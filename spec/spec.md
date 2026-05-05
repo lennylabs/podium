@@ -52,36 +52,45 @@ The agent now has the skill in its working set. Done.
 
 ### 1.1 What Podium Is
 
-**Author your skills, agents, prompts, and reference contexts once in a canonical format; load them into any harness — Claude Code, Claude Desktop, Cursor, Codex, OpenCode, Gemini — without forking per-harness.**
+**Podium is the governance and control plane for an organization's library of authored agent artifacts** — skills, agents, contexts, prompts, MCP server registrations, and any extension type a deployment registers. One catalog, one identity model, one set of layered overlays, one dependency graph, one audit stream, one signing scheme — across every artifact type the organization authors.
 
-Podium is a shared catalog for the artifacts agents load at session time. Two pieces:
+Two pieces:
 
-1. **Registry service** — the system of record. Centralized, multi-tenant. Control-plane HTTP/JSON API for manifests, search, and signed URLs. Object-storage data plane for resource bytes. Postgres + pgvector for metadata, dependency edges, embeddings, RBAC bindings, and audit. Resolves overlays per OAuth identity.
-2. **Podium MCP server** — a single-binary, in-process bridge the host runs alongside its own runtime. Exposes three meta-tools (`load_domain`, `search_artifacts`, `load_artifact`) over MCP; forwards calls to the registry under the host's OAuth-attested identity; materializes bundled resources atomically on the host's filesystem; runs the configured `HarnessAdapter` to translate the canonical artifact into the host's harness-native format on the way out.
+1. **Registry service** — the system of record. Centralized, multi-tenant. Control-plane HTTP/JSON API for manifests, search, layered overlay resolution, and signed URLs. Object-storage data plane for resource bytes. Postgres + pgvector for metadata, dependency edges, embeddings, RBAC bindings, and audit. Resolves the user's effective view per OAuth identity.
+2. **Three pluggable consumers**, all backed by the same registry HTTP API:
+   - **Podium MCP server** — a single-binary, in-process bridge for MCP-speaking hosts. Exposes three meta-tools (`load_domain`, `search_artifacts`, `load_artifact`) for lazy catalog navigation; materializes bundled resources atomically on the host's filesystem; runs the configured `HarnessAdapter` to translate the canonical artifact into the host's harness-native format on the way out.
+   - **`podium sync`** — eager filesystem sync of the user's effective view, for file-based harnesses and runtimes that prefer to read artifacts directly from disk. One-shot or watcher mode.
+   - **Language SDKs (`podium-py`, `podium-ts`)** — thin clients over the registry HTTP API for non-MCP runtimes (LangChain, Bedrock, OpenAI Assistants, custom orchestrators, eval harnesses, build pipelines).
 
-What Podium gives you:
+What Podium gives an organization:
 
-- **Author once, load anywhere.** One canonical authoring format. The configured `HarnessAdapter` translates at materialization time.
-- **Lazy materialization at scale.** Sessions start empty. The agent navigates and searches the catalog; only the artifacts it actually loads are materialized on the host. Catalogs of thousands of artifacts don't pollute the system prompt.
-- **Built for the enterprise.** RBAC, layered authoring (org / team / user / local), classification, lifecycle, signing, and audit are first-class.
-- **Pluggable identity.** One MCP server binary serves every deployment context — interactive OAuth on developer hosts; injected session token in managed runtimes.
+- **Layered authoring with deterministic merge.** Org / team / user / workspace contributions compose with explicit precedence and no silent shadowing. `extends:` lets a higher-precedence artifact inherit and refine a lower one without forking. Most-restrictive-wins for security fields; last-layer-wins for descriptions; alphabetical team tiebreaking. This is Podium's cleanest unique technical contribution.
+- **Type heterogeneity as a first principle.** Skills are one of several first-class types. Agents, contexts, prompts, and MCP server registrations sit alongside; extension types register through a `TypeProvider` SPI. Cross-type dependency edges (an agent's `delegates_to:` another agent; a skill's `mcpServers:` references that resolve to `mcp-server`-type artifacts) drive impact analysis and cascading review.
+- **Governance built in.** RBAC, classification (sensitivity / ownership / review status), approval workflows, freeze windows, signing, hash-chained audit, SBOM ingestion, and CVE tracking are first-class — not afterthoughts grafted onto a file repo.
+- **Lazy materialization at scale.** Sessions can start empty (MCP path) or with the user's effective view pre-synced (file path). Catalogs of thousands of artifacts don't pollute the system prompt; the agent navigates and loads what it needs.
+- **One canonical authoring format, multiple delivery shapes.** Artifacts are authored in a uniform Podium format. The configured `HarnessAdapter` translates at delivery time for harnesses that have native conventions (and is a no-op for runtimes that prefer the canonical layout).
+- **Pluggable identity.** One MCP server binary serves every deployment context — interactive OAuth on developer hosts; injected session token in managed runtimes. The same identity providers are available to `podium sync` and the SDKs.
 
-Sessions, agent execution, policy compilation, and downstream tool wiring are concerns that belong to hosts, not Podium.
+What Podium is not:
+
+- Not an agent runtime. Sessions, agent execution, policy compilation, and downstream tool wiring belong to hosts.
+- Not a public artifact marketplace. Public-skill marketplaces (e.g. Vercel skills.sh) fill that role for community content. Podium is for an organization's own catalog, with optional public mirroring.
+- Not a replacement for harness-native conventions. Where a harness has a native skills directory, agent format, or prompt convention, Podium delivers into it via the harness adapter; it doesn't try to displace it.
 
 ### 1.2 Problem Statement
 
-Organizations adopting AI accumulate large libraries of authored content. Past a few hundred items, several problems emerge together:
+Organizations adopting AI accumulate large libraries of authored content of many kinds — skills, agents, contexts, prompts, MCP server registrations, evaluation datasets, and more. Past a few hundred items, several problems emerge together:
 
 1. **Capability saturation.** Exposing thousands of skills, prompts, or tool definitions to a model degrades planning quality. Hosts need to see only what's relevant.
 2. **Discoverability at scale.** A multi-domain catalogue with thousands of items shared across many teams needs a structured discovery model. A flat list does not work.
 3. **RBAC.** Different users have different rights: who can read, publish, deprecate, manage memberships and overlays. The registry is the central enforcement point.
 4. **Layered authoring.** Org / team / user / workspace contributions need to compose deterministically with clear precedence and no silent shadowing.
 5. **Governance, classification, lifecycle.** Sensitivity labels, review status, ownership, deprecation paths, and reverse-dependency impact analysis need to be first-class.
-6. **Type heterogeneity.** Skills, agents, context bundles, prompts, MCP server registrations, eval datasets, model files — every artifact type fits in one registry, with one storage and discovery model.
-7. **Heterogeneous hosts.** Agent runtimes, build pipelines, terminal CLIs, evaluation harnesses, and other AI systems all read from the same catalogue; none should need its own copy.
-8. **Cross-harness portability.** The same skill should work in Claude Code, Cursor, and Codex without forking. Per-harness convention sprawl is an authoring tax.
+6. **Type heterogeneity.** Skills, agents, context bundles, prompts, MCP server registrations, eval datasets, model files — every artifact type fits in one registry, with one storage and discovery model, and dependency edges that cross types (e.g., an agent's `delegates_to:` another agent; a skill's `mcpServers:` resolving to `mcp-server`-type artifacts).
+7. **Heterogeneous consumers.** Agent runtimes, build pipelines, terminal CLIs, evaluation harnesses, and other AI systems all read from the same catalogue; none should need its own copy. Some speak MCP; many do not.
+8. **Cross-harness portability.** The same artifact should be deliverable into Claude Code, Cursor, Codex, Gemini, or a custom runtime without forking per harness. Per-harness convention sprawl is an authoring tax.
 
-Podium addresses these together: a centralized registry service plus a thin MCP server hosts load alongside their runtime.
+Several point solutions partially address subsets of these problems — git monorepos handle versioning and basic RBAC at the repo level; per-harness skill marketplaces handle discovery within one vendor's surface; LLM gateways add a thin governance layer over a flat plugin list — but no existing system handles all of them coherently across artifact types. Podium addresses them together: a centralized registry service plus three pluggable consumers (MCP server for lazy MCP-speaking hosts, `podium sync` for eager filesystem delivery, language SDKs for everything else).
 
 ### 1.3 Design Principles
 
@@ -89,10 +98,13 @@ Podium addresses these together: a centralized registry service plus a thin MCP 
 - **RBAC at the registry.** Scope claims (org, team, user) and roles live in the registry and travel on every OAuth-attested call. The registry is the only enforcement point for visibility and authoring rights.
 - **The registry is a deployable service.** Authoring lives in Git; the runtime is a service (control plane HTTP API + object store + Postgres+pgvector). Updates take effect on the next call.
 - **Type-agnostic discovery.** The registry defines an artifact type system (`skill` / `agent` / `context` / `prompt` / `mcp-server`, extensible) and treats every type uniformly for discovery, search, and load. Type-specific runtime behaviour lives in hosts.
+- **Cross-type dependency graph.** Dependency edges (`extends:`, `delegates_to:`, `mcpServers:`) are first-class and span types. Impact analysis, cascading review, and search ranking all read from this graph.
 - **Any file type or combination.** Manifests are markdown with YAML frontmatter; bundled resources alongside are arbitrary files. The registry stores them as opaque versioned blobs.
-- **One MCP server, pluggable identity.** A single binary serves every deployment context. Identity is selected by configuration.
+- **Three consumer paths, one registry.** MCP server (lazy, for MCP-speaking hosts), `podium sync` (eager, for filesystem-based delivery), and language SDKs (programmatic, for non-MCP runtimes). All three speak the same registry HTTP API and share identity providers, overlay resolution, content cache, and audit.
+- **One MCP server, pluggable identity.** A single binary serves every MCP deployment context. Identity is selected by configuration.
 - **Materialization on the host's filesystem.** `load_artifact` lazily downloads bundled resources to a host-configured destination path, atomically. The catalog lives at the registry; the working set lives on the host.
-- **Author once, load anywhere.** Adapters mechanically translate canonical artifacts into harness-native shapes. No per-harness forks.
+- **Author once, deliver anywhere.** Adapters mechanically translate canonical artifacts into harness-native shapes. No per-harness forks of the source-of-truth manifest.
+- **Multi-vendor neutrality.** Apache 2.0; vendor-agnostic; explicitly designed for organizations whose AI tooling spans multiple harnesses and runtimes. Not bound to any one vendor's enterprise roadmap.
 - **Immutability and signing.** Every artifact version is bit-for-bit immutable. High-sensitivity artifacts are cryptographically signed.
 
 ### 1.3.1 When You Need Podium
@@ -100,43 +112,50 @@ Podium addresses these together: a centralized registry service plus a thin MCP 
 - **Below ~50 artifacts**, a flat directory plus your harness's native conventions is fine. Podium is overkill.
 - **50–500 artifacts**, you start to feel discovery pain (capability saturation in the system prompt; finding the right artifact by browsing). Podium pays off, especially if you're cross-harness or multi-team.
 - **Above 500 artifacts**, the registry pays for itself outright on discovery alone.
-- **Cross-harness portability** is valuable at any scale — even with five artifacts, "author once" beats forking.
+- **Cross-harness delivery** is valuable at any scale — even with five artifacts, "author once" beats forking per harness.
+- **Multiple artifact types** (agents alongside skills, prompts alongside contexts, MCP server registrations alongside all of them) is valuable at any scale once you have more than one type — a single dependency graph beats N type-specific stores.
 - **Governance** (RBAC, classification, audit) is valuable above ~10 contributors.
 
-A solo developer with a handful of skills in one harness doesn't need Podium yet. A 50-person team with skills in three harnesses does.
+A solo developer with a handful of skills in one harness doesn't need Podium yet. A 50-person team with mixed artifact types in three harnesses does.
+
+**Honesty check: the minimal-viable competitor.** A short script that watches a Git repo and copies files into the right harness-specific directories will give a single-team, single-type, single-vendor shop ~80% of "author once, deliver anywhere" for ~1% of the engineering. Podium earns its complexity at the _intersection_ of multiple types, multiple teams, multiple harnesses, and governance requirements — not on file-copy alone. The §10 build sequence is structured to validate demand before the heavy enterprise stack is built.
 
 ### 1.4 Constraints and Decisions
 
-| Decision | Rationale |
-| --- | --- |
-| Two components: registry service, MCP server | A centralized registry with persistence, plus a thin in-process bridge hosts run alongside their runtime. |
-| MCP server is a single binary with pluggable identity, overlay, and harness adapter | One binary serves every deployment context. Identity providers, the workspace `local` overlay, and the harness adapter are all selected via configuration. |
-| Author once, load anywhere | Artifacts have one canonical authored form. At materialization time, the configured `HarnessAdapter` translates them into the harness's native shape (Claude Code, Claude Desktop, Cursor, Gemini, OpenCode, Codex, or `none` for raw). |
-| Sessions start empty; discovery via meta-tools | Each session begins with zero artifact content. The host calls `load_domain` / `search_artifacts` / `load_artifact` to assemble its working set on demand. |
-| Multiple overlay layers per identity (org / any number of teams / optional user / optional local) | Layers compose at the registry from the host's OAuth identity. The MCP server adds the workspace `local` layer when its `LocalOverlayProvider` is configured. Collisions: most-restrictive-wins for security fields, last-layer-wins for descriptions, explicit `extends:` to inherit. |
-| RBAC enforced at the registry on every call | Roles bind to identities per scope (org, team). Permissions cover read, publish, review, deprecate, manage members, manage overlays, admin. |
-| Registry as a deployable service | Authoring lives in Git; runtime is a service (control plane HTTP API + object store + Postgres+pgvector). |
-| PostgreSQL + pgvector for the registry | Manifest metadata, dependency edges, embeddings, RBAC bindings, registry-side audit. Pluggable interface for alternatives. |
-| Per-workspace MCP server lifecycle on developer hosts | When the MCP server runs as a developer-side subprocess, the host spawns one per workspace, over stdio. Local overlay is workspace-scoped (`.podium/overlay/`). Cache lives in `~/.podium/cache/` and is content-addressed across workspaces. |
-| Versions are immutable; semver-named | Every `(artifact_id, semver)` pair, once published, is bit-for-bit immutable forever. Internal cache keying is by content hash. |
-| MCP-only in v1 | Hosts must speak MCP. Non-MCP runtimes (LangGraph, OpenAI Assistants, Bedrock) integrate via thin language SDKs over the same registry HTTP surface — planned for v1.1. |
-| Apache 2.0 license | Permissive, enterprise-friendly, common for infrastructure projects. |
+| Decision                                                                                          | Rationale                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Two component categories: registry service, consumer clients                                      | A centralized registry with persistence, plus thin clients that hosts run in-process or call programmatically.                                                                                                                                                                                                                                |
+| Three consumer shapes (MCP server, `podium sync`, language SDKs) all in v1                        | Different runtimes have different shapes. MCP for lazy agent-driven loading; filesystem sync for harnesses with native skill/agent directories; SDKs for non-MCP runtimes. Gating on MCP alone would lock out a substantial chunk of the runtime market.                                                                                      |
+| MCP server is a single binary with pluggable identity, overlay, and harness adapter               | One binary serves every MCP deployment context. Identity providers, the workspace `local` overlay, and the harness adapter are all selected via configuration.                                                                                                                                                                                |
+| Author once, deliver anywhere                                                                     | Artifacts have one canonical authored form. At delivery time (MCP materialization or `podium sync`), the configured `HarnessAdapter` translates into the harness's native shape (Claude Code, Claude Desktop, Cursor, Gemini, OpenCode, Codex, or `none` for raw).                                                                            |
+| Sessions can start empty (MCP path) or pre-synced (file path)                                     | Both modes are first-class. Lazy MCP mediation is most valuable above ~500 artifacts; eager filesystem sync is the right default below that.                                                                                                                                                                                                  |
+| Multiple overlay layers per identity (org / any number of teams / optional user / optional local) | Layers compose at the registry from the host's OAuth identity. The MCP server adds the workspace `local` layer when its `LocalOverlayProvider` is configured; `podium sync` and the SDKs apply the same composition. Collisions: most-restrictive-wins for security fields, last-layer-wins for descriptions, explicit `extends:` to inherit. |
+| RBAC enforced at the registry on every call                                                       | Roles bind to identities per scope (org, team). Permissions cover read, publish, review, deprecate, manage members, manage overlays, admin.                                                                                                                                                                                                   |
+| Registry as a deployable service                                                                  | Authoring lives in Git; runtime is a service (control plane HTTP API + object store + Postgres+pgvector).                                                                                                                                                                                                                                     |
+| PostgreSQL + pgvector for the registry                                                            | Manifest metadata, dependency edges, embeddings, RBAC bindings, registry-side audit. Pluggable interface for alternatives.                                                                                                                                                                                                                    |
+| Per-workspace MCP server lifecycle on developer hosts                                             | When the MCP server runs as a developer-side subprocess, the host spawns one per workspace, over stdio. Local overlay is workspace-scoped (`.podium/overlay/`). Cache lives in `~/.podium/cache/` and is content-addressed across workspaces.                                                                                                 |
+| Versions are immutable; semver-named                                                              | Every `(artifact_id, semver)` pair, once published, is bit-for-bit immutable forever. Internal cache keying is by content hash.                                                                                                                                                                                                               |
+| Apache 2.0 license; multi-vendor neutrality is a positioning commitment                           | Permissive, enterprise-friendly, common for infrastructure projects. The project will not accept contributions or governance changes that bind it to a single harness vendor's roadmap.                                                                                                                                                       |
 
 ### 1.5 Where Podium Fits
 
-Podium overlaps with several existing categories. Quick comparison:
+Podium overlaps with several existing categories. None of them handle the full set of problems in §1.2 across artifact types.
 
-| Alternative | Overlap | When it wins | When Podium wins |
-| --- | --- | --- | --- |
-| **Anthropic Skills (Claude Code/Desktop)** | Same artifact authoring concept | Single-harness Claude shop; small catalog | Cross-harness portability; large catalog with discovery; RBAC/audit |
-| **Cursor Rules / Continue contexts / Cline rules** | Per-harness convention files | Single-harness, single-user | Cross-harness; multi-user with overlays |
-| **MCP server marketplaces** | Both register MCP servers | Discovering pre-built community servers | Internal authored content (skills, agents, prompts) alongside MCP servers |
-| **LangChain Hub / LangSmith** | Prompt registry | Prompt-only flows; LangChain-native runtime | Type heterogeneity (skills, agents, contexts); cross-runtime |
-| **PromptLayer / Langfuse / Helicone** | Prompt registry + observability | Prompt-only with strong eval focus | Broader artifact model; richer governance |
-| **HuggingFace Hub** | Versioned artifact storage | Models and datasets at scale | Skills/agents/prompts authored for runtime use |
-| **Git monorepo + GitHub** | Versioning, RBAC, search | Small catalog where a flat repo works | Lazy materialization; runtime resolution; harness translation; structured discovery |
+| Alternative                                                                                | Overlap                                                                       | When it wins                                                                                                                                    | When Podium wins                                                                                                                                                                |
+| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Git monorepo + per-harness directory layout**                                            | Versioning, history, repo-permissions RBAC                                    | Single team, single harness, one or two artifact types, no formal governance needs. Zero infrastructure. The right answer for many small teams. | Multi-team overlay composition with deterministic merge; classification + approval workflows; cross-type dependency-aware impact analysis; lazy discovery at scale.             |
+| **A short script that syncs Git → harness-specific directories**                           | File delivery to multiple harnesses                                           | Single-vendor catalog under a few dozen items where a sync script is good enough.                                                               | Layered overlays, RBAC, audit, signing, cross-type dependency graph, lazy MCP-mediated discovery — i.e. the things a sync script would never grow into without becoming Podium. |
+| **Per-harness skill marketplaces** (Anthropic Claude marketplace, plugin registries, etc.) | Skill discovery and installation within one harness                           | Single-harness shop; consumption of public/community skills.                                                                                    | Cross-harness delivery; multiple artifact types beyond skills; org-private catalogs; layered overlays; richer governance.                                                       |
+| **LLM gateways with plugin marketplaces** (LiteLLM, etc.)                                  | Internal corporate registry with admin enable/disable over a flat plugin list | Already deployed for LLM proxying; adds plugin governance for free.                                                                             | Layered overlays with `extends:`; type heterogeneity; dependency tracking; SBOM/CVE pipeline.                                                                                   |
+| **MCP server marketplaces**                                                                | Both register MCP servers                                                     | Discovering pre-built community MCP servers.                                                                                                    | Internal authored content (skills, agents, prompts, contexts) registered alongside MCP server entries under one governance model.                                               |
+| **LangChain Hub / LangSmith**                                                              | Prompt registry                                                               | Prompt-only flows; LangChain-native runtime; eval-focused workflows.                                                                            | Type heterogeneity; multi-runtime; layered overlays; governance.                                                                                                                |
+| **PromptLayer / Langfuse / Helicone**                                                      | Prompt registry + observability                                               | Prompt-only with strong eval focus.                                                                                                             | Broader artifact model; richer governance; not bound to a single LLM provider.                                                                                                  |
+| **HuggingFace Hub**                                                                        | Versioned artifact storage                                                    | Models and datasets at scale.                                                                                                                   | Authored artifacts (skills, agents, contexts, prompts, MCP server registrations) as runtime objects with governance — not models or datasets.                                   |
+| **Single-vendor enterprise governance tiers**                                              | Centralized RBAC / audit for one vendor's surface                             | Single-vendor shop; native integration; managed infrastructure.                                                                                 | Multi-vendor neutrality; open Apache-2.0; one governance plane across heterogeneous tooling.                                                                                    |
 
-The canonical artifact format is intended for upstream contribution to an MCP-adjacent standard once one exists; until then, it's specified here.
+**The biggest existential risk** isn't a competing OSS project — it's a major harness vendor extending its enterprise tier with native RBAC + audit + multi-team deployment, capturing the governance market for its own surface. Podium's wedge against that is **multi-vendor neutrality and the open license**. Organizations with non-trivial AI tooling diversity — multiple harnesses, custom runtimes, mixed artifact types — can't be served by any single vendor's enterprise tier without forcing consolidation.
+
+The canonical artifact format is intended for upstream contribution to an MCP-adjacent or AAIF-governed standard once the right venue exists; until then, it's specified here.
 
 ### 1.6 Project Model
 
@@ -144,6 +163,8 @@ The canonical artifact format is intended for upstream contribution to an MCP-ad
 - **Governance.** Maintainer model + RFC process for spec changes; see `GOVERNANCE.md`.
 - **Distribution.** OSS-first development; optional commercial managed offering by the sponsoring entity (separate doc).
 - **Public registry.** A reference registry with curated example artifacts is hosted at the project's public URL.
+- **Multi-vendor neutrality is a positioning commitment**, not a slogan. The project will not accept contributions, governance changes, or roadmap pressure that bind it to a single harness vendor's surface.
+- **Standards engagement.** Where adjacent open standards (MCP, AAIF-governed standards, etc.) overlap with Podium concerns, the project participates upstream and harmonizes wherever doing so doesn't compromise Podium's broader scope across artifact types.
 
 ---
 
@@ -151,7 +172,7 @@ The canonical artifact format is intended for upstream contribution to an MCP-ad
 
 ### 2.1 High-Level Component Map
 
-A single centralized registry service serves every host. The Podium MCP server is a thin binary the host runs alongside its own runtime. The same MCP server binary serves every deployment context; differences are configuration only.
+A single centralized registry service serves every consumer. Three consumer shapes read from it: the Podium MCP server (in-process bridge for MCP-speaking hosts), `podium sync` (filesystem delivery for harnesses that load artifacts directly from disk), and the language SDKs (programmatic access for non-MCP runtimes). All three speak the same registry HTTP API, share identity providers, and apply the same overlay resolution and RBAC.
 
 ```
                           ┌───────────────────────────┐
@@ -160,33 +181,37 @@ A single centralized registry service serves every host. The Podium MCP server i
                           │  data plane (object store)│
                           │  Postgres + pgvector      │
                           │  RBAC + overlays          │
+                          │  dependency graph         │
                           │  (centralized,            │
                           │   multi-tenant)           │
                           └───────────▲───────────────┘
                                       │
-                       OAuth-attested │ identity
+                       OAuth-attested │ identity (every call)
                                       │
-                          ┌───────────┴───────────────┐
-                          │ Podium MCP server         │
-                          │   load_domain ·           │
-                          │   search_artifacts ·      │
-                          │   load_artifact           │
-                          │ + IdentityProvider        │
-                          │ + LocalOverlayProvider    │
-                          │ + HarnessAdapter          │
-                          │ + content-addressed cache │
-                          │ + atomic materialization  │
-                          └───────────▲───────────────┘
-                                      │ MCP (stdio)
-                                      │
-                          ┌───────────┴───────────────┐
-                          │ Host runtime              │
-                          │ (any MCP-speaking AI      │
-                          │  system)                  │
-                          └───────────────────────────┘
+              ┌───────────────────────┼───────────────────────────┐
+              │                       │                           │
+   ┌──────────┴──────────┐ ┌──────────┴──────────┐ ┌──────────────┴──────────┐
+   │ Podium MCP server   │ │ podium sync         │ │ Language SDKs           │
+   │   load_domain ·     │ │  one-shot or watch; │ │  podium-py, podium-ts   │
+   │   search_artifacts ·│ │  writes effective   │ │  thin client over the   │
+   │   load_artifact     │ │  view to disk in    │ │  registry HTTP API      │
+   │ + IdentityProvider  │ │  harness-native     │ │ + IdentityProvider      │
+   │ + LocalOverlayProv. │ │  layout             │ │                         │
+   │ + HarnessAdapter    │ │ + HarnessAdapter    │ │                         │
+   │ + cache + materlz.  │ │ + cache             │ │                         │
+   └──────────▲──────────┘ └──────────▲──────────┘ └──────────▲──────────────┘
+              │                       │                       │
+              │ MCP (stdio)           │ filesystem            │ HTTP
+              │                       │                       │
+   ┌──────────┴──────────┐ ┌──────────┴──────────┐ ┌──────────┴──────────────┐
+   │ MCP-speaking host   │ │ File-based harness  │ │ Non-MCP runtime         │
+   │ (any agent runtime) │ │ or runtime          │ │ (LangChain, Bedrock,    │
+   │                     │ │                     │ │  custom orchestrators,  │
+   │                     │ │                     │ │  eval/build pipelines)  │
+   └─────────────────────┘ └─────────────────────┘ └─────────────────────────┘
 ```
 
-Sequence for `load_artifact`:
+Sequence for `load_artifact` (MCP path):
 
 ```
 host         MCP server          registry        object storage
@@ -209,28 +234,32 @@ host         MCP server          registry        object storage
  │◀──────────────│                                       │
 ```
 
-Two deployment scenarios use the same MCP server binary:
+Two MCP deployment scenarios use the same MCP server binary:
 
 - **Managed agent runtime.** The runtime spawns the MCP server as a co-located process. Identity is supplied via an injected session token (signed JWT); the registry endpoint is configured the same way. The `local` overlay is unset.
 - **Developer's host.** The host spawns one MCP server per workspace as a stdio subprocess. The MCP server uses an OAuth device-code flow on first use (surfaced via MCP elicitation) to obtain a registry token, stored in the OS keychain. The workspace `local` overlay reads from `${WORKSPACE}/.podium/overlay/`.
 
 ### 2.2 Component Responsibilities
 
-**Podium Registry** _(centralized service)_. The system of record for artifacts. Resolves overlays per OAuth identity, enforces RBAC, indexes manifests, runs hybrid search, signs URLs for resource bytes. Three persistent stores: Postgres + pgvector, object storage, HTTP/JSON API.
+**Podium Registry** _(centralized service)_. The system of record for artifacts. Resolves overlays per OAuth identity, enforces RBAC, indexes manifests, runs hybrid search, signs URLs for resource bytes, maintains the cross-type dependency graph, emits change events. Three persistent stores: Postgres + pgvector, object storage, HTTP/JSON API.
 
-The registry's wire protocol is **HTTP/JSON**. The MCP surface is what the client-side MCP server exposes after translating registry HTTP responses into MCP tool results. Direct MCP access to the registry is not supported in v1.
+The registry's wire protocol is **HTTP/JSON**. All three consumer shapes speak the same HTTP API. Direct MCP access to the registry is not supported; MCP is one of three consumer surfaces that translate HTTP responses into a runtime-appropriate shape.
 
-**Podium MCP server** _(in-process bridge)_. Single binary. Exposes the three meta-tools. Holds no per-session server-side state — local state is limited to a content-addressed disk cache, OS-keychain-stored credentials (in `oauth-device-code` mode), an in-memory local-overlay index, and the materialized working set on disk. No state is shared across MCP server processes.
+**Podium MCP server** _(in-process bridge for MCP-speaking hosts)_. Single binary. Exposes the three meta-tools. Holds no per-session server-side state — local state is limited to a content-addressed disk cache, OS-keychain-stored credentials (in `oauth-device-code` mode), an in-memory local-overlay index, and the materialized working set on disk. No state is shared across MCP server processes.
 
-Pluggable interfaces:
+**`podium sync`** _(filesystem delivery for harnesses that read artifacts directly from disk)_. CLI command (and library) that reads the user's effective view from the registry and writes it to a host-configured layout via the configured `HarnessAdapter`. One-shot or `--watch` mode (subscribes to registry change events). Reuses the same identity providers and content cache as the MCP server. See §7.5.
+
+**Language SDKs (`podium-py`, `podium-ts`)** _(programmatic access for non-MCP runtimes)_. Thin clients over the registry HTTP API. Used by LangChain, Bedrock, OpenAI Assistants, custom orchestrators, eval harnesses, build pipelines, notebooks. See §7.6.
+
+Pluggable interfaces shared across all three consumer shapes:
 
 - **IdentityProvider** — supplies the OAuth-attested identity attached to every registry call. Built-ins: `oauth-device-code` and `injected-session-token`. Additional implementations register through the interface.
-- **LocalOverlayProvider** — optional. When configured, reads `ARTIFACT.md` packages from a workspace filesystem path and merges them as the `local` overlay layer (§4.6).
-- **HarnessAdapter** — translates canonical artifacts into harness-native format at materialization time. Built-ins cover Claude Code, Claude Desktop, Cursor, Gemini, OpenCode, Codex; `none` (default) writes the canonical layout as-is. See §6.7.
+- **LocalOverlayProvider** — optional. When configured, reads `ARTIFACT.md` packages from a workspace filesystem path and merges them as the `local` overlay layer (§4.6). Available across all three consumer shapes.
+- **HarnessAdapter** — translates canonical artifacts into harness-native format at delivery time (MCP materialization or `podium sync` write). Built-ins cover Claude Code, Claude Desktop, Cursor, Gemini, OpenCode, Codex; `none` (default) writes the canonical layout as-is. See §6.7. The SDKs accept a harness parameter on `materialize()`.
 
-Configuration: env vars, command-line flags, or a config file the host supplies. See §6.
+Configuration: env vars, command-line flags, or a config file the host/user supplies. See §6.
 
-**Hosts** _(not Podium components)_. Any MCP-speaking system that needs the catalog. Hosts spawn the Podium MCP server alongside their own runtime tools, configure its identity provider and (optionally) its local overlay, and use the meta-tools.
+**Hosts** _(not Podium components)_. Any system that consumes the catalog: MCP-speaking agent runtimes, file-based harnesses, programmatic runtimes. Hosts choose the consumer shape that fits their architecture.
 
 ---
 
@@ -378,14 +407,14 @@ The manifest frontmatter is YAML; the prose body is markdown. The registry index
 ---
 type: skill | agent | context | prompt | mcp-server | <extension type>
 name: run-variance-analysis
-version: 1.0.0                       # semver, publisher-chosen
+version: 1.0.0 # semver, publisher-chosen
 description: One-line "when should I use this?"
 when_to_use:
   - "After month-end close, to flag unusual variance vs. forecast"
 tags: [finance, close, variance]
 sensitivity: low | medium | high
-license: Apache-2.0                  # SPDX identifier
-search_visibility: indexed | direct-only   # default: indexed
+license: Apache-2.0 # SPDX identifier
+search_visibility: indexed | direct-only # default: indexed
 release_notes: "Initial release."
 ---
 ```
@@ -410,11 +439,11 @@ runtime_requirements:
 
 sandbox_profile: unrestricted | read-only-fs | network-isolated | seccomp-strict
 
-sbom:                                 # CycloneDX or SPDX inline or referenced
+sbom: # CycloneDX or SPDX inline or referenced
   format: cyclonedx-1.5
   ref: ./sbom.json
 
-approval_policy:                      # optional override of sensitivity defaults
+approval_policy: # optional override of sensitivity defaults
   stages:
     - reviewers: [team:finance/reviewers]
       min_approvals: 1
@@ -493,12 +522,12 @@ Adapters surface these requirements to the host where supported. Hosts that cann
 
 The `sandbox_profile:` field declares execution constraints:
 
-| Profile | Meaning |
-| --- | --- |
-| `unrestricted` | No sandbox constraints. Default for low-sensitivity. |
-| `read-only-fs` | Filesystem is read-only outside the materialization destination. |
-| `network-isolated` | No outbound network. |
-| `seccomp-strict` | Strict syscall allowlist (per a baseline profile shipped with Podium). |
+| Profile            | Meaning                                                                |
+| ------------------ | ---------------------------------------------------------------------- |
+| `unrestricted`     | No sandbox constraints. Default for low-sensitivity.                   |
+| `read-only-fs`     | Filesystem is read-only outside the materialization destination.       |
+| `network-isolated` | No outbound network.                                                   |
+| `seccomp-strict`   | Strict syscall allowlist (per a baseline profile shipped with Podium). |
 
 Hosts with sandbox capability honor the profile; hosts without it MUST refuse to materialize an artifact whose `sandbox_profile != unrestricted` unless explicitly configured to ignore (with a loud warning logged).
 
@@ -510,6 +539,7 @@ Prose in artifact manifests can declare its provenance to enable differential tr
 ---
 source: authored
 ---
+
 <authored prose>
 
 <!-- begin imported source="https://wiki.example.com/policy/payments" -->
@@ -542,6 +572,7 @@ exclude:
 ---
 
 # Accounts Payable
+
 ...
 ```
 
@@ -623,21 +654,21 @@ To intentionally replace an artifact rather than extend it, the lower-precedence
 
 #### Field semantics table
 
-| Field | Merge semantics |
-| --- | --- |
-| `description`, `name`, `release_notes` | Scalar; child wins |
-| `tags` | List; append unique |
-| `when_to_use` | List; append |
-| `sensitivity` | Scalar; most-restrictive (high > medium > low) |
-| `mcpServers` | List of objects; deep-merge by `name` |
-| `requiresApproval` | List; append |
-| `runtime_requirements` | Map; deep-merge with child wins |
-| `sandbox_profile` | Scalar; most-restrictive |
-| `delegates_to` | List; append |
-| `external_resources` | List; append |
-| `license` | Scalar; child wins (lint warning if changed across layers) |
-| `search_visibility` | Scalar; most-restrictive (`direct-only` > `indexed`) |
-| `approval_policy` | Object; most-restrictive (more reviewers / longer timeout wins) |
+| Field                                  | Merge semantics                                                 |
+| -------------------------------------- | --------------------------------------------------------------- |
+| `description`, `name`, `release_notes` | Scalar; child wins                                              |
+| `tags`                                 | List; append unique                                             |
+| `when_to_use`                          | List; append                                                    |
+| `sensitivity`                          | Scalar; most-restrictive (high > medium > low)                  |
+| `mcpServers`                           | List of objects; deep-merge by `name`                           |
+| `requiresApproval`                     | List; append                                                    |
+| `runtime_requirements`                 | Map; deep-merge with child wins                                 |
+| `sandbox_profile`                      | Scalar; most-restrictive                                        |
+| `delegates_to`                         | List; append                                                    |
+| `external_resources`                   | List; append                                                    |
+| `license`                              | Scalar; child wins (lint warning if changed across layers)      |
+| `search_visibility`                    | Scalar; most-restrictive (`direct-only` > `indexed`)            |
+| `approval_policy`                      | Object; most-restrictive (more reviewers / longer timeout wins) |
 
 Extension types register their own field semantics via `TypeProvider`.
 
@@ -682,13 +713,13 @@ v1 is single-region per deployment. Multi-region deployments run separate regist
 
 RBAC is enforced at the registry on every API call. Roles bind to identities per scope (org or team).
 
-| Role | Permissions |
-| ---- | ----------- |
-| `reader` | List, search, and load artifacts visible under the binding's scope. |
-| `publisher` | Reader + create / update artifacts (subject to review status). |
-| `reviewer` | Reader + approve, reject, or request changes on draft artifacts. |
-| `owner` | Publisher + reviewer + deprecate artifacts within the binding's scope. |
-| `admin` | Owner + manage RBAC bindings, team membership, and overlay configuration within the binding's scope. |
+| Role        | Permissions                                                                                          |
+| ----------- | ---------------------------------------------------------------------------------------------------- |
+| `reader`    | List, search, and load artifacts visible under the binding's scope.                                  |
+| `publisher` | Reader + create / update artifacts (subject to review status).                                       |
+| `reviewer`  | Reader + approve, reject, or request changes on draft artifacts.                                     |
+| `owner`     | Publisher + reviewer + deprecate artifacts within the binding's scope.                               |
+| `admin`     | Owner + manage RBAC bindings, team membership, and overlay configuration within the binding's scope. |
 
 Bindings are stored as `(identity, scope, role)` triples in Postgres. Multiple bindings per identity compose additively.
 
@@ -826,10 +857,10 @@ Signatures are stored alongside content. The MCP server verifies signatures on m
 
 Podium exposes three meta-tools through the Podium MCP server. These are the only tools Podium contributes; hosts add their own runtime tools alongside.
 
-| Tool             | Description                                                                                                                                                                                                                                                |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `load_domain`      | Returns the map for a path: `load_domain()` (root), `load_domain("finance")` (domain), `load_domain("finance/close-reporting")` (subdomain). Output groups artifacts by type, lists notable entries, includes vocabulary hints. Optional `session_id` arg. |
-| `search_artifacts` | Hybrid retrieval (BM25 + embeddings, RRF) over artifact frontmatter. Filters by `type`, `tags`, `scope`. Returns top N results with frontmatter and retrieval scores; bodies stay at the registry until `load_artifact`. Optional `session_id` arg.        |
+| Tool               | Description                                                                                                                                                                                                                                                                                                                               |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `load_domain`      | Returns the map for a path: `load_domain()` (root), `load_domain("finance")` (domain), `load_domain("finance/close-reporting")` (subdomain). Output groups artifacts by type, lists notable entries, includes vocabulary hints. Optional `session_id` arg.                                                                                |
+| `search_artifacts` | Hybrid retrieval (BM25 + embeddings, RRF) over artifact frontmatter. Filters by `type`, `tags`, `scope`. Returns top N results with frontmatter and retrieval scores; bodies stay at the registry until `load_artifact`. Optional `session_id` arg.                                                                                       |
 | `load_artifact`    | Loads a specific artifact by ID and version. Returns the manifest content as the tool result; **materializes** any bundled resources to a host-configured path on the filesystem (atomic write via `.tmp` + rename; presigned URLs for large blobs). Args: `id`, optional `version`, optional `session_id`, optional `harness:` override. |
 
 `load_domain` and `search_artifacts` round-trip through the registry on every call (no snapshot caching at session startup). Only `load_artifact` writes to the host filesystem, and only for the specific artifact requested.
@@ -891,18 +922,18 @@ A single Go binary serves every deployment context. The host configures it via e
 
 Top-level configuration parameters (env-var form shown; `--flag` and config-file equivalents are accepted):
 
-| Parameter                     | Description                                                                                  | Default                                |
-| ----------------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------- |
-| `PODIUM_REGISTRY_ENDPOINT`    | Registry HTTP API endpoint                                                                   | (required)                             |
-| `PODIUM_IDENTITY_PROVIDER`    | Selected identity provider implementation                                                    | `oauth-device-code`                    |
-| `PODIUM_HARNESS`              | Selected harness adapter                                                                     | `none` (write canonical layout as-is)  |
-| `PODIUM_OVERLAY_PATH`         | Workspace path for the `local` overlay                                                       | (unset → layer disabled)               |
-| `PODIUM_CACHE_DIR`            | Content-addressed cache directory                                                            | `~/.podium/cache/`                     |
-| `PODIUM_CACHE_MODE`           | `always-revalidate` / `offline-first` / `offline-only`                                       | `always-revalidate`                    |
-| `PODIUM_AUDIT_SINK`           | Local audit destination (path or external endpoint)                                          | (unset → registry audit only)          |
-| `PODIUM_MATERIALIZE_ROOT`     | Default destination root for `load_artifact`                                                 | (host specifies per call)              |
-| `PODIUM_PRESIGN_TTL_SECONDS`  | Override for presigned URL TTL                                                               | 3600                                   |
-| `PODIUM_VERIFY_SIGNATURES`    | Verify artifact signatures on materialization                                                | `medium-and-above`                     |
+| Parameter                    | Description                                            | Default                               |
+| ---------------------------- | ------------------------------------------------------ | ------------------------------------- |
+| `PODIUM_REGISTRY_ENDPOINT`   | Registry HTTP API endpoint                             | (required)                            |
+| `PODIUM_IDENTITY_PROVIDER`   | Selected identity provider implementation              | `oauth-device-code`                   |
+| `PODIUM_HARNESS`             | Selected harness adapter                               | `none` (write canonical layout as-is) |
+| `PODIUM_OVERLAY_PATH`        | Workspace path for the `local` overlay                 | (unset → layer disabled)              |
+| `PODIUM_CACHE_DIR`           | Content-addressed cache directory                      | `~/.podium/cache/`                    |
+| `PODIUM_CACHE_MODE`          | `always-revalidate` / `offline-first` / `offline-only` | `always-revalidate`                   |
+| `PODIUM_AUDIT_SINK`          | Local audit destination (path or external endpoint)    | (unset → registry audit only)         |
+| `PODIUM_MATERIALIZE_ROOT`    | Default destination root for `load_artifact`           | (host specifies per call)             |
+| `PODIUM_PRESIGN_TTL_SECONDS` | Override for presigned URL TTL                         | 3600                                  |
+| `PODIUM_VERIFY_SIGNATURES`   | Verify artifact signatures on materialization          | `medium-and-above`                    |
 
 Provider-specific options are passed as additional env vars (e.g., `PODIUM_OAUTH_AUDIENCE`, `PODIUM_SESSION_TOKEN_ENV`).
 
@@ -996,15 +1027,15 @@ The `HarnessAdapter` translates a canonical artifact into the format a specific 
 
 **Built-in adapters** (selected via `PODIUM_HARNESS`):
 
-| Value             | Target                                                                                                                  |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `none`            | _(default)_ Writes the canonical layout as-is.                                                                           |
-| `claude-code`     | Writes `.claude/agents/<name>.md` (frontmatter + composed prompt) and places bundled resources under `.claude/podium/<artifact-id>/`. |
-| `claude-desktop`  | Writes a Claude Desktop extension layout (`manifest.json` derived from canonical frontmatter; resources alongside).      |
-| `cursor`          | Writes Cursor's native agent / extension format.                                                                         |
-| `gemini`          | Writes Gemini's native agent / extension package layout.                                                                 |
-| `opencode`        | Writes OpenCode's native package layout.                                                                                 |
-| `codex`           | Writes Codex's native package layout.                                                                                   |
+| Value            | Target                                                                                                                                |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `none`           | _(default)_ Writes the canonical layout as-is.                                                                                        |
+| `claude-code`    | Writes `.claude/agents/<name>.md` (frontmatter + composed prompt) and places bundled resources under `.claude/podium/<artifact-id>/`. |
+| `claude-desktop` | Writes a Claude Desktop extension layout (`manifest.json` derived from canonical frontmatter; resources alongside).                   |
+| `cursor`         | Writes Cursor's native agent / extension format.                                                                                      |
+| `gemini`         | Writes Gemini's native agent / extension package layout.                                                                              |
+| `opencode`       | Writes OpenCode's native package layout.                                                                                              |
+| `codex`          | Writes Codex's native package layout.                                                                                                 |
 
 **What an adapter does.** Mechanical translation:
 
@@ -1038,14 +1069,14 @@ Authors who must use a non-portable feature can declare `target_harnesses:` in f
 
 **Capability matrix (excerpt; maintained in sync with adapter implementations):**
 
-| Field | claude-code | cursor | codex | opencode | gemini |
-| --- | --- | --- | --- | --- | --- |
-| `description` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `mcpServers` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `delegates_to` (subagents) | ✓ | ✗ | ✗ | ✓ | ✗ |
-| `requiresApproval` | ✓ | ✗ | ✓ | ✓ | ✗ |
-| `sandbox_profile` | ✓ | ✗ | ✓ | ✓ | ✗ |
-| `expose_as_mcp_prompt` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Field                      | claude-code | cursor | codex | opencode | gemini |
+| -------------------------- | ----------- | ------ | ----- | -------- | ------ |
+| `description`              | ✓           | ✓      | ✓     | ✓        | ✓      |
+| `mcpServers`               | ✓           | ✓      | ✓     | ✓        | ✓      |
+| `delegates_to` (subagents) | ✓           | ✗      | ✗     | ✓        | ✗      |
+| `requiresApproval`         | ✓           | ✗      | ✓     | ✓        | ✗      |
+| `sandbox_profile`          | ✓           | ✗      | ✓     | ✓        | ✗      |
+| `expose_as_mcp_prompt`     | ✓           | ✓      | ✓     | ✓        | ✓      |
 
 ### 6.8 Process Model
 
@@ -1056,22 +1087,22 @@ The MCP server is a stdio subprocess spawned by its host. The host is responsibl
 
 ### 6.9 Failure Modes
 
-| Failure                                         | Behavior                                                                                              |
-| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Registry offline                                | Serve from cache; return explicit "offline" status on fresh `load_domain` / `search_artifacts`.       |
-| Overlay path missing                            | Skip overlay layer; warn once.                                                                       |
-| Auth token expired (`oauth-device-code`)         | Trigger refresh; if interactive refresh required, surface in tool response with reauth instructions via MCP elicitation. |
-| Auth token expired (`injected-session-token`)    | Surface "token expired"; the host's runtime is responsible for refresh.                              |
-| Untrusted runtime (`injected-session-token`)     | Reject with `auth.untrusted_runtime`. Runtime must register signing key with registry.                |
-| RBAC denial on a call                           | Return a structured error naming the missing role; log to the registry audit stream.                  |
-| Materialization destination unwritable          | Fail the `load_artifact` call with a structured error; nothing partial is left on disk.               |
-| Signature verification failure                  | Fail with `materialize.signature_invalid`; do not write to disk.                                       |
-| Unknown `PODIUM_HARNESS` value                  | Refuse to start; CLI lists the available adapter values.                                              |
-| Adapter cannot translate an artifact            | Fail with structured error naming the missing translation; suggest `harness: none` for raw output.   |
-| Binary version mismatch with host caller        | Refuse to start; host's CLI prompts an update.                                                       |
-| MCP protocol version mismatch                   | Negotiate down to host's max supported MCP version; if no compatible version, fail with `mcp.unsupported_version`. |
-| Quota exhausted                                 | Structured error (`quota.storage_exceeded` etc.); operation rejected.                                  |
-| Runtime requirement unsatisfiable               | Fail with `materialize.runtime_unavailable`; lists the unsatisfied requirement.                       |
+| Failure                                       | Behavior                                                                                                                 |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Registry offline                              | Serve from cache; return explicit "offline" status on fresh `load_domain` / `search_artifacts`.                          |
+| Overlay path missing                          | Skip overlay layer; warn once.                                                                                           |
+| Auth token expired (`oauth-device-code`)      | Trigger refresh; if interactive refresh required, surface in tool response with reauth instructions via MCP elicitation. |
+| Auth token expired (`injected-session-token`) | Surface "token expired"; the host's runtime is responsible for refresh.                                                  |
+| Untrusted runtime (`injected-session-token`)  | Reject with `auth.untrusted_runtime`. Runtime must register signing key with registry.                                   |
+| RBAC denial on a call                         | Return a structured error naming the missing role; log to the registry audit stream.                                     |
+| Materialization destination unwritable        | Fail the `load_artifact` call with a structured error; nothing partial is left on disk.                                  |
+| Signature verification failure                | Fail with `materialize.signature_invalid`; do not write to disk.                                                         |
+| Unknown `PODIUM_HARNESS` value                | Refuse to start; CLI lists the available adapter values.                                                                 |
+| Adapter cannot translate an artifact          | Fail with structured error naming the missing translation; suggest `harness: none` for raw output.                       |
+| Binary version mismatch with host caller      | Refuse to start; host's CLI prompts an update.                                                                           |
+| MCP protocol version mismatch                 | Negotiate down to host's max supported MCP version; if no compatible version, fail with `mcp.unsupported_version`.       |
+| Quota exhausted                               | Structured error (`quota.storage_exceeded` etc.); operation rejected.                                                    |
+| Runtime requirement unsatisfiable             | Fail with `materialize.runtime_unavailable`; lists the unsatisfied requirement.                                          |
 
 ### 6.10 Error Model
 
@@ -1081,7 +1112,7 @@ All errors use a structured envelope:
 {
   "code": "auth.untrusted_runtime",
   "message": "Runtime 'managed-runtime-x' is not registered with the registry.",
-  "details": {"runtime_iss": "managed-runtime-x"},
+  "details": { "runtime_iss": "managed-runtime-x" },
   "retryable": false,
   "suggested_action": "Register the runtime's signing key via 'podium admin runtime register'."
 }
@@ -1124,9 +1155,13 @@ Below the inline cutoff, resources are returned inline. This avoids round-trips 
 
 ### 7.3 Host Integration
 
-Podium does not expose its own end-user client API. Hosts spawn the Podium MCP server alongside their own runtime tools. The Podium CLI (`podium publish`, `podium cache prune`, `podium rbac …`, etc.) is for authoring and operator tasks against the registry; agents do not consume it at runtime.
+Hosts choose the consumer shape that fits their runtime:
 
-Any AI system that speaks MCP can consume Podium: agent runtimes, build pipelines, terminal CLIs, evaluation harnesses, custom scripts. The contract is the three meta-tools plus the materialization semantics described in §6.6.
+- **MCP-speaking hosts** spawn the Podium MCP server alongside their own runtime tools. Contract: the three meta-tools plus the materialization semantics described in §6.6.
+- **File-based harnesses and runtimes** run `podium sync` (one-shot or watcher) and let the harness's native discovery do the rest. Contract: the registry's effective view written to a host-configured directory layout via the harness adapter. See §7.5.
+- **Programmatic runtimes** use `podium-py` or `podium-ts` to call the registry HTTP API directly. Contract: the registry's HTTP API, with overlay resolution and RBAC applied server-side. See §7.6.
+
+The Podium CLI (`podium publish`, `podium cache prune`, `podium rbac …`, etc.) is for authoring and operator tasks against the registry; agents do not consume it at runtime.
 
 #### 7.3.1 Publish Workflow Specification
 
@@ -1172,6 +1207,74 @@ When the registry is unreachable, the MCP server falls back to its content cache
 
 Hosts can surface the offline status to the agent so it can adjust behavior (e.g., warn the user about staleness).
 
+`podium sync` and the SDKs apply the same cache modes.
+
+### 7.5 `podium sync` (Filesystem Delivery)
+
+For harnesses and runtimes that load artifacts directly from the filesystem rather than calling MCP meta-tools, Podium provides a sync consumer that does not require MCP.
+
+```bash
+# One-shot: write the user's effective view to disk in Claude Code's expected layout
+podium sync --harness claude-code --target ~/.claude/
+
+# Watcher: re-sync on registry change events (long-running)
+podium sync --harness codex --target ~/.codex/ --watch
+
+# Multi-target: write to all configured destinations
+podium sync --config .podium/sync.yaml
+
+# Type-scoped: sync only artifacts of certain types (useful for split deployments)
+podium sync --harness none --target ./artifacts/ --type skill,agent
+```
+
+The sync command reads the user's effective view (org / team / user / local overlays after RBAC filtering and `extends:` resolution) and writes each artifact through the configured `HarnessAdapter` to the host's directory layout. With `--watch`, the sync subscribes to registry change events (over SSE or webhook) and re-syncs on `artifact.published`, `artifact.deprecated`, and overlay changes.
+
+`podium sync` reuses the same identity providers as the MCP server (`oauth-device-code` on developer machines, `injected-session-token` in managed runtimes), the same content cache, and the same harness adapters.
+
+The sync model is type-agnostic: skills, agents, contexts, prompts, and `mcp-server` registrations all sync through the same path; the harness adapter decides where each type lands.
+
+### 7.6 Language SDKs
+
+Two thin language SDKs ship in v1, both backed by the registry's HTTP API:
+
+- **`podium-py`** (PyPI) — for Python orchestrators. Used by LangChain consumers, OpenAI Assistants integrations, custom build/eval pipelines, and notebook environments.
+- **`podium-ts`** (npm) — for TypeScript / Node orchestrators. Used by Bedrock Agents, custom Node-based agent runtimes, and Edge runtime integrations.
+
+Surface area:
+
+```python
+from podium import Client
+
+client = Client.from_env()  # picks up registry endpoint + identity from env
+
+# Discovery
+domains = client.load_domain("finance/close-reporting")
+results = client.search_artifacts("variance analysis", type="skill")
+
+# Type-specific lookups
+agents = client.search_artifacts("payment workflow", type="agent")
+contexts = client.search_artifacts("style guide", type="context")
+mcp_servers = client.search_artifacts(type="mcp-server")
+
+# Load (in-memory or to disk)
+artifact = client.load_artifact("finance/close-reporting/run-variance-analysis")
+print(artifact.manifest_body)
+artifact.materialize(to="./artifacts/", harness="claude-code")  # respects the harness adapter
+
+# Streaming change events for sync use cases
+for event in client.subscribe(["artifact.published", "artifact.deprecated"]):
+    ...
+
+# Cross-type dependency walks (for impact analysis in custom tooling)
+deps = client.dependents_of("finance/ap/pay-invoice@1.2")
+```
+
+Identity providers, the cache, RBAC filtering, layered overlay resolution, and audit are all the same as in the MCP path — the SDK is just a different transport. Identity provider plug-points are exposed; custom providers register through the same interface as the MCP server's.
+
+The SDKs deliberately do not implement the MCP meta-tool semantics (the agent-driven lazy materialization). Programmatic consumers know what they want; they don't need an LLM-mediated browse interface. If a programmatic consumer wants lazy semantics, it can call `load_artifact` lazily in its own code.
+
+This is in v1 because gating non-MCP runtimes on a future release would lock out a substantial chunk of the runtime market and undercut Podium's multi-vendor positioning.
+
 ---
 
 ## 8. Audit and Observability
@@ -1180,22 +1283,22 @@ Hosts can surface the offline status to the agent so it can adjust behavior (e.g
 
 Every significant event, each carrying a trace ID (W3C Trace Context):
 
-| Event                | When                                                              | Source           |
-| -------------------- | ----------------------------------------------------------------- | ---------------- |
-| `domain.loaded`        | Host invoked `load_domain`                                      | Registry         |
-| `artifacts.searched`   | Host invoked `search_artifacts`                                 | Registry         |
-| `artifact.loaded`      | Host invoked `load_artifact`                                     | Registry         |
-| `artifact.published`   | Publisher created or updated an artifact                          | Registry         |
-| `artifact.reviewed`    | Reviewer approved, rejected, or requested changes                 | Registry         |
-| `artifact.deprecated`  | Owner deprecated an artifact                                      | Registry         |
-| `artifact.signed`      | Artifact version signed                                           | Registry         |
-| `domain.published`     | Publisher created or updated a `DOMAIN.md`                        | Registry         |
-| `rbac.binding.changed` | Admin added or removed an RBAC binding                            | Registry         |
-| `overlay.changed`      | Admin updated an overlay configuration                            | Registry         |
-| `rbac.denied`          | A call was rejected for missing permissions                       | Registry         |
-| `freeze.break_glass`   | Admin used break-glass during a freeze window                     | Registry         |
-| `vulnerability.detected` | CVE matched an artifact's SBOM                                  | Registry         |
-| `user.erased`          | Admin invoked the GDPR erasure command                            | Registry         |
+| Event                    | When                                              | Source   |
+| ------------------------ | ------------------------------------------------- | -------- |
+| `domain.loaded`          | Host invoked `load_domain`                        | Registry |
+| `artifacts.searched`     | Host invoked `search_artifacts`                   | Registry |
+| `artifact.loaded`        | Host invoked `load_artifact`                      | Registry |
+| `artifact.published`     | Publisher created or updated an artifact          | Registry |
+| `artifact.reviewed`      | Reviewer approved, rejected, or requested changes | Registry |
+| `artifact.deprecated`    | Owner deprecated an artifact                      | Registry |
+| `artifact.signed`        | Artifact version signed                           | Registry |
+| `domain.published`       | Publisher created or updated a `DOMAIN.md`        | Registry |
+| `rbac.binding.changed`   | Admin added or removed an RBAC binding            | Registry |
+| `overlay.changed`        | Admin updated an overlay configuration            | Registry |
+| `rbac.denied`            | A call was rejected for missing permissions       | Registry |
+| `freeze.break_glass`     | Admin used break-glass during a freeze window     | Registry |
+| `vulnerability.detected` | CVE matched an artifact's SBOM                    | Registry |
+| `user.erased`            | Admin invoked the GDPR erasure command            | Registry |
 
 Audit lives in two streams. The registry owns the events above. The MCP server can also write a local audit log for the meta-tool events through a `LocalAuditSink` interface (§9) when configured. Both streams share trace IDs.
 
@@ -1214,13 +1317,13 @@ The registry has its own sink for catalogue events. The local file log, when ena
 
 Defaults, configurable per deployment:
 
-| Data | Retention |
-| --- | --- |
-| Audit events (metadata) | 1 year |
-| Query text | 30 days (redacted to placeholders after 7 days) |
-| Deprecated artifact versions | 90 days post-sunset |
-| Soft-deleted artifacts | 30 days |
-| Vulnerability scan history | 1 year |
+| Data                         | Retention                                       |
+| ---------------------------- | ----------------------------------------------- |
+| Audit events (metadata)      | 1 year                                          |
+| Query text                   | 30 days (redacted to placeholders after 7 days) |
+| Deprecated artifact versions | 90 days post-sunset                             |
+| Soft-deleted artifacts       | 30 days                                         |
+| Vulnerability scan history   | 1 year                                          |
 
 Optional sampling for high-volume low-sensitivity events (e.g., `domain.loaded` at 10% sample) reduces storage cost.
 
@@ -1246,22 +1349,22 @@ Periodic anchoring of the chain head to a public transparency log (Sigstore/CT-s
 
 ## 9. Pluggable Interfaces
 
-| Interface              | Default                                              | Purpose                                                                                          |
-| ---------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `RegistryStore`          | Postgres + pgvector                                  | Manifest metadata, dependency edges, embeddings, RBAC bindings, registry-side audit              |
-| `RegistryObjectStore`    | S3-compatible                                        | Bundled resource bytes, presigned URLs                                                           |
-| `RegistrySearchProvider` | BM25 + pgvector (RRF)                                | Hybrid retrieval for `search_artifacts`                                                          |
-| `RegistryAuditSink`      | Separate Postgres table within `RegistryStore`       | Stream for catalogue events; logically distinct, separately mockable, separately routable        |
-| `OverlayResolver`        | OAuth claim → layer composition                      | Org / team / user layer composition; collision/extends merge (registry-side, layers 1–3)         |
-| `RBACProvider`           | Built-in roles                                       | Role definitions and permission evaluation                                                       |
-| `TypeProvider`           | Built-in first-class types                           | Type definitions: frontmatter JSON Schema + lint rules + adapter hints + field-merge semantics    |
-| `PublishLinter`          | Built-in rule registry                               | Manifest validation, resource-reference checks, sensitivity sign-off, type-specific rules        |
-| `IdentityProvider`       | `oauth-device-code` (alt: `injected-session-token`)  | Attaches OAuth-attested identity to every registry call from the MCP server                      |
-| `LocalOverlayProvider`   | Workspace filesystem (`.podium/overlay/`)            | Source for the `local` overlay layer                                                             |
-| `LocalAuditSink`         | JSON Lines file at `${WORKSPACE}/.podium/audit.log`  | Local audit log for meta-tool calls (when configured)                                            |
-| `HarnessAdapter`         | `none` (built-ins per §6.7)                          | Translates canonical artifacts to the harness's native format at materialization time            |
-| `NotificationProvider`   | Email + webhook                                      | Delivery for review notifications, vulnerability alerts                                          |
-| `SignatureProvider`      | Sigstore-keyless                                     | Artifact signing and verification                                                                 |
+| Interface                | Default                                             | Purpose                                                                                        |
+| ------------------------ | --------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `RegistryStore`          | Postgres + pgvector                                 | Manifest metadata, dependency edges, embeddings, RBAC bindings, registry-side audit            |
+| `RegistryObjectStore`    | S3-compatible                                       | Bundled resource bytes, presigned URLs                                                         |
+| `RegistrySearchProvider` | BM25 + pgvector (RRF)                               | Hybrid retrieval for `search_artifacts`                                                        |
+| `RegistryAuditSink`      | Separate Postgres table within `RegistryStore`      | Stream for catalogue events; logically distinct, separately mockable, separately routable      |
+| `OverlayResolver`        | OAuth claim → layer composition                     | Org / team / user layer composition; collision/extends merge (registry-side, layers 1–3)       |
+| `RBACProvider`           | Built-in roles                                      | Role definitions and permission evaluation                                                     |
+| `TypeProvider`           | Built-in first-class types                          | Type definitions: frontmatter JSON Schema + lint rules + adapter hints + field-merge semantics |
+| `PublishLinter`          | Built-in rule registry                              | Manifest validation, resource-reference checks, sensitivity sign-off, type-specific rules      |
+| `IdentityProvider`       | `oauth-device-code` (alt: `injected-session-token`) | Attaches OAuth-attested identity to every registry call from the MCP server                    |
+| `LocalOverlayProvider`   | Workspace filesystem (`.podium/overlay/`)           | Source for the `local` overlay layer                                                           |
+| `LocalAuditSink`         | JSON Lines file at `${WORKSPACE}/.podium/audit.log` | Local audit log for meta-tool calls (when configured)                                          |
+| `HarnessAdapter`         | `none` (built-ins per §6.7)                         | Translates canonical artifacts to the harness's native format at materialization time          |
+| `NotificationProvider`   | Email + webhook                                     | Delivery for review notifications, vulnerability alerts                                        |
+| `SignatureProvider`      | Sigstore-keyless                                    | Artifact signing and verification                                                              |
 
 ### 9.1 Plugin Distribution
 
@@ -1275,25 +1378,39 @@ A community plugin registry is hosted at the project's public URL.
 
 ## 10. MVP Build Sequence
 
-| Phase | What                                                                                              | Why                                                            |
-| ----- | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| 0     | `podium serve --solo` (single binary, embedded SQLite, filesystem object store, no auth)          | Five-minute install for personal use; on-ramp for OSS adoption |
-| 1     | Registry data model (Postgres + pgvector + object storage layout)                                 | The catalog is the foundation                                  |
-| 2     | Publish pipeline + lint for `ARTIFACT.md` and `DOMAIN.md` + per-type lint rules + signing         | Authors need a way to add artifacts before hosts can load them |
-| 3     | Registry HTTP API: `load_domain`, `search_artifacts`, `load_artifact`                             | The wire surface the MCP server talks to                       |
-| 4     | Overlay resolver + scope-claim filtering (org / teams / user) + OIDC + SCIM 2.0                   | Multi-tenant correctness from day one                          |
-| 5     | Domain composition: `DOMAIN.md` parser, glob resolver, `unlisted` enforcement, cross-overlay merge | Multi-membership without duplication                           |
-| 6     | RBAC: built-in roles, bindings table, `approval_policy`, `freeze_windows`, evaluation on every call | Authoring rights and visibility enforced centrally             |
-| 7     | Versioning: semver, immutability, CAS publish, content-hash cache keys, `latest` resolution with `session_id` consistency | Foundational invariant |
-| 8     | Podium MCP server core (single-shape binary: registry client, resolver, MCP handlers, cache, materialization, signature verification) | The bridge hosts load alongside their runtime |
-| 9     | IdentityProvider implementations: `oauth-device-code` (with OS keychain) and `injected-session-token` (signed JWT contract) | One binary across deployment contexts |
-| 10    | LocalOverlayProvider + local BM25 search index                                                    | Workspace `local` layer with discoverable iteration loop      |
-| 11    | HarnessAdapter implementations: `none`, `claude-code`, `claude-desktop`, `cursor`, `gemini`, `opencode`, `codex` + conformance test suite | Author once, load anywhere     |
-| 12    | Authoring CLI: `podium publish`, `podium lint`, `podium materialize`, `podium search-explain`, `podium review *`, `podium cache prune`, `podium rbac …`, `podium whoami`, `podium verify` | Operator + author surface |
-| 13    | Registry audit log + LocalAuditSink + cross-stream correlation + retention + hash-chain integrity | Observability + governance                                     |
-| 14    | Vulnerability tracking + SBOM ingestion + notification provider                                    | Enterprise governance                                          |
-| 15    | Deployment: Helm chart, reference Grafana dashboard, runbook                                      | Operability                                                    |
-| 16    | Example artifact registry (multi-domain, with `DOMAIN.md` imports, unlisted folders, overlays, RBAC bindings, approval policies, signatures) | Prove end-to-end |
+The build sequence is structured to ship a wedge experiment first — the smallest viable thing that validates demand — before committing to the full enterprise stack. Phases 0–4 are the wedge; phases 5+ are the enterprise hardening that earns Podium's complexity.
+
+### Wedge phases (validate demand before scaling scope)
+
+| Phase | What                                                                                                                                            | Why                                                                                |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| 0     | `podium serve --solo` (single binary, embedded SQLite, filesystem object store, no auth)                                                        | Five-minute install for personal/small-team use; on-ramp for OSS adoption          |
+| 1     | Publish pipeline + lint for `ARTIFACT.md` and `DOMAIN.md` + per-type lint rules + signing                                                       | Authors need a way to add artifacts; lint is the early quality bar                 |
+| 2     | Registry HTTP API: `load_domain`, `search_artifacts`, `load_artifact` (against `--solo` mode)                                                   | The wire surface every consumer talks to                                           |
+| 3     | `podium sync` for `none`, `claude-code`, and `codex` adapters + a multi-type reference catalog (skills, agents, contexts, prompts, mcp-servers) | Validates: does filesystem delivery beat ad-hoc scripts for a multi-type catalog?  |
+| 4     | Podium MCP server core (registry client, resolver, MCP handlers, cache, materialization) + `podium-py` SDK against `--solo`                     | Validates: do MCP-speaking and programmatic runtimes both find the catalog useful? |
+
+**Stop-and-evaluate point.** After phase 4, ship a public preview with a multi-type reference catalog. If adoption is real and the demand for governance is real, continue to phase 5. If adoption is thin or the demand is for simpler tooling, reconsider the heavy enterprise stack before building it.
+
+### Enterprise phases (earn the complexity)
+
+| Phase | What                                                                                                                                                                                      | Why                                                           |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| 5     | Multi-tenant registry data model (Postgres + pgvector + object storage layout)                                                                                                            | The catalog at scale                                          |
+| 6     | Overlay resolver + scope-claim filtering (org / teams / user) + OIDC + SCIM 2.0                                                                                                           | Multi-tenant correctness                                      |
+| 7     | Domain composition: `DOMAIN.md` parser, glob resolver, `unlisted` enforcement, cross-overlay merge                                                                                        | Multi-membership without duplication                          |
+| 8     | RBAC: built-in roles, bindings table, `approval_policy`, `freeze_windows`, evaluation on every call                                                                                       | Authoring rights and visibility enforced centrally            |
+| 9     | Versioning: semver, immutability, CAS publish, content-hash cache keys, `latest` resolution with `session_id` consistency                                                                 | Foundational invariant                                        |
+| 10    | IdentityProvider implementations: `oauth-device-code` (with OS keychain) and `injected-session-token` (signed JWT contract)                                                               | One MCP server / sync / SDK binary across deployment contexts |
+| 11    | LocalOverlayProvider + local BM25 search index                                                                                                                                            | Workspace `local` layer with discoverable iteration loop      |
+| 12    | Full HarnessAdapter implementations for the remaining built-ins (`claude-desktop`, `cursor`, `gemini`, `opencode`) + conformance test suite                                               | Cross-harness coverage for all artifact types                 |
+| 13    | `podium-ts` SDK + remaining SDK surface area (subscriptions, dependency walks)                                                                                                            | Programmatic-runtime parity with the MCP path                 |
+| 14    | Authoring CLI: `podium publish`, `podium lint`, `podium materialize`, `podium search-explain`, `podium review *`, `podium cache prune`, `podium rbac …`, `podium whoami`, `podium verify` | Operator + author surface                                     |
+| 15    | Cross-type dependency graph + reverse dependency index + impact analysis CLI                                                                                                              | The unique technical contribution at the type-system level    |
+| 16    | Registry audit log + LocalAuditSink + cross-stream correlation + retention + hash-chain integrity                                                                                         | Observability + governance                                    |
+| 17    | Vulnerability tracking + SBOM ingestion + notification provider                                                                                                                           | Enterprise governance                                         |
+| 18    | Deployment: Helm chart, reference Grafana dashboard, runbook                                                                                                                              | Operability                                                   |
+| 19    | Example artifact registry (multi-domain, multi-type, with `DOMAIN.md` imports, unlisted folders, overlays, RBAC bindings, approval policies, signatures, cross-type delegation)           | Prove end-to-end                                              |
 
 ---
 
@@ -1345,28 +1462,40 @@ A community plugin registry is hosted at the project's public URL.
 
 ## 12. Key Risks and Mitigations
 
-| Risk                                                   | Mitigation                                                                                                                                                                                                             |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Catalog grows too large for `load_domain` to be useful | Two-level hierarchy default; directory layout drives subdomain structure (§4.2, §4.5); domain owners curate cross-cutting views via `DOMAIN.md include:`; learn-from-usage reranking surfaces signal-based ordering. |
-| Prompt injection via artifact manifests                | Content provenance markers (§4.4.2) enable differential trust; adapters propagate to harness-native trust regions where supported. RBAC restricts who can publish; classification + review status gate visibility.    |
-| Bundled-script supply chain                            | SBOM at publish; signature verification on materialization (§4.7.9); sandbox profile (§4.4.1); secret scanning + static analysis in publish-time CI.                                                                  |
-| Registry latency on every meta-tool call               | HTTP/2 keep-alive between MCP server and registry; ETag caching of immutable artifact versions; manifest body inline; content-addressed disk cache shared across workspaces; explicit p99 budgets (§7.1).             |
-| Manifest description quality                           | Publish-time lint flags thin descriptions and clusters of artifacts with colliding summaries. Learn-from-usage reranking surfaces underperforming descriptions.                                                       |
-| Local overlay tampering                                | The local overlay is intended for the developer's own workspace iteration. Hosts that need tamper-evident behavior pin to registry-side versions and leave `PODIUM_OVERLAY_PATH` unset.                              |
-| Registry as a single point of failure for hosts        | The cache and `offline-first` mode let cached artifacts continue to work during transient outages. Fresh `load_domain` / `search_artifacts` returns an explicit "offline" status that hosts can surface.              |
-| Type system extensibility / per-type lint rule drift   | Type definitions are SPI plugins compiled into the registry binary; deployments pin a registry version. Future runtime-registered types deferred to post-v1.                                                          |
-| RBAC misconfiguration                                  | Built-in roles cover most cases; admin actions are audited; the registry refuses to start with structurally invalid binding tables; `podium rbac …` CLI surfaces effective permissions for any identity.              |
-| Identity provider misconfiguration                     | The MCP server validates its identity-provider configuration at startup and refuses to start with an obviously broken combination. Each provider documents the env vars it requires. Untrusted runtimes rejected at the registry. |
-| Bundled resource bloat                                 | Per-package and per-file size lints at publish time; soft cap is configurable; large data uses `external_resources:` (§4.3) instead of inline bundling.                                                              |
-| Recursive globs in `DOMAIN.md` are expensive           | Glob expansion is cached server-side per artifact-version snapshot; cache invalidation is keyed on publish events. Lint warns on overly broad recursive globs.                                                        |
-| `DOMAIN.md` imports go stale silently                  | Publish-time lint warns on imports that don't currently resolve in any visible view. Learn-from-usage signal surfaces domains whose imports return empty results frequently.                                          |
-| `unlisted: true` accidentally hides artifacts          | The flag is opt-in (default `false`); the publish lint flags newly-set `unlisted: true` for review. `search_artifacts` continues to surface unlisted artifacts unless `search_visibility: direct-only`.              |
-| Harness adapter drift                                  | Adapters are versioned with the MCP server binary; profiles can pin a minimum version. Conformance suite runs against every adapter on every release. Authors who hit drift can fall back to `harness: none`.        |
-| Canonical artifact uses a feature an adapter cannot translate | Capability matrix (§6.7.1); publish-time lint surfaces mismatches; `target_harnesses:` opt-out; adapter returns structured error from `load_artifact`.                                                                |
-| Adapter sprawl across many harnesses                  | Adapters carry no agent or registry logic; mechanical translators with a shared core. Conformance suite gates merges. Sandbox contract enforced.                                                                      |
-| Vulnerability in a bundled dependency                 | SBOM at publish; CVE feed ingested by registry; affected artifacts surfaced via `podium vuln list`; owners notified through configured channels.                                                                      |
-| Token leakage in `injected-session-token`             | Runtime owns env-var/file lifecycle; ≤15 min token TTLs recommended; `PODIUM_SESSION_TOKEN_FILE` over env var when possible; runtime trust model rejects unsigned tokens.                                              |
-| Audit tampering                                       | Hash-chained audit (§8.6); periodic transparency-log anchoring recommended; SIEM mirroring as operational backstop.                                                                                                   |
+### 12.1 Strategic Risks
+
+| Risk                                                                                                                                                         | Mitigation                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A major harness vendor extends its enterprise tier with native RBAC + audit + multi-team deployment, capturing the governance market for its own surface** | Multi-vendor neutrality is the wedge. Apache 2.0; explicitly designed for orgs with non-trivial AI tooling diversity (multiple harnesses, custom runtimes, mixed artifact types). Cross-type dependency tracking and layered overlays are deliberately scoped beyond what any single-vendor governance tier will reasonably build.                                                                                        |
+| **The "minimal-viable competitor" — a sync script — is good enough for many teams, undercutting the case for Podium's complexity**                           | §1.3.1 is honest about the threshold: a sync script suffices for single-team, single-vendor, single-type catalogs. Podium's value compounds at the intersection of multi-team, multi-harness, multi-type, governed catalogs. The wedge phases (0–4) are designed to make Podium competitive with the script (5-min install, `--solo` mode, `podium sync`) so adopters don't have to commit to the heavy stack on day one. |
+| **OSS sustainability without a major sponsor**                                                                                                               | The build sequence ships the wedge first and explicitly stops to evaluate demand before committing to phases 5+. If demand is real, a managed offering by a sponsoring entity provides sustainability; if demand is thin, the project doesn't overinvest in the heavy stack.                                                                                                                                              |
+| **Per-harness conventions evolve and adapters fall behind**                                                                                                  | Adapters are versioned alongside the MCP server / sync binary; profiles can pin a minimum version. Conformance suite runs against every adapter on every release. Authors who hit drift can fall back to `harness: none`. The adapter layer is intentionally thin — file placement and frontmatter mapping, not semantic translation — to keep maintenance bounded.                                                       |
+| **Adoption requires convincing organizations to centralize artifacts they currently scatter across repos**                                                   | The `local` overlay (§4.6) plus per-workspace iteration loop is designed so adopters can start by promoting individual artifacts incrementally. There's no "big bang" migration. The reference example registry demonstrates partial adoption, not all-or-nothing.                                                                                                                                                        |
+
+### 12.2 Operational Risks
+
+| Risk                                                          | Mitigation                                                                                                                                                                                                                        |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Catalog grows too large for `load_domain` to be useful        | Two-level hierarchy default; directory layout drives subdomain structure (§4.2, §4.5); domain owners curate cross-cutting views via `DOMAIN.md include:`; learn-from-usage reranking surfaces signal-based ordering.              |
+| Prompt injection via artifact manifests                       | Content provenance markers (§4.4.2) enable differential trust; adapters propagate to harness-native trust regions where supported. RBAC restricts who can publish; classification + review status gate visibility.                |
+| Bundled-script supply chain                                   | SBOM at publish; signature verification on materialization (§4.7.9); sandbox profile (§4.4.1); secret scanning + static analysis in publish-time CI.                                                                              |
+| Registry latency on every meta-tool call                      | HTTP/2 keep-alive between MCP server and registry; ETag caching of immutable artifact versions; manifest body inline; content-addressed disk cache shared across workspaces; explicit p99 budgets (§7.1).                         |
+| Manifest description quality                                  | Publish-time lint flags thin descriptions and clusters of artifacts with colliding summaries. Learn-from-usage reranking surfaces underperforming descriptions.                                                                   |
+| Local overlay tampering                                       | The local overlay is intended for the developer's own workspace iteration. Hosts that need tamper-evident behavior pin to registry-side versions and leave `PODIUM_OVERLAY_PATH` unset.                                           |
+| Registry as a single point of failure for hosts               | The cache and `offline-first` mode let cached artifacts continue to work during transient outages. Fresh `load_domain` / `search_artifacts` returns an explicit "offline" status that hosts can surface.                          |
+| Type system extensibility / per-type lint rule drift          | Type definitions are SPI plugins compiled into the registry binary; deployments pin a registry version. Future runtime-registered types deferred to post-v1.                                                                      |
+| RBAC misconfiguration                                         | Built-in roles cover most cases; admin actions are audited; the registry refuses to start with structurally invalid binding tables; `podium rbac …` CLI surfaces effective permissions for any identity.                          |
+| Identity provider misconfiguration                            | The MCP server validates its identity-provider configuration at startup and refuses to start with an obviously broken combination. Each provider documents the env vars it requires. Untrusted runtimes rejected at the registry. |
+| Bundled resource bloat                                        | Per-package and per-file size lints at publish time; soft cap is configurable; large data uses `external_resources:` (§4.3) instead of inline bundling.                                                                           |
+| Recursive globs in `DOMAIN.md` are expensive                  | Glob expansion is cached server-side per artifact-version snapshot; cache invalidation is keyed on publish events. Lint warns on overly broad recursive globs.                                                                    |
+| `DOMAIN.md` imports go stale silently                         | Publish-time lint warns on imports that don't currently resolve in any visible view. Learn-from-usage signal surfaces domains whose imports return empty results frequently.                                                      |
+| `unlisted: true` accidentally hides artifacts                 | The flag is opt-in (default `false`); the publish lint flags newly-set `unlisted: true` for review. `search_artifacts` continues to surface unlisted artifacts unless `search_visibility: direct-only`.                           |
+| Harness adapter drift                                         | Adapters are versioned with the MCP server binary; profiles can pin a minimum version. Conformance suite runs against every adapter on every release. Authors who hit drift can fall back to `harness: none`.                     |
+| Canonical artifact uses a feature an adapter cannot translate | Capability matrix (§6.7.1); publish-time lint surfaces mismatches; `target_harnesses:` opt-out; adapter returns structured error from `load_artifact`.                                                                            |
+| Adapter sprawl across many harnesses                          | Adapters carry no agent or registry logic; mechanical translators with a shared core. Conformance suite gates merges. Sandbox contract enforced.                                                                                  |
+| Vulnerability in a bundled dependency                         | SBOM at publish; CVE feed ingested by registry; affected artifacts surfaced via `podium vuln list`; owners notified through configured channels.                                                                                  |
+| Token leakage in `injected-session-token`                     | Runtime owns env-var/file lifecycle; ≤15 min token TTLs recommended; `PODIUM_SESSION_TOKEN_FILE` over env var when possible; runtime trust model rejects unsigned tokens.                                                         |
+| Audit tampering                                               | Hash-chained audit (§8.6); periodic transparency-log anchoring recommended; SIEM mirroring as operational backstop.                                                                                                               |
 
 ---
 
