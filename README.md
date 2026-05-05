@@ -22,7 +22,7 @@ The most useful contributions today are **design feedback on the spec** — ques
 - **Visibility per layer.** Each layer declares its own visibility (`public`, `organization`, OIDC `groups`, explicit `users`). Authoring rights live in the Git provider's branch protection — Podium does not duplicate them.
 - **Lazy materialization.** Sessions can start empty and load only what the agent decides to use. Catalogs of thousands of artifacts don't pollute the system prompt.
 - **Hybrid retrieval.** BM25 + vector search fused via reciprocal rank fusion. Built-in vector backends: `pgvector`, `sqlite-vec`, Pinecone, Weaviate Cloud, Qdrant Cloud. Built-in embedding providers: `embedded-onnx`, `openai`, `voyage`, `cohere`, `ollama`.
-- **Solo or standard.** `podium serve --solo` runs as a single binary with embedded SQLite + sqlite-vec + a bundled embedding model — works offline. Standard deployments use Postgres, S3-compatible object storage, an OIDC IdP, and webhook-driven Git ingest.
+- **Standalone or standard.** `podium serve --standalone` runs as a single binary with embedded SQLite + sqlite-vec + a bundled embedding model — works offline. Standard deployments use Postgres, S3-compatible object storage, an OIDC IdP, and webhook-driven Git ingest.
 
 ## Quick example
 
