@@ -55,7 +55,7 @@ The agent now has the skill in its working set. Done.
 
 ### 1.1 What Podium Is
 
-**Podium is the governance and control plane for an organization's library of authored agent artifacts** — skills, agents, contexts, prompts, MCP server registrations, and any extension type a deployment registers. One catalog, one identity model, one ordered set of layers, one dependency graph, one audit stream, one signing scheme — across every artifact type the organization authors.
+**Podium is a control plane for managing and serving AI agent artifacts at scale** — skills, agents, contexts, prompts, MCP server registrations, and any extension type a deployment registers. One catalog, one identity model, one ordered set of layers, one dependency graph, one audit stream, one signing scheme — across every artifact type the catalog holds.
 
 Two pieces:
 
@@ -67,7 +67,7 @@ Two pieces:
 
 Authoring lives in Git (or, for solo and small-team installations, in a local filesystem path). Authors merge to a tracked Git ref; the registry ingests on webhook (§7.3.1).
 
-What Podium gives an organization:
+What Podium provides:
 
 - **Layered composition with deterministic merge.** An ordered list of layers — admin-defined, user-defined, and the workspace local overlay — composes per request with explicit precedence and no silent shadowing. `extends:` lets a higher-precedence artifact inherit and refine a lower one without forking. Most-restrictive-wins for security fields; last-layer-wins for descriptions.
 - **Type heterogeneity as a first principle.** Skills are one of several first-class types. Agents, contexts, prompts, and MCP server registrations sit alongside; extension types register through a `TypeProvider` SPI. Cross-type dependency edges (an agent's `delegates_to:` another agent; a skill's `mcpServers:` references that resolve to `mcp-server`-type artifacts) drive impact analysis.
@@ -79,7 +79,7 @@ What Podium gives an organization:
 What Podium is not:
 
 - Not an agent runtime. Sessions, agent execution, policy compilation, and downstream tool wiring belong to hosts.
-- Not a public artifact marketplace. Public-skill marketplaces (e.g. Vercel skills.sh) fill that role for community content. Podium is for an organization's own catalog, with optional public mirroring.
+- Not a public artifact marketplace. Public-skill marketplaces (e.g. Vercel skills.sh) fill that role for community content. Podium serves internal catalogs, with optional public mirroring.
 - Not a replacement for harness-native conventions. Where a harness has a native skills directory, agent format, or prompt convention, Podium delivers into it via the harness adapter; it doesn't try to displace it.
 
 ### 1.2 Problem Statement
@@ -109,7 +109,7 @@ Several point solutions partially address subsets of these problems — git mono
 - **One MCP server, pluggable identity.** A single binary serves every MCP deployment context. Identity is selected by configuration.
 - **Materialization on the host's filesystem.** `load_artifact` lazily downloads bundled resources to a host-configured destination path, atomically. The catalog lives at the registry; the working set lives on the host.
 - **Author once, deliver anywhere.** Adapters mechanically translate canonical artifacts into harness-native shapes. No per-harness forks of the source-of-truth manifest.
-- **Multi-vendor neutrality.** Apache 2.0; vendor-agnostic; explicitly designed for organizations whose AI tooling spans multiple harnesses and runtimes. Not bound to any one vendor's enterprise roadmap.
+- **Multi-vendor neutrality.** Apache 2.0; vendor-agnostic; designed for tooling that spans multiple harnesses and runtimes.
 - **Immutability and signing.** Every artifact version is bit-for-bit immutable. High-sensitivity artifacts are cryptographically signed.
 
 ### 1.3.1 When Podium Could Help
@@ -143,7 +143,7 @@ The minimum viable alternative — a short script that watches a Git repo and co
 | PostgreSQL + pgvector for the registry (sqlite + sqlite-vec in solo mode)           | Default backend for manifest metadata, dependency edges, embeddings, layer config, admin grants, and audit. Vector storage is pluggable: managed services (Pinecone, Weaviate Cloud, Qdrant Cloud) can replace pgvector / sqlite-vec, in which case the metadata store stays in Postgres (or SQLite) and embeddings live in the external service. The metadata store itself is also pluggable via `RegistryStore`.       |
 | Per-workspace MCP server lifecycle on developer hosts                               | When the MCP server runs as a developer-side subprocess, the host spawns one per workspace, over stdio. The workspace local overlay lives at `.podium/overlay/`. Cache lives in `~/.podium/cache/` and is content-addressed across workspaces.                                                                                                                                                                           |
 | Versions are immutable; semver-named                                                | Every `(artifact_id, semver)` pair, once ingested, is bit-for-bit immutable forever. Internal cache keying is by content hash.                                                                                                                                                                                                                                                                                           |
-| Apache 2.0 license; multi-vendor neutrality is a positioning commitment             | Permissive, enterprise-friendly, common for infrastructure projects. The project will not accept contributions or governance changes that bind it to a single harness vendor's roadmap.                                                                                                                                                                                                                                  |
+| Apache 2.0 license; multi-vendor neutrality | Permissive, enterprise-friendly, common for infrastructure projects. |
 
 ### 1.5 Where Podium Fits
 
@@ -169,7 +169,7 @@ The canonical artifact format is intended for upstream contribution to an MCP-ad
 - **Governance.** Maintainer model + RFC process for spec changes; see `GOVERNANCE.md`.
 - **Distribution.** OSS-first development; optional commercial managed offering by the sponsoring entity (separate doc).
 - **Public registry.** A reference registry with curated example artifacts is hosted at the project's public URL.
-- **Multi-vendor neutrality is a positioning commitment**, not a slogan. The project will not accept contributions, governance changes, or roadmap pressure that bind it to a single harness vendor's surface.
+- **Multi-vendor neutrality.** The project does not adopt contributions, governance changes, or roadmap pressure that would bind it to a single harness vendor's surface.
 - **Standards engagement.** Where adjacent open standards (MCP, AAIF-governed standards, etc.) overlap with Podium concerns, the project participates upstream and harmonizes wherever doing so doesn't compromise Podium's broader scope across artifact types.
 
 ---
