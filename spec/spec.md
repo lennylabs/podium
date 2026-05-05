@@ -140,7 +140,7 @@ The minimum viable alternative — a short script that watches a Git repo and co
 | Single `admin` role per tenant | Admins manage the layer list, freeze windows, and tenant settings. Per-artifact roles do not exist; visibility is per-layer. |
 | Cap of 3 user-defined layers per identity by default | Configurable per tenant. Keeps personal-layer growth bounded; reordering supported. |
 | No registry-side polling | Ingestion fires from Git provider webhooks or from manual `podium layer reingest` invocations. `local`-source layers re-scan on demand. |
-| PostgreSQL + pgvector for the registry | Manifest metadata, dependency edges, embeddings, layer config, admin grants, audit. Pluggable interface for alternatives. |
+| PostgreSQL + pgvector for the registry (sqlite + sqlite-vec in solo mode) | Default backend for manifest metadata, dependency edges, embeddings, layer config, admin grants, and audit. Vector storage is pluggable: managed services (Pinecone, Weaviate Cloud, Qdrant Cloud) can replace pgvector / sqlite-vec, in which case the metadata store stays in Postgres (or SQLite) and embeddings live in the external service. The metadata store itself is also pluggable via `RegistryStore`. |
 | Per-workspace MCP server lifecycle on developer hosts | When the MCP server runs as a developer-side subprocess, the host spawns one per workspace, over stdio. The workspace local overlay lives at `.podium/overlay/`. Cache lives in `~/.podium/cache/` and is content-addressed across workspaces. |
 | Versions are immutable; semver-named | Every `(artifact_id, semver)` pair, once ingested, is bit-for-bit immutable forever. Internal cache keying is by content hash. |
 | Apache 2.0 license; multi-vendor neutrality is a positioning commitment | Permissive, enterprise-friendly, common for infrastructure projects. The project will not accept contributions or governance changes that bind it to a single harness vendor's roadmap. |
@@ -755,17 +755,66 @@ Extension types register their own field semantics via `TypeProvider`.
 
 ### 4.7 Registry as a Service
 
-The registry is a deployable service. The on-disk layout described above (§4.2–§4.5) is the **authoring** model; layers (§4.6), access control (§4.7.2), and the runtime model below are how the service serves requests. Three persistent stores:
+The registry is a deployable service. The on-disk layout described above (§4.2–§4.5) is the **authoring** model; layers (§4.6), access control (§4.7.2), and the runtime model below are how the service serves requests. The runtime model has four pieces — three persistent stores plus the API front door:
 
-- **Postgres + pgvector.** Manifest metadata, descriptors, layer config, admin grants, user-defined-layer registrations, dependency edges, deprecation status, audit log, and embeddings used by `search_artifacts`.
+- **Metadata store (Postgres in standard, SQLite in solo).** Manifest metadata, descriptors, layer config, admin grants, user-defined-layer registrations, dependency edges, deprecation status, and audit log. Pluggable via `RegistryStore` (§9.1).
+- **Vector store.** `pgvector` collocated in Postgres (standard default) or `sqlite-vec` collocated in SQLite (solo default). Pluggable via `RegistrySearchProvider` (§9.1) to a managed service (Pinecone, Weaviate Cloud, Qdrant Cloud); when a managed backend is configured, embeddings move out of the metadata store and the registry assumes responsibility for dual-write consistency.
 - **Object storage.** Bundled resource bytes per artifact version, fronted by presigned URL generation. Versioned: each artifact version is immutable.
-- **HTTP/JSON API.** Stateless front door. Accepts OAuth-attested identity, composes the caller's effective view from the layer list, applies per-layer visibility, queries Postgres, signs URLs, returns responses.
+- **HTTP/JSON API.** Stateless front door. Accepts OAuth-attested identity, composes the caller's effective view from the layer list, applies per-layer visibility, queries the metadata and vector stores, signs URLs, returns responses.
 
 #### Version immutability invariant
 
 A `(artifact_id, version)` pair, once ingested, is bit-for-bit immutable forever in the registry's content store. Subsequent commits in a layer's source that change the same `version:` with different content are rejected at ingest. Readers in flight when a re-ingest occurs continue to see their pinned version. This is a load-bearing system invariant.
 
 Force-push or history rewrite at the source does not break the invariant: previously-ingested commits' bytes are preserved in the content-addressed store, and the registry emits a `layer.history_rewritten` event for the operator. Strict mode is configurable per layer (§7.3.1).
+
+#### Embedding generation
+
+Hybrid retrieval (BM25 + vectors via RRF) needs an embedding for every artifact and for each `search_artifacts` query. The registry computes both.
+
+**What gets embedded.** A canonical text projection per artifact, built from frontmatter only:
+
+- `name`
+- `description`
+- `when_to_use` (joined with newlines)
+- `tags` (joined)
+
+The prose body of `ARTIFACT.md` is **not** embedded. It's noisy for retrieval and risks busting embedding-model context limits at the long-tail end. Authors who want richer search recall put discoverability content in `description` and `when_to_use`. The same projection is applied to `search_artifacts` queries when the caller passes a text `query` (the `query` is treated as a free-text search target, not concatenated with the projection).
+
+**Where embeddings come from.** Two cases, determined by the configured `RegistrySearchProvider`:
+
+1. **Self-embedding backend** — Pinecone Integrated Inference, Weaviate Cloud with a vectorizer, Qdrant Cloud Inference, and similar. The registry passes the text projection to the backend; the backend computes and stores the embedding inline. No external `EmbeddingProvider` required.
+2. **Storage-only backend** — pgvector, sqlite-vec, plain Qdrant, plain Weaviate without a vectorizer. The registry calls a configured `EmbeddingProvider` to compute the vector, then writes the vector to the backend.
+
+In either case, an `EmbeddingProvider` can be **explicitly configured** to override the backend's hosted model — useful when an existing corpus is already embedded with a specific model and you want continuity, or when you want a model the backend doesn't host.
+
+**Built-in `EmbeddingProvider` implementations** (selected via `PODIUM_EMBEDDING_PROVIDER`):
+
+| Value | Model defaults | Notes |
+| ----- | -------------- | ----- |
+| `embedded-onnx` _(solo default)_ | `bge-small-en-v1.5` (384 dimensions, ~30 MB) | Bundled ONNX model running in-process. No external service. |
+| `openai` _(standard default)_ | `text-embedding-3-small` (1536 dim) | Requires `OPENAI_API_KEY`. |
+| `voyage` | `voyage-3` | Requires `VOYAGE_API_KEY`. |
+| `cohere` | `embed-v4` | Requires `COHERE_API_KEY`. |
+| `ollama` | configurable | Points at any Ollama endpoint (default `http://localhost:11434`). Useful for solo + offline + air-gapped. |
+
+Custom embedding providers register through the SPI as Go-module plugins.
+
+**Model versioning and re-embedding.** The vector store records `(model_id, dimensions)` per artifact. When the configured embedding model changes — operator switches `EmbeddingProvider`, switches the self-embedding backend's hosted model, or upgrades to a new version of the same model — the registry triggers a background re-embed via `podium admin reembed` (`--all` or `--since <timestamp>`). During re-embedding, the vector store may transiently contain mixed dimensions; query-time the registry restricts results to vectors matching the currently-configured model and emits `embedding.reembed_in_progress` events for progress monitoring. Once re-embedding completes, stale-dimension rows are purged.
+
+#### Dual-write semantics for external vector backends
+
+When `RegistrySearchProvider` is configured to a backend outside the metadata store (any managed service or a separate pgvector instance), the registry coordinates writes through a **transactional outbox**:
+
+1. At ingest, the manifest commit and a `vector_pending` row land in the same `RegistryStore` transaction. The outbox row carries either the pre-computed vector (storage-only backends) or the canonical text projection (self-embedding backends).
+2. A background worker drains the outbox by writing to the vector backend with exponential-backoff retry, marking each row complete on success.
+3. Ingest itself never blocks on the external service. If the vector backend is down, ingest succeeds, the outbox grows, and the metadata store stays the source of truth.
+
+While an outbox row is unresolved, the affected artifact remains discoverable via BM25 and direct `load_artifact` calls; only its semantic-search recall is degraded until the vector lands. Operators monitor outbox depth via a Prometheus gauge; a `vector.outbox_lagging` event fires when depth or oldest-row age exceeds an operator-configured threshold.
+
+Self-embedding backends collapse the embedding step into the same call (text-in instead of vector-in), so they avoid a separate inference round-trip from the registry but the outbox semantics are otherwise identical.
+
+The collocated defaults (pgvector, sqlite-vec) sidestep the outbox entirely — embeddings and metadata commit in a single database transaction.
 
 #### 4.7.1 Tenancy
 
@@ -1021,7 +1070,7 @@ To promote a workspace artifact to a shared layer, copy it into the appropriate 
 
 When `LocalOverlayProvider` is configured, the MCP server maintains a local BM25 index over local-overlay manifest text. `search_artifacts` calls fan out to both the registry and the local index; the MCP server fuses results via reciprocal rank fusion before returning.
 
-The default is BM25-only — local artifacts have lower recall on semantic queries than registry artifacts, which is acceptable for the developer iteration loop where the goal is "find my draft," not "outrank everything else." Authors who want better local recall can configure the MCP server with an external embedding provider and a vector store via the `LocalSearchProvider` SPI (§9). Managed services (Pinecone, Weaviate Cloud, Qdrant Cloud) are first-class targets, as is a local pgvector instance for offline use. Cost and identity for the external service are the operator's to manage.
+The default is BM25-only — local artifacts have lower recall on semantic queries than registry artifacts, which is acceptable for the developer iteration loop where the goal is "find my draft," not "outrank everything else." Authors who want better local recall can configure the MCP server with an external embedding provider and a vector store via the `LocalSearchProvider` SPI (§9.1). Backends include `sqlite-vec` (embedded, single-file — matching the solo registry's default in §13.10), a local pgvector instance, or a managed service (Pinecone, Weaviate Cloud, Qdrant Cloud). Cost and identity for any external service are the operator's to manage.
 
 ### 6.5 Cache
 
@@ -1562,10 +1611,11 @@ Podium is extensible at two layers. **In-process plugins** swap or augment the r
 
 | Interface                | Default                                             | Purpose                                                                                        |
 | ------------------------ | --------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `RegistryStore`          | Postgres + pgvector                                 | Manifest metadata, dependency edges, embeddings, layer config, admin grants, registry-side audit |
-| `RegistryObjectStore`    | S3-compatible                                       | Bundled resource bytes, presigned URLs                                                         |
-| `RegistrySearchProvider` | BM25 + pgvector (RRF)                               | Hybrid retrieval for `search_artifacts`. Pluggable to managed vector services (Pinecone, Weaviate Cloud, Qdrant Cloud) and alternative embedding providers via the same SPI. |
-| `LocalSearchProvider`    | BM25 over local-overlay manifests                   | Optional semantic backing for the local-overlay index (§6.4.1). Same SPI shape as `RegistrySearchProvider`; can target a managed vector service (e.g. Pinecone) for better local recall. |
+| `RegistryStore`          | Postgres (standard) / SQLite (solo)                 | Manifest metadata, dependency edges, layer config, admin grants, registry-side audit. Embeddings live here too when the default vector backend is in use; see `RegistrySearchProvider`. |
+| `RegistryObjectStore`    | S3-compatible (filesystem in solo)                  | Bundled resource bytes, presigned URLs                                                         |
+| `RegistrySearchProvider` | `pgvector` (standard) / `sqlite-vec` (solo), with BM25 fused via RRF | Hybrid retrieval for `search_artifacts`. Built-ins shipped in the default binary, selectable via `PODIUM_VECTOR_BACKEND`: `pgvector`, `sqlite-vec`, `pinecone`, `weaviate-cloud`, `qdrant-cloud`. Each implementation declares a `self_embedding` capability — Pinecone Integrated Inference, Weaviate vectorizer, and Qdrant Cloud Inference set this true and don't require an `EmbeddingProvider`; storage-only backends (`pgvector`, `sqlite-vec`, plain `qdrant`, plain `weaviate`) require one. Custom backends register through this SPI as Go-module plugins (§9.2). Dual-write semantics for non-collocated backends are documented in §4.7. |
+| `EmbeddingProvider`      | `embedded-onnx` (solo) / `openai` (standard)        | Generates embeddings for ingest text and for `search_artifacts` queries. Built-ins shipped in the default binary, selectable via `PODIUM_EMBEDDING_PROVIDER`: `embedded-onnx`, `openai`, `voyage`, `cohere`, `ollama`. Required when `RegistrySearchProvider` is storage-only; optional override when the backend self-embeds. See §4.7 (Embedding generation). |
+| `LocalSearchProvider`    | BM25 over local-overlay manifests                   | Optional semantic backing for the local-overlay index (§6.4.1). Same SPI shape as `RegistrySearchProvider`; backends include `sqlite-vec`, a local pgvector instance, or any managed vector service. Embedding-provider selection follows the same rules as the registry-side path. |
 | `RegistryAuditSink`      | Separate Postgres table within `RegistryStore`      | Stream for catalogue events; logically distinct, separately mockable, separately routable      |
 | `LayerComposer`          | Layer-list composition + visibility filtering       | Resolves the caller's effective view from the configured layer list (§4.6); applies merge semantics and `extends:` resolution |
 | `GitProvider`            | GitHub                                              | Webhook signature verification and Git fetch semantics. Built-in support for GitHub, GitLab, Bitbucket; additional providers register through this interface. |
@@ -1774,11 +1824,13 @@ The build sequence is structured to ship a wedge experiment first — the smalle
 ### 13.1 Reference Topology
 
 - **Stateless front-end:** 3+ replicas behind a load balancer (HTTP).
-- **Postgres:** managed (RDS, Cloud SQL, Aurora) or self-run; primary + read replicas.
+- **Postgres:** managed (RDS, Cloud SQL, Aurora) or self-run; primary + read replicas. Holds manifest metadata, layer config, admin grants, and audit; also holds embeddings when the default vector backend (pgvector) is in use.
+- **Vector backend:** `pgvector` by default — collocated in the Postgres deployment, no separate service to run. The default binary also ships built-ins for `pinecone`, `weaviate-cloud`, and `qdrant-cloud`, selectable via `PODIUM_VECTOR_BACKEND` (each takes its own endpoint + API key env vars). Custom backends register through the `RegistrySearchProvider` SPI (§9.1, §9.2).
+- **Embedding provider:** `openai` by default in standard deployments — text projection from manifest frontmatter (§4.7 *Embedding generation*) is sent to OpenAI's embeddings API. The default binary also ships `voyage`, `cohere`, `ollama`, and `embedded-onnx`, selectable via `PODIUM_EMBEDDING_PROVIDER`. Optional when the configured vector backend self-embeds (Pinecone Integrated Inference, Weaviate Cloud vectorizer, Qdrant Cloud Inference).
 - **Object storage:** S3-compatible (S3, GCS, MinIO, R2).
 - **Helm chart** ships with the registry; bare-metal deployment guide alongside.
 
-For non-prod or solo use: `podium serve --solo` runs as a single binary with embedded SQLite, filesystem object storage, no auth, and a single layer (`local` source).
+For non-prod or solo use, see §13.10.
 
 ### 13.2 Runbook
 
@@ -1823,6 +1875,189 @@ Presigned URLs are CDN-friendly. Recommend CloudFront / Fastly / Cloudflare in f
 
 - Registry: `/healthz` (liveness) and `/readyz` (readiness — Postgres + object-storage reachable).
 - MCP server: `health` MCP tool returning registry connectivity + cache size + last successful call timestamp.
+
+### 13.10 Solo Deployment
+
+`podium serve --solo` collapses the full stack into a single binary with no external dependencies. It targets local development, individual contributors, and small-team installations where running Postgres + object storage + an IdP is overkill.
+
+```bash
+podium serve --solo \
+  --layer-path /var/podium/artifacts \
+  --bind 127.0.0.1:8080
+```
+
+**What changes from the standard topology:**
+
+| Concern | Standard | Solo |
+| ------- | -------- | ---- |
+| Metadata store | Postgres | Embedded SQLite (`~/.podium/solo/podium.db`) |
+| Vector store | pgvector | `sqlite-vec` extension loaded into the same SQLite file |
+| Embedding provider | `openai` (default) | `embedded-onnx` — bundled BGE-small ONNX model, in-process, no external service |
+| Object storage | S3-compatible | Filesystem (`~/.podium/solo/objects/`) |
+| Identity provider | OIDC IdP | None — no auth; `127.0.0.1`-only HTTP by default |
+| Layers | Configured admin layers + user-defined layers | A single `local`-source layer rooted at `--layer-path` |
+| Git provider / webhooks | Required for `git`-source layers | Not used |
+| Signing | Sigstore-keyless or registry-managed key | Disabled by default; opt in via `--sign registry-key` |
+| Content cache | Cross-workspace disk cache (`~/.podium/cache/`) | Disabled — the registry is local, the cache adds nothing |
+| Audit | Per-tenant Postgres table | Same SQLite file (audit table) |
+| Helm chart / Kubernetes | Required for production deployments | Not used |
+
+**Hybrid search.** Solo runs the same BM25 + vector RRF retriever as the standard registry. Vectors live in `sqlite-vec`; embeddings come from the bundled `embedded-onnx` provider — both run in-process, so the binary works offline and air-gapped with no external dependency. Operators who want a remote model instead can switch via `PODIUM_EMBEDDING_PROVIDER=openai|voyage|cohere|ollama` (`ollama` is the obvious choice for self-hosted local models). `--no-embeddings` falls back to BM25-only.
+
+**Upgrade path.** A solo deployment migrates to standard via `podium admin migrate-to-standard --postgres <dsn> --object-store <url>` (covered in §13.4). Layer config, admin grants, and audit history are preserved; embeddings are re-computed against the target vector backend on first ingest.
+
+**Out of scope for solo.** Multi-tenancy, freeze windows, SCIM, SBOM/CVE pipeline, transparency-log anchoring, outbound webhooks. These are present in the binary but inert without the supporting infrastructure (an IdP for SCIM, a CVE feed for vulnerability tracking, etc.). They can be enabled individually when their dependencies are available.
+
+### 13.11 Backend Configuration Reference
+
+Backend selections and their per-backend config values can be set as environment variables, command-line flags, or entries in a registry config file (default `/etc/podium/registry.yaml` for standard deployments and `~/.podium/registry.yaml` for solo; override via `--config <path>`). **Precedence: CLI flag > env var > config file.** All env vars below are also valid config-file keys (snake-cased under the relevant section); a complete YAML example follows the per-backend tables.
+
+The same values apply on the MCP server when it's configured to use `LocalSearchProvider` against an external backend (§6.4.1) — the workspace-side process reads the same env-var names.
+
+The registry refuses to start when a backend is selected but its required values are missing, naming the missing keys in the error.
+
+#### Metadata store
+
+Selected via `PODIUM_REGISTRY_STORE` (`postgres` | `sqlite`).
+
+| Var | Description | Default |
+| --- | --- | --- |
+| `PODIUM_POSTGRES_DSN` | Postgres connection string (when `postgres`) | — required |
+| `PODIUM_SQLITE_PATH` | SQLite file path (when `sqlite`) | `~/.podium/solo/podium.db` |
+
+#### Object storage
+
+Selected via `PODIUM_OBJECT_STORE` (`s3` | `filesystem`).
+
+| Var | Description | Default |
+| --- | --- | --- |
+| `PODIUM_S3_BUCKET` | Bucket name (when `s3`) | — required |
+| `PODIUM_S3_REGION` | AWS / region for the bucket | — required |
+| `PODIUM_S3_ENDPOINT` | Override URL for S3-compatible services (MinIO, GCS, R2, Backblaze B2) | (none — uses AWS S3) |
+| `PODIUM_S3_ACCESS_KEY_ID` / `PODIUM_S3_SECRET_ACCESS_KEY` | Static credentials | (use IAM role / instance profile when unset) |
+| `PODIUM_S3_FORCE_PATH_STYLE` | `true` for MinIO and similar | `false` |
+| `PODIUM_FILESYSTEM_ROOT` | Root directory (when `filesystem`) | `~/.podium/solo/objects/` |
+
+#### Vector backend
+
+Selected via `PODIUM_VECTOR_BACKEND` (`pgvector` | `sqlite-vec` | `pinecone` | `weaviate-cloud` | `qdrant-cloud`).
+
+`pgvector` and `sqlite-vec` reuse the metadata-store connection — no additional config.
+
+`pinecone`:
+
+| Var | Description | Default |
+| --- | --- | --- |
+| `PODIUM_PINECONE_API_KEY` | Pinecone API key | — required |
+| `PODIUM_PINECONE_INDEX` | Index name | — required |
+| `PODIUM_PINECONE_HOST` | Index host URL (Pinecone serverless) | (auto-resolved from index name) |
+| `PODIUM_PINECONE_NAMESPACE` | Namespace prefix used per tenant | `default` |
+| `PODIUM_PINECONE_INFERENCE_MODEL` | Hosted model name to enable Integrated Inference (e.g., `multilingual-e5-large`) | (unset → storage-only mode; `EmbeddingProvider` required) |
+
+`weaviate-cloud`:
+
+| Var | Description | Default |
+| --- | --- | --- |
+| `PODIUM_WEAVIATE_URL` | Cluster REST URL | — required |
+| `PODIUM_WEAVIATE_API_KEY` | API key | — required |
+| `PODIUM_WEAVIATE_COLLECTION` | Collection name | — required |
+| `PODIUM_WEAVIATE_GRPC_URL` | gRPC endpoint | (derived from REST URL) |
+| `PODIUM_WEAVIATE_VECTORIZER` | Vectorizer module name (e.g., `text2vec-openai`, `text2vec-weaviate`) — set to enable self-embedding | (unset → storage-only mode; `EmbeddingProvider` required) |
+
+`qdrant-cloud`:
+
+| Var | Description | Default |
+| --- | --- | --- |
+| `PODIUM_QDRANT_URL` | Cluster REST URL | — required |
+| `PODIUM_QDRANT_API_KEY` | API key | — required |
+| `PODIUM_QDRANT_COLLECTION` | Collection name | — required |
+| `PODIUM_QDRANT_GRPC_PORT` | gRPC port | `6334` |
+| `PODIUM_QDRANT_INFERENCE_MODEL` | Hosted Cloud Inference model name — set to enable self-embedding | (unset → storage-only mode; `EmbeddingProvider` required) |
+
+#### Embedding provider
+
+Selected via `PODIUM_EMBEDDING_PROVIDER` (`embedded-onnx` | `openai` | `voyage` | `cohere` | `ollama`). **Optional** when the configured vector backend self-embeds (any of the `*_INFERENCE_MODEL` / `*_VECTORIZER` env vars above is set); **required** otherwise.
+
+`embedded-onnx`:
+
+| Var | Description | Default |
+| --- | --- | --- |
+| `PODIUM_ONNX_MODEL_PATH` | Path to an ONNX model file | (bundled `bge-small-en-v1.5`) |
+| `PODIUM_ONNX_DIMENSIONS` | Output vector dimensions | `384` |
+| `PODIUM_ONNX_POOL_SIZE` | Concurrent inference slots | `runtime.NumCPU()` |
+
+`openai`:
+
+| Var | Description | Default |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | OpenAI API key | — required |
+| `PODIUM_OPENAI_MODEL` | Model name | `text-embedding-3-small` |
+| `PODIUM_OPENAI_BASE_URL` | API base URL (override for Azure OpenAI or proxies) | `https://api.openai.com/v1` |
+| `PODIUM_OPENAI_ORG` | OpenAI organization ID | (unset) |
+
+`voyage`:
+
+| Var | Description | Default |
+| --- | --- | --- |
+| `VOYAGE_API_KEY` | Voyage AI API key | — required |
+| `PODIUM_VOYAGE_MODEL` | Model name | `voyage-3` |
+
+`cohere`:
+
+| Var | Description | Default |
+| --- | --- | --- |
+| `COHERE_API_KEY` | Cohere API key | — required |
+| `PODIUM_COHERE_MODEL` | Model name | `embed-v4` |
+
+`ollama`:
+
+| Var | Description | Default |
+| --- | --- | --- |
+| `PODIUM_OLLAMA_URL` | Ollama endpoint | `http://localhost:11434` |
+| `PODIUM_OLLAMA_MODEL` | Model name | `nomic-embed-text` |
+
+#### Identity provider
+
+Identity-provider selection and per-provider config are documented in §6.3 (`PODIUM_IDENTITY_PROVIDER`, `PODIUM_OAUTH_AUDIENCE`, `PODIUM_SESSION_TOKEN_*`, etc.). The same values apply on both the registry and the MCP server.
+
+#### Config file format
+
+```yaml
+# /etc/podium/registry.yaml (or ~/.podium/registry.yaml in solo)
+registry:
+  endpoint: https://podium.acme.com
+  bind: 0.0.0.0:8080
+
+  store:
+    type: postgres
+    dsn: ${PODIUM_POSTGRES_DSN}     # ${ENV_VAR} interpolation supported
+
+  object_store:
+    type: s3
+    bucket: acme-podium
+    region: us-east-1
+    endpoint: ${PODIUM_S3_ENDPOINT}    # optional — set for MinIO / R2 / GCS
+
+  vector_backend:
+    type: pinecone
+    api_key: ${PINECONE_API_KEY}
+    index: acme-prod
+    namespace: ${PODIUM_TENANT_ID}
+    inference_model: multilingual-e5-large    # enables self-embedding
+
+  # Optional: omitted because the vector backend above self-embeds.
+  # embedding_provider:
+  #   type: openai
+  #   api_key: ${OPENAI_API_KEY}
+  #   model: text-embedding-3-large
+
+  identity_provider:
+    type: oauth-device-code
+    audience: https://podium.acme.com
+    authorization_endpoint: https://acme.okta.com/oauth2/default
+```
+
+Env vars and CLI flags override file values. Secret values should use `${ENV_VAR}` interpolation rather than being committed in plaintext.
 
 ---
 
