@@ -1409,6 +1409,16 @@ client = Client.from_env()  # picks up registry endpoint + identity from env
 domains = client.load_domain("finance/close-reporting")
 results = client.search_artifacts("variance analysis", type="skill")
 
+# Full filter surface: type, tags, scope, top_k, session_id
+results = client.search_artifacts(
+    "variance analysis",
+    type="skill",
+    tags=["finance", "close"],
+    scope="finance/close-reporting",
+    top_k=10,
+    session_id=session_id,
+)
+
 # Type-specific lookups
 agents = client.search_artifacts("payment workflow", type="agent")
 contexts = client.search_artifacts("style guide", type="context")
