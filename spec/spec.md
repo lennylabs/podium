@@ -109,7 +109,7 @@ Several point solutions partially address subsets of these problems — git mono
 - **One MCP server, pluggable identity.** A single binary serves every MCP deployment context. Identity is selected by configuration.
 - **Materialization on the host's filesystem.** `load_artifact` lazily downloads bundled resources to a host-configured destination path, atomically. The catalog lives at the registry; the working set lives on the host.
 - **Author once, deliver anywhere.** Adapters mechanically translate canonical artifacts into harness-native shapes. No per-harness forks of the source-of-truth manifest.
-- **Multi-vendor neutrality.** Apache 2.0; vendor-agnostic; designed for tooling that spans multiple harnesses and runtimes.
+- **Multi-vendor neutrality.** MIT-licensed; vendor-agnostic; designed for tooling that spans multiple harnesses and runtimes.
 - **Immutability and signing.** Every artifact version is bit-for-bit immutable. High-sensitivity artifacts are cryptographically signed.
 
 ### 1.3.1 When Podium Could Help
@@ -143,7 +143,7 @@ The minimum viable alternative — a short script that watches a Git repo and co
 | PostgreSQL + pgvector for the registry (sqlite + sqlite-vec in solo mode)           | Default backend for manifest metadata, dependency edges, embeddings, layer config, admin grants, and audit. Vector storage is pluggable: managed services (Pinecone, Weaviate Cloud, Qdrant Cloud) can replace pgvector / sqlite-vec, in which case the metadata store stays in Postgres (or SQLite) and embeddings live in the external service. The metadata store itself is also pluggable via `RegistryStore`.       |
 | Per-workspace MCP server lifecycle on developer hosts                               | When the MCP server runs as a developer-side subprocess, the host spawns one per workspace, over stdio. The workspace local overlay lives at `.podium/overlay/`. Cache lives in `~/.podium/cache/` and is content-addressed across workspaces.                                                                                                                                                                           |
 | Versions are immutable; semver-named                                                | Every `(artifact_id, semver)` pair, once ingested, is bit-for-bit immutable forever. Internal cache keying is by content hash.                                                                                                                                                                                                                                                                                           |
-| Apache 2.0 license; multi-vendor neutrality | Permissive, enterprise-friendly, common for infrastructure projects. |
+| MIT license; multi-vendor neutrality | Permissive, enterprise-friendly, common for infrastructure projects. |
 
 ### 1.5 Where Podium Fits
 
@@ -159,13 +159,13 @@ Podium overlaps with several existing categories. None of them handle the full s
 | **LangChain Hub / LangSmith**                                                              | Prompt registry                                                               | Prompt-only flows; LangChain-native runtime; eval-focused workflows.                                                                            | Type heterogeneity; multi-runtime; multi-layer composition; governance.                                                                                                                                |
 | **PromptLayer / Langfuse / Helicone**                                                      | Prompt registry + observability                                               | Prompt-only with strong eval focus.                                                                                                             | Broader artifact model; richer governance; not bound to a single LLM provider.                                                                                                                         |
 | **HuggingFace Hub**                                                                        | Versioned artifact storage                                                    | Models and datasets at scale.                                                                                                                   | Authored artifacts (skills, agents, contexts, prompts, MCP server registrations) as runtime objects with governance — not models or datasets.                                                          |
-| **Single-vendor enterprise governance tiers**                                              | Centralized visibility controls / audit for one vendor's surface              | Single-vendor shop; native integration; managed infrastructure.                                                                                 | Multi-vendor neutrality; open Apache-2.0; one governance plane across heterogeneous tooling.                                                                                                           |
+| **Single-vendor enterprise governance tiers**                                              | Centralized visibility controls / audit for one vendor's surface              | Single-vendor shop; native integration; managed infrastructure.                                                                                 | Multi-vendor neutrality; open MIT license; one governance plane across heterogeneous tooling.                                                                                                          |
 
 The canonical artifact format is intended for upstream contribution to an MCP-adjacent or AAIF-governed standard once the right venue exists; until then, it's specified here.
 
 ### 1.6 Project Model
 
-- **License.** Apache 2.0.
+- **License.** MIT.
 - **Governance.** Maintainer model + RFC process for spec changes; see `GOVERNANCE.md`.
 - **Distribution.** OSS-first development; optional commercial managed offering by the sponsoring entity (separate doc).
 - **Public registry.** A reference registry with curated example artifacts is hosted at the project's public URL.
@@ -420,7 +420,7 @@ when_to_use:
   - "After month-end close, to flag unusual variance vs. forecast"
 tags: [finance, close, variance]
 sensitivity: low | medium | high # informational; not enforced by the registry
-license: Apache-2.0 # SPDX identifier
+license: MIT # SPDX identifier
 search_visibility: indexed | direct-only # default: indexed
 deprecated: false # set to true to mark this version deprecated
 replaced_by: finance/close-reporting/run-variance-analysis-v2 # optional, suggested upgrade target
