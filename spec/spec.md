@@ -1296,18 +1296,100 @@ podium sync --harness claude-code --target ~/.claude/
 # Watcher: re-sync on registry change events (long-running)
 podium sync --harness codex --target ~/.codex/ --watch
 
-# Multi-target: write to all configured destinations
-podium sync --config .podium/sync.yaml
+# Path-scoped: sync only artifacts under certain domain paths
+podium sync --harness claude-code --target ~/.claude/ \
+  --include "finance/invoicing/**" --include "shared/policies/*" \
+  --exclude "finance/invoicing/legacy/**"
 
 # Type-scoped: sync only artifacts of certain types (useful for split deployments)
 podium sync --harness none --target ./artifacts/ --type skill,agent
+
+# Profile-driven: load named scope from .podium/sync.yaml
+podium sync --profile finance-team
+
+# Multi-target: write to all configured destinations
+podium sync --config .podium/sync.yaml
 ```
 
-The sync command reads the caller's effective view (the composed layer list after visibility filtering and `extends:` resolution) and writes each artifact through the configured `HarnessAdapter` to the host's directory layout. With `--watch`, the sync subscribes to registry change events (over SSE or webhook) and re-syncs on `artifact.published`, `artifact.deprecated`, and `layer.config_changed`.
+The sync command reads the caller's effective view (the composed layer list after visibility filtering and `extends:` resolution), applies the requested scope filters, and writes each artifact through the configured `HarnessAdapter` to the host's directory layout. With `--watch`, the sync subscribes to registry change events (over SSE or webhook) and re-syncs on `artifact.published`, `artifact.deprecated`, and `layer.config_changed`. Watchers honor the same scope filters as the initial sync — events for artifacts outside the scope are ignored.
 
 `podium sync` reuses the same identity providers as the MCP server (`oauth-device-code` on developer machines, `injected-session-token` in managed runtimes), the same content cache, and the same harness adapters.
 
 The sync model is type-agnostic: skills, agents, contexts, prompts, and `mcp-server` registrations all sync through the same path; the harness adapter decides where each type lands.
+
+#### 7.5.1 Scope Filters
+
+Three filters narrow the materialized set:
+
+| Flag | Repeated? | Effect |
+| ---- | --------- | ------ |
+| `--include <pattern>` | Yes | Glob matched against canonical artifact IDs (the directory path under each layer's root, e.g., `finance/invoicing/run-variance-analysis`). When any `--include` is given, only artifacts matching at least one include pattern are synced. |
+| `--exclude <pattern>` | Yes | Glob matched against canonical artifact IDs. Applied after the include set; a matching pattern removes the artifact. |
+| `--type <type>[,...]` | No | Restricts to a comma-separated list of artifact types. |
+
+Patterns use the same glob syntax as `DOMAIN.md include:` (§4.5.2): `*` matches a single path segment, `**` matches recursively, brace expansion `{a,b}` is supported. A bare ID (`finance/invoicing/run-variance-analysis`) matches that artifact exactly.
+
+Visibility is enforced before scope filtering. An artifact that the caller cannot see is not eligible to match an include pattern; this is symmetric with how `search_artifacts` behaves and prevents include patterns from leaking the existence of artifacts in invisible layers.
+
+When neither `--include` nor `--profile` is given, the full effective view is the implicit scope (current behavior).
+
+Path-scoped sync is the recommended way to keep a harness's working set small enough to avoid context rot. Two patterns that work well in practice:
+
+- **Per-team profile.** Each team defines a profile that includes its domain plus shared utilities. Developers run `podium sync --profile <team>`.
+- **Programmatic curation.** A script uses the SDK to pick artifacts based on context (the current task, semantic search, etc.), then invokes `podium sync --include <id> [--include <id> ...]` to materialize the chosen set. See §9.3.
+
+#### 7.5.2 sync.yaml Schema
+
+A workspace or per-user config file lives at `.podium/sync.yaml` (or wherever `--config` points). It supports global defaults, named profiles, and a `targets:` list for multi-destination syncs.
+
+```yaml
+# .podium/sync.yaml
+
+# Defaults applied when a flag is not otherwise set.
+defaults:
+  harness: claude-code
+  target: ~/.claude/
+
+# Named profiles selected via --profile <name>.
+profiles:
+  finance-team:
+    include:
+      - "finance/**"
+      - "shared/policies/*"
+    exclude:
+      - "finance/**/legacy/**"
+    type: [skill, agent]
+
+  oncall:
+    include:
+      - "platform/oncall/**"
+      - "shared/runbooks/*"
+    target: ~/.claude-oncall/   # overrides the default target
+
+  minimal:
+    include:
+      - "shared/critical/*"
+
+# Multi-target list selected via --config (without --profile).
+# Each entry runs as a separate sync with its own scope and target.
+targets:
+  - id: claude-code
+    harness: claude-code
+    target: ~/.claude/
+    profile: finance-team
+  - id: codex-runbooks
+    harness: codex
+    target: ~/.codex/
+    include: ["shared/runbooks/**"]
+```
+
+**Resolution rules.**
+
+- **Profile lookup.** `--profile <name>` selects an entry under `profiles:`. The profile's fields are merged on top of `defaults:`.
+- **CLI override.** Explicit CLI flags override the resolved profile (and defaults) for the same field. `--include` and `--exclude` on the CLI replace the profile's lists rather than appending; if you need additive composition, define a new profile.
+- **Multi-target mode.** `podium sync --config <path>` (without `--profile`) iterates `targets:` and runs one sync per entry. Each entry can name a `profile:` (resolved as above) or specify `include`/`exclude`/`type` inline.
+- **Profile composition.** Profiles do not reference other profiles; nesting is intentionally not supported. A team that wants an "extended" profile defines a new entry with the combined include/exclude lists.
+- **Validation.** `podium sync --check` validates the config against the schema and reports unresolved profile references, malformed globs, and target collisions without performing any writes.
 
 ### 7.6 Language SDKs
 
@@ -1348,6 +1430,45 @@ deps = client.dependents_of("finance/ap/pay-invoice@1.2")
 Identity providers, the cache, visibility filtering, layer composition, and audit are all the same as in the MCP path — the SDK is just a different transport. Identity provider plug-points are exposed; custom providers register through the same interface as the MCP server's.
 
 The SDKs deliberately do not implement the MCP meta-tool semantics (the agent-driven lazy materialization). Programmatic consumers know what they want; they don't need an LLM-mediated browse interface. If a programmatic consumer wants lazy semantics, it can call `load_artifact` lazily in its own code.
+
+#### 7.6.1 Read CLI
+
+For shell pipelines and language-agnostic scripts that don't want to take a Python or Node dependency just to read the catalog, the same read operations are exposed as `podium` subcommands. Each maps 1:1 to the corresponding SDK call and uses the same identity, cache, layer composition, and visibility filtering server-side.
+
+| Command | Maps to | Behavior |
+| ------- | ------- | -------- |
+| `podium search <query>` | `Client.search_artifacts(...)` | Hybrid search. Flags `--type`, `--tags`, `--scope`, `--top-k` mirror the SDK args. Returns ranked descriptors. |
+| `podium domain show [<path>]` | `Client.load_domain(path)` | Domain map for `<path>` (or root when no path is given). |
+| `podium artifact show <id>` | `Client.load_artifact(id)` (manifest only) | Prints the manifest body and frontmatter to stdout. **Does not materialize bundled resources** — for that, use `podium sync --include <id>`. Flags: `--version`, `--session-id`. |
+
+Output formats:
+
+- **Default** — human-readable rendering. Search results are a ranked table; domain trees are nested bullets; manifests are printed as the markdown body with frontmatter at the top.
+- **`--json`** — structured envelope with stable keys, designed to be piped into `jq`. Schemas:
+
+  ```json
+  // podium search ... --json
+  { "query": "...", "results": [ { "id": "...", "type": "...", "version": "...",
+                                   "score": 0.83, "frontmatter": { ... } }, ... ] }
+
+  // podium domain show <path> --json
+  { "path": "...", "subdomains": [ { "path": "...", "name": "..." }, ... ],
+    "artifacts": [ { "id": "...", "type": "...", "summary": "..." }, ... ] }
+
+  // podium artifact show <id> --json
+  { "id": "...", "version": "...", "content_hash": "...",
+    "frontmatter": { ... }, "body": "..." }
+  ```
+
+The CLI and SDK are intentionally interchangeable for these read operations — pick whichever fits the surrounding code. Both defer to the same `RegistrySearchProvider`, `LayerComposer`, and cache paths server-side; output drift between them is treated as a bug.
+
+Example pipeline — fully scripted curation without an SDK install:
+
+```bash
+podium search "month-end close OR variance" --type skill --top-k 15 --json \
+  | jq -r '.results[] | select(.score > 0.5) | .id' \
+  | xargs -I{} podium sync --harness claude-code --target ~/.claude/ --include {}
+```
 
 ---
 
@@ -1423,7 +1544,11 @@ Periodic anchoring of the chain head to a public transparency log (Sigstore/CT-s
 
 ---
 
-## 9. Pluggable Interfaces
+## 9. Extensibility
+
+Podium is extensible at two layers. **In-process plugins** swap or augment the registry's own behavior — different stores, different identity providers, different lint rules — by implementing a Go interface and being compiled into a registry build (§9.1). **External extensions** build on the registry's HTTP API, SDKs, and CLI without changing the registry itself — programmatic curation scripts, webhook receivers, custom CI checks, layer source bridges (§9.3). Most teams reach for external extensions first; SPI plugins are for cases where the registry's own behavior needs to change.
+
+### 9.1 Pluggable Interfaces
 
 | Interface                | Default                                             | Purpose                                                                                        |
 | ------------------------ | --------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
@@ -1443,11 +1568,68 @@ Periodic anchoring of the chain head to a public transparency log (Sigstore/CT-s
 | `NotificationProvider`   | Email + webhook                                     | Delivery for vulnerability alerts and ingest-failure notifications                             |
 | `SignatureProvider`      | Sigstore-keyless                                    | Artifact signing and verification                                                              |
 
-### 9.1 Plugin Distribution
+### 9.2 Plugin Distribution
 
 Plugins ship as Go modules importable into a registry build. A deployment that needs a custom `IdentityProvider` or `GitProvider` builds a registry binary from source with the plugin imported.
 
 A community plugin registry is hosted at the project's public URL.
+
+### 9.3 Building on Podium from outside the registry
+
+The registry's HTTP API, the SDKs, the CLI, and the outbound webhook stream are designed to be composed into team-specific tooling without touching the registry binary. Common patterns:
+
+#### Programmatic curation (semantic discovery + scoped sync)
+
+A script picks artifacts based on whatever context is meaningful — semantic match against a query, the user's recent work, the active project, an upstream ticket — and then invokes `podium sync` with `--include` flags to materialize the selected set. The script owns the discovery logic; Podium owns the materialization (visibility filtering, `extends:` resolution, harness adaptation, audit). The on-disk result is reproducible from the include list.
+
+Discovery can use either the SDK (when the script is in Python or TypeScript and wants typed results) or the read CLI (§7.6.1, when a shell pipeline is enough or the surrounding code is in another language). Both surface the same `search_artifacts` / `load_domain` / `load_artifact` operations.
+
+```python
+from podium import Client
+import subprocess
+
+client = Client.from_env()
+
+# Discovery: whatever logic the team wants. Here, semantic match + a score floor.
+results = client.search_artifacts(
+    "month-end close OR variance analysis",
+    type="skill",
+    top_k=15,
+)
+ids = [r.id for r in results if r.score > 0.5]
+
+# Materialization: hand the chosen ids to `podium sync` so the on-disk view is
+# auditable and reproducible from the include list.
+subprocess.run(
+    [
+        "podium", "sync",
+        "--harness", "claude-code",
+        "--target", "/Users/me/.claude/",
+        *sum((["--include", artifact_id] for artifact_id in ids), []),
+    ],
+    check=True,
+)
+```
+
+The same pattern handles other discovery strategies: the script could read recent files in the workspace and search for related artifacts, follow `dependents_of()` from a starting artifact, or consult an external system (a ticket, a calendar) before deciding what to materialize. Whatever the script decides, `podium sync` performs the write.
+
+This is the recommended answer to "I have a thousand artifacts but my harness only needs ~30 in context for this session." Curate, then sync.
+
+#### Webhook-driven integrations
+
+Receivers for the outbound webhooks (§7.3.2) feed Slack channels, ticket trackers, deployment pipelines, internal dashboards. The registry emits the events; the receiver decides what to do. Common targets: notify owners on `artifact.deprecated`, post to a channel on `vulnerability.detected`, kick off a downstream rebuild on `artifact.published` matching certain paths.
+
+#### Custom pre-merge CI
+
+Each layer's source repo runs whatever CI checks the team wants — naming conventions, sensitivity sign-off, banned dependencies, structural rules — using `podium lint` plus team-specific scripts in the same pipeline. These checks are out of Podium's scope; they're ordinary CI in the layer's source repository, gated by branch protection.
+
+#### Layer source bridges
+
+A script that pulls content from another system (a vendor SaaS, an internal CMS, a documentation generator) and writes it into a `local`-source layer's filesystem path. The registry ingests via `podium layer reingest <id>` (manually or on a schedule the bridge controls). The bridge runs wherever the team wants; Podium just serves what's in the layer's path at the time of ingest.
+
+#### Custom consumer surfaces
+
+A runtime that doesn't fit the three built-in consumer shapes — a specialized agent framework, an internal orchestrator, an evaluation harness — wraps the registry HTTP API directly. Identity attaches via the same OAuth flow used by the SDKs; visibility filtering and layer composition still happen server-side. The custom consumer is responsible for caching and any harness-native translation it needs.
 
 ---
 
@@ -1463,7 +1645,7 @@ The build sequence is structured to ship a wedge experiment first — the smalle
 | 1 | Manifest schema + `podium lint` for `ARTIFACT.md` and `DOMAIN.md` + per-type lint rules + signing | Authors need a way to validate artifacts; lint is the early quality bar |
 | 2 | Registry HTTP API: `load_domain`, `search_artifacts`, `load_artifact` (against `--solo`) | The wire surface every consumer talks to |
 | 3 | `podium sync` for `none`, `claude-code`, and `codex` adapters + a multi-type reference catalog (skills, agents, contexts, prompts, mcp-servers) | Validates: does filesystem delivery beat ad-hoc scripts for a multi-type catalog? |
-| 4 | Podium MCP server core (registry client, layer composer, MCP handlers, cache, materialization) + `podium-py` SDK against `--solo` | Validates: do MCP-speaking and programmatic runtimes both find the catalog useful? |
+| 4 | Podium MCP server core (registry client, layer composer, MCP handlers, cache, materialization) + `podium-py` SDK + read CLI (`podium search`, `podium domain show`, `podium artifact show`) against `--solo` | Validates: do MCP-speaking and programmatic runtimes both find the catalog useful? |
 
 **Stop-and-evaluate point.** After phase 4, ship a public preview with a multi-type reference catalog. If adoption is real and the demand for governance is real, continue to phase 5. If adoption is thin or the demand is for simpler tooling, reconsider the heavy enterprise stack before building it.
 
