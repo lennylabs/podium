@@ -69,7 +69,7 @@ Authoring lives in Git (or, for solo and small-team installations, in a local fi
 
 What Podium gives an organization:
 
-- **Layered composition with deterministic merge.** An ordered list of layers — admin-defined, user-defined, and the workspace local overlay — composes per request with explicit precedence and no silent shadowing. `extends:` lets a higher-precedence artifact inherit and refine a lower one without forking. Most-restrictive-wins for security fields; last-layer-wins for descriptions. This is Podium's cleanest unique technical contribution.
+- **Layered composition with deterministic merge.** An ordered list of layers — admin-defined, user-defined, and the workspace local overlay — composes per request with explicit precedence and no silent shadowing. `extends:` lets a higher-precedence artifact inherit and refine a lower one without forking. Most-restrictive-wins for security fields; last-layer-wins for descriptions.
 - **Type heterogeneity as a first principle.** Skills are one of several first-class types. Agents, contexts, prompts, and MCP server registrations sit alongside; extension types register through a `TypeProvider` SPI. Cross-type dependency edges (an agent's `delegates_to:` another agent; a skill's `mcpServers:` references that resolve to `mcp-server`-type artifacts) drive impact analysis.
 - **Governance built in.** Per-layer visibility, classification metadata, freeze windows, signing, hash-chained audit, SBOM ingestion, and CVE tracking are first-class. Authoring controls (review requirements, code ownership) live in the Git provider's branch protection — Podium does not duplicate them.
 - **Lazy materialization at scale.** Sessions can start empty (MCP path) or with the user's effective view pre-synced (file path). Catalogs of thousands of artifacts don't pollute the system prompt; the agent navigates and loads what it needs.
@@ -123,7 +123,7 @@ Podium is overkill for a small catalog in a single harness with one author — a
 
 A solo developer with a handful of skills in one harness doesn't need Podium. A large team with mixed artifact types across several harnesses, contributing to a catalog used by many audiences, could benefit substantially.
 
-The minimum viable alternative — a short script that watches a Git repo and copies files into the right harness-specific directories — already gets a single-team, single-type, single-vendor shop most of the way to "author once, deliver anywhere" for a fraction of the engineering effort. Podium earns its complexity at the intersection of multiple types, multiple teams, multiple harnesses, and governance requirements — not on file-copy alone. The §10 build sequence is structured to validate demand before the enterprise stack gets built.
+The minimum viable alternative — a short script that watches a Git repo and copies files into the right harness-specific directories — already gets a single-team, single-type, single-vendor shop most of the way to "author once, deliver anywhere" for a fraction of the engineering effort. Podium addresses the intersection of multiple types, multiple teams, multiple harnesses, and governance requirements; below that intersection, file-copy is often enough.
 
 ### 1.4 Constraints and Decisions
 
@@ -160,8 +160,6 @@ Podium overlaps with several existing categories. None of them handle the full s
 | **PromptLayer / Langfuse / Helicone**                                                      | Prompt registry + observability                                               | Prompt-only with strong eval focus.                                                                                                             | Broader artifact model; richer governance; not bound to a single LLM provider.                                                                                                  |
 | **HuggingFace Hub**                                                                        | Versioned artifact storage                                                    | Models and datasets at scale.                                                                                                                   | Authored artifacts (skills, agents, contexts, prompts, MCP server registrations) as runtime objects with governance — not models or datasets.                                   |
 | **Single-vendor enterprise governance tiers**                                              | Centralized visibility controls / audit for one vendor's surface              | Single-vendor shop; native integration; managed infrastructure.                                                                                 | Multi-vendor neutrality; open Apache-2.0; one governance plane across heterogeneous tooling.                                                                                    |
-
-**The biggest existential risk** isn't a competing OSS project — it's a major harness vendor extending its enterprise tier with native visibility controls + audit + multi-team deployment, capturing the governance market for its own surface. Podium's wedge against that is **multi-vendor neutrality and the open license**. Organizations with non-trivial AI tooling diversity — multiple harnesses, custom runtimes, mixed artifact types — can't be served by any single vendor's enterprise tier without forcing consolidation.
 
 The canonical artifact format is intended for upstream contribution to an MCP-adjacent or AAIF-governed standard once the right venue exists; until then, it's specified here.
 
@@ -764,7 +762,7 @@ The registry is a deployable service. The on-disk layout described above (§4.2�
 
 #### Version immutability invariant
 
-A `(artifact_id, version)` pair, once ingested, is bit-for-bit immutable forever in the registry's content store. Subsequent commits in a layer's source that change the same `version:` with different content are rejected at ingest. Readers in flight when a re-ingest occurs continue to see their pinned version. This is a load-bearing system invariant.
+A `(artifact_id, version)` pair, once ingested, is bit-for-bit immutable forever in the registry's content store. Subsequent commits in a layer's source that change the same `version:` with different content are rejected at ingest. Readers in flight when a re-ingest occurs continue to see their pinned version.
 
 Force-push or history rewrite at the source does not break the invariant: previously-ingested commits' bytes are preserved in the content-addressed store, and the registry emits a `layer.history_rewritten` event for the operator. Strict mode is configurable per layer (§7.3.1).
 
@@ -1695,21 +1693,19 @@ A runtime that doesn't fit the three built-in consumer shapes — a specialized 
 
 ## 10. MVP Build Sequence
 
-The build sequence is structured to ship a wedge experiment first — the smallest viable thing that validates demand — before committing to the full enterprise stack. Phases 0–4 are the wedge; phases 5+ are the enterprise hardening that earns Podium's complexity.
+The build sequence is structured in two parts. Phases 0–4 ship an initial release that exercises the architecture end-to-end against a single-binary `--solo` deployment. Phases 5+ add the enterprise capabilities (multi-tenancy, OIDC/SCIM, full RBAC, audit, vulnerability tracking, deployment).
 
-### Wedge phases (validate demand before scaling scope)
+### Initial phases
 
 | Phase | What | Why |
 | ----- | ---- | --- |
-| 0 | `podium serve --solo` (single binary, embedded SQLite, filesystem object store, no auth, supports a `local`-source layer + the workspace local overlay) | Five-minute install for personal/small-team use; on-ramp for OSS adoption |
+| 0 | `podium serve --solo` (single binary, embedded SQLite, filesystem object store, no auth, supports a `local`-source layer + the workspace local overlay) | Five-minute install for personal/small-team use |
 | 1 | Manifest schema + `podium lint` for `ARTIFACT.md` and `DOMAIN.md` + per-type lint rules + signing | Authors need a way to validate artifacts; lint is the early quality bar |
 | 2 | Registry HTTP API: `load_domain`, `search_artifacts`, `load_artifact` (against `--solo`) | The wire surface every consumer talks to |
-| 3 | `podium sync` for `none`, `claude-code`, and `codex` adapters + a multi-type reference catalog (skills, agents, contexts, prompts, mcp-servers) | Validates: does filesystem delivery beat ad-hoc scripts for a multi-type catalog? |
-| 4 | Podium MCP server core (registry client, layer composer, MCP handlers, cache, materialization) + `podium-py` SDK + read CLI (`podium search`, `podium domain show`, `podium artifact show`) against `--solo` | Validates: do MCP-speaking and programmatic runtimes both find the catalog useful? |
+| 3 | `podium sync` for `none`, `claude-code`, and `codex` adapters + a multi-type reference catalog (skills, agents, contexts, prompts, mcp-servers) | Exercises filesystem delivery end-to-end against a multi-type catalog |
+| 4 | Podium MCP server core (registry client, layer composer, MCP handlers, cache, materialization) + `podium-py` SDK + read CLI (`podium search`, `podium domain show`, `podium artifact show`) against `--solo` | Exercises MCP-speaking and programmatic runtimes against the catalog |
 
-**Stop-and-evaluate point.** After phase 4, ship a public preview with a multi-type reference catalog. If adoption is real and the demand for governance is real, continue to phase 5. If adoption is thin or the demand is for simpler tooling, reconsider the heavy enterprise stack before building it.
-
-### Enterprise phases (earn the complexity)
+### Enterprise phases
 
 | Phase | What | Why |
 | ----- | ---- | --- |
@@ -1723,7 +1719,7 @@ The build sequence is structured to ship a wedge experiment first — the smalle
 | 12 | Workspace `LocalOverlayProvider` + local BM25 search index | Workspace iteration loop visible to the MCP-bridge consumer |
 | 13 | Full `HarnessAdapter` implementations for the remaining built-ins (`claude-desktop`, `cursor`, `gemini`, `opencode`) + conformance test suite | Cross-harness coverage for all artifact types |
 | 14 | `podium-ts` SDK + remaining SDK surface area (subscriptions, dependency walks) | Programmatic-runtime parity with the MCP path |
-| 15 | Cross-type dependency graph + reverse dependency index + impact analysis CLI | The unique technical contribution at the type-system level |
+| 15 | Cross-type dependency graph + reverse dependency index + impact analysis CLI | Cross-type analysis: surface what depends on a given artifact, regardless of type |
 | 16 | Registry audit log + `LocalAuditSink` + cross-stream correlation + retention + hash-chain integrity | Observability + governance |
 | 17 | Vulnerability tracking + SBOM ingestion + `NotificationProvider` | Enterprise governance |
 | 18 | Deployment: Helm chart, reference Grafana dashboard, runbook | Operability |
@@ -1779,19 +1775,7 @@ The build sequence is structured to ship a wedge experiment first — the smalle
 
 ---
 
-## 12. Key Risks and Mitigations
-
-### 12.1 Strategic Risks
-
-| Risk                                                                                                                                                         | Mitigation                                                                                                                                                                                                                                                                                                                                                                                                                |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **A major harness vendor extends its enterprise tier with native visibility controls + audit + multi-team deployment, capturing the governance market for its own surface** | Multi-vendor neutrality is the wedge. Apache 2.0; explicitly designed for orgs with non-trivial AI tooling diversity (multiple harnesses, custom runtimes, mixed artifact types). Cross-type dependency tracking and multi-layer composition are deliberately scoped beyond what any single-vendor governance tier will reasonably build. |
-| **The "minimal-viable competitor" — a sync script — is good enough for many teams, undercutting the case for Podium's complexity** | §1.3.1 is upfront about the gradient: a sync script can suffice for a single-team, single-vendor, single-type catalog. Podium's value compounds across multi-team, multi-harness, multi-type, governed catalogs. The wedge phases (0–4) are designed to make Podium competitive with the script (5-min install, `--solo` mode, `podium sync`) so adopters don't have to commit to the heavy stack on day one. |
-| **OSS sustainability without a major sponsor**                                                                                                               | The build sequence ships the wedge first and explicitly stops to evaluate demand before committing to phases 5+. If demand is real, a managed offering by a sponsoring entity provides sustainability; if demand is thin, the project doesn't overinvest in the heavy stack.                                                                                                                                              |
-| **Per-harness conventions evolve and adapters fall behind**                                                                                                  | Adapters are versioned alongside the MCP server / sync binary; profiles can pin a minimum version. Conformance suite runs against every adapter on every release. Authors who hit drift can fall back to `harness: none`. The adapter layer is intentionally thin — file placement and frontmatter mapping, not semantic translation — to keep maintenance bounded.                                                       |
-| **Adoption requires convincing organizations to centralize artifacts they currently scatter across repos** | Layers map to existing Git repos, so a tenant can start by registering one repo at a time. The workspace local overlay plus user-defined layers let individual contributors prototype before anything becomes shared. The reference example registry demonstrates partial adoption, not all-or-nothing. |
-
-### 12.2 Operational Risks
+## 12. Operational Risks and Mitigations
 
 | Risk                                                          | Mitigation                                                                                                                                                                                                                        |
 | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
