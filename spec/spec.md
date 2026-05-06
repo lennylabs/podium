@@ -1007,7 +1007,7 @@ Top-level configuration parameters (env-var form shown; `--flag` and config-file
 | `PODIUM_OVERLAY_PATH`        | Workspace path for the `local` overlay                 | (unset → layer disabled)              |
 | `PODIUM_CACHE_DIR`           | Content-addressed cache directory                      | `~/.podium/cache/`                    |
 | `PODIUM_CACHE_MODE`          | `always-revalidate` / `offline-first` / `offline-only` | `always-revalidate`                   |
-| `PODIUM_AUDIT_SINK`          | Local audit destination (path or external endpoint)    | (unset → registry audit only)         |
+| `PODIUM_AUDIT_SINK`          | Local audit destination (path or external endpoint). When set without a value (or set to `default`), uses `~/.podium/audit.log`. | (unset → registry audit only)         |
 | `PODIUM_MATERIALIZE_ROOT`    | Default destination root for `load_artifact`           | (host specifies per call)             |
 | `PODIUM_PRESIGN_TTL_SECONDS` | Override for presigned URL TTL                         | 3600                                  |
 | `PODIUM_VERIFY_SIGNATURES`   | Verify artifact signatures on materialization          | `medium-and-above`                    |
@@ -1336,33 +1336,43 @@ Hosts can surface the offline status to the agent so it can adjust behavior (e.g
 
 `podium sync` is the consumer for authors who want to materialize the user's effective view onto disk and let the harness's native discovery take over from there — instead of mediating every load through the MCP server or an SDK at runtime. It works for any harness with a filesystem-readable layout, including ones that also speak MCP. The choice is about authoring preference, not about whether the harness can talk to Podium.
 
+The **target directory defaults to the current working directory.** Every workspace (target) holds its own state; multiple `podium sync` invocations from different folders run independently and don't interfere.
+
 ```bash
-# One-shot: write the user's effective view to disk in Claude Code's expected layout
+# One-shot: write the caller's effective view to the current directory
+cd ~/.claude/ && podium sync --harness claude-code
+
+# Explicit target
 podium sync --harness claude-code --target ~/.claude/
 
 # Watcher: re-sync on registry change events (long-running)
-podium sync --harness codex --target ~/.codex/ --watch
+cd ~/.codex/ && podium sync --harness codex --watch
 
 # Path-scoped: sync only artifacts under certain domain paths
-podium sync --harness claude-code --target ~/.claude/ \
+podium sync --harness claude-code \
   --include "finance/invoicing/**" --include "shared/policies/*" \
   --exclude "finance/invoicing/legacy/**"
 
 # Type-scoped: sync only artifacts of certain types (useful for split deployments)
-podium sync --harness none --target ./artifacts/ --type skill,agent
+podium sync --harness none --type skill,agent
 
 # Profile-driven: load named scope from .podium/sync.yaml
 podium sync --profile finance-team
 
-# Multi-target: write to all configured destinations
+# Dry run: print what would be synced without writing anything
+podium sync --dry-run
+
+# Multi-target: write to all configured destinations from sync.yaml
 podium sync --config .podium/sync.yaml
 ```
 
-The sync command reads the caller's effective view (the composed layer list after visibility filtering and `extends:` resolution), applies the requested scope filters, and writes each artifact through the configured `HarnessAdapter` to the host's directory layout. With `--watch`, the sync subscribes to registry change events (over SSE or webhook) and re-syncs on `artifact.published`, `artifact.deprecated`, and `layer.config_changed`. Watchers honor the same scope filters as the initial sync — events for artifacts outside the scope are ignored.
+The sync command reads the caller's effective view (the composed layer list after visibility filtering and `extends:` resolution), applies the requested scope filters, and writes each artifact through the configured `HarnessAdapter` to the target directory.
 
 `podium sync` reuses the same identity providers as the MCP server (`oauth-device-code` on developer machines, `injected-session-token` in managed runtimes), the same content cache, and the same harness adapters.
 
 The sync model is type-agnostic: skills, agents, contexts, prompts, and `mcp-server` registrations all sync through the same path; the harness adapter decides where each type lands.
+
+**`--dry-run`** resolves the artifact set against the current scope and prints it without writing. Default output is human-readable; `--json` produces a structured envelope (`{profile, target, harness, scope, artifacts: [{id, version, type, layer}, ...]}`) for piping into `jq`.
 
 #### 7.5.1 Scope Filters
 
@@ -1387,7 +1397,17 @@ Path-scoped sync is the recommended way to keep a harness's working set small en
 
 #### 7.5.2 sync.yaml Schema
 
-A workspace or per-user config file lives at `.podium/sync.yaml` (or wherever `--config` points). It supports global defaults, named profiles, and a `targets:` list for multi-destination syncs.
+`sync.yaml` configures profiles, defaults, and multi-target lists. It supports global defaults, named profiles, and a `targets:` list for multi-destination syncs.
+
+**Lookup order.** When `podium sync` (or `podium sync override`, `save-as`, or `podium profile edit`) needs to read or write profile config, it resolves the file in this order:
+
+1. `--config <path>` if passed explicitly.
+2. `<CWD>/.podium/sync.yaml` if it exists (workspace-local — wins over user-level so per-project profiles shadow general ones).
+3. `${XDG_CONFIG_HOME}/podium/sync.yaml` if `XDG_CONFIG_HOME` is set, else `~/.config/podium/sync.yaml` (XDG-standard user config).
+4. `~/.podium/sync.yaml` (matches the existing `~/.podium/cache/` convention).
+5. None — sync runs against the registry's full effective view, no profiles.
+
+`podium profile edit` and `podium sync save-as` write to the same file the lookup resolves to. `--user` forces the user-level location (creates `~/.config/podium/sync.yaml` if neither user-level path exists yet); `--workspace` forces `<CWD>/.podium/sync.yaml`.
 
 ```yaml
 # .podium/sync.yaml
@@ -1434,9 +1454,143 @@ targets:
 
 - **Profile lookup.** `--profile <name>` selects an entry under `profiles:`. The profile's fields are merged on top of `defaults:`.
 - **CLI override.** Explicit CLI flags override the resolved profile (and defaults) for the same field. `--include` and `--exclude` on the CLI replace the profile's lists rather than appending; if you need additive composition, define a new profile.
-- **Multi-target mode.** `podium sync --config <path>` (without `--profile`) iterates `targets:` and runs one sync per entry. Each entry can name a `profile:` (resolved as above) or specify `include`/`exclude`/`type` inline.
+- **Multi-target mode.** `podium sync --config <path>` (without `--profile`) iterates `targets:` and runs one sync per entry. Each entry can name a `profile:` (resolved as above) or specify `include`/`exclude`/`type` inline. Each target writes its own `<target>/.podium/sync.lock`; the multi-target invocation does not introduce shared state across targets.
 - **Profile composition.** Profiles do not reference other profiles; nesting is intentionally not supported. A team that wants an "extended" profile defines a new entry with the combined include/exclude lists.
 - **Validation.** `podium sync --check` validates the config against the schema and reports unresolved profile references, malformed globs, and target collisions without performing any writes.
+
+#### 7.5.3 Lock File (`.podium/sync.lock`)
+
+Every target directory holds its own state in `<target>/.podium/sync.lock`. The lock file is per-target — multiple `podium sync` invocations against different targets run independently and don't share state. The cache (`~/.podium/cache/`) stays shared across targets (content-addressed); only sync state is per-target.
+
+`.podium/sync.lock` is git-ignored by default. Teams that want a deterministic shared materialization commit it explicitly.
+
+Schema:
+
+```yaml
+# <target>/.podium/sync.lock
+version: 1
+profile: finance-team           # null when no profile was used
+scope:
+  include: ["finance/**", "shared/policies/*"]
+  exclude: ["finance/**/legacy/**"]
+  type: [skill, agent]
+harness: claude-code
+target: /Users/joan/.claude/
+last_synced_at: 2026-05-05T14:30:00Z
+last_synced_by: full            # full | watch | override
+
+# Currently materialized artifacts.
+artifacts:
+  - id: finance/ap/pay-invoice
+    version: 1.2.0
+    content_hash: sha256:abc123…
+    layer: team-finance
+    materialized_path: agents/pay-invoice.md
+  - id: finance/close/run-variance
+    version: 1.0.0
+    content_hash: sha256:def456…
+    layer: team-finance
+    materialized_path: agents/run-variance.md
+
+# Ephemeral overrides applied since the last full sync.
+toggles:
+  add:
+    - id: finance/experimental/new-thing
+      version: 0.1.0
+      added_at: 2026-05-05T14:35:00Z
+  remove:
+    - id: finance/ap/legacy-vendor
+      removed_at: 2026-05-05T14:36:00Z
+```
+
+The lock file is written atomically (`.tmp` + rename) on every sync, watch event, and override invocation. The `profile:` field is the **active profile** for that target — `override`, `save-as`, and `profile edit` use it as the default when no `--profile` flag is given. Concurrent writers against the same target's lock file (e.g., two `podium sync --watch` processes pointed at one directory) are undefined; operators are expected to keep a single sync owner per target.
+
+The target directory is created if it doesn't exist. The same is true for `<target>/.podium/`. `podium sync` errors only when the target path exists but is not writable.
+
+#### 7.5.4 Watch Mode and Toggle Persistence
+
+Manual `podium sync` and `podium sync --watch` treat the lock file's `toggles:` section differently:
+
+- **Manual sync** (`podium sync`, no `--watch`) — re-resolves the profile, rewrites the target, **clears `toggles` in the lock file**. A manual sync is the operator's "reset to baseline" gesture.
+- **Watch mode** (`podium sync --watch`) — long-running. On startup it materializes `profile + toggles from the lock file`, so any overrides from a previous session survive. On every registry change event (`artifact.published`, `artifact.deprecated`, `layer.config_changed`), the watcher re-resolves the profile, applies toggles on top, and updates the lock file. Toggles persist across events and across watcher restarts.
+- **Watch scope.** Watchers honor the active scope filters; events for artifacts outside the scope are ignored.
+
+Each watcher is workspace-local. Two `podium sync --watch` processes in two different folders run independently, each against its own lock file.
+
+#### 7.5.5 Ephemeral Override (`podium sync override`)
+
+`podium sync override` is for on-the-fly toggling without touching `sync.yaml`. Toggles live in the target's `.podium/sync.lock` (`toggles.add` / `toggles.remove`) and are reset by the next manual `podium sync`. They survive watcher events.
+
+Two modes on a single command:
+
+```bash
+# TUI: launches a checklist over the resolved set + everything else the caller can see
+podium sync override
+
+# Batch: --add and --remove are repeatable, exact IDs only
+podium sync override --add finance/experimental/new-thing
+podium sync override --remove finance/ap/legacy-vendor
+podium sync override --add finance/foo --add finance/bar --remove finance/baz
+
+# Preview without writing
+podium sync override --add finance/foo --dry-run
+
+# Clear all toggles in the current target
+podium sync override --reset
+```
+
+**TUI mode** (no flags). Renders the caller's effective view as an expandable tree (domains as nodes, artifacts as leaf checkboxes). Each entry is annotated with its current state — already materialized, excluded by the profile's `exclude`, etc. — and the layer it comes from. The user toggles items; on quit, the TUI applies the diff to the target directory and updates the lock file.
+
+**Batch mode** (with flags). `--add <id>` fetches and writes the artifact through the active harness adapter, just like a full sync would; the entry lands in `toggles.add`. `--remove <id>` deletes the artifact's materialized files from the target; the entry lands in `toggles.remove` (and is removed from `toggles.add` if it was there). Repeatable. The pair is idempotent — running `--add` on something already materialized is a no-op with a warning.
+
+**Scope.** Override operates on any artifact the caller's identity can see, regardless of the active profile's include/exclude. Visibility filtering still applies — the caller can't `--add` something they can't see. This is the point of override: bring in (or drop) artifacts the profile didn't think of.
+
+**`--reset`** clears `toggles` in the lock file and re-applies the profile's resolved set, dropping artifacts that were `add`ed and re-materializing artifacts that were `remove`d. Equivalent to running a manual `podium sync`.
+
+#### 7.5.6 Saving Toggles as a Profile (`podium sync save-as`)
+
+After working with overrides for a while, an operator can capture the current materialized set as a YAML profile:
+
+```bash
+# Save the current materialized set as a new profile in .podium/sync.yaml
+podium sync save-as --profile finance-team-v2
+
+# Update an existing profile in place
+podium sync save-as --profile finance-team --update
+
+# Print the proposed YAML diff without writing
+podium sync save-as --profile finance-team --update --dry-run
+```
+
+`save-as` reads the current lock file (`scope` + `toggles`), renders an equivalent `include` / `exclude` / `type` block, and writes it to `sync.yaml`. The mapping:
+
+- Existing scope `include` and `exclude` carry over verbatim.
+- Each `toggles.add` entry becomes an `include:` entry pinned to the exact ID.
+- Each `toggles.remove` entry becomes an `exclude:` entry pinned to the exact ID.
+- Type filter carries over.
+
+After `save-as` succeeds, the target's lock file `toggles:` is cleared (the toggles are now part of the profile's scope). If `.podium/sync.yaml` doesn't exist yet, `save-as` creates it with the new profile and an empty `defaults:` block.
+
+#### 7.5.7 Editing Profiles Permanently (`podium profile edit`)
+
+A separate command for permanent edits to entries in `sync.yaml`. Distinct from `podium sync override`, which is ephemeral.
+
+```bash
+# TUI for the active or named profile
+podium profile edit
+podium profile edit finance-team
+
+# Batch: add/remove patterns to/from include or exclude
+podium profile edit finance-team --add-include "finance/new-thing/**"
+podium profile edit finance-team --remove-exclude "finance/old-deprecated/**"
+
+# Print proposed YAML diff without writing
+podium profile edit finance-team --add-include "finance/foo" --dry-run
+```
+
+`podium profile edit` modifies `sync.yaml` in place, preserving formatting and comments around the edited keys (round-trip via a comment-preserving YAML parser). It does not touch the target directory or any lock file — to apply the change to a workspace, run `podium sync` afterwards. If `.podium/sync.yaml` doesn't exist, `podium profile edit <name>` creates it with the named profile and an empty `defaults:` block; `podium profile edit` (no name) errors and asks the user to specify a name.
+
+The flag names are distinct from `podium sync --include` / `--exclude` (ephemeral scope flags applied at sync time) and from `podium sync override --add` / `--remove` (ephemeral toggles on exact IDs). `podium profile edit` writes patterns into the profile YAML; the other two never touch `sync.yaml`.
 
 ### 7.6 Language SDKs
 
@@ -1565,7 +1719,7 @@ Two redaction surfaces:
 
 ### 8.3 Audit Sinks
 
-The registry has its own sink for catalogue events. The local file log, when enabled via `PODIUM_AUDIT_SINK`, is written by the MCP server through the `LocalAuditSink` interface. Both default to local storage and can be redirected to external SIEM / log aggregation independently.
+The registry has its own sink for catalogue events. The local file log, when enabled via `PODIUM_AUDIT_SINK`, is written by the MCP server through the `LocalAuditSink` interface. The local sink defaults to `~/.podium/audit.log` (user-wide — one file across all workspaces). Operators who need per-project scoping point `PODIUM_AUDIT_SINK` at a workspace path such as `${WORKSPACE}/.podium/audit.log`. Both the registry and local sinks can be redirected to external SIEM / log aggregation independently.
 
 ### 8.4 Retention
 
@@ -1621,7 +1775,7 @@ Podium is extensible at two layers. **In-process plugins** swap or augment the r
 | `IngestLinter`           | Built-in rule registry                                               | Manifest validation, resource-reference checks, type-specific rules; runs pre-merge in CI and again at registry ingest                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `IdentityProvider`       | `oauth-device-code` (alt: `injected-session-token`)                  | Attaches OAuth-attested identity to every registry call from the MCP server                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `LocalOverlayProvider`   | Workspace filesystem (`.podium/overlay/`)                            | Source for the workspace-scoped local overlay layer (§6.4)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `LocalAuditSink`         | JSON Lines file at `${WORKSPACE}/.podium/audit.log`                  | Local audit log for meta-tool calls (when configured)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `LocalAuditSink`         | JSON Lines file at `~/.podium/audit.log`                             | Local audit log for meta-tool calls (when configured). User-wide by default — one file across all workspaces. Redirect to a workspace-local path or an external endpoint via `PODIUM_AUDIT_SINK`. Concurrent appends from multiple MCP servers are safe under typical event sizes (POSIX `PIPE_BUF`-bounded atomic writes). |
 | `HarnessAdapter`         | `none` (built-ins per §6.7)                                          | Translates canonical artifacts to the harness's native format at materialization time                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `NotificationProvider`   | Email + webhook                                                      | Delivery for vulnerability alerts and ingest-failure notifications                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `SignatureProvider`      | Sigstore-keyless                                                     | Artifact signing and verification                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -1702,7 +1856,7 @@ The build sequence is structured in two parts. Phases 0–4 ship an initial rele
 | 0     | `podium serve --solo` (single binary, embedded SQLite, filesystem object store, no auth, supports a `local`-source layer + the workspace local overlay)                                                      | Five-minute install for personal/small-team use                         |
 | 1     | Manifest schema + `podium lint` for `ARTIFACT.md` and `DOMAIN.md` + per-type lint rules + signing                                                                                                            | Authors need a way to validate artifacts; lint is the early quality bar |
 | 2     | Registry HTTP API: `load_domain`, `search_artifacts`, `load_artifact` (against `--solo`)                                                                                                                     | The wire surface every consumer talks to                                |
-| 3     | `podium sync` for `none`, `claude-code`, and `codex` adapters + a multi-type reference catalog (skills, agents, contexts, prompts, mcp-servers)                                                              | Exercises filesystem delivery end-to-end against a multi-type catalog   |
+| 3     | `podium sync` for `none`, `claude-code`, and `codex` adapters (default target = CWD; `--include` / `--exclude` / `--type` / `--profile` / `--dry-run`) + per-target lock file (`.podium/sync.lock`) tracking profile, scope, and artifact versions + `--watch` mode + multi-type reference catalog (skills, agents, contexts, prompts, mcp-servers) | Exercises filesystem delivery end-to-end against a multi-type catalog |
 | 4     | Podium MCP server core (registry client, layer composer, MCP handlers, cache, materialization) + `podium-py` SDK + read CLI (`podium search`, `podium domain show`, `podium artifact show`) against `--solo` | Exercises MCP-speaking and programmatic runtimes against the catalog    |
 
 ### Enterprise phases
@@ -1718,7 +1872,7 @@ The build sequence is structured in two parts. Phases 0–4 ship an initial rele
 | 11    | IdentityProvider implementations: `oauth-device-code` (with OS keychain) and `injected-session-token` (signed JWT contract)                                    | One MCP server / sync / SDK binary across deployment contexts                     |
 | 12    | Workspace `LocalOverlayProvider` + local BM25 search index                                                                                                     | Workspace iteration loop visible to the MCP-bridge consumer                       |
 | 13    | Full `HarnessAdapter` implementations for the remaining built-ins (`claude-desktop`, `cursor`, `gemini`, `opencode`) + conformance test suite                  | Cross-harness coverage for all artifact types                                     |
-| 14    | `podium-ts` SDK + remaining SDK surface area (subscriptions, dependency walks)                                                                                 | Programmatic-runtime parity with the MCP path                                     |
+| 14    | `podium-ts` SDK + remaining SDK surface area (subscriptions, dependency walks); `podium sync override` (TUI + batch flags), `podium sync save-as`, and `podium profile edit` for ephemeral and permanent scope changes | Programmatic-runtime parity with the MCP path; TUI/batch toggles for materialization |
 | 15    | Cross-type dependency graph + reverse dependency index + impact analysis CLI                                                                                   | Cross-type analysis: surface what depends on a given artifact, regardless of type |
 | 16    | Registry audit log + `LocalAuditSink` + cross-stream correlation + retention + hash-chain integrity                                                            | Observability + governance                                                        |
 | 17    | Vulnerability tracking + SBOM ingestion + `NotificationProvider`                                                                                               | Enterprise governance                                                             |
@@ -1744,6 +1898,14 @@ The build sequence is structured in two parts. Phases 0–4 ship an initial rele
 - **Cross-layer import tests**: a `DOMAIN.md` ingested in one layer imports an artifact ingested in another; a caller who can see both layers sees the imported artifact; a caller who can see only the destination layer sees nothing for that import; imports that don't currently resolve produce an ingest-time warning, not an error.
 
 - **Materialization test**: exercise `load_artifact` against artifacts with diverse bundled file types (Python script, Jinja template, JSON schema, binary blob, external resource); verify atomic write semantics; verify partial-download recovery; verify presigned URL refresh on expiry.
+
+- **`podium sync` lock-file test**: `podium sync` in an empty target writes `.podium/sync.lock` with the resolved profile, scope, and artifact list; re-running `podium sync` is idempotent (no spurious writes); the target dir auto-creates if missing; `--dry-run` prints the resolved set and writes nothing. Two `podium sync` invocations against different targets each maintain independent lock files.
+
+- **Override + watch test**: `podium sync --watch` running against a target keeps `.podium/sync.lock`'s `toggles:` populated across registry change events. `podium sync override --add <id>` materializes the artifact and adds an entry to `toggles.add`; `podium sync override --remove <id>` removes it from disk and adds to `toggles.remove`. Manual `podium sync` (no `--watch`) clears `toggles:`. `podium sync override --reset` is equivalent to manual `podium sync`.
+
+- **Save-as test**: after `podium sync override --add <id-a> --remove <id-b>`, `podium sync save-as --profile <name>` renders a profile in `.podium/sync.yaml` whose `include` / `exclude` reproduce the toggled state; the lock file's `toggles:` is cleared and the new profile becomes the active one. `--update` overwrites an existing profile; `--dry-run` prints the YAML diff and writes nothing.
+
+- **Profile edit test**: `podium profile edit <name> --add-include <pattern>` rewrites `.podium/sync.yaml` preserving formatting and comments around untouched keys. The target directory and lock file are untouched; a subsequent `podium sync` picks up the change.
 
 - **Signing test**: artifact signed at ingest; signature verified on materialization; tampered content rejected with `materialize.signature_invalid`; `podium verify <id>` matches.
 
