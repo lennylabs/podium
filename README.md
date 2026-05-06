@@ -89,9 +89,9 @@ LangChain, Bedrock,         Claude Desktop,             File-based harnesses,
 custom orchestrators        Claude Code, Cursor         eager materialization
 ```
 
-## When Podium could help
+## When Podium helps
 
-Podium is overkill for a small catalog in a single harness with one author — a flat directory plus the harness's native conventions handles that. It can become beneficial as any of these dimensions grow:
+Podium is overkill for a small catalog in a single harness with one author — a flat directory plus the harness's native conventions handles that. Becomes valuable as any of these dimensions grow:
 
 - **Catalog size.** Lazy discovery and per-domain navigation help once the working set no longer fits comfortably in a system prompt.
 - **Cross-harness delivery.** "Author once, deliver anywhere" is useful even at small scale once a team is targeting more than one harness.

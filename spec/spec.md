@@ -112,16 +112,16 @@ Several point solutions partially address subsets of these problems — git mono
 - **Multi-vendor neutrality.** MIT-licensed; vendor-agnostic; designed for tooling that spans multiple harnesses and runtimes.
 - **Immutability and signing.** Every artifact version is bit-for-bit immutable. High-sensitivity artifacts are cryptographically signed.
 
-### 1.3.1 When Podium Could Help
+### 1.3.1 When Podium Helps
 
-Podium is overkill for a small catalog in a single harness with one author — a flat directory plus the harness's native conventions handles that. It can become beneficial as any of these dimensions grow:
+Podium is overkill for a small catalog in a single harness with one author — a flat directory plus the harness's native conventions handles that. Becomes valuable as any of these dimensions grow:
 
 - **Catalog size.** Browsing-by-directory and listing artifacts in a system prompt both degrade as the catalog grows. Lazy discovery (§3) and per-domain navigation help once the working set no longer fits comfortably in context.
 - **Cross-harness delivery.** "Author once, deliver anywhere" is useful even at small scale once a team is targeting more than one harness — anything beats forking per harness.
 - **Multiple artifact types.** A single dependency graph across skills, agents, contexts, prompts, and MCP server registrations beats N type-specific stores once a catalog has more than one type.
 - **Multiple contributors.** Per-layer visibility, classification, and audit start to pay off as the number of contributors and the diversity of audiences grow.
 
-A solo developer with a handful of skills in one harness doesn't need Podium. A large team with mixed artifact types across several harnesses, contributing to a catalog used by many audiences, could benefit substantially.
+A solo developer with a handful of skills in one harness doesn't need Podium. A large team with mixed artifact types across several harnesses, contributing to a catalog used by many audiences, can get substantial value from it.
 
 The minimum viable alternative — a short script that watches a Git repo and copies files into the right harness-specific directories — already gets a single-team, single-type, single-vendor shop most of the way to "author once, deliver anywhere" for a fraction of the engineering effort. Podium addresses the intersection of multiple types, multiple teams, multiple harnesses, and governance requirements; below that intersection, file-copy is often enough.
 
