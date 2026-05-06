@@ -308,6 +308,37 @@ A typical host session begins empty. The host calls `load_domain()` to get the t
 
 Only `load_artifact` writes to the host filesystem. The catalog lives at the registry; the working set lives on the host.
 
+### 3.5 Scope Preview (Pre-Session)
+
+The disclosure layers above describe what an agent can see _during_ a session. Reviewers (security, compliance, the agent's user themself) sometimes need a summary of what's visible _before_ a session starts — both to set expectations and to satisfy audit asks of the form "what could this agent have loaded?"
+
+`Client.preview_scope()` (and the corresponding `GET /v1/scope/preview` HTTP endpoint) returns aggregated metadata for the calling identity's effective view, with no manifest bodies and no resource transfers:
+
+```python
+preview = client.preview_scope()
+# {
+#   "layers": ["admin-finance", "joan-personal", "workspace-overlay"],
+#   "artifact_count": 1234,
+#   "by_type": {"skill": 800, "agent": 200, "context": 200, "prompt": 30, "mcp-server": 4},
+#   "by_sensitivity": {"low": 1100, "medium": 100, "high": 34}
+# }
+```
+
+The caller's OAuth identity drives layer composition exactly as for a real session; the preview is a read-only projection of that composition with counts only.
+
+**Tenant flag.** Aggregate counts can hint at the existence of restricted content even when no individual artifact is leaked. The endpoint is gated by tenant config:
+
+```yaml
+tenant:
+  expose_scope_preview: true   # default
+```
+
+When `false`, the endpoint returns `403 scope_preview_disabled`. When `true`, the endpoint always returns aggregate counts only — never identifiers, descriptions, or any per-artifact metadata.
+
+**Honored by all consumer paths.** The MCP server, SDK, and `podium sync` all expose this preview. The `podium status` CLI surfaces the same data for human inspection.
+
+The preview is a transparency surface, not a discovery surface. Agents do not call it during a session — they use the disclosure layers in §3.2 — and it does not contribute to ranking, history, or any session-level state.
+
 ---
 
 ## 4. Artifact Model
@@ -670,6 +701,8 @@ Multiple fields combine as a union — a caller sees the layer if any condition 
 
 Read-side enforcement happens at the registry on every call. Git provider permissions are not consulted at request time — visibility is governed entirely by the registry config (or, for user-defined layers, by the registration record).
 
+**Public-mode bypass.** When the registry is started with `--public-mode` (§13.10), the visibility evaluator short-circuits to `true` for every layer and every caller. `visibility:` declarations stay in config (so artifacts remain portable to non-public deployments) but are not enforced at request time. Public mode is mutually exclusive with an identity provider — see §13.10 for the safety constraints.
+
 Authoring rights are out of Podium's scope. Whoever can merge to the tracked Git ref publishes; whoever can write to the `local` filesystem path publishes there. Teams configure branch protection, required reviewers, and signing requirements in their Git provider as they see fit. Podium reads no in-repo permission files.
 
 #### Config schema
@@ -938,7 +971,7 @@ Podium exposes three meta-tools through the Podium MCP server. These are the onl
 | `search_artifacts` | Hybrid retrieval (BM25 + embeddings, RRF) over artifact frontmatter. Filters by `type`, `tags`, `scope`. Returns top N results with frontmatter and retrieval scores; bodies stay at the registry until `load_artifact`. Optional `session_id` arg.                                                                                       |
 | `load_artifact`    | Loads a specific artifact by ID and version. Returns the manifest content as the tool result; **materializes** any bundled resources to a host-configured path on the filesystem (atomic write via `.tmp` + rename; presigned URLs for large blobs). Args: `id`, optional `version`, optional `session_id`, optional `harness:` override. |
 
-`load_domain` and `search_artifacts` round-trip through the registry on every call (no snapshot caching at session startup). Only `load_artifact` writes to the host filesystem, and only for the specific artifact requested.
+`load_domain` and `search_artifacts` round-trip through the registry on every call (no snapshot caching at session startup). Only `load_artifact` writes to the host filesystem, and only for the specific artifact requested. Programmatic consumers (SDK) can also call a non-MCP bulk variant of `load_artifact` — see §7.6.2.
 
 The MCP server declares its capabilities in the MCP `initialize` response: `{tools: true, prompts: <conditional on prompt artifacts with expose_as_mcp_prompt: true>, sessionCorrelation: true}`.
 
@@ -1210,7 +1243,7 @@ All errors use a structured envelope:
 }
 ```
 
-Codes are namespaced (`auth.*`, `ingest.*`, `materialize.*`, `quota.*`, `mcp.*`, `network.*`). Mapped to MCP error payloads per the MCP spec.
+Codes are namespaced (`auth.*`, `ingest.*`, `materialize.*`, `quota.*`, `mcp.*`, `network.*`, `registry.*`). Mapped to MCP error payloads per the MCP spec.
 
 ### 6.11 Host Configuration Recipes
 
@@ -1762,13 +1795,62 @@ podium search "month-end close OR variance" --type skill --top-k 15 --json \
   | xargs -I{} podium sync --harness claude-code --target ~/.claude/ --include {}
 ```
 
+#### 7.6.2 Bulk Fetch
+
+`load_artifact` works one ID at a time. Programmatic consumers — eval harnesses, batch workflows, custom orchestrators — that need a known set of artifacts up front pay the per-request round-trip N times when iterating. `Client.load_artifacts` is the bulk variant: one HTTP request, one auth check, one visibility composition pass, one transactional snapshot.
+
+```python
+artifacts = client.load_artifacts(
+    ids=[
+        "finance/close-reporting/run-variance-analysis",
+        "finance/close-reporting/policy-doc",
+        "finance/ap/pay-invoice",
+    ],
+    session_id=session_id,        # honors the same `latest`-resolution semantics as load_artifact
+    harness="claude-code",        # optional per-call adapter override
+)
+
+for result in artifacts:
+    if result.status == "ok":
+        result.materialize(to="./artifacts/")
+    else:
+        log.warning("skip %s: %s", result.id, result.error.code)
+```
+
+**Wire shape.** `POST /v1/artifacts:batchLoad` with body `{ids: [...], session_id?, harness?, version_pins?: {<id>: <semver>}}`. Response is an array of per-item envelopes:
+
+```json
+[{
+  "id": "finance/close-reporting/run-variance-analysis",
+  "status": "ok",
+  "version": "1.2.0",
+  "content_hash": "sha256:...",
+  "manifest_body": "...",
+  "resources": [{"path": "...", "presigned_url": "...", "content_hash": "..."}]
+}, {
+  "id": "finance/restricted/payroll-runner",
+  "status": "error",
+  "error": { "code": "visibility.denied", "message": "..." }
+}]
+```
+
+**Semantics.**
+
+- **Hard cap:** 50 IDs per batch. The SDK splits larger sets transparently.
+- **Visibility:** identical to `load_artifact`. Items the caller cannot see come back as `status: "error"` with `visibility.denied`; no leak about whether the artifact exists in some hidden layer.
+- **Session consistency:** with `session_id`, the first occurrence of each `(id, "latest")` in the batch freezes the resolved version for the rest of the batch and session.
+- **Partial failure** does not fail the batch — each item carries its own status.
+- **Bandwidth:** large bundled resources travel via presigned URLs (§4.4) so the response body stays small; the SDK fetches resources concurrently after the response.
+
+**Not exposed as an MCP meta-tool** (§5). The MCP path is agent-mediated and load-on-demand; bulk loading is a programmatic-runtime concern that doesn't belong in the agent's tool list. The MCP server uses this endpoint internally for cache warm-up when configured to prefetch.
+
 ### 7.7 Onboarding: `podium init` and `podium login`
 
 Two convenience commands that handle first-time setup and explicit auth so users don't have to learn the underlying env-var contract on day one.
 
 #### `podium init`
 
-Interactive setup wizard. Generates the right config files for either a standalone or a remote deployment. Idempotent — refuses to overwrite existing files without `--force`.
+Interactive setup wizard. Generates the right config files for either a standalone or a remote deployment. Idempotent — refuses to overwrite existing files without `--force`. For the simplest path, this command can be skipped — `podium serve` with no flags auto-bootstraps standalone defaults on first run (§13.10).
 
 ```bash
 # Interactive: asks "standalone or remote?" and walks through the choices
@@ -1832,6 +1914,8 @@ Every significant event, each carrying a trace ID (W3C Trace Context):
 | `user.erased`             | Admin invoked the GDPR erasure command                             | Registry |
 
 Audit lives in two streams. The registry owns the events above. The MCP server can also write a local audit log for the meta-tool events through a `LocalAuditSink` interface (§9) when configured. Both streams share trace IDs.
+
+**Caller identity in audit events.** Read events (`domain.loaded`, `artifacts.searched`, `artifact.loaded`) record the caller's identity from the OAuth token: typically `caller.identity = "<sub-claim>"`, with email and groups attached. In public-mode deployments (§13.10), the OAuth flow is skipped and these events instead record `caller.identity = "system:public"`, with the source IP address and any upstream `X-Forwarded-User` header preserved in `caller.network`. Public-mode events also carry the flag `caller.public_mode: true` so downstream consumers (SIEM, audit dashboards) can filter them without parsing identity strings.
 
 ### 8.2 PII Redaction
 
@@ -2101,9 +2185,60 @@ The build sequence is structured in two parts. Phases 0–4 ship an initial rele
 
 For non-prod or standalone use, see §13.10.
 
+#### 13.1.1 Evaluation Deployment (Docker Compose)
+
+For team evaluation, smoke-testing, and local integration testing — anything that wants the standard topology's components without the standalone single-binary shortcut — the repo ships a `docker-compose.yml` that brings up the full stack with one command:
+
+```bash
+docker compose up -d
+podium init --remote http://localhost:8080
+podium login    # device-code flow against the bundled Dex IdP
+```
+
+The compose file includes:
+
+- **`registry`** — the registry binary, configured against the local services below.
+- **`postgres`** — `pgvector/pgvector:pg16` for metadata + embeddings.
+- **`minio`** — S3-compatible object storage (path-style URLs, `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` for auth).
+- **`dex`** — OIDC IdP for the OAuth device-code flow.
+- **`bootstrap`** — one-shot container that creates the MinIO bucket, registers the registry as an OIDC client with Dex, creates the first tenant and admin user (configurable via env vars), then exits.
+
+**Not production-grade.** Single-replica services, default credentials, local volumes — the compose stack is _standard-topology in shape_ so consumers exercise the same code paths as a real deployment, but it is intended only for evaluation pilots, CI integration tests, and adapter / SDK development. For genuine non-prod or solo use, prefer §13.10's standalone mode (one binary instead of four containers).
+
 ### 13.2 Runbook
 
 Coverage for: Postgres failover, object-storage outage, IdP outage, full-disk on registry node, audit-stream backpressure, runaway search QPS, signature verification failure storm. Each scenario gets detection signals, impact, and mitigation steps; full runbook ships with the Helm chart.
+
+#### 13.2.1 Read-Only Mode
+
+When the Postgres primary becomes unreachable but a read replica is up, the registry falls back to **read-only mode**: read endpoints (`load_domain`, `search_artifacts`, `load_artifact`, `load_artifacts`) continue to serve from the replica; write endpoints (ingest webhooks, layer admin operations, freeze toggles, admin grants, `podium login`-driven token issuance against the local IdP-mediated session table) are rejected with the structured error `registry.read_only`.
+
+A health-state machine drives the transition. The registry probes the primary every 5 s and flips to read-only after three consecutive failures (tunable via `PODIUM_READONLY_PROBE_INTERVAL` and `PODIUM_READONLY_PROBE_FAILURES`). It flips back automatically after three consecutive probe successes once the primary is reachable again.
+
+Read responses in read-only mode carry two additional headers:
+
+- `X-Podium-Read-Only: true`
+- `X-Podium-Read-Only-Lag-Seconds: <n>` — observed replication lag at response time. Clients that need strict freshness can retry once the registry leaves read-only mode (or surface the staleness to a human reviewer via the existing offline/staleness affordance, §7.4).
+
+Audit events for state transitions (`registry.read_only_entered`, `registry.read_only_exited`) are logged like any other admin action and carry the same hash-chain integrity guarantees as ingest and admin events. Ingest events that would have fired during the read-only window are queued by the Git provider's webhook retry policy and replayed on exit; webhooks from receivers that don't retry leave their corresponding ingests pending until the next manual `podium layer reingest`.
+
+The MCP server, SDKs, and `podium sync` propagate the read-only signal: the MCP `health` tool reports `mode: read_only`, SDKs raise `RegistryReadOnly` on attempted writes, and `podium sync` continues to materialize against the cached effective view (the read path is unaffected).
+
+#### 13.2.2 Public Mode
+
+A misconfigured public-mode deployment is the most common security-relevant operational anomaly because the registry serves correctly — it just serves to everyone. The runbook entry exists to make it easy to detect and recover from.
+
+**Detection.** `/healthz` returns `mode: public`. Audit events for read calls show `caller.identity: "system:public"` and the flag `caller.public_mode: true`. The registry's startup banner shows the public-mode warning. Operators investigating a deployment can confirm with `podium status`, which surfaces the same flag.
+
+**Impact.** Authentication is skipped; visibility is bypassed (§4.6). Every artifact is reachable to every caller that can connect to the registry's bind address. Ingest of `sensitivity: medium` and `sensitivity: high` artifacts is rejected; existing artifacts at those levels (ingested before public mode was enabled) continue to be served.
+
+**Mitigation.**
+
+1. Confirm public mode was the intended deployment posture. If it was, no action needed — the audit log already records the intent.
+2. If public mode was _not_ intended (a misconfigured environment variable, copy-pasted CLI flag, or accidental container image tag), stop the registry, remove `--public-mode` / unset `PODIUM_PUBLIC_MODE`, restart. The registry refuses mid-run flips, so a restart is mandatory.
+3. If public mode was running on an internet-exposed registry (which the safety check should have prevented unless `--allow-public-bind` was set), treat as a security incident: rotate any signing keys that were in scope, audit the access log for unfamiliar IPs, and proceed per the org's incident-response procedure.
+
+**Prevention.** Container-image and Helm-chart consumers should set `PODIUM_NO_AUTOSTANDALONE=1` and use `--strict` to refuse anything but explicitly-configured deployments — public mode requires an explicit flag, so a strict-only deployment cannot accidentally land in it. Production CI templates should fail-fast on the presence of `PODIUM_PUBLIC_MODE` in environment lists.
 
 ### 13.3 Backup and Restore
 
@@ -2143,16 +2278,28 @@ Presigned URLs are CDN-friendly. Recommend CloudFront / Fastly / Cloudflare in f
 ### 13.9 Health and Readiness
 
 - Registry: `/healthz` (liveness) and `/readyz` (readiness — Postgres + object-storage reachable).
-- MCP server: `health` MCP tool returning registry connectivity + cache size + last successful call timestamp.
+- `/readyz` reports one of `mode: ready | read_only | not_ready`. `read_only` is healthy from a load-balancer perspective (the registry should stay in rotation to serve reads) but signals upstream tooling that writes are being refused. Response body includes observed replication lag in seconds. See §13.2.1 for the state machine and the corresponding response headers.
+- MCP server: `health` MCP tool returning registry connectivity + observed registry mode (`ready` / `read_only` / unreachable) + cache size + last successful call timestamp.
 
 ### 13.10 Standalone Deployment
 
 `podium serve --standalone` collapses the full stack into a single binary with no external dependencies. It targets local development, individual contributors, and small-team installations where running Postgres + object storage + an IdP is overkill.
 
+**Zero-flag default.** Running `podium serve` with no flags is equivalent to `podium serve --standalone` when no server config is found at `~/.podium/registry.yaml` and no `PODIUM_*` server-side environment variables are set. The server emits a clear stderr line on startup ("No config found at `~/.podium/registry.yaml` — starting in standalone mode at `http://127.0.0.1:8080`. Run `podium serve --strict` to require explicit setup."), creates the standalone defaults (`~/.podium/registry.yaml`, `~/.podium/sync.yaml`, `~/podium-artifacts/`) on first run, and proceeds to serve. This collapses the five-minute install path into a single command — no `podium init` step required.
+
+`podium serve --strict` retains the prior behavior of refusing to start without explicit configuration. Setting `PODIUM_NO_AUTOSTANDALONE=1` in the environment has the same effect — useful in CI and image-building contexts where a missing config should always be a hard error rather than an auto-bootstrap. Auto-bootstrap is also suppressed when `--config <path>` is passed and the file does not exist (the user explicitly named a config; not finding it is an error, not a cue to invent one).
+
 ```bash
+# Zero-flag — auto-enters standalone mode if no config exists at ~/.podium/registry.yaml
+podium serve
+
+# Explicit standalone with custom paths
 podium serve --standalone \
   --layer-path /var/podium/artifacts \
   --bind 127.0.0.1:8080
+
+# Refuse to start without explicit config (CI, image builds)
+podium serve --strict
 ```
 
 **What changes from the standard topology:**
@@ -2174,6 +2321,67 @@ podium serve --standalone \
 **Hybrid search.** Standalone runs the same BM25 + vector RRF retriever as the standard registry. Vectors live in `sqlite-vec`; embeddings come from the bundled `embedded-onnx` provider — both run in-process, so the binary works offline and air-gapped with no external dependency. Operators who want a remote model instead can switch via `PODIUM_EMBEDDING_PROVIDER=openai|voyage|cohere|ollama` (`ollama` is the obvious choice for self-hosted local models). `--no-embeddings` falls back to BM25-only.
 
 **Upgrade path.** A standalone deployment migrates to standard via `podium admin migrate-to-standard --postgres <dsn> --object-store <url>` (covered in §13.4). Layer config, admin grants, and audit history are preserved; embeddings are re-computed against the target vector backend on first ingest.
+
+**Web UI.** When `podium serve` (standalone or standard) is started with `--web-ui` (or `PODIUM_WEB_UI=true`), the same process exposes a single-page web UI at `http://<bind>/ui/`. The UI is a static SPA bundled into the binary; it talks to the registry's HTTP API as any other consumer would. What it surfaces:
+
+- **Domain browser** — hierarchical navigation matching `load_domain`'s structure.
+- **Search** — text input that calls `search_artifacts` with the same `type` / `scope` / `tags` filters as the SDK and CLI.
+- **Artifact viewer** — manifest body rendered as markdown, frontmatter as a property table, links to extending or dependent artifacts.
+- **Layer panel** — list registered layers with their source, visibility, and `last_ingested_at`. Admins can register, reingest, and unregister layers from the UI; users can manage their own user-defined layers (cap per §7.3.1). The UI is a thin client over the same `podium layer …` HTTP endpoints.
+
+Authentication: in standalone deployments without an identity provider, the UI is open on the bind address (default `127.0.0.1` — not network-exposed). In standard deployments the UI uses the same OAuth device-code flow as the CLI, with the verification URL handoff handled in-browser.
+
+Behind a flag: opt-in via `--web-ui` so headless deployments (CI runners, managed runtimes) don't pay the binary-size or attack-surface cost when they don't need it. The binary refuses to bind the UI to a non-loopback address unless `--web-ui-allow-public-bind` is also passed _and_ an identity provider is configured — preventing accidental exposure of an unauthenticated UI.
+
+The UI is the recommended consumption path for non-developer users (analysts, prompt authors, reviewers) who want to browse the catalog without installing the SDK or learning the CLI.
+
+**Sensible defaults for permissive deployments.** Standalone deployments shift several defaults toward low-friction rather than secure-by-default — appropriate for the solo and small-team contexts standalone targets:
+
+- **Layer visibility.** New layers registered via `podium layer register` default to `visibility: public` (instead of `users: [<registrant>]` as in standard mode for user-defined layers). Override with `PODIUM_DEFAULT_LAYER_VISIBILITY=users` for multi-user standalone deployments that want the standard behavior.
+- **Signature verification.** `PODIUM_VERIFY_SIGNATURES` defaults to `never` (instead of `medium-and-above`). Authors who want enforcement set it explicitly to `medium-and-above` or `always`.
+- **Sandbox profile.** `sandbox_profile:` is informational in standalone — hosts honor it as in standard mode, but the registry does not refuse to ingest artifacts whose profiles can't be enforced locally. Override with `PODIUM_ENFORCE_SANDBOX_PROFILE=true` in multi-user setups.
+- **Sensitivity.** Artifacts without an explicit `sensitivity:` field default to `low`. The lint check that flags missing sensitivity is downgraded from a warning to a hint.
+
+Any of these defaults can be flipped to standard-mode behavior via the named env var without otherwise changing the deployment shape — the same single binary continues to serve.
+
+**Public mode (`--public-mode` / `PODIUM_PUBLIC_MODE`).** A registry-level switch that bypasses both authentication and the visibility model in one step. Replaces "progressively disable each governance feature" with a single explicit decision — appropriate for solo demos, evaluation pilots without team context, and intentionally open internal-knowledge-base deployments.
+
+```bash
+# Standalone, fully open
+podium serve --public-mode --layer-path ~/podium-artifacts
+
+# Or via env var
+PODIUM_PUBLIC_MODE=true podium serve
+```
+
+Startup banner:
+
+```
+⚠  PUBLIC MODE — all artifacts visible to all callers without authentication.
+   Bound to 127.0.0.1 by default; pass --allow-public-bind to bind a non-loopback address.
+```
+
+What public mode does:
+
+- **Skips OAuth.** No `podium login`, no JWT verification, no OIDC config required. Callers reach the registry without credentials.
+- **Bypasses visibility.** The visibility evaluator (§4.6) short-circuits to `true` for every layer and every caller. Layer `visibility:` declarations are still accepted into config (so artifacts remain portable to non-public deployments) but ignored at request time.
+- **Records `system:public`** in audit (§8.1). Source IP and any `X-Forwarded-User` header from an upstream proxy are preserved.
+- **Leaves ingest unchanged.** `content_hash` immutability, lint, hash-chained audit, and signing (when configured) all behave normally.
+
+Safety constraints:
+
+- **Mutually exclusive with an identity provider.** Setting `PODIUM_PUBLIC_MODE` and `PODIUM_IDENTITY_PROVIDER` (or the equivalent config keys) at the same time fails at startup with `config.public_mode_with_idp`. Public mode is the absence of authentication, not an alternative provider — pick one.
+- **Loopback bind by default.** Public mode binds to `127.0.0.1` unless `--allow-public-bind` is _also_ passed. The escape hatch exists for deployments behind an authenticated reverse proxy that enforces who can reach the registry; without the proxy, the operator is taking explicit responsibility for the security model.
+- **Sensitivity ceiling.** Ingest of `sensitivity: medium` or `sensitivity: high` artifacts is rejected with `ingest.public_mode_rejects_sensitive`. Public mode is for low-stakes content only. Artifacts already at those levels (ingested before public mode was enabled) continue to be served — public mode does not retroactively delete content.
+- **One-way for the deployment's lifetime.** Toggling public mode requires a config change _and_ a registry restart. The registry refuses to flip the mode mid-run — prevents an admin accidentally toggling away protections through a config-reload signal.
+- **Loud at every checkpoint.** The mode is surfaced in `/healthz` (`mode: public`), in the MCP `health` tool, in `podium status`, and as a flag (`caller.public_mode: true`) on every audit event so downstream tooling can detect it without inspecting startup config.
+
+When to use public mode vs sensible-defaults standalone:
+
+- **Use sensible defaults** when you're a single user or small team using standalone for productivity. The visibility model is already trivially permissive; no extra ceremony.
+- **Use public mode** when (a) the deployment is intentionally open beyond a single user — e.g., a demo registry, an internal-public catalog, an evaluation pilot — and (b) you want the audit log to record that anonymous-public access was the deployment's intent, not a misconfiguration.
+
+Migration to a governed deployment goes through `podium admin migrate-to-standard --postgres <dsn> --object-store <url>` (§13.4), followed by removing the `--public-mode` flag and reconfiguring layer visibility. Same migration path standalone uses today.
 
 **Out of scope for standalone.** Multi-tenancy, freeze windows, SCIM, SBOM/CVE pipeline, transparency-log anchoring, outbound webhooks. These are present in the binary but inert without the supporting infrastructure (an IdP for SCIM, a CVE feed for vulnerability tracking, etc.). They can be enabled individually when their dependencies are available.
 
@@ -2290,6 +2498,8 @@ Selected via `PODIUM_EMBEDDING_PROVIDER` (`embedded-onnx` | `openai` | `voyage` 
 #### Identity provider
 
 Identity-provider selection and per-provider config are documented in §6.3 (`PODIUM_IDENTITY_PROVIDER`, `PODIUM_OAUTH_AUDIENCE`, `PODIUM_SESSION_TOKEN_*`, etc.). The same values apply on both the registry and the MCP server.
+
+For deployments that intentionally run without an identity provider, `PODIUM_PUBLIC_MODE=true` (or `--public-mode`) bypasses authentication and the visibility model entirely — see §13.10. Public mode is mutually exclusive with `PODIUM_IDENTITY_PROVIDER`; setting both fails at startup with `config.public_mode_with_idp`.
 
 #### Config file format
 
