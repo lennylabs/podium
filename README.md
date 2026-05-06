@@ -101,11 +101,16 @@ Podium is overkill for a small catalog in a single harness with one author — a
 ## Documentation
 
 - **Specification** — [`spec/spec.md`](spec/spec.md). Complete technical reference. Read this if you want to understand how Podium works in detail.
-- **Quickstart** — [`spec/spec.md#0-quickstart`](spec/spec.md#0-quickstart).
-- **Architecture** — [`spec/spec.md#2-architecture`](spec/spec.md#2-architecture).
-- **Layer model** — [`spec/spec.md#46-layers-and-visibility`](spec/spec.md#46-layers-and-visibility).
-- **Build sequence** — [`spec/spec.md#10-mvp-build-sequence`](spec/spec.md#10-mvp-build-sequence).
-- **Backend configuration** — [`spec/spec.md#1311-backend-configuration-reference`](spec/spec.md#1311-backend-configuration-reference).
+- **Quickstart (5 minutes)** — [`docs/quickstart.md`](docs/quickstart.md). Author your first skill and load it from Claude Code, end-to-end. Standalone mode, no infrastructure.
+- **Small-team rollout** — [`docs/team-rollout.md`](docs/team-rollout.md). Practical setup for a 3–10 person team.
+- **Operator's guide** — [`docs/operator-guide.md`](docs/operator-guide.md). Running Podium in production: capacity, monitoring, alerting, backup/restore, upgrade.
+- **Progressive adoption** — [`docs/progressive-adoption.md`](docs/progressive-adoption.md). 30/60/90/180-day on-ramp from permissive standalone to enforced governance.
+- **OIDC integration cookbooks** — [`docs/oidc/`](docs/oidc/). Per-IdP setup for Okta, Entra ID, Google Workspace, Auth0, Keycloak.
+- **Spec sections (deep links)**:
+  - Architecture — [`spec/spec.md#2-architecture`](spec/spec.md#2-architecture).
+  - Layer model — [`spec/spec.md#46-layers-and-visibility`](spec/spec.md#46-layers-and-visibility).
+  - Build sequence — [`spec/spec.md#10-mvp-build-sequence`](spec/spec.md#10-mvp-build-sequence).
+  - Backend configuration — [`spec/spec.md#1311-backend-configuration-reference`](spec/spec.md#1311-backend-configuration-reference).
 
 ## Contributing
 
