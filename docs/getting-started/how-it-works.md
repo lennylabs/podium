@@ -132,8 +132,11 @@ harness adapter, and writes to your harness's destination.
   filesystem discovery does the loading at runtime.
 - **What you don't get.** Lazy discovery (no MCP, no SDK). No
   centralized audit. No identity-based visibility filtering.
-- **Multi-user.** The catalog is the git history; ingest is `git
-  pull`. No shared-state coordination needed.
+- **Multi-user.** Share the directory however you'd share any
+  folder. Committing to git is the typical choice — the git history
+  doubles as the audit trail and `git pull` is each developer's
+  ingest. A network share or a sync service (Dropbox, iCloud, etc.)
+  also works.
 
 ### Standalone server
 

@@ -295,11 +295,13 @@ Features that require **specifically a remote server** (not just any server):
 
 `podium sync --watch` against a filesystem source uses `fsnotify` to watch the registry path and the workspace overlay; when files change, it re-runs composition and materialization for the affected artifacts.
 
-### 13.11.5 Multi-User via Committed Registry
+### 13.11.5 Multi-User via a Shared Directory
 
-The registry directory is just files. Commit `<workspace>/.podium/registry/` (or whatever path the project chose) to git, and every developer who clones the project has the same catalog. Each developer runs `podium sync` independently against their local clone; the catalog is read-only from the client's perspective, and mutation goes through git PR + merge. No shared-state coordination, no conflicts.
+The registry directory is just files. Sharing it across multiple developers means sharing the directory however you'd share any folder — most teams commit it to git, but a network share, a sync service (Dropbox, iCloud, etc.), or a periodically-rsync'd directory all work. Each developer runs `podium sync` independently against their copy; the catalog is read-only from the client's perspective, and mutation goes through whatever review the sharing mechanism enforces.
 
-Any number of developers can share a project this way without running a server. The catalog is the git history; ingest is `git pull`.
+The git-committed workflow is the typical choice for teams. Commit `<workspace>/.podium/registry/` (or whatever path the project chose) to git, and every developer who clones the project has the same catalog. Authoring goes through git PR + merge. Each developer's `git pull` is their ingest; the shared git history doubles as the audit trail. No shared-state coordination, no conflicts.
+
+Any number of developers can share a project this way without running a server.
 
 ### 13.11.6 Migrating to a Server
 
