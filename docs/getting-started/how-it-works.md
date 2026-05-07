@@ -110,16 +110,16 @@ A directory of files; no daemon, no port, no auth. `podium sync`
 reads the directory directly, applies layer composition and the
 harness adapter, and writes to your harness's destination.
 
-- **Who it's for.** Solo developers, evaluation, CI build steps,
-  small teams committing the catalog to git.
+- **Who it's for.** Individual developers and small teams. Solo
+  workflows keep the directory local; small teams commit it to git
+  and every developer runs `podium sync` against their clone.
 - **What you run.** Just the `podium` CLI.
 - **What you get.** Eager materialization. The harness's own
   filesystem discovery does the loading at runtime.
 - **What you don't get.** Lazy discovery (no MCP, no SDK). No
   centralized audit. No identity-based visibility filtering.
-- **Multi-user.** Yes — commit the directory to git. Every
-  developer runs `podium sync` against their clone. The catalog is
-  the git history; ingest is `git pull`.
+- **Multi-user.** The catalog is the git history; ingest is `git
+  pull`. No shared-state coordination needed.
 
 ### Standalone server
 
@@ -127,9 +127,11 @@ A single binary running on one machine. SQLite + sqlite-vec +
 filesystem object storage + a bundled embedding model, all
 embedded. Bind to localhost or behind your VPN.
 
-- **Who it's for.** 3–10 person teams; offline / air-gapped
-  development; anyone wanting runtime discovery without the full
-  standard stack.
+- **Who it's for.** Anyone of any team size who specifically wants
+  runtime discovery (agents calling MCP meta-tools mid-session) or
+  a single audit log without standing up the full standard stack.
+  Most small teams don't need this; reach for it when filesystem
+  mode stops fitting.
 - **What you run.** `podium serve --standalone --layer-path
   /path/to/dir` plus the CLI.
 - **What you get.** Runtime discovery via the MCP server. A single
@@ -145,8 +147,9 @@ The full deployment: Postgres + pgvector + S3 + OIDC + multi-tenancy.
 Helm chart ships with the registry; supporting services are managed
 or self-run alongside.
 
-- **Who it's for.** 20+ people, multi-tenant deployments, governed
-  organizations, anything with compliance constraints.
+- **Who it's for.** Larger teams and organizations. Multi-tenant
+  deployments, governed environments, anything with compliance
+  constraints or identity-based visibility requirements.
 - **What you run.** Registry replicas behind a load balancer,
   Postgres (managed or self-run), object storage, an OIDC IdP. See
   [Deployment → Operator guide](../deployment/operator-guide) and

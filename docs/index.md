@@ -8,17 +8,33 @@ description: Podium is a registry for the artifacts AI agents use — skills, co
 
 # Podium
 
-**A registry for the artifacts AI agents use, and a way to get them
-into any harness — Claude Code, Cursor, OpenCode, your own runtime.**
+**A registry for generic agentic AI artifacts, and tools for getting them into any harness.**
 
-You write skills, commands, rules, agents, and other artifacts in
-markdown. Podium serves them. Each consumer — your harness, an SDK,
-a `podium sync` command — pulls what it needs.
+Podium lets you:
 
-You can run Podium as a folder of files (no daemon, no setup), as a
-single binary for a small team, or as a multi-tenant service for an
-organization. Same artifacts, same source repo, same author flow —
-different operational shape.
+- Define generic skills, agents, commands, rules, and other artifacts, and use them across any harness.
+- Share artifacts with your team and organization.
+- Build and organize large catalogs of artifacts and use them efficiently with the help of tools for progressive disclosure and lazy loading.
+
+[Concepts](getting-started/concepts){: .btn .btn-outline }
+
+Podium supports multiple setups to meet the needs of single developers and large organizations alike:
+
+- Individual users: file-based artifacts + Podium CLI
+- Small teams: artifacts in repos + Podium CLI
+- Large teams/organizations: artifacts in repos + Podium registry server + Podium CLI/MCP server/SDK
+
+[Compare deployment setups](deployment/){: .btn .btn-outline }
+
+Highlights:
+
+- **Author once, deliver anywhere.** Pluggable harness adapters translate canonical artifacts into Claude Code, Claude Desktop, Cursor, OpenCode, Gemini, Codex, Pi, Hermes, or your own runtime.
+- **Artifact organization based on domains and subdomains.** Keep artifacts organized in folders and subfolders, where each folder defines a domain.
+- **Selective materialization.** Sync only a subset of the catalog into your workspace. Define profiles to quickly switch between scopes.
+- **Layered composition.** Compose your catalog from multiple sources with deterministic merge and explicit precedence. (Requires the Podium registry server.)
+- **Per-layer visibility.** Declare who can see what — each layer can be `public`, organization-wide, scoped to OIDC `groups`, or restricted to specific `users`. (Requires the Podium registry server.)
+- **Agent-driven progressive discovery.** Discovery tools for traversing domains and searching artifacts. (Requires the Podium MCP server or SDK.)
+- **Lazy artifact loading.** Materialize artifact files into your workspace as they are loaded. (Requires the Podium MCP server or SDK.)
 
 {: .note }
 
@@ -29,7 +45,7 @@ different operational shape.
 
 ---
 
-## In 30 seconds
+## 'Hello world' example
 
 Write a skill (one file in a directory):
 
@@ -47,13 +63,12 @@ Greet the user by their first name. Tell them today's date.
 Point Podium at the directory and tell it which harness you use:
 
 ```bash
-podium init --global --registry ~/podium-artifacts/ --harness claude-code
-podium sync --target .claude/
+cd your_workspace
+podium init --registry ~/podium-artifacts/ --harness claude-code
+podium sync
 ```
 
 Open Claude Code in your project. The skill is there.
-
-That's the whole solo workflow. No daemon. No server. Just files.
 
 [Full quickstart](getting-started/quickstart){: .btn .btn-purple }
 
@@ -109,61 +124,11 @@ Podium directly.
 
 ---
 
-## Three deployment shapes, in order of effort
-
-| Shape | Who it's for | What's running |
-|:--|:--|:--|
-| **Filesystem** | Solo developer, prototype, CI build step | `podium sync` reads a directory. No daemon, no port, no auth. |
-| **Standalone server** | 3–10 person team, one VM | One binary (`podium serve --standalone`). Embedded SQLite, bundled embedding model. Adds runtime discovery and a single audit log. |
-| **Standard** | 20+ people, multi-tenant, governed | Postgres + S3 + OIDC. Per-layer visibility, freeze windows, signing, SCIM, hash-chained audit. |
-
-Same artifacts. Same author flow. Pick the shape that fits today;
-graduate when you outgrow it. Migration is mechanical — `podium serve
---standalone --layer-path /path/to/dir` against the same directory
-turns a filesystem catalog into a server source without touching the
-authoring loop.
-
-[Compare deployment shapes](deployment/){: .btn .btn-outline }
-
----
-
-## What's in the box
-
-- **Author once, deliver anywhere.** Pluggable harness adapters
-  translate canonical artifacts into Claude Code, Claude Desktop,
-  Cursor, Gemini, Codex, OpenCode, Pi, and Hermes — and you can
-  register your own through the `HarnessAdapter` SPI.
-- **Seven first-class types.** `skill`, `agent`, `context`,
-  `command`, `rule`, `hook`, and `mcp-server`. Extension types
-  register through the `TypeProvider` SPI.
-- **Layered composition.** An ordered list of layers (admin-defined,
-  user-defined, workspace-local) composes per request, with
-  deterministic merge and explicit precedence. `extends:` lets a
-  higher-precedence artifact inherit and refine a lower one without
-  forking.
-- **Visibility per layer.** `public`, `organization`, OIDC `groups`,
-  or specific `users`. Authoring rights stay in your Git host's
-  branch protection — Podium doesn't duplicate them.
-- **Lazy materialization.** Sessions can start empty. Agents call
-  `load_domain` / `search_domains` / `search_artifacts` /
-  `load_artifact` only when they need something.
-- **Hybrid retrieval.** BM25 + vector embeddings, fused via reciprocal
-  rank. Vector backends include pgvector, sqlite-vec, Pinecone,
-  Weaviate Cloud, and Qdrant Cloud. Embedding providers include
-  embedded-onnx, openai, voyage, cohere, and ollama.
-- **Pluggable everywhere.** 17 SPIs across storage, identity,
-  composition, signing, audit, layer source, and delivery. The SPI
-  shapes are designed to support out-of-process plugins in a future
-  release without source-incompatible changes.
-
----
-
 ## Quick links
 
 - [Quickstart](getting-started/quickstart){: .btn .btn-outline }
 - [Concepts](getting-started/concepts){: .btn .btn-outline }
 - [How it works](getting-started/how-it-works){: .btn .btn-outline }
-- [Specification](https://github.com/OWNER/podium/tree/main/spec){: .btn .btn-outline }
 - [GitHub](https://github.com/OWNER/podium){: .btn .btn-outline }
 
 <style>

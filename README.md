@@ -1,12 +1,15 @@
 # Podium
 
-**A registry for the artifacts AI agents use, and a way to deliver them
+**A registry for generic agentic AI artifacts, and tools for getting them
 into any harness.**
 
-Skills, commands, rules, agents, contexts, hooks, MCP server registrations
-— write them once in markdown, serve them from one place, materialize them
-into Claude Code, Cursor, OpenCode, Gemini, Codex, Pi, Hermes, or your own
-runtime.
+Podium lets you:
+
+- Define generic skills, agents, commands, rules, and other artifacts, and
+  use them across any harness.
+- Share artifacts with your team and organization.
+- Build and organize large catalogs of artifacts and use them efficiently
+  with the help of tools for progressive disclosure and lazy loading.
 
 [Documentation](https://OWNER.github.io/podium) •
 [Quickstart](#quickstart) •
@@ -23,30 +26,46 @@ runtime.
 
 ---
 
-## What it is
+## Setups
 
-You author artifacts in `ARTIFACT.md` files in a Git repo. Podium
-mirrors them into a content-addressed store and serves them. Three
-consumers read from that store:
+Podium supports multiple setups to meet the needs of single developers and
+large organizations alike:
 
-- **MCP server** — your harness (Claude Code, Cursor, OpenCode, etc.)
-  calls `load_domain` / `search_domains` / `search_artifacts` /
-  `load_artifact` over MCP. Lazy: nothing in the agent's context until
-  it's actually needed.
-- **`podium sync`** — eager filesystem materialization. Walks your
-  effective view, writes harness-native files. One-shot or watcher mode.
-- **Language SDKs** (`podium-py`, `podium-ts`) — programmatic access for
-  runtimes, eval harnesses, custom orchestrators.
+- **Individual users:** file-based artifacts + Podium CLI.
+- **Small teams:** artifacts in repos + Podium CLI.
+- **Large teams / organizations:** artifacts in repos + Podium registry
+  server + Podium CLI / MCP server / SDK.
 
-You can run Podium three ways:
+Same artifacts. Same author flow. Different operational shape. Migration
+between shapes is mechanical.
 
-| Shape | For | What's running |
-|:--|:--|:--|
-| **Filesystem** | Solo, prototype, CI | `podium sync` reads a directory; no daemon, no port, no auth |
-| **Standalone** | 3–10 person team | `podium serve --standalone` — single binary with embedded SQLite + sqlite-vec + a bundled embedding model |
-| **Standard** | 20+ / multi-tenant / governed | Postgres + S3 + OIDC; per-layer visibility, signing, freeze windows, SCIM, hash-chained audit |
+[Compare deployment setups](https://OWNER.github.io/podium/deployment/)
 
-Same artifacts. Same author flow. Different operational shape.
+---
+
+## Highlights
+
+- **Author once, deliver anywhere.** Pluggable harness adapters translate
+  canonical artifacts into Claude Code, Claude Desktop, Cursor, OpenCode,
+  Gemini, Codex, Pi, Hermes, or your own runtime.
+- **Artifact organization based on domains and subdomains.** Keep artifacts
+  organized in folders and subfolders, where each folder defines a domain.
+- **Selective materialization.** Sync only a subset of the catalog into
+  your workspace. Define profiles to quickly switch between scopes.
+- **Layered composition.** Compose your catalog from multiple sources
+  with deterministic merge and explicit
+  precedence. (Requires the Podium registry server.)
+- **Per-layer visibility.** Declare who can see what — each layer can be
+  `public`, organization-wide, scoped to OIDC `groups`, or restricted to
+  specific `users`. (Requires the Podium registry server.)
+- **Agent-driven progressive discovery.** Discovery tools for traversing
+  domains and searching artifacts. (Requires the Podium MCP server or
+  SDK.)
+- **Lazy artifact loading.** Materialize artifact files into your
+  workspace as they are loaded. (Requires the Podium MCP server or SDK.)
+
+Every capability is specified in [`spec/`](spec/) and covered by the
+integration test suite.
 
 ---
 
@@ -58,9 +77,10 @@ Filesystem mode — no daemon, no setup beyond a CLI:
 # Install (target shape; not yet packaged)
 brew install OWNER/tap/podium
 
-# Point Podium at a folder; default to Claude Code as the harness
+# In your project, point Podium at a folder of artifacts
 mkdir -p ~/podium-artifacts/personal
-podium init --global --registry ~/podium-artifacts/ --harness claude-code
+cd ~/projects/your-project
+podium init --registry ~/podium-artifacts/ --harness claude-code
 
 # Author one skill
 mkdir -p ~/podium-artifacts/personal/hello/greet
@@ -75,43 +95,13 @@ description: Greet the user by name and tell them today's date.
 Greet the user by their first name. Tell them today's date.
 EOF
 
-# Materialize into Claude Code's directory
-cd ~/projects/your-project
-podium sync --target .claude/
+# Materialize into the project
+podium sync
 ```
 
 Open Claude Code in the project. The skill is available.
 
 [Full quickstart](https://OWNER.github.io/podium/getting-started/quickstart)
-
----
-
-## What's included
-
-- **Seven first-class artifact types.** `skill`, `agent`, `context`,
-  `command`, `rule`, `hook`, and `mcp-server`. Extension types register
-  through a `TypeProvider` SPI.
-- **Eight built-in harness adapters.** `claude-code`, `claude-desktop`,
-  `cursor`, `gemini`, `opencode`, `codex`, `pi`, `hermes`, plus `none`
-  for raw output.
-- **Layered composition.** Admin-defined, user-defined, and workspace-
-  local overlay layers compose per request with deterministic merge.
-  `extends:` lets a higher-precedence artifact inherit and refine a
-  lower one without forking.
-- **Visibility per layer.** `public`, `organization`, OIDC `groups`, or
-  explicit `users`. Authoring rights stay in your Git host's branch
-  protection.
-- **Hybrid retrieval.** BM25 + vector embeddings via reciprocal rank
-  fusion. Vector backends: pgvector, sqlite-vec, Pinecone, Weaviate
-  Cloud, Qdrant Cloud. Embedding providers: openai, voyage, cohere,
-  ollama, embedded-onnx.
-- **17 SPIs.** Storage, identity, composition, signing, audit, layer
-  source, delivery — every seam is pluggable. `MaterializationHook`
-  for pre-write rewrites; `LayerSourceProvider` for non-Git layer
-  sources (S3, OCI, HTTP archives).
-
-Every capability is specified in [`spec/`](spec/) and covered by the
-integration test suite.
 
 ---
 
@@ -142,12 +132,12 @@ LangChain, Bedrock,        Claude Code, Cursor,        File-based
 custom orchestrators       OpenCode, Pi, Hermes        harnesses
 ```
 
-| Component | Role |
-|:--|:--|
-| **Registry** | System of record. Composes the caller's effective view from the layer list, applies per-layer visibility, indexes manifests, runs hybrid search, signs URLs, maintains the cross-type dependency graph, emits change events. |
-| **MCP server** | In-process bridge for MCP-speaking hosts. Exposes the four meta-tools. Holds no per-session server-side state — only a content-addressed disk cache, OS-keychain credentials, an in-memory local-overlay index, and the materialized working set. |
-| **`podium sync`** | CLI (and library) that reads the user's effective view and writes it to a host-configured layout via the configured `HarnessAdapter`. Works against either an HTTP registry or a filesystem-source registry. |
-| **Language SDKs** | Thin HTTP clients. Used by LangChain, Bedrock, OpenAI Assistants, custom orchestrators, eval harnesses, build pipelines, notebooks. |
+| Component         | Role                                                                                                                                                                                                                                              |
+| :---------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Registry**      | System of record. Composes the caller's effective view from the layer list, applies per-layer visibility, indexes manifests, runs hybrid search, signs URLs, maintains the cross-type dependency graph, emits change events.                      |
+| **MCP server**    | In-process bridge for MCP-speaking hosts. Exposes the four meta-tools. Holds no per-session server-side state — only a content-addressed disk cache, OS-keychain credentials, an in-memory local-overlay index, and the materialized working set. |
+| **`podium sync`** | CLI (and library) that reads the user's effective view and writes it to a host-configured layout via the configured `HarnessAdapter`. Works against either an HTTP registry or a filesystem-source registry.                                      |
+| **Language SDKs** | Thin HTTP clients. Used by LangChain, Bedrock, OpenAI Assistants, custom orchestrators, eval harnesses, build pipelines, notebooks.                                                                                                               |
 
 ---
 

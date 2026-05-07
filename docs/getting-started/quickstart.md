@@ -53,27 +53,29 @@ podium --version
 ## 2. Tell Podium where the catalog lives
 
 Pick a directory for your artifacts (anywhere — `~/podium-artifacts/`
-is a fine default), and tell Podium that's your registry, with
-Claude Code as the default harness:
+is a fine default). In the project where you'll use them, tell
+Podium that's your registry, with Claude Code as the default
+harness:
 
 ```bash
 mkdir -p ~/podium-artifacts/personal
-podium init --global \
-  --registry ~/podium-artifacts/ \
-  --harness claude-code
+cd ~/projects/your-project
+podium init --registry ~/podium-artifacts/ --harness claude-code
 ```
 
-That writes `~/.podium/sync.yaml` with two defaults: a registry
-pointing at the directory (so the client reads from disk directly —
-no server) and a harness telling Podium how to format outputs for
-Claude Code. Verify:
+That writes `<workspace>/.podium/sync.yaml` with two defaults: a
+registry pointing at the directory (so the client reads from disk
+directly — no server) and a harness telling Podium how to format
+outputs for Claude Code. Verify:
 
 ```bash
 podium config show
 ```
 
 You should see the registry path and the harness in the merged
-config.
+config. To share these defaults with teammates, commit
+`.podium/sync.yaml`. For a per-developer config that follows you
+across projects, run `podium init --global` instead.
 
 ---
 
@@ -116,24 +118,24 @@ Two things worth knowing about that file:
 
 ## 4. Materialize into Claude Code
 
-In a project where you use Claude Code (any directory with a
-`.claude/` folder, or where you'd like one):
+You're already in the project from step 2. Run sync:
 
 ```bash
-cd ~/projects/your-project/
-podium sync --target .claude/
+podium sync
 ```
 
 Output:
 
 ```
-Materialized 1 artifact to .claude/:
+Materialized 1 artifact to .:
   personal/hello/greet@1.0.0 → .claude/agents/greet.md
 ```
 
 Podium walked your registry, found the one artifact you authored,
 ran the Claude Code harness adapter on it, and wrote the result to
-the path Claude Code expects.
+the path Claude Code expects. The default sync target is the
+current directory; the adapter knows to write into `.claude/agents/`
+underneath.
 
 ---
 
@@ -170,11 +172,11 @@ Now that the loop works, here's where to go:
   Try a different `type:` — `command`, `context`, `rule`, `hook`,
   `agent`, `mcp-server`. The [authoring guide](../authoring/) has
   the field reference and recipes for each.
-- **Pin per-project settings.** Run `podium init` (without
-  `--global`) inside a project to write
-  `<workspace>/.podium/sync.yaml` so teammates inherit your harness,
-  target, and any [profiles](../authoring/) you set up. Commit the
-  file.
+- **Share settings with teammates.** Commit the
+  `<workspace>/.podium/sync.yaml` you just created so teammates
+  inherit your harness, target, and any [profiles](../authoring/)
+  you set up. For a per-developer config that follows you across
+  projects, use `podium init --global`.
 - **Browse the catalog from the agent.** As your registry grows, the
   agent can call `load_domain`, `search_domains`, and
   `search_artifacts` to discover what's available — but that needs
