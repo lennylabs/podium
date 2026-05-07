@@ -1,6 +1,6 @@
 # Quickstart — your first skill in 5 minutes
 
-This walks you through installing Podium, authoring a skill, and loading it from Claude Code. Standalone mode: no Postgres, no S3, no IdP, no auth. Single binary. Works offline.
+This walks you through installing Podium, authoring a skill, and using it in Claude Code. Filesystem-source mode: no daemon, no port, no auth — just the CLI reading a directory and writing files. The lightest possible Podium setup.
 
 ## What you'll need
 
@@ -15,32 +15,30 @@ Install `podium` via your package manager or download the latest release binary 
 podium --version
 ```
 
-## 2. Start the server
+## 2. Configure Podium
 
-Standalone mode, zero config:
+Tell Podium to use a local directory as its registry, and to materialize for Claude Code by default:
 
 ```bash
-podium serve
+mkdir -p ~/podium-artifacts
+podium init --global \
+  --registry ~/podium-artifacts/ \
+  --harness claude-code
 ```
 
-You'll see something like:
+That writes `~/.podium/sync.yaml` with `defaults.registry: ~/podium-artifacts/` (a filesystem path, so the client runs in-process — no server) and `defaults.harness: claude-code`. Verify:
 
+```bash
+podium config show
 ```
-No config found at ~/.podium/registry.yaml — starting in standalone mode at http://127.0.0.1:8080.
-Run `podium serve --strict` to require explicit setup.
-Created ~/podium-artifacts/ for the default layer.
-Listening on 127.0.0.1:8080.
-```
-
-Leave it running. Open a second terminal.
 
 ## 3. Author a skill
 
-A skill is a directory with an `ARTIFACT.md` file at its root. Drop one into `~/podium-artifacts/`:
+A skill is a directory with an `ARTIFACT.md` file. The first level under `~/podium-artifacts/` is treated as a layer; everything below is artifacts.
 
 ```bash
-mkdir -p ~/podium-artifacts/hello/greet
-cat > ~/podium-artifacts/hello/greet/ARTIFACT.md <<'EOF'
+mkdir -p ~/podium-artifacts/personal/hello/greet
+cat > ~/podium-artifacts/personal/hello/greet/ARTIFACT.md <<'EOF'
 ---
 type: skill
 name: greet
@@ -57,62 +55,44 @@ today's date in a friendly format. Be concise — one or two sentences.
 EOF
 ```
 
-Find the layer id and tell Podium to ingest:
+## 4. Materialize into Claude Code's directory
 
 ```bash
-podium layer list
-podium layer reingest <layer-id>
+cd ~/projects/your-project/   # or any directory with a .claude/ folder
+podium sync --target .claude/
 ```
 
-You should see `New artifacts: 1 (hello/greet@1.0.0)`.
+You should see something like:
 
-## 4. Wire Claude Code to Podium
-
-Add Podium's MCP server to `~/.claude/mcp.json` (create the file if it doesn't exist):
-
-```json
-{
-  "mcpServers": {
-    "podium": {
-      "command": "podium-mcp",
-      "env": {
-        "PODIUM_REGISTRY_ENDPOINT": "http://127.0.0.1:8080",
-        "PODIUM_HARNESS": "claude-code"
-      }
-    }
-  }
-}
+```
+Materialized 1 artifact to .claude/:
+  personal/hello/greet@1.0.0 → .claude/agents/greet.md
 ```
 
-Restart Claude Code.
+## 5. Use it
 
-## 5. Use the skill
-
-Open Claude Code in any project. Type:
+Open Claude Code in that project. Type:
 
 ```
 hello!
 ```
 
-Claude will:
+Claude Code natively discovers `.claude/agents/greet.md` (no MCP needed) and uses the skill. Greet the user by name with today's date.
 
-1. Call `search_artifacts` looking for greeting-related skills.
-2. Find `hello/greet`.
-3. Call `load_artifact` to get the prose body and any bundled resources.
-4. Greet you by name with today's date.
+## Watch mode (optional)
 
-That's the loop. You authored once, the registry served it lazily, and the agent loaded it on demand.
+If you're authoring iteratively, run `podium sync --watch` instead — it uses `fsnotify` to watch the registry directory and re-materializes on every change. Save a `.peng.md`-style edit, see it land in `.claude/` immediately.
 
-## Where to go from here
+## What's next
 
-- Add more skills, agents, contexts, or prompts. The frontmatter `type:` field decides what Podium treats them as.
-- Browse what you've authored: `podium serve --web-ui` exposes a SPA at `http://127.0.0.1:8080/ui` — see the [Web UI section of §13.10](../spec/spec.md#1310-standalone-deployment) of the spec.
-- When you outgrow standalone — multiple users, governance needs, multiple harnesses — read the [team rollout guide](team-rollout.md).
-- The [spec](../spec/spec.md) is the full reference.
+- Add more artifacts in `~/podium-artifacts/<layer>/...`. The frontmatter `type:` field decides the kind (skill / agent / context / prompt / hook / command — see the spec).
+- Use `podium config show` to inspect the merged config — useful as you add per-project configs.
+- Pin per-project settings by running `podium init` (without `--global`) in a project workspace. Writes `<workspace>/.podium/sync.yaml` (committed to git) so teammates inherit your harness, target, and any profiles you set up.
+- Outgrow filesystem-source mode? When you need progressive disclosure (Claude calls MCP meta-tools at runtime to load capabilities incrementally instead of materializing everything ahead of time), graduate to a standalone server: `podium serve --standalone --layer-path ~/podium-artifacts/`. The same artifact directory; just add a daemon. See [team-rollout.md](team-rollout.md) for the bigger-picture path.
 
 ## Troubleshooting
 
-- **"No config found" repeats every restart.** That's expected on first run. Subsequent runs find `~/.podium/registry.yaml` and start without the message.
-- **Claude Code doesn't see the MCP server.** Confirm `podium-mcp` is on your `PATH` (it's a separate binary from `podium`), restart Claude Code, and check Claude Code's MCP logs for the connection error.
-- **`podium layer list` says no layers.** The default layer is created on the registry's first run — make sure step 2 actually started successfully (look for the "Listening on 127.0.0.1:8080" line).
-- **Skill works in `podium search` but Claude doesn't load it.** Check that `description:` is specific enough for `search_artifacts` to surface it under the prompts you're typing. Vague descriptions don't get loaded — see §3.3 of the spec on description quality.
+- **`config.no_registry` error.** `podium init` didn't run, or the resolved `defaults.registry` is empty. Run step 2 again.
+- **`podium sync` says no artifacts.** Make sure your artifact lives under a layer subdirectory (`~/podium-artifacts/<layer-name>/...`), not directly in `~/podium-artifacts/`.
+- **Claude Code doesn't see the skill.** Check that `.claude/agents/greet.md` exists; if it does, restart Claude Code so it re-reads the directory.
+- **Skill is found but not loaded.** Check that `description:` is specific enough for Claude to recognize the skill matches the prompt. Vague descriptions don't get used — see §3.3 of the spec on description quality.

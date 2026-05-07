@@ -70,7 +70,7 @@ Restart the registry.
 Developer side:
 
 ```bash
-podium init --remote https://podium.your-org.example
+podium init --global --registry https://podium.your-org.example
 export PODIUM_OAUTH_CLIENT_ID=podium
 export PODIUM_OAUTH_AUTHORIZATION_ENDPOINT=https://<keycloak-host>/realms/<realm-name>/protocol/openid-connect/auth/device
 podium login

@@ -134,16 +134,16 @@ The minimum viable alternative — a short script that watches a Git repo and co
 | MCP server is a single binary with pluggable identity, overlay, and harness adapter | One binary serves every MCP deployment context. Identity providers, the workspace local overlay, and the harness adapter are all selected via configuration.                                                                                                                                                                                                                                                             |
 | Author once, deliver anywhere                                                       | Artifacts have one canonical authored form. At delivery time (MCP materialization or `podium sync`), the configured `HarnessAdapter` translates into the harness's native shape (Claude Code, Claude Desktop, Cursor, Gemini, OpenCode, Codex, or `none` for raw).                                                                                                                                                       |
 | Lazy and eager loading are both first-class                                         | Lazy MCP/SDK mediation keeps the working set small at runtime — most valuable when catalogs grow large. Eager `podium sync` lets the author materialize once and rely on the harness's native discovery — the right call when the author specifically wants that, regardless of catalog size.                                                                                                                            |
-| Git as the authoring source of truth                                                | Authors merge to a tracked Git ref; the registry ingests on webhook. The registry's content store mirrors what's been ingested and is the served source of truth — bit-for-bit immutable per `(artifact_id, version)`. `local`-source layers cover standalone and small-team installations using the same ingest semantics.                                                                                                    |
+| Git as the authoring source of truth                                                | Authors merge to a tracked Git ref; the registry ingests on webhook. The registry's content store mirrors what's been ingested and is the served source of truth — bit-for-bit immutable per `(artifact_id, version)`. `local`-source layers cover standalone and small-team installations using the same ingest semantics.                                                                                              |
 | Explicit ordered layer list, not a fixed hierarchy                                  | Each layer is admin-defined or user-defined, has a `git` or `local` source, and declares its own visibility (public / organization / OIDC groups / specific users). The caller's effective view is the composition of every layer they can see, in the configured order, plus the workspace local overlay (when present).                                                                                                |
 | Visibility enforced at the registry on every call                                   | The registry composes the caller's effective view from the configured layer list. Git provider permissions are not consulted at request time. Authoring rights live in the Git provider's branch protection, not in Podium.                                                                                                                                                                                              |
 | Single `admin` role per tenant                                                      | Admins manage the layer list, freeze windows, and tenant settings. Per-artifact roles do not exist; visibility is per-layer.                                                                                                                                                                                                                                                                                             |
 | Cap of 3 user-defined layers per identity by default                                | Configurable per tenant. Keeps personal-layer growth bounded; reordering supported.                                                                                                                                                                                                                                                                                                                                      |
 | No registry-side polling                                                            | Ingestion fires from Git provider webhooks or from manual `podium layer reingest` invocations. `local`-source layers re-scan on demand.                                                                                                                                                                                                                                                                                  |
-| PostgreSQL + pgvector for the registry (sqlite + sqlite-vec in standalone mode)           | Default backend for manifest metadata, dependency edges, embeddings, layer config, admin grants, and audit. Vector storage is pluggable: managed services (Pinecone, Weaviate Cloud, Qdrant Cloud) can replace pgvector / sqlite-vec, in which case the metadata store stays in Postgres (or SQLite) and embeddings live in the external service. The metadata store itself is also pluggable via `RegistryStore`.       |
+| PostgreSQL + pgvector for the registry (sqlite + sqlite-vec in standalone mode)     | Default backend for manifest metadata, dependency edges, embeddings, layer config, admin grants, and audit. Vector storage is pluggable: managed services (Pinecone, Weaviate Cloud, Qdrant Cloud) can replace pgvector / sqlite-vec, in which case the metadata store stays in Postgres (or SQLite) and embeddings live in the external service. The metadata store itself is also pluggable via `RegistryStore`.       |
 | Per-workspace MCP server lifecycle on developer hosts                               | When the MCP server runs as a developer-side subprocess, the host spawns one per workspace, over stdio. The workspace local overlay lives at `.podium/overlay/`. Cache lives in `~/.podium/cache/` and is content-addressed across workspaces.                                                                                                                                                                           |
 | Versions are immutable; semver-named                                                | Every `(artifact_id, semver)` pair, once ingested, is bit-for-bit immutable forever. Internal cache keying is by content hash.                                                                                                                                                                                                                                                                                           |
-| MIT license; multi-vendor neutrality | Permissive, enterprise-friendly, common for infrastructure projects. |
+| MIT license; multi-vendor neutrality                                                | Permissive, enterprise-friendly, common for infrastructure projects.                                                                                                                                                                                                                                                                                                                                                     |
 
 ### 1.5 Where Podium Fits
 
@@ -178,7 +178,11 @@ The canonical artifact format is intended for upstream contribution to an MCP-ad
 
 ### 2.1 High-Level Component Map
 
-A single centralized registry service serves every consumer. Three consumer shapes read from it: the Podium MCP server (in-process bridge for MCP-speaking hosts), `podium sync` (filesystem delivery for harnesses that load artifacts directly from disk), and the language SDKs (programmatic access for non-MCP runtimes). All three speak the same registry HTTP API, share identity providers, and apply the same layer composition and visibility filtering.
+The registry is the system of record for artifacts. It can be reached two ways — as an external HTTP service (§13.10) or as a local filesystem path (§13.11). The diagram below shows the HTTP-service shape. See §7.1 for the dispatch and what each shape supports.
+
+Three consumer shapes read from the registry over HTTP: the Podium MCP server (in-process bridge for MCP-speaking hosts), `podium sync` (filesystem delivery for harnesses that load artifacts directly from disk), and the language SDKs (programmatic access for non-MCP runtimes). All three speak the same registry HTTP API, share identity providers, and apply the same layer composition and visibility filtering.
+
+`podium sync` is also the only consumer that works against a filesystem-source registry (eager materialization, no HTTP).
 
 ```
                           ┌───────────────────────────┐
@@ -330,7 +334,7 @@ The caller's OAuth identity drives layer composition exactly as for a real sessi
 
 ```yaml
 tenant:
-  expose_scope_preview: true   # default
+  expose_scope_preview: true # default
 ```
 
 When `false`, the endpoint returns `403 scope_preview_disabled`. When `true`, the endpoint always returns aggregate counts only — never identifiers, descriptions, or any per-artifact metadata.
@@ -703,6 +707,8 @@ Read-side enforcement happens at the registry on every call. Git provider permis
 
 **Public-mode bypass.** When the registry is started with `--public-mode` (§13.10), the visibility evaluator short-circuits to `true` for every layer and every caller. `visibility:` declarations stay in config (so artifacts remain portable to non-public deployments) but are not enforced at request time. Public mode is mutually exclusive with an identity provider — see §13.10 for the safety constraints.
 
+**Filesystem-registry bypass.** With a filesystem-source registry (§13.11) there is no identity, so the visibility evaluator short-circuits to `true` for every layer. `visibility:` declarations stay in the layer config (artifacts remain portable to server-source deployments) but are not enforced.
+
 Authoring rights are out of Podium's scope. Whoever can merge to the tracked Git ref publishes; whoever can write to the `local` filesystem path publishes there. Teams configure branch protection, required reviewers, and signing requirements in their Git provider as they see fit. Podium reads no in-repo permission files.
 
 #### Config schema
@@ -821,13 +827,13 @@ In either case, an `EmbeddingProvider` can be **explicitly configured** to overr
 
 **Built-in `EmbeddingProvider` implementations** (selected via `PODIUM_EMBEDDING_PROVIDER`):
 
-| Value                            | Model defaults                               | Notes                                                                                                     |
-| -------------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `embedded-onnx` _(standalone default)_ | `bge-small-en-v1.5` (384 dimensions, ~30 MB) | Bundled ONNX model running in-process. No external service.                                               |
-| `openai` _(standard default)_    | `text-embedding-3-small` (1536 dim)          | Requires `OPENAI_API_KEY`.                                                                                |
-| `voyage`                         | `voyage-3`                                   | Requires `VOYAGE_API_KEY`.                                                                                |
-| `cohere`                         | `embed-v4`                                   | Requires `COHERE_API_KEY`.                                                                                |
-| `ollama`                         | configurable                                 | Points at any Ollama endpoint (default `http://localhost:11434`). Useful for standalone + offline + air-gapped. |
+| Value                                  | Model defaults                               | Notes                                                                                                           |
+| -------------------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `embedded-onnx` _(standalone default)_ | `bge-small-en-v1.5` (384 dimensions, ~30 MB) | Bundled ONNX model running in-process. No external service.                                                     |
+| `openai` _(standard default)_          | `text-embedding-3-small` (1536 dim)          | Requires `OPENAI_API_KEY`.                                                                                      |
+| `voyage`                               | `voyage-3`                                   | Requires `VOYAGE_API_KEY`.                                                                                      |
+| `cohere`                               | `embed-v4`                                   | Requires `COHERE_API_KEY`.                                                                                      |
+| `ollama`                               | configurable                                 | Points at any Ollama endpoint (default `http://localhost:11434`). Useful for standalone + offline + air-gapped. |
 
 Custom embedding providers register through the SPI as Go-module plugins.
 
@@ -1028,22 +1034,24 @@ The Podium MCP server is a thin in-process bridge. It exposes the three meta-too
 
 A single Go binary serves every deployment context. The host configures it via env vars, command-line flags, or a config file.
 
+**Requires a server-source registry.** The MCP server speaks HTTP and does not work against a filesystem-source registry (§13.11).
+
 ### 6.2 Configuration
 
 Top-level configuration parameters (env-var form shown; `--flag` and config-file equivalents are accepted):
 
-| Parameter                    | Description                                            | Default                               |
-| ---------------------------- | ------------------------------------------------------ | ------------------------------------- |
-| `PODIUM_REGISTRY_ENDPOINT`   | Registry HTTP API endpoint                             | (read from `sync.yaml`'s `defaults.endpoint` per §7.5.2 if unset; required if neither is set) |
-| `PODIUM_IDENTITY_PROVIDER`   | Selected identity provider implementation              | `oauth-device-code`                   |
-| `PODIUM_HARNESS`             | Selected harness adapter                               | `none` (write canonical layout as-is) |
-| `PODIUM_OVERLAY_PATH`        | Workspace path for the `local` overlay                 | (unset → layer disabled)              |
-| `PODIUM_CACHE_DIR`           | Content-addressed cache directory                      | `~/.podium/cache/`                    |
-| `PODIUM_CACHE_MODE`          | `always-revalidate` / `offline-first` / `offline-only` | `always-revalidate`                   |
-| `PODIUM_AUDIT_SINK`          | Local audit destination (path or external endpoint). When set without a value (or set to `default`), uses `~/.podium/audit.log`. | (unset → registry audit only)         |
-| `PODIUM_MATERIALIZE_ROOT`    | Default destination root for `load_artifact`           | (host specifies per call)             |
-| `PODIUM_PRESIGN_TTL_SECONDS` | Override for presigned URL TTL                         | 3600                                  |
-| `PODIUM_VERIFY_SIGNATURES`   | Verify artifact signatures on materialization          | `medium-and-above`                    |
+| Parameter                    | Description                                                                                                                      | Default                                                                                       |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `PODIUM_REGISTRY`            | Registry source: URL (HTTP) or filesystem path. See §7.5.2 for dispatch.                                                         | (read from `sync.yaml`'s `defaults.registry` per §7.5.2 if unset; required if neither is set) |
+| `PODIUM_IDENTITY_PROVIDER`   | Selected identity provider implementation                                                                                        | `oauth-device-code`                                                                           |
+| `PODIUM_HARNESS`             | Selected harness adapter                                                                                                         | `none` (write canonical layout as-is)                                                         |
+| `PODIUM_OVERLAY_PATH`        | Workspace path for the `local` overlay                                                                                           | (unset → layer disabled)                                                                      |
+| `PODIUM_CACHE_DIR`           | Content-addressed cache directory                                                                                                | `~/.podium/cache/`                                                                            |
+| `PODIUM_CACHE_MODE`          | `always-revalidate` / `offline-first` / `offline-only`                                                                           | `always-revalidate`                                                                           |
+| `PODIUM_AUDIT_SINK`          | Local audit destination (path or external endpoint). When set without a value (or set to `default`), uses `~/.podium/audit.log`. | (unset → registry audit only)                                                                 |
+| `PODIUM_MATERIALIZE_ROOT`    | Default destination root for `load_artifact`                                                                                     | (host specifies per call)                                                                     |
+| `PODIUM_PRESIGN_TTL_SECONDS` | Override for presigned URL TTL                                                                                                   | 3600                                                                                          |
+| `PODIUM_VERIFY_SIGNATURES`   | Verify artifact signatures on materialization                                                                                    | `medium-and-above`                                                                            |
 
 Provider-specific options are passed as additional env vars (e.g., `PODIUM_OAUTH_AUDIENCE`, `PODIUM_SESSION_TOKEN_ENV`).
 
@@ -1054,10 +1062,10 @@ Identity providers attach the caller's OAuth-attested identity to every registry
 - **`oauth-device-code`** _(default)_. Interactive device-code flow on first use; tokens cached in the OS keychain (macOS Keychain, Windows Credential Manager, libsecret on Linux). Refreshes transparently. Defaults: access-token TTL 15 min, refresh-token TTL 7 days, revocation propagation ≤60s. Options: `PODIUM_OAUTH_AUDIENCE`, `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT`, `PODIUM_TOKEN_KEYCHAIN_NAME`.
 
   How the verification URL surfaces depends on the consumer:
-
   - **MCP server** uses MCP elicitation — the host displays the URL and code in the agent UI.
   - **`podium sync`, `podium login`, and other CLI commands** print the URL and code to stderr, attempt to open the URL in the system browser (via `open` on macOS, `xdg-open` on Linux, `start` on Windows), and poll the IdP's token endpoint until the user completes the flow or a 10-minute timeout elapses. `--no-browser` skips the auto-open. Output is suppressed under `--json`; the prompt is replaced with a structured `auth.device_code_pending` event emitted on stderr.
   - **SDK** raises `DeviceCodeRequired` with the URL and code; calling code is responsible for surfacing it to the user. `Client.login()` performs the same blocking poll-until-completion the CLI uses.
+
 - **`injected-session-token`**. The MCP server reads a signed JWT from an env var or file path configured by the runtime. The runtime is responsible for token issuance and refresh. Options: `PODIUM_SESSION_TOKEN_ENV`, `PODIUM_SESSION_TOKEN_FILE`.
 - **(Extensible.)** Additional implementations register through the `IdentityProvider` interface (§9).
 
@@ -1257,7 +1265,7 @@ The Podium MCP server is a stdio binary the host spawns alongside its other MCP 
     "podium": {
       "command": "podium-mcp",
       "env": {
-        "PODIUM_REGISTRY_ENDPOINT": "https://podium.acme.com",
+        "PODIUM_REGISTRY": "https://podium.acme.com",
         "PODIUM_HARNESS": "claude-desktop"
       }
     }
@@ -1273,7 +1281,7 @@ The Podium MCP server is a stdio binary the host spawns alongside its other MCP 
     "podium": {
       "command": "podium-mcp",
       "env": {
-        "PODIUM_REGISTRY_ENDPOINT": "https://podium.acme.com",
+        "PODIUM_REGISTRY": "https://podium.acme.com",
         "PODIUM_HARNESS": "claude-code",
         "PODIUM_OVERLAY_PATH": "${WORKSPACE}/.podium/overlay/"
       }
@@ -1290,7 +1298,7 @@ The Podium MCP server is a stdio binary the host spawns alongside its other MCP 
     "podium": {
       "command": "podium-mcp",
       "env": {
-        "PODIUM_REGISTRY_ENDPOINT": "https://podium.acme.com",
+        "PODIUM_REGISTRY": "https://podium.acme.com",
         "PODIUM_HARNESS": "cursor"
       }
     }
@@ -1298,7 +1306,7 @@ The Podium MCP server is a stdio binary the host spawns alongside its other MCP 
 }
 ```
 
-**Standalone (no env override).** When `podium init --standalone` has written `~/.podium/sync.yaml` with `defaults.endpoint: http://127.0.0.1:8080` (§7.7), the MCP server resolves the endpoint from there and the env var can be omitted.
+**Standalone (no env override).** When `podium serve` has auto-bootstrapped `~/.podium/sync.yaml` with `defaults.registry: http://127.0.0.1:8080` (§13.10), or `podium init --global --standalone` has written it explicitly (§7.7), the MCP server resolves the registry from there and the env var can be omitted.
 
 For other MCP-speaking hosts (custom runtimes, non-major harnesses), the same snippet shape applies; `PODIUM_HARNESS=none` writes the canonical layout when no harness-specific adapter is configured.
 
@@ -1306,24 +1314,25 @@ For other MCP-speaking hosts (custom runtimes, non-major harnesses), the same sn
 
 ## 7. External Integration
 
-### 7.1 The Registry Is an External System
+### 7.1 The Registry: External HTTP or Local Filesystem
 
-From the host's perspective, the registry is an external system reached on demand. Every discovery, search, and load call round-trips to the registry's HTTP API. The system prompt carries the meta-tool descriptions only; the working set assembles call by call as the host invokes `load_artifact`.
+The registry is the system of record for artifacts. It can be reached two ways:
 
-This separation is deliberate:
+- **External HTTP service.** The registry runs as a server (standalone or standard deployment, §13.10) and clients reach it over HTTP.
+- **Local filesystem.** The registry is a directory of artifacts on disk (§13.11). The Podium CLI reads it directly via `podium sync` for eager materialization.
 
-- The registry can be self-hosted, multi-tenant, or fully managed without changing the host's behavior.
-- Layer composition and visibility filtering live at the registry, where the OAuth identity is the authoritative input.
-- Artifact updates take effect on the next call.
+Both shapes apply layer composition (§4.6). The dispatch between them is governed by the value of `defaults.registry` in the merged `sync.yaml` (§7.5.2): a URL routes to HTTP, a filesystem path routes to local filesystem.
 
-#### Latency budgets (SLO targets)
+The MCP server (§6), the language SDKs (§7.6), and identity-based visibility filtering require the external HTTP shape; filesystem source does not provide them. The full list of what each shape supports is in §13.11.
+
+#### Latency budgets (SLO targets — server source)
 
 - `load_domain`: p99 < 200 ms
 - `search_artifacts`: p99 < 200 ms
 - `load_artifact` (manifest only): p99 < 500 ms
 - `load_artifact` (manifest + ≤10 MB resources from cache miss): p99 < 2 s
 
-Deployments that miss these should investigate.
+Server deployments that miss these should investigate.
 
 ### 7.2 Control Plane / Data Plane Split
 
@@ -1471,7 +1480,7 @@ podium sync --config .podium/sync.yaml
 
 The sync command reads the caller's effective view (the composed layer list after visibility filtering and `extends:` resolution), applies the requested scope filters, and writes each artifact through the configured `HarnessAdapter` to the target directory.
 
-`podium sync` reuses the same identity providers as the MCP server (`oauth-device-code` on developer machines, `injected-session-token` in managed runtimes), the same content cache, and the same harness adapters.
+`podium sync` works against either kind of registry source — a server (URL) or a local filesystem (path); see §7.5.2 for dispatch and §13.11 for filesystem-specific behavior. Against a server source, sync uses the same identity providers as the MCP server, the same content cache, and the same harness adapters.
 
 The sync model is type-agnostic: skills, agents, contexts, prompts, and `mcp-server` registrations all sync through the same path; the harness adapter decides where each type lands.
 
@@ -1498,48 +1507,53 @@ Path-scoped sync is the recommended way to keep a harness's working set small en
 - **Per-team profile.** Each team defines a profile that includes its domain plus shared utilities. Developers run `podium sync --profile <team>`.
 - **Programmatic curation.** A script uses the SDK to pick artifacts based on context (the current task, semantic search, etc.), then invokes `podium sync --include <id> [--include <id> ...]` to materialize the chosen set. See §9.3.
 
-#### 7.5.2 sync.yaml Schema
+#### 7.5.2 Configuration (`sync.yaml`)
 
-`sync.yaml` configures profiles, defaults, and multi-target lists. It supports global defaults, named profiles, and a `targets:` list for multi-destination syncs.
+`sync.yaml` configures the registry source, profiles, defaults, and multi-target lists. The same schema is read from up to three file scopes; precedence resolves which value wins per key.
 
-**Lookup order.** When `podium sync` (or `podium sync override`, `save-as`, or `podium profile edit`) needs to read or write profile config, it resolves the file in this order:
+**File scopes.**
 
-1. `--config <path>` if passed explicitly.
-2. `<CWD>/.podium/sync.yaml` if it exists (workspace-local — wins over user-level so per-project profiles shadow general ones).
-3. `${XDG_CONFIG_HOME}/podium/sync.yaml` if `XDG_CONFIG_HOME` is set, else `~/.config/podium/sync.yaml` (XDG-standard user config).
-4. `~/.podium/sync.yaml` (matches the existing `~/.podium/cache/` convention).
-5. None — sync runs against the registry's full effective view, no profiles.
+| Scope          | Path                                  | Typical content                                                                    |
+| -------------- | ------------------------------------- | ---------------------------------------------------------------------------------- |
+| User-global    | `~/.podium/sync.yaml`                 | per-developer defaults that follow them across projects (typical: harness, target) |
+| Project-shared | `<workspace>/.podium/sync.yaml`       | per-project settings committed to git (typical: registry, profile)                 |
+| Project-local  | `<workspace>/.podium/sync.local.yaml` | per-developer overrides on top of the project file; gitignored                     |
 
-`podium profile edit` and `podium sync save-as` write to the same file the lookup resolves to. `--user` forces the user-level location (creates `~/.config/podium/sync.yaml` if neither user-level path exists yet); `--workspace` forces `<CWD>/.podium/sync.yaml`.
+The schema is identical at every scope — every field that's valid at user-global is valid at project-shared and project-local. Placement is convention, not enforcement: a project that wants to pin harness + target across teammates does so by putting those fields in the project-shared file.
+
+**Workspace discovery.** Project-shared and project-local files are discovered by walking up from CWD until a `.podium/` directory is found, mirroring how `git` finds `.git`. The discovered `.podium/` directory is also the home for `overlay/` (workspace local overlay, §6.4) and `sync.lock` (§7.5.3).
+
+**Precedence.** Resolved per-key, highest precedence first:
+
+1. CLI flags
+2. `PODIUM_*` env vars
+3. `<workspace>/.podium/sync.local.yaml`
+4. `<workspace>/.podium/sync.yaml`
+5. `~/.podium/sync.yaml`
+6. Built-in defaults
+
+**Profile merge.** Profiles are additive across files — union by profile name. On name collision, the higher-precedence file's definition wins entirely (whole-profile overwrite, no field-level merge inside a profile). A stderr warning fires only when invoking a profile that has a collision (`podium sync --profile X` with multi-defined `X`); a sync against a non-colliding profile stays quiet. `podium config show` (§7.7) always surfaces collisions for debugging.
+
+**Schema:**
 
 ```yaml
-# .podium/sync.yaml
-
-# Defaults applied when a flag is not otherwise set.
 defaults:
-  endpoint: https://podium.acme.com   # registry URL (or http://127.0.0.1:8080 for standalone)
+  registry: https://podium.acme.com # see "Registry source" below — accepts URL or filesystem path
   harness: claude-code
   target: ~/.claude/
+  profile: project-default # default profile when --profile is not passed
 
-# Named profiles selected via --profile <name>.
 profiles:
-  finance-team:
+  project-default:
     include:
       - "finance/**"
       - "shared/policies/*"
     exclude:
       - "finance/**/legacy/**"
     type: [skill, agent]
-
   oncall:
-    include:
-      - "platform/oncall/**"
-      - "shared/runbooks/*"
+    include: ["platform/oncall/**", "shared/runbooks/*"]
     target: ~/.claude-oncall/ # overrides the default target
-
-  minimal:
-    include:
-      - "shared/critical/*"
 
 # Multi-target list selected via --config (without --profile).
 # Each entry runs as a separate sync with its own scope and target.
@@ -1547,21 +1561,28 @@ targets:
   - id: claude-code
     harness: claude-code
     target: ~/.claude/
-    profile: finance-team
+    profile: project-default
   - id: codex-runbooks
     harness: codex
     target: ~/.codex/
     include: ["shared/runbooks/**"]
 ```
 
+**Registry source.** `defaults.registry` accepts either a URL or a filesystem path; the client adapts:
+
+- **URL** (`http://` / `https://`) — the client speaks HTTP to that registry server. All consumer paths (MCP server, SDKs, `podium sync`, read CLI) work.
+- **Filesystem path** (relative or absolute) — `podium sync` reads the directory directly, applies layer composition (§4.6), and materializes through the configured harness adapter. Each subdirectory of the path is a `local`-source layer; ordering is alphabetical (or governed by `<registry-path>/.layer-order`). **`podium sync` is the only consumer that works in this shape** — the MCP server and the SDKs require a server source. See §13.11 for the full filesystem-registry description.
+- **Unset across all scopes** — `config.no_registry` error. The client points the user at `podium init` to configure one. There is no implicit workspace fallback; `podium sync` will not auto-detect `.podium/registry/` without explicit config.
+
+Override an inherited URL with a filesystem path by setting `defaults.registry` explicitly at a higher-precedence scope (typically the project-shared file). Normal precedence applies; no magic-value semantics.
+
 **Resolution rules.**
 
-- **Endpoint resolution.** Order of precedence: (1) `--endpoint <url>` flag if the command supports it, (2) `PODIUM_REGISTRY_ENDPOINT` env var, (3) `defaults.endpoint` from the resolved `sync.yaml`, (4) error (`network.no_endpoint_configured`). The resolved value is the URL clients use to reach the registry — standalone and remote share the same field; only the URL differs (e.g., `http://127.0.0.1:8080` vs. `https://podium.acme.com`).
 - **Profile lookup.** `--profile <name>` selects an entry under `profiles:`. The profile's fields are merged on top of `defaults:`.
 - **CLI override.** Explicit CLI flags override the resolved profile (and defaults) for the same field. `--include` and `--exclude` on the CLI replace the profile's lists rather than appending; if you need additive composition, define a new profile.
 - **Multi-target mode.** `podium sync --config <path>` (without `--profile`) iterates `targets:` and runs one sync per entry. Each entry can name a `profile:` (resolved as above) or specify `include`/`exclude`/`type` inline. Each target writes its own `<target>/.podium/sync.lock`; the multi-target invocation does not introduce shared state across targets.
 - **Profile composition.** Profiles do not reference other profiles; nesting is intentionally not supported. A team that wants an "extended" profile defines a new entry with the combined include/exclude lists.
-- **Validation.** `podium sync --check` validates the config against the schema and reports unresolved profile references, malformed globs, and target collisions without performing any writes.
+- **Validation.** `podium sync --check` validates the merged config against the schema and reports unresolved profile references, malformed globs, target collisions, and profile-name collisions across scopes (warning, not error).
 
 #### 7.5.3 Lock File (`.podium/sync.lock`)
 
@@ -1574,7 +1595,7 @@ Schema:
 ```yaml
 # <target>/.podium/sync.lock
 version: 1
-profile: finance-team           # null when no profile was used
+profile: finance-team # null when no profile was used
 scope:
   include: ["finance/**", "shared/policies/*"]
   exclude: ["finance/**/legacy/**"]
@@ -1582,7 +1603,7 @@ scope:
 harness: claude-code
 target: /Users/joan/.claude/
 last_synced_at: 2026-05-05T14:30:00Z
-last_synced_by: full            # full | watch | override
+last_synced_by: full # full | watch | override
 
 # Currently materialized artifacts.
 artifacts:
@@ -1704,18 +1725,20 @@ Two thin language SDKs are provided, both backed by the registry's HTTP API:
 - **`podium-py`** (PyPI) — for Python orchestrators. Used by LangChain consumers, OpenAI Assistants integrations, custom build/eval pipelines, and notebook environments.
 - **`podium-ts`** (npm) — for TypeScript / Node orchestrators. Used by Bedrock Agents, custom Node-based agent runtimes, and Edge runtime integrations.
 
+**Require a server-source registry.** Both SDKs speak HTTP and do not work against a filesystem-source registry (§13.11).
+
 Surface area:
 
 ```python
 from podium import Client
 
-# from_env reads PODIUM_REGISTRY_ENDPOINT, PODIUM_IDENTITY_PROVIDER,
+# from_env reads PODIUM_REGISTRY, PODIUM_IDENTITY_PROVIDER,
 # PODIUM_OVERLAY_PATH, etc. Constructor params override env values.
 client = Client.from_env()
 
 # Or pass explicitly:
 client = Client(
-    endpoint="https://podium.acme.com",
+    registry="https://podium.acme.com",
     identity_provider="oauth-device-code",
     overlay_path="./.podium/overlay/",   # workspace local overlay (§6.4)
 )
@@ -1820,18 +1843,23 @@ for result in artifacts:
 **Wire shape.** `POST /v1/artifacts:batchLoad` with body `{ids: [...], session_id?, harness?, version_pins?: {<id>: <semver>}}`. Response is an array of per-item envelopes:
 
 ```json
-[{
-  "id": "finance/close-reporting/run-variance-analysis",
-  "status": "ok",
-  "version": "1.2.0",
-  "content_hash": "sha256:...",
-  "manifest_body": "...",
-  "resources": [{"path": "...", "presigned_url": "...", "content_hash": "..."}]
-}, {
-  "id": "finance/restricted/payroll-runner",
-  "status": "error",
-  "error": { "code": "visibility.denied", "message": "..." }
-}]
+[
+  {
+    "id": "finance/close-reporting/run-variance-analysis",
+    "status": "ok",
+    "version": "1.2.0",
+    "content_hash": "sha256:...",
+    "manifest_body": "...",
+    "resources": [
+      { "path": "...", "presigned_url": "...", "content_hash": "..." }
+    ]
+  },
+  {
+    "id": "finance/restricted/payroll-runner",
+    "status": "error",
+    "error": { "code": "visibility.denied", "message": "..." }
+  }
+]
 ```
 
 **Semantics.**
@@ -1844,47 +1872,84 @@ for result in artifacts:
 
 **Not exposed as an MCP meta-tool** (§5). The MCP path is agent-mediated and load-on-demand; bulk loading is a programmatic-runtime concern that doesn't belong in the agent's tool list. The MCP server uses this endpoint internally for cache warm-up when configured to prefetch.
 
-### 7.7 Onboarding: `podium init` and `podium login`
+### 7.7 Onboarding: `podium init`, `podium config show`, `podium login`
 
-Two convenience commands that handle first-time setup and explicit auth so users don't have to learn the underlying env-var contract on day one.
+Three commands cover client-side lifecycle: `podium init` writes a `sync.yaml`; `podium config show` displays the merged result with provenance; `podium login` runs the OAuth flow when the resolved registry is a server. Server-side setup is handled separately by `podium serve` (§13.10), which auto-bootstraps standalone defaults on first run.
 
 #### `podium init`
 
-Interactive setup wizard. Generates the right config files for either a standalone or a remote deployment. Idempotent — refuses to overwrite existing files without `--force`. For the simplest path, this command can be skipped — `podium serve` with no flags auto-bootstraps standalone defaults on first run (§13.10).
+Writes a `sync.yaml`. Default scope is workspace (`<ws>/.podium/sync.yaml`, committed to git); scope flags `--global` and `--local` target the user-global file or the gitignored project-local override file respectively. Idempotent — refuses to overwrite an existing file without `--force`.
 
 ```bash
-# Interactive: asks "standalone or remote?" and walks through the choices
-podium init
+# Workspace (default) — writes <ws>/.podium/sync.yaml, committed
+podium init                                              # interactive wizard
+podium init --registry https://podium.acme.com           # set the project's registry
+podium init --registry .podium/registry/                 # filesystem source — see §13.11
+podium init --standalone                                  # shortcut for --registry http://127.0.0.1:8080
+podium init --harness claude-code --target .claude/       # set per-project defaults at init time
 
-# Standalone (non-interactive): writes server config + client config + creates the layer dir
-podium init --standalone --layer-path ~/podium-artifacts
+# User-global — writes ~/.podium/sync.yaml
+podium init --global                                      # interactive
+podium init --global --registry https://podium.acme.com
+podium init --global --standalone
 
-# Remote (non-interactive): writes client config pointing at the registry
-podium init --remote https://podium.acme.com
+# Workspace personal override — writes <ws>/.podium/sync.local.yaml (gitignored)
+podium init --local
+podium init --local --registry https://podium-staging.acme.com
 ```
 
-What it writes:
+Mental model: scope flags (`--global`, `--local`) decide _where the file goes_; value flags (`--registry`, `--standalone`, `--harness`, `--target`) decide _what's in it_. Default scope is workspace because that's the common case; making it implicit keeps the standard onboarding path short.
 
-- `--standalone`: two files in one step.
-  - `~/.podium/registry.yaml` (server config) — sqlite + sqlite-vec + embedded-onnx + filesystem object store + `bind: 127.0.0.1:8080`.
-  - `~/.podium/sync.yaml` (client config) — `defaults.endpoint: http://127.0.0.1:8080` so subsequent `podium sync` / read CLI invocations resolve the endpoint without an env var.
-  - Creates `~/podium-artifacts/` (or whatever `--layer-path` points to) if missing. Prints the next step (`podium serve --standalone` to start the server).
-- `--remote`: writes only `~/.podium/sync.yaml` with `defaults.endpoint: <url>`. Prints a hint to run `podium login` next.
+`--registry <url-or-path>` accepts either a URL (server source) or a filesystem path (filesystem source, §13.11). The flag's value type determines the registry shape; there is no separate `--mode` flag.
+
+`--standalone` is a shortcut for `--registry http://127.0.0.1:8080`. It is purely client-side (this command only writes `sync.yaml`); the server itself is started by `podium serve`. For the all-in-one server-and-client bootstrap, use `podium serve` zero-flag (§13.10), which writes both `registry.yaml` and `sync.yaml` and starts serving.
+
+**Workspace mode behavior:**
+
+1. Walks up from CWD to find an existing `.podium/` directory; if none, creates `.podium/` in CWD.
+2. Writes `<workspace>/.podium/sync.yaml` with the chosen value flags as `defaults`.
+3. Adds `.podium/sync.local.yaml` and `.podium/overlay/` entries to `.gitignore` (creating it if needed) if they aren't already present.
+4. Prints next-step hints (commit `<ws>/.podium/sync.yaml`, run `podium sync` to materialize).
+
+`--global` writes to `~/.podium/sync.yaml` regardless of CWD and does not touch `.gitignore`. `--local` writes to `<ws>/.podium/sync.local.yaml` and assumes the workspace is already initialized.
+
+#### `podium config show`
+
+Prints the merged `sync.yaml` with per-key provenance:
+
+```
+$ podium config show
+defaults.registry:   https://podium.acme.com         (from <ws>/.podium/sync.yaml)
+defaults.harness:    claude-code                      (from ~/.podium/sync.yaml)
+defaults.target:     .claude/                         (from <ws>/.podium/sync.yaml)
+profiles.project-default:
+  include:           ["finance/**", "shared/policies/*"]   (from <ws>/.podium/sync.yaml)
+  exclude:           ["finance/**/legacy/**"]              (from <ws>/.podium/sync.yaml)
+profiles.staging:                                      (defined in <ws>/.podium/sync.local.yaml)
+  registry:          https://podium-staging.acme.com
+…
+
+Profile collisions: 1 (profiles.staging defined in both ~/.podium/sync.yaml and <ws>/.podium/sync.local.yaml; project-local wins)
+```
+
+`--explain <key>` prints just one key with its full resolution chain — which file each scope had, and which won. Useful when the merged output is large.
 
 #### `podium login`
 
-Explicit OAuth device-code flow for remote registries. Useful when sync is being scripted (auth before the script runs), when re-authing after token expiry, or when the user wants to confirm their identity before doing anything destructive.
+Explicit OAuth device-code flow against the resolved registry. Useful when sync is being scripted (auth before the script runs), when re-authing after token expiry, or when the user wants to confirm their identity before doing anything destructive.
 
 ```bash
-podium login                                    # uses PODIUM_REGISTRY_ENDPOINT or sync.yaml's default
-podium login --endpoint https://podium.acme.com
+podium login                                    # uses the merged config to find the registry
+podium login --registry https://podium.acme.com # override; useful for ad-hoc switches
 podium login --no-browser                       # don't auto-open the verification URL
 podium logout                                   # clears the cached token from the OS keychain
 ```
 
-Behavior: prints the verification URL and code to stderr, attempts to open the URL in the system browser, polls the IdP's token endpoint until the user completes the flow or a 10-minute timeout elapses, caches the access + refresh tokens in the OS keychain (per `oauth-device-code` in §6.3), and prints the resolved identity (`sub`, `email`, OIDC groups) on success. Exits non-zero on timeout, denial, or `auth.untrusted_runtime`.
+Behavior: resolves the registry from the merged config (or `--registry` flag), prints the verification URL and code to stderr, attempts to open the URL in the system browser, polls the IdP's token endpoint until the user completes the flow or a 10-minute timeout elapses, caches the access + refresh tokens in the OS keychain (per `oauth-device-code` in §6.3), and prints the resolved identity (`sub`, `email`, OIDC groups) on success. Exits non-zero on timeout, denial, or `auth.untrusted_runtime`.
 
-`podium login` is a no-op against a `--standalone` registry (no auth) and prints a notice instead of attempting the flow.
+**Multi-endpoint behavior.** Tokens cache in the OS keychain keyed by registry URL. A developer logged into both `https://podium.acme.com` and `https://podium-finance.acme.com` keeps both tokens simultaneously; switching projects (or running `podium login` in any context) authenticates against whichever registry the merged config resolves to. No `podium logout` between project switches required.
+
+`podium login` is a no-op when the resolved registry is a filesystem path (no auth) or points at a `--standalone` server (no auth) — in both cases it prints a notice and exits.
 
 ---
 
@@ -1968,24 +2033,24 @@ Podium is extensible at two layers. **In-process plugins** swap or augment the r
 
 ### 9.1 Pluggable Interfaces
 
-| Interface                | Default                                                              | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ------------------------ | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Interface                | Default                                                                    | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------ | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `RegistryStore`          | Postgres (standard) / SQLite (standalone)                                  | Manifest metadata, dependency edges, layer config, admin grants, registry-side audit. Embeddings live here too when the default vector backend is in use; see `RegistrySearchProvider`.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `RegistryObjectStore`    | S3-compatible (filesystem in standalone)                                   | Bundled resource bytes, presigned URLs                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `RegistrySearchProvider` | `pgvector` (standard) / `sqlite-vec` (standalone), with BM25 fused via RRF | Hybrid retrieval for `search_artifacts`. Built-ins shipped in the default binary, selectable via `PODIUM_VECTOR_BACKEND`: `pgvector`, `sqlite-vec`, `pinecone`, `weaviate-cloud`, `qdrant-cloud`. Each implementation declares a `self_embedding` capability — Pinecone Integrated Inference, Weaviate vectorizer, and Qdrant Cloud Inference set this true and don't require an `EmbeddingProvider`; storage-only backends (`pgvector`, `sqlite-vec`, plain `qdrant`, plain `weaviate`) require one. Custom backends register through this SPI as Go-module plugins (§9.2). Dual-write semantics for non-collocated backends are documented in §4.7. |
 | `EmbeddingProvider`      | `embedded-onnx` (standalone) / `openai` (standard)                         | Generates embeddings for ingest text and for `search_artifacts` queries. Built-ins shipped in the default binary, selectable via `PODIUM_EMBEDDING_PROVIDER`: `embedded-onnx`, `openai`, `voyage`, `cohere`, `ollama`. Required when `RegistrySearchProvider` is storage-only; optional override when the backend self-embeds. See §4.7 (Embedding generation).                                                                                                                                                                                                                                                                                       |
-| `LocalSearchProvider`    | BM25 over local-overlay manifests                                    | Optional semantic backing for the local-overlay index (§6.4.1). Same SPI shape as `RegistrySearchProvider`; backends include `sqlite-vec`, a local pgvector instance, or any managed vector service. Embedding-provider selection follows the same rules as the registry-side path.                                                                                                                                                                                                                                                                                                                                                                   |
-| `RegistryAuditSink`      | Separate Postgres table within `RegistryStore`                       | Stream for catalogue events; logically distinct, separately mockable, separately routable                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `LayerComposer`          | Layer-list composition + visibility filtering                        | Resolves the caller's effective view from the configured layer list (§4.6); applies merge semantics and `extends:` resolution                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `GitProvider`            | GitHub                                                               | Webhook signature verification and Git fetch semantics. Built-in support for GitHub, GitLab, Bitbucket; additional providers register through this interface.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `TypeProvider`           | Built-in first-class types                                           | Type definitions: frontmatter JSON Schema + lint rules + adapter hints + field-merge semantics                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `IngestLinter`           | Built-in rule registry                                               | Manifest validation, resource-reference checks, type-specific rules; runs pre-merge in CI and again at registry ingest                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `IdentityProvider`       | `oauth-device-code` (alt: `injected-session-token`)                  | Attaches OAuth-attested identity to every registry call from the MCP server                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `LocalOverlayProvider`   | Workspace filesystem (`.podium/overlay/`)                            | Source for the workspace-scoped local overlay layer (§6.4)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `LocalAuditSink`         | JSON Lines file at `~/.podium/audit.log`                             | Local audit log for meta-tool calls (when configured). User-wide by default — one file across all workspaces. Redirect to a workspace-local path or an external endpoint via `PODIUM_AUDIT_SINK`. Concurrent appends from multiple MCP servers are safe under typical event sizes (POSIX `PIPE_BUF`-bounded atomic writes). |
-| `HarnessAdapter`         | `none` (built-ins per §6.7)                                          | Translates canonical artifacts to the harness's native format at materialization time                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `NotificationProvider`   | Email + webhook                                                      | Delivery for vulnerability alerts and ingest-failure notifications                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `SignatureProvider`      | Sigstore-keyless                                                     | Artifact signing and verification                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `LocalSearchProvider`    | BM25 over local-overlay manifests                                          | Optional semantic backing for the local-overlay index (§6.4.1). Same SPI shape as `RegistrySearchProvider`; backends include `sqlite-vec`, a local pgvector instance, or any managed vector service. Embedding-provider selection follows the same rules as the registry-side path.                                                                                                                                                                                                                                                                                                                                                                   |
+| `RegistryAuditSink`      | Separate Postgres table within `RegistryStore`                             | Stream for catalogue events; logically distinct, separately mockable, separately routable                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `LayerComposer`          | Layer-list composition + visibility filtering                              | Resolves the caller's effective view from the configured layer list (§4.6); applies merge semantics and `extends:` resolution                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `GitProvider`            | GitHub                                                                     | Webhook signature verification and Git fetch semantics. Built-in support for GitHub, GitLab, Bitbucket; additional providers register through this interface.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `TypeProvider`           | Built-in first-class types                                                 | Type definitions: frontmatter JSON Schema + lint rules + adapter hints + field-merge semantics                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `IngestLinter`           | Built-in rule registry                                                     | Manifest validation, resource-reference checks, type-specific rules; runs pre-merge in CI and again at registry ingest                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `IdentityProvider`       | `oauth-device-code` (alt: `injected-session-token`)                        | Attaches OAuth-attested identity to every registry call from the MCP server                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `LocalOverlayProvider`   | Workspace filesystem (`.podium/overlay/`)                                  | Source for the workspace-scoped local overlay layer (§6.4)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `LocalAuditSink`         | JSON Lines file at `~/.podium/audit.log`                                   | Local audit log for meta-tool calls (when configured). User-wide by default — one file across all workspaces. Redirect to a workspace-local path or an external endpoint via `PODIUM_AUDIT_SINK`. Concurrent appends from multiple MCP servers are safe under typical event sizes (POSIX `PIPE_BUF`-bounded atomic writes).                                                                                                                                                                                                                                                                                                                           |
+| `HarnessAdapter`         | `none` (built-ins per §6.7)                                                | Translates canonical artifacts to the harness's native format at materialization time                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `NotificationProvider`   | Email + webhook                                                            | Delivery for vulnerability alerts and ingest-failure notifications                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `SignatureProvider`      | Sigstore-keyless                                                           | Artifact signing and verification                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 ### 9.2 Plugin Distribution
 
@@ -2054,37 +2119,37 @@ A runtime that doesn't fit the three built-in consumer shapes — a specialized 
 
 ## 10. MVP Build Sequence
 
-The build sequence is structured in two parts. Phases 0–4 ship an initial release that exercises the architecture end-to-end against a single-binary `--standalone` deployment. Phases 5+ add the enterprise capabilities (multi-tenancy, OIDC/SCIM, full RBAC, audit, vulnerability tracking, deployment).
+The build sequence is structured in two parts. Phases 0–4 ship an initial release that exercises the architecture end-to-end against the two lightest local deployment shapes — a filesystem-source registry (no daemon) and a `--standalone` server. Phases 5+ add the enterprise capabilities (multi-tenancy, OIDC/SCIM, full RBAC, audit, vulnerability tracking, deployment).
 
 ### Initial phases
 
-| Phase | What                                                                                                                                                                                                         | Why                                                                     |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
-| 0     | `podium serve --standalone` (single binary, embedded SQLite, filesystem object store, no auth, supports a `local`-source layer + the workspace local overlay)                                                      | Five-minute install for personal/small-team use                         |
-| 1     | Manifest schema + `podium lint` for `ARTIFACT.md` and `DOMAIN.md` + per-type lint rules + signing                                                                                                            | Authors need a way to validate artifacts; lint is the early quality bar |
-| 2     | Registry HTTP API: `load_domain`, `search_artifacts`, `load_artifact` (against `--standalone`)                                                                                                                     | The wire surface every consumer talks to                                |
-| 3     | `podium sync` for `none`, `claude-code`, and `codex` adapters (default target = CWD; `--include` / `--exclude` / `--type` / `--profile` / `--dry-run`) + per-target lock file (`.podium/sync.lock`) tracking profile, scope, and artifact versions + `--watch` mode + multi-type reference catalog (skills, agents, contexts, prompts, mcp-servers) | Exercises filesystem delivery end-to-end against a multi-type catalog |
-| 4     | Podium MCP server core (registry client, layer composer, MCP handlers, cache, materialization) + `podium-py` SDK + read CLI (`podium search`, `podium domain show`, `podium artifact show`) against `--standalone` | Exercises MCP-speaking and programmatic runtimes against the catalog    |
+| Phase | What                                                                                                                                                                                                                                                                                                                                                                                                  | Why                                                                                        |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| 0     | Filesystem-source `podium sync` (§13.11) — `podium sync` reads `.podium/registry/`, applies layer composition, writes the harness target. + `podium serve --standalone` for the same artifact directory plus search and HTTP API (single binary, embedded SQLite + sqlite-vec, no auth).                                                                                                              | Cover the two lightest deployment shapes. Five-minute install for personal/small-team use. |
+| 1     | Manifest schema + `podium lint` for `ARTIFACT.md` and `DOMAIN.md` + per-type lint rules + signing                                                                                                                                                                                                                                                                                                     | Authors need a way to validate artifacts; lint is the early quality bar                    |
+| 2     | Registry HTTP API: `load_domain`, `search_artifacts`, `load_artifact` (against `--standalone`)                                                                                                                                                                                                                                                                                                        | The wire surface every server-source consumer talks to                                     |
+| 3     | `podium sync` for `none`, `claude-code`, and `codex` adapters (default target = CWD; `--include` / `--exclude` / `--type` / `--profile` / `--dry-run`) + per-target lock file (`.podium/sync.lock`) + `--watch` against both source types + multi-type reference catalog (skills, agents, contexts, prompts, mcp-servers) + `podium init` (workspace / `--global` / `--local`) + `podium config show` | Filesystem delivery end-to-end with the full client config surface.                        |
+| 4     | Podium MCP server core (registry client, layer composer, MCP handlers, cache, materialization) + `podium-py` SDK + read CLI (`podium search`, `podium domain show`, `podium artifact show`) against `--standalone`                                                                                                                                                                                    | Exercises MCP-speaking and programmatic runtimes against the catalog (server source only)  |
 
 ### Enterprise phases
 
-| Phase | What                                                                                                                                                           | Why                                                                               |
-| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| 5     | Multi-tenant registry data model (Postgres + pgvector + object storage layout, layer config table, admin grants)                                               | The catalog at scale                                                              |
-| 6     | `GitProvider` + webhook-driven ingest pipeline (signature verification, diff walk, lint, immutability check, content-addressed store)                          | Authoring source-of-truth model in production                                     |
-| 7     | `LayerComposer` + visibility filtering (`public` / `organization` / OIDC groups / explicit users) + OIDC + SCIM 2.0                                            | Multi-tenant correctness                                                          |
-| 8     | Domain composition: `DOMAIN.md` parser, glob resolver, `unlisted` enforcement, cross-layer merge, `extends:` with hidden-parent resolution                     | Multi-layer composition without duplication                                       |
-| 9     | Versioning: semver, immutability invariant on ingest, content-hash cache keys, `latest` resolution with `session_id` consistency, tolerant force-push handling | Foundational invariant                                                            |
-| 10    | Layer CLI: `podium layer register / list / reorder / unregister / reingest / watch`; user-defined-layer cap; freeze windows; `podium admin grant/revoke`       | Operator and author surface for the layer model                                   |
-| 11    | IdentityProvider implementations: `oauth-device-code` (with OS keychain) and `injected-session-token` (signed JWT contract)                                    | One MCP server / sync / SDK binary across deployment contexts                     |
-| 12    | Workspace `LocalOverlayProvider` + local BM25 search index                                                                                                     | Workspace iteration loop visible to the MCP-bridge consumer                       |
-| 13    | Full `HarnessAdapter` implementations for the remaining built-ins (`claude-desktop`, `cursor`, `gemini`, `opencode`) + conformance test suite                  | Cross-harness coverage for all artifact types                                     |
+| Phase | What                                                                                                                                                                                                                   | Why                                                                                  |
+| ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| 5     | Multi-tenant registry data model (Postgres + pgvector + object storage layout, layer config table, admin grants)                                                                                                       | The catalog at scale                                                                 |
+| 6     | `GitProvider` + webhook-driven ingest pipeline (signature verification, diff walk, lint, immutability check, content-addressed store)                                                                                  | Authoring source-of-truth model in production                                        |
+| 7     | `LayerComposer` + visibility filtering (`public` / `organization` / OIDC groups / explicit users) + OIDC + SCIM 2.0                                                                                                    | Multi-tenant correctness                                                             |
+| 8     | Domain composition: `DOMAIN.md` parser, glob resolver, `unlisted` enforcement, cross-layer merge, `extends:` with hidden-parent resolution                                                                             | Multi-layer composition without duplication                                          |
+| 9     | Versioning: semver, immutability invariant on ingest, content-hash cache keys, `latest` resolution with `session_id` consistency, tolerant force-push handling                                                         | Foundational invariant                                                               |
+| 10    | Layer CLI: `podium layer register / list / reorder / unregister / reingest / watch`; user-defined-layer cap; freeze windows; `podium admin grant/revoke`                                                               | Operator and author surface for the layer model                                      |
+| 11    | IdentityProvider implementations: `oauth-device-code` (with OS keychain) and `injected-session-token` (signed JWT contract)                                                                                            | One MCP server / sync / SDK binary across deployment contexts                        |
+| 12    | Workspace `LocalOverlayProvider` + local BM25 search index                                                                                                                                                             | Workspace iteration loop visible to the MCP-bridge consumer                          |
+| 13    | Full `HarnessAdapter` implementations for the remaining built-ins (`claude-desktop`, `cursor`, `gemini`, `opencode`) + conformance test suite                                                                          | Cross-harness coverage for all artifact types                                        |
 | 14    | `podium-ts` SDK + remaining SDK surface area (subscriptions, dependency walks); `podium sync override` (TUI + batch flags), `podium sync save-as`, and `podium profile edit` for ephemeral and permanent scope changes | Programmatic-runtime parity with the MCP path; TUI/batch toggles for materialization |
-| 15    | Cross-type dependency graph + reverse dependency index + impact analysis CLI                                                                                   | Cross-type analysis: surface what depends on a given artifact, regardless of type |
-| 16    | Registry audit log + `LocalAuditSink` + cross-stream correlation + retention + hash-chain integrity                                                            | Observability + governance                                                        |
-| 17    | Vulnerability tracking + SBOM ingestion + `NotificationProvider`                                                                                               | Enterprise governance                                                             |
-| 18    | Deployment: Helm chart, reference Grafana dashboard, runbook                                                                                                   | Operability                                                                       |
-| 19    | Example artifact registry (multi-layer, multi-type, with `DOMAIN.md` imports, unlisted folders, signatures, cross-type delegation)                             | Prove end-to-end                                                                  |
+| 15    | Cross-type dependency graph + reverse dependency index + impact analysis CLI                                                                                                                                           | Cross-type analysis: surface what depends on a given artifact, regardless of type    |
+| 16    | Registry audit log + `LocalAuditSink` + cross-stream correlation + retention + hash-chain integrity                                                                                                                    | Observability + governance                                                           |
+| 17    | Vulnerability tracking + SBOM ingestion + `NotificationProvider`                                                                                                                                                       | Enterprise governance                                                                |
+| 18    | Deployment: Helm chart, reference Grafana dashboard, runbook                                                                                                                                                           | Operability                                                                          |
+| 19    | Example artifact registry (multi-layer, multi-type, with `DOMAIN.md` imports, unlisted folders, signatures, cross-type delegation)                                                                                     | Prove end-to-end                                                                     |
 
 ---
 
@@ -2191,7 +2256,7 @@ For team evaluation, smoke-testing, and local integration testing — anything t
 
 ```bash
 docker compose up -d
-podium init --remote http://localhost:8080
+podium init --global --registry http://localhost:8080
 podium login    # device-code flow against the bundled Dex IdP
 ```
 
@@ -2285,6 +2350,8 @@ Presigned URLs are CDN-friendly. Recommend CloudFront / Fastly / Cloudflare in f
 
 `podium serve --standalone` collapses the full stack into a single binary with no external dependencies. It targets local development, individual contributors, and small-team installations where running Postgres + object storage + an IdP is overkill.
 
+For a lighter shape with no daemon — just the CLI reading the artifact directory directly — see §13.11 (Filesystem Registry).
+
 **Zero-flag default.** Running `podium serve` with no flags is equivalent to `podium serve --standalone` when no server config is found at `~/.podium/registry.yaml` and no `PODIUM_*` server-side environment variables are set. The server emits a clear stderr line on startup ("No config found at `~/.podium/registry.yaml` — starting in standalone mode at `http://127.0.0.1:8080`. Run `podium serve --strict` to require explicit setup."), creates the standalone defaults (`~/.podium/registry.yaml`, `~/.podium/sync.yaml`, `~/podium-artifacts/`) on first run, and proceeds to serve. This collapses the five-minute install path into a single command — no `podium init` step required.
 
 `podium serve --strict` retains the prior behavior of refusing to start without explicit configuration. Setting `PODIUM_NO_AUTOSTANDALONE=1` in the environment has the same effect — useful in CI and image-building contexts where a missing config should always be a hard error rather than an auto-bootstrap. Auto-bootstrap is also suppressed when `--config <path>` is passed and the file does not exist (the user explicitly named a config; not finding it is an error, not a cue to invent one).
@@ -2304,19 +2371,19 @@ podium serve --strict
 
 **What changes from the standard topology:**
 
-| Concern                 | Standard                                        | Standalone                                                                      |
-| ----------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------- |
-| Metadata store          | Postgres                                        | Embedded SQLite (`~/.podium/standalone/podium.db`)                                    |
-| Vector store            | pgvector                                        | `sqlite-vec` extension loaded into the same SQLite file                         |
-| Embedding provider      | `openai` (default)                              | `embedded-onnx` — bundled BGE-small ONNX model, in-process, no external service |
-| Object storage          | S3-compatible                                   | Filesystem (`~/.podium/standalone/objects/`)                                          |
-| Identity provider       | OIDC IdP                                        | None — no auth; `127.0.0.1`-only HTTP by default                                |
-| Layers                  | Configured admin layers + user-defined layers   | One default `local`-source layer rooted at `--layer-path`; additional `local` and `git` layers can be registered via `podium layer register` |
+| Concern                 | Standard                                        | Standalone                                                                                                                                                                                                                                                                                     |
+| ----------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Metadata store          | Postgres                                        | Embedded SQLite (`~/.podium/standalone/podium.db`)                                                                                                                                                                                                                                             |
+| Vector store            | pgvector                                        | `sqlite-vec` extension loaded into the same SQLite file                                                                                                                                                                                                                                        |
+| Embedding provider      | `openai` (default)                              | `embedded-onnx` — bundled BGE-small ONNX model, in-process, no external service                                                                                                                                                                                                                |
+| Object storage          | S3-compatible                                   | Filesystem (`~/.podium/standalone/objects/`)                                                                                                                                                                                                                                                   |
+| Identity provider       | OIDC IdP                                        | None — no auth; `127.0.0.1`-only HTTP by default                                                                                                                                                                                                                                               |
+| Layers                  | Configured admin layers + user-defined layers   | One default `local`-source layer rooted at `--layer-path`; additional `local` and `git` layers can be registered via `podium layer register`                                                                                                                                                   |
 | Git provider / webhooks | Required for `git`-source layers                | `git` source layers are supported; webhooks are optional. Without a webhook (typical for a developer machine without a public ingress), `podium layer reingest <id>` pulls the current state on demand. A local watcher (`podium layer watch <id>`) can poll a configured interval if desired. |
-| Signing                 | Sigstore-keyless or registry-managed key        | Disabled by default; opt in via `--sign registry-key`                           |
-| Content cache           | Cross-workspace disk cache (`~/.podium/cache/`) | Disabled — the registry is local, the cache adds nothing                        |
-| Audit                   | Per-tenant Postgres table                       | Same SQLite file (audit table)                                                  |
-| Helm chart / Kubernetes | Required for production deployments             | Not used                                                                        |
+| Signing                 | Sigstore-keyless or registry-managed key        | Disabled by default; opt in via `--sign registry-key`                                                                                                                                                                                                                                          |
+| Content cache           | Cross-workspace disk cache (`~/.podium/cache/`) | Disabled — the registry is local, the cache adds nothing                                                                                                                                                                                                                                       |
+| Audit                   | Per-tenant Postgres table                       | Same SQLite file (audit table)                                                                                                                                                                                                                                                                 |
+| Helm chart / Kubernetes | Required for production deployments             | Not used                                                                                                                                                                                                                                                                                       |
 
 **Hybrid search.** Standalone runs the same BM25 + vector RRF retriever as the standard registry. Vectors live in `sqlite-vec`; embeddings come from the bundled `embedded-onnx` provider — both run in-process, so the binary works offline and air-gapped with no external dependency. Operators who want a remote model instead can switch via `PODIUM_EMBEDDING_PROVIDER=openai|voyage|cohere|ollama` (`ollama` is the obvious choice for self-hosted local models). `--no-embeddings` falls back to BM25-only.
 
@@ -2385,11 +2452,118 @@ Migration to a governed deployment goes through `podium admin migrate-to-standar
 
 **Out of scope for standalone.** Multi-tenancy, freeze windows, SCIM, SBOM/CVE pipeline, transparency-log anchoring, outbound webhooks. These are present in the binary but inert without the supporting infrastructure (an IdP for SCIM, a CVE feed for vulnerability tracking, etc.). They can be enabled individually when their dependencies are available.
 
-**Client setup.** Clients (CLI, MCP server, SDK) don't read `registry.yaml` — that's server-side config. The endpoint clients use to reach the server is configured separately on the client side, via `sync.yaml`'s `defaults.endpoint`, `PODIUM_REGISTRY_ENDPOINT`, or an SDK constructor param (§7.5.2 covers the lookup order). `podium init --standalone` writes both files in one step: `~/.podium/registry.yaml` for the server (`bind: 127.0.0.1:8080`, store/vector defaults) and `~/.podium/sync.yaml` for the client (`defaults.endpoint: http://127.0.0.1:8080`).
+**Client setup.** Clients (CLI, MCP server, SDK) don't read `registry.yaml` — that's server-side config. The registry value clients use to reach the server is configured separately on the client side, via `sync.yaml`'s `defaults.registry`, `PODIUM_REGISTRY`, or an SDK constructor param (§7.5.2 covers the lookup order). `podium serve` zero-flag writes both files in one step on first run: `~/.podium/registry.yaml` for the server (`bind: 127.0.0.1:8080`, store/vector defaults) and `~/.podium/sync.yaml` for the client (`defaults.registry: http://127.0.0.1:8080`). For client-only setup (e.g., when the server runs elsewhere), use `podium init --global --registry <url>` (§7.7).
 
-### 13.11 Backend Configuration Reference
+### 13.11 Filesystem Registry
 
-Backend selections and their per-backend config values can be set as environment variables, command-line flags, or entries in a registry config file (default `/etc/podium/registry.yaml` for standard deployments and `~/.podium/registry.yaml` for standalone; override via `--config <path>`). **Precedence: CLI flag > env var > config file.** All env vars below are also valid config-file keys (snake-cased under the relevant section); a complete YAML example follows the per-backend tables.
+A filesystem registry is a directory tree treated as the registry. `podium sync` reads it directly — applying layer composition (§4.6) and materializing through the harness adapter — with no server intermediary. No daemon, no port, no PID. Only `podium sync` works in this shape; the MCP server, SDKs, and read CLI require an HTTP server.
+
+The audience is solo developers, small teams committing the catalog to git, CI runs, and restricted environments where running a server isn't possible. The dispatch logic that routes a `defaults.registry` value to either server or filesystem is in §7.5.2.
+
+#### 13.11.1 Directory Layout
+
+A filesystem registry rooted at `<registry-path>` is a directory of layer directories:
+
+```
+<registry-path>/
+├── team-shared/                # one layer
+│   ├── DOMAIN.md
+│   ├── finance/
+│   │   └── close-reporting/
+│   │       └── run-variance-analysis/
+│   │           └── ARTIFACT.md
+│   └── platform/
+│       └── …
+├── personal/                   # another layer (purely a name choice)
+│   └── …
+└── .layer-order                # optional; controls layer ordering
+```
+
+Each subdirectory of `<registry-path>` is treated as a `local`-source layer (§4.6). Layer IDs default to the subdirectory name; layer order is alphabetical by name. An optional `<registry-path>/.layer-order` file overrides the order — one layer ID per line, in precedence order from lowest to highest:
+
+```
+# <registry-path>/.layer-order
+team-shared
+personal
+```
+
+The workspace local overlay (`<workspace>/.podium/overlay/`, §6.4) sits on top of the filesystem-registry layers, exactly as in server source.
+
+#### 13.11.2 Configuration
+
+The client picks filesystem source when `defaults.registry` resolves to a path:
+
+```yaml
+# <workspace>/.podium/sync.yaml
+defaults:
+  registry: ./.podium/registry/ # relative paths are resolved against the workspace
+  harness: claude-code
+  target: .claude/
+```
+
+Absolute paths work too (`registry: /opt/podium-artifacts/`). There is no implicit workspace fallback — if `defaults.registry` is unset across all scopes, the client errors with `config.no_registry` and points the user at `podium init`. Behavior never depends on whether `<workspace>/.podium/registry/` happens to exist.
+
+To override an inherited URL with a filesystem path, set `defaults.registry: ./.podium/registry/` explicitly at a higher-precedence scope (typically the project-shared file). Normal precedence applies.
+
+#### 13.11.3 What's Available
+
+What `podium sync` does in filesystem source:
+
+- Layer composition (§4.6) across the registry's layer subdirectories plus the workspace overlay (§6.4).
+- Materialization through the configured harness adapter.
+- Lock-file write at `<target>/.podium/sync.lock`. `podium sync override` and `podium sync save-as` work the same way as in server source.
+
+What's **not available** in filesystem source:
+
+- The MCP server (§6) and progressive disclosure via meta-tools (§5).
+- The language SDKs (§7.6).
+- The read CLI (`podium search`, `podium domain show`, `podium artifact show`; §7.6.1) — SDK-backed.
+- Outbound webhooks (§7.3.2).
+- Identity-based visibility filtering. The visibility evaluator short-circuits to `true` for every layer.
+- `podium login` (no auth to perform).
+
+Features that require **specifically a remote server** (not just any server):
+
+- Centralized audit independent of clones.
+- OIDC identity-based visibility filtering.
+- Multi-tenancy, SCIM, SBOM/CVE pipeline, transparency-log anchoring.
+
+#### 13.11.4 Watch Mode
+
+`podium sync --watch` against a filesystem source uses `fsnotify` to watch the registry path and the workspace overlay; when files change, it re-runs composition and materialization for the affected artifacts.
+
+#### 13.11.5 Multi-User via Committed Registry
+
+The registry directory is just files. Commit `<workspace>/.podium/registry/` (or whatever path the project chose) to git, and every developer who clones the project has the same catalog. Each developer runs `podium sync` independently against their local clone; the catalog is read-only from the client's perspective, and mutation goes through git PR + merge. No shared-state coordination, no conflicts.
+
+Any number of developers can share a project this way without running a server. The catalog is the git history; ingest is `git pull`.
+
+#### 13.11.6 Migrating to a Server
+
+The filesystem source covers the small-team eager-only path. Migration to a server happens for two clusters of reasons:
+
+**Migrate to any server (local `podium serve --standalone` or remote standard deployment):**
+
+- Progressive disclosure required (agents call MCP meta-tools at runtime to load capabilities incrementally instead of materializing everything ahead of time).
+
+**Migrate specifically to a remote server:**
+
+- Centralized audit independent of clones.
+- OIDC identity-based visibility filtering.
+
+Migration is mechanical:
+
+1. Run `podium serve --standalone --layer-path /path/to/.podium/registry/` (the same directory) on a chosen host. For remote, set up the standard topology (§13.1) and use `podium admin migrate-to-standard` (§13.4).
+2. In each developer's `<workspace>/.podium/sync.yaml`, change `defaults.registry: ./.podium/registry/` to the server URL.
+3. Done. Authoring loop unchanged; consumer paths gain MCP / SDK availability.
+
+### 13.12 Backend Configuration Reference
+
+This section covers **server-side** configuration — the registry process's storage backends, vector backend, embedding provider, and identity provider, configured in `registry.yaml` (default `/etc/podium/registry.yaml` for standard deployments and `~/.podium/registry.yaml` for standalone; override via `--config <path>`).
+
+For **client-side** configuration (`sync.yaml`, `defaults.registry`, profiles, scope filters, etc.), see §7.5.2. Client and server configs are independent — clients don't read `registry.yaml`, servers don't read `sync.yaml`.
+
+Backend selections and their per-backend config values can be set as environment variables, command-line flags, or entries in `registry.yaml`. **Server-side precedence: CLI flag > env var > config file.** All env vars below are also valid config-file keys (snake-cased under the relevant section); a complete YAML example follows the per-backend tables. (Client-side precedence is similar but adds project and project-local config files between env vars and the user-level file — see §7.5.2.)
 
 The same values apply on the MCP server when it's configured to use `LocalSearchProvider` against an external backend (§6.4.1) — the workspace-side process reads the same env-var names.
 
@@ -2399,9 +2573,9 @@ The registry refuses to start when a backend is selected but its required values
 
 Selected via `PODIUM_REGISTRY_STORE` (`postgres` | `sqlite`).
 
-| Var                   | Description                                  | Default                    |
-| --------------------- | -------------------------------------------- | -------------------------- |
-| `PODIUM_POSTGRES_DSN` | Postgres connection string (when `postgres`) | — required                 |
+| Var                   | Description                                  | Default                          |
+| --------------------- | -------------------------------------------- | -------------------------------- |
+| `PODIUM_POSTGRES_DSN` | Postgres connection string (when `postgres`) | — required                       |
 | `PODIUM_SQLITE_PATH`  | SQLite file path (when `sqlite`)             | `~/.podium/standalone/podium.db` |
 
 #### Object storage
@@ -2415,7 +2589,7 @@ Selected via `PODIUM_OBJECT_STORE` (`s3` | `filesystem`).
 | `PODIUM_S3_ENDPOINT`                                      | Override URL for S3-compatible services (MinIO, GCS, R2, Backblaze B2) | (none — uses AWS S3)                         |
 | `PODIUM_S3_ACCESS_KEY_ID` / `PODIUM_S3_SECRET_ACCESS_KEY` | Static credentials                                                     | (use IAM role / instance profile when unset) |
 | `PODIUM_S3_FORCE_PATH_STYLE`                              | `true` for MinIO and similar                                           | `false`                                      |
-| `PODIUM_FILESYSTEM_ROOT`                                  | Root directory (when `filesystem`)                                     | `~/.podium/standalone/objects/`                    |
+| `PODIUM_FILESYSTEM_ROOT`                                  | Root directory (when `filesystem`)                                     | `~/.podium/standalone/objects/`              |
 
 #### Vector backend
 
@@ -2499,7 +2673,9 @@ Selected via `PODIUM_EMBEDDING_PROVIDER` (`embedded-onnx` | `openai` | `voyage` 
 
 Identity-provider selection and per-provider config are documented in §6.3 (`PODIUM_IDENTITY_PROVIDER`, `PODIUM_OAUTH_AUDIENCE`, `PODIUM_SESSION_TOKEN_*`, etc.). The same values apply on both the registry and the MCP server.
 
-For deployments that intentionally run without an identity provider, `PODIUM_PUBLIC_MODE=true` (or `--public-mode`) bypasses authentication and the visibility model entirely — see §13.10. Public mode is mutually exclusive with `PODIUM_IDENTITY_PROVIDER`; setting both fails at startup with `config.public_mode_with_idp`.
+For server deployments that intentionally run without an identity provider, `PODIUM_PUBLIC_MODE=true` (or `--public-mode`) bypasses authentication and the visibility model entirely — see §13.10. Public mode is mutually exclusive with `PODIUM_IDENTITY_PROVIDER`; setting both fails at startup with `config.public_mode_with_idp`.
+
+Filesystem-source registries (§13.11) have no identity provider by definition — there is no server process to authenticate against and no JWT to verify. `podium login` is a no-op when the resolved registry is a filesystem path; the visibility evaluator short-circuits to `true` for every layer.
 
 #### Config file format
 
@@ -2548,25 +2724,26 @@ End-to-end walkthroughs for common ways Podium gets used. Each scenario links to
 
 ### 14.1 Local registry folder, one-shot, single workspace
 
-A developer keeps artifacts in a local folder and materializes a subset into one project for Claude Code.
+A developer keeps artifacts in a local folder and materializes a subset into one project for Claude Code. Filesystem-source registry (§13.11) — no daemon, single CLI invocation.
 
 **One-time:**
 
-1. Lay out artifacts in `~/podium-artifacts/` per §4.2 (each artifact a subdirectory containing `ARTIFACT.md`).
-2. `podium init --standalone --layer-path ~/podium-artifacts` to write `~/.podium/registry.yaml`.
-3. `podium serve --standalone` (uses the config from step 2). The same `init` step also wrote `~/.podium/sync.yaml` with `defaults.endpoint: http://127.0.0.1:8080`, so subsequent client commands pick up the endpoint without an env var.
+1. Lay out artifacts in `~/podium-artifacts/` per §4.2 (each artifact a subdirectory containing `ARTIFACT.md`; subdirectories of `~/podium-artifacts/` are layers, §13.11.1).
+2. `podium init --global --registry ~/podium-artifacts/` to write `~/.podium/sync.yaml` with `defaults.registry: ~/podium-artifacts/`. No server needed — the client reads the directory directly.
 
 **Per project:**
 
-4. `cd ~/projects/myapp/`.
-5. Optional — `.podium/sync.yaml`:
+3. `cd ~/projects/myapp/`.
+4. Optional — `.podium/sync.yaml`:
    ```yaml
    profiles:
      myapp:
        include: ["finance/**", "shared/policies/*"]
        exclude: ["finance/**/legacy/**"]
    ```
-6. `podium sync --harness claude-code --profile myapp`. Default target = CWD; lock file at `<cwd>/.podium/sync.lock`.
+5. `podium sync --harness claude-code --profile myapp`. Default target = CWD; lock file at `<cwd>/.podium/sync.lock`.
+
+**When to graduate to a server:** if the developer wants `load_artifact` lazy-loaded by Claude Code (progressive disclosure via MCP), they migrate by running `podium serve --standalone --layer-path ~/podium-artifacts/` and updating `~/.podium/sync.yaml` to point at `http://127.0.0.1:8080`. Same artifact directory; just add a daemon. See §13.11.6.
 
 **Changing the subset:** edit `sync.yaml` (or `podium profile edit myapp ...`), re-run `podium sync`. Ad-hoc adjustments: `podium sync override --add/--remove`.
 
@@ -2579,23 +2756,25 @@ cd ~/projects/finance-app/    && podium sync --harness claude-code --profile fin
 cd ~/projects/marketing-tool/ && podium sync --harness claude-code --profile marketing
 ```
 
-Each workspace has its own `<workspace>/.podium/sync.lock`. The shared cache (`~/.podium/cache/`) deduplicates downloads. Both connect to the one standalone registry.
+Each workspace has its own `<workspace>/.podium/sync.lock`. Both read from the same artifact directory; with filesystem source, no shared cache or registry process is needed (the source files are the cache).
 
 ### 14.3 Local registry folder, MCP discovery, multiple workspaces
 
-Same registry. No `podium sync` — each project's harness spawns its own Podium MCP server.
+Same artifact directory, but now the developer wants progressive disclosure (the agent calls `load_domain` / `search_artifacts` / `load_artifact` at runtime, not pre-materialized). MCP requires a server, so this scenario graduates from filesystem source (§13.11) to standalone server (§13.10):
 
-**Per project:** add a Podium entry to the harness's MCP config (snippets per §6.11). The MCP server picks up the endpoint from `~/.podium/sync.yaml` (`defaults.endpoint`), so no extra env var is needed when `podium init --standalone` has set things up. Optional `.podium/overlay/` per workspace for in-progress artifacts.
+1. `podium serve --standalone --layer-path ~/podium-artifacts/` — starts the server against the same directory; auto-bootstraps `~/.podium/sync.yaml` with `defaults.registry: http://127.0.0.1:8080`.
+2. Per project, add a Podium entry to the harness's MCP config (snippets per §6.11). The MCP server picks up the registry from `~/.podium/sync.yaml` (`defaults.registry`), so no extra env var is needed.
+3. Optional `.podium/overlay/` per workspace for in-progress artifacts.
 
 ### 14.4 Local registry, custom harness via SDK, multiple workspaces
 
-Each workspace runs an app built on `podium-py` (or `podium-ts`) plus an agent SDK like Claude Agent SDK.
+Each workspace runs an app built on `podium-py` (or `podium-ts`) plus an agent SDK like Claude Agent SDK. The SDK speaks HTTP, so this scenario uses a standalone server (graduated from §14.1's filesystem source — same artifact directory, just wrap it in `podium serve --standalone`).
 
 ```python
 from podium import Client
 from claude_agent_sdk import ...
 
-client = Client.from_env()         # picks up endpoint from sync.yaml + overlay path
+client = Client.from_env()         # picks up registry URL from sync.yaml + overlay path
 # ... custom discovery logic, search_artifacts → load_artifact → agent execution
 ```
 
@@ -2609,7 +2788,7 @@ client = Client.from_env()         # picks up endpoint from sync.yaml + overlay 
 
 **Per developer:**
 
-4. `podium init --remote https://podium.acme.com`.
+4. `podium init --global --registry https://podium.acme.com`.
 5. `podium login` — completes the device-code flow once, caches the token.
 6. `cd <project>`, write `.podium/sync.yaml` with a profile, `podium sync --harness claude-code --profile <name>`.
 7. Repeat per workspace; each has its own lock file.
@@ -2625,7 +2804,7 @@ Operator setup as in §14.5. Per workspace:
 
 Operator setup as in §14.5. Per workspace:
 
-1. Configure the harness's MCP server entry (§6.11) with `PODIUM_REGISTRY_ENDPOINT` and `PODIUM_HARNESS`. `PODIUM_OVERLAY_PATH` is optional — when unset, the MCP server resolves the overlay from MCP roots (§6.4).
+1. Configure the harness's MCP server entry (§6.11) with `PODIUM_REGISTRY` and `PODIUM_HARNESS`. `PODIUM_OVERLAY_PATH` is optional — when unset, the MCP server resolves the overlay from MCP roots (§6.4).
 2. First call triggers OAuth device-code via MCP elicitation. Token caches in the OS keychain.
 3. Drop workspace-local artifacts under `.podium/overlay/`. The MCP server's fsnotify watcher picks up changes.
 
@@ -2635,7 +2814,7 @@ Operator setup as in §14.5. Per workspace:
 
 ```python
 client = Client(
-    endpoint="https://podium.acme.com",
+    registry="https://podium.acme.com",
     identity_provider="oauth-device-code",
     overlay_path="./.podium/overlay/",
 )
@@ -2676,7 +2855,7 @@ A single-developer setup that mirrors a public Git repo (e.g., a community libra
 
 **One-time:**
 
-1. `podium init --standalone --layer-path ~/podium-artifacts` (the local layer for personal artifacts).
+1. `podium serve --standalone --layer-path ~/podium-artifacts` (single-binary server with the local layer for personal artifacts; auto-bootstraps `~/.podium/sync.yaml` pointing at the local server).
 2. `podium serve --standalone`.
 3. Register the Git layer:
    ```bash
@@ -2701,7 +2880,7 @@ A build pipeline materializes a deterministic artifact set into a deploy artifac
 1. CI obtains a runtime-issued JWT (per `injected-session-token`, §6.3.2). The runtime's signing key is registered with the registry one-time.
 2. Pipeline step:
    ```bash
-   export PODIUM_REGISTRY_ENDPOINT=https://podium.acme.com
+   export PODIUM_REGISTRY=https://podium.acme.com
    export PODIUM_IDENTITY_PROVIDER=injected-session-token
    export PODIUM_SESSION_TOKEN_FILE=/run/secrets/podium-token
    podium sync --harness claude-code --profile production --target ./build/.claude/
@@ -2727,7 +2906,7 @@ Registry runs entirely on an internal network with no public ingress.
 
 A single developer uses Claude Code on one project and Cursor on another, sharing one OAuth identity and the same content cache.
 
-1. `podium login --endpoint https://podium.acme.com` once. Token caches in the OS keychain.
+1. `podium login --registry https://podium.acme.com` once. Token caches in the OS keychain.
 2. Project A: Claude Code with the §6.11 Claude Code MCP snippet. Workspace overlay at `<project-a>/.podium/overlay/`.
 3. Project B: Cursor with the §6.11 Cursor MCP snippet. Workspace overlay at `<project-b>/.podium/overlay/`.
 4. Both share the same OS-keychain token, the same `~/.podium/cache/`, and (if so configured) the same user-wide audit log at `~/.podium/audit.log`.
@@ -2750,7 +2929,7 @@ A developer iterates on a new artifact in their workspace overlay, then promotes
 A user with read-only visibility to several layers wants to browse the catalog without running sync or an MCP server.
 
 ```bash
-export PODIUM_REGISTRY_ENDPOINT=https://podium.acme.com
+export PODIUM_REGISTRY=https://podium.acme.com
 podium login
 
 podium domain show                                          # top-level map

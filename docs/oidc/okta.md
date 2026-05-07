@@ -58,7 +58,7 @@ Restart the registry.
 On developer machines, set up the client:
 
 ```bash
-podium init --remote https://podium.your-org.example
+podium init --global --registry https://podium.your-org.example
 export PODIUM_OAUTH_CLIENT_ID=<client-id-from-step-1>
 export PODIUM_OAUTH_AUTHORIZATION_ENDPOINT=https://<your-okta-domain>/oauth2/default/v1/device/authorize
 podium login
