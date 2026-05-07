@@ -55,12 +55,14 @@ Artifacts enter the registry by being merged into a tracked Git ref (or, for `lo
 
 `local` source layers skip the Git steps: the author edits files in place and runs `podium layer reingest <id>`.
 
-**Ingestion triggers.** No polling. Two paths:
+**Ingestion triggers.** Built-in source types use the paths below; custom `LayerSourceProvider` plugins (§9.1) declare their own trigger model (push notification, polling at a configured interval, etc.).
 
-| Trigger              | Source                                                                                                            |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Git provider webhook | Configured at layer-creation time. The registry validates the webhook signature, fetches the new commit, ingests. |
-| Manual reingest      | `podium layer reingest <id>` (admin or layer owner). For missed webhooks, initial backfill, disaster recovery.    |
+| Trigger              | Source                                                                                                                                       |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Git provider webhook | Built-in `git` source. Configured at layer-creation time. The registry validates the webhook signature, fetches the new commit, ingests.     |
+| Filesystem watch     | Built-in `local` source. Re-scanned on demand via `podium layer reingest <id>`; `podium layer watch <id>` polls at a configurable interval.  |
+| Plugin-declared      | Custom `LayerSourceProvider` implementations. Webhook, polling, or push notification depending on the source — declared by the plugin.       |
+| Manual reingest      | `podium layer reingest <id>` (admin or layer owner). Works for every source type: forces a fresh snapshot regardless of the trigger model.   |
 
 `last_ingested_at` is exposed per layer for staleness monitoring.
 
@@ -192,7 +194,7 @@ When neither `--include` nor `--profile` is given, the full effective view is th
 Path-scoped sync is the recommended way to keep a harness's working set small enough to avoid context rot. Two patterns that work well in practice:
 
 - **Per-team profile.** Each team defines a profile that includes its domain plus shared utilities. Developers run `podium sync --profile <team>`.
-- **Programmatic curation.** A script uses the SDK to pick artifacts based on context (the current task, semantic search, etc.), then invokes `podium sync --include <id> [--include <id> ...]` to materialize the chosen set. See §9.3.
+- **Programmatic curation.** A script uses the SDK to pick artifacts based on context (the current task, semantic search, etc.), then invokes `podium sync --include <id> [--include <id> ...]` to materialize the chosen set. See §9.4.
 
 ### 7.5.2 Configuration (`sync.yaml`)
 

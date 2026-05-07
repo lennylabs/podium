@@ -459,10 +459,12 @@ Higher-precedence layers override lower on collisions. Resolution of layers 1 an
 
 ### Source types
 
-Two source types are supported:
+Source types are pluggable via the `LayerSourceProvider` SPI (§9.1). Two are built-in:
 
-- **`git`** — a remote Git repository at a tracked ref, optionally rooted at a subpath. The registry ingests on webhook (§7.3.1).
+- **`git`** — a remote Git repository at a tracked ref, optionally rooted at a subpath. The registry ingests on webhook (§7.3.1). Provider-level details (signature verification, fetch semantics) flow through the `GitProvider` SPI (§9.1) — built-in support for GitHub, GitLab, Bitbucket.
 - **`local`** — a filesystem path readable by the registry process. Re-scanned on demand via `podium layer reingest <id>`. Intended for standalone and small-team installations where the registry runs alongside the author.
+
+Custom source types register through `LayerSourceProvider`. Common targets include S3 (versioned bucket), OCI registries (content-addressed), and HTTP-served archives. Each implementation is responsible for fetch semantics, integrity verification (signature, checksum, etag), snapshotting at a stable reference, and declaring its trigger model — webhook, polling, or push notification (§7.3.1 *Ingestion triggers*).
 
 ### Visibility
 
