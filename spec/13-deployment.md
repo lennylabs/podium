@@ -473,6 +473,14 @@ registry:
     type: oauth-device-code
     audience: https://podium.acme.com
     authorization_endpoint: https://acme.okta.com/oauth2/default
+
+  discovery:
+    max_depth: 3
+    fold_below_artifacts: 3
+    fold_passthrough_chains: true
+    notable_count: 10
+    target_response_tokens: 4000
+    allow_per_domain_overrides: true
 ```
 
 Env vars and CLI flags override file values. Secret values should use `${ENV_VAR}` interpolation rather than being committed in plaintext.

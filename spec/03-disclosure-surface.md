@@ -10,7 +10,7 @@ The host sees only what it asks for, in stages. The three layers map 1:1 to the 
 
 ### Layer 1 — Hierarchical map (`load_domain`)
 
-The host calls `load_domain(path)` to get a map of what exists. With no path, the map describes top-level domains. With a path like `finance`, it describes that domain's subdomains and key artifacts. The hierarchy is two levels deep by default — a third level kicks in only when a domain crosses ~1000 artifacts. The directory layout drives the domain hierarchy (§4.2); a domain's children may be augmented or curated by an optional `DOMAIN.md` config that imports artifacts from elsewhere (§4.5). Multi-membership is allowed: one artifact can show up under more than one domain via imports.
+The host calls `load_domain(path)` to get a map of what exists. With no path, the map describes top-level domains. With a path like `finance`, it describes that domain's subdomains and notable artifacts. The shape of the rendered map — depth, folding of sparse subdomains, ordering of notable entries, response-size budget — is governed by the discovery rules in §4.5.5, configured at tenant scope in `registry.yaml` and overridable per-subtree via `DOMAIN.md`. The directory layout drives the domain hierarchy (§4.2); a domain's children may be augmented or curated by an optional `DOMAIN.md` config that imports artifacts from elsewhere (§4.5). Multi-membership is allowed: one artifact can show up under more than one domain via imports.
 
 ### Layer 2 — Search (`search_artifacts`)
 

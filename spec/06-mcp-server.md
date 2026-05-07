@@ -223,7 +223,7 @@ All errors use a structured envelope:
 }
 ```
 
-Codes are namespaced (`auth.*`, `ingest.*`, `materialize.*`, `quota.*`, `mcp.*`, `network.*`, `registry.*`). Mapped to MCP error payloads per the MCP spec.
+Codes are namespaced (`auth.*`, `ingest.*`, `materialize.*`, `quota.*`, `mcp.*`, `network.*`, `registry.*`, `domain.*`). Mapped to MCP error payloads per the MCP spec.
 
 ## 6.11 Host Configuration Recipes
 

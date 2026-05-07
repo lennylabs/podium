@@ -88,7 +88,7 @@ registry/
             └── ARTIFACT.md
 ```
 
-The hierarchy can nest to arbitrary depth for organization. For discovery, a two-level cap (domain → subdomain) is the default; deeper nesting collapses into the leaf set returned by `load_domain`.
+The hierarchy can nest to arbitrary depth for organization. The discovery shape returned by `load_domain` is a separate concern, governed by configurable rules (§4.5.5): a tenant-level `max_depth` (default 3) caps how deep the rendered subtree goes below the requested path, `fold_below_artifacts` collapses sparse subdomains into the parent's leaf set, and `fold_passthrough_chains` collapses single-child intermediate domains. All of these can be overridden per-subtree via `DOMAIN.md`. Authoring depth never changes the canonical artifact ID — that remains the directory path.
 
 Each layer (§4.6) is rooted at a Git repo or local filesystem path; the directory hierarchy under that root is the domain hierarchy for the layer's contribution to the catalog. At request time, the registry composes the caller's effective view across every visible layer.
 
@@ -251,6 +251,20 @@ A domain is a directory in the registry. Its members at discovery time are: ever
 unlisted: false
 description: "AP-related operations"
 
+discovery:
+  max_depth: 4
+  fold_below_artifacts: 5
+  featured:
+    - finance/ap/pay-invoice
+  deprioritize:
+    - finance/ap/_archive/**
+  keywords:
+    - invoice
+    - remittance
+    - reconciliation
+    - 1099
+    - vendor master
+
 include:
   - finance/ap/pay-invoice
   - finance/ap/payments/*
@@ -264,10 +278,17 @@ exclude:
 
 # Accounts Payable
 
+Operations and artifacts for the AP function — invoice processing, vendor
+remittance, payment reconciliation, and 1099 reporting. Use this domain when
+you need to act on or reason about money flowing out of the company to
+vendors. For inbound payments and AR, see `finance/ar/`.
+
 ...
 ```
 
-A domain folder without a `DOMAIN.md` is a regular navigable domain by default. The file is only needed to import from elsewhere, exclude paths, set the description, or mark the folder as unlisted.
+A domain folder without a `DOMAIN.md` is a regular navigable domain by default. The file is only needed to import from elsewhere, exclude paths, set the description, mark the folder as unlisted, or override discovery rendering for the subtree (§4.5.5).
+
+The frontmatter `description:` is a single-line summary used wherever this domain appears as a child or sibling in another `load_domain` response. The prose body below the frontmatter is long-form context, returned by `load_domain` only when this domain is the requested path. Resolution and rendering of both are described in §4.5.5 *Description rendering*.
 
 ### 4.5.2 Imports and Globs
 
@@ -308,8 +329,86 @@ If multiple layers contribute a `DOMAIN.md` for the same path, the registry merg
 - `include:` — additive across layers.
 - `exclude:` — additive across layers; applied after the merged include set.
 - `unlisted` — most-restrictive-wins.
+- `discovery.max_depth`, `discovery.notable_count`, `discovery.target_response_tokens` — most-restrictive-wins (lowest value).
+- `discovery.fold_below_artifacts` — most-restrictive-wins (highest value).
+- `discovery.fold_passthrough_chains` — most-restrictive-wins (`true` over `false`).
+- `discovery.featured`, `discovery.deprioritize`, `discovery.keywords` — append-unique.
 
 When a workspace-local-overlay `DOMAIN.md` is involved, the MCP server applies the merge client-side after the registry returns its result for the registry-side layers.
+
+### 4.5.5 Discovery Rendering
+
+The shape of the map returned by `load_domain` is governed by configurable rules — depth, folding of sparse subdomains, ordering of notable entries, and a soft response-size budget. These rules affect rendering only; canonical artifact IDs (§4.2), authoring layout, and visibility filtering (§4.6) are unchanged.
+
+**Knobs.**
+
+| Field                     | Type                          | Effect                                                                                                                                           |
+| ------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `max_depth`               | int (≥1)                      | Cap on the depth of the rendered subtree below the requested path. Default 3.                                                                    |
+| `fold_below_artifacts`    | int (≥0)                      | A subdomain whose visible artifact count (recursive — see *Visibility-aware counts*) is below this threshold collapses into its parent's leaf set. Default 0 (no folding). |
+| `fold_passthrough_chains` | bool                          | Collapse single-child intermediate domains into the deepest non-passthrough ancestor. Default `true`.                                            |
+| `notable_count`           | int (≥0)                      | Cap on the notable list per domain in `load_domain` output. Default 10.                                                                          |
+| `target_response_tokens`  | int                           | Soft budget per `load_domain` response; the renderer tightens depth and notable count to fit. Default 4000.                                      |
+| `featured`                | list of canonical artifact IDs | Surfaced first in the notable list.                                                                                                              |
+| `deprioritize`            | list of glob patterns         | Children matching are ranked last and excluded from the notable list unless space permits.                                                       |
+| `keywords`                | list of strings               | Author-curated terms agents should associate with this domain (synonyms, jargon, distinguishing terminology). Returned verbatim in `load_domain` output for this domain. Per-domain only; no tenant default. |
+
+**Where they're configured.**
+
+- **Tenant scope** — `discovery:` block in `registry.yaml` (§13.12). Applies registry-wide.
+- **Per-domain scope** — `discovery:` block in `DOMAIN.md` frontmatter (§4.5.1). Overrides at this subtree only; cross-layer merge per §4.5.4. A tenant-level `discovery.allow_per_domain_overrides: false` disables per-domain overrides registry-wide; lint warns on `DOMAIN.md` `discovery:` blocks under that setting, ingest still succeeds.
+
+**Description rendering.** Each domain has two slots for prose:
+
+- Frontmatter `description:` — a one-line summary used wherever the domain appears as a child or sibling in another `load_domain` response.
+- Prose body of `DOMAIN.md` — long-form context authored as markdown, returned only when the domain is the requested path.
+
+Resolution for the requested domain's description: prose body if present, else frontmatter `description`, else a synthesized fallback (the directory basename, title-cased and de-slugged). For each child or sibling listed in the response, only the frontmatter `description` (or fallback) is included; the body is never returned for non-requested entries. With `depth` > 1, this rule applies once — only the originally requested domain gets its body; expanded subtrees get short descriptions only. This bounds response size while letting authors invest detail where it matters.
+
+Concrete: `load_domain("finance", depth=2)` returns finance's body plus a two-level subtree of subdomains, each rendered with their short `description` only. To read another domain's body, the agent calls `load_domain` on it directly.
+
+Each subdomain entry's `name` field is the directory basename; `path` is the full canonical path. Both are populated even when the subdomain has no `DOMAIN.md`.
+
+Body length is recommended ≤ 2000 tokens; lint warns above. Cross-layer merge of the body follows §4.5.4 (last-layer-wins).
+
+**Notable selection.** Notable artifacts surfaced by `load_domain` are the union of:
+
+- Author-curated entries in `featured:`, in author-supplied order.
+- Artifacts surfaced by learn-from-usage reranking (§3.3) for callers in the relevant signal cohort.
+
+Resolution rules:
+
+- **Deduplication.** An artifact appearing in both sources is tagged `source: "featured"` — featured wins.
+- **Cap.** The combined list is capped at `notable_count`. When `featured:` alone exceeds the cap, it is truncated in author-supplied order and no signal entries are added.
+- **Candidate pool.** Only artifacts enumerated under this domain — canonical children plus those brought in by `DOMAIN.md include:` (after `exclude:`) — are eligible. Signals from artifacts outside this domain do not surface here.
+
+When both sources are empty, the notable list is returned as `[]`. There is no synthesized fallback — agents should treat absence as "no curated entry points," and either drill into subdomains or call `search_artifacts`.
+
+**Visibility-aware counts.** Artifact counts used for folding and the response budget are computed per-caller from the effective view (§4.6). The count for a domain includes both canonical children and artifacts brought in via `DOMAIN.md include:` (after `exclude:`). Two callers with different visibility may see different `load_domain` shapes for the same path; this is consistent with how visibility filters every other read surface. Audit events (§8) record the resolved depth and fold decisions per call.
+
+**Folding mechanics.** When a subdomain folds, its artifacts surface in the parent's leaf list with a `folded_from: <subpath>` annotation so the agent can navigate further if it wants. Folded subdomains still resolve through `load_domain(<full-path>)` directly — folding is an enumeration choice, not a hide. Pass-through chain folding leaves intermediate path segments in canonical IDs unchanged; only the rendered tree is compressed.
+
+**Caller overrides.** Hosts can pass `depth` directly to `load_domain` (§5.1) to override the configured default. The value is bounded by the resolved `max_depth` ceiling for the requested subtree; values exceeding the ceiling are silently capped, with the cap surfaced in the rendering note. `depth` counts levels in the rendered (post-fold) tree, not the underlying directory hierarchy. With pass-through folding enabled and a chain `a/b/c/d` where `b` and `c` are single-child intermediates, `load_domain("a", depth=1)` reaches `d` directly — even though `d` is three directory levels below `a`. Authors who want depth to track the directory hierarchy can disable folding (`fold_passthrough_chains: false`, `fold_below_artifacts: 0`).
+
+**Rendering note.** When the renderer reduces the response in any way the caller did not explicitly request, the response includes a `note` field with a single short natural-language sentence describing what was reduced. The note covers two cases:
+
+1. The renderer tightened depth or notable count to fit `target_response_tokens`.
+2. The caller passed `depth` greater than the resolved `max_depth` ceiling, and the value was capped.
+
+Folding decisions are not surfaced in the note — folded artifacts already carry the `folded_from` annotation in the response. When neither case applies, the field is omitted. Examples:
+
+- "Notable list reduced from 10 to 4 to fit the response budget."
+- "Subtree depth reduced from 3 to 1 to fit the response budget."
+- "Notable list reduced from 10 to 5; subtree depth reduced from 3 to 2 to fit the response budget."
+- "Requested depth 5 capped at the configured ceiling of 3."
+
+Agents that need a fuller map can pass an explicit `depth` (within the ceiling); agents that need more notable entries should call `search_artifacts(scope=<path>)` or drill into a specific subdomain. There is no pagination cursor.
+
+**Root domain.** `load_domain()` (no path) describes the registry root. The root has no `DOMAIN.md`: `description` is omitted, `keywords` is `[]`, and `notable` is signal-only (no `featured` source is possible at root). `subdomains` lists top-level directories with their short `description` and `name` (basename).
+
+**Unknown paths.** A path that doesn't resolve to any visible domain returns a structured `domain.not_found` error (§6.10). Paths that exist only under `unlisted: true` (§4.5.3) are indistinguishable from typos — both return `domain.not_found`, so unlisted folders are not detectable through enumeration probing.
+
+**Layout analysis.** `podium domain analyze [<path>]` renders a quality report — sparsity per node, pass-through chains, candidates for split (high artifact count + tag-cluster entropy) or fold (low artifact count). Operator-facing; agents do not call it.
 
 ## 4.6 Layers and Visibility
 

@@ -486,8 +486,14 @@ Output formats:
                                    "score": 0.83, "frontmatter": { ... } }, ... ] }
 
   // podium domain show <path> --json
-  { "path": "...", "subdomains": [ { "path": "...", "name": "..." }, ... ],
-    "artifacts": [ { "id": "...", "type": "...", "summary": "..." }, ... ] }
+  { "path": "...",
+    "description": "...",
+    "keywords": ["...", "..."],
+    "subdomains": [ { "path": "...", "name": "...", "description": "..." }, ... ],
+    "notable": [ { "id": "...", "type": "...", "summary": "...",
+                   "source": "featured|signal",
+                   "folded_from": "<canonical subpath; omitted when not folded>" }, ... ],
+    "note": "Notable list reduced from 10 to 4 to fit the response budget." }
 
   // podium artifact show <id> --json
   { "id": "...", "version": "...", "content_hash": "...",
