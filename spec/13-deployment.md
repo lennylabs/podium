@@ -274,6 +274,8 @@ What `podium sync` does in filesystem source:
 - Materialization through the configured harness adapter.
 - Lock-file write at `<target>/.podium/sync.lock`. `podium sync override` and `podium sync save-as` work the same way as in server source.
 
+The composer, parsers, glob resolver, `extends:` resolver, and harness adapters used here are the same Go module functions the registry runs behind its HTTP API (§2.2 *Shared library code*). There is no separate filesystem-mode reimplementation, which is why migration to a server (§13.11.6) is mechanical and produces equivalent output for the same artifact directory.
+
 What's **not available** in filesystem source:
 
 - The MCP server (§6) and progressive disclosure via meta-tools (§5).

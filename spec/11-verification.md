@@ -22,6 +22,8 @@
 
 - **`podium sync` lock-file test**: `podium sync` in an empty target writes `.podium/sync.lock` with the resolved profile, scope, and artifact list; re-running `podium sync` is idempotent (no spurious writes); the target dir auto-creates if missing; `--dry-run` prints the resolved set and writes nothing. Two `podium sync` invocations against different targets each maintain independent lock files.
 
+- **Filesystem ↔ server equivalence test**: a `podium sync` against a filesystem-source registry and a `podium sync` against `podium serve --standalone --layer-path` pointed at the same directory produce byte-identical materialized output (manifest bodies, bundled resources, harness-adapter output, lock-file `artifacts:` list) for the same target and profile. Confirms that the shared Go library (§2.2 *Shared library code*) is the single behavioral surface across deployment shapes.
+
 - **Override + watch test**: `podium sync --watch` running against a target keeps `.podium/sync.lock`'s `toggles:` populated across registry change events. `podium sync override --add <id>` materializes the artifact and adds an entry to `toggles.add`; `podium sync override --remove <id>` removes it from disk and adds to `toggles.remove`. Manual `podium sync` (no `--watch`) clears `toggles:`. `podium sync override --reset` is equivalent to manual `podium sync`.
 
 - **Save-as test**: after `podium sync override --add <id-a> --remove <id-b>`, `podium sync save-as --profile <name>` renders a profile in `.podium/sync.yaml` whose `include` / `exclude` reproduce the toggled state; the lock file's `toggles:` is cleared and the new profile becomes the active one. `--update` overwrites an existing profile; `--dry-run` prints the YAML diff and writes nothing.
