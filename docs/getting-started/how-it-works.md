@@ -10,8 +10,8 @@ description: Component overview, the three deployment shapes, where state lives,
 
 Podium has two component categories:
 
-- A **registry** — the system of record for artifacts.
-- **Consumers** — the things that read from the registry. Three of
+- A **registry**: the system of record for artifacts.
+- **Consumers**: the things that read from the registry. Three of
   them ship with Podium: language SDKs, an MCP server, and `podium
   sync`. You can write your own against the same HTTP API.
 
@@ -26,16 +26,16 @@ one consumer that also works against the filesystem shape directly.
 
 Podium has two parts:
 
-- A **registry** — the catalog of artifacts. Backed by either a
+- A **registry**: the catalog of artifacts. Backed by either a
   folder on disk (filesystem mode) or a Podium server (standalone or
   standard mode). Built-in source types are `git` and `local`; the
   `LayerSourceProvider` SPI lets deployments add custom sources
   (S3, OCI, HTTP archives).
-- **Consumers** — three ship with Podium: `podium sync`, the MCP
+- **Consumers**: three ship with Podium: `podium sync`, the MCP
   server, and the language SDKs. Custom consumers can build against
   the HTTP API directly.
 
-Server mode — what most teams run once they're past the filesystem
+Server mode is what most teams run once they're past the filesystem
 stage. The server holds the catalog; consumers reach it over HTTP
 and identity-aware composition runs server-side:
 
@@ -65,8 +65,8 @@ LangChain, Bedrock,       Claude Code, Cursor,        File-based
 custom orchestrators      OpenCode, Pi, Hermes        harnesses
 ```
 
-Filesystem mode — for solo work, prototypes, and CI. The catalog is
-just a folder; `podium sync` reads it directly:
+Filesystem mode is for solo work, prototypes, and CI. The catalog is
+a folder; `podium sync` reads it directly:
 
 ```
    ~/podium-artifacts/             ┌─────────────┐
@@ -98,7 +98,7 @@ For server-source deployments:
 | Vector backend | Hybrid retrieval | `pgvector` and `sqlite-vec` collocate with the metadata store; managed alternatives include Pinecone, Weaviate Cloud, Qdrant Cloud |
 | MCP server | In-process bridge for MCP-speaking hosts; runs the harness adapter at materialization time | Spawned as a stdio subprocess by the host (Claude Code, Cursor, etc.), one per workspace |
 | `podium sync` | Eager filesystem materialization; one-shot or watcher | Developer machines, CI runners, build pipelines |
-| Language SDKs | Programmatic HTTP clients | Wherever your code runs — LangChain, Bedrock, OpenAI Assistants, custom orchestrators, eval harnesses |
+| Language SDKs | Programmatic HTTP clients | Wherever your code runs: LangChain, Bedrock, OpenAI Assistants, custom orchestrators, eval harnesses |
 
 The MCP server, `podium sync`, and the language SDKs share the same
 registry HTTP API. They also share identity providers, the content
@@ -108,7 +108,7 @@ visibility to the registry, then run the adapter and write to disk
 locally.
 
 For filesystem-source deployments, only `podium sync` and the
-filesystem-aware shared library are involved — no Postgres, no
+filesystem-aware shared library are involved. No Postgres, no
 object storage, no auth, no registry process.
 
 ---
@@ -183,7 +183,7 @@ Three places. Each shape uses a different combination.
 
 | State | Filesystem | Standalone | Standard |
 |:--|:--|:--|:--|
-| Manifest metadata, layer config, audit | (none — directory is canonical) | SQLite (`~/.podium/standalone/podium.db`) | Postgres |
+| Manifest metadata, layer config, audit | (none; directory is canonical) | SQLite (`~/.podium/standalone/podium.db`) | Postgres |
 | Embeddings | (none) | sqlite-vec collocated in SQLite | pgvector collocated in Postgres (or external: Pinecone, Weaviate Cloud, Qdrant Cloud) |
 | Bundled resource bytes | The directory itself | Filesystem (`~/.podium/standalone/objects/`) | S3-compatible object storage |
 | Workspace local overlay | `<workspace>/.podium/overlay/` (highest precedence in the caller's effective view) |
@@ -209,7 +209,7 @@ writer locally.
 
 There is one canonical implementation per concern, not three. That's
 why migrating between deployment shapes (filesystem → standalone →
-standard) preserves behavior — same composer, same parsers, same
+standard) preserves behavior: same composer, same parsers, same
 merge semantics, same harness adapter output. See [§2.2 of the
 spec](https://github.com/lennylabs/podium/blob/main/spec/02-architecture.md)
 for the load-bearing rationale.
@@ -225,21 +225,21 @@ HTTP server.
 The registry attaches an OAuth-attested identity to every call.
 Built-in identity providers:
 
-- **`oauth-device-code`** — interactive device-code flow for
+- **`oauth-device-code`**: interactive device-code flow for
   developer hosts; tokens cached in the OS keychain.
-- **`injected-session-token`** — runtime-issued signed JWT for
+- **`injected-session-token`**: runtime-issued signed JWT for
   managed agent runtimes (Bedrock Agents, OpenAI Assistants, custom
   orchestrators). The runtime registers its signing key once with
   the registry; the registry verifies signatures on every call.
 
-Filesystem-source registries don't have identity by definition —
+Filesystem-source registries don't have identity by definition:
 the visibility evaluator short-circuits to `true` for every layer.
 Standalone deployments can run with or without auth; with auth,
 they use the same OIDC machinery as standard deployments.
 
 `tenant.expose_scope_preview` lets operators decide whether
 aggregate visibility counts (artifact count, by-type, by-sensitivity)
-are exposed to callers — useful for tenants where even those
+are exposed to callers, which is useful for tenants where even those
 aggregates would leak signal.
 
 ---
@@ -268,11 +268,11 @@ snapshot.
 You've got the vocabulary and the architecture. From here, follow
 the role-specific guide that fits your goal:
 
-- **Authoring artifacts** — [Authoring guide](../authoring/)
-- **Using them in a harness** — [Consuming guide](../consuming/)
-- **Setting up Podium for a team or org** — [Deployment guide](../deployment/)
-- **Calling the API directly** — [Reference](../reference/)
+- **Authoring artifacts**: [Authoring guide](../authoring/)
+- **Using them in a harness**: [Consuming guide](../consuming/)
+- **Setting up Podium for a team or org**: [Deployment guide](../deployment/)
+- **Calling the API directly**: [Reference](../reference/)
 
-The full technical specification — one file per top-level section —
+The full technical specification, one file per top-level section,
 lives in the [`spec/`](https://github.com/lennylabs/podium/tree/main/spec)
 directory of the repository.

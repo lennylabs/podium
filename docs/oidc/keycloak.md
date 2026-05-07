@@ -1,6 +1,6 @@
 # Keycloak
 
-Podium + Keycloak. ~15 minutes of setup. Self-hosted, so you control the IdP — useful for air-gapped or sovereignty-constrained deployments. Compose-stack development uses Dex (a sibling project), but the production-equivalent IdP for the same niche is Keycloak.
+Podium + Keycloak. ~15 minutes of setup. Self-hosted, so you control the IdP, which is useful for air-gapped or sovereignty-constrained deployments. Compose-stack development uses Dex (a sibling project), but the production-equivalent IdP for the same niche is Keycloak.
 
 ## Prerequisites
 
@@ -17,7 +17,7 @@ Keycloak admin console: **\[your realm\] → Clients → Create client**.
 
 Capability config:
 
-- **Client authentication**: Off (public client — required for device-code flow).
+- **Client authentication**: Off (public client, required for device-code flow).
 - **Authentication flow**: enable **OAuth 2.0 Device Authorization Grant**. Disable **Standard flow** and **Direct access grants** unless you need them for other use cases.
 
 Save. The client is created with no redirect URI requirements.
@@ -104,7 +104,7 @@ Keycloak doesn't ship a built-in SCIM server, but extensions exist (e.g., `keycl
 1. Configure the SCIM endpoint at `https://<keycloak-host>/realms/<realm>/scim/v2`.
 2. In Podium: `podium admin scim configure --endpoint <url> --token <bearer>`.
 
-For most Keycloak users, the OIDC `groups` claim is sufficient — group changes apply on next login.
+For most Keycloak users, the OIDC `groups` claim is sufficient. Group changes apply on next login.
 
 ## Troubleshooting
 

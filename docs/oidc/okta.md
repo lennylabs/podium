@@ -12,17 +12,17 @@ Podium + Okta. ~15 minutes of setup if you have admin access.
 
 In the Okta admin console: **Applications → Applications → Create App Integration**.
 
-- Sign-in method: **OIDC — OpenID Connect**.
+- Sign-in method: **OIDC / OpenID Connect**.
 - Application type: **Native Application** (the device-code flow uses native-app conventions).
 
 Configuration:
 
 - **App name**: Podium (or your tenant name).
 - **Grant type**: enable **Device Authorization** (you may need to enable device-flow under **Security → API → Authorization Servers → default → Settings**).
-- **Sign-in redirect URIs**: not needed for device-code flow, but Okta requires at least one — use `http://localhost/callback` as a placeholder.
+- **Sign-in redirect URIs**: not needed for device-code flow, but Okta requires at least one. Use `http://localhost/callback` as a placeholder.
 - **Assignments**: assign the groups of users who should be able to use Podium (typically all employees, or a specific team to start).
 
-Save. Copy the **Client ID** — that's `PODIUM_OAUTH_CLIENT_ID` for clients.
+Save. Copy the **Client ID**; that's `PODIUM_OAUTH_CLIENT_ID` for clients.
 
 ## 2. Configure the audience and groups claim
 

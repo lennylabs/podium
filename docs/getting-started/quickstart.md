@@ -19,7 +19,7 @@ guide](../deployment/) walks the next steps.
 
 - A terminal.
 - [Claude Code](https://www.anthropic.com/claude-code) installed
-  (or any other harness Podium supports — see [Configure your
+  (or any other harness Podium supports; see [Configure your
   harness](../consuming/configure-your-harness)). The walkthrough
   below uses Claude Code; the commands are identical for other
   harnesses with `--harness <name>` swapped.
@@ -39,7 +39,7 @@ podium --version
 
 {: .note }
 
-> Podium is in design phase — there's no shipped binary yet. The
+> Podium is in design phase. There's no shipped binary yet. The
 > commands below describe the target experience and run against the
 > first released drop. See [Status](../about/status) for what's
 > wired up today.
@@ -48,7 +48,7 @@ podium --version
 
 ## 2. Tell Podium where the catalog lives
 
-Pick a directory for your artifacts (anywhere — `~/podium-artifacts/`
+Pick a directory for your artifacts (anywhere; `~/podium-artifacts/`
 is a fine default). In the project where you'll use them, tell
 Podium that's your registry, with Claude Code as the default
 harness:
@@ -61,7 +61,7 @@ podium init --registry ~/podium-artifacts/ --harness claude-code
 
 That writes `<workspace>/.podium/sync.yaml` with two defaults: a
 registry pointing at the directory (so the client reads from disk
-directly — no server) and a harness telling Podium how to format
+directly, with no server) and a harness telling Podium how to format
 outputs for Claude Code. Verify:
 
 ```bash
@@ -165,7 +165,7 @@ Now that the loop works, here's where to go:
 
 - **Add more artifacts.** Drop more directories under
   `~/podium-artifacts/personal/` with their own `ARTIFACT.md` files.
-  Try a different `type:` — `command`, `context`, `rule`, `hook`,
+  Try a different `type:`: `command`, `context`, `rule`, `hook`,
   `agent`, `mcp-server`. The [authoring guide](../authoring/) has
   the field reference and recipes for each.
 - **Share settings with teammates.** Commit the
@@ -175,14 +175,14 @@ Now that the loop works, here's where to go:
   projects, use `podium init --global`.
 - **Browse the catalog from the agent.** As your registry grows, the
   agent can call `load_domain`, `search_domains`, and
-  `search_artifacts` to discover what's available — but that needs
+  `search_artifacts` to discover what's available. That needs
   a server. See [How it works](how-it-works) for the four discovery
   meta-tools and when each fires.
 - **Outgrow filesystem mode.** When you want runtime discovery
   (agents loading capabilities mid-session) or a single audit log
   for a team, graduate to a standalone server: `podium serve
 --standalone --layer-path ~/podium-artifacts/`. Same directory,
-  same artifacts — just add a daemon. See [Deployment →
+  same artifacts; add a daemon. See [Deployment →
   Small team](../deployment/).
 
 ---

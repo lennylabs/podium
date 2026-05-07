@@ -1,6 +1,6 @@
 # Google Workspace
 
-Podium + Google Workspace. The setup is straightforward but Workspace doesn't emit an OIDC `groups` claim natively — for group-based visibility you either resolve group membership server-side via the Cloud Identity API, or use a directory-sync pattern.
+Podium + Google Workspace. The setup is straightforward, but Workspace doesn't emit an OIDC `groups` claim natively. For group-based visibility, you either resolve group membership server-side via the Cloud Identity API or use a directory-sync pattern.
 
 ## Prerequisites
 
@@ -15,7 +15,7 @@ Google Cloud Console: **APIs & Services → Credentials → Create Credentials �
 - **Application type**: TVs and Limited Input devices (this is the path Google supports for the device-code flow).
 - **Name**: Podium.
 
-After creation, you get a **Client ID** and **Client secret**. Note both — Google's device-flow requires the client secret even though the OIDC spec doesn't strictly require it for public clients.
+After creation, you get a **Client ID** and **Client secret**. Note both; Google's device-flow requires the client secret even though the OIDC spec doesn't strictly require it for public clients.
 
 Configure the OAuth consent screen if it's not already configured:
 
@@ -27,11 +27,11 @@ Configure the OAuth consent screen if it's not already configured:
 
 Three options, in increasing complexity:
 
-**Option A — no groups, email-only visibility.** Set layer visibility based on individual email addresses (`users: [a@you.com, b@you.com]`) or to `organization: true` (any authenticated user from your Workspace org). Works fine for small teams.
+**Option A: no groups, email-only visibility.** Set layer visibility based on individual email addresses (`users: [a@you.com, b@you.com]`) or to `organization: true` (any authenticated user from your Workspace org). Works fine for small teams.
 
-**Option B — sync Workspace groups via SCIM.** Workspace doesn't natively push SCIM, but a pattern using a Workspace add-on or a small sync script can populate Podium's directory. Maintainer-script approach; out of scope here.
+**Option B: sync Workspace groups via SCIM.** Workspace doesn't natively push SCIM, but a pattern using a Workspace add-on or a small sync script can populate Podium's directory. Maintainer-script approach; out of scope here.
 
-**Option C — resolve group membership at token-validation time.** The registry calls Google Cloud Identity's API to fetch the user's group memberships when the JWT arrives, caches for 5 minutes, treats those as the `groups` claim. Requires a service account in your Cloud project with `Cloud Identity Groups Reader` (`cloudidentity.googleapis.com/groups.readonly`). Configure on the registry side via the `IdpGroupMapping` adapter — see [§6.3.1 of the spec](../../spec/06-mcp-server.md#631-claim-derivation).
+**Option C: resolve group membership at token-validation time.** The registry calls Google Cloud Identity's API to fetch the user's group memberships when the JWT arrives, caches for 5 minutes, treats those as the `groups` claim. Requires a service account in your Cloud project with `Cloud Identity Groups Reader` (`cloudidentity.googleapis.com/groups.readonly`). Configure on the registry side via the `IdpGroupMapping` adapter; see [§6.3.1 of the spec](../../spec/06-mcp-server.md#631-claim-derivation).
 
 For most teams, Option A is enough to start. Move to Option C when you actually need different layers visible to different Workspace groups.
 
@@ -49,11 +49,11 @@ identity:
   sub_claim: sub
   # Option A: no groups_claim
   # Option C: configure IdpGroupMapping (see §6.3.1)
-  hd_claim: hd                            # Google's hosted-domain claim — restricts tokens to your org
+  hd_claim: hd                            # Google's hosted-domain claim; restricts tokens to your org
   hd_required: your-org.example           # rejects tokens issued for other Workspace domains
 ```
 
-The `hd_claim` enforcement is critical for Workspace — without it, any Google account (gmail.com or another Workspace org) with the right client ID can authenticate. Setting `hd_required` rejects everything except your domain.
+The `hd_claim` enforcement is important for Workspace. Without it, any Google account (gmail.com or another Workspace org) with the right client ID can authenticate. Setting `hd_required` rejects everything except your domain.
 
 Restart the registry.
 

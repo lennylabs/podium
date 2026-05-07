@@ -3,7 +3,7 @@ layout: default
 title: Home
 nav_order: 0
 permalink: /
-description: Podium is a registry for the artifacts AI agents use — skills, commands, rules, agents — and a way to deliver them to any harness.
+description: Podium is a registry for the artifacts AI agents use, including skills, commands, rules, and agents, and a way to deliver them to any harness.
 ---
 
 # Podium
@@ -32,7 +32,7 @@ Highlights:
 - **Artifact organization based on domains and subdomains.** Keep artifacts organized in folders and subfolders, where each folder defines a domain.
 - **Selective materialization.** Sync only a subset of the catalog into your workspace. Define profiles to quickly switch between scopes.
 - **Layered composition.** Compose your catalog from multiple sources with deterministic merge and explicit precedence. (Requires the Podium registry server.)
-- **Per-layer visibility.** Declare who can see what — each layer can be `public`, organization-wide, scoped to OIDC `groups`, or restricted to specific `users`. (Requires the Podium registry server.)
+- **Per-layer visibility.** Declare who can see what: each layer can be `public`, organization-wide, scoped to OIDC `groups`, or restricted to specific `users`. (Requires the Podium registry server.)
 - **Agent-driven progressive discovery.** Discovery tools for traversing domains and searching artifacts. (Requires the Podium MCP server or SDK.)
 - **Lazy artifact loading.** Materialize artifact files into your workspace as they are loaded. (Requires the Podium MCP server or SDK.)
 
@@ -40,7 +40,7 @@ Highlights:
 
 > **Status: design phase.** The technical specification drives a
 > spec- and test-driven implementation. There is no shipped binary
-> yet. Design feedback is the most useful contribution today — see
+> yet. Design feedback is the most useful contribution today. See
 > [Status](about/status) and [Contributing](about/contributing).
 
 ---

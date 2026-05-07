@@ -6,7 +6,7 @@ Podium + Auth0. ~15 minutes of setup. Group claims are not native to Auth0; they
 
 - Auth0 tenant with admin access.
 - Podium registry running and reachable from developers' browsers.
-- Decide your audience identifier (suggestion: `https://podium.your-org.example` — Auth0 conventionally uses URL-shaped audiences).
+- Decide your audience identifier (suggestion: `https://podium.your-org.example`; Auth0 conventionally uses URL-shaped audiences).
 
 ## 1. Create the API in Auth0
 
@@ -58,7 +58,7 @@ exports.onExecutePostLogin = async (event, api) => {
 
 Save and deploy. Then attach the Action: **Actions → Triggers → post-login → drag the new Action into the flow → Apply**.
 
-This reads the user's groups from `app_metadata` (where you populate them via your provisioning process — manually for small teams, or via SCIM for larger setups). The claim emitted is namespaced (`https://podium.your-org.example/groups`) — Auth0 disallows non-namespaced custom claims for security reasons.
+This reads the user's groups from `app_metadata` (where you populate them via your provisioning process: manually for small teams, or via SCIM for larger setups). The claim emitted is namespaced (`https://podium.your-org.example/groups`); Auth0 disallows non-namespaced custom claims for security reasons.
 
 ## 4. Configure Podium
 
@@ -75,7 +75,7 @@ identity:
   sub_claim: sub
 ```
 
-The trailing slash in `issuer` matters — Auth0's discovery returns the URL with the slash, and the registry's verification expects an exact match.
+The trailing slash in `issuer` matters. Auth0's discovery returns the URL with the slash, and the registry's verification expects an exact match.
 
 Restart the registry.
 

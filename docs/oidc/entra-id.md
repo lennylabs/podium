@@ -6,7 +6,7 @@ Podium + Entra ID. ~20 minutes of setup. Slightly more involved than Okta becaus
 
 - Entra ID Global Administrator or Application Administrator role.
 - Podium registry running and reachable from your developers' browsers.
-- A naming convention for groups in Podium layer config (you'll either use Entra group GUIDs directly, or set up a name-mapping — see step 2).
+- A naming convention for groups in Podium layer config (you'll either use Entra group GUIDs directly, or set up a name-mapping; see step 2).
 
 ## 1. Register the OIDC application
 
@@ -14,7 +14,7 @@ Azure portal: **Microsoft Entra ID → App registrations → New registration**.
 
 - **Name**: Podium.
 - **Supported account types**: usually **Accounts in this organizational directory only** (single tenant). Multi-tenant only if Podium is a SaaS offering.
-- **Redirect URI**: not used for device-code, but Entra requires one — set to **Public client/native** with `http://localhost`.
+- **Redirect URI**: not used for device-code, but Entra requires one. Set to **Public client/native** with `http://localhost`.
 
 After registration, note from the app overview:
 
@@ -26,13 +26,13 @@ Under **Authentication**:
 - Enable **Allow public client flows: Yes**.
 - Add platform: **Mobile and desktop applications**, with redirect `http://localhost`.
 
-Under **API permissions**: ensure **Microsoft Graph → User.Read** is granted (default). Add **GroupMember.Read.All** if you want group-membership claims.
+Under **API permissions**: make sure **Microsoft Graph → User.Read** is granted (default). Add **GroupMember.Read.All** if you want group-membership claims.
 
 ## 2. Configure the groups claim
 
 Entra emits group object IDs by default. Two options:
 
-**Option A — group object IDs in tokens** (simpler, GUIDs in your layer config):
+**Option A: group object IDs in tokens** (simpler, GUIDs in your layer config):
 
 - **Token configuration → Add groups claim**.
 - Select **Security groups** (or **All groups** if you also use distribution lists).
@@ -45,9 +45,9 @@ visibility:
   groups: ["7c52a1d4-..."]   # Entra group object ID
 ```
 
-**Option B — group display names** (requires onPremisesSamAccountName or a custom claims mapping policy):
+**Option B: group display names** (requires onPremisesSamAccountName or a custom claims mapping policy):
 
-For groups synced from on-prem AD, you can emit `sAMAccountName` in the groups claim. For cloud-only groups, this requires a custom claims mapping policy via PowerShell — outside the scope of this guide. If you go this route, set `groups_claim: groups` and use names in your visibility config.
+For groups synced from on-prem AD, you can emit `sAMAccountName` in the groups claim. For cloud-only groups, this requires a custom claims mapping policy via PowerShell; outside the scope of this guide. If you go this route, set `groups_claim: groups` and use names in your visibility config.
 
 Most teams find Option A faster; the GUID-vs-name tradeoff is just a layer-config readability concern.
 

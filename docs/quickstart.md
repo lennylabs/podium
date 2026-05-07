@@ -1,6 +1,6 @@
-# Quickstart — your first skill in 5 minutes
+# Quickstart: Your First Skill in 5 Minutes
 
-This walks you through installing Podium, authoring a skill, and using it in Claude Code. Filesystem-source mode: no daemon, no port, no auth — just the CLI reading a directory and writing files. The lightest possible Podium setup.
+This walks you through installing Podium, authoring a skill, and using it in Claude Code. We will use a filesystem registry and the Podium CLI.
 
 ## What you'll need
 
@@ -26,7 +26,7 @@ podium init --global \
   --harness claude-code
 ```
 
-That writes `~/.podium/sync.yaml` with `defaults.registry: ~/podium-artifacts/` (a filesystem path, so the client runs in-process — no server) and `defaults.harness: claude-code`. Verify:
+That writes `~/.podium/sync.yaml` with `defaults.registry: ~/podium-artifacts/` (a filesystem path, so the client runs in-process with no server) and `defaults.harness: claude-code`. Verify:
 
 ```bash
 podium config show
@@ -51,7 +51,7 @@ sensitivity: low
 ---
 
 Greet the user by their first name (ask if you don't know it). Tell them
-today's date in a friendly format. Be concise — one or two sentences.
+today's date in a friendly format. Be concise: one or two sentences.
 EOF
 ```
 
@@ -81,12 +81,12 @@ Claude Code natively discovers `.claude/agents/greet.md` (no MCP needed) and use
 
 ## Watch mode (optional)
 
-If you're authoring iteratively, run `podium sync --watch` instead — it uses `fsnotify` to watch the registry directory and re-materializes on every change. Save a `.peng.md`-style edit, see it land in `.claude/` immediately.
+If you're authoring iteratively, run `podium sync --watch` instead. It uses `fsnotify` to watch the registry directory and re-materializes on every change. Save a `.peng.md`-style edit, see it land in `.claude/` immediately.
 
 ## What's next
 
-- Add more artifacts in `~/podium-artifacts/<layer>/...`. The frontmatter `type:` field decides the kind (skill / agent / context / prompt / hook / command — see the spec).
-- Use `podium config show` to inspect the merged config — useful as you add per-project configs.
+- Add more artifacts in `~/podium-artifacts/<layer>/...`. The frontmatter `type:` field decides the kind (skill / agent / context / prompt / hook / command; see the spec).
+- Use `podium config show` to inspect the merged config. This is useful as you add per-project configs.
 - Pin per-project settings by running `podium init` (without `--global`) in a project workspace. Writes `<workspace>/.podium/sync.yaml` (committed to git) so teammates inherit your harness, target, and any profiles you set up.
 - Outgrow filesystem-source mode? When you need progressive disclosure (Claude calls MCP meta-tools at runtime to load capabilities incrementally instead of materializing everything ahead of time), graduate to a standalone server: `podium serve --standalone --layer-path ~/podium-artifacts/`. The same artifact directory; just add a daemon. See [team-rollout.md](team-rollout.md) for the bigger-picture path.
 
@@ -95,4 +95,4 @@ If you're authoring iteratively, run `podium sync --watch` instead — it uses `
 - **`config.no_registry` error.** `podium init` didn't run, or the resolved `defaults.registry` is empty. Run step 2 again.
 - **`podium sync` says no artifacts.** Make sure your artifact lives under a layer subdirectory (`~/podium-artifacts/<layer-name>/...`), not directly in `~/podium-artifacts/`.
 - **Claude Code doesn't see the skill.** Check that `.claude/agents/greet.md` exists; if it does, restart Claude Code so it re-reads the directory.
-- **Skill is found but not loaded.** Check that `description:` is specific enough for Claude to recognize the skill matches the prompt. Vague descriptions don't get used — see §3.3 of the spec on description quality.
+- **Skill is found but not loaded.** Check that `description:` is specific enough for Claude to recognize the skill matches the prompt. Vague descriptions don't get used; see §3.3 of the spec on description quality.

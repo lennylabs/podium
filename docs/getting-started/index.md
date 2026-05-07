@@ -25,7 +25,7 @@ Three pages, in order. Together they take well under an hour.
 
 | Page | What you'll do | Time |
 |:--|:--|:--|
-| [Quickstart](quickstart) | Install the CLI, write one skill, materialize it into Claude Code, see it load. Filesystem mode — no daemon, no setup beyond a CLI. | ~5 minutes |
+| [Quickstart](quickstart) | Install the CLI, write one skill, materialize it into Claude Code, see it load. Filesystem mode, with no daemon and no setup beyond a CLI. | ~5 minutes |
 | [Concepts](concepts) | The vocabulary you'll see everywhere: artifact, domain, layer, harness, materialization, visibility, the four meta-tools. | ~15 minutes |
 | [How it works](how-it-works) | Component overview, the three deployment shapes, where state lives, what runs in your process versus on a server. | ~15 minutes |
 

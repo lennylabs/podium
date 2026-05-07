@@ -1,10 +1,10 @@
 # Progressive adoption
 
-Podium ships with the full governance feature set: per-layer visibility, sensitivity labels, sandbox profiles, signing, hash-chained audit, freeze windows, SBOM/CVE pipeline, SCIM. Turning all of it on at once is a recipe for "we'll get to it after this quarter" — and then you don't.
+Podium ships with the full governance feature set: per-layer visibility, sensitivity labels, sandbox profiles, signing, hash-chained audit, freeze windows, SBOM/CVE pipeline, SCIM. Turning all of it on at once is a recipe for "we'll get to it after this quarter." Then you don't.
 
-This guide is a 30 / 60 / 90 / 180-day on-ramp. It assumes you start with `podium serve --standalone` (or the equivalent permissive standard deployment) and progressively tighten as the catalog and team grow into needing each control. Skip ahead if a particular feature is already required by an external constraint (compliance, security review, contractual obligation) — the order below is one that works for most teams, not the only valid order.
+This guide is a 30 / 60 / 90 / 180-day on-ramp. It assumes you start with `podium serve --standalone` (or the equivalent permissive standard deployment) and progressively tighten as the catalog and team grow into needing each control. Skip ahead if a particular feature is already required by an external constraint (compliance, security review, contractual obligation). The order below is one that works for most teams, not the only valid order.
 
-## Day 0 — install, public catalog, no auth
+## Day 0: Install, Public Catalog, No Auth
 
 Goal: get artifacts flowing. Don't gatekeep.
 
@@ -18,13 +18,13 @@ Goal: get artifacts flowing. Don't gatekeep.
 
 **Don't yet**: spend time arguing about layer hierarchies, group-based visibility, or naming conventions. Premature.
 
-## Week 4 — add identity (no enforcement yet)
+## Week 4: Add Identity (No Enforcement Yet)
 
 Goal: get OAuth identity working so audit and visibility have something to attach to. Still permissive.
 
-- Stand up an OIDC IdP (or hook into your existing one — Okta / Entra ID / Google Workspace / Auth0 / Keycloak). The [OIDC cookbooks](oidc/) have per-IdP setup steps.
+- Stand up an OIDC IdP (or hook into your existing one: Okta / Entra ID / Google Workspace / Auth0 / Keycloak). The [OIDC cookbooks](oidc/) have per-IdP setup steps.
 - Switch from standalone (no auth) to standard deployment (or run standalone with auth via `PODIUM_IDENTITY_PROVIDER=oauth-device-code`).
-- Existing `team-shared` layer keeps `visibility: public` for now — every authenticated user can still see everything.
+- Existing `team-shared` layer keeps `visibility: public` for now, so every authenticated user can still see everything.
 - New `<person>-personal` user-defined layers per author, default `users: [<self>]` visibility (the standard default).
 
 **What "done" looks like**: every `load_artifact` and `search_artifacts` call in the audit log carries a real `sub` claim. Anonymous calls are gone. Personal layers exist for in-progress work.
@@ -33,7 +33,7 @@ Goal: get OAuth identity working so audit and visibility have something to attac
 
 **Don't yet**: change `team-shared` visibility to `organization: true` or any group-based scope. Confirm the OIDC `sub` and `groups` claims arrive correctly first.
 
-## Week 8 — narrow `team-shared` to organization-only
+## Week 8: Narrow `team-shared` to Organization-Only
 
 Goal: stop public visibility once you're confident identity works.
 
@@ -43,20 +43,20 @@ Goal: stop public visibility once you're confident identity works.
 
 **What "done" looks like**: an unauthenticated browser hitting the registry is rejected. A user from a different OIDC org can't see your artifacts. Group-scoped layers, if any, work as expected.
 
-## Month 2 — sensitivity labels (advisory)
+## Month 2: Sensitivity Labels (Advisory)
 
 Goal: surface the existing risk profile of artifacts. No enforcement yet.
 
 - Update lint rules to require `sensitivity:` in the frontmatter. Default is still `low`; the lint check is a warning, not a failure.
 - Authors annotate existing artifacts as part of their normal review cycle. Labels available: `low` (default), `medium`, `high`.
 - Run `podium search --filter sensitivity=medium` and `podium search --filter sensitivity=high` to find higher-risk artifacts and review them.
-- The audit log now records sensitivity per `load_artifact` call — useful signal for later.
+- The audit log now records sensitivity per `load_artifact` call, which is useful signal for later.
 
 **What "done" looks like**: every artifact in the catalog has an explicit `sensitivity:` field. Authors know roughly what fraction of the catalog is `medium` or `high`.
 
 **Why advisory first**: the lint warning is a nudge for authors to think about sensitivity without breaking ingest. Once the catalog is fully labeled, you can flip to enforcement without breaking anyone's flow.
 
-## Month 3 — enforce signing for `sensitivity: high`
+## Month 3: Enforce Signing for `sensitivity: high`
 
 Goal: integrity guarantees on the artifacts where it actually matters.
 
@@ -68,19 +68,19 @@ Goal: integrity guarantees on the artifacts where it actually matters.
 
 **Don't yet**: extend signing to `medium` unless you have a specific reason. Most teams find `medium` sensitivity is the bulk of their useful catalog and hard-requiring signatures slows authoring.
 
-## Month 6 — freeze windows for production-impacting changes
+## Month 6: Freeze Windows for Production-Impacting Changes
 
 Goal: protect critical periods (release cuts, year-end close, on-call rotations) from in-flight artifact changes.
 
-- Configure freeze windows per tenant — e.g., "no ingest from Friday 17:00 to Monday 09:00" or "no ingest during the last week of the fiscal quarter."
+- Configure freeze windows per tenant, such as "no ingest from Friday 17:00 to Monday 09:00" or "no ingest during the last week of the fiscal quarter."
 - Train the team on the break-glass protocol: dual-signoff + justification, auto-expires after 24h, queues for post-hoc review.
-- Run a dry-run freeze for one window before you commit — catch the people who needed an exception.
+- Run a dry-run freeze for one window before you commit, to catch the people who needed an exception.
 
 **What "done" looks like**: freeze windows are scheduled and known to the team. The break-glass procedure has been used at least once in a controlled fashion. Audit log shows the expected pattern.
 
 **Don't yet**: enable freeze for daily windows or for non-production layers. Freeze fatigue is real; reserve it for the moments that matter.
 
-## Month 9+ — graduate the rest as needed
+## Month 9+: Graduate the Rest as Needed
 
 By this point governance overhead is amortized; the further controls are easier to add when their specific need shows up:
 
@@ -89,7 +89,7 @@ By this point governance overhead is amortized; the further controls are easier 
 - **Transparency-log anchoring** when external auditors or regulators ask "can you prove this artifact existed at time T?" The hash-chained audit log already gives you that internally; transparency-log anchoring extends it across organizational boundaries.
 - **Multi-region replication** when single-region availability stops being acceptable.
 
-Each of these warrants a planned rollout — read the relevant spec section, run a controlled trial, then enable broadly.
+Each of these warrants a planned rollout: read the relevant spec section, run a controlled trial, then enable broadly.
 
 ## What changes if you don't follow this order
 

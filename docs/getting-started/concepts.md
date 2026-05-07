@@ -3,7 +3,7 @@ layout: default
 title: Concepts
 parent: Getting Started
 nav_order: 2
-description: The vocabulary you'll see everywhere — artifacts, domains, layers, harnesses, materialization, the four meta-tools.
+description: The vocabulary you'll see everywhere: artifacts, domains, layers, harnesses, materialization, the four meta-tools.
 ---
 
 # Concepts
@@ -16,7 +16,7 @@ once up front saves time later.
 
 ## Artifact
 
-An **artifact** is a packaged authoring unit — a directory with an
+An **artifact** is a packaged authoring unit: a directory with an
 `ARTIFACT.md` file at its root and any number of bundled resources
 alongside (scripts, templates, schemas, anything).
 
@@ -33,7 +33,7 @@ The manifest is markdown with YAML frontmatter. The frontmatter is
 what Podium indexes; the prose body is what an agent reads when the
 artifact is loaded.
 
-The directory path is the artifact's **canonical ID** —
+The directory path is the artifact's **canonical ID**:
 `finance/close-reporting/run-variance-analysis` above. Other
 artifacts reference it by that ID, optionally with `@<semver>` or
 `@sha256:<hash>` for version pinning.
@@ -48,11 +48,11 @@ Every artifact declares a `type:`. The seven first-class types are:
 |:--|:--|
 | `skill` | Instructions (and optional scripts) loaded into the agent's context on demand. |
 | `agent` | A complete agent definition meant to run as a delegated child. |
-| `context` | Pure reference material — style guides, glossaries, API references. |
+| `context` | Pure reference material: style guides, glossaries, API references. |
 | `command` | Parameterized prompt templates a human invokes (typically as a slash command). |
 | `rule` | Passive context the harness loads based on a `rule_mode` (`always`, `glob`, `auto`, `explicit`). |
 | `hook` | A lifecycle observer with a declared `hook_event` and a shell `hook_action`. |
-| `mcp-server` | An MCP server registration — name, endpoint, auth profile, description. |
+| `mcp-server` | An MCP server registration: name, endpoint, auth profile, description. |
 
 Extension types register through the `TypeProvider` SPI. The type
 determines indexing, lint rules, and how the harness adapter
@@ -70,7 +70,7 @@ canonical path of an artifact under it.
 A domain folder can carry an optional `DOMAIN.md` that adds
 description, keywords, featured artifacts, imports from elsewhere,
 and discovery-rendering hints. Without `DOMAIN.md`, a domain still
-works — it's just a navigable directory of artifacts.
+works. It's a navigable directory of artifacts.
 
 The shape of a domain in `load_domain` output is governed by
 configurable rules: `max_depth`, folding of sparse subdomains,
@@ -83,14 +83,14 @@ live in `registry.yaml`; per-domain overrides live in `DOMAIN.md`.
 
 The **registry** is the system of record for artifacts. It can be:
 
-- A **directory tree on disk** (filesystem mode — no daemon, no
+- A **directory tree on disk** (filesystem mode, with no daemon, no
   server, no auth).
 - A **standalone single-binary server** running on one machine.
 - A **standard deployment** with Postgres, S3, OIDC, multi-tenancy,
   and the full governance feature set.
 
 All three apply the same layer composition and serve the same
-artifacts. Migration between shapes is mechanical — same shared Go
+artifacts. Migration between shapes is mechanical: same shared Go
 library does the parsing, composition, and adapter work in every
 case.
 
@@ -102,16 +102,16 @@ A **layer** is a unit of composition with a single source (a Git
 repo, a local filesystem path, or a custom source via the
 `LayerSourceProvider` SPI) and a visibility declaration. Layers
 compose in a defined order. There's no fixed `org / team / user`
-hierarchy — the ordering is whatever the registry config says.
+hierarchy. The ordering is whatever the registry config says.
 
 A typical setup might have:
 
-1. **Admin-defined layers**, in registry config order — e.g.,
+1. **Admin-defined layers**, in registry config order, e.g.,
    `org-defaults` (visibility: organization) and `team-finance`
    (visibility: groups: [finance]).
-2. **User-defined layers** — personal layers an authenticated user
+2. **User-defined layers**: personal layers an authenticated user
    registers for themselves, capped at three by default.
-3. **Workspace local overlay** — a per-workspace `.podium/overlay/`
+3. **Workspace local overlay**: a per-workspace `.podium/overlay/`
    directory the MCP server merges client-side, always at highest
    precedence.
 
@@ -135,7 +135,7 @@ Each layer declares its visibility independently:
 | `users: [<user-id>, ...]` | Listed user identifiers. |
 
 Multiple fields combine as a union. Visibility is enforced at the
-registry on every call — Git permissions and other source-side
+registry on every call. Git permissions and other source-side
 controls are not consulted at request time.
 
 Authoring rights are a separate concern. Whoever can merge to a
@@ -148,7 +148,7 @@ the Git host, not in Podium.
 
 ## Harness
 
-A **harness** is the AI runtime hosting an agent — Claude Code,
+A **harness** is the AI runtime hosting an agent: Claude Code,
 Cursor, OpenCode, Codex, Gemini, Pi, Hermes, Claude Desktop, or a
 custom runtime. Harnesses have different file layouts, different
 frontmatter conventions, and different rule semantics.
@@ -171,12 +171,12 @@ when you want raw output for a custom runtime or evaluation pipeline.
 host's filesystem. For `load_artifact`, the MCP server runs five
 steps:
 
-1. **Fetch** — download bytes (or read from cache).
-2. **Verify** — signature, content hash, optional SBOM walk.
-3. **Adapt** — run the harness adapter to translate to native shape.
-4. **Hook** — run any configured `MaterializationHook` plugins for
+1. **Fetch**: download bytes (or read from cache).
+2. **Verify**: signature, content hash, optional SBOM walk.
+3. **Adapt**: run the harness adapter to translate to native shape.
+4. **Hook**: run any configured `MaterializationHook` plugins for
    per-file rewrites.
-5. **Write** — atomic `.tmp + rename` write to the destination.
+5. **Write**: atomic `.tmp + rename` write to the destination.
 
 `podium sync` does the same thing in batch for the caller's whole
 effective view.
@@ -189,10 +189,10 @@ The MCP server exposes four tools to harnesses that speak MCP:
 
 | Tool | What it does |
 |:--|:--|
-| `load_domain(path?)` | Returns a map of a domain — subdomains, notable artifacts, keywords, the requested domain's description. The agent's primary navigation tool. |
+| `load_domain(path?)` | Returns a map of a domain: subdomains, notable artifacts, keywords, the requested domain's description. The agent's primary navigation tool. |
 | `search_domains(query)` | Hybrid retrieval over each domain's projection (description + keywords + truncated body). For when the agent doesn't know the right neighborhood. |
 | `search_artifacts(query?, scope?, type?, tags?)` | Hybrid retrieval over artifact frontmatter. With a query, ranks by relevance; without, browses by filter (the canonical "list all artifacts in this domain" move). |
-| `load_artifact(id)` | Loads a specific artifact by ID, runs the harness adapter, materializes bundled resources to disk. The expensive operation — only call it when you actually need the artifact. |
+| `load_artifact(id)` | Loads a specific artifact by ID, runs the harness adapter, materializes bundled resources to disk. The expensive operation; only call it when you actually need the artifact. |
 
 These are the only tools Podium contributes to a session. Hosts add
 their own runtime tools alongside.
@@ -214,7 +214,7 @@ of entries. Requires a server.
 
 **Eager** (`podium sync` path): one-shot or `--watch` materialization
 of the user's effective view (or a scope-filtered subset) onto disk.
-The harness then uses its own native discovery — `.cursor/rules/`,
+The harness then uses its own native discovery: `.cursor/rules/`,
 `.claude/agents/`, etc. Useful when you want pre-materialized
 artifacts on disk and don't need runtime discovery. Works against
 either a server or a filesystem-source registry.
@@ -230,7 +230,7 @@ Podium's behavior is pluggable via 17 SPIs covering storage,
 identity, composition, signing, audit, layer source, and delivery.
 Plugins compile into a registry build today. The SPI shapes are
 designed to be wire-compatible with a future out-of-process plugin
-protocol — see [Deployment →
+protocol. See [Deployment →
 Extending](../deployment/extending) (and §9.3 of the spec) for the
 constraints that make that transition source-compatible.
 
@@ -239,5 +239,5 @@ constraints that make that transition source-compatible.
 ## What's next
 
 The next page, [How it works](how-it-works), shows how these pieces
-fit together — the architecture, the three deployment shapes, where
+fit together: the architecture, the three deployment shapes, where
 state lives, and what's running on your machine versus on a server.

@@ -1,3 +1,5 @@
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 # Podium
 
 **A registry for generic agentic AI artifacts, and tools for getting them
@@ -16,11 +18,9 @@ Podium lets you:
 [Specification](spec/) •
 [Contributing](#contributing)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-
 > **Status: design phase.** The technical specification drives a spec- and
 > test-driven implementation. There is no shipped binary yet. Design feedback
-> is the most useful contribution today — open an
+> is the most useful contribution today. Open an
 > [issue](https://github.com/lennylabs/podium/issues) or
 > [discussion](https://github.com/lennylabs/podium/discussions).
 
@@ -60,7 +60,7 @@ Podium supports multiple setups to meet the needs of single developers and large
 - **Layered composition.** Compose your catalog from multiple sources
   with deterministic merge and explicit
   precedence. (Requires the Podium registry server.)
-- **Per-layer visibility.** Declare who can see what — each layer can be
+- **Per-layer visibility.** Declare who can see what: each layer can be
   `public`, organization-wide, scoped to OIDC `groups`, or restricted to
   specific `users`. (Requires the Podium registry server.)
 - **Agent-driven progressive discovery.** Discovery tools for traversing
@@ -76,7 +76,7 @@ integration test suite.
 
 ## 'Hello world' example
 
-After installing the `podium` CLI, write a skill — one file in a directory:
+After installing the `podium` CLI, write a skill: one file in a directory:
 
 ```markdown
 ---
@@ -107,13 +107,13 @@ Open Claude Code in your project. The skill is there.
 
 Podium has two parts:
 
-- A **registry** — the catalog of artifacts. Backed either by a folder
+- A **registry**: the catalog of artifacts. Backed either by a folder
   on disk (filesystem mode) or by a Podium server (standalone or
   standard mode). Built-in source types are `git` (a remote Git repo
   at a tracked ref) and `local` (a filesystem path); the
   `LayerSourceProvider` SPI lets deployments add custom sources
   (S3 buckets, OCI registries, HTTP archives).
-- **Consumers** — three ship with Podium: `podium sync`, the MCP
+- **Consumers**: three ship with Podium: `podium sync`, the MCP
   server, and the language SDKs. Custom consumers can build against
   the HTTP API directly.
 
@@ -146,19 +146,19 @@ custom orchestrators      OpenCode, Pi, Hermes        harnesses
 ```
 
 In filesystem mode, the catalog is just a folder. `podium sync` reads
-it directly — no server, no HTTP, no auth — and writes harness-native
+it directly, with no server, HTTP, or auth, and writes harness-native
 files to your project. The MCP server and language SDKs require a
 server.
 
-| Component         | Role                                                                                                          |
-| :---------------- | :------------------------------------------------------------------------------------------------------------ |
-| **Podium server** | HTTP API; layer composition; visibility filtering; manifest indexing; hybrid retrieval; signing; audit.       |
-| **MCP server**    | In-process bridge for MCP-speaking hosts. Exposes the four meta-tools. Requires a server.                     |
-| **`podium sync`** | CLI (and library) that materializes the user's effective view to disk via the harness adapter. Either mode.   |
-| **Language SDKs** | Thin HTTP clients for programmatic runtimes (LangChain, Bedrock, custom orchestrators). Requires a server.    |
+| Component         | Role                                                                                                        |
+| :---------------- | :---------------------------------------------------------------------------------------------------------- |
+| **Podium server** | HTTP API; layer composition; visibility filtering; manifest indexing; hybrid retrieval; signing; audit.     |
+| **MCP server**    | In-process bridge for MCP-speaking hosts. Exposes the four meta-tools. Requires a server.                   |
+| **`podium sync`** | CLI (and library) that materializes the user's effective view to disk via the harness adapter. Either mode. |
+| **Language SDKs** | Thin HTTP clients for programmatic runtimes (LangChain, Bedrock, custom orchestrators). Requires a server.  |
 
 Layer composition, visibility filtering, and harness adaptation run
-through the same shared Go library regardless of mode — embedded
+through the same shared Go library regardless of mode: embedded
 behind the server's HTTP API in server mode; invoked directly by
 `podium sync` in filesystem mode. Migrating between modes is
 mechanical and produces equivalent output for the same artifact
@@ -168,11 +168,11 @@ directory.
 
 ## Documentation
 
-- **[Documentation site](https://lennylabs.github.io/podium)** —
+- **[Documentation site](https://lennylabs.github.io/podium)**:
   organized by role (author / consume / deploy). Start with
   [Getting Started](https://lennylabs.github.io/podium/getting-started/)
   for the quickstart, concepts, and architecture.
-- **[Specification](spec/)** — the technical source of truth, one file
+- **[Specification](spec/)**: the technical source of truth, one file
   per top-level section.
 - **[Roadmap](ROADMAP.md)**, **[Contributing](CONTRIBUTING.md)**,
   **[Governance](GOVERNANCE.md)**, **[Security](SECURITY.md)**.
@@ -180,19 +180,19 @@ directory.
 ## Contributing
 
 The specification is the source of truth and the most useful place to
-push back. Today's highest-leverage contributions:
+push back. Today's most useful contributions:
 
-- **Open issues or discussions** — questions, disagreements with the
+- **Open issues or discussions**: questions, disagreements with the
   spec, missing use cases.
-- **Read the spec and stress-test it** — if a section is unclear or
+- **Read the spec and stress-test it**: if a section is unclear or
   contradicts another, file an issue.
-- **Sketch a harness adapter** — prototyping an adapter against the
+- **Sketch a harness adapter**: prototyping an adapter against the
   [adapter contract](spec/06-mcp-server.md#67-harness-adapters) helps
   surface gaps before they're expensive to fix.
-- **Sketch a `LayerSourceProvider` plugin** — a custom source backend
+- **Sketch a `LayerSourceProvider` plugin**: a custom source backend
   (S3, OCI, internal CMS) against the
   [SPI](spec/09-extensibility.md) helps validate that surface.
-- **Fix typos and broken links** — small documentation PRs are welcome
+- **Fix typos and broken links**: small documentation PRs are welcome
   any time.
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`GOVERNANCE.md`](GOVERNANCE.md).
