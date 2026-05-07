@@ -10,7 +10,7 @@ Authoring lives in Git. The registry mirrors what's been merged into a content-a
 
 ## Status
 
-Podium is in the **design phase**. The technical specification is the source of truth: [`spec/spec.md`](spec/spec.md). Implementation work is sequenced in the [build sequence](spec/spec.md#10-mvp-build-sequence). There is no shipped code yet.
+Podium is in the **design phase**. The technical specification is the source of truth: [`spec/`](spec/). Implementation work is sequenced in the [build sequence](spec/10-mvp-build-sequence.md). There is no shipped code yet.
 
 The most useful contributions today are **design feedback on the spec** — questions, disagreements, missing use cases, edge cases that aren't handled.
 
@@ -100,17 +100,17 @@ Podium is overkill for a small catalog in a single harness with one author — a
 
 ## Documentation
 
-- **Specification** — [`spec/spec.md`](spec/spec.md). Complete technical reference. Read this if you want to understand how Podium works in detail.
-- **Quickstart (5 minutes)** — [`docs/quickstart.md`](docs/quickstart.md). Author your first skill and load it from Claude Code, end-to-end. Standalone mode, no infrastructure.
+- **Specification** — [`spec/`](spec/). Complete technical reference, one file per top-level section. Start at [`spec/README.md`](spec/README.md) for the full table of contents.
+- **Quickstart (5 minutes)** — [`docs/quickstart.md`](docs/quickstart.md). Author your first skill and load it from Claude Code, end-to-end. Filesystem-source mode, no infrastructure.
 - **Small-team rollout** — [`docs/team-rollout.md`](docs/team-rollout.md). Practical setup for a 3–10 person team.
 - **Operator's guide** — [`docs/operator-guide.md`](docs/operator-guide.md). Running Podium in production: capacity, monitoring, alerting, backup/restore, upgrade.
 - **Progressive adoption** — [`docs/progressive-adoption.md`](docs/progressive-adoption.md). 30/60/90/180-day on-ramp from permissive standalone to enforced governance.
 - **OIDC integration cookbooks** — [`docs/oidc/`](docs/oidc/). Per-IdP setup for Okta, Entra ID, Google Workspace, Auth0, Keycloak.
-- **Spec sections (deep links)**:
-  - Architecture — [`spec/spec.md#2-architecture`](spec/spec.md#2-architecture).
-  - Layer model — [`spec/spec.md#46-layers-and-visibility`](spec/spec.md#46-layers-and-visibility).
-  - Build sequence — [`spec/spec.md#10-mvp-build-sequence`](spec/spec.md#10-mvp-build-sequence).
-  - Backend configuration — [`spec/spec.md#1311-backend-configuration-reference`](spec/spec.md#1311-backend-configuration-reference).
+- **Spec deep links**:
+  - [Architecture](spec/02-architecture.md)
+  - [Layers and visibility](spec/04-artifact-model.md#46-layers-and-visibility)
+  - [Build sequence](spec/10-mvp-build-sequence.md)
+  - [Backend configuration reference](spec/13-deployment.md#1312-backend-configuration-reference)
 
 ## Contributing
 
@@ -118,7 +118,7 @@ The specification is the source of truth and the most useful place to push back.
 
 - **Open issues or discussions** — questions, disagreements with the spec, missing use cases. Issues and discussions are at the project's GitHub.
 - **Read the spec and stress-test it** — if a section is unclear or contradicts another, file an issue.
-- **Sketch a runtime adapter** — prototyping an adapter against the [adapter contract](spec/spec.md#67-harness-adapters) helps surface gaps before they're expensive to fix.
+- **Sketch a runtime adapter** — prototyping an adapter against the [adapter contract](spec/06-mcp-server.md#67-harness-adapters) helps surface gaps before they're expensive to fix.
 - **Fix typos and broken links** — small documentation PRs are welcome any time.
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full guide and [`GOVERNANCE.md`](GOVERNANCE.md) for how decisions are made. Security issues: see [`SECURITY.md`](SECURITY.md).

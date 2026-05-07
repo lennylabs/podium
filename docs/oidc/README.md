@@ -35,7 +35,7 @@ identity:
 
 - **TLS termination** — assumed to be handled by your load balancer / reverse proxy.
 - **Network reachability** — the registry must be able to reach the IdP's JWKS endpoint outbound, and developers must be able to reach the IdP's verification endpoint from their browser.
-- **SCIM provisioning** — covered separately in §6.3.1 of the [spec](../../spec/spec.md). The OIDC `groups` claim mechanism described in these guides is the immediate-but-on-login path; SCIM is the push-on-change path. Use SCIM if your IdP supports it and you need group-membership changes to apply without waiting for re-login.
+- **SCIM provisioning** — covered separately in [§6.3.1 of the spec](../../spec/06-mcp-server.md#631-claim-derivation). The OIDC `groups` claim mechanism described in these guides is the immediate-but-on-login path; SCIM is the push-on-change path. Use SCIM if your IdP supports it and you need group-membership changes to apply without waiting for re-login.
 
 ## Common pitfalls (across IdPs)
 

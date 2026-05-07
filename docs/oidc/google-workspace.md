@@ -31,7 +31,7 @@ Three options, in increasing complexity:
 
 **Option B — sync Workspace groups via SCIM.** Workspace doesn't natively push SCIM, but a pattern using a Workspace add-on or a small sync script can populate Podium's directory. Maintainer-script approach; out of scope here.
 
-**Option C — resolve group membership at token-validation time.** The registry calls Google Cloud Identity's API to fetch the user's group memberships when the JWT arrives, caches for 5 minutes, treats those as the `groups` claim. Requires a service account in your Cloud project with `Cloud Identity Groups Reader` (`cloudidentity.googleapis.com/groups.readonly`). Configure on the registry side via the `IdpGroupMapping` adapter — see §6.3.1 of the [spec](../../spec/spec.md).
+**Option C — resolve group membership at token-validation time.** The registry calls Google Cloud Identity's API to fetch the user's group memberships when the JWT arrives, caches for 5 minutes, treats those as the `groups` claim. Requires a service account in your Cloud project with `Cloud Identity Groups Reader` (`cloudidentity.googleapis.com/groups.readonly`). Configure on the registry side via the `IdpGroupMapping` adapter — see [§6.3.1 of the spec](../../spec/06-mcp-server.md#631-claim-derivation).
 
 For most teams, Option A is enough to start. Move to Option C when you actually need different layers visible to different Workspace groups.
 

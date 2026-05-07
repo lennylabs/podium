@@ -1,6 +1,6 @@
 # Operator's guide
 
-Running Podium in production. This is the companion to §13 of the [spec](../spec/spec.md) — the spec describes what's true; this guide describes how to operate it day-to-day. Read §13 first if you haven't.
+Running Podium in production. This is the companion to [§13 of the spec](../spec/13-deployment.md) — the spec describes what's true; this guide describes how to operate it day-to-day. Read §13 first if you haven't.
 
 The audience here is platform engineers and SREs running a standard deployment for an organization. For small-team, single-VM use, the [team rollout guide](team-rollout.md) is more appropriate.
 
