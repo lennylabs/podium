@@ -28,12 +28,13 @@ Three consumer shapes read from the registry over HTTP: the Podium MCP server (i
    ┌──────────┴──────────┐ ┌──────────┴──────────┐ ┌──────────────┴──────────┐
    │ Podium MCP server   │ │ podium sync         │ │ Language SDKs           │
    │   load_domain ·     │ │  one-shot or watch; │ │  podium-py, podium-ts   │
-   │   search_artifacts ·│ │  writes effective   │ │  thin client over the   │
-   │   load_artifact     │ │  view to disk in    │ │  registry HTTP API      │
-   │ + IdentityProvider  │ │  harness-native     │ │ + IdentityProvider      │
-   │ + LocalOverlayProv. │ │  layout             │ │                         │
-   │ + HarnessAdapter    │ │ + HarnessAdapter    │ │                         │
-   │ + cache + materlz.  │ │ + cache             │ │                         │
+   │   search_domains ·  │ │  writes effective   │ │  thin client over the   │
+   │   search_artifacts ·│ │  view to disk in    │ │  registry HTTP API      │
+   │   load_artifact     │ │  harness-native     │ │ + IdentityProvider      │
+   │ + IdentityProvider  │ │  layout             │ │                         │
+   │ + LocalOverlayProv. │ │ + HarnessAdapter    │ │                         │
+   │ + HarnessAdapter    │ │ + cache             │ │                         │
+   │ + cache + materlz.  │ │                     │ │                         │
    └──────────▲──────────┘ └──────────▲──────────┘ └──────────▲──────────────┘
               │                       │                       │
               │ MCP (stdio)           │ filesystem            │ HTTP
@@ -80,7 +81,7 @@ Two MCP deployment scenarios use the same MCP server binary:
 
 The registry's wire protocol is **HTTP/JSON**. All three consumer shapes speak the same HTTP API. Direct MCP access to the registry is not supported; MCP is one of three consumer surfaces that translate HTTP responses into a runtime-appropriate shape.
 
-**Podium MCP server** _(in-process bridge for MCP-speaking hosts)_. Single binary. Exposes the three meta-tools. Holds no per-session server-side state — local state is limited to a content-addressed disk cache, OS-keychain-stored credentials (in `oauth-device-code` mode), an in-memory local-overlay index, and the materialized working set on disk. No state is shared across MCP server processes.
+**Podium MCP server** _(in-process bridge for MCP-speaking hosts)_. Single binary. Exposes the four meta-tools. Holds no per-session server-side state — local state is limited to a content-addressed disk cache, OS-keychain-stored credentials (in `oauth-device-code` mode), an in-memory local-overlay index, and the materialized working set on disk. No state is shared across MCP server processes.
 
 **`podium sync`** _(filesystem delivery for harnesses that read artifacts directly from disk)_. CLI command (and library) that reads the user's effective view from the registry and writes it to a host-configured layout via the configured `HarnessAdapter`. One-shot or `--watch` mode (subscribes to registry change events). Reuses the same identity providers and content cache as the MCP server. See §7.5.
 

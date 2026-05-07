@@ -14,6 +14,7 @@ The MCP server (§6), the language SDKs (§7.6), and identity-based visibility f
 ### Latency budgets (SLO targets — server source)
 
 - `load_domain`: p99 < 200 ms
+- `search_domains`: p99 < 200 ms
 - `search_artifacts`: p99 < 200 ms
 - `load_artifact` (manifest only): p99 < 500 ms
 - `load_artifact` (manifest + ≤10 MB resources from cache miss): p99 < 2 s
@@ -35,7 +36,7 @@ Below the inline cutoff, resources are returned inline. This avoids round-trips 
 Hosts and authors choose the consumer shape that fits their context:
 
 - **Programmatic runtimes** use `podium-py` or `podium-ts` to call the registry HTTP API directly. The most flexible path — preferred wherever a long-running process can host an HTTP client. Contract: the registry's HTTP API, with layer composition and visibility filtering applied server-side. See §7.6.
-- **Hosts that can't run an SDK in-process** (Claude Desktop, Claude Code, Cursor, and similar) spawn the Podium MCP server alongside their own runtime tools. Contract: the three meta-tools plus the materialization semantics described in §6.6.
+- **Hosts that can't run an SDK in-process** (Claude Desktop, Claude Code, Cursor, and similar) spawn the Podium MCP server alongside their own runtime tools. Contract: the four meta-tools plus the materialization semantics described in §6.6.
 - **Authors who prefer eager materialization** run `podium sync` (one-shot or watcher) and let the harness's native discovery take over from there, instead of mediating every load through MCP or the SDK at runtime. Contract: the registry's effective view written to a host-configured directory layout via the harness adapter. See §7.5.
 
 Authoring uses Git as the source of truth (§4.6). The Podium CLI handles layer registration, manual reingests, cache management, and admin tasks; it does not push artifact content to the registry.
@@ -431,6 +432,7 @@ client = Client(
 
 # Discovery
 domains = client.load_domain("finance/close-reporting")
+candidates = client.search_domains("vendor payments", top_k=5)
 results = client.search_artifacts("variance analysis", type="skill")
 
 # Full filter surface: type, tags, scope, top_k, session_id
@@ -447,6 +449,10 @@ results = client.search_artifacts(
 agents = client.search_artifacts("payment workflow", type="agent")
 contexts = client.search_artifacts("style guide", type="context")
 mcp_servers = client.search_artifacts(type="mcp-server")
+
+# Browse: no query, scope only — list artifacts in a domain
+browse = client.search_artifacts(scope="finance/ap", top_k=50)
+print(f"showing {len(browse.results)} of {browse.total_matched} artifacts in finance/ap")
 
 # Load (in-memory or to disk)
 artifact = client.load_artifact("finance/close-reporting/run-variance-analysis")
@@ -471,19 +477,29 @@ For shell pipelines and language-agnostic scripts that don't want to take a Pyth
 
 | Command                       | Maps to                                    | Behavior                                                                                                                                                                         |
 | ----------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `podium search <query>`       | `Client.search_artifacts(...)`             | Hybrid search. Flags `--type`, `--tags`, `--scope`, `--top-k` mirror the SDK args. Returns ranked descriptors.                                                                   |
+| `podium search <query>`       | `Client.search_artifacts(...)`             | Hybrid search over artifacts. Flags `--type`, `--tags`, `--scope`, `--top-k` mirror the SDK args. Returns ranked descriptors.                                                    |
+| `podium domain search <query>`| `Client.search_domains(...)`               | Hybrid search over domains. Flags `--scope`, `--top-k` mirror the SDK args. Returns ranked domain descriptors.                                                                   |
 | `podium domain show [<path>]` | `Client.load_domain(path)`                 | Domain map for `<path>` (or root when no path is given).                                                                                                                         |
 | `podium artifact show <id>`   | `Client.load_artifact(id)` (manifest only) | Prints the manifest body and frontmatter to stdout. **Does not materialize bundled resources** — for that, use `podium sync --include <id>`. Flags: `--version`, `--session-id`. |
 
 Output formats:
 
-- **Default** — human-readable rendering. Search results are a ranked table; domain trees are nested bullets; manifests are printed as the markdown body with frontmatter at the top.
+- **Default** — human-readable rendering. Search results are a ranked table prefixed with `Showing N of M results` so the user can tell when more matched than were rendered; domain trees are nested bullets; manifests are printed as the markdown body with frontmatter at the top.
 - **`--json`** — structured envelope with stable keys, designed to be piped into `jq`. Schemas:
 
   ```json
   // podium search ... --json
-  { "query": "...", "results": [ { "id": "...", "type": "...", "version": "...",
-                                   "score": 0.83, "frontmatter": { ... } }, ... ] }
+  { "query": "...",
+    "total_matched": 47,
+    "results": [ { "id": "...", "type": "...", "version": "...",
+                   "score": 0.83, "frontmatter": { ... } }, ... ] }
+
+  // podium domain search <query> --json
+  { "query": "...",
+    "total_matched": 8,
+    "results": [ { "path": "...", "name": "...",
+                   "description": "...", "keywords": ["...", "..."],
+                   "score": 0.87 }, ... ] }
 
   // podium domain show <path> --json
   { "path": "...",

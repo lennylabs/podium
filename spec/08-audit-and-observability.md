@@ -7,6 +7,7 @@ Every significant event, each carrying a trace ID (W3C Trace Context):
 | Event                     | When                                                               | Source   |
 | ------------------------- | ------------------------------------------------------------------ | -------- |
 | `domain.loaded`           | Host invoked `load_domain`                                         | Registry |
+| `domains.searched`        | Host invoked `search_domains`                                      | Registry |
 | `artifacts.searched`      | Host invoked `search_artifacts`                                    | Registry |
 | `artifact.loaded`         | Host invoked `load_artifact`                                       | Registry |
 | `artifact.published`      | A new `(artifact_id, version)` was ingested                        | Registry |
@@ -25,14 +26,14 @@ Every significant event, each carrying a trace ID (W3C Trace Context):
 
 Audit lives in two streams. The registry owns the events above. The MCP server can also write a local audit log for the meta-tool events through a `LocalAuditSink` interface (§9) when configured. Both streams share trace IDs.
 
-**Caller identity in audit events.** Read events (`domain.loaded`, `artifacts.searched`, `artifact.loaded`) record the caller's identity from the OAuth token: typically `caller.identity = "<sub-claim>"`, with email and groups attached. In public-mode deployments (§13.10), the OAuth flow is skipped and these events instead record `caller.identity = "system:public"`, with the source IP address and any upstream `X-Forwarded-User` header preserved in `caller.network`. Public-mode events also carry the flag `caller.public_mode: true` so downstream consumers (SIEM, audit dashboards) can filter them without parsing identity strings.
+**Caller identity in audit events.** Read events (`domain.loaded`, `domains.searched`, `artifacts.searched`, `artifact.loaded`) record the caller's identity from the OAuth token: typically `caller.identity = "<sub-claim>"`, with email and groups attached. In public-mode deployments (§13.10), the OAuth flow is skipped and these events instead record `caller.identity = "system:public"`, with the source IP address and any upstream `X-Forwarded-User` header preserved in `caller.network`. Public-mode events also carry the flag `caller.public_mode: true` so downstream consumers (SIEM, audit dashboards) can filter them without parsing identity strings.
 
 ## 8.2 PII Redaction
 
 Two redaction surfaces:
 
 - **Manifest-declared.** Artifact manifests can specify fields that should be redacted in audit logs (e.g., `bank_account`, `ssn`). The registry honors redaction directives; the MCP server applies the same directives before writing to its local audit sink.
-- **Query text.** Free-text `search_artifacts` queries are regex-scrubbed for common PII patterns (SSN, credit-card, email, phone) before being written to audit. Patterns configurable via `PIIRedactionConfig`. Default-on.
+- **Query text.** Free-text `search_artifacts` and `search_domains` queries are regex-scrubbed for common PII patterns (SSN, credit-card, email, phone) before being written to audit. Patterns configurable via `PIIRedactionConfig`. Default-on.
 
 ## 8.3 Audit Sinks
 

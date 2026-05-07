@@ -286,7 +286,7 @@ vendors. For inbound payments and AR, see `finance/ar/`.
 ...
 ```
 
-A domain folder without a `DOMAIN.md` is a regular navigable domain by default. The file is only needed to import from elsewhere, exclude paths, set the description, mark the folder as unlisted, or override discovery rendering for the subtree (§4.5.5).
+A domain folder without a `DOMAIN.md` is a regular navigable domain by default. The file is only needed to import from elsewhere, exclude paths, set the description, mark the folder as unlisted, or override discovery rendering for the subtree (§4.5.5). One consequence: a domain without a `DOMAIN.md` does not appear in `search_domains` results (it has no projection to embed) — it remains reachable via `load_domain` enumeration only.
 
 The frontmatter `description:` is a single-line summary used wherever this domain appears as a child or sibling in another `load_domain` response. The prose body below the frontmatter is long-form context, returned by `load_domain` only when this domain is the requested path. Resolution and rendering of both are described in §4.5.5 *Description rendering*.
 
@@ -559,9 +559,9 @@ Force-push or history rewrite at the source does not break the invariant: previo
 
 ### Embedding generation
 
-Hybrid retrieval (BM25 + vectors via RRF) needs an embedding for every artifact and for each `search_artifacts` query. The registry computes both.
+Hybrid retrieval (BM25 + vectors via RRF) needs an embedding for every artifact and for each domain that has a `DOMAIN.md`, plus an embedding for each `search_artifacts` and `search_domains` query. The registry computes all four.
 
-**What gets embedded.** A canonical text projection per artifact, built from frontmatter only:
+**What gets embedded — artifacts.** A canonical text projection per artifact, built from frontmatter only:
 
 - `name`
 - `description`
@@ -569,6 +569,14 @@ Hybrid retrieval (BM25 + vectors via RRF) needs an embedding for every artifact 
 - `tags` (joined)
 
 The prose body of `ARTIFACT.md` is **not** embedded. It's noisy for retrieval and risks busting embedding-model context limits at the long-tail end. Authors who want richer search recall put discoverability content in `description` and `when_to_use`. The same projection is applied to `search_artifacts` queries when the caller passes a text `query` (the `query` is treated as a free-text search target, not concatenated with the projection).
+
+**What gets embedded — domains.** A canonical text projection per domain, built when a `DOMAIN.md` is present:
+
+- `description` (frontmatter)
+- `keywords` (joined)
+- Prose body of `DOMAIN.md`, truncated to the first 500 tokens
+
+Domains without a `DOMAIN.md` are not embedded and do not appear in `search_domains` results — they remain reachable via `load_domain` enumeration. The same `EmbeddingProvider` and storage backend serve both artifact and domain indexes; on `DOMAIN.md` ingest the domain projection is re-embedded with the same dual-write outbox semantics described below. `search_domains` queries are embedded the same way `search_artifacts` queries are: the free-text `query` is sent to the embedding pipeline and matched against the domain index. Visibility filtering applies identically — a domain whose `DOMAIN.md` was ingested only under a layer the caller cannot see (§4.6) does not surface in `search_domains` results, even though its projection embedding exists in the vector store.
 
 **Where embeddings come from.** Two cases, determined by the configured `RegistrySearchProvider`:
 

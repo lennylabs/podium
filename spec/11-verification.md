@@ -8,6 +8,10 @@
 
 - **Local search test**: `search_artifacts` returns workspace-local-overlay artifacts merged with registry results via RRF; removing the local file removes the artifact from search.
 
+- **Search browse mode test**: `search_artifacts(scope=<path>)` with no query returns all visible artifacts in scope, ordered by default rank; `total_matched` reflects the true match count even when `top_k` truncates the returned `results`; `top_k > 50` is rejected with a structured `registry.invalid_argument` error (enforced both client-side in the SDK and server-side at the registry).
+
+- **Domain search test**: `search_domains` returns domains with a `DOMAIN.md` ranked by relevance over the projection (`description` + `keywords` + truncated body); domains without a `DOMAIN.md` do not appear; `--scope` constrains results to a path prefix; visibility filtering excludes domains the caller can't see; updating `DOMAIN.md` re-embeds the projection and reflects in the next query.
+
 - **Workspace local overlay precedence test**: confirm the workspace local overlay overrides every registry-side layer for a synthetic conflicting artifact, and that removing the overlay file restores the registry-side artifact.
 
 - **Domain composition tests**: `DOMAIN.md` `include:` patterns surface matching artifacts; recursive `**` and brace `{a,b}` patterns resolve correctly; `exclude:` removes paths; `unlisted: true` removes a folder and its subtree from `load_domain` enumeration; `DOMAIN.md` from multiple layers merges per §4.5.4; remote-vs-local glob resolution asymmetry is correct.

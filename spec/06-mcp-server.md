@@ -2,7 +2,7 @@
 
 ## 6.1 The Bridge
 
-The Podium MCP server is a thin in-process bridge. It exposes the three meta-tools to the host's runtime over MCP and forwards calls to the registry. It holds no per-session server-side state. Local state is limited to a content-addressed disk cache, OS-keychain-stored credentials (in `oauth-device-code` mode), an in-memory local-overlay index, and the materialized working set on disk. No state is shared across MCP server processes.
+The Podium MCP server is a thin in-process bridge. It exposes the four meta-tools to the host's runtime over MCP and forwards calls to the registry. It holds no per-session server-side state. Local state is limited to a content-addressed disk cache, OS-keychain-stored credentials (in `oauth-device-code` mode), an in-memory local-overlay index, and the materialized working set on disk. No state is shared across MCP server processes.
 
 A single Go binary serves every deployment context. The host configures it via env vars, command-line flags, or a config file.
 
