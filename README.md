@@ -105,69 +105,77 @@ Open Claude Code in your project. The skill is there.
 
 ## How it works
 
+Podium has two parts:
+
+- A **registry** — the catalog of artifacts. Backed either by a folder
+  on disk (filesystem mode) or by a Podium server (standalone or
+  standard mode). Built-in source types are `git` (a remote Git repo
+  at a tracked ref) and `local` (a filesystem path); the
+  `LayerSourceProvider` SPI lets deployments add custom sources
+  (S3 buckets, OCI registries, HTTP archives).
+- **Consumers** — three ship with Podium: `podium sync`, the MCP
+  server, and the language SDKs. Custom consumers can build against
+  the HTTP API directly.
+
+In server mode, the server holds the catalog; consumers reach it
+over HTTP and identity-aware composition runs server-side:
+
 ```
-   Git repos / S3 / OCI / local paths ──┐
-   (one source per layer)               │
-                                        ▼
-                       ┌──────────────────────────┐
-                       │ PODIUM REGISTRY          │
-                       │  HTTP/JSON API           │
-                       │  Postgres + pgvector     │
-                       │  layer composition       │
-                       │  visibility filtering    │
-                       │  dependency graph        │
-                       └─────────────▲────────────┘
-                                     │
+   Git repos / local paths ──────────┐
+   (one or more layer sources)       │
+                                     ▼
+                       ┌─────────────────────────┐
+                       │ Podium server           │
+                       │  HTTP/JSON API          │
+                       │  Postgres + pgvector    │
+                       │  layer composition      │
+                       │  visibility filtering   │
+                       │  dependency graph       │
+                       └────────────▲────────────┘
+                                    │
                   OAuth-attested identity (every call)
-                                     │
-       ┌─────────────────────────────┼─────────────────────────────┐
-       │                             │                             │
-┌──────┴───────┐           ┌─────────┴──────┐         ┌───────────┴─────┐
-│ Language SDKs│           │ MCP server     │         │ podium sync     │
-│ (py, ts)     │           │ (in-process)   │         │ (filesystem)    │
-└──────────────┘           └────────────────┘         └─────────────────┘
-LangChain, Bedrock,        Claude Code, Cursor,        File-based
-custom orchestrators       OpenCode, Pi, Hermes        harnesses
+                                    │
+       ┌────────────────────────────┼────────────────────────────┐
+       │                            │                            │
+┌──────┴───────┐          ┌─────────┴──────┐          ┌──────────┴─────┐
+│ Language SDKs│          │ MCP server     │          │ podium sync    │
+│ (py, ts)     │          │ (in-process)   │          │ (CLI)          │
+└──────────────┘          └────────────────┘          └────────────────┘
+LangChain, Bedrock,       Claude Code, Cursor,        File-based
+custom orchestrators      OpenCode, Pi, Hermes        harnesses
 ```
 
-| Component         | Role                                                                                                                                                                                                                                              |
-| :---------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Registry**      | System of record. Composes the caller's effective view from the layer list, applies per-layer visibility, indexes manifests, runs hybrid search, signs URLs, maintains the cross-type dependency graph, emits change events.                      |
-| **MCP server**    | In-process bridge for MCP-speaking hosts. Exposes the four meta-tools. Holds no per-session server-side state — only a content-addressed disk cache, OS-keychain credentials, an in-memory local-overlay index, and the materialized working set. |
-| **`podium sync`** | CLI (and library) that reads the user's effective view and writes it to a host-configured layout via the configured `HarnessAdapter`. Works against either an HTTP registry or a filesystem-source registry.                                      |
-| **Language SDKs** | Thin HTTP clients. Used by LangChain, Bedrock, OpenAI Assistants, custom orchestrators, eval harnesses, build pipelines, notebooks.                                                                                                               |
+In filesystem mode, the catalog is just a folder. `podium sync` reads
+it directly — no server, no HTTP, no auth — and writes harness-native
+files to your project. The MCP server and language SDKs require a
+server.
 
----
+| Component         | Role                                                                                                          |
+| :---------------- | :------------------------------------------------------------------------------------------------------------ |
+| **Podium server** | HTTP API; layer composition; visibility filtering; manifest indexing; hybrid retrieval; signing; audit.       |
+| **MCP server**    | In-process bridge for MCP-speaking hosts. Exposes the four meta-tools. Requires a server.                     |
+| **`podium sync`** | CLI (and library) that materializes the user's effective view to disk via the harness adapter. Either mode.   |
+| **Language SDKs** | Thin HTTP clients for programmatic runtimes (LangChain, Bedrock, custom orchestrators). Requires a server.    |
 
-## When Podium helps
-
-Podium is overkill for a small catalog in a single harness with one
-author — a flat directory plus the harness's native conventions handles
-that. It becomes valuable as any of these dimensions grow:
-
-- **Catalog size.** Lazy discovery and per-domain navigation help once
-  the working set no longer fits comfortably in a system prompt.
-- **Cross-harness delivery.** "Author once, deliver anywhere" pays off
-  even at small scale once you target more than one harness.
-- **Multiple artifact types.** A single dependency graph across skills,
-  agents, contexts, commands, rules, hooks, and MCP server registrations
-  beats N type-specific stores.
-- **Multiple contributors.** Per-layer visibility, classification, and
-  audit start to pay off as the number of contributors and the diversity
-  of audiences grow.
+Layer composition, visibility filtering, and harness adaptation run
+through the same shared Go library regardless of mode — embedded
+behind the server's HTTP API in server mode; invoked directly by
+`podium sync` in filesystem mode. Migrating between modes is
+mechanical and produces equivalent output for the same artifact
+directory.
 
 ---
 
 ## Documentation
 
-- [Documentation site](https://lennylabs.github.io/podium) — Jekyll +
-  Just The Docs theme.
-- [Specification](spec/) — comprehensive technical reference, one file
-  per top-level section. Start at [`spec/README.md`](spec/README.md).
-- [Roadmap](ROADMAP.md) — short-horizon priorities.
-- [Contributing](CONTRIBUTING.md) — how to contribute today.
-- [Governance](GOVERNANCE.md) — how decisions are made.
-- [Security](SECURITY.md) — reporting vulnerabilities.
+- **[Documentation site](https://lennylabs.github.io/podium)** —
+  organized by role (author / consume / deploy). Start with
+  [Getting Started](https://lennylabs.github.io/podium/getting-started/)
+  for the quickstart, concepts, and architecture.
+- **[Specification](spec/)** — the technical source of truth, one file
+  per top-level section.
+- **[Roadmap](ROADMAP.md)**, **[Contributing](CONTRIBUTING.md)**,
+  **[Governance](GOVERNANCE.md)**, **[Security](SECURITY.md)**.
 
 ## Contributing
 

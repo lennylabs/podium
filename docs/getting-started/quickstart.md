@@ -8,10 +8,6 @@ description: Install Podium, write one skill, see it load in Claude Code. Five m
 
 # Quickstart
 
-Five minutes from a blank terminal to "the skill I just wrote is
-running in Claude Code." Filesystem mode — no daemon, no port, no
-auth. Just a CLI, a folder, and your harness.
-
 This is the lightest possible Podium setup. It's the right starting
 point for solo work, prototypes, and anyone evaluating Podium for
 the first time. When you outgrow it, [the deployment
@@ -82,7 +78,7 @@ across projects, run `podium init --global` instead.
 ## 3. Write your first skill
 
 A skill is a directory with an `ARTIFACT.md` file at its root. The
-top-level directories under your registry path are *layers*; everything
+top-level directories under your registry path are _layers_; everything
 below is the artifact namespace. Make a skill called `greet` under
 the `personal` layer:
 
@@ -185,7 +181,7 @@ Now that the loop works, here's where to go:
 - **Outgrow filesystem mode.** When you want runtime discovery
   (agents loading capabilities mid-session) or a single audit log
   for a team, graduate to a standalone server: `podium serve
-  --standalone --layer-path ~/podium-artifacts/`. Same directory,
+--standalone --layer-path ~/podium-artifacts/`. Same directory,
   same artifacts — just add a daemon. See [Deployment →
   Small team](../deployment/).
 
@@ -197,7 +193,7 @@ Now that the loop works, here's where to go:
 resolved `defaults.registry` is empty. Re-run step 2.
 
 **`podium sync` says no artifacts.** The artifact must live under a
-*layer* subdirectory (`~/podium-artifacts/<layer-name>/...`), not
+_layer_ subdirectory (`~/podium-artifacts/<layer-name>/...`), not
 directly in `~/podium-artifacts/`. Layer names are the top level;
 artifacts go below.
 

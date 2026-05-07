@@ -24,36 +24,49 @@ one consumer that also works against the filesystem shape directly.
 
 ## High-level architecture
 
-Server-source shape — what most teams run once they're past the
-filesystem stage:
+Podium has two parts:
+
+- A **registry** — the catalog of artifacts. Backed by either a
+  folder on disk (filesystem mode) or a Podium server (standalone or
+  standard mode). Built-in source types are `git` and `local`; the
+  `LayerSourceProvider` SPI lets deployments add custom sources
+  (S3, OCI, HTTP archives).
+- **Consumers** — three ship with Podium: `podium sync`, the MCP
+  server, and the language SDKs. Custom consumers can build against
+  the HTTP API directly.
+
+Server mode — what most teams run once they're past the filesystem
+stage. The server holds the catalog; consumers reach it over HTTP
+and identity-aware composition runs server-side:
 
 ```
-   Git repos / S3 / OCI / local paths ───┐
-   (one source per layer)                │
-                                         ▼
-                       ┌──────────────────────────┐
-                       │ PODIUM REGISTRY          │
-                       │  HTTP/JSON API           │
-                       │  Postgres + pgvector     │
-                       │  Object storage          │
-                       │  Layer composition       │
-                       │  Visibility filtering    │
-                       │  Dependency graph        │
-                       └─────────────▲────────────┘
-                                     │
+   Git repos / local paths ──────────┐
+   (one or more layer sources)       │
+                                     ▼
+                       ┌─────────────────────────┐
+                       │ Podium server           │
+                       │  HTTP/JSON API          │
+                       │  Postgres + pgvector    │
+                       │  Object storage         │
+                       │  Layer composition      │
+                       │  Visibility filtering   │
+                       │  Dependency graph       │
+                       └────────────▲────────────┘
+                                    │
                   OAuth-attested identity (every call)
-                                     │
-       ┌─────────────────────────────┼─────────────────────────────┐
-       │                             │                             │
-┌──────┴───────┐           ┌─────────┴──────┐         ┌───────────┴─────┐
-│ Language SDKs│           │ MCP server     │         │ podium sync     │
-│ (py, ts)     │           │ (in-process)   │         │ (filesystem)    │
-└──────────────┘           └────────────────┘         └─────────────────┘
-LangChain, Bedrock,        Claude Code, Cursor,        File-based
-custom orchestrators       OpenCode, Pi, Hermes        harnesses
+                                    │
+       ┌────────────────────────────┼────────────────────────────┐
+       │                            │                            │
+┌──────┴───────┐          ┌─────────┴──────┐          ┌──────────┴─────┐
+│ Language SDKs│          │ MCP server     │          │ podium sync    │
+│ (py, ts)     │          │ (in-process)   │          │ (CLI)          │
+└──────────────┘          └────────────────┘          └────────────────┘
+LangChain, Bedrock,       Claude Code, Cursor,        File-based
+custom orchestrators      OpenCode, Pi, Hermes        harnesses
 ```
 
-Filesystem-source shape — for solo work, prototypes, and CI:
+Filesystem mode — for solo work, prototypes, and CI. The catalog is
+just a folder; `podium sync` reads it directly:
 
 ```
    ~/podium-artifacts/             ┌─────────────┐
@@ -69,6 +82,7 @@ Filesystem-source shape — for solo work, prototypes, and CI:
 Same artifacts, same `ARTIFACT.md` and `DOMAIN.md` formats, same
 adapter behavior. The only thing that changes is whether `podium
 sync` reaches the registry over HTTP or reads it directly from disk.
+The MCP server and language SDKs require a server.
 
 ---
 
