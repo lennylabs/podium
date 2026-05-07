@@ -1,128 +1,206 @@
 # Podium
 
-> A control plane for managing and serving AI agent artifacts at scale.
+**A registry for the artifacts AI agents use, and a way to deliver them
+into any harness.**
+
+Skills, commands, rules, agents, contexts, hooks, MCP server registrations
+— write them once in markdown, serve them from one place, materialize them
+into Claude Code, Cursor, OpenCode, Gemini, Codex, Pi, Hermes, or your own
+runtime.
+
+[Documentation](https://OWNER.github.io/podium) •
+[Quickstart](#quickstart) •
+[Specification](spec/) •
+[Contributing](#contributing)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Podium is a registry and discovery layer for the artifacts AI agents actually use — skills, agents, contexts, prompts, and MCP server registrations — across multiple harnesses, multiple teams, and multiple types.
+> **Status: design phase.** The technical specification drives a spec- and
+> test-driven implementation. There is no shipped binary yet. Design feedback
+> is the most useful contribution today — open an
+> [issue](https://github.com/OWNER/podium/issues) or
+> [discussion](https://github.com/OWNER/podium/discussions).
 
-Authoring lives in Git. The registry mirrors what's been merged into a content-addressed store and serves it to three consumer paths: an SDK, an MCP bridge, and `podium sync`. Visibility is enforced per layer; lazy materialization keeps the working set small even when the catalog has thousands of entries.
+---
 
-## Status
+## What it is
 
-Podium is in the **design phase**. The technical specification is the source of truth: [`spec/`](spec/). Implementation work is sequenced in the [build sequence](spec/10-mvp-build-sequence.md). There is no shipped code yet.
+You author artifacts in `ARTIFACT.md` files in a Git repo. Podium
+mirrors them into a content-addressed store and serves them. Three
+consumers read from that store:
 
-The most useful contributions today are **design feedback on the spec** — questions, disagreements, missing use cases, edge cases that aren't handled.
+- **MCP server** — your harness (Claude Code, Cursor, OpenCode, etc.)
+  calls `load_domain` / `search_domains` / `search_artifacts` /
+  `load_artifact` over MCP. Lazy: nothing in the agent's context until
+  it's actually needed.
+- **`podium sync`** — eager filesystem materialization. Walks your
+  effective view, writes harness-native files. One-shot or watcher mode.
+- **Language SDKs** (`podium-py`, `podium-ts`) — programmatic access for
+  runtimes, eval harnesses, custom orchestrators.
 
-## What Podium does
+You can run Podium three ways:
 
-- **Author once, deliver anywhere.** Artifacts are written in a single canonical format. A pluggable `HarnessAdapter` translates them into Claude Code, Claude Desktop, Cursor, Gemini, Codex, OpenCode, and similar harness-native formats at delivery time.
-- **Type-heterogeneous.** Skills, agents, contexts, prompts, and MCP server registrations are first-class. Cross-type dependencies (`extends:`, `delegates_to:`, `mcpServers:`) are tracked in a single graph.
-- **Multi-layer composition.** An ordered list of layers (admin-defined, user-defined, workspace local) composes per-request, with deterministic merge and explicit precedence. `extends:` lets a higher-precedence artifact inherit and refine a lower one without forking.
-- **Visibility per layer.** Each layer declares its own visibility (`public`, `organization`, OIDC `groups`, explicit `users`). Authoring rights live in the Git provider's branch protection — Podium does not duplicate them.
-- **Lazy materialization.** Sessions can start empty and load only what the agent decides to use. Catalogs of thousands of artifacts don't pollute the system prompt.
-- **Hybrid retrieval.** BM25 + vector search fused via reciprocal rank fusion. Built-in vector backends: `pgvector`, `sqlite-vec`, Pinecone, Weaviate Cloud, Qdrant Cloud. Built-in embedding providers: `embedded-onnx`, `openai`, `voyage`, `cohere`, `ollama`.
-- **Standalone or standard.** `podium serve --standalone` runs as a single binary with embedded SQLite + sqlite-vec + a bundled embedding model — works offline. Standard deployments use Postgres, S3-compatible object storage, an OIDC IdP, and webhook-driven Git ingest.
+| Shape | For | What's running |
+|:--|:--|:--|
+| **Filesystem** | Solo, prototype, CI | `podium sync` reads a directory; no daemon, no port, no auth |
+| **Standalone** | 3–10 person team | `podium serve --standalone` — single binary with embedded SQLite + sqlite-vec + a bundled embedding model |
+| **Standard** | 20+ / multi-tenant / governed | Postgres + S3 + OIDC; per-layer visibility, signing, freeze windows, SCIM, hash-chained audit |
 
-## Quick example
+Same artifacts. Same author flow. Different operational shape.
 
-A minimal artifact:
+---
 
-```
-finance/close-reporting/run-variance-analysis/
-└── ARTIFACT.md
-```
+## Quickstart
 
-```markdown
+Filesystem mode — no daemon, no setup beyond a CLI:
+
+```bash
+# Install (target shape; not yet packaged)
+brew install OWNER/tap/podium
+
+# Point Podium at a folder; default to Claude Code as the harness
+mkdir -p ~/podium-artifacts/personal
+podium init --global --registry ~/podium-artifacts/ --harness claude-code
+
+# Author one skill
+mkdir -p ~/podium-artifacts/personal/hello/greet
+cat > ~/podium-artifacts/personal/hello/greet/ARTIFACT.md <<'EOF'
 ---
 type: skill
-name: run-variance-analysis
+name: greet
 version: 1.0.0
-description: Flag unusual variance vs. forecast after month-end close.
-when_to_use:
-  - "After month-end close, when reviewing financial performance"
-tags: [finance, close, variance]
-sensitivity: low
+description: Greet the user by name and tell them today's date.
 ---
 
-Compare actuals vs. forecast for the most recent close period. For each line
-item, flag variances above the threshold defined in your team's policy doc.
-Output a markdown table sorted by absolute variance.
+Greet the user by their first name. Tell them today's date.
+EOF
+
+# Materialize into Claude Code's directory
+cd ~/projects/your-project
+podium sync --target .claude/
 ```
 
-The author commits this to a tracked Git ref. The registry ingests on webhook. In an agent session:
+Open Claude Code in the project. The skill is available.
+
+[Full quickstart](https://OWNER.github.io/podium/getting-started/quickstart)
+
+---
+
+## What's included
+
+- **Seven first-class artifact types.** `skill`, `agent`, `context`,
+  `command`, `rule`, `hook`, and `mcp-server`. Extension types register
+  through a `TypeProvider` SPI.
+- **Eight built-in harness adapters.** `claude-code`, `claude-desktop`,
+  `cursor`, `gemini`, `opencode`, `codex`, `pi`, `hermes`, plus `none`
+  for raw output.
+- **Layered composition.** Admin-defined, user-defined, and workspace-
+  local overlay layers compose per request with deterministic merge.
+  `extends:` lets a higher-precedence artifact inherit and refine a
+  lower one without forking.
+- **Visibility per layer.** `public`, `organization`, OIDC `groups`, or
+  explicit `users`. Authoring rights stay in your Git host's branch
+  protection.
+- **Hybrid retrieval.** BM25 + vector embeddings via reciprocal rank
+  fusion. Vector backends: pgvector, sqlite-vec, Pinecone, Weaviate
+  Cloud, Qdrant Cloud. Embedding providers: openai, voyage, cohere,
+  ollama, embedded-onnx.
+- **17 SPIs.** Storage, identity, composition, signing, audit, layer
+  source, delivery — every seam is pluggable. `MaterializationHook`
+  for pre-write rewrites; `LayerSourceProvider` for non-Git layer
+  sources (S3, OCI, HTTP archives).
+
+Every capability is specified in [`spec/`](spec/) and covered by the
+integration test suite.
+
+---
+
+## How it works
 
 ```
-load_domain("finance/close-reporting")
-→ {domains: [...], artifacts: [{id: "finance/close-reporting/run-variance-analysis", ...}]}
-
-load_artifact("finance/close-reporting/run-variance-analysis")
-→ {manifest: <prose body>, materialized_at: "/workspace/.podium/runtime/.../ARTIFACT.md"}
-```
-
-The agent now has the skill in its working set. Done.
-
-## Architecture
-
-```
-   Git repos / local paths ──────────┐
-   (one per layer)                   │
-                                     ▼
-                       ┌───────────────────────────┐
-                       │ PODIUM REGISTRY (service) │
-                       │  HTTP/JSON API            │
-                       │  Postgres + pgvector      │
-                       │  layer composition +      │
-                       │    visibility filtering   │
-                       │  dependency graph         │
-                       └─────────────▲─────────────┘
+   Git repos / S3 / OCI / local paths ──┐
+   (one source per layer)               │
+                                        ▼
+                       ┌──────────────────────────┐
+                       │ PODIUM REGISTRY          │
+                       │  HTTP/JSON API           │
+                       │  Postgres + pgvector     │
+                       │  layer composition       │
+                       │  visibility filtering    │
+                       │  dependency graph        │
+                       └─────────────▲────────────┘
                                      │
                   OAuth-attested identity (every call)
                                      │
-        ┌────────────────────────────┼────────────────────────────┐
-        │                            │                            │
-┌───────┴────────┐          ┌────────┴────────┐         ┌─────────┴────────┐
-│ Language SDKs  │          │ MCP server      │         │ podium sync      │
-│ (py, ts)       │          │ (in-process)    │         │ (filesystem)     │
-└────────────────┘          └─────────────────┘         └──────────────────┘
-LangChain, Bedrock,         Claude Desktop,             File-based harnesses,
-custom orchestrators        Claude Code, Cursor         eager materialization
+       ┌─────────────────────────────┼─────────────────────────────┐
+       │                             │                             │
+┌──────┴───────┐           ┌─────────┴──────┐         ┌───────────┴─────┐
+│ Language SDKs│           │ MCP server     │         │ podium sync     │
+│ (py, ts)     │           │ (in-process)   │         │ (filesystem)    │
+└──────────────┘           └────────────────┘         └─────────────────┘
+LangChain, Bedrock,        Claude Code, Cursor,        File-based
+custom orchestrators       OpenCode, Pi, Hermes        harnesses
 ```
+
+| Component | Role |
+|:--|:--|
+| **Registry** | System of record. Composes the caller's effective view from the layer list, applies per-layer visibility, indexes manifests, runs hybrid search, signs URLs, maintains the cross-type dependency graph, emits change events. |
+| **MCP server** | In-process bridge for MCP-speaking hosts. Exposes the four meta-tools. Holds no per-session server-side state — only a content-addressed disk cache, OS-keychain credentials, an in-memory local-overlay index, and the materialized working set. |
+| **`podium sync`** | CLI (and library) that reads the user's effective view and writes it to a host-configured layout via the configured `HarnessAdapter`. Works against either an HTTP registry or a filesystem-source registry. |
+| **Language SDKs** | Thin HTTP clients. Used by LangChain, Bedrock, OpenAI Assistants, custom orchestrators, eval harnesses, build pipelines, notebooks. |
+
+---
 
 ## When Podium helps
 
-Podium is overkill for a small catalog in a single harness with one author — a flat directory plus the harness's native conventions handles that. Becomes valuable as any of these dimensions grow:
+Podium is overkill for a small catalog in a single harness with one
+author — a flat directory plus the harness's native conventions handles
+that. It becomes valuable as any of these dimensions grow:
 
-- **Catalog size.** Lazy discovery and per-domain navigation help once the working set no longer fits comfortably in a system prompt.
-- **Cross-harness delivery.** "Author once, deliver anywhere" is useful even at small scale once a team is targeting more than one harness.
-- **Multiple artifact types.** A single dependency graph across skills, agents, contexts, prompts, and MCP server registrations beats N type-specific stores.
-- **Multiple contributors.** Per-layer visibility, classification, and audit start to pay off as the number of contributors and the diversity of audiences grow.
+- **Catalog size.** Lazy discovery and per-domain navigation help once
+  the working set no longer fits comfortably in a system prompt.
+- **Cross-harness delivery.** "Author once, deliver anywhere" pays off
+  even at small scale once you target more than one harness.
+- **Multiple artifact types.** A single dependency graph across skills,
+  agents, contexts, commands, rules, hooks, and MCP server registrations
+  beats N type-specific stores.
+- **Multiple contributors.** Per-layer visibility, classification, and
+  audit start to pay off as the number of contributors and the diversity
+  of audiences grow.
+
+---
 
 ## Documentation
 
-- **Specification** — [`spec/`](spec/). Complete technical reference, one file per top-level section. Start at [`spec/README.md`](spec/README.md) for the full table of contents.
-- **Quickstart (5 minutes)** — [`docs/quickstart.md`](docs/quickstart.md). Author your first skill and load it from Claude Code, end-to-end. Filesystem-source mode, no infrastructure.
-- **Small-team rollout** — [`docs/team-rollout.md`](docs/team-rollout.md). Practical setup for a 3–10 person team.
-- **Operator's guide** — [`docs/operator-guide.md`](docs/operator-guide.md). Running Podium in production: capacity, monitoring, alerting, backup/restore, upgrade.
-- **Progressive adoption** — [`docs/progressive-adoption.md`](docs/progressive-adoption.md). 30/60/90/180-day on-ramp from permissive standalone to enforced governance.
-- **OIDC integration cookbooks** — [`docs/oidc/`](docs/oidc/). Per-IdP setup for Okta, Entra ID, Google Workspace, Auth0, Keycloak.
-- **Spec deep links**:
-  - [Architecture](spec/02-architecture.md)
-  - [Layers and visibility](spec/04-artifact-model.md#46-layers-and-visibility)
-  - [Build sequence](spec/10-mvp-build-sequence.md)
-  - [Backend configuration reference](spec/13-deployment.md#1312-backend-configuration-reference)
+- [Documentation site](https://OWNER.github.io/podium) — Jekyll +
+  Just The Docs theme.
+- [Specification](spec/) — comprehensive technical reference, one file
+  per top-level section. Start at [`spec/README.md`](spec/README.md).
+- [Roadmap](ROADMAP.md) — short-horizon priorities.
+- [Contributing](CONTRIBUTING.md) — how to contribute today.
+- [Governance](GOVERNANCE.md) — how decisions are made.
+- [Security](SECURITY.md) — reporting vulnerabilities.
 
 ## Contributing
 
-The specification is the source of truth and the most useful place to push back. Ways to contribute today:
+The specification is the source of truth and the most useful place to
+push back. Today's highest-leverage contributions:
 
-- **Open issues or discussions** — questions, disagreements with the spec, missing use cases. Issues and discussions are at the project's GitHub.
-- **Read the spec and stress-test it** — if a section is unclear or contradicts another, file an issue.
-- **Sketch a runtime adapter** — prototyping an adapter against the [adapter contract](spec/06-mcp-server.md#67-harness-adapters) helps surface gaps before they're expensive to fix.
-- **Fix typos and broken links** — small documentation PRs are welcome any time.
+- **Open issues or discussions** — questions, disagreements with the
+  spec, missing use cases.
+- **Read the spec and stress-test it** — if a section is unclear or
+  contradicts another, file an issue.
+- **Sketch a harness adapter** — prototyping an adapter against the
+  [adapter contract](spec/06-mcp-server.md#67-harness-adapters) helps
+  surface gaps before they're expensive to fix.
+- **Sketch a `LayerSourceProvider` plugin** — a custom source backend
+  (S3, OCI, internal CMS) against the
+  [SPI](spec/09-extensibility.md) helps validate that surface.
+- **Fix typos and broken links** — small documentation PRs are welcome
+  any time.
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full guide and [`GOVERNANCE.md`](GOVERNANCE.md) for how decisions are made. Security issues: see [`SECURITY.md`](SECURITY.md).
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`GOVERNANCE.md`](GOVERNANCE.md).
 
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE)
