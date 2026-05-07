@@ -105,7 +105,7 @@ Open Claude Code in your project. The skill is there.
 
 ## How it works
 
-Podium has two parts:
+Podium consists of:
 
 - A **registry**: the catalog of artifacts. Backed either by a folder
   on disk (filesystem mode) or by a Podium server (standalone or
@@ -113,7 +113,7 @@ Podium has two parts:
   at a tracked ref) and `local` (a filesystem path); the
   `LayerSourceProvider` SPI lets deployments add custom sources
   (S3 buckets, OCI registries, HTTP archives).
-- **Consumers**: three ship with Podium: `podium sync`, the MCP
+- **Consumers**: built-in consumers are `podium sync`, the MCP
   server, and the language SDKs. Custom consumers can build against
   the HTTP API directly.
 
@@ -153,7 +153,7 @@ server.
 | Component         | Role                                                                                                        |
 | :---------------- | :---------------------------------------------------------------------------------------------------------- |
 | **Podium server** | HTTP API; layer composition; visibility filtering; manifest indexing; hybrid retrieval; signing; audit.     |
-| **MCP server**    | In-process bridge for MCP-speaking hosts. Exposes the four meta-tools. Requires a server.                   |
+| **MCP server**    | In-process bridge for MCP-speaking hosts. Exposes the discovery and load meta-tools. Requires a server.     |
 | **`podium sync`** | CLI (and library) that materializes the user's effective view to disk via the harness adapter. Either mode. |
 | **Language SDKs** | Thin HTTP clients for programmatic runtimes (LangChain, Bedrock, custom orchestrators). Requires a server.  |
 

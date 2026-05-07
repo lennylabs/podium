@@ -21,13 +21,13 @@ follow the role-specific guide that fits.
 
 ## Start here
 
-Three pages, in order. Together they take well under an hour.
+In order:
 
-| Page | What you'll do | Time |
+| Page | What it covers | Time |
 |:--|:--|:--|
 | [Quickstart](quickstart) | Install the CLI, write one skill, materialize it into Claude Code, see it load. Filesystem mode, with no daemon and no setup beyond a CLI. | ~5 minutes |
-| [Concepts](concepts) | The vocabulary you'll see everywhere: artifact, domain, layer, harness, materialization, visibility, the four meta-tools. | ~15 minutes |
-| [How it works](how-it-works) | Component overview, the three deployment shapes, where state lives, what runs in your process versus on a server. | ~15 minutes |
+| [Concepts](concepts) | Vocabulary used throughout the docs: artifact, domain, layer, harness, materialization, visibility, the meta-tools. | ~15 minutes |
+| [How it works](how-it-works) | Component overview, deployment shapes, where state lives, what runs in your process versus on a server. | ~15 minutes |
 
 ---
 
@@ -38,7 +38,7 @@ in one and stay; many will be both authors and consumers.
 
 | If you want to… | Next | Why |
 |:--|:--|:--|
-| **Write artifacts** | [Authoring guide](../authoring/) | The seven first-class types, the frontmatter you'll actually use, how `DOMAIN.md` works, when to use rule modes and hooks. |
+| **Write artifacts** | [Authoring guide](../authoring/) | The first-class types, the frontmatter, how `DOMAIN.md` works, when to use rule modes and hooks. |
 | **Use artifacts in your harness** | [Consuming guide](../consuming/) | Configure Claude Code / Cursor / OpenCode / Pi / Hermes / Codex / Gemini / Claude Desktop, browse the catalog from the agent, work via the SDK. |
 | **Set up Podium for a team or org** | [Deployment guide](../deployment/) | Pick your shape (filesystem / standalone / standard), then run it. Day-2 operations, progressive adoption of governance, OIDC cookbooks. |
 | **Build against the API** | [Reference](../reference/) | CLI, HTTP API, frontmatter schema, error codes, glossary. |

@@ -3,35 +3,35 @@ layout: default
 title: How it works
 parent: Getting Started
 nav_order: 3
-description: Component overview, the three deployment shapes, where state lives, and what runs on your machine versus on a server.
+description: Component overview, deployment shapes, where state lives, and what runs on your machine versus on a server.
 ---
 
 # How it works
 
-Podium has two component categories:
+Podium consists of:
 
 - A **registry**: the system of record for artifacts.
-- **Consumers**: the things that read from the registry. Three of
-  them ship with Podium: language SDKs, an MCP server, and `podium
-  sync`. You can write your own against the same HTTP API.
+- **Consumers**: the components that read from the registry.
+  Built-in consumers include language SDKs, the MCP server, and
+  `podium sync`. Custom consumers can build against the HTTP API.
 
-The registry can be reached two ways: as an HTTP service (single
-binary or a multi-tenant deployment) or as a local filesystem path.
-Most consumers work against the HTTP shape; `podium sync` is the
-one consumer that also works against the filesystem shape directly.
+The registry can be reached as an HTTP service (single binary or
+multi-tenant deployment) or as a local filesystem path. Most
+consumers work against the HTTP shape; `podium sync` also works
+against the filesystem shape directly.
 
 ---
 
 ## High-level architecture
 
-Podium has two parts:
+Podium consists of:
 
 - A **registry**: the catalog of artifacts. Backed by either a
   folder on disk (filesystem mode) or a Podium server (standalone or
   standard mode). Built-in source types are `git` and `local`; the
   `LayerSourceProvider` SPI lets deployments add custom sources
   (S3, OCI, HTTP archives).
-- **Consumers**: three ship with Podium: `podium sync`, the MCP
+- **Consumers**: built-in consumers are `podium sync`, the MCP
   server, and the language SDKs. Custom consumers can build against
   the HTTP API directly.
 
@@ -113,10 +113,10 @@ object storage, no auth, no registry process.
 
 ---
 
-## The three deployment shapes
+## Deployment shapes
 
-You'll see these three labels everywhere in the docs. Pick the one
-that fits today; graduate when you outgrow it.
+These labels appear throughout the docs. Pick the one that fits
+today; graduate when you outgrow it.
 
 ### Filesystem
 

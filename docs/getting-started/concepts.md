@@ -3,7 +3,7 @@ layout: default
 title: Concepts
 parent: Getting Started
 nav_order: 2
-description: The vocabulary you'll see everywhere: artifacts, domains, layers, harnesses, materialization, the four meta-tools.
+description: Vocabulary used throughout the docs: artifacts, domains, layers, harnesses, materialization, the meta-tools.
 ---
 
 # Concepts
@@ -42,7 +42,7 @@ artifacts reference it by that ID, optionally with `@<semver>` or
 
 ## Type
 
-Every artifact declares a `type:`. The seven first-class types are:
+Every artifact declares a `type:`. The first-class types:
 
 | Type | What it is |
 |:--|:--|
@@ -89,9 +89,9 @@ The **registry** is the system of record for artifacts. It can be:
 - A **standard deployment** with Postgres, S3, OIDC, multi-tenancy,
   and the full governance feature set.
 
-All three apply the same layer composition and serve the same
-artifacts. Migration between shapes is mechanical: same shared Go
-library does the parsing, composition, and adapter work in every
+All shapes apply the same layer composition and serve the same
+artifacts. Migration between shapes is mechanical: the same shared
+Go library does the parsing, composition, and adapter work in every
 case.
 
 ---
@@ -168,7 +168,7 @@ when you want raw output for a custom runtime or evaluation pipeline.
 ## Materialization
 
 **Materialization** is what happens when an artifact lands on a
-host's filesystem. For `load_artifact`, the MCP server runs five
+host's filesystem. For `load_artifact`, the MCP server runs these
 steps:
 
 1. **Fetch**: download bytes (or read from cache).
@@ -183,9 +183,9 @@ effective view.
 
 ---
 
-## The four meta-tools
+## Meta-tools
 
-The MCP server exposes four tools to harnesses that speak MCP:
+The MCP server exposes these tools to harnesses that speak MCP:
 
 | Tool | What it does |
 |:--|:--|
@@ -226,18 +226,18 @@ composition, and harness adapters.
 
 ## Extensibility
 
-Podium's behavior is pluggable via 17 SPIs covering storage,
-identity, composition, signing, audit, layer source, and delivery.
-Plugins compile into a registry build today. The SPI shapes are
-designed to be wire-compatible with a future out-of-process plugin
-protocol. See [Deployment →
-Extending](../deployment/extending) (and §9.3 of the spec) for the
-constraints that make that transition source-compatible.
+Podium's behavior is pluggable via SPIs covering storage, identity,
+composition, signing, audit, layer source, and delivery. Plugins
+compile into a registry build today. The SPI shapes are designed to
+be wire-compatible with a future out-of-process plugin protocol.
+See [Deployment → Extending](../deployment/extending) (and §9.3 of
+the spec) for the constraints that make that transition
+source-compatible.
 
 ---
 
 ## What's next
 
 The next page, [How it works](how-it-works), shows how these pieces
-fit together: the architecture, the three deployment shapes, where
-state lives, and what's running on your machine versus on a server.
+fit together: the architecture, the deployment shapes, where state
+lives, and what's running on your machine versus on a server.
