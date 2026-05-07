@@ -138,6 +138,13 @@ runtime_requirements:
 
 sandbox_profile: unrestricted | read-only-fs | network-isolated | seccomp-strict
 
+# Author hints about the runtime resources this artifact ideally consumes.
+# Both are advisory only — Podium never enforces them; the host (or a custom
+# SDK consumer) decides whether and how to honor them. Applicable to types
+# `agent`, `skill`, and `command`; ingest lint warns if set on other types.
+effort_hint: low | medium | high | max
+model_class_hint: nano | small | medium | large | frontier
+
 sbom: # CycloneDX or SPDX inline or referenced
   format: cyclonedx-1.5
   ref: ./sbom.json
