@@ -36,13 +36,15 @@ large organizations alike:
 - Large teams/organizations: artifacts in repos + Podium registry server +
   Podium CLI/MCP server/SDK
 
-[Compare deployment setups](https://lennylabs.github.io/podium/deployment/)
+[Concepts](https://lennylabs.github.io/podium/getting-started/concepts)
 
 Podium supports multiple setups to meet the needs of single developers and large organizations alike:
 
 - Individual users: file-based artifacts + Podium CLI
 - Small teams: artifacts in repos + Podium CLI
 - Large teams/organizations: artifacts in repos + Podium registry server + Podium CLI/MCP server/SDK
+
+[Compare deployment setups](https://lennylabs.github.io/podium/deployment/)
 
 ---
 
