@@ -1,6 +1,6 @@
 # Glossary
 
-- **Artifact** — a packaged authoring unit (skill, agent, prompt, context, MCP-server registration, or extension type). Distinct from "build artifact" or "ML artifact."
+- **Artifact** — a packaged authoring unit (skill, agent, context, command, rule, hook, MCP-server registration, or extension type). Distinct from "build artifact" or "ML artifact."
 - **Canonical artifact ID** — the directory path under the registry root (e.g., `finance/ap/pay-invoice`). All references use this ID, optionally suffixed with `@<semver>` or `@sha256:<hash>`.
 - **Domain** — a node in the catalog hierarchy. Distinct from DNS domain or DDD domain.
 - **Effective view** — the composition of every layer (admin-defined, user-defined, and the workspace local overlay) visible to the caller's identity, in precedence order.

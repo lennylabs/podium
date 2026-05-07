@@ -35,7 +35,7 @@ The strings below are the canonical tool descriptions exposed to the LLM via MCP
 
 ### `search_artifacts`
 
-> Search or browse the artifact catalog. Pass a `query` for relevance ranking when you know the topic but not the exact ID. Omit `query` and pass `scope` alone to browse all artifacts in a domain — useful when a domain's notable list and description don't tell you enough and you want to list everything. Filters: `type` (skill, agent, context, prompt), `tags`, `scope` (a domain path). Optional `top_k` (default 10, max 50). The response includes `total_matched`; when more results exist than were returned, narrow with filters, drill into a subdomain, or run a more specific query. Returns ranked descriptors only — no manifest bodies. To use a result, call `load_artifact` with its id.
+> Search or browse the artifact catalog. Pass a `query` for relevance ranking when you know the topic but not the exact ID. Omit `query` and pass `scope` alone to browse all artifacts in a domain — useful when a domain's notable list and description don't tell you enough and you want to list everything. Filters: `type` (skill, agent, context, command, rule, hook), `tags`, `scope` (a domain path). Optional `top_k` (default 10, max 50). The response includes `total_matched`; when more results exist than were returned, narrow with filters, drill into a subdomain, or run a more specific query. Returns ranked descriptors only — no manifest bodies. To use a result, call `load_artifact` with its id.
 
 ### `load_artifact`
 
@@ -59,6 +59,6 @@ your context.
 
 ## 5.2 Prompt Projection
 
-When a `type: prompt` artifact is loaded with `expose_as_mcp_prompt: true` in frontmatter, the MCP server also exposes it via MCP's `prompts/get` so harnesses with slash-menu support can surface it directly to users. Opt-in.
+When a `type: command` artifact is loaded with `expose_as_mcp_prompt: true` in frontmatter, the MCP server also exposes it via MCP's `prompts/get` so harnesses with slash-menu support can surface it directly to users. Opt-in. The wire field keeps the MCP-protocol name (`expose_as_mcp_prompt`) since MCP itself calls these "prompts."
 
 The MCP tools declared in a loaded artifact's manifest (`mcpServers:`) are stored by Podium but registered by the host's runtime. Podium stores the declarations and exposes them via `load_artifact`; hosts decide whether and how to wire them up.

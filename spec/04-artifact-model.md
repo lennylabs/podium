@@ -13,7 +13,9 @@ Full lint coverage, conformance suite participation, broad adapter support:
 - `skill` — instructions (+ optional scripts) loaded into the host agent's context on demand.
 - `agent` — a complete agent definition meant to run in isolation as a delegated child.
 - `context` — pure reference material (style guides, glossaries, API references, large knowledge bases).
-- `prompt` — parameterized prompt templates the agent or a human can instantiate.
+- `command` — parameterized prompt templates a human invokes (typically as a slash command).
+- `rule` — passive context loaded by the harness based on its `rule_mode` (`always`, `glob`, `auto`, `explicit`); see §6.7.1 for adapter mapping.
+- `hook` — a lifecycle observer for the agent loop with a declared `hook_event` (e.g., `stop`, `preCompact`) and a shell `hook_action`.
 
 ### Registered extension types
 
@@ -100,7 +102,7 @@ The manifest frontmatter is YAML; the prose body is markdown. The registry index
 
 ```yaml
 ---
-type: skill | agent | context | prompt | mcp-server | <extension type>
+type: skill | agent | context | command | rule | hook | mcp-server | <extension type>
 name: run-variance-analysis
 version: 1.0.0 # semver, author-chosen
 description: One-line "when should I use this?"
@@ -152,8 +154,21 @@ output: { $ref: ./schemas/output.json }
 delegates_to:
   - finance/procurement/vendor-compliance-check@1.x
 
-# For type: prompt — opt-in projection as MCP prompt (see §5.2)
+# For type: command — opt-in projection as MCP prompt (see §5.2). The wire field
+# keeps the MCP-protocol name (`expose_as_mcp_prompt`) since MCP itself uses the
+# word "prompt" for slash-menu templates of this kind.
 expose_as_mcp_prompt: true
+
+# For type: rule — controls when the harness loads this rule into the agent's context.
+# The harness adapter (§6.7.1) translates these to the harness-native rule format.
+rule_mode: always | glob | auto | explicit  # default: always
+rule_globs: "src/**/*.ts,src/**/*.tsx"      # required when rule_mode: glob
+rule_description: "Apply when working with database migrations"  # required when rule_mode: auto
+
+# For type: hook — lifecycle observer wired into the agent loop.
+hook_event: stop                  # event name; valid values are harness-defined (stop, preCompact, sessionStart, ...)
+hook_action: |                    # shell snippet executed when the event fires; receives event payload on stdin
+  echo "[hook] $hook_event triggered"
 
 # For type: mcp-server — canonical server identifier (drives reverse index)
 server_identifier: npx:@company/finance-warehouse-mcp

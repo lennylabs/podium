@@ -132,15 +132,17 @@ The `HarnessAdapter` translates a canonical artifact into the format a specific 
 
 **Built-in adapters** (selected via `PODIUM_HARNESS`):
 
-| Value            | Target                                                                                                                                |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `none`           | _(default)_ Writes the canonical layout as-is.                                                                                        |
-| `claude-code`    | Writes `.claude/agents/<name>.md` (frontmatter + composed prompt) and places bundled resources under `.claude/podium/<artifact-id>/`. |
-| `claude-desktop` | Writes a Claude Desktop extension layout (`manifest.json` derived from canonical frontmatter; resources alongside).                   |
-| `cursor`         | Writes Cursor's native agent / extension format.                                                                                      |
-| `gemini`         | Writes Gemini's native agent / extension package layout.                                                                              |
-| `opencode`       | Writes OpenCode's native package layout.                                                                                              |
-| `codex`          | Writes Codex's native package layout.                                                                                                 |
+| Value            | Target                                                                                                                                                                  |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `none`           | _(default)_ Writes the canonical layout as-is.                                                                                                                          |
+| `claude-code`    | Writes `.claude/agents/<name>.md` (frontmatter + composed prompt), `.claude/rules/<name>.md` for `type: rule`, and places bundled resources under `.claude/podium/<artifact-id>/`. |
+| `claude-desktop` | Writes a Claude Desktop extension layout (`manifest.json` derived from canonical frontmatter; resources alongside).                                                     |
+| `cursor`         | Writes Cursor's native agent / extension format. For `type: rule`, writes `.cursor/rules/<name>.mdc` with `alwaysApply` / `globs` / `description` per `rule_mode`.      |
+| `gemini`         | Writes Gemini's native agent / extension package layout.                                                                                                                |
+| `opencode`       | Writes OpenCode's native package layout. For `type: rule`, injects into `AGENTS.md` between markers (or writes `.opencode/rules/<name>.md` for `rule_mode: explicit`).  |
+| `codex`          | Writes Codex's native package layout. For `type: rule`, injects into `AGENTS.md` between markers.                                                                       |
+| `pi`             | Writes Pi's native layout. For `type: rule`, injects into `AGENTS.md` (project-local `.pi/AGENTS.md` or root `AGENTS.md`); explicit-mode rules at `.pi/rules/<name>.md`. |
+| `hermes`         | Writes Hermes's native layout. For `type: rule`, writes `.claude/rules/<name>.md` (Hermes also reads `.cursor/rules/*.mdc` natively, so cursor-shape output works too). |
 
 **What an adapter does.** Mechanical translation:
 
@@ -172,16 +174,21 @@ Two mitigations:
 
 Authors who must use a non-portable feature can declare `target_harnesses:` in frontmatter to opt out of cross-harness materialization for that artifact.
 
-**Capability matrix (excerpt; maintained in sync with adapter implementations):**
+**Capability matrix (excerpt; maintained in sync with adapter implementations).** Legend: ✓ supported natively, ⚠ supported via fallback (lint warning), ✗ not supported (lint error or `target_harnesses:` opt-out required).
 
-| Field                      | claude-code | cursor | codex | opencode | gemini |
-| -------------------------- | ----------- | ------ | ----- | -------- | ------ |
-| `description`              | ✓           | ✓      | ✓     | ✓        | ✓      |
-| `mcpServers`               | ✓           | ✓      | ✓     | ✓        | ✓      |
-| `delegates_to` (subagents) | ✓           | ✗      | ✗     | ✓        | ✗      |
-| `requiresApproval`         | ✓           | ✗      | ✓     | ✓        | ✗      |
-| `sandbox_profile`          | ✓           | ✗      | ✓     | ✓        | ✗      |
-| `expose_as_mcp_prompt`     | ✓           | ✓      | ✓     | ✓        | ✓      |
+| Field                      | claude-code | cursor | codex | opencode | gemini | pi  | hermes |
+| -------------------------- | ----------- | ------ | ----- | -------- | ------ | --- | ------ |
+| `description`              | ✓           | ✓      | ✓     | ✓        | ✓      | ✓   | ✓      |
+| `mcpServers`               | ✓           | ✓      | ✓     | ✓        | ✓      | ✓   | ✓      |
+| `delegates_to` (subagents) | ✓           | ✗      | ✗     | ✓        | ✗      | ✓   | ✓      |
+| `requiresApproval`         | ✓           | ✗      | ✓     | ✓        | ✗      | ⚠   | ⚠      |
+| `sandbox_profile`          | ✓           | ✗      | ✓     | ✓        | ✗      | ⚠   | ⚠      |
+| `expose_as_mcp_prompt`     | ✓           | ✓      | ✓     | ✓        | ✓      | ✓   | ✓      |
+| `rule_mode: always`        | ✓           | ✓      | ✓     | ✓        | ⚠      | ✓   | ✓      |
+| `rule_mode: glob`          | ⚠           | ✓      | ⚠     | ⚠        | ✗      | ⚠   | ✓      |
+| `rule_mode: auto`          | ⚠           | ✓      | ✗     | ✗        | ✗      | ✗   | ⚠      |
+| `rule_mode: explicit`      | ✓           | ✓      | ✓     | ✓        | ⚠      | ✓   | ✓      |
+| `hook_event`               | ✓           | ✓      | ✗     | ⚠        | ✗      | ⚠   | ⚠      |
 
 ## 6.8 Process Model
 
@@ -272,6 +279,54 @@ The Podium MCP server is a stdio binary the host spawns alongside its other MCP 
       "env": {
         "PODIUM_REGISTRY": "https://podium.acme.com",
         "PODIUM_HARNESS": "cursor"
+      }
+    }
+  }
+}
+```
+
+**OpenCode** (`opencode.json` at the project root or `~/.config/opencode/opencode.json`):
+
+```json
+{
+  "mcpServers": {
+    "podium": {
+      "command": "podium-mcp",
+      "env": {
+        "PODIUM_REGISTRY": "https://podium.acme.com",
+        "PODIUM_HARNESS": "opencode"
+      }
+    }
+  }
+}
+```
+
+**Pi** (`~/.pi/mcp.json` or project-local `.pi/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "podium": {
+      "command": "podium-mcp",
+      "env": {
+        "PODIUM_REGISTRY": "https://podium.acme.com",
+        "PODIUM_HARNESS": "pi"
+      }
+    }
+  }
+}
+```
+
+**Hermes** (`~/.config/hermes/mcp.json` or project-local `.hermes/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "podium": {
+      "command": "podium-mcp",
+      "env": {
+        "PODIUM_REGISTRY": "https://podium.acme.com",
+        "PODIUM_HARNESS": "hermes"
       }
     }
   }
