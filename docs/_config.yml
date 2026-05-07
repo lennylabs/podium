@@ -59,7 +59,7 @@ nav_external_links: []
 # --------------------------------------------------------------------------
 aux_links:
   "Podium on GitHub":
-    - "https://github.com/OWNER/podium"
+    - "https://github.com/lennylabs/podium"
 
 aux_links_new_tab: true
 
@@ -75,7 +75,7 @@ last_edit_time_format: "%b %e %Y at %I:%M %p"
 
 gh_edit_link: true
 gh_edit_link_text: "Edit this page on GitHub"
-gh_edit_repository: "https://github.com/OWNER/podium"
+gh_edit_repository: "https://github.com/lennylabs/podium"
 gh_edit_source: docs
 gh_edit_branch: main
 gh_edit_view_mode: "edit"

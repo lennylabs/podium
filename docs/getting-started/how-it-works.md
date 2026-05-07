@@ -153,7 +153,7 @@ or self-run alongside.
 - **What you run.** Registry replicas behind a load balancer,
   Postgres (managed or self-run), object storage, an OIDC IdP. See
   [Deployment → Operator guide](../deployment/operator-guide) and
-  the spec's [§13](https://github.com/OWNER/podium/blob/main/spec/13-deployment.md).
+  the spec's [§13](https://github.com/lennylabs/podium/blob/main/spec/13-deployment.md).
 - **What you get.** Per-layer visibility, freeze windows, signing,
   hash-chained audit, SCIM, SBOM/CVE pipeline, multi-tenancy.
 - **Migration path.** `podium admin migrate-to-standard` exports
@@ -197,7 +197,7 @@ There is one canonical implementation per concern, not three. That's
 why migrating between deployment shapes (filesystem → standalone →
 standard) preserves behavior — same composer, same parsers, same
 merge semantics, same harness adapter output. See [§2.2 of the
-spec](https://github.com/OWNER/podium/blob/main/spec/02-architecture.md)
+spec](https://github.com/lennylabs/podium/blob/main/spec/02-architecture.md)
 for the load-bearing rationale.
 
 The language SDKs are the exception: they're independent HTTP
@@ -260,5 +260,5 @@ the role-specific guide that fits your goal:
 - **Calling the API directly** — [Reference](../reference/)
 
 The full technical specification — one file per top-level section —
-lives in the [`spec/`](https://github.com/OWNER/podium/tree/main/spec)
+lives in the [`spec/`](https://github.com/lennylabs/podium/tree/main/spec)
 directory of the repository.

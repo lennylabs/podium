@@ -28,6 +28,6 @@ When the criteria are met, the maintainer will propose an initial committee, the
 
 ## Contact
 
-- **Issues and discussions:** <https://github.com/OWNER/podium>
+- **Issues and discussions:** <https://github.com/lennylabs/podium>
 - **Security:** see [`SECURITY.md`](SECURITY.md)
 - **Conduct:** see [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)

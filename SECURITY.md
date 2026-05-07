@@ -12,7 +12,7 @@ Podium is in early development; there are no tagged releases yet. Once releases 
 
 Report privately using either of the following:
 
-- **GitHub private vulnerability reporting** at <https://github.com/OWNER/podium/security/advisories/new> (preferred).
+- **GitHub private vulnerability reporting** at <https://github.com/lennylabs/podium/security/advisories/new> (preferred).
 
 Please include:
 

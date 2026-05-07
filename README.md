@@ -11,8 +11,8 @@ Podium lets you:
 - Build and organize large catalogs of artifacts and use them efficiently
   with the help of tools for progressive disclosure and lazy loading.
 
-[Documentation](https://OWNER.github.io/podium) •
-[Quickstart](#quickstart) •
+[Documentation](https://lennylabs.github.io/podium) •
+[Hello world](#hello-world-example) •
 [Specification](spec/) •
 [Contributing](#contributing)
 
@@ -21,8 +21,8 @@ Podium lets you:
 > **Status: design phase.** The technical specification drives a spec- and
 > test-driven implementation. There is no shipped binary yet. Design feedback
 > is the most useful contribution today — open an
-> [issue](https://github.com/OWNER/podium/issues) or
-> [discussion](https://github.com/OWNER/podium/discussions).
+> [issue](https://github.com/lennylabs/podium/issues) or
+> [discussion](https://github.com/lennylabs/podium/discussions).
 
 ---
 
@@ -31,15 +31,18 @@ Podium lets you:
 Podium supports multiple setups to meet the needs of single developers and
 large organizations alike:
 
-- **Individual users:** file-based artifacts + Podium CLI.
-- **Small teams:** artifacts in repos + Podium CLI.
-- **Large teams / organizations:** artifacts in repos + Podium registry
-  server + Podium CLI / MCP server / SDK.
+- Individual users: file-based artifacts + Podium CLI
+- Small teams: artifacts in repos + Podium CLI
+- Large teams/organizations: artifacts in repos + Podium registry server +
+  Podium CLI/MCP server/SDK
 
-Same artifacts. Same author flow. Different operational shape. Migration
-between shapes is mechanical.
+[Compare deployment setups](https://lennylabs.github.io/podium/deployment/)
 
-[Compare deployment setups](https://OWNER.github.io/podium/deployment/)
+Podium supports multiple setups to meet the needs of single developers and large organizations alike:
+
+- Individual users: file-based artifacts + Podium CLI
+- Small teams: artifacts in repos + Podium CLI
+- Large teams/organizations: artifacts in repos + Podium registry server + Podium CLI/MCP server/SDK
 
 ---
 
@@ -69,22 +72,11 @@ integration test suite.
 
 ---
 
-## Quickstart
+## 'Hello world' example
 
-Filesystem mode — no daemon, no setup beyond a CLI:
+After installing the `podium` CLI, write a skill — one file in a directory:
 
-```bash
-# Install (target shape; not yet packaged)
-brew install OWNER/tap/podium
-
-# In your project, point Podium at a folder of artifacts
-mkdir -p ~/podium-artifacts/personal
-cd ~/projects/your-project
-podium init --registry ~/podium-artifacts/ --harness claude-code
-
-# Author one skill
-mkdir -p ~/podium-artifacts/personal/hello/greet
-cat > ~/podium-artifacts/personal/hello/greet/ARTIFACT.md <<'EOF'
+```markdown
 ---
 type: skill
 name: greet
@@ -93,15 +85,19 @@ description: Greet the user by name and tell them today's date.
 ---
 
 Greet the user by their first name. Tell them today's date.
-EOF
+```
 
-# Materialize into the project
+Point Podium at the directory and tell it which harness you use:
+
+```bash
+cd your_workspace
+podium init --registry ~/podium-artifacts/ --harness claude-code
 podium sync
 ```
 
-Open Claude Code in the project. The skill is available.
+Open Claude Code in your project. The skill is there.
 
-[Full quickstart](https://OWNER.github.io/podium/getting-started/quickstart)
+[Full quickstart](https://lennylabs.github.io/podium/getting-started/quickstart)
 
 ---
 
@@ -162,7 +158,7 @@ that. It becomes valuable as any of these dimensions grow:
 
 ## Documentation
 
-- [Documentation site](https://OWNER.github.io/podium) — Jekyll +
+- [Documentation site](https://lennylabs.github.io/podium) — Jekyll +
   Just The Docs theme.
 - [Specification](spec/) — comprehensive technical reference, one file
   per top-level section. Start at [`spec/README.md`](spec/README.md).

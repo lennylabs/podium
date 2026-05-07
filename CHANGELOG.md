@@ -8,4 +8,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 There are no tagged releases yet. This section will be populated as work lands on `main`.
 
-[Unreleased]: https://github.com/OWNER/podium/compare/HEAD
+[Unreleased]: https://github.com/lennylabs/podium/compare/HEAD

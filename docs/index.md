@@ -129,7 +129,7 @@ Podium directly.
 - [Quickstart](getting-started/quickstart){: .btn .btn-outline }
 - [Concepts](getting-started/concepts){: .btn .btn-outline }
 - [How it works](getting-started/how-it-works){: .btn .btn-outline }
-- [GitHub](https://github.com/OWNER/podium){: .btn .btn-outline }
+- [GitHub](https://github.com/lennylabs/podium){: .btn .btn-outline }
 
 <style>
 .grid-cards {
