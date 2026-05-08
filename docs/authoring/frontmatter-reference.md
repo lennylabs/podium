@@ -282,6 +282,8 @@ When two layers contribute artifacts with the same canonical ID, the higher-prec
 
 For skills, the merge applies to fields in their canonical files: `name`, `description`, and `license` merge across `SKILL.md` files; everything else merges across `ARTIFACT.md` files.
 
+Fields not in this table merge as "child wins": if the child sets the field its value replaces the parent's, otherwise the parent's value is inherited. The child's `type:` must match the parent's, and the child's `version:` is independent of the parent's.
+
 See [Extends](extends) for examples and gotchas.
 
 ---

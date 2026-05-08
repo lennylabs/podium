@@ -194,7 +194,20 @@ expose_as_mcp_prompt: true
 rule_mode: always | glob | auto | explicit  # default: always
 rule_globs: "src/**/*.ts,src/**/*.tsx"      # required when rule_mode: glob
 rule_description: "Apply when working with database migrations"  # required when rule_mode: auto
+```
 
+**`rule_mode` values.**
+
+| Value      | Loaded when                                                                      | Required field     |
+| ---------- | -------------------------------------------------------------------------------- | ------------------ |
+| `always`   | The agent session starts (or every turn).                                        | none               |
+| `glob`     | A file matching `rule_globs` is touched in the session.                          | `rule_globs`       |
+| `auto`     | The harness's autoload heuristic decides this rule's `rule_description` matches. | `rule_description` |
+| `explicit` | The user references the rule by name (slash command, `@rule-name`, or similar). | none               |
+
+The harness adapter (§6.7.1) translates the canonical mode to the harness's native rule format. Per-(mode, harness) compatibility is in the §6.7.1 capability matrix.
+
+```yaml
 # For type: hook — lifecycle observer wired into the agent loop.
 # `hook_event` is one of the canonical event names defined in §4.3.5.
 # The harness adapter translates the canonical name to the harness's native event vocabulary.
@@ -671,6 +684,8 @@ To intentionally replace an artifact rather than extend it, the lower-precedence
 | `external_resources`                   | List; append                                               |
 | `license`                              | Scalar; child wins (lint warning if changed across layers) |
 | `search_visibility`                    | Scalar; most-restrictive (`direct-only` > `indexed`)       |
+
+**Default for unlisted fields.** A child can override any frontmatter field by setting it; if the child omits the field, the parent's value is inherited unchanged. This applies to `deprecated`, `replaced_by`, `effort_hint`, `model_class_hint`, `sbom`, `expose_as_mcp_prompt`, `rule_mode`, `rule_globs`, `rule_description`, `hook_event`, `hook_action`, `server_identifier`, `target_harnesses`, `input`, `output`, and any extension-type fields not declared by their `TypeProvider`. Two fields are special cases. The child's `type:` must match the parent's; ingest rejects an `extends:` chain that crosses types. The child's `version:` is independent of the parent's; each artifact has its own version stored in the registry, and the parent version is pinned at the child's ingest time per §4.7.6.
 
 Extension types register their own field semantics via `TypeProvider`.
 
