@@ -97,7 +97,7 @@ podium serve --standalone --layer-path /var/podium/team-artifacts/
 podium layer reingest team-artifacts
 ```
 
-For continuous local-source updates, `podium layer watch <id>` polls a configured interval (or use fsnotify on the host).
+For continuous updates, `podium layer watch <id>` polls the source at a configured interval (or use fsnotify on the host for local sources).
 
 **`git` source**: the registry mirrors a tracked Git ref. Configure layers in `~/.podium/registry.yaml`:
 

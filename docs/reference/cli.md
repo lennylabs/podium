@@ -290,7 +290,7 @@ During a freeze window, ingest is blocked unless `--break-glass` is passed with 
 
 ### `podium layer watch`
 
-Polls a `local`-source layer for changes (Git sources use webhooks).
+Polls a layer's source for changes at a configured interval. Works against `local`-source layers and against `git`-source layers that do not have a webhook configured (for example, on a developer machine without a public ingress).
 
 ```
 podium layer watch <id> [--interval <duration>]

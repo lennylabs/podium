@@ -60,7 +60,7 @@ Artifacts enter the registry by being merged into a tracked Git ref (or, for `lo
 | Trigger              | Source                                                                                                                                       |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | Git provider webhook | Built-in `git` source. Configured at layer-creation time. The registry validates the webhook signature, fetches the new commit, ingests.     |
-| Filesystem watch     | Built-in `local` source. Re-scanned on demand via `podium layer reingest <id>`; `podium layer watch <id>` polls at a configurable interval.  |
+| Polling watcher      | Built-in `local` and `git` sources. `podium layer watch <id>` polls the source at a configurable interval, suitable for local filesystems and for Git refs without a configured webhook.  |
 | Plugin-declared      | Custom `LayerSourceProvider` implementations. Webhook, polling, or push notification depending on the source; declared by the plugin.        |
 | Manual reingest      | `podium layer reingest <id>` (admin or layer owner). Works for every source type: forces a fresh snapshot regardless of the trigger model.   |
 
@@ -87,7 +87,7 @@ podium layer list
 podium layer reorder <id> [<id> ...]            # user-defined layers only
 podium layer unregister <id>
 podium layer reingest <id> [--break-glass --justification <text>]
-podium layer watch <id>                         # local source only
+podium layer watch <id> [--interval <duration>]
 ```
 
 `podium layer register` returns the webhook URL and HMAC secret to register on the source repo. Registering a Git source without configuring the webhook leaves the layer at its initial commit until the first manual reingest.

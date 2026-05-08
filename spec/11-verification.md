@@ -22,7 +22,7 @@
 
 - **MaterializationHook chain test**: configure two hooks in order; the second receives the first's output; each hook can rewrite a file, drop a file, or emit a warning; the final atomic write reflects the chain's combined output. Sandbox-violation cases (network call, subprocess spawn, write outside destination) fail materialization with a structured error and no files are written. With no hooks configured, materialization is bit-identical to a build without hook support.
 
-- **LayerSourceProvider built-ins test**: the bundled `git` and `local` source providers continue to satisfy §4.6 and §7.3.1: webhook ingest for `git`, manual reingest plus `podium layer watch` for `local`.
+- **LayerSourceProvider built-ins test**: the bundled `git` and `local` source providers continue to satisfy §4.6 and §7.3.1: webhook ingest for `git`, manual reingest for both source types, and `podium layer watch` polling against either a local filesystem path or a Git ref without a configured webhook.
 
 - **LayerSourceProvider extension test**: a synthetic plugin implementing the SPI registers a third source type; layers configured with that source type ingest, snapshot, and serve identically to built-in sources from a caller's perspective. Trigger model declared by the plugin (push or poll) is honored. Manual reingest works regardless of trigger model.
 
