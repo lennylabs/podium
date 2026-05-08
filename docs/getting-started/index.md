@@ -8,11 +8,7 @@ description: Quickstart, concepts, and a high-level look at how Podium works. Th
 
 # Getting Started with Podium
 
-Podium is a registry for generic agentic AI artifacts, and tools for
-getting them into any harness. You define skills, agents, commands,
-rules, and other artifacts once and use them across any harness;
-share them with your team and organization; and build large catalogs
-that work efficiently with progressive disclosure and lazy loading.
+Podium is a registry for agentic AI artifacts, and tools for getting them into any harness and sharing them across your organization. Podium enables AI agent know-how reusability for individual and team workflows. You define skills, agents, commands, rules, and other artifacts once and use them across any harness, then build large catalogs that work efficiently with progressive disclosure and lazy loading.
 
 This section is the right entry point regardless of role. After it,
 follow the role-specific guide that fits.

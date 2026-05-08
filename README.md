@@ -2,8 +2,9 @@
 
 # Podium
 
-**A registry for generic agentic AI artifacts, and tools for getting them
-into any harness.**
+**A registry for agentic AI artifacts, and tools for getting them into any harness and sharing them across your organization.**
+
+Podium enables AI agent know-how reusability for individual and team workflows.
 
 Podium lets you:
 

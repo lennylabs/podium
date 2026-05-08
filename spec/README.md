@@ -1,5 +1,7 @@
 # Podium: Technical Specification
 
+Podium is a registry for agentic AI artifacts, and tools for getting them into any harness and sharing them across your organization. Podium enables AI agent know-how reusability for individual and team workflows.
+
 The specification is split across one file per top-level section. Read in order for the full technical reference, or jump to the section that addresses your question.
 
 ## Sections

@@ -3,12 +3,14 @@ layout: default
 title: Home
 nav_order: 0
 permalink: /
-description: Podium is a registry for the artifacts AI agents use, including skills, commands, rules, and agents, and a way to deliver them to any harness.
+description: A registry for agentic AI artifacts, and tools for getting them into any harness and sharing them across your organization. Podium enables AI agent know-how reusability for individual and team workflows.
 ---
 
 # Podium
 
-**A registry for generic agentic AI artifacts, and tools for getting them into any harness.**
+**A registry for agentic AI artifacts, and tools for getting them into any harness and sharing them across your organization.**
+
+Podium enables AI agent know-how reusability for individual and team workflows.
 
 Podium lets you:
 
