@@ -43,9 +43,9 @@ Identity providers attach the caller's OAuth-attested identity to every registry
 
 ### 6.3.1 Claim Derivation
 
-The IdP returns a JWT with claims `{sub, org_id, email, exp, iss, aud}`. Team membership is resolved registry-side via SCIM 2.0 push from the IdP; the registry maintains a directory of `(user_id → teams)`.
+The IdP returns a JWT with claims `{sub, org_id, email, exp, iss, aud, groups?}`. Group membership is resolved registry-side via SCIM 2.0 push from the IdP; the registry maintains a directory of `(user_id → groups)`.
 
-For IdPs without SCIM, the `IdpGroupMapping` adapter reads OIDC group claims from the token and maps them to team names per a registry-side configuration.
+For IdPs without SCIM, the `IdpGroupMapping` adapter reads OIDC group claims from the token and maps them to group names per a registry-side configuration.
 
 Tested IdPs: Okta, Entra ID, Auth0, Google Workspace, Keycloak. SAML supported via OIDC bridge.
 
