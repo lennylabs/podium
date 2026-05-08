@@ -218,7 +218,7 @@ When a workspace-local-overlay `DOMAIN.md` is involved, the MCP server applies t
 
 ## Discovery rendering
 
-The shape of `load_domain` output is governed by configurable rules. Tenant defaults live in `registry.yaml`; per-domain overrides live in `DOMAIN.md`'s `discovery:` block.
+The rendering of `load_domain` output is governed by configurable rules. Tenant defaults live in `registry.yaml`; per-domain overrides live in `DOMAIN.md`'s `discovery:` block.
 
 | Knob | Type | Effect |
 |:--|:--|:--|

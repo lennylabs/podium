@@ -3,12 +3,12 @@ layout: default
 title: Bundled resources
 parent: Authoring
 nav_order: 8
-description: Files that ship alongside ARTIFACT.md — scripts, templates, schemas, datasets, and how to handle large files via external resources.
+description: Files that ship alongside ARTIFACT.md (scripts, templates, schemas, datasets) and how to handle large files via external resources.
 ---
 
 # Bundled resources
 
-Anything in an artifact's directory other than `ARTIFACT.md` is a bundled resource. Python scripts, Jinja templates, JSON schemas, evaluation datasets, binary blobs, model weights — all packaged together with the manifest and shipped to the host at materialization time.
+Anything in an artifact's directory other than `ARTIFACT.md` is a bundled resource. Python scripts, Jinja templates, JSON schemas, evaluation datasets, binary blobs, model weights, all packaged together with the manifest and shipped to the host at materialization time.
 
 ```
 finance/close-reporting/run-variance-analysis/
@@ -80,7 +80,7 @@ Bundled scripts inherit the artifact's `sensitivity` label. A high-sensitivity s
 
 Pre-merge CI run by the source repository (secret scanning, static analysis, SBOM generation, optional sandbox policy review) is the right place to enforce script-level controls. Podium reads no in-repo permission files; the Git provider's branch protection is the gate.
 
-For sensitivity ≥ medium, lint requires an `sbom:` field — inline (CycloneDX or SPDX) or referenced from a bundled file. The registry consumes CVE feeds and walks SBOM dependencies to surface affected artifacts via `podium vuln list`.
+For sensitivity ≥ medium, lint requires an `sbom:` field, either inline (CycloneDX or SPDX) or referenced from a bundled file. The registry consumes CVE feeds and walks SBOM dependencies to surface affected artifacts via `podium vuln list`.
 
 ---
 

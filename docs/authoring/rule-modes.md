@@ -98,7 +98,7 @@ The full matrix and field-by-field detail is in [§6.7.1 of the spec](https://gi
 | **pi, `always` and `explicit`** | Injected into project-local `.pi/AGENTS.md` or root `AGENTS.md`. Explicit-mode rules at `.pi/rules/<name>.md`. |
 | **pi, `glob`** | Common-ancestor `AGENTS.md` (warning). |
 | **pi, `auto`** | Lint error. |
-| **hermes, all modes** | `.claude/rules/<name>.md` written in cursor-`.mdc` shape (Hermes natively reads `.cursor/rules/*.mdc`, so the cursor adapter output works directly). |
+| **hermes, all modes** | `.claude/rules/<name>.md` written in cursor-`.mdc` format (Hermes natively reads `.cursor/rules/*.mdc`, so the cursor adapter output works directly). |
 | **gemini** | Limited rule support; most modes fall back or fail. |
 | **generic** | AGENTS.md injection for `always`; common-ancestor for `glob`; standalone files referenced manually for `explicit`; `auto` not supported. |
 

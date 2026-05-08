@@ -3,12 +3,12 @@ layout: default
 title: Solo / filesystem
 parent: Deployment
 nav_order: 1
-description: The lightest Podium setup — a folder of artifacts, the podium CLI, no daemon. For individual developers, prototypes, and CI build steps.
+description: The lightest Podium setup. A folder of artifacts, the podium CLI, no daemon. For individual developers, prototypes, and CI build steps.
 ---
 
 # Solo / filesystem
 
-The lightest Podium shape. The catalog is a directory tree on disk; `podium sync` reads it directly and writes harness-native files, with no daemon and no authentication. Suitable for solo work, evaluation, prototypes, CI build steps, and small teams that share the catalog via a Git repo.
+The lightest Podium setup. The catalog is a directory tree on disk; `podium sync` reads it directly and writes harness-native files, with no daemon and no authentication. Suitable for solo work, evaluation, prototypes, CI build steps, and small teams that share the catalog via a Git repo.
 
 ---
 
@@ -16,7 +16,7 @@ The lightest Podium shape. The catalog is a directory tree on disk; `podium sync
 
 The only running component is the `podium` CLI. There is no server process, no database, and no identity provider.
 
-`podium sync` runs the same shared Go library functions the server would run behind its HTTP API: parsers, glob resolver, layer composer, `extends:` resolver, harness adapters, lint rules, and atomic materialization. The library is the single behavioral surface across deployment shapes; migration between shapes preserves output.
+`podium sync` runs the same shared Go library functions the server would run behind its HTTP API: parsers, glob resolver, layer composer, `extends:` resolver, harness adapters, lint rules, and atomic materialization. The library is the single behavioral surface across deployment modes; migration between modes preserves output.
 
 ---
 
@@ -30,11 +30,11 @@ The only running component is the `podium` CLI. There is no server process, no d
 
 ---
 
-## What doesn't work in this shape
+## What doesn't work with a filesystem registry
 
-- The Podium MCP server (no HTTP API to back it). Use the standalone server shape if you want runtime discovery.
-- The language SDKs (HTTP-only). Use the standalone server shape.
-- The read CLI (`podium search`, `podium domain show`, `podium domain search`, `podium artifact show`) — SDK-backed.
+- The Podium MCP server (no HTTP API to back it). Use the standalone server if you want runtime discovery.
+- The language SDKs (HTTP-only). Use the standalone server.
+- The SDK-backed read CLI (`podium search`, `podium domain show`, `podium domain search`, `podium artifact show`).
 - Outbound webhooks.
 - Identity-based visibility filtering. The visibility evaluator short-circuits to `true` for every layer. `visibility:` declarations stay in layer config (artifacts remain portable to server-source deployments) but are not enforced at request time.
 - `podium login`. There's no auth to perform.
@@ -79,7 +79,7 @@ A filesystem registry rooted at `<registry-path>` is a directory of layer direct
 └── .layer-order                # optional; controls layer ordering
 ```
 
-Each subdirectory of `<registry-path>` is treated as a `local`-source layer. Layer IDs default to the subdirectory name; layer order is alphabetical by name. An optional `<registry-path>/.layer-order` file overrides the order — one layer ID per line, lowest precedence to highest.
+Each subdirectory of `<registry-path>` is treated as a `local`-source layer. Layer IDs default to the subdirectory name; layer order is alphabetical by name. An optional `<registry-path>/.layer-order` file overrides the order (one layer ID per line, lowest precedence to highest).
 
 The workspace local overlay (`<workspace>/.podium/overlay/`) sits on top of the filesystem-registry layers, exactly as in server mode.
 
@@ -135,7 +135,7 @@ podium serve --standalone --layer-path ~/podium-artifacts/
 
 Each developer's `<workspace>/.podium/sync.yaml` switches `defaults.registry` from the path to `http://podium.your-team.example` (or wherever the server lives). The directory layout and authoring loop are unchanged; the consumer paths gain MCP and SDK support.
 
-The shared library does the same parsing, composition, and adapter work in both shapes, so output is bit-identical for the same target and profile.
+The shared library does the same parsing, composition, and adapter work in both modes, so output is bit-identical for the same target and profile.
 
 **To a standard deployment.** When you need OIDC identity-based visibility, multi-tenancy, or production availability, follow [Small team](small-team) (or [Organization](organization)) and use `podium admin migrate-to-standard` to export the standalone state.
 
@@ -146,4 +146,4 @@ The shared library does the same parsing, composition, and adapter work in both 
 - Authoring rights for the catalog are whoever can write to the directory. Branch protection on a Git repo is the typical control.
 - Visibility declarations in layer config are recorded but not enforced (artifacts remain portable to server deployments).
 - Audit is the git history (when committed to git) or whatever the sharing mechanism preserves; there's no Podium-side audit stream.
-- SBOM ingestion, CVE tracking, freeze windows, signing enforcement — all available only in server shapes.
+- SBOM ingestion, CVE tracking, freeze windows, signing enforcement: all available only with a server.

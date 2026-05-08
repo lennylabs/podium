@@ -115,6 +115,29 @@ Reword to avoid the count: "the first-class types", "the SPIs", "the meta-tools"
 
 Examples to avoid: very, really, just, simply, truly, actually. Use only when technically necessary.
 
+### "Shape" as a generic noun
+
+Do not use "shape" as a generic noun for data structures, schemas, formats, configurations, APIs, or document organization.
+
+Examples to avoid: "the deployment shape", "the consumer shape", "the registry shape", "the wire shape", "the response shape", "harness-native shape", "delivery shape", "MCP shape".
+
+Replace with the specific technical term: deployment **mode** / **topology**, consumer **path** / **integration**, **format**, **layout**, **structure**, **schema**, **convention**. Pick the term that matches what the reader will actually encounter.
+
+### Vague causal verbs
+
+Avoid "shape," "drive," "enable," "facilitate," and "support" when a more precise verb is available. Describe the specific mechanism or effect directly.
+
+Examples to avoid:
+
+- "The directory layout drives the domain hierarchy." → "The directory layout defines the domain hierarchy."
+- "Cross-type dependency edges drive impact analysis." → "Cross-type dependency edges feed impact analysis."
+- "A health-state machine drives the transition." → "A health-state machine governs the transition."
+- "Reordering via `podium layer reorder` is supported." → "Use `podium layer reorder` to change order."
+- "Nesting is intentionally not supported." → "Nesting is intentionally absent." (or "Profiles cannot nest.")
+- "What each shape supports is in §13.11." → "What each mode covers is in §13.11."
+
+When you have to use one of these verbs, the action and its target should both be specific enough that the reader can reconstruct the mechanism.
+
 ## Prefer
 
 - Explicit subject-verb-object constructions.

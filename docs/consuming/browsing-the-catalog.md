@@ -3,14 +3,14 @@ layout: default
 title: Browsing the catalog
 parent: Consuming
 nav_order: 2
-description: How an agent navigates the catalog at runtime — load_domain, search_domains, search_artifacts, load_artifact — and what each call costs.
+description: How an agent navigates the catalog at runtime via load_domain, search_domains, search_artifacts, and load_artifact, and what each call costs.
 ---
 
 # Browsing the catalog
 
 The Podium MCP server exposes a small set of meta-tools to harnesses that speak MCP. The agent uses them mid-session to discover and load capabilities incrementally, rather than starting with the full catalog in its context window.
 
-The same operations are available to programmatic consumers via the SDK; this page focuses on the agent-mediated MCP path. SDK callers see the same wire shapes.
+The same operations are available to programmatic consumers via the SDK; this page focuses on the agent-mediated MCP path. SDK callers see the same wire format.
 
 | Tool | Purpose |
 |:--|:--|
@@ -38,7 +38,7 @@ Returns:
 - Notable artifacts (author `featured` plus learn-from-usage signal; empty when neither applies).
 - Subdomains, each with their short description.
 
-Output shape (depth, folding, notable count, response budget) is governed by configurable rules per domain and per tenant. The agent can pass `depth` to override the configured default in one call.
+Output rendering (depth, folding, notable count, response budget) is governed by configurable rules per domain and per tenant. The agent can pass `depth` to override the configured default in one call.
 
 When the renderer reduces the response (token-budget tightening or depth cap), the response includes a `note` field describing what was reduced. The agent can pass an explicit `depth` to push past it, drill into a specific subdomain, or fall back to `search_artifacts(scope=<path>)` for more notable artifacts than fit.
 
@@ -59,7 +59,7 @@ Use this when the agent doesn't know which domain to start in. The agent picks a
 
 Filters: `scope` constrains to a path prefix (e.g., search only under `platform/`). `top_k` defaults to 10, max 50. Response includes `total_matched` so the caller knows when more results exist.
 
-Domains without a `DOMAIN.md` aren't embedded and don't appear in `search_domains` results; they're reachable via `load_domain` enumeration only. Visibility filtering applies — a domain whose `DOMAIN.md` lives only in a layer the caller can't see won't surface.
+Domains without a `DOMAIN.md` aren't embedded and don't appear in `search_domains` results; they're reachable via `load_domain` enumeration only. Visibility filtering applies: a domain whose `DOMAIN.md` lives only in a layer the caller can't see won't surface.
 
 ---
 
@@ -82,7 +82,7 @@ Hybrid retrieval over artifact frontmatter. All args optional:
 | `top_k` | Result count cap. Default 10, max 50. |
 | `session_id` | Optional UUID for `latest`-resolution consistency and learn-from-usage reranking. |
 
-When `query` is omitted, returns artifacts matching the filters in default order. This is the canonical "list everything in this domain" move — useful when a domain's notable list and description don't tell the agent enough.
+When `query` is omitted, returns artifacts matching the filters in default order. This is the canonical "list everything in this domain" move, useful when a domain's notable list and description don't tell the agent enough.
 
 Returns ranked descriptors only. To use a result, call `load_artifact` with its id.
 
@@ -99,7 +99,7 @@ load_artifact("finance/ap/pay-invoice", version="1.2.0")
 
 Loads a specific artifact by ID. Returns the manifest body inline; bundled resources are materialized atomically on the host's filesystem at a host-configured destination path. Large blobs are delivered via presigned URLs that the MCP server fetches.
 
-This is the expensive operation in the discovery flow. The agent calls it only when it has decided to use the artifact. Materialization runs through the configured harness adapter, so the on-disk shape matches what the harness expects.
+This is the expensive operation in the discovery flow. The agent calls it only when it has decided to use the artifact. Materialization runs through the configured harness adapter, so the on-disk layout matches what the harness expects.
 
 Args:
 

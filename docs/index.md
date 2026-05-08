@@ -38,8 +38,8 @@ Highlights:
 
 {: .note }
 
-> **Status: design phase.** The technical specification drives a
-> spec- and test-driven implementation. There is no shipped binary
+> **Status: design phase.** The technical specification is the source
+> of truth for a spec- and test-driven implementation. There is no shipped binary
 > yet. Design feedback is the most useful contribution today. See
 > [Status](about/status) and [Contributing](about/contributing).
 
@@ -103,7 +103,7 @@ Podium to feed it.
 
 ### I'm setting up Podium for a team
 
-Pick your deployment shape; scale up as the team grows.
+Pick your deployment mode; scale up as the team grows.
 
 [Deployment guide](deployment/){: .btn .btn-purple }
 

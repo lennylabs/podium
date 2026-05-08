@@ -10,8 +10,8 @@ description: Plugin SPIs, the forward-compatibility constraints that keep out-of
 
 Podium is extensible at two layers:
 
-- **In-process plugins.** Swap or augment the registry's own behavior — different stores, different identity providers, different lint rules — by implementing a Go interface and being compiled into a registry build. See [SPIs](#spis).
-- **External extensions.** Build on the registry's HTTP API, SDKs, and CLI without changing the registry itself — programmatic curation scripts, webhook receivers, custom CI checks, layer source bridges. See [External extensions](#external-extensions).
+- **In-process plugins.** Swap or augment the registry's own behavior (different stores, different identity providers, different lint rules) by implementing a Go interface and being compiled into a registry build. See [SPIs](#spis).
+- **External extensions.** Build on the registry's HTTP API, SDKs, and CLI without changing the registry itself: programmatic curation scripts, webhook receivers, custom CI checks, layer source bridges. See [External extensions](#external-extensions).
 
 Most teams reach for external extensions first. SPI plugins are for cases where the registry's own behavior needs to change.
 
@@ -27,7 +27,7 @@ The registry's pluggable interfaces:
 | `RegistryObjectStore` | Bundled resource bytes, presigned URLs. S3-compatible (filesystem in standalone). |
 | `RegistrySearchProvider` | Hybrid retrieval for `search_artifacts`. Built-ins: `pgvector`, `sqlite-vec`, `pinecone`, `weaviate-cloud`, `qdrant-cloud`. |
 | `EmbeddingProvider` | Generates embeddings for ingest text and query text. Built-ins: `embedded-onnx`, `openai`, `voyage`, `cohere`, `ollama`. |
-| `LocalSearchProvider` | Optional semantic backing for the local-overlay index. Same SPI shape as `RegistrySearchProvider`. |
+| `LocalSearchProvider` | Optional semantic backing for the local-overlay index. Same SPI as `RegistrySearchProvider`. |
 | `RegistryAuditSink` | Stream for catalogue events; logically distinct from `RegistryStore`, separately mockable, separately routable. |
 | `LayerComposer` | Resolves the caller's effective view from the configured layer list; applies merge semantics and `extends:` resolution. |
 | `LayerSourceProvider` | Resolves and watches the source backing a layer. Built-ins: `git`, `local`. Custom backends: S3 versioned buckets, OCI registries, HTTP archives, internal CMS bridges. |
@@ -54,9 +54,9 @@ A community plugin registry is hosted at the project's public URL.
 
 ## Forward compatibility for out-of-process plugins
 
-Plugins today are in-process Go modules. A future release may add an out-of-process plugin protocol (subprocess over stdin/stdout, gRPC, or similar) so plugins can ship as separate binaries — closed-source plugins, plugins written in other languages, plugins distributed without a registry rebuild.
+Plugins today are in-process Go modules. A future release may add an out-of-process plugin protocol (subprocess over stdin/stdout, gRPC, or similar) so plugins can ship as separate binaries: closed-source plugins, plugins written in other languages, plugins distributed without a registry rebuild.
 
-The SPI shapes are designed today to make that transition source-compatible. Plugin authors who follow the constraints below will be able to ship the same plugin in-process now and out-of-process later, without code changes to the plugin's interface contract.
+The SPIs are designed today to make that transition source-compatible. Plugin authors who follow the constraints below will be able to ship the same plugin in-process now and out-of-process later, without code changes to the plugin's interface contract.
 
 **Constraints on every SPI method:**
 
@@ -70,7 +70,7 @@ The SPI shapes are designed today to make that transition source-compatible. Plu
 
 The default implementations (`RegistryStore`, `HarnessAdapter`, `LayerSourceProvider`, etc.) conform to these constraints today, even though they run in-process. The motivation is forward compatibility rather than present-day distribution: when the out-of-process protocol lands, no built-in needs reshaping.
 
-This section commits to keeping SPI shapes wire-friendly. It does not commit to a specific transport (subprocess, gRPC, Wasm) or a timeline.
+This section commits to keeping SPIs wire-friendly. It does not commit to a specific transport (subprocess, gRPC, Wasm) or a timeline.
 
 ---
 
@@ -80,7 +80,7 @@ The registry's HTTP API, SDKs, CLI, and outbound webhook stream are designed to 
 
 ### Programmatic curation (semantic discovery + scoped sync)
 
-A script picks artifacts based on whatever context is meaningful — semantic match against a query, the user's recent work, the active project, an upstream ticket — and then invokes `podium sync` with `--include` flags to materialize the selected set. The script owns the discovery logic; Podium owns the materialization (visibility filtering, `extends:` resolution, harness adaptation, audit). The on-disk result is reproducible from the include list.
+A script picks artifacts based on whatever context is meaningful (semantic match against a query, the user's recent work, the active project, an upstream ticket) and then invokes `podium sync` with `--include` flags to materialize the selected set. The script owns the discovery logic; Podium owns the materialization (visibility filtering, `extends:` resolution, harness adaptation, audit). The on-disk result is reproducible from the include list.
 
 See [Custom consumers via the SDK → Programmatic curation](../consuming/custom-via-sdk#patterns) for a worked example.
 
@@ -96,7 +96,7 @@ Common targets:
 
 ### Custom pre-merge CI
 
-Each layer's source repo runs whatever CI checks the team wants — naming conventions, sensitivity sign-off, banned dependencies, structural rules — using `podium lint` plus team-specific scripts. These checks are out of Podium's scope; they're ordinary CI in the layer's source repository, gated by branch protection.
+Each layer's source repo runs whatever CI checks the team wants (naming conventions, sensitivity sign-off, banned dependencies, structural rules) using `podium lint` plus team-specific scripts. These checks are out of Podium's scope; they're ordinary CI in the layer's source repository, gated by branch protection.
 
 ### Layer source bridges
 
@@ -106,12 +106,12 @@ For a fuller integration that handles its own ingest semantics (signature verifi
 
 ### Custom consumer surfaces
 
-A runtime that doesn't fit the built-in consumer shapes — a specialized agent framework, an internal orchestrator, an evaluation harness — wraps the registry HTTP API directly. Identity attaches via the same OAuth flow used by the SDKs; visibility filtering and layer composition still happen server-side. The custom consumer is responsible for caching and any harness-native translation it needs.
+A runtime that doesn't fit the built-in consumers (a specialized agent framework, an internal orchestrator, an evaluation harness) wraps the registry HTTP API directly. Identity attaches via the same OAuth flow used by the SDKs; visibility filtering and layer composition still happen server-side. The custom consumer is responsible for caching and any harness-native translation it needs.
 
 ---
 
 ## Where to learn more
 
-- [`spec/09-extensibility.md`](https://github.com/lennylabs/podium/blob/main/spec/09-extensibility.md) — the full SPI table and the forward-compatibility constraints.
-- [Configure your harness](../consuming/configure-your-harness) — for runtime-specific extension via `PODIUM_HARNESS=none` plus custom consumer code.
-- [Custom consumers via the SDK](../consuming/custom-via-sdk) — patterns for programmatic curation, eval pipelines, and custom consumer surfaces.
+- [`spec/09-extensibility.md`](https://github.com/lennylabs/podium/blob/main/spec/09-extensibility.md): the full SPI table and the forward-compatibility constraints.
+- [Configure your harness](../consuming/configure-your-harness): for runtime-specific extension via `PODIUM_HARNESS=none` plus custom consumer code.
+- [Custom consumers via the SDK](../consuming/custom-via-sdk): patterns for programmatic curation, eval pipelines, and custom consumer surfaces.

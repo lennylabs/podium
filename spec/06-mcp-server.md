@@ -34,7 +34,7 @@ Identity providers attach the caller's OAuth-attested identity to every registry
 - **`oauth-device-code`** _(default)_. Interactive device-code flow on first use; tokens cached in the OS keychain (macOS Keychain, Windows Credential Manager, libsecret on Linux). Refreshes transparently. Defaults: access-token TTL 15 min, refresh-token TTL 7 days, revocation propagation ≤60s. Options: `PODIUM_OAUTH_AUDIENCE`, `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT`, `PODIUM_TOKEN_KEYCHAIN_NAME`.
 
   How the verification URL surfaces depends on the consumer:
-  - **MCP server** uses MCP elicitation — the host displays the URL and code in the agent UI.
+  - **MCP server** uses MCP elicitation; the host displays the URL and code in the agent UI.
   - **`podium sync`, `podium login`, and other CLI commands** print the URL and code to stderr, attempt to open the URL in the system browser (via `open` on macOS, `xdg-open` on Linux, `start` on Windows), and poll the IdP's token endpoint until the user completes the flow or a 10-minute timeout elapses. `--no-browser` skips the auto-open. Output is suppressed under `--json`; the prompt is replaced with a structured `auth.device_code_pending` event emitted on stderr.
   - **SDK** raises `DeviceCodeRequired` with the URL and code; calling code is responsible for surfacing it to the user. `Client.login()` performs the same blocking poll-until-completion the CLI uses.
 
@@ -43,29 +43,29 @@ Identity providers attach the caller's OAuth-attested identity to every registry
 
 ### 6.3.1 Claim Derivation
 
-The IdP returns a JWT with claims `{sub, org_id, email, exp, iss, aud}`. Team membership is resolved registry-side via SCIM 2.0 push from the IdP — the registry maintains a directory of `(user_id → teams)`.
+The IdP returns a JWT with claims `{sub, org_id, email, exp, iss, aud}`. Team membership is resolved registry-side via SCIM 2.0 push from the IdP; the registry maintains a directory of `(user_id → teams)`.
 
 For IdPs without SCIM, the `IdpGroupMapping` adapter reads OIDC group claims from the token and maps them to team names per a registry-side configuration.
 
 Tested IdPs: Okta, Entra ID, Auth0, Google Workspace, Keycloak. SAML supported via OIDC bridge.
 
-Fine-grained narrowing via OAuth scope claims (e.g., `podium:read:finance/*`, `podium:load:finance/ap/pay-invoice@1.x`); narrow scopes intersect with the caller's layer visibility — the smaller surface wins.
+Fine-grained narrowing via OAuth scope claims (e.g., `podium:read:finance/*`, `podium:load:finance/ap/pay-invoice@1.x`); narrow scopes intersect with the caller's layer visibility, and the smaller surface wins.
 
 ### 6.3.2 Runtime Trust Model (`injected-session-token`)
 
 The injected token is a JWT signed by a runtime-specific signing key registered with the registry one-time at runtime onboarding. The registry verifies the signature on every call. Required claims:
 
-- `iss` — runtime identifier (must match a registered runtime).
-- `aud` — registry endpoint.
-- `sub` — user id the runtime is acting on behalf of.
-- `act` — actor (the runtime itself).
-- `exp` — expiry.
+- `iss`: runtime identifier (must match a registered runtime).
+- `aud`: registry endpoint.
+- `sub`: user id the runtime is acting on behalf of.
+- `act`: actor (the runtime itself).
+- `exp`: expiry.
 
 Without a registered signing key, the registry rejects with `auth.untrusted_runtime`.
 
 #### 6.3.2.1 Token Rotation Contract
 
-- Env-var change is observed at next registry call (no signal needed — the MCP server reads fresh on every call).
+- Env-var change is observed at next registry call (no signal needed; the MCP server reads fresh on every call).
 - SIGHUP triggers a forced re-read.
 - `PODIUM_SESSION_TOKEN_FILE` is watched via fsnotify and re-read on change.
 
@@ -75,10 +75,10 @@ Token rotation is the runtime's responsibility; the MCP server's only obligation
 
 The workspace local overlay is a per-developer set of `ARTIFACT.md` and `DOMAIN.md` files that merge as the **highest-precedence layer in the caller's effective view** (§4.6). It's the path most teams use for in-progress work that isn't ready to share.
 
-**Path resolution.** All three consumer shapes (MCP server, `podium sync`, language SDKs) honor the same lookup:
+**Path resolution.** Every consumer (MCP server, `podium sync`, language SDKs) honors the same lookup:
 
 1. `PODIUM_OVERLAY_PATH` if set (`Client(overlay_path=...)` on the SDK takes precedence over the env var).
-2. The MCP server falls back to MCP roots when available — the `roots/list` response identifies the workspace, and the overlay defaults to `<workspace>/.podium/overlay/` if that directory exists.
+2. The MCP server falls back to MCP roots when available: the `roots/list` response identifies the workspace, and the overlay defaults to `<workspace>/.podium/overlay/` if that directory exists.
 3. `podium sync` and the SDK fall back to `<CWD>/.podium/overlay/` if that directory exists.
 4. Otherwise: layer disabled.
 
@@ -94,7 +94,7 @@ To promote a workspace artifact to a shared layer, copy it into the appropriate 
 
 When `LocalOverlayProvider` is configured, the MCP server maintains a local BM25 index over local-overlay manifest text. `search_artifacts` calls fan out to both the registry and the local index; the MCP server fuses results via reciprocal rank fusion before returning.
 
-The default is BM25-only — local artifacts have lower recall on semantic queries than registry artifacts, which is acceptable for the developer iteration loop where the goal is "find my draft," not "outrank everything else." Authors who want better local recall can configure the MCP server with an external embedding provider and a vector store via the `LocalSearchProvider` SPI (§9.1). Backends include `sqlite-vec` (embedded, single-file — matching the standalone registry's default in §13.10), a local pgvector instance, or a managed service (Pinecone, Weaviate Cloud, Qdrant Cloud). Cost and identity for any external service are the operator's to manage.
+The default is BM25-only. Local artifacts have lower recall on semantic queries than registry artifacts, which is acceptable for the developer iteration loop where the goal is "find my draft," not "outrank everything else." Authors who want better local recall can configure the MCP server with an external embedding provider and a vector store via the `LocalSearchProvider` SPI (§9.1). Backends include `sqlite-vec` (embedded, single-file; matching the standalone registry's default in §13.10), a local pgvector instance, or a managed service (Pinecone, Weaviate Cloud, Qdrant Cloud). Cost and identity for any external service are the operator's to manage.
 
 ## 6.5 Cache
 
@@ -105,9 +105,9 @@ Disk cache at `${PODIUM_CACHE_DIR}/<sha256>/`. Two cache layers:
 
 Cache modes (set at server startup via `PODIUM_CACHE_MODE`):
 
-- `always-revalidate` (default) — HEAD-revalidate the resolution cache on every call.
-- `offline-first` — use cached resolution and content if present; only call the registry on miss.
-- `offline-only` — never call the registry; cache only.
+- `always-revalidate` (default): HEAD-revalidate the resolution cache on every call.
+- `offline-first`: use cached resolution and content if present; only call the registry on miss.
+- `offline-only`: never call the registry; cache only.
 
 Index DB: BoltDB or SQLite. `podium cache prune` for cleanup.
 
@@ -119,13 +119,13 @@ On `load_artifact(<id>)`, the registry returns the canonical manifest body inlin
 
 1. **Fetch.** The MCP server downloads each resource (or reads it from the cache) into a temporary staging area. On 403/expired during fetch, retries with a fresh URL set (max 3 attempts, exponential backoff).
 2. **Verify.** Signature verification (per `PODIUM_VERIFY_SIGNATURES`); content_hash match; SBOM walk if vulnerability tracking is enabled.
-3. **Adapt.** The configured `HarnessAdapter` (§6.7) translates the canonical artifact into the harness's native layout — file names, frontmatter conventions, directory shape — without changing the underlying bytes of bundled resources unless the adapter declares it needs to.
-4. **Hook.** Configured `MaterializationHook` plugins (§9.1) run in declared order over the adapter's output, with read+rewrite access to per-file bytes plus the manifest for context. Each hook can rewrite a file, drop it, or emit warnings; the next hook receives the previous hook's output. No-op when no hooks are configured. Hooks share the adapter sandbox contract (§6.7) — no network, no subprocess, no writes outside the materialization destination.
+3. **Adapt.** The configured `HarnessAdapter` (§6.7) translates the canonical artifact into the harness's native layout (file names, frontmatter conventions, directory structure) without changing the underlying bytes of bundled resources unless the adapter declares it needs to.
+4. **Hook.** Configured `MaterializationHook` plugins (§9.1) run in declared order over the adapter's output, with read+rewrite access to per-file bytes plus the manifest for context. Each hook can rewrite a file, drop it, or emit warnings; the next hook receives the previous hook's output. No-op when no hooks are configured. Hooks share the adapter sandbox contract (§6.7): no network, no subprocess, no writes outside the materialization destination.
 5. **Write.** The MCP server writes the adapted output atomically to a host-configured destination path (`.tmp` + rename), ensuring the destination either contains a complete copy or nothing.
 
-The destination path comes from the host — either via `PODIUM_MATERIALIZE_ROOT` or per-call in the `load_artifact` arguments.
+The destination path comes from the host, either via `PODIUM_MATERIALIZE_ROOT` or per-call in the `load_artifact` arguments.
 
-When `PODIUM_HARNESS=none` (the default), step 3 is a no-op: the canonical layout is written directly. Hosts that want raw artifacts — build pipelines, evaluation harnesses, custom scripts — leave the adapter unset. The hook step (4) runs whether or not an adapter is configured.
+When `PODIUM_HARNESS=none` (the default), step 3 is a no-op: the canonical layout is written directly. Hosts that want raw artifacts (build pipelines, evaluation harnesses, custom scripts) leave the adapter unset. The hook step (4) runs whether or not an adapter is configured.
 
 ## 6.7 Harness Adapters
 
@@ -143,7 +143,7 @@ The `HarnessAdapter` translates a canonical artifact into the format a specific 
 | `opencode`       | Writes OpenCode's native package layout. For `type: rule`, injects into `AGENTS.md` between markers (or writes `.opencode/rules/<name>.md` for `rule_mode: explicit`).  |
 | `codex`          | Writes Codex's native package layout. For `type: rule`, injects into `AGENTS.md` between markers.                                                                       |
 | `pi`             | Writes Pi's native layout. For `type: rule`, injects into `AGENTS.md` (project-local `.pi/AGENTS.md` or root `AGENTS.md`); explicit-mode rules at `.pi/rules/<name>.md`. |
-| `hermes`         | Writes Hermes's native layout. For `type: rule`, writes `.claude/rules/<name>.md` (Hermes also reads `.cursor/rules/*.mdc` natively, so cursor-shape output works too). |
+| `hermes`         | Writes Hermes's native layout. For `type: rule`, writes `.claude/rules/<name>.md` (Hermes also reads `.cursor/rules/*.mdc` natively, so cursor-format output works too). |
 
 **What an adapter does.** Mechanical translation:
 
@@ -336,4 +336,4 @@ The Podium MCP server is a stdio binary the host spawns alongside its other MCP 
 
 **Standalone (no env override).** When `podium serve` has auto-bootstrapped `~/.podium/sync.yaml` with `defaults.registry: http://127.0.0.1:8080` (§13.10), or `podium init --global --standalone` has written it explicitly (§7.7), the MCP server resolves the registry from there and the env var can be omitted.
 
-For other MCP-speaking hosts (custom runtimes, non-major harnesses), the same snippet shape applies; `PODIUM_HARNESS=none` writes the canonical layout when no harness-specific adapter is configured.
+For other MCP-speaking hosts (custom runtimes, non-major harnesses), the same snippet pattern applies; `PODIUM_HARNESS=none` writes the canonical layout when no harness-specific adapter is configured.

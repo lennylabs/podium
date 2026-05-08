@@ -51,7 +51,7 @@ identity:
 - **Audience mismatch.** The IdP must issue tokens with `aud` matching what the registry expects. The registry rejects with `auth.audience_mismatch` if not.
 - **Clock skew.** ±60s tolerance. Run NTP on registry hosts.
 - **Stale JWKS.** The registry caches the JWKS for 5 minutes. After IdP key rotation, expect up to 5 minutes of `auth.signature_invalid` for the affected key.
-- **Groups claim shape.** Some IdPs emit groups as a JSON array of names; others emit IDs that you have to resolve. The registry expects an array of strings; adapt with the IdP-specific configuration described in each guide.
+- **Groups claim format.** Some IdPs emit groups as a JSON array of names; others emit IDs that you have to resolve. The registry expects an array of strings; adapt with the IdP-specific configuration described in each guide.
 - **Browser-mediated flows blocked.** Some corporate networks block the device-code verification URL pattern. Test with a developer on the corporate network before declaring success.
 
 ## When to use SAML instead

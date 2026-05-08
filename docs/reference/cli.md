@@ -3,7 +3,7 @@ layout: default
 title: CLI
 parent: Reference
 nav_order: 1
-description: Every podium subcommand — setup, server, sync, layer management, search, admin, signing, vulnerability tracking.
+description: Every podium subcommand: setup, server, sync, layer management, search, admin, signing, vulnerability tracking.
 ---
 
 # CLI
@@ -37,11 +37,11 @@ podium init [--global | --local]
 
 Value flags:
 
-- `--registry <url-or-path>` — server URL (HTTP) or filesystem path.
-- `--harness <name>` — `none`, `claude-code`, `claude-desktop`, `cursor`, `gemini`, `opencode`, `codex`, `pi`, `hermes`.
-- `--target <path>` — destination for materialization.
-- `--standalone` — shortcut for `--registry http://127.0.0.1:8080`.
-- `--force` — overwrite an existing file.
+- `--registry <url-or-path>`: server URL (HTTP) or filesystem path.
+- `--harness <name>`: `none`, `claude-code`, `claude-desktop`, `cursor`, `gemini`, `opencode`, `codex`, `pi`, `hermes`.
+- `--target <path>`: destination for materialization.
+- `--standalone`: shortcut for `--registry http://127.0.0.1:8080`.
+- `--force`: overwrite an existing file.
 
 Workspace mode walks up from CWD to find `.podium/`; creates one in CWD if none exists. Adds `.podium/sync.local.yaml` and `.podium/overlay/` to `.gitignore` if not already present.
 
@@ -97,7 +97,7 @@ Zero-flag (`podium serve` alone) auto-enters standalone mode when no config is f
 
 ### `podium status`
 
-Prints registry status — bind address, mode (standalone / standard / public / read-only), connected layer sources.
+Prints registry status: bind address, mode (standalone / standard / public / read-only), connected layer sources.
 
 ```
 podium status
@@ -219,7 +219,7 @@ podium domain search <query> [--scope <path>] [--top-k <n>] [--json]
 
 ### `podium domain analyze`
 
-Operator command. Renders a quality report — sparsity per node, pass-through chains, candidates for split (high artifact count + tag-cluster entropy) or fold (low artifact count).
+Operator command. Renders a quality report: sparsity per node, pass-through chains, candidates for split (high artifact count + tag-cluster entropy) or fold (low artifact count).
 
 ```
 podium domain analyze [<path>]
@@ -414,7 +414,7 @@ Explicit signing outside the ingest flow.
 podium sign <artifact>
 ```
 
-Two key models are supported per deployment configuration: Sigstore-keyless (preferred; OIDC-attested signature with transparency log entry) and registry-managed key (per-org key managed by the registry, rotated quarterly).
+Two key models exist per deployment configuration: Sigstore-keyless (preferred; OIDC-attested signature with transparency log entry) and registry-managed key (per-org key managed by the registry, rotated quarterly).
 
 ### `podium verify`
 

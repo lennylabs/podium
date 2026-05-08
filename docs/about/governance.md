@@ -3,7 +3,7 @@ layout: default
 title: Governance
 parent: About
 nav_order: 4
-description: How decisions are made — the maintainer model, transition criteria, and the proposal process.
+description: How decisions are made: the maintainer model, transition criteria, and the proposal process.
 ---
 
 # Governance

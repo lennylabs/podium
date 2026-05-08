@@ -8,7 +8,7 @@ description: Current phase, what's wired up, what's targeted, where to find the 
 
 # Implementation status
 
-Podium is in the **design phase**. The technical specification is the source of truth and drives implementation under a spec- and test-driven workflow. There is no shipped binary yet.
+Podium is in the **design phase**. The technical specification is the source of truth and the basis for a spec- and test-driven implementation. There is no shipped binary yet.
 
 The documentation describes the v1 surface as specified. Where pages reference commands or behavior that's planned-not-shipped, this page is the canonical pointer for what's actually wired up at any given time.
 
@@ -32,13 +32,13 @@ PR-level contributions against platform components open up once the core lands.
 
 ## Build sequence
 
-The full build sequence lives in [`spec/10-mvp-build-sequence.md`](https://github.com/lennylabs/podium/blob/main/spec/10-mvp-build-sequence.md). The phases are directional — surface order and timing may shift as implementation surfaces new constraints.
+The full build sequence lives in [`spec/10-mvp-build-sequence.md`](https://github.com/lennylabs/podium/blob/main/spec/10-mvp-build-sequence.md). The phases are directional; surface order and timing may shift as implementation surfaces new constraints.
 
-### Initial phases (cover lightest deployment shapes end-to-end)
+### Initial phases (cover lightest deployment modes end-to-end)
 
 | Phase | What | Why |
 |:--|:--|:--|
-| 0 | Filesystem-source `podium sync` + `podium serve --standalone` for the same artifact directory plus search and HTTP API. | Cover the lightest deployment shapes; five-minute install for personal/small-team use. |
+| 0 | Filesystem-source `podium sync` + `podium serve --standalone` for the same artifact directory plus search and HTTP API. | Cover the lightest deployment modes; five-minute install for personal/small-team use. |
 | 1 | Manifest schema + `podium lint` for `ARTIFACT.md` and `DOMAIN.md` + per-type lint rules + signing. | Authors need a way to validate artifacts; lint is the early quality bar. |
 | 2 | Registry HTTP API: `load_domain`, `search_domains`, `search_artifacts`, `load_artifact`. | The wire surface every server-source consumer talks to. |
 | 3 | `podium sync` for `none`, `claude-code`, and `codex` adapters. | Filesystem delivery end-to-end with the full client config surface. |

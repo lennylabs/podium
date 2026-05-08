@@ -3,12 +3,12 @@ layout: default
 title: Small team
 parent: Deployment
 nav_order: 2
-description: Standalone server on a single VM. The right shape for 3–10 person teams that want runtime discovery and a single audit log without a full standard deployment.
+description: Standalone server on a single VM. The right setup for 3–10 person teams that want runtime discovery and a single audit log without a full standard deployment.
 ---
 
 # Small team
 
-The standalone server shape: a single binary running on one machine. SQLite + sqlite-vec + filesystem object storage + a bundled embedding model, all embedded. Bind to localhost or behind your VPN.
+The standalone server: a single binary running on one machine. SQLite + sqlite-vec + filesystem object storage + a bundled embedding model, all embedded. Bind to localhost or behind your VPN.
 
 Suitable for:
 
@@ -37,9 +37,9 @@ That command runs a single process. The standalone server includes:
 | Embedding provider | `embedded-onnx` (bundled `bge-small-en-v1.5`, ~30 MB) |
 | Identity provider | Optional. Public mode (no auth) by default; `oauth-device-code` can be enabled. |
 
-The standalone shape requires no Postgres, no S3, and no external identity provider.
+The standalone mode requires no Postgres, no S3, and no external identity provider.
 
-The same registry binary serves the standalone shape and the standard shape. Standalone is a deployment configuration; it is not a separate build.
+The same registry binary serves both standalone and standard modes. Standalone is a deployment configuration; it is not a separate build.
 
 ---
 
@@ -90,7 +90,7 @@ For runtime discovery via the MCP server, add the Podium MCP entry to the harnes
 
 Standalone supports the built-in `local` and `git` source types.
 
-**`local` source** — the easiest setup. The registry reads files directly from a filesystem path. Re-scanned on demand:
+**`local` source**: the easiest setup. The registry reads files directly from a filesystem path. Re-scanned on demand:
 
 ```bash
 podium serve --standalone --layer-path /var/podium/team-artifacts/
@@ -99,7 +99,7 @@ podium layer reingest team-artifacts
 
 For continuous local-source updates, `podium layer watch <id>` polls a configured interval (or use fsnotify on the host).
 
-**`git` source** — the registry mirrors a tracked Git ref. Configure layers in `~/.podium/registry.yaml`:
+**`git` source**: the registry mirrors a tracked Git ref. Configure layers in `~/.podium/registry.yaml`:
 
 ```yaml
 layers:
@@ -128,7 +128,7 @@ Migration is mechanical:
    - Optional: add the Podium MCP server entry to the harness's MCP config so the agent can call meta-tools at runtime.
 3. The authoring loop is unchanged: git PR and merge against the same registry repo. The standalone server picks up changes via `podium layer reingest` or a watcher.
 
-The shared library does the same parsing, composition, and adapter work in both shapes. Output is bit-identical for the same target and profile, so end-user behavior is preserved across the cut-over.
+The shared library does the same parsing, composition, and adapter work in both modes. Output is bit-identical for the same target and profile, so end-user behavior is preserved across the cut-over.
 
 ---
 
@@ -143,7 +143,7 @@ The shared library does the same parsing, composition, and adapter work in both 
 
 ---
 
-## What's not in this shape
+## What's not in this mode
 
 Standalone deliberately omits the things that need external services or a multi-tenant model:
 
@@ -189,7 +189,7 @@ For everyday small-team use, default to `oauth-device-code` auth. The added cere
 
 ## Migrating to standard
 
-When you outgrow standalone — typically when you need multi-tenancy, OIDC group claims via SCIM, the SBOM/CVE pipeline, or production-grade availability — `podium admin migrate-to-standard` exports the standalone state to a standard deployment:
+When you outgrow standalone (typically when you need multi-tenancy, OIDC group claims via SCIM, the SBOM/CVE pipeline, or production-grade availability), `podium admin migrate-to-standard` exports the standalone state to a standard deployment:
 
 ```bash
 podium admin migrate-to-standard --postgres <dsn> --object-store <url>

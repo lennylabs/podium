@@ -2,9 +2,9 @@
 
 ## 2.1 High-Level Component Map
 
-The registry is the system of record for artifacts. It can be reached two ways — as an external Podium server (§13.10) or as a local filesystem path (§13.11). The diagram below shows the server shape. See §7.1 for the dispatch and what each shape supports.
+The registry is the system of record for artifacts. It can be reached two ways: as an external Podium server (§13.10) or as a local filesystem path (§13.11). The diagram below shows the server deployment. See §7.1 for the dispatch and what each mode covers.
 
-Three consumer shapes read from the registry over HTTP: the Podium MCP server (in-process bridge for MCP-speaking hosts), `podium sync` (filesystem delivery for harnesses that load artifacts directly from disk), and the language SDKs (programmatic access for non-MCP runtimes). All three speak the same registry HTTP API, share identity providers, and apply the same layer composition and visibility filtering.
+The consumers read from the registry over HTTP: the Podium MCP server (in-process bridge for MCP-speaking hosts), `podium sync` (filesystem delivery for harnesses that load artifacts directly from disk), and the language SDKs (programmatic access for non-MCP runtimes). All speak the same registry HTTP API, share identity providers, and apply the same layer composition and visibility filtering.
 
 `podium sync` is also the only consumer that works against a filesystem-source registry (eager materialization, no HTTP).
 
@@ -70,16 +70,16 @@ host         MCP server          registry        object storage
  │◀──────────────│                                       │
 ```
 
-Two MCP deployment scenarios use the same MCP server binary:
+Two deployment scenarios share the same MCP server binary:
 
 - **Managed agent runtime.** The runtime spawns the MCP server as a co-located process. Identity is supplied via an injected session token (signed JWT); the registry endpoint is configured the same way. The workspace local overlay is unset.
 - **Developer's host.** The host spawns one MCP server per workspace as a stdio subprocess. The MCP server uses an OAuth device-code flow on first use (surfaced via MCP elicitation) to obtain a registry token, stored in the OS keychain. The workspace local overlay reads from `${WORKSPACE}/.podium/overlay/`.
 
 ## 2.2 Component Responsibilities
 
-**Podium Registry** _(centralized service)_. The system of record for artifacts. Composes the caller's effective view from the configured layer list per OAuth identity, applies per-layer visibility, indexes manifests, runs hybrid search, signs URLs for resource bytes, maintains the cross-type dependency graph, emits change events. Three persistent stores: Postgres + pgvector, object storage, HTTP/JSON API.
+**Podium Registry** _(centralized service)_. The system of record for artifacts. Composes the caller's effective view from the configured layer list per OAuth identity, applies per-layer visibility, indexes manifests, runs hybrid search, signs URLs for resource bytes, maintains the cross-type dependency graph, emits change events. Backed by Postgres + pgvector for metadata, object storage for resource bytes, and an HTTP/JSON API for callers.
 
-The registry's wire protocol is **HTTP/JSON**. All three consumer shapes speak the same HTTP API. Direct MCP access to the registry is not supported; MCP is one of three consumer surfaces that translate HTTP responses into a runtime-appropriate shape.
+The registry's wire protocol is **HTTP/JSON**. Every consumer speaks the same HTTP API. Direct MCP access to the registry is not supported; MCP is a consumer surface that translates HTTP responses into a runtime-appropriate format.
 
 **Podium MCP server** _(in-process bridge for MCP-speaking hosts)_. Single binary. Exposes the meta-tools. Holds no per-session server-side state; local state is limited to a content-addressed disk cache, OS-keychain-stored credentials (in `oauth-device-code` mode), an in-memory local-overlay index, and the materialized working set on disk. No state is shared across MCP server processes.
 
@@ -87,14 +87,14 @@ The registry's wire protocol is **HTTP/JSON**. All three consumer shapes speak t
 
 **Language SDKs (`podium-py`, `podium-ts`)** _(programmatic access for non-MCP runtimes)_. Thin clients over the registry HTTP API. Used by LangChain, Bedrock, OpenAI Assistants, custom orchestrators, eval harnesses, build pipelines, notebooks. See §7.6.
 
-Pluggable interfaces shared across all three consumer shapes:
+Pluggable interfaces shared across the consumers:
 
-- **IdentityProvider** — supplies the OAuth-attested identity attached to every registry call. Built-ins: `oauth-device-code` and `injected-session-token`. Additional implementations register through the interface.
-- **LocalOverlayProvider** — optional. When configured, reads `ARTIFACT.md` packages from a workspace filesystem path and merges them as the workspace local overlay (§6.4). Available across all three consumer shapes.
-- **HarnessAdapter** — translates canonical artifacts into harness-native format at delivery time (MCP materialization or `podium sync` write). Built-ins cover Claude Code, Claude Desktop, Cursor, Gemini, OpenCode, Codex; `none` (default) writes the canonical layout as-is. See §6.7. The SDKs accept a harness parameter on `materialize()`.
+- **IdentityProvider**: supplies the OAuth-attested identity attached to every registry call. Built-ins: `oauth-device-code` and `injected-session-token`. Additional implementations register through the interface.
+- **LocalOverlayProvider**: optional. When configured, reads `ARTIFACT.md` packages from a workspace filesystem path and merges them as the workspace local overlay (§6.4). Available across every consumer.
+- **HarnessAdapter**: translates canonical artifacts into harness-native format at delivery time (MCP materialization or `podium sync` write). Built-ins cover Claude Code, Claude Desktop, Cursor, Gemini, OpenCode, Codex; `none` (default) writes the canonical layout as-is. See §6.7. The SDKs accept a harness parameter on `materialize()`.
 
-**Shared library code (Go).** All the spec-defined logic that operates on artifacts and domains — manifest parsers (`ARTIFACT.md`, `DOMAIN.md`), glob resolver, `LayerComposer`, `extends:` resolver, visibility evaluator, `HarnessAdapter` interface and built-in adapters, materialization (atomic write), lint rules — lives in a single Go module that every Go-built component imports. The registry binary embeds it behind the HTTP API. The MCP server and `podium sync` in server-source mode are thin HTTP clients that call the registry, then invoke the same module's materialization writer locally. `podium sync` in filesystem-source mode (§13.11) calls the module's parser, composer, and writer functions directly, skipping HTTP. There is a single canonical implementation per concern: the same composer, parsers, merge logic, `extends:` resolution, and harness output run in every shape. This is the structural reason migrations between deployment shapes (e.g., §13.11.6: filesystem source → standalone server pointed at the same directory) preserve behavior with no separate validation surface. The language SDKs (`podium-py`, `podium-ts`) are independent HTTP clients in their own languages and do not share this module; they only work against a Podium server (§7.6).
+**Shared library code (Go).** All the spec-defined logic that operates on artifacts and domains lives in a single Go module that every Go-built component imports. This includes manifest parsers (`ARTIFACT.md`, `DOMAIN.md`), the glob resolver, `LayerComposer`, the `extends:` resolver, the visibility evaluator, the `HarnessAdapter` interface and its built-in adapters, materialization (atomic write), and lint rules. The registry binary embeds the module behind the HTTP API. The MCP server and `podium sync` in server-source mode are thin HTTP clients that call the registry, then invoke the same module's materialization writer locally. `podium sync` in filesystem-source mode (§13.11) calls the module's parser, composer, and writer functions directly, skipping HTTP. There is a single canonical implementation per concern: the same composer, parsers, merge logic, `extends:` resolution, and harness output run in every deployment mode. This is the structural reason migrations between deployment modes (e.g., §13.11.6: filesystem source → standalone server pointed at the same directory) preserve behavior with no separate validation surface. The language SDKs (`podium-py`, `podium-ts`) are independent HTTP clients in their own languages and do not share this module; they only work against a Podium server (§7.6).
 
 Configuration: env vars, command-line flags, or a config file the host/user supplies. See §6.
 
-**Hosts** _(not Podium components)_. Any system that consumes the catalog: MCP-speaking agent runtimes, file-based harnesses, programmatic runtimes. Hosts choose the consumer shape that fits their architecture.
+**Hosts** _(not Podium components)_. Any system that consumes the catalog: MCP-speaking agent runtimes, file-based harnesses, programmatic runtimes. Hosts choose the consumer that fits their architecture.

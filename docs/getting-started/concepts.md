@@ -72,7 +72,7 @@ description, keywords, featured artifacts, imports from elsewhere,
 and discovery-rendering hints. Without `DOMAIN.md`, a domain still
 works. It's a navigable directory of artifacts.
 
-The shape of a domain in `load_domain` output is governed by
+The rendering of a domain in `load_domain` output is governed by
 configurable rules: `max_depth`, folding of sparse subdomains,
 `notable_count`, a soft response-token budget. Tenant-level defaults
 live in `registry.yaml`; per-domain overrides live in `DOMAIN.md`.
@@ -89,8 +89,8 @@ The **registry** is the system of record for artifacts. It can be:
 - A **standard deployment** with Postgres, S3, OIDC, multi-tenancy,
   and the full governance feature set.
 
-All shapes apply the same layer composition and serve the same
-artifacts. Migration between shapes is mechanical: the same shared
+All modes apply the same layer composition and serve the same
+artifacts. Migration between modes is mechanical: the same shared
 Go library does the parsing, composition, and adapter work in every
 case.
 
@@ -156,7 +156,7 @@ frontmatter conventions, and different rule semantics.
 The **harness adapter** is the translator. At materialization time,
 the configured adapter takes the canonical artifact and writes it
 into the harness's native format. Same source artifact, different
-on-disk shape per harness. The capability matrix (§6.7.1 of the
+on-disk layout per harness. The capability matrix (§6.7.1 of the
 spec) records which canonical fields each adapter supports natively
 versus via fallback.
 
@@ -173,7 +173,7 @@ steps:
 
 1. **Fetch**: download bytes (or read from cache).
 2. **Verify**: signature, content hash, optional SBOM walk.
-3. **Adapt**: run the harness adapter to translate to native shape.
+3. **Adapt**: run the harness adapter to translate to native format.
 4. **Hook**: run any configured `MaterializationHook` plugins for
    per-file rewrites.
 5. **Write**: atomic `.tmp + rename` write to the destination.
@@ -228,7 +228,7 @@ composition, and harness adapters.
 
 Podium's behavior is pluggable via SPIs covering storage, identity,
 composition, signing, audit, layer source, and delivery. Plugins
-compile into a registry build today. The SPI shapes are designed to
+compile into a registry build today. The SPIs are designed to
 be wire-compatible with a future out-of-process plugin protocol.
 See [Deployment → Extending](../deployment/extending) (and §9.3 of
 the spec) for the constraints that make that transition
@@ -239,5 +239,5 @@ source-compatible.
 ## What's next
 
 The next page, [How it works](how-it-works), shows how these pieces
-fit together: the architecture, the deployment shapes, where state
+fit together: the architecture, the deployment modes, where state
 lives, and what's running on your machine versus on a server.

@@ -27,7 +27,7 @@ In order:
 |:--|:--|:--|
 | [Quickstart](quickstart) | Install the CLI, write one skill, materialize it into Claude Code, see it load. Filesystem mode, with no daemon and no setup beyond a CLI. | ~5 minutes |
 | [Concepts](concepts) | Vocabulary used throughout the docs: artifact, domain, layer, harness, materialization, visibility, the meta-tools. | ~15 minutes |
-| [How it works](how-it-works) | Component overview, deployment shapes, where state lives, what runs in your process versus on a server. | ~15 minutes |
+| [How it works](how-it-works) | Component overview, deployment modes, where state lives, what runs in your process versus on a server. | ~15 minutes |
 
 ---
 
@@ -40,5 +40,5 @@ in one and stay; many will be both authors and consumers.
 |:--|:--|:--|
 | **Write artifacts** | [Authoring guide](../authoring/) | The first-class types, the frontmatter, how `DOMAIN.md` works, when to use rule modes and hooks. |
 | **Use artifacts in your harness** | [Consuming guide](../consuming/) | Configure Claude Code / Cursor / OpenCode / Pi / Hermes / Codex / Gemini / Claude Desktop, browse the catalog from the agent, work via the SDK. |
-| **Set up Podium for a team or org** | [Deployment guide](../deployment/) | Pick your shape (filesystem / standalone / standard), then run it. Day-2 operations, progressive adoption of governance, OIDC cookbooks. |
+| **Set up Podium for a team or org** | [Deployment guide](../deployment/) | Pick your mode (filesystem / standalone / standard), then run it. Day-2 operations, progressive adoption of governance, OIDC cookbooks. |
 | **Build against the API** | [Reference](../reference/) | CLI, HTTP API, frontmatter schema, error codes, glossary. |

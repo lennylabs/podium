@@ -66,7 +66,7 @@ This page is a concise reference. For prose-style explanations of when to use ea
 | `target_harnesses` | list of strings | Opt out of cross-harness materialization. Set to a list of harness names; the artifact only materializes for harnesses on the list. |
 | `external_resources` | list of objects | External resources (URL + sha256 + size + signature) too large to bundle. |
 
-### External resources object shape
+### External resources object schema
 
 ```yaml
 external_resources:

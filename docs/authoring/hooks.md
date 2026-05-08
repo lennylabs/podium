@@ -50,7 +50,7 @@ Cursor's hook system, Claude Code's hook system, and similar harnesses each have
 
 ## Payload handling
 
-The harness fires the event and passes a JSON payload on stdin. The shape varies by event. A typical payload for a `stop` event might be:
+The harness fires the event and passes a JSON payload on stdin. The schema varies by event. A typical payload for a `stop` event might be:
 
 ```json
 {
@@ -128,7 +128,7 @@ The shell action is preserved verbatim; the adapter wraps it in the harness's ex
 - **Hooks ship code.** A hook's `hook_action` runs on the host with the user's privileges. Treat hooks like any other script the catalog ships: review, sign, and consider sandboxing. The `sandbox_profile:` field applies; lint requires it for hooks at sensitivity ≥ medium.
 - **Keep actions short.** A long shell action embedded in YAML gets ugly. Move complex logic into a bundled script (in `scripts/`) and have the action invoke it. The script lives alongside `ARTIFACT.md` and ships with the hook.
 - **Make the description specific.** "Log session-end events" is fine. "Lifecycle observer" is too vague to surface in search. Authors who write good descriptions get used.
-- **Don't depend on payload fields.** Harnesses change their payload shape over time. Use `jq` defaults (`jq -r '.field // empty'`) or guard against missing fields in shell.
+- **Don't depend on payload fields.** Harnesses change their payload schema over time. Use `jq` defaults (`jq -r '.field // empty'`) or guard against missing fields in shell.
 
 ---
 

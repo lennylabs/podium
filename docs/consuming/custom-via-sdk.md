@@ -8,7 +8,7 @@ description: Build programmatic consumers (LangChain, Bedrock, OpenAI Assistants
 
 # Custom consumers via the SDK
 
-Programmatic consumers — LangChain, Bedrock, OpenAI Assistants, custom orchestrators, eval harnesses, build pipelines, notebooks — talk to the registry directly via thin language SDKs. The SDKs are HTTP clients backed by the same registry API the MCP server uses. They share identity providers, the content cache, layer composition, visibility filtering, and audit.
+Programmatic consumers (LangChain, Bedrock, OpenAI Assistants, custom orchestrators, eval harnesses, build pipelines, notebooks) talk to the registry directly via thin language SDKs. The SDKs are HTTP clients backed by the same registry API the MCP server uses. They share identity providers, the content cache, layer composition, visibility filtering, and audit.
 
 | SDK | Distribution | Use for |
 |:--|:--|:--|
@@ -88,7 +88,7 @@ print(artifact.manifest_body)
 artifact.materialize(to="./artifacts/", harness="claude-code")
 ```
 
-`materialize()` runs the configured `HarnessAdapter` over the canonical artifact and writes the result to the destination path. Pass `harness="none"` to write the canonical layout as-is — useful when the consuming runtime reads `ARTIFACT.md` directly.
+`materialize()` runs the configured `HarnessAdapter` over the canonical artifact and writes the result to the destination path. Pass `harness="none"` to write the canonical layout as-is, which is useful when the consuming runtime reads `ARTIFACT.md` directly.
 
 ---
 
@@ -114,7 +114,7 @@ for result in artifacts:
         log.warning("skip %s: %s", result.id, result.error.code)
 ```
 
-Hard cap: 50 IDs per batch. The SDK splits larger sets transparently. Visibility is identical to `load_artifact`: items the caller can't see come back as `status: "error"` with `visibility.denied` (no leak about whether the artifact exists in some hidden layer). Partial failure does not fail the batch — each item carries its own status.
+Hard cap: 50 IDs per batch. The SDK splits larger sets transparently. Visibility is identical to `load_artifact`: items the caller can't see come back as `status: "error"` with `visibility.denied` (no leak about whether the artifact exists in some hidden layer). Partial failure does not fail the batch; each item carries its own status.
 
 The bulk endpoint is not exposed as an MCP meta-tool: bulk loading is a programmatic-runtime concern that doesn't belong in the agent's tool list.
 
@@ -129,7 +129,7 @@ for event in client.subscribe(["artifact.published", "artifact.deprecated"]):
     handle_event(event)
 ```
 
-The same events drive outbound webhooks; the subscription is the in-process equivalent for code that's already running.
+The same events fire outbound webhooks; the subscription is the in-process equivalent for code that's already running.
 
 ---
 
@@ -223,7 +223,7 @@ Identity providers, the cache, visibility filtering, layer composition, and audi
 
 Custom providers register through the same interface as the MCP server's. For most consumers, the built-in providers are enough:
 
-- **`oauth-device-code`** — interactive device-code flow on first use; tokens cached in the OS keychain. The default for developer-machine consumers.
-- **`injected-session-token`** — runtime-issued signed JWT, configured via `PODIUM_SESSION_TOKEN_ENV` or `PODIUM_SESSION_TOKEN_FILE`. The right choice for managed agent runtimes (Bedrock Agents, OpenAI Assistants, custom orchestrators) where the runtime issues credentials per session.
+- **`oauth-device-code`**: interactive device-code flow on first use; tokens cached in the OS keychain. The default for developer-machine consumers.
+- **`injected-session-token`**: runtime-issued signed JWT, configured via `PODIUM_SESSION_TOKEN_ENV` or `PODIUM_SESSION_TOKEN_FILE`. The right choice for managed agent runtimes (Bedrock Agents, OpenAI Assistants, custom orchestrators) where the runtime issues credentials per session.
 
 The runtime registers its signing key with the registry one-time at runtime onboarding. The registry verifies signatures on every call.

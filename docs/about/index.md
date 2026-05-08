@@ -3,7 +3,7 @@ layout: default
 title: About
 nav_order: 6
 has_children: true
-description: Project context — when Podium helps, current implementation status, governance, contributing, changelog.
+description: Project context: when Podium helps, current implementation status, governance, contributing, changelog.
 ---
 
 # About

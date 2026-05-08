@@ -37,7 +37,7 @@ Two redaction surfaces:
 
 ## 8.3 Audit Sinks
 
-The registry has its own sink for catalogue events. The local file log, when enabled via `PODIUM_AUDIT_SINK`, is written by the MCP server through the `LocalAuditSink` interface. The local sink defaults to `~/.podium/audit.log` (user-wide — one file across all workspaces). Operators who need per-project scoping point `PODIUM_AUDIT_SINK` at a workspace path such as `${WORKSPACE}/.podium/audit.log`. Both the registry and local sinks can be redirected to external SIEM / log aggregation independently.
+The registry has its own sink for catalogue events. The local file log, when enabled via `PODIUM_AUDIT_SINK`, is written by the MCP server through the `LocalAuditSink` interface. The local sink defaults to `~/.podium/audit.log` (user-wide; one file across all workspaces). Operators who need per-project scoping point `PODIUM_AUDIT_SINK` at a workspace path such as `${WORKSPACE}/.podium/audit.log`. Both the registry and local sinks can be redirected to external SIEM / log aggregation independently.
 
 ## 8.4 Retention
 
@@ -63,7 +63,7 @@ podium admin erase <user_id>
 - Redacts the user identity in audit records (replaces with `redacted-<sha256(user_id+salt)>`).
 - Preserves audit event sequencing for integrity.
 
-GDPR right-to-erasure is supported via this command. Erasure is itself logged as a `user.erased` event.
+Use this command for GDPR right-to-erasure. Erasure is itself logged as a `user.erased` event.
 
 ## 8.6 Audit Integrity
 

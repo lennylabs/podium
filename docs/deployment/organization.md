@@ -8,7 +8,7 @@ description: Standard deployment for larger teams and governed environments. Pos
 
 # Organization
 
-The standard deployment shape: a replicated Podium registry behind a load balancer, backed by Postgres + object storage + an OIDC IdP. The right shape for organizations with 20+ users, multi-tenant requirements, governed environments, or compliance constraints.
+The standard deployment topology: a replicated Podium registry behind a load balancer, backed by Postgres + object storage + an OIDC IdP. The right setup for organizations with 20+ users, multi-tenant requirements, governed environments, or compliance constraints.
 
 For day-two operations (capacity, monitoring, alerts, backup, upgrades), see [Operator guide](operator-guide). For a staged on-ramp from permissive standalone to enforced governance, see [Progressive adoption](progressive-adoption).
 
@@ -18,7 +18,7 @@ For day-two operations (capacity, monitoring, alerts, backup, upgrades), see [Op
 
 - **Stateless registry replicas.** 3+ replicas behind a load balancer (HTTP).
 - **Postgres.** Managed (RDS, Cloud SQL, Aurora) or self-run; primary + read replicas. Holds manifest metadata, layer config, admin grants, and audit; also holds embeddings when the default vector backend (pgvector) is in use.
-- **Vector backend.** `pgvector` by default — collocated in the Postgres deployment, no separate service to run. Built-ins for `pinecone`, `weaviate-cloud`, and `qdrant-cloud` selectable per deployment.
+- **Vector backend.** `pgvector` by default, collocated in the Postgres deployment with no separate service to run. Built-ins for `pinecone`, `weaviate-cloud`, and `qdrant-cloud` selectable per deployment.
 - **Embedding provider.** `openai` by default. Built-ins also include `voyage`, `cohere`, `ollama`, and `embedded-onnx`.
 - **Object storage.** S3-compatible (S3, GCS, MinIO, R2).
 - **Identity provider.** OIDC IdP that supports device-code flow (Okta, Entra ID, Google Workspace, Auth0, Keycloak); SCIM push optional but recommended for group-based visibility.
@@ -94,7 +94,7 @@ User-defined layers (registered at runtime by individual users) sit above admin-
 - Object storage bucket (S3 / GCS / MinIO / R2).
 - An OIDC IdP with device-code flow support.
 
-For a quick stand-up, the repo ships a `docker-compose.yml` that brings up Postgres + MinIO + Dex (OIDC) for evaluation. Not production-grade — single-replica services, default credentials. The compose stack is *standard-topology in shape* so consumers exercise the same code paths.
+For a quick stand-up, the repo ships a `docker-compose.yml` that brings up Postgres + MinIO + Dex (OIDC) for evaluation. Not production-grade: single-replica services, default credentials. The compose stack mirrors the standard topology so consumers exercise the same code paths.
 
 ### 2. Deploy the registry
 
@@ -187,8 +187,8 @@ For the staged rollout of governance features (identity, sensitivity labels, sig
 
 ## Operational links
 
-- [Operator guide](operator-guide) — capacity, monitoring, alerts, backup/restore, upgrades, security review.
-- [Progressive adoption](progressive-adoption) — staged on-ramp for governance features.
-- [Extending](extending) — SPI plugins, the forward-compatibility constraints, external-extension patterns.
-- [OIDC cookbooks](oidc/) — per-IdP setup recipes.
+- [Operator guide](operator-guide): capacity, monitoring, alerts, backup/restore, upgrades, security review.
+- [Progressive adoption](progressive-adoption): staged on-ramp for governance features.
+- [Extending](extending): SPI plugins, the forward-compatibility constraints, external-extension patterns.
+- [OIDC cookbooks](oidc/): per-IdP setup recipes.
 - The full deployment reference is in [`spec/13-deployment.md`](https://github.com/lennylabs/podium/blob/main/spec/13-deployment.md).

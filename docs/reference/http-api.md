@@ -3,12 +3,12 @@ layout: default
 title: HTTP API
 parent: Reference
 nav_order: 2
-description: The Podium registry's wire surface — discovery endpoints, materialization, ingest webhooks, scope preview, health.
+description: The Podium registry's wire surface: discovery endpoints, materialization, ingest webhooks, scope preview, health.
 ---
 
 # HTTP API
 
-The Podium registry exposes an HTTP/JSON API. Every consumer (the MCP server, language SDKs, `podium sync` in server mode, the read CLI) speaks this API. Direct MCP access to the registry is not supported; the MCP server is a consumer surface that translates HTTP responses into MCP shapes.
+The Podium registry exposes an HTTP/JSON API. Every consumer (the MCP server, language SDKs, `podium sync` in server mode, the read CLI) speaks this API. Direct MCP access to the registry is not supported; the MCP server is a consumer surface that translates HTTP responses into MCP messages.
 
 This page covers the public surface. For the authoritative wire-level detail, see [`spec/07-external-integration.md`](https://github.com/lennylabs/podium/blob/main/spec/07-external-integration.md).
 
@@ -24,8 +24,8 @@ Every call carries an OAuth-attested identity. The registry validates the JWT si
 
 The JWT comes from the configured identity provider:
 
-- `oauth-device-code` — interactive device-code flow on first use; tokens cached in the OS keychain. Refresh transparent.
-- `injected-session-token` — runtime-issued signed JWT. The runtime registers its signing key with the registry one-time at runtime onboarding.
+- `oauth-device-code`: interactive device-code flow on first use; tokens cached in the OS keychain. Refresh transparent.
+- `injected-session-token`: runtime-issued signed JWT. The runtime registers its signing key with the registry one-time at runtime onboarding.
 
 In public-mode deployments, the OAuth flow is skipped; the registry serves anonymously. The audit log records `caller.identity = "system:public"`.
 
@@ -78,7 +78,7 @@ Response:
 
 `note` is omitted when no reduction occurred.
 
-Output shape (depth, folding, notable count, response budget) is governed by the discovery rules (see [Authoring → Domains](../authoring/domains)). Caller-passed `depth` is bounded by the resolved `max_depth` ceiling.
+Output rendering (depth, folding, notable count, response budget) is governed by the discovery rules (see [Authoring → Domains](../authoring/domains)). Caller-passed `depth` is bounded by the resolved `max_depth` ceiling.
 
 ### `search_domains`
 
@@ -112,7 +112,7 @@ Response:
 GET /v1/artifacts/search?query={q}&type={type}&tags={tag1},{tag2}&scope={path}&top_k={n}&session_id={uuid}
 ```
 
-Hybrid retrieval over artifact frontmatter. All args optional. When `query` is omitted, returns artifacts matching the filters in default order — the canonical "browse" call.
+Hybrid retrieval over artifact frontmatter. All args optional. When `query` is omitted, returns artifacts matching the filters in default order: the canonical "browse" call.
 
 Response:
 
@@ -213,7 +213,7 @@ Response: an array of per-item envelopes. Each item has its own `status` (`ok` o
 
 Visibility is identical to `load_artifact`: items the caller can't see come back as `status: "error"` with `visibility.denied`. No leak about whether the artifact exists in some hidden layer.
 
-Not exposed as an MCP meta-tool — bulk loading is a programmatic-runtime concern.
+Not exposed as an MCP meta-tool; bulk loading is a programmatic-runtime concern.
 
 ---
 
@@ -386,7 +386,7 @@ When the Postgres primary becomes unreachable but a read replica is up, the regi
 Read responses carry two headers:
 
 - `X-Podium-Read-Only: true`
-- `X-Podium-Read-Only-Lag-Seconds: <n>` — observed replication lag.
+- `X-Podium-Read-Only-Lag-Seconds: <n>`: observed replication lag.
 
 ---
 

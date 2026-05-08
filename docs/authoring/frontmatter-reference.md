@@ -3,7 +3,7 @@ layout: default
 title: Frontmatter reference
 parent: Authoring
 nav_order: 3
-description: Every field in ARTIFACT.md frontmatter — universal fields, caller-interpreted fields, and type-specific fields.
+description: Every field in ARTIFACT.md frontmatter: universal fields, caller-interpreted fields, and type-specific fields.
 ---
 
 # Frontmatter reference

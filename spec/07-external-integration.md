@@ -7,11 +7,11 @@ The registry is the system of record for artifacts. It can be reached two ways:
 - **Podium server.** The registry runs as a server (standalone or standard deployment, §13.10) and clients reach it over HTTP/JSON.
 - **Local filesystem.** The registry is a directory of artifacts on disk (§13.11). The Podium CLI reads it directly via `podium sync` for eager materialization.
 
-Both shapes apply layer composition (§4.6). The dispatch between them is governed by the value of `defaults.registry` in the merged `sync.yaml` (§7.5.2): a URL routes to a Podium server, a filesystem path routes to local filesystem.
+Both modes apply layer composition (§4.6). The dispatch between them is governed by the value of `defaults.registry` in the merged `sync.yaml` (§7.5.2): a URL routes to a Podium server, a filesystem path routes to local filesystem.
 
-The MCP server (§6), the language SDKs (§7.6), and identity-based visibility filtering require a Podium server; filesystem source does not provide them. The full list of what each shape supports is in §13.11.
+The MCP server (§6), the language SDKs (§7.6), and identity-based visibility filtering require a Podium server; filesystem source does not provide them. The full list of what each mode covers is in §13.11.
 
-### Latency budgets (SLO targets — server source)
+### Latency budgets (SLO targets, server source)
 
 - `load_domain`: p99 < 200 ms
 - `search_domains`: p99 < 200 ms
@@ -33,9 +33,9 @@ Below the inline cutoff, resources are returned inline. This avoids round-trips 
 
 ## 7.3 Host Integration
 
-Hosts and authors choose the consumer shape that fits their context:
+Hosts and authors choose the integration that fits their context:
 
-- **Programmatic runtimes** use `podium-py` or `podium-ts` to call the registry HTTP API directly. The most flexible path — preferred wherever a long-running process can host an HTTP client. Contract: the registry's HTTP API, with layer composition and visibility filtering applied server-side. See §7.6.
+- **Programmatic runtimes** use `podium-py` or `podium-ts` to call the registry HTTP API directly. This is the most flexible path, preferred wherever a long-running process can host an HTTP client. Contract: the registry's HTTP API, with layer composition and visibility filtering applied server-side. See §7.6.
 - **Hosts that can't run an SDK in-process** (Claude Desktop, Claude Code, Cursor, and similar) spawn the Podium MCP server alongside their own runtime tools. Contract: the meta-tools plus the materialization semantics described in §6.6.
 - **Authors who prefer eager materialization** run `podium sync` (one-shot or watcher) and let the harness's native discovery take over from there, instead of mediating every load through MCP or the SDK at runtime. Contract: the registry's effective view written to a host-configured directory layout via the harness adapter. See §7.5.
 
@@ -61,7 +61,7 @@ Artifacts enter the registry by being merged into a tracked Git ref (or, for `lo
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | Git provider webhook | Built-in `git` source. Configured at layer-creation time. The registry validates the webhook signature, fetches the new commit, ingests.     |
 | Filesystem watch     | Built-in `local` source. Re-scanned on demand via `podium layer reingest <id>`; `podium layer watch <id>` polls at a configurable interval.  |
-| Plugin-declared      | Custom `LayerSourceProvider` implementations. Webhook, polling, or push notification depending on the source — declared by the plugin.       |
+| Plugin-declared      | Custom `LayerSourceProvider` implementations. Webhook, polling, or push notification depending on the source; declared by the plugin.        |
 | Manual reingest      | `podium layer reingest <id>` (admin or layer owner). Works for every source type: forces a fresh snapshot regardless of the trigger model.   |
 
 `last_ingested_at` is exposed per layer for staleness monitoring.
@@ -75,7 +75,7 @@ Artifacts enter the registry by being merged into a tracked Git ref (or, for `lo
 | Same version, different content_hash | Rejected as `ingest.immutable_violation`. The author bumps the version.                                                                                                                                                     |
 | Lint failure                         | Rejected as `ingest.lint_failed`. The artifact remains at its previous version (if any).                                                                                                                                    |
 | Freeze-window in effect              | Rejected as `ingest.frozen` unless `--break-glass` passed via the manual reingest path.                                                                                                                                     |
-| Force-push detected                  | Tolerant by default — previously-ingested commits' bytes are preserved in the content store, and a `layer.history_rewritten` event is emitted. Strict mode is configurable per layer (`force_push_policy: strict` rejects). |
+| Force-push detected                  | Tolerant by default; previously-ingested commits' bytes are preserved in the content store, and a `layer.history_rewritten` event is emitted. Strict mode is configurable per layer (`force_push_policy: strict` rejects).  |
 | Source unreachable                   | Ingest fails; existing served artifacts are unaffected.                                                                                                                                                                     |
 
 **Layer CLI.**
@@ -92,20 +92,20 @@ podium layer watch <id>                         # local source only
 
 `podium layer register` returns the webhook URL and HMAC secret to register on the source repo. Registering a Git source without configuring the webhook leaves the layer at its initial commit until the first manual reingest.
 
-**User-defined layers.** Authenticated users register their own layers via `podium layer register`. Each user-defined layer has implicit visibility `users: [<registrant>]`. Default cap: 3 user-defined layers per identity, configurable per tenant. Reordering via `podium layer reorder` is supported.
+**User-defined layers.** Authenticated users register their own layers via `podium layer register`. Each user-defined layer has implicit visibility `users: [<registrant>]`. Default cap: 3 user-defined layers per identity, configurable per tenant. Use `podium layer reorder` to change order.
 
-**Errors.** Lint failures (`ingest.lint_failed`), webhook signature failures (`ingest.webhook_invalid`), same-version content conflicts (`ingest.immutable_violation`), freeze-window blocks (`ingest.frozen`), quota exhaustion (`quota.*` — including the user-defined-layer cap), source unreachable (`ingest.source_unreachable`), admin-only operations attempted by a non-admin (`auth.forbidden`).
+**Errors.** Lint failures (`ingest.lint_failed`), webhook signature failures (`ingest.webhook_invalid`), same-version content conflicts (`ingest.immutable_violation`), freeze-window blocks (`ingest.frozen`), quota exhaustion (`quota.*`, including the user-defined-layer cap), source unreachable (`ingest.source_unreachable`), admin-only operations attempted by a non-admin (`auth.forbidden`).
 
 ### 7.3.2 Outbound Webhooks
 
 The registry emits outbound webhooks for:
 
-- `artifact.published` — a new `(artifact_id, version)` was ingested.
-- `artifact.deprecated` — a manifest update flipped `deprecated: true`.
-- `domain.published` — a `DOMAIN.md` was added or changed.
-- `layer.ingested` — a layer completed an ingest cycle (with summary counts).
-- `layer.history_rewritten` — force-push detected in a `git` layer.
-- `vulnerability.detected` — a CVE matched an artifact's SBOM.
+- `artifact.published`: a new `(artifact_id, version)` was ingested.
+- `artifact.deprecated`: a manifest update flipped `deprecated: true`.
+- `domain.published`: a `DOMAIN.md` was added or changed.
+- `layer.ingested`: a layer completed an ingest cycle (with summary counts).
+- `layer.history_rewritten`: force-push detected in a `git` layer.
+- `vulnerability.detected`: a CVE matched an artifact's SBOM.
 
 Schema:
 
@@ -125,9 +125,9 @@ Receivers are configured per org (URL + HMAC secret).
 
 When the registry is unreachable, the MCP server falls back to its content cache. Behavior depends on `PODIUM_CACHE_MODE`:
 
-- `always-revalidate` — fresh calls return `{status: "offline", served_from_cache: true}` alongside cached results; if no cache, structured error `network.registry_unreachable`.
-- `offline-first` — no error; serve cached results silently.
-- `offline-only` — never contact the registry; structured error if cache miss.
+- `always-revalidate`: fresh calls return `{status: "offline", served_from_cache: true}` alongside cached results; if no cache, structured error `network.registry_unreachable`.
+- `offline-first`: no error; serve cached results silently.
+- `offline-only`: never contact the registry; structured error if cache miss.
 
 Hosts can surface the offline status to the agent so it can adjust behavior (e.g., warn the user about staleness).
 
@@ -169,7 +169,7 @@ podium sync --config .podium/sync.yaml
 
 The sync command reads the caller's effective view (the composed layer list after visibility filtering and `extends:` resolution), applies the requested scope filters, and writes each artifact through the configured `HarnessAdapter` to the target directory.
 
-`podium sync` works against either kind of registry source — a server (URL) or a local filesystem (path); see §7.5.2 for dispatch and §13.11 for filesystem-specific behavior. Against a server source, sync uses the same identity providers as the MCP server, the same content cache, and the same harness adapters.
+`podium sync` works against either kind of registry source: a server (URL) or a local filesystem (path); see §7.5.2 for dispatch and §13.11 for filesystem-specific behavior. Against a server source, sync uses the same identity providers as the MCP server, the same content cache, and the same harness adapters.
 
 The sync model is type-agnostic: skills, agents, contexts, prompts, and `mcp-server` registrations all sync through the same path; the harness adapter decides where each type lands.
 
@@ -185,7 +185,7 @@ Three filters narrow the materialized set:
 | `--exclude <pattern>` | Yes       | Glob matched against canonical artifact IDs. Applied after the include set; a matching pattern removes the artifact.                                                                                                                       |
 | `--type <type>[,...]` | No        | Restricts to a comma-separated list of artifact types.                                                                                                                                                                                     |
 
-Patterns use the same glob syntax as `DOMAIN.md include:` (§4.5.2): `*` matches a single path segment, `**` matches recursively, brace expansion `{a,b}` is supported. A bare ID (`finance/invoicing/run-variance-analysis`) matches that artifact exactly.
+Patterns use the same glob syntax as `DOMAIN.md include:` (§4.5.2): `*` matches a single path segment, `**` matches recursively, and brace expansion `{a,b}` works. A bare ID (`finance/invoicing/run-variance-analysis`) matches that artifact exactly.
 
 Visibility is enforced before scope filtering. An artifact that the caller cannot see is not eligible to match an include pattern; this is symmetric with how `search_artifacts` behaves and prevents include patterns from leaking the existence of artifacts in invisible layers.
 
@@ -221,7 +221,7 @@ The schema is identical at every scope: every field that's valid at user-global 
 5. `~/.podium/sync.yaml`
 6. Built-in defaults
 
-**Profile merge.** Profiles are additive across files — union by profile name. On name collision, the higher-precedence file's definition wins entirely (whole-profile overwrite, no field-level merge inside a profile). A stderr warning fires only when invoking a profile that has a collision (`podium sync --profile X` with multi-defined `X`); a sync against a non-colliding profile stays quiet. `podium config show` (§7.7) always surfaces collisions for debugging.
+**Profile merge.** Profiles are additive across files (union by profile name). On name collision, the higher-precedence file's definition wins entirely (whole-profile overwrite, no field-level merge inside a profile). A stderr warning fires only when invoking a profile that has a collision (`podium sync --profile X` with multi-defined `X`); a sync against a non-colliding profile stays quiet. `podium config show` (§7.7) always surfaces collisions for debugging.
 
 **Schema:**
 
@@ -259,9 +259,9 @@ targets:
 
 **Registry source.** `defaults.registry` accepts either a URL or a filesystem path; the client adapts:
 
-- **URL** (`http://` / `https://`) — the client speaks HTTP to that registry server. All consumer paths (MCP server, SDKs, `podium sync`, read CLI) work.
-- **Filesystem path** (relative or absolute) — `podium sync` reads the directory directly, applies layer composition (§4.6), and materializes through the configured harness adapter. Each subdirectory of the path is a `local`-source layer; ordering is alphabetical (or governed by `<registry-path>/.layer-order`). **`podium sync` is the only consumer that works in this shape** — the MCP server and the SDKs require a server source. See §13.11 for the full filesystem-registry description.
-- **Unset across all scopes** — `config.no_registry` error. The client points the user at `podium init` to configure one. There is no implicit workspace fallback; `podium sync` will not auto-detect `.podium/registry/` without explicit config.
+- **URL** (`http://` / `https://`): the client speaks HTTP to that registry server. All consumer paths (MCP server, SDKs, `podium sync`, read CLI) work.
+- **Filesystem path** (relative or absolute): `podium sync` reads the directory directly, applies layer composition (§4.6), and materializes through the configured harness adapter. Each subdirectory of the path is a `local`-source layer; ordering is alphabetical (or governed by `<registry-path>/.layer-order`). **`podium sync` is the only consumer that works against a filesystem registry.** The MCP server and the SDKs require a server source. See §13.11 for the full filesystem-registry description.
+- **Unset across all scopes**: `config.no_registry` error. The client points the user at `podium init` to configure one. There is no implicit workspace fallback; `podium sync` will not auto-detect `.podium/registry/` without explicit config.
 
 Override an inherited URL with a filesystem path by setting `defaults.registry` explicitly at a higher-precedence scope (typically the project-shared file). Normal precedence applies; no magic-value semantics.
 
@@ -270,12 +270,12 @@ Override an inherited URL with a filesystem path by setting `defaults.registry` 
 - **Profile lookup.** `--profile <name>` selects an entry under `profiles:`. The profile's fields are merged on top of `defaults:`.
 - **CLI override.** Explicit CLI flags override the resolved profile (and defaults) for the same field. `--include` and `--exclude` on the CLI replace the profile's lists rather than appending; if you need additive composition, define a new profile.
 - **Multi-target mode.** `podium sync --config <path>` (without `--profile`) iterates `targets:` and runs one sync per entry. Each entry can name a `profile:` (resolved as above) or specify `include`/`exclude`/`type` inline. Each target writes its own `<target>/.podium/sync.lock`; the multi-target invocation does not introduce shared state across targets.
-- **Profile composition.** Profiles do not reference other profiles; nesting is intentionally not supported. A team that wants an "extended" profile defines a new entry with the combined include/exclude lists.
+- **Profile composition.** Profiles do not reference other profiles; nesting is intentionally absent. A team that wants an "extended" profile defines a new entry with the combined include/exclude lists.
 - **Validation.** `podium sync --check` validates the merged config against the schema and reports unresolved profile references, malformed globs, target collisions, and profile-name collisions across scopes (warning, not error).
 
 ### 7.5.3 Lock File (`.podium/sync.lock`)
 
-Every target directory holds its own state in `<target>/.podium/sync.lock`. The lock file is per-target — multiple `podium sync` invocations against different targets run independently and don't share state. The cache (`~/.podium/cache/`) stays shared across targets (content-addressed); only sync state is per-target.
+Every target directory holds its own state in `<target>/.podium/sync.lock`. The lock file is per-target. Multiple `podium sync` invocations against different targets run independently and don't share state. The cache (`~/.podium/cache/`) stays shared across targets (content-addressed); only sync state is per-target.
 
 `.podium/sync.lock` is git-ignored by default. Teams that want a deterministic shared materialization commit it explicitly.
 
@@ -318,7 +318,7 @@ toggles:
       removed_at: 2026-05-05T14:36:00Z
 ```
 
-The lock file is written atomically (`.tmp` + rename) on every sync, watch event, and override invocation. The `profile:` field is the **active profile** for that target — `override`, `save-as`, and `profile edit` use it as the default when no `--profile` flag is given. Concurrent writers against the same target's lock file (e.g., two `podium sync --watch` processes pointed at one directory) are undefined; operators are expected to keep a single sync owner per target.
+The lock file is written atomically (`.tmp` + rename) on every sync, watch event, and override invocation. The `profile:` field is the **active profile** for that target. `override`, `save-as`, and `profile edit` use it as the default when no `--profile` flag is given. Concurrent writers against the same target's lock file (e.g., two `podium sync --watch` processes pointed at one directory) are undefined; operators are expected to keep a single sync owner per target.
 
 The target directory is created if it doesn't exist. The same is true for `<target>/.podium/`. `podium sync` errors only when the target path exists but is not writable.
 
@@ -326,8 +326,8 @@ The target directory is created if it doesn't exist. The same is true for `<targ
 
 Manual `podium sync` and `podium sync --watch` treat the lock file's `toggles:` section differently:
 
-- **Manual sync** (`podium sync`, no `--watch`) — re-resolves the profile, rewrites the target, **clears `toggles` in the lock file**. A manual sync is the operator's "reset to baseline" gesture.
-- **Watch mode** (`podium sync --watch`) — long-running. On startup it materializes `profile + toggles from the lock file`, so any overrides from a previous session survive. On every registry change event (`artifact.published`, `artifact.deprecated`, `layer.config_changed`), the watcher re-resolves the profile, applies toggles on top, and updates the lock file. Toggles persist across events and across watcher restarts.
+- **Manual sync** (`podium sync`, no `--watch`): re-resolves the profile, rewrites the target, **clears `toggles` in the lock file**. A manual sync is the operator's "reset to baseline" gesture.
+- **Watch mode** (`podium sync --watch`): long-running. On startup it materializes `profile + toggles from the lock file`, so any overrides from a previous session survive. On every registry change event (`artifact.published`, `artifact.deprecated`, `layer.config_changed`), the watcher re-resolves the profile, applies toggles on top, and updates the lock file. Toggles persist across events and across watcher restarts.
 - **Watch scope.** Watchers honor the active scope filters; events for artifacts outside the scope are ignored.
 
 Each watcher is workspace-local. Two `podium sync --watch` processes in two different folders run independently, each against its own lock file.
@@ -354,11 +354,11 @@ podium sync override --add finance/foo --dry-run
 podium sync override --reset
 ```
 
-**TUI mode** (no flags). Renders the caller's effective view as an expandable tree (domains as nodes, artifacts as leaf checkboxes). Each entry is annotated with its current state — already materialized, excluded by the profile's `exclude`, etc. — and the layer it comes from. The user toggles items; on quit, the TUI applies the diff to the target directory and updates the lock file.
+**TUI mode** (no flags). Renders the caller's effective view as an expandable tree (domains as nodes, artifacts as leaf checkboxes). Each entry is annotated with its current state (already materialized, excluded by the profile's `exclude`, etc.) and the layer it comes from. The user toggles items; on quit, the TUI applies the diff to the target directory and updates the lock file.
 
-**Batch mode** (with flags). `--add <id>` fetches and writes the artifact through the active harness adapter, just like a full sync would; the entry lands in `toggles.add`. `--remove <id>` deletes the artifact's materialized files from the target; the entry lands in `toggles.remove` (and is removed from `toggles.add` if it was there). Repeatable. The pair is idempotent — running `--add` on something already materialized is a no-op with a warning.
+**Batch mode** (with flags). `--add <id>` fetches and writes the artifact through the active harness adapter, just like a full sync would; the entry lands in `toggles.add`. `--remove <id>` deletes the artifact's materialized files from the target; the entry lands in `toggles.remove` (and is removed from `toggles.add` if it was there). Repeatable. The pair is idempotent: running `--add` on something already materialized is a no-op with a warning.
 
-**Scope.** Override operates on any artifact the caller's identity can see, regardless of the active profile's include/exclude. Visibility filtering still applies — the caller can't `--add` something they can't see. This is the point of override: bring in (or drop) artifacts the profile didn't think of.
+**Scope.** Override operates on any artifact the caller's identity can see, regardless of the active profile's include/exclude. Visibility filtering still applies; the caller can't `--add` something they can't see. This is the point of override: bring in (or drop) artifacts the profile didn't think of.
 
 **`--reset`** clears `toggles` in the lock file and re-applies the profile's resolved set, dropping artifacts that were `add`ed and re-materializing artifacts that were `remove`d. Equivalent to running a manual `podium sync`.
 
@@ -403,7 +403,7 @@ podium profile edit finance-team --remove-exclude "finance/old-deprecated/**"
 podium profile edit finance-team --add-include "finance/foo" --dry-run
 ```
 
-`podium profile edit` modifies `sync.yaml` in place, preserving formatting and comments around the edited keys (round-trip via a comment-preserving YAML parser). It does not touch the target directory or any lock file — to apply the change to a workspace, run `podium sync` afterwards. If `.podium/sync.yaml` doesn't exist, `podium profile edit <name>` creates it with the named profile and an empty `defaults:` block; `podium profile edit` (no name) errors and asks the user to specify a name.
+`podium profile edit` modifies `sync.yaml` in place, preserving formatting and comments around the edited keys (round-trip via a comment-preserving YAML parser). It does not touch the target directory or any lock file. To apply the change to a workspace, run `podium sync` afterwards. If `.podium/sync.yaml` doesn't exist, `podium profile edit <name>` creates it with the named profile and an empty `defaults:` block; `podium profile edit` (no name) errors and asks the user to specify a name.
 
 The flag names are distinct from `podium sync --include` / `--exclude` (ephemeral scope flags applied at sync time) and from `podium sync override --add` / `--remove` (ephemeral toggles on exact IDs). `podium profile edit` writes patterns into the profile YAML; the other two never touch `sync.yaml`.
 
@@ -411,8 +411,8 @@ The flag names are distinct from `podium sync --include` / `--exclude` (ephemera
 
 Two thin language SDKs are provided, both backed by the registry's HTTP API:
 
-- **`podium-py`** (PyPI) — for Python orchestrators. Used by LangChain consumers, OpenAI Assistants integrations, custom build/eval pipelines, and notebook environments.
-- **`podium-ts`** (npm) — for TypeScript / Node orchestrators. Used by Bedrock Agents, custom Node-based agent runtimes, and Edge runtime integrations.
+- **`podium-py`** (PyPI): for Python orchestrators. Used by LangChain consumers, OpenAI Assistants integrations, custom build/eval pipelines, and notebook environments.
+- **`podium-ts`** (npm): for TypeScript / Node orchestrators. Used by Bedrock Agents, custom Node-based agent runtimes, and Edge runtime integrations.
 
 **Require a server-source registry.** Both SDKs speak HTTP and do not work against a filesystem-source registry (§13.11).
 
@@ -469,7 +469,7 @@ for event in client.subscribe(["artifact.published", "artifact.deprecated"]):
 deps = client.dependents_of("finance/ap/pay-invoice@1.2")
 ```
 
-Identity providers, the cache, visibility filtering, layer composition, and audit are all the same as in the MCP path — the SDK is just a different transport. Identity provider plug-points are exposed; custom providers register through the same interface as the MCP server's.
+Identity providers, the cache, visibility filtering, layer composition, and audit are all the same as in the MCP path; the SDK is just a different transport. Identity provider plug-points are exposed; custom providers register through the same interface as the MCP server's.
 
 The SDKs deliberately do not implement the MCP meta-tool semantics (the agent-driven lazy materialization). Programmatic consumers know what they want; they don't need an LLM-mediated browse interface. If a programmatic consumer wants lazy semantics, it can call `load_artifact` lazily in its own code.
 
@@ -482,12 +482,12 @@ For shell pipelines and language-agnostic scripts that don't want to take a Pyth
 | `podium search <query>`       | `Client.search_artifacts(...)`             | Hybrid search over artifacts. Flags `--type`, `--tags`, `--scope`, `--top-k` mirror the SDK args. Returns ranked descriptors.                                                    |
 | `podium domain search <query>`| `Client.search_domains(...)`               | Hybrid search over domains. Flags `--scope`, `--top-k` mirror the SDK args. Returns ranked domain descriptors.                                                                   |
 | `podium domain show [<path>]` | `Client.load_domain(path)`                 | Domain map for `<path>` (or root when no path is given).                                                                                                                         |
-| `podium artifact show <id>`   | `Client.load_artifact(id)` (manifest only) | Prints the manifest body and frontmatter to stdout. **Does not materialize bundled resources** — for that, use `podium sync --include <id>`. Flags: `--version`, `--session-id`. |
+| `podium artifact show <id>`   | `Client.load_artifact(id)` (manifest only) | Prints the manifest body and frontmatter to stdout. **Does not materialize bundled resources**; for that, use `podium sync --include <id>`. Flags: `--version`, `--session-id`.  |
 
 Output formats:
 
-- **Default** — human-readable rendering. Search results are a ranked table prefixed with `Showing N of M results` so the user can tell when more matched than were rendered; domain trees are nested bullets; manifests are printed as the markdown body with frontmatter at the top.
-- **`--json`** — structured envelope with stable keys, designed to be piped into `jq`. Schemas:
+- **Default**: human-readable rendering. Search results are a ranked table prefixed with `Showing N of M results` so the user can tell when more matched than were rendered; domain trees are nested bullets; manifests are printed as the markdown body with frontmatter at the top.
+- **`--json`**: structured envelope with stable keys, designed to be piped into `jq`. Schemas:
 
   ```json
   // podium search ... --json
@@ -518,9 +518,9 @@ Output formats:
     "frontmatter": { ... }, "body": "..." }
   ```
 
-The CLI and SDK are intentionally interchangeable for these read operations — pick whichever fits the surrounding code. Both defer to the same `RegistrySearchProvider`, `LayerComposer`, and cache paths server-side; output drift between them is treated as a bug.
+The CLI and SDK are intentionally interchangeable for these read operations. Pick whichever fits the surrounding code. Both defer to the same `RegistrySearchProvider`, `LayerComposer`, and cache paths server-side; output drift between them is treated as a bug.
 
-Example pipeline — fully scripted curation without an SDK install:
+Example: fully scripted curation without an SDK install.
 
 ```bash
 podium search "month-end close OR variance" --type skill --top-k 15 --json \
@@ -530,7 +530,7 @@ podium search "month-end close OR variance" --type skill --top-k 15 --json \
 
 ### 7.6.2 Bulk Fetch
 
-`load_artifact` works one ID at a time. Programmatic consumers — eval harnesses, batch workflows, custom orchestrators — that need a known set of artifacts up front pay the per-request round-trip N times when iterating. `Client.load_artifacts` is the bulk variant: one HTTP request, one auth check, one visibility composition pass, one transactional snapshot.
+`load_artifact` works one ID at a time. Programmatic consumers (eval harnesses, batch workflows, custom orchestrators) that need a known set of artifacts up front pay the per-request round-trip N times when iterating. `Client.load_artifacts` is the bulk variant: one HTTP request, one auth check, one visibility composition pass, one transactional snapshot.
 
 ```python
 artifacts = client.load_artifacts(
@@ -550,7 +550,7 @@ for result in artifacts:
         log.warning("skip %s: %s", result.id, result.error.code)
 ```
 
-**Wire shape.** `POST /v1/artifacts:batchLoad` with body `{ids: [...], session_id?, harness?, version_pins?: {<id>: <semver>}}`. Response is an array of per-item envelopes:
+**Wire format.** `POST /v1/artifacts:batchLoad` with body `{ids: [...], session_id?, harness?, version_pins?: {<id>: <semver>}}`. Response is an array of per-item envelopes:
 
 ```json
 [
@@ -577,7 +577,7 @@ for result in artifacts:
 - **Hard cap:** 50 IDs per batch. The SDK splits larger sets transparently.
 - **Visibility:** identical to `load_artifact`. Items the caller cannot see come back as `status: "error"` with `visibility.denied`; no leak about whether the artifact exists in some hidden layer.
 - **Session consistency:** with `session_id`, the first occurrence of each `(id, "latest")` in the batch freezes the resolved version for the rest of the batch and session.
-- **Partial failure** does not fail the batch — each item carries its own status.
+- **Partial failure** does not fail the batch. Each item carries its own status.
 - **Bandwidth:** large bundled resources travel via presigned URLs (§4.4) so the response body stays small; the SDK fetches resources concurrently after the response.
 
 **Not exposed as an MCP meta-tool** (§5). The MCP path is agent-mediated and load-on-demand; bulk loading is a programmatic-runtime concern that doesn't belong in the agent's tool list. The MCP server uses this endpoint internally for cache warm-up when configured to prefetch.
@@ -588,7 +588,7 @@ Three commands cover client-side lifecycle: `podium init` writes a `sync.yaml`; 
 
 ### `podium init`
 
-Writes a `sync.yaml`. Default scope is workspace (`<ws>/.podium/sync.yaml`, committed to git); scope flags `--global` and `--local` target the user-global file or the gitignored project-local override file respectively. Idempotent — refuses to overwrite an existing file without `--force`.
+Writes a `sync.yaml`. Default scope is workspace (`<ws>/.podium/sync.yaml`, committed to git); scope flags `--global` and `--local` target the user-global file or the gitignored project-local override file respectively. Idempotent. Refuses to overwrite an existing file without `--force`.
 
 ```bash
 # Workspace (default) — writes <ws>/.podium/sync.yaml, committed
@@ -610,7 +610,7 @@ podium init --local --registry https://podium-staging.acme.com
 
 Mental model: scope flags (`--global`, `--local`) decide _where the file goes_; value flags (`--registry`, `--standalone`, `--harness`, `--target`) decide _what's in it_. Default scope is workspace because that's the common case; making it implicit keeps the standard onboarding path short.
 
-`--registry <url-or-path>` accepts either a URL (server source) or a filesystem path (filesystem source, §13.11). The flag's value type determines the registry shape; there is no separate `--mode` flag.
+`--registry <url-or-path>` accepts either a URL (server source) or a filesystem path (filesystem source, §13.11). The flag's value type determines the registry source; there is no separate `--mode` flag.
 
 `--standalone` is a shortcut for `--registry http://127.0.0.1:8080`. It is purely client-side (this command only writes `sync.yaml`); the server itself is started by `podium serve`. For the all-in-one server-and-client bootstrap, use `podium serve` zero-flag (§13.10), which writes both `registry.yaml` and `sync.yaml` and starts serving.
 
@@ -642,7 +642,7 @@ profiles.staging:                                      (defined in <ws>/.podium/
 Profile collisions: 1 (profiles.staging defined in both ~/.podium/sync.yaml and <ws>/.podium/sync.local.yaml; project-local wins)
 ```
 
-`--explain <key>` prints just one key with its full resolution chain — which file each scope had, and which won. Useful when the merged output is large.
+`--explain <key>` prints just one key with its full resolution chain: which file each scope had, and which won. Useful when the merged output is large.
 
 ### `podium login`
 
@@ -659,4 +659,4 @@ Behavior: resolves the registry from the merged config (or `--registry` flag), p
 
 **Multi-endpoint behavior.** Tokens cache in the OS keychain keyed by registry URL. A developer logged into both `https://podium.acme.com` and `https://podium-finance.acme.com` keeps both tokens simultaneously; switching projects (or running `podium login` in any context) authenticates against whichever registry the merged config resolves to. No `podium logout` between project switches required.
 
-`podium login` is a no-op when the resolved registry is a filesystem path (no auth) or points at a `--standalone` server (no auth) — in both cases it prints a notice and exits.
+`podium login` is a no-op when the resolved registry is a filesystem path (no auth) or points at a `--standalone` server (no auth). In both cases it prints a notice and exits.

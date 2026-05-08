@@ -4,17 +4,17 @@ End-to-end walkthroughs for common ways Podium gets used. Each scenario links to
 
 ## 14.1 Local registry folder, one-shot, single workspace
 
-A developer keeps artifacts in a local folder and materializes a subset into one project for Claude Code. Filesystem-source registry (§13.11) — no daemon, single CLI invocation.
+A developer keeps artifacts in a local folder and materializes a subset into one project for Claude Code. Filesystem-source registry (§13.11). No daemon, single CLI invocation.
 
 **One-time:**
 
 1. Lay out artifacts in `~/podium-artifacts/` per §4.2 (each artifact a subdirectory containing `ARTIFACT.md`; subdirectories of `~/podium-artifacts/` are layers, §13.11.1).
-2. `podium init --global --registry ~/podium-artifacts/` to write `~/.podium/sync.yaml` with `defaults.registry: ~/podium-artifacts/`. No server needed — the client reads the directory directly.
+2. `podium init --global --registry ~/podium-artifacts/` to write `~/.podium/sync.yaml` with `defaults.registry: ~/podium-artifacts/`. No server needed; the client reads the directory directly.
 
 **Per project:**
 
 3. `cd ~/projects/myapp/`.
-4. Optional — `.podium/sync.yaml`:
+4. Optional `.podium/sync.yaml`:
    ```yaml
    profiles:
      myapp:
@@ -42,13 +42,13 @@ Each workspace has its own `<workspace>/.podium/sync.lock`. Both read from the s
 
 Same artifact directory, but now the developer wants progressive disclosure (the agent calls `load_domain` / `search_artifacts` / `load_artifact` at runtime rather than working from pre-materialized files). MCP requires a server, so this scenario graduates from filesystem source (§13.11) to standalone server (§13.10):
 
-1. `podium serve --standalone --layer-path ~/podium-artifacts/` — starts the server against the same directory; auto-bootstraps `~/.podium/sync.yaml` with `defaults.registry: http://127.0.0.1:8080`.
+1. `podium serve --standalone --layer-path ~/podium-artifacts/`: starts the server against the same directory; auto-bootstraps `~/.podium/sync.yaml` with `defaults.registry: http://127.0.0.1:8080`.
 2. Per project, add a Podium entry to the harness's MCP config (snippets per §6.11). The MCP server picks up the registry from `~/.podium/sync.yaml` (`defaults.registry`), so no extra env var is needed.
 3. Optional `.podium/overlay/` per workspace for in-progress artifacts.
 
 ## 14.4 Local registry, custom harness via SDK, multiple workspaces
 
-Each workspace runs an app built on `podium-py` (or `podium-ts`) plus an agent SDK like Claude Agent SDK. The SDK speaks HTTP, so this scenario uses a standalone server (graduated from §14.1's filesystem source — same artifact directory, just wrap it in `podium serve --standalone`).
+Each workspace runs an app built on `podium-py` (or `podium-ts`) plus an agent SDK like Claude Agent SDK. The SDK speaks HTTP, so this scenario uses a standalone server (graduated from §14.1's filesystem source; same artifact directory, just wrap it in `podium serve --standalone`).
 
 ```python
 from podium import Client
@@ -69,7 +69,7 @@ client = Client.from_env()         # picks up registry URL from sync.yaml + over
 **Per developer:**
 
 4. `podium init --global --registry https://podium.acme.com`.
-5. `podium login` — completes the device-code flow once, caches the token.
+5. `podium login`: completes the device-code flow once, caches the token.
 6. `cd <project>`, write `.podium/sync.yaml` with a profile, `podium sync --harness claude-code --profile <name>`.
 7. Repeat per workspace; each has its own lock file.
 
@@ -78,13 +78,13 @@ client = Client.from_env()         # picks up registry URL from sync.yaml + over
 Operator setup as in §14.5. Per workspace:
 
 1. Drop in-progress artifacts under `<workspace>/.podium/overlay/`.
-2. `podium sync --harness claude-code --profile <name>`. The overlay path auto-resolves to `<CWD>/.podium/overlay/` per §6.4 — no env var needed.
+2. `podium sync --harness claude-code --profile <name>`. The overlay path auto-resolves to `<CWD>/.podium/overlay/` per §6.4; no env var needed.
 
 ## 14.7 Remote registry + local overlay, MCP, multiple workspaces
 
 Operator setup as in §14.5. Per workspace:
 
-1. Configure the harness's MCP server entry (§6.11) with `PODIUM_REGISTRY` and `PODIUM_HARNESS`. `PODIUM_OVERLAY_PATH` is optional — when unset, the MCP server resolves the overlay from MCP roots (§6.4).
+1. Configure the harness's MCP server entry (§6.11) with `PODIUM_REGISTRY` and `PODIUM_HARNESS`. `PODIUM_OVERLAY_PATH` is optional; when unset, the MCP server resolves the overlay from MCP roots (§6.4).
 2. First call triggers OAuth device-code via MCP elicitation. Token caches in the OS keychain.
 3. Drop workspace-local artifacts under `.podium/overlay/`. The MCP server's fsnotify watcher picks up changes.
 
@@ -107,7 +107,7 @@ client.login()   # device-code flow before any catalog calls
 **Operator:**
 
 1. Deploy registry with full stack: Postgres + chosen vector backend, S3, OIDC IdP with SCIM push.
-2. Configure layers — multiple Git repos with visibility per §4.6:
+2. Configure multiple Git repos as layers, with visibility per §4.6:
    ```yaml
    layers:
      - id: org-defaults
@@ -165,7 +165,7 @@ A build pipeline materializes a deterministic artifact set into a deploy artifac
    export PODIUM_SESSION_TOKEN_FILE=/run/secrets/podium-token
    podium sync --harness claude-code --profile production --target ./build/.claude/
    ```
-3. The lock file (`./build/.claude/.podium/sync.lock`) captures exactly which `(artifact_id, version, content_hash)` triples landed in the image — committed alongside the build for reproducibility.
+3. The lock file (`./build/.claude/.podium/sync.lock`) captures exactly which `(artifact_id, version, content_hash)` triples landed in the image. Commit it alongside the build for reproducibility.
 
 `podium sync --dry-run --json` is useful in pre-flight to sanity-check what the build will include.
 
@@ -218,4 +218,4 @@ podium search "variance analysis" --type skill --json
 podium artifact show finance/close-reporting/run-variance-analysis --version 1.2.0
 ```
 
-`podium sync --dry-run` provides the same view in materialization-shape (resolved profile + scope) without writing anything to disk.
+`podium sync --dry-run` provides the same view in materialization form (resolved profile + scope) without writing anything to disk.

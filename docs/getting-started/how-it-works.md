@@ -3,7 +3,7 @@ layout: default
 title: How it works
 parent: Getting Started
 nav_order: 3
-description: Component overview, deployment shapes, where state lives, and what runs on your machine versus on a server.
+description: Component overview, deployment modes, where state lives, and what runs on your machine versus on a server.
 ---
 
 # How it works
@@ -17,8 +17,8 @@ Podium consists of:
 
 The registry can be reached as a Podium server (single binary or
 multi-tenant deployment) or as a local filesystem path. Most
-consumers work against the server shape; `podium sync` also works
-against the filesystem shape directly.
+consumers work against a server; `podium sync` also works
+against a filesystem registry directly.
 
 ---
 
@@ -80,7 +80,7 @@ a folder; `podium sync` reads it directly:
 ```
 
 The artifacts, the file formats (`ARTIFACT.md` and `DOMAIN.md`),
-and the harness adapter behavior are identical across shapes. The
+and the harness adapter behavior are identical across modes. The
 only thing that changes is whether `podium sync` reaches the
 registry over HTTP or reads it directly from disk. The MCP server
 and language SDKs require a server.
@@ -114,7 +114,7 @@ no object storage, no authentication, and no registry process.
 
 ---
 
-## Deployment shapes
+## Deployment modes
 
 These labels appear throughout the docs. Pick the one that fits
 today; graduate when you outgrow it.
@@ -135,7 +135,7 @@ destination.
 - **What you don't get.** Lazy discovery (no MCP, no SDK). No
   centralized audit. No identity-based visibility filtering.
 - **Multi-user.** Share the directory however you'd share any
-  folder. Committing to git is the typical choice — the git history
+  folder. Committing to git is the typical choice; the git history
   doubles as the audit trail and `git pull` is each developer's
   ingest. A network share or a sync service (Dropbox, iCloud, etc.)
   also works.
@@ -184,7 +184,7 @@ or self-run alongside.
 
 ## Where state lives
 
-Three places. Each shape uses a different combination.
+Three places. Each mode uses a different combination.
 
 | State | Filesystem | Standalone | Standard |
 |:--|:--|:--|:--|
@@ -196,7 +196,7 @@ Three places. Each shape uses a different combination.
 | Sync state | `<target>/.podium/sync.lock` (per-target) |
 
 The workspace overlay, content cache, and sync state are
-client-side; they exist regardless of which deployment shape the
+client-side; they exist regardless of which deployment mode the
 registry uses.
 
 ---
@@ -213,9 +213,9 @@ thin HTTP clients that invoke the same module's materialization
 writer locally.
 
 There is a single canonical implementation per concern. Migrating
-between deployment shapes (filesystem → standalone → standard)
+between deployment modes (filesystem → standalone → standard)
 preserves behavior because the same composer, parsers, merge
-semantics, and harness adapter output run in every shape. See
+semantics, and harness adapter output run in every mode. See
 [§2.2 of the spec](https://github.com/lennylabs/podium/blob/main/spec/02-architecture.md)
 for the structural rationale.
 

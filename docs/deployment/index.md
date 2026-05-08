@@ -3,20 +3,20 @@ layout: default
 title: Deployment
 nav_order: 4
 has_children: true
-description: Pick a deployment shape, run it, scale up. Filesystem for solo, standalone for small teams, standard for organizations.
+description: Pick a deployment mode, run it, scale up. Filesystem for solo, standalone for small teams, standard for organizations.
 ---
 
 # Deployment
 
-Pick a deployment shape based on the audience and the operational tolerance:
+Pick a deployment mode based on the audience and the operational tolerance:
 
-| Shape | Audience | What's running | Page |
+| Mode | Audience | What's running | Page |
 |:--|:--|:--|:--|
 | **Filesystem** | Individual developer; prototype; CI build step. | The `podium` CLI runs without a daemon, port, or authentication. The catalog is a folder. | [Solo / filesystem](solo-filesystem) |
 | **Standalone server** | 3–10 person team; single VM behind a VPN; offline / air-gapped. | One binary (`podium serve --standalone`). Embedded SQLite + sqlite-vec + bundled embedding model. | [Small team](small-team) |
 | **Standard** | 20+ people; multi-tenant; governed. | Replicated registry behind a load balancer; Postgres + object storage; OIDC. | [Organization](organization) |
 
-The shapes share artifacts, author flow, and the underlying shared library. Migration between shapes is mechanical: `podium serve --standalone --layer-path /path/to/dir` against a filesystem catalog turns it into a server source without touching the authoring loop, and `podium admin migrate-to-standard` exports a standalone deployment to a standard one.
+The modes share artifacts, author flow, and the underlying shared library. Migration between modes is mechanical: `podium serve --standalone --layer-path /path/to/dir` against a filesystem catalog turns it into a server source without touching the authoring loop, and `podium admin migrate-to-standard` exports a standalone deployment to a standard one.
 
 ---
 

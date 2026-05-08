@@ -3,7 +3,7 @@ layout: default
 title: Artifact types
 parent: Authoring
 nav_order: 2
-description: The first-class types — skill, agent, context, command, rule, hook, mcp-server — and what each is for.
+description: The first-class types (skill, agent, context, command, rule, hook, mcp-server) and what each is for.
 ---
 
 # Artifact types
@@ -218,7 +218,7 @@ mcpServers:
 Read-only SQL access to the finance warehouse...
 ```
 
-The `server_identifier` field drives the reverse index — when a `skill` references `mcpServers:` with the same identifier, Podium tracks the dependency edge.
+The `server_identifier` field keys the reverse index: when a `skill` references `mcpServers:` with the same identifier, Podium tracks the dependency edge.
 
 `mcp-server` artifacts are filtered out of MCP-bridge results because Claude Desktop, Claude Code, Cursor, and similar harnesses fix their MCP server list at startup. Surfacing them through `search_artifacts` from the bridge would only add planning noise. They remain visible through the SDK and through `podium sync` (which materializes them into the harness's on-disk config for the next launch).
 

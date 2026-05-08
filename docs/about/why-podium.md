@@ -19,7 +19,7 @@ Podium is overkill for a small catalog in a single harness with one author. A fl
 
 A solo developer with a handful of skills in one harness doesn't need Podium. A large team with mixed artifact types across several harnesses, contributing to a catalog used by many audiences, can get substantial value from it.
 
-The minimum viable alternative — a short script that watches a Git repo and copies files into the right harness-specific directories — already gets a single-team, single-type, single-vendor shop most of the way to "author once, deliver anywhere" for a fraction of the engineering effort. Podium addresses the intersection of multiple types, multiple teams, multiple harnesses, and governance requirements; below that intersection, file-copy is often enough.
+The minimum viable alternative is a short script that watches a Git repo and copies files into the right harness-specific directories. That already gets a single-team, single-type, single-vendor shop most of the way to "author once, deliver anywhere" for a fraction of the engineering effort. Podium addresses the intersection of multiple types, multiple teams, multiple harnesses, and governance requirements; below that intersection, file-copy is often enough.
 
 ---
 

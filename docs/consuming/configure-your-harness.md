@@ -307,7 +307,7 @@ podium sync
 
 **Where artifacts land:**
 
-Hermes natively reads several rule formats — `.claude/rules/*.md`, `.cursor/rules/*.mdc`, root `AGENTS.md`, `.cursorrules`. The Hermes adapter writes the most-permissive format by default:
+Hermes natively reads several rule formats: `.claude/rules/*.md`, `.cursor/rules/*.mdc`, root `AGENTS.md`, `.cursorrules`. The Hermes adapter writes the most-permissive format by default:
 
 | Type | Location |
 |:--|:--|
@@ -316,13 +316,13 @@ Hermes natively reads several rule formats — `.claude/rules/*.md`, `.cursor/ru
 
 **Notes:**
 
-- Hermes has the broadest rule-format compatibility of any harness Podium supports; all `rule_mode` values map cleanly via the cursor-style `.mdc` shape.
+- Hermes has the broadest rule-format compatibility of any harness Podium supports; all `rule_mode` values map cleanly via the cursor-style `.mdc` format.
 
 ---
 
 ## Generic / `none`
 
-For runtimes without a dedicated adapter, or when you want the canonical raw output, set `PODIUM_HARNESS=none`. The MCP server and `podium sync` write the canonical layout as-is — no harness-specific translation, no field renaming. Consumers (your runtime, an eval harness, custom tooling) read `ARTIFACT.md` and bundled resources directly.
+For runtimes without a dedicated adapter, or when you want the canonical raw output, set `PODIUM_HARNESS=none`. The MCP server and `podium sync` write the canonical layout as-is, with no harness-specific translation and no field renaming. Consumers (your runtime, an eval harness, custom tooling) read `ARTIFACT.md` and bundled resources directly.
 
 ```json
 {
@@ -355,4 +355,4 @@ When `podium serve` has auto-bootstrapped `~/.podium/sync.yaml` with `defaults.r
 
 ## Capability matrix
 
-The full per-harness capability matrix — which fields each adapter translates natively versus via fallback — is in [`spec/06-mcp-server.md` §6.7.1](https://github.com/lennylabs/podium/blob/main/spec/06-mcp-server.md#671-the-authors-burden). [Rule modes](../authoring/rule-modes) has the per-harness mapping for the four `rule_mode` values.
+The full per-harness capability matrix (which fields each adapter translates natively versus via fallback) is in [`spec/06-mcp-server.md` §6.7.1](https://github.com/lennylabs/podium/blob/main/spec/06-mcp-server.md#671-the-authors-burden). [Rule modes](../authoring/rule-modes) has the per-harness mapping for the four `rule_mode` values.
