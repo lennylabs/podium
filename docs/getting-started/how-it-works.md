@@ -15,9 +15,9 @@ Podium consists of:
   Built-in consumers include language SDKs, the MCP server, and
   `podium sync`. Custom consumers can build against the HTTP API.
 
-The registry can be reached as an HTTP service (single binary or
+The registry can be reached as a Podium server (single binary or
 multi-tenant deployment) or as a local filesystem path. Most
-consumers work against the HTTP shape; `podium sync` also works
+consumers work against the server shape; `podium sync` also works
 against the filesystem shape directly.
 
 ---
@@ -212,16 +212,16 @@ HTTP. The MCP server and `podium sync` in server-source mode are
 thin HTTP clients that invoke the same module's materialization
 writer locally.
 
-There is one canonical implementation per concern, not three. That's
-why migrating between deployment shapes (filesystem → standalone →
-standard) preserves behavior: same composer, same parsers, same
-merge semantics, same harness adapter output. See [§2.2 of the
-spec](https://github.com/lennylabs/podium/blob/main/spec/02-architecture.md)
-for the load-bearing rationale.
+There is a single canonical implementation per concern. Migrating
+between deployment shapes (filesystem → standalone → standard)
+preserves behavior because the same composer, parsers, merge
+semantics, and harness adapter output run in every shape. See
+[§2.2 of the spec](https://github.com/lennylabs/podium/blob/main/spec/02-architecture.md)
+for the structural rationale.
 
 The language SDKs are the exception: they're independent HTTP
-clients in Python and TypeScript, and they only work against an
-HTTP server.
+clients in Python and TypeScript, and they only work against a
+Podium server.
 
 ---
 

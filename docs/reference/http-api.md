@@ -8,7 +8,7 @@ description: The Podium registry's wire surface — discovery endpoints, materia
 
 # HTTP API
 
-The Podium registry exposes an HTTP/JSON API. Every consumer (the MCP server, language SDKs, `podium sync` in server mode, the read CLI) speaks this API. Direct MCP access to the registry is not supported — the MCP server is one of the consumer surfaces, not the wire surface itself.
+The Podium registry exposes an HTTP/JSON API. Every consumer (the MCP server, language SDKs, `podium sync` in server mode, the read CLI) speaks this API. Direct MCP access to the registry is not supported; the MCP server is a consumer surface that translates HTTP responses into MCP shapes.
 
 This page covers the public surface. For the authoritative wire-level detail, see [`spec/07-external-integration.md`](https://github.com/lennylabs/podium/blob/main/spec/07-external-integration.md).
 

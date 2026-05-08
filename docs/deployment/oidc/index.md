@@ -18,7 +18,7 @@ These per-IdP guides walk through the setup steps. Each guide assumes you alread
 | IdP | Guide | Notes |
 | --- | --- | --- |
 | Okta | [`okta.md`](okta.md) | Native group claim support; SCIM available. |
-| Microsoft Entra ID | [`entra-id.md`](entra-id.md) | Formerly Azure AD. Group claim emits group _IDs_, not names; extra mapping needed. |
+| Microsoft Entra ID | [`entra-id.md`](entra-id.md) | Formerly Azure AD. Group claim emits group _IDs_ rather than names; extra mapping needed. |
 | Google Workspace | [`google-workspace.md`](google-workspace.md) | No group claim natively in OIDC; uses Cloud Identity API or directory mapping. |
 | Auth0 | [`auth0.md`](auth0.md) | Group claim via custom action / rule. |
 | Keycloak | [`keycloak.md`](keycloak.md) | Self-hosted; group claim via mapper. The Compose stack uses Keycloak's sibling Dex for evaluation deployments. |

@@ -165,7 +165,7 @@ The parent's `sandbox_profile: unrestricted` is overridden by the child's `read-
 
 ## Lint behavior
 
-- Unresolved parent at ingest time: lint warning, not error. The child ingests with the `extends:` reference recorded; resolution happens at request time. (This handles "expected to be defined later" cases.)
+- Unresolved parent at ingest time: lint warning rather than error. The child ingests with the `extends:` reference recorded; resolution happens at request time. (This handles "expected to be defined later" cases.)
 - Cycle detected: ingest error.
 - Child declaring `extends:` against a parent in a layer the child's layer cannot see: ingest succeeds; the parent resolves at request time per the visibility rules above.
 - Child declaring `extends:` with a parent type that doesn't match the child's type: ingest error.

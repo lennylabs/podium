@@ -108,7 +108,7 @@ The full matrix and field-by-field detail is in [§6.7.1 of the spec](https://gi
 
 - **Default to `always`** for guidance you'd want loaded every time. The cost is a few hundred tokens per session; the benefit is consistent behavior.
 - **Use `glob` for type-specific guidance** that doesn't need to be loaded for unrelated work. Sharper context, smaller working set.
-- **Use `auto` carefully.** It depends on the harness's autoload heuristic, which varies by harness and isn't something you can test deterministically. Write the `rule_description` to be a clear trigger statement, not a summary.
+- **Use `auto` carefully.** It depends on the harness's autoload heuristic, which varies by harness and isn't something you can test deterministically. Write the `rule_description` as a clear trigger statement rather than a summary.
 - **Use `explicit` for rules with sharp boundaries**: incident response procedures, regulatory compliance checklists, anything you'd rather have the user invoke deliberately than have the harness load opportunistically.
 
 ---

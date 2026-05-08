@@ -117,7 +117,7 @@ For most Keycloak users, the OIDC `groups` claim is sufficient. Group changes ap
 
 ## Troubleshooting
 
-- **Token's `aud` is `podium` (the client ID), not the audience you wanted.** The Audience mapper from step 3 wasn't added or wasn't attached to the dedicated client scope. Check **Clients → podium → Client scopes → podium-dedicated → Mappers**.
+- **Token's `aud` is `podium` (the client ID) instead of the configured audience.** The Audience mapper from step 3 wasn't added or wasn't attached to the dedicated client scope. Check **Clients → podium → Client scopes → podium-dedicated → Mappers**.
 - **Groups claim is missing.** The Group Membership mapper wasn't attached. Check the same place.
 - **Realm-issuer mismatch.** Keycloak's issuer is `https://<host>/realms/<realm>`, *not* `https://<host>/auth/realms/<realm>` (the latter was the pre-Quarkus URL). If you're on Keycloak < 17, your issuer URL has the `/auth` prefix; adjust accordingly.
 - **`podium login` connects but token is rejected.** Confirm the registry's JWKS endpoint is reachable from the registry host (`curl https://<keycloak-host>/realms/<realm>/protocol/openid-connect/certs`). Self-signed Keycloak certs need to be added to the registry's trust store.

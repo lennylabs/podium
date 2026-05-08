@@ -52,9 +52,9 @@ The mapping to specific models is harness- and deployment-dependent. The tiers a
 
 ---
 
-## Hints versus requirements
+## Advisory framing
 
-These are advisory hints, not enforceable requirements:
+These fields are advisory:
 
 - Authors set them based on what the artifact ideally wants.
 - Consumers (harness adapter, SDK caller) decide whether and how to honor them.
@@ -71,7 +71,7 @@ No built-in adapter currently translates these fields. Custom SDK consumers that
 
 ---
 
-## Why hints, not requirements
+## Why these fields are advisory
 
 Authors don't know what models the consumer's deployment has. A skill author at one company doesn't know whether the consuming team has access to frontier models, whether their cost budgets allow it, or whether the runtime they use respects per-call model selection.
 

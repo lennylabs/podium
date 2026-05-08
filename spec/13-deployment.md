@@ -115,7 +115,7 @@ For a lighter shape with no daemon — just the CLI reading the artifact directo
 
 **Zero-flag default.** Running `podium serve` with no flags is equivalent to `podium serve --standalone` when no server config is found at `~/.podium/registry.yaml` and no `PODIUM_*` server-side environment variables are set. The server emits a clear stderr line on startup ("No config found at `~/.podium/registry.yaml` — starting in standalone mode at `http://127.0.0.1:8080`. Run `podium serve --strict` to require explicit setup."), creates the standalone defaults (`~/.podium/registry.yaml`, `~/.podium/sync.yaml`, `~/podium-artifacts/`) on first run, and proceeds to serve. This collapses the five-minute install path into a single command — no `podium init` step required.
 
-`podium serve --strict` retains the prior behavior of refusing to start without explicit configuration. Setting `PODIUM_NO_AUTOSTANDALONE=1` in the environment has the same effect — useful in CI and image-building contexts where a missing config should always be a hard error rather than an auto-bootstrap. Auto-bootstrap is also suppressed when `--config <path>` is passed and the file does not exist (the user explicitly named a config; not finding it is an error, not a cue to invent one).
+`podium serve --strict` retains the prior behavior of refusing to start without explicit configuration. Setting `PODIUM_NO_AUTOSTANDALONE=1` in the environment has the same effect; this is useful in CI and image-building contexts where a missing config should always be a hard error rather than an auto-bootstrap. Auto-bootstrap is also suppressed when `--config <path>` is passed and the file does not exist (the user explicitly named a config; missing config is an error rather than a cue to invent one).
 
 ```bash
 # Zero-flag — auto-enters standalone mode if no config exists at ~/.podium/registry.yaml
@@ -157,7 +157,7 @@ podium serve --strict
 - **Artifact viewer** — manifest body rendered as markdown, frontmatter as a property table, links to extending or dependent artifacts.
 - **Layer panel** — list registered layers with their source, visibility, and `last_ingested_at`. Admins can register, reingest, and unregister layers from the UI; users can manage their own user-defined layers (cap per §7.3.1). The UI is a thin client over the same `podium layer …` HTTP endpoints.
 
-Authentication: in standalone deployments without an identity provider, the UI is open on the bind address (default `127.0.0.1` — not network-exposed). In standard deployments the UI uses the same OAuth device-code flow as the CLI, with the verification URL handoff handled in-browser.
+Authentication: in standalone deployments without an identity provider, the UI is open on the bind address (default `127.0.0.1`, which is not network-exposed). In standard deployments the UI uses the same OAuth device-code flow as the CLI, with the verification URL handoff handled in-browser.
 
 Behind a flag: opt-in via `--web-ui` so headless deployments (CI runners, managed runtimes) don't pay the binary-size or attack-surface cost when they don't need it. The binary refuses to bind the UI to a non-loopback address unless `--web-ui-allow-public-bind` is also passed _and_ an identity provider is configured — preventing accidental exposure of an unauthenticated UI.
 
@@ -198,7 +198,7 @@ What public mode does:
 
 Safety constraints:
 
-- **Mutually exclusive with an identity provider.** Setting `PODIUM_PUBLIC_MODE` and `PODIUM_IDENTITY_PROVIDER` (or the equivalent config keys) at the same time fails at startup with `config.public_mode_with_idp`. Public mode is the absence of authentication, not an alternative provider — pick one.
+- **Mutually exclusive with an identity provider.** Setting `PODIUM_PUBLIC_MODE` and `PODIUM_IDENTITY_PROVIDER` (or the equivalent config keys) at the same time fails at startup with `config.public_mode_with_idp`. Public mode is the absence of authentication; it is not an alternative identity provider. The deployment must choose one.
 - **Loopback bind by default.** Public mode binds to `127.0.0.1` unless `--allow-public-bind` is _also_ passed. The escape hatch exists for deployments behind an authenticated reverse proxy that enforces who can reach the registry; without the proxy, the operator is taking explicit responsibility for the security model.
 - **Sensitivity ceiling.** Ingest of `sensitivity: medium` or `sensitivity: high` artifacts is rejected with `ingest.public_mode_rejects_sensitive`. Public mode is for low-stakes content only. Artifacts already at those levels (ingested before public mode was enabled) continue to be served — public mode does not retroactively delete content.
 - **One-way for the deployment's lifetime.** Toggling public mode requires a config change _and_ a registry restart. The registry refuses to flip the mode mid-run — prevents an admin accidentally toggling away protections through a config-reload signal.
@@ -207,7 +207,7 @@ Safety constraints:
 When to use public mode vs sensible-defaults standalone:
 
 - **Use sensible defaults** when you're a single user or small team using standalone for productivity. The visibility model is already trivially permissive; no extra ceremony.
-- **Use public mode** when (a) the deployment is intentionally open beyond a single user — e.g., a demo registry, an internal-public catalog, an evaluation pilot — and (b) you want the audit log to record that anonymous-public access was the deployment's intent, not a misconfiguration.
+- **Use public mode** when (a) the deployment is intentionally open beyond a single user (a demo registry, an internal-public catalog, an evaluation pilot, etc.) and (b) you want the audit log to record that anonymous-public access was the deployment's intent rather than a misconfiguration.
 
 Migration to a governed deployment goes through `podium admin migrate-to-standard --postgres <dsn> --object-store <url>` (§13.4), followed by removing the `--public-mode` flag and reconfiguring layer visibility. Same migration path standalone uses today.
 
@@ -217,7 +217,7 @@ Migration to a governed deployment goes through `podium admin migrate-to-standar
 
 ## 13.11 Filesystem Registry
 
-A filesystem registry is a directory tree treated as the registry. `podium sync` reads it directly — applying layer composition (§4.6) and materializing through the harness adapter — with no server intermediary. No daemon, no port, no PID. Only `podium sync` works in this shape; the MCP server, SDKs, and read CLI require an HTTP server.
+A filesystem registry is a directory tree treated as the registry. `podium sync` reads it directly — applying layer composition (§4.6) and materializing through the harness adapter — with no server intermediary. No daemon, no port, no PID. Only `podium sync` works in this shape; the MCP server, SDKs, and read CLI require a Podium server.
 
 The audience is solo developers, small teams committing the catalog to git, CI runs, and restricted environments where running a server isn't possible. The dispatch logic that routes a `defaults.registry` value to either server or filesystem is in §7.5.2.
 

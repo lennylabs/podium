@@ -22,9 +22,30 @@ Do not use any of the following.
 
 Em-dashes are acceptable for genuine asides. They are not acceptable as decorative beats every other sentence, as soft pauses for rhythm, or to set off a contrast that does not need it. If a sentence reads naturally with a comma, period, parenthesis, or colon, use one of those instead.
 
-### "X not Y" rhythm constructions
+### "X not Y" / "X, not Y" rhythm constructions
 
-Examples to avoid: "Not X — it's Y.", "Not just X, but Y.", "Less X, more Y.", "X — not Y." These constructions are acceptable only when both halves convey distinct, necessary information. When one half is filler, drop it. When both halves are necessary, write them as two complete sentences.
+**Minimize this pattern. Avoid it altogether wherever possible.**
+
+Examples to avoid:
+
+- `Not X — it's Y.`
+- `Not just X, but Y.`
+- `Less X, more Y.`
+- `X — not Y.`
+- `X, not Y.`
+- Section headings shaped as `## Why hints, not requirements` or `## X vs Y`.
+- Punchline-style closures: `The intermediate steps were comfort, not correctness.`
+
+The rhythm of "X, not Y" reads as AI emphasis even when both halves carry information. Treat it as the highest-priority pattern to remove.
+
+Rewriting strategies:
+
+- Drop the negation when one half is filler. `There is one canonical implementation per concern, not three.` → `There is a single canonical implementation per concern.`
+- Replace with `rather than` when both halves convey real contrast and the alternative is obvious. `forward compatibility, not present-day distribution` → `forward compatibility rather than present-day distribution`.
+- Split into two complete sentences when both halves are load-bearing. `These are advisory hints, not enforceable requirements.` → `These fields are advisory. The host decides whether and how to honor them.`
+- For headings, name the noun directly. `## Why hints, not requirements` → `## Advisory framing`.
+
+The pattern is sometimes acceptable — for instance, when contrasting two literal values in a configuration error message, or when negating an expected reading the reader is likely to make. When it shows up in your prose, ask whether the rewrite is feasible before keeping it.
 
 ### Conversational intros and second-person framing
 

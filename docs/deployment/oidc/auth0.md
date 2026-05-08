@@ -45,7 +45,7 @@ Note from the app's settings tab: **Client ID**.
 Connect the application to the API:
 
 - **APIs** tab in the application → toggle **Authorized** for the Podium API.
-- Permissions: leave default (Podium uses identity claims, not Auth0-issued permissions).
+- Permissions: leave default. Podium uses identity claims rather than Auth0-issued permissions.
 
 ## 3. Add the groups claim via an Action
 
@@ -131,4 +131,4 @@ A user with `engineering` in their `app_metadata.groups` sees the layer; a user 
 - **Groups claim is missing from the token.** The Action wasn't attached to the post-login trigger, or the user has no `groups` in `app_metadata`. Check the Action's logs: **Actions → Library → \[Action\] → Logs**.
 - **`auth.signature_invalid`.** Auth0 rotated keys; restart the registry to force a JWKS refresh, or wait 5 minutes.
 - **`auth.audience_mismatch`.** The audience must match the API identifier *exactly*, including any trailing slash.
-- **Custom claim namespace error.** Auth0 rejects non-namespaced custom claims. The claim must look like `https://your-namespace/groups`, not just `groups`.
+- **Custom claim namespace error.** Auth0 rejects non-namespaced custom claims. The claim must look like `https://your-namespace/groups`. A bare `groups` is rejected.

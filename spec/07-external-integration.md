@@ -1,15 +1,15 @@
 # 7. External Integration
 
-## 7.1 The Registry: External HTTP or Local Filesystem
+## 7.1 The Registry: Podium Server or Local Filesystem
 
 The registry is the system of record for artifacts. It can be reached two ways:
 
-- **External HTTP service.** The registry runs as a server (standalone or standard deployment, §13.10) and clients reach it over HTTP.
+- **Podium server.** The registry runs as a server (standalone or standard deployment, §13.10) and clients reach it over HTTP/JSON.
 - **Local filesystem.** The registry is a directory of artifacts on disk (§13.11). The Podium CLI reads it directly via `podium sync` for eager materialization.
 
-Both shapes apply layer composition (§4.6). The dispatch between them is governed by the value of `defaults.registry` in the merged `sync.yaml` (§7.5.2): a URL routes to HTTP, a filesystem path routes to local filesystem.
+Both shapes apply layer composition (§4.6). The dispatch between them is governed by the value of `defaults.registry` in the merged `sync.yaml` (§7.5.2): a URL routes to a Podium server, a filesystem path routes to local filesystem.
 
-The MCP server (§6), the language SDKs (§7.6), and identity-based visibility filtering require the external HTTP shape; filesystem source does not provide them. The full list of what each shape supports is in §13.11.
+The MCP server (§6), the language SDKs (§7.6), and identity-based visibility filtering require a Podium server; filesystem source does not provide them. The full list of what each shape supports is in §13.11.
 
 ### Latency budgets (SLO targets — server source)
 
@@ -36,7 +36,7 @@ Below the inline cutoff, resources are returned inline. This avoids round-trips 
 Hosts and authors choose the consumer shape that fits their context:
 
 - **Programmatic runtimes** use `podium-py` or `podium-ts` to call the registry HTTP API directly. The most flexible path — preferred wherever a long-running process can host an HTTP client. Contract: the registry's HTTP API, with layer composition and visibility filtering applied server-side. See §7.6.
-- **Hosts that can't run an SDK in-process** (Claude Desktop, Claude Code, Cursor, and similar) spawn the Podium MCP server alongside their own runtime tools. Contract: the four meta-tools plus the materialization semantics described in §6.6.
+- **Hosts that can't run an SDK in-process** (Claude Desktop, Claude Code, Cursor, and similar) spawn the Podium MCP server alongside their own runtime tools. Contract: the meta-tools plus the materialization semantics described in §6.6.
 - **Authors who prefer eager materialization** run `podium sync` (one-shot or watcher) and let the harness's native discovery take over from there, instead of mediating every load through MCP or the SDK at runtime. Contract: the registry's effective view written to a host-configured directory layout via the harness adapter. See §7.5.
 
 Authoring uses Git as the source of truth (§4.6). The Podium CLI handles layer registration, manual reingests, cache management, and admin tasks; it does not push artifact content to the registry.
@@ -135,7 +135,7 @@ Hosts can surface the offline status to the agent so it can adjust behavior (e.g
 
 ## 7.5 `podium sync` (Filesystem Delivery)
 
-`podium sync` is the consumer for authors who want to materialize the user's effective view onto disk and let the harness's native discovery take over from there — instead of mediating every load through the MCP server or an SDK at runtime. It works for any harness with a filesystem-readable layout, including ones that also speak MCP. The choice is about authoring preference, not about whether the harness can talk to Podium.
+`podium sync` is the consumer for authors who want to materialize the user's effective view onto disk and let the harness's native discovery take over from there, instead of mediating every load through the MCP server or an SDK at runtime. It works for any harness with a filesystem-readable layout, including ones that also speak MCP. The choice is about authoring preference; it does not depend on whether the harness can talk to Podium.
 
 The **target directory defaults to the current working directory.** Every workspace (target) holds its own state; multiple `podium sync` invocations from different folders run independently and don't interfere.
 
@@ -208,7 +208,7 @@ Path-scoped sync is the recommended way to keep a harness's working set small en
 | Project-shared | `<workspace>/.podium/sync.yaml`       | per-project settings committed to git (typical: registry, profile)                 |
 | Project-local  | `<workspace>/.podium/sync.local.yaml` | per-developer overrides on top of the project file; gitignored                     |
 
-The schema is identical at every scope — every field that's valid at user-global is valid at project-shared and project-local. Placement is convention, not enforcement: a project that wants to pin harness + target across teammates does so by putting those fields in the project-shared file.
+The schema is identical at every scope: every field that's valid at user-global is valid at project-shared and project-local. Placement is convention rather than enforcement: a project that wants to pin harness and target across teammates does so by putting those fields in the project-shared file.
 
 **Workspace discovery.** Project-shared and project-local files are discovered by walking up from CWD until a `.podium/` directory is found, mirroring how `git` finds `.git`. The discovered `.podium/` directory is also the home for `overlay/` (workspace local overlay, §6.4) and `sync.lock` (§7.5.3).
 

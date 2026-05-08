@@ -6,7 +6,7 @@ Capability saturation: tool-call accuracy starts to degrade past ~50–100 tools
 
 ## 3.2 Three Disclosure Layers
 
-The host sees only what it asks for, in stages. The three layers cover the four meta-tools: Layer 1 (the map) is served by `load_domain` and `search_domains`; Layer 2 (search) by `search_artifacts`; Layer 3 (load) by `load_artifact`.
+The host sees only what it asks for, in stages. The disclosure layers map onto the meta-tools: Layer 1 (the map) is served by `load_domain` and `search_domains`; Layer 2 (search) by `search_artifacts`; Layer 3 (load) by `load_artifact`.
 
 ### Layer 1 — Map and domain search (`load_domain`, `search_domains`)
 
@@ -26,7 +26,7 @@ When the host has chosen an artifact, it calls `load_artifact(artifact_id)`. The
 
 The disclosure surface only works if three other things hold.
 
-**Visibility filtering.** Every request to the registry carries the host's OAuth identity. The registry composes the caller's effective view from the configured layer list (§4.6), filtering by each layer's visibility declaration. This is gatekeeping, not disclosure — it bounds what the disclosure surface can reveal.
+**Visibility filtering.** Every request to the registry carries the host's OAuth identity. The registry composes the caller's effective view from the configured layer list (§4.6), filtering by each layer's visibility declaration. This is gatekeeping rather than disclosure; it bounds what the disclosure surface can reveal.
 
 **Description quality.** Layers 1 and 2 only work if manifests and domains describe themselves well. Each artifact's `description` field must answer "when should I use this?" in one or two sentences; each `DOMAIN.md` author should similarly invest in `description`, `keywords`, and (where useful) the prose body — those are what `search_domains` retrieves over and what `load_domain` returns. The registry lints for thin descriptions and flags clusters of artifacts whose summaries collide.
 
@@ -67,4 +67,4 @@ When `false`, the endpoint returns `403 scope_preview_disabled`. When `true`, th
 
 **Honored by all consumer paths.** The MCP server, SDK, and `podium sync` all expose this preview. The `podium status` CLI surfaces the same data for human inspection.
 
-The preview is a transparency surface, not a discovery surface. Agents do not call it during a session — they use the disclosure layers in §3.2 — and it does not contribute to ranking, history, or any session-level state.
+The preview is a transparency surface; agents do not use it as a discovery surface. Agents do not call it during a session (they use the disclosure layers in §3.2), and it does not contribute to ranking, history, or any session-level state.

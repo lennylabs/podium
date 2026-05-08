@@ -1,6 +1,6 @@
 # 5. Meta-Tools
 
-Podium exposes four meta-tools through the Podium MCP server. These are the only tools Podium contributes; hosts add their own runtime tools alongside.
+Podium exposes the meta-tools through the Podium MCP server. These are the tools Podium contributes; hosts add their own runtime tools alongside.
 
 | Tool               | Description                                                                                                                                                                                                                                                                                                                               |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -19,7 +19,7 @@ The MCP server declares its capabilities in the MCP `initialize` response: `{too
 
 MCP resources fit static lists and host-driven enumeration. Podium's catalog needs parameterized navigation (`load_domain` takes a path; `search_domains` and `search_artifacts` take queries and filters) and lazy materialization with side effects. Tools fit better.
 
-Artifact bodies are also exposed as MCP resources for hosts that prefer that pattern (read-only mirror of `load_artifact`); the canonical interface remains the four meta-tools.
+Artifact bodies are also exposed as MCP resources for hosts that prefer that pattern (read-only mirror of `load_artifact`); the canonical interface remains the meta-tools.
 
 ## 5.1 Meta-Tool Descriptions and Prompting Guidance
 

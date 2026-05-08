@@ -140,7 +140,7 @@ For each `git`-source layer, register the webhook URL the registry returned at l
 
 ### 7. Configure CI
 
-Each layer's source repo runs `podium lint` as a required check on PRs. Use the in-repo CI tooling (GitHub Actions, GitLab CI, Buildkite, etc.) — Podium is a CLI dependency, not a CI framework.
+Each layer's source repo runs `podium lint` as a required check on PRs. Use the in-repo CI tooling (GitHub Actions, GitLab CI, Buildkite, etc.); Podium runs as a CLI dependency within the existing CI framework.
 
 ---
 

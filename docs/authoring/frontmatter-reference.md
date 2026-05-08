@@ -43,12 +43,12 @@ release_notes: "Initial release."
 | Field | Required | Description |
 |:--|:--|:--|
 | `type` | Yes | Artifact type. See [Artifact types](artifact-types). |
-| `name` | Yes | Short identifier. The canonical artifact ID is the directory path under the registry root, not this field. |
+| `name` | Yes | Short identifier. The canonical artifact ID is the directory path under the registry root, separate from this field. |
 | `version` | Yes | Semver. Once `(artifact_id, version)` is ingested, it's bit-for-bit immutable. |
 | `description` | Yes | One-line "when should I use this?" The harness uses this to decide whether the artifact matches a prompt. Vague descriptions get ignored. |
 | `when_to_use` | Optional | List of explicit situations. Additional retrieval signal. |
 | `tags` | Optional | List of strings. Used for filtering in `search_artifacts`. |
-| `sensitivity` | Optional | `low` (default), `medium`, `high`. Informational metadata exposed in search and load responses. Reviewer requirements based on sensitivity are enforced in the Git provider's branch protection, not by the registry. |
+| `sensitivity` | Optional | `low` (default), `medium`, `high`. Informational metadata exposed in search and load responses. Reviewer requirements based on sensitivity are enforced in the Git provider's branch protection rather than by the registry. |
 | `license` | Optional | SPDX identifier. |
 | `search_visibility` | Optional | `indexed` (default) or `direct-only`. `direct-only` artifacts don't appear in `search_artifacts` results; they're reachable via `load_artifact` if the caller knows the ID. |
 | `deprecated` | Optional | Boolean. When `true`, `load_artifact` returns a warning, and the artifact is excluded from default search results. |

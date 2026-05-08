@@ -15,7 +15,7 @@ Programmatic consumers — LangChain, Bedrock, OpenAI Assistants, custom orchest
 | `podium-py` | PyPI | Python orchestrators, LangChain consumers, OpenAI Assistants integrations, build/eval pipelines, notebooks. |
 | `podium-ts` | npm | TypeScript / Node orchestrators, Bedrock Agents, custom Node-based agent runtimes, Edge runtime integrations. |
 
-**The SDKs require an HTTP server.** They speak HTTP and don't work against a filesystem-source registry. For filesystem-mode consumers, use `podium sync` directly.
+**The SDKs require a Podium server.** They speak HTTP and don't work against a filesystem-source registry. For filesystem-mode consumers, use `podium sync` directly.
 
 ---
 

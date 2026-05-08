@@ -10,8 +10,8 @@ description: Per-harness setup. Configure podium sync for filesystem materializa
 
 A harness can consume Podium artifacts in either of two ways. Pick one (or both) per harness:
 
-- **Filesystem materialization** via `podium sync`. Writes harness-native files to disk; the harness's own filesystem discovery picks them up. Works against either a filesystem-source registry or an HTTP server. No runtime calls.
-- **Runtime discovery** via the Podium MCP server. The agent calls `load_domain`, `search_domains`, `search_artifacts`, and `load_artifact` mid-session and materializes only what it needs. Requires an HTTP server.
+- **Filesystem materialization** via `podium sync`. Writes harness-native files to disk; the harness's own filesystem discovery picks them up. Works against either a filesystem-source registry or a running Podium server. No runtime calls.
+- **Runtime discovery** via the Podium MCP server. The agent calls `load_domain`, `search_domains`, `search_artifacts`, and `load_artifact` mid-session and materializes only what it needs. Requires a Podium server.
 
 Most harnesses support both. Use the per-harness section below.
 

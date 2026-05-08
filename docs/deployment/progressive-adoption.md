@@ -10,7 +10,7 @@ description: A staged on-ramp for adopting governance features — identity, sen
 
 Podium ships with the full governance feature set: per-layer visibility, sensitivity labels, sandbox profiles, signing, hash-chained audit, freeze windows, SBOM/CVE pipeline, SCIM. Turning all of it on at once is a recipe for "we'll get to it after this quarter" — and then you don't.
 
-This guide is a staged on-ramp for governance. It assumes a starting point of `podium serve --standalone` (or an equivalent permissive standard deployment) and progressively tightens as the catalog and team grow into needing each control. Skip ahead if a particular feature is already required by an external constraint (compliance, security review, contractual obligation) — the order below is one that works for most teams, not the only valid order.
+This guide is a staged on-ramp for governance. It assumes a starting point of `podium serve --standalone` (or an equivalent permissive standard deployment) and progressively tightens as the catalog and team grow into needing each control. Skip ahead if a particular feature is already required by an external constraint (compliance, security review, contractual obligation). The order below works for most teams; other orderings are also valid.
 
 ---
 
@@ -63,7 +63,7 @@ Goal: stop public visibility once you're confident identity works.
 
 Goal: surface the existing risk profile of artifacts. No enforcement yet.
 
-- Update lint rules to require `sensitivity:` in the frontmatter. Default is still `low`; the lint check is a warning, not a failure.
+- Update lint rules to require `sensitivity:` in the frontmatter. Default is still `low`; the lint check is a warning at this stage and does not fail ingest.
 - Authors annotate existing artifacts as part of their normal review cycle. Labels available: `low` (default), `medium`, `high`.
 - Run `podium search --filter sensitivity=medium` and `podium search --filter sensitivity=high` to find higher-risk artifacts and review them.
 - The audit log now records sensitivity per `load_artifact` call — useful signal for later.
@@ -119,7 +119,7 @@ Each of these warrants a planned rollout — read the relevant spec section, run
 
 The most common reorderings, and why they're fine:
 
-- **Compliance-driven.** If SOC2, ISO 27001, or a customer contract requires signed-and-audited artifacts before launch, jump straight from Day 0 to Month 3's signing posture. The intermediate steps were comfort, not correctness.
+- **Compliance-driven.** If SOC2, ISO 27001, or a customer contract requires signed-and-audited artifacts before launch, jump straight from Day 0 to Month 3's signing posture. The intermediate steps exist to ease rollout for teams without external pressure; they aren't required for correctness.
 - **Multi-tenant from day 1.** If you're hosting Podium for separate customer organizations, multi-tenancy and OIDC are non-negotiable from Day 0. Skip the standalone phase and start with the standard deployment + per-tenant layer plan.
 - **High-sensitivity domain only.** If your catalog is *only* `sensitivity: high` content (security playbooks, compliance runbooks), enable signing on day 1 alongside identity. Skip the advisory-sensitivity phase.
 

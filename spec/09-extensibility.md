@@ -40,12 +40,12 @@ Plugins today are in-process Go modules (§9.2). A future release may add an out
 - **Cancellable.** Every method takes a `context.Context` (or equivalent) as the first parameter. Long-running work checks for cancellation; deadlines are respected.
 - **Wire-serializable inputs and outputs.** Every argument and return value is structurally serializable — primitives, slices, maps, and structs whose fields are themselves serializable. No Go channels, no closures, no `func` types, no `interface{}` without a stable encoding, no opaque pointers to in-process state.
 - **No shared in-process state across calls.** State the plugin needs across calls is passed explicitly per method (e.g., a session token, a snapshot ID, a cursor). Plugins MUST NOT rely on package-level variables, singletons, or registered callbacks set at init time.
-- **Structured errors.** Failures are returned as structured envelopes — `{code, message, retryable, details}` — not as opaque Go error chains. Codes use the namespacing in §6.10.
+- **Structured errors.** Failures use a structured envelope (`{code, message, retryable, details}`) rather than opaque Go error chains. Codes use the namespacing in §6.10.
 - **Restartable long-lived operations.** Subscriptions, watchers, and streaming results are modeled as cursor-style protocols (the registry holds the cursor; the plugin can be killed and respawned without losing track of where it was). Push-style callback registration is avoided in favor of pull-style polling or explicit re-subscribe with a resume token.
 - **Idempotent retries.** Methods are safe to retry on transient failure. Where a method has side effects, it accepts an idempotency key.
 - **Bounded payloads.** Method arguments and return values declare reasonable size limits in their SPI documentation. Payloads larger than the limit use a content-addressed reference (cache key, presigned URL) rather than inline bytes.
 
-**What this means for built-in plugins.** The default `RegistryStore`, `HarnessAdapter`, `LayerSourceProvider`, etc. implementations conform to these constraints today, even though they run in-process. The motivation is forward-compatibility, not present-day distribution: when the out-of-process protocol lands, no built-in needs reshaping.
+**What this means for built-in plugins.** The default `RegistryStore`, `HarnessAdapter`, `LayerSourceProvider`, etc. implementations conform to these constraints today, even though they run in-process. The motivation is forward-compatibility rather than present-day distribution: when the out-of-process protocol lands, no built-in needs reshaping.
 
 **What's not committed.** This section does not commit Podium to ship an out-of-process plugin protocol on any timeline, nor to a specific transport (subprocess, gRPC, Wasm, or otherwise). It commits only to keeping the SPI shapes wire-friendly so the option remains open.
 
@@ -104,4 +104,4 @@ A script that pulls content from another system (a vendor SaaS, an internal CMS,
 
 ### Custom consumer surfaces
 
-A runtime that doesn't fit the three built-in consumer shapes — a specialized agent framework, an internal orchestrator, an evaluation harness — wraps the registry HTTP API directly. Identity attaches via the same OAuth flow used by the SDKs; visibility filtering and layer composition still happen server-side. The custom consumer is responsible for caching and any harness-native translation it needs.
+A runtime that doesn't fit the built-in consumer shapes (a specialized agent framework, an internal orchestrator, an evaluation harness) wraps the registry HTTP API directly. Identity attaches via the same OAuth flow used by the SDKs; visibility filtering and layer composition still happen server-side. The custom consumer is responsible for caching and any harness-native translation it needs.

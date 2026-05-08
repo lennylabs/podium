@@ -148,7 +148,7 @@ The shared library does the same parsing, composition, and adapter work in both 
 Standalone deliberately omits the things that need external services or a multi-tenant model:
 
 - **Multi-tenancy.** A standalone deployment is single-tenant.
-- **OIDC group claims via SCIM.** Group membership comes from OIDC claims directly, not via SCIM push.
+- **OIDC group claims via SCIM.** Group membership comes from OIDC claims directly; SCIM push is a standard-deployment feature.
 - **SBOM / CVE pipeline.** The registry has the SPI; without a CVE feed configured, vulnerability tracking is inert.
 - **Transparency-log anchoring.** Sigstore-keyless signing requires public OIDC infrastructure.
 - **Outbound webhooks.** Configurable but typically unused at small-team scale.
@@ -172,7 +172,7 @@ Sensitivity ceiling: ingest of `sensitivity: medium` and `sensitivity: high` art
 This is appropriate when:
 
 - The deployment is intentionally open beyond a single user (a demo registry, an evaluation pilot, an internal-public catalog), and
-- You want the audit log to record that anonymous-public access was the intent, not a misconfiguration.
+- You want the audit log to record that anonymous-public access was the deployment's intent rather than a misconfiguration.
 
 For everyday small-team use, default to `oauth-device-code` auth. The added ceremony is small and the audit is sharper.
 
@@ -182,7 +182,7 @@ For everyday small-team use, default to `oauth-device-code` auth. The added cere
 
 - **Backup.** SQLite + the object directory. A periodic snapshot of `~/.podium/standalone/` is enough.
 - **Upgrades.** Replace the binary, restart. Schema migrations run on first start of the new version.
-- **Performance.** Standalone is sized for tens-of-developer scale, not thousands of QPS. When you need scale, see [Organization](organization).
+- **Performance.** Standalone is sized for tens-of-developer scale rather than thousands of QPS. When you need scale, see [Organization](organization).
 - **Observability.** Prometheus endpoint on `/metrics`. The reference Grafana dashboard ships with the binary.
 
 ---

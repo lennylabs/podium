@@ -142,7 +142,7 @@ Authoring rights are a separate concern. Whoever can merge to a
 layer's tracked Git ref publishes there; whoever can write to a
 `local`-source layer's filesystem path publishes there. Branch
 protection, required reviewers, and signing requirements live in
-the Git host, not in Podium.
+the Git host. Podium does not duplicate them.
 
 ---
 
