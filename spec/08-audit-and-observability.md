@@ -4,25 +4,27 @@
 
 Every significant event, each carrying a trace ID (W3C Trace Context):
 
-| Event                     | When                                                               | Source   |
-| ------------------------- | ------------------------------------------------------------------ | -------- |
-| `domain.loaded`           | Host invoked `load_domain`                                         | Registry |
-| `domains.searched`        | Host invoked `search_domains`                                      | Registry |
-| `artifacts.searched`      | Host invoked `search_artifacts`                                    | Registry |
-| `artifact.loaded`         | Host invoked `load_artifact`                                       | Registry |
-| `artifact.published`      | A new `(artifact_id, version)` was ingested                        | Registry |
-| `artifact.deprecated`     | An ingested manifest set `deprecated: true`                        | Registry |
-| `artifact.signed`         | Artifact version signed                                            | Registry |
-| `domain.published`        | A `DOMAIN.md` was added or changed                                 | Registry |
-| `layer.ingested`          | A layer completed an ingest cycle                                  | Registry |
-| `layer.history_rewritten` | Force-push or history rewrite detected on a `git`-source layer     | Registry |
-| `layer.config_changed`    | Admin added, removed, or reordered admin-defined layers            | Registry |
-| `layer.user_registered`   | A user registered or unregistered a personal layer                 | Registry |
-| `admin.granted`           | An admin grant was added or revoked                                | Registry |
-| `visibility.denied`       | A call was rejected because the requested resource was not visible | Registry |
-| `freeze.break_glass`      | An admin used break-glass during a freeze window                   | Registry |
-| `vulnerability.detected`  | CVE matched an artifact's SBOM                                     | Registry |
-| `user.erased`             | Admin invoked the GDPR erasure command                             | Registry |
+| Event                          | When                                                               | Source   |
+| ------------------------------ | ------------------------------------------------------------------ | -------- |
+| `domain.loaded`                | Host invoked `load_domain`                                         | Registry |
+| `domains.searched`             | Host invoked `search_domains`                                      | Registry |
+| `artifacts.searched`           | Host invoked `search_artifacts`                                    | Registry |
+| `artifact.loaded`              | Host invoked `load_artifact`                                       | Registry |
+| `artifact.published`           | A new `(artifact_id, version)` was ingested                        | Registry |
+| `artifact.deprecated`          | An ingested manifest set `deprecated: true`                        | Registry |
+| `artifact.signed`              | Artifact version signed                                            | Registry |
+| `domain.published`             | A `DOMAIN.md` was added or changed                                 | Registry |
+| `layer.ingested`               | A layer completed an ingest cycle                                  | Registry |
+| `layer.history_rewritten`      | Force-push or history rewrite detected on a `git`-source layer     | Registry |
+| `layer.config_changed`         | Admin added, removed, or reordered admin-defined layers            | Registry |
+| `layer.user_registered`        | A user registered or unregistered a personal layer                 | Registry |
+| `admin.granted`                | An admin grant was added or revoked                                | Registry |
+| `visibility.denied`            | A call was rejected because the requested resource was not visible | Registry |
+| `freeze.break_glass`           | An admin used break-glass during a freeze window                   | Registry |
+| `vulnerability.detected`       | CVE matched an artifact's SBOM                                     | Registry |
+| `user.erased`                  | Admin invoked the GDPR erasure command                             | Registry |
+| `registry.read_only_entered`   | Registry entered read-only mode (Postgres primary unreachable)     | Registry |
+| `registry.read_only_exited`    | Registry exited read-only mode (Postgres primary restored)         | Registry |
 
 Audit lives in two streams. The registry owns the events above. The MCP server can also write a local audit log for the meta-tool events through a `LocalAuditSink` interface (§9) when configured. Both streams share trace IDs.
 
