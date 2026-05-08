@@ -75,7 +75,6 @@ The registry's authoring layout is a domain hierarchy. Directories are domain pa
 
 ```
 registry/
-├── registry.yaml
 ├── company-glossary/                       # type: context — ARTIFACT.md only
 │   └── ARTIFACT.md
 ├── finance/
