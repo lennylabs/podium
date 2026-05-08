@@ -58,7 +58,7 @@ Every artifact directory contains an `ARTIFACT.md`. Skill artifacts (`type: skil
 | `rule_mode` | `rule` | `always` (default), `glob`, `auto`, `explicit`. |
 | `rule_globs` | `rule` | Required when `rule_mode: glob`. Comma-separated glob patterns. |
 | `rule_description` | `rule` | Required when `rule_mode: auto`. Drives the harness's autoload heuristic. |
-| `hook_event` | `hook` | Lifecycle event name (e.g., `stop`, `preCompact`, `sessionStart`). Valid values harness-defined. |
+| `hook_event` | `hook` | Canonical lifecycle event name. One of: `session_start`, `session_end`, `user_prompt_submit`, `pre_tool_use`, `post_tool_use`, `post_tool_use_failure`, `subagent_start`, `subagent_stop`, `stop`, `pre_compact`, `post_compact`, `notification`. The adapter translates to the harness's native event; coverage varies. |
 | `hook_action` | `hook` | Shell snippet executed when the event fires. |
 | `server_identifier` | `mcp-server` | Canonical server identifier. Drives the reverse index that links `skill` artifacts referencing the server via `mcpServers:`. |
 

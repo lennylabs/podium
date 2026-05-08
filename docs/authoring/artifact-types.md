@@ -189,9 +189,9 @@ hook_action: |
 ---
 ```
 
-`hook_event` is the lifecycle event name (`stop`, `preCompact`, `sessionStart`, etc.). Valid values are harness-defined. `hook_action` is a shell snippet executed when the event fires; the event payload comes in on stdin.
+`hook_event` is one of the canonical event names: `session_start`, `session_end`, `user_prompt_submit`, `pre_tool_use`, `post_tool_use`, `post_tool_use_failure`, `subagent_start`, `subagent_stop`, `stop`, `pre_compact`, `post_compact`, `notification`. The harness adapter translates the canonical name to the harness's native event. `hook_action` is a shell snippet executed when the event fires; the event payload comes in on stdin.
 
-Hook support varies by harness. Claude Code and Cursor have native hook systems; codex and gemini don't currently expose lifecycle events. See the capability matrix in §6.7.1 of the spec and [Hooks](hooks) for detail.
+Hook support varies by harness, and not every harness implements every canonical event. When the configured harness adapter does not support the chosen event, materialization for that harness is a no-op and lint warns at ingest. For the events a specific harness emits, refer to the harness's own hook documentation. See [Hooks](hooks) for the full event taxonomy and authoring guidance.
 
 ---
 

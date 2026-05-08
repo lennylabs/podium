@@ -189,7 +189,9 @@ Authors who must use a non-portable feature can declare `target_harnesses:` in f
 | `rule_mode: glob`          | ⚠           | ✓      | ⚠     | ⚠        | ✗      | ⚠   | ✓      |
 | `rule_mode: auto`          | ⚠           | ✓      | ✗     | ✗        | ✗      | ✗   | ⚠      |
 | `rule_mode: explicit`      | ✓           | ✓      | ✓     | ✓        | ⚠      | ✓   | ✓      |
-| `hook_event`               | ✓           | ✓      | ✗     | ⚠        | ✗      | ⚠   | ⚠      |
+| `hook_event` (any)         | ✓           | ✓      | ✗     | ⚠        | ⚠      | ⚠   | ⚠      |
+
+The `hook_event` row summarizes hook support at the field level. Per-event coverage (which canonical events from §4.3.5 each adapter translates) is tracked in the adapter implementation rather than in this spec; the row above marks ✓ when the adapter supports the common events (`session_start`, `session_end`, `pre_tool_use`, `post_tool_use`, `stop`, `pre_compact`) and ⚠ when only a subset of canonical events translate. For the harness's own current event surface, refer to the harness's documentation.
 
 ## 6.8 Process Model
 

@@ -182,7 +182,11 @@ rule_globs: "src/**/*.ts,src/**/*.tsx"        # required when rule_mode: glob
 rule_description: "Apply when working with database migrations"  # required when rule_mode: auto
 
 # For type: hook — lifecycle observer
-hook_event: stop                  # event name; valid values are harness-defined
+# `hook_event` is one of the canonical event names; the adapter translates to the harness's native event.
+# Canonical names: session_start, session_end, user_prompt_submit, pre_tool_use, post_tool_use,
+# post_tool_use_failure, subagent_start, subagent_stop, stop, pre_compact, post_compact, notification.
+# See [Hooks](hooks) for descriptions and the per-event coverage caveat.
+hook_event: stop
 hook_action: |                    # shell snippet executed when the event fires
   echo "[hook] $hook_event triggered"
 
@@ -204,7 +208,7 @@ target_harnesses: [claude-code, opencode]
 | `rule_mode` | `rule` | One of `always`, `glob`, `auto`, `explicit`. See [Rule modes](rule-modes). |
 | `rule_globs` | `rule` | Required when `rule_mode: glob`. Comma-separated glob patterns. |
 | `rule_description` | `rule` | Required when `rule_mode: auto`. Drives the harness's autoload heuristic. |
-| `hook_event` | `hook` | Lifecycle event name. Valid values are harness-defined. See [Hooks](hooks). |
+| `hook_event` | `hook` | One of the canonical event names: `session_start`, `session_end`, `user_prompt_submit`, `pre_tool_use`, `post_tool_use`, `post_tool_use_failure`, `subagent_start`, `subagent_stop`, `stop`, `pre_compact`, `post_compact`, `notification`. The adapter translates to the harness's native event. See [Hooks](hooks). |
 | `hook_action` | `hook` | Shell snippet executed when the event fires; receives event payload on stdin. |
 | `server_identifier` | `mcp-server` | Canonical server identifier. Drives the reverse index that links `skill` artifacts referencing the server via `mcpServers:`. |
 | `extends` | Any | Inherit and refine another artifact's manifest. Single scalar (no multiple inheritance). See [Extends](extends). |

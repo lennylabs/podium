@@ -3,21 +3,17 @@ layout: default
 title: Hooks
 parent: Authoring
 nav_order: 6
-description: Lifecycle observers with hook_event and hook_action.
+description: Lifecycle observers with a canonical hook_event taxonomy and a shell hook_action.
 ---
 
 # Hooks
 
-A `hook` artifact wires a shell action into a harness lifecycle event. Use it to log, notify, run a check, or otherwise observe and influence the agent loop.
+A `hook` artifact wires a shell action into a harness lifecycle event. Use it to log, notify, run a check, inject context, or otherwise observe and influence the agent loop.
 
 ```yaml
 ---
 type: hook
-name: log-session-end
 version: 1.0.0
-description: Log session-end events to a local audit file.
-tags: [hook, audit]
-sensitivity: low
 hook_event: stop
 hook_action: |
   INPUT=$(cat)
@@ -26,43 +22,51 @@ hook_action: |
 ---
 ```
 
-`hook_event` is the lifecycle event name. Valid values are harness-defined; common ones are `stop`, `preCompact`, `sessionStart`, `sessionEnd`. The harness fires the event and passes a JSON payload on stdin to the action.
+`hook_event` is one of the canonical event names defined by Podium (see [Canonical events](#canonical-events) below). The harness adapter translates the canonical name into the harness's native event vocabulary at materialization time.
 
-`hook_action` is a shell snippet executed when the event fires. Anything you can run from a shell works.
+`hook_action` is a shell snippet executed when the event fires. The harness writes a JSON payload to the action's stdin.
 
 ---
 
-## Common events
+## Canonical events
 
-The exact set of events varies by harness. The patterns below are common enough to be worth knowing.
+The canonical event taxonomy stays harness-agnostic. The adapter does the translation.
 
-| Event | Fires when |
+| `hook_event` | Fires when |
 |:--|:--|
-| `sessionStart` | A new agent session begins. |
-| `sessionEnd` / `stop` | The session completes (or is interrupted). |
-| `preCompact` | The harness is about to compact the conversation context. |
-| `postCompact` | After compaction. |
-| `toolUse` | A tool call is about to run (typically with the tool name and arguments in the payload). |
+| `session_start` | An agent session begins or resumes. |
+| `session_end` | An agent session terminates. |
+| `user_prompt_submit` | After the user submits a prompt, before the model processes it. Can inject context or block. |
+| `pre_tool_use` | Before a tool call executes. Can block. |
+| `post_tool_use` | After a tool call succeeds. |
+| `post_tool_use_failure` | After a tool call fails (error, timeout, denied). |
+| `subagent_start` | A subagent (delegated child) is spawned. |
+| `subagent_stop` | A subagent finishes. |
+| `stop` | The agent finishes responding (end of turn). |
+| `pre_compact` | Before context compaction. |
+| `post_compact` | After context compaction completes. |
+| `notification` | The harness sends a system notification (waiting for input, permission prompt, idle prompt, and similar). |
 
-Cursor's hook system, Claude Code's hook system, and similar harnesses each have their own event vocabulary. Check the harness's docs for the events it actually emits.
+---
+
+## Coverage varies by harness
+
+Not every harness implements every event in the canonical list. When the configured harness adapter does not support the chosen event, materialization for that harness is a no-op and lint warns at ingest. Authors who want to restrict materialization to a specific subset declare `target_harnesses:` in frontmatter.
+
+For the events a specific harness emits, refer to that harness's hook documentation. The harness's own docs are the source of truth, since each vendor's surface evolves independently.
+
+- Claude Code: [code.claude.com/docs/en/hooks](https://code.claude.com/docs/en/hooks)
+- Cursor: [cursor.com/docs/hooks](https://cursor.com/docs/hooks)
+- Gemini CLI: [geminicli.com/docs/hooks](https://geminicli.com/docs/hooks)
+- OpenCode: [opencode.ai/docs/plugins](https://opencode.ai/docs/plugins)
 
 ---
 
 ## Payload handling
 
-The harness fires the event and passes a JSON payload on stdin. The schema varies by event. A typical payload for a `stop` event might be:
+The harness writes a JSON payload to stdin. The schema is harness-defined and event-defined. Common fields appear across most harnesses (session identifier, working directory, tool name and arguments for tool events, prompt text for `user_prompt_submit`), but the exact field set varies.
 
-```json
-{
-  "conversation_id": "abc123",
-  "hook_event_name": "stop",
-  "workspace_roots": ["/Users/joan/projects/foo"],
-  "duration_seconds": 142,
-  "messages_count": 17
-}
-```
-
-A simple action reads the payload as a string and uses it directly:
+A simple action reads the payload as a string:
 
 ```bash
 hook_action: |
@@ -70,14 +74,13 @@ hook_action: |
   echo "$INPUT" >> ~/.podium/sessions.log
 ```
 
-For structured handling, use `jq`:
+For structured handling, use `jq` with defaults so the action stays portable across harness versions:
 
 ```bash
 hook_action: |
   INPUT=$(cat)
-  CONV_ID=$(echo "$INPUT" | jq -r '.conversation_id')
-  DURATION=$(echo "$INPUT" | jq -r '.duration_seconds')
-  echo "$CONV_ID,$DURATION,$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  CONV_ID=$(echo "$INPUT" | jq -r '.session_id // .conversation_id // "unknown"')
+  echo "$CONV_ID,$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     >> ~/.podium/session-stats.csv
 ```
 
@@ -92,43 +95,13 @@ The harness refuses to materialize when a system package isn't available.
 
 ---
 
-## Per-harness support
-
-Hook support varies. The capability matrix in [§6.7.1 of the spec](https://github.com/lennylabs/podium/blob/main/spec/06-mcp-server.md#671-the-authors-burden) records which harnesses support `hook_event` natively.
-
-| Harness | Hook support |
-|:--|:--|
-| `claude-code` | ✓ Native hook system. |
-| `cursor` | ✓ Native hook system. |
-| `codex` | ✗ No hook surface today. |
-| `opencode` | ⚠ Partial; some events available. |
-| `gemini` | ✗ No hook surface today. |
-| `pi` | ⚠ Partial. |
-| `hermes` | ⚠ Partial. |
-
-For unsupported harnesses, lint rejects ingest unless `target_harnesses:` excludes the harness. For partial support, lint warns when the specific `hook_event` value isn't in the supported set for the harness.
-
----
-
-## What the adapter writes
-
-| Harness | Output |
-|:--|:--|
-| `claude-code` | `.claude/hooks/<name>.json` (or the equivalent native hook config). |
-| `cursor` | `.cursor/hooks/<name>.json` with the action wrapped in Cursor's hook descriptor. |
-| `opencode` | `AGENTS.md` injection where supported; standalone hook file otherwise. |
-| Others | Per-harness; see the spec capability matrix. |
-
-The shell action is preserved verbatim; the adapter wraps it in the harness's expected envelope (event name, file format, etc.).
-
----
-
 ## Authoring guidance
 
 - **Hooks ship code.** A hook's `hook_action` runs on the host with the user's privileges. Treat hooks like any other script the catalog ships: review, sign, and consider sandboxing. The `sandbox_profile:` field applies; lint requires it for hooks at sensitivity ≥ medium.
 - **Keep actions short.** A long shell action embedded in YAML gets ugly. Move complex logic into a bundled script (in `scripts/`) and have the action invoke it. The script lives alongside `ARTIFACT.md` and ships with the hook.
-- **Make the description specific.** "Log session-end events" is fine. "Lifecycle observer" is too vague to surface in search. Authors who write good descriptions get used.
+- **Make the description specific.** "Log session-end events to a local audit file." is fine. "Lifecycle observer." is too vague to surface in search.
 - **Don't depend on payload fields.** Harnesses change their payload schema over time. Use `jq` defaults (`jq -r '.field // empty'`) or guard against missing fields in shell.
+- **Pick the canonical event closest to the intent.** `pre_tool_use` covers shell, MCP, file-edit, and any other tool call uniformly; the adapter translates to whichever native event the harness emits. Selecting a more specific harness-native event by working around the canonical taxonomy makes the artifact non-portable.
 
 ---
 
@@ -168,7 +141,7 @@ set -euo pipefail
 INPUT=$(cat)
 LOG_FILE="${HOME}/.podium/session-audit.log"
 
-CONV_ID=$(echo "$INPUT" | jq -r '.conversation_id // "unknown"')
+CONV_ID=$(echo "$INPUT" | jq -r '.session_id // .conversation_id // "unknown"')
 TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 echo "[${TIMESTAMP}] session end: ${CONV_ID}" >> "${LOG_FILE}"

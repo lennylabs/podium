@@ -19,7 +19,7 @@ Full lint coverage, conformance suite participation, broad adapter support:
 - `context`: pure reference material (style guides, glossaries, API references, large knowledge bases).
 - `command`: parameterized prompt templates a human invokes (typically as a slash command).
 - `rule`: passive context loaded by the harness based on its `rule_mode` (`always`, `glob`, `auto`, `explicit`); see §6.7.1 for adapter mapping.
-- `hook`: a lifecycle observer for the agent loop with a declared `hook_event` (e.g., `stop`, `preCompact`) and a shell `hook_action`.
+- `hook`: a lifecycle observer for the agent loop with a declared `hook_event` from the canonical taxonomy (§4.3.5) and a shell `hook_action`.
 
 ### Registered extension types
 
@@ -197,7 +197,9 @@ rule_globs: "src/**/*.ts,src/**/*.tsx"      # required when rule_mode: glob
 rule_description: "Apply when working with database migrations"  # required when rule_mode: auto
 
 # For type: hook — lifecycle observer wired into the agent loop.
-hook_event: stop                  # event name; valid values are harness-defined (stop, preCompact, sessionStart, ...)
+# `hook_event` is one of the canonical event names defined in §4.3.5.
+# The harness adapter translates the canonical name to the harness's native event vocabulary.
+hook_event: stop
 hook_action: |                    # shell snippet executed when the event fires; receives event payload on stdin
   echo "[hook] $hook_event triggered"
 
@@ -269,6 +271,33 @@ Skill artifacts comply with the [agentskills.io specification](https://agentskil
 - `ARTIFACT.md` does not contain `name`, `description`, or `license` fields (warning); if present, the values must match `SKILL.md` exactly (error on mismatch).
 - `ARTIFACT.md` body is empty or a single HTML comment (warning otherwise).
 - The `skills-ref validate` reference check from the agentskills.io project passes against `SKILL.md` (warning on failure; lint suppression flag available for cases where the standard's validator is overly strict).
+
+### 4.3.5 Canonical hook events
+
+`hook_event` (for `type: hook`) is constrained to a canonical event name from the table below. The harness adapter (§6.7) translates the canonical name to the harness's native event at materialization time.
+
+| Canonical name | Fires when |
+| --- | --- |
+| `session_start` | An agent session begins or resumes. |
+| `session_end` | An agent session terminates. |
+| `user_prompt_submit` | After the user submits a prompt, before the model processes it. Can inject context or block. |
+| `pre_tool_use` | Before a tool call executes. Can block. |
+| `post_tool_use` | After a tool call succeeds. |
+| `post_tool_use_failure` | After a tool call fails (error, timeout, denied). |
+| `subagent_start` | A subagent (delegated child) is spawned. |
+| `subagent_stop` | A subagent finishes. |
+| `stop` | The agent finishes responding (end of turn). |
+| `pre_compact` | Before context compaction. |
+| `post_compact` | After context compaction completes. |
+| `notification` | The harness sends a system notification (waiting for input, permission prompt, idle prompt, and similar). |
+
+**Coverage varies by harness.** No harness today implements every event in the table, and adapter coverage shifts as harnesses introduce or rename events. Authors choose an event from the canonical list; if the configured harness adapter does not support that event, materialization for that harness is a no-op and lint warns at ingest. Authors who want to restrict materialization to a specific subset declare `target_harnesses:` (§4.3 universal fields).
+
+The canonical-to-native mapping lives in the adapter implementation. For the current event surface of each harness, refer to the harness's own documentation rather than to a Podium-side per-harness table; the harness's documentation is the source of truth.
+
+The list of canonical events grows as new harnesses introduce events that warrant a generic name. New events are introduced in spec releases with a deprecation window; existing names remain stable.
+
+**`hook_action` payload.** The harness fires the event and writes a JSON payload to the action's stdin. The payload schema is harness-defined and event-defined; common fields (session identifier, working directory, tool name and arguments for tool events, prompt text for `user_prompt_submit`) appear across most harnesses, but the exact field set varies. Authors who depend on payload fields should guard against missing keys (`jq -r '.field // empty'` and similar) so the action stays portable across harness versions.
 
 ## 4.4 Bundled Resources
 
