@@ -3,49 +3,86 @@ layout: default
 title: Frontmatter reference
 parent: Authoring
 nav_order: 3
-description: Every field in ARTIFACT.md frontmatter: universal fields, caller-interpreted fields, and type-specific fields.
+description: Every field in Podium artifact frontmatter (ARTIFACT.md and, for skills, SKILL.md): universal fields, caller-interpreted fields, and type-specific fields.
 ---
 
 # Frontmatter reference
 
-`ARTIFACT.md` frontmatter is YAML between two `---` lines at the top of the file. Field groups:
+Podium artifact frontmatter is YAML between two `---` lines at the top of a manifest file. Manifest files:
+
+- **`ARTIFACT.md`** — present in every artifact directory. Carries Podium's canonical schema (universal, caller-interpreted, and type-specific fields). For non-skill types, the prose body below the frontmatter is what the agent reads at load time.
+- **`SKILL.md`** — present additionally in skill directories (`type: skill`). Carries the [agentskills.io](https://agentskills.io/specification) standard's frontmatter (`name`, `description`, plus optional `license`, `compatibility`, `metadata`, `allowed-tools`). Its prose body is what the agent reads at load time. For skills, `ARTIFACT.md`'s body is empty.
+
+Field groups:
 
 - [**Universal fields**](#universal-fields) apply to every artifact regardless of type.
 - [**Caller-interpreted fields**](#caller-interpreted-fields) are stored verbatim and read by the host (harness adapter, runtime, etc.) at delivery time.
 - [**Type-specific fields**](#type-specific-fields) apply to certain types only.
 
-The prose body below the frontmatter is what the agent reads at load time. It's plain markdown.
+---
+
+## File allocation for skills
+
+Skills split their frontmatter between `SKILL.md` and `ARTIFACT.md` so that `SKILL.md` stays strictly within the agentskills.io specification. The split is mechanical:
+
+| Field | SKILL.md | ARTIFACT.md (skill) | ARTIFACT.md (non-skill) |
+|:--|:--|:--|:--|
+| `name` | Yes (matches parent directory) | — | Yes |
+| `description` | Yes (≤ 1024 chars) | — | Yes |
+| `license` | Yes (SPDX) | — | Yes |
+| `compatibility` | Optional (≤ 500 chars; human-readable) | — | — (Podium derives from `runtime_requirements` and `sandbox_profile`) |
+| `metadata` | Optional (string-to-string map) | — | — |
+| `allowed-tools` | Optional (experimental) | — | — |
+| `type` | — | Yes (`type: skill`) | Yes |
+| `version`, `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes` | — | Yes | Yes |
+| `mcpServers`, `requiresApproval`, `runtime_requirements`, `sandbox_profile`, `effort_hint`, `model_class_hint`, `sbom`, `external_resources`, `extends`, `target_harnesses` | — | Yes | Yes |
+| Type-specific fields (`input`, `output`, `delegates_to`, `expose_as_mcp_prompt`, `rule_*`, `hook_*`, `server_identifier`) | — | Yes (when applicable) | Yes (when applicable) |
+
+For non-skill types (`agent`, `context`, `command`, `rule`, `hook`, `mcp-server`, extension types), `ARTIFACT.md` carries every field. There is no `SKILL.md`.
+
+The agentskills.io `name` field has stricter constraints than Podium's:
+
+- 1–64 characters.
+- Lowercase Unicode alphanumeric (`a-z`, `0-9`) and hyphens.
+- No leading or trailing hyphen.
+- No consecutive hyphens.
+- Matches the parent directory name.
+
+Lint enforces all of the above for skills.
 
 ---
 
 ## Universal fields
 
-These apply to every artifact.
+These apply to every artifact. The "where it lives" column above governs which file holds each field for skills.
 
 ```yaml
----
-type: skill | agent | context | command | rule | hook | mcp-server | <extension type>
+# In SKILL.md (for skills) or ARTIFACT.md (for non-skills):
 name: run-variance-analysis
-version: 1.0.0                # semver, author-chosen
-description: One-line "when should I use this?"
+description: Flag unusual variance vs. forecast after month-end close. Use after the close period when reviewing financial performance.
+license: MIT                       # SPDX identifier
+```
+
+```yaml
+# In ARTIFACT.md (every type):
+type: skill | agent | context | command | rule | hook | mcp-server | <extension type>
+version: 1.0.0                     # semver, author-chosen
 when_to_use:
   - "After month-end close, to flag unusual variance vs. forecast"
 tags: [finance, close, variance]
 sensitivity: low | medium | high   # informational; not enforced by the registry
-license: MIT                       # SPDX identifier
 search_visibility: indexed | direct-only   # default: indexed
 deprecated: false                  # set to true to mark this version deprecated
 replaced_by: finance/close-reporting/run-variance-analysis-v2
 release_notes: "Initial release."
----
 ```
 
 | Field | Required | Description |
 |:--|:--|:--|
 | `type` | Yes | Artifact type. See [Artifact types](artifact-types). |
-| `name` | Yes | Short identifier. The canonical artifact ID is the directory path under the registry root, separate from this field. |
+| `name` | Yes | Short identifier. For skills, must match the parent directory name (per agentskills.io). The canonical artifact ID is the directory path under the registry root, separate from this field. |
 | `version` | Yes | Semver. Once `(artifact_id, version)` is ingested, it's bit-for-bit immutable. |
-| `description` | Yes | One-line "when should I use this?" The harness uses this to decide whether the artifact matches a prompt. Vague descriptions get ignored. |
+| `description` | Yes | "When should I use this?" The harness uses this to decide whether the artifact matches a prompt. Vague descriptions get ignored. ≤ 1024 chars for skills (per agentskills.io). |
 | `when_to_use` | Optional | List of explicit situations. Additional retrieval signal. |
 | `tags` | Optional | List of strings. Used for filtering in `search_artifacts`. |
 | `sensitivity` | Optional | `low` (default), `medium`, `high`. Informational metadata exposed in search and load responses. Reviewer requirements based on sensitivity are enforced in the Git provider's branch protection rather than by the registry. |
@@ -57,9 +94,33 @@ release_notes: "Initial release."
 
 ---
 
+## SKILL.md-only fields (skills)
+
+These fields appear only in `SKILL.md` and only for skills. They come from the agentskills.io specification.
+
+```yaml
+---
+name: run-variance-analysis
+description: Flag unusual variance vs. forecast after month-end close. Use after the close period when reviewing financial performance.
+license: MIT
+compatibility: Requires Python 3.10+ and pandas. Designed for Claude Code or similar.
+metadata:
+  author: example-org
+allowed-tools: Bash(python:*) Read
+---
+```
+
+| Field | Description |
+|:--|:--|
+| `compatibility` | Free-form environment notes (≤ 500 chars). Read by SKILL.md-aware tools to surface preconditions to a reader. If omitted, the Podium adapter derives a compatibility string from `runtime_requirements` and `sandbox_profile` at materialization time for harnesses that consume only the agentskills.io subset. |
+| `metadata` | Open-ended string-to-string map. Use for client-specific properties not defined by the agentskills.io spec. |
+| `allowed-tools` | Experimental. Space-separated list of tools the skill is pre-approved to call. Adapter support varies by harness. |
+
+---
+
 ## Caller-interpreted fields
 
-These fields are stored verbatim and consumed by the host (harness adapter, runtime, etc.) at delivery time. Podium itself doesn't enforce them; the host decides whether and how to honor them.
+These fields live in `ARTIFACT.md`. They are stored verbatim and consumed by the host (harness adapter, runtime, etc.) at delivery time. Podium itself doesn't enforce them; the host decides whether and how to honor them.
 
 ```yaml
 mcpServers:
@@ -101,7 +162,7 @@ sbom:                              # CycloneDX or SPDX inline or referenced
 
 ## Type-specific fields
 
-These only apply to specific types.
+These fields live in `ARTIFACT.md` and apply to specific types only.
 
 ```yaml
 # For type: agent — declared input/output schemas
@@ -153,7 +214,7 @@ target_harnesses: [claude-code, opencode]
 
 ## External resources
 
-For artifacts that ship bytes too large to bundle (the per-package soft cap is 10 MB), reference pre-uploaded objects:
+For artifacts that ship bytes too large to bundle (the per-package soft cap is 10 MB), reference pre-uploaded objects in `ARTIFACT.md`:
 
 ```yaml
 external_resources:
@@ -170,7 +231,7 @@ The registry stores the URL, hash, size, and signature; bytes don't transit the 
 
 ## Provenance markers
 
-Prose in `ARTIFACT.md` can declare provenance to enable differential trust at the host:
+Prose in the manifest body (`SKILL.md` for skills, `ARTIFACT.md` for non-skills) can declare provenance to enable differential trust at the host:
 
 ```markdown
 ---
@@ -207,6 +268,8 @@ When two layers contribute artifacts with the same canonical ID, the higher-prec
 | `license` | Scalar; child wins (lint warning if changed across layers). |
 | `search_visibility` | Scalar; most-restrictive (`direct-only` > `indexed`). |
 
+For skills, the merge applies to fields in their canonical files: `name`, `description`, and `license` merge across `SKILL.md` files; everything else merges across `ARTIFACT.md` files.
+
 See [Extends](extends) for examples and gotchas.
 
 ---
@@ -215,5 +278,5 @@ See [Extends](extends) for examples and gotchas.
 
 - [Artifact types](artifact-types) explains what each `type:` is for.
 - [Domains](domains) covers `DOMAIN.md`, the file that organizes artifacts in a folder hierarchy.
-- [Bundled resources](bundled-resources) covers the layout and size caps for files alongside `ARTIFACT.md`.
+- [Bundled resources](bundled-resources) covers the layout and size caps for files alongside `ARTIFACT.md` and `SKILL.md`.
 - The full schema is in [`spec/04-artifact-model.md`](https://github.com/lennylabs/podium/blob/main/spec/04-artifact-model.md).

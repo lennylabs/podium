@@ -22,10 +22,11 @@ For a small or in-progress catalog, just nest folders. The directory tree is the
 ~/podium-artifacts/
 └── personal/
     ├── hello/
-    │   └── greet/
+    │   └── greet/                 # type: skill
+    │       ├── SKILL.md
     │       └── ARTIFACT.md
     └── deploy/
-        └── check-config/
+        └── check-config/          # type: command
             └── ARTIFACT.md
 ```
 
@@ -52,9 +53,11 @@ Add a `DOMAIN.md` when:
     └── finance/
         └── ap/
             ├── DOMAIN.md          ← the metadata file
-            ├── pay-invoice/
+            ├── pay-invoice/       # type: skill
+            │   ├── SKILL.md
             │   └── ARTIFACT.md
-            └── reconcile-invoice/
+            └── reconcile-invoice/ # type: skill
+                ├── SKILL.md
                 └── ARTIFACT.md
 ```
 
@@ -168,7 +171,7 @@ include:
 
 Important properties:
 
-- **Imports do not change canonical paths.** An artifact has exactly one canonical home (the directory where its `ARTIFACT.md` lives). Imports add appearances under other domains. `search_artifacts` returns the artifact once, with its canonical path and (optionally) the list of domains that import it.
+- **Imports do not change canonical paths.** An artifact has exactly one canonical home (the directory where its `ARTIFACT.md` lives, plus `SKILL.md` for skills). Imports add appearances under other domains. `search_artifacts` returns the artifact once, with its canonical path and (optionally) the list of domains that import it.
 - **Imports are dynamic.** When an artifact is added at a path matched by a glob, this domain picks it up automatically. No `DOMAIN.md` re-ingest needed.
 - **Authoring rights.** Editing a domain's `include:` requires write access to the layer that contains the destination `DOMAIN.md`. Importing does not require any rights in the source path; only that the artifact resolves under some layer the registry has ingested.
 - **Visibility.** Enforced per layer at read time. A caller who can't see the source layer doesn't see the imported artifact under this domain either.

@@ -3,7 +3,7 @@ layout: default
 title: Frontmatter schema
 parent: Reference
 nav_order: 3
-description: Concise field-by-field schema for ARTIFACT.md and DOMAIN.md.
+description: Concise field-by-field schema for ARTIFACT.md, SKILL.md (for skills), and DOMAIN.md.
 ---
 
 # Frontmatter schema
@@ -12,24 +12,28 @@ This page is a concise reference. For prose-style explanations of when to use ea
 
 ---
 
+## Manifest files
+
+Every artifact directory contains an `ARTIFACT.md`. Skill artifacts (`type: skill`) additionally contain a `SKILL.md` to comply with the [agentskills.io](https://agentskills.io/specification) standard. Field allocation across the two files for skills is summarized in the [SKILL.md](#skillmd-for-type-skill) section below; `ARTIFACT.md` for non-skills carries every field listed below.
+
 ## ARTIFACT.md
 
 ### Universal fields
 
-| Field | Type | Required | Description |
-|:--|:--|:--|:--|
-| `type` | enum | yes | `skill`, `agent`, `context`, `command`, `rule`, `hook`, `mcp-server`, or extension type. |
-| `name` | string | yes | Short identifier. |
-| `version` | semver | yes | Author-chosen semver. Once `(artifact_id, version)` is ingested, it's bit-for-bit immutable. |
-| `description` | string | yes | One-line "when should I use this?" |
-| `when_to_use` | list of strings | no | Explicit situations the artifact applies to. |
-| `tags` | list of strings | no | Filter target for `search_artifacts`. |
-| `sensitivity` | enum | no | `low` (default), `medium`, `high`. |
-| `license` | string | no | SPDX identifier. |
-| `search_visibility` | enum | no | `indexed` (default) or `direct-only`. |
-| `deprecated` | bool | no | When `true`, `load_artifact` returns a deprecation warning. |
-| `replaced_by` | string | no | Suggested upgrade target (canonical artifact ID). |
-| `release_notes` | string | no | Free text. |
+| Field | Type | Required | Description | For skills |
+|:--|:--|:--|:--|:--|
+| `type` | enum | yes | `skill`, `agent`, `context`, `command`, `rule`, `hook`, `mcp-server`, or extension type. | In `ARTIFACT.md` |
+| `name` | string | yes | Short identifier. For skills, must match the parent directory name (per agentskills.io). | In `SKILL.md` |
+| `version` | semver | yes | Author-chosen semver. Once `(artifact_id, version)` is ingested, it's bit-for-bit immutable. | In `ARTIFACT.md` |
+| `description` | string | yes | "When should I use this?" ≤ 1024 chars for skills. | In `SKILL.md` |
+| `when_to_use` | list of strings | no | Explicit situations the artifact applies to. | In `ARTIFACT.md` |
+| `tags` | list of strings | no | Filter target for `search_artifacts`. | In `ARTIFACT.md` |
+| `sensitivity` | enum | no | `low` (default), `medium`, `high`. | In `ARTIFACT.md` |
+| `license` | string | no | SPDX identifier. | In `SKILL.md` |
+| `search_visibility` | enum | no | `indexed` (default) or `direct-only`. | In `ARTIFACT.md` |
+| `deprecated` | bool | no | When `true`, `load_artifact` returns a deprecation warning. | In `ARTIFACT.md` |
+| `replaced_by` | string | no | Suggested upgrade target (canonical artifact ID). | In `ARTIFACT.md` |
+| `release_notes` | string | no | Free text. | In `ARTIFACT.md` |
 
 ### Caller-interpreted fields
 
@@ -86,6 +90,42 @@ external_resources:
 <imported text>
 <!-- end imported -->
 ```
+
+For skills, the prose body lives in `SKILL.md`; for non-skills, it lives in `ARTIFACT.md`.
+
+---
+
+## SKILL.md (for type: skill)
+
+A `SKILL.md` carries the [agentskills.io](https://agentskills.io/specification) standard's frontmatter and the agent-facing prose body. For skills, the `ARTIFACT.md` body is empty (a one-line HTML comment pointer is allowed).
+
+### Top-level fields (per agentskills.io)
+
+| Field | Type | Required | Description |
+|:--|:--|:--|:--|
+| `name` | string | yes | 1–64 chars, lowercase Unicode alphanumeric and hyphens, no leading/trailing/consecutive hyphens, must match the parent directory name. |
+| `description` | string | yes | 1–1024 chars. Describes what the skill does and when to use it. |
+| `license` | string | no | License name or reference to a bundled license file. |
+| `compatibility` | string | no | ≤ 500 chars. Free-form environment notes. If omitted, the Podium adapter derives a string from `runtime_requirements` and `sandbox_profile` at materialization time. |
+| `metadata` | map (string → string) | no | Open-ended map for client-specific extension. |
+| `allowed-tools` | string | no | Experimental. Space-separated list of pre-approved tools. |
+
+### Body
+
+Markdown after the frontmatter. The agentskills.io spec recommends ≤ 5K tokens and ≤ 500 lines, with longer reference content factored into `references/`.
+
+### Lint rules
+
+Lint enforces (errors unless noted):
+
+- Both `SKILL.md` and `ARTIFACT.md` exist for `type: skill`.
+- `SKILL.md` `name` matches the parent directory.
+- `SKILL.md` `name` syntax follows the agentskills.io constraints.
+- `SKILL.md` `description` is non-empty and ≤ 1024 chars.
+- `SKILL.md` does not contain Podium-only fields (`type`, `version`, `when_to_use`, etc.).
+- `ARTIFACT.md` does not contain `name`, `description`, or `license` (warning); when present, values must match `SKILL.md` exactly (error on mismatch).
+- `ARTIFACT.md` body is empty or a single HTML comment (warning).
+- `skills-ref validate` passes against `SKILL.md` (warning; suppression flag available).
 
 ---
 
@@ -169,6 +209,8 @@ When two layers contribute a `DOMAIN.md` for the same path:
 ## Spec sources
 
 - `ARTIFACT.md` schema: [`spec/04-artifact-model.md` §4.3](https://github.com/lennylabs/podium/blob/main/spec/04-artifact-model.md#43-artifact-manifest-schema).
+- `SKILL.md` compliance and field allocation: [`spec/04-artifact-model.md` §4.3.4](https://github.com/lennylabs/podium/blob/main/spec/04-artifact-model.md#434-skillmd-compliance-for-type-skill).
 - `DOMAIN.md` schema: [`spec/04-artifact-model.md` §4.5](https://github.com/lennylabs/podium/blob/main/spec/04-artifact-model.md#45-domain-organization).
 - Discovery rendering: [`spec/04-artifact-model.md` §4.5.5](https://github.com/lennylabs/podium/blob/main/spec/04-artifact-model.md#455-discovery-rendering).
 - Cross-layer merge semantics: [`spec/04-artifact-model.md` §4.6](https://github.com/lennylabs/podium/blob/main/spec/04-artifact-model.md#46-layers-and-visibility).
+- agentskills.io standard: [agentskills.io/specification](https://agentskills.io/specification).

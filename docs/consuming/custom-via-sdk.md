@@ -88,7 +88,7 @@ print(artifact.manifest_body)
 artifact.materialize(to="./artifacts/", harness="claude-code")
 ```
 
-`materialize()` runs the configured `HarnessAdapter` over the canonical artifact and writes the result to the destination path. Pass `harness="none"` to write the canonical layout as-is, which is useful when the consuming runtime reads `ARTIFACT.md` directly.
+`materialize()` runs the configured `HarnessAdapter` over the canonical artifact and writes the result to the destination path. Pass `harness="none"` to write the canonical layout as-is, which is useful when the consuming runtime reads `ARTIFACT.md` (and `SKILL.md` for skills) directly.
 
 ---
 
@@ -190,7 +190,7 @@ When a runtime doesn't fit any built-in harness (a specialized agent framework, 
 client = Client.from_env()
 artifact = client.load_artifact("evals/regression-suite/run-week-42", harness="none")
 
-# `none` writes the canonical layout — read ARTIFACT.md directly
+# `none` writes the canonical layout — read ARTIFACT.md (and SKILL.md for skills) directly
 manifest = artifact.frontmatter
 body = artifact.manifest_body
 ```

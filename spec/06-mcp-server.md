@@ -73,7 +73,7 @@ Token rotation is the runtime's responsibility; the MCP server's only obligation
 
 ## 6.4 Workspace Local Overlay
 
-The workspace local overlay is a per-developer set of `ARTIFACT.md` and `DOMAIN.md` files that merge as the **highest-precedence layer in the caller's effective view** (§4.6). It's the path most teams use for in-progress work that isn't ready to share.
+The workspace local overlay is a per-developer set of artifact packages (`ARTIFACT.md` for every type, plus `SKILL.md` for skills) and `DOMAIN.md` files that merge as the **highest-precedence layer in the caller's effective view** (§4.6). It's the path most teams use for in-progress work that isn't ready to share.
 
 **Path resolution.** Every consumer (MCP server, `podium sync`, language SDKs) honors the same lookup:
 
@@ -84,7 +84,7 @@ The workspace local overlay is a per-developer set of `ARTIFACT.md` and `DOMAIN.
 
 The MCP server watches the resolved path via fsnotify and re-indexes on change. `podium sync` reads it once per invocation and again on each watcher event when `--watch` is set. The SDK reads it on each `Client.search_artifacts` and `Client.load_artifact` call (cached for the duration of a `session_id`).
 
-Format: same `ARTIFACT.md` + frontmatter as the registry; merge semantics are identical to registry-side layers.
+Format: same `ARTIFACT.md` (plus `SKILL.md` for skills) and frontmatter as the registry; merge semantics are identical to registry-side layers.
 
 The workspace local overlay is **orthogonal to the registry-side `local` source type** (§4.6): the workspace overlay is merged in by the consumer (MCP server, sync, or SDK) and is visible only to the developer running it, while a registry-side `local`-source layer is read by the registry process and surfaced to whichever identities the layer's visibility declaration allows.
 

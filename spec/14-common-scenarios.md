@@ -8,7 +8,7 @@ A developer keeps artifacts in a local folder and materializes a subset into one
 
 **One-time:**
 
-1. Lay out artifacts in `~/podium-artifacts/` per §4.2 (each artifact a subdirectory containing `ARTIFACT.md`; subdirectories of `~/podium-artifacts/` are layers, §13.11.1).
+1. Lay out artifacts in `~/podium-artifacts/` per §4.2 (each artifact a subdirectory containing `ARTIFACT.md`, plus `SKILL.md` for skills; subdirectories of `~/podium-artifacts/` are layers, §13.11.1).
 2. `podium init --global --registry ~/podium-artifacts/` to write `~/.podium/sync.yaml` with `defaults.registry: ~/podium-artifacts/`. No server needed; the client reads the directory directly.
 
 **Per project:**
@@ -195,7 +195,7 @@ A single developer uses Claude Code on one project and Cursor on another, sharin
 
 A developer iterates on a new artifact in their workspace overlay, then promotes it to a shared layer.
 
-1. Edit `<workspace>/.podium/overlay/finance/cashflow/forecast/ARTIFACT.md`. The MCP server (or sync, or SDK) sees it immediately.
+1. Edit `<workspace>/.podium/overlay/finance/cashflow/forecast/ARTIFACT.md` (and `SKILL.md` if `forecast` is a skill). The MCP server (or sync, or SDK) sees it immediately.
 2. Test the artifact end-to-end in the workspace.
 3. When ready, `git mv` (or copy) the artifact into the team's Git layer repo, commit, open PR.
 4. PR runs `podium lint` and any team-specific checks. Reviewers approve, merge.

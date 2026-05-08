@@ -322,7 +322,7 @@ Hermes natively reads several rule formats: `.claude/rules/*.md`, `.cursor/rules
 
 ## Generic / `none`
 
-For runtimes without a dedicated adapter, or when you want the canonical raw output, set `PODIUM_HARNESS=none`. The MCP server and `podium sync` write the canonical layout as-is, with no harness-specific translation and no field renaming. Consumers (your runtime, an eval harness, custom tooling) read `ARTIFACT.md` and bundled resources directly.
+For runtimes without a dedicated adapter, or when you want the canonical raw output, set `PODIUM_HARNESS=none`. The MCP server and `podium sync` write the canonical layout as-is, with no harness-specific translation and no field renaming. Consumers (your runtime, an eval harness, custom tooling) read `ARTIFACT.md` (and `SKILL.md` for skills) plus bundled resources directly.
 
 ```json
 {

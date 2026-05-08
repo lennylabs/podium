@@ -75,38 +75,42 @@ across projects, run `podium init --global` instead.
 
 ## 3. Write your first skill
 
-A skill is a directory with an `ARTIFACT.md` file at its root. The
-top-level directories under your registry path are _layers_; everything
-below is the artifact namespace. Make a skill called `greet` under
-the `personal` layer:
+A skill is a directory with two manifest files at its root: `SKILL.md` (the [agentskills.io](https://agentskills.io/specification) standard) and `ARTIFACT.md` (Podium's structured frontmatter). The top-level directories under your registry path are _layers_; everything below is the artifact namespace. Make a skill called `greet` under the `personal` layer:
 
 ```bash
 mkdir -p ~/podium-artifacts/personal/hello/greet
-cat > ~/podium-artifacts/personal/hello/greet/ARTIFACT.md <<'EOF'
+
+cat > ~/podium-artifacts/personal/hello/greet/SKILL.md <<'EOF'
 ---
-type: skill
 name: greet
-version: 1.0.0
-description: Greet the user by name and tell them today's date.
-when_to_use:
-  - "When the user greets you or asks who you are."
-tags: [demo, hello-world]
-sensitivity: low
+description: Greet the user by name and tell them today's date. Use when the user greets you or asks who you are.
+license: MIT
 ---
 
 Greet the user by their first name (ask if you don't know it).
 Tell them today's date in a friendly format. Keep it to one or
 two sentences.
 EOF
+
+cat > ~/podium-artifacts/personal/hello/greet/ARTIFACT.md <<'EOF'
+---
+type: skill
+version: 1.0.0
+when_to_use:
+  - "When the user greets you or asks who you are."
+tags: [demo, hello-world]
+sensitivity: low
+---
+
+<!-- Skill body lives in SKILL.md. -->
+EOF
 ```
 
-Two things worth knowing about that file:
+Three things worth knowing about that pair of files:
 
-- **Frontmatter is metadata**, parsed by Podium for indexing,
-  search, and harness-adapter translation. The body below the
-  frontmatter is the prose the agent actually reads.
-- **The directory path is the canonical artifact ID.** Above, that's
-  `personal/hello/greet`. References from other artifacts use this ID.
+- **`SKILL.md` carries the agent-facing content.** The standard's required `name` and `description` sit in its frontmatter; the prose body is what the agent reads.
+- **`ARTIFACT.md` carries Podium's structured frontmatter.** `type`, `version`, `when_to_use`, `tags`, `sensitivity`, and the rest of Podium's schema live here. The body is empty (a one-line HTML comment pointer).
+- **The directory path is the canonical artifact ID.** Above, that's `personal/hello/greet`. References from other artifacts use this ID.
 
 ---
 
@@ -152,8 +156,8 @@ and tell you today's date.
 
 If you're authoring iteratively, run `podium sync --watch` instead
 of `podium sync`. It watches the registry directory with `fsnotify`
-and re-materializes on every change. Save a tweak to `ARTIFACT.md`
-and see it land in `.claude/` immediately.
+and re-materializes on every change. Save a tweak to `SKILL.md`
+(or `ARTIFACT.md`) and see it land in `.claude/` immediately.
 
 ---
 
@@ -162,7 +166,8 @@ and see it land in `.claude/` immediately.
 Now that the loop works, here's where to go:
 
 - **Add more artifacts.** Drop more directories under
-  `~/podium-artifacts/personal/` with their own `ARTIFACT.md` files.
+  `~/podium-artifacts/personal/` with their own `ARTIFACT.md` files
+  (and `SKILL.md` for skills).
   Try a different `type:`: `command`, `context`, `rule`, `hook`,
   `agent`, `mcp-server`. The [authoring guide](../authoring/) has
   the field reference and recipes for each.

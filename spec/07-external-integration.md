@@ -47,7 +47,7 @@ Artifacts enter the registry by being merged into a tracked Git ref (or, for `lo
 
 **Author flow:**
 
-1. Edit `ARTIFACT.md` (and bundled resources) in a checkout of the layer's Git repo.
+1. Edit `ARTIFACT.md` (and `SKILL.md` for skills, plus bundled resources) in a checkout of the layer's Git repo.
 2. Open a PR against the tracked ref. CI runs `podium lint` as a required check.
 3. Reviewers approve per the team's branch protection rules.
 4. Merge.

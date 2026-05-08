@@ -2,7 +2,11 @@
 
 ## 4.1 Artifacts Are Packages of Arbitrary Files
 
-An artifact is a directory with a manifest at its root. The manifest, `ARTIFACT.md`, is a markdown file with YAML frontmatter and prose. Frontmatter is what the registry indexes; prose is what the host reads when the artifact is loaded.
+An artifact is a directory with one or two manifest files at its root.
+
+**Every artifact has an `ARTIFACT.md`.** It is a markdown file with YAML frontmatter that carries Podium's canonical schema (universal fields, caller-interpreted fields, and type-specific fields). The frontmatter is what the registry indexes. For non-skill types, the prose body is what the host reads when the artifact is loaded.
+
+**Skill artifacts (`type: skill`) additionally have a `SKILL.md`** alongside `ARTIFACT.md` to comply with the [Agent Skills specification](https://agentskills.io/specification). `SKILL.md` carries the standard's required frontmatter (`name`, `description`) and any of the standard's optional fields (`license`, `compatibility`, `metadata`, `allowed-tools`); its prose body holds the agent-facing skill instructions. `ARTIFACT.md` carries Podium's structured frontmatter and omits the prose body for skills (a one-line pointer comment is allowed). Field allocation across the two files and the lint rules that govern them are described in §4.3.4.
 
 **Bundled resources alongside the manifest are arbitrary files.** Python scripts, shell scripts, templates, JSON / YAML schemas, evaluation datasets, model weights, binary blobs, or anything else the host needs at runtime. The registry treats these as opaque versioned blobs.
 
@@ -29,19 +33,31 @@ The type system is extensible: deployments register additional types with their 
 
 The type determines indexing, loading semantics, governance requirements, and search ranking. A `context` artifact does not need the same safety review as a `skill` because instructions are more dangerous than reference data.
 
-**Manifest size lint.** A reasonable cap is ~20K tokens of manifest content. Larger reference content should be factored out as a separate `type: context` artifact.
+**Manifest size lint.** A reasonable cap is ~20K tokens of manifest content. Larger reference content should be factored out as a separate `type: context` artifact. For skills, the cap applies to the `SKILL.md` body; the agentskills.io spec recommends keeping `SKILL.md` body content under 5K tokens and ≤ 500 lines, with longer reference material moved into `references/`.
 
-**Package layout example.** A skill that ships with a Python script and a Jinja template:
+**Package layout example (skill).** A skill that ships with a Python script and a Jinja template, following the agentskills.io directory conventions (`scripts/`, `references/`, `assets/`):
 
 ```
 finance/close-reporting/run-variance-analysis/
+  SKILL.md
   ARTIFACT.md
   scripts/
     variance.py
     helpers.py
-  templates/
+  references/
+    variance-explained.md
+  assets/
     variance-report.md.j2
+    output-schema.json
+```
+
+**Package layout example (non-skill).** An agent that ships with input and output schemas:
+
+```
+finance/procurement/vendor-compliance-check/
+  ARTIFACT.md
   schemas/
+    input.json
     output.json
 ```
 
@@ -60,33 +76,39 @@ The registry's authoring layout is a domain hierarchy. Directories are domain pa
 ```
 registry/
 ├── registry.yaml
-├── company-glossary/
+├── company-glossary/                       # type: context — ARTIFACT.md only
 │   └── ARTIFACT.md
 ├── finance/
 │   ├── DOMAIN.md
 │   ├── ap/
 │   │   ├── DOMAIN.md
-│   │   ├── pay-invoice/
+│   │   ├── pay-invoice/                    # type: skill — SKILL.md + ARTIFACT.md
+│   │   │   ├── SKILL.md
 │   │   │   └── ARTIFACT.md
-│   │   └── reconcile-invoice/
+│   │   └── reconcile-invoice/              # type: skill — SKILL.md + ARTIFACT.md
+│   │       ├── SKILL.md
 │   │       ├── ARTIFACT.md
 │   │       └── scripts/
 │   │           └── reconcile.py
 │   └── close-reporting/
-│       └── run-variance-analysis/
+│       └── run-variance-analysis/          # type: skill — SKILL.md + ARTIFACT.md
+│           ├── SKILL.md
 │           ├── ARTIFACT.md
 │           ├── scripts/
-│           └── templates/
+│           ├── references/
+│           └── assets/
 ├── _shared/
 │   └── payment-helpers/
-│       ├── DOMAIN.md             # unlisted: true — exists for imports + search only
-│       ├── routing-validator/
+│       ├── DOMAIN.md                       # unlisted: true — exists for imports + search only
+│       ├── routing-validator/              # type: skill — SKILL.md + ARTIFACT.md
+│       │   ├── SKILL.md
 │       │   └── ARTIFACT.md
-│       └── swift-bic-parser/
+│       └── swift-bic-parser/               # type: skill — SKILL.md + ARTIFACT.md
+│           ├── SKILL.md
 │           └── ARTIFACT.md
 └── engineering/
     └── platform/
-        └── code-change-pr/
+        └── code-change-pr/                 # type: command — ARTIFACT.md only
             └── ARTIFACT.md
 ```
 
@@ -97,6 +119,8 @@ Each layer (§4.6) is rooted at a Git repo or local filesystem path; the directo
 ## 4.3 Artifact Manifest Schema
 
 The manifest frontmatter is YAML; the prose body is markdown. The registry indexes frontmatter for `search_artifacts` and `load_domain`. The prose body is returned inline by `load_artifact`.
+
+For non-skill types, frontmatter and prose both live in `ARTIFACT.md`. For skills, frontmatter lives in `ARTIFACT.md` while prose lives in `SKILL.md`; a small subset of frontmatter fields is mirrored into `SKILL.md` to satisfy the agentskills.io specification (§4.3.4).
 
 ### Universal fields (any artifact type)
 
@@ -202,15 +226,59 @@ external_resources:
 
 The registry stores the URL + hash + size + signature, not the bytes.
 
+### 4.3.4 SKILL.md compliance for `type: skill`
+
+Skill artifacts comply with the [agentskills.io specification](https://agentskills.io/specification). The compliance rules below apply on top of the universal and type-specific schema described above.
+
+**Two manifest files.** A skill artifact directory contains both `SKILL.md` and `ARTIFACT.md`. `SKILL.md` is the agentskills.io manifest read by every SKILL.md-aware tool (the `npx skills` CLI, the public Vercel skills.sh registry, third-party skill validators, and any harness that consumes SKILL.md directly). `ARTIFACT.md` is Podium's structured manifest read by the registry, the MCP server, the SDKs, and `podium sync`.
+
+**Field allocation.** The split keeps `SKILL.md` strictly within the agentskills.io spec. Podium-specific fields stay in `ARTIFACT.md` so they retain their YAML types and so the spec's `skills-ref validate` check passes without warnings.
+
+| Field | SKILL.md | ARTIFACT.md |
+| --- | --- | --- |
+| `name` | Top-level (per spec; matches parent directory name) | Omitted (Podium reads from SKILL.md) |
+| `description` | Top-level (per spec; ≤ 1024 chars) | Omitted (Podium reads from SKILL.md) |
+| `license` | Top-level (per spec) | Omitted (Podium reads from SKILL.md) |
+| `compatibility` | Top-level (per spec; ≤ 500 chars; human-readable string) | Omitted; if not authored, the Podium adapter derives it from `runtime_requirements` and `sandbox_profile` at materialization time for harnesses that consume only the agentskills.io subset |
+| `metadata` | Top-level (per spec; string-to-string map for free-form extension) | Omitted |
+| `allowed-tools` | Top-level (per spec; experimental) | Omitted |
+| `type` | Not present | Top-level (`type: skill`) |
+| `version`, `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes` | Not present | Top-level |
+| `mcpServers`, `requiresApproval`, `runtime_requirements`, `sandbox_profile`, `effort_hint`, `model_class_hint`, `sbom`, `extends`, `target_harnesses`, `external_resources` | Not present | Top-level |
+
+**Body content.** `SKILL.md` carries the agent-facing skill prose body. `ARTIFACT.md` for skills has no prose body; a one-line HTML comment pointer (`<!-- Skill body lives in SKILL.md. -->`) is allowed and ignored by the linter.
+
+**`name` constraints (per the agentskills.io spec).**
+
+- 1–64 characters.
+- Lowercase Unicode alphanumeric (`a-z`, `0-9`) and hyphens.
+- No leading or trailing hyphen.
+- No consecutive hyphens.
+- Matches the parent directory name.
+
+**Directory conventions.** Subfolders inside a skill package follow the agentskills.io conventions: `scripts/` for executable code, `references/` for documentation loaded on demand, `assets/` for templates and data files. Other subfolders are permitted; these three are recognized by the spec and by adapter targets.
+
+**Body size guidance.** The agentskills.io spec recommends the SKILL.md body stay under 5K tokens and ≤ 500 lines, with longer reference content factored into `references/`. Podium's manifest size lint (§4.1) applies to the SKILL.md body for skills; lint warns above 5K tokens and 500 lines, errors above 20K tokens.
+
+**Skill-artifact ingest lint.** For every artifact with `type: skill`:
+
+- Both `SKILL.md` and `ARTIFACT.md` are present (error if either is missing).
+- `SKILL.md` has top-level `name` matching the parent directory and `description` non-empty (error).
+- `SKILL.md` `name` follows the agentskills.io syntax constraints (error).
+- `SKILL.md` does not contain Podium-only fields (`type`, `version`, `when_to_use`, `tags`, etc.); if present, error and recommend moving the field to `ARTIFACT.md`.
+- `ARTIFACT.md` does not contain `name`, `description`, or `license` fields (warning); if present, the values must match `SKILL.md` exactly (error on mismatch).
+- `ARTIFACT.md` body is empty or a single HTML comment (warning otherwise).
+- The `skills-ref validate` reference check from the agentskills.io project passes against `SKILL.md` (warning on failure; lint suppression flag available for cases where the standard's validator is overly strict).
+
 ## 4.4 Bundled Resources
 
-Bundled resources ship with the artifact package and are discovered implicitly from the directory: every file under the artifact's root other than `ARTIFACT.md` is a bundled resource. There is no `resources:` list in frontmatter; what's in the folder ships, and the manifest references files inline in prose.
+Bundled resources ship with the artifact package and are discovered implicitly from the directory: every file under the artifact's root other than `ARTIFACT.md` (and, for skills, `SKILL.md`) is a bundled resource. There is no `resources:` list in frontmatter; what's in the folder ships, and the manifest references files inline in prose.
 
 The registry stores bundled resources content-addressed by SHA-256 in object storage; bytes are deduplicated across all artifact versions within an org's storage namespace. Presigned URLs deliver them at load time.
 
 At materialization (§6.6), resources land at a host-supplied path. The Podium MCP server downloads each resource and writes it atomically (`.tmp` + rename) so partial downloads cannot corrupt a working set.
 
-The ingest-time linter validates that prose references in `ARTIFACT.md` resolve to:
+The ingest-time linter validates that prose references in the manifest body (`SKILL.md` for skills, `ARTIFACT.md` for other types) resolve to:
 
 - Bundled files (existence check)
 - URLs (HTTP HEAD returns 200/3xx)
@@ -325,7 +393,7 @@ This asymmetry exists because the workspace local overlay is merged client-side 
 
 Imports are dynamic: an artifact added at `finance/ap/payments/new-thing/` is automatically picked up by any domain whose `DOMAIN.md` includes `finance/ap/payments/*`; no `DOMAIN.md` re-ingest needed.
 
-**Imports do not change canonical paths.** An artifact has exactly one canonical home (the directory where its `ARTIFACT.md` lives). Imports add additional appearances under other domains. `search_artifacts` returns the artifact once, with its canonical path and (optionally) the list of domains that import it.
+**Imports do not change canonical paths.** An artifact has exactly one canonical home (the directory where its `ARTIFACT.md` lives, plus `SKILL.md` for skills). Imports add additional appearances under other domains. `search_artifacts` returns the artifact once, with its canonical path and (optionally) the list of domains that import it.
 
 **Authoring rights for imports.** Editing a domain's `include:`/`exclude:` requires write access to the layer that contains the destination `DOMAIN.md` (a Git merge or a `local`-source filesystem write). Importing does not require any rights in the source path; only that the artifact resolves under some layer the registry has ingested. Visibility at read time is enforced per layer.
 
@@ -592,7 +660,7 @@ Hybrid retrieval (BM25 + vectors via RRF) needs an embedding for every artifact 
 - `when_to_use` (joined with newlines)
 - `tags` (joined)
 
-The prose body of `ARTIFACT.md` is **not** embedded. It's noisy for retrieval and risks busting embedding-model context limits at the long-tail end. Authors who want richer search recall put discoverability content in `description` and `when_to_use`. The same projection is applied to `search_artifacts` queries when the caller passes a text `query` (the `query` is treated as a free-text search target rather than concatenated with the projection).
+The prose body is **not** embedded (the `SKILL.md` body for skills, the `ARTIFACT.md` body for other types). The body is noisy for retrieval and risks busting embedding-model context limits at the long-tail end. Authors who want richer search recall put discoverability content in `description` and `when_to_use`. The same projection is applied to `search_artifacts` queries when the caller passes a text `query` (the `query` is treated as a free-text search target rather than concatenated with the projection).
 
 **Domain embeddings.** A canonical text projection per domain, built when a `DOMAIN.md` is present:
 

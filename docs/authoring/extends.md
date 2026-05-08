@@ -105,12 +105,21 @@ The org-wide skill points at the org warehouse; the team-shared layer extends it
 Org-wide layer:
 
 ```yaml
+# layers/org-defaults/finance/ap/pay-invoice/SKILL.md
+---
+name: pay-invoice
+description: Pay an approved invoice. Use after invoice approval to submit payment to the vendor.
+license: MIT
+---
+
+Validate the invoice against the warehouse, then submit payment...
+```
+
+```yaml
 # layers/org-defaults/finance/ap/pay-invoice/ARTIFACT.md
 ---
 type: skill
-name: pay-invoice
 version: 1.0.0
-description: Pay an approved invoice.
 sensitivity: medium
 mcpServers:
   - name: finance-warehouse
@@ -119,19 +128,29 @@ mcpServers:
     args: ["-y", "@company/finance-warehouse-mcp"]
 ---
 
-Validate the invoice against the warehouse, then submit payment...
+<!-- Skill body lives in SKILL.md. -->
 ```
 
 Team-shared layer:
 
 ```yaml
+# layers/team-foo/finance/ap/pay-invoice/SKILL.md
+---
+name: pay-invoice
+description: Pay an approved invoice (team Foo). Use after invoice approval to submit payment with the team cost-center code.
+license: MIT
+---
+
+Team-specific addendum: also tag payments with the team cost-center
+code...
+```
+
+```yaml
 # layers/team-foo/finance/ap/pay-invoice/ARTIFACT.md
 ---
 type: skill
-name: pay-invoice
 version: 2.0.0
 extends: finance/ap/pay-invoice@1.x
-description: Pay an approved invoice (team Foo).
 mcpServers:
   - name: finance-warehouse
     transport: stdio
@@ -139,24 +158,25 @@ mcpServers:
     args: ["-y", "@team-foo/finance-warehouse-mcp"]
 ---
 
-Team-specific addendum: also tag payments with the team cost-center
-code...
+<!-- Skill body lives in SKILL.md. -->
 ```
 
 Merged result for a caller who can see both layers: child's `description`, `version`, prose body. `mcpServers` deep-merged by `name`, with the child's entry overriding the parent's (because the merge key matches). `sensitivity: medium` carried from the parent (most-restrictive between unset and `medium`).
 
 ### Tightening sandbox profile
 
-A child can tighten security-relevant fields without redeclaring the rest:
+A child can tighten security-relevant fields in `ARTIFACT.md` without redeclaring the rest:
 
 ```yaml
+# layers/team-foo/platform/deploy-checks/ARTIFACT.md
 ---
 type: skill
-name: deploy-checks
 version: 2.0.0
 extends: platform/deploy-checks@1.x
 sandbox_profile: read-only-fs
 ---
+
+<!-- Skill body lives in SKILL.md. -->
 ```
 
 The parent's `sandbox_profile: unrestricted` is overridden by the child's `read-only-fs` (most-restrictive wins). The rest of the parent (description, prose body, tags, etc.) is unchanged.

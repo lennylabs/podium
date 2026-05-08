@@ -115,7 +115,7 @@ Validates manifests against the type's schema and runs type-specific rules. CI-f
 podium lint <path>
 ```
 
-`<path>` can be an artifact directory (containing `ARTIFACT.md`), a single `ARTIFACT.md` or `DOMAIN.md` file, or a directory tree (recurses into all artifacts). Exits non-zero on lint errors.
+`<path>` can be an artifact directory (containing `ARTIFACT.md`, plus `SKILL.md` for skills), a single `ARTIFACT.md`, `SKILL.md`, or `DOMAIN.md` file, or a directory tree (recurses into all artifacts). Exits non-zero on lint errors.
 
 ---
 

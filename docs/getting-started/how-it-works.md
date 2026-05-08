@@ -69,18 +69,17 @@ Filesystem mode is for solo work, prototypes, and CI. The catalog is
 a folder; `podium sync` reads it directly:
 
 ```
-   ~/podium-artifacts/             ┌─────────────┐
-   ├── personal/                ──→│ podium sync │──→ harness directory
-   │   └── greet/ARTIFACT.md       └─────────────┘    (.claude/, .cursor/, ...)
-   ├── team-shared/                       ▲
-   │   └── ...                            │
-   └── .layer-order                       │
+   ~/podium-artifacts/                            ┌─────────────┐
+   ├── personal/                               ──→│ podium sync │──→ harness directory
+   │   └── greet/{SKILL.md,ARTIFACT.md}           └─────────────┘    (.claude/, .cursor/, ...)
+   ├── team-shared/                                      ▲
+   │   └── ...                                           │
+   └── .layer-order                                      │
                               No daemon, no authentication.
                               The catalog is the directory.
 ```
 
-The artifacts, the file formats (`ARTIFACT.md` and `DOMAIN.md`),
-and the harness adapter behavior are identical across modes. The
+The artifacts, the file formats (`ARTIFACT.md`, `SKILL.md`, and `DOMAIN.md`), and the harness adapter behavior are identical across modes. The
 only thing that changes is whether `podium sync` reaches the
 registry over HTTP or reads it directly from disk. The MCP server
 and language SDKs require a server.

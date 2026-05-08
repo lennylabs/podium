@@ -70,7 +70,8 @@ A filesystem registry rooted at `<registry-path>` is a directory of layer direct
 │   ├── DOMAIN.md
 │   ├── finance/
 │   │   └── close-reporting/
-│   │       └── run-variance-analysis/
+│   │       └── run-variance-analysis/   # type: skill — SKILL.md + ARTIFACT.md
+│   │           ├── SKILL.md
 │   │           └── ARTIFACT.md
 │   └── platform/
 │       └── …
@@ -105,7 +106,8 @@ Either works. Per-project is simpler; shared local is lighter when the registry 
 ## Authoring loop
 
 ```bash
-# Create or edit an artifact in the registry
+# Create or edit a skill artifact in the registry (skills have both SKILL.md and ARTIFACT.md)
+$EDITOR ~/podium-artifacts/team-shared/finance/close-reporting/run-variance-analysis/SKILL.md
 $EDITOR ~/podium-artifacts/team-shared/finance/close-reporting/run-variance-analysis/ARTIFACT.md
 
 # In your project

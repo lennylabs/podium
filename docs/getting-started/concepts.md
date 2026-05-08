@@ -16,27 +16,21 @@ once up front saves time later.
 
 ## Artifact
 
-An **artifact** is a packaged authoring unit: a directory with an
-`ARTIFACT.md` file at its root and any number of bundled resources
-alongside (scripts, templates, schemas, anything).
+An **artifact** is a packaged authoring unit: a directory with an `ARTIFACT.md` file at its root, plus a `SKILL.md` if the artifact is a skill, and any number of bundled resources alongside (scripts, references, assets).
 
 ```
-finance/close-reporting/run-variance-analysis/
-├── ARTIFACT.md           ← the manifest
+finance/close-reporting/run-variance-analysis/   # type: skill
+├── SKILL.md              ← agent-facing prose + the agentskills.io frontmatter
+├── ARTIFACT.md           ← Podium's structured frontmatter
 ├── scripts/
 │   └── variance.py
-└── templates/
-    └── report.md.j2
+└── references/
+    └── variance-explained.md
 ```
 
-The manifest is markdown with YAML frontmatter. The frontmatter is
-what Podium indexes; the prose body is what an agent reads when the
-artifact is loaded.
+Each manifest is markdown with YAML frontmatter. For skills, `SKILL.md` carries the standard's frontmatter (`name`, `description`, plus optional `license`, `compatibility`, `metadata`, `allowed-tools`) and the prose body that the agent reads. `ARTIFACT.md` carries Podium's structured frontmatter (`type`, `version`, `when_to_use`, `tags`, `sensitivity`, and the rest); for skills its body is empty. For non-skill types, `ARTIFACT.md` is the only manifest and carries both frontmatter and prose body.
 
-The directory path is the artifact's **canonical ID**:
-`finance/close-reporting/run-variance-analysis` above. Other
-artifacts reference it by that ID, optionally with `@<semver>` or
-`@sha256:<hash>` for version pinning.
+The directory path is the artifact's **canonical ID**: `finance/close-reporting/run-variance-analysis` above. Other artifacts reference it by that ID, optionally with `@<semver>` or `@sha256:<hash>` for version pinning.
 
 ---
 

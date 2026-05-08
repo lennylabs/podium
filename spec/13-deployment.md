@@ -231,7 +231,8 @@ A filesystem registry rooted at `<registry-path>` is a directory of layer direct
 │   ├── DOMAIN.md
 │   ├── finance/
 │   │   └── close-reporting/
-│   │       └── run-variance-analysis/
+│   │       └── run-variance-analysis/   # type: skill — SKILL.md + ARTIFACT.md
+│   │           ├── SKILL.md
 │   │           └── ARTIFACT.md
 │   └── platform/
 │       └── …

@@ -14,7 +14,7 @@ Reference material organized by surface.
 |:--|:--|
 | [CLI](cli) | Every `podium` subcommand: setup, sync, layer management, search, admin, signing, vulnerability tracking. |
 | [HTTP API](http-api) | The registry's wire surface. Discovery endpoints, materialization, ingest webhooks, scope preview, health. |
-| [Frontmatter schema](frontmatter-schema) | Concise field-by-field schema for `ARTIFACT.md` and `DOMAIN.md`. |
+| [Frontmatter schema](frontmatter-schema) | Concise field-by-field schema for `ARTIFACT.md`, `SKILL.md` (for skills), and `DOMAIN.md`. |
 | [Error codes](error-codes) | Structured error envelope and the full namespace catalog. |
 | [Glossary](glossary) | Vocabulary used across the spec and docs. |
 

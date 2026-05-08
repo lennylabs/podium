@@ -3,23 +3,27 @@ layout: default
 title: Bundled resources
 parent: Authoring
 nav_order: 8
-description: Files that ship alongside ARTIFACT.md (scripts, templates, schemas, datasets) and how to handle large files via external resources.
+description: Files that ship alongside ARTIFACT.md (and SKILL.md, for skills): scripts, references, assets, schemas, datasets, plus how to handle large files via external resources.
 ---
 
 # Bundled resources
 
-Anything in an artifact's directory other than `ARTIFACT.md` is a bundled resource. Python scripts, Jinja templates, JSON schemas, evaluation datasets, binary blobs, model weights, all packaged together with the manifest and shipped to the host at materialization time.
+Anything in an artifact's directory other than `ARTIFACT.md` (and `SKILL.md` for skills) is a bundled resource. Python scripts, Jinja templates, JSON schemas, evaluation datasets, binary blobs, model weights, all packaged together with the manifest and shipped to the host at materialization time.
+
+For skills, the [agentskills.io](https://agentskills.io/specification) standard recommends three conventional subfolders: `scripts/` for executable code, `references/` for documentation loaded on demand, and `assets/` for templates and data files. Other subfolder names are permitted; these three are recognized by SKILL.md-aware tools.
 
 ```
-finance/close-reporting/run-variance-analysis/
+finance/close-reporting/run-variance-analysis/   # type: skill
+├── SKILL.md
 ├── ARTIFACT.md
 ├── scripts/
 │   ├── variance.py
 │   └── helpers.py
-├── templates/
-│   └── variance-report.md.j2
-└── schemas/
-    └── output.json
+├── references/
+│   └── variance-explained.md
+└── assets/
+    ├── variance-report.md.j2
+    └── output-schema.json
 ```
 
 There is no `resources:` list in frontmatter. What's in the folder ships. Reference files inline in prose:
@@ -112,7 +116,7 @@ Hosts with sandbox capability honor the profile. Hosts without it refuse to mate
 
 ## Content provenance
 
-Prose in `ARTIFACT.md` can declare its provenance to enable differential trust at the host:
+Prose in the manifest body (`SKILL.md` for skills, `ARTIFACT.md` for non-skills) can declare its provenance to enable differential trust at the host:
 
 ```markdown
 ---
@@ -132,7 +136,7 @@ Adapters propagate provenance markers to harnesses that support trust regions (C
 
 ## Manifest size lint
 
-A reasonable cap on manifest content is around 20K tokens. Larger reference content should be factored out as a separate `type: context` artifact and referenced from the prose body.
+A reasonable cap on manifest content is around 20K tokens. For skills, the cap applies to the `SKILL.md` body; the agentskills.io spec recommends keeping that body under 5K tokens and ≤ 500 lines, with longer reference material moved into `references/`. Larger reference content can also be factored out as a separate `type: context` artifact and referenced from the prose body.
 
 Lint warns on manifests above the size cap. Authors who hit it should ask whether the prose is genuinely manifest-level (instructions, when_to_use details) or whether it's reference material that wants its own artifact.
 
@@ -144,38 +148,52 @@ Lint warns on manifests above the size cap. Authors who hit it should ask whethe
 
 ```
 finance/close-reporting/run-variance-analysis/
+├── SKILL.md
 ├── ARTIFACT.md
 └── scripts/
     └── variance.py
 ```
 
+`SKILL.md`:
+
 ```yaml
 ---
-type: skill
 name: run-variance-analysis
-version: 1.0.0
-description: Flag unusual variance vs. forecast after month-end close.
-runtime_requirements:
-  python: ">=3.10"
+description: Flag unusual variance vs. forecast after month-end close. Use after the close period when reviewing financial performance.
+license: MIT
 ---
 
 Run `scripts/variance.py` against the closed period. The script
 expects FORECAST_FILE and ACTUALS_FILE environment variables...
 ```
 
+`ARTIFACT.md`:
+
+```yaml
+---
+type: skill
+version: 1.0.0
+runtime_requirements:
+  python: ">=3.10"
+---
+
+<!-- Skill body lives in SKILL.md. -->
+```
+
 ### Skill with a template
 
 ```
 finance/reports/monthly-summary/
+├── SKILL.md
 ├── ARTIFACT.md
-└── templates/
+└── assets/
     └── summary.md.j2
 ```
 
-The prose body references the template:
+The `SKILL.md` body references the template:
 
 ```markdown
-Format the report using `templates/summary.md.j2`. Pass the metrics
+Format the report using `assets/summary.md.j2`. Pass the metrics
 dict as `m` and the period string as `period`.
 ```
 
@@ -183,15 +201,16 @@ dict as `m` and the period string as `period`.
 
 ```
 finance/procurement/vendor-form/
+├── SKILL.md
 ├── ARTIFACT.md
-└── schemas/
+└── assets/
     └── vendor.json
 ```
 
-The prose body references the schema:
+The `SKILL.md` body references the schema:
 
 ```markdown
-Validate the vendor record against `schemas/vendor.json` before
+Validate the vendor record against `assets/vendor.json` before
 submitting. The schema defines required fields and value ranges.
 ```
 
