@@ -131,19 +131,37 @@ When `PODIUM_HARNESS=none` (the default), step 3 is a no-op: the canonical layou
 
 The `HarnessAdapter` translates a canonical artifact into the format a specific harness expects. It runs at materialization time on the MCP server, between fetch and write.
 
-**Built-in adapters** (selected via `PODIUM_HARNESS`):
+**Supported harnesses.** The harnesses below ship with a built-in adapter. Each adapter value is selected via `PODIUM_HARNESS` (or via the per-call `harness:` argument). For per-harness specifics about skills, hooks, plugins, and other harness-native concepts, refer to the harness's own documentation; the harness's documentation is the source of truth.
 
-| Value            | Target                                                                                                                                                                  |
+| Adapter value    | Harness | Documentation |
+| ---------------- | --- | --- |
+| `none`           | Generic / raw output. No harness-specific translation. | n/a |
+| `claude-code`    | Anthropic Claude Code (CLI). | [code.claude.com/docs](https://code.claude.com/docs/) |
+| `claude-desktop` | Anthropic Claude Desktop (desktop chat app). | [claude.com/download](https://claude.com/download), [Skills in Claude](https://support.claude.com/en/articles/12512180-use-skills-in-claude) |
+| `claude-cowork`  | Anthropic Claude Cowork (web product for organizations, claude.ai). | [claude.com/plugins](https://claude.com/plugins), [Manage Cowork plugins](https://support.claude.com/en/articles/13837433-manage-claude-cowork-plugins-for-your-organization) |
+| `cursor`         | Cursor IDE. | [cursor.com/docs](https://cursor.com/docs) |
+| `codex`          | OpenAI Codex (CLI and IDE). | [developers.openai.com/codex](https://developers.openai.com/codex) |
+| `gemini`         | Google Gemini CLI. | [geminicli.com/docs](https://geminicli.com/docs) |
+| `opencode`       | OpenCode. | [opencode.ai/docs](https://opencode.ai/docs) |
+| `pi`             | Pi (pi-mono coding agent). | [github.com/badlogic/pi-mono](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) |
+| `hermes`         | Hermes Agent (Nous Research). | [hermes-agent.nousresearch.com/docs](https://hermes-agent.nousresearch.com/docs/) |
+
+The adapter set grows as new harnesses appear. Custom adapters register through the `HarnessAdapter` SPI (§9.1).
+
+**Adapter outputs.** What each built-in adapter writes, by artifact type:
+
+| Adapter          | Target                                                                                                                                                                  |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `none`           | _(default)_ Writes the canonical layout as-is.                                                                                                                          |
-| `claude-code`    | Writes `.claude/agents/<name>.md` (frontmatter + composed prompt), `.claude/rules/<name>.md` for `type: rule`, and places bundled resources under `.claude/podium/<artifact-id>/`. |
-| `claude-desktop` | Writes a Claude Desktop extension layout (`manifest.json` derived from canonical frontmatter; resources alongside).                                                     |
-| `cursor`         | Writes Cursor's native agent / extension format. For `type: rule`, writes `.cursor/rules/<name>.mdc` with `alwaysApply` / `globs` / `description` per `rule_mode`.      |
-| `gemini`         | Writes Gemini's native agent / extension package layout.                                                                                                                |
-| `opencode`       | Writes OpenCode's native package layout. For `type: rule`, injects into `AGENTS.md` between markers (or writes `.opencode/rules/<name>.md` for `rule_mode: explicit`).  |
-| `codex`          | Writes Codex's native package layout. For `type: rule`, injects into `AGENTS.md` between markers.                                                                       |
+| `none`           | _(default)_ Writes the canonical layout as-is. |
+| `claude-code`    | Writes `.claude/agents/<name>.md` (frontmatter + composed prompt) and `.claude/rules/<name>.md` for `type: rule`. Places skill packages at `.claude/skills/<name>/SKILL.md` (per the agentskills.io standard). Places bundled resources for non-skill types under `.claude/podium/<artifact-id>/`. |
+| `claude-desktop` | Writes a Claude Desktop extension layout (`manifest.json` derived from canonical frontmatter; resources alongside). |
+| `claude-cowork`  | Writes a Claude Cowork plugin layout (`marketplace.json` plus per-plugin folders containing skills, commands, agents, hooks, and MCP server registrations). The output directory tree is intended to be committed to a private GitHub repo that the org admin imports as a private marketplace. |
+| `cursor`         | Writes Cursor's native agent / extension format. For `type: rule`, writes `.cursor/rules/<name>.mdc` with `alwaysApply` / `globs` / `description` per `rule_mode`. |
+| `codex`          | Writes Codex's native package layout. For `type: rule`, injects into `AGENTS.md` between markers. |
+| `gemini`         | Writes Gemini CLI's native package layout. |
+| `opencode`       | Writes OpenCode's native package layout. For `type: rule`, injects into `AGENTS.md` between markers (or writes `.opencode/rules/<name>.md` for `rule_mode: explicit`). |
 | `pi`             | Writes Pi's native layout. For `type: rule`, injects into `AGENTS.md` (project-local `.pi/AGENTS.md` or root `AGENTS.md`); explicit-mode rules at `.pi/rules/<name>.md`. |
-| `hermes`         | Writes Hermes's native layout. For `type: rule`, writes `.claude/rules/<name>.md` (Hermes also reads `.cursor/rules/*.mdc` natively, so cursor-format output works too). |
+| `hermes`         | Writes Hermes Agent's native layout. For `type: rule`, writes `.claude/rules/<name>.md` (Hermes also reads `.cursor/rules/*.mdc` natively, so cursor-format output works too). |
 
 **What an adapter does.** Mechanical translation:
 
@@ -177,19 +195,19 @@ Authors who must use a non-portable feature can declare `target_harnesses:` in f
 
 **Capability matrix (excerpt; maintained in sync with adapter implementations).** Legend: ✓ supported natively, ⚠ supported via fallback (lint warning), ✗ not supported (lint error or `target_harnesses:` opt-out required).
 
-| Field                      | claude-code | cursor | codex | opencode | gemini | pi  | hermes |
-| -------------------------- | ----------- | ------ | ----- | -------- | ------ | --- | ------ |
-| `description`              | ✓           | ✓      | ✓     | ✓        | ✓      | ✓   | ✓      |
-| `mcpServers`               | ✓           | ✓      | ✓     | ✓        | ✓      | ✓   | ✓      |
-| `delegates_to` (subagents) | ✓           | ✗      | ✗     | ✓        | ✗      | ✓   | ✓      |
-| `requiresApproval`         | ✓           | ✗      | ✓     | ✓        | ✗      | ⚠   | ⚠      |
-| `sandbox_profile`          | ✓           | ✗      | ✓     | ✓        | ✗      | ⚠   | ⚠      |
-| `expose_as_mcp_prompt`     | ✓           | ✓      | ✓     | ✓        | ✓      | ✓   | ✓      |
-| `rule_mode: always`        | ✓           | ✓      | ✓     | ✓        | ⚠      | ✓   | ✓      |
-| `rule_mode: glob`          | ⚠           | ✓      | ⚠     | ⚠        | ✗      | ⚠   | ✓      |
-| `rule_mode: auto`          | ⚠           | ✓      | ✗     | ✗        | ✗      | ✗   | ⚠      |
-| `rule_mode: explicit`      | ✓           | ✓      | ✓     | ✓        | ⚠      | ✓   | ✓      |
-| `hook_event` (any)         | ✓           | ✓      | ✗     | ⚠        | ⚠      | ⚠   | ⚠      |
+| Field                      | claude-code | claude-desktop | claude-cowork | cursor | codex | opencode | gemini | pi  | hermes |
+| -------------------------- | ----------- | -------------- | ------------- | ------ | ----- | -------- | ------ | --- | ------ |
+| `description`              | ✓           | ✓              | ✓             | ✓      | ✓     | ✓        | ✓      | ✓   | ✓      |
+| `mcpServers`               | ✓           | ✓              | ✓             | ✓      | ✓     | ✓        | ✓      | ✓   | ✓      |
+| `delegates_to` (subagents) | ✓           | ⚠              | ✓             | ✗      | ⚠     | ✓        | ✗      | ✓   | ✓      |
+| `requiresApproval`         | ✓           | ⚠              | ✓             | ✗      | ✓     | ✓        | ✗      | ⚠   | ⚠      |
+| `sandbox_profile`          | ✓           | ⚠              | ⚠             | ✗      | ✓     | ✓        | ✗      | ⚠   | ⚠      |
+| `expose_as_mcp_prompt`     | ✓           | ✓              | ✓             | ✓      | ✓     | ✓        | ✓      | ✓   | ✓      |
+| `rule_mode: always`        | ✓           | ✓              | ✓             | ✓      | ✓     | ✓        | ⚠      | ✓   | ✓      |
+| `rule_mode: glob`          | ⚠           | ✗              | ⚠             | ✓      | ⚠     | ⚠        | ✗      | ⚠   | ✓      |
+| `rule_mode: auto`          | ⚠           | ✗              | ⚠             | ✓      | ✗     | ✗        | ✗      | ✗   | ⚠      |
+| `rule_mode: explicit`      | ✓           | ✓              | ✓             | ✓      | ✓     | ✓        | ⚠      | ✓   | ✓      |
+| `hook_event` (any)         | ✓           | ✗              | ⚠             | ✓      | ✓     | ⚠        | ⚠      | ⚠   | ⚠      |
 
 The `hook_event` row summarizes hook support at the field level. Per-event coverage (which canonical events from §4.3.5 each adapter translates) is tracked in the adapter implementation rather than in this spec; the row above marks ✓ when the adapter supports the common events (`session_start`, `session_end`, `pre_tool_use`, `post_tool_use`, `stop`, `pre_compact`) and ⚠ when only a subset of canonical events translate. For the harness's own current event surface, refer to the harness's documentation.
 

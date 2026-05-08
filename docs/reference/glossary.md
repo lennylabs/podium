@@ -12,7 +12,7 @@ description: Vocabulary used across the spec and docs.
 - **Canonical artifact ID**: the directory path under the registry root (e.g., `finance/ap/pay-invoice`). All references use this ID, optionally suffixed with `@<semver>` or `@sha256:<hash>`.
 - **Domain**: a node in the catalog hierarchy. Distinct from DNS domain or DDD domain.
 - **Effective view**: the composition of every layer (admin-defined, user-defined, and the workspace local overlay) visible to the caller's identity, in precedence order.
-- **Harness**: the AI runtime hosting an agent (Claude Code, Cursor, Codex, OpenCode, Pi, Hermes, etc.). Used interchangeably with "host" when the runtime context matters.
+- **Harness**: the AI runtime hosting an agent (Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, Gemini CLI, OpenCode, Pi, Hermes, etc.). Used interchangeably with "host" when the runtime context matters. The full roster with documentation links is in [Configure your harness](../consuming/configure-your-harness#supported-harnesses).
 - **Host**: the MCP-speaking system that runs the Podium MCP server alongside its own runtime.
 - **Layer**: a unit of composition with a single source (Git repo, local filesystem path, or a custom source via `LayerSourceProvider`) and a visibility declaration. Admin-defined, user-defined, or the workspace local overlay.
 - **Workspace local overlay**: the workspace-scoped layer sourced from `${PODIUM_OVERLAY_PATH}` by the MCP server's `LocalOverlayProvider`. Highest precedence in the caller's effective view.

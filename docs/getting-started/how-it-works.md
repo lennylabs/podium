@@ -62,7 +62,8 @@ and identity-aware composition runs server-side:
 │ (py, ts)     │          │ (in-process)   │          │ (CLI)          │
 └──────────────┘          └────────────────┘          └────────────────┘
 LangChain, Bedrock,       Claude Code, Cursor,        File-based
-custom orchestrators      OpenCode, Pi, Hermes        harnesses
+custom orchestrators      Cowork, OpenCode, Pi,       harnesses
+                          Hermes
 ```
 
 Filesystem mode is for solo work, prototypes, and CI. The catalog is

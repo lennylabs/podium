@@ -32,6 +32,27 @@ For `podium sync`, the same configuration lives in `<workspace>/.podium/sync.yam
 
 ---
 
+## Supported harnesses
+
+The harnesses below ship with a built-in adapter. For per-harness specifics about skills, hooks, plugins, and other harness-native concepts, refer to the harness's own documentation; the harness's documentation is the source of truth.
+
+| Adapter value    | Harness | Documentation |
+|:-----------------|:--------|:--------------|
+| `none`           | Generic / raw output. No harness-specific translation. | n/a |
+| `claude-code`    | Anthropic Claude Code (CLI). | [code.claude.com/docs](https://code.claude.com/docs/) |
+| `claude-desktop` | Anthropic Claude Desktop (desktop chat app). | [claude.com/download](https://claude.com/download), [Skills in Claude](https://support.claude.com/en/articles/12512180-use-skills-in-claude) |
+| `claude-cowork`  | Anthropic Claude Cowork (web product for organizations, claude.ai). | [claude.com/plugins](https://claude.com/plugins), [Manage Cowork plugins](https://support.claude.com/en/articles/13837433-manage-claude-cowork-plugins-for-your-organization) |
+| `cursor`         | Cursor IDE. | [cursor.com/docs](https://cursor.com/docs) |
+| `codex`          | OpenAI Codex (CLI and IDE). | [developers.openai.com/codex](https://developers.openai.com/codex) |
+| `gemini`         | Google Gemini CLI. | [geminicli.com/docs](https://geminicli.com/docs) |
+| `opencode`       | OpenCode. | [opencode.ai/docs](https://opencode.ai/docs) |
+| `pi`             | Pi (pi-mono coding agent). | [github.com/badlogic/pi-mono](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) |
+| `hermes`         | Hermes Agent (Nous Research). | [hermes-agent.nousresearch.com/docs](https://hermes-agent.nousresearch.com/docs/) |
+
+The adapter set grows as new harnesses appear. Custom adapters register through the `HarnessAdapter` SPI; see [Extensibility](../reference/) in the spec.
+
+---
+
 ## Claude Code
 
 **MCP server** (project-level `.claude/mcp.json` or user-level `~/.claude/mcp.json`):
@@ -100,6 +121,29 @@ podium sync
 **Notes:**
 
 - Limited rule and hook surface. Most artifact types map to extension manifest entries.
+
+---
+
+## Claude Cowork
+
+Cowork is Anthropic's web product for organizations (claude.ai). Plugin distribution to Cowork uses a private GitHub-hosted plugin marketplace that an org admin imports.
+
+**`podium sync`** writes a Claude Cowork plugin layout: a `marketplace.json` plus per-plugin folders containing skills (`SKILL.md`), commands, agents, hooks, and MCP server registrations. The output directory tree is intended to be committed to a private GitHub repo that the org admin imports as a private marketplace.
+
+```bash
+podium sync --harness claude-cowork --target ./cowork-marketplace/
+git -C ./cowork-marketplace/ add . && git -C ./cowork-marketplace/ commit -m "Sync from Podium"
+git -C ./cowork-marketplace/ push
+```
+
+The org admin then imports the repo URL via [Manage Cowork plugins](https://support.claude.com/en/articles/13837433-manage-claude-cowork-plugins-for-your-organization).
+
+**MCP server** is not applicable: Cowork ingests plugins via its private-marketplace flow rather than spawning local MCP servers per session. Use `podium sync` to publish, and Cowork's own admin tools to deploy.
+
+**Notes:**
+
+- Cowork inherits Claude Code's plugin format; skills follow the same `SKILL.md` standard.
+- Org admins control which plugins reach which users via Cowork's per-user provisioning.
 
 ---
 

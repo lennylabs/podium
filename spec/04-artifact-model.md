@@ -276,20 +276,32 @@ Skill artifacts comply with the [agentskills.io specification](https://agentskil
 
 `hook_event` (for `type: hook`) is constrained to a canonical event name from the table below. The harness adapter (§6.7) translates the canonical name to the harness's native event at materialization time.
 
-| Canonical name | Fires when |
-| --- | --- |
-| `session_start` | An agent session begins or resumes. |
-| `session_end` | An agent session terminates. |
-| `user_prompt_submit` | After the user submits a prompt, before the model processes it. Can inject context or block. |
-| `pre_tool_use` | Before a tool call executes. Can block. |
-| `post_tool_use` | After a tool call succeeds. |
-| `post_tool_use_failure` | After a tool call fails (error, timeout, denied). |
-| `subagent_start` | A subagent (delegated child) is spawned. |
-| `subagent_stop` | A subagent finishes. |
-| `stop` | The agent finishes responding (end of turn). |
-| `pre_compact` | Before context compaction. |
-| `post_compact` | After context compaction completes. |
-| `notification` | The harness sends a system notification (waiting for input, permission prompt, idle prompt, and similar). |
+The taxonomy is grouped by concern. The generic tool events (`pre_tool_use`, `post_tool_use`) cover every tool call uniformly; the specific subtypes (`pre_shell_execution`, `pre_mcp_execution`, `pre_read_file`, `post_file_edit`) target a single category and let the adapter pick a more precise harness-native event when one exists. Authors choose the level of specificity that matches the action's intent.
+
+| Canonical name | Group | Fires when |
+| --- | --- | --- |
+| `session_start` | session | An agent session begins or resumes. |
+| `session_end` | session | An agent session terminates. |
+| `user_prompt_submit` | prompt | After the user submits a prompt, before the model processes it. Can inject context or block. |
+| `pre_tool_use` | tool (generic) | Before any tool call executes. Can block. |
+| `post_tool_use` | tool (generic) | After any tool call succeeds. |
+| `post_tool_use_failure` | tool (generic) | After a tool call fails (error, timeout, denied). |
+| `pre_shell_execution` | tool (subtype) | Before a shell command tool call. |
+| `post_shell_execution` | tool (subtype) | After a shell command tool call. |
+| `pre_mcp_execution` | tool (subtype) | Before an MCP tool call. |
+| `post_mcp_execution` | tool (subtype) | After an MCP tool call. |
+| `pre_read_file` | tool (subtype) | Before the agent reads a file. |
+| `post_file_edit` | tool (subtype) | After the agent edits a file. |
+| `permission_request` | permission | The harness requests user permission for a sensitive action. |
+| `permission_denied` | permission | A tool call is denied (by the user, by policy, or by an auto-deny classifier). |
+| `subagent_start` | subagent | A subagent (delegated child) is spawned. |
+| `subagent_stop` | subagent | A subagent finishes. |
+| `stop` | turn | The agent finishes responding (end of turn). |
+| `pre_compact` | compaction | Before context compaction. |
+| `post_compact` | compaction | After context compaction completes. |
+| `notification` | notification | The harness sends a system notification (waiting for input, idle prompt, and similar). |
+
+**Generic vs. subtype.** The adapter must accept either: a generic event (`pre_tool_use`) OR a subtype (`pre_shell_execution`). When the harness emits only the generic event natively, the adapter installs the subtype hook with a tool-name matcher so only matching tool calls fire it. When the harness emits the subtype natively (Cursor's `beforeShellExecution`, for example), the adapter wires it directly. Authors should not declare both a generic hook and the corresponding subtype hook for the same artifact; lint warns when this happens.
 
 **Coverage varies by harness.** No harness today implements every event in the table, and adapter coverage shifts as harnesses introduce or rename events. Authors choose an event from the canonical list; if the configured harness adapter does not support that event, materialization for that harness is a no-op and lint warns at ingest. Authors who want to restrict materialization to a specific subset declare `target_harnesses:` (§4.3 universal fields).
 

@@ -30,7 +30,7 @@ Podium supports multiple setups to meet the needs of single developers and large
 
 Highlights:
 
-- **Author once, deliver anywhere.** Pluggable harness adapters translate canonical artifacts into Claude Code, Claude Desktop, Cursor, OpenCode, Gemini, Codex, Pi, Hermes, or your own runtime.
+- **Author once, deliver anywhere.** Pluggable harness adapters translate canonical artifacts into Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, Gemini CLI, OpenCode, Pi, Hermes, or your own runtime. The full roster with documentation links is in [Configure your harness](consuming/configure-your-harness#supported-harnesses).
 - **Artifact organization based on domains and subdomains.** Keep artifacts organized in folders and subfolders, where each folder defines a domain.
 - **Selective materialization.** Sync only a subset of the catalog into your workspace. Define profiles to quickly switch between scopes.
 - **Layered composition.** Compose your catalog from multiple sources with deterministic merge and explicit precedence. (Requires the Podium registry server.)

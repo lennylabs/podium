@@ -14,7 +14,7 @@ Podium catalogs an organization's authored AI agent know-how and delivers it int
 
 The features that distinguish Podium from adjacent products:
 
-- **Cross-harness delivery.** A pluggable harness adapter translates the canonical artifact format into Claude Code, Claude Desktop, Cursor, OpenCode, Gemini, Codex, Pi, Hermes, or a custom runtime.
+- **Cross-harness delivery.** A pluggable harness adapter translates the canonical artifact format into Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, Gemini CLI, OpenCode, Pi, Hermes, or a custom runtime. The full roster with documentation links is in [Configure your harness](../consuming/configure-your-harness#supported-harnesses).
 - **Domain-organized catalog.** Folders and subfolders define the domain hierarchy under one canonical tree.
 - **Selective materialization.** `podium sync` materializes the subset of the catalog declared by a profile, instead of the whole tree.
 - **Layered composition.** Multiple sources compose into one effective view with deterministic merge, explicit precedence, and `extends:`-based inheritance. Requires the registry server.

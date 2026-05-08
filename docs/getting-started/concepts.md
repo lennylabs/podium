@@ -143,9 +143,11 @@ the Git host. Podium does not duplicate them.
 ## Harness
 
 A **harness** is the AI runtime hosting an agent: Claude Code,
-Cursor, OpenCode, Codex, Gemini, Pi, Hermes, Claude Desktop, or a
-custom runtime. Harnesses have different file layouts, different
-frontmatter conventions, and different rule semantics.
+Claude Desktop, Claude Cowork, Cursor, Codex, Gemini CLI, OpenCode,
+Pi, Hermes, or a custom runtime. Harnesses have different file
+layouts, different frontmatter conventions, and different rule
+semantics. The full roster with documentation links is in
+[Configure your harness](../consuming/configure-your-harness#supported-harnesses).
 
 The **harness adapter** is the translator. At materialization time,
 the configured adapter takes the canonical artifact and writes it

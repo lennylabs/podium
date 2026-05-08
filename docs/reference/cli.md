@@ -38,7 +38,7 @@ podium init [--global | --local]
 Value flags:
 
 - `--registry <url-or-path>`: server URL (HTTP) or filesystem path.
-- `--harness <name>`: `none`, `claude-code`, `claude-desktop`, `cursor`, `gemini`, `opencode`, `codex`, `pi`, `hermes`.
+- `--harness <name>`: `none`, `claude-code`, `claude-desktop`, `claude-cowork`, `cursor`, `codex`, `gemini`, `opencode`, `pi`, `hermes`. See [Configure your harness](../consuming/configure-your-harness#supported-harnesses) for the roster with documentation links.
 - `--target <path>`: destination for materialization.
 - `--standalone`: shortcut for `--registry http://127.0.0.1:8080`.
 - `--force`: overwrite an existing file.

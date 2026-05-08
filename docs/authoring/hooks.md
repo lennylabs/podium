@@ -30,22 +30,78 @@ hook_action: |
 
 ## Canonical events
 
-The canonical event taxonomy stays harness-agnostic. The adapter does the translation.
+The canonical event taxonomy stays harness-agnostic. The adapter does the translation. Events are grouped by concern.
+
+**Session lifecycle**
 
 | `hook_event` | Fires when |
 |:--|:--|
 | `session_start` | An agent session begins or resumes. |
 | `session_end` | An agent session terminates. |
+
+**Prompt**
+
+| `hook_event` | Fires when |
+|:--|:--|
 | `user_prompt_submit` | After the user submits a prompt, before the model processes it. Can inject context or block. |
-| `pre_tool_use` | Before a tool call executes. Can block. |
-| `post_tool_use` | After a tool call succeeds. |
+
+**Tool calls (generic)**
+
+These cover every tool call regardless of the underlying tool.
+
+| `hook_event` | Fires when |
+|:--|:--|
+| `pre_tool_use` | Before any tool call executes. Can block. |
+| `post_tool_use` | After any tool call succeeds. |
 | `post_tool_use_failure` | After a tool call fails (error, timeout, denied). |
+
+**Tool calls (subtypes)**
+
+Subtype events target a specific kind of tool call. Use them when the action only applies to that category (e.g., a formatter on file edits, a secrets scanner on shell commands). The adapter wires the subtype to the harness's native subtype event when one exists, or installs a generic hook with a tool-name matcher otherwise.
+
+| `hook_event` | Fires when |
+|:--|:--|
+| `pre_shell_execution` | Before a shell command tool call. |
+| `post_shell_execution` | After a shell command tool call. |
+| `pre_mcp_execution` | Before an MCP tool call. |
+| `post_mcp_execution` | After an MCP tool call. |
+| `pre_read_file` | Before the agent reads a file. |
+| `post_file_edit` | After the agent edits a file. |
+
+Don't declare both a generic hook (`pre_tool_use`) and the corresponding subtype hook (`pre_shell_execution`) for the same artifact; lint warns when this happens. Pick one level of specificity.
+
+**Permission**
+
+| `hook_event` | Fires when |
+|:--|:--|
+| `permission_request` | The harness requests user permission for a sensitive action. |
+| `permission_denied` | A tool call is denied (by the user, by policy, or by an auto-deny classifier). |
+
+**Subagent**
+
+| `hook_event` | Fires when |
+|:--|:--|
 | `subagent_start` | A subagent (delegated child) is spawned. |
 | `subagent_stop` | A subagent finishes. |
+
+**Turn**
+
+| `hook_event` | Fires when |
+|:--|:--|
 | `stop` | The agent finishes responding (end of turn). |
+
+**Compaction**
+
+| `hook_event` | Fires when |
+|:--|:--|
 | `pre_compact` | Before context compaction. |
 | `post_compact` | After context compaction completes. |
-| `notification` | The harness sends a system notification (waiting for input, permission prompt, idle prompt, and similar). |
+
+**Notifications**
+
+| `hook_event` | Fires when |
+|:--|:--|
+| `notification` | The harness sends a system notification (waiting for input, idle prompt, and similar). |
 
 ---
 
@@ -53,12 +109,7 @@ The canonical event taxonomy stays harness-agnostic. The adapter does the transl
 
 Not every harness implements every event in the canonical list. When the configured harness adapter does not support the chosen event, materialization for that harness is a no-op and lint warns at ingest. Authors who want to restrict materialization to a specific subset declare `target_harnesses:` in frontmatter.
 
-For the events a specific harness emits, refer to that harness's hook documentation. The harness's own docs are the source of truth, since each vendor's surface evolves independently.
-
-- Claude Code: [code.claude.com/docs/en/hooks](https://code.claude.com/docs/en/hooks)
-- Cursor: [cursor.com/docs/hooks](https://cursor.com/docs/hooks)
-- Gemini CLI: [geminicli.com/docs/hooks](https://geminicli.com/docs/hooks)
-- OpenCode: [opencode.ai/docs/plugins](https://opencode.ai/docs/plugins)
+For the events a specific harness emits, refer to that harness's hook documentation. The harness's own docs are the source of truth, since each vendor's surface evolves independently. The full roster of supported harnesses (with adapter values and documentation links) is in [Configure your harness](../consuming/configure-your-harness#supported-harnesses).
 
 ---
 
