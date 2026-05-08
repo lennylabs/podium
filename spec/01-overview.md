@@ -2,7 +2,7 @@
 
 ## 1.1 What Podium Is
 
-**Podium is a control plane for managing and serving AI agent artifacts at scale**: skills, agents, contexts, prompts, MCP server registrations, and any extension type a deployment registers. One catalog, one identity model, one ordered set of layers, one dependency graph, one audit stream, one signing scheme, applied across every artifact type the catalog holds.
+**Podium is a control plane for managing and serving AI agent artifacts at scale**: skills, agents, contexts, commands, rules, hooks, MCP server registrations, and any extension type a deployment registers. One catalog, one identity model, one ordered set of layers, one dependency graph, one audit stream, one signing scheme, applied across every artifact type the catalog holds.
 
 Two pieces:
 
@@ -17,7 +17,7 @@ Authoring lives in Git (or, for standalone and small-team installations, in a lo
 What Podium provides:
 
 - **Layered composition with deterministic merge.** An ordered list of layers (admin-defined, user-defined, and the workspace local overlay) composes per request with explicit precedence and no silent shadowing. `extends:` lets a higher-precedence artifact inherit and refine a lower one without forking. Most-restrictive-wins for security fields; last-layer-wins for descriptions.
-- **Type heterogeneity as a first principle.** Skills are one of several first-class types. Agents, contexts, prompts, and MCP server registrations sit alongside; extension types register through a `TypeProvider` SPI. Cross-type dependency edges (an agent's `delegates_to:` another agent; a skill's `mcpServers:` references that resolve to `mcp-server`-type artifacts) feed impact analysis.
+- **Type heterogeneity as a first principle.** Skills are one of several first-class types. Agents, contexts, commands, rules, hooks, and MCP server registrations sit alongside; extension types register through a `TypeProvider` SPI. Cross-type dependency edges (an agent's `delegates_to:` another agent; a skill's `mcpServers:` references that resolve to `mcp-server`-type artifacts) feed impact analysis.
 - **Governance built in.** Per-layer visibility, classification metadata, freeze windows, signing, hash-chained audit, SBOM ingestion, and CVE tracking are first-class. Authoring controls (review requirements, code ownership) live in the Git provider's branch protection. Podium does not duplicate them.
 - **Lazy materialization at scale.** Sessions can start empty (MCP path) or with the user's effective view pre-synced (file path). Catalogs of thousands of artifacts don't pollute the system prompt; the agent navigates and loads what it needs.
 - **One canonical authoring format, multiple delivery formats.** Artifacts are authored in a uniform Podium format. The configured `HarnessAdapter` translates at delivery time for harnesses that have native conventions (and is a no-op for runtimes that prefer the canonical layout).
@@ -31,14 +31,14 @@ What Podium is not:
 
 ## 1.2 Problem Statement
 
-Organizations adopting AI accumulate large libraries of authored content of many kinds: skills, agents, contexts, prompts, MCP server registrations, evaluation datasets, and more. As these libraries grow, several problems tend to emerge together:
+Organizations adopting AI accumulate large libraries of authored content of many kinds: skills, agents, contexts, commands, rules, hooks, MCP server registrations, evaluation datasets, and more. As these libraries grow, several problems tend to emerge together:
 
 1. **Capability saturation.** Exposing thousands of skills, prompts, or tool definitions to a model degrades planning quality. Hosts need to see only what's relevant.
 2. **Discoverability at scale.** A multi-domain catalogue with thousands of items shared across many teams needs a structured discovery model. A flat list does not work.
 3. **Visibility control.** Different users see different subsets of the catalog. The registry is the central enforcement point on every read.
 4. **Layered composition.** Organization-wide content, team-specific content, individuals' personal artifacts, and workspace experiments need to compose deterministically with clear precedence and no silent shadowing.
 5. **Governance, classification, lifecycle.** Sensitivity labels, ownership, deprecation paths, and reverse-dependency impact analysis need to be first-class.
-6. **Type heterogeneity.** Every artifact type fits in one registry: skills, agents, context bundles, prompts, MCP server registrations, eval datasets, model files. One storage and discovery model, plus dependency edges that cross types (e.g., an agent's `delegates_to:` another agent; a skill's `mcpServers:` resolving to `mcp-server`-type artifacts).
+6. **Type heterogeneity.** Every artifact type fits in one registry: skills, agents, contexts, commands, rules, hooks, MCP server registrations, eval datasets, and model files. One storage and discovery model, plus dependency edges that cross types (e.g., an agent's `delegates_to:` another agent; a skill's `mcpServers:` resolving to `mcp-server`-type artifacts).
 7. **Heterogeneous consumers.** Agent runtimes, build pipelines, terminal CLIs, evaluation harnesses, and other AI systems all read from the same catalogue; none should need its own copy. Some speak MCP; many do not.
 8. **Cross-harness portability.** The same artifact should be deliverable into Claude Code, Cursor, Codex, Gemini, or a custom runtime without forking per harness. Per-harness convention sprawl is an authoring tax.
 
@@ -65,7 +65,7 @@ Podium is overkill for a small catalog in a single harness with one author. A fl
 
 - **Catalog size.** Browsing-by-directory and listing artifacts in a system prompt both degrade as the catalog grows. Lazy discovery (§3) and per-domain navigation help once the working set no longer fits comfortably in context.
 - **Cross-harness delivery.** "Author once, deliver anywhere" is useful even at small scale once a team is targeting more than one harness; anything beats forking per harness.
-- **Multiple artifact types.** A single dependency graph across skills, agents, contexts, prompts, and MCP server registrations beats N type-specific stores once a catalog has more than one type.
+- **Multiple artifact types.** A single dependency graph across skills, agents, contexts, commands, rules, hooks, and MCP server registrations beats N type-specific stores once a catalog has more than one type.
 - **Multiple contributors.** Per-layer visibility, classification, and audit start to pay off as the number of contributors and the diversity of audiences grow.
 
 A solo developer with a handful of skills in one harness doesn't need Podium. A large team with mixed artifact types across several harnesses, contributing to a catalog used by many audiences, can get substantial value from it.

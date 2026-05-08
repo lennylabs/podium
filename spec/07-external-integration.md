@@ -171,7 +171,7 @@ The sync command reads the caller's effective view (the composed layer list afte
 
 `podium sync` works against either kind of registry source: a server (URL) or a local filesystem (path); see §7.5.2 for dispatch and §13.11 for filesystem-specific behavior. Against a server source, sync uses the same identity providers as the MCP server, the same content cache, and the same harness adapters.
 
-The sync model is type-agnostic: skills, agents, contexts, prompts, and `mcp-server` registrations all sync through the same path; the harness adapter decides where each type lands.
+The sync model is type-agnostic: skills, agents, contexts, commands, rules, hooks, and `mcp-server` registrations all sync through the same path; the harness adapter decides where each type lands.
 
 **`--dry-run`** resolves the artifact set against the current scope and prints it without writing. Default output is human-readable; `--json` produces a structured envelope (`{profile, target, harness, scope, artifacts: [{id, version, type, layer}, ...]}`) for piping into `jq`.
 
