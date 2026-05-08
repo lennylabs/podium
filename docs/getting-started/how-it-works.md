@@ -75,14 +75,15 @@ a folder; `podium sync` reads it directly:
    ├── team-shared/                       ▲
    │   └── ...                            │
    └── .layer-order                       │
-                              No daemon. No port. No auth.
+                              No daemon, no authentication.
                               The catalog is the directory.
 ```
 
-Same artifacts, same `ARTIFACT.md` and `DOMAIN.md` formats, same
-adapter behavior. The only thing that changes is whether `podium
-sync` reaches the registry over HTTP or reads it directly from disk.
-The MCP server and language SDKs require a server.
+The artifacts, the file formats (`ARTIFACT.md` and `DOMAIN.md`),
+and the harness adapter behavior are identical across shapes. The
+only thing that changes is whether `podium sync` reaches the
+registry over HTTP or reads it directly from disk. The MCP server
+and language SDKs require a server.
 
 ---
 
@@ -108,8 +109,8 @@ visibility to the registry, then run the adapter and write to disk
 locally.
 
 For filesystem-source deployments, only `podium sync` and the
-filesystem-aware shared library are involved. No Postgres, no
-object storage, no auth, no registry process.
+filesystem-aware shared library are involved. There is no Postgres,
+no object storage, no authentication, and no registry process.
 
 ---
 
@@ -120,9 +121,10 @@ today; graduate when you outgrow it.
 
 ### Filesystem
 
-A directory of files; no daemon, no port, no auth. `podium sync`
-reads the directory directly, applies layer composition and the
-harness adapter, and writes to your harness's destination.
+A directory of files, with no daemon and no authentication.
+`podium sync` reads the directory directly, applies layer
+composition and the harness adapter, and writes to your harness's
+destination.
 
 - **Who it's for.** Individual developers and small teams. Solo
   workflows keep the directory local; small teams commit it to git

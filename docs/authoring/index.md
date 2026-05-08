@@ -14,8 +14,8 @@ Reference for writing artifacts. Each page below covers one topic.
 |:--|:--|
 | [Your first artifact](your-first-artifact) | Step-by-step from blank directory to materialized output. Picks up from the [quickstart](../getting-started/quickstart): bundled scripts, runtime requirements, watch mode, lint. |
 | [Artifact types](artifact-types) | The first-class types: `skill`, `agent`, `context`, `command`, `rule`, `hook`, `mcp-server`. |
-| [Frontmatter reference](frontmatter-reference) | Every field, what it does, when to use it. |
-| [Domains](domains) | Folders and subfolders as the catalog structure. `DOMAIN.md`, keywords, featured artifacts, the prose body, discovery rendering knobs. |
+| [Frontmatter reference](frontmatter-reference) | Field-by-field reference for the YAML frontmatter in `ARTIFACT.md`. |
+| [Domains](domains) | How folders and subfolders structure the catalog, and how `DOMAIN.md` adds descriptions, keywords, featured artifacts, the prose body, and discovery rendering knobs. |
 | [Rule modes](rule-modes) | The `rule_mode` values (`always`, `glob`, `auto`, `explicit`) and how each harness honors them. |
 | [Hooks](hooks) | Lifecycle observers with `hook_event` and `hook_action`. |
 | [Extends](extends) | Cross-layer inheritance with `extends:`. |

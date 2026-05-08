@@ -27,7 +27,7 @@ Most small teams can stay on filesystem mode (see [Solo / filesystem](solo-files
 podium serve --standalone --layer-path /path/to/podium-artifacts/
 ```
 
-That's it. One binary, one process. The standalone server includes:
+That command runs a single process. The standalone server includes:
 
 | Component | Backend in standalone |
 |:--|:--|
@@ -37,9 +37,9 @@ That's it. One binary, one process. The standalone server includes:
 | Embedding provider | `embedded-onnx` (bundled `bge-small-en-v1.5`, ~30 MB) |
 | Identity provider | Optional. Public mode (no auth) by default; `oauth-device-code` can be enabled. |
 
-No Postgres. No S3. No external IdP required.
+The standalone shape requires no Postgres, no S3, and no external identity provider.
 
-The same registry binary serves the standalone shape and the standard shape. Standalone is a deployment configuration, not a separate build.
+The same registry binary serves the standalone shape and the standard shape. Standalone is a deployment configuration; it is not a separate build.
 
 ---
 
@@ -126,7 +126,7 @@ Migration is mechanical:
 2. Each developer changes `<workspace>/.podium/sync.yaml`:
    - Replace `defaults.registry: ./.podium/registry/` (or whatever path) with `defaults.registry: https://podium.your-team.example`.
    - Optional: add the Podium MCP server entry to the harness's MCP config so the agent can call meta-tools at runtime.
-3. Done. Authoring loop unchanged — still a git PR + merge against the same registry repo. The standalone server picks up changes via `podium layer reingest` or a watcher.
+3. The authoring loop is unchanged: git PR and merge against the same registry repo. The standalone server picks up changes via `podium layer reingest` or a watcher.
 
 The shared library does the same parsing, composition, and adapter work in both shapes. Output is bit-identical for the same target and profile, so end-user behavior is preserved across the cut-over.
 

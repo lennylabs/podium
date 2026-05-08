@@ -8,15 +8,15 @@ description: The lightest Podium setup — a folder of artifacts, the podium CLI
 
 # Solo / filesystem
 
-The lightest Podium shape. The catalog is a directory tree on disk; `podium sync` reads it directly and writes harness-native files. No daemon, no port, no auth. Suitable for solo work, evaluation, prototypes, CI build steps, and small teams that share the catalog via a Git repo.
+The lightest Podium shape. The catalog is a directory tree on disk; `podium sync` reads it directly and writes harness-native files, with no daemon and no authentication. Suitable for solo work, evaluation, prototypes, CI build steps, and small teams that share the catalog via a Git repo.
 
 ---
 
 ## What's running
 
-Just the `podium` CLI. No server process. No database. No identity provider.
+The only running component is the `podium` CLI. There is no server process, no database, and no identity provider.
 
-`podium sync` runs the same shared Go library functions the server would run behind its HTTP API: parsers, glob resolver, layer composer, `extends:` resolver, harness adapters, lint rules, atomic materialization. The library is the single behavioral surface across deployment shapes; migration between shapes preserves output.
+`podium sync` runs the same shared Go library functions the server would run behind its HTTP API: parsers, glob resolver, layer composer, `extends:` resolver, harness adapters, lint rules, and atomic materialization. The library is the single behavioral surface across deployment shapes; migration between shapes preserves output.
 
 ---
 
@@ -89,7 +89,7 @@ The workspace local overlay (`<workspace>/.podium/overlay/`) sits on top of the 
 
 The registry is just files. Sharing across developers means sharing the directory however you'd share any folder. Common choices:
 
-- **Committed to git.** The registry directory is a git repo (or part of one); every developer who clones has the same catalog. Authoring goes through git PR + merge. Each developer's `git pull` is their ingest; the git history doubles as the audit trail. No shared-state coordination, no runtime conflicts.
+- **Committed to git.** The registry directory is a git repo (or part of one); every developer who clones has the same catalog. Authoring goes through git PR and merge. Each developer's `git pull` is their ingest; the git history doubles as the audit trail. There is no shared-state coordination and no runtime conflicts.
 - **Network share or sync service.** Dropbox, iCloud, OneDrive, an NFS mount. Works; less audit signal than git.
 - **Periodic rsync.** A scheduled pull from a canonical location.
 

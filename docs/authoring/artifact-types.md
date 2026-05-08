@@ -80,7 +80,7 @@ You are a vendor compliance reviewer. Given a vendor record...
 
 ## context
 
-A `context` artifact is pure reference material. Style guides, glossaries, API references, large knowledge bases. The agent reads it; nothing more.
+A `context` artifact contains pure reference material such as style guides, glossaries, API references, and large knowledge bases.
 
 ```yaml
 ---

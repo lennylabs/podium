@@ -3,7 +3,7 @@ layout: default
 title: Quickstart
 parent: Getting Started
 nav_order: 1
-description: Install Podium, write one skill, see it load in Claude Code. Five minutes, no daemon, no auth.
+description: Install Podium, write one skill, and see it load in Claude Code. Five minutes, with no daemon and no authentication required.
 ---
 
 # Quickstart
@@ -23,8 +23,6 @@ guide](../deployment/) walks the next steps.
   harness](../consuming/configure-your-harness)). The walkthrough
   below uses Claude Code; the commands are identical for other
   harnesses with `--harness <name>` swapped.
-
-That's the entire prerequisite list.
 
 ---
 

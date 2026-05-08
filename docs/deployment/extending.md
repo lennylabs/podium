@@ -61,7 +61,7 @@ The SPI shapes are designed today to make that transition source-compatible. Plu
 **Constraints on every SPI method:**
 
 - **Cancellable.** Every method takes a `context.Context` (or equivalent) as the first parameter. Long-running work checks for cancellation; deadlines are respected.
-- **Wire-serializable inputs and outputs.** Every argument and return value is structurally serializable — primitives, slices, maps, and structs whose fields are themselves serializable. No Go channels, no closures, no `func` types, no `interface{}` without a stable encoding, no opaque pointers to in-process state.
+- **Wire-serializable inputs and outputs.** Every argument and return value is structurally serializable: primitives, slices, maps, and structs whose fields are themselves serializable. No Go channels, no closures, no `func` types, no `interface{}` without a stable encoding, and no opaque pointers to in-process state.
 - **No shared in-process state across calls.** State the plugin needs across calls is passed explicitly per method (e.g., a session token, a snapshot ID, a cursor). Plugins MUST NOT rely on package-level variables, singletons, or registered callbacks set at init time.
 - **Structured errors.** Failures are returned as structured envelopes — `{code, message, retryable, details}` — not as opaque Go error chains. Codes use the namespacing in §6.10 of the spec.
 - **Restartable long-lived operations.** Subscriptions, watchers, and streaming results are modeled as cursor-style protocols (the registry holds the cursor; the plugin can be killed and respawned without losing track of where it was). Push-style callback registration is avoided in favor of pull-style polling or explicit re-subscribe with a resume token.

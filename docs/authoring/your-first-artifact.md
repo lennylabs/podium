@@ -8,7 +8,7 @@ description: From the quickstart's one-file skill to a richer artifact with a bu
 
 # Your first artifact
 
-This page picks up from the [quickstart](../getting-started/quickstart) and adds the pieces a real artifact uses: a bundled script, fuller frontmatter, watch-mode iteration, and a lint check.
+This page picks up from the [quickstart](../getting-started/quickstart) and adds a few additional pieces: a bundled script, fuller frontmatter, watch-mode iteration, and a lint check.
 
 ---
 
