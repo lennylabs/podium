@@ -107,7 +107,7 @@ Don't declare both a generic hook (`pre_tool_use`) and the corresponding subtype
 
 ## Coverage varies by harness
 
-Not every harness implements every event in the canonical list. When the configured harness adapter does not support the chosen event, materialization for that harness is a no-op and lint warns at ingest. Authors who want to restrict materialization to a specific subset declare `target_harnesses:` in frontmatter.
+Not every harness implements every event in the canonical list. When the configured harness adapter does not support the chosen event, lint rejects ingest unless `target_harnesses:` excludes the unsupported harness. The capability matrix in [§6.7.1 of the spec](https://github.com/lennylabs/podium/blob/main/spec/06-mcp-server.md#671-the-authors-burden) tracks per-(field, harness) support.
 
 For the events a specific harness emits, refer to that harness's hook documentation. The harness's own docs are the source of truth, since each vendor's surface evolves independently. The full roster of supported harnesses (with adapter values and documentation links) is in [Configure your harness](../consuming/configure-your-harness#supported-harnesses).
 

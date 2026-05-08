@@ -68,6 +68,6 @@
 
 - **Example artifact registry**: multi-domain demo with diverse types (skill, agent, context, command, rule, hook, mcp-server), diverse bundled file types, multiple layers exercising every visibility mode (`public`, `organization`, `groups`, `users`), at least one user-defined layer, signed artifacts at multiple sensitivities.
 
-- **Rule mode adapter conformance**: each first-class harness adapter materializes a `type: rule` fixture across all four `rule_mode` values; supported modes (✓ in §6.7.1) produce the expected harness-native output; fallback modes (⚠) produce the documented degraded output and emit a lint warning; unsupported modes (✗) fail with a structured error and the artifact is not written.
+- **Rule mode adapter conformance**: each first-class harness adapter materializes a `type: rule` fixture across all four `rule_mode` values; supported modes (✓ in §6.7.1) produce the expected harness-native output; fallback modes (⚠) produce the documented degraded output and emit a lint warning; unsupported modes (✗) cause lint to reject ingest unless `target_harnesses:` excludes the unsupported harness.
 
 - **Hook materialization**: a `type: hook` artifact materializes into the harness's native lifecycle-event location for adapters that mark `hook_event` as ✓ in §6.7.1; for ⚠ adapters, the hook lands in a documented fallback path with a warning; for ✗ adapters, lint rejects ingest unless `target_harnesses:` excludes the harness.

@@ -191,7 +191,7 @@ hook_action: |
 
 `hook_event` is one of the canonical event names (session lifecycle, user prompts, tool calls in generic and subtype forms, permission events, subagent lifecycle, turn end, compaction, and notifications). The harness adapter translates the canonical name to the harness's native event. `hook_action` is a shell snippet executed when the event fires; the event payload comes in on stdin. See [Hooks](hooks) for the full event taxonomy.
 
-Hook support varies by harness, and not every harness implements every canonical event. When the configured harness adapter does not support the chosen event, materialization for that harness is a no-op and lint warns at ingest. For the events a specific harness emits, refer to the harness's own hook documentation. See [Hooks](hooks) for the full event taxonomy and authoring guidance.
+Hook support varies by harness, and not every harness implements every canonical event. When the configured harness adapter does not support the chosen event, lint rejects ingest unless `target_harnesses:` excludes the unsupported harness. For the events a specific harness emits, refer to the harness's own hook documentation. See [Hooks](hooks) for the full event taxonomy and authoring guidance.
 
 ---
 

@@ -315,7 +315,7 @@ The taxonomy is grouped by concern. The generic tool events (`pre_tool_use`, `po
 
 **Generic vs. subtype.** The adapter must accept either: a generic event (`pre_tool_use`) OR a subtype (`pre_shell_execution`). When the harness emits only the generic event natively, the adapter installs the subtype hook with a tool-name matcher so only matching tool calls fire it. When the harness emits the subtype natively (Cursor's `beforeShellExecution`, for example), the adapter wires it directly. Authors should not declare both a generic hook and the corresponding subtype hook for the same artifact; lint warns when this happens.
 
-**Coverage varies by harness.** No harness today implements every event in the table, and adapter coverage shifts as harnesses introduce or rename events. Authors choose an event from the canonical list; if the configured harness adapter does not support that event, materialization for that harness is a no-op and lint warns at ingest. Authors who want to restrict materialization to a specific subset declare `target_harnesses:` (§4.3 universal fields).
+**Coverage varies by harness.** No harness today implements every event in the table, and adapter coverage shifts as harnesses introduce or rename events. Authors choose an event from the canonical list; per the §6.7.1 capability matrix, lint rejects ingest at the unsupported (✗) intersection unless `target_harnesses:` (§4.3 universal fields) excludes the unsupported harness.
 
 The canonical-to-native mapping lives in the adapter implementation. For the current event surface of each harness, refer to the harness's own documentation rather than to a Podium-side per-harness table; the harness's documentation is the source of truth.
 
