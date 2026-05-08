@@ -3,74 +3,97 @@ layout: default
 title: Home
 nav_order: 0
 permalink: /
-description: A registry for agentic AI artifacts, and tools for getting them into any harness and sharing them across your organization. Podium enables AI agent know-how reusability for individual and team workflows.
+description: A catalog for reusable AI agent artifacts, with tools that translate those artifacts into harness-specific formats.
 ---
 
 # Podium
 
-**A registry for agentic AI artifacts, and tools for getting them into any harness and sharing them across your organization.**
+**A catalog for reusable AI agent artifacts, with tools that translate those artifacts into harness-specific formats.**
 
-Podium enables AI agent know-how reusability for individual and team workflows.
+Podium stores skills, agents, commands, rules, hooks, contexts, and MCP
+server registrations as portable artifacts. A developer can keep a local
+filesystem catalog and run `podium sync` to write harness-native files into
+a workspace. A team can put the same artifacts behind a registry server for
+runtime discovery, identity-aware visibility, audit, and shared governance.
+In server mode, teams usually keep the catalog in one or more Git
+repositories; the registry ingests those tracked refs and builds the
+effective catalog it serves.
 
-Podium lets you:
+{: .note }
 
-- Define generic skills, agents, commands, rules, and other artifacts, and use them across any harness.
-- Share artifacts with your team and organization.
-- Build and organize large catalogs of artifacts and use them efficiently with the help of tools for progressive disclosure and lazy loading.
+> **Status: design phase.** The documentation describes the target v1
+> surface. There is no shipped binary yet. Design feedback is the most useful
+> contribution today. See [Status](about/status) and
+> [Contributing](about/contributing).
 
+[Quickstart](getting-started/quickstart){: .btn .btn-purple }
 [Concepts](getting-started/concepts){: .btn .btn-outline }
+[Fit and comparisons](about/why-podium){: .btn .btn-outline }
 
-Podium supports multiple setups to meet the needs of single developers and large organizations alike:
+Podium can run from a filesystem catalog or from a registry server:
 
-- Individual users: file-based artifacts + Podium CLI
-- Small teams: artifacts in repos + Podium CLI
-- Large teams/organizations: artifacts in repos + Podium registry server + Podium CLI/MCP server/SDK
+- **Filesystem catalog**: file-based artifacts plus the Podium CLI. This
+  mode fits individual use, prototypes, CI, and small shared repositories.
+- **Registry server**: artifacts in one or more Git repositories, plus the
+  Podium server, CLI, MCP server, and SDKs. Git stores catalog history and
+  review flow; the registry ingests the configured refs and composes the
+  effective catalog. This mode adds runtime discovery, identity-aware
+  visibility, audit, and server-side composition.
 
 [Compare deployment setups](deployment/){: .btn .btn-outline }
 
 Highlights:
 
-- **Author once, deliver anywhere.** Pluggable harness adapters translate canonical artifacts into Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, Gemini CLI, OpenCode, Pi, Hermes, or your own runtime. The full roster with documentation links is in [Configure your harness](consuming/configure-your-harness#supported-harnesses).
+- **Cross-harness delivery.** Pluggable harness adapters translate canonical artifacts into Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, Gemini CLI, OpenCode, Pi, Hermes, or a custom runtime. The adapter roster with documentation links is in [Configure your harness](consuming/configure-your-harness#supported-harnesses).
 - **Artifact organization based on domains and subdomains.** Keep artifacts organized in folders and subfolders, where each folder defines a domain.
-- **Selective materialization.** Sync only a subset of the catalog into your workspace. Define profiles to quickly switch between scopes.
-- **Layered composition.** Compose your catalog from multiple sources with deterministic merge and explicit precedence. (Requires the Podium registry server.)
+- **Selective materialization.** Sync a subset of the catalog into a workspace. Define profiles to quickly switch between scopes.
+- **Layered composition.** Compose the catalog from multiple sources with deterministic merge and explicit precedence. (Requires the Podium registry server.)
 - **Per-layer visibility.** Declare who can see what: each layer can be `public`, organization-wide, scoped to OIDC `groups`, or restricted to specific `users`. (Requires the Podium registry server.)
 - **Agent-driven progressive discovery.** Discovery tools for traversing domains and searching artifacts. (Requires the Podium MCP server or SDK.)
-- **Lazy artifact loading.** Materialize artifact files into your workspace as they are loaded. (Requires the Podium MCP server or SDK.)
-
-{: .note }
-
-> **Status: design phase.** The technical specification is the source
-> of truth for a spec- and test-driven implementation. There is no shipped binary
-> yet. Design feedback is the most useful contribution today. See
-> [Status](about/status) and [Contributing](about/contributing).
+- **Lazy artifact loading.** Materialize artifact files into the workspace as they are loaded. (Requires the Podium MCP server or SDK.)
 
 ---
 
 ## 'Hello world' example
 
-Write a skill (one file in a directory):
+The commands below describe the target v1 CLI flow.
+
+Create a skill directory with a `SKILL.md` file for agent-facing
+instructions and an `ARTIFACT.md` file for Podium metadata:
 
 ```markdown
+~/podium-artifacts/personal/hello/greet/SKILL.md
+
 ---
-type: skill
 name: greet
-version: 1.0.0
 description: Greet the user by name and tell them today's date.
 ---
 
 Greet the user by their first name. Tell them today's date.
 ```
 
-Point Podium at the directory and tell it which harness you use:
+```markdown
+~/podium-artifacts/personal/hello/greet/ARTIFACT.md
+
+---
+type: skill
+version: 1.0.0
+tags: [demo, hello-world]
+---
+
+<!-- Skill body lives in SKILL.md. -->
+```
+
+Point Podium at the directory and set the harness:
 
 ```bash
-cd your_workspace
+cd workspace
 podium init --registry ~/podium-artifacts/ --harness claude-code
 podium sync
 ```
 
-Open Claude Code in your project. The skill is there.
+Open Claude Code in the project. Claude Code can discover the materialized
+skill in its native location.
 
 [Full quickstart](getting-started/quickstart){: .btn .btn-purple }
 
@@ -82,9 +105,9 @@ Open Claude Code in your project. The skill is there.
 
 <div class="card" markdown="1">
 
-### I want to write artifacts
+### Author artifacts
 
-You're authoring skills, commands, rules, agents.
+Author skills, commands, rules, and agents.
 
 [Authoring guide](authoring/){: .btn .btn-purple }
 
@@ -92,10 +115,10 @@ You're authoring skills, commands, rules, agents.
 
 <div class="card" markdown="1">
 
-### I want to use them in my harness
+### Consume artifacts in a harness
 
-You have Claude Code, Cursor, OpenCode, or another harness, and want
-Podium to feed it.
+Configure Claude Code, Cursor, OpenCode, or another harness to consume
+Podium artifacts.
 
 [Consuming guide](consuming/){: .btn .btn-purple }
 
@@ -103,9 +126,9 @@ Podium to feed it.
 
 <div class="card" markdown="1">
 
-### I'm setting up Podium for a team
+### Set up Podium for a team
 
-Pick your deployment mode; scale up as the team grows.
+Select a deployment mode and migrate as the catalog grows.
 
 [Deployment guide](deployment/){: .btn .btn-purple }
 
@@ -113,10 +136,10 @@ Pick your deployment mode; scale up as the team grows.
 
 <div class="card" markdown="1">
 
-### I'm calling the API
+### Call the API
 
-Building a runtime, an eval pipeline, or custom tooling against
-Podium directly.
+Build a runtime, an eval pipeline, or custom tooling against Podium
+directly.
 
 [Reference](reference/){: .btn .btn-purple }
 

@@ -27,7 +27,7 @@ Keycloak admin console: **\[your realm\] → Clients → Create client**.
 Capability config:
 
 - **Client authentication**: Off (public client, required for device-code flow).
-- **Authentication flow**: enable **OAuth 2.0 Device Authorization Grant**. Disable **Standard flow** and **Direct access grants** unless you need them for other use cases.
+- **Authentication flow**: enable **OAuth 2.0 Device Authorization Grant**. Disable **Standard flow** and **Direct access grants** unless other use cases require them.
 
 Save. The client is created with no redirect URI requirements.
 
@@ -41,7 +41,7 @@ By default Keycloak does not include group memberships in tokens. Add a mapper:
 
 - **Name**: groups.
 - **Token Claim Name**: `groups`.
-- **Full group path**: Off (you want just the group name, not `/parent/child` paths).
+- **Full group path**: Off. Podium expects the group name rather than `/parent/child` paths.
 - **Add to ID token**, **Add to access token**, **Add to userinfo**: all On.
 
 Save.
@@ -91,7 +91,7 @@ The verification URL is `https://<keycloak-host>/realms/<realm-name>/device`. Af
 
 Keycloak admin console: **Groups → Create group**.
 
-- Create the groups you'll use in Podium layer config (e.g., `engineering`, `platform`, `external-collaborators`).
+- Create the groups used in Podium layer config, for example `engineering`, `platform`, and `external-collaborators`.
 - **Users → \[user\] → Groups → Join Group** to assign.
 
 ## 6. Test
@@ -119,5 +119,5 @@ For most Keycloak users, the OIDC `groups` claim is sufficient. Group changes ap
 
 - **Token's `aud` is `podium` (the client ID) instead of the configured audience.** The Audience mapper from step 3 wasn't added or wasn't attached to the dedicated client scope. Check **Clients → podium → Client scopes → podium-dedicated → Mappers**.
 - **Groups claim is missing.** The Group Membership mapper wasn't attached. Check the same place.
-- **Realm-issuer mismatch.** Keycloak's issuer is `https://<host>/realms/<realm>`, *not* `https://<host>/auth/realms/<realm>` (the latter was the pre-Quarkus URL). If you're on Keycloak < 17, your issuer URL has the `/auth` prefix; adjust accordingly.
+- **Realm-issuer mismatch.** Keycloak's issuer is `https://<host>/realms/<realm>` rather than `https://<host>/auth/realms/<realm>`; the latter was the pre-Quarkus URL. Keycloak versions before 17 use the `/auth` prefix in the issuer URL.
 - **`podium login` connects but token is rejected.** Confirm the registry's JWKS endpoint is reachable from the registry host (`curl https://<keycloak-host>/realms/<realm>/protocol/openid-connect/certs`). Self-signed Keycloak certs need to be added to the registry's trust store.

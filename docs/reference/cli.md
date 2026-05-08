@@ -53,7 +53,7 @@ Prints the merged config with per-key provenance (which scope contributed each v
 podium config show [--explain <key>]
 ```
 
-`--explain <key>` prints just one key with its full resolution chain.
+`--explain <key>` prints one key with its full resolution chain.
 
 ### `podium login` / `podium logout`
 

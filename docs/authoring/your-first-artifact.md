@@ -145,7 +145,7 @@ And the directory:
 
 ## Iterate with watch mode
 
-Re-running `podium sync` after every edit is fine, but watch mode is faster while authoring:
+Watch mode avoids manual `podium sync` runs after each edit:
 
 ```bash
 cd ~/projects/your-project
@@ -168,13 +168,13 @@ podium lint ~/podium-artifacts/personal/hello/greet/
 
 Lint checks the frontmatter against the type's schema in both files, validates that prose references in `SKILL.md` resolve to bundled files, runs the agentskills.io compliance checks on `SKILL.md` (name format, description constraints, parent-directory match), runs type-specific rules, and flags weak descriptions. CI runs the same checks on PRs to a Git-source layer.
 
-If lint passes, you're good. If it warns or fails, the messages name the field and the file location.
+If lint passes, commit the artifact. If lint warns or fails, the messages name the field and the file location.
 
 ---
 
 ## What's next
 
-- **Try a different type.** Make a `command` (slash-invoked template), a `rule` (passive context the harness loads automatically), or a `hook` (lifecycle observer). [Artifact types](artifact-types) covers the first-class types. Non-skill types use `ARTIFACT.md` only.
+- **Try a different type.** Make a `command` (slash-invoked template), a `rule` (passive context the harness loads automatically), or a `hook` (lifecycle observer). [Artifact types](artifact-types) covers the built-in types. Non-skill types use `ARTIFACT.md` only.
 - **Organize multiple artifacts.** As they accumulate, group them with `DOMAIN.md` files: descriptions, keywords, featured artifacts. See [Domains](domains).
 - **Inherit from another artifact.** When two artifacts share most of their structure, `extends:` lets the second refine the first instead of duplicating it. See [Extends](extends).
 - **Move from solo to team-shared.** [Deployment](../deployment/) walks the migration paths.

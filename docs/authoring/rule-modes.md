@@ -3,7 +3,7 @@ layout: default
 title: Rule modes
 parent: Authoring
 nav_order: 5
-description: The four rule_mode values (always, glob, auto, explicit) and how each harness honors them.
+description: The rule_mode values (always, glob, auto, explicit) and how each harness honors them.
 ---
 
 # Rule modes

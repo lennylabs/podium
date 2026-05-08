@@ -15,7 +15,7 @@ Podium + Entra ID. ~20 minutes of setup. Slightly more involved than Okta becaus
 
 - Entra ID Global Administrator or Application Administrator role.
 - Podium registry running and reachable from your developers' browsers.
-- A naming convention for groups in Podium layer config (you'll either use Entra group GUIDs directly, or set up a name-mapping; see step 2).
+- A naming convention for groups in Podium layer config. Use Entra group GUIDs directly, or set up a name mapping; see step 2.
 
 ## 1. Register the OIDC application
 
@@ -35,7 +35,7 @@ Under **Authentication**:
 - Enable **Allow public client flows: Yes**.
 - Add platform: **Mobile and desktop applications**, with redirect `http://localhost`.
 
-Under **API permissions**: make sure **Microsoft Graph → User.Read** is granted (default). Add **GroupMember.Read.All** if you want group-membership claims.
+Under **API permissions**: make sure **Microsoft Graph -> User.Read** is granted (default). Add **GroupMember.Read.All** for group-membership claims.
 
 ## 2. Configure the groups claim
 
@@ -58,7 +58,7 @@ visibility:
 
 For groups synced from on-prem AD, you can emit `sAMAccountName` in the groups claim. For cloud-only groups, this requires a custom claims mapping policy via PowerShell; outside the scope of this guide. If you go this route, set `groups_claim: groups` and use names in your visibility config.
 
-Most teams find Option A faster; the GUID-vs-name tradeoff is just a layer-config readability concern.
+Most teams find Option A faster; the GUID-vs-name tradeoff is a layer-config readability concern.
 
 ## 3. Expose Podium as an API
 

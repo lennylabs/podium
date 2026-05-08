@@ -8,12 +8,12 @@ description: Component overview, deployment modes, where state lives, and what r
 
 # How it works
 
-Podium consists of:
+Podium has two main parts:
 
 - A **registry**: the system of record for artifacts.
-- **Consumers**: the components that read from the registry.
-  Built-in consumers include language SDKs, the MCP server, and
-  `podium sync`. Custom consumers can build against the HTTP API.
+- **Consumers**: components that read from the registry. Built-in
+  consumers include language SDKs, the MCP server, and `podium sync`.
+  Custom consumers can build against the HTTP API.
 
 The registry can be reached as a Podium server (single binary or
 multi-tenant deployment) or as a local filesystem path. Most
@@ -24,16 +24,8 @@ against a filesystem registry directly.
 
 ## High-level architecture
 
-Podium consists of:
-
-- A **registry**: the catalog of artifacts. Backed by either a
-  folder on disk (filesystem mode) or a Podium server (standalone or
-  standard mode). Built-in source types are `git` and `local`; the
-  `LayerSourceProvider` SPI lets deployments add custom sources
-  (S3, OCI, HTTP archives).
-- **Consumers**: built-in consumers are `podium sync`, the MCP
-  server, and the language SDKs. Custom consumers can build against
-  the HTTP API directly.
+The registry stores the catalog. Consumers retrieve artifacts and translate
+them into the format expected by the harness.
 
 Server mode is what most teams run once they're past the filesystem
 stage. The server holds the catalog; consumers reach it over HTTP
@@ -80,10 +72,10 @@ a folder; `podium sync` reads it directly:
                               The catalog is the directory.
 ```
 
-The artifacts, the file formats (`ARTIFACT.md`, `SKILL.md`, and `DOMAIN.md`), and the harness adapter behavior are identical across modes. The
-only thing that changes is whether `podium sync` reaches the
-registry over HTTP or reads it directly from disk. The MCP server
-and language SDKs require a server.
+The artifacts, the file formats (`ARTIFACT.md`, `SKILL.md`, and
+`DOMAIN.md`), and the harness adapter behavior are identical across
+modes. `podium sync` either reaches the registry over HTTP or reads it
+directly from disk. The MCP server and language SDKs require a server.
 
 ---
 
@@ -132,8 +124,8 @@ destination.
 - **What you run.** Just the `podium` CLI.
 - **What you get.** Eager materialization. The harness's own
   filesystem discovery does the loading at runtime.
-- **What you don't get.** Lazy discovery (no MCP, no SDK). No
-  centralized audit. No identity-based visibility filtering.
+- **Unavailable in this mode.** Lazy discovery via MCP or SDK,
+  centralized audit, and identity-based visibility filtering.
 - **Multi-user.** Share the directory however you'd share any
   folder. Committing to git is the typical choice; the git history
   doubles as the audit trail and `git pull` is each developer's
@@ -149,8 +141,8 @@ embedded. Bind to localhost or behind your VPN.
 - **Who it's for.** Anyone of any team size who specifically wants
   runtime discovery (agents calling MCP meta-tools mid-session) or
   a single audit log without standing up the full standard stack.
-  Most small teams don't need this; reach for it when filesystem
-  mode stops fitting.
+  Most small teams can stay in filesystem mode until runtime discovery
+  or centralized audit becomes necessary.
 - **What you run.** `podium serve --standalone --layer-path
   /path/to/dir` plus the CLI.
 - **What you get.** Runtime discovery via the MCP server. A single
@@ -162,7 +154,8 @@ embedded. Bind to localhost or behind your VPN.
 
 ### Standard
 
-The full deployment: Postgres + pgvector + S3 + OIDC + multi-tenancy.
+The standard deployment uses Postgres, pgvector, S3, OIDC, and
+multi-tenancy.
 Helm chart ships with the registry; supporting services are managed
 or self-run alongside.
 
@@ -184,7 +177,8 @@ or self-run alongside.
 
 ## Where state lives
 
-Three places. Each mode uses a different combination.
+State lives in the locations below. Each mode uses a different
+combination.
 
 | State | Filesystem | Standalone | Standard |
 |:--|:--|:--|:--|
@@ -203,14 +197,13 @@ registry uses.
 
 ## Shared library code
 
-Worth saying explicitly: the manifest parsers, glob resolver, layer
-composer, `extends:` resolver, visibility evaluator, materialization
-writer, and harness adapters all live in a single Go module. The
-registry binary embeds it behind the HTTP API; `podium sync` in
-filesystem mode calls the same module functions directly, skipping
-HTTP. The MCP server and `podium sync` in server-source mode are
-thin HTTP clients that invoke the same module's materialization
-writer locally.
+The manifest parsers, glob resolver, layer composer, `extends:`
+resolver, visibility evaluator, materialization writer, and harness
+adapters all live in a single Go module. The registry binary embeds it
+behind the HTTP API. `podium sync` in filesystem mode calls the same
+module functions directly, skipping HTTP. The MCP server and
+`podium sync` in server-source mode are thin HTTP clients that invoke the
+same module's materialization writer locally.
 
 There is a single canonical implementation per concern. Migrating
 between deployment modes (filesystem → standalone → standard)
@@ -270,8 +263,8 @@ snapshot.
 
 ## What's next
 
-You've got the vocabulary and the architecture. From here, follow
-the role-specific guide that fits your goal:
+After the vocabulary and architecture, continue with the role-specific
+guide that fits the task:
 
 - **Authoring artifacts**: [Authoring guide](../authoring/)
 - **Using them in a harness**: [Consuming guide](../consuming/)

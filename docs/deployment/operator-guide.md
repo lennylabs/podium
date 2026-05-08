@@ -172,7 +172,7 @@ These come up a few times a year for most operators:
 - **pgvector index bloat.** After many embeddings have churned, `REINDEX` the vector index quarterly or set up `auto_vacuum` aggressively.
 - **MCP server cache pinning** (`PODIUM_CACHE_DIR` on slow disks). Developer machines with cache on a network filesystem will see materialization latency well above the SLO. Default to `~/.podium/cache/` on local disk.
 - **Webhook retries during read-only mode.** GitHub will retry webhooks for ~24 h with exponential backoff. If your read-only window exceeds that, ingests will be permanently lost. Trigger manual `podium layer reingest` after recovery.
-- **Force-push on a Git source layer.** Default policy is tolerant (`layer.history_rewritten` event emitted, prior commits preserved in the content store). If you've configured `force_push_policy: strict`, expect ingest rejections after force-pushes. Coordinate with authors.
+- **Force-push on a Git source layer.** Default policy is tolerant (`layer.history_rewritten` event emitted, prior commits preserved in the content store). If `force_push_policy: strict` is configured, expect ingest rejections after force-pushes. Coordinate with authors.
 - **OIDC token clock skew.** The registry tolerates ±60s of skew. NTP drift on a registry node beyond that window causes intermittent `auth.token_expired` errors. Monitor clock skew on registry hosts.
 - **SCIM lag.** OIDC group membership changes propagate via SCIM push from the IdP. If your IdP doesn't push, group membership only updates on the user's next login. Force a refresh with `podium admin scim-sync --user <id>`.
 
@@ -180,7 +180,7 @@ These come up a few times a year for most operators:
 
 ## Public-mode misconfiguration
 
-A misconfigured public-mode deployment is the most common security-relevant operational anomaly because the registry serves correctly. It just serves to everyone.
+A misconfigured public-mode deployment is the most common security-relevant operational anomaly because the registry serves correctly. It serves to everyone.
 
 **Detection:**
 
@@ -202,7 +202,7 @@ A misconfigured public-mode deployment is the most common security-relevant oper
 ## When to escalate to support / open an issue
 
 - Audit chain gap detected (`podium admin verify --check audit-chain` reports a hash mismatch). Treat as a security incident; capture evidence before any cleanup.
-- Repeated `materialize.signature_invalid` for artifacts you authored. Either your signing pipeline broke or someone is tampering. Investigate before continuing.
+- Repeated `materialize.signature_invalid` for authored artifacts. Either the signing pipeline broke or someone is tampering. Investigate before continuing.
 - Sustained latency degradation that doesn't track CPU / memory / DB load. Often indicates a query-plan regression after a Postgres major upgrade.
 - Out-of-band ingest events (artifacts appear in the registry without a corresponding `artifact.published` outbound webhook). Indicates webhook config or processing failure.
 

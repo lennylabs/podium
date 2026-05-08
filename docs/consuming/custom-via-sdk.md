@@ -215,7 +215,7 @@ for descriptor in suite.results:
 
 The SDKs deliberately don't implement the MCP meta-tool semantics (the agent-driven lazy materialization). Programmatic consumers know what they want; they don't need an LLM-mediated browse interface. If a programmatic consumer wants lazy semantics, it can call `load_artifact` lazily in its own code.
 
-Identity providers, the cache, visibility filtering, layer composition, and audit are all the same as in the MCP path. The SDK is just a different transport.
+Identity providers, the cache, visibility filtering, layer composition, and audit are all the same as in the MCP path. The SDK uses a different transport.
 
 ---
 

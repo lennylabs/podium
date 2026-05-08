@@ -3,20 +3,20 @@ layout: default
 title: Deployment
 nav_order: 4
 has_children: true
-description: Pick a deployment mode, run it, scale up. Filesystem for solo, standalone for small teams, standard for organizations.
+description: Pick a deployment mode, run it, and migrate as the catalog grows. Filesystem for solo use, standalone for small teams, and standard for organizations.
 ---
 
 # Deployment
 
-Pick a deployment mode based on the audience and the operational tolerance:
+Pick a deployment mode based on the audience and operational tolerance:
 
 | Mode | Audience | What's running | Page |
 |:--|:--|:--|:--|
 | **Filesystem** | Individual developer; prototype; CI build step. | The `podium` CLI runs without a daemon, port, or authentication. The catalog is a folder. | [Solo / filesystem](solo-filesystem) |
-| **Standalone server** | 3–10 person team; single VM behind a VPN; offline / air-gapped. | One binary (`podium serve --standalone`). Embedded SQLite + sqlite-vec + bundled embedding model. | [Small team](small-team) |
-| **Standard** | 20+ people; multi-tenant; governed. | Replicated registry behind a load balancer; Postgres + object storage; OIDC. | [Organization](organization) |
+| **Standalone server** | Small team; single VM behind a VPN; offline or air-gapped environment. | One binary (`podium serve --standalone`). Embedded SQLite, sqlite-vec, and bundled embedding model. | [Small team](small-team) |
+| **Standard** | Larger team; multi-tenant environment; governed catalog. | Replicated registry behind a load balancer; Postgres, object storage, and OIDC. | [Organization](organization) |
 
-The modes share artifacts, author flow, and the underlying shared library. Migration between modes is mechanical: `podium serve --standalone --layer-path /path/to/dir` against a filesystem catalog turns it into a server source without touching the authoring loop, and `podium admin migrate-to-standard` exports a standalone deployment to a standard one.
+The modes share artifacts, author flow, and the underlying shared library. Migration between modes is mechanical: `podium serve --standalone --layer-path /path/to/dir` against a filesystem catalog turns it into a server source without changing the authoring loop, and `podium admin migrate-to-standard` exports a standalone deployment to a standard one.
 
 ---
 

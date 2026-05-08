@@ -15,7 +15,7 @@ Podium + Google Workspace. The setup is straightforward, but Workspace doesn't e
 
 - Google Workspace admin role (or a delegate with the right scopes).
 - Podium registry running and reachable from developers' browsers.
-- A Google Cloud project where you'll register the OAuth client.
+- A Google Cloud project for the OAuth client registration.
 
 ## 1. Create the OAuth client
 
@@ -28,7 +28,7 @@ After creation, you get a **Client ID** and **Client secret**. Note both; Google
 
 Configure the OAuth consent screen if it's not already configured:
 
-- **User type**: Internal (within your Workspace org).
+- **User type**: Internal (within the Workspace org).
 - **App name**: Podium.
 - **Scopes**: `openid`, `email`, `profile`.
 
@@ -36,13 +36,13 @@ Configure the OAuth consent screen if it's not already configured:
 
 Three options, in increasing complexity:
 
-**Option A: no groups, email-only visibility.** Set layer visibility based on individual email addresses (`users: [a@you.com, b@you.com]`) or to `organization: true` (any authenticated user from your Workspace org). Works fine for small teams.
+**Option A: no groups, email-only visibility.** Set layer visibility based on individual email addresses (`users: [a@you.com, b@you.com]`) or to `organization: true` (any authenticated user from the Workspace org). Works for small teams.
 
 **Option B: sync Workspace groups via SCIM.** Workspace doesn't natively push SCIM, but a pattern using a Workspace add-on or a small sync script can populate Podium's directory. Maintainer-script approach; out of scope here.
 
 **Option C: resolve group membership at token-validation time.** The registry calls Google Cloud Identity's API to fetch the user's group memberships when the JWT arrives, caches for 5 minutes, treats those as the `groups` claim. Requires a service account in your Cloud project with `Cloud Identity Groups Reader` (`cloudidentity.googleapis.com/groups.readonly`). Configure on the registry side via the `IdpGroupMapping` adapter; see [§6.3.1 of the spec](../../spec/06-mcp-server.md#631-claim-derivation).
 
-For most teams, Option A is enough to start. Move to Option C when you actually need different layers visible to different Workspace groups.
+For most teams, Option A is enough to start. Move to Option C when different layers need to be visible to different Workspace groups.
 
 ## 3. Configure Podium
 
@@ -52,13 +52,13 @@ Registry side (`~/.podium/registry.yaml`):
 identity:
   provider: oidc
   issuer: https://accounts.google.com
-  audience: <your-client-id>.apps.googleusercontent.com
+  audience: <client-id>.apps.googleusercontent.com
   jwks_uri: https://www.googleapis.com/oauth2/v3/certs
   email_claim: email
   sub_claim: sub
   # Option A: no groups_claim
   # Option C: configure IdpGroupMapping (see §6.3.1)
-  hd_claim: hd                            # Google's hosted-domain claim; restricts tokens to your org
+  hd_claim: hd                            # Google's hosted-domain claim; restricts tokens to the org
   hd_required: your-org.example           # rejects tokens issued for other Workspace domains
 ```
 
@@ -88,11 +88,11 @@ podium layer register \
   --visibility 'organization: true'
 ```
 
-A user from your Workspace domain sees the layer; a user from outside (even with a valid Google login) is rejected with `auth.hd_mismatch` before they even get to layer composition.
+A user from the Workspace domain sees the layer; a user from outside, even with a valid Google login, is rejected with `auth.hd_mismatch` before layer composition.
 
 ## Troubleshooting
 
-- **`auth.hd_mismatch` for legitimate users.** Confirm the user is in your Workspace domain and not signed in to a personal Gmail. Sign out, sign back in with the work account.
+- **`auth.hd_mismatch` for legitimate users.** Confirm the user is in the Workspace domain and not signed in to a personal Gmail. Sign out, sign back in with the work account.
 - **Tokens issued but rejected as `auth.audience_mismatch`.** Google's `aud` claim is the full client ID with the `.apps.googleusercontent.com` suffix; make sure the registry's `audience:` matches exactly.
 - **Group membership doesn't update.** With Option C, the registry caches group lookups for 5 minutes per user. After a group change, either wait for the cache to expire or invalidate via `podium admin claims-cache flush --user <sub>`.
-- **Service account permissions denied (Option C).** The service account needs `Cloud Identity Groups Reader` and the Cloud Identity API enabled in your project.
+- **Service account permissions denied (Option C).** The service account needs `Cloud Identity Groups Reader` and the Cloud Identity API enabled in the Google Cloud project.

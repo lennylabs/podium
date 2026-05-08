@@ -3,12 +3,12 @@ layout: default
 title: Artifact types
 parent: Authoring
 nav_order: 2
-description: The first-class types (skill, agent, context, command, rule, hook, mcp-server) and what each is for.
+description: Built-in artifact types (skill, agent, context, command, rule, hook, mcp-server) and what each is for.
 ---
 
 # Artifact types
 
-Every artifact declares a `type:` in its frontmatter. The type decides how the registry indexes it, what lint rules apply, and how the harness adapter translates it at delivery time. The first-class types:
+Every artifact declares a `type:` in its frontmatter. The type decides how the registry indexes it, what lint rules apply, and how the harness adapter translates it at delivery time. Built-in types include:
 
 - [`skill`](#skill): instructions loaded into the agent's context on demand.
 - [`agent`](#agent): a complete agent definition meant to run as a delegated child.
@@ -226,6 +226,6 @@ The `server_identifier` field keys the reverse index: when a `skill` references 
 
 ## Extension types
 
-Beyond the first-class types, the type system is extensible. Built-in registered extension types include `dataset`, `model`, `eval`, `policy`. The `workflow` type is reserved for future multi-agent flows.
+Beyond the built-in artifact types, the type system is extensible. Registered extension types include `dataset`, `model`, `eval`, and `policy`. The `workflow` type is reserved for future multi-agent flows.
 
 Custom types register through the `TypeProvider` SPI: a JSON Schema for the frontmatter, lint rules, adapter hints, and field-merge semantics. See [Extending](../deployment/extending) for the SPI details.

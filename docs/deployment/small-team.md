@@ -3,7 +3,7 @@ layout: default
 title: Small team
 parent: Deployment
 nav_order: 2
-description: Standalone server on a single VM. The right setup for 3–10 person teams that want runtime discovery and a single audit log without a full standard deployment.
+description: Standalone server on a single VM. This setup fits small teams that want runtime discovery and a single audit log without a full standard deployment.
 ---
 
 # Small team
@@ -114,7 +114,7 @@ layers:
 
 Set up a webhook from the Git host to the registry's ingest endpoint, or rely on `podium layer reingest team-shared` triggered manually or on a schedule. Git providers without a webhook capability (offline mirrors, internal Git that can't reach the registry) work fine via scheduled `podium layer reingest`.
 
-For a developer machine without a public ingress, just use `podium layer watch` or scheduled `reingest`; webhooks aren't required.
+For a developer machine without a public ingress, use `podium layer watch` or scheduled `reingest`; webhooks are not required.
 
 ---
 
@@ -172,7 +172,7 @@ Sensitivity ceiling: ingest of `sensitivity: medium` and `sensitivity: high` art
 This is appropriate when:
 
 - The deployment is intentionally open beyond a single user (a demo registry, an evaluation pilot, an internal-public catalog), and
-- You want the audit log to record that anonymous-public access was the deployment's intent rather than a misconfiguration.
+- The audit log should record that anonymous-public access was the deployment's intent rather than a misconfiguration.
 
 For everyday small-team use, default to `oauth-device-code` auth. The added ceremony is small and the audit is sharper.
 
@@ -182,14 +182,14 @@ For everyday small-team use, default to `oauth-device-code` auth. The added cere
 
 - **Backup.** SQLite + the object directory. A periodic snapshot of `~/.podium/standalone/` is enough.
 - **Upgrades.** Replace the binary, restart. Schema migrations run on first start of the new version.
-- **Performance.** Standalone is sized for tens-of-developer scale rather than thousands of QPS. When you need scale, see [Organization](organization).
+- **Performance.** Standalone is sized for tens-of-developer scale rather than thousands of QPS. For higher scale, see [Organization](organization).
 - **Observability.** Prometheus endpoint on `/metrics`. The reference Grafana dashboard ships with the binary.
 
 ---
 
 ## Migrating to standard
 
-When you outgrow standalone (typically when you need multi-tenancy, OIDC group claims via SCIM, the SBOM/CVE pipeline, or production-grade availability), `podium admin migrate-to-standard` exports the standalone state to a standard deployment:
+When standalone no longer fits, typically because multi-tenancy, OIDC group claims via SCIM, the SBOM/CVE pipeline, or production-grade availability is required, `podium admin migrate-to-standard` exports the standalone state to a standard deployment:
 
 ```bash
 podium admin migrate-to-standard --postgres <dsn> --object-store <url>

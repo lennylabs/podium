@@ -32,14 +32,14 @@ The only running component is the `podium` CLI. There is no server process, no d
 
 ## What doesn't work with a filesystem registry
 
-- The Podium MCP server (no HTTP API to back it). Use the standalone server if you want runtime discovery.
+- The Podium MCP server (no HTTP API to back it). Use the standalone server for runtime discovery.
 - The language SDKs (HTTP-only). Use the standalone server.
 - The SDK-backed read CLI (`podium search`, `podium domain show`, `podium domain search`, `podium artifact show`).
 - Outbound webhooks.
 - Identity-based visibility filtering. The visibility evaluator short-circuits to `true` for every layer. `visibility:` declarations stay in layer config (artifacts remain portable to server-source deployments) but are not enforced at request time.
 - `podium login`. There's no auth to perform.
 
-When you need any of these, see [Small team](small-team) (standalone server) or [Organization](organization) (standard deployment).
+When any of these capabilities are required, see [Small team](small-team) (standalone server) or [Organization](organization) (standard deployment).
 
 ---
 
@@ -49,7 +49,7 @@ When you need any of these, see [Small team](small-team) (standalone server) or 
 # Pick a directory for the catalog
 mkdir -p ~/podium-artifacts/personal
 
-# In your project, point Podium at the directory and pick a harness
+# In the consuming project, point Podium at the directory and pick a harness
 cd ~/projects/your-project
 podium init --registry ~/podium-artifacts/ --harness claude-code
 ```
@@ -88,7 +88,7 @@ The workspace local overlay (`<workspace>/.podium/overlay/`) sits on top of the 
 
 ## Multi-user via a shared directory
 
-The registry is just files. Sharing across developers means sharing the directory however you'd share any folder. Common choices:
+The registry is files. Sharing across developers means sharing the directory through a normal file-distribution path. Common choices:
 
 - **Committed to git.** The registry directory is a git repo (or part of one); every developer who clones has the same catalog. Authoring goes through git PR and merge. Each developer's `git pull` is their ingest; the git history doubles as the audit trail. There is no shared-state coordination and no runtime conflicts.
 - **Network share or sync service.** Dropbox, iCloud, OneDrive, an NFS mount. Works; less audit signal than git.
@@ -110,7 +110,7 @@ Either works. Per-project is simpler; shared local is lighter when the registry 
 $EDITOR ~/podium-artifacts/team-shared/finance/close-reporting/run-variance-analysis/SKILL.md
 $EDITOR ~/podium-artifacts/team-shared/finance/close-reporting/run-variance-analysis/ARTIFACT.md
 
-# In your project
+# In the consuming project
 cd ~/projects/your-project
 podium sync                      # one-shot
 # or
@@ -129,7 +129,7 @@ When the catalog is shared via git, CI on the registry repo runs `podium lint` a
 
 ## Migration paths
 
-**Adding a server in front of the same directory.** When you outgrow filesystem mode (typically because you want runtime discovery via the MCP server, or a single audit log for the team), point a standalone server at the same directory:
+**Adding a server in front of the same directory.** When filesystem mode no longer fits, typically because runtime discovery via the MCP server or a single audit log for the team is needed, point a standalone server at the same directory:
 
 ```bash
 podium serve --standalone --layer-path ~/podium-artifacts/
@@ -139,7 +139,7 @@ Each developer's `<workspace>/.podium/sync.yaml` switches `defaults.registry` fr
 
 The shared library does the same parsing, composition, and adapter work in both modes, so output is bit-identical for the same target and profile.
 
-**To a standard deployment.** When you need OIDC identity-based visibility, multi-tenancy, or production availability, follow [Small team](small-team) (or [Organization](organization)) and use `podium admin migrate-to-standard` to export the standalone state.
+**To a standard deployment.** When OIDC identity-based visibility, multi-tenancy, or production availability is required, follow [Small team](small-team) (or [Organization](organization)) and use `podium admin migrate-to-standard` to export the standalone state.
 
 ---
 

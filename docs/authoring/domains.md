@@ -16,7 +16,7 @@ Domains exist whether or not you do anything special. Any subdirectory in your r
 
 ## When you don't need DOMAIN.md
 
-For a small or in-progress catalog, just nest folders. The directory tree is the domain hierarchy, and each artifact's canonical ID is the directory path under the registry root.
+For a small or in-progress catalog, nest folders. The directory tree is the domain hierarchy, and each artifact's canonical ID is the directory path under the registry root.
 
 ```
 ~/podium-artifacts/
@@ -34,16 +34,16 @@ For a small or in-progress catalog, just nest folders. The directory tree is the
 
 ---
 
-## When you do
+## When to add one
 
 Add a `DOMAIN.md` when:
 
-- You want a description that shows up in `load_domain` output.
-- You want keywords that surface in `search_domains`.
-- You want to import artifacts from elsewhere into this domain.
-- You want to exclude paths from this domain.
-- You want to mark a folder unlisted (hide it from enumeration while keeping it reachable by ID).
-- You want to override discovery rendering for the subtree.
+- A description should appear in `load_domain` output.
+- Keywords should surface in `search_domains`.
+- Artifacts from another domain should appear in this domain.
+- Some paths should be excluded from this domain.
+- A folder should be unlisted, hidden from enumeration, and still reachable by ID.
+- Discovery rendering needs subtree-specific overrides.
 
 `DOMAIN.md` lives at the root of a domain directory:
 
@@ -98,9 +98,9 @@ exclude:
 # Accounts Payable
 
 Operations and artifacts for the AP function: invoice processing,
-vendor remittance, payment reconciliation, and 1099 reporting. Use
-this domain when you need to act on or reason about money flowing
-out of the company to vendors.
+vendor remittance, payment reconciliation, and 1099 reporting. This
+domain applies to tasks involving money flowing out of the company to
+vendors.
 
 For inbound payments and AR, see `finance/ar/`.
 ```

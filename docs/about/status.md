@@ -38,7 +38,7 @@ The full build sequence lives in [`spec/10-mvp-build-sequence.md`](https://githu
 
 | Phase | What | Why |
 |:--|:--|:--|
-| 0 | Filesystem-source `podium sync` + `podium serve --standalone` for the same artifact directory plus search and HTTP API. | Cover the lightest deployment modes; five-minute install for personal/small-team use. |
+| 0 | Filesystem-source `podium sync` + `podium serve --standalone` for the same artifact directory plus search and HTTP API. | Cover the lightest deployment modes; quick install for personal and small-team use. |
 | 1 | Manifest schema + `podium lint` for `ARTIFACT.md`, `SKILL.md`, and `DOMAIN.md` + per-type lint rules (including agentskills.io compliance for skills) + signing. | Authors need a way to validate artifacts; lint is the early quality bar. |
 | 2 | Registry HTTP API: `load_domain`, `search_domains`, `search_artifacts`, `load_artifact`. | The wire surface every server-source consumer talks to. |
 | 3 | `podium sync` for `none`, `claude-code`, and `codex` adapters. | Filesystem delivery end-to-end with the full client config surface. |

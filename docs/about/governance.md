@@ -16,7 +16,7 @@ During the design and early build phases, a single maintainer has final decision
 
 The BDfN model transitions to a multi-maintainer steering committee when the project reaches **three or more regular contributors**, where "regular" means someone who has:
 
-- Landed substantive changes (not just typos or docs) in `main`,
+- Landed substantive changes beyond typos or docs in `main`,
 - Participated in architectural discussions or ADR reviews, and
 - Sustained that activity for at least three months.
 

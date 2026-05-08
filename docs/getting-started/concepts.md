@@ -3,14 +3,13 @@ layout: default
 title: Concepts
 parent: Getting Started
 nav_order: 2
-description: Vocabulary used throughout the docs: artifacts, domains, layers, harnesses, materialization, the meta-tools.
+description: Vocabulary used throughout the docs: artifacts, domains, layers, harnesses, materialization, and meta-tools.
 ---
 
 # Concepts
 
-The terms below show up in every other section. None of them are
-hard, but they have specific meanings in Podium and reading them
-once up front saves time later.
+The terms below appear throughout the docs. Each term has a specific
+meaning in Podium.
 
 ---
 
@@ -36,7 +35,7 @@ The directory path is the artifact's **canonical ID**: `finance/close-reporting/
 
 ## Type
 
-Every artifact declares a `type:`. The first-class types:
+Every artifact declares a `type:`. Built-in artifact types include:
 
 | Type | What it is |
 |:--|:--|
@@ -64,7 +63,7 @@ canonical path of an artifact under it.
 A domain folder can carry an optional `DOMAIN.md` that adds
 description, keywords, featured artifacts, imports from elsewhere,
 and discovery-rendering hints. Without `DOMAIN.md`, a domain still
-works. It's a navigable directory of artifacts.
+works. The directory remains navigable without a manifest.
 
 The rendering of a domain in `load_domain` output is governed by
 configurable rules: `max_depth`, folding of sparse subdomains,
@@ -109,8 +108,8 @@ A typical setup might have:
    directory the MCP server merges client-side, always at highest
    precedence.
 
-When a caller asks for an artifact, Podium composes their
-**effective view** from every layer they're allowed to see, in
+When a caller asks for an artifact, Podium composes the caller's
+**effective view** from every visible layer, in
 precedence order. Higher-precedence layers override lower on
 collisions; `extends:` lets a higher artifact inherit and refine
 a lower one without forking.
@@ -151,13 +150,13 @@ semantics. The full roster with documentation links is in
 
 The **harness adapter** is the translator. At materialization time,
 the configured adapter takes the canonical artifact and writes it
-into the harness's native format. Same source artifact, different
-on-disk layout per harness. The capability matrix (§6.7.1 of the
-spec) records which canonical fields each adapter supports natively
+into the harness's native format. The same source artifact can produce
+a different on-disk layout for each harness. The capability matrix
+(§6.7.1 of the spec) records which canonical fields each adapter maps natively
 versus via fallback.
 
-`PODIUM_HARNESS=none` writes the canonical layout as-is, useful
-when you want raw output for a custom runtime or evaluation pipeline.
+`PODIUM_HARNESS=none` writes the canonical layout as-is. This is useful
+when raw output is needed for a custom runtime or evaluation pipeline.
 
 ---
 
@@ -188,7 +187,7 @@ The MCP server exposes these tools to harnesses that speak MCP:
 | `load_domain(path?)` | Returns a map of a domain: subdomains, notable artifacts, keywords, the requested domain's description. The agent's primary navigation tool. |
 | `search_domains(query)` | Hybrid retrieval over each domain's projection (description + keywords + truncated body). For when the agent doesn't know the right neighborhood. |
 | `search_artifacts(query?, scope?, type?, tags?)` | Hybrid retrieval over artifact frontmatter. With a query, ranks by relevance; without, browses by filter (the canonical "list all artifacts in this domain" move). |
-| `load_artifact(id)` | Loads a specific artifact by ID, runs the harness adapter, materializes bundled resources to disk. The expensive operation; only call it when you actually need the artifact. |
+| `load_artifact(id)` | Loads a specific artifact by ID, runs the harness adapter, materializes bundled resources to disk. This is the expensive operation; call it after the artifact has been selected. |
 
 These are the only tools Podium contributes to a session. Hosts add
 their own runtime tools alongside.
@@ -203,16 +202,16 @@ the same identity, layer composition, and visibility filtering.
 ## Lazy versus eager loading
 
 **Lazy** (MCP / SDK path): the session starts empty. The agent calls
-`load_domain` to navigate, `search_artifacts` to query, `load_artifact`
-to materialize one specific artifact when it's actually needed. Keeps
-the agent's context window small even when the catalog has thousands
+`load_domain` to navigate, `search_artifacts` to query, and `load_artifact`
+to materialize one specific artifact after selection. This keeps the
+agent's context window small even when the catalog has thousands
 of entries. Requires a server.
 
 **Eager** (`podium sync` path): one-shot or `--watch` materialization
 of the user's effective view (or a scope-filtered subset) onto disk.
 The harness then uses its own native discovery: `.cursor/rules/`,
-`.claude/agents/`, etc. Useful when you want pre-materialized
-artifacts on disk and don't need runtime discovery. Works against
+`.claude/agents/`, etc. This path is useful for pre-materialized
+artifacts on disk when runtime discovery is unnecessary. It works against
 either a server or a filesystem-source registry.
 
 Both paths share the same registry, identity providers, layer

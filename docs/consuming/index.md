@@ -16,4 +16,4 @@ Reference for using Podium artifacts. Each page below covers one topic.
 | [Browsing the catalog](browsing-the-catalog) | How an agent navigates the catalog at runtime: `load_domain`, `search_domains`, `search_artifacts`, `load_artifact`. The discovery flow and what each call costs. |
 | [Custom consumers via the SDK](custom-via-sdk) | Building programmatic consumers (LangChain, Bedrock, OpenAI Assistants, custom orchestrators, eval harnesses) with `podium-py` or `podium-ts`. |
 
-Pick the page that matches the consumer you're working with.
+Pick the page that matches the consumer under configuration.
