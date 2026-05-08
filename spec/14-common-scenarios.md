@@ -136,13 +136,12 @@ A single-developer setup that mirrors a public Git repo (e.g., a community libra
 **One-time:**
 
 1. `podium serve --standalone --layer-path ~/podium-artifacts` (single-binary server with the local layer for personal artifacts; auto-bootstraps `~/.podium/sync.yaml` pointing at the local server).
-2. `podium serve --standalone`.
-3. Register the Git layer:
+2. Register the Git layer:
    ```bash
    podium layer register --id community-skills \
      --repo https://github.com/podium-community/skills.git --ref main
    ```
-4. The CLI prints the webhook URL it would expect; on a developer machine without a public ingress, ignore the webhook and pull manually instead:
+3. The CLI prints the webhook URL it would expect; on a developer machine without a public ingress, ignore the webhook and pull manually instead:
    ```bash
    podium layer reingest community-skills
    # or, for periodic sync:
