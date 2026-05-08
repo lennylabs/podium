@@ -40,7 +40,7 @@ Each workspace has its own `<workspace>/.podium/sync.lock`. Both read from the s
 
 ## 14.3 Local registry folder, MCP discovery, multiple workspaces
 
-Same artifact directory, but now the developer wants progressive disclosure (the agent calls `load_domain` / `search_artifacts` / `load_artifact` at runtime rather than working from pre-materialized files). MCP requires a server, so this scenario graduates from filesystem source (§13.11) to standalone server (§13.10):
+Same artifact directory, but now the developer wants progressive disclosure (the agent calls `load_domain` / `search_domains` / `search_artifacts` / `load_artifact` at runtime rather than working from pre-materialized files). MCP requires a server, so this scenario graduates from filesystem source (§13.11) to standalone server (§13.10):
 
 1. `podium serve --standalone --layer-path ~/podium-artifacts/`: starts the server against the same directory; auto-bootstraps `~/.podium/sync.yaml` with `defaults.registry: http://127.0.0.1:8080`.
 2. Per project, add a Podium entry to the harness's MCP config (snippets per §6.11). The MCP server picks up the registry from `~/.podium/sync.yaml` (`defaults.registry`), so no extra env var is needed.

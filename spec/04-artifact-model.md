@@ -564,7 +564,7 @@ Composition order (lowest to highest precedence):
 2. User-defined layers belonging to the caller, in the user-controlled order returned by `podium layer list`.
 3. The workspace local overlay (when configured).
 
-Higher-precedence layers override lower on collisions. Resolution of layers 1 and 2 happens at the registry on every `load_domain`, `search_artifacts`, and `load_artifact` call; layer 3 is merged in by the MCP server before returning results.
+Higher-precedence layers override lower on collisions. Resolution of layers 1 and 2 happens at the registry on every `load_domain`, `search_domains`, `search_artifacts`, and `load_artifact` call; layer 3 is merged in by the MCP server before returning results.
 
 ### Source types
 
@@ -812,7 +812,7 @@ Each artifact carries:
 
 ### 4.7.5 Audit
 
-Every `load_domain`, `search_artifacts`, and `load_artifact` call is logged with caller identity, visibility outcome, requested artifact (or query), timestamp, resolved layer composition, and result size. Ingest events (success and failure), admin actions (layer-list edits, freeze-window toggles, admin grants), and break-glass invocations are also logged. Hosts keep their own audit streams for runtime events; Podium's audit stream stays focused on the catalogue. Detail in §8.
+Every `load_domain`, `search_domains`, `search_artifacts`, and `load_artifact` call is logged with caller identity, visibility outcome, requested artifact (or query), timestamp, resolved layer composition, and result size. Ingest events (success and failure), admin actions (layer-list edits, freeze-window toggles, admin grants), and break-glass invocations are also logged. Hosts keep their own audit streams for runtime events; Podium's audit stream stays focused on the catalogue. Detail in §8.
 
 ### 4.7.6 Version Resolution and Consistency
 

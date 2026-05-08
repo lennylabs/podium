@@ -37,7 +37,7 @@ Coverage for: Postgres failover, object-storage outage, IdP outage, full-disk on
 
 ### 13.2.1 Read-Only Mode
 
-When the Postgres primary becomes unreachable but a read replica is up, the registry falls back to **read-only mode**: read endpoints (`load_domain`, `search_artifacts`, `load_artifact`, `load_artifacts`) continue to serve from the replica; write endpoints (ingest webhooks, layer admin operations, freeze toggles, admin grants, `podium login`-driven token issuance against the local IdP-mediated session table) are rejected with the structured error `registry.read_only`.
+When the Postgres primary becomes unreachable but a read replica is up, the registry falls back to **read-only mode**: read endpoints (`load_domain`, `search_domains`, `search_artifacts`, `load_artifact`, `load_artifacts`) continue to serve from the replica; write endpoints (ingest webhooks, layer admin operations, freeze toggles, admin grants, `podium login`-driven token issuance against the local IdP-mediated session table) are rejected with the structured error `registry.read_only`.
 
 A health-state machine governs the transition. The registry probes the primary every 5 s and flips to read-only after three consecutive failures (tunable via `PODIUM_READONLY_PROBE_INTERVAL` and `PODIUM_READONLY_PROBE_FAILURES`). It flips back automatically after three consecutive probe successes once the primary is reachable again.
 
@@ -98,7 +98,7 @@ Presigned URLs are CDN-friendly. Recommend CloudFront / Fastly / Cloudflare in f
 ## 13.8 Observability
 
 - **Metrics.** Prometheus endpoint on registry and MCP server. Histograms for latency; counters for cache hit rate, error rate, visibility-denial rate, ingest success/failure rate; gauges for queue depths.
-- **Tracing.** OpenTelemetry trace export. W3C Trace Context propagation across all calls. One root span per `load_domain` / `search_artifacts` / `load_artifact`; child spans for registry round-trip, object-storage fetch, adapter translation, materialization.
+- **Tracing.** OpenTelemetry trace export. W3C Trace Context propagation across all calls. One root span per `load_domain` / `search_domains` / `search_artifacts` / `load_artifact`; child spans for registry round-trip, object-storage fetch, adapter translation, materialization.
 - **Reference Grafana dashboard** ships with the registry.
 
 ## 13.9 Health and Readiness

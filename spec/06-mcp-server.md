@@ -222,7 +222,7 @@ The MCP server is a stdio subprocess spawned by its host. The host is responsibl
 
 | Failure                                       | Behavior                                                                                                                                                    |
 | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Registry offline                              | Serve from cache; return explicit "offline" status on fresh `load_domain` / `search_artifacts`.                                                             |
+| Registry offline                              | Serve from cache; return explicit "offline" status on fresh `load_domain` / `search_domains` / `search_artifacts`.                                                             |
 | Workspace overlay path missing                | Skip the workspace local overlay; warn once.                                                                                                                |
 | Auth token expired (`oauth-device-code`)      | Trigger refresh; if interactive refresh required, surface in tool response with reauth instructions via MCP elicitation.                                    |
 | Auth token expired (`injected-session-token`) | Surface "token expired"; the host's runtime is responsible for refresh.                                                                                     |

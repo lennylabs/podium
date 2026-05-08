@@ -202,8 +202,9 @@ the same identity, layer composition, and visibility filtering.
 ## Lazy versus eager loading
 
 **Lazy** (MCP / SDK path): the session starts empty. The agent calls
-`load_domain` to navigate, `search_artifacts` to query, and `load_artifact`
-to materialize one specific artifact after selection. This keeps the
+`load_domain` and `search_domains` to navigate, `search_artifacts` to
+query, and `load_artifact` to materialize one specific artifact after
+selection. This keeps the
 agent's context window small even when the catalog has thousands
 of entries. Requires a server.
 

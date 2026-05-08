@@ -38,7 +38,7 @@ Both the registry and the MCP server expose Prometheus metrics. The reference Gr
 
 **Registry:**
 
-- `podium_request_duration_seconds{handler}`: histograms per endpoint. Watch `load_domain`, `search_artifacts`, `load_artifact`, `load_artifacts` against the SLOs (p99 < 200ms / 200ms / 500ms manifest / 2s with resources).
+- `podium_request_duration_seconds{handler}`: histograms per endpoint. Watch `load_domain`, `search_domains`, `search_artifacts`, `load_artifact`, `load_artifacts` against the SLOs (p99 < 200ms / 200ms / 200ms / 500ms manifest / 2s with resources).
 - `podium_request_total{handler, code}`: error rate. Visibility-denial rate (`code=403, error=visibility.denied`) is informational; a sudden spike usually means a layer config error rather than a real authorization issue.
 - `podium_cache_hit_ratio{layer}`: content-cache hit rate at the registry edge. Low values often indicate a CDN misconfig.
 - `podium_ingest_total{layer, status}`: ingest success / failure / lint-failed counts per layer. Flag a layer with a recent uptick in `lint_failed`.

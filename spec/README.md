@@ -11,7 +11,7 @@ The specification is split across one file per top-level section. Read in order 
 2. [Architecture](02-architecture.md): high-level component map, registry layout, consumer surfaces.
 3. [Disclosure Surface](03-disclosure-surface.md): three-layer disclosure, scope preview, discovery flow.
 4. [Artifact Model](04-artifact-model.md): artifacts, layout, manifest schema, bundled resources, domains, layers, visibility.
-5. [Meta-Tools](05-meta-tools.md): `load_domain`, `search_artifacts`, `load_artifact`; tool descriptions and prompting guidance.
+5. [Meta-Tools](05-meta-tools.md): `load_domain`, `search_domains`, `search_artifacts`, `load_artifact`; tool descriptions and prompting guidance.
 6. [MCP Server](06-mcp-server.md): bridge configuration, identity providers, workspace overlay, cache, materialization, harness adapters, host recipes.
 7. [External Integration](07-external-integration.md): registry as external HTTP or local filesystem, host integration, `podium sync`, language SDKs, onboarding (`podium init`, `podium config show`, `podium login`).
 8. [Audit and Observability](08-audit-and-observability.md): what gets logged, sinks, retention, erasure, integrity.

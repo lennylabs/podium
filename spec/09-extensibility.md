@@ -57,7 +57,7 @@ The registry's HTTP API, the SDKs, the CLI, and the outbound webhook stream are 
 
 A script picks artifacts based on whatever context is meaningful (semantic match against a query, the user's recent work, the active project, an upstream ticket) and then invokes `podium sync` with `--include` flags to materialize the selected set. The script owns the discovery logic; Podium owns the materialization (visibility filtering, `extends:` resolution, harness adaptation, audit). The on-disk result is reproducible from the include list.
 
-Discovery can use either the SDK (when the script is in Python or TypeScript and wants typed results) or the read CLI (§7.6.1, when a shell pipeline is enough or the surrounding code is in another language). Both surface the same `search_artifacts` / `load_domain` / `load_artifact` operations.
+Discovery can use either the SDK (when the script is in Python or TypeScript and wants typed results) or the read CLI (§7.6.1, when a shell pipeline is enough or the surrounding code is in another language). Both surface the same `load_domain` / `search_domains` / `search_artifacts` / `load_artifact` operations.
 
 ```python
 from podium import Client
