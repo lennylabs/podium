@@ -139,12 +139,19 @@ podium serve --strict
 | Embedding provider      | `openai` (default)                              | `embedded-onnx`: bundled BGE-small ONNX model, in-process, no external service                                                                                                                                                                                                                 |
 | Object storage          | S3-compatible                                   | Filesystem (`~/.podium/standalone/objects/`)                                                                                                                                                                                                                                                   |
 | Identity provider       | OIDC IdP                                        | None. No auth; `127.0.0.1`-only HTTP by default                                                                                                                                                                                                                                                |
-| Layers                  | Configured admin layers + user-defined layers   | One default `local`-source layer rooted at `--layer-path`; additional `local` and `git` layers can be registered via `podium layer register`                                                                                                                                                   |
+| Layers                  | Configured admin layers + user-defined layers   | `--layer-path` is polymorphic (see "**`--layer-path` modes**" below): single-layer mode produces one `local`-source layer rooted at the path; filesystem-registry mode treats each subdirectory as a `local`-source layer per §13.11.1. Additional `local` and `git` layers can be registered via `podium layer register` in either mode.                                                                                                                                                   |
 | Git provider / webhooks | Required for `git`-source layers                | `git` source layers work without webhooks; webhooks are optional. Without a webhook (typical for a developer machine without a public ingress), `podium layer reingest <id>` pulls the current state on demand, and `podium layer watch <id>` polls the source at a configured interval.        |
 | Signing                 | Sigstore-keyless or registry-managed key        | Disabled by default; opt in via `--sign registry-key`                                                                                                                                                                                                                                          |
 | Content cache           | Cross-workspace disk cache (`~/.podium/cache/`) | Disabled; the registry is local, the cache adds nothing                                                                                                                                                                                                                                        |
 | Audit                   | Per-tenant Postgres table                       | Same SQLite file (audit table)                                                                                                                                                                                                                                                                 |
 | Helm chart / Kubernetes | Required for production deployments             | Not used                                                                                                                                                                                                                                                                                       |
+
+**`--layer-path` modes.** The path passed to `--layer-path` is interpreted as either a single-layer directory or a filesystem-registry root. The standalone server selects between these via an explicit dispatch:
+
+- **Filesystem-registry mode.** When `<path>/.registry-config` exists and sets `multi_layer: true`, and the path contains no manifest files (`ARTIFACT.md`, `SKILL.md`, `DOMAIN.md`) directly at its top level, `<path>` is treated as a filesystem-registry root. Each subdirectory of `<path>` becomes a `local`-source layer; ordering follows §13.11.1 (alphabetical by subdirectory name, optionally overridden by `layer_order:` in `.registry-config`). This is the mode used when migrating a filesystem registry (§13.11.6) to a server pointed at the same directory.
+- **Single-layer mode (default).** When `.registry-config` is absent, when it sets `multi_layer: false`, or when it is omitted entirely, `<path>` is treated as a single layer. The directory's contents are the layer's domain hierarchy; one `local`-source layer rooted at `--layer-path` is registered, with a default layer ID derived from the directory name.
+
+If `multi_layer: true` is set but the safety check fails (manifest files are present directly at the top level of `<path>`), the server refuses to start with `config.layer_path_ambiguous`, naming the conflicting top-level manifest paths so the operator can either remove them or unset `multi_layer`.
 
 **Hybrid search.** Standalone runs the same BM25 + vector RRF retriever as the standard registry. Vectors live in `sqlite-vec`; embeddings come from the bundled `embedded-onnx` provider. Both run in-process, so the binary works offline and air-gapped with no external dependency. Operators who want a remote model instead can switch via `PODIUM_EMBEDDING_PROVIDER=openai|voyage|cohere|ollama` (`ollama` is the obvious choice for self-hosted local models). `--no-embeddings` falls back to BM25-only.
 
@@ -227,6 +234,7 @@ A filesystem registry rooted at `<registry-path>` is a directory of layer direct
 
 ```
 <registry-path>/
+├── .registry-config            # required; opts the directory into filesystem-registry mode
 ├── team-shared/                # one layer
 │   ├── DOMAIN.md
 │   ├── finance/
@@ -236,18 +244,21 @@ A filesystem registry rooted at `<registry-path>` is a directory of layer direct
 │   │           └── ARTIFACT.md
 │   └── platform/
 │       └── …
-├── personal/                   # another layer (purely a name choice)
-│   └── …
-└── .layer-order                # optional; controls layer ordering
+└── personal/                   # another layer (purely a name choice)
+    └── …
 ```
 
-Each subdirectory of `<registry-path>` is treated as a `local`-source layer (§4.6). Layer IDs default to the subdirectory name; layer order is alphabetical by name. An optional `<registry-path>/.layer-order` file overrides the order (one layer ID per line, in precedence order from lowest to highest):
+Each subdirectory of `<registry-path>` is treated as a `local`-source layer (§4.6). Layer IDs default to the subdirectory name. Layer order is alphabetical by subdirectory name unless overridden in `.registry-config`. The `.registry-config` file is YAML:
 
+```yaml
+# <registry-path>/.registry-config
+multi_layer: true        # default: false. Required to treat <path> as a filesystem-registry root.
+layer_order:             # optional. When omitted, layer order is alphabetical by subdirectory name.
+  - team-shared          # listed lowest-precedence first
+  - personal
 ```
-# <registry-path>/.layer-order
-team-shared
-personal
-```
+
+`multi_layer: true` is the opt-in that distinguishes a filesystem-registry root from a single-layer directory. When `.registry-config` is absent, or when it sets `multi_layer: false`, the directory is interpreted as a single-layer setup (one `local`-source layer rooted at `<registry-path>`, per §13.10). The same dispatch applies to `podium sync` against a filesystem path (§7.5.2) and to the standalone server's `--layer-path` (§13.10).
 
 The workspace local overlay (`<workspace>/.podium/overlay/`, §6.4) sits on top of the filesystem-registry layers, exactly as in server source.
 

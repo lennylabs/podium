@@ -89,7 +89,7 @@ podium serve [--standalone] [--strict]
 | `--strict` | Refuse to start without an explicit config (no auto-standalone fallback). |
 | `--config <path>` | Override the default config file location. |
 | `--bind <addr>` | Bind address. |
-| `--layer-path <path>` | For standalone: register a `local`-source layer rooted at this path. |
+| `--layer-path <path>` | For standalone: register layers rooted at this path. The path is polymorphic. When `<path>/.registry-config` exists with `multi_layer: true` (and no top-level manifest files are present), each subdirectory becomes a `local`-source layer per the filesystem-registry layout. Otherwise the path is registered as a single `local`-source layer. |
 | `--public-mode` | Bypass authentication and visibility filtering. Mutually exclusive with an identity provider. |
 | `--allow-public-bind` | Allow non-loopback bind in public mode (typically behind an authenticated reverse proxy). |
 

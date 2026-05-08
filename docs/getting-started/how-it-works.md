@@ -63,11 +63,11 @@ a folder; `podium sync` reads it directly:
 
 ```
    ~/podium-artifacts/                            ┌─────────────┐
-   ├── personal/                               ──→│ podium sync │──→ harness directory
-   │   └── greet/{SKILL.md,ARTIFACT.md}           └─────────────┘    (.claude/, .cursor/, ...)
-   ├── team-shared/                                      ▲
-   │   └── ...                                           │
-   └── .layer-order                                      │
+   ├── .registry-config                        ──→│ podium sync │──→ harness directory
+   ├── personal/                                  └─────────────┘    (.claude/, .cursor/, ...)
+   │   └── greet/{SKILL.md,ARTIFACT.md}                  ▲
+   └── team-shared/                                      │
+       └── ...                                           │
                               No daemon, no authentication.
                               The catalog is the directory.
 ```

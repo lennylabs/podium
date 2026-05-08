@@ -66,6 +66,7 @@ A filesystem registry rooted at `<registry-path>` is a directory of layer direct
 
 ```
 <registry-path>/
+├── .registry-config            # required; opts the directory into filesystem-registry mode
 ├── team-shared/                # one layer
 │   ├── DOMAIN.md
 │   ├── finance/
@@ -75,12 +76,21 @@ A filesystem registry rooted at `<registry-path>` is a directory of layer direct
 │   │           └── ARTIFACT.md
 │   └── platform/
 │       └── …
-├── personal/                   # another layer
-│   └── …
-└── .layer-order                # optional; controls layer ordering
+└── personal/                   # another layer
+    └── …
 ```
 
-Each subdirectory of `<registry-path>` is treated as a `local`-source layer. Layer IDs default to the subdirectory name; layer order is alphabetical by name. An optional `<registry-path>/.layer-order` file overrides the order (one layer ID per line, lowest precedence to highest).
+Each subdirectory of `<registry-path>` is treated as a `local`-source layer. Layer IDs default to the subdirectory name. Layer order is alphabetical by subdirectory name unless overridden by `layer_order:` in `.registry-config`. The file is YAML:
+
+```yaml
+# <registry-path>/.registry-config
+multi_layer: true        # required; opts the directory into filesystem-registry mode
+layer_order:             # optional; lowest-precedence first
+  - team-shared
+  - personal
+```
+
+When `.registry-config` is absent (or sets `multi_layer: false`), the directory is treated as a single-layer setup instead: one `local`-source layer rooted at the path. The same dispatch applies whether the consumer is `podium sync` (filesystem source) or `podium serve --standalone --layer-path` (standalone server pointed at the same directory).
 
 The workspace local overlay (`<workspace>/.podium/overlay/`) sits on top of the filesystem-registry layers, exactly as in server mode.
 
