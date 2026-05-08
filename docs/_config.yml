@@ -107,10 +107,6 @@ kramdown:
 # --------------------------------------------------------------------------
 # Excludes
 # --------------------------------------------------------------------------
-# The four legacy files below are kept in the repo as drafting source for the
-# subsequent restructure rounds (deployment/, etc.). They are excluded from
-# the site to avoid two competing trees during the transition. Each will be
-# rewritten into its new home before the exclude line is removed.
 exclude:
   - Gemfile
   - Gemfile.lock
@@ -118,8 +114,3 @@ exclude:
   - vendor
   - .bundle
   - README.md
-  - quickstart.md
-  - team-rollout.md
-  - operator-guide.md
-  - progressive-adoption.md
-  - oidc/

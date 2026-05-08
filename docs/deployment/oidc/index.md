@@ -1,3 +1,12 @@
+---
+layout: default
+title: OIDC cookbooks
+parent: Deployment
+nav_order: 7
+has_children: true
+description: Per-IdP setup recipes for Okta, Entra ID, Google Workspace, Auth0, and Keycloak.
+---
+
 # OIDC integration cookbooks
 
 Podium uses OIDC for identity in standard deployments. The registry doesn't ship its own user database. It accepts a JWT issued by your identity provider, validates the signature against the IdP's JWKS, and reads the `sub`, `email`, and `groups` claims to determine the caller's effective view (§4.6, §6.3).

@@ -1,3 +1,12 @@
+---
+layout: default
+title: Google Workspace
+parent: OIDC cookbooks
+grand_parent: Deployment
+nav_order: 3
+description: Configure Podium to authenticate against Google Workspace via OIDC device-code flow.
+---
+
 # Google Workspace
 
 Podium + Google Workspace. The setup is straightforward, but Workspace doesn't emit an OIDC `groups` claim natively. For group-based visibility, you either resolve group membership server-side via the Cloud Identity API or use a directory-sync pattern.

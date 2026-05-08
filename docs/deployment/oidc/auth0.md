@@ -1,3 +1,12 @@
+---
+layout: default
+title: Auth0
+parent: OIDC cookbooks
+grand_parent: Deployment
+nav_order: 4
+description: Configure Podium to authenticate against Auth0 via OIDC device-code flow.
+---
+
 # Auth0
 
 Podium + Auth0. ~15 minutes of setup. Group claims are not native to Auth0; they're added via an Action (the modern way) or a Rule (legacy).

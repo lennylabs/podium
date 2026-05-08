@@ -1,3 +1,12 @@
+---
+layout: default
+title: Keycloak
+parent: OIDC cookbooks
+grand_parent: Deployment
+nav_order: 5
+description: Configure Podium to authenticate against self-hosted Keycloak via OIDC device-code flow.
+---
+
 # Keycloak
 
 Podium + Keycloak. ~15 minutes of setup. Self-hosted, so you control the IdP, which is useful for air-gapped or sovereignty-constrained deployments. Compose-stack development uses Dex (a sibling project), but the production-equivalent IdP for the same niche is Keycloak.

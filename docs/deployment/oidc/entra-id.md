@@ -1,3 +1,12 @@
+---
+layout: default
+title: Entra ID
+parent: OIDC cookbooks
+grand_parent: Deployment
+nav_order: 2
+description: Configure Podium to authenticate against Microsoft Entra ID (formerly Azure AD) via OIDC device-code flow.
+---
+
 # Microsoft Entra ID (formerly Azure AD)
 
 Podium + Entra ID. ~20 minutes of setup. Slightly more involved than Okta because Entra emits group object IDs (GUIDs) instead of names by default.
