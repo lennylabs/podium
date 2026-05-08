@@ -8,7 +8,7 @@ A developer keeps artifacts in a local folder and materializes a subset into one
 
 **One-time:**
 
-1. Lay out artifacts in `~/podium-artifacts/` per §4.2 (each artifact a subdirectory containing `ARTIFACT.md`, plus `SKILL.md` for skills; subdirectories of `~/podium-artifacts/` are layers, §13.11.1).
+1. Lay out artifacts in `~/podium-artifacts/` per §4.2 (each artifact a subdirectory containing `ARTIFACT.md`, plus `SKILL.md` for skills). The path is interpreted as a single `local`-source layer rooted at `~/podium-artifacts/`; for a multi-layer setup (each subdirectory a separate layer) opt in via `<path>/.registry-config` with `multi_layer: true` per §13.11.1.
 2. `podium init --global --registry ~/podium-artifacts/` to write `~/.podium/sync.yaml` with `defaults.registry: ~/podium-artifacts/`. No server needed; the client reads the directory directly.
 
 **Per project:**

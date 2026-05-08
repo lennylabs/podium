@@ -78,9 +78,10 @@ across projects, run `podium init --global` instead.
 
 A skill is a directory with two manifest files at its root:
 `SKILL.md` from the [agentskills.io](https://agentskills.io/specification)
-standard and `ARTIFACT.md` for Podium metadata. The top-level
-directories under the registry path are layers. The example below creates
-a `greet` skill under the `personal` layer:
+standard and `ARTIFACT.md` for Podium metadata. The registry path is one
+filesystem layer; artifacts and intermediate domain directories live
+underneath. The example below creates a `greet` skill under a `personal/hello/`
+domain path:
 
 ```bash
 mkdir -p ~/podium-artifacts/personal/hello/greet
@@ -185,6 +186,13 @@ After the local loop works, continue with one of these paths:
   `search_artifacts` to discover available artifacts. Runtime browsing
   requires a server. See [How it works](how-it-works) for the discovery
   meta-tools and when each applies.
+- **Split the catalog into multiple layers.** This quickstart uses a
+  single-layer setup (one filesystem layer rooted at `~/podium-artifacts/`).
+  To compose several layers from one directory (for example, a shared
+  team layer alongside a personal layer), opt the directory into
+  filesystem-registry mode by adding a `.registry-config` with
+  `multi_layer: true`. See [Solo / filesystem](../deployment/solo-filesystem)
+  for the layout and `.registry-config` reference.
 - **Outgrow filesystem mode.** When runtime discovery (agents loading
   capabilities mid-session) or a single audit log for a team becomes
   necessary, move to a standalone server:
@@ -199,10 +207,11 @@ After the local loop works, continue with one of these paths:
 **`config.no_registry` error.** `podium init` didn't run, or the
 resolved `defaults.registry` is empty. Re-run step 2.
 
-**`podium sync` says no artifacts.** The artifact must live under a
-_layer_ subdirectory (`~/podium-artifacts/<layer-name>/...`), not
-directly in `~/podium-artifacts/`. Layer names are the top level;
-artifacts go below.
+**`podium sync` says no artifacts.** Confirm that the artifact directory
+contains both `ARTIFACT.md` and (for skills) `SKILL.md` at its immediate
+root. The directory path beneath `~/podium-artifacts/` is the canonical
+artifact ID; intermediate directories without manifest files are domain
+nodes, not artifacts.
 
 **Claude Code doesn't see the skill.** Check that
 `.claude/agents/greet.md` actually exists. If it does, restart Claude
