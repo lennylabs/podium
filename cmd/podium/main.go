@@ -127,6 +127,7 @@ func syncCmd(args []string) int {
 		Target:       abs,
 		AdapterID:    *harness,
 		DryRun:       *dryRun,
+		OverlayPath:  *overlay,
 	}
 	if *watch {
 		return runWatchLoop(syncOpts, *overlay, *asJSON)

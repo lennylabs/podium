@@ -5,12 +5,14 @@
 package sync
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
 
 	"github.com/lennylabs/podium/pkg/adapter"
 	"github.com/lennylabs/podium/pkg/materialize"
+	"github.com/lennylabs/podium/pkg/overlay"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 )
 
@@ -35,6 +37,11 @@ type Options struct {
 	AdapterID       string
 	AdapterRegistry *adapter.Registry
 	DryRun          bool
+	// OverlayPath, when non-empty, points at a workspace overlay
+	// directory whose records sit at the highest precedence of the
+	// effective view (§4.6 / §6.4). Overlay artifacts override the
+	// registry's contribution at the same canonical ID.
+	OverlayPath string
 }
 
 // Result describes what a Run actually did. Used by callers (CLI, tests)
@@ -88,6 +95,19 @@ func Run(opts Options) (*Result, error) {
 		return nil, err
 	}
 
+	// §6.4 workspace overlay: records under OverlayPath sit at the
+	// highest precedence; overlay IDs replace the registry's
+	// contribution at the same canonical ID.
+	if opts.OverlayPath != "" {
+		overlayRecords, oerr := overlay.Filesystem{Path: opts.OverlayPath}.Resolve(context.Background())
+		if oerr != nil && !errors.Is(oerr, overlay.ErrNoOverlay) {
+			return nil, fmt.Errorf("overlay: %w", oerr)
+		}
+		if len(overlayRecords) > 0 {
+			records = mergeOverlay(records, overlayRecords)
+		}
+	}
+
 	res := &Result{Adapter: a.ID(), Target: opts.Target}
 
 	allFiles := []adapter.File{}
@@ -121,4 +141,26 @@ func Run(opts Options) (*Result, error) {
 		return nil, err
 	}
 	return res, nil
+}
+
+// mergeOverlay returns base with each overlay record replacing the
+// same-ID base record (or appended when no base record matches).
+// Overlay records keep their original Layer so downstream callers
+// can identify the override path.
+func mergeOverlay(base, overlay []filesystem.ArtifactRecord) []filesystem.ArtifactRecord {
+	idx := map[string]int{}
+	for i, rec := range base {
+		idx[rec.ID] = i
+	}
+	out := make([]filesystem.ArtifactRecord, len(base))
+	copy(out, base)
+	for _, rec := range overlay {
+		if i, ok := idx[rec.ID]; ok {
+			out[i] = rec
+			continue
+		}
+		idx[rec.ID] = len(out)
+		out = append(out, rec)
+	}
+	return out
 }

@@ -32,6 +32,8 @@ import (
 
 	"github.com/lennylabs/podium/pkg/adapter"
 	"github.com/lennylabs/podium/pkg/materialize"
+	"github.com/lennylabs/podium/pkg/overlay"
+	"github.com/lennylabs/podium/pkg/registry/filesystem"
 )
 
 // protocolVersion is the MCP wire-protocol version this binary speaks.
@@ -62,12 +64,13 @@ func main() {
 
 // config captures every PODIUM_ env var the bridge consults.
 type config struct {
-	registry          string
-	harness           string
-	cacheDir          string
-	materializeRoot   string
-	sessionToken      string
-	sessionTokenFile  string
+	registry         string
+	harness          string
+	cacheDir         string
+	materializeRoot  string
+	sessionToken     string
+	sessionTokenFile string
+	overlayPath      string
 }
 
 func loadConfig() (*config, error) {
@@ -78,6 +81,7 @@ func loadConfig() (*config, error) {
 		materializeRoot:  os.Getenv("PODIUM_MATERIALIZE_ROOT"),
 		sessionToken:     os.Getenv("PODIUM_SESSION_TOKEN"),
 		sessionTokenFile: os.Getenv("PODIUM_SESSION_TOKEN_FILE"),
+		overlayPath:      os.Getenv("PODIUM_OVERLAY_PATH"),
 	}
 	if c.registry == "" {
 		return nil, fmt.Errorf("PODIUM_REGISTRY is required")
@@ -104,6 +108,7 @@ type mcpServer struct {
 	http     *http.Client
 	cache    *contentCache
 	adapters *adapter.Registry
+	overlay  []filesystem.ArtifactRecord
 }
 
 func newServer(cfg *config) (*mcpServer, error) {
@@ -111,12 +116,37 @@ func newServer(cfg *config) (*mcpServer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &mcpServer{
+	srv := &mcpServer{
 		cfg:      cfg,
 		http:     &http.Client{},
 		cache:    cache,
 		adapters: adapter.DefaultRegistry(),
-	}, nil
+	}
+	// §6.4 workspace overlay: load now and reuse for the bridge
+	// lifetime. An empty path or absent overlay disables the layer.
+	if cfg.overlayPath != "" {
+		records, err := overlay.Filesystem{Path: cfg.overlayPath}.Resolve(nil)
+		if err == nil {
+			srv.overlay = records
+		}
+		// Errors other than ErrNoOverlay are silently ignored: the
+		// bridge runs without an overlay rather than refusing to
+		// start.
+	}
+	return srv, nil
+}
+
+// overlayMatch returns the overlay record whose canonical ID
+// matches id, or nil. Used by the load_artifact path to satisfy
+// reads from the highest-precedence layer before talking to the
+// registry.
+func (s *mcpServer) overlayMatch(id string) *filesystem.ArtifactRecord {
+	for i := range s.overlay {
+		if s.overlay[i].ID == id {
+			return &s.overlay[i]
+		}
+	}
+	return nil
 }
 
 // rpcRequest is a JSON-RPC 2.0 request envelope.
@@ -228,6 +258,15 @@ func (s *mcpServer) callTool(raw json.RawMessage) any {
 // §6.6 materialization pipeline, and returns the manifest body plus
 // the materialized paths the host can read.
 func (s *mcpServer) loadArtifact(args map[string]any) any {
+	// §6.4 workspace overlay precedence: the overlay layer sits at the
+	// highest precedence in the effective view. When an overlay record
+	// matches the requested ID, return it directly without consulting
+	// the registry.
+	if id, ok := args["id"].(string); ok && id != "" {
+		if rec := s.overlayMatch(id); rec != nil {
+			return s.loadArtifactFromOverlay(rec, args)
+		}
+	}
 	body, err := s.fetchJSON("/v1/load_artifact", args)
 	if err != nil {
 		return errorResult(err.Error())
@@ -291,6 +330,78 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 		"manifest_body":   resp.ManifestBody,
 		"materialized_at": materialized,
 	}
+}
+
+// loadArtifactFromOverlay produces a load_artifact response from a
+// workspace overlay record, bypassing the registry per §6.4. The
+// content hash is computed from the artifact bytes so the response
+// shape matches the registry's.
+func (s *mcpServer) loadArtifactFromOverlay(rec *filesystem.ArtifactRecord, args map[string]any) any {
+	hash := sha256.Sum256(rec.ArtifactBytes)
+	contentHash := "sha256:" + hex.EncodeToString(hash[:])
+
+	resp := loadArtifactResponse{
+		ID:          rec.ID,
+		ContentHash: contentHash,
+		Frontmatter: string(rec.ArtifactBytes),
+		Layer:       "overlay",
+		Resources:   resourcesAsStrings(rec.Resources),
+	}
+	if rec.Artifact != nil {
+		resp.Type = string(rec.Artifact.Type)
+		resp.Version = rec.Artifact.Version
+		resp.ManifestBody = rec.Artifact.Body
+	}
+	if err := s.cache.put(contentHash, resp.Frontmatter, resp.ManifestBody, resp.Resources); err != nil {
+		return errorResult("cache: " + err.Error())
+	}
+	materialized := []string{}
+	if s.cfg.materializeRoot != "" {
+		harnessID := s.cfg.harness
+		if h, ok := args["harness"].(string); ok && h != "" {
+			harnessID = h
+		}
+		a, err := s.adapters.Get(harnessID)
+		if err != nil {
+			return errorResult("config.unknown_harness: " + err.Error())
+		}
+		src := adapter.Source{
+			ArtifactID:    rec.ID,
+			ArtifactBytes: rec.ArtifactBytes,
+			SkillBytes:    rec.SkillBytes,
+			Resources:     rec.Resources,
+		}
+		out, err := a.Adapt(src)
+		if err != nil {
+			return errorResult("adapter: " + err.Error())
+		}
+		if err := materialize.Write(s.cfg.materializeRoot, out); err != nil {
+			return errorResult("materialize: " + err.Error())
+		}
+		for _, f := range out {
+			materialized = append(materialized, filepath.Join(s.cfg.materializeRoot, filepath.FromSlash(f.Path)))
+		}
+	}
+	return map[string]any{
+		"id":              resp.ID,
+		"type":            resp.Type,
+		"version":         resp.Version,
+		"content_hash":    resp.ContentHash,
+		"manifest_body":   resp.ManifestBody,
+		"layer":           resp.Layer,
+		"materialized_at": materialized,
+	}
+}
+
+func resourcesAsStrings(in map[string][]byte) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = string(v)
+	}
+	return out
 }
 
 // loadArtifactResponse mirrors the registry server's
