@@ -79,6 +79,30 @@ type AdminGrant struct {
 	Granted time.Time
 }
 
+// LayerConfig is one entry in a tenant's ordered layer list (§4.6).
+// Admins manage admin-defined layers via the layer-config CLI; users
+// register personal layers (which get implicit visibility:
+// users:[<registrant>]).
+type LayerConfig struct {
+	TenantID    string
+	ID          string
+	SourceType  string   // "git" | "local"
+	Repo        string   // git source
+	Ref         string   // git source
+	Root        string   // optional subpath
+	LocalPath   string   // local source
+	Order       int      // precedence within the tenant (lower = lower precedence)
+	UserDefined bool
+	Owner       string   // OIDC sub of the registrant for user-defined layers
+	// Visibility fields (subset of layer.Visibility per §4.6).
+	Public        bool
+	Organization  bool
+	Groups        []string
+	Users         []string
+	WebhookSecret string // HMAC secret for git source webhook (§7.3.1)
+	CreatedAt     time.Time
+}
+
 // Store is the SPI implementations satisfy. Methods take a
 // context.Context first per §9.3.
 type Store interface {
@@ -98,6 +122,12 @@ type Store interface {
 	// Admin grants
 	GrantAdmin(ctx context.Context, g AdminGrant) error
 	IsAdmin(ctx context.Context, userID, orgID string) (bool, error)
+
+	// Layer configs (§4.6 layer list, managed via the layer CLI).
+	PutLayerConfig(ctx context.Context, cfg LayerConfig) error
+	GetLayerConfig(ctx context.Context, tenantID, id string) (LayerConfig, error)
+	ListLayerConfigs(ctx context.Context, tenantID string) ([]LayerConfig, error)
+	DeleteLayerConfig(ctx context.Context, tenantID, id string) error
 }
 
 // SuiteName is the canonical name of the conformance suite (§9.3).

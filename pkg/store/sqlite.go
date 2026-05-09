@@ -284,6 +284,100 @@ func (s *SQLite) IsAdmin(ctx context.Context, userID, orgID string) (bool, error
 	return true, nil
 }
 
+// PutLayerConfig inserts or replaces a layer config.
+func (s *SQLite) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
+	createdAt := cfg.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT OR REPLACE INTO layer_configs
+			(tenant_id, id, source_type, repo, ref, root, local_path, ord,
+			 user_defined, owner, public, organization, groups, users,
+			 webhook_secret, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		cfg.TenantID, cfg.ID, cfg.SourceType, cfg.Repo, cfg.Ref, cfg.Root, cfg.LocalPath,
+		cfg.Order, boolToInt(cfg.UserDefined), cfg.Owner,
+		boolToInt(cfg.Public), boolToInt(cfg.Organization),
+		strings.Join(cfg.Groups, "\n"), strings.Join(cfg.Users, "\n"),
+		cfg.WebhookSecret, createdAt.UTC().Format(time.RFC3339Nano))
+	return err
+}
+
+// GetLayerConfig returns one layer config or ErrNotFound.
+func (s *SQLite) GetLayerConfig(ctx context.Context, tenantID, id string) (LayerConfig, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
+		       user_defined, owner, public, organization, groups, users,
+		       webhook_secret, created_at
+		FROM layer_configs
+		WHERE tenant_id = ? AND id = ?`, tenantID, id)
+	cfg, err := scanLayerConfig(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return LayerConfig{}, ErrNotFound
+	}
+	return cfg, err
+}
+
+// ListLayerConfigs returns every layer for the tenant in Order ascending.
+func (s *SQLite) ListLayerConfigs(ctx context.Context, tenantID string) ([]LayerConfig, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
+		       user_defined, owner, public, organization, groups, users,
+		       webhook_secret, created_at
+		FROM layer_configs WHERE tenant_id = ?
+		ORDER BY ord ASC, id ASC`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []LayerConfig{}
+	for rows.Next() {
+		cfg, err := scanLayerConfig(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, cfg)
+	}
+	return out, rows.Err()
+}
+
+// DeleteLayerConfig removes a layer.
+func (s *SQLite) DeleteLayerConfig(ctx context.Context, tenantID, id string) error {
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM layer_configs WHERE tenant_id = ? AND id = ?`,
+		tenantID, id)
+	return err
+}
+
+func scanLayerConfig(scanner rowScanner) (LayerConfig, error) {
+	var cfg LayerConfig
+	var userDefined, public, org int
+	var groups, users, createdAt string
+	err := scanner.Scan(
+		&cfg.TenantID, &cfg.ID, &cfg.SourceType,
+		&cfg.Repo, &cfg.Ref, &cfg.Root, &cfg.LocalPath,
+		&cfg.Order, &userDefined, &cfg.Owner,
+		&public, &org, &groups, &users,
+		&cfg.WebhookSecret, &createdAt)
+	if err != nil {
+		return LayerConfig{}, err
+	}
+	cfg.UserDefined = userDefined != 0
+	cfg.Public = public != 0
+	cfg.Organization = org != 0
+	if groups != "" {
+		cfg.Groups = strings.Split(groups, "\n")
+	}
+	if users != "" {
+		cfg.Users = strings.Split(users, "\n")
+	}
+	if createdAt != "" {
+		cfg.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	}
+	return cfg, nil
+}
+
 // rowScanner is satisfied by *sql.Row and *sql.Rows.
 type rowScanner interface {
 	Scan(dest ...any) error

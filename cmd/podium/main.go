@@ -51,6 +51,8 @@ func main() {
 		os.Exit(initCmd(os.Args[2:]))
 	case "profile":
 		os.Exit(profileCmd(os.Args[2:]))
+	case "layer":
+		os.Exit(layerCmd(os.Args[2:]))
 	case "version":
 		fmt.Println("podium 0.0.0-dev")
 	case "help", "-h", "--help":
@@ -74,6 +76,11 @@ Commands:
   artifact show       Print an artifact's manifest body and frontmatter.
   init                Write ~/.podium/sync.yaml or ./.podium/sync.yaml.
   profile edit        Add or remove patterns on a sync.yaml profile.
+  layer register      Register a layer with the registry.
+  layer list          List registered layers.
+  layer reorder       Re-sequence the layer list.
+  layer unregister    Remove a layer.
+  layer reingest      Trigger a fresh ingest for a layer.
   version             Print the podium version.
   help                Print this message.
 `

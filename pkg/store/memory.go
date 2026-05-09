@@ -9,11 +9,12 @@ import (
 // Memory is an in-memory Store implementation used by tests and
 // standalone bootstrapping. Production code uses SQLite or Postgres.
 type Memory struct {
-	mu          sync.Mutex
-	tenants     map[string]Tenant
-	manifests   map[string]ManifestRecord
-	deps        map[string][]DependencyEdge
-	admins      map[string]bool
+	mu        sync.Mutex
+	tenants   map[string]Tenant
+	manifests map[string]ManifestRecord
+	deps      map[string][]DependencyEdge
+	admins    map[string]bool
+	layers    map[string]LayerConfig // key: tenantID + "/" + id
 }
 
 // NewMemory returns a fresh in-memory Store.
@@ -23,6 +24,7 @@ func NewMemory() *Memory {
 		manifests: map[string]ManifestRecord{},
 		deps:      map[string][]DependencyEdge{},
 		admins:    map[string]bool{},
+		layers:    map[string]LayerConfig{},
 	}
 }
 
@@ -130,4 +132,53 @@ func (s *Memory) IsAdmin(_ context.Context, userID, orgID string) (bool, error) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.admins[userID+"/"+orgID], nil
+}
+
+func layerKey(tenantID, id string) string { return tenantID + "/" + id }
+
+// PutLayerConfig inserts or replaces a layer config.
+func (s *Memory) PutLayerConfig(_ context.Context, cfg LayerConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.layers[layerKey(cfg.TenantID, cfg.ID)] = cfg
+	return nil
+}
+
+// GetLayerConfig returns the layer or ErrNotFound.
+func (s *Memory) GetLayerConfig(_ context.Context, tenantID, id string) (LayerConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cfg, ok := s.layers[layerKey(tenantID, id)]
+	if !ok {
+		return LayerConfig{}, ErrNotFound
+	}
+	return cfg, nil
+}
+
+// ListLayerConfigs returns every layer for the tenant in declared
+// order (Order ascending; ties break alphabetical by ID).
+func (s *Memory) ListLayerConfigs(_ context.Context, tenantID string) ([]LayerConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []LayerConfig{}
+	for _, cfg := range s.layers {
+		if cfg.TenantID == tenantID {
+			out = append(out, cfg)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Order != out[j].Order {
+			return out[i].Order < out[j].Order
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
+}
+
+// DeleteLayerConfig removes a layer.
+func (s *Memory) DeleteLayerConfig(_ context.Context, tenantID, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.layers, layerKey(tenantID, id))
+	return nil
 }
