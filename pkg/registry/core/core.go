@@ -41,6 +41,20 @@ type Registry struct {
 	store    store.Store
 	tenantID string
 	layers   []layer.Layer
+	audit    AuditEmitter
+}
+
+// AuditEmitter records audit events for every meta-tool call per §8.
+// The default is a no-op; callers wire pkg/audit.Sink to persist.
+type AuditEmitter func(ctx context.Context, e AuditEvent)
+
+// AuditEvent is one structured event the registry emits. Maps to a
+// pkg/audit.Event in callers that wire one in.
+type AuditEvent struct {
+	Type    string
+	Caller  string
+	Target  string
+	Context map[string]string
 }
 
 // New returns a Registry backed by the given store, tenant, and layer
@@ -48,6 +62,21 @@ type Registry struct {
 // every record is visible.
 func New(s store.Store, tenantID string, layers []layer.Layer) *Registry {
 	return &Registry{store: s, tenantID: tenantID, layers: layers}
+}
+
+// WithAudit attaches an AuditEmitter so every meta-tool invocation
+// produces an audit event per §8.1.
+func (r *Registry) WithAudit(emit AuditEmitter) *Registry {
+	r.audit = emit
+	return r
+}
+
+// emit fires the configured audit emitter, if any.
+func (r *Registry) emit(ctx context.Context, e AuditEvent) {
+	if r.audit == nil {
+		return
+	}
+	r.audit(ctx, e)
 }
 
 // ----- LoadDomain ----------------------------------------------------------
@@ -95,6 +124,11 @@ type LoadDomainOptions struct {
 // with IsPublic=true to bypass visibility filtering, mirroring the
 // §13.10 / §13.11 behavior.
 func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path string, opts LoadDomainOptions) (*LoadDomainResult, error) {
+	r.emit(ctx, AuditEvent{
+		Type:   "domain.loaded",
+		Caller: callerOf(id),
+		Target: path,
+	})
 	visible, err := r.visibleManifests(ctx, id)
 	if err != nil {
 		return nil, err
@@ -178,6 +212,11 @@ type SearchResult struct {
 // (id, description, tags, body), tunable enough to give meaningful
 // rankings without an external index.
 func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts SearchArtifactsOptions) (*SearchResult, error) {
+	r.emit(ctx, AuditEvent{
+		Type:    "artifacts.searched",
+		Caller:  callerOf(id),
+		Context: map[string]string{"query": opts.Query, "scope": opts.Scope, "type": opts.Type},
+	})
 	if opts.TopK > 50 {
 		return nil, fmt.Errorf("%w: top_k > 50", ErrInvalidArgument)
 	}
@@ -238,6 +277,11 @@ type SearchDomainsOptions struct {
 // this with §4.5.5 keyword projections; for now, domains are derived
 // from the unique paths of visible manifests.
 func (r *Registry) SearchDomains(ctx context.Context, id layer.Identity, opts SearchDomainsOptions) (*SearchResult, error) {
+	r.emit(ctx, AuditEvent{
+		Type:    "domains.searched",
+		Caller:  callerOf(id),
+		Context: map[string]string{"query": opts.Query, "scope": opts.Scope},
+	})
 	if opts.TopK > 50 {
 		return nil, fmt.Errorf("%w: top_k > 50", ErrInvalidArgument)
 	}
@@ -311,6 +355,12 @@ type LoadArtifactOptions struct {
 // semantics per §4.6) and field-merged per the §4.6 merge-semantics
 // table. The returned body and frontmatter are the merged result.
 func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifactID string, opts LoadArtifactOptions) (*LoadArtifactResult, error) {
+	r.emit(ctx, AuditEvent{
+		Type:    "artifact.loaded",
+		Caller:  callerOf(id),
+		Target:  artifactID,
+		Context: map[string]string{"version": opts.Version},
+	})
 	visible, err := r.visibleManifests(ctx, id)
 	if err != nil {
 		return nil, err
@@ -476,6 +526,19 @@ func splitParentRef(ref string) (id, ver string) {
 		return ref[:i], ref[i+1:]
 	}
 	return ref, ""
+}
+
+// callerOf renders the caller identity per §8.1. Public-mode (or
+// anonymous) calls record "system:public" so SIEM filters can scope
+// without parsing identity strings.
+func callerOf(id layer.Identity) string {
+	if id.IsPublic || !id.IsAuthenticated {
+		return "system:public"
+	}
+	if id.Sub != "" {
+		return id.Sub
+	}
+	return "system:public"
 }
 
 func resultFromRecord(rec store.ManifestRecord) *LoadArtifactResult {
