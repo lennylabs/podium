@@ -21,7 +21,7 @@ Tracks the state of the Podium implementation on the
 | 2  | REAL    | HTTP API including `/v1/dependents` and `/v1/scope/preview`. Visibility, latest, BM25, audit, public-mode + IdP guard, read-only mode. Presigned URLs above the inline cutoff still pending. |
 | 3  | REAL    | Lock file + scope filter + adapters + override / save-as / profile edit + `--watch` (poll-based, configurable period and debounce). |
 | 4  | REAL    | MCP bridge does fetch + cache + adapter + atomic write per §6.6. Per-call `harness:` override. Identity passthrough. Protocol version negotiation. |
-| 5  | REAL    | SQLite + Memory conformance suite. Standalone bootstrap via `cmd/podium-server`. Postgres still pending. |
+| 5  | REAL    | SQLite + Memory + Postgres conformance suite via `pkg/store/storetest.Suite`. Standalone bootstrap via `cmd/podium-server` selects the backend through `PODIUM_REGISTRY_STORE`; Postgres tests gate on `PODIUM_POSTGRES_DSN` so CI runs with or without a database. |
 | 6  | REAL    | Real go-git source + ingest pipeline + GitHub/GitLab/Bitbucket webhook signature verification + freeze-window + storage-quota enforcement. |
 | 7  | REAL    | LayerComposer wired into HTTP server; visibility filtering applied per call; admin-only ops gated. OIDC / SCIM still pending. |
 | 8  | REAL    | extends: at ingest + merge at load_artifact, max_depth + notable_count + featured, fold_below_artifacts + fold_passthrough_chains + target_response_tokens. |
@@ -59,16 +59,13 @@ recommended approach for each.
    needs `sigstore/sigstore-go` (recommended) or a hand-rolled client.
 2. **Phase 2 presigned URLs** above the §4.1 inline cutoff. Needs an
    `aws-sdk-go-v2` dependency for S3 / MinIO / R2 / GCS.
-3. **Phase 5 Postgres backend** (alongside SQLite). Needs `pgx` or
-   `lib/pq`; tests gate on `PODIUM_POSTGRES_DSN` so CI can run with
-   or without a database.
-4. **Phase 17 real CVE feed adapters.** NVD / OSV / GHSA periodic
+3. **Phase 17 real CVE feed adapters.** NVD / OSV / GHSA periodic
    ingestion; the OSV adapter is the recommended starting point
    (no API key, broadest coverage). NVD + GHSA need a tenant-config
    shape for keys / cadence.
-5. **Phase 16 transparency anchoring.** Periodic Sigstore-style
+4. **Phase 16 transparency anchoring.** Periodic Sigstore-style
    anchoring of the audit chain head; depends on Phase 1.
-6. **Vector store + embedding pipeline** for §4.7 hybrid retrieval.
+5. **Vector store + embedding pipeline** for §4.7 hybrid retrieval.
    Needs at least one embedding provider (recommended: ship the
    API providers — OpenAI / Voyage / Cohere — first; add sqlite-vec
    + embedded-onnx behind a build tag for air-gapped deployments).

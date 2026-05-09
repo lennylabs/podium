@@ -40,7 +40,11 @@ func makeRegistry(t *testing.T, dir string) string {
 // Phase: 3
 func TestWatch_RerunsAfterRegistryEdit(t *testing.T) {
 	testharness.RequirePhase(t, 3)
-	t.Parallel()
+	// Intentionally not parallel: the poll-based watcher's ticker
+	// can be starved when this test runs alongside dozens of
+	// disk-bound tests in the same process. Serializing within the
+	// package keeps the test reliable without hiding real watcher
+	// regressions.
 	dir := t.TempDir()
 	registry := makeRegistry(t, dir)
 	target := filepath.Join(dir, "out")
@@ -95,7 +99,11 @@ func TestWatch_RerunsAfterRegistryEdit(t *testing.T) {
 // Phase: 3
 func TestWatch_CancelClosesChannel(t *testing.T) {
 	testharness.RequirePhase(t, 3)
-	t.Parallel()
+	// Intentionally not parallel: the poll-based watcher's ticker
+	// can be starved when this test runs alongside dozens of
+	// disk-bound tests in the same process. Serializing within the
+	// package keeps the test reliable without hiding real watcher
+	// regressions.
 	dir := t.TempDir()
 	registry := makeRegistry(t, dir)
 	target := filepath.Join(dir, "out")

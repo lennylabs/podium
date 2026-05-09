@@ -128,10 +128,7 @@ func openStore(c *config) (store.Store, error) {
 	case "memory":
 		return store.NewMemory(), nil
 	case "postgres":
-		// pkg/store/postgres landings ship Phase 5 standard mode; for
-		// now route to memory and document the requirement.
-		log.Printf("warning: postgres backend not yet shipped; falling back to in-memory")
-		return store.NewMemory(), nil
+		return store.OpenPostgres(c.postgresDSN)
 	}
 	return nil, fmt.Errorf("unknown PODIUM_REGISTRY_STORE: %s", c.storeType)
 }
