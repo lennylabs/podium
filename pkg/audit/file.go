@@ -24,6 +24,10 @@ type FileSink struct {
 
 // NewFileSink opens (or creates) path and returns a hash-chained
 // FileSink. If path is empty, defaults to ~/.podium/audit.log.
+//
+// On open, the sink scans the existing file (when present) and
+// recovers the last event's hash so the chain continues across
+// server restarts.
 func NewFileSink(path string) (*FileSink, error) {
 	if path == "" {
 		home, err := os.UserHomeDir()
@@ -35,7 +39,39 @@ func NewFileSink(path string) (*FileSink, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	return &FileSink{path: path}, nil
+	sink := &FileSink{path: path}
+	last, err := lastChainHash(path)
+	if err != nil {
+		return nil, err
+	}
+	sink.lastHash = last
+	return sink, nil
+}
+
+// lastChainHash reads the existing log file (if any) and returns
+// the last event's Hash. Missing file returns "" so the next
+// Append seeds a fresh chain. Empty / corrupt last lines fall
+// back to the most-recent parseable line.
+func lastChainHash(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	var last string
+	for _, line := range splitLines(data) {
+		if len(line) == 0 {
+			continue
+		}
+		var je jsonEvent
+		if err := json.Unmarshal(line, &je); err != nil {
+			continue
+		}
+		last = je.Hash
+	}
+	return last, nil
 }
 
 // Append writes the next event in the chain.

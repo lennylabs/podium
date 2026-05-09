@@ -166,10 +166,10 @@ below is the punch summary.
 - Runtime trust keys (§6.3.2) live in memory for the same reason.
   `pkg/identity.RuntimeKeyRegistry` already has the right shape;
   the gap is persisting registrations.
-- The `audit.FileSink` does not load the prior chain head on
-  restart, so the chain breaks across server restarts. Anchoring
-  via Sigstore mitigates the practical risk; a startup-time read
-  of the last log entry would close it cleanly.
+- ~~The `audit.FileSink` does not load the prior chain head on
+  restart~~. DONE: `NewFileSink` scans the existing file at open
+  time and recovers the last event's Hash so the chain continues
+  across server restarts.
 
 ## What this branch leaves you with
 
