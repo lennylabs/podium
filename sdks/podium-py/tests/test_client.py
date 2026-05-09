@@ -142,3 +142,38 @@ def test_from_env_reads_registry(monkeypatch):
     client = Client.from_env()
     assert client.registry == "http://127.0.0.1:9999"
     assert client.overlay_path == "/tmp/overlay"
+
+
+# Spec: §4.7.6 — dependents_of returns artifacts that depend on the
+# given id, surfaced as ArtifactDescriptor instances.
+# Phase: 4
+def test_dependents_of_decodes_envelope(stub_server):
+    stub_server.next_response = {
+        "dependents": [
+            {"id": "finance/run", "type": "skill", "version": "1.0.0",
+             "description": "Variance"},
+        ],
+    }
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    deps = client.dependents_of("finance/glossary")
+    assert "/v1/dependents" in stub_server.last_path
+    assert len(deps) == 1
+    assert deps[0].id == "finance/run"
+
+
+# Spec: §6.4 — preview_scope hits /v1/scope/preview with the
+# constraints; the SDK passes the response through unchanged so
+# callers can inspect the full envelope.
+# Phase: 4
+def test_preview_scope_passes_constraints(stub_server):
+    stub_server.next_response = {
+        "scope": "finance/",
+        "matched": 12,
+        "results": [],
+    }
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    out = client.preview_scope(scope="finance/", type="skill", tags=["q4"])
+    assert "/v1/scope/preview" in stub_server.last_path
+    assert "scope=finance" in stub_server.last_path
+    assert "tags=q4" in stub_server.last_path
+    assert out["matched"] == 12

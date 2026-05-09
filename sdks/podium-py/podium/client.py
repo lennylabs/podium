@@ -165,6 +165,61 @@ class Client:
             resources=body.get("resources", {}) or {},
         )
 
+    def dependents_of(self, artifact_id: str) -> list[ArtifactDescriptor]:
+        """Return artifacts that depend on artifact_id (spec §4.7.6)."""
+        body = self._get("/v1/dependents", {"id": artifact_id})
+        return [
+            ArtifactDescriptor(
+                id=r.get("id", ""),
+                type=r.get("type", ""),
+                version=r.get("version", ""),
+                description=r.get("description", ""),
+                tags=r.get("tags") or [],
+            )
+            for r in body.get("dependents", []) or []
+        ]
+
+    def preview_scope(
+        self,
+        *,
+        scope: str = "",
+        type: str = "",
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Preview a scope's effective artifact set (spec §6.4)."""
+        params: dict[str, Any] = {}
+        if scope:
+            params["scope"] = scope
+        if type:
+            params["type"] = type
+        if tags:
+            params["tags"] = ",".join(tags)
+        return self._get("/v1/scope/preview", params)
+
+    def subscribe(self, *, types: list[str] | None = None):
+        """Yield NDJSON events from /v1/events (spec §7.6).
+
+        Each yielded value is the parsed JSON body of one event. The
+        iterator runs until the underlying connection closes; callers
+        wrap it in a try/except to handle reconnects.
+        """
+        params: dict[str, Any] = {}
+        if types:
+            params["types"] = ",".join(types)
+        url = self.registry + "/v1/events"
+        if params:
+            url = url + "?" + urllib.parse.urlencode(params)
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req) as resp:
+            for raw in resp:
+                line = raw.decode("utf-8").rstrip("\n")
+                if not line:
+                    continue
+                try:
+                    yield json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
     def _get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
         url = self.registry + path
         if params:

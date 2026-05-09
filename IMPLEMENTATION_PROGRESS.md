@@ -95,12 +95,19 @@ below is the punch summary.
   shape is `pg_dump` + S3 sync; a guided wrapper command remains
   on the configuration roadmap.
 
-**Real new features** (Batch C):
-- `NotificationProvider` SPI (§9): ingest-failure /
-  operational-notification delivery, distinct from the §7.3.2
-  outbound webhook event stream.
-- `TypeProvider` SPI (§9): no plugin point for a custom type.
-- `podium-py` SDK (§10 Phase 4): only `podium-ts` exists today.
+**Real new features** (Batch C): DONE.
+- `NotificationProvider` SPI (§9): `pkg/notification` ships
+  Noop, LogProvider, Webhook (HMAC-SHA256), and a fan-out
+  MultiProvider. `core.Registry.WithNotifier` wires the SPI
+  into the registry; `cmd/podium-server` honors
+  `PODIUM_NOTIFICATION_PROVIDER` (`noop|log|webhook|multi`).
+- `TypeProvider` SPI (§9): `pkg/typeprovider` exposes the
+  registry pattern; the first-class types ship as no-op
+  built-ins so existing lint behavior is unchanged. Custom
+  types register a Validate function.
+- `podium-py` SDK (§10 Phase 4): adds `dependents_of`,
+  `preview_scope`, and an NDJSON `subscribe()` generator on
+  top of the previously-shipped meta-tool methods.
 
 **Configuration surface** (Batch D): DONE.
 - `~/.podium/registry.yaml` server-config parser

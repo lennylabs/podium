@@ -25,6 +25,7 @@ import (
 	"github.com/lennylabs/podium/pkg/embedding"
 	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/notification"
 	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
@@ -64,6 +65,60 @@ func buildSCIMHandler(store *scim.Memory) *scim.Handler {
 		return nil
 	}
 	return &scim.Handler{Store: store, Tokens: tokens}
+}
+
+// openNotifier returns the §9 notification provider per
+// PODIUM_NOTIFICATION_PROVIDER. Returns nil when unset or when the
+// provider name resolves to "noop".
+func openNotifier() notification.Provider {
+	switch os.Getenv("PODIUM_NOTIFICATION_PROVIDER") {
+	case "", "noop":
+		return nil
+	case "log":
+		return notification.LogProvider{}
+	case "webhook":
+		url := os.Getenv("PODIUM_NOTIFICATION_WEBHOOK_URL")
+		if url == "" {
+			log.Printf("warning: PODIUM_NOTIFICATION_WEBHOOK_URL is required for webhook notifier")
+			return nil
+		}
+		return notification.Webhook{
+			URL:    url,
+			Secret: os.Getenv("PODIUM_NOTIFICATION_WEBHOOK_SECRET"),
+		}
+	case "multi":
+		// "multi" combines the log provider with the webhook provider
+		// when the URL is set; useful for "alert + record" deployments.
+		out := []notification.Provider{notification.LogProvider{}}
+		if url := os.Getenv("PODIUM_NOTIFICATION_WEBHOOK_URL"); url != "" {
+			out = append(out, notification.Webhook{
+				URL:    url,
+				Secret: os.Getenv("PODIUM_NOTIFICATION_WEBHOOK_SECRET"),
+			})
+		}
+		return notification.MultiProvider{Providers: out}
+	}
+	log.Printf("warning: unknown PODIUM_NOTIFICATION_PROVIDER=%q",
+		os.Getenv("PODIUM_NOTIFICATION_PROVIDER"))
+	return nil
+}
+
+// adaptNotifier turns a notification.Provider into the
+// core.NotificationFunc shape, swallowing errors (the registry
+// keeps running on outage; the audit log records what happened).
+func adaptNotifier(p notification.Provider) core.NotificationFunc {
+	return func(ctx context.Context, severity, title, body string, tags map[string]string) {
+		err := p.Notify(ctx, notification.Notification{
+			Severity: notification.Severity(severity),
+			Title:    title,
+			Body:     body,
+			Tags:     tags,
+			Time:     time.Now().UTC(),
+		})
+		if err != nil {
+			log.Printf("notification (%s): %v", p.ID(), err)
+		}
+	}
 }
 
 // envInt returns the integer value of an env var, or def when the
@@ -107,6 +162,15 @@ func Run() error {
 	} else if v != nil && e != nil {
 		registry = registry.WithVectorSearch(v, e)
 		log.Printf("hybrid search: vector=%s embedder=%s dim=%d", v.ID(), e.ID(), e.Dimensions())
+	}
+
+	// §9 NotificationProvider: chosen via PODIUM_NOTIFICATION_PROVIDER
+	// (one of "noop", "log", "webhook", or "multi"). Wraps the
+	// notifier in core.NotificationFunc so the registry can fire
+	// operational notifications without depending on this package.
+	if np := openNotifier(); np != nil {
+		registry = registry.WithNotifier(adaptNotifier(np))
+		log.Printf("notification provider: %s", np.ID())
 	}
 
 	// §6.3.1 SCIM 2.0: when at least one bearer token is configured,

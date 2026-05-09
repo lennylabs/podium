@@ -302,9 +302,16 @@ detailed plan with effort estimates and test strategies.
   `podium import`, and `podium admin runtime register` /
   `runtime list` ship in this branch. Only
   `admin migrate-to-standard` remains.
-- **Real new features (Batch C, ~2 days).**
-  `NotificationProvider` SPI, `TypeProvider` SPI,
-  `podium-py` SDK.
+- **Real new features (Batch C): DONE.**
+  - `pkg/notification` ships the SPI plus Noop, LogProvider,
+    Webhook (HMAC-SHA256), and MultiProvider. Wired into
+    `core.Registry.WithNotifier` and bootstrapped from
+    `PODIUM_NOTIFICATION_PROVIDER`.
+  - `pkg/typeprovider` ships the registry pattern; first-class
+    types ship as no-op built-ins so existing lint behavior is
+    unchanged.
+  - `sdks/podium-py` extended with `dependents_of`,
+    `preview_scope`, and an NDJSON `subscribe()` generator.
 - **Web UI (Batch E, ~2 days).** `--web-ui` SPA at `/ui/`.
 - **Verification (Batch F, ~half day).** p99 latency benchmark,
   CI workflow for live integration tests.

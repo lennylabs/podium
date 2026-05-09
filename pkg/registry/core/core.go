@@ -61,7 +61,16 @@ type Registry struct {
 	// SCIM membership store. Nil disables expansion: visibility falls
 	// back to JWT-claim group matching only.
 	resolveGroup layer.GroupResolver
+	// notifier delivers §9 operational notifications (ingest
+	// failure, transparency-anchor failure, etc.). Nil = no
+	// outbound notifications.
+	notifier NotificationFunc
 }
+
+// NotificationFunc fires when the registry observes an operational
+// event worth alerting an operator on. Wrappers exist in
+// pkg/notification (Webhook, LogProvider, MultiProvider).
+type NotificationFunc func(ctx context.Context, severity, title, body string, tags map[string]string)
 
 // sessionKey identifies one (session, artifact) latest-resolution
 // memo entry. §4.7.6: "the first latest lookup within a session is
@@ -108,6 +117,25 @@ func (r *Registry) WithVectorSearch(v vector.Provider, e embedding.Provider) *Re
 	r.vector = v
 	r.embedder = e
 	return r
+}
+
+// WithNotifier wires the §9 NotificationProvider so the registry
+// can fire operational notifications (ingest failure, anchor
+// failure) without callers having to subscribe to the audit log.
+func (r *Registry) WithNotifier(fn NotificationFunc) *Registry {
+	r.notifier = fn
+	return r
+}
+
+// Notify is the registry-internal entry point that forwards to the
+// configured notifier (no-op when none is wired). Exported so
+// neighboring packages (ingest, audit anchoring) can fire events
+// through the same channel.
+func (r *Registry) Notify(ctx context.Context, severity, title, body string, tags map[string]string) {
+	if r.notifier == nil {
+		return
+	}
+	r.notifier(ctx, severity, title, body, tags)
 }
 
 // WithGroupResolver wires a §6.3.1 SCIM-backed expander so the

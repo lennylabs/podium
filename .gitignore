@@ -8,3 +8,6 @@ coverage.html
 /podium
 /podium-server
 /podium-mcp
+__pycache__/
+*.pyc
+.venv/
