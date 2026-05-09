@@ -169,10 +169,19 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 // PublishEvent surfaces the bus to callers (e.g., the audit
 // emitter). Wraps publish so external code never sees the
-// concurrency primitives.
+// concurrency primitives. When a §7.3.2 outbound webhook worker
+// is wired (WithWebhooks), this also fans the event out to every
+// matching receiver asynchronously.
 func (s *Server) PublishEvent(ctx context.Context, eventType string, data map[string]any) {
 	if s.events == nil {
 		return
+	}
+	if s.webhooks != nil {
+		// Fire outbound deliveries asynchronously so a slow receiver
+		// never blocks the publisher.
+		go func() {
+			_ = s.webhooks.Deliver(context.Background(), s.tenant, eventType, data)
+		}()
 	}
 	s.events.publish(registryEvent{
 		Event:     eventType,
@@ -180,4 +189,11 @@ func (s *Server) PublishEvent(ctx context.Context, eventType string, data map[st
 		Data:      data,
 	})
 	_ = fmt.Sprintf("%v", ctx) // ctx reserved for future trace_id propagation
+}
+
+// PublishEventForIngest matches the ingest.EventEmitter signature
+// so the orchestrator can pass it directly without a closure that
+// closes over the server.
+func (s *Server) PublishEventForIngest(eventType string, data map[string]any) {
+	s.PublishEvent(context.Background(), eventType, data)
 }

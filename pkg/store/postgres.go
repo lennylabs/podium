@@ -194,15 +194,15 @@ func (p *Postgres) PutManifest(ctx context.Context, rec ManifestRecord) error {
 		INSERT INTO manifests
 			(tenant_id, artifact_id, version, content_hash, type, description,
 			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-			 extends_pin)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+			 extends_pin, signature)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
 		rec.Type, rec.Description,
 		strings.Join(rec.Tags, "\n"),
 		rec.Sensitivity, rec.Layer,
 		rec.Deprecated, ingestedAt.UTC(),
 		rec.Frontmatter, rec.Body,
-		rec.ExtendsPin)
+		rec.ExtendsPin, rec.Signature)
 	if err != nil {
 		return err
 	}
@@ -214,7 +214,7 @@ func (p *Postgres) GetManifest(ctx context.Context, tenantID, artifactID, versio
 	row := p.db.QueryRowContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-		       extends_pin
+		       extends_pin, signature
 		FROM manifests
 		WHERE tenant_id = $1 AND artifact_id = $2 AND version = $3`,
 		tenantID, artifactID, version)
@@ -231,7 +231,7 @@ func (p *Postgres) ListManifests(ctx context.Context, tenantID string) ([]Manife
 	rows, err := p.db.QueryContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-		       extends_pin
+		       extends_pin, signature
 		FROM manifests
 		WHERE tenant_id = $1
 		ORDER BY artifact_id ASC, version ASC`, tenantID)
@@ -310,6 +310,14 @@ func (p *Postgres) IsAdmin(ctx context.Context, userID, orgID string) (bool, err
 		return false, err
 	}
 	return true, nil
+}
+
+// RevokeAdmin removes the admin grant; missing rows are a no-op.
+func (p *Postgres) RevokeAdmin(ctx context.Context, userID, orgID string) error {
+	_, err := p.db.ExecContext(ctx, `
+		DELETE FROM admin_grants WHERE user_id = $1 AND org_id = $2`,
+		userID, orgID)
+	return err
 }
 
 // PutLayerConfig inserts or replaces a layer config.
@@ -407,7 +415,7 @@ func scanManifestPG(scanner rowScanner) (ManifestRecord, error) {
 		&rec.TenantID, &rec.ArtifactID, &rec.Version, &rec.ContentHash,
 		&rec.Type, &rec.Description, &tags, &rec.Sensitivity, &rec.Layer,
 		&rec.Deprecated, &rec.IngestedAt, &rec.Frontmatter, &rec.Body,
-		&rec.ExtendsPin)
+		&rec.ExtendsPin, &rec.Signature)
 	if err != nil {
 		return ManifestRecord{}, err
 	}

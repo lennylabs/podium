@@ -21,7 +21,9 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
+	"github.com/lennylabs/podium/pkg/scim"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/webhook"
 )
 
 // Server is a thin HTTP wrapper over a core.Registry.
@@ -46,6 +48,17 @@ type Server struct {
 	objectStore    objectstore.Provider
 	objectBaseURL  string
 	presignTTL     time.Duration
+	// webhooks is the §7.3.2 outbound delivery worker. When set,
+	// PublishEvent fans the event out to every matching receiver.
+	webhooks *webhook.Worker
+	// scim is the §6.3.1 SCIM 2.0 receiver. When set, the registry
+	// mounts /scim/v2/ to accept user/group push from an IdP.
+	scim *scim.Handler
+	// tenant is the tenant identifier used for outbound webhook
+	// receiver lookup. Single-tenant deployments leave this as
+	// "default"; multi-tenant deployments resolve it per-request
+	// once tenant routing is wired.
+	tenant string
 }
 
 // largeRef is the per-resource metadata the server keeps so it can
@@ -110,9 +123,33 @@ func WithObjectStore(store objectstore.Provider, baseURL string, ttl time.Durati
 	}
 }
 
+// WithSCIM mounts the §6.3.1 SCIM 2.0 receiver at /scim/v2/. The
+// IdP pushes Users + Groups through this endpoint; the visibility
+// evaluator resolves `groups:` filters via scim.Store.MembersOf.
+func WithSCIM(h *scim.Handler) Option {
+	return func(s *Server) { s.scim = h }
+}
+
+// WithWebhooks attaches a §7.3.2 outbound webhook worker. Every
+// call to PublishEvent fans the event out to every matching
+// receiver in the configured store. Without this option, change
+// events still flow to /v1/events subscribers but no outbound
+// HTTP POSTs are issued.
+func WithWebhooks(w *webhook.Worker) Option {
+	return func(s *Server) { s.webhooks = w }
+}
+
+// WithTenant sets the tenant identifier used for outbound webhook
+// receiver lookup. Single-tenant deployments leave this at the
+// default ("default"); multi-tenant deployments resolve it per
+// request (Phase 5+).
+func WithTenant(t string) Option {
+	return func(s *Server) { s.tenant = t }
+}
+
 // New returns a Server backed by the given core.Registry.
 func New(r *core.Registry, opts ...Option) *Server {
-	s := &Server{core: r, events: newEventBus()}
+	s := &Server{core: r, events: newEventBus(), tenant: "default"}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -259,8 +296,19 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/load_artifact", s.handleLoadArtifact)
 	mux.HandleFunc("/v1/dependents", s.handleDependents)
 	mux.HandleFunc("/v1/scope/preview", s.handleScopePreview)
+	mux.HandleFunc("/v1/domain/analyze", s.handleDomainAnalyze)
 	mux.HandleFunc("/v1/admin/reembed", s.handleReembed)
+	mux.HandleFunc("/v1/admin/grants", s.handleAdminGrants)
+	mux.HandleFunc("/v1/admin/show-effective", s.handleAdminShowEffective)
+	mux.HandleFunc("/v1/quota", s.handleQuota)
 	mux.HandleFunc("/v1/events", s.handleEvents)
+	if s.webhooks != nil {
+		mux.HandleFunc("/v1/webhooks", s.handleWebhooksList)
+		mux.HandleFunc("/v1/webhooks/", s.handleWebhookOne)
+	}
+	if s.scim != nil {
+		mux.Handle("/scim/v2/", s.scim)
+	}
 	if s.objectStore != nil {
 		mux.HandleFunc("/objects/", s.handleObjectsRoute)
 	}
@@ -322,9 +370,15 @@ type LoadArtifactResponse struct {
 	ManifestBody   string                       `json:"manifest_body"`
 	Frontmatter    string                       `json:"frontmatter"`
 	Layer          string                       `json:"layer,omitempty"`
+	Sensitivity    string                       `json:"sensitivity,omitempty"`
 	Resources      map[string]string            `json:"resources,omitempty"`
 	ResourcesB64   bool                         `json:"resources_base64,omitempty"`
 	LargeResources map[string]LargeResourceLink `json:"large_resources,omitempty"`
+	// Signature is the §4.7.9 envelope produced at ingest by the
+	// configured SignatureProvider. Empty when ingest had no
+	// signer wired. Consumers verify against
+	// PODIUM_VERIFY_SIGNATURES at materialize time.
+	Signature string `json:"signature,omitempty"`
 }
 
 // LargeResourceLink describes one resource whose payload exceeded
@@ -489,6 +543,23 @@ func (s *Server) handleReembed(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, res)
 }
 
+// handleDomainAnalyze serves §4.5.5 GET /v1/domain/analyze?path=<>
+// returning the per-subtree analysis report.
+func (s *Server) handleDomainAnalyze(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "registry.invalid_argument",
+			"method not allowed: "+r.Method)
+		return
+	}
+	path := r.URL.Query().Get("path")
+	report, err := s.core.AnalyzeDomain(r.Context(), s.identity(r), path)
+	if err != nil {
+		s.writeCoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
+}
+
 func (s *Server) handleScopePreview(w http.ResponseWriter, r *http.Request) {
 	preview, err := s.core.PreviewScope(r.Context(), s.identity(r))
 	if err != nil {
@@ -520,6 +591,8 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 		ManifestBody: res.ManifestBody,
 		Frontmatter:  string(res.Frontmatter),
 		Layer:        res.Layer,
+		Sensitivity:  res.Sensitivity,
+		Signature:    res.Signature,
 	}
 	if cached, ok := s.resources[res.ID]; ok && len(cached) > 0 {
 		resp.Resources = make(map[string]string, len(cached))

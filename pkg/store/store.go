@@ -62,6 +62,12 @@ type ManifestRecord struct {
 	// child ingest time". Empty when the artifact does not extend.
 	// Format: "<artifact_id>@<exact-version>".
 	ExtendsPin string
+	// Signature is the §4.7.9 signature envelope produced at
+	// ingest by the configured SignatureProvider. Empty when the
+	// deployment has no signing provider configured. Consumers
+	// verify via sign.EnforceVerification at materialize time
+	// against PODIUM_VERIFY_SIGNATURES.
+	Signature string
 }
 
 // DependencyEdge is one cross-artifact relation indexed for impact
@@ -131,6 +137,7 @@ type Store interface {
 
 	// Admin grants
 	GrantAdmin(ctx context.Context, g AdminGrant) error
+	RevokeAdmin(ctx context.Context, userID, orgID string) error
 	IsAdmin(ctx context.Context, userID, orgID string) (bool, error)
 
 	// Layer configs (§4.6 layer list, managed via the layer CLI).

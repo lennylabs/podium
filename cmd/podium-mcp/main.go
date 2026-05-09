@@ -31,9 +31,11 @@ import (
 	"strings"
 
 	"github.com/lennylabs/podium/pkg/adapter"
+	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/materialize"
 	"github.com/lennylabs/podium/pkg/overlay"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
+	"github.com/lennylabs/podium/pkg/sign"
 )
 
 // protocolVersion is the MCP wire-protocol version this binary speaks.
@@ -75,6 +77,8 @@ type config struct {
 	auditSink        string
 	tenantID         string
 	oauthAudience    string
+	verifyPolicy     sign.VerificationPolicy
+	signatureProvider string
 }
 
 func loadConfig() (*config, error) {
@@ -95,6 +99,9 @@ func loadConfig() (*config, error) {
 		auditSink:        os.Getenv("PODIUM_AUDIT_SINK"),
 		tenantID:         os.Getenv("PODIUM_TENANT_ID"),
 		oauthAudience:    os.Getenv("PODIUM_OAUTH_AUDIENCE"),
+		// §4.7.9 / §6.2: never | medium-and-above (default) | always.
+		verifyPolicy:     sign.VerificationPolicy(envDefault("PODIUM_VERIFY_SIGNATURES", string(sign.PolicyMediumAndAbove))),
+		signatureProvider: envDefault("PODIUM_SIGNATURE_PROVIDER", "noop"),
 	}
 	if c.registry == "" {
 		return nil, fmt.Errorf("PODIUM_REGISTRY is required")
@@ -299,6 +306,13 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 		return jsonAny(body)
 	}
 
+	// §4.7.9 / §6.2: enforce signature verification per
+	// PODIUM_VERIFY_SIGNATURES before the artifact materializes
+	// onto the host filesystem.
+	if err := s.enforceSignaturePolicy(resp); err != nil {
+		return errorResult("materialize.signature_invalid: " + err.Error())
+	}
+
 	// Cache the canonical bytes (content cache is forever-immutable
 	// per §6.5).
 	if err := s.cache.put(resp.ContentHash, resp.Frontmatter, resp.ManifestBody, resp.Resources); err != nil {
@@ -434,7 +448,48 @@ type loadArtifactResponse struct {
 	ManifestBody string            `json:"manifest_body"`
 	Frontmatter  string            `json:"frontmatter"`
 	Layer        string            `json:"layer,omitempty"`
+	Sensitivity  string            `json:"sensitivity,omitempty"`
 	Resources    map[string]string `json:"resources,omitempty"`
+	Signature    string            `json:"signature,omitempty"`
+}
+
+// enforceSignaturePolicy applies the configured §4.7.9 verification
+// policy against the response. Returns nil when the policy is
+// satisfied (either signature checks out or sensitivity falls below
+// the threshold); returns the verification error otherwise.
+func (s *mcpServer) enforceSignaturePolicy(resp loadArtifactResponse) error {
+	provider, err := buildSignatureProvider(s.cfg.signatureProvider)
+	if err != nil {
+		return err
+	}
+	return sign.EnforceVerification(
+		s.cfg.verifyPolicy,
+		provider,
+		manifest.Sensitivity(resp.Sensitivity),
+		resp.ContentHash,
+		resp.Signature,
+	)
+}
+
+// buildSignatureProvider mirrors the CLI side: a Noop default,
+// Sigstore-keyless when env vars supply Fulcio + Rekor, and
+// registry-managed for tenant-key deployments.
+func buildSignatureProvider(name string) (sign.Provider, error) {
+	switch name {
+	case "", "noop":
+		return sign.Noop{}, nil
+	case "sigstore-keyless":
+		root, _ := os.ReadFile(os.Getenv("PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE"))
+		return sign.SigstoreKeyless{
+			FulcioURL: os.Getenv("PODIUM_SIGSTORE_FULCIO_URL"),
+			RekorURL:  os.Getenv("PODIUM_SIGSTORE_REKOR_URL"),
+			OIDCToken: os.Getenv("PODIUM_SIGSTORE_OIDC_TOKEN"),
+			TrustRoot: root,
+		}, nil
+	case "registry-managed":
+		return sign.RegistryManagedKey{}, nil
+	}
+	return nil, fmt.Errorf("unknown PODIUM_SIGNATURE_PROVIDER: %s", name)
 }
 
 func resourcesAsBytes(in map[string]string) map[string][]byte {

@@ -25,15 +25,18 @@ const HistoryEventKind = "layer.history_rewritten"
 // that don't wire one in pass nil and the event is skipped.
 type HistoryEmitter func(ctx context.Context, tenantID, layerID, priorRef, newRef string)
 
-// SourceIngestOptions threads the §4.7 embedding pieces through the
-// orchestrator without forcing every call site to populate them.
-// Both Embedder and VectorPut must be set together for embedding to
-// run; either nil disables the path and the artifact is BM25-only.
+// SourceIngestOptions threads the §4.7 embedding pieces and the
+// §7.6 change-event publisher through the orchestrator without
+// forcing every call site to populate them. Embedder + VectorPut
+// must be set together; PublishEvent is independent and turned on
+// whenever the orchestrator runs against a server that exposes
+// /v1/events.
 type SourceIngestOptions struct {
-	Linter    *lint.Linter
-	Emit      HistoryEmitter
-	Embedder  EmbedderFunc
-	VectorPut VectorPutFunc
+	Linter       *lint.Linter
+	Emit         HistoryEmitter
+	Embedder     EmbedderFunc
+	VectorPut    VectorPutFunc
+	PublishEvent EventEmitter
 }
 
 // SourceIngest snapshots the layer via the supplied provider, runs
@@ -90,19 +93,44 @@ func SourceIngestWithOptions(
 			if opts.Emit != nil {
 				opts.Emit(ctx, cfg.TenantID, cfg.ID, cfg.LastIngestedRef, snap.Reference)
 			}
+			if opts.PublishEvent != nil {
+				opts.PublishEvent("layer.history_rewritten", map[string]any{
+					"tenant":    cfg.TenantID,
+					"layer":     cfg.ID,
+					"prior_ref": cfg.LastIngestedRef,
+					"new_ref":   snap.Reference,
+				})
+			}
 		}
 	}
 
 	res, err := Ingest(ctx, st, Request{
-		TenantID:  cfg.TenantID,
-		LayerID:   cfg.ID,
-		Files:     snap.Files,
-		Linter:    opts.Linter,
-		Embedder:  opts.Embedder,
-		VectorPut: opts.VectorPut,
+		TenantID:     cfg.TenantID,
+		LayerID:      cfg.ID,
+		Files:        snap.Files,
+		Linter:       opts.Linter,
+		Embedder:     opts.Embedder,
+		VectorPut:    opts.VectorPut,
+		PublishEvent: opts.PublishEvent,
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	// §7.6 layer.ingested: one event per completed layer cycle with
+	// the result summary. Useful for build pipelines that gate on
+	// "ingest of the prod layer just completed."
+	if opts.PublishEvent != nil {
+		opts.PublishEvent("layer.ingested", map[string]any{
+			"tenant":         cfg.TenantID,
+			"layer":          cfg.ID,
+			"reference":      snap.Reference,
+			"accepted":       res.Accepted,
+			"idempotent":     res.Idempotent,
+			"conflicts":      len(res.Conflicts),
+			"lint_failures":  len(res.LintFailures),
+			"embed_failures": len(res.EmbeddingFailures),
+		})
 	}
 
 	cfg.LastIngestedRef = snap.Reference

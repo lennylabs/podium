@@ -111,7 +111,30 @@ type Request struct {
 	// means search continues to return the prior vector until the
 	// new one lands.
 	VectorPut VectorPutFunc
+	// PublishEvent fires §7.6 change events as artifacts ingest.
+	// Optional: when nil, ingest stays silent. Per-artifact:
+	//   - artifact.published with {id, version, content_hash, layer, tenant}
+	//   - artifact.deprecated when an ingested manifest sets deprecated:true
+	// The orchestrator wraps Server.PublishEvent for the production
+	// path; tests use a fake.
+	PublishEvent EventEmitter
+	// Signer signs every newly accepted manifest's content hash and
+	// stores the resulting envelope on the ManifestRecord. Optional:
+	// when nil, ingest stores no signature and downstream
+	// materialize-time verification (PODIUM_VERIFY_SIGNATURES) sees
+	// an empty envelope. Production deployments wire a real signer
+	// (sign.SigstoreKeyless / sign.RegistryManagedKey).
+	Signer SignerFunc
 }
+
+// SignerFunc signs the content hash of a freshly-ingested manifest
+// and returns an opaque envelope. Wraps sign.Provider.Sign.
+type SignerFunc func(contentHash string) (string, error)
+
+// EventEmitter is the §7.6 publish surface. The function shape
+// matches Server.PublishEvent so the orchestrator passes the
+// server's method directly.
+type EventEmitter func(eventType string, data map[string]any)
 
 // EmbedderFunc converts the embedding text projection of a manifest
 // into a vector. Implementations wrap pkg/embedding.Provider.Embed
@@ -291,6 +314,24 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			return nil, err
 		}
 
+		// §4.7.9 signing: when a Signer is configured, attach the
+		// signature envelope before PutManifest commits so callers
+		// see signed bytes from the moment ingest accepts them. A
+		// signing failure rejects the artifact — unsigned bytes
+		// must not sneak in when a signer is configured.
+		if req.Signer != nil {
+			env, err := req.Signer(mr.ContentHash)
+			if err != nil {
+				res.Rejected = append(res.Rejected, RejectedArtifact{
+					ArtifactID: mr.ArtifactID,
+					Reason:     fmt.Sprintf("sign: %v", err),
+					Code:       "ingest.sign_failed",
+				})
+				continue
+			}
+			mr.Signature = env
+		}
+
 		if err := st.PutManifest(ctx, mr); err != nil {
 			if errors.Is(err, store.ErrImmutableViolation) {
 				res.Conflicts = append(res.Conflicts, ConflictReport{
@@ -303,6 +344,27 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			return nil, err
 		}
 		res.Accepted++
+
+		// §7.6 change events. Fire after the manifest commits so
+		// subscribers never see a published event for an ingest that
+		// rolled back. artifact.published carries the canonical
+		// metadata consumers need to look the artifact up.
+		if req.PublishEvent != nil {
+			req.PublishEvent("artifact.published", map[string]any{
+				"id":           mr.ArtifactID,
+				"version":      mr.Version,
+				"content_hash": mr.ContentHash,
+				"layer":        mr.Layer,
+				"tenant":       mr.TenantID,
+			})
+			if mr.Deprecated {
+				req.PublishEvent("artifact.deprecated", map[string]any{
+					"id":      mr.ArtifactID,
+					"version": mr.Version,
+					"layer":   mr.Layer,
+				})
+			}
+		}
 
 		// Populate cross-type dependency edges for §4.7.3.
 		for _, edge := range edgesFor(rec.Artifact, rec.ID) {

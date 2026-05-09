@@ -34,10 +34,131 @@ func adminCmd(args []string) int {
 		return adminRetentionCmd(args[1:])
 	case "reembed":
 		return adminReembedCmd(args[1:])
+	case "grant":
+		return adminGrantCmd(args[1:])
+	case "revoke":
+		return adminRevokeCmd(args[1:])
+	case "show-effective":
+		return adminShowEffectiveCmd(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown admin subcommand: %s\n", args[0])
 		return 2
 	}
+}
+
+// adminGrantCmd adds an admin grant for the named user.
+//
+//	podium admin grant <user-id> [--registry URL]
+func adminGrantCmd(args []string) int {
+	fs := flag.NewFlagSet("admin grant", flag.ContinueOnError)
+	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: podium admin grant <user-id>")
+		return 2
+	}
+	if *registry == "" {
+		fmt.Fprintln(os.Stderr, "error: --registry is required")
+		return 2
+	}
+	body := []byte(`{"user_id":` + jsonString(fs.Arg(0)) + `}`)
+	out, status := doJSON(*registry+"/v1/admin/grants", "POST", body)
+	if status >= 400 {
+		fmt.Fprintf(os.Stderr, "grant failed: HTTP %d\n%s\n", status, out)
+		return 1
+	}
+	fmt.Println(string(out))
+	return 0
+}
+
+// adminRevokeCmd removes an admin grant for the named user.
+//
+//	podium admin revoke <user-id> [--registry URL]
+func adminRevokeCmd(args []string) int {
+	fs := flag.NewFlagSet("admin revoke", flag.ContinueOnError)
+	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: podium admin revoke <user-id>")
+		return 2
+	}
+	if *registry == "" {
+		fmt.Fprintln(os.Stderr, "error: --registry is required")
+		return 2
+	}
+	out, status := doJSON(
+		*registry+"/v1/admin/grants?user_id="+url.QueryEscape(fs.Arg(0)),
+		"DELETE", nil)
+	if status >= 400 {
+		fmt.Fprintf(os.Stderr, "revoke failed: HTTP %d\n%s\n", status, out)
+		return 1
+	}
+	fmt.Fprintln(os.Stderr, "revoked")
+	return 0
+}
+
+// adminShowEffectiveCmd queries the per-layer visibility for one
+// user identity.
+//
+//	podium admin show-effective <user-id> [--group g1] [--group g2] [--registry URL]
+func adminShowEffectiveCmd(args []string) int {
+	fs := flag.NewFlagSet("admin show-effective", flag.ContinueOnError)
+	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
+	groups := stringSliceFlag{}
+	fs.Var(&groups, "group", "OIDC group claim (repeatable)")
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: podium admin show-effective <user-id>")
+		return 2
+	}
+	if *registry == "" {
+		fmt.Fprintln(os.Stderr, "error: --registry is required")
+		return 2
+	}
+	q := url.Values{}
+	q.Set("user_id", fs.Arg(0))
+	for _, g := range groups {
+		q.Add("group", g)
+	}
+	out, status := doJSON(*registry+"/v1/admin/show-effective?"+q.Encode(), "GET", nil)
+	if status >= 400 {
+		fmt.Fprintf(os.Stderr, "show-effective failed: HTTP %d\n%s\n", status, out)
+		return 1
+	}
+	fmt.Println(string(out))
+	return 0
+}
+
+// jsonString escapes s as a JSON string literal. Used by callers
+// that hand-build small request bodies without pulling in
+// encoding/json for one field.
+func jsonString(s string) string {
+	out := []byte{'"'}
+	for _, r := range s {
+		switch r {
+		case '"', '\\':
+			out = append(out, '\\', byte(r))
+		case '\n':
+			out = append(out, '\\', 'n')
+		case '\r':
+			out = append(out, '\\', 'r')
+		case '\t':
+			out = append(out, '\\', 't')
+		default:
+			out = append(out, []byte(string(r))...)
+		}
+	}
+	out = append(out, '"')
+	return string(out)
 }
 
 func adminReembedCmd(args []string) int {

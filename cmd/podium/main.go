@@ -66,6 +66,12 @@ func main() {
 		os.Exit(logoutCmd(os.Args[2:]))
 	case "status":
 		os.Exit(statusCmd(os.Args[2:]))
+	case "sign":
+		os.Exit(signCmd(os.Args[2:]))
+	case "verify":
+		os.Exit(verifyCmd(os.Args[2:]))
+	case "quota":
+		os.Exit(quotaCmd(os.Args[2:]))
 	case "version":
 		fmt.Println("podium 0.0.0-dev")
 	case "help", "-h", "--help":
@@ -86,6 +92,7 @@ Commands:
   search              Hybrid search over artifacts (registry HTTP API).
   domain show         Show a domain map.
   domain search       Hybrid search over domains.
+  domain analyze      Print §4.5.5 metrics + split/fold candidates for a subtree.
   artifact show       Print an artifact's manifest body and frontmatter.
   init                Write ~/.podium/sync.yaml or ./.podium/sync.yaml.
   profile edit        Add or remove patterns on a sync.yaml profile.
@@ -98,9 +105,15 @@ Commands:
   admin erase         GDPR right-to-be-forgotten on the local audit log.
   admin retention     Apply audit retention policies to the local audit log.
   admin reembed       Re-run §4.7 vector embeddings against the configured registry.
+  admin grant         Grant tenant admin role to a user.
+  admin revoke        Revoke tenant admin role from a user.
+  admin show-effective  Print the per-layer visibility for a user identity.
   login               Run the §6.3 OAuth Device Code flow and persist the token to the keychain.
   logout              Remove the cached token for the configured registry.
   status              Print a diagnostic summary of the current Podium client setup.
+  sign                Sign a content hash via the configured signature provider.
+  verify              Verify a signature envelope against a content hash.
+  quota               Print the tenant's §4.7.8 quotas and current usage.
   version             Print the podium version.
   help                Print this message.
 `
@@ -430,7 +443,7 @@ func searchCmd(args []string) int {
 
 func domainCmd(args []string) int {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: podium domain show|search [flags]")
+		fmt.Fprintln(os.Stderr, "usage: podium domain show|search|analyze [flags]")
 		return 2
 	}
 	switch args[0] {
@@ -438,10 +451,39 @@ func domainCmd(args []string) int {
 		return domainShow(args[1:])
 	case "search":
 		return domainSearch(args[1:])
+	case "analyze":
+		return domainAnalyze(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown domain subcommand: %s\n", args[0])
 		return 2
 	}
+}
+
+// domainAnalyze hits /v1/domain/analyze and prints the §4.5.5
+// report. Useful for ingest-time review of split / fold candidates.
+func domainAnalyze(args []string) int {
+	fs := flag.NewFlagSet("domain analyze", flag.ContinueOnError)
+	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
+	path := fs.String("path", "", "subtree to analyze (empty = root)")
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *registry == "" {
+		fmt.Fprintln(os.Stderr, "error: --registry is required")
+		return 2
+	}
+	endpoint := *registry + "/v1/domain/analyze"
+	if *path != "" {
+		endpoint += "?path=" + url.QueryEscape(*path)
+	}
+	out, status := doJSON(endpoint, "GET", nil)
+	if status >= 400 {
+		fmt.Fprintf(os.Stderr, "analyze failed: HTTP %d\n%s\n", status, out)
+		return 1
+	}
+	fmt.Println(string(out))
+	return 0
 }
 
 func domainShow(args []string) int {

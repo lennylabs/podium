@@ -659,6 +659,12 @@ type LoadArtifactResult struct {
 	Frontmatter  []byte
 	Layer        string
 	Resources    map[string][]byte
+	Sensitivity  string
+	// Signature is the §4.7.9 envelope produced at ingest by the
+	// configured SignatureProvider. Empty when ingest had no
+	// signer wired. Consumers verify via sign.EnforceVerification
+	// against PODIUM_VERIFY_SIGNATURES.
+	Signature string
 }
 
 // LoadArtifactOptions captures §5 arguments. Empty Version means
@@ -909,6 +915,8 @@ func resultFromRecord(rec store.ManifestRecord) *LoadArtifactResult {
 		ManifestBody: string(rec.Body),
 		Frontmatter:  rec.Frontmatter,
 		Layer:        rec.Layer,
+		Sensitivity:  rec.Sensitivity,
+		Signature:    rec.Signature,
 	}
 }
 

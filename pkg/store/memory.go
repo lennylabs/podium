@@ -119,6 +119,14 @@ func (s *Memory) DependentsOf(_ context.Context, tenantID, artifactID string) ([
 	return out, nil
 }
 
+// RevokeAdmin removes the admin grant; missing key is a no-op.
+func (s *Memory) RevokeAdmin(_ context.Context, userID, orgID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.admins, userID+"/"+orgID)
+	return nil
+}
+
 // GrantAdmin records an admin grant.
 func (s *Memory) GrantAdmin(_ context.Context, g AdminGrant) error {
 	s.mu.Lock()

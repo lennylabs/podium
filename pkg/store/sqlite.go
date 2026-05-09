@@ -72,6 +72,7 @@ func (s *SQLite) applySchema() error {
 			frontmatter BLOB,
 			body BLOB,
 			extends_pin TEXT NOT NULL DEFAULT '',
+			signature TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY (tenant_id, artifact_id, version)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_manifests_tenant_type
@@ -187,8 +188,8 @@ func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
 		INSERT INTO manifests
 			(tenant_id, artifact_id, version, content_hash, type, description,
 			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-			 extends_pin)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 extends_pin, signature)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
 		rec.Type, rec.Description,
 		strings.Join(rec.Tags, "\n"),
@@ -196,7 +197,7 @@ func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
 		boolToInt(rec.Deprecated),
 		ingestedAt.UTC().Format(time.RFC3339Nano),
 		rec.Frontmatter, rec.Body,
-		rec.ExtendsPin)
+		rec.ExtendsPin, rec.Signature)
 	if err != nil {
 		return err
 	}
@@ -208,7 +209,7 @@ func (s *SQLite) GetManifest(ctx context.Context, tenantID, artifactID, version 
 	row := s.db.QueryRowContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-		       extends_pin
+		       extends_pin, signature
 		FROM manifests
 		WHERE tenant_id = ? AND artifact_id = ? AND version = ?`,
 		tenantID, artifactID, version)
@@ -225,7 +226,7 @@ func (s *SQLite) ListManifests(ctx context.Context, tenantID string) ([]Manifest
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-		       extends_pin
+		       extends_pin, signature
 		FROM manifests
 		WHERE tenant_id = ?
 		ORDER BY artifact_id ASC, version ASC`, tenantID)
@@ -303,6 +304,14 @@ func (s *SQLite) IsAdmin(ctx context.Context, userID, orgID string) (bool, error
 		return false, err
 	}
 	return true, nil
+}
+
+// RevokeAdmin removes the admin grant; missing rows are a no-op.
+func (s *SQLite) RevokeAdmin(ctx context.Context, userID, orgID string) error {
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM admin_grants WHERE user_id = ? AND org_id = ?`,
+		userID, orgID)
+	return err
 }
 
 // PutLayerConfig inserts or replaces a layer config.
@@ -415,7 +424,7 @@ func scanManifest(scanner rowScanner) (ManifestRecord, error) {
 		&rec.TenantID, &rec.ArtifactID, &rec.Version, &rec.ContentHash,
 		&rec.Type, &rec.Description, &tags, &rec.Sensitivity, &rec.Layer,
 		&deprecated, &ingestedAt, &rec.Frontmatter, &rec.Body,
-		&rec.ExtendsPin)
+		&rec.ExtendsPin, &rec.Signature)
 	if err != nil {
 		return ManifestRecord{}, err
 	}
