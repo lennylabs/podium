@@ -71,16 +71,36 @@ func affectsAny(c CVE, comps []SBOMComponent) bool {
 }
 
 // matchesPackage returns whether spec (e.g., "pkg:npm/lodash@4.17.20")
-// applies to the given component. Phase 17 ships an exact-match
-// implementation; range matching lands later.
+// applies to the given component. Match strategy:
+//
+//  1. Exact PURL string match (fast path for identical CVE feeds).
+//  2. Parsed PURL: same type + namespace + name; version equal when
+//     spec carries a version. A spec without a version matches every
+//     version of the same package (broad CVE).
+//
+// Range matching ("<4.17.21") lands when an OSV / NVD feed adapter
+// ships; the parsed PURL gives later commits the structural anchor
+// they need.
 func matchesPackage(spec string, comp SBOMComponent) bool {
 	if spec == comp.PURL {
 		return true
 	}
-	if strings.Contains(spec, comp.Name) && strings.Contains(spec, comp.Version) {
+	specPURL, err := ParsePURL(spec)
+	if err != nil {
+		return strings.Contains(spec, comp.Name) &&
+			(comp.Version == "" || strings.Contains(spec, comp.Version))
+	}
+	compPURL, err := ParsePURL(comp.PURL)
+	if err != nil {
+		return false
+	}
+	if !specPURL.SamePackage(compPURL) {
+		return false
+	}
+	if specPURL.Version == "" {
 		return true
 	}
-	return false
+	return specPURL.Version == compPURL.Version
 }
 
 // NotificationProvider is the SPI implementations satisfy (§9.1).
