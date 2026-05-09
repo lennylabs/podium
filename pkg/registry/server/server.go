@@ -35,6 +35,8 @@ type Server struct {
 	// construct via New (the meta-tool API still returns the manifest
 	// body, just without bundled bytes inline).
 	resources map[string]map[string][]byte
+	// events is the §7.6 in-process pub/sub for /v1/events.
+	events *eventBus
 	// largeResources maps (artifactID, resourcePath) → object key for
 	// resources whose payload exceeded objectstore.InlineCutoff at
 	// ingest. The HTTP handler presigns a URL per key on read; the
@@ -110,7 +112,7 @@ func WithObjectStore(store objectstore.Provider, baseURL string, ttl time.Durati
 
 // New returns a Server backed by the given core.Registry.
 func New(r *core.Registry, opts ...Option) *Server {
-	s := &Server{core: r}
+	s := &Server{core: r, events: newEventBus()}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -258,6 +260,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/dependents", s.handleDependents)
 	mux.HandleFunc("/v1/scope/preview", s.handleScopePreview)
 	mux.HandleFunc("/v1/admin/reembed", s.handleReembed)
+	mux.HandleFunc("/v1/events", s.handleEvents)
 	if s.objectStore != nil {
 		mux.HandleFunc("/objects/", s.handleObjectsRoute)
 	}

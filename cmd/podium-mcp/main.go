@@ -67,21 +67,34 @@ type config struct {
 	registry         string
 	harness          string
 	cacheDir         string
+	cacheMode        string
 	materializeRoot  string
 	sessionToken     string
 	sessionTokenFile string
 	overlayPath      string
+	auditSink        string
+	tenantID         string
+	oauthAudience    string
 }
 
 func loadConfig() (*config, error) {
+	// §6.3.2 PODIUM_SESSION_TOKEN_ENV: hosts can name an env var
+	// holding the JWT instead of putting the secret directly in
+	// PODIUM_SESSION_TOKEN; the named var's value is read here.
+	tokenSource := envDefault("PODIUM_SESSION_TOKEN_ENV", "PODIUM_SESSION_TOKEN")
 	c := &config{
 		registry:         os.Getenv("PODIUM_REGISTRY"),
 		harness:          envDefault("PODIUM_HARNESS", "none"),
 		cacheDir:         os.Getenv("PODIUM_CACHE_DIR"),
+		// §6.5: always-revalidate (default) | offline-first | offline-only.
+		cacheMode:        envDefault("PODIUM_CACHE_MODE", "always-revalidate"),
 		materializeRoot:  os.Getenv("PODIUM_MATERIALIZE_ROOT"),
-		sessionToken:     os.Getenv("PODIUM_SESSION_TOKEN"),
+		sessionToken:     os.Getenv(tokenSource),
 		sessionTokenFile: os.Getenv("PODIUM_SESSION_TOKEN_FILE"),
 		overlayPath:      os.Getenv("PODIUM_OVERLAY_PATH"),
+		auditSink:        os.Getenv("PODIUM_AUDIT_SINK"),
+		tenantID:         os.Getenv("PODIUM_TENANT_ID"),
+		oauthAudience:    os.Getenv("PODIUM_OAUTH_AUDIENCE"),
 	}
 	if c.registry == "" {
 		return nil, fmt.Errorf("PODIUM_REGISTRY is required")
@@ -91,6 +104,12 @@ func loadConfig() (*config, error) {
 		if err == nil {
 			c.cacheDir = filepath.Join(home, ".podium", "cache")
 		}
+	}
+	switch c.cacheMode {
+	case "always-revalidate", "offline-first", "offline-only":
+		// known modes
+	default:
+		return nil, fmt.Errorf("PODIUM_CACHE_MODE must be always-revalidate | offline-first | offline-only, got %q", c.cacheMode)
 	}
 	return c, nil
 }
@@ -460,6 +479,12 @@ func (s *mcpServer) fetchJSON(path string, args map[string]any) ([]byte, error) 
 	}
 	if tok := s.currentToken(); tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	// §6.3 PODIUM_TENANT_ID: forwards the tenant context to the
+	// registry on every request so multi-tenant deployments can
+	// route without parsing the JWT.
+	if s.cfg.tenantID != "" {
+		req.Header.Set("X-Podium-Tenant", s.cfg.tenantID)
 	}
 	resp, err := s.http.Do(req)
 	if err != nil {

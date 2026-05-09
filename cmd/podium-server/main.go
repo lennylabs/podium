@@ -256,6 +256,11 @@ func openVectorAndEmbedder(c *config) (vector.Provider, embedding.Provider, erro
 	return v, emb, nil
 }
 
+// openEmbedder honors §13 per-provider model env vars
+// (PODIUM_OPENAI_MODEL, PODIUM_VOYAGE_MODEL, PODIUM_COHERE_MODEL,
+// PODIUM_OLLAMA_MODEL). The generic PODIUM_EMBEDDING_MODEL acts as
+// a cross-provider fallback when the per-provider variable isn't
+// set.
 func openEmbedder(c *config) (embedding.Provider, error) {
 	switch c.embeddingProvider {
 	case "", "none":
@@ -264,19 +269,33 @@ func openEmbedder(c *config) (embedding.Provider, error) {
 		if c.openaiAPIKey == "" {
 			return nil, fmt.Errorf("OPENAI_API_KEY required for openai embedder")
 		}
-		return embedding.OpenAI{APIKey: c.openaiAPIKey, Model_: c.embeddingModel}, nil
+		return embedding.OpenAI{
+			APIKey:  c.openaiAPIKey,
+			Model_:  envFirst("PODIUM_OPENAI_MODEL", "PODIUM_EMBEDDING_MODEL"),
+			BaseURL: os.Getenv("PODIUM_OPENAI_BASE_URL"),
+			Org:     os.Getenv("PODIUM_OPENAI_ORG"),
+		}, nil
 	case "voyage":
 		if c.voyageAPIKey == "" {
 			return nil, fmt.Errorf("VOYAGE_API_KEY required for voyage embedder")
 		}
-		return embedding.Voyage{APIKey: c.voyageAPIKey, Model_: c.embeddingModel}, nil
+		return embedding.Voyage{
+			APIKey: c.voyageAPIKey,
+			Model_: envFirst("PODIUM_VOYAGE_MODEL", "PODIUM_EMBEDDING_MODEL"),
+		}, nil
 	case "cohere":
 		if c.cohereAPIKey == "" {
 			return nil, fmt.Errorf("COHERE_API_KEY required for cohere embedder")
 		}
-		return embedding.Cohere{APIKey: c.cohereAPIKey, Model_: c.embeddingModel}, nil
+		return embedding.Cohere{
+			APIKey: c.cohereAPIKey,
+			Model_: envFirst("PODIUM_COHERE_MODEL", "PODIUM_EMBEDDING_MODEL"),
+		}, nil
 	case "ollama":
-		return embedding.Ollama{BaseURL: c.ollamaURL, Model_: c.embeddingModel}, nil
+		return embedding.Ollama{
+			BaseURL: c.ollamaURL,
+			Model_:  envFirst("PODIUM_OLLAMA_MODEL", "PODIUM_EMBEDDING_MODEL"),
+		}, nil
 	}
 	return nil, fmt.Errorf("unknown PODIUM_EMBEDDING_PROVIDER: %s", c.embeddingProvider)
 }
@@ -299,8 +318,19 @@ func openVectorBackend(c *config, dim int) (vector.Provider, error) {
 		}
 		return vector.OpenSQLiteVec(vector.SQLiteVecConfig{Path: path, Dimensions: dim})
 	case "pinecone":
+		host := c.pineconeHost
+		if host == "" {
+			// §13: PODIUM_PINECONE_INDEX is auto-resolved to a host
+			// for serverless. Ship a clear error pointing at Host
+			// for now; an SDK call to the Pinecone control plane
+			// would resolve it but adds dep weight.
+			if idx := os.Getenv("PODIUM_PINECONE_INDEX"); idx != "" {
+				return nil, fmt.Errorf(
+					"PODIUM_PINECONE_INDEX=%q set but PODIUM_PINECONE_HOST is required for serverless; supply the index host URL", idx)
+			}
+		}
 		return vector.NewPinecone(vector.PineconeConfig{
-			APIKey: c.pineconeKey, Host: c.pineconeHost,
+			APIKey: c.pineconeKey, Host: host,
 			Namespace: c.pineconeNS, Dimensions: dim,
 		})
 	case "weaviate-cloud":

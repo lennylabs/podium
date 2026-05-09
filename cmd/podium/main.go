@@ -60,6 +60,12 @@ func main() {
 		os.Exit(impactCmd(os.Args[2:]))
 	case "admin":
 		os.Exit(adminCmd(os.Args[2:]))
+	case "login":
+		os.Exit(loginCmd(os.Args[2:]))
+	case "logout":
+		os.Exit(logoutCmd(os.Args[2:]))
+	case "status":
+		os.Exit(statusCmd(os.Args[2:]))
 	case "version":
 		fmt.Println("podium 0.0.0-dev")
 	case "help", "-h", "--help":
@@ -92,6 +98,9 @@ Commands:
   admin erase         GDPR right-to-be-forgotten on the local audit log.
   admin retention     Apply audit retention policies to the local audit log.
   admin reembed       Re-run §4.7 vector embeddings against the configured registry.
+  login               Run the §6.3 OAuth Device Code flow and persist the token to the keychain.
+  logout              Remove the cached token for the configured registry.
+  status              Print a diagnostic summary of the current Podium client setup.
   version             Print the podium version.
   help                Print this message.
 `
