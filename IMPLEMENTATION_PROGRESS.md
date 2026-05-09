@@ -143,9 +143,12 @@ below is the punch summary.
   conformance suite against a Postgres service container and
   the S3 conformance suite against MinIO.
 
-**Larger** (Batch E):
-- Web UI (`--web-ui` / `PODIUM_WEB_UI=true`, §13.10) — SPA at
-  `/ui/`. Not started.
+**Web UI** (Batch E): DONE.
+- `web/index.html`, `web/app.js`, and `web/style.css` ship as
+  the §13.10 SPA, embedded into the binary via `go:embed`.
+- `internal/serverboot` mounts the embedded assets at `/ui/`
+  when `PODIUM_WEB_UI=true`. The SPA renders the domain map,
+  search, and an artifact view by calling the §7.6 read API.
 
 **Intentionally out of scope:**
 - Phase 17 vulnerability scanning (§1.1, §4.7.7) — CI/CD's job.

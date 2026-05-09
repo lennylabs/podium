@@ -33,6 +33,7 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/vector"
 	"github.com/lennylabs/podium/pkg/webhook"
+	"github.com/lennylabs/podium/web"
 )
 
 // envFirst returns the value of the first non-empty env var.
@@ -225,6 +226,10 @@ func Run() error {
 	mux.Handle("/v1/layers", layers.Handler())
 	mux.Handle("/v1/layers/", layers.Handler())
 	mux.Handle("/v1/admin/runtime", runtimeEndpoint.Handler())
+	if isTrue(os.Getenv("PODIUM_WEB_UI")) {
+		mux.Handle("/ui/", http.StripPrefix("/ui/", http.FileServer(http.FS(web.Assets()))))
+		log.Printf("web UI mounted at /ui/")
+	}
 	mux.Handle("/", srv.Handler())
 
 	// §8.6 transparency anchoring: when the operator enables

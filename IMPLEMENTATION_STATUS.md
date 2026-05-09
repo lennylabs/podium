@@ -313,7 +313,10 @@ detailed plan with effort estimates and test strategies.
     unchanged.
   - `sdks/podium-py` extended with `dependents_of`,
     `preview_scope`, and an NDJSON `subscribe()` generator.
-- **Web UI (Batch E, ~2 days).** `--web-ui` SPA at `/ui/`.
+- **Web UI (Batch E): DONE.** Embedded SPA at `web/` (HTML +
+  vanilla JS + CSS) mounted at `/ui/` when
+  `PODIUM_WEB_UI=true`. Renders the domain map, search, and an
+  artifact view by calling the §7.6 read API.
 - **Verification (Batch F): DONE.** `test/bench/latency_test.go`
   exercises SearchArtifacts, LoadArtifact, and LoadDomain at
   three input sizes; the `bench` and `integration-live` GitHub
