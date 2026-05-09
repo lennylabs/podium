@@ -1,0 +1,83 @@
+# Default values for the Podium standard-topology chart.
+# Override per spec §13.12 (Backend Configuration Reference).
+
+image:
+  repository: ghcr.io/lennylabs/podium
+  tag: ""  # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+replicaCount: 3
+
+# Registry configuration (server-side).
+config:
+  endpoint: "https://podium.example.com"
+  bind: "0.0.0.0:8080"
+
+  store:
+    type: postgres
+    dsn: ""  # required; e.g. postgres://podium:pw@db.acme/podium?sslmode=require
+
+  objectStore:
+    type: s3
+    bucket: ""
+    region: us-east-1
+    endpoint: ""  # set for MinIO/R2/GCS
+
+  vectorBackend:
+    type: pgvector
+    # When using an external backend (pinecone/weaviate/qdrant) supply
+    # the per-backend env vars from §13.12 via the secret below.
+
+  embeddingProvider:
+    type: openai
+    model: text-embedding-3-small
+    # OPENAI_API_KEY supplied via the secret below.
+
+  identityProvider:
+    type: oauth-device-code
+    audience: "https://podium.example.com"
+    authorizationEndpoint: ""
+
+  discovery:
+    maxDepth: 3
+    foldBelowArtifacts: 3
+    foldPassthroughChains: true
+    notableCount: 10
+    targetResponseTokens: 4000
+
+# Existing secret holding sensitive values (DSNs, API keys, OIDC
+# client secrets). The chart references the keys; supply your own
+# secret rather than letting the chart create one with values.yaml.
+existingSecret: "podium-secrets"
+
+resources:
+  requests:
+    cpu: "200m"
+    memory: "256Mi"
+  limits:
+    cpu: "1"
+    memory: "1Gi"
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+
+serviceMonitor:
+  enabled: false  # set true when running prometheus-operator
+
+podSecurityContext:
+  runAsUser: 65534
+  runAsGroup: 65534
+  fsGroup: 65534
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]

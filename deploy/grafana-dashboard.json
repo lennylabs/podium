@@ -1,0 +1,105 @@
+{
+  "title": "Podium registry",
+  "uid": "podium-registry",
+  "schemaVersion": 38,
+  "version": 1,
+  "panels": [
+    {
+      "title": "Request rate by endpoint",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum by (endpoint) (rate(podium_request_total[1m]))",
+          "legendFormat": "{{endpoint}}"
+        }
+      ],
+      "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8}
+    },
+    {
+      "title": "Request latency p99 by endpoint",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, endpoint) (rate(podium_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{endpoint}}"
+        }
+      ],
+      "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+      "thresholds": {
+        "mode": "absolute",
+        "steps": [
+          {"color": "green", "value": null},
+          {"color": "yellow", "value": 0.2},
+          {"color": "red", "value": 0.5}
+        ]
+      }
+    },
+    {
+      "title": "Visibility-denial rate",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(podium_visibility_denied_total[1m]))",
+          "legendFormat": "denied/sec"
+        }
+      ],
+      "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8}
+    },
+    {
+      "title": "Cache hit rate",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(podium_cache_hits_total[5m])) / (sum(rate(podium_cache_hits_total[5m])) + sum(rate(podium_cache_misses_total[5m])))",
+          "legendFormat": "hit ratio"
+        }
+      ],
+      "gridPos": {"x": 12, "y": 8, "w": 6, "h": 4},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 0.7},
+              {"color": "green", "value": 0.9}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Ingest success / failure",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(podium_ingest_success_total[1m]))",
+          "legendFormat": "success"
+        },
+        {
+          "expr": "sum(rate(podium_ingest_failure_total[1m]))",
+          "legendFormat": "failure"
+        }
+      ],
+      "gridPos": {"x": 18, "y": 8, "w": 6, "h": 8}
+    },
+    {
+      "title": "Outbox depth",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {"expr": "podium_vector_outbox_depth", "legendFormat": "vector"},
+        {"expr": "podium_audit_outbox_depth",  "legendFormat": "audit"}
+      ],
+      "gridPos": {"x": 0, "y": 16, "w": 24, "h": 8}
+    }
+  ],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"}
+}

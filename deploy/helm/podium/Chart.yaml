@@ -1,0 +1,25 @@
+apiVersion: v2
+name: podium
+description: |
+  Podium registry service — a control plane for AI agent artifacts
+  (skills, agents, contexts, commands, rules, hooks, MCP server
+  registrations) per the Podium specification.
+
+  This chart deploys the standard topology described in spec §13.1:
+  stateless registry replicas, Postgres for metadata, S3-compatible
+  object storage for resource bytes, and an OIDC IdP. For evaluation
+  pilots and small-team installations, prefer the standalone single
+  binary deployment described in §13.10.
+type: application
+version: 0.0.0-dev
+appVersion: 0.0.0-dev
+keywords:
+  - ai-agents
+  - skills
+  - claude
+  - mcp
+home: https://github.com/lennylabs/podium
+sources:
+  - https://github.com/lennylabs/podium
+maintainers:
+  - name: Lenny Labs
