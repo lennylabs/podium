@@ -18,6 +18,11 @@ import (
 var (
 	// ErrNoTarget signals that Options.Target was empty.
 	ErrNoTarget = errors.New("sync: target directory not specified")
+	// ErrNoRegistry signals that no registry source was configured.
+	// Maps to config.no_registry in §6.10. Surfaces when neither
+	// Options.RegistryPath nor a discoverable .podium/sync.yaml /
+	// PODIUM_REGISTRY env var is set.
+	ErrNoRegistry = errors.New("config.no_registry: no registry configured")
 )
 
 // Options are the inputs to Run. RegistryPath is the filesystem-source
@@ -55,6 +60,9 @@ type ArtifactResult struct {
 // When Options.DryRun is true, Run resolves the artifact set, returns the
 // Result, and writes nothing.
 func Run(opts Options) (*Result, error) {
+	if opts.RegistryPath == "" {
+		return nil, ErrNoRegistry
+	}
 	if opts.Target == "" && !opts.DryRun {
 		return nil, ErrNoTarget
 	}
