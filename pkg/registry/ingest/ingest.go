@@ -153,6 +153,23 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			continue
 		}
 
+		// §4.7.6 extends:-pin resolution. If the artifact extends a
+		// parent reference, resolve the parent against existing
+		// manifests and pin to an exact version. Parent updates do
+		// not silently propagate; only re-ingesting the child does.
+		if rec.Artifact.Extends != "" {
+			pin, perr := resolveExtendsPin(ctx, st, req.TenantID, rec.Artifact.Extends, rec.ID)
+			if perr != nil {
+				res.Rejected = append(res.Rejected, RejectedArtifact{
+					ArtifactID: rec.ID,
+					Reason:     fmt.Sprintf("extends: %v", perr),
+					Code:       "ingest.invalid_artifact",
+				})
+				continue
+			}
+			mr.ExtendsPin = pin
+		}
+
 		// Check current state to distinguish accepted vs idempotent vs
 		// immutable-violation.
 		existing, err := st.GetManifest(ctx, req.TenantID, mr.ArtifactID, mr.Version)
@@ -360,6 +377,63 @@ func stripPin(ref string) string {
 		return ref[:i]
 	}
 	return ref
+}
+
+// resolveExtendsPin resolves a parent reference (e.g.,
+// "finance/parent" or "finance/parent@1.x" or
+// "finance/parent@sha256:<hex>") against existing manifests for the
+// tenant and returns the pinned form "<id>@<exact-version>". childID
+// is the artifact being ingested; we use it to detect a self-reference
+// (the simplest cycle case).
+func resolveExtendsPin(ctx context.Context, st store.Store, tenantID, ref, childID string) (string, error) {
+	id, pinStr := splitRef(ref)
+	if id == "" {
+		return "", fmt.Errorf("invalid extends reference %q", ref)
+	}
+	if id == childID {
+		return "", fmt.Errorf("self-extends cycle: %q", ref)
+	}
+	pin, err := version.ParsePin(pinStr)
+	if err != nil {
+		return "", fmt.Errorf("parse pin: %w", err)
+	}
+
+	all, err := st.ListManifests(ctx, tenantID)
+	if err != nil {
+		return "", err
+	}
+	versions := make([]string, 0, 4)
+	hashByVersion := map[string]string{}
+	for _, m := range all {
+		if m.ArtifactID == id {
+			versions = append(versions, m.Version)
+			hashByVersion[m.Version] = m.ContentHash
+		}
+	}
+	if len(versions) == 0 {
+		return "", fmt.Errorf("no parent artifact %q ingested yet", id)
+	}
+
+	if pin.Kind == version.PinContentHash {
+		for v, h := range hashByVersion {
+			if h == "sha256:"+pin.Hash {
+				return id + "@" + v, nil
+			}
+		}
+		return "", fmt.Errorf("no parent version with content hash sha256:%s", pin.Hash)
+	}
+	resolved, err := version.Resolve(pin, versions)
+	if err != nil {
+		return "", fmt.Errorf("no parent version satisfies %q", ref)
+	}
+	return id + "@" + resolved, nil
+}
+
+func splitRef(ref string) (id, pin string) {
+	if i := strings.Index(ref, "@"); i >= 0 {
+		return ref[:i], ref[i+1:]
+	}
+	return ref, ""
 }
 
 func dirOf(p string) string {

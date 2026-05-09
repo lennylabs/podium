@@ -306,13 +306,10 @@ type LoadArtifactOptions struct {
 	Version string
 }
 
-// LoadArtifact returns the manifest body. Resources are not fetched by
-// the core (object storage / inline transit is the consumer's
-// responsibility); the consumer reads them per the spec's data plane.
-//
-// Stage 6 keeps the simple case: for filesystem-source backends the
-// store carries body + frontmatter + bundled resources. Phase 5+
-// introduces presigned URL handling.
+// LoadArtifact returns the manifest body. When the resolved manifest
+// declares extends:, the parent is fetched (server-side, hidden-parent
+// semantics per §4.6) and field-merged per the §4.6 merge-semantics
+// table. The returned body and frontmatter are the merged result.
 func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifactID string, opts LoadArtifactOptions) (*LoadArtifactResult, error) {
 	visible, err := r.visibleManifests(ctx, id)
 	if err != nil {
@@ -327,7 +324,6 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 	if len(candidates) == 0 {
 		return nil, fmt.Errorf("%w: artifact %s", ErrNotFound, artifactID)
 	}
-	// Resolve version per §4.7.6.
 	pin, err := version.ParsePin(opts.Version)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidArgument, err)
@@ -337,7 +333,7 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 	for _, c := range candidates {
 		if pin.Kind == version.PinContentHash {
 			if c.ContentHash == "sha256:"+pin.Hash {
-				return resultFromRecord(c), nil
+				return r.assembleResult(ctx, c)
 			}
 			continue
 		}
@@ -352,7 +348,134 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 		return nil, fmt.Errorf("%w: %v", ErrNotFound, err)
 	}
 	rec := byVersion[resolved]
-	return resultFromRecord(rec), nil
+	return r.assembleResult(ctx, rec)
+}
+
+// assembleResult turns one manifest record into a LoadArtifactResult.
+// When the record declares ExtendsPin, the parent is loaded
+// (privilege-bypassing the visibility filter — hidden-parent semantics
+// per §4.6) and field-merged. Cycle detection prevents infinite loops.
+func (r *Registry) assembleResult(ctx context.Context, rec store.ManifestRecord) (*LoadArtifactResult, error) {
+	if rec.ExtendsPin == "" {
+		return resultFromRecord(rec), nil
+	}
+	chain, err := r.resolveExtendsChain(ctx, rec, map[string]bool{})
+	if err != nil {
+		return nil, err
+	}
+	merged := mergeChain(chain)
+	return resultFromRecord(merged), nil
+}
+
+// resolveExtendsChain returns the chain of records starting at rec and
+// walking each parent via ExtendsPin. Order: parent first (lowest
+// precedence) ... rec (highest). Cycles are detected and produce an
+// error to prevent infinite loops, matching §4.6 "Cycle detection at
+// ingest time" — we re-check at load time as defense in depth.
+func (r *Registry) resolveExtendsChain(ctx context.Context, rec store.ManifestRecord, seen map[string]bool) ([]store.ManifestRecord, error) {
+	key := rec.ArtifactID + "@" + rec.Version
+	if seen[key] {
+		return nil, fmt.Errorf("%w: extends cycle at %s", ErrInvalidArgument, key)
+	}
+	seen[key] = true
+
+	if rec.ExtendsPin == "" {
+		return []store.ManifestRecord{rec}, nil
+	}
+	parentID, parentVer := splitParentRef(rec.ExtendsPin)
+	parent, err := r.store.GetManifest(ctx, r.tenantID, parentID, parentVer)
+	if err != nil {
+		return nil, fmt.Errorf("%w: parent %s: %v", ErrNotFound, rec.ExtendsPin, err)
+	}
+	parentChain, err := r.resolveExtendsChain(ctx, parent, seen)
+	if err != nil {
+		return nil, err
+	}
+	return append(parentChain, rec), nil
+}
+
+// mergeChain folds the chain top-down (parent → child) per the §4.6
+// field-semantics table. Scalar fields take the child's value when set;
+// list fields union; sensitivity is most-restrictive-wins.
+func mergeChain(chain []store.ManifestRecord) store.ManifestRecord {
+	if len(chain) == 0 {
+		return store.ManifestRecord{}
+	}
+	out := chain[0]
+	for _, c := range chain[1:] {
+		if c.Description != "" {
+			out.Description = c.Description
+		}
+		if c.Type != "" {
+			out.Type = c.Type
+		}
+		out.Tags = appendUniqueStrings(out.Tags, c.Tags)
+		out.Sensitivity = mostRestrictiveSensitivity(out.Sensitivity, c.Sensitivity)
+		// Identity fields preserve the child's coordinates so callers
+		// see the child rather than the parent.
+		out.ArtifactID = c.ArtifactID
+		out.Version = c.Version
+		out.ContentHash = c.ContentHash
+		out.Layer = c.Layer
+		out.IngestedAt = c.IngestedAt
+		out.Deprecated = c.Deprecated
+		// Body and Frontmatter take the child's; the parent's prose is
+		// not concatenated — extends inherits structured fields, not
+		// markdown body.
+		if len(c.Body) > 0 {
+			out.Body = c.Body
+		}
+		if len(c.Frontmatter) > 0 {
+			out.Frontmatter = c.Frontmatter
+		}
+		out.ExtendsPin = c.ExtendsPin
+	}
+	return out
+}
+
+func appendUniqueStrings(a, b []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(a)+len(b))
+	for _, s := range a {
+		if seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	for _, s := range b {
+		if seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
+}
+
+func mostRestrictiveSensitivity(a, b string) string {
+	rank := func(s string) int {
+		switch s {
+		case "high":
+			return 3
+		case "medium":
+			return 2
+		case "low":
+			return 1
+		}
+		return 0
+	}
+	if rank(b) > rank(a) {
+		return b
+	}
+	return a
+}
+
+func splitParentRef(ref string) (id, ver string) {
+	if i := strings.LastIndex(ref, "@"); i >= 0 {
+		return ref[:i], ref[i+1:]
+	}
+	return ref, ""
 }
 
 func resultFromRecord(rec store.ManifestRecord) *LoadArtifactResult {

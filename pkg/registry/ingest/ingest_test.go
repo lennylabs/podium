@@ -305,10 +305,20 @@ func TestIngest_PopulatesDependencyEdges(t *testing.T) {
 		"mcpServers:\n" +
 		"  - name: finance-warehouse\n" +
 		"---\n\nbody\n"
+	st := newStore(t)
+	// Per §4.7.6 the extends: parent must exist at the child's ingest
+	// time so its version can be pinned. Ingest the parent first.
+	parentSrc := "---\ntype: agent\nversion: 1.0.0\ndescription: parent\nsensitivity: low\n---\n\nparent body\n"
+	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "tenant-1", LayerID: "L", Files: fstest.MapFS{
+			"shared/parent/ARTIFACT.md": &fstest.MapFile{Data: []byte(parentSrc)},
+		},
+	}); err != nil {
+		t.Fatalf("Ingest parent: %v", err)
+	}
 	fsys := fstest.MapFS{
 		"finance/dependent/ARTIFACT.md": &fstest.MapFile{Data: []byte(src)},
 	}
-	st := newStore(t)
 	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
 		TenantID: "tenant-1", LayerID: "L", Files: fsys,
 	}); err != nil {

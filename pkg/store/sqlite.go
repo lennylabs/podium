@@ -71,6 +71,7 @@ func (s *SQLite) applySchema() error {
 			ingested_at TEXT NOT NULL,
 			frontmatter BLOB,
 			body BLOB,
+			extends_pin TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY (tenant_id, artifact_id, version)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_manifests_tenant_type
@@ -164,15 +165,17 @@ func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO manifests
 			(tenant_id, artifact_id, version, content_hash, type, description,
-			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
+			 extends_pin)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
 		rec.Type, rec.Description,
 		strings.Join(rec.Tags, "\n"),
 		rec.Sensitivity, rec.Layer,
 		boolToInt(rec.Deprecated),
 		ingestedAt.UTC().Format(time.RFC3339Nano),
-		rec.Frontmatter, rec.Body)
+		rec.Frontmatter, rec.Body,
+		rec.ExtendsPin)
 	if err != nil {
 		return err
 	}
@@ -183,7 +186,8 @@ func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
 func (s *SQLite) GetManifest(ctx context.Context, tenantID, artifactID, version string) (ManifestRecord, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
-		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body
+		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
+		       extends_pin
 		FROM manifests
 		WHERE tenant_id = ? AND artifact_id = ? AND version = ?`,
 		tenantID, artifactID, version)
@@ -199,7 +203,8 @@ func (s *SQLite) GetManifest(ctx context.Context, tenantID, artifactID, version 
 func (s *SQLite) ListManifests(ctx context.Context, tenantID string) ([]ManifestRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
-		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body
+		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
+		       extends_pin
 		FROM manifests
 		WHERE tenant_id = ?
 		ORDER BY artifact_id ASC, version ASC`, tenantID)
@@ -292,7 +297,8 @@ func scanManifest(scanner rowScanner) (ManifestRecord, error) {
 	err := scanner.Scan(
 		&rec.TenantID, &rec.ArtifactID, &rec.Version, &rec.ContentHash,
 		&rec.Type, &rec.Description, &tags, &rec.Sensitivity, &rec.Layer,
-		&deprecated, &ingestedAt, &rec.Frontmatter, &rec.Body)
+		&deprecated, &ingestedAt, &rec.Frontmatter, &rec.Body,
+		&rec.ExtendsPin)
 	if err != nil {
 		return ManifestRecord{}, err
 	}

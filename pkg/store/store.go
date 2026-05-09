@@ -57,6 +57,11 @@ type ManifestRecord struct {
 	IngestedAt  time.Time
 	Frontmatter []byte
 	Body        []byte
+	// ExtendsPin is the parent reference pinned at this child's
+	// ingest time per §4.7.6: "extends: parent version pinned at
+	// child ingest time". Empty when the artifact does not extend.
+	// Format: "<artifact_id>@<exact-version>".
+	ExtendsPin string
 }
 
 // DependencyEdge is one cross-artifact relation indexed for impact
