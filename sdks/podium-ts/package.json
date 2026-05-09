@@ -1,0 +1,16 @@
+{
+  "name": "@podium/sdk",
+  "version": "0.0.0-dev",
+  "description": "Thin HTTP client for the Podium registry.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
