@@ -28,6 +28,7 @@ import (
 	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
+	"github.com/lennylabs/podium/pkg/scim"
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/vector"
 )
@@ -40,6 +41,43 @@ func envFirst(keys ...string) string {
 		}
 	}
 	return ""
+}
+
+// buildSCIMHandler returns a SCIM handler when at least one
+// bearer token is configured via PODIUM_SCIM_TOKENS (comma-
+// separated). Returns nil otherwise; the registry then runs
+// without an IdP push interface and the visibility evaluator
+// matches groups via JWT claims only.
+func buildSCIMHandler(store *scim.Memory) *scim.Handler {
+	raw := os.Getenv("PODIUM_SCIM_TOKENS")
+	if raw == "" {
+		return nil
+	}
+	tokens := map[string]bool{}
+	for _, t := range strings.Split(raw, ",") {
+		t = strings.TrimSpace(t)
+		if t != "" {
+			tokens[t] = true
+		}
+	}
+	if len(tokens) == 0 {
+		return nil
+	}
+	return &scim.Handler{Store: store, Tokens: tokens}
+}
+
+// envInt returns the integer value of an env var, or def when the
+// var is unset or invalid.
+func envInt(key string, def int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return def
+	}
+	return n
 }
 
 func main() {
@@ -72,12 +110,63 @@ func run() error {
 		registry = registry.WithVectorSearch(v, e)
 		log.Printf("hybrid search: vector=%s embedder=%s dim=%d", v.ID(), e.ID(), e.Dimensions())
 	}
-	srv := server.New(registry,
-		bootstrapOptions(cfg)...,
-	)
+
+	// §6.3.1 SCIM 2.0: when at least one bearer token is configured,
+	// the SCIM IdP receiver is mounted at /scim/v2/. The same
+	// in-memory store also feeds the §4.6 visibility evaluator's
+	// `groups:` expander so layer filters resolve against
+	// IdP-pushed group membership.
+	scimStore := scim.NewMemory()
+	scimHandler := buildSCIMHandler(scimStore)
+	if scimHandler != nil {
+		registry = registry.WithGroupResolver(func(g string) []string {
+			members, err := scimStore.MembersOf(context.Background(), g)
+			if err != nil {
+				return nil
+			}
+			return members
+		})
+	}
+
+	mode := server.NewModeTracker()
+	bootOpts := bootstrapOptions(cfg)
+	if scimHandler != nil {
+		bootOpts = append(bootOpts, server.WithSCIM(scimHandler))
+		log.Printf("SCIM 2.0 receiver mounted at /scim/v2/")
+	}
+	srv := server.New(registry, bootOpts...)
+
+	// §7.3.1 layer-management endpoint: mounted alongside the meta-
+	// tools so admin operators can register/list/unregister layers
+	// over HTTP. The endpoint shares the ModeTracker with the
+	// read-only probe so config writes refuse during outage.
+	layers := server.NewLayerEndpoint(st, tenantID, mode).
+		WithDefaultVisibility(cfg.defaultLayerVisibility)
 
 	mux := http.NewServeMux()
+	mux.Handle("/v1/layers", layers.Handler())
+	mux.Handle("/v1/layers/", layers.Handler())
 	mux.Handle("/", srv.Handler())
+
+	// §13.2.1 read-only probe: ping the metadata store on a tick
+	// and flip the shared mode tracker after Failures consecutive
+	// errors. Disabled when failures threshold is 0.
+	if cfg.readOnlyProbeFailures > 0 {
+		probe := &server.ReadOnlyProbe{
+			Store:    st,
+			Tracker:  mode,
+			TenantID: tenantID,
+			Interval: time.Duration(cfg.readOnlyProbeInterval) * time.Second,
+			Failures: cfg.readOnlyProbeFailures,
+			OnEnter:  func() { log.Printf("registry entered read_only mode after %d probe failures", cfg.readOnlyProbeFailures) },
+			OnExit:   func() { log.Printf("registry exited read_only mode") },
+		}
+		go func() {
+			if err := probe.Run(context.Background()); err != nil && err != context.Canceled {
+				log.Printf("read-only probe stopped: %v", err)
+			}
+		}()
+	}
 
 	httpServer := &http.Server{
 		Addr:              cfg.bind,
@@ -123,6 +212,14 @@ type config struct {
 	qdrantURL        string
 	qdrantKey        string
 	qdrantColl       string
+	// §4.6 default visibility for newly-registered layers when no
+	// explicit visibility is supplied. One of "public" |
+	// "organization" | "private". Defaults to "private" so
+	// admin-defined layers don't leak by accident.
+	defaultLayerVisibility string
+	// §13.2.1 read-only mode probe.
+	readOnlyProbeFailures int
+	readOnlyProbeInterval int
 }
 
 func loadConfig() *config {
@@ -160,6 +257,17 @@ func loadConfig() *config {
 		qdrantURL:         os.Getenv("PODIUM_QDRANT_URL"),
 		qdrantKey:         os.Getenv("PODIUM_QDRANT_API_KEY"),
 		qdrantColl:        envDefault("PODIUM_QDRANT_COLLECTION", "podium_artifacts"),
+		// §4.6 + §13.2.1.
+		defaultLayerVisibility: envDefault("PODIUM_DEFAULT_LAYER_VISIBILITY", "private"),
+		readOnlyProbeFailures:  envInt("PODIUM_READONLY_PROBE_FAILURES", 0),
+		readOnlyProbeInterval:  envInt("PODIUM_READONLY_PROBE_INTERVAL", 30),
+	}
+	// §13.10 ~/.podium/registry.yaml: load and overlay onto env-
+	// derived defaults. Env values keep precedence per applyYAML.
+	if y, err := readYAMLConfig(); err != nil {
+		log.Printf("warning: ignored registry.yaml: %v", err)
+	} else {
+		applyYAML(c, y)
 	}
 	if c.sqlitePath == "" {
 		home, err := os.UserHomeDir()

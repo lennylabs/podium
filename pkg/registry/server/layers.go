@@ -33,6 +33,18 @@ type LayerEndpoint struct {
 	// admin-defined layers. Tests inject a no-op; production wires
 	// the registry's AdminAuthorize.
 	authAdmin func(*http.Request) error
+	// defaultLayerVisibility is the fallback applied at register
+	// time when an admin-defined layer arrives with no explicit
+	// visibility. One of "public" | "organization" | "private".
+	defaultLayerVisibility string
+}
+
+// WithDefaultVisibility installs the §4.6 fallback visibility for
+// admin-defined layers that arrive at register time without
+// explicit visibility settings.
+func (e *LayerEndpoint) WithDefaultVisibility(v string) *LayerEndpoint {
+	e.defaultLayerVisibility = v
+	return e
 }
 
 // NewLayerEndpoint returns an endpoint backed by the given store +
@@ -142,6 +154,22 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	// visibility per §7.3.1.
 	if cfg.UserDefined && cfg.Owner != "" && len(cfg.Users) == 0 {
 		cfg.Users = []string{cfg.Owner}
+	}
+
+	// §4.6 / PODIUM_DEFAULT_LAYER_VISIBILITY: when no explicit
+	// visibility is supplied by an admin-defined layer, fall back
+	// to the deployment-configured default. "private" is the
+	// safe default — admins must opt in to broader visibility.
+	if !cfg.UserDefined && !cfg.Public && !cfg.Organization &&
+		len(cfg.Groups) == 0 && len(cfg.Users) == 0 {
+		switch e.defaultLayerVisibility {
+		case "public":
+			cfg.Public = true
+		case "organization":
+			cfg.Organization = true
+		}
+		// "private" / unset / unknown: leave the layer with no
+		// visibility filters — only explicit grants will see it.
 	}
 
 	// Pick a default order: the highest existing ord + 10.

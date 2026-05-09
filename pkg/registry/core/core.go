@@ -57,6 +57,10 @@ type Registry struct {
 	// the reduced fidelity.
 	vector   vector.Provider
 	embedder embedding.Provider
+	// resolveGroup expands a layer's `groups:` filter via the §6.3.1
+	// SCIM membership store. Nil disables expansion: visibility falls
+	// back to JWT-claim group matching only.
+	resolveGroup layer.GroupResolver
 }
 
 // sessionKey identifies one (session, artifact) latest-resolution
@@ -103,6 +107,15 @@ func (r *Registry) WithAudit(emit AuditEmitter) *Registry {
 func (r *Registry) WithVectorSearch(v vector.Provider, e embedding.Provider) *Registry {
 	r.vector = v
 	r.embedder = e
+	return r
+}
+
+// WithGroupResolver wires a §6.3.1 SCIM-backed expander so the
+// visibility evaluator turns a layer's `groups:` filter into the
+// underlying user set. Without one, visibility checks the
+// identity's JWT claim list directly.
+func (r *Registry) WithGroupResolver(fn layer.GroupResolver) *Registry {
+	r.resolveGroup = fn
 	return r
 }
 
@@ -933,7 +946,7 @@ func (r *Registry) visibleManifests(ctx context.Context, id layer.Identity) ([]s
 	if id.IsPublic || len(r.layers) == 0 {
 		return all, nil
 	}
-	visible := layer.EffectiveLayers(r.layers, id)
+	visible := layer.EffectiveLayersWith(r.layers, id, r.resolveGroup)
 	allowed := map[string]bool{}
 	for _, l := range visible {
 		allowed[l.ID] = true

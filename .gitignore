@@ -5,3 +5,6 @@ coverage.out
 coverage.html
 *.test
 *.out
+/podium
+/podium-server
+/podium-mcp

@@ -61,7 +61,7 @@ type EffectiveLayer struct {
 func (r *Registry) ShowEffective(ctx context.Context, target layer.Identity) ([]EffectiveLayer, error) {
 	out := make([]EffectiveLayer, 0, len(r.layers))
 	for _, l := range r.layers {
-		visible := layer.Visible(l, target)
+		visible := layer.VisibleWith(l, target, r.resolveGroup)
 		out = append(out, EffectiveLayer{
 			LayerID: l.ID,
 			Visible: visible,

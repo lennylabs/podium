@@ -59,15 +59,17 @@ non-phase-aligned gaps remain. See `REMAINING_GAPS.md` for the
 detailed plan with effort estimates and test strategies. The list
 below is the punch summary.
 
-**Plumbing** (small wiring on existing components — Batch A):
-- SCIM → visibility integration (`layer.Visible` does not yet
-  consult `scim.Store.MembersOf` when expanding `groups:` filters).
-- Transparency anchoring scheduler (`audit.Anchor` works on
-  demand; `cmd/podium-server` doesn't run it on a cadence).
-- Sandbox profile enforcement (`PODIUM_ENFORCE_SANDBOX_PROFILE`
-  is documented but not gated).
-- Idempotent sync stale-file cleanup (a sync that drops an
-  artifact does not delete its previously-materialized files).
+**Plumbing** (small wiring on existing components — Batch A): DONE.
+- SCIM → visibility integration: `core.Registry.WithGroupResolver`
+  expands a layer's `groups:` filter via the resolver function
+  passed in by the caller. `cmd/podium-server` wires it to
+  `scim.Memory.MembersOf` when SCIM is enabled.
+- Sandbox profile enforcement: `cmd/podium-mcp` rejects an
+  artifact whose `sandbox_profile` is not in the operator-
+  supplied host-supported list.
+- Idempotent sync stale-file cleanup: `pkg/sync` reads the
+  prior `.podium/sync.lock`, removes any path the new run did
+  not write, and persists the new lock atomically.
 
 **CLI surface** (operator commands the spec promises — Batch B):
 - `podium serve` (alias / in-process for `podium-server`).
@@ -80,15 +82,26 @@ below is the punch summary.
 - `NotificationProvider` SPI (§9): ingest-failure /
   operational-notification delivery, distinct from the §7.3.2
   outbound webhook event stream.
-- `TypeProvider` SPI (§9): the seven first-class types are
-  hardcoded; no plugin point for a custom type.
+- `TypeProvider` SPI (§9): no plugin point for a custom type.
 - `podium-py` SDK (§10 Phase 4): only `podium-ts` exists today.
 
-**Configuration surface** (Batch D):
-- `~/.podium/registry.yaml` server-config parser.
-- `PODIUM_DEFAULT_LAYER_VISIBILITY`.
-- `PODIUM_READONLY_PROBE_FAILURES` / `_INTERVAL` (probe-and-flip
-  when Postgres becomes unreachable).
+**Configuration surface** (Batch D): DONE.
+- `~/.podium/registry.yaml` server-config parser
+  (`cmd/podium-server/yaml_config.go`); env vars retain
+  precedence.
+- `PODIUM_DEFAULT_LAYER_VISIBILITY` honored in the layer-
+  registration handler when the admin omits an explicit
+  visibility.
+- `PODIUM_READONLY_PROBE_FAILURES` / `_INTERVAL` drive the
+  background goroutine in `cmd/podium-server` that flips the
+  shared `ModeTracker` after consecutive store outages and
+  restores ready mode on the first success.
+
+**Anchor scheduler / outbound webhook worker** (deferred): the
+`pkg/audit.Scheduler` and `pkg/webhook.Worker` exist but are
+not yet bootstrapped from `cmd/podium-server`. The signer
+keypair and webhook receiver store both need persistence-
+backend wiring first.
 
 **Verification** (Batch F):
 - p99 latency benchmark suite for §7.1 budgets.

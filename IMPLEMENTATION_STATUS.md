@@ -283,9 +283,19 @@ cover representative canonical events. Commands include
 These don't map to one phase; see REMAINING_GAPS.md for the
 detailed plan with effort estimates and test strategies.
 
-- **Plumbing (Batch A, ~half day).** SCIM → visibility,
-  anchoring scheduler, sandbox profile enforcement, sync
-  stale-file cleanup.
+- **Plumbing (Batch A): DONE.** SCIM → visibility resolver
+  hook, sandbox profile enforcement on the MCP path, sync
+  stale-file cleanup driven by the sync lock.
+- **Configuration surface (Batch D): DONE.**
+  `~/.podium/registry.yaml` parser,
+  `PODIUM_DEFAULT_LAYER_VISIBILITY`, read-only-mode probe
+  goroutine in `cmd/podium-server` that flips the
+  `ModeTracker` after consecutive store failures.
+- **Anchor scheduler / outbound webhook worker bootstrap.**
+  `pkg/audit.Scheduler` and `pkg/webhook.Worker` ship as
+  ready-to-mount components, but `cmd/podium-server` does not
+  yet construct them. Both need a persistence-backed signer
+  and receiver store wired first.
 - **CLI surface (Batch B, ~half day).** `podium serve` /
   `config show` / `layer update` / `layer watch` / `cache prune`
   / `import` / `admin migrate-to-standard` /
@@ -293,9 +303,6 @@ detailed plan with effort estimates and test strategies.
 - **Real new features (Batch C, ~2 days).**
   `NotificationProvider` SPI, `TypeProvider` SPI,
   `podium-py` SDK.
-- **Configuration surface (Batch D, ~half day).**
-  `~/.podium/registry.yaml` parser,
-  `PODIUM_DEFAULT_LAYER_VISIBILITY`, read-only mode probe.
 - **Web UI (Batch E, ~2 days).** `--web-ui` SPA at `/ui/`.
 - **Verification (Batch F, ~half day).** p99 latency benchmark,
   CI workflow for live integration tests.
