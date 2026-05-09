@@ -21,6 +21,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/lennylabs/podium/pkg/lint"
+	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/sync"
 )
 
@@ -32,6 +34,8 @@ func main() {
 	switch os.Args[1] {
 	case "sync":
 		os.Exit(syncCmd(os.Args[2:]))
+	case "lint":
+		os.Exit(lintCmd(os.Args[2:]))
 	case "version":
 		fmt.Println("podium 0.0.0-dev")
 	case "help", "-h", "--help":
@@ -46,6 +50,7 @@ const usage = `usage: podium <command> [flags]
 
 Commands:
   sync     Materialize the caller's effective view through a HarnessAdapter.
+  lint     Validate manifests in a filesystem-source registry.
   version  Print the podium version.
   help     Print this message.
 `
@@ -102,6 +107,46 @@ func printHuman(res *sync.Result, dryRun bool) {
 			fmt.Fprintf(os.Stdout, "      %s\n", f)
 		}
 	}
+}
+
+func lintCmd(args []string) int {
+	fs := flag.NewFlagSet("lint", flag.ContinueOnError)
+	registry := fs.String("registry", "", "filesystem registry path (required)")
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *registry == "" {
+		fmt.Fprintln(os.Stderr, "error: --registry is required")
+		return 2
+	}
+
+	reg, err := filesystem.Open(*registry)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+	records, err := reg.Walk(filesystem.WalkOptions{
+		CollisionPolicy: filesystem.CollisionPolicyHighestWins,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+
+	diags := (&lint.Linter{}).Lint(reg, records)
+	if len(diags) == 0 {
+		fmt.Println("lint: no issues.")
+		return 0
+	}
+	exit := 0
+	for _, d := range diags {
+		fmt.Fprintln(os.Stdout, d.String())
+		if d.Severity == lint.SeverityError {
+			exit = 1
+		}
+	}
+	return exit
 }
 
 // printJSON emits a stable JSON envelope. Stage 2 keeps this tiny and
