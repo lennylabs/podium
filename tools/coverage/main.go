@@ -121,7 +121,11 @@ func perPackage(root string) int {
 }
 
 func runWithCover(root string) error {
-	cmd := exec.Command("go", "test", "-count=1", "-coverprofile=coverage.out", "./...")
+	cmd := exec.Command("go", "test",
+		"-count=1",
+		"-coverprofile=coverage.out",
+		"-coverpkg=./...",
+		"./...")
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "PODIUM_PHASE=19")
 	var out bytes.Buffer
