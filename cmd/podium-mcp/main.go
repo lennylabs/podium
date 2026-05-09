@@ -1,43 +1,115 @@
-// Command podium-mcp is the MCP server bridge described in spec §6. It
-// exposes the meta-tools (load_domain, search_domains, search_artifacts,
-// load_artifact) over MCP's stdio transport, forwards calls to a Podium
-// registry server, and runs the configured HarnessAdapter at materialize
-// time.
+// Command podium-mcp is the MCP server bridge described in spec §6.
 //
-// Stage 3 ships a stdio I/O loop with a JSON-RPC 2.0 envelope that
-// matches the MCP wire protocol's request / response shape (initialize,
-// tools/list, tools/call). Identity, caching, and the materialization
-// pipeline land alongside their respective phases.
+// The bridge exposes the meta-tools (load_domain, search_domains,
+// search_artifacts, load_artifact) over MCP's stdio transport. It
+// forwards meta-tool calls to a Podium registry over HTTP, caches
+// content-addressed responses, runs the configured HarnessAdapter and
+// MaterializationHook chain, and writes adapter output atomically to
+// the host's filesystem at load_artifact time (§6.6).
+//
+// Configuration (env vars; flags also supported by the launcher):
+//
+//	PODIUM_REGISTRY            Registry URL or filesystem path.
+//	PODIUM_HARNESS             Adapter ID (default: none).
+//	PODIUM_CACHE_DIR           Content-addressed cache root.
+//	PODIUM_MATERIALIZE_ROOT    Materialization destination.
+//	PODIUM_SESSION_TOKEN       Injected JWT (§6.3.2).
+//	PODIUM_SESSION_TOKEN_FILE  File path holding the JWT.
 package main
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/lennylabs/podium/pkg/adapter"
+	"github.com/lennylabs/podium/pkg/materialize"
 )
 
 const protocolVersion = "2024-11-05"
 
 func main() {
-	registry := os.Getenv("PODIUM_REGISTRY")
-	if registry == "" {
-		fmt.Fprintln(os.Stderr, "error: PODIUM_REGISTRY is required")
+	cfg, err := loadConfig()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	srv := &mcpServer{registry: registry, http: &http.Client{}}
+	srv, err := newServer(cfg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 	if err := srv.serve(os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
+// config captures every PODIUM_ env var the bridge consults.
+type config struct {
+	registry          string
+	harness           string
+	cacheDir          string
+	materializeRoot   string
+	sessionToken      string
+	sessionTokenFile  string
+}
+
+func loadConfig() (*config, error) {
+	c := &config{
+		registry:         os.Getenv("PODIUM_REGISTRY"),
+		harness:          envDefault("PODIUM_HARNESS", "none"),
+		cacheDir:         os.Getenv("PODIUM_CACHE_DIR"),
+		materializeRoot:  os.Getenv("PODIUM_MATERIALIZE_ROOT"),
+		sessionToken:     os.Getenv("PODIUM_SESSION_TOKEN"),
+		sessionTokenFile: os.Getenv("PODIUM_SESSION_TOKEN_FILE"),
+	}
+	if c.registry == "" {
+		return nil, fmt.Errorf("PODIUM_REGISTRY is required")
+	}
+	if c.cacheDir == "" {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			c.cacheDir = filepath.Join(home, ".podium", "cache")
+		}
+	}
+	return c, nil
+}
+
+func envDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+// mcpServer holds the wiring for one bridge process.
 type mcpServer struct {
-	registry string
+	cfg      *config
 	http     *http.Client
+	cache    *contentCache
+	adapters *adapter.Registry
+}
+
+func newServer(cfg *config) (*mcpServer, error) {
+	cache, err := newContentCache(cfg.cacheDir)
+	if err != nil {
+		return nil, err
+	}
+	return &mcpServer{
+		cfg:      cfg,
+		http:     &http.Client{},
+		cache:    cache,
+		adapters: adapter.DefaultRegistry(),
+	}, nil
 }
 
 // rpcRequest is a JSON-RPC 2.0 request envelope.
@@ -85,9 +157,9 @@ func (s *mcpServer) handle(req rpcRequest) rpcResponse {
 		resp.Result = map[string]any{
 			"protocolVersion": protocolVersion,
 			"capabilities": map[string]any{
-				"tools":               map[string]any{},
-				"prompts":             map[string]any{},
-				"sessionCorrelation":  true,
+				"tools":              map[string]any{},
+				"prompts":            map[string]any{},
+				"sessionCorrelation": true,
 			},
 			"serverInfo": map[string]any{"name": "podium-mcp", "version": "0.0.0-dev"},
 		}
@@ -116,7 +188,7 @@ type toolCallParams struct {
 func (s *mcpServer) callTool(raw json.RawMessage) any {
 	var p toolCallParams
 	if err := json.Unmarshal(raw, &p); err != nil {
-		return map[string]any{"error": err.Error()}
+		return errorResult(err.Error())
 	}
 	switch p.Name {
 	case "load_domain":
@@ -126,36 +198,257 @@ func (s *mcpServer) callTool(raw json.RawMessage) any {
 	case "search_artifacts":
 		return s.proxyGet("/v1/search_artifacts", p.Arguments)
 	case "load_artifact":
-		return s.proxyGet("/v1/load_artifact", p.Arguments)
+		return s.loadArtifact(p.Arguments)
 	default:
-		return map[string]any{"error": "unknown tool: " + p.Name}
+		return errorResult("unknown tool: " + p.Name)
 	}
 }
 
-// proxyGet forwards the tool call to the registry HTTP API and returns the
-// decoded JSON body as a map.
-func (s *mcpServer) proxyGet(path string, args map[string]any) any {
-	u, err := url.Parse(s.registry + path)
+// loadArtifact fetches the artifact from the registry, runs the
+// §6.6 materialization pipeline, and returns the manifest body plus
+// the materialized paths the host can read.
+func (s *mcpServer) loadArtifact(args map[string]any) any {
+	body, err := s.fetchJSON("/v1/load_artifact", args)
 	if err != nil {
-		return map[string]any{"error": err.Error()}
+		return errorResult(err.Error())
+	}
+	var resp loadArtifactResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return errorResult("decode load_artifact: " + err.Error())
+	}
+	if resp.ID == "" {
+		// Either an error envelope or an empty result; pass through.
+		return jsonAny(body)
+	}
+
+	// Cache the canonical bytes (content cache is forever-immutable
+	// per §6.5).
+	if err := s.cache.put(resp.ContentHash, resp.Frontmatter, resp.ManifestBody, resp.Resources); err != nil {
+		return errorResult("cache: " + err.Error())
+	}
+
+	// Materialize to host filesystem if a destination is configured.
+	materialized := []string{}
+	if s.cfg.materializeRoot != "" {
+		// §6.6 step 3: HarnessAdapter translates canonical artifact.
+		harnessID := s.cfg.harness
+		if h, ok := args["harness"].(string); ok && h != "" {
+			harnessID = h
+		}
+		a, err := s.adapters.Get(harnessID)
+		if err != nil {
+			return errorResult("config.unknown_harness: " + err.Error())
+		}
+		src := adapter.Source{
+			ArtifactID:    resp.ID,
+			ArtifactBytes: []byte(resp.Frontmatter),
+			Resources:     resourcesAsBytes(resp.Resources),
+		}
+		// Skill artifacts carry their body in SkillBytes; the registry
+		// returns the resolved manifest body, so synthesize the SKILL.md
+		// from frontmatter + body when the type is skill.
+		if resp.Type == "skill" {
+			src.SkillBytes = []byte(synthesizeSkillMD(resp))
+		}
+		out, err := a.Adapt(src)
+		if err != nil {
+			return errorResult("adapter: " + err.Error())
+		}
+		// §6.6 step 5: atomic write.
+		if err := materialize.Write(s.cfg.materializeRoot, out); err != nil {
+			return errorResult("materialize: " + err.Error())
+		}
+		for _, f := range out {
+			materialized = append(materialized, filepath.Join(s.cfg.materializeRoot, filepath.FromSlash(f.Path)))
+		}
+	}
+
+	return map[string]any{
+		"id":              resp.ID,
+		"type":            resp.Type,
+		"version":         resp.Version,
+		"content_hash":    resp.ContentHash,
+		"manifest_body":   resp.ManifestBody,
+		"materialized_at": materialized,
+	}
+}
+
+// loadArtifactResponse mirrors the registry server's
+// LoadArtifactResponse so we can decode it without importing the server
+// package.
+type loadArtifactResponse struct {
+	ID           string            `json:"id"`
+	Type         string            `json:"type"`
+	Version      string            `json:"version"`
+	ContentHash  string            `json:"content_hash"`
+	ManifestBody string            `json:"manifest_body"`
+	Frontmatter  string            `json:"frontmatter"`
+	Layer        string            `json:"layer,omitempty"`
+	Resources    map[string]string `json:"resources,omitempty"`
+}
+
+func resourcesAsBytes(in map[string]string) map[string][]byte {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string][]byte, len(in))
+	for k, v := range in {
+		out[k] = []byte(v)
+	}
+	return out
+}
+
+func synthesizeSkillMD(r loadArtifactResponse) string {
+	// The registry returns the merged manifest body. For skills the
+	// agent expects a SKILL.md with the body content. The frontmatter
+	// is whatever ARTIFACT.md carried; the body is the prose.
+	return r.Frontmatter + r.ManifestBody
+}
+
+// fetchJSON makes an authenticated GET against the registry and returns
+// the response body.
+func (s *mcpServer) fetchJSON(path string, args map[string]any) ([]byte, error) {
+	u, err := url.Parse(s.cfg.registry + path)
+	if err != nil {
+		return nil, err
 	}
 	q := u.Query()
 	for k, v := range args {
+		// `harness` is a per-call override consumed locally; do not
+		// forward to the registry since it is not a registry-side
+		// argument.
+		if k == "harness" {
+			continue
+		}
 		q.Set(k, fmt.Sprintf("%v", v))
 	}
 	u.RawQuery = q.Encode()
-	resp, err := s.http.Get(u.String())
+	req, err := http.NewRequest("GET", u.String(), nil)
 	if err != nil {
-		return map[string]any{"error": err.Error()}
+		return nil, err
+	}
+	if tok := s.currentToken(); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := s.http.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return map[string]any{"error": err.Error()}
+		return nil, err
 	}
+	if resp.StatusCode >= 400 {
+		return body, fmt.Errorf("HTTP %d: %s", resp.StatusCode, body)
+	}
+	return body, nil
+}
+
+// proxyGet forwards a non-load_artifact tool call to the registry and
+// returns the decoded JSON response. load_artifact gets its own
+// handler because it has materialization side-effects.
+func (s *mcpServer) proxyGet(path string, args map[string]any) any {
+	body, err := s.fetchJSON(path, args)
+	if err != nil {
+		return errorResult(err.Error())
+	}
+	return jsonAny(body)
+}
+
+func jsonAny(b []byte) any {
 	var out any
-	if err := json.Unmarshal(body, &out); err != nil {
-		return map[string]any{"error": err.Error()}
+	if err := json.Unmarshal(b, &out); err != nil {
+		return errorResult("decode: " + err.Error())
+	}
+	return out
+}
+
+// currentToken reads the injected session token. §6.3.2 requires the
+// MCP server to read fresh on every call so env-var or file rotations
+// take effect at next request.
+func (s *mcpServer) currentToken() string {
+	if s.cfg.sessionTokenFile != "" {
+		data, err := os.ReadFile(s.cfg.sessionTokenFile)
+		if err == nil {
+			return strings.TrimSpace(string(data))
+		}
+	}
+	return strings.TrimSpace(s.cfg.sessionToken)
+}
+
+func errorResult(msg string) map[string]any { return map[string]any{"error": msg} }
+
+// ----- Content cache -------------------------------------------------------
+
+// contentCache is the §6.5 content cache: maps content_hash -> manifest
+// bytes + bundled resources. Content is forever-immutable by definition;
+// we never expire entries.
+type contentCache struct {
+	dir string
+}
+
+func newContentCache(dir string) (*contentCache, error) {
+	if dir == "" {
+		// Cache disabled.
+		return &contentCache{}, nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("cache dir: %w", err)
+	}
+	return &contentCache{dir: dir}, nil
+}
+
+// put stores content under the cache. Returns nil when the cache is
+// disabled.
+func (c *contentCache) put(hash, frontmatter, body string, resources map[string]string) error {
+	if c.dir == "" || hash == "" {
+		return nil
+	}
+	bucket := filepath.Join(c.dir, sanitizeHash(hash))
+	if err := os.MkdirAll(bucket, 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(bucket, "frontmatter"), []byte(frontmatter), 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(bucket, "body"), []byte(body), 0o644); err != nil {
+		return err
+	}
+	for path, content := range resources {
+		dest := filepath.Join(bucket, "resources", filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(dest, []byte(content), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// has reports whether the cache already holds the content_hash. Used
+// by future cache-revalidation paths.
+func (c *contentCache) has(hash string) bool {
+	if c.dir == "" || hash == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(c.dir, sanitizeHash(hash), "frontmatter"))
+	return err == nil
+}
+
+// sanitizeHash makes a content hash safe to use as a filesystem name.
+// "sha256:abc..." becomes "sha256-abc...".
+func sanitizeHash(h string) string {
+	out := strings.ReplaceAll(h, ":", "-")
+	// Defense-in-depth: never let a separator escape the cache root.
+	out = strings.ReplaceAll(out, "/", "_")
+	out = strings.ReplaceAll(out, "..", "_")
+	if out == "" {
+		// Pathologically empty: hash the empty string so we still
+		// produce a stable bucket name.
+		h := sha256.Sum256(nil)
+		out = hex.EncodeToString(h[:])
 	}
 	return out
 }
