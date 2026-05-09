@@ -1,5 +1,6 @@
 multi_layer: true
 layer_order:
   - org-defaults
+  - _shared
   - team-finance
   - personal

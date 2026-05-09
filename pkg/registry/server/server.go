@@ -139,6 +139,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/search_domains", s.handleSearchDomains)
 	mux.HandleFunc("/v1/search_artifacts", s.handleSearchArtifacts)
 	mux.HandleFunc("/v1/load_artifact", s.handleLoadArtifact)
+	mux.HandleFunc("/v1/dependents", s.handleDependents)
+	mux.HandleFunc("/v1/scope/preview", s.handleScopePreview)
 	return mux
 }
 
@@ -291,6 +293,35 @@ func (s *Server) handleSearchArtifacts(w http.ResponseWriter, r *http.Request) {
 		resp.Results = append(resp.Results, descriptorOf(a))
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleDependents(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "id is required")
+		return
+	}
+	edges, err := s.core.DependentsOf(r.Context(), s.identity(r), id)
+	if err != nil {
+		s.writeCoreError(w, err)
+		return
+	}
+	out := []map[string]string{}
+	for _, e := range edges {
+		out = append(out, map[string]string{
+			"from": e.From, "to": e.To, "kind": e.Kind,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"edges": out})
+}
+
+func (s *Server) handleScopePreview(w http.ResponseWriter, r *http.Request) {
+	preview, err := s.core.PreviewScope(r.Context(), s.identity(r))
+	if err != nil {
+		s.writeCoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, preview)
 }
 
 func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {

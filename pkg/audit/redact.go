@@ -27,7 +27,7 @@ func NewPIIScrubber() *PIIScrubber {
 	s.Add("ssn", regexp.MustCompile(`\b\d{3}-\d{2}-\d{4}\b`), "[ssn-redacted]")
 	s.Add("credit-card", regexp.MustCompile(`\b(?:\d[ -]*?){13,19}\b`), "[cc-redacted]")
 	s.Add("email", regexp.MustCompile(`\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b`), "[email-redacted]")
-	s.Add("phone-us", regexp.MustCompile(`\b(?:\+?1[-. ]?)?(?:\(?\d{3}\)?[-. ]?)\d{3}[-. ]?\d{4}\b`), "[phone-redacted]")
+	s.Add("phone-us", regexp.MustCompile(`(?:\+?1[-. ]?)?\(?\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}`), "[phone-redacted]")
 	return s
 }
 

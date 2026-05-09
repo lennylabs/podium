@@ -40,7 +40,7 @@ func TestReferenceRegistry_OpensAndWalks(t *testing.T) {
 	if reg.Mode != filesystem.ModeMultiLayer {
 		t.Errorf("Mode = %s, want multi-layer", reg.Mode)
 	}
-	wantLayers := []string{"org-defaults", "team-finance", "personal"}
+	wantLayers := []string{"org-defaults", "_shared", "team-finance", "personal"}
 	if len(reg.Layers) != len(wantLayers) {
 		t.Fatalf("got %d layers, want %d", len(reg.Layers), len(wantLayers))
 	}
