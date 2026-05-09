@@ -310,15 +310,32 @@ func collectPrecedingComments(lines []string, index int, prefix string) string {
 //	Spec: n/a — reason for not citing the spec.
 //	Phase: 0
 //
-// The first one wins for each kind. Phase defaults to -1 (untagged).
+// A `Spec:` annotation can wrap across multiple comment lines; lines that
+// follow without a new keyword are treated as continuations of the
+// preceding Spec note. The first Spec / Phase annotation wins.
 func parseAnnotations(comment string) (Citation, int) {
 	c := Citation{}
 	phase := -1
-	for _, raw := range strings.Split(comment, "\n") {
-		line := strings.TrimSpace(raw)
+	lines := strings.Split(comment, "\n")
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
 		switch {
 		case startsWithCI(line, "Spec:"):
 			c = parseSpecLine(line)
+			// Collect continuation lines until the next keyword or
+			// blank line.
+			for j := i + 1; j < len(lines); j++ {
+				next := strings.TrimSpace(lines[j])
+				if next == "" || isAnnotationKeyword(next) {
+					break
+				}
+				if c.Note == "" {
+					c.Note = next
+				} else {
+					c.Note += " " + next
+				}
+				i = j
+			}
 		case startsWithCI(line, "Phase:"):
 			n, err := strconv.Atoi(strings.TrimSpace(line[len("Phase:"):]))
 			if err == nil && phase == -1 {
@@ -327,6 +344,15 @@ func parseAnnotations(comment string) (Citation, int) {
 		}
 	}
 	return c, phase
+}
+
+func isAnnotationKeyword(line string) bool {
+	for _, kw := range []string{"Spec:", "Phase:"} {
+		if startsWithCI(line, kw) {
+			return true
+		}
+	}
+	return false
 }
 
 func startsWithCI(line, prefix string) bool {

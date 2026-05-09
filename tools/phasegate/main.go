@@ -9,12 +9,14 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -138,18 +140,44 @@ func next(root string) int {
 	}
 	rep, err := runGoTestReport(root, phase)
 	if err != nil {
-		fmt.Println("(no test report available — Stage 1 minimum)")
+		fmt.Println("(no test report available)")
 		return 1
 	}
 	if rep.firstFailing == nil {
-		fmt.Println("(no failing tests in the active phase)")
+		specTests, _ := specparser.WalkTests(root)
+		specCiting := countCitingPhase(specTests, phase)
+		if specCiting == 0 {
+			fmt.Printf("phase %d has no spec-citing tests; nothing to drive implementation against.\n", phase)
+			return 0
+		}
+		fmt.Println("no failing tests in the active phase. Run `make advance` to move forward.")
 		return 0
 	}
 	f := rep.firstFailing
 	fmt.Printf("name:     %s\n", f.name)
-	fmt.Printf("file:     %s:%d\n", f.file, f.line)
-	fmt.Printf("citation: %s\n", f.citation)
-	fmt.Printf("summary:  %s\n", f.summary)
+	if f.file != "" {
+		if f.line > 0 {
+			fmt.Printf("file:     %s:%d\n", f.file, f.line)
+		} else {
+			fmt.Printf("file:     %s\n", f.file)
+		}
+	}
+	fmt.Printf("package:  %s\n", f.pkg)
+	fmt.Printf("phase:    %d\n", f.phase)
+	if f.citation != "" {
+		fmt.Printf("citation: %s\n", f.citation)
+		if f.note != "" {
+			fmt.Printf("note:     %s\n", f.note)
+		}
+	} else {
+		fmt.Printf("citation: (none — annotate the test with `// Spec: §X.Y title — assertion.`)\n")
+	}
+	if f.summary != "" {
+		fmt.Println("failure:")
+		for _, line := range strings.Split(f.summary, "\n") {
+			fmt.Println("  " + line)
+		}
+	}
 	return 0
 }
 
@@ -230,9 +258,12 @@ type testCounts struct {
 
 type failedTest struct {
 	name     string
+	pkg      string
 	file     string
 	line     int
 	citation string
+	note     string
+	phase    int
 	summary  string
 }
 
@@ -241,9 +272,26 @@ type testReport struct {
 	firstFailing *failedTest
 }
 
-// runGoTestCount runs `go test ./...` with PODIUM_PHASE=phase and returns
-// pass/fail/skip counts derived from `go test -json`. Stage 1 keeps this
-// simple: it doesn't try to associate failures with annotations yet.
+// goTestEvent matches a single line of `go test -json` output. Only the
+// fields we consume are listed; the package emits more.
+type goTestEvent struct {
+	Action  string `json:"Action"`
+	Package string `json:"Package"`
+	Test    string `json:"Test"`
+	Output  string `json:"Output"`
+}
+
+// failureLineRegex matches the conventional Go test failure prefix that
+// `t.Errorf` and `t.Fatalf` emit:
+//
+//	    foo_test.go:42: assertion failed
+//
+// Capture group 1 is the file basename, 2 is the line number, 3 is the
+// optional message. Indented with whitespace in the actual output.
+var failureLineRegex = regexp.MustCompile(`^\s*([^/\s:][^\s:]*\.go):(\d+):\s*(.*)$`)
+
+// runGoTestCount runs the test suite and returns pass/fail/skip counts
+// derived from `go test -json`.
 func runGoTestCount(root string, phase int) (testCounts, error) {
 	rep, err := runGoTestReport(root, phase)
 	if err != nil {
@@ -252,57 +300,144 @@ func runGoTestCount(root string, phase int) (testCounts, error) {
 	return rep.counts, nil
 }
 
+// runGoTestReport runs the test suite and decodes the JSON event stream
+// per-event. Output events for failing tests are buffered so the failure
+// record carries the actual assertion message and source line.
 func runGoTestReport(root string, phase int) (testReport, error) {
 	cmd := exec.Command("go", "test", "-json", "./...")
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "PODIUM_PHASE="+strconv.Itoa(phase))
 	out, _ := cmd.CombinedOutput()
 
+	type key struct{ pkg, test string }
+	output := map[key][]string{}
+	failed := []key{}
+
 	var rep testReport
 	for _, line := range strings.Split(string(out), "\n") {
-		switch {
-		case strings.Contains(line, `"Action":"pass"`) && strings.Contains(line, `"Test":"Test`):
-			rep.counts.passing++
-		case strings.Contains(line, `"Action":"fail"`) && strings.Contains(line, `"Test":"Test`):
-			rep.counts.failing++
-			if rep.firstFailing == nil {
-				rep.firstFailing = parseFailing(line)
+		if line == "" {
+			continue
+		}
+		var ev goTestEvent
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			continue
+		}
+		// Top-level test events have a Test field starting with "Test"
+		// and no slash. Subtests carry "/" in the name; we treat them
+		// as their parent for accounting.
+		if ev.Test == "" {
+			continue
+		}
+		k := key{ev.Package, ev.Test}
+		switch ev.Action {
+		case "output":
+			output[k] = append(output[k], ev.Output)
+		case "pass":
+			if !strings.Contains(ev.Test, "/") {
+				rep.counts.passing++
 			}
-		case strings.Contains(line, `"Action":"skip"`) && strings.Contains(line, `"Test":"Test`):
-			rep.counts.skipped++
+		case "fail":
+			if !strings.Contains(ev.Test, "/") {
+				rep.counts.failing++
+				failed = append(failed, k)
+			}
+		case "skip":
+			if !strings.Contains(ev.Test, "/") {
+				rep.counts.skipped++
+			}
 		}
 	}
+
+	if len(failed) == 0 {
+		return rep, nil
+	}
+
+	// Build the failure record for the first failing test.
+	first := failed[0]
+	tests, _ := specparser.WalkTests(root)
+	annotated := indexTests(tests)
+
+	rep.firstFailing = &failedTest{
+		name: first.test,
+		pkg:  first.pkg,
+	}
+	if t, ok := annotated[first.test]; ok {
+		rep.firstFailing.file = relativePath(root, t.File)
+		rep.firstFailing.line = t.Line
+		rep.firstFailing.citation = t.Citation.SectionID
+		_, rep.firstFailing.note = specparser.SplitNote(t.Citation.Note)
+		if rep.firstFailing.note == "" {
+			rep.firstFailing.note = t.Citation.Note
+		}
+		rep.firstFailing.phase = t.Phase
+	}
+	rep.firstFailing.summary = extractFailureSummary(output[first])
 	return rep, nil
 }
 
-// parseFailing pulls the test name out of a `go test -json` fail event. The
-// richer attribution (file, line, citation) lands when speccov can index the
-// suite; for Stage 1, name + a placeholder summary is enough.
-func parseFailing(line string) *failedTest {
-	name := jsonStringField(line, "Test")
-	pkg := jsonStringField(line, "Package")
-	if name == "" {
-		return nil
+// indexTests indexes the parsed tests by name. When two tests share a
+// name (very rare; would have to live in different packages), the first
+// one wins.
+func indexTests(tests []specparser.Test) map[string]specparser.Test {
+	out := make(map[string]specparser.Test, len(tests))
+	for _, t := range tests {
+		if _, ok := out[t.Name]; ok {
+			continue
+		}
+		out[t.Name] = t
 	}
-	return &failedTest{
-		name:    name,
-		file:    pkg,
-		summary: "see `go test ./...` output for details",
-	}
+	return out
 }
 
-// jsonStringField extracts a string field from a single-line JSON object.
-// Adequate for the well-formed output of `go test -json`.
-func jsonStringField(line, field string) string {
-	key := `"` + field + `":"`
-	i := strings.Index(line, key)
-	if i < 0 {
-		return ""
+// extractFailureSummary distills the buffered output for a failing test
+// into the assertion message and the surrounding context lines.
+//
+// `go test` output for a failure looks like:
+//
+//	=== RUN   TestFoo
+//	    foo_test.go:42: got 7, want 8
+//	    foo_test.go:43:   diff:
+//	    foo_test.go:44:     -7
+//	    foo_test.go:44:     +8
+//	--- FAIL: TestFoo (0.00s)
+//
+// We keep the assertion lines (those matching failureLineRegex) and
+// strip the boilerplate. If no assertion lines are present, fall back
+// to the entire output stripped of `=== RUN` / `--- FAIL` framing.
+func extractFailureSummary(lines []string) string {
+	keep := []string{}
+	for _, raw := range lines {
+		line := strings.TrimRight(raw, "\n")
+		if strings.HasPrefix(strings.TrimSpace(line), "=== RUN") {
+			continue
+		}
+		if strings.HasPrefix(strings.TrimSpace(line), "=== PAUSE") {
+			continue
+		}
+		if strings.HasPrefix(strings.TrimSpace(line), "=== CONT") {
+			continue
+		}
+		if strings.HasPrefix(strings.TrimSpace(line), "--- FAIL") {
+			continue
+		}
+		if strings.HasPrefix(strings.TrimSpace(line), "--- PASS") {
+			continue
+		}
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		keep = append(keep, strings.TrimRight(line, " \t"))
 	}
-	rest := line[i+len(key):]
-	end := strings.Index(rest, `"`)
-	if end < 0 {
-		return ""
+	if len(keep) > 12 {
+		keep = append(keep[:12], "  … (output truncated)")
 	}
-	return rest[:end]
+	return strings.Join(keep, "\n")
+}
+
+func relativePath(root, abs string) string {
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return abs
+	}
+	return rel
 }
