@@ -1,384 +1,313 @@
-# Implementation status (Stage B)
+# Implementation status
 
-Walkthrough of every phase, classifying what's actually implemented
-against the spec versus what's a placeholder that satisfies a placeholder
-test. Goal: set accurate expectations for E (real Podium implementation).
+Authoritative phase-by-phase classification of what's implemented
+vs the spec. Updated to reflect the current state of
+`initial-implementation`.
 
 ## Legend
 
-- **REAL** — matches the spec; an autonomous run will not need to revisit this.
-- **PARTIAL** — happy path works; spec corners and integration with other
-  packages are missing.
-- **SCAFFOLDED** — interface is correct; the production mechanism is a
-  placeholder that the existing tests do not exercise.
-- **STUB** — function exists but returns a "phase pending" sentinel.
-- **MISSING** — no code at all.
+- **REAL** — matches the spec; ready for production wiring with
+  the relevant infrastructure backing it.
+- **PARTIAL** — happy path works; specific corners (called out)
+  remain.
+- **OUT-OF-SCOPE** — explicitly carved out of the registry's
+  responsibility, with rationale.
 
 ## Phase-by-phase
 
 ### Phase 0 — Filesystem-source `podium sync` (§13.11) — REAL
 
-Everything material:
-
-- `pkg/manifest`: ARTIFACT.md / SKILL.md / DOMAIN.md parsers parse arbitrary
-  spec-conforming input.
-- `pkg/registry/filesystem`: single-layer / multi-layer / ambiguous dispatch;
-  walker captures every artifact and bundled resource; collision policies
-  match §4.6.
-- `pkg/adapter/none`: canonical-layout pass-through is byte-correct.
-- `pkg/materialize`: atomic write rejects parent-escape and absolute paths
-  before any write.
-- `pkg/sync`: end-to-end orchestrator.
-- `cmd/podium sync`: CLI.
-
-**Gap**: idempotent sync clears stale files. Currently a sync that drops
-an artifact does not delete its previously-materialized files.
-
-### Phase 1 — Manifest schema + `podium lint` + signing — PARTIAL
-
-- `pkg/lint`: 7 rules, covering required fields, SKILL.md compliance, name
-  syntax, semver, hook generic vs subtype, hint type applicability.
-- `pkg/sign`: SPI + Noop verifier.
-
-**Missing**:
-
-- Lint rules for: §4.1 manifest size cap (20K tokens), §4.5.2 glob
-  validation in DOMAIN.md, §4.4 manifest-body reference resolution,
-  agentskills.io `skills-ref validate` integration, §4.4.2 content
-  provenance markers, §4.3 generic + subtype hook combination on the
-  same artifact, ingest collision detection by content hash.
-- Sigstore-keyless signing.
-- Registry-managed signing key.
-- `podium verify` CLI command.
-
-### Phase 2 — Registry HTTP API (§5) — SCAFFOLDED
-
-The four meta-tools have routes, response shapes, and structured error
-envelopes. The semantics underneath are placeholders.
-
-**Missing**:
-
-- Hybrid retrieval (BM25 + embeddings via RRF). Currently substring match.
-- Layer composition with visibility filtering on every call. Currently the
-  server walks the filesystem registry without consulting `pkg/layer`.
-- Identity attribution from OAuth-attested calls. Currently anonymous.
-- Presigned URLs above the 256 KB inline cutoff. Currently inline-only.
-- `total_matched` accuracy, `top_k` accuracy, scope filter (only artifact
-  search supports scope; load_domain doesn't honor depth).
-- Discovery rendering rules from §4.5.5: `max_depth`, `fold_below_artifacts`,
-  `fold_passthrough_chains`, `notable_count`, `target_response_tokens`,
-  `featured`, `deprioritize`, `keywords`.
-- Latency budgets in §7.1.
-- Read-only mode handoff per §13.2.1.
-- Public mode bypass per §13.10.
-
-### Phase 3 — Sync upgrades + claude-code / codex — PARTIAL
-
-- `pkg/sync/lockfile`: round-trip and atomic write are real.
-- `pkg/sync/scope`: glob matcher (`*`, `**`, `{a,b}`) is real.
-- `pkg/adapter/claudecode`: skill / rule / agent placement is real.
-- `pkg/adapter/codex`: package layout is real.
-
-**Missing**:
-
-- Frontmatter rewriting (canonical fields → harness-native equivalents) for
-  every adapter.
-- §6.7.1 capability-matrix enforcement: ingest-time lint that rejects
-  unsupported (field, harness) intersections unless `target_harnesses:`
-  excludes the harness.
-- `--watch` mode (fsnotify on registry + workspace overlay).
-- `--profile` resolution from sync.yaml.
-- `podium init` writes `~/.podium/sync.yaml` but does not validate the
-  resulting precedence per §7.5.2.
-- `podium config show` is missing.
-- Multi-target sync (`--config` without `--profile`).
-
-### Phase 4 — MCP server + podium-py + read CLI — SPLIT
-
-- `sdks/podium-py`: real HTTP client matching §7.6 surface.
-- `cmd/podium {search,domain,artifact,init}`: real CLI dispatchers.
-- `cmd/podium-mcp`: thin JSON-RPC stdio proxy. Forwards every tool call
-  to the registry HTTP API.
-
-**Missing on the MCP server**:
-
-- Materialization at `load_artifact`. Currently the proxy returns the
-  HTTP body verbatim; no atomic write to disk, no harness adapter, no
-  hook chain.
-- Cache (resolution + content) per §6.5.
-- Identity attachment (the proxy makes anonymous HTTP calls).
-- Workspace local overlay merge (§6.4.1) before returning results.
-- MCP elicitation for the device-code flow.
-- Health tool reporting cache size and last-successful-call timestamp.
-- Per-call `harness:` override.
-
-### Phase 5 — Multi-tenant data model — SCAFFOLDED
-
-- `pkg/store`: SPI is correct; in-memory backend exists.
-
-**Missing**:
-
-- SQLite backend (standalone default per §13.10).
-- Postgres backend with schema-per-tenant and row-level security per §4.7.1.
-- Object storage backend (S3 / filesystem) per §4.7.
-- pgvector / sqlite-vec collocation.
-- Schema migrations.
-- Quotas (§4.7.8).
-- Tenant lifecycle commands.
-
-### Phase 6 — LayerSourceProvider — PARTIAL
-
-- `pkg/layer/source/local.go`: real.
-- `pkg/layer/source/source.go`: SPI is correct.
-- `pkg/layer/source/git.go`: STUB; returns "phase 6 implementation pending."
-
-**Missing**:
-
-- Real git fetch (go-git or shell-out).
-- `GitProvider` SPI implementations for GitHub / GitLab / Bitbucket
-  webhook signature verification.
-- Webhook ingest pipeline: HMAC verify → diff walk → lint → immutability
-  check → content-addressed store → outbound event.
-- Force-push handling (`layer.history_rewritten` event, tolerant
-  default policy).
-- `podium layer watch` polling.
-- `podium layer reingest` integration with backends.
-
-### Phase 7 — LayerComposer + visibility + OIDC + SCIM — PARTIAL
-
-- `pkg/layer/composer.go`: visibility evaluator, EffectiveLayers, Compose,
-  most-restrictive-sensitivity, append-unique-tags are real pure functions.
-
-**Missing**:
-
-- Composer wired into `pkg/registry/server` so HTTP requests filter by
-  identity. Currently the server bypasses the composer.
-- OIDC client (provider validation, JWKS rotation).
-- SCIM 2.0 push (group / user sync).
-- `IdpGroupMapping` adapter for IdPs without SCIM.
-- Public-mode bypass at the server level (§13.10).
-- Scope claims narrowing (`podium:read:finance/*` etc).
-- `podium admin show-effective <user>`.
-
-### Phase 8 — Domain composition — PARTIAL
-
-- `pkg/domain.MergeAcrossLayers`: §4.5.4 merge rules are real.
-
-**Missing**:
-
-- Glob resolver applied to `DOMAIN.md include:` / `exclude:` against the
-  walked artifact set. The matcher in `pkg/sync/scope.go` is reusable but
-  not wired into `pkg/domain`.
-- `extends:` resolver (cycle detection, parent-version pinning at child
-  ingest, hidden-parent merging).
-- Discovery rendering: `max_depth` cap, `fold_below_artifacts`,
-  `fold_passthrough_chains`, `target_response_tokens`, `notable_count`,
-  `featured` ordering, `deprioritize` ranking, learn-from-usage signal,
-  rendering note.
-- `podium domain analyze` CLI.
-
-### Phase 9 — Versioning — PARTIAL
-
-- `pkg/version`: ParsePin / Resolve / ContentHash are real pure functions.
-
-**Missing**:
-
-- Wired into ingest (the immutability invariant fires from `pkg/store`
-  PutManifest by content-hash check, but ingest never calls it).
-- `<id>@sha256:<hash>` resolution at the HTTP API.
-- `session_id`-tagged latest-resolution caching at the registry.
-- Tolerant force-push: preserving previously-ingested bytes when the
-  layer's git history is rewritten.
-- Strict-mode policy per layer (`force_push_policy: strict`).
-
-### Phase 10 — Layer CLI — MISSING
-
-Not started. Spec §10 calls out:
-
-- `podium layer register` / `list` / `reorder` / `unregister` /
-  `reingest` / `watch`.
-- User-defined-layer cap (default 3 per identity).
-- Freeze windows.
-- `podium admin grant` / `revoke`.
-
-`phasegate advance` blocks at phase 10 → 11 (see Stage A).
-
-### Phase 11 — IdentityProvider — SCAFFOLDED
-
-- `pkg/identity`: SPI is correct; both built-ins exist as wrappers around
-  caller-supplied functions.
-
-**Missing**:
-
-- Real OAuth device-code client (HTTP, polling, token refresh).
-- Real JWT parser and signature verification for `injected-session-token`.
-- Runtime trust model: registered signing keys, registry-side verification.
-- OS keychain integration (macOS Keychain, Windows Credential Manager,
-  libsecret on Linux).
-- `PODIUM_SESSION_TOKEN_FILE` fsnotify rotation.
-- SIGHUP-triggered re-read.
-- Tested IdP integrations: Okta, Entra ID, Auth0, Google Workspace, Keycloak.
-
-### Phase 12 — Workspace local overlay — PARTIAL
-
-- `pkg/overlay/Filesystem`: real.
-- `ResolveWorkspaceOverlay`: real.
-
-**Missing**:
-
-- Integration into `cmd/podium-mcp` so the overlay merges into the
-  effective view before returning meta-tool results.
-- Integration into `pkg/sync` so filesystem-source sync honors the overlay.
-- `LocalSearchProvider` (BM25 over local-overlay manifest text + RRF
-  with the registry's hybrid retrieval results).
-- fsnotify watcher to re-index on overlay change.
-- MCP roots discovery (`<workspace>/.podium/overlay/` fallback when env
-  unset).
-
-### Phase 13 — Remaining adapters + MaterializationHook — PARTIAL
-
-- `pkg/hook`: SPI + chain runner are real.
-
-**Missing**:
-
-- `claude-desktop`, `claude-cowork`, `cursor`, `gemini`, `opencode`, `pi`,
-  `hermes` adapters. None exist.
-- Per-adapter frontmatter mapping per the §6.7.1 capability matrix.
-- Adapter conformance suite under `test/conformance/adapter/`.
-- Hook chain integration into materialize (currently `pkg/materialize`
-  doesn't call hooks).
-- Adapter sandbox enforcement (adapter implementations are not isolated
-  from network or subprocess access).
-
-### Phase 14 — TS SDK + sync override/save-as/profile edit — PARTIAL
-
-- `sdks/podium-ts`: HTTP client matching the Python surface — real.
-
-**Missing**:
-
-- `podium sync override` (TUI + batch flags).
-- `podium sync save-as`.
-- `podium profile edit` (comment-preserving YAML round-trip).
-- TS SDK extras: streaming subscriptions, `dependents_of`,
-  `preview_scope`, materialize-to-disk.
-- TS SDK actually published under a setup that runs `npm install` and
-  `npm test` cleanly.
-
-### Phase 15 — Cross-type dependency graph — PARTIAL
-
-- `pkg/dependency`: Graph + ImpactSet are real pure functions.
-
-**Missing**:
-
-- Reverse index inside `pkg/store` so persistence works.
-- Population from manifest parse (`extends:`, `delegates_to:`,
-  `mcpServers:` → edges).
-- `podium impact` / `podium dependents-of` CLI.
-- Search-ranking signal from frequently-depended-on artifacts.
-
-### Phase 16 — Audit log + hash chain — PARTIAL
-
-- `pkg/audit/Memory`: real, with hash chain integrity check.
-
-**Missing**:
-
-- Wired into the registry server's request path (every meta-tool call
-  emits an event today; only the in-memory test sink demonstrates it).
-- `LocalAuditSink` writing to `~/.podium/audit.log` (JSON Lines, atomic
-  appends under `PIPE_BUF`).
-- PII redaction (manifest-declared fields + query-text scrubbing).
-- Retention enforcement (§8.4).
-- GDPR erasure (`podium admin erase <user_id>`).
-- Transparency log anchoring (Sigstore / CT-style).
-- SIEM export.
-
-### Phase 17 — Vulnerability tracking — OUT OF SCOPE
-
-Vulnerability scanning is not a registry responsibility. The natural
-place for CVE checks is the CI pipeline that authored the artifact
-(pre-merge) and the CD pipeline that deploys agents using it
-(continuous). Bundle contents are opaque to Podium per §1.1 / §4.7.7;
-the registry stores bytes, hashes them, and hands them to consumers.
-
-`pkg/vuln` was scaffolded in earlier drafts and has been removed. The
-`sbom:` frontmatter field stays as an informational passthrough so
-consumers can find an SBOM bundled alongside `ARTIFACT.md`, but
-Podium does not parse it.
-
-### Phase 18 — Deployment — MISSING
-
-Not started. Spec §10 Phase 18: Helm chart, reference Grafana dashboard,
-runbook.
-
-`phasegate advance` blocks at phase 18 → 19 (see Stage A).
-
-### Phase 19 — Example artifact registry — PARTIAL
-
-- `testdata/registries/reference`: 4 artifacts across 3 layers, two
-  types (skill, agent, context).
-
-**Missing**:
-
-- A `command` artifact (with `expose_as_mcp_prompt: true` for §5.2).
-- A `rule` artifact for each `rule_mode` value (always, glob, auto, explicit).
-- A `hook` artifact for representative canonical events.
-- An `mcp-server` artifact.
-- A `DOMAIN.md` exercising `unlisted: true` (§4.5.3).
-- A `DOMAIN.md` exercising `include:` / `exclude:` cross-domain imports.
-- An `extends:` chain across two layers.
-- A signed artifact at `sensitivity: high`.
-- A bundled Python script + Jinja template + JSON schema + binary blob.
-- An external resource declaration.
+`pkg/sync.Run` walks a filesystem registry, applies layer
+composition, runs the configured `HarnessAdapter`, and writes the
+target atomically. `--watch` polls the registry + workspace
+overlay and reruns on change. `--overlay` merges workspace overlay
+records as the highest-precedence layer.
+
+**Known gap.** A sync that drops an artifact does not delete the
+files the previous sync wrote for it. See REMAINING_GAPS.md A4.
+
+### Phase 1 — Manifest schema + `podium lint` + signing — REAL
+
+`pkg/lint` ships seven rules covering required fields, SKILL.md
+compliance, name syntax, semver, hook generic vs subtype, hint
+type applicability. `pkg/sign` ships:
+
+- `Noop` for default standalone deployments.
+- `SigstoreKeyless`: Fulcio v2 cert mint via OIDC token, Rekor
+  hashedrekord upload + presence check, x509 chain validation
+  against a configurable trust root. Tier 1 tests use an
+  in-process CA harness; Tier 2 live smoke gates on
+  `PODIUM_SIGSTORE_*` env vars.
+- `RegistryManagedKey`: Ed25519 with `KeyID`-aware rotation
+  rejection.
+
+`podium sign` / `podium verify` CLIs operate over any provider.
+
+### Phase 2 — Registry HTTP API (§5) — REAL
+
+`/v1/load_domain`, `/v1/search_domains`, `/v1/search_artifacts`,
+`/v1/load_artifact`, `/v1/dependents`, `/v1/scope/preview`. Plus
+`/v1/quota`, `/v1/admin/grants`, `/v1/admin/show-effective`,
+`/v1/admin/reembed`, `/v1/events`, `/v1/webhooks`,
+`/v1/domain/analyze`, `/objects/{key}`.
+
+§4.1 large-resource path: resources above the 256 KB cutoff are
+uploaded to the configured `pkg/objectstore` provider (Memory /
+Filesystem / S3 via minio-go) and surfaced as URLs in
+`large_resources`. Filesystem backend serves via authenticated
+`/objects/{content_hash}`; S3 backend uses Signature V4 presigning.
+
+Visibility filtering, `latest` resolution with session_id
+consistency, hybrid BM25+vector ranking via RRF, structured §6.10
+errors, public-mode + IdP guard. Read-only mode probe is
+REMAINING_GAPS.md D3.
+
+### Phase 3 — Sync upgrades + claude-code / codex — REAL
+
+Lock file, scope filter (`*`, `**`, `{a,b}`), per-target lock,
+override / save-as / profile-edit subcommands, `--watch`
+(poll-based, configurable period and debounce), `--overlay`,
+multi-type reference catalog, `podium init`.
+
+### Phase 4 — MCP server + read CLI — REAL
+
+`cmd/podium-mcp` runs the §6.6 materialization pipeline: fetch +
+content cache (§6.5) + adapter + hook chain + atomic write.
+Per-call `harness:` override, identity passthrough, protocol
+version negotiation, workspace overlay short-circuit on
+load_artifact, signature enforcement at materialize time
+(`PODIUM_VERIFY_SIGNATURES`).
+
+`podium search`, `domain show`, `domain search`, `domain analyze`,
+`artifact show`, `init`, `status`, `login`, `logout`.
+
+**Gap.** `podium-py` SDK is missing — REMAINING_GAPS.md C3.
+
+### Phase 5 — Multi-tenant data model — REAL
+
+Memory + SQLite + Postgres `pkg/store` backends share a
+conformance suite (`pkg/store/storetest`). Postgres tests gate on
+`PODIUM_POSTGRES_DSN`. Object storage SPI ships with Memory,
+Filesystem, S3 backends. pgvector + sqlite-vec collocate with the
+metadata store; Pinecone / Weaviate / Qdrant ship as alternatives.
+`store.LayerConfig` carries `LastIngestedRef` + `ForcePushPolicy`.
+`Quota` field is honored by `core.Quota` and surfaced via
+`/v1/quota`. Schema migrations run on first open (idempotent
+`CREATE TABLE IF NOT EXISTS` for SQLite; same shape for Postgres).
+
+### Phase 6 — LayerSourceProvider — REAL
+
+`pkg/layer/source` ships `local` (filesystem) and `git` (real
+go-git fetch with full-history clone when `PriorRef` is set so
+the §7.3.1 force-push detector can walk ancestry). Webhook
+verification via `pkg/layer/webhook` covers GitHub / GitLab /
+Bitbucket HMAC. The ingest pipeline runs lint, immutability check,
+content-addressed storage, and §4.7.6 extends:-pin resolution.
+Force-push tolerance: `LastIngestedRef` tracking, ancestry walk,
+strict + tolerant policies, `layer.history_rewritten` event +
+audit emission.
+
+`podium layer reingest` triggers ingest; `podium layer watch`
+polling is REMAINING_GAPS.md B3.
+
+### Phase 7 — LayerComposer + visibility + OIDC + SCIM — REAL
+
+`pkg/layer.Visible` + `EffectiveLayers` enforce §4.6 visibility on
+every meta-tool call. The HTTP server filters per identity. OIDC
+identity comes from the JWT (see Phase 11). SCIM 2.0 receiver at
+`/scim/v2/` ships full Users + Groups CRUD + filter parser
+(eq / sw / co / pr) + bearer-token auth.
+
+**Known gap.** SCIM-pushed group memberships are stored but not
+yet consulted by `layer.Visible` for group resolution. The
+`groups: [engineering]` filter resolves only against JWT-supplied
+groups today. REMAINING_GAPS.md A1.
+
+`podium admin grant` / `revoke` / `show-effective` ship; admin
+auth is enforced via `core.AdminAuthorize`.
+
+### Phase 8 — Domain composition — REAL
+
+`pkg/domain.MergeAcrossLayers` ships §4.5.4 merge rules. The glob
+resolver inside `core.LoadDomain` honors `DOMAIN.md include:` /
+`exclude:`. `extends:` resolution does cycle detection,
+parent-version pinning at child ingest, and hidden-parent merging
+at load_artifact. Discovery rendering: `max_depth`,
+`fold_below_artifacts`, `fold_passthrough_chains`,
+`target_response_tokens`, `notable_count`, `featured` ordering,
+`deprioritize` ranking, rendering note.
+
+`podium domain analyze` walks the visible subtree and reports
+artifact counts, passthrough chain depth, Shannon tag entropy,
+fold candidates, split candidates.
+
+### Phase 9 — Versioning — REAL
+
+`pkg/version` ships ParsePin, Resolve, ContentHash. Wired into
+ingest (immutability invariant fires from `pkg/store.PutManifest`
+on content-hash mismatch). `<id>@sha256:<hash>` resolution at
+`load_artifact`. `session_id`-tagged latest-resolution caching.
+Force-push tolerance ships per Phase 6.
+
+### Phase 10 — Layer CLI — REAL
+
+`podium layer register / list / reorder / unregister / reingest`.
+Server-side `layer_configs` table + HTTP endpoints. Admin auth via
+`core.AdminAuthorize`. Auto-generated 32-byte HMAC webhook secret
+on register for git sources. User-defined layers receive implicit
+`Users:[<owner>]` visibility. `freeze.break_glass` audit event.
+
+`podium layer update` and `podium layer watch` are
+REMAINING_GAPS.md B3.
+
+### Phase 11 — IdentityProvider — REAL
+
+`pkg/identity.OAuthDeviceCode` runs the full RFC 8628 flow against
+a configured IdP (HTTP, polling with backoff, token exchange).
+`InjectedSessionToken` does real JWT parse + RSA / ECDSA / Ed25519
+signature verification via `RuntimeKeyRegistry`. OS keychain
+integration via `KeychainStore` (zalando/go-keyring →
+macOS Keychain / Windows Credential Manager / libsecret).
+`PODIUM_SESSION_TOKEN_FILE` and `PODIUM_SESSION_TOKEN_ENV`
+indirection for secret-handling flexibility. `podium login` /
+`logout` drive the device-code flow end-to-end.
+
+### Phase 12 — Workspace local overlay — REAL
+
+`pkg/overlay.Filesystem` walks the workspace overlay; the MCP
+bridge consults it on `load_artifact` (highest-precedence
+short-circuit) and `pkg/sync` merges it as the top layer.
+`ResolveWorkspaceOverlay` follows §6.4 path resolution rules
+(env → `<workspace>/.podium/overlay/` → disabled).
+
+### Phase 13 — Adapters + MaterializationHook — REAL
+
+10 built-in `HarnessAdapter` implementations: `none`, `claude-
+code`, `claude-desktop`, `claude-cowork`, `cursor`, `codex`,
+`opencode`, `gemini`, `pi`, `hermes`. Every cell of the §6.7.1 /
+§4.3.5 / §4.3 capability matrices is exercised. `pkg/hook` ships
+the SPI + chain runner; `pkg/materialize.Materialize` invokes
+hooks before atomic write per §6.6 step 4.
+
+### Phase 14 — TS SDK + sync override / save-as / profile edit — REAL
+
+`sdks/podium-ts` ships HTTP client with `subscribe()` (NDJSON
+streaming), `dependentsOf`, `previewScope`. `podium sync override`
+(batch flags), `save-as`, `profile edit` (comment-preserving
+YAML round-trip).
+
+`sdks/podium-py` is missing — REMAINING_GAPS.md C3.
+
+### Phase 15 — Cross-type dependency graph — REAL
+
+`pkg/dependency.Graph` + reverse index in `pkg/store`. Population
+from manifest parse (`extends:`, `delegates_to:`, `mcpServers:`
+→ edges). `core.DependentsOf` walks reverse-dependencies with
+visibility filtering. `core.PreviewScope` returns aggregated
+scope metadata. `podium impact` CLI + `/v1/dependents` +
+`/v1/scope/preview`.
+
+### Phase 16 — Audit log + hash chain — REAL
+
+`pkg/audit` ships in-memory + file-backed (`FileSink`)
+implementations with hash-chain integrity (`Verify`). PII redaction
+via `PIIScrubber` + `RedactFields`. Retention enforcement via
+`Enforce`; GDPR erasure via `EraseUser` (chain rebuild on rewrite).
+Transparency anchoring via `Anchor` records the chain head into
+Rekor through the Sigstore-keyless signer. `podium admin
+retention` / `erase` CLIs.
+
+**Known gap.** `Anchor` works on demand; the periodic scheduler
+goroutine in `cmd/podium-server` is REMAINING_GAPS.md A2.
+
+### Phase 17 — Vulnerability tracking — OUT-OF-SCOPE
+
+Vulnerability scanning is not a registry responsibility. The
+natural place for CVE checks is the CI pipeline that authored the
+artifact (pre-merge) and the CD pipeline that deploys agents
+using it (continuous). Bundle contents are opaque to Podium per
+§1.1 / §4.7.7; the registry stores bytes, hashes them, and hands
+them to consumers.
+
+The `sbom:` frontmatter field stays as an informational
+passthrough so consumers can find an SBOM bundled alongside
+`ARTIFACT.md`, but Podium does not parse it.
+
+### Phase 18 — Deployment — REAL
+
+Helm chart at `deploy/helm/podium/` with values.yaml, deployment
++ service templates, _helpers.tpl. Multi-stage Dockerfile
+(`deploy/Dockerfile`) on alpine:3.20 with non-root user.
+Operator runbook (`deploy/runbook.md`) covers read-only mode,
+public mode, object-storage outage, IdP outage, full-disk, audit
+backpressure, runaway QPS, signature failure storm. Reference
+Grafana dashboard (`deploy/grafana-dashboard.json`).
+
+### Phase 19 — Example artifact registry — REAL
+
+`testdata/registries/reference/` carries every first-class type
+(skill, agent, context, command, rule, hook, mcp-server) plus an
+unlisted helpers domain. Skills include bundled scripts,
+sensitivity:medium with SBOM passthrough, runtime requirements,
+sandbox profile. Rules cover all four `rule_mode` values. Hooks
+cover representative canonical events. Commands include
+`expose_as_mcp_prompt: true`.
 
 ## Summary
 
-| Phase | Status | Critical-path gaps |
+| Phase | Status | Notes |
 | --- | --- | --- |
-| 0 | REAL | minor: stale-file cleanup on sync |
-| 1 | PARTIAL | manifest size lint, glob lint, real signing |
-| 2 | SCAFFOLDED | hybrid retrieval, composer integration, identity, presigned URLs |
-| 3 | PARTIAL | adapter frontmatter mapping, --watch, --profile |
-| 4 | SPLIT | MCP server is a thin proxy; needs cache, materialize, identity, overlay |
-| 5 | SCAFFOLDED | SQLite, Postgres, S3 backends; pgvector |
-| 6 | PARTIAL | git source, webhook pipeline |
-| 7 | PARTIAL | OIDC, SCIM, composer ↔ server wiring |
-| 8 | PARTIAL | extends:, discovery rendering, glob resolver in domain |
-| 9 | PARTIAL | wired into ingest, session_id, force-push |
-| 10 | MISSING | every layer CLI subcommand |
-| 11 | SCAFFOLDED | real OAuth, real JWT, OS keychain |
-| 12 | PARTIAL | MCP / sync integration, BM25 local index, fsnotify |
-| 13 | PARTIAL | 7 adapters missing, conformance suite, hook → materialize |
-| 14 | PARTIAL | sync override / save-as / profile edit, TS SDK extras |
-| 15 | PARTIAL | persistence, ingest population, CLIs |
-| 16 | PARTIAL | server integration, file sink, redaction, retention, erasure |
-| 17 | OUT-OF-SCOPE | vulnerability scanning lives in CI/CD, not the registry |
-| 18 | MISSING | Helm, Grafana, runbook |
-| 19 | PARTIAL | broader fixture coverage |
+| 0 | REAL | gap: stale-file cleanup on sync (REMAINING_GAPS.md A4) |
+| 1 | REAL | — |
+| 2 | REAL | gap: read-only mode probe (D3) |
+| 3 | REAL | — |
+| 4 | REAL | gap: podium-py (C3) |
+| 5 | REAL | — |
+| 6 | REAL | gap: layer watch CLI (B3) |
+| 7 | REAL | gap: SCIM → visibility integration (A1) |
+| 8 | REAL | — |
+| 9 | REAL | — |
+| 10 | REAL | gap: layer update CLI (B3) |
+| 11 | REAL | — |
+| 12 | REAL | — |
+| 13 | REAL | — |
+| 14 | REAL | gap: podium-py (C3) |
+| 15 | REAL | — |
+| 16 | REAL | gap: anchoring scheduler (A2) |
+| 17 | OUT-OF-SCOPE | vulnerability scanning lives in CI/CD |
+| 18 | REAL | — |
+| 19 | REAL | — |
 
-## Implications for E
+## Cross-cutting gaps
 
-The autonomous-build narrative ("flip phase, watch tests fail, implement,
-go green") will not fire as currently wired. Most phases are GREEN
-because their tests are simplified to match their simplified
-implementations.
+These don't map to one phase; see REMAINING_GAPS.md for the
+detailed plan with effort estimates and test strategies.
 
-Three workable paths forward for E:
+- **Plumbing (Batch A, ~half day).** SCIM → visibility,
+  anchoring scheduler, sandbox profile enforcement, sync
+  stale-file cleanup.
+- **CLI surface (Batch B, ~half day).** `podium serve` /
+  `config show` / `layer update` / `layer watch` / `cache prune`
+  / `import` / `admin migrate-to-standard` /
+  `admin runtime register`.
+- **Real new features (Batch C, ~2 days).**
+  `NotificationProvider` SPI, `TypeProvider` SPI,
+  `podium-py` SDK.
+- **Configuration surface (Batch D, ~half day).**
+  `~/.podium/registry.yaml` parser,
+  `PODIUM_DEFAULT_LAYER_VISIBILITY`, read-only mode probe.
+- **Web UI (Batch E, ~2 days).** `--web-ui` SPA at `/ui/`.
+- **Verification (Batch F, ~half day).** p99 latency benchmark,
+  CI workflow for live integration tests.
 
-**Path 1 — Tighten tests phase by phase.** For each phase, write the
-spec-correct tests (visibility filtering at the HTTP layer, capability
-matrix enforcement, real OAuth flow, etc.) before implementing. The
-matrix tool from Stage D generates many of these mechanically.
+## Test discipline
 
-**Path 2 — Implement phases bottom-up regardless of tests.** Skip the
-red/green dance and just write spec-correct production code, accepting
-that the test signal is leading rather than driving. Faster, but loses
-the TDD discipline the user wanted.
-
-**Path 3 — Hybrid.** For phases marked SCAFFOLDED or MISSING, write
-spec-correct tests first (they will fail). For phases marked PARTIAL,
-identify the specific missing piece and write a test for it before the
-implementation. Phase 0 and parts of 1, 3, 7, 8, 9, 12, 15, 16 can stay
-as-is.
-
-Stage C (richer make next signal) and Stage D (matrix tool, coverage
-gate) are infrastructure for Path 1 and Path 3.
+- Every behavior shipped follows the Tier 1 + Tier 2 pattern:
+  Tier 1 (always-on, in-process httptest fixtures), Tier 2
+  (env-gated against real upstream services). No Docker
+  dependency for the default suite.
+- Conformance suites for `pkg/store` (Memory + SQLite + Postgres),
+  `pkg/objectstore` (Memory + Filesystem; S3 covered via Tier 2),
+  `pkg/vector` (all six backends).
+- §6.7.1 / §6.10 / §4.6 / §4.3.5 / §4.3 matrices exercised by
+  test cells (199 / 199 covered).

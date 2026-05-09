@@ -5,12 +5,15 @@ Tracks the state of the Podium implementation on the
 
 ## Summary
 
-- **39 commits** on `initial-implementation` since branching from `main`.
-- **All tests pass** at the active phase (1) and at every higher phase.
+- **All §10 build phases REAL or out-of-scope** (Phase 17 is
+  intentionally out of registry scope per §1.1 / §4.7.7).
+- **31 packages green** at `PODIUM_PHASE=19` across the full suite.
 - **Matrix coverage: 199 / 199 cells.** Every documented spec matrix
   is fully exercised.
-- **Spec section coverage**: ~50 of 138 sections cited.
-- **Line coverage**: 57.4%.
+- **Spec section coverage**: ~80 of 138 sections cited.
+- **Test layout**: Tier 1 (always-on, in-process httptest fixtures)
+  + Tier 2 (env-gated against real Sigstore / Postgres / S3 /
+  embedding providers); no Docker dependency for the default suite.
 
 ## Phase-by-phase status
 
@@ -51,27 +54,83 @@ Tracks the state of the Podium implementation on the
 
 ## What remains
 
-_All items shipped. The implementation matches the §10 build sequence end-to-end._
+The §10 phase table is end-to-end REAL, but a handful of
+non-phase-aligned gaps remain. See `REMAINING_GAPS.md` for the
+detailed plan with effort estimates and test strategies. The list
+below is the punch summary.
 
-§4.7 hybrid retrieval ships with four embedding providers
-(`openai`, `voyage`, `cohere`, `ollama`) and six vector backends
-(`memory`, `pgvector`, `sqlite-vec`, `pinecone`, `weaviate-cloud`,
-`qdrant-cloud`). RRF fusion blends BM25 ranks with vector cosine
-ranks; `SearchResult.Degraded` surfaces BM25-only fallback when
-vector search isn't configured or the embedder is unreachable.
-Ingest-time embedding is content-hash-gated (no re-embed on
-idempotent re-ingest) and atomic per row in the vector store.
-`podium admin reembed` covers manual backfill and provider
-switches.
+**Plumbing** (small wiring on existing components — Batch A):
+- SCIM → visibility integration (`layer.Visible` does not yet
+  consult `scim.Store.MembersOf` when expanding `groups:` filters).
+- Transparency anchoring scheduler (`audit.Anchor` works on
+  demand; `cmd/podium-server` doesn't run it on a cadence).
+- Sandbox profile enforcement (`PODIUM_ENFORCE_SANDBOX_PROFILE`
+  is documented but not gated).
+- Idempotent sync stale-file cleanup (a sync that drops an
+  artifact does not delete its previously-materialized files).
+
+**CLI surface** (operator commands the spec promises — Batch B):
+- `podium serve` (alias / in-process for `podium-server`).
+- `podium config show`.
+- `podium layer update` / `layer watch`.
+- `podium cache prune`, `podium import`.
+- `podium admin migrate-to-standard` / `runtime register`.
+
+**Real new features** (Batch C):
+- `NotificationProvider` SPI (§9): ingest-failure /
+  operational-notification delivery, distinct from the §7.3.2
+  outbound webhook event stream.
+- `TypeProvider` SPI (§9): the seven first-class types are
+  hardcoded; no plugin point for a custom type.
+- `podium-py` SDK (§10 Phase 4): only `podium-ts` exists today.
+
+**Configuration surface** (Batch D):
+- `~/.podium/registry.yaml` server-config parser.
+- `PODIUM_DEFAULT_LAYER_VISIBILITY`.
+- `PODIUM_READONLY_PROBE_FAILURES` / `_INTERVAL` (probe-and-flip
+  when Postgres becomes unreachable).
+
+**Verification** (Batch F):
+- p99 latency benchmark suite for §7.1 budgets.
+- CI workflow that runs the env-gated Tier 2 integration tests
+  against real Postgres / S3 / Sigstage / embedding providers.
+
+**Larger** (Batch E):
+- Web UI (`--web-ui` / `PODIUM_WEB_UI=true`, §13.10) — SPA at
+  `/ui/`. Not started.
+
+**Intentionally out of scope:**
+- Phase 17 vulnerability scanning (§1.1, §4.7.7) — CI/CD's job.
+- Embedded ONNX — Ollama-against-local-model is the offline path.
+- SCIM PATCH and Bulk endpoints — IdPs use full PUT.
 
 ## What this branch leaves you with
 
-- A spec-correct registry server, MCP bridge, sync CLI, and SDKs
-  that interoperate end-to-end.
+- A spec-correct registry server, MCP bridge, sync CLI, and TS
+  SDK that interoperate end-to-end.
+- All §10 phases REAL except 17 (out of scope by design).
+- §4.1 large-resource path with object-store SPI + filesystem and
+  S3 backends.
+- §4.7 hybrid retrieval with four embedding providers (openai,
+  voyage, cohere, ollama) and six vector backends (memory,
+  pgvector, sqlite-vec, pinecone, weaviate-cloud, qdrant-cloud).
+- §4.7.9 signing end-to-end: ingest signs, manifest stores the
+  envelope, `load_artifact` returns it, MCP enforces the §6.2
+  policy at materialize time.
+- §6.3 OAuth Device Code flow, OS keychain integration, real
+  injected-session-token JWT verification.
+- §6.3.1 SCIM 2.0 receiver (CRUD + bearer auth + filter parser).
+- §6.6 materialization pipeline with HarnessAdapter chain
+  (10 adapters) + MaterializationHook chain.
+- §7.3.2 outbound webhook delivery with HMAC, retry, auto-disable.
+- §7.6 `/v1/events` NDJSON streaming + ingest publishing through
+  the bus.
+- §8 audit log: hash-chained file sink, retention enforcement,
+  GDPR erasure, transparency anchoring (Sigstore-keyless).
+- §13 deployment: Docker image, Helm chart, runbook, Grafana
+  dashboard.
 - 199/199 documented spec matrices covered by tests.
-- Deployment-ready Docker image + Helm chart + runbook + dashboard.
-- Reference test fixture exercising every first-class artifact type.
-- A clear roadmap above for the remaining infrastructure wiring.
+- A clear punch list (`REMAINING_GAPS.md`) for the remaining work.
 
 ## Notes on test discipline
 
