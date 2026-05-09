@@ -16,6 +16,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -23,8 +24,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
@@ -103,6 +106,8 @@ func syncCmd(args []string) int {
 	harness := fs.String("harness", "none", "harness adapter")
 	dryRun := fs.Bool("dry-run", false, "resolve and report; write nothing")
 	asJSON := fs.Bool("json", false, "emit a structured JSON envelope on stdout")
+	watch := fs.Bool("watch", false, "rerun sync whenever the registry changes (§7.5)")
+	overlay := fs.String("overlay", "", "workspace overlay path watched alongside the registry")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -117,12 +122,16 @@ func syncCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: cannot resolve target: %v\n", err)
 		return 2
 	}
-	res, err := sync.Run(sync.Options{
+	syncOpts := sync.Options{
 		RegistryPath: *registry,
 		Target:       abs,
 		AdapterID:    *harness,
 		DryRun:       *dryRun,
-	})
+	}
+	if *watch {
+		return runWatchLoop(syncOpts, *overlay, *asJSON)
+	}
+	res, err := sync.Run(syncOpts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "sync failed: %v\n", err)
 		return 1
@@ -131,6 +140,39 @@ func syncCmd(args []string) int {
 		printJSON(res)
 	} else {
 		printHuman(res, *dryRun)
+	}
+	return 0
+}
+
+// runWatchLoop drives sync.Watch until the user interrupts (SIGINT
+// / SIGTERM). Each WatchEvent is printed in the same shape as a
+// one-shot sync run so existing tooling can consume the stream.
+func runWatchLoop(opts sync.Options, overlay string, asJSON bool) int {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	events, err := sync.Watch(ctx, sync.WatchOptions{
+		Sync:        opts,
+		OverlayPath: overlay,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "watch failed: %v\n", err)
+		return 1
+	}
+	failures := 0
+	for ev := range events {
+		if ev.Err != nil {
+			fmt.Fprintf(os.Stderr, "sync failed: %v\n", ev.Err)
+			failures++
+			continue
+		}
+		if asJSON {
+			printJSON(ev.Result)
+		} else {
+			printHuman(ev.Result, opts.DryRun)
+		}
+	}
+	if failures > 0 {
+		return 1
 	}
 	return 0
 }
