@@ -100,7 +100,17 @@ type LayerConfig struct {
 	Groups        []string
 	Users         []string
 	WebhookSecret string // HMAC secret for git source webhook (§7.3.1)
-	CreatedAt     time.Time
+	// LastIngestedRef records the source-specific reference (commit
+	// SHA for git) of the most recent successful ingest. The ingest
+	// pipeline reads it before snapshotting so the source provider can
+	// detect history rewrites (§7.3.1 force-push tolerance).
+	LastIngestedRef string
+	// ForcePushPolicy governs what happens when a force-push is
+	// detected for a git source. The empty string and "tolerant" both
+	// proceed and emit a layer.history_rewritten audit event;
+	// "strict" rejects the ingest with ingest.history_rewritten.
+	ForcePushPolicy string
+	CreatedAt       time.Time
 }
 
 // Store is the SPI implementations satisfy. Methods take a

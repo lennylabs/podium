@@ -92,6 +92,27 @@ func (s *SQLite) applySchema() error {
 			granted_at TEXT NOT NULL,
 			PRIMARY KEY (user_id, org_id)
 		)`,
+		`CREATE TABLE IF NOT EXISTS layer_configs (
+			tenant_id TEXT NOT NULL,
+			id TEXT NOT NULL,
+			source_type TEXT NOT NULL,
+			repo TEXT NOT NULL DEFAULT '',
+			ref TEXT NOT NULL DEFAULT '',
+			root TEXT NOT NULL DEFAULT '',
+			local_path TEXT NOT NULL DEFAULT '',
+			ord INTEGER NOT NULL DEFAULT 0,
+			user_defined INTEGER NOT NULL DEFAULT 0,
+			owner TEXT NOT NULL DEFAULT '',
+			public INTEGER NOT NULL DEFAULT 0,
+			organization INTEGER NOT NULL DEFAULT 0,
+			groups TEXT NOT NULL DEFAULT '',
+			users TEXT NOT NULL DEFAULT '',
+			webhook_secret TEXT NOT NULL DEFAULT '',
+			last_ingested_ref TEXT NOT NULL DEFAULT '',
+			force_push_policy TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			PRIMARY KEY (tenant_id, id)
+		)`,
 	}
 	for _, sql := range stmts {
 		if _, err := s.db.Exec(sql); err != nil {
@@ -294,13 +315,14 @@ func (s *SQLite) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 		INSERT OR REPLACE INTO layer_configs
 			(tenant_id, id, source_type, repo, ref, root, local_path, ord,
 			 user_defined, owner, public, organization, groups, users,
-			 webhook_secret, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 webhook_secret, last_ingested_ref, force_push_policy, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		cfg.TenantID, cfg.ID, cfg.SourceType, cfg.Repo, cfg.Ref, cfg.Root, cfg.LocalPath,
 		cfg.Order, boolToInt(cfg.UserDefined), cfg.Owner,
 		boolToInt(cfg.Public), boolToInt(cfg.Organization),
 		strings.Join(cfg.Groups, "\n"), strings.Join(cfg.Users, "\n"),
-		cfg.WebhookSecret, createdAt.UTC().Format(time.RFC3339Nano))
+		cfg.WebhookSecret, cfg.LastIngestedRef, cfg.ForcePushPolicy,
+		createdAt.UTC().Format(time.RFC3339Nano))
 	return err
 }
 
@@ -309,7 +331,7 @@ func (s *SQLite) GetLayerConfig(ctx context.Context, tenantID, id string) (Layer
 	row := s.db.QueryRowContext(ctx, `
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
-		       webhook_secret, created_at
+		       webhook_secret, last_ingested_ref, force_push_policy, created_at
 		FROM layer_configs
 		WHERE tenant_id = ? AND id = ?`, tenantID, id)
 	cfg, err := scanLayerConfig(row)
@@ -324,7 +346,7 @@ func (s *SQLite) ListLayerConfigs(ctx context.Context, tenantID string) ([]Layer
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
-		       webhook_secret, created_at
+		       webhook_secret, last_ingested_ref, force_push_policy, created_at
 		FROM layer_configs WHERE tenant_id = ?
 		ORDER BY ord ASC, id ASC`, tenantID)
 	if err != nil {
@@ -359,7 +381,8 @@ func scanLayerConfig(scanner rowScanner) (LayerConfig, error) {
 		&cfg.Repo, &cfg.Ref, &cfg.Root, &cfg.LocalPath,
 		&cfg.Order, &userDefined, &cfg.Owner,
 		&public, &org, &groups, &users,
-		&cfg.WebhookSecret, &createdAt)
+		&cfg.WebhookSecret, &cfg.LastIngestedRef, &cfg.ForcePushPolicy,
+		&createdAt)
 	if err != nil {
 		return LayerConfig{}, err
 	}

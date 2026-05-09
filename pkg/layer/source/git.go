@@ -31,6 +31,11 @@ func (Git) Trigger() TriggerModel { return TriggerWebhook }
 // Snapshot fetches the repo and returns the tree at cfg.Ref. The clone
 // runs against an in-memory storer so callers do not pay disk overhead
 // for source-of-truth ingest snapshots.
+//
+// When cfg.PriorRef is set, the clone keeps full history so the
+// provider can answer the §7.3.1 force-push question: does the new
+// ref include PriorRef in its ancestry? When PriorRef is empty, the
+// clone is shallow.
 func (Git) Snapshot(ctx context.Context, cfg LayerConfig) (*Snapshot, error) {
 	if cfg.Repo == "" {
 		return nil, fmt.Errorf("%w: git source requires repo", ErrInvalidConfig)
@@ -40,12 +45,15 @@ func (Git) Snapshot(ctx context.Context, cfg LayerConfig) (*Snapshot, error) {
 	}
 
 	storer := memory.NewStorage()
-	repo, err := git.CloneContext(ctx, storer, nil, &git.CloneOptions{
+	cloneOpts := &git.CloneOptions{
 		URL:           cfg.Repo,
 		ReferenceName: refNameFor(cfg.Ref),
 		SingleBranch:  true,
-		Depth:         1,
-	})
+	}
+	if cfg.PriorRef == "" {
+		cloneOpts.Depth = 1
+	}
+	repo, err := git.CloneContext(ctx, storer, nil, cloneOpts)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrSourceUnreachable, err)
 	}
@@ -68,11 +76,59 @@ func (Git) Snapshot(ctx context.Context, cfg LayerConfig) (*Snapshot, error) {
 			return nil, fmt.Errorf("%w: subtree %q: %v", ErrSourceUnreachable, cfg.Root, err)
 		}
 	}
+
+	rewritten := false
+	if cfg.PriorRef != "" {
+		priorHash := plumbing.NewHash(cfg.PriorRef)
+		// A zero hash on PriorRef means "first ingest" — never a
+		// rewrite. Otherwise, walk the new ref's ancestry; if we hit
+		// the prior commit, it's still reachable (no rewrite).
+		if priorHash != plumbing.ZeroHash {
+			rewritten = !isAncestor(repo, priorHash, *hash)
+		}
+	}
+
 	return &Snapshot{
-		Reference: hash.String(),
-		Files:     &gitTreeFS{tree: tree},
-		CreatedAt: time.Now().UTC(),
+		Reference:        hash.String(),
+		Files:            &gitTreeFS{tree: tree},
+		CreatedAt:        time.Now().UTC(),
+		HistoryRewritten: rewritten,
 	}, nil
+}
+
+// isAncestor reports whether ancestor is reachable from descendant
+// via parent edges. Used by Git.Snapshot for §7.3.1 force-push
+// detection. Walks BFS over the local clone; a missing object yields
+// false (treated as "not reachable, therefore rewrite").
+func isAncestor(repo *git.Repository, ancestor, descendant plumbing.Hash) bool {
+	descCommit, err := repo.CommitObject(descendant)
+	if err != nil {
+		return false
+	}
+	seen := map[plumbing.Hash]bool{}
+	queue := []*object.Commit{descCommit}
+	for len(queue) > 0 {
+		c := queue[0]
+		queue = queue[1:]
+		if c.Hash == ancestor {
+			return true
+		}
+		if seen[c.Hash] {
+			continue
+		}
+		seen[c.Hash] = true
+		for _, ph := range c.ParentHashes {
+			if seen[ph] {
+				continue
+			}
+			pc, err := repo.CommitObject(ph)
+			if err != nil {
+				continue
+			}
+			queue = append(queue, pc)
+		}
+	}
+	return false
 }
 
 // refNameFor maps a user-supplied ref into the qualified ref name

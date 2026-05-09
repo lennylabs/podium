@@ -33,6 +33,11 @@ type Snapshot struct {
 	Files fs.FS
 	// CreatedAt is the snapshot's creation time.
 	CreatedAt time.Time
+	// HistoryRewritten is true when the caller supplied PriorRef on
+	// LayerConfig and the new Reference does not include PriorRef in
+	// its history (§7.3.1 force-push tolerance). Always false when
+	// PriorRef was empty or the source has no history concept.
+	HistoryRewritten bool
 }
 
 // Provider is the SPI implementations satisfy. Methods take a
@@ -58,6 +63,11 @@ type LayerConfig struct {
 	Repo string
 	Ref  string
 	Root string
+	// PriorRef is the last-ingested commit SHA. When set, the Git
+	// provider performs a full-history clone and reports
+	// Snapshot.HistoryRewritten=true if PriorRef is no longer
+	// reachable from Ref (§7.3.1 force-push tolerance).
+	PriorRef string
 
 	// Local source
 	Path string

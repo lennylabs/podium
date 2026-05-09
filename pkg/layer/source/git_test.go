@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-git/go-billy/v5/memfs"
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/lennylabs/podium/internal/testharness"
@@ -134,6 +135,100 @@ func TestGit_UnreachableRepo(t *testing.T) {
 	})
 	if !errors.Is(err, source.ErrSourceUnreachable) {
 		t.Fatalf("got %v, want ErrSourceUnreachable", err)
+	}
+}
+
+// Spec: §7.3.1 — force-push tolerance: when the configured PriorRef
+// remains reachable from the new ref, Snapshot reports
+// HistoryRewritten=false. This is the normal advance case.
+// Phase: 9
+func TestGit_SnapshotForcePushAdvanceNotRewritten(t *testing.T) {
+	testharness.RequirePhase(t, 9)
+	t.Parallel()
+	dir := t.TempDir()
+	repo, err := git.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("PlainInit: %v", err)
+	}
+	wt, _ := repo.Worktree()
+	sig := func() *object.Signature {
+		return &object.Signature{Name: "T", Email: "t@x", When: time.Now()}
+	}
+	commit := func(name, body string) plumbing.Hash {
+		t.Helper()
+		f, _ := wt.Filesystem.Create(name)
+		_, _ = f.Write([]byte(body))
+		_ = f.Close()
+		_, _ = wt.Add(name)
+		h, err := wt.Commit(body, &git.CommitOptions{Author: sig()})
+		if err != nil {
+			t.Fatalf("Commit %s: %v", body, err)
+		}
+		return h
+	}
+	hashA := commit("a.txt", "a")
+	hashB := commit("a.txt", "b")
+	url := "file://" + dir
+	snap, err := source.Git{}.Snapshot(context.Background(), source.LayerConfig{
+		Repo: url, Ref: "master", PriorRef: hashA.String(),
+	})
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if snap.HistoryRewritten {
+		t.Errorf("HistoryRewritten=true on normal advance; want false")
+	}
+	if snap.Reference != hashB.String() {
+		t.Errorf("Reference = %q, want %q", snap.Reference, hashB.String())
+	}
+}
+
+// Spec: §7.3.1 — force-push tolerance: when the new ref no longer
+// reaches the prior ref, Snapshot reports HistoryRewritten=true so
+// the caller can emit layer.history_rewritten and proceed.
+// Phase: 9
+func TestGit_SnapshotForcePushDetected(t *testing.T) {
+	testharness.RequirePhase(t, 9)
+	t.Parallel()
+	dir := t.TempDir()
+	repo, err := git.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("PlainInit: %v", err)
+	}
+	wt, _ := repo.Worktree()
+	sig := func() *object.Signature {
+		return &object.Signature{Name: "T", Email: "t@x", When: time.Now()}
+	}
+	commit := func(name, body string) plumbing.Hash {
+		t.Helper()
+		f, _ := wt.Filesystem.Create(name)
+		_, _ = f.Write([]byte(body))
+		_ = f.Close()
+		_, _ = wt.Add(name)
+		h, err := wt.Commit(body, &git.CommitOptions{Author: sig()})
+		if err != nil {
+			t.Fatalf("Commit %s: %v", body, err)
+		}
+		return h
+	}
+	hashA := commit("a.txt", "a")
+	hashB := commit("a.txt", "b")
+	if err := wt.Reset(&git.ResetOptions{Mode: git.HardReset, Commit: hashA}); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+	hashC := commit("a.txt", "c")
+	url := "file://" + dir
+	snap, err := source.Git{}.Snapshot(context.Background(), source.LayerConfig{
+		Repo: url, Ref: "master", PriorRef: hashB.String(),
+	})
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if !snap.HistoryRewritten {
+		t.Errorf("HistoryRewritten=false; want true (B no longer reachable)")
+	}
+	if snap.Reference != hashC.String() {
+		t.Errorf("Reference = %q, want %q", snap.Reference, hashC.String())
 	}
 }
 
