@@ -33,9 +33,9 @@ func New(t testing.TB, entries ...testharness.WriteTreeOption) *Harness {
 	t.Helper()
 	dir := t.TempDir()
 	testharness.WriteTree(t, dir, entries...)
-	srv, err := server.New(dir)
+	srv, err := server.NewFromFilesystem(dir)
 	if err != nil {
-		t.Fatalf("server.New: %v", err)
+		t.Fatalf("server.NewFromFilesystem: %v", err)
 	}
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)

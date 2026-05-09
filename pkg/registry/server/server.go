@@ -1,44 +1,137 @@
-// Package server exposes the registry HTTP/JSON API (spec §2.2, §5, §6.10).
-// Stage 3 ships the route surface plus the four meta-tools backed by a
-// filesystem-source registry. Visibility filtering, identity, and full
-// hybrid retrieval land in later phases (§4.6, §6.3, §4.7).
+// Package server exposes the registry HTTP/JSON API (spec §5, §6.10).
+// The handlers translate HTTP requests into pkg/registry/core calls;
+// all spec-defined logic (visibility, version resolution, search, etc.)
+// lives in core, matching the §2.2 shared-library-code architecture.
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
-	"path"
-	"sort"
 	"strconv"
-	"strings"
 
-	"github.com/lennylabs/podium/pkg/manifest"
+	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
+	"github.com/lennylabs/podium/pkg/registry/ingest"
+	"github.com/lennylabs/podium/pkg/store"
 )
 
-// Server wraps a filesystem-source registry behind the HTTP/JSON API.
-// Stage 3 reads the registry on each request; later phases add caching
-// and a metadata store (§4.7).
+// Server is a thin HTTP wrapper over a core.Registry.
 type Server struct {
-	registry *filesystem.Registry
+	core         *core.Registry
+	publicMode   bool
+	resolveID    func(*http.Request) layer.Identity
+	resourceFunc ResourceFunc
+	// resources caches bundled resources keyed by artifact ID.
+	// Populated by NewFromFilesystem; empty for callers that
+	// construct via New (the meta-tool API still returns the manifest
+	// body, just without bundled bytes inline).
+	resources map[string]map[string][]byte
 }
 
-// New returns a Server backed by the registry at registryPath.
-func New(registryPath string) (*Server, error) {
-	reg, err := filesystem.Open(registryPath)
+// ResourceFunc returns the bytes of one bundled resource for an
+// artifact load. The default implementation looks up the resource on
+// disk under a configured root; tests can swap it for an in-memory
+// fixture. Returning (nil, false) signals "not present" — the response
+// then omits Resources for that artifact.
+type ResourceFunc func(ctx context.Context, artifactID, resourcePath string) ([]byte, bool)
+
+// Option mutates the Server during construction.
+type Option func(*Server)
+
+// WithPublicMode runs the server in §13.10 public mode: the visibility
+// evaluator short-circuits to "every layer visible," identity is
+// recorded as system:public, and ingest of medium / high sensitivity
+// is rejected (the server doesn't ingest; the bootstrap configures
+// that).
+func WithPublicMode() Option { return func(s *Server) { s.publicMode = true } }
+
+// WithIdentityResolver swaps the default anonymous-public resolver for
+// one that maps an HTTP request to an Identity (e.g., decoded JWT).
+func WithIdentityResolver(fn func(*http.Request) layer.Identity) Option {
+	return func(s *Server) { s.resolveID = fn }
+}
+
+// WithResources installs a function that returns bundled resource bytes
+// for load_artifact responses. Empty → no Resources are attached.
+func WithResources(fn ResourceFunc) Option {
+	return func(s *Server) { s.resourceFunc = fn }
+}
+
+// New returns a Server backed by the given core.Registry.
+func New(r *core.Registry, opts ...Option) *Server {
+	s := &Server{core: r}
+	for _, opt := range opts {
+		opt(s)
+	}
+	if s.resolveID == nil {
+		// Default: anonymous identity. Public-mode bypass is applied
+		// at the core level via Identity.IsPublic.
+		s.resolveID = func(*http.Request) layer.Identity {
+			return layer.Identity{IsPublic: true}
+		}
+	}
+	return s
+}
+
+// NewFromFilesystem opens the filesystem registry at path, ingests
+// every layer into a fresh in-memory store, captures bundled
+// resources for inline delivery, and returns a Server wrapping the
+// resulting core.Registry. This is the standalone bootstrap helper
+// used by tests and the standalone server.
+func NewFromFilesystem(path string, opts ...Option) (*Server, error) {
+	reg, err := filesystem.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	return &Server{registry: reg}, nil
+	st := store.NewMemory()
+	const tenant = "default"
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: tenant, Name: tenant}); err != nil {
+		return nil, err
+	}
+	resources := map[string]map[string][]byte{}
+	layers := make([]layer.Layer, 0, len(reg.Layers))
+	for i, l := range reg.Layers {
+		layerFS := newDirFS(l.Path)
+		if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
+			TenantID: tenant,
+			LayerID:  l.ID,
+			Files:    layerFS,
+		}); err != nil {
+			return nil, err
+		}
+		// Walk the layer once more to capture bundled resources for
+		// inline delivery via load_artifact responses (§4.1 inline
+		// cutoff). Higher-precedence layers overwrite lower ones for
+		// collision-free artifact IDs (sync's effective view).
+		records, err := reg.Walk(filesystem.WalkOptions{
+			CollisionPolicy: filesystem.CollisionPolicyHighestWins,
+		})
+		if err == nil {
+			for _, rec := range records {
+				if rec.Layer.ID != l.ID {
+					continue
+				}
+				resources[rec.ID] = rec.Resources
+			}
+		}
+		layers = append(layers, layer.Layer{
+			ID:         l.ID,
+			Precedence: i + 1,
+			Visibility: layer.Visibility{Public: true},
+		})
+	}
+
+	registry := core.New(st, tenant, layers)
+	server := New(registry, opts...)
+	server.resources = resources
+	server.resourceFunc = filesystemResourceFunc(reg)
+	return server, nil
 }
 
-// NewFromRegistry returns a Server wrapping an already-opened registry.
-// Useful for tests that share fixtures across multiple servers.
-func NewFromRegistry(reg *filesystem.Registry) *Server {
-	return &Server{registry: reg}
-}
-
-// Handler returns an http.Handler with the meta-tool routes registered.
+// Handler returns an http.Handler with every meta-tool route registered.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
@@ -51,7 +144,7 @@ func (s *Server) Handler() http.Handler {
 
 // ----- Response shapes ------------------------------------------------------
 
-// HealthResponse describes /healthz output.
+// HealthResponse describes /healthz output (§13.9).
 type HealthResponse struct {
 	Mode  string `json:"mode"`
 	Ready bool   `json:"ready"`
@@ -59,32 +152,32 @@ type HealthResponse struct {
 
 // LoadDomainResponse describes /v1/load_domain output (§5).
 type LoadDomainResponse struct {
-	Path        string                  `json:"path"`
-	Description string                  `json:"description,omitempty"`
-	Keywords    []string                `json:"keywords,omitempty"`
-	Subdomains  []DomainDescriptor      `json:"subdomains"`
-	Notable     []ArtifactDescriptor    `json:"notable"`
-	Note        string                  `json:"note,omitempty"`
+	Path        string               `json:"path"`
+	Description string               `json:"description,omitempty"`
+	Keywords    []string             `json:"keywords,omitempty"`
+	Subdomains  []DomainDescriptor   `json:"subdomains"`
+	Notable     []ArtifactDescriptor `json:"notable"`
+	Note        string               `json:"note,omitempty"`
 }
 
-// DomainDescriptor is one subdomain entry in load_domain output.
+// DomainDescriptor is one subdomain entry.
 type DomainDescriptor struct {
 	Path        string `json:"path"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 }
 
-// ArtifactDescriptor is one artifact entry in load_domain / search responses.
+// ArtifactDescriptor is one artifact entry.
 type ArtifactDescriptor struct {
 	ID          string   `json:"id"`
 	Type        string   `json:"type"`
 	Version     string   `json:"version,omitempty"`
 	Description string   `json:"description,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
+	Score       float64  `json:"score,omitempty"`
 }
 
-// SearchResponse is the common envelope for search_domains and
-// search_artifacts (§5).
+// SearchResponse is the common envelope for both search endpoints.
 type SearchResponse struct {
 	Query        string               `json:"query,omitempty"`
 	TotalMatched int                  `json:"total_matched"`
@@ -92,115 +185,111 @@ type SearchResponse struct {
 	Domains      []DomainDescriptor   `json:"domains,omitempty"`
 }
 
-// LoadArtifactResponse is /v1/load_artifact output. Bundled resources are
-// returned inline as a path -> base64 map for resources below the inline
-// cutoff (§4.1: 256 KB) and as presigned URLs above it. Stage 3 returns
-// inline only.
+// LoadArtifactResponse is /v1/load_artifact output. Resources below the
+// inline cutoff are returned base64-encoded; presigned URLs land in
+// Phase 5+.
 type LoadArtifactResponse struct {
 	ID            string            `json:"id"`
 	Type          string            `json:"type"`
 	Version       string            `json:"version"`
+	ContentHash   string            `json:"content_hash"`
 	ManifestBody  string            `json:"manifest_body"`
 	Frontmatter   string            `json:"frontmatter"`
+	Layer         string            `json:"layer,omitempty"`
 	Resources     map[string]string `json:"resources,omitempty"`
-	MaterializedAt string           `json:"materialized_at,omitempty"`
+	ResourcesB64  bool              `json:"resources_base64,omitempty"`
+}
+
+// ErrorResponse is the JSON envelope for §6.10 structured errors.
+type ErrorResponse struct {
+	Code            string `json:"code"`
+	Message         string `json:"message"`
+	Retryable       bool   `json:"retryable"`
+	SuggestedAction string `json:"suggested_action,omitempty"`
 }
 
 // ----- Handlers -------------------------------------------------------------
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, HealthResponse{Mode: "ready", Ready: true})
+	mode := "ready"
+	if s.publicMode {
+		mode = "public"
+	}
+	writeJSON(w, http.StatusOK, HealthResponse{Mode: mode, Ready: true})
 }
 
 func (s *Server) handleLoadDomain(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	pathArg := q.Get("path")
-	depth := atoiOr(q.Get("depth"), 1)
-
-	records, err := s.records()
+	res, err := s.core.LoadDomain(r.Context(), s.identity(r), q.Get("path"),
+		core.LoadDomainOptions{Depth: atoiOr(q.Get("depth"), 0)})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+		s.writeCoreError(w, err)
 		return
 	}
-
-	resp := LoadDomainResponse{Path: pathArg}
-	resp.Subdomains = subdomainsOf(records, pathArg, depth)
-	resp.Notable = notableOf(records, pathArg)
+	resp := LoadDomainResponse{
+		Path:        res.Path,
+		Description: res.Description,
+		Keywords:    res.Keywords,
+		Note:        res.Note,
+	}
+	for _, d := range res.Subdomains {
+		resp.Subdomains = append(resp.Subdomains, DomainDescriptor{
+			Path: d.Path, Name: d.Name, Description: d.Description,
+		})
+	}
+	for _, a := range res.Notable {
+		resp.Notable = append(resp.Notable, descriptorOf(a))
+	}
+	if resp.Subdomains == nil {
+		resp.Subdomains = []DomainDescriptor{}
+	}
+	if resp.Notable == nil {
+		resp.Notable = []ArtifactDescriptor{}
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleSearchDomains(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	query := strings.ToLower(q.Get("query"))
-	scope := q.Get("scope")
-	topK := atoiOr(q.Get("top_k"), 10)
-
-	if topK > 50 {
-		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "top_k > 50 is not allowed")
-		return
-	}
-
-	records, err := s.records()
+	res, err := s.core.SearchDomains(r.Context(), s.identity(r), core.SearchDomainsOptions{
+		Query: q.Get("query"),
+		Scope: q.Get("scope"),
+		TopK:  atoiOr(q.Get("top_k"), 10),
+	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+		s.writeCoreError(w, err)
 		return
 	}
-
-	domains := domainsFromRecords(records, scope)
-	matched := []DomainDescriptor{}
-	for _, d := range domains {
-		if query != "" && !strings.Contains(strings.ToLower(d.Name+" "+d.Description), query) {
-			continue
-		}
-		matched = append(matched, d)
+	resp := SearchResponse{Query: res.Query, TotalMatched: res.TotalMatched}
+	for _, d := range res.Domains {
+		resp.Domains = append(resp.Domains, DomainDescriptor{
+			Path: d.Path, Name: d.Name, Description: d.Description,
+		})
 	}
-	resp := SearchResponse{Query: q.Get("query"), TotalMatched: len(matched)}
-	if len(matched) > topK {
-		matched = matched[:topK]
-	}
-	resp.Domains = matched
 	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleSearchArtifacts(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	query := strings.ToLower(q.Get("query"))
-	typeFilter := q.Get("type")
-	scope := q.Get("scope")
-	topK := atoiOr(q.Get("top_k"), 10)
-
-	if topK > 50 {
-		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "top_k > 50 is not allowed")
-		return
+	tags := []string{}
+	if t := q.Get("tags"); t != "" {
+		tags = splitCSV(t)
 	}
-
-	records, err := s.records()
+	res, err := s.core.SearchArtifacts(r.Context(), s.identity(r), core.SearchArtifactsOptions{
+		Query: q.Get("query"),
+		Type:  q.Get("type"),
+		Scope: q.Get("scope"),
+		Tags:  tags,
+		TopK:  atoiOr(q.Get("top_k"), 10),
+	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+		s.writeCoreError(w, err)
 		return
 	}
-
-	matched := []ArtifactDescriptor{}
-	for _, rec := range records {
-		if scope != "" && !strings.HasPrefix(rec.ID, scope) {
-			continue
-		}
-		if typeFilter != "" && string(rec.Artifact.Type) != typeFilter {
-			continue
-		}
-		text := strings.ToLower(rec.ID + " " + rec.Artifact.Description + " " + strings.Join(rec.Artifact.Tags, " "))
-		if query != "" && !strings.Contains(text, query) {
-			continue
-		}
-		matched = append(matched, descriptorOf(rec))
+	resp := SearchResponse{Query: res.Query, TotalMatched: res.TotalMatched}
+	for _, a := range res.Results {
+		resp.Results = append(resp.Results, descriptorOf(a))
 	}
-	sort.Slice(matched, func(i, j int) bool { return matched[i].ID < matched[j].ID })
-
-	resp := SearchResponse{Query: q.Get("query"), TotalMatched: len(matched)}
-	if len(matched) > topK {
-		matched = matched[:topK]
-	}
-	resp.Results = matched
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -211,140 +300,75 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "id is required")
 		return
 	}
-	records, err := s.records()
+	res, err := s.core.LoadArtifact(r.Context(), s.identity(r), id, core.LoadArtifactOptions{
+		Version: q.Get("version"),
+	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+		s.writeCoreError(w, err)
 		return
 	}
-	for _, rec := range records {
-		if rec.ID != id {
-			continue
-		}
-		body := rec.Artifact.Body
-		if rec.Artifact.Type == manifest.TypeSkill && rec.Skill != nil {
-			body = rec.Skill.Body
-		}
-		resources := map[string]string{}
-		for path, data := range rec.Resources {
-			resources[path] = string(data)
-		}
-		writeJSON(w, http.StatusOK, LoadArtifactResponse{
-			ID:           rec.ID,
-			Type:         string(rec.Artifact.Type),
-			Version:      rec.Artifact.Version,
-			ManifestBody: body,
-			Frontmatter:  string(rec.ArtifactBytes),
-			Resources:    resources,
-		})
-		return
+	resp := LoadArtifactResponse{
+		ID:           res.ID,
+		Type:         res.Type,
+		Version:      res.Version,
+		ContentHash:  res.ContentHash,
+		ManifestBody: res.ManifestBody,
+		Frontmatter:  string(res.Frontmatter),
+		Layer:        res.Layer,
 	}
-	writeError(w, http.StatusNotFound, "registry.not_found",
-		"artifact not found: "+id)
+	if cached, ok := s.resources[res.ID]; ok && len(cached) > 0 {
+		resp.Resources = make(map[string]string, len(cached))
+		for path, data := range cached {
+			resp.Resources[path] = string(data)
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ----- Helpers --------------------------------------------------------------
 
-func (s *Server) records() ([]filesystem.ArtifactRecord, error) {
-	return s.registry.Walk(filesystem.WalkOptions{
-		CollisionPolicy: filesystem.CollisionPolicyHighestWins,
-	})
+func (s *Server) identity(r *http.Request) layer.Identity {
+	id := s.resolveID(r)
+	if s.publicMode {
+		id.IsPublic = true
+	}
+	return id
 }
 
-func descriptorOf(rec filesystem.ArtifactRecord) ArtifactDescriptor {
+func (s *Server) writeCoreError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, core.ErrInvalidArgument):
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
+	case errors.Is(err, core.ErrDomainNotFound):
+		writeError(w, http.StatusNotFound, "domain.not_found", err.Error())
+	case errors.Is(err, core.ErrNotFound):
+		writeError(w, http.StatusNotFound, "registry.not_found", err.Error())
+	default:
+		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+	}
+}
+
+func descriptorOf(a core.ArtifactDescriptor) ArtifactDescriptor {
 	return ArtifactDescriptor{
-		ID:          rec.ID,
-		Type:        string(rec.Artifact.Type),
-		Version:     rec.Artifact.Version,
-		Description: rec.Artifact.Description,
-		Tags:        rec.Artifact.Tags,
+		ID:          a.ID,
+		Type:        a.Type,
+		Version:     a.Version,
+		Description: a.Description,
+		Tags:        append([]string(nil), a.Tags...),
+		Score:       a.Score,
 	}
 }
 
-// subdomainsOf returns immediate subdomain descriptors under prefix.
-// "Immediate" means the next path segment from prefix; deeper paths fold
-// into the same subdomain entry.
-func subdomainsOf(records []filesystem.ArtifactRecord, prefix string, _ int) []DomainDescriptor {
-	seen := map[string]bool{}
-	out := []DomainDescriptor{}
-	for _, rec := range records {
-		if !inScope(rec.ID, prefix) {
-			continue
-		}
-		rest := strings.TrimPrefix(rec.ID, prefix)
-		rest = strings.TrimPrefix(rest, "/")
-		first := strings.SplitN(rest, "/", 2)[0]
-		if first == "" || strings.Contains(rest, "/") == false {
-			// Either the root (rest empty) or the artifact is directly
-			// under prefix; not a subdomain.
-			continue
-		}
-		domainPath := path.Join(prefix, first)
-		if seen[domainPath] {
-			continue
-		}
-		seen[domainPath] = true
-		out = append(out, DomainDescriptor{
-			Path: domainPath,
-			Name: first,
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
-	return out
+func writeJSON(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(body)
 }
 
-// notableOf returns artifacts directly under prefix (no further subpath).
-// Phase 8 will replace this with the curated `featured:` + learn-from-usage
-// resolution from §4.5.5.
-func notableOf(records []filesystem.ArtifactRecord, prefix string) []ArtifactDescriptor {
-	out := []ArtifactDescriptor{}
-	for _, rec := range records {
-		if !inScope(rec.ID, prefix) {
-			continue
-		}
-		rest := strings.TrimPrefix(rec.ID, prefix)
-		rest = strings.TrimPrefix(rest, "/")
-		if strings.Contains(rest, "/") {
-			continue
-		}
-		out = append(out, descriptorOf(rec))
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
-}
-
-func domainsFromRecords(records []filesystem.ArtifactRecord, scope string) []DomainDescriptor {
-	seen := map[string]bool{}
-	out := []DomainDescriptor{}
-	for _, rec := range records {
-		if scope != "" && !strings.HasPrefix(rec.ID, scope) {
-			continue
-		}
-		dir := strings.TrimSuffix(rec.ID, "/"+lastSegment(rec.ID))
-		if dir == rec.ID || dir == "" {
-			continue
-		}
-		if seen[dir] {
-			continue
-		}
-		seen[dir] = true
-		out = append(out, DomainDescriptor{Path: dir, Name: lastSegment(dir)})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
-	return out
-}
-
-func lastSegment(p string) string {
-	if i := strings.LastIndex(p, "/"); i >= 0 {
-		return p[i+1:]
-	}
-	return p
-}
-
-func inScope(id, prefix string) bool {
-	if prefix == "" {
-		return true
-	}
-	return strings.HasPrefix(id, prefix)
+func writeError(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, ErrorResponse{Code: code, Message: msg})
 }
 
 func atoiOr(s string, def int) int {
@@ -358,22 +382,22 @@ func atoiOr(s string, def int) int {
 	return n
 }
 
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	_ = enc.Encode(body)
+func splitCSV(s string) []string {
+	out := []string{}
+	cur := ""
+	for i := 0; i < len(s); i++ {
+		if s[i] == ',' {
+			if cur != "" {
+				out = append(out, cur)
+			}
+			cur = ""
+			continue
+		}
+		cur += string(s[i])
+	}
+	if cur != "" {
+		out = append(out, cur)
+	}
+	return out
 }
 
-// ErrorResponse is the JSON envelope for structured errors per §6.10.
-type ErrorResponse struct {
-	Code            string `json:"code"`
-	Message         string `json:"message"`
-	Retryable       bool   `json:"retryable"`
-	SuggestedAction string `json:"suggested_action,omitempty"`
-}
-
-func writeError(w http.ResponseWriter, status int, code, msg string) {
-	writeJSON(w, status, ErrorResponse{Code: code, Message: msg})
-}
