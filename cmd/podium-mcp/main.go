@@ -34,7 +34,14 @@ import (
 	"github.com/lennylabs/podium/pkg/materialize"
 )
 
-const protocolVersion = "2024-11-05"
+// protocolVersion is the MCP wire-protocol version this binary speaks.
+// initialize negotiates with the host: if the host's
+// requested protocolVersion predates supportedSince, the server
+// returns mcp.unsupported_version per §6.9.
+const (
+	protocolVersion = "2024-11-05"
+	supportedSince  = "2024-11-01"
+)
 
 func main() {
 	cfg, err := loadConfig()
@@ -154,6 +161,19 @@ func (s *mcpServer) handle(req rpcRequest) rpcResponse {
 	resp := rpcResponse{JSONRPC: "2.0", ID: req.ID}
 	switch req.Method {
 	case "initialize":
+		// §6.9: refuse with mcp.unsupported_version when the host's
+		// requested protocolVersion predates supportedSince.
+		var initParams struct {
+			ProtocolVersion string `json:"protocolVersion"`
+		}
+		_ = json.Unmarshal(req.Params, &initParams)
+		if initParams.ProtocolVersion != "" && initParams.ProtocolVersion < supportedSince {
+			resp.Error = &rpcError{
+				Code:    -32600,
+				Message: "mcp.unsupported_version: host protocol " + initParams.ProtocolVersion + " predates supported " + supportedSince,
+			}
+			return resp
+		}
 		resp.Result = map[string]any{
 			"protocolVersion": protocolVersion,
 			"capabilities": map[string]any{
