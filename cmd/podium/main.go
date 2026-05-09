@@ -58,6 +58,8 @@ func main() {
 		os.Exit(layerCmd(os.Args[2:]))
 	case "impact":
 		os.Exit(impactCmd(os.Args[2:]))
+	case "admin":
+		os.Exit(adminCmd(os.Args[2:]))
 	case "version":
 		fmt.Println("podium 0.0.0-dev")
 	case "help", "-h", "--help":
@@ -87,6 +89,8 @@ Commands:
   layer unregister    Remove a layer.
   layer reingest      Trigger a fresh ingest for a layer.
   impact              List artifacts that depend on a given artifact.
+  admin erase         GDPR right-to-be-forgotten on the local audit log.
+  admin retention     Apply audit retention policies to the local audit log.
   version             Print the podium version.
   help                Print this message.
 `

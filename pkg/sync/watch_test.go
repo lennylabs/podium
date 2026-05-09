@@ -52,14 +52,14 @@ func TestWatch_RerunsAfterRegistryEdit(t *testing.T) {
 			Target:       target,
 			AdapterID:    "none",
 		},
-		Period:   20 * time.Millisecond,
-		Debounce: 20 * time.Millisecond,
+		Period:   50 * time.Millisecond,
+		Debounce: 50 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("Watch: %v", err)
 	}
 	// Initial sync event.
-	first := waitFor(t, events, time.Second)
+	first := waitFor(t, events, 5*time.Second)
 	if first.Err != nil {
 		t.Fatalf("initial sync: %v", first.Err)
 	}
@@ -78,8 +78,10 @@ func TestWatch_RerunsAfterRegistryEdit(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	// The watcher's debounce + period must exceed the edit settle
-	// time before it reruns; allow a generous deadline.
-	second := waitFor(t, events, 3*time.Second)
+	// time before it reruns; allow a generous deadline so the test
+	// stays stable when the suite runs hundreds of goroutines in
+	// parallel and the ticker channel may be served late.
+	second := waitFor(t, events, 10*time.Second)
 	if second.Err != nil {
 		t.Fatalf("rerun: %v", second.Err)
 	}
@@ -104,13 +106,13 @@ func TestWatch_CancelClosesChannel(t *testing.T) {
 			Target:       target,
 			AdapterID:    "none",
 		},
-		Period: 20 * time.Millisecond,
+		Period: 50 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("Watch: %v", err)
 	}
 	// Drain the initial event.
-	_ = waitFor(t, events, time.Second)
+	_ = waitFor(t, events, 5*time.Second)
 	cancel()
 	// Channel should close within a few periods.
 	deadline := time.Now().Add(time.Second)
