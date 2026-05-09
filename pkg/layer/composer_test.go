@@ -82,6 +82,93 @@ func TestVisible_PublicModeBypass(t *testing.T) {
 	}
 }
 
+// Spec: §4.6 Visibility — every subset of {public, organization,
+// groups, users} composes as a union: a caller sees the layer if any
+// component matches, and never if none match.
+// Phase: 7
+// Matrix: §4.6 (users)
+// Matrix: §4.6 (public_organization)
+// Matrix: §4.6 (public_groups)
+// Matrix: §4.6 (public_users)
+// Matrix: §4.6 (organization_groups)
+// Matrix: §4.6 (organization_users)
+// Matrix: §4.6 (public_organization_groups)
+// Matrix: §4.6 (public_organization_users)
+// Matrix: §4.6 (public_groups_users)
+// Matrix: §4.6 (organization_groups_users)
+// Matrix: §4.6 (public_organization_groups_users)
+func TestVisible_AllUnions(t *testing.T) {
+	testharness.RequirePhase(t, 7)
+	t.Parallel()
+
+	// Identities: matchPublic is the only one that should see a
+	// public-only layer; matchOrg sees org-true layers; matchGroup
+	// sees layers listing "finance" in groups; matchUser sees layers
+	// listing "explicit-user" in users; nobody matches none.
+	matchOrg := Identity{Sub: "org-member", IsAuthenticated: true}
+	matchGroup := Identity{Sub: "g-only", IsAuthenticated: true, Groups: []string{"finance"}}
+	matchUser := Identity{Sub: "explicit-user", IsAuthenticated: true}
+	noMatch := Identity{Sub: "outsider", IsAuthenticated: true}
+	unauth := Identity{}
+
+	type subset struct {
+		name string
+		vis  Visibility
+	}
+	subsets := []subset{
+		{"users", Visibility{Users: []string{"explicit-user"}}},
+		{"public_organization", Visibility{Public: true, Organization: true}},
+		{"public_groups", Visibility{Public: true, Groups: []string{"finance"}}},
+		{"public_users", Visibility{Public: true, Users: []string{"explicit-user"}}},
+		{"organization_groups", Visibility{Organization: true, Groups: []string{"finance"}}},
+		{"organization_users", Visibility{Organization: true, Users: []string{"explicit-user"}}},
+		{"public_organization_groups", Visibility{Public: true, Organization: true, Groups: []string{"finance"}}},
+		{"public_organization_users", Visibility{Public: true, Organization: true, Users: []string{"explicit-user"}}},
+		{"public_groups_users", Visibility{Public: true, Groups: []string{"finance"}, Users: []string{"explicit-user"}}},
+		{"organization_groups_users", Visibility{Organization: true, Groups: []string{"finance"}, Users: []string{"explicit-user"}}},
+		{"public_organization_groups_users", Visibility{Public: true, Organization: true, Groups: []string{"finance"}, Users: []string{"explicit-user"}}},
+	}
+
+	for _, s := range subsets {
+		layer := Layer{ID: s.name, Visibility: s.vis}
+
+		// users-component matches matchUser when present.
+		hasUsers := len(s.vis.Users) > 0
+		if hasUsers && !Visible(layer, matchUser) {
+			t.Errorf("%s: users component should match explicit-user", s.name)
+		}
+
+		// groups-component matches matchGroup when present.
+		hasGroups := len(s.vis.Groups) > 0
+		if hasGroups && !Visible(layer, matchGroup) {
+			t.Errorf("%s: groups component should match finance", s.name)
+		}
+
+		// organization matches authenticated callers.
+		if s.vis.Organization && !Visible(layer, matchOrg) {
+			t.Errorf("%s: organization should match authenticated", s.name)
+		}
+
+		// public matches everyone.
+		if s.vis.Public {
+			if !Visible(layer, unauth) {
+				t.Errorf("%s: public should grant unauthenticated", s.name)
+			}
+			if !Visible(layer, noMatch) {
+				t.Errorf("%s: public should grant non-matching authenticated", s.name)
+			}
+		}
+
+		// Unions where neither org nor public is set must reject
+		// non-matching authenticated users.
+		if !s.vis.Public && !s.vis.Organization {
+			if Visible(layer, noMatch) {
+				t.Errorf("%s: outsider should not be visible", s.name)
+			}
+		}
+	}
+}
+
 // Spec: §4.6 — EffectiveLayers returns the subset visible to identity
 // in precedence order.
 // Phase: 7
