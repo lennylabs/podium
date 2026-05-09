@@ -37,7 +37,37 @@ var (
 	// ErrInvalidArtifact wraps parse / structural errors that surface at
 	// ingest as ingest.lint_failed.
 	ErrInvalidArtifact = errors.New("ingest.invalid_artifact")
+	// ErrQuotaExceeded maps to quota.storage_exceeded (§4.7.8).
+	ErrQuotaExceeded = errors.New("quota.storage_exceeded")
 )
+
+// FreezeWindow is one §4.7.2 freeze window: ingest is blocked when
+// the current time falls within [Start, End) and the window's blocks
+// list includes "ingest".
+type FreezeWindow struct {
+	Name    string
+	Start   time.Time
+	End     time.Time
+	Blocks  []string // typically ["ingest"], may include "layer-config"
+	BreakGlass bool   // when true, this ingest invocation has been
+	                  // approved by dual-signoff break-glass.
+}
+
+// Active reports whether the window blocks ingest at now.
+func (w FreezeWindow) Active(now time.Time, op string) bool {
+	if w.BreakGlass {
+		return false
+	}
+	if now.Before(w.Start) || !now.Before(w.End) {
+		return false
+	}
+	for _, b := range w.Blocks {
+		if b == op {
+			return true
+		}
+	}
+	return false
+}
 
 // Request is a single layer ingest invocation.
 type Request struct {
@@ -49,6 +79,17 @@ type Request struct {
 	// rejected at ingest. Used by §13.10 public mode to refuse medium
 	// and high sensitivity. Empty means no floor.
 	RejectAtOrAbove manifest.Sensitivity
+	// FreezeWindows blocks ingest when any window is currently active
+	// (§4.7.2). An ingest with BreakGlass=true bypasses the windows.
+	FreezeWindows []FreezeWindow
+	// StorageQuotaBytes is the per-tenant storage budget. Zero disables.
+	// Ingest sums frontmatter + body + bundled-resource bytes against
+	// the quota and returns ErrQuotaExceeded when exceeded (§4.7.8).
+	StorageQuotaBytes int64
+	// CurrentStorageBytes is the bytes already stored against the
+	// quota. Caller queries the store for this; ingest cannot
+	// (it would have to walk every manifest).
+	CurrentStorageBytes int64
 	// Files is the source's snapshot exposed as fs.FS. The Local
 	// LayerSourceProvider produces this from os.DirFS; the Git
 	// provider exposes the checked-out tree the same way.
@@ -111,6 +152,14 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		req.Linter = &lint.Linter{}
 	}
 
+	// §4.7.2 freeze-window enforcement: refuse ingest when any active
+	// window blocks it.
+	for _, w := range req.FreezeWindows {
+		if w.Active(req.Clock.Now(), "ingest") {
+			return nil, fmt.Errorf("%w: window %q active", ErrFrozen, w.Name)
+		}
+	}
+
 	now := req.Clock.Now().UTC()
 
 	// Walk the layer's filesystem to find every ARTIFACT.md.
@@ -151,6 +200,22 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 				Code:       "ingest.invalid_artifact",
 			})
 			continue
+		}
+
+		// §4.7.8 quota enforcement: refuse the artifact if accepting
+		// it would push current storage past the configured budget.
+		if req.StorageQuotaBytes > 0 {
+			projected := req.CurrentStorageBytes + recordBytes(mr)
+			if projected > req.StorageQuotaBytes {
+				res.Rejected = append(res.Rejected, RejectedArtifact{
+					ArtifactID: rec.ID,
+					Reason: fmt.Sprintf("would push storage to %d bytes; quota is %d",
+						projected, req.StorageQuotaBytes),
+					Code: "quota.storage_exceeded",
+				})
+				continue
+			}
+			req.CurrentStorageBytes = projected
 		}
 
 		// §4.7.6 extends:-pin resolution. If the artifact extends a
@@ -368,6 +433,12 @@ func edgesFor(a *manifest.Artifact, id string) []store.DependencyEdge {
 		})
 	}
 	return out
+}
+
+// recordBytes is the size of a manifest record's persisted bytes.
+// Used by the §4.7.8 quota check.
+func recordBytes(rec store.ManifestRecord) int64 {
+	return int64(len(rec.Frontmatter)) + int64(len(rec.Body))
 }
 
 // stripPin removes the @semver / @sha256 suffix from a reference so the
