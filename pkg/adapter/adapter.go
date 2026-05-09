@@ -96,12 +96,22 @@ func (r *Registry) IDs() []string {
 }
 
 // DefaultRegistry returns a Registry pre-populated with the built-in
-// adapters available in the active phase. Phase 0 ships only "none";
-// Phase 3 adds claude-code and codex; Phase 13 adds the remaining built-ins.
+// adapters per §6.7.
 func DefaultRegistry() *Registry {
 	r := NewRegistry()
-	_ = r.Register(None{})
-	_ = r.Register(ClaudeCode{})
-	_ = r.Register(Codex{})
+	for _, a := range []HarnessAdapter{
+		None{},
+		ClaudeCode{},
+		ClaudeDesktop{},
+		ClaudeCowork{},
+		Cursor{},
+		Codex{},
+		Gemini{},
+		OpenCode{},
+		Pi{},
+		Hermes{},
+	} {
+		_ = r.Register(a)
+	}
 	return r
 }
