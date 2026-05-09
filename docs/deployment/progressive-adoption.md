@@ -3,12 +3,12 @@ layout: default
 title: Progressive adoption
 parent: Deployment
 nav_order: 4
-description: A staged on-ramp for adopting governance features (identity, sensitivity labels, signing, freeze windows, SBOM/CVE) without forcing the whole feature set on day one.
+description: A staged on-ramp for adopting governance features (identity, sensitivity labels, signing, freeze windows) without forcing the whole feature set on day one.
 ---
 
 # Progressive adoption
 
-Podium ships with the full governance feature set: per-layer visibility, sensitivity labels, sandbox profiles, signing, hash-chained audit, freeze windows, SBOM/CVE pipeline, and SCIM. Turning all of it on at once usually delays adoption.
+Podium ships with the full governance feature set: per-layer visibility, sensitivity labels, sandbox profiles, signing, hash-chained audit, freeze windows, and SCIM. Turning all of it on at once usually delays adoption.
 
 This guide is a staged on-ramp for governance. It assumes a starting point of `podium serve --standalone` (or an equivalent permissive standard deployment) and progressively tightens as the catalog and team grow into needing each control. Skip ahead if a particular feature is already required by an external constraint (compliance, security review, contractual obligation). The order below works for most teams; other orderings are also valid.
 
@@ -22,7 +22,7 @@ Goal: get artifacts flowing without governance gates.
 - One layer (`team-shared`), `visibility: public` (the standalone default), `git`-source pointing at one shared repo.
 - No `PODIUM_VERIFY_SIGNATURES` setting (defaults to `never` in standalone, off entirely).
 - No sensitivity labels required; `sensitivity:` is optional and defaults to `low`.
-- No SCIM, no freeze windows, no SBOM pipeline.
+- No SCIM, no freeze windows.
 
 **Exit criteria:** several people have authored a skill, merged it, and seen it load in their harness. Artifacts are in active use, and the tooling is not blocking the authoring loop.
 
@@ -106,7 +106,6 @@ Goal: protect critical periods (release cuts, year-end close, on-call rotations)
 
 By this point governance overhead is amortized; the further controls are easier to add when their specific need shows up:
 
-- **SBOM / CVE tracking** when artifacts bundle scripts that pull third-party dependencies. The vulnerability feed adds value once dependency surface is non-trivial.
 - **Sandbox profile enforcement** (`PODIUM_ENFORCE_SANDBOX_PROFILE=true`) when artifacts ship code that runs on user machines and the harness honors profiles. Until then, the field is informational.
 - **Transparency-log anchoring** when external auditors or regulators ask whether an artifact existed at time T. The hash-chained audit log already provides internal evidence; transparency-log anchoring extends it across organizational boundaries.
 - **Multi-region replication** when single-region availability stops being acceptable.

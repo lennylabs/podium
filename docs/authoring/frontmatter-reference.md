@@ -143,9 +143,9 @@ sandbox_profile: unrestricted | read-only-fs | network-isolated | seccomp-strict
 effort_hint: low | medium | high | max
 model_class_hint: nano | small | medium | large | frontier
 
-sbom:                              # CycloneDX or SPDX inline or referenced
-  format: cyclonedx-1.5
-  ref: ./sbom.json
+sbom:                              # author-supplied passthrough
+  format: cyclonedx-1.5            # informational
+  ref: ./sbom.json                 # consumers fetch the SBOM via the bundled-resource path
 ```
 
 | Field | Description |
@@ -156,7 +156,7 @@ sbom:                              # CycloneDX or SPDX inline or referenced
 | `sandbox_profile` | Execution sandbox. Hosts with sandbox capability honor it; hosts without it refuse to materialize artifacts whose `sandbox_profile != unrestricted` unless explicitly configured to ignore. |
 | `effort_hint` | Advisory hint about the reasoning budget the artifact ideally consumes. See [Hints](hints). |
 | `model_class_hint` | Advisory hint about the model capability tier. See [Hints](hints). |
-| `sbom` | Software Bill of Materials, inline or referenced. Required by lint for sensitivity ≥ medium. |
+| `sbom` | Author-supplied SBOM hint. Informational only — Podium stores the field verbatim and exposes it on `load_artifact` but does not parse, validate, or scan the referenced SBOM. Consumers that want vulnerability scanning fetch the SBOM via the bundled-resource path and feed their own pipeline. |
 
 ---
 

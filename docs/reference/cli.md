@@ -3,7 +3,7 @@ layout: default
 title: CLI
 parent: Reference
 nav_order: 1
-description: Every podium subcommand: setup, server, sync, layer management, search, admin, signing, vulnerability tracking.
+description: Every podium subcommand: setup, server, sync, layer management, search, admin, signing.
 ---
 
 # CLI
@@ -381,26 +381,6 @@ podium admin erase <user_id>
 ```
 
 Erasure is itself logged as a `user.erased` event.
-
----
-
-## Vulnerability tracking
-
-### `podium vuln list`
-
-Lists artifacts affected by known CVEs (per the configured CVE feed and ingested SBOMs).
-
-```
-podium vuln list [--severity <level>]
-```
-
-### `podium vuln explain`
-
-Shows the dependency path for a CVE-affected artifact.
-
-```
-podium vuln explain <cve> <artifact>
-```
 
 ---
 

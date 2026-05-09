@@ -158,4 +158,4 @@ The shared library does the same parsing, composition, and adapter work in both 
 - Authoring rights for the catalog are whoever can write to the directory. Branch protection on a Git repo is the typical control.
 - Visibility declarations in layer config are recorded but not enforced (artifacts remain portable to server deployments).
 - Audit is the git history (when committed to git) or whatever the sharing mechanism preserves; there's no Podium-side audit stream.
-- SBOM ingestion, CVE tracking, freeze windows, signing enforcement: all available only with a server.
+- Freeze windows and signing enforcement: available only with a server.

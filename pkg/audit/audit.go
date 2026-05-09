@@ -41,7 +41,6 @@ const (
 	EventAdminGranted         EventType = "admin.granted"
 	EventVisibilityDenied     EventType = "visibility.denied"
 	EventFreezeBreakGlass     EventType = "freeze.break_glass"
-	EventVulnerabilityDetected EventType = "vulnerability.detected"
 	EventUserErased           EventType = "user.erased"
 	EventReadOnlyEntered      EventType = "registry.read_only_entered"
 	EventReadOnlyExited       EventType = "registry.read_only_exited"

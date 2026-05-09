@@ -39,7 +39,7 @@ The registry's pluggable interfaces:
 | `LocalAuditSink` | Local audit log for meta-tool calls (when configured). Default: JSON Lines file at `~/.podium/audit.log`. |
 | `HarnessAdapter` | Translates canonical artifacts to the harness's native format at materialization time. |
 | `MaterializationHook` | Per-file pre-write transformation of materialized output. Use cases: redact secrets, rewrite paths, inject team-specific headers, enforce content policy. |
-| `NotificationProvider` | Delivery for vulnerability alerts and ingest-failure notifications. Default: email + webhook. |
+| `NotificationProvider` | Delivery for ingest-failure and operational notifications. Default: email + webhook. |
 | `SignatureProvider` | Artifact signing and verification. Default: Sigstore-keyless. |
 
 ---
@@ -86,12 +86,12 @@ See [Custom consumers via the SDK → Programmatic curation](../consuming/custom
 
 ### Webhook-driven integrations
 
-Receivers for the outbound webhooks (`artifact.published`, `artifact.deprecated`, `domain.published`, `layer.ingested`, `layer.history_rewritten`, `vulnerability.detected`, `domains.searched` audit-stream consumers, etc.) feed Slack channels, ticket trackers, deployment pipelines, internal dashboards. The registry emits the events; the receiver decides what to do.
+Receivers for the outbound webhooks (`artifact.published`, `artifact.deprecated`, `domain.published`, `layer.ingested`, `layer.history_rewritten`, `domains.searched` audit-stream consumers, etc.) feed Slack channels, ticket trackers, deployment pipelines, internal dashboards. The registry emits the events; the receiver decides what to do.
 
 Common targets:
 
 - Notify owners on `artifact.deprecated`.
-- Post to a channel on `vulnerability.detected`.
+- Page on-call on `layer.history_rewritten`.
 - Kick off a downstream rebuild on `artifact.published` matching certain paths.
 
 ### Custom pre-merge CI

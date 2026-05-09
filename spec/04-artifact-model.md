@@ -168,10 +168,12 @@ sandbox_profile: unrestricted | read-only-fs | network-isolated | seccomp-strict
 effort_hint: low | medium | high | max
 model_class_hint: nano | small | medium | large | frontier
 
-sbom: # CycloneDX or SPDX inline or referenced
-  format: cyclonedx-1.5
-  ref: ./sbom.json
+sbom: # author-supplied passthrough; Podium does not parse or validate it.
+  format: cyclonedx-1.5  # informational
+  ref: ./sbom.json       # consumers fetch sbom.json via the bundled-resource path
 ```
+
+The `sbom:` field is informational. Podium stores whatever YAML the author writes and exposes it on `load_artifact` for consumers that want a hint, but the registry does not parse the SBOM file referenced (or any inline SBOM) and does not enforce its presence or format. Vulnerability scanning is the responsibility of the CI pipeline that authored the artifact and the CD pipeline that deploys agents using it; see §1.1 "What Podium is not."
 
 ### Type-specific fields
 
@@ -339,7 +341,7 @@ The ingest-time linter validates that prose references in the manifest body (`SK
 
 Drift between manifest text and bundled files is an ingest error.
 
-**Trust model.** Bundled scripts inherit the artifact's sensitivity label. A high-sensitivity skill that bundles a Python script is effectively shipping code into the host; pre-merge CI run by the source repository (secret scanning, static analysis, SBOM generation, optional sandbox policy review) takes bundled scripts seriously.
+**Trust model.** Bundled scripts inherit the artifact's sensitivity label. A high-sensitivity skill that bundles a Python script is effectively shipping code into the host; pre-merge CI run by the source repository (secret scanning, static analysis, dependency scanning, optional sandbox policy review) takes bundled scripts seriously. Podium does not run any of these checks itself — bundle contents are opaque to the registry per §1.1.
 
 ### 4.4.1 Execution Model Contract
 
@@ -821,7 +823,7 @@ The index drives:
 Each artifact carries:
 
 - **Sensitivity label.** `low` / `medium` / `high`, declared in frontmatter. Informational metadata exposed in `search_artifacts` and `load_artifact` responses for filtering and display. Reviewer requirements based on sensitivity are enforced in the Git provider's branch protection (e.g., path-scoped CODEOWNERS plus required-reviewer counts), not by the registry.
-- **Ownership.** Authoring rights flow through the source layer's Git permissions. The artifact's manifest can name owners informationally for routing notifications via the `NotificationProvider` SPI (e.g., for vulnerability alerts and ingest failures).
+- **Ownership.** Authoring rights flow through the source layer's Git permissions. The artifact's manifest can name owners informationally for routing ingest-failure notifications via the `NotificationProvider` SPI.
 - **Lifecycle.** An ingested artifact is live until a subsequent ingest sets `deprecated: true`. Deprecated artifacts return a warning when loaded and are excluded from default search results; if `replaced_by:` is set, the registry surfaces the upgrade target alongside the warning.
 
 ### 4.7.5 Audit
@@ -845,15 +847,9 @@ For session consistency, the meta-tools accept an optional `session_id` argument
 
 **Inheritance and re-ingest.** When a child manifest declares `extends: <parent>` (no version pin), the parent version is resolved at the child's ingest time and stored as a hard pin in the ingested manifest's resolved form. Parent updates do not silently propagate; the child must be re-ingested (typically by bumping its `version:` and merging) to pick up changes.
 
-### 4.7.7 Vulnerability Tracking
+### 4.7.7 Vulnerability Tracking — Out of Scope
 
-The registry consumes CVE feeds, walks SBOM dependencies declared in artifact frontmatter, and surfaces affected artifacts:
-
-- `podium vuln list [--severity ...]`: list affected artifacts.
-- `podium vuln explain <cve> <artifact>`: show the dependency path.
-- Owners notified through configured channels (webhook / email / Slack via the `NotificationProvider` SPI).
-
-Lint enforces SBOM presence for sensitivity ≥ medium.
+Vulnerability scanning is not a registry responsibility. The natural place for CVE checks is the CI pipeline that authored the artifact (pre-merge) and the CD pipeline that deploys agents using it (continuous). Authors who ship an SBOM bundle it as an ordinary resource (e.g. `bom.json` or `sbom.spdx.json`); consumers fetch it via `load_artifact` and feed their own scanner. The registry stores SBOMs as opaque bytes alongside other bundled resources, performs no parsing, no scoring, no live feed ingestion, and emits no `vulnerability.detected` events. See §1.1 "What Podium is not."
 
 ### 4.7.8 Quotas
 

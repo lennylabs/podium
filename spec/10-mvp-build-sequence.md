@@ -1,6 +1,6 @@
 # 10. MVP Build Sequence
 
-The build sequence is structured in two parts. Phases 0–4 ship an initial release that exercises the architecture end-to-end against the two lightest local deployment modes: a filesystem-source registry (no daemon) and a `--standalone` server. Phases 5+ add the enterprise capabilities (multi-tenancy, OIDC/SCIM, full RBAC, audit, vulnerability tracking, deployment).
+The build sequence is structured in two parts. Phases 0–4 ship an initial release that exercises the architecture end-to-end against the two lightest local deployment modes: a filesystem-source registry (no daemon) and a `--standalone` server. Phases 5+ add the enterprise capabilities (multi-tenancy, OIDC/SCIM, full RBAC, audit, deployment).
 
 ## Initial phases
 
@@ -28,6 +28,6 @@ The build sequence is structured in two parts. Phases 0–4 ship an initial rele
 | 14    | `podium-ts` SDK + remaining SDK surface area (subscriptions, dependency walks); `podium sync override` (TUI + batch flags), `podium sync save-as`, and `podium profile edit` for ephemeral and permanent scope changes | Programmatic-runtime parity with the MCP path; TUI/batch toggles for materialization |
 | 15    | Cross-type dependency graph + reverse dependency index + impact analysis CLI                                                                                                                                           | Cross-type analysis: surface what depends on a given artifact, regardless of type    |
 | 16    | Registry audit log + `LocalAuditSink` + cross-stream correlation + retention + hash-chain integrity                                                                                                                    | Observability + governance                                                           |
-| 17    | Vulnerability tracking + SBOM ingestion + `NotificationProvider`                                                                                                                                                       | Enterprise governance                                                                |
+| 17    | _Reserved._ Vulnerability scanning is intentionally out of scope (§1.1, §4.7.7); this phase number is preserved for stable cross-references.                                                                          | —                                                                                    |
 | 18    | Deployment: Helm chart, reference Grafana dashboard, runbook                                                                                                                                                           | Operability                                                                          |
 | 19    | Example artifact registry (multi-layer, multi-type, with `DOMAIN.md` imports, unlisted folders, signatures, cross-type delegation)                                                                                     | Prove end-to-end                                                                     |

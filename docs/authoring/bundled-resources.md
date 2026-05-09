@@ -82,9 +82,9 @@ Caps don't apply to external resources. They're the right answer for model files
 
 Bundled scripts inherit the artifact's `sensitivity` label. A high-sensitivity skill that bundles a Python script is shipping code that the host runtime executes; the registry treats it accordingly.
 
-Pre-merge CI run by the source repository (secret scanning, static analysis, SBOM generation, optional sandbox policy review) is the right place to enforce script-level controls. Podium reads no in-repo permission files; the Git provider's branch protection is the gate.
+Pre-merge CI run by the source repository (secret scanning, static analysis, dependency scanning, optional sandbox policy review) is the right place to enforce script-level controls. Podium reads no in-repo permission files and does not introspect bundle contents; the Git provider's branch protection is the gate.
 
-For sensitivity ≥ medium, lint requires an `sbom:` field, either inline (CycloneDX or SPDX) or referenced from a bundled file. The registry consumes CVE feeds and walks SBOM dependencies to surface affected artifacts via `podium vuln list`.
+Authors who want to ship an SBOM bundle it as an ordinary resource (e.g. `bom.json` or `sbom.spdx.json`); the `sbom:` frontmatter field is informational and points consumers at the file. Podium does not parse the SBOM, does not enforce its presence, and does not run vulnerability scanning. Scanning belongs to the source-repo CI and the deployer's continuous scanning pipeline.
 
 ---
 

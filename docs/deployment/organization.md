@@ -33,7 +33,6 @@ For day-two operations (capacity, monitoring, alerts, backup, upgrades), see [Op
 - **Hash-chained audit.** Every read, ingest, and admin action recorded with hash-chain integrity. SIEM mirroring supported. Optional anchoring to a public transparency log.
 - **Freeze windows.** Per-tenant config for blocking ingest and layer-config changes during critical periods (year-end close, release cuts). Break-glass with dual-signoff.
 - **Signing.** Sigstore-keyless (preferred) or registry-managed key (fallback). Configurable per-deployment signature verification on materialization (`PODIUM_VERIFY_SIGNATURES=medium-and-above` is the typical setting).
-- **SBOM / CVE tracking.** SBOM ingestion for sensitivity ≥ medium; CVE feed walks dependency graphs and surfaces affected artifacts via `podium vuln list`.
 - **SCIM 2.0.** Group membership push from OIDC IdPs that support it. Layer visibility references group claims directly.
 - **GDPR erasure.** `podium admin erase <user_id>` unregisters user-defined layers, redacts audit identity, returns a cryptographic receipt.
 - **Quotas.** Per-org limits on storage, search QPS, materialization rate, audit volume.

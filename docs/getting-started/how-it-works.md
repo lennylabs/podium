@@ -167,7 +167,7 @@ or self-run alongside.
   [Deployment → Operator guide](../deployment/operator-guide) and
   the spec's [§13](https://github.com/lennylabs/podium/blob/main/spec/13-deployment.md).
 - **What you get.** Per-layer visibility, freeze windows, signing,
-  hash-chained audit, SCIM, SBOM/CVE pipeline, multi-tenancy.
+  hash-chained audit, SCIM, multi-tenancy.
 - **Migration path.** `podium admin migrate-to-standard` exports
   from a standalone deployment to a standard one; the same artifact
   directory becomes a `local`-source layer until you cut over to

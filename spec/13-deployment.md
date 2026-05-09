@@ -218,7 +218,7 @@ When to use public mode vs sensible-defaults standalone:
 
 Migration to a governed deployment goes through `podium admin migrate-to-standard --postgres <dsn> --object-store <url>` (§13.4), followed by removing the `--public-mode` flag and reconfiguring layer visibility. Same migration path standalone uses today.
 
-**Out of scope for standalone.** Multi-tenancy, freeze windows, SCIM, SBOM/CVE pipeline, transparency-log anchoring, outbound webhooks. These are present in the binary but inert without the supporting infrastructure (an IdP for SCIM, a CVE feed for vulnerability tracking, etc.). They can be enabled individually when their dependencies are available.
+**Out of scope for standalone.** Multi-tenancy, freeze windows, SCIM, transparency-log anchoring, outbound webhooks. These are present in the binary but inert without the supporting infrastructure (an IdP for SCIM, a Sigstore stack for transparency anchoring, etc.). They can be enabled individually when their dependencies are available. Vulnerability scanning is out of scope for every deployment shape, not just standalone — see §1.1, §4.7.7.
 
 **Client setup.** Clients (CLI, MCP server, SDK) don't read `registry.yaml`. That's server-side config. The registry value clients use to reach the server is configured separately on the client side, via `sync.yaml`'s `defaults.registry`, `PODIUM_REGISTRY`, or an SDK constructor param (§7.5.2 covers the lookup order). `podium serve` zero-flag writes both files in one step on first run: `~/.podium/registry.yaml` for the server (`bind: 127.0.0.1:8080`, store/vector defaults) and `~/.podium/sync.yaml` for the client (`defaults.registry: http://127.0.0.1:8080`). For client-only setup (e.g., when the server runs elsewhere), use `podium init --global --registry <url>` (§7.7).
 
@@ -301,7 +301,7 @@ Features that require **specifically a remote server** (not just any server):
 
 - Centralized audit independent of clones.
 - OIDC identity-based visibility filtering.
-- Multi-tenancy, SCIM, SBOM/CVE pipeline, transparency-log anchoring.
+- Multi-tenancy, SCIM, transparency-log anchoring.
 
 ### 13.11.4 Watch Mode
 

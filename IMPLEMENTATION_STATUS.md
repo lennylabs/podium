@@ -37,7 +37,7 @@ an artifact does not delete its previously-materialized files.
 ### Phase 1 — Manifest schema + `podium lint` + signing — PARTIAL
 
 - `pkg/lint`: 7 rules, covering required fields, SKILL.md compliance, name
-  syntax, semver, SBOM, hook generic vs subtype, hint type applicability.
+  syntax, semver, hook generic vs subtype, hint type applicability.
 - `pkg/sign`: SPI + Noop verifier.
 
 **Missing**:
@@ -292,19 +292,18 @@ Not started. Spec §10 calls out:
 - Transparency log anchoring (Sigstore / CT-style).
 - SIEM export.
 
-### Phase 17 — Vulnerability tracking + SBOM + NotificationProvider — SCAFFOLDED
+### Phase 17 — Vulnerability tracking — OUT OF SCOPE
 
-- `pkg/vuln`: CVE / SBOM / NotificationProvider types — real surface.
-- Match function — naive substring placeholder.
+Vulnerability scanning is not a registry responsibility. The natural
+place for CVE checks is the CI pipeline that authored the artifact
+(pre-merge) and the CD pipeline that deploys agents using it
+(continuous). Bundle contents are opaque to Podium per §1.1 / §4.7.7;
+the registry stores bytes, hashes them, and hands them to consumers.
 
-**Missing**:
-
-- Real CVE feed ingestion (NVD, OSV, GHSA).
-- SBOM parsing (CycloneDX, SPDX).
-- PURL / version-range matching.
-- `podium vuln list` / `vuln explain` CLIs.
-- NotificationProvider implementations: email, Slack, generic webhook.
-- SBOM enforcement at ingest for sensitivity ≥ medium.
+`pkg/vuln` was scaffolded in earlier drafts and has been removed. The
+`sbom:` frontmatter field stays as an informational passthrough so
+consumers can find an SBOM bundled alongside `ARTIFACT.md`, but
+Podium does not parse it.
 
 ### Phase 18 — Deployment — MISSING
 
@@ -352,7 +351,7 @@ runbook.
 | 14 | PARTIAL | sync override / save-as / profile edit, TS SDK extras |
 | 15 | PARTIAL | persistence, ingest population, CLIs |
 | 16 | PARTIAL | server integration, file sink, redaction, retention, erasure |
-| 17 | SCAFFOLDED | feed ingestion, SBOM parsing, real notifiers |
+| 17 | OUT-OF-SCOPE | vulnerability scanning lives in CI/CD, not the registry |
 | 18 | MISSING | Helm, Grafana, runbook |
 | 19 | PARTIAL | broader fixture coverage |
 

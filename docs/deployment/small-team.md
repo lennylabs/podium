@@ -149,7 +149,6 @@ Standalone deliberately omits the things that need external services or a multi-
 
 - **Multi-tenancy.** A standalone deployment is single-tenant.
 - **OIDC group claims via SCIM.** Group membership comes from OIDC claims directly; SCIM push is a standard-deployment feature.
-- **SBOM / CVE pipeline.** The registry has the SPI; without a CVE feed configured, vulnerability tracking is inert.
 - **Transparency-log anchoring.** Sigstore-keyless signing requires public OIDC infrastructure.
 - **Outbound webhooks.** Configurable but typically unused at small-team scale.
 
@@ -189,7 +188,7 @@ For everyday small-team use, default to `oauth-device-code` auth. The added cere
 
 ## Migrating to standard
 
-When standalone no longer fits, typically because multi-tenancy, OIDC group claims via SCIM, the SBOM/CVE pipeline, or production-grade availability is required, `podium admin migrate-to-standard` exports the standalone state to a standard deployment:
+When standalone no longer fits, typically because multi-tenancy, OIDC group claims via SCIM, or production-grade availability is required, `podium admin migrate-to-standard` exports the standalone state to a standard deployment:
 
 ```bash
 podium admin migrate-to-standard --postgres <dsn> --object-store <url>

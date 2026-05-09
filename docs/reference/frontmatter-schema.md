@@ -45,7 +45,7 @@ Every artifact directory contains an `ARTIFACT.md`. Skill artifacts (`type: skil
 | `sandbox_profile` | enum | `unrestricted` (default), `read-only-fs`, `network-isolated`, `seccomp-strict`. |
 | `effort_hint` | enum | `low`, `medium`, `high`, `max`. Advisory. |
 | `model_class_hint` | enum | `nano`, `small`, `medium`, `large`, `frontier`. Advisory. |
-| `sbom` | object | CycloneDX or SPDX inline or referenced. Required by lint for sensitivity ≥ medium. |
+| `sbom` | object | Author-supplied SBOM hint (e.g. `{format: cyclonedx-1.5, ref: ./sbom.json}`). Stored verbatim and exposed on `load_artifact`; Podium does not parse, validate, or scan it. Vulnerability scanning is a CI/CD concern. |
 
 ### Type-specific fields
 

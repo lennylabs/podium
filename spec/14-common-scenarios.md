@@ -179,7 +179,7 @@ Registry runs entirely on an internal network with no public ingress.
 3. Embedding provider: `embedded-onnx` (no external API calls) or `ollama` pointed at a local model server. Vector backend: pgvector (no external service).
 4. Sigstore-keyless requires public OIDC infrastructure; air-gapped deployments use the registry-managed signing key path instead.
 
-**Consumers:** internal endpoint only; OIDC flow stays inside the network. CVE feeds either disabled or mirrored from an internal vulnerability database.
+**Consumers:** internal endpoint only; OIDC flow stays inside the network.
 
 ## 14.13 Mixed-harness developer
 

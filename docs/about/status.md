@@ -46,7 +46,7 @@ The full build sequence lives in [`spec/10-mvp-build-sequence.md`](https://githu
 
 ### Enterprise phases
 
-Phases 5+ add the standard-deployment capabilities: multi-tenant Postgres data model, GitProvider + webhook ingest, LayerComposer + visibility filtering + OIDC + SCIM, domain composition, versioning + immutability, layer CLI, identity providers, workspace overlay + local search, the remaining harness adapters + conformance suite, the TS SDK, dependency graph, audit log + integrity, vulnerability tracking, deployment artifacts (Helm chart, Grafana dashboard, runbook), and the example artifact registry.
+Phases 5+ add the standard-deployment capabilities: multi-tenant Postgres data model, GitProvider + webhook ingest, LayerComposer + visibility filtering + OIDC + SCIM, domain composition, versioning + immutability, layer CLI, identity providers, workspace overlay + local search, the remaining harness adapters + conformance suite, the TS SDK, dependency graph, audit log + integrity, deployment artifacts (Helm chart, Grafana dashboard, runbook), and the example artifact registry.
 
 Read the build sequence in the spec for the full list and rationale.
 

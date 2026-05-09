@@ -21,7 +21,6 @@ Every significant event, each carrying a trace ID (W3C Trace Context):
 | `admin.granted`                | An admin grant was added or revoked                                | Registry |
 | `visibility.denied`            | A call was rejected because the requested resource was not visible | Registry |
 | `freeze.break_glass`           | An admin used break-glass during a freeze window                   | Registry |
-| `vulnerability.detected`       | CVE matched an artifact's SBOM                                     | Registry |
 | `user.erased`                  | Admin invoked the GDPR erasure command                             | Registry |
 | `registry.read_only_entered`   | Registry entered read-only mode (Postgres primary unreachable)     | Registry |
 | `registry.read_only_exited`    | Registry exited read-only mode (Postgres primary restored)         | Registry |

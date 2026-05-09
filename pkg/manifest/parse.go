@@ -51,9 +51,8 @@ func SplitFrontmatter(src []byte) (frontmatter []byte, body []byte, err error) {
 // frontmatter populates Artifact.Body.
 //
 // ParseArtifact handles syntactic decoding only. Semantic lint rules (cross
-// reference resolution, sensitivity / SBOM enforcement, name / version
-// validation against the spec's per-type rules) live in pkg/lint and run on
-// top of the parsed value.
+// reference resolution, name / version validation against the spec's
+// per-type rules) live in pkg/lint and run on top of the parsed value.
 func ParseArtifact(src []byte) (*Artifact, error) {
 	fm, body, err := SplitFrontmatter(src)
 	if err != nil {

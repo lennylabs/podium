@@ -105,7 +105,6 @@ The registry emits outbound webhooks for:
 - `domain.published`: a `DOMAIN.md` was added or changed.
 - `layer.ingested`: a layer completed an ingest cycle (with summary counts).
 - `layer.history_rewritten`: force-push detected in a `git` layer.
-- `vulnerability.detected`: a CVE matched an artifact's SBOM.
 
 Schema:
 

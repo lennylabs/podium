@@ -18,7 +18,7 @@ What Podium provides:
 
 - **Layered composition with deterministic merge.** An ordered list of layers (admin-defined, user-defined, and the workspace local overlay) composes per request with explicit precedence and no silent shadowing. `extends:` lets a higher-precedence artifact inherit and refine a lower one without forking. Most-restrictive-wins for security fields; last-layer-wins for descriptions.
 - **Type heterogeneity as a first principle.** Skills are one of several first-class types. Agents, contexts, commands, rules, hooks, and MCP server registrations sit alongside; extension types register through a `TypeProvider` SPI. Cross-type dependency edges (an agent's `delegates_to:` another agent; a skill's `mcpServers:` references that resolve to `mcp-server`-type artifacts) feed impact analysis.
-- **Governance built in.** Per-layer visibility, classification metadata, freeze windows, signing, hash-chained audit, SBOM ingestion, and CVE tracking are first-class. Authoring controls (review requirements, code ownership) live in the Git provider's branch protection. Podium does not duplicate them.
+- **Governance built in.** Per-layer visibility, classification metadata, freeze windows, signing, and hash-chained audit are first-class. Authoring controls (review requirements, code ownership) live in the Git provider's branch protection. Podium does not duplicate them.
 - **Lazy materialization at scale.** Sessions can start empty (MCP path) or with the user's effective view pre-synced (file path). Catalogs of thousands of artifacts don't pollute the system prompt; the agent navigates and loads what it needs.
 - **One canonical authoring format, multiple delivery formats.** Artifacts are authored in a uniform Podium format. The configured `HarnessAdapter` translates at delivery time for harnesses that have native conventions (and is a no-op for runtimes that prefer the canonical layout).
 - **Pluggable identity.** One MCP server binary serves every deployment context: interactive OAuth on developer hosts, injected session token in managed runtimes. The same identity providers are available to `podium sync` and the SDKs.
@@ -28,6 +28,7 @@ What Podium is not:
 - Not an agent runtime. Sessions, agent execution, policy compilation, and downstream tool wiring belong to hosts.
 - Not a public artifact marketplace. Public-skill marketplaces (e.g. Vercel skills.sh) fill that role for community content. Podium serves internal catalogs, with optional public mirroring.
 - Not a replacement for harness-native conventions. Where a harness has a native skills directory, agent format, or prompt convention, Podium delivers into it via the harness adapter; it doesn't try to displace it.
+- Not a security scanner. Bundled-resource bytes (scripts, configs, SBOMs, models) are opaque to the registry: it stores them, hashes them, hands them to consumers. Vulnerability scanning, dependency-tree analysis, and CVE tracking are CI/CD concerns, run by the source repository's pre-merge gate and the deployer's continuous scanning. SBOMs travel as ordinary bundled resources for consumers that want them; the registry does not parse or validate them.
 
 ## 1.2 Problem Statement
 

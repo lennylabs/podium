@@ -1,8 +1,7 @@
 // Package lint runs ingest-time validation across artifact and domain
 // manifests. Lint rules implement spec §4.3 (universal field constraints),
 // §4.3.4 (agentskills.io compliance for skills), §4.5.1 / §4.5.2 (DOMAIN.md
-// rules), §4.7.7 (SBOM enforcement for sensitivity ≥ medium), and
-// §4.4 (bundled-resource size budgets).
+// rules), and §4.4 (bundled-resource size budgets).
 //
 // Linter.Lint walks an open filesystem registry and returns a diagnostic
 // slice; severity drives whether a host treats a result as an error
@@ -81,7 +80,6 @@ func AllRules() []Rule {
 		ruleSkillCompliance{},
 		ruleNameSyntax{},
 		ruleVersionSemver{},
-		ruleSensitivitySBOM{},
 		ruleHookConsistency{},
 		ruleEffortHintAppliesToType{},
 	}
@@ -199,26 +197,6 @@ func (r ruleVersionSemver) Check(_ *filesystem.Registry, records []filesystem.Ar
 		}
 		if err := manifest.ValidateVersion(rec.Artifact.Version); err != nil {
 			out = append(out, errMsg(rec.ID, r, err.Error()))
-		}
-	}
-	return out
-}
-
-type ruleSensitivitySBOM struct{}
-
-func (ruleSensitivitySBOM) Code() string        { return "lint.sbom_required_for_sensitive" }
-func (ruleSensitivitySBOM) SpecSection() string { return "§4.7.7" }
-
-func (r ruleSensitivitySBOM) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
-	var out []Diagnostic
-	for _, rec := range records {
-		s := rec.Artifact.Sensitivity
-		if s != manifest.SensitivityMedium && s != manifest.SensitivityHigh {
-			continue
-		}
-		if rec.Artifact.SBOM == nil {
-			out = append(out, errMsg(rec.ID, r,
-				fmt.Sprintf("sensitivity: %s requires sbom: declaration", s)))
 		}
 	}
 	return out

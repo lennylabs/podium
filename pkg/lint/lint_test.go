@@ -149,31 +149,6 @@ body
 	}
 }
 
-// Spec: §4.7.7 — sensitivity ≥ medium requires an sbom: declaration.
-// Phase: 1
-func TestLint_SensitivityRequiresSBOM(t *testing.T) {
-	testharness.RequirePhase(t, 1)
-	t.Parallel()
-	reg, records := openFixture(t,
-		testharness.WriteTreeOption{
-			Path: "x/ARTIFACT.md",
-			Content: `---
-type: agent
-version: 1.0.0
-sensitivity: medium
-description: high-sensitivity artifact without an SBOM
----
-
-body
-`,
-		},
-	)
-	diags := (&Linter{}).Lint(reg, records)
-	if !hasCode(diags, "lint.sbom_required_for_sensitive") {
-		t.Errorf("expected lint.sbom_required_for_sensitive, got: %v", diags)
-	}
-}
-
 // Spec: §4.3 — effort_hint and model_class_hint apply only to types
 // agent, skill, and command. Setting them on context, rule, hook, or
 // mcp-server emits a warning.

@@ -135,40 +135,23 @@ rekor / fulcio deps (~30 MB binary increase).
 
 ---
 
-## 5. Phase 17 — real CVE feed adapters
+## 5. Phase 17 — out of scope
 
-**Blocker.** Each feed has its own JSON shape; no fetcher.
+Vulnerability scanning is intentionally **not** a registry
+responsibility (§1.1, §4.7.7). The natural place for CVE checks is
+the CI pipeline that authored the artifact (pre-merge) and the CD
+pipeline that deploys agents using it (continuous). Bundle contents
+are opaque to Podium; the registry stores bytes, hashes them, and
+hands them to consumers.
 
-**Proposal.**
+The earlier `pkg/vuln` scaffolding (PURL parser, SBOM parsers,
+naive matcher) was removed once this scope decision landed.
+Authors who ship an SBOM bundle it as an ordinary resource (e.g.
+`bom.json`); consumers fetch it via the bundled-resource path on
+`load_artifact` and feed their own scanner.
 
-- `pkg/vuln/feeds/` directory with per-feed adapters.
-- **OSV** (broadest coverage):
-  - Periodic GET against `https://api.osv.dev/v1/query` per
-    SBOM component PURL.
-  - Or batch via `query/batch` endpoint.
-  - Schema: `github.com/ossf/osv-schema/bindings/go/osvschema`.
-- **NVD**:
-  - GET `https://services.nvd.nist.gov/rest/json/cves/2.0` with
-    incremental `lastModStartDate`/`lastModEndDate`.
-  - Persistent cursor in store.
-- **GHSA**:
-  - GitHub GraphQL `securityAdvisories`. Requires a GitHub PAT
-    (env `PODIUM_GHSA_TOKEN`).
-- All three normalize to the existing `vuln.CVE` struct.
-- Scheduler in `cmd/podium-server` runs periodic ingest;
-  per-tenant on/off via tenant config.
-
-**Effort.** Large, ~600 lines for all three. Per-feed scheduler
-adds ~150 lines.
-
-**Decisions.**
-1. Which feeds to ship first? Recommend OSV (most permissive
-   licensing, broadest coverage, no API key).
-2. Periodic ingest cadence? 1 hour default.
-3. Where does the PAT come from for GHSA? Tenant config.
-
-**Can ship now.** OSV adapter standalone; NVD + GHSA after
-decisions.
+No work to do here. The phase number is preserved in
+`spec/10-mvp-build-sequence.md` for stable cross-references.
 
 ---
 
@@ -332,22 +315,11 @@ ONNX path needs build-tag wiring.
 
 ---
 
-## Suggested execution order
+## Status as of the most recent session
 
-If you want to hand off the longest tail of work to a follow-up
-session, the order that minimizes session-to-session blocking is:
+Phases 1, 2, 3, 5, 8, 9, 12, 16 are now REAL on the
+`initial-implementation` branch. Phase 17 is **out of scope** —
+vulnerability scanning lives in CI/CD per §1.1 / §4.7.7.
 
-1. **Phase 8 fold rendering** (no decisions, pure function).
-2. **Phase 9 force-push** (no decisions, uses existing go-git).
-3. **Phase 3 --watch** (no decisions, uses existing fsnotify).
-4. **Phase 12 overlay integration** (no decisions).
-5. **Phase 5 Postgres backend** (no decisions).
-6. **Phase 16 retention + erasure** (no decisions; anchoring waits).
-7. **Phase 17 OSV adapter** (NVD + GHSA after decisions).
-8. **Phase 2 presigned URLs** (after AWS SDK decision).
-9. **Vector store** (after decisions on ONNX + sqlite-vec).
-10. **Phase 1 Sigstore** (largest, last; after Sigstore-go decision).
-
-Items 1–6 don't need any decisions — they can be picked up by a
-follow-up session today. Items 7–10 each carry a single library /
-infrastructure choice the user needs to confirm.
+The single remaining item is the vector store + embedding pipeline
+(§7 in this doc).

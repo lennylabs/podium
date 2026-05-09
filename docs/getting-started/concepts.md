@@ -167,7 +167,7 @@ host's filesystem. For `load_artifact`, the MCP server runs these
 steps:
 
 1. **Fetch**: download bytes (or read from cache).
-2. **Verify**: signature, content hash, optional SBOM walk.
+2. **Verify**: signature and content hash. (Bundle contents are not introspected; vulnerability scanning is a CI/CD concern, not a registry one.)
 3. **Adapt**: run the harness adapter to translate to native format.
 4. **Hook**: run any configured `MaterializationHook` plugins for
    per-file rewrites.

@@ -33,7 +33,7 @@ Tracks the state of the Podium implementation on the
 | 14 | REAL    | TS SDK with subscriptions, dependentsOf, previewScope. `podium sync override` / `save-as` / `profile edit`. |
 | 15 | REAL    | Cross-type dependency graph populated by ingest. core.DependentsOf + core.PreviewScope. /v1/dependents, /v1/scope/preview, podium impact. |
 | 16 | REAL    | Audit emission per call. File-backed JSON Lines sink with hash-chain integrity. PII redaction via PIIScrubber + RedactFields. Retention enforcement (Enforce) and GDPR erasure (EraseUser) with chain rebuild; `podium admin retention` and `podium admin erase` CLIs. Transparency anchoring (audit.Anchor) signs the chain head via the configured Sigstore-keyless provider and records the Rekor log index in an audit.anchored event. |
-| 17 | PARTIAL | PURL parser + structural CVE matching + CycloneDX / SPDX SBOM parsers + ParseSBOM dispatch. Real CVE feed ingestion (NVD / OSV / GHSA) and notification providers still pending. |
+| 17 | OUT-OF-SCOPE | Vulnerability scanning is intentionally out of registry scope (§1.1, §4.7.7). The natural place for CVE checks is the CI pipeline that authored the artifact and the CD pipeline that deploys agents using it. Authors who ship an SBOM bundle it as an ordinary resource; consumers fetch it via `load_artifact` and feed their own scanner. The registry stores SBOMs as opaque bytes and performs no parsing, scoring, or live feed ingestion. |
 | 18 | REAL    | Helm chart + Dockerfile + runbook + Grafana dashboard JSON. |
 | 19 | REAL    | Reference fixture covers every first-class type (skill, agent, context, command, rule, hook, mcp-server) plus an unlisted helpers domain. |
 
@@ -54,11 +54,7 @@ Tracks the state of the Podium implementation on the
 Each remaining item carries a single dependency or infrastructure
 choice the project owner needs to make.
 
-1. **Phase 17 real CVE feed adapters.** NVD / OSV / GHSA periodic
-   ingestion; the OSV adapter is the recommended starting point
-   (no API key, broadest coverage). NVD + GHSA need a tenant-config
-   shape for keys / cadence. All three can be implemented stdlib-only.
-2. **Vector store + embedding pipeline** for §4.7 hybrid retrieval.
+1. **Vector store + embedding pipeline** for §4.7 hybrid retrieval.
    Needs at least one embedding provider (recommended: ship the
    API providers — OpenAI / Voyage / Cohere — first; add pgvector
    for the Postgres path; add sqlite-vec + embedded-onnx behind a

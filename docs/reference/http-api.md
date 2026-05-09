@@ -327,7 +327,6 @@ The registry emits outbound webhooks for change events. Configure receivers per 
 | `domain.published` | A `DOMAIN.md` was added or changed. |
 | `layer.ingested` | A layer completed an ingest cycle. |
 | `layer.history_rewritten` | Force-push detected on a `git`-source layer. |
-| `vulnerability.detected` | A CVE matched an artifact's SBOM. |
 
 Schema:
 
