@@ -13,8 +13,12 @@ jobs:
           go-version: '1.24'
 
       - run: make tools
-      - name: Spec coverage report
+      - name: Spec section coverage
         run: |
           ./bin/speccov report
           ./bin/speccov uncovered || true
           ./bin/speccov drift
+      - name: Matrix audit
+        run: ./bin/matrix audit || true   # advisory until we close the gaps
+      - name: Coverage budget
+        run: make coverage-budget

@@ -10,6 +10,7 @@ import (
 // Spec: §4.6 Visibility — public layer is visible to everyone, including
 // unauthenticated callers.
 // Phase: 7
+// Matrix: §4.6 (public)
 func TestVisible_PublicLayerEveryone(t *testing.T) {
 	testharness.RequirePhase(t, 7)
 	t.Parallel()
@@ -24,6 +25,7 @@ func TestVisible_PublicLayerEveryone(t *testing.T) {
 
 // Spec: §4.6 — organization: true requires an authenticated org member.
 // Phase: 7
+// Matrix: §4.6 (organization)
 func TestVisible_OrgRequiresAuth(t *testing.T) {
 	testharness.RequirePhase(t, 7)
 	t.Parallel()
@@ -38,6 +40,7 @@ func TestVisible_OrgRequiresAuth(t *testing.T) {
 
 // Spec: §4.6 — groups: matches OIDC group claims.
 // Phase: 7
+// Matrix: §4.6 (groups)
 func TestVisible_GroupsMatch(t *testing.T) {
 	testharness.RequirePhase(t, 7)
 	t.Parallel()
@@ -52,6 +55,7 @@ func TestVisible_GroupsMatch(t *testing.T) {
 
 // Spec: §4.6 — multiple visibility fields combine as a union.
 // Phase: 7
+// Matrix: §4.6 (groups_users)
 func TestVisible_FieldUnion(t *testing.T) {
 	testharness.RequirePhase(t, 7)
 	t.Parallel()

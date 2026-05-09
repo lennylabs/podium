@@ -64,7 +64,7 @@ func TestParseAnnotations_ExtractsSpecAndPhase(t *testing.T) {
 	t.Parallel()
 	in := `Spec: §4.6 Layer ordering — admin layers come first.
 Phase: 7`
-	c, p := parseAnnotations(in)
+	c, p, _ := parseAnnotations(in)
 	if c.SectionID != "§4.6" {
 		t.Errorf("SectionID = %q, want §4.6", c.SectionID)
 	}
@@ -80,6 +80,29 @@ Phase: 7`
 	}
 	if p != 7 {
 		t.Errorf("Phase = %d, want 7", p)
+	}
+}
+
+// Spec: n/a — Matrix annotations let tests claim coverage of specific
+// cells in spec tables (capability matrix, error codes, failure modes).
+// Phase: 0
+func TestParseAnnotations_MatrixCells(t *testing.T) {
+	t.Parallel()
+	in := `Spec: §6.7.1 capability matrix — claude-code supports rule_mode: glob.
+Phase: 13
+Matrix: §6.7.1 (claude-code, rule_mode_glob)
+Matrix: §6.7.1 (claude-code, rule_mode_always)`
+	_, _, cells := parseAnnotations(in)
+	if len(cells) != 2 {
+		t.Fatalf("got %d cells, want 2: %+v", len(cells), cells)
+	}
+	if cells[0].Matrix != "§6.7.1" {
+		t.Errorf("Matrix = %q", cells[0].Matrix)
+	}
+	if len(cells[0].Keys) != 2 ||
+		cells[0].Keys[0] != "claude-code" ||
+		cells[0].Keys[1] != "rule_mode_glob" {
+		t.Errorf("Keys = %v", cells[0].Keys)
 	}
 }
 
@@ -111,7 +134,7 @@ func TestSplitNote_HandlesSeparatorVariants(t *testing.T) {
 func TestParseAnnotations_AcceptsNotApplicable(t *testing.T) {
 	t.Parallel()
 	in := "Spec: n/a — internal helper."
-	c, _ := parseAnnotations(in)
+	c, _, _ := parseAnnotations(in)
 	if c.SectionID != "n/a" {
 		t.Errorf("SectionID = %q, want n/a", c.SectionID)
 	}
@@ -121,7 +144,7 @@ func TestParseAnnotations_AcceptsNotApplicable(t *testing.T) {
 // Phase: 0
 func TestParseAnnotations_DefaultsPhaseToMinusOne(t *testing.T) {
 	t.Parallel()
-	c, p := parseAnnotations("Spec: §1.1 something")
+	c, p, _ := parseAnnotations("Spec: §1.1 something")
 	if c.SectionID != "§1.1" {
 		t.Errorf("SectionID = %q, want §1.1", c.SectionID)
 	}

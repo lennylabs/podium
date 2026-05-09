@@ -155,6 +155,7 @@ func TestWalk_CapturesBundledResources(t *testing.T) {
 // Spec: §4.6 — two layers contributing the same canonical artifact ID
 // without extends: are rejected (default Walk behavior).
 // Phase: 0
+// Matrix: §6.10 (ingest.collision)
 func TestWalk_CollisionWithoutExtendsFails(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

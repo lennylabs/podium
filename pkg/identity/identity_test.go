@@ -36,6 +36,7 @@ func TestInjectedSessionToken_Verifies(t *testing.T) {
 // Spec: §6.3.2 / §6.10 — unsigned token rejection surfaces as
 // ErrUntrustedRuntime.
 // Phase: 11
+// Matrix: §6.10 (auth.untrusted_runtime)
 func TestInjectedSessionToken_RejectsUntrusted(t *testing.T) {
 	testharness.RequirePhase(t, 11)
 	t.Parallel()

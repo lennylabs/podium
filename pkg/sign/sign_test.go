@@ -26,6 +26,7 @@ func TestNoop_RoundTrip(t *testing.T) {
 // Spec: §4.7.9 — a signature that does not match the content hash fails
 // with ErrSignatureInvalid (maps to materialize.signature_invalid).
 // Phase: 1
+// Matrix: §6.10 (materialize.signature_invalid)
 func TestNoop_VerifyRejectsMismatch(t *testing.T) {
 	testharness.RequirePhase(t, 1)
 	t.Parallel()

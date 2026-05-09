@@ -23,7 +23,8 @@ export PODIUM_PHASE := $(PHASE)
 .PHONY: help test-fast test-medium test-slow test-phase test \
         lint update-golden status next advance \
         speccov speccov-uncovered speccov-drift speccov-report \
-        coverage coverage-gate \
+        coverage coverage-budget coverage-per-package coverage-gate \
+        matrix matrix-list matrix-audit matrix-scaffold \
         tools clean
 
 help:
@@ -42,7 +43,12 @@ help:
 	@echo "  speccov-uncovered  Print spec sections with no citing test"
 	@echo "  speccov-drift    Fail if any test cites a missing spec section"
 	@echo "  coverage         Run tests with -coverprofile and print summary"
+	@echo "  coverage-budget  Assert overall coverage ≥ COVERAGE_MIN (default 50)"
+	@echo "  coverage-per-package  Print per-package coverage breakdown"
 	@echo "  coverage-gate    Run all coverage checks the CI runs"
+	@echo "  matrix-audit     Audit spec-table coverage (§6.7.1, §6.10, etc.)"
+	@echo "  matrix-list      List the documented spec matrices"
+	@echo "  matrix-scaffold  Print Go test stubs for missing matrix cells"
 	@echo "  tools            Build the helper binaries to ./bin/"
 	@echo "  clean            Remove build artifacts"
 
@@ -89,11 +95,31 @@ speccov-uncovered: tools
 speccov-drift: tools
 	@./bin/speccov drift
 
-coverage:
-	$(GO) test -count=1 -coverprofile=coverage.out ./...
-	@$(GO) tool cover -func=coverage.out | tail -1
+COVERAGE_MIN ?= 50
 
-coverage-gate: lint speccov-drift coverage
+coverage: tools
+	@./bin/coverage report
+
+coverage-budget: tools
+	@./bin/coverage budget -min $(COVERAGE_MIN)
+
+coverage-per-package: tools
+	@./bin/coverage per-package
+
+# ----- Matrix audit ---------------------------------------------------------
+
+matrix: matrix-audit
+
+matrix-audit: tools
+	@./bin/matrix audit
+
+matrix-list: tools
+	@./bin/matrix list
+
+matrix-scaffold: tools
+	@./bin/matrix scaffold
+
+coverage-gate: lint speccov-drift matrix-audit coverage-budget
 
 # ----- Lint / golden / tools / clean ----------------------------------------
 
@@ -112,6 +138,8 @@ tools:
 	@mkdir -p bin
 	$(GO) build -o bin/speccov ./tools/speccov
 	$(GO) build -o bin/phasegate ./tools/phasegate
+	$(GO) build -o bin/matrix ./tools/matrix
+	$(GO) build -o bin/coverage ./tools/coverage
 
 clean:
 	rm -rf bin coverage.out

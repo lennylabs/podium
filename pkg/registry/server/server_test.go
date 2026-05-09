@@ -176,6 +176,7 @@ func TestSearchArtifacts_TypeFilter(t *testing.T) {
 // Spec: §5 search_artifacts — top_k > 50 is rejected with
 // registry.invalid_argument.
 // Phase: 2
+// Matrix: §6.10 (registry.invalid_argument)
 func TestSearchArtifacts_TopKBoundary(t *testing.T) {
 	testharness.RequirePhase(t, 2)
 	t.Parallel()
@@ -224,6 +225,7 @@ func TestLoadArtifact_ReturnsManifestAndResources(t *testing.T) {
 // Spec: §6.10 / §5 — load_artifact for an unknown ID returns 404 with
 // registry.not_found.
 // Phase: 2
+// Matrix: §6.10 (registry.not_found)
 func TestLoadArtifact_NotFound(t *testing.T) {
 	testharness.RequirePhase(t, 2)
 	t.Parallel()

@@ -58,6 +58,7 @@ func TestWrite_NoTmpFilesAfterSuccess(t *testing.T) {
 // Spec: §6.7 sandbox contract — paths with .. that escape the destination
 // fail with ErrOutOfDestination, no files are written.
 // Phase: 0
+// Matrix: §6.10 (materialize.sandbox_violation)
 func TestWrite_RejectsParentEscape(t *testing.T) {
 	t.Parallel()
 	dest := t.TempDir()

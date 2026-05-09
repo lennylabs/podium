@@ -149,6 +149,7 @@ layer_order:
 // Spec: §13.10 --layer-path modes — multi_layer: true with manifest files
 // at the top level of <path> fails with config.layer_path_ambiguous.
 // Phase: 0
+// Matrix: §6.10 (config.layer_path_ambiguous)
 func TestOpen_MultiLayer_AmbiguousFails(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

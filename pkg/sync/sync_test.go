@@ -127,6 +127,7 @@ func TestRun_DefaultAdapterIsNone(t *testing.T) {
 
 // Spec: §6.10 namespace — an unknown adapter returns config.unknown_harness.
 // Phase: 0
+// Matrix: §6.10 (config.unknown_harness)
 func TestRun_UnknownAdapterFails(t *testing.T) {
 	t.Parallel()
 	registry := t.TempDir()

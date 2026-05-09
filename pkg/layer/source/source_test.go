@@ -46,6 +46,7 @@ func TestLocal_RequiresPath(t *testing.T) {
 // Spec: §6.10 namespace — missing path returns ErrSourceUnreachable
 // (maps to ingest.source_unreachable).
 // Phase: 6
+// Matrix: §6.10 (ingest.source_unreachable)
 func TestLocal_MissingPathFailsSourceUnreachable(t *testing.T) {
 	testharness.RequirePhase(t, 6)
 	t.Parallel()

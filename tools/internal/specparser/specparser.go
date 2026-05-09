@@ -43,6 +43,17 @@ type Citation struct {
 	Note      string // assertion text after the section title
 }
 
+// MatrixCell is a per-cell tag attached to a test, asserting that the
+// test verifies one cell of a documented spec matrix (§6.7.1 capability
+// matrix, §6.10 error codes, §6.9 failure modes, §4.6 visibility unions).
+type MatrixCell struct {
+	// Matrix identifies the matrix (e.g., "§6.7.1").
+	Matrix string
+	// Keys identifies the specific cell within the matrix
+	// (e.g., ["claude-code", "rule_mode_glob"]).
+	Keys []string
+}
+
 // Test represents a single parsed test function.
 type Test struct {
 	Name     string
@@ -50,6 +61,7 @@ type Test struct {
 	Line     int
 	Phase    int
 	Citation Citation
+	Matrix   []MatrixCell
 	Language string // "go" | "python" | "typescript"
 }
 
@@ -214,7 +226,7 @@ func parseGoFile(path string) ([]Test, error) {
 			Phase:    -1,
 		}
 		if fn.Doc != nil {
-			t.Citation, t.Phase = parseAnnotations(fn.Doc.Text())
+			t.Citation, t.Phase, t.Matrix = parseAnnotations(fn.Doc.Text())
 		}
 		out = append(out, t)
 	}
@@ -241,7 +253,7 @@ func parsePyFile(path string) []Test {
 			continue
 		}
 		comment := collectPrecedingComments(lines, i, "#")
-		c, p := parseAnnotations(comment)
+		c, p, mat := parseAnnotations(comment)
 		out = append(out, Test{
 			Name:     m[1],
 			File:     path,
@@ -249,6 +261,7 @@ func parsePyFile(path string) []Test {
 			Language: "python",
 			Phase:    p,
 			Citation: c,
+			Matrix:   mat,
 		})
 	}
 	return out
@@ -267,7 +280,7 @@ func parseTSFile(path string) []Test {
 			continue
 		}
 		comment := collectPrecedingComments(lines, i, "//")
-		c, p := parseAnnotations(comment)
+		c, p, mat := parseAnnotations(comment)
 		out = append(out, Test{
 			Name:     m[1],
 			File:     path,
@@ -275,6 +288,7 @@ func parseTSFile(path string) []Test {
 			Language: "typescript",
 			Phase:    p,
 			Citation: c,
+			Matrix:   mat,
 		})
 	}
 	return out
@@ -303,19 +317,24 @@ func collectPrecedingComments(lines []string, index int, prefix string) string {
 	return strings.Join(parts, "\n")
 }
 
-// parseAnnotations extracts the spec citation and phase number from a comment
-// block. Recognized lines (case-insensitive on the keyword):
+// parseAnnotations extracts the spec citation, phase number, and any
+// Matrix cell tags from a comment block.
 //
-//	Spec: §4.6 short title — assertion text.
-//	Spec: n/a — reason for not citing the spec.
-//	Phase: 0
+// Recognized lines (case-insensitive on the keyword):
+//
+//	Spec:   §4.6 short title — assertion text.
+//	Spec:   n/a — reason for not citing the spec.
+//	Phase:  0
+//	Matrix: §6.7.1 (claude-code, rule_mode_glob)
 //
 // A `Spec:` annotation can wrap across multiple comment lines; lines that
 // follow without a new keyword are treated as continuations of the
-// preceding Spec note. The first Spec / Phase annotation wins.
-func parseAnnotations(comment string) (Citation, int) {
+// preceding Spec note. The first Spec and Phase annotations win; every
+// Matrix annotation is collected.
+func parseAnnotations(comment string) (Citation, int, []MatrixCell) {
 	c := Citation{}
 	phase := -1
+	var matrix []MatrixCell
 	lines := strings.Split(comment, "\n")
 	for i := 0; i < len(lines); i++ {
 		line := strings.TrimSpace(lines[i])
@@ -341,18 +360,41 @@ func parseAnnotations(comment string) (Citation, int) {
 			if err == nil && phase == -1 {
 				phase = n
 			}
+		case startsWithCI(line, "Matrix:"):
+			if cell, ok := parseMatrixLine(line); ok {
+				matrix = append(matrix, cell)
+			}
 		}
 	}
-	return c, phase
+	return c, phase, matrix
 }
 
 func isAnnotationKeyword(line string) bool {
-	for _, kw := range []string{"Spec:", "Phase:"} {
+	for _, kw := range []string{"Spec:", "Phase:", "Matrix:"} {
 		if startsWithCI(line, kw) {
 			return true
 		}
 	}
 	return false
+}
+
+// matrixLineRegex captures `Matrix: §X.Y (k1, k2, ...)`.
+var matrixLineRegex = regexp.MustCompile(`^[Mm]atrix:\s*(§\d+(?:\.\d+)*)\s*\(([^)]*)\)\s*$`)
+
+func parseMatrixLine(line string) (MatrixCell, bool) {
+	m := matrixLineRegex.FindStringSubmatch(line)
+	if m == nil {
+		return MatrixCell{}, false
+	}
+	rawKeys := strings.Split(m[2], ",")
+	keys := make([]string, 0, len(rawKeys))
+	for _, k := range rawKeys {
+		k = strings.TrimSpace(k)
+		if k != "" {
+			keys = append(keys, k)
+		}
+	}
+	return MatrixCell{Matrix: m[1], Keys: keys}, true
 }
 
 func startsWithCI(line, prefix string) bool {
