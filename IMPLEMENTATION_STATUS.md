@@ -297,10 +297,11 @@ detailed plan with effort estimates and test strategies.
   yet construct them. Both need a persistence-backed signer
   and receiver store wired first.
 - **CLI surface (Batch B, partial).** `podium serve`,
-  `podium config show`, `podium layer update`, and
-  `podium layer watch` ship in this branch. `cache prune`,
-  `import`, `admin migrate-to-standard`, and
-  `admin runtime register` remain.
+  `podium config show`, `podium layer update`,
+  `podium layer watch`, `podium cache prune`, and
+  `podium import` ship in this branch.
+  `admin migrate-to-standard` and `admin runtime register`
+  remain (both require new persistent state).
 - **Real new features (Batch C, ~2 days).**
   `NotificationProvider` SPI, `TypeProvider` SPI,
   `podium-py` SDK.

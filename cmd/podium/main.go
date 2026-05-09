@@ -44,6 +44,10 @@ func main() {
 		os.Exit(serveCmd(os.Args[2:]))
 	case "config":
 		os.Exit(configCmd(os.Args[2:]))
+	case "cache":
+		os.Exit(cacheCmd(os.Args[2:]))
+	case "import":
+		os.Exit(importCmd(os.Args[2:]))
 	case "sync":
 		os.Exit(syncCmd(os.Args[2:]))
 	case "lint":
@@ -91,6 +95,8 @@ const usage = `usage: podium <command> [flags]
 Commands:
   serve               Run the §13.10 standalone registry server in-process.
   config show         Print the resolved server configuration with sources.
+  cache prune         Remove content-cache buckets older than N days.
+  import              Convert a skills/* tree into a Podium-shaped layer.
   sync                Materialize the caller's effective view through a HarnessAdapter.
   sync override       Add or remove ephemeral artifact toggles.
   sync save-as        Capture the current target state as a sync.yaml profile.

@@ -80,8 +80,15 @@ below is the punch summary.
 - `podium layer update` / `layer watch` — DONE. PUT-style partial
   patch against /v1/layers/update?id=ID; watch polls reingest on
   an interval.
-- `podium cache prune`, `podium import` — pending.
-- `podium admin migrate-to-standard` / `runtime register` — pending.
+- `podium cache prune` — DONE. Walks `~/.podium/cache/`, removes
+  buckets older than `--days N` (default 30); honors `--dir` and
+  `--dry-run`.
+- `podium import` — DONE. Walks a `skills/` directory, rewrites
+  each subdirectory as a Podium-shaped artifact (ARTIFACT.md +
+  SKILL.md + bundled resources).
+- `podium admin migrate-to-standard` / `runtime register` —
+  pending. Both need new persistent state (runtime trust keys,
+  staged migration plans).
 
 **Real new features** (Batch C):
 - `NotificationProvider` SPI (§9): ingest-failure /
