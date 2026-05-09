@@ -40,6 +40,8 @@ func TestNoop_VerifyRejectsMismatch(t *testing.T) {
 // Spec: §6.2 — PolicyMediumAndAbove enforces verification for medium
 // and high sensitivity, skips low.
 // Phase: 1
+// Matrix: §6.10 (materialize.signature_missing)
+// Matrix: §6.10 (materialize.signature_invalid)
 func TestEnforceVerification_PolicyMediumAndAbove(t *testing.T) {
 	testharness.RequirePhase(t, 1)
 	t.Parallel()

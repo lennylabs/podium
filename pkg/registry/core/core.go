@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/lennylabs/podium/pkg/layer"
@@ -38,10 +39,21 @@ var (
 // Registry is the core registry type. Construct one per tenant; the
 // caller passes Identity in per request to drive visibility filtering.
 type Registry struct {
-	store    store.Store
-	tenantID string
-	layers   []layer.Layer
-	audit    AuditEmitter
+	store      store.Store
+	tenantID   string
+	layers     []layer.Layer
+	audit      AuditEmitter
+	sessionsMu sync.Mutex
+	sessions   map[sessionKey]string
+}
+
+// sessionKey identifies one (session, artifact) latest-resolution
+// memo entry. §4.7.6: "the first latest lookup within a session is
+// recorded and reused for all subsequent same-id lookups in that
+// session".
+type sessionKey struct {
+	session string
+	id      string
 }
 
 // AuditEmitter records audit events for every meta-tool call per §8.
@@ -416,6 +428,10 @@ type LoadArtifactResult struct {
 // "latest" per §4.7.6.
 type LoadArtifactOptions struct {
 	Version string
+	// SessionID enables consistent latest resolution within a session
+	// (§4.7.6). The first latest lookup within a session is recorded
+	// and reused for all subsequent same-id lookups in the session.
+	SessionID string
 }
 
 // LoadArtifact returns the manifest body. When the resolved manifest
@@ -461,12 +477,50 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 	if pin.Kind == version.PinContentHash {
 		return nil, fmt.Errorf("%w: no version with content hash sha256:%s", ErrNotFound, pin.Hash)
 	}
+
+	// §4.7.6 session-consistent latest: the first latest lookup within
+	// a session pins, subsequent same-id lookups in the session
+	// resolve to the same version regardless of newer ingests.
+	if pin.Kind == version.PinLatest && opts.SessionID != "" {
+		if pinned, ok := r.lookupSessionPin(opts.SessionID, artifactID); ok {
+			if rec, ok := byVersion[pinned]; ok {
+				return r.assembleResult(ctx, rec)
+			}
+		}
+	}
+
 	resolved, err := version.Resolve(pin, versions)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrNotFound, err)
 	}
+	if pin.Kind == version.PinLatest && opts.SessionID != "" {
+		r.recordSessionPin(opts.SessionID, artifactID, resolved)
+	}
 	rec := byVersion[resolved]
 	return r.assembleResult(ctx, rec)
+}
+
+// lookupSessionPin returns the version a session previously resolved
+// to for artifactID, if any.
+func (r *Registry) lookupSessionPin(session, id string) (string, bool) {
+	r.sessionsMu.Lock()
+	defer r.sessionsMu.Unlock()
+	if r.sessions == nil {
+		return "", false
+	}
+	v, ok := r.sessions[sessionKey{session: session, id: id}]
+	return v, ok
+}
+
+// recordSessionPin remembers the version this session resolved to so
+// later calls see the same answer (§4.7.6).
+func (r *Registry) recordSessionPin(session, id, ver string) {
+	r.sessionsMu.Lock()
+	defer r.sessionsMu.Unlock()
+	if r.sessions == nil {
+		r.sessions = map[sessionKey]string{}
+	}
+	r.sessions[sessionKey{session: session, id: id}] = ver
 }
 
 // assembleResult turns one manifest record into a LoadArtifactResult.

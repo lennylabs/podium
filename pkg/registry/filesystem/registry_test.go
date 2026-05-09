@@ -172,6 +172,7 @@ func TestOpen_MultiLayer_AmbiguousFails(t *testing.T) {
 // Spec: §13.11.1 — invalid YAML in .registry-config fails with
 // ErrConfigInvalid (config.invalid namespace from §6.10).
 // Phase: 0
+// Matrix: §6.10 (config.invalid)
 func TestOpen_InvalidConfig(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
