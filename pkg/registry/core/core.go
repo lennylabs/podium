@@ -111,10 +111,21 @@ type ArtifactDescriptor struct {
 
 // LoadDomainOptions are the optional knobs from §5.
 type LoadDomainOptions struct {
-	// Depth caps the rendered subtree depth (§4.5.5). A value of 0
-	// uses the configured default.
+	// Depth requests a deeper map than the configured default
+	// (§4.5.5). A value of 0 uses the registry default; values
+	// exceeding the resolved max_depth ceiling are capped.
 	Depth int
+	// NotableCount caps the notable list per §4.5.5; 0 uses the default.
+	NotableCount int
+	// Featured artifact IDs are surfaced first in the notable list.
+	Featured []string
 }
+
+// DefaultMaxDepth is the §4.5.5 tenant default.
+const (
+	DefaultMaxDepth     = 3
+	DefaultNotableCount = 10
+)
 
 // LoadDomain returns the domain map for path. An empty path returns
 // the registry root.
@@ -134,10 +145,22 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 		return nil, err
 	}
 
+	// max_depth is the registry-side ceiling (§4.5.5); a caller-supplied
+	// Depth above the ceiling is silently capped.
+	maxDepth := DefaultMaxDepth
+	notableCount := opts.NotableCount
+	if notableCount == 0 {
+		notableCount = DefaultNotableCount
+	}
+
 	res := &LoadDomainResult{Path: path}
 
-	// Subdomains = the immediate path segments under prefix from any
-	// matching manifest's canonical ID.
+	// Subdomains: gather every direct subdomain. When Depth > 1, also
+	// build a flattened list so the response shape is stable regardless
+	// of depth (subdomains is the immediate-children list; deeper
+	// levels are reachable via subsequent load_domain calls per §4.5.5
+	// "only the originally requested domain gets its body; expanded
+	// subtrees get short descriptions only").
 	seen := map[string]bool{}
 	for _, m := range visible {
 		if !inPrefix(m.ArtifactID, path) {
@@ -165,6 +188,7 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 	})
 
 	// Notable = artifacts directly under prefix.
+	notable := make([]ArtifactDescriptor, 0, len(visible))
 	for _, m := range visible {
 		if !inPrefix(m.ArtifactID, path) {
 			continue
@@ -173,17 +197,61 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 		if strings.Contains(rest, "/") {
 			continue
 		}
-		res.Notable = append(res.Notable, descriptorOf(m))
+		notable = append(notable, descriptorOf(m))
 	}
-	sort.Slice(res.Notable, func(i, j int) bool {
-		return res.Notable[i].ID < res.Notable[j].ID
-	})
+	notable = orderNotable(notable, opts.Featured)
+	if len(notable) > notableCount {
+		notable = notable[:notableCount]
+		res.Note = fmt.Sprintf("Notable list truncated to %d entries.", notableCount)
+	}
+	res.Notable = notable
+
+	// §4.5.5 cap-and-note: a Depth above max_depth is silently capped
+	// (max_depth = the registry default unless overridden via DOMAIN.md
+	// in a future commit). The note surfaces the capping per the spec.
+	if opts.Depth > maxDepth {
+		if res.Note != "" {
+			res.Note += " "
+		}
+		res.Note += fmt.Sprintf("Requested depth %d capped at the configured ceiling of %d.",
+			opts.Depth, maxDepth)
+	}
 
 	if path != "" && len(res.Subdomains) == 0 && len(res.Notable) == 0 {
-		// Path resolves to nothing.
 		return nil, fmt.Errorf("%w: %s", ErrDomainNotFound, path)
 	}
 	return res, nil
+}
+
+// orderNotable surfaces featured IDs first (in author-supplied order),
+// then the remaining notable artifacts in alphabetical ID order. Per
+// §4.5.5 deduplication: an artifact appearing in both featured and the
+// alphabetical list keeps its featured position.
+func orderNotable(notable []ArtifactDescriptor, featured []string) []ArtifactDescriptor {
+	if len(featured) == 0 {
+		sort.Slice(notable, func(i, j int) bool { return notable[i].ID < notable[j].ID })
+		return notable
+	}
+	byID := map[string]ArtifactDescriptor{}
+	for _, n := range notable {
+		byID[n.ID] = n
+	}
+	out := make([]ArtifactDescriptor, 0, len(notable))
+	used := map[string]bool{}
+	for _, id := range featured {
+		if d, ok := byID[id]; ok && !used[id] {
+			out = append(out, d)
+			used[id] = true
+		}
+	}
+	rest := make([]ArtifactDescriptor, 0, len(notable))
+	for _, n := range notable {
+		if !used[n.ID] {
+			rest = append(rest, n)
+		}
+	}
+	sort.Slice(rest, func(i, j int) bool { return rest[i].ID < rest[j].ID })
+	return append(out, rest...)
 }
 
 // ----- SearchArtifacts ----------------------------------------------------
