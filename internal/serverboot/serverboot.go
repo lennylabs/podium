@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/pkg/embedding"
+	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/registry/core"
@@ -140,9 +141,17 @@ func Run() error {
 	layers := server.NewLayerEndpoint(st, tenantID, mode).
 		WithDefaultVisibility(cfg.defaultLayerVisibility)
 
+	// §6.3.2 runtime trust keys: an in-memory registry that accepts
+	// PEM-encoded public keys via POST /v1/admin/runtime. Keys live
+	// for the lifetime of the process; persistence is on the
+	// configuration roadmap.
+	runtimeKeys := identity.NewRuntimeKeyRegistry()
+	runtimeEndpoint := server.NewRuntimeKeyEndpoint(runtimeKeys, mode)
+
 	mux := http.NewServeMux()
 	mux.Handle("/v1/layers", layers.Handler())
 	mux.Handle("/v1/layers/", layers.Handler())
+	mux.Handle("/v1/admin/runtime", runtimeEndpoint.Handler())
 	mux.Handle("/", srv.Handler())
 
 	// §13.2.1 read-only probe: ping the metadata store on a tick

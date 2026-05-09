@@ -86,9 +86,14 @@ below is the punch summary.
 - `podium import` — DONE. Walks a `skills/` directory, rewrites
   each subdirectory as a Podium-shaped artifact (ARTIFACT.md +
   SKILL.md + bundled resources).
-- `podium admin migrate-to-standard` / `runtime register` —
-  pending. Both need new persistent state (runtime trust keys,
-  staged migration plans).
+- `podium admin runtime register` / `runtime list` — DONE. POST
+  /v1/admin/runtime takes an issuer, JWS algorithm, and PEM-encoded
+  public key and adds the runtime to the in-memory trust list
+  consulted by the §6.3.2 verifier. Persistent storage is on the
+  configuration roadmap.
+- `podium admin migrate-to-standard` — pending. The operational
+  shape is `pg_dump` + S3 sync; a guided wrapper command remains
+  on the configuration roadmap.
 
 **Real new features** (Batch C):
 - `NotificationProvider` SPI (§9): ingest-failure /

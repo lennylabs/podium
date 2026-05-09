@@ -55,6 +55,30 @@ func (r *RuntimeKeyRegistry) Register(rk RuntimeKey) error {
 	return nil
 }
 
+// All returns every registered runtime key in deterministic
+// insertion-order-independent order (sorted by issuer).
+func (r *RuntimeKeyRegistry) All() []RuntimeKey {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]RuntimeKey, 0, len(r.keys))
+	issuers := make([]string, 0, len(r.keys))
+	for iss := range r.keys {
+		issuers = append(issuers, iss)
+	}
+	// stable order for tests
+	for i := 0; i < len(issuers)-1; i++ {
+		for j := i + 1; j < len(issuers); j++ {
+			if issuers[j] < issuers[i] {
+				issuers[i], issuers[j] = issuers[j], issuers[i]
+			}
+		}
+	}
+	for _, iss := range issuers {
+		out = append(out, r.keys[iss])
+	}
+	return out
+}
+
 // Lookup returns the key for issuer or false when unregistered.
 func (r *RuntimeKeyRegistry) Lookup(issuer string) (RuntimeKey, bool) {
 	r.mu.RLock()
