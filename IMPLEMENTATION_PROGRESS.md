@@ -154,6 +154,22 @@ below is the punch summary.
 - Phase 17 vulnerability scanning (§1.1, §4.7.7) — CI/CD's job.
 - Embedded ONNX — Ollama-against-local-model is the offline path.
 - SCIM PATCH and Bulk endpoints — IdPs use full PUT.
+- `podium admin migrate-to-standard` — `pg_dump` + `aws s3 sync`
+  cover the data movement; a guided wrapper adds little over
+  the standard tools.
+
+**Persistent-state debt** (smaller follow-up batch):
+- Webhook receivers live in memory and do not survive a server
+  restart. The §7.3.2 worker accepts any `webhook.Store`
+  implementation; the gap is wiring a SQL-backed one to
+  `pkg/store`.
+- Runtime trust keys (§6.3.2) live in memory for the same reason.
+  `pkg/identity.RuntimeKeyRegistry` already has the right shape;
+  the gap is persisting registrations.
+- The `audit.FileSink` does not load the prior chain head on
+  restart, so the chain breaks across server restarts. Anchoring
+  via Sigstore mitigates the practical risk; a startup-time read
+  of the last log entry would close it cleanly.
 
 ## What this branch leaves you with
 
