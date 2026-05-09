@@ -1,0 +1,19 @@
+name: test-slow
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 5 * * *'  # nightly at 05:00 UTC
+
+jobs:
+  slow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - run: make tools
+      - run: make test-slow
