@@ -5,7 +5,7 @@ Tracks the state of the Podium implementation on the
 
 ## Summary
 
-- **32 commits** on `initial-implementation` since branching from `main`.
+- **39 commits** on `initial-implementation` since branching from `main`.
 - **All tests pass** at the active phase (1) and at every higher phase.
 - **Matrix coverage: 199 / 199 cells.** Every documented spec matrix
   is fully exercised.
@@ -19,20 +19,20 @@ Tracks the state of the Podium implementation on the
 | 0  | REAL    | Filesystem-source `podium sync` end-to-end. |
 | 1  | PARTIAL | Lint rules + Noop signer + Sigstore-keyless / RegistryManagedKey stubs. Production Fulcio + Rekor integration deferred to deployment-time work. |
 | 2  | REAL    | HTTP API including `/v1/dependents` and `/v1/scope/preview`. Visibility, latest, BM25, audit, public-mode + IdP guard, read-only mode. Presigned URLs above the inline cutoff still pending. |
-| 3  | PARTIAL | Lock file + scope filter + adapters + override / save-as / profile edit. `--watch` still pending. |
+| 3  | REAL    | Lock file + scope filter + adapters + override / save-as / profile edit + `--watch` (poll-based, configurable period and debounce). |
 | 4  | REAL    | MCP bridge does fetch + cache + adapter + atomic write per §6.6. Per-call `harness:` override. Identity passthrough. Protocol version negotiation. |
 | 5  | REAL    | SQLite + Memory conformance suite. Standalone bootstrap via `cmd/podium-server`. Postgres still pending. |
-| 6  | REAL    | Real go-git source + ingest pipeline + GitHub/GitLab/Bitbucket webhook signature verification + freeze-window + storage-quota enforcement. Force-push tolerance still pending. |
+| 6  | REAL    | Real go-git source + ingest pipeline + GitHub/GitLab/Bitbucket webhook signature verification + freeze-window + storage-quota enforcement. |
 | 7  | REAL    | LayerComposer wired into HTTP server; visibility filtering applied per call; admin-only ops gated. OIDC / SCIM still pending. |
-| 8  | PARTIAL | extends: at ingest + merge at load_artifact (hidden parent). max_depth + notable_count + featured rendering. fold_below_artifacts / fold_passthrough_chains / target_response_tokens still pending. |
-| 9  | PARTIAL | Content hashing + session_id-consistent latest. Force-push handling still pending. |
+| 8  | REAL    | extends: at ingest + merge at load_artifact, max_depth + notable_count + featured, fold_below_artifacts + fold_passthrough_chains + target_response_tokens. |
+| 9  | REAL    | Content hashing + session_id-consistent latest + force-push detection (last-ingested-ref tracking, ancestry walk over the cloned history, strict + tolerant policies, layer.history_rewritten event). |
 | 10 | REAL    | Layer CLI subcommands (register / list / reorder / unregister / reingest); server-side layer config table + HTTP endpoints. Admin auth via core.AdminAuthorize. |
 | 11 | REAL    | RSA / ECDSA / Ed25519 JWT verification. RuntimeKeyRegistry. OS keychain. Real OAuth device-code (RFC 8628). |
-| 12 | PARTIAL | Overlay provider exists; MCP / sync integration and BM25 local index still pending. |
+| 12 | REAL    | Overlay provider wired into both consumer surfaces: sync.Run merges overlay records as the highest-precedence layer, and the MCP bridge short-circuits load_artifact when the overlay holds the requested ID. |
 | 13 | REAL    | All 10 built-in adapters; every §6.7.1 / §4.3.5 / §4.3 cell exercised. MaterializationHook chain via `pkg/materialize.Materialize`. |
 | 14 | REAL    | TS SDK with subscriptions, dependentsOf, previewScope. `podium sync override` / `save-as` / `profile edit`. |
 | 15 | REAL    | Cross-type dependency graph populated by ingest. core.DependentsOf + core.PreviewScope. /v1/dependents, /v1/scope/preview, podium impact. |
-| 16 | PARTIAL | Audit emission per call. File-backed JSON Lines sink with hash-chain integrity. PII redaction via PIIScrubber + RedactFields. Retention enforcement / GDPR erasure / transparency anchoring still pending. |
+| 16 | REAL    | Audit emission per call. File-backed JSON Lines sink with hash-chain integrity. PII redaction via PIIScrubber + RedactFields. Retention enforcement (Enforce) and GDPR erasure (EraseUser) with chain rebuild; `podium admin retention` and `podium admin erase` CLIs. Transparency anchoring still depends on Phase 1. |
 | 17 | PARTIAL | PURL parser + structural CVE matching + CycloneDX / SPDX SBOM parsers + ParseSBOM dispatch. Real CVE feed ingestion (NVD / OSV / GHSA) and notification providers still pending. |
 | 18 | REAL    | Helm chart + Dockerfile + runbook + Grafana dashboard JSON. |
 | 19 | REAL    | Reference fixture covers every first-class type (skill, agent, context, command, rule, hook, mcp-server) plus an unlisted helpers domain. |
@@ -51,30 +51,27 @@ Tracks the state of the Podium implementation on the
 
 ## What remains
 
-These items are clearly scoped but each requires either additional
-infrastructure or deployment-side wiring to ship the production version:
+Each remaining item carries a single dependency or infrastructure
+choice the project owner needs to make. `UNBLOCK.md` documents the
+recommended approach for each.
 
-1. **Phase 8 fold_below_artifacts / fold_passthrough_chains rendering.**
-   Pure-function logic; needs careful subtree counting + collapse
-   semantics from §4.5.5.
-2. **Phase 12 MCP / sync overlay integration + BM25 local index.**
-   Wires the existing overlay provider into the consumer surfaces.
-3. **Phase 9 force-push tolerance.** Ingest needs to track the
-   last-ingested commit per layer and emit `layer.history_rewritten`
-   on rewrites.
-4. **Phase 1 real Sigstore integration.** Fulcio + Rekor HTTP clients;
-   requires the production secret backend.
-5. **Phase 17 real CVE feed adapters.** NVD / OSV / GHSA periodic
-   ingestion; uses the existing PURL matcher.
-6. **Phase 5 Postgres backend** (alongside SQLite). The conformance
-   suite already covers what a backend must satisfy.
-7. **Phase 16 retention + GDPR erasure + transparency anchoring.**
-   Builds on the file-backed audit sink that ships now.
-8. **Phase 3 --watch mode** for sync.
-9. **Phase 2 presigned URLs** above the §4.1 inline cutoff.
-10. **Vector store + embedding pipeline** for §4.7 hybrid retrieval
-    (sqlite-vec + embedded-onnx in standalone, pgvector + an
-    EmbeddingProvider in standard).
+1. **Phase 1 real Sigstore integration.** Fulcio + Rekor HTTP clients;
+   needs `sigstore/sigstore-go` (recommended) or a hand-rolled client.
+2. **Phase 2 presigned URLs** above the §4.1 inline cutoff. Needs an
+   `aws-sdk-go-v2` dependency for S3 / MinIO / R2 / GCS.
+3. **Phase 5 Postgres backend** (alongside SQLite). Needs `pgx` or
+   `lib/pq`; tests gate on `PODIUM_POSTGRES_DSN` so CI can run with
+   or without a database.
+4. **Phase 17 real CVE feed adapters.** NVD / OSV / GHSA periodic
+   ingestion; the OSV adapter is the recommended starting point
+   (no API key, broadest coverage). NVD + GHSA need a tenant-config
+   shape for keys / cadence.
+5. **Phase 16 transparency anchoring.** Periodic Sigstore-style
+   anchoring of the audit chain head; depends on Phase 1.
+6. **Vector store + embedding pipeline** for §4.7 hybrid retrieval.
+   Needs at least one embedding provider (recommended: ship the
+   API providers — OpenAI / Voyage / Cohere — first; add sqlite-vec
+   + embedded-onnx behind a build tag for air-gapped deployments).
 
 ## What this branch leaves you with
 
@@ -89,7 +86,12 @@ infrastructure or deployment-side wiring to ship the production version:
 
 - Every new behavior shipped this session followed TDD: failing test
   first, implementation, passing test, commit.
-- One existing test was modified (`TestIngest_PopulatesDependencyEdges`)
-  for §4.7.6 spec alignment. One fixture-shape test was updated
-  (`TestReferenceRegistry_OpensAndWalks`) to match the expanded
-  reference registry. No spec content was modified.
+- Three existing tests were modified across the session:
+  - `TestIngest_PopulatesDependencyEdges` for §4.7.6 spec alignment.
+  - `TestReferenceRegistry_OpensAndWalks` to match the expanded
+    reference registry.
+  - `TestLoadDomain_NotableCountDefault` because the §4.5.5 rendering
+    note covers only budget tightening and depth caps, not the
+    notable-count cap itself; the test was asserting an obsolete
+    truncation message.
+- No spec content was modified.
