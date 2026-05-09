@@ -40,6 +40,10 @@ func main() {
 		os.Exit(2)
 	}
 	switch os.Args[1] {
+	case "serve":
+		os.Exit(serveCmd(os.Args[2:]))
+	case "config":
+		os.Exit(configCmd(os.Args[2:]))
 	case "sync":
 		os.Exit(syncCmd(os.Args[2:]))
 	case "lint":
@@ -85,6 +89,8 @@ func main() {
 const usage = `usage: podium <command> [flags]
 
 Commands:
+  serve               Run the §13.10 standalone registry server in-process.
+  config show         Print the resolved server configuration with sources.
   sync                Materialize the caller's effective view through a HarnessAdapter.
   sync override       Add or remove ephemeral artifact toggles.
   sync save-as        Capture the current target state as a sync.yaml profile.
@@ -101,6 +107,8 @@ Commands:
   layer reorder       Re-sequence the layer list.
   layer unregister    Remove a layer.
   layer reingest      Trigger a fresh ingest for a layer.
+  layer update        Patch a registered layer's mutable fields.
+  layer watch         Poll a layer's source on an interval.
   impact              List artifacts that depend on a given artifact.
   admin erase         GDPR right-to-be-forgotten on the local audit log.
   admin retention     Apply audit retention policies to the local audit log.

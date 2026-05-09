@@ -104,7 +104,79 @@ func (e *LayerEndpoint) Handler() http.Handler {
 	})
 	mux.HandleFunc("/v1/layers/reorder", e.reorder)
 	mux.HandleFunc("/v1/layers/reingest", e.reingest)
+	mux.HandleFunc("/v1/layers/update", e.update)
 	return mux
+}
+
+// update handles PUT /v1/layers/update?id=ID. Body fields that are
+// non-zero replace the corresponding LayerConfig field; zero
+// fields keep the prior value. This shape avoids having to send
+// the whole config and accidentally clear visibility filters.
+//
+// Allowed mutations: visibility (Public, Organization, Groups,
+// Users), Ref, Root, LocalPath, Owner. The store-bound identifying
+// fields (TenantID, ID, SourceType, CreatedAt) and webhook secrets
+// are immutable.
+func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut && r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "registry.invalid_argument",
+			"method not allowed: "+r.Method)
+		return
+	}
+	if e.mode != nil {
+		if err := e.mode.CheckConfig(); err != nil {
+			writeError(w, http.StatusServiceUnavailable, "config.read_only", err.Error())
+			return
+		}
+	}
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "id query param is required")
+		return
+	}
+	if err := e.authAdmin(r); err != nil {
+		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
+		return
+	}
+	cfg, err := e.store.GetLayerConfig(r.Context(), e.tenantID, id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "registry.not_found", err.Error())
+		return
+	}
+	var patch LayerRegisterRequest
+	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
+		return
+	}
+	if patch.Ref != "" {
+		cfg.Ref = patch.Ref
+	}
+	if patch.Root != "" {
+		cfg.Root = patch.Root
+	}
+	if patch.LocalPath != "" {
+		cfg.LocalPath = patch.LocalPath
+	}
+	if patch.Owner != "" {
+		cfg.Owner = patch.Owner
+	}
+	if patch.Public {
+		cfg.Public = true
+	}
+	if patch.Organization {
+		cfg.Organization = true
+	}
+	if len(patch.Groups) > 0 {
+		cfg.Groups = patch.Groups
+	}
+	if len(patch.Users) > 0 {
+		cfg.Users = patch.Users
+	}
+	if err := e.store.PutLayerConfig(r.Context(), cfg); err != nil {
+		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, LayerRegisterResponse{Layer: cfg})
 }
 
 // register handles POST /v1/layers.

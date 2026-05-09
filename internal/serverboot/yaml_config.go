@@ -1,4 +1,4 @@
-package main
+package serverboot
 
 import (
 	"fmt"
@@ -91,7 +91,7 @@ func readYAMLConfig() (*yamlConfig, error) {
 
 // applyYAML overlays values from the YAML config onto c. Env-set
 // fields keep precedence; YAML fills in missing values only.
-func applyYAML(c *config, y *yamlConfig) {
+func applyYAML(c *Config, y *yamlConfig) {
 	if y == nil {
 		return
 	}

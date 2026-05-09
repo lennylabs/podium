@@ -296,10 +296,11 @@ detailed plan with effort estimates and test strategies.
   ready-to-mount components, but `cmd/podium-server` does not
   yet construct them. Both need a persistence-backed signer
   and receiver store wired first.
-- **CLI surface (Batch B, ~half day).** `podium serve` /
-  `config show` / `layer update` / `layer watch` / `cache prune`
-  / `import` / `admin migrate-to-standard` /
-  `admin runtime register`.
+- **CLI surface (Batch B, partial).** `podium serve`,
+  `podium config show`, `podium layer update`, and
+  `podium layer watch` ship in this branch. `cache prune`,
+  `import`, `admin migrate-to-standard`, and
+  `admin runtime register` remain.
 - **Real new features (Batch C, ~2 days).**
   `NotificationProvider` SPI, `TypeProvider` SPI,
   `podium-py` SDK.

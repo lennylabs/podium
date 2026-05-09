@@ -8,7 +8,12 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"time"
 )
+
+// sleepSeconds blocks for n seconds. Wrapped so tests can override
+// without relying on time.Sleep.
+var sleepSeconds = func(n int) { time.Sleep(time.Duration(n) * time.Second) }
 
 // layerCmd dispatches `podium layer ...` subcommands per spec §7.3.1.
 //
@@ -34,9 +39,108 @@ func layerCmd(args []string) int {
 		return layerUnregister(args[1:])
 	case "reingest":
 		return layerReingest(args[1:])
+	case "update":
+		return layerUpdate(args[1:])
+	case "watch":
+		return layerWatch(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown layer subcommand: %s\n", args[0])
 		return 2
+	}
+}
+
+// layerUpdate sends a partial-patch PUT to /v1/layers/update?id=ID.
+// Only flags the operator passes are applied; everything else
+// keeps its prior value.
+func layerUpdate(args []string) int {
+	fs := flag.NewFlagSet("layer update", flag.ContinueOnError)
+	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
+	id := fs.String("id", "", "layer id (required)")
+	ref := fs.String("ref", "", "git ref")
+	root := fs.String("root", "", "git subpath")
+	local := fs.String("local", "", "filesystem path")
+	owner := fs.String("owner", "", "OIDC sub of the user-defined layer's owner")
+	public := fs.Bool("public", false, "set visibility to public")
+	organization := fs.Bool("organization", false, "set visibility to organization-wide")
+	var groups, users stringSliceFlag
+	fs.Var(&groups, "group", "OIDC group with visibility (repeatable)")
+	fs.Var(&users, "user", "OIDC sub with visibility (repeatable)")
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *registry == "" || *id == "" {
+		fmt.Fprintln(os.Stderr, "error: --registry and --id are required")
+		return 2
+	}
+	body := map[string]any{}
+	if *ref != "" {
+		body["ref"] = *ref
+	}
+	if *root != "" {
+		body["root"] = *root
+	}
+	if *local != "" {
+		body["local_path"] = *local
+	}
+	if *owner != "" {
+		body["owner"] = *owner
+	}
+	if *public {
+		body["public"] = true
+	}
+	if *organization {
+		body["organization"] = true
+	}
+	if len(groups) > 0 {
+		body["groups"] = []string(groups)
+	}
+	if len(users) > 0 {
+		body["users"] = []string(users)
+	}
+	if len(body) == 0 {
+		fmt.Fprintln(os.Stderr, "error: at least one mutable field must be provided")
+		return 2
+	}
+	out, status := doJSON(*registry+"/v1/layers/update?id="+*id, "PUT", body)
+	if status >= 400 {
+		fmt.Fprintf(os.Stderr, "update failed: HTTP %d\n%s\n", status, out)
+		return 1
+	}
+	fmt.Println(string(out))
+	return 0
+}
+
+// layerWatch periodically POSTs to /v1/layers/reingest?id=ID until
+// the user interrupts. Useful as a manual replacement for the
+// per-layer webhook callback when the source isn't reachable from
+// the registry.
+func layerWatch(args []string) int {
+	fs := flag.NewFlagSet("layer watch", flag.ContinueOnError)
+	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
+	id := fs.String("id", "", "layer id (required)")
+	intervalSec := fs.Int("interval", 60, "seconds between reingest pokes")
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *registry == "" || *id == "" {
+		fmt.Fprintln(os.Stderr, "error: --registry and --id are required")
+		return 2
+	}
+	if *intervalSec <= 0 {
+		fmt.Fprintln(os.Stderr, "error: --interval must be positive")
+		return 2
+	}
+	url := *registry + "/v1/layers/reingest?id=" + *id
+	for {
+		out, status := doJSON(url, "POST", nil)
+		if status >= 400 {
+			fmt.Fprintf(os.Stderr, "reingest failed: HTTP %d\n%s\n", status, out)
+		} else {
+			fmt.Printf("[reingest %s] %s\n", *id, out)
+		}
+		sleepSeconds(*intervalSec)
 	}
 }
 

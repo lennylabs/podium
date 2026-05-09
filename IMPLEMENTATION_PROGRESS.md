@@ -72,11 +72,16 @@ below is the punch summary.
   not write, and persists the new lock atomically.
 
 **CLI surface** (operator commands the spec promises — Batch B):
-- `podium serve` (alias / in-process for `podium-server`).
-- `podium config show`.
-- `podium layer update` / `layer watch`.
-- `podium cache prune`, `podium import`.
-- `podium admin migrate-to-standard` / `runtime register`.
+- `podium serve` — DONE. Same code path as `podium-server` via
+  the new `internal/serverboot` package.
+- `podium config show` — DONE. Prints every resolved setting with
+  its source (env var, registry.yaml, or hardcoded default);
+  secrets redacted.
+- `podium layer update` / `layer watch` — DONE. PUT-style partial
+  patch against /v1/layers/update?id=ID; watch polls reingest on
+  an interval.
+- `podium cache prune`, `podium import` — pending.
+- `podium admin migrate-to-standard` / `runtime register` — pending.
 
 **Real new features** (Batch C):
 - `NotificationProvider` SPI (§9): ingest-failure /

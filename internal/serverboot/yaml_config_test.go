@@ -1,4 +1,4 @@
-package main
+package serverboot
 
 import (
 	"os"
@@ -9,7 +9,7 @@ import (
 // Spec: §13.10 — registry.yaml supplies deployment defaults that env
 // vars override. Phase 10 wires the new layers / read_only fields.
 func TestApplyYAML_FillsMissingDefaults(t *testing.T) {
-	c := &config{
+	c := &Config{
 		// Mimic loadConfig's hardcoded defaults so applyYAML acts.
 		bind:                   "127.0.0.1:8080",
 		storeType:              "sqlite",
@@ -49,7 +49,7 @@ func TestApplyYAML_FillsMissingDefaults(t *testing.T) {
 // Spec: §13.10 — yaml fills defaultLayerVisibility only when the
 // config did not see PODIUM_DEFAULT_LAYER_VISIBILITY (left empty).
 func TestApplyYAML_DefaultLayerVisibilityFillsWhenEmpty(t *testing.T) {
-	c := &config{defaultLayerVisibility: ""}
+	c := &Config{defaultLayerVisibility: ""}
 	applyYAML(c, &yamlConfig{Layers: yamlLayerCfg{DefaultVisibility: "public"}})
 	if c.defaultLayerVisibility != "public" {
 		t.Errorf("defaultLayerVisibility = %q, want public", c.defaultLayerVisibility)
