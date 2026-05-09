@@ -34,6 +34,9 @@ var (
 	// ErrDomainNotFound (domain.not_found) is returned by LoadDomain
 	// for unknown paths.
 	ErrDomainNotFound = errors.New("domain.not_found")
+	// ErrUnavailable wraps store-layer failures so callers see the
+	// documented §6.10 namespace. Maps to registry.unavailable.
+	ErrUnavailable = errors.New("registry.unavailable")
 )
 
 // Registry is the core registry type. Construct one per tenant; the
@@ -683,7 +686,7 @@ func resultFromRecord(rec store.ManifestRecord) *LoadArtifactResult {
 func (r *Registry) visibleManifests(ctx context.Context, id layer.Identity) ([]store.ManifestRecord, error) {
 	all, err := r.store.ListManifests(ctx, r.tenantID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	if id.IsPublic || len(r.layers) == 0 {
 		return all, nil
