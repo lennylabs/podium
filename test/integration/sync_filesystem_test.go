@@ -188,10 +188,19 @@ func TestPodiumSync_IsIdempotent(t *testing.T) {
 			t.Fatalf("run %d: exit=%d stderr:\n%s", i, res.ExitCode, res.Stderr)
 		}
 	}
-	got := testharness.ReadTree(t, target)
+	all := testharness.ReadTree(t, target)
+	// §7.5.3 sync always writes a `.podium/sync.lock`; filter it
+	// from the artifact comparison since it's deployment metadata,
+	// not artifact output.
+	got := map[string]string{}
+	for k, v := range all {
+		if !strings.HasPrefix(k, ".podium/") {
+			got[k] = v
+		}
+	}
 	wantPaths := []string{"x/ARTIFACT.md", "y/ARTIFACT.md"}
 	if len(got) != len(wantPaths) {
-		t.Fatalf("after 2 runs got %d files, want %d (%v)", len(got), len(wantPaths), keys(got))
+		t.Fatalf("after 2 runs got %d artifact files, want %d (%v)", len(got), len(wantPaths), keys(got))
 	}
 	for _, want := range wantPaths {
 		if _, ok := got[want]; !ok {

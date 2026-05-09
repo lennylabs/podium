@@ -8,7 +8,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/lennylabs/podium/pkg/adapter"
 	"github.com/lennylabs/podium/pkg/materialize"
@@ -137,10 +140,86 @@ func Run(opts Options) (*Result, error) {
 	if opts.DryRun {
 		return res, nil
 	}
+
+	// §7.5 stale-file cleanup: read the prior lock, compute the
+	// set of paths this run wrote, and delete anything the prior
+	// run wrote that this run didn't. Without this, syncing a
+	// registry that drops an artifact leaves the artifact's files
+	// behind in the target.
+	priorPaths := loadPriorLockPaths(opts.Target)
+
 	if err := materialize.Write(opts.Target, allFiles); err != nil {
 		return nil, err
 	}
+
+	currentPaths := map[string]bool{}
+	for _, f := range allFiles {
+		currentPaths[f.Path] = true
+	}
+	removeStalePaths(opts.Target, priorPaths, currentPaths)
+
+	// Persist the new lock entry list so the next run can repeat
+	// the diff. Each artifact records every path it wrote so a
+	// future delete is precise.
+	lock := &LockFile{
+		Target:       opts.Target,
+		Harness:      a.ID(),
+		LastSyncedAt: time.Now().UTC(),
+		LastSyncedBy: "podium-sync",
+	}
+	for _, art := range res.Artifacts {
+		for _, p := range art.Files {
+			lock.Artifacts = append(lock.Artifacts, LockArtifact{
+				ID:               art.ID,
+				Layer:            art.Layer,
+				MaterializedPath: p,
+			})
+		}
+	}
+	if err := WriteLock(opts.Target, lock); err != nil {
+		// Lock write failure is non-fatal; the sync already
+		// completed. Operators see the warning via the returned
+		// Result + a printed message in the CLI.
+		fmt.Fprintf(os.Stderr, "sync: lock write failed: %v\n", err)
+	}
 	return res, nil
+}
+
+// loadPriorLockPaths reads the lock file (if any) and returns the
+// set of materialized paths from the previous successful sync.
+// Missing lock returns an empty set.
+func loadPriorLockPaths(target string) map[string]bool {
+	out := map[string]bool{}
+	lock, err := ReadLock(target)
+	if err != nil || lock == nil {
+		return out
+	}
+	for _, a := range lock.Artifacts {
+		if a.MaterializedPath != "" {
+			out[a.MaterializedPath] = true
+		}
+	}
+	return out
+}
+
+// removeStalePaths deletes every prior path that's not in the
+// current set. Best-effort: log to stderr on error and continue,
+// since a partial cleanup is better than a hard failure that
+// rolls back a successful materialize.
+func removeStalePaths(target string, prior, current map[string]bool) {
+	for p := range prior {
+		if current[p] {
+			continue
+		}
+		full := filepath.Join(target, p)
+		if err := os.Remove(full); err != nil && !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "sync: stale-file cleanup: %v\n", err)
+			continue
+		}
+		// Try to remove the now-empty parent directory; Remove
+		// fails non-empty dirs naturally, which is what we want.
+		_ = os.Remove(filepath.Dir(full))
+	}
 }
 
 // mergeOverlay returns base with each overlay record replacing the

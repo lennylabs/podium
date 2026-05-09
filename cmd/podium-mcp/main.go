@@ -79,6 +79,9 @@ type config struct {
 	oauthAudience    string
 	verifyPolicy     sign.VerificationPolicy
 	signatureProvider string
+	// §4.4.1 sandbox enforcement.
+	enforceSandbox bool
+	hostSandboxes  []string
 }
 
 func loadConfig() (*config, error) {
@@ -102,6 +105,9 @@ func loadConfig() (*config, error) {
 		// §4.7.9 / §6.2: never | medium-and-above (default) | always.
 		verifyPolicy:     sign.VerificationPolicy(envDefault("PODIUM_VERIFY_SIGNATURES", string(sign.PolicyMediumAndAbove))),
 		signatureProvider: envDefault("PODIUM_SIGNATURE_PROVIDER", "noop"),
+		// §4.4.1 sandbox enforcement.
+		enforceSandbox: os.Getenv("PODIUM_ENFORCE_SANDBOX_PROFILE") == "true",
+		hostSandboxes:  splitCSV(envDefault("PODIUM_HOST_SANDBOXES", "unrestricted")),
 	}
 	if c.registry == "" {
 		return nil, fmt.Errorf("PODIUM_REGISTRY is required")
@@ -312,6 +318,12 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 	if err := s.enforceSignaturePolicy(resp); err != nil {
 		return errorResult("materialize.signature_invalid: " + err.Error())
 	}
+	// §4.4.1 sandbox profile enforcement: refuse to materialize
+	// when PODIUM_ENFORCE_SANDBOX_PROFILE=true and the artifact's
+	// profile is not in the host's declared capability set.
+	if err := s.enforceSandboxPolicy(resp); err != nil {
+		return errorResult("materialize.sandbox_unsupported: " + err.Error())
+	}
 
 	// Cache the canonical bytes (content cache is forever-immutable
 	// per §6.5).
@@ -469,6 +481,56 @@ func (s *mcpServer) enforceSignaturePolicy(resp loadArtifactResponse) error {
 		resp.ContentHash,
 		resp.Signature,
 	)
+}
+
+// enforceSandboxPolicy applies the §4.4.1 sandbox-profile gate.
+// Reads the manifest's sandbox_profile from the response
+// frontmatter (parsed via pkg/manifest) and rejects when the host
+// has not declared support for that profile.
+func (s *mcpServer) enforceSandboxPolicy(resp loadArtifactResponse) error {
+	if !s.cfg.enforceSandbox {
+		return nil
+	}
+	a, err := manifest.ParseArtifact([]byte(resp.Frontmatter))
+	if err != nil {
+		// Fail closed: malformed frontmatter under enforce mode is
+		// a refusal, not a passthrough.
+		return fmt.Errorf("parse frontmatter: %v", err)
+	}
+	profile := string(a.SandboxProfile)
+	if profile == "" {
+		profile = string(manifest.SandboxUnrestricted)
+	}
+	for _, supported := range s.cfg.hostSandboxes {
+		if supported == profile {
+			return nil
+		}
+	}
+	return fmt.Errorf("artifact requires sandbox_profile=%s; host supports %v",
+		profile, s.cfg.hostSandboxes)
+}
+
+// splitCSV splits a comma-separated env-var value into trimmed
+// non-empty entries.
+func splitCSV(s string) []string {
+	out := []string{}
+	cur := ""
+	flush := func() {
+		t := strings.TrimSpace(cur)
+		if t != "" {
+			out = append(out, t)
+		}
+		cur = ""
+	}
+	for _, r := range s {
+		if r == ',' {
+			flush()
+			continue
+		}
+		cur += string(r)
+	}
+	flush()
+	return out
 }
 
 // buildSignatureProvider mirrors the CLI side: a Noop default,

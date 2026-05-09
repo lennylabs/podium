@@ -38,11 +38,28 @@ type Layer struct {
 	Precedence int
 }
 
+// GroupResolver expands a layer's `groups:` filter into the set of
+// userNames that belong to the named group. The §6.3.1 SCIM
+// receiver wires its `Store.MembersOf` here so SCIM-pushed group
+// memberships become first-class in the visibility evaluator. A
+// nil resolver short-circuits to the JWT-only path so callers
+// without SCIM keep the prior behavior.
+type GroupResolver func(group string) []string
+
 // Visible reports whether identity can see layer per §4.6 union semantics.
 //
 // In public-mode (Identity.IsPublic), every layer is visible regardless
 // of declared visibility.
 func Visible(layer Layer, id Identity) bool {
+	return VisibleWith(layer, id, nil)
+}
+
+// VisibleWith is the §4.6 visibility evaluator with the §6.3.1 SCIM
+// integration seam: a non-nil resolver expands `groups:` filters
+// against an external group-membership store before falling back to
+// the caller's JWT groups. Used by the registry's HTTP handlers to
+// honor SCIM-pushed memberships per Phase 7's gap callout.
+func VisibleWith(layer Layer, id Identity, resolveGroup GroupResolver) bool {
 	if id.IsPublic {
 		return true
 	}
@@ -59,6 +76,13 @@ func Visible(layer Layer, id Identity) bool {
 				return true
 			}
 		}
+		if resolveGroup != nil {
+			for _, member := range resolveGroup(g) {
+				if member == id.Sub || member == id.Email {
+					return true
+				}
+			}
+		}
 	}
 	for _, u := range v.Users {
 		if u == id.Sub {
@@ -71,9 +95,14 @@ func Visible(layer Layer, id Identity) bool {
 // EffectiveLayers returns the subset of layers visible to identity, in
 // precedence order (lowest first per §4.6).
 func EffectiveLayers(layers []Layer, id Identity) []Layer {
+	return EffectiveLayersWith(layers, id, nil)
+}
+
+// EffectiveLayersWith is the SCIM-aware companion to EffectiveLayers.
+func EffectiveLayersWith(layers []Layer, id Identity, resolveGroup GroupResolver) []Layer {
 	out := make([]Layer, 0, len(layers))
 	for _, l := range layers {
-		if Visible(l, id) {
+		if VisibleWith(l, id, resolveGroup) {
 			out = append(out, l)
 		}
 	}
