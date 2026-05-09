@@ -101,5 +101,7 @@ func (r *Registry) IDs() []string {
 func DefaultRegistry() *Registry {
 	r := NewRegistry()
 	_ = r.Register(None{})
+	_ = r.Register(ClaudeCode{})
+	_ = r.Register(Codex{})
 	return r
 }
