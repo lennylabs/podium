@@ -18,7 +18,7 @@ Tracks the state of the Podium implementation on the
 | ---: | --- | --- |
 | 0  | REAL    | Filesystem-source `podium sync` end-to-end. |
 | 1  | REAL    | Lint rules + Noop signer + real SigstoreKeyless (Fulcio v2 cert mint, Rekor hashedrekord upload + presence check, x509 chain validation against a configurable trust root) + real RegistryManagedKey (Ed25519, KeyID-aware rotation rejection). Tier 1 tests use an in-process CA + httptest fixture; Tier 2 live smoke gates on PODIUM_SIGSTORE_* env vars. |
-| 2  | REAL    | HTTP API including `/v1/dependents` and `/v1/scope/preview`. Visibility, latest, BM25, audit, public-mode + IdP guard, read-only mode. Presigned URLs above the inline cutoff still pending. |
+| 2  | REAL    | HTTP API including `/v1/dependents` and `/v1/scope/preview`. Visibility, latest, BM25, audit, public-mode + IdP guard, read-only mode. §4.1 large-resource path: resources above the 256 KB cutoff are uploaded to the configured `pkg/objectstore` provider (filesystem default, S3 via lib/pq-style minio-go wrapper), and `load_artifact` returns them as URLs in `large_resources`. Filesystem backend serves via authenticated `/objects/{content_hash}` route per the §13.10 spec clarification; S3 backend uses AWS Signature V4 presigning. |
 | 3  | REAL    | Lock file + scope filter + adapters + override / save-as / profile edit + `--watch` (poll-based, configurable period and debounce). |
 | 4  | REAL    | MCP bridge does fetch + cache + adapter + atomic write per §6.6. Per-call `harness:` override. Identity passthrough. Protocol version negotiation. |
 | 5  | REAL    | SQLite + Memory + Postgres conformance suite via `pkg/store/storetest.Suite`. Standalone bootstrap via `cmd/podium-server` selects the backend through `PODIUM_REGISTRY_STORE`; Postgres tests gate on `PODIUM_POSTGRES_DSN` so CI runs with or without a database. |
@@ -54,14 +54,11 @@ Tracks the state of the Podium implementation on the
 Each remaining item carries a single dependency or infrastructure
 choice the project owner needs to make.
 
-1. **Phase 2 presigned URLs** above the §4.1 inline cutoff. Needs an
-   object-storage client (recommend `minio-go` over `aws-sdk-go-v2`
-   for S3-compatible coverage with a much smaller dep).
-2. **Phase 17 real CVE feed adapters.** NVD / OSV / GHSA periodic
+1. **Phase 17 real CVE feed adapters.** NVD / OSV / GHSA periodic
    ingestion; the OSV adapter is the recommended starting point
    (no API key, broadest coverage). NVD + GHSA need a tenant-config
    shape for keys / cadence. All three can be implemented stdlib-only.
-3. **Vector store + embedding pipeline** for §4.7 hybrid retrieval.
+2. **Vector store + embedding pipeline** for §4.7 hybrid retrieval.
    Needs at least one embedding provider (recommended: ship the
    API providers — OpenAI / Voyage / Cohere — first; add pgvector
    for the Postgres path; add sqlite-vec + embedded-onnx behind a

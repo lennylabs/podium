@@ -19,10 +19,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
@@ -75,6 +77,16 @@ type config struct {
 	storeType        string
 	sqlitePath       string
 	postgresDSN      string
+	objectStore      string
+	filesystemRoot   string
+	publicURL        string
+	presignTTL       time.Duration
+	s3Endpoint       string
+	s3Region         string
+	s3Bucket         string
+	s3AccessKey      string
+	s3SecretKey      string
+	s3UseSSL         bool
 }
 
 func loadConfig() *config {
@@ -85,12 +97,38 @@ func loadConfig() *config {
 		storeType:        envDefault("PODIUM_REGISTRY_STORE", "sqlite"),
 		sqlitePath:       os.Getenv("PODIUM_SQLITE_PATH"),
 		postgresDSN:      os.Getenv("PODIUM_POSTGRES_DSN"),
+		objectStore:      envDefault("PODIUM_OBJECT_STORE", "filesystem"),
+		filesystemRoot:   os.Getenv("PODIUM_FILESYSTEM_ROOT"),
+		publicURL:        os.Getenv("PODIUM_PUBLIC_URL"),
+		s3Endpoint:       os.Getenv("PODIUM_S3_ENDPOINT"),
+		s3Region:         envDefault("PODIUM_S3_REGION", "us-east-1"),
+		s3Bucket:         os.Getenv("PODIUM_S3_BUCKET"),
+		s3AccessKey:      os.Getenv("PODIUM_S3_ACCESS_KEY_ID"),
+		s3SecretKey:      os.Getenv("PODIUM_S3_SECRET_ACCESS_KEY"),
+		s3UseSSL:         os.Getenv("PODIUM_S3_USE_SSL") != "false",
 	}
 	if c.sqlitePath == "" {
 		home, err := os.UserHomeDir()
 		if err == nil {
 			c.sqlitePath = filepath.Join(home, ".podium", "standalone", "podium.db")
 		}
+	}
+	if c.filesystemRoot == "" {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			c.filesystemRoot = filepath.Join(home, ".podium", "standalone", "objects")
+		}
+	}
+	if v := os.Getenv("PODIUM_PRESIGN_TTL_SECONDS"); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+			c.presignTTL = time.Duration(secs) * time.Second
+		}
+	}
+	if c.presignTTL <= 0 {
+		c.presignTTL = objectstore.DefaultPresignTTL
+	}
+	if c.publicURL == "" {
+		c.publicURL = "http://" + c.bind
 	}
 	return c
 }
@@ -138,7 +176,41 @@ func bootstrapOptions(c *config) []server.Option {
 	if c.publicMode {
 		out = append(out, server.WithPublicMode())
 	}
+	if store, err := openObjectStore(c); err != nil {
+		log.Printf("warning: object store disabled: %v", err)
+	} else if store != nil {
+		out = append(out, server.WithObjectStore(store, c.publicURL, c.presignTTL))
+	}
 	return out
+}
+
+// openObjectStore returns the configured §13.10 object-storage
+// backend, or (nil, nil) when the standalone deployment runs without
+// one (resources stay inline regardless of size).
+func openObjectStore(c *config) (objectstore.Provider, error) {
+	switch c.objectStore {
+	case "", "filesystem":
+		_ = os.MkdirAll(c.filesystemRoot, 0o755)
+		return objectstore.Open(c.filesystemRoot)
+	case "s3":
+		if c.s3Bucket == "" {
+			return nil, fmt.Errorf("PODIUM_S3_BUCKET is required when PODIUM_OBJECT_STORE=s3")
+		}
+		if c.s3Endpoint == "" {
+			c.s3Endpoint = "s3.amazonaws.com"
+		}
+		return objectstore.NewS3(objectstore.S3Config{
+			Endpoint:        c.s3Endpoint,
+			Bucket:          c.s3Bucket,
+			Region:          c.s3Region,
+			AccessKeyID:     c.s3AccessKey,
+			SecretAccessKey: c.s3SecretKey,
+			UseSSL:          c.s3UseSSL,
+		})
+	case "none":
+		return nil, nil
+	}
+	return nil, fmt.Errorf("unknown PODIUM_OBJECT_STORE: %s", c.objectStore)
 }
 
 func envDefault(key, def string) string {

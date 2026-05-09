@@ -367,6 +367,14 @@ Selected via `PODIUM_OBJECT_STORE` (`s3` | `filesystem`).
 | `PODIUM_S3_ACCESS_KEY_ID` / `PODIUM_S3_SECRET_ACCESS_KEY` | Static credentials                                                     | (use IAM role / instance profile when unset) |
 | `PODIUM_S3_FORCE_PATH_STYLE`                              | `true` for MinIO and similar                                           | `false`                                      |
 | `PODIUM_FILESYSTEM_ROOT`                                  | Root directory (when `filesystem`)                                     | `~/.podium/standalone/objects/`              |
+| `PODIUM_PRESIGN_TTL_SECONDS`                              | TTL for S3 presigned URLs                                              | 3600                                         |
+
+**URL mechanism by backend.** Both backends return `large_resources[*].url` values that the consumer follows to fetch bytes; the URL's authentication mechanism differs:
+
+- **S3 backend.** URLs are presigned with AWS Signature V4. The URL is self-validating: any caller that holds the URL can fetch until the signature expires (`PODIUM_PRESIGN_TTL_SECONDS`). Consumers do not send credentials when following the URL.
+- **Filesystem backend.** URLs point at the registry's authenticated `/objects/{content_hash}` route. There is no embedded signature or expiry; the consumer sends the same session token it used for `load_artifact`. The registry validates the token, confirms visibility for the artifact owning the content hash, and serves the bytes. The URL has no useful TTL of its own — it is bound to the caller's session, not to a clock.
+
+The choice of backend is transparent to the response shape: both produce `{url, content_hash, size, content_type}` records and the consumer verifies `sha256(bytes) == content_hash` after fetch in both cases. Hosts that share a `large_resources` URL with another caller cannot grant access to bytes the other caller is not entitled to read on either backend.
 
 ### Vector backend
 
