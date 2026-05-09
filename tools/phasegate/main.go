@@ -21,6 +21,10 @@ import (
 	"github.com/lennylabs/podium/tools/internal/specparser"
 )
 
+// MaxPhase is the highest phase number defined by the MVP build sequence
+// (spec §10). phasegate advance refuses to move past this.
+const MaxPhase = 19
+
 const usageText = `usage: phasegate <command>
 
 Commands:
@@ -89,7 +93,9 @@ func status(root string) int {
 		fmt.Printf("Phase %d: %d test(s) failing. Run `make next` for the next one to fix.\n",
 			phase, counts.failing)
 	case specCiting == 0:
-		fmt.Printf("Phase %d: no spec-citing tests yet. Stage 2+ adds them.\n", phase)
+		fmt.Printf("Phase %d: no spec-citing tests defined. Phase advance is blocked until tests exist.\n", phase)
+	case phase >= MaxPhase:
+		fmt.Printf("Phase %d: GREEN. Final MVP phase reached.\n", phase)
 	default:
 		fmt.Printf("Phase %d: GREEN. Run `make advance` to move to phase %d.\n", phase, phase+1)
 	}
@@ -153,6 +159,10 @@ func advance(root string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	if phase >= MaxPhase {
+		fmt.Fprintf(os.Stderr, "active phase is %d; phase %d is the last MVP phase (spec §10). Nothing to advance to.\n", phase, MaxPhase)
+		return 1
+	}
 	counts, err := runGoTestCount(root, phase)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "test run failed: %v\n", err)
@@ -161,6 +171,12 @@ func advance(root string) int {
 	if counts.failing > 0 {
 		fmt.Fprintf(os.Stderr, "phase %d not green: %d failing test(s). Refusing to advance.\n",
 			phase, counts.failing)
+		return 1
+	}
+	specTests, _ := specparser.WalkTests(root)
+	specCiting := countCitingPhase(specTests, phase)
+	if specCiting == 0 {
+		fmt.Fprintf(os.Stderr, "phase %d has no spec-citing tests. Refusing to advance: a green phase with no tests is not a green phase.\n", phase)
 		return 1
 	}
 	if err := writePhase(root, phase+1); err != nil {
