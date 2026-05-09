@@ -71,6 +71,12 @@ test-slow:
 test-phase:
 	@$(MAKE) test-fast PHASE=$(PHASE)
 
+# Run the §7.1 latency benchmark suite. Output is informational;
+# CI does not gate on absolute numbers because cloud runners vary.
+.PHONY: bench
+bench:
+	$(GO) test -bench=. -benchmem -benchtime=10x -run=^$$ ./test/bench/...
+
 # ----- Phase orchestration ---------------------------------------------------
 
 status: tools

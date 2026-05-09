@@ -127,10 +127,15 @@ not yet bootstrapped from `cmd/podium-server`. The signer
 keypair and webhook receiver store both need persistence-
 backend wiring first.
 
-**Verification** (Batch F):
-- p99 latency benchmark suite for §7.1 budgets.
-- CI workflow that runs the env-gated Tier 2 integration tests
-  against real Postgres / S3 / Sigstage / embedding providers.
+**Verification** (Batch F): DONE.
+- `test/bench/latency_test.go` exercises SearchArtifacts,
+  LoadArtifact, and LoadDomain at three input sizes; `make
+  bench` runs it with -benchmem and a stable -benchtime; the
+  `bench` GitHub Actions workflow runs it on every push to main
+  and on a Monday cadence.
+- The `integration-live` workflow runs the env-gated Postgres
+  conformance suite against a Postgres service container and
+  the S3 conformance suite against MinIO.
 
 **Larger** (Batch E):
 - Web UI (`--web-ui` / `PODIUM_WEB_UI=true`, §13.10) — SPA at

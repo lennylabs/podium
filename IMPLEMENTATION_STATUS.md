@@ -313,8 +313,10 @@ detailed plan with effort estimates and test strategies.
   - `sdks/podium-py` extended with `dependents_of`,
     `preview_scope`, and an NDJSON `subscribe()` generator.
 - **Web UI (Batch E, ~2 days).** `--web-ui` SPA at `/ui/`.
-- **Verification (Batch F, ~half day).** p99 latency benchmark,
-  CI workflow for live integration tests.
+- **Verification (Batch F): DONE.** `test/bench/latency_test.go`
+  exercises SearchArtifacts, LoadArtifact, and LoadDomain at
+  three input sizes; the `bench` and `integration-live` GitHub
+  Actions workflows run them on a schedule.
 
 ## Test discipline
 
