@@ -17,7 +17,7 @@ Tracks the state of the Podium implementation on the
 | Phase | Status | Notes |
 | ---: | --- | --- |
 | 0  | REAL    | Filesystem-source `podium sync` end-to-end. |
-| 1  | PARTIAL | Lint rules + Noop signer + Sigstore-keyless / RegistryManagedKey stubs. Production Fulcio + Rekor integration deferred to deployment-time work. |
+| 1  | REAL    | Lint rules + Noop signer + real SigstoreKeyless (Fulcio v2 cert mint, Rekor hashedrekord upload + presence check, x509 chain validation against a configurable trust root) + real RegistryManagedKey (Ed25519, KeyID-aware rotation rejection). Tier 1 tests use an in-process CA + httptest fixture; Tier 2 live smoke gates on PODIUM_SIGSTORE_* env vars. |
 | 2  | REAL    | HTTP API including `/v1/dependents` and `/v1/scope/preview`. Visibility, latest, BM25, audit, public-mode + IdP guard, read-only mode. Presigned URLs above the inline cutoff still pending. |
 | 3  | REAL    | Lock file + scope filter + adapters + override / save-as / profile edit + `--watch` (poll-based, configurable period and debounce). |
 | 4  | REAL    | MCP bridge does fetch + cache + adapter + atomic write per §6.6. Per-call `harness:` override. Identity passthrough. Protocol version negotiation. |
@@ -32,7 +32,7 @@ Tracks the state of the Podium implementation on the
 | 13 | REAL    | All 10 built-in adapters; every §6.7.1 / §4.3.5 / §4.3 cell exercised. MaterializationHook chain via `pkg/materialize.Materialize`. |
 | 14 | REAL    | TS SDK with subscriptions, dependentsOf, previewScope. `podium sync override` / `save-as` / `profile edit`. |
 | 15 | REAL    | Cross-type dependency graph populated by ingest. core.DependentsOf + core.PreviewScope. /v1/dependents, /v1/scope/preview, podium impact. |
-| 16 | REAL    | Audit emission per call. File-backed JSON Lines sink with hash-chain integrity. PII redaction via PIIScrubber + RedactFields. Retention enforcement (Enforce) and GDPR erasure (EraseUser) with chain rebuild; `podium admin retention` and `podium admin erase` CLIs. Transparency anchoring still depends on Phase 1. |
+| 16 | REAL    | Audit emission per call. File-backed JSON Lines sink with hash-chain integrity. PII redaction via PIIScrubber + RedactFields. Retention enforcement (Enforce) and GDPR erasure (EraseUser) with chain rebuild; `podium admin retention` and `podium admin erase` CLIs. Transparency anchoring (audit.Anchor) signs the chain head via the configured Sigstore-keyless provider and records the Rekor log index in an audit.anchored event. |
 | 17 | PARTIAL | PURL parser + structural CVE matching + CycloneDX / SPDX SBOM parsers + ParseSBOM dispatch. Real CVE feed ingestion (NVD / OSV / GHSA) and notification providers still pending. |
 | 18 | REAL    | Helm chart + Dockerfile + runbook + Grafana dashboard JSON. |
 | 19 | REAL    | Reference fixture covers every first-class type (skill, agent, context, command, rule, hook, mcp-server) plus an unlisted helpers domain. |
@@ -52,23 +52,20 @@ Tracks the state of the Podium implementation on the
 ## What remains
 
 Each remaining item carries a single dependency or infrastructure
-choice the project owner needs to make. `UNBLOCK.md` documents the
-recommended approach for each.
+choice the project owner needs to make.
 
-1. **Phase 1 real Sigstore integration.** Fulcio + Rekor HTTP clients;
-   needs `sigstore/sigstore-go` (recommended) or a hand-rolled client.
-2. **Phase 2 presigned URLs** above the §4.1 inline cutoff. Needs an
-   `aws-sdk-go-v2` dependency for S3 / MinIO / R2 / GCS.
-3. **Phase 17 real CVE feed adapters.** NVD / OSV / GHSA periodic
+1. **Phase 2 presigned URLs** above the §4.1 inline cutoff. Needs an
+   object-storage client (recommend `minio-go` over `aws-sdk-go-v2`
+   for S3-compatible coverage with a much smaller dep).
+2. **Phase 17 real CVE feed adapters.** NVD / OSV / GHSA periodic
    ingestion; the OSV adapter is the recommended starting point
    (no API key, broadest coverage). NVD + GHSA need a tenant-config
-   shape for keys / cadence.
-4. **Phase 16 transparency anchoring.** Periodic Sigstore-style
-   anchoring of the audit chain head; depends on Phase 1.
-5. **Vector store + embedding pipeline** for §4.7 hybrid retrieval.
+   shape for keys / cadence. All three can be implemented stdlib-only.
+3. **Vector store + embedding pipeline** for §4.7 hybrid retrieval.
    Needs at least one embedding provider (recommended: ship the
-   API providers — OpenAI / Voyage / Cohere — first; add sqlite-vec
-   + embedded-onnx behind a build tag for air-gapped deployments).
+   API providers — OpenAI / Voyage / Cohere — first; add pgvector
+   for the Postgres path; add sqlite-vec + embedded-onnx behind a
+   build tag for air-gapped deployments).
 
 ## What this branch leaves you with
 

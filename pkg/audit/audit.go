@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"sort"
 	"sync"
 	"time"
 )
@@ -44,6 +45,7 @@ const (
 	EventUserErased           EventType = "user.erased"
 	EventReadOnlyEntered      EventType = "registry.read_only_entered"
 	EventReadOnlyExited       EventType = "registry.read_only_exited"
+	EventAuditAnchored        EventType = "audit.anchored"
 )
 
 // Event is one audit record. Caller / target / context fields can be
@@ -64,6 +66,8 @@ type Event struct {
 
 // canonicalBody produces a deterministic byte representation of the
 // event for hash chaining (excludes Hash and PrevHash by definition).
+// Context keys are sorted so the encoding is stable across calls;
+// Go's map iteration order is unspecified.
 func (e Event) canonicalBody() []byte {
 	parts := []string{
 		string(e.Type),
@@ -72,8 +76,13 @@ func (e Event) canonicalBody() []byte {
 		e.Caller,
 		e.Target,
 	}
-	for k, v := range e.Context {
-		parts = append(parts, k+"="+v)
+	keys := make([]string, 0, len(e.Context))
+	for k := range e.Context {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		parts = append(parts, k+"="+e.Context[k])
 	}
 	out := []byte{}
 	for _, p := range parts {
