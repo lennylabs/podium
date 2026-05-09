@@ -27,6 +27,27 @@ export interface LoadedArtifact {
   resources?: Record<string, string>;
 }
 
+export interface DependencyEdge {
+  from: string;
+  to: string;
+  kind: "extends" | "delegates_to" | "mcpServers";
+}
+
+export interface ScopePreview {
+  layers: string[];
+  artifact_count: number;
+  by_type: Record<string, number>;
+  by_sensitivity: Record<string, number>;
+}
+
+export interface RegistryEvent {
+  event: string;
+  trace_id?: string;
+  timestamp?: string;
+  actor?: Record<string, unknown>;
+  data?: Record<string, unknown>;
+}
+
 export class RegistryError extends Error {
   constructor(
     public readonly code: string,
@@ -107,6 +128,55 @@ export class Client {
     const params: Record<string, unknown> = { id };
     if (version) params.version = version;
     return this.get("/v1/load_artifact", params) as Promise<LoadedArtifact>;
+  }
+
+  // Spec §7.6 — dependents_of returns reverse-dependency edges for
+  // impact analysis (extends, delegates_to, mcpServers).
+  async dependentsOf(artifactID: string): Promise<DependencyEdge[]> {
+    const body = (await this.get("/v1/dependents", { id: artifactID })) as {
+      edges?: DependencyEdge[];
+    };
+    return body.edges ?? [];
+  }
+
+  // Spec §3.5 — preview_scope returns aggregated metadata for the
+  // calling identity's effective view (counts only).
+  async previewScope(): Promise<ScopePreview> {
+    return this.get("/v1/scope/preview", {}) as Promise<ScopePreview>;
+  }
+
+  // Spec §7.6 — subscribe streams change events. Phase 14 ships a
+  // long-poll JSON-Lines variant; SSE / websocket land alongside the
+  // server's outbound webhook subsystem.
+  async *subscribe(eventTypes: string[]): AsyncIterable<RegistryEvent> {
+    const url = new URL(this.registry + "/v1/events");
+    for (const t of eventTypes) {
+      url.searchParams.append("type", t);
+    }
+    const resp = await this.fetcher(url.toString());
+    if (!resp.ok || !resp.body) {
+      throw new RegistryError(
+        "registry.unavailable",
+        `subscribe HTTP ${resp.status}`,
+      );
+    }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      buffer += decoder.decode(value, { stream: true });
+      let nl = buffer.indexOf("\n");
+      while (nl >= 0) {
+        const line = buffer.slice(0, nl);
+        buffer = buffer.slice(nl + 1);
+        if (line.trim() !== "") {
+          yield JSON.parse(line) as RegistryEvent;
+        }
+        nl = buffer.indexOf("\n");
+      }
+    }
   }
 
   private async get(path: string, params: Record<string, unknown>): Promise<unknown> {
