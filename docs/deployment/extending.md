@@ -26,7 +26,7 @@ The registry's pluggable interfaces:
 | `RegistryStore` | Manifest metadata, dependency edges, layer config, admin grants, registry-side audit. Postgres (standard) / SQLite (standalone) by default. |
 | `RegistryObjectStore` | Bundled resource bytes, presigned URLs. S3-compatible (filesystem in standalone). |
 | `RegistrySearchProvider` | Hybrid retrieval for `search_artifacts`. Built-ins: `pgvector`, `sqlite-vec`, `pinecone`, `weaviate-cloud`, `qdrant-cloud`. |
-| `EmbeddingProvider` | Generates embeddings for ingest text and query text. Built-ins: `embedded-onnx`, `openai`, `voyage`, `cohere`, `ollama`. |
+| `EmbeddingProvider` | Generates embeddings for ingest text and query text. Built-ins: `openai`, `voyage`, `cohere`, `ollama`. |
 | `LocalSearchProvider` | Optional semantic backing for the local-overlay index. Same SPI as `RegistrySearchProvider`. |
 | `RegistryAuditSink` | Stream for catalogue events; logically distinct from `RegistryStore`, separately mockable, separately routable. |
 | `LayerComposer` | Resolves the caller's effective view from the configured layer list; applies merge semantics and `extends:` resolution. |

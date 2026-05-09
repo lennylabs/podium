@@ -257,6 +257,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/load_artifact", s.handleLoadArtifact)
 	mux.HandleFunc("/v1/dependents", s.handleDependents)
 	mux.HandleFunc("/v1/scope/preview", s.handleScopePreview)
+	mux.HandleFunc("/v1/admin/reembed", s.handleReembed)
 	if s.objectStore != nil {
 		mux.HandleFunc("/objects/", s.handleObjectsRoute)
 	}
@@ -447,6 +448,42 @@ func (s *Server) handleDependents(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"edges": out})
+}
+
+// handleReembed runs the §4.7 reembed flow over the tenant. POST
+// /v1/admin/reembed?artifact=<id>&version=<v>&only_missing=true to
+// scope to one artifact or limit to artifacts without a current
+// embedding. Admin-only in production deployments.
+func (s *Server) handleReembed(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "registry.invalid_argument",
+			"method not allowed: "+r.Method)
+		return
+	}
+	q := r.URL.Query()
+	if id := q.Get("artifact"); id != "" {
+		ver := q.Get("version")
+		if ver == "" {
+			writeError(w, http.StatusBadRequest, "registry.invalid_argument",
+				"version is required when artifact is set")
+			return
+		}
+		if err := s.core.ReembedOne(r.Context(), id, ver); err != nil {
+			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"reembedded": map[string]string{"id": id, "version": ver},
+		})
+		return
+	}
+	onlyMissing := q.Get("only_missing") == "true"
+	res, err := s.core.Reembed(r.Context(), onlyMissing)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 func (s *Server) handleScopePreview(w http.ResponseWriter, r *http.Request) {

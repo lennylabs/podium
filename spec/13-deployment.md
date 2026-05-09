@@ -5,7 +5,7 @@
 - **Stateless front-end:** 3+ replicas behind a load balancer (HTTP).
 - **Postgres:** managed (RDS, Cloud SQL, Aurora) or self-run; primary + read replicas. Holds manifest metadata, layer config, admin grants, and audit; also holds embeddings when the default vector backend (pgvector) is in use.
 - **Vector backend:** `pgvector` by default, collocated in the Postgres deployment with no separate service to run. The default binary also ships built-ins for `pinecone`, `weaviate-cloud`, and `qdrant-cloud`, selectable via `PODIUM_VECTOR_BACKEND` (each takes its own endpoint + API key env vars). Custom backends register through the `RegistrySearchProvider` SPI (§9.1, §9.2).
-- **Embedding provider:** `openai` by default in standard deployments. Text projection from manifest frontmatter (§4.7 _Embedding generation_) is sent to OpenAI's embeddings API. The default binary also ships `voyage`, `cohere`, `ollama`, and `embedded-onnx`, selectable via `PODIUM_EMBEDDING_PROVIDER`. Optional when the configured vector backend self-embeds (Pinecone Integrated Inference, Weaviate Cloud vectorizer, Qdrant Cloud Inference).
+- **Embedding provider:** `openai` by default in standard deployments. Text projection from manifest frontmatter (§4.7 _Embedding generation_) is sent to OpenAI's embeddings API. The default binary also ships `voyage`, `cohere`, and `ollama`, selectable via `PODIUM_EMBEDDING_PROVIDER`. Optional when the configured vector backend self-embeds (Pinecone Integrated Inference, Weaviate Cloud vectorizer, Qdrant Cloud Inference).
 - **Object storage:** S3-compatible (S3, GCS, MinIO, R2).
 - **Helm chart** ships with the registry; bare-metal deployment guide alongside.
 
@@ -136,7 +136,7 @@ podium serve --strict
 | ----------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Metadata store          | Postgres                                        | Embedded SQLite (`~/.podium/standalone/podium.db`)                                                                                                                                                                                                                                             |
 | Vector store            | pgvector                                        | `sqlite-vec` extension loaded into the same SQLite file                                                                                                                                                                                                                                        |
-| Embedding provider      | `openai` (default)                              | `embedded-onnx`: bundled BGE-small ONNX model, in-process, no external service                                                                                                                                                                                                                 |
+| Embedding provider      | `openai` (default)                              | `ollama` pointed at a local model server, or any cloud provider; `--no-embeddings` falls back to BM25-only                                                                                                                                                                                     |
 | Object storage          | S3-compatible                                   | Filesystem (`~/.podium/standalone/objects/`)                                                                                                                                                                                                                                                   |
 | Identity provider       | OIDC IdP                                        | None. No auth; `127.0.0.1`-only HTTP by default                                                                                                                                                                                                                                                |
 | Layers                  | Configured admin layers + user-defined layers   | `--layer-path` is polymorphic (see "**`--layer-path` modes**" below): single-layer mode produces one `local`-source layer rooted at the path; filesystem-registry mode treats each subdirectory as a `local`-source layer per §13.11.1. Additional `local` and `git` layers can be registered via `podium layer register` in either mode.                                                                                                                                                   |
@@ -153,7 +153,7 @@ podium serve --strict
 
 If `multi_layer: true` is set but the safety check fails (manifest files are present directly at the top level of `<path>`), the server refuses to start with `config.layer_path_ambiguous`, naming the conflicting top-level manifest paths so the operator can either remove them or unset `multi_layer`.
 
-**Hybrid search.** Standalone runs the same BM25 + vector RRF retriever as the standard registry. Vectors live in `sqlite-vec`; embeddings come from the bundled `embedded-onnx` provider. Both run in-process, so the binary works offline and air-gapped with no external dependency. Operators who want a remote model instead can switch via `PODIUM_EMBEDDING_PROVIDER=openai|voyage|cohere|ollama` (`ollama` is the obvious choice for self-hosted local models). `--no-embeddings` falls back to BM25-only.
+**Hybrid search.** Standalone runs the same BM25 + vector RRF retriever as the standard registry. Vectors live in `sqlite-vec`, loaded as a SQLite extension into the standalone database. Embeddings come from the configured provider via `PODIUM_EMBEDDING_PROVIDER` (one of `openai`, `voyage`, `cohere`, `ollama`); `ollama` is the recommended choice for self-hosted local models when the deployment must stay offline. `--no-embeddings` falls back to BM25-only when no provider is configured.
 
 **Upgrade path.** A standalone deployment migrates to standard via `podium admin migrate-to-standard --postgres <dsn> --object-store <url>` (covered in §13.4). Layer config, admin grants, and audit history are preserved; embeddings are re-computed against the target vector backend on first ingest.
 
@@ -414,15 +414,7 @@ Selected via `PODIUM_VECTOR_BACKEND` (`pgvector` | `sqlite-vec` | `pinecone` | `
 
 ### Embedding provider
 
-Selected via `PODIUM_EMBEDDING_PROVIDER` (`embedded-onnx` | `openai` | `voyage` | `cohere` | `ollama`). **Optional** when the configured vector backend self-embeds (any of the `*_INFERENCE_MODEL` / `*_VECTORIZER` env vars above is set); **required** otherwise.
-
-`embedded-onnx`:
-
-| Var                      | Description                | Default                       |
-| ------------------------ | -------------------------- | ----------------------------- |
-| `PODIUM_ONNX_MODEL_PATH` | Path to an ONNX model file | (bundled `bge-small-en-v1.5`) |
-| `PODIUM_ONNX_DIMENSIONS` | Output vector dimensions   | `384`                         |
-| `PODIUM_ONNX_POOL_SIZE`  | Concurrent inference slots | `runtime.NumCPU()`            |
+Selected via `PODIUM_EMBEDDING_PROVIDER` (`openai` | `voyage` | `cohere` | `ollama`). **Optional** when the configured vector backend self-embeds (any of the `*_INFERENCE_MODEL` / `*_VECTORIZER` env vars above is set); **required** otherwise. Setting it to the empty string disables embedding generation; search degrades to BM25-only.
 
 `openai`:
 

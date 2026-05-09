@@ -26,7 +26,7 @@ Baseline (10K artifacts, 100 QPS, 1 GB Postgres, 500 GB object storage on a 3-re
 | Tenants | 50 | Confirm `RegistryStore` connection pool is sized appropriately; increase pgbouncer pool if used. |
 | Audit volume | 1M events/day | Set retention explicitly; consider streaming to an external sink via `LocalAuditSink` config. |
 
-Embeddings dominate Postgres growth at scale. Each artifact's text projection becomes a 384-dim float vector with `embedded-onnx` or `text-embedding-3-small`. At ~3 KB per row including metadata, 100K artifacts is ~300 MB of embeddings.
+Embeddings dominate Postgres growth at scale. Each artifact's text projection becomes a float vector whose dimension depends on the configured provider (768 for `nomic-embed-text` via Ollama, 1024 for `voyage-3` or `embed-v4`, 1536 for `text-embedding-3-small`). At ~6 KB per row including metadata at 1536 dim, 100K artifacts is ~600 MB of embeddings.
 
 Object-storage growth is dominated by bundled resources. Most teams' p99 artifact size sits well under the 256 KB inline cutoff, so the inline manifest body fits in Postgres and only larger resources go to S3.
 
@@ -168,7 +168,7 @@ Re-run the checklist after every major release and after any change to layer con
 
 These come up a few times a year for most operators:
 
-- **Embedding provider rate limits.** OpenAI and Voyage rate-limit aggressively under bulk reingest. Stagger `podium layer reingest` across layers, or switch to `embedded-onnx` for local inference during reingest storms.
+- **Embedding provider rate limits.** OpenAI and Voyage rate-limit aggressively under bulk reingest. Stagger `podium layer reingest` across layers, or switch to `ollama` pointed at a local model server for inference during reingest storms.
 - **pgvector index bloat.** After many embeddings have churned, `REINDEX` the vector index quarterly or set up `auto_vacuum` aggressively.
 - **MCP server cache pinning** (`PODIUM_CACHE_DIR` on slow disks). Developer machines with cache on a network filesystem will see materialization latency well above the SLO. Default to `~/.podium/cache/` on local disk.
 - **Webhook retries during read-only mode.** GitHub will retry webhooks for ~24 h with exponential backoff. If your read-only window exceeds that, ingests will be permanently lost. Trigger manual `podium layer reingest` after recovery.

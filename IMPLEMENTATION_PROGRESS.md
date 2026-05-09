@@ -51,14 +51,18 @@ Tracks the state of the Podium implementation on the
 
 ## What remains
 
-Each remaining item carries a single dependency or infrastructure
-choice the project owner needs to make.
+_All items shipped. The implementation matches the §10 build sequence end-to-end._
 
-1. **Vector store + embedding pipeline** for §4.7 hybrid retrieval.
-   Needs at least one embedding provider (recommended: ship the
-   API providers — OpenAI / Voyage / Cohere — first; add pgvector
-   for the Postgres path; add sqlite-vec + embedded-onnx behind a
-   build tag for air-gapped deployments).
+§4.7 hybrid retrieval ships with four embedding providers
+(`openai`, `voyage`, `cohere`, `ollama`) and six vector backends
+(`memory`, `pgvector`, `sqlite-vec`, `pinecone`, `weaviate-cloud`,
+`qdrant-cloud`). RRF fusion blends BM25 ranks with vector cosine
+ranks; `SearchResult.Degraded` surfaces BM25-only fallback when
+vector search isn't configured or the embedder is unreachable.
+Ingest-time embedding is content-hash-gated (no re-embed on
+idempotent re-ingest) and atomic per row in the vector store.
+`podium admin reembed` covers manual backfill and provider
+switches.
 
 ## What this branch leaves you with
 

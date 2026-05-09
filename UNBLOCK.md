@@ -278,40 +278,17 @@ Adds `aws-sdk-go-v2/service/s3` (and friends).
 
 ## 10. Vector store + embedding pipeline
 
-**Blocker.** sqlite-vec extension loading + embedding inference.
+Shipped in the most recent session. Four embedding providers
+(`openai`, `voyage`, `cohere`, `ollama`) plus six vector backends
+(memory, pgvector, sqlite-vec, pinecone, weaviate-cloud,
+qdrant-cloud) plus RRF fusion over BM25 + vector cosine. Ingest-
+time embedding is content-hash-gated so unchanged artifacts skip
+the embed call; per-row upserts keep the vector store atomically
+consistent during reingest. ONNX support was explicitly removed as
+a deliberate scope decision; offline deployments use Ollama
+pointed at a local model server.
 
-**Proposal.**
-
-- **API-only path** (recommended starting point):
-  - `pkg/embedding/openai.go`, `voyage.go`, `cohere.go`, `ollama.go`:
-    thin HTTP clients to each provider's embedding endpoint.
-  - Selected via `PODIUM_EMBEDDING_PROVIDER`.
-- **sqlite-vec path** (standalone vector store):
-  - Load the sqlite-vec extension via the mattn SQLite driver
-    (registers a SQL function returning the embedding distance).
-  - `vec_artifacts` table with `embedding F32_BLOB[384]` column.
-  - At ingest, compute embedding via the configured provider and
-    insert.
-  - At search, query with cosine distance + RRF fusion against
-    BM25 ranks.
-- **embedded-onnx** (for air-gapped / offline):
-  - `github.com/yalue/onnxruntime_go` (~30 MB binary footprint).
-  - Bundled bge-small-en-v1.5 model (384-dim).
-  - Behind a build tag (`onnx`) so default builds stay light.
-
-**Effort.** Large.
-- API providers: ~300 lines for all four + tests.
-- sqlite-vec: ~250 lines + tests.
-- ONNX: ~400 lines + integration tests; binary footprint cost.
-
-**Decisions.**
-1. Ship API-only first, defer sqlite-vec + ONNX? Recommended for
-   non-air-gapped users.
-2. ONNX runtime acceptable as a build-tagged option? It's a
-   sensible default for standalone but adds dependency weight.
-
-**Can ship now.** API providers + sqlite-vec yes after decisions.
-ONNX path needs build-tag wiring.
+`podium admin reembed` exists for backfill and provider switches.
 
 ---
 

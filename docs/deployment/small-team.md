@@ -34,7 +34,7 @@ That command runs a single process. The standalone server includes:
 | Metadata store | SQLite at `~/.podium/standalone/podium.db` |
 | Object storage | Local filesystem at `~/.podium/standalone/objects/` |
 | Vector backend | `sqlite-vec` collocated with SQLite |
-| Embedding provider | `embedded-onnx` (bundled `bge-small-en-v1.5`, ~30 MB) |
+| Embedding provider | `ollama` pointed at a local model (or any other configured provider). `--no-embeddings` falls back to BM25-only. |
 | Identity provider | Optional. Public mode (no auth) by default; `oauth-device-code` can be enabled. |
 
 The standalone mode requires no Postgres, no S3, and no external identity provider.
@@ -135,7 +135,7 @@ The shared library does the same parsing, composition, and adapter work in both 
 ## What you get
 
 - **Runtime discovery** via the Podium MCP server. Agents call `load_domain`, `search_domains`, `search_artifacts`, and `load_artifact` to materialize only what they need.
-- **Hybrid retrieval.** BM25 + vector embeddings via reciprocal rank fusion. Out of the box: BM25 over manifest text plus vectors via the embedded ONNX model.
+- **Hybrid retrieval.** BM25 + vector embeddings via reciprocal rank fusion. Out of the box: BM25 over manifest text plus vectors via the configured embedding provider; `--no-embeddings` falls back to BM25-only when no provider is wired.
 - **Single audit log** capturing every read, ingest, and admin action. SQLite-backed; configurable retention.
 - **Cross-type dependency graph.** `extends:`, `delegates_to:`, `mcpServers:` references all tracked.
 - **Layer composition with visibility.** Even when you start with a single permissive layer, the layer system is in place for when you add a second.

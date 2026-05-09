@@ -17,8 +17,10 @@ import (
 	"sync"
 	"unicode"
 
+	"github.com/lennylabs/podium/pkg/embedding"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/vector"
 	"github.com/lennylabs/podium/pkg/version"
 )
 
@@ -48,6 +50,13 @@ type Registry struct {
 	audit      AuditEmitter
 	sessionsMu sync.Mutex
 	sessions   map[sessionKey]string
+	// vector and embedder enable §4.7 hybrid retrieval. When both are
+	// set, SearchArtifacts blends BM25 with vector cosine via RRF.
+	// When either is nil, search degrades to BM25-only and the
+	// SearchResult carries Degraded=true so consumers can surface
+	// the reduced fidelity.
+	vector   vector.Provider
+	embedder embedding.Provider
 }
 
 // sessionKey identifies one (session, artifact) latest-resolution
@@ -85,6 +94,25 @@ func (r *Registry) WithAudit(emit AuditEmitter) *Registry {
 	r.audit = emit
 	return r
 }
+
+// WithVectorSearch attaches the §4.7 hybrid-retrieval pieces.
+// SearchArtifacts will RRF-fuse BM25 ranks with vector cosine ranks
+// when both the vector store and the embedder are non-nil. Either
+// argument left nil disables the vector path; search continues to
+// work BM25-only and reports Degraded=true.
+func (r *Registry) WithVectorSearch(v vector.Provider, e embedding.Provider) *Registry {
+	r.vector = v
+	r.embedder = e
+	return r
+}
+
+// VectorStore returns the configured vector store, or nil. Used by
+// the ingest pipeline to upsert embeddings on content-hash change.
+func (r *Registry) VectorStore() vector.Provider { return r.vector }
+
+// Embedder returns the configured embedding provider, or nil. Used
+// by the ingest pipeline.
+func (r *Registry) Embedder() embedding.Provider { return r.embedder }
 
 // emit fires the configured audit emitter, if any.
 func (r *Registry) emit(ctx context.Context, e AuditEvent) {
@@ -414,14 +442,19 @@ type SearchResult struct {
 	TotalMatched int
 	Results      []ArtifactDescriptor
 	Domains      []DomainDescriptor
+	// Degraded is true when vector search was configured but failed
+	// (provider unreachable, embedder error) or unconfigured;
+	// search returned BM25-only ranks. Consumers surface this so
+	// callers know the result quality is lexical-only.
+	Degraded bool
 }
 
 // SearchArtifacts runs the §5 search over manifests visible to id.
 //
-// Phase 12 will introduce hybrid retrieval (BM25 + vectors via RRF).
-// The current implementation is BM25-style scoring over manifest text
-// (id, description, tags, body), tunable enough to give meaningful
-// rankings without an external index.
+// When a vector store and embedder are configured (WithVectorSearch),
+// the implementation runs BM25 + vector cosine in parallel and
+// fuses the rankings via RRF (§4.7). Otherwise it falls back to
+// BM25-only and sets SearchResult.Degraded=true.
 func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts SearchArtifactsOptions) (*SearchResult, error) {
 	r.emit(ctx, AuditEvent{
 		Type:    "artifacts.searched",
@@ -455,13 +488,30 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 		filtered = append(filtered, m)
 	}
 
-	// Score with BM25 against the query. Empty query returns matched
+	// Lexical: BM25 over manifest text. Empty query returns matched
 	// records with score 0 (alphabetical by id).
 	scored := scoreBM25(filtered, opts.Query)
+	totalMatched := len(scored)
+
+	// Vector: when configured + non-empty query, compute query
+	// embedding, fetch top-K nearest by cosine, and RRF-fuse with the
+	// BM25 ranks. Failures degrade to BM25-only without erroring.
+	degraded := r.vector == nil || r.embedder == nil
+	if !degraded && opts.Query != "" {
+		vecRanks, vecErr := r.vectorRanks(ctx, opts.Query, filtered, opts.TopK)
+		if vecErr != nil {
+			degraded = true
+		} else if len(vecRanks) > 0 {
+			lexIDs := scoredIDs(scored)
+			fused := RRFFuse(lexIDs, vecRanks)
+			scored = reorderScored(scored, fused)
+		}
+	}
 
 	res := &SearchResult{
 		Query:        opts.Query,
-		TotalMatched: len(scored),
+		TotalMatched: totalMatched,
+		Degraded:     degraded,
 	}
 	if len(scored) > opts.TopK {
 		scored = scored[:opts.TopK]
@@ -473,6 +523,62 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 		res.Results = append(res.Results, d)
 	}
 	return res, nil
+}
+
+// vectorRanks embeds the query and returns the top-K nearest
+// artifact IDs from the vector store, restricted to the visible
+// candidate set so a leaked vector outside the caller's view never
+// surfaces.
+func (r *Registry) vectorRanks(ctx context.Context, query string, candidates []store.ManifestRecord, topK int) ([]string, error) {
+	vecs, err := r.embedder.Embed(ctx, []string{query})
+	if err != nil || len(vecs) == 0 {
+		return nil, fmt.Errorf("embed: %w", err)
+	}
+	matches, err := r.vector.Query(ctx, r.tenantID, vecs[0], topK*4)
+	if err != nil {
+		return nil, fmt.Errorf("vector: %w", err)
+	}
+	candidateIDs := map[string]bool{}
+	for _, c := range candidates {
+		candidateIDs[c.ArtifactID] = true
+	}
+	out := make([]string, 0, len(matches))
+	seen := map[string]bool{}
+	for _, m := range matches {
+		if !candidateIDs[m.ArtifactID] || seen[m.ArtifactID] {
+			continue
+		}
+		seen[m.ArtifactID] = true
+		out = append(out, m.ArtifactID)
+	}
+	return out, nil
+}
+
+// scoredIDs flattens a BM25 score list to artifact IDs in rank order.
+func scoredIDs(scored []scoredRecord) []string {
+	out := make([]string, len(scored))
+	for i, sc := range scored {
+		out[i] = sc.rec.ArtifactID
+	}
+	return out
+}
+
+// reorderScored reorders the BM25 score slice to match the order of
+// fused IDs, preserving any items that survive the fusion. Items
+// that aren't in fused (because they came from neither list, which
+// can't happen here) are dropped.
+func reorderScored(scored []scoredRecord, fused []string) []scoredRecord {
+	byID := map[string]scoredRecord{}
+	for _, sc := range scored {
+		byID[sc.rec.ArtifactID] = sc
+	}
+	out := make([]scoredRecord, 0, len(fused))
+	for _, id := range fused {
+		if sc, ok := byID[id]; ok {
+			out = append(out, sc)
+		}
+	}
+	return out
 }
 
 // ----- SearchDomains ------------------------------------------------------

@@ -23,12 +23,24 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lennylabs/podium/pkg/embedding"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/vector"
 )
+
+// envFirst returns the value of the first non-empty env var.
+func envFirst(keys ...string) string {
+	for _, k := range keys {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
+	}
+	return ""
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -54,6 +66,12 @@ func run() error {
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: tenantID, Name: tenantID})
 
 	registry := core.New(st, tenantID, []layer.Layer{})
+	if v, e, err := openVectorAndEmbedder(cfg); err != nil {
+		log.Printf("warning: vector search disabled: %v", err)
+	} else if v != nil && e != nil {
+		registry = registry.WithVectorSearch(v, e)
+		log.Printf("hybrid search: vector=%s embedder=%s dim=%d", v.ID(), e.ID(), e.Dimensions())
+	}
 	srv := server.New(registry,
 		bootstrapOptions(cfg)...,
 	)
@@ -87,6 +105,24 @@ type config struct {
 	s3AccessKey      string
 	s3SecretKey      string
 	s3UseSSL         bool
+	// Vector + embedding (§4.7).
+	vectorBackend    string
+	embeddingProvider string
+	embeddingModel   string
+	openaiAPIKey     string
+	voyageAPIKey     string
+	cohereAPIKey     string
+	ollamaURL        string
+	pgvectorDSN      string
+	pineconeKey      string
+	pineconeHost     string
+	pineconeNS       string
+	weaviateURL      string
+	weaviateKey      string
+	weaviateColl     string
+	qdrantURL        string
+	qdrantKey        string
+	qdrantColl       string
 }
 
 func loadConfig() *config {
@@ -106,6 +142,24 @@ func loadConfig() *config {
 		s3AccessKey:      os.Getenv("PODIUM_S3_ACCESS_KEY_ID"),
 		s3SecretKey:      os.Getenv("PODIUM_S3_SECRET_ACCESS_KEY"),
 		s3UseSSL:         os.Getenv("PODIUM_S3_USE_SSL") != "false",
+		// §4.7 vector + embedding.
+		vectorBackend:     os.Getenv("PODIUM_VECTOR_BACKEND"),
+		embeddingProvider: os.Getenv("PODIUM_EMBEDDING_PROVIDER"),
+		embeddingModel:    os.Getenv("PODIUM_EMBEDDING_MODEL"),
+		openaiAPIKey:      os.Getenv("OPENAI_API_KEY"),
+		voyageAPIKey:      os.Getenv("VOYAGE_API_KEY"),
+		cohereAPIKey:      os.Getenv("COHERE_API_KEY"),
+		ollamaURL:         envDefault("PODIUM_OLLAMA_URL", "http://localhost:11434"),
+		pgvectorDSN:       envFirst("PODIUM_PGVECTOR_DSN", "PODIUM_POSTGRES_DSN"),
+		pineconeKey:       os.Getenv("PODIUM_PINECONE_API_KEY"),
+		pineconeHost:      os.Getenv("PODIUM_PINECONE_HOST"),
+		pineconeNS:        os.Getenv("PODIUM_PINECONE_NAMESPACE"),
+		weaviateURL:       os.Getenv("PODIUM_WEAVIATE_URL"),
+		weaviateKey:       os.Getenv("PODIUM_WEAVIATE_API_KEY"),
+		weaviateColl:      envDefault("PODIUM_WEAVIATE_COLLECTION", "PodiumArtifacts"),
+		qdrantURL:         os.Getenv("PODIUM_QDRANT_URL"),
+		qdrantKey:         os.Getenv("PODIUM_QDRANT_API_KEY"),
+		qdrantColl:        envDefault("PODIUM_QDRANT_COLLECTION", "podium_artifacts"),
 	}
 	if c.sqlitePath == "" {
 		home, err := os.UserHomeDir()
@@ -182,6 +236,85 @@ func bootstrapOptions(c *config) []server.Option {
 		out = append(out, server.WithObjectStore(store, c.publicURL, c.presignTTL))
 	}
 	return out
+}
+
+// openVectorAndEmbedder returns the configured §4.7 hybrid-search
+// pieces. Returns (nil, nil, nil) when vector search is disabled
+// (operator left PODIUM_VECTOR_BACKEND unset / set to "none").
+func openVectorAndEmbedder(c *config) (vector.Provider, embedding.Provider, error) {
+	emb, err := openEmbedder(c)
+	if err != nil {
+		return nil, nil, err
+	}
+	if emb == nil {
+		return nil, nil, nil
+	}
+	v, err := openVectorBackend(c, emb.Dimensions())
+	if err != nil {
+		return nil, nil, err
+	}
+	return v, emb, nil
+}
+
+func openEmbedder(c *config) (embedding.Provider, error) {
+	switch c.embeddingProvider {
+	case "", "none":
+		return nil, nil
+	case "openai":
+		if c.openaiAPIKey == "" {
+			return nil, fmt.Errorf("OPENAI_API_KEY required for openai embedder")
+		}
+		return embedding.OpenAI{APIKey: c.openaiAPIKey, Model_: c.embeddingModel}, nil
+	case "voyage":
+		if c.voyageAPIKey == "" {
+			return nil, fmt.Errorf("VOYAGE_API_KEY required for voyage embedder")
+		}
+		return embedding.Voyage{APIKey: c.voyageAPIKey, Model_: c.embeddingModel}, nil
+	case "cohere":
+		if c.cohereAPIKey == "" {
+			return nil, fmt.Errorf("COHERE_API_KEY required for cohere embedder")
+		}
+		return embedding.Cohere{APIKey: c.cohereAPIKey, Model_: c.embeddingModel}, nil
+	case "ollama":
+		return embedding.Ollama{BaseURL: c.ollamaURL, Model_: c.embeddingModel}, nil
+	}
+	return nil, fmt.Errorf("unknown PODIUM_EMBEDDING_PROVIDER: %s", c.embeddingProvider)
+}
+
+func openVectorBackend(c *config, dim int) (vector.Provider, error) {
+	switch c.vectorBackend {
+	case "", "none":
+		return nil, nil
+	case "memory":
+		return vector.NewMemory(dim), nil
+	case "pgvector":
+		if c.pgvectorDSN == "" {
+			return nil, fmt.Errorf("PODIUM_PGVECTOR_DSN or PODIUM_POSTGRES_DSN required for pgvector")
+		}
+		return vector.OpenPgVector(vector.PgVectorConfig{DSN: c.pgvectorDSN, Dimensions: dim})
+	case "sqlite-vec":
+		path := c.sqlitePath
+		if path == "" {
+			path = ":memory:"
+		}
+		return vector.OpenSQLiteVec(vector.SQLiteVecConfig{Path: path, Dimensions: dim})
+	case "pinecone":
+		return vector.NewPinecone(vector.PineconeConfig{
+			APIKey: c.pineconeKey, Host: c.pineconeHost,
+			Namespace: c.pineconeNS, Dimensions: dim,
+		})
+	case "weaviate-cloud":
+		return vector.NewWeaviate(vector.WeaviateConfig{
+			URL: c.weaviateURL, APIKey: c.weaviateKey,
+			Collection: c.weaviateColl, Dimensions: dim,
+		})
+	case "qdrant-cloud":
+		return vector.NewQdrant(vector.QdrantConfig{
+			URL: c.qdrantURL, APIKey: c.qdrantKey,
+			Collection: c.qdrantColl, Dimensions: dim,
+		})
+	}
+	return nil, fmt.Errorf("unknown PODIUM_VECTOR_BACKEND: %s", c.vectorBackend)
 }
 
 // openObjectStore returns the configured §13.10 object-storage

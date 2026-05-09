@@ -176,7 +176,7 @@ Registry runs entirely on an internal network with no public ingress.
 
 1. Deploy registry per §13.1 inside the internal network. Identity via the org's internal OIDC IdP. Object storage on internal S3-compatible storage (MinIO or similar).
 2. Layer Git repos hosted on internal Git server (GitLab/Gitea/internal GitHub Enterprise). Webhooks reach the registry over the internal network only.
-3. Embedding provider: `embedded-onnx` (no external API calls) or `ollama` pointed at a local model server. Vector backend: pgvector (no external service).
+3. Embedding provider: `ollama` pointed at a local model server (no external API calls). Vector backend: pgvector (no external service).
 4. Sigstore-keyless requires public OIDC infrastructure; air-gapped deployments use the registry-managed signing key path instead.
 
 **Consumers:** internal endpoint only; OIDC flow stays inside the network.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -31,10 +32,50 @@ func adminCmd(args []string) int {
 		return adminEraseCmd(args[1:])
 	case "retention":
 		return adminRetentionCmd(args[1:])
+	case "reembed":
+		return adminReembedCmd(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown admin subcommand: %s\n", args[0])
 		return 2
 	}
+}
+
+func adminReembedCmd(args []string) int {
+	fs := flag.NewFlagSet("admin reembed", flag.ContinueOnError)
+	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
+	artifact := fs.String("artifact", "", "specific artifact ID (optional)")
+	version := fs.String("version", "", "specific version (required with --artifact)")
+	onlyMissing := fs.Bool("only-missing", false, "skip artifacts that already have a vector")
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *registry == "" {
+		fmt.Fprintln(os.Stderr, "error: --registry is required")
+		return 2
+	}
+	q := url.Values{}
+	if *artifact != "" {
+		if *version == "" {
+			fmt.Fprintln(os.Stderr, "error: --version is required with --artifact")
+			return 2
+		}
+		q.Set("artifact", *artifact)
+		q.Set("version", *version)
+	} else if *onlyMissing {
+		q.Set("only_missing", "true")
+	}
+	endpoint := *registry + "/v1/admin/reembed"
+	if encoded := q.Encode(); encoded != "" {
+		endpoint += "?" + encoded
+	}
+	out, status := doJSON(endpoint, "POST", nil)
+	if status >= 400 {
+		fmt.Fprintf(os.Stderr, "reembed failed: HTTP %d\n%s\n", status, out)
+		return 1
+	}
+	fmt.Println(string(out))
+	return 0
 }
 
 func adminEraseCmd(args []string) int {

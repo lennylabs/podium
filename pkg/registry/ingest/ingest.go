@@ -99,7 +99,28 @@ type Request struct {
 	Linter *lint.Linter
 	// Clock provides ingest timestamps; defaults to clock.Real.
 	Clock clock.Clock
+	// Embedder generates the §4.7 vector embedding for each newly
+	// accepted artifact. Optional: when nil, ingest writes manifests
+	// without embeddings and search degrades to BM25-only for those
+	// artifacts. An EmbeddingFailure entry records artifacts whose
+	// embedding call failed transiently; `podium admin reembed`
+	// retries.
+	Embedder EmbedderFunc
+	// VectorPut persists the embedding atomically per row. Required
+	// when Embedder is set; nil otherwise. Atomic-per-row upsert
+	// means search continues to return the prior vector until the
+	// new one lands.
+	VectorPut VectorPutFunc
 }
+
+// EmbedderFunc converts the embedding text projection of a manifest
+// into a vector. Implementations wrap pkg/embedding.Provider.Embed
+// for a single text.
+type EmbedderFunc func(ctx context.Context, text string) ([]float32, error)
+
+// VectorPutFunc persists the embedding for one (tenant, id,
+// version) tuple. Atomic per row.
+type VectorPutFunc func(ctx context.Context, tenantID, artifactID, version string, vec []float32) error
 
 // Result reports what happened.
 type Result struct {
@@ -117,6 +138,19 @@ type Result struct {
 	// Rejected reports artifacts rejected for other reasons (sensitivity
 	// floor, parse failure, missing SKILL.md for type: skill, etc.).
 	Rejected []RejectedArtifact
+	// EmbeddingFailures records artifacts that ingested successfully
+	// but whose embedding call failed (provider unreachable, vector
+	// store down). The manifest is searchable via BM25 only until
+	// `podium admin reembed` retries.
+	EmbeddingFailures []EmbeddingFailure
+}
+
+// EmbeddingFailure names an artifact whose post-ingest embedding
+// step failed. Search degrades to BM25 for that artifact.
+type EmbeddingFailure struct {
+	ArtifactID string
+	Version    string
+	Reason     string
 }
 
 // ConflictReport names a (id, version) that already has different bytes.
@@ -276,12 +310,66 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 				return nil, err
 			}
 		}
+
+		// §4.7 embedding generation. Atomic per row in the vector
+		// store: search returns the prior embedding until this
+		// upsert lands. A failed embedding does not reject the
+		// artifact; it ingests BM25-only and `podium admin reembed`
+		// can retry.
+		if req.Embedder != nil && req.VectorPut != nil {
+			if err := embedAndStore(ctx, req, mr); err != nil {
+				res.EmbeddingFailures = append(res.EmbeddingFailures, EmbeddingFailure{
+					ArtifactID: mr.ArtifactID,
+					Version:    mr.Version,
+					Reason:     err.Error(),
+				})
+			}
+		}
 	}
 
 	if len(res.LintFailures) > 0 && res.Accepted == 0 && res.Idempotent == 0 && len(res.Conflicts) == 0 {
 		return res, fmt.Errorf("%w: %d diagnostics", ErrLintFailed, len(res.LintFailures))
 	}
 	return res, nil
+}
+
+// embedAndStore composes the §4.7 embedding text projection from the
+// manifest, calls the configured embedder, and upserts the vector.
+// The composition is the canonical input format every Podium
+// embedding provider sees: id + description + tags + body prefix.
+func embedAndStore(ctx context.Context, req Request, mr store.ManifestRecord) error {
+	text := composeEmbeddingText(mr)
+	if text == "" {
+		return nil
+	}
+	vec, err := req.Embedder(ctx, text)
+	if err != nil {
+		return fmt.Errorf("embed: %w", err)
+	}
+	if err := req.VectorPut(ctx, mr.TenantID, mr.ArtifactID, mr.Version, vec); err != nil {
+		return fmt.Errorf("vector put: %w", err)
+	}
+	return nil
+}
+
+// composeEmbeddingText is the canonical embedding-input projection.
+// Authors that want to influence retrieval write better descriptions
+// and tags; bundle-resource bytes don't enter the embedding because
+// they're opaque to the registry per §1.1.
+func composeEmbeddingText(mr store.ManifestRecord) string {
+	const bodyPrefixMax = 1024
+	body := string(mr.Body)
+	if len(body) > bodyPrefixMax {
+		body = body[:bodyPrefixMax]
+	}
+	parts := []string{mr.ArtifactID, mr.Description}
+	if len(mr.Tags) > 0 {
+		parts = append(parts, strings.Join(mr.Tags, " "))
+	}
+	if body != "" {
+		parts = append(parts, body)
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n"))
 }
 
 func walkLayer(fsys fs.FS, layerID string) ([]filesystem.ArtifactRecord, error) {

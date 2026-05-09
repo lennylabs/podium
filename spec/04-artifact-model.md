@@ -736,13 +736,12 @@ In either case, an `EmbeddingProvider` can be **explicitly configured** to overr
 
 **Built-in `EmbeddingProvider` implementations** (selected via `PODIUM_EMBEDDING_PROVIDER`):
 
-| Value                                  | Model defaults                               | Notes                                                                                                           |
-| -------------------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `embedded-onnx` _(standalone default)_ | `bge-small-en-v1.5` (384 dimensions, ~30 MB) | Bundled ONNX model running in-process. No external service.                                                     |
-| `openai` _(standard default)_          | `text-embedding-3-small` (1536 dim)          | Requires `OPENAI_API_KEY`.                                                                                      |
-| `voyage`                               | `voyage-3`                                   | Requires `VOYAGE_API_KEY`.                                                                                      |
-| `cohere`                               | `embed-v4`                                   | Requires `COHERE_API_KEY`.                                                                                      |
-| `ollama`                               | configurable                                 | Points at any Ollama endpoint (default `http://localhost:11434`). Useful for standalone + offline + air-gapped. |
+| Value                         | Model defaults                       | Notes                                                                                                           |
+| ----------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `openai` _(standard default)_ | `text-embedding-3-small` (1536 dim)  | Requires `OPENAI_API_KEY`.                                                                                      |
+| `voyage`                      | `voyage-3`                           | Requires `VOYAGE_API_KEY`.                                                                                      |
+| `cohere`                      | `embed-v4`                           | Requires `COHERE_API_KEY`.                                                                                      |
+| `ollama` _(offline default)_  | `nomic-embed-text` (768 dim)         | Points at any Ollama endpoint (default `http://localhost:11434`). Recommended for standalone / offline / air-gapped deployments. |
 
 Custom embedding providers register through the SPI as Go-module plugins.
 

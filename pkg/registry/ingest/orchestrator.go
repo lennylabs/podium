@@ -25,6 +25,17 @@ const HistoryEventKind = "layer.history_rewritten"
 // that don't wire one in pass nil and the event is skipped.
 type HistoryEmitter func(ctx context.Context, tenantID, layerID, priorRef, newRef string)
 
+// SourceIngestOptions threads the §4.7 embedding pieces through the
+// orchestrator without forcing every call site to populate them.
+// Both Embedder and VectorPut must be set together for embedding to
+// run; either nil disables the path and the artifact is BM25-only.
+type SourceIngestOptions struct {
+	Linter    *lint.Linter
+	Emit      HistoryEmitter
+	Embedder  EmbedderFunc
+	VectorPut VectorPutFunc
+}
+
 // SourceIngest snapshots the layer via the supplied provider, runs
 // the ingest pipeline, updates the store's LastIngestedRef on
 // success, and emits a layer.history_rewritten event when the source
@@ -41,6 +52,21 @@ func SourceIngest(
 	cfg store.LayerConfig,
 	linter *lint.Linter,
 	emit HistoryEmitter,
+) (*Result, error) {
+	return SourceIngestWithOptions(ctx, st, provider, cfg, SourceIngestOptions{
+		Linter: linter, Emit: emit,
+	})
+}
+
+// SourceIngestWithOptions is the SPI variant that accepts the §4.7
+// hybrid-search hooks. The plain SourceIngest preserves the
+// pre-Phase-vector signature for back-compat.
+func SourceIngestWithOptions(
+	ctx context.Context,
+	st store.Store,
+	provider source.Provider,
+	cfg store.LayerConfig,
+	opts SourceIngestOptions,
 ) (*Result, error) {
 	srcCfg := source.LayerConfig{
 		ID:       cfg.ID,
@@ -61,17 +87,19 @@ func SourceIngest(
 			return nil, fmt.Errorf("%w: prior %s no longer reachable from %s",
 				ErrHistoryRewritten, cfg.LastIngestedRef, snap.Reference)
 		default:
-			if emit != nil {
-				emit(ctx, cfg.TenantID, cfg.ID, cfg.LastIngestedRef, snap.Reference)
+			if opts.Emit != nil {
+				opts.Emit(ctx, cfg.TenantID, cfg.ID, cfg.LastIngestedRef, snap.Reference)
 			}
 		}
 	}
 
 	res, err := Ingest(ctx, st, Request{
-		TenantID: cfg.TenantID,
-		LayerID:  cfg.ID,
-		Files:    snap.Files,
-		Linter:   linter,
+		TenantID:  cfg.TenantID,
+		LayerID:   cfg.ID,
+		Files:     snap.Files,
+		Linter:    opts.Linter,
+		Embedder:  opts.Embedder,
+		VectorPut: opts.VectorPut,
 	})
 	if err != nil {
 		return nil, err

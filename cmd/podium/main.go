@@ -91,6 +91,7 @@ Commands:
   impact              List artifacts that depend on a given artifact.
   admin erase         GDPR right-to-be-forgotten on the local audit log.
   admin retention     Apply audit retention policies to the local audit log.
+  admin reembed       Re-run §4.7 vector embeddings against the configured registry.
   version             Print the podium version.
   help                Print this message.
 `
