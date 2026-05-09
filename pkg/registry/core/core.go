@@ -122,6 +122,11 @@ type ArtifactDescriptor struct {
 	Description string
 	Tags        []string
 	Score       float64
+	// FoldedFrom records the relative subpath an artifact was lifted
+	// from when fold_below_artifacts collapsed its sparse subdomain
+	// into the parent's leaf set (§4.5.5 folding mechanics). Empty
+	// when the artifact was a direct child of the requested domain.
+	FoldedFrom string
 }
 
 // LoadDomainOptions are the optional knobs from §5.
@@ -134,6 +139,19 @@ type LoadDomainOptions struct {
 	NotableCount int
 	// Featured artifact IDs are surfaced first in the notable list.
 	Featured []string
+	// FoldBelowArtifacts collapses subdomains whose recursive visible
+	// artifact count is below the threshold into the parent's leaf
+	// set per §4.5.5. 0 (default) disables folding.
+	FoldBelowArtifacts int
+	// FoldPassthroughChains collapses single-child intermediate
+	// domains into the deepest non-passthrough descendant per
+	// §4.5.5. nil treats as the §4.5.5 default of true; pass a
+	// pointer to false to opt out.
+	FoldPassthroughChains *bool
+	// TargetResponseTokens is the §4.5.5 soft response budget. The
+	// renderer tightens notable count to fit, surfacing the reduction
+	// in the rendering note. 0 disables budget enforcement.
+	TargetResponseTokens int
 }
 
 // DefaultMaxDepth is the §4.5.5 tenant default.
@@ -167,75 +185,185 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 	if notableCount == 0 {
 		notableCount = DefaultNotableCount
 	}
+	foldPassthrough := true
+	if opts.FoldPassthroughChains != nil {
+		foldPassthrough = *opts.FoldPassthroughChains
+	}
 
 	res := &LoadDomainResult{Path: path}
 
-	// Subdomains: gather every direct subdomain. When Depth > 1, also
-	// build a flattened list so the response shape is stable regardless
-	// of depth (subdomains is the immediate-children list; deeper
-	// levels are reachable via subsequent load_domain calls per §4.5.5
-	// "only the originally requested domain gets its body; expanded
-	// subtrees get short descriptions only").
-	seen := map[string]bool{}
-	for _, m := range visible {
-		if !inPrefix(m.ArtifactID, path) {
+	// Filter the manifests under the requested path; we'll use this
+	// projection for tree-shape decisions (passthrough collapse, fold
+	// recursion, immediate-children grouping).
+	under := manifestsUnder(visible, path)
+
+	// Group artifacts by the immediate child segment beneath path so
+	// we can decide per-subdomain whether to render, fold, or collapse.
+	groups := groupByImmediateChild(under, path)
+	directArts := directArtifactsOf(under, path)
+
+	notable := make([]ArtifactDescriptor, 0, len(directArts))
+	for _, m := range directArts {
+		notable = append(notable, descriptorOf(m))
+	}
+
+	// Sorted child segment names for deterministic ordering.
+	childNames := make([]string, 0, len(groups))
+	for name := range groups {
+		childNames = append(childNames, name)
+	}
+	sort.Strings(childNames)
+
+	for _, name := range childNames {
+		childPath := joinPath(path, name)
+		recursiveCount := len(groups[name])
+		if opts.FoldBelowArtifacts > 0 && recursiveCount < opts.FoldBelowArtifacts {
+			for _, m := range groups[name] {
+				d := descriptorOf(m)
+				d.FoldedFrom = stripPrefix(parentPath(m.ArtifactID), path)
+				if d.FoldedFrom == "" {
+					d.FoldedFrom = name
+				}
+				notable = append(notable, d)
+			}
 			continue
 		}
-		rest := stripPrefix(m.ArtifactID, path)
-		if rest == "" {
-			continue
+		renderedPath := childPath
+		if foldPassthrough {
+			renderedPath = collapsePassthroughChain(under, childPath)
 		}
-		first := strings.SplitN(rest, "/", 2)[0]
-		if first == "" || !strings.Contains(rest, "/") {
-			continue
-		}
-		domainPath := joinPath(path, first)
-		if seen[domainPath] {
-			continue
-		}
-		seen[domainPath] = true
 		res.Subdomains = append(res.Subdomains, DomainDescriptor{
-			Path: domainPath, Name: first,
+			Path: renderedPath,
+			Name: lastSegment(renderedPath),
 		})
 	}
 	sort.Slice(res.Subdomains, func(i, j int) bool {
 		return res.Subdomains[i].Path < res.Subdomains[j].Path
 	})
 
-	// Notable = artifacts directly under prefix.
-	notable := make([]ArtifactDescriptor, 0, len(visible))
-	for _, m := range visible {
-		if !inPrefix(m.ArtifactID, path) {
-			continue
-		}
-		rest := stripPrefix(m.ArtifactID, path)
-		if strings.Contains(rest, "/") {
-			continue
-		}
-		notable = append(notable, descriptorOf(m))
-	}
 	notable = orderNotable(notable, opts.Featured)
+	originalNotable := len(notable)
 	if len(notable) > notableCount {
 		notable = notable[:notableCount]
-		res.Note = fmt.Sprintf("Notable list truncated to %d entries.", notableCount)
+	}
+
+	// §4.5.5 target_response_tokens: if the soft budget is set and the
+	// estimated response exceeds it, tighten the notable list further.
+	tightenedTo := -1
+	if opts.TargetResponseTokens > 0 {
+		budget := opts.TargetResponseTokens
+		for len(notable) > 0 && estimateResponseTokens(res.Subdomains, notable) > budget {
+			notable = notable[:len(notable)-1]
+			tightenedTo = len(notable)
+		}
 	}
 	res.Notable = notable
 
-	// §4.5.5 cap-and-note: a Depth above max_depth is silently capped
-	// (max_depth = the registry default unless overridden via DOMAIN.md
-	// in a future commit). The note surfaces the capping per the spec.
-	if opts.Depth > maxDepth {
-		if res.Note != "" {
-			res.Note += " "
-		}
-		res.Note += fmt.Sprintf("Requested depth %d capped at the configured ceiling of %d.",
-			opts.Depth, maxDepth)
+	// §4.5.5 rendering note: cover the budget reduction and the
+	// depth-cap cases. Folding decisions are not surfaced — folded
+	// artifacts already carry FoldedFrom in the response.
+	notes := []string{}
+	if tightenedTo >= 0 {
+		notes = append(notes, fmt.Sprintf(
+			"Notable list reduced from %d to %d to fit the response budget.",
+			originalNotable, tightenedTo,
+		))
 	}
+	if opts.Depth > maxDepth {
+		notes = append(notes, fmt.Sprintf(
+			"Requested depth %d capped at the configured ceiling of %d.",
+			opts.Depth, maxDepth,
+		))
+	}
+	res.Note = strings.Join(notes, " ")
 
 	if path != "" && len(res.Subdomains) == 0 && len(res.Notable) == 0 {
 		return nil, fmt.Errorf("%w: %s", ErrDomainNotFound, path)
 	}
 	return res, nil
+}
+
+// manifestsUnder returns the subset of manifests whose ArtifactID is
+// strictly within prefix (excludes records that are not under the
+// path at all). An empty prefix returns the input.
+func manifestsUnder(all []store.ManifestRecord, prefix string) []store.ManifestRecord {
+	if prefix == "" {
+		return all
+	}
+	out := make([]store.ManifestRecord, 0, len(all))
+	for _, m := range all {
+		if inPrefix(m.ArtifactID, prefix) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// groupByImmediateChild groups manifests under prefix by the first
+// path segment beyond prefix. Direct children of prefix (no trailing
+// segments) are not included; use directArtifactsOf for those.
+func groupByImmediateChild(under []store.ManifestRecord, prefix string) map[string][]store.ManifestRecord {
+	groups := map[string][]store.ManifestRecord{}
+	for _, m := range under {
+		rest := stripPrefix(m.ArtifactID, prefix)
+		if rest == "" || !strings.Contains(rest, "/") {
+			continue
+		}
+		first := strings.SplitN(rest, "/", 2)[0]
+		groups[first] = append(groups[first], m)
+	}
+	return groups
+}
+
+// directArtifactsOf returns manifests directly under prefix (no
+// further nesting).
+func directArtifactsOf(under []store.ManifestRecord, prefix string) []store.ManifestRecord {
+	out := make([]store.ManifestRecord, 0, len(under))
+	for _, m := range under {
+		rest := stripPrefix(m.ArtifactID, prefix)
+		if rest != "" && !strings.Contains(rest, "/") {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// collapsePassthroughChain walks down a single-child chain that has
+// no direct artifacts at the current level, returning the deepest
+// non-passthrough path. Used by §4.5.5 fold_passthrough_chains.
+func collapsePassthroughChain(under []store.ManifestRecord, path string) string {
+	for {
+		if len(directArtifactsOf(under, path)) > 0 {
+			return path
+		}
+		groups := groupByImmediateChild(under, path)
+		if len(groups) != 1 {
+			return path
+		}
+		var only string
+		for k := range groups {
+			only = k
+		}
+		path = joinPath(path, only)
+	}
+}
+
+// estimateResponseTokens approximates the token cost of a load_domain
+// response for the §4.5.5 budget check. The estimate stays
+// dependency-free; it counts identifier and description characters
+// divided by the typical 4-bytes-per-token ratio.
+func estimateResponseTokens(subs []DomainDescriptor, notable []ArtifactDescriptor) int {
+	bytes := 0
+	for _, s := range subs {
+		bytes += len(s.Path) + len(s.Name) + len(s.Description) + 16
+	}
+	for _, n := range notable {
+		bytes += len(n.ID) + len(n.Description) + len(n.Type) + 32
+		for _, t := range n.Tags {
+			bytes += len(t) + 4
+		}
+	}
+	return bytes / 4
 }
 
 // orderNotable surfaces featured IDs first (in author-supplied order),
