@@ -24,6 +24,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
@@ -48,6 +49,8 @@ func main() {
 		os.Exit(artifactCmd(os.Args[2:]))
 	case "init":
 		os.Exit(initCmd(os.Args[2:]))
+	case "profile":
+		os.Exit(profileCmd(os.Args[2:]))
 	case "version":
 		fmt.Println("podium 0.0.0-dev")
 	case "help", "-h", "--help":
@@ -61,18 +64,29 @@ func main() {
 const usage = `usage: podium <command> [flags]
 
 Commands:
-  sync             Materialize the caller's effective view through a HarnessAdapter.
-  lint             Validate manifests in a filesystem-source registry.
-  search           Hybrid search over artifacts (registry HTTP API).
-  domain show      Show a domain map.
-  domain search    Hybrid search over domains.
-  artifact show    Print an artifact's manifest body and frontmatter.
-  init             Write ~/.podium/sync.yaml or ./.podium/sync.yaml.
-  version          Print the podium version.
-  help             Print this message.
+  sync                Materialize the caller's effective view through a HarnessAdapter.
+  sync override       Add or remove ephemeral artifact toggles.
+  sync save-as        Capture the current target state as a sync.yaml profile.
+  lint                Validate manifests in a filesystem-source registry.
+  search              Hybrid search over artifacts (registry HTTP API).
+  domain show         Show a domain map.
+  domain search       Hybrid search over domains.
+  artifact show       Print an artifact's manifest body and frontmatter.
+  init                Write ~/.podium/sync.yaml or ./.podium/sync.yaml.
+  profile edit        Add or remove patterns on a sync.yaml profile.
+  version             Print the podium version.
+  help                Print this message.
 `
 
 func syncCmd(args []string) int {
+	if len(args) > 0 {
+		switch args[0] {
+		case "override":
+			return syncOverrideCmd(args[1:])
+		case "save-as":
+			return syncSaveAsCmd(args[1:])
+		}
+	}
 	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
 	registry := fs.String("registry", "", "filesystem registry path (required)")
 	target := fs.String("target", ".", "destination directory")
@@ -109,6 +123,147 @@ func syncCmd(args []string) int {
 		printHuman(res, *dryRun)
 	}
 	return 0
+}
+
+// stringSliceFlag is a flag.Value implementation for repeatable
+// string flags such as --add and --remove.
+type stringSliceFlag []string
+
+func (s *stringSliceFlag) String() string     { return fmt.Sprint([]string(*s)) }
+func (s *stringSliceFlag) Set(v string) error { *s = append(*s, v); return nil }
+
+func syncOverrideCmd(args []string) int {
+	fs := flag.NewFlagSet("sync override", flag.ContinueOnError)
+	target := fs.String("target", ".", "target directory")
+	var add, remove stringSliceFlag
+	fs.Var(&add, "add", "artifact id to materialize on top of the profile (repeatable)")
+	fs.Var(&remove, "remove", "artifact id to drop from the profile (repeatable)")
+	reset := fs.Bool("reset", false, "clear all toggles")
+	dryRun := fs.Bool("dry-run", false, "resolve and report; write nothing")
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	abs, err := filepath.Abs(*target)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 2
+	}
+	res, err := sync.Override(sync.OverrideOptions{
+		Target: abs,
+		Add:    []string(add), Remove: []string(remove),
+		Reset: *reset, DryRun: *dryRun,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "override failed: %v\n", err)
+		return 1
+	}
+	if *dryRun {
+		fmt.Println("(dry-run; nothing written)")
+	}
+	fmt.Printf("toggles.add:    %s\n", formatToggles(res.Lock.Toggles.Add))
+	fmt.Printf("toggles.remove: %s\n", formatToggles(res.Lock.Toggles.Remove))
+	if !res.Changed {
+		fmt.Println("(no change)")
+	}
+	return 0
+}
+
+func syncSaveAsCmd(args []string) int {
+	fs := flag.NewFlagSet("sync save-as", flag.ContinueOnError)
+	target := fs.String("target", ".", "target directory")
+	profile := fs.String("profile", "", "profile name (required)")
+	update := fs.Bool("update", false, "overwrite an existing profile")
+	dryRun := fs.Bool("dry-run", false, "print the proposed YAML diff and write nothing")
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *profile == "" {
+		fmt.Fprintln(os.Stderr, "error: --profile is required")
+		return 2
+	}
+	abs, _ := filepath.Abs(*target)
+	res, err := sync.SaveAs(sync.SaveAsOptions{
+		Target: abs, Profile: *profile, Update: *update, DryRun: *dryRun,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "save-as failed: %v\n", err)
+		return 1
+	}
+	fmt.Printf("profile: %s\n", *profile)
+	fmt.Printf("  include: %s\n", formatList(res.Profile.Include))
+	fmt.Printf("  exclude: %s\n", formatList(res.Profile.Exclude))
+	if res.Profile.Type != nil {
+		fmt.Printf("  type:    %s\n", formatList(res.Profile.Type))
+	}
+	if *dryRun {
+		fmt.Println("(dry-run; nothing written)")
+	}
+	return 0
+}
+
+func profileCmd(args []string) int {
+	if len(args) < 1 || args[0] != "edit" {
+		fmt.Fprintln(os.Stderr, "usage: podium profile edit [flags]")
+		return 2
+	}
+	fs := flag.NewFlagSet("profile edit", flag.ContinueOnError)
+	target := fs.String("target", ".", "target directory")
+	profile := fs.String("profile", "", "profile name (required)")
+	var addInc, removeInc, addExc, removeExc stringSliceFlag
+	fs.Var(&addInc, "add-include", "include pattern to add (repeatable)")
+	fs.Var(&removeInc, "remove-include", "include pattern to remove (repeatable)")
+	fs.Var(&addExc, "add-exclude", "exclude pattern to add (repeatable)")
+	fs.Var(&removeExc, "remove-exclude", "exclude pattern to remove (repeatable)")
+	dryRun := fs.Bool("dry-run", false, "print the proposed YAML diff and write nothing")
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(args[1:]); err != nil {
+		return 2
+	}
+	if *profile == "" {
+		fmt.Fprintln(os.Stderr, "error: --profile is required")
+		return 2
+	}
+	abs, _ := filepath.Abs(*target)
+	res, err := sync.ProfileEdit(sync.ProfileEditOptions{
+		Target:        abs,
+		Profile:       *profile,
+		AddInclude:    []string(addInc),
+		RemoveInclude: []string(removeInc),
+		AddExclude:    []string(addExc),
+		RemoveExclude: []string(removeExc),
+		DryRun:        *dryRun,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "profile edit failed: %v\n", err)
+		return 1
+	}
+	fmt.Printf("profile: %s\n", *profile)
+	fmt.Printf("  include: %s\n", formatList(res.Profile.Include))
+	fmt.Printf("  exclude: %s\n", formatList(res.Profile.Exclude))
+	if *dryRun {
+		fmt.Println("(dry-run; nothing written)")
+	}
+	return 0
+}
+
+func formatToggles(toggles []sync.LockToggle) string {
+	if len(toggles) == 0 {
+		return "(none)"
+	}
+	out := []string{}
+	for _, t := range toggles {
+		out = append(out, t.ID)
+	}
+	return strings.Join(out, ", ")
+}
+
+func formatList(items []string) string {
+	if len(items) == 0 {
+		return "(none)"
+	}
+	return strings.Join(items, ", ")
 }
 
 func printHuman(res *sync.Result, dryRun bool) {
