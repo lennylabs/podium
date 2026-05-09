@@ -32,6 +32,7 @@ import (
 	"github.com/lennylabs/podium/pkg/scim"
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/vector"
+	"github.com/lennylabs/podium/pkg/webhook"
 )
 
 // envFirst returns the value of the first non-empty env var.
@@ -191,7 +192,15 @@ func Run() error {
 	}
 
 	mode := server.NewModeTracker()
+	// §7.3.2 outbound webhook worker: in-memory receiver store
+	// fans change events out to subscribers. Receivers do not
+	// survive a server restart in this configuration; persistent
+	// storage is on the configuration roadmap.
+	webhookStore := webhook.NewMemoryStore()
+	webhookWorker := &webhook.Worker{Store: webhookStore}
+
 	bootOpts := bootstrapOptions(cfg)
+	bootOpts = append(bootOpts, server.WithWebhooks(webhookWorker))
 	if scimHandler != nil {
 		bootOpts = append(bootOpts, server.WithSCIM(scimHandler))
 		log.Printf("SCIM 2.0 receiver mounted at /scim/v2/")
@@ -217,6 +226,16 @@ func Run() error {
 	mux.Handle("/v1/layers/", layers.Handler())
 	mux.Handle("/v1/admin/runtime", runtimeEndpoint.Handler())
 	mux.Handle("/", srv.Handler())
+
+	// §8.6 transparency anchoring: when the operator enables
+	// PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS, the file-backed audit
+	// sink is created and a goroutine periodically anchors new
+	// entries via the registry-managed signing key (loaded or
+	// generated at the configured key path). Operators monitor
+	// audit.anchored / audit.anchor_failed events.
+	if cfg.auditAnchorInterval > 0 {
+		startAnchorScheduler(cfg)
+	}
 
 	// §13.2.1 read-only probe: ping the metadata store on a tick
 	// and flip the shared mode tracker after Failures consecutive
@@ -290,6 +309,10 @@ type Config struct {
 	// §13.2.1 read-only mode probe.
 	readOnlyProbeFailures int
 	readOnlyProbeInterval int
+	// §8.6 transparency anchoring.
+	auditLogPath        string
+	auditSigningKeyPath string
+	auditAnchorInterval int
 }
 
 // Setting names one resolved field together with the env var (or
@@ -393,6 +416,10 @@ func LoadConfig() *Config {
 		defaultLayerVisibility: envDefault("PODIUM_DEFAULT_LAYER_VISIBILITY", "private"),
 		readOnlyProbeFailures:  envInt("PODIUM_READONLY_PROBE_FAILURES", 0),
 		readOnlyProbeInterval:  envInt("PODIUM_READONLY_PROBE_INTERVAL", 30),
+		// §8.6 audit anchoring.
+		auditLogPath:        os.Getenv("PODIUM_AUDIT_LOG_PATH"),
+		auditSigningKeyPath: os.Getenv("PODIUM_AUDIT_SIGNING_KEY_PATH"),
+		auditAnchorInterval: envInt("PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS", 0),
 	}
 	// §13.10 ~/.podium/registry.yaml: load and overlay onto env-
 	// derived defaults. Env values keep precedence per applyYAML.

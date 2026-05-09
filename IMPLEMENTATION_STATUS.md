@@ -291,11 +291,12 @@ detailed plan with effort estimates and test strategies.
   `PODIUM_DEFAULT_LAYER_VISIBILITY`, read-only-mode probe
   goroutine in `cmd/podium-server` that flips the
   `ModeTracker` after consecutive store failures.
-- **Anchor scheduler / outbound webhook worker bootstrap.**
-  `pkg/audit.Scheduler` and `pkg/webhook.Worker` ship as
-  ready-to-mount components, but `cmd/podium-server` does not
-  yet construct them. Both need a persistence-backed signer
-  and receiver store wired first.
+- **Anchor scheduler / outbound webhook worker bootstrap: DONE.**
+  Audit scheduler runs when
+  `PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS > 0`; the Ed25519
+  keypair is generated on first run and persisted in the
+  configured path. Webhook worker is wired with an in-memory
+  receiver store (persistence is on the configuration roadmap).
 - **CLI surface (Batch B, mostly done).** `podium serve`,
   `podium config show`, `podium layer update`,
   `podium layer watch`, `podium cache prune`,

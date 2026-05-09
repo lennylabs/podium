@@ -121,11 +121,17 @@ below is the punch summary.
   shared `ModeTracker` after consecutive store outages and
   restores ready mode on the first success.
 
-**Anchor scheduler / outbound webhook worker** (deferred): the
-`pkg/audit.Scheduler` and `pkg/webhook.Worker` exist but are
-not yet bootstrapped from `cmd/podium-server`. The signer
-keypair and webhook receiver store both need persistence-
-backend wiring first.
+**Anchor scheduler / outbound webhook worker bootstrap**: DONE.
+- `pkg/audit.Scheduler` runs in a goroutine when
+  `PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS > 0`. The signer is a
+  `RegistryManagedKey` whose Ed25519 keypair lives at
+  `~/.podium/standalone/audit.key` (or
+  `PODIUM_AUDIT_SIGNING_KEY_PATH`); the file is generated on
+  first run and reloaded byte-identical thereafter.
+- `pkg/webhook.Worker` is mounted via `server.WithWebhooks` with
+  an in-memory receiver store. Receivers do not survive a
+  process restart in this configuration; persistent-store
+  wiring is on the configuration roadmap.
 
 **Verification** (Batch F): DONE.
 - `test/bench/latency_test.go` exercises SearchArtifacts,
