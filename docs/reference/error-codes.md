@@ -123,5 +123,3 @@ Codes map to MCP error payloads per the MCP spec for harnesses that consume Podi
 ## Adding namespaces
 
 Custom plugins (extension types, source providers, harness adapters) can register their own error namespaces through the SPI. Plugin-registered codes follow the same envelope structure and are documented alongside the plugin.
-
-The full list of base namespaces is recorded in [`spec/06-mcp-server.md` §6.10](https://github.com/lennylabs/podium/blob/main/spec/06-mcp-server.md#610-error-model).

@@ -93,4 +93,3 @@ A new test should carry a `// Spec:` annotation pointing to the spec section it 
 
 - Documentation index: [Home](../).
 - Governance and decision-making: [Governance](governance).
-- Specification: [`spec/`](https://github.com/lennylabs/podium/tree/main/spec).

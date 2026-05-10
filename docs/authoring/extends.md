@@ -197,4 +197,3 @@ The parent's `sandbox_profile: unrestricted` is overridden by the child's `read-
 ## Where to learn more
 
 - [Frontmatter reference](frontmatter-reference) for the field-by-field schema.
-- The full inheritance and merge semantics are in [`spec/04-artifact-model.md` §4.6](https://github.com/lennylabs/podium/blob/main/spec/04-artifact-model.md#46-layers-and-visibility) and the field semantics table immediately following.

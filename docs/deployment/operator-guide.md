@@ -8,7 +8,7 @@ description: Day-two operations for a standard Podium deployment: capacity, moni
 
 # Operator guide
 
-Day-two operations for a standard Podium deployment. Companion to [`spec/13-deployment.md`](https://github.com/lennylabs/podium/blob/main/spec/13-deployment.md), which describes what's true; this page covers how to operate it.
+Day-two operations for a standard Podium deployment.
 
 For small-team, single-VM use, see [Small team](small-team) instead.
 
@@ -145,20 +145,20 @@ Audit events for state transitions (`registry.read_only_entered`, `registry.read
 
 ## Security review checklist
 
-Walk through these before launching to a tenant that handles sensitive content. Each maps to a spec section that defines the underlying guarantee.
+Walk through these before launching to a tenant that handles sensitive content.
 
-| Item | Check | Spec |
-|:--|:--|:--|
-| OAuth identity flow | Device-code flow tested for every IdP in production use. Token lifetimes set to ≤15 min. Revocation propagates within 60s. | §6.3 |
-| OIDC group claim mapping | Group claims actually produced by your IdP arrive in the registry's audit log. Test with a non-admin user. | §6.3.1 |
-| Per-layer visibility | Each layer's `visibility:` declaration is correct. Test by impersonating a non-member identity (via `injected-session-token` test harness). | §4.6 |
-| Sensitivity enforcement | `PODIUM_VERIFY_SIGNATURES` is `medium-and-above` (or stricter). Test that a tampered artifact fails materialization with `materialize.signature_invalid`. | §6.6, §13.10 |
-| Audit hash chain | Run `podium admin verify --check audit-chain` weekly via cron. Detect gaps automatically. | §8.6 |
-| Webhook signing | Git provider webhook HMAC secret is unique per layer. Test with an invalid signature; expect `ingest.webhook_invalid`. | §7.3.1 |
-| Sandbox profile honoring | The hosts in production honor `sandbox_profile` for non-`unrestricted` artifacts. Test with a `read-only-fs` artifact and confirm the host enforces. | §4.3 |
-| Object-storage credentials | IAM roles or short-lived credentials, never static keys. Bucket policy denies public access. | §13.5 / §13.11 |
-| Backup encryption | Postgres backups + S3 object versioning encrypted at rest. PITR window matches your RTO. | §13.3 |
-| Scope preview gating | `tenant.expose_scope_preview` is set deliberately per tenant; `false` for tenants where aggregate visibility counts would leak signal. | §3.5 |
+| Item | Check |
+|:--|:--|
+| OAuth identity flow | Device-code flow tested for every IdP in production use. Token lifetimes set to ≤15 min. Revocation propagates within 60s. |
+| OIDC group claim mapping | Group claims actually produced by your IdP arrive in the registry's audit log. Test with a non-admin user. |
+| Per-layer visibility | Each layer's `visibility:` declaration is correct. Test by impersonating a non-member identity (via `injected-session-token` test harness). |
+| Sensitivity enforcement | `PODIUM_VERIFY_SIGNATURES` is `medium-and-above` (or stricter). Test that a tampered artifact fails materialization with `materialize.signature_invalid`. |
+| Audit hash chain | Run `podium admin verify --check audit-chain` weekly via cron. Detect gaps automatically. |
+| Webhook signing | Git provider webhook HMAC secret is unique per layer. Test with an invalid signature; expect `ingest.webhook_invalid`. |
+| Sandbox profile honoring | The hosts in production honor `sandbox_profile` for non-`unrestricted` artifacts. Test with a `read-only-fs` artifact and confirm the host enforces. |
+| Object-storage credentials | IAM roles or short-lived credentials, never static keys. Bucket policy denies public access. |
+| Backup encryption | Postgres backups + S3 object versioning encrypted at rest. PITR window matches your RTO. |
+| Scope preview gating | `tenant.expose_scope_preview` is set deliberately per tenant; `false` for tenants where aggregate visibility counts would leak signal. |
 
 Re-run the checklist after every major release and after any change to layer config, IdP, or sandbox enforcement settings.
 

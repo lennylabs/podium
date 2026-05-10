@@ -84,7 +84,7 @@ func main() {
 const usage = `usage: podium <command> [flags]
 
 Commands:
-  serve               Run the §13.10 standalone registry server in-process.
+  serve               Run the standalone registry server in-process.
   config show         Print the resolved server configuration with sources.
   cache prune         Remove content-cache buckets older than N days.
   import              Convert a skills/* tree into a Podium-shaped layer.
@@ -95,7 +95,7 @@ Commands:
   search              Hybrid search over artifacts (registry HTTP API).
   domain show         Show a domain map.
   domain search       Hybrid search over domains.
-  domain analyze      Print §4.5.5 metrics + split/fold candidates for a subtree.
+  domain analyze      Print domain-discovery metrics and split/fold candidates for a subtree.
   artifact show       Print an artifact's manifest body and frontmatter.
   init                Write ~/.podium/sync.yaml or ./.podium/sync.yaml.
   profile edit        Add or remove patterns on a sync.yaml profile.
@@ -109,19 +109,19 @@ Commands:
   impact              List artifacts that depend on a given artifact.
   admin erase         GDPR right-to-be-forgotten on the local audit log.
   admin retention     Apply audit retention policies to the local audit log.
-  admin reembed       Re-run §4.7 vector embeddings against the configured registry.
+  admin reembed       Re-run vector embeddings against the configured registry.
   admin grant         Grant tenant admin role to a user.
   admin revoke        Revoke tenant admin role from a user.
   admin show-effective  Print the per-layer visibility for a user identity.
-  admin runtime register  Register a trusted runtime signing key (§6.3.2).
+  admin runtime register  Register a trusted runtime signing key.
   admin runtime list      List registered runtimes.
   admin migrate-to-standard  Pump standalone state (SQLite + filesystem) into a standard deployment (Postgres + S3).
-  login               Run the §6.3 OAuth Device Code flow and persist the token to the keychain.
+  login               Run the OAuth Device Code flow and persist the token to the keychain.
   logout              Remove the cached token for the configured registry.
   status              Print a diagnostic summary of the current Podium client setup.
   sign                Sign a content hash via the configured signature provider.
   verify              Verify a signature envelope against a content hash.
-  quota               Print the tenant's §4.7.8 quotas and current usage.
+  quota               Print the tenant's quotas and current usage.
   version             Print the podium version.
   help                Print this message.
 `
@@ -141,7 +141,7 @@ func syncCmd(args []string) int {
 	harness := fs.String("harness", "none", "harness adapter")
 	dryRun := fs.Bool("dry-run", false, "resolve and report; write nothing")
 	asJSON := fs.Bool("json", false, "emit a structured JSON envelope on stdout")
-	watch := fs.Bool("watch", false, "rerun sync whenever the registry changes (§7.5)")
+	watch := fs.Bool("watch", false, "rerun sync whenever the registry changes")
 	overlay := fs.String("overlay", "", "workspace overlay path watched alongside the registry")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
@@ -594,7 +594,7 @@ func initCmd(args []string) int {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	scopeGlobal := fs.Bool("global", false, "write ~/.podium/sync.yaml")
 	scopeLocal := fs.Bool("local", false, "write <ws>/.podium/sync.local.yaml (gitignored override)")
-	standalone := fs.Bool("standalone", false, "shortcut for --registry http://127.0.0.1:8080 (§13.10)")
+	standalone := fs.Bool("standalone", false, "shortcut for --registry http://127.0.0.1:8080")
 	registry := fs.String("registry", "", "registry URL or filesystem path")
 	harness := fs.String("harness", "", "default harness")
 	target := fs.String("target", "", "default target")

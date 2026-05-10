@@ -293,4 +293,3 @@ See [Extends](extends) for examples and gotchas.
 - [Artifact types](artifact-types) explains what each `type:` is for.
 - [Domains](domains) covers `DOMAIN.md`, the file that organizes artifacts in a folder hierarchy.
 - [Bundled resources](bundled-resources) covers the layout and size caps for files alongside `ARTIFACT.md` and `SKILL.md`.
-- The full schema is in [`spec/04-artifact-model.md`](https://github.com/lennylabs/podium/blob/main/spec/04-artifact-model.md).

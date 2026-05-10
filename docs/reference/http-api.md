@@ -10,8 +10,6 @@ description: The Podium registry's wire surface: discovery endpoints, materializ
 
 The Podium registry exposes an HTTP/JSON API. Every consumer (the MCP server, language SDKs, `podium sync` in server mode, the read CLI) speaks this API. Direct MCP access to the registry is not supported; the MCP server is a consumer surface that translates HTTP responses into MCP messages.
 
-This page covers the public surface. For the authoritative wire-level detail, see [`spec/07-external-integration.md`](https://github.com/lennylabs/podium/blob/main/spec/07-external-integration.md).
-
 ---
 
 ## Authentication
@@ -387,10 +385,3 @@ Read responses carry two headers:
 - `X-Podium-Read-Only: true`
 - `X-Podium-Read-Only-Lag-Seconds: <n>`: observed replication lag.
 
----
-
-## Spec source
-
-- Wire surface and contracts: [`spec/07-external-integration.md`](https://github.com/lennylabs/podium/blob/main/spec/07-external-integration.md).
-- Discovery semantics: [`spec/03-disclosure-surface.md`](https://github.com/lennylabs/podium/blob/main/spec/03-disclosure-surface.md) and [`spec/05-meta-tools.md`](https://github.com/lennylabs/podium/blob/main/spec/05-meta-tools.md).
-- Audit events: [`spec/08-audit-and-observability.md`](https://github.com/lennylabs/podium/blob/main/spec/08-audit-and-observability.md).

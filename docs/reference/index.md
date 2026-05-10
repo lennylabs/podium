@@ -16,6 +16,4 @@ Reference material organized by surface.
 | [HTTP API](http-api) | The registry's wire surface. Discovery endpoints, materialization, ingest webhooks, scope preview, health. |
 | [Frontmatter schema](frontmatter-schema) | Concise field-by-field schema for `ARTIFACT.md`, `SKILL.md` (for skills), and `DOMAIN.md`. |
 | [Error codes](error-codes) | Structured error envelope and the full namespace catalog. |
-| [Glossary](glossary) | Vocabulary used across the spec and docs. |
-
-For the underlying technical specification, see [`spec/`](https://github.com/lennylabs/podium/tree/main/spec).
+| [Glossary](glossary) | Vocabulary used across the docs. |

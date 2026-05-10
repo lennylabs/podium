@@ -108,7 +108,7 @@ helm install podium ./helm/podium \
   --set identityProvider.oauth.authorizationEndpoint=https://acme.okta.com/oauth2/default
 ```
 
-Alternatively, run the binary directly with a `registry.yaml` config file (see [§13.12 of the spec](https://github.com/lennylabs/podium/blob/main/spec/13-deployment.md#1312-backend-configuration-reference)).
+Alternatively, run the binary directly with a `registry.yaml` config file (see [CLI reference](../reference/cli) for the environment variables a registry.yaml maps to).
 
 ### 3. Configure the IdP
 
@@ -190,4 +190,3 @@ For the staged rollout of governance features (identity, sensitivity labels, sig
 - [Progressive adoption](progressive-adoption): staged on-ramp for governance features.
 - [Extending](extending): SPI plugins, the forward-compatibility constraints, external-extension patterns.
 - [OIDC cookbooks](oidc/): per-IdP setup recipes.
-- The full deployment reference is in [`spec/13-deployment.md`](https://github.com/lennylabs/podium/blob/main/spec/13-deployment.md).

@@ -67,7 +67,7 @@ Concretely: an artifact with `model_class_hint: frontier` does not fail to load 
 
 ## Adapter support
 
-No built-in adapter currently translates these fields. Custom SDK consumers that build their own routing logic can read the hints from the manifest and route accordingly. The capability matrix in [§6.7.1 of the spec](https://github.com/lennylabs/podium/blob/main/spec/06-mcp-server.md#671-the-authors-burden) tracks adapter support; adapter-level honoring lands as adapters add the capability.
+No built-in adapter currently translates these fields. Custom SDK consumers that build their own routing logic can read the hints from the manifest and route accordingly. Adapter-level honoring lands as adapters add the capability.
 
 ---
 

@@ -20,7 +20,6 @@ import (
 type ruleArtifactBodyForSkill struct{}
 
 func (ruleArtifactBodyForSkill) Code() string        { return "lint.skill_artifact_body" }
-func (ruleArtifactBodyForSkill) SpecSection() string { return "§4.3.4" }
 
 func (r ruleArtifactBodyForSkill) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
@@ -34,8 +33,7 @@ func (r ruleArtifactBodyForSkill) Check(_ *filesystem.Registry, records []filesy
 				ArtifactID: rec.ID,
 				Code:       r.Code(),
 				Severity:   SeverityWarning,
-				Message:    "ARTIFACT.md body for a skill must be empty or a single HTML comment per §4.3.4",
-				Rule:       r.SpecSection(),
+				Message:    "ARTIFACT.md body for a skill must be empty or a single HTML comment",
 			})
 		}
 	}
@@ -103,7 +101,6 @@ func NewProseReferenceRule(client *http.Client) Rule {
 }
 
 func (ruleProseReferenceResolution) Code() string        { return "lint.prose_reference" }
-func (ruleProseReferenceResolution) SpecSection() string { return "§4.4" }
 
 // proseLinkPattern matches Markdown links of the form [text](href)
 // without escaped backslashes. The HTTP / HTTPS branch matches
@@ -159,7 +156,6 @@ func (r ruleProseReferenceResolution) checkBundled(rec filesystem.ArtifactRecord
 			Code:       "lint.prose_reference",
 			Severity:   SeverityError,
 			Message:    fmt.Sprintf("prose reference %q escapes the artifact package", href),
-			Rule:       "§4.4",
 		}
 	}
 	if _, ok := rec.Resources[clean]; ok {
@@ -175,7 +171,6 @@ func (r ruleProseReferenceResolution) checkBundled(rec filesystem.ArtifactRecord
 		Code:       "lint.prose_reference",
 		Severity:   SeverityError,
 		Message:    fmt.Sprintf("prose reference %q does not match any bundled file", href),
-		Rule:       "§4.4",
 	}
 }
 
@@ -192,7 +187,6 @@ func (r ruleProseReferenceResolution) checkURL(artifactID, href string) *Diagnos
 			Code:       "lint.prose_reference",
 			Severity:   SeverityError,
 			Message:    fmt.Sprintf("prose URL %q cannot be requested: %v", href, err),
-			Rule:       "§4.4",
 		}
 	}
 	resp, err := r.HTTPClient.Do(req)
@@ -202,7 +196,6 @@ func (r ruleProseReferenceResolution) checkURL(artifactID, href string) *Diagnos
 			Code:       "lint.prose_reference",
 			Severity:   SeverityError,
 			Message:    fmt.Sprintf("prose URL %q HEAD failed: %v", href, err),
-			Rule:       "§4.4",
 		}
 	}
 	defer resp.Body.Close()
@@ -214,7 +207,6 @@ func (r ruleProseReferenceResolution) checkURL(artifactID, href string) *Diagnos
 		Code:       "lint.prose_reference",
 		Severity:   SeverityError,
 		Message:    fmt.Sprintf("prose URL %q HEAD returned HTTP %d", href, resp.StatusCode),
-		Rule:       "§4.4",
 	}
 }
 

@@ -9,7 +9,7 @@ description: Per-IdP setup recipes for Okta, Entra ID, Google Workspace, Auth0, 
 
 # OIDC integration cookbooks
 
-Podium uses OIDC for identity in standard deployments. The registry doesn't ship its own user database. It accepts a JWT issued by your identity provider, validates the signature against the IdP's JWKS, and reads the `sub`, `email`, and `groups` claims to determine the caller's effective view (§4.6, §6.3).
+Podium uses OIDC for identity in standard deployments. The registry doesn't ship its own user database. It accepts a JWT issued by your identity provider, validates the signature against the IdP's JWKS, and reads the `sub`, `email`, and `groups` claims to determine the caller's effective view.
 
 These per-IdP guides walk through the setup steps. Each guide assumes a Podium registry is already running at a known URL, for example `https://podium.your-org.example`, and authentication is being configured for it.
 
@@ -44,7 +44,7 @@ identity:
 
 - **TLS termination**: assumed to be handled by your load balancer / reverse proxy.
 - **Network reachability**: the registry must be able to reach the IdP's JWKS endpoint outbound, and developers must be able to reach the IdP's verification endpoint from their browser.
-- **SCIM provisioning**: covered separately in [§6.3.1 of the spec](../../spec/06-mcp-server.md#631-claim-derivation). The OIDC `groups` claim mechanism described in these guides is the immediate-but-on-login path; SCIM is the push-on-change path. Use SCIM when the IdP provides it and group-membership changes must apply without waiting for re-login.
+- **SCIM provisioning**: not covered in these guides. The OIDC `groups` claim mechanism described here is the immediate-but-on-login path; SCIM is the push-on-change path. Use SCIM when the IdP provides it and group-membership changes must apply without waiting for re-login.
 
 ## Common pitfalls (across IdPs)
 

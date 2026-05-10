@@ -3,7 +3,7 @@ layout: default
 title: Glossary
 parent: Reference
 nav_order: 5
-description: Vocabulary used across the spec and docs.
+description: Vocabulary used across the docs.
 ---
 
 # Glossary

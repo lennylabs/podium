@@ -72,8 +72,6 @@ The harness adapter does the translation at materialization time. Each adapter w
 
 Legend: ✓ supported natively, ⚠ supported via fallback (lint warning), ✗ not supported (lint error or `target_harnesses:` opt-out required).
 
-The full matrix and field-by-field detail is in [§6.7.1 of the spec](https://github.com/lennylabs/podium/blob/main/spec/06-mcp-server.md#671-the-authors-burden).
-
 ---
 
 ## What each adapter writes

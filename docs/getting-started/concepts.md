@@ -151,8 +151,8 @@ semantics. The full roster with documentation links is in
 The **harness adapter** is the translator. At materialization time,
 the configured adapter takes the canonical artifact and writes it
 into the harness's native format. The same source artifact can produce
-a different on-disk layout for each harness. The capability matrix
-(§6.7.1 of the spec) records which canonical fields each adapter maps natively
+a different on-disk layout for each harness. A capability matrix
+records which canonical fields each adapter maps natively
 versus via fallback.
 
 `PODIUM_HARNESS=none` writes the canonical layout as-is. This is useful
@@ -226,9 +226,8 @@ Podium's behavior is pluggable via SPIs covering storage, identity,
 composition, signing, audit, layer source, and delivery. Plugins
 compile into a registry build today. The SPIs are designed to
 be wire-compatible with a future out-of-process plugin protocol.
-See [Deployment → Extending](../deployment/extending) (and §9.3 of
-the spec) for the constraints that make that transition
-source-compatible.
+See [Deployment → Extending](../deployment/extending) for the constraints
+that make that transition source-compatible.
 
 ---
 

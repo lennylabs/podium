@@ -610,7 +610,7 @@ func (s *mcpServer) enforceSandboxPolicy(resp loadArtifactResponse) error {
 		// §4.4.1 — explicit override: log loudly so operators see
 		// the violation in the audit trail.
 		fmt.Fprintf(os.Stderr,
-			"WARN: PODIUM_IGNORE_SANDBOX bypassing §4.4.1 — artifact %s wants sandbox_profile=%s; host supports %v\n",
+			"WARN: PODIUM_IGNORE_SANDBOX bypassing sandbox check — artifact %s wants sandbox_profile=%s; host supports %v\n",
 			resp.ID, profile, s.cfg.hostSandboxes)
 		return nil
 	}

@@ -16,7 +16,6 @@ effective catalog it serves.
 
 [Documentation](https://lennylabs.github.io/podium) •
 [Hello world](#hello-world-example) •
-[Specification](spec/) •
 [Contributing](#contributing)
 
 > **Status: pre-release.** The initial v1 implementation lives on the
@@ -68,8 +67,7 @@ Podium can run from a filesystem catalog or from a registry server:
 - **Lazy artifact loading.** Materialize artifact files into the workspace
   as they are loaded. (Requires the Podium MCP server or SDK.)
 
-Every capability is specified in [`spec/`](spec/) and covered by the
-integration test suite.
+Every capability is covered by the integration test suite.
 
 ---
 
@@ -193,9 +191,7 @@ directory.
   organized by role (author / consume / deploy). Start with
   [Getting Started](https://lennylabs.github.io/podium/getting-started/)
   for the quickstart, concepts, and architecture.
-- **[Specification](spec/)**: the technical source of truth, one file
-  per top-level section.
-- **[Roadmap](ROADMAP.md)**, **[Contributing](CONTRIBUTING.md)**,
+- **[Contributing](CONTRIBUTING.md)**,
   **[Governance](GOVERNANCE.md)**, **[Security](SECURITY.md)**.
 
 ## Build and test
@@ -215,8 +211,6 @@ make test-live          # Run Tier 2 tests against real Postgres, S3,
                         # Sigstore, and embedding providers
                         # (configured via PODIUM_LIVE_* env vars).
 make coverage           # Run with -coverprofile and print a summary.
-make speccov            # Print spec-section coverage from test annotations.
-make matrix-audit       # Audit spec-table coverage (§6.7.1, §6.10, etc.).
 make help               # List every make target.
 ```
 
@@ -233,25 +227,19 @@ npm test
 ```
 
 The complete Go suite runs in about 10 seconds on a recent laptop.
-Detailed development setup, including the spec-citation conventions
-that test annotations follow, is in
+The full development setup is in
 [`docs/about/contributing.md`](https://lennylabs.github.io/podium/about/contributing).
 
 ## Contributing
 
-The specification is the source of truth and the most useful place to
-push back. Today's most useful contributions:
+Today's most useful contributions:
 
-- **Open issues or discussions**: questions, disagreements with the
-  spec, missing use cases.
-- **Read the spec and stress-test it**: if a section is unclear or
-  contradicts another, file an issue.
-- **Sketch a harness adapter**: prototyping an adapter against the
-  [adapter contract](spec/06-mcp-server.md#67-harness-adapters) helps
-  surface gaps before they're expensive to fix.
+- **Open issues or discussions**: questions, missing use cases, bug reports.
+- **Run the test suite from source** and report failures or environment-specific issues.
+- **Sketch a harness adapter**: prototyping an adapter for a new harness
+  helps validate the adapter SPI shape.
 - **Sketch a `LayerSourceProvider` plugin**: a custom source backend
-  (S3, OCI, internal CMS) against the
-  [SPI](spec/09-extensibility.md) helps validate that surface.
+  (S3, OCI, internal CMS) helps validate that SPI surface.
 - **Fix typos and broken links**: small documentation PRs are welcome
   any time.
 

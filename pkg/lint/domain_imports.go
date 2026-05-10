@@ -19,7 +19,6 @@ import (
 type ruleDomainImportsResolve struct{}
 
 func (ruleDomainImportsResolve) Code() string        { return "lint.domain_import_unresolved" }
-func (ruleDomainImportsResolve) SpecSection() string { return "§4.5.2" }
 
 func (r ruleDomainImportsResolve) Check(reg *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	if reg == nil {
@@ -44,7 +43,6 @@ func (r ruleDomainImportsResolve) Check(reg *filesystem.Registry, records []file
 					Message: fmt.Sprintf(
 						"DOMAIN.md include pattern %q does not match any known artifact",
 						pattern),
-					Rule: r.SpecSection(),
 				})
 			}
 		}
@@ -60,7 +58,6 @@ func (r ruleDomainImportsResolve) Check(reg *filesystem.Registry, records []file
 type ruleDomainImportCycle struct{}
 
 func (ruleDomainImportCycle) Code() string        { return "lint.domain_import_cycle" }
-func (ruleDomainImportCycle) SpecSection() string { return "§4.5.2" }
 
 func (r ruleDomainImportCycle) Check(reg *filesystem.Registry, _ []filesystem.ArtifactRecord) []Diagnostic {
 	if reg == nil {
@@ -85,7 +82,6 @@ func (r ruleDomainImportCycle) Check(reg *filesystem.Registry, _ []filesystem.Ar
 			Code:       r.Code(),
 			Severity:   SeverityWarning,
 			Message:    fmt.Sprintf("DOMAIN.md import cycle: %s", strings.Join(cyc, " -> ")),
-			Rule:       r.SpecSection(),
 		})
 	}
 	return out

@@ -61,7 +61,6 @@ func countLines(b []byte) int {
 type ruleBundledResourceSize struct{}
 
 func (ruleBundledResourceSize) Code() string        { return "lint.bundled_resource_size" }
-func (ruleBundledResourceSize) SpecSection() string { return "§4.1" }
 
 func (r ruleBundledResourceSize) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
@@ -76,9 +75,8 @@ func (r ruleBundledResourceSize) Check(_ *filesystem.Registry, records []filesys
 					Code:       r.Code(),
 					Severity:   SeverityWarning,
 					Message: fmt.Sprintf(
-						"bundled resource %q is %d bytes, exceeding the §4.1 per-file soft cap of %d bytes",
+						"bundled resource %q is %d bytes, exceeding the per-file soft cap of %d bytes",
 						path, size, PerFileSoftCapBytes),
-					Rule: r.SpecSection(),
 				})
 			}
 		}
@@ -88,9 +86,8 @@ func (r ruleBundledResourceSize) Check(_ *filesystem.Registry, records []filesys
 				Code:       r.Code(),
 				Severity:   SeverityError,
 				Message: fmt.Sprintf(
-					"bundled resources total %d bytes, exceeding the §4.1 per-package soft cap of %d bytes",
+					"bundled resources total %d bytes, exceeding the per-package soft cap of %d bytes",
 					total, PerPackageSoftCapBytes),
-				Rule: r.SpecSection(),
 			})
 		}
 	}
@@ -103,7 +100,6 @@ func (r ruleBundledResourceSize) Check(_ *filesystem.Registry, records []filesys
 type ruleManifestSize struct{}
 
 func (ruleManifestSize) Code() string        { return "lint.manifest_size" }
-func (ruleManifestSize) SpecSection() string { return "§4.1" }
 
 func (r ruleManifestSize) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
@@ -115,9 +111,8 @@ func (r ruleManifestSize) Check(_ *filesystem.Registry, records []filesystem.Art
 				Code:       r.Code(),
 				Severity:   SeverityError,
 				Message: fmt.Sprintf(
-					"manifest is approximately %d tokens, exceeding the §4.1 cap of %d tokens",
+					"manifest is approximately %d tokens, exceeding the cap of %d tokens",
 					manifestTokens, ManifestErrTokens),
-				Rule: r.SpecSection(),
 			})
 		}
 		if rec.Artifact != nil && rec.Artifact.Type == manifest.TypeSkill && len(rec.SkillBytes) > 0 {
@@ -129,9 +124,8 @@ func (r ruleManifestSize) Check(_ *filesystem.Registry, records []filesystem.Art
 					Code:       r.Code(),
 					Severity:   SeverityWarning,
 					Message: fmt.Sprintf(
-						"SKILL.md body is approximately %d tokens; the §4.3.4 guidance recommends ≤ %d",
+						"SKILL.md body is approximately %d tokens; the guidance recommends <= %d",
 						bodyTokens, SkillBodyWarnTokens),
-					Rule: "§4.3.4",
 				})
 			}
 			if bodyLines > SkillBodyWarnLines {
@@ -140,9 +134,8 @@ func (r ruleManifestSize) Check(_ *filesystem.Registry, records []filesystem.Art
 					Code:       r.Code(),
 					Severity:   SeverityWarning,
 					Message: fmt.Sprintf(
-						"SKILL.md body is %d lines; the §4.3.4 guidance recommends ≤ %d",
+						"SKILL.md body is %d lines; the guidance recommends <= %d",
 						bodyLines, SkillBodyWarnLines),
-					Rule: "§4.3.4",
 				})
 			}
 		}

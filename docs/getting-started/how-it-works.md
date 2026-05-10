@@ -164,8 +164,7 @@ or self-run alongside.
   constraints or identity-based visibility requirements.
 - **What you run.** Registry replicas behind a load balancer,
   Postgres (managed or self-run), object storage, an OIDC IdP. See
-  [Deployment → Operator guide](../deployment/operator-guide) and
-  the spec's [§13](https://github.com/lennylabs/podium/blob/main/spec/13-deployment.md).
+  [Deployment → Operator guide](../deployment/operator-guide).
 - **What you get.** Per-layer visibility, freeze windows, signing,
   hash-chained audit, SCIM, multi-tenancy.
 - **Migration path.** `podium admin migrate-to-standard` exports
@@ -208,9 +207,7 @@ same module's materialization writer locally.
 There is a single canonical implementation per concern. Migrating
 between deployment modes (filesystem → standalone → standard)
 preserves behavior because the same composer, parsers, merge
-semantics, and harness adapter output run in every mode. See
-[§2.2 of the spec](https://github.com/lennylabs/podium/blob/main/spec/02-architecture.md)
-for the structural rationale.
+semantics, and harness adapter output run in every mode.
 
 The language SDKs are the exception: they're independent HTTP
 clients in Python and TypeScript, and they only work against a
@@ -270,7 +267,3 @@ guide that fits the task:
 - **Using them in a harness**: [Consuming guide](../consuming/)
 - **Setting up Podium for a team or org**: [Deployment guide](../deployment/)
 - **Calling the API directly**: [Reference](../reference/)
-
-The full technical specification, one file per top-level section,
-lives in the [`spec/`](https://github.com/lennylabs/podium/tree/main/spec)
-directory of the repository.

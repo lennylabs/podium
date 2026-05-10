@@ -19,8 +19,8 @@ import (
 func serveCmd(args []string) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	bind := fs.String("bind", "", "address to listen on (overrides PODIUM_BIND)")
-	publicMode := fs.Bool("public-mode", false, "run in §13.10 public mode (overrides PODIUM_PUBLIC_MODE)")
-	standalone := fs.Bool("standalone", false, "alias for the §13.10 zero-flag standalone bootstrap")
+	publicMode := fs.Bool("public-mode", false, "run in public mode (overrides PODIUM_PUBLIC_MODE)")
+	standalone := fs.Bool("standalone", false, "alias for the zero-flag standalone bootstrap")
 	configFile := fs.String("config", "", "path to registry.yaml (overrides PODIUM_CONFIG_FILE)")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {

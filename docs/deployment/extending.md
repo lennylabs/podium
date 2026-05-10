@@ -63,7 +63,7 @@ The SPIs are designed today to make that transition source-compatible. Plugin au
 - **Cancellable.** Every method takes a `context.Context` (or equivalent) as the first parameter. Long-running work checks for cancellation; deadlines are respected.
 - **Wire-serializable inputs and outputs.** Every argument and return value is structurally serializable: primitives, slices, maps, and structs whose fields are themselves serializable. No Go channels, no closures, no `func` types, no `interface{}` without a stable encoding, and no opaque pointers to in-process state.
 - **No shared in-process state across calls.** State the plugin needs across calls is passed explicitly per method (e.g., a session token, a snapshot ID, a cursor). Plugins MUST NOT rely on package-level variables, singletons, or registered callbacks set at init time.
-- **Structured errors.** Failures use a structured envelope (`{code, message, retryable, details}`) rather than opaque Go error chains. Codes use the namespacing in §6.10 of the spec.
+- **Structured errors.** Failures use a structured envelope (`{code, message, retryable, details}`) rather than opaque Go error chains. Codes use the namespacing documented in [Error codes](../reference/error-codes).
 - **Restartable long-lived operations.** Subscriptions, watchers, and streaming results are modeled as cursor-style protocols (the registry holds the cursor; the plugin can be killed and respawned without losing track of where it was). Push-style callback registration is avoided in favor of pull-style polling or explicit re-subscribe with a resume token.
 - **Idempotent retries.** Methods are safe to retry on transient failure. Where a method has side effects, it accepts an idempotency key.
 - **Bounded payloads.** Method arguments and return values declare reasonable size limits. Payloads larger than the limit use a content-addressed reference (cache key, presigned URL) rather than inline bytes.
@@ -112,6 +112,5 @@ A runtime that doesn't fit the built-in consumers (a specialized agent framework
 
 ## Where to learn more
 
-- [`spec/09-extensibility.md`](https://github.com/lennylabs/podium/blob/main/spec/09-extensibility.md): the full SPI table and the forward-compatibility constraints.
 - [Configure your harness](../consuming/configure-your-harness): for runtime-specific extension via `PODIUM_HARNESS=none` plus custom consumer code.
 - [Custom consumers via the SDK](../consuming/custom-via-sdk): patterns for programmatic curation, eval pipelines, and custom consumer surfaces.

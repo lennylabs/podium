@@ -295,8 +295,8 @@ body
 	}
 }
 
-// Spec: §4.3 — Diagnostic.String renders severity, ID, message, code, and
-// rule so CLI output is grep-able.
+// Spec: §4.3 — Diagnostic.String renders severity, ID, message, and code so
+// CLI output is grep-able.
 func TestDiagnostic_StringIncludesAllFields(t *testing.T) {
 	t.Parallel()
 	d := Diagnostic{
@@ -304,10 +304,9 @@ func TestDiagnostic_StringIncludesAllFields(t *testing.T) {
 		Code:       "lint.example",
 		Severity:   SeverityError,
 		Message:    "msg",
-		Rule:       "§4.3",
 	}
 	s := d.String()
-	for _, want := range []string{"x/y", "lint.example", "§4.3", "msg", "error"} {
+	for _, want := range []string{"x/y", "lint.example", "msg", "error"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("String() missing %q: %s", want, s)
 		}

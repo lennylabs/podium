@@ -49,7 +49,7 @@ The harnesses below ship with a built-in adapter. For per-harness specifics abou
 | `pi`             | Pi (pi-mono coding agent). | [github.com/badlogic/pi-mono](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) |
 | `hermes`         | Hermes Agent (Nous Research). | [hermes-agent.nousresearch.com/docs](https://hermes-agent.nousresearch.com/docs/) |
 
-The adapter set grows as new harnesses appear. Custom adapters register through the `HarnessAdapter` SPI; see [Extensibility](../reference/) in the spec.
+The adapter set grows as new harnesses appear. Custom adapters register through the `HarnessAdapter` SPI; see [Extending](../deployment/extending).
 
 ---
 
@@ -275,7 +275,7 @@ podium sync
 
 **Notes:**
 
-- Limited rule and hook surface today. `rule_mode: always` falls back to "best-effort always" with a lint warning. Other rule modes fail or fall back per the §6.7.1 capability matrix.
+- Limited rule and hook surface today. `rule_mode: always` falls back to "best-effort always" with a lint warning. Other rule modes fail or fall back per the per-harness capability matrix.
 - See [Rule modes](../authoring/rule-modes) for the per-harness mapping.
 
 ---
@@ -399,4 +399,4 @@ When `podium serve` has auto-bootstrapped `~/.podium/sync.yaml` with `defaults.r
 
 ## Capability matrix
 
-The full per-harness capability matrix (which fields each adapter translates natively versus via fallback) is in [`spec/06-mcp-server.md` §6.7.1](https://github.com/lennylabs/podium/blob/main/spec/06-mcp-server.md#671-the-authors-burden). [Rule modes](../authoring/rule-modes) has the per-harness mapping for `rule_mode` values.
+[Rule modes](../authoring/rule-modes) has the per-harness mapping for `rule_mode` values.

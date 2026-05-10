@@ -39,16 +39,14 @@ type Diagnostic struct {
 	Severity Severity
 	// Message is a human-readable description.
 	Message string
-	// Rule is the spec section the rule derives from (e.g., "§4.3.4").
-	Rule string
 }
 
 // String returns a one-line representation suitable for CLI output.
 func (d Diagnostic) String() string {
 	if d.ArtifactID != "" {
-		return fmt.Sprintf("[%s] %s: %s (%s, %s)", d.Severity, d.ArtifactID, d.Message, d.Code, d.Rule)
+		return fmt.Sprintf("[%s] %s: %s (%s)", d.Severity, d.ArtifactID, d.Message, d.Code)
 	}
-	return fmt.Sprintf("[%s] %s (%s, %s)", d.Severity, d.Message, d.Code, d.Rule)
+	return fmt.Sprintf("[%s] %s (%s)", d.Severity, d.Message, d.Code)
 }
 
 // Linter applies the configured rules to a registry.
@@ -64,8 +62,6 @@ type Linter struct {
 type Rule interface {
 	// Code returns the namespaced rule identifier.
 	Code() string
-	// SpecSection returns the spec section the rule derives from.
-	SpecSection() string
 	// Check evaluates the rule and returns any diagnostics it produces.
 	Check(reg *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic
 }
@@ -115,7 +111,6 @@ func (l *Linter) Lint(reg *filesystem.Registry, records []filesystem.ArtifactRec
 type ruleRequiredFields struct{}
 
 func (ruleRequiredFields) Code() string        { return "lint.required_field_missing" }
-func (ruleRequiredFields) SpecSection() string { return "§4.3" }
 
 func (r ruleRequiredFields) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
@@ -124,8 +119,7 @@ func (r ruleRequiredFields) Check(_ *filesystem.Registry, records []filesystem.A
 		if a.Type == "" {
 			out = append(out, errMsg(rec.ID, r, "type is required"))
 		} else if !manifest.IsFirstClassType(a.Type) {
-			// Extension types are handled in Phase 13 via TypeProvider.
-			out = append(out, warn(rec.ID, "lint.unknown_type", "§4.1",
+			out = append(out, warn(rec.ID, "lint.unknown_type",
 				fmt.Sprintf("type %q is not first-class; extension TypeProvider required", a.Type)))
 		}
 		if a.Version == "" {
@@ -138,7 +132,6 @@ func (r ruleRequiredFields) Check(_ *filesystem.Registry, records []filesystem.A
 type ruleSkillCompliance struct{}
 
 func (ruleSkillCompliance) Code() string        { return "lint.skill_md_compliance" }
-func (ruleSkillCompliance) SpecSection() string { return "§4.3.4" }
 
 func (r ruleSkillCompliance) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
@@ -169,7 +162,6 @@ func (r ruleSkillCompliance) Check(_ *filesystem.Registry, records []filesystem.
 type ruleNameSyntax struct{}
 
 func (ruleNameSyntax) Code() string        { return "lint.invalid_name" }
-func (ruleNameSyntax) SpecSection() string { return "§4.3.4" }
 
 func (r ruleNameSyntax) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
@@ -191,7 +183,6 @@ func (r ruleNameSyntax) Check(_ *filesystem.Registry, records []filesystem.Artif
 type ruleVersionSemver struct{}
 
 func (ruleVersionSemver) Code() string        { return "lint.invalid_version" }
-func (ruleVersionSemver) SpecSection() string { return "§4.7.6" }
 
 func (r ruleVersionSemver) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
@@ -209,7 +200,6 @@ func (r ruleVersionSemver) Check(_ *filesystem.Registry, records []filesystem.Ar
 type ruleHookConsistency struct{}
 
 func (ruleHookConsistency) Code() string        { return "lint.hook_generic_and_subtype" }
-func (ruleHookConsistency) SpecSection() string { return "§4.3.5" }
 
 // genericToSubtypes maps each generic event to its subtype family. Used to
 // flag when both the generic and a subtype are declared on the same
@@ -236,7 +226,6 @@ func (r ruleHookConsistency) Check(_ *filesystem.Registry, records []filesystem.
 				Severity:   SeverityInfo,
 				Message: fmt.Sprintf("hook_event %q matches every subtype (%s); pick a subtype if you only need one",
 					event, strings.Join(subs, ", ")),
-				Rule: r.SpecSection(),
 			})
 		}
 	}
@@ -246,7 +235,6 @@ func (r ruleHookConsistency) Check(_ *filesystem.Registry, records []filesystem.
 type ruleEffortHintAppliesToType struct{}
 
 func (ruleEffortHintAppliesToType) Code() string        { return "lint.hint_on_unsupported_type" }
-func (ruleEffortHintAppliesToType) SpecSection() string { return "§4.3" }
 
 func (r ruleEffortHintAppliesToType) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
@@ -259,11 +247,11 @@ func (r ruleEffortHintAppliesToType) Check(_ *filesystem.Registry, records []fil
 			continue
 		}
 		if rec.Artifact.EffortHint != "" {
-			out = append(out, warn(rec.ID, r.Code(), r.SpecSection(),
+			out = append(out, warn(rec.ID, r.Code(),
 				fmt.Sprintf("effort_hint set on type %q; hints apply only to agent / skill / command", ty)))
 		}
 		if rec.Artifact.ModelClassHint != "" {
-			out = append(out, warn(rec.ID, r.Code(), r.SpecSection(),
+			out = append(out, warn(rec.ID, r.Code(),
 				fmt.Sprintf("model_class_hint set on type %q; hints apply only to agent / skill / command", ty)))
 		}
 	}
@@ -278,17 +266,15 @@ func errMsg(id string, r Rule, msg string) Diagnostic {
 		Code:       r.Code(),
 		Severity:   SeverityError,
 		Message:    msg,
-		Rule:       r.SpecSection(),
 	}
 }
 
-func warn(id, code, section, msg string) Diagnostic {
+func warn(id, code, msg string) Diagnostic {
 	return Diagnostic{
 		ArtifactID: id,
 		Code:       code,
 		Severity:   SeverityWarning,
 		Message:    msg,
-		Rule:       section,
 	}
 }
 

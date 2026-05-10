@@ -165,7 +165,7 @@ When reviewing or generating payment-handling code:
 - Never store PANs in plaintext...
 ```
 
-Each harness handles rule modes differently. The harness adapter does the translation (Cursor's `.mdc` frontmatter, Copilot's `.instructions.md` frontmatter, AGENTS.md injection for generic). The capability matrix in §6.7.1 of the spec records which (`rule_mode`, harness) combinations work natively versus via fallback. Full detail in [Rule modes](rule-modes).
+Each harness handles rule modes differently. The harness adapter does the translation (Cursor's `.mdc` frontmatter, Copilot's `.instructions.md` frontmatter, AGENTS.md injection for generic). [Rule modes](rule-modes) has the full per-harness mapping.
 
 ---
 

@@ -234,8 +234,6 @@ The rendering of `load_domain` output is governed by configurable rules. Tenant 
 | `deprioritize` | list of glob patterns | Children matching are ranked last and excluded from "notable" unless space permits. |
 | `keywords` | list of strings | Author-curated terms. Per-domain only; no tenant default. |
 
-Full detail in [`spec/04-artifact-model.md` §4.5.5](https://github.com/lennylabs/podium/blob/main/spec/04-artifact-model.md#455-discovery-rendering).
-
 ---
 
 ## Tooling

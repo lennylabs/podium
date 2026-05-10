@@ -62,7 +62,7 @@ func (s *Server) handleBatchLoad(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.IDs) > BatchLoadCap {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument",
-			"ids exceeds the §7.6.2 batch cap of 50")
+			"ids exceeds the batch cap of 50")
 		return
 	}
 	id := s.identity(r)

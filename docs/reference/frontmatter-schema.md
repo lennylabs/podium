@@ -206,11 +206,9 @@ When two layers contribute a `DOMAIN.md` for the same path:
 
 ---
 
-## Spec sources
+## See also
 
-- `ARTIFACT.md` schema: [`spec/04-artifact-model.md` §4.3](https://github.com/lennylabs/podium/blob/main/spec/04-artifact-model.md#43-artifact-manifest-schema).
-- `SKILL.md` compliance and field allocation: [`spec/04-artifact-model.md` §4.3.4](https://github.com/lennylabs/podium/blob/main/spec/04-artifact-model.md#434-skillmd-compliance-for-type-skill).
-- `DOMAIN.md` schema: [`spec/04-artifact-model.md` §4.5](https://github.com/lennylabs/podium/blob/main/spec/04-artifact-model.md#45-domain-organization).
-- Discovery rendering: [`spec/04-artifact-model.md` §4.5.5](https://github.com/lennylabs/podium/blob/main/spec/04-artifact-model.md#455-discovery-rendering).
-- Cross-layer merge semantics: [`spec/04-artifact-model.md` §4.6](https://github.com/lennylabs/podium/blob/main/spec/04-artifact-model.md#46-layers-and-visibility).
+- [Authoring → Frontmatter reference](../authoring/frontmatter-reference).
+- [Authoring → Artifact types](../authoring/artifact-types).
+- [Authoring → Domains](../authoring/domains).
 - agentskills.io standard: [agentskills.io/specification](https://agentskills.io/specification).

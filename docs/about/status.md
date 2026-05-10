@@ -8,9 +8,9 @@ description: What's built today, what's pending release, and where to track prog
 
 # Implementation status
 
-Podium is **pre-release**. The initial implementation covers the full v1 surface described in the specification and lives on the `initial-implementation` branch. The branch has not been merged to `main` and no tagged release has been published; binaries are not yet distributed through package managers.
+Podium is **pre-release**. The initial implementation covers the full v1 surface and lives on the `initial-implementation` branch. The branch has not been merged to `main` and no tagged release has been published; binaries are not yet distributed through package managers.
 
-Run Podium today by [building from source](../about/contributing#development-setup). The full Go test suite runs in roughly 10 seconds and exercises every spec section through `// Spec: §X.Y` annotations.
+Run Podium today by [building from source](../about/contributing#development-setup). The full Go test suite runs in roughly 10 seconds.
 
 ---
 
@@ -23,8 +23,6 @@ The initial implementation covers:
 - **MCP server**: `podium-mcp` with the meta-tool surface, materialization through the configured harness adapter, and identity-aware loading.
 - **SDKs**: `podium-py` and `@podium/sdk` (TypeScript) as thin HTTP clients for programmatic runtimes.
 - **Plugin surface**: every SPI documented in [Extending](../deployment/extending), including the `LayerSourceProvider`, `GitProvider`, `IdentityProvider`, `HarnessAdapter`, `MaterializationHook`, `SignatureProvider`, `NotificationProvider`, and search/embedding providers.
-
-The build sequence the implementation followed is in [`spec/10-mvp-build-sequence.md`](https://github.com/lennylabs/podium/blob/main/spec/10-mvp-build-sequence.md).
 
 ---
 
@@ -39,12 +37,11 @@ The build sequence the implementation followed is in [`spec/10-mvp-build-sequenc
 
 ## What contributions help most today
 
-- **Spec review.** Read the [`spec/`](https://github.com/lennylabs/podium/tree/main/spec) and open issues with questions, disagreements, missing use cases, or edge cases the test suite does not yet cover.
 - **Run the suite.** Build from source, run `make test`, and report failures or environment-specific issues.
-- **Sketch a harness adapter.** Prototyping an adapter against the [adapter contract](https://github.com/lennylabs/podium/blob/main/spec/06-mcp-server.md#67-harness-adapters) helps validate the SPI shape against new harnesses.
-- **Sketch a `LayerSourceProvider` plugin.** A custom source backend (S3, OCI, internal CMS) against the [SPI](https://github.com/lennylabs/podium/blob/main/spec/09-extensibility.md) helps validate that surface.
+- **Sketch a harness adapter.** Prototyping an adapter for a new harness helps validate the adapter SPI shape.
+- **Sketch a `LayerSourceProvider` plugin.** A custom source backend (S3, OCI, internal CMS) helps validate that SPI surface.
 - **Comparisons and use cases.** Report where Podium does or does not fit a workflow.
-- **Security review.** Threat-model the design; comment on the spec sections related to identity, audit, signing, and visibility.
+- **Security review.** Threat-model the design and report findings related to identity, audit, signing, and visibility.
 - **Documentation fixes.** Small PRs for typos, broken links, or unclear passages are welcome anytime.
 
 ---
@@ -53,4 +50,4 @@ The build sequence the implementation followed is in [`spec/10-mvp-build-sequenc
 
 - **Commits on `initial-implementation`** show the current work: [github.com/lennylabs/podium/commits/initial-implementation](https://github.com/lennylabs/podium/commits/initial-implementation).
 - **Open issues and discussions** at [github.com/lennylabs/podium](https://github.com/lennylabs/podium) capture the current conversation about design and direction.
-- **The test suite** is the most precise picture of what's wired up. `make speccov` prints spec-section coverage; `make matrix-audit` audits per-cell coverage of the documented spec matrices.
+- **The test suite** is the most precise picture of what's wired up. Run `make test` and inspect the reporters under `tools/` for coverage breakdowns.

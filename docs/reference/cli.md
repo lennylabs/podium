@@ -463,4 +463,4 @@ podium search "month-end close OR variance" --type skill --top-k 15 --json \
 | `PODIUM_PUBLIC_MODE` | Equivalent of `--public-mode`. |
 | `PODIUM_NO_AUTOSTANDALONE` | Disable zero-flag standalone fallback. |
 
-The full list, including server-side backend selection vars (`PODIUM_VECTOR_BACKEND`, `PODIUM_EMBEDDING_PROVIDER`, etc.), is in [`spec/13-deployment.md` §13.12](https://github.com/lennylabs/podium/blob/main/spec/13-deployment.md#1312-backend-configuration-reference).
+Server-side backend selection variables (`PODIUM_VECTOR_BACKEND`, `PODIUM_EMBEDDING_PROVIDER`, etc.) are documented alongside the corresponding backend in [Extending](../deployment/extending).
