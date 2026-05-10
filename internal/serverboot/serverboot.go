@@ -221,7 +221,7 @@ func Run() error {
 	webhookWorker := &webhook.Worker{Store: webhookStore}
 
 	bootOpts := bootstrapOptions(cfg)
-	bootOpts = append(bootOpts, server.WithWebhooks(webhookWorker))
+	bootOpts = append(bootOpts, server.WithWebhooks(webhookWorker), server.WithMode(mode))
 	if scimHandler != nil {
 		bootOpts = append(bootOpts, server.WithSCIM(scimHandler))
 		log.Printf("SCIM 2.0 receiver mounted at /scim/v2/")

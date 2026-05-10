@@ -104,7 +104,7 @@ func TestAdminGrants_NonAdminRejected(t *testing.T) {
 	}
 }
 
-// Spec: §4.6.1 — show-effective returns one row per configured
+// Spec: §4.6 — show-effective returns one row per configured
 // layer with a stable Reason string explaining the verdict.
 // Phase: 10
 func TestAdminShowEffective_PerLayerVisibility(t *testing.T) {

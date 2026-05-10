@@ -62,6 +62,16 @@ type Server struct {
 	// quota is the §4.7.8 rate limiter. When non-nil, search /
 	// load_artifact handlers consult it before doing real work.
 	quota *QuotaLimiter
+	// mode reports the §13.2.1 ready / read_only state. /healthz
+	// and /readyz consult it. Optional; nil leaves both endpoints
+	// reporting "ready".
+	mode *ModeTracker
+}
+
+// WithMode installs the §13.2.1 mode tracker so /healthz and
+// /readyz reflect the read-only / ready state.
+func WithMode(m *ModeTracker) Option {
+	return func(s *Server) { s.mode = m }
 }
 
 // WithQuotaLimiter installs the §4.7.8 rate limiter for search
@@ -300,6 +310,7 @@ func guessContentType(path string) string {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
+	mux.HandleFunc("/readyz", s.handleReady)
 	mux.HandleFunc("/v1/load_domain", s.handleLoadDomain)
 	mux.HandleFunc("/v1/search_domains", s.handleSearchDomains)
 	mux.HandleFunc("/v1/search_artifacts", s.handleSearchArtifacts)
@@ -415,11 +426,44 @@ type ErrorResponse struct {
 // ----- Handlers -------------------------------------------------------------
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	mode := "ready"
-	if s.publicMode {
-		mode = "public"
-	}
+	mode := s.modeBanner()
 	writeJSON(w, http.StatusOK, HealthResponse{Mode: mode, Ready: true})
+}
+
+// modeBanner returns the canonical mode string per §13.2.1:
+// "ready" by default, "read_only" when the ModeTracker has flipped,
+// "public" when the §13.10 public mode is engaged. Public-mode
+// short-circuits read-only so a public-mode standalone with no
+// metadata store still reports its serving mode clearly.
+func (s *Server) modeBanner() string {
+	if s.publicMode {
+		return "public"
+	}
+	if s.mode != nil && s.mode.Get() == ModeReadOnly {
+		return "read_only"
+	}
+	return "ready"
+}
+
+// ReadyResponse describes /readyz output (§13.9).
+type ReadyResponse struct {
+	Mode                 string `json:"mode"`
+	ReplicationLagSecs   int    `json:"replication_lag_seconds"`
+}
+
+// handleReady answers /readyz per §13.9. The status code follows
+// load-balancer conventions: ready / read_only return 200 (the
+// registry stays in rotation), not_ready returns 503. Replication
+// lag is 0 in standalone deployments; standard deployments wire
+// a probe that updates the field.
+func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
+	mode := s.modeBanner()
+	resp := ReadyResponse{Mode: mode}
+	status := http.StatusOK
+	if mode == "not_ready" {
+		status = http.StatusServiceUnavailable
+	}
+	writeJSON(w, status, resp)
 }
 
 func (s *Server) handleLoadDomain(w http.ResponseWriter, r *http.Request) {

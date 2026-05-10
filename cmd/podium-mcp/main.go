@@ -318,6 +318,23 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 
 	body, err := s.fetchJSON("/v1/load_artifact", args)
 	if err != nil {
+		// §7.4 degraded-network fallback: in always-revalidate
+		// mode, if a fresh fetch fails, try to serve from cache
+		// before surfacing the registry-unreachable error. Cache
+		// misses surface as network.registry_unreachable.
+		if s.cfg.cacheMode == "always-revalidate" && id != "" {
+			if hash, ok := s.resolutions.Get(id, version); ok {
+				if cached, cerr := s.loadArtifactFromCache(hash, id); cerr == nil {
+					out := s.deliverLoadArtifact(*cached, deliverOpts{harness: harnessFromArgs(s.cfg.harness, args)})
+					if m, ok := out.(map[string]any); ok {
+						m["status"] = "offline"
+						m["served_from_cache"] = true
+					}
+					return out
+				}
+			}
+			return errorResult("network.registry_unreachable: " + err.Error())
+		}
 		return errorResult(err.Error())
 	}
 	var resp loadArtifactResponse
@@ -683,15 +700,28 @@ func jsonAny(b []byte) any {
 	return out
 }
 
-// currentToken reads the injected session token. §6.3.2 requires the
-// MCP server to read fresh on every call so env-var or file rotations
-// take effect at next request.
+// currentToken reads the injected session token. §6.3.2.1 requires
+// the MCP server to read fresh on every call so env-var or file
+// rotations take effect at the next request without a restart or
+// signal.
 func (s *mcpServer) currentToken() string {
+	// File source wins when configured; the file is the canonical
+	// rotation surface for hosts that can write it with restrictive
+	// permissions.
 	if s.cfg.sessionTokenFile != "" {
 		data, err := os.ReadFile(s.cfg.sessionTokenFile)
 		if err == nil {
 			return strings.TrimSpace(string(data))
 		}
+	}
+	// Env var: re-read at call time so rotations land on the next
+	// registry call without requiring SIGHUP.
+	tokenSource := os.Getenv("PODIUM_SESSION_TOKEN_ENV")
+	if tokenSource == "" {
+		tokenSource = "PODIUM_SESSION_TOKEN"
+	}
+	if v := os.Getenv(tokenSource); v != "" {
+		return strings.TrimSpace(v)
 	}
 	return strings.TrimSpace(s.cfg.sessionToken)
 }

@@ -34,9 +34,10 @@ func makeRegistry(t *testing.T, dir string) string {
 	return root
 }
 
-// Spec: §7.5 — Watch runs an initial sync, then reruns Run after
-// edits to the registry. Each rerun emits a WatchEvent on the
-// channel; the channel closes when ctx is canceled.
+// Spec: §7.5 / §13.11.4 — Watch runs an initial sync, then reruns
+// Run after edits to the registry. Each rerun emits a WatchEvent
+// on the channel; the channel closes when ctx is canceled.
+// §13.11.4 covers the filesystem-specific watch shape.
 // Phase: 3
 func TestWatch_RerunsAfterRegistryEdit(t *testing.T) {
 	testharness.RequirePhase(t, 3)

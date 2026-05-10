@@ -10,9 +10,11 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/core"
 )
 
-// Spec: §8.1 — auditEmitterFor adapts the file-backed sink to the
-// core.AuditEmitter shape; the resulting emitter writes the
-// event type, caller, target, and context to the sink.
+// Spec: §8.1 / §4.7.5 — auditEmitterFor adapts the file-backed
+// sink to the core.AuditEmitter shape; the resulting emitter
+// writes the event type, caller, target, and context to the
+// sink, completing the §4.7.5 promise that the registry as a
+// service emits audit events for read calls.
 func TestAuditEmitterFor_AppendsToSink(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
@@ -45,6 +46,11 @@ func statusCmd(args []string) int {
 			fmt.Printf("reachability:       UNREACHABLE (%v)\n", err)
 		case resp.StatusCode == http.StatusOK:
 			fmt.Printf("reachability:       OK\n")
+			// §13.2.2: surface the registry's mode so operators
+			// can see public_mode without inspecting startup config.
+			if mode := decodeHealthMode(resp); mode != "" {
+				fmt.Printf("registry mode:      %s\n", mode)
+			}
 		default:
 			fmt.Printf("reachability:       HTTP %d\n", resp.StatusCode)
 		}
@@ -76,6 +82,19 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// decodeHealthMode extracts the `mode` field from a /healthz JSON
+// response. Returns "" when the body can't be decoded so the
+// status command falls back gracefully.
+func decodeHealthMode(resp *http.Response) string {
+	var body struct {
+		Mode string `json:"mode"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return ""
+	}
+	return body.Mode
 }
 
 // maskedToken returns the first eight chars of a JWT followed by

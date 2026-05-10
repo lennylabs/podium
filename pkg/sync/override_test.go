@@ -15,8 +15,9 @@ func newClock() clock.Clock {
 	return clock.NewFrozen(time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC))
 }
 
-// Spec: §7.5.5 — `podium sync override --add <id>` lands the entry in
-// toggles.add. The lock file is written when changes occur.
+// Spec: §7.5.4 / §7.5.5 — `podium sync override --add <id>` lands
+// the entry in toggles.add. The lock file is written when changes
+// occur, demonstrating the §7.5.4 toggle-persistence contract.
 // Phase: 14
 func TestOverride_AddInsertsToggle(t *testing.T) {
 	testharness.RequirePhase(t, 14)
