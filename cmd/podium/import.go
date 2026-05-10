@@ -32,7 +32,7 @@ func importCmd(args []string) int {
 	dryRun := fs.Bool("dry-run", false, "report the plan; write nothing")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *source == "" || *target == "" {
 		fmt.Fprintln(os.Stderr, "error: --source and --target are required")

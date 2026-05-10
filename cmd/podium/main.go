@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -116,6 +117,17 @@ func isHelpArg(s string) bool {
 	return s == "help" || s == "-h" || s == "--help"
 }
 
+// parseExit translates a non-nil fs.Parse error into an exit code:
+// 0 when --help was requested (flag.ErrHelp), 2 for any other parse
+// failure. The flag package already printed the usage or error message
+// to fs.Output().
+func parseExit(err error) int {
+	if errors.Is(err, flag.ErrHelp) {
+		return 0
+	}
+	return 2
+}
+
 const usage = `usage: podium <command> [flags]
 
 Commands:
@@ -181,7 +193,7 @@ func syncCmd(args []string) int {
 	overlay := fs.String("overlay", "", "workspace overlay path watched alongside the registry")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 
 	// §13.11.2 — when --registry is unset, fall back to
@@ -277,7 +289,7 @@ func syncOverrideCmd(args []string) int {
 	dryRun := fs.Bool("dry-run", false, "resolve and report; write nothing")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	abs, err := filepath.Abs(*target)
 	if err != nil {
@@ -313,7 +325,7 @@ func syncSaveAsCmd(args []string) int {
 	dryRun := fs.Bool("dry-run", false, "print the proposed YAML diff and write nothing")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *profile == "" {
 		fmt.Fprintln(os.Stderr, "error: --profile is required")
@@ -365,7 +377,7 @@ func profileCmd(args []string) int {
 	dryRun := fs.Bool("dry-run", false, "print the proposed YAML diff and write nothing")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args[1:]); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *profile == "" {
 		fmt.Fprintln(os.Stderr, "error: --profile is required")
@@ -433,7 +445,7 @@ func lintCmd(args []string) int {
 	registry := fs.String("registry", "", "filesystem registry path (required)")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *registry == "" {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")
@@ -480,7 +492,7 @@ func searchCmd(args []string) int {
 	asJSON := fs.Bool("json", false, "JSON output")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if fs.NArg() == 0 {
 		fmt.Fprintln(os.Stderr, "usage: podium search <query> [flags]")
@@ -543,7 +555,7 @@ func domainAnalyze(args []string) int {
 	path := fs.String("path", "", "subtree to analyze (empty = root)")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *registry == "" {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")
@@ -569,7 +581,7 @@ func domainShow(args []string) int {
 	asJSON := fs.Bool("json", false, "JSON output")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *registry == "" {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")
@@ -596,7 +608,7 @@ func domainSearch(args []string) int {
 	topK := fs.Int("top-k", 10, "max results")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if fs.NArg() == 0 {
 		fmt.Fprintln(os.Stderr, "usage: podium domain search <query> [flags]")
@@ -640,7 +652,7 @@ func artifactShow(args []string) int {
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if fs.NArg() == 0 {
 		fmt.Fprintln(os.Stderr, "usage: podium artifact show <id>")
@@ -668,7 +680,7 @@ func initCmd(args []string) int {
 	force := fs.Bool("force", false, "overwrite an existing sync.yaml")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *scopeGlobal && *scopeLocal {
 		fmt.Fprintln(os.Stderr, "error: --global and --local are mutually exclusive")

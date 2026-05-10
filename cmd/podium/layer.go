@@ -79,7 +79,7 @@ func layerUpdate(args []string) int {
 	fs.Var(&users, "user", "OIDC sub with visibility (repeatable)")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *registry == "" || *id == "" {
 		fmt.Fprintln(os.Stderr, "error: --registry and --id are required")
@@ -135,7 +135,7 @@ func layerWatch(args []string) int {
 	intervalSec := fs.Int("interval", 60, "seconds between reingest pokes")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *registry == "" || *id == "" {
 		fmt.Fprintln(os.Stderr, "error: --registry and --id are required")
@@ -175,7 +175,7 @@ func layerRegister(args []string) int {
 	fs.Var(&users, "user", "OIDC sub with visibility (repeatable)")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *registry == "" {
 		fmt.Fprintln(os.Stderr, "error: --registry is required (or set PODIUM_REGISTRY)")
@@ -232,7 +232,7 @@ func layerList(args []string) int {
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *registry == "" {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")
@@ -253,7 +253,7 @@ func layerReorder(args []string) int {
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if fs.NArg() == 0 {
 		fmt.Fprintln(os.Stderr, "usage: podium layer reorder <id> [<id> ...]")
@@ -279,7 +279,7 @@ func layerUnregister(args []string) int {
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if fs.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "usage: podium layer unregister <id>")
@@ -304,7 +304,7 @@ func layerReingest(args []string) int {
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if fs.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "usage: podium layer reingest <id>")

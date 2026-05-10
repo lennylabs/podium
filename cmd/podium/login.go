@@ -34,7 +34,7 @@ func loginCmd(args []string) int {
 	scopes := fs.String("scopes", "openid profile email groups", "space-separated OAuth scopes")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *registry == "" {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")
@@ -94,7 +94,7 @@ func logoutCmd(args []string) int {
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL (keychain entry label)")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *registry == "" {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")

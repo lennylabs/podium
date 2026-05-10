@@ -43,7 +43,7 @@ func cachePrune(args []string) int {
 	dryRun := fs.Bool("dry-run", false, "report what would be removed; remove nothing")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *dir == "" {
 		home, err := os.UserHomeDir()

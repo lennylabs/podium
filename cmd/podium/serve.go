@@ -25,7 +25,7 @@ func serveCmd(args []string) int {
 	configFile := fs.String("config", "", "path to registry.yaml (overrides PODIUM_CONFIG_FILE)")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *bind != "" {
 		_ = os.Setenv("PODIUM_BIND", *bind)

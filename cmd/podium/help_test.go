@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"strings"
 	"testing"
@@ -66,6 +67,35 @@ func TestIsHelpArg(t *testing.T) {
 		if isHelpArg(s) {
 			t.Errorf("isHelpArg(%q) = true, want false", s)
 		}
+	}
+}
+
+// Spec: n/a — parseExit gives --help an exit code of 0 and other parse
+// failures exit code of 2; nil never reaches it.
+func TestParseExit(t *testing.T) {
+	t.Parallel()
+	if got := parseExit(flag.ErrHelp); got != 0 {
+		t.Errorf("parseExit(ErrHelp) = %d, want 0", got)
+	}
+	if got := parseExit(errors.New("bad flag")); got != 2 {
+		t.Errorf("parseExit(bad-flag) = %d, want 2", got)
+	}
+}
+
+// Spec: n/a — subcommand --help routes through parseExit and exits 0
+// rather than 2. End-to-end check that wires fs.Parse + parseExit.
+func TestSubcommandHelp_ExitsZero(t *testing.T) {
+	t.Parallel()
+	// serveCmd is representative: any subcommand whose flag.Parse
+	// receives --help should exit 0 via parseExit.
+	if code := serveCmd([]string{"--help"}); code != 0 {
+		t.Errorf("serveCmd(--help) exit = %d, want 0", code)
+	}
+	if code := serveCmd([]string{"-h"}); code != 0 {
+		t.Errorf("serveCmd(-h) exit = %d, want 0", code)
+	}
+	if code := serveCmd([]string{"--bogus"}); code != 2 {
+		t.Errorf("serveCmd(--bogus) exit = %d, want 2", code)
 	}
 }
 

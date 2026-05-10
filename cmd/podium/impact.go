@@ -16,7 +16,7 @@ func impactCmd(args []string) int {
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if fs.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "usage: podium impact <artifact-id>")

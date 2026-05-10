@@ -20,7 +20,7 @@ func signCmd(args []string) int {
 	providerName := fs.String("provider", envDefault("PODIUM_SIGNATURE_PROVIDER", "noop"), "noop|registry-managed|sigstore-keyless")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *contentHash == "" {
 		fmt.Fprintln(os.Stderr, "error: --content-hash is required (sha256:<hex>)")
@@ -52,7 +52,7 @@ func verifyCmd(args []string) int {
 	providerName := fs.String("provider", envDefault("PODIUM_SIGNATURE_PROVIDER", "noop"), "noop|registry-managed|sigstore-keyless")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *contentHash == "" || *signature == "" {
 		fmt.Fprintln(os.Stderr, "error: --content-hash and --signature are required")

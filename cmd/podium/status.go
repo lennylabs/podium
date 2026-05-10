@@ -26,7 +26,7 @@ func statusCmd(args []string) int {
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	fmt.Printf("registry:           %s\n", orMissing(*registry))
 	fmt.Printf("harness:            %s\n", envOr("PODIUM_HARNESS", "none"))

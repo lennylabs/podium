@@ -39,7 +39,7 @@ func configShow(args []string) int {
 	asJSON := fs.Bool("json", false, "emit JSON")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	cfg := serverboot.LoadConfig()
 	settings := cfg.Settings()

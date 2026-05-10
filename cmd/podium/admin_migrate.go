@@ -56,7 +56,7 @@ func adminMigrateToStandard(args []string) int {
 	dryRun := fs.Bool("dry-run", false, "report what would migrate; touch nothing")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return parseExit(err)
 	}
 	if *srcSQLite == "" {
 		fmt.Fprintln(os.Stderr, "error: --source-sqlite is required")
