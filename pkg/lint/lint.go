@@ -86,6 +86,8 @@ func AllRules() []Rule {
 		ruleManifestSize{},
 		ruleArtifactBodyForSkill{},
 		ruleProseReferenceResolution{},
+		ruleDomainImportsResolve{},
+		ruleDomainImportCycle{},
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/internal/clock"
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
@@ -45,17 +46,55 @@ var (
 // the current time falls within [Start, End) and the window's blocks
 // list includes "ingest".
 type FreezeWindow struct {
-	Name    string
-	Start   time.Time
-	End     time.Time
-	Blocks  []string // typically ["ingest"], may include "layer-config"
-	BreakGlass bool   // when true, this ingest invocation has been
-	                  // approved by dual-signoff break-glass.
+	Name   string
+	Start  time.Time
+	End    time.Time
+	Blocks []string // typically ["ingest"], may include "layer-config"
+	// BreakGlass marks this window as carrying an active
+	// break-glass override. The override only applies when the
+	// supporting fields (Approvers, Justification, GrantedAt)
+	// satisfy the §4.7.2 rule — see ValidateBreakGlass.
+	BreakGlass    bool
+	Approvers     []string  // ≥ 2 unique IDs required for §4.7.2 dual-signoff
+	Justification string    // non-empty string explaining the override
+	GrantedAt     time.Time // approval timestamp; auto-expires after 24h
 }
 
-// Active reports whether the window blocks ingest at now.
+// breakGlassMaxAge is the §4.7.2 auto-expiry window for a
+// break-glass grant. Grants older than this are refused.
+const breakGlassMaxAge = 24 * time.Hour
+
+// ValidateBreakGlass returns nil when the BreakGlass override
+// satisfies the §4.7.2 rule (two distinct approvers, non-empty
+// justification, ≤24h since GrantedAt). Returns a descriptive
+// error otherwise. Callers fold the result into ErrFrozen so the
+// freeze stays in effect when the grant is malformed.
+func (w FreezeWindow) ValidateBreakGlass(now time.Time) error {
+	if !w.BreakGlass {
+		return nil
+	}
+	if w.Justification == "" {
+		return fmt.Errorf("break-glass missing justification")
+	}
+	unique := map[string]bool{}
+	for _, a := range w.Approvers {
+		unique[a] = true
+	}
+	if len(unique) < 2 {
+		return fmt.Errorf("break-glass requires two distinct approvers (got %d)", len(unique))
+	}
+	if !w.GrantedAt.IsZero() && now.Sub(w.GrantedAt) > breakGlassMaxAge {
+		return fmt.Errorf("break-glass grant expired (>24h since approval)")
+	}
+	return nil
+}
+
+// Active reports whether the window blocks the named operation
+// at the given time. A BreakGlass override that fails
+// ValidateBreakGlass is treated as if the override were absent
+// (the freeze stays in effect).
 func (w FreezeWindow) Active(now time.Time, op string) bool {
-	if w.BreakGlass {
+	if w.BreakGlass && w.ValidateBreakGlass(now) == nil {
 		return false
 	}
 	if now.Before(w.Start) || !now.Before(w.End) {
@@ -67,6 +106,21 @@ func (w FreezeWindow) Active(now time.Time, op string) bool {
 		}
 	}
 	return false
+}
+
+// uniqueStrings returns its input with duplicates removed. Order
+// preserved (first occurrence wins).
+func uniqueStrings(in []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
 }
 
 // wouldBlockWithoutBreakGlass returns true when the window's
@@ -271,10 +325,18 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			return nil, fmt.Errorf("%w: window %q active", ErrFrozen, w.Name)
 		}
 		if w.BreakGlass && wouldBlockWithoutBreakGlass(w, req.Clock.Now(), "ingest") {
+			// Only fire when the §4.7.2 grant is valid; an
+			// invalid grant left the window Active above and
+			// already returned ErrFrozen.
+			if w.ValidateBreakGlass(req.Clock.Now()) != nil {
+				continue
+			}
 			if req.AuditEmit != nil {
 				req.AuditEmit("freeze.break_glass", req.LayerID, map[string]string{
-					"window": w.Name,
-					"caller": req.CallerID,
+					"window":        w.Name,
+					"caller":        req.CallerID,
+					"approvers":     strings.Join(uniqueStrings(w.Approvers), ","),
+					"justification": w.Justification,
 				})
 			}
 		}
@@ -448,24 +510,27 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		}
 
 		// §8.1 audit log: same events fan into the operator-side
-		// audit sink so SIEM pipelines see the publish.
+		// audit sink so SIEM pipelines see the publish. §8.2
+		// manifest-declared redaction: when the manifest names
+		// fields in audit_redact, the registry replaces those
+		// values with [redacted] before emitting.
 		if req.AuditEmit != nil {
-			req.AuditEmit("artifact.published", mr.ArtifactID, map[string]string{
+			req.AuditEmit("artifact.published", mr.ArtifactID, audit.RedactFields(map[string]string{
 				"version":      mr.Version,
 				"content_hash": mr.ContentHash,
 				"layer":        mr.Layer,
-			})
+			}, mr.AuditRedact))
 			if mr.Deprecated {
-				req.AuditEmit("artifact.deprecated", mr.ArtifactID, map[string]string{
+				req.AuditEmit("artifact.deprecated", mr.ArtifactID, audit.RedactFields(map[string]string{
 					"version": mr.Version,
 					"layer":   mr.Layer,
-				})
+				}, mr.AuditRedact))
 			}
 			if mr.Signature != "" {
-				req.AuditEmit("artifact.signed", mr.ArtifactID, map[string]string{
+				req.AuditEmit("artifact.signed", mr.ArtifactID, audit.RedactFields(map[string]string{
 					"version":      mr.Version,
 					"content_hash": mr.ContentHash,
-				})
+				}, mr.AuditRedact))
 			}
 		}
 
@@ -644,6 +709,7 @@ func manifestRecordFor(rec filesystem.ArtifactRecord, tenantID, layerID string, 
 		Layer:       layerID,
 		Deprecated:  rec.Artifact.Deprecated,
 		ReplacedBy:  rec.Artifact.ReplacedBy,
+		AuditRedact: append([]string(nil), rec.Artifact.AuditRedact...),
 		IngestedAt:  ingestedAt,
 		Frontmatter: rec.ArtifactBytes,
 		Body:        []byte(body),

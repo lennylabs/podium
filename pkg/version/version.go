@@ -58,6 +58,14 @@ func ParsePin(s string) (Pin, error) {
 		if len(hash) != 64 {
 			return Pin{}, fmt.Errorf("%w: sha256 must be 64 hex chars", ErrInvalidPin)
 		}
+		for i := 0; i < len(hash); i++ {
+			c := hash[i]
+			isHex := (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+			if !isHex {
+				return Pin{}, fmt.Errorf("%w: sha256 must be hex; non-hex %q at offset %d",
+					ErrInvalidPin, c, i)
+			}
+		}
 		return Pin{Kind: PinContentHash, Hash: hash}, nil
 	}
 	parts := strings.Split(s, ".")

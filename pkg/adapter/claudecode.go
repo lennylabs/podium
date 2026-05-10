@@ -36,7 +36,10 @@ func (c ClaudeCode) Adapt(src Source) ([]File, error) {
 	case "skill":
 		skillRoot := path.Join(".claude", "skills", name)
 		if len(src.SkillBytes) > 0 {
-			out = append(out, File{Path: path.Join(skillRoot, "SKILL.md"), Content: src.SkillBytes})
+			// §4.4.2 — rewrite imported provenance blocks into
+			// Claude Code <untrusted-data> regions so the host
+			// can apply differential trust at read time.
+			out = append(out, File{Path: path.Join(skillRoot, "SKILL.md"), Content: rewriteProvenanceForClaude(src.SkillBytes)})
 		}
 		for rel, data := range src.Resources {
 			out = append(out, File{Path: path.Join(skillRoot, rel), Content: data})

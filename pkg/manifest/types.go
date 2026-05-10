@@ -109,6 +109,10 @@ type Artifact struct {
 	Deprecated       bool             `yaml:"deprecated,omitempty"`
 	ReplacedBy       string           `yaml:"replaced_by,omitempty"`
 	ReleaseNotes     string           `yaml:"release_notes,omitempty"`
+	// AuditRedact lists field names whose values must be replaced
+	// with "[redacted]" in audit log entries that reference this
+	// artifact (§8.2 manifest-declared redaction surface).
+	AuditRedact []string `yaml:"audit_redact,omitempty"`
 
 	// Caller-interpreted (§4.3).
 	MCPServers          []MCPServerRef        `yaml:"mcpServers,omitempty"`

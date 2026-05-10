@@ -57,6 +57,10 @@ type ManifestRecord struct {
 	// ReplacedBy is the §4.7.4 upgrade target the manifest names
 	// when deprecated. Empty when not set.
 	ReplacedBy  string
+	// AuditRedact lists field names whose values must be replaced
+	// with "[redacted]" in audit context for events that reference
+	// this artifact (§8.2 manifest-declared redaction).
+	AuditRedact []string
 	IngestedAt  time.Time
 	Frontmatter []byte
 	Body        []byte
