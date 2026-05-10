@@ -7,18 +7,25 @@ import (
 	"github.com/lennylabs/podium/pkg/identity"
 )
 
+// RuntimeKeyStore is the SPI the runtime endpoint consumes.
+// In-memory and file-persisted registries both satisfy it.
+type RuntimeKeyStore interface {
+	Register(identity.RuntimeKey) error
+	All() []identity.RuntimeKey
+}
+
 // RuntimeKeyEndpoint mounts the §6.3.2 admin endpoints that
 // register and list trusted runtime signing keys. The registry
 // passed in here is the same one the JWT verifier consults at
 // request time.
 type RuntimeKeyEndpoint struct {
-	Registry  *identity.RuntimeKeyRegistry
+	Registry  RuntimeKeyStore
 	authAdmin func(*http.Request) error
 	mode      *ModeTracker
 }
 
 // NewRuntimeKeyEndpoint returns an endpoint backed by reg.
-func NewRuntimeKeyEndpoint(reg *identity.RuntimeKeyRegistry, mode *ModeTracker) *RuntimeKeyEndpoint {
+func NewRuntimeKeyEndpoint(reg RuntimeKeyStore, mode *ModeTracker) *RuntimeKeyEndpoint {
 	return &RuntimeKeyEndpoint{
 		Registry:  reg,
 		mode:      mode,

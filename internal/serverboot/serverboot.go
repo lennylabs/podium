@@ -51,7 +51,7 @@ func envFirst(keys ...string) string {
 // separated). Returns nil otherwise; the registry then runs
 // without an IdP push interface and the visibility evaluator
 // matches groups via JWT claims only.
-func buildSCIMHandler(store *scim.Memory) *scim.Handler {
+func buildSCIMHandler(store scim.Store) *scim.Handler {
 	raw := os.Getenv("PODIUM_SCIM_TOKENS")
 	if raw == "" {
 		return nil
@@ -176,11 +176,22 @@ func Run() error {
 	}
 
 	// §6.3.1 SCIM 2.0: when at least one bearer token is configured,
-	// the SCIM IdP receiver is mounted at /scim/v2/. The same
-	// in-memory store also feeds the §4.6 visibility evaluator's
+	// the SCIM IdP receiver is mounted at /scim/v2/. When
+	// PODIUM_SCIM_STORE_PATH is set, IdP-pushed users + groups
+	// persist as a JSON file at that path so they survive server
+	// restarts. The same store feeds the §4.6 visibility evaluator's
 	// `groups:` expander so layer filters resolve against
 	// IdP-pushed group membership.
-	scimStore := scim.NewMemory()
+	var scimStore scim.Store = scim.NewMemory()
+	if path := os.Getenv("PODIUM_SCIM_STORE_PATH"); path != "" {
+		fs, err := scim.LoadFileStore(path)
+		if err != nil {
+			log.Printf("warning: SCIM persistence disabled: %v", err)
+		} else {
+			scimStore = fs
+			log.Printf("SCIM directory persisted at %s", path)
+		}
+	}
 	scimHandler := buildSCIMHandler(scimStore)
 	if scimHandler != nil {
 		registry = registry.WithGroupResolver(func(g string) []string {
@@ -193,11 +204,20 @@ func Run() error {
 	}
 
 	mode := server.NewModeTracker()
-	// §7.3.2 outbound webhook worker: in-memory receiver store
-	// fans change events out to subscribers. Receivers do not
-	// survive a server restart in this configuration; persistent
-	// storage is on the configuration roadmap.
-	webhookStore := webhook.NewMemoryStore()
+	// §7.3.2 outbound webhook worker: when PODIUM_WEBHOOK_STORE_PATH
+	// is set, receivers persist as a JSON file at that path; the
+	// store reloads them on startup. Without the env var, receivers
+	// stay in memory (subscriptions vanish on restart).
+	var webhookStore webhook.Store = webhook.NewMemoryStore()
+	if path := os.Getenv("PODIUM_WEBHOOK_STORE_PATH"); path != "" {
+		fs, err := webhook.LoadFileStore(path)
+		if err != nil {
+			log.Printf("warning: webhook persistence disabled: %v", err)
+		} else {
+			webhookStore = fs
+			log.Printf("webhook receivers persisted at %s", path)
+		}
+	}
 	webhookWorker := &webhook.Worker{Store: webhookStore}
 
 	bootOpts := bootstrapOptions(cfg)
@@ -215,11 +235,20 @@ func Run() error {
 	layers := server.NewLayerEndpoint(st, tenantID, mode).
 		WithDefaultVisibility(cfg.defaultLayerVisibility)
 
-	// §6.3.2 runtime trust keys: an in-memory registry that accepts
-	// PEM-encoded public keys via POST /v1/admin/runtime. Keys live
-	// for the lifetime of the process; persistence is on the
-	// configuration roadmap.
-	runtimeKeys := identity.NewRuntimeKeyRegistry()
+	// §6.3.2 runtime trust keys: when PODIUM_RUNTIME_KEYS_PATH is
+	// set, registrations persist as a JSON file at that path; the
+	// registry reloads them on startup. Without the env var, the
+	// registry stays in memory (registrations vanish on restart).
+	var runtimeKeys server.RuntimeKeyStore = identity.NewRuntimeKeyRegistry()
+	if path := os.Getenv("PODIUM_RUNTIME_KEYS_PATH"); path != "" {
+		persisted, err := identity.LoadFilePersistedRuntimeKeyRegistry(path)
+		if err != nil {
+			log.Printf("warning: runtime key persistence disabled: %v", err)
+		} else {
+			runtimeKeys = persisted
+			log.Printf("runtime trust keys persisted at %s", path)
+		}
+	}
 	runtimeEndpoint := server.NewRuntimeKeyEndpoint(runtimeKeys, mode)
 
 	mux := http.NewServeMux()
