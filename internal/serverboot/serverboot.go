@@ -232,28 +232,51 @@ func Run() error {
 	}
 	mux.Handle("/", srv.Handler())
 
+	// §8.3 audit sink: file-backed, hash-chained, shared by the
+	// anchor scheduler, the retention scheduler, and the read-only
+	// probe transition events. Nil when the path can't be resolved
+	// (probes still log; downstream features that need the sink
+	// gracefully no-op).
+	auditSink := openAuditSink(cfg)
+
 	// §8.6 transparency anchoring: when the operator enables
-	// PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS, the file-backed audit
-	// sink is created and a goroutine periodically anchors new
-	// entries via the registry-managed signing key (loaded or
-	// generated at the configured key path). Operators monitor
-	// audit.anchored / audit.anchor_failed events.
+	// PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS, a goroutine periodically
+	// anchors new entries via the registry-managed signing key.
+	// Operators monitor audit.anchored / audit.anchor_failed events.
 	if cfg.auditAnchorInterval > 0 {
-		startAnchorScheduler(cfg)
+		startAnchorScheduler(cfg, auditSink)
+	}
+
+	// §8.5 retention enforcement: when
+	// PODIUM_AUDIT_RETENTION_INTERVAL_SECONDS > 0, a goroutine
+	// truncates the audit log on a cadence using the configured
+	// retention policies (defaulting to the §8.5 standard set).
+	if cfg.auditRetentionInterval > 0 {
+		startRetentionScheduler(cfg, auditSink)
 	}
 
 	// §13.2.1 read-only probe: ping the metadata store on a tick
 	// and flip the shared mode tracker after Failures consecutive
-	// errors. Disabled when failures threshold is 0.
+	// errors. Disabled when failures threshold is 0. Mode
+	// transitions write registry.read_only_entered /
+	// registry.read_only_exited events to the audit sink.
 	if cfg.readOnlyProbeFailures > 0 {
+		auditEnter := readOnlyEnterCallback(auditSink, tenantID, "store_probe_failed")
+		auditExit := readOnlyExitCallback(auditSink, tenantID)
 		probe := &server.ReadOnlyProbe{
 			Store:    st,
 			Tracker:  mode,
 			TenantID: tenantID,
 			Interval: time.Duration(cfg.readOnlyProbeInterval) * time.Second,
 			Failures: cfg.readOnlyProbeFailures,
-			OnEnter:  func() { log.Printf("registry entered read_only mode after %d probe failures", cfg.readOnlyProbeFailures) },
-			OnExit:   func() { log.Printf("registry exited read_only mode") },
+			OnEnter: func() {
+				log.Printf("registry entered read_only mode after %d probe failures", cfg.readOnlyProbeFailures)
+				auditEnter()
+			},
+			OnExit: func() {
+				log.Printf("registry exited read_only mode")
+				auditExit()
+			},
 		}
 		go func() {
 			if err := probe.Run(context.Background()); err != nil && err != context.Canceled {
@@ -318,6 +341,9 @@ type Config struct {
 	auditLogPath        string
 	auditSigningKeyPath string
 	auditAnchorInterval int
+	// §8.5 retention enforcement.
+	auditRetentionInterval int
+	auditRetentionMaxAgeDays int
 }
 
 // Setting names one resolved field together with the env var (or
@@ -425,6 +451,9 @@ func LoadConfig() *Config {
 		auditLogPath:        os.Getenv("PODIUM_AUDIT_LOG_PATH"),
 		auditSigningKeyPath: os.Getenv("PODIUM_AUDIT_SIGNING_KEY_PATH"),
 		auditAnchorInterval: envInt("PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS", 0),
+		// §8.5 retention enforcement.
+		auditRetentionInterval:   envInt("PODIUM_AUDIT_RETENTION_INTERVAL_SECONDS", 0),
+		auditRetentionMaxAgeDays: envInt("PODIUM_AUDIT_RETENTION_MAX_AGE_DAYS", 365),
 	}
 	// §13.10 ~/.podium/registry.yaml: load and overlay onto env-
 	// derived defaults. Env values keep precedence per applyYAML.

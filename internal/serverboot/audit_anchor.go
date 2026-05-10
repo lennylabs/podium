@@ -19,20 +19,32 @@ import (
 	"github.com/lennylabs/podium/pkg/sign"
 )
 
+// openAuditSink returns a file-backed audit sink at the configured
+// path (defaults to ~/.podium/audit.log). Returns nil + a logged
+// warning when the path can't be resolved; callers treat nil as
+// "no audit sink available" and continue without persisting.
+func openAuditSink(cfg *Config) *audit.FileSink {
+	logPath, err := resolveAuditPath(cfg.auditLogPath)
+	if err != nil {
+		log.Printf("warning: audit sink disabled (path): %v", err)
+		return nil
+	}
+	sink, err := audit.NewFileSink(logPath)
+	if err != nil {
+		log.Printf("warning: audit sink disabled (open): %v", err)
+		return nil
+	}
+	return sink
+}
+
 // startAnchorScheduler bootstraps the §8.6 audit-anchoring
 // scheduler. The signer is a §4.7.9 RegistryManagedKey backed by
 // an Ed25519 keypair persisted at cfg.auditSigningKeyPath
 // (defaults to ~/.podium/standalone/audit.key). The scheduler
 // runs in its own goroutine and never blocks startup.
-func startAnchorScheduler(cfg *Config) {
-	logPath, err := resolveAuditPath(cfg.auditLogPath)
-	if err != nil {
-		log.Printf("warning: audit anchor disabled (log path): %v", err)
-		return
-	}
-	sink, err := audit.NewFileSink(logPath)
-	if err != nil {
-		log.Printf("warning: audit anchor disabled (sink): %v", err)
+func startAnchorScheduler(cfg *Config, sink *audit.FileSink) {
+	if sink == nil {
+		log.Printf("warning: audit anchor disabled (no sink)")
 		return
 	}
 	signer, err := loadOrGenerateAuditSigner(cfg.auditSigningKeyPath)

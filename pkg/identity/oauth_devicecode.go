@@ -220,6 +220,83 @@ func (f DeviceCodeFlow) PollOnce(ctx context.Context, auth *DeviceAuth) (*Tokens
 	}
 }
 
+// Refresh exchanges a refresh_token for a fresh access_token via
+// RFC 6749 §6. The IdP may rotate the refresh token (some always
+// do, some never do); the returned Tokens.RefreshToken carries the
+// new value when present, otherwise the caller keeps the old one.
+//
+// Returns ErrAccessDenied when the IdP rejects the refresh
+// (revoked, expired) so callers know to drop the cached token and
+// drive the user through Initiate again.
+func (f DeviceCodeFlow) Refresh(ctx context.Context, refreshToken string) (*Tokens, error) {
+	if f.TokenURL == "" {
+		return nil, errors.New("device-code: TokenURL is required")
+	}
+	if refreshToken == "" {
+		return nil, errors.New("device-code: refresh_token is required")
+	}
+	form := url.Values{}
+	form.Set("grant_type", "refresh_token")
+	form.Set("refresh_token", refreshToken)
+	form.Set("client_id", f.ClientID)
+	if f.ClientSecret != "" {
+		form.Set("client_secret", f.ClientSecret)
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", f.TokenURL,
+		strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := f.client().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		var raw struct {
+			AccessToken  string `json:"access_token"`
+			RefreshToken string `json:"refresh_token"`
+			TokenType    string `json:"token_type"`
+			ExpiresIn    int    `json:"expires_in"`
+			IDToken      string `json:"id_token"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+			return nil, err
+		}
+		if raw.AccessToken == "" {
+			return nil, errors.New("device-code: refresh response missing access_token")
+		}
+		// Carry the prior refresh token through when the IdP did
+		// not rotate it.
+		newRefresh := raw.RefreshToken
+		if newRefresh == "" {
+			newRefresh = refreshToken
+		}
+		return &Tokens{
+			AccessToken:  raw.AccessToken,
+			RefreshToken: newRefresh,
+			TokenType:    raw.TokenType,
+			ExpiresIn:    time.Duration(raw.ExpiresIn) * time.Second,
+			IDToken:      raw.IDToken,
+		}, nil
+	}
+
+	var envelope errorEnvelope
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		return nil, fmt.Errorf("device-code refresh: HTTP %d", resp.StatusCode)
+	}
+	switch envelope.Error {
+	case "invalid_grant", "access_denied":
+		return nil, ErrAccessDenied
+	default:
+		return nil, fmt.Errorf("device-code refresh: %s — %s", envelope.Error, envelope.Description)
+	}
+}
+
 // Poll keeps requesting the token endpoint until the user completes
 // the flow, the device code expires, the user denies, or ctx is
 // canceled. Honors slow_down by adding 5s to the polling interval per
