@@ -82,6 +82,10 @@ func AllRules() []Rule {
 		ruleVersionSemver{},
 		ruleHookConsistency{},
 		ruleEffortHintAppliesToType{},
+		ruleBundledResourceSize{},
+		ruleManifestSize{},
+		ruleArtifactBodyForSkill{},
+		ruleProseReferenceResolution{},
 	}
 }
 
