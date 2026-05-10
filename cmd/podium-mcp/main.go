@@ -30,6 +30,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/lennylabs/podium/internal/buildinfo"
 	"github.com/lennylabs/podium/pkg/adapter"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/materialize"
@@ -251,7 +252,7 @@ func (s *mcpServer) handle(req rpcRequest) rpcResponse {
 				"prompts":            map[string]any{},
 				"sessionCorrelation": true,
 			},
-			"serverInfo": map[string]any{"name": "podium-mcp", "version": "0.0.0-dev"},
+			"serverInfo": map[string]any{"name": "podium-mcp", "version": buildinfo.Version},
 		}
 	case "tools/list":
 		resp.Result = map[string]any{

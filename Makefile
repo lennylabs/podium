@@ -9,7 +9,19 @@ SHELL := /bin/bash
 
 GO    ?= go
 
-.PHONY: help test test-live bench \
+# Build-time version metadata. Override on the command line:
+#   make build VERSION=v0.1.0
+# A release pipeline that pushes binaries should set all three.
+VERSION ?= $(shell git describe --tags --dirty --always 2>/dev/null || echo dev)
+COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+
+# -ldflags injects the values into internal/buildinfo at link time.
+LDFLAGS := -X 'github.com/lennylabs/podium/internal/buildinfo.Version=$(VERSION)' \
+           -X 'github.com/lennylabs/podium/internal/buildinfo.Commit=$(COMMIT)' \
+           -X 'github.com/lennylabs/podium/internal/buildinfo.Date=$(DATE)'
+
+.PHONY: help test test-live bench build \
         lint update-golden \
         speccov speccov-uncovered speccov-drift speccov-report \
         coverage coverage-budget coverage-per-package coverage-gate \
@@ -33,6 +45,7 @@ help:
 	@echo "  matrix-audit     Audit spec-table coverage (§6.7.1, §6.10, etc.)"
 	@echo "  matrix-list      List the documented spec matrices"
 	@echo "  matrix-scaffold  Print Go test stubs for missing matrix cells"
+	@echo "  build            Build podium, podium-server, podium-mcp into ./bin/ with version metadata"
 	@echo "  tools            Build the helper binaries to ./bin/"
 	@echo "  clean            Remove build artifacts"
 
@@ -106,6 +119,12 @@ lint:
 
 update-golden:
 	UPDATE_GOLDEN=1 $(GO) test $(GOFLAGS) -count=1 ./...
+
+build:
+	@mkdir -p bin
+	$(GO) build -ldflags "$(LDFLAGS)" -o bin/podium ./cmd/podium
+	$(GO) build -ldflags "$(LDFLAGS)" -o bin/podium-server ./cmd/podium-server
+	$(GO) build -ldflags "$(LDFLAGS)" -o bin/podium-mcp ./cmd/podium-mcp
 
 tools:
 	@mkdir -p bin

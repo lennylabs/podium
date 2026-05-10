@@ -21,6 +21,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/lennylabs/podium/internal/buildinfo"
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/sync"
@@ -73,7 +74,7 @@ func main() {
 	case "quota":
 		os.Exit(quotaCmd(os.Args[2:]))
 	case "version", "-v", "--version":
-		fmt.Println("podium 0.0.0-dev")
+		fmt.Println("podium " + buildinfo.String())
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 	default:
