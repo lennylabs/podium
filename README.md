@@ -197,6 +197,45 @@ directory.
 - **[Roadmap](ROADMAP.md)**, **[Contributing](CONTRIBUTING.md)**,
   **[Governance](GOVERNANCE.md)**, **[Security](SECURITY.md)**.
 
+## Build and test
+
+Building from source requires:
+
+- Go 1.26 or later for the registry, CLI, and MCP server.
+- Python 3.10 or later for the `podium-py` SDK.
+- Node.js 20 or later for the `@podium/sdk` TypeScript SDK.
+
+Clone the repository, then:
+
+```bash
+go build ./...          # Build every Go binary in the module.
+make test               # Run the full Go test suite.
+make test-live          # Run Tier 2 tests against real Postgres, S3,
+                        # Sigstore, and embedding providers
+                        # (configured via PODIUM_LIVE_* env vars).
+make coverage           # Run with -coverprofile and print a summary.
+make speccov            # Print spec-section coverage from test annotations.
+make matrix-audit       # Audit spec-table coverage (§6.7.1, §6.10, etc.).
+make help               # List every make target.
+```
+
+The SDK suites run independently:
+
+```bash
+cd sdks/podium-py
+pip install -e .
+pytest
+
+cd sdks/podium-ts
+npm install
+npm test
+```
+
+The complete Go suite runs in about 10 seconds on a recent laptop.
+Detailed development setup, including the spec-citation conventions
+that test annotations follow, is in
+[`docs/about/contributing.md`](https://lennylabs.github.io/podium/about/contributing).
+
 ## Contributing
 
 The specification is the source of truth and the most useful place to
