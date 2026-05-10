@@ -54,6 +54,9 @@ type ManifestRecord struct {
 	Sensitivity string
 	Layer       string
 	Deprecated  bool
+	// ReplacedBy is the §4.7.4 upgrade target the manifest names
+	// when deprecated. Empty when not set.
+	ReplacedBy  string
 	IngestedAt  time.Time
 	Frontmatter []byte
 	Body        []byte

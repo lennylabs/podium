@@ -52,6 +52,17 @@ class _StubHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_POST(self):  # noqa: N802 - signature inherited
+        self.server.last_path = self.path  # type: ignore[attr-defined]
+        length = int(self.headers.get("Content-Length", "0"))
+        self.server.last_body = self.rfile.read(length)  # type: ignore[attr-defined]
+        body = json.dumps(self.server.next_response).encode()  # type: ignore[attr-defined]
+        self.send_response(self.server.next_status)  # type: ignore[attr-defined]
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
 
 @pytest.fixture()
 def stub_server():
@@ -177,3 +188,32 @@ def test_preview_scope_passes_constraints(stub_server):
     assert "scope=finance" in stub_server.last_path
     assert "tags=q4" in stub_server.last_path
     assert out["matched"] == 12
+
+
+# Spec: §7.6.2 — load_artifacts POSTs to /v1/artifacts:batchLoad
+# and returns per-item envelopes; partial failures do not raise.
+# Phase: 4
+def test_load_artifacts_returns_envelopes(stub_server):
+    stub_server.next_response = [
+        {"id": "a", "status": "ok", "version": "1.0.0", "content_hash": "sha256:a"},
+        {"id": "b", "status": "error", "error": {"code": "registry.not_found", "message": "missing"}},
+    ]
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    out = client.load_artifacts(["a", "b"])
+
+    assert "/v1/artifacts:batchLoad" in stub_server.last_path
+    body = json.loads(stub_server.last_body)
+    assert body["ids"] == ["a", "b"]
+    assert len(out) == 2
+    assert out[0]["status"] == "ok"
+    assert out[1]["status"] == "error"
+
+
+# Spec: §7.6.2 — empty ids list short-circuits to an empty
+# response without a network call.
+# Phase: 4
+def test_load_artifacts_empty_short_circuits(stub_server):
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    out = client.load_artifacts([])
+    assert out == []
+    assert stub_server.last_path == ""

@@ -475,6 +475,9 @@ type SearchArtifactsOptions struct {
 	Scope string
 	Tags  []string
 	TopK  int
+	// IncludeDeprecated opts deprecated artifacts back into the
+	// result set. Default search excludes them per §4.7.4.
+	IncludeDeprecated bool
 }
 
 // SearchResult is the common envelope for both search functions.
@@ -524,6 +527,12 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 			continue
 		}
 		if !tagsMatch(m.Tags, opts.Tags) {
+			continue
+		}
+		// §4.7.4 lifecycle: deprecated artifacts are excluded from
+		// default search results. Callers can opt in via
+		// IncludeDeprecated when surfacing audit / migration views.
+		if m.Deprecated && !opts.IncludeDeprecated {
 			continue
 		}
 		filtered = append(filtered, m)
@@ -701,6 +710,17 @@ type LoadArtifactResult struct {
 	Layer        string
 	Resources    map[string][]byte
 	Sensitivity  string
+	// Deprecated reports whether the resolved manifest was marked
+	// deprecated at ingest. Per §4.7.4 the registry continues to
+	// serve deprecated artifacts but surfaces a warning.
+	Deprecated bool
+	// ReplacedBy carries the §4.7.4 upgrade target when the
+	// deprecated artifact's manifest names one. Empty when not set.
+	ReplacedBy string
+	// DeprecationWarning is the human-readable warning the registry
+	// emits when serving a deprecated artifact, per §4.7.4. Empty
+	// when the artifact is live.
+	DeprecationWarning string
 	// Signature is the §4.7.9 envelope produced at ingest by the
 	// configured SignatureProvider. Empty when ingest had no
 	// signer wired. Consumers verify via sign.EnforceVerification
@@ -824,14 +844,14 @@ func (r *Registry) recordSessionPin(session, id, ver string) {
 // per §4.6) and field-merged. Cycle detection prevents infinite loops.
 func (r *Registry) assembleResult(ctx context.Context, rec store.ManifestRecord) (*LoadArtifactResult, error) {
 	if rec.ExtendsPin == "" {
-		return resultFromRecord(rec), nil
+		return withDeprecationWarning(resultFromRecord(rec)), nil
 	}
 	chain, err := r.resolveExtendsChain(ctx, rec, map[string]bool{})
 	if err != nil {
 		return nil, err
 	}
 	merged := mergeChain(chain)
-	return resultFromRecord(merged), nil
+	return withDeprecationWarning(resultFromRecord(merged)), nil
 }
 
 // resolveExtendsChain returns the chain of records starting at rec and
@@ -968,8 +988,25 @@ func resultFromRecord(rec store.ManifestRecord) *LoadArtifactResult {
 		Frontmatter:  rec.Frontmatter,
 		Layer:        rec.Layer,
 		Sensitivity:  rec.Sensitivity,
+		Deprecated:   rec.Deprecated,
+		ReplacedBy:   rec.ReplacedBy,
 		Signature:    rec.Signature,
 	}
+}
+
+// withDeprecationWarning fills in DeprecationWarning when the
+// artifact is deprecated. Lifted out of resultFromRecord so
+// callers can wrap their own constructed results.
+func withDeprecationWarning(r *LoadArtifactResult) *LoadArtifactResult {
+	if r == nil || !r.Deprecated {
+		return r
+	}
+	if r.ReplacedBy != "" {
+		r.DeprecationWarning = "artifact is deprecated; replaced_by " + r.ReplacedBy
+	} else {
+		r.DeprecationWarning = "artifact is deprecated"
+	}
+	return r
 }
 
 // ----- Visibility ---------------------------------------------------------

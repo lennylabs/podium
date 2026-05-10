@@ -93,4 +93,41 @@ guarded("Client", () => {
     const c = Client.fromEnv();
     expect(c.registry).toBe("http://localhost:8080");
   });
+
+  // Spec: §7.6.2 — loadArtifacts POSTs to /v1/artifacts:batchLoad
+  // and surfaces per-item envelopes; partial failures don't throw.
+  it("loadArtifacts returns per-item envelopes", async () => {
+    let body = "";
+    const fetcher: typeof fetch = async (_input, init) => {
+      body = String(init?.body ?? "");
+      return new Response(
+        JSON.stringify([
+          { id: "a", status: "ok", version: "1.0.0", content_hash: "sha256:a" },
+          { id: "b", status: "error", error: { code: "registry.not_found", message: "missing" } },
+        ]),
+        { status: 200 },
+      );
+    };
+    const c = new Client({ registry: "http://reg", fetcher });
+    const out = await c.loadArtifacts(["a", "b"]);
+    expect(JSON.parse(body).ids).toEqual(["a", "b"]);
+    expect(out.length).toBe(2);
+    expect(out[0].status).toBe("ok");
+    expect(out[1].status).toBe("error");
+    expect(out[1].error?.code).toBe("registry.not_found");
+  });
+
+  // Spec: §7.6.2 — empty ids list short-circuits without making
+  // an HTTP call.
+  it("loadArtifacts short-circuits on empty input", async () => {
+    let called = false;
+    const fetcher: typeof fetch = async () => {
+      called = true;
+      return new Response("[]", { status: 200 });
+    };
+    const c = new Client({ registry: "http://reg", fetcher });
+    const out = await c.loadArtifacts([]);
+    expect(out).toEqual([]);
+    expect(called).toBe(false);
+  });
 });

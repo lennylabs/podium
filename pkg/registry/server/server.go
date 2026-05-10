@@ -315,6 +315,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/search_domains", s.handleSearchDomains)
 	mux.HandleFunc("/v1/search_artifacts", s.handleSearchArtifacts)
 	mux.HandleFunc("/v1/load_artifact", s.handleLoadArtifact)
+	mux.HandleFunc("/v1/artifacts:batchLoad", s.handleBatchLoad)
 	mux.HandleFunc("/v1/dependents", s.handleDependents)
 	mux.HandleFunc("/v1/scope/preview", s.handleScopePreview)
 	mux.HandleFunc("/v1/domain/analyze", s.handleDomainAnalyze)
@@ -333,7 +334,25 @@ func (s *Server) Handler() http.Handler {
 	if s.objectStore != nil {
 		mux.HandleFunc("/objects/", s.handleObjectsRoute)
 	}
-	return mux
+	return s.withReadOnlyHeaders(mux)
+}
+
+// withReadOnlyHeaders wraps the route mux so every response
+// carries the §13.2.1 read-only signal headers when the mode
+// tracker is flipped. Applied uniformly: callers don't need to
+// remember to set them on each handler.
+func (s *Server) withReadOnlyHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.mode != nil && s.mode.Get() == ModeReadOnly {
+			w.Header().Set("X-Podium-Read-Only", "true")
+			// Replication lag is 0 by default (standalone has no
+			// replica). Standard deployments wire a probe that
+			// updates this; the field stays a numeric string so
+			// clients can parse uniformly.
+			w.Header().Set("X-Podium-Read-Only-Lag-Seconds", "0")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // ----- Response shapes ------------------------------------------------------
@@ -395,6 +414,13 @@ type LoadArtifactResponse struct {
 	Resources      map[string]string            `json:"resources,omitempty"`
 	ResourcesB64   bool                         `json:"resources_base64,omitempty"`
 	LargeResources map[string]LargeResourceLink `json:"large_resources,omitempty"`
+	// Deprecated, ReplacedBy, and DeprecationWarning surface the
+	// §4.7.4 lifecycle signal so consumers see the warning
+	// alongside the served bytes and can route callers to the
+	// upgrade target when set.
+	Deprecated         bool   `json:"deprecated,omitempty"`
+	ReplacedBy         string `json:"replaced_by,omitempty"`
+	DeprecationWarning string `json:"deprecation_warning,omitempty"`
 	// Signature is the §4.7.9 envelope produced at ingest by the
 	// configured SignatureProvider. Empty when ingest had no
 	// signer wired. Consumers verify against
@@ -650,15 +676,18 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := LoadArtifactResponse{
-		ID:           res.ID,
-		Type:         res.Type,
-		Version:      res.Version,
-		ContentHash:  res.ContentHash,
-		ManifestBody: res.ManifestBody,
-		Frontmatter:  string(res.Frontmatter),
-		Layer:        res.Layer,
-		Sensitivity:  res.Sensitivity,
-		Signature:    res.Signature,
+		ID:                 res.ID,
+		Type:               res.Type,
+		Version:            res.Version,
+		ContentHash:        res.ContentHash,
+		ManifestBody:       res.ManifestBody,
+		Frontmatter:        string(res.Frontmatter),
+		Layer:              res.Layer,
+		Sensitivity:        res.Sensitivity,
+		Deprecated:         res.Deprecated,
+		ReplacedBy:         res.ReplacedBy,
+		DeprecationWarning: res.DeprecationWarning,
+		Signature:          res.Signature,
 	}
 	if cached, ok := s.resources[res.ID]; ok && len(cached) > 0 {
 		resp.Resources = make(map[string]string, len(cached))

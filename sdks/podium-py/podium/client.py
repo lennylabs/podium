@@ -165,6 +165,49 @@ class Client:
             resources=body.get("resources", {}) or {},
         )
 
+    def load_artifacts(
+        self,
+        ids: list[str],
+        *,
+        session_id: str = "",
+        harness: str = "",
+        version_pins: dict[str, str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Bulk-fetch artifacts via §7.6.2 POST /v1/artifacts:batchLoad.
+
+        The §7.6.2 hard cap is 50 IDs per request; the SDK splits
+        larger sets transparently. Each returned envelope carries
+        ``status="ok"`` with the manifest body, or ``status="error"``
+        with a §6.10 envelope. Partial failure does not raise.
+        """
+        if not ids:
+            return []
+        out: list[dict[str, Any]] = []
+        chunk_size = 50
+        for chunk_start in range(0, len(ids), chunk_size):
+            chunk = ids[chunk_start : chunk_start + chunk_size]
+            body: dict[str, Any] = {"ids": chunk}
+            if session_id:
+                body["session_id"] = session_id
+            if harness:
+                body["harness"] = harness
+            if version_pins:
+                body["version_pins"] = {k: v for k, v in version_pins.items() if k in chunk}
+            data = json.dumps(body).encode()
+            req = urllib.request.Request(
+                self.registry + "/v1/artifacts:batchLoad",
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req) as resp:
+                    raw = resp.read()
+            except urllib.error.HTTPError as exc:
+                self._raise_from_http_error(exc)
+            out.extend(json.loads(raw))
+        return out
+
     def dependents_of(self, artifact_id: str) -> list[ArtifactDescriptor]:
         """Return artifacts that depend on artifact_id (spec §4.7.6)."""
         body = self._get("/v1/dependents", {"id": artifact_id})

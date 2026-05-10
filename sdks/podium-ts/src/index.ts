@@ -25,6 +25,30 @@ export interface LoadedArtifact {
   manifest_body: string;
   frontmatter: string;
   resources?: Record<string, string>;
+  deprecated?: boolean;
+  replaced_by?: string;
+  deprecation_warning?: string;
+}
+
+// Spec §7.6.2 — per-item envelope for bulk load. Status is "ok"
+// when the artifact resolved successfully and "error" otherwise;
+// the error envelope carries the §6.10 code.
+export interface BatchLoadEnvelope {
+  id: string;
+  status: "ok" | "error";
+  type?: string;
+  version?: string;
+  content_hash?: string;
+  manifest_body?: string;
+  frontmatter?: string;
+  deprecated?: boolean;
+  replaced_by?: string;
+  deprecation_warning?: string;
+  error?: {
+    code: string;
+    message: string;
+    retryable?: boolean;
+  };
 }
 
 export interface DependencyEdge {
@@ -128,6 +152,58 @@ export class Client {
     const params: Record<string, unknown> = { id };
     if (version) params.version = version;
     return this.get("/v1/load_artifact", params) as Promise<LoadedArtifact>;
+  }
+
+  // Spec §7.6.2 — bulk fetch via POST /v1/artifacts:batchLoad. The
+  // §7.6.2 hard cap is 50 IDs per request; this method splits
+  // larger sets transparently. Each returned envelope carries
+  // status="ok" with manifest bytes, or status="error" with a
+  // §6.10 envelope. Partial failure does not throw.
+  async loadArtifacts(
+    ids: string[],
+    opts: {
+      sessionID?: string;
+      harness?: string;
+      versionPins?: Record<string, string>;
+    } = {},
+  ): Promise<BatchLoadEnvelope[]> {
+    if (ids.length === 0) return [];
+    const out: BatchLoadEnvelope[] = [];
+    const cap = 50;
+    for (let i = 0; i < ids.length; i += cap) {
+      const chunk = ids.slice(i, i + cap);
+      const body: Record<string, unknown> = { ids: chunk };
+      if (opts.sessionID) body.session_id = opts.sessionID;
+      if (opts.harness) body.harness = opts.harness;
+      if (opts.versionPins) {
+        const subset: Record<string, string> = {};
+        for (const id of chunk) {
+          if (opts.versionPins[id]) subset[id] = opts.versionPins[id];
+        }
+        if (Object.keys(subset).length > 0) body.version_pins = subset;
+      }
+      const resp = await this.fetcher(this.registry + "/v1/artifacts:batchLoad", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        let envelope: Record<string, unknown> = {};
+        try {
+          envelope = (await resp.json()) as Record<string, unknown>;
+        } catch {
+          // ignore parse errors
+        }
+        throw new RegistryError(
+          (envelope.code as string) ?? "registry.unknown",
+          (envelope.message as string) ?? `HTTP ${resp.status}`,
+          Boolean(envelope.retryable),
+        );
+      }
+      const part = (await resp.json()) as BatchLoadEnvelope[];
+      out.push(...part);
+    }
+    return out;
   }
 
   // Spec §7.6 — dependents_of returns reverse-dependency edges for

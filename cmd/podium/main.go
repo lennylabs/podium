@@ -592,19 +592,37 @@ func artifactShow(args []string) int {
 func initCmd(args []string) int {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	scopeGlobal := fs.Bool("global", false, "write ~/.podium/sync.yaml")
+	scopeLocal := fs.Bool("local", false, "write <ws>/.podium/sync.local.yaml (gitignored override)")
+	standalone := fs.Bool("standalone", false, "shortcut for --registry http://127.0.0.1:8080 (§13.10)")
 	registry := fs.String("registry", "", "registry URL or filesystem path")
 	harness := fs.String("harness", "", "default harness")
 	target := fs.String("target", "", "default target")
+	force := fs.Bool("force", false, "overwrite an existing sync.yaml")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	if *scopeGlobal && *scopeLocal {
+		fmt.Fprintln(os.Stderr, "error: --global and --local are mutually exclusive")
+		return 2
+	}
+	if *standalone {
+		if *registry != "" && *registry != "http://127.0.0.1:8080" {
+			fmt.Fprintln(os.Stderr, "error: --standalone conflicts with --registry")
+			return 2
+		}
+		*registry = "http://127.0.0.1:8080"
+	}
 	if *registry == "" {
-		fmt.Fprintln(os.Stderr, "error: --registry is required")
+		fmt.Fprintln(os.Stderr, "error: --registry, --standalone, or interactive wizard required")
 		return 2
 	}
 
+	// §7.7 scope resolution: --global → ~/.podium; --local →
+	// <ws>/.podium/sync.local.yaml (gitignored); default →
+	// <ws>/.podium/sync.yaml (committed).
 	dir := ".podium"
+	filename := "sync.yaml"
 	if *scopeGlobal {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -612,10 +630,19 @@ func initCmd(args []string) int {
 			return 1
 		}
 		dir = filepath.Join(home, ".podium")
+	} else if *scopeLocal {
+		filename = "sync.local.yaml"
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
+	}
+	dest := filepath.Join(dir, filename)
+	if !*force {
+		if _, err := os.Stat(dest); err == nil {
+			fmt.Fprintf(os.Stderr, "error: %s already exists; pass --force to overwrite\n", dest)
+			return 2
+		}
 	}
 	yaml := "defaults:\n  registry: " + *registry + "\n"
 	if *harness != "" {
@@ -624,13 +651,40 @@ func initCmd(args []string) int {
 	if *target != "" {
 		yaml += "  target: " + *target + "\n"
 	}
-	dest := filepath.Join(dir, "sync.yaml")
 	if err := os.WriteFile(dest, []byte(yaml), 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
+	// §7.7 workspace mode adds the gitignored override file +
+	// overlay dir to .gitignore so they don't accidentally land
+	// in commits.
+	if !*scopeGlobal && !*scopeLocal {
+		_ = ensureGitignoreEntries(".gitignore", []string{
+			".podium/sync.local.yaml",
+			".podium/overlay/",
+		})
+	}
 	fmt.Printf("Wrote %s\n", dest)
 	return 0
+}
+
+// ensureGitignoreEntries appends every missing entry to path,
+// creating the file when absent. Existing entries are preserved
+// verbatim. Best-effort: callers ignore the error to avoid
+// failing init when the workspace is read-only.
+func ensureGitignoreEntries(path string, entries []string) error {
+	existing, _ := os.ReadFile(path)
+	out := string(existing)
+	for _, e := range entries {
+		if strings.Contains(out, e) {
+			continue
+		}
+		if len(out) > 0 && !strings.HasSuffix(out, "\n") {
+			out += "\n"
+		}
+		out += e + "\n"
+	}
+	return os.WriteFile(path, []byte(out), 0o644)
 }
 
 func mustGetJSON(base, path string, params map[string]string) []byte {
