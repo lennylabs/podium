@@ -71,9 +71,7 @@ type Rule interface {
 }
 
 // AllRules returns the set of lint rules registered for the active
-// build. Phase 1 ships the rules below; later phases add rules that
-// require infrastructure built in those phases (e.g., DOMAIN.md
-// composition rules in Phase 8, dependency-graph rules in Phase 15).
+// build.
 func AllRules() []Rule {
 	return []Rule{
 		ruleRequiredFields{},
@@ -228,12 +226,8 @@ func (r ruleHookConsistency) Check(_ *filesystem.Registry, records []filesystem.
 			continue
 		}
 		event := rec.Artifact.HookEvent
-		// Generic + subtype combos only matter if multiple hooks were
-		// declared on the same artifact. Phase 1's lint inspects a
-		// single hook_event field; the generic-vs-subtype pairing
-		// becomes meaningful once a hook artifact ships with both
-		// declarations (Phase 13 multi-event support). Phase 1 emits
-		// info-level guidance when an authored generic event would
+		// Lint inspects a single hook_event field and emits info-
+		// level guidance when an authored generic event would
 		// shadow a more specific subtype.
 		if subs, ok := genericToSubtypes[event]; ok {
 			out = append(out, Diagnostic{

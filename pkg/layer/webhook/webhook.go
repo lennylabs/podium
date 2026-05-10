@@ -27,8 +27,8 @@ var (
 )
 
 // Provider is the interface every Git provider's webhook verifier
-// satisfies. Phase 6 ships GitHub; GitLab and Bitbucket land
-// alongside.
+// satisfies. Built-ins cover GitHub; GitLab and Bitbucket plug in
+// through the same SPI.
 type Provider interface {
 	// ID returns the provider identifier (e.g., "github").
 	ID() string

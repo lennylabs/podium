@@ -1,7 +1,7 @@
-// Package sign exposes the SignatureProvider SPI (spec §9.1) plus the
-// medium-and-above verification policy enforced at materialization time
-// (§4.7.9). Phase 1 ships the SPI plus a noop provider; Sigstore-keyless
-// and registry-managed key implementations land in Phase 5+.
+// Package sign exposes the SignatureProvider SPI (spec §9.1) plus
+// the medium-and-above verification policy enforced at
+// materialization time (§4.7.9). Built-ins ship a noop provider,
+// Sigstore-keyless, and registry-managed-key implementations.
 package sign
 
 import (

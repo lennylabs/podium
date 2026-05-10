@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 )
 
@@ -225,7 +224,3 @@ func overlayTagsMatch(have []string, required []string) bool {
 	return true
 }
 
-// _ keeps the manifest import live when overlayTokens is the
-// only consumer, avoiding "imported and not used" if the field
-// access path simplifies.
-var _ = manifest.TypeSkill

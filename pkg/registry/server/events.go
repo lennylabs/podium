@@ -15,10 +15,9 @@ import (
 // channels; slow subscribers drop events rather than blocking the
 // publisher (drop-and-record so callers can detect lag).
 //
-// Phase 7+ replaces this with a durable broker (Kafka, NATS) when
-// the registry becomes multi-replica. For single-replica
-// deployments the in-process bus is sufficient and stays
-// dependency-free.
+// Multi-replica deployments swap this for a durable broker
+// (Kafka, NATS). For single-replica deployments the in-process
+// bus is sufficient and stays dependency-free.
 type eventBus struct {
 	mu     sync.RWMutex
 	nextID uint64

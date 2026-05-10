@@ -99,9 +99,7 @@ func uniqueStrings(in []string) []string {
 	return out
 }
 
-// Render is the simplified Phase 8 placeholder for §4.5.5 discovery
-// rendering. Final implementation lands in Phase 8 itself; the surface
-// is here so cross-package code can target it.
+// Render captures the §4.5.5 discovery-rendering knobs.
 type Render struct {
 	MaxDepth             int
 	FoldBelowArtifacts   int

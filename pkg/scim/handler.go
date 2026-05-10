@@ -1,7 +1,6 @@
 package scim
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -376,6 +375,3 @@ func scimList[T any](items []T) map[string]any {
 	}
 }
 
-// quiet unused-import linter when the build path doesn't reach
-// context (for example when only the parser is exercised).
-var _ = context.TODO

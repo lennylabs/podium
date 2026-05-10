@@ -1,7 +1,6 @@
-// Package registryharness wraps a filesystem-source registry behind a
-// httptest.Server so integration tests exercise the real HTTP API
-// without paying for a TCP socket. Stage 3 ships the filesystem-backed
-// flavor; Postgres / S3 backends land alongside Phase 5.
+// Package registryharness wraps a filesystem-source registry
+// behind a httptest.Server so integration tests exercise the real
+// HTTP API without paying for a TCP socket.
 package registryharness
 
 import (

@@ -1,10 +1,9 @@
-// Package identity exposes the IdentityProvider SPI per spec §6.3, plus
-// the two built-in providers oauth-device-code and injected-session-token.
-//
-// Phase 11 ships the SPI plus an injected-session-token implementation
-// that verifies signed JWTs against a registered runtime key. The
-// device-code flow lands alongside it; the OS keychain integration ships
-// behind a build tag so unit tests can run hermetically.
+// Package identity exposes the IdentityProvider SPI per spec
+// §6.3, plus the two built-in providers oauth-device-code and
+// injected-session-token. injected-session-token verifies signed
+// JWTs against a registered runtime key; oauth-device-code runs
+// the RFC 8628 flow. OS keychain integration ships behind a build
+// tag so unit tests run hermetically.
 package identity
 
 import (
@@ -43,9 +42,9 @@ type Provider interface {
 	Resolve(ctx context.Context) (Identity, error)
 }
 
-// InjectedSessionToken is a Provider that reads a runtime-signed JWT
-// from an env var or file path (§6.3.2). Phase 11 implementation parses
-// the JWT and validates against a registered runtime key.
+// InjectedSessionToken is a Provider that reads a runtime-signed
+// JWT from an env var or file path (§6.3.2). Parses the JWT and
+// validates it against a registered runtime key.
 type InjectedSessionToken struct {
 	// TokenSource returns the current token. Tests substitute a function
 	// that returns a fixture; production wires an env / file watcher.
@@ -70,9 +69,10 @@ func (p InjectedSessionToken) Resolve(_ context.Context) (Identity, error) {
 	return p.Verify(tok)
 }
 
-// OAuthDeviceCode is a Provider stub for the device-code flow. The
-// device-code endpoint integration lands in Phase 11; this stub returns
-// ErrDeviceCodeRequired so callers can wire the surface today.
+// OAuthDeviceCode is a Provider stub for the device-code flow.
+// The runnable implementation lives in oauth_devicecode.go;
+// this stub returns ErrDeviceCodeRequired so embedders can wire
+// the surface without the full flow.
 type OAuthDeviceCode struct {
 	// VerificationURL is what callers display to the user.
 	VerificationURL string

@@ -1,6 +1,7 @@
 package testharness
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -50,7 +51,7 @@ func TestWriteTree_CreatesIntermediateDirs(t *testing.T) {
 }
 
 func readFile(path string) (string, error) {
-	data, err := readFileImpl(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}

@@ -162,7 +162,7 @@ func WithWebhooks(w *webhook.Worker) Option {
 // WithTenant sets the tenant identifier used for outbound webhook
 // receiver lookup. Single-tenant deployments leave this at the
 // default ("default"); multi-tenant deployments resolve it per
-// request (Phase 5+).
+// request.
 func WithTenant(t string) Option {
 	return func(s *Server) { s.tenant = t }
 }

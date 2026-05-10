@@ -1,8 +1,5 @@
 // Package layer implements the LayerComposer (spec §4.6) plus the
 // visibility evaluator that runs before composition.
-//
-// Phase 7 wires the composer into the registry HTTP handlers; Phase 8
-// adds DOMAIN.md-driven domain composition on top.
 package layer
 
 import (
@@ -56,9 +53,9 @@ func Visible(layer Layer, id Identity) bool {
 
 // VisibleWith is the §4.6 visibility evaluator with the §6.3.1 SCIM
 // integration seam: a non-nil resolver expands `groups:` filters
-// against an external group-membership store before falling back to
-// the caller's JWT groups. Used by the registry's HTTP handlers to
-// honor SCIM-pushed memberships per Phase 7's gap callout.
+// against an external group-membership store before falling back
+// to the caller's JWT groups. Used by the registry's HTTP
+// handlers to honor SCIM-pushed memberships.
 func VisibleWith(layer Layer, id Identity, resolveGroup GroupResolver) bool {
 	if id.IsPublic {
 		return true
@@ -118,8 +115,8 @@ func EffectiveLayersWith(layers []Layer, id Identity, resolveGroup GroupResolver
 //     the caller's effective view (this function) treats them as
 //     highest-wins.
 //   - With `extends:`, fields merge per the field-semantics table.
-//
-// Phase 7 ships highest-wins; Phase 8 layers on extends: resolution.
+// Highest-precedence layer wins on collision; extends: resolution
+// runs on top per §4.6.
 func Compose(layers []Layer, candidates map[string][]Candidate) []Composed {
 	if len(layers) == 0 || len(candidates) == 0 {
 		return nil

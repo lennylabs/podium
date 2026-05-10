@@ -1,18 +1,9 @@
-// Command podium is the unified Podium CLI. Stage 2 ships the sync
-// subcommand against a filesystem-source registry (spec §13.11). Other
-// subcommands (init, login, layer, lint, search, domain, artifact, vuln,
-// admin, status, profile) land in subsequent phases.
-//
-// Usage:
-//
-//	podium sync [flags]
-//
-// Flags supported in Stage 2:
-//
-//	--registry <path>   Filesystem registry path (required for filesystem source).
-//	--target   <path>   Destination directory (default: cwd).
-//	--harness  <name>   Adapter name (default: none).
-//	--dry-run           Resolve and report; write nothing.
+// Command podium is the unified Podium CLI. The `sync` subcommand
+// materializes the caller's effective view through a HarnessAdapter
+// (spec §13.11); `init`, `login`, `layer`, `lint`, `search`,
+// `domain`, `artifact`, `admin`, `status`, and `profile` cover the
+// rest of the read + author surface. Run `podium help` for the
+// full list.
 package main
 
 import (
@@ -750,8 +741,7 @@ func printSearchHuman(body []byte) {
 	}
 }
 
-// printJSON emits a stable JSON envelope. Stage 2 keeps this tiny and
-// dependency-free; the schema can grow as more fields land.
+// printJSON emits a stable JSON envelope.
 func printJSON(res *sync.Result) {
 	fmt.Fprintf(os.Stdout, "{\n  \"adapter\": %q,\n  \"target\": %q,\n  \"artifacts\": [", res.Adapter, res.Target)
 	for i, a := range res.Artifacts {

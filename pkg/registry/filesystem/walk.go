@@ -33,11 +33,11 @@ func (r *ArtifactRecord) CanonicalID() string { return r.ID }
 // stable order: layer order first, alphabetical canonical-ID within each
 // layer.
 //
-// Per §4.6, when two layers contribute the same canonical ID without
-// extends:, ingest is rejected. Phase 0's WalkOptions allow callers to
-// either return an error on collision (the spec default) or pick the
-// highest-precedence wins behavior (used by sync's effective-view
-// composition).
+// Per §4.6, when two layers contribute the same canonical ID
+// without extends:, ingest is rejected. WalkOptions let callers
+// either return an error on collision (the spec default) or pick
+// the highest-precedence-wins behavior (used by sync's
+// effective-view composition).
 func (r *Registry) Walk(opts WalkOptions) ([]ArtifactRecord, error) {
 	collisionError := opts.CollisionPolicy == CollisionPolicyDefault ||
 		opts.CollisionPolicy == CollisionPolicyError

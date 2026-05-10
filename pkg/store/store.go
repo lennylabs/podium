@@ -1,8 +1,8 @@
-// Package store defines RegistryStore SPI (spec §9.1) plus the shared
-// types every backend implementation works with: tenant identity,
-// manifest metadata records, dependency edges, layer config rows, and
-// admin grants. Phase 5 introduces the SPI and a SQLite reference
-// implementation; the Postgres backend lands alongside it.
+// Package store defines RegistryStore SPI (spec §9.1) plus the
+// shared types every backend implementation works with: tenant
+// identity, manifest metadata records, dependency edges, layer
+// config rows, and admin grants. Built-ins cover Memory, SQLite,
+// and Postgres backends.
 package store
 
 import (

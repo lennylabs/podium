@@ -15,9 +15,9 @@
 //     AWS Signature V4 presigned URLs that expire after the
 //     configured TTL.
 //
-// The Provider SPI is identical for both. Phase 2 ships the SPI plus
-// these two implementations; future SPIs (Azure Blob, GCS-native
-// signed URLs) plug in through the same interface.
+// The Provider SPI is identical for both. Future SPIs (Azure
+// Blob, GCS-native signed URLs) plug in through the same
+// interface.
 package objectstore
 
 import (

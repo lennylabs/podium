@@ -6,17 +6,15 @@ import (
 	"strings"
 )
 
-// Codex is the adapter for OpenAI Codex (§6.7). Stage 3 places skills
-// alongside agents under a Codex-native package layout. The full
-// frontmatter mapping plus the AGENTS.md injection for type: rule lands
-// in Phase 13 per the §6.7.1 capability matrix.
+// Codex is the adapter for OpenAI Codex (§6.7). Places skills
+// alongside agents under a Codex-native package layout per the
+// §6.7.1 capability matrix.
 type Codex struct{}
 
 // ID returns "codex".
 func (Codex) ID() string { return "codex" }
 
-// Adapt produces a Codex-flavored layout. Stage 3 ships placement only;
-// frontmatter rewriting and AGENTS.md generation come in Phase 13.
+// Adapt produces a Codex-flavored layout.
 func (c Codex) Adapt(src Source) ([]File, error) {
 	ty := frontmatterType(src.ArtifactBytes)
 	out := []File{}

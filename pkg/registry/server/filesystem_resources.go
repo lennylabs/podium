@@ -36,9 +36,9 @@ func (d dirFS) Stat(name string) (fs.FileInfo, error) {
 // filesystemResourceFunc returns a ResourceFunc that reads bundled
 // resources from the filesystem registry that produced this server.
 //
-// The artifactID maps to a directory under the artifact's originating
-// layer. Stage 6 keeps it simple: walk the layers in reverse precedence
-// order and return the first matching path.
+// The artifactID maps to a directory under the artifact's
+// originating layer. Implementation walks the layers in reverse
+// precedence order and returns the first matching path.
 func filesystemResourceFunc(reg *filesystem.Registry) ResourceFunc {
 	return func(_ context.Context, artifactID, resourcePath string) ([]byte, bool) {
 		for i := len(reg.Layers) - 1; i >= 0; i-- {

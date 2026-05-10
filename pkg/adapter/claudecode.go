@@ -17,9 +17,7 @@ import (
 //   - .claude/rules/<name>.md           for type: rule
 //   - .claude/podium/<artifact-id>/...  for non-skill bundled resources
 //
-// Stage 3 ships the placement logic. Frontmatter mapping (canonical fields
-// → Claude Code equivalents) lands in Phase 13 alongside the capability
-// matrix per §6.7.1.
+// Frontmatter mapping follows the §6.7.1 capability matrix.
 type ClaudeCode struct{}
 
 // ID returns "claude-code".

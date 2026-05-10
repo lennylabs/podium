@@ -1,10 +1,7 @@
-// Package filesystem implements the filesystem-source registry described in
-// spec §13.11. A directory becomes a registry; subdirectories optionally
-// become layers depending on the .registry-config dispatch (§13.11.1,
-// §13.10 --layer-path modes).
-//
-// Stage 2 ships the package surface and a dispatch parser; the layer
-// composer and ingest pipeline land alongside their respective phase tests.
+// Package filesystem implements the filesystem-source registry
+// described in spec §13.11. A directory becomes a registry;
+// subdirectories optionally become layers depending on the
+// .registry-config dispatch (§13.11.1, §13.10 --layer-path modes).
 package filesystem
 
 import (
@@ -108,8 +105,6 @@ var manifestFileNames = []string{
 //     alphabetical otherwise. If a manifest file appears at the top level,
 //     return ErrLayerPathAmbiguous.
 //
-// Stub: the implementation lands in Phase 0. The function compiles and
-// returns a not-implemented error so the test suite expresses behavior.
 func Open(path string) (*Registry, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
