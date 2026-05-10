@@ -61,6 +61,38 @@ func ConfigPath(workspace string) string {
 	return filepath.Join(workspace, ".podium", "sync.yaml")
 }
 
+// ResolveRegistryPath resolves a sync.yaml `defaults.registry`
+// value per §13.11.2: filesystem URLs return as-is, absolute
+// paths return as-is, and relative paths resolve against the
+// workspace. Empty input returns "".
+func ResolveRegistryPath(workspace, registry string) string {
+	if registry == "" {
+		return ""
+	}
+	// HTTP(S) URLs and file:// URIs pass through unchanged; the
+	// caller distinguishes filesystem from server source by
+	// inspecting the scheme.
+	if hasURLScheme(registry) {
+		return registry
+	}
+	if filepath.IsAbs(registry) {
+		return filepath.Clean(registry)
+	}
+	return filepath.Clean(filepath.Join(workspace, registry))
+}
+
+// hasURLScheme reports whether s begins with a URL scheme
+// (http://, https://, file://). The check is intentionally
+// strict: registry: ./relative is a path, not a URL.
+func hasURLScheme(s string) bool {
+	for _, prefix := range []string{"http://", "https://", "file://"} {
+		if len(s) >= len(prefix) && s[:len(prefix)] == prefix {
+			return true
+		}
+	}
+	return false
+}
+
 // ReadConfig reads sync.yaml from the workspace's .podium/ directory.
 // A missing file returns (nil, nil) so callers can distinguish "no
 // config" from "invalid config" without an error type discriminator.

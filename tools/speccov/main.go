@@ -176,6 +176,14 @@ func groupBySection(tests []specparser.Test) map[string][]specparser.Test {
 			continue
 		}
 		m[t.Citation.SectionID] = append(m[t.Citation.SectionID], t)
+		// Multi-cite tests count toward each aliased section so
+		// "Spec: §8.1 / §4.7.5" covers both.
+		for _, alias := range t.Citation.Aliases {
+			if alias == "" || alias == "n/a" {
+				continue
+			}
+			m[alias] = append(m[alias], t)
+		}
 	}
 	return m
 }

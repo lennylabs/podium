@@ -157,8 +157,18 @@ func syncCmd(args []string) int {
 		return 2
 	}
 
+	// §13.11.2 — when --registry is unset, fall back to
+	// defaults.registry from sync.yaml. Relative paths resolve
+	// against the workspace; absolute paths pass through. Unset
+	// across all scopes surfaces config.no_registry via sync.Run.
 	if *registry == "" {
-		fmt.Fprintln(os.Stderr, "error: --registry is required (filesystem path)")
+		ws, _ := os.Getwd()
+		if cfg, _ := sync.ReadConfig(ws); cfg != nil && cfg.Defaults.Registry != "" {
+			*registry = sync.ResolveRegistryPath(ws, cfg.Defaults.Registry)
+		}
+	}
+	if *registry == "" {
+		fmt.Fprintln(os.Stderr, "error: --registry is required (filesystem path) — set it on the command line or in <ws>/.podium/sync.yaml")
 		return 2
 	}
 	abs, err := filepath.Abs(*target)

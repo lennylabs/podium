@@ -38,9 +38,14 @@ type Section struct {
 }
 
 // Citation is a spec reference parsed from a test annotation.
+// SectionID is the primary section; Aliases lists any additional
+// sections the same Spec: line cited via "/ §X.Y" / "+ §X.Y"
+// chains (e.g. "Spec: §8.1 / §4.7.5"). Reporters count the test
+// against every section it cites.
 type Citation struct {
-	SectionID string // "§4.6", "§4.6.3", "n/a", or ""
-	Note      string // assertion text after the section title
+	SectionID string   // "§4.6", "§4.6.3", "n/a", or ""
+	Aliases   []string // additional sections cited on the same Spec: line
+	Note      string   // assertion text after the section title
 }
 
 // MatrixCell is a per-cell tag attached to a test, asserting that the
@@ -404,8 +409,14 @@ func startsWithCI(line, prefix string) bool {
 
 // specLineRegex captures "§X.Y[.Z...]" or "n/a" as the section identifier.
 // Anything after the identifier (separator and prose, in any combination) is
-// captured verbatim as the Note.
+// captured verbatim as the Note. Additional `/ §X.Y` or `+ §X.Y` references
+// inside the note become Citation.Aliases via parseSpecLine.
 var specLineRegex = regexp.MustCompile(`^[Ss]pec:\s*(§\d+(?:\.\d+)*|n/a)(?:\s+(.+))?$`)
+
+// aliasSectionRegex finds `/ §X.Y` and `+ §X.Y` chains at the
+// start of a note so multi-cited tests count against every cited
+// section (the cite reporters consume Citation.Aliases).
+var aliasSectionRegex = regexp.MustCompile(`^[/+]\s*(§\d+(?:\.\d+)*)`)
 
 // noteSplitRegex separates an annotation note's optional short title from
 // its assertion text using a Unicode em-dash, en-dash, or " - " hyphen.
@@ -419,6 +430,17 @@ func parseSpecLine(line string) Citation {
 	c := Citation{SectionID: m[1]}
 	if len(m) >= 3 {
 		c.Note = strings.TrimSpace(m[2])
+	}
+	// Pull leading `/ §X.Y` or `+ §X.Y` chains out of the note
+	// into Aliases so multi-cite tests like
+	// "Spec: §8.1 / §4.7.5 — adapter ..." cover both sections.
+	for {
+		am := aliasSectionRegex.FindStringSubmatch(c.Note)
+		if am == nil {
+			break
+		}
+		c.Aliases = append(c.Aliases, am[1])
+		c.Note = strings.TrimSpace(c.Note[len(am[0]):])
 	}
 	return c
 }

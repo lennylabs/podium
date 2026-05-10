@@ -83,6 +83,38 @@ Phase: 7`
 	}
 }
 
+// Spec: n/a — Multi-cite Spec: lines (e.g. "Spec: §8.1 / §4.7.5
+// — adapter ...") count toward each cited section. The primary
+// section is SectionID; the rest land in Aliases.
+func TestParseAnnotations_MultiCiteAliases(t *testing.T) {
+	t.Parallel()
+	in := `Spec: §8.1 / §4.7.5 — adapter propagates audit events.
+Phase: 7`
+	c, _, _ := parseAnnotations(in)
+	if c.SectionID != "§8.1" {
+		t.Errorf("SectionID = %q, want §8.1", c.SectionID)
+	}
+	if len(c.Aliases) != 1 || c.Aliases[0] != "§4.7.5" {
+		t.Errorf("Aliases = %v, want [§4.7.5]", c.Aliases)
+	}
+	if c.Note != "— adapter propagates audit events." {
+		t.Errorf("Note = %q (want it to start at the em-dash)", c.Note)
+	}
+}
+
+func TestParseAnnotations_MultiCiteThreeSections(t *testing.T) {
+	t.Parallel()
+	in := `Spec: §1 / §2 / §3 — combined.
+Phase: 0`
+	c, _, _ := parseAnnotations(in)
+	if c.SectionID != "§1" {
+		t.Errorf("SectionID = %q", c.SectionID)
+	}
+	if len(c.Aliases) != 2 || c.Aliases[0] != "§2" || c.Aliases[1] != "§3" {
+		t.Errorf("Aliases = %v, want [§2 §3]", c.Aliases)
+	}
+}
+
 // Spec: n/a — Matrix annotations let tests claim coverage of specific
 // cells in spec tables (capability matrix, error codes, failure modes).
 // Phase: 0
