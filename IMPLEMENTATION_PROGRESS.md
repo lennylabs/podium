@@ -52,6 +52,21 @@ Tracks the state of the Podium implementation on the
                           Total missing: 0 / 199
 ```
 
+## Recently closed (in-scope deferred items)
+
+- §5.2 prompt projection: MCP server now answers
+  `prompts/list` (filtered to `type: command` artifacts whose
+  frontmatter declares `expose_as_mcp_prompt: true`) and
+  `prompts/get` (returns the manifest body as the prompt's
+  user-message text). Non-command artifacts and non-opted-in
+  commands surface `prompts.not_a_command` /
+  `prompts.not_exposed`.
+- §6.4.1 local search index: when the workspace overlay is
+  loaded, the MCP server runs a BM25 index over its records and
+  fuses with the registry's search response via reciprocal rank
+  fusion (k=60). Empty overlay leaves the registry response
+  untouched. Type / scope / tag filters apply to both streams.
+
 ## Recently closed deltas (spec audit follow-up)
 
 - §4.1 / §4.3.4 / §4.4 lint coverage: bundled-resource size

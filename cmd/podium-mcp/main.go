@@ -258,6 +258,11 @@ func (s *mcpServer) handle(req rpcRequest) rpcResponse {
 		}
 	case "tools/call":
 		resp.Result = s.callTool(req.Params)
+	case "prompts/list":
+		// §5.2 — opt-in projection of `type: command` artifacts.
+		resp.Result = s.handlePromptsList()
+	case "prompts/get":
+		resp.Result = s.handlePromptsGet(req.Params)
 	default:
 		resp.Error = &rpcError{Code: -32601, Message: "method not found: " + req.Method}
 	}
@@ -280,7 +285,7 @@ func (s *mcpServer) callTool(raw json.RawMessage) any {
 	case "search_domains":
 		return s.proxyGet("/v1/search_domains", p.Arguments)
 	case "search_artifacts":
-		return s.proxyGet("/v1/search_artifacts", p.Arguments)
+		return s.searchArtifacts(p.Arguments)
 	case "load_artifact":
 		return s.loadArtifact(p.Arguments)
 	default:
