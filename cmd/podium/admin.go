@@ -42,6 +42,8 @@ func adminCmd(args []string) int {
 		return adminShowEffectiveCmd(args[1:])
 	case "runtime":
 		return adminRuntimeCmd(args[1:])
+	case "migrate-to-standard":
+		return adminMigrateToStandard(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown admin subcommand: %s\n", args[0])
 		return 2

@@ -88,12 +88,15 @@ below is the punch summary.
   SKILL.md + bundled resources).
 - `podium admin runtime register` / `runtime list` — DONE. POST
   /v1/admin/runtime takes an issuer, JWS algorithm, and PEM-encoded
-  public key and adds the runtime to the in-memory trust list
-  consulted by the §6.3.2 verifier. Persistent storage is on the
-  configuration roadmap.
-- `podium admin migrate-to-standard` — pending. The operational
-  shape is `pg_dump` + S3 sync; a guided wrapper command remains
-  on the configuration roadmap.
+  public key and adds the runtime to the trust list consulted by
+  the §6.3.2 verifier. When `PODIUM_RUNTIME_KEYS_PATH` is set,
+  registrations persist as a JSON file across server restarts.
+- `podium admin migrate-to-standard` — DONE. Reads tenants,
+  manifests, and layer configs from the standalone SQLite store
+  and writes them into the target Postgres (or another SQLite)
+  store; walks the source filesystem object store and uploads
+  every blob to the target backend (filesystem or S3); copies
+  the audit log byte-for-byte. Honors `--dry-run`.
 
 **Real new features** (Batch C): DONE.
 - `NotificationProvider` SPI (§9): `pkg/notification` ships
@@ -128,10 +131,41 @@ below is the punch summary.
   `~/.podium/standalone/audit.key` (or
   `PODIUM_AUDIT_SIGNING_KEY_PATH`); the file is generated on
   first run and reloaded byte-identical thereafter.
-- `pkg/webhook.Worker` is mounted via `server.WithWebhooks` with
-  an in-memory receiver store. Receivers do not survive a
-  process restart in this configuration; persistent-store
-  wiring is on the configuration roadmap.
+- `pkg/webhook.Worker` is mounted via `server.WithWebhooks`. When
+  `PODIUM_WEBHOOK_STORE_PATH` is set, receivers persist as a JSON
+  file across server restarts; absent the env var, receivers
+  stay in memory.
+
+**Audit retention scheduler**: DONE.
+- `internal/serverboot/audit_retention.go` runs `audit.Enforce`
+  every `PODIUM_AUDIT_RETENTION_INTERVAL_SECONDS` against every
+  event type the registry emits, dropping records older than
+  `PODIUM_AUDIT_RETENTION_MAX_AGE_DAYS` (default 365). Manual
+  `podium admin retention` continues to work for one-shot
+  invocation.
+
+**Read-only audit events**: DONE.
+- The §13.2.1 read-only probe writes
+  `registry.read_only_entered` / `registry.read_only_exited`
+  events to the audit sink on transitions. Operators monitor
+  `audit.log` to see store outages.
+
+**OAuth refresh-token flow**: DONE.
+- `identity.DeviceCodeFlow.Refresh` exchanges a refresh_token
+  for a fresh access_token per RFC 6749 §6, carrying through
+  non-rotated refresh tokens and surfacing `invalid_grant` as
+  `ErrAccessDenied` so callers know to re-initiate.
+
+**Persistence for runtime trust keys + SCIM directory**: DONE.
+- `PODIUM_RUNTIME_KEYS_PATH` persists §6.3.2 registrations.
+- `PODIUM_SCIM_STORE_PATH` persists §6.3.1 IdP-pushed users +
+  groups. The visibility evaluator's `groups:` resolver reads
+  the same store, so memberships survive restarts.
+
+**Audit chain head recovery**: DONE.
+- `audit.NewFileSink` rescans the existing log on open and
+  recovers the last event's hash so the chain continues across
+  server restarts.
 
 **Verification** (Batch F): DONE.
 - `test/bench/latency_test.go` exercises SearchArtifacts,
@@ -158,18 +192,11 @@ below is the punch summary.
   cover the data movement; a guided wrapper adds little over
   the standard tools.
 
-**Persistent-state debt** (smaller follow-up batch):
-- Webhook receivers live in memory and do not survive a server
-  restart. The §7.3.2 worker accepts any `webhook.Store`
-  implementation; the gap is wiring a SQL-backed one to
-  `pkg/store`.
-- Runtime trust keys (§6.3.2) live in memory for the same reason.
-  `pkg/identity.RuntimeKeyRegistry` already has the right shape;
-  the gap is persisting registrations.
-- ~~The `audit.FileSink` does not load the prior chain head on
-  restart~~. DONE: `NewFileSink` scans the existing file at open
-  time and recovers the last event's Hash so the chain continues
-  across server restarts.
+**Persistent-state debt**: DONE for webhook receivers, runtime
+trust keys, SCIM directory (file-backed), and the audit chain
+head. SQL-backed implementations of the same SPIs remain a
+follow-up — the file-backed pattern is fine up to the low
+hundreds of records typical of these surfaces.
 
 ## What this branch leaves you with
 

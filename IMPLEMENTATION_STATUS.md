@@ -291,18 +291,23 @@ detailed plan with effort estimates and test strategies.
   `PODIUM_DEFAULT_LAYER_VISIBILITY`, read-only-mode probe
   goroutine in `cmd/podium-server` that flips the
   `ModeTracker` after consecutive store failures.
-- **Anchor scheduler / outbound webhook worker bootstrap: DONE.**
-  Audit scheduler runs when
-  `PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS > 0`; the Ed25519
-  keypair is generated on first run and persisted in the
-  configured path. Webhook worker is wired with an in-memory
-  receiver store (persistence is on the configuration roadmap).
-- **CLI surface (Batch B, mostly done).** `podium serve`,
+- **Anchor scheduler / retention scheduler / read-only audit
+  events: DONE.** All three goroutines run when their env vars
+  are set; the read-only probe writes mode-transition events to
+  the audit sink.
+- **OAuth refresh-token flow: DONE.**
+  `identity.DeviceCodeFlow.Refresh` exchanges a refresh_token
+  via RFC 6749 §6.
+- **Webhook + runtime-key + SCIM persistence: DONE.** File-
+  backed stores ride `PODIUM_WEBHOOK_STORE_PATH`,
+  `PODIUM_RUNTIME_KEYS_PATH`, and `PODIUM_SCIM_STORE_PATH`. SQL-
+  backed implementations of the same SPIs remain a follow-up.
+- **CLI surface (Batch B): DONE.** `podium serve`,
   `podium config show`, `podium layer update`,
   `podium layer watch`, `podium cache prune`,
-  `podium import`, and `podium admin runtime register` /
-  `runtime list` ship in this branch. Only
-  `admin migrate-to-standard` remains.
+  `podium import`, `podium admin runtime register` /
+  `runtime list`, and `podium admin migrate-to-standard`
+  ship in this branch.
 - **Real new features (Batch C): DONE.**
   - `pkg/notification` ships the SPI plus Noop, LogProvider,
     Webhook (HMAC-SHA256), and MultiProvider. Wired into
