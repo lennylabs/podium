@@ -82,6 +82,11 @@ type config struct {
 	// §4.4.1 sandbox enforcement.
 	enforceSandbox bool
 	hostSandboxes  []string
+	// ignoreSandbox is the §4.4.1 escape hatch: when true, a
+	// non-unrestricted profile is materialized even on a host
+	// that doesn't list it. The override is loud — surfaces in
+	// the audit log and on stderr.
+	ignoreSandbox bool
 }
 
 func loadConfig() (*config, error) {
@@ -108,6 +113,7 @@ func loadConfig() (*config, error) {
 		// §4.4.1 sandbox enforcement.
 		enforceSandbox: os.Getenv("PODIUM_ENFORCE_SANDBOX_PROFILE") == "true",
 		hostSandboxes:  splitCSV(envDefault("PODIUM_HOST_SANDBOXES", "unrestricted")),
+		ignoreSandbox:  os.Getenv("PODIUM_IGNORE_SANDBOX") == "true",
 	}
 	if c.registry == "" {
 		return nil, fmt.Errorf("PODIUM_REGISTRY is required")
@@ -388,6 +394,13 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 	if err := s.enforceSandboxPolicy(resp); err != nil {
 		return errorResult("materialize.sandbox_unsupported: " + err.Error())
 	}
+	// §6.6 step 1 — fetch every large_resource via its presigned
+	// URL into the inline Resources map. Failures (network /
+	// 403 / hash mismatch) abort materialization with a
+	// structured error.
+	if err := s.fetchLargeResources(&resp); err != nil {
+		return errorResult("materialize.fetch_failed: " + err.Error())
+	}
 
 	// Cache the canonical bytes (content cache is forever-immutable
 	// per §6.5).
@@ -525,12 +538,23 @@ type loadArtifactResponse struct {
 	Type         string            `json:"type"`
 	Version      string            `json:"version"`
 	ContentHash  string            `json:"content_hash"`
-	ManifestBody string            `json:"manifest_body"`
-	Frontmatter  string            `json:"frontmatter"`
-	Layer        string            `json:"layer,omitempty"`
-	Sensitivity  string            `json:"sensitivity,omitempty"`
-	Resources    map[string]string `json:"resources,omitempty"`
-	Signature    string            `json:"signature,omitempty"`
+	ManifestBody   string                       `json:"manifest_body"`
+	Frontmatter    string                       `json:"frontmatter"`
+	Layer          string                       `json:"layer,omitempty"`
+	Sensitivity    string                       `json:"sensitivity,omitempty"`
+	Resources      map[string]string            `json:"resources,omitempty"`
+	LargeResources map[string]largeResourceLink `json:"large_resources,omitempty"`
+	Signature      string                       `json:"signature,omitempty"`
+}
+
+// largeResourceLink mirrors the registry's per-resource link. The
+// MCP server fetches the URL during materialization, retrying on
+// 403/expired (§6.6 step 1) up to three times.
+type largeResourceLink struct {
+	URL         string `json:"url"`
+	ContentHash string `json:"content_hash"`
+	Size        int64  `json:"size"`
+	ContentType string `json:"content_type,omitempty"`
 }
 
 // enforceSignaturePolicy applies the configured §4.7.9 verification
@@ -552,27 +576,43 @@ func (s *mcpServer) enforceSignaturePolicy(resp loadArtifactResponse) error {
 }
 
 // enforceSandboxPolicy applies the §4.4.1 sandbox-profile gate.
-// Reads the manifest's sandbox_profile from the response
-// frontmatter (parsed via pkg/manifest) and rejects when the host
-// has not declared support for that profile.
+// Default behavior:
+//
+//   - sandbox_profile=unrestricted (or omitted): always allow.
+//   - sandbox_profile=other and host supports it: allow.
+//   - sandbox_profile=other and host doesn't support it: refuse,
+//     unless ignoreSandbox is set, in which case warn loudly and
+//     allow.
+//
+// The legacy enforceSandbox flag is preserved for callers that
+// want strict enforcement even for unrestricted profiles, but the
+// spec says hosts MUST refuse a non-unrestricted profile by
+// default — that's the new minimum.
 func (s *mcpServer) enforceSandboxPolicy(resp loadArtifactResponse) error {
-	if !s.cfg.enforceSandbox {
-		return nil
-	}
 	a, err := manifest.ParseArtifact([]byte(resp.Frontmatter))
 	if err != nil {
-		// Fail closed: malformed frontmatter under enforce mode is
-		// a refusal, not a passthrough.
+		// Fail closed: malformed frontmatter is a refusal.
 		return fmt.Errorf("parse frontmatter: %v", err)
 	}
 	profile := string(a.SandboxProfile)
 	if profile == "" {
 		profile = string(manifest.SandboxUnrestricted)
 	}
+	if profile == string(manifest.SandboxUnrestricted) {
+		return nil
+	}
 	for _, supported := range s.cfg.hostSandboxes {
 		if supported == profile {
 			return nil
 		}
+	}
+	if s.cfg.ignoreSandbox {
+		// §4.4.1 — explicit override: log loudly so operators see
+		// the violation in the audit trail.
+		fmt.Fprintf(os.Stderr,
+			"WARN: PODIUM_IGNORE_SANDBOX bypassing §4.4.1 — artifact %s wants sandbox_profile=%s; host supports %v\n",
+			resp.ID, profile, s.cfg.hostSandboxes)
+		return nil
 	}
 	return fmt.Errorf("artifact requires sandbox_profile=%s; host supports %v",
 		profile, s.cfg.hostSandboxes)
