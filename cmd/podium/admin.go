@@ -23,9 +23,21 @@ import (
 // unless --audit-path is supplied; the registry-wide retention path
 // runs server-side as part of standalone bootstrap.
 func adminCmd(args []string) int {
-	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: podium admin <subcommand>")
-		return 2
+	if len(args) == 0 || isHelpArg(args[0]) {
+		printGroupHelp("admin", "Administer the registry: grants, audit, runtime keys, migration.", [][2]string{
+			{"grant", "Grant tenant admin role to a user."},
+			{"revoke", "Revoke tenant admin role from a user."},
+			{"show-effective", "Print the per-layer visibility for a user identity."},
+			{"erase", "GDPR right-to-be-forgotten on the local audit log."},
+			{"retention", "Apply audit retention policies to the local audit log."},
+			{"reembed", "Re-run vector embeddings against the configured registry."},
+			{"runtime", "Manage trusted runtime signing keys."},
+			{"migrate-to-standard", "Pump standalone state into a standard deployment."},
+		})
+		if len(args) == 0 {
+			return 2
+		}
+		return 0
 	}
 	switch args[0] {
 	case "erase":
@@ -55,6 +67,7 @@ func adminCmd(args []string) int {
 //	podium admin grant <user-id> [--registry URL]
 func adminGrantCmd(args []string) int {
 	fs := flag.NewFlagSet("admin grant", flag.ContinueOnError)
+	setUsage(fs, "Grant tenant admin role to a user.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
@@ -83,6 +96,7 @@ func adminGrantCmd(args []string) int {
 //	podium admin revoke <user-id> [--registry URL]
 func adminRevokeCmd(args []string) int {
 	fs := flag.NewFlagSet("admin revoke", flag.ContinueOnError)
+	setUsage(fs, "Revoke tenant admin role from a user.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
@@ -113,6 +127,7 @@ func adminRevokeCmd(args []string) int {
 //	podium admin show-effective <user-id> [--group g1] [--group g2] [--registry URL]
 func adminShowEffectiveCmd(args []string) int {
 	fs := flag.NewFlagSet("admin show-effective", flag.ContinueOnError)
+	setUsage(fs, "Print the per-layer visibility for a user identity.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	groups := stringSliceFlag{}
 	fs.Var(&groups, "group", "OIDC group claim (repeatable)")
@@ -167,6 +182,7 @@ func jsonString(s string) string {
 
 func adminReembedCmd(args []string) int {
 	fs := flag.NewFlagSet("admin reembed", flag.ContinueOnError)
+	setUsage(fs, "Re-run vector embeddings against the configured registry.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	artifact := fs.String("artifact", "", "specific artifact ID (optional)")
 	version := fs.String("version", "", "specific version (required with --artifact)")
@@ -205,6 +221,7 @@ func adminReembedCmd(args []string) int {
 
 func adminEraseCmd(args []string) int {
 	fs := flag.NewFlagSet("admin erase", flag.ContinueOnError)
+	setUsage(fs, "GDPR right-to-be-forgotten on the local audit log.")
 	auditPath := fs.String("audit-path", "", "audit log path (default ~/.podium/audit.log)")
 	salt := fs.String("salt", "", "salt for the GDPR erasure tombstone (per tenant)")
 	fs.SetOutput(os.Stderr)
@@ -232,6 +249,7 @@ func adminEraseCmd(args []string) int {
 
 func adminRetentionCmd(args []string) int {
 	fs := flag.NewFlagSet("admin retention", flag.ContinueOnError)
+	setUsage(fs, "Apply audit retention policies to the local audit log.")
 	auditPath := fs.String("audit-path", "", "audit log path (default ~/.podium/audit.log)")
 	policyFlag := stringSliceFlag{}
 	fs.Var(&policyFlag, "policy", "TYPE=DURATION (repeatable, e.g. artifacts.searched=720h)")

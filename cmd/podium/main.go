@@ -71,7 +71,7 @@ func main() {
 		os.Exit(verifyCmd(os.Args[2:]))
 	case "quota":
 		os.Exit(quotaCmd(os.Args[2:]))
-	case "version":
+	case "version", "-v", "--version":
 		fmt.Println("podium 0.0.0-dev")
 	case "help", "-h", "--help":
 		fmt.Print(usage)
@@ -79,6 +79,41 @@ func main() {
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n%s", os.Args[1], usage)
 		os.Exit(2)
 	}
+}
+
+// setUsage attaches a description to the FlagSet's --help output. The
+// FlagSet's Name() supplies the subcommand path; description is the one-
+// line summary mirrored from the top-level help block.
+func setUsage(fs *flag.FlagSet, description string) {
+	fs.Usage = func() {
+		out := fs.Output()
+		fmt.Fprintf(out, "podium %s - %s\n\nFlags:\n", fs.Name(), description)
+		fs.PrintDefaults()
+	}
+}
+
+// printGroupHelp writes a help block for a dispatcher group to stdout.
+func printGroupHelp(group, description string, items [][2]string) {
+	fprintGroupHelp(os.Stdout, group, description, items)
+}
+
+// fprintGroupHelp is the testable form: writes the group help block to w.
+func fprintGroupHelp(w io.Writer, group, description string, items [][2]string) {
+	fmt.Fprintf(w, "podium %s - %s\n\nSubcommands:\n", group, description)
+	width := 0
+	for _, it := range items {
+		if l := len(it[0]); l > width {
+			width = l
+		}
+	}
+	for _, it := range items {
+		fmt.Fprintf(w, "  %-*s  %s\n", width, it[0], it[1])
+	}
+}
+
+// isHelpArg returns true when s is one of the recognized help tokens.
+func isHelpArg(s string) bool {
+	return s == "help" || s == "-h" || s == "--help"
 }
 
 const usage = `usage: podium <command> [flags]
@@ -136,6 +171,7 @@ func syncCmd(args []string) int {
 		}
 	}
 	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
+	setUsage(fs, "Materialize the caller's effective view through a HarnessAdapter.")
 	registry := fs.String("registry", "", "filesystem registry path (required)")
 	target := fs.String("target", ".", "destination directory")
 	harness := fs.String("harness", "none", "harness adapter")
@@ -232,6 +268,7 @@ func (s *stringSliceFlag) Set(v string) error { *s = append(*s, v); return nil }
 
 func syncOverrideCmd(args []string) int {
 	fs := flag.NewFlagSet("sync override", flag.ContinueOnError)
+	setUsage(fs, "Add or remove ephemeral artifact toggles.")
 	target := fs.String("target", ".", "target directory")
 	var add, remove stringSliceFlag
 	fs.Var(&add, "add", "artifact id to materialize on top of the profile (repeatable)")
@@ -269,6 +306,7 @@ func syncOverrideCmd(args []string) int {
 
 func syncSaveAsCmd(args []string) int {
 	fs := flag.NewFlagSet("sync save-as", flag.ContinueOnError)
+	setUsage(fs, "Capture the current target state as a sync.yaml profile.")
 	target := fs.String("target", ".", "target directory")
 	profile := fs.String("profile", "", "profile name (required)")
 	update := fs.Bool("update", false, "overwrite an existing profile")
@@ -302,11 +340,21 @@ func syncSaveAsCmd(args []string) int {
 }
 
 func profileCmd(args []string) int {
-	if len(args) < 1 || args[0] != "edit" {
-		fmt.Fprintln(os.Stderr, "usage: podium profile edit [flags]")
+	if len(args) < 1 || isHelpArg(args[0]) {
+		printGroupHelp("profile", "Manage sync.yaml profiles.", [][2]string{
+			{"edit", "Add or remove patterns on a sync.yaml profile."},
+		})
+		if len(args) < 1 {
+			return 2
+		}
+		return 0
+	}
+	if args[0] != "edit" {
+		fmt.Fprintf(os.Stderr, "unknown profile subcommand: %s\n", args[0])
 		return 2
 	}
 	fs := flag.NewFlagSet("profile edit", flag.ContinueOnError)
+	setUsage(fs, "Add or remove patterns on a sync.yaml profile.")
 	target := fs.String("target", ".", "target directory")
 	profile := fs.String("profile", "", "profile name (required)")
 	var addInc, removeInc, addExc, removeExc stringSliceFlag
@@ -381,6 +429,7 @@ func printHuman(res *sync.Result, dryRun bool) {
 
 func lintCmd(args []string) int {
 	fs := flag.NewFlagSet("lint", flag.ContinueOnError)
+	setUsage(fs, "Validate manifests in a filesystem-source registry.")
 	registry := fs.String("registry", "", "filesystem registry path (required)")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
@@ -423,6 +472,7 @@ func lintCmd(args []string) int {
 
 func searchCmd(args []string) int {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
+	setUsage(fs, "Hybrid search over artifacts (registry HTTP API).")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	typeFilter := fs.String("type", "", "filter by artifact type")
 	scope := fs.String("scope", "", "constrain results to a path prefix")
@@ -460,9 +510,16 @@ func searchCmd(args []string) int {
 }
 
 func domainCmd(args []string) int {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: podium domain show|search|analyze [flags]")
-		return 2
+	if len(args) < 1 || isHelpArg(args[0]) {
+		printGroupHelp("domain", "Inspect and search the domain hierarchy.", [][2]string{
+			{"show", "Show a domain map."},
+			{"search", "Hybrid search over domains."},
+			{"analyze", "Print domain-discovery metrics and split/fold candidates for a subtree."},
+		})
+		if len(args) < 1 {
+			return 2
+		}
+		return 0
 	}
 	switch args[0] {
 	case "show":
@@ -481,6 +538,7 @@ func domainCmd(args []string) int {
 // report. Useful for ingest-time review of split / fold candidates.
 func domainAnalyze(args []string) int {
 	fs := flag.NewFlagSet("domain analyze", flag.ContinueOnError)
+	setUsage(fs, "Print domain-discovery metrics and split/fold candidates for a subtree.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	path := fs.String("path", "", "subtree to analyze (empty = root)")
 	fs.SetOutput(os.Stderr)
@@ -506,6 +564,7 @@ func domainAnalyze(args []string) int {
 
 func domainShow(args []string) int {
 	fs := flag.NewFlagSet("domain show", flag.ContinueOnError)
+	setUsage(fs, "Show a domain map.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	asJSON := fs.Bool("json", false, "JSON output")
 	fs.SetOutput(os.Stderr)
@@ -531,6 +590,7 @@ func domainShow(args []string) int {
 
 func domainSearch(args []string) int {
 	fs := flag.NewFlagSet("domain search", flag.ContinueOnError)
+	setUsage(fs, "Hybrid search over domains.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	scope := fs.String("scope", "", "constrain results")
 	topK := fs.Int("top-k", 10, "max results")
@@ -556,9 +616,14 @@ func domainSearch(args []string) int {
 }
 
 func artifactCmd(args []string) int {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: podium artifact show <id> [flags]")
-		return 2
+	if len(args) < 1 || isHelpArg(args[0]) {
+		printGroupHelp("artifact", "Inspect individual artifacts.", [][2]string{
+			{"show", "Print an artifact's manifest body and frontmatter."},
+		})
+		if len(args) < 1 {
+			return 2
+		}
+		return 0
 	}
 	switch args[0] {
 	case "show":
@@ -571,6 +636,7 @@ func artifactCmd(args []string) int {
 
 func artifactShow(args []string) int {
 	fs := flag.NewFlagSet("artifact show", flag.ContinueOnError)
+	setUsage(fs, "Print an artifact's manifest body and frontmatter.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
@@ -592,6 +658,7 @@ func artifactShow(args []string) int {
 
 func initCmd(args []string) int {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
+	setUsage(fs, "Write ~/.podium/sync.yaml or ./.podium/sync.yaml.")
 	scopeGlobal := fs.Bool("global", false, "write ~/.podium/sync.yaml")
 	scopeLocal := fs.Bool("local", false, "write <ws>/.podium/sync.local.yaml (gitignored override)")
 	standalone := fs.Bool("standalone", false, "shortcut for --registry http://127.0.0.1:8080")

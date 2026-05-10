@@ -12,6 +12,7 @@ import (
 //	podium impact <artifact-id>
 func impactCmd(args []string) int {
 	fs := flag.NewFlagSet("impact", flag.ContinueOnError)
+	setUsage(fs, "List artifacts that depend on a given artifact.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {

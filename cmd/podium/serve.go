@@ -18,6 +18,7 @@ import (
 // the duration of the process.
 func serveCmd(args []string) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	setUsage(fs, "Run the standalone registry server in-process.")
 	bind := fs.String("bind", "", "address to listen on (overrides PODIUM_BIND)")
 	publicMode := fs.Bool("public-mode", false, "run in public mode (overrides PODIUM_PUBLIC_MODE)")
 	standalone := fs.Bool("standalone", false, "alias for the zero-flag standalone bootstrap")

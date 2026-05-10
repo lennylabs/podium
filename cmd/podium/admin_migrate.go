@@ -38,6 +38,7 @@ import (
 //	  [--dry-run]
 func adminMigrateToStandard(args []string) int {
 	fs := flag.NewFlagSet("admin migrate-to-standard", flag.ContinueOnError)
+	setUsage(fs, "Pump standalone state (SQLite + filesystem) into a standard deployment (Postgres + S3).")
 	srcSQLite := fs.String("source-sqlite", "", "source SQLite path (required)")
 	srcObjects := fs.String("source-objects", "", "source filesystem object store path")
 	srcAudit := fs.String("source-audit-log", "", "source audit log file (optional)")

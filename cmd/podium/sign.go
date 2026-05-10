@@ -15,6 +15,7 @@ import (
 //	podium sign --content-hash sha256:... [--provider noop|registry-managed|sigstore-keyless]
 func signCmd(args []string) int {
 	fs := flag.NewFlagSet("sign", flag.ContinueOnError)
+	setUsage(fs, "Sign a content hash via the configured signature provider.")
 	contentHash := fs.String("content-hash", "", "sha256:<hex> content hash (required)")
 	providerName := fs.String("provider", envDefault("PODIUM_SIGNATURE_PROVIDER", "noop"), "noop|registry-managed|sigstore-keyless")
 	fs.SetOutput(os.Stderr)
@@ -45,6 +46,7 @@ func signCmd(args []string) int {
 //	podium verify --content-hash sha256:... --signature <envelope> [--provider ...]
 func verifyCmd(args []string) int {
 	fs := flag.NewFlagSet("verify", flag.ContinueOnError)
+	setUsage(fs, "Verify a signature envelope against a content hash.")
 	contentHash := fs.String("content-hash", "", "sha256:<hex> content hash (required)")
 	signature := fs.String("signature", "", "signature envelope (required)")
 	providerName := fs.String("provider", envDefault("PODIUM_SIGNATURE_PROVIDER", "noop"), "noop|registry-managed|sigstore-keyless")

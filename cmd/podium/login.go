@@ -25,6 +25,7 @@ import (
 //     (default `podium`) keyed by the registry URL.
 func loginCmd(args []string) int {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
+	setUsage(fs, "Run the OAuth Device Code flow and persist the token to the keychain.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL (used as the keychain entry label)")
 	issuer := fs.String("issuer", os.Getenv("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT"), "OAuth issuer URL (or its device endpoint)")
 	tokenURL := fs.String("token-url", os.Getenv("PODIUM_OAUTH_TOKEN_URL"), "OAuth token endpoint (defaults to <issuer>/token)")
@@ -89,6 +90,7 @@ func loginCmd(args []string) int {
 //	podium logout [--registry URL]
 func logoutCmd(args []string) int {
 	fs := flag.NewFlagSet("logout", flag.ContinueOnError)
+	setUsage(fs, "Remove the cached token for the configured registry.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL (keychain entry label)")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {

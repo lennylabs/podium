@@ -9,9 +9,15 @@ import (
 // adminRuntimeCmd dispatches `podium admin runtime <register|list>`
 // for §6.3.2 trusted-runtime management.
 func adminRuntimeCmd(args []string) int {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: podium admin runtime <register|list> [flags]")
-		return 2
+	if len(args) < 1 || isHelpArg(args[0]) {
+		printGroupHelp("admin runtime", "Manage trusted runtime signing keys.", [][2]string{
+			{"register", "Register a trusted runtime signing key."},
+			{"list", "List registered runtimes."},
+		})
+		if len(args) < 1 {
+			return 2
+		}
+		return 0
 	}
 	switch args[0] {
 	case "register":
@@ -30,6 +36,7 @@ func adminRuntimeCmd(args []string) int {
 //	  --public-key-file path/to/key.pem [--registry URL]
 func adminRuntimeRegister(args []string) int {
 	fs := flag.NewFlagSet("admin runtime register", flag.ContinueOnError)
+	setUsage(fs, "Register a trusted runtime signing key.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	issuer := fs.String("issuer", "", "issuer name (required)")
 	algorithm := fs.String("algorithm", "", "JWS algorithm (RS256, ES256, EdDSA, ...)")
@@ -63,6 +70,7 @@ func adminRuntimeRegister(args []string) int {
 
 func adminRuntimeList(args []string) int {
 	fs := flag.NewFlagSet("admin runtime list", flag.ContinueOnError)
+	setUsage(fs, "List registered runtimes.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {

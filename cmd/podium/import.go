@@ -24,6 +24,7 @@ import (
 // never modifies the source.
 func importCmd(args []string) int {
 	fs := flag.NewFlagSet("import", flag.ContinueOnError)
+	setUsage(fs, "Convert a skills/* tree into a Podium-shaped layer.")
 	source := fs.String("source", "", "directory of skill subdirectories (required)")
 	target := fs.String("target", "", "destination layer directory (required)")
 	typ := fs.String("type", "skill", "artifact type to use in ARTIFACT.md")

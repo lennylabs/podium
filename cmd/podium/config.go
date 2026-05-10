@@ -12,9 +12,14 @@ import (
 
 // configCmd dispatches `podium config <subcommand>`.
 func configCmd(args []string) int {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: podium config show [--json]")
-		return 2
+	if len(args) < 1 || isHelpArg(args[0]) {
+		printGroupHelp("config", "Inspect the resolved server configuration.", [][2]string{
+			{"show", "Print the resolved server configuration with sources."},
+		})
+		if len(args) < 1 {
+			return 2
+		}
+		return 0
 	}
 	switch args[0] {
 	case "show":
@@ -30,6 +35,7 @@ func configCmd(args []string) int {
 // "default"). API keys / DSNs are redacted.
 func configShow(args []string) int {
 	fs := flag.NewFlagSet("config show", flag.ContinueOnError)
+	setUsage(fs, "Print the resolved server configuration with sources.")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {

@@ -24,9 +24,20 @@ var sleepSeconds = func(n int) { time.Sleep(time.Duration(n) * time.Second) }
 //	podium layer unregister <id>
 //	podium layer reingest <id>
 func layerCmd(args []string) int {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: podium layer <register|list|reorder|unregister|reingest> [flags]")
-		return 2
+	if len(args) < 1 || isHelpArg(args[0]) {
+		printGroupHelp("layer", "Manage layers registered with the registry.", [][2]string{
+			{"register", "Register a layer with the registry."},
+			{"list", "List registered layers."},
+			{"reorder", "Re-sequence the layer list."},
+			{"unregister", "Remove a layer."},
+			{"reingest", "Trigger a fresh ingest for a layer."},
+			{"update", "Patch a registered layer's mutable fields."},
+			{"watch", "Poll a layer's source on an interval."},
+		})
+		if len(args) < 1 {
+			return 2
+		}
+		return 0
 	}
 	switch args[0] {
 	case "register":
@@ -54,6 +65,7 @@ func layerCmd(args []string) int {
 // keeps its prior value.
 func layerUpdate(args []string) int {
 	fs := flag.NewFlagSet("layer update", flag.ContinueOnError)
+	setUsage(fs, "Patch a registered layer's mutable fields.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	id := fs.String("id", "", "layer id (required)")
 	ref := fs.String("ref", "", "git ref")
@@ -117,6 +129,7 @@ func layerUpdate(args []string) int {
 // the registry.
 func layerWatch(args []string) int {
 	fs := flag.NewFlagSet("layer watch", flag.ContinueOnError)
+	setUsage(fs, "Poll a layer's source on an interval.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	id := fs.String("id", "", "layer id (required)")
 	intervalSec := fs.Int("interval", 60, "seconds between reingest pokes")
@@ -146,6 +159,7 @@ func layerWatch(args []string) int {
 
 func layerRegister(args []string) int {
 	fs := flag.NewFlagSet("layer register", flag.ContinueOnError)
+	setUsage(fs, "Register a layer with the registry.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	id := fs.String("id", "", "layer id (required)")
 	repo := fs.String("repo", "", "git repo URL (for git source)")
@@ -214,6 +228,7 @@ func layerRegister(args []string) int {
 
 func layerList(args []string) int {
 	fs := flag.NewFlagSet("layer list", flag.ContinueOnError)
+	setUsage(fs, "List registered layers.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
@@ -234,6 +249,7 @@ func layerList(args []string) int {
 
 func layerReorder(args []string) int {
 	fs := flag.NewFlagSet("layer reorder", flag.ContinueOnError)
+	setUsage(fs, "Re-sequence the layer list.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
@@ -259,6 +275,7 @@ func layerReorder(args []string) int {
 
 func layerUnregister(args []string) int {
 	fs := flag.NewFlagSet("layer unregister", flag.ContinueOnError)
+	setUsage(fs, "Remove a layer.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
@@ -283,6 +300,7 @@ func layerUnregister(args []string) int {
 
 func layerReingest(args []string) int {
 	fs := flag.NewFlagSet("layer reingest", flag.ContinueOnError)
+	setUsage(fs, "Trigger a fresh ingest for a layer.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {

@@ -10,7 +10,48 @@ description: Every podium subcommand: setup, server, sync, layer management, sea
 
 Every `podium` subcommand grouped by purpose. This page is reference; for task-oriented guides, see [Quickstart](../getting-started/quickstart), [Authoring](../authoring/), [Consuming](../consuming/), and [Deployment](../deployment/).
 
-The `podium` CLI is a single binary. Subcommands accept `--help` for inline detail.
+The `podium` CLI is a single binary.
+
+## Top-level flags
+
+- `podium --help` (or `-h`, or `podium help`): print the command list.
+- `podium --version` (or `-v`, or `podium version`): print the build version.
+
+## Subcommand help
+
+Every subcommand and subcommand group accepts `--help` (and the short forms `-h` and `help`). Leaf subcommands print a one-line description followed by their flag list:
+
+```
+$ podium serve --help
+podium serve - Run the standalone registry server in-process.
+
+Flags:
+  -bind string
+        address to listen on (overrides PODIUM_BIND)
+  -config string
+        path to registry.yaml (overrides PODIUM_CONFIG_FILE)
+  -public-mode
+        run in public mode (overrides PODIUM_PUBLIC_MODE)
+  -standalone
+        alias for the zero-flag standalone bootstrap
+```
+
+Dispatcher groups (`admin`, `cache`, `config`, `domain`, `artifact`, `layer`, `profile`, `admin runtime`) print their subcommand list:
+
+```
+$ podium admin --help
+podium admin - Administer the registry: grants, audit, runtime keys, migration.
+
+Subcommands:
+  grant                Grant tenant admin role to a user.
+  revoke               Revoke tenant admin role from a user.
+  show-effective       Print the per-layer visibility for a user identity.
+  erase                GDPR right-to-be-forgotten on the local audit log.
+  retention            Apply audit retention policies to the local audit log.
+  reembed              Re-run vector embeddings against the configured registry.
+  runtime              Manage trusted runtime signing keys.
+  migrate-to-standard  Pump standalone state into a standard deployment.
+```
 
 ---
 

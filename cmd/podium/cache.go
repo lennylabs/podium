@@ -17,9 +17,14 @@ import (
 // since their last access, matching common content-addressed-cache
 // hygiene. The default is 30 days.
 func cacheCmd(args []string) int {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: podium cache prune [--days N] [--dir DIR] [--dry-run]")
-		return 2
+	if len(args) < 1 || isHelpArg(args[0]) {
+		printGroupHelp("cache", "Manage the local content cache.", [][2]string{
+			{"prune", "Remove content-cache buckets older than N days."},
+		})
+		if len(args) < 1 {
+			return 2
+		}
+		return 0
 	}
 	switch args[0] {
 	case "prune":
@@ -32,6 +37,7 @@ func cacheCmd(args []string) int {
 
 func cachePrune(args []string) int {
 	fs := flag.NewFlagSet("cache prune", flag.ContinueOnError)
+	setUsage(fs, "Remove content-cache buckets older than N days.")
 	dir := fs.String("dir", os.Getenv("PODIUM_CACHE_DIR"), "cache directory (defaults to ~/.podium/cache)")
 	days := fs.Int("days", 30, "remove buckets older than N days since last access")
 	dryRun := fs.Bool("dry-run", false, "report what would be removed; remove nothing")

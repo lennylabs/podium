@@ -12,6 +12,7 @@ import (
 //	podium quota [--registry URL]
 func quotaCmd(args []string) int {
 	fs := flag.NewFlagSet("quota", flag.ContinueOnError)
+	setUsage(fs, "Print the tenant's quotas and current usage.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {

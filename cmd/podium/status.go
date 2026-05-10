@@ -22,6 +22,7 @@ import (
 // Useful as a first diagnostic when something doesn't work.
 func statusCmd(args []string) int {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
+	setUsage(fs, "Print a diagnostic summary of the current Podium client setup.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
