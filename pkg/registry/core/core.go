@@ -740,6 +740,17 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 		}
 	}
 	if len(candidates) == 0 {
+		// §8.1 visibility.denied: the artifact ID exists in the
+		// store but its layer is not in the caller's effective
+		// view. Emitting before the not-found return lets SIEM
+		// pipelines tell "missing" from "filtered."
+		if r.artifactExistsAnywhere(ctx, artifactID) {
+			r.emit(ctx, AuditEvent{
+				Type:   "visibility.denied",
+				Caller: callerOf(id),
+				Target: artifactID,
+			})
+		}
 		return nil, fmt.Errorf("%w: artifact %s", ErrNotFound, artifactID)
 	}
 	pin, err := version.ParsePin(opts.Version)
@@ -962,6 +973,23 @@ func resultFromRecord(rec store.ManifestRecord) *LoadArtifactResult {
 }
 
 // ----- Visibility ---------------------------------------------------------
+
+// artifactExistsAnywhere reports whether artifactID has at least
+// one manifest in the tenant store regardless of layer
+// visibility. Used by visibility.denied emission to distinguish
+// filtered records from genuine misses.
+func (r *Registry) artifactExistsAnywhere(ctx context.Context, artifactID string) bool {
+	all, err := r.store.ListManifests(ctx, r.tenantID)
+	if err != nil {
+		return false
+	}
+	for _, m := range all {
+		if m.ArtifactID == artifactID {
+			return true
+		}
+	}
+	return false
+}
 
 // visibleManifests returns every manifest from the tenant whose
 // originating layer is visible to id. In standalone / filesystem

@@ -69,6 +69,23 @@ func (w FreezeWindow) Active(now time.Time, op string) bool {
 	return false
 }
 
+// wouldBlockWithoutBreakGlass returns true when the window's
+// time range and Blocks list would block op at now even though
+// BreakGlass is set. Used to fire the §8.1 freeze.break_glass
+// audit event only on actual overrides (not on out-of-range
+// windows that wouldn't have blocked anyway).
+func wouldBlockWithoutBreakGlass(w FreezeWindow, now time.Time, op string) bool {
+	if now.Before(w.Start) || !now.Before(w.End) {
+		return false
+	}
+	for _, b := range w.Blocks {
+		if b == op {
+			return true
+		}
+	}
+	return false
+}
+
 // Request is a single layer ingest invocation.
 type Request struct {
 	// TenantID identifies the org owning the layer. Required.
@@ -125,7 +142,20 @@ type Request struct {
 	// an empty envelope. Production deployments wire a real signer
 	// (sign.SigstoreKeyless / sign.RegistryManagedKey).
 	Signer SignerFunc
+	// AuditEmit, when non-nil, receives §8.1 audit events the
+	// ingest pipeline produces. Distinct from PublishEvent: the
+	// latter is the §7.6 SSE / outbound webhook stream for
+	// downstream tooling; AuditEmit feeds the operator-side §8
+	// audit log.
+	AuditEmit AuditEmitterFunc
+	// CallerID identifies the operator triggering ingest. Embedded
+	// into the audit event's Caller field. Optional.
+	CallerID string
 }
+
+// AuditEmitterFunc is the audit-emission seam ingest uses to
+// surface ingest events into the §8 audit log.
+type AuditEmitterFunc func(eventType, target string, ctxFields map[string]string)
 
 // SignerFunc signs the content hash of a freshly-ingested manifest
 // and returns an opaque envelope. Wraps sign.Provider.Sign.
@@ -210,10 +240,20 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 	}
 
 	// §4.7.2 freeze-window enforcement: refuse ingest when any active
-	// window blocks it.
+	// window blocks it. Break-glass windows that would otherwise
+	// block emit a §8.1 freeze.break_glass audit event so the
+	// override is recorded.
 	for _, w := range req.FreezeWindows {
 		if w.Active(req.Clock.Now(), "ingest") {
 			return nil, fmt.Errorf("%w: window %q active", ErrFrozen, w.Name)
+		}
+		if w.BreakGlass && wouldBlockWithoutBreakGlass(w, req.Clock.Now(), "ingest") {
+			if req.AuditEmit != nil {
+				req.AuditEmit("freeze.break_glass", req.LayerID, map[string]string{
+					"window": w.Name,
+					"caller": req.CallerID,
+				})
+			}
 		}
 	}
 
@@ -362,6 +402,28 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 					"id":      mr.ArtifactID,
 					"version": mr.Version,
 					"layer":   mr.Layer,
+				})
+			}
+		}
+
+		// §8.1 audit log: same events fan into the operator-side
+		// audit sink so SIEM pipelines see the publish.
+		if req.AuditEmit != nil {
+			req.AuditEmit("artifact.published", mr.ArtifactID, map[string]string{
+				"version":      mr.Version,
+				"content_hash": mr.ContentHash,
+				"layer":        mr.Layer,
+			})
+			if mr.Deprecated {
+				req.AuditEmit("artifact.deprecated", mr.ArtifactID, map[string]string{
+					"version": mr.Version,
+					"layer":   mr.Layer,
+				})
+			}
+			if mr.Signature != "" {
+				req.AuditEmit("artifact.signed", mr.ArtifactID, map[string]string{
+					"version":      mr.Version,
+					"content_hash": mr.ContentHash,
 				})
 			}
 		}

@@ -37,6 +37,13 @@ type SourceIngestOptions struct {
 	Embedder     EmbedderFunc
 	VectorPut    VectorPutFunc
 	PublishEvent EventEmitter
+	// AuditEmit, when non-nil, receives §8.1 audit events the
+	// orchestrator and ingest pipeline produce (artifact.published,
+	// layer.ingested, layer.history_rewritten, freeze.break_glass).
+	AuditEmit AuditEmitterFunc
+	// CallerID identifies the operator triggering the ingest;
+	// embedded into emitted audit events.
+	CallerID string
 }
 
 // SourceIngest snapshots the layer via the supplied provider, runs
@@ -101,6 +108,12 @@ func SourceIngestWithOptions(
 					"new_ref":   snap.Reference,
 				})
 			}
+			if opts.AuditEmit != nil {
+				opts.AuditEmit("layer.history_rewritten", cfg.ID, map[string]string{
+					"prior_ref": cfg.LastIngestedRef,
+					"new_ref":   snap.Reference,
+				})
+			}
 		}
 	}
 
@@ -112,6 +125,8 @@ func SourceIngestWithOptions(
 		Embedder:     opts.Embedder,
 		VectorPut:    opts.VectorPut,
 		PublishEvent: opts.PublishEvent,
+		AuditEmit:    opts.AuditEmit,
+		CallerID:     opts.CallerID,
 	})
 	if err != nil {
 		return nil, err
@@ -130,6 +145,12 @@ func SourceIngestWithOptions(
 			"conflicts":      len(res.Conflicts),
 			"lint_failures":  len(res.LintFailures),
 			"embed_failures": len(res.EmbeddingFailures),
+		})
+	}
+	if opts.AuditEmit != nil {
+		opts.AuditEmit("layer.ingested", cfg.ID, map[string]string{
+			"reference": snap.Reference,
+			"accepted":  fmt.Sprintf("%d", res.Accepted),
 		})
 	}
 

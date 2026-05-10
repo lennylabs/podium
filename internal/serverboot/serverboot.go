@@ -262,11 +262,15 @@ func Run() error {
 	mux.Handle("/", srv.Handler())
 
 	// §8.3 audit sink: file-backed, hash-chained, shared by the
-	// anchor scheduler, the retention scheduler, and the read-only
-	// probe transition events. Nil when the path can't be resolved
+	// anchor scheduler, the retention scheduler, the read-only
+	// probe transition events, and the §8.1 meta-tool emission
+	// hook on the registry. Nil when the path can't be resolved
 	// (probes still log; downstream features that need the sink
 	// gracefully no-op).
 	auditSink := openAuditSink(cfg)
+	if auditSink != nil {
+		registry = registry.WithAudit(auditEmitterFor(auditSink))
+	}
 
 	// §8.6 transparency anchoring: when the operator enables
 	// PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS, a goroutine periodically
