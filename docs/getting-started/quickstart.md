@@ -14,9 +14,10 @@ fits solo work, prototypes, and first evaluation.
 
 {: .note }
 
-> Podium is in design phase. There is no shipped binary yet. The commands
-> below describe the target v1 CLI flow. See [Status](../about/status) for
-> the current implementation state.
+> Podium is pre-release. No tagged binary has been published; build the
+> `podium` CLI from source via the [development setup](../about/contributing#development-setup).
+> See [Implementation status](../about/status) for the merge-and-release
+> roadmap.
 
 ---
 
@@ -33,16 +34,16 @@ fits solo work, prototypes, and first evaluation.
 
 ## 1. Install the CLI
 
-Install the `podium` binary via your package manager, or download a
-release from the project's releases page.
+Build the `podium` binary from source until the first tagged release publishes packaged binaries:
 
 ```bash
+git clone https://github.com/lennylabs/podium.git
+cd podium
+go build -o ~/.local/bin/podium ./cmd/podium
 podium --version
 ```
 
-{: .note }
-
-> The first released binary will make the commands below executable.
+The [development setup](../about/contributing#development-setup) has the full prerequisites and the SDK build steps.
 
 ---
 

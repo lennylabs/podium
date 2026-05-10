@@ -16,7 +16,7 @@ Thanks for your interest in Podium.
 - **Submit a pull request.** For non-trivial changes, please open an issue or discussion first so we can align on direction before you invest time in code.
 - **Fix typos and broken links.** Small documentation PRs are welcome anytime. Keep them focused.
 
-For what's most useful to contribute today (the project is in design phase), see [Implementation status](status).
+For what's most useful to contribute today, see [Implementation status](status).
 
 ## Development setup
 

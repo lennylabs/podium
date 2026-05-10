@@ -21,10 +21,11 @@ effective catalog it serves.
 
 {: .note }
 
-> **Status: design phase.** The documentation describes the target v1
-> surface. There is no shipped binary yet. Design feedback is the most useful
-> contribution today. See [Status](about/status) and
-> [Contributing](about/contributing).
+> **Status: pre-release.** The initial v1 implementation is on the
+> `initial-implementation` branch. No tagged release exists yet; build
+> from source via [Contributing](about/contributing#development-setup).
+> See [Implementation status](about/status) for the merge-and-release
+> roadmap.
 
 [Quickstart](getting-started/quickstart){: .btn .btn-purple }
 [Concepts](getting-started/concepts){: .btn .btn-outline }

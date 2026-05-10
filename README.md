@@ -19,11 +19,12 @@ effective catalog it serves.
 [Specification](spec/) •
 [Contributing](#contributing)
 
-> **Status: design phase.** The documentation describes the target v1
-> surface. There is no shipped binary yet. Design feedback is the most useful
-> contribution today. Open an
+> **Status: pre-release.** The initial v1 implementation lives on the
+> `initial-implementation` branch. No tagged release has been published;
+> install by [building from source](#build-and-test). Open an
 > [issue](https://github.com/lennylabs/podium/issues) or
-> [discussion](https://github.com/lennylabs/podium/discussions).
+> [discussion](https://github.com/lennylabs/podium/discussions) for
+> design feedback or bug reports.
 
 ---
 

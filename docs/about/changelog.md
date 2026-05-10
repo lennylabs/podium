@@ -14,6 +14,6 @@ The canonical changelog file lives at [`CHANGELOG.md`](https://github.com/lennyl
 
 ## [Unreleased]
 
-There are no tagged releases yet. This section will be populated as work lands on `main`. See [Implementation status](status) for the current build phase and what's wired up.
+There are no tagged releases yet. This section will be populated when the first version is tagged. See [Implementation status](status) for what's built today and what's pending release.
 
 [Unreleased]: https://github.com/lennylabs/podium/compare/HEAD
