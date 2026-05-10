@@ -107,6 +107,13 @@ type Request struct {
 	// quota. Caller queries the store for this; ingest cannot
 	// (it would have to walk every manifest).
 	CurrentStorageBytes int64
+	// ArtifactCountQuota is the per-tenant maximum number of
+	// distinct artifact IDs (§4.7.8). Zero disables.
+	ArtifactCountQuota int
+	// CurrentArtifactCount is the current number of distinct
+	// artifact IDs already stored against the quota. The caller
+	// queries the store for this.
+	CurrentArtifactCount int
 	// Files is the source's snapshot exposed as fs.FS. The Local
 	// LayerSourceProvider produces this from os.DirFS; the Git
 	// provider exposes the checked-out tree the same way.
@@ -160,6 +167,22 @@ type AuditEmitterFunc func(eventType, target string, ctxFields map[string]string
 // SignerFunc signs the content hash of a freshly-ingested manifest
 // and returns an opaque envelope. Wraps sign.Provider.Sign.
 type SignerFunc func(contentHash string) (string, error)
+
+// tenantHasArtifact reports whether the tenant already has a
+// manifest for artifactID — we don't double-count distinct
+// artifacts when ingesting a new version of an existing one.
+func (r *Request) tenantHasArtifact(ctx context.Context, st store.Store, artifactID string) bool {
+	all, err := st.ListManifests(ctx, r.TenantID)
+	if err != nil {
+		return false
+	}
+	for _, m := range all {
+		if m.ArtifactID == artifactID {
+			return true
+		}
+	}
+	return false
+}
 
 // EventEmitter is the §7.6 publish surface. The function shape
 // matches Server.PublishEvent so the orchestrator passes the
@@ -313,6 +336,24 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 				continue
 			}
 			req.CurrentStorageBytes = projected
+		}
+
+		// §4.7.8 artifact-count quota: refuse the artifact when it
+		// would be the (Quota+1)-th distinct artifact id. Versions
+		// of an existing id don't count against the cap.
+		if req.ArtifactCountQuota > 0 && !req.tenantHasArtifact(ctx, st, mr.ArtifactID) {
+			projected := req.CurrentArtifactCount + 1
+			if projected > req.ArtifactCountQuota {
+				res.Rejected = append(res.Rejected, RejectedArtifact{
+					ArtifactID: rec.ID,
+					Reason: fmt.Sprintf(
+						"artifact count %d would exceed quota %d",
+						projected, req.ArtifactCountQuota),
+					Code: "quota.artifact_count_exceeded",
+				})
+				continue
+			}
+			req.CurrentArtifactCount = projected
 		}
 
 		// §4.7.6 extends:-pin resolution. If the artifact extends a

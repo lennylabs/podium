@@ -59,6 +59,16 @@ type Server struct {
 	// "default"; multi-tenant deployments resolve it per-request
 	// once tenant routing is wired.
 	tenant string
+	// quota is the §4.7.8 rate limiter. When non-nil, search /
+	// load_artifact handlers consult it before doing real work.
+	quota *QuotaLimiter
+}
+
+// WithQuotaLimiter installs the §4.7.8 rate limiter for search
+// QPS and materialize rate. Zero limits inside the limiter
+// disable the check per dimension.
+func WithQuotaLimiter(q *QuotaLimiter) Option {
+	return func(s *Server) { s.quota = q }
 }
 
 // largeRef is the per-resource metadata the server keeps so it can
@@ -444,6 +454,10 @@ func (s *Server) handleLoadDomain(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSearchDomains(w http.ResponseWriter, r *http.Request) {
+	if !s.quota.AllowSearch(s.tenant) {
+		writeQuotaError(w, "quota.search_qps_exceeded", "tenant search QPS budget exhausted")
+		return
+	}
 	q := r.URL.Query()
 	res, err := s.core.SearchDomains(r.Context(), s.identity(r), core.SearchDomainsOptions{
 		Query: q.Get("query"),
@@ -464,6 +478,10 @@ func (s *Server) handleSearchDomains(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSearchArtifacts(w http.ResponseWriter, r *http.Request) {
+	if !s.quota.AllowSearch(s.tenant) {
+		writeQuotaError(w, "quota.search_qps_exceeded", "tenant search QPS budget exhausted")
+		return
+	}
 	q := r.URL.Query()
 	tags := []string{}
 	if t := q.Get("tags"); t != "" {
@@ -570,6 +588,10 @@ func (s *Server) handleScopePreview(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
+	if !s.quota.AllowMaterialize(s.tenant) {
+		writeQuotaError(w, "quota.materialize_rate_exceeded", "tenant materialize budget exhausted")
+		return
+	}
 	q := r.URL.Query()
 	id := q.Get("id")
 	if id == "" {

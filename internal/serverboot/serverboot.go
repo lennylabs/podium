@@ -226,6 +226,18 @@ func Run() error {
 		bootOpts = append(bootOpts, server.WithSCIM(scimHandler))
 		log.Printf("SCIM 2.0 receiver mounted at /scim/v2/")
 	}
+	// §4.7.8 rate limits per tenant. Zero values disable per
+	// dimension; the limiter still mounts so multi-tenant
+	// deployments can enable a single dimension at a time.
+	quotaLimits := server.QuotaLimits{
+		SearchQPS:       cfg.searchQPSLimit,
+		MaterializeRate: cfg.materializeRateLimit,
+	}
+	if quotaLimits.SearchQPS > 0 || quotaLimits.MaterializeRate > 0 {
+		log.Printf("rate limits: search_qps=%d materialize_rate=%d",
+			quotaLimits.SearchQPS, quotaLimits.MaterializeRate)
+	}
+	bootOpts = append(bootOpts, server.WithQuotaLimiter(server.NewQuotaLimiter(quotaLimits)))
 	srv := server.New(registry, bootOpts...)
 
 	// §7.3.1 layer-management endpoint: mounted alongside the meta-
@@ -377,6 +389,9 @@ type Config struct {
 	// §8.5 retention enforcement.
 	auditRetentionInterval int
 	auditRetentionMaxAgeDays int
+	// §4.7.8 rate limits.
+	searchQPSLimit       int
+	materializeRateLimit int
 }
 
 // Setting names one resolved field together with the env var (or
@@ -487,6 +502,9 @@ func LoadConfig() *Config {
 		// §8.5 retention enforcement.
 		auditRetentionInterval:   envInt("PODIUM_AUDIT_RETENTION_INTERVAL_SECONDS", 0),
 		auditRetentionMaxAgeDays: envInt("PODIUM_AUDIT_RETENTION_MAX_AGE_DAYS", 365),
+		// §4.7.8 rate limits.
+		searchQPSLimit:       envInt("PODIUM_QUOTA_SEARCH_QPS", 0),
+		materializeRateLimit: envInt("PODIUM_QUOTA_MATERIALIZE_RATE", 0),
 	}
 	// §13.10 ~/.podium/registry.yaml: load and overlay onto env-
 	// derived defaults. Env values keep precedence per applyYAML.

@@ -136,11 +136,12 @@ func envDefault(key, def string) string {
 
 // mcpServer holds the wiring for one bridge process.
 type mcpServer struct {
-	cfg      *config
-	http     *http.Client
-	cache    *contentCache
-	adapters *adapter.Registry
-	overlay  []filesystem.ArtifactRecord
+	cfg         *config
+	http        *http.Client
+	cache       *contentCache
+	resolutions *resolutionCache
+	adapters    *adapter.Registry
+	overlay     []filesystem.ArtifactRecord
 }
 
 func newServer(cfg *config) (*mcpServer, error) {
@@ -149,10 +150,11 @@ func newServer(cfg *config) (*mcpServer, error) {
 		return nil, err
 	}
 	srv := &mcpServer{
-		cfg:      cfg,
-		http:     &http.Client{},
-		cache:    cache,
-		adapters: adapter.DefaultRegistry(),
+		cfg:         cfg,
+		http:        &http.Client{},
+		cache:       cache,
+		resolutions: newResolutionCache(cfg.cacheDir),
+		adapters:    adapter.DefaultRegistry(),
 	}
 	// §6.4 workspace overlay: load now and reuse for the bridge
 	// lifetime. An empty path or absent overlay disables the layer.
@@ -299,6 +301,21 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 			return s.loadArtifactFromOverlay(rec, args)
 		}
 	}
+
+	// §6.5 cache modes: in offline-first / offline-only modes, try
+	// the resolution + content cache before going to the network.
+	id, version := argsIDAndVersion(args)
+	if (s.cfg.cacheMode == "offline-first" || s.cfg.cacheMode == "offline-only") && id != "" {
+		if hash, ok := s.resolutions.Get(id, version); ok {
+			if cached, cerr := s.loadArtifactFromCache(hash, id); cerr == nil {
+				return s.deliverLoadArtifact(*cached)
+			}
+		}
+		if s.cfg.cacheMode == "offline-only" {
+			return errorResult(errOfflineCacheMiss.Error())
+		}
+	}
+
 	body, err := s.fetchJSON("/v1/load_artifact", args)
 	if err != nil {
 		return errorResult(err.Error())
@@ -311,16 +328,41 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 		// Either an error envelope or an empty result; pass through.
 		return jsonAny(body)
 	}
+	// Update the resolution cache so future offline-first reads
+	// know the (id, version) → content_hash mapping.
+	s.resolutions.Put(id, version, resp.ContentHash)
+	if resp.Version != "" && resp.Version != version {
+		// Also memoize the explicit version for `version=""` (latest)
+		// requests so a later pinned request can serve from cache.
+		s.resolutions.Put(id, resp.Version, resp.ContentHash)
+	}
 
+	return s.deliverLoadArtifact(resp, deliverOpts{harness: harnessFromArgs(s.cfg.harness, args)})
+}
+
+// deliverOpts threads the per-call adjustments deliverLoadArtifact
+// needs (currently only the harness override).
+type deliverOpts struct {
+	harness string
+}
+
+// deliverLoadArtifact runs §6.6 verification + materialization
+// against an already-fetched (or cached) load_artifact response.
+// Shared between the live-fetch and cache-served code paths so
+// PODIUM_VERIFY_SIGNATURES and the sandbox profile enforcement
+// run uniformly regardless of cache mode.
+func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliverOpts) any {
+	var o deliverOpts
+	if len(opts) > 0 {
+		o = opts[0]
+	}
 	// §4.7.9 / §6.2: enforce signature verification per
 	// PODIUM_VERIFY_SIGNATURES before the artifact materializes
 	// onto the host filesystem.
 	if err := s.enforceSignaturePolicy(resp); err != nil {
 		return errorResult("materialize.signature_invalid: " + err.Error())
 	}
-	// §4.4.1 sandbox profile enforcement: refuse to materialize
-	// when PODIUM_ENFORCE_SANDBOX_PROFILE=true and the artifact's
-	// profile is not in the host's declared capability set.
+	// §4.4.1 sandbox profile enforcement.
 	if err := s.enforceSandboxPolicy(resp); err != nil {
 		return errorResult("materialize.sandbox_unsupported: " + err.Error())
 	}
@@ -334,10 +376,9 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 	// Materialize to host filesystem if a destination is configured.
 	materialized := []string{}
 	if s.cfg.materializeRoot != "" {
-		// §6.6 step 3: HarnessAdapter translates canonical artifact.
-		harnessID := s.cfg.harness
-		if h, ok := args["harness"].(string); ok && h != "" {
-			harnessID = h
+		harnessID := o.harness
+		if harnessID == "" {
+			harnessID = s.cfg.harness
 		}
 		a, err := s.adapters.Get(harnessID)
 		if err != nil {
@@ -348,9 +389,6 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 			ArtifactBytes: []byte(resp.Frontmatter),
 			Resources:     resourcesAsBytes(resp.Resources),
 		}
-		// Skill artifacts carry their body in SkillBytes; the registry
-		// returns the resolved manifest body, so synthesize the SKILL.md
-		// from frontmatter + body when the type is skill.
 		if resp.Type == "skill" {
 			src.SkillBytes = []byte(synthesizeSkillMD(resp))
 		}
@@ -358,7 +396,6 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 		if err != nil {
 			return errorResult("adapter: " + err.Error())
 		}
-		// §6.6 step 5: atomic write.
 		if err := materialize.Write(s.cfg.materializeRoot, out); err != nil {
 			return errorResult("materialize: " + err.Error())
 		}
@@ -375,6 +412,15 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 		"manifest_body":   resp.ManifestBody,
 		"materialized_at": materialized,
 	}
+}
+
+// harnessFromArgs returns args["harness"] as a string when set,
+// otherwise the deployment default.
+func harnessFromArgs(defaultID string, args map[string]any) string {
+	if h, ok := args["harness"].(string); ok && h != "" {
+		return h
+	}
+	return defaultID
 }
 
 // loadArtifactFromOverlay produces a load_artifact response from a

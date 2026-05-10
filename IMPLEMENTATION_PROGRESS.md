@@ -52,6 +52,25 @@ Tracks the state of the Podium implementation on the
                           Total missing: 0 / 199
 ```
 
+## Recently closed deltas (spec audit follow-up)
+
+- §4.1 / §4.3.4 / §4.4 lint coverage: bundled-resource size
+  caps, manifest size caps, ARTIFACT.md body strictness for
+  skills, and prose-reference resolution all now produce lint
+  diagnostics at ingest.
+- §8.1 audit-event coverage: meta-tool calls, ingest events
+  (artifact.published / .deprecated / .signed), layer events,
+  visibility.denied, freeze.break_glass, and read-only mode
+  transitions all reach the file-backed audit sink.
+- §4.7.8 search QPS / materialize rate enforcement: per-tenant
+  token-bucket limiter returns 429 +
+  `quota.search_qps_exceeded` / `quota.materialize_rate_exceeded`
+  when budgets are exhausted.
+- §6.5 cache modes: `PODIUM_CACHE_MODE` now branches; offline-
+  first reads the resolution cache before contacting the
+  registry, offline-only refuses network calls and returns
+  `cache.offline_miss` on a cache miss.
+
 ## What remains
 
 The §10 phase table is end-to-end REAL, but a handful of
