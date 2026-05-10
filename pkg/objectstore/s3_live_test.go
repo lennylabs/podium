@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/objectstore"
 )
 
@@ -74,9 +73,7 @@ func uniqueKey(t *testing.T, suffix string) string {
 // Spec: §13.10 — S3 backend round-trip end-to-end against a live
 // S3-compatible endpoint. Gated on PODIUM_S3_* env vars; default
 // CI runs skip the test.
-// Phase: 2
 func TestS3_LivePutGetRoundTrip(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	s := liveS3(t)
 	ctx := context.Background()
 	key := uniqueKey(t, "round-trip")
@@ -98,9 +95,7 @@ func TestS3_LivePutGetRoundTrip(t *testing.T) {
 // Spec: §6.2 — S3.Presign returns a Signature V4 URL the consumer
 // can follow to fetch the body without sending credentials. Tests
 // use a real http.Client so the signature is exercised end-to-end.
-// Phase: 2
 func TestS3_LivePresignRoundTrip(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	s := liveS3(t)
 	ctx := context.Background()
 	key := uniqueKey(t, "presign")
@@ -132,9 +127,7 @@ func TestS3_LivePresignRoundTrip(t *testing.T) {
 }
 
 // Spec: §6.10 — S3.Get on a missing key returns ErrNotFound.
-// Phase: 2
 func TestS3_LiveGetMissingReturnsErrNotFound(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	s := liveS3(t)
 	_, err := s.Get(context.Background(), uniqueKey(t, "definitely-missing"))
 	if !errors.Is(err, objectstore.ErrNotFound) {

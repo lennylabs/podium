@@ -38,7 +38,6 @@ Glossary body.
 // Spec: §13.11.3 What's Available — `podium sync` against a filesystem
 // source materializes every visible artifact through the harness adapter
 // to the target directory. End-to-end via the real binary.
-// Phase: 0
 func TestPodiumSync_FilesystemSourceWritesTarget(t *testing.T) {
 	t.Parallel()
 	registry := t.TempDir()
@@ -80,7 +79,6 @@ func TestPodiumSync_FilesystemSourceWritesTarget(t *testing.T) {
 }
 
 // Spec: §7.5 — --dry-run resolves the artifact set and writes nothing.
-// Phase: 0
 func TestPodiumSync_DryRunWritesNothing(t *testing.T) {
 	t.Parallel()
 	registry := t.TempDir()
@@ -111,7 +109,6 @@ func TestPodiumSync_DryRunWritesNothing(t *testing.T) {
 // Spec: §13.10 --layer-path modes — multi_layer: true with manifest at top
 // level fails with config.layer_path_ambiguous; the CLI exits non-zero
 // and the operator sees the structured error.
-// Phase: 0
 func TestPodiumSync_LayerPathAmbiguousIsRejected(t *testing.T) {
 	t.Parallel()
 	registry := t.TempDir()
@@ -138,7 +135,6 @@ func TestPodiumSync_LayerPathAmbiguousIsRejected(t *testing.T) {
 
 // Spec: §6.10 namespace — unknown harness selection fails with a
 // config.unknown_harness error.
-// Phase: 0
 func TestPodiumSync_UnknownHarnessFails(t *testing.T) {
 	t.Parallel()
 	registry := t.TempDir()
@@ -165,7 +161,6 @@ func TestPodiumSync_UnknownHarnessFails(t *testing.T) {
 // twice against the same target produces the same on-disk state and does
 // not duplicate or corrupt files. The full lock-file behavior lands in
 // Phase 3; Phase 0 verifies the on-disk equivalence only.
-// Phase: 0
 func TestPodiumSync_IsIdempotent(t *testing.T) {
 	t.Parallel()
 	registry := t.TempDir()

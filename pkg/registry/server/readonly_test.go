@@ -4,16 +4,13 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/registry/server"
 )
 
 // Spec: §13.2.1 / §6.10 — write endpoints rejected in read-only
 // mode with registry.read_only.
-// Phase: 2
 // Matrix: §6.10 (registry.read_only)
 func TestModeTracker_CheckWriteInReadOnly(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	m := server.NewModeTracker()
 	if err := m.CheckWrite(); err != nil {
@@ -28,10 +25,8 @@ func TestModeTracker_CheckWriteInReadOnly(t *testing.T) {
 
 // Spec: §13.2.1 / §6.10 — configuration edits rejected with
 // config.read_only.
-// Phase: 2
 // Matrix: §6.10 (config.read_only)
 func TestModeTracker_CheckConfigInReadOnly(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	m := server.NewModeTracker()
 	m.Set(server.ModeReadOnly)
@@ -42,9 +37,7 @@ func TestModeTracker_CheckConfigInReadOnly(t *testing.T) {
 }
 
 // Spec: §13.2.1 — Mode.String() renders the documented values.
-// Phase: 2
 func TestMode_StringMatchesSpec(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	cases := []struct {
 		m    server.Mode
@@ -62,9 +55,7 @@ func TestMode_StringMatchesSpec(t *testing.T) {
 }
 
 // Spec: §13.2.1 — toggling back to ready re-enables writes.
-// Phase: 2
 func TestModeTracker_BackToReadyAllowsWrites(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	m := server.NewModeTracker()
 	m.Set(server.ModeReadOnly)

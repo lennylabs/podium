@@ -13,9 +13,9 @@ import (
 // by the admin CLI for human-readable output and by callers that
 // re-embed in response to a configured-provider change.
 type ReembedResult struct {
-	Total    int
+	Total     int
 	Succeeded int
-	Failed   []ReembedFailure
+	Failed    []ReembedFailure
 }
 
 // ReembedFailure names an artifact whose embedding call failed.

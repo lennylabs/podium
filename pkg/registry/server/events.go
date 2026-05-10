@@ -37,10 +37,10 @@ func (s *Server) SetHeartbeatForTesting(d time.Duration) {
 
 // eventSubscription captures one /v1/events connection.
 type eventSubscription struct {
-	id        uint64
-	filter    map[string]bool
-	ch        chan registryEvent
-	dropped   atomic.Int64
+	id      uint64
+	filter  map[string]bool
+	ch      chan registryEvent
+	dropped atomic.Int64
 }
 
 // registryEvent is the on-the-wire shape clients see (§7.6 + the
@@ -48,11 +48,11 @@ type eventSubscription struct {
 // permissive — callers add or remove keys as the registry-side
 // surface evolves without breaking older subscribers.
 type registryEvent struct {
-	Event     string                 `json:"event"`
-	TraceID   string                 `json:"trace_id,omitempty"`
-	Timestamp string                 `json:"timestamp,omitempty"`
-	Actor     map[string]any         `json:"actor,omitempty"`
-	Data      map[string]any         `json:"data,omitempty"`
+	Event     string         `json:"event"`
+	TraceID   string         `json:"trace_id,omitempty"`
+	Timestamp string         `json:"timestamp,omitempty"`
+	Actor     map[string]any `json:"actor,omitempty"`
+	Data      map[string]any `json:"data,omitempty"`
 }
 
 // newEventBus returns an empty bus with a 30-second heartbeat.

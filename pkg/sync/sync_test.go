@@ -33,7 +33,6 @@ Glossary body.
 
 // Spec: §7.5 podium sync — Run materializes every visible artifact through
 // the configured HarnessAdapter to the target directory.
-// Phase: 0
 func TestRun_SyncsArtifactsToTarget(t *testing.T) {
 	t.Parallel()
 	registry := t.TempDir()
@@ -77,7 +76,6 @@ func TestRun_SyncsArtifactsToTarget(t *testing.T) {
 }
 
 // Spec: §7.5 — DryRun resolves the artifact set without writing.
-// Phase: 0
 func TestRun_DryRunWritesNothing(t *testing.T) {
 	t.Parallel()
 	registry := t.TempDir()
@@ -106,7 +104,6 @@ func TestRun_DryRunWritesNothing(t *testing.T) {
 
 // Spec: §6.7 — Run uses the "none" adapter by default when AdapterID is
 // empty.
-// Phase: 0
 func TestRun_DefaultAdapterIsNone(t *testing.T) {
 	t.Parallel()
 	registry := t.TempDir()
@@ -126,7 +123,6 @@ func TestRun_DefaultAdapterIsNone(t *testing.T) {
 }
 
 // Spec: §6.10 namespace — an unknown adapter returns config.unknown_harness.
-// Phase: 0
 // Matrix: §6.10 (config.unknown_harness)
 func TestRun_UnknownAdapterFails(t *testing.T) {
 	t.Parallel()
@@ -147,7 +143,6 @@ func TestRun_UnknownAdapterFails(t *testing.T) {
 }
 
 // Spec: §13.11.3 — when no target is set and DryRun is false, Run errors.
-// Phase: 0
 func TestRun_RequiresTarget(t *testing.T) {
 	t.Parallel()
 	_, err := Run(Options{RegistryPath: t.TempDir(), Target: ""})
@@ -159,7 +154,6 @@ func TestRun_RequiresTarget(t *testing.T) {
 // Spec: §4.6 — when two layers both contribute the same canonical ID,
 // sync uses highest-precedence wins (the user's effective view), not the
 // raw ingest behavior that errors on collision.
-// Phase: 0
 func TestRun_HigherLayerWinsOnCollision(t *testing.T) {
 	t.Parallel()
 	registry := t.TempDir()

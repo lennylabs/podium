@@ -3,7 +3,6 @@ package vector_test
 import (
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/vector"
 	"github.com/lennylabs/podium/pkg/vector/vectortest"
 )
@@ -12,9 +11,7 @@ import (
 // contract. Other backends pull this same suite into their package
 // tests so Memory / PgVector / SQLiteVec / Pinecone / Weaviate /
 // Qdrant share one contract.
-// Phase: 5
 func TestMemory_Conformance(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	vectortest.Suite(t, 8, func(t *testing.T) vector.Provider {
 		return vector.NewMemory(8)

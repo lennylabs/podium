@@ -11,9 +11,7 @@ import (
 
 // Spec: §4.6 source types — Local exposes the filesystem path as an
 // fs.FS rooted at the configured path.
-// Phase: 6
 func TestLocal_SnapshotExposesFilesystem(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	dir := t.TempDir()
 	testharness.WriteTree(t, dir,
@@ -33,9 +31,7 @@ func TestLocal_SnapshotExposesFilesystem(t *testing.T) {
 }
 
 // Spec: §4.6 — Local without path: fails with ErrInvalidConfig.
-// Phase: 6
 func TestLocal_RequiresPath(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	_, err := Local{}.Snapshot(context.Background(), LayerConfig{})
 	if !errors.Is(err, ErrInvalidConfig) {
@@ -45,10 +41,8 @@ func TestLocal_RequiresPath(t *testing.T) {
 
 // Spec: §6.10 namespace — missing path returns ErrSourceUnreachable
 // (maps to ingest.source_unreachable).
-// Phase: 6
 // Matrix: §6.10 (ingest.source_unreachable)
 func TestLocal_MissingPathFailsSourceUnreachable(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	_, err := Local{}.Snapshot(context.Background(), LayerConfig{Path: "/nonexistent/path/qqqq"})
 	if !errors.Is(err, ErrSourceUnreachable) {
@@ -57,9 +51,7 @@ func TestLocal_MissingPathFailsSourceUnreachable(t *testing.T) {
 }
 
 // Spec: §7.3.1 Ingestion triggers — Git source declares webhook trigger.
-// Phase: 6
 func TestGit_DeclaresWebhookTrigger(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	if (Git{}).Trigger() != TriggerWebhook {
 		t.Errorf("Git.Trigger = %s, want %s", (Git{}).Trigger(), TriggerWebhook)
@@ -67,9 +59,7 @@ func TestGit_DeclaresWebhookTrigger(t *testing.T) {
 }
 
 // Spec: §4.6 — Git source requires repo and ref.
-// Phase: 6
 func TestGit_RequiresRepoAndRef(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	_, err := Git{}.Snapshot(context.Background(), LayerConfig{})
 	if !errors.Is(err, ErrInvalidConfig) {

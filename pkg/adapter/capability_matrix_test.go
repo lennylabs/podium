@@ -3,8 +3,6 @@ package adapter
 import (
 	"strings"
 	"testing"
-
-	"github.com/lennylabs/podium/internal/testharness"
 )
 
 // firstClassAdapters lists the nine first-class harness adapters whose
@@ -68,7 +66,6 @@ func runMatrixField(t *testing.T, adapterID, field, sentinel string) {
 // Spec: §6.7.1 capability matrix — description is ✓ across every
 // first-class adapter. The sentinel value flows through to the
 // adapter's output unchanged.
-// Phase: 13
 // Matrix: §6.7.1 (claude-code, description)
 // Matrix: §6.7.1 (claude-desktop, description)
 // Matrix: §6.7.1 (claude-cowork, description)
@@ -79,7 +76,6 @@ func runMatrixField(t *testing.T, adapterID, field, sentinel string) {
 // Matrix: §6.7.1 (pi, description)
 // Matrix: §6.7.1 (hermes, description)
 func TestCapabilityMatrix_Description(t *testing.T) {
-	testharness.RequirePhase(t, 13)
 	t.Parallel()
 	for _, id := range firstClassAdapters {
 		runMatrixField(t, id, "description", "Sentinel-DESCRIPTION-7c0c4a")
@@ -87,7 +83,6 @@ func TestCapabilityMatrix_Description(t *testing.T) {
 }
 
 // Spec: §6.7.1 — mcpServers is ✓ across every first-class adapter.
-// Phase: 13
 // Matrix: §6.7.1 (claude-code, mcpServers)
 // Matrix: §6.7.1 (claude-desktop, mcpServers)
 // Matrix: §6.7.1 (claude-cowork, mcpServers)
@@ -98,7 +93,6 @@ func TestCapabilityMatrix_Description(t *testing.T) {
 // Matrix: §6.7.1 (pi, mcpServers)
 // Matrix: §6.7.1 (hermes, mcpServers)
 func TestCapabilityMatrix_MCPServers(t *testing.T) {
-	testharness.RequirePhase(t, 13)
 	t.Parallel()
 	for _, id := range firstClassAdapters {
 		// Use the literal `mcpServers:` field name as sentinel so the
@@ -123,7 +117,6 @@ func TestCapabilityMatrix_MCPServers(t *testing.T) {
 
 // Spec: §6.7.1 — expose_as_mcp_prompt is ✓ across every first-class
 // adapter.
-// Phase: 13
 // Matrix: §6.7.1 (claude-code, expose_as_mcp_prompt)
 // Matrix: §6.7.1 (claude-desktop, expose_as_mcp_prompt)
 // Matrix: §6.7.1 (claude-cowork, expose_as_mcp_prompt)
@@ -134,7 +127,6 @@ func TestCapabilityMatrix_MCPServers(t *testing.T) {
 // Matrix: §6.7.1 (pi, expose_as_mcp_prompt)
 // Matrix: §6.7.1 (hermes, expose_as_mcp_prompt)
 func TestCapabilityMatrix_ExposeAsMCPPrompt(t *testing.T) {
-	testharness.RequirePhase(t, 13)
 	t.Parallel()
 	for _, id := range firstClassAdapters {
 		runMatrixField(t, id, "expose_as_mcp_prompt", "true")
@@ -143,7 +135,6 @@ func TestCapabilityMatrix_ExposeAsMCPPrompt(t *testing.T) {
 
 // Spec: §6.7.1 — rule_mode: always is ✓ on every adapter except
 // gemini (⚠ fallback).
-// Phase: 13
 // Matrix: §6.7.1 (claude-code, rule_mode_always)
 // Matrix: §6.7.1 (claude-desktop, rule_mode_always)
 // Matrix: §6.7.1 (claude-cowork, rule_mode_always)
@@ -154,7 +145,6 @@ func TestCapabilityMatrix_ExposeAsMCPPrompt(t *testing.T) {
 // Matrix: §6.7.1 (pi, rule_mode_always)
 // Matrix: §6.7.1 (hermes, rule_mode_always)
 func TestCapabilityMatrix_RuleModeAlways(t *testing.T) {
-	testharness.RequirePhase(t, 13)
 	t.Parallel()
 	for _, id := range firstClassAdapters {
 		r := DefaultRegistry()
@@ -177,7 +167,6 @@ func TestCapabilityMatrix_RuleModeAlways(t *testing.T) {
 
 // Spec: §6.7.1 — rule_mode: explicit is ✓ on every adapter except
 // gemini (⚠ fallback).
-// Phase: 13
 // Matrix: §6.7.1 (claude-code, rule_mode_explicit)
 // Matrix: §6.7.1 (claude-desktop, rule_mode_explicit)
 // Matrix: §6.7.1 (claude-cowork, rule_mode_explicit)
@@ -188,7 +177,6 @@ func TestCapabilityMatrix_RuleModeAlways(t *testing.T) {
 // Matrix: §6.7.1 (pi, rule_mode_explicit)
 // Matrix: §6.7.1 (hermes, rule_mode_explicit)
 func TestCapabilityMatrix_RuleModeExplicit(t *testing.T) {
-	testharness.RequirePhase(t, 13)
 	t.Parallel()
 	for _, id := range firstClassAdapters {
 		r := DefaultRegistry()

@@ -8,17 +8,14 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/internal/clock"
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/store"
 )
 
 // Spec: §4.7.2 / §6.10 — an active freeze window blocks ingest with
 // ingest.frozen.
-// Phase: 6
 // Matrix: §6.10 (ingest.frozen)
 func TestIngest_FreezeWindowBlocks(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 
 	now := time.Date(2026, 12, 20, 12, 0, 0, 0, time.UTC)
@@ -45,9 +42,7 @@ func TestIngest_FreezeWindowBlocks(t *testing.T) {
 }
 
 // Spec: §4.7.2 — a freeze window outside [Start, End) does not block.
-// Phase: 6
 func TestIngest_FreezeWindowOutsideRangeAllows(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 
 	now := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
@@ -76,9 +71,7 @@ func TestIngest_FreezeWindowOutsideRangeAllows(t *testing.T) {
 }
 
 // Spec: §4.7.2 — break-glass bypasses freeze enforcement.
-// Phase: 6
 func TestIngest_FreezeBreakGlassBypass(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 
 	now := time.Date(2026, 12, 20, 12, 0, 0, 0, time.UTC)
@@ -112,10 +105,8 @@ func TestIngest_FreezeBreakGlassBypass(t *testing.T) {
 
 // Spec: §4.7.8 / §6.10 — accepting an artifact past the storage quota
 // rejects with quota.storage_exceeded.
-// Phase: 6
 // Matrix: §6.10 (quota.storage_exceeded)
 func TestIngest_StorageQuotaExceeded(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
@@ -141,9 +132,7 @@ func TestIngest_StorageQuotaExceeded(t *testing.T) {
 }
 
 // Spec: §4.7.8 — generous quota does not block ingest.
-// Phase: 6
 func TestIngest_StorageQuotaGenerousAllows(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})

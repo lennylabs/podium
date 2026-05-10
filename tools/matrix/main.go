@@ -29,7 +29,7 @@ Commands:
   scaffold   Print Go test stubs for missing cells (stdout).
 
 Flags:
-  -repo <path>   Repository root (default: walk up to .phase).
+  -repo <path>   Repository root (default: walk up to go.mod).
 `
 
 func main() {
@@ -120,18 +120,16 @@ func scaffold(matrices []Matrix, covered map[string]bool) {
 			}
 			testName := stubName(m, cell)
 			fmt.Printf(`// Spec: %s %s.
-// Phase: %d
 // Matrix: %s (%s)
 func %s(t *testing.T) {
-	testharness.RequirePhase(t, %d)
 	t.Parallel()
 	// TODO: assert the spec contract for this cell.
 	t.Skip("not implemented")
 }
 
 `,
-				m.ID, m.Title, m.Phase, m.ID, strings.Join(cell, ", "),
-				testName, m.Phase)
+				m.ID, m.Title, m.ID, strings.Join(cell, ", "),
+				testName)
 		}
 	}
 }
@@ -201,12 +199,12 @@ func resolveRepoRoot(explicit string) (string, error) {
 		return "", err
 	}
 	for {
-		if _, err := os.Stat(dir + string(os.PathSeparator) + ".phase"); err == nil {
+		if _, err := os.Stat(dir + string(os.PathSeparator) + "go.mod"); err == nil {
 			return dir, nil
 		}
 		parent := parentDir(dir)
 		if parent == dir {
-			return "", errors.New(".phase not found")
+			return "", errors.New("go.mod not found")
 		}
 		dir = parent
 	}

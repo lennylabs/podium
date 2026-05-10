@@ -61,10 +61,10 @@ type EffortHint string
 
 // EffortHint values per §4.3.
 const (
-	EffortLow      EffortHint = "low"
-	EffortMedium   EffortHint = "medium"
-	EffortHigh     EffortHint = "high"
-	EffortMaximum  EffortHint = "max"
+	EffortLow     EffortHint = "low"
+	EffortMedium  EffortHint = "medium"
+	EffortHigh    EffortHint = "high"
+	EffortMaximum EffortHint = "max"
 )
 
 // ModelClassHint values (spec §4.3 caller-interpreted fields).
@@ -124,16 +124,16 @@ type Artifact struct {
 	SBOM                *SBOMRef              `yaml:"sbom,omitempty"`
 
 	// Type-specific (§4.3).
-	Input              string   `yaml:"input,omitempty"`
-	Output             string   `yaml:"output,omitempty"`
-	DelegatesTo        []string `yaml:"delegates_to,omitempty"`
-	ExposeAsMCPPrompt  bool     `yaml:"expose_as_mcp_prompt,omitempty"`
-	RuleMode           RuleMode `yaml:"rule_mode,omitempty"`
-	RuleGlobs          string   `yaml:"rule_globs,omitempty"`
-	RuleDescription    string   `yaml:"rule_description,omitempty"`
-	HookEvent          string   `yaml:"hook_event,omitempty"`
-	HookAction         string   `yaml:"hook_action,omitempty"`
-	ServerIdentifier   string   `yaml:"server_identifier,omitempty"`
+	Input             string   `yaml:"input,omitempty"`
+	Output            string   `yaml:"output,omitempty"`
+	DelegatesTo       []string `yaml:"delegates_to,omitempty"`
+	ExposeAsMCPPrompt bool     `yaml:"expose_as_mcp_prompt,omitempty"`
+	RuleMode          RuleMode `yaml:"rule_mode,omitempty"`
+	RuleGlobs         string   `yaml:"rule_globs,omitempty"`
+	RuleDescription   string   `yaml:"rule_description,omitempty"`
+	HookEvent         string   `yaml:"hook_event,omitempty"`
+	HookAction        string   `yaml:"hook_action,omitempty"`
+	ServerIdentifier  string   `yaml:"server_identifier,omitempty"`
 
 	// Inheritance / targeting (§4.3, §4.6).
 	Extends         string   `yaml:"extends,omitempty"`

@@ -15,9 +15,7 @@ import (
 // Spec: §6.6 Materialization — load_artifact through the MCP bridge
 // runs the configured HarnessAdapter and writes adapter output
 // atomically to PODIUM_MATERIALIZE_ROOT.
-// Phase: 4
 func TestPodiumMCP_LoadArtifactMaterializes(t *testing.T) {
-	testharness.RequirePhase(t, 4)
 	t.Parallel()
 
 	h := registryharness.New(t,
@@ -81,9 +79,7 @@ func TestPodiumMCP_LoadArtifactMaterializes(t *testing.T) {
 
 // Spec: §6.6 — selecting the claude-code adapter via PODIUM_HARNESS
 // drives the corresponding harness-native layout.
-// Phase: 4
 func TestPodiumMCP_LoadArtifactWithClaudeCodeAdapter(t *testing.T) {
-	testharness.RequirePhase(t, 4)
 	t.Parallel()
 
 	h := registryharness.New(t,
@@ -123,9 +119,7 @@ func TestPodiumMCP_LoadArtifactWithClaudeCodeAdapter(t *testing.T) {
 
 // Spec: §6.6 / §6.7 — per-call harness override on load_artifact
 // switches the adapter without restarting the bridge.
-// Phase: 4
 func TestPodiumMCP_PerCallHarnessOverride(t *testing.T) {
-	testharness.RequirePhase(t, 4)
 	t.Parallel()
 
 	h := registryharness.New(t,
@@ -169,9 +163,7 @@ func TestPodiumMCP_PerCallHarnessOverride(t *testing.T) {
 
 // Spec: §6.5 — content_hash bytes land in the §6.5 content cache
 // after load_artifact.
-// Phase: 4
 func TestPodiumMCP_LoadArtifactPopulatesContentCache(t *testing.T) {
-	testharness.RequirePhase(t, 4)
 	t.Parallel()
 
 	h := registryharness.New(t,
@@ -219,9 +211,7 @@ func TestPodiumMCP_LoadArtifactPopulatesContentCache(t *testing.T) {
 
 // Spec: §6.6 — when PODIUM_MATERIALIZE_ROOT is unset, load_artifact
 // returns the manifest body without materializing (read-only flow).
-// Phase: 4
 func TestPodiumMCP_NoMaterializeRootReturnsManifestOnly(t *testing.T) {
-	testharness.RequirePhase(t, 4)
 	t.Parallel()
 
 	h := registryharness.New(t,

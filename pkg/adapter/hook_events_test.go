@@ -3,8 +3,6 @@ package adapter
 import (
 	"strings"
 	"testing"
-
-	"github.com/lennylabs/podium/internal/testharness"
 )
 
 // canonicalHookEvents lists the §4.3.5 hook events the spec table
@@ -64,7 +62,6 @@ func runHookEventCell(t *testing.T, event string) {
 
 // Spec: §4.3.5 / §6.7.1 — claude-code adapter materializes every
 // canonical hook event from the §4.3.5 table.
-// Phase: 13
 // Matrix: §4.3.5 (session_start)
 // Matrix: §4.3.5 (session_end)
 // Matrix: §4.3.5 (user_prompt_submit)
@@ -86,7 +83,6 @@ func runHookEventCell(t *testing.T, event string) {
 // Matrix: §4.3.5 (post_compact)
 // Matrix: §4.3.5 (notification)
 func TestHookEvents_AllCanonicalEventsClaudeCode(t *testing.T) {
-	testharness.RequirePhase(t, 13)
 	t.Parallel()
 	for _, event := range canonicalHookEvents {
 		runHookEventCell(t, event)

@@ -12,7 +12,6 @@ import (
 
 // Spec: §6.6 Materialization — Write writes each file under destination
 // and creates intermediate directories as needed.
-// Phase: 0
 func TestWrite_CreatesDestinationTree(t *testing.T) {
 	t.Parallel()
 	dest := t.TempDir()
@@ -35,7 +34,6 @@ func TestWrite_CreatesDestinationTree(t *testing.T) {
 // Spec: §6.6 Materialization — atomic write means the destination either
 // holds the previous content or the new content; no .tmp files are left
 // behind on success.
-// Phase: 0
 func TestWrite_NoTmpFilesAfterSuccess(t *testing.T) {
 	t.Parallel()
 	dest := t.TempDir()
@@ -57,7 +55,6 @@ func TestWrite_NoTmpFilesAfterSuccess(t *testing.T) {
 
 // Spec: §6.7 sandbox contract — paths with .. that escape the destination
 // fail with ErrOutOfDestination, no files are written.
-// Phase: 0
 // Matrix: §6.10 (materialize.sandbox_violation)
 func TestWrite_RejectsParentEscape(t *testing.T) {
 	t.Parallel()
@@ -74,7 +71,6 @@ func TestWrite_RejectsParentEscape(t *testing.T) {
 }
 
 // Spec: §6.7 sandbox contract — absolute paths are rejected.
-// Phase: 0
 func TestWrite_RejectsAbsolutePath(t *testing.T) {
 	t.Parallel()
 	dest := t.TempDir()
@@ -88,7 +84,6 @@ func TestWrite_RejectsAbsolutePath(t *testing.T) {
 
 // Spec: §6.6 Materialization — when validation fails for one file, no
 // files are written (the whole batch is atomic at the directory level).
-// Phase: 0
 func TestWrite_RejectionLeavesNoPartialState(t *testing.T) {
 	t.Parallel()
 	dest := t.TempDir()
@@ -106,7 +101,6 @@ func TestWrite_RejectionLeavesNoPartialState(t *testing.T) {
 
 // Spec: §6.6 — Write replaces existing files in place; readers seeing the
 // destination see either the old or new content.
-// Phase: 0
 func TestWrite_ReplacesExistingFile(t *testing.T) {
 	t.Parallel()
 	dest := t.TempDir()
@@ -128,7 +122,6 @@ func TestWrite_ReplacesExistingFile(t *testing.T) {
 
 // Spec: §6.6 — empty destination is rejected to prevent accidental writes
 // to the working directory or filesystem root.
-// Phase: 0
 func TestWrite_EmptyDestinationRejected(t *testing.T) {
 	t.Parallel()
 	err := Write("", []adapter.File{

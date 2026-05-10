@@ -35,10 +35,10 @@ Commands:
   report       Print every spec section with the count of tests citing it.
   uncovered    Print spec sections with zero citing tests.
   drift        Print citations to sections that no longer exist in spec/.
-  tests        Print every test with its citation and phase.
+  tests        Print every test with its citation.
 
 Flags:
-  -repo <path>    Repository root (default: walk up to the directory containing .phase).
+  -repo <path>    Repository root (default: walk up to the directory containing go.mod).
   -spec <path>    Spec directory relative to repo root (default: spec).
 `
 
@@ -158,13 +158,13 @@ func drift(w io.Writer, sections []specparser.Section, tests []specparser.Test) 
 // listTests prints every parsed test.
 func listTests(w io.Writer, tests []specparser.Test) int {
 	sort.Slice(tests, func(i, j int) bool { return tests[i].Name < tests[j].Name })
-	fmt.Fprintln(w, "phase   section          test")
+	fmt.Fprintln(w, "section          test")
 	for _, t := range tests {
 		section := t.Citation.SectionID
 		if section == "" {
 			section = "(none)"
 		}
-		fmt.Fprintf(w, "%5d   %-15s   %s\n", t.Phase, section, t.Name)
+		fmt.Fprintf(w, "%-15s   %s\n", section, t.Name)
 	}
 	return 0
 }
@@ -207,12 +207,12 @@ func resolveRepoRoot(explicit string) (string, error) {
 		return "", err
 	}
 	for {
-		if _, err := os.Stat(joinPath(dir, ".phase")); err == nil {
+		if _, err := os.Stat(joinPath(dir, "go.mod")); err == nil {
 			return dir, nil
 		}
 		parent := parentDir(dir)
 		if parent == dir {
-			return "", errors.New(".phase file not found in any parent")
+			return "", errors.New("go.mod not found in any parent")
 		}
 		dir = parent
 	}

@@ -6,7 +6,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
@@ -46,14 +45,12 @@ func contextManifestVer(desc, ver string) string {
 }
 
 // Spec: §5 load_domain — root call returns top-level subdomains.
-// Phase: 7
 func TestLoadDomain_RootReturnsTopLevelSubdomains(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	reg := setupRegistry(t, fstest.MapFS{
-		"finance/ap/pay/ARTIFACT.md":      &fstest.MapFile{Data: []byte(contextManifest("pay"))},
-		"finance/close/run/ARTIFACT.md":   &fstest.MapFile{Data: []byte(contextManifest("variance"))},
-		"company-glossary/ARTIFACT.md":    &fstest.MapFile{Data: []byte(contextManifest("glossary"))},
+		"finance/ap/pay/ARTIFACT.md":    &fstest.MapFile{Data: []byte(contextManifest("pay"))},
+		"finance/close/run/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("variance"))},
+		"company-glossary/ARTIFACT.md":  &fstest.MapFile{Data: []byte(contextManifest("glossary"))},
 	}, "team-shared")
 
 	got, err := reg.LoadDomain(context.Background(), publicID, "", core.LoadDomainOptions{})
@@ -81,9 +78,7 @@ func TestLoadDomain_RootReturnsTopLevelSubdomains(t *testing.T) {
 
 // Spec: §5 load_domain — drilling into a path returns subdomains and
 // notable artifacts under that path.
-// Phase: 7
 func TestLoadDomain_DrillIn(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	reg := setupRegistry(t, fstest.MapFS{
 		"finance/ap/pay/ARTIFACT.md":    &fstest.MapFile{Data: []byte(contextManifest("pay"))},
@@ -115,10 +110,8 @@ func TestLoadDomain_DrillIn(t *testing.T) {
 
 // Spec: §6.10 — domain.not_found is returned for paths that do not
 // resolve to any visible domain.
-// Phase: 7
 // Matrix: §6.10 (domain.not_found)
 func TestLoadDomain_UnknownPathFails(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	reg := setupRegistry(t, fstest.MapFS{
 		"finance/notes/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("notes"))},
@@ -131,14 +124,12 @@ func TestLoadDomain_UnknownPathFails(t *testing.T) {
 
 // Spec: §5 search_artifacts — query returns descriptors ranked by
 // relevance.
-// Phase: 7
 func TestSearchArtifacts_RanksByRelevance(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	reg := setupRegistry(t, fstest.MapFS{
-		"finance/run/ARTIFACT.md":    &fstest.MapFile{Data: []byte(contextManifest("Variance analysis after close"))},
-		"finance/pay/ARTIFACT.md":    &fstest.MapFile{Data: []byte(contextManifest("Pay an invoice"))},
-		"misc/random/ARTIFACT.md":    &fstest.MapFile{Data: []byte(contextManifest("Unrelated content"))},
+		"finance/run/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("Variance analysis after close"))},
+		"finance/pay/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("Pay an invoice"))},
+		"misc/random/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("Unrelated content"))},
 	}, "team-shared")
 	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{
 		Query: "variance",
@@ -155,13 +146,11 @@ func TestSearchArtifacts_RanksByRelevance(t *testing.T) {
 }
 
 // Spec: §5 search_artifacts — type filter excludes mismatched types.
-// Phase: 7
 func TestSearchArtifacts_TypeFilter(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	reg := setupRegistry(t, fstest.MapFS{
-		"finance/notes/ARTIFACT.md":   &fstest.MapFile{Data: []byte(contextManifest("notes"))},
-		"finance/agent/ARTIFACT.md":   &fstest.MapFile{Data: []byte("---\ntype: agent\nversion: 1.0.0\ndescription: agent\nsensitivity: low\n---\n\nagent body\n")},
+		"finance/notes/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("notes"))},
+		"finance/agent/ARTIFACT.md": &fstest.MapFile{Data: []byte("---\ntype: agent\nversion: 1.0.0\ndescription: agent\nsensitivity: low\n---\n\nagent body\n")},
 	}, "team-shared")
 	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{
 		Type: "context",
@@ -175,9 +164,7 @@ func TestSearchArtifacts_TypeFilter(t *testing.T) {
 }
 
 // Spec: §5 search_artifacts — scope (path prefix) restricts results.
-// Phase: 7
 func TestSearchArtifacts_ScopeFilter(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	reg := setupRegistry(t, fstest.MapFS{
 		"finance/x/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("x"))},
@@ -195,10 +182,8 @@ func TestSearchArtifacts_ScopeFilter(t *testing.T) {
 }
 
 // Spec: §6.10 — top_k > 50 is rejected with registry.invalid_argument.
-// Phase: 7
 // Matrix: §6.10 (registry.invalid_argument)
 func TestSearchArtifacts_TopKBound(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	reg := setupRegistry(t, fstest.MapFS{}, "team-shared")
 	_, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{
@@ -211,9 +196,7 @@ func TestSearchArtifacts_TopKBound(t *testing.T) {
 
 // Spec: §5 search_artifacts — total_matched reflects the true count
 // even when top_k truncates results.
-// Phase: 7
 func TestSearchArtifacts_TotalMatchedAccurate(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	files := fstest.MapFS{}
 	for i := 0; i < 12; i++ {
@@ -236,9 +219,7 @@ func TestSearchArtifacts_TotalMatchedAccurate(t *testing.T) {
 }
 
 // Spec: §5 load_artifact — version="" resolves to latest per §4.7.6.
-// Phase: 7
 func TestLoadArtifact_LatestResolution(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	st2 := store.NewMemory()
 	_ = st2.CreateTenant(context.Background(), store.Tenant{ID: tenant})
@@ -270,9 +251,7 @@ func TestLoadArtifact_LatestResolution(t *testing.T) {
 }
 
 // Spec: §4.7.6 — id@<major>.x resolves to the highest matching version.
-// Phase: 7
 func TestLoadArtifact_MajorPin(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: tenant})
@@ -296,10 +275,8 @@ func TestLoadArtifact_MajorPin(t *testing.T) {
 
 // Spec: §6.10 — load_artifact for an unknown id returns
 // registry.not_found.
-// Phase: 7
 // Matrix: §6.10 (registry.not_found)
 func TestLoadArtifact_NotFound(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	reg := setupRegistry(t, fstest.MapFS{}, "team-shared")
 	_, err := reg.LoadArtifact(context.Background(), publicID, "missing", core.LoadArtifactOptions{})
@@ -310,10 +287,8 @@ func TestLoadArtifact_NotFound(t *testing.T) {
 
 // Spec: §4.6 Visibility — manifests under a layer the caller cannot
 // see are filtered out before search / load.
-// Phase: 7
 // Matrix: §4.6 (users)
 func TestVisibility_FiltersByLayer(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: tenant})
@@ -360,4 +335,3 @@ func contains(slice []string, item string) bool {
 	}
 	return false
 }
-

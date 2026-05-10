@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/sync"
 )
 
@@ -38,9 +37,7 @@ func makeRegistry(t *testing.T, dir string) string {
 // Run after edits to the registry. Each rerun emits a WatchEvent
 // on the channel; the channel closes when ctx is canceled.
 // §13.11.4 covers the filesystem-specific watch shape.
-// Phase: 3
 func TestWatch_RerunsAfterRegistryEdit(t *testing.T) {
-	testharness.RequirePhase(t, 3)
 	// Intentionally not parallel: the poll-based watcher's ticker
 	// can be starved when this test runs alongside dozens of
 	// disk-bound tests in the same process. Serializing within the
@@ -97,9 +94,7 @@ func TestWatch_RerunsAfterRegistryEdit(t *testing.T) {
 
 // Spec: §7.5 — canceling the watcher's context closes the events
 // channel; the goroutine exits cleanly.
-// Phase: 3
 func TestWatch_CancelClosesChannel(t *testing.T) {
-	testharness.RequirePhase(t, 3)
 	// Intentionally not parallel: the poll-based watcher's ticker
 	// can be starved when this test runs alongside dozens of
 	// disk-bound tests in the same process. Serializing within the

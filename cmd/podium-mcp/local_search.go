@@ -197,7 +197,7 @@ func bm25Scores(docs [][]string, query string) []float64 {
 			}
 			idf := math.Log(1 + (float64(N)-float64(df[qt])+0.5)/(float64(df[qt])+0.5))
 			docLen := float64(len(doc))
-			norm := f*(k1+1) / (f + k1*(1-b+b*docLen/avgLen))
+			norm := f * (k1 + 1) / (f + k1*(1-b+b*docLen/avgLen))
 			score += idf * norm
 		}
 		scores[i] = score
@@ -223,4 +223,3 @@ func overlayTagsMatch(have []string, required []string) bool {
 	}
 	return true
 }
-

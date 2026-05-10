@@ -7,7 +7,6 @@ import (
 
 // Spec: §4.5.1 DOMAIN.md — frontmatter description, include, exclude,
 // discovery, and unlisted round-trip through ParseDomain. Body is preserved.
-// Phase: 0
 func TestParseDomain_FullFrontmatter(t *testing.T) {
 	t.Parallel()
 	src := []byte(`---
@@ -74,7 +73,6 @@ Operations for the AP function.
 }
 
 // Spec: §4.5.3 Unlisted folders — unlisted: true is preserved through parsing.
-// Phase: 0
 func TestParseDomain_Unlisted(t *testing.T) {
 	t.Parallel()
 	src := []byte(`---

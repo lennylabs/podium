@@ -4,15 +4,11 @@ import (
 	"context"
 	"errors"
 	"testing"
-
-	"github.com/lennylabs/podium/internal/testharness"
 )
 
 // Spec: §8.6 Audit Integrity — Append + Verify produce a sound chain
 // across multiple events.
-// Phase: 16
 func TestMemory_AppendThenVerify(t *testing.T) {
-	testharness.RequirePhase(t, 16)
 	t.Parallel()
 	s := NewMemory()
 	ctx := context.Background()
@@ -42,9 +38,7 @@ func TestMemory_AppendThenVerify(t *testing.T) {
 }
 
 // Spec: §8.6 — tampering with an event's body fails Verify.
-// Phase: 16
 func TestMemory_TamperedEventFailsVerify(t *testing.T) {
-	testharness.RequirePhase(t, 16)
 	t.Parallel()
 	s := NewMemory()
 	ctx := context.Background()
@@ -60,9 +54,7 @@ func TestMemory_TamperedEventFailsVerify(t *testing.T) {
 }
 
 // Spec: §8.1 — every documented event type compiles to a stable string.
-// Phase: 16
 func TestEventTypes_StableValues(t *testing.T) {
-	testharness.RequirePhase(t, 16)
 	t.Parallel()
 	cases := []struct {
 		evt EventType

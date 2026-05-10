@@ -9,14 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/audit"
 )
 
 // Spec: §8.3 — FileSink writes events as JSON Lines.
-// Phase: 16
 func TestFileSink_AppendPersistsAsJSONLines(t *testing.T) {
-	testharness.RequirePhase(t, 16)
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
@@ -48,9 +45,7 @@ func TestFileSink_AppendPersistsAsJSONLines(t *testing.T) {
 }
 
 // Spec: §8.6 — FileSink Verify walks the hash chain.
-// Phase: 16
 func TestFileSink_VerifyDetectsTampering(t *testing.T) {
-	testharness.RequirePhase(t, 16)
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
@@ -82,9 +77,7 @@ func TestFileSink_VerifyDetectsTampering(t *testing.T) {
 }
 
 // Spec: §8.2 — query text is regex-scrubbed for common PII patterns.
-// Phase: 16
 func TestPIIScrubber_DefaultPatterns(t *testing.T) {
-	testharness.RequirePhase(t, 16)
 	t.Parallel()
 	s := audit.NewPIIScrubber()
 	cases := []struct {
@@ -113,9 +106,7 @@ func TestPIIScrubber_DefaultPatterns(t *testing.T) {
 
 // Spec: §8.2 — manifest-declared redactKeys replace the fields with
 // [redacted].
-// Phase: 16
 func TestRedactFields(t *testing.T) {
-	testharness.RequirePhase(t, 16)
 	t.Parallel()
 	got := audit.RedactFields(map[string]string{
 		"bank_account": "12345",
@@ -130,9 +121,7 @@ func TestRedactFields(t *testing.T) {
 }
 
 // Spec: §8.2 — custom regex patterns can extend the scrubber.
-// Phase: 16
 func TestPIIScrubber_CustomPattern(t *testing.T) {
-	testharness.RequirePhase(t, 16)
 	t.Parallel()
 	s := audit.NewPIIScrubber()
 	s.Add("api-key", regexp.MustCompile(`sk-[A-Za-z0-9]{16}`), "[api-key-redacted]")

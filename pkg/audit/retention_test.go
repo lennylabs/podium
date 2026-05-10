@@ -7,16 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/audit"
 )
 
 // Spec: §8.4 — Enforce drops events older than the per-type policy
 // and rewrites the hash chain over the survivors. Verify still
 // passes after rewrite.
-// Phase: 16
 func TestEnforce_DropsExpiredEventsAndRebuildsChain(t *testing.T) {
-	testharness.RequirePhase(t, 16)
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
@@ -51,9 +48,7 @@ func TestEnforce_DropsExpiredEventsAndRebuildsChain(t *testing.T) {
 
 // Spec: §8.4 — most-restrictive policy wins when two cover the
 // same event type.
-// Phase: 16
 func TestEnforce_MostRestrictivePolicyWins(t *testing.T) {
-	testharness.RequirePhase(t, 16)
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
@@ -83,9 +78,7 @@ func TestEnforce_MostRestrictivePolicyWins(t *testing.T) {
 // Spec: §8.5 — EraseUser replaces every Caller and userID-bearing
 // Context value with a salted tombstone, appends a user.erased
 // event, and rebuilds the chain.
-// Phase: 16
 func TestEraseUser_ReplacesIdentifiersAndAppendsTombstone(t *testing.T) {
-	testharness.RequirePhase(t, 16)
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")

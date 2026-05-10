@@ -13,8 +13,8 @@ import (
 // it's not intended for catalogues larger than a few thousand
 // artifacts.
 type Memory struct {
-	dim int
-	mu  sync.RWMutex
+	dim  int
+	mu   sync.RWMutex
 	rows map[string]map[string]memVec // tenantID → key(id@ver) → vec
 }
 

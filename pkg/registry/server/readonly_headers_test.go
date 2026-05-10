@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
@@ -17,9 +16,7 @@ import (
 // X-Podium-Read-Only: true plus an X-Podium-Read-Only-Lag-Seconds
 // header when the registry is in read-only mode. Clients that need
 // strict freshness inspect these headers.
-// Phase: 0
 func TestServer_ReadOnlyHeadersOnReadEndpoints(t *testing.T) {
-	testharness.RequirePhase(t, 0)
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
@@ -60,9 +57,7 @@ func TestServer_ReadOnlyHeadersOnReadEndpoints(t *testing.T) {
 
 // Spec: §13.2.1 — load_artifact also carries the header so the
 // MCP server can surface staleness to the agent.
-// Phase: 0
 func TestServer_ReadOnlyHeadersOnLoadArtifact(t *testing.T) {
-	testharness.RequirePhase(t, 0)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "default"})

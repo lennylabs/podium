@@ -109,12 +109,12 @@ func (h *Handler) routeGroups(w http.ResponseWriter, r *http.Request, suffix str
 // ----- Users -------------------------------------------------------------
 
 type scimUser struct {
-	Schemas    []string         `json:"schemas"`
-	ID         string           `json:"id,omitempty"`
-	ExternalID string           `json:"externalId,omitempty"`
-	UserName   string           `json:"userName"`
-	Active     bool             `json:"active"`
-	Emails     []scimUserEmail  `json:"emails,omitempty"`
+	Schemas    []string        `json:"schemas"`
+	ID         string          `json:"id,omitempty"`
+	ExternalID string          `json:"externalId,omitempty"`
+	UserName   string          `json:"userName"`
+	Active     bool            `json:"active"`
+	Emails     []scimUserEmail `json:"emails,omitempty"`
 }
 
 type scimUserEmail struct {
@@ -374,4 +374,3 @@ func scimList[T any](items []T) map[string]any {
 		"Resources":    items,
 	}
 }
-

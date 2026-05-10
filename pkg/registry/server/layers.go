@@ -64,18 +64,18 @@ func (e *LayerEndpoint) WithAdminAuth(fn func(*http.Request) error) *LayerEndpoi
 
 // LayerRegisterRequest is the POST /v1/layers JSON body.
 type LayerRegisterRequest struct {
-	ID            string   `json:"id"`
-	SourceType    string   `json:"source_type"`
-	Repo          string   `json:"repo,omitempty"`
-	Ref           string   `json:"ref,omitempty"`
-	Root          string   `json:"root,omitempty"`
-	LocalPath     string   `json:"local_path,omitempty"`
-	UserDefined   bool     `json:"user_defined,omitempty"`
-	Owner         string   `json:"owner,omitempty"`
-	Public        bool     `json:"public,omitempty"`
-	Organization  bool     `json:"organization,omitempty"`
-	Groups        []string `json:"groups,omitempty"`
-	Users         []string `json:"users,omitempty"`
+	ID           string   `json:"id"`
+	SourceType   string   `json:"source_type"`
+	Repo         string   `json:"repo,omitempty"`
+	Ref          string   `json:"ref,omitempty"`
+	Root         string   `json:"root,omitempty"`
+	LocalPath    string   `json:"local_path,omitempty"`
+	UserDefined  bool     `json:"user_defined,omitempty"`
+	Owner        string   `json:"owner,omitempty"`
+	Public       bool     `json:"public,omitempty"`
+	Organization bool     `json:"organization,omitempty"`
+	Groups       []string `json:"groups,omitempty"`
+	Users        []string `json:"users,omitempty"`
 }
 
 // LayerRegisterResponse is the POST /v1/layers JSON response.

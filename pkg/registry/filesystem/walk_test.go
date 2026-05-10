@@ -34,7 +34,6 @@ Body for %s.
 // Spec: §4.2 Registry Layout — Walk discovers every ARTIFACT.md under each
 // layer and emits records keyed by canonical artifact ID (the path under
 // the layer root).
-// Phase: 0
 func TestWalk_FindsAllArtifactsInLayer(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -85,7 +84,6 @@ func TestWalk_FindsAllArtifactsInLayer(t *testing.T) {
 
 // Spec: §4.3.4 SKILL.md compliance — type: skill artifact missing SKILL.md
 // fails Walk with a structured error message.
-// Phase: 0
 func TestWalk_SkillMissingSkillMDFails(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -110,7 +108,6 @@ func TestWalk_SkillMissingSkillMDFails(t *testing.T) {
 
 // Spec: §4.4 Bundled Resources — files alongside ARTIFACT.md (and
 // SKILL.md for skills) are captured as bundled resources.
-// Phase: 0
 func TestWalk_CapturesBundledResources(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -154,7 +151,6 @@ func TestWalk_CapturesBundledResources(t *testing.T) {
 
 // Spec: §4.6 — two layers contributing the same canonical artifact ID
 // without extends: are rejected (default Walk behavior).
-// Phase: 0
 // Matrix: §6.10 (ingest.collision)
 func TestWalk_CollisionWithoutExtendsFails(t *testing.T) {
 	t.Parallel()
@@ -188,7 +184,6 @@ func TestWalk_CollisionWithoutExtendsFails(t *testing.T) {
 
 // Spec: §4.6 — sync's effective-view composition uses
 // CollisionPolicyHighestWins so the highest-precedence layer wins.
-// Phase: 0
 func TestWalk_HighestWinsKeepsTopLayer(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -228,7 +223,6 @@ layer_order:
 
 // Spec: §13.11 — single-layer mode walks the layer rooted at the registry
 // path, not at any subdirectory.
-// Phase: 0
 func TestWalk_SingleLayerArtifactIDsAreRelativeToRoot(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

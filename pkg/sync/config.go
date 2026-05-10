@@ -22,9 +22,9 @@ var (
 // through Read/Write so handcrafted comments and scalar formatting
 // stay intact across edits.
 type SyncConfig struct {
-	Defaults Defaults            `yaml:"defaults,omitempty"`
-	Profiles map[string]Profile  `yaml:"profiles,omitempty"`
-	Targets  []TargetEntry       `yaml:"targets,omitempty"`
+	Defaults Defaults           `yaml:"defaults,omitempty"`
+	Profiles map[string]Profile `yaml:"profiles,omitempty"`
+	Targets  []TargetEntry      `yaml:"targets,omitempty"`
 }
 
 // Defaults is the `defaults:` block.

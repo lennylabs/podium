@@ -26,18 +26,18 @@ type BatchLoadRequest struct {
 // BatchLoadEnvelope is one per-item response. Status is "ok" or
 // "error"; on error the Error field carries the §6.10 envelope.
 type BatchLoadEnvelope struct {
-	ID                 string             `json:"id"`
-	Status             string             `json:"status"`
-	Type               string             `json:"type,omitempty"`
-	Version            string             `json:"version,omitempty"`
-	ContentHash        string             `json:"content_hash,omitempty"`
-	ManifestBody       string             `json:"manifest_body,omitempty"`
-	Frontmatter        string             `json:"frontmatter,omitempty"`
-	Resources          map[string]string  `json:"resources,omitempty"`
-	Deprecated         bool               `json:"deprecated,omitempty"`
-	ReplacedBy         string             `json:"replaced_by,omitempty"`
-	DeprecationWarning string             `json:"deprecation_warning,omitempty"`
-	Error              *ErrorResponse     `json:"error,omitempty"`
+	ID                 string            `json:"id"`
+	Status             string            `json:"status"`
+	Type               string            `json:"type,omitempty"`
+	Version            string            `json:"version,omitempty"`
+	ContentHash        string            `json:"content_hash,omitempty"`
+	ManifestBody       string            `json:"manifest_body,omitempty"`
+	Frontmatter        string            `json:"frontmatter,omitempty"`
+	Resources          map[string]string `json:"resources,omitempty"`
+	Deprecated         bool              `json:"deprecated,omitempty"`
+	ReplacedBy         string            `json:"replaced_by,omitempty"`
+	DeprecationWarning string            `json:"deprecation_warning,omitempty"`
+	Error              *ErrorResponse    `json:"error,omitempty"`
 }
 
 // handleBatchLoad answers POST /v1/artifacts:batchLoad per

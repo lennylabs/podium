@@ -11,8 +11,8 @@ artifact = client.load_artifact(results.results[0].id)
 print(artifact.manifest_body)
 ```
 
-Stage 3 ships the meta-tool surface. OAuth device code, streaming
-subscriptions, and dependency walks land in subsequent phases.
+The client covers the meta-tool surface. OAuth device code, streaming
+subscriptions, and dependency walks remain on the roadmap.
 
 ## Test
 
@@ -21,5 +21,3 @@ cd sdks/podium-py
 pip install -e .
 pytest
 ```
-
-Tests skip when `.phase` (at the repo root) reads below `4`.

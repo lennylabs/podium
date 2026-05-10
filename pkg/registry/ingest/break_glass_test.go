@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/internal/clock"
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/store"
@@ -50,9 +49,7 @@ func breakGlassWindow(now time.Time, fields func(*ingest.FreezeWindow)) ingest.F
 // Spec: §4.7.2 — break-glass requires two distinct admin
 // approvers and a non-empty justification; a valid grant lets
 // ingest bypass the freeze.
-// Phase: 8
 func TestIngest_BreakGlassValidGrantBypassesFreeze(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
@@ -81,9 +78,7 @@ func TestIngest_BreakGlassValidGrantBypassesFreeze(t *testing.T) {
 
 // Spec: §4.7.2 — single approver is not dual-signoff; bypass is
 // refused and ingest is blocked.
-// Phase: 8
 func TestIngest_BreakGlassRejectsSingleApprover(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
@@ -107,9 +102,7 @@ func TestIngest_BreakGlassRejectsSingleApprover(t *testing.T) {
 
 // Spec: §4.7.2 — duplicate approvers do not satisfy "two
 // admins": the unique-set check.
-// Phase: 8
 func TestIngest_BreakGlassRejectsDuplicateApprovers(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
@@ -133,9 +126,7 @@ func TestIngest_BreakGlassRejectsDuplicateApprovers(t *testing.T) {
 
 // Spec: §4.7.2 — justification is required; an empty string is
 // rejected.
-// Phase: 8
 func TestIngest_BreakGlassRejectsMissingJustification(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
@@ -159,9 +150,7 @@ func TestIngest_BreakGlassRejectsMissingJustification(t *testing.T) {
 
 // Spec: §4.7.2 — break-glass auto-expires after 24h; a grant
 // older than that is refused.
-// Phase: 8
 func TestIngest_BreakGlassExpiresAfter24Hours(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
@@ -186,9 +175,7 @@ func TestIngest_BreakGlassExpiresAfter24Hours(t *testing.T) {
 // Spec: §4.7.2 — the audit event for a successful bypass
 // records both approvers and the justification so post-hoc
 // security review has the context.
-// Phase: 8
 func TestIngest_BreakGlassAuditEventCarriesGrantMetadata(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})

@@ -7,7 +7,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/sign"
 	"github.com/lennylabs/podium/pkg/store"
@@ -16,9 +15,7 @@ import (
 // Spec: §4.7.9 — when ingest is configured with a Signer, the
 // resulting ManifestRecord carries the produced envelope so
 // downstream consumers can verify against PODIUM_VERIFY_SIGNATURES.
-// Phase: 6
 func TestIngest_AttachesSignatureWhenSignerConfigured(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
@@ -54,9 +51,7 @@ func TestIngest_AttachesSignatureWhenSignerConfigured(t *testing.T) {
 
 // Spec: §4.7.9 — a signing failure surfaces as a Rejected entry
 // with the ingest.sign_failed code; the manifest is not committed.
-// Phase: 6
 func TestIngest_SignFailureRejectsArtifact(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
@@ -89,9 +84,7 @@ func TestIngest_SignFailureRejectsArtifact(t *testing.T) {
 // Spec: §4.7.9 — without a Signer the manifest stores no signature;
 // the load path returns an empty envelope and PolicyNever consumers
 // are unaffected.
-// Phase: 6
 func TestIngest_NoSignerProducesEmptySignature(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})

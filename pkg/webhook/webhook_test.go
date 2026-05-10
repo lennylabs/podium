@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/webhook"
 )
 
@@ -19,11 +18,11 @@ import (
 // optionally verifies the HMAC, and returns a configurable status
 // code. Tests use it to drive the worker's wire format.
 type receiverServer struct {
-	srv         *httptest.Server
-	deliveries  atomic.Int64
+	srv          *httptest.Server
+	deliveries   atomic.Int64
 	failuresLeft atomic.Int64
-	secret      string
-	bodies      [][]byte
+	secret       string
+	bodies       [][]byte
 }
 
 // newReceiverServer returns a server that responds 200 to every
@@ -55,9 +54,7 @@ func newReceiverServer(t *testing.T, secret string) *receiverServer {
 // Spec: §7.3.2 — Worker.Deliver POSTs the event body to every
 // matching receiver, signed with X-Podium-Signature: sha256=...
 // over the body bytes using the receiver's per-receiver secret.
-// Phase: 14
 func TestWorker_DeliversWithHMACSignature(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	rs := newReceiverServer(t, "secret-1")
 	store := webhook.NewMemoryStore()
@@ -86,9 +83,7 @@ func TestWorker_DeliversWithHMACSignature(t *testing.T) {
 // Spec: §7.3.2 — receivers whose EventFilter does not include the
 // fired event are skipped; subscribers control which events they
 // receive.
-// Phase: 14
 func TestWorker_SkipsFilteredOutEventTypes(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	rs := newReceiverServer(t, "secret-1")
 	store := webhook.NewMemoryStore()
@@ -108,9 +103,7 @@ func TestWorker_SkipsFilteredOutEventTypes(t *testing.T) {
 // Spec: §7.3.2 — transient 5xx failures are retried per the
 // configured backoff schedule. The worker eventually succeeds when
 // the receiver recovers.
-// Phase: 14
 func TestWorker_RetriesOnTransientFailure(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	rs := newReceiverServer(t, "secret-1")
 	rs.failuresLeft.Store(2) // first two attempts return 503
@@ -138,9 +131,7 @@ func TestWorker_RetriesOnTransientFailure(t *testing.T) {
 // Spec: §7.3.2 — receivers that exceed MaxFailures consecutive
 // failures auto-disable so the worker doesn't keep hitting a dead
 // endpoint. Operators re-enable explicitly.
-// Phase: 14
 func TestWorker_AutoDisablesAfterMaxFailures(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "always 503", http.StatusServiceUnavailable)
@@ -168,9 +159,7 @@ func TestWorker_AutoDisablesAfterMaxFailures(t *testing.T) {
 
 // Spec: §7.3.2 — disabled receivers are skipped silently. Operators
 // flip Disabled=false to re-enable.
-// Phase: 14
 func TestWorker_SkipsDisabledReceivers(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	rs := newReceiverServer(t, "secret-1")
 	store := webhook.NewMemoryStore()
@@ -189,9 +178,7 @@ func TestWorker_SkipsDisabledReceivers(t *testing.T) {
 
 // Spec: §7.3.2 — VerifyBody mirrors SignBody so receivers can
 // validate the signature with the same secret.
-// Phase: 14
 func TestSignBody_RoundTrip(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	body := []byte(`{"event":"artifact.published","data":{"id":"x"}}`)
 	sig := webhook.SignBody(body, "secret")
@@ -210,9 +197,7 @@ func TestSignBody_RoundTrip(t *testing.T) {
 
 // Spec: §7.3.2 — 4xx responses are non-retryable; the worker
 // records a failure and moves on.
-// Phase: 14
 func TestWorker_4xxIsNotRetryable(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	hits := atomic.Int64{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -240,9 +225,7 @@ func TestWorker_4xxIsNotRetryable(t *testing.T) {
 }
 
 // Spec: §7.3.2 — context cancel aborts retry waits cleanly.
-// Phase: 14
 func TestWorker_ContextCancelAbortsRetry(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "down", http.StatusServiceUnavailable)

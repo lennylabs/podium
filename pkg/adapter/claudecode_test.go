@@ -2,15 +2,11 @@ package adapter
 
 import (
 	"testing"
-
-	"github.com/lennylabs/podium/internal/testharness"
 )
 
 // Spec: §6.7 — claude-code adapter places skills under .claude/skills/<name>/
 // per the agentskills.io standard.
-// Phase: 3
 func TestClaudeCode_SkillLayout(t *testing.T) {
-	testharness.RequirePhase(t, 3)
 	t.Parallel()
 	src := Source{
 		ArtifactID: "finance/run-variance",
@@ -44,9 +40,7 @@ version: 1.0.0
 }
 
 // Spec: §6.7 — claude-code adapter writes type: rule into .claude/rules/.
-// Phase: 3
 func TestClaudeCode_RuleLayout(t *testing.T) {
-	testharness.RequirePhase(t, 3)
 	t.Parallel()
 	src := Source{
 		ArtifactID: "ts-style",
@@ -69,9 +63,7 @@ ts style rules
 
 // Spec: §6.7 — claude-code adapter writes type: agent into
 // .claude/agents/<name>.md.
-// Phase: 3
 func TestClaudeCode_AgentLayout(t *testing.T) {
-	testharness.RequirePhase(t, 3)
 	t.Parallel()
 	src := Source{
 		ArtifactID:    "finance/pay-invoice",
@@ -88,9 +80,7 @@ func TestClaudeCode_AgentLayout(t *testing.T) {
 
 // Spec: §6.7 — non-skill / non-rule / non-agent types land under
 // .claude/podium/<artifact-id>/ with the canonical layout.
-// Phase: 3
 func TestClaudeCode_FallbackPathForOtherTypes(t *testing.T) {
-	testharness.RequirePhase(t, 3)
 	t.Parallel()
 	src := Source{
 		ArtifactID:    "company-glossary",
@@ -107,9 +97,7 @@ func TestClaudeCode_FallbackPathForOtherTypes(t *testing.T) {
 
 // Spec: §6.7 — codex adapter places packages under .codex/packages/<id>/
 // and additionally writes rules to .codex/rules/<name>.md.
-// Phase: 3
 func TestCodex_RulePlacement(t *testing.T) {
-	testharness.RequirePhase(t, 3)
 	t.Parallel()
 	src := Source{
 		ArtifactID:    "ts-style",
@@ -135,9 +123,7 @@ func TestCodex_RulePlacement(t *testing.T) {
 
 // Spec: §6.7 — DefaultRegistry contains claude-code and codex once
 // Phase 3 is active.
-// Phase: 3
 func TestDefaultRegistry_ContainsClaudeCodeAndCodex(t *testing.T) {
-	testharness.RequirePhase(t, 3)
 	t.Parallel()
 	r := DefaultRegistry()
 	for _, id := range []string{"claude-code", "codex"} {

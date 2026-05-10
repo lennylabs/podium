@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/scim"
 )
 
@@ -50,9 +49,7 @@ func authedRequest(t *testing.T, token, method, url string, body []byte) *http.R
 
 // Spec: §6.3.1 — POST /scim/v2/Users creates a user with the
 // returned id; subsequent GET returns the same record.
-// Phase: 7
 func TestSCIM_UserCRUD(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	_, ts := bootSCIM(t, "tok")
 	body := []byte(`{
@@ -96,9 +93,7 @@ func TestSCIM_UserCRUD(t *testing.T) {
 
 // Spec: §6.3.1 — bearer-token auth: requests without a valid token
 // fail with 401; the SCIM error envelope carries the schema URN.
-// Phase: 7
 func TestSCIM_RequiresBearerToken(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	_, ts := bootSCIM(t, "expected")
 	resp := authedRequest(t, "" /* no token */, http.MethodGet, ts.URL+"/scim/v2/Users", nil)
@@ -120,9 +115,7 @@ func TestSCIM_RequiresBearerToken(t *testing.T) {
 
 // Spec: §6.3.1 — userName uniqueness is enforced; the second POST
 // returns 409 Conflict with scimType=uniqueness.
-// Phase: 7
 func TestSCIM_UserNameUniqueness(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	_, ts := bootSCIM(t, "tok")
 	body := []byte(`{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"u@x","active":true}`)
@@ -145,9 +138,7 @@ func TestSCIM_UserNameUniqueness(t *testing.T) {
 // Spec: §6.3.1 — Group CRUD plus membership lookup. Storing
 // userName values via Group members lets the visibility evaluator
 // resolve a `groups:[<displayName>]` filter via MembersOf.
-// Phase: 7
 func TestSCIM_GroupAndMembership(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	store, ts := bootSCIM(t, "tok")
 
@@ -200,9 +191,7 @@ func TestSCIM_GroupAndMembership(t *testing.T) {
 
 // Spec: §6.3.1 — the filter parser accepts eq, sw, co, pr; an
 // unsupported operator returns 400 with scimType=invalidFilter.
-// Phase: 7
 func TestSCIM_FilterParser(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	cases := []struct {
 		input    string
@@ -237,9 +226,7 @@ func TestSCIM_FilterParser(t *testing.T) {
 // Spec: §6.3.1 — DeleteUser cascades to scrub group memberships
 // so a user removed from the IdP is also removed from every
 // group's member list.
-// Phase: 7
 func TestSCIM_DeleteUserScrubsMembership(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	store := scim.NewMemory()
 	u, err := store.CreateUser(context.Background(), scim.User{UserName: "alice@x", Active: true})
@@ -266,9 +253,7 @@ func TestSCIM_DeleteUserScrubsMembership(t *testing.T) {
 // Spec: §6.3.1 — Filter.Match returns true on the eq/sw/co cases
 // and false on a mismatch; tested directly so other code paths
 // can rely on the matcher.
-// Phase: 7
 func TestSCIM_FilterMatchSemantics(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	cases := []struct {
 		f    scim.Filter

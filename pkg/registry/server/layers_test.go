@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
 )
@@ -52,18 +51,16 @@ func mustDelete(t *testing.T, base, path string) (*http.Response, []byte) {
 
 // Spec: §7.3.1 — POST /v1/layers registers a layer and returns the
 // webhook URL + HMAC secret for git sources.
-// Phase: 10
 func TestLayerEndpoint_RegisterGitLayer(t *testing.T) {
-	testharness.RequirePhase(t, 10)
 	t.Parallel()
 	base, _, cleanup := newLayerHarness(t)
 	defer cleanup()
 
 	resp, body := mustPost(t, base, "/v1/layers", map[string]any{
-		"id":          "team-finance",
-		"source_type": "git",
-		"repo":        "git@github.com:acme/finance.git",
-		"ref":         "main",
+		"id":           "team-finance",
+		"source_type":  "git",
+		"repo":         "git@github.com:acme/finance.git",
+		"ref":          "main",
 		"organization": true,
 	})
 	if resp.StatusCode != http.StatusCreated {
@@ -85,9 +82,7 @@ func TestLayerEndpoint_RegisterGitLayer(t *testing.T) {
 }
 
 // Spec: §7.3.1 — GET /v1/layers lists registered layers in Order.
-// Phase: 10
 func TestLayerEndpoint_ListReturnsRegisteredLayers(t *testing.T) {
-	testharness.RequirePhase(t, 10)
 	t.Parallel()
 	base, _, cleanup := newLayerHarness(t)
 	defer cleanup()
@@ -117,16 +112,14 @@ func TestLayerEndpoint_ListReturnsRegisteredLayers(t *testing.T) {
 }
 
 // Spec: §7.3.1 — DELETE /v1/layers?id=X unregisters a user-defined layer.
-// Phase: 10
 func TestLayerEndpoint_Unregister(t *testing.T) {
-	testharness.RequirePhase(t, 10)
 	t.Parallel()
 	base, _, cleanup := newLayerHarness(t)
 	defer cleanup()
 
 	mustPost(t, base, "/v1/layers", map[string]any{
 		"id": "joan-personal", "source_type": "local",
-		"local_path": "/tmp/joan",
+		"local_path":   "/tmp/joan",
 		"user_defined": true, "owner": "joan",
 	})
 	resp, _ := mustDelete(t, base, "/v1/layers?id=joan-personal")
@@ -140,16 +133,14 @@ func TestLayerEndpoint_Unregister(t *testing.T) {
 }
 
 // Spec: §7.3.1 — User-defined layers carry implicit users:[owner].
-// Phase: 10
 func TestLayerEndpoint_UserDefinedSetsImplicitUsers(t *testing.T) {
-	testharness.RequirePhase(t, 10)
 	t.Parallel()
 	base, st, cleanup := newLayerHarness(t)
 	defer cleanup()
 
 	mustPost(t, base, "/v1/layers", map[string]any{
 		"id": "joan-personal", "source_type": "local",
-		"local_path": "/tmp/joan",
+		"local_path":   "/tmp/joan",
 		"user_defined": true, "owner": "joan",
 	})
 	cfg, err := st.GetLayerConfig(context.Background(), "t", "joan-personal")
@@ -162,9 +153,7 @@ func TestLayerEndpoint_UserDefinedSetsImplicitUsers(t *testing.T) {
 }
 
 // Spec: §7.3.1 — POST /v1/layers/reorder re-sequences the list.
-// Phase: 10
 func TestLayerEndpoint_Reorder(t *testing.T) {
-	testharness.RequirePhase(t, 10)
 	t.Parallel()
 	base, _, cleanup := newLayerHarness(t)
 	defer cleanup()
@@ -197,9 +186,7 @@ func TestLayerEndpoint_Reorder(t *testing.T) {
 }
 
 // Spec: §6.10 — admin-only ops without admin auth fail with auth.forbidden.
-// Phase: 10
 func TestLayerEndpoint_AdminAuthRequired(t *testing.T) {
-	testharness.RequirePhase(t, 10)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})

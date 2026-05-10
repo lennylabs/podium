@@ -8,7 +8,6 @@ import (
 
 // Spec: §6.7 Harness Adapters — the none adapter writes the canonical
 // layout as-is, with paths rooted at <artifact-id>/.
-// Phase: 0
 func TestNone_WritesCanonicalLayout(t *testing.T) {
 	t.Parallel()
 	src := Source{
@@ -16,8 +15,8 @@ func TestNone_WritesCanonicalLayout(t *testing.T) {
 		ArtifactBytes: []byte("ARTIFACT body\n"),
 		SkillBytes:    []byte("SKILL body\n"),
 		Resources: map[string][]byte{
-			"scripts/x.py":     []byte("print('x')\n"),
-			"references/r.md":  []byte("# Reference\n"),
+			"scripts/x.py":    []byte("print('x')\n"),
+			"references/r.md": []byte("# Reference\n"),
 		},
 	}
 	out, err := None{}.Adapt(src)
@@ -42,7 +41,6 @@ func TestNone_WritesCanonicalLayout(t *testing.T) {
 
 // Spec: §6.7 — when no SKILL.md is present (non-skill type), the adapter
 // emits ARTIFACT.md plus bundled resources only.
-// Phase: 0
 func TestNone_OmitsMissingSkill(t *testing.T) {
 	t.Parallel()
 	src := Source{
@@ -63,7 +61,6 @@ func TestNone_OmitsMissingSkill(t *testing.T) {
 
 // Spec: §6.7 — None.ID() returns the literal "none" so PODIUM_HARNESS=none
 // resolves through the default registry.
-// Phase: 0
 func TestNone_IDIsLiteralNone(t *testing.T) {
 	t.Parallel()
 	if id := (None{}).ID(); id != "none" {
@@ -72,7 +69,6 @@ func TestNone_IDIsLiteralNone(t *testing.T) {
 }
 
 // Spec: §6.7 — DefaultRegistry includes the none adapter at minimum.
-// Phase: 0
 func TestDefaultRegistry_ContainsNone(t *testing.T) {
 	t.Parallel()
 	r := DefaultRegistry()
@@ -87,7 +83,6 @@ func TestDefaultRegistry_ContainsNone(t *testing.T) {
 
 // Spec: §6.10 namespacing — Get returns a config.unknown_harness error for
 // a missing adapter, and the error message lists registered IDs.
-// Phase: 0
 func TestRegistry_GetUnknownReturnsStructured(t *testing.T) {
 	t.Parallel()
 	r := DefaultRegistry()
@@ -104,7 +99,6 @@ func TestRegistry_GetUnknownReturnsStructured(t *testing.T) {
 }
 
 // Spec: §9.1 SPI — registering the same adapter ID twice is rejected.
-// Phase: 0
 func TestRegistry_DuplicateIDIsRejected(t *testing.T) {
 	t.Parallel()
 	r := NewRegistry()
@@ -121,7 +115,6 @@ func TestRegistry_DuplicateIDIsRejected(t *testing.T) {
 
 // Spec: §6.7 — adapter outputs are sorted deterministically so golden-file
 // comparisons remain stable across map iteration orders.
-// Phase: 0
 func TestNone_OutputIsDeterministic(t *testing.T) {
 	t.Parallel()
 	src := Source{

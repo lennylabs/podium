@@ -7,7 +7,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/vector"
 	"github.com/lennylabs/podium/pkg/vector/vectortest"
 )
@@ -16,9 +15,7 @@ import (
 // Gated on PODIUM_POSTGRES_DSN_VECTOR (separate from the metadata-
 // store DSN so operators can point them at different databases) so
 // CI without a Postgres+pgvector instance skips cleanly.
-// Phase: 5
 func TestPgVector_Conformance(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	dsn := os.Getenv("PODIUM_POSTGRES_DSN_VECTOR")
 	if dsn == "" {
 		dsn = os.Getenv("PODIUM_POSTGRES_DSN")

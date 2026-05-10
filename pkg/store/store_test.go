@@ -4,15 +4,11 @@ import (
 	"context"
 	"errors"
 	"testing"
-
-	"github.com/lennylabs/podium/internal/testharness"
 )
 
 // Spec: §4.7.1 Tenancy — tenants isolate manifest visibility; a
 // manifest stored under tenant A is invisible from tenant B.
-// Phase: 5
 func TestMemory_TenantIsolation(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	s := NewMemory()
 	ctx := context.Background()
@@ -34,9 +30,7 @@ func TestMemory_TenantIsolation(t *testing.T) {
 // Spec: §4.7 Version immutability invariant — re-ingesting the same
 // (artifact, version) with different content fails with
 // ingest.immutable_violation.
-// Phase: 5
 func TestMemory_ImmutabilityInvariant(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	s := NewMemory()
 	ctx := context.Background()
@@ -56,9 +50,7 @@ func TestMemory_ImmutabilityInvariant(t *testing.T) {
 
 // Spec: §4.7.3 Reverse Dependency Index — DependentsOf returns every
 // edge ending at the artifact.
-// Phase: 5
 func TestMemory_DependencyIndex(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	s := NewMemory()
 	ctx := context.Background()
@@ -76,9 +68,7 @@ func TestMemory_DependencyIndex(t *testing.T) {
 
 // Spec: §4.7.2 Access control — admin grants persist and are queryable
 // per (user, org) pair.
-// Phase: 5
 func TestMemory_AdminGrants(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	s := NewMemory()
 	ctx := context.Background()

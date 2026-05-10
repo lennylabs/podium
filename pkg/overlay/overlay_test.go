@@ -11,9 +11,7 @@ import (
 
 // Spec: §6.4 — Filesystem provider with a populated overlay returns
 // records via the filesystem registry walker.
-// Phase: 12
 func TestFilesystem_PopulatedOverlay(t *testing.T) {
-	testharness.RequirePhase(t, 12)
 	t.Parallel()
 	root := t.TempDir()
 	testharness.WriteTree(t, root,
@@ -32,9 +30,7 @@ func TestFilesystem_PopulatedOverlay(t *testing.T) {
 }
 
 // Spec: §6.4 — empty path returns ErrNoOverlay.
-// Phase: 12
 func TestFilesystem_EmptyPath(t *testing.T) {
-	testharness.RequirePhase(t, 12)
 	t.Parallel()
 	_, err := (Filesystem{}).Resolve(context.Background())
 	if !errors.Is(err, ErrNoOverlay) {
@@ -43,9 +39,7 @@ func TestFilesystem_EmptyPath(t *testing.T) {
 }
 
 // Spec: §6.4 path resolution — env var wins over workspace fallback.
-// Phase: 12
 func TestResolveWorkspaceOverlay_EnvPrecedence(t *testing.T) {
-	testharness.RequirePhase(t, 12)
 	t.Parallel()
 	got, err := ResolveWorkspaceOverlay("/workspace", "/explicit/env")
 	if err != nil {
@@ -57,9 +51,7 @@ func TestResolveWorkspaceOverlay_EnvPrecedence(t *testing.T) {
 }
 
 // Spec: §6.4 — fallback to <workspace>/.podium/overlay when it exists.
-// Phase: 12
 func TestResolveWorkspaceOverlay_FallbackExists(t *testing.T) {
-	testharness.RequirePhase(t, 12)
 	t.Parallel()
 	ws := t.TempDir()
 	testharness.WriteTree(t, ws, testharness.WriteTreeOption{
@@ -76,9 +68,7 @@ func TestResolveWorkspaceOverlay_FallbackExists(t *testing.T) {
 }
 
 // Spec: §6.4 — workspace without an overlay directory returns ErrNoOverlay.
-// Phase: 12
 func TestResolveWorkspaceOverlay_NoFallback(t *testing.T) {
-	testharness.RequirePhase(t, 12)
 	t.Parallel()
 	_, err := ResolveWorkspaceOverlay(t.TempDir(), "")
 	if !errors.Is(err, ErrNoOverlay) {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
@@ -40,9 +39,7 @@ func nestedAnalyzeRegistry(t *testing.T) *core.Registry {
 
 // Spec: §4.5.5 — AnalyzeDomain reports recursive_count and flags
 // sparse subdomains as fold candidates.
-// Phase: 8
 func TestAnalyzeDomain_FoldCandidates(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	reg := nestedAnalyzeRegistry(t)
 	r, err := reg.AnalyzeDomain(context.Background(), publicID, "finance")
@@ -63,9 +60,7 @@ func TestAnalyzeDomain_FoldCandidates(t *testing.T) {
 
 // Spec: §4.5.5 — passthrough chain depth correctly counts the
 // single-child intermediates above an artifact-bearing domain.
-// Phase: 8
 func TestAnalyzeDomain_PassthroughChainDepth(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	reg := nestedAnalyzeRegistry(t)
 	r, err := reg.AnalyzeDomain(context.Background(), publicID, "a")
@@ -79,9 +74,7 @@ func TestAnalyzeDomain_PassthroughChainDepth(t *testing.T) {
 
 // Spec: §4.5.5 — root analysis produces the expected
 // recursive_count for the whole tenant view.
-// Phase: 8
 func TestAnalyzeDomain_RootCounts(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	reg := nestedAnalyzeRegistry(t)
 	r, err := reg.AnalyzeDomain(context.Background(), publicID, "")

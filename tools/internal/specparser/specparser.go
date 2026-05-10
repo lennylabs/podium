@@ -64,7 +64,6 @@ type Test struct {
 	Name     string
 	File     string
 	Line     int
-	Phase    int
 	Citation Citation
 	Matrix   []MatrixCell
 	Language string // "go" | "python" | "typescript"
@@ -228,10 +227,9 @@ func parseGoFile(path string) ([]Test, error) {
 			File:     path,
 			Line:     pos.Line,
 			Language: "go",
-			Phase:    -1,
 		}
 		if fn.Doc != nil {
-			t.Citation, t.Phase, t.Matrix = parseAnnotations(fn.Doc.Text())
+			t.Citation, t.Matrix = parseAnnotations(fn.Doc.Text())
 		}
 		out = append(out, t)
 	}
@@ -258,13 +256,12 @@ func parsePyFile(path string) []Test {
 			continue
 		}
 		comment := collectPrecedingComments(lines, i, "#")
-		c, p, mat := parseAnnotations(comment)
+		c, mat := parseAnnotations(comment)
 		out = append(out, Test{
 			Name:     m[1],
 			File:     path,
 			Line:     i + 1,
 			Language: "python",
-			Phase:    p,
 			Citation: c,
 			Matrix:   mat,
 		})
@@ -285,13 +282,12 @@ func parseTSFile(path string) []Test {
 			continue
 		}
 		comment := collectPrecedingComments(lines, i, "//")
-		c, p, mat := parseAnnotations(comment)
+		c, mat := parseAnnotations(comment)
 		out = append(out, Test{
 			Name:     m[1],
 			File:     path,
 			Line:     i + 1,
 			Language: "typescript",
-			Phase:    p,
 			Citation: c,
 			Matrix:   mat,
 		})
@@ -322,23 +318,21 @@ func collectPrecedingComments(lines []string, index int, prefix string) string {
 	return strings.Join(parts, "\n")
 }
 
-// parseAnnotations extracts the spec citation, phase number, and any
-// Matrix cell tags from a comment block.
+// parseAnnotations extracts the spec citation and any Matrix
+// cell tags from a comment block.
 //
 // Recognized lines (case-insensitive on the keyword):
 //
 //	Spec:   §4.6 short title — assertion text.
 //	Spec:   n/a — reason for not citing the spec.
-//	Phase:  0
 //	Matrix: §6.7.1 (claude-code, rule_mode_glob)
 //
-// A `Spec:` annotation can wrap across multiple comment lines; lines that
-// follow without a new keyword are treated as continuations of the
-// preceding Spec note. The first Spec and Phase annotations win; every
-// Matrix annotation is collected.
-func parseAnnotations(comment string) (Citation, int, []MatrixCell) {
+// A `Spec:` annotation can wrap across multiple comment lines;
+// lines that follow without a new keyword are treated as
+// continuations of the preceding Spec note. The first Spec
+// annotation wins; every Matrix annotation is collected.
+func parseAnnotations(comment string) (Citation, []MatrixCell) {
 	c := Citation{}
-	phase := -1
 	var matrix []MatrixCell
 	lines := strings.Split(comment, "\n")
 	for i := 0; i < len(lines); i++ {
@@ -360,22 +354,17 @@ func parseAnnotations(comment string) (Citation, int, []MatrixCell) {
 				}
 				i = j
 			}
-		case startsWithCI(line, "Phase:"):
-			n, err := strconv.Atoi(strings.TrimSpace(line[len("Phase:"):]))
-			if err == nil && phase == -1 {
-				phase = n
-			}
 		case startsWithCI(line, "Matrix:"):
 			if cell, ok := parseMatrixLine(line); ok {
 				matrix = append(matrix, cell)
 			}
 		}
 	}
-	return c, phase, matrix
+	return c, matrix
 }
 
 func isAnnotationKeyword(line string) bool {
-	for _, kw := range []string{"Spec:", "Phase:", "Matrix:"} {
+	for _, kw := range []string{"Spec:", "Matrix:"} {
 		if startsWithCI(line, kw) {
 			return true
 		}

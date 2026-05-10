@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
@@ -17,9 +16,7 @@ import (
 // Spec: §4.7.8 — GET /v1/quota returns the tenant's configured
 // limits and the current measured usage. v1 derives storage_bytes
 // from the manifest list.
-// Phase: 14
 func TestQuota_ReturnsLimitsAndUsage(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{

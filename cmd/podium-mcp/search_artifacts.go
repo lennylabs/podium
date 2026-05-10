@@ -15,9 +15,9 @@ func (s *mcpServer) searchArtifacts(args map[string]any) any {
 		return errorResult(err.Error())
 	}
 	var registry struct {
-		Query        string                   `json:"query"`
-		TotalMatched int                      `json:"total_matched"`
-		Results      []map[string]any         `json:"results"`
+		Query        string           `json:"query"`
+		TotalMatched int              `json:"total_matched"`
+		Results      []map[string]any `json:"results"`
 	}
 	if err := json.Unmarshal(body, &registry); err != nil {
 		return errorResult("decode search_artifacts: " + err.Error())

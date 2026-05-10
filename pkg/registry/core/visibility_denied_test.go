@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
@@ -14,9 +13,7 @@ import (
 // artifact's layer is invisible to the caller, the registry
 // emits a visibility.denied audit event so SIEM can distinguish
 // "missing" from "filtered."
-// Phase: 7
 func TestLoadArtifact_EmitsVisibilityDeniedWhenLayerInvisible(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	const tenantID = "t"
 	st := store.NewMemory()
@@ -54,9 +51,7 @@ func TestLoadArtifact_EmitsVisibilityDeniedWhenLayerInvisible(t *testing.T) {
 // Spec: §8.1 — a genuine missing artifact (no manifest in the
 // store) yields a not_found result without firing
 // visibility.denied.
-// Phase: 7
 func TestLoadArtifact_GenuineNotFoundSkipsVisibilityDenied(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	const tenantID = "t"
 	st := store.NewMemory()

@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/vector"
 )
 
@@ -15,9 +14,7 @@ import (
 // roundtrip a vector preserving artifact_id and version metadata.
 // Tier 1 mocks the upstream; Tier 2 against a live index lives in
 // pinecone_live_test.go (env-gated).
-// Phase: 5
 func TestPinecone_PutAndQuery(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	stored := map[string][]float32{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -86,9 +83,7 @@ func TestPinecone_PutAndQuery(t *testing.T) {
 // artifactId/version metadata and converts the GraphQL distance
 // directly to SPI distance (Weaviate already returns cosine
 // distance, not similarity).
-// Phase: 5
 func TestWeaviate_PutAndQuery(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPut {
@@ -138,9 +133,7 @@ func TestWeaviate_PutAndQuery(t *testing.T) {
 
 // Spec: §4.7 — Qdrant REST upsert + search roundtrip preserving
 // payload metadata. Qdrant returns cosine similarity; SPI converts.
-// Phase: 5
 func TestQdrant_PutAndQuery(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {

@@ -7,7 +7,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
@@ -41,9 +40,7 @@ func childArtifact(parentRef, desc string) string {
 // Spec: §4.6 / §4.7.6 — extends: parent reference resolves at the
 // child's ingest time and the parent version is stored as a hard pin
 // in the child's manifest record.
-// Phase: 8
 func TestExtends_PinResolvedAtIngest(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
@@ -80,9 +77,7 @@ func TestExtends_PinResolvedAtIngest(t *testing.T) {
 // Spec: §4.6 — load_artifact merges parent and child fields per the
 // merge-semantics table: scalars (description) child wins; list fields
 // (tags) append-unique; sensitivity most-restrictive.
-// Phase: 8
 func TestExtends_LoadMergesFields(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
@@ -124,9 +119,7 @@ func TestExtends_LoadMergesFields(t *testing.T) {
 // caller cannot see, load_artifact still returns the merged manifest
 // (the parent is fetched server-side); the parent's existence is not
 // surfaced.
-// Phase: 8
 func TestExtends_HiddenParent(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
@@ -181,9 +174,7 @@ func TestExtends_HiddenParent(t *testing.T) {
 
 // Spec: §4.6 — extends pointing at an unknown parent fails ingest with
 // a structured rejection.
-// Phase: 8
 func TestExtends_UnknownParentFailsIngest(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
@@ -208,9 +199,7 @@ func TestExtends_UnknownParentFailsIngest(t *testing.T) {
 }
 
 // Spec: §4.6 — self-referencing extends is rejected as a cycle.
-// Phase: 8
 func TestExtends_SelfCycleRejected(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
@@ -234,9 +223,7 @@ func TestExtends_SelfCycleRejected(t *testing.T) {
 }
 
 // Spec: §4.7.6 — extends pin can target a specific content hash.
-// Phase: 8
 func TestExtends_ContentHashPin(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {

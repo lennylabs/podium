@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/internal/clock"
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/sync"
 )
 
@@ -18,9 +17,7 @@ func newClock() clock.Clock {
 // Spec: §7.5.4 / §7.5.5 — `podium sync override --add <id>` lands
 // the entry in toggles.add. The lock file is written when changes
 // occur, demonstrating the §7.5.4 toggle-persistence contract.
-// Phase: 14
 func TestOverride_AddInsertsToggle(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	target := t.TempDir()
 
@@ -48,9 +45,7 @@ func TestOverride_AddInsertsToggle(t *testing.T) {
 
 // Spec: §7.5.5 — --remove inserts into toggles.remove and clears any
 // matching toggles.add.
-// Phase: 14
 func TestOverride_RemoveInvalidatesAdd(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	target := t.TempDir()
 	if _, err := sync.Override(sync.OverrideOptions{
@@ -73,9 +68,7 @@ func TestOverride_RemoveInvalidatesAdd(t *testing.T) {
 }
 
 // Spec: §7.5.5 — --reset clears all toggles, like a manual sync would.
-// Phase: 14
 func TestOverride_ResetClearsToggles(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	target := t.TempDir()
 	if _, err := sync.Override(sync.OverrideOptions{
@@ -95,9 +88,7 @@ func TestOverride_ResetClearsToggles(t *testing.T) {
 }
 
 // Spec: §7.5.5 — --dry-run resolves and reports without writing.
-// Phase: 14
 func TestOverride_DryRunDoesNotWrite(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	target := t.TempDir()
 	res, err := sync.Override(sync.OverrideOptions{
@@ -119,9 +110,7 @@ func TestOverride_DryRunDoesNotWrite(t *testing.T) {
 }
 
 // Spec: §7.5.5 — empty IDs are rejected.
-// Phase: 14
 func TestOverride_EmptyIDRejected(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	_, err := sync.Override(sync.OverrideOptions{
 		Target: t.TempDir(), Add: []string{""},
@@ -133,9 +122,7 @@ func TestOverride_EmptyIDRejected(t *testing.T) {
 
 // Spec: §7.5.6 — `podium sync save-as` renders toggles + scope as a
 // profile in sync.yaml and clears the lock toggles on success.
-// Phase: 14
 func TestSaveAs_RendersProfileAndClearsToggles(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	target := t.TempDir()
 	if err := sync.WriteLock(target, &sync.LockFile{
@@ -183,9 +170,7 @@ func TestSaveAs_RendersProfileAndClearsToggles(t *testing.T) {
 }
 
 // Spec: §7.5.6 — `--update` is required to overwrite an existing profile.
-// Phase: 14
 func TestSaveAs_RequiresUpdateForExistingProfile(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	target := t.TempDir()
 	if err := sync.WriteConfig(target, &sync.SyncConfig{
@@ -212,9 +197,7 @@ func TestSaveAs_RequiresUpdateForExistingProfile(t *testing.T) {
 
 // Spec: §7.5.7 — `podium profile edit` adds/removes patterns to a
 // profile in sync.yaml.
-// Phase: 14
 func TestProfileEdit_AddInclude(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	target := t.TempDir()
 	if err := sync.WriteConfig(target, &sync.SyncConfig{
@@ -241,9 +224,7 @@ func TestProfileEdit_AddInclude(t *testing.T) {
 }
 
 // Spec: §7.5.7 — profile edit creates the file when it does not exist.
-// Phase: 14
 func TestProfileEdit_CreatesFileWhenMissing(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	target := t.TempDir()
 	if _, err := sync.ProfileEdit(sync.ProfileEditOptions{
@@ -266,9 +247,7 @@ func TestProfileEdit_CreatesFileWhenMissing(t *testing.T) {
 }
 
 // Spec: §7.5.7 — --dry-run prints the change without writing.
-// Phase: 14
 func TestProfileEdit_DryRun(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	target := t.TempDir()
 	res, err := sync.ProfileEdit(sync.ProfileEditOptions{

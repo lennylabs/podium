@@ -7,7 +7,6 @@ import (
 )
 
 // Spec: n/a — internal tooling for the speccov reporter.
-// Phase: 0
 func TestParseSpecHeading_RecognizesSectionIDs(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -36,7 +35,6 @@ func TestParseSpecHeading_RecognizesSectionIDs(t *testing.T) {
 }
 
 // Spec: n/a — internal tooling for the speccov reporter.
-// Phase: 0
 func TestSectionLess_NumericOrder(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -59,12 +57,10 @@ func TestSectionLess_NumericOrder(t *testing.T) {
 }
 
 // Spec: n/a — internal tooling for the speccov reporter.
-// Phase: 0
-func TestParseAnnotations_ExtractsSpecAndPhase(t *testing.T) {
+func TestParseAnnotations_ExtractsSpecCitation(t *testing.T) {
 	t.Parallel()
-	in := `Spec: §4.6 Layer ordering — admin layers come first.
-Phase: 7`
-	c, p, _ := parseAnnotations(in)
+	in := `Spec: §4.6 Layer ordering — admin layers come first.`
+	c, _ := parseAnnotations(in)
 	if c.SectionID != "§4.6" {
 		t.Errorf("SectionID = %q, want §4.6", c.SectionID)
 	}
@@ -78,9 +74,6 @@ Phase: 7`
 	if assertion != "admin layers come first." {
 		t.Errorf("SplitNote assertion = %q, want %q", assertion, "admin layers come first.")
 	}
-	if p != 7 {
-		t.Errorf("Phase = %d, want 7", p)
-	}
 }
 
 // Spec: n/a — Multi-cite Spec: lines (e.g. "Spec: §8.1 / §4.7.5
@@ -88,9 +81,8 @@ Phase: 7`
 // section is SectionID; the rest land in Aliases.
 func TestParseAnnotations_MultiCiteAliases(t *testing.T) {
 	t.Parallel()
-	in := `Spec: §8.1 / §4.7.5 — adapter propagates audit events.
-Phase: 7`
-	c, _, _ := parseAnnotations(in)
+	in := `Spec: §8.1 / §4.7.5 — adapter propagates audit events.`
+	c, _ := parseAnnotations(in)
 	if c.SectionID != "§8.1" {
 		t.Errorf("SectionID = %q, want §8.1", c.SectionID)
 	}
@@ -104,9 +96,8 @@ Phase: 7`
 
 func TestParseAnnotations_MultiCiteThreeSections(t *testing.T) {
 	t.Parallel()
-	in := `Spec: §1 / §2 / §3 — combined.
-Phase: 0`
-	c, _, _ := parseAnnotations(in)
+	in := `Spec: §1 / §2 / §3 — combined.`
+	c, _ := parseAnnotations(in)
 	if c.SectionID != "§1" {
 		t.Errorf("SectionID = %q", c.SectionID)
 	}
@@ -117,14 +108,12 @@ Phase: 0`
 
 // Spec: n/a — Matrix annotations let tests claim coverage of specific
 // cells in spec tables (capability matrix, error codes, failure modes).
-// Phase: 0
 func TestParseAnnotations_MatrixCells(t *testing.T) {
 	t.Parallel()
 	in := `Spec: §6.7.1 capability matrix — claude-code supports rule_mode: glob.
-Phase: 13
 Matrix: §6.7.1 (claude-code, rule_mode_glob)
 Matrix: §6.7.1 (claude-code, rule_mode_always)`
-	_, _, cells := parseAnnotations(in)
+	_, cells := parseAnnotations(in)
 	if len(cells) != 2 {
 		t.Fatalf("got %d cells, want 2: %+v", len(cells), cells)
 	}
@@ -139,7 +128,6 @@ Matrix: §6.7.1 (claude-code, rule_mode_always)`
 }
 
 // Spec: n/a — internal tooling for the speccov reporter.
-// Phase: 0
 func TestSplitNote_HandlesSeparatorVariants(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -162,31 +150,25 @@ func TestSplitNote_HandlesSeparatorVariants(t *testing.T) {
 }
 
 // Spec: n/a — internal tooling for the speccov reporter.
-// Phase: 0
 func TestParseAnnotations_AcceptsNotApplicable(t *testing.T) {
 	t.Parallel()
 	in := "Spec: n/a — internal helper."
-	c, _, _ := parseAnnotations(in)
+	c, _ := parseAnnotations(in)
 	if c.SectionID != "n/a" {
 		t.Errorf("SectionID = %q, want n/a", c.SectionID)
 	}
 }
 
 // Spec: n/a — internal tooling for the speccov reporter.
-// Phase: 0
-func TestParseAnnotations_DefaultsPhaseToMinusOne(t *testing.T) {
+func TestParseAnnotations_BareCitation(t *testing.T) {
 	t.Parallel()
-	c, p, _ := parseAnnotations("Spec: §1.1 something")
+	c, _ := parseAnnotations("Spec: §1.1 something")
 	if c.SectionID != "§1.1" {
 		t.Errorf("SectionID = %q, want §1.1", c.SectionID)
-	}
-	if p != -1 {
-		t.Errorf("Phase = %d, want -1 (untagged)", p)
 	}
 }
 
 // Spec: n/a — internal tooling for the speccov reporter.
-// Phase: 0
 func TestParseGoFile_FindsAnnotatedTests(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -195,7 +177,6 @@ func TestParseGoFile_FindsAnnotatedTests(t *testing.T) {
 import "testing"
 
 // Spec: §4.6 Layer ordering — admin layers come first.
-// Phase: 7
 func TestSomething(t *testing.T) {}
 
 // no annotation here.
@@ -212,8 +193,8 @@ func TestNoCitation(t *testing.T) {}
 	if len(tests) != 2 {
 		t.Fatalf("got %d tests, want 2", len(tests))
 	}
-	if tests[0].Name != "TestSomething" || tests[0].Citation.SectionID != "§4.6" || tests[0].Phase != 7 {
-		t.Errorf("first test = %+v, want TestSomething §4.6 phase=7", tests[0])
+	if tests[0].Name != "TestSomething" || tests[0].Citation.SectionID != "§4.6" {
+		t.Errorf("first test = %+v, want TestSomething cite §4.6", tests[0])
 	}
 	if tests[1].Name != "TestNoCitation" || tests[1].Citation.SectionID != "" {
 		t.Errorf("second test = %+v, want TestNoCitation with empty citation", tests[1])
@@ -221,12 +202,10 @@ func TestNoCitation(t *testing.T) {}
 }
 
 // Spec: n/a — internal tooling for the speccov reporter.
-// Phase: 0
 func TestParsePyFile_FindsCitations(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	src := `# Spec: §7.6 SDK surface — the Python client exposes load_artifact.
-# Phase: 4
 def test_load_artifact():
     pass
 `
@@ -238,18 +217,16 @@ def test_load_artifact():
 	if len(tests) != 1 {
 		t.Fatalf("got %d tests, want 1", len(tests))
 	}
-	if tests[0].Citation.SectionID != "§7.6" || tests[0].Phase != 4 {
-		t.Errorf("got %+v, want §7.6 phase=4", tests[0].Citation)
+	if tests[0].Citation.SectionID != "§7.6" {
+		t.Errorf("got %+v, want §7.6", tests[0].Citation)
 	}
 }
 
 // Spec: n/a — internal tooling for the speccov reporter.
-// Phase: 0
 func TestParseTSFile_FindsCitations(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	src := `// Spec: §7.6 SDK surface — the TS client exposes load_artifact.
-// Phase: 14
 test('load artifact', () => {})
 `
 	path := filepath.Join(dir, "x.test.ts")
@@ -260,13 +237,12 @@ test('load artifact', () => {})
 	if len(tests) != 1 {
 		t.Fatalf("got %d tests, want 1", len(tests))
 	}
-	if tests[0].Citation.SectionID != "§7.6" || tests[0].Phase != 14 {
-		t.Errorf("got %+v, want §7.6 phase=14", tests[0].Citation)
+	if tests[0].Citation.SectionID != "§7.6" {
+		t.Errorf("got %+v, want §7.6", tests[0].Citation)
 	}
 }
 
 // Spec: n/a — internal tooling for the speccov reporter.
-// Phase: 0
 func TestLoadSpecSections_ReadsMarkdown(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

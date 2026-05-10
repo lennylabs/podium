@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
@@ -19,9 +18,7 @@ import (
 // Spec: §7.6 — /v1/events streams change events as NDJSON. The TS
 // SDK's `subscribe()` parses this stream; the server keeps a per-
 // connection subscription on the in-process bus.
-// Phase: 14
 func TestEvents_StreamsPublishedEvents(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
@@ -86,9 +83,7 @@ func TestEvents_StreamsPublishedEvents(t *testing.T) {
 // Spec: §7.6 — events whose type is not in the subscriber's filter
 // are dropped. Subscribing to type=A while only type=B fires
 // produces no output (other than heartbeats).
-// Phase: 14
 func TestEvents_FilterDropsUnmatchedTypes(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})

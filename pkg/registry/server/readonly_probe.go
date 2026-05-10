@@ -18,13 +18,13 @@ import (
 // `registry.read_only_entered` / `registry.read_only_exited`
 // audit events the tracker emits on transition.
 type ReadOnlyProbe struct {
-	Store      store.Store
-	Tracker    *ModeTracker
-	TenantID   string
-	Interval   time.Duration
-	Failures   int
-	OnEnter    func()
-	OnExit     func()
+	Store    store.Store
+	Tracker  *ModeTracker
+	TenantID string
+	Interval time.Duration
+	Failures int
+	OnEnter  func()
+	OnExit   func()
 }
 
 // Run blocks until ctx is canceled, ticking every Interval and

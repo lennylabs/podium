@@ -10,7 +10,6 @@ import (
 
 // Spec: §13.11.1 Directory Layout — when .registry-config is absent, the
 // path is a single local-source layer rooted at the path itself.
-// Phase: 0
 func TestOpen_NoConfig_SingleLayerMode(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -46,7 +45,6 @@ Body.
 
 // Spec: §13.11.1 — multi_layer: false in .registry-config is equivalent to
 // no config: the path is a single layer.
-// Phase: 0
 func TestOpen_MultiLayerFalse_SingleLayerMode(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -67,7 +65,6 @@ func TestOpen_MultiLayerFalse_SingleLayerMode(t *testing.T) {
 
 // Spec: §13.11.1 — multi_layer: true treats each subdirectory as a layer;
 // alphabetical order in the absence of layer_order.
-// Phase: 0
 func TestOpen_MultiLayer_AlphabeticalOrder(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -105,7 +102,6 @@ func TestOpen_MultiLayer_AlphabeticalOrder(t *testing.T) {
 
 // Spec: §13.11.1 — layer_order: in .registry-config overrides alphabetical
 // order; layers listed in layer_order: come first in declared order.
-// Phase: 0
 func TestOpen_MultiLayer_LayerOrderRespected(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -148,7 +144,6 @@ layer_order:
 
 // Spec: §13.10 --layer-path modes — multi_layer: true with manifest files
 // at the top level of <path> fails with config.layer_path_ambiguous.
-// Phase: 0
 // Matrix: §6.10 (config.layer_path_ambiguous)
 func TestOpen_MultiLayer_AmbiguousFails(t *testing.T) {
 	t.Parallel()
@@ -171,7 +166,6 @@ func TestOpen_MultiLayer_AmbiguousFails(t *testing.T) {
 
 // Spec: §13.11.1 — invalid YAML in .registry-config fails with
 // ErrConfigInvalid (config.invalid namespace from §6.10).
-// Phase: 0
 // Matrix: §6.10 (config.invalid)
 func TestOpen_InvalidConfig(t *testing.T) {
 	t.Parallel()
@@ -190,7 +184,6 @@ func TestOpen_InvalidConfig(t *testing.T) {
 
 // Spec: §13.11 — a missing path returns ErrConfigMissing rather than a raw
 // os error, so callers can map it to the structured error envelope.
-// Phase: 0
 func TestOpen_MissingPath(t *testing.T) {
 	t.Parallel()
 	_, err := Open(filepath.Join(t.TempDir(), "does-not-exist"))
@@ -201,7 +194,6 @@ func TestOpen_MissingPath(t *testing.T) {
 
 // Spec: §13.11.1 — dot-directories (.git, .ci) are not treated as layers
 // in multi-layer mode.
-// Phase: 0
 func TestOpen_MultiLayer_SkipsDotDirs(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

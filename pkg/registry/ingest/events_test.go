@@ -5,16 +5,13 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/store"
 )
 
 // Spec: §7.6 — ingest.Request.PublishEvent fires artifact.published
 // for each accepted manifest with the canonical metadata fields.
-// Phase: 14
 func TestIngest_PublishesArtifactPublished(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
@@ -64,9 +61,7 @@ func TestIngest_PublishesArtifactPublished(t *testing.T) {
 // Spec: §7.6 — re-ingesting an unchanged manifest is idempotent and
 // does not republish the artifact.published event. Subscribers
 // only see one event per genuine state change.
-// Phase: 14
 func TestIngest_IdempotentDoesNotRepublish(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
@@ -97,9 +92,7 @@ func TestIngest_IdempotentDoesNotRepublish(t *testing.T) {
 // Spec: §7.6 — when an ingested manifest sets deprecated:true, both
 // artifact.published and artifact.deprecated fire. Subscribers can
 // filter on either type independently.
-// Phase: 14
 func TestIngest_PublishesArtifactDeprecated(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})

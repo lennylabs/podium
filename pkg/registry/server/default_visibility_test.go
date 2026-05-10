@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
 )
@@ -17,9 +16,7 @@ import (
 // Spec: §4.6 + PODIUM_DEFAULT_LAYER_VISIBILITY — when an admin-
 // defined layer arrives at register time without explicit
 // visibility, the configured default takes effect.
-// Phase: 10
 func TestLayerRegister_DefaultVisibilityPublic(t *testing.T) {
-	testharness.RequirePhase(t, 10)
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
@@ -55,9 +52,7 @@ func TestLayerRegister_DefaultVisibilityPublic(t *testing.T) {
 
 // Spec: §4.6 — when an admin-defined layer carries explicit
 // visibility, the default does not override it.
-// Phase: 10
 func TestLayerRegister_ExplicitVisibilityWins(t *testing.T) {
-	testharness.RequirePhase(t, 10)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})

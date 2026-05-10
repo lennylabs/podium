@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
@@ -12,9 +11,7 @@ import (
 
 // Spec: §4.7.3 / §4.7.5 — DependentsOf returns the reverse-dependency
 // edges for the artifact; invisible callers' artifacts are filtered.
-// Phase: 15
 func TestDependentsOf_FiltersByVisibility(t *testing.T) {
-	testharness.RequirePhase(t, 15)
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
@@ -53,9 +50,7 @@ func TestDependentsOf_FiltersByVisibility(t *testing.T) {
 }
 
 // Spec: §3.5 — PreviewScope returns aggregated counts only.
-// Phase: 15
 func TestPreviewScope_Aggregates(t *testing.T) {
-	testharness.RequirePhase(t, 15)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})

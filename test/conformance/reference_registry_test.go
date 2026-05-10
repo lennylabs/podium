@@ -29,9 +29,7 @@ func referencePath(t testing.TB) string {
 // Spec: §11 Verification — the example artifact registry covers every
 // first-class type, every visibility mode, and every adapter target;
 // it loads end-to-end with no errors.
-// Phase: 19
 func TestReferenceRegistry_OpensAndWalks(t *testing.T) {
-	testharness.RequirePhase(t, 19)
 	t.Parallel()
 	reg, err := filesystem.Open(referencePath(t))
 	if err != nil {
@@ -63,9 +61,7 @@ func TestReferenceRegistry_OpensAndWalks(t *testing.T) {
 
 // Spec: §11 — `podium sync` against the reference registry produces
 // a valid materialized tree.
-// Phase: 19
 func TestReferenceRegistry_SyncsThroughNoneAdapter(t *testing.T) {
-	testharness.RequirePhase(t, 19)
 	t.Parallel()
 	target := t.TempDir()
 	res, err := sync.Run(sync.Options{
@@ -83,9 +79,7 @@ func TestReferenceRegistry_SyncsThroughNoneAdapter(t *testing.T) {
 
 // Spec: §11 — claude-code adapter handles the reference registry's
 // type-skill / type-context mix without errors.
-// Phase: 19
 func TestReferenceRegistry_SyncsThroughClaudeCode(t *testing.T) {
-	testharness.RequirePhase(t, 19)
 	t.Parallel()
 	target := t.TempDir()
 	res, err := sync.Run(sync.Options{

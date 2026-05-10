@@ -6,7 +6,6 @@ import (
 )
 
 // Spec: n/a — internal harness primitive (see TEST_INFRASTRUCTURE_PLAN.md §15).
-// Phase: 0
 func TestReal_NowIsRecent(t *testing.T) {
 	t.Parallel()
 	c := Real{}
@@ -20,7 +19,6 @@ func TestReal_NowIsRecent(t *testing.T) {
 }
 
 // Spec: n/a — internal harness primitive (see TEST_INFRASTRUCTURE_PLAN.md §15).
-// Phase: 0
 func TestFrozen_NowReturnsFrozenInstant(t *testing.T) {
 	t.Parallel()
 	want := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
@@ -31,7 +29,6 @@ func TestFrozen_NowReturnsFrozenInstant(t *testing.T) {
 }
 
 // Spec: n/a — internal harness primitive (see TEST_INFRASTRUCTURE_PLAN.md §15).
-// Phase: 0
 func TestFrozen_AdvanceMovesForward(t *testing.T) {
 	t.Parallel()
 	c := NewFrozen(time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC))
@@ -43,7 +40,6 @@ func TestFrozen_AdvanceMovesForward(t *testing.T) {
 }
 
 // Spec: n/a — internal harness primitive (see TEST_INFRASTRUCTURE_PLAN.md §15).
-// Phase: 0
 func TestFrozen_SetReplacesInstant(t *testing.T) {
 	t.Parallel()
 	c := NewFrozen(time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC))
@@ -55,7 +51,6 @@ func TestFrozen_SetReplacesInstant(t *testing.T) {
 }
 
 // Spec: n/a — concurrency safety check.
-// Phase: 0
 func TestFrozen_ConcurrentAccessIsSafe(t *testing.T) {
 	t.Parallel()
 	c := NewFrozen(time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC))

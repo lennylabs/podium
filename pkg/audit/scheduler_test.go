@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/sign"
 )
@@ -19,8 +18,8 @@ type recordingSigner struct {
 	failOnce atomic.Bool
 }
 
-func (r *recordingSigner) ID() string                 { return "recording" }
-func (r *recordingSigner) Verify(_, _ string) error   { return nil }
+func (r *recordingSigner) ID() string               { return "recording" }
+func (r *recordingSigner) Verify(_, _ string) error { return nil }
 func (r *recordingSigner) Sign(contentHash string) (string, error) {
 	r.signs.Add(1)
 	if r.failOnce.CompareAndSwap(true, false) {
@@ -31,9 +30,7 @@ func (r *recordingSigner) Sign(contentHash string) (string, error) {
 
 // Spec: §8.6 — Scheduler.Run calls Anchor on startup and again
 // every Interval. ctx cancel exits cleanly.
-// Phase: 16
 func TestScheduler_AnchorsOnStartupAndPeriodically(t *testing.T) {
-	testharness.RequirePhase(t, 16)
 	t.Parallel()
 	dir := t.TempDir()
 	sink, err := audit.NewFileSink(filepath.Join(dir, "audit.log"))
@@ -65,9 +62,7 @@ func TestScheduler_AnchorsOnStartupAndPeriodically(t *testing.T) {
 
 // Spec: §8.6 — failures don't terminate the scheduler; the next
 // tick retries and OnFailure observes the error.
-// Phase: 16
 func TestScheduler_FailureDoesNotStop(t *testing.T) {
-	testharness.RequirePhase(t, 16)
 	t.Parallel()
 	dir := t.TempDir()
 	sink, _ := audit.NewFileSink(filepath.Join(dir, "audit.log"))
@@ -96,9 +91,7 @@ func TestScheduler_FailureDoesNotStop(t *testing.T) {
 }
 
 // Spec: §8.6 — when Sink or Signer is nil, Run returns immediately.
-// Phase: 16
 func TestScheduler_NoOpWithoutSinkOrSigner(t *testing.T) {
-	testharness.RequirePhase(t, 16)
 	t.Parallel()
 	sched := &audit.Scheduler{}
 	if err := sched.Run(context.Background()); err != nil {

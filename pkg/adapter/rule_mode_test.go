@@ -2,8 +2,6 @@ package adapter
 
 import (
 	"testing"
-
-	"github.com/lennylabs/podium/internal/testharness"
 )
 
 // runRuleModeCell tests one (mode, adapter) cell of the §4.3 rule_mode
@@ -42,7 +40,6 @@ func runRuleModeCell(t *testing.T, adapterID, mode string) {
 // either produce output (✓ / ⚠) or be reject-eligible (✗) at lint. The
 // adapter-level test verifies the production half: even ⚠ and (when
 // reachable) ✗ cells produce a fallback rather than panicking.
-// Phase: 13
 // Matrix: §4.3 (always, claude-desktop)
 // Matrix: §4.3 (always, claude-cowork)
 // Matrix: §4.3 (always, cursor)
@@ -51,7 +48,6 @@ func runRuleModeCell(t *testing.T, adapterID, mode string) {
 // Matrix: §4.3 (always, pi)
 // Matrix: §4.3 (always, hermes)
 func TestRuleMode_Always(t *testing.T) {
-	testharness.RequirePhase(t, 13)
 	t.Parallel()
 	for _, id := range []string{
 		"claude-desktop", "claude-cowork", "cursor", "opencode",
@@ -64,7 +60,6 @@ func TestRuleMode_Always(t *testing.T) {
 // Spec: §4.3 rule_mode: glob — ⚠ on claude-code / claude-cowork /
 // codex / opencode / pi, ✓ on cursor / hermes, ✗ on claude-desktop /
 // gemini per §6.7.1.
-// Phase: 13
 // Matrix: §4.3 (glob, claude-code)
 // Matrix: §4.3 (glob, claude-desktop)
 // Matrix: §4.3 (glob, claude-cowork)
@@ -75,7 +70,6 @@ func TestRuleMode_Always(t *testing.T) {
 // Matrix: §4.3 (glob, pi)
 // Matrix: §4.3 (glob, hermes)
 func TestRuleMode_Glob(t *testing.T) {
-	testharness.RequirePhase(t, 13)
 	t.Parallel()
 	for _, id := range firstClassAdapters {
 		runRuleModeCell(t, id, "glob")
@@ -84,7 +78,6 @@ func TestRuleMode_Glob(t *testing.T) {
 
 // Spec: §4.3 rule_mode: auto — ⚠ on most, ✓ on cursor, ✗ on
 // codex / opencode / gemini / pi.
-// Phase: 13
 // Matrix: §4.3 (auto, claude-code)
 // Matrix: §4.3 (auto, claude-desktop)
 // Matrix: §4.3 (auto, claude-cowork)
@@ -95,7 +88,6 @@ func TestRuleMode_Glob(t *testing.T) {
 // Matrix: §4.3 (auto, pi)
 // Matrix: §4.3 (auto, hermes)
 func TestRuleMode_Auto(t *testing.T) {
-	testharness.RequirePhase(t, 13)
 	t.Parallel()
 	for _, id := range firstClassAdapters {
 		runRuleModeCell(t, id, "auto")
@@ -105,14 +97,12 @@ func TestRuleMode_Auto(t *testing.T) {
 // Spec: §4.3 rule_mode: explicit — ✓ on claude-desktop, claude-cowork,
 // gemini (⚠), claude-code, codex, and the rule-aware adapters covered
 // elsewhere by TestRuleAdapters_PlaceUnderNativeRulesDir.
-// Phase: 13
 // Matrix: §4.3 (explicit, claude-code)
 // Matrix: §4.3 (explicit, claude-desktop)
 // Matrix: §4.3 (explicit, claude-cowork)
 // Matrix: §4.3 (explicit, codex)
 // Matrix: §4.3 (explicit, gemini)
 func TestRuleMode_Explicit(t *testing.T) {
-	testharness.RequirePhase(t, 13)
 	t.Parallel()
 	for _, id := range []string{
 		"claude-code", "claude-desktop", "claude-cowork",

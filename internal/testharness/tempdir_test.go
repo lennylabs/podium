@@ -7,7 +7,6 @@ import (
 )
 
 // Spec: n/a — internal harness primitive (TEST_INFRASTRUCTURE_PLAN.md §15).
-// Phase: 0
 func TestWriteTree_AndReadTree_RoundTrip(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -33,7 +32,6 @@ func TestWriteTree_AndReadTree_RoundTrip(t *testing.T) {
 }
 
 // Spec: n/a — internal harness primitive (TEST_INFRASTRUCTURE_PLAN.md §15).
-// Phase: 0
 func TestWriteTree_CreatesIntermediateDirs(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

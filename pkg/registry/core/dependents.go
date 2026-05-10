@@ -49,10 +49,10 @@ func (r *Registry) DependentsOf(ctx context.Context, id layer.Identity, artifact
 // ScopePreview is the §3.5 aggregated scope preview: counts only,
 // no per-artifact metadata.
 type ScopePreview struct {
-	Layers          []string       `json:"layers"`
-	ArtifactCount   int            `json:"artifact_count"`
-	ByType          map[string]int `json:"by_type"`
-	BySensitivity   map[string]int `json:"by_sensitivity"`
+	Layers        []string       `json:"layers"`
+	ArtifactCount int            `json:"artifact_count"`
+	ByType        map[string]int `json:"by_type"`
+	BySensitivity map[string]int `json:"by_sensitivity"`
 }
 
 // PreviewScope returns aggregated metadata for the calling identity's

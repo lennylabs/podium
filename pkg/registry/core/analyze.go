@@ -15,15 +15,15 @@ import (
 // JSON and grep for problems; structured tools consume the same
 // shape.
 type DomainAnalysis struct {
-	Path                   string                       `json:"path"`
-	ArtifactCount          int                          `json:"artifact_count"`
-	RecursiveCount         int                          `json:"recursive_count"`
-	ChildCount             int                          `json:"child_count"`
-	PassthroughChainLength int                          `json:"passthrough_chain_length"`
-	TagClusterEntropy      float64                      `json:"tag_cluster_entropy"`
-	FoldCandidates         []DomainAnalysisCandidate    `json:"fold_candidates,omitempty"`
-	SplitCandidates        []DomainAnalysisCandidate    `json:"split_candidates,omitempty"`
-	Children               []DomainAnalysisChild        `json:"children,omitempty"`
+	Path                   string                    `json:"path"`
+	ArtifactCount          int                       `json:"artifact_count"`
+	RecursiveCount         int                       `json:"recursive_count"`
+	ChildCount             int                       `json:"child_count"`
+	PassthroughChainLength int                       `json:"passthrough_chain_length"`
+	TagClusterEntropy      float64                   `json:"tag_cluster_entropy"`
+	FoldCandidates         []DomainAnalysisCandidate `json:"fold_candidates,omitempty"`
+	SplitCandidates        []DomainAnalysisCandidate `json:"split_candidates,omitempty"`
+	Children               []DomainAnalysisChild     `json:"children,omitempty"`
 }
 
 // DomainAnalysisCandidate names a subdomain that the analyzer
@@ -50,6 +50,7 @@ type DomainAnalysisChild struct {
 //   - fold candidate: subdomain with recursive_count <= 1.
 //   - split candidate: subdomain with recursive_count >= 20 and
 //     tag entropy >= 0.7.
+//
 // These are §4.5.5's documented heuristics; the registry-wide
 // `discovery:` config can override them later.
 func (r *Registry) AnalyzeDomain(ctx context.Context, id layer.Identity, path string) (*DomainAnalysis, error) {

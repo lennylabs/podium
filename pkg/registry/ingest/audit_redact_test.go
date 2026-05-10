@@ -5,7 +5,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/store"
@@ -31,9 +30,7 @@ body
 // Spec: §8.2 — manifest-declared `audit_redact` causes the
 // registry to replace the named field's value with "[redacted]"
 // in audit context for events that reference this artifact.
-// Phase: 8
 func TestIngest_AuditRedactReplacesContext(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
@@ -92,9 +89,7 @@ func TestIngest_AuditRedactReplacesContext(t *testing.T) {
 
 // Spec: §8.2 — when audit_redact is empty, every context field
 // passes through (no false redactions).
-// Phase: 8
 func TestIngest_NoAuditRedactPassesThrough(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})

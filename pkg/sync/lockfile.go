@@ -12,15 +12,15 @@ import (
 // LockFile is the per-target sync state stored at <target>/.podium/sync.lock
 // (spec §7.5.3).
 type LockFile struct {
-	Version       int            `yaml:"version"`
-	Profile       string         `yaml:"profile,omitempty"`
-	Scope         LockScope      `yaml:"scope,omitempty"`
-	Harness       string         `yaml:"harness,omitempty"`
-	Target        string         `yaml:"target,omitempty"`
-	LastSyncedAt  time.Time      `yaml:"last_synced_at,omitempty"`
-	LastSyncedBy  string         `yaml:"last_synced_by,omitempty"`
-	Artifacts     []LockArtifact `yaml:"artifacts,omitempty"`
-	Toggles       LockToggles    `yaml:"toggles,omitempty"`
+	Version      int            `yaml:"version"`
+	Profile      string         `yaml:"profile,omitempty"`
+	Scope        LockScope      `yaml:"scope,omitempty"`
+	Harness      string         `yaml:"harness,omitempty"`
+	Target       string         `yaml:"target,omitempty"`
+	LastSyncedAt time.Time      `yaml:"last_synced_at,omitempty"`
+	LastSyncedBy string         `yaml:"last_synced_by,omitempty"`
+	Artifacts    []LockArtifact `yaml:"artifacts,omitempty"`
+	Toggles      LockToggles    `yaml:"toggles,omitempty"`
 }
 
 // LockScope captures the resolved scope from the active profile or CLI

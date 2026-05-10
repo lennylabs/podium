@@ -333,7 +333,7 @@ func (f DeviceCodeFlow) client() *http.Client {
 
 // errorEnvelope matches the OAuth 2.0 error response (RFC 6749 §5.2).
 type errorEnvelope struct {
-	Error            string `json:"error"`
-	Description      string `json:"error_description,omitempty"`
-	URI              string `json:"error_uri,omitempty"`
+	Error       string `json:"error"`
+	Description string `json:"error_description,omitempty"`
+	URI         string `json:"error_uri,omitempty"`
 }

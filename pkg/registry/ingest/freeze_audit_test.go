@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/lennylabs/podium/internal/clock"
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/store"
@@ -17,9 +16,7 @@ import (
 // Spec: §8.1 — a freeze window with BreakGlass=true that would
 // otherwise block ingest emits a freeze.break_glass audit event
 // so the override is recorded.
-// Phase: 8
 func TestIngest_FreezeBreakGlassEmitsAuditEvent(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
@@ -81,9 +78,7 @@ func TestIngest_FreezeBreakGlassEmitsAuditEvent(t *testing.T) {
 // Spec: §8.1 — a freeze window with BreakGlass=true that's NOT
 // active (out of time range, or doesn't list "ingest" in
 // Blocks) does not emit freeze.break_glass.
-// Phase: 8
 func TestIngest_FreezeBreakGlassSkipsWhenWouldNotBlock(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})

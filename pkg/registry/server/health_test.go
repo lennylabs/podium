@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
@@ -38,9 +37,7 @@ func newHealthFixture(t *testing.T, opts ...server.Option) (*httptest.Server, *s
 
 // Spec: §13.9 — /healthz reports mode and is always 200 in
 // liveness terms; the mode field surfaces "ready" by default.
-// Phase: 0
 func TestHealth_DefaultIsReady(t *testing.T) {
-	testharness.RequirePhase(t, 0)
 	t.Parallel()
 	ts, _ := newHealthFixture(t)
 	resp, err := http.Get(ts.URL + "/healthz")
@@ -62,9 +59,7 @@ func TestHealth_DefaultIsReady(t *testing.T) {
 
 // Spec: §13.2.1 / §13.9 — when the mode tracker is flipped to
 // read_only, /healthz reflects it.
-// Phase: 0
 func TestHealth_SurfacesReadOnly(t *testing.T) {
-	testharness.RequirePhase(t, 0)
 	t.Parallel()
 	ts, mode := newHealthFixture(t)
 	mode.Set(server.ModeReadOnly)
@@ -84,9 +79,7 @@ func TestHealth_SurfacesReadOnly(t *testing.T) {
 
 // Spec: §13.10 — public mode is reported through /healthz so
 // load balancers and clients can detect the deployment shape.
-// Phase: 0
 func TestHealth_SurfacesPublicMode(t *testing.T) {
-	testharness.RequirePhase(t, 0)
 	t.Parallel()
 	ts, _ := newHealthFixture(t, server.WithPublicMode())
 	resp, err := http.Get(ts.URL + "/healthz")
@@ -106,9 +99,7 @@ func TestHealth_SurfacesPublicMode(t *testing.T) {
 // Spec: §13.9 — /readyz answers 200 in ready / read_only modes
 // (the registry stays in load-balancer rotation while flipped
 // read-only) and reports the canonical mode string.
-// Phase: 0
 func TestReadyz_ReadyAndReadOnlyAreOK(t *testing.T) {
-	testharness.RequirePhase(t, 0)
 	t.Parallel()
 	ts, mode := newHealthFixture(t)
 

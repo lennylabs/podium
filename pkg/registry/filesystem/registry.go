@@ -104,7 +104,6 @@ var manifestFileNames = []string{
 //     of <path> becomes a layer; ordering follows layer_order: when set,
 //     alphabetical otherwise. If a manifest file appears at the top level,
 //     return ErrLayerPathAmbiguous.
-//
 func Open(path string) (*Registry, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {

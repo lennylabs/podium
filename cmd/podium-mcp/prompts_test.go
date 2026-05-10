@@ -47,16 +47,16 @@ func TestPrompts_ListFiltersToOptIns(t *testing.T) {
 		},
 		map[string]map[string]any{
 			"ops/restart": {
-				"id":           "ops/restart",
-				"type":         "command",
+				"id":            "ops/restart",
+				"type":          "command",
 				"manifest_body": "Restart the service.",
-				"frontmatter":  "---\ntype: command\nname: restart\ndescription: restart\nversion: 1.0.0\nexpose_as_mcp_prompt: true\n---\n",
+				"frontmatter":   "---\ntype: command\nname: restart\ndescription: restart\nversion: 1.0.0\nexpose_as_mcp_prompt: true\n---\n",
 			},
 			"ops/audit": {
-				"id":           "ops/audit",
-				"type":         "command",
+				"id":            "ops/audit",
+				"type":          "command",
 				"manifest_body": "Run audit.",
-				"frontmatter":  "---\ntype: command\nname: audit\ndescription: audit\nversion: 1.0.0\n---\n",
+				"frontmatter":   "---\ntype: command\nname: audit\ndescription: audit\nversion: 1.0.0\n---\n",
 			},
 		},
 	)
@@ -80,10 +80,10 @@ func TestPrompts_GetReturnsBodyAsUserMessage(t *testing.T) {
 	ts := promptsFixture(t, nil,
 		map[string]map[string]any{
 			"ops/restart": {
-				"id":           "ops/restart",
-				"type":         "command",
+				"id":            "ops/restart",
+				"type":          "command",
 				"manifest_body": "Restart the service safely.",
-				"frontmatter":  "---\ntype: command\nname: restart\ndescription: restart\nversion: 1.0.0\nexpose_as_mcp_prompt: true\n---\n",
+				"frontmatter":   "---\ntype: command\nname: restart\ndescription: restart\nversion: 1.0.0\nexpose_as_mcp_prompt: true\n---\n",
 			},
 		},
 	)
@@ -118,10 +118,10 @@ func TestPrompts_GetRefusesUnopted(t *testing.T) {
 	ts := promptsFixture(t, nil,
 		map[string]map[string]any{
 			"ops/audit": {
-				"id":           "ops/audit",
-				"type":         "command",
+				"id":            "ops/audit",
+				"type":          "command",
 				"manifest_body": "audit body",
-				"frontmatter":  "---\ntype: command\nname: audit\ndescription: audit\nversion: 1.0.0\n---\n",
+				"frontmatter":   "---\ntype: command\nname: audit\ndescription: audit\nversion: 1.0.0\n---\n",
 			},
 		},
 	)
@@ -139,10 +139,10 @@ func TestPrompts_GetRefusesNonCommand(t *testing.T) {
 	ts := promptsFixture(t, nil,
 		map[string]map[string]any{
 			"docs/glossary": {
-				"id":           "docs/glossary",
-				"type":         "context",
+				"id":            "docs/glossary",
+				"type":          "context",
 				"manifest_body": "glossary",
-				"frontmatter":  "---\ntype: context\nname: glossary\ndescription: glossary\nversion: 1.0.0\nexpose_as_mcp_prompt: true\n---\n",
+				"frontmatter":   "---\ntype: context\nname: glossary\ndescription: glossary\nversion: 1.0.0\nexpose_as_mcp_prompt: true\n---\n",
 			},
 		},
 	)

@@ -5,7 +5,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/store/storetest"
 )
@@ -22,9 +21,7 @@ import (
 // Each sub-test starts from an empty schema by truncating all
 // Podium tables. Tests do not run in parallel because they share
 // the same backing database.
-// Phase: 5
 func TestPostgres_ConformanceSuite(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	dsn := os.Getenv("PODIUM_POSTGRES_DSN")
 	if dsn == "" {
 		t.Skip("PODIUM_POSTGRES_DSN unset; skipping Postgres conformance suite")

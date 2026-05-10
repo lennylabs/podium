@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/identity"
 )
 
@@ -36,9 +35,7 @@ func signJWT(t *testing.T, priv *rsa.PrivateKey, alg jwt.SigningMethod, claims j
 // Spec: §6.3.2 Runtime Trust Model — a JWT signed by a registered
 // runtime key verifies, and claims (sub, org_id, groups, email) flow
 // into the resulting Identity.
-// Phase: 11
 func TestJWTVerifier_AcceptsRegisteredKey(t *testing.T) {
-	testharness.RequirePhase(t, 11)
 	t.Parallel()
 	priv, pub := newRSAKeyPair(t)
 	reg := identity.NewRuntimeKeyRegistry()
@@ -76,10 +73,8 @@ func TestJWTVerifier_AcceptsRegisteredKey(t *testing.T) {
 
 // Spec: §6.3.2 / §6.10 — a token signed by an unregistered issuer
 // fails with auth.untrusted_runtime.
-// Phase: 11
 // Matrix: §6.10 (auth.untrusted_runtime)
 func TestJWTVerifier_RejectsUnregisteredIssuer(t *testing.T) {
-	testharness.RequirePhase(t, 11)
 	t.Parallel()
 	priv, _ := newRSAKeyPair(t)
 	reg := identity.NewRuntimeKeyRegistry()
@@ -99,9 +94,7 @@ func TestJWTVerifier_RejectsUnregisteredIssuer(t *testing.T) {
 
 // Spec: §6.3.2 — a token signed by a key that does not match the
 // registered key fails verification.
-// Phase: 11
 func TestJWTVerifier_RejectsWrongSignature(t *testing.T) {
-	testharness.RequirePhase(t, 11)
 	t.Parallel()
 	_, pub := newRSAKeyPair(t)
 	otherPriv, _ := newRSAKeyPair(t)
@@ -124,10 +117,8 @@ func TestJWTVerifier_RejectsWrongSignature(t *testing.T) {
 }
 
 // Spec: §6.3.2 / §6.10 — an expired token fails with auth.token_expired.
-// Phase: 11
 // Matrix: §6.10 (auth.token_expired)
 func TestJWTVerifier_RejectsExpired(t *testing.T) {
-	testharness.RequirePhase(t, 11)
 	t.Parallel()
 	priv, pub := newRSAKeyPair(t)
 	reg := identity.NewRuntimeKeyRegistry()
@@ -149,9 +140,7 @@ func TestJWTVerifier_RejectsExpired(t *testing.T) {
 }
 
 // Spec: §6.3.2 — wrong audience is rejected.
-// Phase: 11
 func TestJWTVerifier_RejectsWrongAudience(t *testing.T) {
-	testharness.RequirePhase(t, 11)
 	t.Parallel()
 	priv, pub := newRSAKeyPair(t)
 	reg := identity.NewRuntimeKeyRegistry()
@@ -173,9 +162,7 @@ func TestJWTVerifier_RejectsWrongAudience(t *testing.T) {
 }
 
 // Spec: §6.3.2 — sub claim is required.
-// Phase: 11
 func TestJWTVerifier_RejectsMissingSub(t *testing.T) {
-	testharness.RequirePhase(t, 11)
 	t.Parallel()
 	priv, pub := newRSAKeyPair(t)
 	reg := identity.NewRuntimeKeyRegistry()
@@ -200,9 +187,7 @@ func TestJWTVerifier_RejectsMissingSub(t *testing.T) {
 }
 
 // Spec: §6.3.2 — act claim is required.
-// Phase: 11
 func TestJWTVerifier_RejectsMissingAct(t *testing.T) {
-	testharness.RequirePhase(t, 11)
 	t.Parallel()
 	priv, pub := newRSAKeyPair(t)
 	reg := identity.NewRuntimeKeyRegistry()
@@ -224,9 +209,7 @@ func TestJWTVerifier_RejectsMissingAct(t *testing.T) {
 }
 
 // Spec: §6.3.2 — exp claim is required.
-// Phase: 11
 func TestJWTVerifier_RejectsMissingExp(t *testing.T) {
-	testharness.RequirePhase(t, 11)
 	t.Parallel()
 	priv, pub := newRSAKeyPair(t)
 	reg := identity.NewRuntimeKeyRegistry()
@@ -248,9 +231,7 @@ func TestJWTVerifier_RejectsMissingExp(t *testing.T) {
 
 // Spec: §9.1 — the registry rejects unsupported key types at register
 // time so misconfiguration is caught early rather than at request time.
-// Phase: 11
 func TestRuntimeKeyRegistry_RejectsUnsupportedKey(t *testing.T) {
-	testharness.RequirePhase(t, 11)
 	t.Parallel()
 	reg := identity.NewRuntimeKeyRegistry()
 	err := reg.Register(identity.RuntimeKey{
@@ -262,9 +243,7 @@ func TestRuntimeKeyRegistry_RejectsUnsupportedKey(t *testing.T) {
 }
 
 // Spec: §6.3.2 — an Ed25519 key registered is also accepted.
-// Phase: 11
 func TestRuntimeKeyRegistry_AcceptsEd25519(t *testing.T) {
-	testharness.RequirePhase(t, 11)
 	t.Parallel()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

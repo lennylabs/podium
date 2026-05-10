@@ -11,16 +11,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/registry/server"
 )
 
 // Spec: §6.3.2 — POST /v1/admin/runtime takes a PEM public key +
 // algorithm and adds the runtime to the trust list.
-// Phase: 11
 func TestRuntimeRegister_Ed25519(t *testing.T) {
-	testharness.RequirePhase(t, 11)
 	t.Parallel()
 	pub, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -54,9 +51,7 @@ func TestRuntimeRegister_Ed25519(t *testing.T) {
 
 // Spec: §6.3.2 — GET /v1/admin/runtime lists registered runtimes
 // with their algorithms (no key bytes).
-// Phase: 11
 func TestRuntimeRegister_List(t *testing.T) {
-	testharness.RequirePhase(t, 11)
 	t.Parallel()
 	pub, _, _ := ed25519.GenerateKey(rand.Reader)
 	reg := identity.NewRuntimeKeyRegistry()
@@ -89,9 +84,7 @@ func TestRuntimeRegister_List(t *testing.T) {
 
 // Spec: §6.3.2 — algorithm mismatch surfaces as
 // registry.invalid_argument.
-// Phase: 11
 func TestRuntimeRegister_AlgorithmMismatch(t *testing.T) {
-	testharness.RequirePhase(t, 11)
 	t.Parallel()
 	pub, _, _ := ed25519.GenerateKey(rand.Reader)
 	der, _ := x509.MarshalPKIXPublicKey(pub)

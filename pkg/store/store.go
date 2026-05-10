@@ -56,7 +56,7 @@ type ManifestRecord struct {
 	Deprecated  bool
 	// ReplacedBy is the §4.7.4 upgrade target the manifest names
 	// when deprecated. Empty when not set.
-	ReplacedBy  string
+	ReplacedBy string
 	// AuditRedact lists field names whose values must be replaced
 	// with "[redacted]" in audit context for events that reference
 	// this artifact (§8.2 manifest-declared redaction).
@@ -99,14 +99,14 @@ type AdminGrant struct {
 type LayerConfig struct {
 	TenantID    string
 	ID          string
-	SourceType  string   // "git" | "local"
-	Repo        string   // git source
-	Ref         string   // git source
-	Root        string   // optional subpath
-	LocalPath   string   // local source
-	Order       int      // precedence within the tenant (lower = lower precedence)
+	SourceType  string // "git" | "local"
+	Repo        string // git source
+	Ref         string // git source
+	Root        string // optional subpath
+	LocalPath   string // local source
+	Order       int    // precedence within the tenant (lower = lower precedence)
 	UserDefined bool
-	Owner       string   // OIDC sub of the registrant for user-defined layers
+	Owner       string // OIDC sub of the registrant for user-defined layers
 	// Visibility fields (subset of layer.Visibility per §4.6).
 	Public        bool
 	Organization  bool

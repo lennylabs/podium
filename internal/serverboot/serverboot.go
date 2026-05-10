@@ -357,23 +357,23 @@ type Config struct {
 	s3SecretKey      string
 	s3UseSSL         bool
 	// Vector + embedding (§4.7).
-	vectorBackend    string
+	vectorBackend     string
 	embeddingProvider string
-	embeddingModel   string
-	openaiAPIKey     string
-	voyageAPIKey     string
-	cohereAPIKey     string
-	ollamaURL        string
-	pgvectorDSN      string
-	pineconeKey      string
-	pineconeHost     string
-	pineconeNS       string
-	weaviateURL      string
-	weaviateKey      string
-	weaviateColl     string
-	qdrantURL        string
-	qdrantKey        string
-	qdrantColl       string
+	embeddingModel    string
+	openaiAPIKey      string
+	voyageAPIKey      string
+	cohereAPIKey      string
+	ollamaURL         string
+	pgvectorDSN       string
+	pineconeKey       string
+	pineconeHost      string
+	pineconeNS        string
+	weaviateURL       string
+	weaviateKey       string
+	weaviateColl      string
+	qdrantURL         string
+	qdrantKey         string
+	qdrantColl        string
 	// §4.6 default visibility for newly-registered layers when no
 	// explicit visibility is supplied. One of "public" |
 	// "organization" | "private". Defaults to "private" so
@@ -387,7 +387,7 @@ type Config struct {
 	auditSigningKeyPath string
 	auditAnchorInterval int
 	// §8.5 retention enforcement.
-	auditRetentionInterval int
+	auditRetentionInterval   int
 	auditRetentionMaxAgeDays int
 	// §4.7.8 rate limits.
 	searchQPSLimit       int

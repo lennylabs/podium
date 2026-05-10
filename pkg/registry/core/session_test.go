@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
@@ -35,9 +34,7 @@ func putVersion(t *testing.T, st store.Store, id, version string) {
 // Spec: §4.7.6 — within a session, the first latest lookup pins; later
 // same-id lookups in the same session see the same version even if
 // newer versions land in between.
-// Phase: 9
 func TestLoadArtifact_SessionConsistentLatest(t *testing.T) {
-	testharness.RequirePhase(t, 9)
 	t.Parallel()
 	reg, st := newRegistryWithStore(t)
 	putVersion(t, st, "x", "1.0.0")
@@ -90,9 +87,7 @@ func TestLoadArtifact_SessionConsistentLatest(t *testing.T) {
 
 // Spec: §4.7.6 — explicit pins (1.x, 1.2.x, 1.2.3, sha256:...) are not
 // affected by session consistency; they always resolve as specified.
-// Phase: 9
 func TestLoadArtifact_ExplicitPinIgnoresSession(t *testing.T) {
-	testharness.RequirePhase(t, 9)
 	t.Parallel()
 	reg, st := newRegistryWithStore(t)
 	putVersion(t, st, "x", "1.0.0")

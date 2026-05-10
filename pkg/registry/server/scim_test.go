@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/scim"
@@ -18,9 +17,7 @@ import (
 // Spec: §6.3.1 — when WithSCIM is configured, /scim/v2/Users
 // requests are routed to the SCIM handler and bearer-token auth
 // applies.
-// Phase: 7
 func TestServer_MountsSCIMHandler(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
@@ -55,9 +52,7 @@ func TestServer_MountsSCIMHandler(t *testing.T) {
 
 // Spec: §6.3.1 — without a configured SCIM handler the route is
 // not registered and /scim/v2/* returns 404.
-// Phase: 7
 func TestServer_SCIMUnmountedReturns404(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "default"})

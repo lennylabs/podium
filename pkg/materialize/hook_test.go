@@ -11,9 +11,7 @@ import (
 
 // Spec: §6.6 step 4 / §9.1 MaterializationHook — Materialize runs
 // every hook in order; the second hook sees the first hook's output.
-// Phase: 13
 func TestMaterialize_HookChainOrder(t *testing.T) {
-	testharness.RequirePhase(t, 13)
 	t.Parallel()
 	dir := t.TempDir()
 	uppercaser := func(f adapter.File) (adapter.File, bool, error) {
@@ -36,9 +34,7 @@ func TestMaterialize_HookChainOrder(t *testing.T) {
 }
 
 // Spec: §6.6 — a hook can drop a file entirely.
-// Phase: 13
 func TestMaterialize_HookDropsFile(t *testing.T) {
-	testharness.RequirePhase(t, 13)
 	t.Parallel()
 	dir := t.TempDir()
 	dropper := func(f adapter.File) (adapter.File, bool, error) {
@@ -64,9 +60,7 @@ func TestMaterialize_HookDropsFile(t *testing.T) {
 
 // Spec: §6.6 — a hook returning an error aborts the pipeline before
 // any write.
-// Phase: 13
 func TestMaterialize_HookErrorAborts(t *testing.T) {
-	testharness.RequirePhase(t, 13)
 	t.Parallel()
 	dir := t.TempDir()
 	failing := func(adapter.File) (adapter.File, bool, error) {
@@ -84,9 +78,7 @@ func TestMaterialize_HookErrorAborts(t *testing.T) {
 }
 
 // Spec: §6.6 — Materialize without hooks behaves like Write.
-// Phase: 13
 func TestMaterialize_NoHooksMatchesWrite(t *testing.T) {
-	testharness.RequirePhase(t, 13)
 	t.Parallel()
 	dir := t.TempDir()
 	if err := Materialize(dir, []adapter.File{

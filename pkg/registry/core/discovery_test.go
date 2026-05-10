@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
@@ -45,9 +44,7 @@ func fmtID(i int) string {
 // Spec: §4.5.5 — notable list is capped at notable_count; default 10.
 // The cap itself is not surfaced in the rendering note: notes cover
 // only budget tightening and depth-cap cases per §4.5.5.
-// Phase: 8
 func TestLoadDomain_NotableCountDefault(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	reg := freshRegistry(t, 25)
 	res, err := reg.LoadDomain(context.Background(), publicID, "", core.LoadDomainOptions{})
@@ -63,9 +60,7 @@ func TestLoadDomain_NotableCountDefault(t *testing.T) {
 }
 
 // Spec: §4.5.5 — caller-supplied notable_count overrides the default.
-// Phase: 8
 func TestLoadDomain_NotableCountCallerOverride(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	reg := freshRegistry(t, 25)
 	res, err := reg.LoadDomain(context.Background(), publicID, "", core.LoadDomainOptions{
@@ -81,9 +76,7 @@ func TestLoadDomain_NotableCountCallerOverride(t *testing.T) {
 
 // Spec: §4.5.5 — featured artifacts surface first in the notable list,
 // in author-supplied order; the rest fill in alphabetically.
-// Phase: 8
 func TestLoadDomain_FeaturedSurfacesFirst(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	reg := freshRegistry(t, 5)
 	res, err := reg.LoadDomain(context.Background(), publicID, "", core.LoadDomainOptions{
@@ -105,9 +98,7 @@ func TestLoadDomain_FeaturedSurfacesFirst(t *testing.T) {
 
 // Spec: §4.5.5 — depth above the resolved ceiling is capped silently
 // and surfaced in the rendering note.
-// Phase: 8
 func TestLoadDomain_DepthAboveCeilingNoted(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	reg := freshRegistry(t, 1)
 	res, err := reg.LoadDomain(context.Background(), publicID, "", core.LoadDomainOptions{
@@ -124,9 +115,7 @@ func TestLoadDomain_DepthAboveCeilingNoted(t *testing.T) {
 // Spec: §4.5.5 — a featured ID that does not match any visible
 // artifact is dropped silently; the remaining notable list is
 // alphabetical.
-// Phase: 8
 func TestLoadDomain_FeaturedUnknownDropped(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	reg := freshRegistry(t, 3)
 	res, err := reg.LoadDomain(context.Background(), publicID, "", core.LoadDomainOptions{
@@ -174,9 +163,7 @@ func nestedRegistry(t *testing.T) *core.Registry {
 // Spec: §4.5.5 — fold_below_artifacts collapses a sparse subdomain
 // into the parent's leaf set; folded artifacts surface in Notable
 // with a folded_from annotation.
-// Phase: 8
 func TestLoadDomain_FoldBelowArtifacts(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	reg := nestedRegistry(t)
 	res, err := reg.LoadDomain(context.Background(), publicID, "finance", core.LoadDomainOptions{
@@ -211,9 +198,7 @@ func TestLoadDomain_FoldBelowArtifacts(t *testing.T) {
 // Spec: §4.5.5 — fold_passthrough_chains collapses single-child
 // intermediates so the immediate-children list shows the deepest
 // non-passthrough descendant directly. Canonical IDs are preserved.
-// Phase: 8
 func TestLoadDomain_FoldPassthroughChains(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
@@ -240,9 +225,7 @@ func TestLoadDomain_FoldPassthroughChains(t *testing.T) {
 
 // Spec: §4.5.5 — disabling fold_passthrough_chains preserves the
 // directory hierarchy in the rendered tree.
-// Phase: 8
 func TestLoadDomain_FoldPassthroughDisabled(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
@@ -269,9 +252,7 @@ func TestLoadDomain_FoldPassthroughDisabled(t *testing.T) {
 
 // Spec: §4.5.5 — target_response_tokens tightens the notable list
 // to fit a soft budget; the rendering note describes the reduction.
-// Phase: 8
 func TestLoadDomain_TargetResponseTokensTightens(t *testing.T) {
-	testharness.RequirePhase(t, 8)
 	t.Parallel()
 	reg := freshRegistry(t, 25)
 	res, err := reg.LoadDomain(context.Background(), publicID, "", core.LoadDomainOptions{

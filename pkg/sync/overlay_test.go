@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/sync"
 )
 
@@ -47,9 +46,7 @@ func makeOverlayWithBody(t *testing.T, dir, body string) string {
 
 // Spec: §6.4 — workspace overlay sits at the highest precedence and
 // replaces the registry's contribution at the same canonical ID.
-// Phase: 12
 func TestRun_OverlayOverridesRegistry(t *testing.T) {
-	testharness.RequirePhase(t, 12)
 	t.Parallel()
 	dir := t.TempDir()
 	registryBody := "---\ntype: context\nversion: 1.0.0\ndescription: registry\nsensitivity: low\n---\n\nfrom registry\n"
@@ -83,9 +80,7 @@ func TestRun_OverlayOverridesRegistry(t *testing.T) {
 
 // Spec: §6.4 — overlay artifacts whose IDs are not in the registry
 // are appended; nothing else is dropped.
-// Phase: 12
 func TestRun_OverlayAppendsNewArtifact(t *testing.T) {
-	testharness.RequirePhase(t, 12)
 	t.Parallel()
 	dir := t.TempDir()
 	registryBody := "---\ntype: context\nversion: 1.0.0\ndescription: r\nsensitivity: low\n---\n\nregistry-only\n"

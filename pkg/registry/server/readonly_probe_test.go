@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
 )
@@ -27,9 +26,7 @@ func (f *flakyStore) GetTenant(ctx context.Context, id string) (store.Tenant, er
 
 // Spec: §13.2.1 — after Failures consecutive probe failures, the
 // tracker flips to read_only; the first success restores ready.
-// Phase: 2
 func TestReadOnlyProbe_FlipsAfterFailures(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	mem := store.NewMemory()
 	if err := mem.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
@@ -87,9 +84,7 @@ func TestReadOnlyProbe_FlipsAfterFailures(t *testing.T) {
 
 // Spec: §13.2.1 — probe is a no-op when not configured (no Store
 // or Failures=0).
-// Phase: 2
 func TestReadOnlyProbe_NoOpWhenUnconfigured(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	probe := &server.ReadOnlyProbe{}
 	if err := probe.Run(context.Background()); err != nil {

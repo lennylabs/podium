@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
@@ -45,9 +44,7 @@ func newBatchFixture(t *testing.T) (*httptest.Server, store.Store) {
 // Spec: §7.6.2 — POST /v1/artifacts:batchLoad accepts a list of
 // IDs and returns an array of per-item envelopes carrying the
 // canonical metadata.
-// Phase: 4
 func TestBatchLoad_ReturnsPerItemEnvelopes(t *testing.T) {
-	testharness.RequirePhase(t, 4)
 	t.Parallel()
 	ts, _ := newBatchFixture(t)
 	body, _ := json.Marshal(map[string]any{"ids": []string{"team/a", "team/b"}})
@@ -79,9 +76,7 @@ func TestBatchLoad_ReturnsPerItemEnvelopes(t *testing.T) {
 // Spec: §7.6.2 — partial failure does not fail the batch. Items
 // the caller cannot see come back as status=error with
 // visibility.denied; missing items as registry.not_found.
-// Phase: 4
 func TestBatchLoad_PartialFailureSurfacesPerItemErrors(t *testing.T) {
-	testharness.RequirePhase(t, 4)
 	t.Parallel()
 	ts, _ := newBatchFixture(t)
 	body, _ := json.Marshal(map[string]any{
@@ -115,9 +110,7 @@ func TestBatchLoad_PartialFailureSurfacesPerItemErrors(t *testing.T) {
 
 // Spec: §7.6.2 — hard cap of 50 IDs per batch. Larger requests
 // fail with registry.invalid_argument.
-// Phase: 4
 func TestBatchLoad_RejectsBatchAboveCap(t *testing.T) {
-	testharness.RequirePhase(t, 4)
 	t.Parallel()
 	ts, _ := newBatchFixture(t)
 	ids := make([]string, 51)
@@ -140,9 +133,7 @@ func TestBatchLoad_RejectsBatchAboveCap(t *testing.T) {
 }
 
 // Spec: §7.6.2 — empty ids array is rejected.
-// Phase: 4
 func TestBatchLoad_RejectsEmptyIDs(t *testing.T) {
-	testharness.RequirePhase(t, 4)
 	t.Parallel()
 	ts, _ := newBatchFixture(t)
 	body, _ := json.Marshal(map[string]any{"ids": []string{}})
@@ -157,9 +148,7 @@ func TestBatchLoad_RejectsEmptyIDs(t *testing.T) {
 }
 
 // Spec: §7.6.2 — version_pins map carries explicit versions per ID.
-// Phase: 4
 func TestBatchLoad_VersionPinsHonored(t *testing.T) {
-	testharness.RequirePhase(t, 4)
 	t.Parallel()
 	ts, st := newBatchFixture(t)
 	// Add a v2 of team/a.
@@ -184,4 +173,3 @@ func TestBatchLoad_VersionPinsHonored(t *testing.T) {
 		t.Errorf("envelope = %+v, want version 1.0.0", out)
 	}
 }
-

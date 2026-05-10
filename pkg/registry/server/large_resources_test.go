@@ -38,7 +38,7 @@ func largeResourceSetup(t *testing.T) (string, []byte, string) {
 	largeBody := makeBigPayload(objectstore.InlineCutoff + 1024)
 	testharness.WriteTree(t, dir,
 		testharness.WriteTreeOption{
-			Path: "finance/run/ARTIFACT.md",
+			Path:    "finance/run/ARTIFACT.md",
 			Content: "---\ntype: skill\nversion: 1.0.0\ndescription: r\n---\n\nbody\n",
 		},
 		testharness.WriteTreeOption{
@@ -80,9 +80,7 @@ func largeResourceSetup(t *testing.T) (string, []byte, string) {
 // small ones return inline, large ones return as URLs in the
 // large_resources field. The content hash and size are present so
 // the consumer can verify the bytes after fetch.
-// Phase: 2
 func TestLoadArtifact_LargeResourceReturnedAsURL(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	srvURL, largeBody, contentHash := largeResourceSetup(t)
 	resp, err := http.Get(srvURL + "/v1/load_artifact?id=finance/run")
@@ -122,9 +120,7 @@ func TestLoadArtifact_LargeResourceReturnedAsURL(t *testing.T) {
 // Spec: §13.10 — the filesystem backend's /objects/{key} route
 // returns the bytes for an authorized caller, and the consumer can
 // verify sha256(bytes) == ContentHash after fetch.
-// Phase: 2
 func TestObjectsRoute_FetchAndVerifyHash(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	srvURL, largeBody, contentHash := largeResourceSetup(t)
 	loadResp, err := http.Get(srvURL + "/v1/load_artifact?id=finance/run")
@@ -161,9 +157,7 @@ func TestObjectsRoute_FetchAndVerifyHash(t *testing.T) {
 // Spec: §13.10 — /objects/{key} for an unknown key returns 404, not
 // 200. Tests confirm an attacker cannot probe for the existence of
 // content hashes they don't already know.
-// Phase: 2
 func TestObjectsRoute_UnknownKeyReturnsNotFound(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	srvURL, _, _ := largeResourceSetup(t)
 	resp, err := http.Get(srvURL + "/objects/" + strings.Repeat("0", 64))
@@ -177,9 +171,7 @@ func TestObjectsRoute_UnknownKeyReturnsNotFound(t *testing.T) {
 }
 
 // Spec: §13.10 — /objects/{key} rejects path-traversal attempts.
-// Phase: 2
 func TestObjectsRoute_RejectsPathTraversal(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	srvURL, _, _ := largeResourceSetup(t)
 	resp, err := http.Get(srvURL + "/objects/..%2Fescape")
@@ -194,9 +186,7 @@ func TestObjectsRoute_RejectsPathTraversal(t *testing.T) {
 
 // Spec: §13.10 — the /objects route only registers when an
 // objectstore is configured. Without it, the route returns 404.
-// Phase: 2
 func TestObjectsRoute_NotRegisteredWithoutObjectStore(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	dir := t.TempDir()
 	testharness.WriteTree(t, dir,

@@ -7,16 +7,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/internal/testharness/registryharness"
 )
 
 // Spec: §6.9 / §6.10 — initialize with a too-old protocolVersion is
 // rejected with mcp.unsupported_version.
-// Phase: 4
 // Matrix: §6.10 (mcp.unsupported_version)
 func TestPodiumMCP_RejectsOlderProtocol(t *testing.T) {
-	testharness.RequirePhase(t, 4)
 	t.Parallel()
 	h := registryharness.New(t)
 	bin := buildMCP(t)
@@ -51,9 +48,7 @@ func TestPodiumMCP_RejectsOlderProtocol(t *testing.T) {
 
 // Spec: §6.9 / §6.10 — initialize with no protocolVersion is accepted
 // (host did not assert a specific version; we negotiate to ours).
-// Phase: 4
 func TestPodiumMCP_InitializeNegotiates(t *testing.T) {
-	testharness.RequirePhase(t, 4)
 	t.Parallel()
 	h := registryharness.New(t)
 	bin := buildMCP(t)
@@ -89,10 +84,8 @@ func TestPodiumMCP_InitializeNegotiates(t *testing.T) {
 // Spec: §6.10 — when the registry is unreachable, the MCP bridge
 // surfaces network.registry_unreachable in the tool-call result so
 // the host can warn the user about staleness.
-// Phase: 4
 // Matrix: §6.10 (network.registry_unreachable)
 func TestPodiumMCP_NetworkRegistryUnreachable(t *testing.T) {
-	testharness.RequirePhase(t, 4)
 	t.Parallel()
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)

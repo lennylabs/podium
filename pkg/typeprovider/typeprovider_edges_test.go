@@ -10,8 +10,8 @@ import (
 
 type emptyTypeProvider struct{}
 
-func (emptyTypeProvider) ID() string                                           { return "empty" }
-func (emptyTypeProvider) Type() manifest.ArtifactType                          { return "" }
+func (emptyTypeProvider) ID() string                                            { return "empty" }
+func (emptyTypeProvider) Type() manifest.ArtifactType                           { return "" }
 func (emptyTypeProvider) Validate(*manifest.Artifact) []typeprovider.Diagnostic { return nil }
 
 // Spec: §9 — Register rejects a nil provider so a misconfigured

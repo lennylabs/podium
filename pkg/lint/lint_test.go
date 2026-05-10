@@ -27,9 +27,7 @@ func openFixture(t *testing.T, opts ...testharness.WriteTreeOption) (*filesystem
 
 // Spec: §4.3 universal fields — type and version are required; missing
 // fields produce a lint.required_field_missing error.
-// Phase: 1
 func TestLint_RequiredFieldsMissing(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	reg, records := openFixture(t,
 		testharness.WriteTreeOption{
@@ -61,9 +59,7 @@ body
 // Spec: §4.3.4 SKILL.md compliance — type: skill artifact missing SKILL.md
 // fails Walk before lint runs (Phase 0); a skill with SKILL.md whose name
 // does not match the parent directory triggers lint.skill_md_compliance.
-// Phase: 1
 func TestLint_SkillNameMustMatchDirectory(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	reg, records := openFixture(t,
 		testharness.WriteTreeOption{
@@ -94,9 +90,7 @@ body
 
 // Spec: §4.3.4 — invalid SKILL.md name (uppercase / underscore) triggers
 // lint.invalid_name.
-// Phase: 1
 func TestLint_InvalidNameSyntax(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	reg, records := openFixture(t,
 		testharness.WriteTreeOption{
@@ -126,9 +120,7 @@ body
 }
 
 // Spec: §4.7.6 — version must be valid semver.
-// Phase: 1
 func TestLint_InvalidSemverVersion(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	reg, records := openFixture(t,
 		testharness.WriteTreeOption{
@@ -152,9 +144,7 @@ body
 // Spec: §4.3 — effort_hint and model_class_hint apply only to types
 // agent, skill, and command. Setting them on context, rule, hook, or
 // mcp-server emits a warning.
-// Phase: 1
 func TestLint_EffortHintWarnsOnUnsupportedType(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	reg, records := openFixture(t,
 		testharness.WriteTreeOption{
@@ -181,9 +171,7 @@ body
 
 // Spec: §4.1 — extension types (e.g., dataset, model, eval) require a
 // TypeProvider; in Phase 1 they trigger a lint.unknown_type warning.
-// Phase: 1
 func TestLint_UnknownTypeWarning(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	reg, records := openFixture(t,
 		testharness.WriteTreeOption{
@@ -207,9 +195,7 @@ body
 // Spec: §4.3.5 — hook_event using a generic event (pre_tool_use) is
 // allowed but lint emits an info-level note recommending the more
 // specific subtype where possible.
-// Phase: 1
 func TestLint_HookGenericEventInfo(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	reg, records := openFixture(t,
 		testharness.WriteTreeOption{
@@ -235,9 +221,7 @@ body
 
 // Spec: §4.3 — a clean fixture with all required fields produces no
 // diagnostics.
-// Phase: 1
 func TestLint_CleanArtifactProducesNoDiagnostics(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	reg, records := openFixture(t,
 		testharness.WriteTreeOption{
@@ -271,9 +255,7 @@ Body.
 
 // Spec: §4.3 — lint output is sorted deterministically by artifact ID
 // then code so CLI golden output and SIEM-side diffing remain stable.
-// Phase: 1
 func TestLint_OutputIsDeterministic(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	reg, records := openFixture(t,
 		testharness.WriteTreeOption{
@@ -315,9 +297,7 @@ body
 
 // Spec: §4.3 — Diagnostic.String renders severity, ID, message, code, and
 // rule so CLI output is grep-able.
-// Phase: 1
 func TestDiagnostic_StringIncludesAllFields(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	d := Diagnostic{
 		ArtifactID: "x/y",

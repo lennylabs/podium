@@ -47,16 +47,16 @@ var (
 
 // Receiver is one configured outbound destination.
 type Receiver struct {
-	ID            string
-	TenantID      string
-	URL           string
-	Secret        string
-	EventFilter   []string
-	Disabled      bool
-	FailureCount  int
-	LastDelivery  time.Time
-	LastFailure   time.Time
-	CreatedAt     time.Time
+	ID           string
+	TenantID     string
+	URL          string
+	Secret       string
+	EventFilter  []string
+	Disabled     bool
+	FailureCount int
+	LastDelivery time.Time
+	LastFailure  time.Time
+	CreatedAt    time.Time
 }
 
 // Matches reports whether the receiver's filter accepts an event of

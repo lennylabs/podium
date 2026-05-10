@@ -39,9 +39,7 @@ func newlineDelimitedRequests(calls []rpcCall) []byte {
 
 // Spec: §6.1 The Bridge — initialize returns the MCP capabilities
 // declaration with tools, prompts, and sessionCorrelation.
-// Phase: 4
 func TestPodiumMCP_InitializeReturnsCapabilities(t *testing.T) {
-	testharness.RequirePhase(t, 4)
 	t.Parallel()
 	h := registryharness.New(t)
 
@@ -71,9 +69,7 @@ func TestPodiumMCP_InitializeReturnsCapabilities(t *testing.T) {
 }
 
 // Spec: §5 — tools/list returns the four meta-tools.
-// Phase: 4
 func TestPodiumMCP_ToolsListReturnsMetaTools(t *testing.T) {
-	testharness.RequirePhase(t, 4)
 	t.Parallel()
 	h := registryharness.New(t)
 	bin := buildMCP(t)
@@ -99,9 +95,7 @@ func TestPodiumMCP_ToolsListReturnsMetaTools(t *testing.T) {
 
 // Spec: §5 — tools/call for search_artifacts forwards to the registry's
 // HTTP API and returns the decoded response.
-// Phase: 4
 func TestPodiumMCP_ToolsCallProxiesSearchArtifacts(t *testing.T) {
-	testharness.RequirePhase(t, 4)
 	t.Parallel()
 	h := registryharness.New(t,
 		testharness.WriteTreeOption{
@@ -147,7 +141,7 @@ func repoRoot(t testing.TB) string {
 	dir, _ := exec.Command("pwd").Output()
 	d := strings.TrimSpace(string(dir))
 	for d != "/" {
-		if _, err := exec.Command("test", "-f", d+"/.phase").CombinedOutput(); err == nil {
+		if _, err := exec.Command("test", "-f", d+"/go.mod").CombinedOutput(); err == nil {
 			return d
 		}
 		d = parentOf(d)

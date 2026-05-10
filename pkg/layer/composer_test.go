@@ -3,16 +3,13 @@ package layer
 import (
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/manifest"
 )
 
 // Spec: §4.6 Visibility — public layer is visible to everyone, including
 // unauthenticated callers.
-// Phase: 7
 // Matrix: §4.6 (public)
 func TestVisible_PublicLayerEveryone(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	layer := Layer{ID: "x", Visibility: Visibility{Public: true}}
 	if !Visible(layer, Identity{}) {
@@ -24,10 +21,8 @@ func TestVisible_PublicLayerEveryone(t *testing.T) {
 }
 
 // Spec: §4.6 — organization: true requires an authenticated org member.
-// Phase: 7
 // Matrix: §4.6 (organization)
 func TestVisible_OrgRequiresAuth(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	layer := Layer{ID: "x", Visibility: Visibility{Organization: true}}
 	if Visible(layer, Identity{}) {
@@ -39,10 +34,8 @@ func TestVisible_OrgRequiresAuth(t *testing.T) {
 }
 
 // Spec: §4.6 — groups: matches OIDC group claims.
-// Phase: 7
 // Matrix: §4.6 (groups)
 func TestVisible_GroupsMatch(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	layer := Layer{ID: "x", Visibility: Visibility{Groups: []string{"finance"}}}
 	if !Visible(layer, Identity{Sub: "joan", IsAuthenticated: true, Groups: []string{"finance", "ops"}}) {
@@ -54,10 +47,8 @@ func TestVisible_GroupsMatch(t *testing.T) {
 }
 
 // Spec: §4.6 — multiple visibility fields combine as a union.
-// Phase: 7
 // Matrix: §4.6 (groups_users)
 func TestVisible_FieldUnion(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	layer := Layer{ID: "x", Visibility: Visibility{
 		Groups: []string{"finance"},
@@ -72,9 +63,7 @@ func TestVisible_FieldUnion(t *testing.T) {
 }
 
 // Spec: §13.10 — public-mode bypasses the visibility evaluator.
-// Phase: 7
 func TestVisible_PublicModeBypass(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	layer := Layer{ID: "x", Visibility: Visibility{Users: []string{"someone-else"}}}
 	if !Visible(layer, Identity{IsPublic: true}) {
@@ -85,7 +74,6 @@ func TestVisible_PublicModeBypass(t *testing.T) {
 // Spec: §4.6 Visibility — every subset of {public, organization,
 // groups, users} composes as a union: a caller sees the layer if any
 // component matches, and never if none match.
-// Phase: 7
 // Matrix: §4.6 (users)
 // Matrix: §4.6 (public_organization)
 // Matrix: §4.6 (public_groups)
@@ -98,7 +86,6 @@ func TestVisible_PublicModeBypass(t *testing.T) {
 // Matrix: §4.6 (organization_groups_users)
 // Matrix: §4.6 (public_organization_groups_users)
 func TestVisible_AllUnions(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 
 	// Identities: matchPublic is the only one that should see a
@@ -171,9 +158,7 @@ func TestVisible_AllUnions(t *testing.T) {
 
 // Spec: §4.6 — EffectiveLayers returns the subset visible to identity
 // in precedence order.
-// Phase: 7
 func TestEffectiveLayers_FiltersAndOrders(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	layers := []Layer{
 		{ID: "high", Visibility: Visibility{Public: true}, Precedence: 30},
@@ -191,9 +176,7 @@ func TestEffectiveLayers_FiltersAndOrders(t *testing.T) {
 
 // Spec: §4.6 — Compose under highest-wins keeps the highest-precedence
 // candidate per canonical ID.
-// Phase: 7
 func TestCompose_HighestPrecedenceWins(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	layers := []Layer{
 		{ID: "low", Precedence: 10},
@@ -213,9 +196,7 @@ func TestCompose_HighestPrecedenceWins(t *testing.T) {
 
 // Spec: §4.6 merge semantics — sensitivity is most-restrictive-wins
 // (high > medium > low).
-// Phase: 7
 func TestMostRestrictiveSensitivity(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	candidates := []Candidate{
 		{Artifact: &manifest.Artifact{Sensitivity: manifest.SensitivityLow}},
@@ -228,9 +209,7 @@ func TestMostRestrictiveSensitivity(t *testing.T) {
 }
 
 // Spec: §4.6 merge semantics — tags append-unique across layers.
-// Phase: 7
 func TestAppendUniqueTags(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	candidates := []Candidate{
 		{Artifact: &manifest.Artifact{Tags: []string{"a", "b"}}},
@@ -249,9 +228,7 @@ func TestAppendUniqueTags(t *testing.T) {
 }
 
 // Spec: §4.7.6 — SplitArtifactRef parses id@version pinning syntax.
-// Phase: 7
 func TestSplitArtifactRef(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	id, ver := SplitArtifactRef("finance/ap/pay-invoice@1.2.0")
 	if id != "finance/ap/pay-invoice" || ver != "1.2.0" {

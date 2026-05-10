@@ -47,9 +47,9 @@ func Anchor(ctx context.Context, sink *FileSink, signer sign.Provider) (int64, e
 		Caller:    "system:anchor",
 		Target:    chainHead,
 		Context: map[string]string{
-			"signer":    signer.ID(),
-			"envelope":  envelope,
-			"log_index": fmt.Sprintf("%d", logIndex),
+			"signer":      signer.ID(),
+			"envelope":    envelope,
+			"log_index":   fmt.Sprintf("%d", logIndex),
 			"anchored_at": now.Format(time.RFC3339Nano),
 		},
 	}); err != nil {

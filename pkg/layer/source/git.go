@@ -224,10 +224,15 @@ type gitEntry struct {
 	isDir bool
 }
 
-func (e gitEntry) Name() string                       { return e.name }
-func (e gitEntry) IsDir() bool                        { return e.isDir }
-func (e gitEntry) Type() fs.FileMode                  { if e.isDir { return fs.ModeDir }; return 0 }
-func (e gitEntry) Info() (fs.FileInfo, error)         { return gitFileInfo{name: e.name, isDir: e.isDir}, nil }
+func (e gitEntry) Name() string { return e.name }
+func (e gitEntry) IsDir() bool  { return e.isDir }
+func (e gitEntry) Type() fs.FileMode {
+	if e.isDir {
+		return fs.ModeDir
+	}
+	return 0
+}
+func (e gitEntry) Info() (fs.FileInfo, error) { return gitFileInfo{name: e.name, isDir: e.isDir}, nil }
 
 // gitDir implements fs.File (ReadDirFile) for a tree.
 type gitDir struct {
@@ -266,9 +271,14 @@ type gitFileInfo struct {
 	isDir bool
 }
 
-func (i gitFileInfo) Name() string       { return i.name }
-func (i gitFileInfo) Size() int64        { return i.size }
-func (i gitFileInfo) Mode() fs.FileMode  { if i.isDir { return fs.ModeDir | 0o755 }; return 0o644 }
+func (i gitFileInfo) Name() string { return i.name }
+func (i gitFileInfo) Size() int64  { return i.size }
+func (i gitFileInfo) Mode() fs.FileMode {
+	if i.isDir {
+		return fs.ModeDir | 0o755
+	}
+	return 0o644
+}
 func (i gitFileInfo) ModTime() time.Time { return time.Time{} }
 func (i gitFileInfo) IsDir() bool        { return i.isDir }
 func (i gitFileInfo) Sys() any           { return nil }

@@ -135,6 +135,6 @@ type builtin struct {
 	typ manifest.ArtifactType
 }
 
-func (b builtin) ID() string                                  { return "builtin:" + string(b.typ) }
-func (b builtin) Type() manifest.ArtifactType                 { return b.typ }
-func (b builtin) Validate(*manifest.Artifact) []Diagnostic    { return nil }
+func (b builtin) ID() string                               { return "builtin:" + string(b.typ) }
+func (b builtin) Type() manifest.ArtifactType              { return b.typ }
+func (b builtin) Validate(*manifest.Artifact) []Diagnostic { return nil }

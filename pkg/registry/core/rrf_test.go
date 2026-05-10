@@ -4,16 +4,13 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/registry/core"
 )
 
 // Spec: §4.7 — RRF combines two ranked lists; an item that appears
 // near the top of both lists outranks an item that appears in only
 // one.
-// Phase: 5
 func TestRRFFuse_ConsensusBeatsSinglePresence(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	lex := []string{"a", "b", "c", "d"}
 	vec := []string{"b", "a", "e", "f"}
@@ -28,9 +25,7 @@ func TestRRFFuse_ConsensusBeatsSinglePresence(t *testing.T) {
 }
 
 // Spec: §4.7 — fusing identical lists returns the same order.
-// Phase: 5
 func TestRRFFuse_IdenticalListsAreStable(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	list := []string{"x", "y", "z"}
 	got := core.RRFFuse(list, list)
@@ -41,9 +36,7 @@ func TestRRFFuse_IdenticalListsAreStable(t *testing.T) {
 
 // Spec: §4.7 — single-list fusion is a passthrough; useful when
 // vector search is unavailable and the registry degrades to BM25.
-// Phase: 5
 func TestRRFFuse_SingleListIsPassthrough(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	list := []string{"a", "b", "c"}
 	got := core.RRFFuse(list)
@@ -53,9 +46,7 @@ func TestRRFFuse_SingleListIsPassthrough(t *testing.T) {
 }
 
 // Spec: §4.7 — empty lists fuse to empty.
-// Phase: 5
 func TestRRFFuse_EmptyInputIsEmptyOutput(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	if got := core.RRFFuse(); len(got) != 0 {
 		t.Errorf("got %v, want empty", got)

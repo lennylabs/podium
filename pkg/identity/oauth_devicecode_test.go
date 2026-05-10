@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/identity"
 )
 
@@ -29,12 +28,12 @@ type fakeIdP struct {
 
 	// poll behavior: the first N polls return authorization_pending,
 	// subsequent polls return tokens / errors.
-	polls          int
-	pendingPolls   int
-	slowdownPolls  int
-	terminalError  string
-	accessToken    string
-	refreshToken   string
+	polls         int
+	pendingPolls  int
+	slowdownPolls int
+	terminalError string
+	accessToken   string
+	refreshToken  string
 }
 
 func (f *fakeIdP) handleDeviceAuth(w http.ResponseWriter, _ *http.Request) {
@@ -91,9 +90,7 @@ func newFakeIdP(t *testing.T, idp *fakeIdP) *httptest.Server {
 
 // Spec: §6.3 — Initiate POSTs to the device-auth endpoint and decodes
 // device_code, user_code, verification_uri, interval.
-// Phase: 11
 func TestDeviceCodeFlow_Initiate(t *testing.T) {
-	testharness.RequirePhase(t, 11)
 	t.Parallel()
 	idp := &fakeIdP{
 		deviceCode:      "DC-1234",
@@ -127,10 +124,8 @@ func TestDeviceCodeFlow_Initiate(t *testing.T) {
 
 // Spec: §6.3 / §6.10 — PollOnce returns ErrAuthorizationPending while
 // the user is completing the flow.
-// Phase: 11
 // Matrix: §6.10 (auth.device_code_pending)
 func TestDeviceCodeFlow_PollOncePending(t *testing.T) {
-	testharness.RequirePhase(t, 11)
 	t.Parallel()
 	idp := &fakeIdP{
 		deviceCode: "DC", verificationURI: "https://x", interval: 1,
@@ -154,9 +149,7 @@ func TestDeviceCodeFlow_PollOncePending(t *testing.T) {
 
 // Spec: §6.3 — Poll loops until the IdP returns tokens; pending and
 // slow_down responses extend the interval.
-// Phase: 11
 func TestDeviceCodeFlow_PollSucceedsAfterPending(t *testing.T) {
-	testharness.RequirePhase(t, 11)
 	t.Parallel()
 	idp := &fakeIdP{
 		deviceCode: "DC", verificationURI: "https://x", interval: 1,
@@ -187,9 +180,7 @@ func TestDeviceCodeFlow_PollSucceedsAfterPending(t *testing.T) {
 }
 
 // Spec: §6.3 — access_denied surfaces as ErrAccessDenied.
-// Phase: 11
 func TestDeviceCodeFlow_AccessDenied(t *testing.T) {
-	testharness.RequirePhase(t, 11)
 	t.Parallel()
 	idp := &fakeIdP{
 		deviceCode: "DC", verificationURI: "https://x", interval: 1,
@@ -209,9 +200,7 @@ func TestDeviceCodeFlow_AccessDenied(t *testing.T) {
 }
 
 // Spec: §6.3 — expired_token surfaces as ErrExpiredToken.
-// Phase: 11
 func TestDeviceCodeFlow_ExpiredToken(t *testing.T) {
-	testharness.RequirePhase(t, 11)
 	t.Parallel()
 	idp := &fakeIdP{
 		deviceCode: "DC", verificationURI: "https://x", interval: 1,
@@ -232,9 +221,7 @@ func TestDeviceCodeFlow_ExpiredToken(t *testing.T) {
 
 // Spec: §6.3 — Poll honors context cancellation so a CLI Ctrl+C
 // returns immediately without one more interval-wait.
-// Phase: 11
 func TestDeviceCodeFlow_PollContextCanceled(t *testing.T) {
-	testharness.RequirePhase(t, 11)
 	t.Parallel()
 	idp := &fakeIdP{
 		deviceCode: "DC", verificationURI: "https://x", interval: 1,

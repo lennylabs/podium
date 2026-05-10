@@ -100,7 +100,7 @@ func repoRoot() (string, error) {
 		return "", err
 	}
 	for {
-		if _, err := os.Stat(filepath.Join(dir, ".phase")); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
 			return dir, nil
 		}
 		parent := filepath.Dir(dir)

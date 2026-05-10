@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
@@ -21,9 +20,7 @@ import (
 // Spec: §7.3.2 — receivers configured via POST /v1/webhooks receive
 // outbound deliveries when the server publishes an event. The body
 // is signed with X-Podium-Signature against the receiver's secret.
-// Phase: 14
 func TestWebhooks_EndToEndDelivery(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	delivered := atomic.Int64{}
 	bodyChan := make(chan []byte, 4)
@@ -88,9 +85,7 @@ func TestWebhooks_EndToEndDelivery(t *testing.T) {
 
 // Spec: §7.3.2 — GET /v1/webhooks lists every receiver but masks
 // the secret so a read does not leak the HMAC key.
-// Phase: 14
 func TestWebhooks_ListMasksSecret(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	wstore := webhook.NewMemoryStore()
 	_ = wstore.Put(context.Background(), webhook.Receiver{
@@ -119,9 +114,7 @@ func TestWebhooks_ListMasksSecret(t *testing.T) {
 
 // Spec: §7.3.2 — DELETE /v1/webhooks/{id} removes the receiver so
 // no further events are delivered to it.
-// Phase: 14
 func TestWebhooks_DeleteStopsDeliveries(t *testing.T) {
-	testharness.RequirePhase(t, 14)
 	t.Parallel()
 	deliveries := atomic.Int64{}
 	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

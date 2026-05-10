@@ -8,7 +8,6 @@ import (
 // Spec: §4.3 Artifact Manifest Schema — SplitFrontmatter splits on the
 // leading "---" and the next "---" delimiter; the prose body is everything
 // after, with leading whitespace trimmed.
-// Phase: 0
 func TestSplitFrontmatter_RoundTrip(t *testing.T) {
 	t.Parallel()
 	src := []byte(`---
@@ -32,7 +31,6 @@ spans multiple lines
 }
 
 // Spec: §4.3 — without a leading "---" the input is rejected.
-// Phase: 0
 func TestSplitFrontmatter_RejectsMissingLeadingDelimiter(t *testing.T) {
 	t.Parallel()
 	src := []byte(`type: skill
@@ -49,7 +47,6 @@ body
 
 // Spec: §4.2 Registry Layout on Disk — canonical artifact IDs use forward
 // slashes regardless of the host OS.
-// Phase: 0
 func TestJoinCanonicalPath_UsesForwardSlash(t *testing.T) {
 	t.Parallel()
 	got := JoinCanonicalPath("finance", "ap", "pay-invoice")

@@ -13,7 +13,6 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/storage/memory"
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/layer/source"
 )
 
@@ -59,9 +58,7 @@ func repoFactory(t *testing.T, files map[string]string) (string, func()) {
 
 // Spec: §4.6 source types — Git.Snapshot clones the repo and exposes
 // the tree at cfg.Ref as an fs.FS that the ingest pipeline can walk.
-// Phase: 6
 func TestGit_SnapshotExposesTree(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	url, cleanup := repoFactory(t, map[string]string{
 		"company-glossary/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\n---\n\nbody\n",
@@ -91,9 +88,7 @@ func TestGit_SnapshotExposesTree(t *testing.T) {
 }
 
 // Spec: §4.6 — fs.WalkDir traversal works against the git tree FS.
-// Phase: 6
 func TestGit_FSWalkDir(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	url, cleanup := repoFactory(t, map[string]string{
 		"a/ARTIFACT.md":   "---\ntype: context\nversion: 1.0.0\n---\n\n",
@@ -125,10 +120,8 @@ func TestGit_FSWalkDir(t *testing.T) {
 }
 
 // Spec: §6.10 — unreachable repo returns ErrSourceUnreachable.
-// Phase: 6
 // Matrix: §6.10 (ingest.source_unreachable)
 func TestGit_UnreachableRepo(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	_, err := (source.Git{}).Snapshot(context.Background(), source.LayerConfig{
 		Repo: "file:///nonexistent/repo/path", Ref: "main",
@@ -141,9 +134,7 @@ func TestGit_UnreachableRepo(t *testing.T) {
 // Spec: §7.3.1 — force-push tolerance: when the configured PriorRef
 // remains reachable from the new ref, Snapshot reports
 // HistoryRewritten=false. This is the normal advance case.
-// Phase: 9
 func TestGit_SnapshotForcePushAdvanceNotRewritten(t *testing.T) {
-	testharness.RequirePhase(t, 9)
 	t.Parallel()
 	dir := t.TempDir()
 	repo, err := git.PlainInit(dir, false)
@@ -186,9 +177,7 @@ func TestGit_SnapshotForcePushAdvanceNotRewritten(t *testing.T) {
 // Spec: §7.3.1 — force-push tolerance: when the new ref no longer
 // reaches the prior ref, Snapshot reports HistoryRewritten=true so
 // the caller can emit layer.history_rewritten and proceed.
-// Phase: 9
 func TestGit_SnapshotForcePushDetected(t *testing.T) {
-	testharness.RequirePhase(t, 9)
 	t.Parallel()
 	dir := t.TempDir()
 	repo, err := git.PlainInit(dir, false)
@@ -233,12 +222,10 @@ func TestGit_SnapshotForcePushDetected(t *testing.T) {
 }
 
 // Spec: §4.6 — cfg.Root narrows the snapshot to a subtree.
-// Phase: 6
 func TestGit_RootNarrowsToSubtree(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	url, cleanup := repoFactory(t, map[string]string{
-		"top.txt":               "outside",
+		"top.txt":                 "outside",
 		"artifacts/x/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\n---\n\n",
 	})
 	defer cleanup()

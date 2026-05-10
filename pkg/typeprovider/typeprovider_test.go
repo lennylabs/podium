@@ -73,8 +73,8 @@ func TestRegistry_TypesIsSorted(t *testing.T) {
 
 type macroProvider struct{}
 
-func (macroProvider) ID() string                       { return "macro" }
-func (macroProvider) Type() manifest.ArtifactType      { return "macro" }
+func (macroProvider) ID() string                  { return "macro" }
+func (macroProvider) Type() manifest.ArtifactType { return "macro" }
 func (macroProvider) Validate(a *manifest.Artifact) []typeprovider.Diagnostic {
 	if a.Name == "" {
 		return []typeprovider.Diagnostic{{Severity: "error", Code: "macro.no-name", Message: "macro: name required"}}

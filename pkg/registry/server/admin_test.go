@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
@@ -52,9 +51,7 @@ func bootRegistryWithAdmin(t *testing.T, sub string, layers []layer.Layer, opts 
 // Spec: §4.7.2 — POST /v1/admin/grants creates an admin grant for
 // the named user; GET /v1/admin/show-effective then resolves the
 // per-layer visibility for that user.
-// Phase: 10
 func TestAdminGrants_RoundTrip(t *testing.T) {
-	testharness.RequirePhase(t, 10)
 	t.Parallel()
 	ts := bootRegistryWithAdmin(t, "alice", []layer.Layer{
 		{ID: "team", Visibility: layer.Visibility{Public: true}},
@@ -84,9 +81,7 @@ func TestAdminGrants_RoundTrip(t *testing.T) {
 
 // Spec: §6.10 / §4.7.2 — admin endpoints reject non-admin callers
 // with auth.forbidden.
-// Phase: 10
 func TestAdminGrants_NonAdminRejected(t *testing.T) {
-	testharness.RequirePhase(t, 10)
 	t.Parallel()
 	ts := bootRegistryWithAdmin(t, "" /* anonymous caller */, nil)
 	body, _ := json.Marshal(map[string]string{"user_id": "bob"})
@@ -106,9 +101,7 @@ func TestAdminGrants_NonAdminRejected(t *testing.T) {
 
 // Spec: §4.6 — show-effective returns one row per configured
 // layer with a stable Reason string explaining the verdict.
-// Phase: 10
 func TestAdminShowEffective_PerLayerVisibility(t *testing.T) {
-	testharness.RequirePhase(t, 10)
 	t.Parallel()
 	layers := []layer.Layer{
 		{ID: "public", Visibility: layer.Visibility{Public: true}, Precedence: 1},
@@ -126,8 +119,8 @@ func TestAdminShowEffective_PerLayerVisibility(t *testing.T) {
 		t.Fatalf("status = %d: %s", resp.StatusCode, buf)
 	}
 	var parsed struct {
-		UserID string                  `json:"user_id"`
-		Layers []core.EffectiveLayer   `json:"layers"`
+		UserID string                `json:"user_id"`
+		Layers []core.EffectiveLayer `json:"layers"`
 	}
 	_ = json.NewDecoder(resp.Body).Decode(&parsed)
 	if parsed.UserID != "bob" {

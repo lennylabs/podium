@@ -11,4 +11,5 @@ coverage.html
 __pycache__/
 *.pyc
 .venv/
+*.egg-info/
 node_modules/

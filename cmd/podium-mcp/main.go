@@ -66,18 +66,18 @@ func main() {
 
 // config captures every PODIUM_ env var the bridge consults.
 type config struct {
-	registry         string
-	harness          string
-	cacheDir         string
-	cacheMode        string
-	materializeRoot  string
-	sessionToken     string
-	sessionTokenFile string
-	overlayPath      string
-	auditSink        string
-	tenantID         string
-	oauthAudience    string
-	verifyPolicy     sign.VerificationPolicy
+	registry          string
+	harness           string
+	cacheDir          string
+	cacheMode         string
+	materializeRoot   string
+	sessionToken      string
+	sessionTokenFile  string
+	overlayPath       string
+	auditSink         string
+	tenantID          string
+	oauthAudience     string
+	verifyPolicy      sign.VerificationPolicy
 	signatureProvider string
 	// §4.4.1 sandbox enforcement.
 	enforceSandbox bool
@@ -95,9 +95,9 @@ func loadConfig() (*config, error) {
 	// PODIUM_SESSION_TOKEN; the named var's value is read here.
 	tokenSource := envDefault("PODIUM_SESSION_TOKEN_ENV", "PODIUM_SESSION_TOKEN")
 	c := &config{
-		registry:         os.Getenv("PODIUM_REGISTRY"),
-		harness:          envDefault("PODIUM_HARNESS", "none"),
-		cacheDir:         os.Getenv("PODIUM_CACHE_DIR"),
+		registry: os.Getenv("PODIUM_REGISTRY"),
+		harness:  envDefault("PODIUM_HARNESS", "none"),
+		cacheDir: os.Getenv("PODIUM_CACHE_DIR"),
 		// §6.5: always-revalidate (default) | offline-first | offline-only.
 		cacheMode:        envDefault("PODIUM_CACHE_MODE", "always-revalidate"),
 		materializeRoot:  os.Getenv("PODIUM_MATERIALIZE_ROOT"),
@@ -108,7 +108,7 @@ func loadConfig() (*config, error) {
 		tenantID:         os.Getenv("PODIUM_TENANT_ID"),
 		oauthAudience:    os.Getenv("PODIUM_OAUTH_AUDIENCE"),
 		// §4.7.9 / §6.2: never | medium-and-above (default) | always.
-		verifyPolicy:     sign.VerificationPolicy(envDefault("PODIUM_VERIFY_SIGNATURES", string(sign.PolicyMediumAndAbove))),
+		verifyPolicy:      sign.VerificationPolicy(envDefault("PODIUM_VERIFY_SIGNATURES", string(sign.PolicyMediumAndAbove))),
 		signatureProvider: envDefault("PODIUM_SIGNATURE_PROVIDER", "noop"),
 		// §4.4.1 sandbox enforcement.
 		enforceSandbox: os.Getenv("PODIUM_ENFORCE_SANDBOX_PROFILE") == "true",
@@ -534,10 +534,10 @@ func resourcesAsStrings(in map[string][]byte) map[string]string {
 // LoadArtifactResponse so we can decode it without importing the server
 // package.
 type loadArtifactResponse struct {
-	ID           string            `json:"id"`
-	Type         string            `json:"type"`
-	Version      string            `json:"version"`
-	ContentHash  string            `json:"content_hash"`
+	ID             string                       `json:"id"`
+	Type           string                       `json:"type"`
+	Version        string                       `json:"version"`
+	ContentHash    string                       `json:"content_hash"`
 	ManifestBody   string                       `json:"manifest_body"`
 	Frontmatter    string                       `json:"frontmatter"`
 	Layer          string                       `json:"layer,omitempty"`

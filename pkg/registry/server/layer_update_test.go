@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
 )
@@ -18,9 +17,7 @@ import (
 // /v1/layers/update?id=ID. The endpoint applies a partial patch:
 // non-zero fields replace the prior LayerConfig values, zero
 // fields are preserved.
-// Phase: 10
 func TestLayerUpdate_PartialPatch(t *testing.T) {
-	testharness.RequirePhase(t, 10)
 	t.Parallel()
 	const tenantID = "t"
 	st := store.NewMemory()
@@ -77,9 +74,7 @@ func TestLayerUpdate_PartialPatch(t *testing.T) {
 
 // Spec: §7.3.1 — updating an unknown layer returns
 // registry.not_found.
-// Phase: 10
 func TestLayerUpdate_NotFound(t *testing.T) {
-	testharness.RequirePhase(t, 10)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})

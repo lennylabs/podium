@@ -9,7 +9,6 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/layer/source"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/store"
@@ -25,7 +24,7 @@ type fakeProvider struct {
 	calledWithPrior  string
 }
 
-func (p *fakeProvider) ID() string                  { return "fake" }
+func (p *fakeProvider) ID() string                   { return "fake" }
 func (p *fakeProvider) Trigger() source.TriggerModel { return source.TriggerManual }
 func (p *fakeProvider) Snapshot(_ context.Context, cfg source.LayerConfig) (*source.Snapshot, error) {
 	p.calledWithPrior = cfg.PriorRef
@@ -45,9 +44,7 @@ func contextManifestBody(desc string) string {
 // Spec: §7.3.1 — SourceIngest threads the prior ref into the
 // provider, ingests the snapshot, and updates LastIngestedRef on
 // success. The layer config persists with the new commit SHA.
-// Phase: 9
 func TestSourceIngest_TracksLastIngestedRef(t *testing.T) {
-	testharness.RequirePhase(t, 9)
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
@@ -94,9 +91,7 @@ func TestSourceIngest_TracksLastIngestedRef(t *testing.T) {
 // Spec: §7.3.1 — tolerant policy accepts a rewritten history,
 // emitting a layer.history_rewritten audit event. The ingest result
 // reports normal acceptance.
-// Phase: 9
 func TestSourceIngest_TolerantEmitsRewriteEvent(t *testing.T) {
-	testharness.RequirePhase(t, 9)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
@@ -135,10 +130,8 @@ func TestSourceIngest_TolerantEmitsRewriteEvent(t *testing.T) {
 
 // Spec: §6.10 — strict force-push policy rejects with
 // ingest.history_rewritten and skips the ingest.
-// Phase: 9
 // Matrix: §6.10 (ingest.history_rewritten)
 func TestSourceIngest_StrictRejectsRewrite(t *testing.T) {
-	testharness.RequirePhase(t, 9)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})

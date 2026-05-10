@@ -19,8 +19,8 @@ import (
 // a blob; hashedrekord lets the log validate signature presence
 // without storing the underlying bytes.
 type rekorRecord struct {
-	Kind       string          `json:"kind"`
-	APIVersion string          `json:"apiVersion"`
+	Kind       string           `json:"kind"`
+	APIVersion string           `json:"apiVersion"`
 	Spec       hashedRekordSpec `json:"spec"`
 }
 
@@ -30,8 +30,8 @@ type hashedRekordSpec struct {
 }
 
 type hashedRekordSignature struct {
-	Content   string                  `json:"content"`
-	PublicKey hashedRekordPublicKey   `json:"publicKey"`
+	Content   string                `json:"content"`
+	PublicKey hashedRekordPublicKey `json:"publicKey"`
 }
 
 type hashedRekordPublicKey struct {

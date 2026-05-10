@@ -4,16 +4,13 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/layer/webhook"
 )
 
 // Spec: §7.3.1 — GitHub webhooks signed with HMAC-SHA256 verify under
 // the matching secret.
-// Phase: 6
 // Matrix: §6.10 (ingest.webhook_invalid)
 func TestGitHub_VerifiesValidSha256(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	body := []byte(`{"ref":"refs/heads/main"}`)
 	secret := "a-secret"
@@ -27,9 +24,7 @@ func TestGitHub_VerifiesValidSha256(t *testing.T) {
 }
 
 // Spec: §7.3.1 — wrong secret yields ErrInvalidSignature.
-// Phase: 6
 func TestGitHub_RejectsWrongSecret(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	body := []byte(`{"ref":"refs/heads/main"}`)
 	sig, _ := webhook.Sign("github", body, "right")
@@ -40,9 +35,7 @@ func TestGitHub_RejectsWrongSecret(t *testing.T) {
 }
 
 // Spec: §7.3.1 — body tampering invalidates the signature.
-// Phase: 6
 func TestGitHub_RejectsTamperedBody(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	original := []byte(`{"ref":"refs/heads/main"}`)
 	tampered := []byte(`{"ref":"refs/heads/evil"}`)
@@ -54,9 +47,7 @@ func TestGitHub_RejectsTamperedBody(t *testing.T) {
 }
 
 // Spec: §7.3.1 — sha1 fallback works for legacy webhooks.
-// Phase: 6
 func TestGitHub_AcceptsSha1Fallback(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	// Hand-build a sha1 signature so we can test the fallback.
 	body := []byte("hello")
@@ -72,9 +63,7 @@ func TestGitHub_AcceptsSha1Fallback(t *testing.T) {
 }
 
 // Spec: §7.3.1 — unsupported scheme rejected.
-// Phase: 6
 func TestGitHub_UnsupportedScheme(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	err := (webhook.GitHub{}).Verify([]byte("body"), "md5=abcd", "secret")
 	if !errors.Is(err, webhook.ErrUnsupportedScheme) {
@@ -83,9 +72,7 @@ func TestGitHub_UnsupportedScheme(t *testing.T) {
 }
 
 // Spec: §7.3.1 — GitLab uses token equality.
-// Phase: 6
 func TestGitLab_TokenEquality(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	if err := (webhook.GitLab{}).Verify(nil, "secret-token", "secret-token"); err != nil {
 		t.Errorf("Verify: %v", err)
@@ -97,9 +84,7 @@ func TestGitLab_TokenEquality(t *testing.T) {
 }
 
 // Spec: §7.3.1 — Bitbucket uses HMAC-SHA256 without the sha256= prefix.
-// Phase: 6
 func TestBitbucket_VerifiesValid(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	body := []byte(`{"ref":"refs/heads/main"}`)
 	secret := "a-secret"

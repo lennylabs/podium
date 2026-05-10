@@ -473,8 +473,8 @@ func (s *Server) modeBanner() string {
 
 // ReadyResponse describes /readyz output (§13.9).
 type ReadyResponse struct {
-	Mode                 string `json:"mode"`
-	ReplicationLagSecs   int    `json:"replication_lag_seconds"`
+	Mode               string `json:"mode"`
+	ReplicationLagSecs int    `json:"replication_lag_seconds"`
 }
 
 // handleReady answers /readyz per §13.9. The status code follows
@@ -872,4 +872,3 @@ func splitCSV(s string) []string {
 	}
 	return out
 }
-

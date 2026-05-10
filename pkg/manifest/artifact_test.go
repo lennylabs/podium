@@ -8,7 +8,6 @@ import (
 // Spec: §4.3 Artifact Manifest Schema — the canonical universal fields
 // (type, name, version, description, when_to_use, tags, sensitivity,
 // license) round-trip through ParseArtifact.
-// Phase: 0
 func TestParseArtifact_UniversalFields(t *testing.T) {
 	t.Parallel()
 	src := []byte(`---
@@ -51,7 +50,6 @@ This is the agent body.
 
 // Spec: §4.3 Artifact Manifest Schema — missing frontmatter is rejected
 // with ErrNoFrontmatter so callers can present a clear lint error.
-// Phase: 0
 func TestParseArtifact_NoFrontmatter(t *testing.T) {
 	t.Parallel()
 	src := []byte("just prose body, no frontmatter\n")
@@ -63,7 +61,6 @@ func TestParseArtifact_NoFrontmatter(t *testing.T) {
 
 // Spec: §4.3 Artifact Manifest Schema — malformed YAML frontmatter is
 // rejected with ErrInvalidYAML.
-// Phase: 0
 func TestParseArtifact_InvalidYAML(t *testing.T) {
 	t.Parallel()
 	src := []byte(`---
@@ -83,7 +80,6 @@ body
 
 // Spec: §4.3 caller-interpreted fields — mcpServers list is preserved
 // verbatim and reachable from the parsed Artifact.
-// Phase: 0
 func TestParseArtifact_MCPServersPreserved(t *testing.T) {
 	t.Parallel()
 	src := []byte(`---
@@ -113,7 +109,6 @@ body
 
 // Spec: §4.3 type-specific fields — for type: rule, rule_mode, rule_globs,
 // and rule_description appear on the parsed Artifact.
-// Phase: 0
 func TestParseArtifact_RuleFields(t *testing.T) {
 	t.Parallel()
 	src := []byte(`---
@@ -139,7 +134,6 @@ Apply when working with TypeScript files.
 }
 
 // Spec: §4.3 inheritance — extends: <id>@<semver> is preserved verbatim.
-// Phase: 0
 func TestParseArtifact_Extends(t *testing.T) {
 	t.Parallel()
 	src := []byte(`---
@@ -162,7 +156,6 @@ extends parent.
 
 // Spec: §4.1 first-class types — IsFirstClassType reports true for each
 // of the seven canonical types.
-// Phase: 0
 func TestIsFirstClassType_AllSevenAreRecognized(t *testing.T) {
 	t.Parallel()
 	for _, ty := range []ArtifactType{

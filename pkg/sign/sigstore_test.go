@@ -2,8 +2,8 @@ package sign_test
 
 import (
 	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
@@ -22,7 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/sign"
 )
 
@@ -101,12 +100,12 @@ func newTrustHarness(t *testing.T, subject string) *trustHarness {
 func (h *trustHarness) signLeaf(t *testing.T, pub *ecdsa.PublicKey) []byte {
 	t.Helper()
 	tmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(time.Now().UnixNano()),
-		Subject:      pkix.Name{CommonName: "ephemeral"},
-		NotBefore:    h.clock.Add(-5 * time.Minute),
-		NotAfter:     h.clock.Add(15 * time.Minute),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageCodeSigning},
+		SerialNumber:   big.NewInt(time.Now().UnixNano()),
+		Subject:        pkix.Name{CommonName: "ephemeral"},
+		NotBefore:      h.clock.Add(-5 * time.Minute),
+		NotAfter:       h.clock.Add(15 * time.Minute),
+		KeyUsage:       x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:    []x509.ExtKeyUsage{x509.ExtKeyUsageCodeSigning},
 		EmailAddresses: []string{h.subject},
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, h.interCert, pub, h.interKey)
@@ -222,9 +221,7 @@ func hashOf(body []byte) string {
 // successfully against a CA + Fulcio + Rekor harness. The cert
 // chain validates to the configured trust root and the signature
 // verifies under the leaf's public key.
-// Phase: 1
 func TestSigstoreKeyless_RoundTrip(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	h := newTrustHarness(t, "alice@example.com")
 	srv := h.fakeFulcioRekor(t)
@@ -250,9 +247,7 @@ func TestSigstoreKeyless_RoundTrip(t *testing.T) {
 
 // Spec: §4.7.9 — Sign returns ErrSigstoreUnavailable when the
 // Fulcio endpoint is not configured.
-// Phase: 1
 func TestSigstoreKeyless_UnconfiguredFails(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	provider := sign.SigstoreKeyless{}
 	_, err := provider.Sign("sha256:" + strings.Repeat("a", 64))
@@ -263,10 +258,8 @@ func TestSigstoreKeyless_UnconfiguredFails(t *testing.T) {
 
 // Spec: §6.10 materialize.signature_invalid — Verify rejects a
 // signature whose content hash does not match the envelope.
-// Phase: 1
 // Matrix: §6.10 (materialize.signature_invalid)
 func TestSigstoreKeyless_VerifyDetectsTamperedHash(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	h := newTrustHarness(t, "alice@example.com")
 	srv := h.fakeFulcioRekor(t)
@@ -291,10 +284,8 @@ func TestSigstoreKeyless_VerifyDetectsTamperedHash(t *testing.T) {
 // Spec: §4.7.9 — Verify rejects when the envelope's cert chain does
 // not chain to the configured trust root. A different trust root
 // makes the same envelope unverifiable.
-// Phase: 1
 // Matrix: §6.10 (materialize.signature_invalid)
 func TestSigstoreKeyless_VerifyRejectsForeignTrustRoot(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	signerHarness := newTrustHarness(t, "alice@example.com")
 	srv := signerHarness.fakeFulcioRekor(t)
@@ -320,9 +311,7 @@ func TestSigstoreKeyless_VerifyRejectsForeignTrustRoot(t *testing.T) {
 }
 
 // Spec: §6.10 — Verify rejects when no trust root is configured.
-// Phase: 1
 func TestSigstoreKeyless_VerifyRejectsMissingTrustRoot(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	h := newTrustHarness(t, "alice@example.com")
 	srv := h.fakeFulcioRekor(t)
@@ -344,9 +333,7 @@ func TestSigstoreKeyless_VerifyRejectsMissingTrustRoot(t *testing.T) {
 
 // Spec: §4.7.9 — Sign surfaces a Fulcio outage as a clear error,
 // not a swallowed-and-returned-empty signature.
-// Phase: 1
 func TestSigstoreKeyless_SignFulcioOutage(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	h := newTrustHarness(t, "alice@example.com")
 	srv := h.fakeFulcioRekor(t, withFulcioFail())
@@ -368,9 +355,7 @@ func TestSigstoreKeyless_SignFulcioOutage(t *testing.T) {
 
 // Spec: §8.6 — Verify rejects when RekorURL is configured but the
 // log entry the envelope claims does not exist.
-// Phase: 1
 func TestSigstoreKeyless_VerifyRejectsMissingRekorEntry(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	h := newTrustHarness(t, "alice@example.com")
 	srv := h.fakeFulcioRekor(t)
@@ -400,10 +385,8 @@ func TestSigstoreKeyless_VerifyRejectsMissingRekorEntry(t *testing.T) {
 
 // Spec: §4.7.9 — Verify rejects a malformed envelope with
 // ErrSignatureInvalid (parse failure must not be swallowed).
-// Phase: 1
 // Matrix: §6.10 (materialize.signature_invalid)
 func TestSigstoreKeyless_VerifyMalformedEnvelope(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	h := newTrustHarness(t, "alice@example.com")
 	provider := sign.SigstoreKeyless{
@@ -420,9 +403,7 @@ func TestSigstoreKeyless_VerifyMalformedEnvelope(t *testing.T) {
 
 // Spec: §4.7.9 — RegistryManagedKey Sign + Verify round-trip with
 // an Ed25519 keypair.
-// Phase: 1
 func TestRegistryManagedKey_RoundTrip(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -445,9 +426,7 @@ func TestRegistryManagedKey_RoundTrip(t *testing.T) {
 
 // Spec: §4.7.9 — Verify rejects a signature whose KeyID does not
 // match the configured key (rotation safety).
-// Phase: 1
 func TestRegistryManagedKey_RejectsRotatedKey(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	signer := sign.RegistryManagedKey{
@@ -465,9 +444,7 @@ func TestRegistryManagedKey_RejectsRotatedKey(t *testing.T) {
 
 // Spec: §4.7.9 — Sign with no keypair returns
 // ErrRegistryManagedUnavailable.
-// Phase: 1
 func TestRegistryManagedKey_UnconfiguredFails(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	if _, err := (sign.RegistryManagedKey{}).Sign(hashOf([]byte("body"))); !errors.Is(err, sign.ErrRegistryManagedUnavailable) {
 		t.Fatalf("got %v, want ErrRegistryManagedUnavailable", err)

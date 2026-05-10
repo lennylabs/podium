@@ -3,7 +3,6 @@ package layer_test
 import (
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/layer"
 )
 
@@ -11,9 +10,7 @@ import (
 // VisibleWith expands a layer's `groups:` filter via the resolver
 // before falling back to JWT-supplied groups. SCIM-pushed
 // memberships become first-class in the visibility evaluator.
-// Phase: 7
 func TestVisibleWith_GroupResolverExpandsSCIMMembership(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	groups := map[string][]string{
 		"engineering": {"alice@x", "bob@x"},
@@ -35,9 +32,7 @@ func TestVisibleWith_GroupResolverExpandsSCIMMembership(t *testing.T) {
 
 // Spec: §4.6 + §6.3.1 — JWT-supplied groups still work. The
 // resolver only fires when the JWT path doesn't already match.
-// Phase: 7
 func TestVisibleWith_JWTGroupsTakePrecedence(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	calls := 0
 	resolve := func(string) []string { calls++; return nil }
@@ -54,9 +49,7 @@ func TestVisibleWith_JWTGroupsTakePrecedence(t *testing.T) {
 }
 
 // Spec: §4.6 — Visible (no resolver) still works as before.
-// Phase: 7
 func TestVisible_BackCompatNoResolver(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	l := layer.Layer{Visibility: layer.Visibility{Public: true}}
 	if !layer.Visible(l, layer.Identity{IsAuthenticated: true}) {
@@ -66,9 +59,7 @@ func TestVisible_BackCompatNoResolver(t *testing.T) {
 
 // Spec: §6.3.1 — resolver matches against Identity.Email when
 // Sub doesn't match (some IdPs put userName in email vs sub).
-// Phase: 7
 func TestVisibleWith_ResolverMatchesEmail(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	resolve := func(string) []string { return []string{"alice@example.com"} }
 	l := layer.Layer{Visibility: layer.Visibility{Groups: []string{"eng"}}}

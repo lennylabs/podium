@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/adapter"
 )
 
@@ -28,9 +27,7 @@ func (dropper) Apply(_ map[string]any, f File) (Result, error) {
 
 // Spec: §6.6 step 4 / §9.1 — hooks chain in declared order; the second
 // hook receives the first's output.
-// Phase: 13
 func TestRun_HooksChain(t *testing.T) {
-	testharness.RequirePhase(t, 13)
 	t.Parallel()
 	in := []adapter.File{
 		{Path: "x.txt", Content: []byte("hello")},
@@ -49,9 +46,7 @@ func TestRun_HooksChain(t *testing.T) {
 }
 
 // Spec: §6.6 — with no hooks configured, files pass through unchanged.
-// Phase: 13
 func TestRun_NoHooksIsNoop(t *testing.T) {
-	testharness.RequirePhase(t, 13)
 	t.Parallel()
 	in := []adapter.File{{Path: "x", Content: []byte("y")}}
 	out, _, err := Run(nil, nil, in)

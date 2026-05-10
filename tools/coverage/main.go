@@ -29,7 +29,7 @@ Commands:
   per-package       Print per-package coverage from coverage.out.
 
 Flags:
-  -repo <path>      Repository root (default: walk up to .phase).
+  -repo <path>      Repository root (default: walk up to go.mod).
 `
 
 func main() {
@@ -127,7 +127,6 @@ func runWithCover(root string) error {
 		"-coverpkg=./...",
 		"./...")
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "PODIUM_PHASE=19")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -230,12 +229,12 @@ func resolveRepoRoot(explicit string) (string, error) {
 		return "", err
 	}
 	for {
-		if _, err := os.Stat(dir + "/.phase"); err == nil {
+		if _, err := os.Stat(dir + "/go.mod"); err == nil {
 			return dir, nil
 		}
 		parent := dir[:strings.LastIndex(dir, "/")]
 		if parent == "" || parent == dir {
-			return "", errors.New(".phase not found")
+			return "", errors.New("go.mod not found")
 		}
 		dir = parent
 	}

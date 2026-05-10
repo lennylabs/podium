@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/embedding"
 )
 
@@ -45,9 +44,7 @@ func indexedEmbeddingMock(t *testing.T, dim int) *httptest.Server {
 
 // Spec: §4.7 — OpenAI provider returns one vector per input,
 // preserving order via the response's `index` field.
-// Phase: 5
 func TestOpenAI_EmbedRoundTrip(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	srv := indexedEmbeddingMock(t, 8)
 	t.Cleanup(srv.Close)
@@ -73,9 +70,7 @@ func TestOpenAI_EmbedRoundTrip(t *testing.T) {
 
 // Spec: §6.10 — auth failures map to ErrAuth so callers can
 // distinguish between "provider unreachable" and "bad credentials."
-// Phase: 5
 func TestOpenAI_AuthFailureMapsToErrAuth(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "bad token", http.StatusUnauthorized)
@@ -91,9 +86,7 @@ func TestOpenAI_AuthFailureMapsToErrAuth(t *testing.T) {
 }
 
 // Spec: §4.7 — quota / rate-limit responses map to ErrQuota.
-// Phase: 5
 func TestOpenAI_QuotaMapsToErrQuota(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "rate limited", http.StatusTooManyRequests)
@@ -108,9 +101,7 @@ func TestOpenAI_QuotaMapsToErrQuota(t *testing.T) {
 
 // Spec: §4.7 — Voyage uses the same response shape; the same
 // indexed-mock fixture exercises the parsing path.
-// Phase: 5
 func TestVoyage_EmbedRoundTrip(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	srv := indexedEmbeddingMock(t, 4)
 	t.Cleanup(srv.Close)
@@ -128,9 +119,7 @@ func TestVoyage_EmbedRoundTrip(t *testing.T) {
 
 // Spec: §4.7 — Cohere accepts both the legacy top-level array shape
 // and the newer `embeddings.float` shape; the provider parses both.
-// Phase: 5
 func TestCohere_EmbedHandlesBothResponseShapes(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	for _, shape := range []string{"legacy", "v2"} {
 		shape := shape
@@ -166,9 +155,7 @@ func TestCohere_EmbedHandlesBothResponseShapes(t *testing.T) {
 
 // Spec: §4.7 — Ollama serializes one text per call; the provider
 // issues N HTTP calls for a batch of N texts and stitches results.
-// Phase: 5
 func TestOllama_EmbedRoundTrip(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -198,9 +185,7 @@ func TestOllama_EmbedRoundTrip(t *testing.T) {
 // Spec: §4.7 — empty input returns ErrEmptyTexts before any HTTP
 // call is made; useful for the ingest path's "no document text"
 // short-circuit.
-// Phase: 5
 func TestProviders_RejectEmptyInput(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	for _, p := range []embedding.Provider{
 		embedding.OpenAI{}, embedding.Voyage{},

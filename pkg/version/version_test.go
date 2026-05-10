@@ -3,14 +3,10 @@ package version
 import (
 	"errors"
 	"testing"
-
-	"github.com/lennylabs/podium/internal/testharness"
 )
 
 // Spec: §4.7.6 — empty string resolves to PinLatest.
-// Phase: 9
 func TestParsePin_LatestForEmpty(t *testing.T) {
-	testharness.RequirePhase(t, 9)
 	t.Parallel()
 	p, err := ParsePin("")
 	if err != nil {
@@ -23,9 +19,7 @@ func TestParsePin_LatestForEmpty(t *testing.T) {
 
 // Spec: §4.7.6 — exact, minor (1.2.x), major (1.x), and content-hash
 // pins each parse into the expected PinKind.
-// Phase: 9
 func TestParsePin_AllForms(t *testing.T) {
-	testharness.RequirePhase(t, 9)
 	t.Parallel()
 	cases := []struct {
 		in   string
@@ -49,9 +43,7 @@ func TestParsePin_AllForms(t *testing.T) {
 }
 
 // Spec: §4.7.6 — invalid pin strings return ErrInvalidPin.
-// Phase: 9
 func TestParsePin_RejectsInvalid(t *testing.T) {
-	testharness.RequirePhase(t, 9)
 	t.Parallel()
 	for _, in := range []string{
 		"v1.0.0",
@@ -68,19 +60,17 @@ func TestParsePin_RejectsInvalid(t *testing.T) {
 }
 
 // Spec: §4.7.6 — Resolve picks the highest version satisfying pin.
-// Phase: 9
 func TestResolve_HighestMatching(t *testing.T) {
-	testharness.RequirePhase(t, 9)
 	t.Parallel()
 	candidates := []string{"1.0.0", "1.2.0", "1.2.5", "2.0.0", "2.1.3"}
 
 	cases := []struct {
 		pin, want string
 	}{
-		{"", "2.1.3"},        // latest
-		{"1.x", "1.2.5"},     // major
-		{"1.2.x", "1.2.5"},   // minor
-		{"1.2.0", "1.2.0"},   // exact
+		{"", "2.1.3"},      // latest
+		{"1.x", "1.2.5"},   // major
+		{"1.2.x", "1.2.5"}, // minor
+		{"1.2.0", "1.2.0"}, // exact
 		{"2.x", "2.1.3"},
 	}
 	for _, c := range cases {
@@ -97,9 +87,7 @@ func TestResolve_HighestMatching(t *testing.T) {
 }
 
 // Spec: §4.7 — ContentHash is deterministic across identical inputs.
-// Phase: 9
 func TestContentHash_Deterministic(t *testing.T) {
-	testharness.RequirePhase(t, 9)
 	t.Parallel()
 	a := ContentHash([]byte("frontmatter"), []byte("body"))
 	b := ContentHash([]byte("frontmatter"), []byte("body"))

@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/objectstore"
 )
 
@@ -121,9 +120,7 @@ func rejectsPathTraversal(t *testing.T, p objectstore.Provider) {
 }
 
 // Spec: §4.1 — InlineCutoff matches the documented 256 KB threshold.
-// Phase: 2
 func TestInlineCutoff_Matches256KB(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	if objectstore.InlineCutoff != 256*1024 {
 		t.Errorf("InlineCutoff = %d, want %d", objectstore.InlineCutoff, 256*1024)
@@ -132,9 +129,7 @@ func TestInlineCutoff_Matches256KB(t *testing.T) {
 
 // Spec: §6.2 — DefaultPresignTTL matches PODIUM_PRESIGN_TTL_SECONDS
 // default (3600s).
-// Phase: 2
 func TestDefaultPresignTTL_Matches3600s(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	if objectstore.DefaultPresignTTL != 3600*time.Second {
 		t.Errorf("DefaultPresignTTL = %v, want 3600s", objectstore.DefaultPresignTTL)
@@ -142,9 +137,7 @@ func TestDefaultPresignTTL_Matches3600s(t *testing.T) {
 }
 
 // Spec: §9.1 — Memory backend satisfies the SPI conformance contract.
-// Phase: 2
 func TestMemory_Conformance(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	runSuite(t, "Memory", func(t *testing.T) objectstore.Provider {
 		return objectstore.NewMemory()
@@ -153,9 +146,7 @@ func TestMemory_Conformance(t *testing.T) {
 
 // Spec: §13.10 — Filesystem backend satisfies the SPI conformance
 // contract.
-// Phase: 2
 func TestFilesystem_Conformance(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	runSuite(t, "Filesystem", func(t *testing.T) objectstore.Provider {
 		fs, err := objectstore.Open(filepath.Join(t.TempDir(), "obj"))
@@ -169,9 +160,7 @@ func TestFilesystem_Conformance(t *testing.T) {
 
 // Spec: §13.10 — Filesystem.Presign returns BaseURL/objects/<key>
 // with no embedded signature or expiry.
-// Phase: 2
 func TestFilesystem_PresignBearsNoSignature(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	fs, err := objectstore.Open(filepath.Join(t.TempDir(), "obj"))
 	if err != nil {
@@ -196,9 +185,7 @@ func TestFilesystem_PresignBearsNoSignature(t *testing.T) {
 
 // Spec: §4.1 — Filesystem.ContentTypeOf returns the type passed to
 // Put so the HTTP route can set Content-Type on responses.
-// Phase: 2
 func TestFilesystem_ContentTypeRoundTrip(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	fs, err := objectstore.Open(filepath.Join(t.TempDir(), "obj"))
 	if err != nil {
@@ -214,9 +201,7 @@ func TestFilesystem_ContentTypeRoundTrip(t *testing.T) {
 
 // Spec: §13.10 — Filesystem.Presign requires BaseURL to be set;
 // callers without a configured BaseURL get a clear error.
-// Phase: 2
 func TestFilesystem_PresignRequiresBaseURL(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	fs, err := objectstore.Open(filepath.Join(t.TempDir(), "obj"))
 	if err != nil {

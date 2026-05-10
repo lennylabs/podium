@@ -6,7 +6,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/vector"
@@ -25,9 +24,7 @@ func failingEmbed(_ context.Context, _ string) ([]float32, error) {
 }
 
 // Spec: §4.7 — successful ingest writes manifest + populates vector.
-// Phase: 5
 func TestIngest_PopulatesVectorOnAccept(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
@@ -71,9 +68,7 @@ func TestIngest_PopulatesVectorOnAccept(t *testing.T) {
 // Spec: §4.7 — embedding-provider failure does not reject the
 // ingest; the artifact lands in the manifest store and an
 // EmbeddingFailure entry surfaces so admin reembed can retry.
-// Phase: 5
 func TestIngest_EmbedderFailureDoesNotRejectIngest(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
@@ -109,9 +104,7 @@ func TestIngest_EmbedderFailureDoesNotRejectIngest(t *testing.T) {
 // Spec: §4.7 — re-ingesting an unchanged manifest is idempotent and
 // does not re-embed (saves cost; embeddings are deterministic per
 // content_hash anyway).
-// Phase: 5
 func TestIngest_IdempotentSkipsEmbedding(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})

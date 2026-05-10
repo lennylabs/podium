@@ -19,11 +19,11 @@ type Visibility struct {
 
 // Identity is the OAuth-attested caller (§6.3).
 type Identity struct {
-	Sub          string
-	Email        string
-	OrgID        string
-	Groups       []string
-	IsPublic     bool // true in public-mode (§13.10)
+	Sub             string
+	Email           string
+	OrgID           string
+	Groups          []string
+	IsPublic        bool // true in public-mode (§13.10)
 	IsAuthenticated bool
 }
 
@@ -115,6 +115,7 @@ func EffectiveLayersWith(layers []Layer, id Identity, resolveGroup GroupResolver
 //     the caller's effective view (this function) treats them as
 //     highest-wins.
 //   - With `extends:`, fields merge per the field-semantics table.
+//
 // Highest-precedence layer wins on collision; extends: resolution
 // runs on top per §4.6.
 func Compose(layers []Layer, candidates map[string][]Candidate) []Composed {

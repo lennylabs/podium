@@ -4,14 +4,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/manifest"
 )
 
 // Spec: §4.7.9 Signing — Sign + Verify round-trip on a known content hash.
-// Phase: 1
 func TestNoop_RoundTrip(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	p := Noop{}
 	sig, err := p.Sign("sha256:abc")
@@ -25,10 +22,8 @@ func TestNoop_RoundTrip(t *testing.T) {
 
 // Spec: §4.7.9 — a signature that does not match the content hash fails
 // with ErrSignatureInvalid (maps to materialize.signature_invalid).
-// Phase: 1
 // Matrix: §6.10 (materialize.signature_invalid)
 func TestNoop_VerifyRejectsMismatch(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	p := Noop{}
 	err := p.Verify("sha256:abc", "noop:sha256:def")
@@ -39,11 +34,9 @@ func TestNoop_VerifyRejectsMismatch(t *testing.T) {
 
 // Spec: §6.2 — PolicyMediumAndAbove enforces verification for medium
 // and high sensitivity, skips low.
-// Phase: 1
 // Matrix: §6.10 (materialize.signature_missing)
 // Matrix: §6.10 (materialize.signature_invalid)
 func TestEnforceVerification_PolicyMediumAndAbove(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	p := Noop{}
 	cases := []struct {
@@ -70,9 +63,7 @@ func TestEnforceVerification_PolicyMediumAndAbove(t *testing.T) {
 }
 
 // Spec: §6.2 — PolicyNever skips verification regardless of sensitivity.
-// Phase: 1
 func TestEnforceVerification_PolicyNever(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	p := Noop{}
 	for _, s := range []manifest.Sensitivity{
@@ -87,9 +78,7 @@ func TestEnforceVerification_PolicyNever(t *testing.T) {
 }
 
 // Spec: §6.2 — PolicyAlways enforces every sensitivity, including low.
-// Phase: 1
 func TestEnforceVerification_PolicyAlways(t *testing.T) {
-	testharness.RequirePhase(t, 1)
 	t.Parallel()
 	p := Noop{}
 	if err := EnforceVerification(PolicyAlways, p, manifest.SensitivityLow, "sha256:abc", ""); !errors.Is(err, ErrSignatureMissing) {

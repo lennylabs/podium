@@ -7,7 +7,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/store"
@@ -66,9 +65,7 @@ func newStore(t testing.TB) store.Store {
 
 // Spec: §7.3.1 Ingest case "New (artifact_id, version)" — accepted;
 // content hashed and stored.
-// Phase: 6
 func TestIngest_NewArtifactAccepted(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	fsys := fstest.MapFS{
 		"company-glossary/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("Glossary"))},
@@ -99,9 +96,7 @@ func TestIngest_NewArtifactAccepted(t *testing.T) {
 
 // Spec: §7.3.1 Ingest case "Same version, identical content_hash" —
 // no-op; handles webhook retries idempotently.
-// Phase: 6
 func TestIngest_IdempotentOnSameContent(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	fsys := fstest.MapFS{
 		"company-glossary/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("Glossary"))},
@@ -131,10 +126,8 @@ func TestIngest_IdempotentOnSameContent(t *testing.T) {
 
 // Spec: §7.3.1 / §6.10 — same version with different content_hash
 // surfaces as ingest.immutable_violation; existing bytes are preserved.
-// Phase: 6
 // Matrix: §6.10 (ingest.immutable_violation)
 func TestIngest_ImmutabilityViolation(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	st := newStore(t)
 	first := fstest.MapFS{
@@ -172,10 +165,8 @@ func TestIngest_ImmutabilityViolation(t *testing.T) {
 
 // Spec: §7.3.1 / §6.10 — lint failures abort per-artifact ingest;
 // other artifacts in the same batch still proceed.
-// Phase: 6
 // Matrix: §6.10 (ingest.lint_failed)
 func TestIngest_LintFailureBlocksThatArtifact(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	bad := "---\n" +
 		"type: context\n" +
@@ -212,10 +203,8 @@ func TestIngest_LintFailureBlocksThatArtifact(t *testing.T) {
 
 // Spec: §13.10 / §6.10 — public mode rejects ingest of medium and high
 // sensitivity artifacts via ingest.public_mode_rejects_sensitive.
-// Phase: 6
 // Matrix: §6.10 (ingest.public_mode_rejects_sensitive)
 func TestIngest_PublicModeRejectsSensitive(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	fsys := fstest.MapFS{
 		"agent/ARTIFACT.md": &fstest.MapFile{Data: []byte(mediumArtifact("medium-sense"))},
@@ -245,16 +234,14 @@ func TestIngest_PublicModeRejectsSensitive(t *testing.T) {
 // (and SKILL.md) are content-hashed with the manifest so a resource
 // change yields a different content hash even when the manifest text
 // is identical.
-// Phase: 6
 func TestIngest_ContentHashCoversBundledResources(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 
 	mkRegistry := func(scriptBody string) fstest.MapFS {
 		return fstest.MapFS{
-			"finance/run/ARTIFACT.md":     &fstest.MapFile{Data: []byte(skillArtifact())},
-			"finance/run/SKILL.md":        &fstest.MapFile{Data: []byte(skillBody("run"))},
-			"finance/run/scripts/run.py":  &fstest.MapFile{Data: []byte(scriptBody)},
+			"finance/run/ARTIFACT.md":    &fstest.MapFile{Data: []byte(skillArtifact())},
+			"finance/run/SKILL.md":       &fstest.MapFile{Data: []byte(skillBody("run"))},
+			"finance/run/scripts/run.py": &fstest.MapFile{Data: []byte(scriptBody)},
 		}
 	}
 
@@ -290,9 +277,7 @@ func TestIngest_ContentHashCoversBundledResources(t *testing.T) {
 // Spec: §4.7.3 Reverse Dependency Index — extends, delegates_to, and
 // mcpServers references in the manifest produce dependency edges in
 // the store at ingest time.
-// Phase: 6
 func TestIngest_PopulatesDependencyEdges(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	src := "---\n" +
 		"type: agent\n" +
@@ -350,9 +335,7 @@ func TestIngest_PopulatesDependencyEdges(t *testing.T) {
 
 // Spec: §7.3.1 — bytes are preserved when ingest fails on a different
 // artifact in the same batch.
-// Phase: 6
 func TestIngest_BatchPartialFailure(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	st := newStore(t)
 	first := fstest.MapFS{
@@ -393,9 +376,7 @@ func TestIngest_BatchPartialFailure(t *testing.T) {
 }
 
 // Spec: §7.3.1 — TenantID is required.
-// Phase: 6
 func TestIngest_TenantIDRequired(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	_, err := ingest.Ingest(context.Background(), newStore(t), ingest.Request{
 		LayerID: "L",
@@ -407,9 +388,7 @@ func TestIngest_TenantIDRequired(t *testing.T) {
 }
 
 // Spec: §7.3.1 — Files is required.
-// Phase: 6
 func TestIngest_FilesRequired(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	_, err := ingest.Ingest(context.Background(), newStore(t), ingest.Request{
 		TenantID: "tenant-1",
@@ -421,9 +400,7 @@ func TestIngest_FilesRequired(t *testing.T) {
 }
 
 // Sanity check: ErrLintFailed is exposed for callers to switch on.
-// Phase: 6
 func TestIngest_ErrLintFailedExposed(t *testing.T) {
-	testharness.RequirePhase(t, 6)
 	t.Parallel()
 	if !errors.Is(ingest.ErrLintFailed, ingest.ErrLintFailed) {
 		t.Errorf("ErrLintFailed should match itself")

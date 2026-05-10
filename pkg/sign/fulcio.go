@@ -30,8 +30,8 @@ type fulcioCredentials struct {
 }
 
 type fulcioPublicKeyRequest struct {
-	PublicKey          fulcioPublicKey `json:"publicKey"`
-	ProofOfPossession  string          `json:"proofOfPossession"`
+	PublicKey         fulcioPublicKey `json:"publicKey"`
+	ProofOfPossession string          `json:"proofOfPossession"`
 }
 
 type fulcioPublicKey struct {

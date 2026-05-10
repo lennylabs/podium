@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
@@ -12,9 +11,7 @@ import (
 
 // Spec: §4.7.4 — deprecated artifacts are excluded from default
 // search results. Callers can opt back in via IncludeDeprecated.
-// Phase: 7
 func TestSearchArtifacts_DeprecatedExcludedByDefault(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	const tenant = "t"
 	st := store.NewMemory()
@@ -65,9 +62,7 @@ func TestSearchArtifacts_DeprecatedExcludedByDefault(t *testing.T) {
 
 // Spec: §4.7.4 — deprecated artifacts return a warning when
 // loaded; replaced_by surfaces alongside the warning.
-// Phase: 7
 func TestLoadArtifact_DeprecatedReturnsWarning(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	const tenant = "t"
 	st := store.NewMemory()
@@ -100,9 +95,7 @@ func TestLoadArtifact_DeprecatedReturnsWarning(t *testing.T) {
 
 // Spec: §4.7.4 — a live (non-deprecated) artifact carries no
 // warning string.
-// Phase: 7
 func TestLoadArtifact_LiveArtifactHasNoWarning(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	const tenant = "t"
 	st := store.NewMemory()

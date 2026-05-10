@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/sign"
 )
@@ -15,9 +14,7 @@ import (
 // audit.anchored event carrying the envelope, and returns the
 // log index from the Sigstore Rekor entry (or -1 when the signer
 // produced no log entry).
-// Phase: 16
 func TestAnchor_RecordsChainHeadAndAppendsEvent(t *testing.T) {
-	testharness.RequirePhase(t, 16)
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
@@ -47,9 +44,7 @@ func TestAnchor_RecordsChainHeadAndAppendsEvent(t *testing.T) {
 
 // Spec: §8.6 — Anchor against an empty log is a no-op so callers
 // can run it on a schedule without guarding for sink emptiness.
-// Phase: 16
 func TestAnchor_EmptyLogIsNoOp(t *testing.T) {
-	testharness.RequirePhase(t, 16)
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
@@ -67,9 +62,7 @@ func TestAnchor_EmptyLogIsNoOp(t *testing.T) {
 // envelope with a Rekor log index, Anchor surfaces that index in the
 // audit.anchored event's context for cross-correlation with the
 // transparency log.
-// Phase: 16
 func TestAnchor_SurfacesRekorLogIndex(t *testing.T) {
-	testharness.RequirePhase(t, 16)
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")

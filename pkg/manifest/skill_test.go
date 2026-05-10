@@ -8,7 +8,6 @@ import (
 
 // Spec: §4.3.4 SKILL.md compliance — name, description, and license
 // round-trip through ParseSkill, and the prose body is preserved.
-// Phase: 0
 func TestParseSkill_RequiredFields(t *testing.T) {
 	t.Parallel()
 	src := []byte(`---
@@ -40,7 +39,6 @@ Steps to pay a vendor invoice. Begin by reading the policy doc.
 // Spec: §4.3.4 SKILL.md compliance — name constraints: 1-64 chars,
 // lowercase alphanumeric and hyphens, no leading/trailing hyphen, no
 // consecutive hyphens.
-// Phase: 0
 func TestValidateName_Constraints(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -50,14 +48,14 @@ func TestValidateName_Constraints(t *testing.T) {
 		{"pay-invoice", true},
 		{"a", true},
 		{"pay-invoice-123", true},
-		{"PayInvoice", false},      // no uppercase
-		{"-leading", false},        // no leading hyphen
-		{"trailing-", false},       // no trailing hyphen
-		{"double--hyphen", false},  // no consecutive hyphens
-		{"", false},                // length 0
+		{"PayInvoice", false},            // no uppercase
+		{"-leading", false},              // no leading hyphen
+		{"trailing-", false},             // no trailing hyphen
+		{"double--hyphen", false},        // no consecutive hyphens
+		{"", false},                      // length 0
 		{strings.Repeat("a", 65), false}, // length > 64
 		{strings.Repeat("a", 64), true},  // length 64 boundary
-		{"under_score", false},     // underscores not allowed
+		{"under_score", false},           // underscores not allowed
 	}
 	for _, c := range cases {
 		err := ValidateName(c.name)
@@ -71,7 +69,6 @@ func TestValidateName_Constraints(t *testing.T) {
 
 // Spec: §4.7.6 Version Resolution — author-chosen versions are
 // semver-named (major.minor.patch).
-// Phase: 0
 func TestValidateVersion_Semver(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -98,7 +95,6 @@ func TestValidateVersion_Semver(t *testing.T) {
 }
 
 // Spec: §4.3.4 SKILL.md compliance — missing frontmatter is rejected.
-// Phase: 0
 func TestParseSkill_NoFrontmatter(t *testing.T) {
 	t.Parallel()
 	src := []byte("just a body\n")

@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/sync"
 )
 
@@ -13,9 +12,7 @@ import (
 // the previous sync wrote for it. The lock file diff drives the
 // cleanup so artifacts removed from the registry don't linger in
 // the target directory.
-// Phase: 3
 func TestRun_RemovesFilesForDroppedArtifact(t *testing.T) {
-	testharness.RequirePhase(t, 3)
 	t.Parallel()
 	dir := t.TempDir()
 	registry := filepath.Join(dir, "registry")
@@ -68,9 +65,7 @@ func TestRun_RemovesFilesForDroppedArtifact(t *testing.T) {
 
 // Spec: §7.5 — the lock file persists every materialized path so
 // the next sync can compute a precise diff.
-// Phase: 3
 func TestRun_WritesLockFileWithMaterializedPaths(t *testing.T) {
-	testharness.RequirePhase(t, 3)
 	t.Parallel()
 	dir := t.TempDir()
 	registry := filepath.Join(dir, "registry")

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/embedding"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
@@ -21,8 +20,8 @@ type fakeEmbedder struct {
 	err error
 }
 
-func (fakeEmbedder) ID() string  { return "fake" }
-func (e fakeEmbedder) Model() string { return "fake-model" }
+func (fakeEmbedder) ID() string        { return "fake" }
+func (e fakeEmbedder) Model() string   { return "fake-model" }
 func (e fakeEmbedder) Dimensions() int { return e.dim }
 func (e fakeEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
 	if e.err != nil {
@@ -44,9 +43,7 @@ func (e fakeEmbedder) Embed(_ context.Context, texts []string) ([][]float32, err
 // Spec: §4.7 — when both vector store and embedder are configured,
 // SearchArtifacts blends BM25 with vector cosine via RRF. The
 // SearchResult.Degraded flag is false for the hybrid path.
-// Phase: 5
 func TestSearchArtifacts_HybridFusionEngages(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
@@ -87,9 +84,7 @@ func TestSearchArtifacts_HybridFusionEngages(t *testing.T) {
 // Spec: §4.7 — when no vector store is configured, search degrades
 // to BM25-only and SearchResult.Degraded surfaces the reduced
 // fidelity.
-// Phase: 5
 func TestSearchArtifacts_DegradesWithoutVectorStore(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
@@ -112,9 +107,7 @@ func TestSearchArtifacts_DegradesWithoutVectorStore(t *testing.T) {
 // Spec: §4.7 — when the embedder fails, search degrades to BM25 and
 // records Degraded=true rather than erroring out. The artifact data
 // stays accessible.
-// Phase: 5
 func TestSearchArtifacts_DegradesOnEmbedderFailure(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
@@ -140,9 +133,7 @@ func TestSearchArtifacts_DegradesOnEmbedderFailure(t *testing.T) {
 
 // Spec: §4.7 — Reembed walks every visible manifest, embeds, and
 // upserts. Returns counts so admin CLI can render a summary.
-// Phase: 5
 func TestReembed_AllManifests(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})

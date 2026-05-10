@@ -3,8 +3,6 @@ package adapter
 import (
 	"strings"
 	"testing"
-
-	"github.com/lennylabs/podium/internal/testharness"
 )
 
 // allAdapterIDs lists the §6.7 built-in adapter values that ship in
@@ -24,9 +22,7 @@ var allAdapterIDs = []string{
 
 // Spec: §6.7 Harness Adapters — DefaultRegistry exposes every built-in
 // adapter listed in the §6.7 table.
-// Phase: 13
 func TestDefaultRegistry_AllAdaptersRegistered(t *testing.T) {
-	testharness.RequirePhase(t, 13)
 	t.Parallel()
 	r := DefaultRegistry()
 	for _, id := range allAdapterIDs {
@@ -43,9 +39,7 @@ func TestDefaultRegistry_AllAdaptersRegistered(t *testing.T) {
 
 // Spec: §6.7 — every built-in adapter produces output for a basic
 // context-type artifact and emits files in deterministic order.
-// Phase: 13
 func TestEveryAdapter_ProducesDeterministicOutput(t *testing.T) {
-	testharness.RequirePhase(t, 13)
 	t.Parallel()
 	src := Source{
 		ArtifactID:    "company/glossary",
@@ -81,7 +75,6 @@ func TestEveryAdapter_ProducesDeterministicOutput(t *testing.T) {
 
 // Spec: §6.7 — the rule-aware adapters write type: rule artifacts to
 // the adapter-native rules directory.
-// Phase: 13
 // Matrix: §4.3 (always, claude-code)
 // Matrix: §4.3 (explicit, cursor)
 // Matrix: §4.3 (explicit, opencode)
@@ -89,7 +82,6 @@ func TestEveryAdapter_ProducesDeterministicOutput(t *testing.T) {
 // Matrix: §4.3 (explicit, hermes)
 // Matrix: §4.3 (always, codex)
 func TestRuleAdapters_PlaceUnderNativeRulesDir(t *testing.T) {
-	testharness.RequirePhase(t, 13)
 	t.Parallel()
 	src := Source{
 		ArtifactID:    "ts-style",
@@ -128,9 +120,7 @@ func TestRuleAdapters_PlaceUnderNativeRulesDir(t *testing.T) {
 
 // Spec: §6.7 — every adapter rejects nothing; even an empty Source
 // produces zero or more files without erroring.
-// Phase: 13
 func TestEveryAdapter_DoesNotErrorOnEmptySource(t *testing.T) {
-	testharness.RequirePhase(t, 13)
 	t.Parallel()
 	r := DefaultRegistry()
 	for _, id := range allAdapterIDs {
@@ -144,9 +134,7 @@ func TestEveryAdapter_DoesNotErrorOnEmptySource(t *testing.T) {
 // Spec: §6.7 sandbox contract — adapters must not produce paths that
 // escape the conventional roots; every output is rooted at the
 // artifact ID or under a recognized harness-native top-level.
-// Phase: 13
 func TestEveryAdapter_OutputPathsAreSafe(t *testing.T) {
-	testharness.RequirePhase(t, 13)
 	t.Parallel()
 	src := Source{
 		ArtifactID:    "x/y",

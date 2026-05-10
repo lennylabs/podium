@@ -1,37 +1,11 @@
 // Spec coverage: §7.6 SDK surface — TypeScript client mirrors the
 // Python client and the registry HTTP API.
-//
-// Tests skip when the active phase (read from ../../../.phase) is
-// below 14, mirroring the Go-side RequirePhase guard.
 
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { dirname } from "node:path";
 
 import { Client, RegistryError } from "./index.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
-
-function activePhase(): number {
-  let dir = here;
-  while (dir !== "/") {
-    try {
-      return Number(readFileSync(resolve(dir, ".phase"), "utf-8").trim());
-    } catch {
-      dir = dirname(dir);
-    }
-  }
-  return 0;
-}
-
-const PHASE_REQUIRED = 14;
-const skip = activePhase() < PHASE_REQUIRED;
-
-const guarded = skip ? describe.skip : describe;
-
-guarded("Client", () => {
+describe("Client", () => {
   // Spec: §7.6 — searchArtifacts forwards to GET /v1/search_artifacts
   // and decodes the SearchResult envelope.
   it("searchArtifacts forwards the query", async () => {

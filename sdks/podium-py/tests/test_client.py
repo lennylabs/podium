@@ -1,40 +1,15 @@
-"""Tests for the Podium Python SDK.
-
-Tests skip when the active phase (read from ../../.phase) is below 4.
-This mirrors the Go-side RequirePhase guard in internal/testharness.
-"""
+"""Tests for the Podium Python SDK."""
 
 from __future__ import annotations
 
 import http.server
 import json
-import os
-import pathlib
 import socket
 import threading
 
 import pytest
 
 from podium import Client, RegistryError
-
-
-# Spec: phase tagging — defer until Phase 4 is active.
-PHASE_REQUIRED = 4
-
-
-def _active_phase() -> int:
-    here = pathlib.Path(__file__).resolve()
-    for parent in [here, *here.parents]:
-        candidate = parent / ".phase"
-        if candidate.exists():
-            return int(candidate.read_text().strip())
-    return 0
-
-
-pytestmark = pytest.mark.skipif(
-    _active_phase() < PHASE_REQUIRED,
-    reason=f"requires phase {PHASE_REQUIRED} (active phase: {_active_phase()})",
-)
 
 
 class _StubHandler(http.server.BaseHTTPRequestHandler):
@@ -85,7 +60,6 @@ def stub_server():
 
 # Spec: §7.6 SDK surface — search_artifacts forwards to GET /v1/search_artifacts
 # and decodes the SearchResult envelope.
-# Phase: 4
 def test_search_artifacts_forwards_query(stub_server):
     stub_server.next_response = {
         "query": "variance",
@@ -110,7 +84,6 @@ def test_search_artifacts_forwards_query(stub_server):
 
 # Spec: §7.6 SDK surface — load_artifact returns a LoadedArtifact with
 # manifest body and bundled resources.
-# Phase: 4
 def test_load_artifact_returns_manifest_and_resources(stub_server):
     stub_server.next_response = {
         "id": "finance/run",
@@ -130,7 +103,6 @@ def test_load_artifact_returns_manifest_and_resources(stub_server):
 
 # Spec: §6.10 — error envelopes from the registry surface as RegistryError
 # with the namespaced code preserved.
-# Phase: 4
 def test_registry_error_envelope_translates_to_exception(stub_server):
     stub_server.next_status = 404
     stub_server.next_response = {
@@ -146,7 +118,6 @@ def test_registry_error_envelope_translates_to_exception(stub_server):
 
 
 # Spec: §6.2 — Client.from_env reads PODIUM_REGISTRY and provider env vars.
-# Phase: 4
 def test_from_env_reads_registry(monkeypatch):
     monkeypatch.setenv("PODIUM_REGISTRY", "http://127.0.0.1:9999")
     monkeypatch.setenv("PODIUM_OVERLAY_PATH", "/tmp/overlay")
@@ -157,7 +128,6 @@ def test_from_env_reads_registry(monkeypatch):
 
 # Spec: §4.7.6 — dependents_of returns artifacts that depend on the
 # given id, surfaced as ArtifactDescriptor instances.
-# Phase: 4
 def test_dependents_of_decodes_envelope(stub_server):
     stub_server.next_response = {
         "dependents": [
@@ -175,7 +145,6 @@ def test_dependents_of_decodes_envelope(stub_server):
 # Spec: §6.4 — preview_scope hits /v1/scope/preview with the
 # constraints; the SDK passes the response through unchanged so
 # callers can inspect the full envelope.
-# Phase: 4
 def test_preview_scope_passes_constraints(stub_server):
     stub_server.next_response = {
         "scope": "finance/",
@@ -192,7 +161,6 @@ def test_preview_scope_passes_constraints(stub_server):
 
 # Spec: §7.6.2 — load_artifacts POSTs to /v1/artifacts:batchLoad
 # and returns per-item envelopes; partial failures do not raise.
-# Phase: 4
 def test_load_artifacts_returns_envelopes(stub_server):
     stub_server.next_response = [
         {"id": "a", "status": "ok", "version": "1.0.0", "content_hash": "sha256:a"},
@@ -211,7 +179,6 @@ def test_load_artifacts_returns_envelopes(stub_server):
 
 # Spec: §7.6.2 — empty ids list short-circuits to an empty
 # response without a network call.
-# Phase: 4
 def test_load_artifacts_empty_short_circuits(stub_server):
     client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
     out = client.load_artifacts([])

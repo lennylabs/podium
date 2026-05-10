@@ -1201,7 +1201,7 @@ func scoreBM25(records []store.ManifestRecord, query string) []scoredRecord {
 			n := float64(len(records))
 			idf := 0.0
 			if df[qt] > 0 {
-				idf = logf((n - float64(df[qt]) + 0.5) / (float64(df[qt]) + 0.5) + 1)
+				idf = logf((n-float64(df[qt])+0.5)/(float64(df[qt])+0.5) + 1)
 			}
 			dl := float64(len(doc))
 			norm := f * (k1 + 1) / (f + k1*(1-b+b*dl/avgLen))

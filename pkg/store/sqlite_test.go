@@ -4,15 +4,11 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
-
-	"github.com/lennylabs/podium/internal/testharness"
 )
 
 // Spec: §13.10 Standalone Deployment — the SQLite backend persists
 // across opens of the same file path.
-// Phase: 5
 func TestSQLite_PersistsAcrossOpens(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "podium.db")
@@ -65,9 +61,7 @@ func TestSQLite_PersistsAcrossOpens(t *testing.T) {
 
 // Spec: §13.10 — schema apply is idempotent (re-opening an existing
 // database does not error and preserves data).
-// Phase: 5
 func TestSQLite_SchemaIsIdempotent(t *testing.T) {
-	testharness.RequirePhase(t, 5)
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "podium.db")

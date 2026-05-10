@@ -4,15 +4,11 @@ import (
 	"context"
 	"errors"
 	"testing"
-
-	"github.com/lennylabs/podium/internal/testharness"
 )
 
 // Spec: §6.3.2 — InjectedSessionToken returns the verified Identity
 // when both TokenSource and Verify succeed.
-// Phase: 11
 func TestInjectedSessionToken_Verifies(t *testing.T) {
-	testharness.RequirePhase(t, 11)
 	t.Parallel()
 	want := Identity{Sub: "joan", IsAuthenticated: true, Groups: []string{"finance"}}
 	p := InjectedSessionToken{
@@ -35,10 +31,8 @@ func TestInjectedSessionToken_Verifies(t *testing.T) {
 
 // Spec: §6.3.2 / §6.10 — unsigned token rejection surfaces as
 // ErrUntrustedRuntime.
-// Phase: 11
 // Matrix: §6.10 (auth.untrusted_runtime)
 func TestInjectedSessionToken_RejectsUntrusted(t *testing.T) {
-	testharness.RequirePhase(t, 11)
 	t.Parallel()
 	p := InjectedSessionToken{
 		TokenSource: func() (string, error) { return "fake-jwt", nil },
@@ -54,9 +48,7 @@ func TestInjectedSessionToken_RejectsUntrusted(t *testing.T) {
 
 // Spec: §6.3 — OAuthDeviceCode without an AcquireToken function returns
 // ErrDeviceCodeRequired so the caller can drive the device-code flow.
-// Phase: 11
 func TestOAuthDeviceCode_RequiresFlow(t *testing.T) {
-	testharness.RequirePhase(t, 11)
 	t.Parallel()
 	p := OAuthDeviceCode{
 		VerificationURL: "https://example/device",
@@ -69,9 +61,7 @@ func TestOAuthDeviceCode_RequiresFlow(t *testing.T) {
 }
 
 // Spec: §6.3 — provider IDs are stable and match the documented values.
-// Phase: 11
 func TestProvider_IDs(t *testing.T) {
-	testharness.RequirePhase(t, 11)
 	t.Parallel()
 	if (InjectedSessionToken{}).ID() != "injected-session-token" {
 		t.Errorf("InjectedSessionToken.ID changed")

@@ -58,9 +58,7 @@ func mustGet(t testing.TB, base, path string) []byte {
 
 // Spec: §5 / §13.9 — /healthz reports mode: ready when the registry is
 // reachable; clients use this to confirm a server-source registry is up.
-// Phase: 2
 func TestHealth_ReturnsReady(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	h := registryharness.New(t)
 	body := mustGet(t, h.URL, "/healthz")
@@ -75,9 +73,7 @@ func TestHealth_ReturnsReady(t *testing.T) {
 
 // Spec: §5 load_domain — root call (no path) returns subdomains plus
 // notable artifacts directly under root.
-// Phase: 2
 func TestLoadDomain_RootMap(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	h := registryharness.New(t,
 		fixture("finance/ap/pay-invoice/ARTIFACT.md", contextFor("Pay invoice", "finance,ap")),
@@ -105,9 +101,7 @@ func TestLoadDomain_RootMap(t *testing.T) {
 
 // Spec: §5 load_domain — drilling into a path returns the subdomains
 // under that path plus notable artifacts directly under it.
-// Phase: 2
 func TestLoadDomain_DrillIn(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	h := registryharness.New(t,
 		fixture("finance/ap/pay-invoice/ARTIFACT.md", contextFor("Pay invoice", "finance,ap")),
@@ -132,9 +126,7 @@ func TestLoadDomain_DrillIn(t *testing.T) {
 
 // Spec: §5 search_artifacts — basic substring match returns the
 // artifact's descriptor; no manifest body is included.
-// Phase: 2
 func TestSearchArtifacts_Substring(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	h := registryharness.New(t,
 		fixture("finance/run-variance/ARTIFACT.md", contextFor("Variance analysis", "finance")),
@@ -154,9 +146,7 @@ func TestSearchArtifacts_Substring(t *testing.T) {
 }
 
 // Spec: §5 search_artifacts — type filter narrows to the requested type.
-// Phase: 2
 func TestSearchArtifacts_TypeFilter(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	h := registryharness.New(t,
 		fixture("finance/run/ARTIFACT.md", skillFor("Skill")),
@@ -175,10 +165,8 @@ func TestSearchArtifacts_TypeFilter(t *testing.T) {
 
 // Spec: §5 search_artifacts — top_k > 50 is rejected with
 // registry.invalid_argument.
-// Phase: 2
 // Matrix: §6.10 (registry.invalid_argument)
 func TestSearchArtifacts_TopKBoundary(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	h := registryharness.New(t)
 	resp, err := http.Get(h.URL + "/v1/search_artifacts?top_k=51")
@@ -197,9 +185,7 @@ func TestSearchArtifacts_TopKBoundary(t *testing.T) {
 
 // Spec: §5 load_artifact — returns the manifest body and the bundled
 // resources inline (Stage 3; presigned URLs land in Phase 5).
-// Phase: 2
 func TestLoadArtifact_ReturnsManifestAndResources(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	h := registryharness.New(t,
 		fixture("finance/run/ARTIFACT.md", skillFor("Run")),
@@ -224,10 +210,8 @@ func TestLoadArtifact_ReturnsManifestAndResources(t *testing.T) {
 
 // Spec: §6.10 / §5 — load_artifact for an unknown ID returns 404 with
 // registry.not_found.
-// Phase: 2
 // Matrix: §6.10 (registry.not_found)
 func TestLoadArtifact_NotFound(t *testing.T) {
-	testharness.RequirePhase(t, 2)
 	t.Parallel()
 	h := registryharness.New(t)
 	resp, err := http.Get(h.URL + "/v1/load_artifact?id=does/not/exist")

@@ -3,17 +3,13 @@ package materialize
 import (
 	"errors"
 	"testing"
-
-	"github.com/lennylabs/podium/internal/testharness"
 )
 
 // Spec: §4.4.1 / §6.10 — when the host cannot satisfy a manifest's
 // runtime_requirements, materialize fails with
 // materialize.runtime_unavailable.
-// Phase: 0
 // Matrix: §6.10 (materialize.runtime_unavailable)
 func TestCheckRuntimeRequirements_PythonMinVersion(t *testing.T) {
-	testharness.RequirePhase(t, 0)
 	t.Parallel()
 	req := map[string]any{"python": ">=3.10"}
 
@@ -35,9 +31,7 @@ func TestCheckRuntimeRequirements_PythonMinVersion(t *testing.T) {
 
 // Spec: §4.4.1 — system_packages requirements check the host's
 // advertised packages.
-// Phase: 0
 func TestCheckRuntimeRequirements_SystemPackages(t *testing.T) {
-	testharness.RequirePhase(t, 0)
 	t.Parallel()
 	req := map[string]any{"system_packages": []string{"jq", "curl"}}
 	host := HostCapabilities{SystemPackages: []string{"jq", "curl", "ripgrep"}}
@@ -52,9 +46,7 @@ func TestCheckRuntimeRequirements_SystemPackages(t *testing.T) {
 }
 
 // Spec: §4.4.1 — empty requirements are always satisfied.
-// Phase: 0
 func TestCheckRuntimeRequirements_EmptyAlwaysSatisfied(t *testing.T) {
-	testharness.RequirePhase(t, 0)
 	t.Parallel()
 	if err := CheckRuntimeRequirements(nil, HostCapabilities{}); err != nil {
 		t.Errorf("empty req: %v", err)

@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
@@ -15,9 +14,7 @@ import (
 
 // Spec: §4.7.8 — over-rate search calls return HTTP 429 with the
 // quota.search_qps_exceeded code in the §6.10 error envelope.
-// Phase: 12
 func TestServer_SearchQPSRateLimited(t *testing.T) {
-	testharness.RequirePhase(t, 12)
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
@@ -52,9 +49,7 @@ func TestServer_SearchQPSRateLimited(t *testing.T) {
 
 // Spec: §4.7.8 — over-rate load_artifact calls return HTTP 429
 // with quota.materialize_rate_exceeded.
-// Phase: 12
 func TestServer_LoadArtifactRateLimited(t *testing.T) {
-	testharness.RequirePhase(t, 12)
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "default"})

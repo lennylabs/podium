@@ -11,7 +11,7 @@ const artifact = await client.loadArtifact(results.results![0].id);
 console.log(artifact.manifest_body);
 ```
 
-Tests skip when the repo's `.phase` file reads below `14`. Run them with:
+Run the tests with:
 
 ```sh
 cd sdks/podium-ts

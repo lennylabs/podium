@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
@@ -14,9 +13,7 @@ import (
 // ingested *non-deprecated* version. A higher-semver but
 // deprecated version must not win latest resolution; the prior
 // non-deprecated version is what callers see.
-// Phase: 7
 func TestLoadArtifact_LatestSkipsDeprecatedVersion(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	const tenant = "t"
 	st := store.NewMemory()
@@ -53,9 +50,7 @@ func TestLoadArtifact_LatestSkipsDeprecatedVersion(t *testing.T) {
 // resolution falls back to the most recent (deprecated) version
 // rather than failing with not_found. Callers see the
 // deprecation warning but still get bytes.
-// Phase: 7
 func TestLoadArtifact_LatestFallsBackWhenAllDeprecated(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	const tenant = "t"
 	st := store.NewMemory()
@@ -86,9 +81,7 @@ func TestLoadArtifact_LatestFallsBackWhenAllDeprecated(t *testing.T) {
 // Spec: §4.7.6 — when the caller supplies an exact pin, the
 // deprecation filter does not apply (callers can opt to load
 // historical/deprecated versions explicitly).
-// Phase: 7
 func TestLoadArtifact_ExactVersionLoadsDeprecated(t *testing.T) {
-	testharness.RequirePhase(t, 7)
 	t.Parallel()
 	const tenant = "t"
 	st := store.NewMemory()

@@ -4,15 +4,11 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/lennylabs/podium/internal/testharness"
 )
 
 // Spec: §7.5.3 Lock File — every field in the schema round-trips through
 // ReadLock / WriteLock without loss.
-// Phase: 3
 func TestLockFile_RoundTrip(t *testing.T) {
-	testharness.RequirePhase(t, 3)
 	t.Parallel()
 	target := t.TempDir()
 	in := &LockFile{
@@ -56,9 +52,7 @@ func TestLockFile_RoundTrip(t *testing.T) {
 
 // Spec: §7.5.3 — ReadLock on a missing file returns (nil, nil); callers
 // treat this as "no previous sync against this target."
-// Phase: 3
 func TestLockFile_MissingFileReturnsNil(t *testing.T) {
-	testharness.RequirePhase(t, 3)
 	t.Parallel()
 	out, err := ReadLock(t.TempDir())
 	if err != nil {
@@ -71,9 +65,7 @@ func TestLockFile_MissingFileReturnsNil(t *testing.T) {
 
 // Spec: §7.5.3 — WriteLock creates `.podium/` if absent and writes the
 // file atomically (no .tmp left behind on success).
-// Phase: 3
 func TestLockFile_WriteAtomicCreatesDir(t *testing.T) {
-	testharness.RequirePhase(t, 3)
 	t.Parallel()
 	target := t.TempDir()
 	if err := WriteLock(target, &LockFile{Version: 1}); err != nil {
@@ -88,9 +80,7 @@ func TestLockFile_WriteAtomicCreatesDir(t *testing.T) {
 }
 
 // Spec: §7.5.3 — invalid YAML yields a wrapped error (not a panic).
-// Phase: 3
 func TestLockFile_InvalidYAML(t *testing.T) {
-	testharness.RequirePhase(t, 3)
 	t.Parallel()
 	target := t.TempDir()
 	dir := filepath.Join(target, ".podium")

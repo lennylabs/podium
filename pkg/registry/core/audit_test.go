@@ -6,7 +6,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
@@ -53,9 +52,7 @@ func setupRegistryWithAudit(t *testing.T) (*core.Registry, *recorder) {
 }
 
 // Spec: §8.1 — load_domain emits a domain.loaded audit event per call.
-// Phase: 16
 func TestAudit_LoadDomain(t *testing.T) {
-	testharness.RequirePhase(t, 16)
 	t.Parallel()
 	reg, rec := setupRegistryWithAudit(t)
 	if _, err := reg.LoadDomain(context.Background(), publicID, "", core.LoadDomainOptions{}); err != nil {
@@ -72,9 +69,7 @@ func TestAudit_LoadDomain(t *testing.T) {
 
 // Spec: §8.1 — search_artifacts emits an artifacts.searched event;
 // query / scope / type appear in context.
-// Phase: 16
 func TestAudit_SearchArtifacts(t *testing.T) {
-	testharness.RequirePhase(t, 16)
 	t.Parallel()
 	reg, rec := setupRegistryWithAudit(t)
 	if _, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{
@@ -97,9 +92,7 @@ func TestAudit_SearchArtifacts(t *testing.T) {
 
 // Spec: §8.1 — load_artifact emits artifact.loaded with the artifact
 // ID as the target.
-// Phase: 16
 func TestAudit_LoadArtifact(t *testing.T) {
-	testharness.RequirePhase(t, 16)
 	t.Parallel()
 	reg, rec := setupRegistryWithAudit(t)
 	if _, err := reg.LoadArtifact(context.Background(), publicID, "finance/x", core.LoadArtifactOptions{}); err != nil {
@@ -116,9 +109,7 @@ func TestAudit_LoadArtifact(t *testing.T) {
 
 // Spec: §8.1 — authenticated callers record their sub claim, not
 // system:public.
-// Phase: 16
 func TestAudit_AuthenticatedCallerRecordsSub(t *testing.T) {
-	testharness.RequirePhase(t, 16)
 	t.Parallel()
 	reg, rec := setupRegistryWithAudit(t)
 	id := layer.Identity{Sub: "joan", IsAuthenticated: true}

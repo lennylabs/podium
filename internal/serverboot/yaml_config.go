@@ -12,16 +12,16 @@ import (
 // top of the env-derived default so env-var precedence remains
 // (env beats yaml beats hardcoded default).
 type yamlConfig struct {
-	Bind             string         `yaml:"bind,omitempty"`
-	PublicMode       *bool          `yaml:"public_mode,omitempty"`
-	IdentityProvider string         `yaml:"identity_provider,omitempty"`
-	Store            yamlStoreCfg   `yaml:"store,omitempty"`
-	ObjectStore      yamlObjectCfg  `yaml:"object_store,omitempty"`
-	Vector           yamlVectorCfg  `yaml:"vector_backend,omitempty"`
-	Embedding        yamlEmbedCfg   `yaml:"embedding_provider,omitempty"`
-	Discovery        yamlDiscovery  `yaml:"discovery,omitempty"`
-	Layers           yamlLayerCfg   `yaml:"layers,omitempty"`
-	ReadOnly         yamlReadOnly   `yaml:"read_only,omitempty"`
+	Bind             string        `yaml:"bind,omitempty"`
+	PublicMode       *bool         `yaml:"public_mode,omitempty"`
+	IdentityProvider string        `yaml:"identity_provider,omitempty"`
+	Store            yamlStoreCfg  `yaml:"store,omitempty"`
+	ObjectStore      yamlObjectCfg `yaml:"object_store,omitempty"`
+	Vector           yamlVectorCfg `yaml:"vector_backend,omitempty"`
+	Embedding        yamlEmbedCfg  `yaml:"embedding_provider,omitempty"`
+	Discovery        yamlDiscovery `yaml:"discovery,omitempty"`
+	Layers           yamlLayerCfg  `yaml:"layers,omitempty"`
+	ReadOnly         yamlReadOnly  `yaml:"read_only,omitempty"`
 }
 
 type yamlStoreCfg struct {

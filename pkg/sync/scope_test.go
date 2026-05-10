@@ -2,14 +2,10 @@ package sync
 
 import (
 	"testing"
-
-	"github.com/lennylabs/podium/internal/testharness"
 )
 
 // Spec: §4.5.2 Imports and Globs — `*` matches a single segment.
-// Phase: 3
 func TestMatchGlob_SingleSegment(t *testing.T) {
-	testharness.RequirePhase(t, 3)
 	t.Parallel()
 	cases := []struct {
 		pattern, id string
@@ -27,9 +23,7 @@ func TestMatchGlob_SingleSegment(t *testing.T) {
 }
 
 // Spec: §4.5.2 — `**` matches zero or more path segments.
-// Phase: 3
 func TestMatchGlob_RecursiveDoubleStar(t *testing.T) {
-	testharness.RequirePhase(t, 3)
 	t.Parallel()
 	cases := []struct {
 		pattern, id string
@@ -49,9 +43,7 @@ func TestMatchGlob_RecursiveDoubleStar(t *testing.T) {
 }
 
 // Spec: §4.5.2 — brace alternation expands the pattern.
-// Phase: 3
 func TestMatchGlob_BraceAlternation(t *testing.T) {
-	testharness.RequirePhase(t, 3)
 	t.Parallel()
 	cases := []struct {
 		pattern, id string
@@ -70,9 +62,7 @@ func TestMatchGlob_BraceAlternation(t *testing.T) {
 
 // Spec: §7.5.1 Scope Filters — Include narrows; without Include, every
 // record passes through (subject to Exclude / Types).
-// Phase: 3
 func TestScopeFilter_Apply(t *testing.T) {
-	testharness.RequirePhase(t, 3)
 	t.Parallel()
 	records := mkRecords("finance/ap/pay", "finance/ar/refund", "notes/glossary")
 
@@ -91,9 +81,7 @@ func TestScopeFilter_Apply(t *testing.T) {
 }
 
 // Spec: §7.5.1 — type filter narrows to listed types only.
-// Phase: 3
 func TestScopeFilter_TypeFilter(t *testing.T) {
-	testharness.RequirePhase(t, 3)
 	t.Parallel()
 	records := mkRecordsWithTypes(
 		[2]string{"finance/run/skill", "skill"},

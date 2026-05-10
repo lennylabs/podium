@@ -1,27 +1,16 @@
 # Podium build / test orchestration.
 #
-# This Makefile is the user-facing entry point for the autonomous TDD loop.
 # Most targets dispatch to `go` and the tools under `tools/`.
 #
 # Conventions:
-#   PHASE   active phase override; defaults to the contents of .phase.
 #   GOFLAGS extra flags forwarded to `go test`.
-#
-# See TEST_INFRASTRUCTURE_PLAN.md for the design rationale.
 
 SHELL := /bin/bash
 
-PHASE ?= $(shell cat .phase 2>/dev/null || echo 0)
 GO    ?= go
 
-TEST_PKGS_FAST   := ./...
-TEST_PKGS_MEDIUM := ./test/integration/...
-TEST_PKGS_SLOW   := ./test/e2e/... ./test/conformance/...
-
-export PODIUM_PHASE := $(PHASE)
-
-.PHONY: help test-fast test-medium test-slow test-phase test \
-        lint update-golden status next advance \
+.PHONY: help test test-live bench \
+        lint update-golden \
         speccov speccov-uncovered speccov-drift speccov-report \
         coverage coverage-budget coverage-per-package coverage-gate \
         matrix matrix-list matrix-audit matrix-scaffold \
@@ -29,21 +18,16 @@ export PODIUM_PHASE := $(PHASE)
 
 help:
 	@echo "Podium make targets:"
-	@echo "  test-fast        Run unit tests in ./... (under one minute)"
-	@echo "  test-medium      Run integration tests"
-	@echo "  test-slow        Run e2e and conformance suites"
-	@echo "  test-phase       Run the test set for PHASE=N (default: .phase)"
-	@echo "  test             Alias for test-fast"
-	@echo "  status           Print active phase and one-screen summary"
-	@echo "  next             Print the next failing test"
-	@echo "  advance          Bump .phase if the active phase is fully green"
+	@echo "  test             Run the full Go test suite (single lane)"
+	@echo "  test-live        Run env-gated Tier 2 tests against real Postgres/S3/Sigstore/embedding providers"
+	@echo "  bench            Run §7.1 latency benchmarks (informational)"
 	@echo "  lint             Run linters (golangci-lint when available)"
 	@echo "  update-golden    Re-run tests with UPDATE_GOLDEN=1"
 	@echo "  speccov          Print spec-section coverage report"
 	@echo "  speccov-uncovered  Print spec sections with no citing test"
 	@echo "  speccov-drift    Fail if any test cites a missing spec section"
 	@echo "  coverage         Run tests with -coverprofile and print summary"
-	@echo "  coverage-budget  Assert overall coverage ≥ COVERAGE_MIN (default 50)"
+	@echo "  coverage-budget  Assert overall coverage >= COVERAGE_MIN (default 50)"
 	@echo "  coverage-per-package  Print per-package coverage breakdown"
 	@echo "  coverage-gate    Run all coverage checks the CI runs"
 	@echo "  matrix-audit     Audit spec-table coverage (§6.7.1, §6.10, etc.)"
@@ -54,39 +38,22 @@ help:
 
 # ----- Test lanes ------------------------------------------------------------
 
-test: test-fast
+# Single-lane test target: the entire Go suite runs in one invocation.
+# Tier 2 integration tests gate themselves on PODIUM_LIVE_* env vars and
+# are skipped by default. Use `make test-live` to opt in.
+test:
+	$(GO) test $(GOFLAGS) -count=1 ./...
 
-test-fast:
-	@echo "PODIUM_PHASE=$(PHASE) running fast lane"
-	$(GO) test $(GOFLAGS) -count=1 $(TEST_PKGS_FAST)
-
-test-medium:
-	@echo "PODIUM_PHASE=$(PHASE) running medium lane"
-	$(GO) test $(GOFLAGS) -count=1 -tags=medium $(TEST_PKGS_MEDIUM)
-
-test-slow:
-	@echo "PODIUM_PHASE=$(PHASE) running slow lane"
-	$(GO) test $(GOFLAGS) -count=1 -tags=slow,medium $(TEST_PKGS_SLOW)
-
-test-phase:
-	@$(MAKE) test-fast PHASE=$(PHASE)
+# Tier 2 integration tests against real external services (Postgres, S3,
+# Sigstore, embedding providers). The tests inspect PODIUM_LIVE_* env vars
+# and skip themselves when the corresponding service is not configured.
+test-live:
+	PODIUM_LIVE=1 $(GO) test $(GOFLAGS) -count=1 -tags=live ./...
 
 # Run the §7.1 latency benchmark suite. Output is informational;
 # CI does not gate on absolute numbers because cloud runners vary.
-.PHONY: bench
 bench:
 	$(GO) test -bench=. -benchmem -benchtime=10x -run=^$$ ./test/bench/...
-
-# ----- Phase orchestration ---------------------------------------------------
-
-status: tools
-	@./bin/phasegate status
-
-next: tools
-	@./bin/phasegate next
-
-advance: tools
-	@./bin/phasegate advance
 
 # ----- Coverage / spec traceability -----------------------------------------
 
@@ -143,7 +110,6 @@ update-golden:
 tools:
 	@mkdir -p bin
 	$(GO) build -o bin/speccov ./tools/speccov
-	$(GO) build -o bin/phasegate ./tools/phasegate
 	$(GO) build -o bin/matrix ./tools/matrix
 	$(GO) build -o bin/coverage ./tools/coverage
 

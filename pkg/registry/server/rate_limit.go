@@ -65,11 +65,11 @@ func (b *rateBucket) allow() bool {
 // allowSearch / allowMaterialize methods that handlers consult
 // before doing real work. Zero limits skip the check.
 type QuotaLimiter struct {
-	mu             sync.Mutex
-	searchBuckets  map[string]*rateBucket
-	matBuckets     map[string]*rateBucket
-	searchQPS      int
-	matRate        int
+	mu            sync.Mutex
+	searchBuckets map[string]*rateBucket
+	matBuckets    map[string]*rateBucket
+	searchQPS     int
+	matRate       int
 }
 
 // NewQuotaLimiter returns a limiter configured with the supplied
