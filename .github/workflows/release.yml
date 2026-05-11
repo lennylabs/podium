@@ -142,12 +142,12 @@ jobs:
     runs-on: ubuntu-latest
     services:
       minio:
-        # Pinned; keep in sync with docker-compose.yml and nightly.yml.
-        image: bitnami/minio:2024.10.13-debian-12-r1
+        # Official MinIO image. Pinned; keep in sync with
+        # docker-compose.yml and nightly.yml.
+        image: minio/minio:RELEASE.2024-10-29T16-01-48Z
         env:
           MINIO_ROOT_USER: minioadmin
           MINIO_ROOT_PASSWORD: minioadmin
-          MINIO_DEFAULT_BUCKETS: podium
         ports:
           - 9000:9000
         options: >-
@@ -160,6 +160,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Create test bucket
+        # Official MinIO doesn't auto-create buckets; the bitnami
+        # MINIO_DEFAULT_BUCKETS env var was vendor-specific.
+        # Install the mc CLI and create the bucket before tests run.
+        run: |
+          curl -sSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc
+          chmod +x /usr/local/bin/mc
+          mc alias set local http://localhost:9000 minioadmin minioadmin
+          mc mb --ignore-existing local/podium
       - name: pkg/objectstore live S3 conformance
         env:
           PODIUM_S3_ENDPOINT: localhost:9000
