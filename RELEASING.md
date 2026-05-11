@@ -80,7 +80,9 @@ The `main` line continues toward `0.3.0` independently. Merge the fix back into 
 
 ## What CI does on a tag
 
-A push of `vX.Y.Z` triggers the release workflow. Five test jobs run in parallel and every publish job lists all five in `needs:`, so a single failure blocks every artifact:
+A push of `vX.Y.Z` triggers the release workflow. A `validate-tag` job runs first and rejects tags whose commit is not reachable from `main` or any `release/*` branch — a safety net that prevents publishing from a feature branch or stale fork.
+
+Once that gate passes, five test jobs run in parallel and every publish job lists all five in `needs:`, so a single failure blocks every artifact:
 
 | Job | Covers |
 |:--|:--|

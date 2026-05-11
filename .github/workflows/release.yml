@@ -20,8 +20,38 @@ permissions:
   id-token: write   # PyPI trusted publishing + npm provenance
 
 jobs:
+  # Hard gate: a tag push only releases when the tagged commit is
+  # reachable from main or from a release/* branch. Tags created
+  # against feature branches or stale forks fail here and the
+  # workflow short-circuits before any test or publish job runs.
+  #
+  # GitHub Actions has no built-in "tag must be on branch X" filter,
+  # so the check is a small git ancestry probe.
+  validate-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need full history + every release/* branch
+      - name: Verify tag commit is on main or release/*
+        run: |
+          sha='${{ github.sha }}'
+          if git merge-base --is-ancestor "${sha}" origin/main; then
+            echo "Tag commit ${sha} is reachable from origin/main."
+            exit 0
+          fi
+          for ref in $(git for-each-ref --format='%(refname:short)' refs/remotes/origin/release/*); do
+            if git merge-base --is-ancestor "${sha}" "${ref}"; then
+              echo "Tag commit ${sha} is reachable from ${ref}."
+              exit 0
+            fi
+          done
+          echo "::error::Tag commit ${sha} is not on main or any release/* branch. Tags must come from a release-track branch; see RELEASING.md." >&2
+          exit 1
+
   go:
     name: go full sweep
+    needs: validate-tag
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,6 +73,7 @@ jobs:
 
   python:
     name: podium-py
+    needs: validate-tag
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -60,6 +91,7 @@ jobs:
 
   typescript:
     name: podium-ts
+    needs: validate-tag
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -75,6 +107,7 @@ jobs:
 
   postgres:
     name: live postgres + pgvector
+    needs: validate-tag
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -105,6 +138,7 @@ jobs:
 
   s3:
     name: live S3 (MinIO)
+    needs: validate-tag
     runs-on: ubuntu-latest
     services:
       minio:
