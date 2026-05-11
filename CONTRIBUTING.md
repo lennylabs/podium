@@ -74,6 +74,10 @@ make coverage-gate   # Run the full CI gate locally (lint + drift + matrix + cov
 
 A new test should carry a `// Spec:` annotation pointing to the spec section it exercises. Multi-cite is supported via `Spec: §A / §B — note`. Tests that have no spec correspondence use `Spec: n/a — <reason>`.
 
+## Releases
+
+Maintainer-facing notes on cutting a release (versioning, tagging, CI workflow, patch flow) live in [`RELEASING.md`](RELEASING.md).
+
 ## Ground rules
 
 - **License:** Podium is [MIT-licensed](LICENSE). Contributions are accepted under the same license.
