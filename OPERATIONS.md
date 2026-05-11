@@ -13,10 +13,10 @@ Manual steps that supplement the automated workflows. Each item lists what to do
 
 ### Repo secrets to create
 
-| Secret          | Used by                             | Required?                                                                           |
-| :-------------- | :---------------------------------- | :---------------------------------------------------------------------------------- |
-| `NPM_TOKEN`     | `release.yml` → `publish-ts`        | Yes, before first release                                                           |
-| `CODECOV_TOKEN` | `test.yml` → `go` (coverage upload) | Optional; the Codecov GitHub App handles uploads via OIDC without a token           |
+| Secret          | Used by                             | Required?                                                                 |
+| :-------------- | :---------------------------------- | :------------------------------------------------------------------------ |
+| `NPM_TOKEN`     | `release.yml` → `publish-ts`        | Yes, before first release                                                 |
+| `CODECOV_TOKEN` | `test.yml` → `go` (coverage upload) | Optional; the Codecov GitHub App handles uploads via OIDC without a token |
 
 ### What's not a secret
 
@@ -172,7 +172,7 @@ Tag protection plus the `validate-tag` workflow gate gives defense in depth:
 - Tag protection stops most accidents — a contributor with write access can't push a `v*` tag at all.
 - `validate-tag` catches the remaining case — an admin who mistakenly tags an unmerged commit gets a CI failure before any artifact publishes.
 
-### [ ] Set up Codecov
+### [x] Set up Codecov
 
 The `go` job in `test.yml` uploads coverage to Codecov. Two paths, depending on how Codecov is configured for the repo:
 
@@ -189,7 +189,7 @@ The `go` job in `test.yml` uploads coverage to Codecov. Two paths, depending on 
 
 `codecov-action@v5` uses the token when present, falls back to OIDC otherwise. The workflow already sets `fail_ci_if_error: false`, so a missing or flaky upload doesn't block PR merges or releases either way.
 
-### [ ] Enable Dependabot security updates
+### [x] Enable Dependabot security updates
 
 GitHub's free product, on by default for public repos. Confirm at Settings → Code security and analysis → Dependabot alerts and Dependabot security updates are both **On**. The non-security version-bump PRs come from the `.github/dependabot.yml` config that's already committed.
 
