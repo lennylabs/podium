@@ -13,16 +13,17 @@ Manual steps that supplement the automated workflows. Each item lists what to do
 
 ### Repo secrets to create
 
-| Secret          | Used by                             | Required?                                                         |
-| :-------------- | :---------------------------------- | :---------------------------------------------------------------- |
-| `NPM_TOKEN`     | `release.yml` → `publish-ts`        | Yes, before first release                                         |
-| `CODECOV_TOKEN` | `test.yml` → `go` (coverage upload) | Optional; tokenless works on public repos but flakes occasionally |
+| Secret          | Used by                             | Required?                                                                           |
+| :-------------- | :---------------------------------- | :---------------------------------------------------------------------------------- |
+| `NPM_TOKEN`     | `release.yml` → `publish-ts`        | Yes, before first release                                                           |
+| `CODECOV_TOKEN` | `test.yml` → `go` (coverage upload) | Optional; the Codecov GitHub App handles uploads via OIDC without a token           |
 
 ### What's not a secret
 
 | Thing                  | Why no secret needed                                           |
 | :--------------------- | :------------------------------------------------------------- |
 | PyPI uploads           | OIDC via Trusted Publisher, bound on PyPI's side               |
+| Codecov uploads        | The Codecov GitHub App grants OIDC-based access                |
 | GHCR container pushes  | `GITHUB_TOKEN` already has `packages: write` per the workflow  |
 | Postgres / MinIO in CI | Service containers set their own credentials inline            |
 | `PODIUM_SIGSTORE_*`    | Sigstore live tests are manual-only; never run from a workflow |
@@ -32,6 +33,7 @@ Manual steps that supplement the automated workflows. Each item lists what to do
 | Setting                        | Where                                        |
 | :----------------------------- | :------------------------------------------- |
 | `pypi` environment             | Settings → Environments → New environment    |
+| Codecov GitHub App             | github.com/apps/codecov → Install on repo    |
 | PyPI Trusted Publisher binding | pypi.org → manage project → publishing       |
 | Branch protection on `main`    | Settings → Branches → required status checks |
 | Tag protection on `v*`         | Settings → Tags → New rule                   |
@@ -113,7 +115,7 @@ The package name in `sdks/podium-ts/package.json` is `@lennylabs/podium-sdk` —
 
 The `@podium` scope was already taken on npm, which is why this project uses `@lennylabs/podium-sdk` rather than `@podium/sdk`. If `lennylabs` is also taken when you get to this step, pick another scope (`@lennylabs-podium`, `@podiumio`, etc.) and update the `name` field in `sdks/podium-ts/package.json` to match. The Python distribution name (`podium-sdk` on PyPI) and the npm scope name do not have to be aligned.
 
-### [ ] Reserve `@lennylabs/podium-sdk` with a first publish
+### [x] Reserve `@lennylabs/podium-sdk` with a first publish
 
 With the organization in place, the first publish under the scope creates the package and reserves its name. Two ways to do this:
 
@@ -170,13 +172,22 @@ Tag protection plus the `validate-tag` workflow gate gives defense in depth:
 - Tag protection stops most accidents — a contributor with write access can't push a `v*` tag at all.
 - `validate-tag` catches the remaining case — an admin who mistakenly tags an unmerged commit gets a CI failure before any artifact publishes.
 
-### [ ] Add `CODECOV_TOKEN` repo secret
+### [ ] Set up Codecov
 
-The `go` job in `test.yml` uploads coverage to Codecov. Public repos can use Codecov without a token, but tokenless uploads occasionally fail; setting the token avoids flakes.
+The `go` job in `test.yml` uploads coverage to Codecov. Two paths, depending on how Codecov is configured for the repo:
+
+**GitHub App (recommended)** — no token required:
+
+1. Install the [Codecov GitHub App](https://github.com/apps/codecov) on the `lennylabs/podium` repo.
+2. That's it. `codecov-action@v5` exchanges a GitHub Actions OIDC token for short-lived Codecov credentials at upload time; no static secret lives in the repo.
+
+**Upload token (fallback)** — useful for redundancy or if you ever flip the repo to private:
 
 1. Sign in to [codecov.io](https://codecov.io) with GitHub.
-2. Add the `lennylabs/podium` repo. Copy the upload token.
-3. Add to GitHub: repo Settings → Secrets and variables → Actions → New repository secret named `CODECOV_TOKEN`.
+2. Repo dashboard → **Settings** → **General** → **Repository Upload Token**.
+3. Copy. Add to GitHub: repo Settings → Secrets and variables → Actions → New repository secret named `CODECOV_TOKEN`.
+
+`codecov-action@v5` uses the token when present, falls back to OIDC otherwise. The workflow already sets `fail_ci_if_error: false`, so a missing or flaky upload doesn't block PR merges or releases either way.
 
 ### [ ] Enable Dependabot security updates
 
