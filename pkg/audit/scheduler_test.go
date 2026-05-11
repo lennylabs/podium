@@ -79,9 +79,21 @@ func TestScheduler_FailureDoesNotStop(t *testing.T) {
 		OnFailure: func(error) { failed.Add(1) },
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	go sched.Run(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = sched.Run(ctx)
+	}()
 	time.Sleep(120 * time.Millisecond)
 	cancel()
+	// Wait for Run to return before letting the test finish; otherwise
+	// the scheduler's in-flight Append can race with t.TempDir cleanup
+	// and produce "directory not empty" failures on the runner.
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scheduler did not exit within 2s of cancel")
+	}
 	if failed.Load() == 0 {
 		t.Errorf("OnFailure was not invoked despite first-call failure")
 	}
