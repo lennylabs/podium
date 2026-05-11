@@ -9,7 +9,7 @@ var (
 	// Version is the semver string for this build (e.g., "0.1.0" or
 	// "0.1.0-rc.1"). Defaults to a "-dev" marker so a plain
 	// `go build` from a working tree is recognisable as unreleased.
-	Version = "0.1.0-dev"
+	Version = "0.1.0"
 	// Commit is the git commit short hash this build was produced
 	// from. Set via -ldflags at release time; "unknown" otherwise.
 	Commit = "unknown"
