@@ -67,7 +67,7 @@ The PyPI distribution name is `podium-sdk` (the plain `podium` name was taken). 
 
 After this, every tagged release uploads automatically with no token rotation.
 
-### [ ] Create the GitHub `pypi` environment
+### [x] Create the GitHub `pypi` environment
 
 The `publish-py` job pins itself to `environment: pypi` so the trusted-publisher binding is honored.
 
@@ -83,18 +83,34 @@ The `publish-ts` job needs an automation token for the `@podium` scope:
 
 Rotate this token annually or when a maintainer leaves.
 
-### [ ] Reserve the `@podium` npm scope
+### [ ] Create the `@podium` npm organization
 
-Same logic as PyPI: the first publish has to happen manually so npm reserves the scope.
+The package name in `sdks/podium-ts/package.json` is `@podium/sdk` — a *scoped* package. The `@podium` scope is owned by an npm organization, so the organization has to exist before you can publish to that scope.
+
+1. Sign in (or create an account) at [npmjs.com](https://www.npmjs.com).
+2. Top-right avatar → **Add organization**, or go directly to [npmjs.com/org/create](https://www.npmjs.com/org/create).
+3. Organization name: `podium`. This claims the `@podium` scope.
+4. Plan: the free tier is sufficient for public packages.
+5. After creation, the owning account is automatically an organization owner; add co-maintainers later through the org's members page.
+
+If `podium` is already taken on npm, pick a different scope (e.g., `@lennylabs`) and update the `name` field in `sdks/podium-ts/package.json` to match (`@lennylabs/sdk`). The Python distribution name (`podium-sdk`) and the npm scope name do not have to match.
+
+### [ ] Reserve `@podium/sdk` with a first publish
+
+With the organization in place, the first publish under the scope creates the package and reserves its name. Two ways to do this:
+
+**Manually** (gives you a working publish before wiring CI):
 
 ```bash
 cd sdks/podium-ts
 npm install
-npm login                              # interactive
-npm publish --access public            # uses your personal credentials
+npm login                              # interactive; use the org-owning account
+npm publish --access public            # creates @podium/sdk on npm
 ```
 
-Subsequent publishes run from CI via `NPM_TOKEN`.
+`--access public` is required for scoped packages — they default to private, which is a paid feature.
+
+**Or let the release workflow do it**. Configure `NPM_TOKEN`, push a tag, and the `publish-ts` job runs the same `npm publish --access public`. The first run reserves the package; subsequent tags publish updates.
 
 ### [ ] Confirm GHCR access
 
