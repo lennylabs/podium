@@ -74,18 +74,33 @@ The `publish-py` job pins itself to `environment: pypi` so the trusted-publisher
 1. Go to repo Settings → Environments → New environment → `pypi`.
 2. Optional: require manual approval before deploys to this environment if you want a human gate before each PyPI upload.
 
-### [ ] Add the `NPM_TOKEN` repo secret
+### [x] Add the `NPM_TOKEN` repo secret
 
-The `publish-ts` job needs an automation token for the `@lennylabs` scope:
+The `publish-ts` job needs a token that can publish to the `@lennylabs` scope. npm has two flavors of token today; both work.
 
-1. On npmjs.com, [create an automation token](https://www.npmjs.com/settings/<your-username>/tokens) with **Automation** type. Automation tokens bypass 2FA and are designed for CI.
-2. Add it to GitHub: repo Settings → Secrets and variables → Actions → New repository secret named `NPM_TOKEN`.
+**Granular Access Token** (the modern default; what most accounts see now):
 
-Rotate this token annually or when a maintainer leaves.
+1. npmjs.com → avatar → Access Tokens → **Generate New Token** → **Granular Access Token**.
+2. Name: anything (`podium-ci`).
+3. Expiration: pick a date (max 1 year). Set a calendar reminder to rotate.
+4. Allowed IP ranges: leave empty.
+5. Packages and scopes: **Read and write** → **Specific organizations and packages** → pick the `lennylabs` org (or `@lennylabs/*`).
+6. Organizations: No access.
+7. Generate, copy.
 
-### [ ] Create the `@lennylabs` npm organization
+**Classic Automation token** (legacy flow; bypasses 2FA, no expiry):
 
-The package name in `sdks/podium-ts/package.json` is `@lennylabs/podium-sdk` — a *scoped* package. The `@lennylabs` scope is owned by an npm organization, so the organization has to exist before you can publish to that scope.
+1. npmjs.com → avatar → Access Tokens → **Generate New Token** → look for a **Classic Token** option (sometimes behind a "Switch to legacy" toggle).
+2. Type: **Automation**.
+3. Generate, copy.
+
+In either case, add it to GitHub: repo Settings → Secrets and variables → Actions → New repository secret named `NPM_TOKEN`.
+
+Rotate the token annually or when a maintainer leaves. Granular tokens force the issue by expiring on their own; classic tokens rely on you remembering.
+
+### [x] Create the `@lennylabs` npm organization
+
+The package name in `sdks/podium-ts/package.json` is `@lennylabs/podium-sdk` — a _scoped_ package. The `@lennylabs` scope is owned by an npm organization, so the organization has to exist before you can publish to that scope.
 
 1. Sign in (or create an account) at [npmjs.com](https://www.npmjs.com).
 2. Top-right avatar → **Add organization**, or go directly to [npmjs.com/org/create](https://www.npmjs.com/org/create).
