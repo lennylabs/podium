@@ -8,6 +8,37 @@ Manual steps that supplement the automated workflows. Each item lists what to do
 
 ---
 
+## Quick reference
+
+### Repo secrets to create
+
+| Secret | Used by | Required? |
+|:--|:--|:--|
+| `NPM_TOKEN` | `release.yml` → `publish-ts` | Yes, before first release |
+| `CODECOV_TOKEN` | `test.yml` → `go` (coverage upload) | Optional; tokenless works on public repos but flakes occasionally |
+
+### What's not a secret
+
+| Thing | Why no secret needed |
+|:--|:--|
+| PyPI uploads | OIDC via Trusted Publisher, bound on PyPI's side |
+| GHCR container pushes | `GITHUB_TOKEN` already has `packages: write` per the workflow |
+| Postgres / MinIO in CI | Service containers set their own credentials inline |
+| `PODIUM_SIGSTORE_*` | Sigstore live tests are manual-only; never run from a workflow |
+
+### GitHub one-time settings (not secrets)
+
+| Setting | Where |
+|:--|:--|
+| `pypi` environment | Settings → Environments → New environment |
+| PyPI Trusted Publisher binding | pypi.org → manage project → publishing |
+| Branch protection on `main` | Settings → Branches → required status checks |
+| Dependabot security updates | Settings → Code security and analysis |
+
+Each item below expands on these with the exact steps. Local-dev environment variables for live tests are in [Live integration environment variables](#live-integration-environment-variables).
+
+---
+
 ## One-time setup
 
 Required before the first `vX.Y.Z` tag fires the release workflow successfully.
