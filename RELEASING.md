@@ -2,6 +2,8 @@
 
 Maintainer-facing notes for cutting a Podium release.
 
+One-time setup steps (PyPI Trusted Publisher, npm token, GHCR access) live in [`OPERATIONS.md`](OPERATIONS.md). The release workflow assumes those are in place.
+
 ## Versioning
 
 Podium follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html): `MAJOR.MINOR.PATCH`.

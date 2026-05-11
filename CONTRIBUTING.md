@@ -76,7 +76,7 @@ A new test should carry a `// Spec:` annotation pointing to the spec section it 
 
 ## Releases
 
-Maintainer-facing notes on cutting a release (versioning, tagging, CI workflow, patch flow) live in [`RELEASING.md`](RELEASING.md).
+Maintainer-facing notes on cutting a release (versioning, tagging, CI workflow, patch flow) live in [`RELEASING.md`](RELEASING.md). External-system setup (PyPI Trusted Publisher, npm token, GHCR, future-infra checklist) lives in [`OPERATIONS.md`](OPERATIONS.md).
 
 ## Ground rules
 
