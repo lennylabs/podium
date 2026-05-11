@@ -1,6 +1,12 @@
 # podium-py
 
-Thin HTTP client for the Podium registry, per spec §7.6.
+Thin HTTP client for the Podium registry.
+
+Distributed on PyPI as `podium-sdk`; the import name is `podium`:
+
+```sh
+pip install podium-sdk
+```
 
 ```python
 from podium import Client

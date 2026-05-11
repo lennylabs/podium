@@ -98,7 +98,7 @@ Once every test job passes, the workflow:
 
 1. Cross-compiles the binaries for `linux/{amd64,arm64}`, `darwin/arm64`, and `windows/amd64`.
 2. Creates a GitHub Release named `vX.Y.Z` with the CHANGELOG section as the body. Pre-release tags (with a hyphen) are marked accordingly.
-3. Publishes `podium-py` to PyPI via Trusted Publishing.
+3. Publishes `podium-sdk` (the PyPI distribution name; imports as `podium`) via Trusted Publishing.
 4. Publishes `@podium/sdk` to npm with provenance.
 5. Builds and pushes multi-arch container images to `ghcr.io/lennylabs/podium-server`.
 

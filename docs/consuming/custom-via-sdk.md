@@ -10,10 +10,10 @@ description: Build programmatic consumers (LangChain, Bedrock, OpenAI Assistants
 
 Programmatic consumers (LangChain, Bedrock, OpenAI Assistants, custom orchestrators, eval harnesses, build pipelines, notebooks) talk to the registry directly via thin language SDKs. The SDKs are HTTP clients backed by the same registry API the MCP server uses. They share identity providers, the content cache, layer composition, visibility filtering, and audit.
 
-| SDK | Distribution | Use for |
-|:--|:--|:--|
-| `podium-py` | PyPI | Python orchestrators, LangChain consumers, OpenAI Assistants integrations, build/eval pipelines, notebooks. |
-| `podium-ts` | npm | TypeScript / Node orchestrators, Bedrock Agents, custom Node-based agent runtimes, Edge runtime integrations. |
+| SDK | Install | Import | Use for |
+|:--|:--|:--|:--|
+| `podium-py` | `pip install podium-sdk` | `from podium import …` | Python orchestrators, LangChain consumers, OpenAI Assistants integrations, build/eval pipelines, notebooks. |
+| `podium-ts` | `npm install @podium/sdk` | `import { Client } from "@podium/sdk"` | TypeScript / Node orchestrators, Bedrock Agents, custom Node-based agent runtimes, Edge runtime integrations. |
 
 **The SDKs require a Podium server.** They speak HTTP and don't work against a filesystem-source registry. For filesystem-mode consumers, use `podium sync` directly.
 

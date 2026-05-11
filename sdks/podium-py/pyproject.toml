@@ -3,7 +3,11 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "podium"
+# Distribution name on PyPI. The plain "podium" name was taken; the
+# Python import name stays `podium` (PEP 8 prefers single-word
+# package names) so `from podium import Client` still works after
+# `pip install podium-sdk`. Same pattern as Pillow / BeautifulSoup4.
+name = "podium-sdk"
 version = "0.1.0.dev0"
 description = "Thin HTTP client for the Podium registry."
 requires-python = ">=3.10"

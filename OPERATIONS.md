@@ -3,6 +3,7 @@
 Manual steps that supplement the automated workflows. Each item lists what to do, why, and when it's needed.
 
 > Status legend:
+>
 > - **[ ]** not yet done.
 > - **[x]** done; kept here as a reference / runbook.
 
@@ -12,28 +13,28 @@ Manual steps that supplement the automated workflows. Each item lists what to do
 
 ### Repo secrets to create
 
-| Secret | Used by | Required? |
-|:--|:--|:--|
-| `NPM_TOKEN` | `release.yml` → `publish-ts` | Yes, before first release |
+| Secret          | Used by                             | Required?                                                         |
+| :-------------- | :---------------------------------- | :---------------------------------------------------------------- |
+| `NPM_TOKEN`     | `release.yml` → `publish-ts`        | Yes, before first release                                         |
 | `CODECOV_TOKEN` | `test.yml` → `go` (coverage upload) | Optional; tokenless works on public repos but flakes occasionally |
 
 ### What's not a secret
 
-| Thing | Why no secret needed |
-|:--|:--|
-| PyPI uploads | OIDC via Trusted Publisher, bound on PyPI's side |
-| GHCR container pushes | `GITHUB_TOKEN` already has `packages: write` per the workflow |
-| Postgres / MinIO in CI | Service containers set their own credentials inline |
-| `PODIUM_SIGSTORE_*` | Sigstore live tests are manual-only; never run from a workflow |
+| Thing                  | Why no secret needed                                           |
+| :--------------------- | :------------------------------------------------------------- |
+| PyPI uploads           | OIDC via Trusted Publisher, bound on PyPI's side               |
+| GHCR container pushes  | `GITHUB_TOKEN` already has `packages: write` per the workflow  |
+| Postgres / MinIO in CI | Service containers set their own credentials inline            |
+| `PODIUM_SIGSTORE_*`    | Sigstore live tests are manual-only; never run from a workflow |
 
 ### GitHub one-time settings (not secrets)
 
-| Setting | Where |
-|:--|:--|
-| `pypi` environment | Settings → Environments → New environment |
-| PyPI Trusted Publisher binding | pypi.org → manage project → publishing |
-| Branch protection on `main` | Settings → Branches → required status checks |
-| Dependabot security updates | Settings → Code security and analysis |
+| Setting                        | Where                                        |
+| :----------------------------- | :------------------------------------------- |
+| `pypi` environment             | Settings → Environments → New environment    |
+| PyPI Trusted Publisher binding | pypi.org → manage project → publishing       |
+| Branch protection on `main`    | Settings → Branches → required status checks |
+| Dependabot security updates    | Settings → Code security and analysis        |
 
 Each item below expands on these with the exact steps. Local-dev environment variables for live tests are in [Live integration environment variables](#live-integration-environment-variables).
 
@@ -47,6 +48,8 @@ Required before the first `vX.Y.Z` tag fires the release workflow successfully.
 
 The release workflow's `publish-py` job uses [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/) (OIDC-based, no API token stored as a secret). Do this once:
 
+The PyPI distribution name is `podium-sdk` (the plain `podium` name was taken). The Python import name stays `podium` — users run `pip install podium-sdk` then `from podium import Client`.
+
 1. Reserve the project name. The first release must be uploaded manually so PyPI knows the package exists:
    ```bash
    cd sdks/podium-py
@@ -54,7 +57,7 @@ The release workflow's `publish-py` job uses [PyPI Trusted Publishing](https://d
    python -m build
    python -m twine upload dist/*    # use a temporary API token; revoke after.
    ```
-2. Go to [pypi.org/manage/project/podium/settings/publishing/](https://pypi.org/manage/project/podium/settings/publishing/).
+2. Go to [pypi.org/manage/project/podium-sdk/settings/publishing/](https://pypi.org/manage/project/podium-sdk/settings/publishing/).
 3. Add a new trusted publisher with:
    - **Owner**: `lennylabs`
    - **Repository**: `podium`
@@ -155,34 +158,34 @@ make test-live LIVE_POSTGRES_DSN="postgres://…" LIVE_S3_ENDPOINT="s3.amazonaws
 
 ### Postgres (store + pgvector)
 
-| Variable | Required? | Purpose | Example |
-|:--|:--|:--|:--|
-| `PODIUM_POSTGRES_DSN` | Yes for either suite | `pkg/store/postgres_test.go` RegistryStore conformance + pgvector fallback. | `postgres://podium:podium@localhost:5432/podium?sslmode=disable` |
-| `PODIUM_POSTGRES_DSN_VECTOR` | Optional | When set, `pkg/vector/pgvector_test.go` uses this DSN instead of `PODIUM_POSTGRES_DSN`. Useful when the deployment splits metadata and vectors across databases. | `postgres://podium:podium@localhost:5432/podium_vec?sslmode=disable` |
+| Variable                     | Required?            | Purpose                                                                                                                                                          | Example                                                              |
+| :--------------------------- | :------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------- |
+| `PODIUM_POSTGRES_DSN`        | Yes for either suite | `pkg/store/postgres_test.go` RegistryStore conformance + pgvector fallback.                                                                                      | `postgres://podium:podium@localhost:5432/podium?sslmode=disable`     |
+| `PODIUM_POSTGRES_DSN_VECTOR` | Optional             | When set, `pkg/vector/pgvector_test.go` uses this DSN instead of `PODIUM_POSTGRES_DSN`. Useful when the deployment splits metadata and vectors across databases. | `postgres://podium:podium@localhost:5432/podium_vec?sslmode=disable` |
 
 The target database needs the `vector` extension installed (`CREATE EXTENSION vector;`).
 
 ### S3-compatible object storage
 
-| Variable | Required? | Purpose | Example |
-|:--|:--|:--|:--|
-| `PODIUM_S3_ENDPOINT` | Yes | Host:port for MinIO / Ceph / real S3. Skips when unset. | `localhost:9000` |
-| `PODIUM_S3_BUCKET` | Yes | Pre-created bucket name. | `podium-test` |
-| `PODIUM_S3_REGION` | Optional | Defaults to `us-east-1`. | `us-west-2` |
-| `PODIUM_S3_ACCESS_KEY_ID` | Optional | Anonymous access when unset. | `minioadmin` |
-| `PODIUM_S3_SECRET_ACCESS_KEY` | Optional | Pairs with the access key. | `minioadmin` |
-| `PODIUM_S3_USE_SSL` | Optional | Set to `"false"` for plain HTTP. Any other value (including unset) means TLS. | `false` |
+| Variable                      | Required? | Purpose                                                                       | Example          |
+| :---------------------------- | :-------- | :---------------------------------------------------------------------------- | :--------------- |
+| `PODIUM_S3_ENDPOINT`          | Yes       | Host:port for MinIO / Ceph / real S3. Skips when unset.                       | `localhost:9000` |
+| `PODIUM_S3_BUCKET`            | Yes       | Pre-created bucket name.                                                      | `podium-test`    |
+| `PODIUM_S3_REGION`            | Optional  | Defaults to `us-east-1`.                                                      | `us-west-2`      |
+| `PODIUM_S3_ACCESS_KEY_ID`     | Optional  | Anonymous access when unset.                                                  | `minioadmin`     |
+| `PODIUM_S3_SECRET_ACCESS_KEY` | Optional  | Pairs with the access key.                                                    | `minioadmin`     |
+| `PODIUM_S3_USE_SSL`           | Optional  | Set to `"false"` for plain HTTP. Any other value (including unset) means TLS. | `false`          |
 
 ### Sigstore (keyless signing)
 
 `pkg/sign/sigstore_live_test.go` skips unless **all four** are set:
 
-| Variable | Purpose | Example |
-|:--|:--|:--|
-| `PODIUM_SIGSTORE_FULCIO_URL` | Fulcio CA endpoint. | `https://fulcio.sigstore.dev` |
-| `PODIUM_SIGSTORE_REKOR_URL` | Rekor transparency log. | `https://rekor.sigstore.dev` |
-| `PODIUM_SIGSTORE_OIDC_TOKEN` | OIDC token Fulcio binds into the cert. In CI, sourced from `id-token: write`. | `eyJ…` |
-| `PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE` | Path to the trust bundle (intermediate + root CA chain). | `/path/to/sigstore-root.pem` |
+| Variable                              | Purpose                                                                       | Example                       |
+| :------------------------------------ | :---------------------------------------------------------------------------- | :---------------------------- |
+| `PODIUM_SIGSTORE_FULCIO_URL`          | Fulcio CA endpoint.                                                           | `https://fulcio.sigstore.dev` |
+| `PODIUM_SIGSTORE_REKOR_URL`           | Rekor transparency log.                                                       | `https://rekor.sigstore.dev`  |
+| `PODIUM_SIGSTORE_OIDC_TOKEN`          | OIDC token Fulcio binds into the cert. In CI, sourced from `id-token: write`. | `eyJ…`                        |
+| `PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE` | Path to the trust bundle (intermediate + root CA chain).                      | `/path/to/sigstore-root.pem`  |
 
 ### What's not gated by env vars today
 
