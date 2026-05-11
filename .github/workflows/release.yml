@@ -1,0 +1,187 @@
+name: release
+
+# Fires when a vX.Y.Z (or vX.Y.Z-rc.N) tag is pushed. Pre-release tags
+# (anything containing a hyphen, e.g. v0.1.0-rc.1) flow through the same
+# pipeline; the GitHub Release is marked prerelease automatically.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # create the GitHub Release
+  packages: write   # push container images to ghcr.io
+  id-token: write   # PyPI trusted publishing + npm provenance
+
+jobs:
+  # Hard gate: the full Go suite must pass before anything publishes.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
+      - run: make test
+
+  # Cross-compile the three binaries for every supported (os, arch).
+  # Each combination uploads an artifact named binaries-<os>-<arch>;
+  # the release job downloads + merges them.
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64, suffix: '' }
+          - { goos: linux,   goarch: arm64, suffix: '' }
+          - { goos: darwin,  goarch: arm64, suffix: '' }
+          - { goos: windows, goarch: amd64, suffix: '.exe' }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build binaries
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          VERSION='${{ github.ref_name }}'
+          COMMIT='${{ github.sha }}'
+          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          LDFLAGS="-s -w \
+            -X github.com/lennylabs/podium/internal/buildinfo.Version=${VERSION} \
+            -X github.com/lennylabs/podium/internal/buildinfo.Commit=${COMMIT:0:7} \
+            -X github.com/lennylabs/podium/internal/buildinfo.Date=${DATE}"
+          mkdir -p dist
+          for cmd in podium podium-server podium-mcp; do
+            out="dist/${cmd}-${GOOS}-${GOARCH}${{ matrix.suffix }}"
+            echo "building ${out}"
+            go build -trimpath -ldflags "${LDFLAGS}" -o "${out}" ./cmd/${cmd}
+          done
+          ls -la dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/
+
+  # Collect every per-platform artifact and create the GitHub Release.
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Extract CHANGELOG section
+        id: notes
+        run: |
+          TAG='${{ github.ref_name }}'
+          VERSION=${TAG#v}
+          awk -v v="${VERSION}" '
+            $0 ~ "^## \\[" v "\\]" { p=1; next }
+            p && /^## / { exit }
+            p { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "No CHANGELOG entry for ${VERSION}; falling back to tag name." >&2
+            echo "Release ${TAG}" > release-notes.md
+          fi
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          body_path: release-notes.md
+          name: ${{ github.ref_name }}
+          # Anything with a hyphen in the tag (v0.1.0-rc.1, v0.1.0-beta)
+          # is published as a GitHub pre-release.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+
+  # Publish podium-py to PyPI. Requires a configured Trusted Publisher
+  # at https://pypi.org/manage/account/publishing/ pointing at this
+  # repository + this workflow file + the publish-py job. No API token
+  # is stored as a secret.
+  publish-py:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build wheel + sdist
+        working-directory: sdks/podium-py
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: sdks/podium-py/dist
+
+  # Publish @podium/sdk to npm. Requires repo secret NPM_TOKEN (an
+  # automation token from https://www.npmjs.com/settings/<user>/tokens
+  # with permission to publish the @podium scope).
+  publish-ts:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Publish
+        working-directory: sdks/podium-ts
+        run: |
+          npm install
+          npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # Build + push multi-arch container images for podium-server.
+  # Requires a Dockerfile at repo root (not yet committed); the job
+  # is skipped until one exists by checking dockerfile presence.
+  container:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: dockerfile
+        run: |
+          if [ -f Dockerfile ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping container build; no Dockerfile at repo root."
+          fi
+      - if: steps.dockerfile.outputs.exists == 'true'
+        uses: docker/setup-qemu-action@v3
+      - if: steps.dockerfile.outputs.exists == 'true'
+        uses: docker/setup-buildx-action@v3
+      - if: steps.dockerfile.outputs.exists == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - if: steps.dockerfile.outputs.exists == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/podium-server:${{ github.ref_name }}
+            ghcr.io/${{ github.repository_owner }}/podium-server:latest
+          build-args: |
+            VERSION=${{ github.ref_name }}

@@ -1,4 +1,4 @@
-name: test-fast
+name: test
 
 on:
   pull_request:
@@ -6,13 +6,13 @@ on:
     branches: [main]
 
 jobs:
-  fast:
+  go:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version-file: go.mod
       - name: Cache go build
         uses: actions/cache@v4
         with:
@@ -24,4 +24,4 @@ jobs:
       - run: make tools
       - run: make lint
       - run: make speccov-drift
-      - run: make test-fast
+      - run: make test
