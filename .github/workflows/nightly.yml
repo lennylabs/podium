@@ -110,31 +110,39 @@ jobs:
   s3:
     name: live S3 (MinIO)
     runs-on: ubuntu-latest
-    services:
-      minio:
-        # Official MinIO image. Pinned; keep in sync with
-        # docker-compose.yml and release.yml.
-        image: minio/minio:RELEASE.2024-10-29T16-01-48Z
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-        ports:
-          - 9000:9000
-        options: >-
-          --health-cmd "curl -f http://localhost:9000/minio/health/ready"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
+    # Note: MinIO is started from a step rather than via `services:`,
+    # because the official minio/minio image needs `server /data` as
+    # its command and GitHub Actions' services block doesn't let you
+    # set CMD. Postgres stays as a service because its default CMD
+    # works out of the box.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
+      - name: Start MinIO
+        # Pinned; keep in sync with docker-compose.yml and release.yml.
+        run: |
+          docker run -d --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:RELEASE.2024-10-29T16-01-48Z \
+            server /data
+          for i in $(seq 1 30); do
+            if curl -fs http://localhost:9000/minio/health/ready; then
+              echo "MinIO ready"
+              exit 0
+            fi
+            echo "Waiting for MinIO ($i/30)..."
+            sleep 2
+          done
+          echo "MinIO did not become ready in time" >&2
+          docker logs minio
+          exit 1
+
       - name: Create test bucket
-        # Official MinIO doesn't auto-create buckets; the bitnami
-        # MINIO_DEFAULT_BUCKETS env var was vendor-specific.
-        # Install the mc CLI and create the bucket before tests run.
         run: |
           curl -sSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc
           chmod +x /usr/local/bin/mc
