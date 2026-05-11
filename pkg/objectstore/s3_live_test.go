@@ -30,20 +30,31 @@ import (
 // Local devs running MinIO themselves point Endpoint at
 // localhost:9000 with USE_SSL=false. Production smokes use AWS S3
 // with a CI service account.
-func liveS3(t *testing.T) *objectstore.S3 {
-	t.Helper()
+// liveS3Config reads the PODIUM_S3_* environment into an S3Config.
+// The ok return is false when ENDPOINT or BUCKET is missing; the live
+// tests skip in that case. Anonymous access (no creds) is intentional
+// for endpoints that permit it.
+func liveS3Config() (objectstore.S3Config, bool) {
 	endpoint := os.Getenv("PODIUM_S3_ENDPOINT")
 	bucket := os.Getenv("PODIUM_S3_BUCKET")
 	if endpoint == "" || bucket == "" {
-		t.Skip("PODIUM_S3_ENDPOINT/BUCKET unset; skipping live S3 smoke")
+		return objectstore.S3Config{}, false
 	}
-	cfg := objectstore.S3Config{
+	return objectstore.S3Config{
 		Endpoint:        endpoint,
 		Bucket:          bucket,
 		Region:          envOr("PODIUM_S3_REGION", "us-east-1"),
 		AccessKeyID:     os.Getenv("PODIUM_S3_ACCESS_KEY_ID"),
 		SecretAccessKey: os.Getenv("PODIUM_S3_SECRET_ACCESS_KEY"),
 		UseSSL:          os.Getenv("PODIUM_S3_USE_SSL") != "false",
+	}, true
+}
+
+func liveS3(t *testing.T) *objectstore.S3 {
+	t.Helper()
+	cfg, ok := liveS3Config()
+	if !ok {
+		t.Skip("PODIUM_S3_ENDPOINT/BUCKET unset; skipping live S3 smoke")
 	}
 	s3, err := objectstore.NewS3(cfg)
 	if err != nil {
@@ -57,6 +68,115 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// Spec: n/a — liveS3Config's env-var resolution. The integration tests
+// above gate on a real S3 endpoint; this test exercises the resolution
+// branch independently using t.Setenv.
+func TestLiveS3Config_Resolution(t *testing.T) {
+	// Every t.Setenv call below explicitly clears the variable for the
+	// duration of the test, so a developer's exported PODIUM_S3_* vars
+	// don't leak in.
+	resetEnv := func(t *testing.T) {
+		for _, k := range []string{
+			"PODIUM_S3_ENDPOINT", "PODIUM_S3_BUCKET", "PODIUM_S3_REGION",
+			"PODIUM_S3_ACCESS_KEY_ID", "PODIUM_S3_SECRET_ACCESS_KEY",
+			"PODIUM_S3_USE_SSL",
+		} {
+			t.Setenv(k, "")
+		}
+	}
+
+	t.Run("missing endpoint", func(t *testing.T) {
+		resetEnv(t)
+		t.Setenv("PODIUM_S3_BUCKET", "b")
+		if _, ok := liveS3Config(); ok {
+			t.Error("ok = true, want false when endpoint is unset")
+		}
+	})
+
+	t.Run("missing bucket", func(t *testing.T) {
+		resetEnv(t)
+		t.Setenv("PODIUM_S3_ENDPOINT", "host:9000")
+		if _, ok := liveS3Config(); ok {
+			t.Error("ok = true, want false when bucket is unset")
+		}
+	})
+
+	t.Run("region defaults to us-east-1", func(t *testing.T) {
+		resetEnv(t)
+		t.Setenv("PODIUM_S3_ENDPOINT", "host:9000")
+		t.Setenv("PODIUM_S3_BUCKET", "b")
+		cfg, ok := liveS3Config()
+		if !ok || cfg.Region != "us-east-1" {
+			t.Errorf("Region = %q (ok=%v), want us-east-1, true", cfg.Region, ok)
+		}
+	})
+
+	t.Run("region from env", func(t *testing.T) {
+		resetEnv(t)
+		t.Setenv("PODIUM_S3_ENDPOINT", "host:9000")
+		t.Setenv("PODIUM_S3_BUCKET", "b")
+		t.Setenv("PODIUM_S3_REGION", "eu-west-1")
+		cfg, _ := liveS3Config()
+		if cfg.Region != "eu-west-1" {
+			t.Errorf("Region = %q, want eu-west-1", cfg.Region)
+		}
+	})
+
+	t.Run("anonymous when creds unset", func(t *testing.T) {
+		resetEnv(t)
+		t.Setenv("PODIUM_S3_ENDPOINT", "host:9000")
+		t.Setenv("PODIUM_S3_BUCKET", "b")
+		cfg, _ := liveS3Config()
+		if cfg.AccessKeyID != "" || cfg.SecretAccessKey != "" {
+			t.Errorf("creds = (%q, %q), want both empty", cfg.AccessKeyID, cfg.SecretAccessKey)
+		}
+	})
+
+	t.Run("credentialed when creds set", func(t *testing.T) {
+		resetEnv(t)
+		t.Setenv("PODIUM_S3_ENDPOINT", "host:9000")
+		t.Setenv("PODIUM_S3_BUCKET", "b")
+		t.Setenv("PODIUM_S3_ACCESS_KEY_ID", "AKIA…")
+		t.Setenv("PODIUM_S3_SECRET_ACCESS_KEY", "secret")
+		cfg, _ := liveS3Config()
+		if cfg.AccessKeyID != "AKIA…" || cfg.SecretAccessKey != "secret" {
+			t.Errorf("creds = (%q, %q)", cfg.AccessKeyID, cfg.SecretAccessKey)
+		}
+	})
+
+	t.Run("TLS on by default", func(t *testing.T) {
+		resetEnv(t)
+		t.Setenv("PODIUM_S3_ENDPOINT", "host:9000")
+		t.Setenv("PODIUM_S3_BUCKET", "b")
+		cfg, _ := liveS3Config()
+		if !cfg.UseSSL {
+			t.Error("UseSSL = false, want true (default)")
+		}
+	})
+
+	t.Run("TLS off when explicitly false", func(t *testing.T) {
+		resetEnv(t)
+		t.Setenv("PODIUM_S3_ENDPOINT", "host:9000")
+		t.Setenv("PODIUM_S3_BUCKET", "b")
+		t.Setenv("PODIUM_S3_USE_SSL", "false")
+		cfg, _ := liveS3Config()
+		if cfg.UseSSL {
+			t.Error("UseSSL = true, want false")
+		}
+	})
+
+	t.Run("TLS on for any non-false value", func(t *testing.T) {
+		resetEnv(t)
+		t.Setenv("PODIUM_S3_ENDPOINT", "host:9000")
+		t.Setenv("PODIUM_S3_BUCKET", "b")
+		t.Setenv("PODIUM_S3_USE_SSL", "true")
+		cfg, _ := liveS3Config()
+		if !cfg.UseSSL {
+			t.Error("UseSSL = false, want true")
+		}
+	})
 }
 
 // uniqueKey returns a random key prefix so concurrent CI jobs don't
