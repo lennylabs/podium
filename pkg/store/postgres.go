@@ -79,6 +79,7 @@ func (p *Postgres) applySchema() error {
 			frontmatter BYTEA,
 			body BYTEA,
 			extends_pin TEXT NOT NULL DEFAULT '',
+			signature TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY (tenant_id, artifact_id, version)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_manifests_tenant_type
