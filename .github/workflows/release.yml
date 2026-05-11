@@ -3,6 +3,12 @@ name: release
 # Fires when a vX.Y.Z (or vX.Y.Z-rc.N) tag is pushed. Pre-release tags
 # (anything containing a hyphen, e.g. v0.1.0-rc.1) flow through the same
 # pipeline; the GitHub Release is marked prerelease automatically.
+#
+# The release runs the same battery as nightly.yml — Go full sweep,
+# both SDK suites, live Postgres + pgvector, live S3 — before any
+# binary publishes. Every publish job lists every test job in needs:
+# so a single failure blocks every artifact.
+
 on:
   push:
     tags:
@@ -14,8 +20,8 @@ permissions:
   id-token: write   # PyPI trusted publishing + npm provenance
 
 jobs:
-  # Hard gate: the full Go suite must pass before anything publishes.
-  test:
+  go:
+    name: go full sweep
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,13 +34,111 @@ jobs:
             ~/.cache/go-build
             ~/go/pkg/mod
           key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
+      - run: make tools
+      - run: make lint
+      - run: make speccov-drift
+      - run: make matrix-audit
       - run: make test
+      - run: make coverage-budget
+
+  python:
+    name: podium-py
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: sdks/podium-py/pyproject.toml
+      - working-directory: sdks/podium-py
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest
+          pytest
+
+  typescript:
+    name: podium-ts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: sdks/podium-ts/package.json
+      - working-directory: sdks/podium-ts
+        run: |
+          npm install
+          npm test
+
+  postgres:
+    name: live postgres + pgvector
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: podium
+          POSTGRES_DB: podium
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: pkg/store live conformance
+        env:
+          PODIUM_POSTGRES_DSN: postgres://postgres:podium@localhost:5432/podium?sslmode=disable
+        run: go test ./pkg/store/... -count=1 -v
+      - name: pkg/vector pgvector conformance
+        env:
+          PODIUM_POSTGRES_DSN: postgres://postgres:podium@localhost:5432/podium?sslmode=disable
+        run: go test ./pkg/vector/... -count=1 -v
+
+  s3:
+    name: live S3 (MinIO)
+    runs-on: ubuntu-latest
+    services:
+      minio:
+        image: bitnami/minio:latest
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+          MINIO_DEFAULT_BUCKETS: podium
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/ready"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: pkg/objectstore live S3 conformance
+        env:
+          PODIUM_S3_ENDPOINT: localhost:9000
+          PODIUM_S3_BUCKET: podium
+          PODIUM_S3_ACCESS_KEY_ID: minioadmin
+          PODIUM_S3_SECRET_ACCESS_KEY: minioadmin
+          PODIUM_S3_USE_SSL: "false"
+        run: go test ./pkg/objectstore/... -count=1 -v
 
   # Cross-compile the three binaries for every supported (os, arch).
   # Each combination uploads an artifact named binaries-<os>-<arch>;
   # the release job downloads + merges them.
   build:
-    needs: test
+    needs: [go, python, typescript, postgres, s3]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -75,7 +179,7 @@ jobs:
 
   # Collect every per-platform artifact and create the GitHub Release.
   release:
-    needs: build
+    needs: [build, go, python, typescript, postgres, s3]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -111,7 +215,7 @@ jobs:
   # repository + this workflow file + the publish-py job. No API token
   # is stored as a secret.
   publish-py:
-    needs: test
+    needs: [go, python, typescript, postgres, s3]
     runs-on: ubuntu-latest
     environment: pypi
     steps:
@@ -132,7 +236,7 @@ jobs:
   # automation token from https://www.npmjs.com/settings/<user>/tokens
   # with permission to publish the @podium scope).
   publish-ts:
-    needs: test
+    needs: [go, python, typescript, postgres, s3]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -149,10 +253,9 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # Build + push multi-arch container images for podium-server.
-  # Requires a Dockerfile at repo root (not yet committed); the job
-  # is skipped until one exists by checking dockerfile presence.
+  # Requires a Dockerfile at repo root.
   container:
-    needs: test
+    needs: [go, python, typescript, postgres, s3]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

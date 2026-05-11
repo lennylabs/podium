@@ -84,15 +84,41 @@ The `main` line continues toward `0.3.0` independently. Merge the fix back into 
 
 ## What CI does on a tag
 
-A push of `vX.Y.Z` triggers the release workflow:
+A push of `vX.Y.Z` triggers the release workflow. Five test jobs run in parallel and every publish job lists all five in `needs:`, so a single failure blocks every artifact:
 
-1. Run `make test` and `make coverage-gate`.
-2. Run `make build VERSION=vX.Y.Z` once per (OS, arch) matrix entry. Linux amd64, Linux arm64, macOS arm64, Windows amd64.
-3. Upload the binaries to a GitHub Release named `vX.Y.Z` with the CHANGELOG section as the body.
-4. Publish `podium-py` to PyPI and `@podium/sdk` to npm.
-5. Build and publish container images (`ghcr.io/lennylabs/podium-server:X.Y.Z`).
+| Job | Covers |
+|:--|:--|
+| `go` | Full Go suite: `make lint`, `make speccov-drift`, `make matrix-audit`, `make test`, `make coverage-budget`. |
+| `python` | `pytest` against `sdks/podium-py`. |
+| `typescript` | `vitest` against `sdks/podium-ts`. |
+| `postgres` | Live `pkg/store` and `pkg/vector` against a `pgvector/pgvector:pg16` service container. |
+| `s3` | Live `pkg/objectstore` against a MinIO service container. |
+
+Once every test job passes, the workflow:
+
+1. Cross-compiles the binaries for `linux/{amd64,arm64}`, `darwin/arm64`, and `windows/amd64`.
+2. Creates a GitHub Release named `vX.Y.Z` with the CHANGELOG section as the body. Pre-release tags (with a hyphen) are marked accordingly.
+3. Publishes `podium-py` to PyPI via Trusted Publishing.
+4. Publishes `@podium/sdk` to npm with provenance.
+5. Builds and pushes multi-arch container images to `ghcr.io/lennylabs/podium-server`.
+
+The same five test jobs (minus the coverage budget and matrix audit, which are advisory) also run on `nightly.yml` against `main` at 03:00 UTC. A green nightly is the strongest signal that a release-from-`main` will succeed.
 
 The workflow lives in `.github/workflows/release.yml`.
+
+### Sigstore live tests are manual
+
+`pkg/sign/sigstore_live_test.go` is the one Tier 2 suite the release gate does not run. Real Fulcio and Rekor cost money per call and pollute the public transparency log; a sigstore-mock alternative isn't worth the maintenance burden. Verify the signing path manually before any release that changes `pkg/sign` or touches the `SignatureProvider` contract:
+
+```bash
+export PODIUM_SIGSTORE_FULCIO_URL=https://fulcio.sigstore.dev
+export PODIUM_SIGSTORE_REKOR_URL=https://rekor.sigstore.dev
+export PODIUM_SIGSTORE_OIDC_TOKEN=$(gcloud auth print-identity-token)   # or any IdP
+export PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE=/path/to/trust-bundle.pem
+go test ./pkg/sign/... -count=1 -v -run TestSigstore_Live
+```
+
+For releases that don't touch the signing path, the mocked Sigstore tests in `pkg/sign/sigstore_test.go` are sufficient.
 
 ## Hotfix without a tag
 

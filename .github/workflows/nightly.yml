@@ -1,12 +1,13 @@
 name: nightly
 
-# Full sweep that catches regressions even when PR traffic is quiet.
-# Runs lint, the spec / matrix gates, the Go test suite, the SDK
-# suites, and the coverage budget all at once. Failure pings the
-# maintainers via the standard GitHub Actions failure notification.
+# Single source of truth for "did everything pass overnight?". Runs
+# the full Go + SDK + live-integration battery. Sigstore live tests
+# stay manual (real Fulcio + Rekor cost money and pollute the
+# transparency log; OPERATIONS.md covers the manual procedure).
 #
-# Manual trigger (workflow_dispatch) lets a maintainer re-run after
-# a flake without waiting for the next scheduled run.
+# Failure pings the maintainers via the standard GitHub Actions
+# failure notification. Manual trigger (workflow_dispatch) lets a
+# maintainer re-run after a flake without waiting for the next cron.
 
 on:
   schedule:
@@ -70,3 +71,70 @@ jobs:
         run: |
           npm install
           npm test
+
+  postgres:
+    name: live postgres + pgvector
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # pgvector/pgvector:pg16 ships Postgres 16 with the `vector`
+        # extension preinstalled, so both pkg/store and pkg/vector
+        # exercise the same container.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: podium
+          POSTGRES_DB: podium
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: pkg/store live conformance
+        env:
+          PODIUM_POSTGRES_DSN: postgres://postgres:podium@localhost:5432/podium?sslmode=disable
+        run: go test ./pkg/store/... -count=1 -v
+
+      - name: pkg/vector pgvector conformance
+        env:
+          PODIUM_POSTGRES_DSN: postgres://postgres:podium@localhost:5432/podium?sslmode=disable
+        run: go test ./pkg/vector/... -count=1 -v
+
+  s3:
+    name: live S3 (MinIO)
+    runs-on: ubuntu-latest
+    services:
+      minio:
+        image: bitnami/minio:latest
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+          MINIO_DEFAULT_BUCKETS: podium
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/ready"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: pkg/objectstore live S3 conformance
+        env:
+          PODIUM_S3_ENDPOINT: localhost:9000
+          PODIUM_S3_BUCKET: podium
+          PODIUM_S3_ACCESS_KEY_ID: minioadmin
+          PODIUM_S3_SECRET_ACCESS_KEY: minioadmin
+          PODIUM_S3_USE_SSL: "false"
+        run: go test ./pkg/objectstore/... -count=1 -v

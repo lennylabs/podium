@@ -195,6 +195,8 @@ These run alongside the `RELEASING.md` flow. Most are reminders rather than bloc
 - [ ] No `0.0.0-dev` / `unknown` strings remain in any source file (`grep -r '0\.0\.0-dev' --include='*.go' .`).
 - [ ] `make test` passes locally on the release commit.
 - [ ] The four version files agree on the release number (see RELEASING.md for the list).
+- [ ] Last night's `nightly.yml` run is green for `main`. If not, fix before tagging — the release runs the same battery and will fail too.
+- [ ] If the release touches `pkg/sign` or the `SignatureProvider` contract, run the Sigstore live tests manually against real Fulcio + Rekor (see `RELEASING.md` → "Sigstore live tests are manual"). The release workflow does not exercise them.
 - [ ] After the release workflow runs, smoke-test one published artifact (download a binary, run `podium version`).
 
 ---
