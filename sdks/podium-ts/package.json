@@ -3,6 +3,23 @@
   "version": "0.0.0-dev",
   "description": "Thin HTTP client for the Podium registry.",
   "license": "MIT",
+  "homepage": "https://lennylabs.github.io/podium",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lennylabs/podium.git",
+    "directory": "sdks/podium-ts"
+  },
+  "bugs": {
+    "url": "https://github.com/lennylabs/podium/issues"
+  },
+  "keywords": [
+    "podium",
+    "registry",
+    "ai-agent",
+    "skills",
+    "mcp",
+    "sdk"
+  ],
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",

@@ -188,31 +188,80 @@ jobs:
   # Cross-compile the three binaries for every supported (os, arch).
   # Each combination uploads an artifact named binaries-<os>-<arch>;
   # the release job downloads + merges them.
+  #
+  # pkg/vector (sqlite-vec) and internal/serverboot (mattn/go-sqlite3)
+  # both require CGO, so every target builds with CGO_ENABLED=1. The
+  # Linux + Windows rows run on ubuntu-latest with a per-target cross-
+  # compiler; darwin/arm64 runs on macos-latest where the system clang
+  # is native. Linux + Windows static-link with their respective libc
+  # (musl / mingw) so the resulting binary doesn't depend on a
+  # particular system libc at runtime.
   build:
     needs: [go, python, typescript, postgres, s3]
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - { goos: linux,   goarch: amd64, suffix: '' }
-          - { goos: linux,   goarch: arm64, suffix: '' }
-          - { goos: darwin,  goarch: arm64, suffix: '' }
-          - { goos: windows, goarch: amd64, suffix: '.exe' }
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            suffix: ''
+            cc: gcc
+            apt: ''
+            static: 'true'
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            suffix: ''
+            cc: aarch64-linux-gnu-gcc
+            apt: gcc-aarch64-linux-gnu
+            static: 'true'
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            suffix: ''
+            cc: clang
+            apt: ''
+            static: 'false'
+          - os: ubuntu-latest
+            goos: windows
+            goarch: amd64
+            suffix: '.exe'
+            cc: x86_64-w64-mingw32-gcc
+            apt: gcc-mingw-w64-x86-64
+            static: 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Install cross-compiler
+        if: matrix.apt != ''
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ${{ matrix.apt }}
       - name: Build binaries
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: '0'
+          CGO_ENABLED: '1'
+          CC: ${{ matrix.cc }}
         run: |
           VERSION='${{ github.ref_name }}'
           COMMIT='${{ github.sha }}'
           DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          LDFLAGS="-s -w \
+          # Linux + Windows static-link with their respective libc so
+          # the resulting binary is portable across distros / versions.
+          # darwin dynamic-links against system libraries (the platform
+          # convention) — Apple's libSystem.dylib is stable across the
+          # macOS versions we support.
+          if [ '${{ matrix.static }}' = 'true' ]; then
+            EXTLDFLAGS='-linkmode external -extldflags "-static"'
+          else
+            EXTLDFLAGS=''
+          fi
+          LDFLAGS="-s -w ${EXTLDFLAGS} \
             -X github.com/lennylabs/podium/internal/buildinfo.Version=${VERSION} \
             -X github.com/lennylabs/podium/internal/buildinfo.Commit=${COMMIT:0:7} \
             -X github.com/lennylabs/podium/internal/buildinfo.Date=${DATE}"
