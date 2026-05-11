@@ -112,7 +112,8 @@ jobs:
     runs-on: ubuntu-latest
     services:
       minio:
-        image: bitnami/minio:latest
+        # Pinned; keep in sync with docker-compose.yml and release.yml.
+        image: bitnami/minio:2024.10.13-debian-12-r1
         env:
           MINIO_ROOT_USER: minioadmin
           MINIO_ROOT_PASSWORD: minioadmin
