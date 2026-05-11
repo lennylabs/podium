@@ -204,7 +204,7 @@ Building from source requires:
 
 - Go 1.26 or later for the registry, CLI, and MCP server.
 - Python 3.10 or later for the `podium-py` SDK.
-- Node.js 20 or later for the `@podium/sdk` TypeScript SDK.
+- Node.js 20 or later for the `@lennylabs/podium-sdk` TypeScript SDK.
 
 Clone the repository, then:
 

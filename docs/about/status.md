@@ -21,7 +21,7 @@ The initial implementation covers:
 - **Filesystem mode** end-to-end: `podium sync` against a local artifact directory, with the full set of built-in harness adapters.
 - **Server mode** end-to-end: `podium serve` (standalone via embedded SQLite + `sqlite-vec`, or standard via Postgres + `pgvector` + S3-compatible object storage), the registry HTTP API, `LayerComposer`, visibility filtering, OIDC + SCIM, domain composition, immutability and versioning, layer CLI, signing, the workspace overlay with local BM25 search, the dependency graph and impact analysis, the registry audit log with hash-chain integrity, and the meta-tools (`search_domains`, `search_artifacts`, `load_domain`, `load_artifact`).
 - **MCP server**: `podium-mcp` with the meta-tool surface, materialization through the configured harness adapter, and identity-aware loading.
-- **SDKs**: `podium-py` and `@podium/sdk` (TypeScript) as thin HTTP clients for programmatic runtimes.
+- **SDKs**: `podium-py` and `@lennylabs/podium-sdk` (TypeScript) as thin HTTP clients for programmatic runtimes.
 - **Plugin surface**: every SPI documented in [Extending](../deployment/extending), including the `LayerSourceProvider`, `GitProvider`, `IdentityProvider`, `HarnessAdapter`, `MaterializationHook`, `SignatureProvider`, `NotificationProvider`, and search/embedding providers.
 
 ---

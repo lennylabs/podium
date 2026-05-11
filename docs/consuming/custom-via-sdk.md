@@ -13,7 +13,7 @@ Programmatic consumers (LangChain, Bedrock, OpenAI Assistants, custom orchestrat
 | SDK | Install | Import | Use for |
 |:--|:--|:--|:--|
 | `podium-py` | `pip install podium-sdk` | `from podium import …` | Python orchestrators, LangChain consumers, OpenAI Assistants integrations, build/eval pipelines, notebooks. |
-| `podium-ts` | `npm install @podium/sdk` | `import { Client } from "@podium/sdk"` | TypeScript / Node orchestrators, Bedrock Agents, custom Node-based agent runtimes, Edge runtime integrations. |
+| `podium-ts` | `npm install @lennylabs/podium-sdk` | `import { Client } from "@lennylabs/podium-sdk"` | TypeScript / Node orchestrators, Bedrock Agents, custom Node-based agent runtimes, Edge runtime integrations. |
 
 **The SDKs require a Podium server.** They speak HTTP and don't work against a filesystem-source registry. For filesystem-mode consumers, use `podium sync` directly.
 

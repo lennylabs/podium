@@ -271,9 +271,9 @@ jobs:
         with:
           packages-dir: sdks/podium-py/dist
 
-  # Publish @podium/sdk to npm. Requires repo secret NPM_TOKEN (an
+  # Publish @lennylabs/podium-sdk to npm. Requires repo secret NPM_TOKEN (an
   # automation token from https://www.npmjs.com/settings/<user>/tokens
-  # with permission to publish the @podium scope).
+  # with permission to publish the @lennylabs scope).
   publish-ts:
     needs: [go, python, typescript, postgres, s3]
     runs-on: ubuntu-latest

@@ -1,5 +1,5 @@
 {
-  "name": "@podium/sdk",
+  "name": "@lennylabs/podium-sdk",
   "version": "0.0.0-dev",
   "description": "Thin HTTP client for the Podium registry.",
   "license": "MIT",

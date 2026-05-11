@@ -76,26 +76,26 @@ The `publish-py` job pins itself to `environment: pypi` so the trusted-publisher
 
 ### [ ] Add the `NPM_TOKEN` repo secret
 
-The `publish-ts` job needs an automation token for the `@podium` scope:
+The `publish-ts` job needs an automation token for the `@lennylabs` scope:
 
 1. On npmjs.com, [create an automation token](https://www.npmjs.com/settings/<your-username>/tokens) with **Automation** type. Automation tokens bypass 2FA and are designed for CI.
 2. Add it to GitHub: repo Settings → Secrets and variables → Actions → New repository secret named `NPM_TOKEN`.
 
 Rotate this token annually or when a maintainer leaves.
 
-### [ ] Create the `@podium` npm organization
+### [ ] Create the `@lennylabs` npm organization
 
-The package name in `sdks/podium-ts/package.json` is `@podium/sdk` — a *scoped* package. The `@podium` scope is owned by an npm organization, so the organization has to exist before you can publish to that scope.
+The package name in `sdks/podium-ts/package.json` is `@lennylabs/podium-sdk` — a *scoped* package. The `@lennylabs` scope is owned by an npm organization, so the organization has to exist before you can publish to that scope.
 
 1. Sign in (or create an account) at [npmjs.com](https://www.npmjs.com).
 2. Top-right avatar → **Add organization**, or go directly to [npmjs.com/org/create](https://www.npmjs.com/org/create).
-3. Organization name: `podium`. This claims the `@podium` scope.
+3. Organization name: `lennylabs`. This claims the `@lennylabs` scope.
 4. Plan: the free tier is sufficient for public packages.
 5. After creation, the owning account is automatically an organization owner; add co-maintainers later through the org's members page.
 
-If `podium` is already taken on npm, pick a different scope (e.g., `@lennylabs`) and update the `name` field in `sdks/podium-ts/package.json` to match (`@lennylabs/sdk`). The Python distribution name (`podium-sdk`) and the npm scope name do not have to match.
+The `@podium` scope was already taken on npm, which is why this project uses `@lennylabs/podium-sdk` rather than `@podium/sdk`. If `lennylabs` is also taken when you get to this step, pick another scope (`@lennylabs-podium`, `@podiumio`, etc.) and update the `name` field in `sdks/podium-ts/package.json` to match. The Python distribution name (`podium-sdk` on PyPI) and the npm scope name do not have to be aligned.
 
-### [ ] Reserve `@podium/sdk` with a first publish
+### [ ] Reserve `@lennylabs/podium-sdk` with a first publish
 
 With the organization in place, the first publish under the scope creates the package and reserves its name. Two ways to do this:
 
@@ -105,7 +105,7 @@ With the organization in place, the first publish under the scope creates the pa
 cd sdks/podium-ts
 npm install
 npm login                              # interactive; use the org-owning account
-npm publish --access public            # creates @podium/sdk on npm
+npm publish --access public            # creates @lennylabs/podium-sdk on npm
 ```
 
 `--access public` is required for scoped packages — they default to private, which is a paid feature.

@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [0.1.0] - 2026-05-11
 
-Initial release. Covers the full v1 surface described in the project specification, across three binaries (`podium`, `podium-server`, `podium-mcp`) and two SDKs (`podium-sdk` on PyPI, `@podium/sdk` on npm).
+Initial release. Covers the full v1 surface described in the project specification, across three binaries (`podium`, `podium-server`, `podium-mcp`) and two SDKs (`podium-sdk` on PyPI, `@lennylabs/podium-sdk` on npm).
 
 ### What's included
 
@@ -26,7 +26,7 @@ Initial release. Covers the full v1 surface described in the project specificati
 - **Audit log** with hash-chain integrity, retention policies, and GDPR right-to-be-forgotten.
 - **Signing**: Sigstore keyless by default; pluggable `SignatureProvider`.
 - **Dependency graph**: cross-type reverse index + impact analysis CLI.
-- **SDKs**: `podium-sdk` (Python) and `@podium/sdk` (TypeScript) as thin HTTP clients.
+- **SDKs**: `podium-sdk` (Python) and `@lennylabs/podium-sdk` (TypeScript) as thin HTTP clients.
 - **Plugin surface**: every SPI documented in `docs/deployment/extending.md`, including `LayerSourceProvider`, `GitProvider`, `IdentityProvider`, `HarnessAdapter`, `MaterializationHook`, `SignatureProvider`, `NotificationProvider`, plus search and embedding providers.
 
 [0.1.0]: https://github.com/lennylabs/podium/releases/tag/v0.1.0

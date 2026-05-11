@@ -1,9 +1,13 @@
-# @podium/sdk
+# @lennylabs/podium-sdk
 
-TypeScript client for the Podium registry (spec §7.6).
+TypeScript client for the Podium registry.
+
+```sh
+npm install @lennylabs/podium-sdk
+```
 
 ```ts
-import { Client } from "@podium/sdk";
+import { Client } from "@lennylabs/podium-sdk";
 
 const client = Client.fromEnv();
 const results = await client.searchArtifacts("variance", { type: "skill" });
