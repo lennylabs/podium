@@ -1,0 +1,51 @@
+name: codeql
+
+# GitHub's built-in static analysis. Runs on every PR + push to main,
+# plus a weekly scan so advisories that affect previously-clean code
+# surface even on quiet weeks.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 4 * * 1'   # Mondays at 04:00 UTC
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: go
+            build-mode: autobuild
+          - language: python
+            build-mode: none
+          - language: javascript-typescript
+            build-mode: none
+    steps:
+      - uses: actions/checkout@v4
+
+      # CodeQL needs the build toolchain available for Go's autobuild
+      # path. The other languages run pure static analysis.
+      - if: matrix.language == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:${{ matrix.language }}'

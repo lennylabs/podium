@@ -1,29 +1,31 @@
-name: test
+name: nightly
 
-# Per-PR + per-push CI gate. Runs the Go suite, the SDK suites, and
-# uploads coverage. Three jobs run in parallel so a slow Python suite
-# doesn't block Go feedback (and vice versa). The full nightly sweep
-# adds lint + matrix-audit + coverage-budget; see nightly.yml.
+# Full sweep that catches regressions even when PR traffic is quiet.
+# Runs lint, the spec / matrix gates, the Go test suite, the SDK
+# suites, and the coverage budget all at once. Failure pings the
+# maintainers via the standard GitHub Actions failure notification.
+#
+# Manual trigger (workflow_dispatch) lets a maintainer re-run after
+# a flake without waiting for the next scheduled run.
 
 on:
-  pull_request:
-  push:
-    branches: [main]
+  schedule:
+    - cron: '0 3 * * *'   # 03:00 UTC every day
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   go:
-    name: go
+    name: go full sweep
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Cache go build
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cache/go-build
@@ -33,17 +35,9 @@ jobs:
       - run: make tools
       - run: make lint
       - run: make speccov-drift
-      - name: Test with coverage
-        run: |
-          go test -count=1 -coverprofile=coverage.out -coverpkg=./... ./...
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
-        with:
-          files: coverage.out
-          flags: go
-          fail_ci_if_error: false
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      - run: make matrix-audit
+      - run: make test
+      - run: make coverage-budget
 
   python:
     name: podium-py

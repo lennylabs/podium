@@ -1,3 +1,7 @@
+[![test](https://github.com/lennylabs/podium/actions/workflows/test.yml/badge.svg)](https://github.com/lennylabs/podium/actions/workflows/test.yml)
+[![nightly](https://github.com/lennylabs/podium/actions/workflows/nightly.yml/badge.svg)](https://github.com/lennylabs/podium/actions/workflows/nightly.yml)
+[![codeql](https://github.com/lennylabs/podium/actions/workflows/codeql.yml/badge.svg)](https://github.com/lennylabs/podium/actions/workflows/codeql.yml)
+[![codecov](https://codecov.io/gh/lennylabs/podium/branch/main/graph/badge.svg)](https://codecov.io/gh/lennylabs/podium)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 # Podium

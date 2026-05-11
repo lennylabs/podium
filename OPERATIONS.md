@@ -65,6 +65,39 @@ Subsequent publishes run from CI via `NPM_TOKEN`.
 
 The `container` job pushes to `ghcr.io/lennylabs/podium-server`. The `GITHUB_TOKEN` provided to workflows already has `packages: write` per the workflow's `permissions:` block, so no extra credentials are required. The first push creates the package; check it appears at [github.com/orgs/lennylabs/packages](https://github.com/orgs/lennylabs/packages) and make it public if appropriate.
 
+### [ ] Configure branch protection on `main`
+
+Prevents direct pushes and enforces CI before merge. GitHub setting, not a repo file:
+
+1. Go to Settings → Branches → Branch protection rules → Add rule.
+2. Branch name pattern: `main`.
+3. Enable:
+   - **Require a pull request before merging** → require 1 approving review, dismiss stale reviews on new commits.
+   - **Require status checks to pass** → mark these required:
+     - `go` (from `test.yml`)
+     - `podium-py` (from `test.yml`)
+     - `podium-ts` (from `test.yml`)
+     - `speccov` (from `spec-coverage.yml`)
+     - `analyze (go)`, `analyze (python)`, `analyze (javascript-typescript)` (from `codeql.yml`)
+   - **Require branches to be up to date before merging**.
+   - **Require linear history** (no merge commits; PRs land via squash or rebase).
+   - **Restrict who can push** → leave unchecked (the branch is protected; PR review handles authorization).
+4. Save.
+
+Bypass for maintainers is optional. For a project still in pre-release, allowing the project owner to push directly during emergencies is reasonable; tighten once 1.0 is out.
+
+### [ ] Add `CODECOV_TOKEN` repo secret
+
+The `go` job in `test.yml` uploads coverage to Codecov. Public repos can use Codecov without a token, but tokenless uploads occasionally fail; setting the token avoids flakes.
+
+1. Sign in to [codecov.io](https://codecov.io) with GitHub.
+2. Add the `lennylabs/podium` repo. Copy the upload token.
+3. Add to GitHub: repo Settings → Secrets and variables → Actions → New repository secret named `CODECOV_TOKEN`.
+
+### [ ] Enable Dependabot security updates
+
+GitHub's free product, on by default for public repos. Confirm at Settings → Code security and analysis → Dependabot alerts and Dependabot security updates are both **On**. The non-security version-bump PRs come from the `.github/dependabot.yml` config that's already committed.
+
 ---
 
 ## Per-release checklist

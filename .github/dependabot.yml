@@ -1,0 +1,72 @@
+# Dependabot keeps dependencies current across the four ecosystems
+# Podium depends on. PRs land weekly; security advisories are handled
+# out of band by GitHub regardless of the schedule below.
+#
+# Group minor + patch updates per ecosystem to avoid a flood of one-PR-
+# per-bump on quiet weeks. Major upgrades arrive as standalone PRs.
+
+version: 2
+
+updates:
+  # Go modules at the repo root (the registry, MCP server, and CLI).
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '08:00'
+      timezone: Etc/UTC
+    groups:
+      go-minor-patch:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 5
+    labels: [dependencies, go]
+
+  # GitHub Actions versions across every workflow file.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '08:00'
+      timezone: Etc/UTC
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
+    labels: [dependencies, ci]
+
+  # Python SDK.
+  - package-ecosystem: pip
+    directory: /sdks/podium-py
+    schedule:
+      interval: weekly
+      day: monday
+      time: '08:00'
+      timezone: Etc/UTC
+    groups:
+      pip-minor-patch:
+        update-types: [minor, patch]
+    labels: [dependencies, python]
+
+  # TypeScript SDK.
+  - package-ecosystem: npm
+    directory: /sdks/podium-ts
+    schedule:
+      interval: weekly
+      day: monday
+      time: '08:00'
+      timezone: Etc/UTC
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+    labels: [dependencies, typescript]
+
+  # The Dockerfile picks up base image updates separately.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '08:00'
+      timezone: Etc/UTC
+    labels: [dependencies, docker]
