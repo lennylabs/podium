@@ -86,9 +86,10 @@ The `publish-ts` job needs a token that can publish to the `@lennylabs` scope. n
 4. Allowed IP ranges: leave empty.
 5. Packages and scopes: **Read and write** → **Specific organizations and packages** → pick the `lennylabs` org (or `@lennylabs/*`).
 6. Organizations: No access.
-7. Generate, copy.
+7. **Allow this token to bypass two-factor authentication when publishing**: check this box. Without it, `npm publish` fails with HTTP 403 ("granular access token with bypass 2fa enabled is required").
+8. Generate, copy.
 
-**Classic Automation token** (legacy flow; bypasses 2FA, no expiry):
+**Classic Automation token** (legacy flow; bypasses 2FA implicitly, no expiry):
 
 1. npmjs.com → avatar → Access Tokens → **Generate New Token** → look for a **Classic Token** option (sometimes behind a "Switch to legacy" toggle).
 2. Type: **Automation**.
@@ -97,6 +98,8 @@ The `publish-ts` job needs a token that can publish to the `@lennylabs` scope. n
 In either case, add it to GitHub: repo Settings → Secrets and variables → Actions → New repository secret named `NPM_TOKEN`.
 
 Rotate the token annually or when a maintainer leaves. Granular tokens force the issue by expiring on their own; classic tokens rely on you remembering.
+
+> **Reserving the package manually from your laptop?** That uses your interactive login, not `NPM_TOKEN`. If 2FA is enforced on the account, run `npm publish --access public --otp=123456` with the current 6-digit code from your authenticator app, or run `npm publish --access public` and respond when prompted.
 
 ### [x] Create the `@lennylabs` npm organization
 
