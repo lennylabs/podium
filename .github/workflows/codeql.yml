@@ -32,7 +32,7 @@ jobs:
           - language: javascript-typescript
             build-mode: none
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # CodeQL needs the build toolchain available for Go's autobuild
       # path. The other languages run pure static analysis.

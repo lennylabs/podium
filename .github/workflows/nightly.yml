@@ -22,7 +22,7 @@ jobs:
     name: go full sweep
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -44,7 +44,7 @@ jobs:
     name: podium-py
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -61,7 +61,7 @@ jobs:
     name: podium-ts
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -92,7 +92,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -116,7 +116,7 @@ jobs:
     # set CMD. Postgres stays as a service because its default CMD
     # works out of the box.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
