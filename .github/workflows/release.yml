@@ -220,7 +220,11 @@ jobs:
     runs-on: ubuntu-latest
     environment: pypi
     steps:
+      # setuptools-scm derives the version from `git describe --tags`.
+      # The default shallow clone hides tags, so request a full clone.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -245,6 +249,15 @@ jobs:
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
+      - name: Inject version from tag
+        # package.json on main carries a permanent "0.0.0-dev"
+        # placeholder; the workflow rewrites it from the git tag
+        # before publish. --no-git-tag-version edits the file
+        # without creating a commit or tag.
+        working-directory: sdks/podium-ts
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          npm version --no-git-tag-version "${VERSION}"
       - name: Publish
         working-directory: sdks/podium-ts
         run: |

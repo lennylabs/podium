@@ -28,23 +28,22 @@ Versions in flight carry a suffix that semver orders before the plain version:
 
 | Place | Notes |
 |:--|:--|
-| `internal/buildinfo/buildinfo.go` | Default `Version` constant. Source of truth when no ldflags are passed. |
-| `sdks/podium-py/pyproject.toml` and `sdks/podium-py/podium/__init__.py` | PEP 440 form: `0.2.0.dev0` while in flight, `0.2.0` when released. |
-| `sdks/podium-ts/package.json` | Semver: `0.2.0-dev` while in flight, `0.2.0` when released. |
-| Git tag | Authoritative for a release: `vX.Y.Z`. |
+| `internal/buildinfo/buildinfo.go` | Default `Version` constant. Source of truth when no ldflags are passed. **The one place that needs a manual edit per release.** |
+| `sdks/podium-py/pyproject.toml` | Marks the version as dynamic; setuptools-scm derives it from the git tag. **No manual edit per release.** |
+| `sdks/podium-ts/package.json` | Permanent `"0.0.0-dev"` placeholder. The release workflow rewrites it from the git tag before `npm publish`. **No manual edit per release.** |
+| Git tag | Authoritative for a release: `vX.Y.Z`. Drives the Go binary version (via `make build` + `git describe`), the Python wheel version (via setuptools-scm), and the npm package version (via the workflow's `npm version` step). |
 | `Makefile` `build` target | Injects `git describe --tags --dirty --always` into the binary via `-ldflags`. |
 
-Keep the three text sources (`buildinfo.go`, the Python files, the npm `package.json`) in sync.
+The two SDKs are fully tag-driven; only `buildinfo.go` requires a manual edit per release. The Go default is in source code so a plain `go build` on `main` still reports a recognizable `0.X.Y-dev` even when no ldflags are passed.
 
 ## Cutting a release
 
 1. **Pick the version.** Walk the CHANGELOG and the merged diff since the previous tag. Decide MAJOR, MINOR, or PATCH.
 
-2. **Bump the version strings to the release number** (drop the `-dev` / `.dev0` suffix):
+2. **Bump the Go default version** (drop the `-dev` suffix):
    - `internal/buildinfo/buildinfo.go`: `Version = "0.2.0"`.
-   - `sdks/podium-py/pyproject.toml`: `version = "0.2.0"`.
-   - `sdks/podium-py/podium/__init__.py`: `__version__ = "0.2.0"`.
-   - `sdks/podium-ts/package.json`: `"version": "0.2.0"`.
+
+   The two SDKs need no edit at this step — setuptools-scm and the release workflow's `npm version` step will derive `0.2.0` from the tag.
 
 3. **Update `CHANGELOG.md`.** Move the unreleased section into a dated header `## [0.2.0] - YYYY-MM-DD`. Add the compare link at the bottom.
 
@@ -56,15 +55,12 @@ Keep the three text sources (`buildinfo.go`, the Python files, the npm `package.
    git push origin v0.2.0
    ```
 
-5. **CI builds release binaries.** The release workflow runs `make build VERSION=v0.2.0`, which produces binaries reporting `podium v0.2.0 (<sha>, built <date>)`. The workflow publishes them to GitHub Releases plus PyPI plus npm.
+5. **CI builds and publishes.** The release workflow runs `make build VERSION=v0.2.0` for the Go binaries, `python -m build` (under setuptools-scm) for the Python wheel, and `npm version --no-git-tag-version 0.2.0 && npm publish` for the TS SDK. All three report `0.2.0`. The workflow publishes binaries to GitHub Releases, the wheel + sdist to PyPI, the npm package, and the container image to ghcr.io.
 
-6. **Open the next development cycle.** On `main`, bump the version strings to the next `-dev`:
+6. **Open the next development cycle.** On `main`, bump the Go default:
    - `buildinfo.go`: `Version = "0.3.0-dev"`.
-   - `pyproject.toml`: `version = "0.3.0.dev0"`.
-   - `__init__.py`: `__version__ = "0.3.0.dev0"`.
-   - `package.json`: `"version": "0.3.0-dev"`.
 
-   Commit as `Begin 0.3.0 development`.
+   Commit as `Begin 0.3.0 development`. Both SDKs pick up the next dev version automatically (`0.2.1.dev<N>+g<sha>` for Python from setuptools-scm; `0.0.0-dev` is the permanent TS local placeholder).
 
 ## Patch releases
 

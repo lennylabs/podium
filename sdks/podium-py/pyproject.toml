@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=68", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 # package names) so `from podium import Client` still works after
 # `pip install podium-sdk`. Same pattern as Pillow / BeautifulSoup4.
 name = "podium-sdk"
-version = "0.1.0.dev0"
+dynamic = ["version"]
 description = "Thin HTTP client for the Podium registry."
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -20,6 +20,22 @@ classifiers = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["podium*"]
+
+# setuptools-scm derives the version from git tags at build time —
+# `pip install -e .` from a clean checkout at tag v0.1.0 produces
+# podium-sdk 0.1.0; an untagged commit produces 0.1.1.dev<N>+g<sha>.
+# Mirrors the Go side's `internal/buildinfo` + ldflags pattern.
+[tool.setuptools_scm]
+# pyproject.toml sits in sdks/podium-py/; the git root is two levels up.
+root = "../.."
+# Generated at build time and imported by podium/__init__.py.
+# Gitignored — never check it in.
+version_file = "podium/_version.py"
+# Local-version separator (PEP 440); keeps PyPI-uploaded versions
+# clean while local dev builds carry the git sha.
+local_scheme = "node-and-date"
+# Fallback when building from a tarball that has no .git directory.
+fallback_version = "0.0.0"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
