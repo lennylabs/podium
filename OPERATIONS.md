@@ -34,6 +34,7 @@ Manual steps that supplement the automated workflows. Each item lists what to do
 | `pypi` environment             | Settings → Environments → New environment    |
 | PyPI Trusted Publisher binding | pypi.org → manage project → publishing       |
 | Branch protection on `main`    | Settings → Branches → required status checks |
+| Tag protection on `v*`         | Settings → Tags → New rule                   |
 | Dependabot security updates    | Settings → Code security and analysis        |
 
 Each item below expands on these with the exact steps. Local-dev environment variables for live tests are in [Live integration environment variables](#live-integration-environment-variables).
@@ -119,6 +120,21 @@ Prevents direct pushes and enforces CI before merge. GitHub setting, not a repo 
 4. Save.
 
 Bypass for maintainers is optional. For a project still in pre-release, allowing the project owner to push directly during emergencies is reasonable; tighten once 1.0 is out.
+
+### [ ] Configure tag protection on `v*`
+
+Pairs with the `validate-tag` job in `release.yml`. The workflow gate prevents publishing from a feature-branch tag; tag protection prevents the tag from being created at all by anyone without admin access.
+
+1. Go to Settings → Tags → New rule.
+2. Tag name pattern: `v*`.
+3. Save.
+
+By default this restricts creation, deletion, and updating of matching tags to users with admin access. For a single-maintainer project that's the owner; once the project adds maintainers, grant them the role through team membership rather than loosening this rule.
+
+Tag protection plus the `validate-tag` workflow gate gives defense in depth:
+
+- Tag protection stops most accidents — a contributor with write access can't push a `v*` tag at all.
+- `validate-tag` catches the remaining case — an admin who mistakenly tags an unmerged commit gets a CI failure before any artifact publishes.
 
 ### [ ] Add `CODECOV_TOKEN` repo secret
 
