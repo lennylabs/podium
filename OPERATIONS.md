@@ -100,6 +100,93 @@ GitHub's free product, on by default for public repos. Confirm at Settings → C
 
 ---
 
+## Live integration environment variables
+
+Tier 2 tests inspect these and self-skip when unset. `make test` runs only the in-process suite; `make test-live` (or any `go test ./...` invocation with the variables set) exercises real backends. Tests gate on individual variables, so partial coverage works: set only the Postgres group and the rest stay skipped.
+
+### Postgres (store + pgvector)
+
+| Variable | Required? | Purpose | Example |
+|:--|:--|:--|:--|
+| `PODIUM_POSTGRES_DSN` | Yes for either suite | `pkg/store/postgres_test.go` RegistryStore conformance + pgvector fallback. | `postgres://podium:podium@localhost:5432/podium?sslmode=disable` |
+| `PODIUM_POSTGRES_DSN_VECTOR` | Optional | When set, `pkg/vector/pgvector_test.go` uses this DSN instead of `PODIUM_POSTGRES_DSN`. Useful when the deployment splits metadata and vectors across databases. | `postgres://podium:podium@localhost:5432/podium_vec?sslmode=disable` |
+
+The target database needs the `vector` extension installed (`CREATE EXTENSION vector;`).
+
+### S3-compatible object storage
+
+| Variable | Required? | Purpose | Example |
+|:--|:--|:--|:--|
+| `PODIUM_S3_ENDPOINT` | Yes | Host:port for MinIO / Ceph / real S3. Skips when unset. | `localhost:9000` |
+| `PODIUM_S3_BUCKET` | Yes | Pre-created bucket name. | `podium-test` |
+| `PODIUM_S3_REGION` | Optional | Defaults to `us-east-1`. | `us-west-2` |
+| `PODIUM_S3_ACCESS_KEY_ID` | Optional | Anonymous access when unset. | `minioadmin` |
+| `PODIUM_S3_SECRET_ACCESS_KEY` | Optional | Pairs with the access key. | `minioadmin` |
+| `PODIUM_S3_USE_SSL` | Optional | Set to `"false"` for plain HTTP. Any other value (including unset) means TLS. | `false` |
+
+### Sigstore (keyless signing)
+
+`pkg/sign/sigstore_live_test.go` skips unless **all four** are set:
+
+| Variable | Purpose | Example |
+|:--|:--|:--|
+| `PODIUM_SIGSTORE_FULCIO_URL` | Fulcio CA endpoint. | `https://fulcio.sigstore.dev` |
+| `PODIUM_SIGSTORE_REKOR_URL` | Rekor transparency log. | `https://rekor.sigstore.dev` |
+| `PODIUM_SIGSTORE_OIDC_TOKEN` | OIDC token Fulcio binds into the cert. In CI, sourced from `id-token: write`. | `eyJ…` |
+| `PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE` | Path to the trust bundle (intermediate + root CA chain). | `/path/to/sigstore-root.pem` |
+
+### What's not gated by env vars today
+
+The cloud vector backends (Pinecone, Weaviate, Qdrant) and embedding providers (OpenAI, Voyage, Cohere, Ollama) have production implementations but only Tier 1 mocks. No `*_live_test.go` exists for them yet, so the corresponding API-key variables are unused by the suite. Adding live coverage for those is tracked under [Future infra](#future-infra) implicitly; revisit when the cost / value tradeoff makes sense.
+
+### About fallbacks and config-shape coverage
+
+Two of the variables above have fallback behavior:
+
+- `PODIUM_POSTGRES_DSN_VECTOR` falls back to `PODIUM_POSTGRES_DSN`.
+- `PODIUM_S3_ACCESS_KEY_ID` / `_SECRET_ACCESS_KEY` are optional (anonymous access otherwise).
+
+**You do not need to run the full integration suite multiple times to cover both branches of these fallbacks.** The fallback code is three lines of `os.Getenv` resolution that converges on a single `Open(dsn)` / `NewS3(cfg)` call; the database or S3 behavior under test is identical regardless of which variable supplied the value. Re-running the integration suite to exercise a `dsn == ""` branch costs minutes and adds zero behavioral coverage.
+
+If you want airtight coverage of the resolution logic itself:
+
+- Write a small unit test using `t.Setenv` that asserts each branch picks the right DSN / cred combo.
+- Run integration tests once with a realistic config.
+
+Separately, the underlying backends behave differently along some axes that are worth a deliberate second pass when a deployment changes:
+
+- **TLS on vs off** (`PODIUM_S3_USE_SSL`): presigned URL signing and certificate validation paths differ. CI runs against MinIO with TLS off; a one-off run against real S3 with TLS on is the right way to validate.
+- **Anonymous vs credentialed S3**: the SDK takes a different code path. If a deployment uses one or the other, run that configuration once before shipping.
+- **Split vs shared Postgres DSN**: only matters when a deployment actually splits them.
+
+These are deployment-config validations, not fallback-coverage testing. Add a matrix job in CI when a deployment shape genuinely depends on the variant; otherwise one pass is enough.
+
+### Pasteable template
+
+Fill in the values you have; leave the rest empty. The unset ones skip cleanly.
+
+```sh
+# Tier 2 live integrations. Empty values stay skipped.
+export PODIUM_POSTGRES_DSN="postgres://podium:podium@localhost:5432/podium?sslmode=disable"
+export PODIUM_POSTGRES_DSN_VECTOR=""
+
+export PODIUM_S3_ENDPOINT="localhost:9000"
+export PODIUM_S3_BUCKET="podium-test"
+export PODIUM_S3_REGION=""
+export PODIUM_S3_ACCESS_KEY_ID="minioadmin"
+export PODIUM_S3_SECRET_ACCESS_KEY="minioadmin"
+export PODIUM_S3_USE_SSL="false"
+
+export PODIUM_SIGSTORE_FULCIO_URL=""
+export PODIUM_SIGSTORE_REKOR_URL=""
+export PODIUM_SIGSTORE_OIDC_TOKEN=""
+export PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE=""
+```
+
+In CI, every variable above maps to a repo Secret (Settings → Secrets and variables → Actions). `integration-live.yml` provides Postgres and MinIO via service containers, so only Sigstore needs a real secret today.
+
+---
+
 ## Per-release checklist
 
 These run alongside the `RELEASING.md` flow. Most are reminders rather than blockers.
