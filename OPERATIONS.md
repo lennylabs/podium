@@ -104,6 +104,24 @@ GitHub's free product, on by default for public repos. Confirm at Settings → C
 
 Tier 2 tests inspect these and self-skip when unset. `make test` runs only the in-process suite; `make test-live` (or any `go test ./...` invocation with the variables set) exercises real backends. Tests gate on individual variables, so partial coverage works: set only the Postgres group and the rest stay skipped.
 
+### Quickstart with docker-compose
+
+The repo ships a `docker-compose.yml` and matching `make` targets that spin up Postgres (with pgvector preinstalled) and MinIO locally. The same images run as service containers in `nightly.yml` and `release.yml`, so behavior on the laptop matches CI.
+
+```bash
+make services-up        # start Postgres + MinIO
+make test-live          # full Go suite with env vars pointing at the local services
+make services-down      # stop the services (keeps volumes)
+```
+
+`make test-live` sets the Postgres + S3 variables inline; you don't need to source anything. For ad-hoc commands (`go test ./pkg/objectstore/...`), copy `.env.example` to `.env.local` and source it from your shell or direnv.
+
+Need a different backend (managed Postgres, real S3, etc.)? Override the `LIVE_*` make variables on the command line:
+
+```bash
+make test-live LIVE_POSTGRES_DSN="postgres://…" LIVE_S3_ENDPOINT="s3.amazonaws.com"
+```
+
 ### Postgres (store + pgvector)
 
 | Variable | Required? | Purpose | Example |

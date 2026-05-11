@@ -26,12 +26,13 @@ LDFLAGS := -X 'github.com/lennylabs/podium/internal/buildinfo.Version=$(VERSION)
         speccov speccov-uncovered speccov-drift speccov-report \
         coverage coverage-budget coverage-per-package coverage-gate \
         matrix matrix-list matrix-audit matrix-scaffold \
+        services-up services-down services-logs services-status \
         tools clean
 
 help:
 	@echo "Podium make targets:"
-	@echo "  test             Run the full Go test suite (single lane)"
-	@echo "  test-live        Run env-gated Tier 2 tests against real Postgres/S3/Sigstore/embedding providers"
+	@echo "  test             Run the full Go test suite"
+	@echo "  test-live        Run the suite with env vars pointing at docker-compose services"
 	@echo "  bench            Run §7.1 latency benchmarks (informational)"
 	@echo "  lint             Run linters (golangci-lint when available)"
 	@echo "  update-golden    Re-run tests with UPDATE_GOLDEN=1"
@@ -45,6 +46,10 @@ help:
 	@echo "  matrix-audit     Audit spec-table coverage (§6.7.1, §6.10, etc.)"
 	@echo "  matrix-list      List the documented spec matrices"
 	@echo "  matrix-scaffold  Print Go test stubs for missing matrix cells"
+	@echo "  services-up      Start Postgres + MinIO for live tests"
+	@echo "  services-down    Stop the local services (keeps volumes)"
+	@echo "  services-logs    Tail logs from the local services"
+	@echo "  services-status  Show the local service container status"
 	@echo "  build            Build podium, podium-server, podium-mcp into ./bin/ with version metadata"
 	@echo "  tools            Build the helper binaries to ./bin/"
 	@echo "  clean            Remove build artifacts"
@@ -57,11 +62,48 @@ help:
 test:
 	$(GO) test $(GOFLAGS) -count=1 ./...
 
-# Tier 2 integration tests against real external services (Postgres, S3,
-# Sigstore, embedding providers). The tests inspect PODIUM_LIVE_* env vars
-# and skip themselves when the corresponding service is not configured.
+# Run the full suite with env vars pointing at the local docker-compose
+# services (see docker-compose.yml + `make services-up`). Tests that
+# exercise real Postgres / S3 take the live path; everything else runs
+# unchanged. Override any of LIVE_* below to point at a different
+# backend (managed Postgres, real S3, etc.).
+#
+# Sigstore live tests stay manual; see RELEASING.md for the env vars
+# to set when validating signing changes before a release.
+LIVE_POSTGRES_DSN ?= postgres://podium:podium@localhost:5432/podium?sslmode=disable
+LIVE_S3_ENDPOINT  ?= localhost:9000
+LIVE_S3_BUCKET    ?= podium
+LIVE_S3_KEY       ?= minioadmin
+LIVE_S3_SECRET    ?= minioadmin
+LIVE_S3_USE_SSL   ?= false
+
 test-live:
-	PODIUM_LIVE=1 $(GO) test $(GOFLAGS) -count=1 -tags=live ./...
+	PODIUM_POSTGRES_DSN="$(LIVE_POSTGRES_DSN)" \
+	PODIUM_S3_ENDPOINT="$(LIVE_S3_ENDPOINT)" \
+	PODIUM_S3_BUCKET="$(LIVE_S3_BUCKET)" \
+	PODIUM_S3_ACCESS_KEY_ID="$(LIVE_S3_KEY)" \
+	PODIUM_S3_SECRET_ACCESS_KEY="$(LIVE_S3_SECRET)" \
+	PODIUM_S3_USE_SSL="$(LIVE_S3_USE_SSL)" \
+	$(GO) test $(GOFLAGS) -count=1 ./...
+
+# ----- Local services for live tests ---------------------------------------
+
+# Honors `docker compose` (v2) by default; set DOCKER_COMPOSE=docker-compose
+# to use the legacy v1 CLI.
+DOCKER_COMPOSE ?= docker compose
+
+services-up:
+	$(DOCKER_COMPOSE) up -d
+	@echo "Services starting; check status with: make services-status"
+
+services-down:
+	$(DOCKER_COMPOSE) down
+
+services-logs:
+	$(DOCKER_COMPOSE) logs -f
+
+services-status:
+	$(DOCKER_COMPOSE) ps
 
 # Run the §7.1 latency benchmark suite. Output is informational;
 # CI does not gate on absolute numbers because cloud runners vary.

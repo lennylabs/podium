@@ -1,0 +1,53 @@
+# Local services for the live integration suite. Mirrors the service
+# containers used in nightly.yml and release.yml so behavior on the
+# laptop matches CI.
+#
+# Usage:
+#   docker compose up -d      # start
+#   docker compose down       # stop (keeps volumes)
+#   docker compose down -v    # stop + wipe data
+#
+# Or via the Makefile wrappers:
+#   make services-up
+#   make services-down
+#   make services-logs
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: podium-postgres
+    environment:
+      POSTGRES_USER: podium
+      POSTGRES_PASSWORD: podium
+      POSTGRES_DB: podium
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U podium -d podium"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: bitnami/minio:latest
+    container_name: podium-minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_DEFAULT_BUCKETS: podium
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web console at http://localhost:9001
+    volumes:
+      - minio_data:/bitnami/minio/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+  minio_data:
