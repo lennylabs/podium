@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 580" font-family="Helvetica, Arial, sans-serif">
+  <!--
+    Identity and visibility flow.
+    Every registry call carries an OAuth identity. The registry
+    verifies the token, resolves claims, then evaluates the layer
+    list per-layer to produce the caller's effective view.
+  -->
+  <defs>
+    <marker id="b-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M 0 0 L 11 6 L 0 12 z" fill="#1f2933"/>
+    </marker>
+    <style>
+      .b-bg { fill: #ffffff; }
+      .b-caller { fill: #d6e9d2; stroke: #1f2933; stroke-width: 2.4; }
+      .b-stage { fill: #fffaf0; stroke: #1f2933; stroke-width: 2.2; }
+      .b-frame { fill: none; stroke: #b56b1f; stroke-width: 1.8; stroke-dasharray: 6 5; }
+      .b-output { fill: #ffe9c7; stroke: #1f2933; stroke-width: 2.4; }
+      .b-row-yes { fill: #d6e9d2; stroke: #1f2933; stroke-width: 1.6; }
+      .b-row-no { fill: #fde2d6; stroke: #c84a1d; stroke-width: 1.6; }
+      .b-title { font-size: 22px; fill: #1f2933; }
+      .b-section { font-size: 14px; fill: #b56b1f; letter-spacing: 0.04em; }
+      .b-frame-label { font-size: 13px; fill: #b56b1f; letter-spacing: 0.04em; }
+      .b-name { font-size: 16px; fill: #1f2933; }
+      .b-mono { font-size: 13px; fill: #1f2933; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
+      .b-sub { font-size: 14px; fill: #54616e; }
+      .b-line { fill: none; stroke: #1f2933; stroke-width: 2.4; stroke-linecap: round; }
+      .b-foot { font-size: 13px; fill: #8a7755; }
+      .b-th { font-size: 13px; fill: #b56b1f; letter-spacing: 0.04em; }
+      .b-yes { font-size: 14px; fill: #547a3a; }
+      .b-no { font-size: 14px; fill: #c84a1d; }
+    </style>
+  </defs>
+
+  <rect class="b-bg" width="1080" height="580"/>
+
+  <text class="b-title" x="40" y="42">Identity and visibility flow</text>
+  <text class="b-sub" x="40" y="64">Every registry call carries an OAuth identity. The registry uses it to compose the caller's effective view.</text>
+
+  <!-- Caller -->
+  <rect class="b-caller" x="40" y="110" width="160" height="80" rx="8"/>
+  <text class="b-section" x="60" y="134">caller</text>
+  <text class="b-name" x="60" y="156">Alice</text>
+  <text class="b-mono" x="60" y="178">+ OAuth token</text>
+
+  <!-- Arrow caller -> registry -->
+  <path class="b-line" d="M 200 150 L 240 150" marker-end="url(#b-arrow)"/>
+
+  <!-- Registry frame -->
+  <rect class="b-frame" x="240" y="100" width="700" height="100" rx="10"/>
+  <text class="b-frame-label" x="252" y="120">podium server</text>
+
+  <!-- Stage 1: verify -->
+  <rect class="b-stage" x="252" y="128" width="200" height="64" rx="6"/>
+  <text class="b-name" x="268" y="152">1. Verify token</text>
+  <text class="b-sub" x="268" y="174">signature, expiry, audience</text>
+
+  <path class="b-line" d="M 452 160 L 478 160" marker-end="url(#b-arrow)"/>
+
+  <!-- Stage 2: resolve claims -->
+  <rect class="b-stage" x="482" y="128" width="220" height="64" rx="6"/>
+  <text class="b-name" x="498" y="152">2. Resolve claims</text>
+  <text class="b-sub" x="498" y="174">subject, groups, tenant</text>
+
+  <path class="b-line" d="M 702 160 L 728 160" marker-end="url(#b-arrow)"/>
+
+  <!-- Stage 3: evaluate per layer -->
+  <rect class="b-stage" x="732" y="128" width="196" height="64" rx="6"/>
+  <text class="b-name" x="748" y="152">3. Per-layer match</text>
+  <text class="b-sub" x="748" y="174">visible or hidden</text>
+
+  <!-- Arrow registry -> output -->
+  <path class="b-line" d="M 940 150 L 966 150" marker-end="url(#b-arrow)"/>
+
+  <!-- Effective view output -->
+  <rect class="b-output" x="970" y="108" width="100" height="84" rx="8"/>
+  <text class="b-section" x="986" y="132">effective</text>
+  <text class="b-name" x="986" y="158">view</text>
+
+  <!-- Per-layer decision table -->
+  <text class="b-section" x="40" y="244">per-layer decision for Alice</text>
+
+  <!-- Table headers -->
+  <text class="b-th" x="60" y="276">layer</text>
+  <text class="b-th" x="320" y="276">visibility rule</text>
+  <text class="b-th" x="620" y="276">alice's claims match?</text>
+  <text class="b-th" x="900" y="276">in view?</text>
+
+  <!-- Row 1: org-defaults YES -->
+  <rect class="b-row-yes" x="40" y="290" width="1000" height="42" rx="6"/>
+  <text class="b-mono" x="60" y="316">org-defaults</text>
+  <text class="b-mono" x="320" y="316">organization: true</text>
+  <text class="b-sub" x="620" y="316">acme tenant member</text>
+  <text class="b-yes" x="900" y="316">YES</text>
+
+  <!-- Row 2: team-finance NO -->
+  <rect class="b-row-no" x="40" y="338" width="1000" height="42" rx="6"/>
+  <text class="b-mono" x="60" y="364">team-finance</text>
+  <text class="b-mono" x="320" y="364">groups: [finance]</text>
+  <text class="b-sub" x="620" y="364">not in finance group</text>
+  <text class="b-no" x="900" y="364">NO</text>
+
+  <!-- Row 3: alice-personal YES -->
+  <rect class="b-row-yes" x="40" y="386" width="1000" height="42" rx="6"/>
+  <text class="b-mono" x="60" y="412">alice-personal</text>
+  <text class="b-mono" x="320" y="412">users: [alice@acme.com]</text>
+  <text class="b-sub" x="620" y="412">subject matches</text>
+  <text class="b-yes" x="900" y="412">YES</text>
+
+  <!-- Row 4: marketing-public YES -->
+  <rect class="b-row-yes" x="40" y="434" width="1000" height="42" rx="6"/>
+  <text class="b-mono" x="60" y="460">marketing-public</text>
+  <text class="b-mono" x="320" y="460">public: true</text>
+  <text class="b-sub" x="620" y="460">always visible</text>
+  <text class="b-yes" x="900" y="460">YES</text>
+
+  <text class="b-foot" x="40" y="510">Visibility evaluation runs on every registry call. Layers the caller cannot see are silently excluded; the response</text>
+  <text class="b-foot" x="40" y="528">contains no hint of their existence. Hidden parents merge server-side when a visible child declares extends:.</text>
+  <text class="b-foot" x="40" y="546">Public mode and filesystem-source deployments short-circuit visibility to true for every layer (no identity present).</text>
+</svg>

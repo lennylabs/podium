@@ -3,7 +3,7 @@ layout: default
 title: Small team
 parent: Deployment
 nav_order: 2
-description: Standalone server on a single VM. This setup fits small teams that want runtime discovery and a single audit log without a full standard deployment.
+description: Standalone server on a single VM. Fits anyone who needs runtime discovery or a single audit log without the full standard stack.
 ---
 
 # Small team
@@ -17,7 +17,7 @@ Suitable for:
 - Offline / air-gapped development.
 - Anyone evaluating Podium's discovery and search capabilities at small scale.
 
-Most small teams can stay on filesystem mode (see [Solo / filesystem](solo-filesystem)) by committing the catalog to git. Reach for standalone when filesystem mode stops fitting.
+Teams whose catalog does not require access control or progressive disclosure can stay on filesystem mode (see [Solo / filesystem](solo-filesystem)) by committing the catalog to Git. Reach for standalone when runtime discovery or centralized audit becomes necessary.
 
 ---
 

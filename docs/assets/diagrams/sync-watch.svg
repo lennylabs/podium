@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 480" font-family="Helvetica, Arial, sans-serif">
+  <!--
+    podium sync watch mode (the long-running form invoked with the
+    watch flag). The client subscribes to registry change events
+    and re-materializes affected artifacts incrementally.
+  -->
+  <defs>
+    <marker id="b-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M 0 0 L 11 6 L 0 12 z" fill="#1f2933"/>
+    </marker>
+    <marker id="b-arrow-event" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M 0 0 L 11 6 L 0 12 z" fill="#c84a1d"/>
+    </marker>
+    <style>
+      .b-bg { fill: #ffffff; }
+      .b-registry { fill: #ffe9c7; stroke: #1f2933; stroke-width: 2.4; }
+      .b-watcher { fill: #fffaf0; stroke: #1f2933; stroke-width: 2.2; }
+      .b-stage { fill: #fffaf0; stroke: #1f2933; stroke-width: 2; }
+      .b-target { fill: #d6e9d2; stroke: #1f2933; stroke-width: 2.2; }
+      .b-event { fill: #fde2d6; stroke: #c84a1d; stroke-width: 1.6; }
+      .b-title { font-size: 22px; fill: #1f2933; }
+      .b-section { font-size: 14px; fill: #b56b1f; letter-spacing: 0.04em; }
+      .b-name { font-size: 17px; fill: #1f2933; }
+      .b-sub { font-size: 14px; fill: #54616e; }
+      .b-mono { font-size: 13px; fill: #1f2933; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
+      .b-line { fill: none; stroke: #1f2933; stroke-width: 2.4; stroke-linecap: round; }
+      .b-line-event { fill: none; stroke: #c84a1d; stroke-width: 2.2; stroke-linecap: round; stroke-dasharray: 6 5; }
+      .b-annot { font-size: 13px; fill: #54616e; font-style: italic; }
+      .b-foot { font-size: 13px; fill: #8a7755; }
+    </style>
+  </defs>
+
+  <rect class="b-bg" width="1080" height="480"/>
+
+  <text class="b-title" x="40" y="42">podium sync watch mode (server-source registry)</text>
+  <text class="b-sub" x="40" y="64">The watcher subscribes to registry events and re-materializes the changed artifacts incrementally.</text>
+
+  <!-- Registry on left -->
+  <rect class="b-registry" x="40" y="120" width="220" height="100" rx="8"/>
+  <text class="b-section" x="60" y="146">podium server</text>
+  <text class="b-name" x="60" y="170">change events</text>
+  <text class="b-sub" x="60" y="192">SSE stream over HTTP,</text>
+  <text class="b-sub" x="60" y="210">filtered to caller's view</text>
+
+  <!-- Arrow registry -> watcher step 1, with the event payload labelled below the arrow. -->
+  <path class="b-line-event" d="M 260 170 L 516 170" marker-end="url(#b-arrow-event)"/>
+
+  <!-- Event payload label (positioned beneath the arrow) -->
+  <rect class="b-event" x="306" y="184" width="168" height="44" rx="6"/>
+  <text class="b-mono" x="320" y="204">{artifact_id,</text>
+  <text class="b-mono" x="320" y="220">version, change}</text>
+
+  <!-- Watcher loop on right -->
+  <rect class="b-watcher" x="500" y="100" width="540" height="240" rx="10"/>
+  <text class="b-section" x="520" y="124">podium sync (watching)</text>
+
+  <!-- Stage 1: receive -->
+  <rect class="b-stage" x="520" y="140" width="160" height="64" rx="6"/>
+  <text class="b-name" x="536" y="164">1. Receive event</text>
+  <text class="b-sub" x="536" y="186">debounce same id</text>
+
+  <path class="b-line" d="M 680 172 L 712 172" marker-end="url(#b-arrow)"/>
+
+  <!-- Stage 2: fetch -->
+  <rect class="b-stage" x="716" y="140" width="160" height="64" rx="6"/>
+  <text class="b-name" x="732" y="164">2. Fetch manifest</text>
+  <text class="b-sub" x="732" y="186">load_artifact</text>
+
+  <path class="b-line" d="M 876 172 L 908 172" marker-end="url(#b-arrow)"/>
+
+  <!-- Stage 3: adapt -->
+  <rect class="b-stage" x="912" y="140" width="116" height="64" rx="6"/>
+  <text class="b-name" x="928" y="164">3. Adapt</text>
+  <text class="b-sub" x="928" y="186">harness</text>
+
+  <!-- Down arrow to stage 4 -->
+  <path class="b-line" d="M 970 204 L 970 240 L 802 240 L 802 252" marker-end="url(#b-arrow)"/>
+
+  <!-- Stage 4: write -->
+  <rect class="b-stage" x="716" y="256" width="160" height="64" rx="6"/>
+  <text class="b-name" x="732" y="280">4. Atomic write</text>
+  <text class="b-sub" x="732" y="302">.tmp + rename</text>
+
+  <!-- Loop arrow back to stage 1 -->
+  <path class="b-line" d="M 716 288 L 600 288 L 600 204" marker-end="url(#b-arrow)"/>
+  <text class="b-annot" x="540" y="280">await next event</text>
+
+  <!-- Output: target tree -->
+  <rect class="b-target" x="500" y="370" width="540" height="60" rx="8"/>
+  <text class="b-section" x="520" y="394">target tree</text>
+  <text class="b-mono" x="520" y="418">.claude/agents/, .cursor/rules/, …</text>
+
+  <!-- Arrow from write to target -->
+  <path class="b-line" d="M 796 320 L 796 366" marker-end="url(#b-arrow)"/>
+
+  <text class="b-foot" x="40" y="450">Event types: artifact_added, artifact_updated, artifact_removed, layer_changed. Removals delete from the target.</text>
+  <text class="b-foot" x="40" y="468">A change to a parent (via extends:) re-emits events for every dependent child the caller can see.</text>
+</svg>

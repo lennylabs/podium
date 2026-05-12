@@ -31,46 +31,82 @@ Server mode is what most teams run once they're past the filesystem
 stage. The server holds the catalog; consumers reach it over HTTP
 and identity-aware composition runs server-side:
 
-```
-   Git repos / local paths ──────────┐
-   (one or more layer sources)       │
-                                     ▼
-                       ┌─────────────────────────┐
-                       │ Podium server           │
-                       │  HTTP/JSON API          │
-                       │  Postgres + pgvector    │
-                       │  Object storage         │
-                       │  Layer composition      │
-                       │  Visibility filtering   │
-                       │  Dependency graph       │
-                       └────────────▲────────────┘
-                                    │
-                  OAuth-attested identity (every call)
-                                    │
-       ┌────────────────────────────┼────────────────────────────┐
-       │                            │                            │
-┌──────┴───────┐          ┌─────────┴──────┐          ┌──────────┴─────┐
-│ Language SDKs│          │ MCP server     │          │ podium sync    │
-│ (py, ts)     │          │ (in-process)   │          │ (CLI)          │
-└──────────────┘          └────────────────┘          └────────────────┘
-LangChain, Bedrock,       Claude Code, Cursor,        File-based
-custom orchestrators      Cowork, OpenCode, Pi,       harnesses
-                          Hermes
-```
+![Server-mode architecture: Git and local sources flow into the Podium server, which serves language SDKs, the MCP server, and podium sync over an OAuth-attested HTTP API.](../assets/diagrams/architecture-server-mode.svg)
+
+<!--
+ASCII fallback for the diagram above (server-mode architecture):
+
+  sources:
+    Git repo            Git repo                 Local path
+    team-shared @ main  company-glossary @ v3    /opt/podium/personal
+         |                  |                       |
+         +------------------+-----------------------+
+                                  |
+                                  v
+                  +-----------------------------------+
+                  | podium server                     |
+                  |   HTTP / JSON API                 |   OAuth identity
+                  |   stateless front-end + Postgres  | --- on every call
+                  |                                   |
+                  |   [Postgres + pgvector]           |
+                  |   [Layer composition]             |
+                  |   [Visibility filter]             |
+                  |   [Dependency graph]              |
+                  |   [Audit + hash chain]            |
+                  |   [Hybrid retrieval]              |
+                  +-----------------+-----------------+
+                                    |
+            +-----------------------+-----------------------+
+            v                       v                       v
+       +-----------+           +-----------+           +-------------+
+       | Language  |           | MCP       |           | podium sync |
+       | SDKs      |           | server    |           | CLI library |
+       | py / ts   |           | in-proc   |           |             |
+       +-----------+           +-----------+           +-------------+
+            |                       |                       |
+            v                       v                       v
+       targets:
+       LangChain, Bedrock,    Claude Code, Cursor,    Filesystem
+       programmatic runtimes  Codex, Cowork, Pi, ..   harnesses
+                                                      (.claude/, .cursor/, ..)
+-->
 
 Filesystem mode is for solo work, prototypes, and CI. The catalog is
-a folder; `podium sync` reads it directly:
+a folder; `podium sync` reads it directly. The diagram below shows
+the two modes side by side:
 
-```
-   ~/podium-artifacts/                            ┌─────────────┐
-   ├── .registry-config                        ──→│ podium sync │──→ harness directory
-   ├── personal/                                  └─────────────┘    (.claude/, .cursor/, ...)
-   │   └── greet/{SKILL.md,ARTIFACT.md}                  ▲
-   └── team-shared/                                      │
-       └── ...                                           │
-                              No daemon, no authentication.
-                              The catalog is the directory.
-```
+![Filesystem mode versus server mode: filesystem mode has podium sync reading a directory directly; server mode places the registry behind an HTTP API with Postgres and object storage.](../assets/diagrams/modes-filesystem-vs-server.svg)
+
+<!--
+ASCII fallback for the diagram above (filesystem vs server mode):
+
+  Filesystem mode                       |  Server mode
+                                        |
+  catalog:                              |   Git repo            Local path
+    ~/podium-artifacts/                 |   team-shared @ main  /opt/podium/personal
+      personal/hello/greet/ARTIFACT.md  |        |                   |
+      finance/run-variance/ARTIFACT.md  |        +---------+---------+
+              |                         |                  |
+              v                         |                  v
+       +----------------+               |     +-------------------------+
+       | podium sync    |               |     | podium server           |
+       | reads directly |               |     |   HTTP / JSON API       |
+       +-------+--------+               |     |   Postgres + pgvector   |
+               |                        |     |   Layer composition     |
+               v                        |     |   Visibility filter     |
+  workspace:                            |     |   Audit + dependency    |
+    project/.claude/agents/greet.md     |     +------------+------------+
+    .cursor/rules/, AGENTS.md, etc.     |             +----+----+
+                                        |             v    v    v
+                                        |          SDKs  MCP  podium sync
+                                        |               server
+
+  Fits any team or individual without   |  Required for runtime discovery,
+  access control or progressive         |  access control, or centralized
+  disclosure needs. MCP server and      |  audit. Catalog usually lives in
+  language SDKs require a server;       |  Git; the server ingests tracked
+  not available in this mode.           |  refs.
+-->
 
 The artifacts, the file formats (`ARTIFACT.md`, `SKILL.md`, and
 `DOMAIN.md`), and the harness adapter behavior are identical across
@@ -83,15 +119,15 @@ directly from disk. The MCP server and language SDKs require a server.
 
 For server-source deployments:
 
-| Component | Role | Where it runs |
-|:--|:--|:--|
-| Registry service | HTTP API; layer composition; visibility filtering; manifest indexing; hybrid retrieval; dependency graph; signing; audit | A server (single binary in standalone mode; replicated behind a load balancer in standard mode) |
-| Postgres | Manifest metadata, layer config, admin grants, dependency edges, audit log, embeddings (when `pgvector` is the vector backend) | Alongside the registry (or managed RDS / Cloud SQL / Aurora) |
-| Object storage | Bundled resource bytes, content-addressed | S3 / GCS / MinIO / R2 (filesystem in standalone mode) |
-| Vector backend | Hybrid retrieval | `pgvector` and `sqlite-vec` collocate with the metadata store; managed alternatives include Pinecone, Weaviate Cloud, Qdrant Cloud |
-| MCP server | In-process bridge for MCP-speaking hosts; runs the harness adapter at materialization time | Spawned as a stdio subprocess by the host (Claude Code, Cursor, etc.), one per workspace |
-| `podium sync` | Eager filesystem materialization; one-shot or watcher | Developer machines, CI runners, build pipelines |
-| Language SDKs | Programmatic HTTP clients | Wherever your code runs: LangChain, Bedrock, OpenAI Assistants, custom orchestrators, eval harnesses |
+| Component        | Role                                                                                                                           | Where it runs                                                                                                                      |
+| :--------------- | :----------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------- |
+| Registry service | HTTP API; layer composition; visibility filtering; manifest indexing; hybrid retrieval; dependency graph; signing; audit       | A server (single binary in standalone mode; replicated behind a load balancer in standard mode)                                    |
+| Postgres         | Manifest metadata, layer config, admin grants, dependency edges, audit log, embeddings (when `pgvector` is the vector backend) | Alongside the registry (or managed RDS / Cloud SQL / Aurora)                                                                       |
+| Object storage   | Bundled resource bytes, content-addressed                                                                                      | S3 / GCS / MinIO / R2 (filesystem in standalone mode)                                                                              |
+| Vector backend   | Hybrid retrieval                                                                                                               | `pgvector` and `sqlite-vec` collocate with the metadata store; managed alternatives include Pinecone, Weaviate Cloud, Qdrant Cloud |
+| MCP server       | In-process bridge for MCP-speaking hosts; runs the harness adapter at materialization time                                     | Spawned as a stdio subprocess by the host (Claude Code, Cursor, etc.), one per workspace                                           |
+| `podium sync`    | Eager filesystem materialization; one-shot or watcher                                                                          | Developer machines, CI runners, build pipelines                                                                                    |
+| Language SDKs    | Programmatic HTTP clients                                                                                                      | Wherever your code runs: LangChain, Bedrock, OpenAI Assistants, custom orchestrators, eval harnesses                               |
 
 The MCP server, `podium sync`, and the language SDKs share the same
 registry HTTP API. They also share identity providers, the content
@@ -118,9 +154,10 @@ A directory of files, with no daemon and no authentication.
 composition and the harness adapter, and writes to your harness's
 destination.
 
-- **Who it's for.** Individual developers and small teams. Solo
-  workflows keep the directory local; small teams commit it to git
-  and every developer runs `podium sync` against their clone.
+- **Who it's for.** Any team or individual whose catalog does not
+  require access control or progressive disclosure. Solo workflows
+  keep the directory local; teams commit it to Git and every
+  developer runs `podium sync` against their clone.
 - **What you run.** Just the `podium` CLI.
 - **What you get.** Eager materialization. The harness's own
   filesystem discovery does the loading at runtime.
@@ -144,7 +181,7 @@ embedded. Bind to localhost or behind your VPN.
   Most small teams can stay in filesystem mode until runtime discovery
   or centralized audit becomes necessary.
 - **What you run.** `podium serve --standalone --layer-path
-  /path/to/dir` plus the CLI.
+/path/to/dir` plus the CLI.
 - **What you get.** Runtime discovery via the MCP server. A single
   audit log capturing every load. Semantic search.
 - **Migration path.** Point `podium serve --standalone` at the same
@@ -179,18 +216,54 @@ or self-run alongside.
 State lives in the locations below. Each mode uses a different
 combination.
 
-| State | Filesystem | Standalone | Standard |
-|:--|:--|:--|:--|
-| Manifest metadata, layer config, audit | (none; directory is canonical) | SQLite (`~/.podium/standalone/podium.db`) | Postgres |
-| Embeddings | (none) | sqlite-vec collocated in SQLite | pgvector collocated in Postgres (or external: Pinecone, Weaviate Cloud, Qdrant Cloud) |
-| Bundled resource bytes | The directory itself | Filesystem (`~/.podium/standalone/objects/`) | S3-compatible object storage |
-| Workspace local overlay | `<workspace>/.podium/overlay/` (highest precedence in the caller's effective view) |
-| Content cache | `~/.podium/cache/` (content-addressed; shared across workspaces) |
-| Sync state | `<target>/.podium/sync.lock` (per-target) |
+| State                                  | Filesystem                                                                         | Standalone                                   | Standard                                                                              |
+| :------------------------------------- | :--------------------------------------------------------------------------------- | :------------------------------------------- | :------------------------------------------------------------------------------------ |
+| Manifest metadata, layer config, audit | (none; directory is canonical)                                                     | SQLite (`~/.podium/standalone/podium.db`)    | Postgres                                                                              |
+| Embeddings                             | (none)                                                                             | sqlite-vec collocated in SQLite              | pgvector collocated in Postgres (or external: Pinecone, Weaviate Cloud, Qdrant Cloud) |
+| Bundled resource bytes                 | The directory itself                                                               | Filesystem (`~/.podium/standalone/objects/`) | S3-compatible object storage                                                          |
+| Workspace local overlay                | `<workspace>/.podium/overlay/` (highest precedence in the caller's effective view) |
+| Content cache                          | `~/.podium/cache/` (content-addressed; shared across workspaces)                   |
+| Sync state                             | `<target>/.podium/sync.lock` (per-target)                                          |
 
 The workspace overlay, content cache, and sync state are
 client-side; they exist regardless of which deployment mode the
 registry uses.
+
+---
+
+## Materialization
+
+A consumer calls `load_artifact(id, harness=...)`. The pipeline
+fetches bundled bytes from the registry, verifies them against the
+manifest's signature and content hash, runs the configured
+`HarnessAdapter` to translate the canonical layout into the
+harness-native one, applies any `MaterializationHook` plugins, and
+writes atomically to the destination. Errors at any step abort with
+a structured code so the caller can decide whether to retry, fall
+back, or surface a diagnostic.
+
+![Materialization pipeline: load_artifact runs Fetch, Verify, Adapt, Hook, and Write in order; errors abort with a structured code; success writes into the destination tree.](../assets/diagrams/materialization-pipeline.svg)
+
+<!--
+ASCII fallback for the diagram above (materialization pipeline: load_artifact()):
+
+  [1. Fetch]    --> [2. Verify]   --> [3. Adapt]    --> [4. Hook]    --> [5. Write]   --> destination tree
+
+bytes from signature Harness plugins atomic .tmp .claude/, .cursor/, ..
+registry policy Adapter -> rewrite + rename
+
+- presigned + content native per-file
+  URLs hash layout in order
+
+Steps 3 (Adapt) and 4 (Hook) are pluggable; the rest are fixed. Hooks share the
+adapter sandbox: no network calls, no subprocesses, and no writes outside the
+destination. Errors at any step abort with a structured code (see surrounding prose).
+-->
+
+`HarnessAdapter` and `MaterializationHook` are the pluggable steps.
+The remaining steps are fixed. Hooks share the adapter sandbox:
+they cannot make network calls, spawn subprocesses, or write
+outside the destination.
 
 ---
 

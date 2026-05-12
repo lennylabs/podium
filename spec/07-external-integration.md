@@ -289,7 +289,7 @@ scope:
   exclude: ["finance/**/legacy/**"]
   type: [skill, agent]
 harness: claude-code
-target: /Users/joan/.claude/
+target: /Users/alice/.claude/
 last_synced_at: 2026-05-05T14:30:00Z
 last_synced_by: full # full | watch | override
 

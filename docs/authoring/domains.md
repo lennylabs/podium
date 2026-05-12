@@ -178,6 +178,34 @@ Important properties:
 
 `exclude:` removes paths after the include set is computed.
 
+![DOMAIN.md imports: a DOMAIN.md declares imports via glob patterns; at request time, artifacts from elsewhere appear under the importing domain while keeping their canonical IDs.](../assets/diagrams/domain-imports.svg)
+
+<!--
+ASCII fallback for the diagram above (DOMAIN.md imports):
+
+  finance/DOMAIN.md                            source layer: _shared/
+    description: Finance team artifacts.         _shared/payment-helpers/routing-validator/
+    keywords: [ap, ar, treasury]                 _shared/payment-helpers/swift-bic-parser/
+    imports:                                   (canonical IDs stay rooted in _shared/)
+      - _shared/payment-helpers/**
+      - treasury/risk-models@1.x
+
+                              |
+                              v  (resolved at request time)
+
+  effective view of finance/ for the caller:
+    finance/ap/pay-invoice                                native
+    finance/close-reporting/run-variance-analysis         native
+    _shared/payment-helpers/routing-validator             imported, appears under finance/
+    _shared/payment-helpers/swift-bic-parser              imported, appears under finance/
+
+  Imported artifacts can show under multiple domains; their
+  canonical ID is what they keep. Glob patterns expand against
+  the visible layer set; imports the caller cannot see are
+  silently dropped.
+-->
+
+
 ---
 
 ## Unlisted folders

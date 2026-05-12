@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 240" font-family="Helvetica, Arial, sans-serif">
+  <!--
+    Materialization pipeline.
+    Used by docs/getting-started/how-it-works.md.
+
+    Single horizontal flow: five fixed steps followed by the
+    destination tree. Steps 3 (Adapt) and 4 (Hook) are pluggable;
+    the rest are fixed. Errors at any step abort with a structured
+    code; they are described in the surrounding prose rather than
+    drawn here.
+
+    Layout: 30px left margin, six 150px boxes, five 24px arrow gaps.
+    Total: 30 + 6*150 + 5*24 + 30 = 1080.
+  -->
+  <defs>
+    <marker id="b-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M 0 0 L 11 6 L 0 12 z" fill="#1f2933"/>
+    </marker>
+    <style>
+      .b-bg { fill: #ffffff; }
+      .b-step { fill: #fffaf0; stroke: #1f2933; stroke-width: 2.2; }
+      .b-step-pluggable { fill: #ffe9c7; stroke: #1f2933; stroke-width: 2.2; }
+      .b-step-final { fill: #d6e9d2; stroke: #1f2933; stroke-width: 2.4; }
+      .b-destination { fill: #d6e9d2; stroke: #1f2933; stroke-width: 2.2; }
+      .b-step-num { font-size: 30px; fill: #b56b1f; }
+      .b-step-name { font-size: 24px; fill: #1f2933; }
+      .b-step-sub { font-size: 15px; fill: #54616e; }
+      .b-title { font-size: 20px; fill: #1f2933; }
+      .b-title-mono { font-size: 20px; fill: #1f2933; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
+      .b-line { fill: none; stroke: #1f2933; stroke-width: 2.4; stroke-linecap: round; }
+      .b-foot { font-size: 13px; fill: #8a7755; }
+    </style>
+  </defs>
+
+  <rect class="b-bg" width="1080" height="240"/>
+
+  <!-- Title -->
+  <text class="b-title" x="30" y="42">Materialization pipeline:</text>
+  <text class="b-title-mono" x="262" y="42">load_artifact()</text>
+
+  <!-- 1. Fetch -->
+  <rect class="b-step" x="30" y="70" width="150" height="80" rx="8"/>
+  <text class="b-step-num" x="46" y="98">1</text>
+  <text class="b-step-name" x="70" y="98">Fetch</text>
+  <text class="b-step-sub" x="46" y="122">bytes from registry</text>
+  <text class="b-step-sub" x="46" y="140">+ presigned URLs</text>
+
+  <path class="b-line" d="M 180 110 L 200 110" marker-end="url(#b-arrow)"/>
+
+  <!-- 2. Verify -->
+  <rect class="b-step" x="204" y="70" width="150" height="80" rx="8"/>
+  <text class="b-step-num" x="220" y="98">2</text>
+  <text class="b-step-name" x="244" y="98">Verify</text>
+  <text class="b-step-sub" x="220" y="122">signature policy</text>
+  <text class="b-step-sub" x="220" y="140">+ content hash</text>
+
+  <path class="b-line" d="M 354 110 L 374 110" marker-end="url(#b-arrow)"/>
+
+  <!-- 3. Adapt (pluggable) -->
+  <rect class="b-step-pluggable" x="378" y="70" width="150" height="80" rx="8"/>
+  <text class="b-step-num" x="394" y="98">3</text>
+  <text class="b-step-name" x="418" y="98">Adapt</text>
+  <text class="b-step-sub" x="394" y="122">HarnessAdapter</text>
+  <text class="b-step-sub" x="394" y="140">→ native layout</text>
+
+  <path class="b-line" d="M 528 110 L 548 110" marker-end="url(#b-arrow)"/>
+
+  <!-- 4. Hook (pluggable) -->
+  <rect class="b-step-pluggable" x="552" y="70" width="150" height="80" rx="8"/>
+  <text class="b-step-num" x="568" y="98">4</text>
+  <text class="b-step-name" x="592" y="98">Hook</text>
+  <text class="b-step-sub" x="568" y="122">plugins rewrite</text>
+  <text class="b-step-sub" x="568" y="140">per-file in order</text>
+
+  <path class="b-line" d="M 702 110 L 722 110" marker-end="url(#b-arrow)"/>
+
+  <!-- 5. Write -->
+  <rect class="b-step" x="726" y="70" width="150" height="80" rx="8"/>
+  <text class="b-step-num" x="742" y="98">5</text>
+  <text class="b-step-name" x="766" y="98">Write</text>
+  <text class="b-step-sub" x="742" y="122">atomic .tmp</text>
+  <text class="b-step-sub" x="742" y="140">+ rename</text>
+
+  <path class="b-line" d="M 876 110 L 896 110" marker-end="url(#b-arrow)"/>
+
+  <!-- Destination -->
+  <rect class="b-destination" x="900" y="70" width="150" height="80" rx="8"/>
+  <text class="b-step-name" x="916" y="100">destination</text>
+  <text class="b-step-name" x="916" y="126">tree</text>
+  <text class="b-step-sub" x="916" y="144">.claude/, .cursor/, …</text>
+
+  <!-- Footer -->
+  <text class="b-foot" x="30" y="190">Steps shaded yellow are pluggable; the rest are fixed.</text>
+  <text class="b-foot" x="30" y="208">Hooks share the adapter sandbox: no network calls, no subprocesses, and no writes outside the destination.</text>
+  <text class="b-foot" x="30" y="226">Errors at any step abort with a structured code (see the surrounding prose).</text>
+</svg>

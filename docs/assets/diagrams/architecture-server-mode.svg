@@ -1,0 +1,140 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 720" font-family="Helvetica, Arial, sans-serif">
+  <!--
+    Server-mode architecture overview.
+    Used by README.md and docs/getting-started/how-it-works.md.
+
+    Style: hand-drawn (Style B). Page background is white;
+    elements keep the warm Style B palette (cream cards, mustard
+    server card, sage consumer cards, coral identity dash).
+
+    Edit notes:
+    - Each shape is wrapped in a filter group (b-rough / b-rough-2)
+      that adds the wobble. Keep edits inside those groups so the
+      wobble stays consistent.
+    - Source/server/consumer/target swimlanes are 130px apart;
+      adjust the column x-offsets at 100, 380, 660 if a label needs
+      more room.
+  -->
+  <defs>
+    <filter id="b-rough" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" seed="3"/>
+      <feDisplacementMap in="SourceGraphic" scale="0"/>
+    </filter>
+    <filter id="b-rough-2" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.07" numOctaves="2" seed="7"/>
+      <feDisplacementMap in="SourceGraphic" scale="0"/>
+    </filter>
+    <marker id="b-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="9" markerHeight="9" orient="auto">
+      <path d="M 0 0 L 11 6 L 0 12 z" fill="#1f2933"/>
+    </marker>
+    <style>
+      .b-bg { fill: #ffffff; }
+      .b-card { fill: #fffaf0; stroke: #1f2933; stroke-width: 2; }
+      .b-card-primary { fill: #ffe9c7; stroke: #1f2933; stroke-width: 2.5; }
+      .b-card-accent { fill: #d6e9d2; stroke: #1f2933; stroke-width: 2; }
+      .b-title { font-size: 22px; fill: #1f2933; }
+      .b-sub { font-size: 16px; fill: #54616e; }
+      .b-section { font-size: 16px; fill: #b56b1f; letter-spacing: 0.04em; }
+      .b-line { fill: none; stroke: #1f2933; stroke-width: 2.2; stroke-linecap: round; }
+      .b-line-accent { fill: none; stroke: #c84a1d; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 6 5; }
+      .b-pill { fill: #fff7e0; stroke: #1f2933; stroke-width: 1.6; }
+      .b-pill-label { font-size: 15px; fill: #1f2933; }
+      .b-foot { font-size: 13px; fill: #8a7755; }
+    </style>
+  </defs>
+
+  <rect class="b-bg" width="960" height="720"/>
+
+  <!-- Sources -->
+  <text class="b-section" x="80" y="56">sources</text>
+  <g filter="url(#b-rough)">
+    <rect class="b-card" x="80" y="72" width="200" height="58" rx="6"/>
+    <rect class="b-card" x="300" y="72" width="200" height="58" rx="6"/>
+    <rect class="b-card" x="520" y="72" width="200" height="58" rx="6"/>
+  </g>
+  <text class="b-title" x="100" y="102">Git repo</text>
+  <text class="b-sub" x="100" y="122">team-shared @ main</text>
+  <text class="b-title" x="320" y="102">Git repo</text>
+  <text class="b-sub" x="320" y="122">company-glossary @ v3</text>
+  <text class="b-title" x="540" y="102">Local path</text>
+  <text class="b-sub" x="540" y="122">/opt/podium/personal</text>
+
+  <g filter="url(#b-rough-2)">
+    <path class="b-line" d="M 180 130 L 180 174 L 480 174 L 480 200" marker-end="url(#b-arrow)"/>
+    <path class="b-line" d="M 400 130 L 400 174"/>
+    <path class="b-line" d="M 620 130 L 620 174 L 480 174"/>
+  </g>
+
+  <!-- Server card -->
+  <g filter="url(#b-rough)">
+    <rect class="b-card-primary" x="180" y="200" width="600" height="180" rx="8"/>
+  </g>
+  <text class="b-section" x="200" y="228">podium server</text>
+  <text class="b-title" x="200" y="256">HTTP / JSON API</text>
+  <text class="b-sub" x="200" y="278">stateless front-end + Postgres</text>
+
+  <g filter="url(#b-rough-2)">
+    <rect class="b-pill" x="200" y="294" width="170" height="32" rx="14"/>
+    <rect class="b-pill" x="382" y="294" width="170" height="32" rx="14"/>
+    <rect class="b-pill" x="564" y="294" width="186" height="32" rx="14"/>
+    <rect class="b-pill" x="200" y="334" width="170" height="32" rx="14"/>
+    <rect class="b-pill" x="382" y="334" width="170" height="32" rx="14"/>
+    <rect class="b-pill" x="564" y="334" width="186" height="32" rx="14"/>
+  </g>
+  <text class="b-pill-label" x="216" y="315">Postgres + pgvector</text>
+  <text class="b-pill-label" x="398" y="315">Layer composition</text>
+  <text class="b-pill-label" x="580" y="315">Visibility filter</text>
+  <text class="b-pill-label" x="216" y="355">Dependency graph</text>
+  <text class="b-pill-label" x="398" y="355">Audit + hash chain</text>
+  <text class="b-pill-label" x="580" y="355">Hybrid retrieval</text>
+
+  <!-- Identity callout: compact pill anchored to the server's right side.
+       Kept short ("OAuth") so the wobble doesn't push the label past
+       the canvas edge. Caption below explains the cadence. -->
+  <g filter="url(#b-rough)">
+    <rect class="b-card" x="820" y="282" width="100" height="42" rx="21"/>
+  </g>
+  <text class="b-title" x="844" y="309">OAuth</text>
+  <text class="b-sub" x="820" y="346">on every call</text>
+  <path class="b-line-accent" d="M 780 302 L 820 302"/>
+
+  <!-- Server -> consumers: trunk down to the horizontal junction, then three
+       branches. Only the branch ends carry arrowheads. -->
+  <g filter="url(#b-rough-2)">
+    <path class="b-line" d="M 480 380 L 480 422"/>
+    <path class="b-line" d="M 480 422 L 200 422 L 200 458" marker-end="url(#b-arrow)"/>
+    <path class="b-line" d="M 480 422 L 480 458" marker-end="url(#b-arrow)"/>
+    <path class="b-line" d="M 480 422 L 760 422 L 760 458" marker-end="url(#b-arrow)"/>
+  </g>
+
+  <!-- Consumers -->
+  <text class="b-section" x="80" y="448">consumers</text>
+  <g filter="url(#b-rough)">
+    <rect class="b-card-accent" x="100" y="460" width="200" height="68" rx="6"/>
+    <rect class="b-card-accent" x="380" y="460" width="200" height="68" rx="6"/>
+    <rect class="b-card-accent" x="660" y="460" width="200" height="68" rx="6"/>
+  </g>
+  <text class="b-title" x="120" y="490">Language SDKs</text>
+  <text class="b-sub" x="120" y="510">python · typescript</text>
+  <text class="b-title" x="400" y="490">MCP server</text>
+  <text class="b-sub" x="400" y="510">in-process bridge</text>
+  <text class="b-title" x="680" y="490">podium sync</text>
+  <text class="b-sub" x="680" y="510">CLI · library</text>
+
+  <g filter="url(#b-rough-2)">
+    <path class="b-line" d="M 200 528 L 200 560" marker-end="url(#b-arrow)"/>
+    <path class="b-line" d="M 480 528 L 480 560" marker-end="url(#b-arrow)"/>
+    <path class="b-line" d="M 760 528 L 760 560" marker-end="url(#b-arrow)"/>
+  </g>
+
+  <!-- Targets -->
+  <text class="b-section" x="80" y="588">targets</text>
+  <text class="b-title" x="100" y="616">LangChain · Bedrock</text>
+  <text class="b-sub" x="100" y="636">programmatic runtimes</text>
+
+  <text class="b-title" x="380" y="616">Claude Code · Cursor</text>
+  <text class="b-sub" x="380" y="636">Codex · Cowork · Pi…</text>
+
+  <text class="b-title" x="660" y="616">Filesystem harnesses</text>
+  <text class="b-sub" x="660" y="636">writes to .claude/, .cursor/…</text>
+</svg>

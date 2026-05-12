@@ -50,6 +50,45 @@ Parent version is resolved at the child's ingest time and stored as a hard pin i
 
 When the child declares `extends:`, fields merge per the table below. Author-specified fields on the child override or combine with the parent's per the rule.
 
+![Inheritance with extends: a parent manifest in a lower-precedence layer, a child manifest in a higher-precedence layer declaring extends:, and the merged result showing which fields came from each.](../assets/diagrams/extends-inheritance.svg)
+
+<!--
+ASCII fallback for the diagram above (inheritance with extends:):
+
+  Manifest fields:
+
+  parent (lower precedence)         child (higher precedence)         merged manifest
+  finance/ap/pay-invoice@1.2        finance/ap/pay-invoice (overlay)  what the caller sees
+  type: skill                       extends: finance/ap/...@1.2       type: skill           (parent)
+  version: 1.2.0                    version: 1.3.0                    version: 1.3.0        (child)
+  description: Pay an invoice.      description: Pay an invoice (EU). description: ...(EU). (child)
+  tags: [finance, ap]               tags: [eu, vat]                   tags: [finance, ap,   (union)
+  sensitivity: medium               requiresApproval: vat-lookup            eu, vat]
+  requiresApproval: payment-submit                                    sensitivity: medium   (parent)
+                                                                      requiresApproval:     (union)
+                                                                        payment-submit, vat-lookup
+
+  Bundled files (scripts/, references/, assets/, etc.):
+
+  parent files                      child files                       materialized file tree
+  ARTIFACT.md                       SKILL.md         (overrides)      ARTIFACT.md            (from parent)
+  SKILL.md                          scripts/submit.py (overrides)     SKILL.md               (child wins)
+  scripts/validate.py               scripts/vat-lookup.py (new)       scripts/validate.py    (from parent)
+  scripts/submit.py                 assets/eu-template.j2 (new)       scripts/submit.py      (child wins)
+  references/process.md                                               scripts/vat-lookup.py  (child only)
+                                                                      references/process.md  (from parent)
+                                                                      assets/eu-template.j2  (child only)
+
+  Manifest scalars (version, description) take the child's value;
+  set-typed lists (tags, requiresApproval) union; security-relevant
+  fields take the most restrictive value. Files merge by relative
+  path: same-path file in the child overrides the parent; parent-only
+  files inherit; child-only files are added. The child cannot delete
+  a parent file. Hidden parents merge server-side without surfacing
+  the parent ID.
+-->
+
+
 | Field | Merge rule |
 |:--|:--|
 | `description`, `name`, `release_notes` | Scalar; child wins. |
@@ -70,6 +109,20 @@ When the child declares `extends:`, fields merge per the table below. Author-spe
 Extension types register their own merge semantics via `TypeProvider`.
 
 The "most-restrictive" rules apply to security-relevant fields. A parent at `sensitivity: medium` cannot be relaxed to `low` by a child; a parent with `sandbox_profile: read-only-fs` cannot be widened to `unrestricted`.
+
+---
+
+## Bundled-file merge semantics
+
+Bundled files (everything under the artifact root other than the manifest, including `scripts/`, `references/`, `assets/`, schemas, templates, and any other content) merge by relative path:
+
+- A file at the same relative path in both parent and child resolves to the child's content. This applies to `SKILL.md` as well as bundled scripts and resources.
+- A file only in the parent is inherited unchanged.
+- A file only in the child is added.
+
+The child cannot delete a parent file. To remove a file the parent contributes, the child must replace it with an empty file or shadow it at the same path with intentional content. The materialized package the caller receives is the merged union.
+
+The content hash recorded for the merged artifact reflects the combined tree, so reproducibility holds across re-materialization as long as both parent and child versions are pinned.
 
 ---
 

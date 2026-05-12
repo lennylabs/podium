@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 640" font-family="Helvetica, Arial, sans-serif">
+  <!--
+    Filesystem vs server mode (side-by-side).
+    Used by README.md and docs/getting-started/how-it-works.md.
+
+    Layout: two panels of equal width (520 each). Vertical divider
+    at x=540. Each panel has its own title, primary card, and a
+    miniature flow underneath.
+  -->
+  <defs>
+    <marker id="b-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="9" markerHeight="9" orient="auto">
+      <path d="M 0 0 L 11 6 L 0 12 z" fill="#1f2933"/>
+    </marker>
+    <style>
+      .b-bg { fill: #ffffff; }
+      .b-card { fill: #fffaf0; stroke: #1f2933; stroke-width: 2; }
+      .b-card-primary { fill: #ffe9c7; stroke: #1f2933; stroke-width: 2.5; }
+      .b-card-accent { fill: #d6e9d2; stroke: #1f2933; stroke-width: 2; }
+      .b-title { font-size: 22px; fill: #1f2933; }
+      .b-sub { font-size: 16px; fill: #54616e; }
+      .b-section { font-size: 16px; fill: #b56b1f; letter-spacing: 0.04em; }
+      .b-mode-title { font-size: 28px; fill: #1f2933; }
+      .b-line { fill: none; stroke: #1f2933; stroke-width: 2.2; stroke-linecap: round; }
+      .b-divider { fill: none; stroke: #d3c8b0; stroke-width: 1.5; stroke-dasharray: 4 6; }
+      .b-pill { fill: #fff7e0; stroke: #1f2933; stroke-width: 1.6; }
+      .b-pill-label { font-size: 15px; fill: #1f2933; }
+      .b-foot { font-size: 14px; fill: #8a7755; }
+    </style>
+  </defs>
+
+  <rect class="b-bg" width="1080" height="640"/>
+
+  <!-- Divider -->
+  <line class="b-divider" x1="540" y1="60" x2="540" y2="600"/>
+
+  <!-- ===================== Left panel: Filesystem mode ===================== -->
+  <text class="b-section" x="60" y="60">mode 1</text>
+  <text class="b-mode-title" x="60" y="94">Filesystem catalog</text>
+  <text class="b-sub" x="60" y="118">no server · no auth · zero infrastructure</text>
+
+  <!-- Catalog folder card -->
+  <rect class="b-card" x="60" y="148" width="420" height="110" rx="6"/>
+  <text class="b-section" x="80" y="174">catalog</text>
+  <text class="b-title" x="80" y="200">~/podium-artifacts/</text>
+  <text class="b-sub" x="80" y="222">personal/hello/greet/ARTIFACT.md</text>
+  <text class="b-sub" x="80" y="240">finance/run-variance/ARTIFACT.md</text>
+
+  <path class="b-line" d="M 270 262 L 270 302" marker-end="url(#b-arrow)"/>
+
+  <!-- podium sync -->
+  <rect class="b-card-primary" x="170" y="308" width="200" height="60" rx="6"/>
+  <text class="b-title" x="190" y="338">podium sync</text>
+  <text class="b-sub" x="190" y="358">reads the folder</text>
+
+  <path class="b-line" d="M 270 372 L 270 412" marker-end="url(#b-arrow)"/>
+
+  <!-- Workspace -->
+  <rect class="b-card-accent" x="60" y="418" width="420" height="110" rx="6"/>
+  <text class="b-section" x="80" y="444">workspace</text>
+  <text class="b-title" x="80" y="470">project/.claude/agents/greet.md</text>
+  <text class="b-sub" x="80" y="492">written atomically by the harness adapter</text>
+  <text class="b-sub" x="80" y="510">.cursor/rules/, AGENTS.md, etc.</text>
+
+  <text class="b-foot" x="60" y="566">Fits anyone without access control or progressive disclosure needs.</text>
+  <text class="b-foot" x="60" y="588">MCP server and language SDKs are unavailable in this mode.</text>
+
+  <!-- ===================== Right panel: Server mode ===================== -->
+  <text class="b-section" x="600" y="60">mode 2</text>
+  <text class="b-mode-title" x="600" y="94">Registry server</text>
+  <text class="b-sub" x="600" y="118">runtime discovery · identity-aware · audited</text>
+
+  <!-- Sources row -->
+  <rect class="b-card" x="600" y="148" width="200" height="46" rx="6"/>
+  <rect class="b-card" x="820" y="148" width="200" height="46" rx="6"/>
+  <text class="b-title" x="616" y="172">Git repo</text>
+  <text class="b-sub" x="616" y="188">team-shared @ main</text>
+  <text class="b-title" x="836" y="172">Local path</text>
+  <text class="b-sub" x="836" y="188">/opt/podium/personal</text>
+
+  <path class="b-line" d="M 700 198 L 700 224 L 810 224 L 810 244" marker-end="url(#b-arrow)"/>
+  <path class="b-line" d="M 920 198 L 920 224 L 810 224"/>
+
+  <!-- Server card -->
+  <rect class="b-card-primary" x="600" y="250" width="420" height="138" rx="8"/>
+  <text class="b-section" x="620" y="276">podium server</text>
+  <text class="b-title" x="620" y="302">HTTP / JSON API</text>
+
+  <rect class="b-pill" x="620" y="316" width="180" height="28" rx="14"/>
+  <rect class="b-pill" x="812" y="316" width="190" height="28" rx="14"/>
+  <rect class="b-pill" x="620" y="352" width="180" height="28" rx="14"/>
+  <rect class="b-pill" x="812" y="352" width="190" height="28" rx="14"/>
+  <text class="b-pill-label" x="636" y="335">Postgres + pgvector</text>
+  <text class="b-pill-label" x="828" y="335">Layer composition</text>
+  <text class="b-pill-label" x="636" y="371">Visibility filter</text>
+  <text class="b-pill-label" x="828" y="371">Audit + dependency</text>
+
+  <!-- Server -> consumers: trunk down to the junction, then three branches. -->
+  <path class="b-line" d="M 810 392 L 810 422"/>
+  <path class="b-line" d="M 810 422 L 660 422 L 660 452" marker-end="url(#b-arrow)"/>
+  <path class="b-line" d="M 810 422 L 810 452" marker-end="url(#b-arrow)"/>
+  <path class="b-line" d="M 810 422 L 960 422 L 960 452" marker-end="url(#b-arrow)"/>
+
+  <!-- Consumers row -->
+  <rect class="b-card-accent" x="600" y="458" width="140" height="64" rx="6"/>
+  <rect class="b-card-accent" x="750" y="458" width="140" height="64" rx="6"/>
+  <rect class="b-card-accent" x="900" y="458" width="140" height="64" rx="6"/>
+  <text class="b-title" x="614" y="486">SDKs</text>
+  <text class="b-sub" x="614" y="506">py · ts</text>
+  <text class="b-title" x="764" y="486">MCP server</text>
+  <text class="b-sub" x="764" y="506">in-process</text>
+  <text class="b-title" x="914" y="486">podium sync</text>
+  <text class="b-sub" x="914" y="506">CLI · library</text>
+
+  <text class="b-foot" x="600" y="566">Required for runtime discovery, access control, or centralized audit.</text>
+  <text class="b-foot" x="600" y="588">Catalog usually lives in Git; the server ingests tracked refs.</text>
+</svg>

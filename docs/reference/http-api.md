@@ -297,7 +297,7 @@ Returns aggregated metadata for the calling identity's effective view, with no m
 
 ```json
 {
-  "layers": ["admin-finance", "joan-personal", "workspace-overlay"],
+  "layers": ["admin-finance", "alice-personal", "workspace-overlay"],
   "artifact_count": 1234,
   "by_type": {
     "skill": 800,

@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 440" font-family="Helvetica, Arial, sans-serif">
+  <!--
+    Single artifact package layout: one directory containing a
+    manifest and optional bundled resources. The bundled folders
+    are conventional names; any structure works under the manifest.
+  -->
+  <defs>
+    <style>
+      .b-bg { fill: #ffffff; }
+      .b-folder-root { fill: #ffe9c7; stroke: #1f2933; stroke-width: 2.4; }
+      .b-file-req { fill: #ffe9c7; stroke: #1f2933; stroke-width: 2; }
+      .b-file-opt { fill: #fffaf0; stroke: #1f2933; stroke-width: 1.8; }
+      .b-folder { fill: #d6e9d2; stroke: #1f2933; stroke-width: 2; }
+      .b-title { font-size: 22px; fill: #1f2933; }
+      .b-mono { font-size: 15px; fill: #1f2933; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
+      .b-mono-root { font-size: 15px; fill: #1f2933; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
+      .b-callout { font-size: 14px; fill: #54616e; }
+      .b-tag-req { font-size: 12px; fill: #b56b1f; letter-spacing: 0.04em; }
+      .b-tag-opt { font-size: 12px; fill: #547a3a; letter-spacing: 0.04em; }
+      .b-sub { font-size: 15px; fill: #54616e; }
+      .b-foot { font-size: 13px; fill: #8a7755; }
+      .b-tree { fill: none; stroke: #8a7755; stroke-width: 1.3; }
+    </style>
+  </defs>
+
+  <rect class="b-bg" width="1080" height="440"/>
+
+  <text class="b-title" x="40" y="42">Artifact package layout</text>
+  <text class="b-sub" x="40" y="64">An artifact is a directory with a manifest plus optional bundled resources.</text>
+
+  <!-- Root folder card -->
+  <rect class="b-folder-root" x="60" y="92" width="500" height="44" rx="6"/>
+  <text class="b-mono-root" x="80" y="120">finance/close-reporting/run-variance-analysis/</text>
+
+  <!-- Tree connector lines from root to children -->
+  <path class="b-tree" d="M 100 136 L 100 372"/>
+
+  <!-- Child entries: each is (tree-tick, box, label, callout) -->
+  <!-- ARTIFACT.md -->
+  <path class="b-tree" d="M 100 158 L 140 158"/>
+  <rect class="b-file-req" x="140" y="148" width="200" height="32" rx="6"/>
+  <text class="b-mono" x="156" y="170">ARTIFACT.md</text>
+  <text class="b-tag-req" x="356" y="170">REQUIRED</text>
+  <text class="b-callout" x="446" y="170">manifest frontmatter and prose body</text>
+
+  <!-- SKILL.md -->
+  <path class="b-tree" d="M 100 200 L 140 200"/>
+  <rect class="b-file-req" x="140" y="190" width="200" height="32" rx="6"/>
+  <text class="b-mono" x="156" y="212">SKILL.md</text>
+  <text class="b-tag-req" x="356" y="212">REQUIRED FOR SKILLS</text>
+  <text class="b-callout" x="556" y="212">agentskills.io-compatible body</text>
+
+  <!-- scripts/ -->
+  <path class="b-tree" d="M 100 242 L 140 242"/>
+  <rect class="b-folder" x="140" y="232" width="200" height="32" rx="6"/>
+  <text class="b-mono" x="156" y="254">scripts/</text>
+  <text class="b-tag-opt" x="356" y="254">OPTIONAL</text>
+  <text class="b-callout" x="446" y="254">code resources, any language</text>
+
+  <!-- references/ -->
+  <path class="b-tree" d="M 100 284 L 140 284"/>
+  <rect class="b-folder" x="140" y="274" width="200" height="32" rx="6"/>
+  <text class="b-mono" x="156" y="296">references/</text>
+  <text class="b-tag-opt" x="356" y="296">OPTIONAL</text>
+  <text class="b-callout" x="446" y="296">supporting reference documents</text>
+
+  <!-- assets/ -->
+  <path class="b-tree" d="M 100 326 L 140 326"/>
+  <rect class="b-folder" x="140" y="316" width="200" height="32" rx="6"/>
+  <text class="b-mono" x="156" y="338">assets/</text>
+  <text class="b-tag-opt" x="356" y="338">OPTIONAL</text>
+  <text class="b-callout" x="446" y="338">templates, schemas, fixtures, configs</text>
+
+  <!-- Last tree corner -->
+  <path class="b-tree" d="M 100 372 L 140 372"/>
+  <rect class="b-file-opt" x="140" y="362" width="200" height="32" rx="6"/>
+  <text class="b-mono" x="156" y="384">… any other files</text>
+  <text class="b-tag-opt" x="356" y="384">OPTIONAL</text>
+  <text class="b-callout" x="446" y="384">folder names are conventional</text>
+
+  <text class="b-foot" x="40" y="420">Only the manifest is required. Resources larger than the per-package cap use external_resources: pointing at pre-uploaded object-storage URLs with content hashes.</text>
+</svg>

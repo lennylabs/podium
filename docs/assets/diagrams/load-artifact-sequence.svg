@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 560" font-family="Helvetica, Arial, sans-serif">
+  <!--
+    load_artifact request sequence across four participants:
+    host, MCP server, registry, object storage.
+    Arrows are time-ordered top to bottom. Self-action boxes show
+    work that happens inside a single participant.
+  -->
+  <defs>
+    <marker id="b-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M 0 0 L 11 6 L 0 12 z" fill="#1f2933"/>
+    </marker>
+    <style>
+      .b-bg { fill: #ffffff; }
+      .b-lane-head { fill: #ffe9c7; stroke: #1f2933; stroke-width: 2.2; }
+      .b-self { fill: #fffaf0; stroke: #1f2933; stroke-width: 2; }
+      .b-title { font-size: 22px; fill: #1f2933; }
+      .b-lane-label { font-size: 17px; fill: #1f2933; }
+      .b-lifeline { fill: none; stroke: #b8a079; stroke-width: 1.4; stroke-dasharray: 5 5; }
+      .b-line { fill: none; stroke: #1f2933; stroke-width: 2.2; stroke-linecap: round; }
+      .b-msg { font-size: 14px; fill: #1f2933; }
+      .b-msg-mono { font-size: 14px; fill: #1f2933; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
+      .b-foot { font-size: 13px; fill: #8a7755; }
+    </style>
+  </defs>
+
+  <rect class="b-bg" width="1080" height="560"/>
+
+  <text class="b-title" x="40" y="42">load_artifact request sequence</text>
+
+  <!-- Lane headers -->
+  <rect class="b-lane-head" x="40" y="68" width="180" height="42" rx="6"/>
+  <text class="b-lane-label" x="98" y="95">host</text>
+
+  <rect class="b-lane-head" x="280" y="68" width="180" height="42" rx="6"/>
+  <text class="b-lane-label" x="320" y="95">MCP server</text>
+
+  <rect class="b-lane-head" x="520" y="68" width="180" height="42" rx="6"/>
+  <text class="b-lane-label" x="580" y="95">registry</text>
+
+  <rect class="b-lane-head" x="800" y="68" width="220" height="42" rx="6"/>
+  <text class="b-lane-label" x="855" y="95">object storage</text>
+
+  <!-- Lifelines -->
+  <line class="b-lifeline" x1="130" y1="112" x2="130" y2="520"/>
+  <line class="b-lifeline" x1="370" y1="112" x2="370" y2="520"/>
+  <line class="b-lifeline" x1="610" y1="112" x2="610" y2="520"/>
+  <line class="b-lifeline" x1="910" y1="112" x2="910" y2="520"/>
+
+  <!-- 1. host -> MCP: load_artifact(id) -->
+  <text class="b-msg-mono" x="142" y="138">load_artifact(id)</text>
+  <path class="b-line" d="M 130 146 L 366 146" marker-end="url(#b-arrow)"/>
+
+  <!-- 2. MCP -> registry: POST /artifacts -->
+  <text class="b-msg-mono" x="382" y="178">POST /artifacts (id, identity)</text>
+  <path class="b-line" d="M 370 186 L 606 186" marker-end="url(#b-arrow)"/>
+
+  <!-- 3. Registry self-action -->
+  <rect class="b-self" x="538" y="206" width="144" height="48" rx="6"/>
+  <text class="b-msg" x="556" y="226">visibility +</text>
+  <text class="b-msg" x="556" y="244">layer compose</text>
+
+  <!-- 4. Registry -> MCP -->
+  <text class="b-msg" x="382" y="274">{manifest, presigned URLs}</text>
+  <path class="b-line" d="M 610 282 L 374 282" marker-end="url(#b-arrow)"/>
+
+  <!-- 5. MCP -> object storage -->
+  <text class="b-msg-mono" x="382" y="314">GET &lt;presigned&gt;</text>
+  <path class="b-line" d="M 370 322 L 906 322" marker-end="url(#b-arrow)"/>
+
+  <!-- 6. Object storage -> MCP -->
+  <text class="b-msg" x="382" y="354">resource bytes</text>
+  <path class="b-line" d="M 910 362 L 374 362" marker-end="url(#b-arrow)"/>
+
+  <!-- 7. MCP self-action -->
+  <rect class="b-self" x="298" y="382" width="180" height="48" rx="6"/>
+  <text class="b-msg" x="316" y="402">verify + adapt +</text>
+  <text class="b-msg" x="316" y="420">atomic write to host</text>
+
+  <!-- 8. MCP -> host -->
+  <text class="b-msg" x="142" y="452">{manifest, materialized}</text>
+  <path class="b-line" d="M 370 460 L 134 460" marker-end="url(#b-arrow)"/>
+
+  <text class="b-foot" x="40" y="510">The MCP server holds no per-session state; identity flows through the registry on every call.</text>
+  <text class="b-foot" x="40" y="528">Object storage receives presigned-URL GETs only; the registry never proxies resource bytes.</text>
+</svg>

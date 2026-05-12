@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 520" font-family="Helvetica, Arial, sans-serif">
+  <!--
+    Layer composition and precedence.
+    The left column shows the ordered layer list (bottom = lowest
+    precedence). The right column shows the effective view produced
+    by composing layers for one caller's identity.
+  -->
+  <defs>
+    <marker id="b-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M 0 0 L 11 6 L 0 12 z" fill="#1f2933"/>
+    </marker>
+    <style>
+      .b-bg { fill: #ffffff; }
+      .b-layer-overlay { fill: #d6e9d2; stroke: #1f2933; stroke-width: 2.4; }
+      .b-layer-user { fill: #ffe9c7; stroke: #1f2933; stroke-width: 2.4; }
+      .b-layer-admin { fill: #fffaf0; stroke: #1f2933; stroke-width: 2.2; }
+      .b-effective { fill: #fffaf0; stroke: #1f2933; stroke-width: 2.4; }
+      .b-title { font-size: 22px; fill: #1f2933; }
+      .b-section { font-size: 14px; fill: #b56b1f; letter-spacing: 0.04em; }
+      .b-name { font-size: 18px; fill: #1f2933; }
+      .b-mono { font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; font-size: 14px; fill: #1f2933; }
+      .b-sub { font-size: 14px; fill: #54616e; }
+      .b-line { fill: none; stroke: #1f2933; stroke-width: 2.4; stroke-linecap: round; }
+      .b-foot { font-size: 13px; fill: #8a7755; }
+      .b-annot { font-size: 13px; fill: #54616e; font-style: italic; }
+    </style>
+  </defs>
+
+  <rect class="b-bg" width="1080" height="520"/>
+
+  <text class="b-title" x="40" y="42">Layer composition and precedence</text>
+  <text class="b-sub" x="40" y="64">Each layer contributes artifacts. The registry composes them per caller identity in precedence order.</text>
+
+  <!-- Left column: layer stack -->
+  <text class="b-section" x="80" y="100">layer list (bottom = lowest precedence)</text>
+
+  <!-- Layer 4 (top): workspace overlay -->
+  <rect class="b-layer-overlay" x="80" y="120" width="380" height="60" rx="6"/>
+  <text class="b-name" x="100" y="146">4. workspace-overlay</text>
+  <text class="b-mono" x="100" y="168">.podium/overlay/ · always highest</text>
+
+  <!-- Layer 3: user -->
+  <rect class="b-layer-user" x="80" y="190" width="380" height="60" rx="6"/>
+  <text class="b-name" x="100" y="216">3. alice-personal</text>
+  <text class="b-mono" x="100" y="238">user-defined · visible to alice@ only</text>
+
+  <!-- Layer 2: admin -->
+  <rect class="b-layer-admin" x="80" y="260" width="380" height="60" rx="6"/>
+  <text class="b-name" x="100" y="286">2. team-finance</text>
+  <text class="b-mono" x="100" y="308">admin · groups: [finance]</text>
+
+  <!-- Layer 1: admin (bottom) -->
+  <rect class="b-layer-admin" x="80" y="330" width="380" height="60" rx="6"/>
+  <text class="b-name" x="100" y="356">1. org-defaults</text>
+  <text class="b-mono" x="100" y="378">admin · organization: true</text>
+
+  <!-- Precedence arrow (up the left side) -->
+  <path class="b-line" d="M 56 376 L 56 144" marker-end="url(#b-arrow)"/>
+  <text class="b-annot" x="48" y="260" transform="rotate(-90 48 260)">higher precedence</text>
+
+  <!-- Composition arrow (right) -->
+  <path class="b-line" d="M 480 250 L 596 250" marker-end="url(#b-arrow)"/>
+  <text class="b-annot" x="490" y="240">compose per identity</text>
+
+  <!-- Right column: effective view -->
+  <rect class="b-effective" x="610" y="120" width="430" height="270" rx="10"/>
+  <text class="b-section" x="630" y="146">effective view for alice@acme.com</text>
+
+  <text class="b-name" x="630" y="178">Higher layers override on collision.</text>
+
+  <text class="b-mono" x="630" y="214">overlay  → wins</text>
+  <text class="b-mono" x="630" y="238">alice     → if no overlay match</text>
+  <text class="b-mono" x="630" y="262">finance  → if alice is a member</text>
+  <text class="b-mono" x="630" y="286">org      → fallback for anyone</text>
+
+  <text class="b-sub" x="630" y="324">Layers the caller cannot see are silently</text>
+  <text class="b-sub" x="630" y="344">excluded. Hidden parents merge server-side</text>
+  <text class="b-sub" x="630" y="364">when a child declares extends:.</text>
+
+  <text class="b-foot" x="40" y="450">Collisions are rejected at ingest unless the higher-precedence artifact declares extends: &lt;lower&gt;.</text>
+  <text class="b-foot" x="40" y="470">Field-level merge semantics decide which value wins per frontmatter field.</text>
+  <text class="b-foot" x="40" y="490">Resolution runs on every registry call; the workspace overlay is merged in by the MCP server.</text>
+</svg>

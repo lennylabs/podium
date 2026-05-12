@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 660" font-family="Helvetica, Arial, sans-serif">
+  <!--
+    Registry layout on disk.
+    Directories form the domain hierarchy. Leaves are artifact
+    packages. Type tags annotate each artifact directory. The
+    canonical artifact ID equals the directory path under the
+    registry root.
+
+    Layout: rows at y = 116 + i*26. Indent x-positions per depth:
+      depth 0 = 60, depth 1 = 100, depth 2 = 140, depth 3 = 180,
+      depth 4 = 220. Tree connectors are drawn as faint guide lines
+      so monospace box-drawing characters are not required.
+  -->
+  <defs>
+    <style>
+      .b-bg { fill: #ffffff; }
+      .b-frame { fill: #fffaf0; stroke: #1f2933; stroke-width: 2.2; }
+      .b-title { font-size: 22px; fill: #1f2933; }
+      .b-mono { font-size: 14px; fill: #1f2933; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
+      .b-mono-root { font-size: 16px; fill: #1f2933; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
+      .b-tag-skill { font-size: 12px; fill: #b56b1f; letter-spacing: 0.04em; }
+      .b-tag-context { font-size: 12px; fill: #547a3a; letter-spacing: 0.04em; }
+      .b-tag-command { font-size: 12px; fill: #1f6f8b; letter-spacing: 0.04em; }
+      .b-tag-meta { font-size: 12px; fill: #8a7755; letter-spacing: 0.04em; font-style: italic; }
+      .b-sub { font-size: 14px; fill: #54616e; }
+      .b-foot { font-size: 13px; fill: #8a7755; }
+      .b-guide { fill: none; stroke: #c0b290; stroke-width: 1.1; }
+    </style>
+  </defs>
+
+  <rect class="b-bg" width="1080" height="660"/>
+
+  <text class="b-title" x="40" y="42">Registry layout on disk</text>
+  <text class="b-sub" x="40" y="64">Directories form the domain hierarchy. Leaves are artifact packages.</text>
+
+  <rect class="b-frame" x="40" y="84" width="1000" height="492" rx="10"/>
+
+  <!-- Root -->
+  <text class="b-mono-root" x="60" y="116">registry/</text>
+
+  <!-- Vertical guide lines for each open depth.
+       depth 1 (under registry/): runs from y=120 down to last sibling at y=544 -->
+  <path class="b-guide" d="M 76 120 L 76 552"/>
+  <!-- depth 2 under finance/: from y=204 (finance) to y=386 (close-reporting last child) -->
+  <path class="b-guide" d="M 116 204 L 116 412"/>
+  <!-- depth 3 under finance/ap/: from y=256 (ap row) to y=360 (reconcile-invoice) -->
+  <path class="b-guide" d="M 156 256 L 156 360"/>
+  <!-- depth 4 under finance/ap/pay-invoice/: from y=308 to y=334 -->
+  <path class="b-guide" d="M 196 308 L 196 334"/>
+  <!-- depth 3 under finance/close-reporting/: from y=386 to y=412 -->
+  <path class="b-guide" d="M 156 386 L 156 412"/>
+  <!-- depth 2 under _shared/: from y=438 to y=516 -->
+  <path class="b-guide" d="M 116 438 L 116 516"/>
+  <!-- depth 3 under _shared/payment-helpers/: from y=464 to y=516 -->
+  <path class="b-guide" d="M 156 464 L 156 516"/>
+
+  <!-- Branch ticks (horizontal stubs into each row) -->
+  <!-- depth-1 children of registry/ -->
+  <path class="b-guide" d="M 76 142 L 96 142"/>   <!-- company-glossary -->
+  <path class="b-guide" d="M 76 204 L 96 204"/>   <!-- finance -->
+  <path class="b-guide" d="M 76 438 L 96 438"/>   <!-- _shared -->
+  <path class="b-guide" d="M 76 552 L 96 552"/>   <!-- engineering -->
+
+  <!-- depth-2 children under finance/ -->
+  <path class="b-guide" d="M 116 230 L 136 230"/> <!-- DOMAIN.md -->
+  <path class="b-guide" d="M 116 256 L 136 256"/> <!-- ap/ -->
+  <path class="b-guide" d="M 116 386 L 136 386"/> <!-- close-reporting/ -->
+
+  <!-- depth-3 children under finance/ap/ -->
+  <path class="b-guide" d="M 156 282 L 176 282"/> <!-- DOMAIN.md -->
+  <path class="b-guide" d="M 156 308 L 176 308"/> <!-- pay-invoice/ -->
+  <path class="b-guide" d="M 156 360 L 176 360"/> <!-- reconcile-invoice/ -->
+
+  <!-- depth-4 children under pay-invoice/ -->
+  <path class="b-guide" d="M 196 334 L 216 334"/> <!-- SKILL.md / ARTIFACT.md combined row -->
+
+  <!-- depth-3 children under finance/close-reporting/ -->
+  <path class="b-guide" d="M 156 412 L 176 412"/>
+
+  <!-- depth-1 child of _shared/ (depth 2) -->
+  <path class="b-guide" d="M 116 464 L 136 464"/>
+
+  <!-- depth-3 children of payment-helpers/ -->
+  <path class="b-guide" d="M 156 490 L 176 490"/>
+  <path class="b-guide" d="M 156 516 L 176 516"/>
+
+  <!-- Folder lines: name at the right indent. y values match the branch ticks. -->
+
+  <!-- depth 1 -->
+  <text class="b-mono" x="104" y="146">company-glossary/</text>
+  <text class="b-tag-context" x="540" y="146">type: context</text>
+
+  <!-- depth 2 (under company-glossary) -->
+  <path class="b-guide" d="M 116 168 L 136 168"/>
+  <text class="b-mono" x="144" y="172">ARTIFACT.md</text>
+
+  <text class="b-mono" x="104" y="208">finance/</text>
+
+  <text class="b-mono" x="144" y="234">DOMAIN.md</text>
+
+  <text class="b-mono" x="144" y="260">ap/</text>
+  <text class="b-mono" x="184" y="286">DOMAIN.md</text>
+  <text class="b-mono" x="184" y="312">pay-invoice/</text>
+  <text class="b-tag-skill" x="540" y="312">type: skill</text>
+
+  <!-- pay-invoice children -->
+  <text class="b-mono" x="224" y="338">SKILL.md  ·  ARTIFACT.md</text>
+
+  <text class="b-mono" x="184" y="364">reconcile-invoice/</text>
+  <text class="b-tag-skill" x="540" y="364">type: skill</text>
+
+  <text class="b-mono" x="144" y="390">close-reporting/</text>
+  <text class="b-mono" x="184" y="416">run-variance-analysis/</text>
+  <text class="b-tag-skill" x="540" y="416">type: skill</text>
+
+  <text class="b-mono" x="104" y="442">_shared/</text>
+  <text class="b-mono" x="144" y="468">payment-helpers/</text>
+  <text class="b-tag-meta" x="540" y="468">unlisted: imports and search only</text>
+  <text class="b-mono" x="184" y="494">routing-validator/</text>
+  <text class="b-tag-skill" x="540" y="494">type: skill</text>
+  <text class="b-mono" x="184" y="520">swift-bic-parser/</text>
+  <text class="b-tag-skill" x="540" y="520">type: skill</text>
+
+  <text class="b-mono" x="104" y="556">engineering/platform/code-change-pr/</text>
+  <text class="b-tag-command" x="540" y="556">type: command</text>
+
+  <text class="b-foot" x="40" y="616">The canonical artifact ID is the directory path under the registry root, for example finance/ap/pay-invoice.</text>
+  <text class="b-foot" x="40" y="636">References (extends:, delegates_to:, glob patterns) use this ID, optionally suffixed with @version or @sha256:hash.</text>
+</svg>

@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 500" font-family="Helvetica, Arial, sans-serif">
+  <!--
+    DOMAIN.md imports.
+    A DOMAIN.md can pull artifacts from elsewhere via imports + glob
+    patterns. The imported artifacts retain their canonical IDs but
+    appear under the importing domain at discovery time.
+  -->
+  <defs>
+    <marker id="b-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M 0 0 L 11 6 L 0 12 z" fill="#1f2933"/>
+    </marker>
+    <style>
+      .b-bg { fill: #ffffff; }
+      .b-domain { fill: #fffaf0; stroke: #1f2933; stroke-width: 2.2; }
+      .b-domain-mark { fill: #ffe9c7; stroke: #1f2933; stroke-width: 2.4; }
+      .b-source { fill: #d6e9d2; stroke: #1f2933; stroke-width: 2; }
+      .b-imported { fill: #d6e9d2; stroke: #547a3a; stroke-width: 1.8; stroke-dasharray: 5 4; }
+      .b-config { fill: #fffaf0; stroke: #1f2933; stroke-width: 2; }
+      .b-title { font-size: 22px; fill: #1f2933; }
+      .b-section { font-size: 14px; fill: #b56b1f; letter-spacing: 0.04em; }
+      .b-name { font-size: 16px; fill: #1f2933; }
+      .b-mono { font-size: 13px; fill: #1f2933; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
+      .b-mono-import { font-size: 13px; fill: #547a3a; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
+      .b-sub { font-size: 14px; fill: #54616e; }
+      .b-line { fill: none; stroke: #1f2933; stroke-width: 2.4; stroke-linecap: round; }
+      .b-line-import { fill: none; stroke: #547a3a; stroke-width: 2; stroke-linecap: round; stroke-dasharray: 5 4; }
+      .b-foot { font-size: 13px; fill: #8a7755; }
+      .b-annot { font-size: 13px; fill: #54616e; font-style: italic; }
+    </style>
+  </defs>
+
+  <rect class="b-bg" width="1080" height="500"/>
+
+  <text class="b-title" x="40" y="42">DOMAIN.md imports</text>
+  <text class="b-sub" x="40" y="64">A DOMAIN.md can pull artifacts from elsewhere via glob patterns. Canonical IDs do not change.</text>
+
+  <!-- DOMAIN.md config card (top left) -->
+  <rect class="b-config" x="40" y="100" width="380" height="160" rx="8"/>
+  <text class="b-section" x="60" y="124">finance/DOMAIN.md</text>
+  <text class="b-mono" x="60" y="154">description: Finance team artifacts.</text>
+  <text class="b-mono" x="60" y="174">keywords: [ap, ar, treasury]</text>
+  <text class="b-mono-import" x="60" y="204">imports:</text>
+  <text class="b-mono-import" x="60" y="224">  - _shared/payment-helpers/**</text>
+  <text class="b-mono-import" x="60" y="244">  - treasury/risk-models@1.x</text>
+
+  <!-- Source: _shared (top right) -->
+  <rect class="b-source" x="500" y="100" width="540" height="160" rx="8"/>
+  <text class="b-section" x="520" y="124">source layer: _shared/</text>
+
+  <rect class="b-domain" x="520" y="138" width="500" height="40" rx="6"/>
+  <text class="b-mono" x="540" y="162">_shared/payment-helpers/routing-validator/</text>
+
+  <rect class="b-domain" x="520" y="186" width="500" height="40" rx="6"/>
+  <text class="b-mono" x="540" y="210">_shared/payment-helpers/swift-bic-parser/</text>
+
+  <text class="b-sub" x="520" y="248">canonical IDs stay rooted in _shared/</text>
+
+  <!-- Arrow: config -> resolution -->
+  <path class="b-line" d="M 230 260 L 230 300" marker-end="url(#b-arrow)"/>
+  <text class="b-annot" x="244" y="288">resolved at request time</text>
+
+  <!-- Result: composed view of finance/ -->
+  <rect class="b-domain-mark" x="40" y="316" width="1000" height="124" rx="8"/>
+  <text class="b-section" x="60" y="340">effective view of finance/ for the caller</text>
+
+  <text class="b-mono" x="60" y="370">finance/ap/pay-invoice            </text>
+  <text class="b-sub" x="340" y="370">native</text>
+
+  <text class="b-mono" x="60" y="392">finance/close-reporting/run-variance-analysis            </text>
+  <text class="b-sub" x="420" y="392">native</text>
+
+  <text class="b-mono-import" x="60" y="414">_shared/payment-helpers/routing-validator            </text>
+  <text class="b-sub" x="420" y="414">imported · appears under finance/</text>
+
+  <text class="b-mono-import" x="60" y="436">_shared/payment-helpers/swift-bic-parser            </text>
+  <text class="b-sub" x="420" y="436">imported · appears under finance/</text>
+
+  <text class="b-foot" x="40" y="470">Imported artifacts can show under multiple domains; the canonical ID is what they keep.</text>
+  <text class="b-foot" x="40" y="488">Glob patterns expand against the visible layer set; imports the caller cannot see are silently dropped.</text>
+</svg>

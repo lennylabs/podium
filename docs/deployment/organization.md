@@ -126,7 +126,7 @@ Each cookbook covers: client registration, scopes and audience, group claim mapp
 
 ```bash
 podium admin tenant create acme --display-name "Acme Corp"
-podium admin grant --tenant acme --user joan@acme.com --role admin
+podium admin grant --tenant acme --user alice@acme.com --role admin
 ```
 
 ### 5. Configure the tenant's layer list

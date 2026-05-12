@@ -114,6 +114,27 @@ precedence order. Higher-precedence layers override lower on
 collisions; `extends:` lets a higher artifact inherit and refine
 a lower one without forking.
 
+![Layer composition and precedence: an ordered layer stack on the left (lowest precedence at the bottom) composes into a single effective view for one caller identity on the right.](../assets/diagrams/layer-composition.svg)
+
+<!--
+ASCII fallback for the diagram above (layer composition and precedence):
+
+  layer list (top = highest precedence)        |  effective view for alice@acme.com
+                                               |
+  4. workspace-overlay                         |  Higher layers override on collision.
+     .podium/overlay/ - always highest         |
+  3. alice-personal                             |  overlay   -> wins
+     user-defined - visible to alice@ only      |  alice      -> if no overlay match
+  2. team-finance                              |  finance   -> if alice is a member
+     admin - groups: [finance]                 |  org       -> fallback for anyone
+  1. org-defaults                              |
+     admin - organization: true                |  Layers the caller cannot see are
+                                               |  silently excluded; hidden parents
+                                               |  merge server-side when a child
+                                               |  declares extends:.
+-->
+
+
 ---
 
 ## Visibility
@@ -130,6 +151,41 @@ Each layer declares its visibility independently:
 Multiple fields combine as a union. Visibility is enforced at the
 registry on every call. Git permissions and other source-side
 controls are not consulted at request time.
+
+![Identity and visibility flow: every registry call carries an OAuth token; the registry verifies it, resolves claims, then evaluates each layer against the caller's identity to produce the effective view.](../assets/diagrams/identity-visibility-flow.svg)
+
+<!--
+ASCII fallback for the diagram above (identity and visibility flow):
+
+  caller (Alice + OAuth token)
+       |
+       v
+  podium server:
+    1. Verify token (signature, expiry, audience)
+       |
+       v
+    2. Resolve claims (subject, groups, tenant)
+       |
+       v
+    3. Per-layer match (visible or hidden)
+       |
+       v
+  composed view from visible layers
+
+  Per-layer decision for Alice:
+    layer            visibility rule          alice's claims     in view?
+    org-defaults     organization: true       acme tenant member YES
+    team-finance     groups: [finance]        not in finance     NO
+    alice-personal   users: [alice@acme.com]  subject matches    YES
+    marketing-public public: true             always visible     YES
+
+  Visibility evaluation runs on every registry call. Layers the
+  caller cannot see are silently excluded; hidden parents merge
+  server-side when a visible child declares extends:. Public mode
+  and filesystem-source deployments short-circuit visibility to
+  true for every layer.
+-->
+
 
 Authoring rights are a separate concern. Whoever can merge to a
 layer's tracked Git ref publishes there; whoever can write to a

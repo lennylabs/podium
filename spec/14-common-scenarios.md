@@ -127,7 +127,7 @@ client.login()   # device-code flow before any catalog calls
 
 **Per consumer:** authenticates via OIDC, runs `podium sync` / MCP / SDK as in §14.5–14.8. Effective view composes admin layers (visibility-filtered) + user-defined layers + workspace local overlay.
 
-**Personal user-defined layers:** `podium layer register --id my-experiments --repo git@github.com:joan/podium-experiments.git --ref main`. Capped at 3 per identity by default.
+**Personal user-defined layers:** `podium layer register --id my-experiments --repo git@github.com:alice/podium-experiments.git --ref main`. Capped at 3 per identity by default.
 
 ## 14.10 Standalone registry with a Git-source layer
 

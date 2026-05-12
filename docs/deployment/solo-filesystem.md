@@ -3,12 +3,12 @@ layout: default
 title: Solo / filesystem
 parent: Deployment
 nav_order: 1
-description: The lightest Podium setup. A folder of artifacts, the podium CLI, no daemon. For individual developers, prototypes, and CI build steps.
+description: The lightest Podium setup. A folder of artifacts, the podium CLI, no daemon. Fits any team or individual whose catalog does not require access control or progressive disclosure.
 ---
 
 # Solo / filesystem
 
-The lightest Podium setup. The catalog is a directory tree on disk; `podium sync` reads it directly and writes harness-native files, with no daemon and no authentication. Suitable for solo work, evaluation, prototypes, CI build steps, and small teams that share the catalog via a Git repo.
+The lightest Podium setup. The catalog is a directory tree on disk; `podium sync` reads it directly and writes harness-native files, with no daemon and no authentication. Suitable for any team or individual whose catalog does not require access control or progressive disclosure. Covers solo work, evaluation, prototypes, CI build steps, and team-shared catalogs in a Git repo.
 
 ---
 

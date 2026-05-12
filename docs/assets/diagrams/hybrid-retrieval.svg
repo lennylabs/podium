@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 460" font-family="Helvetica, Arial, sans-serif">
+  <!--
+    Hybrid retrieval inside search_artifacts and search_domains.
+    The query runs in parallel through BM25 and embedding similarity;
+    results merge via reciprocal rank fusion; an optional learn-from-
+    usage rerank produces the final ranking.
+  -->
+  <defs>
+    <marker id="b-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M 0 0 L 11 6 L 0 12 z" fill="#1f2933"/>
+    </marker>
+    <style>
+      .b-bg { fill: #ffffff; }
+      .b-input { fill: #d6e9d2; stroke: #1f2933; stroke-width: 2.4; }
+      .b-retriever { fill: #fffaf0; stroke: #1f2933; stroke-width: 2.2; }
+      .b-fuse { fill: #ffe9c7; stroke: #1f2933; stroke-width: 2.4; }
+      .b-rerank { fill: #fffaf0; stroke: #1f2933; stroke-width: 2.2; stroke-dasharray: 6 5; }
+      .b-output { fill: #d6e9d2; stroke: #1f2933; stroke-width: 2.4; }
+      .b-title { font-size: 22px; fill: #1f2933; }
+      .b-name { font-size: 18px; fill: #1f2933; }
+      .b-section { font-size: 14px; fill: #b56b1f; letter-spacing: 0.04em; }
+      .b-sub { font-size: 14px; fill: #54616e; }
+      .b-mono { font-size: 13px; fill: #1f2933; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
+      .b-line { fill: none; stroke: #1f2933; stroke-width: 2.4; stroke-linecap: round; }
+      .b-annot { font-size: 13px; fill: #54616e; font-style: italic; }
+      .b-foot { font-size: 13px; fill: #8a7755; }
+    </style>
+  </defs>
+
+  <rect class="b-bg" width="1080" height="460"/>
+
+  <text class="b-title" x="40" y="42">Hybrid retrieval</text>
+  <text class="b-sub" x="40" y="64">search_artifacts and search_domains run two retrievers in parallel and fuse the results.</text>
+
+  <!-- Input query -->
+  <rect class="b-input" x="40" y="180" width="160" height="80" rx="8"/>
+  <text class="b-section" x="60" y="206">query</text>
+  <text class="b-name" x="60" y="232">free text</text>
+  <text class="b-sub" x="60" y="252">+ filters</text>
+
+  <!-- Branches: split arrow to two retrievers -->
+  <path class="b-line" d="M 200 220 L 240 220 L 240 130 L 286 130" marker-end="url(#b-arrow)"/>
+  <path class="b-line" d="M 200 220 L 240 220 L 240 310 L 286 310" marker-end="url(#b-arrow)"/>
+
+  <!-- Retriever 1: BM25 -->
+  <rect class="b-retriever" x="290" y="98" width="240" height="80" rx="8"/>
+  <text class="b-name" x="310" y="124">BM25</text>
+  <text class="b-sub" x="310" y="148">lexical scoring over</text>
+  <text class="b-sub" x="310" y="168">manifest text</text>
+
+  <!-- Retriever 2: embeddings -->
+  <rect class="b-retriever" x="290" y="278" width="240" height="80" rx="8"/>
+  <text class="b-name" x="310" y="304">Embedding similarity</text>
+  <text class="b-sub" x="310" y="328">vector cosine over</text>
+  <text class="b-sub" x="310" y="348">manifest projection</text>
+
+  <!-- Arrows into fuse -->
+  <path class="b-line" d="M 530 138 L 570 138 L 570 200 L 596 200" marker-end="url(#b-arrow)"/>
+  <path class="b-line" d="M 530 318 L 570 318 L 570 240 L 596 240" marker-end="url(#b-arrow)"/>
+
+  <!-- Fuse: RRF -->
+  <rect class="b-fuse" x="600" y="180" width="180" height="80" rx="8"/>
+  <text class="b-name" x="620" y="206">RRF fusion</text>
+  <text class="b-sub" x="620" y="228">reciprocal rank</text>
+  <text class="b-sub" x="620" y="248">across the two lists</text>
+
+  <!-- Arrow fuse -> rerank -->
+  <path class="b-line" d="M 780 220 L 826 220" marker-end="url(#b-arrow)"/>
+
+  <!-- Rerank (optional, dashed border) -->
+  <rect class="b-rerank" x="830" y="180" width="180" height="80" rx="8"/>
+  <text class="b-name" x="850" y="206">Rerank</text>
+  <text class="b-sub" x="850" y="228">learn-from-usage</text>
+  <text class="b-sub" x="850" y="248">(when enabled)</text>
+
+  <!-- Output -->
+  <path class="b-line" d="M 905 260 L 905 300" marker-end="url(#b-arrow)"/>
+  <rect class="b-output" x="780" y="310" width="280" height="64" rx="8"/>
+  <text class="b-section" x="800" y="334">ranked results</text>
+  <text class="b-mono" x="800" y="358">(artifact_id, summary, score)</text>
+
+  <text class="b-foot" x="40" y="410">The same retriever runs over manifest text (search_artifacts) or domain metadata (search_domains).</text>
+  <text class="b-foot" x="40" y="428">Visibility filtering applies to the candidate set before retrieval; hidden layers contribute nothing to the ranking.</text>
+  <text class="b-foot" x="40" y="446">Rerank uses (query, loaded artifact) correlations from prior sessions; it is off by default until enough signal accrues.</text>
+</svg>

@@ -30,6 +30,92 @@ The Podium MCP server is a stdio binary the harness spawns alongside its other M
 
 For `podium sync`, the same configuration lives in `<workspace>/.podium/sync.yaml` (or `~/.podium/sync.yaml` for per-developer defaults). See the per-harness sections for examples.
 
+`podium sync` runs in one-shot mode by default and in long-running watch mode when invoked with the watch flag. Watch mode subscribes to change events and re-materializes affected artifacts incrementally. The event source differs between server-source and filesystem-source registries; the downstream pipeline is identical.
+
+**Server-source registry.** The watcher subscribes to a registry change-event stream (SSE over HTTP), filtered to the caller's effective view. The registry emits an event when an artifact in any visible layer is added, updated, or removed, or when a parent of a visible child changes.
+
+![podium sync watch mode against a server-source registry: the watcher subscribes to the registry change-event stream and runs each event through receive, fetch, adapt, and atomic write before awaiting the next event.](../assets/diagrams/sync-watch.svg)
+
+<!--
+ASCII fallback for the diagram above (podium sync watch mode, server-source registry):
+
+  podium server                              podium sync (watching)
+    change events       {artifact_id,         +-------------------+
+    SSE stream over     version, change}      | 1. Receive event  |
+    HTTP, filtered to    --(event)-->         |    debounce by id |
+    caller's view                             +---------+---------+
+                                                        |
+                                                        v
+                                              +-------------------+
+                                              | 2. Fetch manifest |
+                                              |    load_artifact  |
+                                              +---------+---------+
+                                                        |
+                                                        v
+                                              +-------------------+
+                                              | 3. Adapt          |
+                                              |    harness writer |
+                                              +---------+---------+
+                                                        |
+                                                        v
+                                              +-------------------+
+                                              | 4. Atomic write   |
+                                              |    .tmp + rename  |
+                                              +---------+---------+
+                                                        |
+                                                        v
+                                              target tree:
+                                                .claude/agents/, .cursor/rules/, ...
+
+  After step 4 the watcher returns to step 1 (await next event).
+  Event types: artifact_added, artifact_updated, artifact_removed,
+  layer_changed. Removals delete from the target. A change to a
+  parent re-emits events for every dependent child the caller
+  can see.
+-->
+
+**Filesystem-source registry.** The catalog is a directory on disk. The watcher uses OS filesystem notifications (`fsnotify` on Linux and macOS, `ReadDirectoryChangesW` on Windows) and reads the changed manifests directly. Identity and visibility do not apply because the directory is canonical.
+
+![podium sync watch mode against a filesystem-source registry: the watcher receives OS filesystem notifications, parses the changed manifest from disk, adapts it, and writes atomically to the target tree.](../assets/diagrams/sync-watch-filesystem.svg)
+
+<!--
+ASCII fallback for the diagram above (podium sync watch mode, filesystem-source registry):
+
+  filesystem catalog                         podium sync (watching)
+    ~/podium-artifacts/   {path, op           +-------------------+
+    OS file notifications  (write, create,    | 1. Receive event  |
+    (fsnotify / fsevents   remove)}           |    debounce path  |
+     / ReadDirChanges)    --(event)-->        +---------+---------+
+                                                        |
+                                                        v
+                                              +-------------------+
+                                              | 2. Parse manifest |
+                                              |    read from disk |
+                                              +---------+---------+
+                                                        |
+                                                        v
+                                              +-------------------+
+                                              | 3. Adapt          |
+                                              |    harness writer |
+                                              +---------+---------+
+                                                        |
+                                                        v
+                                              +-------------------+
+                                              | 4. Atomic write   |
+                                              |    .tmp + rename  |
+                                              +---------+---------+
+                                                        |
+                                                        v
+                                              target tree:
+                                                .claude/agents/, .cursor/rules/, ...
+
+  Removals translate directly to target deletions. Renames in the
+  catalog produce a remove and create event pair. Identity and
+  visibility are not evaluated: filesystem-source registries have
+  no caller identity.
+-->
+
+
 ---
 
 ## Supported harnesses

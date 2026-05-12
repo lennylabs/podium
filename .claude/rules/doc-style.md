@@ -148,6 +148,14 @@ When you have to use one of these verbs, the action and its target should both b
 - Imperative mood for instructions ("Run `podium init`").
 - Declarative mood for facts ("The registry stores manifests in Postgres.").
 
+## Example identifiers
+
+Use placeholder names from the cryptography convention when an example needs a human user. The first user is `alice`, the second is `bob`, then `carol`, `dave`, and so on. This applies to user IDs (`alice@acme.com`), filesystem paths (`/Users/alice/...`), layer identifiers (`alice-personal`), Git repositories (`git@github.com:alice/...`), and any other example that names a specific person.
+
+Do not use the names of real people, including the project author, maintainers, or contributors. Real names create the impression that the example reflects a specific configuration rather than a generic illustration, and they age poorly as team membership changes.
+
+For example tenants and organizations, use `acme` (`acme.com`, `Acme Corp`) unless the example needs to distinguish between multiple tenants, in which case extend with `acme`, `globex`, `initech`.
+
 ## Where these rules apply
 
 - Documentation site (`docs/`).

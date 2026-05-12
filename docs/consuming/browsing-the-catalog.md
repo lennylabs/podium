@@ -21,6 +21,31 @@ The same operations are available to programmatic consumers via the SDK; this pa
 
 Discovery is staged: `load_domain` and the search tools are cheap (descriptors only); `load_artifact` is the expensive operation and the only one that writes to the host filesystem.
 
+![Discovery layers: each staged call returns less material than the one before. Layer 1 (map) lists domains and notable artifacts; layer 2 (search) returns ranked candidates; layer 3 (load) returns one artifact's manifest and materialized resources.](../assets/diagrams/disclosure-layers.svg)
+
+<!--
+ASCII fallback for the diagram above (discovery layers):
+
+  layer 1 — map
+    load_domain · search_domains
+    Returns the catalog map: domains and notable artifacts.
+    No artifact bodies, no resource bytes.
+                  |
+                  v  (host picks a domain)
+  layer 2 — search
+    search_artifacts
+    Returns ranked (id, summary, score) within the chosen scope.
+                  |
+                  v  (host picks an artifact)
+  layer 3 — load
+    load_artifact
+    Returns the manifest inline and materializes resources on the host.
+
+  Visibility filtering bounds what each layer can reveal. The map
+  and search layers are useful only when artifact descriptions and
+  domain metadata are well written.
+-->
+
 ---
 
 ## `load_domain`
@@ -72,6 +97,26 @@ search_artifacts(query="invoice approval", scope="finance/ap", type="skill")
 ```
 
 Hybrid retrieval over artifact frontmatter. All args optional:
+
+![Hybrid retrieval: a query runs through BM25 and embedding similarity in parallel; results merge via reciprocal rank fusion; an optional learn-from-usage rerank produces the final ranking.](../assets/diagrams/hybrid-retrieval.svg)
+
+<!--
+ASCII fallback for the diagram above (hybrid retrieval):
+
+  query (free text + filters)
+       |
+       +---> BM25 (lexical scoring over manifest text)        ---+
+       |                                                          |--> RRF fusion --> Rerank (optional) --> ranked results
+       +---> Embedding similarity (vector cosine over            -+      (reciprocal      (learn-from-       (artifact_id,
+              manifest projection)                                       rank across      usage; off          summary,
+                                                                         the two lists)   by default)         score) tuples
+
+  The same retriever runs over manifest text (search_artifacts)
+  or domain metadata (search_domains). Visibility filtering
+  applies to the candidate set before retrieval; hidden layers
+  contribute nothing to the ranking.
+-->
+
 
 | Arg | Use |
 |:--|:--|

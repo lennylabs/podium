@@ -49,26 +49,33 @@ The consumers read from the registry over HTTP: the Podium MCP server (in-proces
 
 Sequence for `load_artifact` (MCP path):
 
-```
-host         MCP server          registry        object storage
- │ load_artifact │                  │                    │
- │──────────────▶│ POST /artifacts  │                    │
- │               │ (id, identity)   │                    │
- │               │─────────────────▶│                    │
- │               │                  │ visibility + layer │
- │               │                  │ compose + version  │
- │               │ {manifest,       │                    │
- │               │  presigned URLs} │                    │
- │               │◀─────────────────│                    │
- │               │ GET <presigned>                       │
- │               │──────────────────────────────────────▶│
- │               │ resource bytes                        │
- │               │◀──────────────────────────────────────│
- │               │ verify + adapt + atomic write to host │
- │ {manifest,    │                                       │
- │  materialized}│                                       │
- │◀──────────────│                                       │
-```
+![load_artifact request sequence: host calls load_artifact on the MCP server, which posts to the registry; the registry composes the view and returns the manifest with presigned URLs; the MCP server fetches resource bytes from object storage, verifies and adapts them, then returns to the host.](../docs/assets/diagrams/load-artifact-sequence.svg)
+
+<!--
+ASCII fallback for the diagram above (load_artifact request sequence):
+
+  host           MCP server           registry            object storage
+   |  load_artifact(id) |                  |                    |
+   |------------------->|                  |                    |
+   |                    | POST /artifacts  |                    |
+   |                    |  (id, identity)  |                    |
+   |                    |----------------->|                    |
+   |                    |                  | visibility +       |
+   |                    |                  | layer compose      |
+   |                    | {manifest,       |                    |
+   |                    |  presigned URLs} |                    |
+   |                    |<-----------------|                    |
+   |                    | GET <presigned>                       |
+   |                    |-------------------------------------->|
+   |                    | resource bytes                        |
+   |                    |<--------------------------------------|
+   |                    | verify + adapt +                      |
+   |                    | atomic write to host                  |
+   | {manifest,         |                                       |
+   |  materialized}     |                                       |
+   |<-------------------|                                       |
+-->
+
 
 Two deployment scenarios share the same MCP server binary:
 

@@ -34,7 +34,9 @@ effective catalog it serves.
 Podium can run from a filesystem catalog or from a registry server:
 
 - **Filesystem catalog**: file-based artifacts plus the Podium CLI. This
-  mode fits individual use, prototypes, CI, and small shared repositories.
+  mode fits any team or individual whose catalog does not require access
+  control or progressive disclosure: solo work, prototypes, CI, and
+  Git-shared catalogs.
 - **Registry server**: artifacts in one or more Git repositories, plus the
   Podium server, CLI, MCP server, and SDKs. Git stores catalog history and
   review flow; the registry ingests the configured refs and composes the

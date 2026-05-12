@@ -37,19 +37,24 @@ The type determines indexing, loading semantics, governance requirements, and se
 
 **Package layout example (skill).** A skill that ships with a Python script and a Jinja template, following the agentskills.io directory conventions (`scripts/`, `references/`, `assets/`):
 
-```
-finance/close-reporting/run-variance-analysis/
-  SKILL.md
-  ARTIFACT.md
-  scripts/
-    variance.py
-    helpers.py
-  references/
-    variance-explained.md
-  assets/
-    variance-report.md.j2
-    output-schema.json
-```
+![Artifact package layout: a single directory containing ARTIFACT.md (required) and optionally SKILL.md, scripts/, references/, assets/, or other files.](../docs/assets/diagrams/artifact-package.svg)
+
+<!--
+ASCII fallback for the diagram above (artifact package layout):
+
+  finance/close-reporting/run-variance-analysis/
+    ARTIFACT.md            [REQUIRED] manifest frontmatter + prose
+    SKILL.md               [REQUIRED FOR SKILLS] agentskills.io body
+    scripts/               [OPTIONAL] code resources
+      variance.py
+      helpers.py
+    references/            [OPTIONAL] supporting reference documents
+      variance-explained.md
+    assets/                [OPTIONAL] templates, schemas, fixtures
+      variance-report.md.j2
+      output-schema.json
+-->
+
 
 **Package layout example (non-skill).** An agent that ships with input and output schemas:
 
@@ -73,43 +78,46 @@ For resources larger than the per-package cap (model files, datasets), use the `
 
 The registry's authoring layout is a domain hierarchy. Directories are domain paths and the leaves are artifact packages. The **canonical artifact ID** is the directory path under the registry root (e.g., `finance/ap/pay-invoice`). All references (`extends:`, `delegates_to:`, glob patterns) use this ID, optionally suffixed with `@<semver>` or `@sha256:<hash>`.
 
-```
-registry/
-├── company-glossary/                       # type: context — ARTIFACT.md only
-│   └── ARTIFACT.md
-├── finance/
-│   ├── DOMAIN.md
-│   ├── ap/
-│   │   ├── DOMAIN.md
-│   │   ├── pay-invoice/                    # type: skill — SKILL.md + ARTIFACT.md
-│   │   │   ├── SKILL.md
-│   │   │   └── ARTIFACT.md
-│   │   └── reconcile-invoice/              # type: skill — SKILL.md + ARTIFACT.md
-│   │       ├── SKILL.md
-│   │       ├── ARTIFACT.md
-│   │       └── scripts/
-│   │           └── reconcile.py
-│   └── close-reporting/
-│       └── run-variance-analysis/          # type: skill — SKILL.md + ARTIFACT.md
-│           ├── SKILL.md
-│           ├── ARTIFACT.md
-│           ├── scripts/
-│           ├── references/
-│           └── assets/
-├── _shared/
-│   └── payment-helpers/
-│       ├── DOMAIN.md                       # unlisted: true — exists for imports + search only
-│       ├── routing-validator/              # type: skill — SKILL.md + ARTIFACT.md
-│       │   ├── SKILL.md
-│       │   └── ARTIFACT.md
-│       └── swift-bic-parser/               # type: skill — SKILL.md + ARTIFACT.md
-│           ├── SKILL.md
-│           └── ARTIFACT.md
-└── engineering/
-    └── platform/
-        └── code-change-pr/                 # type: command — ARTIFACT.md only
-            └── ARTIFACT.md
-```
+![Registry layout on disk: a directory tree under registry/ where each leaf directory is an artifact package and intermediate directories form the domain hierarchy.](../docs/assets/diagrams/registry-layout.svg)
+
+<!--
+ASCII fallback for the diagram above (registry layout on disk):
+
+  registry/
+    company-glossary/                  [type: context]
+      ARTIFACT.md
+    finance/
+      DOMAIN.md
+      ap/
+        DOMAIN.md
+        pay-invoice/                   [type: skill]
+          SKILL.md
+          ARTIFACT.md
+        reconcile-invoice/             [type: skill]
+          SKILL.md
+          ARTIFACT.md
+          scripts/
+            reconcile.py
+      close-reporting/
+        run-variance-analysis/         [type: skill]
+          SKILL.md
+          ARTIFACT.md
+          scripts/
+          references/
+          assets/
+    _shared/
+      payment-helpers/                 [unlisted: imports + search only]
+        DOMAIN.md
+        routing-validator/             [type: skill]
+          SKILL.md
+          ARTIFACT.md
+        swift-bic-parser/              [type: skill]
+          SKILL.md
+          ARTIFACT.md
+    engineering/platform/code-change-pr/    [type: command]
+      ARTIFACT.md
+-->
+
 
 The hierarchy can nest to arbitrary depth for organization. The discovery output returned by `load_domain` is a separate concern, governed by configurable rules (§4.5.5): a tenant-level `max_depth` (default 3) caps how deep the rendered subtree goes below the requested path, `fold_below_artifacts` collapses sparse subdomains into the parent's leaf set, and `fold_passthrough_chains` collapses single-child intermediate domains. All of these can be overridden per-subtree via `DOMAIN.md`. Authoring depth never changes the canonical artifact ID; that remains the directory path.
 
@@ -654,7 +662,7 @@ layers:
       local:
         path: /var/podium/dev/podium-finance
     visibility:
-      users: [joan@acme.com]
+      users: [alice@acme.com]
 ```
 
 ### Merge semantics for collisions

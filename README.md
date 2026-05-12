@@ -72,7 +72,9 @@ cd podium && go build -o ~/.local/bin/podium ./cmd/podium
 Podium can run from a filesystem catalog or from a registry server:
 
 - **Filesystem catalog**: file-based artifacts plus the Podium CLI. This
-  mode fits individual use, prototypes, CI, and small shared repositories.
+  mode fits any team or individual whose catalog does not require access
+  control or progressive disclosure: solo work, prototypes, CI, and
+  Git-shared catalogs.
 - **Registry server**: artifacts in one or more Git repositories, plus the
   Podium server, CLI, MCP server, and SDKs. Git stores catalog history and
   review flow; the registry ingests the configured refs and composes the
@@ -178,31 +180,46 @@ Podium consists of:
 In server mode, the server holds the catalog; consumers reach it
 over HTTP and identity-aware composition runs server-side:
 
-```
-   Git repos / local paths ──────────┐
-   (one or more layer sources)       │
-                                     ▼
-                       ┌─────────────────────────┐
-                       │ Podium server           │
-                       │  HTTP/JSON API          │
-                       │  Postgres + pgvector    │
-                       │  layer composition      │
-                       │  visibility filtering   │
-                       │  dependency graph       │
-                       └────────────▲────────────┘
-                                    │
-                  OAuth-attested identity (every call)
-                                    │
-       ┌────────────────────────────┼────────────────────────────┐
-       │                            │                            │
-┌──────┴───────┐          ┌─────────┴──────┐          ┌──────────┴─────┐
-│ Language SDKs│          │ MCP server     │          │ podium sync    │
-│ (py, ts)     │          │ (in-process)   │          │ (CLI)          │
-└──────────────┘          └────────────────┘          └────────────────┘
-LangChain, Bedrock,       Claude Code, Cursor,        File-based
-custom orchestrators      Cowork, OpenCode, Pi,       harnesses
-                          Hermes
-```
+![Server-mode architecture: Git and local sources flow into the Podium server, which serves language SDKs, the MCP server, and podium sync over an OAuth-attested HTTP API.](docs/assets/diagrams/architecture-server-mode.svg)
+
+<!--
+ASCII fallback for the diagram above (server-mode architecture):
+
+  sources:
+    Git repo            Git repo                 Local path
+    team-shared @ main  company-glossary @ v3    /opt/podium/personal
+         |                  |                       |
+         +------------------+-----------------------+
+                                  |
+                                  v
+                  +-----------------------------------+
+                  | podium server                     |
+                  |   HTTP / JSON API                 |   OAuth identity
+                  |   stateless front-end + Postgres  | --- on every call
+                  |                                   |
+                  |   [Postgres + pgvector]           |
+                  |   [Layer composition]             |
+                  |   [Visibility filter]             |
+                  |   [Dependency graph]              |
+                  |   [Audit + hash chain]            |
+                  |   [Hybrid retrieval]              |
+                  +-----------------+-----------------+
+                                    |
+            +-----------------------+-----------------------+
+            v                       v                       v
+       +-----------+           +-----------+           +-------------+
+       | Language  |           | MCP       |           | podium sync |
+       | SDKs      |           | server    |           | CLI library |
+       | py / ts   |           | in-proc   |           |             |
+       +-----------+           +-----------+           +-------------+
+            |                       |                       |
+            v                       v                       v
+       targets:
+       LangChain, Bedrock,    Claude Code, Cursor,    Filesystem
+       programmatic runtimes  Codex, Cowork, Pi, ..   harnesses
+                                                      (.claude/, .cursor/, ..)
+-->
+
 
 In filesystem mode, the catalog is a folder. `podium sync` reads
 it directly, with no server, HTTP, or auth, and writes harness-native
