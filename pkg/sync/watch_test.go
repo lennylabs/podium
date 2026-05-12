@@ -82,8 +82,11 @@ func TestWatch_RerunsAfterRegistryEdit(t *testing.T) {
 	// The watcher's debounce + period must exceed the edit settle
 	// time before it reruns; allow a generous deadline so the test
 	// stays stable when the suite runs hundreds of goroutines in
-	// parallel and the ticker channel may be served late.
-	second := waitFor(t, events, 10*time.Second)
+	// parallel and the ticker channel may be served late. Coverage
+	// instrumentation slows every test by ~5×, so the deadline has
+	// to absorb that on top of normal scheduling jitter — anything
+	// under 30s here flaked under `make coverage-budget` in CI.
+	second := waitFor(t, events, 30*time.Second)
 	if second.Err != nil {
 		t.Fatalf("rerun: %v", second.Err)
 	}
