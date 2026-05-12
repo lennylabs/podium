@@ -22,6 +22,26 @@ jobs:
   go:
     name: go
     runs-on: ubuntu-latest
+    # Postgres + pgvector and MinIO run alongside the Go suite so the
+    # coverage upload reflects the live paths in pkg/store, pkg/vector,
+    # and pkg/objectstore. Tests gate on PODIUM_POSTGRES_DSN / PODIUM_S3_*
+    # env vars and skip when those are unset, so the same `go test`
+    # invocation works locally without the services.
+    services:
+      postgres:
+        # pgvector/pgvector:pg16 ships Postgres 16 with the `vector`
+        # extension preinstalled — same image nightly.yml uses.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: podium
+          POSTGRES_DB: podium
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -35,10 +55,44 @@ jobs:
             ~/go/pkg/mod
           key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
 
+      - name: Start MinIO
+        # MinIO needs `server /data` as its CMD, which GitHub Actions'
+        # services block doesn't support — start it via docker run.
+        # Pinned; keep in sync with docker-compose.yml and nightly.yml.
+        run: |
+          docker run -d --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:RELEASE.2024-10-29T16-01-48Z \
+            server /data
+          for i in $(seq 1 30); do
+            if curl -fs http://localhost:9000/minio/health/ready; then
+              echo "MinIO ready"; exit 0
+            fi
+            echo "Waiting for MinIO ($i/30)..."; sleep 2
+          done
+          echo "MinIO did not become ready in time" >&2
+          docker logs minio; exit 1
+
+      - name: Create test bucket
+        run: |
+          curl -sSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc
+          chmod +x /usr/local/bin/mc
+          mc alias set local http://localhost:9000 minioadmin minioadmin
+          mc mb --ignore-existing local/podium
+
       - run: make tools
       - run: make lint
       - run: make speccov-drift
       - name: Test with coverage
+        env:
+          PODIUM_POSTGRES_DSN: postgres://postgres:podium@localhost:5432/podium?sslmode=disable
+          PODIUM_S3_ENDPOINT: localhost:9000
+          PODIUM_S3_BUCKET: podium
+          PODIUM_S3_ACCESS_KEY_ID: minioadmin
+          PODIUM_S3_SECRET_ACCESS_KEY: minioadmin
+          PODIUM_S3_USE_SSL: "false"
         run: |
           go test -count=1 -coverprofile=coverage.out -coverpkg=./... ./...
           echo "--- coverage.out ---"
