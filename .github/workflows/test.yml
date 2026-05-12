@@ -94,31 +94,11 @@ jobs:
           PODIUM_S3_SECRET_ACCESS_KEY: minioadmin
           PODIUM_S3_USE_SSL: "false"
         run: |
-          # Diagnostics: confirm services are reachable before tests
-          # run. If these probes fail, the live-path tests silently
-          # skip via t.Skipf and Codecov coverage drops.
-          echo "::group::Service connectivity probe"
-          pg_isready -h localhost -p 5432 -U postgres || echo "WARN: postgres not ready"
-          curl -fs http://localhost:9000/minio/health/ready && echo "minio ready" || echo "WARN: minio not ready"
-          echo "::endgroup::"
           go test -count=1 -coverprofile=coverage.out -coverpkg=./... ./...
-          echo "::group::Per-package coverage for live-gated paths"
-          go tool cover -func=coverage.out | tail -1
-          go tool cover -func=coverage.out | awk '
-            $1 == "total:" {next}
-            {
-              path=$1; sub(/:[0-9]+:$/, "", path); sub(/\/[^\/]+\.go$/, "", path)
-              match($NF, /[0-9.]+/); pct=substr($NF, RSTART, RLENGTH)+0
-              c[path]++; if (pct>0) h[path]++
-            }
-            END {
-              for (p in c) {
-                if (p ~ /pkg\/(store|vector|objectstore|registry\/server)$/) {
-                  printf "  %-50s %.1f%%\n", p, h[p]*100/c[p]
-                }
-              }
-            }' | sort
-          echo "::endgroup::"
+          echo "--- coverage.out ---"
+          ls -la coverage.out
+          echo "lines: $(wc -l < coverage.out)"
+          head -1 coverage.out
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
