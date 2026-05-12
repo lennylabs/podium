@@ -21,13 +21,15 @@ Full lint coverage, conformance suite participation, broad adapter support:
 - `rule`: passive context loaded by the harness based on its `rule_mode` (`always`, `glob`, `auto`, `explicit`); see §6.7.1 for adapter mapping.
 - `hook`: a lifecycle observer for the agent loop with a declared `hook_event` from the canonical taxonomy (§4.3.5) and a shell `hook_action`.
 
-### Registered extension types
+### Built-in extension types
 
 Schemas and lint rules but no conformance commitment beyond what the type owner specifies:
 
-- `mcp-server`: an MCP server registration (name, endpoint, auth profile, description). Renamed from `tool` to avoid collision with MCP's "tool" callable concept. Ships pre-registered.
+- `mcp-server`: an MCP server registration (name, endpoint, auth profile, description).
 
-The remaining type identifiers in this section are not shipped pre-registered. They are suggested names a deployment registers through the `TypeProvider` SPI (§9) when it has a use for them:
+### Example extension type identifiers
+
+Names a deployment can register through the `TypeProvider` SPI (§9) when it has a use for them. Podium does not ship implementations for these:
 
 - `dataset`, `model`, `eval`, `policy`.
 - `workflow` is reserved for future multi-agent flows.
