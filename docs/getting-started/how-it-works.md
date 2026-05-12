@@ -66,14 +66,13 @@ ASCII fallback for the diagram above (server-mode architecture):
             |                       |                       |
             v                       v                       v
        targets:
-       LangChain, Bedrock,    Claude Code, Cursor,    Filesystem
-       programmatic runtimes  Codex, Cowork, Pi, ..   harnesses
-                                                      (.claude/, .cursor/, ..)
+       LangChain, Claude        Claude Code, OpenCode,   Filesystem harnesses
+       Agent SDK, etc.          etc. (coding harnesses)  (writes to .claude/,
+       (programmatic runtimes)                            .cursor/, etc.)
 -->
 
-Filesystem mode is for solo work, prototypes, and CI. The catalog is
-a folder; `podium sync` reads it directly. The diagram below shows
-the two modes side by side:
+Filesystem mode fits any team or individual whose catalog does not
+require access control or progressive disclosure. It is also a good fit for prototypes and CI. The catalog is a folder; `podium sync` reads it directly. The diagram below shows the two modes side by side:
 
 ![Filesystem mode versus server mode: filesystem mode has podium sync reading a directory directly; server mode places the registry behind an HTTP API with Postgres and object storage.](../assets/diagrams/modes-filesystem-vs-server.svg)
 

@@ -215,9 +215,9 @@ ASCII fallback for the diagram above (server-mode architecture):
             |                       |                       |
             v                       v                       v
        targets:
-       LangChain, Bedrock,    Claude Code, Cursor,    Filesystem
-       programmatic runtimes  Codex, Cowork, Pi, ..   harnesses
-                                                      (.claude/, .cursor/, ..)
+       LangChain, Claude        Claude Code, OpenCode,   Filesystem harnesses
+       Agent SDK, etc.          etc. (coding harnesses)  (writes to .claude/,
+       (programmatic runtimes)                            .cursor/, etc.)
 -->
 
 

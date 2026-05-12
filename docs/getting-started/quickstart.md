@@ -10,7 +10,9 @@ description: Install Podium, write one skill, and see it load in Claude Code. Th
 
 This page shows the filesystem setup. The catalog is a local directory,
 and `podium sync` writes harness-native files into a project. This path
-fits solo work, prototypes, and first evaluation.
+fits any team or individual whose catalog does not require access
+control or progressive disclosure, including solo work, prototypes,
+first evaluation, and Git-shared team catalogs.
 
 {: .note }
 
