@@ -6,7 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-[Unreleased]: https://github.com/lennylabs/podium/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/lennylabs/podium/compare/v0.1.1...HEAD
+
+## [0.1.1] - 2026-05-11
+
+Release-pipeline fixes. The v0.1.0 tag was created but never produced
+published artifacts (PyPI, npm, GHCR) because of a sequence of CI
+configuration failures; v0.1.1 is the first version where the release
+workflow runs end-to-end. The behavior of the code itself is unchanged
+from what v0.1.0 was supposed to ship — see the [0.1.0] section below
+for the feature list.
+
+### Release-pipeline fixes since v0.1.0
+
+- Container builder switched from alpine/musl to debian/glibc;
+  sqlite-vec.c uses BSD type names that musl doesn't provide.
+- Cross-compile matrix now uses CGO_ENABLED=1 with per-target
+  toolchains (gcc on linux/amd64, gcc-aarch64-linux-gnu on
+  linux/arm64, mingw on windows/amd64, native clang on darwin/arm64).
+- Windows binary build moved to a windows-latest runner with a
+  workflow step that fetches sqlite3.h from the SQLite amalgamation.
+- npm package gains `repository` / `homepage` / `bugs` / `keywords`
+  fields so npm provenance verification accepts the publish.
+- Postgres schema gained the `signature` column that the store
+  queries already referenced.
+- MinIO service swapped from the now-vanished bitnami tag to the
+  official `minio/minio` image, with bucket creation via `mc mb` in
+  a workflow step.
+- A flaky scheduler test that raced with `t.TempDir` cleanup now
+  waits for the goroutine to finish on cancel.
+
+[0.1.1]: https://github.com/lennylabs/podium/releases/tag/v0.1.1
 
 ## [0.1.0] - 2026-05-11
 

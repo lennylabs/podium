@@ -1,4 +1,11 @@
-# Multi-stage build: a fat Go builder, a minimal distroless runtime.
+# Multi-stage build: a Go builder on debian (glibc) + a distroless
+# runtime that ships the same glibc.
+#
+# Why debian, not alpine: sqlite-vec.c uses BSD type names like
+# u_int8_t that glibc provides but musl (alpine's libc) does not.
+# A musl builder fails to compile sqlite-vec; a glibc builder
+# handles it cleanly. The runtime image picks distroless/base
+# (glibc) instead of distroless/static (no libc) to match.
 #
 # Build args wire through to internal/buildinfo so `podium-server
 # version` inside the container reports a real version. The release
@@ -13,14 +20,13 @@
 
 ARG GO_VERSION=1.26
 
-FROM golang:${GO_VERSION}-alpine AS build
+FROM golang:${GO_VERSION}-bookworm AS build
 
-# pkg/vector and the standalone-server bootstrap depend on
-# sqlite-vec-go-bindings/cgo and mattn/go-sqlite3, both CGO-only.
-# Install gcc + musl-dev for cgo, plus sqlite-dev for the sqlite3.h
-# header that sqlite-vec.c includes. Then static-link with musl so
-# the resulting binary runs on distroless-static (no libc).
-RUN apk add --no-cache gcc musl-dev sqlite-dev
+# build-essential gives us gcc + the cgo toolchain;
+# libsqlite3-dev provides sqlite3.h for sqlite-vec.c.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential libsqlite3-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
 
@@ -36,21 +42,24 @@ ARG DATE=unknown
 ARG TARGETOS
 ARG TARGETARCH
 
+# CGO_ENABLED=1 for sqlite-vec + mattn/go-sqlite3. Binary dynamic-
+# links against glibc; distroless/base in the runtime stage carries
+# the same glibc.
 RUN --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build \
       -trimpath \
-      -ldflags "-s -w -linkmode external -extldflags '-static' \
+      -ldflags "-s -w \
         -X github.com/lennylabs/podium/internal/buildinfo.Version=${VERSION} \
         -X github.com/lennylabs/podium/internal/buildinfo.Commit=${COMMIT} \
         -X github.com/lennylabs/podium/internal/buildinfo.Date=${DATE}" \
       -o /out/podium-server \
       ./cmd/podium-server
 
-# Runtime: distroless static. No shell, no package manager, no setuid
-# binaries. Runs as a non-root user (uid 65532) baked into the image.
-# The static-linked musl binary above runs here without a libc.
-FROM gcr.io/distroless/static-debian12:nonroot
+# Runtime: distroless base (glibc, no shell, no package manager, no
+# setuid binaries). Runs as a non-root user (uid 65532) baked into
+# the image.
+FROM gcr.io/distroless/base-debian12:nonroot
 
 COPY --from=build /out/podium-server /usr/local/bin/podium-server
 
