@@ -299,6 +299,31 @@ jobs:
             go build -trimpath -ldflags "${LDFLAGS}" -o "${out}" ./cmd/${cmd}
           done
           ls -la dist/
+      - name: Package archive for Homebrew tap / Scoop bucket
+        # Brew + scoop consumers expect a single archive per platform
+        # containing all three binaries with their canonical names
+        # (no platform suffix). Individual binaries continue to ship
+        # alongside; the archive is additive.
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          SUFFIX: ${{ matrix.suffix }}
+        run: |
+          set -eu
+          STAGE="$(mktemp -d)"
+          for cmd in podium podium-server podium-mcp; do
+            cp "dist/${cmd}-${GOOS}-${GOARCH}${SUFFIX}" "${STAGE}/${cmd}${SUFFIX}"
+          done
+          if [ "${GOOS}" = "windows" ]; then
+            (cd "${STAGE}" && zip -q \
+              "${GITHUB_WORKSPACE}/dist/podium-${GOOS}-${GOARCH}.zip" \
+              podium.exe podium-server.exe podium-mcp.exe)
+          else
+            tar -C "${STAGE}" -czf \
+              "dist/podium-${GOOS}-${GOARCH}.tar.gz" \
+              podium podium-server podium-mcp
+          fi
+          ls -la dist/
       - uses: actions/upload-artifact@v4
         with:
           name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
@@ -428,3 +453,83 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/podium-server:latest
           build-args: |
             VERSION=${{ github.ref_name }}
+
+  # Update the Homebrew tap (lennylabs/homebrew-tap) and Scoop bucket
+  # (lennylabs/scoop-bucket) so `brew install podium` / `scoop install
+  # podium` pick up the new version. Runs after the GitHub Release is
+  # published — pulls the per-platform archives the `build` job
+  # packaged, recomputes SHA256s, and commits to the two auxiliary
+  # repos via TAP_BUCKET_TOKEN (a fine-grained PAT with contents:write
+  # on both auxiliary repos).
+  publish-tap-bucket:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Compute archive hashes
+        id: hashes
+        run: |
+          set -eu
+          for f in dist/podium-darwin-arm64.tar.gz \
+                   dist/podium-linux-amd64.tar.gz \
+                   dist/podium-linux-arm64.tar.gz \
+                   dist/podium-windows-amd64.zip; do
+            sha=$(sha256sum "$f" | awk '{print $1}')
+            name=$(basename "$f")
+            echo "${name}=${sha}" >> "$GITHUB_OUTPUT"
+            echo "${name}: ${sha}"
+          done
+      - name: Update Homebrew tap
+        env:
+          GH_TOKEN:     ${{ secrets.TAP_BUCKET_TOKEN }}
+          TAG:          ${{ github.ref_name }}
+          DARWIN_ARM64: ${{ steps.hashes.outputs['podium-darwin-arm64.tar.gz'] }}
+          LINUX_AMD64:  ${{ steps.hashes.outputs['podium-linux-amd64.tar.gz'] }}
+          LINUX_ARM64:  ${{ steps.hashes.outputs['podium-linux-arm64.tar.gz'] }}
+        run: |
+          set -eu
+          V="${TAG#v}"
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/lennylabs/homebrew-tap.git" tap
+          cd tap
+          sed -i "s|version \".*\"|version \"${V}\"|" Formula/podium.rb
+          # Each platform's sha256 line is anchored on a sentinel comment.
+          sed -i "s|sha256 \"[a-f0-9]*\" # darwin-arm64|sha256 \"${DARWIN_ARM64}\" # darwin-arm64|" Formula/podium.rb
+          sed -i "s|sha256 \"[a-f0-9]*\" # linux-amd64|sha256 \"${LINUX_AMD64}\" # linux-amd64|"   Formula/podium.rb
+          sed -i "s|sha256 \"[a-f0-9]*\" # linux-arm64|sha256 \"${LINUX_ARM64}\" # linux-arm64|"   Formula/podium.rb
+          # Update the version in each download URL.
+          sed -i "s|/releases/download/v[0-9.]*/podium-|/releases/download/v${V}/podium-|g" Formula/podium.rb
+          git config user.name  "podium-release-bot"
+          git config user.email "podium-release-bot@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "Formula already at ${V}; nothing to commit."
+          else
+            git commit -am "podium ${V}"
+            git push
+          fi
+      - name: Update Scoop bucket
+        env:
+          GH_TOKEN:  ${{ secrets.TAP_BUCKET_TOKEN }}
+          TAG:       ${{ github.ref_name }}
+          WIN_AMD64: ${{ steps.hashes.outputs['podium-windows-amd64.zip'] }}
+        run: |
+          set -eu
+          V="${TAG#v}"
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/lennylabs/scoop-bucket.git" bucket
+          cd bucket
+          jq --arg v "${V}" --arg h "${WIN_AMD64}" '
+            .version = $v
+            | .architecture."64bit".url = "https://github.com/lennylabs/podium/releases/download/v\($v)/podium-windows-amd64.zip"
+            | .architecture."64bit".hash = "sha256:" + $h
+          ' bucket/podium.json > bucket/podium.json.new
+          mv bucket/podium.json.new bucket/podium.json
+          git config user.name  "podium-release-bot"
+          git config user.email "podium-release-bot@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "Manifest already at ${V}; nothing to commit."
+          else
+            git commit -am "podium ${V}"
+            git push
+          fi

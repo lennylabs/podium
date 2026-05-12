@@ -13,10 +13,11 @@ Manual steps that supplement the automated workflows. Each item lists what to do
 
 ### Repo secrets to create
 
-| Secret          | Used by                             | Required?                                                                 |
-| :-------------- | :---------------------------------- | :------------------------------------------------------------------------ |
-| `NPM_TOKEN`     | `release.yml` → `publish-ts`        | Yes, before first release                                                 |
-| `CODECOV_TOKEN` | `test.yml` → `go` (coverage upload) | Optional; the Codecov GitHub App handles uploads via OIDC without a token |
+| Secret             | Used by                              | Required?                                                                 |
+| :----------------- | :----------------------------------- | :------------------------------------------------------------------------ |
+| `NPM_TOKEN`        | `release.yml` → `publish-ts`         | Yes, before first release                                                 |
+| `TAP_BUCKET_TOKEN` | `release.yml` → `publish-tap-bucket` | Yes, to publish Homebrew / Scoop updates                                  |
+| `CODECOV_TOKEN`    | `test.yml` → `go` (coverage upload)  | Optional; the Codecov GitHub App handles uploads via OIDC without a token |
 
 ### What's not a secret
 
@@ -30,14 +31,17 @@ Manual steps that supplement the automated workflows. Each item lists what to do
 
 ### GitHub one-time settings (not secrets)
 
-| Setting                        | Where                                        |
-| :----------------------------- | :------------------------------------------- |
-| `pypi` environment             | Settings → Environments → New environment    |
-| Codecov GitHub App             | github.com/apps/codecov → Install on repo    |
-| PyPI Trusted Publisher binding | pypi.org → manage project → publishing       |
-| Branch protection on `main`    | Settings → Branches → required status checks |
-| Tag protection on `v*`         | Settings → Tags → New rule                   |
-| Dependabot security updates    | Settings → Code security and analysis        |
+| Setting                          | Where                                        |
+| :------------------------------- | :------------------------------------------- |
+| `pypi` environment               | Settings → Environments → New environment    |
+| Codecov GitHub App               | github.com/apps/codecov → Install on repo    |
+| PyPI Trusted Publisher binding   | pypi.org → manage project → publishing       |
+| `lennylabs/homebrew-tap` repo    | New public repo seeded from `tmp/homebrew-tap/` |
+| `lennylabs/scoop-bucket` repo    | New public repo seeded from `tmp/scoop-bucket/` |
+| GHCR package visibility (public) | github.com/lennylabs/podium/pkgs/container/podium-server → Package settings |
+| Branch protection on `main`      | Settings → Branches → required status checks |
+| Tag protection on `v*`           | Settings → Tags → New rule                   |
+| Dependabot security updates      | Settings → Code security and analysis        |
 
 Each item below expands on these with the exact steps. Local-dev environment variables for live tests are in [Live integration environment variables](#live-integration-environment-variables).
 
@@ -132,9 +136,43 @@ npm publish --access public            # creates @lennylabs/podium-sdk on npm
 
 **Or let the release workflow do it**. Configure `NPM_TOKEN`, push a tag, and the `publish-ts` job runs the same `npm publish --access public`. The first run reserves the package; subsequent tags publish updates.
 
-### [ ] Confirm GHCR access
+### [ ] Confirm GHCR access and make the package public
 
-The `container` job pushes to `ghcr.io/lennylabs/podium-server`. The `GITHUB_TOKEN` provided to workflows already has `packages: write` per the workflow's `permissions:` block, so no extra credentials are required. The first push creates the package; check it appears at [github.com/orgs/lennylabs/packages](https://github.com/orgs/lennylabs/packages) and make it public if appropriate.
+The `container` job pushes to `ghcr.io/lennylabs/podium-server`. The `GITHUB_TOKEN` provided to workflows already has `packages: write` per the workflow's `permissions:` block, so no extra credentials are required.
+
+After the first successful release the package appears at `https://github.com/lennylabs/podium/pkgs/container/podium-server` — but **GHCR packages start private**. Make it public so users can `docker pull` without authenticating:
+
+1. Visit the package page (link above), or browse from [github.com/orgs/lennylabs/packages](https://github.com/orgs/lennylabs/packages).
+2. Right-side menu → **Package settings**.
+3. Scroll to **Danger Zone** → **Change visibility** → **Public**.
+4. Optionally, link the package to the source repo on the same page (improves discoverability and adds the repo's README to the package page).
+
+This is a one-time action per package; subsequent pushes preserve the visibility.
+
+### [ ] Set up the Homebrew tap and Scoop bucket
+
+The `release.yml` `publish-tap-bucket` job updates `Formula/podium.rb` in `lennylabs/homebrew-tap` and `bucket/podium.json` in `lennylabs/scoop-bucket` on every successful release. Both repos are **org-wide** (one repo, one file per project), so when future Lenny Labs projects ship CLIs, they reuse the same auxiliary repos.
+
+1. **Create `lennylabs/homebrew-tap` on GitHub** (public, MIT-licensed). The `homebrew-` prefix is required by Homebrew; the rest is convention. Users will tap it as `brew tap lennylabs/tap`.
+2. **Create `lennylabs/scoop-bucket` on GitHub** (public, MIT-licensed). Users will add it as `scoop bucket add lennylabs https://github.com/lennylabs/scoop-bucket`.
+3. Seed each repo from the scaffolds under `tmp/`:
+   - `tmp/homebrew-tap/` → initial commit on `lennylabs/homebrew-tap`.
+   - `tmp/scoop-bucket/` → initial commit on `lennylabs/scoop-bucket`.
+4. Add a `LICENSE` file (MIT) and any branch-protection rules you want on the auxiliary repos. Neither is strictly required for the workflow to function.
+
+### [ ] Add the `TAP_BUCKET_TOKEN` repo secret
+
+The `publish-tap-bucket` job needs to push commits to the two auxiliary repos created above. The default `GITHUB_TOKEN` is scoped to `lennylabs/podium` only and can't write across repos.
+
+1. Go to [github.com/settings/personal-access-tokens](https://github.com/settings/personal-access-tokens) → **Generate new token** → **Fine-grained token**.
+2. Owner: `lennylabs` (the org that owns the tap + bucket repos). If `lennylabs` doesn't appear in the dropdown, enable fine-grained PATs at Org Settings → Personal access tokens → Settings.
+3. Repository access: **Only select repositories** → pick `lennylabs/homebrew-tap` and `lennylabs/scoop-bucket`.
+4. Permissions → Repository permissions → **Contents: Read and write**. Leave everything else at "No access".
+5. Pick an expiration (max one year). Set a calendar reminder to rotate.
+6. Generate, copy.
+7. Add to GitHub: `lennylabs/podium` → Settings → Secrets and variables → Actions → New repository secret named `TAP_BUCKET_TOKEN`.
+
+If the token is owned by your personal account but the repos are org-owned, the token won't see them. Keep them on the same side.
 
 ### [ ] Configure branch protection on `main`
 

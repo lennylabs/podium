@@ -6,7 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-[Unreleased]: https://github.com/lennylabs/podium/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/lennylabs/podium/compare/v0.1.2...HEAD
+
+## [0.1.2] - 2026-05-11
+
+Distribution-channel additions. No changes to the CLI surface; the binaries themselves are bit-identical to v0.1.1 (modulo the embedded version string).
+
+### Added
+
+- **Per-platform archives** alongside the individual binaries on each GitHub Release: `podium-<os>-<arch>.tar.gz` (Linux + macOS) and `podium-windows-amd64.zip`, each containing `podium`, `podium-server`, and `podium-mcp` with their canonical un-suffixed names. The individual binaries are still attached; the archives are additive for package-manager consumers.
+- **Homebrew tap and Scoop bucket update job** in `release.yml`. On each tag push, the workflow patches `Formula/podium.rb` in `lennylabs/homebrew-tap` and `bucket/podium.json` in `lennylabs/scoop-bucket` so `brew install podium` / `scoop install podium` track the latest release. Both auxiliary repos are org-wide — one repo per package manager, one file per Lenny Labs project.
+- **`TAP_BUCKET_TOKEN`** repo secret requirement, documented in OPERATIONS.md.
+
+[0.1.2]: https://github.com/lennylabs/podium/releases/tag/v0.1.2
 
 ## [0.1.1] - 2026-05-11
 
