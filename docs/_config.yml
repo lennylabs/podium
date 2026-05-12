@@ -15,11 +15,10 @@ url: ""
 # --------------------------------------------------------------------------
 remote_theme: just-the-docs/just-the-docs
 
-color_scheme: nil               # start with light; toggle available below
-
-color_scheme_toggle:
-  - light
-  - dark
+# Build-time default. The runtime toggle lives in
+# _includes/head_custom.html and _includes/header_custom.html; it
+# calls jtd.setTheme() and persists the choice in localStorage.
+color_scheme: light
 
 # --------------------------------------------------------------------------
 # Search

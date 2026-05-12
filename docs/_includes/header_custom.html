@@ -1,0 +1,60 @@
+{% comment %}
+  Theme toggle button. The early-init script and the button styles
+  are in _includes/head_custom.html. The button reads the current
+  theme from the body class set by jtd.setTheme, flips it, persists
+  the choice in localStorage, and updates the label.
+{% endcomment %}
+
+<button
+  id="podium-theme-toggle"
+  class="theme-toggle"
+  type="button"
+  aria-label="Toggle light and dark theme"
+  onclick="podiumToggleTheme()"
+>
+  <span class="theme-toggle__icon" aria-hidden="true">☾</span>
+  <span class="theme-toggle__label">Dark</span>
+</button>
+
+<script>
+  (function () {
+    function currentTheme() {
+      try {
+        var saved = window.localStorage.getItem("podium-theme");
+        if (saved === "light" || saved === "dark") return saved;
+      } catch (e) {}
+      // Fall back to whatever just-the-docs is rendering with.
+      return document.body.classList.contains("dark") ? "dark" : "light";
+    }
+
+    function paintButton(theme) {
+      var btn = document.getElementById("podium-theme-toggle");
+      if (!btn) return;
+      var icon = btn.querySelector(".theme-toggle__icon");
+      var label = btn.querySelector(".theme-toggle__label");
+      // Label and icon describe the action the click will perform.
+      if (theme === "dark") {
+        if (icon) icon.textContent = "☀";
+        if (label) label.textContent = "Light";
+      } else {
+        if (icon) icon.textContent = "☾";
+        if (label) label.textContent = "Dark";
+      }
+    }
+
+    window.podiumToggleTheme = function () {
+      var next = currentTheme() === "dark" ? "light" : "dark";
+      if (window.jtd && typeof window.jtd.setTheme === "function") {
+        window.jtd.setTheme(next);
+      }
+      try {
+        window.localStorage.setItem("podium-theme", next);
+      } catch (e) {}
+      paintButton(next);
+    };
+
+    document.addEventListener("DOMContentLoaded", function () {
+      paintButton(currentTheme());
+    });
+  })();
+</script>

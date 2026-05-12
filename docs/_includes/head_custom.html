@@ -1,0 +1,84 @@
+{% comment %}
+  Theme toggle plumbing.
+
+  The button HTML lives in _includes/header_custom.html. This file
+  carries two pieces:
+
+  1. An early-init script that reads the persisted preference from
+     localStorage and applies it as soon as just-the-docs's jtd
+     object is available, so a returning visitor lands in their
+     chosen scheme instead of the build-time default (light).
+
+  2. The styles for the toggle button itself, scoped to the
+     .theme-toggle class.
+
+  The toggle calls jtd.setTheme(name) (just-the-docs' runtime API)
+  and persists the choice under the localStorage key
+  "podium-theme". See https://just-the-docs.com/docs/customization/
+  for the API.
+{% endcomment %}
+
+<script>
+  (function () {
+    try {
+      var saved = window.localStorage.getItem("podium-theme");
+      if (saved !== "light" && saved !== "dark") return;
+      // jtd is defined by just-the-docs's own script and is not
+      // available at <head>-parse time. Wait until it loads, then
+      // apply the saved preference.
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.jtd && typeof window.jtd.setTheme === "function") {
+          window.jtd.setTheme(saved);
+        }
+      });
+    } catch (e) {
+      // localStorage can throw in privacy-mode browsers; ignore.
+    }
+  })();
+</script>
+
+<style>
+  .theme-toggle {
+    position: fixed;
+    top: 0.75rem;
+    right: 1rem;
+    z-index: 100;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: 4px;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    background: rgba(255, 255, 255, 0.85);
+    color: inherit;
+    font: inherit;
+    font-size: 0.8rem;
+    line-height: 1.2;
+    cursor: pointer;
+    backdrop-filter: saturate(180%) blur(6px);
+    -webkit-backdrop-filter: saturate(180%) blur(6px);
+  }
+  .theme-toggle:hover {
+    border-color: rgba(0, 0, 0, 0.3);
+  }
+  body.dark .theme-toggle {
+    border-color: rgba(255, 255, 255, 0.18);
+    background: rgba(20, 22, 28, 0.7);
+    color: #e6e6e6;
+  }
+  body.dark .theme-toggle:hover {
+    border-color: rgba(255, 255, 255, 0.35);
+  }
+  .theme-toggle__icon {
+    font-size: 0.95rem;
+    line-height: 1;
+  }
+  @media (max-width: 50rem) {
+    .theme-toggle {
+      top: 0.5rem;
+      right: 0.5rem;
+      font-size: 0.75rem;
+      padding: 0.2rem 0.45rem;
+    }
+  }
+</style>
