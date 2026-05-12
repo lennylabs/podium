@@ -1,8 +1,9 @@
 {% comment %}
   Theme toggle button. The early-init script and the button styles
   are in _includes/head_custom.html. The button reads the current
-  theme from the body class set by jtd.setTheme, flips it, persists
-  the choice in localStorage, and updates the label.
+  theme from the persisted preference (or the rendered body class
+  as a fallback), flips it, persists the choice, updates the body
+  class so CSS can follow, and repaints its own label.
 {% endcomment %}
 
 <button
@@ -23,8 +24,7 @@
         var saved = window.localStorage.getItem("podium-theme");
         if (saved === "light" || saved === "dark") return saved;
       } catch (e) {}
-      // Fall back to whatever just-the-docs is rendering with.
-      return document.body.classList.contains("dark") ? "dark" : "light";
+      return document.body.classList.contains("podium-dark") ? "dark" : "light";
     }
 
     function paintButton(theme) {
@@ -47,6 +47,7 @@
       if (window.jtd && typeof window.jtd.setTheme === "function") {
         window.jtd.setTheme(next);
       }
+      document.body.classList.toggle("podium-dark", next === "dark");
       try {
         window.localStorage.setItem("podium-theme", next);
       } catch (e) {}
