@@ -81,7 +81,7 @@ func adminGrantCmd(args []string) int {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")
 		return 2
 	}
-	body := []byte(`{"user_id":` + jsonString(fs.Arg(0)) + `}`)
+	body := map[string]any{"user_id": fs.Arg(0)}
 	out, status := doJSON(*registry+"/v1/admin/grants", "POST", body)
 	if status >= 400 {
 		fmt.Fprintf(os.Stderr, "grant failed: HTTP %d\n%s\n", status, out)
@@ -155,29 +155,6 @@ func adminShowEffectiveCmd(args []string) int {
 	}
 	fmt.Println(string(out))
 	return 0
-}
-
-// jsonString escapes s as a JSON string literal. Used by callers
-// that hand-build small request bodies without pulling in
-// encoding/json for one field.
-func jsonString(s string) string {
-	out := []byte{'"'}
-	for _, r := range s {
-		switch r {
-		case '"', '\\':
-			out = append(out, '\\', byte(r))
-		case '\n':
-			out = append(out, '\\', 'n')
-		case '\r':
-			out = append(out, '\\', 'r')
-		case '\t':
-			out = append(out, '\\', 't')
-		default:
-			out = append(out, []byte(string(r))...)
-		}
-	}
-	out = append(out, '"')
-	return string(out)
 }
 
 func adminReembedCmd(args []string) int {

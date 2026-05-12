@@ -20,15 +20,18 @@ func captureStdout(t *testing.T, fn func()) string {
 	}
 	orig := os.Stdout
 	os.Stdout = w
-	t.Cleanup(func() { os.Stdout = orig })
-	done := make(chan []byte)
+	done := make(chan []byte, 1)
 	go func() {
 		var buf bytes.Buffer
 		_, _ = io.Copy(&buf, r)
 		done <- buf.Bytes()
 	}()
+	defer func() {
+		os.Stdout = orig
+		_ = r.Close()
+	}()
 	fn()
-	w.Close()
+	_ = w.Close()
 	return string(<-done)
 }
 

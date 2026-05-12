@@ -33,8 +33,11 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("DependentsScopedToTenant", func(t *testing.T) { dependentsScopedToTenant(t, factory(t)) })
 	t.Run("AdminGrants", func(t *testing.T) { adminGrants(t, factory(t)) })
 	t.Run("AdminGrantsAreOrgScoped", func(t *testing.T) { adminGrantsAreOrgScoped(t, factory(t)) })
+	t.Run("RevokeAdmin", func(t *testing.T) { revokeAdmin(t, factory(t)) })
 	t.Run("GetTenantNotFound", func(t *testing.T) { getTenantNotFound(t, factory(t)) })
 	t.Run("GetManifestNotFound", func(t *testing.T) { getManifestNotFound(t, factory(t)) })
+	t.Run("LayerConfigCRUD", func(t *testing.T) { layerConfigCRUD(t, factory(t)) })
+	t.Run("LayerConfigDelete", func(t *testing.T) { layerConfigDelete(t, factory(t)) })
 }
 
 // Spec: §4.7.1 Tenancy — tenant boundaries isolate manifests.
@@ -198,6 +201,75 @@ func adminGrantsAreOrgScoped(t *testing.T, s store.Store) {
 	}
 	if ok {
 		t.Errorf("admin grant leaked across orgs")
+	}
+}
+
+// Spec: §4.7.2 — RevokeAdmin removes a previously-granted admin role.
+func revokeAdmin(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	must(t, s.GrantAdmin(ctx, store.AdminGrant{UserID: "alice", OrgID: "acme"}))
+	must(t, s.RevokeAdmin(ctx, "alice", "acme"))
+	ok, err := s.IsAdmin(ctx, "alice", "acme")
+	if err != nil {
+		t.Fatalf("IsAdmin: %v", err)
+	}
+	if ok {
+		t.Errorf("RevokeAdmin did not remove the grant")
+	}
+}
+
+// Spec: §7.3.1 — PutLayerConfig persists a layer config that
+// GetLayerConfig retrieves and ListLayerConfigs enumerates.
+func layerConfigCRUD(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "t")
+	cfg := store.LayerConfig{
+		TenantID:     "t",
+		ID:           "team-shared",
+		SourceType:   "git",
+		Repo:         "git@example/team.git",
+		Ref:          "main",
+		Order:        1,
+		Organization: true,
+		Groups:       []string{"engineering"},
+	}
+	if err := s.PutLayerConfig(ctx, cfg); err != nil {
+		t.Fatalf("PutLayerConfig: %v", err)
+	}
+	got, err := s.GetLayerConfig(ctx, "t", "team-shared")
+	if err != nil {
+		t.Fatalf("GetLayerConfig: %v", err)
+	}
+	if got.ID != cfg.ID || got.Repo != cfg.Repo {
+		t.Errorf("got %+v", got)
+	}
+	list, err := s.ListLayerConfigs(ctx, "t")
+	if err != nil {
+		t.Fatalf("ListLayerConfigs: %v", err)
+	}
+	if len(list) != 1 || list[0].ID != "team-shared" {
+		t.Errorf("ListLayerConfigs = %+v", list)
+	}
+}
+
+// Spec: §7.3.1 — DeleteLayerConfig removes a layer registration.
+func layerConfigDelete(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "t")
+	cfg := store.LayerConfig{
+		TenantID: "t", ID: "victim", SourceType: "local", LocalPath: "/tmp/x",
+	}
+	if err := s.PutLayerConfig(ctx, cfg); err != nil {
+		t.Fatalf("PutLayerConfig: %v", err)
+	}
+	if err := s.DeleteLayerConfig(ctx, "t", "victim"); err != nil {
+		t.Fatalf("DeleteLayerConfig: %v", err)
+	}
+	if _, err := s.GetLayerConfig(ctx, "t", "victim"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("expected ErrNotFound after delete, got %v", err)
 	}
 }
 
