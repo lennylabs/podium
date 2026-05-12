@@ -21,11 +21,11 @@ effective catalog it serves.
 
 {: .note }
 
-> **Status: pre-release.** The initial v1 implementation is on the
-> `initial-implementation` branch. No tagged release exists yet; build
-> from source via [Contributing](about/contributing#development-setup).
-> See [Implementation status](about/status) for the merge-and-release
-> roadmap.
+> **Status: 0.1.x, early release.** The CLI, server, MCP bridge, and SDKs
+> are published. Install with `brew tap lennylabs/tap && brew install podium`
+> (macOS / Linux) or `scoop bucket add lennylabs https://github.com/lennylabs/scoop-bucket && scoop install podium` (Windows).
+> See [Implementation status](about/status) for what's shipped and what's
+> still on the roadmap to 1.0.
 
 [Quickstart](getting-started/quickstart){: .btn .btn-purple }
 [Concepts](getting-started/concepts){: .btn .btn-outline }

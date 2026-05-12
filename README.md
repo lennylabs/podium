@@ -19,15 +19,51 @@ repositories; the registry ingests those tracked refs and builds the
 effective catalog it serves.
 
 [Documentation](https://lennylabs.github.io/podium) •
+[Install](#install) •
 [Hello world](#hello-world-example) •
 [Contributing](#contributing)
 
-> **Status: pre-release.** The initial v1 implementation lives on the
-> `initial-implementation` branch. No tagged release has been published;
-> install by [building from source](#build-and-test). Open an
-> [issue](https://github.com/lennylabs/podium/issues) or
-> [discussion](https://github.com/lennylabs/podium/discussions) for
-> design feedback or bug reports.
+> **Status: 0.1.x, early release.** The CLI, server, MCP bridge, and SDKs are
+> all published, but the surface and behavior may still shift before 1.0.
+> Open an [issue](https://github.com/lennylabs/podium/issues) or
+> [discussion](https://github.com/lennylabs/podium/discussions) for bug
+> reports, missing use cases, or design feedback.
+
+## Install
+
+The Podium CLI ships three binaries (`podium`, `podium-server`, `podium-mcp`) on every supported platform. Pick whichever channel matches your setup.
+
+**macOS / Linux (Homebrew):**
+
+```bash
+brew tap lennylabs/tap
+brew install podium
+```
+
+**Windows (Scoop):**
+
+```powershell
+scoop bucket add lennylabs https://github.com/lennylabs/scoop-bucket
+scoop install podium
+```
+
+**Direct binary download:** grab `podium-<os>-<arch>` (or the `.tar.gz` / `.zip` bundle that includes all three binaries) from the [latest release](https://github.com/lennylabs/podium/releases/latest).
+
+**Container** (for the registry server): `docker pull ghcr.io/lennylabs/podium-server:latest`.
+
+**SDKs** for programmatic consumers:
+
+```bash
+pip install podium-sdk             # Python; imports as `from podium import ...`
+npm install @lennylabs/podium-sdk  # TypeScript
+```
+
+**From source** (Go 1.26+ required):
+
+```bash
+git clone https://github.com/lennylabs/podium.git
+cd podium && go build -o ~/.local/bin/podium ./cmd/podium
+```
 
 ---
 

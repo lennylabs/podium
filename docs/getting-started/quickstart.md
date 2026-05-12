@@ -14,10 +14,9 @@ fits solo work, prototypes, and first evaluation.
 
 {: .note }
 
-> Podium is pre-release. No tagged binary has been published; build the
-> `podium` CLI from source via the [development setup](../about/contributing#development-setup).
-> See [Implementation status](../about/status) for the merge-and-release
-> roadmap.
+> Podium is at 0.1.x, an early release. Surface and behavior may still
+> shift before 1.0; see [Implementation status](../about/status) for
+> what's shipped and what's still on the roadmap.
 
 ---
 
@@ -34,13 +33,32 @@ fits solo work, prototypes, and first evaluation.
 
 ## 1. Install the CLI
 
-Build the `podium` binary from source until the first tagged release publishes packaged binaries:
+Pick the channel that matches your platform. Each option installs the three Podium binaries (`podium`, `podium-server`, `podium-mcp`) on PATH.
+
+**macOS / Linux (Homebrew):**
+
+```bash
+brew tap lennylabs/tap
+brew install podium
+podium version
+```
+
+**Windows (Scoop):**
+
+```powershell
+scoop bucket add lennylabs https://github.com/lennylabs/scoop-bucket
+scoop install podium
+podium version
+```
+
+**Direct binary download:** grab `podium-<os>-<arch>` (or the `.tar.gz` / `.zip` bundle that includes all three binaries) from the [latest release](https://github.com/lennylabs/podium/releases/latest).
+
+**From source** (Go 1.26+ required):
 
 ```bash
 git clone https://github.com/lennylabs/podium.git
 cd podium
 go build -o ~/.local/bin/podium ./cmd/podium
-podium --version
 ```
 
 The [development setup](../about/contributing#development-setup) has the full prerequisites and the SDK build steps.

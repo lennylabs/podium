@@ -8,9 +8,9 @@ description: What's built today, what's pending release, and where to track prog
 
 # Implementation status
 
-Podium is **pre-release**. The initial implementation covers the full v1 surface and lives on the `initial-implementation` branch. The branch has not been merged to `main` and no tagged release has been published; binaries are not yet distributed through package managers.
+Podium is at **0.1.x**, an early release. The full v1 surface is implemented and published, but surface and behavior may still shift before 1.0 — pin to specific versions in production environments and watch the [changelog](changelog) for breaking changes.
 
-Run Podium today by [building from source](../about/contributing#development-setup). The full Go test suite runs in roughly 10 seconds.
+Install via Homebrew, Scoop, container, or direct binary download — see [Quickstart](../getting-started/quickstart#1-install-the-cli) for the commands.
 
 ---
 
@@ -26,12 +26,25 @@ The initial implementation covers:
 
 ---
 
-## What's pending release
+## What's shipped
 
-- **Merge to `main`.** The `initial-implementation` branch lands on `main` once review settles.
-- **Tagged release and packaging.** No version is tagged. Released binaries (Linux, macOS, Windows) and container images publish at the first tag.
-- **PyPI and npm.** The SDKs install today via `pip install -e .` and `npm install` from a checkout. Public package publishing follows the first tag.
-- **Hosted documentation refresh.** This site rebuilds from `main`; the published pages lag the branch.
+| Artifact | Where |
+|:--|:--|
+| Binaries for Linux amd64/arm64, macOS arm64, Windows amd64 | [GitHub Releases](https://github.com/lennylabs/podium/releases/latest) |
+| Homebrew formula (`brew tap lennylabs/tap && brew install podium`) | [github.com/lennylabs/homebrew-tap](https://github.com/lennylabs/homebrew-tap) |
+| Scoop manifest (`scoop install podium`) | [github.com/lennylabs/scoop-bucket](https://github.com/lennylabs/scoop-bucket) |
+| Container image | `ghcr.io/lennylabs/podium-server` |
+| Python SDK | [`podium-sdk` on PyPI](https://pypi.org/project/podium-sdk/) — imports as `from podium import …` |
+| TypeScript SDK | [`@lennylabs/podium-sdk` on npm](https://www.npmjs.com/package/@lennylabs/podium-sdk) |
+
+## On the roadmap toward 1.0
+
+Behavior between 0.1.x and 1.0 may break. Watch the [changelog](changelog) for specifics. Topics under active discussion:
+
+- Tightening the spec where field semantics are still under-specified.
+- Filling in remaining harness adapters and verifying conformance.
+- SBOM and SLSA attestations on every release.
+- Code signing for macOS and Windows binaries.
 
 ---
 
