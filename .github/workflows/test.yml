@@ -12,6 +12,11 @@ on:
 
 permissions:
   contents: read
+  # codecov-action@v5 uses GitHub Actions OIDC to authenticate with
+  # the Codecov GitHub App. Without id-token: write, the upload
+  # silently falls back to a tokenless rate-limited path and the
+  # badge stays empty.
+  id-token: write
 
 jobs:
   go:
@@ -36,6 +41,10 @@ jobs:
       - name: Test with coverage
         run: |
           go test -count=1 -coverprofile=coverage.out -coverpkg=./... ./...
+          echo "--- coverage.out ---"
+          ls -la coverage.out
+          echo "lines: $(wc -l < coverage.out)"
+          head -1 coverage.out
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
@@ -44,6 +53,15 @@ jobs:
           fail_ci_if_error: false
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      - name: Upload coverage.out as workflow artifact
+        # Available on the workflow run page for ~7 days so you can
+        # download and inspect the raw profile when the Codecov badge
+        # doesn't reflect what you expect.
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-go
+          path: coverage.out
+          retention-days: 7
 
   python:
     name: podium-py
