@@ -315,7 +315,10 @@ jobs:
             cp "dist/${cmd}-${GOOS}-${GOARCH}${SUFFIX}" "${STAGE}/${cmd}${SUFFIX}"
           done
           if [ "${GOOS}" = "windows" ]; then
-            (cd "${STAGE}" && zip -q \
+            # Git Bash on windows-latest doesn't ship `zip`; the runner
+            # image has 7-Zip on PATH instead. Output is redirected so
+            # 7z's banner doesn't pollute the step log.
+            (cd "${STAGE}" && 7z a -tzip -bso0 -bsp0 \
               "${GITHUB_WORKSPACE}/dist/podium-${GOOS}-${GOARCH}.zip" \
               podium.exe podium-server.exe podium-mcp.exe)
           else
