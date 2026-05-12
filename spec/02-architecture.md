@@ -56,24 +56,24 @@ ASCII fallback for the diagram above (load_artifact request sequence):
 
   host           MCP server           registry            object storage
    |  load_artifact(id) |                  |                    |
-   |------------------->|                  |                    |
+   |==================>|                  |                    |
    |                    | POST /artifacts  |                    |
    |                    |  (id, identity)  |                    |
-   |                    |----------------->|                    |
+   |                    |================>|                    |
    |                    |                  | visibility +       |
    |                    |                  | layer compose      |
    |                    | {manifest,       |                    |
    |                    |  presigned URLs} |                    |
-   |                    |<-----------------|                    |
-   |                    | GET <presigned>                       |
-   |                    |-------------------------------------->|
+   |                    |<================|                    |
+   |                    | GET (presigned)                       |
+   |                    |======================================>|
    |                    | resource bytes                        |
-   |                    |<--------------------------------------|
+   |                    |<======================================|
    |                    | verify + adapt +                      |
    |                    | atomic write to host                  |
    | {manifest,         |                                       |
    |  materialized}     |                                       |
-   |<-------------------|                                       |
+   |<==================|                                       |
 -->
 
 

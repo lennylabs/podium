@@ -247,17 +247,15 @@ back, or surface a diagnostic.
 <!--
 ASCII fallback for the diagram above (materialization pipeline: load_artifact()):
 
-  [1. Fetch]    --> [2. Verify]   --> [3. Adapt]    --> [4. Hook]    --> [5. Write]   --> destination tree
+  [1. Fetch]   ==> [2. Verify]   ==> [3. Adapt]    ==> [4. Hook]    ==> [5. Write]   ==> destination tree
+   bytes from       signature         Harness            plugins           atomic .tmp      .claude/, .cursor/, ..
+   registry         policy            Adapter ->         rewrite           + rename
+   + presigned      + content         native             per-file
+   URLs             hash              layout             in order
 
-bytes from signature Harness plugins atomic .tmp .claude/, .cursor/, ..
-registry policy Adapter -> rewrite + rename
-
-- presigned + content native per-file
-  URLs hash layout in order
-
-Steps 3 (Adapt) and 4 (Hook) are pluggable; the rest are fixed. Hooks share the
-adapter sandbox: no network calls, no subprocesses, and no writes outside the
-destination. Errors at any step abort with a structured code (see surrounding prose).
+  Steps 3 (Adapt) and 4 (Hook) are pluggable; the rest are fixed. Hooks share the
+  adapter sandbox: no network calls, no subprocesses, and no writes outside the
+  destination. Errors at any step abort with a structured code (see surrounding prose).
 -->
 
 `HarnessAdapter` and `MaterializationHook` are the pluggable steps.

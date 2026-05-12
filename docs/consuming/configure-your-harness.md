@@ -42,7 +42,7 @@ ASCII fallback for the diagram above (podium sync watch mode, server-source regi
   podium server                              podium sync (watching)
     change events       {artifact_id,         +-------------------+
     SSE stream over     version, change}      | 1. Receive event  |
-    HTTP, filtered to    --(event)-->         |    debounce by id |
+    HTTP, filtered to   ===(event)===>        |    debounce by id |
     caller's view                             +---------+---------+
                                                         |
                                                         v
@@ -85,7 +85,7 @@ ASCII fallback for the diagram above (podium sync watch mode, filesystem-source 
     ~/podium-artifacts/   {path, op           +-------------------+
     OS file notifications  (write, create,    | 1. Receive event  |
     (fsnotify / fsevents   remove)}           |    debounce path  |
-     / ReadDirChanges)    --(event)-->        +---------+---------+
+     / ReadDirChanges)   ===(event)===>       +---------+---------+
                                                         |
                                                         v
                                               +-------------------+

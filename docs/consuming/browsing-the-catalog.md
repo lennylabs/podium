@@ -105,11 +105,11 @@ ASCII fallback for the diagram above (hybrid retrieval):
 
   query (free text + filters)
        |
-       +---> BM25 (lexical scoring over manifest text)        ---+
-       |                                                          |--> RRF fusion --> Rerank (optional) --> ranked results
-       +---> Embedding similarity (vector cosine over            -+      (reciprocal      (learn-from-       (artifact_id,
-              manifest projection)                                       rank across      usage; off          summary,
-                                                                         the two lists)   by default)         score) tuples
+       +===> BM25 (lexical scoring over manifest text)        ===+
+       |                                                         |==> RRF fusion ==> Rerank (optional) ==> ranked results
+       +===> Embedding similarity (vector cosine over            +     (reciprocal       (learn-from-        (artifact_id,
+              manifest projection)                                      rank across       usage; off          summary,
+                                                                        the two lists)    by default)         score) tuples
 
   The same retriever runs over manifest text (search_artifacts)
   or domain metadata (search_domains). Visibility filtering
