@@ -2,7 +2,7 @@
 layout: default
 title: Changelog
 parent: About
-nav_order: 5
+nav_order: 4
 description: Release history.
 ---
 

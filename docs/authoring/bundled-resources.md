@@ -2,8 +2,8 @@
 layout: default
 title: Bundled resources
 parent: Authoring
-nav_order: 8
-description: Files that ship alongside ARTIFACT.md (and SKILL.md, for skills): scripts, references, assets, schemas, datasets, plus how to handle large files via external resources.
+nav_order: 10
+description: "Files that ship alongside ARTIFACT.md (and SKILL.md, for skills): scripts, references, assets, schemas, datasets, plus how to handle large files via external resources."
 ---
 
 # Bundled resources
@@ -41,7 +41,7 @@ The ingest-time linter validates that prose references resolve to bundled files 
 
 The registry stores bundled resources content-addressed by SHA-256 in object storage. Bytes are deduplicated across all artifact versions within an org's storage namespace; when two artifacts ship the same file (a shared schema, a vendored library), only one copy is stored.
 
-At materialization, presigned URLs deliver the bytes. The MCP server downloads each resource and writes it atomically (`.tmp` + rename) so partial downloads cannot corrupt a working set.
+At materialization, presigned URLs deliver the bytes. The consumer (`podium sync`, the MCP server, or an SDK `materialize()` call) downloads each resource and writes it atomically (`.tmp` + rename) so partial downloads cannot corrupt a working set. The materialization pipeline is the same across all three; it runs in the consumer process, not on the registry.
 
 ---
 
@@ -72,7 +72,7 @@ external_resources:
     signature: "sigstore:..."
 ```
 
-The registry stores the URL, hash, size, and signature. Bytes don't transit the registry. At materialization the MCP server fetches from the URL, verifies the SHA-256 and signature, and writes locally.
+The registry stores the URL, hash, size, and signature. Bytes don't transit the registry. At materialization the consumer fetches from the URL, verifies the SHA-256 and signature, and writes locally.
 
 Caps don't apply to external resources. They're the right answer for model files, large datasets, vendored binaries.
 
@@ -90,7 +90,7 @@ Authors who want to ship an SBOM bundle it as an ordinary resource (e.g. `bom.js
 
 ## Execution model
 
-The MCP server materializes scripts; the host's runtime executes them. Authors declare runtime expectations in `runtime_requirements:`:
+The consumer writes scripts to disk at materialization time; the host's runtime executes them. Authors declare runtime expectations in `runtime_requirements:`:
 
 ```yaml
 runtime_requirements:

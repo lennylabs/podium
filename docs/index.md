@@ -29,7 +29,7 @@ effective catalog it serves.
 
 [Quickstart](getting-started/quickstart){: .btn .btn-purple }
 [Concepts](getting-started/concepts){: .btn .btn-outline }
-[Fit and comparisons](about/why-podium){: .btn .btn-outline }
+[Fit and comparisons](getting-started/why-podium){: .btn .btn-outline }
 
 Podium can run from a filesystem catalog or from a registry server:
 

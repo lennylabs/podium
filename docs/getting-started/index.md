@@ -24,6 +24,7 @@ In order:
 
 | Page | What it covers | Time |
 |:--|:--|:--|
+| [Why Podium](why-podium) | What Podium does, when it applies, when a simpler alternative is enough, and how it compares to adjacent tools. Read first when evaluating. | ~10 minutes |
 | [Quickstart](quickstart) | Install the CLI, write one skill, materialize it into Claude Code, and see it load. Filesystem mode has no daemon and no setup beyond a CLI. | ~5 minutes |
 | [Concepts](concepts) | Vocabulary used throughout the docs: artifact, domain, layer, harness, materialization, visibility, and meta-tools. | ~15 minutes |
 | [How it works](how-it-works) | Component overview, deployment modes, where state lives, what runs in your process versus on a server. | ~15 minutes |

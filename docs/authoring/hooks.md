@@ -2,7 +2,7 @@
 layout: default
 title: Hooks
 parent: Authoring
-nav_order: 6
+nav_order: 8
 description: Lifecycle observers with a canonical hook_event taxonomy and a shell hook_action.
 ---
 

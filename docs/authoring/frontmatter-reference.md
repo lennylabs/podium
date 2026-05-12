@@ -2,8 +2,8 @@
 layout: default
 title: Frontmatter reference
 parent: Authoring
-nav_order: 3
-description: Every field in Podium artifact frontmatter (ARTIFACT.md and, for skills, SKILL.md): universal fields, caller-interpreted fields, and type-specific fields.
+nav_order: 5
+description: "Every field in Podium artifact frontmatter (ARTIFACT.md and, for skills, SKILL.md): universal fields, caller-interpreted fields, and type-specific fields."
 ---
 
 # Frontmatter reference

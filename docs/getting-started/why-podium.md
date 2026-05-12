@@ -1,9 +1,9 @@
 ---
 layout: default
 title: Why Podium
-parent: About
+parent: Getting Started
 nav_order: 1
-description: What Podium does, when it applies, when a simpler alternative is enough, and how it compares to adjacent products.
+description: "What Podium does, when it applies, when a simpler alternative is enough, and how it compares to adjacent products."
 ---
 
 # Why Podium

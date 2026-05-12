@@ -1,14 +1,14 @@
 ---
 layout: default
-title: Your first artifact
+title: Your first skill
 parent: Authoring
 nav_order: 1
-description: From the quickstart's two-file skill to a richer artifact with a bundled script, runtime requirements, and a lint check before commit.
+description: "From the quickstart's two-file skill to a richer artifact with a bundled script, runtime requirements, and a lint check before commit."
 ---
 
-# Your first artifact
+# Your first skill
 
-This page picks up from the [quickstart](../getting-started/quickstart) and adds a few additional pieces: a bundled script, fuller frontmatter, watch-mode iteration, and a lint check.
+This page picks up from the [quickstart](../getting-started/quickstart) and rounds out the same `greet` skill with a bundled script, fuller frontmatter, watch-mode iteration, and a lint check. For non-skill walkthroughs, see [Your first command](your-first-command) and [Your first agent](your-first-agent).
 
 ---
 
@@ -174,7 +174,9 @@ If lint passes, commit the artifact. If lint warns or fails, the messages name t
 
 ## What's next
 
-- **Try a different type.** Make a `command` (slash-invoked template), a `rule` (passive context the harness loads automatically), or a `hook` (lifecycle observer). [Artifact types](artifact-types) covers the built-in types. Non-skill types use `ARTIFACT.md` only.
+- **Write a slash command.** A `command` is a parameterized prompt template the user invokes by name. See [Your first command](your-first-command).
+- **Write an agent.** An `agent` is a complete agent definition with its own instructions, dependencies, and optional bundled scripts. See [Your first agent](your-first-agent).
+- **Cover the other built-in types.** [Artifact types](artifact-types) covers `rule`, `hook`, `context`, and `mcp-server` alongside skills, commands, and agents.
 - **Organize multiple artifacts.** As they accumulate, group them with `DOMAIN.md` files: descriptions, keywords, featured artifacts. See [Domains](domains).
 - **Inherit from another artifact.** When two artifacts share most of their structure, `extends:` lets the second refine the first instead of duplicating it. See [Extends](extends).
 - **Move from solo to team-shared.** [Deployment](../deployment/) walks the migration paths.

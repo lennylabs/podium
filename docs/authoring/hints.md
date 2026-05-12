@@ -2,7 +2,7 @@
 layout: default
 title: Hints
 parent: Authoring
-nav_order: 9
+nav_order: 11
 description: Advisory metadata fields (effort_hint and model_class_hint) that capture authoring intent about reasoning budget and model capability.
 ---
 

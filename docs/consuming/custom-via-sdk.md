@@ -90,6 +90,8 @@ artifact.materialize(to="./artifacts/", harness="claude-code")
 
 `materialize()` runs the configured `HarnessAdapter` over the canonical artifact and writes the result to the destination path. Pass `harness="none"` to write the canonical layout as-is, which is useful when the consuming runtime reads `ARTIFACT.md` (and `SKILL.md` for skills) directly.
 
+The response carries manifest fields beyond the prose body (hints, sandbox profile, runtime requirements, MCP server registrations, dependency edges). [Handling artifact responses](handling-artifact-responses) walks through each field and what the consumer should do with it.
+
 ---
 
 ## Bulk fetch

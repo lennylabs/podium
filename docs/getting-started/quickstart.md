@@ -2,7 +2,7 @@
 layout: default
 title: Quickstart
 parent: Getting Started
-nav_order: 1
+nav_order: 2
 description: Install Podium, write one skill, and see it load in Claude Code. The filesystem setup uses the CLI without a daemon or authentication.
 ---
 

@@ -2,7 +2,7 @@
 layout: default
 title: Extends
 parent: Authoring
-nav_order: 7
+nav_order: 9
 description: Cross-layer artifact inheritance via the extends field.
 ---
 

@@ -3,7 +3,7 @@ layout: default
 title: CLI
 parent: Reference
 nav_order: 1
-description: Every podium subcommand: setup, server, sync, layer management, search, admin, signing.
+description: "Every podium subcommand: setup, server, sync, layer management, search, admin, signing."
 ---
 
 # CLI

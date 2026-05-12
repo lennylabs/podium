@@ -146,6 +146,8 @@ Loads a specific artifact by ID. Returns the manifest body inline; bundled resou
 
 This is the expensive operation in the discovery flow. The agent calls it only when it has decided to use the artifact. Materialization runs through the configured harness adapter, so the on-disk layout matches what the harness expects.
 
+Manifest fields beyond the prose body (hints, sandbox profile, runtime requirements, MCP server registrations, dependency edges) shape what the consumer does with the artifact next. [Handling artifact responses](handling-artifact-responses) covers the consumer-side action per field.
+
 Args:
 
 - `id` (required)
@@ -193,4 +195,4 @@ What an agent finds (and doesn't) is largely a function of how authors describe 
 - **Domain `description` + `keywords`** are the surface `search_domains` retrieves over. Without keywords, a domain may be unfindable for queries that don't use words from the description.
 - **`featured` lists** in `DOMAIN.md` give domain owners explicit control over which artifacts surface first in `load_domain`'s notable list.
 
-For authoring guidance, see [Your first artifact](../authoring/your-first-artifact) and [Domains](../authoring/domains).
+For authoring guidance, see [Your first skill](../authoring/your-first-skill), [Your first command](../authoring/your-first-command), [Your first agent](../authoring/your-first-agent), and [Domains](../authoring/domains).

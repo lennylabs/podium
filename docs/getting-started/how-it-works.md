@@ -2,7 +2,7 @@
 layout: default
 title: How it works
 parent: Getting Started
-nav_order: 3
+nav_order: 4
 description: Component overview, deployment modes, where state lives, and what runs on your machine versus on a server.
 ---
 

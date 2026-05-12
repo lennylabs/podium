@@ -3,7 +3,7 @@ layout: default
 title: HTTP API
 parent: Reference
 nav_order: 2
-description: The Podium registry's wire surface: discovery endpoints, materialization, ingest webhooks, scope preview, health.
+description: "The Podium registry's wire surface: discovery endpoints, materialization, ingest webhooks, scope preview, health."
 ---
 
 # HTTP API

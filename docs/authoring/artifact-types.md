@@ -2,7 +2,7 @@
 layout: default
 title: Artifact types
 parent: Authoring
-nav_order: 2
+nav_order: 4
 description: Built-in artifact types (skill, agent, context, command, rule, hook, mcp-server) and what each is for.
 ---
 

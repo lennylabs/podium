@@ -2,7 +2,7 @@
 layout: default
 title: Implementation status
 parent: About
-nav_order: 2
+nav_order: 1
 description: What's built today, what's pending release, and where to track progress.
 ---
 

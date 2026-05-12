@@ -2,7 +2,7 @@
 layout: default
 title: Domains
 parent: Authoring
-nav_order: 4
+nav_order: 6
 description: Folders and subfolders as the catalog structure. DOMAIN.md, keywords, featured artifacts, the prose body, and discovery rendering knobs.
 ---
 

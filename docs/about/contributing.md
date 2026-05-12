@@ -2,7 +2,7 @@
 layout: default
 title: Contributing
 parent: About
-nav_order: 3
+nav_order: 2
 description: How to contribute to Podium today. License, DCO, code of conduct.
 ---
 
