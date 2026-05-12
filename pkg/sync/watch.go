@@ -76,10 +76,15 @@ func runWatch(ctx context.Context, opts WatchOptions, events chan<- WatchEvent) 
 		}
 	}
 
-	// Initial sync.
+	// Initial sync. Capture lastSig BEFORE emitting so a caller that
+	// reads the first event and immediately edits the registry can't
+	// race the signature snapshot. The previous order (emit, then
+	// signature) let any edit performed in response to the initial
+	// event land before lastSig captured, so the change was folded
+	// into the baseline and the watcher never observed a transition.
 	res, err := Run(opts.Sync)
-	emit(res, err)
 	lastSig := watchSignature(opts.Sync.RegistryPath, opts.OverlayPath)
+	emit(res, err)
 
 	ticker := time.NewTicker(opts.Period)
 	defer ticker.Stop()
