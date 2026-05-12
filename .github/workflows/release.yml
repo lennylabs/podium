@@ -191,14 +191,21 @@ jobs:
   #
   # pkg/vector (sqlite-vec) and internal/serverboot (mattn/go-sqlite3)
   # both require CGO, so every target builds with CGO_ENABLED=1. The
-  # Linux + Windows rows run on ubuntu-latest with a per-target cross-
-  # compiler; darwin/arm64 runs on macos-latest where the system clang
-  # is native. Linux + Windows static-link with their respective libc
-  # (musl / mingw) so the resulting binary doesn't depend on a
-  # particular system libc at runtime.
+  # Linux rows run on ubuntu-latest with a per-target cross-compiler;
+  # darwin/arm64 runs on macos-latest with native clang; windows/amd64
+  # runs on windows-latest with the runner's bundled mingw-w64 gcc.
+  # All non-darwin targets static-link with their respective libc so
+  # the resulting binary doesn't depend on a particular system libc
+  # at runtime.
   build:
     needs: [go, python, typescript, postgres, s3]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        # Use bash on every runner including windows-latest (Git Bash).
+        # Keeps the build step single-source instead of forking into
+        # PowerShell for the Windows row.
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
@@ -215,7 +222,12 @@ jobs:
             goarch: arm64
             suffix: ''
             cc: aarch64-linux-gnu-gcc
-            apt: gcc-aarch64-linux-gnu
+            # crossbuild-essential-arm64 is the meta-package that
+            # pulls in gcc-aarch64-linux-gnu + libc6-dev-arm64-cross
+            # + the rest of the headers cgo needs. The plain
+            # gcc-aarch64-linux-gnu alone gives you the compiler
+            # without the libc dev files.
+            apt: crossbuild-essential-arm64
             static: 'true'
           - os: macos-latest
             goos: darwin
@@ -224,12 +236,12 @@ jobs:
             cc: clang
             apt: ''
             static: 'false'
-          - os: ubuntu-latest
+          - os: windows-latest
             goos: windows
             goarch: amd64
             suffix: '.exe'
-            cc: x86_64-w64-mingw32-gcc
-            apt: gcc-mingw-w64-x86-64
+            cc: gcc
+            apt: ''
             static: 'true'
     steps:
       - uses: actions/checkout@v4
@@ -241,6 +253,21 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ${{ matrix.apt }}
+      - name: Fetch sqlite3.h for Windows CGO
+        # sqlite-vec's C source #includes sqlite3.h, which mingw on
+        # windows-latest doesn't provide and mattn/go-sqlite3 ships
+        # under a renamed file (sqlite3-binding.h). Grab the header
+        # from the SQLite amalgamation and point CGO_CFLAGS at it.
+        if: matrix.os == 'windows-latest'
+        run: |
+          set -eu
+          mkdir -p "${RUNNER_TEMP}/sqlite"
+          curl -sSL https://www.sqlite.org/2024/sqlite-amalgamation-3470000.zip \
+            -o "${RUNNER_TEMP}/sqlite.zip"
+          unzip -j -o "${RUNNER_TEMP}/sqlite.zip" \
+            'sqlite-amalgamation-3470000/sqlite3.h' \
+            -d "${RUNNER_TEMP}/sqlite"
+          echo "CGO_CFLAGS=-I${RUNNER_TEMP}/sqlite" >> "${GITHUB_ENV}"
       - name: Build binaries
         env:
           GOOS: ${{ matrix.goos }}

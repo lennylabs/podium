@@ -17,9 +17,10 @@ FROM golang:${GO_VERSION}-alpine AS build
 
 # pkg/vector and the standalone-server bootstrap depend on
 # sqlite-vec-go-bindings/cgo and mattn/go-sqlite3, both CGO-only.
-# Install gcc + musl-dev so CGO can compile, then static-link with
-# musl so the resulting binary runs on distroless-static (no libc).
-RUN apk add --no-cache gcc musl-dev
+# Install gcc + musl-dev for cgo, plus sqlite-dev for the sqlite3.h
+# header that sqlite-vec.c includes. Then static-link with musl so
+# the resulting binary runs on distroless-static (no libc).
+RUN apk add --no-cache gcc musl-dev sqlite-dev
 
 WORKDIR /src
 
