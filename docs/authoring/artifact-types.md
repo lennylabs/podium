@@ -226,6 +226,6 @@ The `server_identifier` field keys the reverse index: when a `skill` references 
 
 ## Extension types
 
-Beyond the built-in artifact types, the type system is extensible. Registered extension types include `dataset`, `model`, `eval`, and `policy`. The `workflow` type is reserved for future multi-agent flows.
+Beyond the built-in artifact types, the type system is extensible. `mcp-server` is the only extension type Podium pre-registers. Names like `dataset`, `model`, `eval`, and `policy` are suggested type identifiers a deployment can register through the `TypeProvider` SPI when it has a use for them; they are not shipped pre-registered. The `workflow` type identifier is reserved for future multi-agent flows.
 
-Custom types register through the `TypeProvider` SPI: a JSON Schema for the frontmatter, lint rules, adapter hints, and field-merge semantics. See [Extending](../deployment/extending) for the SPI details.
+Registering a custom type means supplying a `TypeProvider`: a JSON Schema for the frontmatter, lint rules, adapter hints, and field-merge semantics. See [Extending](../deployment/extending) for the SPI details.

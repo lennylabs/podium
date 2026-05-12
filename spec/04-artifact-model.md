@@ -25,9 +25,12 @@ Full lint coverage, conformance suite participation, broad adapter support:
 
 Schemas and lint rules but no conformance commitment beyond what the type owner specifies:
 
-- `mcp-server`: an MCP server registration (name, endpoint, auth profile, description). Renamed from `tool` to avoid collision with MCP's "tool" callable concept.
-- `dataset`, `model`, `eval`, `policy`: register additional types via the `TypeProvider` SPI (§9).
-- `workflow`: reserved.
+- `mcp-server`: an MCP server registration (name, endpoint, auth profile, description). Renamed from `tool` to avoid collision with MCP's "tool" callable concept. Ships pre-registered.
+
+The remaining type identifiers in this section are not shipped pre-registered. They are suggested names a deployment registers through the `TypeProvider` SPI (§9) when it has a use for them:
+
+- `dataset`, `model`, `eval`, `policy`.
+- `workflow` is reserved for future multi-agent flows.
 
 The type system is extensible: deployments register additional types with their own lint rules. Podium treats every type uniformly for discovery, search, and load; type-specific runtime behaviour lives in hosts.
 

@@ -207,7 +207,7 @@ for descriptor in suite.results:
     run_eval(f"./runs/{descriptor.id}/")
 ```
 
-`type: eval` is a registered extension type (see [Artifact types → Extension types](../authoring/artifact-types)); deployments that use it register the schema and lint rules through `TypeProvider`.
+`type: eval` is a suggested extension type identifier (see [Artifact types → Extension types](../authoring/artifact-types)). Podium does not ship it pre-registered; a deployment that uses it registers the schema and lint rules through `TypeProvider`.
 
 ---
 
