@@ -18,7 +18,7 @@ For day-two operations (capacity, monitoring, alerts, backup, upgrades), see [Op
 
 - **Stateless registry replicas.** 3+ replicas behind a load balancer (HTTP).
 - **Postgres.** Managed (RDS, Cloud SQL, Aurora) or self-run; primary + read replicas. Holds manifest metadata, layer config, admin grants, and audit; also holds embeddings when the default vector backend (pgvector) is in use.
-- **Vector backend.** `pgvector` by default, collocated in the Postgres deployment with no separate service to run. Built-ins for `pinecone`, `weaviate-cloud`, and `qdrant-cloud` selectable per deployment.
+- **Vector backend.** `pgvector` by default, collocated in the Postgres deployment with no separate service to run. Built-ins for `pinecone`, `weaviate-cloud`, and `qdrant-cloud` are selectable per deployment; see [Vector backends](vector-backends) for the per-backend recipes.
 - **Embedding provider.** `openai` by default. Built-ins also include `voyage`, `cohere`, and `ollama`.
 - **Object storage.** S3-compatible (S3, GCS, MinIO, R2).
 - **Identity provider.** OIDC IdP that supports device-code flow (Okta, Entra ID, Google Workspace, Auth0, Keycloak); SCIM push optional but recommended for group-based visibility.

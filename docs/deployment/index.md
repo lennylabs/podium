@@ -27,4 +27,5 @@ The modes share artifacts, author flow, and the underlying shared library. Migra
 | [Progressive adoption](progressive-adoption) | An on-ramp from permissive standalone to enforced governance, in stages. Use it once you have a standalone deployment running and want to add identity, sensitivity labels, signing, freeze windows, etc. |
 | [Operator guide](operator-guide) | Day-two operations for a standard deployment: capacity planning, monitoring, alerting, backup and restore, upgrades, security review checklist, common pitfalls. |
 | [Extending](extending) | Plugin SPIs, the forward-compatibility constraints that keep out-of-process plugins on the table, and the external-extension patterns. |
+| [Vector backends](vector-backends) | Configure Pinecone, Weaviate Cloud, or Qdrant Cloud as the registry's vector backend, in standalone or standard mode. Covers self-embedding and storage-only modes, switching backends on a running deployment, and the local-overlay side path. |
 | [OIDC cookbooks](oidc/) | Per-IdP setup recipes for Okta, Entra ID, Google Workspace, Auth0, and Keycloak. |

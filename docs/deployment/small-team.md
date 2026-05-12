@@ -33,7 +33,7 @@ That command runs a single process. The standalone server includes:
 |:--|:--|
 | Metadata store | SQLite at `~/.podium/standalone/podium.db` |
 | Object storage | Local filesystem at `~/.podium/standalone/objects/` |
-| Vector backend | `sqlite-vec` collocated with SQLite |
+| Vector backend | `sqlite-vec` collocated with SQLite by default. Pinecone, Weaviate Cloud, or Qdrant Cloud can be swapped in without adding other infrastructure; see [Vector backends](vector-backends). |
 | Embedding provider | `ollama` pointed at a local model (or any other configured provider). `--no-embeddings` falls back to BM25-only. |
 | Identity provider | Optional. Public mode (no auth) by default; `oauth-device-code` can be enabled. |
 
