@@ -116,7 +116,10 @@ func TestDecodeHealthMode(t *testing.T) {
 		_, _ = w.Write([]byte(`{"mode":"ready","ready":true}`))
 	}))
 	defer srv.Close()
-	resp, _ := http.Get(srv.URL)
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
 	defer resp.Body.Close()
 	if got := decodeHealthMode(resp); got != "ready" {
 		t.Errorf("got %q, want ready", got)
@@ -129,7 +132,10 @@ func TestDecodeHealthMode_InvalidBodyReturnsEmpty(t *testing.T) {
 		_, _ = w.Write([]byte("not json"))
 	}))
 	defer srv.Close()
-	resp, _ := http.Get(srv.URL)
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
 	defer resp.Body.Close()
 	if got := decodeHealthMode(resp); got != "" {
 		t.Errorf("got %q, want empty", got)
