@@ -111,7 +111,7 @@ jobs:
         # Available on the workflow run page for ~7 days so you can
         # download and inspect the raw profile when the Codecov badge
         # doesn't reflect what you expect.
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-go
           path: coverage.out
