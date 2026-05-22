@@ -3,6 +3,7 @@
 [![codeql](https://github.com/lennylabs/podium/actions/workflows/codeql.yml/badge.svg)](https://github.com/lennylabs/podium/actions/workflows/codeql.yml)
 [![codecov](https://codecov.io/gh/lennylabs/podium/branch/main/graph/badge.svg)](https://codecov.io/gh/lennylabs/podium)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Discord](https://img.shields.io/discord/1507235632966275085?logo=discord&logoColor=white&label=Discord&color=5865F2)](https://discord.gg/2kcteA8Y64)
 
 # Podium
 
@@ -219,7 +220,6 @@ ASCII fallback for the diagram above (server-mode architecture):
        Agent SDK, etc.          etc. (coding harnesses)  (writes to .claude/,
        (programmatic runtimes)                            .cursor/, etc.)
 -->
-
 
 In filesystem mode, the catalog is a folder. `podium sync` reads
 it directly, with no server, HTTP, or auth, and writes harness-native
