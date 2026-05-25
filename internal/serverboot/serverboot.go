@@ -28,6 +28,8 @@ import (
 	"github.com/lennylabs/podium/pkg/notification"
 	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/registry/core"
+	"github.com/lennylabs/podium/pkg/registry/filesystem"
+	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/scim"
 	"github.com/lennylabs/podium/pkg/store"
@@ -158,7 +160,34 @@ func Run() error {
 	const tenantID = "default"
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: tenantID, Name: tenantID})
 
-	registry := core.New(st, tenantID, []layer.Layer{})
+	// PODIUM_LAYER_PATH: when set, ingest a filesystem registry at
+	// startup. Mirrors server.NewFromFilesystem; only the pieces
+	// needed for search and load_artifact are inlined here.
+	// When unset, the server boots with an empty registry as before
+	// — existing behaviour and tests are preserved.
+	bootLayers := []layer.Layer{}
+	if layerPath := os.Getenv("PODIUM_LAYER_PATH"); layerPath != "" {
+		fsReg, ferr := filesystem.Open(layerPath)
+		if ferr != nil {
+			return fmt.Errorf("open layer path %s: %w", layerPath, ferr)
+		}
+		for i, l := range fsReg.Layers {
+			if _, ierr := ingest.Ingest(context.Background(), st, ingest.Request{
+				TenantID: tenantID,
+				LayerID:  l.ID,
+				Files:    os.DirFS(l.Path),
+			}); ierr != nil {
+				return fmt.Errorf("ingest layer %s from %s: %w", l.ID, l.Path, ierr)
+			}
+			bootLayers = append(bootLayers, layer.Layer{
+				ID:         l.ID,
+				Precedence: i + 1,
+				Visibility: layer.Visibility{Public: true},
+			})
+			log.Printf("ingested layer %s from %s", l.ID, l.Path)
+		}
+	}
+	registry := core.New(st, tenantID, bootLayers)
 	if v, e, err := openVectorAndEmbedder(cfg); err != nil {
 		log.Printf("warning: vector search disabled: %v", err)
 	} else if v != nil && e != nil {
