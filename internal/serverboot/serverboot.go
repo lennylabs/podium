@@ -266,6 +266,33 @@ func Run() error {
 		bootOpts = append(bootOpts, server.WithSCIM(scimHandler))
 		log.Printf("SCIM 2.0 receiver mounted at /scim/v2/")
 	}
+	// §6.3 identity-provider dispatch for the server-side request
+	// resolver. Today the documented values (oauth-device-code,
+	// injected-session-token) describe how the *client* attaches a
+	// JWT to outgoing calls; their server-side verifier wiring is
+	// out of scope for this change and continues to rely on the
+	// default anonymous-public resolver. The new "trusted-headers"
+	// value wires server.HeaderIdentityResolver so deployments that
+	// terminate authentication at a trusted upstream proxy can
+	// drive the §4.6 visibility evaluator from the X-Podium-User-*
+	// headers the proxy injects.
+	//
+	// Unset values keep the default anonymous-public bypass so
+	// existing deployments observe no behavior change. Unknown
+	// values log a warning so a typo does not silently open or
+	// close the registry.
+	idProvider := strings.ToLower(strings.TrimSpace(cfg.identityProvider))
+	switch idProvider {
+	case "":
+		log.Printf("identity provider: (none) (anonymous-public bypass; visibility filtering off)")
+	case "oauth-device-code", "injected-session-token":
+		log.Printf("identity provider: %s (server-side verifier wiring not yet implemented; falling back to anonymous-public resolver)", idProvider)
+	case "trusted-headers":
+		bootOpts = append(bootOpts, server.WithIdentityResolver(server.HeaderIdentityResolver))
+		log.Printf("identity provider: trusted-headers (X-Podium-User-* headers, trusts upstream proxy)")
+	default:
+		log.Printf("warning: PODIUM_IDENTITY_PROVIDER=%q is not recognized; falling back to anonymous-public resolver", idProvider)
+	}
 	// §4.7.8 rate limits per tenant. Zero values disable per
 	// dimension; the limiter still mounts so multi-tenant
 	// deployments can enable a single dimension at a time.
