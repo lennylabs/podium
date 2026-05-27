@@ -630,8 +630,9 @@ func domainSearch(args []string) int {
 
 func artifactCmd(args []string) int {
 	if len(args) < 1 || isHelpArg(args[0]) {
-		printGroupHelp("artifact", "Inspect individual artifacts.", [][2]string{
+		printGroupHelp("artifact", "Inspect and scaffold artifacts.", [][2]string{
 			{"show", "Print an artifact's manifest body and frontmatter."},
+			{"new", "Scaffold a new artifact in a declared layer."},
 		})
 		if len(args) < 1 {
 			return 2
@@ -641,6 +642,8 @@ func artifactCmd(args []string) int {
 	switch args[0] {
 	case "show":
 		return artifactShow(args[1:])
+	case "new":
+		return artifactNew(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown artifact subcommand: %s\n", args[0])
 		return 2

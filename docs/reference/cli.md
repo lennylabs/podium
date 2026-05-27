@@ -278,6 +278,73 @@ podium artifact show <id> [--version <semver>]
 
 For materialization (writing files to disk), use `podium sync --include <id>`.
 
+### `podium artifact new`
+
+Scaffolds a new artifact directory under a declared layer, with a
+starting body matching one of five built-in templates. The command is
+interactive by default; CI and scripts can pass `--yes` plus the
+required flags to run non-interactively.
+
+```
+podium artifact new [--root <dir>]
+                    [--layer <name>]
+                    [--name <kebab-case>]
+                    [--description <text>]
+                    [--tags <a,b,c>]
+                    [--template <skill|workflow|persona|policy|conversation>]
+                    [--force] [--yes]
+```
+
+**Layer discovery.** When `<root>/.podium/layers.yaml` exists, the
+command reads that file as the layer catalog and uses each entry's
+description in the picker. When the file is absent, the command lists
+top-level directories under `<root>` as candidate layers.
+
+A minimal `.podium/layers.yaml`:
+
+```yaml
+layers:
+  - name: policy
+    description: Cross-cutting policies (PII, scope, tone).
+    review_required: true
+  - name: common
+    description: Generic skills any team can use.
+  - name: alice-personal
+    description: Personal playground.
+    review_required: false
+```
+
+**Templates:**
+
+| Template       | When to use                                                          |
+|----------------|----------------------------------------------------------------------|
+| `skill`        | Plain markdown body with frontmatter.                                |
+| `workflow`     | Multi-step workflow over MCP tools (numbered steps + output format). |
+| `persona`      | Cross-cutting tone or format; composes with other skills.            |
+| `policy`       | Guardrail or redaction rules; composes with other skills.            |
+| `conversation` | Pure conversation; no MCP tool calls.                                |
+
+**Non-interactive example:**
+
+```bash
+podium artifact new \
+    --root ./skills \
+    --layer common \
+    --name release-notes \
+    --description "Draft release notes from a list of ticket keys." \
+    --tags "release,workflow" \
+    --template workflow \
+    --yes
+```
+
+This writes `./skills/common/release-notes/ARTIFACT.md` and `SKILL.md`.
+The artifact frontmatter is populated from the flags; the skill body
+follows the chosen template and is ready to edit.
+
+When the destination layer has `review_required: true`, the command
+prints a notice reminding the author to get owner approval before
+merging.
+
 ---
 
 ## Layer management
