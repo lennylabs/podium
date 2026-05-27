@@ -171,6 +171,13 @@ func Run() error {
 		if ferr != nil {
 			return fmt.Errorf("open layer path %s: %w", layerPath, ferr)
 		}
+		// Per-layer visibility overrides from <layerPath>/.podium/layers.yaml.
+		// Layers absent from the file, or layers present without a
+		// visibility: block, keep the prior default of Public:true.
+		visOverrides, verr := server.LoadLayerVisibility(layerPath)
+		if verr != nil {
+			return fmt.Errorf("load layer visibility from %s: %w", layerPath, verr)
+		}
 		for i, l := range fsReg.Layers {
 			if _, ierr := ingest.Ingest(context.Background(), st, ingest.Request{
 				TenantID: tenantID,
@@ -179,12 +186,16 @@ func Run() error {
 			}); ierr != nil {
 				return fmt.Errorf("ingest layer %s from %s: %w", l.ID, l.Path, ierr)
 			}
+			vis := layer.Visibility{Public: true}
+			if v, ok := visOverrides[l.ID]; ok {
+				vis = v
+			}
 			bootLayers = append(bootLayers, layer.Layer{
 				ID:         l.ID,
 				Precedence: i + 1,
-				Visibility: layer.Visibility{Public: true},
+				Visibility: vis,
 			})
-			log.Printf("ingested layer %s from %s", l.ID, l.Path)
+			log.Printf("ingested layer %s from %s (visibility=%s)", l.ID, l.Path, server.DescribeVisibility(vis))
 		}
 	}
 	registry := core.New(st, tenantID, bootLayers)

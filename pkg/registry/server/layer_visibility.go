@@ -38,7 +38,25 @@ type visibilityYAMLDoc struct {
 	Users        []string `yaml:"users"`
 }
 
-// loadLayerVisibility reads root/.podium/layers.yaml when present
+// DescribeVisibility renders a single-token summary of a Visibility
+// value for log output. The format is stable enough for grep but
+// short enough not to bloat boot logs.
+func DescribeVisibility(v layer.Visibility) string {
+	switch {
+	case v.Public:
+		return "public"
+	case v.Organization:
+		return "organization"
+	case len(v.Groups) > 0:
+		return "groups=" + fmt.Sprintf("%v", v.Groups)
+	case len(v.Users) > 0:
+		return "users=" + fmt.Sprintf("%v", v.Users)
+	default:
+		return "deny-all"
+	}
+}
+
+// LoadLayerVisibility reads root/.podium/layers.yaml when present
 // and returns a map keyed by layer name to the declared Visibility.
 // Layers omitted from the file, or layers present without a
 // visibility block, are absent from the map; callers fall back
@@ -46,7 +64,7 @@ type visibilityYAMLDoc struct {
 //
 // A missing layers.yaml returns (nil, nil): the caller treats this
 // as "no overrides" and keeps the previous default for every layer.
-func loadLayerVisibility(root string) (map[string]layer.Visibility, error) {
+func LoadLayerVisibility(root string) (map[string]layer.Visibility, error) {
 	yamlPath := filepath.Join(root, ".podium", "layers.yaml")
 	body, err := os.ReadFile(yamlPath)
 	if err != nil {

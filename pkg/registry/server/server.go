@@ -196,7 +196,7 @@ func NewFromFilesystem(path string, opts ...Option) (*Server, error) {
 	// Per-layer visibility overrides from <root>/.podium/layers.yaml.
 	// Layers without an override keep the previous default of
 	// Visibility{Public: true}.
-	visOverrides, err := loadLayerVisibility(path)
+	visOverrides, err := LoadLayerVisibility(path)
 	if err != nil {
 		return nil, err
 	}

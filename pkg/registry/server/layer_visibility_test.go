@@ -22,7 +22,7 @@ func writeLayersYAML(t *testing.T, root, body string) {
 
 func TestLoadLayerVisibility_MissingFile_ReturnsNil(t *testing.T) {
 	root := t.TempDir()
-	got, err := loadLayerVisibility(root)
+	got, err := LoadLayerVisibility(root)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -50,7 +50,7 @@ layers:
   - name: no-vis
     description: layer without a visibility block, should be omitted from the map
 `)
-	got, err := loadLayerVisibility(root)
+	got, err := LoadLayerVisibility(root)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -68,7 +68,7 @@ layers:
 func TestLoadLayerVisibility_MalformedYAML_Errors(t *testing.T) {
 	root := t.TempDir()
 	writeLayersYAML(t, root, ":: not valid yaml ::\n  garbage:\n - -\n")
-	if _, err := loadLayerVisibility(root); err == nil {
+	if _, err := LoadLayerVisibility(root); err == nil {
 		t.Fatal("expected parse error on malformed YAML, got nil")
 	}
 }
@@ -76,7 +76,7 @@ func TestLoadLayerVisibility_MalformedYAML_Errors(t *testing.T) {
 func TestLoadLayerVisibility_EmptyLayersBlock_ReturnsEmptyMap(t *testing.T) {
 	root := t.TempDir()
 	writeLayersYAML(t, root, "layers: []\n")
-	got, err := loadLayerVisibility(root)
+	got, err := LoadLayerVisibility(root)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
