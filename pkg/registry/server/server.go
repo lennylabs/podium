@@ -193,6 +193,13 @@ func NewFromFilesystem(path string, opts ...Option) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Per-layer visibility overrides from <root>/.podium/layers.yaml.
+	// Layers without an override keep the previous default of
+	// Visibility{Public: true}.
+	visOverrides, err := loadLayerVisibility(path)
+	if err != nil {
+		return nil, err
+	}
 	st := store.NewMemory()
 	const tenant = "default"
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: tenant, Name: tenant}); err != nil {
@@ -224,10 +231,14 @@ func NewFromFilesystem(path string, opts ...Option) (*Server, error) {
 				resources[rec.ID] = rec.Resources
 			}
 		}
+		vis := layer.Visibility{Public: true}
+		if v, ok := visOverrides[l.ID]; ok {
+			vis = v
+		}
 		layers = append(layers, layer.Layer{
 			ID:         l.ID,
 			Precedence: i + 1,
-			Visibility: layer.Visibility{Public: true},
+			Visibility: vis,
 		})
 	}
 
