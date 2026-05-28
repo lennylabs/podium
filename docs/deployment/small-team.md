@@ -53,7 +53,9 @@ On the host that will run the registry:
 podium serve --standalone --layer-path /path/to/podium-artifacts/
 ```
 
-`podium serve` writes a default config to `~/.podium/registry.yaml` and starts serving on `127.0.0.1:8080`. The startup banner prints the bind address and the layer path.
+`podium serve` writes a default config to `~/.podium/registry.yaml` and starts serving on `127.0.0.1:8080`. The startup banner prints the bind address, ingests every layer under the path, and logs one line per layer with the resulting `accepted` / `idempotent` / `rejected` counts.
+
+Setting `PODIUM_LAYER_PATH` in the environment is equivalent to passing `--layer-path` on the command line and is useful for systemd units, container deployments, and any other context where flags are awkward. The same value also accepts a `layers.path` key in `~/.podium/registry.yaml`. Precedence is CLI flag > env var > config file (see the [CLI reference](../reference/cli)).
 
 For a multi-user team, change the bind address and (optionally) enable auth:
 

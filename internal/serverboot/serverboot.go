@@ -28,6 +28,8 @@ import (
 	"github.com/lennylabs/podium/pkg/notification"
 	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/registry/core"
+	"github.com/lennylabs/podium/pkg/registry/filesystem"
+	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/scim"
 	"github.com/lennylabs/podium/pkg/store"
@@ -137,6 +139,69 @@ func envInt(key string, def int) int {
 	return n
 }
 
+// bootstrapLayerPath ingests the filesystem registry at layerPath
+// (when non-empty), persists a store.LayerConfig per resolved layer,
+// and returns the in-memory []layer.Layer the core registry uses for
+// visibility filtering. Returns an empty slice when layerPath is
+// empty so the caller can pass the result straight into core.New.
+//
+// Ingest runs against context.Background: a bootstrap failure
+// returns an error and aborts startup before any HTTP listener is
+// bound, so there is no in-flight request context to thread through.
+//
+// Layer ordering follows filesystem.Open's resolution
+// (alphabetical, or layer_order: when .registry-config sets it),
+// with Order/Precedence assigned 1..N (lowest-precedence first per
+// §4.6).
+func bootstrapLayerPath(st store.Store, tenantID, layerPath string) ([]layer.Layer, error) {
+	if layerPath == "" {
+		return []layer.Layer{}, nil
+	}
+	fsReg, err := filesystem.Open(layerPath)
+	if err != nil {
+		return nil, fmt.Errorf("open layer path %s: %w", layerPath, err)
+	}
+	ctx := context.Background()
+	layers := make([]layer.Layer, 0, len(fsReg.Layers))
+	for i, l := range fsReg.Layers {
+		order := i + 1
+		res, err := ingest.Ingest(ctx, st, ingest.Request{
+			TenantID: tenantID,
+			LayerID:  l.ID,
+			Files:    os.DirFS(l.Path),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("ingest layer %s from %s: %w", l.ID, l.Path, err)
+		}
+		// Persist a LayerConfig so /v1/layers, /v1/layers/reingest, and
+		// the standalone web UI (§13.10) see the bootstrap layers. The
+		// SourceType is "local" with LocalPath set to the resolved
+		// directory so a future reingest can re-snapshot the same path.
+		// Public visibility matches §13.10's standalone default for
+		// newly-registered layers.
+		cfg := store.LayerConfig{
+			TenantID:   tenantID,
+			ID:         l.ID,
+			SourceType: "local",
+			LocalPath:  l.Path,
+			Order:      order,
+			Public:     true,
+			CreatedAt:  time.Now().UTC(),
+		}
+		if err := st.PutLayerConfig(ctx, cfg); err != nil {
+			return nil, fmt.Errorf("persist layer config %s: %w", l.ID, err)
+		}
+		layers = append(layers, layer.Layer{
+			ID:         l.ID,
+			Precedence: order,
+			Visibility: layer.Visibility{Public: true},
+		})
+		log.Printf("ingested layer %s from %s (accepted=%d, idempotent=%d, rejected=%d)",
+			l.ID, l.Path, res.Accepted, res.Idempotent, len(res.Rejected))
+	}
+	return layers, nil
+}
+
 // Run loads configuration, opens the configured backends, mounts
 // every endpoint, and blocks on the HTTP listener. Returns the
 // http.Server's error (always non-nil — at minimum
@@ -158,7 +223,18 @@ func Run() error {
 	const tenantID = "default"
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: tenantID, Name: tenantID})
 
-	registry := core.New(st, tenantID, []layer.Layer{})
+	// PODIUM_LAYER_PATH: when set, ingest a filesystem registry at
+	// startup. Mirrors server.NewFromFilesystem for the pieces needed
+	// for search and load_artifact, and additionally persists a
+	// store.LayerConfig per layer so the §7.3.1 layer-management
+	// endpoints (GET /v1/layers, POST /v1/layers/reingest,
+	// DELETE /v1/layers) see the bootstrap layers. When unset, the
+	// server boots with an empty registry as before.
+	bootLayers, err := bootstrapLayerPath(st, tenantID, cfg.layerPath)
+	if err != nil {
+		return err
+	}
+	registry := core.New(st, tenantID, bootLayers)
 	if v, e, err := openVectorAndEmbedder(cfg); err != nil {
 		log.Printf("warning: vector search disabled: %v", err)
 	} else if v != nil && e != nil {
@@ -392,6 +468,11 @@ type Config struct {
 	// §4.7.8 rate limits.
 	searchQPSLimit       int
 	materializeRateLimit int
+	// §13.10 standalone bootstrap layer path. When non-empty,
+	// Run() opens the filesystem registry at the path, ingests
+	// every resolved layer, and persists a store.LayerConfig per
+	// layer so the §7.3.1 layer endpoints see them.
+	layerPath string
 }
 
 // Setting names one resolved field together with the env var (or
@@ -436,6 +517,7 @@ func (c *Config) Settings() []Setting {
 		{"embedding_provider", c.embeddingProvider, envOrSrc("PODIUM_EMBEDDING_PROVIDER", yamlSrc)},
 		{"embedding_model", c.embeddingModel, envOrSrc("PODIUM_EMBEDDING_MODEL", yamlSrc)},
 		{"layers.default_visibility", c.defaultLayerVisibility, envOrSrc("PODIUM_DEFAULT_LAYER_VISIBILITY", defaultSrc)},
+		{"layers.path", c.layerPath, envOrSrc("PODIUM_LAYER_PATH", yamlSrc)},
 		{"read_only.probe_failures", intStr(c.readOnlyProbeFailures), envOrSrc("PODIUM_READONLY_PROBE_FAILURES", defaultSrc)},
 		{"read_only.probe_interval_seconds", intStr(c.readOnlyProbeInterval), envOrSrc("PODIUM_READONLY_PROBE_INTERVAL", defaultSrc)},
 		{"openai_api_key", redact(c.openaiAPIKey), envOrSrc("OPENAI_API_KEY", "")},
@@ -505,6 +587,8 @@ func LoadConfig() *Config {
 		// §4.7.8 rate limits.
 		searchQPSLimit:       envInt("PODIUM_QUOTA_SEARCH_QPS", 0),
 		materializeRateLimit: envInt("PODIUM_QUOTA_MATERIALIZE_RATE", 0),
+		// §13.10 standalone bootstrap layer path.
+		layerPath: os.Getenv("PODIUM_LAYER_PATH"),
 	}
 	// §13.10 ~/.podium/registry.yaml: load and overlay onto env-
 	// derived defaults. Env values keep precedence per applyYAML.
