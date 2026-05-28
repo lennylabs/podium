@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"os"
 	"path/filepath"
@@ -478,6 +479,622 @@ func TestScaffold_Interactive_TypePrompt(t *testing.T) {
 	body, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
 	if !bytes.Contains(body, []byte("type: context")) {
 		t.Errorf("interactive type pick did not yield context: %s", body)
+	}
+}
+
+// ---------- Interactive prompt coverage ----------
+
+// Interactive path: --description omitted, user types it. Confirms
+// promptString round-trips a typed line into the description field
+// of the rendered manifest.
+func TestScaffold_Interactive_DescriptionPrompt(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "x")
+	exit, _, stderr := runScaffold([]string{
+		"--type", "context",
+		target,
+	}, "Reference content for the catalog.\n")
+	if exit != 0 {
+		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
+	}
+	body, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
+	if !bytes.Contains(body, []byte("description: Reference content for the catalog.")) {
+		t.Errorf("description from prompt not written: %s", body)
+	}
+}
+
+// Interactive type pick by name (typing the literal type string
+// instead of an index). Exercises the contains() branch of
+// promptChoice.
+func TestScaffold_Interactive_TypePromptByName(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "x")
+	exit, _, stderr := runScaffold([]string{
+		"--description", "x",
+		target,
+	}, "agent\n")
+	if exit != 0 {
+		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
+	}
+	body, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
+	if !bytes.Contains(body, []byte("type: agent")) {
+		t.Errorf("typed type-name did not yield agent: %s", body)
+	}
+}
+
+// Interactive type pick that retries on invalid input. The first
+// line ("99") is out of range and matches no type name; the loop
+// reprompts and accepts the valid second line. Exercises the
+// invalid-input retry branch of promptChoice.
+func TestScaffold_Interactive_TypePromptRetriesOnInvalid(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "x")
+	exit, _, stderr := runScaffold([]string{
+		"--description", "x",
+		target,
+	}, "99\n2\n")
+	if exit != 0 {
+		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
+	}
+	body, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
+	// Position 2 is "agent" in firstClassTypes.
+	if !bytes.Contains(body, []byte("type: agent")) {
+		t.Errorf("retry-after-invalid did not pick choice 2 (agent): %s", body)
+	}
+}
+
+// Interactive type pick with EOF (closed stdin, no value entered).
+// promptChoice must return "" so the subsequent validateType call
+// rejects the empty type and the command exits 2 instead of hanging.
+func TestScaffold_Interactive_TypePromptEOFErrors(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "x")
+	exit, _, stderr := runScaffold([]string{
+		"--description", "x",
+		target,
+	}, "") // empty stdin → EOF on the first read
+	if exit != 2 {
+		t.Fatalf("exit=%d, want 2 (EOF should not loop forever)", exit)
+	}
+	if !strings.Contains(stderr, "--type is required") {
+		t.Errorf("stderr missing required-type hint: %s", stderr)
+	}
+}
+
+// Interactive hook-event prompt. Exercises the prompt branch of
+// collectTypeSpecific for type=hook.
+func TestScaffold_Interactive_HookEventPrompt(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "h")
+	exit, _, stderr := runScaffold([]string{
+		"--type", "hook",
+		"--description", "x",
+		target,
+	}, "pre_tool_use\n")
+	if exit != 0 {
+		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
+	}
+	body, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
+	if !bytes.Contains(body, []byte("hook_event: pre_tool_use")) {
+		t.Errorf("hook_event from prompt not written: %s", body)
+	}
+}
+
+// Interactive server-identifier prompt for type=mcp-server.
+func TestScaffold_Interactive_ServerIdPrompt(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "m")
+	exit, _, stderr := runScaffold([]string{
+		"--type", "mcp-server",
+		"--description", "x",
+		target,
+	}, "npx:@acme/test-mcp\n")
+	if exit != 0 {
+		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
+	}
+	body, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
+	if !bytes.Contains(body, []byte("server_identifier: npx:@acme/test-mcp")) {
+		t.Errorf("server_identifier from prompt not written: %s", body)
+	}
+}
+
+// Interactive rule-globs prompt when --rule-mode=glob is set
+// without --rule-globs. Exercises the prompt branch of
+// collectTypeSpecific for the rule/glob path.
+func TestScaffold_Interactive_RuleGlobsPrompt(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "r")
+	exit, _, stderr := runScaffold([]string{
+		"--type", "rule",
+		"--description", "x",
+		"--rule-mode", "glob",
+		target,
+	}, "internal/**/*.go\n")
+	if exit != 0 {
+		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
+	}
+	body, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
+	if !bytes.Contains(body, []byte(`rule_globs: "internal/**/*.go"`)) {
+		t.Errorf("rule_globs from prompt not written: %s", body)
+	}
+}
+
+// Interactive rule-description prompt when --rule-mode=auto is set
+// without --rule-description.
+func TestScaffold_Interactive_RuleDescPrompt(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "r")
+	exit, _, stderr := runScaffold([]string{
+		"--type", "rule",
+		"--description", "x",
+		"--rule-mode", "auto",
+		target,
+	}, "Apply on database migrations\n")
+	if exit != 0 {
+		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
+	}
+	body, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
+	if !bytes.Contains(body, []byte(`rule_description: "Apply on database migrations"`)) {
+		t.Errorf("rule_description from prompt not written: %s", body)
+	}
+}
+
+// Interactive prompt for rule-description that returns empty errors
+// cleanly instead of writing a malformed manifest.
+func TestScaffold_Interactive_RuleDescEmptyErrors(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "r")
+	exit, _, stderr := runScaffold([]string{
+		"--type", "rule",
+		"--description", "x",
+		"--rule-mode", "auto",
+		target,
+	}, "\n")
+	if exit != 2 {
+		t.Fatalf("exit=%d, want 2", exit)
+	}
+	if !strings.Contains(stderr, "rule-description is required") {
+		t.Errorf("stderr missing rule-description required hint: %s", stderr)
+	}
+}
+
+// Interactive hook-event prompt that returns empty errors cleanly.
+func TestScaffold_Interactive_HookEventEmptyErrors(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "h")
+	exit, _, stderr := runScaffold([]string{
+		"--type", "hook",
+		"--description", "x",
+		target,
+	}, "\n")
+	if exit != 2 {
+		t.Fatalf("exit=%d, want 2", exit)
+	}
+	if !strings.Contains(stderr, "hook-event is required") {
+		t.Errorf("stderr missing hook-event required hint: %s", stderr)
+	}
+}
+
+// Interactive server-identifier prompt that returns empty errors cleanly.
+func TestScaffold_Interactive_ServerIdEmptyErrors(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "m")
+	exit, _, stderr := runScaffold([]string{
+		"--type", "mcp-server",
+		"--description", "x",
+		target,
+	}, "\n")
+	if exit != 2 {
+		t.Fatalf("exit=%d, want 2", exit)
+	}
+	if !strings.Contains(stderr, "server-identifier is required") {
+		t.Errorf("stderr missing server-identifier required hint: %s", stderr)
+	}
+}
+
+// Interactive description prompt that returns empty fails the
+// post-prompt required-field check.
+func TestScaffold_Interactive_DescriptionEmptyErrors(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "x")
+	exit, _, stderr := runScaffold([]string{
+		"--type", "context",
+		target,
+	}, "\n")
+	if exit != 2 {
+		t.Fatalf("exit=%d, want 2", exit)
+	}
+	if !strings.Contains(stderr, "description is required") {
+		t.Errorf("stderr missing description-required hint: %s", stderr)
+	}
+}
+
+// Skill name >64 chars is rejected (agentskills.io constraint).
+func TestScaffold_SkillNameRejectsOver64Chars(t *testing.T) {
+	root := t.TempDir()
+	long := strings.Repeat("a", 65)
+	target := filepath.Join(root, "personal", long)
+	exit, _, stderr := runScaffold([]string{
+		"--type", "skill",
+		"--description", "x",
+		"--yes",
+		target,
+	}, "")
+	if exit != 2 {
+		t.Fatalf("exit=%d, want 2", exit)
+	}
+	if !strings.Contains(stderr, "64 characters") {
+		t.Errorf("stderr missing 64-char hint: %s", stderr)
+	}
+}
+
+// Skill name with trailing hyphen rejected (agentskills.io constraint).
+func TestScaffold_SkillNameRejectsTrailingHyphen(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "bad-")
+	exit, _, stderr := runScaffold([]string{
+		"--type", "skill",
+		"--description", "x",
+		"--yes",
+		target,
+	}, "")
+	if exit != 2 {
+		t.Fatalf("exit=%d, want 2", exit)
+	}
+	if !strings.Contains(stderr, "cannot end with a hyphen") {
+		t.Errorf("stderr missing trailing-hyphen hint: %s", stderr)
+	}
+}
+
+// Unknown flag triggers stdlib flag.Parse error and the command
+// exits with parseExit's code (2 for non-help errors).
+func TestScaffold_UnknownFlagErrors(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "x")
+	exit, _, _ := runScaffold([]string{
+		"--type", "context",
+		"--description", "x",
+		"--yes",
+		"--no-such-flag",
+		target,
+	}, "")
+	if exit != 2 {
+		t.Fatalf("exit=%d, want 2 (flag.Parse error)", exit)
+	}
+}
+
+// --help on the scaffold subcommand exits 0 (the stdlib flag
+// package treats it as a non-error usage request).
+func TestScaffold_HelpExits0(t *testing.T) {
+	exit, _, _ := runScaffold([]string{"--help"}, "")
+	if exit != 0 {
+		t.Fatalf("exit=%d, want 0", exit)
+	}
+}
+
+// Interactive rule-globs prompt that returns empty (EOF after the
+// prompt). The command must reject the missing value instead of
+// writing a malformed manifest.
+func TestScaffold_Interactive_RuleGlobsEmptyErrors(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "r")
+	exit, _, stderr := runScaffold([]string{
+		"--type", "rule",
+		"--description", "x",
+		"--rule-mode", "glob",
+		target,
+	}, "\n") // user just hits enter; the resulting empty value is rejected
+	if exit != 2 {
+		t.Fatalf("exit=%d, want 2", exit)
+	}
+	if !strings.Contains(stderr, "rule-globs is required") {
+		t.Errorf("stderr missing rule-globs required hint: %s", stderr)
+	}
+}
+
+// --rule-mode value validation runs even in interactive mode.
+func TestScaffold_RejectsBadRuleMode(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "r")
+	exit, _, stderr := runScaffold([]string{
+		"--type", "rule",
+		"--description", "x",
+		"--rule-mode", "bogus",
+		"--yes",
+		target,
+	}, "")
+	if exit != 2 {
+		t.Fatalf("exit=%d, want 2", exit)
+	}
+	if !strings.Contains(stderr, "must be one of") {
+		t.Errorf("stderr missing rule-mode validity hint: %s", stderr)
+	}
+}
+
+// ---------- Flag pass-through coverage ----------
+
+// --when-to-use populates the YAML list. Covers the populated
+// branch of writeWhenToUse (the empty branch is hit by every other
+// test).
+func TestScaffold_WhenToUsePopulated(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "x")
+	exit, _, stderr := runScaffold([]string{
+		"--type", "context",
+		"--description", "x",
+		"--when-to-use", "first situation,second situation",
+		"--yes",
+		target,
+	}, "")
+	if exit != 0 {
+		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
+	}
+	body, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
+	if !bytes.Contains(body, []byte("when_to_use:\n")) {
+		t.Errorf("ARTIFACT.md missing when_to_use header: %s", body)
+	}
+	if !bytes.Contains(body, []byte(`- "first situation"`)) {
+		t.Errorf("first when_to_use entry missing: %s", body)
+	}
+	if !bytes.Contains(body, []byte(`- "second situation"`)) {
+		t.Errorf("second when_to_use entry missing: %s", body)
+	}
+}
+
+// --extends populates the extends field for a non-skill type.
+func TestScaffold_ExtendsOnContext(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "x")
+	exit, _, stderr := runScaffold([]string{
+		"--type", "context",
+		"--description", "x",
+		"--extends", "finance/ap/pay-invoice@1.x",
+		"--yes",
+		target,
+	}, "")
+	if exit != 0 {
+		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
+	}
+	body, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
+	if !bytes.Contains(body, []byte("extends: finance/ap/pay-invoice@1.x")) {
+		t.Errorf("extends not written: %s", body)
+	}
+}
+
+// --extends populates the extends field for skill (ARTIFACT.md,
+// not SKILL.md — extends is Podium-specific per §4.3.4).
+func TestScaffold_ExtendsOnSkill(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "child-skill")
+	exit, _, stderr := runScaffold([]string{
+		"--type", "skill",
+		"--description", "Child skill that extends a parent.",
+		"--extends", "finance/ap/parent@1.x",
+		"--yes",
+		target,
+	}, "")
+	if exit != 0 {
+		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
+	}
+	artifact, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
+	if !bytes.Contains(artifact, []byte("extends: finance/ap/parent@1.x")) {
+		t.Errorf("extends not written to skill ARTIFACT.md: %s", artifact)
+	}
+	skill, _ := os.ReadFile(filepath.Join(target, "SKILL.md"))
+	if bytes.Contains(skill, []byte("extends:")) {
+		t.Errorf("extends must live in ARTIFACT.md only (§4.3.4): %s", skill)
+	}
+}
+
+// Hook with no --hook-action emits a default placeholder action so
+// the manifest is lint-clean and the author has something to edit.
+func TestScaffold_Hook_DefaultActionPlaceholder(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "h")
+	exit, _, stderr := runScaffold([]string{
+		"--type", "hook",
+		"--description", "x",
+		"--hook-event", "session_start",
+		"--yes",
+		target,
+	}, "")
+	if exit != 0 {
+		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
+	}
+	body, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
+	if !bytes.Contains(body, []byte("hook_action: |")) {
+		t.Errorf("default hook_action block missing: %s", body)
+	}
+	if !bytes.Contains(body, []byte("echo \"hook fired\"")) {
+		t.Errorf("placeholder hook action body missing: %s", body)
+	}
+}
+
+// ---------- Render helpers ----------
+
+func TestPlaceholderBody_AllTypes(t *testing.T) {
+	cases := []string{"context", "command", "agent", "rule", "hook", "mcp-server", "unknown-extension"}
+	for _, typ := range cases {
+		t.Run(typ, func(t *testing.T) {
+			got := placeholderBody(typ)
+			if got == "" {
+				t.Errorf("placeholderBody(%q) returned empty string", typ)
+			}
+			if !strings.HasSuffix(got, "\n") {
+				t.Errorf("placeholderBody(%q) missing trailing newline", typ)
+			}
+		})
+	}
+}
+
+func TestSplitCSV(t *testing.T) {
+	cases := []struct {
+		in   string
+		want []string
+	}{
+		{"", []string{}},
+		{"a", []string{"a"}},
+		{"a,b,c", []string{"a", "b", "c"}},
+		{" a , b , c ", []string{"a", "b", "c"}},
+		{"a,,b", []string{"a", "b"}},
+		{",,,", []string{}},
+	}
+	for _, c := range cases {
+		got := splitCSV(c.in)
+		if len(got) != len(c.want) {
+			t.Errorf("splitCSV(%q) = %v, want %v", c.in, got, c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("splitCSV(%q)[%d] = %q, want %q", c.in, i, got[i], c.want[i])
+			}
+		}
+	}
+}
+
+// --license on a non-skill type populates ARTIFACT.md (license
+// lives in SKILL.md for skills, so this branch only fires for
+// other types).
+func TestScaffold_LicenseOnContext(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "x")
+	exit, _, stderr := runScaffold([]string{
+		"--type", "context",
+		"--description", "x",
+		"--license", "Apache-2.0",
+		"--yes",
+		target,
+	}, "")
+	if exit != 0 {
+		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
+	}
+	body, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
+	if !bytes.Contains(body, []byte("license: Apache-2.0")) {
+		t.Errorf("license not written to ARTIFACT.md: %s", body)
+	}
+}
+
+// Interactive description prompt with a fully-empty stdin (no
+// trailing newline) exercises promptString's EOF branch.
+func TestScaffold_Interactive_DescriptionEOF(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "x")
+	exit, _, stderr := runScaffold([]string{
+		"--type", "context",
+		target,
+	}, "")
+	if exit != 2 {
+		t.Fatalf("exit=%d, want 2", exit)
+	}
+	if !strings.Contains(stderr, "description is required") {
+		t.Errorf("stderr missing description-required hint: %s", stderr)
+	}
+}
+
+// Public-API wrapper exercise: artifactScaffold delegates to the
+// IO-injected core. A --yes invocation with all required values
+// runs end-to-end against os.Stdin/Stdout/Stderr.
+func TestArtifactScaffoldWrapper(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "x")
+	exit := artifactScaffold([]string{
+		"--type", "context",
+		"--description", "x",
+		"--yes",
+		target,
+	})
+	if exit != 0 {
+		t.Fatalf("exit=%d, want 0", exit)
+	}
+	if _, err := os.Stat(filepath.Join(target, "ARTIFACT.md")); err != nil {
+		t.Errorf("expected ARTIFACT.md: %v", err)
+	}
+}
+
+// promptChoice with a default returns the default when the user
+// hits enter; covers the def != "" hint and the empty-input return.
+func TestPromptChoice_DefaultOnEmptyInput(t *testing.T) {
+	var out bytes.Buffer
+	got := promptChoice(bufio.NewReader(strings.NewReader("\n")), &out, "Pick", []string{"a", "b", "c"}, "b")
+	if got != "b" {
+		t.Errorf("got %q, want default %q", got, "b")
+	}
+	if !strings.Contains(out.String(), "[b]") {
+		t.Errorf("output missing default hint: %s", out.String())
+	}
+}
+
+// promptString with a default returns the default on empty input.
+func TestPromptString_DefaultOnEmptyInput(t *testing.T) {
+	var out bytes.Buffer
+	got := promptString(bufio.NewReader(strings.NewReader("\n")), &out, "Name", "alice")
+	if got != "alice" {
+		t.Errorf("got %q, want default %q", got, "alice")
+	}
+	if !strings.Contains(out.String(), "[alice]") {
+		t.Errorf("output missing default hint: %s", out.String())
+	}
+}
+
+// renderAndWrite's WriteFile error path: pre-create ARTIFACT.md
+// as a directory so os.WriteFile fails with a write error and the
+// command returns non-zero with a clear message.
+func TestScaffold_WriteFileFailsCleanly(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "x")
+	if err := os.MkdirAll(filepath.Join(target, "ARTIFACT.md"), 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	exit, _, stderr := runScaffold([]string{
+		"--type", "context",
+		"--description", "x",
+		"--force",
+		"--yes",
+		target,
+	}, "")
+	if exit != 1 {
+		t.Fatalf("exit=%d, want 1 (WriteFile error)", exit)
+	}
+	if !strings.Contains(stderr, "error:") {
+		t.Errorf("stderr missing error line: %s", stderr)
+	}
+}
+
+// Same as above but for the skill branch: pre-create SKILL.md as a
+// directory so the second WriteFile in renderAndWrite fails (the
+// ARTIFACT.md write succeeds first). Covers the skill-specific
+// SKILL.md write-error branch.
+func TestScaffold_Skill_SkillMDWriteFailsCleanly(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "greet")
+	if err := os.MkdirAll(filepath.Join(target, "SKILL.md"), 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	exit, _, stderr := runScaffold([]string{
+		"--type", "skill",
+		"--description", "Greet the user.",
+		"--force",
+		"--yes",
+		target,
+	}, "")
+	if exit != 1 {
+		t.Fatalf("exit=%d, want 1 (SKILL.md WriteFile error)", exit)
+	}
+	if !strings.Contains(stderr, "error:") {
+		t.Errorf("stderr missing error line: %s", stderr)
+	}
+}
+
+func TestContains(t *testing.T) {
+	if !contains([]string{"a", "b", "c"}, "b") {
+		t.Error("contains failed for present item")
+	}
+	if contains([]string{"a", "b", "c"}, "z") {
+		t.Error("contains returned true for missing item")
+	}
+	if contains([]string{}, "anything") {
+		t.Error("contains returned true for empty haystack")
 	}
 }
 
