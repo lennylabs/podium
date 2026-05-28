@@ -10,9 +10,9 @@ Each finding has an ID of the form `F-{section}.{subsection}.{n}`, a severity in
 
 ## Totals
 
-- 386 findings across 72 of the 82 reviewed subsections. 10 subsections had no findings.
-- By severity: 104 High, 168 Medium, 92 Low, and 22 Info.
-- By kind: 215 gap, 126 inconsistency, and 41 bug. Four findings did not carry an inline kind tag.
+- 387 findings across 72 of the 82 reviewed subsections. 10 subsections had no findings.
+- By severity: 105 High, 168 Medium, 92 Low, and 22 Info.
+- By kind: 216 gap, 126 inconsistency, and 41 bug. Four findings did not carry an inline kind tag.
 
 Severity meanings used by the reviewers:
 
@@ -63,7 +63,7 @@ Severity meanings used by the reviewers:
 | 7.2 | 7.2 Control Plane / Data Plane Split | 5 | 2 | 1 | 1 | 1 |
 | 7.3 | 7.3 Host Integration (7.3.1 Authoring and Ingestion, 7.3.2 Outbound Webhooks) | 10 | 4 | 5 | 0 | 1 |
 | 7.4 | 7.4 Degraded Network | 6 | 3 | 1 | 2 | 0 |
-| 7.5 | 7.5 podium sync (7.5.1 Scope Filters, 7.5.2 sync.yaml, 7.5.3 sync.lock, 7.5.4 Watch/Toggle, 7.5.5 override, 7.5.6 save-as, 7.5.7 profile edit) | 12 | 6 | 6 | 0 | 0 |
+| 7.5 | 7.5 podium sync (7.5.1 Scope Filters, 7.5.2 sync.yaml, 7.5.3 sync.lock, 7.5.4 Watch/Toggle, 7.5.5 override, 7.5.6 save-as, 7.5.7 profile edit) | 13 | 7 | 6 | 0 | 0 |
 | 7.6 | 7.6 Language SDKs (7.6.1 Read CLI, 7.6.2 Bulk Fetch) | 13 | 1 | 8 | 4 | 0 |
 | 7.7 | 7.7 Onboarding: podium init, config show, login | 14 | 2 | 9 | 3 | 0 |
 | 8.1 | 8.1 What Gets Logged | 6 | 4 | 2 | 0 | 0 |
@@ -106,7 +106,7 @@ Severity meanings used by the reviewers:
 | 14.13 | 14.13 Mixed-harness developer | 2 | 0 | 2 | 0 | 0 |
 | 14.14 | 14.14 Promote-to-shared workflow | 0 | 0 | 0 | 0 | 0 |
 | 14.15 | 14.15 Read-only viewer / auditor | 4 | 1 | 2 | 1 | 0 |
-| **Total** | **82 subsections** | **386** | **104** | **168** | **92** | **22** |
+| **Total** | **82 subsections** | **387** | **105** | **168** | **92** | **22** |
 
 ## High-severity findings
 
@@ -154,6 +154,7 @@ Severity meanings used by the reviewers:
 - F-7.5.5 — `podium sync override` does not materialize or delete files
 - F-7.5.6 — Watch mode does not apply toggles or re-resolve a profile
 - F-7.5.8 — `sync.Run` never populates the lock's `profile` and `scope`, breaking save-as and the active-profile default
+- F-7.5.13 — `podium sync` ignores `PODIUM_HARNESS` and the `sync.yaml` harness, always defaulting the adapter to `none`
 - F-7.6.1 — Python SDK `dependents_of` reads the wrong response field and decodes the wrong shape
 - F-7.7.1 — `podium config show` prints server config instead of the merged sync.yaml
 - F-7.7.4 — `podium login` requires `--registry` and does not resolve it from the merged config
@@ -1178,7 +1179,7 @@ The degraded-network contract in §7.4 defines three `PODIUM_CACHE_MODE` behavio
 
 _Reviewed spec/07-external-integration.md against the implementation._
 
-The implementation in pkg/sync and cmd/podium covers a filesystem-source materialization core (walk, adapter, atomic lock write, stale-file cleanup, poll-based watch) plus standalone helpers for override toggles, save-as, and profile edit. Several spec-mandated parts of §7.5 are absent or diverge: scope filtering (`--include`/`--exclude`/`--type`) is implemented as a `ScopeFilter` type with unit tests but never wired into `sync.Run` or the CLI; profiles, `--config` multi-target, `--check`, multi-scope `sync.yaml` resolution (user-global / project-local), precedence, and the profile-collision warning do not exist on the sync path; server-source (URL) sync is not implemented; override and watch do not touch the target directory or apply toggles; and the lock file's `profile`/`scope`/`last_synced_by` fields are not populated as specified. Findings below.
+The implementation in pkg/sync and cmd/podium covers a filesystem-source materialization core (walk, adapter, atomic lock write, stale-file cleanup, poll-based watch) plus standalone helpers for override toggles, save-as, and profile edit. Several spec-mandated parts of §7.5 are absent or diverge: scope filtering (`--include`/`--exclude`/`--type`) is implemented as a `ScopeFilter` type with unit tests but never wired into `sync.Run` or the CLI; profiles, `--config` multi-target, `--check`, multi-scope `sync.yaml` resolution (user-global / project-local), precedence, and the profile-collision warning do not exist on the sync path; server-source (URL) sync is not implemented; override and watch do not touch the target directory or apply toggles; the lock file's `profile`/`scope`/`last_synced_by` fields are not populated as specified; and the harness adapter is never resolved from `PODIUM_HARNESS` or the `sync.yaml` `harness` field, so a sync that omits `--harness` writes the canonical layout rather than the configured harness-native layout. Findings below.
 
 ### - [ ] F-7.5.1 — Scope filters (`--include`/`--exclude`/`--type`) never applied during sync [High] — OPEN
 
@@ -1227,6 +1228,10 @@ The implementation in pkg/sync and cmd/podium covers a filesystem-source materia
 ### - [ ] F-7.5.12 — `podium sync --profile`, the override TUI, and the profile-edit TUI are not provided [Medium] — OPEN
 
 (gap) §7.5 lists `podium sync --profile finance-team`; §7.5.5 specifies a no-flag TUI mode for `podium sync override` that renders the effective view as an expandable checklist; §7.5.7 specifies a no-flag/positional TUI for `podium profile edit`. The CLI provides no `--profile` flag on `sync` (cmd/podium/main.go:186), and both `syncOverrideCmd` (cmd/podium/main.go:282) and `profileCmd` (cmd/podium/main.go:355) implement only the batch flag paths with no interactive checklist; running `podium sync override` with no flags writes no toggles and just prints empty lists, and `podium profile edit` with no `--profile` exits 2. Suggested direction: add the `sync --profile` flag (see F-7.5.2) and implement (or explicitly defer with a clear message) the override and profile-edit TUI checklists described in §7.5.5 and §7.5.7.
+
+### - [ ] F-7.5.13 — `podium sync` ignores `PODIUM_HARNESS` and the `sync.yaml` harness, always defaulting the adapter to `none` [High] — OPEN
+
+(gap) §7.5.2 defines `harness` as a `sync.yaml` field (`defaults.harness`, line 230; per-target `harness` at lines 250 and 254) and resolves it per key in precedence order (lines 214-221: CLI flags, then `PODIUM_*` env vars, then project-local, then project-shared, then user-global, then built-in defaults), with the user-global scope holding the typical `harness` default (line 206) and §7.5.2 stating that a project pins `harness` by placing it in the project-shared file (line 210). The `podium sync` CLI honors only the `--harness` flag and the built-in default. `syncCmd` declares `harness := fs.String("harness", "none", ...)` (cmd/podium/main.go:191) and reads `sync.yaml` only for `cfg.Defaults.Registry` (cmd/podium/main.go:205-209); it never reads `cfg.Defaults.Harness` (declared at pkg/sync/config.go:33, with per-profile and per-target `Harness` at config.go:45 and config.go:51) and never consults `PODIUM_HARNESS`. A whole-file search of cmd/podium/main.go shows `os.Getenv` used only for `PODIUM_REGISTRY` (lines 490, 556, 582, 608, 657); `PODIUM_HARNESS` is read by `podium status` (cmd/podium/status.go:32) and by the separate MCP binary (cmd/podium-mcp/main.go:100), never on the sync path. The resolved `AdapterID` therefore stays `"none"` for any invocation that omits `--harness`, so `sync.Run` selects the `None` adapter (pkg/sync/sync.go:85, pkg/adapter/none.go:20) and writes the canonical layout `<artifact-id>/ARTIFACT.md` and `<artifact-id>/SKILL.md` instead of the Claude Code layout `.claude/skills/<name>/SKILL.md` that `ClaudeCode.Adapt` produces (pkg/adapter/claudecode.go:34-44). A developer who selects Claude Code through the documented `PODIUM_HARNESS=claude-code` env var or a `defaults.harness: claude-code` entry in `sync.yaml` receives the canonical files with no error, while `podium status` reports `harness: claude-code` (cmd/podium/status.go:32) for the same environment the sync materializes as `none`. The harness documentation states the env-var path applies to sync: "The harness still needs `PODIUM_HARNESS` set (or `--harness <name>` on the sync command)" (docs/consuming/configure-your-harness.md:482). Suggested direction: change the `--harness` flag default to empty so an unset flag falls through, then resolve the adapter ID in the §7.5.2 precedence order (`--harness` when set, then `PODIUM_HARNESS`, then `cfg.Defaults.Harness` and the selected profile's or target's `Harness`, then `none`) before constructing `sync.Options`, mirroring the existing `defaults.registry` fallback at cmd/podium/main.go:205-209.
 ## F-7.6 — 7.6 Language SDKs (7.6.1 Read CLI, 7.6.2 Bulk Fetch)
 
 _Reviewed spec/07-external-integration.md against the implementation._
