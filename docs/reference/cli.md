@@ -280,6 +280,61 @@ podium artifact show <id> [--version <semver>]
 
 For materialization (writing files to disk), use `podium sync --include <id>`.
 
+### `podium artifact scaffold`
+
+Writes a new artifact directory at the given path with valid starting frontmatter for the chosen `--type`. Filesystem-only; the command does not talk to the registry. The last component of `<path>` becomes the artifact name; preceding components form the §4.2 domain hierarchy.
+
+```
+podium artifact scaffold --type <type> --description <text>
+                         [--tags <a,b,c>]
+                         [--sensitivity <low|medium|high>]
+                         [--license <spdx>]
+                         [--when-to-use <a,b,c>]
+                         [--version <semver>]
+                         [--extends <id>]
+                         [type-specific flags]
+                         [--force] [--yes]
+                         <path>
+```
+
+`--type` is required; it accepts any of the spec §4.3 first-class types:
+
+| Type | Files written | Type-specific flags |
+|---|---|---|
+| `skill` | ARTIFACT.md + SKILL.md (per §4.3.4 field allocation) | — |
+| `agent` | ARTIFACT.md | `--input-schema`, `--output-schema`, `--delegates-to` |
+| `context` | ARTIFACT.md | — |
+| `command` | ARTIFACT.md | `--expose-as-mcp-prompt` |
+| `rule` | ARTIFACT.md | `--rule-mode` (default `always`), `--rule-globs`, `--rule-description` |
+| `hook` | ARTIFACT.md | `--hook-event` (required), `--hook-action` |
+| `mcp-server` | ARTIFACT.md | `--server-identifier` (required) |
+
+Extension types (anything outside the first-class enum) are accepted with a warning; the scaffolder writes a generic ARTIFACT.md and leaves the extension's bespoke fields for the author to add.
+
+**Non-interactive example:**
+
+```bash
+podium artifact scaffold \
+    --type skill \
+    --description "Draft release notes from a list of ticket keys." \
+    --tags "release,workflow" \
+    --license MIT \
+    --yes \
+    finance/release/release-notes
+```
+
+This writes `finance/release/release-notes/ARTIFACT.md` and `SKILL.md` (intermediate domain directories are created). Per spec §4.3.4, `name`, `description`, and `license` live in `SKILL.md`; `ARTIFACT.md` carries Podium's structured fields and an empty-body marker.
+
+**Conditional requirements when `--yes` is set:**
+
+- `--description` is required for every type.
+- `--rule-globs` is required when `--rule-mode glob` is set.
+- `--rule-description` is required when `--rule-mode auto` is set.
+- `--hook-event` is required for `--type hook`.
+- `--server-identifier` is required for `--type mcp-server`.
+
+Without `--yes`, the command prompts for missing values. `--force` overwrites an existing directory.
+
 ---
 
 ## Layer management
