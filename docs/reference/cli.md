@@ -30,6 +30,8 @@ Flags:
         address to listen on (overrides PODIUM_BIND)
   -config string
         path to registry.yaml (overrides PODIUM_CONFIG_FILE)
+  -layer-path string
+        filesystem registry root to ingest at startup (§13.10; overrides PODIUM_LAYER_PATH)
   -public-mode
         run in public mode (overrides PODIUM_PUBLIC_MODE)
   -standalone
@@ -130,7 +132,7 @@ podium serve [--standalone] [--strict]
 | `--strict` | Refuse to start without an explicit config (no auto-standalone fallback). |
 | `--config <path>` | Override the default config file location. |
 | `--bind <addr>` | Bind address. |
-| `--layer-path <path>` | For standalone: register layers rooted at this path. The path is polymorphic. When `<path>/.registry-config` exists with `multi_layer: true` (and no top-level manifest files are present), each subdirectory becomes a `local`-source layer per the filesystem-registry layout. Otherwise the path is registered as a single `local`-source layer. |
+| `--layer-path <path>` | For standalone: register layers rooted at this path. The path is polymorphic. When `<path>/.registry-config` exists with `multi_layer: true` (and no top-level manifest files are present), each subdirectory becomes a `local`-source layer per the filesystem-registry layout. Otherwise the path is registered as a single `local`-source layer. Equivalent to `PODIUM_LAYER_PATH` or the `layers.path` key in `registry.yaml`; precedence is CLI flag > env var > config file. |
 | `--public-mode` | Bypass authentication and visibility filtering. Mutually exclusive with an identity provider. |
 | `--allow-public-bind` | Allow non-loopback bind in public mode (typically behind an authenticated reverse proxy). |
 

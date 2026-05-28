@@ -23,6 +23,7 @@ func serveCmd(args []string) int {
 	publicMode := fs.Bool("public-mode", false, "run in public mode (overrides PODIUM_PUBLIC_MODE)")
 	standalone := fs.Bool("standalone", false, "alias for the zero-flag standalone bootstrap")
 	configFile := fs.String("config", "", "path to registry.yaml (overrides PODIUM_CONFIG_FILE)")
+	layerPath := fs.String("layer-path", "", "filesystem registry root to ingest at startup (§13.10; overrides PODIUM_LAYER_PATH)")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
@@ -35,6 +36,9 @@ func serveCmd(args []string) int {
 	}
 	if *configFile != "" {
 		_ = os.Setenv("PODIUM_CONFIG_FILE", *configFile)
+	}
+	if *layerPath != "" {
+		_ = os.Setenv("PODIUM_LAYER_PATH", *layerPath)
 	}
 	// --standalone is a documentation hint per §13.10; the bootstrap
 	// is already the standalone default. Carry it on the env so

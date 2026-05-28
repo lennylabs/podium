@@ -454,6 +454,17 @@ For server deployments that intentionally run without an identity provider, `POD
 
 Filesystem-source registries (§13.11) have no identity provider by definition. There is no server process to authenticate against and no JWT to verify. `podium login` is a no-op when the resolved registry is a filesystem path; the visibility evaluator short-circuits to `true` for every layer.
 
+### Layers
+
+Layer-list bootstrap and visibility default for the §13.10 standalone deployment.
+
+| Var                              | Description                                                                                                                                                              | Default                                                                |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| `PODIUM_LAYER_PATH`              | Filesystem registry root opened at startup. Maps to the `--layer-path` flag. Dispatches between single-layer and filesystem-registry modes per `.registry-config` (§13.10). | (unset disables the bootstrap and starts with an empty registry)        |
+| `PODIUM_DEFAULT_LAYER_VISIBILITY`| Fallback `visibility:` applied when a layer is registered without an explicit setting. One of `public`, `organization`, or `private`.                                    | `private` (§13.10 specifies `public` for standalone deployments)        |
+
+When `PODIUM_LAYER_PATH` is set, the standalone server ingests every resolved layer at startup and persists a `local`-source `LayerConfig` per layer so the §7.3.1 layer-management endpoints (`GET /v1/layers`, `POST /v1/layers/reingest`, `DELETE /v1/layers`) see them. Bootstrap layers carry `visibility: public` per the §13.10 standalone default. Additional `local` and `git` layers can be registered via `podium layer register` after startup.
+
 ### Config file format
 
 ```yaml

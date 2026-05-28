@@ -57,6 +57,10 @@ type yamlDiscovery struct {
 
 type yamlLayerCfg struct {
 	DefaultVisibility string `yaml:"default_visibility,omitempty"`
+	// Path is the §13.10 standalone bootstrap layer path. Mirrors
+	// the PODIUM_LAYER_PATH env var; env wins per the standard
+	// precedence.
+	Path string `yaml:"path,omitempty"`
 }
 
 type yamlReadOnly struct {
@@ -141,6 +145,9 @@ func applyYAML(c *Config, y *yamlConfig) {
 	}
 	if c.defaultLayerVisibility == "" && y.Layers.DefaultVisibility != "" {
 		c.defaultLayerVisibility = y.Layers.DefaultVisibility
+	}
+	if c.layerPath == "" && y.Layers.Path != "" {
+		c.layerPath = y.Layers.Path
 	}
 	if c.readOnlyProbeFailures == 0 && y.ReadOnly.ProbeFailures > 0 {
 		c.readOnlyProbeFailures = y.ReadOnly.ProbeFailures
