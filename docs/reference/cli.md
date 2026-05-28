@@ -278,72 +278,60 @@ podium artifact show <id> [--version <semver>]
 
 For materialization (writing files to disk), use `podium sync --include <id>`.
 
-### `podium artifact new`
+### `podium artifact scaffold`
 
-Scaffolds a new artifact directory under a declared layer, with a
-starting body matching one of five built-in templates. The command is
-interactive by default; CI and scripts can pass `--yes` plus the
-required flags to run non-interactively.
+Writes a new artifact directory at the given path with valid starting frontmatter for the chosen `--type`. Filesystem-only; the command does not talk to the registry. The last component of `<path>` becomes the artifact name; preceding components form the §4.2 domain hierarchy.
 
 ```
-podium artifact new [--root <dir>]
-                    [--layer <name>]
-                    [--name <kebab-case>]
-                    [--description <text>]
-                    [--tags <a,b,c>]
-                    [--template <skill|workflow|persona|policy|conversation>]
-                    [--force] [--yes]
+podium artifact scaffold --type <type> --description <text>
+                         [--tags <a,b,c>]
+                         [--sensitivity <low|medium|high>]
+                         [--license <spdx>]
+                         [--when-to-use <a,b,c>]
+                         [--version <semver>]
+                         [--extends <id>]
+                         [type-specific flags]
+                         [--force] [--yes]
+                         <path>
 ```
 
-**Layer discovery.** When `<root>/.podium/layers.yaml` exists, the
-command reads that file as the layer catalog and uses each entry's
-description in the picker. When the file is absent, the command lists
-top-level directories under `<root>` as candidate layers.
+`--type` is required; it accepts any of the spec §4.3 first-class types:
 
-A minimal `.podium/layers.yaml`:
+| Type | Files written | Type-specific flags |
+|---|---|---|
+| `skill` | ARTIFACT.md + SKILL.md (per §4.3.4 field allocation) | — |
+| `agent` | ARTIFACT.md | `--input-schema`, `--output-schema`, `--delegates-to` |
+| `context` | ARTIFACT.md | — |
+| `command` | ARTIFACT.md | `--expose-as-mcp-prompt` |
+| `rule` | ARTIFACT.md | `--rule-mode` (default `always`), `--rule-globs`, `--rule-description` |
+| `hook` | ARTIFACT.md | `--hook-event` (required), `--hook-action` |
+| `mcp-server` | ARTIFACT.md | `--server-identifier` (required) |
 
-```yaml
-layers:
-  - name: policy
-    description: Cross-cutting policies (PII, scope, tone).
-    review_required: true
-  - name: common
-    description: Generic skills any team can use.
-  - name: alice-personal
-    description: Personal playground.
-    review_required: false
-```
-
-**Templates:**
-
-| Template       | When to use                                                          |
-|----------------|----------------------------------------------------------------------|
-| `skill`        | Plain markdown body with frontmatter.                                |
-| `workflow`     | Multi-step workflow over MCP tools (numbered steps + output format). |
-| `persona`      | Cross-cutting tone or format; composes with other skills.            |
-| `policy`       | Guardrail or redaction rules; composes with other skills.            |
-| `conversation` | Pure conversation; no MCP tool calls.                                |
+Extension types (anything outside the first-class enum) are accepted with a warning; the scaffolder writes a generic ARTIFACT.md and leaves the extension's bespoke fields for the author to add.
 
 **Non-interactive example:**
 
 ```bash
-podium artifact new \
-    --root ./skills \
-    --layer common \
-    --name release-notes \
+podium artifact scaffold \
+    --type skill \
     --description "Draft release notes from a list of ticket keys." \
     --tags "release,workflow" \
-    --template workflow \
-    --yes
+    --license MIT \
+    --yes \
+    finance/release/release-notes
 ```
 
-This writes `./skills/common/release-notes/ARTIFACT.md` and `SKILL.md`.
-The artifact frontmatter is populated from the flags; the skill body
-follows the chosen template and is ready to edit.
+This writes `finance/release/release-notes/ARTIFACT.md` and `SKILL.md` (intermediate domain directories are created). Per spec §4.3.4, `name`, `description`, and `license` live in `SKILL.md`; `ARTIFACT.md` carries Podium's structured fields and an empty-body marker.
 
-When the destination layer has `review_required: true`, the command
-prints a notice reminding the author to get owner approval before
-merging.
+**Conditional requirements when `--yes` is set:**
+
+- `--description` is required for every type.
+- `--rule-globs` is required when `--rule-mode glob` is set.
+- `--rule-description` is required when `--rule-mode auto` is set.
+- `--hook-event` is required for `--type hook`.
+- `--server-identifier` is required for `--type mcp-server`.
+
+Without `--yes`, the command prompts for missing values. `--force` overwrites an existing directory.
 
 ---
 

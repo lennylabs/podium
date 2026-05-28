@@ -145,6 +145,7 @@ Commands:
   domain search       Hybrid search over domains.
   domain analyze      Print domain-discovery metrics and split/fold candidates for a subtree.
   artifact show       Print an artifact's manifest body and frontmatter.
+  artifact scaffold   Write a new artifact directory at a path on disk.
   init                Write ~/.podium/sync.yaml or ./.podium/sync.yaml.
   profile edit        Add or remove patterns on a sync.yaml profile.
   layer register      Register a layer with the registry.
@@ -632,7 +633,7 @@ func artifactCmd(args []string) int {
 	if len(args) < 1 || isHelpArg(args[0]) {
 		printGroupHelp("artifact", "Inspect and scaffold artifacts.", [][2]string{
 			{"show", "Print an artifact's manifest body and frontmatter."},
-			{"new", "Scaffold a new artifact in a declared layer."},
+			{"scaffold", "Write a new artifact directory at a path on disk."},
 		})
 		if len(args) < 1 {
 			return 2
@@ -642,8 +643,8 @@ func artifactCmd(args []string) int {
 	switch args[0] {
 	case "show":
 		return artifactShow(args[1:])
-	case "new":
-		return artifactNew(args[1:])
+	case "scaffold":
+		return artifactScaffold(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown artifact subcommand: %s\n", args[0])
 		return 2
