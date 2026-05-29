@@ -65,6 +65,14 @@ func runPodium(t testing.TB, cwd string, env []string, args ...string) cliResult
 	return runBin(t, cmdharness.Bin(t, "podium"), cwd, append(env, "PODIUM_NO_AUTOSTANDALONE=1"), nil, 90*time.Second, args...)
 }
 
+// runPodiumStdin is runPodium with a stdin payload, for the CLI's
+// interactive prompts (scaffold without --yes). The payload is fed verbatim
+// and the process reads it to EOF under the same hard deadline.
+func runPodiumStdin(t testing.TB, cwd string, env []string, stdin string, args ...string) cliResult {
+	t.Helper()
+	return runBin(t, cmdharness.Bin(t, "podium"), cwd, append(env, "PODIUM_NO_AUTOSTANDALONE=1"), []byte(stdin), 90*time.Second, args...)
+}
+
 // runBin is the generic bounded subprocess runner.
 func runBin(t testing.TB, bin, cwd string, env []string, stdin []byte, timeout time.Duration, args ...string) cliResult {
 	t.Helper()
