@@ -66,7 +66,7 @@ SUMMARY_LOG = os.path.join(LOG_DIR, "summary.log")
 DEFAULTS = {
     "max_iter": 1000,
     "fix_cap": 6,          # fix batches processed per outer iteration before re-planning + verify
-    "timeout": 2700,       # seconds per batch claude invocation (45 min)
+    "timeout": 14400,      # seconds per batch claude invocation (4 h)
     "plan_timeout": 900,   # seconds for the plan session (15 min)
     "verify_timeout": 1800,  # seconds for the verify session (30 min)
     "retries": 5,          # resume-retries after a failed/timed-out batch

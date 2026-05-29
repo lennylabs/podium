@@ -19,3 +19,7 @@ sdks/podium-py/podium/_version.py
 node_modules/
 .env.local
 .envrc.local
+
+# close-build-gaps.py driver scratch (not part of the project)
+close-build-gaps-reference-only.sh
+.claude/scheduled_tasks.lock
