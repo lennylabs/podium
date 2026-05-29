@@ -53,6 +53,16 @@ func Run(t testing.TB, binary, cwd string, args ...string) Result {
 	return res
 }
 
+// Bin builds the named binary once per test process and returns its
+// path. Callers that need custom environment, stdin, or their own
+// process lifecycle (background servers, MCP stdio, SIGINT teardown)
+// construct their own exec.Command from this path; Run covers the
+// common single-shot case.
+func Bin(t testing.TB, binary string) string {
+	t.Helper()
+	return buildBinary(t, binary)
+}
+
 var (
 	buildOnce sync.Map // map[string]*sync.Once
 	buildPath sync.Map // map[string]string
