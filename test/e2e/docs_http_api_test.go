@@ -811,9 +811,20 @@ func TestDocHTTPAPI_37_ScopePreview(t *testing.T) {
 	}
 }
 
-// spec: http-api.md § Scope preview — 403 when disabled.
+// spec: http-api.md § Scope preview — 403 when disabled. F-3.5.1: the
+// standalone binary honors PODIUM_EXPOSE_SCOPE_PREVIEW=false and answers
+// 403 scope_preview_disabled.
 func TestDocHTTPAPI_38_ScopePreviewDisabled(t *testing.T) {
-	t.Skip("blocked by F-3.5.1: the expose_scope_preview tenant flag and 403 scope_preview_disabled response are not implemented (the endpoint is always on)")
+	t.Parallel()
+	srv := startServerArgs(t,
+		[]string{"HOME=" + t.TempDir(), "PODIUM_EXPOSE_SCOPE_PREVIEW=false"},
+		"serve", "--standalone")
+	st, body := getRaw(t, srv.BaseURL+"/v1/scope/preview")
+	apiWantStatus(t, st, 403, "scope/preview disabled", body)
+	m := apiJSONObj(t, body)
+	if m["code"] != "scope_preview_disabled" {
+		t.Fatalf("error code = %v, want scope_preview_disabled\nbody:\n%s", m["code"], body)
+	}
 }
 
 // ===== Ingest webhook (T-D-http-api-39) ==============================

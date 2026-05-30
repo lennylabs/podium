@@ -391,9 +391,14 @@ func Run() error {
 
 	// Standalone bootstrap: ensure the default tenant exists so
 	// initial requests don't fail on missing-tenant lookups (§13.10
-	// auto-bootstrap).
+	// auto-bootstrap). The §3.5 expose_scope_preview gate is seeded from
+	// config at creation; a nil pointer leaves the default (true).
 	const tenantID = "default"
-	_ = st.CreateTenant(context.Background(), store.Tenant{ID: tenantID, Name: tenantID})
+	_ = st.CreateTenant(context.Background(), store.Tenant{
+		ID:                 tenantID,
+		Name:               tenantID,
+		ExposeScopePreview: cfg.exposeScopePreview,
+	})
 
 	// §7.2 data plane: open the object store before any ingest so bundled
 	// resources upload to it keyed by content hash as artifacts ingest.
@@ -720,6 +725,11 @@ type Config struct {
 	// (true); a tenant sets it false to disable per-domain DOMAIN.md
 	// discovery overrides registry-wide and have lint warn on them.
 	allowPerDomainOverrides *bool
+	// §3.5 expose_scope_preview tenant gate. nil leaves the default
+	// (true); a tenant sets it false so GET /v1/scope/preview answers
+	// 403 scope_preview_disabled. Sourced from PODIUM_EXPOSE_SCOPE_PREVIEW
+	// or registry.yaml's tenant.expose_scope_preview.
+	exposeScopePreview *bool
 }
 
 // discoveryDefaults converts the parsed registry.yaml discovery block
@@ -784,6 +794,7 @@ func (c *Config) Settings() []Setting {
 		{"layers.default_visibility", c.defaultLayerVisibility, envOrSrc("PODIUM_DEFAULT_LAYER_VISIBILITY", defaultSrc)},
 		{"layers.max_user_layers", intStr(c.maxUserLayers), envOrSrc("PODIUM_MAX_USER_LAYERS", defaultSrc)},
 		{"layers.path", c.layerPath, envOrSrc("PODIUM_LAYER_PATH", yamlSrc)},
+		{"tenant.expose_scope_preview", boolStr(c.exposeScopePreview == nil || *c.exposeScopePreview), envOrSrc("PODIUM_EXPOSE_SCOPE_PREVIEW", yamlSrc)},
 		{"read_only.probe_failures", intStr(c.readOnlyProbeFailures), envOrSrc("PODIUM_READONLY_PROBE_FAILURES", defaultSrc)},
 		{"read_only.probe_interval_seconds", intStr(c.readOnlyProbeInterval), envOrSrc("PODIUM_READONLY_PROBE_INTERVAL", defaultSrc)},
 		{"openai_api_key", redact(c.openaiAPIKey), envOrSrc("OPENAI_API_KEY", "")},
@@ -857,6 +868,8 @@ func LoadConfig() *Config {
 		materializeRateLimit: envInt("PODIUM_QUOTA_MATERIALIZE_RATE", 0),
 		// §13.10 standalone bootstrap layer path.
 		layerPath: os.Getenv("PODIUM_LAYER_PATH"),
+		// §3.5 scope-preview tenant gate (nil = default true).
+		exposeScopePreview: envBoolPtr("PODIUM_EXPOSE_SCOPE_PREVIEW"),
 	}
 	// §13.10 ~/.podium/registry.yaml: load and overlay onto env-
 	// derived defaults. Env values keep precedence per applyYAML.
@@ -1109,4 +1122,15 @@ func isTrue(s string) bool {
 		return true
 	}
 	return false
+}
+
+// envBoolPtr reads a tri-state boolean env var: unset yields nil (leave
+// the default), a truthy value yields &true, anything else yields &false.
+func envBoolPtr(key string) *bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return nil
+	}
+	b := isTrue(v)
+	return &b
 }

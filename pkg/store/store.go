@@ -7,10 +7,31 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"time"
 )
+
+// nullBoolFromPtr converts an optional bool to a sql.NullBool for the SQL
+// backends. A nil pointer persists as NULL so the tri-state survives a
+// round trip (NULL = unset, distinct from an explicit false).
+func nullBoolFromPtr(b *bool) sql.NullBool {
+	if b == nil {
+		return sql.NullBool{}
+	}
+	return sql.NullBool{Bool: *b, Valid: true}
+}
+
+// ptrFromNullBool is the inverse of nullBoolFromPtr: a NULL column reads
+// back as a nil pointer.
+func ptrFromNullBool(nb sql.NullBool) *bool {
+	if !nb.Valid {
+		return nil
+	}
+	v := nb.Bool
+	return &v
+}
 
 // Errors returned by Store implementations.
 var (
@@ -31,6 +52,18 @@ type Tenant struct {
 	ID    string
 	Name  string
 	Quota Quota
+	// ExposeScopePreview is the §3.5 tenant gate for GET
+	// /v1/scope/preview. A nil pointer selects the documented default
+	// (true); a non-nil false disables the endpoint so the registry
+	// answers 403 scope_preview_disabled. The tri-state distinguishes
+	// "operator left it unset" from "operator set it false".
+	ExposeScopePreview *bool
+}
+
+// ScopePreviewEnabled resolves the §3.5 expose_scope_preview gate,
+// defaulting to true when the tenant config leaves it unset.
+func (t Tenant) ScopePreviewEnabled() bool {
+	return t.ExposeScopePreview == nil || *t.ExposeScopePreview
 }
 
 // Quota is the per-tenant resource budget (§4.7.8).

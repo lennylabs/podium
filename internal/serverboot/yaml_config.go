@@ -33,6 +33,15 @@ type yamlConfig struct {
 	// PODIUM_DEFAULT_LAYER_VISIBILITY.
 	DefaultLayerVisibility string       `yaml:"default_layer_visibility,omitempty"`
 	ReadOnly               yamlReadOnly `yaml:"read_only,omitempty"`
+	// Tenant is the §3.5 per-tenant config block (currently the
+	// scope-preview gate). Config-file-only with an env override.
+	Tenant yamlTenant `yaml:"tenant,omitempty"`
+}
+
+// yamlTenant mirrors the §3.5 `tenant:` block. ExposeScopePreview is
+// tri-state (nil = default true) so an explicit false survives.
+type yamlTenant struct {
+	ExposeScopePreview *bool `yaml:"expose_scope_preview,omitempty"`
 }
 
 type yamlStoreCfg struct {
@@ -198,6 +207,11 @@ func applyYAML(c *Config, y *yamlConfig) {
 	// default true); the others are zero-means-unset in resolveKnobs.
 	c.discovery = y.Discovery
 	c.allowPerDomainOverrides = y.Discovery.AllowPerDomainOverrides
+	// §3.5 scope-preview gate: env (PODIUM_EXPOSE_SCOPE_PREVIEW) wins; the
+	// yaml value fills in only when the env var left it unset.
+	if c.exposeScopePreview == nil && y.Tenant.ExposeScopePreview != nil {
+		c.exposeScopePreview = y.Tenant.ExposeScopePreview
+	}
 	if c.readOnlyProbeFailures == 0 && y.ReadOnly.ProbeFailures > 0 {
 		c.readOnlyProbeFailures = y.ReadOnly.ProbeFailures
 	}

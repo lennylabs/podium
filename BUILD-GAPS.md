@@ -425,9 +425,11 @@ _Reviewed spec/03-disclosure-surface.md against the implementation._
 
 I verified the scope preview surface end to end: the core aggregator (`pkg/registry/core/dependents.go`), the HTTP endpoint (`pkg/registry/server/server.go`), the Python and TypeScript SDK methods, and the claimed consumer paths (MCP server, `podium sync`, `podium status`). The core endpoint exists and returns the four spec-named fields with matching wire names, and the OAuth identity drives layer composition through the shared `s.identity(r)` path. The tenant gate `expose_scope_preview` and the `403 scope_preview_disabled` response are absent (the implementing code documents this itself), the aggregate counts double-count artifact versions, the `layers` array has no stable ordering, and several mandated consumer paths do not expose the preview.
 
-### - [ ] F-3.5.1 — Tenant flag `expose_scope_preview` and `403 scope_preview_disabled` not implemented [High] — OPEN
+### - [x] F-3.5.1 — Tenant flag `expose_scope_preview` and `403 scope_preview_disabled` not implemented [High] — CLOSED
 
 (gap) Spec §3.5 states the endpoint is gated by tenant config `expose_scope_preview` (default `true`) and that "When `false`, the endpoint returns `403 scope_preview_disabled`." The implementation has no such gate. `PreviewScope` in `pkg/registry/core/dependents.go:62` always computes and returns the preview, and its own doc comment at lines 59-61 states "this implementation ships the always-on path. Adding the 403 surface is one Tenant config check away." The handler `handleScopePreview` at `pkg/registry/server/server.go:662` performs no gating. A repo-wide search for `expose_scope_preview`, `ExposeScopePreview`, and `scope_preview_disabled` returns only that single doc-comment reference, and the `store.Tenant` struct at `pkg/store/store.go:29` has no corresponding field. Because aggregate counts can hint at the existence of restricted content (the rationale the spec gives for the gate), the missing flag is a disclosure-control gap. Add an `ExposeScopePreview` field to the tenant config (defaulting to true), wire it through `internal/serverboot`, and have `handleScopePreview` return `403` with error code `scope_preview_disabled` when it is false.
+
+**Resolution (fdf8587):** Added `store.Tenant.ExposeScopePreview *bool` (tri-state, nil = default true) plus `Tenant.ScopePreviewEnabled()`, persisted across the memory, SQLite, and Postgres backends (new nullable `expose_scope_preview` column, `sql.NullBool` round trip, storetest `ScopePreviewFlagRoundTrip` conformance). `core.PreviewScope` checks the gate first and returns the new `ErrScopePreviewDisabled` sentinel; `handleScopePreview` maps it to `403 scope_preview_disabled`. `internal/serverboot` resolves the flag from `PODIUM_EXPOSE_SCOPE_PREVIEW` and registry.yaml's `tenant.expose_scope_preview` (env wins) and seeds it on the default tenant.
 
 ### - [ ] F-3.5.2 — `podium status` does not surface scope preview data [Medium] — OPEN
 
@@ -441,25 +443,33 @@ I verified the scope preview surface end to end: the core aggregator (`pkg/regis
 
 (gap) Spec §3.5 names `podium sync` among the consumer paths that "all expose this preview." A search across `pkg/sync/` and the `cmd/podium/sync*.go` sources for `preview`, `Preview`, `scope/preview`, and `PreviewScope` returns no matches. Add a preview affordance to the sync path (for example a `podium sync --preview` flag or a preview line in sync output) that calls `GET /v1/scope/preview`, or reconcile the spec if this exposure is intentionally deferred.
 
-### - [ ] F-3.5.5 — Aggregate counts count artifact-versions instead of distinct artifacts [Medium] — OPEN
+### - [x] F-3.5.5 — Aggregate counts count artifact-versions instead of distinct artifacts [Medium] — CLOSED
 
 (bug) Spec §3.5 presents `artifact_count` and the `by_type` / `by_sensitivity` breakdowns as counts of artifacts (the example shows `artifact_count: 1234` with per-type and per-sensitivity sums that add to it). `PreviewScope` at `pkg/registry/core/dependents.go:67-77` sets `ArtifactCount` to `len(visible)` and increments `ByType[m.Type]` and `BySensitivity[m.Sensitivity]` once per record returned by `visibleManifests`. `visibleManifests` (`pkg/registry/core/core.go:1051`) calls `store.ListManifests`, which returns one record per `(artifact_id, version)` pair: the memory store keys manifests by `mkey(tenantID, artifactID, version)` (`pkg/store/memory.go:31,60`) and lists every record (lines 83-98). An artifact with multiple ingested versions is therefore counted once per version, inflating all three figures. The search path already establishes the correct convention by deduplicating on `m.ArtifactID` with a `seen` map (`pkg/registry/core/core.go:596-602`). Deduplicate the preview by artifact ID before counting (for example collapse to the latest version per artifact id, then tally).
 
-### - [ ] F-3.5.6 — `layers` array has non-deterministic order and omits empty visible layers [Low] — OPEN
+**Resolution (fdf8587):** `PreviewScope` now collapses visible records to one per artifact ID via `latestPerArtifact` before counting. Each artifact's type and sensitivity come from the version §4.7.6 `latest` resolves to (most recently ingested non-deprecated, reusing `version.ResolveLatest`), so a multi-version artifact counts once and the breakdowns reflect the latest version.
+
+### - [x] F-3.5.6 — `layers` array has non-deterministic order and omits empty visible layers [Low] — CLOSED
 
 (inconsistency) Spec §3.5 shows `layers` as an ordered composition (`["admin-finance", "alice-personal", "workspace-overlay"]`) and states the preview is "a read-only projection of that composition"; §4.6 defines the effective view as an ordered list in precedence order (lowest first). `PreviewScope` builds `Layers` by collecting `m.Layer` into a Go map `layerSet` and then ranging over the map (`pkg/registry/core/dependents.go:72-80`), so the resulting slice order is non-deterministic across calls. The same code derives the layer set only from layers that contain at least one visible manifest, so a layer the caller can see but that is currently empty never appears in `layers`, which diverges from "the composition of every layer the caller's identity is entitled to see." Derive `Layers` from `layer.EffectiveLayersWith(r.layers, id, r.resolveGroup)` (already used by `visibleManifests` at `pkg/registry/core/core.go:1059`) so the array reflects every visible layer in precedence order.
+
+**Resolution (fdf8587):** When layers are configured, `Layers` is now built from `layer.EffectiveLayersWith(r.layers, id, r.resolveGroup)` in precedence order (lowest first), so the order is deterministic and a visible-but-empty layer is included. The bare-core / filesystem-source fallback (no layer config) derives the distinct layers from the visible records and sorts them for a stable response.
 
 ### - [ ] F-3.5.7 — Python SDK `preview_scope` accepts and sends constraint params the spec and server do not define [Low] — OPEN
 
 (inconsistency) Spec §3.5 shows `preview_scope()` taking no arguments, and the server handler reads no query parameters (`pkg/registry/server/server.go:662-669`). The Python SDK method at `sdks/podium-py/podium/client.py:225-240` accepts `scope`, `type`, and `tags` and forwards them as query params to `/v1/scope/preview`, where the server silently ignores them, so callers can pass filters that have no effect. The TypeScript SDK `previewScope()` at `sdks/podium-ts/src/index.ts:220` correctly takes no arguments. The Python docstring also cites "spec §6.4" while the contract for this surface is §3.5. Remove the unused parameters from the Python `preview_scope` (or implement matching server-side filtering and update the spec), and correct the docstring reference.
 
-### - [ ] F-3.5.8 — `by_sensitivity` can contain an empty-string bucket for unset sensitivity [Low] — OPEN
+### - [x] F-3.5.8 — `by_sensitivity` can contain an empty-string bucket for unset sensitivity [Low] — CLOSED
 
 (bug) Spec §3.5 illustrates `by_sensitivity` with the keys `low`, `medium`, and `high`. The `sensitivity` frontmatter field is optional (`yaml:"sensitivity,omitempty"` at `pkg/manifest/types.go:106`), ingest stores it verbatim as `string(rec.Artifact.Sensitivity)` without defaulting (`pkg/registry/ingest/ingest.go:708`), and `parse.go` never sets a default. `PreviewScope` increments `BySensitivity[m.Sensitivity]` unconditionally (`pkg/registry/core/dependents.go:75`), so an artifact that omits `sensitivity` produces a `by_sensitivity[""]` bucket rather than falling into one of the documented buckets. Normalize an empty sensitivity to a defined bucket (the spec leaves the default unstated, so `low` is the natural floor) before counting, or omit empty-key buckets, so the response keys match the documented set.
 
-### - [ ] F-3.5.9 — Scope preview handler does not reject non-GET methods [Low] — OPEN
+**Resolution (fdf8587):** `PreviewScope` now tallies `by_sensitivity` through `sensitivityBucket`, which maps an empty (unset) sensitivity to the `low` floor. The response no longer carries an empty-string bucket; an artifact that omits `sensitivity` counts under `low`.
+
+### - [x] F-3.5.9 — Scope preview handler does not reject non-GET methods [Low] — CLOSED
 
 (inconsistency) Spec §3.5 defines the endpoint as `GET /v1/scope/preview`. Sibling GET handlers in the same file reject other methods with `405` (for example `handleDomainAnalyze` at `pkg/registry/server/server.go:648-652`). `handleScopePreview` at `pkg/registry/server/server.go:662-669` performs no method check, so a POST, PUT, or DELETE to the path is served identically to a GET. Add a method guard that returns `405` for non-GET requests, matching the other read endpoints.
+
+**Resolution (fdf8587):** `handleScopePreview` now rejects any non-GET method with `405 registry.invalid_argument`, matching the sibling `handleDomainAnalyze` guard.
 ## F-4.1 — 4.1 Artifacts Are Packages of Arbitrary Files (first-class + extension types)
 
 _Reviewed spec/04-artifact-model.md against the implementation._

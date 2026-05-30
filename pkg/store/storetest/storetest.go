@@ -41,6 +41,7 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("RevokeAdmin", func(t *testing.T) { revokeAdmin(t, factory(t)) })
 	t.Run("GetTenantNotFound", func(t *testing.T) { getTenantNotFound(t, factory(t)) })
 	t.Run("QuotaRoundTrip", func(t *testing.T) { quotaRoundTrips(t, factory(t)) })
+	t.Run("ScopePreviewFlagRoundTrip", func(t *testing.T) { scopePreviewFlagRoundTrips(t, factory(t)) })
 	t.Run("GetManifestNotFound", func(t *testing.T) { getManifestNotFound(t, factory(t)) })
 	t.Run("LayerConfigCRUD", func(t *testing.T) { layerConfigCRUD(t, factory(t)) })
 	t.Run("LayerConfigDelete", func(t *testing.T) { layerConfigDelete(t, factory(t)) })
@@ -475,6 +476,46 @@ func quotaRoundTrips(t *testing.T, s store.Store) {
 	}
 	if got.Quota != want {
 		t.Errorf("Quota round-trip = %+v, want %+v", got.Quota, want)
+	}
+}
+
+// Spec: §3.5 — the tenant gate expose_scope_preview round-trips through
+// CreateTenant/GetTenant as a tri-state on every backend: an unset flag
+// reads back nil (ScopePreviewEnabled defaults true), an explicit false
+// reads back false, and an explicit true reads back true. A backend that
+// dropped the column would silently re-enable the endpoint a tenant
+// disabled.
+func scopePreviewFlagRoundTrips(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	ptr := func(b bool) *bool { return &b }
+	cases := []struct {
+		id       string
+		flag     *bool
+		wantEnab bool
+	}{
+		{"unset", nil, true},
+		{"off", ptr(false), false},
+		{"on", ptr(true), true},
+	}
+	for _, c := range cases {
+		if err := s.CreateTenant(ctx, store.Tenant{ID: c.id, Name: c.id, ExposeScopePreview: c.flag}); err != nil {
+			t.Fatalf("CreateTenant(%s): %v", c.id, err)
+		}
+		got, err := s.GetTenant(ctx, c.id)
+		if err != nil {
+			t.Fatalf("GetTenant(%s): %v", c.id, err)
+		}
+		if c.flag == nil {
+			if got.ExposeScopePreview != nil {
+				t.Errorf("%s: ExposeScopePreview = %v, want nil (unset round-trips as NULL)", c.id, *got.ExposeScopePreview)
+			}
+		} else if got.ExposeScopePreview == nil || *got.ExposeScopePreview != *c.flag {
+			t.Errorf("%s: ExposeScopePreview = %v, want %v", c.id, got.ExposeScopePreview, *c.flag)
+		}
+		if got.ScopePreviewEnabled() != c.wantEnab {
+			t.Errorf("%s: ScopePreviewEnabled() = %v, want %v", c.id, got.ScopePreviewEnabled(), c.wantEnab)
+		}
 	}
 }
 

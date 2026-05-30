@@ -104,6 +104,66 @@ func TestApplyYAML_DefaultLayerVisibilityFillsWhenEmpty(t *testing.T) {
 	}
 }
 
+// Spec: §3.5 (F-3.5.1) — registry.yaml's tenant.expose_scope_preview
+// parses as a tri-state and overlays into the config; an absent block
+// leaves it nil (default true).
+func TestApplyYAML_ExposeScopePreview(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "registry.yaml")
+	if err := os.WriteFile(path, []byte("tenant:\n  expose_scope_preview: false\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	t.Setenv("PODIUM_CONFIG_FILE", path)
+	y, err := readYAMLConfig()
+	if err != nil {
+		t.Fatalf("readYAMLConfig: %v", err)
+	}
+	c := &Config{}
+	applyYAML(c, y)
+	if c.exposeScopePreview == nil || *c.exposeScopePreview {
+		t.Errorf("exposeScopePreview = %v, want explicit false from yaml", c.exposeScopePreview)
+	}
+
+	// Omitting the tenant block leaves the gate unset (default true).
+	c2 := &Config{}
+	applyYAML(c2, &yamlConfig{})
+	if c2.exposeScopePreview != nil {
+		t.Errorf("exposeScopePreview = %v, want nil when tenant block absent", *c2.exposeScopePreview)
+	}
+}
+
+// Spec: §3.5 (F-3.5.1) — the env var PODIUM_EXPOSE_SCOPE_PREVIEW wins over
+// registry.yaml, matching the standard env-beats-yaml precedence.
+func TestApplyYAML_ExposeScopePreviewEnvWins(t *testing.T) {
+	c := &Config{exposeScopePreview: envBoolPtr("PODIUM_EXPOSE_SCOPE_PREVIEW")} // unset → nil
+	if c.exposeScopePreview != nil {
+		t.Fatalf("precondition: env unset should yield nil, got %v", *c.exposeScopePreview)
+	}
+	yesEnv := true
+	c.exposeScopePreview = &yesEnv // simulate env-derived true
+	applyYAML(c, &yamlConfig{Tenant: yamlTenant{ExposeScopePreview: boolPtr(false)}})
+	if c.exposeScopePreview == nil || !*c.exposeScopePreview {
+		t.Errorf("exposeScopePreview = %v, want env true to win over yaml false", c.exposeScopePreview)
+	}
+}
+
+// Spec: §3.5 — envBoolPtr is the tri-state reader behind the gate.
+func TestEnvBoolPtr_TriState(t *testing.T) {
+	if envBoolPtr("PODIUM_TEST_UNSET_VAR_XYZ") != nil {
+		t.Error("unset var should yield nil")
+	}
+	t.Setenv("PODIUM_TEST_BOOL_VAR", "false")
+	if p := envBoolPtr("PODIUM_TEST_BOOL_VAR"); p == nil || *p {
+		t.Errorf("'false' should yield &false, got %v", p)
+	}
+	t.Setenv("PODIUM_TEST_BOOL_VAR", "true")
+	if p := envBoolPtr("PODIUM_TEST_BOOL_VAR"); p == nil || !*p {
+		t.Errorf("'true' should yield &true, got %v", p)
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }
+
 // Spec: §13.10 — readYAMLConfig returns (nil, nil) when the file is
 // absent, so loadConfig falls through to env defaults.
 func TestReadYAMLConfig_MissingFileIsNoOp(t *testing.T) {

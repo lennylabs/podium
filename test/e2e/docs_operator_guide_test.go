@@ -12,7 +12,6 @@ package e2e
 //   - F-13.2.8: X-Podium-Read-Only-Lag-Seconds is always "0".
 //   - F-7.3.7: force_push_policy not settable via API/CLI/config. Tests 29, 30.
 //   - F-13.8.1: /metrics endpoint absent. Test 34.
-//   - F-3.5.1: tenant.expose_scope_preview flag not surfaced. Test 38.
 //   - podium admin verify: not implemented. Tests 11, 12, 22, 40.
 //   - podium admin migrate --finalize/--revert: not implemented. Tests 13, 14.
 //   - podium admin scim-sync: not implemented. Test 31.
@@ -815,9 +814,38 @@ tests:
 
 // ---- T-D-operator-guide-38: scope preview gating ---------------------------
 
-// T-D-operator-guide-38
+// T-D-operator-guide-38: an operator disables the §3.5 scope-preview
+// surface per tenant via registry.yaml's tenant.expose_scope_preview, and
+// the endpoint then answers 403 scope_preview_disabled. F-3.5.1.
 func TestOpGuide_38_ScopePreviewGating(t *testing.T) {
-	t.Skip("blocked by F-3.5.1: tenant.expose_scope_preview flag is not surfaced via any CLI command or config; cannot disable scope preview per-tenant in e2e")
+	t.Parallel()
+	home := t.TempDir()
+	cfgDir := filepath.Join(home, ".podium")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "registry.yaml"),
+		[]byte("tenant:\n  expose_scope_preview: false\n"), 0o644); err != nil {
+		t.Fatalf("write registry.yaml: %v", err)
+	}
+
+	srv := startServerArgs(t, []string{"HOME=" + home}, "serve", "--standalone")
+	st, body := getRaw(t, srv.BaseURL+"/v1/scope/preview")
+	if st != 403 {
+		t.Fatalf("scope/preview status = %d, want 403 (gated by registry.yaml tenant.expose_scope_preview)\nbody:\n%s", st, body)
+	}
+	if !strings.Contains(string(body), "scope_preview_disabled") {
+		t.Errorf("403 body missing scope_preview_disabled code:\n%s", body)
+	}
+
+	// The operator can confirm the resolved setting through config show.
+	res := runPodium(t, "", []string{"HOME=" + home}, "config", "show")
+	if res.Exit != 0 {
+		t.Fatalf("config show exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stdout, "tenant.expose_scope_preview") {
+		t.Errorf("config show missing tenant.expose_scope_preview setting:\n%s", res.Stdout)
+	}
 }
 
 // ---- T-D-operator-guide-39: PODIUM_CACHE_DIR defaults to ~/.podium/cache/ ---
