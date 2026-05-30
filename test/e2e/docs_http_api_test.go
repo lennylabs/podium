@@ -126,8 +126,10 @@ func apiInProcCore(t testing.TB) *core.Registry {
 
 // ===== Health (T-D-http-api-1..3) ======================================
 
-// spec: http-api.md § Health. The server returns {mode, ready}; the doc
-// shows {status:"ok", mode:"standalone"} — recorded as a doc/impl gap.
+// spec: §13.9 — /healthz is a liveness signal that returns {mode} and
+// conveys liveness through the 200 status; it carries no readiness
+// boolean (F-13.9.5). The http-api.md doc shows {status:"ok",
+// mode:"standalone", read_only:false}, recorded as a doc/impl gap.
 func TestDocHTTPAPI_1_Healthz(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/healthz")
@@ -136,10 +138,10 @@ func TestDocHTTPAPI_1_Healthz(t *testing.T) {
 	if m["mode"] != "ready" {
 		t.Fatalf("/healthz mode=%v, want \"ready\" (doc says \"standalone\"/\"ok\" — divergence)", m["mode"])
 	}
-	if m["ready"] != true {
-		t.Fatalf("/healthz ready=%v, want true", m["ready"])
+	if _, present := m["ready"]; present {
+		t.Fatalf("/healthz carries undocumented `ready` field: %s", body)
 	}
-	t.Log("doc/impl gap: /healthz returns {mode:\"ready\", ready:true}; the doc documents {status:\"ok\", mode:\"standalone\", read_only:false}")
+	t.Log("doc/impl gap: /healthz returns {mode:\"ready\"}; the doc documents {status:\"ok\", mode:\"standalone\", read_only:false}")
 }
 
 // spec: http-api.md § Health and § Read-only mode. Flipping mode needs
@@ -169,9 +171,11 @@ func TestDocHTTPAPI_2_HealthzReadOnly(t *testing.T) {
 	}
 }
 
-// spec: http-api.md § Health — /readyz. The not_ready→503 branch is
-// unreachable in the current mode model (modeBanner emits only
-// ready/read_only/public), so the ready→200 path is asserted.
+// spec: §13.9 — /readyz reports ready / read_only / not_ready. A
+// healthy standalone deployment (in-memory store, no object store
+// outage) reports ready→200; the not_ready→503 branch is exercised by
+// the server unit tests, which inject a failing dependency probe
+// (F-13.9.2, F-13.9.3).
 func TestDocHTTPAPI_3_Readyz(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/readyz")

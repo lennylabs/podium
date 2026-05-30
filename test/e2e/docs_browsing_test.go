@@ -823,16 +823,14 @@ func TestBrowsing_LoadArtifactBadVersion(t *testing.T) {
 	}
 }
 
-// T-D-browsing-49 — tools/list returns the four meta-tools with descriptions.
+// T-D-browsing-49 — tools/list returns the meta-tools plus the §13.9
+// health tool, each with a description.
 func TestBrowsing_ToolsList(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
 	res := mcpExec(t, brEnv(srv.BaseURL), rpcReq{ID: 1, Method: "tools/list", Params: map[string]any{}})
 	result := rpcResult(t, res.Stdout, 1)
 	tools := brArr(result, "tools")
-	if len(tools) != 4 {
-		t.Errorf("tools/list returned %d tools, want 4: %s", len(tools), mustJSON(result))
-	}
 	names := map[string]bool{}
 	for _, ti := range tools {
 		m, _ := ti.(map[string]any)
@@ -841,9 +839,9 @@ func TestBrowsing_ToolsList(t *testing.T) {
 			t.Errorf("tool %v has an empty description", m["name"])
 		}
 	}
-	for _, want := range []string{"load_domain", "search_domains", "search_artifacts", "load_artifact"} {
+	for _, want := range []string{"load_domain", "search_domains", "search_artifacts", "load_artifact", "health"} {
 		if !names[want] {
-			t.Errorf("tools/list missing %q", want)
+			t.Errorf("tools/list missing %q: %s", want, mustJSON(result))
 		}
 	}
 }

@@ -476,8 +476,28 @@ func Run() error {
 	}
 	webhookWorker := &webhook.Worker{Store: webhookStore}
 
-	bootOpts := bootstrapOptions(cfg)
+	bootOpts, objStore := bootstrapOptions(cfg)
 	bootOpts = append(bootOpts, server.WithWebhooks(webhookWorker), server.WithMode(mode))
+
+	// §13.9 /readyz reachability probes, run at request time and
+	// bounded by the handler's deadline. The metadata-store probe
+	// pings the read path (GetTenant); the object-store probe (when an
+	// object store is configured) confirms the backend answers. A
+	// failing probe makes /readyz report not_ready (503) so a load
+	// balancer pulls the registry out of rotation, distinct from the
+	// §13.2.1 read_only replication-fallback state (200, in rotation).
+	readyChecks := []server.ReadinessCheck{storeReadinessCheck(st, tenantID)}
+	if objStore != nil {
+		readyChecks = append(readyChecks, objectStoreReadinessCheck(objStore))
+	}
+	bootOpts = append(bootOpts, server.WithReadinessChecks(readyChecks...))
+	// §13.2.1 replication lag: the Postgres store reports the replica's
+	// replay lag; every other backend (and a primary with no replica)
+	// reports 0. Threaded into the /readyz body and the
+	// X-Podium-Read-Only-Lag-Seconds header.
+	if lag := storeLagReporter(st); lag != nil {
+		bootOpts = append(bootOpts, server.WithLagReporter(lag))
+	}
 	if scimHandler != nil {
 		bootOpts = append(bootOpts, server.WithSCIM(scimHandler))
 		log.Printf("SCIM 2.0 receiver mounted at /scim/v2/")
@@ -894,17 +914,23 @@ func openStore(c *Config) (store.Store, error) {
 	return nil, fmt.Errorf("unknown PODIUM_REGISTRY_STORE: %s", c.storeType)
 }
 
-func bootstrapOptions(c *Config) []server.Option {
+// bootstrapOptions builds the base server options and returns the
+// object-store provider alongside them (nil when disabled) so the
+// caller can wire a §13.9 object-store readiness probe against the same
+// instance instead of opening a second client.
+func bootstrapOptions(c *Config) ([]server.Option, objectstore.Provider) {
 	out := []server.Option{}
 	if c.publicMode {
 		out = append(out, server.WithPublicMode())
 	}
-	if store, err := openObjectStore(c); err != nil {
+	objStore, err := openObjectStore(c)
+	if err != nil {
 		log.Printf("warning: object store disabled: %v", err)
-	} else if store != nil {
-		out = append(out, server.WithObjectStore(store, c.publicURL, c.presignTTL))
+		objStore = nil
+	} else if objStore != nil {
+		out = append(out, server.WithObjectStore(objStore, c.publicURL, c.presignTTL))
 	}
-	return out
+	return out, objStore
 }
 
 // openVectorAndEmbedder returns the configured §4.7 hybrid-search

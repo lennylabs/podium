@@ -59,6 +59,8 @@ func mustGet(t testing.TB, base, path string) []byte {
 
 // Spec: §5 / §13.9 — /healthz reports mode: ready when the registry is
 // reachable; clients use this to confirm a server-source registry is up.
+// Liveness is conveyed by the 200 status; §13.9 documents no readiness
+// boolean on /healthz (F-13.9.5).
 func TestHealth_ReturnsReady(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t)
@@ -67,8 +69,16 @@ func TestHealth_ReturnsReady(t *testing.T) {
 	if err := json.Unmarshal(body, &resp); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if !resp.Ready || resp.Mode != "ready" {
-		t.Errorf("got %+v, want ready", resp)
+	if resp.Mode != "ready" {
+		t.Errorf("got %+v, want mode ready", resp)
+	}
+	// §13.9: /healthz carries only the mode field, no `ready` boolean.
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatalf("unmarshal raw: %v", err)
+	}
+	if _, present := raw["ready"]; present {
+		t.Errorf("/healthz body carries undocumented `ready` field: %s", body)
 	}
 }
 

@@ -51,6 +51,25 @@ func (p *Postgres) Close() error { return p.db.Close() }
 // production code should not need it.
 func (p *Postgres) DB() *sql.DB { return p.db }
 
+// ReplicationLagSeconds returns the §13.2.1 observed replication lag in
+// seconds. On a read replica it measures how far the replica trails the
+// primary via pg_last_xact_replay_timestamp(); on a primary (no replay
+// in progress) that function is NULL and the COALESCE reports 0, the
+// genuine no-replica value. The /readyz body and the
+// X-Podium-Read-Only-Lag-Seconds header surface this value.
+func (p *Postgres) ReplicationLagSeconds(ctx context.Context) (int, error) {
+	var secs int
+	err := p.db.QueryRowContext(ctx,
+		`SELECT COALESCE(EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp()))::int, 0)`).Scan(&secs)
+	if err != nil {
+		return 0, err
+	}
+	if secs < 0 {
+		secs = 0
+	}
+	return secs, nil
+}
+
 // applySchema runs the schema migrations idempotently. The Postgres
 // schema mirrors the SQLite layout but uses native types: BYTEA for
 // blobs, BOOLEAN for bool fields, TIMESTAMPTZ for timestamps.

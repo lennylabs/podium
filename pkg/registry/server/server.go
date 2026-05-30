@@ -68,12 +68,53 @@ type Server struct {
 	// and /readyz consult it. Optional; nil leaves both endpoints
 	// reporting "ready".
 	mode *ModeTracker
+	// readiness holds the §13.9 dependency probes /readyz runs at
+	// request time (metadata store, object storage). A failing probe
+	// downgrades /readyz to not_ready (503). Empty leaves /readyz
+	// reporting ready / read_only from the mode tracker alone.
+	readiness []ReadinessCheck
+	// lag reports the §13.2.1 observed replication lag in seconds for
+	// /readyz and the X-Podium-Read-Only-Lag-Seconds header. Nil
+	// reports 0 (the genuine value for a standalone deployment with
+	// no read replica).
+	lag LagReporter
 }
+
+// readyProbeTimeout bounds the §13.9 dependency probes so a hung
+// metadata-store or object-store call can never block the /readyz
+// handler past this deadline.
+const readyProbeTimeout = 2 * time.Second
+
+// ReadinessCheck probes one dependency for §13.9 readiness. It returns
+// nil when the dependency is reachable and a non-nil error describing
+// the outage otherwise. Checks must honor ctx cancellation so /readyz
+// stays bounded.
+type ReadinessCheck func(ctx context.Context) error
+
+// LagReporter returns the §13.2.1 observed replication lag in seconds.
+// A standalone deployment with no replica reports 0; a standard
+// deployment wires a reporter backed by the replica's replay
+// timestamp.
+type LagReporter func(ctx context.Context) int
 
 // WithMode installs the §13.2.1 mode tracker so /healthz and
 // /readyz reflect the read-only / ready state.
 func WithMode(m *ModeTracker) Option {
 	return func(s *Server) { s.mode = m }
+}
+
+// WithReadinessChecks installs the §13.9 dependency probes consulted by
+// /readyz. Each check pings one dependency (the metadata store, object
+// storage); any failing check makes /readyz report not_ready and answer
+// 503 so a load balancer pulls the registry out of rotation.
+func WithReadinessChecks(checks ...ReadinessCheck) Option {
+	return func(s *Server) { s.readiness = append(s.readiness, checks...) }
+}
+
+// WithLagReporter installs the §13.2.1 replication-lag source threaded
+// into the /readyz body and the X-Podium-Read-Only-Lag-Seconds header.
+func WithLagReporter(fn LagReporter) Option {
+	return func(s *Server) { s.lag = fn }
 }
 
 // WithQuotaLimiter installs the §4.7.8 rate limiter for search
@@ -350,11 +391,12 @@ func (s *Server) withReadOnlyHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.mode != nil && s.mode.Get() == ModeReadOnly {
 			w.Header().Set("X-Podium-Read-Only", "true")
-			// Replication lag is 0 by default (standalone has no
-			// replica). Standard deployments wire a probe that
-			// updates this; the field stays a numeric string so
-			// clients can parse uniformly.
-			w.Header().Set("X-Podium-Read-Only-Lag-Seconds", "0")
+			// Observed replication lag at response time (§13.2.1).
+			// A standalone deployment with no replica reports 0;
+			// the field stays a numeric string so clients parse it
+			// uniformly.
+			lag := s.replicationLagSeconds(r.Context())
+			w.Header().Set("X-Podium-Read-Only-Lag-Seconds", strconv.Itoa(lag))
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -362,10 +404,13 @@ func (s *Server) withReadOnlyHeaders(next http.Handler) http.Handler {
 
 // ----- Response shapes ------------------------------------------------------
 
-// HealthResponse describes /healthz output (§13.9).
+// HealthResponse describes /healthz output (§13.9). The endpoint is a
+// liveness signal: it reports the mode string (§13.2.1 read_only,
+// §13.2.2 public, or ready) and conveys liveness through the 200 status
+// alone. Readiness lives on /readyz; /healthz carries no readiness
+// boolean.
 type HealthResponse struct {
-	Mode  string `json:"mode"`
-	Ready bool   `json:"ready"`
+	Mode string `json:"mode"`
 }
 
 // LoadDomainResponse describes /v1/load_domain output (§5).
@@ -486,8 +531,7 @@ type ErrorResponse struct {
 // ----- Handlers -------------------------------------------------------------
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	mode := s.modeBanner()
-	writeJSON(w, http.StatusOK, HealthResponse{Mode: mode, Ready: true})
+	writeJSON(w, http.StatusOK, HealthResponse{Mode: s.modeBanner()})
 }
 
 // modeBanner returns the canonical mode string per §13.2.1:
@@ -513,17 +557,54 @@ type ReadyResponse struct {
 
 // handleReady answers /readyz per §13.9. The status code follows
 // load-balancer conventions: ready / read_only return 200 (the
-// registry stays in rotation), not_ready returns 503. Replication
-// lag is 0 in standalone deployments; standard deployments wire
-// a probe that updates the field.
-func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
-	mode := s.modeBanner()
-	resp := ReadyResponse{Mode: mode}
+// registry stays in rotation), not_ready returns 503. The body
+// always carries the observed replication lag in seconds (0 for a
+// standalone deployment with no replica).
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), readyProbeTimeout)
+	defer cancel()
+	mode := s.readyMode(ctx)
+	resp := ReadyResponse{Mode: mode, ReplicationLagSecs: s.replicationLagSeconds(ctx)}
 	status := http.StatusOK
 	if mode == "not_ready" {
 		status = http.StatusServiceUnavailable
 	}
 	writeJSON(w, status, resp)
+}
+
+// readyMode computes the §13.9 /readyz state, which the spec restricts
+// to ready, read_only, or not_ready (public mode is a /healthz signal,
+// not a readiness state, so it is intentionally absent here). The
+// precedence is: not_ready when any §13.9 dependency probe fails (a hard
+// outage takes the registry out of rotation), then read_only when the
+// §13.2.1 tracker has flipped (degraded but still serving reads), then
+// ready.
+func (s *Server) readyMode(ctx context.Context) string {
+	for _, check := range s.readiness {
+		if check == nil {
+			continue
+		}
+		if err := check(ctx); err != nil {
+			return ModeNotReady.String()
+		}
+	}
+	if s.mode != nil && s.mode.Get() == ModeReadOnly {
+		return ModeReadOnly.String()
+	}
+	return ModeReady.String()
+}
+
+// replicationLagSeconds returns the §13.2.1 observed replication lag.
+// Nil reporter (or a negative reading) reports 0, the genuine value for
+// a standalone deployment with no read replica.
+func (s *Server) replicationLagSeconds(ctx context.Context) int {
+	if s.lag == nil {
+		return 0
+	}
+	if n := s.lag(ctx); n > 0 {
+		return n
+	}
+	return 0
 }
 
 func (s *Server) handleLoadDomain(w http.ResponseWriter, r *http.Request) {

@@ -45,3 +45,28 @@ func TestPostgres_ConformanceSuite(t *testing.T) {
 		return s
 	})
 }
+
+// Spec: §13.2.1 / §13.9 (F-13.9.4) — the Postgres backend computes
+// observed replication lag from pg_last_xact_replay_timestamp(). On a
+// primary (the usual DSN target) the function is NULL and the query
+// reports 0; on a replica it reports the trailing lag. The query path
+// runs when PODIUM_POSTGRES_DSN is configured; otherwise the test skips.
+func TestPostgres_ReplicationLagSeconds(t *testing.T) {
+	dsn := os.Getenv("PODIUM_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("PODIUM_POSTGRES_DSN unset; skipping Postgres replication-lag check")
+	}
+	s, err := store.OpenPostgres(dsn)
+	if err != nil {
+		t.Skipf("OpenPostgres %q: %v (database unreachable)", dsn, err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	n, err := s.ReplicationLagSeconds(context.Background())
+	if err != nil {
+		t.Fatalf("ReplicationLagSeconds: %v", err)
+	}
+	if n < 0 {
+		t.Errorf("lag = %d, want >= 0", n)
+	}
+}

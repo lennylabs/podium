@@ -88,6 +88,18 @@ func (r *resolutionCache) Put(id, version, contentHash string) {
 	_ = r.save()
 }
 
+// Len returns the number of cached (id, version) → content_hash
+// resolutions, surfaced as the §13.9 health tool's cache size. A
+// disabled cache reports 0.
+func (r *resolutionCache) Len() int {
+	if r == nil || r.dir == "" {
+		return 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.entries)
+}
+
 // Get returns the cached content hash for (id, version) or
 // ("", false) when the resolution isn't cached.
 func (r *resolutionCache) Get(id, version string) (string, bool) {

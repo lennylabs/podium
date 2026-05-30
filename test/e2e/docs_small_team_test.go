@@ -107,8 +107,7 @@ func TestSmallTeam_1_StandaloneStartHealthz(t *testing.T) {
 	srv := startServer(t, reg)
 
 	var health struct {
-		Mode  string `json:"mode"`
-		Ready bool   `json:"ready"`
+		Mode string `json:"mode"`
 	}
 	getJSON(t, srv.BaseURL+"/healthz", &health)
 	if health.Mode != "ready" && health.Mode != "standalone" {

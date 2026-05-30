@@ -587,12 +587,11 @@ func TestCustomSDK_NoBulkMCPTool(t *testing.T) {
 	srv := startServer(t, csSkillReg(t))
 	res := mcpExec(t, []string{"PODIUM_REGISTRY=" + srv.BaseURL}, rpcReq{ID: 1, Method: "tools/list", Params: map[string]any{}})
 	result := rpcResult(t, res.Stdout, 1)
-	if got := len(brArr(result, "tools")); got != 4 {
-		t.Errorf("tools/list returned %d tools, want 4 (no bulk tool): %s", got, mustJSON(result))
-	}
-	for _, want := range []string{"load_domain", "search_domains", "search_artifacts", "load_artifact"} {
+	// tools/list advertises the meta-tools plus the §13.9 health tool;
+	// the bulk endpoint is intentionally absent (asserted below).
+	for _, want := range []string{"load_domain", "search_domains", "search_artifacts", "load_artifact", "health"} {
 		if !strings.Contains(res.Stdout, want) {
-			t.Errorf("tools/list missing %q", want)
+			t.Errorf("tools/list missing %q: %s", want, mustJSON(result))
 		}
 	}
 	for _, banned := range []string{"load_artifacts", "batch_load", "batchLoad"} {

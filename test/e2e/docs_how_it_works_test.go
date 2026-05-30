@@ -133,8 +133,13 @@ func TestHIW_HealthReadyJSON(t *testing.T) {
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
 	var health map[string]any
 	getJSON(t, srv.BaseURL+"/healthz", &health)
-	if health["mode"] != "ready" || health["ready"] != true {
-		t.Errorf("/healthz = %v, want mode=ready ready=true", health)
+	// §13.9: /healthz reports the mode; liveness is the 200 status, and
+	// there is no readiness boolean on /healthz (F-13.9.5).
+	if health["mode"] != "ready" {
+		t.Errorf("/healthz = %v, want mode=ready", health)
+	}
+	if _, present := health["ready"]; present {
+		t.Errorf("/healthz carries undocumented `ready` field: %v", health)
 	}
 	var ready map[string]any
 	getJSON(t, srv.BaseURL+"/readyz", &ready)

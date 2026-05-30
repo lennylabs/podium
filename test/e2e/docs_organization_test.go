@@ -1266,8 +1266,13 @@ func TestOrg_55_Healthz(t *testing.T) {
 	}
 	var obj map[string]any
 	orgDecodeBody(t, body, &obj)
-	if obj["ready"] != true && obj["mode"] == nil {
-		t.Errorf("/healthz body missing expected fields: %s", body)
+	// §13.9: /healthz reports the mode; liveness is the 200 status and
+	// there is no readiness boolean (F-13.9.5).
+	if obj["mode"] == nil {
+		t.Errorf("/healthz body missing mode: %s", body)
+	}
+	if _, present := obj["ready"]; present {
+		t.Errorf("/healthz carries undocumented `ready` field: %s", body)
 	}
 }
 

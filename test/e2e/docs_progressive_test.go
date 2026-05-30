@@ -102,17 +102,15 @@ func TestProgressive_1_StandaloneHealthz(t *testing.T) {
 	home := t.TempDir()
 	srv := startServerArgs(t, []string{"HOME=" + home},
 		"serve", "--standalone")
-	// /healthz must be 200 with mode "ready" (startServerArgs already asserts 200).
+	// /healthz must be 200 with mode "ready" (startServerArgs already
+	// asserts 200). Liveness is the 200 status; §13.9 documents no
+	// readiness boolean on /healthz (F-13.9.5).
 	var hz struct {
-		Mode  string `json:"mode"`
-		Ready bool   `json:"ready"`
+		Mode string `json:"mode"`
 	}
 	getJSON(t, srv.BaseURL+"/healthz", &hz)
 	if hz.Mode != "ready" {
 		t.Errorf("healthz mode=%q, want ready", hz.Mode)
-	}
-	if !hz.Ready {
-		t.Errorf("healthz ready=false, want true")
 	}
 	// The doc claims the SQLite database is created at ~/.podium/standalone/podium.db.
 	// With HOME pinned, check that path exists.

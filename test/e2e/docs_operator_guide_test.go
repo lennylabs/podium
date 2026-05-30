@@ -82,8 +82,10 @@ func TestOpGuide_1_HealthzModeReady(t *testing.T) {
 	if h["mode"] != "ready" {
 		t.Errorf("/healthz mode=%v, want ready", h["mode"])
 	}
-	if h["ready"] != true {
-		t.Errorf("/healthz ready=%v, want true", h["ready"])
+	// §13.9: /healthz reports the mode only; no readiness boolean
+	// (F-13.9.5).
+	if _, present := h["ready"]; present {
+		t.Errorf("/healthz carries undocumented `ready` field: %v", h)
 	}
 	if !strings.Contains(srv.log(), "mode=standalone") {
 		t.Errorf("startup log missing mode=standalone:\n%s", srv.log())
@@ -659,8 +661,13 @@ func TestOpGuide_32_HealthzAlways200(t *testing.T) {
 	if err := json.Unmarshal(body, &m); err != nil {
 		t.Fatalf("decode /healthz: %v\nbody: %s", err, body)
 	}
-	if m["ready"] != true {
-		t.Errorf("/healthz ready=%v, want true", m["ready"])
+	// §13.9: liveness is the 200 status; the body carries the mode and
+	// no readiness boolean (F-13.9.5).
+	if m["mode"] == nil {
+		t.Errorf("/healthz body missing mode: %s", body)
+	}
+	if _, present := m["ready"]; present {
+		t.Errorf("/healthz carries undocumented `ready` field: %s", body)
 	}
 }
 

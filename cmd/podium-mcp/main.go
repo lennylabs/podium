@@ -32,6 +32,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/lennylabs/podium/internal/buildinfo"
 	"github.com/lennylabs/podium/pkg/adapter"
@@ -173,6 +175,26 @@ type mcpServer struct {
 	resolutions *resolutionCache
 	adapters    *adapter.Registry
 	overlay     []filesystem.ArtifactRecord
+	// lastSuccess holds the Unix-nanosecond timestamp of the last
+	// successful registry call, surfaced by the §13.9 health tool. Zero
+	// means no successful call has happened yet.
+	lastSuccess atomic.Int64
+}
+
+// recordSuccess stamps the time of a successful registry call for the
+// §13.9 health tool's last-successful-call field.
+func (s *mcpServer) recordSuccess(t time.Time) {
+	s.lastSuccess.Store(t.UnixNano())
+}
+
+// lastSuccessTime returns the last successful registry call time and
+// whether one has occurred.
+func (s *mcpServer) lastSuccessTime() (time.Time, bool) {
+	n := s.lastSuccess.Load()
+	if n == 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(0, n), true
 }
 
 func newServer(cfg *config) (*mcpServer, error) {
@@ -285,6 +307,7 @@ func (s *mcpServer) handle(req rpcRequest) rpcResponse {
 				{"name": "search_domains", "description": "Search the catalog for relevant domains."},
 				{"name": "search_artifacts", "description": "Search or browse the artifact catalog."},
 				{"name": "load_artifact", "description": "Load a specific artifact by ID."},
+				{"name": "health", "description": "Report registry connectivity, observed mode, cache size, and last successful call."},
 			},
 		}
 	case "tools/call":
@@ -319,6 +342,10 @@ func (s *mcpServer) callTool(raw json.RawMessage) any {
 		return s.searchArtifacts(p.Arguments)
 	case "load_artifact":
 		return s.loadArtifact(p.Arguments)
+	case "health":
+		// §13.9 health tool: registry connectivity + observed mode +
+		// cache size + last successful call timestamp.
+		return s.healthTool()
 	default:
 		return errorResult("unknown tool: " + p.Name)
 	}
@@ -877,6 +904,9 @@ func (s *mcpServer) fetchJSON(path string, args map[string]any) ([]byte, error) 
 		// opaque "HTTP <status>: <body>" string (F-6.10.2).
 		return body, parseRegistryError(resp.StatusCode, body)
 	}
+	// §13.9: a 2xx response is a successful registry call; stamp it so
+	// the health tool can report the last-successful-call timestamp.
+	s.recordSuccess(time.Now())
 	return body, nil
 }
 
