@@ -298,7 +298,7 @@ func TestApplyYAML_LayerPathFillsWhenEmpty(t *testing.T) {
 func TestReadYAMLConfig_ParsesLayerPath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "registry.yaml")
-	body := []byte("layer_path: /var/podium/artifacts\n")
+	body := []byte("registry:\n  layer_path: /var/podium/artifacts\n")
 	if err := os.WriteFile(path, body, 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}

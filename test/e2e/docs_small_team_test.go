@@ -185,7 +185,7 @@ func TestSmallTeam_4_RegistryYAMLLayersPath(t *testing.T) {
 
 	cfgDir := t.TempDir()
 	cfgFile := filepath.Join(cfgDir, "registry.yaml")
-	if err := os.WriteFile(cfgFile, []byte("layer_path: "+reg+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(cfgFile, []byte("registry:\n  layer_path: "+reg+"\n"), 0o644); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)
 	}
 
@@ -213,7 +213,7 @@ func TestSmallTeam_5_ConfigShowLayersPathSource(t *testing.T) {
 	t.Parallel()
 	cfgDir := t.TempDir()
 	cfgFile := filepath.Join(cfgDir, "registry.yaml")
-	if err := os.WriteFile(cfgFile, []byte("layer_path: /from/yaml\n"), 0o644); err != nil {
+	if err := os.WriteFile(cfgFile, []byte("registry:\n  layer_path: /from/yaml\n"), 0o644); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)
 	}
 
@@ -253,7 +253,7 @@ func TestSmallTeam_6_RegistryYAMLBind(t *testing.T) {
 
 	cfgDir := t.TempDir()
 	cfgFile := filepath.Join(cfgDir, "registry.yaml")
-	yaml := fmt.Sprintf("bind: %s\n", bind)
+	yaml := fmt.Sprintf("registry:\n  bind: %s\n", bind)
 	if err := os.WriteFile(cfgFile, []byte(yaml), 0o644); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)
 	}
@@ -988,7 +988,7 @@ func TestSmallTeam_35_RegistryYAMLIdentityProvider(t *testing.T) {
 	t.Parallel()
 	cfgDir := t.TempDir()
 	cfgFile := filepath.Join(cfgDir, "registry.yaml")
-	if err := os.WriteFile(cfgFile, []byte("identity_provider: oauth-device-code\n"), 0o644); err != nil {
+	if err := os.WriteFile(cfgFile, []byte("registry:\n  identity_provider:\n    type: oauth-device-code\n"), 0o644); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)
 	}
 
@@ -1007,7 +1007,7 @@ func TestSmallTeam_36_RegistryYAMLPublicModeWithIdP(t *testing.T) {
 	t.Parallel()
 	cfgDir := t.TempDir()
 	cfgFile := filepath.Join(cfgDir, "registry.yaml")
-	if err := os.WriteFile(cfgFile, []byte("identity_provider: oauth-device-code\n"), 0o644); err != nil {
+	if err := os.WriteFile(cfgFile, []byte("registry:\n  identity_provider:\n    type: oauth-device-code\n"), 0o644); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)
 	}
 

@@ -34,7 +34,7 @@ func TestReadYAMLConfig_BadYAMLReturnsError(t *testing.T) {
 func TestReadYAMLConfig_ValidFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "registry.yaml")
-	body := "bind: \"0.0.0.0:9090\"\nidentity_provider: \"oidc\"\nstore:\n  type: postgres\n"
+	body := "registry:\n  bind: \"0.0.0.0:9090\"\n  identity_provider:\n    type: \"oidc\"\n  store:\n    type: postgres\n"
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestReadYAMLConfig_ValidFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	if cfg == nil || cfg.Bind != "0.0.0.0:9090" || cfg.IdentityProvider != "oidc" {
+	if cfg == nil || cfg.Bind != "0.0.0.0:9090" || cfg.Identity.Type != "oidc" {
 		t.Errorf("got %+v", cfg)
 	}
 }
@@ -60,14 +60,14 @@ func TestApplyYAML_PopulatesEmptyFields(t *testing.T) {
 		filesystemRoot: "",
 	}
 	y := &yamlConfig{
-		Bind:             "0.0.0.0:9090",
-		IdentityProvider: "oidc",
-		PublicMode:       &publicTrue,
+		Bind:       "0.0.0.0:9090",
+		Identity:   yamlIdentityCfg{Type: "oidc"},
+		PublicMode: &publicTrue,
 	}
 	y.Store.Type = "postgres"
-	y.Store.PostgresDSN = "postgres://x"
+	y.Store.DSN = "postgres://x"
 	y.ObjectStore.Type = "s3"
-	y.ObjectStore.S3Bucket = "my-bucket"
+	y.ObjectStore.Bucket = "my-bucket"
 	applyYAML(c, y)
 	if c.bind != "0.0.0.0:9090" {
 		t.Errorf("bind = %q", c.bind)

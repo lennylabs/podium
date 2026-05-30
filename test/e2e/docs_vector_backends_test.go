@@ -18,12 +18,33 @@ package e2e
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 )
+
+// vbExpectRefuseToStart runs `podium serve` with the given env and asserts the
+// process refuses to start (non-zero exit) with an error naming wantKey. §13.12
+// requires the registry to refuse to start when a selected backend's required
+// values are missing, naming the missing keys (F-13.12.10). validate() fails
+// before any listener binds, so the process exits promptly; the bind is a
+// regression backstop.
+func vbExpectRefuseToStart(t *testing.T, reg, wantKey string, extra ...string) {
+	t.Helper()
+	bind := fmt.Sprintf("127.0.0.1:%d", freePort(t))
+	res := runPodium(t, "", vbServerEnv(t, extra...),
+		"serve", "--standalone", "--layer-path", reg, "--bind", bind)
+	if res.Exit == 0 {
+		t.Fatalf("expected non-zero exit (refuse to start)\nstdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	}
+	combined := strings.ToUpper(res.Stdout + res.Stderr)
+	if !strings.Contains(combined, strings.ToUpper(wantKey)) {
+		t.Errorf("startup error should name %s; got:\nstdout:\n%s\nstderr:\n%s", wantKey, res.Stdout, res.Stderr)
+	}
+}
 
 // ---- package-level helpers (prefixed vb) ------------------------------------
 
@@ -147,28 +168,20 @@ func TestVectorBackends_4_PineconeStorageOnlyHappyPath(t *testing.T) {
 	t.Skip("storage-only happy path needs a faithful mock embedder + vector server; covered by pkg/vector cloud tests")
 }
 
-// T-D-vector-backends-5: Pinecone missing API key => warning mentioning APIKey.
+// T-D-vector-backends-5: Pinecone selected without its API key is a
+// misconfiguration; §13.12 ("refuses to start when a backend is selected but
+// its required values are missing, naming the missing keys") makes it a hard
+// startup error rather than a silent BM25 fallback (F-13.12.10).
 func TestVectorBackends_5_PineconeMissingAPIKey(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
-	srv := startServerArgs(t, vbServerEnv(t,
+	vbExpectRefuseToStart(t, reg, "PODIUM_PINECONE_API_KEY",
 		"PODIUM_VECTOR_BACKEND=pinecone",
 		"PODIUM_PINECONE_API_KEY=",
 		"PODIUM_PINECONE_HOST=https://h.example.com",
 		"PODIUM_EMBEDDING_PROVIDER=openai",
 		"OPENAI_API_KEY=sk-test",
-	), "serve", "--standalone", "--layer-path", reg)
-	if st := getStatus(t, srv.BaseURL+"/healthz"); st != 200 {
-		t.Fatalf("healthz = %d, want 200 (server must start in BM25 mode)", st)
-	}
-	log := srv.log()
-	if !strings.Contains(log, "warning: vector search disabled") {
-		t.Errorf("expected 'warning: vector search disabled' in startup log:\n%s", log)
-	}
-	lowerLog := strings.ToLower(log)
-	if !strings.Contains(lowerLog, "apikey") && !strings.Contains(lowerLog, "api_key") && !strings.Contains(lowerLog, "api key") {
-		t.Errorf("expected log to mention APIKey; got:\n%s", log)
-	}
+	)
 }
 
 // T-D-vector-backends-6: Pinecone INDEX without HOST => clear error.
@@ -209,7 +222,7 @@ func TestVectorBackends_8_PineconeYAMLConfig(t *testing.T) {
 	t.Parallel()
 	cfgDir := t.TempDir()
 	cfgFile := cfgDir + "/registry.yaml"
-	if err := vbWriteFile(t, cfgFile, "vector_backend:\n  type: pinecone\n"); err != nil {
+	if err := vbWriteFile(t, cfgFile, "registry:\n  vector_backend:\n    type: pinecone\n"); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)
 	}
 
@@ -247,7 +260,7 @@ func TestVectorBackends_9_EnvOverridesYAMLVectorBackend(t *testing.T) {
 	t.Parallel()
 	cfgDir := t.TempDir()
 	cfgFile := cfgDir + "/registry.yaml"
-	if err := vbWriteFile(t, cfgFile, "vector_backend:\n  type: pinecone\n"); err != nil {
+	if err := vbWriteFile(t, cfgFile, "registry:\n  vector_backend:\n    type: pinecone\n"); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)
 	}
 
@@ -293,28 +306,20 @@ func TestVectorBackends_11_WeaviateStorageOnlyHappyPath(t *testing.T) {
 	t.Skip("storage-only happy path needs a faithful mock Weaviate + mock embedder; covered by pkg/vector cloud tests")
 }
 
-// T-D-vector-backends-12: Weaviate missing URL => warning mentioning URL.
+// T-D-vector-backends-12: Weaviate selected without its URL is a
+// misconfiguration; §13.12 makes it a hard startup error naming the missing
+// key rather than a silent BM25 fallback (F-13.12.10).
 func TestVectorBackends_12_WeaviateMissingURL(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
-	srv := startServerArgs(t, vbServerEnv(t,
+	vbExpectRefuseToStart(t, reg, "PODIUM_WEAVIATE_URL",
 		"PODIUM_VECTOR_BACKEND=weaviate-cloud",
 		"PODIUM_WEAVIATE_URL=",
+		"PODIUM_WEAVIATE_API_KEY=wv-test",
 		"PODIUM_WEAVIATE_COLLECTION=PodiumArtifacts",
 		"PODIUM_EMBEDDING_PROVIDER=openai",
 		"OPENAI_API_KEY=sk-test",
-	), "serve", "--standalone", "--layer-path", reg)
-	if st := getStatus(t, srv.BaseURL+"/healthz"); st != 200 {
-		t.Fatalf("healthz = %d, want 200", st)
-	}
-	log := srv.log()
-	if !strings.Contains(log, "warning: vector search disabled") {
-		t.Errorf("expected 'warning: vector search disabled':\n%s", log)
-	}
-	lowerLog := strings.ToLower(log)
-	if !strings.Contains(lowerLog, "url") {
-		t.Errorf("expected 'URL' mention in warning; got:\n%s", log)
-	}
+	)
 }
 
 // T-D-vector-backends-13: Weaviate default collection PodiumArtifacts.
@@ -329,7 +334,7 @@ func TestVectorBackends_14_WeaviateYAMLConfig(t *testing.T) {
 	t.Parallel()
 	cfgDir := t.TempDir()
 	cfgFile := cfgDir + "/registry.yaml"
-	if err := vbWriteFile(t, cfgFile, "vector_backend:\n  type: weaviate-cloud\n"); err != nil {
+	if err := vbWriteFile(t, cfgFile, "registry:\n  vector_backend:\n    type: weaviate-cloud\n"); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)
 	}
 
@@ -374,28 +379,20 @@ func TestVectorBackends_16_QdrantStorageOnlyHappyPath(t *testing.T) {
 	t.Skip("storage-only happy path needs a faithful mock Qdrant + mock embedder; covered by pkg/vector cloud tests")
 }
 
-// T-D-vector-backends-17: Qdrant missing URL => warning mentioning URL.
+// T-D-vector-backends-17: Qdrant selected without its URL is a
+// misconfiguration; §13.12 makes it a hard startup error naming the missing
+// key rather than a silent BM25 fallback (F-13.12.10).
 func TestVectorBackends_17_QdrantMissingURL(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
-	srv := startServerArgs(t, vbServerEnv(t,
+	vbExpectRefuseToStart(t, reg, "PODIUM_QDRANT_URL",
 		"PODIUM_VECTOR_BACKEND=qdrant-cloud",
 		"PODIUM_QDRANT_URL=",
+		"PODIUM_QDRANT_API_KEY=qdr-test",
 		"PODIUM_QDRANT_COLLECTION=podium-artifacts",
 		"PODIUM_EMBEDDING_PROVIDER=openai",
 		"OPENAI_API_KEY=sk-test",
-	), "serve", "--standalone", "--layer-path", reg)
-	if st := getStatus(t, srv.BaseURL+"/healthz"); st != 200 {
-		t.Fatalf("healthz = %d, want 200", st)
-	}
-	log := srv.log()
-	if !strings.Contains(log, "warning: vector search disabled") {
-		t.Errorf("expected 'warning: vector search disabled':\n%s", log)
-	}
-	lowerLog := strings.ToLower(log)
-	if !strings.Contains(lowerLog, "url") {
-		t.Errorf("expected 'URL' mention in warning; got:\n%s", log)
-	}
+	)
 }
 
 // T-D-vector-backends-18: Qdrant default collection name is podium_artifacts (underscore).
@@ -410,7 +407,7 @@ func TestVectorBackends_19_QdrantYAMLConfig(t *testing.T) {
 	t.Parallel()
 	cfgDir := t.TempDir()
 	cfgFile := cfgDir + "/registry.yaml"
-	if err := vbWriteFile(t, cfgFile, "vector_backend:\n  type: qdrant-cloud\n"); err != nil {
+	if err := vbWriteFile(t, cfgFile, "registry:\n  vector_backend:\n    type: qdrant-cloud\n"); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)
 	}
 
@@ -680,25 +677,17 @@ func TestVectorBackends_31_UnknownEmbeddingProviderWarning(t *testing.T) {
 	}
 }
 
-// T-D-vector-backends-32: openai provider missing OPENAI_API_KEY => warning.
+// T-D-vector-backends-32: the openai embedding provider selected without
+// OPENAI_API_KEY is a misconfiguration; §13.12 makes it a hard startup error
+// naming the missing key (F-13.12.10). An embedding provider set to the empty
+// string is a separate, intentional disable that degrades to BM25 (test 29).
 func TestVectorBackends_32_OpenAIMissingAPIKey(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
-	srv := startServerArgs(t, vbServerEnv(t,
+	vbExpectRefuseToStart(t, reg, "OPENAI_API_KEY",
 		"PODIUM_EMBEDDING_PROVIDER=openai",
 		"OPENAI_API_KEY=",
-	), "serve", "--standalone", "--layer-path", reg)
-	if st := getStatus(t, srv.BaseURL+"/healthz"); st != 200 {
-		t.Fatalf("healthz = %d, want 200", st)
-	}
-	log := srv.log()
-	if !strings.Contains(log, "warning: vector search disabled") {
-		t.Errorf("expected 'warning: vector search disabled':\n%s", log)
-	}
-	lowerLog := strings.ToLower(log)
-	if !strings.Contains(lowerLog, "openai_api_key") && !strings.Contains(lowerLog, "api_key") {
-		t.Errorf("expected OPENAI_API_KEY mention in warning; got:\n%s", log)
-	}
+	)
 }
 
 // T-D-vector-backends-33: MCP overlay search uses BM25 regardless of PODIUM_VECTOR_BACKEND.

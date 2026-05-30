@@ -484,13 +484,14 @@ func TestOpGuide_24_PerLayerVisibilityInjectedToken(t *testing.T) {
 	})
 	cfgPath := filepath.Join(home, "registry.yaml")
 	cfg := "" +
-		"layers:\n" +
-		"  - id: finance-layer\n" +
-		"    source:\n" +
-		"      local:\n" +
-		"        path: " + layerRoot + "\n" +
-		"    visibility:\n" +
-		"      groups: [finance]\n"
+		"registry:\n" +
+		"  layers:\n" +
+		"    - id: finance-layer\n" +
+		"      source:\n" +
+		"        local:\n" +
+		"          path: " + layerRoot + "\n" +
+		"      visibility:\n" +
+		"        groups: [finance]\n"
 	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)
 	}
@@ -602,7 +603,7 @@ func TestOpGuide_27_EnvOverridesYAMLPublicMode(t *testing.T) {
 	home := t.TempDir()
 	cfgFile := filepath.Join(home, "registry.yaml")
 	// Write a YAML config with public_mode: false.
-	if err := os.WriteFile(cfgFile, []byte("public_mode: false\n"), 0o644); err != nil {
+	if err := os.WriteFile(cfgFile, []byte("registry:\n  public_mode: false\n"), 0o644); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)
 	}
 	reg := writeRegistry(t, map[string]string{"ctx/ARTIFACT.md": opguideSimpleArtifact()})
@@ -940,7 +941,7 @@ func TestOpGuide_38_ScopePreviewGating(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(cfgDir, "registry.yaml"),
-		[]byte("tenant:\n  expose_scope_preview: false\n"), 0o644); err != nil {
+		[]byte("registry:\n  tenant:\n    expose_scope_preview: false\n"), 0o644); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)
 	}
 

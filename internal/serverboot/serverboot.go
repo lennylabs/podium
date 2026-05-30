@@ -694,6 +694,11 @@ type Config struct {
 	// verifier requires (the registry endpoint). Empty disables audience
 	// checking. Sourced from PODIUM_OAUTH_AUDIENCE.
 	oauthAudience string
+	// oauthAuthorizationEndpoint is the §6.3 / §13.12 identity-provider
+	// authorization endpoint (PODIUM_OAUTH_AUTHORIZATION_ENDPOINT or the
+	// registry.yaml identity_provider.authorization_endpoint). Surfaced via
+	// `config show`; the device-code clients consume the same value.
+	oauthAuthorizationEndpoint string
 	// idpGroupMapping is the §6.3.1 IdpGroupMapping adapter: a registry-
 	// side table rewriting OIDC group-claim values to layer group names
 	// for IdPs without SCIM. Nil or empty passes groups through unchanged.
@@ -723,6 +728,7 @@ type Config struct {
 	pgvectorDSN       string
 	pineconeKey       string
 	pineconeHost      string
+	pineconeIndex     string
 	pineconeNS        string
 	weaviateURL       string
 	weaviateKey       string
@@ -730,6 +736,13 @@ type Config struct {
 	qdrantURL         string
 	qdrantKey         string
 	qdrantColl        string
+	// vectorInferenceModel captures the §13.12 self-embedding model name
+	// (PODIUM_PINECONE_INFERENCE_MODEL / PODIUM_WEAVIATE_VECTORIZER /
+	// PODIUM_QDRANT_INFERENCE_MODEL, or vector_backend.inference_model). The
+	// self-embedding wiring itself is tracked separately (F-13.12.6); the
+	// value is parsed and surfaced so a config-file deployment is not silently
+	// dropped.
+	vectorInferenceModel string
 	// §4.6 default visibility for newly-registered layers when no
 	// explicit visibility is supplied. One of "public" |
 	// "organization" | "private". Defaults to "private" so
@@ -814,6 +827,16 @@ func (c *Config) Settings() []Setting {
 		}
 		return src
 	}
+	// envFirstOrSrc reports the first set env var among keys (for a value that
+	// has more than one env source), else the fallback source.
+	envFirstOrSrc := func(src string, keys ...string) string {
+		for _, k := range keys {
+			if os.Getenv(k) != "" {
+				return k
+			}
+		}
+		return src
+	}
 	redact := func(s string) string {
 		if s == "" {
 			return ""
@@ -825,6 +848,7 @@ func (c *Config) Settings() []Setting {
 		{"public_mode", boolStr(c.publicMode), envOrSrc("PODIUM_PUBLIC_MODE", defaultSrc)},
 		{"identity_provider", c.identityProvider, envOrSrc("PODIUM_IDENTITY_PROVIDER", yamlSrc)},
 		{"oauth_audience", c.oauthAudience, envOrSrc("PODIUM_OAUTH_AUDIENCE", defaultSrc)},
+		{"identity_provider.authorization_endpoint", c.oauthAuthorizationEndpoint, envOrSrc("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT", yamlSrc)},
 		{"idp_group_mapping", idpGroupMappingStr(c.idpGroupMapping), envOrSrc("PODIUM_IDP_GROUP_MAPPING", defaultSrc)},
 		{"store.type", c.storeType, envOrSrc("PODIUM_REGISTRY_STORE", defaultSrc)},
 		{"store.sqlite_path", c.sqlitePath, envOrSrc("PODIUM_SQLITE_PATH", defaultSrc)},
@@ -835,6 +859,9 @@ func (c *Config) Settings() []Setting {
 		{"object_store.s3_bucket", c.s3Bucket, envOrSrc("PODIUM_S3_BUCKET", yamlSrc)},
 		{"object_store.s3_region", c.s3Region, envOrSrc("PODIUM_S3_REGION", defaultSrc)},
 		{"vector_backend", c.vectorBackend, envOrSrc("PODIUM_VECTOR_BACKEND", yamlSrc)},
+		{"vector_backend.index", c.pineconeIndex, envOrSrc("PODIUM_PINECONE_INDEX", yamlSrc)},
+		{"vector_backend.namespace", c.pineconeNS, envOrSrc("PODIUM_PINECONE_NAMESPACE", yamlSrc)},
+		{"vector_backend.inference_model", c.vectorInferenceModel, envFirstOrSrc(yamlSrc, "PODIUM_PINECONE_INFERENCE_MODEL", "PODIUM_WEAVIATE_VECTORIZER", "PODIUM_QDRANT_INFERENCE_MODEL")},
 		{"embedding_provider", c.embeddingProvider, envOrSrc("PODIUM_EMBEDDING_PROVIDER", yamlSrc)},
 		{"embedding_model", c.embeddingModel, envOrSrc("PODIUM_EMBEDDING_MODEL", yamlSrc)},
 		{"layers.default_visibility", c.defaultLayerVisibility, envOrSrc("PODIUM_DEFAULT_LAYER_VISIBILITY", defaultSrc)},
@@ -873,22 +900,23 @@ func idpGroupMappingStr(m *identity.IdpGroupMapping) string {
 
 func LoadConfig() *Config {
 	c := &Config{
-		bind:             envDefault("PODIUM_BIND", "127.0.0.1:8080"),
-		publicMode:       isTrue(os.Getenv("PODIUM_PUBLIC_MODE")),
-		identityProvider: os.Getenv("PODIUM_IDENTITY_PROVIDER"),
-		oauthAudience:    os.Getenv("PODIUM_OAUTH_AUDIENCE"),
-		storeType:        envDefault("PODIUM_REGISTRY_STORE", "sqlite"),
-		sqlitePath:       os.Getenv("PODIUM_SQLITE_PATH"),
-		postgresDSN:      os.Getenv("PODIUM_POSTGRES_DSN"),
-		objectStore:      envDefault("PODIUM_OBJECT_STORE", "filesystem"),
-		filesystemRoot:   os.Getenv("PODIUM_FILESYSTEM_ROOT"),
-		publicURL:        os.Getenv("PODIUM_PUBLIC_URL"),
-		s3Endpoint:       os.Getenv("PODIUM_S3_ENDPOINT"),
-		s3Region:         envDefault("PODIUM_S3_REGION", "us-east-1"),
-		s3Bucket:         os.Getenv("PODIUM_S3_BUCKET"),
-		s3AccessKey:      os.Getenv("PODIUM_S3_ACCESS_KEY_ID"),
-		s3SecretKey:      os.Getenv("PODIUM_S3_SECRET_ACCESS_KEY"),
-		s3UseSSL:         os.Getenv("PODIUM_S3_USE_SSL") != "false",
+		bind:                       envDefault("PODIUM_BIND", "127.0.0.1:8080"),
+		publicMode:                 isTrue(os.Getenv("PODIUM_PUBLIC_MODE")),
+		identityProvider:           os.Getenv("PODIUM_IDENTITY_PROVIDER"),
+		oauthAudience:              os.Getenv("PODIUM_OAUTH_AUDIENCE"),
+		oauthAuthorizationEndpoint: os.Getenv("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT"),
+		storeType:                  envDefault("PODIUM_REGISTRY_STORE", "sqlite"),
+		sqlitePath:                 os.Getenv("PODIUM_SQLITE_PATH"),
+		postgresDSN:                os.Getenv("PODIUM_POSTGRES_DSN"),
+		objectStore:                envDefault("PODIUM_OBJECT_STORE", "filesystem"),
+		filesystemRoot:             os.Getenv("PODIUM_FILESYSTEM_ROOT"),
+		publicURL:                  os.Getenv("PODIUM_PUBLIC_URL"),
+		s3Endpoint:                 os.Getenv("PODIUM_S3_ENDPOINT"),
+		s3Region:                   envDefault("PODIUM_S3_REGION", "us-east-1"),
+		s3Bucket:                   os.Getenv("PODIUM_S3_BUCKET"),
+		s3AccessKey:                os.Getenv("PODIUM_S3_ACCESS_KEY_ID"),
+		s3SecretKey:                os.Getenv("PODIUM_S3_SECRET_ACCESS_KEY"),
+		s3UseSSL:                   os.Getenv("PODIUM_S3_USE_SSL") != "false",
 		// §4.7 vector + embedding.
 		vectorBackend:     os.Getenv("PODIUM_VECTOR_BACKEND"),
 		embeddingProvider: os.Getenv("PODIUM_EMBEDDING_PROVIDER"),
@@ -900,6 +928,7 @@ func LoadConfig() *Config {
 		pgvectorDSN:       envFirst("PODIUM_PGVECTOR_DSN", "PODIUM_POSTGRES_DSN"),
 		pineconeKey:       os.Getenv("PODIUM_PINECONE_API_KEY"),
 		pineconeHost:      os.Getenv("PODIUM_PINECONE_HOST"),
+		pineconeIndex:     os.Getenv("PODIUM_PINECONE_INDEX"),
 		pineconeNS:        os.Getenv("PODIUM_PINECONE_NAMESPACE"),
 		weaviateURL:       os.Getenv("PODIUM_WEAVIATE_URL"),
 		weaviateKey:       os.Getenv("PODIUM_WEAVIATE_API_KEY"),
@@ -907,8 +936,11 @@ func LoadConfig() *Config {
 		qdrantURL:         os.Getenv("PODIUM_QDRANT_URL"),
 		qdrantKey:         os.Getenv("PODIUM_QDRANT_API_KEY"),
 		qdrantColl:        envDefault("PODIUM_QDRANT_COLLECTION", "podium_artifacts"),
-		// §4.6 + §13.2.1.
-		defaultLayerVisibility: envDefault("PODIUM_DEFAULT_LAYER_VISIBILITY", "private"),
+		// §13.12 self-embedding model (parsed/surfaced; wiring is F-13.12.6).
+		vectorInferenceModel: envFirst("PODIUM_PINECONE_INFERENCE_MODEL", "PODIUM_WEAVIATE_VECTORIZER", "PODIUM_QDRANT_INFERENCE_MODEL"),
+		// §4.6 + §13.2.1. The default visibility is resolved after applyYAML
+		// (a standalone deployment defaults to public; see below, F-13.12.15).
+		defaultLayerVisibility: os.Getenv("PODIUM_DEFAULT_LAYER_VISIBILITY"),
 		// §7.3.1 user-defined-layer cap (0 = default of 3).
 		maxUserLayers:         envInt("PODIUM_MAX_USER_LAYERS", 0),
 		readOnlyProbeFailures: envInt("PODIUM_READONLY_PROBE_FAILURES", 0),
@@ -934,6 +966,18 @@ func LoadConfig() *Config {
 		log.Printf("warning: ignored registry.yaml: %v", err)
 	} else {
 		applyYAML(c, y)
+	}
+	// §13.10 / §13.12 (F-13.12.15): when no explicit default visibility was
+	// supplied (env or registry.yaml), a standalone deployment (no identity
+	// provider) defaults endpoint-registered layers to `public`, matching the
+	// §13.10 standalone default; once an identity provider gates access, the
+	// default is `private` so admin-defined layers do not leak by accident.
+	if c.defaultLayerVisibility == "" {
+		if c.identityProvider == "" {
+			c.defaultLayerVisibility = "public"
+		} else {
+			c.defaultLayerVisibility = "private"
+		}
 	}
 	// §6.3.1 IdpGroupMapping: parse the registry-side group-mapping table
 	// from PODIUM_IDP_GROUP_MAPPING ("oktaGroupOID=finance,..."). A
@@ -983,7 +1027,58 @@ func (c *Config) validate() error {
 	if c.storeType == "postgres" && c.postgresDSN == "" {
 		return fmt.Errorf("PODIUM_POSTGRES_DSN is required when PODIUM_REGISTRY_STORE=postgres")
 	}
+	// §13.12: "The registry refuses to start when a backend is selected but
+	// its required values are missing, naming the missing keys in the error."
+	if missing := c.missingBackendValues(); len(missing) > 0 {
+		return fmt.Errorf("missing required configuration for the selected backend(s): %s",
+			strings.Join(missing, ", "))
+	}
 	return nil
+}
+
+// missingBackendValues returns the env-var names that a selected backend
+// requires but that resolved empty. §13.12 makes a configured-but-incomplete
+// backend a hard startup error (F-13.12.10); the warn-and-disable path in Run
+// is reserved for the explicit none/unset selection, for an unknown backend
+// name, and for a fully-configured backend that is merely unreachable at
+// runtime (search then degrades to BM25 per §13.12). An embedding provider
+// set to the empty string is an intentional disable, not a selection, so it
+// is not checked here.
+func (c *Config) missingBackendValues() []string {
+	var missing []string
+	req := func(present bool, key string) {
+		if !present {
+			missing = append(missing, key)
+		}
+	}
+	switch c.objectStore {
+	case "s3":
+		req(c.s3Bucket != "", "PODIUM_S3_BUCKET")
+	}
+	switch c.vectorBackend {
+	case "pinecone":
+		req(c.pineconeKey != "", "PODIUM_PINECONE_API_KEY")
+		// The host is auto-resolved from the index name (§13.12), so either
+		// the host or the index locates the backend.
+		req(c.pineconeHost != "" || c.pineconeIndex != "", "PODIUM_PINECONE_INDEX")
+	case "weaviate-cloud":
+		req(c.weaviateURL != "", "PODIUM_WEAVIATE_URL")
+		req(c.weaviateKey != "", "PODIUM_WEAVIATE_API_KEY")
+	case "qdrant-cloud":
+		req(c.qdrantURL != "", "PODIUM_QDRANT_URL")
+		req(c.qdrantKey != "", "PODIUM_QDRANT_API_KEY")
+	case "pgvector":
+		req(c.pgvectorDSN != "", "PODIUM_PGVECTOR_DSN")
+	}
+	switch c.embeddingProvider {
+	case "openai":
+		req(c.openaiAPIKey != "", "OPENAI_API_KEY")
+	case "voyage":
+		req(c.voyageAPIKey != "", "VOYAGE_API_KEY")
+	case "cohere":
+		req(c.cohereAPIKey != "", "COHERE_API_KEY")
+	}
+	return missing
 }
 
 func (c *Config) modeBanner() string {
@@ -1003,6 +1098,10 @@ func openStore(c *Config) (store.Store, error) {
 		_ = os.MkdirAll(dir, 0o755)
 		return store.OpenSQLite(c.sqlitePath)
 	case "memory":
+		// §13.12 lists only postgres | sqlite; `memory` is an undocumented
+		// test affordance. Warn so an operator who selects it in a real
+		// process knows it persists nothing (F-13.12.14).
+		log.Printf("warning: PODIUM_REGISTRY_STORE=memory is a non-durable test backend; it persists nothing across restarts")
 		return store.NewMemory(), nil
 	case "postgres":
 		return store.OpenPostgres(c.postgresDSN)
@@ -1106,6 +1205,10 @@ func openVectorBackend(c *Config, dim int) (vector.Provider, error) {
 	case "", "none":
 		return nil, nil
 	case "memory":
+		// §13.12 lists pgvector | sqlite-vec | pinecone | weaviate-cloud |
+		// qdrant-cloud; `memory` is an undocumented test affordance. Warn so
+		// an operator who selects it knows it persists nothing (F-13.12.14).
+		log.Printf("warning: PODIUM_VECTOR_BACKEND=memory is a non-durable test backend; it persists nothing across restarts")
 		return vector.NewMemory(dim), nil
 	case "pgvector":
 		if c.pgvectorDSN == "" {
@@ -1125,7 +1228,7 @@ func openVectorBackend(c *Config, dim int) (vector.Provider, error) {
 			// for serverless. Ship a clear error pointing at Host
 			// for now; an SDK call to the Pinecone control plane
 			// would resolve it but adds dep weight.
-			if idx := os.Getenv("PODIUM_PINECONE_INDEX"); idx != "" {
+			if idx := c.pineconeIndex; idx != "" {
 				return nil, fmt.Errorf(
 					"PODIUM_PINECONE_INDEX=%q set but PODIUM_PINECONE_HOST is required for serverless; supply the index host URL", idx)
 			}

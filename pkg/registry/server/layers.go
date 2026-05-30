@@ -383,6 +383,15 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 			cfg.Public = true
 		case "organization":
 			cfg.Organization = true
+		case "users":
+			// spec §13.10: PODIUM_DEFAULT_LAYER_VISIBILITY=users selects the
+			// standard "users: [<registrant>]" behavior. Derive the registrant
+			// from the authenticated caller; with no authenticated identity
+			// (anonymous standalone) the layer stays private (no filters),
+			// which is the safe fallback for the `users` selection.
+			if id := e.identify(r); id.IsAuthenticated && id.Sub != "" {
+				cfg.Users = []string{id.Sub}
+			}
 		}
 		// "private" / unset / unknown: leave the layer with no
 		// visibility filters — only explicit grants will see it.

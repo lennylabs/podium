@@ -26,13 +26,14 @@ func TestDeclarativeLayers_LocalLayerBootsAndServes(t *testing.T) {
 
 	cfgPath := filepath.Join(home, "registry.yaml")
 	cfg := "" +
-		"layers:\n" +
-		"  - id: org-defaults\n" +
-		"    source:\n" +
-		"      local:\n" +
-		"        path: " + layerRoot + "\n" +
-		"    visibility:\n" +
-		"      public: true\n"
+		"registry:\n" +
+		"  layers:\n" +
+		"    - id: org-defaults\n" +
+		"      source:\n" +
+		"        local:\n" +
+		"          path: " + layerRoot + "\n" +
+		"      visibility:\n" +
+		"        public: true\n"
 	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)
 	}

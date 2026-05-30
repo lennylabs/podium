@@ -3,23 +3,34 @@ package serverboot
 import (
 	"fmt"
 	"os"
+	"regexp"
 
 	"gopkg.in/yaml.v3"
 )
 
-// yamlConfig mirrors the §13.10 `~/.podium/registry.yaml` shape.
-// Each field is optional; loadConfig overlays a non-empty value on
-// top of the env-derived default so env-var precedence remains
-// (env beats yaml beats hardcoded default).
+// fileConfig is the top-level registry.yaml document. §13.12 nests every
+// server-side key under a single `registry:` mapping, so the parser reads
+// into this wrapper and hands callers the unwrapped Registry block.
+// spec: §13.12 (config file format example, F-13.12.2).
+type fileConfig struct {
+	Registry yamlConfig `yaml:"registry"`
+}
+
+// yamlConfig mirrors the §13.12 `registry:` block. Each field is optional;
+// loadConfig overlays a non-empty value on top of the env-derived default so
+// env-var precedence remains (env beats yaml beats hardcoded default).
 type yamlConfig struct {
-	Bind             string        `yaml:"bind,omitempty"`
-	PublicMode       *bool         `yaml:"public_mode,omitempty"`
-	IdentityProvider string        `yaml:"identity_provider,omitempty"`
-	Store            yamlStoreCfg  `yaml:"store,omitempty"`
-	ObjectStore      yamlObjectCfg `yaml:"object_store,omitempty"`
-	Vector           yamlVectorCfg `yaml:"vector_backend,omitempty"`
-	Embedding        yamlEmbedCfg  `yaml:"embedding_provider,omitempty"`
-	Discovery        yamlDiscovery `yaml:"discovery,omitempty"`
+	// Endpoint is the §13.12 `endpoint:` public-facing registry URL; it maps
+	// to PODIUM_PUBLIC_URL (the presigned-URL / advertised base).
+	Endpoint    string          `yaml:"endpoint,omitempty"`
+	Bind        string          `yaml:"bind,omitempty"`
+	PublicMode  *bool           `yaml:"public_mode,omitempty"`
+	Identity    yamlIdentityCfg `yaml:"identity_provider,omitempty"`
+	Store       yamlStoreCfg    `yaml:"store,omitempty"`
+	ObjectStore yamlObjectCfg   `yaml:"object_store,omitempty"`
+	Vector      yamlVectorCfg   `yaml:"vector_backend,omitempty"`
+	Embedding   yamlEmbedCfg    `yaml:"embedding_provider,omitempty"`
+	Discovery   yamlDiscovery   `yaml:"discovery,omitempty"`
 	// Layers is the §4.6 per-tenant admin-defined layer list. Each entry
 	// declares an id, a single source (git or local), and a visibility
 	// block. Seeded into store.LayerConfig rows at startup.
@@ -44,27 +55,54 @@ type yamlTenant struct {
 	ExposeScopePreview *bool `yaml:"expose_scope_preview,omitempty"`
 }
 
-type yamlStoreCfg struct {
-	Type        string `yaml:"type,omitempty"`
-	SQLitePath  string `yaml:"sqlite_path,omitempty"`
-	PostgresDSN string `yaml:"postgres_dsn,omitempty"`
+// yamlIdentityCfg mirrors the §13.12 `identity_provider:` mapping. The spec
+// example models it as an object with type / audience / authorization_endpoint
+// (F-13.12.4), so a scalar would no longer unmarshal here.
+type yamlIdentityCfg struct {
+	Type                  string `yaml:"type,omitempty"`
+	Audience              string `yaml:"audience,omitempty"`
+	AuthorizationEndpoint string `yaml:"authorization_endpoint,omitempty"`
 }
 
+// yamlStoreCfg mirrors the §13.12 `store:` block. The DSN key is `dsn`
+// (section-relative, per the config example) rather than `postgres_dsn`
+// (F-13.12.5).
+type yamlStoreCfg struct {
+	Type       string `yaml:"type,omitempty"`
+	SQLitePath string `yaml:"sqlite_path,omitempty"`
+	DSN        string `yaml:"dsn,omitempty"`
+}
+
+// yamlObjectCfg mirrors the §13.12 `object_store:` block. The keys are
+// section-relative (`bucket`, `region`, `endpoint`) per the config example
+// rather than the `s3_`-prefixed env-var forms (F-13.12.5).
 type yamlObjectCfg struct {
 	Type           string `yaml:"type,omitempty"`
 	FilesystemRoot string `yaml:"filesystem_root,omitempty"`
-	S3Endpoint     string `yaml:"s3_endpoint,omitempty"`
-	S3Bucket       string `yaml:"s3_bucket,omitempty"`
-	S3Region       string `yaml:"s3_region,omitempty"`
+	Endpoint       string `yaml:"endpoint,omitempty"`
+	Bucket         string `yaml:"bucket,omitempty"`
+	Region         string `yaml:"region,omitempty"`
 }
 
+// yamlVectorCfg mirrors the §13.12 `vector_backend:` block. Beyond `type`,
+// the config example carries the per-backend sub-keys api_key / index /
+// namespace / inference_model (F-13.12.4); applyYAML routes them to the
+// selected backend's config fields.
 type yamlVectorCfg struct {
-	Type string `yaml:"type,omitempty"`
+	Type           string `yaml:"type,omitempty"`
+	APIKey         string `yaml:"api_key,omitempty"`
+	Index          string `yaml:"index,omitempty"`
+	Namespace      string `yaml:"namespace,omitempty"`
+	InferenceModel string `yaml:"inference_model,omitempty"`
 }
 
+// yamlEmbedCfg mirrors the §13.12 `embedding_provider:` block. The selector
+// key is `type` (matching the config example) rather than `provider`, and the
+// block carries an `api_key` (F-13.12.4).
 type yamlEmbedCfg struct {
-	Provider string `yaml:"provider,omitempty"`
-	Model    string `yaml:"model,omitempty"`
+	Type   string `yaml:"type,omitempty"`
+	APIKey string `yaml:"api_key,omitempty"`
+	Model  string `yaml:"model,omitempty"`
 }
 
 // yamlDiscovery mirrors the §13.12 tenant-scope `discovery:` block. The
@@ -116,8 +154,27 @@ type yamlReadOnly struct {
 	ProbeInterval int `yaml:"probe_interval_seconds,omitempty"`
 }
 
-// readYAMLConfig loads ~/.podium/registry.yaml (or
-// PODIUM_CONFIG_FILE override). Missing file returns (nil, nil).
+// envInterpolationRE matches the §13.12 `${ENV_VAR}` interpolation form. Only
+// the brace form is recognized so a bare `$` in a DSN or password survives.
+var envInterpolationRE = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
+// expandEnvVars resolves `${ENV_VAR}` references in the raw config bytes
+// before parsing, per §13.12 ("`${ENV_VAR}` interpolation supported" and
+// "Secret values should use `${ENV_VAR}` interpolation"). An unset variable
+// expands to the empty string, matching standard environment-substitution
+// tools; the resulting empty required value is then named by validate
+// (§13.12: "refuses to start when a backend is selected but its required
+// values are missing"). spec: §13.12 (F-13.12.1).
+func expandEnvVars(data []byte) []byte {
+	return envInterpolationRE.ReplaceAllFunc(data, func(match []byte) []byte {
+		name := envInterpolationRE.FindSubmatch(match)[1]
+		return []byte(os.Getenv(string(name)))
+	})
+}
+
+// readYAMLConfig loads ~/.podium/registry.yaml (or PODIUM_CONFIG_FILE
+// override), resolves §13.12 ${ENV_VAR} interpolation, and unwraps the
+// top-level `registry:` block. Missing file returns (nil, nil).
 func readYAMLConfig() (*yamlConfig, error) {
 	path := os.Getenv("PODIUM_CONFIG_FILE")
 	if path == "" {
@@ -134,11 +191,15 @@ func readYAMLConfig() (*yamlConfig, error) {
 		}
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	var out yamlConfig
+	// §13.12: resolve ${ENV_VAR} interpolation before parsing so a config
+	// written with the documented secret-handling form connects with the
+	// resolved value rather than the literal placeholder (F-13.12.1).
+	data = expandEnvVars(data)
+	var out fileConfig
 	if err := yaml.Unmarshal(data, &out); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
-	return &out, nil
+	return &out.Registry, nil
 }
 
 // applyYAML overlays values from the YAML config onto c. Env-set
@@ -152,11 +213,23 @@ func applyYAML(c *Config, y *yamlConfig) {
 			c.bind = y.Bind
 		}
 	}
+	// §13.12 endpoint: the advertised public URL (PODIUM_PUBLIC_URL). It is
+	// defaulted to http://<bind> later in LoadConfig only when still empty.
+	if c.publicURL == "" && y.Endpoint != "" && os.Getenv("PODIUM_PUBLIC_URL") == "" {
+		c.publicURL = y.Endpoint
+	}
 	if y.PublicMode != nil && os.Getenv("PODIUM_PUBLIC_MODE") == "" {
 		c.publicMode = *y.PublicMode
 	}
-	if c.identityProvider == "" && y.IdentityProvider != "" {
-		c.identityProvider = y.IdentityProvider
+	// §13.12 identity_provider object: type / audience / authorization_endpoint.
+	if c.identityProvider == "" && y.Identity.Type != "" {
+		c.identityProvider = y.Identity.Type
+	}
+	if c.oauthAudience == "" && y.Identity.Audience != "" {
+		c.oauthAudience = y.Identity.Audience
+	}
+	if c.oauthAuthorizationEndpoint == "" && y.Identity.AuthorizationEndpoint != "" {
+		c.oauthAuthorizationEndpoint = y.Identity.AuthorizationEndpoint
 	}
 	if c.storeType == "sqlite" && y.Store.Type != "" && os.Getenv("PODIUM_REGISTRY_STORE") == "" {
 		c.storeType = y.Store.Type
@@ -164,8 +237,8 @@ func applyYAML(c *Config, y *yamlConfig) {
 	if c.sqlitePath == "" && y.Store.SQLitePath != "" {
 		c.sqlitePath = y.Store.SQLitePath
 	}
-	if c.postgresDSN == "" && y.Store.PostgresDSN != "" {
-		c.postgresDSN = y.Store.PostgresDSN
+	if c.postgresDSN == "" && y.Store.DSN != "" {
+		c.postgresDSN = y.Store.DSN
 	}
 	if c.objectStore == "filesystem" && y.ObjectStore.Type != "" && os.Getenv("PODIUM_OBJECT_STORE") == "" {
 		c.objectStore = y.ObjectStore.Type
@@ -173,24 +246,26 @@ func applyYAML(c *Config, y *yamlConfig) {
 	if c.filesystemRoot == "" && y.ObjectStore.FilesystemRoot != "" {
 		c.filesystemRoot = y.ObjectStore.FilesystemRoot
 	}
-	if c.s3Endpoint == "" && y.ObjectStore.S3Endpoint != "" {
-		c.s3Endpoint = y.ObjectStore.S3Endpoint
+	if c.s3Endpoint == "" && y.ObjectStore.Endpoint != "" {
+		c.s3Endpoint = y.ObjectStore.Endpoint
 	}
-	if c.s3Bucket == "" && y.ObjectStore.S3Bucket != "" {
-		c.s3Bucket = y.ObjectStore.S3Bucket
+	if c.s3Bucket == "" && y.ObjectStore.Bucket != "" {
+		c.s3Bucket = y.ObjectStore.Bucket
 	}
-	if y.ObjectStore.S3Region != "" && os.Getenv("PODIUM_S3_REGION") == "" {
-		c.s3Region = y.ObjectStore.S3Region
+	if y.ObjectStore.Region != "" && os.Getenv("PODIUM_S3_REGION") == "" {
+		c.s3Region = y.ObjectStore.Region
 	}
 	if c.vectorBackend == "" && y.Vector.Type != "" {
 		c.vectorBackend = y.Vector.Type
 	}
-	if c.embeddingProvider == "" && y.Embedding.Provider != "" {
-		c.embeddingProvider = y.Embedding.Provider
+	applyVectorYAML(c, y.Vector)
+	if c.embeddingProvider == "" && y.Embedding.Type != "" {
+		c.embeddingProvider = y.Embedding.Type
 	}
 	if c.embeddingModel == "" && y.Embedding.Model != "" {
 		c.embeddingModel = y.Embedding.Model
 	}
+	applyEmbeddingYAML(c, y.Embedding)
 	if c.defaultLayerVisibility == "" && y.DefaultLayerVisibility != "" {
 		c.defaultLayerVisibility = y.DefaultLayerVisibility
 	}
@@ -217,5 +292,58 @@ func applyYAML(c *Config, y *yamlConfig) {
 	}
 	if c.readOnlyProbeInterval == 0 && y.ReadOnly.ProbeInterval > 0 {
 		c.readOnlyProbeInterval = y.ReadOnly.ProbeInterval
+	}
+}
+
+// applyVectorYAML routes the §13.12 `vector_backend:` sub-keys to the selected
+// backend's config fields (F-13.12.4). api_key maps to the backend's key;
+// index / namespace / inference_model are the Pinecone-scoped keys the config
+// example documents. The inference-model value is captured for the §13.12.6
+// self-embedding path. Env values keep precedence.
+func applyVectorYAML(c *Config, v yamlVectorCfg) {
+	switch c.vectorBackend {
+	case "pinecone":
+		if c.pineconeKey == "" && v.APIKey != "" {
+			c.pineconeKey = v.APIKey
+		}
+		if c.pineconeIndex == "" && v.Index != "" {
+			c.pineconeIndex = v.Index
+		}
+		if c.pineconeNS == "" && v.Namespace != "" {
+			c.pineconeNS = v.Namespace
+		}
+	case "weaviate-cloud":
+		if c.weaviateKey == "" && v.APIKey != "" {
+			c.weaviateKey = v.APIKey
+		}
+	case "qdrant-cloud":
+		if c.qdrantKey == "" && v.APIKey != "" {
+			c.qdrantKey = v.APIKey
+		}
+	}
+	if c.vectorInferenceModel == "" && v.InferenceModel != "" {
+		c.vectorInferenceModel = v.InferenceModel
+	}
+}
+
+// applyEmbeddingYAML routes the §13.12 `embedding_provider.api_key` to the
+// selected provider's key field (F-13.12.4). Env values keep precedence.
+func applyEmbeddingYAML(c *Config, e yamlEmbedCfg) {
+	if e.APIKey == "" {
+		return
+	}
+	switch c.embeddingProvider {
+	case "openai":
+		if c.openaiAPIKey == "" {
+			c.openaiAPIKey = e.APIKey
+		}
+	case "voyage":
+		if c.voyageAPIKey == "" {
+			c.voyageAPIKey = e.APIKey
+		}
+	case "cohere":
+		if c.cohereAPIKey == "" {
+			c.cohereAPIKey = e.APIKey
+		}
 	}
 }

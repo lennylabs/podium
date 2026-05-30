@@ -23,7 +23,7 @@ func TestApplyYAML_FillsMissingDefaults(t *testing.T) {
 			ProbeFailures: 3,
 			ProbeInterval: 60,
 		},
-		Store: yamlStoreCfg{Type: "postgres", PostgresDSN: "postgres://u:p@h/db"},
+		Store: yamlStoreCfg{Type: "postgres", DSN: "postgres://u:p@h/db"},
 	}
 	applyYAML(c, y)
 	if c.bind != "0.0.0.0:9090" {
@@ -52,13 +52,14 @@ func TestApplyYAML_FillsMissingDefaults(t *testing.T) {
 func TestApplyYAML_DiscoveryBlock(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "registry.yaml")
-	body := []byte(`discovery:
-  max_depth: 4
-  notable_count: 7
-  fold_below_artifacts: 2
-  fold_passthrough_chains: false
-  target_response_tokens: 3000
-  allow_per_domain_overrides: false
+	body := []byte(`registry:
+  discovery:
+    max_depth: 4
+    notable_count: 7
+    fold_below_artifacts: 2
+    fold_passthrough_chains: false
+    target_response_tokens: 3000
+    allow_per_domain_overrides: false
 `)
 	if err := os.WriteFile(path, body, 0o644); err != nil {
 		t.Fatalf("write: %v", err)
@@ -110,7 +111,7 @@ func TestApplyYAML_DefaultLayerVisibilityFillsWhenEmpty(t *testing.T) {
 func TestApplyYAML_ExposeScopePreview(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "registry.yaml")
-	if err := os.WriteFile(path, []byte("tenant:\n  expose_scope_preview: false\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("registry:\n  tenant:\n    expose_scope_preview: false\n"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	t.Setenv("PODIUM_CONFIG_FILE", path)
@@ -182,18 +183,20 @@ func TestReadYAMLConfig_MissingFileIsNoOp(t *testing.T) {
 func TestReadYAMLConfig_ParsesFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "registry.yaml")
-	body := []byte(`bind: 127.0.0.1:9000
-identity_provider: oidc
-store:
-  type: postgres
-  postgres_dsn: postgres://localhost/db
-object_store:
-  type: filesystem
-  filesystem_root: /var/podium/objects
-default_layer_visibility: organization
-read_only:
-  probe_failures: 5
-  probe_interval_seconds: 45
+	body := []byte(`registry:
+  bind: 127.0.0.1:9000
+  identity_provider:
+    type: oidc
+  store:
+    type: postgres
+    dsn: postgres://localhost/db
+  object_store:
+    type: filesystem
+    filesystem_root: /var/podium/objects
+  default_layer_visibility: organization
+  read_only:
+    probe_failures: 5
+    probe_interval_seconds: 45
 `)
 	if err := os.WriteFile(path, body, 0o644); err != nil {
 		t.Fatalf("write: %v", err)
@@ -209,10 +212,10 @@ read_only:
 	if y.Bind != "127.0.0.1:9000" {
 		t.Errorf("Bind = %q", y.Bind)
 	}
-	if y.IdentityProvider != "oidc" {
-		t.Errorf("IdentityProvider = %q", y.IdentityProvider)
+	if y.Identity.Type != "oidc" {
+		t.Errorf("Identity.Type = %q", y.Identity.Type)
 	}
-	if y.Store.Type != "postgres" || y.Store.PostgresDSN != "postgres://localhost/db" {
+	if y.Store.Type != "postgres" || y.Store.DSN != "postgres://localhost/db" {
 		t.Errorf("Store = %+v", y.Store)
 	}
 	if y.ObjectStore.FilesystemRoot != "/var/podium/objects" {

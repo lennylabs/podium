@@ -292,14 +292,15 @@ func TestOIDC_1_PublicModeWithIdPFails(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-2: registry.yaml flat identity_provider field is parsed -------
+// ---- T-D-oidc-2: registry.yaml identity_provider.type is parsed -------------
 
-// T-D-oidc-2
+// T-D-oidc-2: §13.12 nests config under `registry:` and models
+// identity_provider as an object with a `type:` selector.
 func TestOIDC_2_RegistryYAMLIdentityProviderField(t *testing.T) {
 	t.Parallel()
 	cfgDir := t.TempDir()
 	cfgFile := filepath.Join(cfgDir, "registry.yaml")
-	if err := os.WriteFile(cfgFile, []byte("identity_provider: oidc\n"), 0o644); err != nil {
+	if err := os.WriteFile(cfgFile, []byte("registry:\n  identity_provider:\n    type: oidc\n"), 0o644); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)
 	}
 	res := runPodium(t, "", []string{
@@ -755,17 +756,18 @@ func TestOIDC_28_NestedIdentityBlockNotParsed(t *testing.T) {
 	if res.Exit != 0 {
 		t.Fatalf("config show exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	// The identity_provider field must NOT be "oidc" from the nested block,
-	// because the implementation only parses the flat identity_provider field.
-	// A correct output will show identity_provider as "(none)" / blank / "default".
+	// The identity_provider field must NOT be "oidc" from this block: §13.12
+	// nests config under `registry:` and the identity selector is
+	// registry.identity_provider.type, so a top-level identity: block is not
+	// parsed. A correct output shows identity_provider blank / "default".
 	lines := strings.Split(res.Stdout, "\n")
 	for _, line := range lines {
 		if strings.Contains(line, "identity_provider") && strings.Contains(line, "oidc") {
-			t.Errorf("doc-accuracy gap (T-D-oidc-28): nested identity: block should NOT be parsed, but config show reports identity_provider=oidc:\n%s", res.Stdout)
+			t.Errorf("doc-accuracy gap (T-D-oidc-28): top-level identity: block should NOT be parsed, but config show reports identity_provider=oidc:\n%s", res.Stdout)
 			return
 		}
 	}
-	t.Log("confirmed: nested identity: block is not parsed; flat identity_provider field is the only supported form")
+	t.Log("confirmed: a top-level identity: block is not parsed; the supported form is registry.identity_provider.type (§13.12)")
 }
 
 // ---- T-D-oidc-29: Auth0 trailing slash in issuer URL -------------------------

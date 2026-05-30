@@ -180,21 +180,22 @@ func TestBootstrapDeclaredLayers_ValidationErrors(t *testing.T) {
 func TestReadYAMLConfig_ParsesLayersList(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "registry.yaml")
-	body := []byte(`layers:
-  - id: org-defaults
-    source:
-      git:
-        repo: git@github.com:acme/org.git
-        ref: main
-        root: artifacts/
-    visibility:
-      organization: true
-  - id: dev-finance
-    source:
-      local:
-        path: /var/podium/dev/finance
-    visibility:
-      users: [alice@acme.com]
+	body := []byte(`registry:
+  layers:
+    - id: org-defaults
+      source:
+        git:
+          repo: git@github.com:acme/org.git
+          ref: main
+          root: artifacts/
+      visibility:
+        organization: true
+    - id: dev-finance
+      source:
+        local:
+          path: /var/podium/dev/finance
+      visibility:
+        users: [alice@acme.com]
 `)
 	if err := os.WriteFile(path, body, 0o644); err != nil {
 		t.Fatalf("write: %v", err)
