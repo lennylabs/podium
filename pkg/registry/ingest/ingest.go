@@ -387,10 +387,26 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 	// layers (§4.5.4). DOMAIN.md is not an artifact and is not subject
 	// to artifact lint; a malformed one is skipped (manifest-parse
 	// lint rules cover it) so it never blocks artifact ingest.
+	// §8.1: a DOMAIN.md that is newly added or whose source changed since
+	// the previous ingest emits domain.published. Compare against the
+	// stored record so an unchanged re-ingest stays quiet.
+	prevDomains := map[string]string{}
+	if existing, lerr := st.ListDomains(ctx, req.TenantID); lerr == nil {
+		for _, d := range existing {
+			if d.Layer == req.LayerID {
+				prevDomains[d.Path] = string(d.Raw)
+			}
+		}
+	}
 	domainRecs := walkDomains(req.Files, req.TenantID, req.LayerID)
 	for _, dr := range domainRecs {
+		prev, seen := prevDomains[dr.Path]
 		if err := st.PutDomain(ctx, dr); err != nil {
 			return nil, err
+		}
+		if (!seen || prev != string(dr.Raw)) && req.AuditEmit != nil {
+			req.AuditEmit(string(audit.EventDomainPublished), dr.Path,
+				map[string]string{"layer": dr.Layer})
 		}
 	}
 

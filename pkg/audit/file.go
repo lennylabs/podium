@@ -144,12 +144,16 @@ func (f *FileSink) Verify(_ context.Context) error {
 // commands.
 func (f *FileSink) Path() string { return f.path }
 
-// jsonEvent is the wire shape of an event in the JSON-Lines log.
+// jsonEvent is the wire form of an event in the JSON-Lines log.
 type jsonEvent struct {
 	Type           string            `json:"type"`
 	Timestamp      string            `json:"timestamp"`
 	TraceID        string            `json:"trace_id,omitempty"`
 	Caller         string            `json:"caller,omitempty"`
+	CallerEmail    string            `json:"caller_email,omitempty"`
+	CallerGroups   []string          `json:"caller_groups,omitempty"`
+	CallerNetwork  *jsonNetwork      `json:"caller_network,omitempty"`
+	PublicMode     bool              `json:"caller_public_mode,omitempty"`
 	Target         string            `json:"target,omitempty"`
 	Context        map[string]string `json:"context,omitempty"`
 	ResolvedLayers []string          `json:"resolved_layers,omitempty"`
@@ -158,12 +162,22 @@ type jsonEvent struct {
 	PrevHash       string            `json:"prev_hash,omitempty"`
 }
 
+// jsonNetwork is the wire form of CallerNetwork (§8.1 caller.network).
+type jsonNetwork struct {
+	SourceIP      string `json:"source_ip,omitempty"`
+	ForwardedUser string `json:"forwarded_user,omitempty"`
+}
+
 func eventForJSON(e Event) jsonEvent {
 	return jsonEvent{
 		Type:           string(e.Type),
 		Timestamp:      e.Timestamp.UTC().Format(time.RFC3339Nano),
 		TraceID:        e.TraceID,
 		Caller:         e.Caller,
+		CallerEmail:    e.CallerEmail,
+		CallerGroups:   e.CallerGroups,
+		CallerNetwork:  networkForJSON(e.CallerNetwork),
+		PublicMode:     e.PublicMode,
 		Target:         e.Target,
 		Context:        e.Context,
 		ResolvedLayers: e.ResolvedLayers,
@@ -180,6 +194,10 @@ func eventFromJSON(je jsonEvent) Event {
 		Timestamp:      t,
 		TraceID:        je.TraceID,
 		Caller:         je.Caller,
+		CallerEmail:    je.CallerEmail,
+		CallerGroups:   je.CallerGroups,
+		CallerNetwork:  networkFromJSON(je.CallerNetwork),
+		PublicMode:     je.PublicMode,
 		Target:         je.Target,
 		Context:        je.Context,
 		ResolvedLayers: je.ResolvedLayers,
@@ -187,6 +205,20 @@ func eventFromJSON(je jsonEvent) Event {
 		Hash:           je.Hash,
 		PrevHash:       je.PrevHash,
 	}
+}
+
+func networkForJSON(n *CallerNetwork) *jsonNetwork {
+	if n == nil {
+		return nil
+	}
+	return &jsonNetwork{SourceIP: n.SourceIP, ForwardedUser: n.ForwardedUser}
+}
+
+func networkFromJSON(n *jsonNetwork) *CallerNetwork {
+	if n == nil {
+		return nil
+	}
+	return &CallerNetwork{SourceIP: n.SourceIP, ForwardedUser: n.ForwardedUser}
 }
 
 // splitLines mirrors strings.Split on '\n' but operates on bytes so

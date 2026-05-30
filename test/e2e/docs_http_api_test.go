@@ -1071,24 +1071,50 @@ func TestDocHTTPAPI_51_UntrustedRuntime(t *testing.T) {
 }
 
 // spec: http-api.md § Authentication — public mode records system:public.
+// spec: §8.1 "Caller identity in audit events" — in public mode a read event
+// records caller.identity=system:public, the caller_public_mode flag, and the
+// source IP and any X-Forwarded-User in caller.network, plus a trace id (§8.1
+// "W3C Trace Context"). F-8.1.1, F-8.1.6.
 func TestDocHTTPAPI_52_PublicModeAudit(t *testing.T) {
 	reg := apiReg(t)
 	auditPath := filepath.Join(t.TempDir(), "audit.log")
 	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_AUDIT_LOG_PATH=" + auditPath},
 		"serve", "--standalone", "--public-mode", "--layer-path", reg)
-	st, _ := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=variance")
-	if st != 200 {
-		t.Fatalf("public-mode search = %d, want 200", st)
+	req, err := http.NewRequest(http.MethodGet, srv.BaseURL+"/v1/search_artifacts?query=variance", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
 	}
-	// The audit emission is asynchronous; poll the sink briefly.
+	req.Header.Set("X-Forwarded-User", "upstream-alice")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		t.Fatalf("public-mode search: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("public-mode search = %d, want 200", resp.StatusCode)
+	}
+	// The audit emission is synchronous within the handler; poll the sink
+	// briefly to absorb the out-of-process file flush.
 	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
-		if b, _ := os.ReadFile(auditPath); strings.Contains(string(b), "system:public") {
+		got := readOrEmpty(auditPath)
+		if strings.Contains(got, "caller_public_mode") {
+			for _, want := range []string{
+				`"caller":"system:public"`,
+				`"caller_public_mode":true`,
+				`"source_ip":"127.0.0.1"`,
+				`"forwarded_user":"upstream-alice"`,
+				`"trace_id"`,
+			} {
+				if !strings.Contains(got, want) {
+					t.Errorf("public-mode audit log missing %s\nlog:\n%s", want, got)
+				}
+			}
 			return
 		}
 		time.Sleep(150 * time.Millisecond)
 	}
-	t.Fatalf("audit log did not record caller.identity=system:public\nlog:\n%s", readOrEmpty(auditPath))
+	t.Fatalf("audit log did not record §8.1 public-mode caller fields\nlog:\n%s", readOrEmpty(auditPath))
 }
 
 func readOrEmpty(path string) string {

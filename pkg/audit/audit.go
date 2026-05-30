@@ -49,6 +49,14 @@ const (
 	EventAuditAnchored         EventType = "audit.anchored"
 )
 
+// CallerNetwork captures the source network attributes recorded for a
+// public-mode caller per §8.1: the source IP address and any upstream
+// X-Forwarded-User header. Filtered out (nil) for authenticated callers.
+type CallerNetwork struct {
+	SourceIP      string
+	ForwardedUser string
+}
+
 // Event is one audit record. Caller / target / context fields can be
 // empty depending on the event type; the renderer is responsible for
 // rendering them appropriately for SIEM consumers.
@@ -57,8 +65,16 @@ type Event struct {
 	Timestamp time.Time
 	TraceID   string
 	Caller    string
-	Target    string
-	Context   map[string]string
+	// §8.1 structured caller identity. CallerEmail and CallerGroups are
+	// attached for authenticated callers; CallerNetwork and PublicMode are
+	// recorded for public-mode calls so SIEM consumers can filter them
+	// without parsing the identity string. spec: §8.1.
+	CallerEmail   string
+	CallerGroups  []string
+	CallerNetwork *CallerNetwork
+	PublicMode    bool
+	Target        string
+	Context       map[string]string
 
 	// ResolvedLayers is the ordered layer composition of the caller's
 	// effective view, recorded on read events per §4.7.5. Empty for
@@ -98,6 +114,15 @@ func (e Event) canonicalBody() []byte {
 	// the fact without breaking the hash.
 	parts = append(parts, "resolved_layers="+strings.Join(e.ResolvedLayers, ","))
 	parts = append(parts, "result_size="+strconv.Itoa(e.ResultSize))
+	// §8.1 structured caller attributes are tamper-evident: identity email,
+	// group membership, the public-mode flag, and public-mode network
+	// cannot be altered after the fact without breaking the hash.
+	parts = append(parts, "caller_email="+e.CallerEmail)
+	parts = append(parts, "caller_groups="+strings.Join(e.CallerGroups, ","))
+	parts = append(parts, "caller_public_mode="+strconv.FormatBool(e.PublicMode))
+	if e.CallerNetwork != nil {
+		parts = append(parts, "caller_network="+e.CallerNetwork.SourceIP+"|"+e.CallerNetwork.ForwardedUser)
+	}
 	out := []byte{}
 	for _, p := range parts {
 		out = append(out, []byte(p)...)

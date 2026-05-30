@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/objectstore"
@@ -70,6 +71,10 @@ type Server struct {
 	// reports 0 (the genuine value for a standalone deployment with
 	// no read replica).
 	lag LagReporter
+	// auditSink records §8.1 events that originate at the HTTP boundary
+	// (admin.granted). Read events flow through the core emitter; sharing
+	// the same sink keeps both on one §8.6 hash chain. Nil is a no-op.
+	auditSink *audit.FileSink
 }
 
 // readyProbeTimeout bounds the §13.9 dependency probes so a hung
@@ -180,6 +185,13 @@ func WithTenant(t string) Option {
 	return func(s *Server) { s.tenant = t }
 }
 
+// WithAudit installs the §8.3 audit sink used to record HTTP-boundary
+// events (admin.granted). The same sink backs the core read-event emitter
+// so both streams stay on one §8.6 hash chain.
+func WithAudit(sink *audit.FileSink) Option {
+	return func(s *Server) { s.auditSink = sink }
+}
+
 // New returns a Server backed by the given core.Registry.
 func New(r *core.Registry, opts ...Option) *Server {
 	s := &Server{core: r, events: newEventBus(), tenant: "default"}
@@ -280,7 +292,10 @@ func (s *Server) Handler() http.Handler {
 	if s.objectStore != nil {
 		mux.HandleFunc("/objects/", s.handleObjectsRoute)
 	}
-	return s.withReadOnlyHeaders(mux)
+	// §8.1: attach per-request audit metadata (trace id + structured caller
+	// identity) to every request context so read events emitted by the core
+	// and the HTTP write handlers carry it.
+	return s.withAuditMetaMiddleware(s.withReadOnlyHeaders(mux))
 }
 
 // withReadOnlyHeaders wraps the route mux so every response

@@ -594,6 +594,12 @@ func Run() error {
 	auditSink := openAuditSink(cfg)
 	if auditSink != nil {
 		registry = registry.WithAudit(auditEmitterFor(auditSink))
+		// spec §8.1: the same §8.3 sink records the HTTP-boundary events —
+		// admin.granted (grants handler) and layer.config_changed /
+		// layer.user_registered (layer endpoint) — so every audit stream
+		// shares one §8.6 hash chain.
+		server.WithAudit(auditSink)(srv)
+		layers.WithAudit(auditSink)
 	}
 
 	// §8.6 transparency anchoring: when the operator enables

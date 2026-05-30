@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/store"
 )
@@ -54,6 +56,10 @@ type LayerEndpoint struct {
 	// DefaultMaxUserLayers; a negative value disables the cap. See
 	// effectiveLayerCap.
 	maxUserLayers int
+	// auditSink records §8.1 layer.config_changed (admin-defined) and
+	// layer.user_registered (personal) events on register, unregister, and
+	// reorder. Nil is a no-op.
+	auditSink *audit.FileSink
 }
 
 // WithDefaultVisibility installs the §4.6 fallback visibility for
@@ -94,6 +100,37 @@ func (e *LayerEndpoint) WithIdentityResolver(fn func(*http.Request) layer.Identi
 func (e *LayerEndpoint) WithMaxUserLayers(n int) *LayerEndpoint {
 	e.maxUserLayers = n
 	return e
+}
+
+// WithAudit installs the §8.3 audit sink the endpoint records layer
+// lifecycle events to (§8.1 layer.config_changed / layer.user_registered).
+func (e *LayerEndpoint) WithAudit(sink *audit.FileSink) *LayerEndpoint {
+	e.auditSink = sink
+	return e
+}
+
+// emitLayerEvent records the §8.1 audit event for a register or unregister
+// action: layer.user_registered for a personal (user-defined) layer with
+// its owner as caller, or layer.config_changed for an admin-defined layer.
+func (e *LayerEndpoint) emitLayerEvent(r *http.Request, cfg store.LayerConfig, action string) {
+	typ := audit.EventLayerConfigChanged
+	if cfg.UserDefined {
+		typ = audit.EventLayerUserRegistered
+	}
+	fields := map[string]string{"action": action, "user_defined": boolString(cfg.UserDefined)}
+	// §8.1: record the personal-layer owner so a layer.user_registered event
+	// names the user whose layer changed even when an admin acts on it.
+	if cfg.Owner != "" {
+		fields["owner"] = cfg.Owner
+	}
+	emitAuditEvent(e.auditSink, r, e.identify(r), typ, cfg.ID, fields)
+}
+
+func boolString(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
 }
 
 // effectiveLayerCap resolves the §7.3.1 user-defined-layer cap for the
@@ -372,6 +409,10 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return
 	}
+	// spec §8.1: a user registering a personal layer emits
+	// layer.user_registered; an admin adding an admin-defined layer emits
+	// layer.config_changed.
+	e.emitLayerEvent(r, cfg, "register")
 
 	resp := LayerRegisterResponse{Layer: cfg}
 	if cfg.SourceType == "git" {
@@ -423,6 +464,9 @@ func (e *LayerEndpoint) unregister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return
 	}
+	// spec §8.1: unregistering a personal layer emits layer.user_registered;
+	// removing an admin-defined layer emits layer.config_changed.
+	e.emitLayerEvent(r, cfg, "unregister")
 	writeJSON(w, http.StatusOK, map[string]any{"unregistered": id})
 }
 
@@ -479,6 +523,11 @@ func (e *LayerEndpoint) reorder(w http.ResponseWriter, r *http.Request) {
 	}
 	updated, _ := e.store.ListLayerConfigs(r.Context(), e.tenantID)
 	sort.Slice(updated, func(i, j int) bool { return updated[i].Order < updated[j].Order })
+	// spec §8.1: reordering admin-defined layers emits layer.config_changed.
+	if len(req.Order) > 0 {
+		emitAuditEvent(e.auditSink, r, e.identify(r), audit.EventLayerConfigChanged,
+			strings.Join(req.Order, ","), map[string]string{"action": "reorder"})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"layers": updated})
 }
 

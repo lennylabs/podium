@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 )
@@ -40,6 +41,10 @@ func (s *Server) handleAdminGrants(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 			return
 		}
+		// spec §8.1: record admin.granted with the acting admin as caller,
+		// the affected user as target, and the add action in context.
+		emitAuditEvent(s.auditSink, r, s.identity(r), audit.EventAdminGranted, body.UserID,
+			map[string]string{"action": "grant"})
 		writeJSON(w, http.StatusCreated, map[string]string{"user_id": body.UserID})
 	case http.MethodDelete:
 		userID := r.URL.Query().Get("user_id")
@@ -51,6 +56,10 @@ func (s *Server) handleAdminGrants(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 			return
 		}
+		// spec §8.1: an admin grant being revoked emits admin.granted with
+		// the revoke action recorded in context.
+		emitAuditEvent(s.auditSink, r, s.identity(r), audit.EventAdminGranted, userID,
+			map[string]string{"action": "revoke"})
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "registry.invalid_argument",
