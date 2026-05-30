@@ -19,6 +19,7 @@ import (
 
 	"github.com/lennylabs/podium/internal/clock"
 	"github.com/lennylabs/podium/pkg/audit"
+	domainpkg "github.com/lennylabs/podium/pkg/domain"
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
@@ -189,6 +190,12 @@ type Request struct {
 	// means search continues to return the prior vector until the
 	// new one lands.
 	VectorPut VectorPutFunc
+	// DomainVectorPut persists a DOMAIN.md projection embedding (§4.7
+	// "Domain embeddings") into the domain index that search_domains
+	// queries. Set alongside Embedder to embed domains at ingest; nil
+	// leaves search_domains BM25-only. The wiring closure supplies the
+	// reserved domain version sentinel, so ingest stays unaware of it.
+	DomainVectorPut DomainVectorPutFunc
 	// PublishEvent fires §7.6 change events as artifacts ingest.
 	// Optional: when nil, ingest stays silent. Per-artifact:
 	//   - artifact.published with {id, version, content_hash, layer, tenant}
@@ -251,6 +258,12 @@ type EmbedderFunc func(ctx context.Context, text string) ([]float32, error)
 // VectorPutFunc persists the embedding for one (tenant, id,
 // version) tuple. Atomic per row.
 type VectorPutFunc func(ctx context.Context, tenantID, artifactID, version string, vec []float32) error
+
+// DomainVectorPutFunc persists the embedding for one domain projection,
+// keyed by (tenant, domain path). The §4.7 domain index reuses the same
+// vector backend as artifacts under a reserved version sentinel; the
+// wiring closure supplies that sentinel so ingest need not know it.
+type DomainVectorPutFunc func(ctx context.Context, tenantID, domainPath string, vec []float32) error
 
 // Result reports what happened.
 type Result struct {
@@ -350,7 +363,8 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 	// layers (§4.5.4). DOMAIN.md is not an artifact and is not subject
 	// to artifact lint; a malformed one is skipped (manifest-parse
 	// lint rules cover it) so it never blocks artifact ingest.
-	for _, dr := range walkDomains(req.Files, req.TenantID, req.LayerID) {
+	domainRecs := walkDomains(req.Files, req.TenantID, req.LayerID)
+	for _, dr := range domainRecs {
 		if err := st.PutDomain(ctx, dr); err != nil {
 			return nil, err
 		}
@@ -368,6 +382,22 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 
 	res := &Result{}
 	errsByID := groupLintErrors(diags)
+
+	// §4.7 "Domain embeddings": embed each DOMAIN.md projection
+	// (description + keywords + truncated body) into the domain index so
+	// search_domains has a semantic ranker. A failed embed does not block
+	// ingest; the domain stays BM25-searchable and `podium admin reembed`
+	// can retry. Runs after res is initialized so failures are reported.
+	if req.Embedder != nil && req.DomainVectorPut != nil {
+		for _, dr := range domainRecs {
+			if err := embedDomain(ctx, req, dr); err != nil {
+				res.EmbeddingFailures = append(res.EmbeddingFailures, EmbeddingFailure{
+					ArtifactID: dr.Path,
+					Reason:     err.Error(),
+				})
+			}
+		}
+	}
 
 	// spec: §4.6 — two layers contributing the same canonical ID is a
 	// forbidden silent shadow unless the higher-precedence artifact
@@ -649,6 +679,29 @@ func embedAndStore(ctx context.Context, req Request, mr store.ManifestRecord) er
 		return fmt.Errorf("embed: %w", err)
 	}
 	if err := req.VectorPut(ctx, mr.TenantID, mr.ArtifactID, mr.Version, vec); err != nil {
+		return fmt.Errorf("vector put: %w", err)
+	}
+	return nil
+}
+
+// embedDomain composes the §4.7 domain projection from a DOMAIN.md
+// record and upserts its embedding into the domain index. Malformed
+// frontmatter is skipped (the linter reports it at ingest); a domain with
+// no projectable text (e.g. an include-only DOMAIN.md) is a no-op.
+func embedDomain(ctx context.Context, req Request, dr store.DomainRecord) error {
+	d, err := manifest.ParseDomain(dr.Raw)
+	if err != nil {
+		return nil
+	}
+	text := domainpkg.EmbeddingProjection(d)
+	if text == "" {
+		return nil
+	}
+	vec, err := req.Embedder(ctx, text)
+	if err != nil {
+		return fmt.Errorf("embed: %w", err)
+	}
+	if err := req.DomainVectorPut(ctx, dr.TenantID, dr.Path, vec); err != nil {
 		return fmt.Errorf("vector put: %w", err)
 	}
 	return nil

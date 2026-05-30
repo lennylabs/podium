@@ -9,10 +9,12 @@ package e2e
 // Known gaps drive several skips:
 //   - F-0.0.2 is a quickstart doc-key bug; the wire format here uses the
 //     correct `subdomains`/`notable` keys, so those tests pass.
-//   - F-3.2.1: search_domains uses path-substring matching, not hybrid
-//     retrieval over DOMAIN.md projections (tests 8, 9, 10, 11, 30, 41, 54).
 //   - F-8.2.1: query-text PII scrubbing is never applied (test 35).
 //   - mcp-server bridge filtering is unimplemented and unfiled (tests 20, 21).
+//
+// search_domains now runs hybrid retrieval over DOMAIN.md projections
+// (F-3.2.1): tests 8, 9, 10, 11, 30, 41, and 54 assert keyword retrieval,
+// scope, top_k, the descriptor fields, and DOMAIN.md-gated indexing.
 
 import (
 	"fmt"
@@ -224,28 +226,97 @@ func TestBrowsing_LoadDomainKeywords(t *testing.T) {
 
 // ---- search_domains ---------------------------------------------------------
 
-// T-D-browsing-8 — search_domains semantic match.
+// brDomainPaths extracts the domain paths from a search_domains result.
+func brDomainPaths(result map[string]any) []string {
+	out := []string{}
+	for _, d := range brArr(result, "domains") {
+		if m, ok := d.(map[string]any); ok {
+			if p, ok := m["path"].(string); ok {
+				out = append(out, p)
+			}
+		}
+	}
+	return out
+}
+
+// T-D-browsing-8 — search_domains matches a domain by a DOMAIN.md keyword
+// that does not appear in its path or description (§3.2 Layer 1, hybrid
+// retrieval over projections). spec: §3.2 / §4.7 (F-3.2.1)
 func TestBrowsing_SearchDomainsSemantic(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-3.2.1: search_domains uses path-substring matching, not hybrid retrieval over DOMAIN.md projections")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/ap/DOMAIN.md":               "---\ndescription: \"Accounts payable operations\"\ndiscovery:\n  keywords:\n    - reconciliation\n---\n",
+		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay invoice"),
+	}))
+	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "search_domains", map[string]any{"query": "reconciliation"}))
+	paths := brDomainPaths(rpcResult(t, res.Stdout, 1))
+	if !dmContains(paths, "finance/ap") {
+		t.Errorf("search_domains(\"reconciliation\") = %v, want finance/ap matched by its keyword", paths)
+	}
 }
 
-// T-D-browsing-9 — search_domains scope constrains to a path prefix.
+// T-D-browsing-9 — search_domains scope constrains results to a path
+// prefix. spec: §5 (F-3.2.1)
 func TestBrowsing_SearchDomainsScope(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-3.2.1: search_domains does not run real retrieval, so scope-constrained ranking is not exercised")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/ap/DOMAIN.md":     "---\ndescription: AP\n---\n",
+		"finance/ap/x/ARTIFACT.md": contextArtifact("x"),
+		"finance/ar/DOMAIN.md":     "---\ndescription: AR\n---\n",
+		"finance/ar/y/ARTIFACT.md": contextArtifact("y"),
+		"ops/runner/DOMAIN.md":     "---\ndescription: Ops runner\n---\n",
+		"ops/runner/z/ARTIFACT.md": contextArtifact("z"),
+	}))
+	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "search_domains", map[string]any{"scope": "finance"}))
+	paths := brDomainPaths(rpcResult(t, res.Stdout, 1))
+	if !dmContains(paths, "finance/ap") || !dmContains(paths, "finance/ar") {
+		t.Errorf("scope=finance dropped an in-scope domain: %v", paths)
+	}
+	if dmContains(paths, "ops/runner") {
+		t.Errorf("scope=finance returned an out-of-scope domain: %v", paths)
+	}
 }
 
-// T-D-browsing-10 — search_domains top_k cap.
+// T-D-browsing-10 — search_domains top_k caps the result count. spec: §5
+// (F-3.2.1)
 func TestBrowsing_SearchDomainsTopK(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-3.2.1: search_domains does not run real retrieval, so top_k ranking semantics are not exercised")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"alpha/DOMAIN.md":       "---\ndescription: \"shared topic\"\n---\n",
+		"alpha/a/ARTIFACT.md":   contextArtifact("a"),
+		"bravo/DOMAIN.md":       "---\ndescription: \"shared topic\"\n---\n",
+		"bravo/b/ARTIFACT.md":   contextArtifact("b"),
+		"charlie/DOMAIN.md":     "---\ndescription: \"shared topic\"\n---\n",
+		"charlie/c/ARTIFACT.md": contextArtifact("c"),
+	}))
+	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "search_domains", map[string]any{"query": "shared topic", "top_k": 2}))
+	paths := brDomainPaths(rpcResult(t, res.Stdout, 1))
+	if len(paths) != 2 {
+		t.Errorf("search_domains top_k=2 returned %d domains: %v", len(paths), paths)
+	}
 }
 
-// T-D-browsing-11 — domains without DOMAIN.md not indexed in search_domains.
+// T-D-browsing-11 — a domain without a DOMAIN.md has no projection and is
+// not indexed in search_domains; it stays reachable via load_domain
+// enumeration only. spec: §4.5.1 / §4.7 (F-3.2.1)
 func TestBrowsing_SearchDomainsRequiresDomainMD(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-3.2.1: search_domains derives candidates from manifest ancestors and does not condition on DOMAIN.md presence")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/ap/DOMAIN.md":               "---\ndescription: \"Accounts payable\"\n---\n",
+		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay invoice"),
+		// ops/runner has artifacts but no DOMAIN.md.
+		"ops/runner/restart/ARTIFACT.md": contextArtifact("restart"),
+	}))
+	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "search_domains", map[string]any{}))
+	paths := brDomainPaths(rpcResult(t, res.Stdout, 1))
+	if !dmContains(paths, "finance/ap") {
+		t.Errorf("search_domains missing the DOMAIN.md-backed finance/ap: %v", paths)
+	}
+	for _, p := range paths {
+		if p == "ops" || p == "ops/runner" {
+			t.Errorf("search_domains indexed a domain with no DOMAIN.md: %v", paths)
+		}
+	}
 }
 
 // ---- search_artifacts -------------------------------------------------------
@@ -548,10 +619,27 @@ func TestBrowsing_DiscoveryFlow(t *testing.T) {
 	mustExist(t, filepath.Join(mat, "finance/ap/pay-invoice", "ARTIFACT.md"))
 }
 
-// T-D-browsing-30 — discovery flow: search_domains cold start variant.
+// T-D-browsing-30 — discovery flow cold start via search_domains: a
+// topical query finds a domain neighborhood, then the agent drills in
+// with load_domain. spec: §3.4 / §3.2 (F-3.2.1)
 func TestBrowsing_DiscoveryFlowSearchDomains(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-3.2.1: search_domains uses path-substring matching, so a topical query (\"accounts payable\") returns no domain to drill into")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/ap/DOMAIN.md":               "---\ndescription: \"Accounts payable: money out to vendors\"\ndiscovery:\n  keywords:\n    - invoice\n---\n",
+		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay invoice"),
+	}))
+	// Cold start: a topical query ("accounts payable") absent from the path
+	// surfaces the neighborhood.
+	r1 := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "search_domains", map[string]any{"query": "accounts payable"}))
+	paths := brDomainPaths(rpcResult(t, r1.Stdout, 1))
+	if !dmContains(paths, "finance/ap") {
+		t.Fatalf("search_domains(\"accounts payable\") = %v, want finance/ap to drill into", paths)
+	}
+	// Drill into the chosen domain.
+	r2 := mcpExec(t, brEnv(srv.BaseURL), toolCall(2, "load_domain", map[string]any{"path": "finance/ap"}))
+	if got := rpcResult(t, r2.Stdout, 2)["path"]; got != "finance/ap" {
+		t.Errorf("load_domain path = %v, want finance/ap", got)
+	}
 }
 
 // ---- audit ------------------------------------------------------------------
@@ -624,10 +712,32 @@ func TestBrowsing_SLOLoadArtifactResources(t *testing.T) {
 
 // ---- descriptor structure ---------------------------------------------------
 
-// T-D-browsing-41 — search_domains descriptor fields (keywords/score).
+// T-D-browsing-41 — a search_domains descriptor carries path, name,
+// description, keywords, and score (§3.2 Layer 1). spec: §3.2 (F-3.2.1)
 func TestBrowsing_SearchDomainsDescriptorFields(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-3.2.1: keywords and score are absent from the DomainDescriptor response struct")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/ap/DOMAIN.md":               "---\ndescription: \"Accounts payable operations\"\ndiscovery:\n  keywords:\n    - reconciliation\n    - remittance\n---\n",
+		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay invoice"),
+	}))
+	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "search_domains", map[string]any{"query": "reconciliation"}))
+	result := rpcResult(t, res.Stdout, 1)
+	domains := brArr(result, "domains")
+	if len(domains) == 0 {
+		t.Fatalf("search_domains returned no domains: %s", mustJSON(result))
+	}
+	d, _ := domains[0].(map[string]any)
+	for _, field := range []string{"path", "name", "description", "keywords", "score"} {
+		if _, ok := d[field]; !ok {
+			t.Errorf("descriptor missing %q field: %v", field, d)
+		}
+	}
+	if kw, _ := d["keywords"].([]any); len(kw) == 0 {
+		t.Errorf("descriptor keywords empty, want the DOMAIN.md keywords: %v", d)
+	}
+	if sc, _ := d["score"].(float64); sc <= 0 {
+		t.Errorf("descriptor score = %v, want > 0 for a lexical match", d["score"])
+	}
 }
 
 // T-D-browsing-42 — search_domains returns no subdomain list or notable.
@@ -788,10 +898,30 @@ func TestBrowsing_DescriptionScoring(t *testing.T) {
 	t.Skip("ranking-quality assertion is embedding/scoring-dependent and not a stable e2e gate")
 }
 
-// T-D-browsing-54 — domain without keywords reachable via load_domain only.
+// T-D-browsing-54 — a domain with no DOMAIN.md (so no keywords or
+// projection) does not surface in search_domains but stays reachable via
+// load_domain enumeration; a keyworded sibling is found by query.
+// spec: §4.5.1 / §4.7 (F-3.2.1)
 func TestBrowsing_DomainWithoutKeywords(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-3.2.1: search_domains uses path-substring matching rather than DOMAIN.md embedding, so the keyword-reachability contrast is not exercised")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/ap/DOMAIN.md":           "---\ndescription: AP\ndiscovery:\n  keywords:\n    - reconciliation\n---\n",
+		"finance/ap/x/ARTIFACT.md":       contextArtifact("x"),
+		"ops/runner/restart/ARTIFACT.md": contextArtifact("restart"),
+	}))
+	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "search_domains", map[string]any{"query": "reconciliation"}))
+	paths := brDomainPaths(rpcResult(t, res.Stdout, 1))
+	if !dmContains(paths, "finance/ap") {
+		t.Errorf("keyworded domain not found by search_domains: %v", paths)
+	}
+	if dmContains(paths, "ops/runner") {
+		t.Errorf("domain without a DOMAIN.md surfaced in search_domains: %v", paths)
+	}
+	// The bare domain is still reachable via load_domain enumeration.
+	r2 := mcpExec(t, brEnv(srv.BaseURL), toolCall(2, "load_domain", map[string]any{"path": "ops/runner"}))
+	if got := rpcResult(t, r2.Stdout, 2)["path"]; got != "ops/runner" {
+		t.Errorf("load_domain(ops/runner) = %v, want the bare domain to resolve", got)
+	}
 }
 
 // T-D-browsing-55 — authoring quality: when_to_use improves retrieval signal.
@@ -844,10 +974,16 @@ func TestBrowsing_HTTPSearchArtifacts(t *testing.T) {
 	}
 }
 
-// T-D-browsing-58 — GET /v1/search_domains returns the documented structure.
+// T-D-browsing-58 — GET /v1/search_domains returns the documented
+// structure. The finance domain carries a DOMAIN.md so it has a
+// projection to retrieve over (§4.7); without one a domain is reachable
+// by load_domain enumeration only.
 func TestBrowsing_HTTPSearchDomains(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/DOMAIN.md":     "---\ndescription: \"The finance function\"\n---\n",
+		"finance/x/ARTIFACT.md": contextArtifact("x"),
+	}))
 	st, body := getRaw(t, srv.BaseURL+"/v1/search_domains?query=finance")
 	if st != 200 {
 		t.Fatalf("HTTP %d: %s", st, body)

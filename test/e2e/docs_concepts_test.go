@@ -351,9 +351,19 @@ func TestConcepts_LoadDomainPath(t *testing.T) {
 	}
 }
 
-// T-D-concepts-27 — search_domains retrieves domains matching a query.
+// T-D-concepts-27 — search_domains retrieves a domain matching a query via
+// its DOMAIN.md projection. spec: §3.2 / §4.7 (F-3.2.1)
 func TestConcepts_SearchDomains(t *testing.T) {
-	t.Skip("blocked by F-3.2.1: search_domains does not run hybrid retrieval over domain projections (DOMAIN.md is not ingested), so it returns no matches")
+	t.Parallel()
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/ap/DOMAIN.md":               "---\ndescription: \"Accounts payable operations\"\ndiscovery:\n  keywords:\n    - reconciliation\n---\n",
+		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay invoice"),
+	}))
+	res := mcpExec(t, []string{"PODIUM_REGISTRY=" + srv.BaseURL}, toolCall(1, "search_domains", map[string]any{"query": "reconciliation"}))
+	body := mustJSON(rpcResult(t, res.Stdout, 1))
+	if !strings.Contains(body, "finance/ap") {
+		t.Errorf("search_domains did not retrieve finance/ap by keyword: %s", body)
+	}
 }
 
 // T-D-concepts-28 — search_artifacts returns ranked descriptors (no bodies).

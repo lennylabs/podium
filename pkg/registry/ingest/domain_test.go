@@ -9,6 +9,41 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
+// spec: §4.7 "Domain embeddings" — ingest composes each DOMAIN.md's
+// projection and upserts its embedding into the domain index so
+// search_domains has a semantic ranker. A DOMAIN.md with no projectable
+// text (include-only) is not embedded. F-3.2.1.
+func TestIngest_EmbedsDomainProjection(t *testing.T) {
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	fsys := fstest.MapFS{
+		"finance/ap/DOMAIN.md":         &fstest.MapFile{Data: []byte("---\ndescription: AP ops\ndiscovery:\n  keywords:\n    - reconciliation\n---\n# AP\nbody\n")},
+		"finance/ap/imports/DOMAIN.md": &fstest.MapFile{Data: []byte("---\ninclude:\n  - x/*\n---\n")},
+		"finance/ap/pay/ARTIFACT.md":   &fstest.MapFile{Data: []byte(contextArtifact("pay"))},
+	}
+	embedded := map[string]bool{}
+	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "t", LayerID: "L", Files: fsys,
+		Embedder: func(_ context.Context, text string) ([]float32, error) {
+			return []float32{1, 0}, nil
+		},
+		DomainVectorPut: func(_ context.Context, tenantID, path string, _ []float32) error {
+			embedded[path] = true
+			return nil
+		},
+	}); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if !embedded["finance/ap"] {
+		t.Errorf("finance/ap DOMAIN.md was not embedded: %v", embedded)
+	}
+	if embedded["finance/ap/imports"] {
+		t.Errorf("include-only DOMAIN.md should not be embedded (empty projection): %v", embedded)
+	}
+}
+
 // spec: §4.5.1 (F-4.5.1) — ingest persists each DOMAIN.md as a
 // store.DomainRecord keyed by the canonical domain path, so load_domain
 // can read domain composition. A root-level DOMAIN.md is skipped (the

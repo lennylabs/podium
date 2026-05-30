@@ -32,11 +32,12 @@ type HistoryEmitter func(ctx context.Context, tenantID, layerID, priorRef, newRe
 // whenever the orchestrator runs against a server that exposes
 // /v1/events.
 type SourceIngestOptions struct {
-	Linter       *lint.Linter
-	Emit         HistoryEmitter
-	Embedder     EmbedderFunc
-	VectorPut    VectorPutFunc
-	PublishEvent EventEmitter
+	Linter          *lint.Linter
+	Emit            HistoryEmitter
+	Embedder        EmbedderFunc
+	VectorPut       VectorPutFunc
+	DomainVectorPut DomainVectorPutFunc
+	PublishEvent    EventEmitter
 	// AuditEmit, when non-nil, receives §8.1 audit events the
 	// orchestrator and ingest pipeline produce (artifact.published,
 	// layer.ingested, layer.history_rewritten, freeze.break_glass).
@@ -118,15 +119,16 @@ func SourceIngestWithOptions(
 	}
 
 	res, err := Ingest(ctx, st, Request{
-		TenantID:     cfg.TenantID,
-		LayerID:      cfg.ID,
-		Files:        snap.Files,
-		Linter:       opts.Linter,
-		Embedder:     opts.Embedder,
-		VectorPut:    opts.VectorPut,
-		PublishEvent: opts.PublishEvent,
-		AuditEmit:    opts.AuditEmit,
-		CallerID:     opts.CallerID,
+		TenantID:        cfg.TenantID,
+		LayerID:         cfg.ID,
+		Files:           snap.Files,
+		Linter:          opts.Linter,
+		Embedder:        opts.Embedder,
+		VectorPut:       opts.VectorPut,
+		DomainVectorPut: opts.DomainVectorPut,
+		PublishEvent:    opts.PublishEvent,
+		AuditEmit:       opts.AuditEmit,
+		CallerID:        opts.CallerID,
 	})
 	if err != nil {
 		return nil, err

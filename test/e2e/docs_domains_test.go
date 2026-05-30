@@ -13,9 +13,9 @@ package e2e
 // load_domain time: description/body/keywords, include/exclude imports,
 // unlisted suppression, cross-layer merge, and the discovery-rendering knobs
 // (max_depth, fold_*, notable_count, target_response_tokens, featured,
-// deprioritize). The remaining skips are unrelated to §4.5 composition:
-//   - F-3.2.1: search_domains matches on the path substring only; DOMAIN.md
-//     keywords and descriptions are not retrieved (tests 9, 10, 49).
+// deprioritize). search_domains runs hybrid retrieval over those DOMAIN.md
+// projections (F-3.2.1): tests 9, 10, and 49 assert keyword retrieval through
+// the HTTP endpoint, the CLI, and the MCP tool.
 // Doc claims with no finding filed are asserted against actual behavior with a
 // note so a future change is detected (T-D-domains-53).
 
@@ -268,17 +268,39 @@ func TestDomains_KeywordsInLoadDomain(t *testing.T) {
 	}
 }
 
-// T-D-domains-9 — search_domains should find a domain via a keyword absent from
-// its description.
+// T-D-domains-9 — search_domains finds a domain via a DOMAIN.md keyword
+// absent from its path and description (hybrid retrieval over the domain
+// projection). spec: §3.2 / §4.7 (F-3.2.1)
 func TestDomains_SearchDomainsByKeyword(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-3.2.1: search_domains matches on the path substring only; DOMAIN.md keywords are not indexed or retrieved")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/ap/DOMAIN.md":               "---\ndescription: \"Money out to vendors\"\ndiscovery:\n  keywords:\n    - reconciliation\n---\n",
+		"finance/ap/pay-invoice/ARTIFACT.md": dmSkillArtifact,
+		"finance/ap/pay-invoice/SKILL.md":    skillBody("pay-invoice"),
+	}))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/search_domains?query=reconciliation&top_k=10", &m)
+	if paths := brDomainPaths(m); !dmContains(paths, "finance/ap") {
+		t.Errorf("search_domains(\"reconciliation\") = %v, want finance/ap via its keyword", paths)
+	}
 }
 
-// T-D-domains-10 — `podium domain search` should find a domain via a keyword.
+// T-D-domains-10 — `podium domain search` finds a domain via a keyword
+// (the CLI wraps search_domains). spec: §3.2 / §4.7 (F-3.2.1)
 func TestDomains_CLISearchByKeyword(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-3.2.1: domain search wraps search_domains, which matches on the path substring only, so a keyword-only query does not surface the domain")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/ap/DOMAIN.md":               "---\ndescription: \"Money out to vendors\"\ndiscovery:\n  keywords:\n    - reconciliation\n---\n",
+		"finance/ap/pay-invoice/ARTIFACT.md": dmSkillArtifact,
+		"finance/ap/pay-invoice/SKILL.md":    skillBody("pay-invoice"),
+	}))
+	res := runPodium(t, "", nil, "domain", "search", "--registry", srv.BaseURL, "reconciliation")
+	if res.Exit != 0 {
+		t.Fatalf("domain search exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stdout, "finance/ap") {
+		t.Errorf("domain search did not surface finance/ap by keyword:\n%s", res.Stdout)
+	}
 }
 
 // dmFeaturedRegistry stages finance/ap with a DOMAIN.md whose discovery
@@ -1069,11 +1091,20 @@ func TestDomains_MCPLoadDomainMetadata(t *testing.T) {
 	}
 }
 
-// T-D-domains-49 — the MCP search_domains tool should return domains matching a
-// keyword query.
+// T-D-domains-49 — the MCP search_domains tool returns a domain matched by
+// a DOMAIN.md keyword routed through the bridge. spec: §3.2 / §4.7 (F-3.2.1)
 func TestDomains_MCPSearchDomains(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-3.2.1: search_domains matches on the path substring only, so a keyword query routed through the MCP tool does not surface the domain")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/ap/DOMAIN.md":               "---\ndescription: \"Accounts payable operations\"\ndiscovery:\n  keywords:\n    - remittance\n---\n",
+		"finance/ap/pay-invoice/ARTIFACT.md": dmSkillArtifact,
+		"finance/ap/pay-invoice/SKILL.md":    skillBody("pay-invoice"),
+	}))
+	res := mcpExec(t, mcpServerEnv(t, srv.BaseURL), toolCall(1, "search_domains", map[string]any{"query": "remittance"}))
+	body := mustJSON(rpcResult(t, res.Stdout, 1))
+	if !strings.Contains(body, "finance/ap") {
+		t.Errorf("MCP search_domains did not surface finance/ap by keyword:\n%s", body)
+	}
 }
 
 // T-D-domains-50 — load_domain on an unknown path returns 404 domain.not_found.

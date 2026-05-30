@@ -383,10 +383,16 @@ type LoadDomainResponse struct {
 // (§4.5.5 depth); it is omitted for leaf entries and at the deepest
 // rendered level.
 type DomainDescriptor struct {
-	Path        string             `json:"path"`
-	Name        string             `json:"name"`
-	Description string             `json:"description,omitempty"`
-	Subdomains  []DomainDescriptor `json:"subdomains,omitempty"`
+	Path        string `json:"path"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// Keywords and Score populate the §3.2 Layer 1 search_domains
+	// descriptor (path, name, description, keywords, score). Both are
+	// omitted for load_domain subdomain entries, which carry
+	// path/name/description (and the nested subtree) only.
+	Keywords   []string           `json:"keywords,omitempty"`
+	Score      float64            `json:"score,omitempty"`
+	Subdomains []DomainDescriptor `json:"subdomains,omitempty"`
 }
 
 // ArtifactDescriptor is one artifact entry.
@@ -568,6 +574,7 @@ func (s *Server) handleSearchDomains(w http.ResponseWriter, r *http.Request) {
 	for _, d := range res.Domains {
 		resp.Domains = append(resp.Domains, DomainDescriptor{
 			Path: d.Path, Name: d.Name, Description: d.Description,
+			Keywords: d.Keywords, Score: d.Score,
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)

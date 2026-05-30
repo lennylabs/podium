@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	domainpkg "github.com/lennylabs/podium/pkg/domain"
 	"github.com/lennylabs/podium/pkg/embedding"
+	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/vector"
 )
@@ -64,6 +66,13 @@ func (r *Registry) Reembed(ctx context.Context, opts ReembedOptions) (*ReembedRe
 	if err != nil {
 		return nil, fmt.Errorf("reembed: list manifests: %w", err)
 	}
+	// §4.7 "Domain embeddings": domains are re-embedded on a full pass
+	// alongside artifacts. Fetched up front so the --only-missing probe
+	// can size its top-K to cover stored domain vectors too.
+	domainRecs, err := r.store.ListDomains(ctx, r.tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("reembed: list domains: %w", err)
+	}
 	// spec: §4.7 `--since <timestamp>` — drop artifacts ingested before
 	// the cutoff so a post-model-change pass only re-embeds recent work.
 	if !opts.Since.IsZero() {
@@ -82,13 +91,18 @@ func (r *Registry) Reembed(ctx context.Context, opts ReembedOptions) (*ReembedRe
 	// per manifest record (one row per (id, version)), so a query with
 	// topK == len(manifests) returns every stored vector for the tenant;
 	// the prior fixed topK=100 probe falsely reported existing vectors
-	// missing once a tenant held more than 100 artifacts (F-4.7.10).
+	// missing once a tenant held more than 100 artifacts (F-4.7.10). The
+	// top-K also covers stored domain vectors so they cannot displace an
+	// artifact vector out of the probe result; domain rows are skipped.
 	present := map[string]bool{}
 	if opts.OnlyIfMissing && len(manifests) > 0 {
 		probe := make([]float32, r.embedder.Dimensions())
 		probe[0] = 1
-		matches, _ := r.vector.Query(ctx, r.tenantID, probe, len(manifests))
+		matches, _ := r.vector.Query(ctx, r.tenantID, probe, len(manifests)+len(domainRecs))
 		for _, m := range matches {
+			if m.Version == DomainVectorVersion {
+				continue
+			}
 			present[m.ArtifactID+"@"+m.Version] = true
 		}
 	}
@@ -107,6 +121,26 @@ func (r *Registry) Reembed(ctx context.Context, opts ReembedOptions) (*ReembedRe
 			continue
 		}
 		res.Succeeded++
+	}
+
+	// §4.7 "Domain embeddings": re-embed every DOMAIN.md projection so
+	// search_domains has a current semantic index. Domains carry no ingest
+	// timestamp, so a --since pass (which targets recently-ingested
+	// artifacts) leaves them untouched; a full pass re-embeds them all (the
+	// upsert is idempotent).
+	if opts.Since.IsZero() {
+		for _, dr := range domainRecs {
+			res.Total++
+			if err := embedAndUpsertDomain(ctx, r.embedder, r.vector, dr); err != nil {
+				res.Failed = append(res.Failed, ReembedFailure{
+					ArtifactID: dr.Path,
+					Version:    DomainVectorVersion,
+					Reason:     err.Error(),
+				})
+				continue
+			}
+			res.Succeeded++
+		}
 	}
 	return res, nil
 }
@@ -140,6 +174,33 @@ func embedAndUpsert(ctx context.Context, e embedding.Provider, v vector.Provider
 		return fmt.Errorf("embed: expected 1 vector, got %d", len(vecs))
 	}
 	if err := v.Put(ctx, mr.TenantID, mr.ArtifactID, mr.Version, vecs[0]); err != nil {
+		return fmt.Errorf("vector put: %w", err)
+	}
+	return nil
+}
+
+// embedAndUpsertDomain composes the §4.7 domain projection from a
+// DOMAIN.md record and upserts it under the reserved DomainVectorVersion
+// so search_domains can rank over it. Malformed frontmatter is skipped
+// (the linter reports it at ingest); a domain with no projectable text is
+// a no-op.
+func embedAndUpsertDomain(ctx context.Context, e embedding.Provider, v vector.Provider, dr store.DomainRecord) error {
+	d, err := manifest.ParseDomain(dr.Raw)
+	if err != nil {
+		return nil
+	}
+	text := domainpkg.EmbeddingProjection(d)
+	if text == "" {
+		return nil
+	}
+	vecs, err := e.Embed(ctx, []string{text})
+	if err != nil {
+		return fmt.Errorf("embed: %w", err)
+	}
+	if len(vecs) != 1 {
+		return fmt.Errorf("embed: expected 1 vector, got %d", len(vecs))
+	}
+	if err := v.Put(ctx, dr.TenantID, dr.Path, DomainVectorVersion, vecs[0]); err != nil {
 		return fmt.Errorf("vector put: %w", err)
 	}
 	return nil

@@ -243,11 +243,21 @@ type LoadDomainResult struct {
 	Note        string
 }
 
-// DomainDescriptor describes one subdomain entry.
+// DomainDescriptor describes one subdomain entry (load_domain) or one
+// ranked domain result (search_domains).
 type DomainDescriptor struct {
 	Path        string
 	Name        string
 	Description string
+	// Keywords carries the domain's author-curated keywords. Populated for
+	// search_domains results per the §3.2 Layer 1 descriptor (path, name,
+	// description, keywords, score); empty for load_domain subdomain
+	// entries, which carry path/name/description only.
+	Keywords []string
+	// Score is the retrieval relevance of a search_domains result (the
+	// lexical BM25 score, consistent with search_artifacts). Zero for
+	// load_domain subdomain entries and for a vector-only match.
+	Score float64
 	// Subdomains is the nested child tree rendered when load_domain
 	// expands more than one level (§4.5.5 depth). It is empty for leaf
 	// subdomains and for entries at the deepest rendered level. Each
@@ -872,7 +882,7 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 		} else if len(vecRanks) > 0 {
 			lexIDs := scoredIDs(scored)
 			fused := RRFFuse(lexIDs, vecRanks)
-			scored = reorderScored(scored, fused)
+			scored = reorderScored(scored, latestByID(filtered), fused)
 		}
 	}
 
@@ -939,6 +949,12 @@ func (r *Registry) vectorRanks(ctx context.Context, query string, candidates []s
 	out := make([]string, 0, len(matches))
 	seen := map[string]bool{}
 	for _, m := range matches {
+		// §3.2: domain projection vectors share this index under a
+		// reserved version sentinel (DomainVectorVersion). Skip them so
+		// an artifact search never returns a domain.
+		if m.Version == DomainVectorVersion {
+			continue
+		}
 		if !candidateIDs[m.ArtifactID] || seen[m.ArtifactID] {
 			continue
 		}
@@ -958,10 +974,15 @@ func scoredIDs(scored []scoredRecord) []string {
 }
 
 // reorderScored reorders the BM25 score slice to match the order of
-// fused IDs, preserving any items that survive the fusion. Items
-// that aren't in fused (because they came from neither list, which
-// can't happen here) are dropped.
-func reorderScored(scored []scoredRecord, fused []string) []scoredRecord {
+// fused IDs. A fused ID that BM25 scored keeps its lexical score; a
+// fused ID that only the vector ranker found (semantically related but
+// with no query-term overlap, so absent from scored) is materialized
+// from the candidate set with score 0. Without this, the embeddings
+// half of hybrid retrieval could only reorder lexical hits and never
+// surface a new candidate, defeating the point of fusing vectors in
+// (§3.2 Layer 2 / F-3.2.3). candidates maps each visible artifact ID to
+// its latest record.
+func reorderScored(scored []scoredRecord, candidates map[string]store.ManifestRecord, fused []string) []scoredRecord {
 	byID := map[string]scoredRecord{}
 	for _, sc := range scored {
 		byID[sc.rec.ArtifactID] = sc
@@ -970,79 +991,13 @@ func reorderScored(scored []scoredRecord, fused []string) []scoredRecord {
 	for _, id := range fused {
 		if sc, ok := byID[id]; ok {
 			out = append(out, sc)
+			continue
+		}
+		if rec, ok := candidates[id]; ok {
+			out = append(out, scoredRecord{rec: rec})
 		}
 	}
 	return out
-}
-
-// ----- SearchDomains ------------------------------------------------------
-
-// SearchDomainsOptions captures the §5 search_domains arguments.
-type SearchDomainsOptions struct {
-	Query string
-	Scope string
-	TopK  int
-}
-
-// SearchDomains returns ranked domain descriptors. Phase 12 enriches
-// this with §4.5.5 keyword projections; for now, domains are derived
-// from the unique paths of visible manifests.
-func (r *Registry) SearchDomains(ctx context.Context, id layer.Identity, opts SearchDomainsOptions) (*SearchResult, error) {
-	// spec: §4.7.5 — log the read with resolved layer composition and
-	// result size; deferred so the size lands on the success path.
-	ev := AuditEvent{
-		Type:           "domains.searched",
-		Caller:         callerOf(id),
-		Context:        map[string]string{"query": opts.Query, "scope": opts.Scope},
-		ResolvedLayers: r.effectiveLayerComposition(id),
-	}
-	defer func() { r.emit(ctx, ev) }()
-	if opts.TopK > 50 {
-		return nil, fmt.Errorf("%w: top_k > 50", ErrInvalidArgument)
-	}
-	if opts.TopK <= 0 {
-		opts.TopK = 10
-	}
-
-	visible, err := r.visibleManifests(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-
-	domainSet := map[string]bool{}
-	for _, m := range visible {
-		if opts.Scope != "" && !inPrefix(m.ArtifactID, opts.Scope) {
-			continue
-		}
-		dir := parentPath(m.ArtifactID)
-		if dir == "" {
-			continue
-		}
-		// All ancestor paths qualify as domains.
-		for p := dir; p != ""; p = parentPath(p) {
-			domainSet[p] = true
-		}
-	}
-	q := strings.ToLower(opts.Query)
-	matched := make([]string, 0, len(domainSet))
-	for p := range domainSet {
-		if q != "" && !strings.Contains(strings.ToLower(p), q) {
-			continue
-		}
-		matched = append(matched, p)
-	}
-	sort.Strings(matched)
-	res := &SearchResult{Query: opts.Query, TotalMatched: len(matched)}
-	if len(matched) > opts.TopK {
-		matched = matched[:opts.TopK]
-	}
-	for _, p := range matched {
-		res.Domains = append(res.Domains, DomainDescriptor{
-			Path: p, Name: lastSegment(p),
-		})
-	}
-	ev.ResultSize = len(res.Domains)
-	return res, nil
 }
 
 // ----- LoadArtifact -------------------------------------------------------
@@ -1532,9 +1487,9 @@ type scoredRecord struct {
 	score float64
 }
 
-// scoreBM25 ranks records by a small BM25 implementation over manifest
-// text (id segments, description, tags, body). Empty query returns
-// records sorted alphabetically by ID with score 0.
+// scoreBM25 ranks records by the shared bm25Rank implementation over
+// manifest text (id segments, description, tags, body). Empty query
+// returns records sorted alphabetically by ID with score 0.
 func scoreBM25(records []store.ManifestRecord, query string) []scoredRecord {
 	if query == "" {
 		out := make([]scoredRecord, len(records))
@@ -1544,14 +1499,43 @@ func scoreBM25(records []store.ManifestRecord, query string) []scoredRecord {
 		sort.Slice(out, func(i, j int) bool { return out[i].rec.ArtifactID < out[j].rec.ArtifactID })
 		return out
 	}
-
 	docs := make([][]string, len(records))
-	totalLen := 0
+	tiebreak := make([]string, len(records))
 	for i, r := range records {
 		docs[i] = tokensFor(r)
-		totalLen += len(docs[i])
+		tiebreak[i] = r.ArtifactID
 	}
-	avgLen := float64(totalLen) / float64(max1(len(records)))
+	ranked := bm25Rank(docs, tiebreak, query)
+	out := make([]scoredRecord, 0, len(ranked))
+	for _, ri := range ranked {
+		out = append(out, scoredRecord{rec: records[ri.idx], score: ri.score})
+	}
+	return out
+}
+
+// scoredIndex is one document's BM25 score keyed by its position in the
+// input slice. Callers map idx back to their own record type.
+type scoredIndex struct {
+	idx   int
+	score float64
+}
+
+// bm25Rank scores each tokenized document against the query with Okapi
+// BM25 weighting (k1=1.5, b=0.75), the shared lexical ranker behind both
+// search_artifacts and search_domains (§4.7 hybrid retrieval). It returns
+// only documents with a positive score, ordered by descending score then
+// ascending tiebreak (the caller's stable identifier, e.g. artifact ID or
+// domain path). An empty query or empty corpus returns nil.
+func bm25Rank(docs [][]string, tiebreak []string, query string) []scoredIndex {
+	queryTerms := tokenize(strings.ToLower(query))
+	if len(docs) == 0 || len(queryTerms) == 0 {
+		return nil
+	}
+	totalLen := 0
+	for _, doc := range docs {
+		totalLen += len(doc)
+	}
+	avgLen := float64(totalLen) / float64(max1(len(docs)))
 
 	df := map[string]int{}
 	for _, doc := range docs {
@@ -1565,12 +1549,12 @@ func scoreBM25(records []store.ManifestRecord, query string) []scoredRecord {
 		}
 	}
 
-	queryTerms := tokenize(strings.ToLower(query))
 	const (
 		k1 = 1.5
 		b  = 0.75
 	)
-	out := make([]scoredRecord, 0, len(records))
+	n := float64(len(docs))
+	out := make([]scoredIndex, 0, len(docs))
 	for i, doc := range docs {
 		score := 0.0
 		tf := termFreqs(doc)
@@ -1579,7 +1563,6 @@ func scoreBM25(records []store.ManifestRecord, query string) []scoredRecord {
 			if f == 0 {
 				continue
 			}
-			n := float64(len(records))
 			idf := 0.0
 			if df[qt] > 0 {
 				idf = logf((n-float64(df[qt])+0.5)/(float64(df[qt])+0.5) + 1)
@@ -1589,14 +1572,14 @@ func scoreBM25(records []store.ManifestRecord, query string) []scoredRecord {
 			score += idf * norm
 		}
 		if score > 0 {
-			out = append(out, scoredRecord{rec: records[i], score: score})
+			out = append(out, scoredIndex{idx: i, score: score})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].score != out[j].score {
 			return out[i].score > out[j].score
 		}
-		return out[i].rec.ArtifactID < out[j].rec.ArtifactID
+		return tiebreak[out[i].idx] < tiebreak[out[j].idx]
 	})
 	return out
 }

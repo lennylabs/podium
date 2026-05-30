@@ -293,7 +293,7 @@ func TestDocHTTPAPI_9_SearchDomains(t *testing.T) {
 			t.Fatalf("domain result missing %q: %v", k, d)
 		}
 	}
-	t.Log("doc/impl gap: search_domains keys hits under \"domains\" (the doc shows \"results\"), and the domain descriptor carries no per-result score")
+	t.Log("doc/impl gap: search_domains keys hits under \"domains\" (the doc shows \"results\")")
 }
 
 // spec: http-api.md § search_domains; top_k max 50.
