@@ -11,6 +11,7 @@
 package typeprovider
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -38,7 +39,7 @@ type Diagnostic struct {
 type Provider interface {
 	ID() string
 	Type() manifest.ArtifactType
-	Validate(*manifest.Artifact) []Diagnostic
+	Validate(ctx context.Context, a *manifest.Artifact) []Diagnostic
 }
 
 // Registry holds the registered providers.
@@ -120,7 +121,7 @@ func (r *Registry) Types() []manifest.ArtifactType {
 // Validate dispatches to the registered provider's Validate, or
 // returns nil when no provider matches a (the linter's other rules
 // catch the unknown-type case).
-func (r *Registry) Validate(a *manifest.Artifact) []Diagnostic {
+func (r *Registry) Validate(ctx context.Context, a *manifest.Artifact) []Diagnostic {
 	if a == nil {
 		return nil
 	}
@@ -130,7 +131,7 @@ func (r *Registry) Validate(a *manifest.Artifact) []Diagnostic {
 	if !ok {
 		return nil
 	}
-	return p.Validate(a)
+	return p.Validate(ctx, a)
 }
 
 // builtin is the default TypeProvider for every first-class and
@@ -140,6 +141,6 @@ type builtin struct {
 	typ manifest.ArtifactType
 }
 
-func (b builtin) ID() string                               { return "builtin:" + string(b.typ) }
-func (b builtin) Type() manifest.ArtifactType              { return b.typ }
-func (b builtin) Validate(*manifest.Artifact) []Diagnostic { return nil }
+func (b builtin) ID() string                                                { return "builtin:" + string(b.typ) }
+func (b builtin) Type() manifest.ArtifactType                               { return b.typ }
+func (b builtin) Validate(context.Context, *manifest.Artifact) []Diagnostic { return nil }

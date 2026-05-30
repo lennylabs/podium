@@ -8,6 +8,7 @@
 package hook
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -41,13 +42,13 @@ type Hook interface {
 	ID() string
 	// Apply transforms one file. Returning a non-nil error aborts the
 	// chain; the materialization fails before any write.
-	Apply(manifest map[string]any, file File) (Result, error)
+	Apply(ctx context.Context, manifest map[string]any, file File) (Result, error)
 }
 
 // Run runs hooks in order over files. Each hook receives the previous
 // hook's output. Files where Drop=true are removed from subsequent
 // stages. The returned warnings are concatenated.
-func Run(hooks []Hook, manifest map[string]any, files []adapter.File) ([]adapter.File, []string, error) {
+func Run(ctx context.Context, hooks []Hook, manifest map[string]any, files []adapter.File) ([]adapter.File, []string, error) {
 	if len(hooks) == 0 {
 		return files, nil, nil
 	}
@@ -59,7 +60,7 @@ func Run(hooks []Hook, manifest map[string]any, files []adapter.File) ([]adapter
 	for _, h := range hooks {
 		next := make([]File, 0, len(current))
 		for _, f := range current {
-			res, err := h.Apply(manifest, f)
+			res, err := h.Apply(ctx, manifest, f)
 			if err != nil {
 				return nil, nil, fmt.Errorf("hook %s: %w", h.ID(), err)
 			}

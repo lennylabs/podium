@@ -22,7 +22,7 @@ type tagHook struct {
 }
 
 func (h tagHook) ID() string { return "tag-" + h.tag }
-func (h tagHook) Apply(_ map[string]any, f hook.File) (hook.Result, error) {
+func (h tagHook) Apply(_ context.Context, _ map[string]any, f hook.File) (hook.Result, error) {
 	*h.order = append(*h.order, h.tag)
 	f.Content = append(append([]byte{}, f.Content...), []byte("|"+h.tag)...)
 	return hook.Result{File: f}, nil
@@ -32,7 +32,7 @@ func (h tagHook) Apply(_ map[string]any, f hook.File) (hook.Result, error) {
 type dropHook struct{ match string }
 
 func (dropHook) ID() string { return "drop" }
-func (h dropHook) Apply(_ map[string]any, f hook.File) (hook.Result, error) {
+func (h dropHook) Apply(_ context.Context, _ map[string]any, f hook.File) (hook.Result, error) {
 	if strings.Contains(f.Path, h.match) {
 		f.Drop = true
 	}
@@ -43,7 +43,7 @@ func (h dropHook) Apply(_ map[string]any, f hook.File) (hook.Result, error) {
 type errHook struct{}
 
 func (errHook) ID() string { return "err" }
-func (errHook) Apply(_ map[string]any, _ hook.File) (hook.Result, error) {
+func (errHook) Apply(_ context.Context, _ map[string]any, _ hook.File) (hook.Result, error) {
 	return hook.Result{}, errors.New("boom")
 }
 
@@ -51,7 +51,7 @@ func (errHook) Apply(_ map[string]any, _ hook.File) (hook.Result, error) {
 type warnHook struct{ msg string }
 
 func (warnHook) ID() string { return "warn" }
-func (h warnHook) Apply(_ map[string]any, f hook.File) (hook.Result, error) {
+func (h warnHook) Apply(_ context.Context, _ map[string]any, f hook.File) (hook.Result, error) {
 	return hook.Result{File: f, Warnings: []string{h.msg}}, nil
 }
 
@@ -59,7 +59,7 @@ func (h warnHook) Apply(_ map[string]any, f hook.File) (hook.Result, error) {
 type ctxHook struct{ seen *map[string]any }
 
 func (ctxHook) ID() string { return "ctx" }
-func (h ctxHook) Apply(m map[string]any, f hook.File) (hook.Result, error) {
+func (h ctxHook) Apply(_ context.Context, m map[string]any, f hook.File) (hook.Result, error) {
 	*h.seen = m
 	return hook.Result{File: f}, nil
 }

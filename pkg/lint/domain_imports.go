@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,7 +21,7 @@ type ruleDomainImportsResolve struct{}
 
 func (ruleDomainImportsResolve) Code() string { return "lint.domain_import_unresolved" }
 
-func (r ruleDomainImportsResolve) Check(reg *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleDomainImportsResolve) Check(_ context.Context, reg *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	if reg == nil {
 		return nil
 	}
@@ -59,7 +60,7 @@ type ruleDomainImportCycle struct{}
 
 func (ruleDomainImportCycle) Code() string { return "lint.domain_import_cycle" }
 
-func (r ruleDomainImportCycle) Check(reg *filesystem.Registry, _ []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleDomainImportCycle) Check(_ context.Context, reg *filesystem.Registry, _ []filesystem.ArtifactRecord) []Diagnostic {
 	if reg == nil {
 		return nil
 	}
@@ -99,7 +100,7 @@ func (ruleDomainDiscoveryOverrideDisallowed) Code() string {
 	return "lint.domain_discovery_override_disabled"
 }
 
-func (r ruleDomainDiscoveryOverrideDisallowed) Check(reg *filesystem.Registry, _ []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleDomainDiscoveryOverrideDisallowed) Check(_ context.Context, reg *filesystem.Registry, _ []filesystem.ArtifactRecord) []Diagnostic {
 	if reg == nil {
 		return nil
 	}

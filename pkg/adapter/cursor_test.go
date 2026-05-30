@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -9,7 +10,7 @@ import (
 // and returns the .mdc content.
 func cursorMDCFor(t *testing.T, artifact string) string {
 	t.Helper()
-	out, err := Cursor{}.Adapt(Source{ArtifactID: "style/rule", ArtifactBytes: []byte(artifact)})
+	out, err := Cursor{}.Adapt(context.Background(), Source{ArtifactID: "style/rule", ArtifactBytes: []byte(artifact)})
 	if err != nil {
 		t.Fatalf("Cursor.Adapt: %v", err)
 	}

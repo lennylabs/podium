@@ -12,12 +12,12 @@ func TestManifestBodyOf_StripsFrontmatter(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
 		// frontmatter present
-		"---\nfoo: bar\n---\nBody here\n":  "\nBody here\n",
-		"---\n---\nplain":                  "\nplain",
+		"---\nfoo: bar\n---\nBody here\n": "\nBody here\n",
+		"---\n---\nplain":                 "\nplain",
 		// no frontmatter
-		"plain text":                       "plain text",
+		"plain text": "plain text",
 		// empty
-		"":                                 "",
+		"": "",
 		// frontmatter without closing fence — returned as-is
 		"---\nno-close": "---\nno-close",
 	}

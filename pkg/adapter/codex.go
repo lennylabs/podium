@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"context"
 	"path"
 	"sort"
 	"strings"
@@ -15,7 +16,7 @@ type Codex struct{}
 func (Codex) ID() string { return "codex" }
 
 // Adapt produces a Codex-flavored layout.
-func (c Codex) Adapt(src Source) ([]File, error) {
+func (c Codex) Adapt(ctx context.Context, src Source) ([]File, error) {
 	ty := frontmatterType(src.ArtifactBytes)
 	out := []File{}
 	name := lastSegmentCodex(src.ArtifactID)

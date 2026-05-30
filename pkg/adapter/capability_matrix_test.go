@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -54,7 +55,7 @@ func runMatrixField(t *testing.T, adapterID, field, sentinel string) {
 		ArtifactID:    "test/artifact",
 		ArtifactBytes: makeArtifact(map[string]string{field: sentinel}),
 	}
-	out, err := a.Adapt(src)
+	out, err := a.Adapt(context.Background(), src)
 	if err != nil {
 		t.Fatalf("%s.Adapt: %v", adapterID, err)
 	}
@@ -105,7 +106,7 @@ func TestCapabilityMatrix_MCPServers(t *testing.T) {
 			ArtifactBytes: []byte("---\ntype: agent\nversion: 1.0.0\n" +
 				"mcpServers:\n  - name: finance-warehouse\n---\n\nbody\n"),
 		}
-		out, err := a.Adapt(src)
+		out, err := a.Adapt(context.Background(), src)
 		if err != nil {
 			t.Fatalf("%s.Adapt: %v", id, err)
 		}
@@ -154,7 +155,7 @@ func TestCapabilityMatrix_RuleModeAlways(t *testing.T) {
 			ArtifactBytes: []byte("---\ntype: rule\nversion: 1.0.0\nrule_mode: always\n" +
 				"description: a rule\n---\n\nrule body\n"),
 		}
-		out, err := a.Adapt(src)
+		out, err := a.Adapt(context.Background(), src)
 		if err != nil {
 			t.Fatalf("%s.Adapt: %v", id, err)
 		}
@@ -186,7 +187,7 @@ func TestCapabilityMatrix_RuleModeExplicit(t *testing.T) {
 			ArtifactBytes: []byte("---\ntype: rule\nversion: 1.0.0\nrule_mode: explicit\n" +
 				"description: a rule\n---\n\nrule body\n"),
 		}
-		out, err := a.Adapt(src)
+		out, err := a.Adapt(context.Background(), src)
 		if err != nil {
 			t.Fatalf("%s.Adapt: %v", id, err)
 		}

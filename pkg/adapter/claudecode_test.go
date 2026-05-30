@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"context"
 	"testing"
 )
 
@@ -21,7 +22,7 @@ version: 1.0.0
 			"scripts/x.py": []byte("print('x')\n"),
 		},
 	}
-	out, err := ClaudeCode{}.Adapt(src)
+	out, err := ClaudeCode{}.Adapt(context.Background(), src)
 	if err != nil {
 		t.Fatalf("Adapt: %v", err)
 	}
@@ -52,7 +53,7 @@ version: 1.0.0
 ts style rules
 `),
 	}
-	out, err := ClaudeCode{}.Adapt(src)
+	out, err := ClaudeCode{}.Adapt(context.Background(), src)
 	if err != nil {
 		t.Fatalf("Adapt: %v", err)
 	}
@@ -69,7 +70,7 @@ func TestClaudeCode_AgentLayout(t *testing.T) {
 		ArtifactID:    "finance/pay-invoice",
 		ArtifactBytes: []byte("---\ntype: agent\nversion: 1.0.0\n---\nbody\n"),
 	}
-	out, err := ClaudeCode{}.Adapt(src)
+	out, err := ClaudeCode{}.Adapt(context.Background(), src)
 	if err != nil {
 		t.Fatalf("Adapt: %v", err)
 	}
@@ -86,7 +87,7 @@ func TestClaudeCode_FallbackPathForOtherTypes(t *testing.T) {
 		ArtifactID:    "company-glossary",
 		ArtifactBytes: []byte("---\ntype: context\nversion: 1.0.0\n---\nbody\n"),
 	}
-	out, err := ClaudeCode{}.Adapt(src)
+	out, err := ClaudeCode{}.Adapt(context.Background(), src)
 	if err != nil {
 		t.Fatalf("Adapt: %v", err)
 	}
@@ -103,7 +104,7 @@ func TestCodex_RulePlacement(t *testing.T) {
 		ArtifactID:    "ts-style",
 		ArtifactBytes: []byte("---\ntype: rule\nversion: 1.0.0\n---\nrules\n"),
 	}
-	out, err := Codex{}.Adapt(src)
+	out, err := Codex{}.Adapt(context.Background(), src)
 	if err != nil {
 		t.Fatalf("Adapt: %v", err)
 	}

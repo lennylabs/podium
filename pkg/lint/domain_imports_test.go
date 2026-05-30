@@ -1,6 +1,7 @@
 package lint_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,7 +58,7 @@ include:
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
-	diags := (&lint.Linter{}).Lint(reg, records)
+	diags := (&lint.Linter{}).Lint(context.Background(), reg, records)
 	gotUnresolved := false
 	gotResolved := false
 	for _, d := range diags {
@@ -102,7 +103,7 @@ include:
 	})
 	reg, _ := filesystem.Open(dir)
 	records, _ := reg.Walk(filesystem.WalkOptions{})
-	diags := (&lint.Linter{}).Lint(reg, records)
+	diags := (&lint.Linter{}).Lint(context.Background(), reg, records)
 	got := false
 	for _, d := range diags {
 		if d.Code == "lint.domain_import_cycle" {
@@ -146,7 +147,7 @@ description: Finance
 	const code = "lint.domain_discovery_override_disabled"
 
 	// Default linter (overrides allowed): no discovery-override warning.
-	for _, d := range (&lint.Linter{}).Lint(reg, records) {
+	for _, d := range (&lint.Linter{}).Lint(context.Background(), reg, records) {
 		if d.Code == code {
 			t.Errorf("unexpected %s when overrides are allowed: %+v", code, d)
 		}
@@ -155,7 +156,7 @@ description: Finance
 	// Overrides disabled: exactly the finance/ap DOMAIN.md (which has a
 	// discovery: block) is warned.
 	disabled := false
-	diags := (&lint.Linter{AllowPerDomainOverrides: &disabled}).Lint(reg, records)
+	diags := (&lint.Linter{AllowPerDomainOverrides: &disabled}).Lint(context.Background(), reg, records)
 	var flagged []string
 	for _, d := range diags {
 		if d.Code == code {
@@ -177,7 +178,7 @@ func TestRuleDomainImports_NoImportsClean(t *testing.T) {
 	})
 	reg, _ := filesystem.Open(dir)
 	records, _ := reg.Walk(filesystem.WalkOptions{})
-	diags := (&lint.Linter{}).Lint(reg, records)
+	diags := (&lint.Linter{}).Lint(context.Background(), reg, records)
 	for _, d := range diags {
 		if d.Code == "lint.domain_import_unresolved" || d.Code == "lint.domain_import_cycle" {
 			t.Errorf("false positive: %s — %s", d.Code, d.Message)

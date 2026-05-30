@@ -1,6 +1,7 @@
 package sign
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -33,13 +34,13 @@ func TestEnforceVerification_UnknownPolicyFailsClosed(t *testing.T) {
 	t.Parallel()
 	// Low sensitivity + unknown policy: fail-open would return nil; fail
 	// closed requires a signature and reports it missing.
-	err := EnforceVerification("bogus", Noop{}, manifest.Sensitivity("low"), "sha256:abc", "")
+	err := EnforceVerification(context.Background(), "bogus", Noop{}, manifest.Sensitivity("low"), "sha256:abc", "")
 	if !errors.Is(err, ErrSignatureMissing) {
 		t.Fatalf("unknown policy with no signature = %v, want ErrSignatureMissing", err)
 	}
 	// With a valid signature the unknown policy still enforces and the
 	// noop provider verifies the placeholder.
-	if err := EnforceVerification("bogus", Noop{}, manifest.Sensitivity("low"), "sha256:abc", "noop:sha256:abc"); err != nil {
+	if err := EnforceVerification(context.Background(), "bogus", Noop{}, manifest.Sensitivity("low"), "sha256:abc", "noop:sha256:abc"); err != nil {
 		t.Errorf("unknown policy with valid signature = %v, want nil", err)
 	}
 }
@@ -48,7 +49,7 @@ func TestEnforceVerification_UnknownPolicyFailsClosed(t *testing.T) {
 // skips verification entirely even for high sensitivity.
 func TestEnforceVerification_NeverSkips(t *testing.T) {
 	t.Parallel()
-	if err := EnforceVerification(PolicyNever, Noop{}, manifest.SensitivityHigh, "sha256:abc", ""); err != nil {
+	if err := EnforceVerification(context.Background(), PolicyNever, Noop{}, manifest.SensitivityHigh, "sha256:abc", ""); err != nil {
 		t.Errorf("PolicyNever = %v, want nil", err)
 	}
 }

@@ -10,12 +10,12 @@ import (
 func TestMaskedToken(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
-		"":                           "(unset)",
-		"   ":                        "(unset)",
-		"short":                      "(set)",
-		"twelvechars1":                "(set)",
-		"abcdefghijklm":              "abcdefgh…",
-		"verylongjwttokenpayload":    "verylong…",
+		"":                        "(unset)",
+		"   ":                     "(unset)",
+		"short":                   "(set)",
+		"twelvechars1":            "(set)",
+		"abcdefghijklm":           "abcdefgh…",
+		"verylongjwttokenpayload": "verylong…",
 	}
 	for in, want := range cases {
 		if got := maskedToken(in); got != want {

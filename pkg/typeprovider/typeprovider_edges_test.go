@@ -1,6 +1,7 @@
 package typeprovider_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -10,9 +11,11 @@ import (
 
 type emptyTypeProvider struct{}
 
-func (emptyTypeProvider) ID() string                                            { return "empty" }
-func (emptyTypeProvider) Type() manifest.ArtifactType                           { return "" }
-func (emptyTypeProvider) Validate(*manifest.Artifact) []typeprovider.Diagnostic { return nil }
+func (emptyTypeProvider) ID() string                  { return "empty" }
+func (emptyTypeProvider) Type() manifest.ArtifactType { return "" }
+func (emptyTypeProvider) Validate(context.Context, *manifest.Artifact) []typeprovider.Diagnostic {
+	return nil
+}
 
 // Spec: §9 — Register rejects a nil provider so a misconfigured
 // import doesn't silently land an inert entry.
@@ -43,7 +46,7 @@ func TestRegister_RejectsEmptyType(t *testing.T) {
 func TestValidate_NoMatchReturnsNil(t *testing.T) {
 	t.Parallel()
 	r := typeprovider.NewRegistry()
-	diags := r.Validate(&manifest.Artifact{Type: "macro"})
+	diags := r.Validate(context.Background(), &manifest.Artifact{Type: "macro"})
 	if diags != nil {
 		t.Errorf("diags = %v, want nil", diags)
 	}
@@ -53,7 +56,7 @@ func TestValidate_NoMatchReturnsNil(t *testing.T) {
 func TestValidate_NilArtifactIsNoop(t *testing.T) {
 	t.Parallel()
 	r := typeprovider.NewRegistry()
-	if got := r.Validate(nil); got != nil {
+	if got := r.Validate(context.Background(), nil); got != nil {
 		t.Errorf("got %+v, want nil", got)
 	}
 }

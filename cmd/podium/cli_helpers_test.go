@@ -48,10 +48,10 @@ func TestParsePolicies_RejectsBadInput(t *testing.T) {
 func TestGuessTokenURL(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
-		"https://issuer.example/oauth2/device":    "https://issuer.example/oauth2/token",
-		"https://issuer.example/v1/oauth/device":  "https://issuer.example/v1/oauth/token",
-		"https://issuer.example/device":           "https://issuer.example/token",
-		"https://issuer.example/custom-auth":      "https://issuer.example/custom-auth/token",
+		"https://issuer.example/oauth2/device":   "https://issuer.example/oauth2/token",
+		"https://issuer.example/v1/oauth/device": "https://issuer.example/v1/oauth/token",
+		"https://issuer.example/device":          "https://issuer.example/token",
+		"https://issuer.example/custom-auth":     "https://issuer.example/custom-auth/token",
 	}
 	for in, want := range cases {
 		if got := guessTokenURL(in); got != want {
@@ -270,13 +270,13 @@ func TestSubcommands_HelpExitsZero(t *testing.T) {
 func TestDispatchers_NoArgsExit2_HelpExit0(t *testing.T) {
 	t.Parallel()
 	for name, cmd := range map[string]func([]string) int{
-		"cacheCmd":         cacheCmd,
-		"configCmd":        configCmd,
-		"layerCmd":         layerCmd,
-		"profileCmd":       profileCmd,
-		"domainCmd":        domainCmd,
-		"artifactCmd":      artifactCmd,
-		"adminRuntimeCmd":  adminRuntimeCmd,
+		"cacheCmd":        cacheCmd,
+		"configCmd":       configCmd,
+		"layerCmd":        layerCmd,
+		"profileCmd":      profileCmd,
+		"domainCmd":       domainCmd,
+		"artifactCmd":     artifactCmd,
+		"adminRuntimeCmd": adminRuntimeCmd,
 	} {
 		t.Run(name+"_noargs", func(t *testing.T) {
 			withStderr(t, func() {
@@ -458,4 +458,3 @@ func withStderr(t *testing.T, fn func()) {
 	}()
 	fn()
 }
-
