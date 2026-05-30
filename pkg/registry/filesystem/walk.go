@@ -180,6 +180,14 @@ func captureResources(rec *ArtifactRecord, dir string) error {
 			return walkErr
 		}
 		if d.IsDir() {
+			// spec: §4.2 — directories are domain paths and the leaves are
+			// artifact packages. A subdirectory that carries its own
+			// ARTIFACT.md is a separate package; its files belong to that
+			// artifact, so stop descending here instead of capturing them as
+			// this artifact's bundled resources (§4.4).
+			if path != dir && hasArtifactManifest(path) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if path == filepath.Join(dir, "ARTIFACT.md") {
@@ -202,14 +210,50 @@ func captureResources(rec *ArtifactRecord, dir string) error {
 }
 
 // canonicalID converts a filesystem directory path under a layer root to
-// a canonical artifact ID using forward slashes.
+// a canonical artifact ID using forward slashes, enforcing the §4.2
+// canonical-ID invariants via ValidateCanonicalID.
 func canonicalID(layerRoot, dir string) (string, error) {
 	rel, err := filepath.Rel(layerRoot, dir)
 	if err != nil {
 		return "", err
 	}
-	if rel == "." {
-		return "", fmt.Errorf("artifact must live in a subdirectory of the layer (root: %q)", layerRoot)
+	id := filepath.ToSlash(rel)
+	if id == "." {
+		// A root-level ARTIFACT.md has no directory path under the root.
+		id = ""
 	}
-	return filepath.ToSlash(rel), nil
+	if err := ValidateCanonicalID(id); err != nil {
+		return "", fmt.Errorf("%w (layer root: %q)", err, layerRoot)
+	}
+	return id, nil
+}
+
+// hasArtifactManifest reports whether dir directly contains an ARTIFACT.md
+// file, marking it as a nested artifact-package boundary (§4.2).
+func hasArtifactManifest(dir string) bool {
+	info, err := os.Stat(filepath.Join(dir, "ARTIFACT.md"))
+	return err == nil && !info.IsDir()
+}
+
+// ValidateCanonicalID enforces the §4.2 canonical-ID invariants that every
+// artifact-walk path shares: the ID is the non-empty directory path under
+// the registry root, and no path segment contains "@". A root-level
+// ARTIFACT.md yields an empty ID and is rejected, so every artifact has an
+// addressable canonical home. "@" is reserved as the reference delimiter in
+// the "<id>@<semver>" and "<id>@sha256:<hash>" grammar; allowing it inside a
+// segment makes a reference split ambiguously. Both the filesystem-source
+// walk and the server ingest walk call this so they share one invariant.
+func ValidateCanonicalID(id string) error {
+	if id == "" {
+		return errors.New("artifact must live in a subdirectory of the layer (a root-level ARTIFACT.md has no canonical ID)")
+	}
+	for _, seg := range strings.Split(id, "/") {
+		if seg == "" {
+			return fmt.Errorf("canonical ID %q has an empty path segment", id)
+		}
+		if strings.Contains(seg, "@") {
+			return fmt.Errorf("canonical ID segment %q must not contain '@' (reserved for the @version or @sha256 suffix)", seg)
+		}
+	}
+	return nil
 }

@@ -634,6 +634,12 @@ func walkLayer(fsys fs.FS, layerID string) ([]filesystem.ArtifactRecord, error) 
 func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecord, error) {
 	dir := dirOf(artifactPath)
 	id := dirToCanonical(dir)
+	// spec: §4.2 — enforce the canonical-ID invariants the filesystem-source
+	// registry already enforces, so both walk paths reject a root-level
+	// ARTIFACT.md (empty ID) and any segment containing "@" identically.
+	if err := filesystem.ValidateCanonicalID(id); err != nil {
+		return filesystem.ArtifactRecord{}, fmt.Errorf("%s: %w", artifactPath, err)
+	}
 
 	bytes, err := fs.ReadFile(fsys, artifactPath)
 	if err != nil {
@@ -669,6 +675,12 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 			return err
 		}
 		if d.IsDir() {
+			// spec: §4.2/§4.4 — stop at a nested artifact-package boundary so
+			// a child artifact's files are not captured as the parent's
+			// bundled resources.
+			if p != dir && fsHasArtifactManifest(fsys, p) {
+				return fs.SkipDir
+			}
 			return nil
 		}
 		base := d.Name()
@@ -847,6 +859,13 @@ func dirToCanonical(dir string) string {
 		return ""
 	}
 	return dir
+}
+
+// fsHasArtifactManifest reports whether dir directly contains an ARTIFACT.md
+// file, marking it as a nested artifact-package boundary (§4.2).
+func fsHasArtifactManifest(fsys fs.FS, dir string) bool {
+	info, err := fs.Stat(fsys, joinPath(dir, "ARTIFACT.md"))
+	return err == nil && !info.IsDir()
 }
 
 func rejectsSensitivity(floor, actual manifest.Sensitivity) bool {

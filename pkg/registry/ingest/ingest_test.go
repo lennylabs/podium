@@ -406,3 +406,76 @@ func TestIngest_ErrLintFailedExposed(t *testing.T) {
 		t.Errorf("ErrLintFailed should match itself")
 	}
 }
+
+// TestIngest_RootLevelArtifactRejected covers F-4.2.1.
+// Spec: §4.2 — a root-level ARTIFACT.md has no canonical ID; Ingest rejects
+// it instead of silently storing an artifact with an empty, unaddressable ID.
+func TestIngest_RootLevelArtifactRejected(t *testing.T) {
+	t.Parallel()
+	fsys := fstest.MapFS{
+		"ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("Root"))},
+	}
+	st := newStore(t)
+	_, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "tenant-1",
+		LayerID:  "team-shared",
+		Files:    fsys,
+	})
+	if err == nil {
+		t.Fatalf("Ingest accepted a root-level ARTIFACT.md")
+	}
+	if !strings.Contains(err.Error(), "subdirectory") {
+		t.Errorf("error %q missing 'subdirectory'", err)
+	}
+}
+
+// TestIngest_AtSegmentRejected covers F-4.2.2.
+// Spec: §4.2 — "@" inside a directory name makes the canonical-ID-plus-suffix
+// reference grammar ambiguous, so Ingest rejects it.
+func TestIngest_AtSegmentRejected(t *testing.T) {
+	t.Parallel()
+	fsys := fstest.MapFS{
+		"finance/pay@v2/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("Pay"))},
+	}
+	st := newStore(t)
+	_, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "tenant-1",
+		LayerID:  "team-shared",
+		Files:    fsys,
+	})
+	if err == nil {
+		t.Fatalf("Ingest accepted '@' in a canonical-ID segment")
+	}
+	if !strings.Contains(err.Error(), "@") {
+		t.Errorf("error %q missing '@'", err)
+	}
+}
+
+// TestIngest_NestedArtifactsIngestedSeparately covers F-4.2.3.
+// Spec: §4.2 — a nested artifact is a separate leaf package. Both the parent
+// and the nested artifact are ingested as distinct records keyed by their own
+// canonical IDs.
+func TestIngest_NestedArtifactsIngestedSeparately(t *testing.T) {
+	t.Parallel()
+	fsys := fstest.MapFS{
+		"outer/ARTIFACT.md":       &fstest.MapFile{Data: []byte(contextArtifact("Outer"))},
+		"outer/inner/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("Inner"))},
+	}
+	st := newStore(t)
+	res, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "tenant-1",
+		LayerID:  "team-shared",
+		Files:    fsys,
+	})
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if res.Accepted != 2 {
+		t.Fatalf("Accepted=%d, want 2 (parent + nested)", res.Accepted)
+	}
+	for _, id := range []string{"outer", "outer/inner"} {
+		if _, err := st.GetManifest(context.Background(), "tenant-1", id, "1.0.0"); err != nil {
+			t.Errorf("GetManifest(%q): %v", id, err)
+		}
+	}
+}

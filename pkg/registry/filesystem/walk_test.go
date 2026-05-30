@@ -248,7 +248,149 @@ func TestWalk_SingleLayerArtifactIDsAreRelativeToRoot(t *testing.T) {
 	}
 }
 
+// Spec: §4.2 — ValidateCanonicalID enforces the shared canonical-ID
+// invariants: a non-empty directory path with no "@" in any segment. Domain
+// directories such as "_shared" are allowed (the spec's own layout uses one).
+func TestValidateCanonicalID(t *testing.T) {
+	t.Parallel()
+	ok := []string{
+		"finance",
+		"finance/ap/pay-invoice",
+		"_shared/payment-helpers/routing-validator",
+		"engineering/platform/code-change-pr",
+	}
+	for _, id := range ok {
+		if err := ValidateCanonicalID(id); err != nil {
+			t.Errorf("ValidateCanonicalID(%q) = %v, want nil", id, err)
+		}
+	}
+	bad := map[string]string{
+		"":              "subdirectory",
+		"pay@v2":        "@",
+		"finance/p@y/x": "@",
+		"a//b":          "empty path segment",
+	}
+	for id, want := range bad {
+		err := ValidateCanonicalID(id)
+		if err == nil {
+			t.Errorf("ValidateCanonicalID(%q) = nil, want error containing %q", id, want)
+			continue
+		}
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("ValidateCanonicalID(%q) = %v, want substring %q", id, err, want)
+		}
+	}
+}
+
+// Spec: §4.2 — a root-level ARTIFACT.md has no directory path under the layer
+// root, so Walk rejects it (an empty canonical ID is unaddressable).
+func TestWalk_RootLevelArtifactRejected(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	testharness.WriteTree(t, root,
+		testharness.WriteTreeOption{
+			Path:    "ARTIFACT.md",
+			Content: stringf(contextArtifact, "Root", "root"),
+		},
+	)
+	reg, err := Open(root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err = reg.Walk(WalkOptions{}); err == nil {
+		t.Fatalf("expected error for root-level ARTIFACT.md")
+	} else if !strings.Contains(err.Error(), "subdirectory") {
+		t.Errorf("error %q missing 'subdirectory'", err)
+	}
+}
+
+// Spec: §4.2 — "@" is reserved as the reference version/hash delimiter, so a
+// directory name containing "@" is an invalid canonical-ID segment.
+func TestWalk_AtSegmentRejected(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	testharness.WriteTree(t, root,
+		testharness.WriteTreeOption{
+			Path:    "finance/pay@v2/ARTIFACT.md",
+			Content: stringf(contextArtifact, "Pay", "pay"),
+		},
+	)
+	reg, err := Open(root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err = reg.Walk(WalkOptions{}); err == nil {
+		t.Fatalf("expected error for '@' in a canonical-ID segment")
+	} else if !strings.Contains(err.Error(), "@") {
+		t.Errorf("error %q missing '@'", err)
+	}
+}
+
+// Spec: §4.2/§4.4 — a nested artifact package is its own leaf. Its files,
+// including its own ARTIFACT.md, are not captured as the parent's bundled
+// resources; the nested artifact is discovered as a separate record.
+func TestWalk_NestedArtifactNotCapturedAsResource(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	testharness.WriteTree(t, root,
+		testharness.WriteTreeOption{
+			Path:    "outer/ARTIFACT.md",
+			Content: stringf(contextArtifact, "Outer", "outer"),
+		},
+		testharness.WriteTreeOption{
+			Path:    "outer/notes.md",
+			Content: "outer notes\n",
+		},
+		testharness.WriteTreeOption{
+			Path:    "outer/inner/ARTIFACT.md",
+			Content: stringf(contextArtifact, "Inner", "inner"),
+		},
+		testharness.WriteTreeOption{
+			Path:    "outer/inner/data.txt",
+			Content: "inner data\n",
+		},
+	)
+	reg, err := Open(root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	got, err := reg.Walk(WalkOptions{})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	byID := map[string]ArtifactRecord{}
+	for _, r := range got {
+		byID[r.ID] = r
+	}
+	outer, ok := byID["outer"]
+	if !ok {
+		t.Fatalf("missing outer record (got %v)", idsOf(got))
+	}
+	if _, ok := byID["outer/inner"]; !ok {
+		t.Fatalf("missing nested outer/inner record (got %v)", idsOf(got))
+	}
+	if _, ok := outer.Resources["notes.md"]; !ok {
+		t.Errorf("outer missing its own resource notes.md: %v", resourceKeys(outer.Resources))
+	}
+	for k := range outer.Resources {
+		if strings.HasPrefix(k, "inner/") {
+			t.Errorf("outer captured nested-artifact file %q as a resource", k)
+		}
+	}
+	if _, ok := byID["outer/inner"].Resources["data.txt"]; !ok {
+		t.Errorf("nested artifact missing its resource data.txt: %v", resourceKeys(byID["outer/inner"].Resources))
+	}
+}
+
 // Helpers used by these tests only.
+
+func resourceKeys(m map[string][]byte) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
 
 func idsOf(records []ArtifactRecord) []string {
 	out := make([]string, len(records))
