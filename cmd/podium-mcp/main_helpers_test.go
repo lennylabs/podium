@@ -25,9 +25,9 @@ func TestEnvDefault(t *testing.T) {
 func TestSplitCSV(t *testing.T) {
 	t.Parallel()
 	cases := map[string][]string{
-		"":              {},
-		"alone":         {"alone"},
-		"a,b,c":         {"a", "b", "c"},
+		"":             {},
+		"alone":        {"alone"},
+		"a,b,c":        {"a", "b", "c"},
 		" a , b ,  c ": {"a", "b", "c"},
 		",,a,,b,,":     {"a", "b"},
 	}
@@ -42,10 +42,10 @@ func TestSplitCSV(t *testing.T) {
 func TestSplitCSVMCP(t *testing.T) {
 	t.Parallel()
 	cases := map[string][]string{
-		"":         nil,
-		"x":        {"x"},
-		"x,y":      {"x", "y"},
-		"a,,b,,c":  {"a", "b", "c"},
+		"":        nil,
+		"x":       {"x"},
+		"x,y":     {"x", "y"},
+		"a,,b,,c": {"a", "b", "c"},
 	}
 	for in, want := range cases {
 		got := splitCSVMCP(in)
@@ -145,6 +145,9 @@ func TestPromptsCapabilityActive_AlwaysTrue(t *testing.T) {
 // --- loadConfig --------------------------------------------------------------
 
 func TestLoadConfig_MissingRegistryErrors(t *testing.T) {
+	// hermetic isolates HOME + cwd so the §7.5.2 sync.yaml fallback
+	// cannot resolve a registry from a real ~/.podium/sync.yaml.
+	hermetic(t)
 	t.Setenv("PODIUM_REGISTRY", "")
 	if _, err := loadConfig(); err == nil {
 		t.Errorf("missing PODIUM_REGISTRY: no error")

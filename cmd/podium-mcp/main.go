@@ -22,6 +22,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -39,6 +40,7 @@ import (
 
 	"github.com/lennylabs/podium/internal/buildinfo"
 	"github.com/lennylabs/podium/pkg/adapter"
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/materialize"
@@ -84,8 +86,13 @@ type config struct {
 	sessionTokenFile string
 	overlayPath      string
 	auditSink        string
-	tenantID         string
-	oauthAudience    string
+	// auditSinkSet records whether PODIUM_AUDIT_SINK (or its flag /
+	// config-file equivalent) was provided at all, so an explicit empty
+	// value selects the §6.2 default (~/.podium/audit.log) while an
+	// absent value leaves local auditing off (registry audit only).
+	auditSinkSet  bool
+	tenantID      string
+	oauthAudience string
 	// §6.2 / §6.3 identity provider selection and the oauth-device-code
 	// options. identityProvider defaults to "oauth-device-code". The
 	// device-code flow runs only when oauthAuthEndpoint is configured;
@@ -139,7 +146,6 @@ func loadConfig() (*config, error) {
 		sessionToken:     os.Getenv(tokenSource),
 		sessionTokenFile: os.Getenv("PODIUM_SESSION_TOKEN_FILE"),
 		overlayPath:      os.Getenv("PODIUM_OVERLAY_PATH"),
-		auditSink:        os.Getenv("PODIUM_AUDIT_SINK"),
 		tenantID:         os.Getenv("PODIUM_TENANT_ID"),
 		oauthAudience:    os.Getenv("PODIUM_OAUTH_AUDIENCE"),
 		// §6.2: PODIUM_IDENTITY_PROVIDER defaults to oauth-device-code.
@@ -163,13 +169,37 @@ func loadConfig() (*config, error) {
 		enforceRuntime: os.Getenv("PODIUM_ENFORCE_RUNTIME_REQUIREMENTS") == "true",
 		ignoreRuntime:  os.Getenv("PODIUM_IGNORE_RUNTIME_REQUIREMENTS") == "true",
 	}
+	// §6.2 PODIUM_AUDIT_SINK: distinguish unset (registry audit only) from
+	// set-but-empty (use the default ~/.podium/audit.log). os.Getenv cannot
+	// tell the two apart, so use LookupEnv.
+	if v, ok := os.LookupEnv("PODIUM_AUDIT_SINK"); ok {
+		c.auditSink, c.auditSinkSet = v, true
+	}
+	// §6.1 / §6.2: the host may configure the bridge via env vars,
+	// command-line flags, or a config file. Flags and config-file values
+	// overlay the env-derived defaults above (flag > config file > env).
+	if err := applyFlagsAndConfig(c, os.Args[1:]); err != nil {
+		return nil, err
+	}
+	// §6.2 / §7.5.2: when no registry is configured, fall back to
+	// sync.yaml's defaults.registry (workspace overlay first, then the
+	// home-global ~/.podium/sync.yaml the standalone recipe bootstraps).
 	if c.registry == "" {
-		return nil, fmt.Errorf("PODIUM_REGISTRY is required")
+		c.registry = registryFromSyncYAML()
+	}
+	if c.registry == "" {
+		return nil, fmt.Errorf("PODIUM_REGISTRY is required (registry URL or filesystem path) — set it, pass --registry, or write defaults.registry to .podium/sync.yaml")
 	}
 	if c.cacheDir == "" {
 		home, err := os.UserHomeDir()
 		if err == nil {
 			c.cacheDir = filepath.Join(home, ".podium", "cache")
+		} else {
+			// §6.2 default is ~/.podium/cache/. When the home directory
+			// cannot be resolved the cache stays disabled; say so loudly
+			// instead of degrading silently (§6.5 notes ephemeral-home
+			// hosts should point PODIUM_CACHE_DIR at a volume).
+			fmt.Fprintf(os.Stderr, "WARN: PODIUM_CACHE_DIR unset and home directory unresolved (%v); content cache disabled — set PODIUM_CACHE_DIR to enable it\n", err)
 		}
 	}
 	switch c.cacheMode {
@@ -177,6 +207,21 @@ func loadConfig() (*config, error) {
 		// known modes
 	default:
 		return nil, fmt.Errorf("PODIUM_CACHE_MODE must be always-revalidate | offline-first | offline-only, got %q", c.cacheMode)
+	}
+	// §6.2 / §4.7.9: PODIUM_VERIFY_SIGNATURES must be one of the recognized
+	// policies. Reject an unknown value at startup so a typo cannot silently
+	// disable signature enforcement on a security control.
+	if !sign.ValidPolicy(c.verifyPolicy) {
+		return nil, fmt.Errorf("PODIUM_VERIFY_SIGNATURES must be never | medium-and-above | always, got %q", c.verifyPolicy)
+	}
+	// §6.2: PODIUM_IDENTITY_PROVIDER selects a built-in provider. Reject an
+	// unrecognized value at startup rather than silently treating it as the
+	// injected-session-token path.
+	switch c.identityProvider {
+	case "oauth-device-code", "injected-session-token":
+		// known providers
+	default:
+		return nil, fmt.Errorf("PODIUM_IDENTITY_PROVIDER must be oauth-device-code | injected-session-token, got %q", c.identityProvider)
 	}
 	return c, nil
 }
@@ -227,6 +272,10 @@ type mcpServer struct {
 	// loop is single-threaded, so these need no extra synchronization.
 	hostSupportsRoots bool
 	rootsRequested    bool
+	// audit is the optional §6.2 local audit sink (PODIUM_AUDIT_SINK).
+	// Nil when the var is unset, in which case auditing is left to the
+	// registry. When set, meta-tool calls append a local audit event.
+	audit audit.Sink
 }
 
 // recordSuccess stamps the time of a successful registry call for the
@@ -272,7 +321,48 @@ func newServer(cfg *config) (*mcpServer, error) {
 		// bridge runs without an overlay rather than refusing to
 		// start.
 	}
+	// §6.2 PODIUM_AUDIT_SINK: when configured, append meta-tool calls to a
+	// local audit log in addition to the registry's audit stream.
+	sink, err := newAuditSink(cfg)
+	if err != nil {
+		return nil, err
+	}
+	srv.audit = sink
 	return srv, nil
+}
+
+// newAuditSink builds the §6.2 local audit sink from PODIUM_AUDIT_SINK.
+// An unset var leaves auditing to the registry (nil sink). A value of
+// "default" (or an explicit empty value) writes to ~/.podium/audit.log;
+// any other value is treated as a destination file path.
+//
+// spec: §6.2 — "When set without a value (or set to `default`), uses
+// ~/.podium/audit.log".
+func newAuditSink(cfg *config) (audit.Sink, error) {
+	if !cfg.auditSinkSet {
+		return nil, nil
+	}
+	path := cfg.auditSink
+	if path == "default" {
+		path = ""
+	}
+	return audit.NewFileSink(path)
+}
+
+// auditMeta appends a local audit event for a meta-tool call when a sink
+// is configured (§6.2). It is a no-op when auditing is registry-only.
+// Failures are swallowed: a local-audit write must not break a tool call,
+// and the registry audit stream remains the authoritative record.
+func (s *mcpServer) auditMeta(t audit.EventType, target string) {
+	if s.audit == nil {
+		return
+	}
+	_ = s.audit.Append(context.Background(), audit.Event{
+		Type:    t,
+		Caller:  s.sessionID,
+		Target:  target,
+		Context: map[string]string{"source": "mcp"},
+	})
 }
 
 // newSessionID returns a random RFC 4122 v4 UUID string. The bridge
@@ -512,7 +602,23 @@ func (s *mcpServer) handle(req rpcRequest) rpcResponse {
 				{"name": "load_domain", "description": "Browse the artifact catalog hierarchically."},
 				{"name": "search_domains", "description": "Search the catalog for relevant domains."},
 				{"name": "search_artifacts", "description": "Search or browse the artifact catalog."},
-				{"name": "load_artifact", "description": "Load a specific artifact by ID."},
+				{
+					"name":        "load_artifact",
+					"description": "Load a specific artifact by ID.",
+					// §6.2 / §6.6: the host may supply the materialization
+					// destination per call via `destination`, overriding
+					// PODIUM_MATERIALIZE_ROOT for that call.
+					"inputSchema": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"id":          map[string]any{"type": "string", "description": "Artifact ID to load."},
+							"version":     map[string]any{"type": "string", "description": "Semver or \"latest\" (default)."},
+							"harness":     map[string]any{"type": "string", "description": "Harness adapter override for this call."},
+							"destination": map[string]any{"type": "string", "description": "Materialization root for this call (overrides PODIUM_MATERIALIZE_ROOT)."},
+						},
+						"required": []string{"id"},
+					},
+				},
 				{"name": "health", "description": "Report registry connectivity, observed mode, cache size, and last successful call."},
 			},
 		}
@@ -541,12 +647,16 @@ func (s *mcpServer) callTool(raw json.RawMessage) any {
 	}
 	switch p.Name {
 	case "load_domain":
+		s.auditMeta(audit.EventDomainLoaded, argString(p.Arguments, "path"))
 		return s.proxyGet("/v1/load_domain", p.Arguments)
 	case "search_domains":
+		s.auditMeta(audit.EventDomainsSearched, argString(p.Arguments, "query"))
 		return s.proxyGet("/v1/search_domains", p.Arguments)
 	case "search_artifacts":
+		s.auditMeta(audit.EventArtifactsSearched, argString(p.Arguments, "query"))
 		return s.searchArtifacts(p.Arguments)
 	case "load_artifact":
+		s.auditMeta(audit.EventArtifactLoaded, argString(p.Arguments, "id"))
 		return s.loadArtifact(p.Arguments)
 	case "health":
 		// §13.9 health tool: registry connectivity + observed mode +
@@ -577,7 +687,7 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 	if (s.cfg.cacheMode == "offline-first" || s.cfg.cacheMode == "offline-only") && id != "" {
 		if hash, ok := s.resolutions.Get(id, version); ok {
 			if cached, cerr := s.loadArtifactFromCache(hash, id); cerr == nil {
-				return s.deliverLoadArtifact(*cached)
+				return s.deliverLoadArtifact(*cached, deliverOpts{harness: harnessFromArgs(s.cfg.harness, args), destination: destFromArgs(args)})
 			}
 		}
 		if s.cfg.cacheMode == "offline-only" {
@@ -594,7 +704,7 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 		if s.cfg.cacheMode == "always-revalidate" && id != "" {
 			if hash, ok := s.resolutions.Get(id, version); ok {
 				if cached, cerr := s.loadArtifactFromCache(hash, id); cerr == nil {
-					out := s.deliverLoadArtifact(*cached, deliverOpts{harness: harnessFromArgs(s.cfg.harness, args)})
+					out := s.deliverLoadArtifact(*cached, deliverOpts{harness: harnessFromArgs(s.cfg.harness, args), destination: destFromArgs(args)})
 					if m, ok := out.(map[string]any); ok {
 						m["status"] = "offline"
 						m["served_from_cache"] = true
@@ -623,13 +733,30 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 		s.resolutions.Put(id, resp.Version, resp.ContentHash)
 	}
 
-	return s.deliverLoadArtifact(resp, deliverOpts{harness: harnessFromArgs(s.cfg.harness, args)})
+	return s.deliverLoadArtifact(resp, deliverOpts{harness: harnessFromArgs(s.cfg.harness, args), destination: destFromArgs(args)})
 }
 
 // deliverOpts threads the per-call adjustments deliverLoadArtifact
-// needs (currently only the harness override).
+// needs: the harness override and the per-call destination root.
 type deliverOpts struct {
 	harness string
+	// destination is the §6.2 / §6.6 per-call materialization root. When
+	// set it takes precedence over PODIUM_MATERIALIZE_ROOT, so a host can
+	// supply the destination per load_artifact call instead of (or in
+	// addition to) the process-wide env var.
+	destination string
+}
+
+// destFromArgs returns the per-call materialization destination from a
+// load_artifact call's arguments (§6.2 / §6.6). The host may name it
+// `destination`, `materialize_root`, or `path`; the first set wins.
+func destFromArgs(args map[string]any) string {
+	for _, key := range []string{"destination", "materialize_root", "path"} {
+		if v, ok := args[key].(string); ok && v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // deliverLoadArtifact runs §6.6 verification + materialization
@@ -672,9 +799,15 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 		return errorResult("cache: " + err.Error())
 	}
 
-	// Materialize to host filesystem if a destination is configured.
+	// Materialize to host filesystem when a destination is configured,
+	// either per call (§6.2 / §6.6) or via PODIUM_MATERIALIZE_ROOT. The
+	// per-call destination wins when both are present.
 	materialized := []string{}
-	if s.cfg.materializeRoot != "" {
+	root := o.destination
+	if root == "" {
+		root = s.cfg.materializeRoot
+	}
+	if root != "" {
 		harnessID := o.harness
 		if harnessID == "" {
 			harnessID = s.cfg.harness
@@ -709,11 +842,11 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 			if err != nil {
 				return errorResult("adapter: " + err.Error())
 			}
-			if err := materialize.Write(s.cfg.materializeRoot, out); err != nil {
+			if err := materialize.Write(root, out); err != nil {
 				return errorResult("materialize: " + err.Error())
 			}
 			for _, f := range out {
-				materialized = append(materialized, filepath.Join(s.cfg.materializeRoot, filepath.FromSlash(f.Path)))
+				materialized = append(materialized, filepath.Join(root, filepath.FromSlash(f.Path)))
 			}
 		}
 		// §4.4.1 — when the artifact requests a sandbox_profile whose
@@ -721,7 +854,7 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 		// alongside the materialized files so a host with sandbox
 		// capability can honor it. The sandbox gate above has already
 		// confirmed the host honors (or was told to ignore) the profile.
-		if p, ok, err := materialize.WriteSandboxProfile(s.cfg.materializeRoot, sandboxProfileOf(resp.Frontmatter)); err != nil {
+		if p, ok, err := materialize.WriteSandboxProfile(root, sandboxProfileOf(resp.Frontmatter)); err != nil {
 			return errorResult("materialize: " + err.Error())
 		} else if ok {
 			materialized = append(materialized, p)
@@ -760,6 +893,15 @@ func harnessFromArgs(defaultID string, args map[string]any) string {
 	return defaultID
 }
 
+// argString returns args[key] as a string, or "" when absent or not a
+// string. Used to record a meta-tool's target in the local audit event.
+func argString(args map[string]any, key string) string {
+	if v, ok := args[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
 // loadArtifactFromOverlay produces a load_artifact response from a
 // workspace overlay record, bypassing the registry per §6.4. The
 // content hash is computed from the artifact bytes so the response
@@ -784,7 +926,11 @@ func (s *mcpServer) loadArtifactFromOverlay(rec *filesystem.ArtifactRecord, args
 		return errorResult("cache: " + err.Error())
 	}
 	materialized := []string{}
-	if s.cfg.materializeRoot != "" {
+	root := destFromArgs(args)
+	if root == "" {
+		root = s.cfg.materializeRoot
+	}
+	if root != "" {
 		harnessID := s.cfg.harness
 		if h, ok := args["harness"].(string); ok && h != "" {
 			harnessID = h
@@ -815,11 +961,11 @@ func (s *mcpServer) loadArtifactFromOverlay(rec *filesystem.ArtifactRecord, args
 			if err != nil {
 				return errorResult("adapter: " + err.Error())
 			}
-			if err := materialize.Write(s.cfg.materializeRoot, out); err != nil {
+			if err := materialize.Write(root, out); err != nil {
 				return errorResult("materialize: " + err.Error())
 			}
 			for _, f := range out {
-				materialized = append(materialized, filepath.Join(s.cfg.materializeRoot, filepath.FromSlash(f.Path)))
+				materialized = append(materialized, filepath.Join(root, filepath.FromSlash(f.Path)))
 			}
 		}
 	}

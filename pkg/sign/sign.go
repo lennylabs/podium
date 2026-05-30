@@ -38,6 +38,21 @@ const (
 	PolicyAlways VerificationPolicy = "always"
 )
 
+// ValidPolicy reports whether p is one of the three recognized
+// PODIUM_VERIFY_SIGNATURES values (spec §6.2 / §4.7.9). Callers that
+// read the policy from configuration use this to refuse an unknown
+// value at startup rather than silently falling through to a skip.
+//
+// spec: §6.2 — PODIUM_VERIFY_SIGNATURES is never | medium-and-above | always.
+func ValidPolicy(p VerificationPolicy) bool {
+	switch p {
+	case PolicyNever, PolicyMediumAndAbove, PolicyAlways:
+		return true
+	default:
+		return false
+	}
+}
+
 // Provider is the SPI implementations satisfy.
 type Provider interface {
 	// ID returns the provider identifier (e.g., "sigstore-keyless").
@@ -93,6 +108,10 @@ func needsVerification(policy VerificationPolicy, s manifest.Sensitivity) bool {
 	case PolicyNever:
 		return false
 	default:
-		return false
+		// Fail closed: an unrecognized policy enforces verification
+		// rather than silently skipping it. loadConfig refuses such a
+		// value at startup (§6.2), so this is defense in depth for any
+		// other caller that constructs a policy directly.
+		return true
 	}
 }
