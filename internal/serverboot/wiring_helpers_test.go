@@ -84,6 +84,58 @@ func TestOpenNotifier_MultiWithoutURL(t *testing.T) {
 	}
 }
 
+// Spec: §9.1 — the email provider is selected by PODIUM_NOTIFICATION_PROVIDER=email
+// and requires the SMTP host and sender; absent either, the selector warns and
+// disables the notifier rather than dispatching to a misconfigured relay.
+func TestOpenNotifier_EmailRequiresHostAndFrom(t *testing.T) {
+	t.Setenv("PODIUM_NOTIFICATION_PROVIDER", "email")
+	t.Setenv("PODIUM_NOTIFICATION_SMTP_HOST", "")
+	t.Setenv("PODIUM_NOTIFICATION_SMTP_FROM", "")
+	if p := openNotifier(); p != nil {
+		t.Errorf("email without host/from → %v, want nil", p)
+	}
+	t.Setenv("PODIUM_NOTIFICATION_SMTP_HOST", "smtp.acme.com")
+	t.Setenv("PODIUM_NOTIFICATION_SMTP_FROM", "podium@acme.com")
+	t.Setenv("PODIUM_NOTIFICATION_SMTP_TO", "ops@acme.com, alerts@acme.com")
+	p := openNotifier()
+	if p == nil || p.ID() != "email" {
+		t.Fatalf("email selection → %v, want email provider", p)
+	}
+	smtp, ok := p.(notification.SMTP)
+	if !ok {
+		t.Fatalf("provider type = %T, want notification.SMTP", p)
+	}
+	if len(smtp.To) != 2 || smtp.To[0] != "ops@acme.com" || smtp.To[1] != "alerts@acme.com" {
+		t.Errorf("To = %v, want the parsed PODIUM_NOTIFICATION_SMTP_TO list", smtp.To)
+	}
+}
+
+// Spec: §9.1 — the "Email + webhook" default is realized via "multi", which
+// includes the email provider when SMTP is configured alongside the webhook.
+func TestOpenNotifier_MultiIncludesEmail(t *testing.T) {
+	t.Setenv("PODIUM_NOTIFICATION_PROVIDER", "multi")
+	t.Setenv("PODIUM_NOTIFICATION_WEBHOOK_URL", "http://example/")
+	t.Setenv("PODIUM_NOTIFICATION_SMTP_HOST", "smtp.acme.com")
+	t.Setenv("PODIUM_NOTIFICATION_SMTP_FROM", "podium@acme.com")
+	p := openNotifier()
+	multi, ok := p.(notification.MultiProvider)
+	if !ok {
+		t.Fatalf("provider type = %T, want notification.MultiProvider", p)
+	}
+	var hasEmail, hasWebhook bool
+	for _, sub := range multi.Providers {
+		switch sub.ID() {
+		case "email":
+			hasEmail = true
+		case "webhook":
+			hasWebhook = true
+		}
+	}
+	if !hasEmail || !hasWebhook {
+		t.Errorf("multi providers = %+v, want both email and webhook", multi.Providers)
+	}
+}
+
 func TestOpenNotifier_UnknownProvider(t *testing.T) {
 	t.Setenv("PODIUM_NOTIFICATION_PROVIDER", "bogus")
 	if p := openNotifier(); p != nil {

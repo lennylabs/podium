@@ -91,9 +91,18 @@ func openNotifier() notification.Provider {
 			URL:    url,
 			Secret: os.Getenv("PODIUM_NOTIFICATION_WEBHOOK_SECRET"),
 		}
+	case "email", "smtp":
+		// §9.1 NotificationProvider email delivery over SMTP.
+		smtp, ok := smtpNotifierFromEnv()
+		if !ok {
+			log.Printf("warning: PODIUM_NOTIFICATION_SMTP_HOST and PODIUM_NOTIFICATION_SMTP_FROM are required for the email notifier")
+			return nil
+		}
+		return smtp
 	case "multi":
-		// "multi" combines the log provider with the webhook provider
-		// when the URL is set; useful for "alert + record" deployments.
+		// §9.1 default "Email + webhook": "multi" combines the log
+		// provider with the webhook and email providers when each is
+		// configured. Useful for "alert + record" deployments.
 		out := []notification.Provider{notification.LogProvider{}}
 		if url := os.Getenv("PODIUM_NOTIFICATION_WEBHOOK_URL"); url != "" {
 			out = append(out, notification.Webhook{
@@ -101,11 +110,53 @@ func openNotifier() notification.Provider {
 				Secret: os.Getenv("PODIUM_NOTIFICATION_WEBHOOK_SECRET"),
 			})
 		}
+		if smtp, ok := smtpNotifierFromEnv(); ok {
+			out = append(out, smtp)
+		}
 		return notification.MultiProvider{Providers: out}
 	}
 	log.Printf("warning: unknown PODIUM_NOTIFICATION_PROVIDER=%q",
 		os.Getenv("PODIUM_NOTIFICATION_PROVIDER"))
 	return nil
+}
+
+// smtpNotifierFromEnv builds the §9.1 email NotificationProvider from
+// the PODIUM_NOTIFICATION_SMTP_* environment. Reports false when the
+// required host or sender address is absent so the caller can warn and
+// fall back. Per-notification Recipients override the configured
+// PODIUM_NOTIFICATION_SMTP_TO list.
+func smtpNotifierFromEnv() (notification.SMTP, bool) {
+	host := os.Getenv("PODIUM_NOTIFICATION_SMTP_HOST")
+	from := os.Getenv("PODIUM_NOTIFICATION_SMTP_FROM")
+	if host == "" || from == "" {
+		return notification.SMTP{}, false
+	}
+	return notification.SMTP{
+		Host:     host,
+		Port:     envInt("PODIUM_NOTIFICATION_SMTP_PORT", 0),
+		From:     from,
+		To:       splitCSVTrim(os.Getenv("PODIUM_NOTIFICATION_SMTP_TO")),
+		Username: os.Getenv("PODIUM_NOTIFICATION_SMTP_USERNAME"),
+		Password: os.Getenv("PODIUM_NOTIFICATION_SMTP_PASSWORD"),
+	}, true
+}
+
+// splitCSVTrim splits a comma-separated list, trimming whitespace and
+// dropping empty entries. Returns nil for an empty input.
+func splitCSVTrim(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	out := []string{}
+	for _, t := range strings.Split(raw, ",") {
+		if t = strings.TrimSpace(t); t != "" {
+			out = append(out, t)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // adaptNotifier turns a notification.Provider into the
@@ -1003,6 +1054,37 @@ func LoadConfig() *Config {
 	// when neither the env var nor registry.yaml set it.
 	if c.pineconeNS == "" {
 		c.pineconeNS = "default"
+	}
+	// §9.1 / §13.10 (F-9.1.5): realize the per-deployment-mode defaults for the
+	// RegistrySearchProvider and EmbeddingProvider rows. A zero-config standard
+	// deployment defaults to pgvector + openai; a standalone deployment defaults
+	// to sqlite-vec + ollama, the same SQLite file holding manifests and
+	// vectors. Explicit env / registry.yaml values keep precedence. The operator
+	// opts out to BM25-only with PODIUM_NO_EMBEDDINGS=true (the spec's
+	// --no-embeddings fallback) or by setting either variable to "none".
+	if isTrue(os.Getenv("PODIUM_NO_EMBEDDINGS")) {
+		c.vectorBackend, c.embeddingProvider = "none", "none"
+	} else {
+		standard := c.storeType == "postgres"
+		// Apply the per-mode default only when the operator made no explicit
+		// choice. An explicitly empty env var (§13.12: "Setting it to the
+		// empty string disables embedding generation; search degrades to
+		// BM25-only") and a registry.yaml value both count as explicit and
+		// keep precedence over the default.
+		if _, set := os.LookupEnv("PODIUM_VECTOR_BACKEND"); !set && c.vectorBackend == "" {
+			if standard {
+				c.vectorBackend = "pgvector"
+			} else {
+				c.vectorBackend = "sqlite-vec"
+			}
+		}
+		if _, set := os.LookupEnv("PODIUM_EMBEDDING_PROVIDER"); !set && c.embeddingProvider == "" {
+			if standard {
+				c.embeddingProvider = "openai"
+			} else {
+				c.embeddingProvider = "ollama"
+			}
+		}
 	}
 	// §13.10 / §13.12 (F-13.12.15): when no explicit default visibility was
 	// supplied (env or registry.yaml), a standalone deployment (no identity

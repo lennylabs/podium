@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"sort"
 )
@@ -35,7 +36,18 @@ func (s *mcpServer) searchArtifacts(args map[string]any) any {
 	topK := topKArg(args)
 	local := localSearch(s.overlay, query, typeFilter, scope, tags, topK)
 
-	fused := rrfFuse(registry.Results, local, topK)
+	// §9.1 LocalSearchProvider: when an overlay semantic backend is
+	// configured, contribute a vector-ranked stream fused alongside the
+	// BM25 local stream and the registry stream. Disabled by default;
+	// nil index and any backend error degrade to BM25-only.
+	var semantic []localSearchResult
+	if s.localSem != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), localSemanticTimeout)
+		semantic = s.localSem.search(ctx, s.overlay, query, typeFilter, scope, tags, topK)
+		cancel()
+	}
+
+	fused := rrfFuse(registry.Results, topK, local, semantic)
 	return map[string]any{
 		"query":         registry.Query,
 		"total_matched": registry.TotalMatched + len(local),
@@ -71,12 +83,13 @@ func topKArg(args map[string]any) int {
 	return 10
 }
 
-// rrfFuse blends the registry's ordered results with the local
-// search hits via reciprocal rank fusion (k=60, the
-// Cormack/Clarke default mirrored from the registry's vector
-// path). Items appearing in both streams sum their reciprocal
-// ranks so a hit ranked highly by either backend rises.
-func rrfFuse(registry []map[string]any, local []localSearchResult, topK int) []map[string]any {
+// rrfFuse blends the registry's ordered results with one or more local
+// search streams (BM25 over the overlay, and the §9.1 LocalSearchProvider
+// semantic stream when configured) via reciprocal rank fusion (k=60, the
+// Cormack/Clarke default mirrored from the registry's vector path). Items
+// appearing in more than one stream sum their reciprocal ranks so a hit
+// ranked highly by any backend rises. Empty local streams are ignored.
+func rrfFuse(registry []map[string]any, topK int, locals ...[]localSearchResult) []map[string]any {
 	if topK <= 0 {
 		topK = 10
 	}
@@ -109,19 +122,21 @@ func rrfFuse(registry []map[string]any, local []localSearchResult, topK int) []m
 		}
 		add(id, r, i, false)
 	}
-	for i, r := range local {
-		desc := map[string]any{
-			"id":          r.ID,
-			"type":        r.Type,
-			"version":     r.Version,
-			"description": r.Description,
-			"score":       r.Score,
-			"overlay":     true,
+	for _, local := range locals {
+		for i, r := range local {
+			desc := map[string]any{
+				"id":          r.ID,
+				"type":        r.Type,
+				"version":     r.Version,
+				"description": r.Description,
+				"score":       r.Score,
+				"overlay":     true,
+			}
+			if len(r.Tags) > 0 {
+				desc["tags"] = r.Tags
+			}
+			add(r.ID, desc, i, true)
 		}
-		if len(r.Tags) > 0 {
-			desc["tags"] = r.Tags
-		}
-		add(r.ID, desc, i, true)
 	}
 	out := make([]*entry, 0, len(order))
 	for _, id := range order {

@@ -91,7 +91,13 @@ type config struct {
 	sessionToken     string
 	sessionTokenFile string
 	overlayPath      string
-	auditSink        string
+	// §9.1 LocalSearchProvider: optional semantic backing for the
+	// workspace-overlay index. Both must name a backend (not "" / "none")
+	// to activate; otherwise the overlay stays BM25-only. Selected by the
+	// same env vars as the registry-side path.
+	localVectorBackend     string
+	localEmbeddingProvider string
+	auditSink              string
 	// auditSinkSet records whether PODIUM_AUDIT_SINK (or its flag /
 	// config-file equivalent) was provided at all, so an explicit empty
 	// value selects the §6.2 default (~/.podium/audit.log) while an
@@ -147,13 +153,15 @@ func loadConfig() (*config, error) {
 		harness:  envDefault("PODIUM_HARNESS", "none"),
 		cacheDir: os.Getenv("PODIUM_CACHE_DIR"),
 		// §6.5: always-revalidate (default) | offline-first | offline-only.
-		cacheMode:        envDefault("PODIUM_CACHE_MODE", "always-revalidate"),
-		materializeRoot:  os.Getenv("PODIUM_MATERIALIZE_ROOT"),
-		sessionToken:     os.Getenv(tokenSource),
-		sessionTokenFile: os.Getenv("PODIUM_SESSION_TOKEN_FILE"),
-		overlayPath:      os.Getenv("PODIUM_OVERLAY_PATH"),
-		tenantID:         os.Getenv("PODIUM_TENANT_ID"),
-		oauthAudience:    os.Getenv("PODIUM_OAUTH_AUDIENCE"),
+		cacheMode:              envDefault("PODIUM_CACHE_MODE", "always-revalidate"),
+		materializeRoot:        os.Getenv("PODIUM_MATERIALIZE_ROOT"),
+		sessionToken:           os.Getenv(tokenSource),
+		sessionTokenFile:       os.Getenv("PODIUM_SESSION_TOKEN_FILE"),
+		overlayPath:            os.Getenv("PODIUM_OVERLAY_PATH"),
+		localVectorBackend:     os.Getenv("PODIUM_VECTOR_BACKEND"),
+		localEmbeddingProvider: os.Getenv("PODIUM_EMBEDDING_PROVIDER"),
+		tenantID:               os.Getenv("PODIUM_TENANT_ID"),
+		oauthAudience:          os.Getenv("PODIUM_OAUTH_AUDIENCE"),
 		// §6.2: PODIUM_IDENTITY_PROVIDER defaults to oauth-device-code.
 		identityProvider:  envDefault("PODIUM_IDENTITY_PROVIDER", "oauth-device-code"),
 		oauthAuthEndpoint: os.Getenv("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT"),
@@ -247,6 +255,10 @@ type mcpServer struct {
 	resolutions *resolutionCache
 	adapters    *adapter.Registry
 	overlay     []filesystem.ArtifactRecord
+	// localSem is the §9.1 LocalSearchProvider semantic index over the
+	// overlay. Nil when no overlay vector backend is configured, in which
+	// case the overlay search stays BM25-only.
+	localSem *localSemanticIndex
 	// sessionID is generated once per bridge process (one agent session)
 	// and threaded through every meta-tool call to the registry so the
 	// session correlates across calls. It backs the sessionCorrelation
@@ -332,6 +344,14 @@ func newServer(cfg *config) (*mcpServer, error) {
 		// Errors other than ErrNoOverlay are silently ignored: the
 		// bridge runs without an overlay rather than refusing to
 		// start.
+	}
+	// §9.1 LocalSearchProvider: wire the optional overlay semantic index.
+	// A construction error (missing API key, unknown backend) disables the
+	// semantic stream with a warning; the overlay stays BM25-searchable.
+	if sem, err := buildLocalSemantic(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "WARN: overlay semantic search disabled: %v\n", err)
+	} else {
+		srv.localSem = sem
 	}
 	// §6.2 PODIUM_AUDIT_SINK: when configured, append meta-tool calls to a
 	// local audit log in addition to the registry's audit stream.

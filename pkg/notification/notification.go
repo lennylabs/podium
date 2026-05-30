@@ -22,7 +22,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/smtp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -134,6 +136,103 @@ func (w Webhook) Notify(ctx context.Context, n Notification) error {
 		return fmt.Errorf("notification: webhook returned %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// SMTP delivers notifications as email over SMTP, the email half of
+// the §9.1 NotificationProvider "Email + webhook" default. Each
+// Notification is sent to its own Recipients list when present,
+// falling back to the provider's configured To addresses. The
+// message body carries the severity, title, and body as an RFC 5322
+// text/plain mail.
+type SMTP struct {
+	// Host and Port name the SMTP relay (for example "smtp.acme.com",
+	// 587). Port 0 defaults to 587 (submission).
+	Host string
+	Port int
+	// From is the envelope and header sender address.
+	From string
+	// To is the default recipient list used when a Notification
+	// carries no Recipients of its own.
+	To []string
+	// Username and Password authenticate via PLAIN auth when both are
+	// set. Left empty for relays that accept unauthenticated
+	// submission from the registry host.
+	Username string
+	Password string
+
+	// send is the injection seam for tests; nil uses smtp.SendMail.
+	send func(addr string, a smtp.Auth, from string, to []string, msg []byte) error
+}
+
+// ID returns "email".
+func (SMTP) ID() string { return "email" }
+
+// Notify renders n as an email and sends it to the resolved
+// recipient list. Returns an error when no recipient can be
+// determined or when the relay rejects the message.
+func (s SMTP) Notify(_ context.Context, n Notification) error {
+	if s.Host == "" {
+		return errors.New("notification: smtp host required")
+	}
+	if s.From == "" {
+		return errors.New("notification: smtp from address required")
+	}
+	to := n.Recipients
+	if len(to) == 0 {
+		to = s.To
+	}
+	if len(to) == 0 {
+		return errors.New("notification: smtp has no recipients (set To or Notification.Recipients)")
+	}
+	port := s.Port
+	if port == 0 {
+		port = 587
+	}
+	addr := fmt.Sprintf("%s:%d", s.Host, port)
+	var auth smtp.Auth
+	if s.Username != "" && s.Password != "" {
+		auth = smtp.PlainAuth("", s.Username, s.Password, s.Host)
+	}
+	send := s.send
+	if send == nil {
+		send = smtp.SendMail
+	}
+	return send(addr, auth, s.From, to, s.message(to, n))
+}
+
+// message builds the RFC 5322 representation of n addressed to the
+// resolved recipient list. The subject prefixes the severity so an
+// operator can filter on it; the body repeats the structured fields.
+func (s SMTP) message(to []string, n Notification) []byte {
+	subject := n.Title
+	if n.Severity != "" {
+		subject = fmt.Sprintf("[podium %s] %s", n.Severity, n.Title)
+	}
+	when := n.Time
+	if when.IsZero() {
+		when = time.Now()
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "From: %s\r\n", s.From)
+	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(to, ", "))
+	fmt.Fprintf(&b, "Subject: %s\r\n", subject)
+	fmt.Fprintf(&b, "Date: %s\r\n", when.UTC().Format(time.RFC1123Z))
+	b.WriteString("MIME-Version: 1.0\r\n")
+	b.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
+	b.WriteString("\r\n")
+	b.WriteString(n.Body)
+	if len(n.Tags) > 0 {
+		keys := make([]string, 0, len(n.Tags))
+		for k := range n.Tags {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		b.WriteString("\r\n\r\n")
+		for _, k := range keys {
+			fmt.Fprintf(&b, "%s: %s\r\n", k, n.Tags[k])
+		}
+	}
+	return []byte(b.String())
 }
 
 // MultiProvider fans a Notify out to every wrapped provider. A

@@ -45,9 +45,9 @@ func TestOpenEmbedder_DispatchesByProvider(t *testing.T) {
 func TestOpenEmbedder_HappyPaths(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name    string
-		cfg     *Config
-		wantID  string
+		name   string
+		cfg    *Config
+		wantID string
 	}{
 		{"openai", &Config{embeddingProvider: "openai", openaiAPIKey: "k"}, "openai"},
 		{"voyage", &Config{embeddingProvider: "voyage", voyageAPIKey: "k"}, "voyage"},
