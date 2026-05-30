@@ -471,18 +471,40 @@ func TestVectorBackends_21_AdminReembedAllFlagUnknown(t *testing.T) {
 	}
 }
 
-// T-D-vector-backends-22: admin reembed --since flag is not recognized (exits 2).
-func TestVectorBackends_22_AdminReembedSinceFlagUnknown(t *testing.T) {
+// T-D-vector-backends-22: admin reembed --since <timestamp> is a
+// recognized flag (spec §4.7 "podium admin reembed --since"; F-4.7.8).
+// A valid RFC3339 timestamp reaches the endpoint (no flag-parse error);
+// a malformed one is rejected with a usage error before any request.
+func TestVectorBackends_22_AdminReembedSinceFlag(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
 	srv := startServer(t, reg)
-	res := runPodium(t, "", nil,
+
+	// Valid RFC3339: flag is parsed, request is sent. vbReg has no
+	// embedder so the endpoint returns the structured "vector search not
+	// configured" error (exit 1) or, when a backend is wired, exits 0.
+	// Either way the exit is not 2 (which would mean an unknown flag).
+	ok := runPodium(t, "", nil,
+		"admin", "reembed",
+		"--registry", srv.BaseURL,
+		"--since", "2026-01-01T00:00:00Z",
+	)
+	if ok.Exit == 2 {
+		t.Errorf("valid --since exit=2 (flag unrecognized), want 0 or 1; stderr=%s", ok.Stderr)
+	}
+
+	// Malformed timestamp: rejected locally with a usage error (exit 2)
+	// and never sent to the registry.
+	bad := runPodium(t, "", nil,
 		"admin", "reembed",
 		"--registry", srv.BaseURL,
 		"--since", "2026-01-01",
 	)
-	if res.Exit != 2 {
-		t.Errorf("exit=%d, want 2 (--since should be unknown); stderr=%s", res.Exit, res.Stderr)
+	if bad.Exit != 2 {
+		t.Errorf("malformed --since exit=%d, want 2; stderr=%s", bad.Exit, bad.Stderr)
+	}
+	if !strings.Contains(bad.Stderr, "RFC3339") {
+		t.Errorf("malformed --since stderr should mention RFC3339: %s", bad.Stderr)
 	}
 }
 

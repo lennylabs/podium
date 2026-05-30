@@ -13,10 +13,12 @@ import (
 func auditEmitterFor(sink *audit.FileSink) core.AuditEmitter {
 	return func(ctx context.Context, e core.AuditEvent) {
 		_ = sink.Append(ctx, audit.Event{
-			Type:    audit.EventType(e.Type),
-			Caller:  e.Caller,
-			Target:  e.Target,
-			Context: e.Context,
+			Type:           audit.EventType(e.Type),
+			Caller:         e.Caller,
+			Target:         e.Target,
+			Context:        e.Context,
+			ResolvedLayers: e.ResolvedLayers,
+			ResultSize:     e.ResultSize,
 		})
 	}
 }

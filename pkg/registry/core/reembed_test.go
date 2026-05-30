@@ -3,7 +3,9 @@ package core_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
@@ -36,9 +38,9 @@ type fakeEmbedderRE struct {
 	hits int
 }
 
-func (*fakeEmbedderRE) ID() string                 { return "fake" }
-func (*fakeEmbedderRE) Model() string              { return "fake-model" }
-func (e *fakeEmbedderRE) Dimensions() int          { return e.dim }
+func (*fakeEmbedderRE) ID() string        { return "fake" }
+func (*fakeEmbedderRE) Model() string     { return "fake-model" }
+func (e *fakeEmbedderRE) Dimensions() int { return e.dim }
 func (e *fakeEmbedderRE) Embed(_ context.Context, texts []string) ([][]float32, error) {
 	e.hits++
 	if e.err != nil {
@@ -55,7 +57,7 @@ func (e *fakeEmbedderRE) Embed(_ context.Context, texts []string) ([][]float32, 
 func TestReembed_TwoManifestsAllSucceed(t *testing.T) {
 	t.Parallel()
 	reg, e, _ := newReembedHarness(t)
-	res, err := reg.Reembed(context.Background(), false)
+	res, err := reg.Reembed(context.Background(), core.ReembedOptions{})
 	if err != nil {
 		t.Fatalf("Reembed: %v", err)
 	}
@@ -72,7 +74,7 @@ func TestReembed_OnlyMissingSkipsExisting(t *testing.T) {
 	reg, _, v := newReembedHarness(t)
 	// Pre-seed a vector for artifact "a" so the missing check skips it.
 	_ = v.Put(context.Background(), "t", "a", "1.0.0", make([]float32, 8))
-	res, err := reg.Reembed(context.Background(), true)
+	res, err := reg.Reembed(context.Background(), core.ReembedOptions{OnlyIfMissing: true})
 	if err != nil {
 		t.Fatalf("Reembed: %v", err)
 	}
@@ -85,11 +87,94 @@ func TestReembed_OnlyMissingSkipsExisting(t *testing.T) {
 	}
 }
 
+// spec: §4.7 — Reembed(OnlyIfMissing) must skip every artifact that
+// already has a vector, even when the tenant holds more than the old
+// fixed 100-item probe window. The prior probe queried topK=100 and
+// reported existing vectors as missing past that boundary (F-4.7.10).
+func TestReembed_OnlyMissingScalesPast100Artifacts(t *testing.T) {
+	t.Parallel()
+	const n = 150
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	for i := 0; i < n; i++ {
+		id := fmt.Sprintf("a%03d", i)
+		if err := st.PutManifest(context.Background(), store.ManifestRecord{
+			TenantID: "t", ArtifactID: id, Version: "1.0.0",
+			Description: id + " desc", Layer: "L",
+		}); err != nil {
+			t.Fatalf("PutManifest: %v", err)
+		}
+	}
+	e := &fakeEmbedderRE{dim: 8}
+	v := vector.NewMemory(8)
+	reg := core.New(st, "t", nil).WithVectorSearch(v, e)
+
+	// First pass populates a vector for every artifact.
+	if _, err := reg.Reembed(context.Background(), core.ReembedOptions{}); err != nil {
+		t.Fatalf("seed Reembed: %v", err)
+	}
+	// Second pass with OnlyIfMissing must re-embed nothing: all n vectors
+	// already exist. With the old topK=100 probe, the 50 artifacts past
+	// the window were falsely re-embedded.
+	res, err := reg.Reembed(context.Background(), core.ReembedOptions{OnlyIfMissing: true})
+	if err != nil {
+		t.Fatalf("Reembed: %v", err)
+	}
+	if res.Total != n {
+		t.Errorf("Total = %d, want %d", res.Total, n)
+	}
+	if res.Succeeded != 0 {
+		t.Errorf("Succeeded = %d, want 0 (all %d already embedded)", res.Succeeded, n)
+	}
+}
+
+// spec: §4.7 — Reembed(Since) covers only artifacts ingested at or after
+// the cutoff; the boundary is inclusive (F-4.7.8 `--since`).
+func TestReembed_SinceFiltersByIngestedAt(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	cutoff := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	for _, m := range []store.ManifestRecord{
+		{TenantID: "t", ArtifactID: "old", Version: "1.0.0", Description: "old", Layer: "L", IngestedAt: cutoff.Add(-time.Hour)},
+		{TenantID: "t", ArtifactID: "fresh", Version: "1.0.0", Description: "fresh", Layer: "L", IngestedAt: cutoff.Add(time.Hour)},
+		{TenantID: "t", ArtifactID: "edge", Version: "1.0.0", Description: "edge", Layer: "L", IngestedAt: cutoff},
+	} {
+		if err := st.PutManifest(context.Background(), m); err != nil {
+			t.Fatalf("PutManifest: %v", err)
+		}
+	}
+	e := &fakeEmbedderRE{dim: 8}
+	v := vector.NewMemory(8)
+	reg := core.New(st, "t", nil).WithVectorSearch(v, e)
+
+	res, err := reg.Reembed(context.Background(), core.ReembedOptions{Since: cutoff})
+	if err != nil {
+		t.Fatalf("Reembed: %v", err)
+	}
+	// "fresh" and "edge" (at the inclusive cutoff) re-embed; "old" does not.
+	if res.Total != 2 || res.Succeeded != 2 {
+		t.Errorf("got Total=%d Succeeded=%d, want 2/2 (fresh + at-cutoff; old excluded)", res.Total, res.Succeeded)
+	}
+	probe := make([]float32, 8)
+	probe[0] = 1
+	matches, _ := v.Query(context.Background(), "t", probe, 10)
+	for _, m := range matches {
+		if m.ArtifactID == "old" {
+			t.Errorf("artifact ingested before --since was re-embedded")
+		}
+	}
+}
+
 func TestReembed_EmbedFailureRecordedInFailed(t *testing.T) {
 	t.Parallel()
 	reg, e, _ := newReembedHarness(t)
 	e.err = errors.New("embedder unavailable")
-	res, err := reg.Reembed(context.Background(), false)
+	res, err := reg.Reembed(context.Background(), core.ReembedOptions{})
 	if err != nil {
 		t.Fatalf("Reembed: %v", err)
 	}
@@ -103,7 +188,7 @@ func TestReembed_NoVectorSearchConfiguredErrors(t *testing.T) {
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
 	reg := core.New(st, "t", nil)
-	if _, err := reg.Reembed(context.Background(), false); err == nil {
+	if _, err := reg.Reembed(context.Background(), core.ReembedOptions{}); err == nil {
 		t.Errorf("expected error when vector search not configured")
 	}
 }

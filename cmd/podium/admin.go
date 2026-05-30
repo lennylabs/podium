@@ -164,6 +164,7 @@ func adminReembedCmd(args []string) int {
 	artifact := fs.String("artifact", "", "specific artifact ID (optional)")
 	version := fs.String("version", "", "specific version (required with --artifact)")
 	onlyMissing := fs.Bool("only-missing", false, "skip artifacts that already have a vector")
+	since := fs.String("since", "", "re-embed only artifacts ingested at or after this RFC3339 timestamp")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
@@ -171,6 +172,12 @@ func adminReembedCmd(args []string) int {
 	if *registry == "" {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")
 		return 2
+	}
+	if *since != "" {
+		if _, err := time.Parse(time.RFC3339, *since); err != nil {
+			fmt.Fprintf(os.Stderr, "error: --since must be an RFC3339 timestamp: %v\n", err)
+			return 2
+		}
 	}
 	q := url.Values{}
 	if *artifact != "" {
@@ -180,8 +187,15 @@ func adminReembedCmd(args []string) int {
 		}
 		q.Set("artifact", *artifact)
 		q.Set("version", *version)
-	} else if *onlyMissing {
-		q.Set("only_missing", "true")
+	} else {
+		// spec: §4.7 — `--all` is the no-flag default; `--since` and
+		// `--only-missing` scope a tenant-wide pass and compose.
+		if *onlyMissing {
+			q.Set("only_missing", "true")
+		}
+		if *since != "" {
+			q.Set("since", *since)
+		}
 	}
 	endpoint := *registry + "/v1/admin/reembed"
 	if encoded := q.Encode(); encoded != "" {

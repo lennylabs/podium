@@ -57,8 +57,9 @@ func (g *Graph) DependentsOf(artifactID string) []Edge {
 }
 
 // ImpactSet computes the transitive set of artifact IDs that depend on
-// the seed, traversing in-edges. Used by `podium vuln explain` and the
-// admin impact-analysis CLI (§4.7.5).
+// the seed, traversing in-edges. Feeds the §4.7.3 impact-analysis
+// surface (`podium impact`). Vulnerability tracking is out of scope per
+// §4.7.7, so there is no vuln-scanning caller.
 func (g *Graph) ImpactSet(seed string) []string {
 	seen := map[string]bool{seed: true}
 	queue := []string{seed}

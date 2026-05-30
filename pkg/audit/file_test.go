@@ -44,6 +44,47 @@ func TestFileSink_AppendPersistsAsJSONLines(t *testing.T) {
 	}
 }
 
+// Spec: §4.7.5 — a read event's resolved layer composition and result
+// size persist to the JSON-Lines log and survive the hash-chain verify
+// (they participate in the tamper-evident chain) (F-4.7.11).
+func TestFileSink_ReadFieldsPersistAndVerify(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.log")
+
+	sink, err := audit.NewFileSink(path)
+	if err != nil {
+		t.Fatalf("NewFileSink: %v", err)
+	}
+	if err := sink.Append(context.Background(), audit.Event{
+		Type:           audit.EventArtifactsSearched,
+		Caller:         "alice@acme.com",
+		ResolvedLayers: []string{"acme-shared", "alice-personal"},
+		ResultSize:     7,
+	}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(data), `"resolved_layers":["acme-shared","alice-personal"]`) {
+		t.Errorf("resolved_layers not persisted in: %s", data)
+	}
+	if !strings.Contains(string(data), `"result_size":7`) {
+		t.Errorf("result_size not persisted in: %s", data)
+	}
+	// The fields are in the canonical body, so a fresh sink reading the
+	// same file verifies the chain (no hash mismatch).
+	reopened, err := audit.NewFileSink(path)
+	if err != nil {
+		t.Fatalf("reopen NewFileSink: %v", err)
+	}
+	if err := reopened.Verify(context.Background()); err != nil {
+		t.Errorf("Verify after reopen: %v", err)
+	}
+}
+
 // Spec: §8.6 — FileSink Verify walks the hash chain.
 func TestFileSink_VerifyDetectsTampering(t *testing.T) {
 	t.Parallel()

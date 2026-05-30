@@ -118,6 +118,18 @@ type AuditEvent struct {
 	Caller  string
 	Target  string
 	Context map[string]string
+	// ResolvedLayers is the ordered set of layer IDs composing the
+	// caller's effective view (§4.6 precedence order), recorded on every
+	// read call per §4.7.5 "resolved layer composition". Empty when no
+	// layer list is configured (filesystem source) or the call is not a
+	// read. spec: §4.7.5, §8.1.
+	ResolvedLayers []string
+	// ResultSize is the number of result items the read call returned to
+	// the caller per §4.7.5 "result size": matched artifacts/domains for
+	// a search, rendered subdomains plus notable entries for load_domain,
+	// and 1 for a resolved load_artifact. Zero on the error paths and for
+	// non-read events. spec: §4.7.5, §8.1.
+	ResultSize int
 }
 
 // New returns a Registry backed by the given store, tenant, and layer
@@ -200,6 +212,23 @@ func (r *Registry) emit(ctx context.Context, e AuditEvent) {
 		return
 	}
 	r.audit(ctx, e)
+}
+
+// effectiveLayerComposition returns the ordered layer IDs composing id's
+// effective view (§4.6 precedence order, lowest first), for the §4.7.5
+// audit "resolved layer composition" field. Returns nil when no layer
+// list is configured (filesystem source) so the audit field stays empty
+// rather than carrying a misleading value.
+func (r *Registry) effectiveLayerComposition(id layer.Identity) []string {
+	eff := layer.EffectiveLayersWith(r.layers, id, r.resolveGroup)
+	if len(eff) == 0 {
+		return nil
+	}
+	out := make([]string, len(eff))
+	for i, l := range eff {
+		out[i] = l.ID
+	}
+	return out
 }
 
 // ----- LoadDomain ----------------------------------------------------------
@@ -299,12 +328,22 @@ const (
 // In standalone mode (no identity provider), pass an empty Identity
 // with IsPublic=true to bypass visibility filtering, mirroring the
 // §13.10 / §13.11 behavior.
-func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path string, opts LoadDomainOptions) (*LoadDomainResult, error) {
-	r.emit(ctx, AuditEvent{
-		Type:   "domain.loaded",
-		Caller: callerOf(id),
-		Target: path,
-	})
+func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path string, opts LoadDomainOptions) (res *LoadDomainResult, err error) {
+	// spec: §4.7.5 — log the read with resolved layer composition and
+	// result size (rendered subdomains plus notable entries). Deferred
+	// over a named return so the size lands on the success path.
+	ev := AuditEvent{
+		Type:           "domain.loaded",
+		Caller:         callerOf(id),
+		Target:         path,
+		ResolvedLayers: r.effectiveLayerComposition(id),
+	}
+	defer func() {
+		if res != nil {
+			ev.ResultSize = len(res.Subdomains) + len(res.Notable)
+		}
+		r.emit(ctx, ev)
+	}()
 	visible, err := r.visibleManifests(ctx, id)
 	if err != nil {
 		return nil, err
@@ -341,7 +380,7 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 		}
 	}
 
-	res := &LoadDomainResult{Path: path}
+	res = &LoadDomainResult{Path: path}
 
 	// §4.5.5 description rendering and keywords. The root has no
 	// DOMAIN.md: description is omitted and keywords is the empty list.
@@ -768,11 +807,16 @@ type SearchResult struct {
 // fuses the rankings via RRF (§4.7). Otherwise it falls back to
 // BM25-only and sets SearchResult.Degraded=true.
 func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts SearchArtifactsOptions) (*SearchResult, error) {
-	r.emit(ctx, AuditEvent{
-		Type:    "artifacts.searched",
-		Caller:  callerOf(id),
-		Context: map[string]string{"query": opts.Query, "scope": opts.Scope, "type": opts.Type},
-	})
+	// spec: §4.7.5 — log the read with the caller's resolved layer
+	// composition and result size. Deferred so the size is captured on
+	// the success path while the event still fires on every early return.
+	ev := AuditEvent{
+		Type:           "artifacts.searched",
+		Caller:         callerOf(id),
+		Context:        map[string]string{"query": opts.Query, "scope": opts.Scope, "type": opts.Type},
+		ResolvedLayers: r.effectiveLayerComposition(id),
+	}
+	defer func() { r.emit(ctx, ev) }()
 	if opts.TopK > 50 {
 		return nil, fmt.Errorf("%w: top_k > 50", ErrInvalidArgument)
 	}
@@ -850,6 +894,7 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 		d.Sensitivity = r.mergedSensitivity(ctx, sc.rec)
 		res.Results = append(res.Results, d)
 	}
+	ev.ResultSize = len(res.Results)
 	return res, nil
 }
 
@@ -943,11 +988,15 @@ type SearchDomainsOptions struct {
 // this with §4.5.5 keyword projections; for now, domains are derived
 // from the unique paths of visible manifests.
 func (r *Registry) SearchDomains(ctx context.Context, id layer.Identity, opts SearchDomainsOptions) (*SearchResult, error) {
-	r.emit(ctx, AuditEvent{
-		Type:    "domains.searched",
-		Caller:  callerOf(id),
-		Context: map[string]string{"query": opts.Query, "scope": opts.Scope},
-	})
+	// spec: §4.7.5 — log the read with resolved layer composition and
+	// result size; deferred so the size lands on the success path.
+	ev := AuditEvent{
+		Type:           "domains.searched",
+		Caller:         callerOf(id),
+		Context:        map[string]string{"query": opts.Query, "scope": opts.Scope},
+		ResolvedLayers: r.effectiveLayerComposition(id),
+	}
+	defer func() { r.emit(ctx, ev) }()
 	if opts.TopK > 50 {
 		return nil, fmt.Errorf("%w: top_k > 50", ErrInvalidArgument)
 	}
@@ -992,6 +1041,7 @@ func (r *Registry) SearchDomains(ctx context.Context, id layer.Identity, opts Se
 			Path: p, Name: lastSegment(p),
 		})
 	}
+	ev.ResultSize = len(res.Domains)
 	return res, nil
 }
 
@@ -1041,13 +1091,24 @@ type LoadArtifactOptions struct {
 // declares extends:, the parent is fetched (server-side, hidden-parent
 // semantics per §4.6) and field-merged per the §4.6 merge-semantics
 // table. The returned body and frontmatter are the merged result.
-func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifactID string, opts LoadArtifactOptions) (*LoadArtifactResult, error) {
-	r.emit(ctx, AuditEvent{
-		Type:    "artifact.loaded",
-		Caller:  callerOf(id),
-		Target:  artifactID,
-		Context: map[string]string{"version": opts.Version},
-	})
+func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifactID string, opts LoadArtifactOptions) (res *LoadArtifactResult, err error) {
+	// spec: §4.7.5 — log the read with resolved layer composition and
+	// result size. Deferred over a named return so a resolved artifact
+	// records size 1 across every resolution path (latest, exact, hash,
+	// session pin) while a not-found/denied call still logs at size 0.
+	ev := AuditEvent{
+		Type:           "artifact.loaded",
+		Caller:         callerOf(id),
+		Target:         artifactID,
+		Context:        map[string]string{"version": opts.Version},
+		ResolvedLayers: r.effectiveLayerComposition(id),
+	}
+	defer func() {
+		if res != nil {
+			ev.ResultSize = 1
+		}
+		r.emit(ctx, ev)
+	}()
 	visible, err := r.visibleManifests(ctx, id)
 	if err != nil {
 		return nil, err

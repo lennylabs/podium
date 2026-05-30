@@ -147,7 +147,7 @@ func TestReembed_AllManifests(t *testing.T) {
 	e := fakeEmbedder{dim: 16}
 	reg := core.New(st, "t", []layer.Layer{{ID: "L", Visibility: layer.Visibility{Public: true}}}).
 		WithVectorSearch(v, e)
-	r, err := reg.Reembed(context.Background(), false)
+	r, err := reg.Reembed(context.Background(), core.ReembedOptions{})
 	if err != nil {
 		t.Fatalf("Reembed: %v", err)
 	}

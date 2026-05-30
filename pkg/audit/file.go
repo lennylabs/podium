@@ -146,40 +146,46 @@ func (f *FileSink) Path() string { return f.path }
 
 // jsonEvent is the wire shape of an event in the JSON-Lines log.
 type jsonEvent struct {
-	Type      string            `json:"type"`
-	Timestamp string            `json:"timestamp"`
-	TraceID   string            `json:"trace_id,omitempty"`
-	Caller    string            `json:"caller,omitempty"`
-	Target    string            `json:"target,omitempty"`
-	Context   map[string]string `json:"context,omitempty"`
-	Hash      string            `json:"hash"`
-	PrevHash  string            `json:"prev_hash,omitempty"`
+	Type           string            `json:"type"`
+	Timestamp      string            `json:"timestamp"`
+	TraceID        string            `json:"trace_id,omitempty"`
+	Caller         string            `json:"caller,omitempty"`
+	Target         string            `json:"target,omitempty"`
+	Context        map[string]string `json:"context,omitempty"`
+	ResolvedLayers []string          `json:"resolved_layers,omitempty"`
+	ResultSize     int               `json:"result_size,omitempty"`
+	Hash           string            `json:"hash"`
+	PrevHash       string            `json:"prev_hash,omitempty"`
 }
 
 func eventForJSON(e Event) jsonEvent {
 	return jsonEvent{
-		Type:      string(e.Type),
-		Timestamp: e.Timestamp.UTC().Format(time.RFC3339Nano),
-		TraceID:   e.TraceID,
-		Caller:    e.Caller,
-		Target:    e.Target,
-		Context:   e.Context,
-		Hash:      e.Hash,
-		PrevHash:  e.PrevHash,
+		Type:           string(e.Type),
+		Timestamp:      e.Timestamp.UTC().Format(time.RFC3339Nano),
+		TraceID:        e.TraceID,
+		Caller:         e.Caller,
+		Target:         e.Target,
+		Context:        e.Context,
+		ResolvedLayers: e.ResolvedLayers,
+		ResultSize:     e.ResultSize,
+		Hash:           e.Hash,
+		PrevHash:       e.PrevHash,
 	}
 }
 
 func eventFromJSON(je jsonEvent) Event {
 	t, _ := time.Parse(time.RFC3339Nano, je.Timestamp)
 	return Event{
-		Type:      EventType(je.Type),
-		Timestamp: t,
-		TraceID:   je.TraceID,
-		Caller:    je.Caller,
-		Target:    je.Target,
-		Context:   je.Context,
-		Hash:      je.Hash,
-		PrevHash:  je.PrevHash,
+		Type:           EventType(je.Type),
+		Timestamp:      t,
+		TraceID:        je.TraceID,
+		Caller:         je.Caller,
+		Target:         je.Target,
+		Context:        je.Context,
+		ResolvedLayers: je.ResolvedLayers,
+		ResultSize:     je.ResultSize,
+		Hash:           je.Hash,
+		PrevHash:       je.PrevHash,
 	}
 }
 

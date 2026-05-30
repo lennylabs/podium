@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/lennylabs/podium/pkg/embedding"
 	"github.com/lennylabs/podium/pkg/store"
@@ -25,6 +26,21 @@ type ReembedFailure struct {
 	Reason     string
 }
 
+// ReembedOptions selects which artifacts a Reembed pass covers. The
+// zero value re-embeds every visible manifest in the tenant, matching
+// the §4.7 "podium admin reembed" default (--all).
+type ReembedOptions struct {
+	// OnlyIfMissing skips artifacts that already have a stored vector,
+	// for partial backfills after a transient embedding outage. spec:
+	// §4.7 "podium admin reembed --only-missing".
+	OnlyIfMissing bool
+	// Since, when non-zero, restricts the pass to artifacts ingested at
+	// or after this instant. Operators use it to re-embed only recently
+	// ingested artifacts after a model change. spec: §4.7 "podium admin
+	// reembed --since <timestamp>".
+	Since time.Time
+}
+
 // Reembed re-runs the §4.7 embedding generation for every visible
 // manifest in the tenant. The vector store's per-row UPSERT keeps
 // each artifact's vector atomically replaced; in-flight searches
@@ -35,11 +51,12 @@ type ReembedFailure struct {
 //   - Backfilling artifacts whose original ingest failed to embed.
 //   - Operator-initiated dimension upgrade on `podium admin reembed`.
 //
-// onlyIfMissing=true skips artifacts that already have a vector in
-// the store; useful for partial backfills after transient outages.
-// onlyIfMissing=false re-embeds everything, useful after a provider
-// switch where the old vectors are stale-dimension.
-func (r *Registry) Reembed(ctx context.Context, onlyIfMissing bool) (*ReembedResult, error) {
+// opts.OnlyIfMissing skips artifacts that already have a vector in the
+// store; useful for partial backfills after transient outages. The zero
+// value re-embeds everything, useful after a provider switch where the
+// old vectors are stale-dimension. opts.Since restricts the pass to
+// artifacts ingested at or after the given instant.
+func (r *Registry) Reembed(ctx context.Context, opts ReembedOptions) (*ReembedResult, error) {
 	if r.embedder == nil || r.vector == nil {
 		return nil, fmt.Errorf("reembed: vector search not configured")
 	}
@@ -47,20 +64,39 @@ func (r *Registry) Reembed(ctx context.Context, onlyIfMissing bool) (*ReembedRes
 	if err != nil {
 		return nil, fmt.Errorf("reembed: list manifests: %w", err)
 	}
+	// spec: §4.7 `--since <timestamp>` — drop artifacts ingested before
+	// the cutoff so a post-model-change pass only re-embeds recent work.
+	if !opts.Since.IsZero() {
+		kept := manifests[:0:0]
+		for _, m := range manifests {
+			if !m.IngestedAt.Before(opts.Since) {
+				kept = append(kept, m)
+			}
+		}
+		manifests = kept
+	}
+
+	// spec: §4.7 `--only-missing` — build the set of (id, version)
+	// tuples that already have a vector in one exhaustive query rather
+	// than a per-artifact top-K probe. The store keys at most one vector
+	// per manifest record (one row per (id, version)), so a query with
+	// topK == len(manifests) returns every stored vector for the tenant;
+	// the prior fixed topK=100 probe falsely reported existing vectors
+	// missing once a tenant held more than 100 artifacts (F-4.7.10).
+	present := map[string]bool{}
+	if opts.OnlyIfMissing && len(manifests) > 0 {
+		probe := make([]float32, r.embedder.Dimensions())
+		probe[0] = 1
+		matches, _ := r.vector.Query(ctx, r.tenantID, probe, len(manifests))
+		for _, m := range matches {
+			present[m.ArtifactID+"@"+m.Version] = true
+		}
+	}
+
 	res := &ReembedResult{Total: len(manifests)}
 	for _, m := range manifests {
-		if onlyIfMissing {
-			// Best-effort presence check: query with a zero vector
-			// scoped to the artifact to see if we already have one.
-			// We cheat a bit: a vector of a single non-zero element
-			// is enough — we only need the backend to either return
-			// the artifact or not.
-			probe := make([]float32, r.embedder.Dimensions())
-			probe[0] = 1
-			matches, _ := r.vector.Query(ctx, r.tenantID, probe, 100)
-			if hasMatch(matches, m.ArtifactID, m.Version) {
-				continue
-			}
+		if opts.OnlyIfMissing && present[m.ArtifactID+"@"+m.Version] {
+			continue
 		}
 		if err := embedAndUpsert(ctx, r.embedder, r.vector, m); err != nil {
 			res.Failed = append(res.Failed, ReembedFailure{
@@ -136,13 +172,4 @@ func joinNonEmpty(parts []string, sep string) string {
 		out += p
 	}
 	return out
-}
-
-func hasMatch(matches []vector.Match, id, version string) bool {
-	for _, m := range matches {
-		if m.ArtifactID == id && m.Version == version {
-			return true
-		}
-	}
-	return false
 }

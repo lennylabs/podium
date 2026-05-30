@@ -1343,11 +1343,12 @@ func TestDocCLI_112_AdminEraseAudited(t *testing.T) {
 }
 
 // ===== Signing (T-D-cli-113..115) ======================================
-// `podium sign`/`verify` operate on a content hash + signature envelope
-// (the documented positional `<artifact>` form is a doc gap); the noop
-// provider is the default.
+// `podium sign <artifact>` / `podium verify <artifact>` resolve the
+// artifact's canonical content hash (and stored signature) via the
+// registry; the lower-level `--content-hash` / `--signature` form
+// operates on a raw hash. The noop provider is the default.
 
-// spec: doc "Signing — podium sign".
+// spec: doc "Signing — podium sign" (lower-level --content-hash form).
 func TestDocCLI_113_Sign(t *testing.T) {
 	hash := "sha256:" + strings.Repeat("a", 64)
 	res := runPodium(t, "", nil, "sign", "--content-hash", hash)
@@ -1355,6 +1356,26 @@ func TestDocCLI_113_Sign(t *testing.T) {
 	if strings.TrimSpace(res.Stdout) == "" {
 		t.Fatalf("sign produced no envelope")
 	}
+}
+
+// spec: §4.7.9 — `podium sign <artifact>` resolves the artifact's
+// content hash from the registry and signs it (F-4.7.9). The documented
+// positional form must not be a usage error.
+func TestDocCLI_113b_SignPositionalArtifact(t *testing.T) {
+	srv := startServer(t, cliReg(t))
+	res := runPodium(t, "", brEnv(srv.BaseURL), "sign", "finance/invoice")
+	cliWantExit(t, res, 0, "sign <artifact>")
+	cliContains(t, res.Stdout, "noop:sha256:", "sign envelope over resolved hash")
+}
+
+// spec: §4.7.9 — `podium verify <artifact>` resolves the stored
+// signature. The standalone server signs no artifacts at ingest, so an
+// unsigned artifact reports the missing envelope rather than passing.
+func TestDocCLI_114b_VerifyPositionalArtifactUnsigned(t *testing.T) {
+	srv := startServer(t, cliReg(t))
+	res := runPodium(t, "", brEnv(srv.BaseURL), "verify", "finance/invoice")
+	cliWantNonZero(t, res, "verify <artifact> unsigned")
+	cliContains(t, res.Stderr, "no stored signature", "missing-signature message")
 }
 
 // spec: doc "Signing — podium verify" (valid signature).

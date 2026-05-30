@@ -643,8 +643,18 @@ func (s *Server) handleReembed(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	onlyMissing := q.Get("only_missing") == "true"
-	res, err := s.core.Reembed(r.Context(), onlyMissing)
+	opts := core.ReembedOptions{OnlyIfMissing: q.Get("only_missing") == "true"}
+	// spec: §4.7 `--since <timestamp>` — RFC3339 cutoff on IngestedAt.
+	if since := q.Get("since"); since != "" {
+		ts, perr := time.Parse(time.RFC3339, since)
+		if perr != nil {
+			writeError(w, http.StatusBadRequest, "registry.invalid_argument",
+				"since must be an RFC3339 timestamp: "+perr.Error())
+			return
+		}
+		opts.Since = ts
+	}
+	res, err := s.core.Reembed(r.Context(), opts)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return

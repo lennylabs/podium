@@ -9,6 +9,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -58,6 +60,14 @@ type Event struct {
 	Target    string
 	Context   map[string]string
 
+	// ResolvedLayers is the ordered layer composition of the caller's
+	// effective view, recorded on read events per §4.7.5. Empty for
+	// events that are not reads or when no layer list is configured.
+	ResolvedLayers []string
+	// ResultSize is the number of result items a read event returned
+	// (§4.7.5 "result size"). Zero for non-read events.
+	ResultSize int
+
 	// Hash is the chain hash sha256(body || prev_hash).
 	Hash     string
 	PrevHash string
@@ -83,6 +93,11 @@ func (e Event) canonicalBody() []byte {
 	for _, k := range keys {
 		parts = append(parts, k+"="+e.Context[k])
 	}
+	// §4.7.5 read-call fields participate in the tamper-evident chain so
+	// resolved layer composition and result size cannot be altered after
+	// the fact without breaking the hash.
+	parts = append(parts, "resolved_layers="+strings.Join(e.ResolvedLayers, ","))
+	parts = append(parts, "result_size="+strconv.Itoa(e.ResultSize))
 	out := []byte{}
 	for _, p := range parts {
 		out = append(out, []byte(p)...)
