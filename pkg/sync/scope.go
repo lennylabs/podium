@@ -44,6 +44,36 @@ func (f ScopeFilter) Apply(records []filesystem.ArtifactRecord) []filesystem.Art
 	return out
 }
 
+// filterMaterial applies the scope to source-neutral records (§7.5.1). It
+// mirrors Apply but operates on the materialRecord type used by both the
+// filesystem and server sources. A record whose manifest did not parse has an
+// empty type, so a non-empty Types filter drops it.
+func (f ScopeFilter) filterMaterial(records []materialRecord) []materialRecord {
+	if f.IsEmpty() {
+		return records
+	}
+	out := make([]materialRecord, 0, len(records))
+	for _, rec := range records {
+		if len(f.Include) > 0 && !matchesAny(rec.ID, f.Include) {
+			continue
+		}
+		if matchesAny(rec.ID, f.Exclude) {
+			continue
+		}
+		if len(f.Types) > 0 {
+			ty := ""
+			if rec.Artifact != nil {
+				ty = string(rec.Artifact.Type)
+			}
+			if !containsType(f.Types, ty) {
+				continue
+			}
+		}
+		out = append(out, rec)
+	}
+	return out
+}
+
 func matchesAny(id string, patterns []string) bool {
 	for _, p := range patterns {
 		if matchGlob(p, id) {

@@ -54,6 +54,20 @@ type Options struct {
 	// HTTPClient, when set, is used for server-source requests. Nil uses a
 	// default client with a bounded timeout. Tests inject a stub here.
 	HTTPClient *http.Client
+	// Scope narrows the effective view per §7.5.1 (--include / --exclude /
+	// --type). The empty filter materializes the full effective view. The
+	// resolved scope is persisted into the lock (§7.5.3).
+	Scope ScopeFilter
+	// Profile is the active profile name (§7.5.3). Persisted into the lock so
+	// override, save-as, and profile edit can default to it.
+	Profile string
+	// PreserveToggles selects the §7.5.4 toggle semantics. When true (watch
+	// mode and override re-materialization), Run reads the prior lock's
+	// toggles, applies them on top of the scoped set (add fetched, remove
+	// dropped), and carries them into the new lock. When false (a manual
+	// one-shot sync), toggles are cleared, which is the operator's
+	// "reset to baseline" gesture.
+	PreserveToggles bool
 }
 
 // materialRecord is a source-neutral artifact ready for the HarnessAdapter.
@@ -121,11 +135,23 @@ func Run(opts Options) (*Result, error) {
 	}
 
 	// §7.5.2 dispatch: a URL routes to the Podium server, every other value
-	// to the local filesystem registry.
-	records, err := resolveRecords(opts)
+	// to the local filesystem registry. The full effective view is resolved
+	// first; scope and toggles narrow it below.
+	all, err := resolveRecords(opts)
 	if err != nil {
 		return nil, err
 	}
+
+	// The prior lock carries the §7.5.5 toggles (applied only in watch /
+	// override mode) and the materialized paths used for §7.5 stale cleanup.
+	priorLock, _ := ReadLock(opts.Target)
+	var toggles LockToggles
+	if opts.PreserveToggles && priorLock != nil {
+		toggles = priorLock.Toggles
+	}
+
+	// §7.5.1 scope + §7.5.5 toggles select the records to materialize.
+	records := selectRecords(opts.Scope, all, toggles)
 
 	res := &Result{Adapter: a.ID(), Target: opts.Target}
 
@@ -165,12 +191,11 @@ func Run(opts Options) (*Result, error) {
 		return res, nil
 	}
 
-	// §7.5 stale-file cleanup: read the prior lock, compute the
-	// set of paths this run wrote, and delete anything the prior
-	// run wrote that this run didn't. Without this, syncing a
-	// registry that drops an artifact leaves the artifact's files
+	// §7.5 stale-file cleanup: compute the paths this run wrote and delete
+	// anything the prior run wrote that this run didn't. Without this,
+	// syncing a registry that drops an artifact leaves the artifact's files
 	// behind in the target.
-	priorPaths := loadPriorLockPaths(opts.Target)
+	priorPaths := lockPaths(priorLock)
 
 	if err := materialize.Write(opts.Target, allFiles); err != nil {
 		return nil, err
@@ -186,10 +211,17 @@ func Run(opts Options) (*Result, error) {
 	// the diff. Each artifact records every path it wrote so a
 	// future delete is precise.
 	lock := &LockFile{
-		Target:       opts.Target,
-		Harness:      a.ID(),
+		Target:  opts.Target,
+		Harness: a.ID(),
+		Profile: opts.Profile,
+		Scope: LockScope{
+			Include: opts.Scope.Include,
+			Exclude: opts.Scope.Exclude,
+			Type:    opts.Scope.Types,
+		},
 		LastSyncedAt: time.Now().UTC(),
 		LastSyncedBy: "podium-sync",
+		Toggles:      toggles,
 	}
 	for _, art := range res.Artifacts {
 		for _, p := range art.Files {
@@ -260,19 +292,62 @@ func filesystemRecords(opts Options) ([]materialRecord, error) {
 	return out, nil
 }
 
-// loadPriorLockPaths reads the lock file (if any) and returns the
-// set of materialized paths from the previous successful sync.
-// Missing lock returns an empty set.
-func loadPriorLockPaths(target string) map[string]bool {
+// lockPaths returns the set of materialized paths recorded in a lock.
+// A nil lock returns an empty set.
+func lockPaths(lock *LockFile) map[string]bool {
 	out := map[string]bool{}
-	lock, err := ReadLock(target)
-	if err != nil || lock == nil {
+	if lock == nil {
 		return out
 	}
 	for _, a := range lock.Artifacts {
 		if a.MaterializedPath != "" {
 			out[a.MaterializedPath] = true
 		}
+	}
+	return out
+}
+
+// selectRecords computes the materialization set from the full effective view
+// (§7.5.1 scope, then §7.5.5 toggles). The scoped set is taken first; each
+// toggles.add ID is then pulled from the full view when the caller can see it
+// (an invisible ID is silently absent, matching §7.5.5 visibility), and each
+// toggles.remove ID is dropped. Toggles are empty for a manual sync, so the
+// result is exactly the scoped set there.
+func selectRecords(scope ScopeFilter, all []materialRecord, toggles LockToggles) []materialRecord {
+	scoped := scope.filterMaterial(all)
+
+	byID := make(map[string]materialRecord, len(all))
+	for _, r := range all {
+		byID[r.ID] = r
+	}
+
+	included := make(map[string]bool, len(scoped))
+	out := make([]materialRecord, 0, len(scoped)+len(toggles.Add))
+	for _, r := range scoped {
+		included[r.ID] = true
+		out = append(out, r)
+	}
+	for _, t := range toggles.Add {
+		if included[t.ID] {
+			continue
+		}
+		if r, ok := byID[t.ID]; ok {
+			included[t.ID] = true
+			out = append(out, r)
+		}
+	}
+	if len(toggles.Remove) > 0 {
+		drop := make(map[string]bool, len(toggles.Remove))
+		for _, t := range toggles.Remove {
+			drop[t.ID] = true
+		}
+		kept := out[:0]
+		for _, r := range out {
+			if !drop[r.ID] {
+				kept = append(kept, r)
+			}
+		}
+		out = kept
 	}
 	return out
 }

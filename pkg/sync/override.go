@@ -3,9 +3,11 @@ package sync
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/lennylabs/podium/internal/clock"
+	"github.com/lennylabs/podium/pkg/adapter"
 )
 
 // Errors related to override / save-as / profile edit.
@@ -31,6 +33,19 @@ type OverrideOptions struct {
 	DryRun bool
 	// Clock provides timestamps; defaults to clock.Real.
 	Clock clock.Clock
+
+	// Materialization inputs (§7.5.5). When RegistryPath is set and DryRun is
+	// false, Override re-materializes the target after updating the toggles:
+	// --add then writes the artifact's files through the active adapter and
+	// --remove deletes them, just like a full sync would. The scope and
+	// profile come from the lock so the baseline matches the last sync. When
+	// RegistryPath is empty, Override only records the toggles (the caller
+	// materializes separately).
+	RegistryPath    string
+	AdapterID       string
+	AdapterRegistry *adapter.Registry
+	OverlayPath     string
+	HTTPClient      *http.Client
 }
 
 // OverrideResult is what Override returns: the new lock state and
@@ -99,6 +114,35 @@ func Override(opts OverrideOptions) (*OverrideResult, error) {
 	if !opts.DryRun && changed {
 		if err := WriteLock(opts.Target, lock); err != nil {
 			return nil, err
+		}
+	}
+
+	// §7.5.5: --add writes the artifact's files and --remove deletes them.
+	// Re-materialize the target from the lock's scope + the updated toggles
+	// so the on-disk set matches. PreserveToggles keeps the toggles we just
+	// wrote and rewrites the lock with the new materialized paths.
+	if !opts.DryRun && opts.RegistryPath != "" {
+		if _, err := Run(Options{
+			RegistryPath:    opts.RegistryPath,
+			Target:          opts.Target,
+			AdapterID:       opts.AdapterID,
+			AdapterRegistry: opts.AdapterRegistry,
+			OverlayPath:     opts.OverlayPath,
+			HTTPClient:      opts.HTTPClient,
+			Profile:         lock.Profile,
+			Scope: ScopeFilter{
+				Include: lock.Scope.Include,
+				Exclude: lock.Scope.Exclude,
+				Types:   lock.Scope.Type,
+			},
+			PreserveToggles: true,
+		}); err != nil {
+			return nil, fmt.Errorf("override: materialize: %w", err)
+		}
+		// Reflect the rewritten lock (materialized paths, last_synced_at) in
+		// the returned state.
+		if reread, rerr := ReadLock(opts.Target); rerr == nil && reread != nil {
+			lock = reread
 		}
 	}
 	return &OverrideResult{Lock: lock, Changed: changed}, nil

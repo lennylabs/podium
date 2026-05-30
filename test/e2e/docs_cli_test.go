@@ -674,19 +674,52 @@ func TestDocCLI_43_SyncJSON(t *testing.T) {
 	}
 }
 
-// spec: doc "podium sync", `--include` flag.
+// spec: §7.5.1 — `podium sync --include` narrows the materialized set to
+// canonical IDs matching the glob (F-7.5.1).
 func TestDocCLI_44_SyncInclude(t *testing.T) {
-	t.Skip("blocked by F-7.5.1: `podium sync --include` is not a defined flag and scope filtering is never applied")
+	reg := cliReg(t)
+	tgt := t.TempDir()
+	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none", "--include", "finance/**")
+	cliWantExit(t, res, 0, "sync --include")
+	files := readTreeFiltered(t, tgt)
+	if _, ok := files["finance/invoice/ARTIFACT.md"]; !ok {
+		t.Fatalf("included finance/invoice not materialized: %v", keysOf(files))
+	}
+	if _, ok := files["personal/greet/ARTIFACT.md"]; ok {
+		t.Fatalf("personal/greet must be excluded by --include finance/**: %v", keysOf(files))
+	}
 }
 
-// spec: doc "podium sync", `--exclude` flag.
+// spec: §7.5.1 — `podium sync --exclude` drops matching IDs after the include
+// set (F-7.5.1).
 func TestDocCLI_45_SyncExclude(t *testing.T) {
-	t.Skip("blocked by F-7.5.1: `podium sync --exclude` is not a defined flag and scope filtering is never applied")
+	reg := cliReg(t)
+	tgt := t.TempDir()
+	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none",
+		"--include", "personal/**", "--exclude", "personal/note")
+	cliWantExit(t, res, 0, "sync --exclude")
+	files := readTreeFiltered(t, tgt)
+	if _, ok := files["personal/note/ARTIFACT.md"]; ok {
+		t.Fatalf("personal/note must be excluded: %v", keysOf(files))
+	}
+	if _, ok := files["personal/greet/ARTIFACT.md"]; !ok {
+		t.Fatalf("personal/greet must remain: %v", keysOf(files))
+	}
 }
 
-// spec: doc "podium sync", `--type` flag.
+// spec: §7.5.1 — `podium sync --type` restricts to the listed types (F-7.5.1).
 func TestDocCLI_46_SyncType(t *testing.T) {
-	t.Skip("blocked by F-7.5.1: `podium sync --type` is not a defined flag and scope filtering is never applied")
+	reg := cliReg(t)
+	tgt := t.TempDir()
+	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none", "--type", "skill")
+	cliWantExit(t, res, 0, "sync --type")
+	files := readTreeFiltered(t, tgt)
+	if _, ok := files["personal/greet/ARTIFACT.md"]; !ok {
+		t.Fatalf("skill personal/greet must materialize under --type skill: %v", keysOf(files))
+	}
+	if _, ok := files["finance/invoice/ARTIFACT.md"]; ok {
+		t.Fatalf("context finance/invoice must not pass --type skill: %v", keysOf(files))
+	}
 }
 
 // spec: doc "podium sync", claude-code adapter layout for skills.

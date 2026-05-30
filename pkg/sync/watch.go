@@ -58,6 +58,10 @@ func Watch(ctx context.Context, opts WatchOptions) (<-chan WatchEvent, error) {
 	if opts.Debounce <= 0 {
 		opts.Debounce = 200 * time.Millisecond
 	}
+	// §7.5.4: watch materializes "profile + toggles from the lock file" on
+	// startup and re-applies toggles on every event, so every Run on the
+	// watch path preserves the lock's toggles rather than clearing them.
+	opts.Sync.PreserveToggles = true
 
 	events := make(chan WatchEvent, 4)
 	// §7.5.2 dispatch: a server-source watcher subscribes to the registry's

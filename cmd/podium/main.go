@@ -187,42 +187,84 @@ func syncCmd(args []string) int {
 	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
 	setUsage(fs, "Materialize the caller's effective view through a HarnessAdapter.")
 	registry := fs.String("registry", "", "registry URL (server source) or filesystem path (required)")
-	target := fs.String("target", ".", "destination directory")
+	target := fs.String("target", "", "destination directory (default: current directory)")
 	harness := fs.String("harness", "none", "harness adapter")
 	dryRun := fs.Bool("dry-run", false, "resolve and report; write nothing")
 	asJSON := fs.Bool("json", false, "emit a structured JSON envelope on stdout")
 	watch := fs.Bool("watch", false, "rerun sync whenever the registry changes")
 	overlay := fs.String("overlay", "", "workspace overlay path watched alongside the registry")
+	profile := fs.String("profile", "", "load a named scope from sync.yaml profiles")
+	configPath := fs.String("config", "", "run one sync per entry in a sync.yaml targets: list")
+	typeStr := fs.String("type", "", "restrict to a comma-separated artifact type list")
+	var include, exclude stringSliceFlag
+	fs.Var(&include, "include", "glob over canonical IDs to include (repeatable)")
+	fs.Var(&exclude, "exclude", "glob over canonical IDs to exclude (repeatable)")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
 
-	// §13.11.2 — when --registry is unset, fall back to
-	// defaults.registry from sync.yaml. Relative paths resolve
-	// against the workspace; absolute paths pass through. Unset
-	// across all scopes surfaces config.no_registry via sync.Run.
-	if *registry == "" {
-		ws, _ := os.Getwd()
-		if cfg, _ := sync.ReadConfig(ws); cfg != nil && cfg.Defaults.Registry != "" {
-			*registry = sync.ResolveRegistryPath(ws, cfg.Defaults.Registry)
-		}
+	// §7.5.2 multi-target: --config iterates a targets: list, one sync each.
+	if *configPath != "" {
+		return runMultiTargetSync(*configPath, *registry, *dryRun, *asJSON)
 	}
-	if *registry == "" {
+
+	// §7.5.2 resolution: merge the three sync.yaml scopes by per-key
+	// precedence, then overlay CLI flags and PODIUM_* env. The merged
+	// config also resolves the active profile's scope.
+	ws, _ := os.Getwd()
+	home, _ := os.UserHomeDir()
+	merged, workspace, merrr := sync.LoadMergedConfig(ws, home)
+	if merrr != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", merrr)
+		return 1
+	}
+	if workspace == "" {
+		workspace = ws
+	}
+	resolved, rerr := sync.Resolve(sync.ResolveInput{
+		Registry: *registry,
+		Target:   *target,
+		Profile:  *profile,
+		Include:  []string(include),
+		Exclude:  []string(exclude),
+		Types:    splitCSV(*typeStr),
+	}, merged, os.Getenv)
+	if rerr != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", rerr)
+		return 2
+	}
+	if resolved.CollisionWarning != "" {
+		fmt.Fprintln(os.Stderr, resolved.CollisionWarning)
+	}
+
+	registryPath := resolved.Registry
+	if registryPath != "" {
+		// Relative defaults.registry resolves against the workspace; URLs
+		// and absolute paths pass through (§13.11.2).
+		registryPath = sync.ResolveRegistryPath(workspace, registryPath)
+	}
+	if registryPath == "" {
 		fmt.Fprintln(os.Stderr, "error: --registry is required (registry URL or filesystem path) — set it on the command line or in <ws>/.podium/sync.yaml")
 		return 2
 	}
-	abs, err := filepath.Abs(*target)
+	targetDir := resolved.Target
+	if targetDir == "" {
+		targetDir = "."
+	}
+	abs, err := filepath.Abs(targetDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: cannot resolve target: %v\n", err)
 		return 2
 	}
 	syncOpts := sync.Options{
-		RegistryPath: *registry,
+		RegistryPath: registryPath,
 		Target:       abs,
 		AdapterID:    *harness,
 		DryRun:       *dryRun,
 		OverlayPath:  *overlay,
+		Profile:      resolved.Profile,
+		Scope:        resolved.Scope,
 	}
 	if *watch {
 		return runWatchLoop(syncOpts, *overlay, *asJSON)
@@ -273,6 +315,59 @@ func runWatchLoop(opts sync.Options, overlay string, asJSON bool) int {
 	return 0
 }
 
+// runMultiTargetSync implements `podium sync --config <path>` (§7.5.2): it
+// reads the config file's targets: list, resolves each entry's scope, target,
+// and harness, and runs one sync per entry. Each target writes its own lock.
+func runMultiTargetSync(configPath, registryOverride string, dryRun, asJSON bool) int {
+	cfg, err := sync.ReadConfigFile(configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+	if cfg == nil {
+		fmt.Fprintf(os.Stderr, "error: config not found: %s\n", configPath)
+		return 2
+	}
+	workspace := filepath.Dir(filepath.Dir(configPath))
+	plans, err := sync.PlanMultiTarget(cfg, registryOverride, workspace)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 2
+	}
+	failures := 0
+	for _, p := range plans {
+		abs, aerr := filepath.Abs(p.Target)
+		if aerr != nil {
+			fmt.Fprintf(os.Stderr, "target %s: %v\n", p.ID, aerr)
+			failures++
+			continue
+		}
+		res, rerr := sync.Run(sync.Options{
+			RegistryPath: p.Registry,
+			Target:       abs,
+			AdapterID:    p.Harness,
+			DryRun:       dryRun,
+			Profile:      p.Profile,
+			Scope:        p.Scope,
+		})
+		if rerr != nil {
+			fmt.Fprintf(os.Stderr, "target %s: %v\n", p.ID, rerr)
+			failures++
+			continue
+		}
+		fmt.Printf("== target %s ==\n", p.ID)
+		if asJSON {
+			printJSON(res)
+		} else {
+			printHuman(res, dryRun)
+		}
+	}
+	if failures > 0 {
+		return 1
+	}
+	return 0
+}
+
 // stringSliceFlag is a flag.Value implementation for repeatable
 // string flags such as --add and --remove.
 type stringSliceFlag []string
@@ -284,6 +379,8 @@ func syncOverrideCmd(args []string) int {
 	fs := flag.NewFlagSet("sync override", flag.ContinueOnError)
 	setUsage(fs, "Add or remove ephemeral artifact toggles.")
 	target := fs.String("target", ".", "target directory")
+	registry := fs.String("registry", "", "registry URL or filesystem path (default: sync.yaml)")
+	harness := fs.String("harness", "none", "harness adapter")
 	var add, remove stringSliceFlag
 	fs.Var(&add, "add", "artifact id to materialize on top of the profile (repeatable)")
 	fs.Var(&remove, "remove", "artifact id to drop from the profile (repeatable)")
@@ -298,10 +395,17 @@ func syncOverrideCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 2
 	}
+	// §7.5.5: override writes/deletes files through the active adapter. Resolve
+	// the registry the same way sync does so --add materializes and --remove
+	// deletes. A missing registry leaves materialization off; the toggles are
+	// still recorded.
+	registryPath := resolveOverrideRegistry(*registry)
 	res, err := sync.Override(sync.OverrideOptions{
 		Target: abs,
 		Add:    []string(add), Remove: []string(remove),
 		Reset: *reset, DryRun: *dryRun,
+		RegistryPath: registryPath,
+		AdapterID:    *harness,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "override failed: %v\n", err)
@@ -316,6 +420,29 @@ func syncOverrideCmd(args []string) int {
 		fmt.Println("(no change)")
 	}
 	return 0
+}
+
+// resolveOverrideRegistry resolves the registry source for `podium sync
+// override` from the --registry flag, PODIUM_REGISTRY, or the merged
+// sync.yaml, returning "" when none is configured (materialization off).
+func resolveOverrideRegistry(flagVal string) string {
+	ws, _ := os.Getwd()
+	home, _ := os.UserHomeDir()
+	merged, workspace, _ := sync.LoadMergedConfig(ws, home)
+	if workspace == "" {
+		workspace = ws
+	}
+	reg := flagVal
+	if reg == "" {
+		reg = os.Getenv("PODIUM_REGISTRY")
+	}
+	if reg == "" && merged != nil {
+		reg = merged.Defaults.Registry
+	}
+	if reg == "" {
+		return ""
+	}
+	return sync.ResolveRegistryPath(workspace, reg)
 }
 
 func syncSaveAsCmd(args []string) int {
