@@ -138,13 +138,52 @@ func ValidateVersion(v string) error {
 	return nil
 }
 
-// IsFirstClassType reports whether the given type is one of the seven
-// first-class types listed in §4.1.
+// firstClassTypes and builtinExtensionTypes encode the §4.1 type
+// taxonomy. They are the single source of truth for the IsFirstClassType
+// / IsBuiltinExtensionType predicates and for the default TypeProvider
+// registry seeded in pkg/typeprovider.
+var (
+	firstClassTypes       = []ArtifactType{TypeSkill, TypeAgent, TypeContext, TypeCommand, TypeRule, TypeHook}
+	builtinExtensionTypes = []ArtifactType{TypeMCPServer}
+)
+
+// FirstClassTypes returns the first-class artifact types listed in §4.1
+// (skill, agent, context, command, rule, hook). These types carry full
+// lint coverage and conformance-suite participation. The returned slice
+// is a copy the caller may modify.
+func FirstClassTypes() []ArtifactType {
+	return append([]ArtifactType(nil), firstClassTypes...)
+}
+
+// BuiltinExtensionTypes returns the built-in extension types listed in
+// §4.1. Podium ships schemas and lint rules for these but makes no
+// conformance commitment beyond the type owner's. mcp-server is the only
+// built-in extension type. The returned slice is a copy the caller may
+// modify.
+func BuiltinExtensionTypes() []ArtifactType {
+	return append([]ArtifactType(nil), builtinExtensionTypes...)
+}
+
+// IsFirstClassType reports whether t is one of the first-class types
+// listed in §4.1 (skill, agent, context, command, rule, hook). Per §4.1
+// mcp-server is a built-in extension type, not first-class; use
+// IsBuiltinExtensionType for it.
 func IsFirstClassType(t ArtifactType) bool {
-	switch t {
-	case TypeSkill, TypeAgent, TypeContext, TypeCommand,
-		TypeRule, TypeHook, TypeMCPServer:
-		return true
+	for _, ft := range firstClassTypes {
+		if t == ft {
+			return true
+		}
+	}
+	return false
+}
+
+// IsBuiltinExtensionType reports whether t is one of the built-in
+// extension types listed in §4.1. mcp-server is currently the only one.
+func IsBuiltinExtensionType(t ArtifactType) bool {
+	for _, et := range builtinExtensionTypes {
+		if t == et {
+			return true
+		}
 	}
 	return false
 }

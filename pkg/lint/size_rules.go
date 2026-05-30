@@ -22,8 +22,9 @@ const (
 	// SkillBodyWarnLines is the §4.3.4 SKILL.md body line warning
 	// threshold.
 	SkillBodyWarnLines = 500
-	// ManifestErrTokens is the §4.1 manifest hard error threshold
-	// (whole-manifest, including bundled SKILL.md when present).
+	// ManifestErrTokens is the §4.1 manifest hard error threshold.
+	// For skills it applies to the SKILL.md body; for every other
+	// type it applies to the ARTIFACT.md content.
 	ManifestErrTokens = 20_000
 )
 
@@ -60,7 +61,7 @@ func countLines(b []byte) int {
 // per-package soft caps for bundled resources.
 type ruleBundledResourceSize struct{}
 
-func (ruleBundledResourceSize) Code() string        { return "lint.bundled_resource_size" }
+func (ruleBundledResourceSize) Code() string { return "lint.bundled_resource_size" }
 
 func (r ruleBundledResourceSize) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
@@ -97,28 +98,51 @@ func (r ruleBundledResourceSize) Check(_ *filesystem.Registry, records []filesys
 // ruleManifestSize implements §4.1's manifest-token cap and
 // §4.3.4's SKILL.md body 5K-token / 500-line warning + 20K-token
 // error.
+//
+// Per §4.1 the manifest-size cap applies to the SKILL.md body for
+// skills (the parsed prose body, excluding YAML frontmatter), and to
+// the ARTIFACT.md content for every other type.
 type ruleManifestSize struct{}
 
-func (ruleManifestSize) Code() string        { return "lint.manifest_size" }
+func (ruleManifestSize) Code() string { return "lint.manifest_size" }
 
 func (r ruleManifestSize) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
 	for _, rec := range records {
-		manifestTokens := approxTokenCount(rec.ArtifactBytes) + approxTokenCount(rec.SkillBytes)
-		if manifestTokens > ManifestErrTokens {
+		isSkill := rec.Artifact != nil && rec.Artifact.Type == manifest.TypeSkill
+
+		// The body the §4.1 cap measures: SKILL.md body for skills,
+		// the ARTIFACT.md content otherwise. A skill missing its
+		// SKILL.md (rec.Skill == nil) is reported by
+		// ruleSkillCompliance; here it measures an empty body.
+		var capBody []byte
+		if isSkill {
+			if rec.Skill != nil {
+				capBody = []byte(rec.Skill.Body)
+			}
+		} else {
+			capBody = rec.ArtifactBytes
+		}
+
+		if tokens := approxTokenCount(capBody); tokens > ManifestErrTokens {
+			subject := "manifest"
+			if isSkill {
+				subject = "SKILL.md body"
+			}
 			out = append(out, Diagnostic{
 				ArtifactID: rec.ID,
 				Code:       r.Code(),
 				Severity:   SeverityError,
 				Message: fmt.Sprintf(
-					"manifest is approximately %d tokens, exceeding the cap of %d tokens",
-					manifestTokens, ManifestErrTokens),
+					"%s is approximately %d tokens, exceeding the cap of %d tokens",
+					subject, tokens, ManifestErrTokens),
 			})
 		}
-		if rec.Artifact != nil && rec.Artifact.Type == manifest.TypeSkill && len(rec.SkillBytes) > 0 {
-			bodyTokens := approxTokenCount(rec.SkillBytes)
-			bodyLines := countLines(rec.SkillBytes)
-			if bodyTokens > SkillBodyWarnTokens {
+
+		// §4.3.4 SKILL.md body soft caps, measured on the parsed body.
+		if isSkill && rec.Skill != nil {
+			body := []byte(rec.Skill.Body)
+			if bodyTokens := approxTokenCount(body); bodyTokens > SkillBodyWarnTokens {
 				out = append(out, Diagnostic{
 					ArtifactID: rec.ID,
 					Code:       r.Code(),
@@ -128,7 +152,7 @@ func (r ruleManifestSize) Check(_ *filesystem.Registry, records []filesystem.Art
 						bodyTokens, SkillBodyWarnTokens),
 				})
 			}
-			if bodyLines > SkillBodyWarnLines {
+			if bodyLines := countLines(body); bodyLines > SkillBodyWarnLines {
 				out = append(out, Diagnostic{
 					ArtifactID: rec.ID,
 					Code:       r.Code(),

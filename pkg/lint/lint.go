@@ -9,12 +9,14 @@
 package lint
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
+	"github.com/lennylabs/podium/pkg/typeprovider"
 )
 
 // Severity is one of error, warning, info.
@@ -71,6 +73,7 @@ type Rule interface {
 func AllRules() []Rule {
 	return []Rule{
 		ruleRequiredFields{},
+		ruleTypeProviderValidate{},
 		ruleSkillCompliance{},
 		ruleNameSyntax{},
 		ruleVersionSemver{},
@@ -108,19 +111,31 @@ func (l *Linter) Lint(reg *filesystem.Registry, records []filesystem.ArtifactRec
 
 // ----- Rules -----------------------------------------------------------------
 
-type ruleRequiredFields struct{}
+// ruleRequiredFields enforces the §4.3 universal-field requirements
+// (type and version) and the §4.1 type-registration check. providers is
+// the TypeProvider registry consulted for the type check; a nil registry
+// defaults to typeprovider.Default so the shipped binary recognizes
+// first-class and built-in extension types.
+type ruleRequiredFields struct {
+	providers *typeprovider.Registry
+}
 
-func (ruleRequiredFields) Code() string        { return "lint.required_field_missing" }
+func (ruleRequiredFields) Code() string { return "lint.required_field_missing" }
 
 func (r ruleRequiredFields) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+	providers := resolveProviders(r.providers)
 	var out []Diagnostic
 	for _, rec := range records {
 		a := rec.Artifact
 		if a.Type == "" {
 			out = append(out, errMsg(rec.ID, r, "type is required"))
-		} else if !manifest.IsFirstClassType(a.Type) {
+		} else if err := providers.Require(a.Type); errors.Is(err, manifest.ErrUnknownType) {
+			// §4.1: a type registered with any TypeProvider (first-class,
+			// built-in extension, or deployment-registered extension) is
+			// accepted. Only an unregistered type warns, because the
+			// deployment may register a provider for it.
 			out = append(out, warn(rec.ID, "lint.unknown_type",
-				fmt.Sprintf("type %q is not first-class; extension TypeProvider required", a.Type)))
+				fmt.Sprintf("type %q is not registered with any TypeProvider; register an extension TypeProvider for it", a.Type)))
 		}
 		if a.Version == "" {
 			out = append(out, errMsg(rec.ID, r, "version is required"))
@@ -129,9 +144,48 @@ func (r ruleRequiredFields) Check(_ *filesystem.Registry, records []filesystem.A
 	return out
 }
 
+// ruleTypeProviderValidate dispatches each artifact to the TypeProvider
+// registered for its type and surfaces the provider's diagnostics
+// (§4.1 type-system extensibility, §9 TypeProvider SPI). The built-in
+// providers are no-ops; deployment-registered extension types contribute
+// their type-specific lint rules here. providers defaults to
+// typeprovider.Default when nil.
+type ruleTypeProviderValidate struct {
+	providers *typeprovider.Registry
+}
+
+func (ruleTypeProviderValidate) Code() string { return "lint.type_provider" }
+
+func (r ruleTypeProviderValidate) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+	providers := resolveProviders(r.providers)
+	var out []Diagnostic
+	for _, rec := range records {
+		if rec.Artifact == nil {
+			continue
+		}
+		for _, d := range providers.Validate(rec.Artifact) {
+			msg := d.Message
+			if d.Path != "" {
+				msg = fmt.Sprintf("%s (%s)", msg, d.Path)
+			}
+			code := d.Code
+			if code == "" {
+				code = r.Code()
+			}
+			out = append(out, Diagnostic{
+				ArtifactID: rec.ID,
+				Code:       code,
+				Severity:   severityFromProvider(d.Severity),
+				Message:    msg,
+			})
+		}
+	}
+	return out
+}
+
 type ruleSkillCompliance struct{}
 
-func (ruleSkillCompliance) Code() string        { return "lint.skill_md_compliance" }
+func (ruleSkillCompliance) Code() string { return "lint.skill_md_compliance" }
 
 func (r ruleSkillCompliance) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
@@ -161,7 +215,7 @@ func (r ruleSkillCompliance) Check(_ *filesystem.Registry, records []filesystem.
 
 type ruleNameSyntax struct{}
 
-func (ruleNameSyntax) Code() string        { return "lint.invalid_name" }
+func (ruleNameSyntax) Code() string { return "lint.invalid_name" }
 
 func (r ruleNameSyntax) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
@@ -182,7 +236,7 @@ func (r ruleNameSyntax) Check(_ *filesystem.Registry, records []filesystem.Artif
 
 type ruleVersionSemver struct{}
 
-func (ruleVersionSemver) Code() string        { return "lint.invalid_version" }
+func (ruleVersionSemver) Code() string { return "lint.invalid_version" }
 
 func (r ruleVersionSemver) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
@@ -199,7 +253,7 @@ func (r ruleVersionSemver) Check(_ *filesystem.Registry, records []filesystem.Ar
 
 type ruleHookConsistency struct{}
 
-func (ruleHookConsistency) Code() string        { return "lint.hook_generic_and_subtype" }
+func (ruleHookConsistency) Code() string { return "lint.hook_generic_and_subtype" }
 
 // genericToSubtypes maps each generic event to its subtype family. Used to
 // flag when both the generic and a subtype are declared on the same
@@ -234,7 +288,7 @@ func (r ruleHookConsistency) Check(_ *filesystem.Registry, records []filesystem.
 
 type ruleEffortHintAppliesToType struct{}
 
-func (ruleEffortHintAppliesToType) Code() string        { return "lint.hint_on_unsupported_type" }
+func (ruleEffortHintAppliesToType) Code() string { return "lint.hint_on_unsupported_type" }
 
 func (r ruleEffortHintAppliesToType) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
@@ -259,6 +313,31 @@ func (r ruleEffortHintAppliesToType) Check(_ *filesystem.Registry, records []fil
 }
 
 // ----- helpers --------------------------------------------------------------
+
+// resolveProviders returns p, or the process-global typeprovider.Default
+// when p is nil, so AllRules() works without explicit wiring while tests
+// can inject a registry.
+func resolveProviders(p *typeprovider.Registry) *typeprovider.Registry {
+	if p != nil {
+		return p
+	}
+	return typeprovider.Default
+}
+
+// severityFromProvider maps a typeprovider.Diagnostic severity string to a
+// lint Severity. typeprovider uses "warn"; lint uses "warning". Unknown
+// values default to warning so a misconfigured provider does not silently
+// drop a finding.
+func severityFromProvider(s string) Severity {
+	switch s {
+	case "error":
+		return SeverityError
+	case "info":
+		return SeverityInfo
+	default:
+		return SeverityWarning
+	}
+}
 
 func errMsg(id string, r Rule, msg string) Diagnostic {
 	return Diagnostic{

@@ -154,22 +154,68 @@ extends parent.
 	}
 }
 
-// Spec: §4.1 first-class types — IsFirstClassType reports true for each
-// of the seven canonical types.
-func TestIsFirstClassType_AllSevenAreRecognized(t *testing.T) {
+// Spec: §4.1 first-class types — IsFirstClassType reports true for the
+// first-class types (skill, agent, context, command, rule, hook) and
+// false for the built-in extension type mcp-server, which §4.1 lists
+// separately under "Built-in extension types".
+func TestIsFirstClassType(t *testing.T) {
 	t.Parallel()
 	for _, ty := range []ArtifactType{
-		TypeSkill, TypeAgent, TypeContext, TypeCommand,
-		TypeRule, TypeHook, TypeMCPServer,
+		TypeSkill, TypeAgent, TypeContext, TypeCommand, TypeRule, TypeHook,
 	} {
 		if !IsFirstClassType(ty) {
 			t.Errorf("%q should be first-class", ty)
 		}
+	}
+	if IsFirstClassType(TypeMCPServer) {
+		t.Errorf("mcp-server is a built-in extension type, not first-class")
 	}
 	if IsFirstClassType("workflow") {
 		t.Errorf("workflow is reserved but not first-class")
 	}
 	if IsFirstClassType("dataset") {
 		t.Errorf("dataset is an extension type, not first-class")
+	}
+}
+
+// Spec: §4.1 built-in extension types — IsBuiltinExtensionType reports
+// true only for mcp-server, and false for first-class and unregistered
+// types.
+func TestIsBuiltinExtensionType(t *testing.T) {
+	t.Parallel()
+	if !IsBuiltinExtensionType(TypeMCPServer) {
+		t.Errorf("mcp-server should be a built-in extension type")
+	}
+	for _, ty := range []ArtifactType{
+		TypeSkill, TypeAgent, TypeContext, TypeCommand, TypeRule, TypeHook, "dataset", "",
+	} {
+		if IsBuiltinExtensionType(ty) {
+			t.Errorf("%q should not be a built-in extension type", ty)
+		}
+	}
+}
+
+// Spec: §4.1 type taxonomy — FirstClassTypes and BuiltinExtensionTypes
+// are disjoint, each agrees with its predicate, and the accessors return
+// copies the caller cannot use to mutate package state.
+func TestTypeTaxonomyLists(t *testing.T) {
+	t.Parallel()
+	fc := FirstClassTypes()
+	for _, ty := range fc {
+		if !IsFirstClassType(ty) {
+			t.Errorf("FirstClassTypes lists %q but IsFirstClassType is false", ty)
+		}
+		if IsBuiltinExtensionType(ty) {
+			t.Errorf("%q appears in both the first-class and built-in extension sets", ty)
+		}
+	}
+	be := BuiltinExtensionTypes()
+	if len(be) != 1 || be[0] != TypeMCPServer {
+		t.Fatalf("BuiltinExtensionTypes = %v, want [mcp-server]", be)
+	}
+	// Mutating the returned slice must not affect a subsequent call.
+	fc[0] = "mutated"
+	if FirstClassTypes()[0] == "mutated" {
+		t.Errorf("FirstClassTypes returned a shared backing array")
 	}
 }

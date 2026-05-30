@@ -5,7 +5,9 @@ import (
 	"testing"
 
 	"github.com/lennylabs/podium/internal/testharness"
+	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
+	"github.com/lennylabs/podium/pkg/typeprovider"
 )
 
 func openFixture(t *testing.T, opts ...testharness.WriteTreeOption) (*filesystem.Registry, []filesystem.ArtifactRecord) {
@@ -189,6 +191,119 @@ body
 	diags := (&Linter{}).Lint(reg, records)
 	if !hasCode(diags, "lint.unknown_type") {
 		t.Errorf("expected lint.unknown_type, got: %v", diags)
+	}
+}
+
+// Spec: §4.1 (F-4.1.3) — mcp-server is a built-in extension type
+// registered in the default TypeProvider registry, so it lints without a
+// lint.unknown_type warning even though IsFirstClassType is false for it.
+func TestLint_MCPServerDoesNotWarnUnknownType(t *testing.T) {
+	t.Parallel()
+	reg, records := openFixture(t,
+		testharness.WriteTreeOption{
+			Path: "m/ARTIFACT.md",
+			Content: `---
+type: mcp-server
+version: 1.0.0
+description: server registration
+---
+
+body
+`,
+		},
+	)
+	diags := (&Linter{}).Lint(reg, records)
+	for _, d := range diags {
+		if d.Code == "lint.unknown_type" {
+			t.Errorf("mcp-server must not warn unknown_type: %v", d)
+		}
+	}
+}
+
+// datasetProvider is a stand-in for a deployment-registered extension
+// TypeProvider whose Validate contributes a type-specific lint rule.
+type datasetProvider struct{}
+
+func (datasetProvider) ID() string                  { return "dataset" }
+func (datasetProvider) Type() manifest.ArtifactType { return "dataset" }
+func (datasetProvider) Validate(*manifest.Artifact) []typeprovider.Diagnostic {
+	return []typeprovider.Diagnostic{{
+		Severity: "warn",
+		Code:     "dataset.needs-rows",
+		Message:  "dataset requires a row count",
+	}}
+}
+
+// Spec: §4.1 / §9 (F-4.1.1) — when a deployment registers a TypeProvider
+// for an extension type, lint stops warning lint.unknown_type for it and
+// dispatches to the provider's Validate so the extension's lint rules run
+// at ingest.
+func TestLint_RegisteredExtensionTypeSuppressesUnknownAndValidates(t *testing.T) {
+	t.Parallel()
+	reg, records := openFixture(t,
+		testharness.WriteTreeOption{
+			Path: "d/ARTIFACT.md",
+			Content: `---
+type: dataset
+version: 1.0.0
+description: extension type
+---
+
+body
+`,
+		},
+	)
+	providers := typeprovider.NewRegistry()
+	if err := providers.Register(datasetProvider{}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	l := &Linter{Rules: []Rule{
+		ruleRequiredFields{providers: providers},
+		ruleTypeProviderValidate{providers: providers},
+	}}
+	diags := l.Lint(reg, records)
+	for _, d := range diags {
+		if d.Code == "lint.unknown_type" {
+			t.Errorf("a registered extension type must not warn unknown_type: %v", d)
+		}
+	}
+	if !hasCode(diags, "dataset.needs-rows") {
+		t.Errorf("expected the provider's dataset.needs-rows diagnostic, got: %v", diags)
+	}
+}
+
+// Spec: §4.1 / §9 (F-4.1.1) — an unregistered extension type still warns
+// lint.unknown_type, because the deployment may register a provider for
+// it; ingest is not rejected.
+func TestLint_UnregisteredExtensionTypeStillWarns(t *testing.T) {
+	t.Parallel()
+	reg, records := openFixture(t,
+		testharness.WriteTreeOption{
+			Path: "d/ARTIFACT.md",
+			Content: `---
+type: dataset
+version: 1.0.0
+description: extension type
+---
+
+body
+`,
+		},
+	)
+	// Empty registry: no provider for dataset, no built-in types either.
+	providers := typeprovider.NewRegistry()
+	l := &Linter{Rules: []Rule{
+		ruleRequiredFields{providers: providers},
+		ruleTypeProviderValidate{providers: providers},
+	}}
+	diags := l.Lint(reg, records)
+	if !hasCode(diags, "lint.unknown_type") {
+		t.Errorf("expected lint.unknown_type for an unregistered type, got: %v", diags)
+	}
+	for _, d := range diags {
+		if d.Severity == SeverityError {
+			t.Errorf("unknown type must warn, not error: %v", d)
+		}
 	}
 }
 
