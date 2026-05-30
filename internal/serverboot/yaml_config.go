@@ -58,12 +58,16 @@ type yamlEmbedCfg struct {
 	Model    string `yaml:"model,omitempty"`
 }
 
+// yamlDiscovery mirrors the §13.12 tenant-scope `discovery:` block. The
+// pointer fields distinguish "unset" (leave the package default) from an
+// explicit value, including the explicit false the gates need.
 type yamlDiscovery struct {
-	MaxDepth             int  `yaml:"max_depth,omitempty"`
-	NotableCount         int  `yaml:"notable_count,omitempty"`
-	FoldBelowArtifacts   int  `yaml:"fold_below_artifacts,omitempty"`
-	FoldPassthroughChain bool `yaml:"fold_passthrough_chains,omitempty"`
-	TargetResponseTokens int  `yaml:"target_response_tokens,omitempty"`
+	MaxDepth                int   `yaml:"max_depth,omitempty"`
+	NotableCount            int   `yaml:"notable_count,omitempty"`
+	FoldBelowArtifacts      int   `yaml:"fold_below_artifacts,omitempty"`
+	FoldPassthroughChains   *bool `yaml:"fold_passthrough_chains,omitempty"`
+	TargetResponseTokens    int   `yaml:"target_response_tokens,omitempty"`
+	AllowPerDomainOverrides *bool `yaml:"allow_per_domain_overrides,omitempty"`
 }
 
 // yamlLayerEntry is one admin-defined layer in the §4.6 `layers:` list.
@@ -189,6 +193,11 @@ func applyYAML(c *Config, y *yamlConfig) {
 	if len(y.Layers) > 0 {
 		c.declaredLayers = y.Layers
 	}
+	// §13.12 / §4.5.5 tenant discovery block is config-file-only, so it
+	// overlays directly. AllowPerDomainOverrides is tri-state (nil =
+	// default true); the others are zero-means-unset in resolveKnobs.
+	c.discovery = y.Discovery
+	c.allowPerDomainOverrides = y.Discovery.AllowPerDomainOverrides
 	if c.readOnlyProbeFailures == 0 && y.ReadOnly.ProbeFailures > 0 {
 		c.readOnlyProbeFailures = y.ReadOnly.ProbeFailures
 	}

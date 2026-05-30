@@ -114,6 +114,59 @@ include:
 	}
 }
 
+// Spec: §4.5.5 (F-4.5.11) — when the tenant disables per-domain
+// discovery overrides, a DOMAIN.md carrying a discovery: block is
+// warned (ingest still succeeds); the default rule set (overrides
+// allowed) draws no such diagnostic.
+func TestRuleDomainDiscoveryOverrideDisallowed(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{
+		"finance/ap/run/ARTIFACT.md": liveArtifact,
+		"finance/ap/DOMAIN.md": `---
+description: AP
+discovery:
+  notable_count: 3
+---
+`,
+		// A DOMAIN.md without a discovery: block must not be flagged.
+		"finance/DOMAIN.md": `---
+description: Finance
+---
+`,
+	})
+	reg, err := filesystem.Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	records, err := reg.Walk(filesystem.WalkOptions{})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	const code = "lint.domain_discovery_override_disabled"
+
+	// Default linter (overrides allowed): no discovery-override warning.
+	for _, d := range (&lint.Linter{}).Lint(reg, records) {
+		if d.Code == code {
+			t.Errorf("unexpected %s when overrides are allowed: %+v", code, d)
+		}
+	}
+
+	// Overrides disabled: exactly the finance/ap DOMAIN.md (which has a
+	// discovery: block) is warned.
+	disabled := false
+	diags := (&lint.Linter{AllowPerDomainOverrides: &disabled}).Lint(reg, records)
+	var flagged []string
+	for _, d := range diags {
+		if d.Code == code {
+			flagged = append(flagged, d.ArtifactID)
+		}
+	}
+	if len(flagged) != 1 || flagged[0] != "finance/ap" {
+		t.Errorf("discovery-override warnings = %v, want exactly [finance/ap]", flagged)
+	}
+}
+
 // Spec: §4.5.2 — domain with no imports lints clean (no false
 // positives).
 func TestRuleDomainImports_NoImportsClean(t *testing.T) {

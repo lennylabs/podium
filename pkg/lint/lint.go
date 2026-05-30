@@ -64,6 +64,14 @@ type Linter struct {
 	// skipped (offline ingest); the bundled-file existence check still
 	// runs. Ignored when Rules is set explicitly.
 	HTTPClient *http.Client
+	// AllowPerDomainOverrides reflects the §13.12 tenant
+	// discovery.allow_per_domain_overrides setting. When non-nil and
+	// false, the default rule set adds a warning on any DOMAIN.md that
+	// carries a `discovery:` block, since per-domain overrides are
+	// disabled registry-wide and the block has no effect (§4.5.5). Nil
+	// (the default) leaves overrides allowed and skips the check. Ignored
+	// when Rules is set explicitly.
+	AllowPerDomainOverrides *bool
 }
 
 // Rule is one lint check. Receiving the registry plus parsed records
@@ -137,6 +145,12 @@ func (l *Linter) Lint(reg *filesystem.Registry, records []filesystem.ArtifactRec
 	rules := l.Rules
 	if len(rules) == 0 {
 		rules = AllRulesWithClient(l.HTTPClient)
+		// §4.5.5: when the tenant disables per-domain discovery
+		// overrides, warn on any DOMAIN.md that still carries a
+		// `discovery:` block (ingest succeeds; the block is ignored).
+		if l.AllowPerDomainOverrides != nil && !*l.AllowPerDomainOverrides {
+			rules = append(rules, ruleDomainDiscoveryOverrideDisallowed{})
+		}
 	}
 	var out []Diagnostic
 	for _, r := range rules {

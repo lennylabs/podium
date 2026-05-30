@@ -160,7 +160,20 @@ func envInt(key string, def int) int {
 // by the caller from the deployment mode (§4.6 / §13.10): public for a
 // no-identity-provider standalone, otherwise the configured default
 // (F-4.6.9). The bootstrap path supplies no per-layer visibility input.
-func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Visibility, startOrder int) ([]layer.Layer, error) {
+// ingestLinter builds the ingest linter shared by the bootstrap paths:
+// §4.4 prose-URL validation (offline per PODIUM_INGEST_OFFLINE) plus the
+// §4.5.5 discovery-override warning when the tenant disabled per-domain
+// overrides (allowPerDomain false).
+func ingestLinter(allowPerDomain bool) *lint.Linter {
+	lr := lint.NewIngestLinter(isTrue(os.Getenv("PODIUM_INGEST_OFFLINE")))
+	if !allowPerDomain {
+		disabled := false
+		lr.AllowPerDomainOverrides = &disabled
+	}
+	return lr
+}
+
+func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Visibility, startOrder int, allowPerDomain bool) ([]layer.Layer, error) {
 	if layerPath == "" {
 		return []layer.Layer{}, nil
 	}
@@ -178,7 +191,9 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			Files:    os.DirFS(l.Path),
 			// §4.4: validate prose URL references with an HTTP HEAD by
 			// default; PODIUM_INGEST_OFFLINE=true skips the network probe.
-			Linter: lint.NewIngestLinter(isTrue(os.Getenv("PODIUM_INGEST_OFFLINE"))),
+			// §4.5.5: warn on DOMAIN.md discovery: blocks when per-domain
+			// overrides are disabled tenant-wide.
+			Linter: ingestLinter(allowPerDomain),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("ingest layer %s from %s: %w", l.ID, l.Path, err)
@@ -283,7 +298,7 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config) ([]la
 				TenantID: tenantID,
 				LayerID:  lc.ID,
 				Files:    os.DirFS(lc.LocalPath),
-				Linter:   lint.NewIngestLinter(isTrue(os.Getenv("PODIUM_INGEST_OFFLINE"))),
+				Linter:   ingestLinter(cfg.allowPerDomain()),
 			})
 			if err != nil {
 				return nil, fmt.Errorf("ingest declared layer %s from %s: %w", lc.ID, lc.LocalPath, err)
@@ -391,12 +406,15 @@ func Run() error {
 	// DELETE /v1/layers) see the bootstrap layers. These layers carry no
 	// per-layer visibility input, so they take the deployment default
 	// (§4.6 / §13.10 / F-4.6.9). They append after the declared layers.
-	pathLayers, err := bootstrapLayerPath(st, tenantID, cfg.layerPath, defaultBootstrapVisibility(cfg), len(declared))
+	pathLayers, err := bootstrapLayerPath(st, tenantID, cfg.layerPath, defaultBootstrapVisibility(cfg), len(declared), cfg.allowPerDomain())
 	if err != nil {
 		return err
 	}
 	bootLayers := append(declared, pathLayers...)
 	registry := core.New(st, tenantID, bootLayers)
+	// §13.12 / §4.5.5: apply the tenant registry.yaml discovery defaults
+	// and the allow_per_domain_overrides gate to load_domain rendering.
+	registry = registry.WithDiscoveryDefaults(cfg.discoveryDefaults(), cfg.allowPerDomain())
 	if v, e, err := openVectorAndEmbedder(cfg); err != nil {
 		log.Printf("warning: vector search disabled: %v", err)
 	} else if v != nil && e != nil {
@@ -654,6 +672,32 @@ type Config struct {
 	// `layers:` block. Each entry is seeded as a store.LayerConfig at
 	// startup; local sources are also ingested. Config-file-only.
 	declaredLayers []yamlLayerEntry
+	// §13.12 / §4.5.5 tenant-scope discovery rendering defaults from
+	// registry.yaml's `discovery:` block. Applied to the registry as
+	// core.DiscoveryDefaults; config-file-only.
+	discovery yamlDiscovery
+	// §4.5.5 allow_per_domain_overrides gate. nil leaves the default
+	// (true); a tenant sets it false to disable per-domain DOMAIN.md
+	// discovery overrides registry-wide and have lint warn on them.
+	allowPerDomainOverrides *bool
+}
+
+// discoveryDefaults converts the parsed registry.yaml discovery block
+// into the core tenant-default knobs.
+func (c *Config) discoveryDefaults() core.DiscoveryDefaults {
+	return core.DiscoveryDefaults{
+		MaxDepth:              c.discovery.MaxDepth,
+		NotableCount:          c.discovery.NotableCount,
+		FoldBelowArtifacts:    c.discovery.FoldBelowArtifacts,
+		TargetResponseTokens:  c.discovery.TargetResponseTokens,
+		FoldPassthroughChains: c.discovery.FoldPassthroughChains,
+	}
+}
+
+// allowPerDomain resolves the §4.5.5 allow_per_domain_overrides gate,
+// defaulting to true when the tenant did not set it.
+func (c *Config) allowPerDomain() bool {
+	return c.allowPerDomainOverrides == nil || *c.allowPerDomainOverrides
 }
 
 // Setting names one resolved field together with the env var (or

@@ -51,8 +51,12 @@ type DomainAnalysisChild struct {
 //   - split candidate: subdomain with recursive_count >= 20 and
 //     tag entropy >= 0.7.
 //
-// These are §4.5.5's documented heuristics; the registry-wide
-// `discovery:` config can override them later.
+// §4.5.5 names the sparsity, pass-through, split, and fold heuristics but
+// does not quantify them, so these values are fixed. The §13.12 tenant
+// `discovery:` block tunes load_domain rendering (max_depth, fold_below,
+// notable_count, target_response_tokens), not the analyze report; adding
+// analyze-threshold knobs would introduce configuration the spec does not
+// define (F-4.5.12).
 func (r *Registry) AnalyzeDomain(ctx context.Context, id layer.Identity, path string) (*DomainAnalysis, error) {
 	visible, err := r.visibleManifests(ctx, id)
 	if err != nil {

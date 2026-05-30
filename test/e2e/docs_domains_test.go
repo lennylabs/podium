@@ -1161,6 +1161,73 @@ func TestDomains_ExcludeAfterIncludePipeline(t *testing.T) {
 	}
 }
 
+// T-D-domains-56 — load_domain tags each notable entry with its §4.5.5
+// selection source: "featured" for an author-curated entry, "signal"
+// otherwise. spec: §4.5.5 (F-4.5.9)
+func TestDomains_NotableSourceTag(t *testing.T) {
+	t.Parallel()
+	md := "---\ndescription: AP\ndiscovery:\n  featured:\n    - finance/ap/zebra\n---\n\n# AP\n"
+	srv := startServer(t, dmFeaturedRegistry(t, md, "alpha", "zebra"))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance/ap", &m)
+	if e := dmNotableEntry(m, "finance/ap/zebra"); e == nil || e["source"] != "featured" {
+		t.Errorf("featured entry source = %v, want %q", entrySource(e), "featured")
+	}
+	if e := dmNotableEntry(m, "finance/ap/alpha"); e == nil || e["source"] != "signal" {
+		t.Errorf("non-featured entry source = %v, want %q", entrySource(e), "signal")
+	}
+}
+
+// entrySource returns the "source" field of a notable entry, or "<nil>".
+func entrySource(e map[string]any) any {
+	if e == nil {
+		return "<nil>"
+	}
+	return e["source"]
+}
+
+// T-D-domains-57 — target_response_tokens tightens the rendered subtree
+// depth and the note reports it ("Subtree depth reduced from X to Y ...").
+// spec: §4.5.5 (F-4.5.10)
+func TestDomains_BudgetReducesSubtreeDepthNote(t *testing.T) {
+	t.Parallel()
+	// finance has no direct artifacts (so the notable list is empty and
+	// only depth can be tightened) and a two-level branchy subtree.
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/DOMAIN.md":                "---\ndescription: Finance\ndiscovery:\n  target_response_tokens: 5\n---\n\n# Finance\n",
+		"finance/dept/teamA/x/ARTIFACT.md": dmSkillArtifact,
+		"finance/dept/teamA/x/SKILL.md":    skillBody("x"),
+		"finance/dept/teamB/y/ARTIFACT.md": dmSkillArtifact,
+		"finance/dept/teamB/y/SKILL.md":    skillBody("y"),
+	}))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance&depth=2", &m)
+	note, _ := m["note"].(string)
+	if !strings.Contains(strings.ToLower(note), "subtree depth reduced from") {
+		t.Errorf("note = %q, want a subtree-depth-reduction sentence", note)
+	}
+}
+
+// T-D-domains-58 — a single-child intermediate domain whose only members
+// arrive through DOMAIN.md include: is not collapsed away as a bare
+// pass-through (§4.5.5). spec: §4.5.5 (F-4.5.13)
+func TestDomains_ImportedMembersPreventCollapse(t *testing.T) {
+	t.Parallel()
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		// finance/hub has no canonical artifacts; only imported members.
+		"finance/hub/DOMAIN.md":            "---\ninclude:\n  - _shared/lib/**\n---\n",
+		"finance/hub/sub/leaf/ARTIFACT.md": dmSkillArtifact,
+		"finance/hub/sub/leaf/SKILL.md":    skillBody("leaf"),
+		"_shared/lib/routing/ARTIFACT.md":  dmSkillArtifact,
+		"_shared/lib/routing/SKILL.md":     skillBody("routing"),
+	}))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance", &m)
+	if !hasSubdomain(m, "finance/hub") {
+		t.Errorf("finance/hub collapsed away despite imported members: %v", m["subdomains"])
+	}
+}
+
 // T-D-domains-55 — a cross-domain import from an unlisted _shared into
 // finance/ap surfaces the helpers under finance/ap while _shared stays hidden
 // from enumeration (§4.5.2, §4.5.3). spec: §4.5.2 / §4.5.3 (F-4.5.5, F-4.5.6)

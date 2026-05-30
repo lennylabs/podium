@@ -18,7 +18,7 @@ import (
 // another layer later" case).
 type ruleDomainImportsResolve struct{}
 
-func (ruleDomainImportsResolve) Code() string        { return "lint.domain_import_unresolved" }
+func (ruleDomainImportsResolve) Code() string { return "lint.domain_import_unresolved" }
 
 func (r ruleDomainImportsResolve) Check(reg *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	if reg == nil {
@@ -57,7 +57,7 @@ func (r ruleDomainImportsResolve) Check(reg *filesystem.Registry, records []file
 // warning naming the participants.
 type ruleDomainImportCycle struct{}
 
-func (ruleDomainImportCycle) Code() string        { return "lint.domain_import_cycle" }
+func (ruleDomainImportCycle) Code() string { return "lint.domain_import_cycle" }
 
 func (r ruleDomainImportCycle) Check(reg *filesystem.Registry, _ []filesystem.ArtifactRecord) []Diagnostic {
 	if reg == nil {
@@ -83,6 +83,40 @@ func (r ruleDomainImportCycle) Check(reg *filesystem.Registry, _ []filesystem.Ar
 			Severity:   SeverityWarning,
 			Message:    fmt.Sprintf("DOMAIN.md import cycle: %s", strings.Join(cyc, " -> ")),
 		})
+	}
+	return out
+}
+
+// ruleDomainDiscoveryOverrideDisallowed implements the §4.5.5
+// "allow_per_domain_overrides: false" lint promise: when the tenant
+// disables per-domain discovery overrides registry-wide, a DOMAIN.md
+// that still carries a `discovery:` block has no effect, so lint warns
+// (ingest still succeeds). The rule is only added to the rule set when
+// the tenant setting is false (see Linter.AllowPerDomainOverrides).
+type ruleDomainDiscoveryOverrideDisallowed struct{}
+
+func (ruleDomainDiscoveryOverrideDisallowed) Code() string {
+	return "lint.domain_discovery_override_disabled"
+}
+
+func (r ruleDomainDiscoveryOverrideDisallowed) Check(reg *filesystem.Registry, _ []filesystem.ArtifactRecord) []Diagnostic {
+	if reg == nil {
+		return nil
+	}
+	var out []Diagnostic
+	for _, layer := range reg.Layers {
+		for path, dom := range walkDomainsInLayer(layer) {
+			if dom.Discovery == nil {
+				continue
+			}
+			out = append(out, Diagnostic{
+				ArtifactID: path,
+				Code:       r.Code(),
+				Severity:   SeverityWarning,
+				Message: "DOMAIN.md discovery: block is ignored because the tenant " +
+					"sets discovery.allow_per_domain_overrides: false",
+			})
+		}
 	}
 	return out
 }

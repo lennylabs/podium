@@ -29,22 +29,43 @@ type domainKnobs struct {
 	keywords             []string
 }
 
-// resolveKnobs layers the §4.5.5 discovery configuration: package
-// defaults, then the requested domain's merged DOMAIN.md discovery
-// block (per-domain override), then the caller-supplied options (which
-// win, per §4.5.5 "Caller overrides"). The tenant-scope registry.yaml
-// discovery block and allow_per_domain_overrides gate are out of scope
-// here (tracked separately).
-func resolveKnobs(opts LoadDomainOptions, dom *manifest.Domain) domainKnobs {
+// resolveKnobs layers the §4.5.5 discovery configuration in precedence
+// order: package defaults, then the §13.12 tenant registry.yaml
+// `discovery:` block, then the requested domain's merged DOMAIN.md
+// `discovery:` block (per-domain override), then the caller-supplied
+// options (which win, per §4.5.5 "Caller overrides"). The per-domain
+// `discovery:` block is applied only when allowPerDomain is true; a
+// tenant that sets discovery.allow_per_domain_overrides: false disables
+// per-domain discovery overrides registry-wide. The DOMAIN.md
+// include:/exclude: lists are top-level fields, not discovery overrides,
+// so they apply regardless of the gate.
+func resolveKnobs(opts LoadDomainOptions, dom *manifest.Domain, td DiscoveryDefaults, allowPerDomain bool) domainKnobs {
 	k := domainKnobs{
-		maxDepth:        DefaultMaxDepth,
-		notableCount:    DefaultNotableCount,
-		foldPassthrough: true,
+		maxDepth:             DefaultMaxDepth,
+		notableCount:         DefaultNotableCount,
+		targetResponseTokens: DefaultTargetResponseTokens,
+		foldPassthrough:      true,
+	}
+	// Tenant-scope registry.yaml defaults override the package defaults.
+	if td.MaxDepth > 0 {
+		k.maxDepth = td.MaxDepth
+	}
+	if td.NotableCount > 0 {
+		k.notableCount = td.NotableCount
+	}
+	if td.FoldBelowArtifacts > 0 {
+		k.foldBelow = td.FoldBelowArtifacts
+	}
+	if td.TargetResponseTokens > 0 {
+		k.targetResponseTokens = td.TargetResponseTokens
+	}
+	if td.FoldPassthroughChains != nil {
+		k.foldPassthrough = *td.FoldPassthroughChains
 	}
 	if dom != nil {
 		k.include = dom.Include
 		k.exclude = dom.Exclude
-		if d := dom.Discovery; d != nil {
+		if d := dom.Discovery; d != nil && allowPerDomain {
 			if d.MaxDepth > 0 {
 				k.maxDepth = d.MaxDepth
 			}
@@ -184,7 +205,7 @@ func childDescription(path string, merged map[string]*manifest.Domain) string {
 // requested domain's level (where the folded artifacts have a notable
 // list to surface in); deeper levels carry descriptions only per
 // §4.5.5.
-func (r *Registry) renderSubtree(under []store.ManifestRecord, merged map[string]*manifest.Domain, path string, depth int, foldPassthrough bool) []DomainDescriptor {
+func (r *Registry) renderSubtree(under []store.ManifestRecord, merged map[string]*manifest.Domain, path string, depth int, foldPassthrough bool, curated map[string]bool) []DomainDescriptor {
 	if depth <= 0 {
 		return nil
 	}
@@ -202,7 +223,7 @@ func (r *Registry) renderSubtree(under []store.ManifestRecord, merged map[string
 		}
 		renderedPath := childPath
 		if foldPassthrough {
-			renderedPath = collapsePassthroughChain(under, childPath)
+			renderedPath = collapsePassthroughChain(under, childPath, curated)
 		}
 		if unlistedAt(renderedPath, merged) {
 			continue
@@ -211,7 +232,7 @@ func (r *Registry) renderSubtree(under []store.ManifestRecord, merged map[string
 			Path:        renderedPath,
 			Name:        lastSegment(renderedPath),
 			Description: childDescription(renderedPath, merged),
-			Subdomains:  r.renderSubtree(under, merged, renderedPath, depth-1, foldPassthrough),
+			Subdomains:  r.renderSubtree(under, merged, renderedPath, depth-1, foldPassthrough, curated),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
@@ -286,14 +307,4 @@ func latestRecord(recs []store.ManifestRecord) store.ManifestRecord {
 		}
 	}
 	return recs[len(recs)-1]
-}
-
-// visibleCount returns the number of distinct artifact IDs in records,
-// the §4.5.5 visibility-aware count used for fold_below decisions.
-func visibleCount(records []store.ManifestRecord) int {
-	seen := map[string]bool{}
-	for _, m := range records {
-		seen[m.ArtifactID] = true
-	}
-	return len(seen)
 }

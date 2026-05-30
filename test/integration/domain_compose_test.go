@@ -95,6 +95,105 @@ func TestDomainComposition_IngestToLoadDomain(t *testing.T) {
 	}
 }
 
+// Spec: §13.12 / §4.5.5 (F-4.5.11) — through the real ingest walk, a
+// per-domain DOMAIN.md discovery override is applied when
+// allow_per_domain_overrides is true and ignored when false, while the
+// tenant registry.yaml discovery default governs the rest.
+func TestDomainComposition_AllowPerDomainOverridesGate(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	testharness.WriteTree(t, dir,
+		testharness.WriteTreeOption{
+			Path:    "finance/ap/DOMAIN.md",
+			Content: "---\ndescription: AP\ndiscovery:\n  notable_count: 1\n---\n",
+		},
+		testharness.WriteTreeOption{Path: "finance/ap/a/ARTIFACT.md", Content: contextArtifact},
+		testharness.WriteTreeOption{Path: "finance/ap/b/ARTIFACT.md", Content: contextArtifact},
+		testharness.WriteTreeOption{Path: "finance/ap/c/ARTIFACT.md", Content: contextArtifact},
+	)
+	st := store.NewMemory()
+	ctx := context.Background()
+	if err := st.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	if _, err := ingest.Ingest(ctx, st, ingest.Request{TenantID: "t", LayerID: "L", Files: os.DirFS(dir)}); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	layers := []layer.Layer{{ID: "L", Visibility: layer.Visibility{Public: true}, Precedence: 1}}
+	id := layer.Identity{IsPublic: true}
+	tenant := core.DiscoveryDefaults{NotableCount: 3}
+
+	// Overrides allowed: the DOMAIN.md notable_count: 1 wins.
+	reg := core.New(st, "t", layers).WithDiscoveryDefaults(tenant, true)
+	res, err := reg.LoadDomain(ctx, id, "finance/ap", core.LoadDomainOptions{})
+	if err != nil {
+		t.Fatalf("LoadDomain(allowed): %v", err)
+	}
+	if len(res.Notable) != 1 {
+		t.Errorf("allowed: notable = %d, want 1 (per-domain override)", len(res.Notable))
+	}
+
+	// Overrides disabled: the DOMAIN.md discovery block is ignored, so the
+	// tenant default notable_count: 3 governs.
+	reg = core.New(st, "t", layers).WithDiscoveryDefaults(tenant, false)
+	res, err = reg.LoadDomain(ctx, id, "finance/ap", core.LoadDomainOptions{})
+	if err != nil {
+		t.Fatalf("LoadDomain(disabled): %v", err)
+	}
+	if len(res.Notable) != 3 {
+		t.Errorf("disabled: notable = %d, want 3 (per-domain override ignored)", len(res.Notable))
+	}
+}
+
+// Spec: §4.5.5 (F-4.5.13) — through the real ingest walk, a domain whose
+// only members arrive via DOMAIN.md include: counts them toward the
+// fold_below threshold and is preserved as a pass-through stop, rather
+// than being folded or collapsed away.
+func TestDomainComposition_ImportedMembersPreserveDomain(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	testharness.WriteTree(t, dir,
+		// finance/hub has no canonical artifacts of its own; its members
+		// are imported. A single canonical descendant makes it a one-child
+		// chain that the count-only logic would collapse.
+		// No description/keywords: curation comes purely from the resolved
+		// include: members, isolating the F-4.5.13 import path.
+		testharness.WriteTreeOption{
+			Path:    "finance/hub/DOMAIN.md",
+			Content: "---\ninclude:\n  - _shared/lib/**\n---\n",
+		},
+		testharness.WriteTreeOption{Path: "finance/hub/sub/leaf/ARTIFACT.md", Content: contextArtifact},
+		testharness.WriteTreeOption{Path: "_shared/lib/a/ARTIFACT.md", Content: contextArtifact},
+		testharness.WriteTreeOption{Path: "_shared/lib/b/ARTIFACT.md", Content: contextArtifact},
+	)
+	st := store.NewMemory()
+	ctx := context.Background()
+	if err := st.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	if _, err := ingest.Ingest(ctx, st, ingest.Request{TenantID: "t", LayerID: "L", Files: os.DirFS(dir)}); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	reg := core.New(st, "t", []layer.Layer{{ID: "L", Visibility: layer.Visibility{Public: true}, Precedence: 1}})
+	res, err := reg.LoadDomain(ctx, layer.Identity{IsPublic: true}, "finance", core.LoadDomainOptions{Depth: 1})
+	if err != nil {
+		t.Fatalf("LoadDomain: %v", err)
+	}
+	var got []string
+	for _, s := range res.Subdomains {
+		got = append(got, s.Path)
+	}
+	found := false
+	for _, p := range got {
+		if p == "finance/hub" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("finance/hub collapsed past despite imported members; subdomains = %v", got)
+	}
+}
+
 func hasString(ss []string, want string) bool {
 	for _, s := range ss {
 		if s == want {

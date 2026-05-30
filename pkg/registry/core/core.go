@@ -67,6 +67,30 @@ type Registry struct {
 	// failure, transparency-anchor failure, etc.). Nil = no
 	// outbound notifications.
 	notifier NotificationFunc
+	// discoveryDefaults are the §13.12 tenant-scope `discovery:` knobs
+	// from registry.yaml. They override the package defaults and are in
+	// turn overridden by a per-domain DOMAIN.md `discovery:` block
+	// (§4.5.5 "Where they're configured"). The zero value leaves the
+	// package defaults in force.
+	discoveryDefaults DiscoveryDefaults
+	// allowPerDomainOverrides gates whether a per-domain DOMAIN.md
+	// `discovery:` block overrides the tenant defaults (§4.5.5). The
+	// default is true; a tenant that sets
+	// discovery.allow_per_domain_overrides: false disables per-domain
+	// discovery overrides registry-wide.
+	allowPerDomainOverrides bool
+}
+
+// DiscoveryDefaults carries the §13.12 tenant-scope discovery knobs from
+// registry.yaml. A zero field means "unset" and leaves the §4.5.5 package
+// default in force (max_depth 3, notable_count 10, target_response_tokens
+// 4000, fold_below_artifacts 0, fold_passthrough_chains true).
+type DiscoveryDefaults struct {
+	MaxDepth              int
+	NotableCount          int
+	FoldBelowArtifacts    int
+	TargetResponseTokens  int
+	FoldPassthroughChains *bool
 }
 
 // NotificationFunc fires when the registry observes an operational
@@ -100,7 +124,20 @@ type AuditEvent struct {
 // list. The layer list governs visibility filtering (§4.6); empty means
 // every record is visible.
 func New(s store.Store, tenantID string, layers []layer.Layer) *Registry {
-	return &Registry{store: s, tenantID: tenantID, layers: layers}
+	// §4.5.5: per-domain discovery overrides are allowed unless a tenant
+	// opts out via discovery.allow_per_domain_overrides: false.
+	return &Registry{store: s, tenantID: tenantID, layers: layers, allowPerDomainOverrides: true}
+}
+
+// WithDiscoveryDefaults wires the §13.12 tenant-scope `discovery:` knobs
+// (from registry.yaml) and the allow_per_domain_overrides gate. These
+// override the §4.5.5 package defaults; a per-domain DOMAIN.md
+// `discovery:` block overrides them in turn unless allowPerDomain is
+// false. Returns the registry for chaining.
+func (r *Registry) WithDiscoveryDefaults(d DiscoveryDefaults, allowPerDomain bool) *Registry {
+	r.discoveryDefaults = d
+	r.allowPerDomainOverrides = allowPerDomain
+	return r
 }
 
 // WithAudit attaches an AuditEmitter so every meta-tool invocation
@@ -210,6 +247,15 @@ type ArtifactDescriptor struct {
 	// into the parent's leaf set (§4.5.5 folding mechanics). Empty
 	// when the artifact was a direct child of the requested domain.
 	FoldedFrom string
+	// Source discriminates the §4.5.5 notable-selection sources for an
+	// entry in load_domain's notable list: "featured" for an artifact
+	// named in the domain's featured: list, "signal" otherwise. Per
+	// §4.5.5 an artifact present in both sources is tagged "featured"
+	// (featured wins). The learn-from-usage signal source (§3.3) is not
+	// yet wired, so the "signal" slot is currently filled by domain
+	// enumeration ranking. Empty outside load_domain (search results do
+	// not carry a notable source).
+	Source string
 }
 
 // LoadDomainOptions are the optional knobs from §5.
@@ -237,10 +283,13 @@ type LoadDomainOptions struct {
 	TargetResponseTokens int
 }
 
-// DefaultMaxDepth is the §4.5.5 tenant default.
+// DefaultMaxDepth, DefaultNotableCount, and DefaultTargetResponseTokens
+// are the §4.5.5 tenant defaults applied when neither the tenant
+// registry.yaml `discovery:` block nor a per-domain DOMAIN.md sets them.
 const (
-	DefaultMaxDepth     = 3
-	DefaultNotableCount = 10
+	DefaultMaxDepth             = 3
+	DefaultNotableCount         = 10
+	DefaultTargetResponseTokens = 4000
 )
 
 // LoadDomain returns the domain map for path. An empty path returns
@@ -278,7 +327,7 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 	}
 
 	requested := merged[path]
-	knobs := resolveKnobs(opts, requested)
+	knobs := resolveKnobs(opts, requested, r.discoveryDefaults, r.allowPerDomainOverrides)
 
 	// §4.5.5 caller overrides: depth overrides the configured default
 	// (the resolved max_depth ceiling) and is silently capped at it.
@@ -306,6 +355,11 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 	under := manifestsUnder(visible, path)
 	allIDs := manifestIDs(visible)
 	byID := latestByID(visible)
+	// §4.5.5 / F-4.5.13: domains that carry curated content (a DOMAIN.md
+	// description/body/keywords or resolved include: members) are not bare
+	// pass-throughs and must not be collapsed away. Precomputed once and
+	// shared by the fold/collapse logic at every level.
+	curated := curatedDomainPaths(merged, allIDs)
 
 	// §4.5.5 candidate pool for the notable list: the requested
 	// domain's direct artifacts plus those brought in by include:
@@ -345,7 +399,9 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 		if unlistedAt(childPath, merged) {
 			continue // §4.5.3 unlisted subtree removed from enumeration
 		}
-		recursiveCount := visibleCount(groups[name])
+		// §4.5.5 visibility-aware count: canonical descendants plus any
+		// members a DOMAIN.md in the subtree pulls in via include: (F-4.5.13).
+		recursiveCount := subtreeMemberCount(groups[name], childPath, merged, allIDs)
 		if knobs.foldBelow > 0 && recursiveCount < knobs.foldBelow {
 			for _, m := range dedupeLatest(groups[name]) {
 				if domainpkg.MatchAny(knobs.exclude, m.ArtifactID) {
@@ -362,7 +418,7 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 		}
 		renderedPath := childPath
 		if knobs.foldPassthrough {
-			renderedPath = collapsePassthroughChain(under, childPath)
+			renderedPath = collapsePassthroughChain(under, childPath, curated)
 		}
 		if unlistedAt(renderedPath, merged) {
 			continue // collapsed through an unlisted intermediate
@@ -371,7 +427,7 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 			Path:        renderedPath,
 			Name:        lastSegment(renderedPath),
 			Description: childDescription(renderedPath, merged),
-			Subdomains:  r.renderSubtree(under, merged, renderedPath, renderDepth-1, knobs.foldPassthrough),
+			Subdomains:  r.renderSubtree(under, merged, renderedPath, renderDepth-1, knobs.foldPassthrough, curated),
 		})
 	}
 	sort.Slice(res.Subdomains, func(i, j int) bool {
@@ -379,32 +435,50 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 	})
 
 	notable = orderNotable(notable, knobs.featured, knobs.deprioritize)
-	originalNotable := len(notable)
 	if len(notable) > knobs.notableCount {
 		notable = notable[:knobs.notableCount]
 	}
 
-	// §4.5.5 target_response_tokens: if the soft budget is set and the
-	// estimated response exceeds it, tighten the notable list further.
-	tightenedTo := -1
+	// §4.5.5 target_response_tokens soft budget: when the estimated
+	// response exceeds the budget, tighten the rendered subtree depth
+	// first (coarse) and then the notable list (fine), surfacing each
+	// reduction in the rendering note. Depth reduction drops the deepest
+	// nested levels; the immediate children (level 1) and the curated
+	// notable list survive as long as the budget allows.
+	notableFrom, notableTo := len(notable), -1
+	depthFrom, depthTo := 0, 0
 	if knobs.targetResponseTokens > 0 {
 		budget := knobs.targetResponseTokens
+		startDepth := renderedDepth(res.Subdomains)
+		eff := startDepth
+		for eff > 1 && estimateResponseTokens(res.Subdomains, notable) > budget {
+			eff--
+			res.Subdomains = truncateToDepth(res.Subdomains, eff)
+		}
+		if eff < startDepth {
+			depthFrom, depthTo = startDepth, eff
+		}
 		for len(notable) > 0 && estimateResponseTokens(res.Subdomains, notable) > budget {
 			notable = notable[:len(notable)-1]
-			tightenedTo = len(notable)
+			notableTo = len(notable)
 		}
 	}
 	res.Notable = notable
 
-	// §4.5.5 rendering note: cover the budget reduction and the
-	// depth-cap cases. Folding decisions are not surfaced — folded
-	// artifacts already carry FoldedFrom in the response.
+	// §4.5.5 rendering note: budget reductions (notable and depth, as one
+	// sentence) and the depth-cap case. Folding decisions are not surfaced
+	// — folded artifacts already carry FoldedFrom in the response.
 	notes := []string{}
-	if tightenedTo >= 0 {
-		notes = append(notes, fmt.Sprintf(
-			"Notable list reduced from %d to %d to fit the response budget.",
-			originalNotable, tightenedTo,
-		))
+	clauses := []string{}
+	if notableTo >= 0 {
+		clauses = append(clauses, fmt.Sprintf("notable list reduced from %d to %d", notableFrom, notableTo))
+	}
+	if depthFrom > 0 {
+		clauses = append(clauses, fmt.Sprintf("subtree depth reduced from %d to %d", depthFrom, depthTo))
+	}
+	if len(clauses) > 0 {
+		s := strings.Join(clauses, "; ") + " to fit the response budget."
+		notes = append(notes, strings.ToUpper(s[:1])+s[1:])
 	}
 	if depthCapped {
 		notes = append(notes, fmt.Sprintf(
@@ -476,12 +550,18 @@ func directArtifactsOf(under []store.ManifestRecord, prefix string) []store.Mani
 	return out
 }
 
-// collapsePassthroughChain walks down a single-child chain that has
-// no direct artifacts at the current level, returning the deepest
-// non-passthrough path. Used by §4.5.5 fold_passthrough_chains.
-func collapsePassthroughChain(under []store.ManifestRecord, path string) string {
+// collapsePassthroughChain walks down a single-child chain that has no
+// direct artifacts and no curated DOMAIN.md at the current level,
+// returning the deepest non-passthrough path. A level stops the collapse
+// when it has direct artifacts, is curated (a DOMAIN.md description,
+// body, keywords, or resolved include: members — F-4.5.13), or has more
+// than one immediate child. Used by §4.5.5 fold_passthrough_chains.
+func collapsePassthroughChain(under []store.ManifestRecord, path string, curated map[string]bool) string {
 	for {
 		if len(directArtifactsOf(under, path)) > 0 {
+			return path
+		}
+		if curated[path] {
 			return path
 		}
 		groups := groupByImmediateChild(under, path)
@@ -496,15 +576,63 @@ func collapsePassthroughChain(under []store.ManifestRecord, path string) string 
 	}
 }
 
+// curatedDomainPaths returns the set of domain paths that must not be
+// collapsed away as bare pass-throughs (§4.5.5 / F-4.5.13). A path is
+// curated when its merged DOMAIN.md carries a description, a prose body,
+// or keywords, or when its include: (after exclude:) resolves at least
+// one imported member. Collapsing past such a domain would drop its
+// description and curated member set from the rendered tree.
+func curatedDomainPaths(merged map[string]*manifest.Domain, allIDs []string) map[string]bool {
+	out := map[string]bool{}
+	for p, dom := range merged {
+		if dom == nil {
+			continue
+		}
+		if strings.TrimSpace(dom.Description) != "" || strings.TrimSpace(dom.Body) != "" {
+			out[p] = true
+			continue
+		}
+		if dom.Discovery != nil && len(dom.Discovery.Keywords) > 0 {
+			out[p] = true
+			continue
+		}
+		if len(domainpkg.ResolveImports(dom.Include, dom.Exclude, allIDs)) > 0 {
+			out[p] = true
+		}
+	}
+	return out
+}
+
+// subtreeMemberCount is the §4.5.5 visibility-aware count for the subtree
+// rooted at subtreePath: the distinct canonical artifacts in records,
+// unioned with every artifact pulled in by a DOMAIN.md include: (after
+// exclude:) anywhere in the subtree. Imported members count toward the
+// fold_below_artifacts decision so a domain whose members arrive only
+// through include: is not treated as sparse (F-4.5.13).
+func subtreeMemberCount(records []store.ManifestRecord, subtreePath string, merged map[string]*manifest.Domain, allIDs []string) int {
+	seen := map[string]bool{}
+	for _, m := range records {
+		seen[m.ArtifactID] = true
+	}
+	for p, dom := range merged {
+		if dom == nil || !inPrefix(p, subtreePath) {
+			continue
+		}
+		for _, id := range domainpkg.ResolveImports(dom.Include, dom.Exclude, allIDs) {
+			seen[id] = true
+		}
+	}
+	return len(seen)
+}
+
 // estimateResponseTokens approximates the token cost of a load_domain
 // response for the §4.5.5 budget check. The estimate stays
 // dependency-free; it counts identifier and description characters
-// divided by the typical 4-bytes-per-token ratio.
+// divided by the typical 4-bytes-per-token ratio. The subtree term
+// recurses into nested children so the budget pass's depth reduction
+// measurably shrinks the estimate.
 func estimateResponseTokens(subs []DomainDescriptor, notable []ArtifactDescriptor) int {
-	bytes := 0
-	for _, s := range subs {
-		bytes += len(s.Path) + len(s.Name) + len(s.Description) + 16
-	}
+	bytes := subdomainBytes(subs)
 	for _, n := range notable {
 		bytes += len(n.ID) + len(n.Description) + len(n.Type) + 32
 		for _, t := range n.Tags {
@@ -514,12 +642,65 @@ func estimateResponseTokens(subs []DomainDescriptor, notable []ArtifactDescripto
 	return bytes / 4
 }
 
+// subdomainBytes sums the descriptor bytes for a subdomain tree,
+// recursing into the nested children so the estimate tracks the full
+// rendered depth (§4.5.5 budget).
+func subdomainBytes(subs []DomainDescriptor) int {
+	bytes := 0
+	for _, s := range subs {
+		bytes += len(s.Path) + len(s.Name) + len(s.Description) + 16
+		bytes += subdomainBytes(s.Subdomains)
+	}
+	return bytes
+}
+
+// renderedDepth returns the number of levels present in a rendered
+// subdomain tree: 0 for an empty slice, 1 for a flat list of children
+// with no nested subdomains, and so on. The §4.5.5 budget pass uses it to
+// know how far the subtree can be compressed before only the immediate
+// children remain.
+func renderedDepth(subs []DomainDescriptor) int {
+	max := 0
+	for _, s := range subs {
+		if d := 1 + renderedDepth(s.Subdomains); d > max {
+			max = d
+		}
+	}
+	return max
+}
+
+// truncateToDepth returns subs with nesting limited to d levels (the
+// immediate children are level 1). Levels deeper than d have their child
+// lists dropped. Used by the §4.5.5 budget pass to compress the rendered
+// subtree depth without dropping the immediate children.
+func truncateToDepth(subs []DomainDescriptor, d int) []DomainDescriptor {
+	out := make([]DomainDescriptor, len(subs))
+	for i, s := range subs {
+		if d <= 1 {
+			s.Subdomains = nil
+		} else {
+			s.Subdomains = truncateToDepth(s.Subdomains, d-1)
+		}
+		out[i] = s
+	}
+	return out
+}
+
+// §4.5.5 notable-selection source tags. featured marks an author-curated
+// entry; signal marks every other entry (currently surfaced by domain
+// enumeration ranking pending the §3.3 learn-from-usage signal source).
+const (
+	sourceFeatured = "featured"
+	sourceSignal   = "signal"
+)
+
 // orderNotable surfaces featured IDs first (in author-supplied order),
 // then the remaining notable artifacts in alphabetical ID order, with
 // any artifact matching a deprioritize glob ranked last (§4.5.5). Per
 // §4.5.5 deduplication an artifact appearing in both featured and the
 // alphabetical list keeps its featured position; featured always wins
-// over deprioritize.
+// over deprioritize. Each entry is tagged with its §4.5.5 source:
+// "featured" for a featured ID, "signal" otherwise.
 func orderNotable(notable []ArtifactDescriptor, featured, deprioritize []string) []ArtifactDescriptor {
 	byID := map[string]ArtifactDescriptor{}
 	for _, n := range notable {
@@ -529,6 +710,7 @@ func orderNotable(notable []ArtifactDescriptor, featured, deprioritize []string)
 	used := map[string]bool{}
 	for _, id := range featured {
 		if d, ok := byID[id]; ok && !used[id] {
+			d.Source = sourceFeatured
 			out = append(out, d)
 			used[id] = true
 		}
@@ -539,6 +721,7 @@ func orderNotable(notable []ArtifactDescriptor, featured, deprioritize []string)
 		if used[n.ID] {
 			continue
 		}
+		n.Source = sourceSignal
 		if len(deprioritize) > 0 && domainpkg.MatchAny(deprioritize, n.ID) {
 			low = append(low, n)
 			continue

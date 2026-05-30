@@ -406,6 +406,11 @@ type ArtifactDescriptor struct {
 	// into this domain's leaf set (§4.5.5 folding mechanics). Empty for
 	// a direct child of the requested domain.
 	FoldedFrom string `json:"folded_from,omitempty"`
+	// Source tags a load_domain notable entry with its §4.5.5
+	// notable-selection source: "featured" for an author-curated entry,
+	// "signal" otherwise. Omitted on search results, which carry no
+	// notable source.
+	Source string `json:"source,omitempty"`
 }
 
 // SearchResponse is the common envelope for both search endpoints.
@@ -846,6 +851,7 @@ func descriptorOf(a core.ArtifactDescriptor) ArtifactDescriptor {
 		Score:       a.Score,
 		Sensitivity: a.Sensitivity,
 		FoldedFrom:  a.FoldedFrom,
+		Source:      a.Source,
 	}
 }
 

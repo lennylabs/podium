@@ -46,6 +46,54 @@ func TestApplyYAML_FillsMissingDefaults(t *testing.T) {
 	}
 }
 
+// Spec: §13.12 / §4.5.5 (F-4.5.11) — the registry.yaml discovery block
+// parses into the config and resolves to core.DiscoveryDefaults plus the
+// allow_per_domain_overrides gate.
+func TestApplyYAML_DiscoveryBlock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "registry.yaml")
+	body := []byte(`discovery:
+  max_depth: 4
+  notable_count: 7
+  fold_below_artifacts: 2
+  fold_passthrough_chains: false
+  target_response_tokens: 3000
+  allow_per_domain_overrides: false
+`)
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	t.Setenv("PODIUM_CONFIG_FILE", path)
+	y, err := readYAMLConfig()
+	if err != nil {
+		t.Fatalf("readYAMLConfig: %v", err)
+	}
+	c := &Config{}
+	applyYAML(c, y)
+
+	if c.allowPerDomain() {
+		t.Error("allowPerDomain() = true, want false (allow_per_domain_overrides: false)")
+	}
+	d := c.discoveryDefaults()
+	if d.MaxDepth != 4 || d.NotableCount != 7 || d.FoldBelowArtifacts != 2 || d.TargetResponseTokens != 3000 {
+		t.Errorf("discoveryDefaults = %+v, want max_depth 4 / notable 7 / fold_below 2 / budget 3000", d)
+	}
+	if d.FoldPassthroughChains == nil || *d.FoldPassthroughChains {
+		t.Errorf("FoldPassthroughChains = %v, want explicit false", d.FoldPassthroughChains)
+	}
+}
+
+// Spec: §4.5.5 (F-4.5.11) — when registry.yaml omits the discovery
+// block, allow_per_domain_overrides defaults to true (per-domain
+// overrides allowed).
+func TestApplyYAML_DiscoveryDefaultsAllowOverrides(t *testing.T) {
+	c := &Config{}
+	applyYAML(c, &yamlConfig{})
+	if !c.allowPerDomain() {
+		t.Error("allowPerDomain() = false, want true by default")
+	}
+}
+
 // Spec: §13.10 — yaml fills defaultLayerVisibility only when the
 // config did not see PODIUM_DEFAULT_LAYER_VISIBILITY (left empty).
 func TestApplyYAML_DefaultLayerVisibilityFillsWhenEmpty(t *testing.T) {

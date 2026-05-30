@@ -19,6 +19,15 @@ import (
 //
 // Inputs are ordered lowest-precedence first. Returns a single merged
 // Domain ready for rendering.
+//
+// "Last-layer-wins" for description and body is read as "the last layer
+// that supplies a value wins" (F-4.5.8): a higher-precedence layer whose
+// DOMAIN.md omits description/body does not clear a lower layer's value.
+// YAML parses an omitted `description:` and an explicit `description: ""`
+// to the same empty string, so the two cannot be distinguished after
+// parse; treating empty as "clear" would erase the org-wide description
+// whenever a higher layer's DOMAIN.md only adds include: patterns, which
+// is the common case (a team layer that imports without restating prose).
 func MergeAcrossLayers(candidates []*manifest.Domain) *manifest.Domain {
 	if len(candidates) == 0 {
 		return nil
