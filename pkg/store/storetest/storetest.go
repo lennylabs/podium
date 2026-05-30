@@ -11,6 +11,10 @@ package storetest
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/lennylabs/podium/pkg/store"
@@ -27,6 +31,7 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("TenantIsolation", func(t *testing.T) { tenantIsolation(t, factory(t)) })
 	t.Run("ImmutabilityInvariant", func(t *testing.T) { immutabilityInvariant(t, factory(t)) })
 	t.Run("ImmutabilityIdempotent", func(t *testing.T) { immutabilityIdempotent(t, factory(t)) })
+	t.Run("ConcurrentImmutabilityViolation", func(t *testing.T) { concurrentImmutabilityViolation(t, factory(t)) })
 	t.Run("ListManifestsScopedToTenant", func(t *testing.T) { listManifestsScopedToTenant(t, factory(t)) })
 	t.Run("ListManifestsStableOrder", func(t *testing.T) { listManifestsStableOrder(t, factory(t)) })
 	t.Run("DependencyEdges", func(t *testing.T) { dependencyEdges(t, factory(t)) })
@@ -179,6 +184,75 @@ func immutabilityIdempotent(t *testing.T, s store.Store) {
 		if err := s.PutManifest(ctx, rec); err != nil {
 			t.Fatalf("Put #%d: %v", i, err)
 		}
+	}
+}
+
+// Spec: §4.7 Version immutability invariant (F-1.3.1) — under concurrent
+// ingest of different content for the same (tenant, id, version), the
+// store accepts exactly one writer and reports every other writer as
+// ErrImmutableViolation. No writer may leak a raw driver error: the
+// ingest orchestrator maps only ErrImmutableViolation to a per-artifact
+// conflict and aborts the whole batch on any other error
+// (pkg/registry/ingest/ingest.go). A SELECT-then-INSERT pair lets two
+// writers both pass the existence check under READ COMMITTED and then
+// collide on the primary key, leaking the raw unique-violation error; an
+// atomic INSERT ... ON CONFLICT DO NOTHING plus read-back keeps the
+// conflict path deterministic. Memory serializes on a mutex and SQLite on
+// a single connection, so they accept exactly one without ever leaking;
+// Postgres exercises the true MVCC race.
+func concurrentImmutabilityViolation(t *testing.T, s store.Store) {
+	t.Helper()
+	mustCreateTenant(t, s, "a")
+
+	const writers = 64
+	var accepted, violations atomic.Int64
+	var mu sync.Mutex
+	var leaks []error // any non-immutability error a writer saw
+
+	ready := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		// Each writer stores a distinct content hash for the same key, so
+		// at most one can win; the rest are immutability violations.
+		hash := fmt.Sprintf("sha:%d", i)
+		go func() {
+			defer wg.Done()
+			<-ready
+			switch err := s.PutManifest(context.Background(), manifestRec("a", "x", "1.0.0", hash)); {
+			case err == nil:
+				accepted.Add(1)
+			case errors.Is(err, store.ErrImmutableViolation):
+				violations.Add(1)
+			default:
+				mu.Lock()
+				leaks = append(leaks, err)
+				mu.Unlock()
+			}
+		}()
+	}
+	close(ready)
+	wg.Wait()
+
+	if len(leaks) > 0 {
+		t.Fatalf("%d/%d writers leaked a non-immutability error under concurrency (want every "+
+			"loser mapped to ErrImmutableViolation); first leak: %v", len(leaks), writers, leaks[0])
+	}
+	if accepted.Load() != 1 {
+		t.Errorf("accepted = %d, want exactly 1 under concurrent conflicting writes", accepted.Load())
+	}
+	if got := accepted.Load() + violations.Load(); got != int64(writers) {
+		t.Errorf("accepted (%d) + violations (%d) = %d, want %d (no writer lost or double-counted)",
+			accepted.Load(), violations.Load(), got, writers)
+	}
+
+	// Exactly one set of bytes is durably stored and is one of the racers'.
+	got, err := s.GetManifest(context.Background(), "a", "x", "1.0.0")
+	if err != nil {
+		t.Fatalf("GetManifest after race: %v", err)
+	}
+	if !strings.HasPrefix(got.ContentHash, "sha:") {
+		t.Errorf("stored ContentHash = %q, want one of the racing hashes", got.ContentHash)
 	}
 }
 

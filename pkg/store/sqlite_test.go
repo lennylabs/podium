@@ -2,7 +2,11 @@ package store
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -74,5 +78,77 @@ func TestSQLite_SchemaIsIdempotent(t *testing.T) {
 		if err := s.Close(); err != nil {
 			t.Fatalf("Close #%d: %v", i, err)
 		}
+	}
+}
+
+// Spec: §4.7 Version immutability invariant (F-1.3.1) — the standalone
+// backend is a file-backed SQLite database (WAL plus a busy timeout)
+// served through a pooled *sql.DB, so writers run on separate
+// connections rather than the serialized single connection the in-memory
+// store uses. Concurrent ingest of different content for the same
+// (tenant, id, version) must accept exactly one writer and reject every
+// other with ErrImmutableViolation, never leaking a raw SQLite error
+// (a primary-key unique violation or a "database is locked" contention
+// error). This exercises true multi-connection concurrency that the
+// in-memory conformance run cannot.
+func TestSQLite_ConcurrentConflictMapsToImmutableViolation(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "concurrent.db")
+	s, err := OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	ctx := context.Background()
+	if err := s.CreateTenant(ctx, Tenant{ID: "a", Name: "a"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+
+	const writers = 32
+	var accepted, violations atomic.Int64
+	var mu sync.Mutex
+	var leaks []error
+
+	ready := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		rec := ManifestRecord{
+			TenantID:    "a",
+			ArtifactID:  "x",
+			Version:     "1.0.0",
+			ContentHash: fmt.Sprintf("sha:%d", i),
+			Type:        "skill",
+			Sensitivity: "low",
+			Layer:       "L",
+		}
+		go func() {
+			defer wg.Done()
+			<-ready
+			switch err := s.PutManifest(ctx, rec); {
+			case err == nil:
+				accepted.Add(1)
+			case errors.Is(err, ErrImmutableViolation):
+				violations.Add(1)
+			default:
+				mu.Lock()
+				leaks = append(leaks, err)
+				mu.Unlock()
+			}
+		}()
+	}
+	close(ready)
+	wg.Wait()
+
+	if len(leaks) > 0 {
+		t.Fatalf("%d/%d writers leaked a raw SQLite error instead of ErrImmutableViolation; first: %v",
+			len(leaks), writers, leaks[0])
+	}
+	if accepted.Load() != 1 {
+		t.Errorf("accepted = %d, want exactly 1", accepted.Load())
+	}
+	if got := accepted.Load() + violations.Load(); got != int64(writers) {
+		t.Errorf("accepted (%d) + violations (%d) = %d, want %d", accepted.Load(), violations.Load(), got, writers)
 	}
 }

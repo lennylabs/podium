@@ -170,43 +170,30 @@ func (p *Postgres) GetTenant(ctx context.Context, id string) (Tenant, error) {
 }
 
 // PutManifest enforces the §4.7 immutability invariant: the same
-// (tenant, id, version) with a different content hash is rejected.
-// Same content hash is idempotent.
+// (tenant, id, version) with a different content hash is rejected with
+// ErrImmutableViolation; the same content hash is an idempotent no-op.
+//
+// spec: §4.7 — the invariant must hold under concurrent ingest. A
+// SELECT-then-INSERT pair lets two writers both observe no row under
+// READ COMMITTED and then collide on the primary key, leaking the raw
+// unique-violation error (F-1.3.1). A single atomic
+// INSERT ... ON CONFLICT DO NOTHING is the immutability anchor instead:
+// at most one writer inserts the row, and the loser reads the stored
+// hash back to classify the outcome deterministically — a differing hash
+// is the conflict (ErrImmutableViolation), an identical hash is the
+// idempotent retry.
 func (p *Postgres) PutManifest(ctx context.Context, rec ManifestRecord) error {
-	tx, err := p.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	row := tx.QueryRowContext(ctx, `
-		SELECT content_hash FROM manifests
-		WHERE tenant_id = $1 AND artifact_id = $2 AND version = $3`,
-		rec.TenantID, rec.ArtifactID, rec.Version)
-	var existing string
-	err = row.Scan(&existing)
-	switch {
-	case err == nil:
-		if existing != rec.ContentHash {
-			return ErrImmutableViolation
-		}
-		return tx.Commit()
-	case errors.Is(err, sql.ErrNoRows):
-		// Insert below.
-	default:
-		return err
-	}
-
 	ingestedAt := rec.IngestedAt
 	if ingestedAt.IsZero() {
 		ingestedAt = time.Now().UTC()
 	}
-	_, err = tx.ExecContext(ctx, `
+	res, err := p.db.ExecContext(ctx, `
 		INSERT INTO manifests
 			(tenant_id, artifact_id, version, content_hash, type, description,
 			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
 			 extends_pin, signature, search_visibility)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+		ON CONFLICT (tenant_id, artifact_id, version) DO NOTHING`,
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
 		rec.Type, rec.Description,
 		strings.Join(rec.Tags, "\n"),
@@ -217,7 +204,28 @@ func (p *Postgres) PutManifest(ctx context.Context, rec ManifestRecord) error {
 	if err != nil {
 		return err
 	}
-	return tx.Commit()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil // inserted these bytes
+	}
+	// The row already existed (a prior ingest, or the winner of a
+	// concurrent race). Read the stored hash back to classify; immutable
+	// rows are never deleted, so the SELECT always finds it.
+	var existing string
+	err = p.db.QueryRowContext(ctx, `
+		SELECT content_hash FROM manifests
+		WHERE tenant_id = $1 AND artifact_id = $2 AND version = $3`,
+		rec.TenantID, rec.ArtifactID, rec.Version).Scan(&existing)
+	if err != nil {
+		return err
+	}
+	if existing != rec.ContentHash {
+		return ErrImmutableViolation
+	}
+	return nil // idempotent — same hash
 }
 
 // GetManifest returns the manifest or ErrNotFound.

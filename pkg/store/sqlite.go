@@ -24,12 +24,25 @@ type SQLite struct {
 // open; existing schemas are unchanged thanks to IF NOT EXISTS.
 func OpenSQLite(path string) (*SQLite, error) {
 	dsn := path + "?_busy_timeout=5000&_journal_mode=WAL&_foreign_keys=ON"
-	if path == ":memory:" {
-		dsn = "file::memory:?cache=shared"
+	memory := path == ":memory:"
+	if memory {
+		dsn = "file::memory:?cache=shared&_busy_timeout=5000"
 	}
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
+	}
+	// A shared-cache in-memory database is a single database with no WAL,
+	// so concurrent writers contend on a table lock that the busy handler
+	// cannot resolve (SQLITE_LOCKED, not SQLITE_BUSY). Serialize access
+	// through one connection so concurrent PutManifest calls queue instead
+	// of leaking "database table is locked". MaxIdleConns stays at its
+	// default so the single connection is retained and the in-memory cache
+	// is not torn down between calls. File-backed databases keep the
+	// default pool: WAL plus _busy_timeout lets readers run concurrently
+	// with a single writer.
+	if memory {
+		db.SetMaxOpenConns(1)
 	}
 	if err := db.Ping(); err != nil {
 		_ = db.Close()
@@ -162,44 +175,29 @@ func (s *SQLite) GetTenant(ctx context.Context, id string) (Tenant, error) {
 }
 
 // PutManifest enforces the §4.7 immutability invariant: the same
-// (tenant, id, version) with a different content hash is rejected; the
-// same content hash is a no-op.
+// (tenant, id, version) with a different content hash is rejected with
+// ErrImmutableViolation; the same content hash is an idempotent no-op.
+//
+// spec: §4.7 — the invariant must hold under concurrent ingest. A
+// SELECT-then-INSERT pair can let two writers both observe no row and
+// then collide on the primary key, leaking a raw constraint error
+// (F-1.3.1). A single atomic INSERT ... ON CONFLICT DO NOTHING is the
+// immutability anchor instead: at most one writer inserts the row, and
+// the loser reads the stored hash back to classify the outcome — a
+// differing hash is the conflict (ErrImmutableViolation), an identical
+// hash is the idempotent retry.
 func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	row := tx.QueryRowContext(ctx, `
-		SELECT content_hash FROM manifests
-		WHERE tenant_id = ? AND artifact_id = ? AND version = ?`,
-		rec.TenantID, rec.ArtifactID, rec.Version)
-	var existing string
-	err = row.Scan(&existing)
-	switch {
-	case err == nil:
-		if existing != rec.ContentHash {
-			return ErrImmutableViolation
-		}
-		// Idempotent — same hash, no-op.
-		return tx.Commit()
-	case errors.Is(err, sql.ErrNoRows):
-		// Insert below.
-	default:
-		return err
-	}
-
 	ingestedAt := rec.IngestedAt
 	if ingestedAt.IsZero() {
 		ingestedAt = time.Now().UTC()
 	}
-	_, err = tx.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO manifests
 			(tenant_id, artifact_id, version, content_hash, type, description,
 			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
 			 extends_pin, signature, search_visibility)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (tenant_id, artifact_id, version) DO NOTHING`,
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
 		rec.Type, rec.Description,
 		strings.Join(rec.Tags, "\n"),
@@ -211,7 +209,28 @@ func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
 	if err != nil {
 		return err
 	}
-	return tx.Commit()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil // inserted these bytes
+	}
+	// The row already existed (a prior ingest, or the winner of a
+	// concurrent race). Read the stored hash back to classify; immutable
+	// rows are never deleted, so the SELECT always finds it.
+	var existing string
+	err = s.db.QueryRowContext(ctx, `
+		SELECT content_hash FROM manifests
+		WHERE tenant_id = ? AND artifact_id = ? AND version = ?`,
+		rec.TenantID, rec.ArtifactID, rec.Version).Scan(&existing)
+	if err != nil {
+		return err
+	}
+	if existing != rec.ContentHash {
+		return ErrImmutableViolation
+	}
+	return nil // idempotent — same hash
 }
 
 // GetManifest returns the manifest or ErrNotFound.
