@@ -68,7 +68,8 @@ func (s *SQLite) applySchema() error {
 			storage_quota INTEGER NOT NULL DEFAULT 0,
 			search_qps_quota INTEGER NOT NULL DEFAULT 0,
 			materialize_rate_quota INTEGER NOT NULL DEFAULT 0,
-			audit_volume_quota INTEGER NOT NULL DEFAULT 0
+			audit_volume_quota INTEGER NOT NULL DEFAULT 0,
+			max_user_layers INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE TABLE IF NOT EXISTS manifests (
 			tenant_id TEXT NOT NULL,
@@ -151,23 +152,23 @@ func (s *SQLite) applySchema() error {
 func (s *SQLite) CreateTenant(ctx context.Context, t Tenant) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT OR IGNORE INTO tenants
-			(id, name, storage_quota, search_qps_quota, materialize_rate_quota, audit_volume_quota)
-		VALUES (?, ?, ?, ?, ?, ?)`,
+			(id, name, storage_quota, search_qps_quota, materialize_rate_quota, audit_volume_quota, max_user_layers)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		t.ID, t.Name,
 		t.Quota.StorageBytes, t.Quota.SearchQPS,
-		t.Quota.MaterializeRate, t.Quota.AuditVolumePerDay)
+		t.Quota.MaterializeRate, t.Quota.AuditVolumePerDay, t.Quota.MaxUserLayers)
 	return err
 }
 
 // GetTenant returns the tenant or ErrTenantNotFound.
 func (s *SQLite) GetTenant(ctx context.Context, id string) (Tenant, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, name, storage_quota, search_qps_quota, materialize_rate_quota, audit_volume_quota
+		SELECT id, name, storage_quota, search_qps_quota, materialize_rate_quota, audit_volume_quota, max_user_layers
 		FROM tenants WHERE id = ?`, id)
 	var t Tenant
 	err := row.Scan(&t.ID, &t.Name,
 		&t.Quota.StorageBytes, &t.Quota.SearchQPS,
-		&t.Quota.MaterializeRate, &t.Quota.AuditVolumePerDay)
+		&t.Quota.MaterializeRate, &t.Quota.AuditVolumePerDay, &t.Quota.MaxUserLayers)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Tenant{}, ErrTenantNotFound
 	}

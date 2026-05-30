@@ -1364,8 +1364,51 @@ func TestOrg_59_LayerWatchMissingID(t *testing.T) {
 }
 
 // T-D-organization-60 -- user-defined layer cap of 3 is enforced per identity.
+// spec: §7.3.1 / §1.4 (F-7.3.5 / F-1.4.1) — "Default cap: 3 user-defined
+// layers per identity"; exceeding it returns a quota.* error.
 func TestOrg_60_UserDefinedLayerCap(t *testing.T) {
-	t.Skip("blocked by F-7.3.5: user-defined layer cap of 3 per identity is not enforced")
+	t.Parallel()
+	srv := startServer(t, "")
+
+	reg := func(id string) (int, []byte) {
+		return orgPostJSON(t, srv.BaseURL+"/v1/layers", map[string]any{
+			"id": id, "source_type": "local", "local_path": t.TempDir(),
+			"user_defined": true, "owner": "alice@acme.com",
+		})
+	}
+	// The first three personal layers register cleanly.
+	for _, id := range []string{"alice-a", "alice-b", "alice-c"} {
+		if st, body := reg(id); st != 201 {
+			t.Fatalf("register %s = %d, want 201 (body=%s)", id, st, body)
+		}
+	}
+	// The fourth exceeds the cap and is rejected with quota.layer_count_exceeded.
+	st, body := reg("alice-d")
+	if st != 429 {
+		t.Fatalf("register 4th = %d, want 429 (body=%s)", st, body)
+	}
+	var env map[string]any
+	orgDecodeBody(t, body, &env)
+	if env["code"] != "quota.layer_count_exceeded" {
+		t.Errorf("4th register code=%v, want quota.layer_count_exceeded", env["code"])
+	}
+
+	// The list holds exactly the three accepted layers for the identity.
+	_, listBody := getRaw(t, srv.BaseURL+"/v1/layers")
+	var list struct {
+		Layers []map[string]any `json:"layers"`
+	}
+	orgDecodeBody(t, listBody, &list)
+	owned := 0
+	for _, l := range list.Layers {
+		ud, _ := l["UserDefined"].(bool)
+		if ud && l["Owner"] == "alice@acme.com" {
+			owned++
+		}
+	}
+	if owned != 3 {
+		t.Errorf("alice owns %d user-defined layers, want 3 (rejected layer must not persist):\n%s", owned, listBody)
+	}
 }
 
 // T-D-organization-61 -- `podium quota` CLI prints tenant quotas via /v1/quota.

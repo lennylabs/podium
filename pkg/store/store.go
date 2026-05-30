@@ -38,6 +38,13 @@ type Quota struct {
 	SearchQPS         int
 	MaterializeRate   int
 	AuditVolumePerDay int64
+	// MaxUserLayers is the §7.3.1 / §1.4 cap on user-defined layers per
+	// identity ("Default cap: 3 user-defined layers per identity,
+	// configurable per tenant"; §4.4 calls it the tenant's "default
+	// user-layer cap"). Zero selects the deployment default (3); a
+	// negative value disables the cap. The register handler resolves and
+	// enforces it (pkg/registry/server/layers.go).
+	MaxUserLayers int
 }
 
 // ManifestRecord is the indexed metadata for one (artifact_id, version)

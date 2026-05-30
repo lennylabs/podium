@@ -740,6 +740,55 @@ func TestDocHTTPAPI_36_UnregisterNotFound(t *testing.T) {
 	}
 }
 
+// spec: §7.3.1 / §1.4 (F-1.4.1) — the default cap is 3 user-defined
+// layers per identity. Registering a 4th through the standalone binary
+// is rejected with quota.layer_count_exceeded at HTTP 429, and the
+// rejected layer never appears in the layer list.
+func TestDocHTTPAPI_LayerCapDefaultThree(t *testing.T) {
+	srv := startServer(t, "")
+	reg := func(id string) (int, []byte) {
+		return apiDo(t, "POST", srv.BaseURL+"/v1/layers", map[string]any{
+			"id": id, "source_type": "local", "local_path": t.TempDir(),
+			"user_defined": true, "owner": "alice@acme.com",
+		})
+	}
+	for _, id := range []string{"personal-a", "personal-b", "personal-c"} {
+		st, body := reg(id)
+		apiWantStatus(t, st, 201, "register "+id, body)
+	}
+	st, body := reg("personal-d")
+	apiWantStatus(t, st, 429, "register 4th over cap", body)
+	if code := apiJSONObj(t, body)["code"]; code != "quota.layer_count_exceeded" {
+		t.Fatalf("code=%v, want quota.layer_count_exceeded", code)
+	}
+	_, listBody := getRaw(t, srv.BaseURL+"/v1/layers")
+	if strings.Contains(string(listBody), "personal-d") {
+		t.Fatalf("rejected layer personal-d must not be persisted:\n%s", listBody)
+	}
+}
+
+// spec: §7.3.1 / §4.4 (F-1.4.1) — the cap is configurable per tenant.
+// PODIUM_MAX_USER_LAYERS=1 lowers the standalone deployment's cap, so the
+// second user-defined registration is rejected.
+func TestDocHTTPAPI_LayerCapConfigurable(t *testing.T) {
+	srv := startServerArgs(t,
+		[]string{"HOME=" + t.TempDir(), "PODIUM_MAX_USER_LAYERS=1"},
+		"serve", "--standalone")
+	reg := func(id string) (int, []byte) {
+		return apiDo(t, "POST", srv.BaseURL+"/v1/layers", map[string]any{
+			"id": id, "source_type": "local", "local_path": t.TempDir(),
+			"user_defined": true, "owner": "alice@acme.com",
+		})
+	}
+	st, body := reg("personal-a")
+	apiWantStatus(t, st, 201, "register first under cap=1", body)
+	st, body = reg("personal-b")
+	apiWantStatus(t, st, 429, "register second over cap=1", body)
+	if code := apiJSONObj(t, body)["code"]; code != "quota.layer_count_exceeded" {
+		t.Fatalf("code=%v, want quota.layer_count_exceeded", code)
+	}
+}
+
 // ===== Scope preview (T-D-http-api-37..38) ============================
 
 // spec: http-api.md § Scope preview.

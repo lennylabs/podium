@@ -62,7 +62,8 @@ func (p *Postgres) applySchema() error {
 			storage_quota BIGINT NOT NULL DEFAULT 0,
 			search_qps_quota BIGINT NOT NULL DEFAULT 0,
 			materialize_rate_quota BIGINT NOT NULL DEFAULT 0,
-			audit_volume_quota BIGINT NOT NULL DEFAULT 0
+			audit_volume_quota BIGINT NOT NULL DEFAULT 0,
+			max_user_layers BIGINT NOT NULL DEFAULT 0
 		)`,
 		`CREATE TABLE IF NOT EXISTS manifests (
 			tenant_id TEXT NOT NULL,
@@ -145,24 +146,24 @@ func (p *Postgres) applySchema() error {
 func (p *Postgres) CreateTenant(ctx context.Context, t Tenant) error {
 	_, err := p.db.ExecContext(ctx, `
 		INSERT INTO tenants
-			(id, name, storage_quota, search_qps_quota, materialize_rate_quota, audit_volume_quota)
-		VALUES ($1, $2, $3, $4, $5, $6)
+			(id, name, storage_quota, search_qps_quota, materialize_rate_quota, audit_volume_quota, max_user_layers)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (id) DO NOTHING`,
 		t.ID, t.Name,
 		t.Quota.StorageBytes, t.Quota.SearchQPS,
-		t.Quota.MaterializeRate, t.Quota.AuditVolumePerDay)
+		t.Quota.MaterializeRate, t.Quota.AuditVolumePerDay, t.Quota.MaxUserLayers)
 	return err
 }
 
 // GetTenant returns the tenant or ErrTenantNotFound.
 func (p *Postgres) GetTenant(ctx context.Context, id string) (Tenant, error) {
 	row := p.db.QueryRowContext(ctx, `
-		SELECT id, name, storage_quota, search_qps_quota, materialize_rate_quota, audit_volume_quota
+		SELECT id, name, storage_quota, search_qps_quota, materialize_rate_quota, audit_volume_quota, max_user_layers
 		FROM tenants WHERE id = $1`, id)
 	var t Tenant
 	err := row.Scan(&t.ID, &t.Name,
 		&t.Quota.StorageBytes, &t.Quota.SearchQPS,
-		&t.Quota.MaterializeRate, &t.Quota.AuditVolumePerDay)
+		&t.Quota.MaterializeRate, &t.Quota.AuditVolumePerDay, &t.Quota.MaxUserLayers)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Tenant{}, ErrTenantNotFound
 	}

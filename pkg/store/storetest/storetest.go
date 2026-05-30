@@ -40,6 +40,7 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("AdminGrantsAreOrgScoped", func(t *testing.T) { adminGrantsAreOrgScoped(t, factory(t)) })
 	t.Run("RevokeAdmin", func(t *testing.T) { revokeAdmin(t, factory(t)) })
 	t.Run("GetTenantNotFound", func(t *testing.T) { getTenantNotFound(t, factory(t)) })
+	t.Run("QuotaRoundTrip", func(t *testing.T) { quotaRoundTrips(t, factory(t)) })
 	t.Run("GetManifestNotFound", func(t *testing.T) { getManifestNotFound(t, factory(t)) })
 	t.Run("LayerConfigCRUD", func(t *testing.T) { layerConfigCRUD(t, factory(t)) })
 	t.Run("LayerConfigDelete", func(t *testing.T) { layerConfigDelete(t, factory(t)) })
@@ -446,6 +447,33 @@ func getTenantNotFound(t *testing.T, s store.Store) {
 	t.Helper()
 	if _, err := s.GetTenant(context.Background(), "missing"); !errors.Is(err, store.ErrTenantNotFound) {
 		t.Errorf("got %v, want ErrTenantNotFound", err)
+	}
+}
+
+// Spec: §4.7.8 / §7.3.1 — the per-tenant Quota round-trips through
+// CreateTenant/GetTenant on every backend, including the §7.3.1
+// MaxUserLayers cap that the user-defined-layer enforcement reads
+// (F-1.4.1). A backend that drops a quota field would let the cap fall
+// back to its default and silently ignore the tenant override.
+func quotaRoundTrips(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	want := store.Quota{
+		StorageBytes:      1 << 30,
+		SearchQPS:         50,
+		MaterializeRate:   25,
+		AuditVolumePerDay: 100000,
+		MaxUserLayers:     7,
+	}
+	if err := s.CreateTenant(ctx, store.Tenant{ID: "q", Name: "q", Quota: want}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	got, err := s.GetTenant(ctx, "q")
+	if err != nil {
+		t.Fatalf("GetTenant: %v", err)
+	}
+	if got.Quota != want {
+		t.Errorf("Quota round-trip = %+v, want %+v", got.Quota, want)
 	}
 }
 

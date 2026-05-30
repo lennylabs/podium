@@ -15,6 +15,13 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
+// DefaultMaxUserLayers is the §7.3.1 / §1.4 default cap on
+// user-defined layers per identity: "Default cap: 3 user-defined
+// layers per identity, configurable per tenant." A per-tenant
+// store.Quota.MaxUserLayers (or WithMaxUserLayers) overrides it; a
+// negative override disables the cap.
+const DefaultMaxUserLayers = 3
+
 // LayerEndpoint serves the §7.3.1 layer-management HTTP surface:
 //
 //	POST   /v1/layers          register a layer
@@ -42,6 +49,11 @@ type LayerEndpoint struct {
 	// time when an admin-defined layer arrives with no explicit
 	// visibility. One of "public" | "organization" | "private".
 	defaultLayerVisibility string
+	// maxUserLayers overrides the §7.3.1 per-identity user-defined-layer
+	// cap. Zero leaves resolution to the tenant quota then
+	// DefaultMaxUserLayers; a negative value disables the cap. See
+	// effectiveLayerCap.
+	maxUserLayers int
 }
 
 // WithDefaultVisibility installs the §4.6 fallback visibility for
@@ -73,6 +85,31 @@ func (e *LayerEndpoint) WithAdminAuth(fn func(*http.Request) error) *LayerEndpoi
 func (e *LayerEndpoint) WithIdentityResolver(fn func(*http.Request) layer.Identity) *LayerEndpoint {
 	e.identify = fn
 	return e
+}
+
+// WithMaxUserLayers overrides the §7.3.1 per-identity cap on
+// user-defined layers. A positive value caps at that count; zero
+// leaves the tenant-quota/DefaultMaxUserLayers resolution in place; a
+// negative value disables the cap.
+func (e *LayerEndpoint) WithMaxUserLayers(n int) *LayerEndpoint {
+	e.maxUserLayers = n
+	return e
+}
+
+// effectiveLayerCap resolves the §7.3.1 user-defined-layer cap for the
+// endpoint's tenant. Precedence: an explicit WithMaxUserLayers override,
+// then the per-tenant store.Quota.MaxUserLayers, then
+// DefaultMaxUserLayers. A non-zero value at any level wins (a negative
+// value disables the cap). The resolved value is never zero, so the
+// caller treats `cap > 0` as "enforce" and `cap < 0` as "unlimited".
+func (e *LayerEndpoint) effectiveLayerCap(ctx context.Context) int {
+	if e.maxUserLayers != 0 {
+		return e.maxUserLayers
+	}
+	if t, err := e.store.GetTenant(ctx, e.tenantID); err == nil && t.Quota.MaxUserLayers != 0 {
+		return t.Quota.MaxUserLayers
+	}
+	return DefaultMaxUserLayers
 }
 
 // LayerRegisterRequest is the POST /v1/layers JSON body.
@@ -261,6 +298,36 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 			cfg.Users = []string{cfg.Owner}
 		} else {
 			cfg.Users = nil
+		}
+	}
+
+	// spec: §7.3.1 / §1.4 — cap of N user-defined layers per identity
+	// (default 3, configurable per tenant). Count the registrant's
+	// existing user-defined layers and reject when accepting this one
+	// would exceed the cap. Re-registering an already-owned layer (same
+	// id) is an update and does not count as an additional layer.
+	if cfg.UserDefined {
+		if capN := e.effectiveLayerCap(r.Context()); capN > 0 {
+			existing, err := e.store.ListLayerConfigs(r.Context(), e.tenantID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+				return
+			}
+			owned := 0
+			for _, l := range existing {
+				if l.UserDefined && l.Owner == cfg.Owner && l.ID != cfg.ID {
+					owned++
+				}
+			}
+			if owned+1 > capN {
+				who := cfg.Owner
+				if who == "" {
+					who = "the registrant"
+				}
+				writeError(w, http.StatusTooManyRequests, "quota.layer_count_exceeded",
+					fmt.Sprintf("user-defined layer cap of %d reached for %s", capN, who))
+				return
+			}
 		}
 	}
 
@@ -456,6 +523,3 @@ func generateSecret() (string, error) {
 // "this caller is not admin" into authAdmin. Real callers wire
 // pkg/registry/core.AdminAuthorize, which surfaces ErrForbidden.
 var ErrAdminRequired = errors.New("admin: caller lacks admin role")
-
-// quiet unused-import linter when build doesn't touch context yet.
-var _ = context.Background

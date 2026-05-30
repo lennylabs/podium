@@ -511,6 +511,7 @@ func Run() error {
 	// would otherwise expose.
 	layers := server.NewLayerEndpoint(st, tenantID, mode).
 		WithDefaultVisibility(cfg.defaultLayerVisibility).
+		WithMaxUserLayers(cfg.maxUserLayers).
 		WithAdminAuth(func(r *http.Request) error {
 			if cfg.publicMode || cfg.identityProvider == "" {
 				return nil
@@ -650,6 +651,10 @@ type Config struct {
 	// "organization" | "private". Defaults to "private" so
 	// admin-defined layers don't leak by accident.
 	defaultLayerVisibility string
+	// §7.3.1 cap on user-defined layers per identity. Zero applies the
+	// server.DefaultMaxUserLayers default (3); a negative value disables
+	// the cap.
+	maxUserLayers int
 	// §13.2.1 read-only mode probe.
 	readOnlyProbeFailures int
 	readOnlyProbeInterval int
@@ -742,6 +747,7 @@ func (c *Config) Settings() []Setting {
 		{"embedding_provider", c.embeddingProvider, envOrSrc("PODIUM_EMBEDDING_PROVIDER", yamlSrc)},
 		{"embedding_model", c.embeddingModel, envOrSrc("PODIUM_EMBEDDING_MODEL", yamlSrc)},
 		{"layers.default_visibility", c.defaultLayerVisibility, envOrSrc("PODIUM_DEFAULT_LAYER_VISIBILITY", defaultSrc)},
+		{"layers.max_user_layers", intStr(c.maxUserLayers), envOrSrc("PODIUM_MAX_USER_LAYERS", defaultSrc)},
 		{"layers.path", c.layerPath, envOrSrc("PODIUM_LAYER_PATH", yamlSrc)},
 		{"read_only.probe_failures", intStr(c.readOnlyProbeFailures), envOrSrc("PODIUM_READONLY_PROBE_FAILURES", defaultSrc)},
 		{"read_only.probe_interval_seconds", intStr(c.readOnlyProbeInterval), envOrSrc("PODIUM_READONLY_PROBE_INTERVAL", defaultSrc)},
@@ -800,8 +806,10 @@ func LoadConfig() *Config {
 		qdrantColl:        envDefault("PODIUM_QDRANT_COLLECTION", "podium_artifacts"),
 		// §4.6 + §13.2.1.
 		defaultLayerVisibility: envDefault("PODIUM_DEFAULT_LAYER_VISIBILITY", "private"),
-		readOnlyProbeFailures:  envInt("PODIUM_READONLY_PROBE_FAILURES", 0),
-		readOnlyProbeInterval:  envInt("PODIUM_READONLY_PROBE_INTERVAL", 30),
+		// §7.3.1 user-defined-layer cap (0 = default of 3).
+		maxUserLayers:         envInt("PODIUM_MAX_USER_LAYERS", 0),
+		readOnlyProbeFailures: envInt("PODIUM_READONLY_PROBE_FAILURES", 0),
+		readOnlyProbeInterval: envInt("PODIUM_READONLY_PROBE_INTERVAL", 30),
 		// §8.6 audit anchoring.
 		auditLogPath:        os.Getenv("PODIUM_AUDIT_LOG_PATH"),
 		auditSigningKeyPath: os.Getenv("PODIUM_AUDIT_SIGNING_KEY_PATH"),
