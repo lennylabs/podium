@@ -22,7 +22,11 @@ type Qdrant struct {
 	APIKey     string
 	Collection string
 	Dim        int
-	Client     *http.Client
+	// InferenceModel enables Qdrant Cloud Inference (§13.12
+	// PODIUM_QDRANT_INFERENCE_MODEL). When set, points carry text + model
+	// and Qdrant embeds them server-side; Dim is unused (0).
+	InferenceModel string
+	Client         *http.Client
 }
 
 // QdrantConfig is the constructor input.
@@ -31,6 +35,9 @@ type QdrantConfig struct {
 	APIKey     string
 	Collection string
 	Dimensions int
+	// InferenceModel, when set, enables self-embedding (§13.12). The hosted
+	// model determines the dimension, so Dimensions may be 0.
+	InferenceModel string
 }
 
 // NewQdrant returns a configured Qdrant backend.
@@ -41,22 +48,28 @@ func NewQdrant(cfg QdrantConfig) (*Qdrant, error) {
 	if cfg.Collection == "" {
 		return nil, fmt.Errorf("vector.qdrant: Collection is required")
 	}
-	if cfg.Dimensions <= 0 {
+	// §13.12: with Cloud Inference the hosted model fixes the dimension, so
+	// a self-embedding backend needs no local dimension.
+	if cfg.Dimensions <= 0 && cfg.InferenceModel == "" {
 		return nil, fmt.Errorf("vector.qdrant: Dimensions must be > 0")
 	}
 	return &Qdrant{
-		URL:        strings.TrimRight(cfg.URL, "/"),
-		APIKey:     cfg.APIKey,
-		Collection: cfg.Collection,
-		Dim:        cfg.Dimensions,
+		URL:            strings.TrimRight(cfg.URL, "/"),
+		APIKey:         cfg.APIKey,
+		Collection:     cfg.Collection,
+		Dim:            cfg.Dimensions,
+		InferenceModel: cfg.InferenceModel,
 	}, nil
 }
 
 // ID returns "qdrant-cloud".
 func (*Qdrant) ID() string { return "qdrant-cloud" }
 
-// Dimensions returns the configured dimension.
+// Dimensions returns the configured dimension (0 in self-embedding mode).
 func (q *Qdrant) Dimensions() int { return q.Dim }
+
+// SelfEmbeds reports whether Cloud Inference is configured.
+func (q *Qdrant) SelfEmbeds() bool { return q.InferenceModel != "" }
 
 func (q *Qdrant) client() *http.Client {
 	if q.Client != nil {
@@ -166,6 +179,76 @@ func (q *Qdrant) Query(ctx context.Context, tenantID string, vec []float32, topK
 	for _, r := range parsed.Result {
 		// Qdrant returns cosine *similarity* in [-1, 1]; convert
 		// to cosine distance for SPI consistency.
+		out = append(out, Match{
+			ArtifactID: r.Payload.ArtifactID,
+			Version:    r.Payload.Version,
+			Distance:   float32(1 - r.Score),
+		})
+	}
+	return out, nil
+}
+
+// PutText upserts a point whose vector is a {text, model} document, so
+// Qdrant Cloud Inference embeds it server-side. spec: §13.12
+// PODIUM_QDRANT_INFERENCE_MODEL.
+func (q *Qdrant) PutText(ctx context.Context, tenantID, artifactID, version, text string) error {
+	if tenantID == "" || artifactID == "" || version == "" {
+		return ErrInvalidArgument
+	}
+	body := map[string]any{
+		"points": []map[string]any{{
+			"id":     q.pointID(tenantID, artifactID, version),
+			"vector": map[string]any{"text": text, "model": q.InferenceModel},
+			"payload": map[string]string{
+				"tenant_id":   tenantID,
+				"artifact_id": artifactID,
+				"version":     version,
+			},
+		}},
+	}
+	_, err := q.doJSON(ctx, http.MethodPut,
+		fmt.Sprintf("/collections/%s/points?wait=true", q.Collection), body)
+	return err
+}
+
+// QueryText runs the Query API with a {text, model} document so Qdrant
+// embeds the query server-side. spec: §13.12.
+func (q *Qdrant) QueryText(ctx context.Context, tenantID, text string, topK int) ([]Match, error) {
+	if tenantID == "" || topK < 1 {
+		return nil, ErrInvalidArgument
+	}
+	body := map[string]any{
+		"query": map[string]any{"text": text, "model": q.InferenceModel},
+		"limit": topK,
+		"filter": map[string]any{
+			"must": []map[string]any{{
+				"key":   "tenant_id",
+				"match": map[string]any{"value": tenantID},
+			}},
+		},
+		"with_payload": true,
+	}
+	respBody, err := q.doJSON(ctx, http.MethodPost,
+		fmt.Sprintf("/collections/%s/points/query", q.Collection), body)
+	if err != nil {
+		return nil, err
+	}
+	var parsed struct {
+		Result struct {
+			Points []struct {
+				Score   float64 `json:"score"`
+				Payload struct {
+					ArtifactID string `json:"artifact_id"`
+					Version    string `json:"version"`
+				} `json:"payload"`
+			} `json:"points"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return nil, fmt.Errorf("qdrant: decode: %w", err)
+	}
+	out := make([]Match, 0, len(parsed.Result.Points))
+	for _, r := range parsed.Result.Points {
 		out = append(out, Match{
 			ArtifactID: r.Payload.ArtifactID,
 			Version:    r.Payload.Version,

@@ -164,14 +164,64 @@ func (r *Registry) WithAudit(emit AuditEmitter) *Registry {
 }
 
 // WithVectorSearch attaches the §4.7 hybrid-retrieval pieces.
-// SearchArtifacts will RRF-fuse BM25 ranks with vector cosine ranks
-// when both the vector store and the embedder are non-nil. Either
-// argument left nil disables the vector path; search continues to
-// work BM25-only and reports Degraded=true.
+// SearchArtifacts RRF-fuses BM25 ranks with vector cosine ranks when the
+// vector path is active. The embedder may be nil when the vector backend
+// self-embeds (§13.12 F-13.12.6): the registry then sends raw text through
+// the backend's TextVectorizer methods. A nil vector store, or a nil
+// embedder against a backend that does not self-embed, disables the vector
+// path; search continues BM25-only and reports Degraded=true.
 func (r *Registry) WithVectorSearch(v vector.Provider, e embedding.Provider) *Registry {
 	r.vector = v
 	r.embedder = e
 	return r
+}
+
+// vectorSearchActive reports whether the §4.7 vector path is wired and can
+// run: a vector store plus either a local embedder or a self-embedding
+// backend (§13.12). When false, search and reembed degrade to BM25-only.
+func (r *Registry) vectorSearchActive() bool {
+	return r.vector != nil && (r.embedder != nil || vector.SelfEmbeds(r.vector))
+}
+
+// queryVector returns the top-K nearest matches for the query string. With a
+// self-embedding backend (§13.12 F-13.12.6) it sends the raw text via
+// QueryText; otherwise it embeds the query locally and queries by vector.
+func (r *Registry) queryVector(ctx context.Context, query string, topK int) ([]vector.Match, error) {
+	if r.embedder == nil && vector.SelfEmbeds(r.vector) {
+		return r.vector.(vector.TextVectorizer).QueryText(ctx, r.tenantID, query, topK)
+	}
+	vecs, err := r.embedder.Embed(ctx, []string{query})
+	if err != nil || len(vecs) == 0 {
+		return nil, fmt.Errorf("embed: %w", err)
+	}
+	return r.vector.Query(ctx, r.tenantID, vecs[0], topK)
+}
+
+// upsertVector persists the embedding for one (tenant, id, version) row from
+// its composed text. With a self-embedding backend it sends the text via
+// PutText; otherwise it embeds locally and upserts the vector. An empty text
+// is a no-op. spec: §4.7 / §13.12 (F-13.12.6).
+func (r *Registry) upsertVector(ctx context.Context, tenantID, artifactID, version, text string) error {
+	if text == "" {
+		return nil
+	}
+	if r.embedder == nil && vector.SelfEmbeds(r.vector) {
+		if err := r.vector.(vector.TextVectorizer).PutText(ctx, tenantID, artifactID, version, text); err != nil {
+			return fmt.Errorf("vector put: %w", err)
+		}
+		return nil
+	}
+	vecs, err := r.embedder.Embed(ctx, []string{text})
+	if err != nil {
+		return fmt.Errorf("embed: %w", err)
+	}
+	if len(vecs) != 1 {
+		return fmt.Errorf("embed: expected 1 vector, got %d", len(vecs))
+	}
+	if err := r.vector.Put(ctx, tenantID, artifactID, version, vecs[0]); err != nil {
+		return fmt.Errorf("vector put: %w", err)
+	}
+	return nil
 }
 
 // WithNotifier wires the §9 NotificationProvider so the registry
@@ -877,8 +927,9 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 
 	// Vector: when configured + non-empty query, compute query
 	// embedding, fetch top-K nearest by cosine, and RRF-fuse with the
-	// BM25 ranks. Failures degrade to BM25-only without erroring.
-	degraded := r.vector == nil || r.embedder == nil
+	// BM25 ranks. Failures degrade to BM25-only without erroring. The
+	// embedder may be nil when the backend self-embeds (§13.12 F-13.12.6).
+	degraded := !r.vectorSearchActive()
 	if !degraded && opts.Query != "" {
 		vecRanks, vecErr := r.vectorRanks(ctx, opts.Query, filtered, opts.TopK)
 		if vecErr != nil {
@@ -938,11 +989,7 @@ func (r *Registry) mergedSensitivity(ctx context.Context, rec store.ManifestReco
 // candidate set so a leaked vector outside the caller's view never
 // surfaces.
 func (r *Registry) vectorRanks(ctx context.Context, query string, candidates []store.ManifestRecord, topK int) ([]string, error) {
-	vecs, err := r.embedder.Embed(ctx, []string{query})
-	if err != nil || len(vecs) == 0 {
-		return nil, fmt.Errorf("embed: %w", err)
-	}
-	matches, err := r.vector.Query(ctx, r.tenantID, vecs[0], topK*4)
+	matches, err := r.queryVector(ctx, query, topK*4)
 	if err != nil {
 		return nil, fmt.Errorf("vector: %w", err)
 	}

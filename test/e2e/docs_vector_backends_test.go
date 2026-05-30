@@ -7,8 +7,10 @@ package e2e
 // Known gaps:
 //   - F-13.10.10: standalone sqlite-vec default is not implemented; the
 //     effective backend when PODIUM_VECTOR_BACKEND is unset is "" (BM25 only).
-//   - F-13.12.6: self-embedding via *_INFERENCE_MODEL / *_VECTORIZER is not
-//     implemented; those env vars are not read by serverboot.
+//
+// Self-embedding via *_INFERENCE_MODEL / *_VECTORIZER (tests 3, 10, 15) is
+// implemented (F-13.12.6); those env vars wire vector search with no separate
+// embedding provider.
 //
 // Tests 4, 11, 16, 35 require a faithful mock embedder + vector server
 // returning correctly-dimensioned vectors and wiring that was uncertain; they
@@ -140,12 +142,12 @@ func TestVectorBackends_2_FilesystemOnlyNoVectorSearch(t *testing.T) {
 	mustExist(t, target+"/glossary/ARTIFACT.md")
 }
 
-// T-D-vector-backends-3: Pinecone self-embedding mode (F-13.12.6).
-// PODIUM_PINECONE_INFERENCE_MODEL is not read; server logs warning, not
-// vector=pinecone.
-func TestVectorBackends_3_PineconeSelfEmbeddingNotImplemented(t *testing.T) {
+// T-D-vector-backends-3: Pinecone Integrated Inference (self-embedding) via
+// PODIUM_PINECONE_INFERENCE_MODEL (F-13.12.6). The inference model enables
+// self-embedding, so vector search is wired with no separate embedding
+// provider; the server logs vector=pinecone with a self-embedding model.
+func TestVectorBackends_3_PineconeSelfEmbedding(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-13.12.6: PODIUM_PINECONE_INFERENCE_MODEL is not read; self-embedding not implemented")
 	reg := vbReg(t)
 	srv := startServerArgs(t, vbServerEnv(t,
 		"PODIUM_VECTOR_BACKEND=pinecone",
@@ -154,9 +156,15 @@ func TestVectorBackends_3_PineconeSelfEmbeddingNotImplemented(t *testing.T) {
 		"PODIUM_PINECONE_INFERENCE_MODEL=multilingual-e5-large",
 		"PODIUM_EMBEDDING_PROVIDER=",
 	), "serve", "--standalone", "--layer-path", reg)
+	if st := getStatus(t, srv.BaseURL+"/healthz"); st != 200 {
+		t.Fatalf("healthz = %d, want 200", st)
+	}
 	log := srv.log()
-	if !strings.Contains(log, "warning: vector search disabled") {
-		t.Errorf("expected 'warning: vector search disabled' in startup log:\n%s", log)
+	if !strings.Contains(log, "vector=pinecone") || !strings.Contains(log, "self-embedding") {
+		t.Errorf("expected self-embedding 'vector=pinecone' in startup log:\n%s", log)
+	}
+	if strings.Contains(log, "vector search disabled") {
+		t.Errorf("a self-embedding backend must not be disabled for a missing embedder:\n%s", log)
 	}
 }
 
@@ -281,10 +289,11 @@ func TestVectorBackends_9_EnvOverridesYAMLVectorBackend(t *testing.T) {
 	}
 }
 
-// T-D-vector-backends-10: Weaviate self-embedding via PODIUM_WEAVIATE_VECTORIZER (F-13.12.6).
-func TestVectorBackends_10_WeaviateSelfEmbeddingNotImplemented(t *testing.T) {
+// T-D-vector-backends-10: Weaviate self-embedding via PODIUM_WEAVIATE_VECTORIZER
+// (F-13.12.6). The vectorizer module enables self-embedding, so vector search
+// is wired with no separate embedding provider.
+func TestVectorBackends_10_WeaviateSelfEmbedding(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-13.12.6: PODIUM_WEAVIATE_VECTORIZER is not read; self-embedding not implemented")
 	reg := vbReg(t)
 	srv := startServerArgs(t, vbServerEnv(t,
 		"PODIUM_VECTOR_BACKEND=weaviate-cloud",
@@ -294,9 +303,15 @@ func TestVectorBackends_10_WeaviateSelfEmbeddingNotImplemented(t *testing.T) {
 		"PODIUM_WEAVIATE_VECTORIZER=text2vec-weaviate",
 		"PODIUM_EMBEDDING_PROVIDER=",
 	), "serve", "--standalone", "--layer-path", reg)
+	if st := getStatus(t, srv.BaseURL+"/healthz"); st != 200 {
+		t.Fatalf("healthz = %d, want 200", st)
+	}
 	log := srv.log()
-	if !strings.Contains(log, "warning: vector search disabled") {
-		t.Errorf("expected 'warning: vector search disabled':\n%s", log)
+	if !strings.Contains(log, "vector=weaviate-cloud") || !strings.Contains(log, "self-embedding") {
+		t.Errorf("expected self-embedding 'vector=weaviate-cloud' in startup log:\n%s", log)
+	}
+	if strings.Contains(log, "vector search disabled") {
+		t.Errorf("a self-embedding backend must not be disabled for a missing embedder:\n%s", log)
 	}
 }
 
@@ -354,10 +369,12 @@ func TestVectorBackends_14_WeaviateYAMLConfig(t *testing.T) {
 	}
 }
 
-// T-D-vector-backends-15: Qdrant self-embedding via PODIUM_QDRANT_INFERENCE_MODEL (F-13.12.6).
-func TestVectorBackends_15_QdrantSelfEmbeddingNotImplemented(t *testing.T) {
+// T-D-vector-backends-15: Qdrant Cloud Inference (self-embedding) via
+// PODIUM_QDRANT_INFERENCE_MODEL (F-13.12.6). The inference model enables
+// self-embedding, so vector search is wired with no separate embedding
+// provider.
+func TestVectorBackends_15_QdrantSelfEmbedding(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-13.12.6: PODIUM_QDRANT_INFERENCE_MODEL is not read; self-embedding not implemented")
 	reg := vbReg(t)
 	srv := startServerArgs(t, vbServerEnv(t,
 		"PODIUM_VECTOR_BACKEND=qdrant-cloud",
@@ -367,9 +384,15 @@ func TestVectorBackends_15_QdrantSelfEmbeddingNotImplemented(t *testing.T) {
 		"PODIUM_QDRANT_INFERENCE_MODEL=bge-small-en",
 		"PODIUM_EMBEDDING_PROVIDER=",
 	), "serve", "--standalone", "--layer-path", reg)
+	if st := getStatus(t, srv.BaseURL+"/healthz"); st != 200 {
+		t.Fatalf("healthz = %d, want 200", st)
+	}
 	log := srv.log()
-	if !strings.Contains(log, "warning: vector search disabled") {
-		t.Errorf("expected 'warning: vector search disabled':\n%s", log)
+	if !strings.Contains(log, "vector=qdrant-cloud") || !strings.Contains(log, "self-embedding") {
+		t.Errorf("expected self-embedding 'vector=qdrant-cloud' in startup log:\n%s", log)
+	}
+	if strings.Contains(log, "vector search disabled") {
+		t.Errorf("a self-embedding backend must not be disabled for a missing embedder:\n%s", log)
 	}
 }
 

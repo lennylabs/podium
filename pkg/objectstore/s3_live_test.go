@@ -20,33 +20,34 @@ import (
 // recommended free target for nightly CI is play.min.io with the
 // publicly-known credentials (kept stable by MinIO for testing):
 //
-//	PODIUM_S3_ENDPOINT=play.min.io
+//	PODIUM_S3_ENDPOINT=https://play.min.io
 //	PODIUM_S3_BUCKET=podium-ci
 //	PODIUM_S3_REGION=us-east-1
-//	PODIUM_S3_USE_SSL=true
 //	PODIUM_S3_ACCESS_KEY_ID=Q3AM3UQ867SPQQA43P2F
 //	PODIUM_S3_SECRET_ACCESS_KEY=zuf+tfteSlswRu7BJ86wekitnifILbZam1KYY3TG
 //
-// Local devs running MinIO themselves point Endpoint at
-// localhost:9000 with USE_SSL=false. Production smokes use AWS S3
-// with a CI service account.
-// liveS3Config reads the PODIUM_S3_* environment into an S3Config.
-// The ok return is false when ENDPOINT or BUCKET is missing; the live
-// tests skip in that case. Anonymous access (no creds) is intentional
-// for endpoints that permit it.
+// Local devs running MinIO themselves point the endpoint at
+// http://localhost:9000 (the http scheme selects plaintext). Production
+// smokes use AWS S3 with a CI service account.
+// liveS3Config reads the PODIUM_S3_* environment into an S3Config. TLS is
+// derived from the endpoint URL scheme via ParseS3Endpoint (§13.12). The ok
+// return is false when ENDPOINT or BUCKET is missing; the live tests skip in
+// that case. Anonymous access (no creds) is intentional for endpoints that
+// permit it.
 func liveS3Config() (objectstore.S3Config, bool) {
 	endpoint := os.Getenv("PODIUM_S3_ENDPOINT")
 	bucket := os.Getenv("PODIUM_S3_BUCKET")
 	if endpoint == "" || bucket == "" {
 		return objectstore.S3Config{}, false
 	}
+	host, useSSL := objectstore.ParseS3Endpoint(endpoint)
 	return objectstore.S3Config{
-		Endpoint:        endpoint,
+		Endpoint:        host,
 		Bucket:          bucket,
 		Region:          envOr("PODIUM_S3_REGION", "us-east-1"),
 		AccessKeyID:     os.Getenv("PODIUM_S3_ACCESS_KEY_ID"),
 		SecretAccessKey: os.Getenv("PODIUM_S3_SECRET_ACCESS_KEY"),
-		UseSSL:          os.Getenv("PODIUM_S3_USE_SSL") != "false",
+		UseSSL:          useSSL,
 	}, true
 }
 
@@ -81,7 +82,6 @@ func TestLiveS3Config_Resolution(t *testing.T) {
 		for _, k := range []string{
 			"PODIUM_S3_ENDPOINT", "PODIUM_S3_BUCKET", "PODIUM_S3_REGION",
 			"PODIUM_S3_ACCESS_KEY_ID", "PODIUM_S3_SECRET_ACCESS_KEY",
-			"PODIUM_S3_USE_SSL",
 		} {
 			t.Setenv(k, "")
 		}
@@ -146,7 +146,7 @@ func TestLiveS3Config_Resolution(t *testing.T) {
 		}
 	})
 
-	t.Run("TLS on by default", func(t *testing.T) {
+	t.Run("TLS on by default for a bare host", func(t *testing.T) {
 		resetEnv(t)
 		t.Setenv("PODIUM_S3_ENDPOINT", "host:9000")
 		t.Setenv("PODIUM_S3_BUCKET", "b")
@@ -156,25 +156,26 @@ func TestLiveS3Config_Resolution(t *testing.T) {
 		}
 	})
 
-	t.Run("TLS off when explicitly false", func(t *testing.T) {
+	t.Run("TLS off for an http endpoint", func(t *testing.T) {
 		resetEnv(t)
-		t.Setenv("PODIUM_S3_ENDPOINT", "host:9000")
+		t.Setenv("PODIUM_S3_ENDPOINT", "http://host:9000")
 		t.Setenv("PODIUM_S3_BUCKET", "b")
-		t.Setenv("PODIUM_S3_USE_SSL", "false")
 		cfg, _ := liveS3Config()
 		if cfg.UseSSL {
-			t.Error("UseSSL = true, want false")
+			t.Error("UseSSL = true, want false (http scheme)")
+		}
+		if cfg.Endpoint != "host:9000" {
+			t.Errorf("Endpoint = %q, want host:9000 (scheme stripped)", cfg.Endpoint)
 		}
 	})
 
-	t.Run("TLS on for any non-false value", func(t *testing.T) {
+	t.Run("TLS on for an https endpoint", func(t *testing.T) {
 		resetEnv(t)
-		t.Setenv("PODIUM_S3_ENDPOINT", "host:9000")
+		t.Setenv("PODIUM_S3_ENDPOINT", "https://host:9000")
 		t.Setenv("PODIUM_S3_BUCKET", "b")
-		t.Setenv("PODIUM_S3_USE_SSL", "true")
 		cfg, _ := liveS3Config()
 		if !cfg.UseSSL {
-			t.Error("UseSSL = false, want true")
+			t.Error("UseSSL = false, want true (https scheme)")
 		}
 	})
 }

@@ -1142,5 +1142,5 @@ func TestExtending_49_NotificationProviderIngestFailure(t *testing.T) {
 
 // T-D-extending-50 — EmbeddingProvider SPI: search_artifacts with semantic query returns ranked results.
 func TestExtending_50_EmbeddingProviderSemanticSearch(t *testing.T) {
-	t.Skip("requires a live EmbeddingProvider (openai, voyage, ollama, etc.) and a vector backend (pgvector, sqlite-vec, etc.); blocked by F-13.12.6 (self-embedding not implemented) and F-13.10.10 (standalone sqlite-vec not default)")
+	t.Skip("requires a live EmbeddingProvider (openai, voyage, ollama, etc.) or a self-embedding cloud backend, plus a reachable vector backend; standalone has neither. Self-embedding wiring exists (F-13.12.6) but needs a live cloud index; the no-config standalone path is blocked by F-13.10.10 (sqlite-vec not default)")
 }

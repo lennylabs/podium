@@ -82,6 +82,9 @@ type yamlObjectCfg struct {
 	Endpoint       string `yaml:"endpoint,omitempty"`
 	Bucket         string `yaml:"bucket,omitempty"`
 	Region         string `yaml:"region,omitempty"`
+	// ForcePathStyle mirrors §13.12 PODIUM_S3_FORCE_PATH_STYLE as a
+	// config-file key (snake-cased under the section per spec line 343).
+	ForcePathStyle bool `yaml:"force_path_style,omitempty"`
 }
 
 // yamlVectorCfg mirrors the §13.12 `vector_backend:` block. Beyond `type`,
@@ -94,6 +97,9 @@ type yamlVectorCfg struct {
 	Index          string `yaml:"index,omitempty"`
 	Namespace      string `yaml:"namespace,omitempty"`
 	InferenceModel string `yaml:"inference_model,omitempty"`
+	// Collection is the §13.12 weaviate-cloud / qdrant-cloud collection name,
+	// required for those backends (F-13.12.12). Routed by applyVectorYAML.
+	Collection string `yaml:"collection,omitempty"`
 }
 
 // yamlEmbedCfg mirrors the §13.12 `embedding_provider:` block. The selector
@@ -255,6 +261,9 @@ func applyYAML(c *Config, y *yamlConfig) {
 	if y.ObjectStore.Region != "" && os.Getenv("PODIUM_S3_REGION") == "" {
 		c.s3Region = y.ObjectStore.Region
 	}
+	if !c.s3ForcePathStyle && y.ObjectStore.ForcePathStyle && os.Getenv("PODIUM_S3_FORCE_PATH_STYLE") == "" {
+		c.s3ForcePathStyle = true
+	}
 	if c.vectorBackend == "" && y.Vector.Type != "" {
 		c.vectorBackend = y.Vector.Type
 	}
@@ -316,9 +325,15 @@ func applyVectorYAML(c *Config, v yamlVectorCfg) {
 		if c.weaviateKey == "" && v.APIKey != "" {
 			c.weaviateKey = v.APIKey
 		}
+		if c.weaviateColl == "" && v.Collection != "" {
+			c.weaviateColl = v.Collection
+		}
 	case "qdrant-cloud":
 		if c.qdrantKey == "" && v.APIKey != "" {
 			c.qdrantKey = v.APIKey
+		}
+		if c.qdrantColl == "" && v.Collection != "" {
+			c.qdrantColl = v.Collection
 		}
 	}
 	if c.vectorInferenceModel == "" && v.InferenceModel != "" {

@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/minio/minio-go/v7"
@@ -30,6 +32,11 @@ type S3Config struct {
 	Region          string // e.g. "us-east-1"; required.
 	Bucket          string // required.
 	UseSSL          bool   // false for plain HTTP (MinIO local).
+	// ForcePathStyle selects path-style bucket addressing
+	// (https://endpoint/bucket/key) instead of virtual-host-style
+	// (https://bucket.endpoint/key). spec: §13.12 PODIUM_S3_FORCE_PATH_STYLE
+	// ("true for MinIO and similar").
+	ForcePathStyle bool
 }
 
 // NewS3 returns an S3 Provider configured against cfg.
@@ -44,16 +51,60 @@ func NewS3(cfg S3Config) (*S3, error) {
 	if cfg.Bucket == "" {
 		return nil, fmt.Errorf("objectstore.s3: Bucket is required")
 	}
-	creds := credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretAccessKey, "")
-	client, err := minio.New(cfg.Endpoint, &minio.Options{
-		Creds:  creds,
+	opts := &minio.Options{
+		Creds:  s3Credentials(cfg),
 		Secure: cfg.UseSSL,
 		Region: cfg.Region,
-	})
+	}
+	if cfg.ForcePathStyle {
+		// spec: §13.12 — force path-style addressing so MinIO and other
+		// services that do not serve virtual-host-style buckets resolve.
+		opts.BucketLookup = minio.BucketLookupPath
+	}
+	client, err := minio.New(cfg.Endpoint, opts)
 	if err != nil {
 		return nil, fmt.Errorf("objectstore.s3: client: %w", err)
 	}
 	return &S3{Client: client, Bucket: cfg.Bucket}, nil
+}
+
+// s3Credentials selects the minio credential provider for cfg. When both
+// static keys are unset it falls back to the AWS credential chain
+// (environment, shared config file, then EC2/ECS instance metadata / IAM
+// role) so a credential-less deployment on AWS authenticates against the
+// instance role. spec: §13.12 PODIUM_S3_ACCESS_KEY_ID /
+// PODIUM_S3_SECRET_ACCESS_KEY ("use IAM role / instance profile when
+// unset"). Signing with empty static V4 keys would otherwise send an empty
+// access key and fail authentication. Credential retrieval is lazy: the
+// chain is consulted on first request, so construction never blocks.
+func s3Credentials(cfg S3Config) *credentials.Credentials {
+	if cfg.AccessKeyID != "" || cfg.SecretAccessKey != "" {
+		return credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretAccessKey, "")
+	}
+	return credentials.NewChainCredentials([]credentials.Provider{
+		&credentials.EnvAWS{},
+		&credentials.FileAWSCredentials{},
+		&credentials.IAM{Client: &http.Client{Timeout: 10 * time.Second}},
+	})
+}
+
+// ParseS3Endpoint splits a PODIUM_S3_ENDPOINT value into the host[:port]
+// form minio-go expects and the TLS flag derived from the URL scheme.
+// §13.12 documents the endpoint as a URL for S3-compatible services, so the
+// scheme selects TLS: https (or any non-http scheme) enables it, http
+// disables it. A bare host[:port] with no scheme defaults to TLS on (the
+// AWS default), and an empty value yields the AWS S3 endpoint with TLS on.
+func ParseS3Endpoint(raw string) (host string, secure bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "s3.amazonaws.com", true
+	}
+	if strings.Contains(raw, "://") {
+		if u, err := url.Parse(raw); err == nil && u.Host != "" {
+			return u.Host, u.Scheme != "http"
+		}
+	}
+	return raw, true
 }
 
 // ID returns "s3".

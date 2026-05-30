@@ -144,18 +144,27 @@ func TestValidate_MissingBackendValues(t *testing.T) {
 		wantErr bool
 		wantKey string
 	}{
-		{"s3 without bucket", Config{objectStore: "s3"}, true, "PODIUM_S3_BUCKET"},
-		{"s3 with bucket", Config{objectStore: "s3", s3Bucket: "b"}, false, ""},
+		{"s3 without bucket", Config{objectStore: "s3", s3Region: "r"}, true, "PODIUM_S3_BUCKET"},
+		// §13.12 marks the region required for s3 (F-13.12.9).
+		{"s3 without region", Config{objectStore: "s3", s3Bucket: "b"}, true, "PODIUM_S3_REGION"},
+		{"s3 with bucket+region ok", Config{objectStore: "s3", s3Bucket: "b", s3Region: "us-east-1"}, false, ""},
 		{"pinecone without key", Config{vectorBackend: "pinecone", pineconeHost: "h"}, true, "PODIUM_PINECONE_API_KEY"},
 		{"pinecone key+host ok", Config{vectorBackend: "pinecone", pineconeKey: "k", pineconeHost: "h"}, false, ""},
 		{"pinecone key+index ok", Config{vectorBackend: "pinecone", pineconeKey: "k", pineconeIndex: "i"}, false, ""},
 		{"pinecone key but no host/index", Config{vectorBackend: "pinecone", pineconeKey: "k"}, true, "PODIUM_PINECONE_INDEX"},
-		{"weaviate without url", Config{vectorBackend: "weaviate-cloud", weaviateKey: "k"}, true, "PODIUM_WEAVIATE_URL"},
-		{"weaviate ok", Config{vectorBackend: "weaviate-cloud", weaviateURL: "u", weaviateKey: "k"}, false, ""},
-		{"qdrant without key", Config{vectorBackend: "qdrant-cloud", qdrantURL: "u"}, true, "PODIUM_QDRANT_API_KEY"},
-		{"qdrant ok", Config{vectorBackend: "qdrant-cloud", qdrantURL: "u", qdrantKey: "k"}, false, ""},
+		{"weaviate without url", Config{vectorBackend: "weaviate-cloud", weaviateKey: "k", weaviateColl: "c"}, true, "PODIUM_WEAVIATE_URL"},
+		// §13.12 marks the collection required for weaviate-cloud (F-13.12.12).
+		{"weaviate without collection", Config{vectorBackend: "weaviate-cloud", weaviateURL: "u", weaviateKey: "k"}, true, "PODIUM_WEAVIATE_COLLECTION"},
+		{"weaviate ok", Config{vectorBackend: "weaviate-cloud", weaviateURL: "u", weaviateKey: "k", weaviateColl: "c"}, false, ""},
+		{"qdrant without key", Config{vectorBackend: "qdrant-cloud", qdrantURL: "u", qdrantColl: "c"}, true, "PODIUM_QDRANT_API_KEY"},
+		// §13.12 marks the collection required for qdrant-cloud (F-13.12.12).
+		{"qdrant without collection", Config{vectorBackend: "qdrant-cloud", qdrantURL: "u", qdrantKey: "k"}, true, "PODIUM_QDRANT_COLLECTION"},
+		{"qdrant ok", Config{vectorBackend: "qdrant-cloud", qdrantURL: "u", qdrantKey: "k", qdrantColl: "c"}, false, ""},
 		{"openai without key", Config{embeddingProvider: "openai"}, true, "OPENAI_API_KEY"},
 		{"openai ok", Config{embeddingProvider: "openai", openaiAPIKey: "sk"}, false, ""},
+		// §13.12 (F-13.12.6): a self-embedding backend makes the embedding
+		// provider optional, so a missing embedder key is not an error.
+		{"self-embedding makes embedder optional", Config{vectorBackend: "pinecone", pineconeKey: "k", pineconeHost: "h", vectorInferenceModel: "m", embeddingProvider: "openai"}, false, ""},
 		{"unknown vector backend is not a missing-value error", Config{vectorBackend: "nope"}, false, ""},
 		{"empty embedding provider is intentional disable", Config{embeddingProvider: ""}, false, ""},
 		{"none selections", Config{vectorBackend: "none", objectStore: "none"}, false, ""},

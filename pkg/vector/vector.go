@@ -74,6 +74,35 @@ type Provider interface {
 	Close() error
 }
 
+// TextVectorizer is the optional capability a vector backend implements
+// when it embeds raw text server-side: Pinecone Integrated Inference, a
+// Weaviate vectorizer module, or Qdrant Cloud Inference (§13.12). When a
+// backend self-embeds, the registry sends text through PutText / QueryText
+// and no separate embedding.Provider is required; the hosted model
+// determines the vector dimension, so Dimensions reports 0 and the
+// dimension checks are skipped on the text path.
+type TextVectorizer interface {
+	// SelfEmbeds reports whether server-side embedding is active (an
+	// inference-model / vectorizer name is configured). A backend that
+	// implements this interface but is configured storage-only returns
+	// false, and the registry uses the precomputed-vector path instead.
+	SelfEmbeds() bool
+	// PutText upserts the (tenant, id, version) row from raw text; the
+	// backend embeds it with the configured hosted model.
+	PutText(ctx context.Context, tenantID, artifactID, version, text string) error
+	// QueryText embeds text server-side and returns the top-K nearest rows
+	// scoped to the tenant, ordered by ascending Distance.
+	QueryText(ctx context.Context, tenantID, text string, topK int) ([]Match, error)
+}
+
+// SelfEmbeds reports whether v is a TextVectorizer with server-side
+// embedding active. Nil-safe: a nil provider or a backend that does not
+// self-embed returns false.
+func SelfEmbeds(v Provider) bool {
+	tv, ok := v.(TextVectorizer)
+	return ok && tv.SelfEmbeds()
+}
+
 // validateDim returns ErrDimensionMismatch when v's length doesn't
 // match the configured dimension. Backends call this on every Put /
 // Query so the error surface is consistent.

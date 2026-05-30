@@ -437,9 +437,15 @@ func Run() error {
 	registry = registry.WithDiscoveryDefaults(cfg.discoveryDefaults(), cfg.allowPerDomain())
 	if v, e, err := openVectorAndEmbedder(cfg); err != nil {
 		log.Printf("warning: vector search disabled: %v", err)
-	} else if v != nil && e != nil {
+	} else if v != nil {
 		registry = registry.WithVectorSearch(v, e)
-		log.Printf("hybrid search: vector=%s embedder=%s dim=%d", v.ID(), e.ID(), e.Dimensions())
+		if e != nil {
+			log.Printf("hybrid search: vector=%s embedder=%s dim=%d", v.ID(), e.ID(), e.Dimensions())
+		} else {
+			// §13.12 (F-13.12.6): the backend embeds text server-side, so no
+			// separate embedding provider is wired.
+			log.Printf("hybrid search: vector=%s self-embedding=%s", v.ID(), cfg.vectorInferenceModel)
+		}
 	}
 
 	// §9 NotificationProvider: chosen via PODIUM_NOTIFICATION_PROVIDER
@@ -716,7 +722,10 @@ type Config struct {
 	s3Bucket        string
 	s3AccessKey     string
 	s3SecretKey     string
-	s3UseSSL        bool
+	// s3ForcePathStyle maps to §13.12 PODIUM_S3_FORCE_PATH_STYLE. TLS is
+	// derived from the PODIUM_S3_ENDPOINT URL scheme (§13.12 documents the
+	// endpoint as a URL), so there is no separate use-SSL knob.
+	s3ForcePathStyle bool
 	// Vector + embedding (§4.7).
 	vectorBackend     string
 	embeddingProvider string
@@ -858,6 +867,7 @@ func (c *Config) Settings() []Setting {
 		{"object_store.s3_endpoint", c.s3Endpoint, envOrSrc("PODIUM_S3_ENDPOINT", yamlSrc)},
 		{"object_store.s3_bucket", c.s3Bucket, envOrSrc("PODIUM_S3_BUCKET", yamlSrc)},
 		{"object_store.s3_region", c.s3Region, envOrSrc("PODIUM_S3_REGION", defaultSrc)},
+		{"object_store.s3_force_path_style", boolStr(c.s3ForcePathStyle), envOrSrc("PODIUM_S3_FORCE_PATH_STYLE", defaultSrc)},
 		{"vector_backend", c.vectorBackend, envOrSrc("PODIUM_VECTOR_BACKEND", yamlSrc)},
 		{"vector_backend.index", c.pineconeIndex, envOrSrc("PODIUM_PINECONE_INDEX", yamlSrc)},
 		{"vector_backend.namespace", c.pineconeNS, envOrSrc("PODIUM_PINECONE_NAMESPACE", yamlSrc)},
@@ -912,11 +922,14 @@ func LoadConfig() *Config {
 		filesystemRoot:             os.Getenv("PODIUM_FILESYSTEM_ROOT"),
 		publicURL:                  os.Getenv("PODIUM_PUBLIC_URL"),
 		s3Endpoint:                 os.Getenv("PODIUM_S3_ENDPOINT"),
-		s3Region:                   envDefault("PODIUM_S3_REGION", "us-east-1"),
-		s3Bucket:                   os.Getenv("PODIUM_S3_BUCKET"),
-		s3AccessKey:                os.Getenv("PODIUM_S3_ACCESS_KEY_ID"),
-		s3SecretKey:                os.Getenv("PODIUM_S3_SECRET_ACCESS_KEY"),
-		s3UseSSL:                   os.Getenv("PODIUM_S3_USE_SSL") != "false",
+		// §13.12 marks PODIUM_S3_REGION required for s3; no implicit default
+		// so a missing region is named by validate() (F-13.12.9) rather than
+		// silently replaced by us-east-1.
+		s3Region:         os.Getenv("PODIUM_S3_REGION"),
+		s3Bucket:         os.Getenv("PODIUM_S3_BUCKET"),
+		s3AccessKey:      os.Getenv("PODIUM_S3_ACCESS_KEY_ID"),
+		s3SecretKey:      os.Getenv("PODIUM_S3_SECRET_ACCESS_KEY"),
+		s3ForcePathStyle: isTrue(os.Getenv("PODIUM_S3_FORCE_PATH_STYLE")),
 		// §4.7 vector + embedding.
 		vectorBackend:     os.Getenv("PODIUM_VECTOR_BACKEND"),
 		embeddingProvider: os.Getenv("PODIUM_EMBEDDING_PROVIDER"),
@@ -929,13 +942,17 @@ func LoadConfig() *Config {
 		pineconeKey:       os.Getenv("PODIUM_PINECONE_API_KEY"),
 		pineconeHost:      os.Getenv("PODIUM_PINECONE_HOST"),
 		pineconeIndex:     os.Getenv("PODIUM_PINECONE_INDEX"),
-		pineconeNS:        os.Getenv("PODIUM_PINECONE_NAMESPACE"),
-		weaviateURL:       os.Getenv("PODIUM_WEAVIATE_URL"),
-		weaviateKey:       os.Getenv("PODIUM_WEAVIATE_API_KEY"),
-		weaviateColl:      envDefault("PODIUM_WEAVIATE_COLLECTION", "PodiumArtifacts"),
-		qdrantURL:         os.Getenv("PODIUM_QDRANT_URL"),
-		qdrantKey:         os.Getenv("PODIUM_QDRANT_API_KEY"),
-		qdrantColl:        envDefault("PODIUM_QDRANT_COLLECTION", "podium_artifacts"),
+		// Read raw here; the §13.12 "default" namespace fallback (F-13.12.11)
+		// is applied after applyYAML so env > registry.yaml > default holds.
+		pineconeNS:  os.Getenv("PODIUM_PINECONE_NAMESPACE"),
+		weaviateURL: os.Getenv("PODIUM_WEAVIATE_URL"),
+		weaviateKey: os.Getenv("PODIUM_WEAVIATE_API_KEY"),
+		// §13.12 marks the collection required for weaviate-cloud/qdrant-cloud;
+		// no implicit default so validate() names a missing one (F-13.12.12).
+		weaviateColl: os.Getenv("PODIUM_WEAVIATE_COLLECTION"),
+		qdrantURL:    os.Getenv("PODIUM_QDRANT_URL"),
+		qdrantKey:    os.Getenv("PODIUM_QDRANT_API_KEY"),
+		qdrantColl:   os.Getenv("PODIUM_QDRANT_COLLECTION"),
 		// §13.12 self-embedding model (parsed/surfaced; wiring is F-13.12.6).
 		vectorInferenceModel: envFirst("PODIUM_PINECONE_INFERENCE_MODEL", "PODIUM_WEAVIATE_VECTORIZER", "PODIUM_QDRANT_INFERENCE_MODEL"),
 		// §4.6 + §13.2.1. The default visibility is resolved after applyYAML
@@ -966,6 +983,11 @@ func LoadConfig() *Config {
 		log.Printf("warning: ignored registry.yaml: %v", err)
 	} else {
 		applyYAML(c, y)
+	}
+	// §13.12 (F-13.12.11): the Pinecone namespace prefix defaults to "default"
+	// when neither the env var nor registry.yaml set it.
+	if c.pineconeNS == "" {
+		c.pineconeNS = "default"
 	}
 	// §13.10 / §13.12 (F-13.12.15): when no explicit default visibility was
 	// supplied (env or registry.yaml), a standalone deployment (no identity
@@ -1054,6 +1076,8 @@ func (c *Config) missingBackendValues() []string {
 	switch c.objectStore {
 	case "s3":
 		req(c.s3Bucket != "", "PODIUM_S3_BUCKET")
+		// §13.12 marks the region required for s3 (F-13.12.9).
+		req(c.s3Region != "", "PODIUM_S3_REGION")
 	}
 	switch c.vectorBackend {
 	case "pinecone":
@@ -1064,19 +1088,29 @@ func (c *Config) missingBackendValues() []string {
 	case "weaviate-cloud":
 		req(c.weaviateURL != "", "PODIUM_WEAVIATE_URL")
 		req(c.weaviateKey != "", "PODIUM_WEAVIATE_API_KEY")
+		// §13.12 marks the collection required for weaviate-cloud (F-13.12.12).
+		req(c.weaviateColl != "", "PODIUM_WEAVIATE_COLLECTION")
 	case "qdrant-cloud":
 		req(c.qdrantURL != "", "PODIUM_QDRANT_URL")
 		req(c.qdrantKey != "", "PODIUM_QDRANT_API_KEY")
+		// §13.12 marks the collection required for qdrant-cloud (F-13.12.12).
+		req(c.qdrantColl != "", "PODIUM_QDRANT_COLLECTION")
 	case "pgvector":
 		req(c.pgvectorDSN != "", "PODIUM_PGVECTOR_DSN")
 	}
-	switch c.embeddingProvider {
-	case "openai":
-		req(c.openaiAPIKey != "", "OPENAI_API_KEY")
-	case "voyage":
-		req(c.voyageAPIKey != "", "VOYAGE_API_KEY")
-	case "cohere":
-		req(c.cohereAPIKey != "", "COHERE_API_KEY")
+	// §13.12 (F-13.12.6): the embedding provider is optional when the selected
+	// vector backend self-embeds (an *_INFERENCE_MODEL / *_VECTORIZER is set),
+	// so its per-provider key is required only when no self-embedding model is
+	// configured.
+	if c.vectorInferenceModel == "" {
+		switch c.embeddingProvider {
+		case "openai":
+			req(c.openaiAPIKey != "", "OPENAI_API_KEY")
+		case "voyage":
+			req(c.voyageAPIKey != "", "VOYAGE_API_KEY")
+		case "cohere":
+			req(c.cohereAPIKey != "", "COHERE_API_KEY")
+		}
 	}
 	return missing
 }
@@ -1138,10 +1172,37 @@ func bootstrapOptions(c *Config, objStore objectstore.Provider) []server.Option 
 	return out
 }
 
+// vectorSelfEmbeds reports whether the selected vector backend embeds text
+// server-side (§13.12 F-13.12.6): a cloud backend with an inference-model /
+// vectorizer configured. The local backends (pgvector, sqlite-vec) cannot
+// self-embed, so a stray inference model with one of those is ignored and
+// the normal embedding-provider path applies.
+func (c *Config) vectorSelfEmbeds() bool {
+	if c.vectorInferenceModel == "" {
+		return false
+	}
+	switch c.vectorBackend {
+	case "pinecone", "weaviate-cloud", "qdrant-cloud":
+		return true
+	}
+	return false
+}
+
 // openVectorAndEmbedder returns the configured §4.7 hybrid-search
 // pieces. Returns (nil, nil, nil) when vector search is disabled
 // (operator left PODIUM_VECTOR_BACKEND unset / set to "none").
+//
+// §13.12 (F-13.12.6): when the selected backend self-embeds, the embedding
+// provider is optional; the backend is opened with no local dimension and a
+// nil embedder is returned so the registry sends raw text on Put/Query.
 func openVectorAndEmbedder(c *Config) (vector.Provider, embedding.Provider, error) {
+	if c.vectorSelfEmbeds() {
+		v, err := openVectorBackend(c, 0)
+		if err != nil {
+			return nil, nil, err
+		}
+		return v, nil, nil
+	}
 	emb, err := openEmbedder(c)
 	if err != nil {
 		return nil, nil, err
@@ -1236,16 +1297,25 @@ func openVectorBackend(c *Config, dim int) (vector.Provider, error) {
 		return vector.NewPinecone(vector.PineconeConfig{
 			APIKey: c.pineconeKey, Host: host,
 			Namespace: c.pineconeNS, Dimensions: dim,
+			// §13.12 (F-13.12.6) Integrated Inference; empty leaves
+			// storage-only mode.
+			InferenceModel: c.vectorInferenceModel,
 		})
 	case "weaviate-cloud":
 		return vector.NewWeaviate(vector.WeaviateConfig{
 			URL: c.weaviateURL, APIKey: c.weaviateKey,
 			Collection: c.weaviateColl, Dimensions: dim,
+			// §13.12 (F-13.12.6) vectorizer module; empty leaves
+			// storage-only mode.
+			Vectorizer: c.vectorInferenceModel,
 		})
 	case "qdrant-cloud":
 		return vector.NewQdrant(vector.QdrantConfig{
 			URL: c.qdrantURL, APIKey: c.qdrantKey,
 			Collection: c.qdrantColl, Dimensions: dim,
+			// §13.12 (F-13.12.6) Cloud Inference; empty leaves
+			// storage-only mode.
+			InferenceModel: c.vectorInferenceModel,
 		})
 	}
 	return nil, fmt.Errorf("unknown PODIUM_VECTOR_BACKEND: %s", c.vectorBackend)
@@ -1263,16 +1333,17 @@ func openObjectStore(c *Config) (objectstore.Provider, error) {
 		if c.s3Bucket == "" {
 			return nil, fmt.Errorf("PODIUM_S3_BUCKET is required when PODIUM_OBJECT_STORE=s3")
 		}
-		if c.s3Endpoint == "" {
-			c.s3Endpoint = "s3.amazonaws.com"
-		}
+		// §13.12: the endpoint is a URL; its scheme selects TLS (https on,
+		// http off), and an unset endpoint defaults to AWS S3 over TLS.
+		host, useSSL := objectstore.ParseS3Endpoint(c.s3Endpoint)
 		return objectstore.NewS3(objectstore.S3Config{
-			Endpoint:        c.s3Endpoint,
+			Endpoint:        host,
 			Bucket:          c.s3Bucket,
 			Region:          c.s3Region,
 			AccessKeyID:     c.s3AccessKey,
 			SecretAccessKey: c.s3SecretKey,
-			UseSSL:          c.s3UseSSL,
+			UseSSL:          useSSL,
+			ForcePathStyle:  c.s3ForcePathStyle,
 		})
 	case "none":
 		return nil, nil

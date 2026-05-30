@@ -6,10 +6,8 @@ import (
 	"time"
 
 	domainpkg "github.com/lennylabs/podium/pkg/domain"
-	"github.com/lennylabs/podium/pkg/embedding"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/store"
-	"github.com/lennylabs/podium/pkg/vector"
 )
 
 // ReembedResult reports what `Reembed` did across the tenant. Used
@@ -59,7 +57,7 @@ type ReembedOptions struct {
 // old vectors are stale-dimension. opts.Since restricts the pass to
 // artifacts ingested at or after the given instant.
 func (r *Registry) Reembed(ctx context.Context, opts ReembedOptions) (*ReembedResult, error) {
-	if r.embedder == nil || r.vector == nil {
+	if !r.vectorSearchActive() {
 		return nil, fmt.Errorf("reembed: vector search not configured")
 	}
 	manifests, err := r.store.ListManifests(ctx, r.tenantID)
@@ -94,8 +92,11 @@ func (r *Registry) Reembed(ctx context.Context, opts ReembedOptions) (*ReembedRe
 	// missing once a tenant held more than 100 artifacts (F-4.7.10). The
 	// top-K also covers stored domain vectors so they cannot displace an
 	// artifact vector out of the probe result; domain rows are skipped.
+	// The probe builds a query vector from the local embedder's dimension. A
+	// self-embedding backend has no local embedder, so the optimization is
+	// skipped and every artifact is re-embedded (the upsert is idempotent).
 	present := map[string]bool{}
-	if opts.OnlyIfMissing && len(manifests) > 0 {
+	if opts.OnlyIfMissing && len(manifests) > 0 && r.embedder != nil {
 		probe := make([]float32, r.embedder.Dimensions())
 		probe[0] = 1
 		matches, _ := r.vector.Query(ctx, r.tenantID, probe, len(manifests)+len(domainRecs))
@@ -112,7 +113,7 @@ func (r *Registry) Reembed(ctx context.Context, opts ReembedOptions) (*ReembedRe
 		if opts.OnlyIfMissing && present[m.ArtifactID+"@"+m.Version] {
 			continue
 		}
-		if err := embedAndUpsert(ctx, r.embedder, r.vector, m); err != nil {
+		if err := r.embedAndUpsert(ctx, m); err != nil {
 			res.Failed = append(res.Failed, ReembedFailure{
 				ArtifactID: m.ArtifactID,
 				Version:    m.Version,
@@ -131,7 +132,7 @@ func (r *Registry) Reembed(ctx context.Context, opts ReembedOptions) (*ReembedRe
 	if opts.Since.IsZero() {
 		for _, dr := range domainRecs {
 			res.Total++
-			if err := embedAndUpsertDomain(ctx, r.embedder, r.vector, dr); err != nil {
+			if err := r.embedAndUpsertDomain(ctx, dr); err != nil {
 				res.Failed = append(res.Failed, ReembedFailure{
 					ArtifactID: dr.Path,
 					Version:    DomainVectorVersion,
@@ -148,35 +149,22 @@ func (r *Registry) Reembed(ctx context.Context, opts ReembedOptions) (*ReembedRe
 // ReembedOne re-embeds a single (artifact_id, version). Used by the
 // `podium admin reembed --artifact <id>` path.
 func (r *Registry) ReembedOne(ctx context.Context, artifactID, version string) error {
-	if r.embedder == nil || r.vector == nil {
+	if !r.vectorSearchActive() {
 		return fmt.Errorf("reembed: vector search not configured")
 	}
 	m, err := r.store.GetManifest(ctx, r.tenantID, artifactID, version)
 	if err != nil {
 		return fmt.Errorf("reembed: get manifest: %w", err)
 	}
-	return embedAndUpsert(ctx, r.embedder, r.vector, m)
+	return r.embedAndUpsert(ctx, m)
 }
 
-// embedAndUpsert composes the embedding text and upserts the vector.
-// Identical to ingest's embedAndStore but operates on a manifest
-// fetched from the store rather than one mid-ingest.
-func embedAndUpsert(ctx context.Context, e embedding.Provider, v vector.Provider, mr store.ManifestRecord) error {
-	text := composeEmbeddingText(mr)
-	if text == "" {
-		return nil
-	}
-	vecs, err := e.Embed(ctx, []string{text})
-	if err != nil {
-		return fmt.Errorf("embed: %w", err)
-	}
-	if len(vecs) != 1 {
-		return fmt.Errorf("embed: expected 1 vector, got %d", len(vecs))
-	}
-	if err := v.Put(ctx, mr.TenantID, mr.ArtifactID, mr.Version, vecs[0]); err != nil {
-		return fmt.Errorf("vector put: %w", err)
-	}
-	return nil
+// embedAndUpsert composes the embedding text and upserts the row, routing
+// through upsertVector so a self-embedding backend (§13.12 F-13.12.6)
+// receives raw text. Mirrors ingest's embedAndStore but operates on a
+// manifest fetched from the store rather than one mid-ingest.
+func (r *Registry) embedAndUpsert(ctx context.Context, mr store.ManifestRecord) error {
+	return r.upsertVector(ctx, mr.TenantID, mr.ArtifactID, mr.Version, composeEmbeddingText(mr))
 }
 
 // embedAndUpsertDomain composes the §4.7 domain projection from a
@@ -184,26 +172,12 @@ func embedAndUpsert(ctx context.Context, e embedding.Provider, v vector.Provider
 // so search_domains can rank over it. Malformed frontmatter is skipped
 // (the linter reports it at ingest); a domain with no projectable text is
 // a no-op.
-func embedAndUpsertDomain(ctx context.Context, e embedding.Provider, v vector.Provider, dr store.DomainRecord) error {
+func (r *Registry) embedAndUpsertDomain(ctx context.Context, dr store.DomainRecord) error {
 	d, err := manifest.ParseDomain(dr.Raw)
 	if err != nil {
 		return nil
 	}
-	text := domainpkg.EmbeddingProjection(d)
-	if text == "" {
-		return nil
-	}
-	vecs, err := e.Embed(ctx, []string{text})
-	if err != nil {
-		return fmt.Errorf("embed: %w", err)
-	}
-	if len(vecs) != 1 {
-		return fmt.Errorf("embed: expected 1 vector, got %d", len(vecs))
-	}
-	if err := v.Put(ctx, dr.TenantID, dr.Path, DomainVectorVersion, vecs[0]); err != nil {
-		return fmt.Errorf("vector put: %w", err)
-	}
-	return nil
+	return r.upsertVector(ctx, dr.TenantID, dr.Path, DomainVectorVersion, domainpkg.EmbeddingProjection(d))
 }
 
 // composeEmbeddingText mirrors the ingest-side §4.7 projection so the

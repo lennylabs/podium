@@ -136,7 +136,7 @@ func (r *Registry) SearchDomains(ctx context.Context, id layer.Identity, opts Se
 	// vector ranks with the lexical ranks via RRF. RRFFuse unions both
 	// lists, so a vector-only domain (semantically related, no lexical
 	// overlap) surfaces — every fused path maps back through byPath.
-	degraded := r.vector == nil || r.embedder == nil
+	degraded := !r.vectorSearchActive()
 	if !degraded && opts.Query != "" {
 		vecRanks, vecErr := r.domainVectorRanks(ctx, opts.Query, byPath, opts.TopK)
 		if vecErr != nil {
@@ -173,11 +173,7 @@ func (r *Registry) SearchDomains(ctx context.Context, id layer.Identity, opts Se
 // (byPath) so an artifact vector or a domain the caller cannot see never
 // surfaces. Mirrors vectorRanks for §3.2 Layer 1.
 func (r *Registry) domainVectorRanks(ctx context.Context, query string, byPath map[string]domainCandidate, topK int) ([]string, error) {
-	vecs, err := r.embedder.Embed(ctx, []string{query})
-	if err != nil || len(vecs) == 0 {
-		return nil, fmt.Errorf("embed: %w", err)
-	}
-	matches, err := r.vector.Query(ctx, r.tenantID, vecs[0], topK*4)
+	matches, err := r.queryVector(ctx, query, topK*4)
 	if err != nil {
 		return nil, fmt.Errorf("vector: %w", err)
 	}

@@ -22,6 +22,10 @@ type Weaviate struct {
 	APIKey     string
 	Collection string
 	Dim        int
+	// Vectorizer enables Weaviate self-embedding (§13.12
+	// PODIUM_WEAVIATE_VECTORIZER). When set, objects are inserted without a
+	// vector and the module embeds the text property; Dim is unused (0).
+	Vectorizer string
 	Client     *http.Client
 }
 
@@ -31,6 +35,9 @@ type WeaviateConfig struct {
 	APIKey     string
 	Collection string
 	Dimensions int
+	// Vectorizer, when set, enables self-embedding (§13.12). The module
+	// determines the dimension, so Dimensions may be 0.
+	Vectorizer string
 }
 
 // NewWeaviate returns a configured Weaviate backend.
@@ -41,7 +48,9 @@ func NewWeaviate(cfg WeaviateConfig) (*Weaviate, error) {
 	if cfg.Collection == "" {
 		return nil, fmt.Errorf("vector.weaviate: Collection is required")
 	}
-	if cfg.Dimensions <= 0 {
+	// §13.12: with a vectorizer module the dimension is fixed server-side,
+	// so a self-embedding backend needs no local dimension.
+	if cfg.Dimensions <= 0 && cfg.Vectorizer == "" {
 		return nil, fmt.Errorf("vector.weaviate: Dimensions must be > 0")
 	}
 	return &Weaviate{
@@ -49,14 +58,18 @@ func NewWeaviate(cfg WeaviateConfig) (*Weaviate, error) {
 		APIKey:     cfg.APIKey,
 		Collection: cfg.Collection,
 		Dim:        cfg.Dimensions,
+		Vectorizer: cfg.Vectorizer,
 	}, nil
 }
 
 // ID returns "weaviate-cloud".
 func (*Weaviate) ID() string { return "weaviate-cloud" }
 
-// Dimensions returns the configured dimension.
+// Dimensions returns the configured dimension (0 in self-embedding mode).
 func (w *Weaviate) Dimensions() int { return w.Dim }
+
+// SelfEmbeds reports whether a vectorizer module is configured.
+func (w *Weaviate) SelfEmbeds() bool { return w.Vectorizer != "" }
 
 func (w *Weaviate) client() *http.Client {
 	if w.Client != nil {
@@ -136,10 +149,19 @@ func (w *Weaviate) Query(ctx context.Context, tenantID string, vec []float32, to
 		return nil, err
 	}
 	vecJSON, _ := json.Marshal(vec)
+	near := fmt.Sprintf("nearVector: { vector: %s }", string(vecJSON))
+	return w.graphQLGet(ctx, near, tenantID, topK)
+}
+
+// graphQLGet builds and runs a GraphQL Get over the collection with the
+// supplied near-operator clause (nearVector for the precomputed-vector path,
+// nearText for the self-embedding path), scoped to the tenant, and unpacks
+// the rows into Match records.
+func (w *Weaviate) graphQLGet(ctx context.Context, nearClause, tenantID string, topK int) ([]Match, error) {
 	query := fmt.Sprintf(`{
 		Get {
 			%s(
-				nearVector: { vector: %s }
+				%s
 				limit: %d
 				where: {
 					path: ["tenantId"]
@@ -152,7 +174,7 @@ func (w *Weaviate) Query(ctx context.Context, tenantID string, vec []float32, to
 				_additional { distance }
 			}
 		}
-	}`, w.Collection, string(vecJSON), topK, tenantID)
+	}`, w.Collection, nearClause, topK, tenantID)
 
 	respBody, err := w.doJSON(ctx, http.MethodPost, "/v1/graphql", map[string]any{"query": query})
 	if err != nil {
@@ -182,6 +204,40 @@ func (w *Weaviate) Query(ctx context.Context, tenantID string, vec []float32, to
 		})
 	}
 	return out, nil
+}
+
+// PutText upserts an object carrying the text in the vectorized `content`
+// property and no explicit vector, so the configured vectorizer module
+// embeds it server-side. spec: §13.12 PODIUM_WEAVIATE_VECTORIZER.
+func (w *Weaviate) PutText(ctx context.Context, tenantID, artifactID, version, text string) error {
+	if tenantID == "" || artifactID == "" || version == "" {
+		return ErrInvalidArgument
+	}
+	id := w.objectID(tenantID, artifactID, version)
+	body := map[string]any{
+		"class": w.Collection,
+		"id":    id,
+		"properties": map[string]any{
+			"content":    text,
+			"tenantId":   tenantID,
+			"artifactId": artifactID,
+			"version":    version,
+		},
+	}
+	_, err := w.doJSON(ctx, http.MethodPut,
+		fmt.Sprintf("/v1/objects/%s/%s", w.Collection, id), body)
+	return err
+}
+
+// QueryText runs a nearText GraphQL search so the vectorizer module embeds
+// the query server-side. spec: §13.12.
+func (w *Weaviate) QueryText(ctx context.Context, tenantID, text string, topK int) ([]Match, error) {
+	if tenantID == "" || topK < 1 {
+		return nil, ErrInvalidArgument
+	}
+	conceptJSON, _ := json.Marshal([]string{text})
+	near := fmt.Sprintf("nearText: { concepts: %s }", string(conceptJSON))
+	return w.graphQLGet(ctx, near, tenantID, topK)
 }
 
 // Delete removes the (tenant, id, version) object via DELETE
