@@ -15,6 +15,9 @@
 //	PODIUM_MATERIALIZE_ROOT    Materialization destination.
 //	PODIUM_SESSION_TOKEN       Injected JWT (§6.3.2).
 //	PODIUM_SESSION_TOKEN_FILE  File path holding the JWT.
+//	PODIUM_HOST_PYTHON         Host Python version, e.g. 3.11.4 (§4.4.1).
+//	PODIUM_HOST_NODE           Host Node version (§4.4.1).
+//	PODIUM_HOST_PACKAGES       CSV of installed system packages (§4.4.1).
 package main
 
 import (
@@ -88,6 +91,21 @@ type config struct {
 	// that doesn't list it. The override is loud — surfaces in
 	// the audit log and on stderr.
 	ignoreSandbox bool
+	// §4.4.1 runtime_requirements enforcement. The host advertises
+	// what it can run so an artifact declaring runtime_requirements
+	// the host cannot satisfy is refused at load time with
+	// materialize.runtime_unavailable.
+	hostPython   string
+	hostNode     string
+	hostPackages []string
+	// enforceRuntime forces the runtime gate active even when the
+	// host advertises no capability (fail-closed: any artifact with
+	// runtime_requirements is refused). When false, the gate is
+	// active only once the host advertises at least one capability.
+	enforceRuntime bool
+	// ignoreRuntime is the §4.4.1 escape hatch mirroring
+	// ignoreSandbox: bypass the runtime gate with a loud warning.
+	ignoreRuntime bool
 }
 
 func loadConfig() (*config, error) {
@@ -115,6 +133,12 @@ func loadConfig() (*config, error) {
 		enforceSandbox: os.Getenv("PODIUM_ENFORCE_SANDBOX_PROFILE") == "true",
 		hostSandboxes:  splitCSV(envDefault("PODIUM_HOST_SANDBOXES", "unrestricted")),
 		ignoreSandbox:  os.Getenv("PODIUM_IGNORE_SANDBOX") == "true",
+		// §4.4.1 runtime_requirements enforcement.
+		hostPython:     os.Getenv("PODIUM_HOST_PYTHON"),
+		hostNode:       os.Getenv("PODIUM_HOST_NODE"),
+		hostPackages:   splitCSV(os.Getenv("PODIUM_HOST_PACKAGES")),
+		enforceRuntime: os.Getenv("PODIUM_ENFORCE_RUNTIME_REQUIREMENTS") == "true",
+		ignoreRuntime:  os.Getenv("PODIUM_IGNORE_RUNTIME_REQUIREMENTS") == "true",
 	}
 	if c.registry == "" {
 		return nil, fmt.Errorf("PODIUM_REGISTRY is required")
@@ -395,6 +419,12 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 	if err := s.enforceSandboxPolicy(resp); err != nil {
 		return errorResult("materialize.sandbox_unsupported: " + err.Error())
 	}
+	// §4.4.1 runtime_requirements enforcement: a host that advertises
+	// its capabilities refuses an artifact it cannot satisfy. The error
+	// already carries the materialize.runtime_unavailable code.
+	if err := s.enforceRuntimePolicy(resp); err != nil {
+		return errorResult(err.Error())
+	}
 	// §6.6 step 1 — fetch every large_resource via its presigned
 	// URL into the inline Resources map. Failures (network /
 	// 403 / hash mismatch) abort materialization with a
@@ -442,6 +472,16 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 			for _, f := range out {
 				materialized = append(materialized, filepath.Join(s.cfg.materializeRoot, filepath.FromSlash(f.Path)))
 			}
+		}
+		// §4.4.1 — when the artifact requests a sandbox_profile whose
+		// baseline Podium ships (seccomp-strict), deliver that baseline
+		// alongside the materialized files so a host with sandbox
+		// capability can honor it. The sandbox gate above has already
+		// confirmed the host honors (or was told to ignore) the profile.
+		if p, ok, err := materialize.WriteSandboxProfile(s.cfg.materializeRoot, sandboxProfileOf(resp.Frontmatter)); err != nil {
+			return errorResult("materialize: " + err.Error())
+		} else if ok {
+			materialized = append(materialized, p)
 		}
 	}
 
@@ -641,6 +681,91 @@ func (s *mcpServer) enforceSandboxPolicy(resp loadArtifactResponse) error {
 	}
 	return fmt.Errorf("artifact requires sandbox_profile=%s; host supports %v",
 		profile, s.cfg.hostSandboxes)
+}
+
+// sandboxProfileOf returns the sandbox_profile declared in the frontmatter,
+// defaulting to unrestricted when absent or unparseable. Used to decide
+// whether a shipped baseline profile (seccomp-strict) must be delivered.
+func sandboxProfileOf(frontmatter string) string {
+	a, err := manifest.ParseArtifact([]byte(frontmatter))
+	if err != nil || a == nil || a.SandboxProfile == "" {
+		return string(manifest.SandboxUnrestricted)
+	}
+	return string(a.SandboxProfile)
+}
+
+// enforceRuntimePolicy applies the §4.4.1 runtime_requirements gate. The
+// host advertises its capabilities via PODIUM_HOST_PYTHON,
+// PODIUM_HOST_NODE, and PODIUM_HOST_PACKAGES; an artifact that declares a
+// requirement the host cannot satisfy is refused at load time with
+// materialize.runtime_unavailable. The returned error already carries
+// that code (it wraps materialize.ErrRuntimeUnavailable).
+//
+// The gate is active only once the host opts in by advertising at least
+// one capability, or by setting PODIUM_ENFORCE_RUNTIME_REQUIREMENTS. An
+// unconfigured host surfaces runtime_requirements to the caller without
+// refusing, matching the spec's "where supported" framing: a host that
+// cannot evaluate its own capabilities does not gate. This mirrors the
+// sandbox gate, whose host capabilities default to unrestricted.
+func (s *mcpServer) enforceRuntimePolicy(resp loadArtifactResponse) error {
+	a, err := manifest.ParseArtifact([]byte(resp.Frontmatter))
+	if err != nil {
+		// Fail closed: malformed frontmatter is a refusal.
+		return fmt.Errorf("%w: parse frontmatter: %v", materialize.ErrRuntimeUnavailable, err)
+	}
+	if a.RuntimeRequirements == nil {
+		return nil
+	}
+	if !s.runtimeGateActive() {
+		return nil
+	}
+	if s.cfg.ignoreRuntime {
+		// §4.4.1 — explicit override: log loudly so operators see the
+		// bypass in the audit trail.
+		fmt.Fprintf(os.Stderr,
+			"WARN: PODIUM_IGNORE_RUNTIME_REQUIREMENTS bypassing runtime check — artifact %s declares runtime_requirements; host advertises python=%q node=%q packages=%v\n",
+			resp.ID, s.cfg.hostPython, s.cfg.hostNode, s.cfg.hostPackages)
+		return nil
+	}
+	return materialize.CheckRuntimeRequirements(
+		runtimeRequirementsMap(a.RuntimeRequirements),
+		materialize.HostCapabilities{
+			Python:         s.cfg.hostPython,
+			Node:           s.cfg.hostNode,
+			SystemPackages: s.cfg.hostPackages,
+		},
+	)
+}
+
+// runtimeGateActive reports whether the host has opted into runtime
+// capability gating, either by advertising a capability or by the
+// explicit enforce flag.
+func (s *mcpServer) runtimeGateActive() bool {
+	return s.cfg.enforceRuntime ||
+		s.cfg.hostPython != "" ||
+		s.cfg.hostNode != "" ||
+		len(s.cfg.hostPackages) > 0
+}
+
+// runtimeRequirementsMap converts the typed manifest requirements into
+// the map[string]any CheckRuntimeRequirements consumes. system_packages
+// is carried as []string, which the check handles directly (and now also
+// when it arrives as []any, per F-4.4.4).
+func runtimeRequirementsMap(r *manifest.RuntimeRequirements) map[string]any {
+	if r == nil {
+		return nil
+	}
+	m := map[string]any{}
+	if r.Python != "" {
+		m["python"] = r.Python
+	}
+	if r.Node != "" {
+		m["node"] = r.Node
+	}
+	if len(r.SystemPackages) > 0 {
+		m["system_packages"] = r.SystemPackages
+	}
+	return m
 }
 
 // splitCSV splits a comma-separated env-var value into trimmed

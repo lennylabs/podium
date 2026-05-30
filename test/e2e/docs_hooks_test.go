@@ -270,11 +270,22 @@ func TestHooks_LintRuntimeRequirementsAccepted(t *testing.T) {
 }
 
 // T-D-hooks-10 — a hook whose runtime_requirements names a missing system
-// package should fail materialization with runtime_unavailable. The check is
-// implemented but never invoked, so the guarantee cannot be exercised.
+// package fails materialization with materialize.runtime_unavailable when the
+// host advertises its packages (§4.4.1, F-4.4.1).
 func TestHooks_RuntimeUnavailableRefusesMaterialize(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.4.1: the materialize.runtime_unavailable check is implemented but never invoked, so a missing system package does not block materialization")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"hooks/log-stop/ARTIFACT.md": hkArtifact("log-stop", "stop", "runtime_requirements:\n  system_packages: [jq]"),
+	}))
+	mat := t.TempDir()
+	// Host advertises bash but not jq.
+	env := append(mcpServerEnv(t, srv.BaseURL), "PODIUM_HARNESS=none", "PODIUM_MATERIALIZE_ROOT="+mat, "PODIUM_HOST_PACKAGES=bash")
+	res := mcpExec(t, env, toolCall(1, "load_artifact", map[string]any{"id": "hooks/log-stop"}))
+	result := rpcResult(t, res.Stdout, 1)
+	errStr, _ := result["error"].(string)
+	if !strings.Contains(errStr, "materialize.runtime_unavailable") || !strings.Contains(errStr, "jq") {
+		t.Errorf("expected runtime_unavailable naming jq, got result=%v", result)
+	}
 }
 
 // T-D-hooks-11 — declaring both a generic pre_tool_use hook and a

@@ -9,7 +9,6 @@ package e2e
 //
 // Known gaps drive several skips:
 //   - F-6.7.2: target_harnesses is parsed but never honored (test 4).
-//   - F-4.4.1: the runtime-requirements check is never invoked (test 14).
 //   - F-8.x / visibility: read_only mode and invisible artifacts are not
 //     deterministically expressible in a standalone single-layer e2e
 //     (tests 18, 48, 50).
@@ -247,10 +246,22 @@ func TestHandlingResponses_RuntimeRequirements(t *testing.T) {
 	hrWantFM(t, srv.BaseURL, "tools/acme/analyzer", "runtime_requirements", "python", ">=3.11", "node", ">=20")
 }
 
-// T-D-handling-responses-14 — materialize.runtime_unavailable when a runtime is absent.
+// T-D-handling-responses-14 — materialize.runtime_unavailable when the host
+// cannot satisfy a declared runtime (§4.4.1, F-4.4.1). The host advertises
+// python 3.9, below the skill's >=3.11 requirement, so load_artifact refuses.
 func TestHandlingResponses_RuntimeUnavailable(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.4.1: the runtime-requirements check is implemented but never invoked at materialize, so materialize.runtime_unavailable is never returned")
+	id := "tools/acme/analyzer"
+	reg := hrSkillReg(t, id, "analyzer", "runtime_requirements:\n  python: \">=3.11\"")
+	srv := startServer(t, reg)
+	mat := t.TempDir()
+	env := append(mcpServerEnv(t, srv.BaseURL), "PODIUM_HARNESS=none", "PODIUM_MATERIALIZE_ROOT="+mat, "PODIUM_HOST_PYTHON=3.9.0")
+	res := mcpExec(t, env, toolCall(1, "load_artifact", map[string]any{"id": id}))
+	result := rpcResult(t, res.Stdout, 1)
+	errStr, _ := result["error"].(string)
+	if !strings.Contains(errStr, "materialize.runtime_unavailable") {
+		t.Errorf("expected materialize.runtime_unavailable, got result=%v", result)
+	}
 }
 
 // T-D-handling-responses-15 — mcpServers is returned in frontmatter.

@@ -67,14 +67,37 @@ func CheckRuntimeRequirements(req map[string]any, host HostCapabilities) error {
 			return wrapRuntime("host node %s does not satisfy %s", host.Node, want)
 		}
 	}
-	if pkgs, ok := req["system_packages"].([]string); ok {
-		for _, p := range pkgs {
-			if !containsString(host.SystemPackages, p) {
-				return wrapRuntime("required system package %q not installed", p)
-			}
+	for _, p := range systemPackages(req["system_packages"]) {
+		if !containsString(host.SystemPackages, p) {
+			return wrapRuntime("required system package %q not installed", p)
 		}
 	}
 	return nil
+}
+
+// systemPackages coerces the system_packages requirement to a string
+// slice. The value is []string when the map is built directly from a
+// typed manifest.RuntimeRequirements, but a generic YAML or JSON
+// round-trip yields []any (F-4.4.4); the bare []string assertion used to
+// silently skip the check for the round-tripped form, treating an unmet
+// requirement as satisfied. Both element types are accepted here.
+func systemPackages(v any) []string {
+	switch t := v.(type) {
+	case []string:
+		return t
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, e := range t {
+			if s, ok := e.(string); ok {
+				out = append(out, s)
+			} else {
+				out = append(out, fmt.Sprintf("%v", e))
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func wrapRuntime(format string, args ...any) error {

@@ -12,11 +12,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
@@ -206,6 +208,9 @@ func NewFromFilesystem(path string, opts ...Option) (*Server, error) {
 			TenantID: tenant,
 			LayerID:  l.ID,
 			Files:    layerFS,
+			// §4.4: validate prose URL references with an HTTP HEAD by
+			// default; PODIUM_INGEST_OFFLINE=true skips the network probe.
+			Linter: lint.NewIngestLinter(os.Getenv("PODIUM_INGEST_OFFLINE") == "true"),
 		}); err != nil {
 			return nil, err
 		}

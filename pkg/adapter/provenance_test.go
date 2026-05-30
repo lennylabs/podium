@@ -121,6 +121,61 @@ second
 	}
 }
 
+// nonSkillProvenanceArtifact builds an ARTIFACT.md (frontmatter + body)
+// for a non-skill type whose body carries one imported provenance block.
+func nonSkillProvenanceArtifact(ty string) []byte {
+	return []byte("---\ntype: " + ty + "\nversion: 1.0.0\ndescription: aggregated knowledge\n---\n\n" +
+		"Authored intro.\n\n" +
+		"<!-- begin imported source=\"https://wiki.example/policy\" -->\n" +
+		"Imported policy text.\n" +
+		"<!-- end imported -->\n")
+}
+
+// Spec: §4.4.2 (F-4.4.3) — provenance rewriting must cover every type the
+// Claude Code adapter materializes, not just skills. A context, agent, or
+// rule body that aggregates external content carries imported blocks that
+// must become <untrusted-data> regions so the host can apply differential
+// trust. Before the fix only the skill path was rewritten.
+func TestClaudeCode_RewritesProvenanceForNonSkillTypes(t *testing.T) {
+	t.Parallel()
+	for _, ty := range []string{"context", "agent", "rule", "command", "hook"} {
+		ty := ty
+		t.Run(ty, func(t *testing.T) {
+			t.Parallel()
+			out, err := adapter.ClaudeCode{}.Adapt(adapter.Source{
+				ArtifactID:    "team/aggregate",
+				ArtifactBytes: nonSkillProvenanceArtifact(ty),
+			})
+			if err != nil {
+				t.Fatalf("Adapt(%s): %v", ty, err)
+			}
+			// Find the materialized manifest file (the one carrying the body).
+			var body string
+			for _, f := range out {
+				if strings.Contains(string(f.Content), "Authored intro.") {
+					body = string(f.Content)
+				}
+			}
+			if body == "" {
+				t.Fatalf("%s: no materialized body in output: %+v", ty, out)
+			}
+			if !strings.Contains(body, "<untrusted-data source=\"https://wiki.example/policy\">") {
+				t.Errorf("%s: imported block not rewritten to <untrusted-data>:\n%s", ty, body)
+			}
+			if !strings.Contains(body, "</untrusted-data>") {
+				t.Errorf("%s: <untrusted-data> not closed:\n%s", ty, body)
+			}
+			if strings.Contains(body, "begin imported") {
+				t.Errorf("%s: raw begin-imported marker survived:\n%s", ty, body)
+			}
+			// Authored prose and the frontmatter are preserved.
+			if !strings.Contains(body, "Authored intro.") || !strings.Contains(body, "type: "+ty) {
+				t.Errorf("%s: authored prose or frontmatter dropped:\n%s", ty, body)
+			}
+		})
+	}
+}
+
 // Spec: §4.4.2 — bodies without provenance markers pass
 // through unchanged (no-op when there's nothing to rewrite).
 func TestClaudeCode_NoMarkersPassesThrough(t *testing.T) {

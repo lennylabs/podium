@@ -445,6 +445,10 @@ func lintCmd(args []string) int {
 	fs := flag.NewFlagSet("lint", flag.ContinueOnError)
 	setUsage(fs, "Validate manifests in a filesystem-source registry.")
 	registry := fs.String("registry", "", "filesystem registry path (required)")
+	// §4.4: prose URL references are validated by an HTTP HEAD (200/3xx)
+	// by default; --offline (or PODIUM_INGEST_OFFLINE=true) skips the
+	// network probe and validates only bundled-file references.
+	offline := fs.Bool("offline", false, "skip the §4.4 URL HEAD check (validate bundled files only)")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
@@ -474,7 +478,8 @@ func lintCmd(args []string) int {
 		return 1
 	}
 
-	diags := (&lint.Linter{}).Lint(reg, records)
+	linter := lint.NewIngestLinter(*offline || os.Getenv("PODIUM_INGEST_OFFLINE") == "true")
+	diags := linter.Lint(reg, records)
 	if len(diags) == 0 {
 		fmt.Println("lint: no issues.")
 		return 0

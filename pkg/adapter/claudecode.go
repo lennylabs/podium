@@ -48,15 +48,22 @@ func (c ClaudeCode) Adapt(src Source) ([]File, error) {
 		for rel, data := range src.Resources {
 			out = append(out, File{Path: path.Join(skillRoot, rel), Content: data})
 		}
+	// §4.4.2 — every type's materialized body has its imported
+	// provenance blocks rewritten into Claude Code <untrusted-data>
+	// regions, not just skills. context bodies in particular aggregate
+	// external knowledge, so the prompt-injection defense must cover
+	// them. rewriteProvenanceForClaude only touches imported blocks, so
+	// passing the full ARTIFACT.md (frontmatter included) is a no-op when
+	// none are present.
 	case "rule":
 		out = append(out, File{
 			Path:    path.Join(".claude", "rules", name+".md"),
-			Content: src.ArtifactBytes,
+			Content: rewriteProvenanceForClaude(src.ArtifactBytes),
 		})
 	case "agent":
 		out = append(out, File{
 			Path:    path.Join(".claude", "agents", name+".md"),
-			Content: src.ArtifactBytes,
+			Content: rewriteProvenanceForClaude(src.ArtifactBytes),
 		})
 		for rel, data := range src.Resources {
 			out = append(out, File{
@@ -69,7 +76,7 @@ func (c ClaudeCode) Adapt(src Source) ([]File, error) {
 		// under .claude/podium/<id>/ with the canonical layout.
 		out = append(out, File{
 			Path:    path.Join(".claude", "podium", src.ArtifactID, "ARTIFACT.md"),
-			Content: src.ArtifactBytes,
+			Content: rewriteProvenanceForClaude(src.ArtifactBytes),
 		})
 		for rel, data := range src.Resources {
 			out = append(out, File{

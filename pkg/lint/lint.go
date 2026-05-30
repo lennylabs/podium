@@ -11,8 +11,10 @@ package lint
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
@@ -53,9 +55,15 @@ func (d Diagnostic) String() string {
 
 // Linter applies the configured rules to a registry.
 type Linter struct {
-	// Rules is the ordered set of rules to apply. Defaults to
-	// AllRules() when empty.
+	// Rules is the ordered set of rules to apply. Defaults to the
+	// rule set from AllRulesWithClient(HTTPClient) when empty.
 	Rules []Rule
+	// HTTPClient, when non-nil, enables the §4.4 URL HEAD check in the
+	// default rule set: prose references to URLs are validated by an
+	// HTTP HEAD that must return 200/3xx. When nil the URL check is
+	// skipped (offline ingest); the bundled-file existence check still
+	// runs. Ignored when Rules is set explicitly.
+	HTTPClient *http.Client
 }
 
 // Rule is one lint check. Receiving the registry plus parsed records
@@ -69,8 +77,17 @@ type Rule interface {
 }
 
 // AllRules returns the set of lint rules registered for the active
-// build.
+// build, with the §4.4 URL HEAD check disabled (offline). Equivalent to
+// AllRulesWithClient(nil).
 func AllRules() []Rule {
+	return AllRulesWithClient(nil)
+}
+
+// AllRulesWithClient returns the registered rule set with the §4.4
+// prose-reference rule driven by client: a non-nil client enables URL
+// HEAD validation, a nil client skips it. Every other rule is
+// client-independent.
+func AllRulesWithClient(client *http.Client) []Rule {
 	return []Rule{
 		ruleRequiredFields{},
 		ruleTypeRequiredFields{},
@@ -88,10 +105,29 @@ func AllRules() []Rule {
 		ruleBundledResourceSize{},
 		ruleManifestSize{},
 		ruleArtifactBodyForSkill{},
-		ruleProseReferenceResolution{},
+		ruleProseReferenceResolution{HTTPClient: client},
 		ruleDomainImportsResolve{},
 		ruleDomainImportCycle{},
 	}
+}
+
+// DefaultHTTPClient is the client NewIngestLinter uses for §4.4 URL HEAD
+// checks. The 10s overall timeout bounds a slow or unreachable host; the
+// per-request context in the prose rule adds a 5s ceiling per probe.
+func DefaultHTTPClient() *http.Client {
+	return &http.Client{Timeout: 10 * time.Second}
+}
+
+// NewIngestLinter returns a Linter for an ingest pass. When offline is
+// false it enables §4.4 URL HEAD validation with DefaultHTTPClient();
+// when true it skips the network probe (the bundled-file existence check
+// still runs). Callers supply offline from their own deployment config
+// (for example PODIUM_INGEST_OFFLINE or a --offline flag).
+func NewIngestLinter(offline bool) *Linter {
+	if offline {
+		return &Linter{}
+	}
+	return &Linter{HTTPClient: DefaultHTTPClient()}
 }
 
 // Lint runs every configured rule against the registry and returns the
@@ -100,7 +136,7 @@ func AllRules() []Rule {
 func (l *Linter) Lint(reg *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	rules := l.Rules
 	if len(rules) == 0 {
-		rules = AllRules()
+		rules = AllRulesWithClient(l.HTTPClient)
 	}
 	var out []Diagnostic
 	for _, r := range rules {

@@ -14,6 +14,8 @@ package e2e
 // finding filed) are asserted against actual behavior with a note.
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -183,6 +185,57 @@ func TestBundled_ProseReferenceMissing(t *testing.T) {
 	}
 }
 
+// T-D-bundled-resources-5b — a prose reference to a URL that returns 404 to a
+// HEAD is an ingest error (§4.4, F-4.4.2). The real `podium lint` enables the
+// URL HEAD check by default; the probe targets a localhost test server.
+func TestBundled_ProseURLReferenceValidated(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/missing") {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	id := "finance/close-reporting/run-variance-analysis"
+	reg := writeRegistry(t, map[string]string{
+		id + "/ARTIFACT.md": brSkillArtifact,
+		id + "/SKILL.md":    brSkillMD("run-variance-analysis", brVarianceDesc, "Live [a]("+ts.URL+"/ok). Dead [b]("+ts.URL+"/missing).\n"),
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 1 {
+		t.Fatalf("lint exit=%d, want 1\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "lint.prose_reference") || !strings.Contains(res.Stdout, "/missing") {
+		t.Errorf("expected a prose_reference error naming the dead URL:\n%s", res.Stdout)
+	}
+}
+
+// T-D-bundled-resources-5c — --offline skips the §4.4 URL HEAD check, so a dead
+// URL no longer blocks lint (F-4.4.2 offline opt-out).
+func TestBundled_ProseURLOfflineSkips(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	id := "finance/close-reporting/run-variance-analysis"
+	reg := writeRegistry(t, map[string]string{
+		id + "/ARTIFACT.md": brSkillArtifact,
+		id + "/SKILL.md":    brSkillMD("run-variance-analysis", brVarianceDesc, "Dead [b]("+ts.URL+"/missing).\n"),
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg, "--offline")
+	if res.Exit != 0 {
+		t.Fatalf("offline lint exit=%d, want 0\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if strings.Contains(res.Stdout, "lint.prose_reference") {
+		t.Errorf("offline lint should not run the URL check:\n%s", res.Stdout)
+	}
+}
+
 // T-D-bundled-resources-6 — a Markdown-link prose reference that escapes the
 // artifact package (../) errors with lint.prose_reference.
 func TestBundled_ProseReferenceEscapes(t *testing.T) {
@@ -336,12 +389,12 @@ func TestBundled_RuntimeRequirementsParse(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-15 — runtime_requirements are not enforced at
-// materialize, so an MCP load_artifact succeeds and materializes regardless of
-// the declared python constraint. spec: doc "Execution model"; runtime check is
-// implemented but never invoked (F-4.4.1), so the positive (materializes) path
-// is what is observable.
-func TestBundled_RuntimeRequirementsNotEnforced(t *testing.T) {
+// T-D-bundled-resources-15 — a host that advertises no capabilities does not
+// gate on runtime_requirements: it surfaces the requirement to the caller and
+// materializes (§4.4.1 "Adapters surface these requirements to the host where
+// supported"). The runtime gate (F-4.4.1) activates only once the host
+// advertises a capability; see tests 16 and 17 for the refusal path.
+func TestBundled_RuntimeRequirementsSurfacedNotGated(t *testing.T) {
 	t.Parallel()
 	id := "finance/close-reporting/run-variance-analysis"
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -353,7 +406,29 @@ func TestBundled_RuntimeRequirementsNotEnforced(t *testing.T) {
 		toolCall(1, "load_artifact", map[string]any{"id": id}))
 	result := rpcResult(t, res.Stdout, 1)
 	if e, ok := result["error"]; ok && e != nil {
-		t.Fatalf("runtime check is not enforced; load should not refuse: %v", e)
+		t.Fatalf("unconfigured host should not gate; load should not refuse: %v", e)
+	}
+	if paths, _ := result["materialized_at"].([]any); len(paths) == 0 {
+		t.Errorf("expected materialized_at paths: %v", result)
+	}
+}
+
+// T-D-bundled-resources-15b — once the host advertises a satisfying capability,
+// the artifact materializes (§4.4.1). The positive complement to tests 16/17.
+func TestBundled_RuntimeSatisfiedMaterializes(t *testing.T) {
+	t.Parallel()
+	id := "finance/close-reporting/run-variance-analysis"
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		id + "/ARTIFACT.md": brSkillArtifactPy, // requires python >=3.10
+		id + "/SKILL.md":    brSkillMD("run-variance-analysis", brVarianceDesc, "Run the analysis.\n"),
+	}))
+	mat := t.TempDir()
+	res := mcpExec(t, append(mcpServerEnv(t, srv.BaseURL),
+		"PODIUM_HARNESS=none", "PODIUM_MATERIALIZE_ROOT="+mat, "PODIUM_HOST_PYTHON=3.11.4"),
+		toolCall(1, "load_artifact", map[string]any{"id": id}))
+	result := rpcResult(t, res.Stdout, 1)
+	if e, ok := result["error"]; ok && e != nil {
+		t.Fatalf("host python 3.11.4 satisfies >=3.10; load should not refuse: %v", e)
 	}
 	if paths, _ := result["materialized_at"].([]any); len(paths) == 0 {
 		t.Errorf("expected materialized_at paths: %v", result)
@@ -361,17 +436,49 @@ func TestBundled_RuntimeRequirementsNotEnforced(t *testing.T) {
 }
 
 // T-D-bundled-resources-16 — a host that does not satisfy a python requirement
-// should refuse with materialize.runtime_unavailable.
+// refuses with materialize.runtime_unavailable (§4.4.1, F-4.4.1).
 func TestBundled_RuntimeUnavailablePython(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.4.1: materialize.CheckRuntimeRequirements is implemented but never invoked at materialize, so materialize.runtime_unavailable is never returned")
+	id := "finance/close-reporting/run-variance-analysis"
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		id + "/ARTIFACT.md": brSkillArtifactPy, // requires python >=3.10
+		id + "/SKILL.md":    brSkillMD("run-variance-analysis", brVarianceDesc, "Run the analysis.\n"),
+	}))
+	mat := t.TempDir()
+	res := mcpExec(t, append(mcpServerEnv(t, srv.BaseURL),
+		"PODIUM_HARNESS=none", "PODIUM_MATERIALIZE_ROOT="+mat, "PODIUM_HOST_PYTHON=3.9.0"),
+		toolCall(1, "load_artifact", map[string]any{"id": id}))
+	result := rpcResult(t, res.Stdout, 1)
+	errStr, _ := result["error"].(string)
+	if !strings.Contains(errStr, "materialize.runtime_unavailable") || !strings.Contains(errStr, "python") {
+		t.Errorf("expected runtime_unavailable naming python, got result=%v", result)
+	}
+	// A refused artifact must not have been written to disk.
+	if paths, _ := result["materialized_at"].([]any); len(paths) != 0 {
+		t.Errorf("refused artifact should not materialize: %v", paths)
+	}
 }
 
-// T-D-bundled-resources-17 — a host missing a required system package should
-// refuse with materialize.runtime_unavailable.
+// T-D-bundled-resources-17 — a host missing a required system package refuses
+// with materialize.runtime_unavailable naming the package (§4.4.1, F-4.4.1).
 func TestBundled_RuntimeUnavailableSystemPackage(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.4.1: the system-package runtime check is implemented but never invoked at materialize, so materialize.runtime_unavailable is never returned")
+	id := "finance/close-reporting/run-variance-analysis"
+	art := "---\ntype: skill\nversion: 1.0.0\nruntime_requirements:\n  system_packages: [\"jq\", \"curl\"]\n---\n\n<!-- Skill body lives in SKILL.md. -->\n"
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		id + "/ARTIFACT.md": art,
+		id + "/SKILL.md":    brSkillMD("run-variance-analysis", brVarianceDesc, "Run the analysis.\n"),
+	}))
+	mat := t.TempDir()
+	// Host advertises jq but not curl.
+	res := mcpExec(t, append(mcpServerEnv(t, srv.BaseURL),
+		"PODIUM_HARNESS=none", "PODIUM_MATERIALIZE_ROOT="+mat, "PODIUM_HOST_PACKAGES=jq"),
+		toolCall(1, "load_artifact", map[string]any{"id": id}))
+	result := rpcResult(t, res.Stdout, 1)
+	errStr, _ := result["error"].(string)
+	if !strings.Contains(errStr, "materialize.runtime_unavailable") || !strings.Contains(errStr, "curl") {
+		t.Errorf("expected runtime_unavailable naming curl, got result=%v", result)
+	}
 }
 
 // ---- sandbox_profile --------------------------------------------------------
@@ -452,6 +559,33 @@ func TestBundled_SandboxAbsentDefaultsUnrestricted(t *testing.T) {
 	}
 }
 
+// T-D-bundled-resources-21b — when a host honors sandbox_profile: seccomp-strict,
+// the materialization layer delivers the baseline syscall-allowlist profile
+// Podium ships (§4.4.1, F-4.4.5) under .podium/seccomp-strict.json so the host
+// can apply it.
+func TestBundled_SeccompBaselineDelivered(t *testing.T) {
+	t.Parallel()
+	id := "finance/strict-ctx"
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		id + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Strict context.\nsandbox_profile: seccomp-strict\n---\n\nbody\n",
+	}))
+	mat := t.TempDir()
+	// Host declares it honors seccomp-strict so the sandbox gate passes.
+	res := mcpExec(t, append(mcpServerEnv(t, srv.BaseURL),
+		"PODIUM_HARNESS=none", "PODIUM_MATERIALIZE_ROOT="+mat, "PODIUM_HOST_SANDBOXES=unrestricted,seccomp-strict"),
+		toolCall(1, "load_artifact", map[string]any{"id": id}))
+	result := rpcResult(t, res.Stdout, 1)
+	if e, ok := result["error"]; ok && e != nil {
+		t.Fatalf("host honoring seccomp-strict should not refuse: %v", e)
+	}
+	profile := filepath.Join(mat, ".podium", "seccomp-strict.json")
+	mustExist(t, profile)
+	got := readFile(t, profile)
+	if !strings.Contains(got, "SCMP_ACT_ERRNO") || !strings.Contains(got, "SCMP_ACT_ALLOW") {
+		t.Errorf("delivered seccomp profile is not a strict allowlist:\n%s", got)
+	}
+}
+
 // ---- Content provenance -----------------------------------------------------
 
 // brProvenanceBody is a SKILL.md body carrying one imported provenance block.
@@ -515,6 +649,28 @@ func TestBundled_ProvenanceAuthoredOnlyPassthrough(t *testing.T) {
 	got := readFile(t, filepath.Join(tgt, ".claude/skills/payments/SKILL.md"))
 	if strings.Contains(got, "untrusted-data") {
 		t.Errorf("unmarked body should not gain untrusted-data tags:\n%s", got)
+	}
+}
+
+// T-D-bundled-resources-24b — the claude-code adapter rewrites imported
+// provenance in a non-skill (context) body too, not just skills (§4.4.2,
+// F-4.4.3). The materialized ARTIFACT.md under .claude/podium/<id>/ carries
+// the <untrusted-data> region.
+func TestBundled_ProvenanceClaudeCodeNonSkill(t *testing.T) {
+	t.Parallel()
+	id := "finance/policy/payments-context"
+	art := "---\ntype: context\nversion: 1.0.0\ndescription: Aggregated payments policy.\n---\n\nAuthored intro.\n\n" + brProvenanceBody
+	reg := writeRegistry(t, map[string]string{id + "/ARTIFACT.md": art})
+	tgt := t.TempDir()
+	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
+		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	got := readFile(t, filepath.Join(tgt, ".claude/podium", id, "ARTIFACT.md"))
+	if !strings.Contains(got, "<untrusted-data source=\"https://wiki.example.com/policy/payments\">") {
+		t.Errorf("non-skill body missing untrusted-data region:\n%s", got)
+	}
+	if strings.Contains(got, "begin imported") {
+		t.Errorf("begin-imported marker should be rewritten in a non-skill body:\n%s", got)
 	}
 }
 

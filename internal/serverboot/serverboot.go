@@ -25,6 +25,7 @@ import (
 	"github.com/lennylabs/podium/pkg/embedding"
 	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/notification"
 	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/registry/core"
@@ -169,6 +170,9 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string) ([]layer.Lay
 			TenantID: tenantID,
 			LayerID:  l.ID,
 			Files:    os.DirFS(l.Path),
+			// §4.4: validate prose URL references with an HTTP HEAD by
+			// default; PODIUM_INGEST_OFFLINE=true skips the network probe.
+			Linter: lint.NewIngestLinter(isTrue(os.Getenv("PODIUM_INGEST_OFFLINE"))),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("ingest layer %s from %s: %w", l.ID, l.Path, err)
