@@ -11,6 +11,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/store"
 )
 
@@ -33,6 +34,10 @@ type LayerEndpoint struct {
 	// admin-defined layers. Tests inject a no-op; production wires
 	// the registry's AdminAuthorize.
 	authAdmin func(*http.Request) error
+	// identify resolves the caller identity. It backs the §4.6 rule
+	// that a user-defined layer's owner is the authenticated
+	// registrant. Defaults to an anonymous caller.
+	identify func(*http.Request) layer.Identity
 	// defaultLayerVisibility is the fallback applied at register
 	// time when an admin-defined layer arrives with no explicit
 	// visibility. One of "public" | "organization" | "private".
@@ -53,12 +58,20 @@ func NewLayerEndpoint(s store.Store, tenantID string, mode *ModeTracker) *LayerE
 	return &LayerEndpoint{
 		store: s, tenantID: tenantID, mode: mode,
 		authAdmin: func(*http.Request) error { return nil },
+		identify:  func(*http.Request) layer.Identity { return layer.Identity{IsPublic: true} },
 	}
 }
 
 // WithAdminAuth installs the admin-authorization callback.
 func (e *LayerEndpoint) WithAdminAuth(fn func(*http.Request) error) *LayerEndpoint {
 	e.authAdmin = fn
+	return e
+}
+
+// WithIdentityResolver installs the caller-identity resolver used to
+// derive a user-defined layer's owner from the authenticated registrant.
+func (e *LayerEndpoint) WithIdentityResolver(fn func(*http.Request) layer.Identity) *LayerEndpoint {
+	e.identify = fn
 	return e
 }
 
@@ -134,14 +147,18 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "id query param is required")
 		return
 	}
-	if err := e.authAdmin(r); err != nil {
-		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
-		return
-	}
 	cfg, err := e.store.GetLayerConfig(r.Context(), e.tenantID, id)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "registry.not_found", err.Error())
 		return
+	}
+	// Mutating an admin-defined layer requires admin authorization; a
+	// user-defined layer belongs to its registrant (§4.7.2).
+	if !cfg.UserDefined {
+		if err := e.authAdmin(r); err != nil {
+			writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
+			return
+		}
 	}
 	var patch LayerRegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
@@ -157,20 +174,26 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	if patch.LocalPath != "" {
 		cfg.LocalPath = patch.LocalPath
 	}
-	if patch.Owner != "" {
-		cfg.Owner = patch.Owner
-	}
-	if patch.Public {
-		cfg.Public = true
-	}
-	if patch.Organization {
-		cfg.Organization = true
-	}
-	if len(patch.Groups) > 0 {
-		cfg.Groups = patch.Groups
-	}
-	if len(patch.Users) > 0 {
-		cfg.Users = patch.Users
+	// spec: §4.6 — a user-defined layer's owner and implicit
+	// users:[owner] visibility are fixed at registration and cannot be
+	// widened, so visibility/owner patches are ignored for it. An admin
+	// may edit an admin-defined layer's visibility.
+	if !cfg.UserDefined {
+		if patch.Owner != "" {
+			cfg.Owner = patch.Owner
+		}
+		if patch.Public {
+			cfg.Public = true
+		}
+		if patch.Organization {
+			cfg.Organization = true
+		}
+		if len(patch.Groups) > 0 {
+			cfg.Groups = patch.Groups
+		}
+		if len(patch.Users) > 0 {
+			cfg.Users = patch.Users
+		}
 	}
 	if err := e.store.PutLayerConfig(r.Context(), cfg); err != nil {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
@@ -222,10 +245,23 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:    time.Now().UTC(),
 	}
 
-	// User-defined layers always carry the implicit users:[owner]
-	// visibility per §7.3.1.
-	if cfg.UserDefined && cfg.Owner != "" && len(cfg.Users) == 0 {
-		cfg.Users = []string{cfg.Owner}
+	// spec: §4.6 / §7.3.1 — a user-defined layer has implicit visibility
+	// users:[<registrant>]; the field is set automatically and cannot be
+	// widened. Derive the owner from the authenticated identity so a
+	// caller cannot register a layer owned by an arbitrary subject, and
+	// discard any caller-supplied public/organization/groups/users.
+	if cfg.UserDefined {
+		if id := e.identify(r); id.IsAuthenticated && id.Sub != "" {
+			cfg.Owner = id.Sub
+		}
+		cfg.Public = false
+		cfg.Organization = false
+		cfg.Groups = nil
+		if cfg.Owner != "" {
+			cfg.Users = []string{cfg.Owner}
+		} else {
+			cfg.Users = nil
+		}
 	}
 
 	// §4.6 / PODIUM_DEFAULT_LAYER_VISIBILITY: when no explicit

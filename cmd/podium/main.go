@@ -459,8 +459,15 @@ func lintCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
+	// spec: §4.6 — lint validates the registry, so it surfaces a
+	// same-canonical-ID cross-layer collision as an error ("silent
+	// shadowing is never permitted"). The default policy honors the
+	// extends exception, so a legitimate higher-precedence overlay that
+	// declares extends: passes; only an unsanctioned shadow errors. sync
+	// keeps CollisionPolicyHighestWins because it materializes the
+	// caller's composed effective view rather than validating it.
 	records, err := reg.Walk(filesystem.WalkOptions{
-		CollisionPolicy: filesystem.CollisionPolicyHighestWins,
+		CollisionPolicy: filesystem.CollisionPolicyDefault,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

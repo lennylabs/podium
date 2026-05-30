@@ -983,23 +983,24 @@ func (r *Registry) resolveExtendsChain(ctx context.Context, rec store.ManifestRe
 	return append(parentChain, rec), nil
 }
 
-// mergeChain folds the chain top-down (parent → child) per the §4.6
-// field-semantics table. Scalar fields take the child's value when set;
-// list fields union; sensitivity is most-restrictive-wins.
+// mergeChain folds the chain parent → child per the §4.6 field-semantics
+// table. It parses each record's stored frontmatter into a
+// manifest.Artifact, applies manifest.MergeExtends across the chain, and
+// re-serializes the merged frontmatter so every consumer that reads the
+// served frontmatter (not only the indexed Description/Tags/Sensitivity
+// record fields) observes the merged result. The merged record keeps the
+// child's identity (id, version, content hash, layer, body) and surfaces
+// the merged scalar fields back onto the record for callers that read
+// them directly. spec: §4.6 field-semantics table.
 func mergeChain(chain []store.ManifestRecord) store.ManifestRecord {
 	if len(chain) == 0 {
 		return store.ManifestRecord{}
 	}
 	out := chain[0]
+	merged := parsedArtifact(out)
 	for _, c := range chain[1:] {
-		if c.Description != "" {
-			out.Description = c.Description
-		}
-		if c.Type != "" {
-			out.Type = c.Type
-		}
-		out.Tags = appendUniqueStrings(out.Tags, c.Tags)
-		out.Sensitivity = mostRestrictiveSensitivity(out.Sensitivity, c.Sensitivity)
+		m := manifest.MergeExtends(*merged, *parsedArtifact(c))
+		merged = &m
 		// Identity fields preserve the child's coordinates so callers
 		// see the child rather than the parent.
 		out.ArtifactID = c.ArtifactID
@@ -1007,39 +1008,48 @@ func mergeChain(chain []store.ManifestRecord) store.ManifestRecord {
 		out.ContentHash = c.ContentHash
 		out.Layer = c.Layer
 		out.IngestedAt = c.IngestedAt
-		out.Deprecated = c.Deprecated
-		// Body and Frontmatter take the child's; the parent's prose is
-		// not concatenated — extends inherits structured fields, not
+		out.ExtendsPin = c.ExtendsPin
+		// The body takes the child's; the parent's prose is not
+		// concatenated — extends inherits structured fields, not the
 		// markdown body.
 		if len(c.Body) > 0 {
 			out.Body = c.Body
 		}
-		if len(c.Frontmatter) > 0 {
-			out.Frontmatter = c.Frontmatter
-		}
-		out.ExtendsPin = c.ExtendsPin
+	}
+	// Surface the merged structured fields back onto the record so search
+	// descriptors, sensitivity gating, and deprecation reporting agree
+	// with the served frontmatter.
+	out.Type = string(merged.Type)
+	out.Description = merged.Description
+	out.Tags = append([]string(nil), merged.Tags...)
+	out.Sensitivity = string(merged.Sensitivity)
+	out.SearchVisibility = string(merged.SearchVisibility)
+	out.Deprecated = merged.Deprecated
+	out.ReplacedBy = merged.ReplacedBy
+	// Strip the extends reference from the served manifest: the merge has
+	// been applied server-side and the parent's ID must not be surfaced to
+	// the requester (§4.6 hidden parents).
+	merged.Extends = ""
+	if fm, err := manifest.SerializeArtifact(merged); err == nil {
+		out.Frontmatter = fm
 	}
 	return out
 }
 
-func appendUniqueStrings(a, b []string) []string {
-	seen := map[string]bool{}
-	out := make([]string, 0, len(a)+len(b))
-	for _, s := range a {
-		if seen[s] {
-			continue
-		}
-		seen[s] = true
-		out = append(out, s)
+// parsedArtifact decodes a record's stored frontmatter into a
+// manifest.Artifact. Ingested records always parse (ingest parsed them);
+// the indexed-field fallback is defense in depth for a malformed record.
+func parsedArtifact(rec store.ManifestRecord) *manifest.Artifact {
+	if a, err := manifest.ParseArtifact(rec.Frontmatter); err == nil && a != nil {
+		return a
 	}
-	for _, s := range b {
-		if seen[s] {
-			continue
-		}
-		seen[s] = true
-		out = append(out, s)
+	return &manifest.Artifact{
+		Type:        manifest.ArtifactType(rec.Type),
+		Version:     rec.Version,
+		Description: rec.Description,
+		Tags:        append([]string(nil), rec.Tags...),
+		Sensitivity: manifest.Sensitivity(rec.Sensitivity),
 	}
-	return out
 }
 
 func mostRestrictiveSensitivity(a, b string) string {

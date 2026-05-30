@@ -2,20 +2,18 @@ package e2e
 
 // End-to-end tests for docs/authoring/extends.md (D-extends).
 //
-// extends is effectively non-functional end to end. A higher-precedence child
-// that declares extends: at the same canonical ID is rejected at boot ingest as
-// a cross-layer collision (the extends exception is not honored, F-4.6.3), so
-// only the parent serves and the merge is never observed. The merge-observation
-// tests (scalar/list/sensitivity/sandbox/mcpServers/runtime/hidden-parent) are
-// therefore recorded as skips against the relevant BUILD-GAPS finding. The few
-// behaviors that do hold are asserted directly: scaffold --extends writes the
-// field; an unknown-parent or self-referencing child is dropped at ingest and
-// observable as a 404 when a valid sibling keeps boot alive; an extends child at
-// a different canonical ID from its parent ingests (the same-ID constraint is
-// not enforced); lint never errors on an extends reference; and the filesystem
-// sync path resolves nothing (highest-wins, no merge). Doc claims the
-// implementation does not honor (with no finding filed) are asserted against
-// actual behavior with a note so a future change is detected.
+// extends works end to end after the §4.6 remediation (F-4.6.1/2/3): a
+// higher-precedence child that declares extends: at the same canonical ID is
+// accepted as an overlay at boot, the full field-semantics table merges into
+// the served frontmatter, a same-ID collision without extends is rejected, and
+// a cross-type extends is rejected. The merge-observation tests boot a
+// two-layer multi_layer registry (org-defaults parent, team-foo overlay) and
+// assert the served result. A few cases remain skipped where the standalone
+// e2e harness cannot exercise them: per-identity layer visibility (hidden
+// parents/children), a post-boot reingest path (pin propagation), and a
+// content-hash pin whose value is unknowable before the fixtures are written;
+// those are covered by package-level tests. Bundled-file merge over sync stays
+// skipped under F-13.11.2 and search-descriptor sensitivity under F-4.6.7.
 
 import (
 	"os"
@@ -32,55 +30,135 @@ func exSkillMD(name, desc string) string {
 	return "---\nname: " + name + "\ndescription: " + desc + "\n---\n\n" + name + " body.\n"
 }
 
+// exParentID is the canonical ID shared by the parent and the
+// higher-precedence extends child in the two-layer boot fixtures.
+const exParentID = "finance/ap/pay-invoice"
+
+// exLoadResp captures the load_artifact fields the extends tests assert.
+type exLoadResp struct {
+	Version      string `json:"version"`
+	Type         string `json:"type"`
+	Frontmatter  string `json:"frontmatter"`
+	ManifestBody string `json:"manifest_body"`
+	Sensitivity  string `json:"sensitivity"`
+	Deprecated   bool   `json:"deprecated"`
+}
+
+// extendsBoot stages a multi_layer registry where the higher-precedence
+// team-foo layer overlays org-defaults at the same canonical ID
+// (exParentID) and boots a standalone server. The parent is the
+// lower-precedence org-defaults artifact; the child is the team-foo
+// overlay (which must declare extends: <exParentID>). extra adds further
+// files, e.g. SKILL.md bodies for skill fixtures.
+func extendsBoot(t testing.TB, parentArtifact, childArtifact string, extra map[string]string) *serverProc {
+	t.Helper()
+	entries := map[string]string{
+		".registry-config": "multi_layer: true\nlayer_order:\n  - org-defaults\n  - team-foo\n",
+		"org-defaults/" + exParentID + "/ARTIFACT.md": parentArtifact,
+		"team-foo/" + exParentID + "/ARTIFACT.md":     childArtifact,
+	}
+	for k, v := range extra {
+		entries[k] = v
+	}
+	return startServer(t, writeRegistry(t, entries))
+}
+
+// exLoad GETs /v1/load_artifact and decodes the response.
+func exLoad(t testing.TB, srv *serverProc, id string) exLoadResp {
+	t.Helper()
+	var r exLoadResp
+	getJSON(t, srv.BaseURL+"/v1/load_artifact?id="+id, &r)
+	return r
+}
+
 // ---- Pinning (T-D-extends-1..7): ExtendsPin is not exposed by any API -------
 
+// extParentWithTag is a lower-precedence parent carrying a distinctive
+// tag the child does not declare; the tag's presence on the merged result
+// proves the pinned parent was resolved and folded in.
+func extParentWithTag(version string) string {
+	return "---\ntype: context\nversion: " + version + "\ndescription: org parent\ntags: [from-parent]\n---\n\nparent body\n"
+}
+
 // T-D-extends-1 — extends pin resolved to an exact version at child ingest time
-// using a semver range. spec: docs/authoring/extends.md § "Pinning" table.
+// using a semver range. The merged result carries the parent's tag, which is
+// observable only if the @1.x range resolved to the ingested parent.
+// spec: docs/authoring/extends.md § "Pinning" table.
 func TestExtends_PinSemverRange(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: the same-ID extends child is rejected at boot ingest as a cross-layer collision, so its resolved manifest is never stored; ExtendsPin is also not exposed by any API response, so the resolved pin is unobservable")
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	srv := extendsBoot(t, extParentWithTag("1.0.0"), child, nil)
+	got := exLoad(t, srv, exParentID)
+	if got.Version != "2.0.0" {
+		t.Fatalf("version = %q, want child's 2.0.0", got.Version)
+	}
+	if !strings.Contains(got.Frontmatter, "from-parent") {
+		t.Errorf("@1.x range did not resolve+merge the parent:\n%s", got.Frontmatter)
+	}
 }
 
-// T-D-extends-2 — extends with an exact semver pin ingests successfully.
-// spec: docs/authoring/extends.md § "Pinning" table, <id>@<semver> row.
+// T-D-extends-2 — extends with an exact semver pin ingests successfully and
+// merges. spec: docs/authoring/extends.md § "Pinning" table, <id>@<semver> row.
 func TestExtends_PinExactSemver(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: the same-ID extends child is rejected at ingest; ExtendsPin is not exposed by any API response, so the exact pin is unobservable")
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nextends: " + exParentID + "@1.0.0\n---\n\nbody\n"
+	srv := extendsBoot(t, extParentWithTag("1.0.0"), child, nil)
+	got := exLoad(t, srv, exParentID)
+	if got.Version != "2.0.0" || !strings.Contains(got.Frontmatter, "from-parent") {
+		t.Errorf("exact pin did not merge the parent: version=%q\n%s", got.Version, got.Frontmatter)
+	}
 }
 
-// T-D-extends-3 — extends with a content-hash pin resolves to an exact version.
-// spec: docs/authoring/extends.md § "Pinning" table, <id>@sha256:<hash> row.
+// T-D-extends-3 — content-hash pinning resolves to an exact version. The
+// parent's hash is not knowable before the boot fixtures are written, so the
+// resolution is asserted in the core unit test TestExtends_ContentHashPin; here
+// only the failure path (T-D-extends-4) is reachable end to end.
 func TestExtends_PinContentHash(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: the same-ID extends child is rejected at ingest; ExtendsPin is not exposed by any API response, so the hash-resolved pin is unobservable")
+	t.Skip("content-hash pin resolution requires the parent's hash before boot, which the e2e fixtures cannot know; covered by pkg/registry/core TestExtends_ContentHashPin")
 }
 
-// T-D-extends-4 — extends with an unresolvable content hash fails ingest.
+// T-D-extends-4 — extends with an unresolvable content hash fails ingest; the
+// child is dropped and only the lower-precedence parent serves at the shared id.
 // spec: docs/authoring/extends.md § "Pinning" table, <id>@sha256:<hash> row.
 func TestExtends_PinUnresolvableHash(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: the same-ID extends child is rejected at ingest before the hash-resolution path is reachable; ExtendsPin is not exposed by any API response")
+	bogus := "sha256:" + strings.Repeat("0", 64)
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nextends: " + exParentID + "@" + bogus + "\n---\n\nbody\n"
+	srv := extendsBoot(t, extParentWithTag("1.0.0"), child, nil)
+	got := exLoad(t, srv, exParentID)
+	if got.Version != "1.0.0" {
+		t.Errorf("version = %q, want 1.0.0 (child with unresolvable hash dropped at ingest)", got.Version)
+	}
+	if !strings.Contains(srv.log(), "rejected") {
+		t.Errorf("server log missing a rejection for the unresolvable-hash child:\n%s", srv.log())
+	}
 }
 
-// T-D-extends-5 — extends with a bare ID resolves to latest at ingest time.
-// spec: docs/authoring/extends.md § "Pinning" table, bare <id> row.
+// T-D-extends-5 — extends with a bare ID resolves to latest at ingest time and
+// merges. spec: docs/authoring/extends.md § "Pinning" table, bare <id> row.
 func TestExtends_PinBareID(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: the same-ID extends child is rejected at ingest; ExtendsPin is not exposed by any API response, so the latest-resolved pin is unobservable")
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nextends: " + exParentID + "\n---\n\nbody\n"
+	srv := extendsBoot(t, extParentWithTag("1.0.0"), child, nil)
+	got := exLoad(t, srv, exParentID)
+	if got.Version != "2.0.0" || !strings.Contains(got.Frontmatter, "from-parent") {
+		t.Errorf("bare-id extends did not resolve latest + merge: version=%q\n%s", got.Version, got.Frontmatter)
+	}
 }
 
 // T-D-extends-6 — parent updates do not silently propagate to an ingested child.
 // spec: docs/authoring/extends.md § "Pinning", last paragraph.
 func TestExtends_PinNoSilentPropagation(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: the same-ID extends child is rejected at ingest, so there is no stored child pin to observe across a parent update; ExtendsPin is not exposed by any API response")
+	t.Skip("the standalone boot ingests each layer exactly once; there is no post-boot reingest path to publish a newer parent version and observe non-propagation. Pin stability is covered by pkg/registry/ingest TestIngest_CrossLayerExtendsOverlayAllowed (ExtendsPin is fixed at ingest)")
 }
 
 // T-D-extends-7 — re-ingesting the child after a version bump picks up the newer
 // parent version. spec: docs/authoring/extends.md § "Pinning", last paragraph.
 func TestExtends_PinReingestPicksNewerParent(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: the same-ID extends child is rejected at ingest, so re-ingest never produces a stored child pin; ExtendsPin is not exposed by any API response")
+	t.Skip("the standalone boot has no post-boot reingest path (/v1/layers/reingest is a stub, F-7.3.4), so a re-ingest cannot be driven end to end to observe a newer pinned parent")
 }
 
 // ---- Scalar / list / map field merge (T-D-extends-8..15) --------------------
@@ -89,14 +167,34 @@ func TestExtends_PinReingestPicksNewerParent(t *testing.T) {
 // spec: docs/authoring/extends.md § "Field merge semantics".
 func TestExtends_ScalarChildWins(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.1: even if ingested, only Description/Type/Tags/Sensitivity/Body merge at the record level and the load response carries no top-level description, so the merged scalar is unobservable; F-4.6.3 also rejects the same-ID child at ingest")
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: the parent description\n---\n\nparent body\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: the child description\nextends: " + exParentID + "@1.x\n---\n\nchild body\n"
+	srv := extendsBoot(t, parent, child, nil)
+	got := exLoad(t, srv, exParentID)
+	if got.Version != "2.0.0" {
+		t.Fatalf("version = %q, want child's 2.0.0", got.Version)
+	}
+	if !strings.Contains(got.Frontmatter, "the child description") {
+		t.Errorf("merged frontmatter missing child's description:\n%s", got.Frontmatter)
+	}
+	if strings.Contains(got.Frontmatter, "the parent description") {
+		t.Errorf("scalar description must be the child's only:\n%s", got.Frontmatter)
+	}
 }
 
 // T-D-extends-9 — tags are unioned (append unique) across parent and child.
 // spec: docs/authoring/extends.md § "Field merge semantics", tags row.
 func TestExtends_TagsUnion(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.1: the load response carries no top-level tags and merged Tags are dropped when the raw child frontmatter is served; F-4.6.3 also rejects the same-ID child at ingest")
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\ntags: [parent-tag, shared]\n---\n\nbody\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\ntags: [child-tag, shared]\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	srv := extendsBoot(t, parent, child, nil)
+	fm := exLoad(t, srv, exParentID).Frontmatter
+	for _, tag := range []string{"parent-tag", "child-tag", "shared"} {
+		if !strings.Contains(fm, tag) {
+			t.Errorf("merged tags missing %q:\n%s", tag, fm)
+		}
+	}
 }
 
 // T-D-extends-10 — sensitivity takes the most-restrictive value; the child
@@ -104,28 +202,52 @@ func TestExtends_TagsUnion(t *testing.T) {
 // semantics", sensitivity row.
 func TestExtends_SensitivityMostRestrictive(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: the same-ID extends child is rejected at ingest as a cross-layer collision, so the merged most-restrictive sensitivity is never served")
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\nsensitivity: high\n---\n\nbody\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nsensitivity: low\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	srv := extendsBoot(t, parent, child, nil)
+	if got := exLoad(t, srv, exParentID); got.Sensitivity != "high" {
+		t.Errorf("sensitivity = %q, want high (child cannot relax the parent)", got.Sensitivity)
+	}
 }
 
 // T-D-extends-11 — sensitivity: the child can tighten medium to high.
 // spec: docs/authoring/extends.md § "Field merge semantics", sensitivity row.
 func TestExtends_SensitivityChildTightens(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: the same-ID extends child is rejected at ingest, so the merged tightened sensitivity is never served")
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\nsensitivity: medium\n---\n\nbody\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nsensitivity: high\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	srv := extendsBoot(t, parent, child, nil)
+	if got := exLoad(t, srv, exParentID); got.Sensitivity != "high" {
+		t.Errorf("sensitivity = %q, want high (child tightened medium)", got.Sensitivity)
+	}
 }
 
 // T-D-extends-12 — sandbox_profile: most-restrictive wins; the child tightens
 // the parent. spec: docs/authoring/extends.md § "Tightening sandbox profile".
 func TestExtends_SandboxChildTightens(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.1: sandbox_profile is not a structured merge field and the merge is never surfaced; F-4.6.3 also rejects the same-ID child at ingest")
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\nsandbox_profile: read-only-fs\n---\n\nbody\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nsandbox_profile: seccomp-strict\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	srv := extendsBoot(t, parent, child, nil)
+	if fm := exLoad(t, srv, exParentID).Frontmatter; !strings.Contains(fm, "seccomp-strict") {
+		t.Errorf("merged sandbox_profile = should be seccomp-strict:\n%s", fm)
+	}
 }
 
 // T-D-extends-13 — sandbox_profile: the child cannot widen the parent
 // restriction. spec: docs/authoring/extends.md § "The most-restrictive rules".
 func TestExtends_SandboxChildCannotWiden(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.1: sandbox_profile merge is not implemented and the child's raw frontmatter is served as-is; F-4.6.3 also rejects the same-ID child at ingest")
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\nsandbox_profile: seccomp-strict\n---\n\nbody\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nsandbox_profile: unrestricted\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	srv := extendsBoot(t, parent, child, nil)
+	fm := exLoad(t, srv, exParentID).Frontmatter
+	if !strings.Contains(fm, "seccomp-strict") {
+		t.Errorf("most-restrictive sandbox must stay seccomp-strict:\n%s", fm)
+	}
+	if strings.Contains(fm, "unrestricted") {
+		t.Errorf("child must not widen sandbox to unrestricted:\n%s", fm)
+	}
 }
 
 // T-D-extends-14 — mcpServers: deep-merged by name; the child's entry overrides
@@ -133,7 +255,13 @@ func TestExtends_SandboxChildCannotWiden(t *testing.T) {
 // semantics", mcpServers row.
 func TestExtends_McpServersOverrideByName(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.1: mcpServers deep-merge is not implemented and only the child's raw frontmatter is served; F-4.6.3 also rejects the same-ID child at ingest")
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\nmcpServers:\n  - name: github\n    command: gh-old\n---\n\nbody\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nmcpServers:\n  - name: github\n    command: gh-new\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	srv := extendsBoot(t, parent, child, nil)
+	fm := exLoad(t, srv, exParentID).Frontmatter
+	if !strings.Contains(fm, "gh-new") || strings.Contains(fm, "gh-old") {
+		t.Errorf("child mcpServers entry should override parent's by name:\n%s", fm)
+	}
 }
 
 // T-D-extends-15 — mcpServers: a parent-only server is inherited when the child
@@ -141,7 +269,13 @@ func TestExtends_McpServersOverrideByName(t *testing.T) {
 // merge semantics", mcpServers row.
 func TestExtends_McpServersParentOnlyInherited(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.1: parent-only mcpServers are not inherited (deep-merge not implemented); F-4.6.3 also rejects the same-ID child at ingest")
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\nmcpServers:\n  - name: jira\n    command: jira\n---\n\nbody\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nmcpServers:\n  - name: slack\n    command: slack\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	srv := extendsBoot(t, parent, child, nil)
+	fm := exLoad(t, srv, exParentID).Frontmatter
+	if !strings.Contains(fm, "jira") || !strings.Contains(fm, "slack") {
+		t.Errorf("parent-only jira should be inherited alongside child's slack:\n%s", fm)
+	}
 }
 
 // ---- Hidden parents (T-D-extends-16..17) ------------------------------------
@@ -150,14 +284,14 @@ func TestExtends_McpServersParentOnlyInherited(t *testing.T) {
 // result. spec: docs/authoring/extends.md § "Hidden parents".
 func TestExtends_HiddenParentMergedResult(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: the same-ID extends child is rejected at ingest, so the merged hidden-parent result is never served; the standalone e2e harness also has no per-identity layer visibility to restrict the parent layer")
+	t.Skip("the standalone e2e harness has no per-identity layer visibility (bootstrap layers are all public), so a parent layer cannot be hidden from a caller. The server-side hidden-parent merge is covered by pkg/registry/core TestExtends_HiddenParent")
 }
 
 // T-D-extends-17 — the parent does not appear in search results for an
 // unauthorized caller. spec: docs/authoring/extends.md § "Hidden parents".
 func TestExtends_HiddenParentNotInSearch(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: the extends child is rejected at ingest so the hidden-parent path is never exercised; the standalone e2e harness also has no per-identity layer visibility to hide the parent layer from search")
+	t.Skip("the standalone e2e harness has no per-identity layer visibility to hide the parent layer from search; the hidden-parent search exclusion is covered by pkg/registry/core TestExtends_HiddenParent")
 }
 
 // ---- Bundled-file merge (T-D-extends-18..21) --------------------------------
@@ -196,7 +330,22 @@ func TestExtends_BundledChildCannotDelete(t *testing.T) {
 // spec: docs/authoring/extends.md § "Bundled-file merge semantics".
 func TestExtends_SkillBodyChildOverrides(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: the same-ID extends child is rejected at boot ingest as a cross-layer collision, so the child SKILL.md body is never served from the merged record")
+	childArt := "---\ntype: skill\nversion: 2.0.0\nextends: " + exParentID + "@1.x\n---\n\n<!-- Skill body lives in SKILL.md. -->\n"
+	extra := map[string]string{
+		"org-defaults/" + exParentID + "/SKILL.md": "---\nname: pay-invoice\ndescription: Pay an approved invoice.\n---\n\nPARENT skill prose.\n",
+		"team-foo/" + exParentID + "/SKILL.md":     "---\nname: pay-invoice\ndescription: Pay an approved invoice for team Foo.\n---\n\nCHILD skill prose.\n",
+	}
+	srv := extendsBoot(t, exSkillArtifact, childArt, extra)
+	got := exLoad(t, srv, exParentID)
+	if got.Version != "2.0.0" {
+		t.Fatalf("version = %q, want child's 2.0.0", got.Version)
+	}
+	if !strings.Contains(got.ManifestBody, "CHILD skill prose") {
+		t.Errorf("manifest_body should be the child SKILL.md body:\n%s", got.ManifestBody)
+	}
+	if strings.Contains(got.ManifestBody, "PARENT skill prose") {
+		t.Errorf("parent SKILL.md body must not be served (child overrides):\n%s", got.ManifestBody)
+	}
 }
 
 // ---- Ingest rejections observable via load 404 (T-D-extends-23..24) ---------
@@ -257,35 +406,82 @@ func TestExtends_SelfReferenceRejected(t *testing.T) {
 // depth. spec: docs/authoring/extends.md § "Constraints", cycle detection.
 func TestExtends_MultiHopCycleAtLoad(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: extends children at the same canonical ID are rejected across layers at ingest, so an extends chain cannot be assembled through the running ingest path to reach the load-time cycle defense")
+	t.Skip("ingest pins each parent at child-ingest time and rejects self/forward references, so a cyclic chain cannot be persisted through the running ingest path to reach the load-time cycle defense; the defense is unit-covered in pkg/registry/core (resolveExtendsChain seen-set)")
 }
 
-// T-D-extends-26 — a same-canonical-ID collision without extends is rejected.
-// spec: docs/authoring/extends.md § "Replacing instead of extending".
+// T-D-extends-26 — a same-canonical-ID collision without extends is rejected at
+// boot ingest, so the higher-precedence shadow is dropped and only the
+// lower-precedence artifact serves. spec: docs/authoring/extends.md §
+// "Replacing instead of extending".
 func TestExtends_CollisionWithoutExtendsRejected(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: collision-rejection via the CLI is not implemented; podium lint and podium sync use CollisionPolicyHighestWins and silently pick a winner rather than erroring on a same-ID collision")
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: org base\n---\n\nbase body\n"
+	shadow := "---\ntype: context\nversion: 2.0.0\ndescription: silent shadow\n---\n\nshadow body\n"
+	srv := extendsBoot(t, parent, shadow, nil)
+	got := exLoad(t, srv, exParentID)
+	if got.Version != "1.0.0" {
+		t.Errorf("version = %q, want 1.0.0 (the no-extends shadow is rejected at ingest)", got.Version)
+	}
+	if !strings.Contains(srv.log(), "rejected=1") {
+		t.Errorf("team-foo layer should report one rejected artifact (the silent shadow):\n%s", srv.log())
+	}
 }
 
 // T-D-extends-27 — extends allows a same-ID artifact in a higher-precedence
-// layer without a collision error. spec: docs/authoring/extends.md § intro.
+// layer without a collision error, and the merged child serves.
+// spec: docs/authoring/extends.md § intro.
 func TestExtends_AllowsSameIDWithExtends(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: the filesystem walk rejects a same-ID cross-layer artifact unconditionally; the extends exception that would allow this is not implemented")
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: org base\ntags: [from-parent]\n---\n\nbase body\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: overlay child\nextends: " + exParentID + "@1.x\n---\n\noverlay body\n"
+	srv := extendsBoot(t, parent, child, nil)
+	got := exLoad(t, srv, exParentID)
+	if got.Version != "2.0.0" {
+		t.Errorf("version = %q, want 2.0.0 (the extends overlay wins)", got.Version)
+	}
+	if !strings.Contains(got.Frontmatter, "from-parent") {
+		t.Errorf("overlay should merge the parent's fields:\n%s", got.Frontmatter)
+	}
 }
 
 // T-D-extends-28 — a cross-type extends is rejected (child type must match the
-// parent type). spec: docs/authoring/extends.md § "Default for unlisted fields".
+// parent type), so the child is dropped and the parent serves.
+// spec: docs/authoring/extends.md § "Default for unlisted fields".
 func TestExtends_CrossTypeRejected(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.2: extends does not enforce that the child type matches the parent type; resolveExtendsPin never compares types, so a cross-type extends is not rejected")
+	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent agent\n---\n\nagent body\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child context\nextends: " + exParentID + "@1.x\n---\n\ncontext body\n"
+	srv := extendsBoot(t, parent, child, nil)
+	got := exLoad(t, srv, exParentID)
+	if got.Version != "1.0.0" || got.Type != "agent" {
+		t.Errorf("got type=%q version=%q, want the agent parent (cross-type child rejected)", got.Type, got.Version)
+	}
+	if !strings.Contains(srv.log(), "rejected=1") {
+		t.Errorf("team-foo layer should report one rejected artifact (the cross-type child):\n%s", srv.log())
+	}
 }
 
 // T-D-extends-29 — chained inheritance (A extends B extends C) resolves the full
-// chain. spec: docs/authoring/extends.md § "Constraints".
+// chain across three layers at one canonical ID. spec: docs/authoring/extends.md
+// § "Constraints".
 func TestExtends_ChainedInheritance(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: same-ID extends children are rejected across layers at ingest, so a three-layer extends chain at one canonical ID cannot be assembled to observe the folded result")
+	reg := writeRegistry(t, map[string]string{
+		".registry-config":                      "multi_layer: true\nlayer_order:\n  - a-base\n  - b-mid\n  - c-top\n",
+		"a-base/" + exParentID + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: base C\ntags: [c-tag]\n---\n\nbody\n",
+		"b-mid/" + exParentID + "/ARTIFACT.md":  "---\ntype: context\nversion: 2.0.0\ndescription: mid B\ntags: [b-tag]\nextends: " + exParentID + "@1.x\n---\n\nbody\n",
+		"c-top/" + exParentID + "/ARTIFACT.md":  "---\ntype: context\nversion: 3.0.0\ndescription: top A\ntags: [a-tag]\nextends: " + exParentID + "@2.x\n---\n\nbody\n",
+	})
+	srv := startServer(t, reg)
+	got := exLoad(t, srv, exParentID)
+	if got.Version != "3.0.0" {
+		t.Fatalf("version = %q, want 3.0.0 (top of the chain)", got.Version)
+	}
+	for _, tag := range []string{"a-tag", "b-tag", "c-tag"} {
+		if !strings.Contains(got.Frontmatter, tag) {
+			t.Errorf("merged frontmatter missing %q; the full A→B→C chain should fold:\n%s", tag, got.Frontmatter)
+		}
+	}
 }
 
 // ---- Same-canonical-ID constraint not enforced (T-D-extends-30) -------------
@@ -315,56 +511,111 @@ func TestExtends_DifferentCanonicalIDIngests(t *testing.T) {
 // spec: docs/authoring/extends.md § "Field merge semantics", requiresApproval.
 func TestExtends_RequiresApprovalUnion(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.1: requiresApproval is not a structured merge field and the merged list never reaches the served frontmatter; F-4.6.3 also rejects the same-ID child at ingest")
+	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent\nrequiresApproval:\n  - tool: deploy\n---\n\nbody\n"
+	child := "---\ntype: agent\nversion: 2.0.0\ndescription: child\nrequiresApproval:\n  - tool: publish\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	srv := extendsBoot(t, parent, child, nil)
+	fm := exLoad(t, srv, exParentID).Frontmatter
+	if !strings.Contains(fm, "deploy") || !strings.Contains(fm, "publish") {
+		t.Errorf("requiresApproval should union to [deploy, publish]:\n%s", fm)
+	}
 }
 
 // T-D-extends-32 — when_to_use is appended across parent and child.
 // spec: docs/authoring/extends.md § "Field merge semantics", when_to_use.
 func TestExtends_WhenToUseAppend(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.1: when_to_use is not a structured merge field and the appended list never reaches the served frontmatter; F-4.6.3 also rejects the same-ID child at ingest")
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\nwhen_to_use:\n  - when parenting\n---\n\nbody\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nwhen_to_use:\n  - when childing\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	srv := extendsBoot(t, parent, child, nil)
+	fm := exLoad(t, srv, exParentID).Frontmatter
+	if !strings.Contains(fm, "when parenting") || !strings.Contains(fm, "when childing") {
+		t.Errorf("when_to_use should append both entries:\n%s", fm)
+	}
 }
 
 // T-D-extends-33 — delegates_to is appended across parent and child.
 // spec: docs/authoring/extends.md § "Field merge semantics", delegates_to.
 func TestExtends_DelegatesToAppend(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.1: delegates_to is not a structured merge field and the appended list never reaches the served frontmatter; F-4.6.3 also rejects the same-ID child at ingest")
+	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent\ndelegates_to: [finance/x]\n---\n\nbody\n"
+	child := "---\ntype: agent\nversion: 2.0.0\ndescription: child\ndelegates_to: [finance/y]\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	srv := extendsBoot(t, parent, child, nil)
+	fm := exLoad(t, srv, exParentID).Frontmatter
+	if !strings.Contains(fm, "finance/x") || !strings.Contains(fm, "finance/y") {
+		t.Errorf("delegates_to should append both targets:\n%s", fm)
+	}
 }
 
 // T-D-extends-34 — external_resources is appended across parent and child.
 // spec: docs/authoring/extends.md § "Field merge semantics", external_resources.
 func TestExtends_ExternalResourcesAppend(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.1: external_resources is not a structured merge field and the appended list never reaches the served frontmatter; F-4.6.3 also rejects the same-ID child at ingest")
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\nexternal_resources:\n  - path: data/p.bin\n    url: https://e/p\n---\n\nbody\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nexternal_resources:\n  - path: data/c.bin\n    url: https://e/c\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	srv := extendsBoot(t, parent, child, nil)
+	fm := exLoad(t, srv, exParentID).Frontmatter
+	if !strings.Contains(fm, "data/p.bin") || !strings.Contains(fm, "data/c.bin") {
+		t.Errorf("external_resources should append both entries:\n%s", fm)
+	}
 }
 
-// T-D-extends-35 — license: child wins; lint warns on a license change across
-// layers. spec: docs/authoring/extends.md § "Field merge semantics", license.
+// T-D-extends-35 — license: child wins. The documented lint warning on a
+// license change across layers is a separate, unimplemented rule; this asserts
+// only the merge that §4.6 mandates. spec: docs/authoring/extends.md § "Field
+// merge semantics", license.
 func TestExtends_LicenseChildWinsLintWarns(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: the same-ID extends child is rejected at ingest so the merged license is never served; no license-change-across-layers lint rule exists either, so the documented warning is never emitted")
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\nlicense: Apache-2.0\n---\n\nbody\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nlicense: MIT\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	srv := extendsBoot(t, parent, child, nil)
+	fm := exLoad(t, srv, exParentID).Frontmatter
+	if !strings.Contains(fm, "MIT") || strings.Contains(fm, "Apache-2.0") {
+		t.Errorf("license should be the child's (MIT), not the parent's:\n%s", fm)
+	}
 }
 
-// T-D-extends-36 — search_visibility takes the most-restrictive value.
+// T-D-extends-36 — search_visibility takes the most-restrictive value
+// (direct-only > indexed); the child cannot relax the parent.
 // spec: docs/authoring/extends.md § "Field merge semantics", search_visibility.
 func TestExtends_SearchVisibilityMostRestrictive(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: the same-ID extends child is rejected at ingest, so the merged most-restrictive search_visibility is never served (F-4.3.3 also leaves search_visibility unenforced)")
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\nsearch_visibility: direct-only\n---\n\nbody\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nsearch_visibility: indexed\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	srv := extendsBoot(t, parent, child, nil)
+	fm := exLoad(t, srv, exParentID).Frontmatter
+	if !strings.Contains(fm, "direct-only") {
+		t.Errorf("search_visibility should stay direct-only (most-restrictive):\n%s", fm)
+	}
 }
 
 // T-D-extends-37 — a child omitting a parent field inherits the parent's value.
 // spec: docs/authoring/extends.md § "Default for unlisted fields".
 func TestExtends_UnlistedFieldInherited(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: the same-ID extends child is rejected at ingest, so an inherited parent field is never observable on the merged record")
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\neffort_hint: high\n---\n\nbody\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	srv := extendsBoot(t, parent, child, nil)
+	fm := exLoad(t, srv, exParentID).Frontmatter
+	if !strings.Contains(fm, "effort_hint: high") {
+		t.Errorf("child omitting effort_hint should inherit the parent's:\n%s", fm)
+	}
 }
 
-// T-D-extends-38 — a child can override an inherited deprecated field.
-// spec: docs/authoring/extends.md § "Default for unlisted fields", deprecated.
+// T-D-extends-38 — a child can override an inherited unlisted field by setting
+// it (deprecated). spec: docs/authoring/extends.md § "Default for unlisted
+// fields", deprecated.
 func TestExtends_ChildOverridesDeprecated(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: the same-ID extends child is rejected at ingest, so the child's overriding deprecated value is never served")
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\n---\n\nbody\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\ndeprecated: true\nreplaced_by: finance/new\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	srv := extendsBoot(t, parent, child, nil)
+	// `latest` skips deprecated versions (§4.7.6), so load the child
+	// version explicitly to observe the merged deprecated flag.
+	var got exLoadResp
+	getJSON(t, srv.BaseURL+"/v1/load_artifact?id="+exParentID+"&version=2.0.0", &got)
+	if !got.Deprecated {
+		t.Errorf("child set deprecated: true; the merged record should be deprecated:\n%+v", got)
+	}
 }
 
 // T-D-extends-39 — runtime_requirements is deep-merged with the child winning
@@ -372,7 +623,16 @@ func TestExtends_ChildOverridesDeprecated(t *testing.T) {
 // runtime_requirements.
 func TestExtends_RuntimeRequirementsDeepMerge(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.1: runtime_requirements is not a structured merge field and the deep-merged map never reaches the served frontmatter; F-4.6.3 also rejects the same-ID child at ingest")
+	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent\nruntime_requirements:\n  python: \"3.10\"\n  system_packages: [git]\n---\n\nbody\n"
+	child := "---\ntype: agent\nversion: 2.0.0\ndescription: child\nruntime_requirements:\n  python: \"3.12\"\n  system_packages: [curl]\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	srv := extendsBoot(t, parent, child, nil)
+	fm := exLoad(t, srv, exParentID).Frontmatter
+	if !strings.Contains(fm, "3.12") {
+		t.Errorf("runtime python should be the child's 3.12:\n%s", fm)
+	}
+	if !strings.Contains(fm, "git") || !strings.Contains(fm, "curl") {
+		t.Errorf("system_packages should union [git, curl]:\n%s", fm)
+	}
 }
 
 // ---- scaffold --extends (T-D-extends-40) ------------------------------------
@@ -399,35 +659,99 @@ func TestExtends_ScaffoldExtendsField(t *testing.T) {
 // ---- Impact / dependents (T-D-extends-41..42) -------------------------------
 
 // T-D-extends-41 — GET /v1/dependents returns the extends edge for the parent.
-// spec: docs/authoring/extends.md § "Constraints".
+// A higher-layer child extends a lower-layer parent (distinct canonical IDs);
+// the reverse-dependency index records the edge. spec:
+// docs/authoring/extends.md § "Constraints".
 func TestExtends_DependentsEdge(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: the extends edge requires the same-ID child to have ingested, but the child is rejected at boot ingest as a cross-layer collision, so no extends dependency edge is recorded")
+	reg := writeRegistry(t, map[string]string{
+		".registry-config":                       "multi_layer: true\nlayer_order:\n  - org-defaults\n  - team-foo\n",
+		"org-defaults/shared/parent/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: parent\n---\n\nbody\n",
+		"team-foo/finance/child/ARTIFACT.md":     "---\ntype: context\nversion: 2.0.0\ndescription: child\nextends: shared/parent@1.x\n---\n\nbody\n",
+	})
+	srv := startServer(t, reg)
+	st, body := getRaw(t, srv.BaseURL+"/v1/dependents?id=shared/parent")
+	if st != 200 {
+		t.Fatalf("GET /v1/dependents = HTTP %d: %s", st, body)
+	}
+	if !strings.Contains(string(body), "finance/child") {
+		t.Errorf("dependents of shared/parent should list the extends child finance/child:\n%s", body)
+	}
 }
 
 // T-D-extends-42 — the impact CLI lists the extending children of a parent.
 // spec: docs/authoring/extends.md § "Constraints"; impact analysis.
 func TestExtends_ImpactCLIListsChildren(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: the same-ID extends child is rejected at ingest, so no extends edge exists for the impact CLI to report")
+	reg := writeRegistry(t, map[string]string{
+		".registry-config":                       "multi_layer: true\nlayer_order:\n  - org-defaults\n  - team-foo\n",
+		"org-defaults/shared/parent/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: parent\n---\n\nbody\n",
+		"team-foo/finance/child/ARTIFACT.md":     "---\ntype: context\nversion: 2.0.0\ndescription: child\nextends: shared/parent@1.x\n---\n\nbody\n",
+	})
+	srv := startServer(t, reg)
+	res := runPodium(t, "", nil, "impact", "--registry", srv.BaseURL, "shared/parent")
+	if res.Exit != 0 {
+		t.Fatalf("impact exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stdout, "finance/child") {
+		t.Errorf("impact should list the extending child finance/child:\n%s", res.Stdout)
+	}
 }
 
 // ---- Worked example (T-D-extends-43) ----------------------------------------
 
-// T-D-extends-43 — the org-wide skill example: full two-layer ingest and load.
-// spec: docs/authoring/extends.md § "Examples".
+// T-D-extends-43 — the org-wide skill example: a team layer overlays the
+// org-defaults skill at the same canonical ID via extends, and the merged
+// manifest (unioned tags, child body, child version) serves. spec:
+// docs/authoring/extends.md § "Examples".
 func TestExtends_OrgWideSkillExample(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: the higher-precedence team-foo child at finance/ap/pay-invoice is rejected at boot ingest as a cross-layer collision, so only the org-defaults parent serves and the documented merged result is never observed")
+	parentArt := "---\ntype: skill\nversion: 1.0.0\ntags: [org-tag]\n---\n\n<!-- Skill body lives in SKILL.md. -->\n"
+	childArt := "---\ntype: skill\nversion: 2.0.0\ntags: [team-tag]\nextends: " + exParentID + "@1.x\n---\n\n<!-- Skill body lives in SKILL.md. -->\n"
+	extra := map[string]string{
+		"org-defaults/" + exParentID + "/SKILL.md": "---\nname: pay-invoice\ndescription: Pay an approved invoice.\n---\n\nORG skill prose.\n",
+		"team-foo/" + exParentID + "/SKILL.md":     "---\nname: pay-invoice\ndescription: Pay an approved invoice for team Foo.\n---\n\nTEAM skill prose.\n",
+	}
+	srv := extendsBoot(t, parentArt, childArt, extra)
+	got := exLoad(t, srv, exParentID)
+	if got.Version != "2.0.0" {
+		t.Fatalf("version = %q, want child's 2.0.0", got.Version)
+	}
+	if !strings.Contains(got.Frontmatter, "org-tag") || !strings.Contains(got.Frontmatter, "team-tag") {
+		t.Errorf("merged tags should union org-tag and team-tag:\n%s", got.Frontmatter)
+	}
+	if !strings.Contains(got.ManifestBody, "TEAM skill prose") {
+		t.Errorf("served body should be the team child SKILL.md:\n%s", got.ManifestBody)
+	}
 }
 
 // ---- MCP load (T-D-extends-44) ----------------------------------------------
 
-// T-D-extends-44 — the MCP load_artifact tool returns the extends-merged body.
-// spec: docs/authoring/extends.md § "Field merge semantics".
+// T-D-extends-44 — the MCP load_artifact tool returns the extends-merged
+// manifest. The overlay child (resolved + merged server-side) is what the
+// bridge serves, observable as the child version and body. spec:
+// docs/authoring/extends.md § "Field merge semantics".
 func TestExtends_McpLoadMergedBody(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: the same-ID extends child is rejected at ingest, so the MCP bridge resolves only the parent and the documented merged manifest is never returned")
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\n---\n\nPARENT body\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child desc\nextends: " + exParentID + "@1.x\n---\n\nCHILD body\n"
+	srv := extendsBoot(t, parent, child, nil)
+	res := mcpExec(t,
+		[]string{
+			"PODIUM_REGISTRY=" + srv.BaseURL,
+			"PODIUM_HARNESS=none",
+			"PODIUM_MATERIALIZE_ROOT=" + t.TempDir(),
+			"PODIUM_CACHE_DIR=" + t.TempDir(),
+		},
+		toolCall(1, "load_artifact", map[string]any{"id": exParentID}),
+	)
+	body := mustJSON(rpcResult(t, res.Stdout, 1))
+	if !strings.Contains(body, "2.0.0") {
+		t.Errorf("MCP load_artifact should serve the merged overlay child (version 2.0.0):\n%s", body)
+	}
+	if !strings.Contains(body, "CHILD body") {
+		t.Errorf("MCP load_artifact should serve the child body, not the parent's:\n%s", body)
+	}
 }
 
 // ---- Lint behavior (T-D-extends-45..46) -------------------------------------
@@ -526,5 +850,5 @@ func TestExtends_SearchSensitivityMostRestrictive(t *testing.T) {
 // child layer. spec: docs/authoring/extends.md § "Hidden parents".
 func TestExtends_ChildHiddenWithoutLayerAccess(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: a child on a restricted layer cannot be ingested across layers at the same canonical ID; the standalone e2e harness also has no per-identity layer visibility to exercise cross-layer child hiding")
+	t.Skip("the standalone e2e harness has no per-identity layer visibility (bootstrap layers are all public), so a child layer cannot be hidden from a caller; per-identity visibility is covered by pkg/layer and pkg/registry/core tests")
 }

@@ -61,7 +61,14 @@ func (r *Registry) Walk(opts WalkOptions) ([]ArtifactRecord, error) {
 			deduped = append(deduped, rec)
 			continue
 		}
-		if collisionError {
+		// spec: §4.6 — "A collision is rejected at ingest unless the
+		// higher-precedence artifact declares extends: <lower-precedence-id>."
+		// rec is the higher-precedence record (later layers override
+		// earlier), so the collision is permitted when its extends:
+		// resolves to the colliding canonical ID; the extends merge is
+		// applied later at read time. A collision without that declaration
+		// is a forbidden silent shadow.
+		if collisionError && !declaresExtendsTo(rec, rec.ID) {
 			return nil, fmt.Errorf("ingest.collision: artifact %q present in layers %q and %q",
 				rec.ID, deduped[idx].Layer.ID, rec.Layer.ID)
 		}
@@ -69,6 +76,20 @@ func (r *Registry) Walk(opts WalkOptions) ([]ArtifactRecord, error) {
 		deduped[idx] = rec
 	}
 	return deduped, nil
+}
+
+// declaresExtendsTo reports whether rec's frontmatter declares
+// extends: <id>, comparing against the pin-stripped reference. Used to
+// honor the §4.6 same-ID extends exception during collision detection.
+func declaresExtendsTo(rec ArtifactRecord, id string) bool {
+	if rec.Artifact == nil || rec.Artifact.Extends == "" {
+		return false
+	}
+	ref := rec.Artifact.Extends
+	if i := strings.Index(ref, "@"); i >= 0 {
+		ref = ref[:i]
+	}
+	return ref == id
 }
 
 // CollisionPolicy controls how Walk handles two layers contributing the

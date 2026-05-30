@@ -846,9 +846,23 @@ func TestReadme_DomainAnalyze(t *testing.T) {
 	}
 }
 
-// T-D-readme-64 — impact lists dependents.
+// T-D-readme-64 — impact lists dependents. A child extends a parent, so the
+// reverse-dependency index records the edge and `podium impact` reports it.
 func TestReadme_Impact(t *testing.T) {
-	t.Skip("blocked by F-4.6.1: extends merge is incomplete and reverse-dependency edges are not populated, so podium impact returns no dependents")
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		".registry-config":               "multi_layer: true\nlayer_order:\n  - org\n  - team\n",
+		"org/shared/parent/ARTIFACT.md":  "---\ntype: context\nversion: 1.0.0\ndescription: parent\n---\n\nbody\n",
+		"team/finance/child/ARTIFACT.md": "---\ntype: context\nversion: 2.0.0\ndescription: child\nextends: shared/parent@1.x\n---\n\nbody\n",
+	})
+	srv := startServer(t, reg)
+	res := runPodium(t, "", nil, "impact", "--registry", srv.BaseURL, "shared/parent")
+	if res.Exit != 0 {
+		t.Fatalf("impact exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stdout, "finance/child") {
+		t.Errorf("impact should list the extends dependent finance/child:\n%s", res.Stdout)
+	}
 }
 
 // T-D-readme-65 — sign signs a content hash.

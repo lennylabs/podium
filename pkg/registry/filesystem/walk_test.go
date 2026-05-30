@@ -182,6 +182,73 @@ func TestWalk_CollisionWithoutExtendsFails(t *testing.T) {
 	}
 }
 
+// Spec: §4.6 — "A collision is rejected at ingest unless the
+// higher-precedence artifact declares extends: <lower-precedence-id>."
+// The higher-precedence (personal) record at canonical ID x declares
+// extends: x, so the same-ID collision is permitted and the
+// higher-precedence record wins; the extends merge runs at read time.
+func TestWalk_CollisionWithExtendsAllowed(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	testharness.WriteTree(t, root,
+		testharness.WriteTreeOption{
+			Path:    ".registry-config",
+			Content: "multi_layer: true\nlayer_order:\n  - team-shared\n  - personal\n",
+		},
+		testharness.WriteTreeOption{
+			Path:    "team-shared/x/ARTIFACT.md",
+			Content: stringf(contextArtifact, "shared parent", "shared parent"),
+		},
+		testharness.WriteTreeOption{
+			Path:    "personal/x/ARTIFACT.md",
+			Content: "---\ntype: context\nversion: 2.0.0\ndescription: overlay child\nextends: x\n---\n\noverlay body\n",
+		},
+	)
+	reg, err := Open(root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	got, err := reg.Walk(WalkOptions{})
+	if err != nil {
+		t.Fatalf("Walk returned %v; the extends exception should permit the same-ID overlay", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d artifacts, want 1 (the overlay)", len(got))
+	}
+	if got[0].Layer.ID != "personal" {
+		t.Errorf("Layer.ID = %q, want personal (the higher-precedence overlay)", got[0].Layer.ID)
+	}
+}
+
+// Spec: §4.6 — the extends exception is keyed on the COLLIDING id. A
+// higher-precedence record that extends some other id is still a
+// forbidden silent shadow of the colliding id.
+func TestWalk_CollisionExtendsOtherIDStillFails(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	testharness.WriteTree(t, root,
+		testharness.WriteTreeOption{
+			Path:    ".registry-config",
+			Content: "multi_layer: true\nlayer_order:\n  - team-shared\n  - personal\n",
+		},
+		testharness.WriteTreeOption{
+			Path:    "team-shared/x/ARTIFACT.md",
+			Content: stringf(contextArtifact, "shared", "shared"),
+		},
+		testharness.WriteTreeOption{
+			Path:    "personal/x/ARTIFACT.md",
+			Content: "---\ntype: context\nversion: 2.0.0\ndescription: shadow\nextends: some/other-id\n---\n\nbody\n",
+		},
+	)
+	reg, err := Open(root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := reg.Walk(WalkOptions{}); err == nil || !strings.Contains(err.Error(), "ingest.collision") {
+		t.Fatalf("Walk err = %v, want ingest.collision (extends points at a different id)", err)
+	}
+}
+
 // Spec: §4.6 — sync's effective-view composition uses
 // CollisionPolicyHighestWins so the highest-precedence layer wins.
 func TestWalk_HighestWinsKeepsTopLayer(t *testing.T) {

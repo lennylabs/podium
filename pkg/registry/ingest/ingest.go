@@ -368,6 +368,23 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 
 	res := &Result{}
 	errsByID := groupLintErrors(diags)
+
+	// spec: §4.6 — two layers contributing the same canonical ID is a
+	// forbidden silent shadow unless the higher-precedence artifact
+	// declares extends: <lower-precedence-id>. The server-store path keys
+	// records by (tenant, id, version) with the layer excluded, so without
+	// this check a same-ID record from another layer is stored and
+	// silently shadows at read time. Index the manifests already
+	// contributed by other layers so the per-record check can spot it.
+	crossLayerByID := map[string][]store.ManifestRecord{}
+	if existing, lerr := st.ListManifests(ctx, req.TenantID); lerr == nil {
+		for _, m := range existing {
+			if m.Layer != req.LayerID {
+				crossLayerByID[m.ArtifactID] = append(crossLayerByID[m.ArtifactID], m)
+			}
+		}
+	}
+
 	for _, rec := range records {
 		// Lint blocks ingest at error severity.
 		if errs, ok := errsByID[rec.ID]; ok {
@@ -435,7 +452,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		// manifests and pin to an exact version. Parent updates do
 		// not silently propagate; only re-ingesting the child does.
 		if rec.Artifact.Extends != "" {
-			pin, perr := resolveExtendsPin(ctx, st, req.TenantID, rec.Artifact.Extends, rec.ID)
+			pin, parentType, perr := resolveExtendsPin(ctx, st, req.TenantID, rec.Artifact.Extends, rec.ID, rec.Artifact.Version)
 			if perr != nil {
 				res.Rejected = append(res.Rejected, RejectedArtifact{
 					ArtifactID: rec.ID,
@@ -444,7 +461,44 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 				})
 				continue
 			}
+			// spec: §4.6 — "The child's type: must match the parent's;
+			// ingest rejects an extends: chain that crosses types."
+			if parentType != string(rec.Artifact.Type) {
+				res.Rejected = append(res.Rejected, RejectedArtifact{
+					ArtifactID: rec.ID,
+					Reason: fmt.Sprintf("extends: child type %q does not match parent %s type %q",
+						rec.Artifact.Type, stripPin(rec.Artifact.Extends), parentType),
+					Code: "ingest.invalid_artifact",
+				})
+				continue
+			}
 			mr.ExtendsPin = pin
+		}
+
+		// spec: §4.6 — reject a cross-layer same-ID collision unless an
+		// extends: overlay links the two records. The overlay is sanctioned
+		// when the incoming record extends the colliding ID, or when an
+		// existing cross-layer record does (the existing record is the
+		// overlay). Anything else is a silent shadow, which the spec forbids.
+		if crossLayer := crossLayerByID[mr.ArtifactID]; len(crossLayer) > 0 {
+			overlay := stripPin(rec.Artifact.Extends) == mr.ArtifactID
+			if !overlay {
+				for _, ex := range crossLayer {
+					if stripPin(ex.ExtendsPin) == mr.ArtifactID {
+						overlay = true
+						break
+					}
+				}
+			}
+			if !overlay {
+				res.Rejected = append(res.Rejected, RejectedArtifact{
+					ArtifactID: mr.ArtifactID,
+					Reason: fmt.Sprintf("cross-layer collision: %q already contributed by layer %q; declare extends: %s to overlay it",
+						mr.ArtifactID, crossLayer[0].Layer, mr.ArtifactID),
+					Code: "ingest.collision",
+				})
+				continue
+			}
 		}
 
 		// Check current state to distinguish accepted vs idempotent vs
@@ -846,51 +900,68 @@ func stripPin(ref string) string {
 // resolveExtendsPin resolves a parent reference (e.g.,
 // "finance/parent" or "finance/parent@1.x" or
 // "finance/parent@sha256:<hex>") against existing manifests for the
-// tenant and returns the pinned form "<id>@<exact-version>". childID
-// is the artifact being ingested; we use it to detect a self-reference
-// (the simplest cycle case).
-func resolveExtendsPin(ctx context.Context, st store.Store, tenantID, ref, childID string) (string, error) {
+// tenant and returns the pinned form "<id>@<exact-version>" together with
+// the parent's type at the resolved version. childID is the artifact
+// being ingested; we use it to detect a self-reference (the simplest
+// cycle case). The returned type lets the caller enforce the §4.6 rule
+// that a child's type must match its parent's.
+func resolveExtendsPin(ctx context.Context, st store.Store, tenantID, ref, childID, childVersion string) (pin, parentType string, err error) {
 	id, pinStr := splitRef(ref)
 	if id == "" {
-		return "", fmt.Errorf("invalid extends reference %q", ref)
+		return "", "", fmt.Errorf("invalid extends reference %q", ref)
 	}
-	if id == childID {
-		return "", fmt.Errorf("self-extends cycle: %q", ref)
-	}
-	pin, err := version.ParsePin(pinStr)
+	p, err := version.ParsePin(pinStr)
 	if err != nil {
-		return "", fmt.Errorf("parse pin: %w", err)
+		return "", "", fmt.Errorf("parse pin: %w", err)
 	}
 
 	all, err := st.ListManifests(ctx, tenantID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	versions := make([]string, 0, 4)
 	hashByVersion := map[string]string{}
+	typeByVersion := map[string]string{}
 	for _, m := range all {
-		if m.ArtifactID == id {
-			versions = append(versions, m.Version)
-			hashByVersion[m.Version] = m.ContentHash
+		if m.ArtifactID != id {
+			continue
 		}
+		// A child may extend its own canonical ID to overlay a
+		// lower-precedence layer's artifact (§4.6 same-ID extends
+		// exception). Its own version is never a valid parent — that
+		// would be a self-cycle — so exclude it from the candidate set.
+		if id == childID && m.Version == childVersion {
+			continue
+		}
+		versions = append(versions, m.Version)
+		hashByVersion[m.Version] = m.ContentHash
+		typeByVersion[m.Version] = m.Type
 	}
 	if len(versions) == 0 {
-		return "", fmt.Errorf("no parent artifact %q ingested yet", id)
+		if id == childID {
+			return "", "", fmt.Errorf("self-extends cycle: %q", ref)
+		}
+		return "", "", fmt.Errorf("no parent artifact %q ingested yet", id)
 	}
 
-	if pin.Kind == version.PinContentHash {
+	var resolved string
+	if p.Kind == version.PinContentHash {
 		for v, h := range hashByVersion {
-			if h == "sha256:"+pin.Hash {
-				return id + "@" + v, nil
+			if h == "sha256:"+p.Hash {
+				resolved = v
+				break
 			}
 		}
-		return "", fmt.Errorf("no parent version with content hash sha256:%s", pin.Hash)
+		if resolved == "" {
+			return "", "", fmt.Errorf("no parent version with content hash sha256:%s", p.Hash)
+		}
+	} else {
+		resolved, err = version.Resolve(p, versions)
+		if err != nil {
+			return "", "", fmt.Errorf("no parent version satisfies %q", ref)
+		}
 	}
-	resolved, err := version.Resolve(pin, versions)
-	if err != nil {
-		return "", fmt.Errorf("no parent version satisfies %q", ref)
-	}
-	return id + "@" + resolved, nil
+	return id + "@" + resolved, typeByVersion[resolved], nil
 }
 
 func splitRef(ref string) (id, pin string) {

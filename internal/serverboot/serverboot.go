@@ -320,8 +320,23 @@ func Run() error {
 	// tools so admin operators can register/list/unregister layers
 	// over HTTP. The endpoint shares the ModeTracker with the
 	// read-only probe so config writes refuse during outage.
+	// §4.7.2 — mutating admin-defined layers (register, update,
+	// unregister, reorder, visibility edits) requires an authenticated
+	// tenant admin. A standalone deployment configures no identity
+	// provider, so it has no authenticated callers and the local operator
+	// is the de facto admin (§13.10/§13.11), mirroring the §4.6 visibility
+	// bypass. With an identity provider configured, AdminAuthorize gates
+	// the operation; the anonymous caller is denied, which closes the
+	// unauthenticated layer-management surface the standard deployment
+	// would otherwise expose.
 	layers := server.NewLayerEndpoint(st, tenantID, mode).
-		WithDefaultVisibility(cfg.defaultLayerVisibility)
+		WithDefaultVisibility(cfg.defaultLayerVisibility).
+		WithAdminAuth(func(r *http.Request) error {
+			if cfg.publicMode || cfg.identityProvider == "" {
+				return nil
+			}
+			return registry.AdminAuthorize(r.Context(), layer.Identity{IsPublic: true})
+		})
 
 	// §6.3.2 runtime trust keys: when PODIUM_RUNTIME_KEYS_PATH is
 	// set, registrations persist as a JSON file at that path; the

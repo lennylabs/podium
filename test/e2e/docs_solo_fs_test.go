@@ -885,7 +885,6 @@ func TestSoloFS_42_LayerOrderExtraLayersAppendedAlphabetically(t *testing.T) {
 // (lint uses CollisionPolicyDefault; sync uses CollisionPolicyHighestWins).
 func TestSoloFS_43_CollisionRaisedByLint(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: podium lint resolves cross-layer duplicate IDs with CollisionPolicyHighestWins (cmd/podium/main.go) instead of surfacing ingest.collision, so the documented collision diagnostic is never emitted")
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":                solofsMultiLayerConfig,
 		"layer-a/shared/note/ARTIFACT.md": contextArtifact("from-a"),

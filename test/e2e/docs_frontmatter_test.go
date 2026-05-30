@@ -726,45 +726,84 @@ func TestFrontmatter_ProvenancePassthrough(t *testing.T) {
 	}
 }
 
-// Cross-layer merge (T-D-frontmatter-44..49): a higher-precedence child that
-// declares extends: at the same canonical ID is rejected at ingest as a
-// cross-layer collision (the extends exception is not honored), so the merge is
-// never observed end to end.
+// Cross-layer merge (T-D-frontmatter-44..49): a higher-precedence team-foo
+// child declares extends: at the same canonical ID as the org-defaults parent,
+// is accepted as an overlay (§4.6 extends exception), and the field-semantics
+// table merges into the served frontmatter. The two-layer boot helpers live in
+// docs_extends_test.go (same package).
 
 // T-D-frontmatter-44 — child description wins over parent description.
 func TestFrontmatter_MergeChildDescriptionWins(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: a higher-precedence child declaring extends: at the same canonical ID is rejected as a cross-layer collision, so the merged description is never served")
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: PARENT description\n---\n\nbody\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: CHILD description\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	fm := exLoad(t, extendsBoot(t, parent, child, nil), exParentID).Frontmatter
+	if !strings.Contains(fm, "CHILD description") || strings.Contains(fm, "PARENT description") {
+		t.Errorf("description should be the child's only:\n%s", fm)
+	}
 }
 
 // T-D-frontmatter-45 — tags are unioned across parent and child.
 func TestFrontmatter_MergeTagsUnion(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: the extends child is rejected at ingest (collision exception not honored), so the unioned tags are never served; F-4.6.1 also drops list merges from the served frontmatter")
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: p\ntags: [parent-tag, shared]\n---\n\nbody\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: c\ntags: [child-tag, shared]\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	fm := exLoad(t, extendsBoot(t, parent, child, nil), exParentID).Frontmatter
+	for _, tag := range []string{"parent-tag", "child-tag", "shared"} {
+		if !strings.Contains(fm, tag) {
+			t.Errorf("merged tags missing %q:\n%s", tag, fm)
+		}
+	}
 }
 
 // T-D-frontmatter-46 — sensitivity takes the most-restrictive value.
 func TestFrontmatter_MergeSensitivityMostRestrictive(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: the extends child is rejected at ingest, so the merged most-restrictive sensitivity is never served")
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: p\nsensitivity: high\n---\n\nbody\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: c\nsensitivity: low\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	if got := exLoad(t, extendsBoot(t, parent, child, nil), exParentID); got.Sensitivity != "high" {
+		t.Errorf("sensitivity = %q, want high (most-restrictive)", got.Sensitivity)
+	}
 }
 
 // T-D-frontmatter-47 — search_visibility takes the most-restrictive value.
 func TestFrontmatter_MergeSearchVisibilityMostRestrictive(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: the extends child is rejected at ingest; F-4.3.3 also leaves search_visibility unenforced")
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: p\nsearch_visibility: direct-only\n---\n\nbody\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: c\nsearch_visibility: indexed\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	fm := exLoad(t, extendsBoot(t, parent, child, nil), exParentID).Frontmatter
+	if !strings.Contains(fm, "direct-only") {
+		t.Errorf("search_visibility should stay direct-only (most-restrictive):\n%s", fm)
+	}
 }
 
 // T-D-frontmatter-48 — the child type must match the parent type.
 func TestFrontmatter_MergeTypeMustMatch(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.2: extends does not enforce that the child and parent share the same type (and F-4.6.3 rejects the same-ID child before any type check)")
+	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent agent\n---\n\nbody\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child context\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	srv := extendsBoot(t, parent, child, nil)
+	got := exLoad(t, srv, exParentID)
+	if got.Type != "agent" || got.Version != "1.0.0" {
+		t.Errorf("got type=%q version=%q, want the agent parent (cross-type child rejected)", got.Type, got.Version)
+	}
 }
 
-// T-D-frontmatter-49 — an extends cycle is detected and returns an error.
+// T-D-frontmatter-49 — a self-referencing extends is rejected at ingest (cycle
+// detection); the artifact is dropped and a sibling keeps boot alive.
 func TestFrontmatter_ExtendsCycleDetected(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.3: extends children cannot be ingested across layers (collision/unknown-parent rejection), so an extends cycle cannot be constructed through the running ingest path to exercise the load-time cycle defense")
+	reg := writeRegistry(t, map[string]string{
+		"finance/sibling/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: sibling keeps boot alive\n---\n\nbody\n",
+		"finance/self/ARTIFACT.md":    "---\ntype: context\nversion: 1.0.0\ndescription: self\nextends: finance/self@1.x\n---\n\nbody\n",
+	})
+	srv := startServer(t, reg)
+	if st := getStatus(t, srv.BaseURL+"/v1/load_artifact?id=finance/sibling"); st != 200 {
+		t.Fatalf("sibling = HTTP %d, want 200", st)
+	}
+	if st := getStatus(t, srv.BaseURL+"/v1/load_artifact?id=finance/self"); st != 404 {
+		t.Errorf("self-extends artifact = HTTP %d, want 404 (cycle rejected at ingest)", st)
+	}
 }
 
 // T-D-frontmatter-50 — a skill ARTIFACT.md body with non-comment prose warns.

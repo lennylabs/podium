@@ -544,7 +544,20 @@ func TestHIW_BatchLoad(t *testing.T) {
 
 // T-D-how-it-works-29 — /v1/dependents returns extends-based edges.
 func TestHIW_Dependents(t *testing.T) {
-	t.Skip("blocked by F-4.6.1: extends merge is incomplete and reverse-dependency edges from extends: are not populated, so /v1/dependents returns no edges")
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		".registry-config":               "multi_layer: true\nlayer_order:\n  - org\n  - team\n",
+		"org/shared/parent/ARTIFACT.md":  "---\ntype: context\nversion: 1.0.0\ndescription: parent\n---\n\nbody\n",
+		"team/finance/child/ARTIFACT.md": "---\ntype: context\nversion: 2.0.0\ndescription: child\nextends: shared/parent@1.x\n---\n\nbody\n",
+	})
+	srv := startServer(t, reg)
+	st, body := getRaw(t, srv.BaseURL+"/v1/dependents?id=shared/parent")
+	if st != 200 {
+		t.Fatalf("GET /v1/dependents = HTTP %d: %s", st, body)
+	}
+	if !strings.Contains(string(body), "finance/child") {
+		t.Errorf("/v1/dependents should report the extends edge from finance/child:\n%s", body)
+	}
 }
 
 // T-D-how-it-works-30 — /v1/scope/preview returns aggregate visibility counts.
