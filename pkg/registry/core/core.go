@@ -1097,6 +1097,25 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 		}
 		return nil, fmt.Errorf("%w: artifact %s", ErrNotFound, artifactID)
 	}
+	// §6.3.1 fine-grained scopes: a load grant (with any "@version" pin)
+	// must cover the resolved record, otherwise the load is outside the
+	// caller's scope surface. assemble gates every successful resolution
+	// path through this check and mirrors the visibility-denial response
+	// so it does not leak that a version the caller may not load exists.
+	scopes := layer.ParseScopes(id.Scopes)
+	assemble := func(rec store.ManifestRecord) (*LoadArtifactResult, error) {
+		if scopes.Active() && !scopes.AllowsLoad(artifactID, rec.Version) {
+			if r.artifactExistsAnywhere(ctx, artifactID) {
+				r.emit(ctx, AuditEvent{
+					Type:   "visibility.denied",
+					Caller: callerOf(id),
+					Target: artifactID,
+				})
+			}
+			return nil, fmt.Errorf("%w: artifact %s", ErrNotFound, artifactID)
+		}
+		return r.assembleResult(ctx, rec)
+	}
 	pin, err := version.ParsePin(opts.Version)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidArgument, err)
@@ -1106,7 +1125,7 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 	for _, c := range candidates {
 		if pin.Kind == version.PinContentHash {
 			if c.ContentHash == "sha256:"+pin.Hash {
-				return r.assembleResult(ctx, c)
+				return assemble(c)
 			}
 			continue
 		}
@@ -1123,7 +1142,7 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 	if pin.Kind == version.PinLatest && opts.SessionID != "" {
 		if pinned, ok := r.lookupSessionPin(opts.SessionID, artifactID); ok {
 			if rec, ok := byVersion[pinned]; ok {
-				return r.assembleResult(ctx, rec)
+				return assemble(rec)
 			}
 		}
 	}
@@ -1159,7 +1178,7 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 		r.recordSessionPin(opts.SessionID, artifactID, resolved)
 	}
 	rec := byVersion[resolved]
-	return r.assembleResult(ctx, rec)
+	return assemble(rec)
 }
 
 // lookupSessionPin returns the version a session previously resolved
@@ -1427,8 +1446,12 @@ func (r *Registry) visibleManifests(ctx context.Context, id layer.Identity) ([]s
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
+	// §6.3.1 fine-grained scopes intersect with layer visibility; the
+	// smaller surface wins. A public-mode caller bypasses layer filtering
+	// but a presented scope still narrows the read surface.
+	scopes := layer.ParseScopes(id.Scopes)
 	if id.IsPublic || len(r.layers) == 0 {
-		return all, nil
+		return applyReadScope(all, scopes), nil
 	}
 	visible := layer.EffectiveLayersWith(r.layers, id, r.resolveGroup)
 	allowed := map[string]bool{}
@@ -1441,7 +1464,23 @@ func (r *Registry) visibleManifests(ctx context.Context, id layer.Identity) ([]s
 			out = append(out, m)
 		}
 	}
-	return out, nil
+	return applyReadScope(out, scopes), nil
+}
+
+// applyReadScope narrows a visible-manifest set to the records the
+// caller's OAuth read surface permits (§6.3.1). An inactive scope set is
+// the identity transform.
+func applyReadScope(in []store.ManifestRecord, scopes layer.ScopeSet) []store.ManifestRecord {
+	if !scopes.Active() {
+		return in
+	}
+	out := make([]store.ManifestRecord, 0, len(in))
+	for _, m := range in {
+		if scopes.AllowsRead(m.ArtifactID) {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // ----- helpers ------------------------------------------------------------

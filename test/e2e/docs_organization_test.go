@@ -766,14 +766,70 @@ func TestOrg_33_MCPVerifySignaturesDefault(t *testing.T) {
 	// should load fine under medium-and-above.
 }
 
-// T-D-organization-34 -- MCP reads PODIUM_SESSION_TOKEN for injected-session-token identity (skipped).
+// T-D-organization-34 -- the MCP bridge reads PODIUM_SESSION_TOKEN and the
+// registry verifies it end-to-end: a meta-tool call carrying a JWT signed by
+// the registered runtime key returns the artifact. F-6.3.1, F-6.3.3.
 func TestOrg_34_MCPSessionToken(t *testing.T) {
-	t.Skip("requires a registered runtime key and a JWT signed by it — needs OIDC + a seeded runtime key registration; not achievable in plain standalone e2e")
+	t.Parallel()
+	priv, pem := injKeyPair(t)
+	reg := writeRegistry(t, map[string]string{
+		"finance/run/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Run variance analysis for month-end close across vendor payments.\n---\n\nbody\n",
+	})
+	srv := injServer(t, reg, priv, pem)
+	token := injSignJWT(t, priv, injClaims("alice"))
+
+	env := []string{
+		"PODIUM_REGISTRY=" + srv.BaseURL,
+		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
+		"PODIUM_SESSION_TOKEN=" + token,
+		"PODIUM_CACHE_DIR=" + t.TempDir(),
+	}
+	res := mcpExec(t, env, toolCall(1, "search_artifacts", map[string]any{"query": "variance"}))
+	body := mustJSON(rpcResult(t, res.Stdout, 1))
+	if !strings.Contains(body, "finance/run") {
+		t.Errorf("MCP search via injected token did not return the artifact (token rejected?): %s\nstderr: %s", body, res.Stderr)
+	}
+
+	// Negative control: an unverifiable token is rejected by the registry, so
+	// the artifact is not returned.
+	envBad := []string{
+		"PODIUM_REGISTRY=" + srv.BaseURL,
+		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
+		"PODIUM_SESSION_TOKEN=not-a-valid-jwt",
+		"PODIUM_CACHE_DIR=" + t.TempDir(),
+	}
+	resBad := mcpExec(t, envBad, toolCall(1, "search_artifacts", map[string]any{"query": "variance"}))
+	if strings.Contains(mustJSON(rpcEnvelope(t, resBad.Stdout, 1)), "finance/run") {
+		t.Errorf("unverifiable token still returned the artifact")
+	}
 }
 
-// T-D-organization-35 -- MCP reads PODIUM_SESSION_TOKEN_FILE (skipped).
+// T-D-organization-35 -- the MCP bridge reads PODIUM_SESSION_TOKEN_FILE
+// (preferred over the env var) and the registry verifies it. F-6.3.3.
 func TestOrg_35_MCPSessionTokenFile(t *testing.T) {
-	t.Skip("requires a registered runtime key and a JWT signed by it — needs OIDC + a seeded runtime key registration; not achievable in plain standalone e2e")
+	t.Parallel()
+	priv, pem := injKeyPair(t)
+	reg := writeRegistry(t, map[string]string{
+		"finance/run/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Run variance analysis for month-end close across vendor payments.\n---\n\nbody\n",
+	})
+	srv := injServer(t, reg, priv, pem)
+	token := injSignJWT(t, priv, injClaims("alice"))
+	tokFile := filepath.Join(t.TempDir(), "session.jwt")
+	if err := os.WriteFile(tokFile, []byte(token+"\n"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+
+	env := []string{
+		"PODIUM_REGISTRY=" + srv.BaseURL,
+		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
+		"PODIUM_SESSION_TOKEN_FILE=" + tokFile,
+		"PODIUM_CACHE_DIR=" + t.TempDir(),
+	}
+	res := mcpExec(t, env, toolCall(1, "search_artifacts", map[string]any{"query": "variance"}))
+	body := mustJSON(rpcResult(t, res.Stdout, 1))
+	if !strings.Contains(body, "finance/run") {
+		t.Errorf("MCP search via session-token file did not return the artifact: %s\nstderr: %s", body, res.Stderr)
+	}
 }
 
 // T-D-organization-36 -- `podium admin migrate-to-standard` with --dry-run reports plan and exits 0.

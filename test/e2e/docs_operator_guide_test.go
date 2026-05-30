@@ -24,7 +24,7 @@ package e2e
 //   - Test 23: webhook ingest invalid HMAC — the layer webhook ingest route
 //     requires a git-type layer; the webhook URL is /v1/layers/<id>/webhook
 //     which is not mounted in the standalone handler (only /v1/webhooks/* is).
-//   - Tests 24, 43, 44: need OIDC IdP or runtime-verified JWT.
+//   - Tests 43, 44: need OIDC IdP or runtime-verified JWT.
 //   - Tests 25: sandbox enforcement via MCP — REAL (feasible).
 //   - Tests 33: /readyz in read_only — probe not triggerable.
 //   - Tests 35, 36, 37: promtool checks — REAL when promtool installed.
@@ -470,9 +470,54 @@ func TestOpGuide_23_WebhookInvalidHMAC(t *testing.T) {
 
 // ---- T-D-operator-guide-24: per-layer visibility via injected-session-token -
 
-// T-D-operator-guide-24
+// T-D-operator-guide-24 — per-layer visibility via injected-session-token: a
+// JWT's group claim drives which layers the verified caller sees. F-6.3.1.
 func TestOpGuide_24_PerLayerVisibilityInjectedToken(t *testing.T) {
-	t.Skip("requires a runtime-verified JWT with specific group claims and a registry configured with PODIUM_IDENTITY_PROVIDER=injected-session-token; needs a real OIDC-like key setup not available in standalone e2e")
+	t.Parallel()
+	home := t.TempDir()
+	priv, pem := injKeyPair(t)
+
+	// A finance-only layer (visibility: groups: [finance]) declared in
+	// registry.yaml so its visibility is explicit rather than the default.
+	layerRoot := writeRegistry(t, map[string]string{
+		"finance/secret/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Finance-only month-end variance secret.\n---\n\nbody\n",
+	})
+	cfgPath := filepath.Join(home, "registry.yaml")
+	cfg := "" +
+		"layers:\n" +
+		"  - id: finance-layer\n" +
+		"    source:\n" +
+		"      local:\n" +
+		"        path: " + layerRoot + "\n" +
+		"    visibility:\n" +
+		"      groups: [finance]\n"
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatalf("write registry.yaml: %v", err)
+	}
+
+	srv := startServerArgs(t, []string{
+		"HOME=" + home,
+		"PODIUM_CONFIG_FILE=" + cfgPath,
+		"PODIUM_INGEST_OFFLINE=true",
+		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
+		"PODIUM_OAUTH_AUDIENCE=" + injAudience,
+	}, "serve", "--standalone")
+	injRegisterRuntime(t, srv, pem)
+
+	// A caller whose JWT carries the finance group sees the finance-only
+	// artifact.
+	finClaims := injClaims("alice")
+	finClaims["groups"] = []string{"finance"}
+	if status, body := injGet(t, srv.BaseURL+"/v1/load_artifact?id=finance/secret", injSignJWT(t, priv, finClaims)); status != 200 {
+		t.Fatalf("finance caller: status=%d, want 200\nbody: %s\nlog:\n%s", status, body, srv.log())
+	}
+
+	// A caller outside the finance group cannot see it (404, no leak).
+	hrClaims := injClaims("bob")
+	hrClaims["groups"] = []string{"hr"}
+	if status, _ := injGet(t, srv.BaseURL+"/v1/load_artifact?id=finance/secret", injSignJWT(t, priv, hrClaims)); status != 404 {
+		t.Errorf("hr caller: status=%d, want 404 (filtered by group visibility)", status)
+	}
 }
 
 // ---- T-D-operator-guide-25: sandbox read-only-fs via MCP PODIUM_HARNESS=none

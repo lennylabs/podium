@@ -8,7 +8,7 @@ package e2e
 //
 // Several tests are skipped because the underlying surface is not reachable
 // from a standalone e2e harness:
-//   - T-D-extending-11,14: require OIDC standard-mode deployment.
+//   - T-D-extending-14: requires an interactive device-code prompt.
 //   - T-D-extending-15,16,17: blocked by F-6.6.1 / F-9.3.1
 //     (MaterializationHook SPI not executed in MCP; HookFunc is a func type).
 //   - T-D-extending-18,19,20,21,22: outbound webhook delivery not reachable
@@ -350,9 +350,24 @@ func TestExtending_10_ReingestMissingID(t *testing.T) {
 	}
 }
 
-// T-D-extending-11 — IdentityProvider SPI: injected-session-token with unregistered runtime key returns auth.untrusted_runtime.
+// T-D-extending-11 — IdentityProvider SPI: injected-session-token with an
+// unregistered runtime key returns auth.untrusted_runtime. F-6.3.2.
 func TestExtending_11_InjectedSessionTokenUntrusted(t *testing.T) {
-	t.Skip("requires standard-mode registry with runtime trust and a session JWT signed by a registered key; not expressible in a standalone e2e")
+	t.Parallel()
+	priv, pem := injKeyPair(t)
+	srv := injServer(t, extSkillReg(t), priv, pem)
+	// Sign with a runtime issuer that was never registered.
+	claims := injClaims("alice")
+	claims["iss"] = "unregistered-runtime"
+	claims["act"] = "unregistered-runtime"
+	token := injSignJWT(t, priv, claims)
+	status, body := injGet(t, srv.BaseURL+"/v1/search_artifacts?query=pay", token)
+	if status != 401 {
+		t.Fatalf("status = %d, want 401\nbody: %s", status, body)
+	}
+	if !strings.Contains(string(body), "auth.untrusted_runtime") {
+		t.Errorf("body missing auth.untrusted_runtime: %s", body)
+	}
 }
 
 // T-D-extending-12 — IdentityProvider SPI: admin runtime register and list roundtrip.

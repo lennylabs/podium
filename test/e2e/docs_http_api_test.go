@@ -1060,14 +1060,60 @@ func TestDocHTTPAPI_49_CacheOfflineOnly(t *testing.T) {
 
 // ===== Authentication (T-D-http-api-50..52) ==========================
 
-// spec: http-api.md § Authentication — unauthenticated rejected.
+// spec: http-api.md § Authentication — unauthenticated rejected. In
+// injected-session-token mode the registry verifies the bearer token on
+// every meta-tool call (§6.3.2), so a call with no Authorization header is
+// rejected rather than served anonymously. F-6.3.1.
 func TestDocHTTPAPI_50_AuthRequired(t *testing.T) {
-	t.Skip("requires a standard deployment with a JWT-validating identity resolver; the standalone server serves anonymously and never returns 401/403 on reads")
+	t.Parallel()
+	priv, pem := injKeyPair(t)
+	srv := injServer(t, apiReg(t), priv, pem)
+	status, body := injGet(t, srv.BaseURL+"/v1/search_artifacts?query=variance", "")
+	if status != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 (no token)\nbody: %s", status, body)
+	}
+	env := apiJSONObj(t, body)
+	if code, _ := env["code"].(string); code != "auth.untrusted_runtime" {
+		t.Errorf("code = %v, want auth.untrusted_runtime", env["code"])
+	}
 }
 
 // spec: http-api.md § Authentication; error-codes.md § auth.untrusted_runtime.
+// A token whose issuer is not a registered runtime key is rejected with
+// auth.untrusted_runtime carrying details.runtime_iss. F-6.3.2.
 func TestDocHTTPAPI_51_UntrustedRuntime(t *testing.T) {
-	t.Skip("requires a standard deployment that validates injected-session-token JWTs against registered runtime keys; not exposed by the standalone server")
+	t.Parallel()
+	priv, pem := injKeyPair(t)
+	srv := injServer(t, apiReg(t), priv, pem)
+	claims := injClaims("alice")
+	claims["iss"] = "ghost-runtime" // unregistered issuer
+	claims["act"] = "ghost-runtime"
+	token := injSignJWT(t, priv, claims)
+	status, body := injGet(t, srv.BaseURL+"/v1/search_artifacts?query=variance", token)
+	if status != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401\nbody: %s", status, body)
+	}
+	env := apiJSONObj(t, body)
+	if code, _ := env["code"].(string); code != "auth.untrusted_runtime" {
+		t.Errorf("code = %v, want auth.untrusted_runtime", env["code"])
+	}
+	details, _ := env["details"].(map[string]any)
+	if details["runtime_iss"] != "ghost-runtime" {
+		t.Errorf("details.runtime_iss = %v, want ghost-runtime", details["runtime_iss"])
+	}
+}
+
+// spec: §6.3.2 — a token signed by the registered runtime key verifies and
+// the meta-tool call succeeds (the positive path for 50/51). F-6.3.1.
+func TestDocHTTPAPI_51b_RegisteredRuntimeAccepted(t *testing.T) {
+	t.Parallel()
+	priv, pem := injKeyPair(t)
+	srv := injServer(t, apiReg(t), priv, pem)
+	token := injSignJWT(t, priv, injClaims("alice"))
+	status, body := injGet(t, srv.BaseURL+"/v1/search_artifacts?query=variance", token)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (registered runtime)\nbody: %s", status, body)
+	}
 }
 
 // spec: http-api.md § Authentication — public mode records system:public.

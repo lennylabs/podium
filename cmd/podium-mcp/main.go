@@ -33,11 +33,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/lennylabs/podium/internal/buildinfo"
 	"github.com/lennylabs/podium/pkg/adapter"
+	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/materialize"
 	"github.com/lennylabs/podium/pkg/overlay"
@@ -73,17 +75,28 @@ func main() {
 
 // config captures every PODIUM_ env var the bridge consults.
 type config struct {
-	registry          string
-	harness           string
-	cacheDir          string
-	cacheMode         string
-	materializeRoot   string
-	sessionToken      string
-	sessionTokenFile  string
-	overlayPath       string
-	auditSink         string
-	tenantID          string
-	oauthAudience     string
+	registry         string
+	harness          string
+	cacheDir         string
+	cacheMode        string
+	materializeRoot  string
+	sessionToken     string
+	sessionTokenFile string
+	overlayPath      string
+	auditSink        string
+	tenantID         string
+	oauthAudience    string
+	// §6.2 / §6.3 identity provider selection and the oauth-device-code
+	// options. identityProvider defaults to "oauth-device-code". The
+	// device-code flow runs only when oauthAuthEndpoint is configured;
+	// otherwise the bridge sends a cached or injected token, or no
+	// credential, so a bridge pointed at an anonymous registry still works.
+	identityProvider  string
+	oauthAuthEndpoint string
+	oauthTokenURL     string
+	oauthClientID     string
+	oauthScopes       string
+	tokenKeychainName string
 	verifyPolicy      sign.VerificationPolicy
 	signatureProvider string
 	// §4.4.1 sandbox enforcement.
@@ -129,6 +142,13 @@ func loadConfig() (*config, error) {
 		auditSink:        os.Getenv("PODIUM_AUDIT_SINK"),
 		tenantID:         os.Getenv("PODIUM_TENANT_ID"),
 		oauthAudience:    os.Getenv("PODIUM_OAUTH_AUDIENCE"),
+		// §6.2: PODIUM_IDENTITY_PROVIDER defaults to oauth-device-code.
+		identityProvider:  envDefault("PODIUM_IDENTITY_PROVIDER", "oauth-device-code"),
+		oauthAuthEndpoint: os.Getenv("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT"),
+		oauthTokenURL:     os.Getenv("PODIUM_OAUTH_TOKEN_URL"),
+		oauthClientID:     envDefault("PODIUM_OAUTH_CLIENT_ID", "podium-cli"),
+		oauthScopes:       envDefault("PODIUM_OAUTH_SCOPES", "openid profile email groups"),
+		tokenKeychainName: envDefault("PODIUM_TOKEN_KEYCHAIN_NAME", "podium"),
 		// §4.7.9 / §6.2: never | medium-and-above (default) | always.
 		verifyPolicy:      sign.VerificationPolicy(envDefault("PODIUM_VERIFY_SIGNATURES", string(sign.PolicyMediumAndAbove))),
 		signatureProvider: envDefault("PODIUM_SIGNATURE_PROVIDER", "noop"),
@@ -188,6 +208,17 @@ type mcpServer struct {
 	// successful registry call, surfaced by the §13.9 health tool. Zero
 	// means no successful call has happened yet.
 	lastSuccess atomic.Int64
+	// tokens persists oauth-device-code access tokens (§6.3): the OS
+	// keychain in production, an in-memory store in tests. Consulted only
+	// in oauth-device-code mode with an IdP configured.
+	tokens identity.TokenStore
+	// out is the JSON-RPC output encoder, shared by tool responses and
+	// server-initiated messages (MCP elicitation for the device-code
+	// flow, §6.3). outMu serializes writes since elicitation can be
+	// emitted from a tool-call goroutine while a response is encoded.
+	out      *json.Encoder
+	outMu    sync.Mutex
+	serverID atomic.Int64
 }
 
 // recordSuccess stamps the time of a successful registry call for the
@@ -218,6 +249,9 @@ func newServer(cfg *config) (*mcpServer, error) {
 		resolutions: newResolutionCache(cfg.cacheDir),
 		adapters:    adapter.DefaultRegistry(),
 		sessionID:   newSessionID(),
+		// §6.3: oauth-device-code tokens cache in the OS keychain, keyed by
+		// registry URL (matching `podium login`).
+		tokens: identity.KeychainStore{Service: cfg.tokenKeychainName},
 	}
 	// §6.4 workspace overlay: load now and reuse for the bridge
 	// lifetime. An empty path or absent overlay disables the layer.
@@ -286,18 +320,37 @@ type rpcError struct {
 func (s *mcpServer) serve(r io.Reader, w io.Writer) error {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-	enc := json.NewEncoder(w)
+	s.outMu.Lock()
+	s.out = json.NewEncoder(w)
+	s.outMu.Unlock()
+	// §6.3.2.1 token rotation: honor SIGHUP (forced re-read) and a file
+	// watch on PODIUM_SESSION_TOKEN_FILE in addition to the per-call fresh
+	// read currentToken() already performs. Stops when serve returns.
+	stop := s.startTokenWatch()
+	defer stop()
 	for scanner.Scan() {
 		var req rpcRequest
 		if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
 			continue
 		}
 		resp := s.handle(req)
-		if err := enc.Encode(resp); err != nil {
+		if err := s.send(resp); err != nil {
 			return err
 		}
 	}
 	return scanner.Err()
+}
+
+// send writes one JSON-RPC message (a tool response or a server-initiated
+// elicitation) to the output stream under outMu so concurrent writers do
+// not interleave.
+func (s *mcpServer) send(v any) error {
+	s.outMu.Lock()
+	defer s.outMu.Unlock()
+	if s.out == nil {
+		return nil
+	}
+	return s.out.Encode(v)
 }
 
 func (s *mcpServer) handle(req rpcRequest) rpcResponse {
@@ -932,7 +985,14 @@ func (s *mcpServer) fetchJSON(path string, args map[string]any) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
-	if tok := s.currentToken(); tok != "" {
+	// §6.3: attach the caller credential per the selected identity
+	// provider — the injected session token, or an oauth-device-code token
+	// (cached in the keychain, acquired via the device flow on first use).
+	tok, err := s.bearerToken()
+	if err != nil {
+		return nil, err
+	}
+	if tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 	// §6.3 PODIUM_TENANT_ID: forwards the tenant context to the

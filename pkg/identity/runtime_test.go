@@ -229,6 +229,127 @@ func TestJWTVerifier_RejectsMissingExp(t *testing.T) {
 	}
 }
 
+// Spec: §6.3.2 — act is "actor (the runtime itself)"; an act that names a
+// different principal than the verified runtime (iss) is rejected. F-6.3.7.
+func TestJWTVerifier_RejectsActMismatch(t *testing.T) {
+	t.Parallel()
+	priv, pub := newRSAKeyPair(t)
+	reg := identity.NewRuntimeKeyRegistry()
+	if err := reg.Register(identity.RuntimeKey{Issuer: "rt", Algorithm: "RS256", Key: pub}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	verify := reg.JWTVerifier("https://podium.acme.com", nil)
+	signed := signJWT(t, priv, jwt.SigningMethodRS256, jwt.MapClaims{
+		"iss": "rt", "aud": "https://podium.acme.com",
+		"sub": "alice", "act": "some-other-runtime",
+		"exp": time.Now().Add(5 * time.Minute).Unix(),
+	})
+	_, err := verify(signed)
+	if !errors.Is(err, identity.ErrUntrustedRuntime) {
+		t.Fatalf("got %v, want ErrUntrustedRuntime", err)
+	}
+}
+
+// Spec: §6.3.2 — the RFC 8693 nested actor form, act: {"sub": <runtime>},
+// is accepted when the actor sub identifies the verified runtime. F-6.3.7.
+func TestJWTVerifier_AcceptsActObjectForm(t *testing.T) {
+	t.Parallel()
+	priv, pub := newRSAKeyPair(t)
+	reg := identity.NewRuntimeKeyRegistry()
+	if err := reg.Register(identity.RuntimeKey{Issuer: "rt", Algorithm: "RS256", Key: pub}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	verify := reg.JWTVerifier("https://podium.acme.com", nil)
+	signed := signJWT(t, priv, jwt.SigningMethodRS256, jwt.MapClaims{
+		"iss": "rt", "aud": "https://podium.acme.com",
+		"sub": "alice", "act": map[string]any{"sub": "rt"},
+		"exp": time.Now().Add(5 * time.Minute).Unix(),
+	})
+	id, err := verify(signed)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if id.Sub != "alice" {
+		t.Errorf("Sub = %q", id.Sub)
+	}
+	// And the object form with a mismatched sub is rejected.
+	bad := signJWT(t, priv, jwt.SigningMethodRS256, jwt.MapClaims{
+		"iss": "rt", "aud": "https://podium.acme.com",
+		"sub": "alice", "act": map[string]any{"sub": "evil"},
+		"exp": time.Now().Add(5 * time.Minute).Unix(),
+	})
+	if _, err := verify(bad); !errors.Is(err, identity.ErrUntrustedRuntime) {
+		t.Fatalf("object-form mismatch: got %v, want ErrUntrustedRuntime", err)
+	}
+}
+
+// Spec: §6.10 — an unregistered issuer surfaces a typed
+// *UntrustedRuntimeError carrying the issuer so the HTTP boundary can
+// populate details.runtime_iss. F-6.3.2.
+func TestJWTVerifier_UntrustedErrorCarriesIssuer(t *testing.T) {
+	t.Parallel()
+	priv, _ := newRSAKeyPair(t)
+	reg := identity.NewRuntimeKeyRegistry()
+	verify := reg.JWTVerifier("https://podium.acme.com", nil)
+	signed := signJWT(t, priv, jwt.SigningMethodRS256, jwt.MapClaims{
+		"iss": "managed-runtime-x", "aud": "https://podium.acme.com",
+		"sub": "alice", "act": "managed-runtime-x",
+		"exp": time.Now().Add(5 * time.Minute).Unix(),
+	})
+	_, err := verify(signed)
+	var ute *identity.UntrustedRuntimeError
+	if !errors.As(err, &ute) {
+		t.Fatalf("got %T (%v), want *UntrustedRuntimeError", err, err)
+	}
+	if ute.Issuer != "managed-runtime-x" {
+		t.Errorf("Issuer = %q, want managed-runtime-x", ute.Issuer)
+	}
+	if !errors.Is(err, identity.ErrUntrustedRuntime) {
+		t.Errorf("typed error does not match ErrUntrustedRuntime sentinel")
+	}
+}
+
+// Spec: §6.3.1 — fine-grained OAuth scope claims flow onto the Identity.
+// Both the RFC 6749 space-delimited "scope" string and the array-valued
+// "scp" claim are read. F-6.3.5.
+func TestJWTVerifier_ParsesScopeClaims(t *testing.T) {
+	t.Parallel()
+	priv, pub := newRSAKeyPair(t)
+	reg := identity.NewRuntimeKeyRegistry()
+	if err := reg.Register(identity.RuntimeKey{Issuer: "rt", Algorithm: "RS256", Key: pub}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	verify := reg.JWTVerifier("https://podium.acme.com", nil)
+
+	// "scope": space-delimited string.
+	s1 := signJWT(t, priv, jwt.SigningMethodRS256, jwt.MapClaims{
+		"iss": "rt", "aud": "https://podium.acme.com", "sub": "alice", "act": "rt",
+		"scope": "openid podium:read:finance/* podium:load:finance/ap/pay-invoice@1.x",
+		"exp":   time.Now().Add(5 * time.Minute).Unix(),
+	})
+	id, err := verify(s1)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if len(id.Scopes) != 3 || id.Scopes[1] != "podium:read:finance/*" {
+		t.Errorf("Scopes = %v", id.Scopes)
+	}
+
+	// "scp": array form.
+	s2 := signJWT(t, priv, jwt.SigningMethodRS256, jwt.MapClaims{
+		"iss": "rt", "aud": "https://podium.acme.com", "sub": "alice", "act": "rt",
+		"scp": []any{"podium:read:hr/*", "podium:write:hr/policies"},
+		"exp": time.Now().Add(5 * time.Minute).Unix(),
+	})
+	id2, err := verify(s2)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if len(id2.Scopes) != 2 || id2.Scopes[0] != "podium:read:hr/*" {
+		t.Errorf("Scopes = %v", id2.Scopes)
+	}
+}
+
 // Spec: §9.1 — the registry rejects unsupported key types at register
 // time so misconfiguration is caught early rather than at request time.
 func TestRuntimeKeyRegistry_RejectsUnsupportedKey(t *testing.T) {

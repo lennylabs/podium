@@ -534,6 +534,38 @@ func Run() error {
 			quotaLimits.SearchQPS, quotaLimits.MaterializeRate)
 	}
 	bootOpts = append(bootOpts, server.WithQuotaLimiter(server.NewQuotaLimiter(quotaLimits)))
+
+	// §6.3.2 runtime trust keys: when PODIUM_RUNTIME_KEYS_PATH is set,
+	// registrations persist as a JSON file at that path; the registry
+	// reloads them on startup. Without the env var, the registry stays in
+	// memory (registrations vanish on restart). The same store is consulted
+	// by the request-time JWT verifier and by the admin register/list
+	// endpoint, so a key registered over HTTP is immediately trusted.
+	var runtimeKeys identity.RuntimeKeyVerifierStore = identity.NewRuntimeKeyRegistry()
+	if path := os.Getenv("PODIUM_RUNTIME_KEYS_PATH"); path != "" {
+		persisted, err := identity.LoadFilePersistedRuntimeKeyRegistry(path)
+		if err != nil {
+			log.Printf("warning: runtime key persistence disabled: %v", err)
+		} else {
+			runtimeKeys = persisted
+			log.Printf("runtime trust keys persisted at %s", path)
+		}
+	}
+
+	// §6.3.2 injected-session-token: install the per-request verifier so the
+	// registry verifies the signed JWT on every meta-tool call, mapping the
+	// verified claims to the caller Identity and rejecting an unregistered
+	// or unsigned token with auth.untrusted_runtime. Without this the server
+	// would treat every caller as anonymous-public, which defeats the trust
+	// model the section specifies. Only the injected-session-token provider
+	// installs it; oauth-device-code and standalone stay on the anonymous
+	// resolver.
+	if cfg.identityProvider == "injected-session-token" {
+		bootOpts = append(bootOpts, server.WithIdentityVerifier(
+			injectedTokenVerifier(runtimeKeys, cfg.oauthAudience, cfg.idpGroupMapping)))
+		log.Printf("identity provider: injected-session-token (verifying runtime-signed JWTs)")
+	}
+
 	srv := server.New(registry, bootOpts...)
 
 	// §7.3.1 layer-management endpoint: mounted alongside the meta-
@@ -559,20 +591,6 @@ func Run() error {
 			return registry.AdminAuthorize(r.Context(), layer.Identity{IsPublic: true})
 		})
 
-	// §6.3.2 runtime trust keys: when PODIUM_RUNTIME_KEYS_PATH is
-	// set, registrations persist as a JSON file at that path; the
-	// registry reloads them on startup. Without the env var, the
-	// registry stays in memory (registrations vanish on restart).
-	var runtimeKeys server.RuntimeKeyStore = identity.NewRuntimeKeyRegistry()
-	if path := os.Getenv("PODIUM_RUNTIME_KEYS_PATH"); path != "" {
-		persisted, err := identity.LoadFilePersistedRuntimeKeyRegistry(path)
-		if err != nil {
-			log.Printf("warning: runtime key persistence disabled: %v", err)
-		} else {
-			runtimeKeys = persisted
-			log.Printf("runtime trust keys persisted at %s", path)
-		}
-	}
 	runtimeEndpoint := server.NewRuntimeKeyEndpoint(runtimeKeys, mode)
 
 	mux := http.NewServeMux()
@@ -661,19 +679,28 @@ type Config struct {
 	bind             string
 	publicMode       bool
 	identityProvider string
-	storeType        string
-	sqlitePath       string
-	postgresDSN      string
-	objectStore      string
-	filesystemRoot   string
-	publicURL        string
-	presignTTL       time.Duration
-	s3Endpoint       string
-	s3Region         string
-	s3Bucket         string
-	s3AccessKey      string
-	s3SecretKey      string
-	s3UseSSL         bool
+	// oauthAudience is the §6.3.2 `aud` claim the injected-session-token
+	// verifier requires (the registry endpoint). Empty disables audience
+	// checking. Sourced from PODIUM_OAUTH_AUDIENCE.
+	oauthAudience string
+	// idpGroupMapping is the §6.3.1 IdpGroupMapping adapter: a registry-
+	// side table rewriting OIDC group-claim values to layer group names
+	// for IdPs without SCIM. Nil or empty passes groups through unchanged.
+	// Sourced from PODIUM_IDP_GROUP_MAPPING.
+	idpGroupMapping *identity.IdpGroupMapping
+	storeType       string
+	sqlitePath      string
+	postgresDSN     string
+	objectStore     string
+	filesystemRoot  string
+	publicURL       string
+	presignTTL      time.Duration
+	s3Endpoint      string
+	s3Region        string
+	s3Bucket        string
+	s3AccessKey     string
+	s3SecretKey     string
+	s3UseSSL        bool
 	// Vector + embedding (§4.7).
 	vectorBackend     string
 	embeddingProvider string
@@ -786,6 +813,8 @@ func (c *Config) Settings() []Setting {
 		{"bind", c.bind, envOrSrc("PODIUM_BIND", defaultSrc)},
 		{"public_mode", boolStr(c.publicMode), envOrSrc("PODIUM_PUBLIC_MODE", defaultSrc)},
 		{"identity_provider", c.identityProvider, envOrSrc("PODIUM_IDENTITY_PROVIDER", yamlSrc)},
+		{"oauth_audience", c.oauthAudience, envOrSrc("PODIUM_OAUTH_AUDIENCE", defaultSrc)},
+		{"idp_group_mapping", idpGroupMappingStr(c.idpGroupMapping), envOrSrc("PODIUM_IDP_GROUP_MAPPING", defaultSrc)},
 		{"store.type", c.storeType, envOrSrc("PODIUM_REGISTRY_STORE", defaultSrc)},
 		{"store.sqlite_path", c.sqlitePath, envOrSrc("PODIUM_SQLITE_PATH", defaultSrc)},
 		{"store.postgres_dsn", redact(c.postgresDSN), envOrSrc("PODIUM_POSTGRES_DSN", yamlSrc)},
@@ -821,11 +850,22 @@ func intStr(n int) string {
 	return strconv.Itoa(n)
 }
 
+// idpGroupMappingStr renders the §6.3.1 group-mapping table for `config
+// show`: the entry count, or "" when no mapping is configured. The raw
+// claim→group pairs are not printed so the output stays compact.
+func idpGroupMappingStr(m *identity.IdpGroupMapping) string {
+	if m == nil || m.Empty() {
+		return ""
+	}
+	return intStr(m.Len()) + " mappings"
+}
+
 func LoadConfig() *Config {
 	c := &Config{
 		bind:             envDefault("PODIUM_BIND", "127.0.0.1:8080"),
 		publicMode:       isTrue(os.Getenv("PODIUM_PUBLIC_MODE")),
 		identityProvider: os.Getenv("PODIUM_IDENTITY_PROVIDER"),
+		oauthAudience:    os.Getenv("PODIUM_OAUTH_AUDIENCE"),
 		storeType:        envDefault("PODIUM_REGISTRY_STORE", "sqlite"),
 		sqlitePath:       os.Getenv("PODIUM_SQLITE_PATH"),
 		postgresDSN:      os.Getenv("PODIUM_POSTGRES_DSN"),
@@ -883,6 +923,17 @@ func LoadConfig() *Config {
 		log.Printf("warning: ignored registry.yaml: %v", err)
 	} else {
 		applyYAML(c, y)
+	}
+	// §6.3.1 IdpGroupMapping: parse the registry-side group-mapping table
+	// from PODIUM_IDP_GROUP_MAPPING ("oktaGroupOID=finance,..."). A
+	// malformed spec is logged and ignored rather than crashing startup;
+	// groups then pass through unmapped.
+	if spec := os.Getenv("PODIUM_IDP_GROUP_MAPPING"); spec != "" {
+		if m, err := identity.ParseIdpGroupMapping(spec); err != nil {
+			log.Printf("warning: ignored PODIUM_IDP_GROUP_MAPPING: %v", err)
+		} else {
+			c.idpGroupMapping = m
+		}
 	}
 	if c.sqlitePath == "" {
 		home, err := os.UserHomeDir()

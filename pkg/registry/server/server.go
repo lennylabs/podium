@@ -33,6 +33,14 @@ type Server struct {
 	core       *core.Registry
 	publicMode bool
 	resolveID  func(*http.Request) layer.Identity
+	// idVerifier verifies the per-request caller token and maps it to an
+	// Identity (§6.3.2 injected-session-token). When set, the meta-tool
+	// routes verify on every call: a verification failure rejects the
+	// request with the §6.10 auth.* envelope before the handler runs, and
+	// a success carries the Identity to the handler via the request
+	// context. Nil leaves the server on the resolveID path (anonymous
+	// public by default), preserving standalone / public-mode behavior.
+	idVerifier func(*http.Request) (layer.Identity, error)
 	// events is the §7.6 in-process pub/sub for /v1/events.
 	events *eventBus
 	// objectStore is the §7.2 data-plane backend. load_artifact reads
@@ -135,6 +143,17 @@ func WithPublicMode() Option { return func(s *Server) { s.publicMode = true } }
 // one that maps an HTTP request to an Identity (e.g., decoded JWT).
 func WithIdentityResolver(fn func(*http.Request) layer.Identity) Option {
 	return func(s *Server) { s.resolveID = fn }
+}
+
+// WithIdentityVerifier installs the §6.3.2 per-request token verifier used
+// when the registry runs the injected-session-token provider. The function
+// extracts and verifies the bearer token and returns the caller Identity,
+// or an error (identity.ErrUntrustedRuntime / identity.ErrTokenExpired)
+// that the meta-tool routes surface as the §6.10 auth.* envelope. Setting
+// it makes the registry verify the signature on every meta-tool call;
+// without it the server stays on the anonymous resolveID path.
+func WithIdentityVerifier(fn func(*http.Request) (layer.Identity, error)) Option {
+	return func(s *Server) { s.idVerifier = fn }
 }
 
 // WithObjectStore configures the §4.1 large-resource path. Resources
@@ -292,10 +311,12 @@ func (s *Server) Handler() http.Handler {
 	if s.objectStore != nil {
 		mux.HandleFunc("/objects/", s.handleObjectsRoute)
 	}
+	// §6.3.2: verify the caller token on every meta-tool call (outermost so
+	// a rejected request never reaches the audit emitter or a handler), then
 	// §8.1: attach per-request audit metadata (trace id + structured caller
 	// identity) to every request context so read events emitted by the core
 	// and the HTTP write handlers carry it.
-	return s.withAuditMetaMiddleware(s.withReadOnlyHeaders(mux))
+	return s.withIdentityVerification(s.withAuditMetaMiddleware(s.withReadOnlyHeaders(mux)))
 }
 
 // withReadOnlyHeaders wraps the route mux so every response
@@ -922,6 +943,13 @@ func (s *Server) writeObjectStoreError(w http.ResponseWriter, err error) {
 // ----- Helpers --------------------------------------------------------------
 
 func (s *Server) identity(r *http.Request) layer.Identity {
+	// §6.3.2: when a verifier is installed, the identity-verification
+	// middleware has already verified the token and stored the caller
+	// Identity on the context. Use it so handlers and the audit emitter
+	// agree on one verified identity per request.
+	if id, ok := verifiedIdentityFrom(r.Context()); ok {
+		return id
+	}
 	id := s.resolveID(r)
 	if s.publicMode {
 		id.IsPublic = true
