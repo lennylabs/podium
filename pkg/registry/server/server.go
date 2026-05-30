@@ -373,11 +373,15 @@ type LoadDomainResponse struct {
 	Note        string               `json:"note,omitempty"`
 }
 
-// DomainDescriptor is one subdomain entry.
+// DomainDescriptor is one subdomain entry. Subdomains carries the
+// nested child tree when load_domain expands more than one level
+// (§4.5.5 depth); it is omitted for leaf entries and at the deepest
+// rendered level.
 type DomainDescriptor struct {
-	Path        string `json:"path"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	Path        string             `json:"path"`
+	Name        string             `json:"name"`
+	Description string             `json:"description,omitempty"`
+	Subdomains  []DomainDescriptor `json:"subdomains,omitempty"`
 }
 
 // ArtifactDescriptor is one artifact entry.
@@ -388,6 +392,11 @@ type ArtifactDescriptor struct {
 	Description string   `json:"description,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
 	Score       float64  `json:"score,omitempty"`
+	// FoldedFrom is the relative subpath a notable artifact was lifted
+	// from when fold_below_artifacts collapsed its sparse subdomain
+	// into this domain's leaf set (§4.5.5 folding mechanics). Empty for
+	// a direct child of the requested domain.
+	FoldedFrom string `json:"folded_from,omitempty"`
 }
 
 // SearchResponse is the common envelope for both search endpoints.
@@ -507,9 +516,7 @@ func (s *Server) handleLoadDomain(w http.ResponseWriter, r *http.Request) {
 		Note:        res.Note,
 	}
 	for _, d := range res.Subdomains {
-		resp.Subdomains = append(resp.Subdomains, DomainDescriptor{
-			Path: d.Path, Name: d.Name, Description: d.Description,
-		})
+		resp.Subdomains = append(resp.Subdomains, domainDescriptorOf(d))
 	}
 	for _, a := range res.Notable {
 		resp.Notable = append(resp.Notable, descriptorOf(a))
@@ -828,7 +835,18 @@ func descriptorOf(a core.ArtifactDescriptor) ArtifactDescriptor {
 		Description: a.Description,
 		Tags:        append([]string(nil), a.Tags...),
 		Score:       a.Score,
+		FoldedFrom:  a.FoldedFrom,
 	}
+}
+
+// domainDescriptorOf converts a core subdomain descriptor to the wire
+// form, recursing so the §4.5.5 nested depth tree is preserved.
+func domainDescriptorOf(d core.DomainDescriptor) DomainDescriptor {
+	out := DomainDescriptor{Path: d.Path, Name: d.Name, Description: d.Description}
+	for _, c := range d.Subdomains {
+		out.Subdomains = append(out.Subdomains, domainDescriptorOf(c))
+	}
+	return out
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

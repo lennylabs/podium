@@ -83,6 +83,24 @@ type ManifestRecord struct {
 	Signature string
 }
 
+// DomainRecord is the parsed DOMAIN.md for one (tenant, layer, domain
+// path), persisted at ingest so load_domain can apply §4.5 domain
+// composition (description, prose body, keywords, unlisted,
+// include/exclude imports, per-domain discovery overrides). Raw holds
+// the full DOMAIN.md source; the registry re-parses it via
+// manifest.ParseDomain at load time and merges candidates for the same
+// path across layers per §4.5.4. Keyed by (TenantID, Layer, Path);
+// re-ingesting a layer replaces its record for a path.
+type DomainRecord struct {
+	TenantID string
+	// Path is the canonical domain path (slash-separated, relative to
+	// the layer root). The registry root has no DOMAIN.md, so Path is
+	// never empty.
+	Path  string
+	Layer string
+	Raw   []byte
+}
+
 // DependencyEdge is one cross-artifact relation indexed for impact
 // analysis (§4.7.3).
 type DependencyEdge struct {
@@ -143,6 +161,13 @@ type Store interface {
 	PutManifest(ctx context.Context, rec ManifestRecord) error
 	GetManifest(ctx context.Context, tenantID, artifactID, version string) (ManifestRecord, error)
 	ListManifests(ctx context.Context, tenantID string) ([]ManifestRecord, error)
+
+	// Domains (§4.5 DOMAIN.md composition). PutDomain upserts the
+	// record for a (tenant, layer, path); ListDomains returns every
+	// domain record for the tenant so LoadDomain can merge candidates
+	// across layers (§4.5.4).
+	PutDomain(ctx context.Context, rec DomainRecord) error
+	ListDomains(ctx context.Context, tenantID string) ([]DomainRecord, error)
 
 	// Dependencies
 	PutDependency(ctx context.Context, tenantID string, edge DependencyEdge) error

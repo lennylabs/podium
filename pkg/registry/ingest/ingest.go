@@ -344,6 +344,18 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 
 	now := req.Clock.Now().UTC()
 
+	// §4.5.1 — persist every DOMAIN.md so load_domain can read domain
+	// composition (description, keywords, unlisted, include/exclude,
+	// per-domain discovery overrides) and merge candidates across
+	// layers (§4.5.4). DOMAIN.md is not an artifact and is not subject
+	// to artifact lint; a malformed one is skipped (manifest-parse
+	// lint rules cover it) so it never blocks artifact ingest.
+	for _, dr := range walkDomains(req.Files, req.TenantID, req.LayerID) {
+		if err := st.PutDomain(ctx, dr); err != nil {
+			return nil, err
+		}
+	}
+
 	// Walk the layer's filesystem to find every ARTIFACT.md.
 	records, err := walkLayer(req.Files, req.LayerID)
 	if err != nil {
@@ -629,6 +641,46 @@ func walkLayer(fsys fs.FS, layerID string) ([]filesystem.ArtifactRecord, error) 
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
+}
+
+// walkDomains finds every DOMAIN.md in the snapshot and returns one
+// store.DomainRecord per file, keyed by the canonical domain path
+// (directory relative to the layer root). A root-level DOMAIN.md is
+// skipped: §4.5.5 gives the registry root no DOMAIN.md. Parse failures
+// are not surfaced here; the record stores the raw bytes and the
+// registry re-parses (and lint reports malformed frontmatter).
+func walkDomains(fsys fs.FS, tenantID, layerID string) []store.DomainRecord {
+	var out []store.DomainRecord
+	_ = fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if strings.HasPrefix(d.Name(), ".") && p != "." {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if d.Name() != "DOMAIN.md" {
+			return nil
+		}
+		path := dirToCanonical(dirOf(p))
+		if path == "" {
+			return nil // root has no DOMAIN.md (§4.5.5)
+		}
+		data, rerr := fs.ReadFile(fsys, p)
+		if rerr != nil {
+			return nil
+		}
+		out = append(out, store.DomainRecord{
+			TenantID: tenantID,
+			Layer:    layerID,
+			Path:     path,
+			Raw:      data,
+		})
+		return nil
+	})
+	return out
 }
 
 func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecord, error) {

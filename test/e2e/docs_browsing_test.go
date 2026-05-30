@@ -11,8 +11,6 @@ package e2e
 //     correct `subdomains`/`notable` keys, so those tests pass.
 //   - F-3.2.1: search_domains uses path-substring matching, not hybrid
 //     retrieval over DOMAIN.md projections (tests 8, 9, 10, 11, 30, 41, 54).
-//   - F-4.5.3 / F-4.5.7: DOMAIN.md keywords and depth/budget rendering are
-//     not implemented (tests 5, 6, 7).
 //   - F-8.2.1: query-text PII scrubbing is never applied (test 35).
 //   - mcp-server bridge filtering is unimplemented and unfiled (tests 20, 21).
 
@@ -164,22 +162,64 @@ func TestBrowsing_LoadDomainNoBodies(t *testing.T) {
 	}
 }
 
-// T-D-browsing-5 — load_domain depth override.
+// T-D-browsing-5 — a depth override expands the rendered subtree: depth=2
+// nests a grandchild that depth=1 omits (§4.5.5). spec: §4.5.5 (F-4.5.7)
 func TestBrowsing_LoadDomainDepth(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.7: load_domain renders a single level only; depth is ignored and does not expand the subtree")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/ap/direct/ARTIFACT.md":   contextArtifact("direct"),
+		"finance/ap/sub/deep/ARTIFACT.md": contextArtifact("deep"),
+	}))
+	var d1 map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance&depth=1", &d1)
+	if sub := dmSubdomain(d1, "finance/ap"); sub != nil {
+		if nested, _ := sub["subdomains"].([]any); len(nested) != 0 {
+			t.Errorf("depth=1 should not nest finance/ap children, got %v", nested)
+		}
+	}
+	var d2 map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance&depth=2", &d2)
+	sub := dmSubdomain(d2, "finance/ap")
+	if sub == nil {
+		t.Fatalf("finance/ap missing at depth=2: %v", d2["subdomains"])
+	}
+	if !strings.Contains(mustJSON(sub), "finance/ap/sub") {
+		t.Errorf("depth=2 should nest finance/ap/sub under finance/ap: %s", mustJSON(sub))
+	}
 }
 
-// T-D-browsing-6 — load_domain note field on budget tightening.
+// T-D-browsing-6 — the rendering note describes a notable reduction driven by
+// target_response_tokens (§4.5.5). spec: §4.5.5 (F-4.5.7)
 func TestBrowsing_LoadDomainNote(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.7/F-4.5.10: notable reduction for the response budget is not implemented, so the note field is absent")
+	files := map[string]string{
+		"finance/DOMAIN.md": "---\ndescription: Finance\ndiscovery:\n  target_response_tokens: 20\n---\n\n# Finance\n",
+	}
+	for _, n := range []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot"} {
+		files["finance/"+n+"/ARTIFACT.md"] = contextArtifact(n + " operations workflow")
+	}
+	srv := startServer(t, writeRegistry(t, files))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance", &m)
+	if note, _ := m["note"].(string); !strings.Contains(note, "reduced") {
+		t.Errorf("note = %q, want a budget-reduction sentence", note)
+	}
 }
 
-// T-D-browsing-7 — load_domain keywords from DOMAIN.md.
+// T-D-browsing-7 — load_domain returns DOMAIN.md keywords verbatim (§4.5.5).
+// spec: §4.5.5 (F-4.5.3)
 func TestBrowsing_LoadDomainKeywords(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.3: keywords are never populated from DOMAIN.md; result.keywords is always empty")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/DOMAIN.md":       "---\ndescription: Finance\ndiscovery:\n  keywords:\n    - reconciliation\n    - 1099\n---\n\n# Finance\n",
+		"finance/pay/ARTIFACT.md": contextArtifact("pay"),
+	}))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance", &m)
+	kw := dmKeywords(m)
+	if !dmContains(kw, "reconciliation") || !dmContains(kw, "1099") {
+		t.Errorf("keywords %v missing the DOMAIN.md terms", kw)
+	}
 }
 
 // ---- search_domains ---------------------------------------------------------

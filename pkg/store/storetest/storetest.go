@@ -39,6 +39,70 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("LayerConfigCRUD", func(t *testing.T) { layerConfigCRUD(t, factory(t)) })
 	t.Run("LayerConfigDelete", func(t *testing.T) { layerConfigDelete(t, factory(t)) })
 	t.Run("SearchVisibilityRoundTrip", func(t *testing.T) { searchVisibilityRoundTrip(t, factory(t)) })
+	t.Run("DomainRecordRoundTrip", func(t *testing.T) { domainRecordRoundTrip(t, factory(t)) })
+	t.Run("DomainPutReplacesPerLayer", func(t *testing.T) { domainPutReplacesPerLayer(t, factory(t)) })
+}
+
+// Spec: §4.5.1 / §4.5.4 (F-4.5.1) — DOMAIN.md is persisted per (tenant,
+// layer, path) so LoadDomain can read it and merge candidates for the
+// same path across layers. ListDomains is tenant-scoped and stable.
+func domainRecordRoundTrip(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "a")
+	mustCreateTenant(t, s, "b")
+	mustPutDomain(t, s, store.DomainRecord{TenantID: "a", Layer: "team", Path: "finance/ap", Raw: []byte("---\ndescription: AP\n---\n\n# AP\n")})
+	mustPutDomain(t, s, store.DomainRecord{TenantID: "a", Layer: "org", Path: "finance/ap", Raw: []byte("---\nunlisted: true\n---\n")})
+	mustPutDomain(t, s, store.DomainRecord{TenantID: "b", Layer: "team", Path: "ops", Raw: []byte("---\n---\n")})
+
+	list, err := s.ListDomains(ctx, "a")
+	if err != nil {
+		t.Fatalf("ListDomains: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("ListDomains(a) = %d records, want 2 (tenant isolation): %+v", len(list), list)
+	}
+	// Both records share the path but come from distinct layers.
+	for _, rec := range list {
+		if rec.Path != "finance/ap" {
+			t.Errorf("unexpected path %q", rec.Path)
+		}
+		if len(rec.Raw) == 0 {
+			t.Errorf("raw bytes lost for layer %q", rec.Layer)
+		}
+	}
+	// Stable order: path then layer (org < team).
+	if list[0].Layer != "org" || list[1].Layer != "team" {
+		t.Errorf("ListDomains order = [%s,%s], want [org,team]", list[0].Layer, list[1].Layer)
+	}
+}
+
+// Spec: §4.5.1 (F-4.5.1) — re-ingesting a layer replaces its DOMAIN.md
+// record for a path rather than accumulating duplicates.
+func domainPutReplacesPerLayer(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "a")
+	mustPutDomain(t, s, store.DomainRecord{TenantID: "a", Layer: "team", Path: "finance", Raw: []byte("v1")})
+	mustPutDomain(t, s, store.DomainRecord{TenantID: "a", Layer: "team", Path: "finance", Raw: []byte("v2")})
+
+	list, err := s.ListDomains(ctx, "a")
+	if err != nil {
+		t.Fatalf("ListDomains: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("expected 1 record after replace, got %d", len(list))
+	}
+	if string(list[0].Raw) != "v2" {
+		t.Errorf("raw = %q, want v2 (upsert)", list[0].Raw)
+	}
+}
+
+func mustPutDomain(t *testing.T, s store.Store, rec store.DomainRecord) {
+	t.Helper()
+	if err := s.PutDomain(context.Background(), rec); err != nil {
+		t.Fatalf("PutDomain %s/%s: %v", rec.Layer, rec.Path, err)
+	}
 }
 
 // Spec: §4.3 universal fields (F-4.3.3) — search_visibility persists on

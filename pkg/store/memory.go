@@ -14,7 +14,8 @@ type Memory struct {
 	manifests map[string]ManifestRecord
 	deps      map[string][]DependencyEdge
 	admins    map[string]bool
-	layers    map[string]LayerConfig // key: tenantID + "/" + id
+	layers    map[string]LayerConfig  // key: tenantID + "/" + id
+	domains   map[string]DomainRecord // key: tenantID + "/" + layer + "/" + path
 }
 
 // NewMemory returns a fresh in-memory Store.
@@ -25,6 +26,7 @@ func NewMemory() *Memory {
 		deps:      map[string][]DependencyEdge{},
 		admins:    map[string]bool{},
 		layers:    map[string]LayerConfig{},
+		domains:   map[string]DomainRecord{},
 	}
 }
 
@@ -94,6 +96,38 @@ func (s *Memory) ListManifests(_ context.Context, tenantID string) ([]ManifestRe
 			return out[i].ArtifactID < out[j].ArtifactID
 		}
 		return out[i].Version < out[j].Version
+	})
+	return out, nil
+}
+
+func domainKey(tenantID, layer, path string) string {
+	return tenantID + "/" + layer + "/" + path
+}
+
+// PutDomain upserts the DOMAIN.md record for a (tenant, layer, path).
+func (s *Memory) PutDomain(_ context.Context, rec DomainRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.domains[domainKey(rec.TenantID, rec.Layer, rec.Path)] = rec
+	return nil
+}
+
+// ListDomains returns every domain record for the tenant in a stable
+// order (path, then layer).
+func (s *Memory) ListDomains(_ context.Context, tenantID string) ([]DomainRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []DomainRecord
+	for _, rec := range s.domains {
+		if rec.TenantID == tenantID {
+			out = append(out, rec)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Path != out[j].Path {
+			return out[i].Path < out[j].Path
+		}
+		return out[i].Layer < out[j].Layer
 	})
 	return out, nil
 }

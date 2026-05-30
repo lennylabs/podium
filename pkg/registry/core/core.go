@@ -17,6 +17,7 @@ import (
 	"sync"
 	"unicode"
 
+	domainpkg "github.com/lennylabs/podium/pkg/domain"
 	"github.com/lennylabs/podium/pkg/embedding"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/manifest"
@@ -181,6 +182,12 @@ type DomainDescriptor struct {
 	Path        string
 	Name        string
 	Description string
+	// Subdomains is the nested child tree rendered when load_domain
+	// expands more than one level (§4.5.5 depth). It is empty for leaf
+	// subdomains and for entries at the deepest rendered level. Each
+	// nested entry carries its short description only; bodies are
+	// returned solely for the originally requested domain.
+	Subdomains []DomainDescriptor
 }
 
 // ArtifactDescriptor describes one artifact entry. Used by LoadDomain's
@@ -247,81 +254,135 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 	if err != nil {
 		return nil, err
 	}
-
-	// max_depth is the registry-side ceiling (§4.5.5); a caller-supplied
-	// Depth above the ceiling is silently capped.
-	maxDepth := DefaultMaxDepth
-	notableCount := opts.NotableCount
-	if notableCount == 0 {
-		notableCount = DefaultNotableCount
+	// §4.5.1 / §4.5.4 — load every visible DOMAIN.md and merge the
+	// candidates for each path across layers. The merged set drives
+	// description, keywords, unlisted, imports, and per-domain
+	// discovery overrides below.
+	merged, err := r.mergedDomains(ctx, id)
+	if err != nil {
+		return nil, err
 	}
-	foldPassthrough := true
-	if opts.FoldPassthroughChains != nil {
-		foldPassthrough = *opts.FoldPassthroughChains
+
+	// §4.5.3 / §4.5.5 unlisted: a path that resolves only under an
+	// unlisted folder is indistinguishable from a typo and returns
+	// domain.not_found, so unlisted folders are not detectable through
+	// enumeration probing.
+	if path != "" && unlistedAt(path, merged) {
+		return nil, fmt.Errorf("%w: %s", ErrDomainNotFound, path)
+	}
+
+	requested := merged[path]
+	knobs := resolveKnobs(opts, requested)
+
+	// §4.5.5 caller overrides: depth overrides the configured default
+	// (the resolved max_depth ceiling) and is silently capped at it.
+	renderDepth := knobs.maxDepth
+	depthCapped := false
+	if opts.Depth > 0 {
+		renderDepth = opts.Depth
+		if renderDepth > knobs.maxDepth {
+			renderDepth = knobs.maxDepth
+			depthCapped = true
+		}
 	}
 
 	res := &LoadDomainResult{Path: path}
 
-	// Filter the manifests under the requested path; we'll use this
-	// projection for tree-shape decisions (passthrough collapse, fold
-	// recursion, immediate-children grouping).
-	under := manifestsUnder(visible, path)
-
-	// Group artifacts by the immediate child segment beneath path so
-	// we can decide per-subdomain whether to render, fold, or collapse.
-	groups := groupByImmediateChild(under, path)
-	directArts := directArtifactsOf(under, path)
-
-	notable := make([]ArtifactDescriptor, 0, len(directArts))
-	for _, m := range directArts {
-		notable = append(notable, descriptorOf(m))
+	// §4.5.5 description rendering and keywords. The root has no
+	// DOMAIN.md: description is omitted and keywords is the empty list.
+	if path == "" {
+		res.Keywords = []string{}
+	} else {
+		res.Description = requestedDescription(requested, path)
+		res.Keywords = knobs.keywords
 	}
 
-	// Sorted child segment names for deterministic ordering.
+	under := manifestsUnder(visible, path)
+	allIDs := manifestIDs(visible)
+	byID := latestByID(visible)
+
+	// §4.5.5 candidate pool for the notable list: the requested
+	// domain's direct artifacts plus those brought in by include:
+	// (after exclude:), deduplicated by canonical ID.
+	notable := make([]ArtifactDescriptor, 0)
+	seen := map[string]bool{}
+	addCandidate := func(d ArtifactDescriptor) {
+		if seen[d.ID] {
+			return
+		}
+		seen[d.ID] = true
+		notable = append(notable, d)
+	}
+	for _, m := range dedupeLatest(directArtifactsOf(under, path)) {
+		if domainpkg.MatchAny(knobs.exclude, m.ArtifactID) {
+			continue
+		}
+		addCandidate(descriptorOf(m))
+	}
+	for _, iid := range domainpkg.ResolveImports(knobs.include, knobs.exclude, allIDs) {
+		if rec, ok := byID[iid]; ok {
+			addCandidate(descriptorOf(rec))
+		}
+	}
+
+	// Immediate children: fold sparse subdomains into the notable list
+	// (§4.5.5 folding mechanics) and render the rest as the subdomain
+	// tree, dropping any unlisted subtree.
+	groups := groupByImmediateChild(under, path)
 	childNames := make([]string, 0, len(groups))
 	for name := range groups {
 		childNames = append(childNames, name)
 	}
 	sort.Strings(childNames)
-
 	for _, name := range childNames {
 		childPath := joinPath(path, name)
-		recursiveCount := len(groups[name])
-		if opts.FoldBelowArtifacts > 0 && recursiveCount < opts.FoldBelowArtifacts {
-			for _, m := range groups[name] {
+		if unlistedAt(childPath, merged) {
+			continue // §4.5.3 unlisted subtree removed from enumeration
+		}
+		recursiveCount := visibleCount(groups[name])
+		if knobs.foldBelow > 0 && recursiveCount < knobs.foldBelow {
+			for _, m := range dedupeLatest(groups[name]) {
+				if domainpkg.MatchAny(knobs.exclude, m.ArtifactID) {
+					continue
+				}
 				d := descriptorOf(m)
 				d.FoldedFrom = stripPrefix(parentPath(m.ArtifactID), path)
 				if d.FoldedFrom == "" {
 					d.FoldedFrom = name
 				}
-				notable = append(notable, d)
+				addCandidate(d)
 			}
 			continue
 		}
 		renderedPath := childPath
-		if foldPassthrough {
+		if knobs.foldPassthrough {
 			renderedPath = collapsePassthroughChain(under, childPath)
 		}
+		if unlistedAt(renderedPath, merged) {
+			continue // collapsed through an unlisted intermediate
+		}
 		res.Subdomains = append(res.Subdomains, DomainDescriptor{
-			Path: renderedPath,
-			Name: lastSegment(renderedPath),
+			Path:        renderedPath,
+			Name:        lastSegment(renderedPath),
+			Description: childDescription(renderedPath, merged),
+			Subdomains:  r.renderSubtree(under, merged, renderedPath, renderDepth-1, knobs.foldPassthrough),
 		})
 	}
 	sort.Slice(res.Subdomains, func(i, j int) bool {
 		return res.Subdomains[i].Path < res.Subdomains[j].Path
 	})
 
-	notable = orderNotable(notable, opts.Featured)
+	notable = orderNotable(notable, knobs.featured, knobs.deprioritize)
 	originalNotable := len(notable)
-	if len(notable) > notableCount {
-		notable = notable[:notableCount]
+	if len(notable) > knobs.notableCount {
+		notable = notable[:knobs.notableCount]
 	}
 
 	// §4.5.5 target_response_tokens: if the soft budget is set and the
 	// estimated response exceeds it, tighten the notable list further.
 	tightenedTo := -1
-	if opts.TargetResponseTokens > 0 {
-		budget := opts.TargetResponseTokens
+	if knobs.targetResponseTokens > 0 {
+		budget := knobs.targetResponseTokens
 		for len(notable) > 0 && estimateResponseTokens(res.Subdomains, notable) > budget {
 			notable = notable[:len(notable)-1]
 			tightenedTo = len(notable)
@@ -339,15 +400,18 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 			originalNotable, tightenedTo,
 		))
 	}
-	if opts.Depth > maxDepth {
+	if depthCapped {
 		notes = append(notes, fmt.Sprintf(
 			"Requested depth %d capped at the configured ceiling of %d.",
-			opts.Depth, maxDepth,
+			opts.Depth, knobs.maxDepth,
 		))
 	}
 	res.Note = strings.Join(notes, " ")
 
-	if path != "" && len(res.Subdomains) == 0 && len(res.Notable) == 0 {
+	// §4.5.5 unknown paths: a non-root path with no subdomains, no
+	// notable artifacts, and no DOMAIN.md does not resolve to a visible
+	// domain.
+	if path != "" && len(res.Subdomains) == 0 && len(res.Notable) == 0 && requested == nil {
 		return nil, fmt.Errorf("%w: %s", ErrDomainNotFound, path)
 	}
 	return res, nil
@@ -375,6 +439,9 @@ func manifestsUnder(all []store.ManifestRecord, prefix string) []store.ManifestR
 func groupByImmediateChild(under []store.ManifestRecord, prefix string) map[string][]store.ManifestRecord {
 	groups := map[string][]store.ManifestRecord{}
 	for _, m := range under {
+		if !inPrefix(m.ArtifactID, prefix) {
+			continue
+		}
 		rest := stripPrefix(m.ArtifactID, prefix)
 		if rest == "" || !strings.Contains(rest, "/") {
 			continue
@@ -386,10 +453,15 @@ func groupByImmediateChild(under []store.ManifestRecord, prefix string) map[stri
 }
 
 // directArtifactsOf returns manifests directly under prefix (no
-// further nesting).
+// further nesting). The inPrefix guard keeps it correct when callers
+// pass a record set scoped to an ancestor of prefix (the recursive
+// subtree renderer reuses one slice across nested levels).
 func directArtifactsOf(under []store.ManifestRecord, prefix string) []store.ManifestRecord {
 	out := make([]store.ManifestRecord, 0, len(under))
 	for _, m := range under {
+		if !inPrefix(m.ArtifactID, prefix) {
+			continue
+		}
 		rest := stripPrefix(m.ArtifactID, prefix)
 		if rest != "" && !strings.Contains(rest, "/") {
 			out = append(out, m)
@@ -437,14 +509,12 @@ func estimateResponseTokens(subs []DomainDescriptor, notable []ArtifactDescripto
 }
 
 // orderNotable surfaces featured IDs first (in author-supplied order),
-// then the remaining notable artifacts in alphabetical ID order. Per
-// §4.5.5 deduplication: an artifact appearing in both featured and the
-// alphabetical list keeps its featured position.
-func orderNotable(notable []ArtifactDescriptor, featured []string) []ArtifactDescriptor {
-	if len(featured) == 0 {
-		sort.Slice(notable, func(i, j int) bool { return notable[i].ID < notable[j].ID })
-		return notable
-	}
+// then the remaining notable artifacts in alphabetical ID order, with
+// any artifact matching a deprioritize glob ranked last (§4.5.5). Per
+// §4.5.5 deduplication an artifact appearing in both featured and the
+// alphabetical list keeps its featured position; featured always wins
+// over deprioritize.
+func orderNotable(notable []ArtifactDescriptor, featured, deprioritize []string) []ArtifactDescriptor {
 	byID := map[string]ArtifactDescriptor{}
 	for _, n := range notable {
 		byID[n.ID] = n
@@ -458,13 +528,21 @@ func orderNotable(notable []ArtifactDescriptor, featured []string) []ArtifactDes
 		}
 	}
 	rest := make([]ArtifactDescriptor, 0, len(notable))
+	low := make([]ArtifactDescriptor, 0)
 	for _, n := range notable {
-		if !used[n.ID] {
-			rest = append(rest, n)
+		if used[n.ID] {
+			continue
 		}
+		if len(deprioritize) > 0 && domainpkg.MatchAny(deprioritize, n.ID) {
+			low = append(low, n)
+			continue
+		}
+		rest = append(rest, n)
 	}
 	sort.Slice(rest, func(i, j int) bool { return rest[i].ID < rest[j].ID })
-	return append(out, rest...)
+	sort.Slice(low, func(i, j int) bool { return low[i].ID < low[j].ID })
+	out = append(out, rest...)
+	return append(out, low...)
 }
 
 // ----- SearchArtifacts ----------------------------------------------------

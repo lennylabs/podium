@@ -87,6 +87,15 @@ func (p *Postgres) applySchema() error {
 			ON manifests(tenant_id, type)`,
 		`CREATE INDEX IF NOT EXISTS idx_manifests_tenant_layer
 			ON manifests(tenant_id, layer)`,
+		`CREATE TABLE IF NOT EXISTS domains (
+			tenant_id TEXT NOT NULL,
+			layer TEXT NOT NULL,
+			path TEXT NOT NULL,
+			raw BYTEA,
+			PRIMARY KEY (tenant_id, layer, path)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_domains_tenant_path
+			ON domains(tenant_id, path)`,
 		`CREATE TABLE IF NOT EXISTS dependencies (
 			tenant_id TEXT NOT NULL,
 			from_artifact TEXT NOT NULL,
@@ -245,6 +254,39 @@ func (p *Postgres) ListManifests(ctx context.Context, tenantID string) ([]Manife
 	for rows.Next() {
 		rec, err := scanManifestPG(rows)
 		if err != nil {
+			return nil, err
+		}
+		out = append(out, rec)
+	}
+	return out, rows.Err()
+}
+
+// PutDomain upserts the DOMAIN.md record for a (tenant, layer, path).
+func (p *Postgres) PutDomain(ctx context.Context, rec DomainRecord) error {
+	_, err := p.db.ExecContext(ctx, `
+		INSERT INTO domains (tenant_id, layer, path, raw)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (tenant_id, layer, path) DO UPDATE SET raw = EXCLUDED.raw`,
+		rec.TenantID, rec.Layer, rec.Path, rec.Raw)
+	return err
+}
+
+// ListDomains returns every domain record for the tenant, ordered by
+// path then layer (matches Memory and SQLite).
+func (p *Postgres) ListDomains(ctx context.Context, tenantID string) ([]DomainRecord, error) {
+	rows, err := p.db.QueryContext(ctx, `
+		SELECT tenant_id, layer, path, raw
+		FROM domains
+		WHERE tenant_id = $1
+		ORDER BY path ASC, layer ASC`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []DomainRecord{}
+	for rows.Next() {
+		var rec DomainRecord
+		if err := rows.Scan(&rec.TenantID, &rec.Layer, &rec.Path, &rec.Raw); err != nil {
 			return nil, err
 		}
 		out = append(out, rec)

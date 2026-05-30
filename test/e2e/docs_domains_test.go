@@ -9,18 +9,13 @@ package e2e
 // domain search, domain analyze, load_domain, search_domains). Tests drive the
 // podium CLI, the standalone server, and the podium-mcp bridge.
 //
-// The filesystem server reads the directory tree to enumerate subdomains and
-// direct artifacts, but it does not read DOMAIN.md frontmatter or apply the
-// discovery-rendering knobs over HTTP. Behaviors blocked by a known BUILD-GAPS
-// finding are recorded as skips with the finding ID:
-//   - F-4.5.2: load_domain returns no DOMAIN.md description or keywords, so the
-//     description/keywords/featured/deprioritize/include/exclude/unlisted/
-//     cross-layer-merge surfaces are unobservable over HTTP.
-//   - F-4.5.7: load_domain renders a single level and does not apply the
-//     discovery rendering knobs (max_depth, fold_*, notable_count,
-//     target_response_tokens).
-//   - F-3.2.1: search_domains matches on the path substring only; keywords and
-//     descriptions are not retrieved.
+// The server reads DOMAIN.md at ingest and applies §4.5 domain composition at
+// load_domain time: description/body/keywords, include/exclude imports,
+// unlisted suppression, cross-layer merge, and the discovery-rendering knobs
+// (max_depth, fold_*, notable_count, target_response_tokens, featured,
+// deprioritize). The remaining skips are unrelated to §4.5 composition:
+//   - F-3.2.1: search_domains matches on the path substring only; DOMAIN.md
+//     keywords and descriptions are not retrieved (tests 9, 10, 49).
 // Doc claims with no finding filed are asserted against actual behavior with a
 // note so a future change is detected (T-D-domains-53).
 
@@ -50,6 +45,65 @@ func dmNotableIDs(m map[string]any) []string {
 		}
 	}
 	return ids
+}
+
+// dmKeywords decodes a load_domain response's keywords list.
+func dmKeywords(m map[string]any) []string {
+	var out []string
+	kw, _ := m["keywords"].([]any)
+	for _, k := range kw {
+		if s, ok := k.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// dmSubdomain returns the top-level subdomain entry with the given path,
+// or nil when absent.
+func dmSubdomain(m map[string]any, path string) map[string]any {
+	subs, _ := m["subdomains"].([]any)
+	for _, s := range subs {
+		if entry, ok := s.(map[string]any); ok && entry["path"] == path {
+			return entry
+		}
+	}
+	return nil
+}
+
+// dmNotableEntry returns the notable artifact entry with the given id, or
+// nil when absent.
+func dmNotableEntry(m map[string]any, id string) map[string]any {
+	notable, _ := m["notable"].([]any)
+	for _, n := range notable {
+		if entry, ok := n.(map[string]any); ok && entry["id"] == id {
+			return entry
+		}
+	}
+	return nil
+}
+
+// dmContains reports whether ids contains want.
+func dmContains(ids []string, want string) bool {
+	for _, id := range ids {
+		if id == want {
+			return true
+		}
+	}
+	return false
+}
+
+// dmMultiLayer stages a multi-layer filesystem registry (§4.6, §13.11.1):
+// it adds a .registry-config with multi_layer: true so each top-level
+// subdirectory in files becomes a layer. Layers order alphabetically, so
+// a "team" layer takes precedence over an "org" layer (§4.5.4 merge).
+func dmMultiLayer(t *testing.T, files map[string]string) string {
+	t.Helper()
+	withCfg := map[string]string{".registry-config": "multi_layer: true\n"}
+	for k, v := range files {
+		withCfg[k] = v
+	}
+	return writeRegistry(t, withCfg)
 }
 
 // dmNoDomainRegistry stages the doc's "When you don't need DOMAIN.md" tree:
@@ -110,38 +164,108 @@ func TestDomains_CLIShowNoDomainMD(t *testing.T) {
 	}
 }
 
-// T-D-domains-4 — a child domain descriptor should carry its DOMAIN.md
-// frontmatter description.
+// T-D-domains-4 — a child domain descriptor carries its DOMAIN.md
+// frontmatter description (§4.5.1, §4.5.5). spec: §4.5.5 (F-4.5.2)
 func TestDomains_ChildDescriptionInLoadDomain(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.2: load_domain does not read DOMAIN.md, so a child subdomain descriptor never carries the frontmatter description")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/ap/DOMAIN.md":               "---\ndescription: \"AP-related operations\"\n---\n\n# AP\n",
+		"finance/ap/pay-invoice/ARTIFACT.md": dmSkillArtifact,
+		"finance/ap/pay-invoice/SKILL.md":    skillBody("pay-invoice"),
+	}))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance", &m)
+	sub := dmSubdomain(m, "finance/ap")
+	if sub == nil {
+		t.Fatalf("finance/ap missing from subdomains: %v", m["subdomains"])
+	}
+	if sub["description"] != "AP-related operations" {
+		t.Errorf("child description = %v, want %q", sub["description"], "AP-related operations")
+	}
 }
 
-// T-D-domains-5 — load_domain on the domain itself should return the prose body.
+// T-D-domains-5 — load_domain on the domain itself returns the prose body
+// in the description slot (§4.5.5 description rendering). spec: §4.5.5 (F-4.5.2)
 func TestDomains_ProseBodyForRequestedDomain(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.2: load_domain does not read DOMAIN.md, so the prose body is never returned for the requested domain")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/ap/DOMAIN.md":               "---\ndescription: \"AP-related operations\"\n---\n\n# Accounts Payable\n\nInvoice processing and vendor remittance.\n",
+		"finance/ap/pay-invoice/ARTIFACT.md": dmSkillArtifact,
+		"finance/ap/pay-invoice/SKILL.md":    skillBody("pay-invoice"),
+	}))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance/ap", &m)
+	desc, _ := m["description"].(string)
+	if !strings.Contains(desc, "Invoice processing and vendor remittance") {
+		t.Errorf("requested-domain description missing prose body: %q", desc)
+	}
 }
 
-// T-D-domains-6 — load_domain depth=2 should return child descriptions without
-// their prose bodies.
+// T-D-domains-6 — load_domain depth=2 returns child descriptions without
+// their prose bodies (§4.5.5: only the requested domain gets its body).
+// spec: §4.5.5 (F-4.5.7, F-4.5.2)
 func TestDomains_DepthTwoChildDescriptionsOnly(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.7: load_domain renders a single level and does not honor depth-based multi-level subtree rendering, and F-4.5.2 means child descriptions are not read from DOMAIN.md")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/DOMAIN.md":                  "---\ndescription: Finance\n---\n\n# Finance\n\nFINANCE-BODY-MARKER long-form prose.\n",
+		"finance/ap/DOMAIN.md":               "---\ndescription: \"AP-related operations\"\n---\n\n# AP\n\nAP-BODY-MARKER should not appear for a child.\n",
+		"finance/ap/pay-invoice/ARTIFACT.md": dmSkillArtifact,
+		"finance/ap/pay-invoice/SKILL.md":    skillBody("pay-invoice"),
+	}))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance&depth=2", &m)
+	if d, _ := m["description"].(string); !strings.Contains(d, "FINANCE-BODY-MARKER") {
+		t.Errorf("requested domain should carry its body: %q", d)
+	}
+	sub := dmSubdomain(m, "finance/ap")
+	if sub == nil {
+		t.Fatalf("finance/ap missing: %v", m["subdomains"])
+	}
+	if sub["description"] != "AP-related operations" {
+		t.Errorf("child description = %v, want frontmatter description", sub["description"])
+	}
+	if strings.Contains(mustJSON(sub), "AP-BODY-MARKER") {
+		t.Errorf("child subtree leaked the prose body: %s", mustJSON(sub))
+	}
 }
 
-// T-D-domains-7 — a domain without DOMAIN.md should return a synthesized
-// fallback description from the directory basename.
+// T-D-domains-7 — a domain without DOMAIN.md returns a synthesized fallback
+// description from the directory basename (title-cased, de-slugged).
+// spec: §4.5.5 (F-4.5.2)
 func TestDomains_SynthesizedFallbackDescription(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.2: load_domain does not populate the description field (DOMAIN.md is not read), so the synthesized basename fallback is not observable over HTTP")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/accounts-payable/pay-invoice/ARTIFACT.md": dmSkillArtifact,
+		"finance/accounts-payable/pay-invoice/SKILL.md":    skillBody("pay-invoice"),
+	}))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance", &m)
+	sub := dmSubdomain(m, "finance/accounts-payable")
+	if sub == nil {
+		t.Fatalf("finance/accounts-payable missing: %v", m["subdomains"])
+	}
+	if sub["description"] != "Accounts Payable" {
+		t.Errorf("fallback description = %v, want %q", sub["description"], "Accounts Payable")
+	}
 }
 
-// T-D-domains-8 — keywords should be returned verbatim in load_domain output
-// for the domain.
+// T-D-domains-8 — keywords are returned verbatim in load_domain output for
+// the domain (§4.5.5). spec: §4.5.5 (F-4.5.3)
 func TestDomains_KeywordsInLoadDomain(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.2: load_domain does not read DOMAIN.md, so discovery.keywords are never returned in the response")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/ap/DOMAIN.md":               "---\ndescription: AP\ndiscovery:\n  keywords:\n    - invoice\n    - remittance\n    - 1099\n---\n\n# AP\n",
+		"finance/ap/pay-invoice/ARTIFACT.md": dmSkillArtifact,
+		"finance/ap/pay-invoice/SKILL.md":    skillBody("pay-invoice"),
+	}))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance/ap", &m)
+	kw := dmKeywords(m)
+	for _, want := range []string{"invoice", "remittance", "1099"} {
+		if !dmContains(kw, want) {
+			t.Errorf("keywords %v missing %q", kw, want)
+		}
+	}
 }
 
 // T-D-domains-9 — search_domains should find a domain via a keyword absent from
@@ -157,59 +281,169 @@ func TestDomains_CLISearchByKeyword(t *testing.T) {
 	t.Skip("blocked by F-3.2.1: domain search wraps search_domains, which matches on the path substring only, so a keyword-only query does not surface the domain")
 }
 
-// T-D-domains-11 — featured artifacts should surface first in the notable list.
+// dmFeaturedRegistry stages finance/ap with a DOMAIN.md whose discovery
+// block sets featured/deprioritize/notable_count per the named values, plus
+// the listed direct-child skills.
+func dmFeaturedRegistry(t *testing.T, domainMD string, children ...string) string {
+	t.Helper()
+	files := map[string]string{"finance/ap/DOMAIN.md": domainMD}
+	for _, c := range children {
+		files["finance/ap/"+c+"/ARTIFACT.md"] = dmSkillArtifact
+		files["finance/ap/"+c+"/SKILL.md"] = skillBody(c)
+	}
+	return writeRegistry(t, files)
+}
+
+// T-D-domains-11 — featured artifacts surface first in the notable list, in
+// author-supplied order (§4.5.5 notable selection). spec: §4.5.5 (F-4.5.7)
 func TestDomains_FeaturedFirstInNotable(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.7: load_domain does not apply the discovery rendering knobs, so discovery.featured does not reorder the notable list")
+	md := "---\ndescription: AP\ndiscovery:\n  featured:\n    - finance/ap/zebra\n---\n\n# AP\n"
+	srv := startServer(t, dmFeaturedRegistry(t, md, "alpha", "zebra"))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance/ap", &m)
+	ids := dmNotableIDs(m)
+	if len(ids) == 0 || ids[0] != "finance/ap/zebra" {
+		t.Errorf("notable order = %v, want finance/ap/zebra first", ids)
+	}
 }
 
-// T-D-domains-12 — a featured list exceeding notable_count should be truncated
-// in author order with no signal entries.
+// T-D-domains-12 — a featured list exceeding notable_count is truncated in
+// author order (§4.5.5 cap). spec: §4.5.5 (F-4.5.7)
 func TestDomains_FeaturedTruncatedAtNotableCount(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.7: load_domain does not apply discovery.featured or discovery.notable_count, so the truncation behavior is not observable over HTTP")
+	md := "---\ndescription: AP\ndiscovery:\n  notable_count: 2\n  featured:\n    - finance/ap/a\n    - finance/ap/b\n    - finance/ap/c\n---\n\n# AP\n"
+	srv := startServer(t, dmFeaturedRegistry(t, md, "a", "b", "c"))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance/ap", &m)
+	ids := dmNotableIDs(m)
+	want := []string{"finance/ap/a", "finance/ap/b"}
+	if len(ids) != 2 || ids[0] != want[0] || ids[1] != want[1] {
+		t.Errorf("notable = %v, want %v (truncated in author order)", ids, want)
+	}
 }
 
-// T-D-domains-13 — a deprioritize glob should exclude matching children from
-// the notable list.
+// T-D-domains-13 — a deprioritize entry ranks a matching child last and
+// excludes it when the notable cap leaves no room (§4.5.5). spec: §4.5.5 (F-4.5.7)
 func TestDomains_DeprioritizeExcludesFromNotable(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.7: load_domain does not apply discovery.deprioritize, so matching children are not ranked last or excluded from notable")
+	md := "---\ndescription: AP\ndiscovery:\n  notable_count: 1\n  deprioritize:\n    - finance/ap/old-invoice\n---\n\n# AP\n"
+	srv := startServer(t, dmFeaturedRegistry(t, md, "old-invoice", "pay-invoice"))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance/ap", &m)
+	ids := dmNotableIDs(m)
+	// Alphabetically old-invoice precedes pay-invoice; deprioritize ranks it
+	// last, so the single notable slot goes to pay-invoice instead.
+	if len(ids) != 1 || ids[0] != "finance/ap/pay-invoice" {
+		t.Errorf("notable = %v, want only finance/ap/pay-invoice (old-invoice deprioritized out)", ids)
+	}
 }
 
-// T-D-domains-14 — an exact-match include should import an artifact from another
-// domain.
+// dmImportRegistry stages an importing finance/ap/DOMAIN.md plus the named
+// imported-artifact paths (each a skill).
+func dmImportRegistry(t *testing.T, domainMD string, importedPaths ...string) string {
+	t.Helper()
+	files := map[string]string{
+		"finance/ap/DOMAIN.md":               domainMD,
+		"finance/ap/pay-invoice/ARTIFACT.md": dmSkillArtifact,
+		"finance/ap/pay-invoice/SKILL.md":    skillBody("pay-invoice"),
+	}
+	for _, p := range importedPaths {
+		files[p+"/ARTIFACT.md"] = dmSkillArtifact
+		files[p+"/SKILL.md"] = skillBody(lastSeg(p))
+	}
+	return writeRegistry(t, files)
+}
+
+// lastSeg returns the final slash-separated segment of p.
+func lastSeg(p string) string {
+	if i := strings.LastIndex(p, "/"); i >= 0 {
+		return p[i+1:]
+	}
+	return p
+}
+
+// T-D-domains-14 — an exact-match include imports an artifact from another
+// domain (§4.5.2). spec: §4.5.2 (F-4.5.6)
 func TestDomains_IncludeExactMatch(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.2: load_domain does not read DOMAIN.md, so include directives are not applied and imported artifacts do not appear in the domain response")
+	md := "---\ndescription: AP\ninclude:\n  - _shared/payment-helpers/routing-validator\n---\n\n# AP\n"
+	srv := startServer(t, dmImportRegistry(t, md, "_shared/payment-helpers/routing-validator"))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance/ap", &m)
+	if !dmContains(dmNotableIDs(m), "_shared/payment-helpers/routing-validator") {
+		t.Errorf("notable %v missing the exact-include import", dmNotableIDs(m))
+	}
 }
 
-// T-D-domains-15 — a one-level wildcard include should import matching
-// artifacts.
+// T-D-domains-15 — a one-level wildcard include imports matching artifacts and
+// not deeper ones (§4.5.2). spec: §4.5.2 (F-4.5.6)
 func TestDomains_IncludeOneLevelWildcard(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.2: load_domain does not read DOMAIN.md, so a `payments/*` include is not applied")
+	md := "---\ndescription: AP\ninclude:\n  - finance/payments/*\n---\n\n# AP\n"
+	srv := startServer(t, dmImportRegistry(t, md,
+		"finance/payments/ach", "finance/payments/deep/nested"))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance/ap", &m)
+	ids := dmNotableIDs(m)
+	if !dmContains(ids, "finance/payments/ach") {
+		t.Errorf("notable %v missing finance/payments/ach", ids)
+	}
+	if dmContains(ids, "finance/payments/deep/nested") {
+		t.Errorf("one-level wildcard wrongly imported a two-level-deep artifact: %v", ids)
+	}
 }
 
-// T-D-domains-16 — a recursive wildcard include should import all matching
-// artifacts.
+// T-D-domains-16 — a recursive wildcard include imports all matching artifacts
+// at any depth (§4.5.2). spec: §4.5.2 (F-4.5.6)
 func TestDomains_IncludeRecursiveWildcard(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.2: load_domain does not read DOMAIN.md, so a `refunds/**` include is not applied")
+	md := "---\ndescription: AP\ninclude:\n  - finance/refunds/**\n---\n\n# AP\n"
+	srv := startServer(t, dmImportRegistry(t, md,
+		"finance/refunds/partial", "finance/refunds/full/deep"))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance/ap", &m)
+	ids := dmNotableIDs(m)
+	for _, want := range []string{"finance/refunds/partial", "finance/refunds/full/deep"} {
+		if !dmContains(ids, want) {
+			t.Errorf("recursive include notable %v missing %q", ids, want)
+		}
+	}
 }
 
-// T-D-domains-17 — an alternation include should import the matching artifact
-// IDs.
+// T-D-domains-17 — an alternation include imports the matching artifact IDs
+// (§4.5.2). spec: §4.5.2 (F-4.5.6)
 func TestDomains_IncludeAlternation(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.2: load_domain does not read DOMAIN.md, so a `{ssn,iban,routing-number}` alternation include is not applied")
+	md := "---\ndescription: AP\ninclude:\n  - _shared/regex/{ssn,iban,routing-number}\n---\n\n# AP\n"
+	srv := startServer(t, dmImportRegistry(t, md,
+		"_shared/regex/ssn", "_shared/regex/iban", "_shared/regex/routing-number", "_shared/regex/other"))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance/ap", &m)
+	ids := dmNotableIDs(m)
+	for _, want := range []string{"_shared/regex/ssn", "_shared/regex/iban", "_shared/regex/routing-number"} {
+		if !dmContains(ids, want) {
+			t.Errorf("alternation include notable %v missing %q", ids, want)
+		}
+	}
+	if dmContains(ids, "_shared/regex/other") {
+		t.Errorf("alternation include wrongly imported _shared/regex/other: %v", ids)
+	}
 }
 
-// T-D-domains-18 — imported artifacts should keep their canonical IDs in the
-// load_domain response.
+// T-D-domains-18 — imported artifacts keep their canonical IDs in the
+// load_domain response (§4.5.2 imports do not change canonical paths).
+// spec: §4.5.2 (F-4.5.6)
 func TestDomains_ImportsKeepCanonicalIDs(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.2: load_domain does not read DOMAIN.md, so include directives are not applied and no imported artifacts appear in the domain response to inspect their IDs")
+	md := "---\ndescription: AP\ninclude:\n  - _shared/payment-helpers/routing-validator\n---\n\n# AP\n"
+	srv := startServer(t, dmImportRegistry(t, md, "_shared/payment-helpers/routing-validator"))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance/ap", &m)
+	entry := dmNotableEntry(m, "_shared/payment-helpers/routing-validator")
+	if entry == nil {
+		t.Fatalf("imported artifact missing under its canonical id: %v", dmNotableIDs(m))
+	}
 }
 
 // dmRoutingValidatorRegistry stages a single skill at the unlisted-style
@@ -233,17 +467,47 @@ func TestDomains_SearchReturnsImportedOnce(t *testing.T) {
 	}
 }
 
-// T-D-domains-20 — exclude should remove paths from the include set.
+// T-D-domains-20 — exclude removes paths from the include set (§4.5.2,
+// applied after include). spec: §4.5.2 (F-4.5.6)
 func TestDomains_ExcludeRemovesFromInclude(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.2: load_domain does not read DOMAIN.md, so neither include nor exclude directives are applied")
+	md := "---\ndescription: AP\ninclude:\n  - _shared/regex/**\nexclude:\n  - _shared/regex/iban\n---\n\n# AP\n"
+	srv := startServer(t, dmImportRegistry(t, md, "_shared/regex/ssn", "_shared/regex/iban"))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance/ap", &m)
+	ids := dmNotableIDs(m)
+	if !dmContains(ids, "_shared/regex/ssn") {
+		t.Errorf("notable %v missing included _shared/regex/ssn", ids)
+	}
+	if dmContains(ids, "_shared/regex/iban") {
+		t.Errorf("exclude did not remove _shared/regex/iban: %v", ids)
+	}
 }
 
-// T-D-domains-21 — unlisted: true should remove a domain from load_domain
-// enumeration.
+// T-D-domains-21 — unlisted: true removes a folder and its subtree from
+// load_domain enumeration (§4.5.3) while a sibling stays visible.
+// spec: §4.5.3 / §4.5.5 (F-4.5.5)
 func TestDomains_UnlistedRemovedFromEnumeration(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.2: load_domain does not read DOMAIN.md, so unlisted: true is not honored and the subtree still appears in enumeration")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/x/ARTIFACT.md": contextArtifact("x"),
+		"_shared/DOMAIN.md":     "---\nunlisted: true\n---\n",
+		"_shared/payment-helpers/routing-validator/ARTIFACT.md": dmSkillArtifact,
+		"_shared/payment-helpers/routing-validator/SKILL.md":    skillBody("routing-validator"),
+	}))
+	var root map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain", &root)
+	if !hasSubdomain(root, "finance") {
+		t.Errorf("visible sibling finance dropped from root: %v", root["subdomains"])
+	}
+	if hasSubdomain(root, "_shared") {
+		t.Errorf("unlisted _shared appears in root enumeration: %v", root["subdomains"])
+	}
+	// §4.5.5 unknown paths: an unlisted path returns domain.not_found.
+	st, body := getRaw(t, srv.BaseURL+"/v1/load_domain?path=_shared")
+	if st != 404 || !strings.Contains(string(body), "domain.not_found") {
+		t.Errorf("load_domain(_shared) = HTTP %d (%s), want 404 domain.not_found", st, body)
+	}
 }
 
 // dmUnlistedSharedRegistry stages an unlisted _shared/DOMAIN.md (ignored over
@@ -279,94 +543,290 @@ func TestDomains_UnlistedArtifactInSearch(t *testing.T) {
 	}
 }
 
-// T-D-domains-24 — an artifact inside an unlisted domain should be importable
-// into another domain via include.
+// T-D-domains-24 — an artifact inside an unlisted domain is importable into
+// another domain via include (§4.5.3). spec: §4.5.3 (F-4.5.5, F-4.5.6)
 func TestDomains_UnlistedArtifactImportable(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.2: load_domain does not read DOMAIN.md, so the include directive that would surface the unlisted artifact under finance/ap is not applied")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/ap/DOMAIN.md":                                  "---\ndescription: AP\ninclude:\n  - _shared/payment-helpers/*\n---\n\n# AP\n",
+		"finance/ap/pay-invoice/ARTIFACT.md":                    dmSkillArtifact,
+		"finance/ap/pay-invoice/SKILL.md":                       skillBody("pay-invoice"),
+		"_shared/DOMAIN.md":                                     "---\nunlisted: true\n---\n",
+		"_shared/payment-helpers/routing-validator/ARTIFACT.md": dmSkillArtifact,
+		"_shared/payment-helpers/routing-validator/SKILL.md":    skillBody("routing-validator"),
+	}))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance/ap", &m)
+	if !dmContains(dmNotableIDs(m), "_shared/payment-helpers/routing-validator") {
+		t.Errorf("unlisted-domain artifact was not importable into finance/ap: %v", dmNotableIDs(m))
+	}
 }
 
-// T-D-domains-25 — unlisted: true should propagate to the whole subtree.
+// T-D-domains-25 — unlisted: true propagates to the whole subtree, so a path
+// below an unlisted folder also returns domain.not_found (§4.5.3).
+// spec: §4.5.3 / §4.5.5 (F-4.5.5)
 func TestDomains_UnlistedPropagatesToSubtree(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.2: load_domain does not read DOMAIN.md, so unlisted is not honored and the subtree is not removed from enumeration")
+	srv := startServer(t, dmUnlistedSharedRegistry(t))
+	st, body := getRaw(t, srv.BaseURL+"/v1/load_domain?path=_shared/payment-helpers")
+	if st != 404 || !strings.Contains(string(body), "domain.not_found") {
+		t.Errorf("load_domain(_shared/payment-helpers) = HTTP %d (%s), want 404 domain.not_found", st, body)
+	}
 }
 
-// T-D-domains-26 — cross-layer DOMAIN.md description should use last-layer-wins.
+// T-D-domains-26 — cross-layer DOMAIN.md description uses last-layer-wins; the
+// higher-precedence "team" layer wins over "org" (§4.5.4). spec: §4.5.4 (F-4.5.2)
 func TestDomains_LayerMergeDescriptionLastWins(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.2: load_domain does not read DOMAIN.md, so the cross-layer description merge is not observable in the response")
+	srv := startServer(t, dmMultiLayer(t, map[string]string{
+		"org/finance/ap/DOMAIN.md":               "---\ndescription: \"Org AP\"\n---\n",
+		"team/finance/ap/DOMAIN.md":              "---\ndescription: \"Team AP\"\n---\n",
+		"org/finance/ap/pay-invoice/ARTIFACT.md": dmSkillArtifact,
+		"org/finance/ap/pay-invoice/SKILL.md":    skillBody("pay-invoice"),
+	}))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance/ap", &m)
+	// Frontmatter-only DOMAIN.md (no body), so the description slot resolves to
+	// the merged frontmatter description, last-layer-wins (team over org).
+	if d, _ := m["description"].(string); d != "Team AP" {
+		t.Errorf("merged description = %q, want %q (last-layer-wins)", d, "Team AP")
+	}
 }
 
-// T-D-domains-27 — cross-layer DOMAIN.md include should be additive.
+// T-D-domains-27 — cross-layer DOMAIN.md include is additive across layers
+// (§4.5.4). spec: §4.5.4 (F-4.5.6)
 func TestDomains_LayerMergeIncludeAdditive(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.2: load_domain does not read DOMAIN.md, so include directives from either layer are not applied")
+	srv := startServer(t, dmMultiLayer(t, map[string]string{
+		"org/finance/ap/DOMAIN.md":               "---\ndescription: AP\ninclude:\n  - _shared/a/*\n---\n\n# AP\n",
+		"team/finance/ap/DOMAIN.md":              "---\ninclude:\n  - _shared/b/*\n---\n\n# AP\n",
+		"org/finance/ap/pay-invoice/ARTIFACT.md": dmSkillArtifact,
+		"org/finance/ap/pay-invoice/SKILL.md":    skillBody("pay-invoice"),
+		"org/_shared/a/one/ARTIFACT.md":          dmSkillArtifact,
+		"org/_shared/a/one/SKILL.md":             skillBody("one"),
+		"org/_shared/b/two/ARTIFACT.md":          dmSkillArtifact,
+		"org/_shared/b/two/SKILL.md":             skillBody("two"),
+	}))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance/ap", &m)
+	ids := dmNotableIDs(m)
+	for _, want := range []string{"_shared/a/one", "_shared/b/two"} {
+		if !dmContains(ids, want) {
+			t.Errorf("additive include notable %v missing %q", ids, want)
+		}
+	}
 }
 
-// T-D-domains-28 — cross-layer DOMAIN.md unlisted should use most-restrictive.
+// T-D-domains-28 — cross-layer unlisted uses most-restrictive-wins: one layer
+// setting unlisted: true hides the subtree (§4.5.4). spec: §4.5.4 (F-4.5.5)
 func TestDomains_LayerMergeUnlistedMostRestrictive(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.2: load_domain does not read DOMAIN.md, so unlisted is not honored and the most-restrictive merge is not observable")
+	srv := startServer(t, dmMultiLayer(t, map[string]string{
+		"org/finance/ap/DOMAIN.md":               "---\nunlisted: false\ndescription: AP\n---\n\n# AP\n",
+		"team/finance/ap/DOMAIN.md":              "---\nunlisted: true\n---\n",
+		"org/finance/ap/pay-invoice/ARTIFACT.md": dmSkillArtifact,
+		"org/finance/ap/pay-invoice/SKILL.md":    skillBody("pay-invoice"),
+	}))
+	st, body := getRaw(t, srv.BaseURL+"/v1/load_domain?path=finance/ap")
+	if st != 404 || !strings.Contains(string(body), "domain.not_found") {
+		t.Errorf("load_domain(finance/ap) = HTTP %d (%s), want 404 (most-restrictive unlisted)", st, body)
+	}
 }
 
-// T-D-domains-29 — cross-layer DOMAIN.md max_depth should use the lowest value.
+// T-D-domains-29 — cross-layer max_depth uses the lowest value; a caller depth
+// above the merged ceiling is capped and noted (§4.5.4). spec: §4.5.4 (F-4.5.7)
 func TestDomains_LayerMergeMaxDepthLowest(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.7: load_domain does not apply discovery.max_depth, so the cross-layer most-restrictive merge of max_depth is not observable")
+	srv := startServer(t, dmMultiLayer(t, map[string]string{
+		"org/finance/DOMAIN.md":        "---\ndescription: Finance\ndiscovery:\n  max_depth: 3\n---\n\n# Finance\n",
+		"team/finance/DOMAIN.md":       "---\ndiscovery:\n  max_depth: 1\n---\n\n# Finance\n",
+		"org/finance/ap/x/ARTIFACT.md": dmSkillArtifact,
+		"org/finance/ap/x/SKILL.md":    skillBody("x"),
+	}))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance&depth=3", &m)
+	if note, _ := m["note"].(string); !strings.Contains(note, "ceiling of 1") {
+		t.Errorf("note = %q, want depth capped at the merged ceiling of 1", note)
+	}
 }
 
-// T-D-domains-30 — cross-layer fold_below_artifacts should use the highest
-// value.
+// T-D-domains-30 — cross-layer fold_below_artifacts uses the highest value, so
+// a sparse subdomain folds into the parent (§4.5.4). spec: §4.5.4 (F-4.5.7)
 func TestDomains_LayerMergeFoldBelowHighest(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.7: load_domain does not apply discovery.fold_below_artifacts, so the cross-layer most-restrictive merge is not observable")
+	srv := startServer(t, dmMultiLayer(t, map[string]string{
+		"org/finance/DOMAIN.md":                 "---\ndescription: Finance\ndiscovery:\n  fold_below_artifacts: 0\n---\n\n# Finance\n",
+		"team/finance/DOMAIN.md":                "---\ndiscovery:\n  fold_below_artifacts: 5\n---\n\n# Finance\n",
+		"org/finance/sparse/lonely/ARTIFACT.md": dmSkillArtifact,
+		"org/finance/sparse/lonely/SKILL.md":    skillBody("lonely"),
+	}))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance", &m)
+	if hasSubdomain(m, "finance/sparse") {
+		t.Errorf("finance/sparse should have folded (merged fold_below=5): %v", m["subdomains"])
+	}
+	entry := dmNotableEntry(m, "finance/sparse/lonely")
+	if entry == nil {
+		t.Fatalf("folded artifact missing from notable: %v", dmNotableIDs(m))
+	}
+	if entry["folded_from"] != "sparse" {
+		t.Errorf("folded_from = %v, want %q", entry["folded_from"], "sparse")
+	}
 }
 
-// T-D-domains-31 — cross-layer DOMAIN.md keywords should be append-unique.
+// T-D-domains-31 — cross-layer keywords are append-unique (§4.5.4).
+// spec: §4.5.4 (F-4.5.3)
 func TestDomains_LayerMergeKeywordsAppendUnique(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.2: load_domain does not read DOMAIN.md, so the appended-unique keyword merge is not returned in the response")
+	srv := startServer(t, dmMultiLayer(t, map[string]string{
+		"org/finance/ap/DOMAIN.md":               "---\ndescription: AP\ndiscovery:\n  keywords:\n    - invoice\n    - remittance\n---\n\n# AP\n",
+		"team/finance/ap/DOMAIN.md":              "---\ndiscovery:\n  keywords:\n    - remittance\n    - vendor\n---\n\n# AP\n",
+		"org/finance/ap/pay-invoice/ARTIFACT.md": dmSkillArtifact,
+		"org/finance/ap/pay-invoice/SKILL.md":    skillBody("pay-invoice"),
+	}))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance/ap", &m)
+	kw := dmKeywords(m)
+	for _, want := range []string{"invoice", "remittance", "vendor"} {
+		if !dmContains(kw, want) {
+			t.Errorf("merged keywords %v missing %q", kw, want)
+		}
+	}
+	n := 0
+	for _, k := range kw {
+		if k == "remittance" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("keyword remittance appears %d times, want 1 (append-unique)", n)
+	}
 }
 
-// T-D-domains-32 — the max_depth knob should cap the rendered subtree depth.
+// T-D-domains-32 — the max_depth knob caps the rendered subtree depth: at
+// max_depth 1, an immediate child carries no nested subdomains (§4.5.5).
+// spec: §4.5.5 (F-4.5.7)
 func TestDomains_MaxDepthCapsSubtree(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.7: load_domain renders a single level and does not apply discovery.max_depth")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/DOMAIN.md":               "---\ndescription: Finance\ndiscovery:\n  max_depth: 1\n---\n\n# Finance\n",
+		"finance/ap/direct/ARTIFACT.md":   dmSkillArtifact,
+		"finance/ap/direct/SKILL.md":      skillBody("direct"),
+		"finance/ap/sub/deep/ARTIFACT.md": dmSkillArtifact,
+		"finance/ap/sub/deep/SKILL.md":    skillBody("deep"),
+	}))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance", &m)
+	sub := dmSubdomain(m, "finance/ap")
+	if sub == nil {
+		t.Fatalf("finance/ap missing: %v", m["subdomains"])
+	}
+	if nested, _ := sub["subdomains"].([]any); len(nested) != 0 {
+		t.Errorf("max_depth 1 should render no nested subdomains under finance/ap, got %v", nested)
+	}
 }
 
-// T-D-domains-33 — fold_below_artifacts should collapse sparse subdomains into
-// the parent notable list.
+// T-D-domains-33 — fold_below_artifacts collapses a sparse subdomain into the
+// parent notable list with a folded_from annotation (§4.5.5). spec: §4.5.5 (F-4.5.7)
 func TestDomains_FoldBelowArtifactsCollapses(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.7: load_domain does not apply discovery.fold_below_artifacts, so sparse subdomains are not folded and no folded_from annotation appears")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/DOMAIN.md":                 "---\ndescription: Finance\ndiscovery:\n  fold_below_artifacts: 3\n---\n\n# Finance\n",
+		"finance/sparse/lonely/ARTIFACT.md": dmSkillArtifact,
+		"finance/sparse/lonely/SKILL.md":    skillBody("lonely"),
+		"finance/dense/a/ARTIFACT.md":       dmSkillArtifact,
+		"finance/dense/a/SKILL.md":          skillBody("a"),
+		"finance/dense/b/ARTIFACT.md":       dmSkillArtifact,
+		"finance/dense/b/SKILL.md":          skillBody("b"),
+		"finance/dense/c/ARTIFACT.md":       dmSkillArtifact,
+		"finance/dense/c/SKILL.md":          skillBody("c"),
+	}))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance", &m)
+	if hasSubdomain(m, "finance/sparse") {
+		t.Errorf("sparse subdomain should have folded away: %v", m["subdomains"])
+	}
+	if !hasSubdomain(m, "finance/dense") {
+		t.Errorf("dense subdomain (3 >= threshold) should remain: %v", m["subdomains"])
+	}
+	entry := dmNotableEntry(m, "finance/sparse/lonely")
+	if entry == nil {
+		t.Fatalf("folded artifact missing from notable: %v", dmNotableIDs(m))
+	}
+	if entry["folded_from"] != "sparse" {
+		t.Errorf("folded_from = %v, want %q", entry["folded_from"], "sparse")
+	}
 }
 
-// T-D-domains-34 — fold_passthrough_chains should collapse single-child
-// intermediate domains.
+// T-D-domains-34 — fold_passthrough_chains collapses single-child intermediate
+// domains into the deepest non-passthrough descendant (§4.5.5). spec: §4.5.5 (F-4.5.7)
 func TestDomains_FoldPassthroughChains(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.7: load_domain does not apply discovery.fold_passthrough_chains, so single-child intermediate domains are not collapsed")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"a/b/c/d/x/ARTIFACT.md": dmSkillArtifact,
+		"a/b/c/d/x/SKILL.md":    skillBody("x"),
+		"a/b/c/d/y/ARTIFACT.md": dmSkillArtifact,
+		"a/b/c/d/y/SKILL.md":    skillBody("y"),
+	}))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=a", &m)
+	if !hasSubdomain(m, "a/b/c/d") {
+		t.Errorf("passthrough chain a/b/c should collapse to a/b/c/d: %v", m["subdomains"])
+	}
+	if hasSubdomain(m, "a/b") {
+		t.Errorf("intermediate a/b should not appear as its own subdomain: %v", m["subdomains"])
+	}
 }
 
-// T-D-domains-35 — the notable_count knob should cap the notable list size.
+// T-D-domains-35 — the notable_count knob caps the notable list size (§4.5.5).
+// spec: §4.5.5 (F-4.5.7)
 func TestDomains_NotableCountCap(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.7: load_domain does not apply discovery.notable_count, so the default cap of 10 is not enforced over HTTP")
+	srv := startServer(t, dmFeaturedRegistry(t,
+		"---\ndescription: AP\ndiscovery:\n  notable_count: 3\n---\n\n# AP\n",
+		"a", "b", "c", "d", "e"))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance/ap", &m)
+	if ids := dmNotableIDs(m); len(ids) != 3 {
+		t.Errorf("notable count = %d, want 3 (discovery.notable_count): %v", len(ids), ids)
+	}
 }
 
-// T-D-domains-36 — target_response_tokens should tighten depth and notable
-// count.
+// T-D-domains-36 — target_response_tokens tightens the notable list to fit the
+// soft budget and surfaces a rendering note (§4.5.5). spec: §4.5.5 (F-4.5.7)
 func TestDomains_TargetResponseTokensTightens(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.7: load_domain does not apply discovery.target_response_tokens, so the response is not tightened and no budget note is emitted")
+	srv := startServer(t, dmFeaturedRegistry(t,
+		"---\ndescription: AP\ndiscovery:\n  target_response_tokens: 20\n---\n\n# AP\n",
+		"alpha", "bravo", "charlie", "delta", "echo", "foxtrot"))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance/ap", &m)
+	ids := dmNotableIDs(m)
+	if len(ids) >= 6 {
+		t.Errorf("notable not tightened under the budget: %d entries", len(ids))
+	}
+	if note, _ := m["note"].(string); !strings.Contains(note, "reduced") {
+		t.Errorf("note = %q, want a budget-reduction sentence", note)
+	}
 }
 
-// T-D-domains-37 — `podium domain show <path>` should surface the DOMAIN.md
-// description or keywords.
+// T-D-domains-37 — `podium domain show <path>` surfaces the DOMAIN.md
+// description and keywords (it prints the load_domain payload).
+// spec: §4.5.5 (F-4.5.2, F-4.5.3)
 func TestDomains_CLIShowSurfacesDomainMD(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.2: domain show wraps load_domain, which does not read DOMAIN.md, so the description/keywords are not present in the output")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/ap/DOMAIN.md":               "---\ndescription: \"AP-related operations\"\ndiscovery:\n  keywords:\n    - remittance\n---\n",
+		"finance/ap/pay-invoice/ARTIFACT.md": dmSkillArtifact,
+		"finance/ap/pay-invoice/SKILL.md":    skillBody("pay-invoice"),
+	}))
+	res := runPodium(t, "", nil, "domain", "show", "--registry", srv.BaseURL, "finance/ap")
+	if res.Exit != 0 {
+		t.Fatalf("domain show exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stdout, "AP-related operations") || !strings.Contains(res.Stdout, "remittance") {
+		t.Errorf("domain show missing DOMAIN.md description/keywords:\n%s", res.Stdout)
+	}
 }
 
 // T-D-domains-38 — `podium domain show --json` emits valid JSON.
@@ -593,11 +1053,20 @@ func TestDomains_MCPLoadDomain(t *testing.T) {
 	}
 }
 
-// T-D-domains-48 — the MCP load_domain tool should return the DOMAIN.md
-// description and keywords.
+// T-D-domains-48 — the MCP load_domain tool returns the DOMAIN.md description
+// and keywords for the requested domain (§4.5.5). spec: §4.5.5 (F-4.5.2, F-4.5.3)
 func TestDomains_MCPLoadDomainMetadata(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.2: load_domain does not read DOMAIN.md, so the MCP load_domain result carries no description or keywords")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/ap/DOMAIN.md":               "---\ndescription: \"AP-related operations\"\ndiscovery:\n  keywords:\n    - remittance\n---\n",
+		"finance/ap/pay-invoice/ARTIFACT.md": dmSkillArtifact,
+		"finance/ap/pay-invoice/SKILL.md":    skillBody("pay-invoice"),
+	}))
+	res := mcpExec(t, mcpServerEnv(t, srv.BaseURL), toolCall(1, "load_domain", map[string]any{"path": "finance/ap"}))
+	body := mustJSON(rpcResult(t, res.Stdout, 1))
+	if !strings.Contains(body, "AP-related operations") || !strings.Contains(body, "remittance") {
+		t.Errorf("MCP load_domain missing description/keywords:\n%s", body)
+	}
 }
 
 // T-D-domains-49 — the MCP search_domains tool should return domains matching a
@@ -630,11 +1099,21 @@ func TestDomains_AnalyzePostNotAllowed(t *testing.T) {
 	}
 }
 
-// T-D-domains-52 — a frontmatter-only DOMAIN.md should resolve the description
-// to its frontmatter value.
+// T-D-domains-52 — a frontmatter-only DOMAIN.md (no prose body) resolves the
+// requested domain's description to its frontmatter value (§4.5.5).
+// spec: §4.5.5 (F-4.5.2)
 func TestDomains_FrontmatterOnlyDescriptionFallback(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.2: load_domain does not read DOMAIN.md, so the frontmatter description fallback is not returned in the response")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/ap/DOMAIN.md":               "---\ndescription: \"AP-related operations\"\n---\n",
+		"finance/ap/pay-invoice/ARTIFACT.md": dmSkillArtifact,
+		"finance/ap/pay-invoice/SKILL.md":    skillBody("pay-invoice"),
+	}))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance/ap", &m)
+	if d, _ := m["description"].(string); d != "AP-related operations" {
+		t.Errorf("description = %q, want the frontmatter value (no body present)", d)
+	}
 }
 
 // T-D-domains-53 — the doc states lint warns when a DOMAIN.md prose body exceeds
@@ -662,16 +1141,47 @@ func TestDomains_DomainBodyLengthNoLintWarning(t *testing.T) {
 	}
 }
 
-// T-D-domains-54 — exclude applied after include should remove the specified
-// paths.
+// T-D-domains-54 — exclude is applied after include, removing the specified
+// paths from the imported set (§4.5.2). spec: §4.5.2 (F-4.5.6)
 func TestDomains_ExcludeAfterIncludePipeline(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.2: load_domain does not read DOMAIN.md, so the include-then-exclude pipeline is not applied over HTTP")
+	md := "---\ndescription: AP\ninclude:\n  - _shared/**\nexclude:\n  - _shared/regex/iban\n---\n\n# AP\n"
+	srv := startServer(t, dmImportRegistry(t, md,
+		"_shared/regex/ssn", "_shared/regex/iban", "_shared/other/thing"))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance/ap", &m)
+	ids := dmNotableIDs(m)
+	for _, want := range []string{"_shared/regex/ssn", "_shared/other/thing"} {
+		if !dmContains(ids, want) {
+			t.Errorf("include _shared/** notable %v missing %q", ids, want)
+		}
+	}
+	if dmContains(ids, "_shared/regex/iban") {
+		t.Errorf("exclude (applied after include) did not remove _shared/regex/iban: %v", ids)
+	}
 }
 
-// T-D-domains-55 — a cross-domain import from an unlisted _shared into finance/ap
-// should surface the helpers under finance/ap while keeping _shared hidden.
+// T-D-domains-55 — a cross-domain import from an unlisted _shared into
+// finance/ap surfaces the helpers under finance/ap while _shared stays hidden
+// from enumeration (§4.5.2, §4.5.3). spec: §4.5.2 / §4.5.3 (F-4.5.5, F-4.5.6)
 func TestDomains_CrossDomainImportFromUnlisted(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.5.2: load_domain does not read DOMAIN.md, so neither the include directive nor the unlisted flag is applied; the imported helpers do not appear under finance/ap")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/ap/DOMAIN.md":                                  "---\ndescription: AP\ninclude:\n  - _shared/payment-helpers/*\n---\n\n# AP\n",
+		"finance/ap/pay-invoice/ARTIFACT.md":                    dmSkillArtifact,
+		"finance/ap/pay-invoice/SKILL.md":                       skillBody("pay-invoice"),
+		"_shared/DOMAIN.md":                                     "---\nunlisted: true\n---\n",
+		"_shared/payment-helpers/routing-validator/ARTIFACT.md": dmSkillArtifact,
+		"_shared/payment-helpers/routing-validator/SKILL.md":    skillBody("routing-validator"),
+	}))
+	var ap map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance/ap", &ap)
+	if !dmContains(dmNotableIDs(ap), "_shared/payment-helpers/routing-validator") {
+		t.Errorf("imported helper missing under finance/ap: %v", dmNotableIDs(ap))
+	}
+	var root map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain", &root)
+	if hasSubdomain(root, "_shared") {
+		t.Errorf("unlisted _shared leaked into root enumeration: %v", root["subdomains"])
+	}
 }
