@@ -794,6 +794,13 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := s.core.LoadArtifact(r.Context(), s.identity(r), id, core.LoadArtifactOptions{
 		Version: q.Get("version"),
+		// §5 load_artifact "Optional session_id"; §4.7.6 — within a
+		// session the first `latest` lookup pins, so a later same-id
+		// lookup resolves to the same version even after a newer ingest.
+		// The batch-load path already honors this; wiring it here lets
+		// the single-artifact GET (the MCP bridge's load_artifact) carry
+		// the same session consistency.
+		SessionID: q.Get("session_id"),
 	})
 	if err != nil {
 		s.writeCoreError(w, err)

@@ -22,6 +22,7 @@ package main
 
 import (
 	"bufio"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -175,6 +176,14 @@ type mcpServer struct {
 	resolutions *resolutionCache
 	adapters    *adapter.Registry
 	overlay     []filesystem.ArtifactRecord
+	// sessionID is generated once per bridge process (one agent session)
+	// and threaded through every meta-tool call to the registry so the
+	// session correlates across calls. It backs the sessionCorrelation
+	// capability the bridge advertises (§5): the registry uses it for
+	// `latest`-resolution consistency (§4.7.6) and as the learn-from-usage
+	// correlation key (§3.3). A host that supplies its own session_id
+	// argument overrides it per call.
+	sessionID string
 	// lastSuccess holds the Unix-nanosecond timestamp of the last
 	// successful registry call, surfaced by the §13.9 health tool. Zero
 	// means no successful call has happened yet.
@@ -208,6 +217,7 @@ func newServer(cfg *config) (*mcpServer, error) {
 		cache:       cache,
 		resolutions: newResolutionCache(cfg.cacheDir),
 		adapters:    adapter.DefaultRegistry(),
+		sessionID:   newSessionID(),
 	}
 	// §6.4 workspace overlay: load now and reuse for the bridge
 	// lifetime. An empty path or absent overlay disables the layer.
@@ -221,6 +231,22 @@ func newServer(cfg *config) (*mcpServer, error) {
 		// start.
 	}
 	return srv, nil
+}
+
+// newSessionID returns a random RFC 4122 v4 UUID string. The bridge
+// generates one per process (one agent session) and threads it through
+// every meta-tool call (§5 "Optional session_id"); the registry uses it
+// for `latest`-resolution consistency (§4.7.6) and as the learn-from-usage
+// correlation key (§3.3). On the unlikely read failure it returns "" and
+// the bridge forwards no session_id rather than aborting.
+func newSessionID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return ""
+	}
+	b[6] = (b[6] & 0x0f) | 0x40 // version 4
+	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 // overlayMatch returns the overlay record whose canonical ID
@@ -873,6 +899,14 @@ func (s *mcpServer) fetchJSON(path string, args map[string]any) ([]byte, error) 
 			continue
 		}
 		q.Set(k, fmt.Sprintf("%v", v))
+	}
+	// §3.3 / §4.7.6 — correlate every meta-tool call in this bridge
+	// process under one session_id so the registry resolves `latest`
+	// consistently and can observe search-to-load within the session.
+	// This is what backs the advertised sessionCorrelation capability
+	// (§5). A host that passed its own session_id argument keeps it.
+	if q.Get("session_id") == "" && s.sessionID != "" {
+		q.Set("session_id", s.sessionID)
 	}
 	u.RawQuery = q.Encode()
 	req, err := http.NewRequest("GET", u.String(), nil)

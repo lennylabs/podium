@@ -286,6 +286,12 @@ type Result struct {
 	// store down). The manifest is searchable via BM25 only until
 	// `podium admin reembed` retries.
 	EmbeddingFailures []EmbeddingFailure
+	// Advisories collects the §3.3 / §12 description-quality flags the
+	// registry raises at ingest time: thin descriptions and clusters of
+	// artifacts whose summaries collide. They are advisory (warning
+	// severity) and never block ingest; they surface to domain owners so
+	// authored descriptions can be improved.
+	Advisories []lint.Diagnostic
 }
 
 // EmbeddingFailure names an artifact whose post-ingest embedding
@@ -382,6 +388,13 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 
 	res := &Result{}
 	errsByID := groupLintErrors(diags)
+
+	// §3.3 / §12 — the registry flags thin descriptions and clusters of
+	// artifacts whose summaries collide. These checks are advisory and do
+	// not gate ingest, so they run independently of req.Linter (which the
+	// author-facing `podium lint` shares) over the ingested record set;
+	// the colliding-summary check needs that set to spot a cluster.
+	res.Advisories = (&lint.Linter{Rules: lint.DescriptionAdvisoryRules()}).Lint(nil, records)
 
 	// §4.7 "Domain embeddings": embed each DOMAIN.md projection
 	// (description + keywords + truncated body) into the domain index so

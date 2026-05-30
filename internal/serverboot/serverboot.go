@@ -222,8 +222,8 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			Precedence: order,
 			Visibility: vis,
 		})
-		log.Printf("ingested layer %s from %s (accepted=%d, idempotent=%d, rejected=%d)",
-			l.ID, l.Path, res.Accepted, res.Idempotent, len(res.Rejected))
+		log.Printf("ingested layer %s from %s (accepted=%d, idempotent=%d, rejected=%d, advisories=%d)",
+			l.ID, l.Path, res.Accepted, res.Idempotent, len(res.Rejected), len(res.Advisories))
 	}
 	return layers, nil
 }
@@ -303,8 +303,8 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config) ([]la
 			if err != nil {
 				return nil, fmt.Errorf("ingest declared layer %s from %s: %w", lc.ID, lc.LocalPath, err)
 			}
-			log.Printf("ingested declared layer %s from %s (accepted=%d, idempotent=%d, rejected=%d)",
-				lc.ID, lc.LocalPath, res.Accepted, res.Idempotent, len(res.Rejected))
+			log.Printf("ingested declared layer %s from %s (accepted=%d, idempotent=%d, rejected=%d, advisories=%d)",
+				lc.ID, lc.LocalPath, res.Accepted, res.Idempotent, len(res.Rejected), len(res.Advisories))
 		case "git":
 			log.Printf("seeded declared git layer %s (repo=%s ref=%s); awaiting reingest/webhook to ingest",
 				lc.ID, lc.Repo, lc.Ref)
