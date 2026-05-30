@@ -133,6 +133,81 @@ Apply when working with TypeScript files.
 	}
 }
 
+// Spec: §4.3 type-specific fields (F-4.3.1) — for type: agent the
+// documented input/output mapping form ({ $ref: ./schemas/input.json })
+// decodes into SchemaRef.Ref. Before Input/Output were typed as
+// *SchemaRef this manifest failed to parse with ErrInvalidYAML ("cannot
+// unmarshal !!map into string").
+func TestParseArtifact_InputOutputRefObjectForm(t *testing.T) {
+	t.Parallel()
+	src := []byte(`---
+type: agent
+name: run-variance-analysis
+version: 1.0.0
+input: { $ref: ./schemas/input.json }
+output: { $ref: ./schemas/output.json }
+---
+
+agent body
+`)
+	got, err := ParseArtifact(src)
+	if err != nil {
+		t.Fatalf("ParseArtifact rejected the documented $ref form: %v", err)
+	}
+	if got.Input == nil || got.Input.Ref != "./schemas/input.json" {
+		t.Errorf("Input = %+v, want Ref=./schemas/input.json", got.Input)
+	}
+	if got.Output == nil || got.Output.Ref != "./schemas/output.json" {
+		t.Errorf("Output = %+v, want Ref=./schemas/output.json", got.Output)
+	}
+}
+
+// Spec: §4.3 type-specific fields (F-4.3.1) — a bare scalar path is also
+// accepted for input/output and populates Ref, so authors who omit the
+// $ref wrapper are not rejected at parse time.
+func TestParseArtifact_InputOutputRefScalarForm(t *testing.T) {
+	t.Parallel()
+	src := []byte(`---
+type: agent
+name: scalar-ref
+version: 1.0.0
+input: ./schemas/in.json
+---
+
+body
+`)
+	got, err := ParseArtifact(src)
+	if err != nil {
+		t.Fatalf("ParseArtifact: %v", err)
+	}
+	if got.Input == nil || got.Input.Ref != "./schemas/in.json" {
+		t.Errorf("Input = %+v, want Ref=./schemas/in.json", got.Input)
+	}
+	if got.Output != nil {
+		t.Errorf("Output = %+v, want nil when absent", got.Output)
+	}
+}
+
+// Spec: §4.3 type-specific fields (F-4.3.1) — a malformed schema ref (a
+// sequence rather than a scalar or { $ref: ... } mapping) is rejected with
+// ErrInvalidYAML rather than silently accepted.
+func TestParseArtifact_InputRefInvalidKind(t *testing.T) {
+	t.Parallel()
+	src := []byte(`---
+type: agent
+name: bad-ref
+version: 1.0.0
+input: [a, b]
+---
+
+body
+`)
+	_, err := ParseArtifact(src)
+	if !errors.Is(err, ErrInvalidYAML) {
+		t.Fatalf("expected ErrInvalidYAML for a sequence schema ref, got %v", err)
+	}
+}
+
 // Spec: §4.3 inheritance — extends: <id>@<semver> is preserved verbatim.
 func TestParseArtifact_Extends(t *testing.T) {
 	t.Parallel()
@@ -151,6 +226,28 @@ extends parent.
 	}
 	if got.Extends != "finance/ap/pay-invoice@1.2.0" {
 		t.Errorf("Extends = %q, want finance/ap/pay-invoice@1.2.0", got.Extends)
+	}
+}
+
+// Spec: §4.3 target_harnesses (F-4.3.4) — an empty or absent list targets
+// every harness; a non-empty list restricts materialization to the named
+// harnesses (exact adapter-ID match).
+func TestTargetsHarness(t *testing.T) {
+	t.Parallel()
+	if !TargetsHarness(nil, "claude-code") {
+		t.Errorf("nil target_harnesses must target every harness")
+	}
+	if !TargetsHarness([]string{}, "cursor") {
+		t.Errorf("empty target_harnesses must target every harness")
+	}
+	if !TargetsHarness([]string{"claude-code", "opencode"}, "opencode") {
+		t.Errorf("a listed harness must be targeted")
+	}
+	if TargetsHarness([]string{"claude-code", "opencode"}, "cursor") {
+		t.Errorf("an unlisted harness must not be targeted")
+	}
+	if TargetsHarness([]string{"claude-code"}, "") {
+		t.Errorf("an empty harness id must not match a non-empty list")
 	}
 }
 

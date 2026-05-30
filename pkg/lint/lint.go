@@ -77,6 +77,7 @@ func AllRules() []Rule {
 		ruleSkillCompliance{},
 		ruleNameSyntax{},
 		ruleVersionSemver{},
+		ruleHookEventCanonical{},
 		ruleHookConsistency{},
 		ruleEffortHintAppliesToType{},
 		ruleBundledResourceSize{},
@@ -247,6 +248,33 @@ func (r ruleVersionSemver) Check(_ *filesystem.Registry, records []filesystem.Ar
 		if err := manifest.ValidateVersion(rec.Artifact.Version); err != nil {
 			out = append(out, errMsg(rec.ID, r, err.Error()))
 		}
+	}
+	return out
+}
+
+// ruleHookEventCanonical enforces §4.3.5: a type: hook artifact's
+// hook_event is "constrained to a canonical event name from the table".
+// An unknown or misspelled event (for example on_stop) is an ingest
+// error, since the adapter has no canonical-to-native mapping for it. An
+// empty hook_event is left to ruleRequiredFields-style per-type checks;
+// this rule only rejects a non-empty value outside the canonical set.
+type ruleHookEventCanonical struct{}
+
+func (ruleHookEventCanonical) Code() string { return "lint.unknown_hook_event" }
+
+func (r ruleHookEventCanonical) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+	var out []Diagnostic
+	for _, rec := range records {
+		if rec.Artifact == nil || rec.Artifact.Type != manifest.TypeHook {
+			continue
+		}
+		event := rec.Artifact.HookEvent
+		if event == "" || manifest.IsCanonicalHookEvent(event) {
+			continue
+		}
+		out = append(out, errMsg(rec.ID, r,
+			fmt.Sprintf("hook_event %q is not a canonical §4.3.5 event; valid events: %s",
+				event, strings.Join(manifest.CanonicalHookEvents(), ", "))))
 	}
 	return out
 }

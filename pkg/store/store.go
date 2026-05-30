@@ -52,8 +52,14 @@ type ManifestRecord struct {
 	Description string
 	Tags        []string
 	Sensitivity string
-	Layer       string
-	Deprecated  bool
+	// SearchVisibility is the §4.3 universal field controlling whether
+	// the artifact appears in search_artifacts results. "indexed" (the
+	// default, also the empty string) appears normally; "direct-only"
+	// is excluded from default search results and reachable only via
+	// load_artifact. SearchArtifacts (§4.5.3) filters on it.
+	SearchVisibility string
+	Layer            string
+	Deprecated       bool
 	// ReplacedBy is the §4.7.4 upgrade target the manifest names
 	// when deprecated. Empty when not set.
 	ReplacedBy string

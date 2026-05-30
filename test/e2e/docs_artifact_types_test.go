@@ -742,11 +742,32 @@ func TestArtifactTypes_SearchTypeAgent(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-42 — search_visibility: direct-only should exclude an
-// artifact from search. The field is parsed but never persisted or
-// enforced.
+// T-D-artifact-types-42 — search_visibility: direct-only excludes an
+// artifact from search results while leaving it reachable via
+// load_artifact by ID.
+// spec: §4.3 universal fields (search_visibility), §4.5.3 (F-4.3.3).
 func TestArtifactTypes_SearchVisibilityDirectOnly(t *testing.T) {
-	t.Skip("blocked by F-4.3.3: search_visibility: direct-only is parsed but never persisted or enforced, so the artifact still appears in search results")
+	t.Parallel()
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/indexed-glossary/ARTIFACT.md": "---\ntype: context\nname: indexed-glossary\nversion: 1.0.0\ndescription: Indexed variance glossary.\n---\n\nbody\n",
+		"finance/secret-glossary/ARTIFACT.md":  "---\ntype: context\nname: secret-glossary\nversion: 1.0.0\ndescription: Secret variance glossary.\nsearch_visibility: direct-only\n---\n\nbody\n",
+	}))
+	_, sbody := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=variance")
+	if strings.Contains(string(sbody), "finance/secret-glossary") {
+		t.Errorf("direct-only artifact appeared in search results:\n%s", sbody)
+	}
+	if !strings.Contains(string(sbody), "finance/indexed-glossary") {
+		t.Errorf("indexed artifact missing from search:\n%s", sbody)
+	}
+	// §4.3: a direct-only artifact stays reachable via load_artifact when
+	// the caller knows the ID.
+	var load struct {
+		ID string `json:"id"`
+	}
+	getJSON(t, srv.BaseURL+"/v1/load_artifact?id=finance/secret-glossary", &load)
+	if load.ID != "finance/secret-glossary" {
+		t.Errorf("direct-only artifact should load by ID, got %+v", load)
+	}
 }
 
 // T-D-artifact-types-43 — a deprecated artifact is excluded from default

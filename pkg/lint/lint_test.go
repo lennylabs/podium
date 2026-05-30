@@ -334,6 +334,104 @@ body
 	}
 }
 
+// Spec: §4.3.5 (F-4.3.2) — a type: hook artifact whose hook_event is not
+// in the canonical taxonomy (here the misspelling on_stop) is rejected
+// with a lint.unknown_hook_event error. Without the rule the artifact
+// passes ingest.
+func TestLint_HookEventUnknownErrors(t *testing.T) {
+	t.Parallel()
+	reg, records := openFixture(t,
+		testharness.WriteTreeOption{
+			Path: "x/bad-hook/ARTIFACT.md",
+			Content: `---
+type: hook
+version: 1.0.0
+description: a hook
+hook_event: on_stop
+hook_action: |
+  echo hook
+---
+
+body
+`,
+		},
+	)
+	diags := (&Linter{}).Lint(reg, records)
+	var gotErr bool
+	for _, d := range diags {
+		if d.Code == "lint.unknown_hook_event" {
+			if d.Severity != SeverityError {
+				t.Errorf("unknown hook_event must error, got severity %q", d.Severity)
+			}
+			if !strings.Contains(d.Message, "on_stop") {
+				t.Errorf("message should name the offending event: %s", d.Message)
+			}
+			gotErr = true
+		}
+	}
+	if !gotErr {
+		t.Errorf("expected lint.unknown_hook_event for hook_event: on_stop, got: %v", diags)
+	}
+}
+
+// Spec: §4.3.5 (F-4.3.2) — every canonical event name passes the
+// hook_event check, and the generic events still draw only the info-level
+// subtype note (not an unknown-event error).
+func TestLint_HookEventCanonicalAccepted(t *testing.T) {
+	t.Parallel()
+	for _, event := range manifest.CanonicalHookEvents() {
+		event := event
+		t.Run(event, func(t *testing.T) {
+			t.Parallel()
+			reg, records := openFixture(t,
+				testharness.WriteTreeOption{
+					Path: "hooks/" + event + "/ARTIFACT.md",
+					Content: `---
+type: hook
+version: 1.0.0
+description: a hook
+hook_event: ` + event + `
+hook_action: |
+  echo hook
+---
+
+body
+`,
+				},
+			)
+			diags := (&Linter{}).Lint(reg, records)
+			if hasCode(diags, "lint.unknown_hook_event") {
+				t.Errorf("canonical event %q must not trigger lint.unknown_hook_event: %v", event, diags)
+			}
+		})
+	}
+}
+
+// Spec: §4.3.5 (F-4.3.2) — the canonical-event rule applies only to
+// type: hook. A non-hook artifact that happens to carry a hook_event
+// value is not the rule's concern (the field is type-specific to hooks),
+// so no unknown-event error is raised.
+func TestLint_HookEventIgnoredForNonHook(t *testing.T) {
+	t.Parallel()
+	reg, records := openFixture(t,
+		testharness.WriteTreeOption{
+			Path: "ctx/note/ARTIFACT.md",
+			Content: `---
+type: context
+version: 1.0.0
+hook_event: totally-made-up
+---
+
+body
+`,
+		},
+	)
+	diags := (&Linter{}).Lint(reg, records)
+	if hasCode(diags, "lint.unknown_hook_event") {
+		t.Errorf("non-hook artifact must not trigger lint.unknown_hook_event: %v", diags)
+	}
+}
+
 // Spec: §4.3 — a clean fixture with all required fields produces no
 // diagnostics.
 func TestLint_CleanArtifactProducesNoDiagnostics(t *testing.T) {

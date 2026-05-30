@@ -19,6 +19,7 @@ import (
 
 	"github.com/lennylabs/podium/pkg/embedding"
 	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/vector"
 	"github.com/lennylabs/podium/pkg/version"
@@ -533,6 +534,12 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 		// default search results. Callers can opt in via
 		// IncludeDeprecated when surfacing audit / migration views.
 		if m.Deprecated && !opts.IncludeDeprecated {
+			continue
+		}
+		// §4.3 / §4.5.3 search_visibility: a direct-only artifact does
+		// not appear in search_artifacts results; it stays reachable
+		// via load_artifact for a caller that knows its ID.
+		if m.SearchVisibility == string(manifest.SearchVisibilityDirectOnly) {
 			continue
 		}
 		filtered = append(filtered, m)

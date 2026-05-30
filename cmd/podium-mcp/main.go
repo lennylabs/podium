@@ -420,23 +420,28 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 		if err != nil {
 			return errorResult("config.unknown_harness: " + err.Error())
 		}
-		src := adapter.Source{
-			ArtifactID:    resp.ID,
-			ArtifactBytes: []byte(resp.Frontmatter),
-			Resources:     resourcesAsBytes(resp.Resources),
-		}
-		if resp.Type == "skill" {
-			src.SkillBytes = []byte(synthesizeSkillMD(resp))
-		}
-		out, err := a.Adapt(src)
-		if err != nil {
-			return errorResult("adapter: " + err.Error())
-		}
-		if err := materialize.Write(s.cfg.materializeRoot, out); err != nil {
-			return errorResult("materialize: " + err.Error())
-		}
-		for _, f := range out {
-			materialized = append(materialized, filepath.Join(s.cfg.materializeRoot, filepath.FromSlash(f.Path)))
+		// §4.3 target_harnesses: suppress the on-disk write when the
+		// artifact opts out of this harness. The manifest content is
+		// still returned to the caller; only materialization is skipped.
+		if materializeTargetsHarness(resp.Frontmatter, harnessID) {
+			src := adapter.Source{
+				ArtifactID:    resp.ID,
+				ArtifactBytes: []byte(resp.Frontmatter),
+				Resources:     resourcesAsBytes(resp.Resources),
+			}
+			if resp.Type == "skill" {
+				src.SkillBytes = []byte(synthesizeSkillMD(resp))
+			}
+			out, err := a.Adapt(src)
+			if err != nil {
+				return errorResult("adapter: " + err.Error())
+			}
+			if err := materialize.Write(s.cfg.materializeRoot, out); err != nil {
+				return errorResult("materialize: " + err.Error())
+			}
+			for _, f := range out {
+				materialized = append(materialized, filepath.Join(s.cfg.materializeRoot, filepath.FromSlash(f.Path)))
+			}
 		}
 	}
 
@@ -448,6 +453,19 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 		"manifest_body":   resp.ManifestBody,
 		"materialized_at": materialized,
 	}
+}
+
+// materializeTargetsHarness reports whether the artifact whose full
+// ARTIFACT.md is in frontmatter should materialize for harnessID, per
+// §4.3 target_harnesses. Frontmatter that fails to parse (it already
+// passed ingest) defaults to targeting every harness so a parse quirk
+// never silently suppresses a write.
+func materializeTargetsHarness(frontmatter, harnessID string) bool {
+	a, err := manifest.ParseArtifact([]byte(frontmatter))
+	if err != nil || a == nil {
+		return true
+	}
+	return manifest.TargetsHarness(a.TargetHarnesses, harnessID)
 }
 
 // harnessFromArgs returns args["harness"] as a string when set,
@@ -492,21 +510,27 @@ func (s *mcpServer) loadArtifactFromOverlay(rec *filesystem.ArtifactRecord, args
 		if err != nil {
 			return errorResult("config.unknown_harness: " + err.Error())
 		}
-		src := adapter.Source{
-			ArtifactID:    rec.ID,
-			ArtifactBytes: rec.ArtifactBytes,
-			SkillBytes:    rec.SkillBytes,
-			Resources:     rec.Resources,
-		}
-		out, err := a.Adapt(src)
-		if err != nil {
-			return errorResult("adapter: " + err.Error())
-		}
-		if err := materialize.Write(s.cfg.materializeRoot, out); err != nil {
-			return errorResult("materialize: " + err.Error())
-		}
-		for _, f := range out {
-			materialized = append(materialized, filepath.Join(s.cfg.materializeRoot, filepath.FromSlash(f.Path)))
+		// §4.3 target_harnesses: an overlay artifact that opts out of
+		// this harness is not written; the response still carries its
+		// manifest body. A record without a parsed artifact targets all.
+		targets := rec.Artifact == nil || manifest.TargetsHarness(rec.Artifact.TargetHarnesses, harnessID)
+		if targets {
+			src := adapter.Source{
+				ArtifactID:    rec.ID,
+				ArtifactBytes: rec.ArtifactBytes,
+				SkillBytes:    rec.SkillBytes,
+				Resources:     rec.Resources,
+			}
+			out, err := a.Adapt(src)
+			if err != nil {
+				return errorResult("adapter: " + err.Error())
+			}
+			if err := materialize.Write(s.cfg.materializeRoot, out); err != nil {
+				return errorResult("materialize: " + err.Error())
+			}
+			for _, f := range out {
+				materialized = append(materialized, filepath.Join(s.cfg.materializeRoot, filepath.FromSlash(f.Path)))
+			}
 		}
 	}
 	return map[string]any{

@@ -163,6 +163,40 @@ func TestSearchArtifacts_TypeFilter(t *testing.T) {
 	}
 }
 
+// Spec: §4.3 / §4.5.3 (F-4.3.3) — an artifact with
+// search_visibility: direct-only is excluded from search_artifacts
+// results, while an indexed (default) artifact appears. The value is
+// carried from the frontmatter through ingest into the store record and
+// honored by the search filter.
+func TestSearchArtifacts_DirectOnlyExcluded(t *testing.T) {
+	t.Parallel()
+	directOnly := "---\ntype: context\nversion: 1.0.0\ndescription: secret tool\nsensitivity: low\nsearch_visibility: direct-only\n---\n\nbody\n"
+	reg := setupRegistry(t, fstest.MapFS{
+		"finance/indexed-tool/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("tool"))},
+		"finance/secret-tool/ARTIFACT.md":  &fstest.MapFile{Data: []byte(directOnly)},
+	}, "team-shared")
+	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{
+		Scope: "finance",
+	})
+	if err != nil {
+		t.Fatalf("SearchArtifacts: %v", err)
+	}
+	for _, r := range res.Results {
+		if r.ID == "finance/secret-tool" {
+			t.Errorf("direct-only artifact must not appear in search results: %+v", res.Results)
+		}
+	}
+	var sawIndexed bool
+	for _, r := range res.Results {
+		if r.ID == "finance/indexed-tool" {
+			sawIndexed = true
+		}
+	}
+	if !sawIndexed {
+		t.Errorf("indexed artifact should still appear, got %+v", res.Results)
+	}
+}
+
 // Spec: §5 search_artifacts — scope (path prefix) restricts results.
 func TestSearchArtifacts_ScopeFilter(t *testing.T) {
 	t.Parallel()

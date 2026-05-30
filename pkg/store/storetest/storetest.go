@@ -38,6 +38,36 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("GetManifestNotFound", func(t *testing.T) { getManifestNotFound(t, factory(t)) })
 	t.Run("LayerConfigCRUD", func(t *testing.T) { layerConfigCRUD(t, factory(t)) })
 	t.Run("LayerConfigDelete", func(t *testing.T) { layerConfigDelete(t, factory(t)) })
+	t.Run("SearchVisibilityRoundTrip", func(t *testing.T) { searchVisibilityRoundTrip(t, factory(t)) })
+}
+
+// Spec: §4.3 universal fields (F-4.3.3) — search_visibility persists on
+// the manifest record and survives both GetManifest and ListManifests so
+// SearchArtifacts can exclude direct-only artifacts. Without a backing
+// column the SQLite and Postgres backends silently dropped the value.
+func searchVisibilityRoundTrip(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "a")
+	rec := manifestRec("a", "secret-tool", "1.0.0", "sha:1")
+	rec.SearchVisibility = "direct-only"
+	mustPut(t, s, rec)
+
+	got, err := s.GetManifest(ctx, "a", "secret-tool", "1.0.0")
+	if err != nil {
+		t.Fatalf("GetManifest: %v", err)
+	}
+	if got.SearchVisibility != "direct-only" {
+		t.Errorf("GetManifest SearchVisibility = %q, want direct-only", got.SearchVisibility)
+	}
+
+	list, err := s.ListManifests(ctx, "a")
+	if err != nil {
+		t.Fatalf("ListManifests: %v", err)
+	}
+	if len(list) != 1 || list[0].SearchVisibility != "direct-only" {
+		t.Errorf("ListManifests SearchVisibility not preserved: %+v", list)
+	}
 }
 
 // Spec: §4.7.1 Tenancy — tenant boundaries isolate manifests.

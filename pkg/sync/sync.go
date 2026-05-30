@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/pkg/adapter"
+	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/materialize"
 	"github.com/lennylabs/podium/pkg/overlay"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
@@ -53,6 +54,11 @@ type Result struct {
 	Adapter   string
 	Target    string
 	Artifacts []ArtifactResult
+	// Skipped lists the canonical IDs of artifacts excluded from this
+	// run because their target_harnesses (§4.3) does not include the
+	// active adapter. Recorded so callers can report what was dropped
+	// rather than silently omitting it.
+	Skipped []string
 }
 
 // ArtifactResult is one artifact's contribution to the materialized output.
@@ -115,6 +121,14 @@ func Run(opts Options) (*Result, error) {
 
 	allFiles := []adapter.File{}
 	for _, rec := range records {
+		// §4.3 target_harnesses: an artifact that opts out of this
+		// adapter is not materialized for it. Skip it before adapting
+		// so its files are neither written nor counted as current
+		// (stale-file cleanup then removes any prior output for it).
+		if rec.Artifact != nil && !manifest.TargetsHarness(rec.Artifact.TargetHarnesses, a.ID()) {
+			res.Skipped = append(res.Skipped, rec.ID)
+			continue
+		}
 		out, err := a.Adapt(adapter.Source{
 			ArtifactID:    rec.ID,
 			ArtifactBytes: rec.ArtifactBytes,

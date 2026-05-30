@@ -242,11 +242,22 @@ func TestFrontmatter_DeprecatedReachableWithWarning(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-13 — search_visibility: direct-only should hide an artifact
-// from search. The field is parsed but never persisted or enforced.
+// T-D-frontmatter-13 — search_visibility: direct-only hides an artifact
+// from search while an indexed sibling still appears.
+// spec: §4.3 universal fields (search_visibility), §4.5.3 (F-4.3.3).
 func TestFrontmatter_DirectOnlyHiddenFromSearch(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.3.3: search_visibility: direct-only is parsed but never persisted or enforced, so the artifact still appears in search results")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/public-tool/ARTIFACT.md": "---\ntype: context\nname: public-tool\nversion: 1.0.0\ndescription: Public payments tool.\n---\n\nbody\n",
+		"finance/secret-tool/ARTIFACT.md": "---\ntype: context\nname: secret-tool\nversion: 1.0.0\ndescription: Secret payments tool.\nsearch_visibility: direct-only\n---\n\nbody\n",
+	}))
+	_, sbody := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=payments")
+	if strings.Contains(string(sbody), "finance/secret-tool") {
+		t.Errorf("direct-only artifact appeared in search results:\n%s", sbody)
+	}
+	if !strings.Contains(string(sbody), "finance/public-tool") {
+		t.Errorf("indexed artifact missing from search:\n%s", sbody)
+	}
 }
 
 // T-D-frontmatter-14 — a direct-only artifact is reachable via load_artifact by

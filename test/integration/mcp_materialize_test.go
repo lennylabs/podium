@@ -77,6 +77,66 @@ func TestPodiumMCP_LoadArtifactMaterializes(t *testing.T) {
 	}
 }
 
+// Spec: §4.3 target_harnesses (F-4.3.4) — load_artifact through the MCP
+// bridge does not write harness-native files when the artifact opts out
+// of the active harness. The manifest content still returns; only the
+// on-disk materialization is suppressed (materialized_at is empty and the
+// target stays bare).
+func TestPodiumMCP_TargetHarnessesSuppressesMaterialize(t *testing.T) {
+	t.Parallel()
+
+	h := registryharness.New(t,
+		testharness.WriteTreeOption{
+			Path: "tools/cc-only/ARTIFACT.md",
+			Content: "---\ntype: context\nversion: 1.0.0\n" +
+				"description: claude-code only\n" +
+				"target_harnesses: [claude-code]\n---\n\nbody\n",
+		},
+	)
+
+	target := t.TempDir()
+	cache := t.TempDir()
+
+	bin := buildMCP(t)
+	cmd := exec.Command(bin)
+	cmd.Env = append(cmd.Env,
+		"PODIUM_REGISTRY="+h.URL,
+		"PODIUM_HARNESS=none",
+		"PODIUM_MATERIALIZE_ROOT="+target,
+		"PODIUM_CACHE_DIR="+cache,
+	)
+	cmd.Stdin = bytes.NewReader(newlineDelimitedRequests([]rpcCall{
+		{Method: "tools/call", ID: 1, Params: map[string]any{
+			"name":      "load_artifact",
+			"arguments": map[string]any{"id": "tools/cc-only"},
+		}},
+	}))
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run mcp: %v\nstdout:\n%s", err, stdout.String())
+	}
+
+	var resp struct {
+		Result struct {
+			ID             string   `json:"id"`
+			MaterializedAt []string `json:"materialized_at"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(&stdout).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v\nstdout: %s", err, stdout.String())
+	}
+	if resp.Result.ID != "tools/cc-only" {
+		t.Errorf("ID = %q, want tools/cc-only (load still succeeds)", resp.Result.ID)
+	}
+	if len(resp.Result.MaterializedAt) != 0 {
+		t.Errorf("materialized_at = %v, want empty (artifact opted out of the none harness)", resp.Result.MaterializedAt)
+	}
+	if files := testharness.ReadTree(t, target); len(files) != 0 {
+		t.Errorf("target should be empty for an opted-out artifact, got: %v", keysOf(files))
+	}
+}
+
 // Spec: §6.6 — selecting the claude-code adapter via PODIUM_HARNESS
 // drives the corresponding harness-native layout.
 func TestPodiumMCP_LoadArtifactWithClaudeCodeAdapter(t *testing.T) {

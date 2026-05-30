@@ -82,6 +82,30 @@ func ParseSkill(src []byte) (*Skill, error) {
 	return s, nil
 }
 
+// UnmarshalYAML decodes a SchemaRef from either the documented mapping
+// form (input: { $ref: ./schemas/input.json }, §4.3 type-specific fields)
+// or a bare scalar path (input: ./schemas/input.json). Both populate Ref.
+// Without this, the spec's { $ref: ... } mapping fails to decode into the
+// field and ParseArtifact rejects the manifest with ErrInvalidYAML.
+func (s *SchemaRef) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		s.Ref = node.Value
+		return nil
+	case yaml.MappingNode:
+		var aux struct {
+			Ref string `yaml:"$ref"`
+		}
+		if err := node.Decode(&aux); err != nil {
+			return err
+		}
+		s.Ref = aux.Ref
+		return nil
+	default:
+		return fmt.Errorf("schema ref must be a scalar path or a { $ref: ... } mapping, got YAML kind %d", node.Kind)
+	}
+}
+
 // ParseDomain decodes a DOMAIN.md source per §4.5.1. Glob validation,
 // import resolution, and per-domain discovery overrides happen later.
 func ParseDomain(src []byte) (*Domain, error) {
@@ -182,6 +206,24 @@ func IsFirstClassType(t ArtifactType) bool {
 func IsBuiltinExtensionType(t ArtifactType) bool {
 	for _, et := range builtinExtensionTypes {
 		if t == et {
+			return true
+		}
+	}
+	return false
+}
+
+// TargetsHarness reports whether an artifact whose target_harnesses field
+// is targets should materialize for harnessID. Per §4.3 the field is an
+// opt-out of cross-harness materialization: an empty (or absent) list
+// targets every harness, and a non-empty list restricts materialization
+// to the harnesses it names. Matching is exact on the adapter ID, which
+// is the PODIUM_HARNESS value (§6.7).
+func TargetsHarness(targets []string, harnessID string) bool {
+	if len(targets) == 0 {
+		return true
+	}
+	for _, h := range targets {
+		if h == harnessID {
 			return true
 		}
 	}

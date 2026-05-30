@@ -971,11 +971,22 @@ func TestHooks_DomainShowListsHook(t *testing.T) {
 	}
 }
 
-// T-D-hooks-53 — a direct-only hook should be hidden from default search. The
-// search_visibility field is parsed but never enforced.
+// T-D-hooks-53 — a direct-only hook is hidden from default search while an
+// indexed hook still appears.
+// spec: §4.3 universal fields (search_visibility), §4.5.3 (F-4.3.3).
 func TestHooks_DirectOnlyHiddenFromSearch(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.3.3: search_visibility: direct-only is parsed but never enforced, so the hook still appears in search results")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"hooks/audit-logger/ARTIFACT.md":  hkArtifact("audit-logger", "stop"),
+		"hooks/secret-logger/ARTIFACT.md": hkArtifact("secret-logger", "stop", "search_visibility: direct-only"),
+	}))
+	_, sbody := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=hook")
+	if strings.Contains(string(sbody), "hooks/secret-logger") {
+		t.Errorf("direct-only hook appeared in search results:\n%s", sbody)
+	}
+	if !strings.Contains(string(sbody), "hooks/audit-logger") {
+		t.Errorf("indexed hook missing from search:\n%s", sbody)
+	}
 }
 
 // T-D-hooks-54 — a second sync over the same state is idempotent: both runs

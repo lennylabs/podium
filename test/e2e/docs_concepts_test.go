@@ -70,7 +70,7 @@ func TestConcepts_AllFirstClassTypesLint(t *testing.T) {
 		"ctx/ARTIFACT.md": contextArtifact("a context"),
 		"cmd/ARTIFACT.md": "---\ntype: command\nversion: 1.0.0\ndescription: a command\n---\n\nbody\n",
 		"rl/ARTIFACT.md":  "---\ntype: rule\nversion: 1.0.0\ndescription: a rule\nrule_mode: always\n---\n\nbody\n",
-		"hk/ARTIFACT.md":  "---\ntype: hook\nversion: 1.0.0\ndescription: a hook\nhook_event: PreToolUse\nhook_action: echo ok\n---\n\nbody\n",
+		"hk/ARTIFACT.md":  "---\ntype: hook\nversion: 1.0.0\ndescription: a hook\nhook_event: stop\nhook_action: echo ok\n---\n\nbody\n",
 		"ms/ARTIFACT.md":  "---\ntype: mcp-server\nversion: 1.0.0\ndescription: a server\nserver_identifier: ms\n---\n\nbody\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
