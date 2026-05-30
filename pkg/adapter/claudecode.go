@@ -34,10 +34,16 @@ func (c ClaudeCode) Adapt(src Source) ([]File, error) {
 	case "skill":
 		skillRoot := path.Join(".claude", "skills", name)
 		if len(src.SkillBytes) > 0 {
+			// Claude Code consumes only the agentskills.io subset
+			// (SKILL.md, not ARTIFACT.md). §4.3.4 — derive
+			// compatibility from runtime_requirements and
+			// sandbox_profile when the author omits it so the
+			// runtime constraints survive into SKILL.md.
+			skill := deriveSkillCompatibility(src.SkillBytes, src.ArtifactBytes)
 			// §4.4.2 — rewrite imported provenance blocks into
 			// Claude Code <untrusted-data> regions so the host
 			// can apply differential trust at read time.
-			out = append(out, File{Path: path.Join(skillRoot, "SKILL.md"), Content: rewriteProvenanceForClaude(src.SkillBytes)})
+			out = append(out, File{Path: path.Join(skillRoot, "SKILL.md"), Content: rewriteProvenanceForClaude(skill)})
 		}
 		for rel, data := range src.Resources {
 			out = append(out, File{Path: path.Join(skillRoot, rel), Content: data})

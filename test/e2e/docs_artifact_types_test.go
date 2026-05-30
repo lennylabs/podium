@@ -56,8 +56,10 @@ func TestArtifactTypes_ScaffoldSkillSplit(t *testing.T) {
 // lints clean and the field round-trips.
 func TestArtifactTypes_SkillExampleLints(t *testing.T) {
 	t.Parallel()
-	art := "---\ntype: skill\nname: run-variance-analysis\nversion: 1.0.0\n" +
-		"description: Flag unusual variance vs. forecast after month-end close.\n" +
+	// §4.3.4 — a skill's name/description live in SKILL.md; ARTIFACT.md omits
+	// them. Podium-only fields (version, when_to_use, tags, sensitivity,
+	// runtime_requirements) stay in ARTIFACT.md.
+	art := "---\ntype: skill\nversion: 1.0.0\n" +
 		"when_to_use:\n  - \"After month-end close, when reviewing financial performance.\"\n" +
 		"tags: [finance, close, variance]\nsensitivity: low\n" +
 		"runtime_requirements:\n  python: \">=3.10\"\n---\n\n<!-- body -->\n"
@@ -419,19 +421,21 @@ func TestArtifactTypes_HookClaudeCodeLayout(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, ".claude/podium/audit/log-session-end/ARTIFACT.md"))
 }
 
-// T-D-artifact-types-23 — a generic hook_event (pre_tool_use) emits an info
-// diagnostic naming the subtypes; lint stays green.
-func TestArtifactTypes_HookGenericInfo(t *testing.T) {
+// T-D-artifact-types-23 — declaring both a generic hook_event (pre_tool_use)
+// and a corresponding subtype hook warns (spec §4.3.5, F-4.3.8); lint stays
+// green (warning, not error). A lone generic hook is valid and unflagged.
+func TestArtifactTypes_HookGenericAndSubtypeWarns(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"audit/generic-tool-hook/ARTIFACT.md": "---\ntype: hook\nname: generic-tool-hook\nversion: 1.0.0\ndescription: Generic hook.\nhook_event: pre_tool_use\nhook_action: |\n  echo done\n---\n\nbody\n",
+		"audit/shell-hook/ARTIFACT.md":        "---\ntype: hook\nname: shell-hook\nversion: 1.0.0\ndescription: Shell hook.\nhook_event: pre_shell_execution\nhook_action: |\n  echo done\n---\n\nbody\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 0 {
-		t.Fatalf("lint exit=%d, want 0 (info only)\nstdout=%s", res.Exit, res.Stdout)
+		t.Fatalf("lint exit=%d, want 0 (warning only)\nstdout=%s", res.Exit, res.Stdout)
 	}
-	if !strings.Contains(res.Stdout, "[info]") || !strings.Contains(res.Stdout, "pre_tool_use") || !strings.Contains(res.Stdout, "subtype") {
-		t.Errorf("missing generic-hook info diagnostic:\n%s", res.Stdout)
+	if !strings.Contains(res.Stdout, "[warning]") || !strings.Contains(res.Stdout, "pre_shell_execution") || !strings.Contains(res.Stdout, "lint.hook_generic_and_subtype") {
+		t.Errorf("missing generic/subtype warning naming the subtype:\n%s", res.Stdout)
 	}
 }
 
@@ -706,7 +710,7 @@ func TestArtifactTypes_RuleExplicitLints(t *testing.T) {
 // so type filtering can be isolated from the query.
 func searchRegistry(t *testing.T) string {
 	return writeRegistry(t, map[string]string{
-		"finance/close/run-variance-analysis/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\ndescription: Flag unusual variance vs forecast.\n---\n\n<!-- body -->\n",
+		"finance/close/run-variance-analysis/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\n---\n\n<!-- body -->\n",
 		"finance/close/run-variance-analysis/SKILL.md":    "---\nname: run-variance-analysis\ndescription: Flag unusual variance vs forecast after close.\n---\n\nCompare actuals vs forecast and flag variance.\n",
 		"finance/procurement/vendor-check/ARTIFACT.md":    "---\ntype: agent\nname: vendor-check\nversion: 1.0.0\ndescription: Verify a vendor against variance and compliance checks.\n---\n\nReview the vendor.\n",
 	})

@@ -460,7 +460,7 @@ func TestHIW_LoadDomainStructure(t *testing.T) {
 func TestHIW_SearchArtifactsDescriptors(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"greet/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\ndescription: greet the user\n---\n\n",
+		"greet/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\n---\n\n",
 		"greet/SKILL.md":    greetSkillBody,
 	}))
 	st, body := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=greet&type=skill&top_k=5")
@@ -552,7 +552,7 @@ func TestHIW_ScopePreview(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"a/ARTIFACT.md": contextArtifact("a"),
-		"b/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\ndescription: b\n---\n\n",
+		"b/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\n---\n\n",
 		"b/SKILL.md":    skillBody("b"),
 	}))
 	var resp struct {

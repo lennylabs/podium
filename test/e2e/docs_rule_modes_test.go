@@ -199,43 +199,89 @@ func TestRuleModes_LintAlwaysClean(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-10 — lint should error for a glob-mode rule missing rule_globs.
+// T-D-rule-modes-10 — lint errors for a glob-mode rule missing rule_globs.
 // spec: docs/authoring/rule-modes.md § "Lint behavior"; glob requires rule_globs.
 func TestRuleModes_LintGlobMissingGlobs(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.3.7: type-specific required fields are not validated at ingest, so a glob-mode rule missing rule_globs lints clean instead of erroring")
+	reg := writeRegistry(t, map[string]string{
+		"style/react-style/ARTIFACT.md": rmRuleArtifact("react-style", "glob", nil, "React rules.\n"),
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 1 {
+		t.Fatalf("lint exit=%d, want 1 (error)\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "[error]") || !strings.Contains(res.Stdout, "rule_globs") {
+		t.Errorf("expected an error naming rule_globs:\n%s", res.Stdout)
+	}
 }
 
-// T-D-rule-modes-11 — lint should error for an auto-mode rule missing
+// T-D-rule-modes-11 — lint errors for an auto-mode rule missing
 // rule_description.
 // spec: docs/authoring/rule-modes.md § "Lint behavior"; auto requires rule_description.
 func TestRuleModes_LintAutoMissingDescription(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.3.7: type-specific required fields are not validated at ingest, so an auto-mode rule missing rule_description lints clean instead of erroring")
+	reg := writeRegistry(t, map[string]string{
+		"rules/db-checks/ARTIFACT.md": rmRuleArtifact("db-checks", "auto", nil, "DB checks.\n"),
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 1 {
+		t.Fatalf("lint exit=%d, want 1 (error)\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "[error]") || !strings.Contains(res.Stdout, "rule_description") {
+		t.Errorf("expected an error naming rule_description:\n%s", res.Stdout)
+	}
 }
 
-// T-D-rule-modes-12 — lint should warn for a glob-mode rule that also sets
+// T-D-rule-modes-12 — lint warns for a glob-mode rule that also sets
 // rule_description (ignored field).
 // spec: docs/authoring/rule-modes.md § "Lint behavior"; glob + rule_description warns.
 func TestRuleModes_LintGlobWithDescriptionWarns(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.3.7: the ignored-companion-field lint rule is absent, so a glob-mode rule with rule_description emits no warning")
+	reg := writeRegistry(t, map[string]string{
+		"style/react-style/ARTIFACT.md": rmRuleArtifact("react-style", "glob",
+			[]string{`rule_globs: "src/**/*.tsx"`, `rule_description: "ignored"`}, "React rules.\n"),
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 0 {
+		t.Fatalf("lint exit=%d, want 0 (warning)\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "[warning]") || !strings.Contains(res.Stdout, "rule-description is ignored") {
+		t.Errorf("expected a warning that rule-description is ignored:\n%s", res.Stdout)
+	}
 }
 
-// T-D-rule-modes-13 — lint should warn for an auto-mode rule that also sets
+// T-D-rule-modes-13 — lint warns for an auto-mode rule that also sets
 // rule_globs (ignored field).
 // spec: docs/authoring/rule-modes.md § "Lint behavior"; auto + rule_globs warns.
 func TestRuleModes_LintAutoWithGlobsWarns(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.3.7: the ignored-companion-field lint rule is absent, so an auto-mode rule with rule_globs emits no warning")
+	reg := writeRegistry(t, map[string]string{
+		"rules/db-checks/ARTIFACT.md": rmRuleArtifact("db-checks", "auto",
+			[]string{`rule_description: "when migrating"`, `rule_globs: "src/**"`}, "DB checks.\n"),
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 0 {
+		t.Fatalf("lint exit=%d, want 0 (warning)\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "[warning]") || !strings.Contains(res.Stdout, "rule-globs is ignored") {
+		t.Errorf("expected a warning that rule-globs is ignored:\n%s", res.Stdout)
+	}
 }
 
-// T-D-rule-modes-14 — lint should warn for a non-rule artifact that sets
-// rule_mode.
+// T-D-rule-modes-14 — lint warns for a non-rule artifact that sets rule_mode.
 // spec: docs/authoring/rule-modes.md § "Lint behavior"; rule_mode on non-rule warns.
 func TestRuleModes_LintRuleModeOnNonRuleWarns(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.3.7: the rule_mode-on-non-rule lint rule is absent, so a non-rule artifact carrying rule_mode emits no warning")
+	reg := writeRegistry(t, map[string]string{
+		"ctx/note/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\nname: note\ndescription: A note.\nrule_mode: glob\n---\n\nbody\n",
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 0 {
+		t.Fatalf("lint exit=%d, want 0 (warning)\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "[warning]") || !strings.Contains(res.Stdout, "only applicable to type: rule") {
+		t.Errorf("expected a warning that rule-mode is only applicable to type: rule:\n%s", res.Stdout)
+	}
 }
 
 // ---- Sync: per-adapter rule layouts ---------------------------------------

@@ -203,8 +203,8 @@ func TestExtending_4_FirstClassTypesPassLint(t *testing.T) {
 		"types/my-command/ARTIFACT.md": "---\ntype: command\nversion: 1.0.0\ndescription: My command for tests.\n---\n\n$ARGUMENTS\n",
 		// rule
 		"types/my-rule/ARTIFACT.md": "---\ntype: rule\nversion: 1.0.0\ndescription: My rule for tests.\nrule_mode: always\n---\n\nAlways follow this rule.\n",
-		// hook
-		"types/my-hook/ARTIFACT.md": "---\ntype: hook\nversion: 1.0.0\ndescription: My hook for tests.\nhook_trigger: before_tool_call\n---\n\nbody\n",
+		// hook (hook_event + hook_action are the required §4.3 hook fields)
+		"types/my-hook/ARTIFACT.md": "---\ntype: hook\nversion: 1.0.0\ndescription: My hook for tests.\nhook_event: pre_tool_use\nhook_action: |\n  echo done\n---\n\nbody\n",
 		// mcp-server
 		"types/my-mcp-server/ARTIFACT.md": "---\ntype: mcp-server\nversion: 1.0.0\ndescription: My mcp-server for tests.\nserver_identifier: test-server\n---\n\nbody\n",
 	})

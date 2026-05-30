@@ -73,8 +73,13 @@ type Rule interface {
 func AllRules() []Rule {
 	return []Rule{
 		ruleRequiredFields{},
+		ruleTypeRequiredFields{},
+		ruleRuleModeHygiene{},
 		ruleTypeProviderValidate{},
 		ruleSkillCompliance{},
+		ruleSkillPodiumOnlyFields{},
+		ruleSkillArtifactFields{},
+		ruleSkillRefValidate{},
 		ruleNameSyntax{},
 		ruleVersionSemver{},
 		ruleHookEventCanonical{},
@@ -283,33 +288,66 @@ type ruleHookConsistency struct{}
 
 func (ruleHookConsistency) Code() string { return "lint.hook_generic_and_subtype" }
 
-// genericToSubtypes maps each generic event to its subtype family. Used to
-// flag when both the generic and a subtype are declared on the same
-// artifact.
+// genericToSubtypes maps each generic tool event to its subtype family
+// (§4.3.5). Used to detect when a generic hook and one of its corresponding
+// subtype hooks are both declared.
 var genericToSubtypes = map[string][]string{
 	"pre_tool_use":  {"pre_shell_execution", "pre_mcp_execution", "pre_read_file"},
 	"post_tool_use": {"post_shell_execution", "post_mcp_execution", "post_file_edit"},
 }
 
+// subtypeToGeneric inverts genericToSubtypes for subtype lookup.
+var subtypeToGeneric = func() map[string]string {
+	m := map[string]string{}
+	for generic, subs := range genericToSubtypes {
+		for _, s := range subs {
+			m[s] = generic
+		}
+	}
+	return m
+}()
+
+// Check implements spec §4.3.5: "Authors should not declare both a generic
+// hook and the corresponding subtype hook for the same artifact; lint warns
+// when this happens." A hook_event is a single scalar (§4.3.5 shows
+// `hook_event: stop`), so one artifact cannot hold both a generic and a
+// subtype; the reachable form of "declaring both" is a generic hook and a
+// corresponding subtype hook present together in the linted set. The rule
+// warns on the generic hook and names the overlapping subtype hook. A lone
+// generic hook is valid (§4.3.5: "Authors choose the level of specificity")
+// and draws no diagnostic.
 func (r ruleHookConsistency) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
-	var out []Diagnostic
+	// Collect the subtype hooks present, grouped by their parent generic.
+	subtypesByGeneric := map[string][]filesystem.ArtifactRecord{}
 	for _, rec := range records {
-		if rec.Artifact.Type != manifest.TypeHook {
+		if rec.Artifact == nil || rec.Artifact.Type != manifest.TypeHook {
 			continue
 		}
-		event := rec.Artifact.HookEvent
-		// Lint inspects a single hook_event field and emits info-
-		// level guidance when an authored generic event would
-		// shadow a more specific subtype.
-		if subs, ok := genericToSubtypes[event]; ok {
-			out = append(out, Diagnostic{
-				ArtifactID: rec.ID,
-				Code:       r.Code(),
-				Severity:   SeverityInfo,
-				Message: fmt.Sprintf("hook_event %q matches every subtype (%s); pick a subtype if you only need one",
-					event, strings.Join(subs, ", ")),
-			})
+		if generic, ok := subtypeToGeneric[rec.Artifact.HookEvent]; ok {
+			subtypesByGeneric[generic] = append(subtypesByGeneric[generic], rec)
 		}
+	}
+	var out []Diagnostic
+	for _, rec := range records {
+		if rec.Artifact == nil || rec.Artifact.Type != manifest.TypeHook {
+			continue
+		}
+		overlaps := subtypesByGeneric[rec.Artifact.HookEvent]
+		if len(overlaps) == 0 {
+			continue
+		}
+		labels := make([]string, 0, len(overlaps))
+		for _, s := range overlaps {
+			labels = append(labels, fmt.Sprintf("%q (%s)", s.Artifact.HookEvent, s.ID))
+		}
+		sort.Strings(labels)
+		out = append(out, Diagnostic{
+			ArtifactID: rec.ID,
+			Code:       r.Code(),
+			Severity:   SeverityWarning,
+			Message: fmt.Sprintf("generic hook_event %q overlaps the subtype hook(s) %s; a generic hook already covers the subtype, so pick one level of specificity",
+				rec.Artifact.HookEvent, strings.Join(labels, ", ")),
+		})
 	}
 	return out
 }

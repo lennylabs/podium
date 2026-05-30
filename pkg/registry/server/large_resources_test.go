@@ -39,7 +39,7 @@ func largeResourceSetup(t *testing.T) (string, []byte, string) {
 	testharness.WriteTree(t, dir,
 		testharness.WriteTreeOption{
 			Path:    "finance/run/ARTIFACT.md",
-			Content: "---\ntype: skill\nversion: 1.0.0\ndescription: r\n---\n\nbody\n",
+			Content: "---\ntype: skill\nversion: 1.0.0\n---\n\n<!-- Skill body lives in SKILL.md. -->\n",
 		},
 		testharness.WriteTreeOption{
 			Path:    "finance/run/SKILL.md",

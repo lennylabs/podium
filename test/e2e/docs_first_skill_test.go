@@ -161,6 +161,40 @@ func TestFirstSkill_FullerFrontmatterLints(t *testing.T) {
 	}
 }
 
+// T-D-first-skill-4b — a Podium-only field in SKILL.md is an ingest error;
+// SKILL.md stays within the agentskills.io subset (spec §4.3.4, F-4.3.6).
+func TestFirstSkill_SkillMDPodiumFieldErrors(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"personal/hello/greet/ARTIFACT.md": greetSkillArtifact,
+		"personal/hello/greet/SKILL.md":    "---\nname: greet\ndescription: Greet the user.\nversion: 1.0.0\n---\n\nbody\n",
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 1 {
+		t.Fatalf("lint exit=%d, want 1 (error)\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "[error]") || !strings.Contains(res.Stdout, "version") {
+		t.Errorf("expected an error flagging the Podium-only field version:\n%s", res.Stdout)
+	}
+}
+
+// T-D-first-skill-4c — name/description/license in a skill's ARTIFACT.md that
+// disagree with SKILL.md are an ingest error (spec §4.3.4, F-4.3.6).
+func TestFirstSkill_ArtifactFieldMismatchErrors(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"personal/hello/greet/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\ndescription: A different description than SKILL.md.\n---\n\n<!-- Skill body lives in SKILL.md. -->\n",
+		"personal/hello/greet/SKILL.md":    greetSkillBody,
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 1 {
+		t.Fatalf("lint exit=%d, want 1 (error)\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "skill_artifact_field_mismatch") {
+		t.Errorf("expected a skill_artifact_field_mismatch error:\n%s", res.Stdout)
+	}
+}
+
 // T-D-first-skill-5 — a non-comment ARTIFACT.md body for a skill warns
 // (lint.skill_artifact_body) but does not fail. spec: §4.3.4.
 func TestFirstSkill_ArtifactBodyMustBeComment(t *testing.T) {
@@ -311,6 +345,34 @@ func TestFirstSkill_ClaudeCodeMaterializes(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(tgt, ".claude/skills/greet/ARTIFACT.md")); err == nil {
 		t.Errorf(".claude/skills/greet/ARTIFACT.md should not exist for a skill")
+	}
+}
+
+// T-D-first-skill-12b — when SKILL.md omits compatibility, the claude-code
+// adapter derives it from runtime_requirements/sandbox_profile and injects it
+// into the materialized SKILL.md (spec §4.3.4, F-4.3.9). The none adapter,
+// which materializes the canonical layout verbatim, does not.
+func TestFirstSkill_ClaudeCodeDerivesCompatibility(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"personal/hello/greet/ARTIFACT.md": greetArtifactRuntime,
+		"personal/hello/greet/SKILL.md":    greetSkillBodyFuller,
+	})
+	tgt := t.TempDir()
+	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
+		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	got := readFile(t, filepath.Join(tgt, ".claude/skills/greet/SKILL.md"))
+	if !strings.Contains(got, "compatibility:") || !strings.Contains(got, "Python >=3.10") {
+		t.Errorf("claude-code SKILL.md missing derived compatibility:\n%s", got)
+	}
+
+	tgt2 := t.TempDir()
+	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt2, "--harness", "none"); res.Exit != 0 {
+		t.Fatalf("sync none exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	if got := readFile(t, filepath.Join(tgt2, "personal/hello/greet/SKILL.md")); strings.Contains(got, "compatibility:") {
+		t.Errorf("none adapter must materialize SKILL.md verbatim, no derived compatibility:\n%s", got)
 	}
 }
 

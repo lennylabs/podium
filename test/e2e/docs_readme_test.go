@@ -534,8 +534,8 @@ func TestReadme_MCPToolsList(t *testing.T) {
 func TestReadme_MCPSearchArtifacts(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/close-reporting/run-variance-analysis/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\ndescription: Flag unusual variance vs forecast.\n---\n\n",
-		"finance/close-reporting/run-variance-analysis/SKILL.md":    skillBody("run-variance-analysis"),
+		"finance/close-reporting/run-variance-analysis/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\n---\n\n",
+		"finance/close-reporting/run-variance-analysis/SKILL.md":    skillBodyDesc("run-variance-analysis", "Flag unusual variance vs forecast."),
 	}))
 	res := mcpExec(t, []string{"PODIUM_REGISTRY=" + srv.BaseURL},
 		toolCall(1, "search_artifacts", map[string]any{"query": "variance"}))

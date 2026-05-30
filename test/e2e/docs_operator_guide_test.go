@@ -483,7 +483,7 @@ func TestOpGuide_25_SandboxReadOnlyFsMCP(t *testing.T) {
 	// The none harness only advertises "unrestricted", so load_artifact
 	// should fail with materialize.sandbox_unsupported.
 	reg := writeRegistry(t, map[string]string{
-		"sandboxed/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\ndescription: Sandboxed skill. Use when testing sandbox.\nsensitivity: low\nsandbox_profile: read-only-fs\n---\n\nSandboxed body.\n",
+		"sandboxed/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\nsensitivity: low\nsandbox_profile: read-only-fs\n---\n\n<!-- Skill body lives in SKILL.md. -->\n",
 		"sandboxed/SKILL.md":    skillBody("sandboxed"),
 	})
 	srv := startServer(t, reg)

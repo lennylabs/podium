@@ -214,8 +214,8 @@ func TestBrowsing_SearchDomainsRequiresDomainMD(t *testing.T) {
 func TestBrowsing_SearchArtifactsQuery(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/close-reporting/run-variance-analysis/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\ndescription: Run variance analysis against forecast.\n---\n\n<!-- body -->\n",
-		"finance/close-reporting/run-variance-analysis/SKILL.md":    skillBody("run-variance-analysis"),
+		"finance/close-reporting/run-variance-analysis/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\n---\n\n<!-- body -->\n",
+		"finance/close-reporting/run-variance-analysis/SKILL.md":    skillBodyDesc("run-variance-analysis", "Run variance analysis against forecast."),
 	}))
 	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "search_artifacts", map[string]any{"query": "variance analysis", "type": "skill"}))
 	result := rpcResult(t, res.Stdout, 1)
@@ -255,10 +255,10 @@ func TestBrowsing_SearchArtifactsBrowse(t *testing.T) {
 func TestBrowsing_SearchArtifactsQueryScopeType(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\ndescription: Approve and pay vendor invoices.\n---\n\n<!-- body -->\n",
-		"finance/ap/pay-invoice/SKILL.md":    skillBody("pay-invoice"),
-		"engineering/pr-review/ARTIFACT.md":  "---\ntype: skill\nversion: 1.0.0\ndescription: Review PRs.\n---\n\n<!-- body -->\n",
-		"engineering/pr-review/SKILL.md":     skillBody("pr-review"),
+		"finance/ap/pay-invoice/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\n---\n\n<!-- body -->\n",
+		"finance/ap/pay-invoice/SKILL.md":    skillBodyDesc("pay-invoice", "Approve and pay vendor invoices."),
+		"engineering/pr-review/ARTIFACT.md":  "---\ntype: skill\nversion: 1.0.0\n---\n\n<!-- body -->\n",
+		"engineering/pr-review/SKILL.md":     skillBodyDesc("pr-review", "Review PRs."),
 	}))
 	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "search_artifacts", map[string]any{
 		"query": "invoice approval", "scope": "finance/ap", "type": "skill"}))
@@ -786,8 +786,8 @@ func TestBrowsing_HTTPLoadDomain(t *testing.T) {
 func TestBrowsing_HTTPSearchArtifacts(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/va/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\ndescription: variance.\n---\n\n<!-- body -->\n",
-		"finance/va/SKILL.md":    skillBody("va"),
+		"finance/va/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\n---\n\n<!-- body -->\n",
+		"finance/va/SKILL.md":    skillBodyDesc("va", "variance."),
 	}))
 	st, body := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=variance&type=skill")
 	if st != 200 {

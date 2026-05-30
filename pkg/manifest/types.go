@@ -113,6 +113,12 @@ type Artifact struct {
 	// with "[redacted]" in audit log entries that reference this
 	// artifact (§8.2 manifest-declared redaction surface).
 	AuditRedact []string `yaml:"audit_redact,omitempty"`
+	// LintSuppress lists lint rule codes to suppress for this artifact.
+	// Per §4.3.4 the agentskills.io `skills-ref validate` reference check
+	// ships a suppression flag "for cases where the standard's validator
+	// is overly strict"; listing lint.skill_ref_validate here silences
+	// that warning. Only advisory (non-error) rules honor the list.
+	LintSuppress []string `yaml:"lint_suppress,omitempty"`
 
 	// Caller-interpreted (§4.3).
 	MCPServers          []MCPServerRef        `yaml:"mcpServers,omitempty"`

@@ -277,9 +277,47 @@ func TestHooks_RuntimeUnavailableRefusesMaterialize(t *testing.T) {
 	t.Skip("blocked by F-4.4.1: the materialize.runtime_unavailable check is implemented but never invoked, so a missing system package does not block materialization")
 }
 
-// T-D-hooks-11 — a generic pre_tool_use hook emits an info diagnostic naming
-// its subtypes.
+// T-D-hooks-11 — declaring both a generic pre_tool_use hook and a
+// corresponding subtype hook (pre_shell_execution) warns; the warning names
+// the overlapping subtype (spec §4.3.5, F-4.3.8).
 func TestHooks_LintGenericPreToolUse(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"hooks/broad/ARTIFACT.md":  hkArtifact("broad", "pre_tool_use"),
+		"hooks/narrow/ARTIFACT.md": hkArtifact("narrow", "pre_shell_execution"),
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 0 {
+		t.Fatalf("lint exit=%d, want 0 (warning)\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "lint.hook_generic_and_subtype") || !strings.Contains(res.Stdout, "[warning]") {
+		t.Errorf("expected a generic/subtype warning:\n%s", res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "pre_shell_execution") {
+		t.Errorf("warning should name the overlapping subtype:\n%s", res.Stdout)
+	}
+}
+
+// T-D-hooks-12 — declaring both a generic post_tool_use hook and a
+// corresponding post-subtype hook (post_file_edit) warns (spec §4.3.5).
+func TestHooks_LintGenericPostToolUse(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"hooks/broad/ARTIFACT.md":  hkArtifact("broad", "post_tool_use"),
+		"hooks/narrow/ARTIFACT.md": hkArtifact("narrow", "post_file_edit"),
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 0 {
+		t.Fatalf("lint exit=%d, want 0 (warning)\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "lint.hook_generic_and_subtype") || !strings.Contains(res.Stdout, "post_file_edit") {
+		t.Errorf("missing generic/subtype warning naming post_file_edit:\n%s", res.Stdout)
+	}
+}
+
+// T-D-hooks-11b — a lone generic hook is valid and draws no generic/subtype
+// diagnostic (spec §4.3.5: "Authors choose the level of specificity"; F-4.3.8).
+func TestHooks_LintLoneGenericClean(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"hooks/x/ARTIFACT.md": hkArtifact("x", "pre_tool_use"),
@@ -288,24 +326,8 @@ func TestHooks_LintGenericPreToolUse(t *testing.T) {
 	if res.Exit != 0 {
 		t.Fatalf("lint exit=%d, want 0\nstdout=%s", res.Exit, res.Stdout)
 	}
-	if !strings.Contains(res.Stdout, "lint.hook_generic_and_subtype") || !strings.Contains(res.Stdout, "pre_shell_execution") {
-		t.Errorf("missing generic-hook info naming pre_shell_execution:\n%s", res.Stdout)
-	}
-}
-
-// T-D-hooks-12 — a generic post_tool_use hook emits an info diagnostic naming
-// its post-subtypes.
-func TestHooks_LintGenericPostToolUse(t *testing.T) {
-	t.Parallel()
-	reg := writeRegistry(t, map[string]string{
-		"hooks/y/ARTIFACT.md": hkArtifact("y", "post_tool_use"),
-	})
-	res := runPodium(t, "", nil, "lint", "--registry", reg)
-	if res.Exit != 0 {
-		t.Fatalf("lint exit=%d, want 0\nstdout=%s", res.Exit, res.Stdout)
-	}
-	if !strings.Contains(res.Stdout, "lint.hook_generic_and_subtype") || !strings.Contains(res.Stdout, "post_file_edit") {
-		t.Errorf("missing generic post-hook info naming post_file_edit:\n%s", res.Stdout)
+	if strings.Contains(res.Stdout, "lint.hook_generic_and_subtype") {
+		t.Errorf("a lone generic hook must not be flagged:\n%s", res.Stdout)
 	}
 }
 
@@ -829,11 +851,20 @@ func TestHooks_LintLowNoSandboxClean(t *testing.T) {
 	}
 }
 
-// T-D-hooks-44 — the doc presents hook_event as required, but ruleRequiredFields
-// does not check it. A hook missing hook_event is not flagged.
-func TestHooks_LintMissingEventNotRequired(t *testing.T) {
+// T-D-hooks-44 — hook_event is a required field of a type: hook artifact
+// (spec §4.3 hook schema, F-4.3.7); a hook missing it is an ingest error.
+func TestHooks_LintMissingEventErrors(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.3.7: type-specific required fields are not validated, so a hook missing hook_event is not flagged by lint")
+	reg := writeRegistry(t, map[string]string{
+		"hooks/no-event/ARTIFACT.md": "---\ntype: hook\nname: no-event\nversion: 1.0.0\ndescription: A hook.\nhook_action: |\n  echo hi\n---\n\nbody\n",
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 1 {
+		t.Fatalf("lint exit=%d, want 1 (error)\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "[error]") || !strings.Contains(res.Stdout, "hook_event") {
+		t.Errorf("expected an error naming hook_event:\n%s", res.Stdout)
+	}
 }
 
 // T-D-hooks-45 — scaffold produces a placeholder body after the closing

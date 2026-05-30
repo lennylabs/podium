@@ -553,3 +553,10 @@ func contextArtifact(desc string) string {
 func skillBody(name string) string {
 	return fmt.Sprintf("---\nname: %s\ndescription: The %s skill for tests. Use when the user needs %s.\n---\n\n%s body.\n", name, name, name, name)
 }
+
+// skillBodyDesc builds a SKILL.md with a specific name and description. Per
+// §4.3.4 the agentskills.io name/description live in SKILL.md; this helper is
+// used where a search query must match the skill's description.
+func skillBodyDesc(name, description string) string {
+	return fmt.Sprintf("---\nname: %s\ndescription: %s\n---\n\n%s body.\n", name, description, name)
+}

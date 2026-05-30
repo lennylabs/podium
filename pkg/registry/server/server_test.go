@@ -22,10 +22,11 @@ tags: [%s]
 
 Body for %s.
 `
+	// §4.3.4 — a skill's ARTIFACT.md omits name/description (they live in
+	// SKILL.md). skillFor's description argument is therefore ignored.
 	skillArtifact = `---
 type: skill
 version: 1.0.0
-description: %s
 ---
 
 `

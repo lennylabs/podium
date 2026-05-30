@@ -706,8 +706,16 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 func manifestRecordFor(rec filesystem.ArtifactRecord, tenantID, layerID string, ingestedAt time.Time) (store.ManifestRecord, error) {
 	hash := contentHashOf(rec)
 	body := rec.Artifact.Body
+	description := rec.Artifact.Description
 	if rec.Artifact.Type == manifest.TypeSkill && rec.Skill != nil {
 		body = rec.Skill.Body
+		// spec: §4.3.4 — a skill's name and description live in SKILL.md;
+		// ARTIFACT.md omits them ("Podium reads from SKILL.md"). Index the
+		// SKILL.md description so the skill is searchable without
+		// duplicating the field into ARTIFACT.md.
+		if rec.Skill.Description != "" {
+			description = rec.Skill.Description
+		}
 	}
 	return store.ManifestRecord{
 		TenantID:         tenantID,
@@ -715,7 +723,7 @@ func manifestRecordFor(rec filesystem.ArtifactRecord, tenantID, layerID string, 
 		Version:          rec.Artifact.Version,
 		ContentHash:      "sha256:" + hash,
 		Type:             string(rec.Artifact.Type),
-		Description:      rec.Artifact.Description,
+		Description:      description,
 		Tags:             rec.Artifact.Tags,
 		Sensitivity:      string(rec.Artifact.Sensitivity),
 		SearchVisibility: string(rec.Artifact.SearchVisibility),

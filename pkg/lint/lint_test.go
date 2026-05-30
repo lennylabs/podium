@@ -307,10 +307,11 @@ body
 	}
 }
 
-// Spec: §4.3.5 — hook_event using a generic event (pre_tool_use) is
-// allowed but lint emits an info-level note recommending the more
-// specific subtype where possible.
-func TestLint_HookGenericEventInfo(t *testing.T) {
+// Spec: §4.3.5 (F-4.3.8) — a lone generic hook is valid ("Authors choose the
+// level of specificity that matches the action's intent") and draws no
+// generic/subtype diagnostic. The pre-fix rule wrongly flagged every generic
+// hook at info severity.
+func TestLint_HookLoneGenericClean(t *testing.T) {
 	t.Parallel()
 	reg, records := openFixture(t,
 		testharness.WriteTreeOption{
@@ -329,8 +330,63 @@ body
 		},
 	)
 	diags := (&Linter{}).Lint(reg, records)
-	if !hasCode(diags, "lint.hook_generic_and_subtype") {
-		t.Errorf("expected lint.hook_generic_and_subtype, got: %v", diags)
+	if hasCode(diags, "lint.hook_generic_and_subtype") {
+		t.Errorf("a lone generic hook must not draw the generic/subtype diagnostic: %v", diags)
+	}
+}
+
+// Spec: §4.3.5 (F-4.3.8) — "Authors should not declare both a generic hook and
+// the corresponding subtype hook ...; lint warns when this happens." Because
+// hook_event is a single scalar, the reachable form is a generic hook and a
+// corresponding subtype hook present together; the rule warns (not info) and
+// names the overlapping subtype.
+func TestLint_HookGenericAndSubtypeWarns(t *testing.T) {
+	t.Parallel()
+	reg, records := openFixture(t,
+		testharness.WriteTreeOption{
+			Path: "hooks/broad/ARTIFACT.md",
+			Content: `---
+type: hook
+version: 1.0.0
+description: broad
+hook_event: pre_tool_use
+hook_action: |
+  echo broad
+---
+
+body
+`,
+		},
+		testharness.WriteTreeOption{
+			Path: "hooks/narrow/ARTIFACT.md",
+			Content: `---
+type: hook
+version: 1.0.0
+description: narrow
+hook_event: pre_shell_execution
+hook_action: |
+  echo narrow
+---
+
+body
+`,
+		},
+	)
+	diags := (&Linter{}).Lint(reg, records)
+	if !hasSeverity(diags, "lint.hook_generic_and_subtype", SeverityWarning) {
+		t.Fatalf("expected a hook_generic_and_subtype warning, got: %v", diags)
+	}
+	var named bool
+	for _, d := range diags {
+		if d.Code == "lint.hook_generic_and_subtype" && strings.Contains(d.Message, "pre_shell_execution") {
+			named = true
+		}
+		if d.Code == "lint.hook_generic_and_subtype" && d.Severity == SeverityInfo {
+			t.Errorf("severity must be warning, not info: %v", d)
+		}
+	}
+	if !named {
+		t.Errorf("warning should name the overlapping subtype pre_shell_execution: %v", diags)
 	}
 }
 
@@ -375,8 +431,8 @@ body
 }
 
 // Spec: §4.3.5 (F-4.3.2) — every canonical event name passes the
-// hook_event check, and the generic events still draw only the info-level
-// subtype note (not an unknown-event error).
+// hook_event check. Each event is its own single-artifact fixture, so no
+// generic/subtype overlap arises and no unknown-event error is raised.
 func TestLint_HookEventCanonicalAccepted(t *testing.T) {
 	t.Parallel()
 	for _, event := range manifest.CanonicalHookEvents() {
