@@ -1086,6 +1086,12 @@ type LoadArtifactResult struct {
 	// signer wired. Consumers verify via sign.EnforceVerification
 	// against PODIUM_VERIFY_SIGNATURES.
 	Signature string
+	// Merged is true when the served Frontmatter is an extends-merged
+	// re-serialization with the hidden parent stripped (§4.6) rather than
+	// the original child bytes the ContentHash was computed over. The
+	// consumer uses it to skip local content-hash recomputation, which the
+	// served bytes cannot reproduce for a merged manifest (§6.6 step 2).
+	Merged bool
 }
 
 // LoadArtifactOptions captures §5 arguments. Empty Version means
@@ -1264,7 +1270,14 @@ func (r *Registry) assembleResult(ctx context.Context, rec store.ManifestRecord)
 		return nil, err
 	}
 	merged := mergeChain(chain)
-	return withDeprecationWarning(resultFromRecord(merged)), nil
+	result := resultFromRecord(merged)
+	// This branch runs only for an extends artifact, and mergeChain always
+	// re-serializes the frontmatter with the hidden parent stripped (§4.6),
+	// so the served bytes no longer reproduce the stored ContentHash. Flag
+	// the result so the consumer skips local content-hash verification and
+	// relies on the signature gate instead (§6.6 step 2).
+	result.Merged = true
+	return withDeprecationWarning(result), nil
 }
 
 // resolveExtendsChain returns the chain of records starting at rec and

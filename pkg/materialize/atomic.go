@@ -185,14 +185,23 @@ func containsString(haystack []string, needle string) bool {
 	return false
 }
 
-// Write writes each file from files into the destination root. Each file
-// is written atomically (temp file + rename) so a failure mid-stream
-// leaves either the previous content or the new content, never a partial
-// write.
+// Write writes every file from files into the destination root with a
+// tree-level all-or-nothing guarantee: the destination ends up containing a
+// complete copy of files or none of them (§6.6 step 5, §6.9 "Materialization
+// destination unwritable"). It stages each file as "<path>.tmp" first, and
+// only after every staged write succeeds does it rename them into place. A
+// failure during the write phase (an unwritable directory, a full disk)
+// removes the staged temporaries and leaves the destination unchanged, so a
+// mid-batch failure cannot leave files 0..i-1 renamed into place while file i
+// failed.
 //
-// Per §6.7 sandbox contract, paths that escape destination (via "..", an
-// absolute path, or a symlink) cause the call to fail with
-// ErrOutOfDestination before any file is written.
+// Per the §6.7 sandbox contract, paths that escape destination cause the call
+// to fail with ErrOutOfDestination before any file is written. Escapes via
+// ".." or an absolute path are rejected lexically; escapes via a symlinked
+// destination root or a symlinked intermediate directory are rejected by
+// resolving the deepest existing ancestor of each target with
+// filepath.EvalSymlinks and confirming it stays within the resolved
+// destination root.
 func Write(destination string, files []adapter.File) error {
 	if destination == "" {
 		return ErrEmptyDestination
@@ -202,8 +211,8 @@ func Write(destination string, files []adapter.File) error {
 		return err
 	}
 
-	// Validate every path before any write so a single bad path fails the
-	// whole batch atomically (no half-written tree).
+	// Validate every path lexically before any write so a single bad path
+	// fails the whole batch with no half-written tree.
 	resolved := make([]string, len(files))
 	for i, f := range files {
 		full, err := resolveSandboxedPath(absDest, f.Path)
@@ -216,15 +225,59 @@ func Write(destination string, files []adapter.File) error {
 	if err := os.MkdirAll(absDest, 0o755); err != nil {
 		return err
 	}
+	// Resolve the destination root through any symlinks once so every
+	// per-target containment check compares against the real root (§6.7).
+	realDest, err := filepath.EvalSymlinks(absDest)
+	if err != nil {
+		return err
+	}
 
+	// Stage phase: create parent directories and write every file to its
+	// "<path>.tmp" sibling. Nothing is renamed into place yet, so a failure
+	// here is fully reversible by removing the staged temporaries.
+	staged := make([]string, len(files))
+	cleanup := func() {
+		for _, t := range staged {
+			if t != "" {
+				_ = os.Remove(t)
+			}
+		}
+	}
 	for i, f := range files {
+		// §6.7 symlink containment: confirm the target's deepest existing
+		// ancestor resolves inside the destination before creating or
+		// writing anything, so a pre-existing symlinked directory cannot
+		// redirect the write outside the root.
+		if err := checkSymlinkContainment(realDest, resolved[i]); err != nil {
+			cleanup()
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(resolved[i]), 0o755); err != nil {
+			cleanup()
+			return err
+		}
 		mode := os.FileMode(f.Mode)
 		if mode == 0 {
 			mode = 0o644
 		}
-		if err := writeAtomic(resolved[i], f.Content, mode); err != nil {
+		tmp := resolved[i] + ".tmp"
+		if err := os.WriteFile(tmp, f.Content, mode); err != nil {
+			cleanup()
 			return err
 		}
+		staged[i] = tmp
+	}
+
+	// Commit phase: rename each staged temporary into place. The writes have
+	// already succeeded, so a same-directory rename is atomic and does not
+	// fail under the disk-full / unwritable conditions that abort the stage
+	// phase. A leftover temporary from a rename error is cleaned up.
+	for i := range files {
+		if err := os.Rename(staged[i], resolved[i]); err != nil {
+			cleanup()
+			return err
+		}
+		staged[i] = ""
 	}
 	return nil
 }
@@ -247,8 +300,47 @@ func resolveSandboxedPath(dest, rel string) (string, error) {
 	return full, nil
 }
 
+// checkSymlinkContainment confirms that the deepest already-existing ancestor
+// of target resolves (through any symlinks) to a path still inside realDest.
+// realDest must already be symlink-resolved. This catches a destination whose
+// intermediate directory is a symlink pointing outside the root (for example
+// a pre-existing "sub -> /etc"), which the lexical check in
+// resolveSandboxedPath cannot see. spec: §6.6 step 5, §6.7 sandbox contract.
+func checkSymlinkContainment(realDest, target string) error {
+	dir := filepath.Dir(target)
+	for {
+		real, err := filepath.EvalSymlinks(dir)
+		if err == nil {
+			if !withinRoot(realDest, real) {
+				return fmt.Errorf("%w: %q resolves outside %q via a symlinked component", ErrOutOfDestination, target, realDest)
+			}
+			return nil
+		}
+		if !os.IsNotExist(err) {
+			return err
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Reached the filesystem root without an existing ancestor.
+			return nil
+		}
+		dir = parent
+	}
+}
+
+// withinRoot reports whether path is root itself or nested under it, after
+// both have been symlink-resolved by the caller.
+func withinRoot(root, path string) bool {
+	if path == root {
+		return true
+	}
+	return strings.HasPrefix(path+string(filepath.Separator), root+string(filepath.Separator))
+}
+
 // writeAtomic writes content to path via "<path>.tmp" + rename so the
-// destination either has the previous content or the new content.
+// destination either has the previous content or the new content. It is the
+// single-file primitive WriteSandboxProfile uses; the multi-file Write path
+// stages and commits explicitly for its tree-level guarantee.
 func writeAtomic(path string, content []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err

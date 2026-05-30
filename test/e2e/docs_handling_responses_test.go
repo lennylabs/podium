@@ -750,30 +750,25 @@ func TestHandlingResponses_ScopeDenied(t *testing.T) {
 	t.Skip("not expressible in a standalone single-layer deployment: there is no invisible artifact to exercise the visibility-denied path")
 }
 
-// T-D-handling-responses-51 — materialize.hook_failed is absent from the codebase.
-func TestHandlingResponses_HookFailedAbsent(t *testing.T) {
+// T-D-handling-responses-51 — materialize.hook_failed is a documented error
+// code (docs/consuming/handling-artifact-responses.md) the bridge emits when
+// the §6.6 step 4 MaterializationHook chain returns an error. F-6.6.1 wired
+// the hook step into both materialization paths, so the code is now reachable.
+// This asserts the bridge references it (the inverse of the prior gap marker).
+// The full hook-failure path is exercised in cmd/podium-mcp's in-process unit
+// tests (TestDeliver_HookErrorAbortsWrite); a standalone e2e cannot register a
+// hook with the out-of-process bridge until the wire-serializable hook-loading
+// SPI lands (F-9.3.1).
+func TestHandlingResponses_HookFailedWired(t *testing.T) {
 	t.Parallel()
-	// Build the needle at runtime so this test file does not match itself.
 	needle := "materialize.hook" + "_failed"
-	root := repoRoot(t)
-	for _, sub := range []string{"cmd", "pkg", "internal"} {
-		dir := filepath.Join(root, sub)
-		err := filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
-			if err != nil || info.IsDir() {
-				return nil
-			}
-			if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
-				return nil
-			}
-			b, _ := os.ReadFile(p)
-			if strings.Contains(string(b), needle) {
-				t.Errorf("%s contains %q (documented as an unimplemented error code)", p, needle)
-			}
-			return nil
-		})
-		if err != nil {
-			t.Fatalf("walk %s: %v", dir, err)
-		}
+	mainGo := filepath.Join(repoRoot(t), "cmd", "podium-mcp", "main.go")
+	b, err := os.ReadFile(mainGo)
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	if !strings.Contains(string(b), needle) {
+		t.Errorf("%s does not reference %q; the §6.6 step 4 hook-failure path is not wired", mainGo, needle)
 	}
 }
 

@@ -25,6 +25,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -33,20 +34,25 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/lennylabs/podium/internal/buildinfo"
 	"github.com/lennylabs/podium/pkg/adapter"
 	"github.com/lennylabs/podium/pkg/audit"
+	"github.com/lennylabs/podium/pkg/hook"
 	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/materialize"
 	"github.com/lennylabs/podium/pkg/overlay"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/sign"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // protocolVersion is the MCP wire-protocol version this binary speaks.
@@ -276,6 +282,12 @@ type mcpServer struct {
 	// Nil when the var is unset, in which case auditing is left to the
 	// registry. When set, meta-tool calls append a local audit event.
 	audit audit.Sink
+	// hooks is the §6.6 step 4 MaterializationHook chain, run over the
+	// adapter output before the atomic write on every materialization path.
+	// Empty by default (step 4 is a no-op when no hooks are configured); the
+	// boot-time loading of configured hook plugins is the wire-serializable
+	// SPI work tracked by F-9.3.1. Tests inject hooks directly.
+	hooks []hook.Hook
 }
 
 // recordSuccess stamps the time of a successful registry call for the
@@ -733,7 +745,29 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 		s.resolutions.Put(id, resp.Version, resp.ContentHash)
 	}
 
-	return s.deliverLoadArtifact(resp, deliverOpts{harness: harnessFromArgs(s.cfg.harness, args), destination: destFromArgs(args)})
+	return s.deliverLoadArtifact(resp, deliverOpts{
+		harness:     harnessFromArgs(s.cfg.harness, args),
+		destination: destFromArgs(args),
+		refresh:     s.largeResourceRefresher(args),
+	})
+}
+
+// largeResourceRefresher returns a closure that re-requests /v1/load_artifact
+// with the same arguments and yields a freshly presigned large_resources URL
+// set, backing the §6.6 step 1 "retry with a fresh URL set" contract. It is
+// used only on the live-fetch path; cache and overlay deliveries pass nil.
+func (s *mcpServer) largeResourceRefresher(args map[string]any) resourceRefresher {
+	return func() (map[string]largeResourceLink, error) {
+		body, err := s.fetchJSON("/v1/load_artifact", args)
+		if err != nil {
+			return nil, err
+		}
+		var fresh loadArtifactResponse
+		if err := json.Unmarshal(body, &fresh); err != nil {
+			return nil, err
+		}
+		return fresh.LargeResources, nil
+	}
 }
 
 // deliverOpts threads the per-call adjustments deliverLoadArtifact
@@ -745,6 +779,11 @@ type deliverOpts struct {
 	// supply the destination per load_artifact call instead of (or in
 	// addition to) the process-wide env var.
 	destination string
+	// refresh re-requests a freshly presigned large_resources URL set so a
+	// 403/expired URL is replaced rather than retried unchanged (§6.6 step
+	// 1). Set only on the live-fetch path; nil on cache/overlay paths, which
+	// cannot reach the registry.
+	refresh resourceRefresher
 }
 
 // destFromArgs returns the per-call materialization destination from a
@@ -785,12 +824,23 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 	if err := s.enforceRuntimePolicy(resp); err != nil {
 		return errorResult(err.Error())
 	}
-	// §6.6 step 1 — fetch every large_resource via its presigned
-	// URL into the inline Resources map. Failures (network /
-	// 403 / hash mismatch) abort materialization with a
-	// structured error.
-	if err := s.fetchLargeResources(&resp); err != nil {
+	// §6.6 step 1 — normalize inline resources. When the registry flags them
+	// base64 (F-6.6.8), decode to raw bytes before the content-hash check and
+	// materialization so the host receives the payload rather than base64 text.
+	if err := decodeInlineResources(&resp); err != nil {
+		return errorResult(err.Error())
+	}
+	// §6.6 step 1 — fetch every large_resource via its presigned URL into the
+	// inline Resources map. Failures (network / 403 / hash mismatch) abort
+	// materialization with a structured error; a 403/expired URL is refreshed.
+	if err := s.fetchLargeResources(&resp, o.refresh); err != nil {
 		return errorResult("materialize.fetch_failed: " + err.Error())
+	}
+	// §6.6 step 2 — content-hash match. Recompute the canonical hash over the
+	// delivered manifest bytes and bundled resources and reject a mismatch
+	// before anything is cached or written (F-6.6.2).
+	if err := s.verifyContentHash(resp); err != nil {
+		return errorResult(err.Error())
 	}
 
 	// Cache the canonical bytes (content cache is forever-immutable
@@ -803,6 +853,7 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 	// either per call (§6.2 / §6.6) or via PODIUM_MATERIALIZE_ROOT. The
 	// per-call destination wins when both are present.
 	materialized := []string{}
+	var warnings []string
 	root := o.destination
 	if root == "" {
 		root = s.cfg.materializeRoot
@@ -842,6 +893,17 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 			if err != nil {
 				return errorResult("adapter: " + err.Error())
 			}
+			// §6.6 step 4 — run the configured MaterializationHook chain
+			// over the adapter output before the atomic write. Hooks may
+			// rewrite or drop files and emit warnings; the chain is a no-op
+			// when none are configured and runs whether or not an adapter
+			// translated (harness: none still produces the canonical layout).
+			hookedOut, hookWarnings, herr := hook.Run(s.hooks, manifestContext(resp.Frontmatter), out)
+			if herr != nil {
+				return errorResult("materialize.hook_failed: " + herr.Error())
+			}
+			warnings = append(warnings, hookWarnings...)
+			out = hookedOut
 			if err := materialize.Write(root, out); err != nil {
 				return errorResult("materialize: " + err.Error())
 			}
@@ -861,7 +923,7 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 		}
 	}
 
-	return map[string]any{
+	result := map[string]any{
 		"id":              resp.ID,
 		"type":            resp.Type,
 		"version":         resp.Version,
@@ -869,6 +931,88 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 		"manifest_body":   resp.ManifestBody,
 		"materialized_at": materialized,
 	}
+	// §6.6 step 4 — surface any warnings the hook chain emitted alongside the
+	// materialized paths so the host sees them without failing the call.
+	if len(warnings) > 0 {
+		result["warnings"] = warnings
+	}
+	return result
+}
+
+// decodeInlineResources decodes base64-encoded inline resources in place when
+// the registry set resources_base64 (F-6.6.8). Large resources are fetched
+// raw and are unaffected. A value that does not decode fails the call with a
+// structured error rather than writing the base64 text to disk.
+func decodeInlineResources(resp *loadArtifactResponse) error {
+	if !resp.ResourcesB64 || len(resp.Resources) == 0 {
+		return nil
+	}
+	decoded := make(map[string]string, len(resp.Resources))
+	for k, v := range resp.Resources {
+		raw, err := base64.StdEncoding.DecodeString(v)
+		if err != nil {
+			return fmt.Errorf("materialize.invalid_base64: resource %s: %v", k, err)
+		}
+		decoded[k] = string(raw)
+	}
+	resp.Resources = decoded
+	resp.ResourcesB64 = false
+	return nil
+}
+
+// verifyContentHash recomputes the canonical content hash over the served
+// manifest bytes and bundled resources and compares it to resp.ContentHash
+// (§4.7.6 / §6.6 step 2). It binds the delivered frontmatter, manifest body,
+// and inline resources to the content_hash so a registry response (or a
+// non-TLS hop) that tampered with the bytes while keeping a consistent
+// (content_hash, signature) pair is rejected before materialization. For
+// sub-threshold artifacts that carry no signature this is the only integrity
+// gate the spec defines.
+//
+// The recomputation reproduces the registry's canonicalization (contentHashOf
+// over version.ContentHash): artifact bytes, the SKILL.md slot, then each
+// bundled resource in sorted-path order. It is skipped when the served bytes
+// cannot reproduce the stored hash by construction:
+//   - skills, whose content_hash covers the original SKILL.md bytes the
+//     registry parses and discards at ingest (only the prose body is served);
+//   - extends-merged manifests (resp.ManifestMerged), whose served frontmatter
+//     is a re-serialization with the hidden parent stripped (§4.6).
+//
+// Those paths rely on the signature gate. A skip never weakens the common
+// path: the registry sets manifest_merged only when it actually merged.
+func (s *mcpServer) verifyContentHash(resp loadArtifactResponse) error {
+	if resp.ContentHash == "" || resp.Type == "skill" || resp.ManifestMerged {
+		return nil
+	}
+	parts := [][]byte{[]byte(resp.Frontmatter), nil}
+	keys := make([]string, 0, len(resp.Resources))
+	for k := range resp.Resources {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		parts = append(parts, []byte(k), []byte(resp.Resources[k]))
+	}
+	got := "sha256:" + version.ContentHash(parts...)
+	if got != resp.ContentHash {
+		return fmt.Errorf("materialize.content_hash_mismatch: recomputed %s does not match served %s", got, resp.ContentHash)
+	}
+	return nil
+}
+
+// manifestContext parses the served frontmatter into the map[string]any the
+// MaterializationHook chain receives for context (§6.6 step 4). A parse
+// failure yields a nil map; the hooks still run over the file bytes.
+func manifestContext(frontmatter string) map[string]any {
+	fm, _, err := manifest.SplitFrontmatter([]byte(frontmatter))
+	if err != nil {
+		return nil
+	}
+	var m map[string]any
+	if err := yaml.Unmarshal(fm, &m); err != nil {
+		return nil
+	}
+	return m
 }
 
 // materializeTargetsHarness reports whether the artifact whose full
@@ -926,6 +1070,7 @@ func (s *mcpServer) loadArtifactFromOverlay(rec *filesystem.ArtifactRecord, args
 		return errorResult("cache: " + err.Error())
 	}
 	materialized := []string{}
+	var warnings []string
 	root := destFromArgs(args)
 	if root == "" {
 		root = s.cfg.materializeRoot
@@ -961,6 +1106,15 @@ func (s *mcpServer) loadArtifactFromOverlay(rec *filesystem.ArtifactRecord, args
 			if err != nil {
 				return errorResult("adapter: " + err.Error())
 			}
+			// §6.6 step 4 — the hook chain runs on the overlay path too, so
+			// the workspace-overlay layer is subject to the same per-file
+			// rewrite/drop contract as a registry-served artifact.
+			hookedOut, hookWarnings, herr := hook.Run(s.hooks, manifestContext(string(rec.ArtifactBytes)), out)
+			if herr != nil {
+				return errorResult("materialize.hook_failed: " + herr.Error())
+			}
+			warnings = append(warnings, hookWarnings...)
+			out = hookedOut
 			if err := materialize.Write(root, out); err != nil {
 				return errorResult("materialize: " + err.Error())
 			}
@@ -969,7 +1123,7 @@ func (s *mcpServer) loadArtifactFromOverlay(rec *filesystem.ArtifactRecord, args
 			}
 		}
 	}
-	return map[string]any{
+	result := map[string]any{
 		"id":              resp.ID,
 		"type":            resp.Type,
 		"version":         resp.Version,
@@ -978,6 +1132,10 @@ func (s *mcpServer) loadArtifactFromOverlay(rec *filesystem.ArtifactRecord, args
 		"layer":           resp.Layer,
 		"materialized_at": materialized,
 	}
+	if len(warnings) > 0 {
+		result["warnings"] = warnings
+	}
+	return result
 }
 
 func resourcesAsStrings(in map[string][]byte) map[string]string {
@@ -995,17 +1153,27 @@ func resourcesAsStrings(in map[string][]byte) map[string]string {
 // LoadArtifactResponse so we can decode it without importing the server
 // package.
 type loadArtifactResponse struct {
-	ID             string                       `json:"id"`
-	Type           string                       `json:"type"`
-	Version        string                       `json:"version"`
-	ContentHash    string                       `json:"content_hash"`
-	ManifestBody   string                       `json:"manifest_body"`
-	Frontmatter    string                       `json:"frontmatter"`
-	Layer          string                       `json:"layer,omitempty"`
-	Sensitivity    string                       `json:"sensitivity,omitempty"`
-	Resources      map[string]string            `json:"resources,omitempty"`
+	ID           string            `json:"id"`
+	Type         string            `json:"type"`
+	Version      string            `json:"version"`
+	ContentHash  string            `json:"content_hash"`
+	ManifestBody string            `json:"manifest_body"`
+	Frontmatter  string            `json:"frontmatter"`
+	Layer        string            `json:"layer,omitempty"`
+	Sensitivity  string            `json:"sensitivity,omitempty"`
+	Resources    map[string]string `json:"resources,omitempty"`
+	// ResourcesB64 mirrors the registry's resources_base64 flag: when true,
+	// the inline Resources values are base64-encoded and must be decoded to
+	// raw bytes before the content-hash check and materialization (F-6.6.8).
+	ResourcesB64   bool                         `json:"resources_base64,omitempty"`
 	LargeResources map[string]largeResourceLink `json:"large_resources,omitempty"`
 	Signature      string                       `json:"signature,omitempty"`
+	// ManifestMerged signals that the served frontmatter is an extends-merged
+	// re-serialization with the hidden parent stripped (§4.6) rather than the
+	// original bytes the content_hash was computed over. The consumer skips
+	// the local content-hash recomputation for such manifests (F-6.6.2),
+	// since the served bytes cannot reproduce the stored hash by design.
+	ManifestMerged bool `json:"manifest_merged,omitempty"`
 }
 
 // largeResourceLink mirrors the registry's per-resource link. The

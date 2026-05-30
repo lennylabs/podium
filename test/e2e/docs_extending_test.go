@@ -452,17 +452,17 @@ func TestExtending_14_OAuthDeviceCodePrompt(t *testing.T) {
 
 // T-D-extending-15 — MaterializationHook SPI: hook chain runs in order.
 func TestExtending_15_HookChainOrder(t *testing.T) {
-	t.Skip("blocked by F-6.6.1: MaterializationHook step is never executed in the MCP; also F-9.3.1 (HookFunc is a func type, not wire-serializable)")
+	t.Skip("F-6.6.1 fixed: the §6.6 step 4 hook chain now runs in both bridge materialization paths, covered in-process by cmd/podium-mcp TestDeliver_HookChainRunsInOrder. A standalone e2e still cannot register a hook with the out-of-process bridge until the wire-serializable hook-loading SPI lands (F-9.3.1)")
 }
 
 // T-D-extending-16 — MaterializationHook SPI: hook that drops a file prevents write.
 func TestExtending_16_HookDropsFile(t *testing.T) {
-	t.Skip("blocked by F-6.6.1: MaterializationHook step is never executed in the MCP; also F-9.3.1 (HookFunc is a func type, not wire-serializable)")
+	t.Skip("F-6.6.1 fixed: the hook chain runs and a drop suppresses the write, covered in-process by cmd/podium-mcp TestDeliver_HookDropsFile. Registering a hook with the out-of-process bridge needs the wire-serializable hook-loading SPI (F-9.3.1)")
 }
 
 // T-D-extending-17 — MaterializationHook SPI: hook error aborts write.
 func TestExtending_17_HookErrorAborts(t *testing.T) {
-	t.Skip("blocked by F-6.6.1: MaterializationHook step is never executed in the MCP; also F-9.3.1 (HookFunc is a func type, not wire-serializable)")
+	t.Skip("F-6.6.1 fixed: a hook error aborts the write with materialize.hook_failed, covered in-process by cmd/podium-mcp TestDeliver_HookErrorAbortsWrite. Registering a hook with the out-of-process bridge needs the wire-serializable hook-loading SPI (F-9.3.1)")
 }
 
 // T-D-extending-18 — Webhook outbound delivery: artifact.published event reaches receiver.

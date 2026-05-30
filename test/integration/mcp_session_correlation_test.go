@@ -17,6 +17,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // Spec: §5 / §3.3 (F-3.3.3) — the bridge advertises sessionCorrelation and
@@ -101,18 +102,20 @@ func TestPodiumMCP_SessionPinsLatestEndToEnd(t *testing.T) {
 		t.Fatalf("CreateTenant: %v", err)
 	}
 	t0 := time.Now().UTC()
-	put := func(version, hash string, at time.Time) {
-		fm := "---\ntype: context\nversion: " + version +
+	// ContentHash is the canonical hash of the served frontmatter so the
+	// bridge's §6.6 step 2 content-hash check (F-6.6.2) accepts the load.
+	put := func(ver string, at time.Time) {
+		fm := "---\ntype: context\nversion: " + ver +
 			"\ndescription: A reusable finance context for the team.\nsensitivity: low\n---\n"
 		if err := st.PutManifest(context.Background(), store.ManifestRecord{
-			TenantID: "default", ArtifactID: "finance/a", Version: version,
-			ContentHash: hash, Type: "context", Sensitivity: "low", Layer: "L",
-			IngestedAt: at, Frontmatter: []byte(fm),
+			TenantID: "default", ArtifactID: "finance/a", Version: ver,
+			ContentHash: "sha256:" + version.ContentHash([]byte(fm)), Type: "context",
+			Sensitivity: "low", Layer: "L", IngestedAt: at, Frontmatter: []byte(fm),
 		}); err != nil {
-			t.Fatalf("PutManifest %s: %v", version, err)
+			t.Fatalf("PutManifest %s: %v", ver, err)
 		}
 	}
-	put("1.0.0", "sha256:v1", t0)
+	put("1.0.0", t0)
 	reg := core.New(st, "default", []layer.Layer{
 		{ID: "L", Precedence: 1, Visibility: layer.Visibility{Public: true}},
 	})
@@ -126,7 +129,7 @@ func TestPodiumMCP_SessionPinsLatestEndToEnd(t *testing.T) {
 	if v := a.loadVersion(t, "finance/a"); v != "1.0.0" {
 		t.Fatalf("A first load = %q, want 1.0.0", v)
 	}
-	put("2.0.0", "sha256:v2", t0.Add(time.Hour)) // newer version mid-session
+	put("2.0.0", t0.Add(time.Hour)) // newer version mid-session
 	if v := a.loadVersion(t, "finance/a"); v != "1.0.0" {
 		t.Errorf("A second load = %q, want 1.0.0 (session pinned)", v)
 	}

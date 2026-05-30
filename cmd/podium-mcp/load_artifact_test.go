@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,7 +9,45 @@ import (
 
 	"github.com/lennylabs/podium/pkg/adapter"
 	"github.com/lennylabs/podium/pkg/sign"
+	"github.com/lennylabs/podium/pkg/version"
 )
+
+// loadArtifactJSON builds a /v1/load_artifact response body whose content_hash
+// is the canonical hash of frontmatter plus resources, so the §6.6 step 2
+// consumer-side check (verifyContentHash, F-6.6.2) accepts it. Compute it in
+// the test goroutine and write the returned string from the stub handler.
+func loadArtifactJSON(t *testing.T, fields map[string]any) string {
+	t.Helper()
+	fm, _ := fields["frontmatter"].(string)
+	parts := [][]byte{[]byte(fm), nil}
+	if res, ok := fields["resources"].(map[string]string); ok {
+		keys := make([]string, 0, len(res))
+		for k := range res {
+			keys = append(keys, k)
+		}
+		sortStrings(keys)
+		for _, k := range keys {
+			parts = append(parts, []byte(k), []byte(res[k]))
+		}
+	}
+	if _, set := fields["content_hash"]; !set {
+		fields["content_hash"] = "sha256:" + version.ContentHash(parts...)
+	}
+	b, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatalf("marshal stub response: %v", err)
+	}
+	return string(b)
+}
+
+// sortStrings is a tiny dependency-free sort for the test helper.
+func sortStrings(s []string) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j-1] > s[j]; j-- {
+			s[j-1], s[j] = s[j], s[j-1]
+		}
+	}
+}
 
 func newTestServer(t *testing.T, cfg *config) *mcpServer {
 	t.Helper()
@@ -30,15 +69,15 @@ func newTestServer(t *testing.T, cfg *config) *mcpServer {
 // resolution, and returns a result map.
 func TestLoadArtifact_HappyPath(t *testing.T) {
 	t.Parallel()
+	respBody := loadArtifactJSON(t, map[string]any{
+		"id": "x", "type": "context", "version": "1.0.0",
+		"manifest_body": "body", "frontmatter": "---\ntype: context\n---\n",
+	})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/load_artifact" {
 			t.Errorf("path = %q", r.URL.Path)
 		}
-		_, _ = w.Write([]byte(`{
-			"id": "x", "type": "context", "version": "1.0.0",
-			"content_hash": "sha256:abc", "manifest_body": "body",
-			"frontmatter": "---\ntype: context\n---\n"
-		}`))
+		_, _ = w.Write([]byte(respBody))
 	}))
 	defer srv.Close()
 	s := newTestServer(t, &config{
@@ -136,8 +175,12 @@ func TestArgsIDAndVersion(t *testing.T) {
 // callTool dispatches to the proper handler.
 func TestCallTool_DispatchToLoadArtifact(t *testing.T) {
 	t.Parallel()
+	respBody := loadArtifactJSON(t, map[string]any{
+		"id": "x", "type": "context", "version": "1.0.0",
+		"frontmatter": "---\ntype: context\n---\n",
+	})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"id":"x","type":"context","version":"1.0.0","content_hash":"sha256:a","frontmatter":"---\ntype: context\n---\n"}`))
+		_, _ = w.Write([]byte(respBody))
 	}))
 	defer srv.Close()
 	s := newTestServer(t, &config{

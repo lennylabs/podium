@@ -374,12 +374,12 @@ func TestLoadConfig_IgnoresPresignTTL(t *testing.T) {
 // artifact is returned but nothing is written to disk.
 func TestLoadArtifact_PerCallDestinationMaterializes(t *testing.T) {
 	t.Parallel()
+	respBody := loadArtifactJSON(t, map[string]any{
+		"id": "acme/widget", "type": "context", "version": "1.0.0",
+		"manifest_body": "body", "frontmatter": "---\ntype: context\n---\n",
+	})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{
-			"id": "acme/widget", "type": "context", "version": "1.0.0",
-			"content_hash": "sha256:abc", "manifest_body": "body",
-			"frontmatter": "---\ntype: context\n---\n"
-		}`))
+		_, _ = w.Write([]byte(respBody))
 	}))
 	defer srv.Close()
 	// materializeRoot is intentionally empty: only the per-call
