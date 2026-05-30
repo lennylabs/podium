@@ -1,13 +1,16 @@
-// Package sync orchestrates filesystem-source materialization (spec §7.5,
-// §13.11): open the filesystem registry, walk every visible artifact in
-// the caller's effective view, run the configured HarnessAdapter, and
-// write atomically through pkg/materialize.
+// Package sync orchestrates materialization (spec §7.5, §13.11) for both
+// registry sources: a filesystem registry (walk the local layers) and a
+// server registry (read the effective view over the §7.5 HTTP API). Both
+// run the configured HarnessAdapter and write atomically through
+// pkg/materialize. The source is chosen per §7.5.2 dispatch: an http(s)
+// URL routes to the server, every other value to the filesystem.
 package sync
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -29,21 +32,13 @@ var (
 	// Options.RegistryPath nor a discoverable .podium/sync.yaml /
 	// PODIUM_REGISTRY env var is set.
 	ErrNoRegistry = errors.New("config.no_registry: no registry configured")
-	// ErrServerSourceUnsupported signals that the resolved registry is an
-	// http(s):// URL, which the §7.1 / §7.5.2 dispatch routes to a Podium
-	// server. podium sync materializes only the filesystem source today, so
-	// Run returns this canonical error instead of handing the URL to
-	// filesystem.Open, which would filepath.Abs the URL into a bogus path
-	// under the working directory and fail with a misleading "registry path
-	// does not exist" error. A server registry is reachable through the MCP
-	// server (§6) or a language SDK (§7.6).
-	ErrServerSourceUnsupported = errors.New("config.server_source_unsupported: podium sync requires a filesystem-source registry; a server-source URL is reachable via the MCP server or an SDK")
 )
 
-// Options are the inputs to Run. RegistryPath is the filesystem-source
-// registry path (per §13.11). Target is the destination directory where
-// adapter output lands. AdapterID selects the HarnessAdapter from the
-// registry; the default is "none" (canonical layout pass-through).
+// Options are the inputs to Run. RegistryPath is the registry source: an
+// http(s):// URL routes to a Podium server (§7.5 server-source), every other
+// value is a filesystem-registry path (§13.11). Target is the destination
+// directory where adapter output lands. AdapterID selects the HarnessAdapter
+// from the registry; the default is "none" (canonical layout pass-through).
 type Options struct {
 	RegistryPath    string
 	Target          string
@@ -53,8 +48,29 @@ type Options struct {
 	// OverlayPath, when non-empty, points at a workspace overlay
 	// directory whose records sit at the highest precedence of the
 	// effective view (§4.6 / §6.4). Overlay artifacts override the
-	// registry's contribution at the same canonical ID.
+	// registry's contribution at the same canonical ID. Applies to the
+	// filesystem source; a server source composes the overlay server-side.
 	OverlayPath string
+	// HTTPClient, when set, is used for server-source requests. Nil uses a
+	// default client with a bounded timeout. Tests inject a stub here.
+	HTTPClient *http.Client
+}
+
+// materialRecord is a source-neutral artifact ready for the HarnessAdapter.
+// The filesystem source builds it from on-disk files; the server source
+// builds it from the registry's HTTP responses, mirroring the MCP server's
+// server-source delivery (§2.2): ArtifactBytes is the served frontmatter,
+// SkillBytes is frontmatter+body for skills, Resources are the inline and
+// fetched large resources. Artifact carries the parsed manifest so the
+// §4.3 target_harnesses gate runs; it may be nil when the frontmatter does
+// not parse.
+type materialRecord struct {
+	ID            string
+	LayerID       string
+	Artifact      *manifest.Artifact
+	ArtifactBytes []byte
+	SkillBytes    []byte
+	Resources     map[string][]byte
 }
 
 // Result describes what a Run actually did. Used by callers (CLI, tests)
@@ -77,24 +93,18 @@ type ArtifactResult struct {
 	Files []string
 }
 
-// Run executes one filesystem-source sync. The function does not consult
-// any HTTP service; it reads the registry, applies layer composition with
-// CollisionPolicyHighestWins (per §4.6), and writes the adapter output to
-// Target.
+// Run executes one sync. The registry source is dispatched per §7.5.2: an
+// http(s):// URL reads the caller's effective view over the §7.5 HTTP API; a
+// filesystem path reads the registry directly, applies layer composition
+// with CollisionPolicyHighestWins (per §4.6), and writes the adapter output
+// to Target. Both paths run the configured HarnessAdapter and the §7.5
+// stale-file cleanup against the same lock file.
 //
 // When Options.DryRun is true, Run resolves the artifact set, returns the
 // Result, and writes nothing.
 func Run(opts Options) (*Result, error) {
 	if opts.RegistryPath == "" {
 		return nil, ErrNoRegistry
-	}
-	// §7.1 / §7.5.2 dispatch: a URL routes to a Podium server, a filesystem
-	// path routes to local filesystem. podium sync materializes only the
-	// filesystem source, so reject an http(s):// registry with a canonical
-	// error rather than letting filesystem.Open collapse the URL into a
-	// bogus path under the working directory.
-	if isServerSource(opts.RegistryPath) {
-		return nil, ErrServerSourceUnsupported
 	}
 	if opts.Target == "" && !opts.DryRun {
 		return nil, ErrNoTarget
@@ -110,28 +120,11 @@ func Run(opts Options) (*Result, error) {
 		return nil, err
 	}
 
-	reg, err := filesystem.Open(opts.RegistryPath)
+	// §7.5.2 dispatch: a URL routes to the Podium server, every other value
+	// to the local filesystem registry.
+	records, err := resolveRecords(opts)
 	if err != nil {
 		return nil, err
-	}
-	records, err := reg.Walk(filesystem.WalkOptions{
-		CollisionPolicy: filesystem.CollisionPolicyHighestWins,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// §6.4 workspace overlay: records under OverlayPath sit at the
-	// highest precedence; overlay IDs replace the registry's
-	// contribution at the same canonical ID.
-	if opts.OverlayPath != "" {
-		overlayRecords, oerr := overlay.Filesystem{Path: opts.OverlayPath}.Resolve(context.Background())
-		if oerr != nil && !errors.Is(oerr, overlay.ErrNoOverlay) {
-			return nil, fmt.Errorf("overlay: %w", oerr)
-		}
-		if len(overlayRecords) > 0 {
-			records = mergeOverlay(records, overlayRecords)
-		}
 	}
 
 	res := &Result{Adapter: a.ID(), Target: opts.Target}
@@ -162,7 +155,7 @@ func Run(opts Options) (*Result, error) {
 		sort.Strings(paths)
 		res.Artifacts = append(res.Artifacts, ArtifactResult{
 			ID:    rec.ID,
-			Layer: rec.Layer.ID,
+			Layer: rec.LayerID,
 			Files: paths,
 		})
 		allFiles = append(allFiles, out...)
@@ -214,6 +207,57 @@ func Run(opts Options) (*Result, error) {
 		fmt.Fprintf(os.Stderr, "sync: lock write failed: %v\n", err)
 	}
 	return res, nil
+}
+
+// resolveRecords dispatches on the registry source (§7.5.2) and returns the
+// source-neutral records to materialize. A server URL reads the effective
+// view over HTTP; any other value reads the local filesystem registry.
+func resolveRecords(opts Options) ([]materialRecord, error) {
+	if isServerSource(opts.RegistryPath) {
+		return fetchServerRecords(context.Background(), opts)
+	}
+	return filesystemRecords(opts)
+}
+
+// filesystemRecords reads the filesystem registry, applies the §6.4
+// workspace overlay, and converts the result to source-neutral records.
+func filesystemRecords(opts Options) ([]materialRecord, error) {
+	reg, err := filesystem.Open(opts.RegistryPath)
+	if err != nil {
+		return nil, err
+	}
+	records, err := reg.Walk(filesystem.WalkOptions{
+		CollisionPolicy: filesystem.CollisionPolicyHighestWins,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// §6.4 workspace overlay: records under OverlayPath sit at the
+	// highest precedence; overlay IDs replace the registry's
+	// contribution at the same canonical ID.
+	if opts.OverlayPath != "" {
+		overlayRecords, oerr := overlay.Filesystem{Path: opts.OverlayPath}.Resolve(context.Background())
+		if oerr != nil && !errors.Is(oerr, overlay.ErrNoOverlay) {
+			return nil, fmt.Errorf("overlay: %w", oerr)
+		}
+		if len(overlayRecords) > 0 {
+			records = mergeOverlay(records, overlayRecords)
+		}
+	}
+
+	out := make([]materialRecord, 0, len(records))
+	for _, rec := range records {
+		out = append(out, materialRecord{
+			ID:            rec.ID,
+			LayerID:       rec.Layer.ID,
+			Artifact:      rec.Artifact,
+			ArtifactBytes: rec.ArtifactBytes,
+			SkillBytes:    rec.SkillBytes,
+			Resources:     rec.Resources,
+		})
+	}
+	return out, nil
 }
 
 // loadPriorLockPaths reads the lock file (if any) and returns the

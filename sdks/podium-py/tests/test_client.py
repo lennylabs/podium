@@ -9,7 +9,8 @@ import threading
 
 import pytest
 
-from podium import Client, RegistryError
+from podium import Client, MaterializeError, RegistryError
+from podium.client import BatchResult, LoadedArtifact
 
 
 class _StubHandler(http.server.BaseHTTPRequestHandler):
@@ -173,8 +174,9 @@ def test_load_artifacts_returns_envelopes(stub_server):
     body = json.loads(stub_server.last_body)
     assert body["ids"] == ["a", "b"]
     assert len(out) == 2
-    assert out[0]["status"] == "ok"
-    assert out[1]["status"] == "error"
+    assert out[0].status == "ok"
+    assert out[1].status == "error"
+    assert out[1].error is not None and out[1].error.code == "registry.not_found"
 
 
 # Spec: §7.6.2 — empty ids list short-circuits to an empty
@@ -184,3 +186,113 @@ def test_load_artifacts_empty_short_circuits(stub_server):
     out = client.load_artifacts([])
     assert out == []
     assert stub_server.last_path == ""
+
+
+# Spec: §7.6 / §2.2 (F-2.2.1) — the loaded-artifact object exposes
+# materialize(to=..., harness=...) and writes the canonical layout to disk.
+def test_materialize_context_writes_artifact_md(tmp_path):
+    art = LoadedArtifact(
+        id="finance/close/run-variance",
+        type="context",
+        version="1.0.0",
+        manifest_body="# body\n",
+        frontmatter="---\ntype: context\n---\n\n# body\n",
+    )
+    written = art.materialize(str(tmp_path), harness="claude-code")
+    art_md = tmp_path / "finance" / "close" / "run-variance" / "ARTIFACT.md"
+    assert art_md.read_text() == "---\ntype: context\n---\n\n# body\n"
+    assert str(art_md) in written
+    # A non-skill writes no SKILL.md.
+    assert not (tmp_path / "finance" / "close" / "run-variance" / "SKILL.md").exists()
+
+
+# Spec: §6.7 — a skill additionally materializes SKILL.md reconstructed as
+# frontmatter + manifest_body (the registry's server-source delivery).
+def test_materialize_skill_writes_skill_md(tmp_path):
+    art = LoadedArtifact(
+        id="eng/lint",
+        type="skill",
+        version="2.0.0",
+        manifest_body="Run the linter.\n",
+        frontmatter="---\ntype: skill\n---\n",
+    )
+    art.materialize(str(tmp_path))
+    root = tmp_path / "eng" / "lint"
+    assert (root / "ARTIFACT.md").read_text() == "---\ntype: skill\n---\n"
+    assert (root / "SKILL.md").read_text() == "---\ntype: skill\n---\nRun the linter.\n"
+
+
+# Spec: §4.4 — inline bundled resources land at their package-relative path.
+def test_materialize_writes_inline_resources(tmp_path):
+    art = LoadedArtifact(
+        id="a/b",
+        type="context",
+        version="1",
+        manifest_body="x",
+        frontmatter="---\ntype: context\n---\n",
+        resources={"data/table.csv": "1,2,3\n"},
+    )
+    art.materialize(str(tmp_path))
+    assert (tmp_path / "a" / "b" / "data" / "table.csv").read_text() == "1,2,3\n"
+
+
+# Spec: §7.2 — large resources are fetched from their presigned URLs.
+def test_materialize_fetches_large_resources(tmp_path):
+    calls = []
+
+    def fake_fetch(url):
+        calls.append(url)
+        return b"BIGDATA"
+
+    art = LoadedArtifact(
+        id="a/b",
+        type="context",
+        version="1",
+        manifest_body="x",
+        frontmatter="---\ntype: context\n---\n",
+        large_resources={"big.bin": {"url": "https://store/presigned"}},
+    )
+    art.materialize(str(tmp_path), fetch=fake_fetch)
+    assert (tmp_path / "a" / "b" / "big.bin").read_bytes() == b"BIGDATA"
+    assert calls == ["https://store/presigned"]
+
+
+# Spec: §6.6 — a resource path that escapes the destination root is rejected
+# (sandbox contract), not written through the traversal.
+def test_materialize_rejects_path_traversal(tmp_path):
+    art = LoadedArtifact(
+        id="a/b",
+        type="context",
+        version="1",
+        manifest_body="x",
+        frontmatter="---\ntype: context\n---\n",
+        resources={"../../escape.txt": "nope"},
+    )
+    with pytest.raises(MaterializeError):
+        art.materialize(str(tmp_path))
+
+
+# Spec: §7.6.2 — a batch result materializes ok items and fetches its
+# presigned resources; an error item refuses to materialize.
+def test_batch_result_materialize_ok_and_error(tmp_path):
+    ok = BatchResult(
+        id="a/b",
+        status="ok",
+        type="context",
+        manifest_body="x",
+        frontmatter="---\ntype: context\n---\n",
+        resources=[{"path": "r.bin", "presigned_url": "https://store/r"}],
+    )
+    ok.materialize(str(tmp_path), fetch=lambda url: b"R")
+    assert (tmp_path / "a" / "b" / "r.bin").read_bytes() == b"R"
+
+    bad = BatchResult(id="x/y", status="error", error=RegistryError("visibility.denied", "no"))
+    with pytest.raises(RegistryError):
+        bad.materialize(str(tmp_path))
+
+
+# Spec: §2.2 — materialize on an empty destination is rejected.
+def test_materialize_empty_destination(tmp_path):
+    art = LoadedArtifact(id="a", type="context", version="1", manifest_body="", frontmatter="x")
+    with pytest.raises(MaterializeError):
+        art.materialize("")

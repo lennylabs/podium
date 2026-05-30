@@ -1,9 +1,13 @@
 // Spec coverage: §7.6 SDK surface — TypeScript client mirrors the
 // Python client and the registry HTTP API.
 
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
-import { Client, RegistryError } from "./index.js";
+import { BatchResult, Client, LoadedArtifact, MaterializeError, RegistryError } from "./index.js";
 
 describe("Client", () => {
   // Spec: §7.6 — searchArtifacts forwards to GET /v1/search_artifacts
@@ -103,5 +107,133 @@ describe("Client", () => {
     const out = await c.loadArtifacts([]);
     expect(out).toEqual([]);
     expect(called).toBe(false);
+  });
+});
+
+// Spec: §7.6 / §2.2 (F-2.2.1) — the loaded-artifact object exposes
+// materialize(to, { harness }) and writes the canonical layout to disk.
+describe("LoadedArtifact.materialize", () => {
+  async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
+    const dir = await mkdtemp(join(tmpdir(), "podium-mat-"));
+    try {
+      return await fn(dir);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  it("writes ARTIFACT.md for a context and no SKILL.md", async () => {
+    await withTempDir(async (dir) => {
+      const art = new LoadedArtifact({
+        id: "finance/close/run-variance",
+        type: "context",
+        version: "1.0.0",
+        manifest_body: "# body\n",
+        frontmatter: "---\ntype: context\n---\n\n# body\n",
+      });
+      const written = await art.materialize(dir, { harness: "claude-code" });
+      const artMd = join(dir, "finance", "close", "run-variance", "ARTIFACT.md");
+      expect(await readFile(artMd, "utf8")).toBe("---\ntype: context\n---\n\n# body\n");
+      expect(written).toContain(artMd);
+      await expect(
+        readFile(join(dir, "finance", "close", "run-variance", "SKILL.md"), "utf8"),
+      ).rejects.toBeDefined();
+    });
+  });
+
+  it("writes SKILL.md for a skill as frontmatter + manifest_body", async () => {
+    await withTempDir(async (dir) => {
+      const art = new LoadedArtifact({
+        id: "eng/lint",
+        type: "skill",
+        version: "2.0.0",
+        manifest_body: "Run the linter.\n",
+        frontmatter: "---\ntype: skill\n---\n",
+      });
+      await art.materialize(dir);
+      const root = join(dir, "eng", "lint");
+      expect(await readFile(join(root, "ARTIFACT.md"), "utf8")).toBe("---\ntype: skill\n---\n");
+      expect(await readFile(join(root, "SKILL.md"), "utf8")).toBe(
+        "---\ntype: skill\n---\nRun the linter.\n",
+      );
+    });
+  });
+
+  it("writes inline resources at their relative path", async () => {
+    await withTempDir(async (dir) => {
+      const art = new LoadedArtifact({
+        id: "a/b",
+        type: "context",
+        version: "1",
+        manifest_body: "x",
+        frontmatter: "---\ntype: context\n---\n",
+        resources: { "data/table.csv": "1,2,3\n" },
+      });
+      await art.materialize(dir);
+      expect(await readFile(join(dir, "a", "b", "data", "table.csv"), "utf8")).toBe("1,2,3\n");
+    });
+  });
+
+  it("fetches large resources from presigned URLs", async () => {
+    await withTempDir(async (dir) => {
+      const calls: string[] = [];
+      const fetcher: typeof fetch = async (input) => {
+        calls.push(String(input));
+        return new Response("BIGDATA", { status: 200 });
+      };
+      const art = new LoadedArtifact({
+        id: "a/b",
+        type: "context",
+        version: "1",
+        manifest_body: "x",
+        frontmatter: "---\ntype: context\n---\n",
+        large_resources: { "big.bin": { url: "https://store/presigned" } },
+      });
+      await art.materialize(dir, { fetcher });
+      expect(await readFile(join(dir, "a", "b", "big.bin"), "utf8")).toBe("BIGDATA");
+      expect(calls).toEqual(["https://store/presigned"]);
+    });
+  });
+
+  it("rejects a resource path that escapes the destination root", async () => {
+    await withTempDir(async (dir) => {
+      const art = new LoadedArtifact({
+        id: "a/b",
+        type: "context",
+        version: "1",
+        manifest_body: "x",
+        frontmatter: "---\ntype: context\n---\n",
+        resources: { "../../escape.txt": "nope" },
+      });
+      await expect(art.materialize(dir)).rejects.toBeInstanceOf(MaterializeError);
+    });
+  });
+
+  it("rejects an empty destination", async () => {
+    const art = new LoadedArtifact({ id: "a", type: "context", version: "1" });
+    await expect(art.materialize("")).rejects.toBeInstanceOf(MaterializeError);
+  });
+
+  // Spec: §7.6.2 — a batch result materializes ok items and refuses error items.
+  it("BatchResult materializes ok items and throws on error items", async () => {
+    await withTempDir(async (dir) => {
+      const ok = new BatchResult({
+        id: "a/b",
+        status: "ok",
+        type: "context",
+        manifest_body: "x",
+        frontmatter: "---\ntype: context\n---\n",
+        resources: [{ path: "r.bin", presigned_url: "https://store/r" }],
+      });
+      await ok.materialize(dir, { fetcher: async () => new Response("R", { status: 200 }) });
+      expect(await readFile(join(dir, "a", "b", "r.bin"), "utf8")).toBe("R");
+
+      const bad = new BatchResult({
+        id: "x/y",
+        status: "error",
+        error: { code: "visibility.denied", message: "no" },
+      });
+      await expect(bad.materialize(dir)).rejects.toBeInstanceOf(RegistryError);
+    });
   });
 });

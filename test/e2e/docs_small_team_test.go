@@ -323,6 +323,22 @@ func TestSmallTeam_7_PublicModeWithIdPFails(t *testing.T) {
 	}
 }
 
+// spec: §2.2, §6.3.1 (F-2.2.3) — a registry configured with
+// oauth-device-code (and public mode off) has no request-time verifier
+// wired, so it would resolve every caller as anonymous-public and never
+// apply per-layer visibility. The boot guard refuses to start with
+// config.identity_provider_unverified rather than silently serve a private
+// registry open.
+func TestSmallTeam_IdentityProviderUnverifiedFailsStartup(t *testing.T) {
+	t.Parallel()
+	out := smallteamRawExecFail(t,
+		[]string{"HOME=" + t.TempDir(), "PODIUM_IDENTITY_PROVIDER=oauth-device-code"},
+		"serve", "--standalone")
+	if !strings.Contains(out, "config.identity_provider_unverified") {
+		t.Errorf("expected config.identity_provider_unverified in output; got:\n%s", out)
+	}
+}
+
 // T-D-small-team-8 — public mode reports mode:public in /healthz.
 func TestSmallTeam_8_PublicModeHealthz(t *testing.T) {
 	t.Parallel()

@@ -7,7 +7,7 @@ import os
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 
 class RegistryError(Exception):
@@ -50,9 +50,50 @@ class SearchResult:
     domains: list[dict[str, Any]] = field(default_factory=list)
 
 
+class MaterializeError(Exception):
+    """Raised when materialize() cannot safely write to disk.
+
+    The §6.6 sandbox contract forbids writing outside the destination
+    root; a resource path that escapes it raises this rather than
+    writing through the traversal.
+    """
+
+
+def _safe_join(root: str, rel: str) -> str:
+    """Join rel under root, rejecting any path that escapes root (§6.6).
+
+    Mirrors pkg/materialize.Write's ErrOutOfDestination guard: a
+    bundled-resource path containing ``..`` must not write outside the
+    destination root.
+    """
+    parts = [p for p in rel.replace("\\", "/").split("/") if p not in ("", ".")]
+    target = os.path.normpath(os.path.join(root, *parts))
+    root_abs = os.path.normpath(root)
+    if target != root_abs and not target.startswith(root_abs + os.sep):
+        raise MaterializeError(f"resource path escapes destination root: {rel!r}")
+    return target
+
+
+def _write_file(path: str, content: bytes) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as fh:
+        fh.write(content)
+
+
+def _fetch_bytes(url: str) -> bytes:
+    with urllib.request.urlopen(url) as resp:  # noqa: S310 - registry-issued presigned URL
+        return resp.read()
+
+
 @dataclass
 class LoadedArtifact:
-    """Manifest body and bundled resources returned by load_artifact."""
+    """Manifest body and bundled resources returned by load_artifact.
+
+    ``materialize`` writes the artifact to disk in the canonical layout
+    (spec §7.6, §2.2). ``resources`` are inline bytes returned in the
+    response; ``large_resources`` are §7.2 presigned references that
+    materialize fetches on demand.
+    """
 
     id: str
     type: str
@@ -60,6 +101,163 @@ class LoadedArtifact:
     manifest_body: str
     frontmatter: str
     resources: dict[str, str] = field(default_factory=dict)
+    large_resources: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    def materialize(
+        self,
+        to: str,
+        *,
+        harness: str = "none",
+        fetch: Callable[[str], bytes] | None = None,
+    ) -> list[str]:
+        """Write the artifact to disk under ``to`` and return the paths.
+
+        spec §7.6 / §2.2 — the loaded-artifact object exposes
+        ``materialize(to=..., harness=...)``. The artifact lands under
+        ``<to>/<id>/`` in the canonical layout: ``ARTIFACT.md`` for every
+        type, ``SKILL.md`` for skills, and each bundled resource at its
+        package-relative path. Large resources are fetched from their
+        §7.2 presigned URLs.
+
+        The ``harness`` parameter is accepted per §2.2. Harness-specific
+        adaptation is the registry's shared module (§2.2); the SDK is an
+        independent HTTP client that does not embed the harness adapters,
+        so it writes the canonical layout that the ``none`` adapter
+        produces. ``harness`` is recorded for forward compatibility with
+        server-side adaptation.
+        """
+        return _materialize_canonical(
+            to,
+            artifact_id=self.id,
+            artifact_type=self.type,
+            frontmatter=self.frontmatter,
+            manifest_body=self.manifest_body,
+            inline_resources=self.resources,
+            large_resources=self.large_resources,
+            fetch=fetch or _fetch_bytes,
+        )
+
+
+@dataclass
+class BatchResult:
+    """One §7.6.2 bulk-load envelope with a materialize() helper.
+
+    Mirrors the spec's ``for result in artifacts: result.materialize(...)``
+    example. ``status`` is ``"ok"`` or ``"error"``; on error ``error``
+    carries the §6.10 code/message and the manifest fields are empty.
+    """
+
+    id: str
+    status: str
+    version: str = ""
+    content_hash: str = ""
+    type: str = ""
+    manifest_body: str = ""
+    frontmatter: str = ""
+    resources: list[dict[str, Any]] = field(default_factory=list)
+    error: "RegistryError | None" = None
+
+    def materialize(
+        self,
+        to: str,
+        *,
+        harness: str = "none",
+        fetch: Callable[[str], bytes] | None = None,
+    ) -> list[str]:
+        """Write an ``ok`` batch item to disk (spec §7.6.2).
+
+        Raises RegistryError when called on an ``error`` item so a caller
+        that forgets to check ``status`` fails loudly rather than writing
+        an empty package. Batch resources travel as §7.6.2 presigned
+        references, so every resource is fetched from its URL.
+        """
+        if self.status != "ok":
+            raise self.error or RegistryError("registry.unknown", f"cannot materialize {self.id}")
+        large = {r["path"]: {"url": r.get("presigned_url", "")} for r in self.resources}
+        return _materialize_canonical(
+            to,
+            artifact_id=self.id,
+            artifact_type=self.type,
+            frontmatter=self.frontmatter,
+            manifest_body=self.manifest_body,
+            inline_resources={},
+            large_resources=large,
+            fetch=fetch or _fetch_bytes,
+        )
+
+
+def _materialize_canonical(
+    to: str,
+    *,
+    artifact_id: str,
+    artifact_type: str,
+    frontmatter: str,
+    manifest_body: str,
+    inline_resources: dict[str, str],
+    large_resources: dict[str, dict[str, Any]],
+    fetch: Callable[[str], bytes],
+) -> list[str]:
+    """Write the canonical (``none``-adapter) layout for one artifact.
+
+    The wire ``frontmatter`` already carries the complete ``ARTIFACT.md``
+    for non-skills; for skills it carries the frontmatter-only
+    ``ARTIFACT.md`` and the skill body arrives separately as
+    ``manifest_body``, so ``SKILL.md`` is reconstructed as
+    ``frontmatter + manifest_body`` (mirroring the MCP server's
+    server-source delivery). spec §6.6, §6.7.
+    """
+    if not to:
+        raise MaterializeError("destination path is empty")
+    root = _safe_join(to, artifact_id)
+    written: list[str] = []
+
+    art_path = os.path.join(root, "ARTIFACT.md")
+    _write_file(art_path, frontmatter.encode())
+    written.append(art_path)
+
+    if artifact_type == "skill":
+        skill_path = os.path.join(root, "SKILL.md")
+        _write_file(skill_path, (frontmatter + manifest_body).encode())
+        written.append(skill_path)
+
+    for rel, content in sorted((inline_resources or {}).items()):
+        path = _safe_join(root, rel)
+        data = content.encode() if isinstance(content, str) else bytes(content)
+        _write_file(path, data)
+        written.append(path)
+
+    for rel, link in sorted((large_resources or {}).items()):
+        path = _safe_join(root, rel)
+        url = link.get("url") or link.get("presigned_url") if isinstance(link, dict) else link
+        if not url:
+            raise MaterializeError(f"large resource {rel!r} has no presigned URL")
+        _write_file(path, fetch(url))
+        written.append(path)
+
+    return written
+
+
+def _batch_result_from(env: dict[str, Any]) -> BatchResult:
+    """Parse one §7.6.2 batch envelope into a BatchResult."""
+    err = None
+    if env.get("error"):
+        e = env["error"]
+        err = RegistryError(
+            code=e.get("code", "registry.unknown"),
+            message=e.get("message", ""),
+            retryable=e.get("retryable", False),
+        )
+    return BatchResult(
+        id=env.get("id", ""),
+        status=env.get("status", ""),
+        version=env.get("version", ""),
+        content_hash=env.get("content_hash", ""),
+        type=env.get("type", ""),
+        manifest_body=env.get("manifest_body", ""),
+        frontmatter=env.get("frontmatter", ""),
+        resources=env.get("resources", []) or [],
+        error=err,
+    )
 
 
 class Client:
@@ -163,6 +361,9 @@ class Client:
             manifest_body=body.get("manifest_body", ""),
             frontmatter=body.get("frontmatter", ""),
             resources=body.get("resources", {}) or {},
+            # §7.2 large resources travel as presigned references the
+            # consumer fetches from object storage; materialize() pulls them.
+            large_resources=body.get("large_resources", {}) or {},
         )
 
     def load_artifacts(
@@ -172,17 +373,18 @@ class Client:
         session_id: str = "",
         harness: str = "",
         version_pins: dict[str, str] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[BatchResult]:
         """Bulk-fetch artifacts via §7.6.2 POST /v1/artifacts:batchLoad.
 
         The §7.6.2 hard cap is 50 IDs per request; the SDK splits
-        larger sets transparently. Each returned envelope carries
-        ``status="ok"`` with the manifest body, or ``status="error"``
-        with a §6.10 envelope. Partial failure does not raise.
+        larger sets transparently. Each returned ``BatchResult`` carries
+        ``status="ok"`` with the manifest body (and a ``materialize()``
+        helper), or ``status="error"`` with a §6.10 envelope. Partial
+        failure does not raise.
         """
         if not ids:
             return []
-        out: list[dict[str, Any]] = []
+        out: list[BatchResult] = []
         chunk_size = 50
         for chunk_start in range(0, len(ids), chunk_size):
             chunk = ids[chunk_start : chunk_start + chunk_size]
@@ -205,7 +407,7 @@ class Client:
                     raw = resp.read()
             except urllib.error.HTTPError as exc:
                 self._raise_from_http_error(exc)
-            out.extend(json.loads(raw))
+            out.extend(_batch_result_from(env) for env in json.loads(raw))
         return out
 
     def dependents_of(self, artifact_id: str) -> list[ArtifactDescriptor]:

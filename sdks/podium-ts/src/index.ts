@@ -18,22 +18,153 @@ export interface SearchResult {
   domains?: Record<string, unknown>[];
 }
 
-export interface LoadedArtifact {
+// §7.2 large-resource reference: the response delivers bytes out of band
+// via a presigned URL the consumer fetches from object storage.
+export interface LargeResourceLink {
+  url: string;
+  content_hash?: string;
+  size?: number;
+  content_type?: string;
+}
+
+export interface MaterializeOptions {
+  // Accepted per §2.2 ("The SDKs accept a harness parameter on
+  // materialize()"). Harness-specific adaptation is the registry's shared
+  // module (§2.2); this independent client writes the canonical (`none`)
+  // layout and records the requested harness for forward compatibility.
+  harness?: string;
+  // Override the fetcher used to pull §7.2 presigned large resources.
+  // Defaults to the global fetch.
+  fetcher?: typeof fetch;
+}
+
+// Spec §6.6 sandbox contract: a resource path that escapes the destination
+// root is rejected rather than written through the traversal.
+export class MaterializeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MaterializeError";
+  }
+}
+
+// materializeCanonical writes one artifact to disk in the canonical
+// (`none`-adapter) layout under `<to>/<id>/` (spec §6.6, §6.7): ARTIFACT.md
+// for every type, SKILL.md for skills (reconstructed as frontmatter +
+// manifest body, mirroring the registry's server-source delivery), and each
+// bundled resource at its package-relative path. Node-only filesystem and
+// path modules load lazily so the SDK stays importable in edge bundles that
+// never materialize.
+async function materializeCanonical(args: {
+  to: string;
+  id: string;
+  type: string;
+  frontmatter: string;
+  manifestBody: string;
+  inline: Record<string, string>;
+  large: Record<string, LargeResourceLink>;
+  fetcher: typeof fetch;
+}): Promise<string[]> {
+  if (!args.to) throw new MaterializeError("destination path is empty");
+  const fs = await import("node:fs/promises");
+  const path = await import("node:path");
+
+  const rootAbs = path.resolve(args.to);
+  const safeJoin = (rel: string): string => {
+    const parts = rel
+      .replace(/\\/g, "/")
+      .split("/")
+      .filter((p) => p !== "" && p !== ".");
+    const target = path.resolve(rootAbs, args.id, ...parts);
+    const base = path.resolve(rootAbs, args.id);
+    if (target !== base && !target.startsWith(base + path.sep)) {
+      throw new MaterializeError(`resource path escapes destination root: ${rel}`);
+    }
+    return target;
+  };
+  const write = async (target: string, bytes: Uint8Array | string): Promise<void> => {
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, bytes);
+  };
+
+  const written: string[] = [];
+  const artPath = safeJoin("ARTIFACT.md");
+  await write(artPath, args.frontmatter);
+  written.push(artPath);
+
+  if (args.type === "skill") {
+    const skillPath = safeJoin("SKILL.md");
+    await write(skillPath, args.frontmatter + args.manifestBody);
+    written.push(skillPath);
+  }
+
+  for (const rel of Object.keys(args.inline).sort()) {
+    const target = safeJoin(rel);
+    await write(target, args.inline[rel]);
+    written.push(target);
+  }
+
+  for (const rel of Object.keys(args.large).sort()) {
+    const link = args.large[rel];
+    if (!link?.url) throw new MaterializeError(`large resource ${rel} has no presigned URL`);
+    const resp = await args.fetcher(link.url);
+    if (!resp.ok) {
+      throw new MaterializeError(`fetch large resource ${rel}: HTTP ${resp.status}`);
+    }
+    const target = safeJoin(rel);
+    await write(target, new Uint8Array(await resp.arrayBuffer()));
+    written.push(target);
+  }
+
+  return written;
+}
+
+// Spec §7.6 / §2.2 — the loaded-artifact object exposes
+// materialize(to, { harness }). resources are inline bytes; largeResources
+// are §7.2 presigned references fetched on demand.
+export class LoadedArtifact {
   id: string;
   type: string;
   version: string;
   manifest_body: string;
   frontmatter: string;
   resources?: Record<string, string>;
+  large_resources?: Record<string, LargeResourceLink>;
   deprecated?: boolean;
   replaced_by?: string;
   deprecation_warning?: string;
+
+  constructor(data: Partial<LoadedArtifact>) {
+    this.id = data.id ?? "";
+    this.type = data.type ?? "";
+    this.version = data.version ?? "";
+    this.manifest_body = data.manifest_body ?? "";
+    this.frontmatter = data.frontmatter ?? "";
+    this.resources = data.resources;
+    this.large_resources = data.large_resources;
+    this.deprecated = data.deprecated;
+    this.replaced_by = data.replaced_by;
+    this.deprecation_warning = data.deprecation_warning;
+  }
+
+  async materialize(to: string, opts: MaterializeOptions = {}): Promise<string[]> {
+    return materializeCanonical({
+      to,
+      id: this.id,
+      type: this.type,
+      frontmatter: this.frontmatter,
+      manifestBody: this.manifest_body,
+      inline: this.resources ?? {},
+      large: this.large_resources ?? {},
+      fetcher: opts.fetcher ?? fetch,
+    });
+  }
 }
 
-// Spec §7.6.2 — per-item envelope for bulk load. Status is "ok"
-// when the artifact resolved successfully and "error" otherwise;
-// the error envelope carries the §6.10 code.
-export interface BatchLoadEnvelope {
+// Spec §7.6.2 — one bulk-load envelope with a materialize() helper. Status
+// is "ok" when the artifact resolved and "error" otherwise; the error
+// envelope carries the §6.10 code. Batch resources travel as presigned
+// references, so materialize fetches every resource.
+export class BatchResult {
   id: string;
   status: "ok" | "error";
   type?: string;
@@ -41,6 +172,7 @@ export interface BatchLoadEnvelope {
   content_hash?: string;
   manifest_body?: string;
   frontmatter?: string;
+  resources?: { path: string; presigned_url: string; content_hash?: string }[];
   deprecated?: boolean;
   replaced_by?: string;
   deprecation_warning?: string;
@@ -49,6 +181,45 @@ export interface BatchLoadEnvelope {
     message: string;
     retryable?: boolean;
   };
+
+  constructor(data: Partial<BatchResult>) {
+    this.id = data.id ?? "";
+    this.status = data.status ?? "error";
+    this.type = data.type;
+    this.version = data.version;
+    this.content_hash = data.content_hash;
+    this.manifest_body = data.manifest_body;
+    this.frontmatter = data.frontmatter;
+    this.resources = data.resources;
+    this.deprecated = data.deprecated;
+    this.replaced_by = data.replaced_by;
+    this.deprecation_warning = data.deprecation_warning;
+    this.error = data.error;
+  }
+
+  async materialize(to: string, opts: MaterializeOptions = {}): Promise<string[]> {
+    if (this.status !== "ok") {
+      throw new RegistryError(
+        this.error?.code ?? "registry.unknown",
+        this.error?.message ?? `cannot materialize ${this.id}`,
+        this.error?.retryable ?? false,
+      );
+    }
+    const large: Record<string, LargeResourceLink> = {};
+    for (const r of this.resources ?? []) {
+      large[r.path] = { url: r.presigned_url, content_hash: r.content_hash };
+    }
+    return materializeCanonical({
+      to,
+      id: this.id,
+      type: this.type ?? "",
+      frontmatter: this.frontmatter ?? "",
+      manifestBody: this.manifest_body ?? "",
+      inline: {},
+      large,
+      fetcher: opts.fetcher ?? fetch,
+    });
+  }
 }
 
 export interface DependencyEdge {
@@ -151,7 +322,8 @@ export class Client {
   async loadArtifact(id: string, version?: string): Promise<LoadedArtifact> {
     const params: Record<string, unknown> = { id };
     if (version) params.version = version;
-    return this.get("/v1/load_artifact", params) as Promise<LoadedArtifact>;
+    const data = (await this.get("/v1/load_artifact", params)) as Partial<LoadedArtifact>;
+    return new LoadedArtifact(data);
   }
 
   // Spec §7.6.2 — bulk fetch via POST /v1/artifacts:batchLoad. The
@@ -166,9 +338,9 @@ export class Client {
       harness?: string;
       versionPins?: Record<string, string>;
     } = {},
-  ): Promise<BatchLoadEnvelope[]> {
+  ): Promise<BatchResult[]> {
     if (ids.length === 0) return [];
-    const out: BatchLoadEnvelope[] = [];
+    const out: BatchResult[] = [];
     const cap = 50;
     for (let i = 0; i < ids.length; i += cap) {
       const chunk = ids.slice(i, i + cap);
@@ -200,8 +372,8 @@ export class Client {
           Boolean(envelope.retryable),
         );
       }
-      const part = (await resp.json()) as BatchLoadEnvelope[];
-      out.push(...part);
+      const part = (await resp.json()) as Partial<BatchResult>[];
+      out.push(...part.map((e) => new BatchResult(e)));
     }
     return out;
   }

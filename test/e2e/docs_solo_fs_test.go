@@ -9,11 +9,8 @@ package e2e
 //   - T-D-solo-fs-6, -7, -42: layer-order assertions via filesystem.Open are
 //     covered by e2e collision/precedence variants instead; the pure Go API
 //     import is also feasible and used for -6 and -7.
-//   - T-D-solo-fs-53: a bit-identical filesystem-vs-server sync comparison
-//     needs server-source materialization, which is not wired. The §7.1 /
-//     §7.5.2 source dispatch itself is covered by
-//     TestSoloFS_ServerSourceURLCanonicalError (F-7.1.1): a server URL fails
-//     fast with the canonical config.server_source_unsupported error.
+//   - T-D-solo-fs-53: server-source materialization is wired (F-2.2.2), so
+//     the bit-identical filesystem-vs-server sync comparison runs.
 
 import (
 	"encoding/json"
@@ -1134,35 +1131,112 @@ func TestSoloFS_52_MCPFailsAgainstFilesystemRegistry(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-53
-// podium sync output is bit-identical between filesystem and standalone server.
-// The comparison needs server-source materialization, which is not wired; the
-// §7.1 / §7.5.2 source dispatch is covered by the test below.
+// T-D-solo-fs-53 (F-2.2.2)
+// podium sync output is bit-identical between a filesystem source and a
+// standalone server pointed at the same registry. The server-source path
+// reads the effective view over HTTP and runs the same harness adapter and
+// materialization writer, so the on-disk result matches the filesystem source
+// byte for byte.
+//
+// spec: §2.2, §7.5
 func TestSoloFS_53_BitIdenticalFilesystemVsServer(t *testing.T) {
-	t.Skip("bit-identical filesystem-vs-server comparison needs server-source materialization (unwired); dispatch covered by TestSoloFS_ServerSourceURLCanonicalError, F-7.1.1")
+	t.Parallel()
+	registry := writeRegistry(t, map[string]string{
+		".registry-config":          "multi_layer: true\n",
+		"team/glossary/ARTIFACT.md": contextArtifact("glossary"),
+		"team/policy/ARTIFACT.md":   contextArtifact("policy"),
+	})
+
+	fsTarget := t.TempDir()
+	resFS := runPodium(t, "", nil, "sync",
+		"--registry", registry, "--target", fsTarget, "--harness", "none")
+	if resFS.Exit != 0 {
+		t.Fatalf("filesystem sync exit=%d\nstderr: %s", resFS.Exit, resFS.Stderr)
+	}
+
+	srv := startServer(t, registry)
+	serverTarget := t.TempDir()
+	resSrv := runPodium(t, "", nil, "sync",
+		"--registry", srv.BaseURL, "--target", serverTarget, "--harness", "none")
+	if resSrv.Exit != 0 {
+		t.Fatalf("server-source sync exit=%d\nstderr: %s", resSrv.Exit, resSrv.Stderr)
+	}
+
+	fsFiles := materializedFiles(t, fsTarget)
+	srvFiles := materializedFiles(t, serverTarget)
+	if len(fsFiles) == 0 {
+		t.Fatal("filesystem sync materialized nothing")
+	}
+	for path, fsContent := range fsFiles {
+		srvContent, ok := srvFiles[path]
+		if !ok {
+			t.Errorf("server sync missing %s that filesystem sync wrote", path)
+			continue
+		}
+		if fsContent != srvContent {
+			t.Errorf("content mismatch for %s:\nfs:     %q\nserver: %q", path, fsContent, srvContent)
+		}
+	}
+	for path := range srvFiles {
+		if _, ok := fsFiles[path]; !ok {
+			t.Errorf("server sync wrote %s that filesystem sync did not", path)
+		}
+	}
 }
 
 // podium sync dispatches on the §7.5.2 registry source: a URL routes to a
-// Podium server, a filesystem path routes to local filesystem. Server-source
-// materialization is not wired, so a URL must fail fast with the canonical
-// config.server_source_unsupported error rather than the pre-fix mangled
-// "registry path does not exist: <cwd>/https:/..." filesystem error that
-// filepath.Abs produced from the URL.
+// Podium server (server-source materialization, F-2.2.2), a filesystem path
+// routes to local filesystem. A server URL must not be collapsed into a bogus
+// filesystem path; pointed at a live server it materializes the effective
+// view.
 //
-// spec: §7.1, §7.5.2 — F-7.1.1
-func TestSoloFS_ServerSourceURLCanonicalError(t *testing.T) {
+// spec: §2.2, §7.5.2
+func TestSoloFS_ServerSourceURLMaterializes(t *testing.T) {
 	t.Parallel()
+	registry := writeRegistry(t, map[string]string{
+		".registry-config":                 "multi_layer: true\n",
+		"team-shared/glossary/ARTIFACT.md": contextArtifact("glossary"),
+	})
+	srv := startServer(t, registry)
+	target := t.TempDir()
 	res := runPodium(t, "", nil, "sync",
-		"--registry", "https://podium.acme.com",
-		"--target", t.TempDir(), "--harness", "none")
-	if res.Exit == 0 {
-		t.Fatalf("sync against a server URL exited 0, want non-zero\nstderr: %s", res.Stderr)
-	}
-	if !strings.Contains(res.Stderr, "config.server_source_unsupported") {
-		t.Errorf("stderr missing canonical config.server_source_unsupported:\n%s", res.Stderr)
+		"--registry", srv.BaseURL, "--target", target, "--harness", "none")
+	if res.Exit != 0 {
+		t.Fatalf("server-source sync exit=%d\nstderr: %s", res.Exit, res.Stderr)
 	}
 	// The pre-fix bug collapsed the URL into a bogus filesystem path.
 	if strings.Contains(res.Stderr, "registry path does not exist") {
 		t.Errorf("stderr leaked the mangled filesystem error:\n%s", res.Stderr)
 	}
+	// In multi-layer mode the leading path segment is the layer, so the
+	// canonical id is "glossary" and materializes at <target>/glossary/.
+	if _, err := os.Stat(filepath.Join(target, "glossary", "ARTIFACT.md")); err != nil {
+		t.Errorf("server-source sync did not materialize glossary/ARTIFACT.md: %v", err)
+	}
+}
+
+// materializedFiles returns a path->content map of every file under root,
+// keyed by the slash-separated path relative to root, excluding sync state.
+func materializedFiles(t *testing.T, root string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, _ := filepath.Rel(root, path)
+		rel = filepath.ToSlash(rel)
+		if strings.HasPrefix(rel, ".podium/") {
+			return nil // per-target sync.lock and state are not materialized output
+		}
+		out[rel] = readFile(t, path)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", root, err)
+	}
+	return out
 }

@@ -52,12 +52,6 @@ func Watch(ctx context.Context, opts WatchOptions) (<-chan WatchEvent, error) {
 	if opts.Sync.RegistryPath == "" {
 		return nil, ErrNoRegistry
 	}
-	// §7.1 / §7.5.2 dispatch: --watch against a server-source URL fails fast
-	// with the same canonical error Run returns, instead of spawning a
-	// poller that can never stat the URL as a directory.
-	if isServerSource(opts.Sync.RegistryPath) {
-		return nil, ErrServerSourceUnsupported
-	}
 	if opts.Period <= 0 {
 		opts.Period = 500 * time.Millisecond
 	}
@@ -66,6 +60,13 @@ func Watch(ctx context.Context, opts WatchOptions) (<-chan WatchEvent, error) {
 	}
 
 	events := make(chan WatchEvent, 4)
+	// §7.5.2 dispatch: a server-source watcher subscribes to the registry's
+	// §7.5 change-event stream and reruns on every event; a filesystem
+	// source polls the local tree for content changes.
+	if isServerSource(opts.Sync.RegistryPath) {
+		go runServerWatch(ctx, opts, events)
+		return events, nil
+	}
 	go runWatch(ctx, opts, events)
 	return events, nil
 }

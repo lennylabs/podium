@@ -638,15 +638,23 @@ func Run() error {
 	// call. Server-side identity modes that are not MCP-server providers (the
 	// empty standalone default, "oidc", public mode) are absent from the
 	// registry and stay on the anonymous resolver.
+	verifierInstalled := false
+	providerSelected := false
 	if prov, err := selectIdentityProvider(cfg); err != nil {
 		return fmt.Errorf("identity provider %q: %w", cfg.identityProvider, err)
 	} else if prov != nil {
+		providerSelected = true
 		log.Printf("identity provider: %s (registered via identity.Default)", prov.ID())
 		if cfg.identityProvider == "injected-session-token" {
 			bootOpts = append(bootOpts, server.WithIdentityVerifier(
 				injectedTokenVerifier(runtimeKeys, cfg.oauthAudience, cfg.idpGroupMapping)))
+			verifierInstalled = true
 			log.Printf("identity provider: injected-session-token (verifying runtime-signed JWTs)")
 		}
+	}
+
+	if err := identityVisibilityGuard(cfg.identityProvider, providerSelected, cfg.publicMode, verifierInstalled); err != nil {
+		return err
 	}
 
 	srv := server.New(registry, bootOpts...)

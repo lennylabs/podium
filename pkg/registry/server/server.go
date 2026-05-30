@@ -299,6 +299,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/search_artifacts", s.handleSearchArtifacts)
 	mux.HandleFunc("/v1/load_artifact", s.handleLoadArtifact)
 	mux.HandleFunc("/v1/artifacts:batchLoad", s.handleBatchLoad)
+	mux.HandleFunc("/v1/sync/manifest", s.handleSyncManifest)
 	mux.HandleFunc("/v1/dependents", s.handleDependents)
 	mux.HandleFunc("/v1/scope/preview", s.handleScopePreview)
 	mux.HandleFunc("/v1/domain/analyze", s.handleDomainAnalyze)
