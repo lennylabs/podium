@@ -240,6 +240,11 @@ type LayerConfig struct {
 	Groups        []string
 	Users         []string
 	WebhookSecret string // HMAC secret for git source webhook (§7.3.1)
+	// GitProvider names the §9.1 GitProvider whose signature scheme
+	// verifies this layer's inbound webhook deliveries (e.g. "github",
+	// "gitlab", "bitbucket", or a custom provider registered via
+	// webhook.Default.Register). Empty defaults to "github". spec §7.3.1.
+	GitProvider string
 	// LastIngestedRef records the source-specific reference (commit
 	// SHA for git) of the most recent successful ingest. The ingest
 	// pipeline reads it before snapshotting so the source provider can

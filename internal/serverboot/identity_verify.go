@@ -40,6 +40,26 @@ func injectedTokenVerifier(keys identity.RuntimeKeyVerifierStore, audience strin
 	}
 }
 
+// selectIdentityProvider resolves the §9.1 IdentityProvider for
+// cfg.identityProvider from the process-global identity.Default registry
+// (§9.2). It returns the instantiated provider when the id is registered
+// (the built-in oauth-device-code / injected-session-token, or a custom
+// provider an imported plugin registered), nil when the id is not a
+// registered MCP-server provider (the empty standalone default, a
+// server-side mode such as "oidc", or public mode), and an error only when
+// a registered provider's factory fails. This is the build-path consumer
+// that makes "import a custom IdentityProvider into a source build" change
+// behavior, the gap §9.2 names by example.
+func selectIdentityProvider(cfg *Config) (identity.Provider, error) {
+	if cfg.identityProvider == "" || !identity.Default.Has(cfg.identityProvider) {
+		return nil, nil
+	}
+	return identity.Default.New(cfg.identityProvider, identity.Config{
+		Audience:              cfg.oauthAudience,
+		AuthorizationEndpoint: cfg.oauthAuthorizationEndpoint,
+	})
+}
+
 // bearerToken returns the token from an "Authorization: Bearer <token>"
 // header, or "" when the header is absent or not a bearer credential. The
 // empty string drives the verifier's empty-token rejection

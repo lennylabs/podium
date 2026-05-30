@@ -191,6 +191,7 @@ func (e *LayerEndpoint) Handler() http.Handler {
 	})
 	mux.HandleFunc("/v1/layers/reorder", e.reorder)
 	mux.HandleFunc("/v1/layers/reingest", e.reingest)
+	mux.HandleFunc("/v1/layers/webhook", e.handleWebhook)
 	mux.HandleFunc("/v1/layers/update", e.update)
 	return mux
 }

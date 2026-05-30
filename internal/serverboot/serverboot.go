@@ -577,10 +577,25 @@ func Run() error {
 	// model the section specifies. Only the injected-session-token provider
 	// installs it; oauth-device-code and standalone stay on the anonymous
 	// resolver.
-	if cfg.identityProvider == "injected-session-token" {
-		bootOpts = append(bootOpts, server.WithIdentityVerifier(
-			injectedTokenVerifier(runtimeKeys, cfg.oauthAudience, cfg.idpGroupMapping)))
-		log.Printf("identity provider: injected-session-token (verifying runtime-signed JWTs)")
+	// §9.1/§9.2 IdentityProvider selection: consult the process-global
+	// identity.Default registry so a custom provider imported into a source
+	// build (via identity.Default.Register, mirroring typeprovider) is
+	// selected by its PODIUM_IDENTITY_PROVIDER id. The built-in
+	// oauth-device-code and injected-session-token providers are seeded into
+	// the registry; injected-session-token additionally installs the
+	// request-time JWT verifier so the registry verifies every meta-tool
+	// call. Server-side identity modes that are not MCP-server providers (the
+	// empty standalone default, "oidc", public mode) are absent from the
+	// registry and stay on the anonymous resolver.
+	if prov, err := selectIdentityProvider(cfg); err != nil {
+		return fmt.Errorf("identity provider %q: %w", cfg.identityProvider, err)
+	} else if prov != nil {
+		log.Printf("identity provider: %s (registered via identity.Default)", prov.ID())
+		if cfg.identityProvider == "injected-session-token" {
+			bootOpts = append(bootOpts, server.WithIdentityVerifier(
+				injectedTokenVerifier(runtimeKeys, cfg.oauthAudience, cfg.idpGroupMapping)))
+			log.Printf("identity provider: injected-session-token (verifying runtime-signed JWTs)")
+		}
 	}
 
 	srv := server.New(registry, bootOpts...)
@@ -1188,6 +1203,39 @@ func (c *Config) vectorSelfEmbeds() bool {
 	return false
 }
 
+// embeddingSettings collects the resolved §9.1 EmbeddingProvider settings
+// a registered custom provider may read. The map is wire-serializable per
+// §9.3 so a future out-of-process provider receives the same inputs.
+func (c *Config) embeddingSettings() map[string]string {
+	return map[string]string{
+		"model":      c.embeddingModel,
+		"openai_key": c.openaiAPIKey,
+		"voyage_key": c.voyageAPIKey,
+		"cohere_key": c.cohereAPIKey,
+		"ollama_url": c.ollamaURL,
+	}
+}
+
+// vectorSettings collects the resolved §9.1 RegistrySearchProvider
+// settings a registered custom backend may read. The map is wire-
+// serializable per §9.3.
+func (c *Config) vectorSettings() map[string]string {
+	return map[string]string{
+		"pgvector_dsn":    c.pgvectorDSN,
+		"sqlite_path":     c.sqlitePath,
+		"pinecone_key":    c.pineconeKey,
+		"pinecone_host":   c.pineconeHost,
+		"pinecone_index":  c.pineconeIndex,
+		"namespace":       c.pineconeNS,
+		"weaviate_url":    c.weaviateURL,
+		"weaviate_key":    c.weaviateKey,
+		"collection":      c.weaviateColl,
+		"qdrant_url":      c.qdrantURL,
+		"qdrant_key":      c.qdrantKey,
+		"inference_model": c.vectorInferenceModel,
+	}
+}
+
 // openVectorAndEmbedder returns the configured §4.7 hybrid-search
 // pieces. Returns (nil, nil, nil) when vector search is disabled
 // (operator left PODIUM_VECTOR_BACKEND unset / set to "none").
@@ -1223,6 +1271,15 @@ func openVectorAndEmbedder(c *Config) (vector.Provider, embedding.Provider, erro
 // a cross-provider fallback when the per-provider variable isn't
 // set.
 func openEmbedder(c *Config) (embedding.Provider, error) {
+	// §9.1/§9.2: consult the process-global embedding.Default registry first
+	// so a custom EmbeddingProvider imported into a source build (via
+	// embedding.Default.Register) is selectable by PODIUM_EMBEDDING_PROVIDER
+	// without editing this switch. The built-in providers fall through.
+	if p, ok, err := embedding.Default.New(c.embeddingProvider, c.embeddingSettings()); err != nil {
+		return nil, err
+	} else if ok {
+		return p, nil
+	}
 	switch c.embeddingProvider {
 	case "", "none":
 		return nil, nil
@@ -1262,6 +1319,15 @@ func openEmbedder(c *Config) (embedding.Provider, error) {
 }
 
 func openVectorBackend(c *Config, dim int) (vector.Provider, error) {
+	// §9.1/§9.2: consult the process-global vector.Default registry first so
+	// a custom RegistrySearchProvider imported into a source build (via
+	// vector.Default.Register) is selectable by PODIUM_VECTOR_BACKEND without
+	// editing this switch. The built-in backends fall through.
+	if p, ok, err := vector.Default.New(c.vectorBackend, c.vectorSettings(), dim); err != nil {
+		return nil, err
+	} else if ok {
+		return p, nil
+	}
 	switch c.vectorBackend {
 	case "", "none":
 		return nil, nil

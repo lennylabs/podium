@@ -150,6 +150,7 @@ func (p *Postgres) applySchema() error {
 			webhook_secret TEXT NOT NULL DEFAULT '',
 			last_ingested_ref TEXT NOT NULL DEFAULT '',
 			force_push_policy TEXT NOT NULL DEFAULT '',
+			git_provider TEXT NOT NULL DEFAULT '',
 			created_at TIMESTAMPTZ NOT NULL,
 			PRIMARY KEY (tenant_id, id)
 		)`,
@@ -412,8 +413,8 @@ func (p *Postgres) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 		INSERT INTO layer_configs
 			(tenant_id, id, source_type, repo, ref, root, local_path, ord,
 			 user_defined, owner, public, organization, groups, users,
-			 webhook_secret, last_ingested_ref, force_push_policy, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+			 webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 		ON CONFLICT (tenant_id, id) DO UPDATE SET
 			source_type = EXCLUDED.source_type,
 			repo = EXCLUDED.repo,
@@ -430,12 +431,13 @@ func (p *Postgres) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 			webhook_secret = EXCLUDED.webhook_secret,
 			last_ingested_ref = EXCLUDED.last_ingested_ref,
 			force_push_policy = EXCLUDED.force_push_policy,
+			git_provider = EXCLUDED.git_provider,
 			created_at = EXCLUDED.created_at`,
 		cfg.TenantID, cfg.ID, cfg.SourceType, cfg.Repo, cfg.Ref, cfg.Root, cfg.LocalPath,
 		cfg.Order, cfg.UserDefined, cfg.Owner,
 		cfg.Public, cfg.Organization,
 		strings.Join(cfg.Groups, "\n"), strings.Join(cfg.Users, "\n"),
-		cfg.WebhookSecret, cfg.LastIngestedRef, cfg.ForcePushPolicy,
+		cfg.WebhookSecret, cfg.LastIngestedRef, cfg.ForcePushPolicy, cfg.GitProvider,
 		createdAt.UTC())
 	return err
 }
@@ -445,7 +447,7 @@ func (p *Postgres) GetLayerConfig(ctx context.Context, tenantID, id string) (Lay
 	row := p.db.QueryRowContext(ctx, `
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
-		       webhook_secret, last_ingested_ref, force_push_policy, created_at
+		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at
 		FROM layer_configs
 		WHERE tenant_id = $1 AND id = $2`, tenantID, id)
 	cfg, err := scanLayerConfigPG(row)
@@ -460,7 +462,7 @@ func (p *Postgres) ListLayerConfigs(ctx context.Context, tenantID string) ([]Lay
 	rows, err := p.db.QueryContext(ctx, `
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
-		       webhook_secret, last_ingested_ref, force_push_policy, created_at
+		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at
 		FROM layer_configs WHERE tenant_id = $1
 		ORDER BY ord ASC, id ASC`, tenantID)
 	if err != nil {
@@ -521,7 +523,7 @@ func scanLayerConfigPG(scanner rowScanner) (LayerConfig, error) {
 		&cfg.Repo, &cfg.Ref, &cfg.Root, &cfg.LocalPath,
 		&cfg.Order, &cfg.UserDefined, &cfg.Owner,
 		&cfg.Public, &cfg.Organization, &groups, &users,
-		&cfg.WebhookSecret, &cfg.LastIngestedRef, &cfg.ForcePushPolicy,
+		&cfg.WebhookSecret, &cfg.LastIngestedRef, &cfg.ForcePushPolicy, &cfg.GitProvider,
 		&cfg.CreatedAt)
 	if err != nil {
 		return LayerConfig{}, err
