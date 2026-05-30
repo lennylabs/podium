@@ -857,6 +857,76 @@ tests:
 	}
 }
 
+// ---- §7.1 latency SLO surface: per-request access log (F-7.1.2) -------------
+
+// The running standalone server times each meta-tool request and emits a
+// structured access-log line keyed by operation name, so an operator has a
+// timing surface to compare against the §7.1 SLO budgets. The liveness probe
+// carries no SLO budget and is excluded.
+//
+// spec: §7.1 Latency budgets (SLO targets, server source) — F-7.1.2
+func TestOpGuide_AccessLogLatencySurface(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"finance/run/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ntags: [finance]\ndescription: Run variance analysis for vendor payments here today.\n---\n\nBody.\n",
+	})
+	srv := opguideStartStandalone(t, []string{"HOME=" + t.TempDir()}, reg)
+
+	// An SLO-budgeted meta-tool request must produce one access line.
+	if st, body := getRaw(t, srv.BaseURL+"/v1/search_artifacts?q=variance"); st != 200 {
+		t.Fatalf("search_artifacts status=%d, want 200\nbody: %s", st, body)
+	}
+
+	// The access line is written after the response is sent, so poll the
+	// captured server log with a bounded wait.
+	want := "access op=search_artifacts status=200 duration_ms="
+	deadline := time.Now().Add(5 * time.Second)
+	found := false
+	for time.Now().Before(deadline) {
+		if strings.Contains(srv.log(), want) {
+			found = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !found {
+		t.Fatalf("access log missing %q\nlog:\n%s", want, srv.log())
+	}
+	// The startup line announces the surface is enabled by default.
+	if !strings.Contains(srv.log(), "access log: enabled") {
+		t.Errorf("startup log missing the access-log enable line:\n%s", srv.log())
+	}
+	// The liveness/readiness probes are not SLO operations; they must not
+	// leak into the access log as observed operations.
+	if logText := srv.log(); strings.Contains(logText, "op=health") || strings.Contains(logText, "op=ready") {
+		t.Errorf("access log observed an excluded probe:\n%s", logText)
+	}
+}
+
+// PODIUM_ACCESS_LOG=false silences the §7.1 access log without affecting the
+// rest of the server, for an operator who routes latency through a different
+// sink.
+//
+// spec: §7.1 — F-7.1.2
+func TestOpGuide_AccessLogDisabled(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{"ctx/ARTIFACT.md": opguideSimpleArtifact()})
+	srv := opguideStartStandalone(t,
+		[]string{"HOME=" + t.TempDir(), "PODIUM_ACCESS_LOG=false"}, reg)
+
+	if st, _ := getRaw(t, srv.BaseURL+"/v1/search_artifacts?q=test"); st != 200 {
+		t.Fatalf("search_artifacts status=%d, want 200", st)
+	}
+	// Give the server a moment in case a line were (wrongly) emitted.
+	time.Sleep(300 * time.Millisecond)
+	if logText := srv.log(); strings.Contains(logText, "access op=") {
+		t.Errorf("PODIUM_ACCESS_LOG=false still emitted an access line:\n%s", logText)
+	}
+	if logText := srv.log(); strings.Contains(logText, "access log: enabled") {
+		t.Errorf("PODIUM_ACCESS_LOG=false still logged the enable line:\n%s", logText)
+	}
+}
+
 // ---- T-D-operator-guide-38: scope preview gating ---------------------------
 
 // T-D-operator-guide-38: an operator disables the §3.5 scope-preview

@@ -93,6 +93,24 @@ func hasURLScheme(s string) bool {
 	return false
 }
 
+// isServerSource reports whether registry resolves to a Podium server
+// under the §7.1 / §7.5.2 dispatch: an http:// or https:// URL routes to
+// a server, and every other value (a bare path, a file:// URI) is a
+// filesystem source. Run and Watch use it to reject a server URL with a
+// canonical error instead of letting filesystem.Open mangle the URL into
+// a bogus path under the working directory.
+//
+// spec: §7.1, §7.5.2 — "a URL routes to a Podium server, a filesystem
+// path routes to local filesystem".
+func isServerSource(registry string) bool {
+	for _, prefix := range []string{"http://", "https://"} {
+		if len(registry) >= len(prefix) && registry[:len(prefix)] == prefix {
+			return true
+		}
+	}
+	return false
+}
+
 // ReadConfig reads sync.yaml from the workspace's .podium/ directory.
 // A missing file returns (nil, nil) so callers can distinguish "no
 // config" from "invalid config" without an error type discriminator.

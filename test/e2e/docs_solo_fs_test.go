@@ -9,8 +9,11 @@ package e2e
 //   - T-D-solo-fs-6, -7, -42: layer-order assertions via filesystem.Open are
 //     covered by e2e collision/precedence variants instead; the pure Go API
 //     import is also feasible and used for -6 and -7.
-//   - T-D-solo-fs-53: server-source sync (podium sync --registry http://...) is
-//     not implemented; skipped with an honest reason.
+//   - T-D-solo-fs-53: a bit-identical filesystem-vs-server sync comparison
+//     needs server-source materialization, which is not wired. The §7.1 /
+//     §7.5.2 source dispatch itself is covered by
+//     TestSoloFS_ServerSourceURLCanonicalError (F-7.1.1): a server URL fails
+//     fast with the canonical config.server_source_unsupported error.
 
 import (
 	"encoding/json"
@@ -1133,7 +1136,33 @@ func TestSoloFS_52_MCPFailsAgainstFilesystemRegistry(t *testing.T) {
 
 // T-D-solo-fs-53
 // podium sync output is bit-identical between filesystem and standalone server.
-// Server-source sync (--registry http://...) is not implemented.
+// The comparison needs server-source materialization, which is not wired; the
+// §7.1 / §7.5.2 source dispatch is covered by the test below.
 func TestSoloFS_53_BitIdenticalFilesystemVsServer(t *testing.T) {
-	t.Skip("server-source sync not implemented; podium sync --registry http:// is unsupported")
+	t.Skip("bit-identical filesystem-vs-server comparison needs server-source materialization (unwired); dispatch covered by TestSoloFS_ServerSourceURLCanonicalError, F-7.1.1")
+}
+
+// podium sync dispatches on the §7.5.2 registry source: a URL routes to a
+// Podium server, a filesystem path routes to local filesystem. Server-source
+// materialization is not wired, so a URL must fail fast with the canonical
+// config.server_source_unsupported error rather than the pre-fix mangled
+// "registry path does not exist: <cwd>/https:/..." filesystem error that
+// filepath.Abs produced from the URL.
+//
+// spec: §7.1, §7.5.2 — F-7.1.1
+func TestSoloFS_ServerSourceURLCanonicalError(t *testing.T) {
+	t.Parallel()
+	res := runPodium(t, "", nil, "sync",
+		"--registry", "https://podium.acme.com",
+		"--target", t.TempDir(), "--harness", "none")
+	if res.Exit == 0 {
+		t.Fatalf("sync against a server URL exited 0, want non-zero\nstderr: %s", res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "config.server_source_unsupported") {
+		t.Errorf("stderr missing canonical config.server_source_unsupported:\n%s", res.Stderr)
+	}
+	// The pre-fix bug collapsed the URL into a bogus filesystem path.
+	if strings.Contains(res.Stderr, "registry path does not exist") {
+		t.Errorf("stderr leaked the mangled filesystem error:\n%s", res.Stderr)
+	}
 }

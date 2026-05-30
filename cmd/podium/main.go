@@ -186,7 +186,7 @@ func syncCmd(args []string) int {
 	}
 	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
 	setUsage(fs, "Materialize the caller's effective view through a HarnessAdapter.")
-	registry := fs.String("registry", "", "filesystem registry path (required)")
+	registry := fs.String("registry", "", "registry URL (server source) or filesystem path (required)")
 	target := fs.String("target", ".", "destination directory")
 	harness := fs.String("harness", "none", "harness adapter")
 	dryRun := fs.Bool("dry-run", false, "resolve and report; write nothing")
@@ -209,7 +209,7 @@ func syncCmd(args []string) int {
 		}
 	}
 	if *registry == "" {
-		fmt.Fprintln(os.Stderr, "error: --registry is required (filesystem path) — set it on the command line or in <ws>/.podium/sync.yaml")
+		fmt.Fprintln(os.Stderr, "error: --registry is required (registry URL or filesystem path) — set it on the command line or in <ws>/.podium/sync.yaml")
 		return 2
 	}
 	abs, err := filepath.Abs(*target)

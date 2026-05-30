@@ -83,6 +83,12 @@ type Server struct {
 	// (admin.granted). Read events flow through the core emitter; sharing
 	// the same sink keeps both on one §8.6 hash chain. Nil is a no-op.
 	auditSink *audit.FileSink
+	// latency, when set, receives one §7.1 timing observation per served
+	// request (operation name, status, elapsed) so a deployment can compare
+	// observed latency against the SLO budgets. Nil disables timing with
+	// zero per-request overhead. Wired by serverboot to a structured access
+	// log; pluggable for a histogram exporter.
+	latency LatencyObserver
 }
 
 // readyProbeTimeout bounds the §13.9 dependency probes so a hung
@@ -311,12 +317,15 @@ func (s *Server) Handler() http.Handler {
 	if s.objectStore != nil {
 		mux.HandleFunc("/objects/", s.handleObjectsRoute)
 	}
-	// §6.3.2: verify the caller token on every meta-tool call (outermost so
-	// a rejected request never reaches the audit emitter or a handler), then
-	// §8.1: attach per-request audit metadata (trace id + structured caller
+	// §7.1: time the full request (outermost so the measured duration spans
+	// identity verification, audit, and the handler) and report it to the
+	// latency observer, keyed by operation name, for SLO comparison. Then
+	// §6.3.2: verify the caller token on every meta-tool call (a rejected
+	// request never reaches the audit emitter or a handler), then §8.1:
+	// attach per-request audit metadata (trace id + structured caller
 	// identity) to every request context so read events emitted by the core
 	// and the HTTP write handlers carry it.
-	return s.withIdentityVerification(s.withAuditMetaMiddleware(s.withReadOnlyHeaders(mux)))
+	return s.withLatencyObserver(s.withIdentityVerification(s.withAuditMetaMiddleware(s.withReadOnlyHeaders(mux))))
 }
 
 // withReadOnlyHeaders wraps the route mux so every response

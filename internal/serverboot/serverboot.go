@@ -535,6 +535,17 @@ func Run() error {
 	}
 	bootOpts = append(bootOpts, server.WithQuotaLimiter(server.NewQuotaLimiter(quotaLimits)))
 
+	// §7.1 latency SLO surface: time every meta-tool request and emit a
+	// structured access-log line keyed by operation name so a deployment can
+	// compare observed latency against the SLO budgets. On by default;
+	// PODIUM_ACCESS_LOG=false (or 0/off/no) silences it. The registry holds
+	// no metrics dependency; the /metrics histogram endpoint is tracked
+	// separately (F-13.8.1) and can reuse this same observer seam.
+	if accessLogEnabled() {
+		bootOpts = append(bootOpts, server.WithLatencyObserver(accessLogObserver()))
+		log.Printf("access log: enabled (per-request latency keyed by operation; §7.1 SLO surface)")
+	}
+
 	// §6.3.2 runtime trust keys: when PODIUM_RUNTIME_KEYS_PATH is set,
 	// registrations persist as a JSON file at that path; the registry
 	// reloads them on startup. Without the env var, the registry stays in

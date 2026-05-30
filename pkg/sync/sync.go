@@ -29,6 +29,15 @@ var (
 	// Options.RegistryPath nor a discoverable .podium/sync.yaml /
 	// PODIUM_REGISTRY env var is set.
 	ErrNoRegistry = errors.New("config.no_registry: no registry configured")
+	// ErrServerSourceUnsupported signals that the resolved registry is an
+	// http(s):// URL, which the §7.1 / §7.5.2 dispatch routes to a Podium
+	// server. podium sync materializes only the filesystem source today, so
+	// Run returns this canonical error instead of handing the URL to
+	// filesystem.Open, which would filepath.Abs the URL into a bogus path
+	// under the working directory and fail with a misleading "registry path
+	// does not exist" error. A server registry is reachable through the MCP
+	// server (§6) or a language SDK (§7.6).
+	ErrServerSourceUnsupported = errors.New("config.server_source_unsupported: podium sync requires a filesystem-source registry; a server-source URL is reachable via the MCP server or an SDK")
 )
 
 // Options are the inputs to Run. RegistryPath is the filesystem-source
@@ -78,6 +87,14 @@ type ArtifactResult struct {
 func Run(opts Options) (*Result, error) {
 	if opts.RegistryPath == "" {
 		return nil, ErrNoRegistry
+	}
+	// §7.1 / §7.5.2 dispatch: a URL routes to a Podium server, a filesystem
+	// path routes to local filesystem. podium sync materializes only the
+	// filesystem source, so reject an http(s):// registry with a canonical
+	// error rather than letting filesystem.Open collapse the URL into a
+	// bogus path under the working directory.
+	if isServerSource(opts.RegistryPath) {
+		return nil, ErrServerSourceUnsupported
 	}
 	if opts.Target == "" && !opts.DryRun {
 		return nil, ErrNoTarget
