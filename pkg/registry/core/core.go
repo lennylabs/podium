@@ -199,6 +199,12 @@ type ArtifactDescriptor struct {
 	Description string
 	Tags        []string
 	Score       float64
+	// Sensitivity is the artifact's classification label, surfaced in
+	// search_artifacts results for filtering and display (§4.7.4). For an
+	// artifact that declares extends:, it carries the most-restrictive value
+	// across the chain (§4.6 field-semantics) so search agrees with
+	// load_artifact. Empty when the artifact declares no sensitivity.
+	Sensitivity string
 	// FoldedFrom records the relative subpath an artifact was lifted
 	// from when fold_below_artifacts collapsed its sparse subdomain
 	// into the parent's leaf set (§4.5.5 folding mechanics). Empty
@@ -655,9 +661,34 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 	for _, sc := range scored {
 		d := descriptorOf(sc.rec)
 		d.Score = sc.score
+		// spec: §4.7.4 — surface the sensitivity label in search results,
+		// resolved most-restrictive across the extends chain (§4.6) so the
+		// search and load_artifact surfaces report the same value.
+		d.Sensitivity = r.mergedSensitivity(ctx, sc.rec)
 		res.Results = append(res.Results, d)
 	}
 	return res, nil
+}
+
+// mergedSensitivity returns rec's effective sensitivity. When rec declares
+// extends:, it folds the chain most-restrictively (§4.6 field-semantics
+// table) to match what assembleResult/load_artifact reports; otherwise it
+// returns the record's own value. A chain that fails to resolve falls back
+// to the record's own sensitivity rather than erroring, since this feeds a
+// display field on an already-authorized result.
+func (r *Registry) mergedSensitivity(ctx context.Context, rec store.ManifestRecord) string {
+	if rec.ExtendsPin == "" {
+		return rec.Sensitivity
+	}
+	chain, err := r.resolveExtendsChain(ctx, rec, map[string]bool{})
+	if err != nil {
+		return rec.Sensitivity
+	}
+	s := ""
+	for _, c := range chain {
+		s = mostRestrictiveSensitivity(s, c.Sensitivity)
+	}
+	return s
 }
 
 // vectorRanks embeds the query and returns the top-K nearest

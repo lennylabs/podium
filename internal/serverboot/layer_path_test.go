@@ -8,9 +8,14 @@ import (
 	"testing"
 
 	"github.com/lennylabs/podium/internal/testharness"
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/store"
 )
+
+// publicVis is the §13.10 standalone default a no-identity-provider caller
+// computes for bootstrap layers; the tests pass it explicitly.
+var publicVis = layer.Visibility{Public: true}
 
 // artifactBody is a minimal §4.5.1-shaped manifest the ingest
 // pipeline accepts. type:context avoids the SKILL.md requirement
@@ -31,7 +36,7 @@ func newMemoryStoreWithTenant(t testing.TB) store.Store {
 // preserves pre-PR behaviour.
 func TestBootstrapLayerPath_EmptyReturnsEmpty(t *testing.T) {
 	st := newMemoryStoreWithTenant(t)
-	layers, err := bootstrapLayerPath(st, "default", "")
+	layers, err := bootstrapLayerPath(st, "default", "", publicVis, 0)
 	if err != nil {
 		t.Fatalf("bootstrapLayerPath: %v", err)
 	}
@@ -52,7 +57,7 @@ func TestBootstrapLayerPath_EmptyReturnsEmpty(t *testing.T) {
 func TestBootstrapLayerPath_MissingPathErrors(t *testing.T) {
 	st := newMemoryStoreWithTenant(t)
 	bogus := filepath.Join(t.TempDir(), "does-not-exist")
-	_, err := bootstrapLayerPath(st, "default", bogus)
+	_, err := bootstrapLayerPath(st, "default", bogus, publicVis, 0)
 	if err == nil {
 		t.Fatal("err = nil, want filesystem.ErrConfigMissing")
 	}
@@ -72,7 +77,7 @@ func TestBootstrapLayerPath_SingleLayerMode(t *testing.T) {
 		Content: artifactBody,
 	})
 
-	layers, err := bootstrapLayerPath(st, "default", root)
+	layers, err := bootstrapLayerPath(st, "default", root, publicVis, 0)
 	if err != nil {
 		t.Fatalf("bootstrapLayerPath: %v", err)
 	}
@@ -153,7 +158,7 @@ func TestBootstrapLayerPath_MultiLayerMode(t *testing.T) {
 		},
 	)
 
-	layers, err := bootstrapLayerPath(st, "default", root)
+	layers, err := bootstrapLayerPath(st, "default", root, publicVis, 0)
 	if err != nil {
 		t.Fatalf("bootstrapLayerPath: %v", err)
 	}
@@ -219,7 +224,7 @@ func TestBootstrapLayerPath_RespectsLayerOrder(t *testing.T) {
 		},
 	)
 
-	layers, err := bootstrapLayerPath(st, "default", root)
+	layers, err := bootstrapLayerPath(st, "default", root, publicVis, 0)
 	if err != nil {
 		t.Fatalf("bootstrapLayerPath: %v", err)
 	}
@@ -248,7 +253,7 @@ func TestBootstrapLayerPath_AmbiguousMultiLayerErrors(t *testing.T) {
 		},
 	)
 
-	_, err := bootstrapLayerPath(st, "default", root)
+	_, err := bootstrapLayerPath(st, "default", root, publicVis, 0)
 	if err == nil {
 		t.Fatal("err = nil, want filesystem.ErrLayerPathAmbiguous")
 	}
@@ -272,7 +277,7 @@ func TestLoadConfig_ReadsLayerPathFromEnv(t *testing.T) {
 // are set.
 func TestApplyYAML_LayerPathEnvWins(t *testing.T) {
 	c := &Config{layerPath: "/from/env"}
-	applyYAML(c, &yamlConfig{Layers: yamlLayerCfg{Path: "/from/yaml"}})
+	applyYAML(c, &yamlConfig{LayerPath: "/from/yaml"})
 	if c.layerPath != "/from/env" {
 		t.Errorf("layerPath = %q, want /from/env (env beats yaml)", c.layerPath)
 	}
@@ -282,18 +287,18 @@ func TestApplyYAML_LayerPathEnvWins(t *testing.T) {
 // left Config.layerPath empty.
 func TestApplyYAML_LayerPathFillsWhenEmpty(t *testing.T) {
 	c := &Config{layerPath: ""}
-	applyYAML(c, &yamlConfig{Layers: yamlLayerCfg{Path: "/from/yaml"}})
+	applyYAML(c, &yamlConfig{LayerPath: "/from/yaml"})
 	if c.layerPath != "/from/yaml" {
 		t.Errorf("layerPath = %q, want /from/yaml", c.layerPath)
 	}
 }
 
-// Spec: §13.12 — readYAMLConfig parses the new layers.path key so
+// Spec: §13.12 — readYAMLConfig parses the top-level layer_path key so
 // the standalone server can be configured via registry.yaml.
 func TestReadYAMLConfig_ParsesLayerPath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "registry.yaml")
-	body := []byte("layers:\n  path: /var/podium/artifacts\n")
+	body := []byte("layer_path: /var/podium/artifacts\n")
 	if err := os.WriteFile(path, body, 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -305,8 +310,8 @@ func TestReadYAMLConfig_ParsesLayerPath(t *testing.T) {
 	if y == nil {
 		t.Fatal("yamlConfig nil")
 	}
-	if y.Layers.Path != "/var/podium/artifacts" {
-		t.Errorf("Layers.Path = %q, want /var/podium/artifacts", y.Layers.Path)
+	if y.LayerPath != "/var/podium/artifacts" {
+		t.Errorf("LayerPath = %q, want /var/podium/artifacts", y.LayerPath)
 	}
 }
 

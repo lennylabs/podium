@@ -17,8 +17,8 @@ func TestApplyYAML_FillsMissingDefaults(t *testing.T) {
 		defaultLayerVisibility: "private",
 	}
 	y := &yamlConfig{
-		Bind:   "0.0.0.0:9090",
-		Layers: yamlLayerCfg{DefaultVisibility: "organization"},
+		Bind:                   "0.0.0.0:9090",
+		DefaultLayerVisibility: "organization",
 		ReadOnly: yamlReadOnly{
 			ProbeFailures: 3,
 			ProbeInterval: 60,
@@ -50,7 +50,7 @@ func TestApplyYAML_FillsMissingDefaults(t *testing.T) {
 // config did not see PODIUM_DEFAULT_LAYER_VISIBILITY (left empty).
 func TestApplyYAML_DefaultLayerVisibilityFillsWhenEmpty(t *testing.T) {
 	c := &Config{defaultLayerVisibility: ""}
-	applyYAML(c, &yamlConfig{Layers: yamlLayerCfg{DefaultVisibility: "public"}})
+	applyYAML(c, &yamlConfig{DefaultLayerVisibility: "public"})
 	if c.defaultLayerVisibility != "public" {
 		t.Errorf("defaultLayerVisibility = %q, want public", c.defaultLayerVisibility)
 	}
@@ -82,8 +82,7 @@ store:
 object_store:
   type: filesystem
   filesystem_root: /var/podium/objects
-layers:
-  default_visibility: organization
+default_layer_visibility: organization
 read_only:
   probe_failures: 5
   probe_interval_seconds: 45
@@ -111,8 +110,8 @@ read_only:
 	if y.ObjectStore.FilesystemRoot != "/var/podium/objects" {
 		t.Errorf("ObjectStore = %+v", y.ObjectStore)
 	}
-	if y.Layers.DefaultVisibility != "organization" {
-		t.Errorf("Layers.DefaultVisibility = %q", y.Layers.DefaultVisibility)
+	if y.DefaultLayerVisibility != "organization" {
+		t.Errorf("DefaultLayerVisibility = %q", y.DefaultLayerVisibility)
 	}
 	if y.ReadOnly.ProbeFailures != 5 || y.ReadOnly.ProbeInterval != 45 {
 		t.Errorf("ReadOnly = %+v", y.ReadOnly)

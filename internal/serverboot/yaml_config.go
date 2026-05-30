@@ -20,8 +20,19 @@ type yamlConfig struct {
 	Vector           yamlVectorCfg `yaml:"vector_backend,omitempty"`
 	Embedding        yamlEmbedCfg  `yaml:"embedding_provider,omitempty"`
 	Discovery        yamlDiscovery `yaml:"discovery,omitempty"`
-	Layers           yamlLayerCfg  `yaml:"layers,omitempty"`
-	ReadOnly         yamlReadOnly  `yaml:"read_only,omitempty"`
+	// Layers is the §4.6 per-tenant admin-defined layer list. Each entry
+	// declares an id, a single source (git or local), and a visibility
+	// block. Seeded into store.LayerConfig rows at startup.
+	Layers []yamlLayerEntry `yaml:"layers,omitempty"`
+	// LayerPath is the §13.10 standalone bootstrap path (a single
+	// filesystem-registry root). Mirrors the PODIUM_LAYER_PATH env var and
+	// the --layer-path flag; env wins per the standard precedence.
+	LayerPath string `yaml:"layer_path,omitempty"`
+	// DefaultLayerVisibility is the §4.6 fallback visibility for a layer
+	// registered or declared without an explicit visibility block. Mirrors
+	// PODIUM_DEFAULT_LAYER_VISIBILITY.
+	DefaultLayerVisibility string       `yaml:"default_layer_visibility,omitempty"`
+	ReadOnly               yamlReadOnly `yaml:"read_only,omitempty"`
 }
 
 type yamlStoreCfg struct {
@@ -55,12 +66,36 @@ type yamlDiscovery struct {
 	TargetResponseTokens int  `yaml:"target_response_tokens,omitempty"`
 }
 
-type yamlLayerCfg struct {
-	DefaultVisibility string `yaml:"default_visibility,omitempty"`
-	// Path is the §13.10 standalone bootstrap layer path. Mirrors
-	// the PODIUM_LAYER_PATH env var; env wins per the standard
-	// precedence.
-	Path string `yaml:"path,omitempty"`
+// yamlLayerEntry is one admin-defined layer in the §4.6 `layers:` list.
+type yamlLayerEntry struct {
+	ID         string              `yaml:"id"`
+	Source     yamlLayerSource     `yaml:"source"`
+	Visibility yamlLayerVisibility `yaml:"visibility,omitempty"`
+}
+
+// yamlLayerSource is the §4.6 `source:` block. Exactly one of git or
+// local is expected; bootstrap rejects an entry that sets neither or both.
+type yamlLayerSource struct {
+	Git   *yamlGitSource   `yaml:"git,omitempty"`
+	Local *yamlLocalSource `yaml:"local,omitempty"`
+}
+
+type yamlGitSource struct {
+	Repo string `yaml:"repo"`
+	Ref  string `yaml:"ref,omitempty"`
+	Root string `yaml:"root,omitempty"`
+}
+
+type yamlLocalSource struct {
+	Path string `yaml:"path"`
+}
+
+// yamlLayerVisibility is the §4.6 `visibility:` block.
+type yamlLayerVisibility struct {
+	Public       bool     `yaml:"public,omitempty"`
+	Organization bool     `yaml:"organization,omitempty"`
+	Groups       []string `yaml:"groups,omitempty"`
+	Users        []string `yaml:"users,omitempty"`
 }
 
 type yamlReadOnly struct {
@@ -143,11 +178,16 @@ func applyYAML(c *Config, y *yamlConfig) {
 	if c.embeddingModel == "" && y.Embedding.Model != "" {
 		c.embeddingModel = y.Embedding.Model
 	}
-	if c.defaultLayerVisibility == "" && y.Layers.DefaultVisibility != "" {
-		c.defaultLayerVisibility = y.Layers.DefaultVisibility
+	if c.defaultLayerVisibility == "" && y.DefaultLayerVisibility != "" {
+		c.defaultLayerVisibility = y.DefaultLayerVisibility
 	}
-	if c.layerPath == "" && y.Layers.Path != "" {
-		c.layerPath = y.Layers.Path
+	if c.layerPath == "" && y.LayerPath != "" {
+		c.layerPath = y.LayerPath
+	}
+	// §4.6 declarative layer list is config-file-only (no env equivalent),
+	// so it overlays directly when present.
+	if len(y.Layers) > 0 {
+		c.declaredLayers = y.Layers
 	}
 	if c.readOnlyProbeFailures == 0 && y.ReadOnly.ProbeFailures > 0 {
 		c.readOnlyProbeFailures = y.ReadOnly.ProbeFailures

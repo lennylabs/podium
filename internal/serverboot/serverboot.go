@@ -152,9 +152,15 @@ func envInt(key string, def int) int {
 //
 // Layer ordering follows filesystem.Open's resolution
 // (alphabetical, or layer_order: when .registry-config sets it),
-// with Order/Precedence assigned 1..N (lowest-precedence first per
-// §4.6).
-func bootstrapLayerPath(st store.Store, tenantID, layerPath string) ([]layer.Layer, error) {
+// with Order/Precedence assigned startOrder+1..startOrder+N
+// (lowest-precedence first per §4.6). startOrder lets a caller append
+// these layers after a declarative `layers:` list.
+//
+// vis is the visibility stamped on every resolved layer. It is computed
+// by the caller from the deployment mode (§4.6 / §13.10): public for a
+// no-identity-provider standalone, otherwise the configured default
+// (F-4.6.9). The bootstrap path supplies no per-layer visibility input.
+func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Visibility, startOrder int) ([]layer.Layer, error) {
 	if layerPath == "" {
 		return []layer.Layer{}, nil
 	}
@@ -165,7 +171,7 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string) ([]layer.Lay
 	ctx := context.Background()
 	layers := make([]layer.Layer, 0, len(fsReg.Layers))
 	for i, l := range fsReg.Layers {
-		order := i + 1
+		order := startOrder + i + 1
 		res, err := ingest.Ingest(ctx, st, ingest.Request{
 			TenantID: tenantID,
 			LayerID:  l.ID,
@@ -181,16 +187,17 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string) ([]layer.Lay
 		// the standalone web UI (§13.10) see the bootstrap layers. The
 		// SourceType is "local" with LocalPath set to the resolved
 		// directory so a future reingest can re-snapshot the same path.
-		// Public visibility matches §13.10's standalone default for
-		// newly-registered layers.
 		cfg := store.LayerConfig{
-			TenantID:   tenantID,
-			ID:         l.ID,
-			SourceType: "local",
-			LocalPath:  l.Path,
-			Order:      order,
-			Public:     true,
-			CreatedAt:  time.Now().UTC(),
+			TenantID:     tenantID,
+			ID:           l.ID,
+			SourceType:   "local",
+			LocalPath:    l.Path,
+			Order:        order,
+			Public:       vis.Public,
+			Organization: vis.Organization,
+			Groups:       vis.Groups,
+			Users:        vis.Users,
+			CreatedAt:    time.Now().UTC(),
 		}
 		if err := st.PutLayerConfig(ctx, cfg); err != nil {
 			return nil, fmt.Errorf("persist layer config %s: %w", l.ID, err)
@@ -198,12 +205,153 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string) ([]layer.Lay
 		layers = append(layers, layer.Layer{
 			ID:         l.ID,
 			Precedence: order,
-			Visibility: layer.Visibility{Public: true},
+			Visibility: vis,
 		})
 		log.Printf("ingested layer %s from %s (accepted=%d, idempotent=%d, rejected=%d)",
 			l.ID, l.Path, res.Accepted, res.Idempotent, len(res.Rejected))
 	}
 	return layers, nil
+}
+
+// defaultBootstrapVisibility returns the visibility stamped on a layer that
+// carries no explicit visibility input (a §13.10 PODIUM_LAYER_PATH bootstrap
+// layer, or a declarative layer whose `visibility:` block is empty).
+//
+// spec: §4.6 / §13.10 (F-4.6.9). A no-identity-provider standalone (or public
+// mode) is the only deployment the spec gives a public default to: there is no
+// identity to enforce against, so the evaluator short-circuits to true anyway.
+// Once an identity provider is configured, an unconditional public default
+// would expose every bootstrap layer to all callers, contradicting §4.6, so
+// the configured PODIUM_DEFAULT_LAYER_VISIBILITY applies instead.
+func defaultBootstrapVisibility(cfg *Config) layer.Visibility {
+	if cfg.publicMode || cfg.identityProvider == "" {
+		return layer.Visibility{Public: true}
+	}
+	return visibilityFromDefault(cfg.defaultLayerVisibility)
+}
+
+// visibilityFromDefault maps a PODIUM_DEFAULT_LAYER_VISIBILITY value to a
+// layer.Visibility. "private"/unset/unknown leaves no visibility filters set,
+// so only an explicit grant (added later via the layer-management API) can
+// surface the layer. spec: §4.6.
+func visibilityFromDefault(v string) layer.Visibility {
+	switch v {
+	case "public":
+		return layer.Visibility{Public: true}
+	case "organization":
+		return layer.Visibility{Organization: true}
+	default:
+		return layer.Visibility{}
+	}
+}
+
+// visibilityIsEmpty reports whether a visibility block declares no filters.
+func visibilityIsEmpty(v layer.Visibility) bool {
+	return !v.Public && !v.Organization && len(v.Groups) == 0 && len(v.Users) == 0
+}
+
+// bootstrapDeclaredLayers seeds a store.LayerConfig per entry in the §4.6
+// declarative `layers:` list and returns the in-memory []layer.Layer the core
+// registry uses for visibility filtering. Local sources are ingested at
+// startup so their artifacts are immediately searchable. Git sources are
+// seeded as config rows only: a git clone is unbounded network I/O that must
+// not block startup, so the §7.3.1 reingest/webhook path pulls them on demand
+// (spec §13.10: "Additional local and git layers can be registered ... after
+// startup"). Orders are assigned 1..N in list order (lowest precedence first,
+// "in the order they appear in the registry config", §4.6).
+//
+// Ingest runs against context.Background: a bootstrap failure aborts startup
+// before any HTTP listener binds.
+func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config) ([]layer.Layer, error) {
+	if len(cfg.declaredLayers) == 0 {
+		return []layer.Layer{}, nil
+	}
+	ctx := context.Background()
+	layers := make([]layer.Layer, 0, len(cfg.declaredLayers))
+	for i, entry := range cfg.declaredLayers {
+		order := i + 1
+		lc, vis, err := layerConfigFromEntry(tenantID, entry, order, cfg)
+		if err != nil {
+			return nil, err
+		}
+		if err := st.PutLayerConfig(ctx, lc); err != nil {
+			return nil, fmt.Errorf("persist layer config %s: %w", lc.ID, err)
+		}
+		switch lc.SourceType {
+		case "local":
+			res, err := ingest.Ingest(ctx, st, ingest.Request{
+				TenantID: tenantID,
+				LayerID:  lc.ID,
+				Files:    os.DirFS(lc.LocalPath),
+				Linter:   lint.NewIngestLinter(isTrue(os.Getenv("PODIUM_INGEST_OFFLINE"))),
+			})
+			if err != nil {
+				return nil, fmt.Errorf("ingest declared layer %s from %s: %w", lc.ID, lc.LocalPath, err)
+			}
+			log.Printf("ingested declared layer %s from %s (accepted=%d, idempotent=%d, rejected=%d)",
+				lc.ID, lc.LocalPath, res.Accepted, res.Idempotent, len(res.Rejected))
+		case "git":
+			log.Printf("seeded declared git layer %s (repo=%s ref=%s); awaiting reingest/webhook to ingest",
+				lc.ID, lc.Repo, lc.Ref)
+		}
+		layers = append(layers, layer.Layer{
+			ID:         lc.ID,
+			Precedence: order,
+			Visibility: vis,
+		})
+	}
+	return layers, nil
+}
+
+// layerConfigFromEntry validates one §4.6 declared layer entry and builds the
+// store.LayerConfig plus the resolved visibility. An empty `visibility:` block
+// falls back to the deployment default (§4.6 / F-4.6.9). Exactly one source
+// (git or local) must be set.
+func layerConfigFromEntry(tenantID string, entry yamlLayerEntry, order int, cfg *Config) (store.LayerConfig, layer.Visibility, error) {
+	if entry.ID == "" {
+		return store.LayerConfig{}, layer.Visibility{}, fmt.Errorf("declared layer at position %d is missing id", order)
+	}
+	hasGit := entry.Source.Git != nil
+	hasLocal := entry.Source.Local != nil
+	if hasGit == hasLocal {
+		return store.LayerConfig{}, layer.Visibility{}, fmt.Errorf("declared layer %s must set exactly one source (git or local)", entry.ID)
+	}
+	vis := layer.Visibility{
+		Public:       entry.Visibility.Public,
+		Organization: entry.Visibility.Organization,
+		Groups:       entry.Visibility.Groups,
+		Users:        entry.Visibility.Users,
+	}
+	if visibilityIsEmpty(vis) {
+		vis = defaultBootstrapVisibility(cfg)
+	}
+	lc := store.LayerConfig{
+		TenantID:     tenantID,
+		ID:           entry.ID,
+		Order:        order,
+		Public:       vis.Public,
+		Organization: vis.Organization,
+		Groups:       vis.Groups,
+		Users:        vis.Users,
+		CreatedAt:    time.Now().UTC(),
+	}
+	switch {
+	case hasGit:
+		if entry.Source.Git.Repo == "" {
+			return store.LayerConfig{}, layer.Visibility{}, fmt.Errorf("declared git layer %s is missing source.git.repo", entry.ID)
+		}
+		lc.SourceType = "git"
+		lc.Repo = entry.Source.Git.Repo
+		lc.Ref = entry.Source.Git.Ref
+		lc.Root = entry.Source.Git.Root
+	case hasLocal:
+		if entry.Source.Local.Path == "" {
+			return store.LayerConfig{}, layer.Visibility{}, fmt.Errorf("declared local layer %s is missing source.local.path", entry.ID)
+		}
+		lc.SourceType = "local"
+		lc.LocalPath = entry.Source.Local.Path
+	}
+	return lc, vis, nil
 }
 
 // Run loads configuration, opens the configured backends, mounts
@@ -227,17 +375,27 @@ func Run() error {
 	const tenantID = "default"
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: tenantID, Name: tenantID})
 
+	// §4.6 declarative layers: the registry.yaml `layers:` list seeds an
+	// admin-defined layer per entry (lowest precedence first, in config
+	// order). Local sources are ingested at boot; git sources are seeded as
+	// config rows for the §7.3.1 reingest/webhook path.
+	declared, err := bootstrapDeclaredLayers(st, tenantID, cfg)
+	if err != nil {
+		return err
+	}
 	// PODIUM_LAYER_PATH: when set, ingest a filesystem registry at
 	// startup. Mirrors server.NewFromFilesystem for the pieces needed
 	// for search and load_artifact, and additionally persists a
 	// store.LayerConfig per layer so the §7.3.1 layer-management
 	// endpoints (GET /v1/layers, POST /v1/layers/reingest,
-	// DELETE /v1/layers) see the bootstrap layers. When unset, the
-	// server boots with an empty registry as before.
-	bootLayers, err := bootstrapLayerPath(st, tenantID, cfg.layerPath)
+	// DELETE /v1/layers) see the bootstrap layers. These layers carry no
+	// per-layer visibility input, so they take the deployment default
+	// (§4.6 / §13.10 / F-4.6.9). They append after the declared layers.
+	pathLayers, err := bootstrapLayerPath(st, tenantID, cfg.layerPath, defaultBootstrapVisibility(cfg), len(declared))
 	if err != nil {
 		return err
 	}
+	bootLayers := append(declared, pathLayers...)
 	registry := core.New(st, tenantID, bootLayers)
 	if v, e, err := openVectorAndEmbedder(cfg); err != nil {
 		log.Printf("warning: vector search disabled: %v", err)
@@ -492,6 +650,10 @@ type Config struct {
 	// every resolved layer, and persists a store.LayerConfig per
 	// layer so the §7.3.1 layer endpoints see them.
 	layerPath string
+	// §4.6 declarative admin-defined layer list from registry.yaml's
+	// `layers:` block. Each entry is seeded as a store.LayerConfig at
+	// startup; local sources are also ingested. Config-file-only.
+	declaredLayers []yamlLayerEntry
 }
 
 // Setting names one resolved field together with the env var (or

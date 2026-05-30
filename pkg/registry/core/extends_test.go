@@ -337,5 +337,96 @@ func TestExtends_ContentHashPin(t *testing.T) {
 	}
 }
 
+// Spec: §4.7.4 + §4.6 (F-4.6.7) — search_artifacts surfaces the sensitivity
+// label, and for an extends: child it reflects the most-restrictive value
+// across the chain so search and load_artifact agree. A child that declares
+// `low` while its pinned parent is `high` searches as `high`.
+func TestSearchArtifacts_SensitivityMergesAcrossExtends(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	highParent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent\nsensitivity: high\n---\n\nparent body\n"
+	lowChild := "---\ntype: agent\nversion: 2.0.0\ndescription: child\nsensitivity: low\nextends: shared/parent@1.x\n---\n\nchild body\n"
+	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "t", LayerID: "L1", Files: fstest.MapFS{
+			"shared/parent/ARTIFACT.md": &fstest.MapFile{Data: []byte(highParent)},
+		},
+	}); err != nil {
+		t.Fatalf("ingest parent: %v", err)
+	}
+	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "t", LayerID: "L2", Files: fstest.MapFS{
+			"finance/child/ARTIFACT.md": &fstest.MapFile{Data: []byte(lowChild)},
+		},
+	}); err != nil {
+		t.Fatalf("ingest child: %v", err)
+	}
+	reg := core.New(st, "t", []layer.Layer{
+		{ID: "L1", Visibility: layer.Visibility{Public: true}, Precedence: 1},
+		{ID: "L2", Visibility: layer.Visibility{Public: true}, Precedence: 2},
+	})
+	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{})
+	if err != nil {
+		t.Fatalf("SearchArtifacts: %v", err)
+	}
+	var child *core.ArtifactDescriptor
+	for i := range res.Results {
+		if res.Results[i].ID == "finance/child" {
+			child = &res.Results[i]
+		}
+	}
+	if child == nil {
+		t.Fatalf("search did not return finance/child: %+v", res.Results)
+	}
+	if child.Sensitivity != "high" {
+		t.Errorf("child search Sensitivity = %q, want high (most-restrictive across extends; the child cannot relax to low)", child.Sensitivity)
+	}
+	// The search and load_artifact surfaces must report the same value.
+	got, err := reg.LoadArtifact(context.Background(), publicID, "finance/child", core.LoadArtifactOptions{})
+	if err != nil {
+		t.Fatalf("LoadArtifact: %v", err)
+	}
+	if got.Sensitivity != child.Sensitivity {
+		t.Errorf("search Sensitivity %q disagrees with load Sensitivity %q", child.Sensitivity, got.Sensitivity)
+	}
+}
+
+// Spec: §4.7.4 — a non-extends artifact surfaces its own declared sensitivity
+// in search results (no chain to resolve).
+func TestSearchArtifacts_SensitivityOwnValueNoExtends(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	body := "---\ntype: context\nversion: 1.0.0\ndescription: solo\nsensitivity: medium\n---\n\nbody\n"
+	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "t", LayerID: "L1", Files: fstest.MapFS{
+			"finance/solo/ARTIFACT.md": &fstest.MapFile{Data: []byte(body)},
+		},
+	}); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	reg := core.New(st, "t", []layer.Layer{{ID: "L1", Visibility: layer.Visibility{Public: true}, Precedence: 1}})
+	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{})
+	if err != nil {
+		t.Fatalf("SearchArtifacts: %v", err)
+	}
+	found := false
+	for _, r := range res.Results {
+		if r.ID == "finance/solo" {
+			found = true
+			if r.Sensitivity != "medium" {
+				t.Errorf("Sensitivity = %q, want medium", r.Sensitivity)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("search did not return finance/solo: %+v", res.Results)
+	}
+}
+
 // quiet unused-import linter for tests that don't directly use errors
 var _ = errors.Is

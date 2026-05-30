@@ -81,8 +81,12 @@ func VisibleWith(layer Layer, id Identity, resolveGroup GroupResolver) bool {
 			}
 		}
 	}
+	// spec: §4.6 — `users:` lists OIDC subjects, but the visibility table's
+	// own config example uses email-style identifiers (users: [alice@acme.com]).
+	// IdPs often carry the human identifier in Email while Sub is opaque
+	// (auth0|abc123), so match either, consistent with the group-resolver path.
 	for _, u := range v.Users {
-		if u == id.Sub {
+		if u == id.Sub || (id.Email != "" && u == id.Email) {
 			return true
 		}
 	}

@@ -177,7 +177,7 @@ func TestSmallTeam_3_LayerPathEnvEquivalent(t *testing.T) {
 	}
 }
 
-// T-D-small-team-4 — layers.path key in registry.yaml is respected.
+// T-D-small-team-4 — layer_path key in registry.yaml is respected.
 func TestSmallTeam_4_RegistryYAMLLayersPath(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -186,7 +186,7 @@ func TestSmallTeam_4_RegistryYAMLLayersPath(t *testing.T) {
 
 	cfgDir := t.TempDir()
 	cfgFile := filepath.Join(cfgDir, "registry.yaml")
-	if err := os.WriteFile(cfgFile, []byte("layers:\n  path: "+reg+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(cfgFile, []byte("layer_path: "+reg+"\n"), 0o644); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)
 	}
 
@@ -209,12 +209,12 @@ func TestSmallTeam_4_RegistryYAMLLayersPath(t *testing.T) {
 	}
 }
 
-// T-D-small-team-5 — config show reflects layers.path source (registry.yaml vs env).
+// T-D-small-team-5 — config show reflects layer_path source (registry.yaml vs env).
 func TestSmallTeam_5_ConfigShowLayersPathSource(t *testing.T) {
 	t.Parallel()
 	cfgDir := t.TempDir()
 	cfgFile := filepath.Join(cfgDir, "registry.yaml")
-	if err := os.WriteFile(cfgFile, []byte("layers:\n  path: /from/yaml\n"), 0o644); err != nil {
+	if err := os.WriteFile(cfgFile, []byte("layer_path: /from/yaml\n"), 0o644); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)
 	}
 

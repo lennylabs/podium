@@ -13,7 +13,7 @@ package e2e
 // parents/children), a post-boot reingest path (pin propagation), and a
 // content-hash pin whose value is unknowable before the fixtures are written;
 // those are covered by package-level tests. Bundled-file merge over sync stays
-// skipped under F-13.11.2 and search-descriptor sensitivity under F-4.6.7.
+// skipped under F-13.11.2.
 
 import (
 	"os"
@@ -840,10 +840,40 @@ func TestExtends_SyncFilesystemNotMerged(t *testing.T) {
 
 // T-D-extends-48 — search_artifacts reflects the most-restrictive sensitivity
 // across the extends chain. spec: docs/authoring/extends.md § "Field merge
-// semantics", sensitivity.
+// semantics", sensitivity. (F-4.6.7)
 func TestExtends_SearchSensitivityMostRestrictive(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-4.6.7: search descriptors are built from the raw child record without resolving the extends chain, so the most-restrictive sensitivity is not reflected in search results")
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\nsensitivity: high\n---\n\nbody\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nsensitivity: low\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	srv := extendsBoot(t, parent, child, nil)
+
+	var resp struct {
+		Results []struct {
+			ID          string `json:"id"`
+			Version     string `json:"version"`
+			Sensitivity string `json:"sensitivity"`
+		} `json:"results"`
+	}
+	getJSON(t, srv.BaseURL+"/v1/search_artifacts?scope=finance/ap", &resp)
+
+	var sawChild bool
+	for _, r := range resp.Results {
+		if r.ID != exParentID {
+			continue
+		}
+		// Every surfaced version of the artifact reports high: the parent is
+		// high outright, and the child's `low` is raised to the parent's
+		// `high` by the most-restrictive merge (it cannot relax it).
+		if r.Sensitivity != "high" {
+			t.Errorf("search result %s@%s sensitivity = %q, want high", r.ID, r.Version, r.Sensitivity)
+		}
+		if r.Version == "2.0.0" {
+			sawChild = true
+		}
+	}
+	if !sawChild {
+		t.Fatalf("search did not surface the extends child (v2.0.0): %+v", resp.Results)
+	}
 }
 
 // T-D-extends-49 — the child is not visible to a caller without access to the

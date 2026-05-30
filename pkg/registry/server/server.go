@@ -397,6 +397,10 @@ type ArtifactDescriptor struct {
 	Description string   `json:"description,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
 	Score       float64  `json:"score,omitempty"`
+	// Sensitivity is the classification label surfaced in search_artifacts
+	// results (§4.7.4), resolved most-restrictive across an extends chain
+	// (§4.6). Omitted when the artifact declares no sensitivity.
+	Sensitivity string `json:"sensitivity,omitempty"`
 	// FoldedFrom is the relative subpath a notable artifact was lifted
 	// from when fold_below_artifacts collapsed its sparse subdomain
 	// into this domain's leaf set (§4.5.5 folding mechanics). Empty for
@@ -840,6 +844,7 @@ func descriptorOf(a core.ArtifactDescriptor) ArtifactDescriptor {
 		Description: a.Description,
 		Tags:        append([]string(nil), a.Tags...),
 		Score:       a.Score,
+		Sensitivity: a.Sensitivity,
 		FoldedFrom:  a.FoldedFrom,
 	}
 }
