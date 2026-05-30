@@ -2,7 +2,6 @@ package lint
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -20,9 +19,9 @@ import (
 // anything else warns.
 type ruleArtifactBodyForSkill struct{}
 
-func (ruleArtifactBodyForSkill) Code() string { return "lint.skill_artifact_body" }
+func (ruleArtifactBodyForSkill) Code() string        { return "lint.skill_artifact_body" }
 
-func (r ruleArtifactBodyForSkill) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleArtifactBodyForSkill) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
 	for _, rec := range records {
 		if rec.Artifact == nil || rec.Artifact.Type != manifest.TypeSkill {
@@ -101,7 +100,7 @@ func NewProseReferenceRule(client *http.Client) Rule {
 	return ruleProseReferenceResolution{HTTPClient: client}
 }
 
-func (ruleProseReferenceResolution) Code() string { return "lint.prose_reference" }
+func (ruleProseReferenceResolution) Code() string        { return "lint.prose_reference" }
 
 // proseLinkPattern matches Markdown links of the form [text](href)
 // without escaped backslashes. The HTTP / HTTPS branch matches
@@ -109,7 +108,7 @@ func (ruleProseReferenceResolution) Code() string { return "lint.prose_reference
 // path.
 var proseLinkPattern = regexp.MustCompile(`\[[^\]]+\]\(([^)]+)\)`)
 
-func (r ruleProseReferenceResolution) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleProseReferenceResolution) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
 	for _, rec := range records {
 		body := r.relevantBody(rec)

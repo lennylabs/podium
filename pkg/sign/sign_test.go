@@ -1,7 +1,6 @@
 package sign
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -12,11 +11,11 @@ import (
 func TestNoop_RoundTrip(t *testing.T) {
 	t.Parallel()
 	p := Noop{}
-	sig, err := p.Sign(context.Background(), "sha256:abc")
+	sig, err := p.Sign("sha256:abc")
 	if err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
-	if err := p.Verify(context.Background(), "sha256:abc", sig); err != nil {
+	if err := p.Verify("sha256:abc", sig); err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
 }
@@ -27,7 +26,7 @@ func TestNoop_RoundTrip(t *testing.T) {
 func TestNoop_VerifyRejectsMismatch(t *testing.T) {
 	t.Parallel()
 	p := Noop{}
-	err := p.Verify(context.Background(), "sha256:abc", "noop:sha256:def")
+	err := p.Verify("sha256:abc", "noop:sha256:def")
 	if !errors.Is(err, ErrSignatureInvalid) {
 		t.Fatalf("got %v, want ErrSignatureInvalid", err)
 	}
@@ -52,7 +51,7 @@ func TestEnforceVerification_PolicyMediumAndAbove(t *testing.T) {
 		{manifest.SensitivityHigh, "noop:wrong", ErrSignatureInvalid},
 	}
 	for _, c := range cases {
-		err := EnforceVerification(context.Background(), PolicyMediumAndAbove, p, c.s, "sha256:abc", c.signature)
+		err := EnforceVerification(PolicyMediumAndAbove, p, c.s, "sha256:abc", c.signature)
 		if c.wantErr == nil {
 			if err != nil {
 				t.Errorf("(s=%s sig=%q) got %v, want nil", c.s, c.signature, err)
@@ -72,7 +71,7 @@ func TestEnforceVerification_PolicyNever(t *testing.T) {
 		manifest.SensitivityMedium,
 		manifest.SensitivityHigh,
 	} {
-		if err := EnforceVerification(context.Background(), PolicyNever, p, s, "sha256:abc", ""); err != nil {
+		if err := EnforceVerification(PolicyNever, p, s, "sha256:abc", ""); err != nil {
 			t.Errorf("PolicyNever, s=%s: got %v, want nil", s, err)
 		}
 	}
@@ -82,7 +81,7 @@ func TestEnforceVerification_PolicyNever(t *testing.T) {
 func TestEnforceVerification_PolicyAlways(t *testing.T) {
 	t.Parallel()
 	p := Noop{}
-	if err := EnforceVerification(context.Background(), PolicyAlways, p, manifest.SensitivityLow, "sha256:abc", ""); !errors.Is(err, ErrSignatureMissing) {
+	if err := EnforceVerification(PolicyAlways, p, manifest.SensitivityLow, "sha256:abc", ""); !errors.Is(err, ErrSignatureMissing) {
 		t.Errorf("PolicyAlways low: got %v, want ErrSignatureMissing", err)
 	}
 }

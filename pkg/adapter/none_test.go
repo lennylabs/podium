@@ -1,7 +1,6 @@
 package adapter
 
 import (
-	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -20,7 +19,7 @@ func TestNone_WritesCanonicalLayout(t *testing.T) {
 			"references/r.md": []byte("# Reference\n"),
 		},
 	}
-	out, err := None{}.Adapt(context.Background(), src)
+	out, err := None{}.Adapt(src)
 	if err != nil {
 		t.Fatalf("Adapt: %v", err)
 	}
@@ -48,7 +47,7 @@ func TestNone_OmitsMissingSkill(t *testing.T) {
 		ArtifactID:    "company-glossary",
 		ArtifactBytes: []byte("---\ntype: context\n---\nbody\n"),
 	}
-	out, err := None{}.Adapt(context.Background(), src)
+	out, err := None{}.Adapt(src)
 	if err != nil {
 		t.Fatalf("Adapt: %v", err)
 	}
@@ -128,7 +127,7 @@ func TestNone_OutputIsDeterministic(t *testing.T) {
 		},
 	}
 	for i := 0; i < 5; i++ {
-		out, err := None{}.Adapt(context.Background(), src)
+		out, err := None{}.Adapt(src)
 		if err != nil {
 			t.Fatalf("Adapt: %v", err)
 		}

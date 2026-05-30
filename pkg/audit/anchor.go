@@ -35,7 +35,7 @@ func Anchor(ctx context.Context, sink *FileSink, signer sign.Provider) (int64, e
 		return -1, nil
 	}
 	contentHash := "sha256:" + chainHead
-	envelope, err := signer.Sign(ctx, contentHash)
+	envelope, err := signer.Sign(contentHash)
 	if err != nil {
 		return 0, fmt.Errorf("audit.anchor: sign chain head: %w", err)
 	}

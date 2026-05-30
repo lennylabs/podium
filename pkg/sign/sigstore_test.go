@@ -1,7 +1,6 @@
 package sign_test
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -237,11 +236,11 @@ func TestSigstoreKeyless_RoundTrip(t *testing.T) {
 		Now:       func() time.Time { return h.clock },
 	}
 	contentHash := hashOf([]byte("podium artifact body"))
-	envelopeStr, err := provider.Sign(context.Background(), contentHash)
+	envelopeStr, err := provider.Sign(contentHash)
 	if err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
-	if err := provider.Verify(context.Background(), contentHash, envelopeStr); err != nil {
+	if err := provider.Verify(contentHash, envelopeStr); err != nil {
 		t.Fatalf("Verify round-trip: %v", err)
 	}
 }
@@ -251,7 +250,7 @@ func TestSigstoreKeyless_RoundTrip(t *testing.T) {
 func TestSigstoreKeyless_UnconfiguredFails(t *testing.T) {
 	t.Parallel()
 	provider := sign.SigstoreKeyless{}
-	_, err := provider.Sign(context.Background(), "sha256:"+strings.Repeat("a", 64))
+	_, err := provider.Sign("sha256:" + strings.Repeat("a", 64))
 	if !errors.Is(err, sign.ErrSigstoreUnavailable) {
 		t.Fatalf("got %v, want ErrSigstoreUnavailable", err)
 	}
@@ -272,11 +271,11 @@ func TestSigstoreKeyless_VerifyDetectsTamperedHash(t *testing.T) {
 		Client:    srv.Client(),
 		Now:       func() time.Time { return h.clock },
 	}
-	envelopeStr, err := provider.Sign(context.Background(), hashOf([]byte("original")))
+	envelopeStr, err := provider.Sign(hashOf([]byte("original")))
 	if err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
-	err = provider.Verify(context.Background(), hashOf([]byte("tampered")), envelopeStr)
+	err = provider.Verify(hashOf([]byte("tampered")), envelopeStr)
 	if !errors.Is(err, sign.ErrSignatureInvalid) {
 		t.Fatalf("got %v, want ErrSignatureInvalid", err)
 	}
@@ -298,14 +297,14 @@ func TestSigstoreKeyless_VerifyRejectsForeignTrustRoot(t *testing.T) {
 		Client:    srv.Client(),
 		Now:       func() time.Time { return signerHarness.clock },
 	}
-	envelopeStr, err := provider.Sign(context.Background(), hashOf([]byte("body")))
+	envelopeStr, err := provider.Sign(hashOf([]byte("body")))
 	if err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
 	// Now switch trust root to a freshly-minted unrelated CA.
 	otherHarness := newTrustHarness(t, "alice@example.com")
 	provider.TrustRoot = otherHarness.rootPEM
-	err = provider.Verify(context.Background(), hashOf([]byte("body")), envelopeStr)
+	err = provider.Verify(hashOf([]byte("body")), envelopeStr)
 	if !errors.Is(err, sign.ErrSignatureInvalid) {
 		t.Fatalf("got %v, want ErrSignatureInvalid", err)
 	}
@@ -324,10 +323,10 @@ func TestSigstoreKeyless_VerifyRejectsMissingTrustRoot(t *testing.T) {
 		Client:    srv.Client(),
 		Now:       func() time.Time { return h.clock },
 	}
-	envelopeStr, _ := signer.Sign(context.Background(), hashOf([]byte("body")))
+	envelopeStr, _ := signer.Sign(hashOf([]byte("body")))
 	verifier := signer
 	verifier.TrustRoot = nil
-	if err := verifier.Verify(context.Background(), hashOf([]byte("body")), envelopeStr); !errors.Is(err, sign.ErrSignatureInvalid) {
+	if err := verifier.Verify(hashOf([]byte("body")), envelopeStr); !errors.Is(err, sign.ErrSignatureInvalid) {
 		t.Fatalf("got %v, want ErrSignatureInvalid", err)
 	}
 }
@@ -345,7 +344,7 @@ func TestSigstoreKeyless_SignFulcioOutage(t *testing.T) {
 		TrustRoot: h.rootPEM,
 		Client:    srv.Client(),
 	}
-	_, err := provider.Sign(context.Background(), hashOf([]byte("body")))
+	_, err := provider.Sign(hashOf([]byte("body")))
 	if err == nil {
 		t.Fatalf("Sign expected error on Fulcio 503")
 	}
@@ -369,7 +368,7 @@ func TestSigstoreKeyless_VerifyRejectsMissingRekorEntry(t *testing.T) {
 		Client:    srv.Client(),
 		Now:       func() time.Time { return h.clock },
 	}
-	envelopeStr, _ := signer.Sign(context.Background(), hashOf([]byte("body")))
+	envelopeStr, _ := signer.Sign(hashOf([]byte("body")))
 
 	// Now stand up a new server that 404s on the log-fetch path so
 	// the verifier sees a missing entry.
@@ -378,7 +377,7 @@ func TestSigstoreKeyless_VerifyRejectsMissingRekorEntry(t *testing.T) {
 	verifier := signer
 	verifier.RekorURL = missingSrv.URL
 	verifier.Client = missingSrv.Client()
-	err := verifier.Verify(context.Background(), hashOf([]byte("body")), envelopeStr)
+	err := verifier.Verify(hashOf([]byte("body")), envelopeStr)
 	if !errors.Is(err, sign.ErrSignatureInvalid) {
 		t.Fatalf("got %v, want ErrSignatureInvalid", err)
 	}
@@ -394,10 +393,10 @@ func TestSigstoreKeyless_VerifyMalformedEnvelope(t *testing.T) {
 		TrustRoot: h.rootPEM,
 		Now:       func() time.Time { return h.clock },
 	}
-	if err := provider.Verify(context.Background(), hashOf([]byte("body")), "not-json"); !errors.Is(err, sign.ErrSignatureInvalid) {
+	if err := provider.Verify(hashOf([]byte("body")), "not-json"); !errors.Is(err, sign.ErrSignatureInvalid) {
 		t.Fatalf("got %v, want ErrSignatureInvalid", err)
 	}
-	if err := provider.Verify(context.Background(), hashOf([]byte("body")), `{}`); !errors.Is(err, sign.ErrSignatureInvalid) {
+	if err := provider.Verify(hashOf([]byte("body")), `{}`); !errors.Is(err, sign.ErrSignatureInvalid) {
 		t.Fatalf("got %v, want ErrSignatureInvalid (empty envelope)", err)
 	}
 }
@@ -416,11 +415,11 @@ func TestRegistryManagedKey_RoundTrip(t *testing.T) {
 		KeyID:      "key-2026q1",
 	}
 	contentHash := hashOf([]byte("body"))
-	envelopeStr, err := provider.Sign(context.Background(), contentHash)
+	envelopeStr, err := provider.Sign(contentHash)
 	if err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
-	if err := provider.Verify(context.Background(), contentHash, envelopeStr); err != nil {
+	if err := provider.Verify(contentHash, envelopeStr); err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
 }
@@ -433,11 +432,11 @@ func TestRegistryManagedKey_RejectsRotatedKey(t *testing.T) {
 	signer := sign.RegistryManagedKey{
 		PrivateKey: priv, PublicKey: pub, KeyID: "key-2026q1",
 	}
-	envelopeStr, _ := signer.Sign(context.Background(), hashOf([]byte("body")))
+	envelopeStr, _ := signer.Sign(hashOf([]byte("body")))
 	verifier := sign.RegistryManagedKey{
 		PrivateKey: priv, PublicKey: pub, KeyID: "key-2026q2",
 	}
-	err := verifier.Verify(context.Background(), hashOf([]byte("body")), envelopeStr)
+	err := verifier.Verify(hashOf([]byte("body")), envelopeStr)
 	if !errors.Is(err, sign.ErrSignatureInvalid) {
 		t.Fatalf("got %v, want ErrSignatureInvalid", err)
 	}
@@ -447,7 +446,7 @@ func TestRegistryManagedKey_RejectsRotatedKey(t *testing.T) {
 // ErrRegistryManagedUnavailable.
 func TestRegistryManagedKey_UnconfiguredFails(t *testing.T) {
 	t.Parallel()
-	if _, err := (sign.RegistryManagedKey{}).Sign(context.Background(), hashOf([]byte("body"))); !errors.Is(err, sign.ErrRegistryManagedUnavailable) {
+	if _, err := (sign.RegistryManagedKey{}).Sign(hashOf([]byte("body"))); !errors.Is(err, sign.ErrRegistryManagedUnavailable) {
 		t.Fatalf("got %v, want ErrRegistryManagedUnavailable", err)
 	}
 }

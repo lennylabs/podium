@@ -1,7 +1,6 @@
 package lint
 
 import (
-	"context"
 	"testing"
 
 	"github.com/lennylabs/podium/internal/testharness"
@@ -17,7 +16,7 @@ func capDiags(t *testing.T, content string) []Diagnostic {
 		Path:    "team/art/ARTIFACT.md",
 		Content: content,
 	})
-	return (&Linter{Rules: []Rule{ruleHarnessCapability{}}}).Lint(context.Background(), reg, records)
+	return (&Linter{Rules: []Rule{ruleHarnessCapability{}}}).Lint(reg, records)
 }
 
 // Spec: §6.7.1 / §4.3.5 — an artifact without target_harnesses declares no

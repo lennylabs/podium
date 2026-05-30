@@ -5,7 +5,6 @@
 package sign
 
 import (
-	"context"
 	"errors"
 	"fmt"
 
@@ -59,14 +58,9 @@ type Provider interface {
 	// ID returns the provider identifier (e.g., "sigstore-keyless").
 	ID() string
 	// Sign produces a signature over the canonical content hash.
-	//
-	// spec: §9.3 — context-first so deadlines and cancellation propagate to
-	// the network calls a real provider makes (Fulcio, Rekor).
-	Sign(ctx context.Context, contentHash string) (string, error)
+	Sign(contentHash string) (string, error)
 	// Verify checks that signature is valid for contentHash.
-	//
-	// spec: §9.3 — context-first for the same reason as Sign.
-	Verify(ctx context.Context, contentHash, signature string) error
+	Verify(contentHash, signature string) error
 }
 
 // Noop is a Provider that signs by returning a deterministic placeholder
@@ -78,13 +72,13 @@ type Noop struct{}
 func (Noop) ID() string { return "noop" }
 
 // Sign returns a placeholder signature derived from the content hash.
-func (Noop) Sign(_ context.Context, contentHash string) (string, error) {
+func (Noop) Sign(contentHash string) (string, error) {
 	return "noop:" + contentHash, nil
 }
 
 // Verify accepts the placeholder produced by Sign for the same content
 // hash and rejects anything else.
-func (Noop) Verify(_ context.Context, contentHash, signature string) error {
+func (Noop) Verify(contentHash, signature string) error {
 	want := "noop:" + contentHash
 	if signature != want {
 		return fmt.Errorf("%w: %q != %q", ErrSignatureInvalid, signature, want)
@@ -95,14 +89,14 @@ func (Noop) Verify(_ context.Context, contentHash, signature string) error {
 // EnforceVerification applies policy to the artifact's sensitivity and
 // returns nil when the artifact does not require verification, or the
 // result of provider.Verify when it does.
-func EnforceVerification(ctx context.Context, policy VerificationPolicy, provider Provider, sensitivity manifest.Sensitivity, contentHash, signature string) error {
+func EnforceVerification(policy VerificationPolicy, provider Provider, sensitivity manifest.Sensitivity, contentHash, signature string) error {
 	if !needsVerification(policy, sensitivity) {
 		return nil
 	}
 	if signature == "" {
 		return fmt.Errorf("%w: sensitivity %q requires a signature", ErrSignatureMissing, sensitivity)
 	}
-	return provider.Verify(ctx, contentHash, signature)
+	return provider.Verify(contentHash, signature)
 }
 
 func needsVerification(policy VerificationPolicy, s manifest.Sensitivity) bool {

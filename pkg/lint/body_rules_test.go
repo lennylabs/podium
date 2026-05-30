@@ -1,7 +1,6 @@
 package lint_test
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -34,7 +33,7 @@ func TestRuleArtifactBodyForSkill_AcceptsEmptyOrSingleComment(t *testing.T) {
 				Artifact:      &manifest.Artifact{Type: manifest.TypeSkill},
 				ArtifactBytes: []byte(tc.body),
 			}
-			diags := (&lint.Linter{}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec})
+			diags := (&lint.Linter{}).Lint(nil, []filesystem.ArtifactRecord{rec})
 			gotWarn := false
 			for _, d := range diags {
 				if d.Code == "lint.skill_artifact_body" {
@@ -61,7 +60,7 @@ func TestRuleProseReference_BundledFileResolves(t *testing.T) {
 			"scripts/run.py": []byte("print('run')\n"),
 		},
 	}
-	diags := (&lint.Linter{}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec})
+	diags := (&lint.Linter{}).Lint(nil, []filesystem.ArtifactRecord{rec})
 	for _, d := range diags {
 		if d.Code == "lint.prose_reference" {
 			t.Errorf("unexpected diagnostic for resolvable reference: %s", d.Message)
@@ -77,7 +76,7 @@ func TestRuleProseReference_MissingBundledFileErrors(t *testing.T) {
 		Artifact:      &manifest.Artifact{Type: manifest.TypeContext},
 		ArtifactBytes: []byte(body),
 	}
-	diags := (&lint.Linter{}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec})
+	diags := (&lint.Linter{}).Lint(nil, []filesystem.ArtifactRecord{rec})
 	gotErr := false
 	for _, d := range diags {
 		if d.Code == "lint.prose_reference" && d.Severity == lint.SeverityError {
@@ -100,7 +99,7 @@ func TestRuleProseReference_RejectsPathEscape(t *testing.T) {
 		Artifact:      &manifest.Artifact{Type: manifest.TypeContext},
 		ArtifactBytes: []byte(body),
 	}
-	diags := (&lint.Linter{}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec})
+	diags := (&lint.Linter{}).Lint(nil, []filesystem.ArtifactRecord{rec})
 	gotErr := false
 	for _, d := range diags {
 		if d.Code == "lint.prose_reference" && strings.Contains(d.Message, "escapes") {
@@ -138,7 +137,7 @@ func TestRuleProseReference_URLHEAD(t *testing.T) {
 		ArtifactBytes: []byte(body),
 	}
 	rule := lint.NewProseReferenceRule(ts.Client())
-	diags := (&lint.Linter{Rules: []lint.Rule{rule}}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec})
+	diags := (&lint.Linter{Rules: []lint.Rule{rule}}).Lint(nil, []filesystem.ArtifactRecord{rec})
 	gotMissing := false
 	for _, d := range diags {
 		if d.Code == "lint.prose_reference" && strings.Contains(d.Message, "/missing") {

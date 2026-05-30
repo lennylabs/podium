@@ -1,7 +1,6 @@
 package hook
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -11,7 +10,7 @@ import (
 type uppercaser struct{}
 
 func (uppercaser) ID() string { return "uppercaser" }
-func (uppercaser) Apply(_ context.Context, _ map[string]any, f File) (Result, error) {
+func (uppercaser) Apply(_ map[string]any, f File) (Result, error) {
 	f.Content = []byte(strings.ToUpper(string(f.Content)))
 	return Result{File: f}, nil
 }
@@ -19,7 +18,7 @@ func (uppercaser) Apply(_ context.Context, _ map[string]any, f File) (Result, er
 type dropper struct{}
 
 func (dropper) ID() string { return "dropper" }
-func (dropper) Apply(_ context.Context, _ map[string]any, f File) (Result, error) {
+func (dropper) Apply(_ map[string]any, f File) (Result, error) {
 	if strings.HasSuffix(f.Path, ".tmp") {
 		f.Drop = true
 	}
@@ -34,7 +33,7 @@ func TestRun_HooksChain(t *testing.T) {
 		{Path: "x.txt", Content: []byte("hello")},
 		{Path: "y.tmp", Content: []byte("temp")},
 	}
-	out, warnings, err := Run(context.Background(), []Hook{uppercaser{}, dropper{}}, nil, in)
+	out, warnings, err := Run([]Hook{uppercaser{}, dropper{}}, nil, in)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -50,7 +49,7 @@ func TestRun_HooksChain(t *testing.T) {
 func TestRun_NoHooksIsNoop(t *testing.T) {
 	t.Parallel()
 	in := []adapter.File{{Path: "x", Content: []byte("y")}}
-	out, _, err := Run(context.Background(), nil, nil, in)
+	out, _, err := Run(nil, nil, in)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

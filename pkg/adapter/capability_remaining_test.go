@@ -1,7 +1,6 @@
 package adapter
 
 import (
-	"context"
 	"strings"
 	"testing"
 )
@@ -21,7 +20,7 @@ func runFieldCell(t *testing.T, adapterID, frontmatter, marker string) {
 		ArtifactID:    "test/cell",
 		ArtifactBytes: []byte(frontmatter),
 	}
-	out, err := a.Adapt(context.Background(), src)
+	out, err := a.Adapt(src)
 	if err != nil {
 		t.Fatalf("%s.Adapt: %v", adapterID, err)
 	}

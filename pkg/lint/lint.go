@@ -9,7 +9,6 @@
 package lint
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -82,7 +81,7 @@ type Rule interface {
 	// Code returns the namespaced rule identifier.
 	Code() string
 	// Check evaluates the rule and returns any diagnostics it produces.
-	Check(ctx context.Context, reg *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic
+	Check(reg *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic
 }
 
 // AllRules returns the set of lint rules registered for the active
@@ -143,7 +142,7 @@ func NewIngestLinter(offline bool) *Linter {
 // Lint runs every configured rule against the registry and returns the
 // concatenated diagnostics, sorted by ArtifactID then Code so output is
 // deterministic.
-func (l *Linter) Lint(ctx context.Context, reg *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (l *Linter) Lint(reg *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	rules := l.Rules
 	if len(rules) == 0 {
 		rules = AllRulesWithClient(l.HTTPClient)
@@ -156,7 +155,7 @@ func (l *Linter) Lint(ctx context.Context, reg *filesystem.Registry, records []f
 	}
 	var out []Diagnostic
 	for _, r := range rules {
-		out = append(out, r.Check(ctx, reg, records)...)
+		out = append(out, r.Check(reg, records)...)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].ArtifactID != out[j].ArtifactID {
@@ -180,7 +179,7 @@ type ruleRequiredFields struct {
 
 func (ruleRequiredFields) Code() string { return "lint.required_field_missing" }
 
-func (r ruleRequiredFields) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleRequiredFields) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	providers := resolveProviders(r.providers)
 	var out []Diagnostic
 	for _, rec := range records {
@@ -214,14 +213,14 @@ type ruleTypeProviderValidate struct {
 
 func (ruleTypeProviderValidate) Code() string { return "lint.type_provider" }
 
-func (r ruleTypeProviderValidate) Check(ctx context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleTypeProviderValidate) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	providers := resolveProviders(r.providers)
 	var out []Diagnostic
 	for _, rec := range records {
 		if rec.Artifact == nil {
 			continue
 		}
-		for _, d := range providers.Validate(ctx, rec.Artifact) {
+		for _, d := range providers.Validate(rec.Artifact) {
 			msg := d.Message
 			if d.Path != "" {
 				msg = fmt.Sprintf("%s (%s)", msg, d.Path)
@@ -245,7 +244,7 @@ type ruleSkillCompliance struct{}
 
 func (ruleSkillCompliance) Code() string { return "lint.skill_md_compliance" }
 
-func (r ruleSkillCompliance) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleSkillCompliance) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
 	for _, rec := range records {
 		if rec.Artifact.Type != manifest.TypeSkill {
@@ -275,7 +274,7 @@ type ruleNameSyntax struct{}
 
 func (ruleNameSyntax) Code() string { return "lint.invalid_name" }
 
-func (r ruleNameSyntax) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleNameSyntax) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
 	for _, rec := range records {
 		if rec.Skill != nil && rec.Skill.Name != "" {
@@ -296,7 +295,7 @@ type ruleVersionSemver struct{}
 
 func (ruleVersionSemver) Code() string { return "lint.invalid_version" }
 
-func (r ruleVersionSemver) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleVersionSemver) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
 	for _, rec := range records {
 		if rec.Artifact.Version == "" {
@@ -319,7 +318,7 @@ type ruleHookEventCanonical struct{}
 
 func (ruleHookEventCanonical) Code() string { return "lint.unknown_hook_event" }
 
-func (r ruleHookEventCanonical) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleHookEventCanonical) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
 	for _, rec := range records {
 		if rec.Artifact == nil || rec.Artifact.Type != manifest.TypeHook {
@@ -368,7 +367,7 @@ var subtypeToGeneric = func() map[string]string {
 // warns on the generic hook and names the overlapping subtype hook. A lone
 // generic hook is valid (§4.3.5: "Authors choose the level of specificity")
 // and draws no diagnostic.
-func (r ruleHookConsistency) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleHookConsistency) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	// Collect the subtype hooks present, grouped by their parent generic.
 	subtypesByGeneric := map[string][]filesystem.ArtifactRecord{}
 	for _, rec := range records {
@@ -408,7 +407,7 @@ type ruleEffortHintAppliesToType struct{}
 
 func (ruleEffortHintAppliesToType) Code() string { return "lint.hint_on_unsupported_type" }
 
-func (r ruleEffortHintAppliesToType) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleEffortHintAppliesToType) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
 	for _, rec := range records {
 		ty := rec.Artifact.Type

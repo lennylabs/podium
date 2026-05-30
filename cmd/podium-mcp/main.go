@@ -889,7 +889,7 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 			if resp.Type == "skill" {
 				src.SkillBytes = []byte(synthesizeSkillMD(resp))
 			}
-			out, err := a.Adapt(context.Background(), src)
+			out, err := a.Adapt(src)
 			if err != nil {
 				return errorResult("adapter: " + err.Error())
 			}
@@ -898,7 +898,7 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 			// rewrite or drop files and emit warnings; the chain is a no-op
 			// when none are configured and runs whether or not an adapter
 			// translated (harness: none still produces the canonical layout).
-			hookedOut, hookWarnings, herr := hook.Run(context.Background(), s.hooks, manifestContext(resp.Frontmatter), out)
+			hookedOut, hookWarnings, herr := hook.Run(s.hooks, manifestContext(resp.Frontmatter), out)
 			if herr != nil {
 				return errorResult("materialize.hook_failed: " + herr.Error())
 			}
@@ -1102,14 +1102,14 @@ func (s *mcpServer) loadArtifactFromOverlay(rec *filesystem.ArtifactRecord, args
 				SkillBytes:    rec.SkillBytes,
 				Resources:     rec.Resources,
 			}
-			out, err := a.Adapt(context.Background(), src)
+			out, err := a.Adapt(src)
 			if err != nil {
 				return errorResult("adapter: " + err.Error())
 			}
 			// §6.6 step 4 — the hook chain runs on the overlay path too, so
 			// the workspace-overlay layer is subject to the same per-file
 			// rewrite/drop contract as a registry-served artifact.
-			hookedOut, hookWarnings, herr := hook.Run(context.Background(), s.hooks, manifestContext(string(rec.ArtifactBytes)), out)
+			hookedOut, hookWarnings, herr := hook.Run(s.hooks, manifestContext(string(rec.ArtifactBytes)), out)
 			if herr != nil {
 				return errorResult("materialize.hook_failed: " + herr.Error())
 			}
@@ -1197,7 +1197,7 @@ func (s *mcpServer) enforceSignaturePolicy(resp loadArtifactResponse) error {
 	if err != nil {
 		return err
 	}
-	return sign.EnforceVerification(context.Background(),
+	return sign.EnforceVerification(
 		s.cfg.verifyPolicy,
 		provider,
 		manifest.Sensitivity(resp.Sensitivity),

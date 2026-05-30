@@ -1,7 +1,6 @@
 package lint
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -26,7 +25,7 @@ func TestLint_SkillPodiumOnlyFieldInSkillMD(t *testing.T) {
 		"type: skill\nversion: 1.0.0\n",
 		"name: hello\ndescription: Greet the user.\ntype: skill\nwhen_to_use:\n  - greeting\n",
 	)...)
-	diags := (&Linter{}).Lint(context.Background(), reg, records)
+	diags := (&Linter{}).Lint(reg, records)
 	if !hasSeverity(diags, "lint.skill_podium_only_field", SeverityError) {
 		t.Fatalf("expected lint.skill_podium_only_field error, got: %v", diags)
 	}
@@ -55,7 +54,7 @@ func TestLint_SkillCleanSkillMDNoPodiumField(t *testing.T) {
 		"type: skill\nversion: 1.0.0\n",
 		"name: hello\ndescription: Greet the user.\nlicense: MIT\ncompatibility: Any harness.\nallowed-tools:\n  - Read\n",
 	)...)
-	diags := (&Linter{}).Lint(context.Background(), reg, records)
+	diags := (&Linter{}).Lint(reg, records)
 	if hasCode(diags, "lint.skill_podium_only_field") {
 		t.Errorf("clean SKILL.md must not flag Podium-only fields: %v", diags)
 	}
@@ -70,7 +69,7 @@ func TestLint_SkillArtifactRedundantFieldWarns(t *testing.T) {
 		"type: skill\nversion: 1.0.0\nname: hello\n",
 		"name: hello\ndescription: Greet the user.\n",
 	)...)
-	diags := (&Linter{}).Lint(context.Background(), reg, records)
+	diags := (&Linter{}).Lint(reg, records)
 	if !hasSeverity(diags, "lint.skill_artifact_field", SeverityWarning) {
 		t.Errorf("expected lint.skill_artifact_field warning, got: %v", diags)
 	}
@@ -87,7 +86,7 @@ func TestLint_SkillArtifactFieldMismatchErrors(t *testing.T) {
 		"type: skill\nversion: 1.0.0\ndescription: A different description.\n",
 		"name: hello\ndescription: Greet the user.\n",
 	)...)
-	diags := (&Linter{}).Lint(context.Background(), reg, records)
+	diags := (&Linter{}).Lint(reg, records)
 	if !hasSeverity(diags, "lint.skill_artifact_field_mismatch", SeverityError) {
 		t.Fatalf("expected lint.skill_artifact_field_mismatch error, got: %v", diags)
 	}
@@ -105,7 +104,7 @@ func TestLint_SkillArtifactFieldsAbsentClean(t *testing.T) {
 		"type: skill\nversion: 1.0.0\n",
 		"name: hello\ndescription: Greet the user.\nlicense: MIT\n",
 	)...)
-	diags := (&Linter{}).Lint(context.Background(), reg, records)
+	diags := (&Linter{}).Lint(reg, records)
 	if hasCode(diags, "lint.skill_artifact_field") || hasCode(diags, "lint.skill_artifact_field_mismatch") {
 		t.Errorf("clean skill must not flag ARTIFACT.md name/description/license: %v", diags)
 	}
@@ -120,7 +119,7 @@ func TestLint_SkillRefValidateDescriptionTooLong(t *testing.T) {
 		"type: skill\nversion: 1.0.0\n",
 		"name: hello\ndescription: "+longDesc+"\n",
 	)...)
-	diags := (&Linter{}).Lint(context.Background(), reg, records)
+	diags := (&Linter{}).Lint(reg, records)
 	if !hasSeverity(diags, "lint.skill_ref_validate", SeverityWarning) {
 		t.Errorf("expected lint.skill_ref_validate warning for an over-long description, got: %v", diags)
 	}
@@ -135,7 +134,7 @@ func TestLint_SkillRefValidateCompatibilityTooLong(t *testing.T) {
 		"type: skill\nversion: 1.0.0\n",
 		"name: hello\ndescription: Greet.\ncompatibility: "+longCompat+"\n",
 	)...)
-	diags := (&Linter{}).Lint(context.Background(), reg, records)
+	diags := (&Linter{}).Lint(reg, records)
 	var found bool
 	for _, d := range diags {
 		if d.Code == "lint.skill_ref_validate" && strings.Contains(d.Message, "compatibility") {
@@ -157,7 +156,7 @@ func TestLint_SkillRefValidateSuppressed(t *testing.T) {
 		"type: skill\nversion: 1.0.0\nlint_suppress:\n  - lint.skill_ref_validate\n",
 		"name: hello\ndescription: "+longDesc+"\n",
 	)...)
-	diags := (&Linter{}).Lint(context.Background(), reg, records)
+	diags := (&Linter{}).Lint(reg, records)
 	if hasCode(diags, "lint.skill_ref_validate") {
 		t.Errorf("lint_suppress must silence skill_ref_validate, got: %v", diags)
 	}
@@ -171,7 +170,7 @@ func TestLint_SkillRefValidateWithinLimitsClean(t *testing.T) {
 		"type: skill\nversion: 1.0.0\n",
 		"name: hello\ndescription: Greet the user.\ncompatibility: Runs on any harness.\n",
 	)...)
-	diags := (&Linter{}).Lint(context.Background(), reg, records)
+	diags := (&Linter{}).Lint(reg, records)
 	if hasCode(diags, "lint.skill_ref_validate") {
 		t.Errorf("a within-limits skill must not warn skill_ref_validate: %v", diags)
 	}

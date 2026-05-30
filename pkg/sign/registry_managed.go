@@ -1,7 +1,6 @@
 package sign
 
 import (
-	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
@@ -49,7 +48,7 @@ type registryManagedEnvelope struct {
 // Sign signs contentHash with the configured Ed25519 private key.
 // The returned envelope is a JSON object carrying the base64-encoded
 // signature plus the key ID.
-func (k RegistryManagedKey) Sign(_ context.Context, contentHash string) (string, error) {
+func (k RegistryManagedKey) Sign(contentHash string) (string, error) {
 	if len(k.PrivateKey) == 0 {
 		return "", ErrRegistryManagedUnavailable
 	}
@@ -71,7 +70,7 @@ func (k RegistryManagedKey) Sign(_ context.Context, contentHash string) (string,
 // Verify checks that signature is a valid Ed25519 signature for
 // contentHash under the configured public key. Mismatched KeyID
 // rejects with ErrSignatureInvalid so verifiers can detect rotation.
-func (k RegistryManagedKey) Verify(_ context.Context, contentHash, signature string) error {
+func (k RegistryManagedKey) Verify(contentHash, signature string) error {
 	pub := k.PublicKey
 	if len(pub) == 0 && len(k.PrivateKey) > 0 {
 		pub = k.PrivateKey.Public().(ed25519.PublicKey)

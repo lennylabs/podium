@@ -1,7 +1,6 @@
 package lint
 
 import (
-	"context"
 	"fmt"
 	"unicode/utf8"
 
@@ -30,7 +29,7 @@ type ruleSkillPodiumOnlyFields struct{}
 
 func (ruleSkillPodiumOnlyFields) Code() string { return "lint.skill_podium_only_field" }
 
-func (r ruleSkillPodiumOnlyFields) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleSkillPodiumOnlyFields) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
 	for _, rec := range records {
 		if rec.Artifact == nil || rec.Artifact.Type != manifest.TypeSkill || len(rec.SkillBytes) == 0 {
@@ -60,7 +59,7 @@ type ruleSkillArtifactFields struct{}
 
 func (ruleSkillArtifactFields) Code() string { return "lint.skill_artifact_field" }
 
-func (r ruleSkillArtifactFields) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleSkillArtifactFields) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
 	for _, rec := range records {
 		if rec.Artifact == nil || rec.Artifact.Type != manifest.TypeSkill {
@@ -114,7 +113,7 @@ type ruleSkillRefValidate struct{}
 
 func (ruleSkillRefValidate) Code() string { return "lint.skill_ref_validate" }
 
-func (r ruleSkillRefValidate) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleSkillRefValidate) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
 	for _, rec := range records {
 		if rec.Artifact == nil || rec.Artifact.Type != manifest.TypeSkill || rec.Skill == nil {

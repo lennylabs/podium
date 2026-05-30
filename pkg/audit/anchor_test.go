@@ -95,10 +95,10 @@ func TestAnchor_SurfacesRekorLogIndex(t *testing.T) {
 type fakeIndexedSigner struct{ logIndex int64 }
 
 func (fakeIndexedSigner) ID() string { return "fake-indexed" }
-func (s fakeIndexedSigner) Sign(_ context.Context, contentHash string) (string, error) {
+func (s fakeIndexedSigner) Sign(contentHash string) (string, error) {
 	return `{"cert":"-","signature":"-","log_index":` + itoa(s.logIndex) + `}`, nil
 }
-func (s fakeIndexedSigner) Verify(_ context.Context, _, _ string) error { return nil }
+func (s fakeIndexedSigner) Verify(_, _ string) error { return nil }
 
 func itoa(n int64) string {
 	if n == 0 {

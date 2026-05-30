@@ -1,7 +1,6 @@
 package adapter
 
 import (
-	"context"
 	"path"
 	"sort"
 	"strings"
@@ -27,7 +26,7 @@ type ClaudeDesktop struct{}
 func (ClaudeDesktop) ID() string { return "claude-desktop" }
 
 // Adapt writes the canonical artifact under .claude-desktop/<id>/.
-func (ClaudeDesktop) Adapt(ctx context.Context, src Source) ([]File, error) {
+func (ClaudeDesktop) Adapt(src Source) ([]File, error) {
 	return placeUnder(".claude-desktop/extensions", src), nil
 }
 
@@ -41,7 +40,7 @@ type ClaudeCowork struct{}
 func (ClaudeCowork) ID() string { return "claude-cowork" }
 
 // Adapt writes the canonical artifact under .claude-cowork/plugins/<id>/.
-func (ClaudeCowork) Adapt(ctx context.Context, src Source) ([]File, error) {
+func (ClaudeCowork) Adapt(src Source) ([]File, error) {
 	return placeUnder(".claude-cowork/plugins", src), nil
 }
 
@@ -54,7 +53,7 @@ type Cursor struct{}
 func (Cursor) ID() string { return "cursor" }
 
 // Adapt translates per type.
-func (c Cursor) Adapt(ctx context.Context, src Source) ([]File, error) {
+func (c Cursor) Adapt(src Source) ([]File, error) {
 	ty := frontmatterType(src.ArtifactBytes)
 	if ty == "rule" {
 		name := lastSeg(src.ArtifactID)
@@ -120,7 +119,7 @@ type Gemini struct{}
 func (Gemini) ID() string { return "gemini" }
 
 // Adapt writes the canonical artifact under .gemini/extensions/<id>/.
-func (Gemini) Adapt(ctx context.Context, src Source) ([]File, error) {
+func (Gemini) Adapt(src Source) ([]File, error) {
 	return placeUnder(".gemini/extensions", src), nil
 }
 
@@ -133,7 +132,7 @@ type OpenCode struct{}
 func (OpenCode) ID() string { return "opencode" }
 
 // Adapt translates per type.
-func (OpenCode) Adapt(ctx context.Context, src Source) ([]File, error) {
+func (OpenCode) Adapt(src Source) ([]File, error) {
 	ty := frontmatterType(src.ArtifactBytes)
 	if ty == "rule" {
 		name := lastSeg(src.ArtifactID)
@@ -154,7 +153,7 @@ type Pi struct{}
 func (Pi) ID() string { return "pi" }
 
 // Adapt translates per type.
-func (Pi) Adapt(ctx context.Context, src Source) ([]File, error) {
+func (Pi) Adapt(src Source) ([]File, error) {
 	ty := frontmatterType(src.ArtifactBytes)
 	if ty == "rule" {
 		name := lastSeg(src.ArtifactID)
@@ -175,7 +174,7 @@ type Hermes struct{}
 func (Hermes) ID() string { return "hermes" }
 
 // Adapt translates per type.
-func (Hermes) Adapt(ctx context.Context, src Source) ([]File, error) {
+func (Hermes) Adapt(src Source) ([]File, error) {
 	ty := frontmatterType(src.ArtifactBytes)
 	if ty == "rule" {
 		name := lastSeg(src.ArtifactID)

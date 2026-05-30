@@ -1,7 +1,6 @@
 package adapter
 
 import (
-	"context"
 	"strings"
 	"testing"
 )
@@ -41,7 +40,7 @@ func runHookEventCell(t *testing.T, event string) {
 			"hook_action: |\n  echo " + event + "\n" +
 			"---\n\n"),
 	}
-	out, err := a.Adapt(context.Background(), src)
+	out, err := a.Adapt(src)
 	if err != nil {
 		t.Fatalf("Adapt(%s): %v", event, err)
 	}

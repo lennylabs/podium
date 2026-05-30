@@ -1,7 +1,6 @@
 package lint
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -43,7 +42,7 @@ body
 `,
 		},
 	)
-	diags := (&Linter{}).Lint(context.Background(), reg, records)
+	diags := (&Linter{}).Lint(reg, records)
 	wantCodes := []string{
 		"lint.required_field_missing",
 		"lint.required_field_missing",
@@ -85,7 +84,7 @@ body
 `,
 		},
 	)
-	diags := (&Linter{}).Lint(context.Background(), reg, records)
+	diags := (&Linter{}).Lint(reg, records)
 	if !hasCode(diags, "lint.skill_md_compliance") {
 		t.Errorf("expected lint.skill_md_compliance, got: %v", diags)
 	}
@@ -116,7 +115,7 @@ body
 `,
 		},
 	)
-	diags := (&Linter{}).Lint(context.Background(), reg, records)
+	diags := (&Linter{}).Lint(reg, records)
 	if !hasCode(diags, "lint.invalid_name") {
 		t.Errorf("expected lint.invalid_name, got: %v", diags)
 	}
@@ -138,7 +137,7 @@ body
 `,
 		},
 	)
-	diags := (&Linter{}).Lint(context.Background(), reg, records)
+	diags := (&Linter{}).Lint(reg, records)
 	if !hasCode(diags, "lint.invalid_version") {
 		t.Errorf("expected lint.invalid_version, got: %v", diags)
 	}
@@ -163,7 +162,7 @@ body
 `,
 		},
 	)
-	diags := (&Linter{}).Lint(context.Background(), reg, records)
+	diags := (&Linter{}).Lint(reg, records)
 	if !hasCode(diags, "lint.hint_on_unsupported_type") {
 		t.Errorf("expected lint.hint_on_unsupported_type, got: %v", diags)
 	}
@@ -189,7 +188,7 @@ body
 `,
 		},
 	)
-	diags := (&Linter{}).Lint(context.Background(), reg, records)
+	diags := (&Linter{}).Lint(reg, records)
 	if !hasCode(diags, "lint.unknown_type") {
 		t.Errorf("expected lint.unknown_type, got: %v", diags)
 	}
@@ -213,7 +212,7 @@ body
 `,
 		},
 	)
-	diags := (&Linter{}).Lint(context.Background(), reg, records)
+	diags := (&Linter{}).Lint(reg, records)
 	for _, d := range diags {
 		if d.Code == "lint.unknown_type" {
 			t.Errorf("mcp-server must not warn unknown_type: %v", d)
@@ -227,7 +226,7 @@ type datasetProvider struct{}
 
 func (datasetProvider) ID() string                  { return "dataset" }
 func (datasetProvider) Type() manifest.ArtifactType { return "dataset" }
-func (datasetProvider) Validate(context.Context, *manifest.Artifact) []typeprovider.Diagnostic {
+func (datasetProvider) Validate(*manifest.Artifact) []typeprovider.Diagnostic {
 	return []typeprovider.Diagnostic{{
 		Severity: "warn",
 		Code:     "dataset.needs-rows",
@@ -262,7 +261,7 @@ body
 		ruleRequiredFields{providers: providers},
 		ruleTypeProviderValidate{providers: providers},
 	}}
-	diags := l.Lint(context.Background(), reg, records)
+	diags := l.Lint(reg, records)
 	for _, d := range diags {
 		if d.Code == "lint.unknown_type" {
 			t.Errorf("a registered extension type must not warn unknown_type: %v", d)
@@ -297,7 +296,7 @@ body
 		ruleRequiredFields{providers: providers},
 		ruleTypeProviderValidate{providers: providers},
 	}}
-	diags := l.Lint(context.Background(), reg, records)
+	diags := l.Lint(reg, records)
 	if !hasCode(diags, "lint.unknown_type") {
 		t.Errorf("expected lint.unknown_type for an unregistered type, got: %v", diags)
 	}
@@ -330,7 +329,7 @@ body
 `,
 		},
 	)
-	diags := (&Linter{}).Lint(context.Background(), reg, records)
+	diags := (&Linter{}).Lint(reg, records)
 	if hasCode(diags, "lint.hook_generic_and_subtype") {
 		t.Errorf("a lone generic hook must not draw the generic/subtype diagnostic: %v", diags)
 	}
@@ -373,7 +372,7 @@ body
 `,
 		},
 	)
-	diags := (&Linter{}).Lint(context.Background(), reg, records)
+	diags := (&Linter{}).Lint(reg, records)
 	if !hasSeverity(diags, "lint.hook_generic_and_subtype", SeverityWarning) {
 		t.Fatalf("expected a hook_generic_and_subtype warning, got: %v", diags)
 	}
@@ -413,7 +412,7 @@ body
 `,
 		},
 	)
-	diags := (&Linter{}).Lint(context.Background(), reg, records)
+	diags := (&Linter{}).Lint(reg, records)
 	var gotErr bool
 	for _, d := range diags {
 		if d.Code == "lint.unknown_hook_event" {
@@ -456,7 +455,7 @@ body
 `,
 				},
 			)
-			diags := (&Linter{}).Lint(context.Background(), reg, records)
+			diags := (&Linter{}).Lint(reg, records)
 			if hasCode(diags, "lint.unknown_hook_event") {
 				t.Errorf("canonical event %q must not trigger lint.unknown_hook_event: %v", event, diags)
 			}
@@ -483,7 +482,7 @@ body
 `,
 		},
 	)
-	diags := (&Linter{}).Lint(context.Background(), reg, records)
+	diags := (&Linter{}).Lint(reg, records)
 	if hasCode(diags, "lint.unknown_hook_event") {
 		t.Errorf("non-hook artifact must not trigger lint.unknown_hook_event: %v", diags)
 	}
@@ -515,7 +514,7 @@ Body.
 `,
 		},
 	)
-	diags := (&Linter{}).Lint(context.Background(), reg, records)
+	diags := (&Linter{}).Lint(reg, records)
 	for _, d := range diags {
 		if d.Severity == SeverityError {
 			t.Errorf("unexpected error diagnostic: %s", d)
@@ -551,7 +550,7 @@ body
 `,
 		},
 	)
-	diags := (&Linter{}).Lint(context.Background(), reg, records)
+	diags := (&Linter{}).Lint(reg, records)
 	for i := 1; i < len(diags); i++ {
 		prev, cur := diags[i-1], diags[i]
 		if prev.ArtifactID > cur.ArtifactID {

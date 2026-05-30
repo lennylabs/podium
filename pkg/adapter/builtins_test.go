@@ -1,7 +1,6 @@
 package adapter
 
 import (
-	"context"
 	"strings"
 	"testing"
 )
@@ -58,7 +57,7 @@ func TestEveryAdapter_ProducesDeterministicOutput(t *testing.T) {
 		}
 		runs := make([][]File, 5)
 		for i := 0; i < 5; i++ {
-			runs[i], err = a.Adapt(context.Background(), src)
+			runs[i], err = a.Adapt(src)
 			if err != nil {
 				t.Fatalf("%s.Adapt: %v", id, err)
 			}
@@ -102,7 +101,7 @@ func TestRuleAdapters_PlaceUnderNativeRulesDir(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Get(%q): %v", id, err)
 		}
-		out, err := a.Adapt(context.Background(), src)
+		out, err := a.Adapt(src)
 		if err != nil {
 			t.Fatalf("%s.Adapt: %v", id, err)
 		}
@@ -126,8 +125,8 @@ func TestEveryAdapter_DoesNotErrorOnEmptySource(t *testing.T) {
 	r := DefaultRegistry()
 	for _, id := range allAdapterIDs {
 		a, _ := r.Get(id)
-		if _, err := a.Adapt(context.Background(), Source{ArtifactID: "x", ArtifactBytes: []byte{}}); err != nil {
-			t.Errorf("%s.Adapt(context.Background(), empty): %v", id, err)
+		if _, err := a.Adapt(Source{ArtifactID: "x", ArtifactBytes: []byte{}}); err != nil {
+			t.Errorf("%s.Adapt(empty): %v", id, err)
 		}
 	}
 }
@@ -148,7 +147,7 @@ func TestEveryAdapter_OutputPathsAreSafe(t *testing.T) {
 	r := DefaultRegistry()
 	for _, id := range allAdapterIDs {
 		a, _ := r.Get(id)
-		out, err := a.Adapt(context.Background(), src)
+		out, err := a.Adapt(src)
 		if err != nil {
 			t.Fatalf("%s.Adapt: %v", id, err)
 		}

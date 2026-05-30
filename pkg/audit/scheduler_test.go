@@ -18,9 +18,9 @@ type recordingSigner struct {
 	failOnce atomic.Bool
 }
 
-func (r *recordingSigner) ID() string                                  { return "recording" }
-func (r *recordingSigner) Verify(_ context.Context, _, _ string) error { return nil }
-func (r *recordingSigner) Sign(_ context.Context, contentHash string) (string, error) {
+func (r *recordingSigner) ID() string               { return "recording" }
+func (r *recordingSigner) Verify(_, _ string) error { return nil }
+func (r *recordingSigner) Sign(contentHash string) (string, error) {
 	r.signs.Add(1)
 	if r.failOnce.CompareAndSwap(true, false) {
 		return "", errors.New("transient")

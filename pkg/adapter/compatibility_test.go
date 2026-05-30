@@ -1,7 +1,6 @@
 package adapter
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -56,7 +55,7 @@ const skillNoCompat = "---\nname: aggregate\ndescription: Aggregate data.\n---\n
 // runtime_requirements and sandbox_profile and injects it into SKILL.md.
 func TestClaudeCode_DerivesCompatibilityWhenOmitted(t *testing.T) {
 	t.Parallel()
-	out, err := ClaudeCode{}.Adapt(context.Background(), Source{
+	out, err := ClaudeCode{}.Adapt(Source{
 		ArtifactID: "team/aggregate",
 		ArtifactBytes: []byte("---\ntype: skill\nversion: 1.0.0\n" +
 			"runtime_requirements:\n  python: \">=3.10\"\nsandbox_profile: read-only-fs\n---\n"),
@@ -91,7 +90,7 @@ func TestClaudeCode_DerivesCompatibilityWhenOmitted(t *testing.T) {
 func TestClaudeCode_KeepsAuthoredCompatibility(t *testing.T) {
 	t.Parallel()
 	authored := "---\nname: aggregate\ndescription: Aggregate.\ncompatibility: Hand-written.\n---\n\nbody\n"
-	out, err := ClaudeCode{}.Adapt(context.Background(), Source{
+	out, err := ClaudeCode{}.Adapt(Source{
 		ArtifactID:    "team/aggregate",
 		ArtifactBytes: []byte("---\ntype: skill\nversion: 1.0.0\nruntime_requirements:\n  python: \">=3.10\"\n---\n"),
 		SkillBytes:    []byte(authored),
@@ -112,7 +111,7 @@ func TestClaudeCode_KeepsAuthoredCompatibility(t *testing.T) {
 // nothing to derive and SKILL.md is materialized unchanged.
 func TestClaudeCode_NoDerivationWithoutRuntimeInfo(t *testing.T) {
 	t.Parallel()
-	out, err := ClaudeCode{}.Adapt(context.Background(), Source{
+	out, err := ClaudeCode{}.Adapt(Source{
 		ArtifactID:    "team/aggregate",
 		ArtifactBytes: []byte("---\ntype: skill\nversion: 1.0.0\n---\n"),
 		SkillBytes:    []byte(skillNoCompat),

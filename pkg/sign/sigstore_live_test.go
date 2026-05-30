@@ -1,7 +1,6 @@
 package sign_test
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
@@ -26,6 +25,7 @@ import (
 // points at the PEM file containing the trust anchors for the
 // chosen Sigstore deployment (the public-good root, the staging
 // root, or a local stack's CA).
+//
 func TestSigstoreKeyless_LiveSmoke(t *testing.T) {
 	fulcio := os.Getenv("PODIUM_SIGSTORE_FULCIO_URL")
 	rekor := os.Getenv("PODIUM_SIGSTORE_REKOR_URL")
@@ -47,11 +47,11 @@ func TestSigstoreKeyless_LiveSmoke(t *testing.T) {
 	body := []byte("podium live smoke")
 	h := sha256.Sum256(body)
 	contentHash := "sha256:" + hex.EncodeToString(h[:])
-	envelopeStr, err := provider.Sign(context.Background(), contentHash)
+	envelopeStr, err := provider.Sign(contentHash)
 	if err != nil {
 		t.Fatalf("Sign live: %v", err)
 	}
-	if err := provider.Verify(context.Background(), contentHash, envelopeStr); err != nil {
+	if err := provider.Verify(contentHash, envelopeStr); err != nil {
 		t.Fatalf("Verify live: %v", err)
 	}
 }

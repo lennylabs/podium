@@ -1,7 +1,6 @@
 package adapter
 
 import (
-	"context"
 	"path"
 	"sort"
 )
@@ -18,7 +17,7 @@ func (None) ID() string { return "none" }
 // into the destination. Files are returned in deterministic order
 // (alphabetical by path) so golden-file comparisons remain stable across
 // platforms.
-func (None) Adapt(ctx context.Context, src Source) ([]File, error) {
+func (None) Adapt(src Source) ([]File, error) {
 	out := []File{}
 	if len(src.ArtifactBytes) > 0 {
 		out = append(out, File{

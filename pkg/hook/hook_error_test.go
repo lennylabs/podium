@@ -1,7 +1,6 @@
 package hook_test
 
 import (
-	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -15,7 +14,7 @@ import (
 type failingHook struct{ id string }
 
 func (f failingHook) ID() string { return f.id }
-func (f failingHook) Apply(context.Context, map[string]any, hook.File) (hook.Result, error) {
+func (f failingHook) Apply(map[string]any, hook.File) (hook.Result, error) {
 	return hook.Result{}, errors.New("boom")
 }
 
@@ -25,7 +24,7 @@ func (f failingHook) Apply(context.Context, map[string]any, hook.File) (hook.Res
 type passthrough struct{ id string }
 
 func (p passthrough) ID() string { return p.id }
-func (p passthrough) Apply(_ context.Context, _ map[string]any, f hook.File) (hook.Result, error) {
+func (p passthrough) Apply(_ map[string]any, f hook.File) (hook.Result, error) {
 	return hook.Result{File: f, Warnings: []string{p.id + ":ok"}}, nil
 }
 
@@ -36,7 +35,7 @@ func TestRun_AbortsAndWrapsHookError(t *testing.T) {
 	t.Parallel()
 	hooks := []hook.Hook{passthrough{id: "ok"}, failingHook{id: "fail"}}
 	files := []adapter.File{{Path: "a.md", Content: []byte("x")}}
-	out, warnings, err := hook.Run(context.Background(), hooks, nil, files)
+	out, warnings, err := hook.Run(hooks, nil, files)
 	if err == nil {
 		t.Fatalf("err = nil, want abort")
 	}
@@ -59,7 +58,7 @@ func TestRun_AbortsAndWrapsHookError(t *testing.T) {
 func TestRun_EmptyHookListIsNoop(t *testing.T) {
 	t.Parallel()
 	files := []adapter.File{{Path: "a.md", Content: []byte("x")}}
-	out, warnings, err := hook.Run(context.Background(), nil, nil, files)
+	out, warnings, err := hook.Run(nil, nil, files)
 	if err != nil {
 		t.Errorf("err = %v, want nil", err)
 	}

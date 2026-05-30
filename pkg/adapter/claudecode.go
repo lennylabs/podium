@@ -1,7 +1,6 @@
 package adapter
 
 import (
-	"context"
 	"path"
 	"sort"
 	"strings"
@@ -26,7 +25,7 @@ func (ClaudeCode) ID() string { return "claude-code" }
 
 // Adapt translates src into the Claude Code layout. Outputs are sorted
 // alphabetically for golden-file stability.
-func (c ClaudeCode) Adapt(ctx context.Context, src Source) ([]File, error) {
+func (c ClaudeCode) Adapt(src Source) ([]File, error) {
 	ty := frontmatterType(src.ArtifactBytes)
 	out := []File{}
 	name := lastSegmentClaude(src.ArtifactID)

@@ -1,7 +1,6 @@
 package lint
 
 import (
-	"context"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 )
@@ -20,7 +19,7 @@ type ruleTypeRequiredFields struct{}
 
 func (ruleTypeRequiredFields) Code() string { return "lint.required_field_missing" }
 
-func (r ruleTypeRequiredFields) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleTypeRequiredFields) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
 	for _, rec := range records {
 		a := rec.Artifact
@@ -64,7 +63,7 @@ type ruleRuleModeHygiene struct{}
 
 func (ruleRuleModeHygiene) Code() string { return "lint.rule_mode" }
 
-func (r ruleRuleModeHygiene) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleRuleModeHygiene) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
 	for _, rec := range records {
 		a := rec.Artifact

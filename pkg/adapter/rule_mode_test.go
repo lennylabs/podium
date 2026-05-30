@@ -1,7 +1,6 @@
 package adapter
 
 import (
-	"context"
 	"testing"
 )
 
@@ -28,7 +27,7 @@ func runRuleModeCell(t *testing.T, adapterID, mode string) {
 			"rule_mode: " + mode + "\n" +
 			"---\n\nrule body\n"),
 	}
-	out, err := a.Adapt(context.Background(), src)
+	out, err := a.Adapt(src)
 	if err != nil {
 		t.Fatalf("%s rule_mode=%s: %v", adapterID, mode, err)
 	}

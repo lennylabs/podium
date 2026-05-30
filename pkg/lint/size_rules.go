@@ -1,7 +1,6 @@
 package lint
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/lennylabs/podium/pkg/manifest"
@@ -64,7 +63,7 @@ type ruleBundledResourceSize struct{}
 
 func (ruleBundledResourceSize) Code() string { return "lint.bundled_resource_size" }
 
-func (r ruleBundledResourceSize) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleBundledResourceSize) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
 	for _, rec := range records {
 		total := int64(0)
@@ -107,7 +106,7 @@ type ruleManifestSize struct{}
 
 func (ruleManifestSize) Code() string { return "lint.manifest_size" }
 
-func (r ruleManifestSize) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleManifestSize) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
 	for _, rec := range records {
 		isSkill := rec.Artifact != nil && rec.Artifact.Type == manifest.TypeSkill
