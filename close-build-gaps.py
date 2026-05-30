@@ -71,7 +71,7 @@ DEFAULTS = {
     "verify_timeout": 1800,  # seconds for the verify session (30 min)
     "retries": 5,          # resume-retries after a failed/timed-out batch
     "model": "claude-opus-4-8",
-    "effort": "max",
+    "effort": "high",
     "no_progress_limit": 5,  # abort if this many iterations close nothing and build nothing
 }
 
