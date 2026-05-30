@@ -627,32 +627,16 @@ func (s *mcpServer) handle(req rpcRequest) rpcResponse {
 				"sessionCorrelation": true,
 			},
 			"serverInfo": map[string]any{"name": "podium-mcp", "version": buildinfo.Version},
+			// §5.1 example system-prompt fragment, surfaced through the MCP
+			// `instructions` field so a host can add it to the model's
+			// system prompt verbatim. F-5.1.3.
+			"instructions": systemPromptFragment,
 		}
 	case "tools/list":
 		resp.Result = map[string]any{
-			"tools": []map[string]any{
-				{"name": "load_domain", "description": "Browse the artifact catalog hierarchically."},
-				{"name": "search_domains", "description": "Search the catalog for relevant domains."},
-				{"name": "search_artifacts", "description": "Search or browse the artifact catalog."},
-				{
-					"name":        "load_artifact",
-					"description": "Load a specific artifact by ID.",
-					// §6.2 / §6.6: the host may supply the materialization
-					// destination per call via `destination`, overriding
-					// PODIUM_MATERIALIZE_ROOT for that call.
-					"inputSchema": map[string]any{
-						"type": "object",
-						"properties": map[string]any{
-							"id":          map[string]any{"type": "string", "description": "Artifact ID to load."},
-							"version":     map[string]any{"type": "string", "description": "Semver or \"latest\" (default)."},
-							"harness":     map[string]any{"type": "string", "description": "Harness adapter override for this call."},
-							"destination": map[string]any{"type": "string", "description": "Materialization root for this call (overrides PODIUM_MATERIALIZE_ROOT)."},
-						},
-						"required": []string{"id"},
-					},
-				},
-				{"name": "health", "description": "Report registry connectivity, observed mode, cache size, and last successful call."},
-			},
+			// §5.1 canonical descriptions emitted verbatim (F-5.1.1) with an
+			// inputSchema per meta-tool (F-5.1.2). See descriptions.go.
+			"tools": metaToolDescriptors(),
 		}
 	case "tools/call":
 		resp.Result = s.callTool(req.Params)

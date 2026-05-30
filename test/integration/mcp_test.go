@@ -93,6 +93,89 @@ func TestPodiumMCP_ToolsListReturnsMetaTools(t *testing.T) {
 	}
 }
 
+// Spec: §5.1 — tools/list returns the canonical multi-sentence
+// descriptions verbatim (F-5.1.1) and an inputSchema for every meta-tool
+// (F-5.1.2); initialize surfaces the example system-prompt fragment via
+// the MCP `instructions` field (F-5.1.3). Driven through the real bridge
+// subprocess.
+func TestPodiumMCP_ToolsListDescriptionsSchemasAndInstructions(t *testing.T) {
+	t.Parallel()
+	h := registryharness.New(t)
+	bin := buildMCP(t)
+	cmd := exec.Command(bin)
+	cmd.Env = append(cmd.Env, "PODIUM_REGISTRY="+h.URL)
+	cmd.Stdin = bytes.NewReader(newlineDelimitedRequests([]rpcCall{
+		{Method: "initialize", ID: 1, Params: map[string]any{"protocolVersion": "2024-11-05"}},
+		{Method: "tools/list", ID: 2},
+	}))
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run: %v\n%s", err, stdout.String())
+	}
+
+	dec := json.NewDecoder(&stdout)
+	var initResp struct {
+		Result struct {
+			Instructions string `json:"instructions"`
+		} `json:"result"`
+	}
+	if err := dec.Decode(&initResp); err != nil {
+		t.Fatalf("decode initialize: %v", err)
+	}
+	// F-5.1.3: the §5.1 example fragment is exposed programmatically.
+	for _, want := range []string{
+		"You have access to a catalog of authored skills and agents through the Podium meta-tools",
+		"Sessions start empty",
+	} {
+		if !strings.Contains(initResp.Result.Instructions, want) {
+			t.Errorf("initialize instructions missing %q: %q", want, initResp.Result.Instructions)
+		}
+	}
+
+	var listResp struct {
+		Result struct {
+			Tools []struct {
+				Name        string          `json:"name"`
+				Description string          `json:"description"`
+				InputSchema json.RawMessage `json:"inputSchema"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	if err := dec.Decode(&listResp); err != nil {
+		t.Fatalf("decode tools/list: %v", err)
+	}
+	byName := map[string]struct {
+		desc   string
+		schema json.RawMessage
+	}{}
+	for _, tool := range listResp.Result.Tools {
+		byName[tool.Name] = struct {
+			desc   string
+			schema json.RawMessage
+		}{tool.Description, tool.InputSchema}
+	}
+	// F-5.1.2: every meta-tool advertises an inputSchema.
+	for _, name := range []string{"load_domain", "search_domains", "search_artifacts", "load_artifact"} {
+		tool, ok := byName[name]
+		if !ok {
+			t.Fatalf("tools/list missing %q", name)
+		}
+		if len(tool.schema) == 0 || string(tool.schema) == "null" {
+			t.Errorf("%s missing inputSchema", name)
+		}
+	}
+	// F-5.1.1: descriptions are the full canonical strings, not the
+	// first-sentence truncation. The cross-tool guidance lives past the
+	// first period.
+	if d := byName["load_domain"].desc; !strings.Contains(d, "call `load_artifact`") {
+		t.Errorf("load_domain description truncated: %q", d)
+	}
+	if d := byName["search_artifacts"].desc; !strings.Contains(d, "total_matched") {
+		t.Errorf("search_artifacts description truncated: %q", d)
+	}
+}
+
 // Spec: §5 — tools/call for search_artifacts forwards to the registry's
 // HTTP API and returns the decoded response.
 func TestPodiumMCP_ToolsCallProxiesSearchArtifacts(t *testing.T) {
