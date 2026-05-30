@@ -371,7 +371,7 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 			}
 			return errorResult("network.registry_unreachable: " + err.Error())
 		}
-		return errorResult(err.Error())
+		return errorResultFrom(err)
 	}
 	var resp loadArtifactResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
@@ -871,7 +871,11 @@ func (s *mcpServer) fetchJSON(path string, args map[string]any) ([]byte, error) 
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return body, fmt.Errorf("HTTP %d: %s", resp.StatusCode, body)
+		// §6.10: decode the registry's structured envelope so the
+		// namespaced code, details, retryable, and suggested_action
+		// survive to the MCP client instead of collapsing into an
+		// opaque "HTTP <status>: <body>" string (F-6.10.2).
+		return body, parseRegistryError(resp.StatusCode, body)
 	}
 	return body, nil
 }
@@ -882,7 +886,7 @@ func (s *mcpServer) fetchJSON(path string, args map[string]any) ([]byte, error) 
 func (s *mcpServer) proxyGet(path string, args map[string]any) any {
 	body, err := s.fetchJSON(path, args)
 	if err != nil {
-		return errorResult(err.Error())
+		return errorResultFrom(err)
 	}
 	return jsonAny(body)
 }
@@ -920,8 +924,6 @@ func (s *mcpServer) currentToken() string {
 	}
 	return strings.TrimSpace(s.cfg.sessionToken)
 }
-
-func errorResult(msg string) map[string]any { return map[string]any{"error": msg} }
 
 // ----- Content cache -------------------------------------------------------
 

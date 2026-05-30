@@ -50,7 +50,7 @@ func (s *mcpServer) handlePromptsGet(raw json.RawMessage) any {
 	}
 	body, err := s.fetchJSON("/v1/load_artifact", map[string]any{"id": args.Name})
 	if err != nil {
-		return errorResult(err.Error())
+		return errorResultFrom(err)
 	}
 	var resp loadArtifactResponse
 	if err := json.Unmarshal(body, &resp); err != nil {

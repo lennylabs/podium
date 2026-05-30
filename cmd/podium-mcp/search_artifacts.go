@@ -12,7 +12,7 @@ import (
 func (s *mcpServer) searchArtifacts(args map[string]any) any {
 	body, err := s.fetchJSON("/v1/search_artifacts", args)
 	if err != nil {
-		return errorResult(err.Error())
+		return errorResultFrom(err)
 	}
 	var registry struct {
 		Query        string           `json:"query"`

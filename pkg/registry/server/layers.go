@@ -324,8 +324,12 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 				if who == "" {
 					who = "the registrant"
 				}
-				writeError(w, http.StatusTooManyRequests, "quota.layer_count_exceeded",
-					fmt.Sprintf("user-defined layer cap of %d reached for %s", capN, who))
+				// spec: SS 6.10 — carry the machine-readable cap and the
+				// caller's current count in `details` so a client can render
+				// the limit without parsing the message (F-6.10.1).
+				writeErrorDetails(w, http.StatusTooManyRequests, "quota.layer_count_exceeded",
+					fmt.Sprintf("user-defined layer cap of %d reached for %s", capN, who),
+					map[string]any{"limit": capN, "current": owned})
 				return
 			}
 		}

@@ -1170,8 +1170,17 @@ func TestDocHTTPAPI_56_SearchQPSQuota(t *testing.T) {
 	for i := 0; i < 20 && !exceeded; i++ {
 		st, body := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=test")
 		if st == 429 || st == 400 {
-			if apiJSONObj(t, body)["code"] == "quota.search_qps_exceeded" {
+			env := apiJSONObj(t, body)
+			if env["code"] == "quota.search_qps_exceeded" {
 				exceeded = true
+				// spec: error-codes.md § Error envelope (F-6.10.3/.4) — a
+				// rate-limit code is retryable and carries a remediation hint.
+				if env["retryable"] != true {
+					t.Errorf("retryable=%v, want true for quota.search_qps_exceeded", env["retryable"])
+				}
+				if s, _ := env["suggested_action"].(string); s == "" {
+					t.Errorf("suggested_action empty, want a remediation hint: %v", env)
+				}
 			}
 		}
 	}

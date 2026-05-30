@@ -99,15 +99,22 @@ func (s *Server) loadOneForBatch(ctx context.Context, id layer.Identity, artifac
 	}
 }
 
-// errorEnvelopeFor maps a core error to the §6.10 envelope.
+// errorEnvelopeFor maps a core error to the §6.10 envelope. The
+// retryable flag and suggested_action are assigned by enrichEnvelope from
+// the per-code registry so per-item batch errors carry the same envelope
+// fields as the top-level writeError path (F-6.10.4).
 func errorEnvelopeFor(err error) *ErrorResponse {
+	var e *ErrorResponse
 	switch {
 	case errors.Is(err, core.ErrNotFound):
-		return &ErrorResponse{Code: "registry.not_found", Message: err.Error()}
+		e = &ErrorResponse{Code: "registry.not_found", Message: err.Error()}
 	case errors.Is(err, core.ErrUnavailable):
-		return &ErrorResponse{Code: "registry.unavailable", Message: err.Error(), Retryable: true}
+		e = &ErrorResponse{Code: "registry.unavailable", Message: err.Error()}
 	case errors.Is(err, core.ErrInvalidArgument):
-		return &ErrorResponse{Code: "registry.invalid_argument", Message: err.Error()}
+		e = &ErrorResponse{Code: "registry.invalid_argument", Message: err.Error()}
+	default:
+		e = &ErrorResponse{Code: "registry.unknown", Message: err.Error()}
 	}
-	return &ErrorResponse{Code: "registry.unknown", Message: err.Error()}
+	enrichEnvelope(e)
+	return e
 }

@@ -464,12 +464,17 @@ type LargeResourceLink struct {
 	ContentType string `json:"content_type,omitempty"`
 }
 
-// ErrorResponse is the JSON envelope for §6.10 structured errors.
+// ErrorResponse is the JSON envelope for §6.10 structured errors. The
+// field order mirrors the spec example: code, message, details,
+// retryable, suggested_action. Details carries machine-readable context
+// for codes whose spec example includes it (for example runtime_iss for
+// auth.untrusted_runtime); it is omitted when empty.
 type ErrorResponse struct {
-	Code            string `json:"code"`
-	Message         string `json:"message"`
-	Retryable       bool   `json:"retryable"`
-	SuggestedAction string `json:"suggested_action,omitempty"`
+	Code            string         `json:"code"`
+	Message         string         `json:"message"`
+	Details         map[string]any `json:"details,omitempty"`
+	Retryable       bool           `json:"retryable"`
+	SuggestedAction string         `json:"suggested_action,omitempty"`
 }
 
 // ----- Handlers -------------------------------------------------------------
@@ -884,7 +889,17 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 }
 
 func writeError(w http.ResponseWriter, status int, code, msg string) {
-	writeJSON(w, status, ErrorResponse{Code: code, Message: msg})
+	writeErrorDetails(w, status, code, msg, nil)
+}
+
+// writeErrorDetails emits the §6.10 envelope with machine-readable
+// details. The retryable flag and suggested_action are filled from the
+// per-code registry (see enrichEnvelope) so every emission path reports
+// them consistently.
+func writeErrorDetails(w http.ResponseWriter, status int, code, msg string, details map[string]any) {
+	e := ErrorResponse{Code: code, Message: msg, Details: details}
+	enrichEnvelope(&e)
+	writeJSON(w, status, e)
 }
 
 func atoiOr(s string, def int) int {
