@@ -109,6 +109,7 @@ func AllRulesWithClient(client *http.Client) []Rule {
 		ruleVersionSemver{},
 		ruleHookEventCanonical{},
 		ruleHookConsistency{},
+		ruleHarnessCapability{},
 		ruleEffortHintAppliesToType{},
 		ruleBundledResourceSize{},
 		ruleManifestSize{},

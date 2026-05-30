@@ -631,11 +631,25 @@ func TestFrontmatter_TargetHarnessesLintsClean(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-38 — sync should skip an artifact whose target_harnesses
-// excludes the active harness. The field has no behavioral effect.
+// T-D-frontmatter-38 — sync skips an artifact whose target_harnesses
+// excludes the active harness (§4.3 / §6.7.1, F-6.7.2).
 func TestFrontmatter_TargetHarnessesExcludesSkips(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-6.7.2: target_harnesses is parsed but has no behavioral effect, so an artifact materializes for every harness regardless of the list")
+	reg := writeRegistry(t, map[string]string{
+		// Targets opencode only; a claude-code sync must skip it.
+		"eng/scoped/ARTIFACT.md": "---\ntype: context\nname: scoped\nversion: 1.0.0\ndescription: Context.\ntarget_harnesses: [opencode]\n---\n\nbody\n",
+		// A second artifact with no target_harnesses materializes normally,
+		// so the run still produces output and the skip is isolated.
+		"eng/open/ARTIFACT.md": "---\ntype: context\nname: open\nversion: 1.0.0\ndescription: Context.\n---\n\nbody\n",
+	})
+	tgt := t.TempDir()
+	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
+		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	if _, err := os.Stat(filepath.Join(tgt, ".claude/podium/eng/scoped/ARTIFACT.md")); err == nil {
+		t.Errorf("artifact excluded by target_harnesses must not materialize for claude-code")
+	}
+	mustExist(t, filepath.Join(tgt, ".claude/podium/eng/open/ARTIFACT.md"))
 }
 
 // T-D-frontmatter-39 — sync materializes an artifact whose target_harnesses

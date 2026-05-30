@@ -137,6 +137,62 @@ func TestPodiumMCP_TargetHarnessesSuppressesMaterialize(t *testing.T) {
 	}
 }
 
+// Spec: §6.9 "Adapter cannot translate an artifact" (F-6.7.3) —
+// load_artifact under a harness whose §6.7.1 cell is ✗ for a field the
+// artifact uses fails with a structured error naming the field and
+// suggesting harness: none, and writes nothing to disk. Here a
+// rule_mode: glob rule materializes under claude-desktop (✗ for glob).
+func TestPodiumMCP_UntranslatableFieldFailsMaterialize(t *testing.T) {
+	t.Parallel()
+
+	h := registryharness.New(t,
+		testharness.WriteTreeOption{
+			Path: "style/glob-rule/ARTIFACT.md",
+			Content: "---\ntype: rule\nversion: 1.0.0\n" +
+				"description: glob rule\nrule_mode: glob\n" +
+				"rule_globs: \"src/**/*.ts\"\n---\n\nrules\n",
+		},
+	)
+
+	target := t.TempDir()
+
+	bin := buildMCP(t)
+	cmd := exec.Command(bin)
+	cmd.Env = append(cmd.Env,
+		"PODIUM_REGISTRY="+h.URL,
+		"PODIUM_HARNESS=claude-desktop",
+		"PODIUM_MATERIALIZE_ROOT="+target,
+		"PODIUM_CACHE_DIR="+t.TempDir(),
+	)
+	cmd.Stdin = bytes.NewReader(newlineDelimitedRequests([]rpcCall{
+		{Method: "tools/call", ID: 1, Params: map[string]any{
+			"name":      "load_artifact",
+			"arguments": map[string]any{"id": "style/glob-rule"},
+		}},
+	}))
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run mcp: %v\nstdout:\n%s", err, stdout.String())
+	}
+
+	var resp struct {
+		Result struct {
+			Error string `json:"error"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(&stdout).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v\nstdout: %s", err, stdout.String())
+	}
+	if !strings.Contains(resp.Result.Error, "materialize.untranslatable") ||
+		!strings.Contains(resp.Result.Error, "rule_mode: glob") {
+		t.Errorf("error = %q, want a materialize.untranslatable error naming rule_mode: glob", resp.Result.Error)
+	}
+	if files := testharness.ReadTree(t, target); len(files) != 0 {
+		t.Errorf("an untranslatable load must write nothing, got: %v", keysOf(files))
+	}
+}
+
 // Spec: §6.6 — selecting the claude-code adapter via PODIUM_HARNESS
 // drives the corresponding harness-native layout.
 func TestPodiumMCP_LoadArtifactWithClaudeCodeAdapter(t *testing.T) {

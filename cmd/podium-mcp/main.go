@@ -507,6 +507,16 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 		// artifact opts out of this harness. The manifest content is
 		// still returned to the caller; only materialization is skipped.
 		if materializeTargetsHarness(resp.Frontmatter, harnessID) {
+			// §6.9 "Adapter cannot translate an artifact": when the
+			// selected harness has no §6.7.1 equivalent for a field the
+			// artifact uses (a ✗ cell), fail with a structured error
+			// naming the field instead of writing an unannotated verbatim
+			// copy.
+			if art, perr := manifest.ParseArtifact([]byte(resp.Frontmatter)); perr == nil {
+				if terr := adapter.TranslationError(harnessID, art); terr != nil {
+					return errorResult(terr.Error())
+				}
+			}
 			src := adapter.Source{
 				ArtifactID:    resp.ID,
 				ArtifactBytes: []byte(resp.Frontmatter),
@@ -608,6 +618,13 @@ func (s *mcpServer) loadArtifactFromOverlay(rec *filesystem.ArtifactRecord, args
 		// manifest body. A record without a parsed artifact targets all.
 		targets := rec.Artifact == nil || manifest.TargetsHarness(rec.Artifact.TargetHarnesses, harnessID)
 		if targets {
+			// §6.9 guard: refuse to materialize a field the selected
+			// harness cannot translate (a §6.7.1 ✗ cell).
+			if rec.Artifact != nil {
+				if terr := adapter.TranslationError(harnessID, rec.Artifact); terr != nil {
+					return errorResult(terr.Error())
+				}
+			}
 			src := adapter.Source{
 				ArtifactID:    rec.ID,
 				ArtifactBytes: rec.ArtifactBytes,

@@ -106,10 +106,30 @@ func TestHandlingResponses_TargetHarnesses(t *testing.T) {
 	hrWantFM(t, srv.BaseURL, "tools/acme/scoped-skill", "target_harnesses", "claude-code")
 }
 
-// T-D-handling-responses-4 — MCP harness mismatch on target_harnesses.
+// T-D-handling-responses-4 — MCP harness mismatch on target_harnesses
+// (§4.3 / §6.7.1, F-6.7.2). Loading under a harness the artifact's
+// target_harnesses excludes returns the manifest but materializes nothing.
 func TestHandlingResponses_TargetHarnessMismatch(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-6.7.2: target_harnesses is parsed but never honored, so the MCP bridge does not skip or warn on a harness mismatch")
+	srv := startServer(t, hrSkillReg(t, "tools/acme/scoped-skill", "scoped-skill", "target_harnesses: [claude-code]"))
+	mat := t.TempDir()
+	// cursor is not in target_harnesses: the manifest is returned, but the
+	// MCP server skips the on-disk write.
+	res := mcpExec(t, append(mcpServerEnv(t, srv.BaseURL), "PODIUM_HARNESS=cursor", "PODIUM_MATERIALIZE_ROOT="+mat),
+		toolCall(1, "load_artifact", map[string]any{"id": "tools/acme/scoped-skill"}))
+	result := rpcResult(t, res.Stdout, 1)
+	if e, ok := result["error"]; ok && e != nil {
+		t.Fatalf("excluded harness should still return the manifest, got error: %v", e)
+	}
+	if mb, _ := result["manifest_body"].(string); mb == "" {
+		t.Errorf("manifest_body should be returned even when materialization is skipped")
+	}
+	if m, _ := result["materialized_at"].([]any); len(m) != 0 {
+		t.Errorf("target_harnesses mismatch must report no materialized paths, got: %v", m)
+	}
+	if files := readTreeAll(t, mat); len(files) != 0 {
+		t.Errorf("target_harnesses mismatch must suppress materialization, wrote: %v", files)
+	}
 }
 
 // ---- Safety and trust -------------------------------------------------------
