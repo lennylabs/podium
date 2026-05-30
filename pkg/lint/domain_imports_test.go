@@ -1,6 +1,7 @@
 package lint_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,7 +58,7 @@ include:
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
-	diags := (&lint.Linter{}).Lint(reg, records)
+	diags := (&lint.Linter{}).Lint(context.Background(), reg, records)
 	gotUnresolved := false
 	gotResolved := false
 	for _, d := range diags {
@@ -102,7 +103,7 @@ include:
 	})
 	reg, _ := filesystem.Open(dir)
 	records, _ := reg.Walk(filesystem.WalkOptions{})
-	diags := (&lint.Linter{}).Lint(reg, records)
+	diags := (&lint.Linter{}).Lint(context.Background(), reg, records)
 	got := false
 	for _, d := range diags {
 		if d.Code == "lint.domain_import_cycle" {
@@ -146,7 +147,7 @@ description: Finance
 	const code = "lint.domain_discovery_override_disabled"
 
 	// Default linter (overrides allowed): no discovery-override warning.
-	for _, d := range (&lint.Linter{}).Lint(reg, records) {
+	for _, d := range (&lint.Linter{}).Lint(context.Background(), reg, records) {
 		if d.Code == code {
 			t.Errorf("unexpected %s when overrides are allowed: %+v", code, d)
 		}
@@ -155,7 +156,7 @@ description: Finance
 	// Overrides disabled: exactly the finance/ap DOMAIN.md (which has a
 	// discovery: block) is warned.
 	disabled := false
-	diags := (&lint.Linter{AllowPerDomainOverrides: &disabled}).Lint(reg, records)
+	diags := (&lint.Linter{AllowPerDomainOverrides: &disabled}).Lint(context.Background(), reg, records)
 	var flagged []string
 	for _, d := range diags {
 		if d.Code == code {
@@ -165,6 +166,56 @@ description: Finance
 	if len(flagged) != 1 || flagged[0] != "finance/ap" {
 		t.Errorf("discovery-override warnings = %v, want exactly [finance/ap]", flagged)
 	}
+}
+
+// Spec: §9.3 "Cancellable" — the cross-artifact domain rules honor the
+// caller's context: an already-cancelled context short-circuits the per-layer
+// walk, so the unresolved-import warning that the same input produces under a
+// live context is suppressed. This is the behavioral counterpart to the static
+// signature guard in test/conformance.
+func TestRuleDomainImports_HonorsContextCancellation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{
+		"finance/ap/payments/run/ARTIFACT.md": liveArtifact,
+		"finance/DOMAIN.md": `---
+name: finance
+include:
+  - finance/never-defined/*
+---
+`,
+	})
+	reg, err := filesystem.Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	records, err := reg.Walk(filesystem.WalkOptions{})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+
+	// Sanity: a live context produces the unresolved-import warning.
+	live := (&lint.Linter{}).Lint(context.Background(), reg, records)
+	if !hasCode(live, "lint.domain_import_unresolved") {
+		t.Fatalf("expected unresolved warning under a live context: %+v", live)
+	}
+
+	// A cancelled context short-circuits the walk before it inspects the layer.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	cancelled := (&lint.Linter{}).Lint(ctx, reg, records)
+	if hasCode(cancelled, "lint.domain_import_unresolved") {
+		t.Errorf("cancelled context still produced domain-import diagnostics: %+v", cancelled)
+	}
+}
+
+func hasCode(diags []lint.Diagnostic, code string) bool {
+	for _, d := range diags {
+		if d.Code == code {
+			return true
+		}
+	}
+	return false
 }
 
 // Spec: §4.5.2 — domain with no imports lints clean (no false
@@ -177,7 +228,7 @@ func TestRuleDomainImports_NoImportsClean(t *testing.T) {
 	})
 	reg, _ := filesystem.Open(dir)
 	records, _ := reg.Walk(filesystem.WalkOptions{})
-	diags := (&lint.Linter{}).Lint(reg, records)
+	diags := (&lint.Linter{}).Lint(context.Background(), reg, records)
 	for _, d := range diags {
 		if d.Code == "lint.domain_import_unresolved" || d.Code == "lint.domain_import_cycle" {
 			t.Errorf("false positive: %s — %s", d.Code, d.Message)

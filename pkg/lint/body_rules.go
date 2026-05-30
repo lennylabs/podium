@@ -2,6 +2,7 @@ package lint
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -19,9 +20,9 @@ import (
 // anything else warns.
 type ruleArtifactBodyForSkill struct{}
 
-func (ruleArtifactBodyForSkill) Code() string        { return "lint.skill_artifact_body" }
+func (ruleArtifactBodyForSkill) Code() string { return "lint.skill_artifact_body" }
 
-func (r ruleArtifactBodyForSkill) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleArtifactBodyForSkill) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
 	for _, rec := range records {
 		if rec.Artifact == nil || rec.Artifact.Type != manifest.TypeSkill {
@@ -100,7 +101,7 @@ func NewProseReferenceRule(client *http.Client) Rule {
 	return ruleProseReferenceResolution{HTTPClient: client}
 }
 
-func (ruleProseReferenceResolution) Code() string        { return "lint.prose_reference" }
+func (ruleProseReferenceResolution) Code() string { return "lint.prose_reference" }
 
 // proseLinkPattern matches Markdown links of the form [text](href)
 // without escaped backslashes. The HTTP / HTTPS branch matches
@@ -108,9 +109,15 @@ func (ruleProseReferenceResolution) Code() string        { return "lint.prose_re
 // path.
 var proseLinkPattern = regexp.MustCompile(`\[[^\]]+\]\(([^)]+)\)`)
 
-func (r ruleProseReferenceResolution) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleProseReferenceResolution) Check(ctx context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
+	// spec: §9.3 — this rule scans every record's body and may issue a URL
+	// HEAD per reference, so it is the long-running work the constraint
+	// names; it checks for cancellation before each record.
 	for _, rec := range records {
+		if ctx.Err() != nil {
+			break
+		}
 		body := r.relevantBody(rec)
 		if len(body) == 0 {
 			continue
@@ -121,7 +128,7 @@ func (r ruleProseReferenceResolution) Check(_ *filesystem.Registry, records []fi
 				continue
 			}
 			if isAbsoluteURL(href) {
-				if d := r.checkURL(rec.ID, href); d != nil {
+				if d := r.checkURL(ctx, rec.ID, href); d != nil {
 					out = append(out, *d)
 				}
 				continue
@@ -174,11 +181,11 @@ func (r ruleProseReferenceResolution) checkBundled(rec filesystem.ArtifactRecord
 	}
 }
 
-func (r ruleProseReferenceResolution) checkURL(artifactID, href string) *Diagnostic {
+func (r ruleProseReferenceResolution) checkURL(ctx context.Context, artifactID, href string) *Diagnostic {
 	if r.HTTPClient == nil {
 		return nil
 	}
-	ctx, cancel := contextWithTimeout(5 * time.Second)
+	ctx, cancel := contextWithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, href, nil)
 	if err != nil {

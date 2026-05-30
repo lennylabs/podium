@@ -479,7 +479,7 @@ func lintCmd(args []string) int {
 	}
 
 	linter := lint.NewIngestLinter(*offline || os.Getenv("PODIUM_INGEST_OFFLINE") == "true")
-	diags := linter.Lint(reg, records)
+	diags := linter.Lint(context.Background(), reg, records)
 	if len(diags) == 0 {
 		fmt.Println("lint: no issues.")
 		return 0

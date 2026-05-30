@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,7 +21,7 @@ type ruleDomainImportsResolve struct{}
 
 func (ruleDomainImportsResolve) Code() string { return "lint.domain_import_unresolved" }
 
-func (r ruleDomainImportsResolve) Check(reg *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleDomainImportsResolve) Check(ctx context.Context, reg *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	if reg == nil {
 		return nil
 	}
@@ -29,7 +30,13 @@ func (r ruleDomainImportsResolve) Check(reg *filesystem.Registry, records []file
 		ids = append(ids, rec.ID)
 	}
 	var out []Diagnostic
+	// spec: §9.3 — resolving every include/exclude pattern against the full
+	// artifact set is unbounded with registry size, so the per-layer walk
+	// checks for cancellation.
 	for _, layer := range reg.Layers {
+		if ctx.Err() != nil {
+			break
+		}
 		domains := walkDomainsInLayer(layer)
 		for path, dom := range domains {
 			for _, pattern := range append([]string(nil), dom.Include...) {
@@ -59,13 +66,18 @@ type ruleDomainImportCycle struct{}
 
 func (ruleDomainImportCycle) Code() string { return "lint.domain_import_cycle" }
 
-func (r ruleDomainImportCycle) Check(reg *filesystem.Registry, _ []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleDomainImportCycle) Check(ctx context.Context, reg *filesystem.Registry, _ []filesystem.ArtifactRecord) []Diagnostic {
 	if reg == nil {
 		return nil
 	}
 	// Build domain → []domain edges.
 	graph := map[string][]string{}
+	// spec: §9.3 — the include-pattern graph is built from every domain in
+	// every layer, so the walk checks for cancellation.
 	for _, layer := range reg.Layers {
+		if ctx.Err() != nil {
+			break
+		}
 		for path, dom := range walkDomainsInLayer(layer) {
 			for _, pattern := range dom.Include {
 				if other := domainForPattern(pattern); other != "" && other != path {
@@ -99,7 +111,7 @@ func (ruleDomainDiscoveryOverrideDisallowed) Code() string {
 	return "lint.domain_discovery_override_disabled"
 }
 
-func (r ruleDomainDiscoveryOverrideDisallowed) Check(reg *filesystem.Registry, _ []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleDomainDiscoveryOverrideDisallowed) Check(_ context.Context, reg *filesystem.Registry, _ []filesystem.ArtifactRecord) []Diagnostic {
 	if reg == nil {
 		return nil
 	}

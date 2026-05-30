@@ -8,6 +8,7 @@
 package adapter
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -44,7 +45,7 @@ type HarnessAdapter interface {
 	// Adapt produces the harness-native output for src. Implementations
 	// must not perform IO; the returned files are written by
 	// pkg/materialize under the sandbox contract.
-	Adapt(src Source) ([]File, error)
+	Adapt(ctx context.Context, src Source) ([]File, error)
 }
 
 // Registry holds the set of HarnessAdapter implementations registered by

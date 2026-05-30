@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -55,7 +56,7 @@ func signCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
-	envelope, err := provider.Sign(hash)
+	envelope, err := provider.Sign(context.Background(), hash)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "sign failed: %v\n", err)
 		return 1
@@ -120,7 +121,7 @@ func verifyCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
-	if err := provider.Verify(hash, sig); err != nil {
+	if err := provider.Verify(context.Background(), hash, sig); err != nil {
 		fmt.Fprintf(os.Stderr, "verify failed: %v\n", err)
 		return 1
 	}

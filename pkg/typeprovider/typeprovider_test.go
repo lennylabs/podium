@@ -1,6 +1,7 @@
 package typeprovider_test
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -77,7 +78,7 @@ func TestRegistry_ValidateDispatches(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 	a := &manifest.Artifact{Type: "macro"}
-	got := r.Validate(a)
+	got := r.Validate(context.Background(), a)
 	if len(got) != 1 || got[0].Code != "macro.no-name" {
 		t.Errorf("got %+v, want one macro.no-name diagnostic", got)
 	}
@@ -101,7 +102,7 @@ type macroProvider struct{}
 
 func (macroProvider) ID() string                  { return "macro" }
 func (macroProvider) Type() manifest.ArtifactType { return "macro" }
-func (macroProvider) Validate(a *manifest.Artifact) []typeprovider.Diagnostic {
+func (macroProvider) Validate(_ context.Context, a *manifest.Artifact) []typeprovider.Diagnostic {
 	if a.Name == "" {
 		return []typeprovider.Diagnostic{{Severity: "error", Code: "macro.no-name", Message: "macro: name required"}}
 	}
@@ -110,6 +111,8 @@ func (macroProvider) Validate(a *manifest.Artifact) []typeprovider.Diagnostic {
 
 type otherProvider struct{}
 
-func (otherProvider) ID() string                                            { return "other" }
-func (otherProvider) Type() manifest.ArtifactType                           { return "z-other" }
-func (otherProvider) Validate(*manifest.Artifact) []typeprovider.Diagnostic { return nil }
+func (otherProvider) ID() string                  { return "other" }
+func (otherProvider) Type() manifest.ArtifactType { return "z-other" }
+func (otherProvider) Validate(context.Context, *manifest.Artifact) []typeprovider.Diagnostic {
+	return nil
+}

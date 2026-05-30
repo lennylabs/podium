@@ -238,8 +238,9 @@ type Request struct {
 type AuditEmitterFunc func(eventType, target string, ctxFields map[string]string)
 
 // SignerFunc signs the content hash of a freshly-ingested manifest
-// and returns an opaque envelope. Wraps sign.Provider.Sign.
-type SignerFunc func(contentHash string) (string, error)
+// and returns an opaque envelope. Wraps sign.Provider.Sign, whose
+// context-first signature it mirrors (spec: §9.3).
+type SignerFunc func(ctx context.Context, contentHash string) (string, error)
 
 // tenantHasArtifact reports whether the tenant already has a
 // manifest for artifactID — we don't double-count distinct
@@ -418,7 +419,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 
 	// Run lint over the collected set; diagnostics with severity Error
 	// abort their artifact's ingest.
-	diags := req.Linter.Lint(nil, records)
+	diags := req.Linter.Lint(ctx, nil, records)
 
 	res := &Result{}
 	errsByID := groupLintErrors(diags)
@@ -428,7 +429,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 	// not gate ingest, so they run independently of req.Linter (which the
 	// author-facing `podium lint` shares) over the ingested record set;
 	// the colliding-summary check needs that set to spot a cluster.
-	res.Advisories = (&lint.Linter{Rules: lint.DescriptionAdvisoryRules()}).Lint(nil, records)
+	res.Advisories = (&lint.Linter{Rules: lint.DescriptionAdvisoryRules()}).Lint(ctx, nil, records)
 
 	// §4.7 "Domain embeddings": embed each DOMAIN.md projection
 	// (description + keywords + truncated body) into the domain index so
@@ -612,7 +613,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		// signing failure rejects the artifact — unsigned bytes
 		// must not sneak in when a signer is configured.
 		if req.Signer != nil {
-			env, err := req.Signer(mr.ContentHash)
+			env, err := req.Signer(ctx, mr.ContentHash)
 			if err != nil {
 				res.Rejected = append(res.Rejected, RejectedArtifact{
 					ArtifactID: mr.ArtifactID,

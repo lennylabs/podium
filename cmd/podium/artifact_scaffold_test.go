@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,7 +44,7 @@ func assertLintClean(t *testing.T, root string) {
 		t.Fatalf("no records discovered under %s", root)
 	}
 	linter := &lint.Linter{}
-	diags := linter.Lint(reg, records)
+	diags := linter.Lint(context.Background(), reg, records)
 	for _, d := range diags {
 		if d.Severity == lint.SeverityError {
 			t.Errorf("lint error: %s", d)

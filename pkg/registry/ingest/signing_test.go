@@ -55,7 +55,7 @@ func TestIngest_SignFailureRejectsArtifact(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
-	failSigner := func(string) (string, error) {
+	failSigner := func(context.Context, string) (string, error) {
 		return "", errors.New("provider offline")
 	}
 	res, err := ingest.Ingest(context.Background(), st, ingest.Request{

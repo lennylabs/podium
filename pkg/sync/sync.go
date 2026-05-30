@@ -146,7 +146,7 @@ func Run(opts Options) (*Result, error) {
 			res.Skipped = append(res.Skipped, rec.ID)
 			continue
 		}
-		out, err := a.Adapt(adapter.Source{
+		out, err := a.Adapt(context.Background(), adapter.Source{
 			ArtifactID:    rec.ID,
 			ArtifactBytes: rec.ArtifactBytes,
 			SkillBytes:    rec.SkillBytes,

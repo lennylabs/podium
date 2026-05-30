@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -73,7 +74,7 @@ type ruleThinDescription struct{}
 
 func (ruleThinDescription) Code() string { return "lint.thin_description" }
 
-func (r ruleThinDescription) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleThinDescription) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
 	for _, rec := range records {
 		if rec.Artifact != nil && rec.Artifact.Suppresses(r.Code()) {
@@ -106,7 +107,7 @@ type ruleCollidingDescriptions struct{}
 
 func (ruleCollidingDescriptions) Code() string { return "lint.colliding_descriptions" }
 
-func (r ruleCollidingDescriptions) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleCollidingDescriptions) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	// Group canonical IDs by normalized description across the whole
 	// ingested set so a cluster is visible from any of its members.
 	byNorm := map[string][]string{}

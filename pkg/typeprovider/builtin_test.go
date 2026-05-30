@@ -1,6 +1,7 @@
 package typeprovider_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/lennylabs/podium/pkg/manifest"
@@ -16,7 +17,7 @@ func TestRegistry_BuiltinProviderHasIDAndNoValidate(t *testing.T) {
 	if id := provider.ID(); id == "" {
 		t.Errorf("ID returned empty string")
 	}
-	if diags := provider.Validate(&manifest.Artifact{Type: manifest.TypeSkill}); diags != nil {
+	if diags := provider.Validate(context.Background(), &manifest.Artifact{Type: manifest.TypeSkill}); diags != nil {
 		t.Errorf("builtin Validate returned %v, want nil", diags)
 	}
 }

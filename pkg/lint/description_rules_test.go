@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -19,7 +20,7 @@ func rec(id, desc string) filesystem.ArtifactRecord {
 
 // runAdvisory runs only the §3.3 / §12 description-quality rules.
 func runAdvisory(records []filesystem.ArtifactRecord) []Diagnostic {
-	return (&Linter{Rules: DescriptionAdvisoryRules()}).Lint(nil, records)
+	return (&Linter{Rules: DescriptionAdvisoryRules()}).Lint(context.Background(), nil, records)
 }
 
 // Spec: §3.3 / §12 — "The registry lints for thin descriptions." A

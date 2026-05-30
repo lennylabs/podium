@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/lennylabs/podium/pkg/adapter"
@@ -29,7 +30,7 @@ type ruleHarnessCapability struct{}
 
 func (ruleHarnessCapability) Code() string { return "lint.harness_capability" }
 
-func (r ruleHarnessCapability) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleHarnessCapability) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
 	for _, rec := range records {
 		art := rec.Artifact

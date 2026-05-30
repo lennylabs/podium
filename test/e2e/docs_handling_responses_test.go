@@ -756,9 +756,10 @@ func TestHandlingResponses_ScopeDenied(t *testing.T) {
 // the hook step into both materialization paths, so the code is now reachable.
 // This asserts the bridge references it (the inverse of the prior gap marker).
 // The full hook-failure path is exercised in cmd/podium-mcp's in-process unit
-// tests (TestDeliver_HookErrorAbortsWrite); a standalone e2e cannot register a
-// hook with the out-of-process bridge until the wire-serializable hook-loading
-// SPI lands (F-9.3.1).
+// tests (TestDeliver_HookErrorAbortsWrite). The hook SPI is now a context-first
+// wire-serializable interface (F-9.3.1); a standalone e2e still cannot register
+// a hook with the out-of-process bridge because §9.3 does not commit to an
+// out-of-process plugin protocol, so registration stays in-process.
 func TestHandlingResponses_HookFailedWired(t *testing.T) {
 	t.Parallel()
 	needle := "materialize.hook" + "_failed"

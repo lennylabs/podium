@@ -1,6 +1,7 @@
 package adapter_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -28,7 +29,7 @@ Authored conclusion.
 // Claude can apply differential trust at read time.
 func TestClaudeCode_RewritesProvenanceMarkers(t *testing.T) {
 	t.Parallel()
-	out, err := adapter.ClaudeCode{}.Adapt(adapter.Source{
+	out, err := adapter.ClaudeCode{}.Adapt(context.Background(), adapter.Source{
 		ArtifactID:    "team/aggregate",
 		ArtifactBytes: []byte("---\ntype: skill\nversion: 1.0.0\nname: aggregate\n---\n"),
 		SkillBytes:    []byte(provenanceSkill),
@@ -66,7 +67,7 @@ func TestClaudeCode_RewritesProvenanceMarkers(t *testing.T) {
 // for that case.
 func TestNoneAdapter_PreservesProvenanceMarkers(t *testing.T) {
 	t.Parallel()
-	out, err := adapter.None{}.Adapt(adapter.Source{
+	out, err := adapter.None{}.Adapt(context.Background(), adapter.Source{
 		ArtifactID:    "team/aggregate",
 		ArtifactBytes: []byte("---\ntype: skill\nversion: 1.0.0\nname: aggregate\n---\n"),
 		SkillBytes:    []byte(provenanceSkill),
@@ -104,7 +105,7 @@ between
 second
 <!-- end imported -->
 `)
-	out, _ := adapter.ClaudeCode{}.Adapt(adapter.Source{
+	out, _ := adapter.ClaudeCode{}.Adapt(context.Background(), adapter.Source{
 		ArtifactID:    "team/x",
 		ArtifactBytes: []byte("---\ntype: skill\nversion: 1.0.0\nname: x\n---\n"),
 		SkillBytes:    body,
@@ -142,7 +143,7 @@ func TestClaudeCode_RewritesProvenanceForNonSkillTypes(t *testing.T) {
 		ty := ty
 		t.Run(ty, func(t *testing.T) {
 			t.Parallel()
-			out, err := adapter.ClaudeCode{}.Adapt(adapter.Source{
+			out, err := adapter.ClaudeCode{}.Adapt(context.Background(), adapter.Source{
 				ArtifactID:    "team/aggregate",
 				ArtifactBytes: nonSkillProvenanceArtifact(ty),
 			})
@@ -187,7 +188,7 @@ description: x
 
 Plain authored body.
 `)
-	out, _ := adapter.ClaudeCode{}.Adapt(adapter.Source{
+	out, _ := adapter.ClaudeCode{}.Adapt(context.Background(), adapter.Source{
 		ArtifactID:    "team/x",
 		ArtifactBytes: []byte("---\ntype: skill\nversion: 1.0.0\nname: x\n---\n"),
 		SkillBytes:    plain,
