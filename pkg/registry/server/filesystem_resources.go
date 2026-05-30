@@ -1,13 +1,9 @@
 package server
 
 import (
-	"context"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
-
-	"github.com/lennylabs/podium/pkg/registry/filesystem"
 )
 
 // dirFS is a minimal os.DirFS replacement that the ingest pipeline
@@ -31,29 +27,4 @@ func (d dirFS) ReadDir(name string) ([]fs.DirEntry, error) {
 // Stat implements fs.StatFS.
 func (d dirFS) Stat(name string) (fs.FileInfo, error) {
 	return os.Stat(filepath.Join(d.root, filepath.FromSlash(name)))
-}
-
-// filesystemResourceFunc returns a ResourceFunc that reads bundled
-// resources from the filesystem registry that produced this server.
-//
-// The artifactID maps to a directory under the artifact's
-// originating layer. Implementation walks the layers in reverse
-// precedence order and returns the first matching path.
-func filesystemResourceFunc(reg *filesystem.Registry) ResourceFunc {
-	return func(_ context.Context, artifactID, resourcePath string) ([]byte, bool) {
-		for i := len(reg.Layers) - 1; i >= 0; i-- {
-			full := filepath.Join(reg.Layers[i].Path,
-				filepath.FromSlash(artifactID),
-				filepath.FromSlash(resourcePath))
-			if !strings.HasPrefix(filepath.Clean(full), filepath.Clean(reg.Layers[i].Path)) {
-				continue
-			}
-			data, err := os.ReadFile(full)
-			if err != nil {
-				continue
-			}
-			return data, true
-		}
-		return nil, false
-	}
 }

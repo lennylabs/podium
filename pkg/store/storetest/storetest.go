@@ -45,6 +45,7 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("LayerConfigCRUD", func(t *testing.T) { layerConfigCRUD(t, factory(t)) })
 	t.Run("LayerConfigDelete", func(t *testing.T) { layerConfigDelete(t, factory(t)) })
 	t.Run("SearchVisibilityRoundTrip", func(t *testing.T) { searchVisibilityRoundTrip(t, factory(t)) })
+	t.Run("ResourcesRoundTrip", func(t *testing.T) { resourcesRoundTrip(t, factory(t)) })
 	t.Run("DomainRecordRoundTrip", func(t *testing.T) { domainRecordRoundTrip(t, factory(t)) })
 	t.Run("DomainPutReplacesPerLayer", func(t *testing.T) { domainPutReplacesPerLayer(t, factory(t)) })
 }
@@ -483,6 +484,78 @@ func getManifestNotFound(t *testing.T, s store.Store) {
 	mustCreateTenant(t, s, "a")
 	if _, err := s.GetManifest(context.Background(), "a", "missing", "1.0.0"); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("got %v, want ErrNotFound", err)
+	}
+}
+
+// Spec: §7.2 / §4.4 — bundled resource refs persist on the manifest
+// record and survive GetManifest and ListManifests so the data plane can
+// serve them. Inline bytes (small resources), the content hash, size,
+// and content type all round-trip; without a backing column the SQL
+// backends would silently drop them.
+func resourcesRoundTrip(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "a")
+	rec := manifestRec("a", "finance/run", "1.0.0", "sha:1")
+	rec.Resources = []store.ResourceRef{
+		{
+			Path:        "scripts/run.py",
+			ContentHash: "sha256:aaaa",
+			Size:        12,
+			ContentType: "text/x-python",
+			Inline:      []byte("print('hi')\n"),
+		},
+		{
+			// A large resource carries no inline bytes (served from object storage).
+			Path:        "data/big.bin",
+			ContentHash: "sha256:bbbb",
+			Size:        9_000_000,
+			ContentType: "application/octet-stream",
+		},
+	}
+	mustPut(t, s, rec)
+
+	check := func(label string, got store.ManifestRecord) {
+		if len(got.Resources) != 2 {
+			t.Fatalf("%s: Resources len = %d, want 2 (%+v)", label, len(got.Resources), got.Resources)
+		}
+		small := got.Resources[0]
+		if small.Path != "scripts/run.py" || small.ContentHash != "sha256:aaaa" ||
+			small.Size != 12 || small.ContentType != "text/x-python" ||
+			string(small.Inline) != "print('hi')\n" {
+			t.Errorf("%s: small ref not preserved: %+v", label, small)
+		}
+		large := got.Resources[1]
+		if large.Path != "data/big.bin" || large.ContentHash != "sha256:bbbb" ||
+			large.Size != 9_000_000 || large.Inline != nil {
+			t.Errorf("%s: large ref not preserved (inline must be nil): %+v", label, large)
+		}
+	}
+
+	got, err := s.GetManifest(ctx, "a", "finance/run", "1.0.0")
+	if err != nil {
+		t.Fatalf("GetManifest: %v", err)
+	}
+	check("GetManifest", got)
+
+	list, err := s.ListManifests(ctx, "a")
+	if err != nil {
+		t.Fatalf("ListManifests: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("ListManifests len = %d, want 1", len(list))
+	}
+	check("ListManifests", list[0])
+
+	// A record with no bundled resources round-trips to an empty/nil slice.
+	bare := manifestRec("a", "finance/bare", "1.0.0", "sha:2")
+	mustPut(t, s, bare)
+	gotBare, err := s.GetManifest(ctx, "a", "finance/bare", "1.0.0")
+	if err != nil {
+		t.Fatalf("GetManifest(bare): %v", err)
+	}
+	if len(gotBare.Resources) != 0 {
+		t.Errorf("bare record Resources = %+v, want none", gotBare.Resources)
 	}
 }
 

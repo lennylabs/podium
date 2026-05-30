@@ -3,6 +3,7 @@ package serverboot
 import (
 	"context"
 	"errors"
+	"io"
 	"testing"
 	"time"
 
@@ -36,6 +37,12 @@ type brokenObjectStore struct{ err error }
 func (b brokenObjectStore) ID() string                                        { return "broken" }
 func (b brokenObjectStore) Put(context.Context, string, []byte, string) error { return b.err }
 func (b brokenObjectStore) Get(context.Context, string) ([]byte, error)       { return nil, b.err }
+func (b brokenObjectStore) GetStream(context.Context, string) (io.ReadCloser, objectstore.ObjectInfo, error) {
+	return nil, objectstore.ObjectInfo{}, b.err
+}
+func (b brokenObjectStore) Stat(context.Context, string) (objectstore.ObjectInfo, error) {
+	return objectstore.ObjectInfo{}, b.err
+}
 func (b brokenObjectStore) Presign(context.Context, string, time.Duration) (string, error) {
 	return "", b.err
 }

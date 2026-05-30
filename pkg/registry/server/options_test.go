@@ -10,6 +10,7 @@ import (
 
 	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
@@ -17,28 +18,20 @@ import (
 
 func strReader(s string) io.Reader { return strings.NewReader(s) }
 
-func TestServerOptions_WithResourcesAndTenant(t *testing.T) {
+func TestServerOptions_WithObjectStoreAndTenant(t *testing.T) {
 	t.Parallel()
-	resourceCalls := 0
-	rf := func(_ context.Context, artifactID, resourcePath string) ([]byte, bool) {
-		resourceCalls++
-		return []byte("data"), true
-	}
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
 	srv := server.New(
 		core.New(st, "default", nil),
-		server.WithResources(rf),
+		server.WithObjectStore(objectstore.NewMemory(), "https://example.test", 0),
 		server.WithTenant("default"),
 	)
 	if srv == nil {
 		t.Fatal("New returned nil")
 	}
-	// resourceCalls remains 0 because no load_artifact request was made;
-	// the goal here is to exercise the option constructors.
-	_ = resourceCalls
 }
 
 func TestPublishEventForIngest_FiresEvent(t *testing.T) {

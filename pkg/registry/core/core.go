@@ -1012,8 +1012,13 @@ type LoadArtifactResult struct {
 	ManifestBody string
 	Frontmatter  []byte
 	Layer        string
-	Resources    map[string][]byte
-	Sensitivity  string
+	// Resources are the §4.4 bundled resources for the artifact,
+	// resolved from the persisted manifest record (§7.2 data plane).
+	// Small resources carry their bytes inline; large ones carry a
+	// content-hash reference the HTTP layer presigns. Nil when the
+	// package bundles no resources.
+	Resources   []store.ResourceRef
+	Sensitivity string
 	// Deprecated reports whether the resolved manifest was marked
 	// deprecated at ingest. Per §4.7.4 the registry continues to
 	// serve deprecated artifacts but surfaces a warning.
@@ -1251,6 +1256,10 @@ func mergeChain(chain []store.ManifestRecord) store.ManifestRecord {
 		if len(c.Body) > 0 {
 			out.Body = c.Body
 		}
+		// Bundled resources belong to the concrete package: the child's
+		// own files ship, not the hidden parent's (§4.6). The leaf record
+		// is last in the chain, so its refs win.
+		out.Resources = c.Resources
 	}
 	// Surface the merged structured fields back onto the record so search
 	// descriptors, sensitivity gating, and deprecation reporting agree
@@ -1341,10 +1350,35 @@ func resultFromRecord(rec store.ManifestRecord) *LoadArtifactResult {
 		Frontmatter:  rec.Frontmatter,
 		Layer:        rec.Layer,
 		Sensitivity:  rec.Sensitivity,
+		Resources:    rec.Resources,
 		Deprecated:   rec.Deprecated,
 		ReplacedBy:   rec.ReplacedBy,
 		Signature:    rec.Signature,
 	}
+}
+
+// ResolveResourceOwner returns the ID of a visible artifact that
+// bundles a resource whose content hash matches key (the bare hex
+// digest, no "sha256:" prefix), and ok=false when the caller can see no
+// such artifact. The §7.2 data-plane /objects/{key} route uses it to
+// re-check visibility on every fetch so a caller who has lost access to
+// every artifact bundling the bytes can no longer follow a
+// previously-issued URL. Bytes are deduplicated by content hash across
+// artifacts (§4.4), so any one visible owner authorizes the read.
+func (r *Registry) ResolveResourceOwner(ctx context.Context, id layer.Identity, key string) (string, bool) {
+	visible, err := r.visibleManifests(ctx, id)
+	if err != nil {
+		return "", false
+	}
+	want := "sha256:" + key
+	for _, m := range visible {
+		for _, ref := range m.Resources {
+			if ref.ContentHash == want {
+				return m.ArtifactID, true
+			}
+		}
+	}
+	return "", false
 }
 
 // withDeprecationWarning fills in DeprecationWarning when the

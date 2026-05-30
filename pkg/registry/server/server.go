@@ -6,11 +6,10 @@ package server
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -30,26 +29,19 @@ import (
 
 // Server is a thin HTTP wrapper over a core.Registry.
 type Server struct {
-	core         *core.Registry
-	publicMode   bool
-	resolveID    func(*http.Request) layer.Identity
-	resourceFunc ResourceFunc
-	// resources caches bundled resources keyed by artifact ID.
-	// Populated by NewFromFilesystem; empty for callers that
-	// construct via New (the meta-tool API still returns the manifest
-	// body, just without bundled bytes inline).
-	resources map[string]map[string][]byte
+	core       *core.Registry
+	publicMode bool
+	resolveID  func(*http.Request) layer.Identity
 	// events is the §7.6 in-process pub/sub for /v1/events.
 	events *eventBus
-	// largeResources maps (artifactID, resourcePath) → object key for
-	// resources whose payload exceeded objectstore.InlineCutoff at
-	// ingest. The HTTP handler presigns a URL per key on read; the
-	// /objects/{key} route serves the bytes for filesystem-backed
-	// stores. Empty when no objectstore is configured.
-	largeResources map[string]map[string]largeRef
-	objectStore    objectstore.Provider
-	objectBaseURL  string
-	presignTTL     time.Duration
+	// objectStore is the §7.2 data-plane backend. load_artifact reads
+	// small resources from it (when not inline) and presigns large ones;
+	// the /objects/{key} route streams the bytes for the filesystem
+	// backend. Nil when no object store is configured, in which case the
+	// resources ingest left inline on the record still serve.
+	objectStore   objectstore.Provider
+	objectBaseURL string
+	presignTTL    time.Duration
 	// webhooks is the §7.3.2 outbound delivery worker. When set,
 	// PublishEvent fans the event out to every matching receiver.
 	webhooks *webhook.Worker
@@ -124,22 +116,6 @@ func WithQuotaLimiter(q *QuotaLimiter) Option {
 	return func(s *Server) { s.quota = q }
 }
 
-// largeRef is the per-resource metadata the server keeps so it can
-// presign URLs and validate visibility on /objects/{key} reads.
-type largeRef struct {
-	Key         string
-	Size        int64
-	ContentType string
-	ContentHash string
-}
-
-// ResourceFunc returns the bytes of one bundled resource for an
-// artifact load. The default implementation looks up the resource on
-// disk under a configured root; tests can swap it for an in-memory
-// fixture. Returning (nil, false) signals "not present" — the response
-// then omits Resources for that artifact.
-type ResourceFunc func(ctx context.Context, artifactID, resourcePath string) ([]byte, bool)
-
 // Option mutates the Server during construction.
 type Option func(*Server)
 
@@ -154,12 +130,6 @@ func WithPublicMode() Option { return func(s *Server) { s.publicMode = true } }
 // one that maps an HTTP request to an Identity (e.g., decoded JWT).
 func WithIdentityResolver(fn func(*http.Request) layer.Identity) Option {
 	return func(s *Server) { s.resolveID = fn }
-}
-
-// WithResources installs a function that returns bundled resource bytes
-// for load_artifact responses. Empty → no Resources are attached.
-func WithResources(fn ResourceFunc) Option {
-	return func(s *Server) { s.resourceFunc = fn }
 }
 
 // WithObjectStore configures the §4.1 large-resource path. Resources
@@ -227,10 +197,13 @@ func New(r *core.Registry, opts ...Option) *Server {
 }
 
 // NewFromFilesystem opens the filesystem registry at path, ingests
-// every layer into a fresh in-memory store, captures bundled
-// resources for inline delivery, and returns a Server wrapping the
-// resulting core.Registry. This is the standalone bootstrap helper
-// used by tests and the standalone server.
+// every layer into a fresh in-memory store, and returns a Server
+// wrapping the resulting core.Registry. Bundled resources persist at
+// ingest (§7.2 data plane): when an object store is configured via
+// WithObjectStore, each resource uploads keyed by its content hash and
+// resources above the §4.2 cutoff serve via presigned URL; otherwise
+// they stay inline on the manifest record. This is the standalone
+// bootstrap helper used by tests and the standalone server.
 func NewFromFilesystem(path string, opts ...Option) (*Server, error) {
 	reg, err := filesystem.Open(path)
 	if err != nil {
@@ -241,7 +214,19 @@ func NewFromFilesystem(path string, opts ...Option) (*Server, error) {
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: tenant, Name: tenant}); err != nil {
 		return nil, err
 	}
-	resources := map[string]map[string][]byte{}
+	// Discover the configured object store ahead of ingest so the
+	// data-plane upload runs in the ingest pipeline (the same path the
+	// standalone server's bootstrapLayerPath uses). Applying the options
+	// to a throwaway server reads objectStore without duplicating the
+	// option wiring; New applies them again to the real server.
+	probe := &Server{}
+	for _, opt := range opts {
+		opt(probe)
+	}
+	var resourcePut ingest.ResourcePutFunc
+	if probe.objectStore != nil {
+		resourcePut = probe.objectStore.Put
+	}
 	layers := make([]layer.Layer, 0, len(reg.Layers))
 	for i, l := range reg.Layers {
 		layerFS := newDirFS(l.Path)
@@ -251,24 +236,10 @@ func NewFromFilesystem(path string, opts ...Option) (*Server, error) {
 			Files:    layerFS,
 			// §4.4: validate prose URL references with an HTTP HEAD by
 			// default; PODIUM_INGEST_OFFLINE=true skips the network probe.
-			Linter: lint.NewIngestLinter(os.Getenv("PODIUM_INGEST_OFFLINE") == "true"),
+			Linter:      lint.NewIngestLinter(os.Getenv("PODIUM_INGEST_OFFLINE") == "true"),
+			ResourcePut: resourcePut,
 		}); err != nil {
 			return nil, err
-		}
-		// Walk the layer once more to capture bundled resources for
-		// inline delivery via load_artifact responses (§4.1 inline
-		// cutoff). Higher-precedence layers overwrite lower ones for
-		// collision-free artifact IDs (sync's effective view).
-		records, err := reg.Walk(filesystem.WalkOptions{
-			CollisionPolicy: filesystem.CollisionPolicyHighestWins,
-		})
-		if err == nil {
-			for _, rec := range records {
-				if rec.Layer.ID != l.ID {
-					continue
-				}
-				resources[rec.ID] = rec.Resources
-			}
 		}
 		layers = append(layers, layer.Layer{
 			ID:         l.ID,
@@ -278,78 +249,7 @@ func NewFromFilesystem(path string, opts ...Option) (*Server, error) {
 	}
 
 	registry := core.New(st, tenant, layers)
-	server := New(registry, opts...)
-	server.resourceFunc = filesystemResourceFunc(reg)
-	if server.objectStore != nil {
-		// Split bundled resources by §4.1 inline cutoff: small ones
-		// stay in s.resources for inline embedding; large ones go to
-		// the objectstore and are referenced via presigned URLs.
-		large, err := uploadLargeResources(context.Background(), server.objectStore, resources)
-		if err != nil {
-			return nil, fmt.Errorf("upload large resources: %w", err)
-		}
-		server.largeResources = large
-		// Strip large resources from the inline cache so handleLoadArtifact
-		// doesn't double-deliver them.
-		for artifactID, paths := range large {
-			for path := range paths {
-				delete(resources[artifactID], path)
-			}
-		}
-	}
-	server.resources = resources
-	return server, nil
-}
-
-// uploadLargeResources walks resources, uploads any blob above
-// objectstore.InlineCutoff to store, and returns the (artifactID →
-// path → ref) mapping for the server to use on /v1/load_artifact.
-func uploadLargeResources(ctx context.Context, store objectstore.Provider, resources map[string]map[string][]byte) (map[string]map[string]largeRef, error) {
-	out := map[string]map[string]largeRef{}
-	for artifactID, byPath := range resources {
-		for path, body := range byPath {
-			if int64(len(body)) <= objectstore.InlineCutoff {
-				continue
-			}
-			h := sha256.Sum256(body)
-			contentHash := "sha256:" + hex.EncodeToString(h[:])
-			key := contentHash[len("sha256:"):]
-			contentType := guessContentType(path)
-			if err := store.Put(ctx, key, body, contentType); err != nil {
-				return nil, fmt.Errorf("put %s/%s: %w", artifactID, path, err)
-			}
-			if out[artifactID] == nil {
-				out[artifactID] = map[string]largeRef{}
-			}
-			out[artifactID][path] = largeRef{
-				Key:         key,
-				Size:        int64(len(body)),
-				ContentType: contentType,
-				ContentHash: contentHash,
-			}
-		}
-	}
-	return out, nil
-}
-
-// guessContentType picks a Content-Type from path extension. Falls
-// back to application/octet-stream so a missing match is benign.
-func guessContentType(path string) string {
-	switch {
-	case strings.HasSuffix(path, ".json"):
-		return "application/json"
-	case strings.HasSuffix(path, ".md"):
-		return "text/markdown"
-	case strings.HasSuffix(path, ".txt"):
-		return "text/plain"
-	case strings.HasSuffix(path, ".yaml"), strings.HasSuffix(path, ".yml"):
-		return "application/yaml"
-	case strings.HasSuffix(path, ".png"):
-		return "image/png"
-	case strings.HasSuffix(path, ".jpg"), strings.HasSuffix(path, ".jpeg"):
-		return "image/jpeg"
-	}
-	return "application/octet-stream"
+	return New(registry, opts...), nil
 }
 
 // Handler returns an http.Handler with every meta-tool route registered.
@@ -503,13 +403,15 @@ type LoadArtifactResponse struct {
 }
 
 // LargeResourceLink describes one resource whose payload exceeded
-// the inline cutoff. The URL's auth model is backend-specific:
+// the inline cutoff. The presigned URL's auth model is backend-specific:
 // the S3 backend embeds an AWS Signature V4 in the URL; the
 // filesystem backend's URL points at the registry's authenticated
 // /objects/{content_hash} route. ContentHash lets the consumer
-// verify the bytes after fetching.
+// verify the bytes after fetching. The field is named presigned_url to
+// match the §7.6.2 batch-load wire example, so both load paths use one
+// name for the same reference.
 type LargeResourceLink struct {
-	URL         string `json:"url"`
+	URL         string `json:"presigned_url"`
 	ContentHash string `json:"content_hash"`
 	Size        int64  `json:"size"`
 	ContentType string `json:"content_type,omitempty"`
@@ -820,30 +722,86 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 		DeprecationWarning: res.DeprecationWarning,
 		Signature:          res.Signature,
 	}
-	if cached, ok := s.resources[res.ID]; ok && len(cached) > 0 {
-		resp.Resources = make(map[string]string, len(cached))
-		for path, data := range cached {
-			resp.Resources[path] = string(data)
-		}
-	}
-	if largeMap, ok := s.largeResources[res.ID]; ok && len(largeMap) > 0 {
-		resp.LargeResources = make(map[string]LargeResourceLink, len(largeMap))
-		for path, ref := range largeMap {
-			url, perr := s.objectStore.Presign(r.Context(), ref.Key, s.presignTTL)
-			if perr != nil {
-				writeError(w, http.StatusInternalServerError, "registry.unavailable",
-					"presign large resource: "+perr.Error())
-				return
-			}
-			resp.LargeResources[path] = LargeResourceLink{
-				URL:         url,
-				ContentHash: ref.ContentHash,
-				Size:        ref.Size,
-				ContentType: ref.ContentType,
-			}
-		}
+	// §7.2 data plane: resources at or below the inline cutoff return
+	// inline; larger ones return as presigned URLs the consumer fetches
+	// directly from object storage.
+	if err := s.attachResources(r.Context(), &resp, res.Resources); err != nil {
+		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// attachResources splits the §4.4 bundled resources of a load result
+// into the §7.2 inline set (at or below objectstore.InlineCutoff) and
+// the large set (above it). Small resources serve from the bytes ingest
+// stored inline, falling back to an object-store read; large resources
+// presign against the configured store.
+func (s *Server) attachResources(ctx context.Context, resp *LoadArtifactResponse, refs []store.ResourceRef) error {
+	for _, ref := range refs {
+		if ref.Size > objectstore.InlineCutoff {
+			link, err := s.presignResource(ctx, ref)
+			if err != nil {
+				return err
+			}
+			if resp.LargeResources == nil {
+				resp.LargeResources = map[string]LargeResourceLink{}
+			}
+			resp.LargeResources[ref.Path] = link
+			continue
+		}
+		body, err := s.inlineBytes(ctx, ref)
+		if err != nil {
+			return err
+		}
+		if resp.Resources == nil {
+			resp.Resources = map[string]string{}
+		}
+		resp.Resources[ref.Path] = string(body)
+	}
+	return nil
+}
+
+// presignResource builds a §7.2 large-resource link, presigning the
+// object-store key (the bare content hash) for the consumer to fetch.
+func (s *Server) presignResource(ctx context.Context, ref store.ResourceRef) (LargeResourceLink, error) {
+	if s.objectStore == nil {
+		return LargeResourceLink{}, fmt.Errorf("no object store configured for large resource %s", ref.Path)
+	}
+	url, err := s.objectStore.Presign(ctx, resourceKey(ref), s.presignTTL)
+	if err != nil {
+		return LargeResourceLink{}, fmt.Errorf("presign large resource %s: %w", ref.Path, err)
+	}
+	return LargeResourceLink{
+		URL:         url,
+		ContentHash: ref.ContentHash,
+		Size:        ref.Size,
+		ContentType: ref.ContentType,
+	}, nil
+}
+
+// inlineBytes returns a small resource's bytes for inline delivery: the
+// copy ingest stored on the record when present, otherwise an
+// object-store read by content hash.
+func (s *Server) inlineBytes(ctx context.Context, ref store.ResourceRef) ([]byte, error) {
+	if ref.Inline != nil {
+		return ref.Inline, nil
+	}
+	if s.objectStore == nil {
+		return nil, fmt.Errorf("no object store configured for resource %s", ref.Path)
+	}
+	body, err := s.objectStore.Get(ctx, resourceKey(ref))
+	if err != nil {
+		return nil, fmt.Errorf("read resource %s: %w", ref.Path, err)
+	}
+	return body, nil
+}
+
+// resourceKey is the object-store key for a resource: the content hash
+// with the "sha256:" prefix stripped, which is what makes identical
+// bytes deduplicate across artifact versions (§4.4).
+func resourceKey(ref store.ResourceRef) string {
+	return strings.TrimPrefix(ref.ContentHash, "sha256:")
 }
 
 // handleObjectsRoute serves bytes for the filesystem objectstore via
@@ -868,64 +826,68 @@ func (s *Server) handleObjectsRoute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "invalid object key")
 		return
 	}
-
-	// Find the artifact owning this key so we can re-check visibility.
-	artifactID, _, ok := s.findLargeRef(key)
-	if !ok {
+	if s.objectStore == nil {
 		writeError(w, http.StatusNotFound, "registry.not_found", "no such object")
 		return
 	}
-	id := s.identity(r)
-	visible, err := s.core.LoadArtifact(r.Context(), id, artifactID, core.LoadArtifactOptions{})
-	if err != nil || visible == nil {
-		writeError(w, http.StatusForbidden, "auth.forbidden",
-			"caller is not authorized for this object")
+
+	// Re-check visibility on every fetch: the caller must currently see
+	// an artifact that bundles these bytes (§4.4 deduplicates by content
+	// hash, so any one visible owner authorizes the read). A caller who
+	// has lost access can no longer follow a previously-issued URL.
+	if _, ok := s.core.ResolveResourceOwner(r.Context(), s.identity(r), key); !ok {
+		writeError(w, http.StatusNotFound, "registry.not_found", "no such object")
 		return
 	}
 
-	body, err := s.objectStore.Get(r.Context(), key)
-	if err != nil {
-		if errors.Is(err, objectstore.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "registry.not_found", "object not found")
+	// HEAD reports size without reading the body (§7.2: the control plane
+	// never streams large bytes it does not have to).
+	if r.Method == http.MethodHead {
+		info, err := s.objectStore.Stat(r.Context(), key)
+		if err != nil {
+			s.writeObjectStoreError(w, err)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+		s.writeObjectHeaders(w, key, info)
+		w.WriteHeader(http.StatusOK)
 		return
 	}
-	contentType := contentTypeFromStore(s.objectStore, key)
+
+	// GET streams the bytes straight to the client instead of buffering
+	// the whole resource in memory (§7.2 / F-7.2.4).
+	reader, info, err := s.objectStore.GetStream(r.Context(), key)
+	if err != nil {
+		s.writeObjectStoreError(w, err)
+		return
+	}
+	defer reader.Close()
+	s.writeObjectHeaders(w, key, info)
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, reader)
+}
+
+// writeObjectHeaders sets the §7.2 data-plane response headers: the
+// content type (from the stored metadata, falling back to a generic
+// type), the content length, and the X-Content-Hash the consumer
+// verifies against.
+func (s *Server) writeObjectHeaders(w http.ResponseWriter, key string, info objectstore.ObjectInfo) {
+	contentType := info.ContentType
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
 	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Length", strconv.FormatInt(info.Size, 10))
 	w.Header().Set("X-Content-Hash", "sha256:"+key)
-	w.WriteHeader(http.StatusOK)
-	if r.Method == http.MethodGet {
-		_, _ = w.Write(body)
-	}
 }
 
-// findLargeRef returns (artifactID, path, ok) for the resource whose
-// stored key matches; ok=false when no artifact owns the key.
-func (s *Server) findLargeRef(key string) (string, string, bool) {
-	for artifactID, paths := range s.largeResources {
-		for path, ref := range paths {
-			if ref.Key == key {
-				return artifactID, path, true
-			}
-		}
+// writeObjectStoreError maps an object-store read error to the §6.10
+// envelope: a missing key is a 404, anything else a 503.
+func (s *Server) writeObjectStoreError(w http.ResponseWriter, err error) {
+	if errors.Is(err, objectstore.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "registry.not_found", "object not found")
+		return
 	}
-	return "", "", false
-}
-
-// contentTypeFromStore extracts a content type from the configured
-// store when the backend supports it. Filesystem records the type
-// alongside the body; S3 returns it on the GetObject response (we
-// don't query that here for the redirect path).
-func contentTypeFromStore(store objectstore.Provider, key string) string {
-	if fs, ok := store.(*objectstore.Filesystem); ok {
-		return fs.ContentTypeOf(key)
-	}
-	return ""
+	writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 }
 
 // ----- Helpers --------------------------------------------------------------

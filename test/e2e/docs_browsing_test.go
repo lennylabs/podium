@@ -556,9 +556,24 @@ func TestBrowsing_LoadArtifactHarnessNone(t *testing.T) {
 }
 
 // T-D-browsing-27 — load_artifact materializes bundled resources atomically.
+// spec: §7.2.
 func TestBrowsing_LoadArtifactResourcesAtomic(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-7.2.2: the server ingest path discards bundled resource bytes, so load_artifact materializes only ARTIFACT.md / SKILL.md and never the bundled scripts")
+	id := "finance/close-reporting/run-variance-analysis"
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		id + "/ARTIFACT.md":               brSkillArtifact,
+		id + "/SKILL.md":                  brSkillMD("run-variance-analysis", brVarianceDesc, "Run the analysis.\n"),
+		id + "/scripts/variance.py":       "print('variance')\n",
+		id + "/assets/output-schema.json": "{}\n",
+	}))
+	mat := t.TempDir()
+	res := mcpExec(t, brMatEnv(t, srv.BaseURL, mat),
+		toolCall(1, "load_artifact", map[string]any{"id": id}))
+	_ = rpcResult(t, res.Stdout, 1)
+	mustExist(t, filepath.Join(mat, id, "scripts/variance.py"))
+	mustExist(t, filepath.Join(mat, id, "assets/output-schema.json"))
+	// Atomic write leaves no .tmp scratch files behind.
+	brNoTmp(t, readTreeAll(t, mat))
 }
 
 // T-D-browsing-28 — only load_artifact writes to the host filesystem.

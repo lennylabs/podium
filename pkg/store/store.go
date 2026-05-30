@@ -7,6 +7,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -96,6 +97,60 @@ type ManifestRecord struct {
 	// verify via sign.EnforceVerification at materialize time
 	// against PODIUM_VERIFY_SIGNATURES.
 	Signature string
+	// Resources lists the §4.4 bundled resources for this artifact
+	// version, persisted at ingest so load_artifact can serve them
+	// (§7.2 data plane). Each entry is content-addressed; small
+	// resources carry their bytes inline (Inline) while large ones are
+	// delivered from object storage by content hash. Empty when the
+	// package bundles no resources.
+	Resources []ResourceRef
+}
+
+// ResourceRef is one §4.4 bundled resource attached to a manifest
+// record. The registry stores resource bytes content-addressed by
+// SHA-256 in object storage and deduplicated across versions; this ref
+// is the lightweight pointer the metadata store keeps so load_artifact
+// can return the resource inline (below the §4.2 256 KB cutoff) or as a
+// presigned URL (above it).
+type ResourceRef struct {
+	// Path is the package-relative resource path (slash-separated).
+	Path string
+	// ContentHash is the "sha256:<hex>" digest of the bytes. It is also
+	// the object-store key (minus the "sha256:" prefix), which is what
+	// makes identical bytes deduplicate across artifact versions.
+	ContentHash string
+	// Size is the resource length in bytes.
+	Size int64
+	// ContentType is the MIME type guessed from the path extension.
+	ContentType string
+	// Inline carries the bytes for a resource at or below the §4.2
+	// inline cutoff so load_artifact returns it in the response body
+	// without an object-store round-trip. It is nil for resources above
+	// the cutoff, which the data plane delivers via a presigned URL.
+	Inline []byte
+}
+
+// MarshalResources encodes a manifest's resource refs for the SQL
+// backends' JSON column. An empty list encodes to nil so a row with no
+// bundled resources stores NULL rather than a literal "null".
+func MarshalResources(refs []ResourceRef) ([]byte, error) {
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	return json.Marshal(refs)
+}
+
+// UnmarshalResources decodes the SQL backends' JSON resources column.
+// Empty or NULL data decodes to a nil slice.
+func UnmarshalResources(data []byte) ([]ResourceRef, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	var refs []ResourceRef
+	if err := json.Unmarshal(data, &refs); err != nil {
+		return nil, err
+	}
+	return refs, nil
 }
 
 // DomainRecord is the parsed DOMAIN.md for one (tenant, layer, domain

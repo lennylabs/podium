@@ -88,6 +88,7 @@ func (s *SQLite) applySchema() error {
 			extends_pin TEXT NOT NULL DEFAULT '',
 			signature TEXT NOT NULL DEFAULT '',
 			search_visibility TEXT NOT NULL DEFAULT '',
+			resources BLOB,
 			PRIMARY KEY (tenant_id, artifact_id, version)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_manifests_tenant_type
@@ -192,12 +193,16 @@ func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
 	if ingestedAt.IsZero() {
 		ingestedAt = time.Now().UTC()
 	}
+	resources, err := MarshalResources(rec.Resources)
+	if err != nil {
+		return fmt.Errorf("marshal resources: %w", err)
+	}
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO manifests
 			(tenant_id, artifact_id, version, content_hash, type, description,
 			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-			 extends_pin, signature, search_visibility)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 extends_pin, signature, search_visibility, resources)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (tenant_id, artifact_id, version) DO NOTHING`,
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
 		rec.Type, rec.Description,
@@ -206,7 +211,7 @@ func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
 		boolToInt(rec.Deprecated),
 		ingestedAt.UTC().Format(time.RFC3339Nano),
 		rec.Frontmatter, rec.Body,
-		rec.ExtendsPin, rec.Signature, rec.SearchVisibility)
+		rec.ExtendsPin, rec.Signature, rec.SearchVisibility, resources)
 	if err != nil {
 		return err
 	}
@@ -239,7 +244,7 @@ func (s *SQLite) GetManifest(ctx context.Context, tenantID, artifactID, version 
 	row := s.db.QueryRowContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-		       extends_pin, signature, search_visibility
+		       extends_pin, signature, search_visibility, resources
 		FROM manifests
 		WHERE tenant_id = ? AND artifact_id = ? AND version = ?`,
 		tenantID, artifactID, version)
@@ -256,7 +261,7 @@ func (s *SQLite) ListManifests(ctx context.Context, tenantID string) ([]Manifest
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-		       extends_pin, signature, search_visibility
+		       extends_pin, signature, search_visibility, resources
 		FROM manifests
 		WHERE tenant_id = ?
 		ORDER BY artifact_id ASC, version ASC`, tenantID)
@@ -482,11 +487,12 @@ func scanManifest(scanner rowScanner) (ManifestRecord, error) {
 	var deprecated int
 	var tags string
 	var ingestedAt string
+	var resources []byte
 	err := scanner.Scan(
 		&rec.TenantID, &rec.ArtifactID, &rec.Version, &rec.ContentHash,
 		&rec.Type, &rec.Description, &tags, &rec.Sensitivity, &rec.Layer,
 		&deprecated, &ingestedAt, &rec.Frontmatter, &rec.Body,
-		&rec.ExtendsPin, &rec.Signature, &rec.SearchVisibility)
+		&rec.ExtendsPin, &rec.Signature, &rec.SearchVisibility, &resources)
 	if err != nil {
 		return ManifestRecord{}, err
 	}
@@ -496,6 +502,9 @@ func scanManifest(scanner rowScanner) (ManifestRecord, error) {
 	}
 	if ingestedAt != "" {
 		rec.IngestedAt, _ = time.Parse(time.RFC3339Nano, ingestedAt)
+	}
+	if rec.Resources, err = UnmarshalResources(resources); err != nil {
+		return ManifestRecord{}, err
 	}
 	return rec, nil
 }

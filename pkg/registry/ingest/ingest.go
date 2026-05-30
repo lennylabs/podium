@@ -10,6 +10,8 @@ package ingest
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -22,6 +24,7 @@ import (
 	domainpkg "github.com/lennylabs/podium/pkg/domain"
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/manifest"
+	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/version"
@@ -216,6 +219,15 @@ type Request struct {
 	// downstream tooling; AuditEmit feeds the operator-side §8
 	// audit log.
 	AuditEmit AuditEmitterFunc
+	// ResourcePut uploads each bundled resource to the §7.2 data-plane
+	// object store keyed by its content hash (§4.4 deduplicates identical
+	// bytes across versions). Optional: when nil, ingest keeps every
+	// resource's bytes inline on the manifest record (the no-object-store
+	// deployment, where resources stay inline regardless of size). When
+	// set, resources above the §4.2 inline cutoff upload to the store and
+	// drop their inline copy so the control plane never carries large
+	// bytes.
+	ResourcePut ResourcePutFunc
 	// CallerID identifies the operator triggering ingest. Embedded
 	// into the audit event's Caller field. Optional.
 	CallerID string
@@ -264,6 +276,12 @@ type VectorPutFunc func(ctx context.Context, tenantID, artifactID, version strin
 // vector backend as artifacts under a reserved version sentinel; the
 // wiring closure supplies that sentinel so ingest need not know it.
 type DomainVectorPutFunc func(ctx context.Context, tenantID, domainPath string, vec []float32) error
+
+// ResourcePutFunc uploads one bundled resource's bytes to the §7.2
+// data-plane object store, keyed by its content hash. Wraps
+// objectstore.Provider.Put; the wiring closure supplies the configured
+// store so ingest stays unaware of the backend.
+type ResourcePutFunc func(ctx context.Context, key string, body []byte, contentType string) error
 
 // Result reports what happened.
 type Result struct {
@@ -588,6 +606,19 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 				continue
 			}
 			mr.Signature = env
+		}
+
+		// §7.2 data plane: persist bundled resources before the manifest
+		// commits so a served artifact's resources are retrievable the
+		// moment ingest accepts it. Large resources upload to object
+		// storage and drop their inline bytes; small ones stay inline.
+		if err := persistResources(ctx, req.ResourcePut, mr.Resources); err != nil {
+			res.Rejected = append(res.Rejected, RejectedArtifact{
+				ArtifactID: mr.ArtifactID,
+				Reason:     fmt.Sprintf("persist resources: %v", err),
+				Code:       "ingest.resource_store_failed",
+			})
+			continue
 		}
 
 		if err := st.PutManifest(ctx, mr); err != nil {
@@ -930,7 +961,61 @@ func manifestRecordFor(rec filesystem.ArtifactRecord, tenantID, layerID string, 
 		IngestedAt:       ingestedAt,
 		Frontmatter:      rec.ArtifactBytes,
 		Body:             []byte(body),
+		Resources:        resourceRefsFor(rec),
 	}, nil
+}
+
+// resourceRefsFor builds the §4.4 bundled-resource refs for a record in
+// sorted-path order. Each ref carries the per-resource content hash,
+// size, guessed content type, and (initially) the bytes inline. The
+// ingest loop later uploads the bytes to the object store and drops the
+// inline copy for resources above the §4.2 cutoff (see persistResources).
+func resourceRefsFor(rec filesystem.ArtifactRecord) []store.ResourceRef {
+	if len(rec.Resources) == 0 {
+		return nil
+	}
+	paths := make([]string, 0, len(rec.Resources))
+	for p := range rec.Resources {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	refs := make([]store.ResourceRef, 0, len(paths))
+	for _, p := range paths {
+		body := rec.Resources[p]
+		h := sha256.Sum256(body)
+		refs = append(refs, store.ResourceRef{
+			Path:        p,
+			ContentHash: "sha256:" + hex.EncodeToString(h[:]),
+			Size:        int64(len(body)),
+			ContentType: objectstore.GuessContentType(p),
+			Inline:      body,
+		})
+	}
+	return refs
+}
+
+// persistResources realizes the §7.2 data-plane split for one record's
+// bundled resources before the manifest commits. With an object store
+// configured (put non-nil), every resource uploads keyed by its content
+// hash (§4.4 deduplicates identical bytes), and resources above the
+// §4.2 inline cutoff drop their inline copy so the control plane never
+// carries large bytes. Without an object store, every resource keeps its
+// bytes inline regardless of size (the standalone-without-storage mode).
+func persistResources(ctx context.Context, put ResourcePutFunc, refs []store.ResourceRef) error {
+	if put == nil {
+		return nil
+	}
+	for i := range refs {
+		ref := &refs[i]
+		key := strings.TrimPrefix(ref.ContentHash, "sha256:")
+		if err := put(ctx, key, ref.Inline, ref.ContentType); err != nil {
+			return fmt.Errorf("%s: %w", ref.Path, err)
+		}
+		if ref.Size > objectstore.InlineCutoff {
+			ref.Inline = nil
+		}
+	}
+	return nil
 }
 
 // contentHashOf computes the canonical content hash for an artifact:

@@ -26,18 +26,30 @@ type BatchLoadRequest struct {
 // BatchLoadEnvelope is one per-item response. Status is "ok" or
 // "error"; on error the Error field carries the §6.10 envelope.
 type BatchLoadEnvelope struct {
-	ID                 string            `json:"id"`
-	Status             string            `json:"status"`
-	Type               string            `json:"type,omitempty"`
-	Version            string            `json:"version,omitempty"`
-	ContentHash        string            `json:"content_hash,omitempty"`
-	ManifestBody       string            `json:"manifest_body,omitempty"`
-	Frontmatter        string            `json:"frontmatter,omitempty"`
-	Resources          map[string]string `json:"resources,omitempty"`
-	Deprecated         bool              `json:"deprecated,omitempty"`
-	ReplacedBy         string            `json:"replaced_by,omitempty"`
-	DeprecationWarning string            `json:"deprecation_warning,omitempty"`
-	Error              *ErrorResponse    `json:"error,omitempty"`
+	ID           string `json:"id"`
+	Status       string `json:"status"`
+	Type         string `json:"type,omitempty"`
+	Version      string `json:"version,omitempty"`
+	ContentHash  string `json:"content_hash,omitempty"`
+	ManifestBody string `json:"manifest_body,omitempty"`
+	Frontmatter  string `json:"frontmatter,omitempty"`
+	// Resources carries every bundled resource as a presigned reference
+	// per the §7.6.2 wire example {path, presigned_url, content_hash}.
+	// The batch path keeps the response body small by delivering all
+	// resources via URL; the SDK fetches them concurrently afterward.
+	Resources          []BatchResource `json:"resources,omitempty"`
+	Deprecated         bool            `json:"deprecated,omitempty"`
+	ReplacedBy         string          `json:"replaced_by,omitempty"`
+	DeprecationWarning string          `json:"deprecation_warning,omitempty"`
+	Error              *ErrorResponse  `json:"error,omitempty"`
+}
+
+// BatchResource is one §7.6.2 bundled-resource reference in a batch
+// envelope. The field names match the spec example exactly.
+type BatchResource struct {
+	Path         string `json:"path"`
+	PresignedURL string `json:"presigned_url"`
+	ContentHash  string `json:"content_hash"`
 }
 
 // handleBatchLoad answers POST /v1/artifacts:batchLoad per
@@ -85,7 +97,7 @@ func (s *Server) loadOneForBatch(ctx context.Context, id layer.Identity, artifac
 			Error:  errorEnvelopeFor(err),
 		}
 	}
-	return BatchLoadEnvelope{
+	env := BatchLoadEnvelope{
 		ID:                 res.ID,
 		Status:             "ok",
 		Type:               res.Type,
@@ -97,6 +109,28 @@ func (s *Server) loadOneForBatch(ctx context.Context, id layer.Identity, artifac
 		ReplacedBy:         res.ReplacedBy,
 		DeprecationWarning: res.DeprecationWarning,
 	}
+	// §7.6.2: bundled resources travel as presigned URLs so the batch
+	// response body stays small. When no object store is configured the
+	// references are omitted (the data plane is unavailable); the manifest
+	// still loads.
+	if s.objectStore != nil {
+		for _, ref := range res.Resources {
+			url, err := s.objectStore.Presign(ctx, resourceKey(ref), s.presignTTL)
+			if err != nil {
+				return BatchLoadEnvelope{
+					ID:     artifactID,
+					Status: "error",
+					Error:  errorEnvelopeFor(err),
+				}
+			}
+			env.Resources = append(env.Resources, BatchResource{
+				Path:         ref.Path,
+				PresignedURL: url,
+				ContentHash:  ref.ContentHash,
+			})
+		}
+	}
+	return env
 }
 
 // errorEnvelopeFor maps a core error to the §6.10 envelope. The

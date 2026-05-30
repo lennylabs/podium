@@ -173,7 +173,7 @@ func ingestLinter(allowPerDomain bool) *lint.Linter {
 	return lr
 }
 
-func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Visibility, startOrder int, allowPerDomain bool) ([]layer.Layer, error) {
+func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Visibility, startOrder int, allowPerDomain bool, resourcePut ingest.ResourcePutFunc) ([]layer.Layer, error) {
 	if layerPath == "" {
 		return []layer.Layer{}, nil
 	}
@@ -194,6 +194,9 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			// §4.5.5: warn on DOMAIN.md discovery: blocks when per-domain
 			// overrides are disabled tenant-wide.
 			Linter: ingestLinter(allowPerDomain),
+			// §7.2 data plane: upload bundled resources to the configured
+			// object store at ingest so load_artifact can serve them.
+			ResourcePut: resourcePut,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("ingest layer %s from %s: %w", l.ID, l.Path, err)
@@ -277,7 +280,7 @@ func visibilityIsEmpty(v layer.Visibility) bool {
 //
 // Ingest runs against context.Background: a bootstrap failure aborts startup
 // before any HTTP listener binds.
-func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config) ([]layer.Layer, error) {
+func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resourcePut ingest.ResourcePutFunc) ([]layer.Layer, error) {
 	if len(cfg.declaredLayers) == 0 {
 		return []layer.Layer{}, nil
 	}
@@ -299,6 +302,8 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config) ([]la
 				LayerID:  lc.ID,
 				Files:    os.DirFS(lc.LocalPath),
 				Linter:   ingestLinter(cfg.allowPerDomain()),
+				// §7.2 data plane: persist bundled resources at ingest.
+				ResourcePut: resourcePut,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("ingest declared layer %s from %s: %w", lc.ID, lc.LocalPath, err)
@@ -390,11 +395,21 @@ func Run() error {
 	const tenantID = "default"
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: tenantID, Name: tenantID})
 
+	// §7.2 data plane: open the object store before any ingest so bundled
+	// resources upload to it keyed by content hash as artifacts ingest.
+	// A nil store (disabled, or open failure) leaves resources inline on
+	// the manifest record.
+	objStore := openObjectStoreOrNil(cfg)
+	var resourcePut ingest.ResourcePutFunc
+	if objStore != nil {
+		resourcePut = objStore.Put
+	}
+
 	// §4.6 declarative layers: the registry.yaml `layers:` list seeds an
 	// admin-defined layer per entry (lowest precedence first, in config
 	// order). Local sources are ingested at boot; git sources are seeded as
 	// config rows for the §7.3.1 reingest/webhook path.
-	declared, err := bootstrapDeclaredLayers(st, tenantID, cfg)
+	declared, err := bootstrapDeclaredLayers(st, tenantID, cfg, resourcePut)
 	if err != nil {
 		return err
 	}
@@ -406,7 +421,7 @@ func Run() error {
 	// DELETE /v1/layers) see the bootstrap layers. These layers carry no
 	// per-layer visibility input, so they take the deployment default
 	// (§4.6 / §13.10 / F-4.6.9). They append after the declared layers.
-	pathLayers, err := bootstrapLayerPath(st, tenantID, cfg.layerPath, defaultBootstrapVisibility(cfg), len(declared), cfg.allowPerDomain())
+	pathLayers, err := bootstrapLayerPath(st, tenantID, cfg.layerPath, defaultBootstrapVisibility(cfg), len(declared), cfg.allowPerDomain(), resourcePut)
 	if err != nil {
 		return err
 	}
@@ -476,7 +491,7 @@ func Run() error {
 	}
 	webhookWorker := &webhook.Worker{Store: webhookStore}
 
-	bootOpts, objStore := bootstrapOptions(cfg)
+	bootOpts := bootstrapOptions(cfg, objStore)
 	bootOpts = append(bootOpts, server.WithWebhooks(webhookWorker), server.WithMode(mode))
 
 	// §13.9 /readyz reachability probes, run at request time and
@@ -914,23 +929,33 @@ func openStore(c *Config) (store.Store, error) {
 	return nil, fmt.Errorf("unknown PODIUM_REGISTRY_STORE: %s", c.storeType)
 }
 
-// bootstrapOptions builds the base server options and returns the
-// object-store provider alongside them (nil when disabled) so the
-// caller can wire a §13.9 object-store readiness probe against the same
-// instance instead of opening a second client.
-func bootstrapOptions(c *Config) ([]server.Option, objectstore.Provider) {
+// openObjectStoreOrNil opens the configured §7.2 object store, logging
+// and returning nil when it is disabled or fails to open. The same
+// instance backs the ingest-time resource upload, the load_artifact
+// data plane, and the §13.9 readiness probe, so it is opened once in Run
+// and threaded everywhere.
+func openObjectStoreOrNil(c *Config) objectstore.Provider {
+	objStore, err := openObjectStore(c)
+	if err != nil {
+		log.Printf("warning: object store disabled: %v", err)
+		return nil
+	}
+	return objStore
+}
+
+// bootstrapOptions builds the base server options for the already-opened
+// object store (nil when disabled). The store is opened in Run so the
+// ingest-time resource upload and the §13.9 readiness probe share the
+// same instance.
+func bootstrapOptions(c *Config, objStore objectstore.Provider) []server.Option {
 	out := []server.Option{}
 	if c.publicMode {
 		out = append(out, server.WithPublicMode())
 	}
-	objStore, err := openObjectStore(c)
-	if err != nil {
-		log.Printf("warning: object store disabled: %v", err)
-		objStore = nil
-	} else if objStore != nil {
+	if objStore != nil {
 		out = append(out, server.WithObjectStore(objStore, c.publicURL, c.presignTTL))
 	}
-	return out, objStore
+	return out
 }
 
 // openVectorAndEmbedder returns the configured §4.7 hybrid-search

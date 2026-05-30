@@ -23,6 +23,7 @@ package objectstore
 import (
 	"context"
 	"errors"
+	"io"
 	"time"
 )
 
@@ -39,9 +40,45 @@ var (
 // this go through the object store.
 const InlineCutoff = 256 * 1024
 
+// GuessContentType picks a Content-Type from a path extension, falling
+// back to application/octet-stream so a missing match is benign. The
+// registry records this at ingest so the data-plane route and the
+// load_artifact link report a stable type.
+func GuessContentType(path string) string {
+	switch {
+	case hasSuffix(path, ".json"):
+		return "application/json"
+	case hasSuffix(path, ".md"):
+		return "text/markdown"
+	case hasSuffix(path, ".txt"):
+		return "text/plain"
+	case hasSuffix(path, ".yaml"), hasSuffix(path, ".yml"):
+		return "application/yaml"
+	case hasSuffix(path, ".png"):
+		return "image/png"
+	case hasSuffix(path, ".jpg"), hasSuffix(path, ".jpeg"):
+		return "image/jpeg"
+	}
+	return "application/octet-stream"
+}
+
+func hasSuffix(s, suffix string) bool {
+	return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix
+}
+
 // DefaultPresignTTL is the §6.2 default expiry for S3 presigned URLs.
 // Operators override via PODIUM_PRESIGN_TTL_SECONDS.
 const DefaultPresignTTL = 3600 * time.Second
+
+// ObjectInfo describes a stored object's metadata without reading its
+// body. The §7.2 data-plane HEAD path uses it to report size without
+// buffering the blob.
+type ObjectInfo struct {
+	// Size is the object length in bytes.
+	Size int64
+	// ContentType is the recorded MIME type, or "" when none was stored.
+	ContentType string
+}
 
 // Provider is the SPI a backend satisfies. Implementations are safe
 // for concurrent use; callers may share one instance across requests.
@@ -55,7 +92,18 @@ type Provider interface {
 	// canonical key is the content hash.
 	Put(ctx context.Context, key string, body []byte, contentType string) error
 	// Get fetches the body for key. Returns ErrNotFound when missing.
+	// Suited to small payloads (the §7.2 inline-cutoff resources);
+	// large blobs use GetStream so the registry never buffers them.
 	Get(ctx context.Context, key string) ([]byte, error)
+	// GetStream returns a reader over the body for key along with its
+	// metadata. The caller closes the reader. Returns ErrNotFound when
+	// missing. The §7.2 data plane streams large resources straight to
+	// the response writer with this instead of buffering them in memory.
+	GetStream(ctx context.Context, key string) (io.ReadCloser, ObjectInfo, error)
+	// Stat returns the object's size and content type without reading
+	// the body. Returns ErrNotFound when missing. The §7.2 data-plane
+	// HEAD path uses it so a size probe never reads the blob.
+	Stat(ctx context.Context, key string) (ObjectInfo, error)
 	// Presign returns a URL the consumer follows to fetch the body.
 	// The URL's auth model is backend-specific (S3: signature in the
 	// URL; Filesystem: bearer token on the request). ttl is the

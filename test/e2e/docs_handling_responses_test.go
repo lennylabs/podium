@@ -350,9 +350,20 @@ func TestHandlingResponses_BundledAtomic(t *testing.T) {
 }
 
 // T-D-handling-responses-23 — load_artifact inlines a bundled resource.
+// spec: §7.2.
 func TestHandlingResponses_ResourcesInline(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-7.2.2: the server ingest path discards bundled resource bytes, so the load_artifact resources map is always empty in a standalone server")
+	id := "finance/ap/pay-invoice"
+	script := "print('inline fixture')\n"
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		id + "/ARTIFACT.md":       contextArtifact("pay"),
+		id + "/scripts/helper.py": script,
+	}))
+	r := hrLoad(t, srv.BaseURL, id)
+	if r.Resources["scripts/helper.py"] != script {
+		t.Errorf("inline resource = %q, want %q (resources=%v)",
+			r.Resources["scripts/helper.py"], script, r.Resources)
+	}
 }
 
 // T-D-handling-responses-24 — external_resources entries are in frontmatter.

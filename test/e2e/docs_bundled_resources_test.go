@@ -255,17 +255,72 @@ func TestBundled_ProseReferenceEscapes(t *testing.T) {
 }
 
 // T-D-bundled-resources-7 — a bundled resource below the 256 KB inline cutoff is
-// returned inline in the load_artifact response.
+// returned inline in the load_artifact response. spec: §7.2.
 func TestBundled_InlineResourceBelowCutoff(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-7.2.2: the standalone boot ingest discards bundled resource bytes, so load_artifact returns no resources map to serve inline")
+	id := "finance/close-reporting/run-variance-analysis"
+	script := "print('variance')\n"
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		id + "/ARTIFACT.md":         brSkillArtifact,
+		id + "/SKILL.md":            brSkillMD("run-variance-analysis", brVarianceDesc, "Run the analysis.\n"),
+		id + "/scripts/variance.py": script,
+	}))
+	var resp struct {
+		Resources      map[string]string `json:"resources"`
+		LargeResources map[string]any    `json:"large_resources"`
+	}
+	getJSON(t, srv.BaseURL+"/v1/load_artifact?id="+id, &resp)
+	if resp.Resources["scripts/variance.py"] != script {
+		t.Errorf("inline resource = %q, want %q (resources=%v)",
+			resp.Resources["scripts/variance.py"], script, resp.Resources)
+	}
+	if len(resp.LargeResources) != 0 {
+		t.Errorf("a sub-cutoff resource must not appear in large_resources: %v", resp.LargeResources)
+	}
 }
 
 // T-D-bundled-resources-8 — a bundled resource above the 256 KB inline cutoff is
-// returned as a presigned URL in the load_artifact response.
+// returned as a presigned URL in the load_artifact response, and the URL serves
+// the bytes from the data plane. spec: §7.2.
 func TestBundled_LargeResourceAboveCutoff(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-7.2.2: the standalone boot ingest discards bundled resource bytes, so load_artifact returns no large_resources link to fetch from /objects/")
+	id := "finance/close-reporting/run-variance-analysis"
+	large := strings.Repeat("A", 256*1024+1024) // above the 256 KB inline cutoff
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		id + "/ARTIFACT.md":  brSkillArtifact,
+		id + "/SKILL.md":     brSkillMD("run-variance-analysis", brVarianceDesc, "Run the analysis.\n"),
+		id + "/data/big.bin": large,
+	}))
+	var resp struct {
+		Resources      map[string]string `json:"resources"`
+		LargeResources map[string]struct {
+			PresignedURL string `json:"presigned_url"`
+			ContentHash  string `json:"content_hash"`
+			Size         int64  `json:"size"`
+		} `json:"large_resources"`
+	}
+	getJSON(t, srv.BaseURL+"/v1/load_artifact?id="+id, &resp)
+	if _, inline := resp.Resources["data/big.bin"]; inline {
+		t.Error("a resource above the cutoff must not be returned inline")
+	}
+	link, ok := resp.LargeResources["data/big.bin"]
+	if !ok {
+		t.Fatalf("large resource missing from large_resources: %v", resp.LargeResources)
+	}
+	if link.PresignedURL == "" {
+		t.Error("presigned_url is empty")
+	}
+	if link.Size != int64(len(large)) {
+		t.Errorf("size = %d, want %d", link.Size, len(large))
+	}
+	// The presigned URL resolves to the data-plane route and returns the bytes.
+	st, body := getRaw(t, link.PresignedURL)
+	if st != 200 {
+		t.Fatalf("presigned fetch = HTTP %d", st)
+	}
+	if string(body) != large {
+		t.Errorf("fetched %d bytes, want %d", len(body), len(large))
+	}
 }
 
 // ---- Size caps --------------------------------------------------------------
@@ -948,17 +1003,40 @@ func TestBundled_AtomicNoTmpFiles(t *testing.T) {
 }
 
 // T-D-bundled-resources-38 — MCP load_artifact via the none adapter materializes
-// the skill's bundled resources.
+// the skill's bundled resources. spec: §7.2.
 func TestBundled_MCPMaterializeNone(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-7.2.2: the standalone boot ingest discards bundled resource bytes, so MCP materialized_at lists only SKILL.md and never the bundled scripts/variance.py")
+	id := "finance/close-reporting/run-variance-analysis"
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		id + "/ARTIFACT.md":         brSkillArtifact,
+		id + "/SKILL.md":            brSkillMD("run-variance-analysis", brVarianceDesc, "Run the analysis.\n"),
+		id + "/scripts/variance.py": "print('variance')\n",
+	}))
+	mat := t.TempDir()
+	res := mcpExec(t, brMatEnv(t, srv.BaseURL, mat),
+		toolCall(1, "load_artifact", map[string]any{"id": id}))
+	_ = rpcResult(t, res.Stdout, 1)
+	mustExist(t, filepath.Join(mat, id, "SKILL.md"))
+	mustExist(t, filepath.Join(mat, id, "scripts/variance.py"))
 }
 
 // T-D-bundled-resources-39 — MCP load_artifact via the claude-code adapter
-// materializes the skill's bundled resources.
+// materializes the skill's bundled resources. spec: §7.2.
 func TestBundled_MCPMaterializeClaudeCode(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-7.2.2: the standalone boot ingest discards bundled resource bytes, so MCP materialization writes only SKILL.md and never the bundled scripts/variance.py")
+	id := "finance/close-reporting/run-variance-analysis"
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		id + "/ARTIFACT.md":         brSkillArtifact,
+		id + "/SKILL.md":            brSkillMD("run-variance-analysis", brVarianceDesc, "Run the analysis.\n"),
+		id + "/scripts/variance.py": "print('variance')\n",
+	}))
+	mat := t.TempDir()
+	res := mcpExec(t, brMatEnv(t, srv.BaseURL, mat, "PODIUM_HARNESS=claude-code"),
+		toolCall(1, "load_artifact", map[string]any{"id": id, "harness": "claude-code"}))
+	_ = rpcResult(t, res.Stdout, 1)
+	base := filepath.Join(mat, ".claude/skills/run-variance-analysis")
+	mustExist(t, filepath.Join(base, "SKILL.md"))
+	mustExist(t, filepath.Join(base, "scripts/variance.py"))
 }
 
 // T-D-bundled-resources-40 — a references/ file is bundled and materialized, and
@@ -1166,10 +1244,45 @@ func TestBundled_ObjectsUnknownReturns404(t *testing.T) {
 }
 
 // T-D-bundled-resources-51 — content-addressed deduplication stores identical
-// files once.
+// files once. spec: §4.4, §7.2.
 func TestBundled_ContentDedup(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-7.2.2: the standalone boot ingest discards bundled resource bytes, so identical bundled files are never written to the object store and dedup cannot be observed")
+	shared := strings.Repeat("D", 256*1024+777) // large → routed to the object store
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/a/ARTIFACT.md":  contextArtifact("A"),
+		"finance/a/data/big.bin": shared,
+		"finance/b/ARTIFACT.md":  contextArtifact("B"),
+		"finance/b/data/big.bin": shared,
+	}))
+	// Both artifacts reference the same content-addressed key.
+	var ra, rb struct {
+		LargeResources map[string]struct {
+			ContentHash string `json:"content_hash"`
+		} `json:"large_resources"`
+	}
+	getJSON(t, srv.BaseURL+"/v1/load_artifact?id=finance/a", &ra)
+	getJSON(t, srv.BaseURL+"/v1/load_artifact?id=finance/b", &rb)
+	ha := ra.LargeResources["data/big.bin"].ContentHash
+	hb := rb.LargeResources["data/big.bin"].ContentHash
+	if ha == "" || ha != hb {
+		t.Fatalf("identical bytes must share a content hash: a=%q b=%q", ha, hb)
+	}
+	// The object store keeps exactly one copy keyed by that hash.
+	objRoot := filepath.Join(srv.Home, ".podium", "standalone", "objects")
+	key := strings.TrimPrefix(ha, "sha256:")
+	entries, err := os.ReadDir(objRoot)
+	if err != nil {
+		t.Fatalf("read object store dir: %v", err)
+	}
+	count := 0
+	for _, e := range entries {
+		if e.Name() == key {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("dedup: object %s stored %d times, want 1", key, count)
+	}
 }
 
 // T-D-bundled-resources-52 — sync with an unknown harness fails with

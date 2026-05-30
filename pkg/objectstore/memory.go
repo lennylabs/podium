@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 )
@@ -54,6 +55,30 @@ func (m *Memory) Get(_ context.Context, key string) ([]byte, error) {
 		return nil, ErrNotFound
 	}
 	return append([]byte(nil), o.body...), nil
+}
+
+// GetStream returns a reader over the body for key.
+func (m *Memory) GetStream(_ context.Context, key string) (io.ReadCloser, ObjectInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	o, ok := m.objects[key]
+	if !ok {
+		return nil, ObjectInfo{}, ErrNotFound
+	}
+	body := append([]byte(nil), o.body...)
+	info := ObjectInfo{Size: int64(len(body)), ContentType: o.contentType}
+	return io.NopCloser(bytes.NewReader(body)), info, nil
+}
+
+// Stat returns the size and content type for key.
+func (m *Memory) Stat(_ context.Context, key string) (ObjectInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	o, ok := m.objects[key]
+	if !ok {
+		return ObjectInfo{}, ErrNotFound
+	}
+	return ObjectInfo{Size: int64(len(o.body)), ContentType: o.contentType}, nil
 }
 
 // Presign returns a deterministic URL of the form <BaseURL>/<key>.

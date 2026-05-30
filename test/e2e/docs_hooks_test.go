@@ -746,12 +746,29 @@ func TestHooks_MCPLoadArtifactFields(t *testing.T) {
 	}
 }
 
-// T-D-hooks-35 — an MCP load_artifact should materialize a hook's bundled
-// script under PODIUM_MATERIALIZE_ROOT. The server ingest path discards bundled
-// resource bytes, so the script never transits the bridge.
+// T-D-hooks-35 — an MCP load_artifact materializes a hook's bundled script
+// under PODIUM_MATERIALIZE_ROOT. spec: §7.2.
 func TestHooks_MCPBundledScriptMaterialize(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-7.2.2: the server ingest path discards bundled resource bytes, so load_artifact materializes only ARTIFACT.md and never the bundled scripts/log.sh")
+	id := "hooks/log-stop"
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		id + "/ARTIFACT.md":    hkArtifact("log-stop", "stop"),
+		id + "/scripts/log.sh": "#!/bin/sh\necho hi\n",
+	}))
+	mat := t.TempDir()
+	env := append(mcpServerEnv(t, srv.BaseURL), "PODIUM_HARNESS=none", "PODIUM_MATERIALIZE_ROOT="+mat)
+	res := mcpExec(t, env, toolCall(1, "load_artifact", map[string]any{"id": id}))
+	_ = rpcResult(t, res.Stdout, 1)
+	// The bundled script transits the bridge and lands under the materialize root.
+	found := false
+	for rel := range readTreeAll(t, mat) {
+		if strings.HasSuffix(rel, "scripts/log.sh") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("bundled scripts/log.sh was not materialized under %s", mat)
+	}
 }
 
 // T-D-hooks-36 — when the configured harness does not support the event, lint

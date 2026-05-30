@@ -485,7 +485,7 @@ func TestDocHTTPAPI_19_LoadArtifactLargeResource(t *testing.T) {
 	if link == nil {
 		t.Fatalf("scripts/big.txt missing from large_resources: %v", large)
 	}
-	for _, k := range []string{"url", "content_hash", "size"} {
+	for _, k := range []string{"presigned_url", "content_hash", "size"} {
 		if _, ok := link[k]; !ok {
 			t.Fatalf("large resource missing %q: %v", k, link)
 		}
@@ -1126,9 +1126,9 @@ func TestDocHTTPAPI_54_ObjectsServesBytes(t *testing.T) {
 	t.Cleanup(ts.Close)
 	_, body := getRaw(t, ts.URL+"/v1/load_artifact?id=finance/big")
 	link := apiJSONObj(t, body)["large_resources"].(map[string]any)["scripts/big.txt"].(map[string]any)
-	u, err := url.Parse(link["url"].(string))
+	u, err := url.Parse(link["presigned_url"].(string))
 	if err != nil {
-		t.Fatalf("parse object url %q: %v", link["url"], err)
+		t.Fatalf("parse object url %q: %v", link["presigned_url"], err)
 	}
 	resp, err := httpClient.Get(ts.URL + u.Path)
 	if err != nil {

@@ -667,9 +667,11 @@ type loadArtifactResponse struct {
 
 // largeResourceLink mirrors the registry's per-resource link. The
 // MCP server fetches the URL during materialization, retrying on
-// 403/expired (§6.6 step 1) up to three times.
+// 403/expired (§6.6 step 1) up to three times. The field is named
+// presigned_url to match the §7.6.2 wire example and the registry's
+// load_artifact response.
 type largeResourceLink struct {
-	URL         string `json:"url"`
+	URL         string `json:"presigned_url"`
 	ContentHash string `json:"content_hash"`
 	Size        int64  `json:"size"`
 	ContentType string `json:"content_type,omitempty"`

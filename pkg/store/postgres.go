@@ -101,6 +101,7 @@ func (p *Postgres) applySchema() error {
 			extends_pin TEXT NOT NULL DEFAULT '',
 			signature TEXT NOT NULL DEFAULT '',
 			search_visibility TEXT NOT NULL DEFAULT '',
+			resources BYTEA,
 			PRIMARY KEY (tenant_id, artifact_id, version)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_manifests_tenant_type
@@ -207,12 +208,16 @@ func (p *Postgres) PutManifest(ctx context.Context, rec ManifestRecord) error {
 	if ingestedAt.IsZero() {
 		ingestedAt = time.Now().UTC()
 	}
+	resources, err := MarshalResources(rec.Resources)
+	if err != nil {
+		return fmt.Errorf("marshal resources: %w", err)
+	}
 	res, err := p.db.ExecContext(ctx, `
 		INSERT INTO manifests
 			(tenant_id, artifact_id, version, content_hash, type, description,
 			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-			 extends_pin, signature, search_visibility)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+			 extends_pin, signature, search_visibility, resources)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 		ON CONFLICT (tenant_id, artifact_id, version) DO NOTHING`,
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
 		rec.Type, rec.Description,
@@ -220,7 +225,7 @@ func (p *Postgres) PutManifest(ctx context.Context, rec ManifestRecord) error {
 		rec.Sensitivity, rec.Layer,
 		rec.Deprecated, ingestedAt.UTC(),
 		rec.Frontmatter, rec.Body,
-		rec.ExtendsPin, rec.Signature, rec.SearchVisibility)
+		rec.ExtendsPin, rec.Signature, rec.SearchVisibility, resources)
 	if err != nil {
 		return err
 	}
@@ -253,7 +258,7 @@ func (p *Postgres) GetManifest(ctx context.Context, tenantID, artifactID, versio
 	row := p.db.QueryRowContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-		       extends_pin, signature, search_visibility
+		       extends_pin, signature, search_visibility, resources
 		FROM manifests
 		WHERE tenant_id = $1 AND artifact_id = $2 AND version = $3`,
 		tenantID, artifactID, version)
@@ -270,7 +275,7 @@ func (p *Postgres) ListManifests(ctx context.Context, tenantID string) ([]Manife
 	rows, err := p.db.QueryContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-		       extends_pin, signature, search_visibility
+		       extends_pin, signature, search_visibility, resources
 		FROM manifests
 		WHERE tenant_id = $1
 		ORDER BY artifact_id ASC, version ASC`, tenantID)
@@ -483,16 +488,20 @@ func (p *Postgres) DeleteLayerConfig(ctx context.Context, tenantID, id string) e
 func scanManifestPG(scanner rowScanner) (ManifestRecord, error) {
 	var rec ManifestRecord
 	var tags string
+	var resources []byte
 	err := scanner.Scan(
 		&rec.TenantID, &rec.ArtifactID, &rec.Version, &rec.ContentHash,
 		&rec.Type, &rec.Description, &tags, &rec.Sensitivity, &rec.Layer,
 		&rec.Deprecated, &rec.IngestedAt, &rec.Frontmatter, &rec.Body,
-		&rec.ExtendsPin, &rec.Signature, &rec.SearchVisibility)
+		&rec.ExtendsPin, &rec.Signature, &rec.SearchVisibility, &resources)
 	if err != nil {
 		return ManifestRecord{}, err
 	}
 	if tags != "" {
 		rec.Tags = strings.Split(tags, "\n")
+	}
+	if rec.Resources, err = UnmarshalResources(resources); err != nil {
+		return ManifestRecord{}, err
 	}
 	return rec, nil
 }

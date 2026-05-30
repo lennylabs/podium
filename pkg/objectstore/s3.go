@@ -95,6 +95,46 @@ func (s *S3) Get(ctx context.Context, key string) ([]byte, error) {
 	return body, nil
 }
 
+// GetStream returns a reader over the object body. minio's *Object is
+// itself an io.ReadCloser backed by a streaming HTTP response, so the
+// §7.2 data plane copies it straight to the client without buffering.
+// The metadata is fetched up front via Stat so a missing key surfaces
+// as ErrNotFound before any bytes flow.
+func (s *S3) GetStream(ctx context.Context, key string) (io.ReadCloser, ObjectInfo, error) {
+	if err := validateKey(key); err != nil {
+		return nil, ObjectInfo{}, err
+	}
+	obj, err := s.Client.GetObject(ctx, s.Bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, ObjectInfo{}, err
+	}
+	stat, err := obj.Stat()
+	if err != nil {
+		_ = obj.Close()
+		if minio.ToErrorResponse(err).Code == "NoSuchKey" {
+			return nil, ObjectInfo{}, ErrNotFound
+		}
+		return nil, ObjectInfo{}, err
+	}
+	return obj, ObjectInfo{Size: stat.Size, ContentType: stat.ContentType}, nil
+}
+
+// Stat returns the object's size and content type via a HEAD-style
+// StatObject call. ErrNotFound is returned for a missing key.
+func (s *S3) Stat(ctx context.Context, key string) (ObjectInfo, error) {
+	if err := validateKey(key); err != nil {
+		return ObjectInfo{}, err
+	}
+	stat, err := s.Client.StatObject(ctx, s.Bucket, key, minio.StatObjectOptions{})
+	if err != nil {
+		if minio.ToErrorResponse(err).Code == "NoSuchKey" {
+			return ObjectInfo{}, ErrNotFound
+		}
+		return ObjectInfo{}, err
+	}
+	return ObjectInfo{Size: stat.Size, ContentType: stat.ContentType}, nil
+}
+
 // Presign returns an AWS Signature V4 presigned GET URL with the
 // given TTL. ttl <= 0 falls back to DefaultPresignTTL.
 func (s *S3) Presign(ctx context.Context, key string, ttl time.Duration) (string, error) {
