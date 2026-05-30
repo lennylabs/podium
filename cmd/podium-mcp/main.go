@@ -219,6 +219,14 @@ type mcpServer struct {
 	out      *json.Encoder
 	outMu    sync.Mutex
 	serverID atomic.Int64
+	// §6.4 step 2 workspace-overlay resolution via MCP roots. When no
+	// PODIUM_OVERLAY_PATH is set and the host advertised the roots
+	// capability at initialize, the bridge asks the host for its
+	// workspace roots (roots/list) and defaults the overlay to
+	// <workspace>/.podium/overlay/ when that directory exists. The serve
+	// loop is single-threaded, so these need no extra synchronization.
+	hostSupportsRoots bool
+	rootsRequested    bool
 }
 
 // recordSuccess stamps the time of a successful registry call for the
@@ -329,13 +337,25 @@ func (s *mcpServer) serve(r io.Reader, w io.Writer) error {
 	stop := s.startTokenWatch()
 	defer stop()
 	for scanner.Scan() {
+		line := scanner.Bytes()
+		// §6.4 step 2: intercept the host's reply to our server-initiated
+		// roots/list request and resolve the workspace overlay from it,
+		// instead of mis-dispatching the reply as an inbound request.
+		if s.applyRootsResponse(line) {
+			continue
+		}
 		var req rpcRequest
-		if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
+		if err := json.Unmarshal(line, &req); err != nil {
 			continue
 		}
 		resp := s.handle(req)
 		if err := s.send(resp); err != nil {
 			return err
+		}
+		// §6.4 step 2: once initialize is acknowledged, ask the host for
+		// its workspace roots when no explicit PODIUM_OVERLAY_PATH was set.
+		if req.Method == "initialize" {
+			s.requestRootsIfNeeded()
 		}
 	}
 	return scanner.Err()
@@ -353,6 +373,105 @@ func (s *mcpServer) send(v any) error {
 	return s.out.Encode(v)
 }
 
+// rootsRequestID is the JSON-RPC id the bridge uses for its
+// server-initiated roots/list request (§6.4 step 2). It is fixed so the
+// serve loop recognizes the host's matching response.
+const rootsRequestID = "podium-roots-1"
+
+// requestRootsIfNeeded asks the host for its workspace roots so the bridge
+// can default the workspace overlay to <workspace>/.podium/overlay/ per
+// §6.4 step 2. It is a no-op when PODIUM_OVERLAY_PATH is set (§6.4 step 1
+// wins), when the host did not advertise the roots capability, or when the
+// request was already sent.
+func (s *mcpServer) requestRootsIfNeeded() {
+	if s.cfg.overlayPath != "" || !s.hostSupportsRoots || s.rootsRequested {
+		return
+	}
+	s.rootsRequested = true
+	_ = s.send(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      rootsRequestID,
+		"method":  "roots/list",
+	})
+}
+
+// applyRootsResponse recognizes the host's reply to the bridge's
+// roots/list request and resolves the workspace overlay from the first
+// usable root (§6.4 step 2). It returns true when the line was that reply,
+// so the serve loop consumes it instead of dispatching it as a request;
+// any other message returns false.
+func (s *mcpServer) applyRootsResponse(line []byte) bool {
+	var msg struct {
+		ID     json.RawMessage `json:"id"`
+		Method string          `json:"method"`
+		Result struct {
+			Roots []struct {
+				URI  string `json:"uri"`
+				Name string `json:"name"`
+			} `json:"roots"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(line, &msg); err != nil {
+		return false
+	}
+	// A JSON-RPC response carries no method; a request or notification does.
+	if msg.Method != "" {
+		return false
+	}
+	var id string
+	_ = json.Unmarshal(msg.ID, &id)
+	if id != rootsRequestID {
+		return false
+	}
+	for _, r := range msg.Result.Roots {
+		if s.resolveWorkspaceOverlay(workspaceFromURI(r.URI)) {
+			break
+		}
+	}
+	return true
+}
+
+// resolveWorkspaceOverlay applies §6.4 step 2 for one workspace directory:
+// when no overlay is configured, default to <workspace>/.podium/overlay/
+// if it exists and load its records. It returns true once an overlay has
+// been resolved so the caller stops scanning further roots.
+func (s *mcpServer) resolveWorkspaceOverlay(workspace string) bool {
+	if workspace == "" || s.cfg.overlayPath != "" {
+		return false
+	}
+	path, err := overlay.ResolveWorkspaceOverlay(workspace, "")
+	if err != nil {
+		return false
+	}
+	records, err := overlay.Filesystem{Path: path}.Resolve(nil)
+	if err != nil {
+		return false
+	}
+	s.cfg.overlayPath = path
+	s.overlay = records
+	return true
+}
+
+// workspaceFromURI converts an MCP root URI to a filesystem path. Roots
+// are file:// URIs per the MCP spec; a bare absolute path is tolerated for
+// hosts that send one.
+func workspaceFromURI(uri string) string {
+	if uri == "" {
+		return ""
+	}
+	if strings.HasPrefix(uri, "file://") {
+		u, err := url.Parse(uri)
+		if err != nil {
+			return ""
+		}
+		return u.Path
+	}
+	if strings.HasPrefix(uri, "/") {
+		return uri
+	}
+	return ""
+}
+
 func (s *mcpServer) handle(req rpcRequest) rpcResponse {
 	resp := rpcResponse{JSONRPC: "2.0", ID: req.ID}
 	switch req.Method {
@@ -361,8 +480,16 @@ func (s *mcpServer) handle(req rpcRequest) rpcResponse {
 		// requested protocolVersion predates supportedSince.
 		var initParams struct {
 			ProtocolVersion string `json:"protocolVersion"`
+			Capabilities    struct {
+				Roots json.RawMessage `json:"roots"`
+			} `json:"capabilities"`
 		}
 		_ = json.Unmarshal(req.Params, &initParams)
+		// §6.4 step 2: record whether the host can answer roots/list so
+		// the serve loop knows it may resolve the workspace overlay from
+		// the host's reported workspace root.
+		s.hostSupportsRoots = len(initParams.Capabilities.Roots) > 0 &&
+			string(initParams.Capabilities.Roots) != "null"
 		if initParams.ProtocolVersion != "" && initParams.ProtocolVersion < supportedSince {
 			resp.Error = &rpcError{
 				Code:    -32600,
