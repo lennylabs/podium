@@ -289,6 +289,19 @@ func TestIngest_PopulatesDependencyEdges(t *testing.T) {
 		"  - finance/sub-agent@1.x\n" +
 		"mcpServers:\n" +
 		"  - name: finance-warehouse\n" +
+		"    command: npx\n" +
+		"    args: [\"-y\", \"@company/finance-warehouse-mcp\"]\n" +
+		"---\n\nbody\n"
+	// spec: §4.7.3 — the mcpServers edge resolves to the mcp-server
+	// artifact that declares the matching server_identifier. The
+	// consumer entry derives npx:@company/finance-warehouse-mcp, which
+	// this sibling artifact owns.
+	mcpSrc := "---\n" +
+		"type: mcp-server\n" +
+		"version: 1.0.0\n" +
+		"description: warehouse mcp\n" +
+		"sensitivity: low\n" +
+		"server_identifier: npx:@company/finance-warehouse-mcp\n" +
 		"---\n\nbody\n"
 	st := newStore(t)
 	// Per §4.7.6 the extends: parent must exist at the child's ingest
@@ -302,7 +315,8 @@ func TestIngest_PopulatesDependencyEdges(t *testing.T) {
 		t.Fatalf("Ingest parent: %v", err)
 	}
 	fsys := fstest.MapFS{
-		"finance/dependent/ARTIFACT.md": &fstest.MapFile{Data: []byte(src)},
+		"finance/dependent/ARTIFACT.md":   &fstest.MapFile{Data: []byte(src)},
+		"infra/mcp/warehouse/ARTIFACT.md": &fstest.MapFile{Data: []byte(mcpSrc)},
 	}
 	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
 		TenantID: "tenant-1", LayerID: "L", Files: fsys,
@@ -314,7 +328,9 @@ func TestIngest_PopulatesDependencyEdges(t *testing.T) {
 	}{
 		{"shared/parent", "extends"},
 		{"finance/sub-agent", "delegates_to"},
-		{"finance-warehouse", "mcpServers"},
+		// §4.7.3 — keyed on the resolved mcp-server artifact ID, not the
+		// consumer-side local name "finance-warehouse".
+		{"infra/mcp/warehouse", "mcpServers"},
 	}
 	for _, c := range cases {
 		got, err := st.DependentsOf(context.Background(), "tenant-1", c.to)

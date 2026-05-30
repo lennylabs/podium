@@ -988,12 +988,42 @@ func TestArtifactTypes_ScaffoldForce(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-56 — a skill referencing an mcp-server's
-// server_identifier should link to it in the dependency graph. The
-// reverse-dependency edge keys on the local mcpServers name, not the
-// server_identifier, so the link does not resolve to the mcp-server id.
+// T-D-artifact-types-56 — a consumer referencing an mcp-server through
+// mcpServers links to it in the reverse-dependency index by the
+// canonical server_identifier, so /v1/dependents on the mcp-server
+// artifact lists the consumer.
+// spec: §4.7.3 — "mcpServers: references that resolve to mcp-server-type
+// artifacts via server_identifier."
 func TestArtifactTypes_MCPServerReverseIndex(t *testing.T) {
-	t.Skip("blocked by F-4.7.4: the mcpServers reverse-dependency edge keys on the local name, not server_identifier, so a skill referencing the server does not link to the mcp-server artifact id")
+	t.Parallel()
+	// The agent's mcpServers entry (command npx, first non-flag arg
+	// @company/finance-warehouse-mcp) derives the server identifier
+	// npx:@company/finance-warehouse-mcp, which the mcp-server artifact
+	// declares. The edge must therefore resolve to the mcp-server's
+	// canonical ID (tools/finance-warehouse), not the consumer-side
+	// local name "warehouse".
+	reg := writeRegistry(t, map[string]string{
+		"tools/finance-warehouse/ARTIFACT.md": "---\ntype: mcp-server\nname: finance-warehouse\nversion: 1.0.0\ndescription: Finance MCP server.\nsensitivity: low\nserver_identifier: npx:@company/finance-warehouse-mcp\n---\n\nbody\n",
+		"finance/analyst/ARTIFACT.md":         "---\ntype: agent\nname: analyst\nversion: 1.0.0\ndescription: Finance analyst.\nsensitivity: low\nmcpServers:\n  - name: warehouse\n    command: npx\n    args: [\"-y\", \"@company/finance-warehouse-mcp\"]\n---\n\nbody\n",
+	})
+	srv := startServer(t, reg)
+	var resp struct {
+		Edges []struct {
+			From string `json:"from"`
+			To   string `json:"to"`
+			Kind string `json:"kind"`
+		} `json:"edges"`
+	}
+	getJSON(t, srv.BaseURL+"/v1/dependents?id=tools/finance-warehouse", &resp)
+	found := false
+	for _, e := range resp.Edges {
+		if e.From == "finance/analyst" && e.Kind == "mcpServers" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("mcpServers edge should resolve to the mcp-server artifact id tools/finance-warehouse; got %+v", resp.Edges)
+	}
 }
 
 // T-D-artifact-types-57 — scaffolding a nested artifact creates the full

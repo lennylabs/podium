@@ -49,7 +49,15 @@ type ManifestRecord struct {
 	Version     string
 	ContentHash string
 	Type        string
+	// Name is the §4.3 universal `name` field (from SKILL.md for
+	// skills, ARTIFACT.md frontmatter otherwise). It feeds the §4.7
+	// embedding text projection, which leads with `name`.
+	Name        string
 	Description string
+	// WhenToUse is the §4.3 `when_to_use` list. The §4.7 embedding
+	// projection joins it with newlines; the prose body is never
+	// embedded.
+	WhenToUse   []string
 	Tags        []string
 	Sensitivity string
 	// SearchVisibility is the §4.3 universal field controlling whether

@@ -385,6 +385,12 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		}
 	}
 
+	// spec: §4.7.3 — mcpServers edges resolve to the mcp-server
+	// artifact that declares the matching server_identifier. Index the
+	// server_identifier of every mcp-server in this ingest set once so
+	// edgesFor can resolve consumer references against siblings.
+	serverIDs := serverIdentifierIndex(records)
+
 	for _, rec := range records {
 		// Lint blocks ingest at error severity.
 		if errs, ok := errsByID[rec.ID]; ok {
@@ -601,7 +607,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		}
 
 		// Populate cross-type dependency edges for §4.7.3.
-		for _, edge := range edgesFor(rec.Artifact, rec.ID) {
+		for _, edge := range edgesFor(rec.Artifact, rec.ID, serverIDs) {
 			if err := st.PutDependency(ctx, req.TenantID, edge); err != nil {
 				return nil, err
 			}
@@ -632,7 +638,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 // embedAndStore composes the §4.7 embedding text projection from the
 // manifest, calls the configured embedder, and upserts the vector.
 // The composition is the canonical input format every Podium
-// embedding provider sees: id + description + tags + body prefix.
+// embedding provider sees: name + description + when_to_use + tags.
 func embedAndStore(ctx context.Context, req Request, mr store.ManifestRecord) error {
 	text := composeEmbeddingText(mr)
 	if text == "" {
@@ -648,24 +654,35 @@ func embedAndStore(ctx context.Context, req Request, mr store.ManifestRecord) er
 	return nil
 }
 
-// composeEmbeddingText is the canonical embedding-input projection.
-// Authors that want to influence retrieval write better descriptions
-// and tags; bundle-resource bytes don't enter the embedding because
-// they're opaque to the registry per §1.1.
+// composeEmbeddingText is the canonical §4.7 embedding-input
+// projection, built from frontmatter only: name, description,
+// when_to_use (joined with newlines), and tags (joined). The prose
+// body is deliberately excluded ("The prose body is not embedded");
+// it is noisy for retrieval and risks busting embedding-model context
+// limits. Authors influence recall via description and when_to_use.
+// spec: §4.7 "Artifact embeddings".
 func composeEmbeddingText(mr store.ManifestRecord) string {
-	const bodyPrefixMax = 1024
-	body := string(mr.Body)
-	if len(body) > bodyPrefixMax {
-		body = body[:bodyPrefixMax]
+	parts := []string{mr.Name, mr.Description}
+	if len(mr.WhenToUse) > 0 {
+		parts = append(parts, strings.Join(mr.WhenToUse, "\n"))
 	}
-	parts := []string{mr.ArtifactID, mr.Description}
 	if len(mr.Tags) > 0 {
 		parts = append(parts, strings.Join(mr.Tags, " "))
 	}
-	if body != "" {
-		parts = append(parts, body)
+	return joinNonEmpty(parts, "\n")
+}
+
+// joinNonEmpty joins the non-empty parts with sep so an absent name,
+// description, or when_to_use list does not leave a blank line in the
+// embedding projection.
+func joinNonEmpty(parts []string, sep string) string {
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p != "" {
+			out = append(out, p)
+		}
 	}
-	return strings.TrimSpace(strings.Join(parts, "\n"))
+	return strings.Join(out, sep)
 }
 
 func walkLayer(fsys fs.FS, layerID string) ([]filesystem.ArtifactRecord, error) {
@@ -812,13 +829,18 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 func manifestRecordFor(rec filesystem.ArtifactRecord, tenantID, layerID string, ingestedAt time.Time) (store.ManifestRecord, error) {
 	hash := contentHashOf(rec)
 	body := rec.Artifact.Body
+	name := rec.Artifact.Name
 	description := rec.Artifact.Description
 	if rec.Artifact.Type == manifest.TypeSkill && rec.Skill != nil {
 		body = rec.Skill.Body
 		// spec: §4.3.4 — a skill's name and description live in SKILL.md;
 		// ARTIFACT.md omits them ("Podium reads from SKILL.md"). Index the
-		// SKILL.md description so the skill is searchable without
-		// duplicating the field into ARTIFACT.md.
+		// SKILL.md name and description so the skill is searchable without
+		// duplicating the fields into ARTIFACT.md. The §4.7 embedding
+		// projection leads with `name`, so it must be populated here.
+		if rec.Skill.Name != "" {
+			name = rec.Skill.Name
+		}
 		if rec.Skill.Description != "" {
 			description = rec.Skill.Description
 		}
@@ -829,7 +851,9 @@ func manifestRecordFor(rec filesystem.ArtifactRecord, tenantID, layerID string, 
 		Version:          rec.Artifact.Version,
 		ContentHash:      "sha256:" + hash,
 		Type:             string(rec.Artifact.Type),
+		Name:             name,
 		Description:      description,
+		WhenToUse:        append([]string(nil), rec.Artifact.WhenToUse...),
 		Tags:             rec.Artifact.Tags,
 		Sensitivity:      string(rec.Artifact.Sensitivity),
 		SearchVisibility: string(rec.Artifact.SearchVisibility),
@@ -862,7 +886,10 @@ func contentHashOf(rec filesystem.ArtifactRecord) string {
 
 // edgesFor extracts cross-type dependency edges from the artifact
 // frontmatter (§4.7.3): extends, delegates_to, mcpServers references.
-func edgesFor(a *manifest.Artifact, id string) []store.DependencyEdge {
+// serverIDs maps a canonical server_identifier to the mcp-server-type
+// artifact ID that declares it; an mcpServers entry produces an edge
+// only when its derived server identifier resolves to such an artifact.
+func edgesFor(a *manifest.Artifact, id string, serverIDs map[string]string) []store.DependencyEdge {
 	var out []store.DependencyEdge
 	if a.Extends != "" {
 		out = append(out, store.DependencyEdge{
@@ -874,10 +901,66 @@ func edgesFor(a *manifest.Artifact, id string) []store.DependencyEdge {
 			From: id, To: stripPin(target), Kind: "delegates_to",
 		})
 	}
+	// spec: §4.7.3 — an mcpServers reference resolves to an
+	// mcp-server-type artifact via server_identifier. The consumer-side
+	// entry carries only name/transport/command/args, so derive the
+	// canonical identifier from it and match it against the ingested
+	// mcp-server artifacts. Emit no edge when nothing resolves: keying
+	// on the local consumer-side name would point the index at a
+	// non-existent artifact.
 	for _, srv := range a.MCPServers {
+		sid := serverIdentifierFor(srv)
+		if sid == "" {
+			continue
+		}
+		target, ok := serverIDs[sid]
+		if !ok {
+			continue
+		}
 		out = append(out, store.DependencyEdge{
-			From: id, To: srv.Name, Kind: "mcpServers",
+			From: id, To: target, Kind: "mcpServers",
 		})
+	}
+	return out
+}
+
+// serverIdentifierFor derives the canonical server_identifier (§4.3,
+// §4.7.3) from a consumer-side mcpServers entry. The spec example
+// `server_identifier: npx:@company/finance-warehouse-mcp` corresponds
+// to `command: npx` with `args: ["-y", "@company/finance-warehouse-mcp"]`,
+// so the identifier is `<command>:<first non-flag arg>`. A flag arg
+// begins with "-". When the entry has no command, the identifier
+// cannot be derived and the empty string is returned.
+func serverIdentifierFor(srv manifest.MCPServerRef) string {
+	if srv.Command == "" {
+		return srv.Transport
+	}
+	for _, arg := range srv.Args {
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		return srv.Command + ":" + arg
+	}
+	return srv.Command
+}
+
+// serverIdentifierIndex maps each mcp-server-type artifact's
+// server_identifier to its canonical artifact ID, for §4.7.3
+// mcpServers edge resolution. Records that are not mcp-server type or
+// that lack a server_identifier are skipped.
+func serverIdentifierIndex(records []filesystem.ArtifactRecord) map[string]string {
+	out := map[string]string{}
+	for _, rec := range records {
+		if rec.Artifact == nil {
+			continue
+		}
+		if rec.Artifact.Type != manifest.TypeMCPServer {
+			continue
+		}
+		if rec.Artifact.ServerIdentifier == "" {
+			continue
+		}
+		out[rec.Artifact.ServerIdentifier] = rec.ID
 	}
 	return out
 }

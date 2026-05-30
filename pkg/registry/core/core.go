@@ -1092,23 +1092,6 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 		return nil, fmt.Errorf("%w: no version with content hash sha256:%s", ErrNotFound, pin.Hash)
 	}
 
-	// §4.7.6 — `latest` resolves to the most recently ingested
-	// non-deprecated version. Build a deprecation-filtered list;
-	// fall back to the full list when every version is
-	// deprecated so callers still get bytes (with the warning).
-	resolveVersions := versions
-	if pin.Kind == version.PinLatest {
-		live := make([]string, 0, len(versions))
-		for _, v := range versions {
-			if rec, ok := byVersion[v]; ok && !rec.Deprecated {
-				live = append(live, v)
-			}
-		}
-		if len(live) > 0 {
-			resolveVersions = live
-		}
-	}
-
 	// §4.7.6 session-consistent latest: the first latest lookup within
 	// a session pins, subsequent same-id lookups in the session
 	// resolve to the same version regardless of newer ingests.
@@ -1120,7 +1103,30 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 		}
 	}
 
-	resolved, err := version.Resolve(pin, resolveVersions)
+	var resolved string
+	if pin.Kind == version.PinLatest {
+		// §4.7.6 — `latest` is "the most recently ingested
+		// non-deprecated version visible under the caller's effective
+		// view." Order by ingest time (ties broken by higher semver),
+		// not by semver, so a backported fix ingested after a newer
+		// major line still wins. Fall back to the full candidate set
+		// when every version is deprecated so callers still get bytes
+		// (with the deprecation warning).
+		cands := make([]version.Candidate, 0, len(versions))
+		for _, v := range versions {
+			if rec, ok := byVersion[v]; ok && !rec.Deprecated {
+				cands = append(cands, version.Candidate{Version: v, IngestedAt: rec.IngestedAt})
+			}
+		}
+		if len(cands) == 0 {
+			for _, v := range versions {
+				cands = append(cands, version.Candidate{Version: v, IngestedAt: byVersion[v].IngestedAt})
+			}
+		}
+		resolved, err = version.ResolveLatest(cands)
+	} else {
+		resolved, err = version.Resolve(pin, versions)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrNotFound, err)
 	}

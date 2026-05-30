@@ -109,20 +109,17 @@ func embedAndUpsert(ctx context.Context, e embedding.Provider, v vector.Provider
 	return nil
 }
 
-// composeEmbeddingText mirrors the ingest-side projection so the
-// embedding-input shape stays consistent across ingest and reembed.
+// composeEmbeddingText mirrors the ingest-side §4.7 projection so the
+// embedding input stays consistent across ingest and reembed: name,
+// description, when_to_use (joined with newlines), and tags (joined).
+// The prose body is not embedded. spec: §4.7 "Artifact embeddings".
 func composeEmbeddingText(mr store.ManifestRecord) string {
-	const bodyPrefixMax = 1024
-	body := string(mr.Body)
-	if len(body) > bodyPrefixMax {
-		body = body[:bodyPrefixMax]
+	parts := []string{mr.Name, mr.Description}
+	if len(mr.WhenToUse) > 0 {
+		parts = append(parts, joinNonEmpty(mr.WhenToUse, "\n"))
 	}
-	parts := []string{mr.ArtifactID, mr.Description}
 	if len(mr.Tags) > 0 {
 		parts = append(parts, joinNonEmpty(mr.Tags, " "))
-	}
-	if body != "" {
-		parts = append(parts, body)
 	}
 	return joinNonEmpty(parts, "\n")
 }

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Errors returned by version functions.
@@ -122,6 +123,45 @@ func Resolve(pin Pin, candidates []string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("%w: no candidate matches", ErrInvalidPin)
+}
+
+// Candidate is one ingested version with the timestamp the registry
+// recorded at ingest. ResolveLatest orders by IngestedAt so `latest`
+// follows §4.7.6 ("the most recently ingested non-deprecated version")
+// rather than the highest semver.
+type Candidate struct {
+	Version    string
+	IngestedAt time.Time
+}
+
+// ResolveLatest implements the §4.7.6 `latest` rule: it returns the
+// version with the greatest IngestedAt among candidates, breaking ties
+// by the higher semver. Callers pass only the versions that are
+// visible and non-deprecated; this function does not filter. It exists
+// as a distinct path from Resolve because range, exact, and hash pins
+// order by semver while `latest` orders by ingest time. A backported
+// fix published after a newer major line is therefore selected by
+// `latest` even though its semver is lower.
+func ResolveLatest(candidates []Candidate) (string, error) {
+	best := ""
+	var bestAt time.Time
+	var bestPin Pin
+	for _, c := range candidates {
+		p, err := ParsePin(c.Version)
+		if err != nil || p.Kind != PinExact {
+			continue
+		}
+		if best == "" || c.IngestedAt.After(bestAt) ||
+			(c.IngestedAt.Equal(bestAt) && less(bestPin, p)) {
+			best = c.Version
+			bestAt = c.IngestedAt
+			bestPin = p
+		}
+	}
+	if best == "" {
+		return "", fmt.Errorf("%w: no candidate matches", ErrInvalidPin)
+	}
+	return best, nil
 }
 
 func matches(pin, candidate Pin) bool {

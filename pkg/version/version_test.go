@@ -3,6 +3,7 @@ package version
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 // Spec: §4.7.6 — empty string resolves to PinLatest.
@@ -100,6 +101,73 @@ func TestContentHash_Deterministic(t *testing.T) {
 	}
 	if len(a) != 64 {
 		t.Errorf("hash length = %d, want 64 (sha256 hex)", len(a))
+	}
+}
+
+// Spec: §4.7.6 — `latest` is the most recently ingested version, not
+// the highest semver. ResolveLatest orders by IngestedAt.
+func TestResolveLatest_NewestByIngest(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	cands := []Candidate{
+		{Version: "1.0.0", IngestedAt: base},
+		{Version: "2.0.0", IngestedAt: base.Add(1 * time.Hour)},
+		{Version: "2.1.0", IngestedAt: base.Add(2 * time.Hour)},
+	}
+	got, err := ResolveLatest(cands)
+	if err != nil {
+		t.Fatalf("ResolveLatest: %v", err)
+	}
+	if got != "2.1.0" {
+		t.Errorf("ResolveLatest = %q, want 2.1.0", got)
+	}
+}
+
+// Spec: §4.7.6 — the backport case. A lower-semver line (1.2.4)
+// ingested AFTER a newer major line (2.0.0) is the most recently
+// ingested version and must win, even though 2.0.0 has the higher
+// semver. This is the case that distinguishes ingest-time ordering
+// from semver ordering.
+func TestResolveLatest_BackportWinsOverHigherSemver(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	cands := []Candidate{
+		{Version: "1.0.0", IngestedAt: base},
+		{Version: "2.0.0", IngestedAt: base.Add(1 * time.Hour)},
+		{Version: "1.2.4", IngestedAt: base.Add(2 * time.Hour)}, // backport, newest
+	}
+	got, err := ResolveLatest(cands)
+	if err != nil {
+		t.Fatalf("ResolveLatest: %v", err)
+	}
+	if got != "1.2.4" {
+		t.Errorf("ResolveLatest = %q, want 1.2.4 (backport ingested last)", got)
+	}
+}
+
+// Spec: §4.7.6 — ties on ingest time are broken by the higher semver
+// so resolution is deterministic when two versions share a timestamp.
+func TestResolveLatest_TieBrokenByHigherSemver(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	cands := []Candidate{
+		{Version: "1.4.0", IngestedAt: at},
+		{Version: "1.5.0", IngestedAt: at},
+	}
+	got, err := ResolveLatest(cands)
+	if err != nil {
+		t.Fatalf("ResolveLatest: %v", err)
+	}
+	if got != "1.5.0" {
+		t.Errorf("ResolveLatest = %q, want 1.5.0 (tie broken by semver)", got)
+	}
+}
+
+// Spec: §4.7.6 — an empty candidate set has no latest.
+func TestResolveLatest_EmptyIsError(t *testing.T) {
+	t.Parallel()
+	if _, err := ResolveLatest(nil); !errors.Is(err, ErrInvalidPin) {
+		t.Errorf("ResolveLatest(nil) = %v, want ErrInvalidPin", err)
 	}
 }
 
