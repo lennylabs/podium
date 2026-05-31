@@ -111,6 +111,52 @@ func TestLoadConfig_AcceptsKnownIdentityProviders(t *testing.T) {
 	}
 }
 
+// spec: §6.1 / §7.5.2 — the MCP server requires a server-source registry.
+// A PODIUM_REGISTRY value that is not an http:// or https:// URL is a
+// filesystem source under the §7.5.2 dispatch rule and the bridge refuses
+// to start rather than failing opaquely on the first tool call (F-6.1.1).
+func TestLoadConfig_RejectsFilesystemRegistry(t *testing.T) {
+	for _, reg := range []string{
+		"/srv/registry",        // absolute filesystem path
+		"./registry",           // relative filesystem path
+		"file:///srv/registry", // file:// URI
+		"registry.local",       // bare host-like value, no scheme
+	} {
+		t.Run(reg, func(t *testing.T) {
+			hermetic(t)
+			t.Setenv("PODIUM_REGISTRY", reg)
+			_, err := loadConfig()
+			if err == nil {
+				t.Fatalf("filesystem registry %q: loadConfig returned no error", reg)
+			}
+			if !strings.Contains(err.Error(), "config.filesystem_registry_unsupported") {
+				t.Errorf("error %q lacks config.filesystem_registry_unsupported code", err)
+			}
+			if !strings.Contains(err.Error(), reg) {
+				t.Errorf("error %q does not name the offending value %q", err, reg)
+			}
+		})
+	}
+}
+
+// spec: §6.1 / §7.5.2 — http:// and https:// registries are server sources
+// and pass startup.
+func TestLoadConfig_AcceptsServerRegistry(t *testing.T) {
+	for _, reg := range []string{"http://127.0.0.1:8080", "https://podium.acme.com"} {
+		t.Run(reg, func(t *testing.T) {
+			hermetic(t)
+			t.Setenv("PODIUM_REGISTRY", reg)
+			cfg, err := loadConfig()
+			if err != nil {
+				t.Fatalf("server registry %q: %v", reg, err)
+			}
+			if cfg.registry != reg {
+				t.Errorf("registry = %q, want %q", cfg.registry, reg)
+			}
+		})
+	}
+}
+
 // spec: §6.2 / §7.5.2 / §6.11 — when PODIUM_REGISTRY is unset the bridge
 // falls back to defaults.registry from the workspace sync.yaml (F-6.2.2).
 func TestLoadConfig_RegistryFromWorkspaceSyncYAML(t *testing.T) {

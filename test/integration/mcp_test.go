@@ -93,6 +93,37 @@ func TestPodiumMCP_ToolsListReturnsMetaTools(t *testing.T) {
 	}
 }
 
+// Spec: §6.1 / §7.5.2 — the MCP server speaks HTTP and requires a
+// server-source registry. A filesystem PODIUM_REGISTRY (no http:// or
+// https:// prefix) makes the real binary refuse to start with a non-zero
+// exit and the config.filesystem_registry_unsupported envelope on stderr,
+// rather than serving and failing opaquely on the first tool call (F-6.1.1).
+func TestPodiumMCP_RejectsFilesystemRegistry(t *testing.T) {
+	t.Parallel()
+	bin := buildMCP(t)
+	dir := t.TempDir()
+	cmd := exec.Command(bin)
+	// An absolute filesystem path is a §7.5.2 filesystem source.
+	cmd.Env = append(cmd.Env, "PODIUM_REGISTRY="+dir)
+	// No stdin is consumed: the bridge must reject the config before serving.
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err == nil {
+		t.Fatal("filesystem registry: binary exited 0, want non-zero")
+	}
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("run error %v is not an ExitError", err)
+	}
+	if got := exitErr.ExitCode(); got != 2 {
+		t.Errorf("exit code = %d, want 2 (config error)", got)
+	}
+	if !strings.Contains(stderr.String(), "config.filesystem_registry_unsupported") {
+		t.Errorf("stderr %q lacks config.filesystem_registry_unsupported", stderr.String())
+	}
+}
+
 // Spec: §5.1 — tools/list returns the canonical multi-sentence
 // descriptions verbatim (F-5.1.1) and an inputSchema for every meta-tool
 // (F-5.1.2); initialize surfaces the example system-prompt fragment via

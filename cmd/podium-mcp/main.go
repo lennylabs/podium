@@ -7,9 +7,11 @@
 // MaterializationHook chain, and writes adapter output atomically to
 // the host's filesystem at load_artifact time (§6.6).
 //
-// Configuration (env vars; flags also supported by the launcher):
+// The host configures the binary via env vars, command-line flags, or a
+// YAML config file (§6.1 / §6.2; flag > config file > env, see cliconfig.go).
+// The env-var forms:
 //
-//	PODIUM_REGISTRY            Registry URL or filesystem path.
+//	PODIUM_REGISTRY            Registry URL (server source; required, §6.1).
 //	PODIUM_HARNESS             Adapter ID (default: none).
 //	PODIUM_CACHE_DIR           Content-addressed cache root.
 //	PODIUM_MATERIALIZE_ROOT    Materialization destination.
@@ -55,6 +57,7 @@ import (
 	"github.com/lennylabs/podium/pkg/overlay"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/sign"
+	synccfg "github.com/lennylabs/podium/pkg/sync"
 	"github.com/lennylabs/podium/pkg/version"
 )
 
@@ -237,6 +240,15 @@ func loadConfig() (*config, error) {
 	}
 	if c.registry == "" {
 		return nil, fmt.Errorf("PODIUM_REGISTRY is required (registry URL or filesystem path) — set it, pass --registry, or write defaults.registry to .podium/sync.yaml")
+	}
+	// §6.1 / §7.5.2: the MCP server speaks HTTP and requires a server-source
+	// registry. Under the §7.5.2 dispatch rule only an http:// or https://
+	// prefix names a server; every other value (a bare path, a file:// URI)
+	// is a filesystem source that only `podium sync` supports. Refuse to
+	// start with a clear message rather than passing startup and failing
+	// opaquely on the first tool call with an HTTP-client scheme error.
+	if !synccfg.IsServerSource(c.registry) {
+		return nil, fmt.Errorf("config.filesystem_registry_unsupported: PODIUM_REGISTRY %q is a filesystem-source registry; the MCP server speaks HTTP and requires a server source (http:// or https://). Use `podium sync` to consume a filesystem registry (§6.1, §7.5.2)", c.registry)
 	}
 	if c.cacheDir == "" {
 		home, err := os.UserHomeDir()
