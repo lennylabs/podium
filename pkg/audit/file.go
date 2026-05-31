@@ -15,7 +15,9 @@ import (
 // FileSink writes audit events as JSON Lines to ~/.podium/audit.log
 // or a configured override path (§8.3 LocalAuditSink). Concurrent
 // appends are safe under typical event sizes per §8.3:
-// "POSIX PIPE_BUF-bounded atomic writes."
+// "POSIX PIPE_BUF-bounded atomic writes." A single shared log written by
+// multiple processes is a forest of per-writer hash chains; Verify
+// validates it accordingly (see Verify, F-14.13.2).
 type FileSink struct {
 	mu       sync.Mutex
 	path     string
@@ -104,8 +106,22 @@ func (f *FileSink) Append(_ context.Context, e Event) error {
 	return nil
 }
 
-// Verify re-reads the audit log and walks the hash chain. Returns
+// Verify re-reads the audit log and validates the hash chain. Returns
 // ErrChainBroken on any mismatch.
+//
+// §9 scopes the local sink's concurrency guarantee to PIPE_BUF-bounded
+// atomic appends: several MCP server processes can append to one
+// ~/.podium/audit.log concurrently (§14.13). Each process chains off its
+// own in-process lastHash, so the file is a forest of per-writer chains
+// rather than one linear chain. Verifying it as a single linear chain
+// reported a spurious ErrChainBroken the moment two writers interleaved
+// (F-14.13.2). Verification therefore checks, per §8.6, that every event's
+// own hash satisfies event_hash = sha256(body || prev_hash), and that a
+// non-empty PrevHash references the Hash of some earlier event in the log.
+// A single-writer log is the degenerate one-chain case and still verifies.
+// Tampering with an event body breaks its self-hash, and deleting an
+// interior event leaves a later event's PrevHash dangling; both surface as
+// ErrChainBroken.
 func (f *FileSink) Verify(_ context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -116,7 +132,7 @@ func (f *FileSink) Verify(_ context.Context) error {
 		}
 		return err
 	}
-	prev := ""
+	seen := map[string]bool{}
 	idx := 0
 	for _, line := range splitLines(data) {
 		if len(line) == 0 {
@@ -127,14 +143,14 @@ func (f *FileSink) Verify(_ context.Context) error {
 			return errChainAt(ErrChainBroken, idx, "unparseable event")
 		}
 		e := eventFromJSON(je)
-		if e.PrevHash != prev {
-			return errChainAt(ErrChainBroken, idx, "PrevHash mismatch")
-		}
-		want := sha256.Sum256(append(e.canonicalBody(), []byte(prev)...))
+		want := sha256.Sum256(append(e.canonicalBody(), []byte(e.PrevHash)...))
 		if hex.EncodeToString(want[:]) != e.Hash {
 			return errChainAt(ErrChainBroken, idx, "Hash mismatch")
 		}
-		prev = e.Hash
+		if e.PrevHash != "" && !seen[e.PrevHash] {
+			return errChainAt(ErrChainBroken, idx, "PrevHash references no earlier event")
+		}
+		seen[e.Hash] = true
 		idx++
 	}
 	return nil

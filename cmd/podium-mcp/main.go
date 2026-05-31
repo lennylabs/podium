@@ -441,7 +441,20 @@ func newAuditSink(cfg *config) (audit.Sink, error) {
 	if path == "default" {
 		path = ""
 	}
+	// §6.2 / §9: PODIUM_AUDIT_SINK may name an external endpoint instead of
+	// a filesystem path ("Local audit destination (path or external
+	// endpoint)"). An http(s) URL forwards meta-tool events to a SIEM / log
+	// aggregator; any other value is a local JSON-Lines file. F-8.3.2.
+	if isAuditEndpoint(path) {
+		return audit.NewEndpointSink(path)
+	}
 	return audit.NewFileSink(path)
+}
+
+// isAuditEndpoint reports whether a PODIUM_AUDIT_SINK value selects the
+// external-endpoint sink rather than a local file path.
+func isAuditEndpoint(v string) bool {
+	return strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://")
 }
 
 // auditMeta appends a local audit event for a meta-tool call when a sink
