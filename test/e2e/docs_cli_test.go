@@ -1700,9 +1700,86 @@ func TestDocCLI_130_SyncWatch(t *testing.T) {
 	}
 }
 
-// spec: doc "podium sync", `--profile` flag.
+// spec: doc "podium sync", `--profile` flag (§7.5, §7.5.1, §7.5.2; §14.1/§14.2/§14.5).
+// Exercises the full per-team scenario: the registry is written to the
+// user-global ~/.podium/sync.yaml by `podium init --global` (§14.5 step 4),
+// the workspace .podium/sync.yaml carries only a profile with include/exclude
+// scope (§14.1 step 4), and a bare `podium sync --profile finance` from the
+// workspace resolves the global registry (F-14.2.2 / F-14.5.2), parses the
+// --profile flag (F-14.1.1 / F-14.2.1 / F-14.11.2), and materializes only the
+// scoped subset (F-14.1.2).
 func TestDocCLI_131_SyncProfile(t *testing.T) {
-	t.Skip("blocked by F-14.1.1: `podium sync --profile` is not implemented")
+	reg := writeRegistry(t, map[string]string{
+		// Included by finance/**.
+		"finance/invoicing/run-variance/ARTIFACT.md": contextArtifact("Run variance analysis over vendor invoices for the finance team."),
+		// Included by finance/** but removed by the exclude finance/**/legacy/**.
+		"finance/invoicing/legacy/old-flow/ARTIFACT.md": contextArtifact("A retired invoicing flow kept only for historical reference."),
+		// Included by shared/policies/*.
+		"shared/policies/data-handling/ARTIFACT.md": contextArtifact("Data handling policy that every team applies to customer records."),
+		// Outside the profile scope entirely.
+		"personal/notes/reminder/ARTIFACT.md": contextArtifact("A personal note that the finance profile must not materialize here."),
+	})
+	home := t.TempDir()
+	ws := t.TempDir()
+	tgt := t.TempDir()
+
+	// §14.5 step 4: the registry lives only in the user-global file.
+	if res := runPodium(t, ws, []string{"HOME=" + home}, "init", "--global", "--registry", reg); res.Exit != 0 {
+		t.Fatalf("init --global: exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	// §14.1 step 4: the workspace file carries only the profile scope.
+	syncYAML := "profiles:\n" +
+		"  finance:\n" +
+		"    include:\n" +
+		"      - \"finance/**\"\n" +
+		"      - \"shared/policies/*\"\n" +
+		"    exclude:\n" +
+		"      - \"finance/**/legacy/**\"\n"
+	if err := os.MkdirAll(filepath.Join(ws, ".podium"), 0o755); err != nil {
+		t.Fatalf("mkdir workspace .podium: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, ".podium/sync.yaml"), []byte(syncYAML), 0o644); err != nil {
+		t.Fatalf("write workspace sync.yaml: %v", err)
+	}
+
+	// Bare `podium sync --profile finance`: no --registry flag (resolved from
+	// the global file), profile selected from the workspace file.
+	res := runPodium(t, ws, []string{"HOME=" + home}, "sync", "--profile", "finance", "--harness", "none", "--target", tgt)
+	cliWantExit(t, res, 0, "sync --profile finance")
+
+	mustExist(t, filepath.Join(tgt, "finance/invoicing/run-variance/ARTIFACT.md"))
+	mustExist(t, filepath.Join(tgt, "shared/policies/data-handling/ARTIFACT.md"))
+	if _, err := os.Stat(filepath.Join(tgt, "finance/invoicing/legacy/old-flow/ARTIFACT.md")); err == nil {
+		t.Errorf("excluded legacy artifact was materialized; --exclude finance/**/legacy/** not applied")
+	}
+	if _, err := os.Stat(filepath.Join(tgt, "personal/notes/reminder/ARTIFACT.md")); err == nil {
+		t.Errorf("out-of-scope personal artifact was materialized; include scope not applied")
+	}
+	// §7.5.3: the lock records the resolved profile and scope.
+	lock := readFile(t, filepath.Join(tgt, ".podium/sync.lock"))
+	cliContains(t, lock, "profile: finance", "lock records the active profile")
+}
+
+// spec: doc "podium sync", `--profile <name>` with an undefined profile name
+// is an error (§7.5.2 profile lookup). Corner case for F-14.1.1.
+func TestDocCLI_131b_SyncProfileUndefined(t *testing.T) {
+	reg := cliReg(t)
+	ws := t.TempDir()
+	tgt := t.TempDir()
+	res := runPodium(t, ws, []string{"HOME=" + t.TempDir()}, "sync", "--registry", reg, "--profile", "does-not-exist", "--harness", "none", "--target", tgt)
+	cliWantNonZero(t, res, "sync --profile undefined")
+}
+
+// spec: doc "Environment variables", PODIUM_REGISTRY honored by `podium sync`
+// (§7.5.2 precedence; §14.11 step 2). Corner case for F-14.11.3: a bare sync
+// with no --registry flag and no sync.yaml picks the registry up from the env.
+func TestDocCLI_131c_SyncRegistryFromEnv(t *testing.T) {
+	reg := cliReg(t)
+	ws := t.TempDir() // no .podium/sync.yaml anywhere
+	tgt := t.TempDir()
+	res := runPodium(t, ws, []string{"HOME=" + t.TempDir(), "PODIUM_REGISTRY=" + reg}, "sync", "--harness", "none", "--target", tgt)
+	cliWantExit(t, res, 0, "sync with PODIUM_REGISTRY")
+	mustExist(t, filepath.Join(tgt, "personal/greet/ARTIFACT.md"))
 }
 
 // spec: doc "podium logout".
