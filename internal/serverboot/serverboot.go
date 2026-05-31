@@ -14,6 +14,7 @@ package serverboot
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -897,8 +898,25 @@ func Run() error {
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	// spec: §13.2.2 / §13.10 — when public mode is engaged, emit the
+	// documented warning banner to stderr at startup so operators see that
+	// authentication is skipped and that a non-loopback bind requires
+	// --allow-public-bind.
+	emitStartupBanner(os.Stderr, cfg.publicMode)
 	log.Printf("podium-server listening on %s (mode=%s)", cfg.bind, cfg.modeBanner())
 	return httpServer.ListenAndServe()
+}
+
+// emitStartupBanner writes the §13.2.2 / §13.10 public-mode warning to w
+// when public mode is engaged. The text is copied verbatim from §13.10
+// (including the ⚠ glyph and indentation) so the startup banner matches
+// the documented contract. When public mode is off it writes nothing.
+func emitStartupBanner(w io.Writer, publicMode bool) {
+	if !publicMode {
+		return
+	}
+	fmt.Fprintln(w, "⚠  PUBLIC MODE: all artifacts visible to all callers without authentication.")
+	fmt.Fprintln(w, "   Bound to 127.0.0.1 by default; pass --allow-public-bind to bind a non-loopback address.")
 }
 
 type Config struct {

@@ -7,6 +7,7 @@ from .client import (
     LoadedArtifact,
     MaterializeError,
     RegistryError,
+    RegistryReadOnly,
 )
 
 try:
@@ -24,4 +25,5 @@ __all__ = [
     "LoadedArtifact",
     "MaterializeError",
     "RegistryError",
+    "RegistryReadOnly",
 ]

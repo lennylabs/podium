@@ -39,6 +39,30 @@ class DeviceCodeRequired(Exception):
     """
 
 
+class RegistryReadOnly(RegistryError):
+    """Raised when a write is rejected because the registry is in §13.2.1
+    read-only mode (the §6.10 ``registry.read_only`` error code).
+
+    It is a subclass of :class:`RegistryError`, so callers that catch the
+    base error keep working while callers that want to retry once the
+    registry leaves read-only mode can catch this type specifically.
+    """
+
+
+def _registry_error_from_envelope(envelope: dict) -> RegistryError:
+    """Build the §6.10 error for a structured envelope, choosing the most
+    specific subclass for the code. ``registry.read_only`` (§13.2.1) maps
+    to :class:`RegistryReadOnly`; every other code maps to the base
+    :class:`RegistryError`.
+    """
+    code = envelope.get("code", "registry.unknown")
+    message = envelope.get("message", "")
+    retryable = bool(envelope.get("retryable", False))
+    if code == "registry.read_only":
+        return RegistryReadOnly(code, message, retryable=retryable)
+    return RegistryError(code, message, retryable=retryable)
+
+
 @dataclass
 class ArtifactDescriptor:
     """A single result returned by search_artifacts and load_domain."""
@@ -276,12 +300,10 @@ def _batch_result_from(env: dict[str, Any]) -> BatchResult:
     """Parse one §7.6.2 batch envelope into a BatchResult."""
     err = None
     if env.get("error"):
-        e = env["error"]
-        err = RegistryError(
-            code=e.get("code", "registry.unknown"),
-            message=e.get("message", ""),
-            retryable=e.get("retryable", False),
-        )
+        # spec: §13.2.1 / §6.10 — a batch item rejected with
+        # registry.read_only carries RegistryReadOnly so materialize()
+        # re-raises the specific type.
+        err = _registry_error_from_envelope(env["error"])
     return BatchResult(
         id=env.get("id", ""),
         status=env.get("status", ""),
@@ -563,8 +585,7 @@ class Client:
             envelope = json.loads(exc.read())
         except Exception:
             raise RegistryError("registry.unknown", f"HTTP {exc.code}: {exc.reason}") from exc
-        raise RegistryError(
-            code=envelope.get("code", "registry.unknown"),
-            message=envelope.get("message", str(exc)),
-            retryable=envelope.get("retryable", False),
-        )
+        # spec: §13.2.1 / §6.10 — a write rejected with registry.read_only
+        # surfaces as RegistryReadOnly (a RegistryError subclass); every
+        # other code maps to the base RegistryError.
+        raise _registry_error_from_envelope(envelope)

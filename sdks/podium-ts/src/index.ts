@@ -210,11 +210,13 @@ export class BatchResult {
 
   async materialize(to: string, opts: MaterializeOptions = {}): Promise<string[]> {
     if (this.status !== "ok") {
-      throw new RegistryError(
-        this.error?.code ?? "registry.unknown",
-        this.error?.message ?? `cannot materialize ${this.id}`,
-        this.error?.retryable ?? false,
-      );
+      // spec: §13.2.1 / §6.10 — re-raise the specific subclass so a
+      // registry.read_only batch item surfaces as RegistryReadOnly.
+      throw registryErrorFromEnvelope({
+        code: this.error?.code ?? "registry.unknown",
+        message: this.error?.message ?? `cannot materialize ${this.id}`,
+        retryable: this.error?.retryable,
+      });
     }
     const large: Record<string, LargeResourceLink> = {};
     for (const r of this.resources ?? []) {
@@ -264,6 +266,36 @@ export class RegistryError extends Error {
     super(`${code}: ${message}`);
     this.name = "RegistryError";
   }
+}
+
+// RegistryReadOnly is thrown when a write is rejected because the
+// registry is in §13.2.1 read-only mode (the §6.10 registry.read_only
+// error code). It extends RegistryError, so callers that catch the base
+// error keep working while callers that want to retry once the registry
+// leaves read-only mode can catch this type specifically.
+export class RegistryReadOnly extends RegistryError {
+  constructor(message: string, retryable = false) {
+    super("registry.read_only", message, retryable);
+    this.name = "RegistryReadOnly";
+  }
+}
+
+// registryErrorFromEnvelope builds the §6.10 error for a structured
+// envelope, choosing the most specific subclass for the code.
+// registry.read_only (§13.2.1) maps to RegistryReadOnly; every other code
+// maps to the base RegistryError.
+export function registryErrorFromEnvelope(env: {
+  code?: unknown;
+  message?: unknown;
+  retryable?: unknown;
+}): RegistryError {
+  const code = (env.code as string) ?? "registry.unknown";
+  const message = (env.message as string) ?? "";
+  const retryable = Boolean(env.retryable);
+  if (code === "registry.read_only") {
+    return new RegistryReadOnly(message, retryable);
+  }
+  return new RegistryError(code, message, retryable);
 }
 
 // spec: §11 (Search browse mode test) — the search top_k cap. Distinct from the
@@ -423,11 +455,13 @@ export class Client {
         } catch {
           // ignore parse errors
         }
-        throw new RegistryError(
-          (envelope.code as string) ?? "registry.unknown",
-          (envelope.message as string) ?? `HTTP ${resp.status}`,
-          Boolean(envelope.retryable),
-        );
+        // spec: §13.2.1 / §6.10 — a write rejected with registry.read_only
+        // surfaces as RegistryReadOnly (a RegistryError subclass).
+        throw registryErrorFromEnvelope({
+          code: envelope.code ?? "registry.unknown",
+          message: envelope.message ?? `HTTP ${resp.status}`,
+          retryable: envelope.retryable,
+        });
       }
       const part = (await resp.json()) as Partial<BatchResult>[];
       out.push(...part.map((e) => new BatchResult(e)));
@@ -498,11 +532,13 @@ export class Client {
       } catch {
         // ignore parse errors; fall through to generic error.
       }
-      throw new RegistryError(
-        (envelope.code as string) ?? "registry.unknown",
-        (envelope.message as string) ?? `HTTP ${resp.status}`,
-        Boolean(envelope.retryable),
-      );
+      // spec: §13.2.1 / §6.10 — registry.read_only surfaces as
+      // RegistryReadOnly so read callers can detect the degraded mode.
+      throw registryErrorFromEnvelope({
+        code: envelope.code ?? "registry.unknown",
+        message: envelope.message ?? `HTTP ${resp.status}`,
+        retryable: envelope.retryable,
+      });
     }
     return resp.json();
   }
