@@ -154,7 +154,7 @@ func TestProxyGet_DecodesRegistryEnvelopeEndToEnd(t *testing.T) {
 	t.Cleanup(ts.Close)
 
 	srv := &mcpServer{cfg: &config{registry: ts.URL}, http: &http.Client{}}
-	out := srv.proxyGet("/v1/load_domain", map[string]any{"path": "finance"})
+	out := srv.proxyGet("/v1/load_domain", map[string]any{"path": "finance"}, nil)
 	m, ok := out.(map[string]any)
 	if !ok {
 		t.Fatalf("proxyGet result = %T, want map", out)

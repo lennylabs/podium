@@ -13,6 +13,13 @@ import (
 func (s *mcpServer) searchArtifacts(args map[string]any) any {
 	body, err := s.fetchJSON("/v1/search_artifacts", args)
 	if err != nil {
+		// spec: §12 — when the registry is unreachable, surface an explicit
+		// "offline" status the host can present rather than an error. The
+		// workspace overlay is reachable without the registry, so a fresh
+		// search still returns the local matches alongside the status.
+		if isRegistryUnreachable(err) {
+			return s.offlineSearchArtifacts(args)
+		}
 		return errorResultFrom(err)
 	}
 	var registry struct {
@@ -51,6 +58,40 @@ func (s *mcpServer) searchArtifacts(args map[string]any) any {
 	return map[string]any{
 		"query":         registry.Query,
 		"total_matched": registry.TotalMatched + len(local),
+		"results":       fused,
+	}
+}
+
+// offlineSearchArtifacts builds the §12 offline result for search_artifacts
+// when the registry is unreachable. The workspace overlay (and its optional
+// §9.1 semantic index) is local, so any overlay matches are still returned;
+// the status tells the host the registry stream was unavailable.
+func (s *mcpServer) offlineSearchArtifacts(args map[string]any) any {
+	query, _ := args["query"].(string)
+	if len(s.overlay) == 0 {
+		return map[string]any{
+			"status":        "offline",
+			"query":         query,
+			"total_matched": 0,
+			"results":       []any{},
+		}
+	}
+	typeFilter, _ := args["type"].(string)
+	scope, _ := args["scope"].(string)
+	tags := tagsArg(args)
+	topK := topKArg(args)
+	local := localSearch(s.overlay, query, typeFilter, scope, tags, topK)
+	var semantic []localSearchResult
+	if s.localSem != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), localSemanticTimeout)
+		semantic = s.localSem.search(ctx, s.overlay, query, typeFilter, scope, tags, topK)
+		cancel()
+	}
+	fused := rrfFuse(nil, topK, local, semantic)
+	return map[string]any{
+		"status":        "offline",
+		"query":         query,
+		"total_matched": len(local),
 		"results":       fused,
 	}
 }

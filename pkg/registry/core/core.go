@@ -88,6 +88,12 @@ type Registry struct {
 	// server-side per artifact-version snapshot; cache invalidation is
 	// keyed on ingest events"). Nil falls back to uncached resolution.
 	importCache *importCache
+	// usage carries the §3.3 learn-from-usage signal. When set, load_artifact
+	// records each access and search_artifacts / load_domain blend the
+	// access-frequency ranking into their ordering (§12 "learn-from-usage
+	// reranking surfaces signal-based ordering"). Nil leaves ranking on its
+	// lexical, vector, and author-curated order alone.
+	usage UsageSignals
 }
 
 // DiscoveryDefaults carries the §13.12 tenant-scope discovery knobs from
@@ -174,6 +180,15 @@ func (r *Registry) WithDiscoveryDefaults(d DiscoveryDefaults, allowPerDomain boo
 // produces an audit event per §8.1.
 func (r *Registry) WithAudit(emit AuditEmitter) *Registry {
 	r.audit = emit
+	return r
+}
+
+// WithUsageSignals attaches the §3.3 learn-from-usage signal store so
+// load_artifact records accesses and search_artifacts / load_domain rerank by
+// access frequency (§12). Nil disables the feature; ranking stays on its
+// lexical, vector, and author-curated order. Returns the registry for chaining.
+func (r *Registry) WithUsageSignals(u UsageSignals) *Registry {
+	r.usage = u
 	return r
 }
 
@@ -573,7 +588,14 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 		return res.Subdomains[i].Path < res.Subdomains[j].Path
 	})
 
-	notable = orderNotable(notable, knobs.featured, knobs.deprioritize)
+	// §12 learn-from-usage reranking restricted to the notable pool so the
+	// signal orders the candidates within their tier without pulling in
+	// artifacts outside this domain's view.
+	notableIDs := make(map[string]bool, len(notable))
+	for _, n := range notable {
+		notableIDs[n.ID] = true
+	}
+	notable = orderNotable(notable, knobs.featured, knobs.deprioritize, r.usageRanking(ctx, notableIDs))
 	if len(notable) > knobs.notableCount {
 		notable = notable[:knobs.notableCount]
 	}
@@ -844,14 +866,18 @@ const (
 	sourceSignal   = "signal"
 )
 
-// orderNotable surfaces featured IDs first (in author-supplied order),
-// then the remaining notable artifacts in alphabetical ID order, with
-// any artifact matching a deprioritize glob ranked last (§4.5.5). Per
-// §4.5.5 deduplication an artifact appearing in both featured and the
-// alphabetical list keeps its featured position; featured always wins
-// over deprioritize. Each entry is tagged with its §4.5.5 source:
-// "featured" for a featured ID, "signal" otherwise.
-func orderNotable(notable []ArtifactDescriptor, featured, deprioritize []string) []ArtifactDescriptor {
+// orderNotable surfaces featured IDs first (in author-supplied order), then
+// the remaining notable artifacts, with any artifact matching a deprioritize
+// glob ranked last (§4.5.5). Per §4.5.5 deduplication an artifact appearing in
+// both featured and the rest keeps its featured position; featured always wins
+// over deprioritize. Within the non-deprioritized "signal" tier the §3.3
+// learn-from-usage ranking (usageRank, most-accessed first) orders the
+// artifacts agents actually load ahead of the rest, which fall back to
+// alphabetical ID order; this is the §12 "learn-from-usage reranking surfaces
+// signal-based ordering" applied to the load_domain notable pool. Each entry
+// is tagged with its §4.5.5 source: "featured" for a featured ID, "signal"
+// otherwise.
+func orderNotable(notable []ArtifactDescriptor, featured, deprioritize, usageRank []string) []ArtifactDescriptor {
 	byID := map[string]ArtifactDescriptor{}
 	for _, n := range notable {
 		byID[n.ID] = n
@@ -863,6 +889,14 @@ func orderNotable(notable []ArtifactDescriptor, featured, deprioritize []string)
 			d.Source = sourceFeatured
 			out = append(out, d)
 			used[id] = true
+		}
+	}
+	// usagePos maps an artifact ID to its rank in the usage signal (lower is
+	// more accessed); IDs absent from the signal sort after ranked ones.
+	usagePos := make(map[string]int, len(usageRank))
+	for i, id := range usageRank {
+		if _, ok := usagePos[id]; !ok {
+			usagePos[id] = i
 		}
 	}
 	rest := make([]ArtifactDescriptor, 0, len(notable))
@@ -878,10 +912,25 @@ func orderNotable(notable []ArtifactDescriptor, featured, deprioritize []string)
 		}
 		rest = append(rest, n)
 	}
-	sort.Slice(rest, func(i, j int) bool { return rest[i].ID < rest[j].ID })
+	sort.Slice(rest, func(i, j int) bool { return lessByUsageThenID(rest[i].ID, rest[j].ID, usagePos) })
 	sort.Slice(low, func(i, j int) bool { return low[i].ID < low[j].ID })
 	out = append(out, rest...)
 	return append(out, low...)
+}
+
+// lessByUsageThenID orders two artifact IDs by their §3.3 usage rank first
+// (lower position = more accessed = earlier), with unranked IDs after ranked
+// ones, then alphabetically. spec: §12.
+func lessByUsageThenID(a, b string, usagePos map[string]int) bool {
+	pa, oka := usagePos[a]
+	pb, okb := usagePos[b]
+	if oka != okb {
+		return oka // a ranked, b not -> a first
+	}
+	if oka && pa != pb {
+		return pa < pb
+	}
+	return a < b
 }
 
 // ----- SearchArtifacts ----------------------------------------------------
@@ -992,6 +1041,21 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 		}
 	}
 
+	// §12 learn-from-usage reranking: blend the access-frequency signal into
+	// the ranked order so artifacts agents actually load rise above
+	// equally-relevant but unused ones. Applied after lexical/vector fusion
+	// and only for a non-empty query (an empty-query browse stays the
+	// deterministic alphabetical listing of §4.7). The usage ranking is
+	// restricted to the current result IDs so it reorders matches without
+	// injecting non-matching artifacts.
+	if opts.Query != "" && len(scored) > 1 {
+		curIDs := scoredIDs(scored)
+		if usageRank := r.usageRanking(ctx, idSet(curIDs)); len(usageRank) > 0 {
+			fused := RRFFuse(curIDs, usageRank)
+			scored = reorderScored(scored, latestByID(filtered), fused)
+		}
+	}
+
 	res := &SearchResult{
 		Query:        opts.Query,
 		TotalMatched: totalMatched,
@@ -1073,6 +1137,15 @@ func scoredIDs(scored []scoredRecord) []string {
 		out[i] = sc.rec.ArtifactID
 	}
 	return out
+}
+
+// idSet builds a membership set over a slice of artifact IDs.
+func idSet(ids []string) map[string]bool {
+	set := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		set[id] = true
+	}
+	return set
 }
 
 // reorderScored reorders the BM25 score slice to match the order of
@@ -1174,6 +1247,10 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 	defer func() {
 		if res != nil {
 			ev.ResultSize = 1
+			// §3.3 / §12 learn-from-usage: a resolved load is the access
+			// signal that feeds search and load_domain reranking. Recorded
+			// only on success so denied/not-found calls do not inflate counts.
+			r.recordUsage(ctx, artifactID, opts.SessionID)
 		}
 		r.emit(ctx, ev)
 	}()

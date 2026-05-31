@@ -558,6 +558,10 @@ func Run() error {
 	// §13.12 / §4.5.5: apply the tenant registry.yaml discovery defaults
 	// and the allow_per_domain_overrides gate to load_domain rendering.
 	registry = registry.WithDiscoveryDefaults(cfg.discoveryDefaults(), cfg.allowPerDomain())
+	// §3.3 / §12 learn-from-usage: record meta-tool accesses so
+	// search_artifacts and load_domain rerank by access frequency. The signal
+	// is in-process advisory ordering; a restart relearns it from live traffic.
+	registry = registry.WithUsageSignals(core.NewMemoryUsageSignals())
 	if v, e, err := openVectorAndEmbedder(cfg); err != nil {
 		log.Printf("warning: vector search disabled: %v", err)
 	} else if v != nil {

@@ -295,6 +295,9 @@ func NewFromFilesystem(path string, opts ...Option) (*Server, error) {
 	}
 
 	registry := core.New(st, tenant, layers)
+	// §3.3 / §12 learn-from-usage: the standalone server reranks search and
+	// load_domain by access frequency, like the standard-topology registry.
+	registry = registry.WithUsageSignals(core.NewMemoryUsageSignals())
 	return New(registry, opts...), nil
 }
 
@@ -798,6 +801,20 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 		s.writeCoreError(w, err)
 		return
 	}
+	// §12 ETag caching of immutable artifact versions: the content hash is a
+	// strong validator for a resolved (id, version) pair, so it is published
+	// as the response ETag. A request that carries a matching If-None-Match is
+	// served 304 Not Modified with no body, letting the MCP client read its
+	// content-addressed cache instead of re-downloading the manifest body and
+	// re-presigning resources. The check runs for GET and HEAD alike and
+	// before any resource presigning so a revalidated hit avoids that work.
+	if etag := contentHashETag(res.ContentHash); etag != "" {
+		w.Header().Set("ETag", etag)
+		if ifNoneMatchHit(r.Header.Get("If-None-Match"), etag) {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+	}
 	// §6.5 HEAD revalidation: report the resolved content hash (and version)
 	// in headers so the MCP cache confirms an unchanged artifact without
 	// downloading the manifest body or presigning resources.
@@ -832,6 +849,40 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// contentHashETag formats a resolved content hash as a strong HTTP ETag
+// (a quoted opaque string). spec: §12 ETag caching of immutable artifact
+// versions. An empty hash yields an empty ETag so the caller skips the
+// header rather than emitting `""`.
+func contentHashETag(contentHash string) string {
+	if contentHash == "" {
+		return ""
+	}
+	return `"` + contentHash + `"`
+}
+
+// ifNoneMatchHit reports whether an If-None-Match request header matches the
+// artifact's ETag. It accepts the wildcard `*`, a comma-separated list of
+// entity tags, and weak validators (`W/"..."`), comparing on the opaque tag
+// value per RFC 7232. The MCP client sends the single content-hash ETag it
+// cached, so the common case is one entry.
+func ifNoneMatchHit(ifNoneMatch, etag string) bool {
+	if ifNoneMatch == "" {
+		return false
+	}
+	if strings.TrimSpace(ifNoneMatch) == "*" {
+		return true
+	}
+	want := strings.TrimPrefix(etag, "W/")
+	for _, candidate := range strings.Split(ifNoneMatch, ",") {
+		c := strings.TrimSpace(candidate)
+		c = strings.TrimPrefix(c, "W/")
+		if c == want {
+			return true
+		}
+	}
+	return false
 }
 
 // attachResources splits the §4.4 bundled resources of a load result

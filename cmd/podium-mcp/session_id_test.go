@@ -85,7 +85,7 @@ func TestFetchJSON_NoSessionWhenEmpty(t *testing.T) {
 func TestProxyGet_ThreadsSession(t *testing.T) {
 	t.Parallel()
 	s, got, _ := captureSession(t)
-	_ = s.proxyGet("/v1/load_domain", map[string]any{"path": "finance"})
+	_ = s.proxyGet("/v1/load_domain", map[string]any{"path": "finance"}, nil)
 	if *got != "bridge-sess" {
 		t.Errorf("proxyGet session_id = %q, want bridge-sess", *got)
 	}

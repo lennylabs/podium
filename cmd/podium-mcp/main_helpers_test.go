@@ -383,22 +383,27 @@ func TestServe_SkipsMalformedRequests(t *testing.T) {
 }
 
 // --- proxyGet ----------------------------------------------------------------
-// proxyGet wraps fetchJSON; covered transitively where the registry is
-// unreachable: the result is an error map.
 
-func TestProxyGet_UnreachableRegistryReturnsErrorResult(t *testing.T) {
+// spec: §12 — "Fresh load_domain / search_domains / search_artifacts returns
+// an explicit 'offline' status that hosts can surface." An unreachable
+// registry yields an offline status rather than an error so the host can tell
+// a transient outage from a request rejection (F-12.0.3).
+func TestProxyGet_UnreachableRegistryReturnsOfflineStatus(t *testing.T) {
 	t.Parallel()
 	srv := &mcpServer{
 		cfg:  &config{registry: "http://127.0.0.1:1"},
 		http: &http.Client{},
 	}
-	got := srv.proxyGet("/v1/load_domain", map[string]any{"path": "x"})
+	got := srv.proxyGet("/v1/load_domain", map[string]any{"path": "x"}, nil)
 	m, ok := got.(map[string]any)
 	if !ok {
 		t.Fatalf("type = %T", got)
 	}
-	if _, has := m["error"]; !has {
-		t.Errorf("expected error key in %v", m)
+	if m["status"] != "offline" {
+		t.Errorf("status = %v, want offline (%v)", m["status"], m)
+	}
+	if _, has := m["error"]; has {
+		t.Errorf("offline result must not carry an error key: %v", m)
 	}
 }
 

@@ -29,6 +29,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -773,10 +774,10 @@ func (s *mcpServer) callTool(raw json.RawMessage) any {
 	switch p.Name {
 	case "load_domain":
 		s.auditMeta(audit.EventDomainLoaded, argString(p.Arguments, "path"))
-		return s.proxyGet("/v1/load_domain", p.Arguments)
+		return s.proxyGet("/v1/load_domain", p.Arguments, nil)
 	case "search_domains":
 		s.auditSearch(audit.EventDomainsSearched, argString(p.Arguments, "query"))
-		return s.proxyGet("/v1/search_domains", p.Arguments)
+		return s.proxyGet("/v1/search_domains", p.Arguments, map[string]any{"results": []any{}})
 	case "search_artifacts":
 		s.auditSearch(audit.EventArtifactsSearched, argString(p.Arguments, "query"))
 		return s.searchArtifacts(p.Arguments)
@@ -844,7 +845,31 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 		}
 	}
 
-	body, err := s.fetchJSON("/v1/load_artifact", args)
+	// §12 ETag caching of immutable artifact versions: when the bridge
+	// already holds the content for the resolved (id, version), send its
+	// content-hash ETag as If-None-Match. A 304 lets the registry confirm the
+	// artifact is unchanged without re-sending the manifest body or
+	// re-presigning resources, and the bridge serves from cache. A cache miss
+	// or any other (id, version) sends no validator and fetches normally.
+	condHash := ""
+	if id != "" {
+		if h, ok := s.resolutions.Resolve(id, version, now, ttl, true); ok && s.cache.has(h) {
+			condHash = h
+		}
+	}
+	body, notModified, err := s.fetchJSONConditional("/v1/load_artifact", args, contentHashETag(condHash))
+	if err == nil && notModified {
+		if cached, cerr := s.loadArtifactFromCache(condHash, id); cerr == nil {
+			if version == "" {
+				// Revalidated: restart the `latest` TTL window.
+				s.resolutions.RefreshLatest(id, now)
+			}
+			return s.deliverLoadArtifact(*cached, deliverOpts{harness: harnessFromArgs(s.cfg.harness, args), destination: destFromArgs(args)})
+		}
+		// The cache entry disappeared between the conditional request and the
+		// read; refetch unconditionally so the host still gets the artifact.
+		body, _, err = s.fetchJSONConditional("/v1/load_artifact", args, "")
+	}
 	if err != nil {
 		// §7.4 degraded-network fallback: in always-revalidate
 		// mode, if a fresh fetch fails, try to serve from cache
@@ -1585,6 +1610,59 @@ func (s *mcpServer) newRegistryRequest(method, path string, args map[string]any)
 	return req, nil
 }
 
+// contentHashETag formats a cached content hash as the strong HTTP ETag the
+// registry publishes (a quoted opaque string) so it can be sent back as an
+// If-None-Match validator. spec: §12. An empty hash yields an empty string so
+// the caller omits the header.
+func contentHashETag(contentHash string) string {
+	if contentHash == "" {
+		return ""
+	}
+	return `"` + contentHash + `"`
+}
+
+// fetchJSONConditional makes an authenticated GET against the registry,
+// optionally sending an If-None-Match validator. spec: §12 ETag caching of
+// immutable artifact versions — when the bridge already holds the content for
+// a resolved (id, version) it sends the content-hash ETag as If-None-Match;
+// the registry answers 304 Not Modified when the artifact is unchanged, which
+// the bridge serves from its content-addressed cache. notModified is true on a
+// 304 (body is nil); otherwise the decoded body and any error are returned as
+// for fetchJSON.
+func (s *mcpServer) fetchJSONConditional(path string, args map[string]any, ifNoneMatch string) (body []byte, notModified bool, err error) {
+	req, err := s.newRegistryRequest("GET", path, args)
+	if err != nil {
+		return nil, false, err
+	}
+	if ifNoneMatch != "" {
+		req.Header.Set("If-None-Match", ifNoneMatch)
+	}
+	client := s.http
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotModified {
+		// §12: the registry confirmed the cached content hash is current.
+		_, _ = io.Copy(io.Discard, resp.Body)
+		s.recordSuccess(time.Now())
+		return nil, true, nil
+	}
+	body, err = io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, false, err
+	}
+	if resp.StatusCode >= 400 {
+		return body, false, parseRegistryError(resp.StatusCode, body)
+	}
+	s.recordSuccess(time.Now())
+	return body, false, nil
+}
+
 // fetchJSON makes an authenticated GET against the registry and returns
 // the response body.
 func (s *mcpServer) fetchJSON(path string, args map[string]any) ([]byte, error) {
@@ -1734,15 +1812,48 @@ func (s *mcpServer) prefetchChunk(chunk []string) error {
 	return nil
 }
 
-// proxyGet forwards a non-load_artifact tool call to the registry and
-// returns the decoded JSON response. load_artifact gets its own
-// handler because it has materialization side-effects.
-func (s *mcpServer) proxyGet(path string, args map[string]any) any {
+// proxyGet forwards a GET meta-tool call to the registry. spec: §12 — the
+// "Registry as a single point of failure for hosts" mitigation states that a
+// fresh load_domain / search_domains / search_artifacts "returns an explicit
+// 'offline' status that hosts can surface." When the registry is unreachable
+// (a transport-level failure rather than a structured >=400 response), the
+// bridge returns a result carrying status "offline" merged with `offline`
+// (e.g. an empty `results` list for search_domains) instead of an error, so
+// the host can distinguish a transient outage from a request rejection. A
+// structured registry error still passes through as a §6.10 error envelope.
+func (s *mcpServer) proxyGet(path string, args, offline map[string]any) any {
 	body, err := s.fetchJSON(path, args)
 	if err != nil {
+		if isRegistryUnreachable(err) {
+			return offlineResult(offline)
+		}
 		return errorResultFrom(err)
 	}
 	return jsonAny(body)
+}
+
+// isRegistryUnreachable reports whether err is a transport-level failure
+// reaching the registry (DNS, dial, timeout, connection reset) rather than a
+// structured >=400 response. A *registryError means the registry answered, so
+// it is reachable; anything else is treated as the registry being unreachable.
+// spec: §12 — the offline status the discovery/search meta-tools surface
+// during a transient outage.
+func isRegistryUnreachable(err error) bool {
+	if err == nil {
+		return false
+	}
+	var re *registryError
+	return !errors.As(err, &re)
+}
+
+// offlineResult builds the §12 offline status envelope, merging any
+// tool-specific keys (e.g. an empty `results` list) over the base status.
+func offlineResult(extra map[string]any) map[string]any {
+	m := map[string]any{"status": "offline"}
+	for k, v := range extra {
+		m[k] = v
+	}
+	return m
 }
 
 func jsonAny(b []byte) any {
