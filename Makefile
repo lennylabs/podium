@@ -46,7 +46,7 @@ help:
 	@echo "  matrix-audit     Audit spec-table coverage (§6.7.1, §6.10, etc.)"
 	@echo "  matrix-list      List the documented spec matrices"
 	@echo "  matrix-scaffold  Print Go test stubs for missing matrix cells"
-	@echo "  services-up      Start Postgres + MinIO for live tests"
+	@echo "  services-up      Start Postgres + MinIO (+ bucket) for live tests"
 	@echo "  services-down    Stop the local services (keeps volumes)"
 	@echo "  services-logs    Tail logs from the local services"
 	@echo "  services-status  Show the local service container status"
@@ -92,8 +92,12 @@ test-live:
 # to use the legacy v1 CLI.
 DOCKER_COMPOSE ?= docker compose
 
+# Live tests only need Postgres + MinIO + the bucket bootstrap. Naming
+# them explicitly keeps `make services-up` from building the registry
+# image and starting Dex (the full evaluation stack `docker compose up -d`
+# brings up; see docker-compose.yml).
 services-up:
-	$(DOCKER_COMPOSE) up -d
+	$(DOCKER_COMPOSE) up -d postgres minio bootstrap
 	@echo "Services starting; check status with: make services-status"
 
 services-down:

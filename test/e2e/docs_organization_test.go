@@ -15,7 +15,9 @@ package e2e
 //
 // Known gaps:
 //   - F-7.3.5: user-defined layer cap of 3 is not enforced (T-D-organization-60).
-//   - T-D-organization-1 requires Docker and docker compose (skipped).
+//   - T-D-organization-1 live bring-up requires Docker (skipped); the
+//     compose file's §13.1.1 structure is asserted in
+//     docs_organization_compose_test.go without Docker.
 //   - T-D-organization-3, -20, -21, -23 need an authenticated admin identity
 //     (skipped with honest reason).
 //   - T-D-organization-34, -35 need a registered runtime key and signed JWT
@@ -185,9 +187,13 @@ func orgOIDCStub(t *testing.T) *httptest.Server {
 
 // ---- tests ------------------------------------------------------------------
 
-// T-D-organization-1 -- docker-compose stack brings up Postgres, MinIO, and bucket.
+// T-D-organization-1 -- docker-compose stack brings up the full §13.1.1
+// evaluation topology. The structural conformance of the compose file (the
+// registry, postgres, minio, dex, and bootstrap services and their wiring)
+// is asserted without Docker in docs_organization_compose_test.go. The live
+// bring-up below needs Docker and a registry image build, so it stays gated.
 func TestOrg_1_DockerComposeStack(t *testing.T) {
-	t.Skip("requires Docker and docker compose; not available in CI plain process e2e")
+	t.Skip("live bring-up requires Docker and a registry image build; structural conformance is covered by TestOrg_1_ComposeStackServices and siblings")
 }
 
 // T-D-organization-2 -- standalone registry serves /healthz and /readyz after `podium serve`.

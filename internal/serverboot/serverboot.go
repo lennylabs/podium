@@ -260,6 +260,46 @@ func ingestLinter(allowPerDomain bool) *lint.Linter {
 	return lr
 }
 
+// parseBootstrapAdmins splits PODIUM_BOOTSTRAP_ADMINS into user IDs. The
+// value accepts commas, whitespace, or both as separators (so a YAML list
+// rendered as "alice@acme.com, bob@acme.com" and a shell-friendly
+// "alice@acme.com bob@acme.com" both work). Empty fields are dropped.
+//
+// spec: §13.1.1 — the evaluation-stack bootstrap creates the first admin
+// user, configurable via env vars.
+func parseBootstrapAdmins(raw string) []string {
+	fields := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '\r'
+	})
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// seedBootstrapAdmins grants the tenant admin role to each user in admins.
+// It returns the number of grants applied. The operation is idempotent: the
+// store's GrantAdmin upserts, so re-seeding an existing admin on a later boot
+// is a no-op rather than an error. A single failed grant aborts and returns
+// the error with the count applied so far.
+//
+// spec: §13.1.1 — the bootstrap step "creates the first tenant and admin
+// user (configurable via env vars)". The default tenant is created by Run's
+// caller before this runs.
+func seedBootstrapAdmins(ctx context.Context, st store.Store, tenantID string, admins []string) (int, error) {
+	seeded := 0
+	for _, userID := range admins {
+		if err := st.GrantAdmin(ctx, store.AdminGrant{UserID: userID, OrgID: tenantID}); err != nil {
+			return seeded, fmt.Errorf("grant admin %q in %q: %w", userID, tenantID, err)
+		}
+		seeded++
+	}
+	return seeded, nil
+}
+
 func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Visibility, startOrder int, allowPerDomain bool, resourcePut ingest.ResourcePutFunc, rejectAtOrAbove manifest.Sensitivity) ([]layer.Layer, error) {
 	if layerPath == "" {
 		return []layer.Layer{}, nil
@@ -523,6 +563,18 @@ func Run() error {
 		Name:               tenantID,
 		ExposeScopePreview: cfg.exposeScopePreview,
 	})
+
+	// §13.1.1 evaluation-stack bootstrap: seed the configured admin users
+	// for the default tenant so the documented `docker compose up` →
+	// `podium init` → `podium login` workflow reaches a state where an
+	// admin exists. PODIUM_BOOTSTRAP_ADMINS carries the user IDs; the
+	// chicken-and-egg of "the first admin can only be granted by an existing
+	// admin" is broken here at boot rather than over the admin API.
+	if n, err := seedBootstrapAdmins(context.Background(), st, tenantID, cfg.bootstrapAdmins); err != nil {
+		log.Printf("warning: bootstrap admin seeding failed: %v", err)
+	} else if n > 0 {
+		log.Printf("bootstrap: seeded %d admin grant(s) for tenant %q", n, tenantID)
+	}
 
 	// §7.2 data plane: open the object store before any ingest so bundled
 	// resources upload to it keyed by content hash as artifacts ingest.
@@ -1029,6 +1081,14 @@ type Config struct {
 	// every resolved layer, and persists a store.LayerConfig per
 	// layer so the §7.3.1 layer endpoints see them.
 	layerPath string
+	// §13.1.1 evaluation-stack bootstrap admins. Comma- or
+	// space-separated user IDs seeded as tenant admins at boot, so the
+	// docker-compose evaluation stack arrives at a state where an admin
+	// exists (the "creates the first tenant and admin user, configurable
+	// via env vars" responsibility of the bootstrap step). Sourced from
+	// PODIUM_BOOTSTRAP_ADMINS. Idempotent: re-seeding an existing grant is
+	// a no-op.
+	bootstrapAdmins []string
 	// §4.6 declarative admin-defined layer list from registry.yaml's
 	// `layers:` block. Each entry is seeded as a store.LayerConfig at
 	// startup; local sources are also ingested. Config-file-only.
@@ -1251,6 +1311,8 @@ func LoadConfig() *Config {
 		materializeRateLimit: envInt("PODIUM_QUOTA_MATERIALIZE_RATE", 0),
 		// §13.10 standalone bootstrap layer path.
 		layerPath: os.Getenv("PODIUM_LAYER_PATH"),
+		// §13.1.1 evaluation-stack bootstrap admins.
+		bootstrapAdmins: parseBootstrapAdmins(os.Getenv("PODIUM_BOOTSTRAP_ADMINS")),
 		// §3.5 scope-preview tenant gate (nil = default true).
 		exposeScopePreview: envBoolPtr("PODIUM_EXPOSE_SCOPE_PREVIEW"),
 	}

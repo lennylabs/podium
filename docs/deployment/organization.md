@@ -93,7 +93,7 @@ User-defined layers (registered at runtime by individual users) sit above admin-
 - Object storage bucket (S3 / GCS / MinIO / R2).
 - An OIDC IdP with device-code flow support.
 
-For a quick stand-up, the repo ships a `docker-compose.yml` that brings up Postgres + MinIO + Dex (OIDC) for evaluation. Not production-grade: single-replica services, default credentials. The compose stack mirrors the standard topology so consumers exercise the same code paths.
+For a quick stand-up, the repo ships a `docker-compose.yml` that brings up the full evaluation stack with `docker compose up -d`: the registry, a pgvector Postgres, MinIO object storage, a Dex OIDC IdP, and a one-shot bootstrap container that creates the MinIO bucket and seeds the first admin user. It is not production-grade: single-replica services, default credentials, and local volumes. The compose stack runs the standard-topology components so consumers exercise the same code paths as a real deployment.
 
 ### 2. Deploy the registry
 
