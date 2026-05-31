@@ -84,8 +84,8 @@ func TestLoadArtifactFromCache_RecoversBytes(t *testing.T) {
 }
 
 // Spec: §6.5 — loadArtifactFromCache returns an error on missing
-// bucket so offline-only mode can surface the cache.offline_miss
-// envelope.
+// bucket so offline-only mode can surface the network.offline_cache_miss
+// envelope (§7.4 / §6.10).
 func TestLoadArtifactFromCache_Missing(t *testing.T) {
 	t.Parallel()
 	srv := &mcpServer{cfg: &config{cacheDir: t.TempDir()}}

@@ -113,6 +113,41 @@ func TestLoadArtifact_ReachableRejectionPassesThroughNotRelabeled(t *testing.T) 
 	}
 }
 
+// Spec: §7.4 — offline-first + unreachable + cache miss: "no error; serve
+// cached results silently." With nothing cached the bridge returns a silent
+// offline status rather than the network.registry_unreachable error the
+// always-revalidate mode would surface (F-7.4.4).
+func TestLoadArtifact_OfflineFirstCacheMissUnreachableIsSilent(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	cache, _ := newContentCache(dir)
+	srv := &mcpServer{
+		cfg: &config{
+			cacheDir:  dir,
+			cacheMode: "offline-first",
+			registry:  "http://127.0.0.1:1", // unbound port → connect refused
+			harness:   "none",
+		},
+		cache:       cache,
+		resolutions: newResolutionCache(dir),
+		http:        &http.Client{},
+	}
+	out := srv.loadArtifact(map[string]any{"id": "team/never-cached"})
+	m, ok := out.(map[string]any)
+	if !ok {
+		t.Fatalf("loadArtifact returned %T, want map", out)
+	}
+	if m["status"] != "offline" {
+		t.Errorf("status = %v, want offline", m["status"])
+	}
+	if _, hasErr := m["error"]; hasErr {
+		t.Errorf("offline-first miss must not carry an error key: %v", m)
+	}
+	if strings.Contains(errorMessageText(out), "network.registry_unreachable") {
+		t.Errorf("offline-first must not surface network.registry_unreachable: %v", m)
+	}
+}
+
 // errorMessageText returns the message inside the {"error": "..."}
 // envelope errorResult produces, or "" if the input doesn't match.
 func errorMessageText(out any) string {

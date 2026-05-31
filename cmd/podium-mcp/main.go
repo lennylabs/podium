@@ -1095,6 +1095,16 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 					}
 				}
 			}
+			// §7.4 offline-first: "no error; serve cached results silently."
+			// The content cache was already consulted above and missed, so
+			// there is nothing to serve. Return a silent offline status with no
+			// artifact rather than the registry-unreachable error, matching the
+			// "no error" contract for this mode (F-7.4.4). offline-only never
+			// reaches here: it short-circuits to errOfflineCacheMiss on the
+			// earlier cache miss without calling the registry.
+			if s.cfg.cacheMode == "offline-first" {
+				return offlineResult(nil)
+			}
 			return errorResult("network.registry_unreachable: " + err.Error())
 		}
 		return errorResultFrom(err)
@@ -2040,8 +2050,26 @@ func (s *mcpServer) prefetchChunk(chunk []string) error {
 // the host can distinguish a transient outage from a request rejection. A
 // structured registry error still passes through as a §6.10 error envelope.
 func (s *mcpServer) proxyGet(path string, args, offline map[string]any) any {
+	// §7.4 offline-only: "never contact the registry; structured error if
+	// cache miss." The discovery meta-tools keep no content cache (§6.5 caches
+	// canonical artifact bytes for load_artifact, not domain trees or search
+	// results), so an offline-only call has nothing local to serve and returns
+	// the structured offline cache-miss error without opening a connection
+	// (F-7.4.2).
+	if s.cfg.cacheMode == "offline-only" {
+		return errorResult(errOfflineCacheMiss.Error())
+	}
 	body, err := s.fetchJSON(path, args)
 	if err != nil {
+		// §7.4 / §12 degraded network: a transport-level failure (registry
+		// unreachable) in always-revalidate or offline-first mode surfaces the
+		// explicit "offline" status hosts can present (§12), letting the host
+		// tell a transient outage from a request rejection. The discovery tools
+		// have no content cache to fall back to, so the envelope carries no
+		// served_from_cache results; the §7.4 network.registry_unreachable code
+		// is the no-cache signal for load_artifact, which does have a content
+		// cache. A structured >=400 response means the registry answered and
+		// refused; it passes through as a §6.10 error (F-7.4.1).
 		if isRegistryUnreachable(err) {
 			return offlineResult(offline)
 		}

@@ -32,6 +32,12 @@ var (
 	// Options.RegistryPath nor a discoverable .podium/sync.yaml /
 	// PODIUM_REGISTRY env var is set.
 	ErrNoRegistry = errors.New("config.no_registry: no registry configured")
+	// ErrOfflineCacheMiss signals a §7.4 offline-only sync against a
+	// server-source registry. podium sync keeps no offline content cache, so
+	// offline-only ("never contact the registry; structured error if cache
+	// miss") has nothing local to materialize. The code lives in the §6.10
+	// network.* namespace, matching the MCP server (F-7.4.3, F-7.4.5).
+	ErrOfflineCacheMiss = errors.New("network.offline_cache_miss: offline-only mode cannot reach a server-source registry and podium sync keeps no offline cache")
 )
 
 // Options are the inputs to Run. RegistryPath is the registry source: an
@@ -72,6 +78,13 @@ type Options struct {
 	// (manual one-shot sync), "watch" (watcher-driven rerun), or "override"
 	// (override-driven materialization). An empty value defaults to "full".
 	LastSyncedBy string
+	// CacheMode is the §7.4 PODIUM_CACHE_MODE the sync applies to a
+	// server-source registry: "always-revalidate" (default; fetch every run),
+	// "offline-first" (tolerate an unreachable server, leaving the existing
+	// materialized output in place), or "offline-only" (never contact the
+	// server). It is a no-op for a filesystem source, which is read locally and
+	// is always reachable. An empty value behaves as always-revalidate.
+	CacheMode string
 }
 
 // materialRecord is a source-neutral artifact ready for the HarnessAdapter.
@@ -105,6 +118,10 @@ type Result struct {
 	// active adapter. Recorded so callers can report what was dropped
 	// rather than silently omitting it.
 	Skipped []string
+	// Offline is set when a §7.4 offline-first sync could not reach the
+	// server-source registry and left the existing materialized output in
+	// place. Callers surface it as the offline status hosts can present.
+	Offline bool
 }
 
 // ArtifactResult is one artifact's contribution to the materialized output.
@@ -145,11 +162,29 @@ func Run(opts Options) (*Result, error) {
 		return nil, err
 	}
 
+	// §7.4 cache modes apply to a server-source registry; a filesystem
+	// registry is read locally and is always reachable, so the mode is a no-op
+	// there (offline-only's "cache only" is trivially satisfied when no network
+	// call happens).
+	if isServerSource(opts.RegistryPath) && opts.CacheMode == "offline-only" {
+		// §7.4: "never contact the registry; structured error if cache miss."
+		// podium sync keeps no offline content cache, so a server-source sync
+		// has nothing local to materialize (F-7.4.3).
+		return nil, ErrOfflineCacheMiss
+	}
+
 	// §7.5.2 dispatch: a URL routes to the Podium server, every other value
 	// to the local filesystem registry. The full effective view is resolved
 	// first; scope and toggles narrow it below.
 	all, err := resolveRecords(opts)
 	if err != nil {
+		// §7.4 offline-first: "no error; serve cached results silently." When
+		// the server-source registry is unreachable, leave the already
+		// materialized output untouched and report a no-op offline result
+		// rather than failing the sync (F-7.4.3).
+		if opts.CacheMode == "offline-first" && errors.As(err, new(*serverUnreachableError)) {
+			return offlineFirstNoop(opts, a.ID()), nil
+		}
 		return nil, err
 	}
 
@@ -266,6 +301,30 @@ func Run(opts Options) (*Result, error) {
 		fmt.Fprintf(os.Stderr, "sync: lock write failed: %v\n", err)
 	}
 	return res, nil
+}
+
+// offlineFirstNoop builds the §7.4 offline-first result for a sync whose
+// server-source registry was unreachable. It writes nothing and runs no
+// stale-file cleanup, leaving the existing materialized output in place; the
+// returned Result echoes the prior lock so callers see the served (cached)
+// state and the Offline flag.
+func offlineFirstNoop(opts Options, adapterID string) *Result {
+	res := &Result{Adapter: adapterID, Target: opts.Target, Profile: opts.Profile, Scope: opts.Scope, Offline: true}
+	prior, _ := ReadLock(opts.Target)
+	if prior == nil {
+		return res
+	}
+	idx := map[string]int{}
+	for _, la := range prior.Artifacts {
+		i, ok := idx[la.ID]
+		if !ok {
+			i = len(res.Artifacts)
+			idx[la.ID] = i
+			res.Artifacts = append(res.Artifacts, ArtifactResult{ID: la.ID, Version: la.Version, Layer: la.Layer})
+		}
+		res.Artifacts[i].Files = append(res.Artifacts[i].Files, la.MaterializedPath)
+	}
+	return res
 }
 
 // resolveRecords dispatches on the registry source (§7.5.2) and returns the

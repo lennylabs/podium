@@ -110,8 +110,10 @@ func TestPodiumMCP_AlwaysRevalidateHeadRoundTrip(t *testing.T) {
 	}
 }
 
-// Spec: §6.5 — offline-only never contacts the registry and reports
-// cache.offline_miss for an artifact that was never cached.
+// Spec: §6.5 / §7.4 — offline-only never contacts the registry and reports the
+// structured network.offline_cache_miss error for content that was never
+// cached (the code lives in the §6.10 network.* namespace; there is no cache.*
+// namespace — F-7.4.5).
 func TestPodiumMCP_OfflineOnlyMissReportsOfflineMiss(t *testing.T) {
 	t.Parallel()
 
@@ -119,7 +121,7 @@ func TestPodiumMCP_OfflineOnlyMissReportsOfflineMiss(t *testing.T) {
 		"PODIUM_CACHE_MODE=offline-only",
 	)
 	errText, _ := res["error"].(string)
-	if errText == "" || !bytes.Contains([]byte(errText), []byte("cache.offline_miss")) {
-		t.Errorf("error = %v, want cache.offline_miss", res["error"])
+	if errText == "" || !bytes.Contains([]byte(errText), []byte("network.offline_cache_miss")) {
+		t.Errorf("error = %v, want network.offline_cache_miss", res["error"])
 	}
 }

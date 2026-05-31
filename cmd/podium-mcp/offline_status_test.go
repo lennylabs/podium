@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/lennylabs/podium/pkg/manifest"
@@ -105,6 +106,72 @@ func TestSearchArtifacts_OfflineStatusServesOverlay(t *testing.T) {
 	}
 	if results[0]["id"] != "overlay/local-variance" {
 		t.Errorf("result id = %v, want overlay/local-variance", results[0]["id"])
+	}
+}
+
+// Spec: §7.4 — offline-only "never contact the registry; structured error if
+// cache miss." The discovery meta-tools keep no content cache, so an
+// offline-only load_domain / search_domains returns the structured
+// network.offline_cache_miss error without dialing the registry. Pointing at
+// an unbound port proves no connection is attempted: a dial would surface a
+// connect/refused transport error instead of the offline-miss code (F-7.4.2).
+func TestProxyGet_OfflineOnlyNeverContactsRegistry(t *testing.T) {
+	t.Parallel()
+	for _, path := range []string{"/v1/load_domain", "/v1/search_domains", "/v1/scope/preview"} {
+		path := path
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+			srv := &mcpServer{cfg: &config{registry: unreachableRegistry, cacheMode: "offline-only"}, http: &http.Client{}}
+			out := srv.proxyGet(path, map[string]any{"path": "finance"}, map[string]any{"results": []any{}})
+			body := errorMessageText(out)
+			if !strings.Contains(body, "network.offline_cache_miss") {
+				t.Errorf("error = %q, want network.offline_cache_miss", body)
+			}
+			if m, ok := out.(map[string]any); ok && m["status"] == "offline" {
+				t.Errorf("offline-only miss must be a structured error, not an offline status: %v", m)
+			}
+		})
+	}
+}
+
+// Spec: §7.4 — offline-only search_artifacts serves only the workspace overlay
+// and never contacts the registry. With overlay matches it returns them; an
+// empty overlay is a structured cache miss (F-7.4.2).
+func TestSearchArtifacts_OfflineOnlyServesOverlayOnly(t *testing.T) {
+	t.Parallel()
+	srv := &mcpServer{
+		cfg:  &config{registry: unreachableRegistry, cacheMode: "offline-only"},
+		http: &http.Client{},
+		overlay: []filesystem.ArtifactRecord{
+			{
+				ID: "overlay/local-variance",
+				Artifact: &manifest.Artifact{
+					Type:        manifest.TypeSkill,
+					Name:        "local-variance",
+					Description: "local variance helper for the workspace",
+					Version:     "0.1.0",
+				},
+			},
+		},
+	}
+	out := srv.searchArtifacts(map[string]any{"query": "variance", "top_k": float64(10)})
+	m, ok := out.(map[string]any)
+	if !ok {
+		t.Fatalf("got %T, want map", out)
+	}
+	results, ok := m["results"].([]map[string]any)
+	if !ok || len(results) != 1 || results[0]["id"] != "overlay/local-variance" {
+		t.Fatalf("results = %v, want one overlay hit", m["results"])
+	}
+}
+
+func TestSearchArtifacts_OfflineOnlyEmptyOverlayMisses(t *testing.T) {
+	t.Parallel()
+	srv := &mcpServer{cfg: &config{registry: unreachableRegistry, cacheMode: "offline-only"}, http: &http.Client{}}
+	out := srv.searchArtifacts(map[string]any{"query": "variance"})
+	body := errorMessageText(out)
+	if !strings.Contains(body, "network.offline_cache_miss") {
+		t.Errorf("error = %q, want network.offline_cache_miss", body)
 	}
 }
 

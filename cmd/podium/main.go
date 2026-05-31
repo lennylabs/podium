@@ -283,6 +283,16 @@ func syncCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: cannot resolve target: %v\n", err)
 		return 2
 	}
+	// §7.4: podium sync applies the same cache modes as the MCP server. The
+	// mode is read once from PODIUM_CACHE_MODE and threaded into the run; it
+	// governs the server source (offline-only never contacts the registry,
+	// offline-first tolerates an unreachable server) and is a no-op for a
+	// filesystem source.
+	cacheMode, cmErr := resolveCacheMode(os.Getenv("PODIUM_CACHE_MODE"))
+	if cmErr != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", cmErr)
+		return 2
+	}
 	syncOpts := sync.Options{
 		RegistryPath: registryPath,
 		Target:       abs,
@@ -291,6 +301,7 @@ func syncCmd(args []string) int {
 		OverlayPath:  *overlay,
 		Profile:      resolved.Profile,
 		Scope:        resolved.Scope,
+		CacheMode:    cacheMode,
 	}
 	if *watch {
 		return runWatchLoop(syncOpts, *overlay, *asJSON)
@@ -306,6 +317,21 @@ func syncCmd(args []string) int {
 		printHuman(res, *dryRun)
 	}
 	return 0
+}
+
+// resolveCacheMode validates PODIUM_CACHE_MODE for the sync path (§7.4). An
+// empty value defaults to always-revalidate, matching the MCP server (§6.2);
+// an unrecognized value is rejected so a typo cannot silently change the
+// degraded-network behavior.
+func resolveCacheMode(v string) (string, error) {
+	switch v {
+	case "":
+		return "always-revalidate", nil
+	case "always-revalidate", "offline-first", "offline-only":
+		return v, nil
+	default:
+		return "", fmt.Errorf("PODIUM_CACHE_MODE must be always-revalidate | offline-first | offline-only, got %q", v)
+	}
 }
 
 // runWatchLoop drives sync.Watch until the user interrupts (SIGINT
@@ -360,6 +386,11 @@ func runMultiTargetSync(configPath, registryOverride string, dryRun, asJSON bool
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 2
 	}
+	cacheMode, cmErr := resolveCacheMode(os.Getenv("PODIUM_CACHE_MODE"))
+	if cmErr != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", cmErr)
+		return 2
+	}
 	failures := 0
 	for _, p := range plans {
 		abs, aerr := filepath.Abs(p.Target)
@@ -375,6 +406,7 @@ func runMultiTargetSync(configPath, registryOverride string, dryRun, asJSON bool
 			DryRun:       dryRun,
 			Profile:      p.Profile,
 			Scope:        p.Scope,
+			CacheMode:    cacheMode,
 		})
 		if rerr != nil {
 			fmt.Fprintf(os.Stderr, "target %s: %v\n", p.ID, rerr)

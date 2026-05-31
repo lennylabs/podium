@@ -354,3 +354,56 @@ describe("LoadedArtifact.materialize", () => {
     });
   });
 });
+
+describe("Client cache modes (§7.4)", () => {
+  // Spec: §7.4 — "podium sync and the SDKs apply the same cache modes."
+  // offline-only "never contact the registry": every meta-tool call throws the
+  // structured network.offline_cache_miss error before a request is issued.
+  it("offline-only never contacts the registry", async () => {
+    let called = false;
+    const fetcher: typeof fetch = async () => {
+      called = true;
+      return new Response("{}", { status: 200 });
+    };
+    const c = new Client({ registry: "http://reg", fetcher, cacheMode: "offline-only" });
+    await expect(c.searchArtifacts("variance")).rejects.toMatchObject({
+      code: "network.offline_cache_miss",
+    });
+    expect(called).toBe(false);
+  });
+
+  // Spec: §7.4 — offline-only also gates the batch-load path, which does not
+  // route through the private get helper.
+  it("offline-only gates loadArtifacts", async () => {
+    let called = false;
+    const fetcher: typeof fetch = async () => {
+      called = true;
+      return new Response("[]", { status: 200 });
+    };
+    const c = new Client({ registry: "http://reg", fetcher, cacheMode: "offline-only" });
+    await expect(c.loadArtifacts(["finance/run"])).rejects.toMatchObject({
+      code: "network.offline_cache_miss",
+    });
+    expect(called).toBe(false);
+  });
+
+  // Spec: §7.4 — offline-first keeps no persistent cache in the SDK, so it
+  // still fetches on every call.
+  it("offline-first still fetches", async () => {
+    let observedURL = "";
+    const fetcher: typeof fetch = async (input) => {
+      observedURL = String(input);
+      return new Response(JSON.stringify({ total_matched: 0, results: [] }), { status: 200 });
+    };
+    const c = new Client({ registry: "http://reg", fetcher, cacheMode: "offline-first" });
+    await c.searchArtifacts("q");
+    expect(observedURL).toContain("search_artifacts");
+  });
+
+  // Spec: §6.2 — an unrecognized cache mode is rejected at construction.
+  it("rejects an unknown cache mode", () => {
+    expect(
+      () => new Client({ registry: "http://reg", cacheMode: "bogus" as unknown as never }),
+    ).toThrow();
+  });
+});

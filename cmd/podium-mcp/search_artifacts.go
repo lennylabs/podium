@@ -11,12 +11,21 @@ import (
 // records, fusing the two ranked lists via RRF before returning
 // to the host.
 func (s *mcpServer) searchArtifacts(args map[string]any) any {
+	// §7.4 offline-only: "never contact the registry; structured error if
+	// cache miss." The workspace overlay is the only local source a search can
+	// serve, so an offline-only search returns overlay matches without dialing
+	// the registry, and an empty overlay is a structured cache miss (F-7.4.2).
+	if s.cfg.cacheMode == "offline-only" {
+		return s.offlineOnlySearchArtifacts(args)
+	}
 	body, err := s.fetchJSON("/v1/search_artifacts", args)
 	if err != nil {
-		// spec: §12 — when the registry is unreachable, surface an explicit
-		// "offline" status the host can present rather than an error. The
-		// workspace overlay is reachable without the registry, so a fresh
-		// search still returns the local matches alongside the status.
+		// spec: §7.4 / §12 — when the registry is unreachable, surface an
+		// explicit "offline" status the host can present rather than an error
+		// (always-revalidate and offline-first both report the offline status
+		// hosts can surface). The workspace overlay is reachable without the
+		// registry, so a fresh search still returns the local matches alongside
+		// the status.
 		if isRegistryUnreachable(err) {
 			return s.offlineSearchArtifacts(args)
 		}
@@ -127,6 +136,22 @@ func (s *mcpServer) offlineSearchArtifacts(args map[string]any) any {
 		"total_matched": fusedTotalMatched(0, nil, local, semantic),
 		"results":       fused,
 	}
+}
+
+// offlineOnlySearchArtifacts serves the §7.4 offline-only contract for
+// search_artifacts: the registry is never contacted, so only workspace-overlay
+// matches are returned. With no local match the call is a structured cache miss
+// (network.offline_cache_miss) rather than an empty offline envelope, because
+// offline-only forbids reaching the registry that would otherwise fill the gap
+// (F-7.4.2).
+func (s *mcpServer) offlineOnlySearchArtifacts(args map[string]any) any {
+	res := s.offlineSearchArtifacts(args)
+	if m, ok := res.(map[string]any); ok {
+		if n, _ := m["total_matched"].(int); n > 0 {
+			return res
+		}
+	}
+	return errorResult(errOfflineCacheMiss.Error())
 }
 
 // tagsArg pulls the optional tags arg in either []any or

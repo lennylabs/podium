@@ -318,12 +318,16 @@ def _batch_result_from(env: dict[str, Any]) -> BatchResult:
     )
 
 
+# spec: §6.5 / §6.2 — the recognized PODIUM_CACHE_MODE values.
+_CACHE_MODES = ("always-revalidate", "offline-first", "offline-only")
+
+
 class Client:
     """Thin HTTP client over the registry's meta-tool API.
 
     Construct with an explicit registry URL or call `Client.from_env()` to
-    pick up `PODIUM_REGISTRY`, `PODIUM_IDENTITY_PROVIDER`, and
-    `PODIUM_OVERLAY_PATH` per §6.2.
+    pick up `PODIUM_REGISTRY`, `PODIUM_IDENTITY_PROVIDER`,
+    `PODIUM_OVERLAY_PATH`, and `PODIUM_CACHE_MODE` per §6.2.
     """
 
     def __init__(
@@ -333,6 +337,7 @@ class Client:
         identity_provider: str = "oauth-device-code",
         overlay_path: str | None = None,
         token: str = "",
+        cache_mode: str = "always-revalidate",
     ) -> None:
         self.registry = registry.rstrip("/")
         self.identity_provider = identity_provider
@@ -342,6 +347,16 @@ class Client:
         # PODIUM_SESSION_TOKEN in from_env); it is attached as the Bearer
         # credential on every request so visibility filtering applies.
         self.token = token
+        # spec: §7.4 — "podium sync and the SDKs apply the same cache modes."
+        # The SDK keeps no persistent content cache, so always-revalidate and
+        # offline-first both fetch on every call (there is nothing cached to
+        # serve), while offline-only "never contact the registry" and therefore
+        # raises a structured cache-miss error before any request.
+        if cache_mode not in _CACHE_MODES:
+            raise ValueError(
+                f"cache_mode must be one of {_CACHE_MODES}, got {cache_mode!r}"
+            )
+        self.cache_mode = cache_mode
 
     @classmethod
     def from_env(cls) -> "Client":
@@ -356,7 +371,23 @@ class Client:
             # bridge also reads, so the SDK reaches the registry as the same
             # identity without an interactive device-code flow.
             token=os.environ.get("PODIUM_SESSION_TOKEN", ""),
+            # §7.4 cache mode, shared with the MCP server and podium sync.
+            cache_mode=os.environ.get("PODIUM_CACHE_MODE") or "always-revalidate",
         )
+
+    def _guard_offline(self) -> None:
+        """Enforce §7.4 offline-only: never contact the registry.
+
+        The SDK has no local cache, so an offline-only call is always a cache
+        miss and raises the structured network.offline_cache_miss error (the
+        §6.10 network.* namespace, matching the MCP server) before a request is
+        issued (F-7.4.3).
+        """
+        if self.cache_mode == "offline-only":
+            raise RegistryError(
+                "network.offline_cache_miss",
+                "offline-only mode: the registry was not contacted and the SDK keeps no offline cache",
+            )
 
     def _headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
         """Return request headers with the Bearer credential when configured."""
@@ -477,6 +508,8 @@ class Client:
         """
         if not ids:
             return []
+        # §7.4 offline-only short-circuit before any network request.
+        self._guard_offline()
         out: list[BatchResult] = []
         chunk_size = 50
         for chunk_start in range(0, len(ids), chunk_size):
@@ -545,6 +578,8 @@ class Client:
         reads ``r.URL.Query()["type"]``) and the TypeScript SDK. A single
         comma-joined ``types`` parameter is never read by the server.
         """
+        # §7.4 offline-only short-circuit before opening the event stream.
+        self._guard_offline()
         # Repeated key form: ?type=a&type=b. doseq expands the list so each
         # event type becomes its own type= pair the server can read.
         params = [("type", t) for t in (event_types or [])]
@@ -563,6 +598,8 @@ class Client:
                     continue
 
     def _get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
+        # §7.4 offline-only short-circuit before any network request.
+        self._guard_offline()
         url = self.registry + path
         if params:
             url = url + "?" + urllib.parse.urlencode(params)

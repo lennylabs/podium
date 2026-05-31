@@ -280,9 +280,13 @@ func touchBucket(bucket string) {
 }
 
 // errOfflineCacheMiss is returned in offline-only mode when the requested
-// artifact isn't in the cache. Maps to cache.offline_miss in the §6.10
-// namespace.
-var errOfflineCacheMiss = errors.New("cache.offline_miss: artifact not in offline cache")
+// artifact (or discovery result) is not in the local cache. §7.4 mandates a
+// "structured error if cache miss" but does not name a code; the §6.10
+// namespace list (auth.*, config.*, ingest.*, materialize.*, quota.*, mcp.*,
+// network.*, registry.*, domain.*) has no cache.* namespace, so the code lives
+// under network.* — the same namespace as network.registry_unreachable, which
+// is the other degraded-network code (F-7.4.5).
+var errOfflineCacheMiss = errors.New("network.offline_cache_miss: requested content not in offline cache")
 
 // argsIDAndVersion converts a generic argument map's `id` and `version` fields
 // to canonical strings.

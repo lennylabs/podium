@@ -309,6 +309,14 @@ function checkTopK(topK: number): void {
   }
 }
 
+// spec: §6.5 / §6.2 — the recognized PODIUM_CACHE_MODE values.
+export type CacheMode = "always-revalidate" | "offline-first" | "offline-only";
+const CACHE_MODES: readonly CacheMode[] = [
+  "always-revalidate",
+  "offline-first",
+  "offline-only",
+];
+
 export interface ClientOptions {
   registry: string;
   identityProvider?: string;
@@ -318,12 +326,16 @@ export interface ClientOptions {
   // credential so it reaches the registry with the same identity as the MCP
   // path. fromEnv reads it from PODIUM_SESSION_TOKEN.
   token?: string;
+  // spec: §7.4 — the cache mode the SDK applies, shared with the MCP server
+  // and podium sync. fromEnv reads it from PODIUM_CACHE_MODE.
+  cacheMode?: CacheMode;
 }
 
 export class Client {
   readonly registry: string;
   readonly identityProvider: string;
   readonly overlayPath?: string;
+  readonly cacheMode: CacheMode;
   private readonly fetcher: typeof fetch;
   private readonly token: string;
 
@@ -333,6 +345,18 @@ export class Client {
     this.overlayPath = opts.overlayPath;
     this.fetcher = opts.fetcher ?? fetch;
     this.token = opts.token ?? "";
+    // spec: §7.4 — "podium sync and the SDKs apply the same cache modes." The
+    // SDK keeps no persistent content cache, so always-revalidate and
+    // offline-first both fetch on every call (nothing is cached to serve),
+    // while offline-only "never contact the registry" and raises a structured
+    // cache-miss error before any request.
+    const mode = opts.cacheMode ?? "always-revalidate";
+    if (!CACHE_MODES.includes(mode)) {
+      throw new Error(
+        `cacheMode must be one of ${CACHE_MODES.join(" | ")}, got ${String(mode)}`,
+      );
+    }
+    this.cacheMode = mode;
   }
 
   static fromEnv(): Client {
@@ -347,7 +371,22 @@ export class Client {
       // §6.3.2 injected session token: the env credential the MCP bridge also
       // reads, so the SDK reaches the registry as the same identity.
       token: process.env.PODIUM_SESSION_TOKEN,
+      // §7.4 cache mode, shared with the MCP server and podium sync.
+      cacheMode: (process.env.PODIUM_CACHE_MODE as CacheMode) || "always-revalidate",
     });
+  }
+
+  // guardOffline enforces §7.4 offline-only: the SDK has no local cache, so an
+  // offline-only call is always a cache miss and throws the structured
+  // network.offline_cache_miss error (the §6.10 network.* namespace, matching
+  // the MCP server) before a request is issued (F-7.4.3).
+  private guardOffline(): void {
+    if (this.cacheMode === "offline-only") {
+      throw new RegistryError(
+        "network.offline_cache_miss",
+        "offline-only mode: the registry was not contacted and the SDK keeps no offline cache",
+      );
+    }
   }
 
   // headers returns request headers with the Bearer credential attached when
@@ -429,6 +468,8 @@ export class Client {
     } = {},
   ): Promise<BatchResult[]> {
     if (ids.length === 0) return [];
+    // §7.4 offline-only short-circuit before any network request.
+    this.guardOffline();
     const out: BatchResult[] = [];
     const cap = 50;
     for (let i = 0; i < ids.length; i += cap) {
@@ -488,6 +529,8 @@ export class Client {
   // long-poll JSON-Lines variant; SSE / websocket land alongside the
   // server's outbound webhook subsystem.
   async *subscribe(eventTypes: string[]): AsyncIterable<RegistryEvent> {
+    // §7.4 offline-only short-circuit before opening the event stream.
+    this.guardOffline();
     const url = new URL(this.registry + "/v1/events");
     for (const t of eventTypes) {
       url.searchParams.append("type", t);
@@ -519,6 +562,8 @@ export class Client {
   }
 
   private async get(path: string, params: Record<string, unknown>): Promise<unknown> {
+    // §7.4 offline-only short-circuit before any network request.
+    this.guardOffline();
     const url = new URL(this.registry + path);
     for (const [k, v] of Object.entries(params)) {
       if (v === undefined || v === null) continue;

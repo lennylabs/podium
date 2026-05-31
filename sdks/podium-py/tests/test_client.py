@@ -416,3 +416,60 @@ def test_from_env_reads_session_token(monkeypatch):
     monkeypatch.setenv("PODIUM_SESSION_TOKEN", "env-tok")
     client = Client.from_env()
     assert client.token == "env-tok"
+
+
+# Spec: §7.4 — "podium sync and the SDKs apply the same cache modes."
+# offline-only "never contact the registry": every meta-tool call raises the
+# structured network.offline_cache_miss error before a request is issued. The
+# registry points at the stub, but no request reaches it (F-7.4.3).
+def test_offline_only_never_contacts_registry(stub_server):
+    stub_server.last_path = "untouched"
+    client = Client(
+        registry=f"http://127.0.0.1:{stub_server.server_port}",
+        cache_mode="offline-only",
+    )
+    with pytest.raises(RegistryError) as exc:
+        client.search_artifacts("variance")
+    assert exc.value.code == "network.offline_cache_miss"
+    # No request was sent: the stub's recorded path is unchanged.
+    assert stub_server.last_path == "untouched"
+
+
+# Spec: §7.4 — offline-first and always-revalidate keep no persistent cache in
+# the SDK, so both fetch on every call. offline-first must reach the registry.
+def test_offline_first_still_fetches(stub_server):
+    stub_server.next_response = {"query": "q", "total_matched": 0, "results": []}
+    stub_server.last_path = "untouched"
+    client = Client(
+        registry=f"http://127.0.0.1:{stub_server.server_port}",
+        cache_mode="offline-first",
+    )
+    client.search_artifacts("q")
+    assert "search_artifacts" in stub_server.last_path
+
+
+# Spec: §7.4 — offline-only also gates the batch-load and subscribe paths,
+# which do not route through _get.
+def test_offline_only_gates_batch_load(stub_server):
+    client = Client(
+        registry=f"http://127.0.0.1:{stub_server.server_port}",
+        cache_mode="offline-only",
+    )
+    with pytest.raises(RegistryError) as exc:
+        client.load_artifacts(["finance/run"])
+    assert exc.value.code == "network.offline_cache_miss"
+
+
+# Spec: §6.2 / §7.4 — from_env reads PODIUM_CACHE_MODE; an unset value defaults
+# to always-revalidate and an unrecognized value is rejected.
+def test_from_env_reads_cache_mode(monkeypatch):
+    monkeypatch.setenv("PODIUM_REGISTRY", "http://127.0.0.1:9999")
+    monkeypatch.setenv("PODIUM_CACHE_MODE", "offline-only")
+    assert Client.from_env().cache_mode == "offline-only"
+    monkeypatch.delenv("PODIUM_CACHE_MODE")
+    assert Client.from_env().cache_mode == "always-revalidate"
+
+
+def test_rejects_unknown_cache_mode():
+    with pytest.raises(ValueError):
+        Client(registry="http://127.0.0.1:9999", cache_mode="bogus")

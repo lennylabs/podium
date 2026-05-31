@@ -19,6 +19,17 @@ import (
 // against an unresponsive registry fails rather than hanging.
 const defaultServerTimeout = 30 * time.Second
 
+// serverUnreachableError wraps a transport-level failure reaching a
+// server-source registry (dial, DNS, timeout, connection reset), distinct from
+// a structured >=400 response which means the registry answered and refused.
+// It drives the §7.4 offline-first degraded-network behavior in Run: an
+// unreachable server in offline-first mode is tolerated, while a structured
+// rejection still fails the sync (F-7.4.3).
+type serverUnreachableError struct{ err error }
+
+func (e *serverUnreachableError) Error() string { return e.err.Error() }
+func (e *serverUnreachableError) Unwrap() error { return e.err }
+
 // syncManifestResponse is the GET /v1/sync/manifest body: the caller's
 // effective view as a flat artifact list (§7.5 server-source enumeration).
 type syncManifestResponse struct {
@@ -165,7 +176,10 @@ func httpGetJSON(ctx context.Context, client *http.Client, rawURL string, out an
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		// A transport-level failure (the registry could not be reached) is the
+		// §7.4 degraded-network condition; tag it so Run can apply the cache
+		// mode. A non-2xx status below is a structured rejection, not this.
+		return &serverUnreachableError{err}
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
@@ -190,7 +204,7 @@ func fetchBytes(ctx context.Context, client *http.Client, rawURL string) ([]byte
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, &serverUnreachableError{err}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
