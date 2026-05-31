@@ -1021,7 +1021,11 @@ func manifestRecordFor(rec filesystem.ArtifactRecord, tenantID, layerID string, 
 		IngestedAt:       ingestedAt,
 		Frontmatter:      rec.ArtifactBytes,
 		Body:             []byte(body),
-		Resources:        resourceRefsFor(rec),
+		// spec: §11 / §2.2 — preserve the verbatim SKILL.md so server-source
+		// delivery reproduces the authored skill file byte-for-byte. The walk
+		// captured the raw bytes in rec.SkillBytes; empty for non-skills.
+		SkillRaw:  append([]byte(nil), rec.SkillBytes...),
+		Resources: resourceRefsFor(rec),
 	}, nil
 }
 

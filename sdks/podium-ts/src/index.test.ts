@@ -33,6 +33,47 @@ describe("Client", () => {
     expect(out.results?.[0].id).toBe("finance/run-variance");
   });
 
+  // Spec: §11 (Search browse mode test) — top_k > 50 is rejected client-side
+  // with a structured registry.invalid_argument error before any request.
+  it("searchArtifacts rejects topK over 50 before the request", async () => {
+    let called = false;
+    const fetcher: typeof fetch = async () => {
+      called = true;
+      return new Response("{}", { status: 200 });
+    };
+    const c = new Client({ registry: "http://reg", fetcher });
+    await expect(c.searchArtifacts("variance", { topK: 51 })).rejects.toMatchObject({
+      code: "registry.invalid_argument",
+    });
+    expect(called).toBe(false);
+  });
+
+  // Spec: §11 — the boundary value topK == 50 is accepted (cap is strictly > 50).
+  it("searchArtifacts allows topK at 50", async () => {
+    let observedURL = "";
+    const fetcher: typeof fetch = async (input) => {
+      observedURL = String(input);
+      return new Response(JSON.stringify({ total_matched: 0, results: [] }), { status: 200 });
+    };
+    const c = new Client({ registry: "http://reg", fetcher });
+    await c.searchArtifacts("q", { topK: 50 });
+    expect(observedURL).toContain("top_k=50");
+  });
+
+  // Spec: §11 — searchDomains enforces the same client-side top_k cap.
+  it("searchDomains rejects topK over 50 before the request", async () => {
+    let called = false;
+    const fetcher: typeof fetch = async () => {
+      called = true;
+      return new Response("{}", { status: 200 });
+    };
+    const c = new Client({ registry: "http://reg", fetcher });
+    await expect(c.searchDomains("q", { topK: 200 })).rejects.toMatchObject({
+      code: "registry.invalid_argument",
+    });
+    expect(called).toBe(false);
+  });
+
   // Spec: §7.6 — loadArtifact returns the manifest body and resources.
   it("loadArtifact returns manifest and resources", async () => {
     const fetcher: typeof fetch = async () =>
@@ -211,6 +252,27 @@ describe("LoadedArtifact.materialize", () => {
       expect(await readFile(join(root, "SKILL.md"), "utf8")).toBe(
         "---\ntype: skill\n---\nRun the linter.\n",
       );
+    });
+  });
+
+  // Spec: §4.3.4 / §11 — when the registry delivers skill_raw, SKILL.md is the
+  // verbatim authored file (its own frontmatter preserved), not a reconstruction.
+  it("writes SKILL.md verbatim from skill_raw when present", async () => {
+    await withTempDir(async (dir) => {
+      const skillMD = "---\nname: lint\ndescription: Run the project linter.\n---\n\nRun the linter.\n";
+      const art = new LoadedArtifact({
+        id: "eng/lint",
+        type: "skill",
+        version: "2.0.0",
+        manifest_body: "Run the linter.\n",
+        frontmatter: "---\ntype: skill\nversion: 2.0.0\n---\n",
+        skill_raw: skillMD,
+      });
+      await art.materialize(dir);
+      const root = join(dir, "eng", "lint");
+      // ARTIFACT.md is the manifest frontmatter; SKILL.md is the authored file.
+      expect(await readFile(join(root, "ARTIFACT.md"), "utf8")).toBe("---\ntype: skill\nversion: 2.0.0\n---\n");
+      expect(await readFile(join(root, "SKILL.md"), "utf8")).toBe(skillMD);
     });
   });
 

@@ -33,6 +33,11 @@ type BatchLoadEnvelope struct {
 	ContentHash  string `json:"content_hash,omitempty"`
 	ManifestBody string `json:"manifest_body,omitempty"`
 	Frontmatter  string `json:"frontmatter,omitempty"`
+	// SkillRaw is the verbatim SKILL.md for a type: skill artifact (§4.3.4),
+	// delivered so the SDK materializes the authored skill file byte-for-byte
+	// rather than reconstructing it from frontmatter plus body. Empty for
+	// non-skills.
+	SkillRaw string `json:"skill_raw,omitempty"`
 	// Resources carries every bundled resource as a presigned reference
 	// per the §7.6.2 wire example {path, presigned_url, content_hash}.
 	// The batch path keeps the response body small by delivering all
@@ -105,6 +110,7 @@ func (s *Server) loadOneForBatch(ctx context.Context, id layer.Identity, artifac
 		ContentHash:        res.ContentHash,
 		ManifestBody:       res.ManifestBody,
 		Frontmatter:        string(res.Frontmatter),
+		SkillRaw:           string(res.SkillRaw),
 		Deprecated:         res.Deprecated,
 		ReplacedBy:         res.ReplacedBy,
 		DeprecationWarning: res.DeprecationWarning,

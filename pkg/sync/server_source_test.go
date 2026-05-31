@@ -19,6 +19,7 @@ type stubArtifact struct {
 	layer         string
 	frontmatter   string
 	manifestBody  string
+	skillRaw      string
 	resources     map[string]string
 	resourcesB64  bool
 	largeResource map[string]string // path -> bytes served from a side endpoint
@@ -66,6 +67,11 @@ func newStubRegistry(t *testing.T, arts map[string]stubArtifact) *httptest.Serve
 			"layer":         a.layer,
 			"manifest_body": a.manifestBody,
 			"frontmatter":   a.frontmatter,
+		}
+		// spec: §4.3.4 / §11 — the registry delivers a skill's verbatim
+		// SKILL.md so the consumer materializes it byte-for-byte.
+		if a.skillRaw != "" {
+			resp["skill_raw"] = a.skillRaw
 		}
 		if len(a.resources) > 0 {
 			resp["resources"] = a.resources
@@ -131,17 +137,22 @@ func TestRun_ServerSource_MaterializesEffectiveView(t *testing.T) {
 	}
 }
 
-// spec: §4.3.4 — a server-source skill materializes SKILL.md reconstructed
-// from the served frontmatter plus the manifest body.
+// spec: §4.3.4 / §11 — a server-source skill materializes the verbatim
+// SKILL.md the registry delivers in skill_raw, so its authored frontmatter
+// (name, description, …) is preserved rather than replaced by ARTIFACT.md's.
 func TestRun_ServerSource_SkillWritesSkillMD(t *testing.T) {
 	t.Parallel()
 	const skillFM = "---\ntype: skill\nversion: 1.0.0\n---\n"
+	// The authored SKILL.md carries its own frontmatter, distinct from
+	// ARTIFACT.md, plus the prose body.
+	const skillMD = "---\nname: lint\ndescription: Run the project linter.\n---\n\nRun the linter.\n"
 	srv := newStubRegistry(t, map[string]stubArtifact{
 		"eng/lint": {
 			typ:          "skill",
 			layer:        "local",
 			frontmatter:  skillFM,
 			manifestBody: "Run the linter.\n",
+			skillRaw:     skillMD,
 		},
 	})
 	target := t.TempDir()
@@ -152,7 +163,7 @@ func TestRun_ServerSource_SkillWritesSkillMD(t *testing.T) {
 	if got := readFileT(t, filepath.Join(root, "ARTIFACT.md")); got != skillFM {
 		t.Errorf("ARTIFACT.md = %q", got)
 	}
-	if got := readFileT(t, filepath.Join(root, "SKILL.md")); got != skillFM+"Run the linter.\n" {
+	if got := readFileT(t, filepath.Join(root, "SKILL.md")); got != skillMD {
 		t.Errorf("SKILL.md = %q", got)
 	}
 }

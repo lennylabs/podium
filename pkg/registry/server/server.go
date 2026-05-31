@@ -290,7 +290,7 @@ func NewFromFilesystem(path string, opts ...Option) (*Server, error) {
 		layers = append(layers, layer.Layer{
 			ID:         l.ID,
 			Precedence: i + 1,
-			Visibility: layer.Visibility{Public: true},
+			Visibility: bootstrapVisibility(l),
 		})
 	}
 
@@ -299,6 +299,24 @@ func NewFromFilesystem(path string, opts ...Option) (*Server, error) {
 	// load_domain by access frequency, like the standard-topology registry.
 	registry = registry.WithUsageSignals(core.NewMemoryUsageSignals())
 	return New(registry, opts...), nil
+}
+
+// bootstrapVisibility resolves the runtime visibility of a filesystem-source
+// layer. A layer that declares visibility via its .layer-config file (§4.6)
+// uses that declaration; a layer without one defaults to public, the §13.10
+// standalone bootstrap default. This lets a fixture or migrated directory
+// express every visibility mode through the filesystem load path while
+// preserving the all-public default for layers that say nothing.
+func bootstrapVisibility(l filesystem.Layer) layer.Visibility {
+	if !l.HasVisibility {
+		return layer.Visibility{Public: true}
+	}
+	return layer.Visibility{
+		Public:       l.Visibility.Public,
+		Organization: l.Visibility.Organization,
+		Groups:       l.Visibility.Groups,
+		Users:        l.Visibility.Users,
+	}
 }
 
 // Handler returns an http.Handler with every meta-tool route registered.
@@ -443,12 +461,17 @@ type SearchResponse struct {
 // resources above the cutoff are returned in LargeResources as
 // follow-the-URL references the consumer fetches separately.
 type LoadArtifactResponse struct {
-	ID             string                       `json:"id"`
-	Type           string                       `json:"type"`
-	Version        string                       `json:"version"`
-	ContentHash    string                       `json:"content_hash"`
-	ManifestBody   string                       `json:"manifest_body"`
-	Frontmatter    string                       `json:"frontmatter"`
+	ID           string `json:"id"`
+	Type         string `json:"type"`
+	Version      string `json:"version"`
+	ContentHash  string `json:"content_hash"`
+	ManifestBody string `json:"manifest_body"`
+	Frontmatter  string `json:"frontmatter"`
+	// SkillRaw is the verbatim SKILL.md for a type: skill artifact (§4.3.4),
+	// so a server-source consumer materializes the authored skill file
+	// byte-for-byte instead of reconstructing it from ARTIFACT.md frontmatter
+	// plus body (§11 filesystem ↔ server equivalence). Empty for non-skills.
+	SkillRaw       string                       `json:"skill_raw,omitempty"`
 	Layer          string                       `json:"layer,omitempty"`
 	Sensitivity    string                       `json:"sensitivity,omitempty"`
 	Resources      map[string]string            `json:"resources,omitempty"`
@@ -833,6 +856,7 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 		ContentHash:        res.ContentHash,
 		ManifestBody:       res.ManifestBody,
 		Frontmatter:        string(res.Frontmatter),
+		SkillRaw:           string(res.SkillRaw),
 		Layer:              res.Layer,
 		Sensitivity:        res.Sensitivity,
 		Deprecated:         res.Deprecated,

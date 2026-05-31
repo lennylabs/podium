@@ -38,6 +38,7 @@ type serverLoadResponse struct {
 	Layer          string            `json:"layer"`
 	ManifestBody   string            `json:"manifest_body"`
 	Frontmatter    string            `json:"frontmatter"`
+	SkillRaw       string            `json:"skill_raw"`
 	Resources      map[string]string `json:"resources"`
 	ResourcesB64   bool              `json:"resources_base64"`
 	LargeResources map[string]struct {
@@ -120,11 +121,13 @@ func fetchServerRecord(ctx context.Context, client *http.Client, base, id, layer
 	if a, perr := manifest.ParseArtifact([]byte(resp.Frontmatter)); perr == nil {
 		rec.Artifact = a
 	}
-	// §4.3.4 — a skill's SKILL.md is the frontmatter plus the body the
-	// registry returns separately (the same reconstruction the MCP server
-	// performs for server-source delivery).
+	// spec: §4.3.4 / §11 — a skill's SKILL.md is delivered verbatim so the
+	// materialized file is byte-identical to the filesystem-source consumer.
+	// The authored SKILL.md frontmatter (name, description, compatibility,
+	// allowed-tools, …) cannot be reconstructed from ARTIFACT.md frontmatter
+	// plus body, so the registry ships the original bytes in skill_raw.
 	if resp.Type == "skill" {
-		rec.SkillBytes = []byte(resp.Frontmatter + resp.ManifestBody)
+		rec.SkillBytes = []byte(resp.SkillRaw)
 	}
 	return rec, nil
 }

@@ -104,6 +104,34 @@ def test_load_artifact_returns_manifest_and_resources(stub_server):
     assert art.resources == {"scripts/run.py": "print('run')\n"}
 
 
+# Spec: §11 (Search browse mode test) — top_k > 50 is rejected client-side with
+# a structured registry.invalid_argument error before any request is sent.
+def test_search_artifacts_rejects_top_k_over_50(stub_server):
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    with pytest.raises(RegistryError) as exc:
+        client.search_artifacts("variance", top_k=51)
+    assert exc.value.code == "registry.invalid_argument"
+    # The bound check fires before the HTTP call, so the stub records no path.
+    assert stub_server.last_path == ""
+
+
+# Spec: §11 — the boundary value top_k == 50 is accepted (cap is strictly > 50).
+def test_search_artifacts_allows_top_k_at_50(stub_server):
+    stub_server.next_response = {"query": "q", "total_matched": 0, "results": []}
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    client.search_artifacts("q", top_k=50)
+    assert "top_k=50" in stub_server.last_path
+
+
+# Spec: §11 — search_domains enforces the same client-side top_k cap.
+def test_search_domains_rejects_top_k_over_50(stub_server):
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    with pytest.raises(RegistryError) as exc:
+        client.search_domains("q", top_k=200)
+    assert exc.value.code == "registry.invalid_argument"
+    assert stub_server.last_path == ""
+
+
 # Spec: §6.10 — error envelopes from the registry surface as RegistryError
 # with the namespaced code preserved.
 def test_registry_error_envelope_translates_to_exception(stub_server):
@@ -244,6 +272,25 @@ def test_materialize_skill_writes_skill_md(tmp_path):
     root = tmp_path / "eng" / "lint"
     assert (root / "ARTIFACT.md").read_text() == "---\ntype: skill\n---\n"
     assert (root / "SKILL.md").read_text() == "---\ntype: skill\n---\nRun the linter.\n"
+
+
+# Spec: §4.3.4 / §11 — when the registry delivers skill_raw, SKILL.md is the
+# verbatim authored file (its own frontmatter preserved), not a reconstruction.
+def test_materialize_skill_uses_verbatim_skill_raw(tmp_path):
+    skill_md = "---\nname: lint\ndescription: Run the project linter.\n---\n\nRun the linter.\n"
+    art = LoadedArtifact(
+        id="eng/lint",
+        type="skill",
+        version="2.0.0",
+        manifest_body="Run the linter.\n",
+        frontmatter="---\ntype: skill\nversion: 2.0.0\n---\n",
+        skill_raw=skill_md,
+    )
+    art.materialize(str(tmp_path))
+    root = tmp_path / "eng" / "lint"
+    # ARTIFACT.md is the manifest frontmatter; SKILL.md is the authored file.
+    assert (root / "ARTIFACT.md").read_text() == "---\ntype: skill\nversion: 2.0.0\n---\n"
+    assert (root / "SKILL.md").read_text() == skill_md
 
 
 # Spec: §4.4 — inline bundled resources land at their package-relative path.

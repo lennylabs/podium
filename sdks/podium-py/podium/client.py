@@ -20,6 +20,17 @@ class RegistryError(Exception):
         super().__init__(f"{code}: {message}")
 
 
+# spec: §11 (Search browse mode test) — the search top_k cap. Distinct from the
+# §7.6.2 batch-load 50-ID cap; this bounds the number of returned search results.
+_MAX_TOP_K = 50
+
+
+def _check_top_k(top_k: int) -> None:
+    """Reject top_k > 50 before the request is sent (spec §11, §6.10)."""
+    if top_k > _MAX_TOP_K:
+        raise RegistryError("registry.invalid_argument", "top_k > 50")
+
+
 class DeviceCodeRequired(Exception):
     """Raised when the configured identity provider needs a device-code flow.
 
@@ -116,6 +127,9 @@ class LoadedArtifact:
     frontmatter: str
     resources: dict[str, str] = field(default_factory=dict)
     large_resources: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # spec: §4.3.4 / §11 — the verbatim SKILL.md for a skill, delivered so the
+    # materialized file is byte-identical to the authored source.
+    skill_raw: str = ""
 
     def materialize(
         self,
@@ -146,6 +160,7 @@ class LoadedArtifact:
             artifact_type=self.type,
             frontmatter=self.frontmatter,
             manifest_body=self.manifest_body,
+            skill_raw=self.skill_raw,
             inline_resources=self.resources,
             large_resources=self.large_resources,
             fetch=fetch or _fetch_bytes,
@@ -168,6 +183,7 @@ class BatchResult:
     type: str = ""
     manifest_body: str = ""
     frontmatter: str = ""
+    skill_raw: str = ""
     resources: list[dict[str, Any]] = field(default_factory=list)
     error: "RegistryError | None" = None
 
@@ -194,6 +210,7 @@ class BatchResult:
             artifact_type=self.type,
             frontmatter=self.frontmatter,
             manifest_body=self.manifest_body,
+            skill_raw=self.skill_raw,
             inline_resources={},
             large_resources=large,
             fetch=fetch or _fetch_bytes,
@@ -207,6 +224,7 @@ def _materialize_canonical(
     artifact_type: str,
     frontmatter: str,
     manifest_body: str,
+    skill_raw: str,
     inline_resources: dict[str, str],
     large_resources: dict[str, dict[str, Any]],
     fetch: Callable[[str], bytes],
@@ -231,7 +249,10 @@ def _materialize_canonical(
 
     if artifact_type == "skill":
         skill_path = os.path.join(root, "SKILL.md")
-        _write_file(skill_path, (frontmatter + manifest_body).encode())
+        # spec: §4.3.4 / §11 — prefer the verbatim SKILL.md the registry
+        # delivers; fall back to frontmatter+body only when it is absent.
+        skill_md = skill_raw if skill_raw else (frontmatter + manifest_body)
+        _write_file(skill_path, skill_md.encode())
         written.append(skill_path)
 
     for rel, content in sorted((inline_resources or {}).items()):
@@ -269,6 +290,7 @@ def _batch_result_from(env: dict[str, Any]) -> BatchResult:
         type=env.get("type", ""),
         manifest_body=env.get("manifest_body", ""),
         frontmatter=env.get("frontmatter", ""),
+        skill_raw=env.get("skill_raw", ""),
         resources=env.get("resources", []) or [],
         error=err,
     )
@@ -332,6 +354,10 @@ class Client:
     def search_domains(
         self, query: str = "", *, scope: str = "", top_k: int = 10
     ) -> SearchResult:
+        # spec: §11 (Search browse mode test) — top_k > 50 is rejected with a
+        # structured registry.invalid_argument error, enforced client-side in
+        # the SDK as well as server-side at the registry (§6.10).
+        _check_top_k(top_k)
         params = {"top_k": top_k}
         if query:
             params["query"] = query
@@ -354,6 +380,9 @@ class Client:
         top_k: int = 10,
         session_id: str = "",
     ) -> SearchResult:
+        # spec: §11 (Search browse mode test) — client-side top_k cap, mirroring
+        # the server's registry.invalid_argument rejection (§6.10).
+        _check_top_k(top_k)
         params: dict[str, Any] = {"top_k": top_k}
         if query:
             params["query"] = query
@@ -401,6 +430,7 @@ class Client:
             version=body.get("version", ""),
             manifest_body=body.get("manifest_body", ""),
             frontmatter=body.get("frontmatter", ""),
+            skill_raw=body.get("skill_raw", ""),
             resources=body.get("resources", {}) or {},
             # §7.2 large resources travel as presigned references the
             # consumer fetches from object storage; materialize() pulls them.

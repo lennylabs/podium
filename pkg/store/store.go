@@ -132,6 +132,14 @@ type ManifestRecord struct {
 	IngestedAt  time.Time
 	Frontmatter []byte
 	Body        []byte
+	// SkillRaw is the verbatim SKILL.md bytes for a type: skill artifact,
+	// preserved so server-source delivery reproduces the authored skill file
+	// exactly. The §11 filesystem ↔ server equivalence test requires the
+	// materialized SKILL.md to be byte-identical across both consumers, and
+	// the authored SKILL.md frontmatter (name, description, compatibility,
+	// allowed-tools, and any other keys) cannot be reconstructed from the
+	// indexed fields alone. Empty for non-skills.
+	SkillRaw []byte
 	// ExtendsPin is the parent reference pinned at this child's
 	// ingest time per §4.7.6: "extends: parent version pinned at
 	// child ingest time". Empty when the artifact does not extend.

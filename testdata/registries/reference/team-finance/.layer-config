@@ -1,0 +1,5 @@
+# Finance content is scoped to the acme-finance OIDC group.
+# spec §4.6 visibility: groups.
+visibility:
+  groups:
+    - acme-finance

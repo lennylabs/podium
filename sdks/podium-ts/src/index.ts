@@ -60,6 +60,7 @@ async function materializeCanonical(args: {
   type: string;
   frontmatter: string;
   manifestBody: string;
+  skillRaw: string;
   inline: Record<string, string>;
   large: Record<string, LargeResourceLink>;
   fetcher: typeof fetch;
@@ -93,7 +94,9 @@ async function materializeCanonical(args: {
 
   if (args.type === "skill") {
     const skillPath = safeJoin("SKILL.md");
-    await write(skillPath, args.frontmatter + args.manifestBody);
+    // spec: §4.3.4 / §11 — prefer the verbatim SKILL.md the registry delivers;
+    // fall back to frontmatter + body only when it is absent.
+    await write(skillPath, args.skillRaw !== "" ? args.skillRaw : args.frontmatter + args.manifestBody);
     written.push(skillPath);
   }
 
@@ -127,6 +130,9 @@ export class LoadedArtifact {
   version: string;
   manifest_body: string;
   frontmatter: string;
+  // spec: §4.3.4 / §11 — verbatim SKILL.md for a skill, delivered so the
+  // materialized file is byte-identical to the authored source.
+  skill_raw?: string;
   resources?: Record<string, string>;
   large_resources?: Record<string, LargeResourceLink>;
   deprecated?: boolean;
@@ -139,6 +145,7 @@ export class LoadedArtifact {
     this.version = data.version ?? "";
     this.manifest_body = data.manifest_body ?? "";
     this.frontmatter = data.frontmatter ?? "";
+    this.skill_raw = data.skill_raw;
     this.resources = data.resources;
     this.large_resources = data.large_resources;
     this.deprecated = data.deprecated;
@@ -153,6 +160,7 @@ export class LoadedArtifact {
       type: this.type,
       frontmatter: this.frontmatter,
       manifestBody: this.manifest_body,
+      skillRaw: this.skill_raw ?? "",
       inline: this.resources ?? {},
       large: this.large_resources ?? {},
       fetcher: opts.fetcher ?? fetch,
@@ -172,6 +180,8 @@ export class BatchResult {
   content_hash?: string;
   manifest_body?: string;
   frontmatter?: string;
+  // spec: §4.3.4 / §11 — verbatim SKILL.md for a skill (byte-identical).
+  skill_raw?: string;
   resources?: { path: string; presigned_url: string; content_hash?: string }[];
   deprecated?: boolean;
   replaced_by?: string;
@@ -190,6 +200,7 @@ export class BatchResult {
     this.content_hash = data.content_hash;
     this.manifest_body = data.manifest_body;
     this.frontmatter = data.frontmatter;
+    this.skill_raw = data.skill_raw;
     this.resources = data.resources;
     this.deprecated = data.deprecated;
     this.replaced_by = data.replaced_by;
@@ -215,6 +226,7 @@ export class BatchResult {
       type: this.type ?? "",
       frontmatter: this.frontmatter ?? "",
       manifestBody: this.manifest_body ?? "",
+      skillRaw: this.skill_raw ?? "",
       inline: {},
       large,
       fetcher: opts.fetcher ?? fetch,
@@ -251,6 +263,17 @@ export class RegistryError extends Error {
   ) {
     super(`${code}: ${message}`);
     this.name = "RegistryError";
+  }
+}
+
+// spec: §11 (Search browse mode test) — the search top_k cap. Distinct from the
+// §7.6.2 batch-load 50-ID cap; this bounds the number of returned search results.
+const MAX_TOP_K = 50;
+
+// checkTopK rejects top_k > 50 before the request is sent (spec §11, §6.10).
+function checkTopK(topK: number): void {
+  if (topK > MAX_TOP_K) {
+    throw new RegistryError("registry.invalid_argument", "top_k > 50");
   }
 }
 
@@ -313,6 +336,10 @@ export class Client {
     query = "",
     opts: { scope?: string; topK?: number } = {},
   ): Promise<SearchResult> {
+    // spec: §11 (Search browse mode test) — top_k > 50 is rejected with a
+    // structured registry.invalid_argument error, enforced client-side in the
+    // SDK as well as server-side at the registry (§6.10).
+    checkTopK(opts.topK ?? 10);
     const params: Record<string, unknown> = { top_k: opts.topK ?? 10 };
     if (query) params.query = query;
     if (opts.scope) params.scope = opts.scope;
@@ -330,6 +357,9 @@ export class Client {
       sessionID?: string;
     } = {},
   ): Promise<SearchResult> {
+    // spec: §11 (Search browse mode test) — client-side top_k cap, mirroring
+    // the server's registry.invalid_argument rejection (§6.10).
+    checkTopK(opts.topK ?? 10);
     const params: Record<string, unknown> = { top_k: opts.topK ?? 10 };
     if (query) params.query = query;
     if (opts.type) params.type = opts.type;

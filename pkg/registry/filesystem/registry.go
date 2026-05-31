@@ -70,6 +70,11 @@ type Layer struct {
 	ID string
 	// Path is the absolute filesystem path to the layer's root.
 	Path string
+	// Visibility is the §4.6 visibility declared in the layer's optional
+	// .layer-config file. HasVisibility reports whether such a file was
+	// present; when false a server bootstrap applies its default.
+	Visibility    Visibility
+	HasVisibility bool
 }
 
 // Registry is an opened filesystem registry: the dispatched mode plus the
@@ -125,7 +130,7 @@ func Open(path string) (*Registry, error) {
 		return nil, err
 	}
 	if !hasCfg || !cfg.MultiLayer {
-		return openSingleLayer(abs, cfg), nil
+		return openSingleLayer(abs, cfg)
 	}
 	return openMultiLayer(abs, cfg)
 }
@@ -145,14 +150,18 @@ func readConfig(root string) (Config, bool, error) {
 	return cfg, true, nil
 }
 
-func openSingleLayer(root string, cfg Config) *Registry {
+func openSingleLayer(root string, cfg Config) (*Registry, error) {
 	id := filepath.Base(root)
+	vis, has, err := readLayerVisibility(root)
+	if err != nil {
+		return nil, err
+	}
 	return &Registry{
 		Mode:   ModeSingleLayer,
 		Path:   root,
 		Config: cfg,
-		Layers: []Layer{{ID: id, Path: root}},
-	}
+		Layers: []Layer{{ID: id, Path: root, Visibility: vis, HasVisibility: has}},
+	}, nil
 }
 
 func openMultiLayer(root string, cfg Config) (*Registry, error) {
@@ -169,9 +178,16 @@ func openMultiLayer(root string, cfg Config) (*Registry, error) {
 	}
 	layers := make([]Layer, 0, len(ordered))
 	for _, name := range ordered {
+		dir := filepath.Join(root, name)
+		vis, has, err := readLayerVisibility(dir)
+		if err != nil {
+			return nil, err
+		}
 		layers = append(layers, Layer{
-			ID:   name,
-			Path: filepath.Join(root, name),
+			ID:            name,
+			Path:          dir,
+			Visibility:    vis,
+			HasVisibility: has,
 		})
 	}
 	return &Registry{

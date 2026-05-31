@@ -1316,15 +1316,19 @@ func resourcesAsStrings(in map[string][]byte) map[string]string {
 // LoadArtifactResponse so we can decode it without importing the server
 // package.
 type loadArtifactResponse struct {
-	ID           string            `json:"id"`
-	Type         string            `json:"type"`
-	Version      string            `json:"version"`
-	ContentHash  string            `json:"content_hash"`
-	ManifestBody string            `json:"manifest_body"`
-	Frontmatter  string            `json:"frontmatter"`
-	Layer        string            `json:"layer,omitempty"`
-	Sensitivity  string            `json:"sensitivity,omitempty"`
-	Resources    map[string]string `json:"resources,omitempty"`
+	ID           string `json:"id"`
+	Type         string `json:"type"`
+	Version      string `json:"version"`
+	ContentHash  string `json:"content_hash"`
+	ManifestBody string `json:"manifest_body"`
+	Frontmatter  string `json:"frontmatter"`
+	// SkillRaw is the verbatim SKILL.md for a type: skill artifact (§4.3.4),
+	// delivered so materialization reproduces the authored skill file exactly
+	// rather than reconstructing it from ARTIFACT.md frontmatter plus body.
+	SkillRaw    string            `json:"skill_raw,omitempty"`
+	Layer       string            `json:"layer,omitempty"`
+	Sensitivity string            `json:"sensitivity,omitempty"`
+	Resources   map[string]string `json:"resources,omitempty"`
 	// ResourcesB64 mirrors the registry's resources_base64 flag: when true,
 	// the inline Resources values are base64-encoded and must be decoded to
 	// raw bytes before the content-hash check and materialization (F-6.6.8).
@@ -1553,9 +1557,14 @@ func resourcesAsBytes(in map[string]string) map[string][]byte {
 }
 
 func synthesizeSkillMD(r loadArtifactResponse) string {
-	// The registry returns the merged manifest body. For skills the
-	// agent expects a SKILL.md with the body content. The frontmatter
-	// is whatever ARTIFACT.md carried; the body is the prose.
+	// spec: §4.3.4 / §11 — the registry delivers the verbatim SKILL.md in
+	// skill_raw, so the materialized skill file is byte-identical to the
+	// authored source. The authored SKILL.md frontmatter (name, description,
+	// compatibility, allowed-tools, …) cannot be reconstructed from
+	// ARTIFACT.md frontmatter plus body, so prefer the raw bytes.
+	if r.SkillRaw != "" {
+		return r.SkillRaw
+	}
 	return r.Frontmatter + r.ManifestBody
 }
 

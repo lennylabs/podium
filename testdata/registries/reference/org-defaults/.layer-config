@@ -1,0 +1,4 @@
+# Org-wide defaults are visible to every caller, including unauthenticated
+# ones. spec §4.6 visibility: public.
+visibility:
+  public: true

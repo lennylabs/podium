@@ -1186,7 +1186,12 @@ type LoadArtifactResult struct {
 	ContentHash  string
 	ManifestBody string
 	Frontmatter  []byte
-	Layer        string
+	// SkillRaw is the verbatim SKILL.md for a type: skill artifact (§4.3.4),
+	// surfaced so server-source delivery reproduces the authored skill file
+	// byte-for-byte (§11 filesystem ↔ server equivalence). Empty for
+	// non-skills.
+	SkillRaw []byte
+	Layer    string
 	// Resources are the §4.4 bundled resources for the artifact,
 	// resolved from the persisted manifest record (§7.2 data plane).
 	// Small resources carry their bytes inline; large ones carry a
@@ -1486,6 +1491,9 @@ func mergeChain(chain []store.ManifestRecord) store.ManifestRecord {
 		// own files ship, not the hidden parent's (§4.6). The leaf record
 		// is last in the chain, so its refs win.
 		out.Resources = c.Resources
+		// The verbatim SKILL.md follows the child's identity: a skill that
+		// extends a parent still ships its own authored SKILL.md.
+		out.SkillRaw = c.SkillRaw
 	}
 	// Surface the merged structured fields back onto the record so search
 	// descriptors, sensitivity gating, and deprecation reporting agree
@@ -1574,6 +1582,7 @@ func resultFromRecord(rec store.ManifestRecord) *LoadArtifactResult {
 		ContentHash:  rec.ContentHash,
 		ManifestBody: string(rec.Body),
 		Frontmatter:  rec.Frontmatter,
+		SkillRaw:     rec.SkillRaw,
 		Layer:        rec.Layer,
 		Sensitivity:  rec.Sensitivity,
 		Resources:    rec.Resources,

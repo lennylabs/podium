@@ -8,4 +8,4 @@ license: MIT
 
 # Journal
 
-Working notes for joan. Not for sharing.
+Working notes for alice. Not for sharing.
