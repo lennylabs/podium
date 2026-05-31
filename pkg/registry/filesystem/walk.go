@@ -75,6 +75,16 @@ func (r *Registry) Walk(opts WalkOptions) ([]ArtifactRecord, error) {
 		// Highest-precedence wins; later layers override earlier.
 		deduped[idx] = rec
 	}
+
+	// spec: §13.11.3 — filesystem source resolves extends: through the same
+	// merge the registry applies at load time, so materialization produces
+	// equivalent output for the same artifact directory. Callers that want
+	// raw layer records (lint, conformance) leave ResolveExtends false.
+	if opts.ResolveExtends {
+		if err := resolveExtends(deduped, all); err != nil {
+			return nil, err
+		}
+	}
 	return deduped, nil
 }
 
@@ -112,6 +122,12 @@ const (
 // WalkOptions configures Walk behavior.
 type WalkOptions struct {
 	CollisionPolicy CollisionPolicy
+	// ResolveExtends folds each record's extends: chain into the record via
+	// the shared manifest.MergeExtends before Walk returns, replacing the
+	// record's ArtifactBytes/Artifact with the merged, extends-stripped
+	// manifest (§4.6, §13.11.3). When false, records keep their authored
+	// frontmatter unchanged.
+	ResolveExtends bool
 }
 
 // walkLayer enumerates every artifact directory in a single layer.

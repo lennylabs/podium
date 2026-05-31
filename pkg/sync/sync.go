@@ -344,8 +344,12 @@ func filesystemRecords(opts Options) ([]materialRecord, error) {
 	if err != nil {
 		return nil, err
 	}
+	// spec: §13.11.3 — filesystem source runs the same composer and extends:
+	// resolver as the server so materialization produces equivalent output for
+	// the same artifact directory (the §13.11.6 migration equivalence).
 	records, err := reg.Walk(filesystem.WalkOptions{
 		CollisionPolicy: filesystem.CollisionPolicyHighestWins,
+		ResolveExtends:  true,
 	})
 	if err != nil {
 		return nil, err

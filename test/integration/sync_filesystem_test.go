@@ -78,6 +78,72 @@ func TestPodiumSync_FilesystemSourceWritesTarget(t *testing.T) {
 	}
 }
 
+// Spec: §13.11.3 / §4.6 — `podium sync` against a filesystem source resolves
+// extends: through the same merge the registry applies at load time, so the
+// materialized output carries the merged, extends-stripped frontmatter rather
+// than the child's authored bytes. This is the §13.11.6 equivalent-output
+// guarantee on the filesystem side (F-13.11.2).
+func TestPodiumSync_FilesystemSourceResolvesExtends(t *testing.T) {
+	t.Parallel()
+	registry := t.TempDir()
+	target := t.TempDir()
+	parent := "---\ntype: context\nversion: 1.0.0\nname: Base\ndescription: parent desc\nsensitivity: low\ntags:\n  - shared\n---\n\nParent body.\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child desc\nsensitivity: high\nextends: x\ntags:\n  - team\n---\n\nChild body.\n"
+	testharness.WriteTree(t, registry,
+		testharness.WriteTreeOption{
+			Path: ".registry-config", Content: "multi_layer: true\nlayer_order:\n  - team-shared\n  - personal\n",
+		},
+		testharness.WriteTreeOption{Path: "team-shared/x/ARTIFACT.md", Content: parent},
+		testharness.WriteTreeOption{Path: "personal/x/ARTIFACT.md", Content: child},
+	)
+	res := cmdharness.Run(t, "podium", "",
+		"sync", "--registry", registry, "--target", target, "--harness", "none",
+	)
+	if res.ExitCode != 0 {
+		t.Fatalf("podium sync exit=%d\nstderr:\n%s", res.ExitCode, res.Stderr)
+	}
+	got := testharness.ReadTree(t, target)
+	merged, ok := got["x/ARTIFACT.md"]
+	if !ok {
+		t.Fatalf("target missing x/ARTIFACT.md (got: %v)", keys(got))
+	}
+	// Child wins on description; parent name is inherited; sensitivity is
+	// most-restrictive; tags union; extends is stripped.
+	for _, want := range []string{"description: child desc", "name: Base", "sensitivity: high"} {
+		if !strings.Contains(merged, want) {
+			t.Errorf("merged frontmatter missing %q:\n%s", want, merged)
+		}
+	}
+	if !strings.Contains(merged, "shared") || !strings.Contains(merged, "team") {
+		t.Errorf("merged tags missing the union of shared+team:\n%s", merged)
+	}
+	if strings.Contains(merged, "extends:") {
+		t.Errorf("merged frontmatter must strip extends (§4.6 hidden parent):\n%s", merged)
+	}
+}
+
+// Spec: §13.11.2 — when defaults.registry is unset across all scopes and no
+// --registry / PODIUM_REGISTRY is given, the CLI errors with config.no_registry
+// and points the user at podium init (F-13.11.3).
+func TestPodiumSync_UnsetRegistryEmitsNoRegistryCode(t *testing.T) {
+	t.Parallel()
+	// A workspace with a .podium/ dir but no defaults.registry in any scope.
+	ws := t.TempDir()
+	testharness.WriteTree(t, ws,
+		testharness.WriteTreeOption{Path: ".podium/sync.yaml", Content: "defaults:\n  harness: none\n"},
+	)
+	res := cmdharness.Run(t, "podium", ws, "sync", "--target", t.TempDir())
+	if res.ExitCode == 0 {
+		t.Fatalf("expected non-zero exit, stdout:\n%s", res.Stdout)
+	}
+	if !strings.Contains(res.Stderr, "config.no_registry") {
+		t.Errorf("stderr missing config.no_registry: %s", res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "podium init") {
+		t.Errorf("stderr missing the podium init pointer: %s", res.Stderr)
+	}
+}
+
 // Spec: §7.5 — --dry-run resolves the artifact set and writes nothing.
 func TestPodiumSync_DryRunWritesNothing(t *testing.T) {
 	t.Parallel()

@@ -95,6 +95,50 @@ func TestWatch_RerunsAfterRegistryEdit(t *testing.T) {
 	}
 }
 
+// Spec: §13.11.4 — an in-place edit to an existing artifact file (an
+// fsnotify Write rather than a Create) triggers a rerun. The rerun reports
+// the new version, confirming the watcher observes content changes and not
+// only directory additions.
+func TestWatch_RerunsAfterInPlaceEdit(t *testing.T) {
+	dir := t.TempDir()
+	registry := makeRegistry(t, dir)
+	target := filepath.Join(dir, "out")
+	artifact := filepath.Join(registry, "_default", "finance", "intro", "ARTIFACT.md")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events, err := sync.Watch(ctx, sync.WatchOptions{
+		Sync: sync.Options{
+			RegistryPath: registry,
+			Target:       target,
+			AdapterID:    "none",
+		},
+		Period:   50 * time.Millisecond,
+		Debounce: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Watch: %v", err)
+	}
+	first := waitFor(t, events, 5*time.Second)
+	if first.Err != nil {
+		t.Fatalf("initial sync: %v", first.Err)
+	}
+	if len(first.Result.Artifacts) != 1 || first.Result.Artifacts[0].Version != "1.0.0" {
+		t.Fatalf("initial = %+v, want one artifact at 1.0.0", first.Result.Artifacts)
+	}
+	// Bump the version in place.
+	body := "---\ntype: context\nversion: 2.0.0\ndescription: intro\nsensitivity: low\n---\n\nbody\n"
+	if err := os.WriteFile(artifact, []byte(body), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	second := waitFor(t, events, 30*time.Second)
+	if second.Err != nil {
+		t.Fatalf("rerun: %v", second.Err)
+	}
+	if len(second.Result.Artifacts) != 1 || second.Result.Artifacts[0].Version != "2.0.0" {
+		t.Errorf("rerun = %+v, want one artifact at 2.0.0", second.Result.Artifacts)
+	}
+}
+
 // Spec: §7.5 — canceling the watcher's context closes the events
 // channel; the goroutine exits cleanly.
 func TestWatch_CancelClosesChannel(t *testing.T) {

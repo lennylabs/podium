@@ -79,6 +79,11 @@ func Watch(ctx context.Context, opts WatchOptions) (<-chan WatchEvent, error) {
 
 // runWatch is the watcher goroutine. It owns the events channel and
 // closes it on exit.
+//
+// spec: §13.11.4 — a filesystem source uses fsnotify to watch the registry
+// path and the workspace overlay. Polling is the fallback for platforms or
+// filesystems where fsnotify cannot initialize (for example a network share
+// that does not deliver inotify events).
 func runWatch(ctx context.Context, opts WatchOptions, events chan<- WatchEvent) {
 	defer close(events)
 
@@ -89,6 +94,18 @@ func runWatch(ctx context.Context, opts WatchOptions, events chan<- WatchEvent) 
 		}
 	}
 
+	if tw, err := newTreeWatcher(opts.Sync.RegistryPath, opts.OverlayPath); err == nil {
+		defer tw.Close()
+		runFSNotifyWatch(ctx, opts, tw, emit)
+		return
+	}
+	runPollWatch(ctx, opts, emit)
+}
+
+// runPollWatch is the poll-based fallback watcher. It computes a content
+// fingerprint over the watched trees on each tick and reruns the sync when
+// the fingerprint moves, debouncing bursts of edits.
+func runPollWatch(ctx context.Context, opts WatchOptions, emit func(*Result, error)) {
 	// Initial sync. Capture lastSig BEFORE emitting so a caller that
 	// reads the first event and immediately edits the registry can't
 	// race the signature snapshot. The previous order (emit, then

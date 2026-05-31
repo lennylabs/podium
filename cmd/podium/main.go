@@ -259,7 +259,13 @@ func syncCmd(args []string) int {
 		registryPath = sync.ResolveRegistryPath(workspace, registryPath)
 	}
 	if registryPath == "" {
-		fmt.Fprintln(os.Stderr, "error: --registry is required (registry URL or filesystem path) — set it on the command line or in <ws>/.podium/sync.yaml")
+		// spec: §13.11.2 — "If defaults.registry is unset across all scopes,
+		// the client errors with config.no_registry and points the user at
+		// podium init." Registry resolution above already applies the §7.5.2
+		// precedence chain (CLI flag, PODIUM_REGISTRY, then the merged
+		// user-global/project-shared/project-local scopes), so reaching here
+		// means no scope set defaults.registry.
+		fmt.Fprintln(os.Stderr, "error: config.no_registry: no registry configured — run `podium init` to set defaults.registry, or pass --registry")
 		return 2
 	}
 

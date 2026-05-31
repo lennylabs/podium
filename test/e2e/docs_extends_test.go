@@ -12,8 +12,11 @@ package e2e
 // e2e harness cannot exercise them: per-identity layer visibility (hidden
 // parents/children), a post-boot reingest path (pin propagation), and a
 // content-hash pin whose value is unknowable before the fixtures are written;
-// those are covered by package-level tests. Bundled-file merge over sync stays
-// skipped under F-13.11.2.
+// those are covered by package-level tests. Bundled-file (resource) merge stays
+// skipped because the shared resolver (core.mergeChain) serves the child's
+// resources only; that resource-union behavior is unimplemented on the server
+// and on filesystem sync alike, independent of the F-13.11.2 frontmatter
+// extends resolution now applied to the filesystem path.
 
 import (
 	"os"
@@ -300,28 +303,28 @@ func TestExtends_HiddenParentNotInSearch(t *testing.T) {
 // spec: docs/authoring/extends.md § "Bundled-file merge semantics".
 func TestExtends_BundledChildOverrides(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-13.11.2: the podium sync filesystem path does not resolve extends, so same-path bundled files are not merged; the higher-precedence layer wins by collision policy rather than by an extends merge")
+	t.Skip("bundled-file (resource) merge across extends is not implemented in the shared resolver: core.mergeChain serves the child's resources only (child-only for §4.6 hidden-parent privacy), so neither the server nor the now-extends-resolving filesystem sync (F-13.11.2) unions parent and child files. This is a §4.4/§4.6 resource-merge gap, not the frontmatter-resolution gap F-13.11.2 closed")
 }
 
 // T-D-extends-19 — a parent-only bundled file is inherited unchanged.
 // spec: docs/authoring/extends.md § "Bundled-file merge semantics".
 func TestExtends_BundledParentOnlyInherited(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-13.11.2: the podium sync filesystem path does not resolve extends, so a parent-only bundled file is not inherited into the child's materialized output")
+	t.Skip("bundled-file (resource) merge across extends is not implemented in the shared resolver: core.mergeChain serves the child's resources only, so a parent-only bundled file is not inherited on either the server or the now-extends-resolving filesystem sync (F-13.11.2). This is a §4.4/§4.6 resource-merge gap, not the frontmatter-resolution gap F-13.11.2 closed")
 }
 
 // T-D-extends-20 — a child-only bundled file is added to the merged output.
 // spec: docs/authoring/extends.md § "Bundled-file merge semantics".
 func TestExtends_BundledChildOnlyAdded(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-13.11.2: the podium sync filesystem path does not resolve extends, so there is no merged output to add the child-only file into")
+	t.Skip("bundled-file (resource) merge across extends is not implemented in the shared resolver: core.mergeChain serves the child's resources only, with no parent/child file union, on either the server or the now-extends-resolving filesystem sync (F-13.11.2). This is a §4.4/§4.6 resource-merge gap, not the frontmatter-resolution gap F-13.11.2 closed")
 }
 
 // T-D-extends-21 — the child cannot delete a parent file; it is inherited.
 // spec: docs/authoring/extends.md § "Bundled-file merge semantics".
 func TestExtends_BundledChildCannotDelete(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-13.11.2: the podium sync filesystem path does not resolve extends, so the parent file is never composed into the child's output and the delete-shadow semantics are not exercisable")
+	t.Skip("bundled-file (resource) merge across extends is not implemented in the shared resolver: core.mergeChain serves the child's resources only, so the parent file is never composed into the child's output and the delete-shadow semantics are not exercisable on either the server or the now-extends-resolving filesystem sync (F-13.11.2). This is a §4.4/§4.6 resource-merge gap, not the frontmatter-resolution gap F-13.11.2 closed")
 }
 
 // ---- SKILL.md override (T-D-extends-22) -------------------------------------
