@@ -14,7 +14,7 @@ type Memory struct {
 	tenants   map[string]Tenant
 	manifests map[string]ManifestRecord
 	deps      map[string][]DependencyEdge
-	admins    map[string]bool
+	admins    map[string]AdminGrant   // key: userID + "/" + orgID
 	layers    map[string]LayerConfig  // key: tenantID + "/" + id
 	domains   map[string]DomainRecord // key: tenantID + "/" + layer + "/" + path
 }
@@ -25,7 +25,7 @@ func NewMemory() *Memory {
 		tenants:   map[string]Tenant{},
 		manifests: map[string]ManifestRecord{},
 		deps:      map[string][]DependencyEdge{},
-		admins:    map[string]bool{},
+		admins:    map[string]AdminGrant{},
 		layers:    map[string]LayerConfig{},
 		domains:   map[string]DomainRecord{},
 	}
@@ -183,7 +183,10 @@ func (s *Memory) RevokeAdmin(_ context.Context, userID, orgID string) error {
 func (s *Memory) GrantAdmin(_ context.Context, g AdminGrant) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.admins[g.UserID+"/"+g.OrgID] = true
+	if g.Granted.IsZero() {
+		g.Granted = time.Now().UTC()
+	}
+	s.admins[g.UserID+"/"+g.OrgID] = g
 	return nil
 }
 
@@ -191,7 +194,22 @@ func (s *Memory) GrantAdmin(_ context.Context, g AdminGrant) error {
 func (s *Memory) IsAdmin(_ context.Context, userID, orgID string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.admins[userID+"/"+orgID], nil
+	_, ok := s.admins[userID+"/"+orgID]
+	return ok, nil
+}
+
+// ListAdminGrants returns every grant for orgID, ordered by UserID.
+func (s *Memory) ListAdminGrants(_ context.Context, orgID string) ([]AdminGrant, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []AdminGrant
+	for _, g := range s.admins {
+		if g.OrgID == orgID {
+			out = append(out, g)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].UserID < out[j].UserID })
+	return out, nil
 }
 
 func layerKey(tenantID, id string) string { return tenantID + "/" + id }

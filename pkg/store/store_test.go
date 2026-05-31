@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 )
 
@@ -78,5 +79,50 @@ func TestMemory_AdminGrants(t *testing.T) {
 	}
 	if ok, _ := s.IsAdmin(ctx, "joan", "other"); ok {
 		t.Errorf("admin grant leaked across orgs")
+	}
+}
+
+// spec: §13.10 — ListAdminGrants enumerates a tenant's grants so
+// migration (§13.4) can preserve them. Covers empty, ordering, and
+// org-isolation corner cases across Memory and SQLite.
+func TestListAdminGrants(t *testing.T) {
+	t.Parallel()
+	sqlitePath := filepath.Join(t.TempDir(), "grants.db")
+	sq, err := OpenSQLite(sqlitePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	backends := map[string]Store{"memory": NewMemory(), "sqlite": sq}
+	for name, s := range backends {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			// Empty: no grants for an org returns an empty slice.
+			got, err := s.ListAdminGrants(ctx, "acme")
+			if err != nil {
+				t.Fatalf("ListAdminGrants empty: %v", err)
+			}
+			if len(got) != 0 {
+				t.Fatalf("empty org grants = %d, want 0", len(got))
+			}
+			// Seed two grants in acme (out of order) and one in globex.
+			_ = s.GrantAdmin(ctx, AdminGrant{UserID: "bob@acme.com", OrgID: "acme"})
+			_ = s.GrantAdmin(ctx, AdminGrant{UserID: "alice@acme.com", OrgID: "acme"})
+			_ = s.GrantAdmin(ctx, AdminGrant{UserID: "carol@globex.com", OrgID: "globex"})
+
+			got, err = s.ListAdminGrants(ctx, "acme")
+			if err != nil {
+				t.Fatalf("ListAdminGrants acme: %v", err)
+			}
+			// Ordering: enumerated by UserID ascending.
+			if len(got) != 2 || got[0].UserID != "alice@acme.com" || got[1].UserID != "bob@acme.com" {
+				t.Fatalf("acme grants = %+v, want [alice, bob] ordered", got)
+			}
+			// Org isolation: globex grants do not leak into acme.
+			for _, g := range got {
+				if g.OrgID != "acme" {
+					t.Errorf("grant %+v leaked from another org", g)
+				}
+			}
+		})
 	}
 }

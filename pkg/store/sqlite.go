@@ -400,6 +400,28 @@ func (s *SQLite) IsAdmin(ctx context.Context, userID, orgID string) (bool, error
 	return true, nil
 }
 
+// ListAdminGrants returns every grant for orgID, ordered by user_id.
+func (s *SQLite) ListAdminGrants(ctx context.Context, orgID string) ([]AdminGrant, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT user_id, org_id, granted_at FROM admin_grants
+		WHERE org_id = ? ORDER BY user_id`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AdminGrant
+	for rows.Next() {
+		var g AdminGrant
+		var granted string
+		if err := rows.Scan(&g.UserID, &g.OrgID, &granted); err != nil {
+			return nil, err
+		}
+		g.Granted, _ = time.Parse(time.RFC3339Nano, granted)
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
 // RevokeAdmin removes the admin grant; missing rows are a no-op.
 func (s *SQLite) RevokeAdmin(ctx context.Context, userID, orgID string) error {
 	_, err := s.db.ExecContext(ctx, `

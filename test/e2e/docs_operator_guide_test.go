@@ -372,20 +372,27 @@ func TestOpGuide_16_MigrateToStandardSQLiteToSQLite(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-17: migrate-to-standard requires --source-sqlite ----
+// ---- T-D-operator-guide-17: migrate-to-standard defaults the source --------
 
 // T-D-operator-guide-17
-func TestOpGuide_17_MigrateToStandardRequiresSourceSQLite(t *testing.T) {
+//
+// spec: §13.4 / §13.10 — the documented short form omits the source
+// flags, so an unset --source-sqlite resolves to the standalone layout
+// (~/.podium/standalone/podium.db). When that default does not exist the
+// command fails opening the source rather than treating the source as a
+// missing required argument.
+func TestOpGuide_17_MigrateToStandardDefaultsSource(t *testing.T) {
 	t.Parallel()
-	res := runPodium(t, "", nil,
+	home := t.TempDir() // clean HOME: no ~/.podium/standalone/podium.db
+	res := runPodium(t, "", []string{"HOME=" + home},
 		"admin", "migrate-to-standard",
 		"--target-store", "sqlite",
 		"--target-sqlite", filepath.Join(t.TempDir(), "dst.db"))
-	if res.Exit != 2 {
-		t.Errorf("exit=%d, want 2 (stderr=%s)", res.Exit, res.Stderr)
+	if res.Exit != 1 {
+		t.Errorf("exit=%d, want 1 (source default absent) (stderr=%s)", res.Exit, res.Stderr)
 	}
-	if !strings.Contains(res.Stderr, "--source-sqlite is required") {
-		t.Errorf("stderr missing '--source-sqlite is required':\n%s", res.Stderr)
+	if !strings.Contains(res.Stderr, "open source SQLite") {
+		t.Errorf("stderr missing 'open source SQLite':\n%s", res.Stderr)
 	}
 }
 
@@ -425,6 +432,53 @@ func TestOpGuide_18_MigrateToStandardObjectsCopy(t *testing.T) {
 	}
 	if !strings.Contains(res.Stdout, "object migration complete") {
 		t.Errorf("stdout missing 'object migration complete':\n%s", res.Stdout)
+	}
+}
+
+// ---- T-D-operator-guide-18b: migrate-to-standard §13.4 short form ----------
+
+// T-D-operator-guide-18b
+//
+// spec: §13.4 / §13.10 — the documented short form
+// `podium admin migrate-to-standard --postgres <dsn> --object-store <url>`
+// is accepted (F-13.4.1). --object-store=file://... selects the
+// filesystem backend; --target-store=sqlite stands in for --postgres so
+// the test needs no live Postgres. The run reports admin-grant
+// preservation (F-13.4.2).
+func TestOpGuide_18b_MigrateToStandardShortForm(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	srcDB := filepath.Join(home, "src.db")
+	srcObjects := filepath.Join(home, "src-objects")
+	dstDB := filepath.Join(home, "dst.db")
+	dstObjects := filepath.Join(home, "dst-objects")
+
+	if err := os.MkdirAll(srcObjects, 0o755); err != nil {
+		t.Fatalf("mkdir srcObjects: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(srcObjects, "blob.bin"), []byte("payload"), 0o644); err != nil {
+		t.Fatalf("write blob: %v", err)
+	}
+	opguidePopulateSourceSQLite(t, home, srcDB)
+
+	res := runPodium(t, "", nil,
+		"admin", "migrate-to-standard",
+		"--source-sqlite", srcDB,
+		"--source-objects", srcObjects,
+		"--target-store", "sqlite",
+		"--target-sqlite", dstDB,
+		"--object-store", "file://"+dstObjects)
+	if res.Exit != 0 {
+		t.Fatalf("migrate-to-standard exit=%d stderr=%s stdout=%s", res.Exit, res.Stderr, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "admin grant(s) preserved") {
+		t.Errorf("stdout missing admin-grant preservation line:\n%s", res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "object migration complete") {
+		t.Errorf("stdout missing 'object migration complete':\n%s", res.Stdout)
+	}
+	if _, err := os.Stat(dstObjects); err != nil {
+		t.Errorf("short-form --object-store did not create dest objects dir: %v", err)
 	}
 }
 

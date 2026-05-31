@@ -415,6 +415,26 @@ func (p *Postgres) IsAdmin(ctx context.Context, userID, orgID string) (bool, err
 	return true, nil
 }
 
+// ListAdminGrants returns every grant for orgID, ordered by user_id.
+func (p *Postgres) ListAdminGrants(ctx context.Context, orgID string) ([]AdminGrant, error) {
+	rows, err := p.db.QueryContext(ctx, `
+		SELECT user_id, org_id, granted_at FROM admin_grants
+		WHERE org_id = $1 ORDER BY user_id`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AdminGrant
+	for rows.Next() {
+		var g AdminGrant
+		if err := rows.Scan(&g.UserID, &g.OrgID, &g.Granted); err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
 // RevokeAdmin removes the admin grant; missing rows are a no-op.
 func (p *Postgres) RevokeAdmin(ctx context.Context, userID, orgID string) error {
 	_, err := p.db.ExecContext(ctx, `

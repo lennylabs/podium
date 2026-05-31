@@ -342,6 +342,10 @@ type Store interface {
 	GrantAdmin(ctx context.Context, g AdminGrant) error
 	RevokeAdmin(ctx context.Context, userID, orgID string) error
 	IsAdmin(ctx context.Context, userID, orgID string) (bool, error)
+	// ListAdminGrants returns every admin grant for orgID, ordered by
+	// UserID. Migration (§13.4 / §13.10 "admin grants ... are preserved")
+	// enumerates grants here so they transfer to the target deployment.
+	ListAdminGrants(ctx context.Context, orgID string) ([]AdminGrant, error)
 
 	// Layer configs (§4.6 layer list, managed via the layer CLI).
 	PutLayerConfig(ctx context.Context, cfg LayerConfig) error
