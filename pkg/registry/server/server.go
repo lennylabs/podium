@@ -751,6 +751,12 @@ func (s *Server) handleScopePreview(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
+	// §6.5: GET materializes; HEAD revalidates the MCP resolution cache by
+	// returning the resolved content hash in a header without a body.
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		writeError(w, http.StatusMethodNotAllowed, "registry.method_not_allowed", "method not allowed: "+r.Method)
+		return
+	}
 	if !s.quota.AllowMaterialize(s.tenant) {
 		writeQuotaError(w, "quota.materialize_rate_exceeded", "tenant materialize budget exhausted")
 		return
@@ -773,6 +779,17 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		s.writeCoreError(w, err)
+		return
+	}
+	// §6.5 HEAD revalidation: report the resolved content hash (and version)
+	// in headers so the MCP cache confirms an unchanged artifact without
+	// downloading the manifest body or presigning resources.
+	if r.Method == http.MethodHead {
+		w.Header().Set("X-Podium-Content-Hash", res.ContentHash)
+		if res.Version != "" {
+			w.Header().Set("X-Podium-Version", res.Version)
+		}
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 	resp := LoadArtifactResponse{

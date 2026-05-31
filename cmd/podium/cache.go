@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -75,7 +76,18 @@ func cachePrune(args []string) int {
 		if !e.IsDir() {
 			continue
 		}
+		// §6.5 (F-6.5.3): the resolution index (`.resolutions`) and any other
+		// dot-prefixed bookkeeping directory are not content buckets; never
+		// prune them, or offline resolution loses its (id, version) index.
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
 		bucket := filepath.Join(*dir, e.Name())
+		// A content bucket always holds a `frontmatter` file; skip any
+		// directory that is not one so prune cannot delete unrelated data.
+		if _, err := os.Stat(filepath.Join(bucket, "frontmatter")); err != nil {
+			continue
+		}
 		mtime, size := bucketAccessTime(bucket)
 		if !mtime.Before(cutoff) {
 			kept++
@@ -100,7 +112,9 @@ func cachePrune(args []string) int {
 
 // bucketAccessTime returns the most recent mtime of any file
 // inside the bucket directory. Falls back to the bucket dir's
-// own mtime when empty.
+// own mtime when empty. The MCP server touches bucket files on every
+// cache hit (§6.5, F-6.5.6), so the newest mtime reflects last access
+// (read or write), not just the original write time.
 func bucketAccessTime(bucket string) (time.Time, int64) {
 	info, err := os.Stat(bucket)
 	if err != nil {

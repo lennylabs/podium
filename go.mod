@@ -11,6 +11,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.44
 	github.com/minio/minio-go/v7 v7.1.0
 	github.com/zalando/go-keyring v0.2.8
+	go.etcd.io/bbolt v1.4.3
 	gopkg.in/yaml.v3 v3.0.1
 )
 

@@ -4,24 +4,34 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Spec: §6.5 — the resolution cache persists (id, version) →
-// content_hash so offline-first reads can serve future requests
-// without contacting the registry.
+// content_hash to a BoltDB index so offline-first reads can serve
+// future requests without contacting the registry.
 func TestResolutionCache_RoundTrip(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
+	now := time.Now()
 	r1 := newResolutionCache(dir)
-	r1.Put("team/finance", "1.0.0", "sha256:abc")
-	r1.Put("team/finance", "", "sha256:abc")
+	r1.PutVersion("team/finance", "1.0.0", "sha256:abc", now)
+	// A latest request resolving to 1.0.0 maps (id,"latest")→semver
+	// and (id,1.0.0)→content_hash (§6.5).
+	r1.PutLatest("team/finance", "1.0.0", "sha256:abc", now)
+	// Close releases the BoltDB lock so a second handle can open the
+	// same on-disk index.
+	if err := r1.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
 
 	r2 := newResolutionCache(dir)
-	if got, ok := r2.Get("team/finance", "1.0.0"); !ok || got != "sha256:abc" {
-		t.Errorf("Get(1.0.0) = %q ok=%v, want sha256:abc, true", got, ok)
+	defer r2.Close()
+	if got, ok := r2.Resolve("team/finance", "1.0.0", now, 30*time.Second, false); !ok || got != "sha256:abc" {
+		t.Errorf("Resolve(1.0.0) = %q ok=%v, want sha256:abc, true", got, ok)
 	}
-	if got, ok := r2.Get("team/finance", ""); !ok || got != "sha256:abc" {
-		t.Errorf("Get(latest) = %q ok=%v, want sha256:abc, true", got, ok)
+	if got, ok := r2.Resolve("team/finance", "", now, 30*time.Second, false); !ok || got != "sha256:abc" {
+		t.Errorf("Resolve(latest) = %q ok=%v, want sha256:abc, true", got, ok)
 	}
 }
 
@@ -29,8 +39,8 @@ func TestResolutionCache_RoundTrip(t *testing.T) {
 func TestResolutionCache_DisabledCache(t *testing.T) {
 	t.Parallel()
 	r := newResolutionCache("")
-	r.Put("x", "1.0.0", "sha256:abc")
-	if _, ok := r.Get("x", "1.0.0"); ok {
+	r.PutVersion("x", "1.0.0", "sha256:abc", time.Now())
+	if _, ok := r.Resolve("x", "1.0.0", time.Now(), 30*time.Second, false); ok {
 		t.Errorf("disabled cache returned a hit")
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Spec: §7.4 — always-revalidate + unreachable registry +
@@ -18,7 +19,7 @@ func TestLoadArtifact_AlwaysRevalidateFallsBackToCacheOnNetworkError(t *testing.
 		t.Fatalf("put: %v", err)
 	}
 	resolutions := newResolutionCache(dir)
-	resolutions.Put("team/x", "", hash)
+	resolutions.PutLatest("team/x", "", hash, time.Now())
 
 	srv := &mcpServer{
 		cfg: &config{

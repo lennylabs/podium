@@ -125,8 +125,9 @@ func TestHealthTool_CacheSize(t *testing.T) {
 	ts := readyzStub(t, "ready", http.StatusOK)
 	s := newHealthServer(ts.URL)
 	s.resolutions = newResolutionCache(t.TempDir())
-	s.resolutions.Put("finance/x", "1.0.0", "sha256:aaa")
-	s.resolutions.Put("finance/y", "2.0.0", "sha256:bbb")
+	now := time.Now()
+	s.resolutions.PutVersion("finance/x", "1.0.0", "sha256:aaa", now)
+	s.resolutions.PutVersion("finance/y", "2.0.0", "sha256:bbb", now)
 
 	res := s.healthTool().(healthResult)
 	if res.CacheSize != 2 {

@@ -35,6 +35,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -83,10 +84,15 @@ func main() {
 
 // config captures every PODIUM_ env var the bridge consults.
 type config struct {
-	registry         string
-	harness          string
-	cacheDir         string
-	cacheMode        string
+	registry  string
+	harness   string
+	cacheDir  string
+	cacheMode string
+	// resolutionTTL bounds how long a cached `(id, "latest")` resolution is
+	// served before it is treated as a miss (§6.5 "TTL 30s by default").
+	// Pinned versions are immutable and ignore this. Sourced from
+	// PODIUM_CACHE_RESOLUTION_TTL_SECONDS; 0 disables expiry.
+	resolutionTTL    time.Duration
 	materializeRoot  string
 	sessionToken     string
 	sessionTokenFile string
@@ -157,7 +163,9 @@ func loadConfig() (*config, error) {
 		harness:  envDefault("PODIUM_HARNESS", "none"),
 		cacheDir: os.Getenv("PODIUM_CACHE_DIR"),
 		// §6.5: always-revalidate (default) | offline-first | offline-only.
-		cacheMode:              envDefault("PODIUM_CACHE_MODE", "always-revalidate"),
+		cacheMode: envDefault("PODIUM_CACHE_MODE", "always-revalidate"),
+		// §6.5: resolution-cache TTL for `latest`, default 30s.
+		resolutionTTL:          parseTTLSeconds(envDefault("PODIUM_CACHE_RESOLUTION_TTL_SECONDS", "30")),
 		materializeRoot:        os.Getenv("PODIUM_MATERIALIZE_ROOT"),
 		sessionToken:           os.Getenv(tokenSource),
 		sessionTokenFile:       os.Getenv("PODIUM_SESSION_TOKEN_FILE"),
@@ -255,6 +263,17 @@ func envDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// parseTTLSeconds converts a §6.5 resolution-cache TTL expressed in seconds to
+// a Duration. A non-numeric or negative value falls back to the 30s default; a
+// value of 0 disables expiry.
+func parseTTLSeconds(s string) time.Duration {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || n < 0 {
+		return 30 * time.Second
+	}
+	return time.Duration(n) * time.Second
 }
 
 // mcpServer holds the wiring for one bridge process.
@@ -762,14 +781,38 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 	// §6.5 cache modes: in offline-first / offline-only modes, try
 	// the resolution + content cache before going to the network.
 	id, version := argsIDAndVersion(args)
+	now := time.Now()
+	ttl := s.cfg.resolutionTTL
 	if (s.cfg.cacheMode == "offline-first" || s.cfg.cacheMode == "offline-only") && id != "" {
-		if hash, ok := s.resolutions.Get(id, version); ok {
+		// offline-only serves a stale `latest` because it can never refresh;
+		// offline-first treats a stale `latest` as a miss and falls through to
+		// the registry. Pinned versions are immutable and never expire.
+		allowStale := s.cfg.cacheMode == "offline-only"
+		if hash, ok := s.resolutions.Resolve(id, version, now, ttl, allowStale); ok {
 			if cached, cerr := s.loadArtifactFromCache(hash, id); cerr == nil {
 				return s.deliverLoadArtifact(*cached, deliverOpts{harness: harnessFromArgs(s.cfg.harness, args), destination: destFromArgs(args)})
 			}
 		}
 		if s.cfg.cacheMode == "offline-only" {
 			return errorResult(errOfflineCacheMiss.Error())
+		}
+	}
+
+	// §6.5 always-revalidate: HEAD-revalidate the cached resolution on a hit.
+	// When the registry confirms the content hash is unchanged, serve the
+	// cached content instead of downloading the full manifest + resources. A
+	// changed hash or a HEAD failure falls through to a full fetch.
+	if s.cfg.cacheMode == "always-revalidate" && id != "" {
+		if hash, ok := s.resolutions.Resolve(id, version, now, ttl, true); ok && s.cache.has(hash) {
+			if freshHash, herr := s.headContentHash("/v1/load_artifact", args); herr == nil && freshHash == hash {
+				if cached, cerr := s.loadArtifactFromCache(hash, id); cerr == nil {
+					if version == "" {
+						// Revalidated: restart the `latest` TTL window.
+						s.resolutions.RefreshLatest(id, now)
+					}
+					return s.deliverLoadArtifact(*cached, deliverOpts{harness: harnessFromArgs(s.cfg.harness, args), destination: destFromArgs(args)})
+				}
+			}
 		}
 	}
 
@@ -780,7 +823,7 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 		// before surfacing the registry-unreachable error. Cache
 		// misses surface as network.registry_unreachable.
 		if s.cfg.cacheMode == "always-revalidate" && id != "" {
-			if hash, ok := s.resolutions.Get(id, version); ok {
+			if hash, ok := s.resolutions.Resolve(id, version, now, ttl, true); ok {
 				if cached, cerr := s.loadArtifactFromCache(hash, id); cerr == nil {
 					out := s.deliverLoadArtifact(*cached, deliverOpts{harness: harnessFromArgs(s.cfg.harness, args), destination: destFromArgs(args)})
 					if m, ok := out.(map[string]any); ok {
@@ -802,13 +845,14 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 		// Either an error envelope or an empty result; pass through.
 		return jsonAny(body)
 	}
-	// Update the resolution cache so future offline-first reads
-	// know the (id, version) → content_hash mapping.
-	s.resolutions.Put(id, version, resp.ContentHash)
-	if resp.Version != "" && resp.Version != version {
-		// Also memoize the explicit version for `version=""` (latest)
-		// requests so a later pinned request can serve from cache.
-		s.resolutions.Put(id, resp.Version, resp.ContentHash)
+	// Update the resolution cache so future reads know the (id, version) →
+	// content_hash mapping. A `latest` request records (id, "latest") → semver
+	// and (id, semver) → content_hash (§6.5); a pinned request records the
+	// version directly.
+	if version == "" {
+		s.resolutions.PutLatest(id, resp.Version, resp.ContentHash, now)
+	} else {
+		s.resolutions.PutVersion(id, version, resp.ContentHash, now)
 	}
 
 	return s.deliverLoadArtifact(resp, deliverOpts{
@@ -1462,9 +1506,11 @@ func synthesizeSkillMD(r loadArtifactResponse) string {
 	return r.Frontmatter + r.ManifestBody
 }
 
-// fetchJSON makes an authenticated GET against the registry and returns
-// the response body.
-func (s *mcpServer) fetchJSON(path string, args map[string]any) ([]byte, error) {
+// newRegistryRequest builds an authenticated registry request for the given
+// method and path, encoding args as query parameters and attaching the §6.3
+// credential, tenant, and session-correlation headers. Shared by fetchJSON and
+// the §6.5 HEAD revalidation path.
+func (s *mcpServer) newRegistryRequest(method, path string, args map[string]any) (*http.Request, error) {
 	u, err := url.Parse(s.cfg.registry + path)
 	if err != nil {
 		return nil, err
@@ -1488,7 +1534,7 @@ func (s *mcpServer) fetchJSON(path string, args map[string]any) ([]byte, error) 
 		q.Set("session_id", s.sessionID)
 	}
 	u.RawQuery = q.Encode()
-	req, err := http.NewRequest("GET", u.String(), nil)
+	req, err := http.NewRequest(method, u.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1507,6 +1553,16 @@ func (s *mcpServer) fetchJSON(path string, args map[string]any) ([]byte, error) 
 	// route without parsing the JWT.
 	if s.cfg.tenantID != "" {
 		req.Header.Set("X-Podium-Tenant", s.cfg.tenantID)
+	}
+	return req, nil
+}
+
+// fetchJSON makes an authenticated GET against the registry and returns
+// the response body.
+func (s *mcpServer) fetchJSON(path string, args map[string]any) ([]byte, error) {
+	req, err := s.newRegistryRequest("GET", path, args)
+	if err != nil {
+		return nil, err
 	}
 	client := s.http
 	if client == nil {
@@ -1532,6 +1588,32 @@ func (s *mcpServer) fetchJSON(path string, args map[string]any) ([]byte, error) 
 	// the health tool can report the last-successful-call timestamp.
 	s.recordSuccess(time.Now())
 	return body, nil
+}
+
+// headContentHash issues an authenticated HEAD against the registry to
+// revalidate a cached resolution without downloading the manifest body or
+// presigning resources (§6.5 always-revalidate). It returns the registry's
+// current content hash for the requested (id, version).
+func (s *mcpServer) headContentHash(path string, args map[string]any) (string, error) {
+	req, err := s.newRegistryRequest(http.MethodHead, path, args)
+	if err != nil {
+		return "", err
+	}
+	client := s.http
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("HEAD %s: status %d", path, resp.StatusCode)
+	}
+	s.recordSuccess(time.Now())
+	return resp.Header.Get("X-Podium-Content-Hash"), nil
 }
 
 // proxyGet forwards a non-load_artifact tool call to the registry and
@@ -1637,11 +1719,15 @@ func (c *contentCache) has(hash string) bool {
 	return err == nil
 }
 
-// sanitizeHash makes a content hash safe to use as a filesystem name.
-// "sha256:abc..." becomes "sha256-abc...".
+// sanitizeHash maps a content hash to its on-disk content-bucket name. The
+// §6.5 disk-cache layout is `${PODIUM_CACHE_DIR}/<sha256>/`, so the bucket name
+// is the bare hex digest with the `sha256:` algorithm prefix stripped
+// (F-6.5.7).
 func sanitizeHash(h string) string {
-	out := strings.ReplaceAll(h, ":", "-")
-	// Defense-in-depth: never let a separator escape the cache root.
+	out := strings.TrimPrefix(h, "sha256:")
+	// Defense-in-depth: never let a separator escape the cache root for a
+	// non-sha256 or malformed hash.
+	out = strings.ReplaceAll(out, ":", "-")
 	out = strings.ReplaceAll(out, "/", "_")
 	out = strings.ReplaceAll(out, "..", "_")
 	if out == "" {
