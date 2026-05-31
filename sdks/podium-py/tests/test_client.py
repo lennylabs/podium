@@ -195,21 +195,24 @@ def test_dependents_of_decodes_edges(stub_server):
     assert deps[0].kind == "extends"
 
 
-# Spec: §6.4 — preview_scope hits /v1/scope/preview with the
-# constraints; the SDK passes the response through unchanged so
-# callers can inspect the full envelope.
-def test_preview_scope_passes_constraints(stub_server):
+# Spec: §3.5 (F-3.5.7) — preview_scope takes no arguments and sends no query
+# constraints (the spec shows preview_scope() with no args and the server
+# reads no query parameters). It GETs /v1/scope/preview and passes the
+# aggregate-count response through unchanged.
+def test_preview_scope_sends_no_constraints(stub_server):
     stub_server.next_response = {
-        "scope": "finance/",
-        "matched": 12,
-        "results": [],
+        "layers": ["alice-personal"],
+        "artifact_count": 12,
+        "by_type": {"skill": 12},
+        "by_sensitivity": {"low": 12},
     }
     client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
-    out = client.preview_scope(scope="finance/", type="skill", tags=["q4"])
+    out = client.preview_scope()
     assert "/v1/scope/preview" in stub_server.last_path
-    assert "scope=finance" in stub_server.last_path
-    assert "tags=q4" in stub_server.last_path
-    assert out["matched"] == 12
+    # No constraint query params are appended: the path is bare.
+    assert "?" not in stub_server.last_path
+    assert out["artifact_count"] == 12
+    assert out["by_sensitivity"] == {"low": 12}
 
 
 # Spec: §7.6.2 — load_artifacts POSTs to /v1/artifacts:batchLoad

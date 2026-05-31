@@ -788,6 +788,14 @@ func (s *mcpServer) callTool(raw json.RawMessage) any {
 		// §13.9 health tool: registry connectivity + observed mode +
 		// cache size + last successful call timestamp.
 		return s.healthTool()
+	case "scope_preview":
+		// §3.5 transparency affordance: aggregate counts for the caller's
+		// effective view, no bodies or per-artifact metadata. Agents do not
+		// use this as a discovery surface during a session; it answers
+		// "what could this identity have loaded?" for an operator or
+		// reviewer. Proxies GET /v1/scope/preview, returning the §3.5 403
+		// scope_preview_disabled envelope verbatim when the tenant gate is off.
+		return s.proxyGet("/v1/scope/preview", nil, nil)
 	default:
 		return errorResult("unknown tool: " + p.Name)
 	}

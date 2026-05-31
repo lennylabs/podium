@@ -108,5 +108,15 @@ func metaToolDescriptors() []map[string]any {
 			"description": "Report registry connectivity, observed mode, cache size, and last successful call.",
 			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
 		},
+		{
+			// §3.5 transparency affordance. Aggregate counts only (no bodies,
+			// no per-artifact metadata) for the caller's effective view, so an
+			// operator or reviewer can answer "what could this identity have
+			// loaded?" before a session. Agents do not call it during a
+			// session; it is not a discovery surface.
+			"name":        "scope_preview",
+			"description": "Report aggregate counts for the caller's effective view: total artifacts, counts by type, and counts by sensitivity. Transparency affordance for operators and reviewers; not a discovery surface.",
+			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
+		},
 	}
 }

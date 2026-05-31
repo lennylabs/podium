@@ -194,6 +194,7 @@ func syncCmd(args []string) int {
 	// empty so an omitted flag does not pin "none" over the configured value.
 	harness := fs.String("harness", "", "harness adapter (default: PODIUM_HARNESS, sync.yaml, then none)")
 	dryRun := fs.Bool("dry-run", false, "resolve and report; write nothing")
+	preview := fs.Bool("preview", false, "print the §3.5 scope-preview aggregate counts and exit; write nothing")
 	asJSON := fs.Bool("json", false, "emit a structured JSON envelope on stdout")
 	watch := fs.Bool("watch", false, "rerun sync whenever the registry changes")
 	check := fs.Bool("check", false, "validate the merged sync.yaml and report warnings")
@@ -260,6 +261,19 @@ func syncCmd(args []string) int {
 		fmt.Fprintln(os.Stderr, "error: --registry is required (registry URL or filesystem path) — set it on the command line or in <ws>/.podium/sync.yaml")
 		return 2
 	}
+
+	// §3.5: `podium sync --preview` is a transparency affordance. It prints
+	// the caller's effective-view aggregate counts and writes nothing. The
+	// preview is served by GET /v1/scope/preview, so it requires a
+	// server-source registry; a filesystem source has no such endpoint.
+	if *preview {
+		if !sync.IsServerSource(registryPath) {
+			fmt.Fprintln(os.Stderr, "error: --preview requires a server registry URL (the §3.5 scope preview is served by GET /v1/scope/preview)")
+			return 2
+		}
+		return runScopePreview(registryPath, *asJSON)
+	}
+
 	targetDir := resolved.Target
 	if targetDir == "" {
 		targetDir = "."

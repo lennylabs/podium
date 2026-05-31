@@ -520,22 +520,16 @@ class Client:
             for e in body.get("edges", []) or []
         ]
 
-    def preview_scope(
-        self,
-        *,
-        scope: str = "",
-        type: str = "",
-        tags: list[str] | None = None,
-    ) -> dict[str, Any]:
-        """Preview a scope's effective artifact set (spec §6.4)."""
-        params: dict[str, Any] = {}
-        if scope:
-            params["scope"] = scope
-        if type:
-            params["type"] = type
-        if tags:
-            params["tags"] = ",".join(tags)
-        return self._get("/v1/scope/preview", params)
+    def preview_scope(self) -> dict[str, Any]:
+        """Return aggregate counts for the caller's effective view (spec §3.5).
+
+        Takes no arguments: the caller's OAuth identity determines layer
+        composition exactly as for a real session, and the endpoint returns
+        aggregate counts only (``layers``, ``artifact_count``, ``by_type``,
+        ``by_sensitivity``) with no per-artifact metadata. The server reads no
+        query parameters, so no constraint filters are sent.
+        """
+        return self._get("/v1/scope/preview", {})
 
     def subscribe(self, event_types: list[str] | None = None):
         """Yield NDJSON events from /v1/events (spec §7.6).

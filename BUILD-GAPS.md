@@ -455,17 +455,23 @@ I verified the scope preview surface end to end: the core aggregator (`pkg/regis
 
 **Resolution (fdf8587):** Added `store.Tenant.ExposeScopePreview *bool` (tri-state, nil = default true) plus `Tenant.ScopePreviewEnabled()`, persisted across the memory, SQLite, and Postgres backends (new nullable `expose_scope_preview` column, `sql.NullBool` round trip, storetest `ScopePreviewFlagRoundTrip` conformance). `core.PreviewScope` checks the gate first and returns the new `ErrScopePreviewDisabled` sentinel; `handleScopePreview` maps it to `403 scope_preview_disabled`. `internal/serverboot` resolves the flag from `PODIUM_EXPOSE_SCOPE_PREVIEW` and registry.yaml's `tenant.expose_scope_preview` (env wins) and seeds it on the default tenant.
 
-### - [ ] F-3.5.2 — `podium status` does not surface scope preview data [Medium] — OPEN
+### - [x] F-3.5.2 — `podium status` does not surface scope preview data [Medium] — CLOSED
 
 (gap) Spec §3.5 states "The `podium status` CLI surfaces the same data for human inspection." `cmd/podium/status.go` prints registry URL, harness, cache settings, identity provider, session token, tenant, reachability, and registry mode (lines 31-69), but never calls `/v1/scope/preview` and never prints `artifact_count`, `by_type`, or `by_sensitivity`. A search of `cmd/podium/status.go` for `preview`, `scope`, `by_type`, `by_sensitivity`, and `artifact_count` finds nothing. Add a section to `podium status` that fetches `GET /v1/scope/preview` for the configured registry and prints the aggregate counts.
 
-### - [ ] F-3.5.3 — MCP server does not expose the scope preview [Medium] — OPEN
+**Resolution (8a58678):** Added a shared `fetchScopePreview`/`printScopePreview` helper (`cmd/podium/scope_preview.go`) and a `scope preview:` section to `podium status` that GETs `/v1/scope/preview` for the configured registry (attaching the caller credential) and prints `artifacts`, `layers`, and the sorted `by type` / `by sensitivity` breakdowns. A 403 prints a disabled notice and an unreachable endpoint a one-line unavailable notice, so status still exits 0.
+
+### - [x] F-3.5.3 — MCP server does not expose the scope preview [Medium] — CLOSED
 
 (gap) Spec §3.5 states "The MCP server, SDK, and `podium sync` all expose this preview." A search across `cmd/podium-mcp/` for `preview`, `Preview`, `scope/preview`, `preview_scope`, and `PreviewScope` returns no matches, so the MCP bridge offers no preview affordance (tool, prompt, or resource). Note the same paragraph also says agents do not call the preview during a session, so the MCP exposure is a transparency affordance for the operator or reviewer rather than an agent-facing tool. Either add an MCP-side exposure of the preview (for example an out-of-session tool or resource that calls `/v1/scope/preview`) or reconcile the spec text if the MCP exposure is intentionally deferred.
 
-### - [ ] F-3.5.4 — `podium sync` does not expose the scope preview [Medium] — OPEN
+**Resolution (8a58678):** Added a `scope_preview` MCP tool. It is advertised in `tools/list` (`metaToolDescriptors`, no input parameters) and dispatched in `callTool` to `proxyGet("/v1/scope/preview")`, returning the §3.5 aggregate counts verbatim. The tool description marks it a transparency affordance for operators and reviewers rather than an agent discovery surface, matching §3.5. A 403 tenant-gate refusal surfaces as the structured `scope_preview_disabled` error envelope.
+
+### - [x] F-3.5.4 — `podium sync` does not expose the scope preview [Medium] — CLOSED
 
 (gap) Spec §3.5 names `podium sync` among the consumer paths that "all expose this preview." A search across `pkg/sync/` and the `cmd/podium/sync*.go` sources for `preview`, `Preview`, `scope/preview`, and `PreviewScope` returns no matches. Add a preview affordance to the sync path (for example a `podium sync --preview` flag or a preview line in sync output) that calls `GET /v1/scope/preview`, or reconcile the spec if this exposure is intentionally deferred.
+
+**Resolution (8a58678):** Added a `--preview` flag to `podium sync`. It resolves the registry, then (via the shared `runScopePreview` helper) GETs `/v1/scope/preview` and prints the aggregate counts (or a JSON object under `--json`), writing nothing. The §3.5 preview is served only over HTTP, so `--preview` against a filesystem-source registry is rejected with exit 2; `pkg/sync.IsServerSource` was exported for the URL check.
 
 ### - [x] F-3.5.5 — Aggregate counts count artifact-versions instead of distinct artifacts [Medium] — CLOSED
 
@@ -479,9 +485,11 @@ I verified the scope preview surface end to end: the core aggregator (`pkg/regis
 
 **Resolution (fdf8587):** When layers are configured, `Layers` is now built from `layer.EffectiveLayersWith(r.layers, id, r.resolveGroup)` in precedence order (lowest first), so the order is deterministic and a visible-but-empty layer is included. The bare-core / filesystem-source fallback (no layer config) derives the distinct layers from the visible records and sorts them for a stable response.
 
-### - [ ] F-3.5.7 — Python SDK `preview_scope` accepts and sends constraint params the spec and server do not define [Low] — OPEN
+### - [x] F-3.5.7 — Python SDK `preview_scope` accepts and sends constraint params the spec and server do not define [Low] — CLOSED
 
 (inconsistency) Spec §3.5 shows `preview_scope()` taking no arguments, and the server handler reads no query parameters (`pkg/registry/server/server.go:662-669`). The Python SDK method at `sdks/podium-py/podium/client.py:225-240` accepts `scope`, `type`, and `tags` and forwards them as query params to `/v1/scope/preview`, where the server silently ignores them, so callers can pass filters that have no effect. The TypeScript SDK `previewScope()` at `sdks/podium-ts/src/index.ts:220` correctly takes no arguments. The Python docstring also cites "spec §6.4" while the contract for this surface is §3.5. Remove the unused parameters from the Python `preview_scope` (or implement matching server-side filtering and update the spec), and correct the docstring reference.
+
+**Resolution (8a58678):** `preview_scope()` now takes no arguments and sends no query parameters, GETting `/v1/scope/preview` directly (matching the §3.5 contract and the TypeScript SDK). The docstring reference was corrected from §6.4 to §3.5. The Python test was rewritten to assert the request path carries no query string.
 
 ### - [x] F-3.5.8 — `by_sensitivity` can contain an empty-string bucket for unset sensitivity [Low] — CLOSED
 

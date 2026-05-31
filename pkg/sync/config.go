@@ -102,6 +102,11 @@ func hasURLScheme(s string) bool {
 //
 // spec: §7.1, §7.5.2 — "a URL routes to a Podium server, a filesystem
 // path routes to local filesystem".
+// IsServerSource is the exported form of isServerSource for callers outside
+// the package (the CLI uses it to decide whether the §3.5 scope-preview
+// endpoint is reachable over HTTP).
+func IsServerSource(registry string) bool { return isServerSource(registry) }
+
 func isServerSource(registry string) bool {
 	for _, prefix := range []string{"http://", "https://"} {
 		if len(registry) >= len(prefix) && registry[:len(prefix)] == prefix {

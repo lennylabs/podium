@@ -58,6 +58,19 @@ func statusCmd(args []string) int {
 		if resp != nil {
 			_ = resp.Body.Close()
 		}
+
+		// §3.5: podium status surfaces the same scope-preview aggregate
+		// counts the MCP server, SDK, and podium sync expose, for human
+		// inspection of "what could this identity have loaded?".
+		fmt.Printf("scope preview:\n")
+		switch preview, err := fetchScopePreview(*registry); {
+		case err == nil:
+			printScopePreview(os.Stdout, preview)
+		case isScopePreviewDisabled(err):
+			fmt.Printf("  (disabled by tenant config expose_scope_preview)\n")
+		default:
+			fmt.Printf("  (unavailable: %v)\n", err)
+		}
 	}
 
 	store := identity.KeychainStore{Service: envOr("PODIUM_TOKEN_KEYCHAIN_NAME", "podium")}
