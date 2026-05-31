@@ -957,9 +957,70 @@ func TestDocCLI_67_SearchJSON(t *testing.T) {
 	}
 }
 
-// spec: doc "JSON output", the bash pipeline example.
+// spec: doc "JSON output", the bash pipeline example; §9.4 "Programmatic
+// curation". The documented workflow is `podium search --json | jq -r
+// '.results[].id' | xargs -I{} podium sync --harness ... --include {}`. This
+// emulates the jq/xargs steps in-process: discovery runs against the server
+// source, the returned ids drive one `podium sync --include` per id (also
+// against the server source, picking the registry up from PODIUM_REGISTRY like
+// Client.from_env()), and the on-disk set is exactly the curated ids. The
+// harness adapter is orthogonal to scoping; `none` is used so the canonical
+// layout makes the per-id assertion deterministic. (F-9.4.1, F-9.4.2, F-9.4.3)
 func TestDocCLI_68_JSONPipeline(t *testing.T) {
-	t.Skip("blocked by F-9.4.1: the documented `podium search --json | jq | xargs podium sync --include` pipeline needs `podium sync --include`, which is unimplemented")
+	srv := startServer(t, cliReg(t))
+	env := brEnv(srv.BaseURL)
+
+	// Discovery step (`podium search ... --json`). --type context matches the
+	// two "variance" contexts and excludes the skill, standing in for the
+	// doc's score-floored jq selection.
+	search := runPodium(t, "", env, "search", "--type", "context", "--json", "variance")
+	cliWantExit(t, search, 0, "search --json")
+	var ids []string
+	for _, r := range cliResults(t, search.Stdout) {
+		if id, ok := r["id"].(string); ok && id != "" {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		t.Fatalf("discovery returned no ids:\n%s", search.Stdout)
+	}
+
+	// Materialization step (`xargs ... podium sync --include {}`). One repeated
+	// --include per discovered id, against the same server source.
+	var includeArgs []string
+	for _, id := range ids {
+		includeArgs = append(includeArgs, "--include", id)
+	}
+	tgt := t.TempDir()
+	args := append([]string{"sync", "--target", tgt, "--harness", "none"}, includeArgs...)
+	cliWantExit(t, runPodium(t, "", env, args...), 0, "sync --include from pipeline")
+
+	files := readTreeFiltered(t, tgt)
+	for _, id := range ids {
+		if _, ok := files[id+"/ARTIFACT.md"]; !ok {
+			t.Fatalf("curated id %q not materialized: %v", id, keysOf(files))
+		}
+	}
+	// The skill was never discovered (--type context) and is absent from the
+	// include list, so it must not appear on disk: the set is reproducible
+	// from the include list (§9.4).
+	if _, ok := files["personal/greet/ARTIFACT.md"]; ok {
+		t.Fatalf("non-curated personal/greet leaked into the materialized set: %v", keysOf(files))
+	}
+
+	// Reproducibility: the same include list against a fresh target yields the
+	// identical tree.
+	tgt2 := t.TempDir()
+	cliWantExit(t, runPodium(t, "", env, append([]string{"sync", "--target", tgt2, "--harness", "none"}, includeArgs...)...), 0, "sync --include rerun")
+	repro := readTreeFiltered(t, tgt2)
+	if len(repro) != len(files) {
+		t.Fatalf("include list not reproducible: %v vs %v", keysOf(files), keysOf(repro))
+	}
+	for k, v := range files {
+		if repro[k] != v {
+			t.Fatalf("include list not reproducible at %q", k)
+		}
+	}
 }
 
 // ===== Read CLI — domain (T-D-cli-69..73) ==============================

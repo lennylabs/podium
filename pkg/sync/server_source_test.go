@@ -194,6 +194,38 @@ func TestRun_ServerSource_PropagatesError(t *testing.T) {
 	}
 }
 
+// spec: §7.5.1, §9.4 (F-9.4.3) — programmatic curation against a server
+// source: the include scope narrows the effective view fetched over HTTP, so
+// only the curated ids are materialized. This is the server-source half of the
+// §9.4 "search then podium sync --include" workflow.
+func TestRun_ServerSource_ScopeIncludeNarrows(t *testing.T) {
+	t.Parallel()
+	srv := newStubRegistry(t, map[string]stubArtifact{
+		"finance/invoice": {typ: "context", layer: "team-shared", frontmatter: contextArtifactSrc, manifestBody: "Invoice body.\n"},
+		"personal/greet":  {typ: "context", layer: "local", frontmatter: contextArtifactSrc, manifestBody: "Greet body.\n"},
+	})
+	target := t.TempDir()
+	res, err := Run(Options{
+		RegistryPath: srv.URL,
+		Target:       target,
+		AdapterID:    "none",
+		HTTPClient:   srv.Client(),
+		Scope:        ScopeFilter{Include: []string{"finance/**"}},
+	})
+	if err != nil {
+		t.Fatalf("server-source scoped Run: %v", err)
+	}
+	if len(res.Artifacts) != 1 || res.Artifacts[0].ID != "finance/invoice" {
+		t.Fatalf("scoped server-source Result.Artifacts = %+v, want only finance/invoice", res.Artifacts)
+	}
+	if _, err := os.Stat(filepath.Join(target, "finance", "invoice", "ARTIFACT.md")); err != nil {
+		t.Errorf("finance/invoice not materialized: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(target, "personal", "greet", "ARTIFACT.md")); !os.IsNotExist(err) {
+		t.Errorf("personal/greet must be excluded by the include scope, stat err = %v", err)
+	}
+}
+
 // spec: §7.5.2 — a filesystem path (and a file:// URI) is a filesystem
 // source; the dispatch must route it to filesystem composition rather than
 // the server path.
