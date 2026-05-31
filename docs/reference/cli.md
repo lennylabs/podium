@@ -344,11 +344,13 @@ Without `--yes`, the command prompts for missing values. `--force` overwrites an
 Registers a new layer.
 
 ```
-podium layer register --id <id> --repo <git-url> --ref <ref> [--root <subpath>]
+podium layer register --id <id> --repo <git-url> --ref <ref> [--root <subpath>] [--force-push-policy <tolerant|strict>]
 podium layer register --id <id> --local <path>
 ```
 
 For Git sources, the registry returns the webhook URL and HMAC secret to configure on the source repo. Without webhook configuration, the layer stays at its initial commit until the first manual reingest.
+
+`--force-push-policy` sets the per-layer force-push handling for a Git source. The default (`tolerant`) preserves previously-ingested commits and emits a `layer.history_rewritten` event; `strict` rejects an ingest whose history was rewritten. The policy is also settable with `podium layer update --force-push-policy` and through the registry.yaml `source.git.force_push_policy` key.
 
 ### `podium layer list`
 
@@ -381,10 +383,10 @@ podium layer unregister <id>
 Forces a re-pull of a layer's source.
 
 ```
-podium layer reingest <id> [--break-glass --justification <text>]
+podium layer reingest <id> [--break-glass --justification <text> --approver <id> --approver <id>]
 ```
 
-During a freeze window, ingest is blocked unless `--break-glass` is passed with a justification. Break-glass requires dual-signoff (two admins), auto-expires after 24h, and queues for post-hoc security review.
+During a freeze window, ingest is blocked unless `--break-glass` is passed with a justification. Break-glass requires dual-signoff, so supply two distinct approver identities with repeated `--approver` flags. A grant auto-expires after 24h and queues for post-hoc security review.
 
 ### `podium layer watch`
 

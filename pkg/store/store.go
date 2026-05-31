@@ -267,8 +267,16 @@ type LayerConfig struct {
 	// detected for a git source. The empty string and "tolerant" both
 	// proceed and emit a layer.history_rewritten audit event;
 	// "strict" rejects the ingest with ingest.history_rewritten.
-	ForcePushPolicy string
-	CreatedAt       time.Time
+	// Settable per layer via the register/update API, the
+	// `podium layer register/update --force-push-policy` CLI flag, and
+	// the registry.yaml `source.git.force_push_policy` key (§7.3.1).
+	ForcePushPolicy string `json:"force_push_policy,omitempty"`
+	// LastIngestedAt records the wall-clock time of the most recent
+	// successful ingest cycle for this layer. The §7.3.1 layer list
+	// exposes it as `last_ingested_at` for staleness monitoring. Nil
+	// until the layer has completed an ingest at least once.
+	LastIngestedAt *time.Time `json:"last_ingested_at,omitempty"`
+	CreatedAt      time.Time
 	// DeletedAt is the §8.4 soft-delete tombstone for a layer
 	// unregistered by its owner. A non-nil value hides the layer from
 	// Get/List while keeping it (and its artifacts) recoverable via

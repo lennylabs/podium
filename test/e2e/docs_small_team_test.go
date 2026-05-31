@@ -458,7 +458,6 @@ func TestSmallTeam_15_PodiumSyncServerRegistry(t *testing.T) {
 // T-D-small-team-16 — local source: podium layer reingest updates the layer.
 func TestSmallTeam_16_LayerReingest(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-7.3.4: POST /v1/layers/reingest records intent (returns {queued,queued_at}) but never runs the ingest pipeline, so a post-startup artifact is never re-scanned")
 	reg := writeRegistry(t, map[string]string{
 		"artifact-a/ARTIFACT.md": smallteamLowArtifact("artifact a"),
 	})
@@ -489,7 +488,6 @@ func TestSmallTeam_16_LayerReingest(t *testing.T) {
 // T-D-small-team-17 — podium layer watch polls the source and reingests.
 func TestSmallTeam_17_LayerWatch(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-7.3.4: podium layer watch polls and emits [reingest <id>] correctly, but the reingest endpoint runs no ingest pipeline, so a newly-added artifact is never picked up")
 	reg := writeRegistry(t, map[string]string{
 		"wa/ARTIFACT.md": smallteamLowArtifact("watch artifact"),
 	})
@@ -740,7 +738,6 @@ func TestSmallTeam_24_GetLayersAfterStartup(t *testing.T) {
 // T-D-small-team-25 — POST /v1/layers/reingest triggers re-scan of local source.
 func TestSmallTeam_25_HTTPReingestRescan(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-7.3.4: the reingest endpoint records intent but performs no ingest, so accepted/idempotent counts are absent and a post-startup artifact never appears")
 	reg := writeRegistry(t, map[string]string{
 		"ra/ARTIFACT.md": smallteamLowArtifact("rescan a"),
 	})

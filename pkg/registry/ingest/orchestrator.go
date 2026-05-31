@@ -8,6 +8,7 @@ import (
 
 	"github.com/lennylabs/podium/pkg/layer/source"
 	"github.com/lennylabs/podium/pkg/lint"
+	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/store"
 )
 
@@ -45,6 +46,16 @@ type SourceIngestOptions struct {
 	// CallerID identifies the operator triggering the ingest;
 	// embedded into emitted audit events.
 	CallerID string
+	// ResourcePut uploads bundled resources to the §7.2 object store at
+	// ingest. Nil keeps resource bytes inline on the manifest record.
+	ResourcePut ResourcePutFunc
+	// FreezeWindows are the §4.7.2 windows enforced for this ingest. An
+	// active window blocking "ingest" rejects with ErrFrozen unless a
+	// window carries a valid break-glass grant (§7.3.1 manual reingest).
+	FreezeWindows []FreezeWindow
+	// RejectAtOrAbove is the §13.10 public-mode sensitivity floor passed
+	// through to the ingest Request. Empty means no floor.
+	RejectAtOrAbove manifest.Sensitivity
 }
 
 // SourceIngest snapshots the layer via the supplied provider, runs
@@ -129,6 +140,9 @@ func SourceIngestWithOptions(
 		PublishEvent:    opts.PublishEvent,
 		AuditEmit:       opts.AuditEmit,
 		CallerID:        opts.CallerID,
+		ResourcePut:     opts.ResourcePut,
+		FreezeWindows:   opts.FreezeWindows,
+		RejectAtOrAbove: opts.RejectAtOrAbove,
 	})
 	if err != nil {
 		return nil, err
@@ -157,6 +171,14 @@ func SourceIngestWithOptions(
 	}
 
 	cfg.LastIngestedRef = snap.Reference
+	// §7.3.1 "last_ingested_at is exposed per layer for staleness
+	// monitoring": stamp the completion time of this ingest cycle from
+	// the snapshot timestamp the provider reported.
+	ingestedAt := snap.CreatedAt
+	if !ingestedAt.IsZero() {
+		ts := ingestedAt.UTC()
+		cfg.LastIngestedAt = &ts
+	}
 	if perr := st.PutLayerConfig(ctx, cfg); perr != nil {
 		return res, fmt.Errorf("update last_ingested_ref: %w", perr)
 	}

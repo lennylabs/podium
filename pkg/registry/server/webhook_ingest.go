@@ -4,7 +4,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"time"
 
 	"github.com/lennylabs/podium/pkg/layer/webhook"
 	"github.com/lennylabs/podium/pkg/store"
@@ -39,9 +38,12 @@ func (e *LayerEndpoint) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	id := r.URL.Query().Get("id")
+	id := r.PathValue("id")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "id query param required")
+		id = r.URL.Query().Get("id")
+	}
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "layer id required")
 		return
 	}
 	cfg, err := e.store.GetLayerConfig(r.Context(), e.tenantID, id)
@@ -70,15 +72,14 @@ func (e *LayerEndpoint) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if err := webhook.Default.Verify(provID, body, sig, cfg.WebhookSecret); err != nil {
 		// §6.10 ingest.webhook_invalid: the signature did not verify, or the
 		// provider id has no registered GitProvider. The delivery is rejected
-		// before any reingest so unverified content never reaches the store.
+		// before any ingest so unverified content never reaches the store.
 		writeError(w, http.StatusUnauthorized, "ingest.webhook_invalid", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"queued":    cfg.ID,
-		"provider":  provID,
-		"queued_at": time.Now().UTC().Format(time.RFC3339),
-	})
+	// §7.3.1: a verified delivery "fetches the new commit, ingests". Drive
+	// the ingest pipeline (no break-glass on the webhook path) and return its
+	// result summary. Without a runner wired the handler records the intent.
+	e.runIngestAndRespond(w, r, cfg, nil)
 }
 
 // webhookSignatureHeader returns the signature credential for the named

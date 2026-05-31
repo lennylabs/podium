@@ -400,15 +400,20 @@ func layerConfigCRUD(t *testing.T, s store.Store) {
 	t.Helper()
 	ctx := context.Background()
 	mustCreateTenant(t, s, "t")
+	// spec: §7.3.1 — force_push_policy and last_ingested_at persist on the
+	// layer config (F-7.3.6, F-7.3.7).
+	ingestedAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	cfg := store.LayerConfig{
-		TenantID:     "t",
-		ID:           "team-shared",
-		SourceType:   "git",
-		Repo:         "git@example/team.git",
-		Ref:          "main",
-		Order:        1,
-		Organization: true,
-		Groups:       []string{"engineering"},
+		TenantID:        "t",
+		ID:              "team-shared",
+		SourceType:      "git",
+		Repo:            "git@example/team.git",
+		Ref:             "main",
+		Order:           1,
+		Organization:    true,
+		Groups:          []string{"engineering"},
+		ForcePushPolicy: "strict",
+		LastIngestedAt:  &ingestedAt,
 	}
 	if err := s.PutLayerConfig(ctx, cfg); err != nil {
 		t.Fatalf("PutLayerConfig: %v", err)
@@ -419,6 +424,12 @@ func layerConfigCRUD(t *testing.T, s store.Store) {
 	}
 	if got.ID != cfg.ID || got.Repo != cfg.Repo {
 		t.Errorf("got %+v", got)
+	}
+	if got.ForcePushPolicy != "strict" {
+		t.Errorf("ForcePushPolicy = %q, want strict", got.ForcePushPolicy)
+	}
+	if got.LastIngestedAt == nil || !got.LastIngestedAt.Equal(ingestedAt) {
+		t.Errorf("LastIngestedAt = %v, want %v", got.LastIngestedAt, ingestedAt)
 	}
 	list, err := s.ListLayerConfigs(ctx, "t")
 	if err != nil {

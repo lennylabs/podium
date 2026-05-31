@@ -155,6 +155,7 @@ func (p *Postgres) applySchema() error {
 			git_provider TEXT NOT NULL DEFAULT '',
 			created_at TIMESTAMPTZ NOT NULL,
 			deleted_at TIMESTAMPTZ,
+			last_ingested_at TIMESTAMPTZ,
 			PRIMARY KEY (tenant_id, id)
 		)`,
 	}
@@ -432,8 +433,8 @@ func (p *Postgres) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 		INSERT INTO layer_configs
 			(tenant_id, id, source_type, repo, ref, root, local_path, ord,
 			 user_defined, owner, public, organization, groups, users,
-			 webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+			 webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
 		ON CONFLICT (tenant_id, id) DO UPDATE SET
 			source_type = EXCLUDED.source_type,
 			repo = EXCLUDED.repo,
@@ -452,13 +453,14 @@ func (p *Postgres) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 			force_push_policy = EXCLUDED.force_push_policy,
 			git_provider = EXCLUDED.git_provider,
 			created_at = EXCLUDED.created_at,
-			deleted_at = EXCLUDED.deleted_at`,
+			deleted_at = EXCLUDED.deleted_at,
+			last_ingested_at = EXCLUDED.last_ingested_at`,
 		cfg.TenantID, cfg.ID, cfg.SourceType, cfg.Repo, cfg.Ref, cfg.Root, cfg.LocalPath,
 		cfg.Order, cfg.UserDefined, cfg.Owner,
 		cfg.Public, cfg.Organization,
 		strings.Join(cfg.Groups, "\n"), strings.Join(cfg.Users, "\n"),
 		cfg.WebhookSecret, cfg.LastIngestedRef, cfg.ForcePushPolicy, cfg.GitProvider,
-		createdAt.UTC(), nullTimePG(cfg.DeletedAt))
+		createdAt.UTC(), nullTimePG(cfg.DeletedAt), nullTimePG(cfg.LastIngestedAt))
 	return err
 }
 
@@ -467,7 +469,7 @@ func (p *Postgres) GetLayerConfig(ctx context.Context, tenantID, id string) (Lay
 	row := p.db.QueryRowContext(ctx, `
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
-		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at
+		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at
 		FROM layer_configs
 		WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`, tenantID, id)
 	cfg, err := scanLayerConfigPG(row)
@@ -482,7 +484,7 @@ func (p *Postgres) ListLayerConfigs(ctx context.Context, tenantID string) ([]Lay
 	rows, err := p.db.QueryContext(ctx, `
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
-		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at
+		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at
 		FROM layer_configs WHERE tenant_id = $1 AND deleted_at IS NULL
 		ORDER BY ord ASC, id ASC`, tenantID)
 	if err != nil {
@@ -557,7 +559,7 @@ func (p *Postgres) ListDeletedLayerConfigs(ctx context.Context, tenantID string)
 	rows, err := p.db.QueryContext(ctx, `
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
-		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at
+		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at
 		FROM layer_configs WHERE tenant_id = $1 AND deleted_at IS NOT NULL
 		ORDER BY id ASC`, tenantID)
 	if err != nil {
@@ -657,14 +659,14 @@ func ptrFromNullTime(nt sql.NullTime) *time.Time {
 func scanLayerConfigPG(scanner rowScanner) (LayerConfig, error) {
 	var cfg LayerConfig
 	var groups, users string
-	var deletedAt sql.NullTime
+	var deletedAt, lastIngestedAt sql.NullTime
 	err := scanner.Scan(
 		&cfg.TenantID, &cfg.ID, &cfg.SourceType,
 		&cfg.Repo, &cfg.Ref, &cfg.Root, &cfg.LocalPath,
 		&cfg.Order, &cfg.UserDefined, &cfg.Owner,
 		&cfg.Public, &cfg.Organization, &groups, &users,
 		&cfg.WebhookSecret, &cfg.LastIngestedRef, &cfg.ForcePushPolicy, &cfg.GitProvider,
-		&cfg.CreatedAt, &deletedAt)
+		&cfg.CreatedAt, &deletedAt, &lastIngestedAt)
 	if err != nil {
 		return LayerConfig{}, err
 	}
@@ -675,5 +677,6 @@ func scanLayerConfigPG(scanner rowScanner) (LayerConfig, error) {
 		cfg.Users = strings.Split(users, "\n")
 	}
 	cfg.DeletedAt = ptrFromNullTime(deletedAt)
+	cfg.LastIngestedAt = ptrFromNullTime(lastIngestedAt)
 	return cfg, nil
 }

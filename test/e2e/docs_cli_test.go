@@ -1272,14 +1272,55 @@ func TestDocCLI_98_LayerReingest(t *testing.T) {
 	cliContains(t, res.Stdout, "queued", "reingest queued acknowledgement")
 }
 
-// spec: doc "podium layer reingest", freeze-window behavior.
+// spec: doc "podium layer reingest", freeze-window behavior (§4.7.2). A
+// reingest inside an active freeze window is rejected; break-glass with a
+// valid dual-signoff grant bypasses it.
 func TestDocCLI_99_LayerReingestFreeze(t *testing.T) {
-	t.Skip("blocked by F-7.3.4: freeze windows / break-glass are not implemented; reingest only records intent")
+	t.Parallel()
+	srv, layerID := progressiveFreezeBoot(t, true)
+
+	blocked := runPodium(t, "", nil, "layer", "reingest", "--registry", srv.BaseURL, layerID)
+	if blocked.Exit == 0 || !strings.Contains(blocked.Stderr, "ingest.frozen") {
+		t.Fatalf("expected ingest.frozen, exit=%d stderr=%s", blocked.Exit, blocked.Stderr)
+	}
+
+	broke := runPodium(t, "", nil, "layer", "reingest", "--registry", srv.BaseURL,
+		"--break-glass", "--justification", "year-end hotfix",
+		"--approver", "alice@acme.com", "--approver", "bob@acme.com", layerID)
+	if broke.Exit != 0 {
+		t.Fatalf("break-glass reingest exit=%d stderr=%s", broke.Exit, broke.Stderr)
+	}
 }
 
-// spec: doc "Layer management — podium layer watch".
+// spec: doc "Layer management — podium layer watch". The watcher polls
+// reingest, which now runs the pipeline, so a post-registration artifact is
+// picked up and becomes searchable.
 func TestDocCLI_100_LayerWatchReingests(t *testing.T) {
-	t.Skip("blocked by F-7.3.4: reingest records intent but never runs the ingest pipeline, so a watched layer never picks up new artifacts")
+	t.Parallel()
+	srv := startServer(t, "")
+	layerDir := t.TempDir()
+	mkArtifact(t, filepath.Join(layerDir, "wa"), smallteamLowArtifact("watch existing"))
+	cliWantExit(t, runPodium(t, "", brEnv(srv.BaseURL),
+		"layer", "register", "--id", "watch-layer", "--local", layerDir), 0, "register")
+
+	w := cliStartWatchLayer(t, srv.BaseURL, "watch-layer", 1)
+	defer w.stop(t)
+
+	// Add a new artifact and wait for a poll cycle to pick it up.
+	mkArtifact(t, filepath.Join(layerDir, "wb"), smallteamLowArtifact("watch added"))
+	deadline := time.Now().Add(8 * time.Second)
+	var found bool
+	for time.Now().Before(deadline) {
+		st, body := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=watch+added")
+		if st == 200 && strings.Contains(string(body), "wb") {
+			found = true
+			break
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	if !found {
+		t.Errorf("watched layer did not pick up new artifact within deadline\nwatch log:\n%s", w.log())
+	}
 }
 
 // spec: doc "podium layer watch", `--interval`. The binary takes an

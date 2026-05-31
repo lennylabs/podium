@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/lennylabs/podium/pkg/audit"
+	"github.com/lennylabs/podium/pkg/registry/ingest"
 )
 
 // fileConfig is the top-level registry.yaml document. §13.12 nests every
@@ -52,6 +54,20 @@ type yamlConfig struct {
 	// PIIRedaction is the §8.2 query-text scrub config (enable toggle and
 	// custom patterns). Default-on when absent; PODIUM_PII_REDACTION wins.
 	PIIRedaction audit.PIIRedactionConfig `yaml:"pii_redaction,omitempty"`
+	// FreezeWindows is the §4.7.2 org-level freeze list. Each window blocks
+	// the named operations for [start, end); ingest in an active window is
+	// rejected as ingest.frozen unless the manual reingest path passes
+	// break-glass. Config-file-only.
+	FreezeWindows []yamlFreezeWindow `yaml:"freeze_windows,omitempty"`
+}
+
+// yamlFreezeWindow is one §4.7.2 freeze window in the `freeze_windows:` list.
+type yamlFreezeWindow struct {
+	Name           string    `yaml:"name"`
+	Start          time.Time `yaml:"start"`
+	End            time.Time `yaml:"end"`
+	Blocks         []string  `yaml:"blocks,omitempty"`
+	BreakGlassRole string    `yaml:"break_glass_role,omitempty"`
 }
 
 // yamlTenant mirrors the §3.5 `tenant:` block. ExposeScopePreview is
@@ -146,6 +162,10 @@ type yamlGitSource struct {
 	Repo string `yaml:"repo"`
 	Ref  string `yaml:"ref,omitempty"`
 	Root string `yaml:"root,omitempty"`
+	// ForcePushPolicy is the §7.3.1 per-layer force-push handling:
+	// "" / "tolerant" preserve prior commits and emit
+	// layer.history_rewritten; "strict" rejects a rewritten history.
+	ForcePushPolicy string `yaml:"force_push_policy,omitempty"`
 }
 
 type yamlLocalSource struct {
@@ -316,6 +336,30 @@ func applyYAML(c *Config, y *yamlConfig) {
 	if c.readOnlyProbeInterval == 0 && y.ReadOnly.ProbeInterval > 0 {
 		c.readOnlyProbeInterval = y.ReadOnly.ProbeInterval
 	}
+	// §4.7.2 freeze windows are config-file-only, so they overlay directly.
+	if len(y.FreezeWindows) > 0 {
+		c.freezeWindows = freezeWindowsFromYAML(y.FreezeWindows)
+	}
+}
+
+// freezeWindowsFromYAML converts the parsed registry.yaml freeze list into the
+// ingest pipeline's §4.7.2 FreezeWindow values. A window with no explicit
+// `blocks` defaults to blocking ingest.
+func freezeWindowsFromYAML(in []yamlFreezeWindow) []ingest.FreezeWindow {
+	out := make([]ingest.FreezeWindow, 0, len(in))
+	for _, w := range in {
+		blocks := w.Blocks
+		if len(blocks) == 0 {
+			blocks = []string{"ingest"}
+		}
+		out = append(out, ingest.FreezeWindow{
+			Name:   w.Name,
+			Start:  w.Start.UTC(),
+			End:    w.End.UTC(),
+			Blocks: blocks,
+		})
+	}
+	return out
 }
 
 // applyVectorYAML routes the §13.12 `vector_backend:` sub-keys to the selected

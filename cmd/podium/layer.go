@@ -77,6 +77,7 @@ func layerUpdate(args []string) int {
 	owner := fs.String("owner", "", "OIDC sub of the user-defined layer's owner")
 	public := fs.Bool("public", false, "set visibility to public")
 	organization := fs.Bool("organization", false, "set visibility to organization-wide")
+	forcePush := fs.String("force-push-policy", "", "git force-push handling: tolerant or strict")
 	var groups, users stringSliceFlag
 	fs.Var(&groups, "group", "OIDC group with visibility (repeatable)")
 	fs.Var(&users, "user", "OIDC sub with visibility (repeatable)")
@@ -97,6 +98,9 @@ func layerUpdate(args []string) int {
 	}
 	if *local != "" {
 		body["local_path"] = *local
+	}
+	if *forcePush != "" {
+		body["force_push_policy"] = *forcePush
 	}
 	if *owner != "" {
 		body["owner"] = *owner
@@ -173,6 +177,7 @@ func layerRegister(args []string) int {
 	owner := fs.String("owner", "", "OIDC sub of the user-defined layer's owner")
 	public := fs.Bool("public", false, "visibility: public")
 	organization := fs.Bool("organization", false, "visibility: organization-wide")
+	forcePush := fs.String("force-push-policy", "", "git force-push handling: tolerant (default) or strict")
 	var groups, users stringSliceFlag
 	fs.Var(&groups, "group", "OIDC group with visibility (repeatable)")
 	fs.Var(&users, "user", "OIDC sub with visibility (repeatable)")
@@ -206,6 +211,9 @@ func layerRegister(args []string) int {
 	if *userDefined {
 		body["user_defined"] = true
 		body["owner"] = *owner
+	}
+	if *forcePush != "" {
+		body["force_push_policy"] = *forcePush
 	}
 	if *public {
 		body["public"] = true
@@ -337,19 +345,43 @@ func layerReingest(args []string) int {
 	fs := flag.NewFlagSet("layer reingest", flag.ContinueOnError)
 	setUsage(fs, "Trigger a fresh ingest for a layer.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
+	// spec §7.3.1 / §4.7.2: break-glass overrides an active freeze window on
+	// the manual reingest path. It requires a justification and (per the
+	// dual-signoff rule) two distinct approvers, supplied by the repeatable
+	// --approver flag plus the authenticated caller.
+	breakGlass := fs.Bool("break-glass", false, "override an active freeze window (requires --justification)")
+	justification := fs.String("justification", "", "reason for the break-glass override")
+	var approvers stringSliceFlag
+	fs.Var(&approvers, "approver", "break-glass approver identity (repeatable, for dual-signoff)")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
 	if fs.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: podium layer reingest <id>")
+		fmt.Fprintln(os.Stderr, "usage: podium layer reingest [--break-glass --justification <text>] <id>")
 		return 2
 	}
 	if *registry == "" {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")
 		return 2
 	}
-	out, status := doJSON(*registry+"/v1/layers/reingest?id="+fs.Arg(0), "POST", nil)
+	if *justification != "" && !*breakGlass {
+		fmt.Fprintln(os.Stderr, "error: --justification is only valid with --break-glass")
+		return 2
+	}
+	var body any
+	if *breakGlass {
+		if *justification == "" {
+			fmt.Fprintln(os.Stderr, "error: --break-glass requires --justification")
+			return 2
+		}
+		req := map[string]any{"break_glass": true, "justification": *justification}
+		if len(approvers) > 0 {
+			req["approvers"] = []string(approvers)
+		}
+		body = req
+	}
+	out, status := doJSON(*registry+"/v1/layers/reingest?id="+fs.Arg(0), "POST", body)
 	if status >= 400 {
 		fmt.Fprintf(os.Stderr, "reingest failed: HTTP %d\n%s\n", status, out)
 		return 1

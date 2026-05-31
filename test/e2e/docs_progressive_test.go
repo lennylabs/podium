@@ -747,49 +747,134 @@ func TestProgressive_31_LintNoErrorOnMissingSensitivity(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-32..37 — freeze windows (blocked by F-7.3.9) -----------
+// ---- T-D-progressive-32..37 — freeze windows + break-glass (§4.7.2/§7.3.1) --
 
-// TestProgressive_32_FreezeWindowBlocksIngest documents that freeze window
-// enforcement is not reachable via the e2e HTTP/CLI surface.
+// progressiveFreezeBoot writes a registry.yaml declaring one local layer plus a
+// freeze window and boots a standalone server. When active is true the window
+// covers the present so an ingest blocks; otherwise the window is in the past.
+// Returns the running server and the declared layer id.
+func progressiveFreezeBoot(t *testing.T, active bool) (*serverProc, string) {
+	t.Helper()
+	home := t.TempDir()
+	layerRoot := writeRegistry(t, map[string]string{
+		"ctx/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: freeze window test artifact\nsensitivity: low\n---\n\nbody\n",
+	})
+	start, end := "2020-01-01T00:00:00Z", "2035-01-01T00:00:00Z"
+	if !active {
+		// A window entirely in the past never blocks the present.
+		start, end = "2020-01-01T00:00:00Z", "2020-02-01T00:00:00Z"
+	}
+	cfg := "registry:\n" +
+		"  layers:\n" +
+		"    - id: frozen-layer\n" +
+		"      source:\n" +
+		"        local:\n" +
+		"          path: " + layerRoot + "\n" +
+		"      visibility:\n" +
+		"        public: true\n" +
+		"  freeze_windows:\n" +
+		"    - name: maintenance\n" +
+		"      start: \"" + start + "\"\n" +
+		"      end: \"" + end + "\"\n" +
+		"      blocks: [ingest]\n"
+	if err := os.WriteFile(filepath.Join(home, "registry.yaml"), []byte(cfg), 0o644); err != nil {
+		t.Fatalf("write registry.yaml: %v", err)
+	}
+	srv := startServerArgs(t,
+		[]string{"HOME=" + home, "PODIUM_CONFIG_FILE=" + filepath.Join(home, "registry.yaml"), "PODIUM_INGEST_OFFLINE=true"},
+		"serve", "--standalone")
+	return srv, "frozen-layer"
+}
+
+// TestProgressive_32_FreezeWindowBlocksIngest — a manual reingest inside an
+// active freeze window is rejected as ingest.frozen (§4.7.2).
 // T-D-progressive-32
 func TestProgressive_32_FreezeWindowBlocksIngest(t *testing.T) {
-	t.Skip("blocked by F-7.3.9: break-glass CLI flags are absent; freeze window enforcement is not reachable via the e2e HTTP/CLI surface")
+	t.Parallel()
+	srv, layerID := progressiveFreezeBoot(t, true)
+	res := runPodium(t, "", nil, "layer", "reingest", "--registry", srv.BaseURL, layerID)
+	if res.Exit == 0 {
+		t.Fatalf("reingest in freeze window should fail, got exit 0\nstdout=%s", res.Stdout)
+	}
+	if !strings.Contains(res.Stderr, "ingest.frozen") {
+		t.Errorf("stderr missing ingest.frozen:\n%s", res.Stderr)
+	}
 }
 
-// TestProgressive_33_IngestSucceedsOutsideFreezeWindow documents that verifying
-// ingest outside a freeze window requires freeze window configuration, which is
-// not reachable via the e2e HTTP/CLI surface.
+// TestProgressive_33_IngestSucceedsOutsideFreezeWindow — a reingest with no
+// active window proceeds normally.
 // T-D-progressive-33
 func TestProgressive_33_IngestSucceedsOutsideFreezeWindow(t *testing.T) {
-	t.Skip("blocked by F-7.3.9: freeze window configuration is not reachable via the e2e HTTP/CLI surface")
+	t.Parallel()
+	srv, layerID := progressiveFreezeBoot(t, false)
+	res := runPodium(t, "", nil, "layer", "reingest", "--registry", srv.BaseURL, layerID)
+	if res.Exit != 0 {
+		t.Fatalf("reingest outside freeze window exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stdout, "queued") {
+		t.Errorf("reingest stdout missing summary:\n%s", res.Stdout)
+	}
 }
 
-// TestProgressive_34_BreakGlassOverride documents that break-glass override
-// testing requires the break-glass CLI flags, which are absent.
+// TestProgressive_34_BreakGlassOverride — break-glass with a valid dual-signoff
+// grant (two distinct approvers + justification) bypasses an active window.
 // T-D-progressive-34
 func TestProgressive_34_BreakGlassOverride(t *testing.T) {
-	t.Skip("blocked by F-7.3.9: break-glass CLI flags (--break-glass/--justification on reingest) are absent; ValidateBreakGlass exists as a library function but is not reachable via the e2e HTTP/CLI surface")
+	t.Parallel()
+	srv, layerID := progressiveFreezeBoot(t, true)
+	res := runPodium(t, "", nil, "layer", "reingest", "--registry", srv.BaseURL,
+		"--break-glass", "--justification", "incident-123",
+		"--approver", "alice@acme.com", "--approver", "bob@acme.com",
+		layerID)
+	if res.Exit != 0 {
+		t.Fatalf("break-glass reingest exit=%d stderr=%s stdout=%s", res.Exit, res.Stderr, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "queued") {
+		t.Errorf("break-glass reingest stdout missing summary:\n%s", res.Stdout)
+	}
 }
 
-// TestProgressive_35_BreakGlassRequiresTwoApprovers documents the two-approver
-// requirement, blocked by the same gap.
+// TestProgressive_35_BreakGlassRequiresTwoApprovers — a grant with a single
+// approver fails the §4.7.2 dual-signoff, so the window stays in effect.
 // T-D-progressive-35
 func TestProgressive_35_BreakGlassRequiresTwoApprovers(t *testing.T) {
-	t.Skip("blocked by F-7.3.9: break-glass CLI flags are absent; ValidateBreakGlass exists as a library function but is not reachable via the e2e HTTP/CLI surface")
+	t.Parallel()
+	srv, layerID := progressiveFreezeBoot(t, true)
+	res := runPodium(t, "", nil, "layer", "reingest", "--registry", srv.BaseURL,
+		"--break-glass", "--justification", "incident-123",
+		"--approver", "alice@acme.com",
+		layerID)
+	if res.Exit == 0 {
+		t.Fatalf("single-approver break-glass should fail, got exit 0\nstdout=%s", res.Stdout)
+	}
+	if !strings.Contains(res.Stderr, "ingest.frozen") {
+		t.Errorf("stderr missing ingest.frozen (window should stay in effect):\n%s", res.Stderr)
+	}
 }
 
-// TestProgressive_36_BreakGlassExpiredGrant documents the 24-hour expiry
-// check, blocked by the same gap.
+// TestProgressive_36_BreakGlassExpiredGrant — the 24-hour expiry check
+// (§4.7.2) is exercised at the pipeline level by
+// pkg/registry/ingest TestIngest_BreakGlassExpiresAfter24Hours; it cannot be
+// driven through the CLI, which stamps the grant timestamp at request time.
 // T-D-progressive-36
 func TestProgressive_36_BreakGlassExpiredGrant(t *testing.T) {
-	t.Skip("blocked by F-7.3.9: break-glass CLI flags are absent; ValidateBreakGlass exists as a library function but is not reachable via the e2e HTTP/CLI surface")
+	t.Skip("the manual reingest path stamps the break-glass grant at request time, so an expired (>24h) grant is not reachable via the CLI; covered by pkg/registry/ingest TestIngest_BreakGlassExpiresAfter24Hours")
 }
 
-// TestProgressive_37_BreakGlassEmptyJustification documents the justification
-// requirement, blocked by the same gap.
+// TestProgressive_37_BreakGlassEmptyJustification — break-glass without a
+// justification is rejected before any ingest (§4.7.2).
 // T-D-progressive-37
 func TestProgressive_37_BreakGlassEmptyJustification(t *testing.T) {
-	t.Skip("blocked by F-7.3.9: break-glass CLI flags are absent; ValidateBreakGlass exists as a library function but is not reachable via the e2e HTTP/CLI surface")
+	t.Parallel()
+	srv, layerID := progressiveFreezeBoot(t, true)
+	res := runPodium(t, "", nil, "layer", "reingest", "--registry", srv.BaseURL,
+		"--break-glass", layerID)
+	if res.Exit == 0 {
+		t.Fatalf("break-glass without justification should fail, got exit 0")
+	}
+	if !strings.Contains(res.Stderr, "justification") {
+		t.Errorf("stderr missing justification requirement:\n%s", res.Stderr)
+	}
 }
 
 // ---- T-D-progressive-38 — sandbox enforcement blocks incompatible profile ---

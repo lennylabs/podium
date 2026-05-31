@@ -86,6 +86,56 @@ func TestSourceIngest_TracksLastIngestedRef(t *testing.T) {
 		t.Errorf("LastIngestedRef = %q, want %q",
 			updated.LastIngestedRef, "fedcba9876543210")
 	}
+	// spec: §7.3.1 (F-7.3.6) — a successful cycle stamps last_ingested_at.
+	if updated.LastIngestedAt == nil {
+		t.Errorf("LastIngestedAt not stamped after a successful ingest")
+	}
+}
+
+// Spec: §4.7.2 (F-7.3.9) — an active freeze window passed through
+// SourceIngestOptions rejects ingest with ErrFrozen; a valid break-glass
+// grant on the same window bypasses it.
+func TestSourceIngest_FreezeWindowAndBreakGlass(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemory()
+	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
+	cfg := store.LayerConfig{TenantID: "t", ID: "L", SourceType: "fake"}
+	_ = st.PutLayerConfig(context.Background(), cfg)
+	provider := &fakeProvider{
+		files: fstest.MapFS{"g/ARTIFACT.md": &fstest.MapFile{
+			Data: []byte(contextManifestBody("glossary")),
+		}},
+		reference: "ref-1",
+	}
+	now := time.Now().UTC()
+	window := ingest.FreezeWindow{
+		Name:   "maint",
+		Start:  now.Add(-time.Hour),
+		End:    now.Add(time.Hour),
+		Blocks: []string{"ingest"},
+	}
+
+	// Active window with no grant → frozen.
+	_, err := ingest.SourceIngestWithOptions(context.Background(), st, provider, cfg,
+		ingest.SourceIngestOptions{FreezeWindows: []ingest.FreezeWindow{window}})
+	if !errors.Is(err, ingest.ErrFrozen) {
+		t.Fatalf("err = %v, want ErrFrozen", err)
+	}
+
+	// Same window carrying a valid dual-signoff grant → bypass.
+	bg := window
+	bg.BreakGlass = true
+	bg.Justification = "incident"
+	bg.Approvers = []string{"alice@acme.com", "bob@acme.com"}
+	bg.GrantedAt = now
+	res, err := ingest.SourceIngestWithOptions(context.Background(), st, provider, cfg,
+		ingest.SourceIngestOptions{FreezeWindows: []ingest.FreezeWindow{bg}})
+	if err != nil {
+		t.Fatalf("break-glass ingest: %v", err)
+	}
+	if res.Accepted != 1 {
+		t.Errorf("Accepted = %d, want 1", res.Accepted)
+	}
 }
 
 // Spec: §7.3.1 — tolerant policy accepts a rewritten history,

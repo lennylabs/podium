@@ -257,6 +257,7 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 		// the standalone web UI (§13.10) see the bootstrap layers. The
 		// SourceType is "local" with LocalPath set to the resolved
 		// directory so a future reingest can re-snapshot the same path.
+		now := time.Now().UTC()
 		cfg := store.LayerConfig{
 			TenantID:     tenantID,
 			ID:           l.ID,
@@ -267,7 +268,10 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			Organization: vis.Organization,
 			Groups:       vis.Groups,
 			Users:        vis.Users,
-			CreatedAt:    time.Now().UTC(),
+			CreatedAt:    now,
+			// §7.3.1: the bootstrap ingest just completed, so stamp
+			// last_ingested_at for staleness monitoring (F-7.3.6).
+			LastIngestedAt: &now,
 		}
 		if err := st.PutLayerConfig(ctx, cfg); err != nil {
 			return nil, fmt.Errorf("persist layer config %s: %w", l.ID, err)
@@ -379,6 +383,17 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resou
 // store.LayerConfig plus the resolved visibility. An empty `visibility:` block
 // falls back to the deployment default (§4.6 / F-4.6.9). Exactly one source
 // (git or local) must be set.
+// validForcePushPolicyYAML reports whether a registry.yaml
+// source.git.force_push_policy value is one of the §7.3.1 accepted forms.
+func validForcePushPolicyYAML(p string) bool {
+	switch p {
+	case "", "tolerant", "strict":
+		return true
+	default:
+		return false
+	}
+}
+
 func layerConfigFromEntry(tenantID string, entry yamlLayerEntry, order int, cfg *Config) (store.LayerConfig, layer.Visibility, error) {
 	if entry.ID == "" {
 		return store.LayerConfig{}, layer.Visibility{}, fmt.Errorf("declared layer at position %d is missing id", order)
@@ -412,10 +427,16 @@ func layerConfigFromEntry(tenantID string, entry yamlLayerEntry, order int, cfg 
 		if entry.Source.Git.Repo == "" {
 			return store.LayerConfig{}, layer.Visibility{}, fmt.Errorf("declared git layer %s is missing source.git.repo", entry.ID)
 		}
+		if !validForcePushPolicyYAML(entry.Source.Git.ForcePushPolicy) {
+			return store.LayerConfig{}, layer.Visibility{}, fmt.Errorf(
+				"declared git layer %s has invalid force_push_policy %q (want tolerant or strict)",
+				entry.ID, entry.Source.Git.ForcePushPolicy)
+		}
 		lc.SourceType = "git"
 		lc.Repo = entry.Source.Git.Repo
 		lc.Ref = entry.Source.Git.Ref
 		lc.Root = entry.Source.Git.Root
+		lc.ForcePushPolicy = entry.Source.Git.ForcePushPolicy
 	case hasLocal:
 		if entry.Source.Local.Path == "" {
 			return store.LayerConfig{}, layer.Visibility{}, fmt.Errorf("declared local layer %s is missing source.local.path", entry.ID)
@@ -688,6 +709,9 @@ func Run() error {
 	mux := http.NewServeMux()
 	mux.Handle("/v1/layers", layers.Handler())
 	mux.Handle("/v1/layers/", layers.Handler())
+	// §7.3.1 inbound Git-provider webhook trigger. Mounted at the
+	// per-layer path `podium layer register` advertises.
+	mux.Handle("/v1/ingest/webhook/", layers.WebhookHandler())
 	mux.Handle("/v1/admin/runtime", runtimeEndpoint.Handler())
 	if isTrue(os.Getenv("PODIUM_WEB_UI")) {
 		mux.Handle("/ui/", http.StripPrefix("/ui/", http.FileServer(http.FS(web.Assets()))))
@@ -702,14 +726,15 @@ func Run() error {
 	// (probes still log; downstream features that need the sink
 	// gracefully no-op).
 	auditSink := openAuditSink(cfg)
+	// §8.2 default-on query-text scrubbing: build the scrubber from the
+	// resolved PIIRedactionConfig (env PODIUM_PII_REDACTION + registry.yaml
+	// pii_redaction). A nil scrubber means an operator disabled it. Resolved
+	// here unconditionally so the reingest runner's audit emitter shares it.
+	scrubber, err := cfg.piiRedaction.BuildScrubber()
+	if err != nil {
+		return fmt.Errorf("pii redaction config: %w", err)
+	}
 	if auditSink != nil {
-		// §8.2 default-on query-text scrubbing: build the scrubber from the
-		// resolved PIIRedactionConfig (env PODIUM_PII_REDACTION + registry.yaml
-		// pii_redaction). A nil scrubber means an operator disabled it.
-		scrubber, err := cfg.piiRedaction.BuildScrubber()
-		if err != nil {
-			return fmt.Errorf("pii redaction config: %w", err)
-		}
 		registry = registry.WithAudit(auditEmitterFor(auditSink, scrubber))
 		// spec §8.1: the same §8.3 sink records the HTTP-boundary events —
 		// admin.granted (grants handler) and layer.config_changed /
@@ -718,6 +743,13 @@ func Run() error {
 		server.WithAudit(auditSink)(srv)
 		layers.WithAudit(auditSink)
 	}
+
+	// §7.3.1: wire the ingest-pipeline driver so the manual reingest and
+	// inbound-webhook triggers run the pipeline (resolve source provider,
+	// lint, hash, store, publish events) instead of only recording intent.
+	// It carries the §4.7.2 freeze windows so an active window blocks ingest
+	// unless the manual reingest passes break-glass.
+	layers.WithReingestRunner(buildReingestRunner(st, srv, cfg, resourcePut, auditSink, scrubber))
 
 	// §8.6 transparency anchoring: when the operator enables
 	// PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS, a goroutine periodically
@@ -884,6 +916,11 @@ type Config struct {
 	// `layers:` block. Each entry is seeded as a store.LayerConfig at
 	// startup; local sources are also ingested. Config-file-only.
 	declaredLayers []yamlLayerEntry
+	// §4.7.2 org-level freeze windows from registry.yaml's `freeze_windows:`
+	// block. Enforced on the §7.3.1 manual reingest and inbound-webhook
+	// ingest paths; an active window rejects with ingest.frozen unless the
+	// manual reingest passes break-glass. Config-file-only.
+	freezeWindows []ingest.FreezeWindow
 	// §13.12 / §4.5.5 tenant-scope discovery rendering defaults from
 	// registry.yaml's `discovery:` block. Applied to the registry as
 	// core.DiscoveryDefaults; config-file-only.

@@ -40,10 +40,10 @@ func TestWebhook_ValidGitHubSignature(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/v1/layers/webhook?id=vendor", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/ingest/webhook/vendor", strings.NewReader(body))
 	req.Header.Set("X-Hub-Signature-256", sig)
 	rec := httptest.NewRecorder()
-	e.Handler().ServeHTTP(rec, req)
+	e.WebhookHandler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
@@ -60,10 +60,10 @@ func TestWebhook_InvalidSignature(t *testing.T) {
 	})
 	body := `{"ref":"refs/heads/main"}`
 	sig, _ := webhook.Sign("github", []byte(body), "wrong")
-	req := httptest.NewRequest(http.MethodPost, "/v1/layers/webhook?id=vendor", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/ingest/webhook/vendor", strings.NewReader(body))
 	req.Header.Set("X-Hub-Signature-256", sig)
 	rec := httptest.NewRecorder()
-	e.Handler().ServeHTTP(rec, req)
+	e.WebhookHandler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401; body=%s", rec.Code, rec.Body.String())
 	}
@@ -80,10 +80,10 @@ func TestWebhook_DefaultsToGitHub(t *testing.T) {
 	})
 	body := `{}`
 	sig, _ := webhook.Sign("github", []byte(body), secret)
-	req := httptest.NewRequest(http.MethodPost, "/v1/layers/webhook?id=vendor", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/ingest/webhook/vendor", strings.NewReader(body))
 	req.Header.Set("X-Hub-Signature-256", sig)
 	rec := httptest.NewRecorder()
-	e.Handler().ServeHTTP(rec, req)
+	e.WebhookHandler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
@@ -102,10 +102,10 @@ func TestWebhook_CustomRegisteredProvider(t *testing.T) {
 	e, _ := newWebhookEndpoint(t, store.LayerConfig{
 		ID: "vendor", SourceType: "git", GitProvider: id, WebhookSecret: "tok",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/v1/layers/webhook?id=vendor", strings.NewReader("body"))
+	req := httptest.NewRequest(http.MethodPost, "/v1/ingest/webhook/vendor", strings.NewReader("body"))
 	req.Header.Set("X-Hub-Signature-256", "tok")
 	rec := httptest.NewRecorder()
-	e.Handler().ServeHTTP(rec, req)
+	e.WebhookHandler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Errorf("custom provider status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
@@ -114,9 +114,9 @@ func TestWebhook_CustomRegisteredProvider(t *testing.T) {
 // spec: §4.6 — a non-git layer cannot receive a git webhook.
 func TestWebhook_NonGitLayer(t *testing.T) {
 	e, _ := newWebhookEndpoint(t, store.LayerConfig{ID: "local-layer", SourceType: "local"})
-	req := httptest.NewRequest(http.MethodPost, "/v1/layers/webhook?id=local-layer", strings.NewReader("x"))
+	req := httptest.NewRequest(http.MethodPost, "/v1/ingest/webhook/local-layer", strings.NewReader("x"))
 	rec := httptest.NewRecorder()
-	e.Handler().ServeHTTP(rec, req)
+	e.WebhookHandler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rec.Code)
 	}

@@ -660,18 +660,99 @@ func TestOpGuide_28_LayerReingest(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-29: force_push_policy strict not settable -----------
+// ---- T-D-operator-guide-29: force_push_policy strict settable ---------------
 
 // T-D-operator-guide-29
+// spec: §7.3.1 — force_push_policy: strict is settable per layer via the
+// register CLI/API and persists on the layer config.
 func TestOpGuide_29_ForcePushPolicyStrict(t *testing.T) {
-	t.Skip("blocked by F-7.3.7: force_push_policy is not settable via API/CLI/config")
+	t.Parallel()
+	srv := startServer(t, "")
+
+	res := runPodium(t, "", nil,
+		"layer", "register",
+		"--id", "opguide-strict",
+		"--repo", "git@github.com:acme/strict.git", "--ref", "main",
+		"--force-push-policy", "strict",
+		"--registry", srv.BaseURL)
+	if res.Exit != 0 {
+		t.Fatalf("layer register exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+
+	var resp struct {
+		Layers []struct {
+			ID              string `json:"ID"`
+			ForcePushPolicy string `json:"force_push_policy"`
+		} `json:"layers"`
+	}
+	getJSON(t, srv.BaseURL+"/v1/layers", &resp)
+	var found bool
+	for _, l := range resp.Layers {
+		if l.ID == "opguide-strict" {
+			found = true
+			if l.ForcePushPolicy != "strict" {
+				t.Errorf("force_push_policy = %q, want strict", l.ForcePushPolicy)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("opguide-strict layer not listed")
+	}
+
+	// An invalid policy is rejected.
+	bad := runPodium(t, "", nil,
+		"layer", "register", "--id", "opguide-bad",
+		"--repo", "git@github.com:acme/bad.git", "--ref", "main",
+		"--force-push-policy", "loose", "--registry", srv.BaseURL)
+	if bad.Exit == 0 {
+		t.Errorf("invalid force-push-policy should fail, got exit 0")
+	}
 }
 
 // ---- T-D-operator-guide-30: force-push default tolerant policy --------------
 
 // T-D-operator-guide-30
+// spec: §7.3.1 — force-push handling is "Tolerant by default": a layer
+// registered without a force_push_policy carries the empty (tolerant) value,
+// and strict can be set later via update.
 func TestOpGuide_30_ForcePushDefaultTolerant(t *testing.T) {
-	t.Skip("blocked by F-7.3.7: force_push_policy is not settable; cannot demonstrate tolerant vs strict contrast")
+	t.Parallel()
+	srv := startServer(t, "")
+
+	res := runPodium(t, "", nil,
+		"layer", "register",
+		"--id", "opguide-tolerant",
+		"--repo", "git@github.com:acme/tolerant.git", "--ref", "main",
+		"--registry", srv.BaseURL)
+	if res.Exit != 0 {
+		t.Fatalf("layer register exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+
+	var resp struct {
+		Layers []struct {
+			ID              string `json:"ID"`
+			ForcePushPolicy string `json:"force_push_policy"`
+		} `json:"layers"`
+	}
+	getJSON(t, srv.BaseURL+"/v1/layers", &resp)
+	for _, l := range resp.Layers {
+		if l.ID == "opguide-tolerant" && l.ForcePushPolicy != "" {
+			t.Errorf("default force_push_policy = %q, want empty (tolerant)", l.ForcePushPolicy)
+		}
+	}
+
+	upd := runPodium(t, "", nil,
+		"layer", "update", "--id", "opguide-tolerant",
+		"--force-push-policy", "strict", "--registry", srv.BaseURL)
+	if upd.Exit != 0 {
+		t.Fatalf("layer update exit=%d stderr=%s", upd.Exit, upd.Stderr)
+	}
+	getJSON(t, srv.BaseURL+"/v1/layers", &resp)
+	for _, l := range resp.Layers {
+		if l.ID == "opguide-tolerant" && l.ForcePushPolicy != "strict" {
+			t.Errorf("after update force_push_policy = %q, want strict", l.ForcePushPolicy)
+		}
+	}
 }
 
 // ---- T-D-operator-guide-31: admin scim-sync not implemented -----------------

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strings"
@@ -14,6 +15,8 @@ import (
 
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/layer/source"
+	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/store"
 )
 
@@ -60,6 +63,35 @@ type LayerEndpoint struct {
 	// layer.user_registered (personal) events on register, unregister, and
 	// reorder. Nil is a no-op.
 	auditSink *audit.FileSink
+	// reingestRunner runs the §7.3.1 ingest pipeline for a resolved layer
+	// (the manual reingest and inbound-webhook triggers). serverboot wires
+	// it with the source-provider resolver, linter, event publisher, audit
+	// emitter, and freeze windows. Nil leaves the endpoint in record-intent
+	// mode (the queue-only response) for harnesses that do not wire ingest.
+	reingestRunner ReingestRunner
+}
+
+// BreakGlass carries a §4.7.2 break-glass override supplied on the manual
+// reingest path (`podium layer reingest <id> --break-glass --justification
+// <text>`). The ingest pipeline requires a non-empty justification and two
+// distinct approvers before a freeze window is bypassed.
+type BreakGlass struct {
+	Justification string
+	Approvers     []string
+}
+
+// ReingestRunner runs the §7.3.1 ingest pipeline for one layer and returns
+// the result summary. bg is non-nil when the caller passed a break-glass
+// override on the manual reingest path. A nil runner leaves the endpoint in
+// record-intent mode.
+type ReingestRunner func(ctx context.Context, cfg store.LayerConfig, bg *BreakGlass) (*ingest.Result, error)
+
+// WithReingestRunner installs the ingest-pipeline driver the manual reingest
+// and inbound-webhook handlers invoke. Without it, those handlers only record
+// the intent (the queue-only response).
+func (e *LayerEndpoint) WithReingestRunner(fn ReingestRunner) *LayerEndpoint {
+	e.reingestRunner = fn
+	return e
 }
 
 // WithDefaultVisibility installs the §4.6 fallback visibility for
@@ -163,6 +195,23 @@ type LayerRegisterRequest struct {
 	Organization bool     `json:"organization,omitempty"`
 	Groups       []string `json:"groups,omitempty"`
 	Users        []string `json:"users,omitempty"`
+	// ForcePushPolicy sets the §7.3.1 per-layer force-push handling for a
+	// git source. One of "" (tolerant), "tolerant", or "strict". On update
+	// the empty string leaves the prior value; "tolerant" explicitly
+	// resets it.
+	ForcePushPolicy string `json:"force_push_policy,omitempty"`
+}
+
+// validForcePushPolicy reports whether p is one of the §7.3.1 accepted
+// force-push policy values ("" and "tolerant" both mean tolerant; "strict"
+// rejects a rewritten history).
+func validForcePushPolicy(p string) bool {
+	switch p {
+	case "", "tolerant", "strict":
+		return true
+	default:
+		return false
+	}
 }
 
 // LayerRegisterResponse is the POST /v1/layers JSON response.
@@ -191,9 +240,18 @@ func (e *LayerEndpoint) Handler() http.Handler {
 	})
 	mux.HandleFunc("/v1/layers/reorder", e.reorder)
 	mux.HandleFunc("/v1/layers/reingest", e.reingest)
-	mux.HandleFunc("/v1/layers/webhook", e.handleWebhook)
 	mux.HandleFunc("/v1/layers/update", e.update)
 	mux.HandleFunc("/v1/layers/restore", e.restore)
+	return mux
+}
+
+// WebhookHandler returns the handler for the §7.3.1 inbound Git-provider
+// webhook trigger, mounted separately at /v1/ingest/webhook/{id}. The layer
+// id comes from the path so the URL `podium layer register` advertises is a
+// clean per-layer endpoint. POST only; other methods get 405 from the mux.
+func (e *LayerEndpoint) WebhookHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/ingest/webhook/{id}", e.handleWebhook)
 	return mux
 }
 
@@ -240,6 +298,17 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
 		return
+	}
+	if !validForcePushPolicy(patch.ForcePushPolicy) {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument",
+			"force_push_policy must be \"tolerant\" or \"strict\"")
+		return
+	}
+	// spec: §7.3.1 — a non-empty force_push_policy replaces the prior
+	// value; the empty string leaves it unchanged (consistent with the
+	// other patch fields).
+	if patch.ForcePushPolicy != "" {
+		cfg.ForcePushPolicy = patch.ForcePushPolicy
 	}
 	if patch.Ref != "" {
 		cfg.Ref = patch.Ref
@@ -296,6 +365,11 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 			"id and source_type are required")
 		return
 	}
+	if !validForcePushPolicy(req.ForcePushPolicy) {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument",
+			"force_push_policy must be \"tolerant\" or \"strict\"")
+		return
+	}
 	// Admin-defined layers require admin authorization.
 	if !req.UserDefined {
 		if err := e.authAdmin(r); err != nil {
@@ -305,20 +379,21 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg := store.LayerConfig{
-		TenantID:     e.tenantID,
-		ID:           req.ID,
-		SourceType:   req.SourceType,
-		Repo:         req.Repo,
-		Ref:          req.Ref,
-		Root:         req.Root,
-		LocalPath:    req.LocalPath,
-		UserDefined:  req.UserDefined,
-		Owner:        req.Owner,
-		Public:       req.Public,
-		Organization: req.Organization,
-		Groups:       req.Groups,
-		Users:        req.Users,
-		CreatedAt:    time.Now().UTC(),
+		TenantID:        e.tenantID,
+		ID:              req.ID,
+		SourceType:      req.SourceType,
+		Repo:            req.Repo,
+		Ref:             req.Ref,
+		Root:            req.Root,
+		LocalPath:       req.LocalPath,
+		UserDefined:     req.UserDefined,
+		Owner:           req.Owner,
+		Public:          req.Public,
+		Organization:    req.Organization,
+		Groups:          req.Groups,
+		Users:           req.Users,
+		ForcePushPolicy: req.ForcePushPolicy,
+		CreatedAt:       time.Now().UTC(),
 	}
 
 	// spec: §4.6 / §7.3.1 — a user-defined layer has implicit visibility
@@ -427,7 +502,7 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 
 	resp := LayerRegisterResponse{Layer: cfg}
 	if cfg.SourceType == "git" {
-		resp.WebhookURL = "/v1/layers/" + cfg.ID + "/webhook"
+		resp.WebhookURL = "/v1/ingest/webhook/" + cfg.ID
 		resp.WebhookSecret = cfg.WebhookSecret
 	}
 	writeJSON(w, http.StatusCreated, resp)
@@ -613,21 +688,58 @@ func (e *LayerEndpoint) reorder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"layers": updated})
 }
 
-// reingest handles POST /v1/layers/reingest?id=ID. The actual ingest
-// pipeline runs externally; this endpoint records the intent so an
-// orchestrator can pick it up. Phase 10 wires the trigger; the
-// pipeline integration lands when the standalone server's ingest
-// scheduler ships.
+// reingestRequest is the optional POST /v1/layers/reingest body. The §7.3.1
+// manual reingest path carries a break-glass override here so an operator can
+// bypass an active freeze window (§4.7.2).
+type reingestRequest struct {
+	BreakGlass    bool     `json:"break_glass,omitempty"`
+	Justification string   `json:"justification,omitempty"`
+	Approvers     []string `json:"approvers,omitempty"`
+}
+
+// reingest handles POST /v1/layers/reingest?id=ID, the §7.3.1 manual reingest
+// trigger ("forces a fresh snapshot regardless of the trigger model"). When a
+// reingest runner is wired it resolves the layer's source provider and runs
+// the ingest pipeline, returning the result summary. An optional break-glass
+// body bypasses an active freeze window (§4.7.2). Without a runner the handler
+// records the intent (the queue-only response).
 func (e *LayerEndpoint) reingest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "registry.invalid_argument",
 			"method not allowed: "+r.Method)
 		return
 	}
+	if e.mode != nil {
+		if err := e.mode.CheckConfig(); err != nil {
+			writeError(w, http.StatusServiceUnavailable, "config.read_only", err.Error())
+			return
+		}
+	}
 	id := r.URL.Query().Get("id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "id query param required")
 		return
+	}
+	// The break-glass override is optional; an empty or absent body means a
+	// plain reingest. Decode leniently so a nil body (CLI watch, tests) is
+	// not an error.
+	var body reingestRequest
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+			writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
+			return
+		}
+	}
+	var bg *BreakGlass
+	if body.BreakGlass {
+		// spec: §4.7.2 — break-glass requires a justification. Reject the
+		// request before touching the pipeline when it is missing.
+		if body.Justification == "" {
+			writeError(w, http.StatusBadRequest, "registry.invalid_argument",
+				"break-glass requires a justification")
+			return
+		}
+		bg = &BreakGlass{Justification: body.Justification, Approvers: body.Approvers}
 	}
 	cfg, err := e.store.GetLayerConfig(r.Context(), e.tenantID, id)
 	if err != nil {
@@ -638,10 +750,56 @@ func (e *LayerEndpoint) reingest(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	e.runIngestAndRespond(w, r, cfg, bg)
+}
+
+// runIngestAndRespond drives the ingest pipeline for a resolved layer (shared
+// by the manual reingest and inbound-webhook triggers) and writes the §7.3.1
+// result summary. With no runner wired it records the intent only.
+func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Request, cfg store.LayerConfig, bg *BreakGlass) {
+	if e.reingestRunner == nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"queued":    cfg.ID,
+			"queued_at": time.Now().UTC().Format(time.RFC3339),
+		})
+		return
+	}
+	res, err := e.reingestRunner(r.Context(), cfg, bg)
+	if err != nil {
+		writeReingestError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"queued":    cfg.ID,
-		"queued_at": time.Now().UTC().Format(time.RFC3339),
+		"queued":        cfg.ID,
+		"queued_at":     time.Now().UTC().Format(time.RFC3339),
+		"accepted":      res.Accepted,
+		"idempotent":    res.Idempotent,
+		"conflicts":     len(res.Conflicts),
+		"lint_failures": len(res.LintFailures),
 	})
+}
+
+// writeReingestError maps the ingest-pipeline sentinels to their §6.10
+// structured error codes and HTTP status.
+func writeReingestError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ingest.ErrFrozen):
+		writeError(w, http.StatusConflict, "ingest.frozen", err.Error())
+	case errors.Is(err, ingest.ErrHistoryRewritten):
+		writeError(w, http.StatusConflict, "ingest.history_rewritten", err.Error())
+	case errors.Is(err, ingest.ErrLintFailed), errors.Is(err, ingest.ErrInvalidArtifact):
+		writeError(w, http.StatusUnprocessableEntity, "ingest.lint_failed", err.Error())
+	case errors.Is(err, ingest.ErrQuotaExceeded):
+		writeError(w, http.StatusTooManyRequests, "quota.storage_exceeded", err.Error())
+	case errors.Is(err, ingest.ErrPublicModeSensitive):
+		writeError(w, http.StatusUnprocessableEntity, "ingest.public_mode_rejects_sensitive", err.Error())
+	case errors.Is(err, source.ErrSourceUnreachable):
+		writeError(w, http.StatusBadGateway, "ingest.source_unreachable", err.Error())
+	case errors.Is(err, source.ErrInvalidConfig):
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
+	default:
+		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+	}
 }
 
 // generateSecret returns a 32-byte hex-encoded HMAC secret for git

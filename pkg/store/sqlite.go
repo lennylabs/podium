@@ -142,6 +142,7 @@ func (s *SQLite) applySchema() error {
 			git_provider TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL,
 			deleted_at TEXT,
+			last_ingested_at TEXT,
 			PRIMARY KEY (tenant_id, id)
 		)`,
 	}
@@ -417,14 +418,14 @@ func (s *SQLite) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 		INSERT OR REPLACE INTO layer_configs
 			(tenant_id, id, source_type, repo, ref, root, local_path, ord,
 			 user_defined, owner, public, organization, groups, users,
-			 webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		cfg.TenantID, cfg.ID, cfg.SourceType, cfg.Repo, cfg.Ref, cfg.Root, cfg.LocalPath,
 		cfg.Order, boolToInt(cfg.UserDefined), cfg.Owner,
 		boolToInt(cfg.Public), boolToInt(cfg.Organization),
 		strings.Join(cfg.Groups, "\n"), strings.Join(cfg.Users, "\n"),
 		cfg.WebhookSecret, cfg.LastIngestedRef, cfg.ForcePushPolicy, cfg.GitProvider,
-		createdAt.UTC().Format(time.RFC3339Nano), nullTimeText(cfg.DeletedAt))
+		createdAt.UTC().Format(time.RFC3339Nano), nullTimeText(cfg.DeletedAt), nullTimeText(cfg.LastIngestedAt))
 	return err
 }
 
@@ -433,7 +434,7 @@ func (s *SQLite) GetLayerConfig(ctx context.Context, tenantID, id string) (Layer
 	row := s.db.QueryRowContext(ctx, `
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
-		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at
+		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at
 		FROM layer_configs
 		WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL`, tenantID, id)
 	cfg, err := scanLayerConfig(row)
@@ -448,7 +449,7 @@ func (s *SQLite) ListLayerConfigs(ctx context.Context, tenantID string) ([]Layer
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
-		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at
+		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at
 		FROM layer_configs WHERE tenant_id = ? AND deleted_at IS NULL
 		ORDER BY ord ASC, id ASC`, tenantID)
 	if err != nil {
@@ -523,7 +524,7 @@ func (s *SQLite) ListDeletedLayerConfigs(ctx context.Context, tenantID string) (
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
-		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at
+		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at
 		FROM layer_configs WHERE tenant_id = ? AND deleted_at IS NOT NULL
 		ORDER BY id ASC`, tenantID)
 	if err != nil {
@@ -575,14 +576,14 @@ func scanLayerConfig(scanner rowScanner) (LayerConfig, error) {
 	var cfg LayerConfig
 	var userDefined, public, org int
 	var groups, users, createdAt string
-	var deletedAt sql.NullString
+	var deletedAt, lastIngestedAt sql.NullString
 	err := scanner.Scan(
 		&cfg.TenantID, &cfg.ID, &cfg.SourceType,
 		&cfg.Repo, &cfg.Ref, &cfg.Root, &cfg.LocalPath,
 		&cfg.Order, &userDefined, &cfg.Owner,
 		&public, &org, &groups, &users,
 		&cfg.WebhookSecret, &cfg.LastIngestedRef, &cfg.ForcePushPolicy, &cfg.GitProvider,
-		&createdAt, &deletedAt)
+		&createdAt, &deletedAt, &lastIngestedAt)
 	if err != nil {
 		return LayerConfig{}, err
 	}
@@ -599,6 +600,7 @@ func scanLayerConfig(scanner rowScanner) (LayerConfig, error) {
 		cfg.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
 	}
 	cfg.DeletedAt = parseNullTimeText(deletedAt)
+	cfg.LastIngestedAt = parseNullTimeText(lastIngestedAt)
 	return cfg, nil
 }
 

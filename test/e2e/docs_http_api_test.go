@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/pkg/layer"
+	layerwebhook "github.com/lennylabs/podium/pkg/layer/webhook"
 	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
@@ -829,9 +830,71 @@ func TestDocHTTPAPI_38_ScopePreviewDisabled(t *testing.T) {
 
 // ===== Ingest webhook (T-D-http-api-39) ==============================
 
-// spec: http-api.md § Ingest webhook.
+// spec: http-api.md § Ingest webhook (§7.3.1). The inbound Git-provider
+// webhook endpoint is mounted at /v1/ingest/webhook/{id}: an invalid HMAC
+// signature is rejected as ingest.webhook_invalid and never reaches the
+// content store; a valid signature drives the ingest pipeline.
 func TestDocHTTPAPI_39_IngestWebhookInvalid(t *testing.T) {
-	t.Skip("blocked by F-7.3.2: the inbound Git-provider webhook endpoint (/v1/ingest/webhook/{layer-id}) is not registered")
+	t.Parallel()
+	srv := startServer(t, "")
+
+	// Register a git layer; the response advertises the per-layer webhook URL
+	// and the generated HMAC secret to register on the source repo.
+	st, body := apiDo(t, "POST", srv.BaseURL+"/v1/layers", map[string]any{
+		"id": "vendor-hooks", "source_type": "git",
+		"repo": "git@github.com:acme/vendor.git", "ref": "main",
+	})
+	apiWantStatus(t, st, 201, "register git layer", body)
+	var reg struct {
+		WebhookURL    string `json:"webhook_url"`
+		WebhookSecret string `json:"webhook_secret"`
+	}
+	if err := json.Unmarshal(body, &reg); err != nil {
+		t.Fatalf("decode register response: %v\n%s", err, body)
+	}
+	if reg.WebhookURL != "/v1/ingest/webhook/vendor-hooks" {
+		t.Fatalf("webhook_url = %q, want /v1/ingest/webhook/vendor-hooks", reg.WebhookURL)
+	}
+	if reg.WebhookSecret == "" {
+		t.Fatalf("register did not return a webhook secret")
+	}
+
+	payload := []byte(`{"ref":"refs/heads/main"}`)
+
+	// Invalid signature → 401 ingest.webhook_invalid, never ingests.
+	badReq, _ := http.NewRequest("POST", srv.BaseURL+reg.WebhookURL, bytes.NewReader(payload))
+	badSig, _ := layerwebhook.Sign("github", payload, "the-wrong-secret")
+	badReq.Header.Set("X-Hub-Signature-256", badSig)
+	badResp, err := httpClient.Do(badReq)
+	if err != nil {
+		t.Fatalf("POST webhook (bad sig): %v", err)
+	}
+	badBody := new(bytes.Buffer)
+	_, _ = badBody.ReadFrom(badResp.Body)
+	badResp.Body.Close()
+	apiWantStatus(t, badResp.StatusCode, 401, "invalid webhook signature", badBody.Bytes())
+	if code := apiJSONObj(t, badBody.Bytes())["code"]; code != "ingest.webhook_invalid" {
+		t.Fatalf("code = %v, want ingest.webhook_invalid\n%s", code, badBody.Bytes())
+	}
+
+	// Valid signature → verification passes and the ingest pipeline runs. The
+	// fake repo is unreachable, so the pipeline surfaces ingest.source_unreachable
+	// (502), which proves the delivery passed verification and reached ingest
+	// rather than 404/401.
+	okReq, _ := http.NewRequest("POST", srv.BaseURL+reg.WebhookURL, bytes.NewReader(payload))
+	okSig, _ := layerwebhook.Sign("github", payload, reg.WebhookSecret)
+	okReq.Header.Set("X-Hub-Signature-256", okSig)
+	okResp, err := httpClient.Do(okReq)
+	if err != nil {
+		t.Fatalf("POST webhook (valid sig): %v", err)
+	}
+	okBody := new(bytes.Buffer)
+	_, _ = okBody.ReadFrom(okResp.Body)
+	okResp.Body.Close()
+	if okResp.StatusCode == http.StatusNotFound || okResp.StatusCode == http.StatusUnauthorized {
+		t.Fatalf("valid signature still returned %d (route or verification broken): %s",
+			okResp.StatusCode, okBody.Bytes())
+	}
 }
 
 // ===== Subscriptions / events (T-D-http-api-40..41) ==================
