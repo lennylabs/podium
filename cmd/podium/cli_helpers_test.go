@@ -177,34 +177,59 @@ func TestFormatList_EmptyAndPopulated(t *testing.T) {
 	}
 }
 
-func TestPrintJSON_EmitsAdapterTargetAndArtifacts(t *testing.T) {
+// spec: §7.5 — the --json envelope is
+// {profile, target, harness, scope, artifacts: [{id, version, type, layer}]}.
+func TestPrintJSON_EmitsSpecEnvelope(t *testing.T) {
 	got := captureStdout(t, func() {
 		printJSON(&sync.Result{
 			Adapter: "claude-code",
+			Profile: "finance-team",
 			Target:  "/tmp/proj",
+			Scope: sync.ScopeFilter{
+				Include: []string{"finance/**"},
+				Exclude: []string{"finance/**/legacy/**"},
+				Types:   []string{"skill", "agent"},
+			},
 			Artifacts: []sync.ArtifactResult{
-				{ID: "personal/a", Layer: "personal", Files: []string{".claude/agents/a.md"}},
-				{ID: "personal/b", Layer: "personal", Files: []string{".claude/agents/b.md", ".claude/agents/b2.md"}},
+				{ID: "personal/a", Version: "1.0.0", Type: "agent", Layer: "personal", Files: []string{".claude/agents/a.md"}},
+				{ID: "personal/b", Version: "2.1.0", Type: "skill", Layer: "personal", Files: []string{".claude/agents/b.md"}},
 			},
 		})
 	})
 	var envelope struct {
-		Adapter   string `json:"adapter"`
-		Target    string `json:"target"`
+		Profile string `json:"profile"`
+		Target  string `json:"target"`
+		Harness string `json:"harness"`
+		Scope   struct {
+			Include []string `json:"include"`
+			Exclude []string `json:"exclude"`
+			Type    []string `json:"type"`
+		} `json:"scope"`
 		Artifacts []struct {
-			ID    string   `json:"id"`
-			Layer string   `json:"layer"`
-			Files []string `json:"files"`
+			ID      string `json:"id"`
+			Version string `json:"version"`
+			Type    string `json:"type"`
+			Layer   string `json:"layer"`
 		} `json:"artifacts"`
 	}
 	if err := json.Unmarshal([]byte(got), &envelope); err != nil {
 		t.Fatalf("printJSON output not valid JSON: %v\n%s", err, got)
 	}
-	if envelope.Adapter != "claude-code" || envelope.Target != "/tmp/proj" {
+	if envelope.Harness != "claude-code" || envelope.Profile != "finance-team" || envelope.Target != "/tmp/proj" {
 		t.Errorf("envelope = %+v", envelope)
 	}
-	if len(envelope.Artifacts) != 2 || envelope.Artifacts[1].Files[1] != ".claude/agents/b2.md" {
-		t.Errorf("artifacts = %+v", envelope.Artifacts)
+	if len(envelope.Scope.Include) != 1 || envelope.Scope.Include[0] != "finance/**" || len(envelope.Scope.Type) != 2 {
+		t.Errorf("scope = %+v", envelope.Scope)
+	}
+	if len(envelope.Artifacts) != 2 {
+		t.Fatalf("artifacts = %+v", envelope.Artifacts)
+	}
+	if envelope.Artifacts[1].Version != "2.1.0" || envelope.Artifacts[1].Type != "skill" || envelope.Artifacts[0].Layer != "personal" {
+		t.Errorf("artifact fields = %+v", envelope.Artifacts)
+	}
+	// The non-spec "files" key is gone.
+	if strings.Contains(got, "\"files\"") || strings.Contains(got, "\"adapter\"") {
+		t.Errorf("envelope still carries adapter/files keys:\n%s", got)
 	}
 }
 

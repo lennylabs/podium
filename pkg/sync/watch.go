@@ -62,6 +62,8 @@ func Watch(ctx context.Context, opts WatchOptions) (<-chan WatchEvent, error) {
 	// startup and re-applies toggles on every event, so every Run on the
 	// watch path preserves the lock's toggles rather than clearing them.
 	opts.Sync.PreserveToggles = true
+	// spec: §7.5.3 — watcher-driven reruns stamp last_synced_by: watch.
+	opts.Sync.LastSyncedBy = "watch"
 
 	events := make(chan WatchEvent, 4)
 	// §7.5.2 dispatch: a server-source watcher subscribes to the registry's

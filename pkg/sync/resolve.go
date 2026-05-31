@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -168,6 +169,7 @@ func mergeDefaults(dst *Defaults, src Defaults) {
 type ResolveInput struct {
 	Registry string
 	Target   string
+	Harness  string
 	Profile  string
 	Include  []string
 	Exclude  []string
@@ -179,6 +181,7 @@ type ResolveInput struct {
 type Resolved struct {
 	Registry string
 	Target   string
+	Harness  string // resolved adapter id; "none" when unset everywhere
 	Profile  string // active profile name; "" when none
 	Scope    ScopeFilter
 	// CollisionWarning is non-empty when the invoked profile is defined in
@@ -229,12 +232,75 @@ func Resolve(in ResolveInput, merged *MergedConfig, env func(string) string) (*R
 
 	out.Registry = firstNonEmpty(in.Registry, env("PODIUM_REGISTRY"), merged.Defaults.Registry)
 	out.Target = firstNonEmpty(in.Target, prof.Target, merged.Defaults.Target)
+	// spec: §7.5.2 — harness resolves per key by precedence: CLI flag, then
+	// PODIUM_HARNESS, then the active profile's harness, then defaults.harness,
+	// then the built-in "none" adapter.
+	out.Harness = firstNonEmpty(in.Harness, env("PODIUM_HARNESS"), prof.Harness, merged.Defaults.Harness, "none")
 	out.Scope = ScopeFilter{
 		Include: pickList(in.Include, prof.Include),
 		Exclude: pickList(in.Exclude, prof.Exclude),
 		Types:   pickList(in.Types, prof.Type),
 	}
 	return out, nil
+}
+
+// Check validates a merged config per §7.5.2 `podium sync --check` and returns
+// the warnings (never errors): unresolved profile references (defaults.profile
+// and per-target profile names), malformed include/exclude globs, duplicate
+// target ids, and profile-name collisions across scopes. The returned slice is
+// sorted for deterministic output and is empty when the config is clean.
+//
+// spec: §7.5.2 — "validate the merged config against the schema and report
+// unresolved profile references, malformed globs, target collisions, and
+// profile-name collisions across scopes (warning, not error)".
+func Check(merged *MergedConfig) []string {
+	if merged == nil {
+		return nil
+	}
+	var warns []string
+
+	for name, scopes := range merged.Collisions {
+		if len(scopes) > 1 {
+			warns = append(warns, fmt.Sprintf(
+				"profile %q is defined in multiple scopes (%s); the highest-precedence definition wins",
+				name, joinScopes(scopes)))
+		}
+	}
+
+	if p := merged.Defaults.Profile; p != "" {
+		if _, ok := merged.Profiles[p]; !ok {
+			warns = append(warns, fmt.Sprintf("defaults.profile references undefined profile %q", p))
+		}
+	}
+
+	for name, prof := range merged.Profiles {
+		for _, g := range append(append([]string(nil), prof.Include...), prof.Exclude...) {
+			if err := validateGlob(g); err != nil {
+				warns = append(warns, fmt.Sprintf("profile %q: malformed glob %q (%v)", name, g, err))
+			}
+		}
+	}
+
+	seen := map[string]bool{}
+	for _, t := range merged.Targets {
+		if t.ID != "" && seen[t.ID] {
+			warns = append(warns, fmt.Sprintf("target id %q is defined more than once", t.ID))
+		}
+		seen[t.ID] = true
+		if t.Profile != "" {
+			if _, ok := merged.Profiles[t.Profile]; !ok {
+				warns = append(warns, fmt.Sprintf("target %q references undefined profile %q", t.ID, t.Profile))
+			}
+		}
+		for _, g := range append(append([]string(nil), t.Include...), t.Exclude...) {
+			if err := validateGlob(g); err != nil {
+				warns = append(warns, fmt.Sprintf("target %q: malformed glob %q (%v)", t.ID, g, err))
+			}
+		}
+	}
+
+	sort.Strings(warns)
+	return warns
 }
 
 // MultiTargetPlan is one resolved entry from a §7.5.2 `targets:` list. Each

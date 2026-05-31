@@ -842,9 +842,11 @@ func TestDocCLI_55_OverrideDryRun(t *testing.T) {
 	res := runPodium(t, "", nil, "sync", "override", "--add", "personal/greet", "--dry-run", "--target", tgt)
 	cliWantExit(t, res, 0, "override --dry-run")
 	cliContains(t, res.Stdout, "dry-run", "dry-run marker")
-	// Not persisted: a plain override now shows no add toggle.
-	after := runPodium(t, "", nil, "sync", "override", "--target", tgt)
-	cliContains(t, after.Stdout, "toggles.add:    (none)", "dry-run not persisted")
+	// Not persisted: the dry-run wrote no lock toggle. (A no-flag override is
+	// the TUI form, deferred with a message, so inspect the lock directly.)
+	if b, err := os.ReadFile(filepath.Join(tgt, ".podium/sync.lock")); err == nil {
+		cliNotContains(t, string(b), "personal/greet", "dry-run not persisted")
+	}
 }
 
 // spec: doc "Sync and materialization — podium sync save-as".
@@ -893,7 +895,7 @@ func cliProfileWS(t testing.TB) string {
 // spec: doc "Sync and materialization — podium profile edit".
 func TestDocCLI_59_ProfileAddInclude(t *testing.T) {
 	ws := cliProfileWS(t)
-	res := runPodium(t, ws, nil, "profile", "edit", "--profile", "team", "--add-include", "personal/*")
+	res := runPodium(t, ws, nil, "profile", "edit", "team", "--add-include", "personal/*")
 	cliWantExit(t, res, 0, "profile edit --add-include")
 	cliContains(t, readFile(t, filepath.Join(ws, ".podium/sync.yaml")), "personal/*", "include pattern added")
 }
@@ -901,15 +903,15 @@ func TestDocCLI_59_ProfileAddInclude(t *testing.T) {
 // spec: doc "podium profile edit", `--remove-include` flag.
 func TestDocCLI_60_ProfileRemoveInclude(t *testing.T) {
 	ws := cliProfileWS(t)
-	cliWantExit(t, runPodium(t, ws, nil, "profile", "edit", "--profile", "team", "--add-include", "personal/*"), 0, "add")
-	cliWantExit(t, runPodium(t, ws, nil, "profile", "edit", "--profile", "team", "--remove-include", "personal/*"), 0, "remove")
+	cliWantExit(t, runPodium(t, ws, nil, "profile", "edit", "team", "--add-include", "personal/*"), 0, "add")
+	cliWantExit(t, runPodium(t, ws, nil, "profile", "edit", "team", "--remove-include", "personal/*"), 0, "remove")
 	cliNotContains(t, readFile(t, filepath.Join(ws, ".podium/sync.yaml")), "personal/*", "include pattern removed")
 }
 
 // spec: doc "podium profile edit", `--add-exclude` flag.
 func TestDocCLI_61_ProfileAddExclude(t *testing.T) {
 	ws := cliProfileWS(t)
-	res := runPodium(t, ws, nil, "profile", "edit", "--profile", "team", "--add-exclude", "drafts/*")
+	res := runPodium(t, ws, nil, "profile", "edit", "team", "--add-exclude", "drafts/*")
 	cliWantExit(t, res, 0, "profile edit --add-exclude")
 	cliContains(t, readFile(t, filepath.Join(ws, ".podium/sync.yaml")), "drafts/*", "exclude pattern added")
 }
@@ -917,7 +919,7 @@ func TestDocCLI_61_ProfileAddExclude(t *testing.T) {
 // spec: doc "podium profile edit", `--dry-run` form.
 func TestDocCLI_62_ProfileEditDryRun(t *testing.T) {
 	ws := cliProfileWS(t)
-	res := runPodium(t, ws, nil, "profile", "edit", "--profile", "team", "--add-include", "personal/*", "--dry-run")
+	res := runPodium(t, ws, nil, "profile", "edit", "team", "--add-include", "personal/*", "--dry-run")
 	cliWantExit(t, res, 0, "profile edit --dry-run")
 	cliNotContains(t, readFile(t, filepath.Join(ws, ".podium/sync.yaml")), "personal/*", "dry-run not persisted")
 }

@@ -136,6 +136,9 @@ func Override(opts OverrideOptions) (*OverrideResult, error) {
 				Types:   lock.Scope.Type,
 			},
 			PreserveToggles: true,
+			// spec: §7.5.3 — override-driven lock writes stamp
+			// last_synced_by: override.
+			LastSyncedBy: "override",
 		}); err != nil {
 			return nil, fmt.Errorf("override: materialize: %w", err)
 		}
@@ -263,7 +266,9 @@ type ProfileEditResult struct {
 
 // ProfileEdit modifies an entry in sync.yaml's `profiles:` block per
 // §7.5.7. The target directory and lock file are untouched; a
-// subsequent `podium sync` picks up the change.
+// subsequent `podium sync` picks up the change. The edit round-trips the
+// file through a yaml.Node tree so comments and formatting around the
+// untouched keys survive (§7.5.7 "preserving formatting and comments").
 func ProfileEdit(opts ProfileEditOptions) (*ProfileEditResult, error) {
 	if opts.Target == "" {
 		return nil, ErrNoTarget
@@ -271,49 +276,7 @@ func ProfileEdit(opts ProfileEditOptions) (*ProfileEditResult, error) {
 	if opts.Profile == "" {
 		return nil, fmt.Errorf("profile edit: profile name required")
 	}
-	cfg, err := EnsureConfig(opts.Target)
-	if err != nil {
-		return nil, err
-	}
-	prof, ok := cfg.Profiles[opts.Profile]
-	if !ok {
-		// §7.5.7: "If .podium/sync.yaml doesn't exist, podium profile
-		// edit <name> creates it with the named profile and an empty
-		// defaults: block."
-		prof = Profile{}
-	}
-	for _, p := range opts.AddInclude {
-		if !containsStr(prof.Include, p) {
-			prof.Include = append(prof.Include, p)
-		}
-	}
-	prof.Include = removeStrings(prof.Include, opts.RemoveInclude)
-	for _, p := range opts.AddExclude {
-		if !containsStr(prof.Exclude, p) {
-			prof.Exclude = append(prof.Exclude, p)
-		}
-	}
-	prof.Exclude = removeStrings(prof.Exclude, opts.RemoveExclude)
-
-	res := &ProfileEditResult{Profile: prof}
-	if opts.DryRun {
-		return res, nil
-	}
-	cfg.Profiles[opts.Profile] = prof
-	if err := WriteConfig(opts.Target, cfg); err != nil {
-		return nil, err
-	}
-	res.Wrote = true
-	return res, nil
-}
-
-func containsStr(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-	return false
+	return editProfileYAML(opts)
 }
 
 func removeStrings(haystack, drop []string) []string {

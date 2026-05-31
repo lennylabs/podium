@@ -970,7 +970,7 @@ func TestReadme_ProfileEdit(t *testing.T) {
 	ws := t.TempDir()
 	reg := writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")})
 	runPodium(t, ws, []string{"HOME=" + t.TempDir()}, "init", "--registry", reg)
-	res := runPodium(t, ws, []string{"HOME=" + t.TempDir()}, "profile", "edit", "--profile", "dev-focus", "--add-include", "finance/**", "--target", t.TempDir())
+	res := runPodium(t, ws, []string{"HOME=" + t.TempDir()}, "profile", "edit", "dev-focus", "--add-include", "finance/**", "--target", t.TempDir())
 	if res.Exit != 0 {
 		t.Fatalf("profile edit exit=%d stderr=%s", res.Exit, res.Stderr)
 	}

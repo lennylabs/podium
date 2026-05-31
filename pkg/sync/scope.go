@@ -1,11 +1,33 @@
 package sync
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 )
+
+// ErrUnbalancedBraces signals a glob pattern with mismatched "{" / "}".
+var ErrUnbalancedBraces = errors.New("unbalanced braces")
+
+// validateGlob reports whether pattern is a well-formed §7.5.1 glob. It
+// rejects unbalanced brace alternation and any segment that filepath.Match
+// considers malformed (for example an unterminated "[" class). Used by the
+// §7.5.2 `podium sync --check` validation.
+func validateGlob(pattern string) error {
+	if strings.Count(pattern, "{") != strings.Count(pattern, "}") {
+		return ErrUnbalancedBraces
+	}
+	for _, expanded := range expandBraces(pattern) {
+		for _, seg := range splitSegments(expanded) {
+			if _, err := filepath.Match(seg, ""); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
 
 // ScopeFilter narrows a record set per §7.5.1: --include, --exclude, --type.
 // Patterns use the same glob syntax as DOMAIN.md include: (§4.5.2): "*"

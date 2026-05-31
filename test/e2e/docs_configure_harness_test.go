@@ -7,9 +7,6 @@ package e2e
 // bridge against filesystem-source registries.
 //
 // Several documented behaviors are known gaps:
-//   - F-7.5.13: `podium sync` ignores PODIUM_HARNESS and the sync.yaml
-//     harness, always defaulting the adapter to `none`. Tests 3, 4, and 24
-//     assert the actual (none-default) behavior.
 //   - F-14.11.1: `podium sync` has no server/URL registry source, so the
 //     standalone-against-a-server path (test 63) is skipped.
 //   - F-6.7.1 / F-6.7.2: the ingest-time capability-matrix lint and the
@@ -128,9 +125,10 @@ func TestConfigureHarness_SyncReadsRegistryFromConfig(t *testing.T) {
 	mustExist(t, filepath.Join(ws, "glossary", "ARTIFACT.md"))
 }
 
-// T-D-configure-harness-3 — podium sync ignores the sync.yaml harness field and
-// defaults the adapter to none (F-7.5.13). Documents the actual behavior.
-func TestConfigureHarness_SyncIgnoresConfigHarness(t *testing.T) {
+// T-D-configure-harness-3 — podium sync honors the sync.yaml harness field
+// (F-7.5.13). With defaults.harness: claude-code and no --harness flag, sync
+// materializes the Claude Code layout.
+func TestConfigureHarness_SyncHonorsConfigHarness(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"greet/ARTIFACT.md": greetSkillArtifact,
@@ -142,15 +140,16 @@ func TestConfigureHarness_SyncIgnoresConfigHarness(t *testing.T) {
 	if res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	// Actual: none-layout, not .claude/skills.
-	mustExist(t, filepath.Join(ws, "greet", "ARTIFACT.md"))
-	if _, err := os.Stat(filepath.Join(ws, ".claude")); err == nil {
-		t.Errorf("F-7.5.13: sync should not honor sync.yaml harness, but a .claude/ dir appeared")
+	// spec §7.5.2: the configured harness wins, so the Claude Code layout
+	// appears and the none-layout ARTIFACT.md does not.
+	mustExist(t, filepath.Join(ws, ".claude", "skills", "greet", "SKILL.md"))
+	if _, err := os.Stat(filepath.Join(ws, "greet", "ARTIFACT.md")); err == nil {
+		t.Errorf("F-7.5.13: sync.yaml harness ignored; none-layout greet/ARTIFACT.md appeared")
 	}
 }
 
-// T-D-configure-harness-4 — podium sync ignores PODIUM_HARNESS (F-7.5.13).
-func TestConfigureHarness_SyncIgnoresEnvHarness(t *testing.T) {
+// T-D-configure-harness-4 — podium sync honors PODIUM_HARNESS (F-7.5.13).
+func TestConfigureHarness_SyncHonorsEnvHarness(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"greet/ARTIFACT.md": greetSkillArtifact,
@@ -162,9 +161,9 @@ func TestConfigureHarness_SyncIgnoresEnvHarness(t *testing.T) {
 	if res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	mustExist(t, filepath.Join(target, "greet", "ARTIFACT.md"))
-	if _, err := os.Stat(filepath.Join(target, ".claude")); err == nil {
-		t.Errorf("F-7.5.13: PODIUM_HARNESS must not be read by sync, but a .claude/ dir appeared")
+	mustExist(t, filepath.Join(target, ".claude", "skills", "greet", "SKILL.md"))
+	if _, err := os.Stat(filepath.Join(target, "greet", "ARTIFACT.md")); err == nil {
+		t.Errorf("F-7.5.13: PODIUM_HARNESS ignored; none-layout greet/ARTIFACT.md appeared")
 	}
 }
 
@@ -404,8 +403,9 @@ func TestConfigureHarness_ClaudeCodeAlwaysExplicit(t *testing.T) {
 	}
 }
 
-// T-D-configure-harness-24 — claude-code init+sync two-step (explicit --harness
-// required on sync per F-7.5.13).
+// T-D-configure-harness-24 — claude-code init+sync two-step. init writes
+// harness: claude-code into sync.yaml; the subsequent sync honors it without
+// an explicit --harness flag (F-7.5.13).
 func TestConfigureHarness_ClaudeCodeInitSync(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -416,7 +416,7 @@ func TestConfigureHarness_ClaudeCodeInitSync(t *testing.T) {
 	if r := runPodium(t, ws, nil, "init", "--registry", reg, "--harness", "claude-code"); r.Exit != 0 {
 		t.Fatalf("init exit=%d stderr=%s", r.Exit, r.Stderr)
 	}
-	if r := runPodium(t, ws, nil, "sync", "--harness", "claude-code"); r.Exit != 0 {
+	if r := runPodium(t, ws, []string{"PODIUM_HARNESS="}, "sync"); r.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", r.Exit, r.Stderr)
 	}
 	yaml := readFile(t, filepath.Join(ws, ".podium", "sync.yaml"))
@@ -1011,10 +1011,14 @@ func TestConfigureHarness_SyncJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(res.Stdout), &env); err != nil {
 		t.Fatalf("stdout is not valid JSON: %v\n%s", err, res.Stdout)
 	}
-	for _, k := range []string{"adapter", "target", "artifacts"} {
+	// spec §7.5: {profile, target, harness, scope, artifacts} (F-7.5.9).
+	for _, k := range []string{"profile", "target", "harness", "scope", "artifacts"} {
 		if _, ok := env[k]; !ok {
 			t.Errorf("json envelope missing %q: %v", k, env)
 		}
+	}
+	if env["harness"] != "none" {
+		t.Errorf("harness = %v, want none", env["harness"])
 	}
 }
 

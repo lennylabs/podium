@@ -189,10 +189,14 @@ func syncCmd(args []string) int {
 	setUsage(fs, "Materialize the caller's effective view through a HarnessAdapter.")
 	registry := fs.String("registry", "", "registry URL (server source) or filesystem path (required)")
 	target := fs.String("target", "", "destination directory (default: current directory)")
-	harness := fs.String("harness", "none", "harness adapter")
+	// §7.5.2: an unset --harness falls through to PODIUM_HARNESS, then the
+	// sync.yaml harness, then the built-in "none" adapter. The default is
+	// empty so an omitted flag does not pin "none" over the configured value.
+	harness := fs.String("harness", "", "harness adapter (default: PODIUM_HARNESS, sync.yaml, then none)")
 	dryRun := fs.Bool("dry-run", false, "resolve and report; write nothing")
 	asJSON := fs.Bool("json", false, "emit a structured JSON envelope on stdout")
 	watch := fs.Bool("watch", false, "rerun sync whenever the registry changes")
+	check := fs.Bool("check", false, "validate the merged sync.yaml and report warnings")
 	overlay := fs.String("overlay", "", "workspace overlay path watched alongside the registry")
 	profile := fs.String("profile", "", "load a named scope from sync.yaml profiles")
 	configPath := fs.String("config", "", "run one sync per entry in a sync.yaml targets: list")
@@ -203,6 +207,12 @@ func syncCmd(args []string) int {
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
+	}
+
+	// §7.5.2 validation: --check loads the merged config and reports warnings
+	// (unresolved profiles, malformed globs, target/profile collisions).
+	if *check {
+		return runSyncCheck()
 	}
 
 	// §7.5.2 multi-target: --config iterates a targets: list, one sync each.
@@ -226,6 +236,7 @@ func syncCmd(args []string) int {
 	resolved, rerr := sync.Resolve(sync.ResolveInput{
 		Registry: *registry,
 		Target:   *target,
+		Harness:  *harness,
 		Profile:  *profile,
 		Include:  []string(include),
 		Exclude:  []string(exclude),
@@ -261,7 +272,7 @@ func syncCmd(args []string) int {
 	syncOpts := sync.Options{
 		RegistryPath: registryPath,
 		Target:       abs,
-		AdapterID:    *harness,
+		AdapterID:    resolved.Harness,
 		DryRun:       *dryRun,
 		OverlayPath:  *overlay,
 		Profile:      resolved.Profile,
@@ -369,6 +380,28 @@ func runMultiTargetSync(configPath, registryOverride string, dryRun, asJSON bool
 	return 0
 }
 
+// runSyncCheck implements `podium sync --check` (§7.5.2): it loads the merged
+// config and prints validation warnings. Warnings are not errors, so a config
+// with warnings still exits 0; only a config-load failure exits non-zero.
+func runSyncCheck() int {
+	ws, _ := os.Getwd()
+	home, _ := os.UserHomeDir()
+	merged, _, err := sync.LoadMergedConfig(ws, home)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+	warns := sync.Check(merged)
+	if len(warns) == 0 {
+		fmt.Println("sync.yaml: ok (no warnings)")
+		return 0
+	}
+	for _, w := range warns {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+	}
+	return 0
+}
+
 // stringSliceFlag is a flag.Value implementation for repeatable
 // string flags such as --add and --remove.
 type stringSliceFlag []string
@@ -381,7 +414,7 @@ func syncOverrideCmd(args []string) int {
 	setUsage(fs, "Add or remove ephemeral artifact toggles.")
 	target := fs.String("target", ".", "target directory")
 	registry := fs.String("registry", "", "registry URL or filesystem path (default: sync.yaml)")
-	harness := fs.String("harness", "none", "harness adapter")
+	harness := fs.String("harness", "", "harness adapter (default: PODIUM_HARNESS, lock, sync.yaml, then none)")
 	var add, remove stringSliceFlag
 	fs.Var(&add, "add", "artifact id to materialize on top of the profile (repeatable)")
 	fs.Var(&remove, "remove", "artifact id to drop from the profile (repeatable)")
@@ -396,6 +429,13 @@ func syncOverrideCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 2
 	}
+	// §7.5.5 TUI deferral: no batch flags is the interactive checklist form,
+	// which is not yet available. Print a clear message rather than silently
+	// writing nothing.
+	if len(add) == 0 && len(remove) == 0 && !*reset {
+		fmt.Fprintln(os.Stderr, "interactive override (TUI) is not available; use --add <id>, --remove <id>, or --reset")
+		return 2
+	}
 	// §7.5.5: override writes/deletes files through the active adapter. Resolve
 	// the registry the same way sync does so --add materializes and --remove
 	// deletes. A missing registry leaves materialization off; the toggles are
@@ -406,7 +446,7 @@ func syncOverrideCmd(args []string) int {
 		Add:    []string(add), Remove: []string(remove),
 		Reset: *reset, DryRun: *dryRun,
 		RegistryPath: registryPath,
-		AdapterID:    *harness,
+		AdapterID:    resolveOverrideHarness(*harness, abs),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "override failed: %v\n", err)
@@ -444,6 +484,28 @@ func resolveOverrideRegistry(flagVal string) string {
 		return ""
 	}
 	return sync.ResolveRegistryPath(workspace, reg)
+}
+
+// resolveOverrideHarness resolves the adapter id for `podium sync override`
+// per §7.5.2 precedence: the --harness flag, then PODIUM_HARNESS, then the
+// harness recorded in the target's lock (the adapter the last sync used), then
+// the merged sync.yaml default, then the built-in "none" adapter.
+func resolveOverrideHarness(flagVal, target string) string {
+	if flagVal != "" {
+		return flagVal
+	}
+	if h := os.Getenv("PODIUM_HARNESS"); h != "" {
+		return h
+	}
+	if lock, _ := sync.ReadLock(target); lock != nil && lock.Harness != "" {
+		return lock.Harness
+	}
+	ws, _ := os.Getwd()
+	home, _ := os.UserHomeDir()
+	if merged, _, _ := sync.LoadMergedConfig(ws, home); merged != nil && merged.Defaults.Harness != "" {
+		return merged.Defaults.Harness
+	}
+	return "none"
 }
 
 func syncSaveAsCmd(args []string) int {
@@ -495,10 +557,17 @@ func profileCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "unknown profile subcommand: %s\n", args[0])
 		return 2
 	}
+	// §7.5.7: the profile name is positional (`podium profile edit finance-team`).
+	// Pull it off before flag parsing; a leading flag means no name was given.
+	rest := args[1:]
+	var name string
+	if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
+		name = rest[0]
+		rest = rest[1:]
+	}
 	fs := flag.NewFlagSet("profile edit", flag.ContinueOnError)
 	setUsage(fs, "Add or remove patterns on a sync.yaml profile.")
 	target := fs.String("target", ".", "target directory")
-	profile := fs.String("profile", "", "profile name (required)")
 	var addInc, removeInc, addExc, removeExc stringSliceFlag
 	fs.Var(&addInc, "add-include", "include pattern to add (repeatable)")
 	fs.Var(&removeInc, "remove-include", "include pattern to remove (repeatable)")
@@ -506,17 +575,24 @@ func profileCmd(args []string) int {
 	fs.Var(&removeExc, "remove-exclude", "exclude pattern to remove (repeatable)")
 	dryRun := fs.Bool("dry-run", false, "print the proposed YAML diff and write nothing")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := fs.Parse(rest); err != nil {
 		return parseExit(err)
 	}
-	if *profile == "" {
-		fmt.Fprintln(os.Stderr, "error: --profile is required")
+	if name == "" {
+		// §7.5.7: `podium profile edit` with no name errors and asks for one.
+		fmt.Fprintln(os.Stderr, "error: profile name required (usage: podium profile edit <name> [--add-include ...])")
+		return 2
+	}
+	// §7.5.7 TUI deferral: no batch flags is the interactive form, not yet
+	// available. Print a clear message rather than rewriting the file as a no-op.
+	if len(addInc) == 0 && len(removeInc) == 0 && len(addExc) == 0 && len(removeExc) == 0 {
+		fmt.Fprintln(os.Stderr, "interactive profile editing (TUI) is not available; use --add-include/--remove-include/--add-exclude/--remove-exclude")
 		return 2
 	}
 	abs, _ := filepath.Abs(*target)
 	res, err := sync.ProfileEdit(sync.ProfileEditOptions{
 		Target:        abs,
-		Profile:       *profile,
+		Profile:       name,
 		AddInclude:    []string(addInc),
 		RemoveInclude: []string(removeInc),
 		AddExclude:    []string(addExc),
@@ -527,7 +603,7 @@ func profileCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "profile edit failed: %v\n", err)
 		return 1
 	}
-	fmt.Printf("profile: %s\n", *profile)
+	fmt.Printf("profile: %s\n", name)
 	fmt.Printf("  include: %s\n", formatList(res.Profile.Include))
 	fmt.Printf("  exclude: %s\n", formatList(res.Profile.Exclude))
 	if *dryRun {
@@ -1153,20 +1229,55 @@ func printDomainSearchHuman(body []byte) {
 }
 
 // printJSON emits a stable JSON envelope.
+// printJSON emits the §7.5 dry-run envelope:
+// {profile, target, harness, scope, artifacts: [{id, version, type, layer}]}.
+// A jq consumer reads .harness, .scope.include, or .artifacts[].version
+// directly.
 func printJSON(res *sync.Result) {
-	fmt.Fprintf(os.Stdout, "{\n  \"adapter\": %q,\n  \"target\": %q,\n  \"artifacts\": [", res.Adapter, res.Target)
-	for i, a := range res.Artifacts {
-		if i > 0 {
-			fmt.Fprint(os.Stdout, ",")
-		}
-		fmt.Fprintf(os.Stdout, "\n    {\"id\": %q, \"layer\": %q, \"files\": [", a.ID, a.Layer)
-		for j, f := range a.Files {
-			if j > 0 {
-				fmt.Fprint(os.Stdout, ", ")
-			}
-			fmt.Fprintf(os.Stdout, "%q", f)
-		}
-		fmt.Fprint(os.Stdout, "]}")
+	type artOut struct {
+		ID      string `json:"id"`
+		Version string `json:"version"`
+		Type    string `json:"type"`
+		Layer   string `json:"layer"`
 	}
-	fmt.Fprintln(os.Stdout, "\n  ]\n}")
+	type scopeOut struct {
+		Include []string `json:"include"`
+		Exclude []string `json:"exclude"`
+		Type    []string `json:"type"`
+	}
+	env := struct {
+		Profile   string   `json:"profile"`
+		Target    string   `json:"target"`
+		Harness   string   `json:"harness"`
+		Scope     scopeOut `json:"scope"`
+		Artifacts []artOut `json:"artifacts"`
+	}{
+		Profile: res.Profile,
+		Target:  res.Target,
+		Harness: res.Adapter,
+		Scope: scopeOut{
+			Include: emptyIfNil(res.Scope.Include),
+			Exclude: emptyIfNil(res.Scope.Exclude),
+			Type:    emptyIfNil(res.Scope.Types),
+		},
+		Artifacts: []artOut{},
+	}
+	for _, a := range res.Artifacts {
+		env.Artifacts = append(env.Artifacts, artOut{ID: a.ID, Version: a.Version, Type: a.Type, Layer: a.Layer})
+	}
+	b, err := json.MarshalIndent(env, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: encode json: %v\n", err)
+		return
+	}
+	fmt.Fprintln(os.Stdout, string(b))
+}
+
+// emptyIfNil normalizes a nil slice to a non-nil empty slice so the JSON
+// envelope renders [] rather than null for an unset scope field.
+func emptyIfNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }

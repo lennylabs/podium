@@ -23,10 +23,11 @@ func TestProfileEdit_HappyPath(t *testing.T) {
 	writeSyncYAML(t, dir)
 	withStderr(t, func() {
 		captureStdout(t, func() {
+			// spec: §7.5.7 — the profile name is positional.
 			rc := profileCmd([]string{
 				"edit",
+				"team",
 				"--target", dir,
-				"--profile", "team",
 				"--add-include", "personal/*",
 				"--add-exclude", "drafts/*",
 			})
@@ -44,8 +45,8 @@ func TestProfileEdit_DryRun(t *testing.T) {
 		captureStdout(t, func() {
 			rc := profileCmd([]string{
 				"edit",
+				"team",
 				"--target", dir,
-				"--profile", "team",
 				"--add-include", "personal/*",
 				"--dry-run",
 			})
@@ -64,11 +65,24 @@ func TestProfileEdit_UnknownSubcommandExits2(t *testing.T) {
 	})
 }
 
-func TestProfileEdit_MissingProfileFlagExits2(t *testing.T) {
+// spec: §7.5.7 — `podium profile edit` with no positional name errors (exit 2).
+func TestProfileEdit_MissingNameExits2(t *testing.T) {
 	dir := t.TempDir()
 	writeSyncYAML(t, dir)
 	withStderr(t, func() {
 		if rc := profileCmd([]string{"edit", "--target", dir}); rc != 2 {
+			t.Errorf("rc = %d, want 2", rc)
+		}
+	})
+}
+
+// spec: §7.5.7 — `podium profile edit <name>` with no batch flags defers to the
+// (unavailable) TUI with a clear message (exit 2), rather than a silent no-op.
+func TestProfileEdit_NoFlagsTUIDeferral(t *testing.T) {
+	dir := t.TempDir()
+	writeSyncYAML(t, dir)
+	withStderr(t, func() {
+		if rc := profileCmd([]string{"edit", "team", "--target", dir}); rc != 2 {
 			t.Errorf("rc = %d, want 2", rc)
 		}
 	})

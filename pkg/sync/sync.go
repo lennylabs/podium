@@ -68,6 +68,10 @@ type Options struct {
 	// one-shot sync), toggles are cleared, which is the operator's
 	// "reset to baseline" gesture.
 	PreserveToggles bool
+	// LastSyncedBy is the §7.5.3 lock provenance field: one of "full"
+	// (manual one-shot sync), "watch" (watcher-driven rerun), or "override"
+	// (override-driven materialization). An empty value defaults to "full".
+	LastSyncedBy string
 }
 
 // materialRecord is a source-neutral artifact ready for the HarnessAdapter.
@@ -88,10 +92,13 @@ type materialRecord struct {
 }
 
 // Result describes what a Run actually did. Used by callers (CLI, tests)
-// for reporting.
+// for reporting. Profile and Scope echo the resolved §7.5.1 scope and active
+// profile so the §7.5 --json dry-run envelope can emit them.
 type Result struct {
 	Adapter   string
+	Profile   string
 	Target    string
+	Scope     ScopeFilter
 	Artifacts []ArtifactResult
 	// Skipped lists the canonical IDs of artifacts excluded from this
 	// run because their target_harnesses (§4.3) does not include the
@@ -101,10 +108,14 @@ type Result struct {
 }
 
 // ArtifactResult is one artifact's contribution to the materialized output.
+// Version and Type come from the parsed manifest (empty when the frontmatter
+// did not parse) and feed the §7.5 --json artifact entries.
 type ArtifactResult struct {
-	ID    string
-	Layer string
-	Files []string
+	ID      string
+	Version string
+	Type    string
+	Layer   string
+	Files   []string
 }
 
 // Run executes one sync. The registry source is dispatched per §7.5.2: an
@@ -153,7 +164,7 @@ func Run(opts Options) (*Result, error) {
 	// §7.5.1 scope + §7.5.5 toggles select the records to materialize.
 	records := selectRecords(opts.Scope, all, toggles)
 
-	res := &Result{Adapter: a.ID(), Target: opts.Target}
+	res := &Result{Adapter: a.ID(), Target: opts.Target, Profile: opts.Profile, Scope: opts.Scope}
 
 	allFiles := []adapter.File{}
 	for _, rec := range records {
@@ -179,10 +190,17 @@ func Run(opts Options) (*Result, error) {
 			paths[i] = f.Path
 		}
 		sort.Strings(paths)
+		version, artType := "", ""
+		if rec.Artifact != nil {
+			version = rec.Artifact.Version
+			artType = string(rec.Artifact.Type)
+		}
 		res.Artifacts = append(res.Artifacts, ArtifactResult{
-			ID:    rec.ID,
-			Layer: rec.LayerID,
-			Files: paths,
+			ID:      rec.ID,
+			Version: version,
+			Type:    artType,
+			Layer:   rec.LayerID,
+			Files:   paths,
 		})
 		allFiles = append(allFiles, out...)
 	}
@@ -210,6 +228,14 @@ func Run(opts Options) (*Result, error) {
 	// Persist the new lock entry list so the next run can repeat
 	// the diff. Each artifact records every path it wrote so a
 	// future delete is precise.
+	//
+	// spec: §7.5.3 — last_synced_by is one of "full | watch | override".
+	// Run writes the value the caller selected (manual sync defaults to
+	// "full"; the watcher passes "watch"; override passes "override").
+	syncedBy := opts.LastSyncedBy
+	if syncedBy == "" {
+		syncedBy = "full"
+	}
 	lock := &LockFile{
 		Target:  opts.Target,
 		Harness: a.ID(),
@@ -220,13 +246,14 @@ func Run(opts Options) (*Result, error) {
 			Type:    opts.Scope.Types,
 		},
 		LastSyncedAt: time.Now().UTC(),
-		LastSyncedBy: "podium-sync",
+		LastSyncedBy: syncedBy,
 		Toggles:      toggles,
 	}
 	for _, art := range res.Artifacts {
 		for _, p := range art.Files {
 			lock.Artifacts = append(lock.Artifacts, LockArtifact{
 				ID:               art.ID,
+				Version:          art.Version,
 				Layer:            art.Layer,
 				MaterializedPath: p,
 			})
