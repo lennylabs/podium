@@ -411,6 +411,34 @@ func TestDocCLI_20_InitTarget(t *testing.T) {
 	cliContains(t, readFile(t, filepath.Join(ws, ".podium/sync.yaml")), "/tmp/materialized", "target")
 }
 
+// spec: §7.7 workspace-mode step 1 (F-7.7.11) — init walks up from CWD to
+// reuse an existing `.podium/` workspace; running it from a subdirectory
+// does not create a second workspace.
+func TestDocCLI_20a_InitWalksUpToWorkspace(t *testing.T) {
+	ws := t.TempDir()
+	env := []string{"HOME=" + t.TempDir()}
+	cliWantExit(t, runPodium(t, ws, env, "init", "--registry", "https://podium.example/"), 0, "root init")
+	sub := filepath.Join(ws, "services", "api")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cliWantExit(t, runPodium(t, sub, env, "init", "--local", "--registry", "https://staging.example/"), 0, "sub init --local")
+	if _, err := os.Stat(filepath.Join(sub, ".podium")); err == nil {
+		t.Fatalf("init from subdirectory created a second .podium/")
+	}
+	mustExist(t, filepath.Join(ws, ".podium/sync.local.yaml"))
+}
+
+// spec: §7.7 workspace-mode step 4 (F-7.7.13) — init prints next-step hints
+// to commit the file and run `podium sync`.
+func TestDocCLI_20b_InitNextStepHints(t *testing.T) {
+	ws := t.TempDir()
+	res := runPodium(t, ws, []string{"HOME=" + t.TempDir()}, "init", "--registry", "https://podium.example/")
+	cliWantExit(t, res, 0, "init next-step hints")
+	cliContains(t, res.Stdout, "commit", "commit hint")
+	cliContains(t, res.Stdout, "podium sync", "sync hint")
+}
+
 // ===== Setup and config — config / login (T-D-cli-21..25) ==============
 
 // spec: doc "Setup and config — podium config show". `config show`

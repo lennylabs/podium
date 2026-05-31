@@ -275,29 +275,32 @@ func decodeIdentity(idToken string) string {
 	return b.String()
 }
 
-// logoutCmd removes the cached token for the configured registry from
-// the keychain. No remote revocation is performed; the IdP retains
-// authority over token lifecycle. spec: §7.7.
+// logoutCmd removes the cached tokens for the resolved registry from the
+// keychain. No remote revocation is performed; the IdP retains authority
+// over token lifecycle. The registry resolves from --registry, then
+// PODIUM_REGISTRY, then the merged sync.yaml, mirroring `podium login` so a
+// bare `podium logout` works after `podium init`. spec: §7.7 (F-7.7.14).
 //
 //	podium logout [--registry URL]
 func logoutCmd(args []string) int {
 	fs := flag.NewFlagSet("logout", flag.ContinueOnError)
-	setUsage(fs, "Remove the cached token for the configured registry.")
-	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL (keychain entry label)")
+	setUsage(fs, "Remove the cached token for the resolved registry.")
+	registry := fs.String("registry", "", "registry URL (resolved from the merged config when unset)")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
-	if *registry == "" {
-		fmt.Fprintln(os.Stderr, "error: --registry is required")
+	reg, err := resolveClientRegistry(*registry)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 2
 	}
 	store := identity.KeychainStore{Service: envDefault("PODIUM_TOKEN_KEYCHAIN_NAME", "podium")}
-	if err := store.Delete(*registry); err != nil {
+	if err := store.Delete(reg); err != nil {
 		fmt.Fprintf(os.Stderr, "delete token: %v\n", err)
 		return 1
 	}
-	_ = store.Delete(identity.RefreshLabel(*registry))
+	_ = store.Delete(identity.RefreshLabel(reg))
 	fmt.Fprintln(os.Stderr, "Logout successful.")
 	return 0
 }

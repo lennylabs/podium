@@ -7,6 +7,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -992,6 +993,24 @@ func initCmd(args []string) int {
 		}
 		*registry = "http://127.0.0.1:8080"
 	}
+	// F-7.7.12 (spec: §7.7) — with no value flags and an interactive
+	// stdin, prompt for the registry (and optionally harness/target). A
+	// non-terminal stdin (CI, tests, pipes) skips the wizard and falls
+	// through to the required-flag error below, so init never blocks.
+	if *registry == "" && initIsTerminal() {
+		w, err := runInitWizard(initStdin, os.Stderr)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		*registry = w.registry
+		if *harness == "" {
+			*harness = w.harness
+		}
+		if *target == "" {
+			*target = w.target
+		}
+	}
 	if *registry == "" {
 		fmt.Fprintln(os.Stderr, "error: --registry, --standalone, or interactive wizard required")
 		return 2
@@ -1000,8 +1019,11 @@ func initCmd(args []string) int {
 	// §7.7 scope resolution: --global → ~/.podium; --local →
 	// <ws>/.podium/sync.local.yaml (gitignored); default →
 	// <ws>/.podium/sync.yaml (committed).
-	dir := ".podium"
 	filename := "sync.yaml"
+	// workspace is the directory holding `.podium/` for the workspace and
+	// local scopes; it is empty for the user-global scope.
+	var workspace string
+	var dir string
 	if *scopeGlobal {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -1009,8 +1031,26 @@ func initCmd(args []string) int {
 			return 1
 		}
 		dir = filepath.Join(home, ".podium")
-	} else if *scopeLocal {
-		filename = "sync.local.yaml"
+	} else {
+		// F-7.7.11 (spec: §7.7 workspace-mode step 1) — walk up from CWD to
+		// reuse an existing `.podium/` workspace so init from a subdirectory
+		// does not create a second workspace; create one in CWD when none is
+		// found. Both the committed default scope and the `--local` override
+		// resolve against the discovered workspace.
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		ws, found := sync.DiscoverWorkspace(cwd)
+		if !found {
+			ws = cwd
+		}
+		workspace = ws
+		dir = filepath.Join(ws, ".podium")
+		if *scopeLocal {
+			filename = "sync.local.yaml"
+		}
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -1038,13 +1078,72 @@ func initCmd(args []string) int {
 	// overlay dir to .gitignore so they don't accidentally land
 	// in commits.
 	if !*scopeGlobal && !*scopeLocal {
-		_ = ensureGitignoreEntries(".gitignore", []string{
+		_ = ensureGitignoreEntries(filepath.Join(workspace, ".gitignore"), []string{
 			".podium/sync.local.yaml",
 			".podium/overlay/",
 		})
 	}
 	fmt.Printf("Wrote %s\n", dest)
+	// F-7.7.13 (spec: §7.7 workspace-mode step 4) — print next-step hints.
+	// The committed default scope suggests committing the file; every
+	// workspace scope suggests running `podium sync` to materialize.
+	if !*scopeGlobal {
+		fmt.Println("Next steps:")
+		if !*scopeLocal {
+			fmt.Printf("  - commit %s to share the configuration with your team\n", dest)
+		}
+		fmt.Println("  - run `podium sync` to materialize artifacts")
+	}
 	return 0
+}
+
+// initWizardResult holds the values gathered from the interactive
+// `podium init` wizard. spec: §7.7 (F-7.7.12).
+type initWizardResult struct {
+	registry string
+	harness  string
+	target   string
+}
+
+// initStdin and initIsTerminal are indirections so tests can drive the
+// interactive wizard without a real terminal. By default the wizard reads
+// os.Stdin and runs only when stdin is a character device.
+var (
+	initStdin      io.Reader = os.Stdin
+	initIsTerminal           = func() bool {
+		fi, err := os.Stdin.Stat()
+		if err != nil {
+			return false
+		}
+		return fi.Mode()&os.ModeCharDevice != 0
+	}
+)
+
+// runInitWizard prompts for the registry (required) and the optional
+// harness and target defaults, returning the collected values. Empty
+// answers leave the corresponding field unset. spec: §7.7 (F-7.7.12).
+func runInitWizard(in io.Reader, out io.Writer) (initWizardResult, error) {
+	r := bufio.NewReader(in)
+	ask := func(prompt string) (string, error) {
+		fmt.Fprint(out, prompt)
+		line, err := r.ReadString('\n')
+		if err != nil && err != io.EOF {
+			return "", err
+		}
+		return strings.TrimSpace(line), nil
+	}
+	var res initWizardResult
+	var err error
+	if res.registry, err = ask("Registry URL or filesystem path: "); err != nil {
+		return res, err
+	}
+	if res.harness, err = ask("Default harness (optional): "); err != nil {
+		return res, err
+	}
+	if res.target, err = ask("Default target (optional): "); err != nil {
+		return res, err
+	}
+	return res, nil
 }
 
 // ensureGitignoreEntries appends every missing entry to path,

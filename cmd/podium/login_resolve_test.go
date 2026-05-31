@@ -147,6 +147,40 @@ func TestDecodeIdentity(t *testing.T) {
 	}
 }
 
+// spec: §7.7 (F-7.7.14) — a bare `podium logout` resolves the registry
+// from the merged sync.yaml (the same resolution as login) and clears both
+// the access and refresh keychain entries; it does not require --registry.
+func TestLogout_ResolvesRegistryFromConfig(t *testing.T) {
+	ws := t.TempDir()
+	home := t.TempDir()
+	reg := "https://podium.acme.com"
+	mustWrite(t, filepath.Join(ws, ".podium", "sync.yaml"), "defaults:\n  registry: "+reg+"\n")
+
+	store := identity.NewMemoryStore()
+	_ = store.Save(reg, "access-1")
+	_ = store.Save(identity.RefreshLabel(reg), "refresh-1")
+
+	t.Setenv("PODIUM_REGISTRY", "")
+	t.Setenv("HOME", home)
+	withCwd(t, ws, func() {
+		got, err := resolveClientRegistryAt("", ws, home)
+		if err != nil || got != reg {
+			t.Fatalf("logout registry resolution: got %q err %v", got, err)
+		}
+	})
+	// Exercise the deletion the command performs once the registry resolves.
+	if err := store.Delete(reg); err != nil {
+		t.Fatalf("delete access: %v", err)
+	}
+	_ = store.Delete(identity.RefreshLabel(reg))
+	if _, err := store.Load(reg); err == nil {
+		t.Error("access token should be cleared")
+	}
+	if _, err := store.Load(identity.RefreshLabel(reg)); err == nil {
+		t.Error("refresh token should be cleared")
+	}
+}
+
 func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

@@ -1737,31 +1737,45 @@ I checked the three onboarding commands the subsection defines: `podium init` (c
 
 (inconsistency) §7.7 states that `login` "caches the access + refresh tokens in the OS keychain (per `oauth-device-code` in §6.3)". The implemented `loginCmd` saves only the access token: `store.Save(*registry, tokens.AccessToken)` (cmd/podium/login.go:77-78). The `Tokens` struct carries `RefreshToken` (pkg/identity/oauth_devicecode.go:67-73) and the device-code flow already parses it (pkg/identity/oauth_devicecode.go:196-202), but it is dropped. The `TokenStore` interface stores a single string per label (pkg/identity/keychain.go:14-18), so it has no slot for the refresh token. Without the refresh token, `DeviceCodeFlow.Refresh` (pkg/identity/oauth_devicecode.go:231-298) cannot run, defeating the spec's "re-authing after token expiry" use case without a full re-login. Suggested direction: persist both tokens (for example serialize access plus refresh to a single keychain entry, or extend `TokenStore` to store a structured token) so the cached refresh token is available for silent renewal.
 
-### - [ ] F-7.7.8 — `podium login` does not print the resolved identity on success [Low] — OPEN
+### - [x] F-7.7.8 — `podium login` does not print the resolved identity on success [Low] — CLOSED
+
+**Resolution (commit a7dbc1b).** Already resolved by the §7.7 login batch: `loginCmd` decodes the ID token via `decodeIdentity` and prints `sub`, `email`, and OIDC groups on success (cmd/podium/login.go:126-128, 233-276). Verified against the spec and covered by `TestDecodeIdentity`.
 
 (gap) §7.7 states that on success `login` "prints the resolved identity (`sub`, `email`, OIDC groups)". The implemented `loginCmd` prints only "Login successful; token saved to keychain." (cmd/podium/login.go:82) and never decodes the ID token. The flow captures `IDToken` (pkg/identity/oauth_devicecode.go:188, 201) but `loginCmd` does not parse it for `sub`, `email`, or `groups`. Suggested direction: decode the returned ID token (or call the registry's identity/whoami endpoint) and print the `sub`, `email`, and OIDC groups so the operator can confirm who they authenticated as.
 
-### - [ ] F-7.7.9 — `podium login` has no `--no-browser` flag and does not open the browser [Medium] — OPEN
+### - [x] F-7.7.9 — `podium login` has no `--no-browser` flag and does not open the browser [Medium] — CLOSED
+
+**Resolution (commit a7dbc1b).** Already resolved by the §7.7 login batch: `loginCmd` defines `--no-browser` (cmd/podium/login.go:39) and, unless it is set, opens the verification URL via the platform launcher `openBrowser` (`open`/`xdg-open`/`rundll32`, cmd/podium/login.go:107-109, 198-213), tolerating launch failures. Verified against the spec.
 
 (gap) §7.7 lists `podium login --no-browser` ("don't auto-open the verification URL") and states the default behavior "attempts to open the URL in the system browser". The implemented `loginCmd` defines no `--no-browser` flag (cmd/podium/login.go:27-34) and never attempts to open a browser; it only prints the verification URL and code to stderr (cmd/podium/login.go:67-71). No browser-open helper exists in cmd/podium or pkg/identity. Suggested direction: add a `--no-browser` flag and, unless it is set, attempt to open `auth.VerificationURLComplete` (falling back to `auth.VerificationURL`) with a platform launcher (`open` on macOS, `xdg-open` on Linux, `rundll32` on Windows), tolerating launch failures.
 
-### - [ ] F-7.7.10 — `podium login` is not a no-op against a filesystem or standalone registry [Medium] — OPEN
+### - [x] F-7.7.10 — `podium login` is not a no-op against a filesystem or standalone registry [Medium] — CLOSED
+
+**Resolution (commit a7dbc1b).** Already resolved by the §7.7 login batch: after resolving the registry, `loginCmd` short-circuits with an informational notice and a zero exit when `isNoAuthRegistry` matches a filesystem path or the standalone server, before initiating the device-code flow (cmd/podium/login.go:55-58, 162-167). Covered by `TestIsNoAuthRegistry` and the e2e `TestDocCLI_24/25` no-op tests.
 
 (inconsistency) §7.7 states: "`podium login` is a no-op when the resolved registry is a filesystem path (no auth) or points at a `--standalone` server (no auth). In both cases it prints a notice and exits." The implemented `loginCmd` always proceeds into `flow.Initiate` / `flow.Poll` regardless of the registry value (cmd/podium/login.go:53-76). Against a filesystem-path registry it would attempt the OAuth flow (and fail because `--issuer` is required), and against `http://127.0.0.1:8080` it would attempt to reach a device endpoint that the standalone server does not serve. Suggested direction: after resolving the registry, detect a filesystem path (no URL scheme) or the standalone address and short-circuit with an informational notice and a zero exit, before initiating the device-code flow.
 
-### - [ ] F-7.7.11 — `podium init` does not walk up to find an existing `.podium/` directory [Medium] — OPEN
+### - [x] F-7.7.11 — `podium init` does not walk up to find an existing `.podium/` directory [Medium] — CLOSED
+
+**Resolution (commit f0a75e8).** `initCmd` now discovers the workspace with `sync.DiscoverWorkspace` (walking up from CWD) for both the default and `--local` scopes, reusing an existing `.podium/` and falling back to CWD only when none is found; `.gitignore` is written to the discovered workspace. Init from a subdirectory no longer creates a second workspace.
 
 (inconsistency) §7.7 workspace-mode step 1 states that `podium init` "Walks up from CWD to find an existing `.podium/` directory; if none, creates `.podium/` in CWD." The implemented `initCmd` sets `dir := ".podium"` relative to CWD and calls `os.MkdirAll(dir, ...)` without walking up (cmd/podium/main.go:705, 717). Running `podium init` (or `podium init --local`) from a subdirectory of an already-initialized workspace creates a second `.podium/` in the subdirectory instead of reusing the parent workspace, which contradicts both the spec and the workspace-discovery model in §7.5.2 ("walking up from CWD until a `.podium/` directory is found"). Suggested direction: reuse a shared walk-up workspace-discovery helper to locate an existing `.podium/` before falling back to creating one in CWD, matching how `podium sync` is meant to discover the workspace.
 
-### - [ ] F-7.7.12 — `podium init` has no interactive wizard [Medium] — OPEN
+### - [x] F-7.7.12 — `podium init` has no interactive wizard [Medium] — CLOSED
+
+**Resolution (commit f0a75e8).** When no value flags are supplied and stdin is a terminal, `initCmd` runs `runInitWizard`, prompting for the registry (and optional harness/target) and writing the answers. A non-terminal stdin (CI, pipes, tests) skips the wizard and falls through to the required-flag error, so init never blocks.
 
 (gap) §7.7 documents `podium init` with no flags as the "interactive wizard" (line 594), and the user-global form `podium init --global` is likewise annotated "interactive" (line 601). The implemented `initCmd` has no interactive prompting; when `--registry` is empty and `--standalone` is not set, it prints "error: --registry, --standalone, or interactive wizard required" and exits 2 (cmd/podium/main.go:697-700). No prompt or stdin-reading logic exists in the command. Suggested direction: implement an interactive prompt that asks for the registry (and optionally harness and target) when no value flags are supplied and stdin is a terminal, writing the resulting `sync.yaml`.
 
-### - [ ] F-7.7.13 — `podium init` does not print next-step hints [Low] — OPEN
+### - [x] F-7.7.13 — `podium init` does not print next-step hints [Low] — CLOSED
+
+**Resolution (commit f0a75e8).** After writing the file, `initCmd` prints next-step hints: the committed default scope suggests committing `<ws>/.podium/sync.yaml`, and every workspace scope suggests running `podium sync` to materialize.
 
 (gap) §7.7 workspace-mode step 4 states that `init` "Prints next-step hints (commit `<ws>/.podium/sync.yaml`, run `podium sync` to materialize)." The implemented `initCmd` prints only "Wrote %s\n" with the destination path (cmd/podium/main.go:748). It does not suggest committing the file or running `podium sync`. Suggested direction: after writing, print the next-step guidance the spec describes for workspace mode (commit the file and run `podium sync`).
 
-### - [ ] F-7.7.14 — `podium logout` requires `--registry` and does not resolve it from the merged config [Low] — OPEN
+### - [x] F-7.7.14 — `podium logout` requires `--registry` and does not resolve it from the merged config [Low] — CLOSED
+
+**Resolution (commit f0a75e8).** `logoutCmd` now resolves the registry via the shared `resolveClientRegistry` (`--registry`, then `PODIUM_REGISTRY`, then the merged `sync.yaml`'s `defaults.registry`), mirroring `podium login`, so a bare `podium logout` works after `podium init`. It clears both the access and refresh keychain entries.
 
 (inconsistency) §7.7 lists `podium logout` with no arguments ("clears the cached token from the OS keychain", line 654) and frames `login`/`logout` symmetrically around the resolved registry. The implemented `logoutCmd` defaults `--registry` to `PODIUM_REGISTRY` only and exits 2 when it is empty (cmd/podium/login.go:94, 99-102). A developer who configured the registry through `podium init` cannot run a bare `podium logout`; it errors with "--registry is required". Suggested direction: resolve `defaults.registry` from the merged `sync.yaml` when `--registry` and `PODIUM_REGISTRY` are unset, mirroring the resolution proposed for `login` in F-7.7.4.
 ## F-8.1 — 8.1 What Gets Logged
