@@ -10,16 +10,16 @@ import (
 	"github.com/lennylabs/podium/pkg/sign"
 )
 
-// handlePromptsList queries search_artifacts with type=command and
-// returns the filtered prompt descriptors.
+// handlePromptsList enumerates the effective view's command artifacts
+// and returns the descriptors for the ones that opted in (F-5.2.1).
 func TestHandlePromptsList_FiltersByOptIn(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v1/search_artifacts":
-			_, _ = w.Write([]byte(`{"results":[
-				{"id":"cmd-opted-in","description":"opted in"},
-				{"id":"cmd-not-opted","description":"not"}
+		case "/v1/sync/manifest":
+			_, _ = w.Write([]byte(`{"artifacts":[
+				{"id":"cmd-opted-in","type":"command"},
+				{"id":"cmd-not-opted","type":"command"}
 			]}`))
 		case "/v1/load_artifact":
 			id := r.URL.Query().Get("id")

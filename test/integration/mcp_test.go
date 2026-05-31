@@ -207,6 +207,81 @@ func TestPodiumMCP_ToolsCallProxiesSearchArtifacts(t *testing.T) {
 	}
 }
 
+// Spec: §5.0 — the bridge advertises a `resources` capability and serves
+// the read-only mirror of load_artifact: resources/list enumerates the
+// effective view and resources/read returns an artifact body without
+// materializing anything (F-5.0.1). Driven through the real subprocess.
+func TestPodiumMCP_ResourcesMirror(t *testing.T) {
+	t.Parallel()
+	h := registryharness.New(t,
+		testharness.WriteTreeOption{
+			Path:    "finance/run/ARTIFACT.md",
+			Content: "---\ntype: context\nversion: 1.0.0\ndescription: Variance analysis\n---\n\nthe body text\n",
+		},
+	)
+	bin := buildMCP(t)
+	cmd := exec.Command(bin)
+	cmd.Env = append(cmd.Env, "PODIUM_REGISTRY="+h.URL, "PODIUM_CACHE_DIR="+t.TempDir())
+	cmd.Stdin = bytes.NewReader(newlineDelimitedRequests([]rpcCall{
+		{Method: "initialize", ID: 1, Params: map[string]any{"protocolVersion": "2024-11-05"}},
+		{Method: "resources/list", ID: 2},
+		{Method: "resources/read", ID: 3, Params: map[string]any{"uri": "podium://artifact/finance/run"}},
+	}))
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run: %v\n%s", err, stdout.String())
+	}
+
+	dec := json.NewDecoder(&stdout)
+	var initResp struct {
+		Result struct {
+			Capabilities map[string]any `json:"capabilities"`
+		} `json:"result"`
+	}
+	if err := dec.Decode(&initResp); err != nil {
+		t.Fatalf("decode initialize: %v", err)
+	}
+	if _, ok := initResp.Result.Capabilities["resources"]; !ok {
+		t.Errorf("initialize did not advertise resources capability: %+v", initResp.Result.Capabilities)
+	}
+
+	var listResp struct {
+		Result struct {
+			Resources []struct {
+				URI  string `json:"uri"`
+				Name string `json:"name"`
+			} `json:"resources"`
+		} `json:"result"`
+	}
+	if err := dec.Decode(&listResp); err != nil {
+		t.Fatalf("decode resources/list: %v", err)
+	}
+	found := false
+	for _, r := range listResp.Result.Resources {
+		if r.URI == "podium://artifact/finance/run" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("resources/list missing finance/run: %+v", listResp.Result.Resources)
+	}
+
+	var readResp struct {
+		Result struct {
+			Contents []struct {
+				Text string `json:"text"`
+			} `json:"contents"`
+		} `json:"result"`
+	}
+	if err := dec.Decode(&readResp); err != nil {
+		t.Fatalf("decode resources/read: %v", err)
+	}
+	if len(readResp.Result.Contents) != 1 || !strings.Contains(readResp.Result.Contents[0].Text, "the body text") {
+		t.Errorf("resources/read did not return the artifact body: %+v", readResp.Result.Contents)
+	}
+}
+
 func buildMCP(t testing.TB) string {
 	t.Helper()
 	tmp := t.TempDir()

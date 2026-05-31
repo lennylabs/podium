@@ -665,14 +665,24 @@ func (s *mcpServer) handle(req rpcRequest) rpcResponse {
 			}
 			return resp
 		}
+		// §5 capability set: `{tools: true, prompts: <conditional on
+		// opted-in command artifacts>, sessionCorrelation: true}`. The
+		// `resources` capability backs the §5.0 read-only mirror of
+		// load_artifact (F-5.0.1). `prompts` is advertised only when at
+		// least one `type: command` artifact opted into projection, per
+		// §5.2's conditional wording (F-5.2.2).
+		caps := map[string]any{
+			"tools":              map[string]any{},
+			"sessionCorrelation": true,
+			"resources":          map[string]any{},
+		}
+		if s.promptsCapabilityActive() {
+			caps["prompts"] = map[string]any{}
+		}
 		resp.Result = map[string]any{
 			"protocolVersion": protocolVersion,
-			"capabilities": map[string]any{
-				"tools":              map[string]any{},
-				"prompts":            map[string]any{},
-				"sessionCorrelation": true,
-			},
-			"serverInfo": map[string]any{"name": "podium-mcp", "version": buildinfo.Version},
+			"capabilities":    caps,
+			"serverInfo":      map[string]any{"name": "podium-mcp", "version": buildinfo.Version},
 			// §5.1 example system-prompt fragment, surfaced through the MCP
 			// `instructions` field so a host can add it to the model's
 			// system prompt verbatim. F-5.1.3.
@@ -691,6 +701,12 @@ func (s *mcpServer) handle(req rpcRequest) rpcResponse {
 		resp.Result = s.handlePromptsList()
 	case "prompts/get":
 		resp.Result = s.handlePromptsGet(req.Params)
+	case "resources/list":
+		// §5.0 — read-only mirror of load_artifact: artifact bodies are
+		// also exposed through MCP's resource protocol.
+		resp.Result = s.handleResourcesList()
+	case "resources/read":
+		resp.Result = s.handleResourcesRead(req.Params)
 	default:
 		resp.Error = &rpcError{Code: -32601, Message: "method not found: " + req.Method}
 	}
@@ -1492,7 +1508,11 @@ func (s *mcpServer) fetchJSON(path string, args map[string]any) ([]byte, error) 
 	if s.cfg.tenantID != "" {
 		req.Header.Set("X-Podium-Tenant", s.cfg.tenantID)
 	}
-	resp, err := s.http.Do(req)
+	client := s.http
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}

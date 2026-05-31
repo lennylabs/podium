@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,18 +10,22 @@ import (
 )
 
 // promptsFixture spins up a fake registry that answers
-// /v1/search_artifacts and /v1/load_artifact with the supplied
-// shapes so the prompts paths can be exercised offline.
+// /v1/sync/manifest (the effective-view enumeration the prompt
+// projection walks) and /v1/load_artifact with the supplied manifests
+// so the prompts paths can be exercised offline. The `results`
+// parameter is retained for call-site compatibility but only the
+// manifests drive enumeration now (F-5.2.1).
 func promptsFixture(t *testing.T, results []map[string]any, manifests map[string]map[string]any) *httptest.Server {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/v1/search_artifacts":
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"total_matched": len(results),
-				"results":       results,
-			})
+		case "/v1/sync/manifest":
+			arts := []map[string]any{}
+			for id, m := range manifests {
+				arts = append(arts, map[string]any{"id": id, "type": m["type"]})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"artifacts": arts})
 		case "/v1/load_artifact":
 			id := r.URL.Query().Get("id")
 			if m, ok := manifests[id]; ok {
@@ -70,6 +75,34 @@ func TestPrompts_ListFiltersToOptIns(t *testing.T) {
 	}
 	if out.Prompts[0].Name != "ops/restart" {
 		t.Errorf("Name = %q, want ops/restart", out.Prompts[0].Name)
+	}
+}
+
+// Spec: §5.2 — prompts/list must return every opted-in command even when
+// the catalog holds more than the 50-result search_artifacts ceiling. The
+// enumeration walks the effective view (no top-K cap), so none are
+// silently dropped (F-5.2.1).
+func TestPrompts_ListReturnsAllBeyond50(t *testing.T) {
+	t.Parallel()
+	const n = 63
+	manifests := map[string]map[string]any{}
+	for i := 0; i < n; i++ {
+		id := fmt.Sprintf("ops/cmd-%03d", i)
+		manifests[id] = map[string]any{
+			"id":            id,
+			"type":          "command",
+			"manifest_body": "body",
+			"frontmatter":   "---\ntype: command\nname: cmd\nversion: 1.0.0\nexpose_as_mcp_prompt: true\n---\n",
+		}
+	}
+	ts := promptsFixture(t, nil, manifests)
+	srv := &mcpServer{cfg: &config{registry: ts.URL}, http: &http.Client{}}
+	out, ok := srv.handlePromptsList().(promptsListResult)
+	if !ok {
+		t.Fatalf("handlePromptsList returned %T", srv.handlePromptsList())
+	}
+	if len(out.Prompts) != n {
+		t.Fatalf("len = %d, want %d (no top-K truncation)", len(out.Prompts), n)
 	}
 }
 

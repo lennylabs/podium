@@ -89,30 +89,39 @@ func (s *mcpServer) handlePromptsGet(raw json.RawMessage) any {
 	}
 }
 
-// collectPromptDescriptors walks the registry's command-type
-// artifacts and keeps the ones whose manifest declares
-// `expose_as_mcp_prompt: true`. The MCP server consults the
-// filtered list when answering `prompts/list`.
+// collectPromptDescriptors walks every `type: command` artifact in the
+// caller's effective view and keeps the ones whose manifest declares
+// `expose_as_mcp_prompt: true`. The MCP server consults the filtered
+// list when answering `prompts/list`.
+//
+// Enumeration goes through /v1/sync/manifest (the registry's full
+// effective view, which carries no top-K cap) rather than
+// search_artifacts: search_artifacts rejects top_k > 50 (§5) and offers
+// no pagination, so a deployment with more than 50 command artifacts
+// would silently drop every opt-in whose ID sorts past the 50th. The
+// effective view enumerates the whole catalog in one pass, so the
+// projected prompt list is complete regardless of catalog size
+// (F-5.2.1).
 func (s *mcpServer) collectPromptDescriptors() ([]promptDescriptor, error) {
-	body, err := s.fetchJSON("/v1/search_artifacts", map[string]any{
-		"type":  "command",
-		"top_k": 50,
-	})
+	body, err := s.fetchJSON("/v1/sync/manifest", nil)
 	if err != nil {
 		return nil, err
 	}
-	var search struct {
-		Results []struct {
-			ID          string `json:"id"`
-			Description string `json:"description"`
-		} `json:"results"`
+	var view struct {
+		Artifacts []struct {
+			ID   string `json:"id"`
+			Type string `json:"type"`
+		} `json:"artifacts"`
 	}
-	if err := json.Unmarshal(body, &search); err != nil {
-		return nil, fmt.Errorf("decode search_artifacts: %w", err)
+	if err := json.Unmarshal(body, &view); err != nil {
+		return nil, fmt.Errorf("decode sync/manifest: %w", err)
 	}
 	out := []promptDescriptor{}
-	for _, r := range search.Results {
-		body, err := s.fetchJSON("/v1/load_artifact", map[string]any{"id": r.ID})
+	for _, a := range view.Artifacts {
+		if a.ID == "" || a.Type != string(manifest.TypeCommand) {
+			continue
+		}
+		body, err := s.fetchJSON("/v1/load_artifact", map[string]any{"id": a.ID})
 		if err != nil {
 			continue
 		}
@@ -124,22 +133,25 @@ func (s *mcpServer) collectPromptDescriptors() ([]promptDescriptor, error) {
 		if err != nil || !art.ExposeAsMCPPrompt {
 			continue
 		}
-		desc := strings.TrimSpace(r.Description)
-		if desc == "" {
-			desc = strings.TrimSpace(art.Description)
-		}
-		out = append(out, promptDescriptor{Name: r.ID, Description: desc})
+		out = append(out, promptDescriptor{Name: a.ID, Description: strings.TrimSpace(art.Description)})
 	}
 	return out, nil
 }
 
-// promptsCapabilityActive reports whether the deployment should
-// announce the `prompts` MCP capability. Empty-listed deployments
-// can still serve future opt-ins, so we always return true once
-// the MCP server is configured (matching §5.2's "conditional on
-// prompt artifacts" wording loosely — clients send prompts/list
-// to enumerate at runtime regardless).
-func (s *mcpServer) promptsCapabilityActive() bool { return true }
+// promptsCapabilityActive reports whether the bridge should announce the
+// `prompts` MCP capability. §5 advertises `prompts` conditional on the
+// presence of at least one `type: command` artifact that opted into
+// projection, so the check enumerates the effective view and reports
+// whether any opt-in exists. A registry-fetch failure fails open
+// (returns true) so a transient error never hides a present capability;
+// the client can still call prompts/list to enumerate (F-5.2.2).
+func (s *mcpServer) promptsCapabilityActive() bool {
+	descriptors, err := s.collectPromptDescriptors()
+	if err != nil {
+		return true
+	}
+	return len(descriptors) > 0
+}
 
 // errorResultWithStatus is reserved for callers that want to
 // surface non-200 HTTP status alongside the error message.
