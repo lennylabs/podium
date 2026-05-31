@@ -61,14 +61,39 @@ import (
 	"github.com/lennylabs/podium/pkg/version"
 )
 
-// protocolVersion is the MCP wire-protocol version this binary speaks.
-// initialize negotiates with the host: if the host's
-// requested protocolVersion predates supportedSince, the server
-// returns mcp.unsupported_version per §6.9.
+// protocolVersion is the maximum MCP wire-protocol version this binary
+// speaks; supportedSince is the oldest version it still accepts. initialize
+// negotiates within [supportedSince, protocolVersion] per §6.9 "MCP protocol
+// version mismatch": it agrees on the lower of the host's request and this
+// maximum, and returns mcp.unsupported_version when the host's request is
+// older than supportedSince.
 const (
 	protocolVersion = "2024-11-05"
 	supportedSince  = "2024-11-01"
 )
+
+// negotiateProtocol implements the §6.9 "MCP protocol version mismatch" row:
+// negotiate down to the host's max supported version. The host advertises its
+// maximum in the initialize protocolVersion field; the agreed version is the
+// lower of that request and this binary's protocolVersion, so a host that
+// tops out below this binary's max gets its own version echoed back rather
+// than a version it cannot speak. A request older than supportedSince has no
+// compatible version (ok=false), and the caller emits mcp.unsupported_version.
+// An empty request (the host omitted the field) falls back to this binary's
+// maximum. Comparison is lexical, which matches the chronological order of the
+// YYYY-MM-DD MCP version scheme.
+func negotiateProtocol(requested string) (agreed string, ok bool) {
+	if requested == "" {
+		return protocolVersion, true
+	}
+	if requested < supportedSince {
+		return "", false
+	}
+	if requested < protocolVersion {
+		return requested, true
+	}
+	return protocolVersion, true
+}
 
 func main() {
 	cfg, err := loadConfig()
@@ -849,8 +874,10 @@ func (s *mcpServer) handle(req rpcRequest) rpcResponse {
 	resp := rpcResponse{JSONRPC: "2.0", ID: req.ID}
 	switch req.Method {
 	case "initialize":
-		// §6.9: refuse with mcp.unsupported_version when the host's
-		// requested protocolVersion predates supportedSince.
+		// §6.9 "MCP protocol version mismatch": negotiate down to the lower
+		// of the host's requested protocolVersion and this binary's maximum;
+		// refuse with mcp.unsupported_version only when the request predates
+		// supportedSince.
 		var initParams struct {
 			ProtocolVersion string `json:"protocolVersion"`
 			Capabilities    struct {
@@ -863,7 +890,8 @@ func (s *mcpServer) handle(req rpcRequest) rpcResponse {
 		// the host's reported workspace root.
 		s.hostSupportsRoots = len(initParams.Capabilities.Roots) > 0 &&
 			string(initParams.Capabilities.Roots) != "null"
-		if initParams.ProtocolVersion != "" && initParams.ProtocolVersion < supportedSince {
+		agreedVersion, ok := negotiateProtocol(initParams.ProtocolVersion)
+		if !ok {
 			resp.Error = &rpcError{
 				Code:    -32600,
 				Message: "mcp.unsupported_version: host protocol " + initParams.ProtocolVersion + " predates supported " + supportedSince,
@@ -885,7 +913,9 @@ func (s *mcpServer) handle(req rpcRequest) rpcResponse {
 			caps["prompts"] = map[string]any{}
 		}
 		resp.Result = map[string]any{
-			"protocolVersion": protocolVersion,
+			// §6.9: the negotiated version, the lower of the host's request
+			// and this binary's maximum.
+			"protocolVersion": agreedVersion,
 			"capabilities":    caps,
 			"serverInfo":      map[string]any{"name": "podium-mcp", "version": buildinfo.Version},
 			// §5.1 example system-prompt fragment, surfaced through the MCP

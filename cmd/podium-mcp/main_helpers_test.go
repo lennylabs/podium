@@ -239,21 +239,36 @@ func TestNewServer_OK(t *testing.T) {
 	}
 }
 
-func TestNewServer_MissingOverlayIsSilent(t *testing.T) {
+// spec: §6.9 "Workspace overlay path missing" — a configured overlay path that
+// does not resolve is skipped (the overlay stays empty and the bridge still
+// starts), and the bridge warns exactly once, naming the path, so a developer
+// whose drafts are invisible gets a diagnostic rather than silence.
+func TestNewServer_MissingOverlayWarnsOnceAndSkips(t *testing.T) {
 	dir := t.TempDir()
+	absent := filepath.Join(t.TempDir(), "absent")
 	cfg := &config{
 		registry:    "http://127.0.0.1:1",
 		harness:     "none",
 		cacheDir:    dir,
 		cacheMode:   "always-revalidate",
-		overlayPath: filepath.Join(t.TempDir(), "absent"),
+		overlayPath: absent,
 	}
-	srv, err := newServer(cfg)
+	var srv *mcpServer
+	var err error
+	out := captureStderr(t, func() { srv, err = newServer(cfg) })
 	if err != nil {
 		t.Fatalf("newServer: %v", err)
 	}
 	if len(srv.overlay) != 0 {
-		t.Errorf("expected empty overlay, got %d records", len(srv.overlay))
+		t.Errorf("expected empty overlay (skipped), got %d records", len(srv.overlay))
+	}
+	if !strings.Contains(out, absent) || !strings.Contains(out, "overlay") {
+		t.Errorf("startup warning = %q, want a single warning naming %q", out, absent)
+	}
+	// Warn once: the path is resolved a single time at startup, so the
+	// warning must not be repeated.
+	if n := strings.Count(out, absent); n != 1 {
+		t.Errorf("warning emitted %d times, want exactly once", n)
 	}
 }
 
@@ -280,6 +295,79 @@ func TestHandle_InitializeAcceptsCurrentProtocol(t *testing.T) {
 	m, ok := resp.Result.(map[string]any)
 	if !ok || m["protocolVersion"] != protocolVersion {
 		t.Errorf("result = %+v", resp.Result)
+	}
+}
+
+// spec: §6.9 "MCP protocol version mismatch" — for a host that tops out below
+// this binary's max but within the supported window, initialize negotiates
+// DOWN to the host's version (echoing min(host, server)) rather than forcing
+// the server's own constant.
+func TestHandle_InitializeNegotiatesDownToHost(t *testing.T) {
+	t.Parallel()
+	srv := &mcpServer{cfg: &config{}}
+	// supportedSince <= 2024-11-03 < protocolVersion (2024-11-05).
+	hostMax := "2024-11-03"
+	params, _ := json.Marshal(map[string]string{"protocolVersion": hostMax})
+	resp := srv.handle(rpcRequest{JSONRPC: "2.0", Method: "initialize", Params: params})
+	if resp.Error != nil {
+		t.Fatalf("error on in-window host protocol: %v", resp.Error)
+	}
+	m, _ := resp.Result.(map[string]any)
+	if m["protocolVersion"] != hostMax {
+		t.Errorf("protocolVersion = %v, want negotiated-down %q", m["protocolVersion"], hostMax)
+	}
+}
+
+// spec: §6.9 — a host requesting a version newer than this binary's max is
+// capped at the server max (the server cannot speak a version it does not
+// implement); a host omitting the field gets the server max.
+func TestHandle_InitializeCapsNewerAndDefaultsEmpty(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name      string
+		requested string
+		want      string
+	}{
+		{"newer than server", "2025-06-01", protocolVersion},
+		{"empty defaults to max", "", protocolVersion},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			srv := &mcpServer{cfg: &config{}}
+			params, _ := json.Marshal(map[string]string{"protocolVersion": tc.requested})
+			resp := srv.handle(rpcRequest{JSONRPC: "2.0", Method: "initialize", Params: params})
+			if resp.Error != nil {
+				t.Fatalf("unexpected error: %v", resp.Error)
+			}
+			m, _ := resp.Result.(map[string]any)
+			if m["protocolVersion"] != tc.want {
+				t.Errorf("protocolVersion = %v, want %q", m["protocolVersion"], tc.want)
+			}
+		})
+	}
+}
+
+// spec: §6.9 — negotiateProtocol unit table covering the boundary at
+// supportedSince and the no-compatible-version case.
+func TestNegotiateProtocol(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		requested string
+		want      string
+		wantOK    bool
+	}{
+		{"", protocolVersion, true},              // host omitted the field
+		{"2023-01-01", "", false},                // older than supportedSince
+		{"2024-10-31", "", false},                // one day before supportedSince
+		{supportedSince, supportedSince, true},   // exact floor
+		{"2024-11-03", "2024-11-03", true},       // in-window, negotiate down
+		{protocolVersion, protocolVersion, true}, // exact server max
+		{"2025-06-01", protocolVersion, true},    // newer than server, capped
+	} {
+		got, ok := negotiateProtocol(tc.requested)
+		if got != tc.want || ok != tc.wantOK {
+			t.Errorf("negotiateProtocol(%q) = (%q, %v), want (%q, %v)", tc.requested, got, ok, tc.want, tc.wantOK)
+		}
 	}
 }
 
