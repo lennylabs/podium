@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -63,7 +64,7 @@ func TestWorker_DeliversWithHMACSignature(t *testing.T) {
 	})
 	w := &webhook.Worker{Store: store, HTTPClient: rs.srv.Client(),
 		Backoff: []time.Duration{}}
-	if err := w.Deliver(context.Background(), "t", "artifact.published", map[string]any{
+	if err := w.Deliver(context.Background(), "t", "artifact.published", "", nil, map[string]any{
 		"id": "x", "version": "1.0.0",
 	}); err != nil {
 		t.Fatalf("Deliver: %v", err)
@@ -80,6 +81,103 @@ func TestWorker_DeliversWithHMACSignature(t *testing.T) {
 	}
 }
 
+// spec: §7.3.2 — the delivered body carries the full
+// {event, trace_id, timestamp, actor, data} schema. trace_id and actor
+// are threaded from the publisher; actor is always an object so the
+// schema stays stable for receivers that key on it (F-7.3.1).
+func TestWorker_BodyCarriesFullSchema(t *testing.T) {
+	t.Parallel()
+	rs := newReceiverServer(t, "secret-1")
+	store := webhook.NewMemoryStore()
+	_ = store.Put(context.Background(), webhook.Receiver{
+		ID: "r1", TenantID: "t", URL: rs.srv.URL, Secret: "secret-1",
+	})
+	w := &webhook.Worker{Store: store, HTTPClient: rs.srv.Client()}
+	actor := map[string]any{"email": "alice@acme.com"}
+	if err := w.Deliver(context.Background(), "t", "artifact.published", "trace-abc", actor,
+		map[string]any{"id": "x"}); err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rs.bodies[0], &body); err != nil {
+		t.Fatalf("body parse: %v", err)
+	}
+	for _, k := range []string{"event", "trace_id", "timestamp", "actor", "data"} {
+		if _, ok := body[k]; !ok {
+			t.Errorf("body missing %q key: %v", k, body)
+		}
+	}
+	if body["trace_id"] != "trace-abc" {
+		t.Errorf("trace_id = %v, want trace-abc", body["trace_id"])
+	}
+	gotActor, _ := body["actor"].(map[string]any)
+	if gotActor["email"] != "alice@acme.com" {
+		t.Errorf("actor.email = %v, want alice@acme.com", gotActor["email"])
+	}
+}
+
+// spec: §7.3.2 — a delivery with no resolved caller still carries an
+// `actor` object (empty), keeping the wire schema stable (F-7.3.1).
+func TestWorker_NilActorMarshalsAsEmptyObject(t *testing.T) {
+	t.Parallel()
+	rs := newReceiverServer(t, "secret-1")
+	store := webhook.NewMemoryStore()
+	_ = store.Put(context.Background(), webhook.Receiver{
+		ID: "r1", TenantID: "t", URL: rs.srv.URL, Secret: "secret-1",
+	})
+	w := &webhook.Worker{Store: store, HTTPClient: rs.srv.Client()}
+	if err := w.Deliver(context.Background(), "t", "artifact.published", "", nil, nil); err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rs.bodies[0], &body); err != nil {
+		t.Fatalf("body parse: %v", err)
+	}
+	actor, ok := body["actor"].(map[string]any)
+	if !ok {
+		t.Fatalf("actor key absent or not an object: %v", body["actor"])
+	}
+	if len(actor) != 0 {
+		t.Errorf("actor = %v, want empty object", actor)
+	}
+}
+
+// spec: §7.3.2 — two events firing close together against the same
+// receiver must not lose a failure-count increment. The persisted
+// counter reflects both failures, so the 32-failure auto-disable
+// threshold is reached on time rather than late (F-7.3.8).
+func TestWorker_ConcurrentDeliveriesDoNotLoseFailureCount(t *testing.T) {
+	t.Parallel()
+	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "always 503", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(dead.Close)
+	store := webhook.NewMemoryStore()
+	_ = store.Put(context.Background(), webhook.Receiver{
+		ID: "r1", TenantID: "t", URL: dead.URL, Secret: "k",
+	})
+	w := &webhook.Worker{
+		Store:       store,
+		HTTPClient:  dead.Client(),
+		MaxFailures: 100,
+		Backoff:     []time.Duration{time.Microsecond}, // fail fast
+	}
+	const events = 8
+	var wg sync.WaitGroup
+	for i := 0; i < events; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = w.Deliver(context.Background(), "t", "artifact.published", "", nil, nil)
+		}()
+	}
+	wg.Wait()
+	got, _ := store.Get(context.Background(), "t", "r1")
+	if got.FailureCount != events {
+		t.Errorf("FailureCount = %d, want %d (no lost increments under concurrency)", got.FailureCount, events)
+	}
+}
+
 // Spec: §7.3.2 — receivers whose EventFilter does not include the
 // fired event are skipped; subscribers control which events they
 // receive.
@@ -92,7 +190,7 @@ func TestWorker_SkipsFilteredOutEventTypes(t *testing.T) {
 		EventFilter: []string{"artifact.deprecated"},
 	})
 	w := &webhook.Worker{Store: store, HTTPClient: rs.srv.Client()}
-	if err := w.Deliver(context.Background(), "t", "artifact.published", nil); err != nil {
+	if err := w.Deliver(context.Background(), "t", "artifact.published", "", nil, nil); err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
 	if rs.deliveries.Load() != 0 {
@@ -116,7 +214,7 @@ func TestWorker_RetriesOnTransientFailure(t *testing.T) {
 		HTTPClient: rs.srv.Client(),
 		Backoff:    []time.Duration{time.Millisecond, time.Millisecond, time.Millisecond},
 	}
-	if err := w.Deliver(context.Background(), "t", "artifact.published", nil); err != nil {
+	if err := w.Deliver(context.Background(), "t", "artifact.published", "", nil, nil); err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
 	if rs.deliveries.Load() != 3 {
@@ -148,7 +246,7 @@ func TestWorker_AutoDisablesAfterMaxFailures(t *testing.T) {
 		MaxFailures: 32,
 		Backoff:     []time.Duration{time.Microsecond}, // single retry
 	}
-	if err := w.Deliver(context.Background(), "t", "artifact.published", nil); err != nil {
+	if err := w.Deliver(context.Background(), "t", "artifact.published", "", nil, nil); err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
 	got, _ := store.Get(context.Background(), "t", "r1")
@@ -168,7 +266,7 @@ func TestWorker_SkipsDisabledReceivers(t *testing.T) {
 		Disabled: true,
 	})
 	w := &webhook.Worker{Store: store, HTTPClient: rs.srv.Client()}
-	if err := w.Deliver(context.Background(), "t", "artifact.published", nil); err != nil {
+	if err := w.Deliver(context.Background(), "t", "artifact.published", "", nil, nil); err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
 	if rs.deliveries.Load() != 0 {
@@ -214,7 +312,7 @@ func TestWorker_4xxIsNotRetryable(t *testing.T) {
 		HTTPClient: srv.Client(),
 		Backoff:    []time.Duration{time.Microsecond, time.Microsecond},
 	}
-	_ = w.Deliver(context.Background(), "t", "artifact.published", nil)
+	_ = w.Deliver(context.Background(), "t", "artifact.published", "", nil, nil)
 	if hits.Load() != 1 {
 		t.Errorf("hits = %d, want 1 (4xx must not retry)", hits.Load())
 	}
@@ -242,7 +340,7 @@ func TestWorker_ContextCancelAbortsRetry(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- w.Deliver(ctx, "t", "x", nil) }()
+	go func() { done <- w.Deliver(ctx, "t", "x", "", nil, nil) }()
 	time.Sleep(50 * time.Millisecond)
 	cancel()
 	select {

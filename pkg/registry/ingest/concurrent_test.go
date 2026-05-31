@@ -48,7 +48,7 @@ func TestIngest_ConcurrentSameContentEmitsOnce(t *testing.T) {
 				TenantID: "t",
 				LayerID:  "L",
 				Files:    files,
-				PublishEvent: func(typ string, _ map[string]any) {
+				PublishEvent: func(_ context.Context, typ string, _ map[string]any) {
 					if typ == "artifact.published" {
 						publishedCount.Add(1)
 					}
@@ -125,7 +125,7 @@ func TestIngest_ConcurrentDifferentContentOneAcceptsRestConflict(t *testing.T) {
 				TenantID: "t",
 				LayerID:  "L",
 				Files:    files,
-				PublishEvent: func(typ string, _ map[string]any) {
+				PublishEvent: func(_ context.Context, typ string, _ map[string]any) {
 					if typ == "artifact.published" {
 						publishedCount.Add(1)
 					}

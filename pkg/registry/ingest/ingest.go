@@ -258,10 +258,31 @@ func (r *Request) tenantHasArtifact(ctx context.Context, st store.Store, artifac
 	return false
 }
 
-// EventEmitter is the §7.6 publish surface. The function shape
-// matches Server.PublishEvent so the orchestrator passes the
-// server's method directly.
-type EventEmitter func(eventType string, data map[string]any)
+// tenantHasNonDeprecatedVersion reports whether the tenant already
+// stores a non-deprecated manifest for artifactID. A new deprecated
+// version of an artifact that previously had a non-deprecated version
+// is the §7.3.2 "flipped deprecated: true" transition; a version born
+// deprecated has no such prior state. Called after the new version is
+// committed, the just-stored deprecated record is excluded by the
+// !Deprecated filter, so the result reflects the prior state.
+func (r *Request) tenantHasNonDeprecatedVersion(ctx context.Context, st store.Store, artifactID string) bool {
+	all, err := st.ListManifests(ctx, r.TenantID)
+	if err != nil {
+		return false
+	}
+	for _, m := range all {
+		if m.ArtifactID == artifactID && !m.Deprecated {
+			return true
+		}
+	}
+	return false
+}
+
+// EventEmitter is the §7.6 publish surface. The signature matches
+// Server.PublishEvent so the orchestrator passes the server's method
+// directly. The ctx carries the §7.3.2 trace id and actor (via the
+// request's audit metadata) through to the outbound webhook body.
+type EventEmitter func(ctx context.Context, eventType string, data map[string]any)
 
 // EmbedderFunc converts the embedding text projection of a manifest
 // into a vector. Implementations wrap pkg/embedding.Provider.Embed
@@ -405,9 +426,22 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		if err := st.PutDomain(ctx, dr); err != nil {
 			return nil, err
 		}
-		if (!seen || prev != string(dr.Raw)) && req.AuditEmit != nil {
-			req.AuditEmit(string(audit.EventDomainPublished), dr.Path,
-				map[string]string{"layer": dr.Layer})
+		if !seen || prev != string(dr.Raw) {
+			// §7.3.2 outbound webhook + §8.1 audit: a DOMAIN.md that was
+			// added or whose source changed emits domain.published. Both
+			// the change-event seam and the audit sink fire so receivers
+			// and SIEM pipelines see one event per real change (F-7.3.3).
+			if req.PublishEvent != nil {
+				req.PublishEvent(ctx, string(audit.EventDomainPublished), map[string]any{
+					"domain": dr.Path,
+					"layer":  dr.Layer,
+					"tenant": dr.TenantID,
+				})
+			}
+			if req.AuditEmit != nil {
+				req.AuditEmit(string(audit.EventDomainPublished), dr.Path,
+					map[string]string{"layer": dr.Layer})
+			}
 		}
 	}
 
@@ -651,20 +685,29 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		}
 		res.Accepted++
 
+		// §7.3.2 — artifact.deprecated fires only when a manifest update
+		// "flipped deprecated: true", i.e. a prior non-deprecated version
+		// of the same artifact_id existed before this ingest. A version
+		// born deprecated on first publish is not a flip and emits only
+		// artifact.published. The just-committed deprecated version is
+		// excluded by the !Deprecated filter, so this reads the prior
+		// state correctly (F-7.3.10).
+		deprecatedFlip := mr.Deprecated && req.tenantHasNonDeprecatedVersion(ctx, st, mr.ArtifactID)
+
 		// §7.6 change events. Fire after the manifest commits so
 		// subscribers never see a published event for an ingest that
 		// rolled back. artifact.published carries the canonical
 		// metadata consumers need to look the artifact up.
 		if req.PublishEvent != nil {
-			req.PublishEvent("artifact.published", map[string]any{
+			req.PublishEvent(ctx, "artifact.published", map[string]any{
 				"id":           mr.ArtifactID,
 				"version":      mr.Version,
 				"content_hash": mr.ContentHash,
 				"layer":        mr.Layer,
 				"tenant":       mr.TenantID,
 			})
-			if mr.Deprecated {
-				req.PublishEvent("artifact.deprecated", map[string]any{
+			if deprecatedFlip {
+				req.PublishEvent(ctx, "artifact.deprecated", map[string]any{
 					"id":      mr.ArtifactID,
 					"version": mr.Version,
 					"layer":   mr.Layer,
@@ -683,7 +726,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 				"content_hash": mr.ContentHash,
 				"layer":        mr.Layer,
 			}, mr.AuditRedact))
-			if mr.Deprecated {
+			if deprecatedFlip {
 				req.AuditEmit("artifact.deprecated", mr.ArtifactID, audit.RedactFields(map[string]string{
 					"version": mr.Version,
 					"layer":   mr.Layer,

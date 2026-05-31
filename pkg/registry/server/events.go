@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -168,31 +167,68 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 // PublishEvent surfaces the bus to callers (e.g., the audit
 // emitter). Wraps publish so external code never sees the
-// concurrency primitives. When a §7.3.2 outbound webhook worker
-// is wired (WithWebhooks), this also fans the event out to every
-// matching receiver asynchronously.
+// concurrency primitives. The signature matches ingest.EventEmitter
+// so the orchestrator passes this method directly.
+//
+// The §7.3.2 trace id and actor are recovered from the per-request
+// audit metadata on ctx (set by withAuditMetaMiddleware). Both are
+// stamped on the streamed event and threaded into the outbound
+// webhook delivery so receivers can correlate (trace_id) and
+// attribute (actor). When ctx carries no metadata the trace id is
+// empty and actor is an empty object, keeping the wire schema stable.
+//
+// When a §7.3.2 outbound webhook worker is wired (WithWebhooks),
+// this also fans the event out to every matching receiver
+// asynchronously.
 func (s *Server) PublishEvent(ctx context.Context, eventType string, data map[string]any) {
 	if s.events == nil {
 		return
 	}
+	meta, ok := AuditMetaFromContext(ctx)
+	traceID := meta.TraceID
+	actor := actorFromMeta(meta, ok)
 	if s.webhooks != nil {
 		// Fire outbound deliveries asynchronously so a slow receiver
 		// never blocks the publisher.
 		go func() {
-			_ = s.webhooks.Deliver(context.Background(), s.tenant, eventType, data)
+			_ = s.webhooks.Deliver(context.Background(), s.tenant, eventType, traceID, actor, data)
 		}()
 	}
 	s.events.publish(registryEvent{
 		Event:     eventType,
+		TraceID:   traceID,
 		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+		Actor:     actor,
 		Data:      data,
 	})
-	_ = fmt.Sprintf("%v", ctx) // ctx reserved for future trace_id propagation
 }
 
-// PublishEventForIngest matches the ingest.EventEmitter signature
-// so the orchestrator can pass it directly without a closure that
-// closes over the server.
-func (s *Server) PublishEventForIngest(eventType string, data map[string]any) {
-	s.PublishEvent(context.Background(), eventType, data)
+// actorFromMeta renders the §7.3.2 webhook `actor` object from the
+// per-request audit metadata. It always returns a non-nil map so the
+// outbound body carries a stable `actor` key even for events that
+// resolve no caller (the map is then empty). Authenticated callers
+// contribute their email and groups; public-mode callers contribute
+// the source IP and any upstream forwarded user.
+func actorFromMeta(m AuditMeta, ok bool) map[string]any {
+	actor := map[string]any{}
+	if !ok {
+		return actor
+	}
+	if m.PublicMode {
+		actor["type"] = "public"
+		if m.SourceIP != "" {
+			actor["source_ip"] = m.SourceIP
+		}
+		if m.ForwardedUser != "" {
+			actor["forwarded_user"] = m.ForwardedUser
+		}
+		return actor
+	}
+	if m.Email != "" {
+		actor["email"] = m.Email
+	}
+	if len(m.Groups) > 0 {
+		actor["groups"] = m.Groups
+	}
+	return actor
 }

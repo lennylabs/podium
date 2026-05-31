@@ -14,8 +14,12 @@ package e2e
 //     covered in-process. A standalone e2e cannot register a hook with the
 //     out-of-process bridge because §9.3 does not commit to an out-of-process
 //     plugin protocol; registration stays in-process.
-//   - T-D-extending-18,19,20,21,22: outbound webhook delivery not reachable
-//     via the standalone HTTP surface (F-7.3.3 domain.published, F-7.3.10).
+//   - T-D-extending-18,19,19b: outbound webhook delivery (artifact.published,
+//     artifact.deprecated on a genuine flip, and domain.published) is driven
+//     in-process through the real ingest -> PublishEvent path (F-7.3.1, F-7.3.3,
+//     F-7.3.10).
+//   - T-D-extending-20,21,22: outbound webhook delivery not reachable
+//     via the standalone HTTP surface.
 //   - T-D-extending-30: needs two authenticated users and visibility enforcement.
 //   - T-D-extending-31: structural static check over SPI interface decls.
 //   - T-D-extending-42: needs a signed-then-tampered artifact.
@@ -28,18 +32,26 @@ package e2e
 //   - T-D-extending-50: requires a live embedding provider and vector backend.
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
+	"github.com/lennylabs/podium/pkg/registry/core"
+	"github.com/lennylabs/podium/pkg/registry/ingest"
+	"github.com/lennylabs/podium/pkg/registry/server"
+	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/webhook"
 )
 
@@ -468,14 +480,165 @@ func TestExtending_17_HookErrorAborts(t *testing.T) {
 	t.Skip("F-6.6.1 and F-9.3.1 fixed: a hook error aborts the write with materialize.hook_failed (covered in-process by cmd/podium-mcp TestDeliver_HookErrorAbortsWrite) and the hook SPI is now context-first and wire-serializable. Registering a hook with the out-of-process bridge would need an out-of-process plugin protocol, which §9.3 does not commit to; registration remains in-process")
 }
 
+// extWebhookHarness wires an in-process registry server with an outbound
+// webhook worker (§7.3.2) delivering to a capture receiver, plus a backing
+// store the test drives ingest against. The receiver records the parsed
+// JSON body of every delivery on the returned channel. The ingest pipeline
+// is wired to srv.PublishEvent, which is the production emission path, so a
+// test can drive a real ingest and observe the outbound delivery. eventFilter
+// (empty = all) limits which event types the receiver subscribes to.
+func extWebhookHarness(t *testing.T, eventFilter ...string) (*server.Server, store.Store, <-chan map[string]any) {
+	t.Helper()
+	bodies := make(chan map[string]any, 8)
+	recv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var m map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&m)
+		select {
+		case bodies <- m:
+		default:
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(recv.Close)
+
+	wstore := webhook.NewMemoryStore()
+	if err := wstore.Put(context.Background(), webhook.Receiver{
+		ID: "r1", TenantID: "default", URL: recv.URL, Secret: "s", EventFilter: eventFilter,
+	}); err != nil {
+		t.Fatalf("seed receiver: %v", err)
+	}
+	worker := &webhook.Worker{Store: wstore, HTTPClient: recv.Client()}
+
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	srv := server.New(core.New(st, "default", nil), server.WithWebhooks(worker), server.WithTenant("default"))
+	return srv, st, bodies
+}
+
+// extDeprecatedArtifact renders an ARTIFACT.md at the given version,
+// optionally marked deprecated.
+func extDeprecatedArtifact(version string, deprecated bool) []byte {
+	dep := ""
+	if deprecated {
+		dep = "deprecated: true\nreplaced_by: finance/run\n"
+	}
+	return []byte("---\ntype: context\nversion: " + version +
+		"\ndescription: Variance helper for vendor payments month-end close here today.\nsensitivity: low\n" +
+		dep + "---\n\nBody.\n")
+}
+
 // T-D-extending-18 — Webhook outbound delivery: artifact.published event reaches receiver.
+// spec: §7.3.2 — ingesting a new (artifact_id, version) fires artifact.published
+// to every matching receiver with the full {event, trace_id, timestamp, actor,
+// data} body (F-7.3.1, F-7.3.3 wiring).
 func TestExtending_18_WebhookArtifactPublished(t *testing.T) {
-	t.Skip("outbound webhook delivery for artifact.published is not reachable via the standalone HTTP surface; no wired publish trigger available to e2e (F-7.3.3 domain.published never emitted)")
+	srv, st, bodies := extWebhookHarness(t, "artifact.published")
+	_, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "default", LayerID: "L", PublishEvent: srv.PublishEvent,
+		Files: fstest.MapFS{
+			"finance/run/ARTIFACT.md": &fstest.MapFile{Data: extDeprecatedArtifact("1.0.0", false)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	select {
+	case m := <-bodies:
+		if m["event"] != "artifact.published" {
+			t.Fatalf("event = %v, want artifact.published", m["event"])
+		}
+		for _, k := range []string{"trace_id", "timestamp", "actor", "data"} {
+			if _, ok := m[k]; !ok {
+				t.Errorf("body missing %q: %v", k, m)
+			}
+		}
+		data, _ := m["data"].(map[string]any)
+		if data["id"] != "finance/run" {
+			t.Errorf("data.id = %v, want finance/run", data["id"])
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no artifact.published webhook delivery within deadline")
+	}
 }
 
 // T-D-extending-19 — Webhook outbound delivery: artifact.deprecated event reaches receiver.
+// spec: §7.3.2 — artifact.deprecated fires only when a manifest update flips
+// deprecated:true. A first non-deprecated version then a deprecated successor
+// delivers exactly one artifact.deprecated event; the receiver filtered to that
+// type sees nothing for the first publish (F-7.3.10, F-7.3.1).
 func TestExtending_19_WebhookArtifactDeprecated(t *testing.T) {
-	t.Skip("blocked by F-7.3.10: artifact.deprecated fires on first publish rather than on deprecation; outbound webhook delivery not reachable in standalone e2e")
+	srv, st, bodies := extWebhookHarness(t, "artifact.deprecated")
+	// v1 is not deprecated: no artifact.deprecated delivery.
+	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "default", LayerID: "L", PublishEvent: srv.PublishEvent,
+		Files: fstest.MapFS{
+			"finance/run/ARTIFACT.md": &fstest.MapFile{Data: extDeprecatedArtifact("1.0.0", false)},
+		},
+	}); err != nil {
+		t.Fatalf("ingest v1: %v", err)
+	}
+	select {
+	case m := <-bodies:
+		t.Fatalf("artifact.deprecated delivered for the non-deprecated v1 publish: %v", m)
+	case <-time.After(500 * time.Millisecond):
+	}
+	// v2 flips deprecated: exactly one artifact.deprecated delivery.
+	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "default", LayerID: "L", PublishEvent: srv.PublishEvent,
+		Files: fstest.MapFS{
+			"finance/run/ARTIFACT.md": &fstest.MapFile{Data: extDeprecatedArtifact("2.0.0", true)},
+		},
+	}); err != nil {
+		t.Fatalf("ingest v2: %v", err)
+	}
+	select {
+	case m := <-bodies:
+		if m["event"] != "artifact.deprecated" {
+			t.Fatalf("event = %v, want artifact.deprecated", m["event"])
+		}
+		for _, k := range []string{"trace_id", "timestamp", "actor", "data"} {
+			if _, ok := m[k]; !ok {
+				t.Errorf("body missing %q: %v", k, m)
+			}
+		}
+		data, _ := m["data"].(map[string]any)
+		if data["version"] != "2.0.0" {
+			t.Errorf("data.version = %v, want 2.0.0", data["version"])
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no artifact.deprecated webhook delivery within deadline")
+	}
+}
+
+// T-D-extending-19b — Webhook outbound delivery: domain.published reaches receiver.
+// spec: §7.3.2 — adding or changing a DOMAIN.md fires domain.published to
+// matching receivers (F-7.3.3).
+func TestExtending_19b_WebhookDomainPublished(t *testing.T) {
+	srv, st, bodies := extWebhookHarness(t, "domain.published")
+	_, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "default", LayerID: "L", PublishEvent: srv.PublishEvent,
+		Files: fstest.MapFS{
+			"finance/DOMAIN.md":       &fstest.MapFile{Data: []byte("---\ndescription: Finance domain for vendor payments here.\n---\n\nFinance.\n")},
+			"finance/run/ARTIFACT.md": &fstest.MapFile{Data: extDeprecatedArtifact("1.0.0", false)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	select {
+	case m := <-bodies:
+		if m["event"] != "domain.published" {
+			t.Fatalf("event = %v, want domain.published", m["event"])
+		}
+		data, _ := m["data"].(map[string]any)
+		if data["domain"] != "finance" {
+			t.Errorf("data.domain = %v, want finance", data["domain"])
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no domain.published webhook delivery within deadline")
+	}
 }
 
 // T-D-extending-20 — Webhook outbound delivery: layer.ingested event reaches receiver.

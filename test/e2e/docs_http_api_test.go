@@ -933,8 +933,8 @@ func TestDocHTTPAPI_41_EventsTypeFilter(t *testing.T) {
 
 // spec: http-api.md § Outbound webhooks. Driven in-process so an event
 // can be published to a configured receiver. The delivered body carries
-// {event, timestamp, data} and an X-Podium-Signature header; the
-// documented trace_id/actor fields are omitted (F-7.3.1).
+// the full §7.3.2 schema {event, trace_id, timestamp, actor, data} and an
+// X-Podium-Signature header (F-7.3.1).
 func TestDocHTTPAPI_42_OutboundWebhook(t *testing.T) {
 	received := make(chan []byte, 1)
 	sigHeader := make(chan string, 1)
@@ -966,18 +966,18 @@ func TestDocHTTPAPI_42_OutboundWebhook(t *testing.T) {
 		if m["event"] != "artifact.published" {
 			t.Fatalf("event=%v, want artifact.published", m["event"])
 		}
-		for _, k := range []string{"timestamp", "data"} {
+		for _, k := range []string{"trace_id", "timestamp", "actor", "data"} {
 			if _, ok := m[k]; !ok {
 				t.Fatalf("webhook body missing %q: %v", k, m)
 			}
 		}
+		// actor is always an object so the schema stays stable even when
+		// no caller is resolved (here the in-process publish carries none).
+		if _, ok := m["actor"].(map[string]any); !ok {
+			t.Fatalf("webhook body actor is not an object: %v", m["actor"])
+		}
 		if sig := <-sigHeader; !strings.HasPrefix(sig, "sha256=") {
 			t.Fatalf("X-Podium-Signature=%q, want sha256= prefix", sig)
-		}
-		if _, ok := m["trace_id"]; ok {
-			t.Log("note: trace_id present (F-7.3.1 resolved)")
-		} else {
-			t.Log("doc/impl gap (F-7.3.1): outbound webhook body omits trace_id and actor")
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatalf("no outbound webhook delivery within deadline")

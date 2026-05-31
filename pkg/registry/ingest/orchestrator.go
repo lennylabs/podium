@@ -102,7 +102,7 @@ func SourceIngestWithOptions(
 				opts.Emit(ctx, cfg.TenantID, cfg.ID, cfg.LastIngestedRef, snap.Reference)
 			}
 			if opts.PublishEvent != nil {
-				opts.PublishEvent("layer.history_rewritten", map[string]any{
+				opts.PublishEvent(ctx, "layer.history_rewritten", map[string]any{
 					"tenant":    cfg.TenantID,
 					"layer":     cfg.ID,
 					"prior_ref": cfg.LastIngestedRef,
@@ -138,7 +138,7 @@ func SourceIngestWithOptions(
 	// the result summary. Useful for build pipelines that gate on
 	// "ingest of the prod layer just completed."
 	if opts.PublishEvent != nil {
-		opts.PublishEvent("layer.ingested", map[string]any{
+		opts.PublishEvent(ctx, "layer.ingested", map[string]any{
 			"tenant":         cfg.TenantID,
 			"layer":          cfg.ID,
 			"reference":      snap.Reference,

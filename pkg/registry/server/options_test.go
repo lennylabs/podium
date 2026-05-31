@@ -34,7 +34,7 @@ func TestServerOptions_WithObjectStoreAndTenant(t *testing.T) {
 	}
 }
 
-func TestPublishEventForIngest_FiresEvent(t *testing.T) {
+func TestPublishEvent_FiresEvent(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
@@ -42,8 +42,8 @@ func TestPublishEventForIngest_FiresEvent(t *testing.T) {
 	}
 	srv := server.New(core.New(st, "default", nil))
 	// Without a webhook worker the call is a no-op; just ensure it
-	// doesn't panic.
-	srv.PublishEventForIngest("artifact.published", map[string]any{
+	// doesn't panic. The signature matches ingest.EventEmitter.
+	srv.PublishEvent(context.Background(), "artifact.published", map[string]any{
 		"id": "x", "version": "1.0.0",
 	})
 }
