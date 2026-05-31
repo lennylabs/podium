@@ -183,3 +183,24 @@ func TestDataPlane_ObjectsHeadReportsSizeWithoutBody(t *testing.T) {
 		t.Errorf("GET streamed %d bytes, want %d", len(getBody), len(large))
 	}
 }
+
+// Spec: §13.7 — content-addressed object reads carry the immutable
+// Cache-Control header so a CDN caches them at the origin. The key is the
+// content hash, so the bytes can never change. Covers both the GET stream and
+// the HEAD probe the filesystem backend serves through /objects/{key}.
+func TestDataPlane_ObjectsImmutableCacheControl(t *testing.T) {
+	t.Parallel()
+	ts, _, key := dataPlaneFixture(t)
+
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		req, _ := http.NewRequest(method, ts.URL+"/objects/"+key, nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s: %v", method, err)
+		}
+		resp.Body.Close()
+		if got := resp.Header.Get("Cache-Control"); got != objectstore.ImmutableCacheControl {
+			t.Errorf("%s Cache-Control = %q, want %q", method, got, objectstore.ImmutableCacheControl)
+		}
+	}
+}

@@ -1055,6 +1055,10 @@ func (s *Server) writeObjectHeaders(w http.ResponseWriter, key string, info obje
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Length", strconv.FormatInt(info.Size, 10))
 	w.Header().Set("X-Content-Hash", "sha256:"+key)
+	// §13.7: the object key is the content hash, so these bytes are immutable
+	// and safe to cache indefinitely. Emit the immutable Cache-Control header a
+	// CDN honors at the origin.
+	w.Header().Set("Cache-Control", objectstore.ImmutableCacheControl)
 }
 
 // writeObjectStoreError maps an object-store read error to the §6.10

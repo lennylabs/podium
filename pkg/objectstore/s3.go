@@ -117,8 +117,10 @@ func (s *S3) Put(ctx context.Context, key string, body []byte, contentType strin
 	if err := validateKey(key); err != nil {
 		return err
 	}
+	// §13.7: store the immutable Cache-Control so presigned GET responses carry
+	// it and a CDN caches the content-addressed object served from S3.
 	_, err := s.Client.PutObject(ctx, s.Bucket, key, bytes.NewReader(body), int64(len(body)),
-		minio.PutObjectOptions{ContentType: contentType})
+		minio.PutObjectOptions{ContentType: contentType, CacheControl: ImmutableCacheControl})
 	return err
 }
 

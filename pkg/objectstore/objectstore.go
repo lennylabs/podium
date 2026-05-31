@@ -70,6 +70,19 @@ func hasSuffix(s, suffix string) bool {
 // Operators override via PODIUM_PRESIGN_TTL_SECONDS.
 const DefaultPresignTTL = 3600 * time.Second
 
+// ImmutableCacheControl is the Cache-Control header value emitted for
+// content-addressed object reads. Because the canonical key is the content
+// hash, the bytes for a given key can never change, so the response is
+// cacheable for a year and marked immutable. The registry's filesystem
+// /objects/{key} route sets it on the response, and the S3 backend stores it
+// as object metadata so presigned GET responses inherit it. This realizes the
+// §13.7 "Cache headers safe because content_hash keys are immutable" property
+// at the origin so a CDN (CloudFront, Fastly, or Cloudflare) caches without
+// CDN-side configuration.
+//
+// spec: §13.7 (CDN)
+const ImmutableCacheControl = "public, max-age=31536000, immutable"
+
 // ObjectInfo describes a stored object's metadata without reading its
 // body. The §7.2 data-plane HEAD path uses it to report size without
 // buffering the blob.
