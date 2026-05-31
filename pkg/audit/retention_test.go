@@ -3,6 +3,8 @@ package audit_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -171,7 +173,7 @@ func TestEraseUser_ReplacesIdentifiersAndAppendsTombstone(t *testing.T) {
 		Timestamp: time.Now().UTC(),
 	})
 	transformed, err := audit.EraseUser(context.Background(), sink,
-		"joan@example.com", "tenant-salt")
+		"joan@example.com", "tenant-salt", "carol@acme.com")
 	if err != nil {
 		t.Fatalf("EraseUser: %v", err)
 	}
@@ -195,6 +197,136 @@ func TestEraseUser_ReplacesIdentifiersAndAppendsTombstone(t *testing.T) {
 	}
 	if !containsBytes(data, []byte("other@example.com")) {
 		t.Errorf("unrelated caller was incorrectly redacted")
+	}
+}
+
+// erasedEvents parses the file-backed sink and returns the events with the
+// given type. Used to inspect the appended user.erased record.
+func parseEvents(t *testing.T, path string) []struct {
+	Type    string            `json:"type"`
+	Caller  string            `json:"caller"`
+	Target  string            `json:"target"`
+	Context map[string]string `json:"context"`
+} {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var out []struct {
+		Type    string            `json:"type"`
+		Caller  string            `json:"caller"`
+		Target  string            `json:"target"`
+		Context map[string]string `json:"context"`
+	}
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		if len(line) == 0 {
+			continue
+		}
+		var e struct {
+			Type    string            `json:"type"`
+			Caller  string            `json:"caller"`
+			Target  string            `json:"target"`
+			Context map[string]string `json:"context"`
+		}
+		if err := json.Unmarshal(line, &e); err != nil {
+			t.Fatalf("parse event: %v", err)
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// Spec: §8.5 (F-8.5.2) — the redaction value is
+// redacted-<sha256(user_id+salt)>: the redacted- prefix, the full 32-byte
+// (64 hex char) SHA-256 digest, and no delimiter inserted between user_id
+// and salt.
+func TestEraseUser_TombstoneFormatMatchesSpec(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.log")
+	sink, _ := audit.NewFileSink(path)
+	_ = sink.Append(context.Background(), audit.Event{
+		Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Timestamp: time.Now().UTC(),
+	})
+	if _, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "tenant-salt", "carol@acme.com"); err != nil {
+		t.Fatalf("EraseUser: %v", err)
+	}
+	want := func() string {
+		h := sha256.Sum256([]byte("alice@acme.com" + "tenant-salt"))
+		return "redacted-" + hex.EncodeToString(h[:])
+	}()
+	data, _ := readSinkBytes(path)
+	if !containsBytes(data, []byte(want)) {
+		t.Errorf("tombstone %q not found in log:\n%s", want, data)
+	}
+	// The pre-fix format must be gone: prefix, delimiter, and truncation.
+	if containsBytes(data, []byte("erased:")) {
+		t.Errorf("legacy erased: prefix still present")
+	}
+	wrongDelim := func() string {
+		h := sha256.Sum256([]byte("alice@acme.com" + "|" + "tenant-salt"))
+		return hex.EncodeToString(h[:])
+	}()
+	if containsBytes(data, []byte(wrongDelim)) {
+		t.Errorf("delimiter-bearing digest present; salt must be appended without a separator")
+	}
+	// 64 hex chars after the prefix = full SHA-256, not the 16-char truncation.
+	if len(want) != len("redacted-")+64 {
+		t.Fatalf("test bug: want length %d", len(want))
+	}
+}
+
+// Spec: §8.5 (F-8.5.5) — an empty salt is rejected so the tombstone cannot
+// degrade to a guessable sha256(user_id).
+func TestEraseUser_EmptySaltRejected(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.log")
+	sink, _ := audit.NewFileSink(path)
+	_ = sink.Append(context.Background(), audit.Event{
+		Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Timestamp: time.Now().UTC(),
+	})
+	if _, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "", "carol@acme.com"); err == nil {
+		t.Fatalf("EraseUser with empty salt: want error, got nil")
+	}
+	// The log must be untouched: the original identity still present, no
+	// user.erased event appended.
+	data, _ := readSinkBytes(path)
+	if !containsBytes(data, []byte("alice@acme.com")) {
+		t.Errorf("rejected erase must not rewrite the log")
+	}
+	if containsBytes(data, []byte("user.erased")) {
+		t.Errorf("rejected erase must not append user.erased")
+	}
+}
+
+// Spec: §8.5 / §8.1 (F-8.5.4) — the appended user.erased event records the
+// invoking admin as the Caller and in the admin context field.
+func TestEraseUser_RecordsInvokingAdmin(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.log")
+	sink, _ := audit.NewFileSink(path)
+	_ = sink.Append(context.Background(), audit.Event{
+		Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Timestamp: time.Now().UTC(),
+	})
+	if _, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "salt", "carol@acme.com"); err != nil {
+		t.Fatalf("EraseUser: %v", err)
+	}
+	events := parseEvents(t, path)
+	var found bool
+	for _, e := range events {
+		if e.Type != string(audit.EventUserErased) {
+			continue
+		}
+		found = true
+		if e.Caller != "carol@acme.com" {
+			t.Errorf("user.erased Caller = %q, want carol@acme.com", e.Caller)
+		}
+		if e.Context["admin"] != "carol@acme.com" {
+			t.Errorf("user.erased context admin = %q, want carol@acme.com", e.Context["admin"])
+		}
+	}
+	if !found {
+		t.Fatalf("no user.erased event appended")
 	}
 }
 

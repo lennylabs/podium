@@ -1404,14 +1404,14 @@ func TestDocCLI_110_AdminVerifySchemaGap(t *testing.T) {
 func TestDocCLI_111_AdminErase(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "audit.log")
 	cliSeedAudit(t, logPath, "alice@acme.com")
-	res := runPodium(t, "", nil, "admin", "erase", "--audit-path", logPath, "alice@acme.com")
+	res := runPodium(t, "", nil, "admin", "erase",
+		"--audit-path", logPath, "--salt", "tenant-salt", "--operator", "carol@acme.com",
+		"alice@acme.com")
 	cliWantExit(t, res, 0, "admin erase")
 	body := readFile(t, logPath)
 	cliNotContains(t, body, "alice@acme.com", "caller redacted")
-	// The implementation writes an `erased:<hash>` tombstone (the doc
-	// describes it as `redacted-<sha256(sub+salt)>`; recorded as a
-	// doc-accuracy gap).
-	cliContains(t, body, "erased:", "tombstone identity")
+	// spec §8.5: the tombstone is redacted-<sha256(user_id+salt)>.
+	cliContains(t, body, "redacted-", "tombstone identity")
 	cliContains(t, body, "user.erased", "erasure audit event")
 }
 
@@ -1419,7 +1419,9 @@ func TestDocCLI_111_AdminErase(t *testing.T) {
 func TestDocCLI_112_AdminEraseAudited(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "audit.log")
 	cliSeedAudit(t, logPath, "alice@acme.com")
-	cliWantExit(t, runPodium(t, "", nil, "admin", "erase", "--audit-path", logPath, "alice@acme.com"), 0, "erase")
+	cliWantExit(t, runPodium(t, "", nil, "admin", "erase",
+		"--audit-path", logPath, "--salt", "tenant-salt", "--operator", "carol@acme.com",
+		"alice@acme.com"), 0, "erase")
 	cliContains(t, readFile(t, logPath), "user.erased", "user.erased event appended")
 }
 

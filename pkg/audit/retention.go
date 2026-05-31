@@ -162,20 +162,29 @@ func Enforce(_ context.Context, sink *FileSink, now time.Time, policies []Policy
 
 // EraseUser implements the §8.5 GDPR right-to-be-forgotten flow:
 // every Caller and userID-bearing Context value matching userID is
-// replaced with a salted hash, then the chain is rewritten over the
-// transformed events. The salted-hash form preserves cross-event
-// correlation for SIEM consumers that know the salt while removing
-// the original identifier.
+// replaced with the salted tombstone redacted-<sha256(user_id+salt)>,
+// then the chain is rewritten over the transformed events. The salted
+// form preserves cross-event correlation for SIEM consumers that know
+// the salt while removing the original identifier.
 //
-// EraseUser appends a user.erased audit event to the rewritten log.
-// Pass a unique salt per tenant; the same userID with two salts
-// produces two unrelated tombstones, which is the desired property.
+// EraseUser appends a user.erased audit event to the rewritten log,
+// recording the invoking admin (§8.1: "Admin invoked the GDPR erasure
+// command") as the event Caller and in the admin context field. Pass a
+// unique salt per tenant; the same userID with two salts produces two
+// unrelated tombstones, which is the desired property.
+//
+// salt must be non-empty (§8.5, F-8.5.5): an empty salt reduces the
+// tombstone to sha256(user_id), which is reversible by brute force or
+// dictionary over candidate user IDs and defeats de-identification.
 //
 // Returns the number of events transformed (excludes the appended
 // user.erased event).
-func EraseUser(_ context.Context, sink *FileSink, userID, salt string) (int, error) {
+func EraseUser(_ context.Context, sink *FileSink, userID, salt, admin string) (int, error) {
 	if userID == "" {
 		return 0, fmt.Errorf("audit.erase: userID is required")
+	}
+	if salt == "" {
+		return 0, fmt.Errorf("audit.erase: salt is required (an empty salt yields a guessable tombstone)")
 	}
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
@@ -202,13 +211,24 @@ func EraseUser(_ context.Context, sink *FileSink, userID, salt string) (int, err
 			transformed++
 		}
 	}
-	// Append the user.erased record so the action is itself audited.
+	// Append the user.erased record so the action is itself audited. §8.1/
+	// §8.5 (F-8.5.4): the invoking admin is recorded as the event Caller and
+	// in the admin context field for accountability; with no admin supplied
+	// (an internal call) it falls back to system:retention.
+	caller := admin
+	if caller == "" {
+		caller = "system:retention"
+	}
+	erasedCtx := map[string]string{"transformed": fmt.Sprintf("%d", transformed)}
+	if admin != "" {
+		erasedCtx["admin"] = admin
+	}
 	events = append(events, Event{
 		Type:      EventUserErased,
 		Timestamp: time.Now().UTC(),
-		Caller:    "system:retention",
+		Caller:    caller,
 		Target:    tombstone,
-		Context:   map[string]string{"transformed": fmt.Sprintf("%d", transformed)},
+		Context:   erasedCtx,
 	})
 	if err := rewriteWithChain(sink.path, events); err != nil {
 		return 0, err
@@ -219,9 +239,12 @@ func EraseUser(_ context.Context, sink *FileSink, userID, salt string) (int, err
 	return transformed, nil
 }
 
+// tombstoneFor returns the §8.5 audit redaction value
+// redacted-<sha256(user_id+salt)>: the full 32-byte SHA-256 digest of the
+// user id concatenated with the salt, with no delimiter between them.
 func tombstoneFor(userID, salt string) string {
-	h := sha256.Sum256([]byte(userID + "|" + salt))
-	return "erased:" + hex.EncodeToString(h[:8])
+	h := sha256.Sum256([]byte(userID + salt))
+	return "redacted-" + hex.EncodeToString(h[:])
 }
 
 // readAllEvents loads every event from a file-backed sink. A

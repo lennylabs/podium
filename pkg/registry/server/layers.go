@@ -250,6 +250,101 @@ func (e *LayerEndpoint) Handler() http.Handler {
 	return mux
 }
 
+// EraseHandler returns the handler for the §8.5 GDPR right-to-erasure
+// operation, mounted separately at /v1/admin/erase. POST only.
+func (e *LayerEndpoint) EraseHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/admin/erase", e.erase)
+	return mux
+}
+
+// eraseRequest is the POST /v1/admin/erase JSON body.
+type eraseRequest struct {
+	UserID string `json:"user_id"`
+	Salt   string `json:"salt"`
+}
+
+// erase performs the §8.5 GDPR right-to-erasure for user_id. It (1)
+// unregisters and soft-deletes every user-defined layer the user owns and
+// the artifacts ingested from them, (2) redacts the user identity across the
+// registry audit stream, and (3) appends a registry-sourced user.erased
+// event naming the invoking admin (§8.1). Admin-only; rejected in read-only
+// mode because it mutates catalogue state.
+//
+// The layer-purge events are emitted before the redaction pass so the erased
+// owner is itself redacted out of those layer.user_registered records.
+func (e *LayerEndpoint) erase(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "registry.invalid_argument",
+			"method not allowed: "+r.Method)
+		return
+	}
+	if e.mode != nil {
+		if err := e.mode.CheckConfig(); err != nil {
+			writeError(w, http.StatusServiceUnavailable, "config.read_only", err.Error())
+			return
+		}
+	}
+	if err := e.authAdmin(r); err != nil {
+		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
+		return
+	}
+	var body eraseRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
+		return
+	}
+	if body.UserID == "" {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "user_id is required")
+		return
+	}
+	// spec §8.5 (F-8.5.5): the tombstone is redacted-<sha256(user_id+salt)>;
+	// an empty salt makes it guessable, so reject it.
+	if body.Salt == "" {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "salt is required")
+		return
+	}
+	// spec §8.5 (F-8.5.1): unregister and soft-delete every user-defined
+	// layer the user owns. DeleteLayerConfig tombstones the layer and the
+	// artifacts ingested from it (recoverable within the §8.4 30-day window).
+	layers, err := e.store.ListLayerConfigs(r.Context(), e.tenantID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+		return
+	}
+	purged := []string{}
+	for _, l := range layers {
+		if !l.UserDefined || l.Owner != body.UserID {
+			continue
+		}
+		if err := e.store.DeleteLayerConfig(r.Context(), e.tenantID, l.ID); err != nil {
+			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+			return
+		}
+		e.emitLayerEvent(r, l, "erase")
+		purged = append(purged, l.ID)
+	}
+	// spec §8.5 (F-8.5.3): redact the user identity across the registry audit
+	// stream and append the registry-sourced user.erased event naming the
+	// invoking admin (F-8.5.4). The registry's §8.3 sink is the same file the
+	// retention and anchor schedulers operate on, so the redaction lands on
+	// the authoritative stream.
+	admin := callerIdentityString(e.identify(r))
+	redacted := 0
+	if e.auditSink != nil {
+		redacted, err = audit.EraseUser(r.Context(), e.auditSink, body.UserID, body.Salt, admin)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"erased":                body.UserID,
+		"layers_purged":         purged,
+		"audit_events_redacted": redacted,
+	})
+}
+
 // WebhookHandler returns the handler for the §7.3.1 inbound Git-provider
 // webhook trigger, mounted separately at /v1/ingest/webhook/{id}. The layer
 // id comes from the path so the URL `podium layer register` advertises is a

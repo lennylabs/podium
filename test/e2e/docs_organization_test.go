@@ -598,6 +598,8 @@ func TestOrg_25_AdminErase(t *testing.T) {
 	res := runPodium(t, "", nil,
 		"admin", "erase",
 		"--audit-path", auditPath,
+		"--salt", "tenant-salt",
+		"--operator", "carol@acme.com",
 		"alice@acme.com",
 	)
 	if res.Exit != 0 {
@@ -619,6 +621,28 @@ func TestOrg_25_AdminErase(t *testing.T) {
 	// We verify the erasure ran successfully via stdout; full redaction
 	// verification requires knowledge of the internal storage format.
 	_ = content
+}
+
+// spec: §8.5 (F-8.5.3) -- the default `podium admin erase` form drives the
+// registry's /v1/admin/erase endpoint, which purges the user's owned layers
+// and redacts the registry audit stream. Exercises the route end-to-end
+// against a live standalone server.
+func TestOrg_25b_AdminEraseRegistry(t *testing.T) {
+	t.Parallel()
+	srv, auditPath := brStartAuditServer(t, t.TempDir())
+	res := runPodium(t, "", []string{"PODIUM_REGISTRY=" + srv.BaseURL},
+		"admin", "erase", "--salt", "tenant-salt", "alice@acme.com")
+	if res.Exit != 0 {
+		t.Fatalf("admin erase --registry exit=%d stderr=%s stdout=%s", res.Exit, res.Stderr, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "\"erased\"") {
+		t.Errorf("stdout missing erased field: %s", res.Stdout)
+	}
+	// The registry-sourced user.erased event lands on the registry audit
+	// stream (the same file the server writes).
+	if !brPollContains(auditPath, "user.erased", 3*time.Second) {
+		t.Errorf("registry audit stream missing user.erased:\n%s", brReadOrEmpty(auditPath))
+	}
 }
 
 // T-D-organization-26 -- `podium admin erase` fails when no user-id is given.
@@ -648,6 +672,8 @@ func TestOrg_27_AdminEraseBadAuditPath(t *testing.T) {
 	res := runPodium(t, "", nil,
 		"admin", "erase",
 		"--audit-path", badPath,
+		"--salt", "tenant-salt",
+		"--operator", "carol@acme.com",
 		"alice@acme.com",
 	)
 	if res.Exit != 1 {

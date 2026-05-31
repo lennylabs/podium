@@ -28,7 +28,7 @@ func adminCmd(args []string) int {
 			{"grant", "Grant tenant admin role to a user."},
 			{"revoke", "Revoke tenant admin role from a user."},
 			{"show-effective", "Print the per-layer visibility for a user identity."},
-			{"erase", "GDPR right-to-be-forgotten on the local audit log."},
+			{"erase", "GDPR right-to-erasure: purge a user's layers and redact their audit identity."},
 			{"retention", "Apply audit retention policies to the local audit log."},
 			{"reembed", "Re-run vector embeddings against the configured registry."},
 			{"runtime", "Manage trusted runtime signing keys."},
@@ -210,11 +210,20 @@ func adminReembedCmd(args []string) int {
 	return 0
 }
 
+// adminEraseCmd runs the §8.5 GDPR right-to-erasure. By default it calls the
+// registry-side endpoint, which unregisters and purges the user's owned
+// layers and redacts the registry audit stream (the authenticated session
+// identifies the invoking admin). The --local / --audit-path form instead
+// redacts the MCP local audit sink directly; that path records the invoking
+// admin from --operator.
 func adminEraseCmd(args []string) int {
 	fs := flag.NewFlagSet("admin erase", flag.ContinueOnError)
-	setUsage(fs, "GDPR right-to-be-forgotten on the local audit log.")
-	auditPath := fs.String("audit-path", "", "audit log path (default ~/.podium/audit.log)")
-	salt := fs.String("salt", "", "salt for the GDPR erasure tombstone (per tenant)")
+	setUsage(fs, "GDPR right-to-erasure: purge a user's layers and redact their audit identity.")
+	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
+	auditPath := fs.String("audit-path", "", "local MCP audit log path (default ~/.podium/audit.log); selects the local-log form")
+	local := fs.Bool("local", false, "redact the local MCP audit log instead of the registry")
+	salt := fs.String("salt", "", "salt for the GDPR erasure tombstone (per tenant, required)")
+	operator := fs.String("operator", "", "invoking admin identity recorded on user.erased (required for the local-log form)")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
@@ -224,17 +233,44 @@ func adminEraseCmd(args []string) int {
 		return 2
 	}
 	userID := fs.Arg(0)
-	sink, err := audit.NewFileSink(*auditPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "open audit log: %v\n", err)
+	// spec §8.5 (F-8.5.5): an empty salt yields a guessable tombstone.
+	if *salt == "" {
+		fmt.Fprintln(os.Stderr, "error: --salt is required (an empty salt yields a guessable tombstone)")
+		return 2
+	}
+	// Local MCP-sink form: redact the local audit log directly.
+	if *local || *auditPath != "" {
+		// spec §8.5 (F-8.5.4): record the invoking admin for accountability.
+		if *operator == "" {
+			fmt.Fprintln(os.Stderr, "error: --operator is required for the local-log erase")
+			return 2
+		}
+		sink, err := audit.NewFileSink(*auditPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "open audit log: %v\n", err)
+			return 1
+		}
+		transformed, err := audit.EraseUser(context.Background(), sink, userID, *salt, *operator)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "erase failed: %v\n", err)
+			return 1
+		}
+		fmt.Printf("erased %s in %d audit events; tombstone written\n", userID, transformed)
+		return 0
+	}
+	// Registry-side form: the endpoint purges owned layers and redacts the
+	// registry audit stream; the authenticated session names the admin.
+	if *registry == "" {
+		fmt.Fprintln(os.Stderr, "error: --registry is required")
+		return 2
+	}
+	body := map[string]any{"user_id": userID, "salt": *salt}
+	out, status := doJSON(*registry+"/v1/admin/erase", "POST", body)
+	if status >= 400 {
+		fmt.Fprintf(os.Stderr, "erase failed: HTTP %d\n%s\n", status, out)
 		return 1
 	}
-	transformed, err := audit.EraseUser(context.Background(), sink, userID, *salt)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "erase failed: %v\n", err)
-		return 1
-	}
-	fmt.Printf("erased %s in %d audit events; tombstone written\n", userID, transformed)
+	fmt.Println(string(out))
 	return 0
 }
 

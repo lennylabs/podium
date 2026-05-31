@@ -745,6 +745,10 @@ func Run() error {
 	// §7.3.1 inbound Git-provider webhook trigger. Mounted at the
 	// per-layer path `podium layer register` advertises.
 	mux.Handle("/v1/ingest/webhook/", layers.WebhookHandler())
+	// §8.5 GDPR right-to-erasure: purges the user's owned layers and redacts
+	// the registry audit stream. Backed by the same store + audit sink as the
+	// layer endpoint.
+	mux.Handle("/v1/admin/erase", layers.EraseHandler())
 	mux.Handle("/v1/admin/runtime", runtimeEndpoint.Handler())
 	if isTrue(os.Getenv("PODIUM_WEB_UI")) {
 		mux.Handle("/ui/", http.StripPrefix("/ui/", http.FileServer(http.FS(web.Assets()))))
