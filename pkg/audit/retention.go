@@ -17,6 +17,67 @@ type Policy struct {
 	MaxAge time.Duration
 }
 
+// queryContextField is the audit-event Context key that holds free-text
+// search query strings (set by SearchArtifacts / SearchDomains). It is
+// the §8.4 "Query text" retention category, distinct from the event
+// metadata the per-type Policy governs.
+const queryContextField = "query"
+
+// queryBearingEvent reports whether an event type carries free-text query
+// content subject to the §8.4 query-text retention window.
+func queryBearingEvent(t EventType) bool {
+	return t == EventDomainsSearched || t == EventArtifactsSearched
+}
+
+// QueryRetention is the §8.4 "Query text: 30 days (redacted to
+// placeholders after 7 days)" rule. Query text is a category distinct
+// from audit-event metadata: the surrounding event is kept under the
+// per-type Policy, but its query field is replaced with Placeholder once
+// it is older than PlaceholderAfter and removed entirely once it is older
+// than DropAfter. A zero duration disables that stage.
+type QueryRetention struct {
+	PlaceholderAfter time.Duration
+	DropAfter        time.Duration
+	Placeholder      string
+}
+
+// DefaultQueryRetention returns the §8.4 defaults: placeholder after 7
+// days, drop after 30 days.
+func DefaultQueryRetention() *QueryRetention {
+	return &QueryRetention{
+		PlaceholderAfter: 7 * 24 * time.Hour,
+		DropAfter:        30 * 24 * time.Hour,
+		Placeholder:      "[redacted]",
+	}
+}
+
+// apply transitions a single event's query field for its age. It returns
+// true when the event was modified. A nil receiver, a non-query event, or
+// an event with no query field is a no-op. The drop stage takes
+// precedence over the placeholder stage for an event past both marks.
+func (q *QueryRetention) apply(e *Event, now time.Time) bool {
+	if q == nil || !queryBearingEvent(e.Type) {
+		return false
+	}
+	cur, ok := e.Context[queryContextField]
+	if !ok {
+		return false
+	}
+	age := now.Sub(e.Timestamp)
+	if q.DropAfter > 0 && age > q.DropAfter {
+		delete(e.Context, queryContextField)
+		return true
+	}
+	if q.PlaceholderAfter > 0 && age > q.PlaceholderAfter {
+		if cur == q.Placeholder {
+			return false
+		}
+		e.Context[queryContextField] = q.Placeholder
+		return true
+	}
+	return false
+}
+
 // Enforce rewrites sink's underlying file with every event older
 // than its per-type policy removed. The hash chain is rebuilt over
 // the surviving events; external anchoring of the prior chain head
@@ -25,9 +86,13 @@ type Policy struct {
 // When two policies cover the same Type, the most-restrictive
 // (smallest MaxAge) wins — the §8.4 retention-by-default behavior.
 //
-// Returns the number of events dropped. Errors are returned as-is;
-// the file is left in its prior state on rewrite failure.
-func Enforce(_ context.Context, sink *FileSink, now time.Time, policies []Policy) (int, error) {
+// queryRet applies the §8.4 query-text window (placeholder at 7 days,
+// drop at 30 days) to the surviving search events; pass nil to skip it.
+//
+// Returns the number of events dropped (query-text redaction of a kept
+// event does not count as a drop). Errors are returned as-is; the file is
+// left in its prior state on rewrite failure.
+func Enforce(_ context.Context, sink *FileSink, now time.Time, policies []Policy, queryRet *QueryRetention) (int, error) {
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
 	events, err := readAllEvents(sink.path)
@@ -43,14 +108,20 @@ func Enforce(_ context.Context, sink *FileSink, now time.Time, policies []Policy
 	}
 	kept := events[:0:0]
 	dropped := 0
-	for _, e := range events {
+	redacted := false
+	for i := range events {
+		e := events[i]
 		if max, ok := maxAge[e.Type]; ok && now.Sub(e.Timestamp) > max {
 			dropped++
 			continue
 		}
+		// §8.4 query-text window: keep the event, age out its query field.
+		if queryRet.apply(&e, now) {
+			redacted = true
+		}
 		kept = append(kept, e)
 	}
-	if dropped == 0 {
+	if dropped == 0 && !redacted {
 		return 0, nil
 	}
 	if err := rewriteWithChain(sink.path, kept); err != nil {

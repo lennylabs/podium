@@ -48,7 +48,10 @@ func startRetentionScheduler(cfg *Config, sink *audit.FileSink) {
 }
 
 func runRetentionOnce(ctx context.Context, sink *audit.FileSink, policies []audit.Policy) {
-	dropped, err := audit.Enforce(ctx, sink, time.Now(), policies)
+	// §8.4 query-text window (placeholder at 7d, drop at 30d) runs in the
+	// same pass so the query field ages out independently of the event
+	// metadata kept under the per-type policies.
+	dropped, err := audit.Enforce(ctx, sink, time.Now(), policies, audit.DefaultQueryRetention())
 	if err != nil && !errors.Is(err, context.Canceled) {
 		log.Printf("audit retention failure: %v", err)
 		return

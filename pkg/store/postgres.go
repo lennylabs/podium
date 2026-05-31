@@ -103,6 +103,8 @@ func (p *Postgres) applySchema() error {
 			signature TEXT NOT NULL DEFAULT '',
 			search_visibility TEXT NOT NULL DEFAULT '',
 			resources BYTEA,
+			deprecated_at TIMESTAMPTZ,
+			deleted_at TIMESTAMPTZ,
 			PRIMARY KEY (tenant_id, artifact_id, version)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_manifests_tenant_type
@@ -152,6 +154,7 @@ func (p *Postgres) applySchema() error {
 			force_push_policy TEXT NOT NULL DEFAULT '',
 			git_provider TEXT NOT NULL DEFAULT '',
 			created_at TIMESTAMPTZ NOT NULL,
+			deleted_at TIMESTAMPTZ,
 			PRIMARY KEY (tenant_id, id)
 		)`,
 	}
@@ -214,6 +217,7 @@ func (p *Postgres) PutManifest(ctx context.Context, rec ManifestRecord) error {
 	if ingestedAt.IsZero() {
 		ingestedAt = time.Now().UTC()
 	}
+	stampDeprecation(&rec)
 	resources, err := MarshalResources(rec.Resources)
 	if err != nil {
 		return fmt.Errorf("marshal resources: %w", err)
@@ -222,8 +226,8 @@ func (p *Postgres) PutManifest(ctx context.Context, rec ManifestRecord) error {
 		INSERT INTO manifests
 			(tenant_id, artifact_id, version, content_hash, type, description,
 			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-			 extends_pin, signature, search_visibility, resources)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+			 extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 		ON CONFLICT (tenant_id, artifact_id, version) DO NOTHING`,
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
 		rec.Type, rec.Description,
@@ -231,7 +235,8 @@ func (p *Postgres) PutManifest(ctx context.Context, rec ManifestRecord) error {
 		rec.Sensitivity, rec.Layer,
 		rec.Deprecated, ingestedAt.UTC(),
 		rec.Frontmatter, rec.Body,
-		rec.ExtendsPin, rec.Signature, rec.SearchVisibility, resources)
+		rec.ExtendsPin, rec.Signature, rec.SearchVisibility, resources,
+		nullTimePG(rec.DeprecatedAt), nullTimePG(rec.DeletedAt))
 	if err != nil {
 		return err
 	}
@@ -264,9 +269,9 @@ func (p *Postgres) GetManifest(ctx context.Context, tenantID, artifactID, versio
 	row := p.db.QueryRowContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-		       extends_pin, signature, search_visibility, resources
+		       extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at
 		FROM manifests
-		WHERE tenant_id = $1 AND artifact_id = $2 AND version = $3`,
+		WHERE tenant_id = $1 AND artifact_id = $2 AND version = $3 AND deleted_at IS NULL`,
 		tenantID, artifactID, version)
 	rec, err := scanManifestPG(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -281,9 +286,9 @@ func (p *Postgres) ListManifests(ctx context.Context, tenantID string) ([]Manife
 	rows, err := p.db.QueryContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-		       extends_pin, signature, search_visibility, resources
+		       extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at
 		FROM manifests
-		WHERE tenant_id = $1
+		WHERE tenant_id = $1 AND deleted_at IS NULL
 		ORDER BY artifact_id ASC, version ASC`, tenantID)
 	if err != nil {
 		return nil, err
@@ -298,6 +303,20 @@ func (p *Postgres) ListManifests(ctx context.Context, tenantID string) ([]Manife
 		out = append(out, rec)
 	}
 	return out, rows.Err()
+}
+
+// PurgeDeprecatedManifests removes deprecated versions whose
+// deprecated_at predates `before` (§8.4 90-day window).
+func (p *Postgres) PurgeDeprecatedManifests(ctx context.Context, before time.Time) (int, error) {
+	res, err := p.db.ExecContext(ctx, `
+		DELETE FROM manifests
+		WHERE deprecated = TRUE AND deprecated_at IS NOT NULL AND deprecated_at < $1`,
+		before.UTC())
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
 }
 
 // PutDomain upserts the DOMAIN.md record for a (tenant, layer, path).
@@ -413,8 +432,8 @@ func (p *Postgres) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 		INSERT INTO layer_configs
 			(tenant_id, id, source_type, repo, ref, root, local_path, ord,
 			 user_defined, owner, public, organization, groups, users,
-			 webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+			 webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 		ON CONFLICT (tenant_id, id) DO UPDATE SET
 			source_type = EXCLUDED.source_type,
 			repo = EXCLUDED.repo,
@@ -432,13 +451,14 @@ func (p *Postgres) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 			last_ingested_ref = EXCLUDED.last_ingested_ref,
 			force_push_policy = EXCLUDED.force_push_policy,
 			git_provider = EXCLUDED.git_provider,
-			created_at = EXCLUDED.created_at`,
+			created_at = EXCLUDED.created_at,
+			deleted_at = EXCLUDED.deleted_at`,
 		cfg.TenantID, cfg.ID, cfg.SourceType, cfg.Repo, cfg.Ref, cfg.Root, cfg.LocalPath,
 		cfg.Order, cfg.UserDefined, cfg.Owner,
 		cfg.Public, cfg.Organization,
 		strings.Join(cfg.Groups, "\n"), strings.Join(cfg.Users, "\n"),
 		cfg.WebhookSecret, cfg.LastIngestedRef, cfg.ForcePushPolicy, cfg.GitProvider,
-		createdAt.UTC())
+		createdAt.UTC(), nullTimePG(cfg.DeletedAt))
 	return err
 }
 
@@ -447,9 +467,9 @@ func (p *Postgres) GetLayerConfig(ctx context.Context, tenantID, id string) (Lay
 	row := p.db.QueryRowContext(ctx, `
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
-		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at
+		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at
 		FROM layer_configs
-		WHERE tenant_id = $1 AND id = $2`, tenantID, id)
+		WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`, tenantID, id)
 	cfg, err := scanLayerConfigPG(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return LayerConfig{}, ErrNotFound
@@ -462,8 +482,8 @@ func (p *Postgres) ListLayerConfigs(ctx context.Context, tenantID string) ([]Lay
 	rows, err := p.db.QueryContext(ctx, `
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
-		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at
-		FROM layer_configs WHERE tenant_id = $1
+		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at
+		FROM layer_configs WHERE tenant_id = $1 AND deleted_at IS NULL
 		ORDER BY ord ASC, id ASC`, tenantID)
 	if err != nil {
 		return nil, err
@@ -480,12 +500,109 @@ func (p *Postgres) ListLayerConfigs(ctx context.Context, tenantID string) ([]Lay
 	return out, rows.Err()
 }
 
-// DeleteLayerConfig removes a layer.
+// DeleteLayerConfig soft-deletes a layer and the artifacts ingested from
+// it (§8.4): both rows get a deleted_at tombstone, hiding them from
+// normal reads while keeping them recoverable for 30 days.
 func (p *Postgres) DeleteLayerConfig(ctx context.Context, tenantID, id string) error {
-	_, err := p.db.ExecContext(ctx, `
-		DELETE FROM layer_configs WHERE tenant_id = $1 AND id = $2`,
-		tenantID, id)
-	return err
+	now := time.Now().UTC()
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE layer_configs SET deleted_at = $1
+		WHERE tenant_id = $2 AND id = $3 AND deleted_at IS NULL`, now, tenantID, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE manifests SET deleted_at = $1
+		WHERE tenant_id = $2 AND layer = $3 AND deleted_at IS NULL`, now, tenantID, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// RestoreLayerConfig clears the soft-delete tombstone on a layer and its
+// artifacts (§8.4 admin recovery).
+func (p *Postgres) RestoreLayerConfig(ctx context.Context, tenantID, id string) error {
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `
+		UPDATE layer_configs SET deleted_at = NULL
+		WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NOT NULL`, tenantID, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE manifests SET deleted_at = NULL
+		WHERE tenant_id = $1 AND layer = $2 AND deleted_at IS NOT NULL`, tenantID, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ListDeletedLayerConfigs returns the tenant's soft-deleted layers.
+func (p *Postgres) ListDeletedLayerConfigs(ctx context.Context, tenantID string) ([]LayerConfig, error) {
+	rows, err := p.db.QueryContext(ctx, `
+		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
+		       user_defined, owner, public, organization, groups, users,
+		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at
+		FROM layer_configs WHERE tenant_id = $1 AND deleted_at IS NOT NULL
+		ORDER BY id ASC`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []LayerConfig{}
+	for rows.Next() {
+		cfg, err := scanLayerConfigPG(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, cfg)
+	}
+	return out, rows.Err()
+}
+
+// PurgeExpiredLayerDeletions hard-deletes soft-deleted layers and their
+// artifacts whose deleted_at predates `before` (§8.4 30-day window end).
+func (p *Postgres) PurgeExpiredLayerDeletions(ctx context.Context, before time.Time) (int, error) {
+	cutoff := before.UTC()
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM manifests
+		WHERE deleted_at IS NOT NULL AND deleted_at < $1`, cutoff); err != nil {
+		return 0, err
+	}
+	res, err := tx.ExecContext(ctx, `
+		DELETE FROM layer_configs
+		WHERE deleted_at IS NOT NULL AND deleted_at < $1`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return int(n), nil
 }
 
 // scanManifestPG scans a manifest row from Postgres. Differs from
@@ -496,21 +613,43 @@ func scanManifestPG(scanner rowScanner) (ManifestRecord, error) {
 	var rec ManifestRecord
 	var tags string
 	var resources []byte
+	var deprecatedAt, deletedAt sql.NullTime
 	err := scanner.Scan(
 		&rec.TenantID, &rec.ArtifactID, &rec.Version, &rec.ContentHash,
 		&rec.Type, &rec.Description, &tags, &rec.Sensitivity, &rec.Layer,
 		&rec.Deprecated, &rec.IngestedAt, &rec.Frontmatter, &rec.Body,
-		&rec.ExtendsPin, &rec.Signature, &rec.SearchVisibility, &resources)
+		&rec.ExtendsPin, &rec.Signature, &rec.SearchVisibility, &resources,
+		&deprecatedAt, &deletedAt)
 	if err != nil {
 		return ManifestRecord{}, err
 	}
 	if tags != "" {
 		rec.Tags = strings.Split(tags, "\n")
 	}
+	rec.DeprecatedAt = ptrFromNullTime(deprecatedAt)
+	rec.DeletedAt = ptrFromNullTime(deletedAt)
 	if rec.Resources, err = UnmarshalResources(resources); err != nil {
 		return ManifestRecord{}, err
 	}
 	return rec, nil
+}
+
+// nullTimePG renders an optional timestamp for a Postgres TIMESTAMPTZ
+// param: nil persists as NULL, a value as UTC.
+func nullTimePG(t *time.Time) any {
+	if t == nil {
+		return nil
+	}
+	return t.UTC()
+}
+
+// ptrFromNullTime converts a scanned NULL-able timestamp to a pointer.
+func ptrFromNullTime(nt sql.NullTime) *time.Time {
+	if !nt.Valid {
+		return nil
+	}
+	v := nt.Time.UTC()
+	return &v
 }
 
 // scanLayerConfigPG scans a layer config row from Postgres. Bool
@@ -518,13 +657,14 @@ func scanManifestPG(scanner rowScanner) (ManifestRecord, error) {
 func scanLayerConfigPG(scanner rowScanner) (LayerConfig, error) {
 	var cfg LayerConfig
 	var groups, users string
+	var deletedAt sql.NullTime
 	err := scanner.Scan(
 		&cfg.TenantID, &cfg.ID, &cfg.SourceType,
 		&cfg.Repo, &cfg.Ref, &cfg.Root, &cfg.LocalPath,
 		&cfg.Order, &cfg.UserDefined, &cfg.Owner,
 		&cfg.Public, &cfg.Organization, &groups, &users,
 		&cfg.WebhookSecret, &cfg.LastIngestedRef, &cfg.ForcePushPolicy, &cfg.GitProvider,
-		&cfg.CreatedAt)
+		&cfg.CreatedAt, &deletedAt)
 	if err != nil {
 		return LayerConfig{}, err
 	}
@@ -534,5 +674,6 @@ func scanLayerConfigPG(scanner rowScanner) (LayerConfig, error) {
 	if users != "" {
 		cfg.Users = strings.Split(users, "\n")
 	}
+	cfg.DeletedAt = ptrFromNullTime(deletedAt)
 	return cfg, nil
 }

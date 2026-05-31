@@ -735,6 +735,14 @@ func Run() error {
 		startRetentionScheduler(cfg, auditSink)
 	}
 
+	// §8.4 store retention: when PODIUM_STORE_RETENTION_INTERVAL_SECONDS
+	// > 0, a goroutine purges deprecated artifact versions past the
+	// 90-day window and hard-deletes soft-deleted layers past the 30-day
+	// recovery window.
+	if cfg.storeRetentionInterval > 0 {
+		startStoreRetentionScheduler(cfg, st)
+	}
+
 	// §13.2.1 read-only probe: ping the metadata store on a tick
 	// and flip the shared mode tracker after Failures consecutive
 	// errors. Disabled when failures threshold is 0. Mode
@@ -853,6 +861,14 @@ type Config struct {
 	// §8.5 retention enforcement.
 	auditRetentionInterval   int
 	auditRetentionMaxAgeDays int
+	// §8.4 store retention sweeps. storeRetentionInterval > 0 enables a
+	// goroutine that purges deprecated artifact versions and expired
+	// soft-deleted layers on a cadence; the day windows default to the
+	// §8.4 table (90 days for deprecated versions, 30 days for the
+	// owner-unregistered-layer recovery window).
+	storeRetentionInterval  int
+	deprecatedRetentionDays int
+	layerRecoveryDays       int
 	// §8.2 query-text PII scrub config. Default-on (Enabled nil); sourced
 	// from PODIUM_PII_REDACTION and registry.yaml's pii_redaction block.
 	piiRedaction audit.PIIRedactionConfig
@@ -1055,6 +1071,10 @@ func LoadConfig() *Config {
 		// §8.5 retention enforcement.
 		auditRetentionInterval:   envInt("PODIUM_AUDIT_RETENTION_INTERVAL_SECONDS", 0),
 		auditRetentionMaxAgeDays: envInt("PODIUM_AUDIT_RETENTION_MAX_AGE_DAYS", 365),
+		// §8.4 store retention sweeps (deprecated-version + layer-recovery purge).
+		storeRetentionInterval:  envInt("PODIUM_STORE_RETENTION_INTERVAL_SECONDS", 0),
+		deprecatedRetentionDays: envInt("PODIUM_DEPRECATED_RETENTION_DAYS", 90),
+		layerRecoveryDays:       envInt("PODIUM_LAYER_RECOVERY_DAYS", 30),
 		// §8.2 query-text scrub: default-on, disabled with PODIUM_PII_REDACTION=false.
 		piiRedaction: audit.PIIRedactionConfig{Enabled: envBoolPtr("PODIUM_PII_REDACTION")},
 		// §4.7.8 rate limits.

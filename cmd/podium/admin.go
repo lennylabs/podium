@@ -262,7 +262,7 @@ func adminRetentionCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "open audit log: %v\n", err)
 		return 1
 	}
-	dropped, err := audit.Enforce(context.Background(), sink, time.Now().UTC(), policies)
+	dropped, err := audit.Enforce(context.Background(), sink, time.Now().UTC(), policies, audit.DefaultQueryRetention())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "enforce failed: %v\n", err)
 		return 1

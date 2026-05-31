@@ -112,6 +112,19 @@ type ManifestRecord struct {
 	// ReplacedBy is the §4.7.4 upgrade target the manifest names
 	// when deprecated. Empty when not set.
 	ReplacedBy string
+	// DeprecatedAt records when the §8.4 deprecation flag was set for
+	// this version. Nil when the version is not deprecated. The
+	// deprecated-version purge (§8.4 "90 days after the deprecation flag
+	// is set") computes its window from this timestamp; PutManifest
+	// stamps it from IngestedAt when Deprecated is true and it is unset.
+	DeprecatedAt *time.Time
+	// DeletedAt is the §8.4 soft-delete tombstone. A non-nil value marks
+	// the manifest as recoverable-but-hidden: it was soft-deleted when
+	// the layer it was ingested from was unregistered ("artifacts
+	// soft-deleted, recoverable via admin"). Get/List exclude soft-deleted
+	// rows; RestoreLayerConfig clears it within the recovery window; the
+	// purge job hard-deletes rows whose DeletedAt predates the window.
+	DeletedAt *time.Time
 	// AuditRedact lists field names whose values must be replaced
 	// with "[redacted]" in audit context for events that reference
 	// this artifact (§8.2 manifest-declared redaction).
@@ -256,6 +269,28 @@ type LayerConfig struct {
 	// "strict" rejects the ingest with ingest.history_rewritten.
 	ForcePushPolicy string
 	CreatedAt       time.Time
+	// DeletedAt is the §8.4 soft-delete tombstone for a layer
+	// unregistered by its owner. A non-nil value hides the layer from
+	// Get/List while keeping it (and its artifacts) recoverable via
+	// RestoreLayerConfig for the 30-day window, after which the purge job
+	// hard-deletes it. Nil for an active layer.
+	DeletedAt *time.Time
+}
+
+// stampDeprecation sets DeprecatedAt from IngestedAt (falling back to
+// now) when a manifest is deprecated and the timestamp is unset, so the
+// §8.4 90-day purge window has an anchor. A version's deprecated state is
+// fixed at ingest time; the flag is "set" when the deprecated version is
+// stored. Every backend's PutManifest calls this before persisting.
+func stampDeprecation(rec *ManifestRecord) {
+	if rec.Deprecated && rec.DeprecatedAt == nil {
+		t := rec.IngestedAt
+		if t.IsZero() {
+			t = time.Now().UTC()
+		}
+		t = t.UTC()
+		rec.DeprecatedAt = &t
+	}
 }
 
 // Store is the SPI implementations satisfy. Methods take a
@@ -269,6 +304,12 @@ type Store interface {
 	PutManifest(ctx context.Context, rec ManifestRecord) error
 	GetManifest(ctx context.Context, tenantID, artifactID, version string) (ManifestRecord, error)
 	ListManifests(ctx context.Context, tenantID string) ([]ManifestRecord, error)
+	// PurgeDeprecatedManifests hard-deletes deprecated manifest versions
+	// whose DeprecatedAt predates `before`, implementing the §8.4
+	// "Deprecated artifact versions: 90 days after the deprecation flag
+	// is set" rule. Returns the number of versions removed. Non-deprecated
+	// and not-yet-expired versions are left untouched.
+	PurgeDeprecatedManifests(ctx context.Context, before time.Time) (int, error)
 
 	// Domains (§4.5 DOMAIN.md composition). PutDomain upserts the
 	// record for a (tenant, layer, path); ListDomains returns every
@@ -290,7 +331,22 @@ type Store interface {
 	PutLayerConfig(ctx context.Context, cfg LayerConfig) error
 	GetLayerConfig(ctx context.Context, tenantID, id string) (LayerConfig, error)
 	ListLayerConfigs(ctx context.Context, tenantID string) ([]LayerConfig, error)
+	// DeleteLayerConfig soft-deletes a layer per §8.4: the layer config
+	// and every artifact ingested from it are tombstoned (DeletedAt set to
+	// the current time) rather than hard-deleted, so they stay recoverable
+	// for the 30-day window. Subsequent Get/List calls exclude them.
 	DeleteLayerConfig(ctx context.Context, tenantID, id string) error
+	// RestoreLayerConfig clears the soft-delete tombstone on a layer and
+	// its artifacts, implementing the §8.4 admin recovery path. Returns
+	// ErrNotFound when no soft-deleted layer matches.
+	RestoreLayerConfig(ctx context.Context, tenantID, id string) error
+	// ListDeletedLayerConfigs returns the tenant's soft-deleted layers so
+	// an admin can see what is recoverable within the window.
+	ListDeletedLayerConfigs(ctx context.Context, tenantID string) ([]LayerConfig, error)
+	// PurgeExpiredLayerDeletions hard-deletes soft-deleted layers and
+	// their artifacts whose DeletedAt predates `before`, ending the §8.4
+	// 30-day recovery window. Returns the number of layers removed.
+	PurgeExpiredLayerDeletions(ctx context.Context, before time.Time) (int, error)
 }
 
 // SuiteName is the canonical name of the conformance suite (§9.3).

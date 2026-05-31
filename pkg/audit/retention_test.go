@@ -34,7 +34,7 @@ func TestEnforce_DropsExpiredEventsAndRebuildsChain(t *testing.T) {
 		})
 	}
 	dropped, err := audit.Enforce(context.Background(), sink, now,
-		[]audit.Policy{{Type: audit.EventArtifactsSearched, MaxAge: 30 * 24 * time.Hour}})
+		[]audit.Policy{{Type: audit.EventArtifactsSearched, MaxAge: 30 * 24 * time.Hour}}, nil)
 	if err != nil {
 		t.Fatalf("Enforce: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestEnforce_MostRestrictivePolicyWins(t *testing.T) {
 	dropped, err := audit.Enforce(context.Background(), sink, now, []audit.Policy{
 		{Type: audit.EventDomainLoaded, MaxAge: 7 * 24 * time.Hour},
 		{Type: audit.EventDomainLoaded, MaxAge: 36 * time.Hour},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("Enforce: %v", err)
 	}

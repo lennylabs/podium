@@ -30,6 +30,7 @@ func layerCmd(args []string) int {
 			{"list", "List registered layers."},
 			{"reorder", "Re-sequence the layer list."},
 			{"unregister", "Remove a layer."},
+			{"restore", "Recover a layer unregistered within the recovery window."},
 			{"reingest", "Trigger a fresh ingest for a layer."},
 			{"update", "Patch a registered layer's mutable fields."},
 			{"watch", "Poll a layer's source on an interval."},
@@ -48,6 +49,8 @@ func layerCmd(args []string) int {
 		return layerReorder(args[1:])
 	case "unregister":
 		return layerUnregister(args[1:])
+	case "restore":
+		return layerRestore(args[1:])
 	case "reingest":
 		return layerReingest(args[1:])
 	case "update":
@@ -230,6 +233,7 @@ func layerList(args []string) int {
 	fs := flag.NewFlagSet("layer list", flag.ContinueOnError)
 	setUsage(fs, "List registered layers.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
+	deleted := fs.Bool("deleted", false, "list soft-deleted layers recoverable within the §8.4 window")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
@@ -238,7 +242,11 @@ func layerList(args []string) int {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")
 		return 2
 	}
-	out, status := doJSON(*registry+"/v1/layers", "GET", nil)
+	url := *registry + "/v1/layers"
+	if *deleted {
+		url += "?deleted=true"
+	}
+	out, status := doJSON(url, "GET", nil)
 	if status >= 400 {
 		fmt.Fprintf(os.Stderr, "list failed: HTTP %d\n%s\n", status, out)
 		return 1
@@ -292,6 +300,33 @@ func layerUnregister(args []string) int {
 	out, status := doJSON(*registry+"/v1/layers?id="+fs.Arg(0), "DELETE", nil)
 	if status >= 400 {
 		fmt.Fprintf(os.Stderr, "unregister failed: HTTP %d\n%s\n", status, out)
+		return 1
+	}
+	fmt.Println(string(out))
+	return 0
+}
+
+// layerRestore recovers a layer (and its artifacts) that was
+// unregistered within the §8.4 30-day recovery window.
+func layerRestore(args []string) int {
+	fs := flag.NewFlagSet("layer restore", flag.ContinueOnError)
+	setUsage(fs, "Recover a layer unregistered within the recovery window.")
+	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return parseExit(err)
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: podium layer restore <id>")
+		return 2
+	}
+	if *registry == "" {
+		fmt.Fprintln(os.Stderr, "error: --registry is required")
+		return 2
+	}
+	out, status := doJSON(*registry+"/v1/layers/restore?id="+fs.Arg(0), "POST", nil)
+	if status >= 400 {
+		fmt.Fprintf(os.Stderr, "restore failed: HTTP %d\n%s\n", status, out)
 		return 1
 	}
 	fmt.Println(string(out))

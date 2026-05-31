@@ -193,6 +193,7 @@ func (e *LayerEndpoint) Handler() http.Handler {
 	mux.HandleFunc("/v1/layers/reingest", e.reingest)
 	mux.HandleFunc("/v1/layers/webhook", e.handleWebhook)
 	mux.HandleFunc("/v1/layers/update", e.update)
+	mux.HandleFunc("/v1/layers/restore", e.restore)
 	return mux
 }
 
@@ -432,14 +433,85 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, resp)
 }
 
-// list handles GET /v1/layers.
+// list handles GET /v1/layers. With ?deleted=true it returns the
+// soft-deleted layers still inside the §8.4 30-day recovery window so an
+// admin can see what RestoreLayerConfig can recover.
 func (e *LayerEndpoint) list(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("deleted") == "true" {
+		layers, err := e.store.ListDeletedLayerConfigs(r.Context(), e.tenantID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"layers": layers})
+		return
+	}
 	layers, err := e.store.ListLayerConfigs(r.Context(), e.tenantID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"layers": layers})
+}
+
+// restore handles POST /v1/layers/restore?id=ID. It clears the §8.4
+// soft-delete tombstone on a layer unregistered by its owner (and the
+// artifacts ingested from it), recovering them within the 30-day window.
+// An admin-defined layer requires admin authorization; a user-defined
+// layer's owner can recover their own layer.
+func (e *LayerEndpoint) restore(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "registry.invalid_argument",
+			"method not allowed: "+r.Method)
+		return
+	}
+	if e.mode != nil {
+		if err := e.mode.CheckConfig(); err != nil {
+			writeError(w, http.StatusServiceUnavailable, "config.read_only", err.Error())
+			return
+		}
+	}
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "id query param required")
+		return
+	}
+	// Locate the soft-deleted layer so authorization and the audit record
+	// see its UserDefined / Owner attributes (a restored layer is hidden
+	// from GetLayerConfig until the tombstone is cleared).
+	deleted, err := e.store.ListDeletedLayerConfigs(r.Context(), e.tenantID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+		return
+	}
+	var cfg store.LayerConfig
+	found := false
+	for _, l := range deleted {
+		if l.ID == id {
+			cfg, found = l, true
+			break
+		}
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "registry.not_found", "no recoverable layer: "+id)
+		return
+	}
+	if !cfg.UserDefined {
+		if err := e.authAdmin(r); err != nil {
+			writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
+			return
+		}
+	}
+	if err := e.store.RestoreLayerConfig(r.Context(), e.tenantID, id); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "registry.not_found", "no recoverable layer: "+id)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+		return
+	}
+	e.emitLayerEvent(r, cfg, "restore")
+	writeJSON(w, http.StatusOK, map[string]any{"restored": id})
 }
 
 // unregister handles DELETE /v1/layers?id=ID.

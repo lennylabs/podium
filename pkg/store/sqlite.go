@@ -90,6 +90,8 @@ func (s *SQLite) applySchema() error {
 			signature TEXT NOT NULL DEFAULT '',
 			search_visibility TEXT NOT NULL DEFAULT '',
 			resources BLOB,
+			deprecated_at TEXT,
+			deleted_at TEXT,
 			PRIMARY KEY (tenant_id, artifact_id, version)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_manifests_tenant_type
@@ -139,6 +141,7 @@ func (s *SQLite) applySchema() error {
 			force_push_policy TEXT NOT NULL DEFAULT '',
 			git_provider TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL,
+			deleted_at TEXT,
 			PRIMARY KEY (tenant_id, id)
 		)`,
 	}
@@ -199,6 +202,7 @@ func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
 	if ingestedAt.IsZero() {
 		ingestedAt = time.Now().UTC()
 	}
+	stampDeprecation(&rec)
 	resources, err := MarshalResources(rec.Resources)
 	if err != nil {
 		return fmt.Errorf("marshal resources: %w", err)
@@ -207,8 +211,8 @@ func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
 		INSERT INTO manifests
 			(tenant_id, artifact_id, version, content_hash, type, description,
 			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-			 extends_pin, signature, search_visibility, resources)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (tenant_id, artifact_id, version) DO NOTHING`,
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
 		rec.Type, rec.Description,
@@ -217,7 +221,8 @@ func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
 		boolToInt(rec.Deprecated),
 		ingestedAt.UTC().Format(time.RFC3339Nano),
 		rec.Frontmatter, rec.Body,
-		rec.ExtendsPin, rec.Signature, rec.SearchVisibility, resources)
+		rec.ExtendsPin, rec.Signature, rec.SearchVisibility, resources,
+		nullTimeText(rec.DeprecatedAt), nullTimeText(rec.DeletedAt))
 	if err != nil {
 		return err
 	}
@@ -250,9 +255,9 @@ func (s *SQLite) GetManifest(ctx context.Context, tenantID, artifactID, version 
 	row := s.db.QueryRowContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-		       extends_pin, signature, search_visibility, resources
+		       extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at
 		FROM manifests
-		WHERE tenant_id = ? AND artifact_id = ? AND version = ?`,
+		WHERE tenant_id = ? AND artifact_id = ? AND version = ? AND deleted_at IS NULL`,
 		tenantID, artifactID, version)
 	rec, err := scanManifest(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -267,9 +272,9 @@ func (s *SQLite) ListManifests(ctx context.Context, tenantID string) ([]Manifest
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-		       extends_pin, signature, search_visibility, resources
+		       extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at
 		FROM manifests
-		WHERE tenant_id = ?
+		WHERE tenant_id = ? AND deleted_at IS NULL
 		ORDER BY artifact_id ASC, version ASC`, tenantID)
 	if err != nil {
 		return nil, err
@@ -284,6 +289,21 @@ func (s *SQLite) ListManifests(ctx context.Context, tenantID string) ([]Manifest
 		out = append(out, rec)
 	}
 	return out, rows.Err()
+}
+
+// PurgeDeprecatedManifests removes deprecated versions whose
+// DeprecatedAt predates `before` (§8.4 90-day window). Timestamps are
+// stored as RFC3339Nano UTC text, which sorts lexicographically.
+func (s *SQLite) PurgeDeprecatedManifests(ctx context.Context, before time.Time) (int, error) {
+	res, err := s.db.ExecContext(ctx, `
+		DELETE FROM manifests
+		WHERE deprecated = 1 AND deprecated_at IS NOT NULL AND deprecated_at < ?`,
+		before.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
 }
 
 // PutDomain upserts the DOMAIN.md record for a (tenant, layer, path).
@@ -397,14 +417,14 @@ func (s *SQLite) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 		INSERT OR REPLACE INTO layer_configs
 			(tenant_id, id, source_type, repo, ref, root, local_path, ord,
 			 user_defined, owner, public, organization, groups, users,
-			 webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		cfg.TenantID, cfg.ID, cfg.SourceType, cfg.Repo, cfg.Ref, cfg.Root, cfg.LocalPath,
 		cfg.Order, boolToInt(cfg.UserDefined), cfg.Owner,
 		boolToInt(cfg.Public), boolToInt(cfg.Organization),
 		strings.Join(cfg.Groups, "\n"), strings.Join(cfg.Users, "\n"),
 		cfg.WebhookSecret, cfg.LastIngestedRef, cfg.ForcePushPolicy, cfg.GitProvider,
-		createdAt.UTC().Format(time.RFC3339Nano))
+		createdAt.UTC().Format(time.RFC3339Nano), nullTimeText(cfg.DeletedAt))
 	return err
 }
 
@@ -413,9 +433,9 @@ func (s *SQLite) GetLayerConfig(ctx context.Context, tenantID, id string) (Layer
 	row := s.db.QueryRowContext(ctx, `
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
-		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at
+		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at
 		FROM layer_configs
-		WHERE tenant_id = ? AND id = ?`, tenantID, id)
+		WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL`, tenantID, id)
 	cfg, err := scanLayerConfig(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return LayerConfig{}, ErrNotFound
@@ -428,8 +448,8 @@ func (s *SQLite) ListLayerConfigs(ctx context.Context, tenantID string) ([]Layer
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
-		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at
-		FROM layer_configs WHERE tenant_id = ?
+		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at
+		FROM layer_configs WHERE tenant_id = ? AND deleted_at IS NULL
 		ORDER BY ord ASC, id ASC`, tenantID)
 	if err != nil {
 		return nil, err
@@ -446,25 +466,123 @@ func (s *SQLite) ListLayerConfigs(ctx context.Context, tenantID string) ([]Layer
 	return out, rows.Err()
 }
 
-// DeleteLayerConfig removes a layer.
+// DeleteLayerConfig soft-deletes a layer and the artifacts ingested from
+// it (§8.4): both rows get a deleted_at tombstone, hiding them from
+// normal reads while keeping them recoverable for 30 days.
 func (s *SQLite) DeleteLayerConfig(ctx context.Context, tenantID, id string) error {
-	_, err := s.db.ExecContext(ctx, `
-		DELETE FROM layer_configs WHERE tenant_id = ? AND id = ?`,
-		tenantID, id)
-	return err
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE layer_configs SET deleted_at = ?
+		WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL`, now, tenantID, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE manifests SET deleted_at = ?
+		WHERE tenant_id = ? AND layer = ? AND deleted_at IS NULL`, now, tenantID, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// RestoreLayerConfig clears the soft-delete tombstone on a layer and its
+// artifacts (§8.4 admin recovery).
+func (s *SQLite) RestoreLayerConfig(ctx context.Context, tenantID, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `
+		UPDATE layer_configs SET deleted_at = NULL
+		WHERE tenant_id = ? AND id = ? AND deleted_at IS NOT NULL`, tenantID, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE manifests SET deleted_at = NULL
+		WHERE tenant_id = ? AND layer = ? AND deleted_at IS NOT NULL`, tenantID, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ListDeletedLayerConfigs returns the tenant's soft-deleted layers.
+func (s *SQLite) ListDeletedLayerConfigs(ctx context.Context, tenantID string) ([]LayerConfig, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
+		       user_defined, owner, public, organization, groups, users,
+		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at
+		FROM layer_configs WHERE tenant_id = ? AND deleted_at IS NOT NULL
+		ORDER BY id ASC`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []LayerConfig{}
+	for rows.Next() {
+		cfg, err := scanLayerConfig(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, cfg)
+	}
+	return out, rows.Err()
+}
+
+// PurgeExpiredLayerDeletions hard-deletes soft-deleted layers and their
+// artifacts whose deleted_at predates `before` (§8.4 30-day window end).
+func (s *SQLite) PurgeExpiredLayerDeletions(ctx context.Context, before time.Time) (int, error) {
+	cutoff := before.UTC().Format(time.RFC3339Nano)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM manifests
+		WHERE deleted_at IS NOT NULL AND deleted_at < ?`, cutoff); err != nil {
+		return 0, err
+	}
+	res, err := tx.ExecContext(ctx, `
+		DELETE FROM layer_configs
+		WHERE deleted_at IS NOT NULL AND deleted_at < ?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return int(n), nil
 }
 
 func scanLayerConfig(scanner rowScanner) (LayerConfig, error) {
 	var cfg LayerConfig
 	var userDefined, public, org int
 	var groups, users, createdAt string
+	var deletedAt sql.NullString
 	err := scanner.Scan(
 		&cfg.TenantID, &cfg.ID, &cfg.SourceType,
 		&cfg.Repo, &cfg.Ref, &cfg.Root, &cfg.LocalPath,
 		&cfg.Order, &userDefined, &cfg.Owner,
 		&public, &org, &groups, &users,
 		&cfg.WebhookSecret, &cfg.LastIngestedRef, &cfg.ForcePushPolicy, &cfg.GitProvider,
-		&createdAt)
+		&createdAt, &deletedAt)
 	if err != nil {
 		return LayerConfig{}, err
 	}
@@ -480,6 +598,7 @@ func scanLayerConfig(scanner rowScanner) (LayerConfig, error) {
 	if createdAt != "" {
 		cfg.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
 	}
+	cfg.DeletedAt = parseNullTimeText(deletedAt)
 	return cfg, nil
 }
 
@@ -494,11 +613,13 @@ func scanManifest(scanner rowScanner) (ManifestRecord, error) {
 	var tags string
 	var ingestedAt string
 	var resources []byte
+	var deprecatedAt, deletedAt sql.NullString
 	err := scanner.Scan(
 		&rec.TenantID, &rec.ArtifactID, &rec.Version, &rec.ContentHash,
 		&rec.Type, &rec.Description, &tags, &rec.Sensitivity, &rec.Layer,
 		&deprecated, &ingestedAt, &rec.Frontmatter, &rec.Body,
-		&rec.ExtendsPin, &rec.Signature, &rec.SearchVisibility, &resources)
+		&rec.ExtendsPin, &rec.Signature, &rec.SearchVisibility, &resources,
+		&deprecatedAt, &deletedAt)
 	if err != nil {
 		return ManifestRecord{}, err
 	}
@@ -509,10 +630,34 @@ func scanManifest(scanner rowScanner) (ManifestRecord, error) {
 	if ingestedAt != "" {
 		rec.IngestedAt, _ = time.Parse(time.RFC3339Nano, ingestedAt)
 	}
+	rec.DeprecatedAt = parseNullTimeText(deprecatedAt)
+	rec.DeletedAt = parseNullTimeText(deletedAt)
 	if rec.Resources, err = UnmarshalResources(resources); err != nil {
 		return ManifestRecord{}, err
 	}
 	return rec, nil
+}
+
+// nullTimeText renders an optional timestamp for a SQLite TEXT column:
+// nil persists as NULL, a value as RFC3339Nano UTC.
+func nullTimeText(t *time.Time) any {
+	if t == nil {
+		return nil
+	}
+	return t.UTC().Format(time.RFC3339Nano)
+}
+
+// parseNullTimeText is the inverse of nullTimeText.
+func parseNullTimeText(ns sql.NullString) *time.Time {
+	if !ns.Valid || ns.String == "" {
+		return nil
+	}
+	t, err := time.Parse(time.RFC3339Nano, ns.String)
+	if err != nil {
+		return nil
+	}
+	t = t.UTC()
+	return &t
 }
 
 func boolToInt(b bool) int {

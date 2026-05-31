@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"time"
 )
 
 // Memory is an in-memory Store implementation used by tests and
@@ -58,6 +59,7 @@ func (s *Memory) GetTenant(_ context.Context, id string) (Tenant, error) {
 func (s *Memory) PutManifest(_ context.Context, rec ManifestRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	stampDeprecation(&rec)
 	key := mkey(rec.TenantID, rec.ArtifactID, rec.Version)
 	if existing, ok := s.manifests[key]; ok {
 		if existing.ContentHash != rec.ContentHash {
@@ -75,7 +77,8 @@ func (s *Memory) GetManifest(_ context.Context, tenantID, artifactID, version st
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rec, ok := s.manifests[mkey(tenantID, artifactID, version)]
-	if !ok {
+	if !ok || rec.DeletedAt != nil {
+		// A soft-deleted manifest is hidden from normal reads (§8.4).
 		return ManifestRecord{}, ErrNotFound
 	}
 	return rec, nil
@@ -87,7 +90,7 @@ func (s *Memory) ListManifests(_ context.Context, tenantID string) ([]ManifestRe
 	defer s.mu.Unlock()
 	var out []ManifestRecord
 	for _, rec := range s.manifests {
-		if rec.TenantID == tenantID {
+		if rec.TenantID == tenantID && rec.DeletedAt == nil {
 			out = append(out, rec)
 		}
 	}
@@ -98,6 +101,21 @@ func (s *Memory) ListManifests(_ context.Context, tenantID string) ([]ManifestRe
 		return out[i].Version < out[j].Version
 	})
 	return out, nil
+}
+
+// PurgeDeprecatedManifests removes deprecated versions whose
+// DeprecatedAt predates `before` (§8.4 90-day window).
+func (s *Memory) PurgeDeprecatedManifests(_ context.Context, before time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for key, rec := range s.manifests {
+		if rec.Deprecated && rec.DeprecatedAt != nil && rec.DeprecatedAt.Before(before) {
+			delete(s.manifests, key)
+			n++
+		}
+	}
+	return n, nil
 }
 
 func domainKey(tenantID, layer, path string) string {
@@ -191,7 +209,8 @@ func (s *Memory) GetLayerConfig(_ context.Context, tenantID, id string) (LayerCo
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cfg, ok := s.layers[layerKey(tenantID, id)]
-	if !ok {
+	if !ok || cfg.DeletedAt != nil {
+		// Soft-deleted layers are hidden from normal reads (§8.4).
 		return LayerConfig{}, ErrNotFound
 	}
 	return cfg, nil
@@ -204,7 +223,7 @@ func (s *Memory) ListLayerConfigs(_ context.Context, tenantID string) ([]LayerCo
 	defer s.mu.Unlock()
 	out := []LayerConfig{}
 	for _, cfg := range s.layers {
-		if cfg.TenantID == tenantID {
+		if cfg.TenantID == tenantID && cfg.DeletedAt == nil {
 			out = append(out, cfg)
 		}
 	}
@@ -217,10 +236,78 @@ func (s *Memory) ListLayerConfigs(_ context.Context, tenantID string) ([]LayerCo
 	return out, nil
 }
 
-// DeleteLayerConfig removes a layer.
+// DeleteLayerConfig soft-deletes a layer and the artifacts ingested from
+// it (§8.4): both are tombstoned with the current time and excluded from
+// normal reads, but recoverable via RestoreLayerConfig for 30 days.
 func (s *Memory) DeleteLayerConfig(_ context.Context, tenantID, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.layers, layerKey(tenantID, id))
+	cfg, ok := s.layers[layerKey(tenantID, id)]
+	if !ok || cfg.DeletedAt != nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	cfg.DeletedAt = &now
+	s.layers[layerKey(tenantID, id)] = cfg
+	for key, rec := range s.manifests {
+		if rec.TenantID == tenantID && rec.Layer == id && rec.DeletedAt == nil {
+			rec.DeletedAt = &now
+			s.manifests[key] = rec
+		}
+	}
 	return nil
+}
+
+// RestoreLayerConfig clears the soft-delete tombstone on a layer and its
+// artifacts (§8.4 admin recovery).
+func (s *Memory) RestoreLayerConfig(_ context.Context, tenantID, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cfg, ok := s.layers[layerKey(tenantID, id)]
+	if !ok || cfg.DeletedAt == nil {
+		return ErrNotFound
+	}
+	cfg.DeletedAt = nil
+	s.layers[layerKey(tenantID, id)] = cfg
+	for key, rec := range s.manifests {
+		if rec.TenantID == tenantID && rec.Layer == id && rec.DeletedAt != nil {
+			rec.DeletedAt = nil
+			s.manifests[key] = rec
+		}
+	}
+	return nil
+}
+
+// ListDeletedLayerConfigs returns the tenant's soft-deleted layers.
+func (s *Memory) ListDeletedLayerConfigs(_ context.Context, tenantID string) ([]LayerConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []LayerConfig{}
+	for _, cfg := range s.layers {
+		if cfg.TenantID == tenantID && cfg.DeletedAt != nil {
+			out = append(out, cfg)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+// PurgeExpiredLayerDeletions hard-deletes soft-deleted layers and their
+// artifacts whose DeletedAt predates `before` (§8.4 30-day window end).
+func (s *Memory) PurgeExpiredLayerDeletions(_ context.Context, before time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for key, cfg := range s.layers {
+		if cfg.DeletedAt != nil && cfg.DeletedAt.Before(before) {
+			delete(s.layers, key)
+			n++
+			for mk, rec := range s.manifests {
+				if rec.TenantID == cfg.TenantID && rec.Layer == cfg.ID && rec.DeletedAt != nil {
+					delete(s.manifests, mk)
+				}
+			}
+		}
+	}
+	return n, nil
 }

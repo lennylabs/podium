@@ -16,6 +16,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/lennylabs/podium/pkg/store"
 )
@@ -45,6 +46,9 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("GetManifestNotFound", func(t *testing.T) { getManifestNotFound(t, factory(t)) })
 	t.Run("LayerConfigCRUD", func(t *testing.T) { layerConfigCRUD(t, factory(t)) })
 	t.Run("LayerConfigDelete", func(t *testing.T) { layerConfigDelete(t, factory(t)) })
+	t.Run("DeprecatedAtStampedAndPurged", func(t *testing.T) { deprecatedAtStampedAndPurged(t, factory(t)) })
+	t.Run("LayerSoftDeleteRecovery", func(t *testing.T) { layerSoftDeleteRecovery(t, factory(t)) })
+	t.Run("LayerDeletionPurgedAfterWindow", func(t *testing.T) { layerDeletionPurgedAfterWindow(t, factory(t)) })
 	t.Run("SearchVisibilityRoundTrip", func(t *testing.T) { searchVisibilityRoundTrip(t, factory(t)) })
 	t.Run("ResourcesRoundTrip", func(t *testing.T) { resourcesRoundTrip(t, factory(t)) })
 	t.Run("DomainRecordRoundTrip", func(t *testing.T) { domainRecordRoundTrip(t, factory(t)) })
@@ -441,6 +445,163 @@ func layerConfigDelete(t *testing.T, s store.Store) {
 	}
 	if _, err := s.GetLayerConfig(ctx, "t", "victim"); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("expected ErrNotFound after delete, got %v", err)
+	}
+}
+
+// Spec: §8.4 — a deprecated version is stamped with DeprecatedAt at put
+// time, and PurgeDeprecatedManifests removes only those whose stamp
+// predates the cutoff ("90 days after the deprecation flag is set"). A
+// non-deprecated version and a freshly deprecated one are left intact.
+func deprecatedAtStampedAndPurged(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "t")
+
+	old := time.Now().UTC().Add(-100 * 24 * time.Hour)
+	recent := time.Now().UTC().Add(-1 * 24 * time.Hour)
+
+	oldDep := manifestRec("t", "skill/x", "1.0.0", "h1")
+	oldDep.Deprecated = true
+	oldDep.IngestedAt = old
+	mustPut(t, s, oldDep)
+
+	freshDep := manifestRec("t", "skill/x", "2.0.0", "h2")
+	freshDep.Deprecated = true
+	freshDep.IngestedAt = recent
+	mustPut(t, s, freshDep)
+
+	live := manifestRec("t", "skill/x", "3.0.0", "h3")
+	live.IngestedAt = old
+	mustPut(t, s, live)
+
+	// DeprecatedAt is stamped from IngestedAt for deprecated versions only.
+	got, err := s.GetManifest(ctx, "t", "skill/x", "1.0.0")
+	if err != nil {
+		t.Fatalf("GetManifest: %v", err)
+	}
+	if got.DeprecatedAt == nil {
+		t.Fatalf("DeprecatedAt not stamped on deprecated version")
+	}
+	if liveRec, _ := s.GetManifest(ctx, "t", "skill/x", "3.0.0"); liveRec.DeprecatedAt != nil {
+		t.Errorf("DeprecatedAt stamped on non-deprecated version: %v", liveRec.DeprecatedAt)
+	}
+
+	// Purge versions deprecated more than 90 days ago.
+	cutoff := time.Now().UTC().Add(-90 * 24 * time.Hour)
+	n, err := s.PurgeDeprecatedManifests(ctx, cutoff)
+	if err != nil {
+		t.Fatalf("PurgeDeprecatedManifests: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("purged = %d, want 1", n)
+	}
+	if _, err := s.GetManifest(ctx, "t", "skill/x", "1.0.0"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("old deprecated version survived purge: %v", err)
+	}
+	if _, err := s.GetManifest(ctx, "t", "skill/x", "2.0.0"); err != nil {
+		t.Errorf("fresh deprecated version wrongly purged: %v", err)
+	}
+	if _, err := s.GetManifest(ctx, "t", "skill/x", "3.0.0"); err != nil {
+		t.Errorf("live version wrongly purged: %v", err)
+	}
+}
+
+// Spec: §8.4 — DeleteLayerConfig soft-deletes a layer and the artifacts
+// ingested from it (hidden from Get/List but listed by
+// ListDeletedLayerConfigs), and RestoreLayerConfig recovers both within
+// the window.
+func layerSoftDeleteRecovery(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "t")
+	cfg := store.LayerConfig{TenantID: "t", ID: "alice-personal", SourceType: "local", LocalPath: "/tmp/x", UserDefined: true, Owner: "alice"}
+	if err := s.PutLayerConfig(ctx, cfg); err != nil {
+		t.Fatalf("PutLayerConfig: %v", err)
+	}
+	art := manifestRec("t", "skill/a", "1.0.0", "ha")
+	art.Layer = "alice-personal"
+	mustPut(t, s, art)
+
+	if err := s.DeleteLayerConfig(ctx, "t", "alice-personal"); err != nil {
+		t.Fatalf("DeleteLayerConfig: %v", err)
+	}
+	// Layer and its artifact are hidden from normal reads.
+	if _, err := s.GetLayerConfig(ctx, "t", "alice-personal"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("soft-deleted layer still visible: %v", err)
+	}
+	if _, err := s.GetManifest(ctx, "t", "skill/a", "1.0.0"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("soft-deleted artifact still visible: %v", err)
+	}
+	if list, _ := s.ListManifests(ctx, "t"); len(list) != 0 {
+		t.Errorf("ListManifests returned soft-deleted artifact: %+v", list)
+	}
+	// But recoverable: it shows up in the deleted list.
+	deleted, err := s.ListDeletedLayerConfigs(ctx, "t")
+	if err != nil {
+		t.Fatalf("ListDeletedLayerConfigs: %v", err)
+	}
+	if len(deleted) != 1 || deleted[0].ID != "alice-personal" || deleted[0].DeletedAt == nil {
+		t.Fatalf("ListDeletedLayerConfigs = %+v", deleted)
+	}
+
+	// Restore clears the tombstone on both layer and artifact.
+	if err := s.RestoreLayerConfig(ctx, "t", "alice-personal"); err != nil {
+		t.Fatalf("RestoreLayerConfig: %v", err)
+	}
+	if _, err := s.GetLayerConfig(ctx, "t", "alice-personal"); err != nil {
+		t.Errorf("layer not recovered: %v", err)
+	}
+	if _, err := s.GetManifest(ctx, "t", "skill/a", "1.0.0"); err != nil {
+		t.Errorf("artifact not recovered: %v", err)
+	}
+	// Restoring a layer with no tombstone is ErrNotFound.
+	if err := s.RestoreLayerConfig(ctx, "t", "alice-personal"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("restore of non-deleted layer = %v, want ErrNotFound", err)
+	}
+}
+
+// Spec: §8.4 — PurgeExpiredLayerDeletions hard-deletes soft-deleted
+// layers and their artifacts past the 30-day recovery window, and leaves
+// a recently soft-deleted layer recoverable.
+func layerDeletionPurgedAfterWindow(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "t")
+	// A layer soft-deleted 40 days ago (past the window): inject the
+	// tombstone directly via PutLayerConfig so the test controls the age.
+	oldDeleted := time.Now().UTC().Add(-40 * 24 * time.Hour)
+	expired := store.LayerConfig{TenantID: "t", ID: "expired", SourceType: "local", LocalPath: "/x", DeletedAt: &oldDeleted}
+	if err := s.PutLayerConfig(ctx, expired); err != nil {
+		t.Fatalf("PutLayerConfig: %v", err)
+	}
+	expiredArt := manifestRec("t", "skill/e", "1.0.0", "he")
+	expiredArt.Layer = "expired"
+	expiredArt.DeletedAt = &oldDeleted
+	mustPut(t, s, expiredArt)
+
+	// A layer soft-deleted 5 days ago (still recoverable).
+	recentDeleted := time.Now().UTC().Add(-5 * 24 * time.Hour)
+	recent := store.LayerConfig{TenantID: "t", ID: "recent", SourceType: "local", LocalPath: "/y", DeletedAt: &recentDeleted}
+	if err := s.PutLayerConfig(ctx, recent); err != nil {
+		t.Fatalf("PutLayerConfig: %v", err)
+	}
+
+	cutoff := time.Now().UTC().Add(-30 * 24 * time.Hour)
+	n, err := s.PurgeExpiredLayerDeletions(ctx, cutoff)
+	if err != nil {
+		t.Fatalf("PurgeExpiredLayerDeletions: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("purged = %d, want 1", n)
+	}
+	// The expired layer's artifact is gone; the recent layer is still
+	// recoverable.
+	deleted, _ := s.ListDeletedLayerConfigs(ctx, "t")
+	if len(deleted) != 1 || deleted[0].ID != "recent" {
+		t.Errorf("after purge ListDeletedLayerConfigs = %+v", deleted)
+	}
+	if err := s.RestoreLayerConfig(ctx, "t", "recent"); err != nil {
+		t.Errorf("recent layer should still be recoverable: %v", err)
 	}
 }
 
