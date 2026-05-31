@@ -264,7 +264,11 @@ func loadConfig() (*config, error) {
 		c.registry = registryFromSyncYAML()
 	}
 	if c.registry == "" {
-		return nil, fmt.Errorf("PODIUM_REGISTRY is required (registry URL or filesystem path) — set it, pass --registry, or write defaults.registry to .podium/sync.yaml")
+		// §6.10 / §7.5.2 / §13.10: the registry is unset across env, flags, and
+		// every sync.yaml scope. Surface the canonical config.no_registry code
+		// and point the user at `podium init`, matching pkg/sync ErrNoRegistry,
+		// rather than a bare "required" message.
+		return nil, fmt.Errorf("config.no_registry: no registry configured; set PODIUM_REGISTRY, pass --registry, or run `podium init` to write defaults.registry to .podium/sync.yaml")
 	}
 	// §6.1 / §7.5.2: the MCP server speaks HTTP and requires a server-source
 	// registry. Under the §7.5.2 dispatch rule only an http:// or https://

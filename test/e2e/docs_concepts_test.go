@@ -729,8 +729,11 @@ func TestConcepts_MCPRequiresRegistry(t *testing.T) {
 	t.Parallel()
 	res := mcpExec(t, []string{"PODIUM_REGISTRY="}, rpcReq{ID: 1, Method: "initialize"})
 	out := res.Stdout + res.Stderr
-	if res.Exit == 0 && !strings.Contains(out, "PODIUM_REGISTRY is required") {
-		t.Errorf("expected PODIUM_REGISTRY-required failure, exit=%d out=%s", res.Exit, out)
+	// §6.10: unset across all scopes surfaces config.no_registry (F-6.11.1). The
+	// host env may carry a real ~/.podium/sync.yaml, so a clean start is allowed;
+	// otherwise a startup failure naming config.no_registry is required.
+	if res.Exit == 0 && !strings.Contains(out, "config.no_registry") {
+		t.Errorf("expected config.no_registry failure, exit=%d out=%s", res.Exit, out)
 	}
 }
 

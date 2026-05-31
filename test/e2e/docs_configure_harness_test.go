@@ -229,8 +229,10 @@ func TestConfigureHarness_MCPRequiresRegistry(t *testing.T) {
 	if res.Exit != 2 {
 		t.Errorf("exit=%d, want 2 (stderr=%s)", res.Exit, res.Stderr)
 	}
-	if !strings.Contains(res.Stderr, "PODIUM_REGISTRY is required") {
-		t.Errorf("stderr missing 'PODIUM_REGISTRY is required':\n%s", res.Stderr)
+	// spec: §6.10 / §7.5.2 — unset across all scopes surfaces config.no_registry
+	// and points the user at `podium init` (F-6.11.1).
+	if !strings.Contains(res.Stderr, "config.no_registry") {
+		t.Errorf("stderr missing 'config.no_registry':\n%s", res.Stderr)
 	}
 }
 
@@ -902,20 +904,33 @@ func TestConfigureHarness_StandaloneSyncFromServer(t *testing.T) {
 	t.Skip("blocked by F-14.11.1: podium sync has no server/URL registry source — sync.Run only opens a filesystem registry")
 }
 
-// T-D-configure-harness-64 — standalone MCP does not resolve the registry from
-// sync.yaml (known gap): it requires PODIUM_REGISTRY.
-func TestConfigureHarness_StandaloneMCPNoSyncYAMLFallback(t *testing.T) {
+// T-D-configure-harness-64 — standalone recipe (§6.11): the MCP server resolves
+// the registry from the bootstrapped ~/.podium/sync.yaml and PODIUM_REGISTRY can
+// be omitted (F-6.11.1). With defaults.registry set there, initialize succeeds
+// rather than failing with config.no_registry.
+func TestConfigureHarness_StandaloneMCPResolvesRegistryFromSyncYAML(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
+	// The §6.11 standalone bootstrap writes the loopback server URL; initialize
+	// is a local handshake and does not contact the registry, so no live server
+	// is required to exercise the resolution.
 	chWriteSyncYAML(t, home, "defaults:\n  registry: http://127.0.0.1:8080\n")
-	// rename to ~/.podium/sync.yaml location already satisfied (home/.podium/sync.yaml).
-	res := mcpExec(t, []string{"PODIUM_REGISTRY=", "HOME=" + home},
+	chAssertInitOK(t, []string{"PODIUM_REGISTRY=", "PODIUM_CACHE_DIR=" + t.TempDir(), "HOME=" + home})
+}
+
+// T-D-configure-harness-66 — standalone recipe negative: with no PODIUM_REGISTRY
+// and no sync.yaml in any scope, the MCP server exits 2 with config.no_registry
+// (§6.10) rather than a bare "required" message (F-6.11.1).
+func TestConfigureHarness_StandaloneMCPNoRegistryAnywhere(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir() // empty: no ~/.podium/sync.yaml
+	res := mcpExec(t, []string{"PODIUM_REGISTRY=", "PODIUM_CACHE_DIR=" + t.TempDir(), "HOME=" + home},
 		rpcReq{ID: 1, Method: "initialize", Params: chInitParams})
 	if res.Exit != 2 {
 		t.Errorf("exit=%d, want 2 (stderr=%s)", res.Exit, res.Stderr)
 	}
-	if !strings.Contains(res.Stderr, "PODIUM_REGISTRY is required") {
-		t.Errorf("stderr missing 'PODIUM_REGISTRY is required':\n%s", res.Stderr)
+	if !strings.Contains(res.Stderr, "config.no_registry") {
+		t.Errorf("stderr missing 'config.no_registry':\n%s", res.Stderr)
 	}
 }
 

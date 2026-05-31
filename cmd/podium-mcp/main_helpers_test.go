@@ -178,13 +178,23 @@ func TestPromptsCapabilityActive_FailsOpenOnError(t *testing.T) {
 
 // --- loadConfig --------------------------------------------------------------
 
+// spec: §6.10 / §7.5.2 / §13.10 — registry unset across env, flags, and every
+// sync.yaml scope surfaces the canonical config.no_registry code and points the
+// user at `podium init` (F-6.11.1), not a bare "required" message.
 func TestLoadConfig_MissingRegistryErrors(t *testing.T) {
 	// hermetic isolates HOME + cwd so the §7.5.2 sync.yaml fallback
 	// cannot resolve a registry from a real ~/.podium/sync.yaml.
 	hermetic(t)
 	t.Setenv("PODIUM_REGISTRY", "")
-	if _, err := loadConfig(); err == nil {
-		t.Errorf("missing PODIUM_REGISTRY: no error")
+	_, err := loadConfig()
+	if err == nil {
+		t.Fatalf("missing PODIUM_REGISTRY: no error")
+	}
+	if !strings.Contains(err.Error(), "config.no_registry") {
+		t.Errorf("error %q missing config.no_registry code", err)
+	}
+	if !strings.Contains(err.Error(), "podium init") {
+		t.Errorf("error %q should point the user at `podium init`", err)
 	}
 }
 
