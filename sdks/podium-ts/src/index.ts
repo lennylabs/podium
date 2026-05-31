@@ -259,6 +259,10 @@ export interface ClientOptions {
   identityProvider?: string;
   overlayPath?: string;
   fetcher?: typeof fetch;
+  // spec: §7.6 — the session/access token the client attaches as its Bearer
+  // credential so it reaches the registry with the same identity as the MCP
+  // path. fromEnv reads it from PODIUM_SESSION_TOKEN.
+  token?: string;
 }
 
 export class Client {
@@ -266,12 +270,14 @@ export class Client {
   readonly identityProvider: string;
   readonly overlayPath?: string;
   private readonly fetcher: typeof fetch;
+  private readonly token: string;
 
   constructor(opts: ClientOptions) {
     this.registry = opts.registry.replace(/\/$/, "");
     this.identityProvider = opts.identityProvider ?? "oauth-device-code";
     this.overlayPath = opts.overlayPath;
     this.fetcher = opts.fetcher ?? fetch;
+    this.token = opts.token ?? "";
   }
 
   static fromEnv(): Client {
@@ -283,7 +289,18 @@ export class Client {
       registry,
       identityProvider: process.env.PODIUM_IDENTITY_PROVIDER,
       overlayPath: process.env.PODIUM_OVERLAY_PATH,
+      // §6.3.2 injected session token: the env credential the MCP bridge also
+      // reads, so the SDK reaches the registry as the same identity.
+      token: process.env.PODIUM_SESSION_TOKEN,
     });
+  }
+
+  // headers returns request headers with the Bearer credential attached when
+  // a token is configured (spec: §7.6).
+  private headers(extra?: Record<string, string>): Record<string, string> {
+    const h: Record<string, string> = { ...(extra ?? {}) };
+    if (this.token) h.Authorization = `Bearer ${this.token}`;
+    return h;
   }
 
   async loadDomain(path = "", depth = 1): Promise<Record<string, unknown>> {
@@ -366,7 +383,7 @@ export class Client {
       }
       const resp = await this.fetcher(this.registry + "/v1/artifacts:batchLoad", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: this.headers({ "Content-Type": "application/json" }),
         body: JSON.stringify(body),
       });
       if (!resp.ok) {
@@ -411,7 +428,7 @@ export class Client {
     for (const t of eventTypes) {
       url.searchParams.append("type", t);
     }
-    const resp = await this.fetcher(url.toString());
+    const resp = await this.fetcher(url.toString(), { headers: this.headers() });
     if (!resp.ok || !resp.body) {
       throw new RegistryError(
         "registry.unavailable",
@@ -443,7 +460,7 @@ export class Client {
       if (v === undefined || v === null) continue;
       url.searchParams.set(k, String(v));
     }
-    const resp = await this.fetcher(url.toString());
+    const resp = await this.fetcher(url.toString(), { headers: this.headers() });
     if (!resp.ok) {
       let envelope: Record<string, unknown> = {};
       try {

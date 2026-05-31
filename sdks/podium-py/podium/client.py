@@ -288,10 +288,16 @@ class Client:
         *,
         identity_provider: str = "oauth-device-code",
         overlay_path: str | None = None,
+        token: str = "",
     ) -> None:
         self.registry = registry.rstrip("/")
         self.identity_provider = identity_provider
         self.overlay_path = overlay_path
+        # spec: §7.6 — the SDK reaches the registry with the same identity as
+        # the MCP path. The caller passes a session/access token here (or via
+        # PODIUM_SESSION_TOKEN in from_env); it is attached as the Bearer
+        # credential on every request so visibility filtering applies.
+        self.token = token
 
     @classmethod
     def from_env(cls) -> "Client":
@@ -302,7 +308,18 @@ class Client:
             registry=registry,
             identity_provider=os.environ.get("PODIUM_IDENTITY_PROVIDER", "oauth-device-code"),
             overlay_path=os.environ.get("PODIUM_OVERLAY_PATH"),
+            # §6.3.2 injected session token: the env-driven credential the MCP
+            # bridge also reads, so the SDK reaches the registry as the same
+            # identity without an interactive device-code flow.
+            token=os.environ.get("PODIUM_SESSION_TOKEN", ""),
         )
+
+    def _headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
+        """Return request headers with the Bearer credential when configured."""
+        headers = dict(extra or {})
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        return headers
 
     def load_domain(self, path: str = "", depth: int = 1) -> dict[str, Any]:
         params = {}
@@ -423,7 +440,7 @@ class Client:
             req = urllib.request.Request(
                 self.registry + "/v1/artifacts:batchLoad",
                 data=data,
-                headers={"Content-Type": "application/json"},
+                headers=self._headers({"Content-Type": "application/json"}),
                 method="POST",
             )
             try:
@@ -468,20 +485,27 @@ class Client:
             params["tags"] = ",".join(tags)
         return self._get("/v1/scope/preview", params)
 
-    def subscribe(self, *, types: list[str] | None = None):
+    def subscribe(self, event_types: list[str] | None = None):
         """Yield NDJSON events from /v1/events (spec §7.6).
 
         Each yielded value is the parsed JSON body of one event. The
         iterator runs until the underlying connection closes; callers
         wrap it in a try/except to handle reconnects.
+
+        spec: §7.6 — the documented call form passes the event-type list
+        positionally (`client.subscribe(["artifact.published", ...])`).
+        The filter is sent as one repeated ``type`` query parameter per
+        event type, matching the server's ``/v1/events`` handler (which
+        reads ``r.URL.Query()["type"]``) and the TypeScript SDK. A single
+        comma-joined ``types`` parameter is never read by the server.
         """
-        params: dict[str, Any] = {}
-        if types:
-            params["types"] = ",".join(types)
+        # Repeated key form: ?type=a&type=b. doseq expands the list so each
+        # event type becomes its own type= pair the server can read.
+        params = [("type", t) for t in (event_types or [])]
         url = self.registry + "/v1/events"
         if params:
             url = url + "?" + urllib.parse.urlencode(params)
-        req = urllib.request.Request(url)
+        req = urllib.request.Request(url, headers=self._headers())
         with urllib.request.urlopen(req) as resp:
             for raw in resp:
                 line = raw.decode("utf-8").rstrip("\n")
@@ -496,7 +520,7 @@ class Client:
         url = self.registry + path
         if params:
             url = url + "?" + urllib.parse.urlencode(params)
-        req = urllib.request.Request(url)
+        req = urllib.request.Request(url, headers=self._headers())
         try:
             with urllib.request.urlopen(req) as resp:
                 body = resp.read()

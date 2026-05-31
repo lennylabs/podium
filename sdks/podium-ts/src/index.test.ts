@@ -108,6 +108,61 @@ describe("Client", () => {
     expect(out).toEqual([]);
     expect(called).toBe(false);
   });
+
+  // Spec: §7.6 (F-7.6.8) — subscribe sends one repeated `type` query
+  // parameter per event type (matching the server and the Python SDK), never a
+  // comma-joined `types` parameter the server does not read.
+  it("subscribe sends repeated type params", async () => {
+    let observedURL = "";
+    const fetcher: typeof fetch = async (input) => {
+      observedURL = String(input);
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"event":"artifact.published"}\n'));
+          controller.close();
+        },
+      });
+      return new Response(body, { status: 200 });
+    };
+    const c = new Client({ registry: "http://reg", fetcher });
+    const it = c.subscribe(["artifact.published", "artifact.deprecated"]);
+    await it.next();
+    expect(observedURL).toContain("type=artifact.published");
+    expect(observedURL).toContain("type=artifact.deprecated");
+    expect(observedURL).not.toContain("types=");
+  });
+
+  // Spec: §7.6 (F-7.6.13) — the client attaches its token as the Bearer
+  // credential so it reaches the registry with the caller's identity.
+  it("attaches the Bearer token on requests", async () => {
+    let gotAuth: string | null = "unset";
+    const fetcher: typeof fetch = async (_input, init) => {
+      gotAuth = new Headers(init?.headers).get("Authorization");
+      return new Response(
+        JSON.stringify({ query: "q", total_matched: 0, results: [] }),
+        { status: 200 },
+      );
+    };
+    const c = new Client({ registry: "http://reg", fetcher, token: "tok-7" });
+    await c.searchArtifacts("q");
+    expect(gotAuth).toBe("Bearer tok-7");
+  });
+
+  // Spec: §7.6 (F-7.6.13) — with no token configured no Authorization header
+  // is sent.
+  it("sends no Authorization header without a token", async () => {
+    let gotAuth: string | null = "unset";
+    const fetcher: typeof fetch = async (_input, init) => {
+      gotAuth = new Headers(init?.headers).get("Authorization");
+      return new Response(
+        JSON.stringify({ query: "q", total_matched: 0, results: [] }),
+        { status: 200 },
+      );
+    };
+    const c = new Client({ registry: "http://reg", fetcher });
+    await c.searchArtifacts("q");
+    expect(gotAuth).toBeNull();
+  });
 });
 
 // Spec: §7.6 / §2.2 (F-2.2.1) — the loaded-artifact object exposes

@@ -104,6 +104,8 @@ func applyConfigKV(c *config, key, val string) {
 		c.cacheDir = val
 	case "cache-mode":
 		c.cacheMode = val
+	case "prefetch":
+		c.prefetchIDs = splitCSV(val)
 	case "cache-resolution-ttl-seconds":
 		c.resolutionTTL = parseTTLSeconds(val)
 	case "materialize-root":

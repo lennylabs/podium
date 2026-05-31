@@ -22,6 +22,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -76,6 +77,14 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
+	// §7.6.2 cache warm-up: when configured to prefetch, warm the §6.5 cache
+	// from the batch-load endpoint before serving. Best-effort — a failure
+	// logs and the bridge still starts, falling back to on-demand loads.
+	if len(cfg.prefetchIDs) > 0 {
+		if perr := srv.prefetch(cfg.prefetchIDs); perr != nil {
+			fmt.Fprintf(os.Stderr, "WARN: prefetch warm-up failed: %v\n", perr)
+		}
+	}
 	if err := srv.serve(os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -92,8 +101,12 @@ type config struct {
 	// served before it is treated as a miss (§6.5 "TTL 30s by default").
 	// Pinned versions are immutable and ignore this. Sourced from
 	// PODIUM_CACHE_RESOLUTION_TTL_SECONDS; 0 disables expiry.
-	resolutionTTL    time.Duration
-	materializeRoot  string
+	resolutionTTL   time.Duration
+	materializeRoot string
+	// prefetchIDs lists artifact IDs to warm into the §6.5 cache at startup
+	// via the §7.6.2 batch-load endpoint. Sourced from PODIUM_PREFETCH (CSV)
+	// or the `prefetch` config key. Empty disables warm-up.
+	prefetchIDs      []string
 	sessionToken     string
 	sessionTokenFile string
 	overlayPath      string
@@ -164,6 +177,8 @@ func loadConfig() (*config, error) {
 		cacheDir: os.Getenv("PODIUM_CACHE_DIR"),
 		// §6.5: always-revalidate (default) | offline-first | offline-only.
 		cacheMode: envDefault("PODIUM_CACHE_MODE", "always-revalidate"),
+		// §7.6.2: optional cache warm-up ID list (CSV).
+		prefetchIDs: splitCSV(os.Getenv("PODIUM_PREFETCH")),
 		// §6.5: resolution-cache TTL for `latest`, default 30s.
 		resolutionTTL:          parseTTLSeconds(envDefault("PODIUM_CACHE_RESOLUTION_TTL_SECONDS", "30")),
 		materializeRoot:        os.Getenv("PODIUM_MATERIALIZE_ROOT"),
@@ -1614,6 +1629,96 @@ func (s *mcpServer) headContentHash(path string, args map[string]any) (string, e
 	}
 	s.recordSuccess(time.Now())
 	return resp.Header.Get("X-Podium-Content-Hash"), nil
+}
+
+// batchLoadEnvelope mirrors the registry's §7.6.2 per-item batch response,
+// decoding only the fields prefetch needs to warm the cache. Bundled resources
+// travel as presigned references the consumer fetches on demand, so prefetch
+// warms the manifest body and resolution rather than resource bytes.
+type batchLoadEnvelope struct {
+	ID           string `json:"id"`
+	Status       string `json:"status"`
+	Version      string `json:"version"`
+	ContentHash  string `json:"content_hash"`
+	ManifestBody string `json:"manifest_body"`
+	Frontmatter  string `json:"frontmatter"`
+}
+
+// prefetch warms the §6.5 content and resolution caches from the §7.6.2
+// batch-load endpoint. spec: §7.6.2 — "The MCP server uses this endpoint
+// internally for cache warm-up when configured to prefetch." It POSTs the
+// configured IDs in batches of the §7.6.2 cap; for each ok item it stores the
+// manifest in the content cache and records the (id, "latest") -> version ->
+// content_hash resolution so a later load_artifact HEAD-revalidates and serves
+// from cache instead of re-downloading the manifest.
+func (s *mcpServer) prefetch(ids []string) error {
+	const batchCap = 50 // §7.6.2 hard cap
+	for start := 0; start < len(ids); start += batchCap {
+		end := start + batchCap
+		if end > len(ids) {
+			end = len(ids)
+		}
+		if err := s.prefetchChunk(ids[start:end]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// prefetchChunk warms one ≤50-ID batch. The request is bounded by a context
+// deadline so an unreachable registry cannot block bridge startup.
+func (s *mcpServer) prefetchChunk(chunk []string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	reqBody, err := json.Marshal(map[string]any{"ids": chunk, "session_id": s.sessionID})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		s.cfg.registry+"/v1/artifacts:batchLoad", bytes.NewReader(reqBody))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	// §6.3: warm-up runs as the bridge's own identity, like every other call.
+	if tok, terr := s.bearerToken(); terr == nil && tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	if s.cfg.tenantID != "" {
+		req.Header.Set("X-Podium-Tenant", s.cfg.tenantID)
+	}
+	client := s.http
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("batchLoad: status %d", resp.StatusCode)
+	}
+	var envs []batchLoadEnvelope
+	if err := json.Unmarshal(raw, &envs); err != nil {
+		return err
+	}
+	now := time.Now()
+	for _, e := range envs {
+		if e.Status != "ok" || e.ContentHash == "" {
+			continue
+		}
+		_ = s.cache.put(e.ContentHash, e.Frontmatter, e.ManifestBody, nil)
+		// (id, "latest") -> version -> content_hash so always-revalidate finds
+		// the cached content on the next load.
+		s.resolutions.PutLatest(e.ID, e.Version, e.ContentHash, now)
+	}
+	s.recordSuccess(now)
+	return nil
 }
 
 // proxyGet forwards a non-load_artifact tool call to the registry and

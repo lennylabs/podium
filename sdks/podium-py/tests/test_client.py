@@ -21,6 +21,7 @@ class _StubHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):  # noqa: N802 - signature inherited
         self.server.last_path = self.path  # type: ignore[attr-defined]
+        self.server.last_auth = self.headers.get("Authorization", "")  # type: ignore[attr-defined]
         body = json.dumps(self.server.next_response).encode()  # type: ignore[attr-defined]
         self.send_response(self.server.next_status)  # type: ignore[attr-defined]
         self.send_header("Content-Type", "application/json")
@@ -51,6 +52,7 @@ def stub_server():
     server.next_status = 200
     server.next_response = {}
     server.last_path = ""
+    server.last_auth = ""
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -318,3 +320,49 @@ def test_materialize_empty_destination(tmp_path):
     art = LoadedArtifact(id="a", type="context", version="1", manifest_body="", frontmatter="x")
     with pytest.raises(MaterializeError):
         art.materialize("")
+
+
+# Spec: §7.6 (F-7.6.8) — subscribe takes the event-type list positionally (the
+# documented call form) and sends one repeated `type` query parameter per
+# event type, matching the server's /v1/events handler and the TypeScript SDK.
+# A comma-joined `types` parameter the server never reads must not be emitted.
+def test_subscribe_sends_repeated_type_params(stub_server):
+    stub_server.next_response = {"event": "artifact.published"}
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    it = client.subscribe(["artifact.published", "artifact.deprecated"])
+    next(it)  # consume one event so the request is made
+    path = stub_server.last_path
+    assert "/v1/events" in path
+    assert "type=artifact.published" in path
+    assert "type=artifact.deprecated" in path
+    assert "types=" not in path
+
+
+# Spec: §7.6 (F-7.6.13) — the client attaches its session/access token as the
+# Bearer credential so it reaches the registry with the same identity as the
+# MCP path; visibility filtering then applies server-side.
+def test_requests_attach_bearer_token(stub_server):
+    stub_server.next_response = {"query": "q", "total_matched": 0, "results": []}
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}", token="tok-7")
+    client.search_artifacts("q")
+    # The stub records the last Authorization header on GET.
+    assert getattr(stub_server, "last_auth", "") == "Bearer tok-7"
+
+
+# Spec: §7.6 (F-7.6.13) — with no token configured no Authorization header is
+# sent, so an anonymous client still reaches an open registry.
+def test_no_token_sends_no_auth_header(stub_server):
+    stub_server.next_response = {"query": "q", "total_matched": 0, "results": []}
+    stub_server.last_auth = "unset"
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    client.search_artifacts("q")
+    assert getattr(stub_server, "last_auth", "") == ""
+
+
+# Spec: §6.2 / §6.3.2 — from_env reads the injected session token from
+# PODIUM_SESSION_TOKEN so the SDK and MCP path resolve the same credential.
+def test_from_env_reads_session_token(monkeypatch):
+    monkeypatch.setenv("PODIUM_REGISTRY", "http://127.0.0.1:9999")
+    monkeypatch.setenv("PODIUM_SESSION_TOKEN", "env-tok")
+    client = Client.from_env()
+    assert client.token == "env-tok"

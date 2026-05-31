@@ -417,6 +417,14 @@ type ArtifactDescriptor struct {
 	// "signal" otherwise. Omitted on search results, which carry no
 	// notable source.
 	Source string `json:"source,omitempty"`
+	// Frontmatter carries the artifact's frontmatter on search_artifacts
+	// results per the §7.6.1 read-CLI JSON schema. Omitted on load_domain
+	// notable entries, which carry Summary instead.
+	Frontmatter string `json:"frontmatter,omitempty"`
+	// Summary carries the artifact's short summary on load_domain notable
+	// entries per the §7.6.1 schema. Omitted on search results, which carry
+	// Frontmatter instead.
+	Summary string `json:"summary,omitempty"`
 }
 
 // SearchResponse is the common envelope for both search endpoints.
@@ -1025,6 +1033,10 @@ func descriptorOf(a core.ArtifactDescriptor) ArtifactDescriptor {
 		Sensitivity: a.Sensitivity,
 		FoldedFrom:  a.FoldedFrom,
 		Source:      a.Source,
+		// spec: §7.6.1 — Frontmatter on search results, Summary on
+		// notable entries; each is omitempty so it appears only where set.
+		Frontmatter: a.Frontmatter,
+		Summary:     a.Summary,
 	}
 }
 

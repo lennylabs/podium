@@ -363,6 +363,15 @@ type ArtifactDescriptor struct {
 	// enumeration ranking. Empty outside load_domain (search results do
 	// not carry a notable source).
 	Source string
+	// Frontmatter is the artifact's full ARTIFACT.md frontmatter, surfaced
+	// in search_artifacts results per the §7.6.1 read-CLI/SDK JSON schema
+	// ({id, type, version, score, frontmatter}). Empty for load_domain
+	// notable entries, which carry Summary instead.
+	Frontmatter string
+	// Summary is the artifact's short description, surfaced in load_domain
+	// notable entries per the §7.6.1 schema ({id, type, summary, source,
+	// folded_from}). Empty for search results, which carry Frontmatter.
+	Summary string
 }
 
 // LoadDomainOptions are the optional knobs from §5.
@@ -495,6 +504,12 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 			return
 		}
 		seen[d.ID] = true
+		// spec: §7.6.1 — a load_domain notable entry carries a short summary
+		// ({id, type, summary, source, folded_from}); the search-only
+		// frontmatter field is cleared so the two response schemas stay
+		// distinct (output drift is a bug, §7.6.1).
+		d.Summary = d.Description
+		d.Frontmatter = ""
 		notable = append(notable, d)
 	}
 	for _, m := range dedupeLatest(directArtifactsOf(under, path)) {
@@ -1603,6 +1618,9 @@ func descriptorOf(m store.ManifestRecord) ArtifactDescriptor {
 		Version:     m.Version,
 		Description: m.Description,
 		Tags:        append([]string(nil), m.Tags...),
+		// spec: §7.6.1 — search_artifacts results carry the artifact's
+		// frontmatter for the read-CLI/SDK JSON schema ({..., frontmatter}).
+		Frontmatter: string(m.Frontmatter),
 	}
 }
 

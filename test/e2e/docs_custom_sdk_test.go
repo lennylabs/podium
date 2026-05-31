@@ -392,13 +392,17 @@ func TestCustomSDK_PySubscribe(t *testing.T) {
 	t.Skip("subscription e2e requires a publish trigger and a bounded SSE read; not implemented as a stable gate")
 }
 
-// T-D-custom-sdk-28 — Python subscribe is keyword-only (positional raises).
+// T-D-custom-sdk-28 — Python subscribe accepts the documented positional
+// event-type list (§7.6, F-7.6.8). The call form `c.subscribe([...])` must
+// type-check; against an unreachable registry the connection raises a
+// non-TypeError, so the test asserts the positional call is accepted (it is
+// not rejected with TypeError).
 func TestCustomSDK_PySubscribePositional(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	res := csRunPy(t, py, "http://localhost:1",
-		"from podium import Client\nc = Client(registry='http://localhost:1')\ntry:\n    g = c.subscribe(['artifact.published'])\n    next(g)\n    print('NO_ERROR')\nexcept TypeError:\n    print('TYPEERROR_OK')\n")
-	csWantStdout(t, res, "TYPEERROR_OK")
+		"from podium import Client\nc = Client(registry='http://localhost:1')\ntry:\n    g = c.subscribe(['artifact.published'])\n    next(g)\n    print('ACCEPTED')\nexcept TypeError:\n    print('TYPEERROR')\nexcept Exception:\n    print('ACCEPTED')\n")
+	csWantStdout(t, res, "ACCEPTED")
 }
 
 // T-D-custom-sdk-29 — Python dependents_of returns descriptors.

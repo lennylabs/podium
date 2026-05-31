@@ -22,6 +22,7 @@ import (
 	"syscall"
 
 	"github.com/lennylabs/podium/internal/buildinfo"
+	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/sync"
@@ -742,7 +743,10 @@ func domainShow(args []string) int {
 		fmt.Println(string(body))
 		return 0
 	}
-	fmt.Println(string(body))
+	// spec: §7.6.1 Output formats — the default is a human-readable
+	// rendering (domain trees are nested bullets); --json is the structured
+	// envelope.
+	printDomainHuman(body)
 	return 0
 }
 
@@ -752,6 +756,9 @@ func domainSearch(args []string) int {
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	scope := fs.String("scope", "", "constrain results")
 	topK := fs.Int("top-k", 10, "max results")
+	// spec: §7.6.1 — domain search exposes a --json structured envelope
+	// alongside the default human-readable ranked table.
+	asJSON := fs.Bool("json", false, "JSON output")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
@@ -769,7 +776,11 @@ func domainSearch(args []string) int {
 		params["scope"] = *scope
 	}
 	body := mustGetJSON(*registry, "/v1/search_domains", params)
-	fmt.Println(string(body))
+	if *asJSON {
+		fmt.Println(string(body))
+		return 0
+	}
+	printDomainSearchHuman(body)
 	return 0
 }
 
@@ -802,6 +813,10 @@ func artifactShow(args []string) int {
 	// spec: §7.6.1 — podium artifact show flags --version and --session-id.
 	version := fs.String("version", "", "specific version (default: latest)")
 	sessionID := fs.String("session-id", "", "session id for consistent latest resolution")
+	// spec: §7.6.1 — --json emits the structured {id, version, content_hash,
+	// frontmatter, body} envelope; the default prints the markdown body with
+	// frontmatter at the top.
+	asJSON := fs.Bool("json", false, "JSON output")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
@@ -822,7 +837,11 @@ func artifactShow(args []string) int {
 		params["session_id"] = *sessionID
 	}
 	body := mustGetJSON(*registry, "/v1/load_artifact", params)
-	fmt.Println(string(body))
+	if *asJSON {
+		fmt.Println(string(body))
+		return 0
+	}
+	printArtifactHuman(body)
 	return 0
 }
 
@@ -925,6 +944,35 @@ func ensureGitignoreEntries(path string, entries []string) error {
 	return os.WriteFile(path, []byte(out), 0o644)
 }
 
+// readCLIToken resolves the read CLI's caller credential so its requests
+// reach the registry with the same identity the MCP path uses (spec: §7.6,
+// §7.6.1 — "uses the same identity ... server-side"). Resolution mirrors the
+// MCP bridge: the §6.3.2 injected session token (file, then env) wins, then a
+// §6.3.1 oauth-device-code access token cached in the OS keychain keyed by the
+// registry URL (matching `podium login`). Returns "" when none is configured,
+// in which case the caller reaches the registry anonymously.
+func readCLIToken(registry string) string {
+	if f := os.Getenv("PODIUM_SESSION_TOKEN_FILE"); f != "" {
+		if data, err := os.ReadFile(f); err == nil {
+			return strings.TrimSpace(string(data))
+		}
+	}
+	src := os.Getenv("PODIUM_SESSION_TOKEN_ENV")
+	if src == "" {
+		src = "PODIUM_SESSION_TOKEN"
+	}
+	if v := os.Getenv(src); v != "" {
+		return strings.TrimSpace(v)
+	}
+	if registry != "" {
+		store := identity.KeychainStore{Service: envDefault("PODIUM_TOKEN_KEYCHAIN_NAME", "podium")}
+		if tok, err := store.Load(registry); err == nil {
+			return strings.TrimSpace(tok)
+		}
+	}
+	return ""
+}
+
 func mustGetJSON(base, path string, params map[string]string) []byte {
 	u, err := url.Parse(base + path)
 	if err != nil {
@@ -936,7 +984,18 @@ func mustGetJSON(base, path string, params map[string]string) []byte {
 		q.Set(k, v)
 	}
 	u.RawQuery = q.Encode()
-	resp, err := http.Get(u.String())
+	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	// §7.6 / §7.6.1 — attach the resolved caller credential so visibility
+	// filtering, layer composition, and audit apply to this identity
+	// server-side, matching the MCP path.
+	if tok := readCLIToken(base); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -974,6 +1033,121 @@ func printSearchHuman(body []byte) {
 		fmt.Printf("  %s  [%s]\n", r.ID, r.Type)
 		if r.Description != "" {
 			fmt.Printf("      %s\n", r.Description)
+		}
+	}
+}
+
+// printArtifactHuman renders artifact show output as the markdown body with
+// frontmatter at the top (spec: §7.6.1 Output formats). On a decode failure
+// it falls back to the raw JSON body so output is never lost.
+func printArtifactHuman(body []byte) {
+	var a struct {
+		Frontmatter  string `json:"frontmatter"`
+		ManifestBody string `json:"manifest_body"`
+	}
+	if err := json.Unmarshal(body, &a); err != nil {
+		fmt.Println(string(body))
+		return
+	}
+	if a.Frontmatter != "" {
+		fmt.Print(a.Frontmatter)
+		if !strings.HasSuffix(a.Frontmatter, "\n") {
+			fmt.Println()
+		}
+	}
+	if a.ManifestBody != "" {
+		fmt.Println(a.ManifestBody)
+	}
+}
+
+// domainNode is one node in the load_domain subdomain tree, used by
+// printDomainHuman to render the nested-bullet view.
+type domainNode struct {
+	Path        string       `json:"path"`
+	Name        string       `json:"name"`
+	Description string       `json:"description"`
+	Subdomains  []domainNode `json:"subdomains"`
+}
+
+// printDomainHuman renders a domain map as nested bullets (spec: §7.6.1
+// Output formats). On a decode failure it falls back to the raw JSON body.
+func printDomainHuman(body []byte) {
+	var d struct {
+		Path        string       `json:"path"`
+		Description string       `json:"description"`
+		Subdomains  []domainNode `json:"subdomains"`
+		Notable     []struct {
+			ID      string `json:"id"`
+			Type    string `json:"type"`
+			Summary string `json:"summary"`
+		} `json:"notable"`
+	}
+	if err := json.Unmarshal(body, &d); err != nil {
+		fmt.Println(string(body))
+		return
+	}
+	title := d.Path
+	if title == "" {
+		title = "(root)"
+	}
+	fmt.Println(title)
+	if d.Description != "" {
+		fmt.Printf("  %s\n", d.Description)
+	}
+	var walk func(nodes []domainNode, depth int)
+	walk = func(nodes []domainNode, depth int) {
+		indent := strings.Repeat("  ", depth)
+		for _, n := range nodes {
+			label := n.Name
+			if label == "" {
+				label = n.Path
+			}
+			fmt.Printf("%s- %s\n", indent, label)
+			if n.Description != "" {
+				fmt.Printf("%s    %s\n", indent, n.Description)
+			}
+			walk(n.Subdomains, depth+1)
+		}
+	}
+	if len(d.Subdomains) > 0 {
+		fmt.Println("subdomains:")
+		walk(d.Subdomains, 1)
+	}
+	if len(d.Notable) > 0 {
+		fmt.Println("notable:")
+		for _, a := range d.Notable {
+			fmt.Printf("  - %s  [%s]\n", a.ID, a.Type)
+			if a.Summary != "" {
+				fmt.Printf("      %s\n", a.Summary)
+			}
+		}
+	}
+}
+
+// printDomainSearchHuman renders a domain search result set as a ranked list
+// (spec: §7.6.1 Output formats). On a decode failure it falls back to raw JSON.
+func printDomainSearchHuman(body []byte) {
+	var resp struct {
+		TotalMatched int `json:"total_matched"`
+		Domains      []struct {
+			Path        string `json:"path"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
+		} `json:"domains"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		fmt.Println(string(body))
+		return
+	}
+	fmt.Printf("Showing %d of %d results\n\n", len(resp.Domains), resp.TotalMatched)
+	for _, d := range resp.Domains {
+		label := d.Name
+		if label == "" {
+			label = d.Path
+		}
+		fmt.Printf("  %s  (%s)\n", label, d.Path)
+		if d.Description != "" {
+			fmt.Printf("      %s\n", d.Description)
 		}
 	}
 }
