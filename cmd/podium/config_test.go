@@ -43,7 +43,7 @@ func TestConfigShow_PrintsResolvedSettings(t *testing.T) {
 	t.Setenv("PODIUM_DEFAULT_LAYER_VISIBILITY", "organization")
 	t.Setenv("PODIUM_CONFIG_FILE", filepath.Join(t.TempDir(), "missing.yaml"))
 	out := captureStdout(t, func() {
-		if rc := configShow(nil); rc != 0 {
+		if rc := configShow([]string{"--server"}); rc != 0 {
 			t.Errorf("rc = %d, want 0", rc)
 		}
 	})
@@ -63,7 +63,7 @@ func TestConfigShow_JSONIsStructured(t *testing.T) {
 	t.Setenv("PODIUM_CONFIG_FILE", filepath.Join(t.TempDir(), "missing.yaml"))
 	t.Setenv("PODIUM_DEFAULT_LAYER_VISIBILITY", "public")
 	out := captureStdout(t, func() {
-		if rc := configShow([]string{"--json"}); rc != 0 {
+		if rc := configShow([]string{"--server", "--json"}); rc != 0 {
 			t.Errorf("rc = %d, want 0", rc)
 		}
 	})
@@ -99,7 +99,7 @@ func TestConfigShow_RedactsSecrets(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "sk-very-secret-key-do-not-leak")
 	t.Setenv("PODIUM_CONFIG_FILE", filepath.Join(t.TempDir(), "missing.yaml"))
 	out := captureStdout(t, func() {
-		_ = configShow(nil)
+		_ = configShow([]string{"--server"})
 	})
 	if strings.Contains(out, "sk-very-secret-key-do-not-leak") {
 		t.Errorf("output leaks API key: %s", out)

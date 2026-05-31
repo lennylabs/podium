@@ -419,39 +419,46 @@ func TestDocCLI_20_InitTarget(t *testing.T) {
 // doc-accuracy gap noted in BUILD-GAPS §7.7). This test asserts the
 // provenance feature via PODIUM_BIND.
 func TestDocCLI_21_ConfigShowProvenance(t *testing.T) {
-	res := runPodium(t, "", []string{"HOME=" + t.TempDir(), "PODIUM_BIND=127.0.0.1:9999"}, "config", "show")
-	cliWantExit(t, res, 0, "config show")
+	res := runPodium(t, "", []string{"HOME=" + t.TempDir(), "PODIUM_BIND=127.0.0.1:9999"}, "config", "show", "--server")
+	cliWantExit(t, res, 0, "config show --server")
 	cliContains(t, res.Stdout, "source", "provenance column header")
 	cliContains(t, res.Stdout, "127.0.0.1:9999", "env-provided bind value")
 	cliContains(t, res.Stdout, "PODIUM_BIND", "provenance marker for env value")
 }
 
-// spec: doc "podium config show", `--explain` flag. The flag is not
-// implemented; the documented `--explain <key>` invocation fails to
-// parse. Recorded as a doc-accuracy gap.
-func TestDocCLI_22_ConfigShowExplainUnimplemented(t *testing.T) {
-	res := runPodium(t, "", []string{"HOME=" + t.TempDir()}, "config", "show", "--explain", "registry")
-	cliWantNonZero(t, res, "config show --explain")
-	cliContains(t, res.Stderr, "not defined", "explain flag absent")
-	t.Log("doc-accuracy gap: `podium config show --explain` is documented but not implemented")
+// spec: §7.7 (F-7.7.2) — `config show --explain <key>` prints one key's
+// full resolution chain across the sync.yaml scopes and which won.
+func TestDocCLI_22_ConfigShowExplain(t *testing.T) {
+	ws := t.TempDir()
+	env := []string{"HOME=" + t.TempDir()}
+	cliWantExit(t, runPodium(t, ws, env, "init", "--registry", "https://podium.example/"), 0, "init")
+	res := runPodium(t, ws, env, "config", "show", "--explain", "registry")
+	cliWantExit(t, res, 0, "config show --explain")
+	cliContains(t, res.Stdout, "https://podium.example/", "explain prints the resolved value")
+	cliContains(t, res.Stdout, "resolved", "explain prints the resolution chain")
 }
 
-// spec: doc "podium login", `--no-browser`. The device-code flow needs a
-// stub OIDC endpoint and `login` requires `--issuer` (no registry-driven
-// IdP discovery), so the documented no-op/no-browser behavior is not
-// reachable without infrastructure.
+// spec: §7.7 (F-7.7.5) — `--no-browser` is accepted and the flow runs
+// without opening a browser. An unreachable issuer makes device
+// authorization fail (exit 1), proving the flag parsed and the flow ran.
 func TestDocCLI_23_LoginNoBrowser(t *testing.T) {
-	t.Skip("blocked by F-7.7.5: `podium login` requires --issuer and has no --no-browser flag; device-code flow needs a stub OIDC IdP")
+	res := runPodium(t, "", []string{"HOME=" + t.TempDir()},
+		"login", "--registry", "https://podium.example", "--issuer", "http://127.0.0.1:1/device", "--no-browser")
+	cliWantExit(t, res, 1, "login --no-browser")
 }
 
-// spec: doc "podium login", filesystem-registry no-op.
+// spec: §7.7 (F-7.7.5) — login is a no-op for a filesystem registry.
 func TestDocCLI_24_LoginFilesystemNoOp(t *testing.T) {
-	t.Skip("blocked by F-7.7.5: `podium login` requires --issuer and is not a no-op for filesystem registries as documented")
+	res := runPodium(t, "", []string{"HOME=" + t.TempDir()}, "login", "--registry", t.TempDir())
+	cliWantExit(t, res, 0, "login filesystem no-op")
+	cliContains(t, res.Stderr, "no authentication", "filesystem no-op notice")
 }
 
-// spec: doc "podium login", standalone-server no-op.
+// spec: §7.7 (F-7.7.5) — login is a no-op for the standalone server.
 func TestDocCLI_25_LoginStandaloneNoOp(t *testing.T) {
-	t.Skip("blocked by F-7.7.5: `podium login` requires --issuer and is not a no-op for a --standalone server as documented")
+	res := runPodium(t, "", []string{"HOME=" + t.TempDir()}, "login", "--registry", "http://127.0.0.1:8080")
+	cliWantExit(t, res, 0, "login standalone no-op")
+	cliContains(t, res.Stderr, "no authentication", "standalone no-op notice")
 }
 
 // ===== Server — podium serve / status (T-D-cli-26..35) =================

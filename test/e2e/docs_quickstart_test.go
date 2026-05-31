@@ -85,15 +85,12 @@ func TestQuickstart_ConfigShowTable(t *testing.T) {
 	if res.Exit != 0 {
 		t.Fatalf("config show exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	lines := strings.Split(strings.TrimSpace(res.Stdout), "\n")
-	if len(lines) < 2 {
-		t.Fatalf("config show produced no rows:\n%s", res.Stdout)
-	}
-	for _, col := range []string{"name", "value", "source"} {
-		if !strings.Contains(lines[0], col) {
-			t.Errorf("header missing column %q: %q", col, lines[0])
-		}
-	}
+	// spec §7.7 (F-7.7.1): config show prints the merged sync.yaml with
+	// per-key provenance, so the registry and harness from `init` appear
+	// alongside the file scope each came from.
+	cliContains(t, res.Stdout, reg, "merged registry value")
+	cliContains(t, res.Stdout, "claude-code", "merged harness value")
+	cliContains(t, res.Stdout, "from", "per-key provenance")
 }
 
 // T-D-quickstart-4 — podium init --global writes ~/.podium/sync.yaml and

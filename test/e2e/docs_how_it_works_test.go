@@ -678,7 +678,20 @@ func TestHIW_TypeScriptSDKRequiresServer(t *testing.T) {
 
 // T-D-how-it-works-40 — config show reflects the active deployment mode.
 func TestHIW_ConfigShowDeploymentMode(t *testing.T) {
-	t.Skip("blocked by F-7.7.1: podium config show prints the server registry.yaml config, not the merged sync.yaml defaults.registry the doc references")
+	// spec §7.7 (F-7.7.1): config show prints the merged sync.yaml, so the
+	// active deployment's registry surfaces as defaults.registry.
+	ws := t.TempDir()
+	reg := t.TempDir()
+	env := []string{"HOME=" + t.TempDir()}
+	if r := runPodium(t, ws, env, "init", "--registry", reg); r.Exit != 0 {
+		t.Fatalf("init exit=%d stderr=%s", r.Exit, r.Stderr)
+	}
+	res := runPodium(t, ws, env, "config", "show")
+	if res.Exit != 0 {
+		t.Fatalf("config show exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	cliContains(t, res.Stdout, "defaults.registry", "merged registry key")
+	cliContains(t, res.Stdout, reg, "active registry value")
 }
 
 // T-D-how-it-works-41 — /metrics endpoint.

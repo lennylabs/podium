@@ -1563,31 +1563,45 @@ _Reviewed spec/07-external-integration.md against the implementation._
 
 I checked the three onboarding commands the subsection defines: `podium init` (cmd/podium/main.go:672-769), `podium config show` (cmd/podium/config.go and the server config in internal/serverboot/serverboot.go), and `podium login` / `podium logout` (cmd/podium/login.go), plus the supporting `sync.yaml` machinery in pkg/sync/config.go and the OAuth device-code flow in pkg/identity/oauth_devicecode.go and pkg/identity/keychain.go. The `init` command implements the scope flags, the `--standalone` shortcut, the overwrite guard, and the `.gitignore` update, and its tests cover those paths. The `config show` and `login` commands diverge substantially from the spec: `config show` prints the server-side registry configuration rather than the merged client `sync.yaml` with provenance, and `login` omits registry resolution from the merged config, the issuer discovery, the timeout, refresh-token persistence, identity printout, browser handling, and the filesystem/standalone no-op. Several of these gaps trace to absent multi-scope `sync.yaml` merge and precedence machinery, which does not exist anywhere in the repo.
 
-### - [ ] F-7.7.1 — `podium config show` prints server config instead of the merged sync.yaml [High] — OPEN
+### - [x] F-7.7.1 — `podium config show` prints server config instead of the merged sync.yaml [High] — CLOSED
+
+**Resolution (commit a7dbc1b).** `podium config show` now prints the merged client `sync.yaml` with per-key provenance (new `cmd/podium/clientconfig.go`, reading the three §7.5.2 scopes via `sync.ReadConfigFile`/`DiscoverWorkspace`); the server configuration view moved behind `config show --server`.
 
 (inconsistency) §7.7 states that `podium config show` "displays the merged result with provenance" and "Prints the merged `sync.yaml` with per-key provenance", showing keys such as `defaults.registry`, `defaults.harness`, `defaults.target`, and the `profiles.*` blocks, each annotated with the file scope it came from (for example `(from <ws>/.podium/sync.yaml)`, `(from ~/.podium/sync.yaml)`). The implemented `configShow` in cmd/podium/config.go:36-57 calls `serverboot.LoadConfig()` and prints `cfg.Settings()`, which is the server-side registry configuration (`bind`, `public_mode`, `identity_provider`, `store.type`, and similar; see internal/serverboot/serverboot.go:490-494). It never reads any `sync.yaml`, reports no per-key file-scope provenance, and exposes none of the `defaults`/`profiles` keys the spec lists. The command's own help text confirms the divergence: "Print the resolved server configuration with sources." (cmd/podium/config.go:38, cmd/podium/main.go:136). The §7.7 client-side `config show` is unimplemented. Suggested direction: add a client-config code path (either a new subcommand or a flag) that merges `~/.podium/sync.yaml`, `<ws>/.podium/sync.yaml`, and `<ws>/.podium/sync.local.yaml` per the §7.5.2 precedence order and prints each resolved key with the winning file scope.
 
-### - [ ] F-7.7.2 — `podium config show --explain <key>` is absent [Medium] — OPEN
+### - [x] F-7.7.2 — `podium config show --explain <key>` is absent [Medium] — CLOSED
+
+**Resolution (commit a7dbc1b).** Added `config show --explain <key>` (`explainConfigKey`), which prints the value held at each `sync.yaml` scope and which scope won.
 
 (gap) §7.7 specifies that `config show` accepts `--explain <key>`, which "prints just one key with its full resolution chain: which file each scope had, and which won." The implemented `configShow` (cmd/podium/config.go:36-57) defines only a `--json` flag and has no `--explain` handling. Because the command operates on server settings rather than the merged `sync.yaml` (see F-7.7.1), there is no resolution chain to print. Suggested direction: implement `--explain <key>` as part of the client-config `config show`, emitting the value held at each scope (`~/.podium/sync.yaml`, `<ws>/.podium/sync.yaml`, `<ws>/.podium/sync.local.yaml`, env, CLI) and which scope won.
 
-### - [ ] F-7.7.3 — `podium config show` does not surface profile collisions [Medium] — OPEN
+### - [x] F-7.7.3 — `podium config show` does not surface profile collisions [Medium] — CLOSED
+
+**Resolution (commit a7dbc1b).** `config show` now emits a `Profile collisions:` summary line naming each profile defined in more than one scope and the winning scope.
 
 (gap) §7.7 (and the cross-reference in §7.5.2: "`podium config show` (§7.7) always surfaces collisions for debugging") requires `config show` to report profile-name collisions across scopes, for example `Profile collisions: 1 (profiles.staging defined in both ~/.podium/sync.yaml and <ws>/.podium/sync.local.yaml; project-local wins)`. The implemented `configShow` prints only server settings (cmd/podium/config.go:36-57) and has no notion of profiles or cross-scope collisions. No collision-detection logic exists in pkg/sync; `ReadConfig` reads a single workspace file and performs no merge (pkg/sync/config.go:99-112). Suggested direction: detect duplicate profile names across the user-global, project-shared, and project-local files during the merge and list them in `config show` output.
 
-### - [ ] F-7.7.4 — `podium login` requires `--registry` and does not resolve it from the merged config [High] — OPEN
+### - [x] F-7.7.4 — `podium login` requires `--registry` and does not resolve it from the merged config [High] — CLOSED
+
+**Resolution (commit a7dbc1b).** `podium login` now resolves the registry from `--registry`, then `PODIUM_REGISTRY`, then the merged `sync.yaml`'s `defaults.registry` (`resolveClientRegistry`); a bare `podium login` works after `podium init`.
 
 (inconsistency) §7.7 documents `podium login` with no arguments as the primary form ("uses the merged config to find the registry") and states the behavior "resolves the registry from the merged config (or `--registry` flag)". The implemented `loginCmd` defaults `--registry` to the `PODIUM_REGISTRY` env var only and exits 2 when it is empty (cmd/podium/login.go:29, 39-42). It never reads `sync.yaml` to resolve `defaults.registry`, so a developer who configured the registry through `podium init` cannot run a bare `podium login`. Suggested direction: when `--registry` and `PODIUM_REGISTRY` are unset, resolve `defaults.registry` from the merged `sync.yaml` (the same resolution the spec attributes to `podium sync`).
 
-### - [ ] F-7.7.5 — `podium login` requires `--issuer`; no IdP discovery from the registry [Medium] — OPEN
+### - [x] F-7.7.5 — `podium login` requires `--issuer`; no IdP discovery from the registry [Medium] — CLOSED
+
+**Resolution (commit a7dbc1b).** `--issuer` is now an optional override: login discovers the device-authorization and token endpoints from the registry's RFC 8414 `/.well-known/oauth-authorization-server` metadata (`discoverIdP`), adds `--no-browser`, and is a no-op (prints a notice, exits 0) for filesystem-path and standalone registries (`isNoAuthRegistry`).
 
 (gap) §7.7 frames `podium login` as needing only the resolved registry; it does not require the operator to supply the OAuth issuer or token endpoint. The implemented `loginCmd` requires `--issuer` (or `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT`) and exits 2 when it is empty (cmd/podium/login.go:30, 43-46), then synthesizes the token URL with `guessTokenURL` (cmd/podium/login.go:48-51, 115-122). The spec's `podium login` and `podium login --registry <url>` examples (lines 651-652) supply no issuer, implying the client discovers the IdP from the registry (for example via an OAuth metadata or registry capabilities endpoint, consistent with §6.3 `oauth-device-code`). Suggested direction: have `login` fetch the registry's advertised authorization and token endpoints so the issuer flags become optional overrides rather than requirements.
 
-### - [ ] F-7.7.6 — `podium login` enforces no 10-minute timeout [Medium] — OPEN
+### - [x] F-7.7.6 — `podium login` enforces no 10-minute timeout [Medium] — CLOSED
+
+**Resolution (commit a7dbc1b).** The device-code flow now runs under a 10-minute `context.WithTimeout` deadline (`loginTimeout`) and exits non-zero with a timeout message when it elapses.
 
 (gap) §7.7 states that `login` "polls the IdP's token endpoint until the user completes the flow or a 10-minute timeout elapses" and "Exits non-zero on timeout". The implemented `loginCmd` calls `flow.Poll(ctx, auth)` with `ctx := context.Background()` (cmd/podium/login.go:61-72), and `Poll` loops until success, denial, expiry, or context cancellation (pkg/identity/oauth_devicecode.go:304-325). With a background context that never cancels, the only stop conditions are the IdP returning `expired_token` or `access_denied`; there is no client-side 10-minute deadline. If the IdP's `device_code` lifetime exceeds 10 minutes (or the IdP keeps returning `authorization_pending`), `podium login` blocks past the spec's bound. Suggested direction: wrap the poll in `context.WithTimeout(ctx, 10*time.Minute)` (or honor the device code's `ExpiresIn`, whichever is shorter) and return a non-zero exit on deadline.
 
-### - [ ] F-7.7.7 — `podium login` discards the refresh token [Medium] — OPEN
+### - [x] F-7.7.7 — `podium login` discards the refresh token [Medium] — CLOSED
+
+**Resolution (commit a7dbc1b).** login now persists the refresh token under a derived keychain label (`refreshLabel`) alongside the access token (`saveTokens`), and prints the resolved identity (`sub`, `email`, groups) decoded from the ID token.
 
 (inconsistency) §7.7 states that `login` "caches the access + refresh tokens in the OS keychain (per `oauth-device-code` in §6.3)". The implemented `loginCmd` saves only the access token: `store.Save(*registry, tokens.AccessToken)` (cmd/podium/login.go:77-78). The `Tokens` struct carries `RefreshToken` (pkg/identity/oauth_devicecode.go:67-73) and the device-code flow already parses it (pkg/identity/oauth_devicecode.go:196-202), but it is dropped. The `TokenStore` interface stores a single string per label (pkg/identity/keychain.go:14-18), so it has no slot for the refresh token. Without the refresh token, `DeviceCodeFlow.Refresh` (pkg/identity/oauth_devicecode.go:231-298) cannot run, defeating the spec's "re-authing after token expiry" use case without a full re-login. Suggested direction: persist both tokens (for example serialize access plus refresh to a single keychain entry, or extend `TokenStore` to store a structured token) so the cached refresh token is available for silent renewal.
 
