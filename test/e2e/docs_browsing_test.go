@@ -806,27 +806,38 @@ func TestBrowsing_SearchDomainsNoSubtree(t *testing.T) {
 
 // ---- offline ----------------------------------------------------------------
 
-// T-D-browsing-43 — registry offline: search_artifacts surfaces an error.
+// T-D-browsing-43 — registry offline: search_artifacts returns the §6.9
+// "offline" status, not an error. The "Registry offline" row requires the
+// fresh search meta-tool to "return explicit 'offline' status" so the host
+// can distinguish a transient outage from a request rejection (F-6.9.1).
 func TestBrowsing_OfflineSearchArtifacts(t *testing.T) {
 	t.Parallel()
 	res := mcpExec(t, []string{"PODIUM_REGISTRY=http://127.0.0.1:1", "PODIUM_CACHE_MODE=always-revalidate", "PODIUM_CACHE_DIR=" + t.TempDir()},
 		toolCall(1, "search_artifacts", map[string]any{"query": "anything"}))
-	errStr := brToolErr(t, res.Stdout, 1)
-	if errStr == "" {
-		t.Errorf("expected an error for an unreachable registry; stdout=%s", res.Stdout)
+	result := rpcResult(t, res.Stdout, 1)
+	if result["status"] != "offline" {
+		t.Errorf("status = %v, want offline; stdout=%s", result["status"], res.Stdout)
+	}
+	if brToolErr(t, res.Stdout, 1) != "" {
+		t.Errorf("offline result must not carry an error: %s", res.Stdout)
 	}
 	if res.Exit != 0 {
-		t.Errorf("bridge crashed (exit=%d) instead of returning an error result", res.Exit)
+		t.Errorf("bridge crashed (exit=%d) instead of returning an offline result", res.Exit)
 	}
 }
 
-// T-D-browsing-44 — registry offline: load_domain surfaces an error.
+// T-D-browsing-44 — registry offline: load_domain returns the §6.9 "offline"
+// status, not an error (F-6.9.1).
 func TestBrowsing_OfflineLoadDomain(t *testing.T) {
 	t.Parallel()
 	res := mcpExec(t, []string{"PODIUM_REGISTRY=http://127.0.0.1:1", "PODIUM_CACHE_MODE=always-revalidate", "PODIUM_CACHE_DIR=" + t.TempDir()},
 		toolCall(1, "load_domain", map[string]any{}))
-	if brToolErr(t, res.Stdout, 1) == "" {
-		t.Errorf("expected an error for an unreachable registry; stdout=%s", res.Stdout)
+	result := rpcResult(t, res.Stdout, 1)
+	if result["status"] != "offline" {
+		t.Errorf("status = %v, want offline; stdout=%s", result["status"], res.Stdout)
+	}
+	if brToolErr(t, res.Stdout, 1) != "" {
+		t.Errorf("offline result must not carry an error: %s", res.Stdout)
 	}
 }
 

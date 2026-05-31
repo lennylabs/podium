@@ -212,22 +212,15 @@ func openBrowser(url string) {
 	_ = cmd.Start()
 }
 
-// refreshLabel derives the keychain label under which the refresh token
-// is stored for a registry. The access token keeps the bare registry
-// label so existing readers are unaffected. spec: §7.7 (F-7.7.7).
-func refreshLabel(registry string) string {
-	return registry + "#refresh"
-}
-
 // saveTokens persists the access token (under the registry label) and,
-// when present, the refresh token (under refreshLabel). spec: §7.7
+// when present, the refresh token (under identity.RefreshLabel). spec: §7.7
 // (F-7.7.7) — cache the access + refresh tokens for silent renewal.
 func saveTokens(store identity.TokenStore, registry string, tokens *identity.Tokens) error {
 	if err := store.Save(registry, tokens.AccessToken); err != nil {
 		return err
 	}
 	if tokens.RefreshToken != "" {
-		if err := store.Save(refreshLabel(registry), tokens.RefreshToken); err != nil {
+		if err := store.Save(identity.RefreshLabel(registry), tokens.RefreshToken); err != nil {
 			return err
 		}
 	}
@@ -304,7 +297,7 @@ func logoutCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "delete token: %v\n", err)
 		return 1
 	}
-	_ = store.Delete(refreshLabel(*registry))
+	_ = store.Delete(identity.RefreshLabel(*registry))
 	fmt.Fprintln(os.Stderr, "Logout successful.")
 	return 0
 }

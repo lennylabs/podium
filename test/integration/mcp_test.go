@@ -124,6 +124,41 @@ func TestPodiumMCP_RejectsFilesystemRegistry(t *testing.T) {
 	}
 }
 
+// Spec: §6.9 "Unknown PODIUM_HARNESS value" — the real binary refuses to
+// start and lists the available adapter values, with a non-zero exit and the
+// config.unknown_harness envelope on stderr, rather than detecting the bad
+// harness lazily on the first load_artifact call (F-6.9.2).
+func TestPodiumMCP_RejectsUnknownHarness(t *testing.T) {
+	t.Parallel()
+	bin := buildMCP(t)
+	cmd := exec.Command(bin)
+	cmd.Env = append(cmd.Env,
+		"PODIUM_REGISTRY=http://127.0.0.1:1", // server source so only the harness is at fault
+		"PODIUM_HARNESS=claude-codex-typo",
+	)
+	// No stdin is consumed: the bridge must reject the config before serving.
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err == nil {
+		t.Fatal("unknown harness: binary exited 0, want non-zero")
+	}
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("run error %v is not an ExitError", err)
+	}
+	if got := exitErr.ExitCode(); got != 2 {
+		t.Errorf("exit code = %d, want 2 (config error)", got)
+	}
+	if !strings.Contains(stderr.String(), "config.unknown_harness") {
+		t.Errorf("stderr %q lacks config.unknown_harness", stderr.String())
+	}
+	// The diagnostic lists the registered adapters so the operator can fix it.
+	if !strings.Contains(stderr.String(), "none") {
+		t.Errorf("stderr %q does not list available adapters", stderr.String())
+	}
+}
+
 // Spec: §5.1 — tools/list returns the canonical multi-sentence
 // descriptions verbatim (F-5.1.1) and an inputSchema for every meta-tool
 // (F-5.1.2); initialize surfaces the example system-prompt fragment via

@@ -283,6 +283,13 @@ func loadConfig() (*config, error) {
 	default:
 		return nil, fmt.Errorf("PODIUM_IDENTITY_PROVIDER must be oauth-device-code | injected-session-token, got %q", c.identityProvider)
 	}
+	// spec: §6.9 "Unknown PODIUM_HARNESS value" — refuse to start and list
+	// the available adapter values, rather than detecting an unknown harness
+	// lazily on the first load_artifact materialization. adapter.Registry.Get
+	// already enumerates the registered IDs in its error (config.unknown_harness).
+	if _, err := adapter.DefaultRegistry().Get(c.harness); err != nil {
+		return nil, err
+	}
 	return c, nil
 }
 
@@ -1029,19 +1036,29 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 		body, _, err = s.fetchJSONConditional("/v1/load_artifact", args, "")
 	}
 	if err != nil {
-		// §7.4 degraded-network fallback: in always-revalidate
-		// mode, if a fresh fetch fails, try to serve from cache
-		// before surfacing the registry-unreachable error. Cache
-		// misses surface as network.registry_unreachable.
-		if s.cfg.cacheMode == "always-revalidate" && id != "" {
-			if hash, ok := s.resolutions.Resolve(id, version, now, ttl, true); ok {
-				if cached, cerr := s.loadArtifactFromCache(hash, id); cerr == nil {
-					out := s.deliverLoadArtifact(*cached, deliverOpts{harness: harnessFromArgs(s.cfg.harness, args), destination: destFromArgs(args)})
-					if m, ok := out.(map[string]any); ok {
-						m["status"] = "offline"
-						m["served_from_cache"] = true
+		// spec: §6.9 — distinguish a registry that could not be reached (a
+		// transport-level failure) from one that answered and refused (403
+		// visibility denial, 401 auth.token_expired, 409 quota.*, 403
+		// auth.untrusted_runtime). Only a genuine transport failure is the
+		// "Registry offline" row: fall back to cache and, on a miss, surface
+		// network.registry_unreachable. A reachable-but-rejected response
+		// carries the registry's structured §6.10 envelope, which must pass
+		// through unchanged rather than being relabeled retryable (F-6.9.4).
+		if isRegistryUnreachable(err) {
+			// §7.4 degraded-network fallback: in always-revalidate mode, if a
+			// fresh fetch fails, try to serve from cache before surfacing the
+			// registry-unreachable error. Cache misses surface as
+			// network.registry_unreachable.
+			if s.cfg.cacheMode == "always-revalidate" && id != "" {
+				if hash, ok := s.resolutions.Resolve(id, version, now, ttl, true); ok {
+					if cached, cerr := s.loadArtifactFromCache(hash, id); cerr == nil {
+						out := s.deliverLoadArtifact(*cached, deliverOpts{harness: harnessFromArgs(s.cfg.harness, args), destination: destFromArgs(args)})
+						if m, ok := out.(map[string]any); ok {
+							m["status"] = "offline"
+							m["served_from_cache"] = true
+						}
+						return out
 					}
-					return out
 				}
 			}
 			return errorResult("network.registry_unreachable: " + err.Error())

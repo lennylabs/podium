@@ -81,10 +81,12 @@ func TestPodiumMCP_InitializeNegotiates(t *testing.T) {
 	}
 }
 
-// Spec: §6.10 — when the registry is unreachable, the MCP bridge
-// surfaces network.registry_unreachable in the tool-call result so
-// the host can warn the user about staleness.
-// Matrix: §6.10 (network.registry_unreachable)
+// Spec: §6.9 — the "Registry offline" row requires the fresh discovery /
+// search meta-tools to "return explicit 'offline' status" rather than an
+// error. A transport-level failure (connection refused) is the offline
+// condition, so search_artifacts against an unreachable registry returns a
+// result carrying status "offline" and no error key, letting the host tell a
+// transient outage from a request rejection (F-6.9.1, F-6.9.4).
 func TestPodiumMCP_NetworkRegistryUnreachable(t *testing.T) {
 	t.Parallel()
 	bin := buildMCP(t)
@@ -102,9 +104,16 @@ func TestPodiumMCP_NetworkRegistryUnreachable(t *testing.T) {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "connect") &&
-		!strings.Contains(stdout.String(), "refused") &&
-		!strings.Contains(stdout.String(), "reachable") {
-		t.Errorf("expected a network error in stdout, got: %s", stdout.String())
+	var resp struct {
+		Result map[string]any `json:"result"`
+	}
+	if err := json.NewDecoder(&stdout).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v\nstdout: %s", err, stdout.String())
+	}
+	if resp.Result["status"] != "offline" {
+		t.Errorf("status = %v, want offline (result=%v)", resp.Result["status"], resp.Result)
+	}
+	if _, hasErr := resp.Result["error"]; hasErr {
+		t.Errorf("offline result must not carry an error key: %v", resp.Result)
 	}
 }

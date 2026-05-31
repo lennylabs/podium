@@ -111,6 +111,46 @@ func TestLoadConfig_AcceptsKnownIdentityProviders(t *testing.T) {
 	}
 }
 
+// spec: §6.9 "Unknown PODIUM_HARNESS value" — the bridge refuses to start
+// and the error lists the available adapter values, instead of detecting the
+// unknown harness lazily on the first load_artifact materialization (F-6.9.2).
+func TestLoadConfig_RejectsUnknownHarness(t *testing.T) {
+	hermetic(t)
+	t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:1")
+	t.Setenv("PODIUM_HARNESS", "claude-codex-typo")
+	_, err := loadConfig()
+	if err == nil {
+		t.Fatal("unknown PODIUM_HARNESS: no error")
+	}
+	if !strings.Contains(err.Error(), "config.unknown_harness") {
+		t.Errorf("error %q missing config.unknown_harness code", err)
+	}
+	// The error enumerates the registered adapters so the operator can pick a
+	// valid value; "none" is always registered.
+	if !strings.Contains(err.Error(), "none") {
+		t.Errorf("error %q does not list the available adapters", err)
+	}
+}
+
+// spec: §6.9 — a registered PODIUM_HARNESS (including the default "none")
+// starts cleanly (F-6.9.2).
+func TestLoadConfig_AcceptsKnownHarness(t *testing.T) {
+	for _, h := range []string{"none", "claude-code", "cursor"} {
+		t.Run(h, func(t *testing.T) {
+			hermetic(t)
+			t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:1")
+			t.Setenv("PODIUM_HARNESS", h)
+			cfg, err := loadConfig()
+			if err != nil {
+				t.Fatalf("harness %q: %v", h, err)
+			}
+			if cfg.harness != h {
+				t.Errorf("harness = %q, want %q", cfg.harness, h)
+			}
+		})
+	}
+}
+
 // spec: §6.1 / §7.5.2 — the MCP server requires a server-source registry.
 // A PODIUM_REGISTRY value that is not an http:// or https:// URL is a
 // filesystem source under the §7.5.2 dispatch rule and the bridge refuses

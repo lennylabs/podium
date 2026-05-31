@@ -119,13 +119,13 @@ func TestSaveTokens_PersistsAccessAndRefresh(t *testing.T) {
 	if got, _ := store.Load(reg); got != "access-1" {
 		t.Errorf("access token = %q, want access-1", got)
 	}
-	if got, _ := store.Load(refreshLabel(reg)); got != "refresh-1" {
+	if got, _ := store.Load(identity.RefreshLabel(reg)); got != "refresh-1" {
 		t.Errorf("refresh token = %q, want refresh-1", got)
 	}
 	// No refresh token → no refresh entry written.
 	store2 := identity.NewMemoryStore()
 	_ = saveTokens(store2, reg, &identity.Tokens{AccessToken: "a"})
-	if _, err := store2.Load(refreshLabel(reg)); err == nil {
+	if _, err := store2.Load(identity.RefreshLabel(reg)); err == nil {
 		t.Error("expected no refresh entry when the IdP returned none")
 	}
 }
