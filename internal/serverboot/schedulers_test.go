@@ -36,14 +36,14 @@ func TestStartAnchorScheduler_BadKeyPathLogsAndReturns(t *testing.T) {
 
 func TestStartRetentionScheduler_NilSink(t *testing.T) {
 	t.Parallel()
-	startRetentionScheduler(&Config{}, nil)
+	startRetentionScheduler(&Config{}, nil, nil)
 }
 
 func TestStartRetentionScheduler_ZeroMaxAge(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	sink, _ := audit.NewFileSink(filepath.Join(dir, "audit.log"))
-	startRetentionScheduler(&Config{auditRetentionMaxAgeDays: 0}, sink)
+	startRetentionScheduler(&Config{auditRetentionMaxAgeDays: 0}, sink, nil)
 }
 
 func TestStartRetentionScheduler_ZeroInterval(t *testing.T) {
@@ -51,7 +51,7 @@ func TestStartRetentionScheduler_ZeroInterval(t *testing.T) {
 	dir := t.TempDir()
 	sink, _ := audit.NewFileSink(filepath.Join(dir, "audit.log"))
 	cfg := &Config{auditRetentionMaxAgeDays: 1, auditRetentionInterval: 0}
-	startRetentionScheduler(cfg, sink)
+	startRetentionScheduler(cfg, sink, nil)
 }
 
 func TestStartRetentionScheduler_Runs(t *testing.T) {
@@ -59,7 +59,7 @@ func TestStartRetentionScheduler_Runs(t *testing.T) {
 	dir := t.TempDir()
 	sink, _ := audit.NewFileSink(filepath.Join(dir, "audit.log"))
 	cfg := &Config{auditRetentionMaxAgeDays: 1, auditRetentionInterval: 1}
-	startRetentionScheduler(cfg, sink)
+	startRetentionScheduler(cfg, sink, nil)
 	// Allow the immediate pass to run.
 	time.Sleep(50 * time.Millisecond)
 }

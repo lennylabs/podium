@@ -31,7 +31,7 @@ func newReadEventServer(t *testing.T, opts ...server.Option) sinkServer {
 	if err != nil {
 		t.Fatalf("NewFileSink: %v", err)
 	}
-	reg := core.New(st, "default", nil).WithAudit(auditEmitterFor(sink, audit.NewPIIScrubber()))
+	reg := core.New(st, "default", nil).WithAudit(auditEmitterFor(sink, audit.NewPIIScrubber(), nil))
 	return sinkServer{srv: server.New(reg, opts...), sink: sink}
 }
 

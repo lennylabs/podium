@@ -20,7 +20,7 @@ func TestAuditEmitterFor_ScrubsQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	emit := auditEmitterFor(sink, audit.NewPIIScrubber())
+	emit := auditEmitterFor(sink, audit.NewPIIScrubber(), nil)
 	emit(context.Background(), core.AuditEvent{
 		Type:    "artifacts.searched",
 		Caller:  "alice",
@@ -54,7 +54,7 @@ func TestAuditEmitterFor_ScrubDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	emit := auditEmitterFor(sink, nil) // scrubbing disabled
+	emit := auditEmitterFor(sink, nil, nil) // scrubbing disabled
 	emit(context.Background(), core.AuditEvent{
 		Type:    "domains.searched",
 		Context: map[string]string{"query": "ssn 123-45-6789"},
@@ -74,7 +74,7 @@ func TestAuditEmitterFor_RedactsManifestFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	emit := auditEmitterFor(sink, audit.NewPIIScrubber())
+	emit := auditEmitterFor(sink, audit.NewPIIScrubber(), nil)
 	emit(context.Background(), core.AuditEvent{
 		Type:       "artifact.loaded",
 		Target:     "finance/payroll",

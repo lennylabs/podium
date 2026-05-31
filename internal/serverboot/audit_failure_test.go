@@ -40,7 +40,7 @@ func TestAuditEmitterFor_SwallowsSinkAppendError(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
-	emit := auditEmitterFor(sink, audit.NewPIIScrubber())
+	emit := auditEmitterFor(sink, audit.NewPIIScrubber(), nil)
 	// Must not panic, must not deadlock. The error inside the
 	// adapter is silently discarded.
 	emit(context.Background(), core.AuditEvent{
@@ -59,7 +59,7 @@ func TestAuditEmit_NilEmitterIsSafe(t *testing.T) {
 	t.Parallel()
 	// auditEmitterFor against a closed/nil sink (operator with
 	// PODIUM_AUDIT_DISABLED-style configuration).
-	emit := auditEmitterFor(nil, audit.NewPIIScrubber())
+	emit := auditEmitterFor(nil, audit.NewPIIScrubber(), nil)
 	// Calling the returned function with a nil sink would panic on
 	// sink.Append. The current adapter does not nil-check the sink
 	// at construction time — we test that the documented production

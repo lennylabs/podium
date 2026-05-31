@@ -80,8 +80,10 @@ func (q *QueryRetention) apply(e *Event, now time.Time) bool {
 
 // Enforce rewrites sink's underlying file with every event older
 // than its per-type policy removed. The hash chain is rebuilt over
-// the surviving events; external anchoring of the prior chain head
-// must be redone after Enforce.
+// the surviving events. When the rewrite changes the log it appends an
+// audit.retention_enforced marker recording the superseded chain head,
+// so an external anchor of the prior head can be reconciled and
+// re-anchored (§8.6, F-8.4.8).
 //
 // When two policies cover the same Type, the most-restrictive
 // (smallest MaxAge) wins — the §8.4 retention-by-default behavior.
@@ -123,6 +125,29 @@ func Enforce(_ context.Context, sink *FileSink, now time.Time, policies []Policy
 	}
 	if dropped == 0 && !redacted {
 		return 0, nil
+	}
+	// §8.4/§8.6: dropping events rebuilds the hash chain, which invalidates
+	// any external anchor of the prior chain head. Append a boundary marker
+	// recording the superseded head and the drop count so a verifier
+	// holding an older anchor can reconcile it with the truncated log and
+	// an anchor scheduler re-anchors the new head (F-8.4.8). Query-text
+	// redaction also rewrites the chain, but it removes no events; the
+	// marker is reserved for drops so a redaction-only pass stays quiet.
+	if dropped > 0 {
+		supersededHead := ""
+		if len(events) > 0 {
+			supersededHead = events[len(events)-1].Hash
+		}
+		kept = append(kept, Event{
+			Type:      EventRetentionEnforced,
+			Timestamp: now,
+			Caller:    "system:retention",
+			Target:    supersededHead,
+			Context: map[string]string{
+				"dropped":         fmt.Sprintf("%d", dropped),
+				"superseded_head": supersededHead,
+			},
+		})
 	}
 	if err := rewriteWithChain(sink.path, kept); err != nil {
 		return 0, err

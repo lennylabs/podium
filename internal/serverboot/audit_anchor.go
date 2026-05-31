@@ -42,15 +42,19 @@ func openAuditSink(cfg *Config) *audit.FileSink {
 // an Ed25519 keypair persisted at cfg.auditSigningKeyPath
 // (defaults to ~/.podium/standalone/audit.key). The scheduler
 // runs in its own goroutine and never blocks startup.
-func startAnchorScheduler(cfg *Config, sink *audit.FileSink) {
+//
+// It returns the signer so the caller can re-anchor on demand (e.g.
+// immediately after a retention truncation, F-8.4.8); nil is returned
+// when anchoring is disabled.
+func startAnchorScheduler(cfg *Config, sink *audit.FileSink) sign.Provider {
 	if sink == nil {
 		log.Printf("warning: audit anchor disabled (no sink)")
-		return
+		return nil
 	}
 	signer, err := loadOrGenerateAuditSigner(cfg.auditSigningKeyPath)
 	if err != nil {
 		log.Printf("warning: audit anchor disabled (signer): %v", err)
-		return
+		return nil
 	}
 	sched := &audit.Scheduler{
 		Sink:     sink,
@@ -66,6 +70,7 @@ func startAnchorScheduler(cfg *Config, sink *audit.FileSink) {
 		}
 	}()
 	log.Printf("audit anchor scheduler running (interval=%ds)", cfg.auditAnchorInterval)
+	return signer
 }
 
 // resolveAuditPath returns the audit log path with the home

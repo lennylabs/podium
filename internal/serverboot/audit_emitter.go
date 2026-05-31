@@ -18,8 +18,15 @@ import (
 // declared field redaction (RedactFields keyed by the event's RedactKeys)
 // and default-on query-text scrubbing (scrubber.ScrubEvent over the search
 // query). A nil scrubber disables query-text scrubbing.
-func auditEmitterFor(sink *audit.FileSink, scrubber *audit.PIIScrubber) core.AuditEmitter {
+//
+// The §8.4 sampler is consulted first: when an event type carries a
+// configured keep-rate (e.g. domain.loaded at 10%), the emitter drops the
+// event before it enters the hash chain. A nil sampler keeps every event.
+func auditEmitterFor(sink *audit.FileSink, scrubber *audit.PIIScrubber, sampler *audit.Sampler) core.AuditEmitter {
 	return func(ctx context.Context, e core.AuditEvent) {
+		if !sampler.Keep(audit.EventType(e.Type)) {
+			return
+		}
 		fields := e.Context
 		if len(e.RedactKeys) > 0 {
 			fields = audit.RedactFields(fields, e.RedactKeys)

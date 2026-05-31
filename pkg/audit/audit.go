@@ -47,6 +47,11 @@ const (
 	EventReadOnlyEntered       EventType = "registry.read_only_entered"
 	EventReadOnlyExited        EventType = "registry.read_only_exited"
 	EventAuditAnchored         EventType = "audit.anchored"
+	// EventRetentionEnforced marks a §8.4 retention pass that rewrote the
+	// hash chain. It records the superseded chain head so a verifier
+	// holding an external anchor of the prior head can reconcile it with
+	// the truncated log (§8.6). spec: §8.4, §8.6.
+	EventRetentionEnforced EventType = "audit.retention_enforced"
 )
 
 // CallerNetwork captures the source network attributes recorded for a

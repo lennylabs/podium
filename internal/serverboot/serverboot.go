@@ -192,6 +192,39 @@ func envInt(key string, def int) int {
 	return n
 }
 
+// parseAuditSampleRates parses the §8.4 sampling spec
+// "TYPE=RATE,TYPE=RATE" (e.g. "domain.loaded=0.1,artifact.loaded=0.5")
+// into a per-event-type keep-rate map. Malformed entries and rates
+// outside [0,1] are skipped so a typo disables sampling for that type
+// rather than dropping every event. Returns nil when nothing parses.
+func parseAuditSampleRates(raw string) map[audit.EventType]float64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	out := map[audit.EventType]float64{}
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		eq := strings.LastIndex(part, "=")
+		if eq <= 0 {
+			continue
+		}
+		name := strings.TrimSpace(part[:eq])
+		rate, err := strconv.ParseFloat(strings.TrimSpace(part[eq+1:]), 64)
+		if err != nil || rate < 0 || rate > 1 {
+			continue
+		}
+		out[audit.EventType(name)] = rate
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // bootstrapLayerPath ingests the filesystem registry at layerPath
 // (when non-empty), persists a store.LayerConfig per resolved layer,
 // and returns the in-memory []layer.Layer the core registry uses for
@@ -734,8 +767,16 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("pii redaction config: %w", err)
 	}
+	// §8.4 optional sampling for high-volume low-sensitivity events
+	// (e.g. domain.loaded at 10%). Built from PODIUM_AUDIT_SAMPLE_RATES;
+	// nil when unset, in which case every event is kept.
+	auditSampler := audit.NewSampler(cfg.auditSampleRates)
 	if auditSink != nil {
-		registry = registry.WithAudit(auditEmitterFor(auditSink, scrubber))
+		// §8.1/§8.3/F-8.4.7: this FileSink is the registry's own sink for
+		// catalogue events (the metadata store persists no audit stream),
+		// so the §8.4 retention scheduler below, which enforces against
+		// this same sink, ages out registry-owned catalogue events.
+		registry = registry.WithAudit(auditEmitterFor(auditSink, scrubber, auditSampler))
 		// spec §8.1: the same §8.3 sink records the HTTP-boundary events —
 		// admin.granted (grants handler) and layer.config_changed /
 		// layer.user_registered (layer endpoint) — so every audit stream
@@ -755,16 +796,27 @@ func Run() error {
 	// PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS, a goroutine periodically
 	// anchors new entries via the registry-managed signing key.
 	// Operators monitor audit.anchored / audit.anchor_failed events.
+	var reAnchor func()
 	if cfg.auditAnchorInterval > 0 {
-		startAnchorScheduler(cfg, auditSink)
+		if signer := startAnchorScheduler(cfg, auditSink); signer != nil {
+			// §8.6/F-8.4.8: after a retention pass drops events the chain
+			// head moves, invalidating the last anchor. Re-anchor the new
+			// head immediately so verifiers do not wait for the next tick.
+			reAnchor = func() {
+				if _, err := audit.Anchor(context.Background(), auditSink, signer); err != nil {
+					log.Printf("audit re-anchor after retention failed: %v", err)
+				}
+			}
+		}
 	}
 
-	// §8.5 retention enforcement: when
-	// PODIUM_AUDIT_RETENTION_INTERVAL_SECONDS > 0, a goroutine
-	// truncates the audit log on a cadence using the configured
-	// retention policies (defaulting to the §8.5 standard set).
+	// §8.4 audit-event retention: a goroutine truncates the audit log on
+	// a cadence using the configured retention policies (the §8.4 1-year
+	// default for event metadata, plus the §8.4 query-text window).
+	// Enabled by default (PODIUM_AUDIT_RETENTION_INTERVAL_SECONDS defaults
+	// to one day); set the interval to 0 to disable.
 	if cfg.auditRetentionInterval > 0 {
-		startRetentionScheduler(cfg, auditSink)
+		startRetentionScheduler(cfg, auditSink, reAnchor)
 	}
 
 	// §8.4 store retention: when PODIUM_STORE_RETENTION_INTERVAL_SECONDS
@@ -890,9 +942,12 @@ type Config struct {
 	auditLogPath        string
 	auditSigningKeyPath string
 	auditAnchorInterval int
-	// §8.5 retention enforcement.
+	// §8.4 audit-event retention enforcement.
 	auditRetentionInterval   int
 	auditRetentionMaxAgeDays int
+	// §8.4 optional per-event-type sampling keep-rates (e.g.
+	// domain.loaded -> 0.1). Empty disables sampling (every event kept).
+	auditSampleRates map[audit.EventType]float64
 	// §8.4 store retention sweeps. storeRetentionInterval > 0 enables a
 	// goroutine that purges deprecated artifact versions and expired
 	// soft-deleted layers on a cadence; the day windows default to the
@@ -1105,9 +1160,13 @@ func LoadConfig() *Config {
 		auditLogPath:        os.Getenv("PODIUM_AUDIT_LOG_PATH"),
 		auditSigningKeyPath: os.Getenv("PODIUM_AUDIT_SIGNING_KEY_PATH"),
 		auditAnchorInterval: envInt("PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS", 0),
-		// §8.5 retention enforcement.
-		auditRetentionInterval:   envInt("PODIUM_AUDIT_RETENTION_INTERVAL_SECONDS", 0),
+		// §8.4 audit-event retention enforcement. The interval defaults to
+		// one day so the §8.4 1-year metadata default applies out of the
+		// box; set PODIUM_AUDIT_RETENTION_INTERVAL_SECONDS=0 to disable.
+		auditRetentionInterval:   envInt("PODIUM_AUDIT_RETENTION_INTERVAL_SECONDS", 86400),
 		auditRetentionMaxAgeDays: envInt("PODIUM_AUDIT_RETENTION_MAX_AGE_DAYS", 365),
+		// §8.4 optional sampling, e.g. PODIUM_AUDIT_SAMPLE_RATES="domain.loaded=0.1".
+		auditSampleRates: parseAuditSampleRates(os.Getenv("PODIUM_AUDIT_SAMPLE_RATES")),
 		// §8.4 store retention sweeps (deprecated-version + layer-recovery purge).
 		storeRetentionInterval:  envInt("PODIUM_STORE_RETENTION_INTERVAL_SECONDS", 0),
 		deprecatedRetentionDays: envInt("PODIUM_DEPRECATED_RETENTION_DAYS", 90),

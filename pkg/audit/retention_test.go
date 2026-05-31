@@ -1,7 +1,9 @@
 package audit_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -43,6 +45,76 @@ func TestEnforce_DropsExpiredEventsAndRebuildsChain(t *testing.T) {
 	}
 	if err := sink.Verify(context.Background()); err != nil {
 		t.Errorf("Verify after Enforce: %v", err)
+	}
+}
+
+// Spec: §8.4/§8.6/F-8.4.8 — when a retention pass rewrites the chain it
+// appends an audit.retention_enforced marker recording the superseded
+// chain head, so a verifier holding an older anchor can reconcile it.
+func TestEnforce_AppendsRetentionMarkerRecordingSupersededHead(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.log")
+	sink, err := audit.NewFileSink(path)
+	if err != nil {
+		t.Fatalf("NewFileSink: %v", err)
+	}
+	now := time.Now().UTC()
+	old := now.Add(-2 * 365 * 24 * time.Hour)
+	recent := now.Add(-1 * time.Hour)
+	for _, ts := range []time.Time{old, recent} {
+		_ = sink.Append(context.Background(), audit.Event{
+			Type: audit.EventArtifactLoaded, Timestamp: ts, Caller: "u",
+		})
+	}
+	// Capture the chain head before retention; the marker must name it.
+	headBefore := chainHeadFromFile(t, path)
+
+	dropped, err := audit.Enforce(context.Background(), sink, now,
+		[]audit.Policy{{Type: audit.EventArtifactLoaded, MaxAge: 30 * 24 * time.Hour}}, nil)
+	if err != nil {
+		t.Fatalf("Enforce: %v", err)
+	}
+	if dropped != 1 {
+		t.Fatalf("dropped = %d, want 1", dropped)
+	}
+	if err := sink.Verify(context.Background()); err != nil {
+		t.Errorf("Verify after Enforce: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read sink: %v", err)
+	}
+	if !containsBytes(data, []byte("audit.retention_enforced")) {
+		t.Errorf("retention marker not appended")
+	}
+	if !containsBytes(data, []byte(headBefore)) {
+		t.Errorf("marker does not record superseded head %q", headBefore)
+	}
+}
+
+// Spec: §8.4/F-8.4.8 — a pass that drops nothing leaves the log
+// untouched and appends no marker, so a stable chain is not perturbed.
+func TestEnforce_NoMarkerWhenNothingChanges(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.log")
+	sink, _ := audit.NewFileSink(path)
+	now := time.Now().UTC()
+	_ = sink.Append(context.Background(), audit.Event{
+		Type: audit.EventArtifactLoaded, Timestamp: now.Add(-time.Hour), Caller: "u",
+	})
+	dropped, err := audit.Enforce(context.Background(), sink, now,
+		[]audit.Policy{{Type: audit.EventArtifactLoaded, MaxAge: 365 * 24 * time.Hour}}, nil)
+	if err != nil {
+		t.Fatalf("Enforce: %v", err)
+	}
+	if dropped != 0 {
+		t.Fatalf("dropped = %d, want 0", dropped)
+	}
+	data, _ := os.ReadFile(path)
+	if containsBytes(data, []byte("audit.retention_enforced")) {
+		t.Errorf("marker appended despite no change")
 	}
 }
 
@@ -130,6 +202,33 @@ func TestEraseUser_ReplacesIdentifiersAndAppendsTombstone(t *testing.T) {
 
 func readSinkBytes(path string) ([]byte, error) {
 	return os.ReadFile(path)
+}
+
+// chainHeadFromFile returns the Hash of the last JSON-Lines event in
+// the file, the chain head a prior anchor would have pinned.
+func chainHeadFromFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var head string
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		if len(line) == 0 {
+			continue
+		}
+		var je struct {
+			Hash string `json:"hash"`
+		}
+		if err := json.Unmarshal(line, &je); err != nil {
+			t.Fatalf("parse event: %v", err)
+		}
+		head = je.Hash
+	}
+	if head == "" {
+		t.Fatalf("no chain head found in %s", path)
+	}
+	return head
 }
 
 func containsBytes(haystack, needle []byte) bool {
