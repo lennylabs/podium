@@ -25,7 +25,8 @@ func (f *flakyStore) GetTenant(ctx context.Context, id string) (store.Tenant, er
 }
 
 // Spec: §13.2.1 — after Failures consecutive probe failures, the
-// tracker flips to read_only; the first success restores ready.
+// tracker flips to read_only; after the recovery threshold of
+// consecutive successes it flips back to ready.
 func TestReadOnlyProbe_FlipsAfterFailures(t *testing.T) {
 	t.Parallel()
 	mem := store.NewMemory()
@@ -67,7 +68,7 @@ func TestReadOnlyProbe_FlipsAfterFailures(t *testing.T) {
 		t.Errorf("OnEnter not invoked")
 	}
 
-	// Restore: first success should flip back.
+	// Restore: consecutive successes (default recovery threshold) flip back.
 	st.failTenant.Store(false)
 	deadline = time.Now().Add(time.Second)
 	for tracker.Get() != server.ModeReady && time.Now().Before(deadline) {
@@ -80,6 +81,95 @@ func TestReadOnlyProbe_FlipsAfterFailures(t *testing.T) {
 		t.Errorf("OnExit not invoked")
 	}
 	cancel()
+}
+
+// statefulStore models a primary that can be healthy, fully down, or
+// intermittently reachable (flapping). In the flapping state it alternates
+// success and failure so that no run of probe successes reaches the recovery
+// threshold.
+type statefulStore struct {
+	*store.Memory
+	state atomic.Int32 // 0 healthy, 1 down, 2 flapping
+	calls atomic.Int64
+}
+
+const (
+	storeHealthy  = 0
+	storeDown     = 1
+	storeFlapping = 2
+)
+
+func (f *statefulStore) GetTenant(ctx context.Context, id string) (store.Tenant, error) {
+	switch f.state.Load() {
+	case storeDown:
+		return store.Tenant{}, errors.New("primary unreachable")
+	case storeFlapping:
+		// Odd calls fail, even calls succeed: at most one success in a row.
+		if f.calls.Add(1)%2 == 1 {
+			return store.Tenant{}, errors.New("intermittent outage")
+		}
+	}
+	return f.Memory.GetTenant(ctx, id)
+}
+
+// Spec: §13.2.1 — the registry flips back to ready only "after three
+// consecutive probe successes". An intermittently reachable primary
+// (alternating success/failure) never reaches the threshold, so the
+// registry stays in read_only rather than flapping; once the primary is
+// stably reachable it recovers. F-13.2.4.
+func TestReadOnlyProbe_RecoveryRequiresConsecutiveSuccesses(t *testing.T) {
+	t.Parallel()
+	mem := store.NewMemory()
+	if err := mem.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	st := &statefulStore{Memory: mem}
+	st.state.Store(storeDown) // start in a full outage to enter read_only
+	tracker := server.NewModeTracker()
+	exits := atomic.Int64{}
+	probe := &server.ReadOnlyProbe{
+		Store:      st,
+		Tracker:    tracker,
+		TenantID:   "default",
+		Interval:   15 * time.Millisecond,
+		Failures:   2,
+		Recoveries: 3,
+		OnExit:     func() { exits.Add(1) },
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go probe.Run(ctx)
+
+	// Two consecutive failures flip the tracker to read_only.
+	deadline := time.Now().Add(time.Second)
+	for tracker.Get() != server.ModeReadOnly && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if tracker.Get() != server.ModeReadOnly {
+		t.Fatalf("mode = %s, want read_only after outage", tracker.Get())
+	}
+
+	// Flapping: a lone success between failures never accumulates three in a
+	// row, so the registry must not recover.
+	st.state.Store(storeFlapping)
+	time.Sleep(300 * time.Millisecond)
+	if tracker.Get() != server.ModeReadOnly {
+		t.Fatalf("mode = %s, want read_only to persist while flapping", tracker.Get())
+	}
+	if exits.Load() != 0 {
+		t.Errorf("OnExit fired %d times while flapping; want 0", exits.Load())
+	}
+
+	// Once the primary is stably reachable, three consecutive successes
+	// restore ready.
+	st.state.Store(storeHealthy)
+	deadline = time.Now().Add(time.Second)
+	for tracker.Get() != server.ModeReady && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if tracker.Get() != server.ModeReady {
+		t.Fatalf("mode = %s after stable recovery, want ready", tracker.Get())
+	}
 }
 
 // Spec: §13.2.1 — probe is a no-op when not configured (no Store

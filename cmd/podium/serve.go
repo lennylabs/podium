@@ -21,6 +21,7 @@ func serveCmd(args []string) int {
 	setUsage(fs, "Run the standalone registry server in-process.")
 	bind := fs.String("bind", "", "address to listen on (overrides PODIUM_BIND)")
 	publicMode := fs.Bool("public-mode", false, "run in public mode (overrides PODIUM_PUBLIC_MODE)")
+	allowPublicBind := fs.Bool("allow-public-bind", false, "allow public mode to bind a non-loopback address (overrides PODIUM_ALLOW_PUBLIC_BIND)")
 	standalone := fs.Bool("standalone", false, "alias for the zero-flag standalone bootstrap")
 	configFile := fs.String("config", "", "path to registry.yaml (overrides PODIUM_CONFIG_FILE)")
 	layerPath := fs.String("layer-path", "", "filesystem registry root to ingest at startup (§13.10; overrides PODIUM_LAYER_PATH)")
@@ -33,6 +34,9 @@ func serveCmd(args []string) int {
 	}
 	if *publicMode {
 		_ = os.Setenv("PODIUM_PUBLIC_MODE", "true")
+	}
+	if *allowPublicBind {
+		_ = os.Setenv("PODIUM_ALLOW_PUBLIC_BIND", "true")
 	}
 	if *configFile != "" {
 		_ = os.Setenv("PODIUM_CONFIG_FILE", *configFile)

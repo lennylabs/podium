@@ -330,10 +330,14 @@ func applyYAML(c *Config, y *yamlConfig) {
 	if len(y.PIIRedaction.Patterns) > 0 {
 		c.piiRedaction.Patterns = y.PIIRedaction.Patterns
 	}
-	if c.readOnlyProbeFailures == 0 && y.ReadOnly.ProbeFailures > 0 {
+	// §13.2.1: env keeps precedence. A negative value is the "env unset"
+	// sentinel (an explicit 0 from env disables the probe and is preserved),
+	// so registry.yaml only fills in a still-unset threshold; the spec default
+	// is applied later in LoadConfig.
+	if c.readOnlyProbeFailures < 0 && y.ReadOnly.ProbeFailures > 0 {
 		c.readOnlyProbeFailures = y.ReadOnly.ProbeFailures
 	}
-	if c.readOnlyProbeInterval == 0 && y.ReadOnly.ProbeInterval > 0 {
+	if c.readOnlyProbeInterval <= 0 && y.ReadOnly.ProbeInterval > 0 {
 		c.readOnlyProbeInterval = y.ReadOnly.ProbeInterval
 	}
 	// §4.7.2 freeze windows are config-file-only, so they overlay directly.

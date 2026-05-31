@@ -561,6 +561,33 @@ func TestDocCLI_33_PublicModeExcludesIdP(t *testing.T) {
 	cliWantNonZero(t, res, "serve --public-mode + IdP")
 }
 
+// spec: §13.10 / §13.2.2 — public mode refuses a non-loopback bind unless
+// --allow-public-bind is passed, failing fast at startup with
+// config.public_bind_refused and naming the address. F-13.2.1.
+func TestServe_PublicModeNonLoopbackRefused(t *testing.T) {
+	port := freePort(t)
+	bind := fmt.Sprintf("0.0.0.0:%d", port)
+	env := []string{"HOME=" + t.TempDir()}
+	res, timedOut := cliRunServe(t, env, 20*time.Second, "serve", "--public-mode", "--bind", bind)
+	if timedOut {
+		t.Fatalf("serve --public-mode with a non-loopback bind did not exit; expected the loopback-bind refusal")
+	}
+	cliWantNonZero(t, res, "serve --public-mode + non-loopback bind")
+	cliContains(t, res.Stderr, "config.public_bind_refused", "loopback-bind refusal error code")
+	cliContains(t, res.Stderr, bind, "refusal error names the address")
+}
+
+// spec: §13.10 — --allow-public-bind composes with public mode without a
+// startup refusal; the server boots and serves. F-13.2.1.
+func TestServe_PublicModeAllowPublicBind(t *testing.T) {
+	srv := startServerArgs(t,
+		[]string{"HOME=" + t.TempDir()},
+		"serve", "--public-mode", "--allow-public-bind")
+	if st := getStatus(t, srv.BaseURL+"/healthz"); st != 200 {
+		t.Errorf("/healthz = %d, want 200 with --allow-public-bind", st)
+	}
+}
+
 // spec: doc "Server — podium status".
 func TestDocCLI_34_Status(t *testing.T) {
 	srv := startServer(t, cliReg(t))

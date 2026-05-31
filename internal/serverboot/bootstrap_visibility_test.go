@@ -48,7 +48,7 @@ func TestBootstrapLayerPath_IdPDeploymentNotPublic(t *testing.T) {
 	testharness.WriteTree(t, root, testharness.WriteTreeOption{Path: "x/ARTIFACT.md", Content: artifactBody})
 
 	cfg := &Config{identityProvider: "oidc", defaultLayerVisibility: "private"}
-	layers, err := bootstrapLayerPath(st, "default", root, defaultBootstrapVisibility(cfg), 0, true, nil)
+	layers, err := bootstrapLayerPath(st, "default", root, defaultBootstrapVisibility(cfg), 0, true, nil, "")
 	if err != nil {
 		t.Fatalf("bootstrapLayerPath: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestBootstrapLayerPath_StandaloneStaysPublic(t *testing.T) {
 	testharness.WriteTree(t, root, testharness.WriteTreeOption{Path: "x/ARTIFACT.md", Content: artifactBody})
 
 	cfg := &Config{identityProvider: "", defaultLayerVisibility: "private"}
-	layers, err := bootstrapLayerPath(st, "default", root, defaultBootstrapVisibility(cfg), 0, true, nil)
+	layers, err := bootstrapLayerPath(st, "default", root, defaultBootstrapVisibility(cfg), 0, true, nil, "")
 	if err != nil {
 		t.Fatalf("bootstrapLayerPath: %v", err)
 	}

@@ -7,8 +7,12 @@ package e2e
 // operational pitfalls.
 //
 // Known gaps and skip rationale:
-//   - F-13.2.3: read-only probe disabled by default; not triggerable in e2e.
-//     Tests 5, 6, 7, 8, 9 assert this.
+//   - Read-only fallback (§13.2.1) flips on a metadata-store/primary outage.
+//     The probe is enabled by default (F-13.2.3, resolved), but a standalone
+//     SQLite/memory store cannot be made to fail after boot (the open handle
+//     keeps serving reads), so the read_only transition is only inducible on a
+//     Postgres primary/replica deployment. Tests 5, 6, 7, 8, 9, 33 honest-skip
+//     for that reason, like the Postgres tests 45-47.
 //   - F-13.2.8: X-Podium-Read-Only-Lag-Seconds is always "0".
 //   - F-7.3.7: force_push_policy not settable via API/CLI/config. Tests 29, 30.
 //   - F-13.8.1: /metrics endpoint absent. Test 34.
@@ -159,35 +163,35 @@ func TestOpGuide_4_ReadyzReturns200(t *testing.T) {
 
 // T-D-operator-guide-5
 func TestOpGuide_5_ReadOnlyWriteEndpoints(t *testing.T) {
-	t.Skip("blocked by F-13.2.3: read-only probe is disabled by default; cannot trigger read_only mode in e2e")
+	t.Skip("read_only requires a metadata-store/primary outage; a standalone SQLite store cannot be made to fail after boot, so this is only inducible on a Postgres primary/replica deployment")
 }
 
 // ---- T-D-operator-guide-6: read endpoints serve with X-Podium-Read-Only headers
 
 // T-D-operator-guide-6
 func TestOpGuide_6_ReadOnlyHeaders(t *testing.T) {
-	t.Skip("blocked by F-13.2.3: read-only probe is disabled by default; also F-13.2.8: lag header always 0")
+	t.Skip("read_only requires a metadata-store/primary outage not inducible against standalone SQLite; lag header is also a placeholder (F-13.2.8)")
 }
 
 // ---- T-D-operator-guide-7: auto-exit read-only mode -------------------------
 
 // T-D-operator-guide-7
 func TestOpGuide_7_ReadOnlyAutoExit(t *testing.T) {
-	t.Skip("blocked by F-13.2.3: read-only probe is disabled by default; cannot induce or recover from read_only mode in e2e")
+	t.Skip("read_only entry/recovery requires a Postgres primary outage; a standalone SQLite store cannot be made to fail after boot")
 }
 
 // ---- T-D-operator-guide-8: read_only_entered / read_only_exited audit events
 
 // T-D-operator-guide-8
 func TestOpGuide_8_ReadOnlyAuditEvents(t *testing.T) {
-	t.Skip("blocked by F-13.2.3: read-only probe is disabled by default; state transitions never occur in e2e")
+	t.Skip("read_only state transitions require a metadata-store outage not inducible against standalone SQLite")
 }
 
 // ---- T-D-operator-guide-9: probe tuning via env vars -----------------------
 
 // T-D-operator-guide-9
 func TestOpGuide_9_ReadOnlyProbeTuning(t *testing.T) {
-	t.Skip("blocked by F-13.2.3: read-only probe is disabled by default; tuning is not observable in e2e")
+	t.Skip("probe tuning is observable via config show (test 10); the read_only flip itself requires a Postgres primary outage not inducible against standalone SQLite")
 }
 
 // ---- T-D-operator-guide-10: podium config show read_only probe settings -----
@@ -840,7 +844,7 @@ func TestOpGuide_32_HealthzAlways200(t *testing.T) {
 
 // T-D-operator-guide-33
 func TestOpGuide_33_ReadyzInReadOnlyMode(t *testing.T) {
-	t.Skip("blocked by F-13.2.3: read-only probe disabled by default; cannot trigger read_only mode in e2e to verify /readyz stays 200")
+	t.Skip("verifying /readyz stays 200 in read_only requires inducing a Postgres primary outage; not inducible against standalone SQLite")
 }
 
 // ---- T-D-operator-guide-34: /metrics not exposed ---------------------------

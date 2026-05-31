@@ -10,11 +10,15 @@ import (
 // vars override. Phase 10 wires the new layers / read_only fields.
 func TestApplyYAML_FillsMissingDefaults(t *testing.T) {
 	c := &Config{
-		// Mimic loadConfig's hardcoded defaults so applyYAML acts.
+		// Mimic loadConfig's hardcoded defaults so applyYAML acts. The
+		// §13.2.1 probe fields use -1 as the "env unset" sentinel so the
+		// registry.yaml overlay can distinguish absent from an explicit 0.
 		bind:                   "127.0.0.1:8080",
 		storeType:              "sqlite",
 		objectStore:            "filesystem",
 		defaultLayerVisibility: "private",
+		readOnlyProbeFailures:  -1,
+		readOnlyProbeInterval:  -1,
 	}
 	y := &yamlConfig{
 		Bind:                   "0.0.0.0:9090",

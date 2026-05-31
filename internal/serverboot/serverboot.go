@@ -27,6 +27,7 @@ import (
 	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/lint"
+	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/notification"
 	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/registry/core"
@@ -258,7 +259,7 @@ func ingestLinter(allowPerDomain bool) *lint.Linter {
 	return lr
 }
 
-func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Visibility, startOrder int, allowPerDomain bool, resourcePut ingest.ResourcePutFunc) ([]layer.Layer, error) {
+func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Visibility, startOrder int, allowPerDomain bool, resourcePut ingest.ResourcePutFunc, rejectAtOrAbove manifest.Sensitivity) ([]layer.Layer, error) {
 	if layerPath == "" {
 		return []layer.Layer{}, nil
 	}
@@ -274,6 +275,10 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			TenantID: tenantID,
 			LayerID:  l.ID,
 			Files:    os.DirFS(l.Path),
+			// §13.10/§13.2.2 public-mode sensitivity ceiling: reject medium and
+			// high artifacts at ingest with ingest.public_mode_rejects_sensitive.
+			// Empty (non-public deployments) imposes no floor.
+			RejectAtOrAbove: rejectAtOrAbove,
 			// §4.4: validate prose URL references with an HTTP HEAD by
 			// default; PODIUM_INGEST_OFFLINE=true skips the network probe.
 			// §4.5.5: warn on DOMAIN.md discovery: blocks when per-domain
@@ -318,6 +323,16 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			l.ID, l.Path, res.Accepted, res.Idempotent, len(res.Rejected), len(res.Advisories))
 	}
 	return layers, nil
+}
+
+// publicSensitivityFloor returns the §13.10/§13.2.2 ingest sensitivity floor
+// for the deployment. Public mode rejects medium and high artifacts at ingest;
+// every other deployment imposes no floor (empty).
+func publicSensitivityFloor(c *Config) manifest.Sensitivity {
+	if c.publicMode {
+		return manifest.SensitivityMedium
+	}
+	return ""
 }
 
 // defaultBootstrapVisibility returns the visibility stamped on a layer that
@@ -390,7 +405,9 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resou
 				TenantID: tenantID,
 				LayerID:  lc.ID,
 				Files:    os.DirFS(lc.LocalPath),
-				Linter:   ingestLinter(cfg.allowPerDomain()),
+				// §13.10/§13.2.2 public-mode sensitivity ceiling.
+				RejectAtOrAbove: publicSensitivityFloor(cfg),
+				Linter:          ingestLinter(cfg.allowPerDomain()),
 				// §7.2 data plane: persist bundled resources at ingest.
 				ResourcePut: resourcePut,
 			})
@@ -532,7 +549,7 @@ func Run() error {
 	// DELETE /v1/layers) see the bootstrap layers. These layers carry no
 	// per-layer visibility input, so they take the deployment default
 	// (§4.6 / §13.10 / F-4.6.9). They append after the declared layers.
-	pathLayers, err := bootstrapLayerPath(st, tenantID, cfg.layerPath, defaultBootstrapVisibility(cfg), len(declared), cfg.allowPerDomain(), resourcePut)
+	pathLayers, err := bootstrapLayerPath(st, tenantID, cfg.layerPath, defaultBootstrapVisibility(cfg), len(declared), cfg.allowPerDomain(), resourcePut, publicSensitivityFloor(cfg))
 	if err != nil {
 		return err
 	}
@@ -871,8 +888,12 @@ func Run() error {
 }
 
 type Config struct {
-	bind             string
-	publicMode       bool
+	bind       string
+	publicMode bool
+	// allowPublicBind is the §13.10 escape hatch (--allow-public-bind /
+	// PODIUM_ALLOW_PUBLIC_BIND). Public mode refuses a non-loopback bind
+	// unless this is set.
+	allowPublicBind  bool
 	identityProvider string
 	// oauthAudience is the §6.3.2 `aud` claim the injected-session-token
 	// verifier requires (the registry endpoint). Empty disables audience
@@ -1052,6 +1073,7 @@ func (c *Config) Settings() []Setting {
 	return []Setting{
 		{"bind", c.bind, envOrSrc("PODIUM_BIND", defaultSrc)},
 		{"public_mode", boolStr(c.publicMode), envOrSrc("PODIUM_PUBLIC_MODE", defaultSrc)},
+		{"allow_public_bind", boolStr(c.allowPublicBind), envOrSrc("PODIUM_ALLOW_PUBLIC_BIND", defaultSrc)},
 		{"identity_provider", c.identityProvider, envOrSrc("PODIUM_IDENTITY_PROVIDER", yamlSrc)},
 		{"oauth_audience", c.oauthAudience, envOrSrc("PODIUM_OAUTH_AUDIENCE", defaultSrc)},
 		{"identity_provider.authorization_endpoint", c.oauthAuthorizationEndpoint, envOrSrc("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT", yamlSrc)},
@@ -1110,6 +1132,7 @@ func LoadConfig() *Config {
 	c := &Config{
 		bind:                       envDefault("PODIUM_BIND", "127.0.0.1:8080"),
 		publicMode:                 isTrue(os.Getenv("PODIUM_PUBLIC_MODE")),
+		allowPublicBind:            isTrue(os.Getenv("PODIUM_ALLOW_PUBLIC_BIND")),
 		identityProvider:           os.Getenv("PODIUM_IDENTITY_PROVIDER"),
 		oauthAudience:              os.Getenv("PODIUM_OAUTH_AUDIENCE"),
 		oauthAuthorizationEndpoint: os.Getenv("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT"),
@@ -1157,9 +1180,14 @@ func LoadConfig() *Config {
 		// (a standalone deployment defaults to public; see below, F-13.12.15).
 		defaultLayerVisibility: os.Getenv("PODIUM_DEFAULT_LAYER_VISIBILITY"),
 		// §7.3.1 user-defined-layer cap (0 = default of 3).
-		maxUserLayers:         envInt("PODIUM_MAX_USER_LAYERS", 0),
-		readOnlyProbeFailures: envInt("PODIUM_READONLY_PROBE_FAILURES", 0),
-		readOnlyProbeInterval: envInt("PODIUM_READONLY_PROBE_INTERVAL", 30),
+		maxUserLayers: envInt("PODIUM_MAX_USER_LAYERS", 0),
+		// §13.2.1 read-only probe. Sentinel -1 means "unset by env" so the
+		// registry.yaml overlay and the spec defaults below can distinguish an
+		// absent value from an explicit 0 (which disables the probe). The
+		// failure threshold defaults to 3 and the interval to 5 s so the
+		// documented automatic fallback runs out of the box.
+		readOnlyProbeFailures: envInt("PODIUM_READONLY_PROBE_FAILURES", -1),
+		readOnlyProbeInterval: envInt("PODIUM_READONLY_PROBE_INTERVAL", -1),
 		// §8.6 audit anchoring.
 		auditLogPath:        os.Getenv("PODIUM_AUDIT_LOG_PATH"),
 		auditSigningKeyPath: os.Getenv("PODIUM_AUDIT_SIGNING_KEY_PATH"),
@@ -1196,6 +1224,17 @@ func LoadConfig() *Config {
 	// when neither the env var nor registry.yaml set it.
 	if c.pineconeNS == "" {
 		c.pineconeNS = "default"
+	}
+	// §13.2.1 (F-13.2.3): apply the spec defaults once env and registry.yaml
+	// have had their say. A negative failure threshold means neither set it,
+	// so the documented automatic fallback engages (probe every 5 s, flip
+	// after three consecutive failures). An explicit 0 from env or yaml keeps
+	// the probe disabled.
+	if c.readOnlyProbeFailures < 0 {
+		c.readOnlyProbeFailures = 3
+	}
+	if c.readOnlyProbeInterval <= 0 {
+		c.readOnlyProbeInterval = 5
 	}
 	// §9.1 / §13.10 (F-9.1.5): realize the per-deployment-mode defaults for the
 	// RegistrySearchProvider and EmbeddingProvider rows. A zero-config standard
@@ -1281,6 +1320,8 @@ func (c *Config) validate() error {
 	startup := server.StartupConfig{
 		PublicMode:       c.publicMode,
 		IdentityProvider: c.identityProvider,
+		Bind:             c.bind,
+		AllowPublicBind:  c.allowPublicBind,
 	}
 	if err := startup.Validate(); err != nil {
 		return err

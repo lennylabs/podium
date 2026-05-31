@@ -1138,10 +1138,34 @@ func TestBundled_HighSensitivityAccepted(t *testing.T) {
 }
 
 // T-D-bundled-resources-45 — public-mode ingest rejects a high-sensitivity
-// artifact.
+// artifact (§13.10/§13.2.2), so it is not served, while a low-sensitivity
+// artifact in the same registry is. The boot log records the rejection.
+// F-13.2.2.
 func TestBundled_PublicModeRejectsSensitive(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-13.2.2: the public-mode sensitivity ceiling is not wired into the running ingest path, so a high-sensitivity artifact is not rejected with ingest.public_mode_rejects_sensitive")
+	hi := "finance/close/run-variance-analysis"
+	reg := writeRegistry(t, map[string]string{
+		hi + "/ARTIFACT.md":     "---\ntype: skill\nversion: 1.0.0\nsensitivity: high\n---\n\n<!-- Skill body lives in SKILL.md. -->\n",
+		hi + "/SKILL.md":        brSkillMD("run-variance-analysis", brVarianceDesc, "Run the analysis.\n"),
+		hi + "/scripts/run.py":  "print('run')\n",
+		"ctx/intro/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: low intro\nsensitivity: low\n---\n\nIntro.\n",
+	})
+	srv := startServerArgs(t,
+		[]string{"HOME=" + t.TempDir(), "PODIUM_PUBLIC_MODE=true"},
+		"serve", "--standalone", "--layer-path", reg)
+
+	// The low-sensitivity artifact is served.
+	if st, body := getRaw(t, srv.BaseURL+"/v1/load_artifact?id=ctx/intro"); st != 200 {
+		t.Errorf("low-sensitivity load = %d, want 200\n%s", st, body)
+	}
+	// The high-sensitivity artifact was rejected at ingest, so it is absent.
+	if st, _ := getRaw(t, srv.BaseURL+"/v1/load_artifact?id="+hi); st == 200 {
+		t.Errorf("high-sensitivity artifact served in public mode (status 200)")
+	}
+	// The §13.10 rejection is recorded in the boot log.
+	if !strings.Contains(srv.log(), "rejected=1") {
+		t.Errorf("boot log missing the public-mode rejection (rejected=1):\n%s", srv.log())
+	}
 }
 
 // ---- podium import ----------------------------------------------------------

@@ -19,6 +19,7 @@ import (
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/lint"
+	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
@@ -264,13 +265,21 @@ func NewFromFilesystem(path string, opts ...Option) (*Server, error) {
 	if probe.objectStore != nil {
 		resourcePut = probe.objectStore.Put
 	}
+	// §13.10/§13.2.2 public-mode sensitivity ceiling: when the server runs in
+	// public mode, reject medium and high artifacts at ingest. Read from the
+	// applied options so the standalone bootstrap and tests share one floor.
+	var rejectAtOrAbove manifest.Sensitivity
+	if probe.publicMode {
+		rejectAtOrAbove = manifest.SensitivityMedium
+	}
 	layers := make([]layer.Layer, 0, len(reg.Layers))
 	for i, l := range reg.Layers {
 		layerFS := newDirFS(l.Path)
 		if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
-			TenantID: tenant,
-			LayerID:  l.ID,
-			Files:    layerFS,
+			TenantID:        tenant,
+			LayerID:         l.ID,
+			Files:           layerFS,
+			RejectAtOrAbove: rejectAtOrAbove,
 			// §4.4: validate prose URL references with an HTTP HEAD by
 			// default; PODIUM_INGEST_OFFLINE=true skips the network probe.
 			Linter:      lint.NewIngestLinter(os.Getenv("PODIUM_INGEST_OFFLINE") == "true"),
