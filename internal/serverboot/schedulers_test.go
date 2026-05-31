@@ -1,6 +1,7 @@
 package serverboot
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -37,6 +38,27 @@ func TestStartAnchorScheduler_BadKeyPathLogsAndReturns(t *testing.T) {
 func TestStartRetentionScheduler_NilSink(t *testing.T) {
 	t.Parallel()
 	startRetentionScheduler(&Config{}, nil, nil)
+}
+
+// Spec: §8.6 (F-8.6.1) — startVerifyScheduler tolerates a nil sink by
+// logging and returning without launching a goroutine.
+func TestStartVerifyScheduler_NilSink(t *testing.T) {
+	t.Parallel()
+	startVerifyScheduler(&Config{auditVerifyInterval: 1}, nil)
+}
+
+// Spec: §8.6 (F-8.6.1) — with a sink and a short interval the verify
+// scheduler runs its immediate pass without panicking. A clean chain
+// raises no alert.
+func TestStartVerifyScheduler_Runs(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	sink, _ := audit.NewFileSink(filepath.Join(dir, "audit.log"))
+	_ = sink.Append(context.Background(), audit.Event{Type: audit.EventArtifactLoaded, Caller: "alice"})
+	startVerifyScheduler(&Config{auditVerifyInterval: 1}, sink)
+	// Allow the immediate pass to run, then let process exit reclaim the
+	// goroutine.
+	time.Sleep(40 * time.Millisecond)
 }
 
 func TestStartRetentionScheduler_ZeroMaxAge(t *testing.T) {

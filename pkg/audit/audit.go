@@ -47,6 +47,17 @@ const (
 	EventReadOnlyEntered       EventType = "registry.read_only_entered"
 	EventReadOnlyExited        EventType = "registry.read_only_exited"
 	EventAuditAnchored         EventType = "audit.anchored"
+	// EventAuditAnchorFailed records a failed transparency-anchor attempt
+	// (signer outage, network blip, or sink write error) so operators
+	// monitoring the audit log, and SIEM mirrors, see anchoring failures
+	// rather than relying solely on process logs. spec: §8.6.
+	EventAuditAnchorFailed EventType = "audit.anchor_failed"
+	// EventAuditGapDetected records a hash-chain gap found by the periodic
+	// verification pass (§8.6 "Detection of gaps is automated and alerted").
+	// The verifier appends it best-effort so SIEM mirroring (the §8.6
+	// operational backstop) surfaces the break even if the alerting seam is
+	// unconfigured. spec: §8.6.
+	EventAuditGapDetected EventType = "audit.gap_detected"
 	// EventRetentionEnforced marks a §8.4 retention pass that rewrote the
 	// hash chain. It records the superseded chain head so a verifier
 	// holding an external anchor of the prior head can reconcile it with

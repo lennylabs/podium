@@ -34,6 +34,20 @@ func TestLoadConfig_RetentionDisableableByOperator(t *testing.T) {
 	}
 }
 
+// Spec: §8.6 (F-8.6.1) — gap detection must be "automated and alerted",
+// so the verification scheduler defaults to a positive interval (one hour)
+// out of the box and an operator can disable it with 0.
+func TestLoadConfig_VerifyEnabledByDefault(t *testing.T) {
+	t.Setenv("PODIUM_AUDIT_VERIFY_INTERVAL_SECONDS", "")
+	if cfg := LoadConfig(); cfg.auditVerifyInterval <= 0 {
+		t.Errorf("auditVerifyInterval = %d, want > 0 by default", cfg.auditVerifyInterval)
+	}
+	t.Setenv("PODIUM_AUDIT_VERIFY_INTERVAL_SECONDS", "0")
+	if cfg := LoadConfig(); cfg.auditVerifyInterval != 0 {
+		t.Errorf("auditVerifyInterval = %d, want 0 when operator opts out", cfg.auditVerifyInterval)
+	}
+}
+
 // Spec: §8.4/F-8.4.5 — parseAuditSampleRates parses the
 // "TYPE=RATE,TYPE=RATE" spec and skips malformed or out-of-range entries.
 func TestParseAuditSampleRates(t *testing.T) {

@@ -73,6 +73,34 @@ func startAnchorScheduler(cfg *Config, sink *audit.FileSink) sign.Provider {
 	return signer
 }
 
+// startVerifyScheduler bootstraps the §8.6 audit-integrity
+// verification scheduler. It re-verifies the hash chain on a cadence
+// and, on a detected gap, records an audit.gap_detected event and logs
+// an alert ("Detection of gaps is automated and alerted"). The
+// scheduler runs in its own goroutine and never blocks startup.
+//
+// Nil sink disables verification. The verification pass needs no signer,
+// so it runs independently of whether anchoring is enabled.
+func startVerifyScheduler(cfg *Config, sink *audit.FileSink) {
+	if sink == nil {
+		log.Printf("warning: audit verify disabled (no sink)")
+		return
+	}
+	sched := &audit.VerifyScheduler{
+		Sink:     sink,
+		Interval: time.Duration(cfg.auditVerifyInterval) * time.Second,
+		OnGap: func(err error) {
+			log.Printf("audit integrity ALERT: hash-chain gap detected: %v", err)
+		},
+	}
+	go func() {
+		if err := sched.Run(context.Background()); err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("audit verify scheduler stopped: %v", err)
+		}
+	}()
+	log.Printf("audit verify scheduler running (interval=%ds)", cfg.auditVerifyInterval)
+}
+
 // resolveAuditPath returns the audit log path with the home
 // directory expanded. Empty defaults to ~/.podium/audit.log.
 func resolveAuditPath(p string) (string, error) {

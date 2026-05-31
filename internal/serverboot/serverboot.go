@@ -835,6 +835,16 @@ func Run() error {
 		}
 	}
 
+	// §8.6 audit-integrity verification: a goroutine re-verifies the hash
+	// chain on a cadence and records an audit.gap_detected event (plus an
+	// operator alert) on any break, so an out-of-band edit that breaks the
+	// chain is detected and surfaced to SIEM at runtime. Enabled by default
+	// (PODIUM_AUDIT_VERIFY_INTERVAL_SECONDS defaults to one hour); set the
+	// interval to 0 to disable.
+	if cfg.auditVerifyInterval > 0 {
+		startVerifyScheduler(cfg, auditSink)
+	}
+
 	// §8.4 audit-event retention: a goroutine truncates the audit log on
 	// a cadence using the configured retention policies (the §8.4 1-year
 	// default for event metadata, plus the §8.4 query-text window).
@@ -971,6 +981,11 @@ type Config struct {
 	auditLogPath        string
 	auditSigningKeyPath string
 	auditAnchorInterval int
+	// §8.6 audit-integrity verification. auditVerifyInterval > 0 enables a
+	// goroutine that re-verifies the hash chain on a cadence and records an
+	// audit.gap_detected event on any break ("Detection of gaps is
+	// automated and alerted").
+	auditVerifyInterval int
 	// §8.4 audit-event retention enforcement.
 	auditRetentionInterval   int
 	auditRetentionMaxAgeDays int
@@ -1196,6 +1211,10 @@ func LoadConfig() *Config {
 		auditLogPath:        os.Getenv("PODIUM_AUDIT_LOG_PATH"),
 		auditSigningKeyPath: os.Getenv("PODIUM_AUDIT_SIGNING_KEY_PATH"),
 		auditAnchorInterval: envInt("PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS", 0),
+		// §8.6 audit-integrity verification. Defaults to one hour so gap
+		// detection is automated out of the box; set
+		// PODIUM_AUDIT_VERIFY_INTERVAL_SECONDS=0 to disable.
+		auditVerifyInterval: envInt("PODIUM_AUDIT_VERIFY_INTERVAL_SECONDS", 3600),
 		// §8.4 audit-event retention enforcement. The interval defaults to
 		// one day so the §8.4 1-year metadata default applies out of the
 		// box; set PODIUM_AUDIT_RETENTION_INTERVAL_SECONDS=0 to disable.
