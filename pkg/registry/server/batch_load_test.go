@@ -73,9 +73,10 @@ func TestBatchLoad_ReturnsPerItemEnvelopes(t *testing.T) {
 	}
 }
 
-// Spec: §7.6.2 — partial failure does not fail the batch. Items
-// the caller cannot see come back as status=error with
-// visibility.denied; missing items as registry.not_found.
+// Spec: §7.6.2 — partial failure does not fail the batch. Items the
+// caller cannot see come back as status=error with visibility.denied.
+// A missing id returns the same code so the response does not leak
+// whether the artifact exists in some hidden layer.
 func TestBatchLoad_PartialFailureSurfacesPerItemErrors(t *testing.T) {
 	t.Parallel()
 	ts, _ := newBatchFixture(t)
@@ -103,8 +104,8 @@ func TestBatchLoad_PartialFailureSurfacesPerItemErrors(t *testing.T) {
 		t.Errorf("team/missing status = %q, want error", byID["team/missing"].Status)
 	}
 	if byID["team/missing"].Error == nil ||
-		byID["team/missing"].Error.Code != "registry.not_found" {
-		t.Errorf("team/missing error = %+v, want registry.not_found", byID["team/missing"].Error)
+		byID["team/missing"].Error.Code != "visibility.denied" {
+		t.Errorf("team/missing error = %+v, want visibility.denied", byID["team/missing"].Error)
 	}
 }
 

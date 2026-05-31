@@ -630,6 +630,8 @@ func (s *Server) handleSearchArtifacts(w http.ResponseWriter, r *http.Request) {
 		Scope: q.Get("scope"),
 		Tags:  tags,
 		TopK:  atoiOr(q.Get("top_k"), 10),
+		// spec: §7.6 — search_artifacts accepts session_id.
+		SessionID: q.Get("session_id"),
 	})
 	if err != nil {
 		s.writeCoreError(w, err)

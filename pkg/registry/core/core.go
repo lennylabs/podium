@@ -846,6 +846,10 @@ type SearchArtifactsOptions struct {
 	Scope string
 	Tags  []string
 	TopK  int
+	// SessionID carries the §7.6 session_id filter for session-consistent
+	// retrieval. It is threaded through so search shares the load path's
+	// session surface; latest resolution itself is applied at load time.
+	SessionID string
 	// IncludeDeprecated opts deprecated artifacts back into the
 	// result set. Default search excludes them per §4.7.4.
 	IncludeDeprecated bool

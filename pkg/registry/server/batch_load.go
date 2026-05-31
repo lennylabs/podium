@@ -94,7 +94,7 @@ func (s *Server) loadOneForBatch(ctx context.Context, id layer.Identity, artifac
 		return BatchLoadEnvelope{
 			ID:     artifactID,
 			Status: "error",
-			Error:  errorEnvelopeFor(err),
+			Error:  batchLoadError(err),
 		}
 	}
 	env := BatchLoadEnvelope{
@@ -131,6 +131,21 @@ func (s *Server) loadOneForBatch(ctx context.Context, id layer.Identity, artifac
 		}
 	}
 	return env
+}
+
+// batchLoadError maps a per-item load failure to the §7.6.2 envelope. A
+// not-found or visibility-filtered artifact both surface as
+// visibility.denied (the spec's documented per-item code) so the caller
+// cannot tell whether the artifact exists in some hidden layer; §7.6.2
+// forbids that existence leak. Other errors pass through errorEnvelopeFor.
+// spec: §7.6.2.
+func batchLoadError(err error) *ErrorResponse {
+	if errors.Is(err, core.ErrNotFound) {
+		e := &ErrorResponse{Code: "visibility.denied", Message: "artifact not visible to caller"}
+		enrichEnvelope(e)
+		return e
+	}
+	return errorEnvelopeFor(err)
 }
 
 // errorEnvelopeFor maps a core error to the §6.10 envelope. The

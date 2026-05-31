@@ -127,20 +127,42 @@ def test_from_env_reads_registry(monkeypatch):
     assert client.overlay_path == "/tmp/overlay"
 
 
-# Spec: §4.7.6 — dependents_of returns artifacts that depend on the
-# given id, surfaced as ArtifactDescriptor instances.
-def test_dependents_of_decodes_envelope(stub_server):
+# Spec: §7.6 — search_artifacts forwards the session_id filter (F-7.6.3).
+def test_search_artifacts_forwards_session_id(stub_server):
+    stub_server.next_response = {"query": "q", "total_matched": 0, "results": []}
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    client.search_artifacts("variance", session_id="sess-7")
+    assert "session_id=sess-7" in stub_server.last_path
+
+
+# Spec: §7.6.1 — load_artifact forwards --session-id for consistent latest
+# resolution within a session (F-7.6.5, F-7.6.6).
+def test_load_artifact_forwards_session_id(stub_server):
     stub_server.next_response = {
-        "dependents": [
-            {"id": "finance/run", "type": "skill", "version": "1.0.0",
-             "description": "Variance"},
+        "id": "finance/run", "type": "skill", "version": "1.0.0",
+        "manifest_body": "b", "frontmatter": "f",
+    }
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    client.load_artifact("finance/run", session_id="sess-9")
+    assert "session_id=sess-9" in stub_server.last_path
+
+
+# Spec: §7.6 / §4.7.6 — dependents_of reads the server's {"edges": [...]}
+# envelope (matching the TypeScript SDK and the /v1/dependents handler) and
+# returns DependencyEdge objects with from/to/kind.
+def test_dependents_of_decodes_edges(stub_server):
+    stub_server.next_response = {
+        "edges": [
+            {"from": "finance/run", "to": "finance/glossary", "kind": "extends"},
         ],
     }
     client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
     deps = client.dependents_of("finance/glossary")
     assert "/v1/dependents" in stub_server.last_path
     assert len(deps) == 1
-    assert deps[0].id == "finance/run"
+    assert deps[0].from_ == "finance/run"
+    assert deps[0].to == "finance/glossary"
+    assert deps[0].kind == "extends"
 
 
 # Spec: §6.4 — preview_scope hits /v1/scope/preview with the

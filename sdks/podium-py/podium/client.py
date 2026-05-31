@@ -41,6 +41,20 @@ class ArtifactDescriptor:
 
 
 @dataclass
+class DependencyEdge:
+    """A reverse-dependency edge returned by dependents_of (spec §7.6).
+
+    Mirrors the server envelope ``{"from", "to", "kind"}`` and the
+    TypeScript SDK's ``DependencyEdge``. ``from_`` carries the wire
+    ``from`` field, renamed because ``from`` is a Python keyword.
+    """
+
+    from_: str = ""
+    to: str = ""
+    kind: str = ""
+
+
+@dataclass
 class SearchResult:
     """Envelope returned by search_artifacts and search_domains."""
 
@@ -321,6 +335,7 @@ class Client:
         scope: str = "",
         tags: list[str] | None = None,
         top_k: int = 10,
+        session_id: str = "",
     ) -> SearchResult:
         params: dict[str, Any] = {"top_k": top_k}
         if query:
@@ -331,6 +346,9 @@ class Client:
             params["scope"] = scope
         if tags:
             params["tags"] = ",".join(tags)
+        # spec: §7.6 — session_id for session-consistent retrieval.
+        if session_id:
+            params["session_id"] = session_id
         body = self._get("/v1/search_artifacts", params)
         results = [
             ArtifactDescriptor(
@@ -349,10 +367,16 @@ class Client:
             results=results,
         )
 
-    def load_artifact(self, artifact_id: str, *, version: str = "") -> LoadedArtifact:
+    def load_artifact(
+        self, artifact_id: str, *, version: str = "", session_id: str = ""
+    ) -> LoadedArtifact:
         params = {"id": artifact_id}
         if version:
             params["version"] = version
+        # spec: §7.6.1 — --session-id maps to load_artifact session_id for
+        # consistent latest resolution within a session (§4.7.6).
+        if session_id:
+            params["session_id"] = session_id
         body = self._get("/v1/load_artifact", params)
         return LoadedArtifact(
             id=body.get("id", artifact_id),
@@ -410,18 +434,21 @@ class Client:
             out.extend(_batch_result_from(env) for env in json.loads(raw))
         return out
 
-    def dependents_of(self, artifact_id: str) -> list[ArtifactDescriptor]:
-        """Return artifacts that depend on artifact_id (spec §4.7.6)."""
+    def dependents_of(self, artifact_id: str) -> list[DependencyEdge]:
+        """Return reverse-dependency edges for artifact_id (spec §7.6, §4.7.6).
+
+        The server replies with ``{"edges": [{"from", "to", "kind"}]}``
+        (matching the TypeScript SDK). Each edge names a dependent and the
+        dependency kind (extends, delegates_to, mcpServers).
+        """
         body = self._get("/v1/dependents", {"id": artifact_id})
         return [
-            ArtifactDescriptor(
-                id=r.get("id", ""),
-                type=r.get("type", ""),
-                version=r.get("version", ""),
-                description=r.get("description", ""),
-                tags=r.get("tags") or [],
+            DependencyEdge(
+                from_=e.get("from", ""),
+                to=e.get("to", ""),
+                kind=e.get("kind", ""),
             )
-            for r in body.get("dependents", []) or []
+            for e in body.get("edges", []) or []
         ]
 
     def preview_scope(

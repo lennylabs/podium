@@ -309,6 +309,8 @@ export class Client {
       scope?: string;
       tags?: string[];
       topK?: number;
+      // spec: §7.6 — session_id for session-consistent retrieval.
+      sessionID?: string;
     } = {},
   ): Promise<SearchResult> {
     const params: Record<string, unknown> = { top_k: opts.topK ?? 10 };
@@ -316,12 +318,20 @@ export class Client {
     if (opts.type) params.type = opts.type;
     if (opts.scope) params.scope = opts.scope;
     if (opts.tags?.length) params.tags = opts.tags.join(",");
+    if (opts.sessionID) params.session_id = opts.sessionID;
     return this.get("/v1/search_artifacts", params) as Promise<SearchResult>;
   }
 
-  async loadArtifact(id: string, version?: string): Promise<LoadedArtifact> {
+  // spec: §7.6.1 — load_artifact accepts session_id for consistent latest
+  // resolution within a session (§4.7.6).
+  async loadArtifact(
+    id: string,
+    version?: string,
+    opts: { sessionID?: string } = {},
+  ): Promise<LoadedArtifact> {
     const params: Record<string, unknown> = { id };
     if (version) params.version = version;
+    if (opts.sessionID) params.session_id = opts.sessionID;
     const data = (await this.get("/v1/load_artifact", params)) as Partial<LoadedArtifact>;
     return new LoadedArtifact(data);
   }

@@ -630,6 +630,8 @@ func searchCmd(args []string) int {
 	typeFilter := fs.String("type", "", "filter by artifact type")
 	scope := fs.String("scope", "", "constrain results to a path prefix")
 	topK := fs.Int("top-k", 10, "max results")
+	// spec: §7.6.1 — podium search flag --tags mirrors the SDK arg.
+	tagsFlag := fs.String("tags", "", "comma-separated tag filter")
 	asJSON := fs.Bool("json", false, "JSON output")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
@@ -649,6 +651,9 @@ func searchCmd(args []string) int {
 	}
 	if *scope != "" {
 		params["scope"] = *scope
+	}
+	if *tagsFlag != "" {
+		params["tags"] = *tagsFlag
 	}
 	if *topK > 0 {
 		params["top_k"] = fmt.Sprintf("%d", *topK)
@@ -794,6 +799,9 @@ func artifactShow(args []string) int {
 	fs := flag.NewFlagSet("artifact show", flag.ContinueOnError)
 	setUsage(fs, "Print an artifact's manifest body and frontmatter.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
+	// spec: §7.6.1 — podium artifact show flags --version and --session-id.
+	version := fs.String("version", "", "specific version (default: latest)")
+	sessionID := fs.String("session-id", "", "session id for consistent latest resolution")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
@@ -806,8 +814,14 @@ func artifactShow(args []string) int {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")
 		return 2
 	}
-	body := mustGetJSON(*registry, "/v1/load_artifact",
-		map[string]string{"id": fs.Arg(0)})
+	params := map[string]string{"id": fs.Arg(0)}
+	if *version != "" {
+		params["version"] = *version
+	}
+	if *sessionID != "" {
+		params["session_id"] = *sessionID
+	}
+	body := mustGetJSON(*registry, "/v1/load_artifact", params)
 	fmt.Println(string(body))
 	return 0
 }
