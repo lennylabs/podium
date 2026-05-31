@@ -78,6 +78,7 @@ func layerUpdate(args []string) int {
 	public := fs.Bool("public", false, "set visibility to public")
 	organization := fs.Bool("organization", false, "set visibility to organization-wide")
 	forcePush := fs.String("force-push-policy", "", "git force-push handling: tolerant or strict")
+	rotateSecret := fs.Bool("rotate-webhook-secret", false, "regenerate the git layer's HMAC webhook secret and print the new value")
 	var groups, users stringSliceFlag
 	fs.Var(&groups, "group", "OIDC group with visibility (repeatable)")
 	fs.Var(&users, "user", "OIDC sub with visibility (repeatable)")
@@ -101,6 +102,9 @@ func layerUpdate(args []string) int {
 	}
 	if *forcePush != "" {
 		body["force_push_policy"] = *forcePush
+	}
+	if *rotateSecret {
+		body["rotate_webhook_secret"] = true
 	}
 	if *owner != "" {
 		body["owner"] = *owner

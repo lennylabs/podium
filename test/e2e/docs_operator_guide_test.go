@@ -21,9 +21,8 @@ package e2e
 //     requires a signed medium artifact.
 //   - Test 21: private layer visibility.denied audit event — default standalone
 //     layers are public; private layer visibility control is uncertain.
-//   - Test 23: webhook ingest invalid HMAC — the layer webhook ingest route
-//     requires a git-type layer; the webhook URL is /v1/layers/<id>/webhook
-//     which is not mounted in the standalone handler (only /v1/webhooks/* is).
+//   - Test 23: webhook ingest invalid HMAC — REAL. The inbound route is
+//     mounted at /v1/ingest/webhook/{id} and advertised at register (F-12.0.1).
 //   - Tests 43, 44: need OIDC IdP or runtime-verified JWT.
 //   - Tests 25: sandbox enforcement via MCP — REAL (feasible).
 //   - Tests 33: /readyz in read_only — probe not triggerable.
@@ -35,6 +34,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -463,9 +463,48 @@ func TestOpGuide_22_AdminVerifyAuditChain(t *testing.T) {
 
 // ---- T-D-operator-guide-23: webhook invalid HMAC => ingest.webhook_invalid --
 
-// T-D-operator-guide-23
+// T-D-operator-guide-23 — operator-guide security-review checklist: a Git
+// provider webhook delivery carrying an invalid HMAC signature is rejected
+// as ingest.webhook_invalid and never reaches the content store. The
+// inbound webhook is mounted at /v1/ingest/webhook/{id} and advertised at
+// register time (spec §7.3.1, §6.10, §12). F-12.0.1.
 func TestOpGuide_23_WebhookInvalidHMAC(t *testing.T) {
-	t.Skip("the layer webhook ingest route /v1/layers/<id>/webhook is not mounted in the standalone server handler (only /v1/webhooks/* for outbound delivery); cannot exercise ingest.webhook_invalid path in e2e")
+	t.Parallel()
+	srv := startServer(t, "")
+
+	// Register a git layer; the response advertises the per-layer webhook URL.
+	st, body := apiDo(t, "POST", srv.BaseURL+"/v1/layers", map[string]any{
+		"id": "vendor-hooks", "source_type": "git",
+		"repo": "git@github.com:acme/vendor.git", "ref": "main",
+	})
+	apiWantStatus(t, st, 201, "register git layer", body)
+	var reg struct {
+		WebhookURL    string `json:"webhook_url"`
+		WebhookSecret string `json:"webhook_secret"`
+	}
+	if err := json.Unmarshal(body, &reg); err != nil {
+		t.Fatalf("decode register response: %v\n%s", err, body)
+	}
+	if reg.WebhookURL == "" || reg.WebhookSecret == "" {
+		t.Fatalf("register did not advertise webhook url/secret: %s", body)
+	}
+
+	// A delivery with a bogus signature header fails verification: 401
+	// ingest.webhook_invalid, and no ingest is triggered.
+	badReq, _ := http.NewRequest("POST", srv.BaseURL+reg.WebhookURL,
+		bytes.NewReader([]byte(`{"ref":"refs/heads/main"}`)))
+	badReq.Header.Set("X-Hub-Signature-256", "sha256=deadbeefdeadbeef")
+	resp, err := httpClient.Do(badReq)
+	if err != nil {
+		t.Fatalf("POST webhook (bad sig): %v", err)
+	}
+	buf := new(bytes.Buffer)
+	_, _ = buf.ReadFrom(resp.Body)
+	resp.Body.Close()
+	apiWantStatus(t, resp.StatusCode, 401, "invalid webhook signature", buf.Bytes())
+	if code := apiJSONObj(t, buf.Bytes())["code"]; code != "ingest.webhook_invalid" {
+		t.Fatalf("code = %v, want ingest.webhook_invalid\n%s", code, buf.Bytes())
+	}
 }
 
 // ---- T-D-operator-guide-24: per-layer visibility via injected-session-token -

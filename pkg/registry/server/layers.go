@@ -200,6 +200,11 @@ type LayerRegisterRequest struct {
 	// the empty string leaves the prior value; "tolerant" explicitly
 	// resets it.
 	ForcePushPolicy string `json:"force_push_policy,omitempty"`
+	// RotateWebhookSecret requests a fresh HMAC webhook secret on the
+	// update path (§12 "Per-layer HMAC secret rotated via `podium layer
+	// update`"). When true on a git layer the handler regenerates
+	// WebhookSecret and returns the new value once. Ignored on register.
+	RotateWebhookSecret bool `json:"rotate_webhook_secret,omitempty"`
 }
 
 // validForcePushPolicy reports whether p is one of the §7.3.1 accepted
@@ -261,9 +266,10 @@ func (e *LayerEndpoint) WebhookHandler() http.Handler {
 // the whole config and accidentally clear visibility filters.
 //
 // Allowed mutations: visibility (Public, Organization, Groups,
-// Users), Ref, Root, LocalPath, Owner. The store-bound identifying
-// fields (TenantID, ID, SourceType, CreatedAt) and webhook secrets
-// are immutable.
+// Users), Ref, Root, LocalPath, Owner, ForcePushPolicy, and a
+// webhook-secret rotation (rotate_webhook_secret). The store-bound
+// identifying fields (TenantID, ID, SourceType, CreatedAt) are
+// immutable.
 func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "registry.invalid_argument",
@@ -319,6 +325,24 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	if patch.LocalPath != "" {
 		cfg.LocalPath = patch.LocalPath
 	}
+	// spec: §12 — "Per-layer HMAC secret rotated via `podium layer
+	// update`." A compromised secret is replaced here; only a git layer
+	// carries one, so a rotation request on a non-git layer is rejected.
+	rotated := false
+	if patch.RotateWebhookSecret {
+		if cfg.SourceType != "git" {
+			writeError(w, http.StatusBadRequest, "registry.invalid_argument",
+				"rotate_webhook_secret applies only to a git layer")
+			return
+		}
+		secret, err := generateSecret()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+			return
+		}
+		cfg.WebhookSecret = secret
+		rotated = true
+	}
 	// spec: §4.6 — a user-defined layer's owner and implicit
 	// users:[owner] visibility are fixed at registration and cannot be
 	// widened, so visibility/owner patches are ignored for it. An admin
@@ -344,7 +368,17 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, LayerRegisterResponse{Layer: cfg})
+	// spec §8.1: a config mutation (including a secret rotation) is an
+	// auditable layer.config_changed / layer.user_registered event.
+	e.emitLayerEvent(r, cfg, "update")
+	resp := LayerRegisterResponse{Layer: cfg}
+	// Return the freshly rotated secret once so the operator can register
+	// it on the source repo; it is never echoed on a plain update.
+	if rotated {
+		resp.WebhookURL = "/v1/ingest/webhook/" + cfg.ID
+		resp.WebhookSecret = cfg.WebhookSecret
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // register handles POST /v1/layers.

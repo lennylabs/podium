@@ -72,6 +72,90 @@ func TestLayerUpdate_PartialPatch(t *testing.T) {
 	}
 }
 
+// Spec: §12 — "Per-layer HMAC secret rotated via `podium layer update`."
+// A rotate_webhook_secret request on a git layer regenerates the stored
+// secret and returns the new value once; the prior secret no longer
+// verifies a delivery.
+func TestLayerUpdate_RotateWebhookSecret(t *testing.T) {
+	t.Parallel()
+	const tenantID = "t"
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: tenantID}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	if err := st.PutLayerConfig(context.Background(), store.LayerConfig{
+		TenantID: tenantID, ID: "vendor", SourceType: "git",
+		Repo: "git@example/vendor.git", Ref: "main",
+		WebhookSecret: "old-secret", CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	endpoint := server.NewLayerEndpoint(st, tenantID, server.NewModeTracker())
+	ts := httptest.NewServer(endpoint.Handler())
+	t.Cleanup(ts.Close)
+
+	body, _ := json.Marshal(map[string]any{"rotate_webhook_secret": true})
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/v1/layers/update?id=vendor", bytes.NewReader(body))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var out struct {
+		Layer         store.LayerConfig `json:"layer"`
+		WebhookURL    string            `json:"webhook_url"`
+		WebhookSecret string            `json:"webhook_secret"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.WebhookSecret == "" || out.WebhookSecret == "old-secret" {
+		t.Errorf("response secret = %q, want a fresh non-empty secret", out.WebhookSecret)
+	}
+	if out.WebhookURL != "/v1/ingest/webhook/vendor" {
+		t.Errorf("webhook_url = %q, want /v1/ingest/webhook/vendor", out.WebhookURL)
+	}
+	stored, _ := st.GetLayerConfig(context.Background(), tenantID, "vendor")
+	if stored.WebhookSecret == "old-secret" {
+		t.Errorf("stored secret was not rotated")
+	}
+	if stored.WebhookSecret != out.WebhookSecret {
+		t.Errorf("stored secret %q != returned secret %q", stored.WebhookSecret, out.WebhookSecret)
+	}
+}
+
+// Spec: §12 — only a git layer carries a webhook secret, so a rotation
+// request on a local layer is a registry.invalid_argument.
+func TestLayerUpdate_RotateWebhookSecretRejectsNonGit(t *testing.T) {
+	t.Parallel()
+	const tenantID = "t"
+	st := store.NewMemory()
+	_ = st.CreateTenant(context.Background(), store.Tenant{ID: tenantID})
+	if err := st.PutLayerConfig(context.Background(), store.LayerConfig{
+		TenantID: tenantID, ID: "local-team", SourceType: "local",
+		LocalPath: "/srv/team", CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	endpoint := server.NewLayerEndpoint(st, tenantID, server.NewModeTracker())
+	ts := httptest.NewServer(endpoint.Handler())
+	t.Cleanup(ts.Close)
+
+	body, _ := json.Marshal(map[string]any{"rotate_webhook_secret": true})
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/v1/layers/update?id=local-team", bytes.NewReader(body))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
 // Spec: §7.3.1 — updating an unknown layer returns
 // registry.not_found.
 func TestLayerUpdate_NotFound(t *testing.T) {

@@ -99,6 +99,81 @@ func (r ruleDomainImportCycle) Check(ctx context.Context, reg *filesystem.Regist
 	return out
 }
 
+// ruleDomainImportBroadGlob implements the §12 "Recursive globs in
+// DOMAIN.md are expensive" mitigation: "Lint warns on overly broad
+// recursive globs." An include pattern is overly broad when it contains a
+// `**` recursive segment with no literal path prefix to anchor it (for
+// example a bare `**` or `**/payments` at the domain root), so the
+// recursion can match the entire catalog. A pattern anchored by a literal
+// prefix (`finance/**`) is bounded and draws no warning. The warning is
+// advisory; ingest still succeeds (§4.5.2 keeps unresolved imports a
+// warning, and an over-broad import is likewise non-fatal).
+type ruleDomainImportBroadGlob struct{}
+
+func (ruleDomainImportBroadGlob) Code() string { return "lint.domain_import_broad_glob" }
+
+func (r ruleDomainImportBroadGlob) Check(ctx context.Context, reg *filesystem.Registry, _ []filesystem.ArtifactRecord) []Diagnostic {
+	if reg == nil {
+		return nil
+	}
+	var out []Diagnostic
+	// spec: §9.3 — bound the walk with the request context so a large
+	// registry cannot pin the linter.
+	for _, layer := range reg.Layers {
+		if ctx.Err() != nil {
+			break
+		}
+		for path, dom := range walkDomainsInLayer(layer) {
+			for _, pattern := range dom.Include {
+				if pattern == "" || !isBroadRecursiveGlob(pattern) {
+					continue
+				}
+				out = append(out, Diagnostic{
+					ArtifactID: path,
+					Code:       r.Code(),
+					Severity:   SeverityWarning,
+					Message: fmt.Sprintf(
+						"DOMAIN.md include pattern %q is an unbounded recursive glob; anchor it with a literal path prefix (for example finance/**) so it does not match the whole catalog",
+						pattern),
+				})
+			}
+		}
+	}
+	return out
+}
+
+// isBroadRecursiveGlob reports whether pattern, after `{a,b}` expansion,
+// has any alternative that is an unbounded recursive match: a `**` segment
+// with no literal leading segment to anchor it. `{a,b}/**` is bounded
+// (each alternative carries a literal prefix), so it does not warn; a bare
+// `**` or `**/...` does.
+func isBroadRecursiveGlob(pattern string) bool {
+	for _, alt := range expandAlternatives(pattern) {
+		if patternIsUnboundedRecursive(alt) {
+			return true
+		}
+	}
+	return false
+}
+
+// patternIsUnboundedRecursive reports whether a single (brace-free) glob
+// alternative contains a `**` segment yet has no literal leading path
+// segment. domainForPattern returns the literal prefix and "" when the
+// first segment is itself a wildcard, which is exactly the unbounded case.
+func patternIsUnboundedRecursive(alt string) bool {
+	hasDoubleStar := false
+	for _, seg := range strings.Split(alt, "/") {
+		if seg == "**" {
+			hasDoubleStar = true
+			break
+		}
+	}
+	if !hasDoubleStar {
+		return false
+	}
+	return domainForPattern(alt) == ""
+}
+
 // ruleDomainDiscoveryOverrideDisallowed implements the §4.5.5
 // "allow_per_domain_overrides: false" lint promise: when the tenant
 // disables per-domain discovery overrides registry-wide, a DOMAIN.md

@@ -83,6 +83,11 @@ type Registry struct {
 	// discovery.allow_per_domain_overrides: false disables per-domain
 	// discovery overrides registry-wide.
 	allowPerDomainOverrides bool
+	// importCache memoizes §4.5.2 DOMAIN.md include/exclude glob expansion
+	// per visible artifact-ID snapshot (§12 "Glob expansion is cached
+	// server-side per artifact-version snapshot; cache invalidation is
+	// keyed on ingest events"). Nil falls back to uncached resolution.
+	importCache *importCache
 }
 
 // DiscoveryDefaults carries the §13.12 tenant-scope discovery knobs from
@@ -151,7 +156,7 @@ type AuditEvent struct {
 func New(s store.Store, tenantID string, layers []layer.Layer) *Registry {
 	// §4.5.5: per-domain discovery overrides are allowed unless a tenant
 	// opts out via discovery.allow_per_domain_overrides: false.
-	return &Registry{store: s, tenantID: tenantID, layers: layers, allowPerDomainOverrides: true}
+	return &Registry{store: s, tenantID: tenantID, layers: layers, allowPerDomainOverrides: true, importCache: newImportCache()}
 }
 
 // WithDiscoveryDefaults wires the §13.12 tenant-scope `discovery:` knobs
@@ -467,11 +472,18 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 	under := manifestsUnder(visible, path)
 	allIDs := manifestIDs(visible)
 	byID := latestByID(visible)
+	// §12 glob-expansion cache: every include/exclude resolution in this
+	// load_domain runs over the same allIDs snapshot, so route them through
+	// the per-snapshot importCache. resolveImports memoizes the expansion
+	// and invalidates when an ingest changes the visible artifact-ID set.
+	resolveImports := func(include, exclude []string) []string {
+		return r.resolveImports(include, exclude, allIDs)
+	}
 	// §4.5.5 / F-4.5.13: domains that carry curated content (a DOMAIN.md
 	// description/body/keywords or resolved include: members) are not bare
 	// pass-throughs and must not be collapsed away. Precomputed once and
 	// shared by the fold/collapse logic at every level.
-	curated := curatedDomainPaths(merged, allIDs)
+	curated := curatedDomainPaths(merged, resolveImports)
 
 	// §4.5.5 candidate pool for the notable list: the requested
 	// domain's direct artifacts plus those brought in by include:
@@ -491,7 +503,7 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 		}
 		addCandidate(descriptorOf(m))
 	}
-	for _, iid := range domainpkg.ResolveImports(knobs.include, knobs.exclude, allIDs) {
+	for _, iid := range resolveImports(knobs.include, knobs.exclude) {
 		if rec, ok := byID[iid]; ok {
 			addCandidate(descriptorOf(rec))
 		}
@@ -513,7 +525,7 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 		}
 		// §4.5.5 visibility-aware count: canonical descendants plus any
 		// members a DOMAIN.md in the subtree pulls in via include: (F-4.5.13).
-		recursiveCount := subtreeMemberCount(groups[name], childPath, merged, allIDs)
+		recursiveCount := subtreeMemberCount(groups[name], childPath, merged, resolveImports)
 		if knobs.foldBelow > 0 && recursiveCount < knobs.foldBelow {
 			for _, m := range dedupeLatest(groups[name]) {
 				if domainpkg.MatchAny(knobs.exclude, m.ArtifactID) {
@@ -694,7 +706,7 @@ func collapsePassthroughChain(under []store.ManifestRecord, path string, curated
 // or keywords, or when its include: (after exclude:) resolves at least
 // one imported member. Collapsing past such a domain would drop its
 // description and curated member set from the rendered tree.
-func curatedDomainPaths(merged map[string]*manifest.Domain, allIDs []string) map[string]bool {
+func curatedDomainPaths(merged map[string]*manifest.Domain, resolveImports func(include, exclude []string) []string) map[string]bool {
 	out := map[string]bool{}
 	for p, dom := range merged {
 		if dom == nil {
@@ -708,7 +720,7 @@ func curatedDomainPaths(merged map[string]*manifest.Domain, allIDs []string) map
 			out[p] = true
 			continue
 		}
-		if len(domainpkg.ResolveImports(dom.Include, dom.Exclude, allIDs)) > 0 {
+		if len(resolveImports(dom.Include, dom.Exclude)) > 0 {
 			out[p] = true
 		}
 	}
@@ -721,7 +733,7 @@ func curatedDomainPaths(merged map[string]*manifest.Domain, allIDs []string) map
 // exclude:) anywhere in the subtree. Imported members count toward the
 // fold_below_artifacts decision so a domain whose members arrive only
 // through include: is not treated as sparse (F-4.5.13).
-func subtreeMemberCount(records []store.ManifestRecord, subtreePath string, merged map[string]*manifest.Domain, allIDs []string) int {
+func subtreeMemberCount(records []store.ManifestRecord, subtreePath string, merged map[string]*manifest.Domain, resolveImports func(include, exclude []string) []string) int {
 	seen := map[string]bool{}
 	for _, m := range records {
 		seen[m.ArtifactID] = true
@@ -730,11 +742,22 @@ func subtreeMemberCount(records []store.ManifestRecord, subtreePath string, merg
 		if dom == nil || !inPrefix(p, subtreePath) {
 			continue
 		}
-		for _, id := range domainpkg.ResolveImports(dom.Include, dom.Exclude, allIDs) {
+		for _, id := range resolveImports(dom.Include, dom.Exclude) {
 			seen[id] = true
 		}
 	}
 	return len(seen)
+}
+
+// resolveImports expands the §4.5.2 include/exclude globs against the
+// visible artifact-ID snapshot, serving the §12 per-snapshot importCache
+// when one is wired. A nil cache (a Registry built without New) falls back
+// to uncached resolution so the result is identical either way.
+func (r *Registry) resolveImports(include, exclude, allIDs []string) []string {
+	if r.importCache == nil {
+		return domainpkg.ResolveImports(include, exclude, allIDs)
+	}
+	return r.importCache.resolve(include, exclude, allIDs)
 }
 
 // estimateResponseTokens approximates the token cost of a load_domain

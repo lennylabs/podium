@@ -118,6 +118,7 @@ func AllRulesWithClient(client *http.Client) []Rule {
 		ruleProseReferenceResolution{HTTPClient: client},
 		ruleDomainImportsResolve{},
 		ruleDomainImportCycle{},
+		ruleDomainImportBroadGlob{},
 	}
 }
 
