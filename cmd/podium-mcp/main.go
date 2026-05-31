@@ -599,9 +599,19 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
+// maxFrameBytes caps the size of a single inbound JSON-RPC line. The §6.8
+// process model is a long-lived stdio subprocess, so a single oversized frame
+// must fail only that request rather than tearing the process down: when a
+// frame exceeds this cap the serve loop emits a structured error response and
+// keeps serving (F-6.8.2). The cap is generous enough for a tools/call whose
+// arguments carry large inline data while still bounding memory.
+const maxFrameBytes = 16 * 1024 * 1024
+
 func (s *mcpServer) serve(r io.Reader, w io.Writer) error {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	// Read line-delimited frames with a bounded reader. A frame longer than
+	// maxFrameBytes is reported (tooLong) and drained rather than buffered in
+	// full, so memory stays bounded by the bufio buffer (F-6.8.2).
+	reader := bufio.NewReaderSize(r, 64*1024)
 	s.outMu.Lock()
 	s.out = json.NewEncoder(w)
 	s.outMu.Unlock()
@@ -615,29 +625,104 @@ func (s *mcpServer) serve(r io.Reader, w io.Writer) error {
 	// the bridge subprocess.
 	stopOverlay := s.startOverlayWatch()
 	defer stopOverlay()
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		// §6.4 step 2: intercept the host's reply to our server-initiated
-		// roots/list request and resolve the workspace overlay from it,
-		// instead of mis-dispatching the reply as an inbound request.
-		if s.applyRootsResponse(line) {
-			continue
+	// §6.8: the host owns the lifecycle. The loop ends only when stdin
+	// reaches EOF (the host closing the pipe); there is no signal-driven
+	// shutdown here (F-6.8.3). A read error other than EOF propagates.
+	for {
+		line, tooLong, err := readFrame(reader, maxFrameBytes)
+		if tooLong {
+			// F-6.8.2: fail only this request, keep serving. The frame's id
+			// is unrecoverable, so the error carries a null id per JSON-RPC.
+			if sendErr := s.send(rpcResponse{
+				JSONRPC: "2.0",
+				Error: &rpcError{
+					Code:    -32600,
+					Message: fmt.Sprintf("invalid request: inbound frame exceeds %d-byte limit", maxFrameBytes),
+				},
+			}); sendErr != nil {
+				return sendErr
+			}
+		} else if len(bytes.TrimSpace(line)) > 0 {
+			if derr := s.dispatchLine(line); derr != nil {
+				return derr
+			}
 		}
-		var req rpcRequest
-		if err := json.Unmarshal(line, &req); err != nil {
-			continue
-		}
-		resp := s.handle(req)
-		if err := s.send(resp); err != nil {
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
 			return err
 		}
-		// §6.4 step 2: once initialize is acknowledged, ask the host for
-		// its workspace roots when no explicit PODIUM_OVERLAY_PATH was set.
-		if req.Method == "initialize" {
-			s.requestRootsIfNeeded()
+	}
+}
+
+// dispatchLine routes one well-formed inbound frame. It returns a non-nil
+// error only when writing a response to the host fails (a broken output pipe),
+// in which case serve exits.
+func (s *mcpServer) dispatchLine(line []byte) error {
+	// §6.4 step 2: intercept the host's reply to our server-initiated
+	// roots/list request and resolve the workspace overlay from it,
+	// instead of mis-dispatching the reply as an inbound request.
+	if s.applyRootsResponse(line) {
+		return nil
+	}
+	var req rpcRequest
+	if err := json.Unmarshal(line, &req); err != nil {
+		return nil
+	}
+	// §6.8 / JSON-RPC 2.0: a notification is a request with no id and must
+	// not receive a response. The host-driven lifecycle sends
+	// notifications/initialized after initialize, and may send others such
+	// as notifications/cancelled and notifications/roots/list_changed.
+	// Dispatching them through handle would fall to the default branch and
+	// emit a spurious -32601 error frame, which strict hosts treat as a
+	// protocol error mid-handshake (F-6.8.1). An absent id leaves req.ID nil;
+	// an explicit null id (a malformed request, not a notification) decodes
+	// to the bytes "null" and is still answered.
+	if req.ID == nil {
+		return nil
+	}
+	resp := s.handle(req)
+	if err := s.send(resp); err != nil {
+		return err
+	}
+	// §6.4 step 2: once initialize is acknowledged, ask the host for
+	// its workspace roots when no explicit PODIUM_OVERLAY_PATH was set.
+	if req.Method == "initialize" {
+		s.requestRootsIfNeeded()
+	}
+	return nil
+}
+
+// readFrame reads one '\n'-delimited frame from r, bounding buffered memory to
+// max bytes. When a frame exceeds max it returns tooLong=true and discards the
+// remainder of the line so the next call resumes at the following frame; the
+// returned line is then empty. err is io.EOF once the stream is exhausted (with
+// any trailing partial frame returned alongside it).
+func readFrame(r *bufio.Reader, max int) (line []byte, tooLong bool, err error) {
+	var buf []byte
+	for {
+		seg, e := r.ReadSlice('\n')
+		if !tooLong {
+			if len(buf)+len(seg) > max {
+				// Stop accumulating; keep draining to the newline so the
+				// oversized frame does not corrupt the next one.
+				tooLong = true
+				buf = nil
+			} else {
+				// seg aliases the reader's buffer; copy it out.
+				buf = append(buf, seg...)
+			}
+		}
+		switch e {
+		case bufio.ErrBufferFull:
+			continue
+		case nil:
+			return buf, tooLong, nil
+		default:
+			return buf, tooLong, e
 		}
 	}
-	return scanner.Err()
 }
 
 // send writes one JSON-RPC message (a tool response or a server-initiated
