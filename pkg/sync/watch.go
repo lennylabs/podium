@@ -124,6 +124,15 @@ func runWatch(ctx context.Context, opts WatchOptions, events chan<- WatchEvent) 
 	}
 }
 
+// PathSignature returns a stable content fingerprint over one or more
+// filesystem trees, suitable for poll-based change detection. Two
+// signatures are equal iff every (path, modtime, size) tuple matches
+// across calls. It is exported so other poll-based watchers (the §6.4
+// MCP overlay watcher) reuse the same detection logic.
+func PathSignature(paths ...string) string {
+	return watchSignature(paths...)
+}
+
 // watchSignature returns a stable fingerprint of the watched paths.
 // Two signatures are equal iff every (path, modtime, size) tuple
 // matches across calls. Walks that fail (e.g., transient permission

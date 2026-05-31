@@ -30,7 +30,8 @@ func (s *mcpServer) searchArtifacts(args map[string]any) any {
 	if err := json.Unmarshal(body, &registry); err != nil {
 		return errorResult("decode search_artifacts: " + err.Error())
 	}
-	if len(s.overlay) == 0 {
+	overlayRecords := s.overlaySnapshot()
+	if len(overlayRecords) == 0 {
 		// No overlay: pass the registry response through untouched
 		// so single-deployment behavior is unchanged.
 		return jsonAny(body)
@@ -41,7 +42,7 @@ func (s *mcpServer) searchArtifacts(args map[string]any) any {
 	scope, _ := args["scope"].(string)
 	tags := tagsArg(args)
 	topK := topKArg(args)
-	local := localSearch(s.overlay, query, typeFilter, scope, tags, topK)
+	local := localSearch(overlayRecords, query, typeFilter, scope, tags, topK)
 
 	// §9.1 LocalSearchProvider: when an overlay semantic backend is
 	// configured, contribute a vector-ranked stream fused alongside the
@@ -50,16 +51,45 @@ func (s *mcpServer) searchArtifacts(args map[string]any) any {
 	var semantic []localSearchResult
 	if s.localSem != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), localSemanticTimeout)
-		semantic = s.localSem.search(ctx, s.overlay, query, typeFilter, scope, tags, topK)
+		semantic = s.localSem.search(ctx, overlayRecords, query, typeFilter, scope, tags, topK)
 		cancel()
 	}
 
 	fused := rrfFuse(registry.Results, topK, local, semantic)
 	return map[string]any{
 		"query":         registry.Query,
-		"total_matched": registry.TotalMatched + len(local),
+		"total_matched": fusedTotalMatched(registry.TotalMatched, registry.Results, local, semantic),
 		"results":       fused,
 	}
+}
+
+// fusedTotalMatched defines total_matched for the §6.4.1 fused response as
+// the count of distinct artifacts matched across both streams. The registry's
+// own pre-truncation total is the authoritative count for its stream; an
+// overlay artifact the registry already returned must not be counted again
+// (it is one artifact, and rrfFuse merges it into a single descriptor), so
+// only overlay artifacts absent from the registry's returned results add to
+// the total. This avoids both the double-count of overlapping hits and the
+// summing of a pre-truncation registry total with a post-truncation local
+// count. F-6.4.4.
+func fusedTotalMatched(registryTotal int, registryResults []map[string]any, locals ...[]localSearchResult) int {
+	seen := make(map[string]bool, len(registryResults))
+	for _, r := range registryResults {
+		if id, _ := r["id"].(string); id != "" {
+			seen[id] = true
+		}
+	}
+	overlayOnly := 0
+	for _, local := range locals {
+		for _, r := range local {
+			if r.ID == "" || seen[r.ID] {
+				continue
+			}
+			seen[r.ID] = true
+			overlayOnly++
+		}
+	}
+	return registryTotal + overlayOnly
 }
 
 // offlineSearchArtifacts builds the §12 offline result for search_artifacts
@@ -68,7 +98,8 @@ func (s *mcpServer) searchArtifacts(args map[string]any) any {
 // the status tells the host the registry stream was unavailable.
 func (s *mcpServer) offlineSearchArtifacts(args map[string]any) any {
 	query, _ := args["query"].(string)
-	if len(s.overlay) == 0 {
+	overlayRecords := s.overlaySnapshot()
+	if len(overlayRecords) == 0 {
 		return map[string]any{
 			"status":        "offline",
 			"query":         query,
@@ -80,18 +111,20 @@ func (s *mcpServer) offlineSearchArtifacts(args map[string]any) any {
 	scope, _ := args["scope"].(string)
 	tags := tagsArg(args)
 	topK := topKArg(args)
-	local := localSearch(s.overlay, query, typeFilter, scope, tags, topK)
+	local := localSearch(overlayRecords, query, typeFilter, scope, tags, topK)
 	var semantic []localSearchResult
 	if s.localSem != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), localSemanticTimeout)
-		semantic = s.localSem.search(ctx, s.overlay, query, typeFilter, scope, tags, topK)
+		semantic = s.localSem.search(ctx, overlayRecords, query, typeFilter, scope, tags, topK)
 		cancel()
 	}
 	fused := rrfFuse(nil, topK, local, semantic)
 	return map[string]any{
-		"status":        "offline",
-		"query":         query,
-		"total_matched": len(local),
+		"status": "offline",
+		"query":  query,
+		// No registry stream offline; the total is the count of distinct
+		// overlay artifacts matched across the local and semantic streams.
+		"total_matched": fusedTotalMatched(0, nil, local, semantic),
 		"results":       fused,
 	}
 }

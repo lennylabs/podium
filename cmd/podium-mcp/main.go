@@ -312,6 +312,12 @@ type mcpServer struct {
 	resolutions *resolutionCache
 	adapters    *adapter.Registry
 	overlay     []filesystem.ArtifactRecord
+	// overlayMu guards overlay and cfg.overlayPath. The §6.4 overlay
+	// watcher (a separate goroutine, startOverlayWatch) re-resolves the
+	// overlay records and swaps them on a filesystem change, while request
+	// handlers read them on the serve goroutine; the roots/list reply also
+	// writes both. All access goes through the guarded accessors below.
+	overlayMu sync.RWMutex
 	// localSem is the §9.1 LocalSearchProvider semantic index over the
 	// overlay. Nil when no overlay vector backend is configured, in which
 	// case the overlay search stays BM25-only.
@@ -395,16 +401,20 @@ func newServer(cfg *config) (*mcpServer, error) {
 		// registry URL (matching `podium login`).
 		tokens: identity.KeychainStore{Service: cfg.tokenKeychainName},
 	}
-	// §6.4 workspace overlay: load now and reuse for the bridge
-	// lifetime. An empty path or absent overlay disables the layer.
+	// §6.4 workspace overlay: load the initial records. The §6.4.1 watcher
+	// (started in serve) re-resolves and swaps them on every filesystem
+	// change so an edit, add, or remove is reflected without a restart.
 	if cfg.overlayPath != "" {
 		records, err := overlay.Filesystem{Path: cfg.overlayPath}.Resolve(nil)
 		if err == nil {
 			srv.overlay = records
+		} else {
+			// spec: §6.9 "Workspace overlay path missing" — skip the
+			// overlay but warn once, identifying the path, so a
+			// developer whose drafts are invisible gets a diagnostic
+			// rather than silence. The bridge still starts.
+			fmt.Fprintf(os.Stderr, "WARN: workspace overlay path %q unavailable (%v); overlay disabled\n", cfg.overlayPath, err)
 		}
-		// Errors other than ErrNoOverlay are silently ignored: the
-		// bridge runs without an overlay rather than refusing to
-		// start.
 	}
 	// §9.1 LocalSearchProvider: wire the optional overlay semantic index.
 	// A construction error (missing API key, unknown backend) disables the
@@ -524,12 +534,48 @@ func newSessionID() string {
 // reads from the highest-precedence layer before talking to the
 // registry.
 func (s *mcpServer) overlayMatch(id string) *filesystem.ArtifactRecord {
-	for i := range s.overlay {
-		if s.overlay[i].ID == id {
-			return &s.overlay[i]
+	records := s.overlaySnapshot()
+	for i := range records {
+		if records[i].ID == id {
+			return &records[i]
 		}
 	}
 	return nil
+}
+
+// overlaySnapshot returns the current overlay records under the read
+// lock. The slice is never mutated in place (the watcher replaces it
+// wholesale), so callers may read the returned slice without holding the
+// lock.
+func (s *mcpServer) overlaySnapshot() []filesystem.ArtifactRecord {
+	s.overlayMu.RLock()
+	defer s.overlayMu.RUnlock()
+	return s.overlay
+}
+
+// setOverlay swaps in a fresh set of overlay records under the write lock.
+// Called at startup, by the §6.4 watcher on a filesystem change, and by the
+// roots/list resolution.
+func (s *mcpServer) setOverlay(records []filesystem.ArtifactRecord) {
+	s.overlayMu.Lock()
+	s.overlay = records
+	s.overlayMu.Unlock()
+}
+
+// overlayPath returns the currently resolved overlay path under the read
+// lock; empty means the layer is disabled.
+func (s *mcpServer) overlayPath() string {
+	s.overlayMu.RLock()
+	defer s.overlayMu.RUnlock()
+	return s.cfg.overlayPath
+}
+
+// setOverlayPath records the resolved overlay path under the write lock so
+// the watcher picks up a path established after startup (roots/list).
+func (s *mcpServer) setOverlayPath(path string) {
+	s.overlayMu.Lock()
+	s.cfg.overlayPath = path
+	s.overlayMu.Unlock()
 }
 
 // rpcRequest is a JSON-RPC 2.0 request envelope.
@@ -564,6 +610,11 @@ func (s *mcpServer) serve(r io.Reader, w io.Writer) error {
 	// read currentToken() already performs. Stops when serve returns.
 	stop := s.startTokenWatch()
 	defer stop()
+	// §6.4 / §6.4.1: watch the resolved overlay path and re-index on
+	// change so in-progress overlay edits are visible without restarting
+	// the bridge subprocess.
+	stopOverlay := s.startOverlayWatch()
+	defer stopOverlay()
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		// §6.4 step 2: intercept the host's reply to our server-initiated
@@ -612,7 +663,7 @@ const rootsRequestID = "podium-roots-1"
 // wins), when the host did not advertise the roots capability, or when the
 // request was already sent.
 func (s *mcpServer) requestRootsIfNeeded() {
-	if s.cfg.overlayPath != "" || !s.hostSupportsRoots || s.rootsRequested {
+	if s.overlayPath() != "" || !s.hostSupportsRoots || s.rootsRequested {
 		return
 	}
 	s.rootsRequested = true
@@ -664,7 +715,7 @@ func (s *mcpServer) applyRootsResponse(line []byte) bool {
 // if it exists and load its records. It returns true once an overlay has
 // been resolved so the caller stops scanning further roots.
 func (s *mcpServer) resolveWorkspaceOverlay(workspace string) bool {
-	if workspace == "" || s.cfg.overlayPath != "" {
+	if workspace == "" || s.overlayPath() != "" {
 		return false
 	}
 	path, err := overlay.ResolveWorkspaceOverlay(workspace, "")
@@ -675,8 +726,10 @@ func (s *mcpServer) resolveWorkspaceOverlay(workspace string) bool {
 	if err != nil {
 		return false
 	}
-	s.cfg.overlayPath = path
-	s.overlay = records
+	// Set the path before the records so the watcher, which keys off the
+	// resolved path, observes a consistent (path, records) pair.
+	s.setOverlayPath(path)
+	s.setOverlay(records)
 	return true
 }
 
