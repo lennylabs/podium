@@ -13,16 +13,26 @@ import (
 // trace id and structured caller attributes (email, groups, public-mode
 // network, and the public_mode flag) from the per-request audit metadata
 // the server's identity middleware attached to the context.
-func auditEmitterFor(sink *audit.FileSink) core.AuditEmitter {
+//
+// Before each write it applies the two §8.2 redaction surfaces: manifest-
+// declared field redaction (RedactFields keyed by the event's RedactKeys)
+// and default-on query-text scrubbing (scrubber.ScrubEvent over the search
+// query). A nil scrubber disables query-text scrubbing.
+func auditEmitterFor(sink *audit.FileSink, scrubber *audit.PIIScrubber) core.AuditEmitter {
 	return func(ctx context.Context, e core.AuditEvent) {
+		fields := e.Context
+		if len(e.RedactKeys) > 0 {
+			fields = audit.RedactFields(fields, e.RedactKeys)
+		}
 		ev := audit.Event{
 			Type:           audit.EventType(e.Type),
 			Caller:         e.Caller,
 			Target:         e.Target,
-			Context:        e.Context,
+			Context:        fields,
 			ResolvedLayers: e.ResolvedLayers,
 			ResultSize:     e.ResultSize,
 		}
+		ev = scrubber.ScrubEvent(ev)
 		if m, ok := server.AuditMetaFromContext(ctx); ok {
 			ev.TraceID = m.TraceID
 			ev.PublicMode = m.PublicMode

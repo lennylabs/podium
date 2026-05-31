@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/embedding"
 	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/layer"
@@ -702,7 +703,14 @@ func Run() error {
 	// gracefully no-op).
 	auditSink := openAuditSink(cfg)
 	if auditSink != nil {
-		registry = registry.WithAudit(auditEmitterFor(auditSink))
+		// §8.2 default-on query-text scrubbing: build the scrubber from the
+		// resolved PIIRedactionConfig (env PODIUM_PII_REDACTION + registry.yaml
+		// pii_redaction). A nil scrubber means an operator disabled it.
+		scrubber, err := cfg.piiRedaction.BuildScrubber()
+		if err != nil {
+			return fmt.Errorf("pii redaction config: %w", err)
+		}
+		registry = registry.WithAudit(auditEmitterFor(auditSink, scrubber))
 		// spec §8.1: the same §8.3 sink records the HTTP-boundary events —
 		// admin.granted (grants handler) and layer.config_changed /
 		// layer.user_registered (layer endpoint) — so every audit stream
@@ -845,6 +853,9 @@ type Config struct {
 	// §8.5 retention enforcement.
 	auditRetentionInterval   int
 	auditRetentionMaxAgeDays int
+	// §8.2 query-text PII scrub config. Default-on (Enabled nil); sourced
+	// from PODIUM_PII_REDACTION and registry.yaml's pii_redaction block.
+	piiRedaction audit.PIIRedactionConfig
 	// §4.7.8 rate limits.
 	searchQPSLimit       int
 	materializeRateLimit int
@@ -958,6 +969,7 @@ func (c *Config) Settings() []Setting {
 		{"voyage_api_key", redact(c.voyageAPIKey), envOrSrc("VOYAGE_API_KEY", "")},
 		{"cohere_api_key", redact(c.cohereAPIKey), envOrSrc("COHERE_API_KEY", "")},
 		{"ollama_url", c.ollamaURL, envOrSrc("PODIUM_OLLAMA_URL", defaultSrc)},
+		{"pii_redaction.enabled", boolStr(c.piiRedaction.Active()), envOrSrc("PODIUM_PII_REDACTION", yamlSrc)},
 	}
 }
 
@@ -1043,6 +1055,8 @@ func LoadConfig() *Config {
 		// §8.5 retention enforcement.
 		auditRetentionInterval:   envInt("PODIUM_AUDIT_RETENTION_INTERVAL_SECONDS", 0),
 		auditRetentionMaxAgeDays: envInt("PODIUM_AUDIT_RETENTION_MAX_AGE_DAYS", 365),
+		// §8.2 query-text scrub: default-on, disabled with PODIUM_PII_REDACTION=false.
+		piiRedaction: audit.PIIRedactionConfig{Enabled: envBoolPtr("PODIUM_PII_REDACTION")},
 		// §4.7.8 rate limits.
 		searchQPSLimit:       envInt("PODIUM_QUOTA_SEARCH_QPS", 0),
 		materializeRateLimit: envInt("PODIUM_QUOTA_MATERIALIZE_RATE", 0),

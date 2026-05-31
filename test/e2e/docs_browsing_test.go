@@ -18,6 +18,7 @@ package e2e
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -699,10 +700,42 @@ func TestBrowsing_AuditArtifactLoaded(t *testing.T) {
 	}
 }
 
-// T-D-browsing-35 — search query PII scrubbed before audit.
+// T-D-browsing-35 — search query PII scrubbed before audit. spec: §8.2
+// (F-8.2.1): free-text queries are regex-scrubbed (SSN, credit-card,
+// email, phone) before being written to audit. Default-on.
 func TestBrowsing_AuditPIIScrubbed(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-8.2.1: query-text PII scrubbing is never applied in the runtime path; queries reach the audit log unredacted")
+	srv, auditLog := brStartAuditServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
+	// A query carrying an SSN and an email address.
+	getJSON(t, srv.BaseURL+"/v1/search_artifacts?query="+url.QueryEscape("ssn 123-45-6789 contact bob@acme.com"), nil)
+	if !brPollContains(auditLog, "[ssn-redacted]", 5*time.Second) {
+		t.Fatalf("audit log never recorded the redaction placeholder:\n%s", brReadOrEmpty(auditLog))
+	}
+	body := brReadOrEmpty(auditLog)
+	for _, leaked := range []string{"123-45-6789", "bob@acme.com"} {
+		if strings.Contains(body, leaked) {
+			t.Errorf("audit log leaked PII %q:\n%s", leaked, body)
+		}
+	}
+	if !strings.Contains(body, "[email-redacted]") {
+		t.Errorf("audit log missing email redaction placeholder:\n%s", body)
+	}
+}
+
+// T-D-browsing-35b — PODIUM_PII_REDACTION=false writes the raw query.
+// spec: §8.2 (F-8.2.2) the scrub is configurable and default-on.
+func TestBrowsing_AuditPIIScrubDisabled(t *testing.T) {
+	t.Parallel()
+	auditPath := filepath.Join(t.TempDir(), "audit.log")
+	srv := startServerArgs(t, []string{
+		"HOME=" + t.TempDir(),
+		"PODIUM_AUDIT_LOG_PATH=" + auditPath,
+		"PODIUM_PII_REDACTION=false",
+	}, "serve", "--standalone", "--layer-path", writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
+	getJSON(t, srv.BaseURL+"/v1/search_artifacts?query="+url.QueryEscape("ssn 123-45-6789"), nil)
+	if !brPollContains(auditPath, "123-45-6789", 5*time.Second) {
+		t.Errorf("disabled scrub should record the raw query:\n%s", brReadOrEmpty(auditPath))
+	}
 }
 
 // ---- SLO benchmarks (placement) --------------------------------------------

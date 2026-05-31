@@ -102,7 +102,11 @@ type config struct {
 	// config-file equivalent) was provided at all, so an explicit empty
 	// value selects the §6.2 default (~/.podium/audit.log) while an
 	// absent value leaves local auditing off (registry audit only).
-	auditSinkSet  bool
+	auditSinkSet bool
+	// piiRedaction is the §8.2 query-text scrub toggle for the local audit
+	// sink. Tri-state: nil (absent) means default-on, an explicit false
+	// disables scrubbing. Sourced from PODIUM_PII_REDACTION.
+	piiRedaction  *bool
 	tenantID      string
 	oauthAudience string
 	// §6.2 / §6.3 identity provider selection and the oauth-device-code
@@ -188,6 +192,12 @@ func loadConfig() (*config, error) {
 	// tell the two apart, so use LookupEnv.
 	if v, ok := os.LookupEnv("PODIUM_AUDIT_SINK"); ok {
 		c.auditSink, c.auditSinkSet = v, true
+	}
+	// §8.2 query-text scrub: default-on for the local audit sink, disabled
+	// only with PODIUM_PII_REDACTION=false.
+	if v, ok := os.LookupEnv("PODIUM_PII_REDACTION"); ok {
+		b := !piiDisabledValue(v)
+		c.piiRedaction = &b
 	}
 	// §6.1 / §6.2: the host may configure the bridge via env vars,
 	// command-line flags, or a config file. Flags and config-file values
@@ -294,6 +304,10 @@ type mcpServer struct {
 	// Nil when the var is unset, in which case auditing is left to the
 	// registry. When set, meta-tool calls append a local audit event.
 	audit audit.Sink
+	// scrubber applies the §8.2 default-on query-text PII scrub before a
+	// search event is written to the local audit sink. Nil when an operator
+	// disabled scrubbing via PODIUM_PII_REDACTION=false.
+	scrubber *audit.PIIScrubber
 	// hooks is the §6.6 step 4 MaterializationHook chain, run over the
 	// adapter output before the atomic write on every materialization path.
 	// Empty by default (step 4 is a no-op when no hooks are configured); the
@@ -360,7 +374,22 @@ func newServer(cfg *config) (*mcpServer, error) {
 		return nil, err
 	}
 	srv.audit = sink
+	// §8.2 query-text scrub: default-on; a nil scrubber means an operator
+	// disabled it with PODIUM_PII_REDACTION=false.
+	if cfg.piiRedaction == nil || *cfg.piiRedaction {
+		srv.scrubber = audit.NewPIIScrubber()
+	}
 	return srv, nil
+}
+
+// piiDisabledValue reports whether an env value turns the §8.2 query-text
+// scrub off. Any other value leaves it on (default-on).
+func piiDisabledValue(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "false", "0", "no", "off":
+		return true
+	}
+	return false
 }
 
 // newAuditSink builds the §6.2 local audit sink from PODIUM_AUDIT_SINK.
@@ -395,6 +424,23 @@ func (s *mcpServer) auditMeta(t audit.EventType, target string) {
 		Target:  target,
 		Context: map[string]string{"source": "mcp"},
 	})
+}
+
+// auditSearch appends a local audit event for a search meta-tool call,
+// applying the §8.2 default-on query-text scrub to the free-text query
+// before it lands in the local sink. A nil sink is a no-op; a nil scrubber
+// (operator-disabled) writes the query unredacted.
+func (s *mcpServer) auditSearch(t audit.EventType, query string) {
+	if s.audit == nil {
+		return
+	}
+	ev := audit.Event{
+		Type:    t,
+		Caller:  s.sessionID,
+		Context: map[string]string{"source": "mcp", "query": query},
+	}
+	ev = s.scrubber.ScrubEvent(ev)
+	_ = s.audit.Append(context.Background(), ev)
 }
 
 // newSessionID returns a random RFC 4122 v4 UUID string. The bridge
@@ -666,10 +712,10 @@ func (s *mcpServer) callTool(raw json.RawMessage) any {
 		s.auditMeta(audit.EventDomainLoaded, argString(p.Arguments, "path"))
 		return s.proxyGet("/v1/load_domain", p.Arguments)
 	case "search_domains":
-		s.auditMeta(audit.EventDomainsSearched, argString(p.Arguments, "query"))
+		s.auditSearch(audit.EventDomainsSearched, argString(p.Arguments, "query"))
 		return s.proxyGet("/v1/search_domains", p.Arguments)
 	case "search_artifacts":
-		s.auditMeta(audit.EventArtifactsSearched, argString(p.Arguments, "query"))
+		s.auditSearch(audit.EventArtifactsSearched, argString(p.Arguments, "query"))
 		return s.searchArtifacts(p.Arguments)
 	case "load_artifact":
 		s.auditMeta(audit.EventArtifactLoaded, argString(p.Arguments, "id"))

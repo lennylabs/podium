@@ -134,6 +134,15 @@ type AuditEvent struct {
 	// and 1 for a resolved load_artifact. Zero on the error paths and for
 	// non-read events. spec: §4.7.5, §8.1.
 	ResultSize int
+	// RedactKeys lists the context keys the resolved artifact's manifest
+	// named in audit_redact (§8.2 manifest-declared redaction). The audit
+	// adapter replaces those context values with [redacted] before writing
+	// to a sink. Eligible context keys on artifact.loaded are version,
+	// content_hash, and layer (the same keys the publish event carries),
+	// so a directive that names one of them is honored on reads as well as
+	// on ingest. Empty for events that do not reference a single resolved
+	// manifest. spec: §8.2.
+	RedactKeys []string
 }
 
 // New returns a Registry backed by the given store, tenant, and layer
@@ -1171,7 +1180,22 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 			}
 			return nil, fmt.Errorf("%w: artifact %s", ErrNotFound, artifactID)
 		}
-		return r.assembleResult(ctx, rec)
+		res, err := r.assembleResult(ctx, rec)
+		if err == nil {
+			// §8.2 manifest-declared redaction + §4.7.5 read-event context:
+			// record the resolved version/content_hash/layer and carry the
+			// manifest's audit_redact key set so the audit adapter masks any
+			// named eligible key before the event lands in a sink. This is
+			// the read-side counterpart of the ingest publish event, which
+			// already redacts these same keys.
+			ev.Context = map[string]string{
+				"version":      rec.Version,
+				"content_hash": rec.ContentHash,
+				"layer":        rec.Layer,
+			}
+			ev.RedactKeys = rec.AuditRedact
+		}
+		return res, err
 	}
 	pin, err := version.ParsePin(opts.Version)
 	if err != nil {

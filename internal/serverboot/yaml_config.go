@@ -6,6 +6,8 @@ import (
 	"regexp"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/lennylabs/podium/pkg/audit"
 )
 
 // fileConfig is the top-level registry.yaml document. §13.12 nests every
@@ -47,6 +49,9 @@ type yamlConfig struct {
 	// Tenant is the §3.5 per-tenant config block (currently the
 	// scope-preview gate). Config-file-only with an env override.
 	Tenant yamlTenant `yaml:"tenant,omitempty"`
+	// PIIRedaction is the §8.2 query-text scrub config (enable toggle and
+	// custom patterns). Default-on when absent; PODIUM_PII_REDACTION wins.
+	PIIRedaction audit.PIIRedactionConfig `yaml:"pii_redaction,omitempty"`
 }
 
 // yamlTenant mirrors the §3.5 `tenant:` block. ExposeScopePreview is
@@ -295,6 +300,15 @@ func applyYAML(c *Config, y *yamlConfig) {
 	// yaml value fills in only when the env var left it unset.
 	if c.exposeScopePreview == nil && y.Tenant.ExposeScopePreview != nil {
 		c.exposeScopePreview = y.Tenant.ExposeScopePreview
+	}
+	// §8.2 pii_redaction: env PODIUM_PII_REDACTION wins for the enable
+	// toggle; the yaml value fills it in only when the env left it unset.
+	// Custom patterns are config-file-only, so they overlay directly.
+	if c.piiRedaction.Enabled == nil && y.PIIRedaction.Enabled != nil {
+		c.piiRedaction.Enabled = y.PIIRedaction.Enabled
+	}
+	if len(y.PIIRedaction.Patterns) > 0 {
+		c.piiRedaction.Patterns = y.PIIRedaction.Patterns
 	}
 	if c.readOnlyProbeFailures == 0 && y.ReadOnly.ProbeFailures > 0 {
 		c.readOnlyProbeFailures = y.ReadOnly.ProbeFailures

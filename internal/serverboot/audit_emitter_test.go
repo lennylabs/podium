@@ -23,7 +23,7 @@ func TestAuditEmitterFor_AppendsToSink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFileSink: %v", err)
 	}
-	emit := auditEmitterFor(sink)
+	emit := auditEmitterFor(sink, audit.NewPIIScrubber())
 	emit(context.Background(), core.AuditEvent{
 		Type:    "domain.loaded",
 		Caller:  "alice",
