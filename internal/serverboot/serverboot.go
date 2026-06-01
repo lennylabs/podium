@@ -300,7 +300,7 @@ func seedBootstrapAdmins(ctx context.Context, st store.Store, tenantID string, a
 	return seeded, nil
 }
 
-func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Visibility, startOrder int, allowPerDomain bool, resourcePut ingest.ResourcePutFunc, rejectAtOrAbove manifest.Sensitivity) ([]layer.Layer, error) {
+func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Visibility, startOrder int, allowPerDomain bool, resourcePut ingest.ResourcePutFunc, rejectAtOrAbove manifest.Sensitivity, signer ingest.SignerFunc) ([]layer.Layer, error) {
 	if layerPath == "" {
 		return []layer.Layer{}, nil
 	}
@@ -328,6 +328,8 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			// §7.2 data plane: upload bundled resources to the configured
 			// object store at ingest so load_artifact can serve them.
 			ResourcePut: resourcePut,
+			// §13.10/§4.7.9 ingest signing: nil leaves manifests unsigned.
+			Signer: signer,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("ingest layer %s from %s: %w", l.ID, l.Path, err)
@@ -380,15 +382,31 @@ func publicSensitivityFloor(c *Config) manifest.Sensitivity {
 // carries no explicit visibility input (a §13.10 PODIUM_LAYER_PATH bootstrap
 // layer, or a declarative layer whose `visibility:` block is empty).
 //
-// spec: §4.6 / §13.10 (F-4.6.9). A no-identity-provider standalone (or public
-// mode) is the only deployment the spec gives a public default to: there is no
-// identity to enforce against, so the evaluator short-circuits to true anyway.
-// Once an identity provider is configured, an unconditional public default
-// would expose every bootstrap layer to all callers, contradicting §4.6, so
-// the configured PODIUM_DEFAULT_LAYER_VISIBILITY applies instead.
+// spec: §4.6 / §13.10 / §13.12 (F-4.6.9, F-13.10.15). Public mode bypasses the
+// visibility model entirely, so its bootstrap layers are public. Otherwise the
+// bootstrap layer carries the resolved PODIUM_DEFAULT_LAYER_VISIBILITY: §13.12
+// documents that env var as the fallback "applied when a layer is registered
+// without an explicit setting", and a bootstrap layer is exactly that. The
+// fallback default is itself deployment-aware (LoadConfig resolves an unset
+// value to "public" for a no-identity standalone per §13.10 and "private" once
+// an identity provider gates access), so a zero-config standalone still yields
+// public bootstrap layers, while an operator who sets
+// PODIUM_DEFAULT_LAYER_VISIBILITY=private|organization for a multi-user
+// standalone gets the restricted visibility they asked for instead of an
+// unconditional public layer.
 func defaultBootstrapVisibility(cfg *Config) layer.Visibility {
-	if cfg.publicMode || cfg.identityProvider == "" {
+	if cfg.publicMode {
 		return layer.Visibility{Public: true}
+	}
+	if cfg.defaultLayerVisibility == "" {
+		// A directly-constructed Config (e.g. a unit test) may skip
+		// LoadConfig's resolution; mirror it so a no-identity standalone
+		// still defaults to public and an identity-gated deployment to
+		// private.
+		if cfg.identityProvider == "" {
+			return layer.Visibility{Public: true}
+		}
+		return layer.Visibility{}
 	}
 	return visibilityFromDefault(cfg.defaultLayerVisibility)
 }
@@ -425,7 +443,7 @@ func visibilityIsEmpty(v layer.Visibility) bool {
 //
 // Ingest runs against context.Background: a bootstrap failure aborts startup
 // before any HTTP listener binds.
-func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resourcePut ingest.ResourcePutFunc) ([]layer.Layer, error) {
+func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resourcePut ingest.ResourcePutFunc, signer ingest.SignerFunc) ([]layer.Layer, error) {
 	if len(cfg.declaredLayers) == 0 {
 		return []layer.Layer{}, nil
 	}
@@ -451,6 +469,8 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resou
 				Linter:          ingestLinter(cfg.allowPerDomain()),
 				// §7.2 data plane: persist bundled resources at ingest.
 				ResourcePut: resourcePut,
+				// §13.10/§4.7.9 ingest signing: nil leaves manifests unsigned.
+				Signer: signer,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("ingest declared layer %s from %s: %w", lc.ID, lc.LocalPath, err)
@@ -586,11 +606,23 @@ func Run() error {
 		resourcePut = objStore.Put
 	}
 
+	// §13.10 / §4.7.9 ingest signing: when --sign registry-key (PODIUM_SIGN)
+	// is set, every accepted manifest's content hash is signed with the
+	// registry-managed key. Disabled by default; the bootstrap and reingest
+	// paths leave the signature envelope empty.
+	ingestSigner, err := registrySignerFor(cfg.signMode)
+	if err != nil {
+		return fmt.Errorf("registry signing key: %w", err)
+	}
+	if ingestSigner != nil {
+		log.Printf("ingest signing: registry-managed key (§4.7.9)")
+	}
+
 	// §4.6 declarative layers: the registry.yaml `layers:` list seeds an
 	// admin-defined layer per entry (lowest precedence first, in config
 	// order). Local sources are ingested at boot; git sources are seeded as
 	// config rows for the §7.3.1 reingest/webhook path.
-	declared, err := bootstrapDeclaredLayers(st, tenantID, cfg, resourcePut)
+	declared, err := bootstrapDeclaredLayers(st, tenantID, cfg, resourcePut, ingestSigner)
 	if err != nil {
 		return err
 	}
@@ -602,7 +634,7 @@ func Run() error {
 	// DELETE /v1/layers) see the bootstrap layers. These layers carry no
 	// per-layer visibility input, so they take the deployment default
 	// (§4.6 / §13.10 / F-4.6.9). They append after the declared layers.
-	pathLayers, err := bootstrapLayerPath(st, tenantID, cfg.layerPath, defaultBootstrapVisibility(cfg), len(declared), cfg.allowPerDomain(), resourcePut, publicSensitivityFloor(cfg))
+	pathLayers, err := bootstrapLayerPath(st, tenantID, cfg.layerPath, defaultBootstrapVisibility(cfg), len(declared), cfg.allowPerDomain(), resourcePut, publicSensitivityFloor(cfg), ingestSigner)
 	if err != nil {
 		return err
 	}
@@ -824,7 +856,7 @@ func Run() error {
 	// layer endpoint.
 	mux.Handle("/v1/admin/erase", layers.EraseHandler())
 	mux.Handle("/v1/admin/runtime", runtimeEndpoint.Handler())
-	if isTrue(os.Getenv("PODIUM_WEB_UI")) {
+	if cfg.webUI {
 		mux.Handle("/ui/", http.StripPrefix("/ui/", http.FileServer(http.FS(web.Assets()))))
 		log.Printf("web UI mounted at /ui/")
 	}
@@ -868,7 +900,7 @@ func Run() error {
 	// lint, hash, store, publish events) instead of only recording intent.
 	// It carries the §4.7.2 freeze windows so an active window blocks ingest
 	// unless the manual reingest passes break-glass.
-	layers.WithReingestRunner(buildReingestRunner(st, srv, cfg, resourcePut, auditSink, scrubber))
+	layers.WithReingestRunner(buildReingestRunner(st, srv, cfg, resourcePut, auditSink, scrubber, ingestSigner))
 
 	// §8.6 transparency anchoring: when the operator enables
 	// PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS, a goroutine periodically
@@ -977,7 +1009,18 @@ type Config struct {
 	// allowPublicBind is the §13.10 escape hatch (--allow-public-bind /
 	// PODIUM_ALLOW_PUBLIC_BIND). Public mode refuses a non-loopback bind
 	// unless this is set.
-	allowPublicBind  bool
+	allowPublicBind bool
+	// webUI mounts the §13.10 single-page web UI at /ui/ (--web-ui /
+	// PODIUM_WEB_UI). webUIAllowPublicBind (--web-ui-allow-public-bind /
+	// PODIUM_WEB_UI_ALLOW_PUBLIC_BIND) is the escape hatch that, together with
+	// a configured identity provider, lets the UI bind a non-loopback address.
+	webUI                bool
+	webUIAllowPublicBind bool
+	// signMode is the §13.10 ingest-signing selection (--sign /
+	// PODIUM_SIGN). Standalone signing is disabled by default; the only
+	// accepted value is "registry-key", which signs every accepted manifest
+	// with a registry-managed Ed25519 key (§4.7.9).
+	signMode         string
 	identityProvider string
 	// oauthAudience is the §6.3.2 `aud` claim the injected-session-token
 	// verifier requires (the registry endpoint). Empty disables audience
@@ -1230,6 +1273,9 @@ func LoadConfig() *Config {
 		bind:                       envDefault("PODIUM_BIND", "127.0.0.1:8080"),
 		publicMode:                 isTrue(os.Getenv("PODIUM_PUBLIC_MODE")),
 		allowPublicBind:            isTrue(os.Getenv("PODIUM_ALLOW_PUBLIC_BIND")),
+		webUI:                      isTrue(os.Getenv("PODIUM_WEB_UI")),
+		webUIAllowPublicBind:       isTrue(os.Getenv("PODIUM_WEB_UI_ALLOW_PUBLIC_BIND")),
+		signMode:                   os.Getenv("PODIUM_SIGN"),
 		identityProvider:           os.Getenv("PODIUM_IDENTITY_PROVIDER"),
 		oauthAudience:              os.Getenv("PODIUM_OAUTH_AUDIENCE"),
 		oauthAuthorizationEndpoint: os.Getenv("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT"),
@@ -1421,13 +1467,21 @@ func LoadConfig() *Config {
 
 func (c *Config) validate() error {
 	startup := server.StartupConfig{
-		PublicMode:       c.publicMode,
-		IdentityProvider: c.identityProvider,
-		Bind:             c.bind,
-		AllowPublicBind:  c.allowPublicBind,
+		PublicMode:           c.publicMode,
+		IdentityProvider:     c.identityProvider,
+		Bind:                 c.bind,
+		AllowPublicBind:      c.allowPublicBind,
+		WebUI:                c.webUI,
+		WebUIAllowPublicBind: c.webUIAllowPublicBind,
 	}
 	if err := startup.Validate(); err != nil {
 		return err
+	}
+	// §13.10 signing: the only accepted --sign / PODIUM_SIGN value is
+	// "registry-key"; reject anything else at startup so a typo is named
+	// rather than silently leaving signing disabled.
+	if c.signMode != "" && c.signMode != "registry-key" {
+		return fmt.Errorf("config.invalid_sign_mode: PODIUM_SIGN must be registry-key, got %q", c.signMode)
 	}
 	if c.storeType == "postgres" && c.postgresDSN == "" {
 		return fmt.Errorf("PODIUM_POSTGRES_DSN is required when PODIUM_REGISTRY_STORE=postgres")

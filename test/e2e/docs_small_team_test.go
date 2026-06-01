@@ -9,7 +9,7 @@ package e2e
 //   - F-13.10.5: --allow-public-bind flag absent; loopback enforcement not implemented.
 //   - F-13.10.6: public-mode sensitivity ceiling not wired into ingest paths.
 //   - F-13.10.8: public-mode startup warning banner not emitted.
-//   - F-13.10.11: --no-embeddings flag does not exist (BM25-only is the default; search still works).
+//   - F-13.10.11: --no-embeddings flag now exists; see TestStandaloneFlags_NoEmbeddingsSearchWorks.
 //   - F-13.8.1: /metrics endpoint absent.
 
 import (

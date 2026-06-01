@@ -56,6 +56,10 @@ type SourceIngestOptions struct {
 	// RejectAtOrAbove is the §13.10 public-mode sensitivity floor passed
 	// through to the ingest Request. Empty means no floor.
 	RejectAtOrAbove manifest.Sensitivity
+	// Signer signs every newly accepted manifest's content hash (§4.7.9).
+	// Nil leaves manifests unsigned (the standalone default; §13.10 signing
+	// is disabled unless --sign registry-key is set).
+	Signer SignerFunc
 }
 
 // SourceIngest snapshots the layer via the supplied provider, runs
@@ -143,6 +147,7 @@ func SourceIngestWithOptions(
 		ResourcePut:     opts.ResourcePut,
 		FreezeWindows:   opts.FreezeWindows,
 		RejectAtOrAbove: opts.RejectAtOrAbove,
+		Signer:          opts.Signer,
 	})
 	if err != nil {
 		return nil, err

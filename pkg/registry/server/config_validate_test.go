@@ -90,3 +90,53 @@ func TestStartupConfig_NonPublicNonLoopbackAllowed(t *testing.T) {
 		t.Errorf("non-public non-loopback bind rejected: %v", err)
 	}
 }
+
+// Spec: §13.10 (F-13.10.9) — the web UI on a non-loopback bind is refused
+// unless --web-ui-allow-public-bind is set AND an identity provider is
+// configured. Each missing condition on a non-loopback bind fails startup with
+// config.web_ui_public_bind_refused.
+func TestStartupConfig_WebUINonLoopbackRefused(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		cfg  server.StartupConfig
+	}{
+		{"no opt-in, no idp", server.StartupConfig{WebUI: true, Bind: "0.0.0.0:8080"}},
+		{"opt-in but no idp", server.StartupConfig{WebUI: true, WebUIAllowPublicBind: true, Bind: "0.0.0.0:8080"}},
+		{"idp but no opt-in", server.StartupConfig{WebUI: true, IdentityProvider: "oidc", Bind: "0.0.0.0:8080"}},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			if err := c.cfg.Validate(); !errors.Is(err, server.ErrWebUIPublicBindRefused) {
+				t.Errorf("got %v, want ErrWebUIPublicBindRefused", err)
+			}
+		})
+	}
+}
+
+// Spec: §13.10 (F-13.10.9) — the web UI binds a non-loopback address when both
+// the escape hatch and an identity provider are present, and binds a loopback
+// address (the standalone default) with no opt-in at all.
+func TestStartupConfig_WebUIAllowed(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		cfg  server.StartupConfig
+	}{
+		{"non-loopback with opt-in and idp", server.StartupConfig{WebUI: true, WebUIAllowPublicBind: true, IdentityProvider: "oidc", Bind: "0.0.0.0:8080"}},
+		{"loopback standalone, no opt-in", server.StartupConfig{WebUI: true, Bind: "127.0.0.1:8080"}},
+		{"loopback default bind", server.StartupConfig{WebUI: true, Bind: ""}},
+		{"ui off, non-loopback bind", server.StartupConfig{WebUI: false, Bind: "0.0.0.0:8080"}},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			if err := c.cfg.Validate(); err != nil {
+				t.Errorf("Validate() = %v, want nil", err)
+			}
+		})
+	}
+}

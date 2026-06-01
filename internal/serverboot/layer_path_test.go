@@ -36,7 +36,7 @@ func newMemoryStoreWithTenant(t testing.TB) store.Store {
 // preserves pre-PR behaviour.
 func TestBootstrapLayerPath_EmptyReturnsEmpty(t *testing.T) {
 	st := newMemoryStoreWithTenant(t)
-	layers, err := bootstrapLayerPath(st, "default", "", publicVis, 0, true, nil, "")
+	layers, err := bootstrapLayerPath(st, "default", "", publicVis, 0, true, nil, "", nil)
 	if err != nil {
 		t.Fatalf("bootstrapLayerPath: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestBootstrapLayerPath_EmptyReturnsEmpty(t *testing.T) {
 func TestBootstrapLayerPath_MissingPathErrors(t *testing.T) {
 	st := newMemoryStoreWithTenant(t)
 	bogus := filepath.Join(t.TempDir(), "does-not-exist")
-	_, err := bootstrapLayerPath(st, "default", bogus, publicVis, 0, true, nil, "")
+	_, err := bootstrapLayerPath(st, "default", bogus, publicVis, 0, true, nil, "", nil)
 	if err == nil {
 		t.Fatal("err = nil, want filesystem.ErrConfigMissing")
 	}
@@ -77,7 +77,7 @@ func TestBootstrapLayerPath_SingleLayerMode(t *testing.T) {
 		Content: artifactBody,
 	})
 
-	layers, err := bootstrapLayerPath(st, "default", root, publicVis, 0, true, nil, "")
+	layers, err := bootstrapLayerPath(st, "default", root, publicVis, 0, true, nil, "", nil)
 	if err != nil {
 		t.Fatalf("bootstrapLayerPath: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestBootstrapLayerPath_MultiLayerMode(t *testing.T) {
 		},
 	)
 
-	layers, err := bootstrapLayerPath(st, "default", root, publicVis, 0, true, nil, "")
+	layers, err := bootstrapLayerPath(st, "default", root, publicVis, 0, true, nil, "", nil)
 	if err != nil {
 		t.Fatalf("bootstrapLayerPath: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestBootstrapLayerPath_RespectsLayerOrder(t *testing.T) {
 		},
 	)
 
-	layers, err := bootstrapLayerPath(st, "default", root, publicVis, 0, true, nil, "")
+	layers, err := bootstrapLayerPath(st, "default", root, publicVis, 0, true, nil, "", nil)
 	if err != nil {
 		t.Fatalf("bootstrapLayerPath: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestBootstrapLayerPath_AmbiguousMultiLayerErrors(t *testing.T) {
 		},
 	)
 
-	_, err := bootstrapLayerPath(st, "default", root, publicVis, 0, true, nil, "")
+	_, err := bootstrapLayerPath(st, "default", root, publicVis, 0, true, nil, "", nil)
 	if err == nil {
 		t.Fatal("err = nil, want filesystem.ErrLayerPathAmbiguous")
 	}

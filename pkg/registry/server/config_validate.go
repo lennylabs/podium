@@ -21,6 +21,14 @@ var (
 	// 127.0.0.1 unless the operator explicitly opts into a non-loopback bind.
 	// Maps to config.public_bind_refused.
 	ErrPublicBindNonLoopback = errors.New("config.public_bind_refused")
+
+	// ErrWebUIPublicBindRefused signals that the §13.10 web UI was enabled on
+	// a non-loopback bind without the explicit opt-in. §13.10 ("Behind a
+	// flag") refuses to bind the UI to a non-loopback address unless
+	// --web-ui-allow-public-bind is also passed and an identity provider is
+	// configured, preventing accidental exposure of an unauthenticated UI.
+	// Maps to config.web_ui_public_bind_refused.
+	ErrWebUIPublicBindRefused = errors.New("config.web_ui_public_bind_refused")
 )
 
 // StartupConfig captures the pieces of the server config that need
@@ -36,6 +44,14 @@ type StartupConfig struct {
 	// PODIUM_ALLOW_PUBLIC_BIND). When false, public mode refuses a
 	// non-loopback bind.
 	AllowPublicBind bool
+	// WebUI reports whether the §13.10 web UI is mounted (--web-ui /
+	// PODIUM_WEB_UI). The non-loopback guard only applies when it is on.
+	WebUI bool
+	// WebUIAllowPublicBind is the §13.10 web-UI escape hatch
+	// (--web-ui-allow-public-bind / PODIUM_WEB_UI_ALLOW_PUBLIC_BIND). The UI
+	// may bind a non-loopback address only when this is set and an identity
+	// provider is configured.
+	WebUIAllowPublicBind bool
 }
 
 // Validate enforces the §13.10 startup invariants:
@@ -53,6 +69,17 @@ func (c StartupConfig) Validate() error {
 	if c.PublicMode && !c.AllowPublicBind && !isLoopbackBind(c.Bind) {
 		return fmt.Errorf("%w: public mode binds 127.0.0.1 by default; %q is not a loopback address (pass --allow-public-bind to override)",
 			ErrPublicBindNonLoopback, c.Bind)
+	}
+	// §13.10 "Behind a flag": the web UI is open on its bind address (no auth
+	// in a no-identity standalone), so a non-loopback bind requires both the
+	// explicit --web-ui-allow-public-bind opt-in and a configured identity
+	// provider. Either condition missing on a non-loopback bind is refused.
+	if c.WebUI && !isLoopbackBind(c.Bind) {
+		hasIdP := c.IdentityProvider != "" && c.IdentityProvider != "none"
+		if !c.WebUIAllowPublicBind || !hasIdP {
+			return fmt.Errorf("%w: the web UI on a non-loopback bind (%q) requires --web-ui-allow-public-bind and a configured identity provider",
+				ErrWebUIPublicBindRefused, c.Bind)
+		}
 	}
 	return nil
 }

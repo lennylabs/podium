@@ -92,6 +92,42 @@ func TestSourceIngest_TracksLastIngestedRef(t *testing.T) {
 	}
 }
 
+// Spec: §4.7.9 / §13.10 (F-13.10.14) — a Signer supplied on
+// SourceIngestOptions threads through to the ingest Request so the
+// registry-managed-key signing the standalone --sign registry-key path
+// configures lands on the persisted manifest.
+func TestSourceIngest_SignerThreadsThrough(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemory()
+	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
+	cfg := store.LayerConfig{TenantID: "t", ID: "L", SourceType: "fake"}
+	_ = st.PutLayerConfig(context.Background(), cfg)
+	provider := &fakeProvider{
+		files: fstest.MapFS{"g/ARTIFACT.md": &fstest.MapFile{
+			Data: []byte(contextManifestBody("glossary")),
+		}},
+		reference: "ref-1",
+	}
+	signer := func(_ context.Context, contentHash string) (string, error) {
+		return "test-sig:" + contentHash, nil
+	}
+	res, err := ingest.SourceIngestWithOptions(context.Background(), st, provider, cfg,
+		ingest.SourceIngestOptions{Signer: signer})
+	if err != nil {
+		t.Fatalf("SourceIngestWithOptions: %v", err)
+	}
+	if res.Accepted != 1 {
+		t.Fatalf("Accepted = %d, want 1", res.Accepted)
+	}
+	stored, err := st.GetManifest(context.Background(), "t", "g", "1.0.0")
+	if err != nil {
+		t.Fatalf("GetManifest: %v", err)
+	}
+	if !strings.HasPrefix(stored.Signature, "test-sig:") {
+		t.Errorf("Signature = %q, want the signer's envelope (test-sig: prefix)", stored.Signature)
+	}
+}
+
 // Spec: §4.7.2 (F-7.3.9) — an active freeze window passed through
 // SourceIngestOptions rejects ingest with ErrFrozen; a valid break-glass
 // grant on the same window bypasses it.

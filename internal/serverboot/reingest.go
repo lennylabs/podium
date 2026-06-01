@@ -25,6 +25,7 @@ func buildReingestRunner(
 	resourcePut ingest.ResourcePutFunc,
 	auditSink *audit.FileSink,
 	scrubber *audit.PIIScrubber,
+	signer ingest.SignerFunc,
 ) server.ReingestRunner {
 	return func(ctx context.Context, lc store.LayerConfig, bg *server.BreakGlass) (*ingest.Result, error) {
 		prov, err := sourceProviderFor(lc.SourceType)
@@ -38,6 +39,8 @@ func buildReingestRunner(
 			ResourcePut:   resourcePut,
 			CallerID:      caller,
 			FreezeWindows: applyBreakGlass(cfg.freezeWindows, bg, caller),
+			// §13.10/§4.7.9 ingest signing: nil leaves manifests unsigned.
+			Signer: signer,
 		}
 		if auditSink != nil {
 			opts.AuditEmit = ingestAuditEmitter(ctx, auditSink, scrubber, caller)
