@@ -499,11 +499,24 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 			"force_push_policy must be \"tolerant\" or \"strict\"")
 		return
 	}
-	// Admin-defined layers require admin authorization.
-	if !req.UserDefined {
+	// spec: §7.3.1 / §4.6 — resolve the registration class. An admin-defined
+	// layer is declared by a tenant admin and requires admin authorization.
+	// An authenticated non-admin caller registers a personal (user-defined)
+	// layer rather than being rejected: §7.3.1 states "Authenticated users
+	// register their own layers via podium layer register", and the §14.9
+	// invocation carries no --user-defined flag, so the class is resolved
+	// server-side from the caller's identity. An anonymous caller attempting
+	// an admin-defined registration is still rejected with auth.forbidden.
+	caller := e.identify(r)
+	userDefined := req.UserDefined
+	if !userDefined {
 		if err := e.authAdmin(r); err != nil {
-			writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
-			return
+			if caller.IsAuthenticated && caller.Sub != "" {
+				userDefined = true
+			} else {
+				writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
+				return
+			}
 		}
 	}
 
@@ -515,33 +528,40 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 		Ref:             req.Ref,
 		Root:            req.Root,
 		LocalPath:       req.LocalPath,
-		UserDefined:     req.UserDefined,
-		Owner:           req.Owner,
-		Public:          req.Public,
-		Organization:    req.Organization,
-		Groups:          req.Groups,
-		Users:           req.Users,
+		UserDefined:     userDefined,
 		ForcePushPolicy: req.ForcePushPolicy,
 		CreatedAt:       time.Now().UTC(),
 	}
 
-	// spec: §4.6 / §7.3.1 — a user-defined layer has implicit visibility
-	// users:[<registrant>]; the field is set automatically and cannot be
-	// widened. Derive the owner from the authenticated identity so a
-	// caller cannot register a layer owned by an arbitrary subject, and
-	// discard any caller-supplied public/organization/groups/users.
-	if cfg.UserDefined {
-		if id := e.identify(r); id.IsAuthenticated && id.Sub != "" {
-			cfg.Owner = id.Sub
-		}
-		cfg.Public = false
-		cfg.Organization = false
-		cfg.Groups = nil
-		if cfg.Owner != "" {
-			cfg.Users = []string{cfg.Owner}
+	if userDefined {
+		// spec: §4.6 / §7.3.1 — a user-defined layer has implicit visibility
+		// users:[<registrant>]; the field is set automatically and cannot be
+		// widened. Derive the owner from the authenticated identity so a
+		// caller cannot register a layer owned by an arbitrary subject; with
+		// no identity (a no-identity standalone/filesystem deployment, where
+		// visibility is bypassed per §4.6) fall back to the request body.
+		// Discard any caller-supplied public/organization/groups.
+		if caller.IsAuthenticated && caller.Sub != "" {
+			cfg.Owner = caller.Sub
 		} else {
-			cfg.Users = nil
+			cfg.Owner = req.Owner
 		}
+		// spec: §4.6 / §14.9 — a user-defined layer with no resolvable owner
+		// has no visibility entries and is unreachable (visible to no one).
+		// Reject the registration rather than persist an orphaned, invisible
+		// row that not even the registrant can see.
+		if cfg.Owner == "" {
+			writeError(w, http.StatusForbidden, "auth.forbidden",
+				"user-defined layer registration requires an authenticated identity")
+			return
+		}
+		cfg.Users = []string{cfg.Owner}
+	} else {
+		cfg.Owner = req.Owner
+		cfg.Public = req.Public
+		cfg.Organization = req.Organization
+		cfg.Groups = req.Groups
+		cfg.Users = req.Users
 	}
 
 	// spec: §7.3.1 / §1.4 — cap of N user-defined layers per identity

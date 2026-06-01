@@ -61,7 +61,7 @@ func TestLayerEndpoint_UnregisterSoftDeletesAndRestoreRecovers(t *testing.T) {
 	// Register a user-defined layer (no admin auth needed to manage it).
 	resp, body := mustPost(t, base, "/v1/layers", map[string]any{
 		"id": "alice-personal", "source_type": "local", "local_path": "/tmp/x",
-		"user_defined": true,
+		"user_defined": true, "owner": "alice",
 	})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("register status %d, body=%s", resp.StatusCode, body)

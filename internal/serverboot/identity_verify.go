@@ -41,6 +41,26 @@ func injectedTokenVerifier(keys identity.RuntimeKeyVerifierStore, audience strin
 	}
 }
 
+// layerIdentityResolver adapts a §6.3.2 request-time verifier into the
+// resolver the §7.3.1 layer endpoint uses to attribute a user-defined layer
+// to its registrant (§4.6) and to evaluate admin authorization (§4.7.2). The
+// layer endpoint is mounted outside the meta-tool identity middleware, so it
+// resolves the caller itself. A verified token yields the authenticated
+// identity; a missing or invalid token resolves to the anonymous-public
+// caller, which the endpoint then denies for admin-gated operations and
+// rejects for user-defined registrations (fail-closed). A nil verifier (no
+// server-side verification wired) always resolves anonymous.
+func layerIdentityResolver(verify func(*http.Request) (layer.Identity, error)) func(*http.Request) layer.Identity {
+	return func(r *http.Request) layer.Identity {
+		if verify != nil {
+			if id, err := verify(r); err == nil {
+				return id
+			}
+		}
+		return layer.Identity{IsPublic: true}
+	}
+}
+
 // identityVisibilityGuard refuses startup when a configured identity
 // provider cannot resolve callers to an Identity at request time.
 //

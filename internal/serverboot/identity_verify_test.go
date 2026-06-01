@@ -102,6 +102,47 @@ func TestInjectedTokenVerifier_RejectsMissingToken(t *testing.T) {
 	}
 }
 
+// Spec: §4.6 / §7.3.1 (F-14.9.4, F-14.9.5) — the layer endpoint resolves the
+// caller from the same request-time verifier wired on the meta-tool server. A
+// verified token yields the authenticated identity used to attribute a
+// user-defined layer and gate admin operations; a missing/invalid token or a
+// nil verifier resolves to the anonymous-public caller (fail-closed).
+func TestLayerIdentityResolver(t *testing.T) {
+	t.Parallel()
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	reg := identity.NewRuntimeKeyRegistry()
+	if err := reg.Register(identity.RuntimeKey{Issuer: "rt", Algorithm: "RS256", Key: &priv.PublicKey}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	verify := injectedTokenVerifier(reg, "https://podium.acme.com", nil)
+	resolve := layerIdentityResolver(verify)
+
+	// Valid token => authenticated identity.
+	raw := signRuntimeJWT(t, priv, jwt.MapClaims{
+		"iss": "rt", "aud": "https://podium.acme.com", "sub": "alice", "act": "rt",
+		"exp": time.Now().Add(5 * time.Minute).Unix(),
+	})
+	req, _ := http.NewRequest(http.MethodPost, "http://x/v1/layers", nil)
+	req.Header.Set("Authorization", "Bearer "+raw)
+	if id := resolve(req); !id.IsAuthenticated || id.Sub != "alice" {
+		t.Errorf("valid token resolved to %+v, want authenticated alice", id)
+	}
+
+	// Missing token => anonymous-public fallback.
+	anon, _ := http.NewRequest(http.MethodPost, "http://x/v1/layers", nil)
+	if id := resolve(anon); id.IsAuthenticated || !id.IsPublic {
+		t.Errorf("missing token resolved to %+v, want anonymous-public", id)
+	}
+
+	// Nil verifier => anonymous-public fallback.
+	if id := layerIdentityResolver(nil)(req); id.IsAuthenticated || !id.IsPublic {
+		t.Errorf("nil verifier resolved to %+v, want anonymous-public", id)
+	}
+}
+
 func TestBearerToken(t *testing.T) {
 	t.Parallel()
 	cases := []struct{ header, want string }{

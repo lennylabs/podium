@@ -40,7 +40,7 @@ func TestLayerRecovery_SQLiteSoftDeleteRestoreAndPurge(t *testing.T) {
 	// Register a user-defined layer and seed an artifact ingested from it.
 	body, _ := json.Marshal(map[string]any{
 		"id": "alice-personal", "source_type": "local", "local_path": "/tmp/x",
-		"user_defined": true,
+		"user_defined": true, "owner": "alice",
 	})
 	resp, err := http.Post(ts.URL+"/v1/layers", "application/json", bytes.NewReader(body))
 	if err != nil {

@@ -807,14 +807,19 @@ func Run() error {
 	// registry and stay on the anonymous resolver.
 	verifierInstalled := false
 	providerSelected := false
+	// layerVerify is the request-time verifier the §7.3.1 layer endpoint uses
+	// to attribute user-defined layers and gate admin operations. It is the
+	// same verifier installed on the meta-tool server; nil leaves the layer
+	// endpoint on the anonymous resolver.
+	var layerVerify func(*http.Request) (layer.Identity, error)
 	if prov, err := selectIdentityProvider(cfg); err != nil {
 		return fmt.Errorf("identity provider %q: %w", cfg.identityProvider, err)
 	} else if prov != nil {
 		providerSelected = true
 		log.Printf("identity provider: %s (registered via identity.Default)", prov.ID())
 		if cfg.identityProvider == "injected-session-token" {
-			bootOpts = append(bootOpts, server.WithIdentityVerifier(
-				injectedTokenVerifier(runtimeKeys, cfg.oauthAudience, cfg.idpGroupMapping)))
+			layerVerify = injectedTokenVerifier(runtimeKeys, cfg.oauthAudience, cfg.idpGroupMapping)
+			bootOpts = append(bootOpts, server.WithIdentityVerifier(layerVerify))
 			verifierInstalled = true
 			log.Printf("identity provider: injected-session-token (verifying runtime-signed JWTs)")
 		}
@@ -839,14 +844,25 @@ func Run() error {
 	// the operation; the anonymous caller is denied, which closes the
 	// unauthenticated layer-management surface the standard deployment
 	// would otherwise expose.
+	// §4.6/§7.3.1: the layer endpoint resolves the caller itself (it is
+	// mounted outside the meta-tool identity middleware) so it can attribute
+	// a user-defined layer to its authenticated registrant and gate
+	// admin-defined operations on the real identity rather than a hardcoded
+	// anonymous caller.
+	layerIdentity := layerIdentityResolver(layerVerify)
 	layers := server.NewLayerEndpoint(st, tenantID, mode).
 		WithDefaultVisibility(cfg.defaultLayerVisibility).
 		WithMaxUserLayers(cfg.maxUserLayers).
+		WithIdentityResolver(layerIdentity).
 		WithAdminAuth(func(r *http.Request) error {
+			// §13.10/§13.11: a standalone deployment configures no identity
+			// provider, so the local operator is the de facto admin; public
+			// mode authenticates no one. Otherwise gate on the resolved
+			// attested identity via the §4.7.2 admin grant table.
 			if cfg.publicMode || cfg.identityProvider == "" {
 				return nil
 			}
-			return registry.AdminAuthorize(r.Context(), layer.Identity{IsPublic: true})
+			return registry.AdminAuthorize(r.Context(), layerIdentity(r))
 		})
 
 	runtimeEndpoint := server.NewRuntimeKeyEndpoint(runtimeKeys, mode)
