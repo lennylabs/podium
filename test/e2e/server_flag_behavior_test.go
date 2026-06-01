@@ -15,7 +15,7 @@ import (
 )
 
 // F-13.10.9 — `podium serve --web-ui` mounts the bundled SPA at /ui/.
-func TestStandaloneFlags_WebUIFlagMountsUI(t *testing.T) {
+func TestServerFlags_WebUIFlagMountsUI(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"my-skill/ARTIFACT.md": smallteamLowArtifact("ui artifact"),
@@ -33,7 +33,7 @@ func TestStandaloneFlags_WebUIFlagMountsUI(t *testing.T) {
 }
 
 // F-13.10.9 — without --web-ui the UI is not mounted; /ui/ is not served.
-func TestStandaloneFlags_NoWebUIByDefault(t *testing.T) {
+func TestServerFlags_NoWebUIByDefault(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"my-skill/ARTIFACT.md": smallteamLowArtifact("ui artifact"),
@@ -46,7 +46,7 @@ func TestStandaloneFlags_NoWebUIByDefault(t *testing.T) {
 
 // F-13.10.11 — `podium serve --no-embeddings` boots into BM25-only search and
 // search_artifacts still answers.
-func TestStandaloneFlags_NoEmbeddingsSearchWorks(t *testing.T) {
+func TestServerFlags_NoEmbeddingsSearchWorks(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"variance-skill/ARTIFACT.md": smallteamLowArtifact("variance analysis skill"),
@@ -62,7 +62,7 @@ func TestStandaloneFlags_NoEmbeddingsSearchWorks(t *testing.T) {
 // F-13.10.14 — `podium serve --sign registry-key` boots with ingest signing
 // enabled, logs the registry-managed-key line, and generates the signing key
 // under the standalone home.
-func TestStandaloneFlags_SignRegistryKey(t *testing.T) {
+func TestServerFlags_SignRegistryKey(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	reg := writeRegistry(t, map[string]string{
@@ -85,7 +85,7 @@ func TestStandaloneFlags_SignRegistryKey(t *testing.T) {
 // pointing at the local server, so a consumer resolves the registry without an
 // extra env var. The bound address is a free loopback port chosen by the
 // harness, so the written pointer must carry that exact bind.
-func TestStandaloneFlags_AutoBootstrapsSyncYAML(t *testing.T) {
+func TestServerFlags_AutoBootstrapsSyncYAML(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	reg := writeRegistry(t, map[string]string{
@@ -113,7 +113,7 @@ func TestStandaloneFlags_AutoBootstrapsSyncYAML(t *testing.T) {
 
 // F-13.10.14 — an unrecognized --sign value is refused at startup; the process
 // exits non-zero before binding a listener.
-func TestStandaloneFlags_SignRejectsUnknown(t *testing.T) {
+func TestServerFlags_SignRejectsUnknown(t *testing.T) {
 	t.Parallel()
 	out := runPodium(t, "", []string{"HOME=" + t.TempDir()},
 		"serve", "--standalone", "--sign", "sigstore")

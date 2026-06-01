@@ -76,7 +76,7 @@ func loadComposeFile(t *testing.T) composeFile {
 // TestOrg_1_ComposeStackServices asserts the compose file declares every
 // service §13.1.1 lists. The pre-remediation file declared only postgres,
 // minio, and minio-init.
-func TestOrg_1_ComposeStackServices(t *testing.T) {
+func TestDeployCompose_ComposeStackServices(t *testing.T) {
 	t.Parallel()
 	cf := loadComposeFile(t)
 	for _, name := range []string{"registry", "postgres", "minio", "dex", "bootstrap"} {
@@ -88,7 +88,7 @@ func TestOrg_1_ComposeStackServices(t *testing.T) {
 
 // TestOrg_1_RegistryServiceWiring asserts the registry service is built and
 // configured against the local Postgres, MinIO, and Dex services (F-13.1.1).
-func TestOrg_1_RegistryServiceWiring(t *testing.T) {
+func TestDeployCompose_RegistryServiceWiring(t *testing.T) {
 	t.Parallel()
 	cf := loadComposeFile(t)
 	reg, ok := cf.Services["registry"]
@@ -136,7 +136,7 @@ func TestOrg_1_RegistryServiceWiring(t *testing.T) {
 // TestOrg_1_DexService asserts the Dex IdP service exists, mounts the
 // bundled config, and that the config defines a device-code client and a
 // static user (F-13.1.2).
-func TestOrg_1_DexService(t *testing.T) {
+func TestDeployCompose_DexService(t *testing.T) {
 	t.Parallel()
 	cf := loadComposeFile(t)
 	dex, ok := cf.Services["dex"]
@@ -171,7 +171,7 @@ func TestOrg_1_DexService(t *testing.T) {
 
 // TestOrg_1_BootstrapService asserts the one-shot bootstrap container creates
 // the MinIO bucket and runs after MinIO is healthy (F-13.1.3).
-func TestOrg_1_BootstrapService(t *testing.T) {
+func TestDeployCompose_BootstrapService(t *testing.T) {
 	t.Parallel()
 	cf := loadComposeFile(t)
 	bs, ok := cf.Services["bootstrap"]

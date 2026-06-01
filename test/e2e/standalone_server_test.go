@@ -99,7 +99,7 @@ func smallteamRawExecFail(t *testing.T, env []string, args ...string) string {
 
 // T-D-small-team-1 — standalone server starts, answers /healthz, startup log
 // contains an "ingested layer" line.
-func TestSmallTeam_1_StandaloneStartHealthz(t *testing.T) {
+func TestStandaloneServer_StandaloneStartHealthz(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"my-skill/ARTIFACT.md": smallteamLowArtifact("test artifact"),
@@ -120,7 +120,7 @@ func TestSmallTeam_1_StandaloneStartHealthz(t *testing.T) {
 }
 
 // T-D-small-team-2 — startup banner includes bind address and mode.
-func TestSmallTeam_2_StartupBannerBind(t *testing.T) {
+func TestStandaloneServer_StartupBannerBind(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"a/ARTIFACT.md": smallteamLowArtifact("a"),
@@ -141,7 +141,7 @@ func TestSmallTeam_2_StartupBannerBind(t *testing.T) {
 }
 
 // T-D-small-team-3 — PODIUM_LAYER_PATH env var produces the same layer set as --layer-path.
-func TestSmallTeam_3_LayerPathEnvEquivalent(t *testing.T) {
+func TestStandaloneServer_LayerPathEnvEquivalent(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"x/ARTIFACT.md": smallteamLowArtifact("env-layer-test"),
@@ -177,7 +177,7 @@ func TestSmallTeam_3_LayerPathEnvEquivalent(t *testing.T) {
 }
 
 // T-D-small-team-4 — layer_path key in registry.yaml is respected.
-func TestSmallTeam_4_RegistryYAMLLayersPath(t *testing.T) {
+func TestStandaloneServer_RegistryYAMLLayersPath(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"doc/ARTIFACT.md": smallteamLowArtifact("yaml-layer-path"),
@@ -209,7 +209,7 @@ func TestSmallTeam_4_RegistryYAMLLayersPath(t *testing.T) {
 }
 
 // T-D-small-team-5 — config show reflects layer_path source (registry.yaml vs env).
-func TestSmallTeam_5_ConfigShowLayersPathSource(t *testing.T) {
+func TestStandaloneServer_ConfigShowLayersPathSource(t *testing.T) {
 	t.Parallel()
 	cfgDir := t.TempDir()
 	cfgFile := filepath.Join(cfgDir, "registry.yaml")
@@ -246,7 +246,7 @@ func TestSmallTeam_5_ConfigShowLayersPathSource(t *testing.T) {
 }
 
 // T-D-small-team-6 — bind key in registry.yaml changes listen address.
-func TestSmallTeam_6_RegistryYAMLBind(t *testing.T) {
+func TestStandaloneServer_RegistryYAMLBind(t *testing.T) {
 	t.Parallel()
 	port := freePort(t)
 	bind := fmt.Sprintf("127.0.0.1:%d", port)
@@ -313,7 +313,7 @@ func TestSmallTeam_6_RegistryYAMLBind(t *testing.T) {
 }
 
 // T-D-small-team-7 — public mode + identity provider fails at startup with config.public_mode_with_idp.
-func TestSmallTeam_7_PublicModeWithIdPFails(t *testing.T) {
+func TestStandaloneServer_PublicModeWithIdPFails(t *testing.T) {
 	t.Parallel()
 	out := smallteamRawExecFail(t,
 		[]string{"HOME=" + t.TempDir(), "PODIUM_PUBLIC_MODE=true", "PODIUM_IDENTITY_PROVIDER=oauth-device-code"},
@@ -340,7 +340,7 @@ func TestSmallTeam_IdentityProviderUnverifiedFailsStartup(t *testing.T) {
 }
 
 // T-D-small-team-8 — public mode reports mode:public in /healthz.
-func TestSmallTeam_8_PublicModeHealthz(t *testing.T) {
+func TestStandaloneServer_PublicModeHealthz(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"a/ARTIFACT.md": smallteamLowArtifact("a")})
 	srv := startServerArgs(t,
@@ -357,25 +357,25 @@ func TestSmallTeam_8_PublicModeHealthz(t *testing.T) {
 }
 
 // T-D-small-team-9 — public mode loopback enforcement (blocked by F-13.10.5).
-func TestSmallTeam_9_PublicModeLoopbackEnforce(t *testing.T) {
+func TestStandaloneServer_PublicModeLoopbackEnforce(t *testing.T) {
 	t.Parallel()
 	t.Skip("blocked by F-13.10.5: --allow-public-bind flag absent; loopback enforcement in public mode not implemented")
 }
 
 // T-D-small-team-10 — --allow-public-bind flag permits non-loopback bind (blocked by F-13.10.5).
-func TestSmallTeam_10_AllowPublicBindFlag(t *testing.T) {
+func TestStandaloneServer_AllowPublicBindFlag(t *testing.T) {
 	t.Parallel()
 	t.Skip("blocked by F-13.10.5: --allow-public-bind flag does not exist in cmd/podium/serve.go")
 }
 
 // T-D-small-team-11 — public mode rejects sensitivity:medium ingest (blocked by F-13.10.6).
-func TestSmallTeam_11_PublicModeRejectsMedium(t *testing.T) {
+func TestStandaloneServer_PublicModeRejectsMedium(t *testing.T) {
 	t.Parallel()
 	t.Skip("blocked by F-13.10.6: ingest.Request.RejectAtOrAbove is never set by bootstrap or reingest paths when public mode is on")
 }
 
 // T-D-small-team-12 — public mode audit log records system:public caller.
-func TestSmallTeam_12_PublicModeAuditCaller(t *testing.T) {
+func TestStandaloneServer_PublicModeAuditCaller(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"pub/ARTIFACT.md": smallteamLowArtifact("public artifact"),
@@ -404,13 +404,13 @@ func TestSmallTeam_12_PublicModeAuditCaller(t *testing.T) {
 }
 
 // T-D-small-team-13 — public mode startup warning banner (blocked by F-13.10.8).
-func TestSmallTeam_13_PublicModeStartupBanner(t *testing.T) {
+func TestStandaloneServer_PublicModeStartupBanner(t *testing.T) {
 	t.Parallel()
 	t.Skip("blocked by F-13.10.8: public-mode startup warning banner is not emitted; log only shows mode=public in listening line")
 }
 
 // T-D-small-team-14 — podium init writes .podium/sync.yaml with registry URL and harness.
-func TestSmallTeam_14_PodiumInit(t *testing.T) {
+func TestStandaloneServer_PodiumInit(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
 	res := runPodium(t, ws, []string{"HOME=" + t.TempDir()},
@@ -450,13 +450,13 @@ func TestSmallTeam_14_PodiumInit(t *testing.T) {
 }
 
 // T-D-small-team-15 — podium sync against server registry (http://) not implemented as documented.
-func TestSmallTeam_15_PodiumSyncServerRegistry(t *testing.T) {
+func TestStandaloneServer_PodiumSyncServerRegistry(t *testing.T) {
 	t.Parallel()
 	t.Skip("podium sync --registry http:// (server-source) is not implemented; sync currently operates on filesystem registries only")
 }
 
 // T-D-small-team-16 — local source: podium layer reingest updates the layer.
-func TestSmallTeam_16_LayerReingest(t *testing.T) {
+func TestStandaloneServer_LayerReingest(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"artifact-a/ARTIFACT.md": smallteamLowArtifact("artifact a"),
@@ -486,7 +486,7 @@ func TestSmallTeam_16_LayerReingest(t *testing.T) {
 }
 
 // T-D-small-team-17 — podium layer watch polls the source and reingests.
-func TestSmallTeam_17_LayerWatch(t *testing.T) {
+func TestStandaloneServer_LayerWatch(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"wa/ARTIFACT.md": smallteamLowArtifact("watch artifact"),
@@ -533,7 +533,7 @@ func TestSmallTeam_17_LayerWatch(t *testing.T) {
 }
 
 // T-D-small-team-18 — git source: layer register with --repo exits 0 and lists the layer.
-func TestSmallTeam_18_GitSourceLayerRegister(t *testing.T) {
+func TestStandaloneServer_GitSourceLayerRegister(t *testing.T) {
 	t.Parallel()
 	// Create a minimal local git repo.
 	repoDir := t.TempDir()
@@ -581,7 +581,7 @@ func TestSmallTeam_18_GitSourceLayerRegister(t *testing.T) {
 }
 
 // T-D-small-team-19 — migrating from filesystem: podium init --force overwrites sync.yaml.
-func TestSmallTeam_19_MigrateInitForce(t *testing.T) {
+func TestStandaloneServer_MigrateInitForce(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
 	home := t.TempDir()
@@ -622,13 +622,13 @@ func TestSmallTeam_19_MigrateInitForce(t *testing.T) {
 }
 
 // T-D-small-team-20 — filesystem→server migration: podium sync output matches.
-func TestSmallTeam_20_MigrateOutputBitIdentical(t *testing.T) {
+func TestStandaloneServer_MigrateOutputBitIdentical(t *testing.T) {
 	t.Parallel()
 	t.Skip("podium sync --registry http:// (server-source) not implemented; cannot compare server sync output against filesystem sync output")
 }
 
 // T-D-small-team-21 — runtime discovery via MCP: load_artifact returns artifact.
-func TestSmallTeam_21_MCPLoadArtifact(t *testing.T) {
+func TestStandaloneServer_MCPLoadArtifact(t *testing.T) {
 	t.Parallel()
 	id := "ops/runbook"
 	reg := writeRegistry(t, map[string]string{
@@ -657,7 +657,7 @@ func TestSmallTeam_21_MCPLoadArtifact(t *testing.T) {
 }
 
 // T-D-small-team-22 — runtime discovery via MCP: search_artifacts returns results.
-func TestSmallTeam_22_MCPSearchArtifacts(t *testing.T) {
+func TestStandaloneServer_MCPSearchArtifacts(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"ops/runbook/ARTIFACT.md": smallteamLowArtifact("operations runbook quarterly"),
@@ -679,7 +679,7 @@ func TestSmallTeam_22_MCPSearchArtifacts(t *testing.T) {
 }
 
 // T-D-small-team-23 — BM25-only search works with no embedding provider.
-func TestSmallTeam_23_BM25SearchNoEmbeddings(t *testing.T) {
+func TestStandaloneServer_BM25SearchNoEmbeddings(t *testing.T) {
 	t.Parallel()
 	// No PODIUM_EMBEDDING_PROVIDER, no PODIUM_VECTOR_BACKEND → BM25-only.
 	reg := writeRegistry(t, map[string]string{
@@ -703,7 +703,7 @@ func TestSmallTeam_23_BM25SearchNoEmbeddings(t *testing.T) {
 }
 
 // T-D-small-team-24 — GET /v1/layers lists bootstrap layers after --layer-path startup.
-func TestSmallTeam_24_GetLayersAfterStartup(t *testing.T) {
+func TestStandaloneServer_GetLayersAfterStartup(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"layer-list/ARTIFACT.md": smallteamLowArtifact("layer list test"),
@@ -736,7 +736,7 @@ func TestSmallTeam_24_GetLayersAfterStartup(t *testing.T) {
 }
 
 // T-D-small-team-25 — POST /v1/layers/reingest triggers re-scan of local source.
-func TestSmallTeam_25_HTTPReingestRescan(t *testing.T) {
+func TestStandaloneServer_HTTPReingestRescan(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"ra/ARTIFACT.md": smallteamLowArtifact("rescan a"),
@@ -771,13 +771,13 @@ func TestSmallTeam_25_HTTPReingestRescan(t *testing.T) {
 }
 
 // T-D-small-team-26 — GET /metrics returns Prometheus data (blocked by F-13.8.1).
-func TestSmallTeam_26_MetricsEndpoint(t *testing.T) {
+func TestStandaloneServer_MetricsEndpoint(t *testing.T) {
 	t.Parallel()
 	t.Skip("blocked by F-13.8.1: /metrics endpoint is absent from the standalone server")
 }
 
 // T-D-small-team-27 — GET /healthz and GET /readyz both answer 200 in standalone mode.
-func TestSmallTeam_27_HealthzReadyz(t *testing.T) {
+func TestStandaloneServer_HealthzReadyz(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"hz/ARTIFACT.md": smallteamLowArtifact("healthz"),
@@ -801,7 +801,7 @@ func TestSmallTeam_27_HealthzReadyz(t *testing.T) {
 }
 
 // T-D-small-team-28 — schema migration runs on restart of same SQLite db.
-func TestSmallTeam_28_SchemaRestartIdempotent(t *testing.T) {
+func TestStandaloneServer_SchemaRestartIdempotent(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	sqlitePath := filepath.Join(home, "podium.db")
@@ -836,7 +836,7 @@ func TestSmallTeam_28_SchemaRestartIdempotent(t *testing.T) {
 }
 
 // T-D-small-team-29 — podium admin migrate-to-standard with sqlite target.
-func TestSmallTeam_29_MigrateToStandardSQLite(t *testing.T) {
+func TestStandaloneServer_MigrateToStandardSQLite(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	srcDB := filepath.Join(home, "src.db")
@@ -870,7 +870,7 @@ func TestSmallTeam_29_MigrateToStandardSQLite(t *testing.T) {
 }
 
 // T-D-small-team-30 — podium admin migrate-to-standard --dry-run writes nothing.
-func TestSmallTeam_30_MigrateToStandardDryRun(t *testing.T) {
+func TestStandaloneServer_MigrateToStandardDryRun(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	srcDB := filepath.Join(home, "src.db")
@@ -906,7 +906,7 @@ func TestSmallTeam_30_MigrateToStandardDryRun(t *testing.T) {
 }
 
 // T-D-small-team-31 — podium admin migrate-to-standard without --source-sqlite fails.
-func TestSmallTeam_31_MigrateToStandardMissingFlag(t *testing.T) {
+func TestStandaloneServer_MigrateToStandardMissingFlag(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"HOME=" + t.TempDir()},
 		"admin", "migrate-to-standard")
@@ -920,7 +920,7 @@ func TestSmallTeam_31_MigrateToStandardMissingFlag(t *testing.T) {
 }
 
 // T-D-small-team-32 — multi-layer: .registry-config with multi_layer:true registers multiple layers.
-func TestSmallTeam_32_MultiLayerRegistryConfig(t *testing.T) {
+func TestStandaloneServer_MultiLayerRegistryConfig(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, ".registry-config"),
@@ -957,7 +957,7 @@ func TestSmallTeam_32_MultiLayerRegistryConfig(t *testing.T) {
 }
 
 // T-D-small-team-33 — layer_order in .registry-config overrides alphabetical order.
-func TestSmallTeam_33_RegistryConfigLayerOrder(t *testing.T) {
+func TestStandaloneServer_RegistryConfigLayerOrder(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	cfg := "multi_layer: true\nlayer_order:\n  - team-shared\n  - personal\n"
@@ -986,7 +986,7 @@ func TestSmallTeam_33_RegistryConfigLayerOrder(t *testing.T) {
 }
 
 // T-D-small-team-34 — --layer-path with missing directory errors at startup.
-func TestSmallTeam_34_MissingLayerPathFails(t *testing.T) {
+func TestStandaloneServer_MissingLayerPathFails(t *testing.T) {
 	t.Parallel()
 	out := smallteamRawExecFail(t,
 		[]string{"HOME=" + t.TempDir()},
@@ -997,7 +997,7 @@ func TestSmallTeam_34_MissingLayerPathFails(t *testing.T) {
 }
 
 // T-D-small-team-35 — registry.yaml identity_provider key configures oauth-device-code via config show.
-func TestSmallTeam_35_RegistryYAMLIdentityProvider(t *testing.T) {
+func TestStandaloneServer_RegistryYAMLIdentityProvider(t *testing.T) {
 	t.Parallel()
 	cfgDir := t.TempDir()
 	cfgFile := filepath.Join(cfgDir, "registry.yaml")
@@ -1016,7 +1016,7 @@ func TestSmallTeam_35_RegistryYAMLIdentityProvider(t *testing.T) {
 }
 
 // T-D-small-team-36 — public mode + identity provider via registry.yaml fails at startup.
-func TestSmallTeam_36_RegistryYAMLPublicModeWithIdP(t *testing.T) {
+func TestStandaloneServer_RegistryYAMLPublicModeWithIdP(t *testing.T) {
 	t.Parallel()
 	cfgDir := t.TempDir()
 	cfgFile := filepath.Join(cfgDir, "registry.yaml")
@@ -1033,7 +1033,7 @@ func TestSmallTeam_36_RegistryYAMLPublicModeWithIdP(t *testing.T) {
 }
 
 // T-D-small-team-37 — podium lint validates artifacts and reports errors.
-func TestSmallTeam_37_LintValidInvalid(t *testing.T) {
+func TestStandaloneServer_LintValidInvalid(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"valid/ARTIFACT.md": smallteamLowArtifact("valid artifact"),
@@ -1053,7 +1053,7 @@ func TestSmallTeam_37_LintValidInvalid(t *testing.T) {
 }
 
 // T-D-small-team-38 — cross-type dependency graph: podium impact shows dependents.
-func TestSmallTeam_38_ImpactAnalysis(t *testing.T) {
+func TestStandaloneServer_ImpactAnalysis(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"parent/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: parent artifact\nsensitivity: low\n---\n\nparent body.\n",
@@ -1076,7 +1076,7 @@ func TestSmallTeam_38_ImpactAnalysis(t *testing.T) {
 }
 
 // T-D-small-team-39 — single audit log captures every load.
-func TestSmallTeam_39_AuditLogLoad(t *testing.T) {
+func TestStandaloneServer_AuditLogLoad(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"aud/ARTIFACT.md": smallteamLowArtifact("audit test"),
@@ -1100,7 +1100,7 @@ func TestSmallTeam_39_AuditLogLoad(t *testing.T) {
 }
 
 // T-D-small-team-40 — standalone is single-tenant: all requests served under default tenant.
-func TestSmallTeam_40_SingleTenant(t *testing.T) {
+func TestStandaloneServer_SingleTenant(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"st/ARTIFACT.md": smallteamLowArtifact("single tenant"),
@@ -1121,13 +1121,13 @@ func TestSmallTeam_40_SingleTenant(t *testing.T) {
 }
 
 // T-D-small-team-41 — default bind 127.0.0.1:8080 (skip to avoid port conflicts in CI).
-func TestSmallTeam_41_DefaultBind8080(t *testing.T) {
+func TestStandaloneServer_DefaultBind8080(t *testing.T) {
 	t.Parallel()
 	t.Skip("fixed port 8080 not safe in parallel CI; default-bind behavior is covered by startServerArgs free-port path in other tests")
 }
 
 // T-D-small-team-42 — config show reveals layers.path from PODIUM_LAYER_PATH.
-func TestSmallTeam_42_ConfigShowLayerPathEnv(t *testing.T) {
+func TestStandaloneServer_ConfigShowLayerPathEnv(t *testing.T) {
 	t.Parallel()
 	testPath := "/tmp/podium-test-layers-42"
 	res := runPodium(t, "",
@@ -1145,7 +1145,7 @@ func TestSmallTeam_42_ConfigShowLayerPathEnv(t *testing.T) {
 }
 
 // T-D-small-team-43 — podium init --standalone sets registry to http://127.0.0.1:8080.
-func TestSmallTeam_43_InitStandaloneFlag(t *testing.T) {
+func TestStandaloneServer_InitStandaloneFlag(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
 
@@ -1172,7 +1172,7 @@ func TestSmallTeam_43_InitStandaloneFlag(t *testing.T) {
 }
 
 // T-D-small-team-44 — missing --layer-path directory prints a clear error.
-func TestSmallTeam_44_MissingLayerPathClearError(t *testing.T) {
+func TestStandaloneServer_MissingLayerPathClearError(t *testing.T) {
 	t.Parallel()
 	out := smallteamRawExecFail(t,
 		[]string{"HOME=" + t.TempDir()},
@@ -1184,7 +1184,7 @@ func TestSmallTeam_44_MissingLayerPathClearError(t *testing.T) {
 }
 
 // T-D-small-team-45 — public mode with only low-sensitivity artifacts ingests fine.
-func TestSmallTeam_45_PublicModeLowSensitivityIngests(t *testing.T) {
+func TestStandaloneServer_PublicModeLowSensitivityIngests(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"low/ARTIFACT.md": smallteamLowArtifact("low sensitivity public mode"),

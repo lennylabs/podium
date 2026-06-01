@@ -27,7 +27,7 @@ func hiwSkillRegistry(t *testing.T) string {
 
 // T-D-how-it-works-1 — filesystem registry: sync reads the directory directly
 // with harness=none, no server required.
-func TestHIW_FilesystemSyncNone(t *testing.T) {
+func TestDeployment_FilesystemSyncNone(t *testing.T) {
 	t.Parallel()
 	reg := hiwSkillRegistry(t)
 	tgt := t.TempDir()
@@ -48,7 +48,7 @@ func TestHIW_FilesystemSyncNone(t *testing.T) {
 
 // T-D-how-it-works-2 — filesystem registry: claude-code adapter layout, with a
 // cursor negative variant.
-func TestHIW_FilesystemSyncClaudeCodeLayout(t *testing.T) {
+func TestDeployment_FilesystemSyncClaudeCodeLayout(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"skills/my-skill/ARTIFACT.md": greetSkillArtifact,
@@ -70,7 +70,7 @@ func TestHIW_FilesystemSyncClaudeCodeLayout(t *testing.T) {
 
 // T-D-how-it-works-3 — filesystem path is not a valid source for the MCP
 // server: a tool call surfaces an error.
-func TestHIW_MCPRejectsFilesystemPath(t *testing.T) {
+func TestDeployment_MCPRejectsFilesystemPath(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"y/ARTIFACT.md": contextArtifact("y")})
 	res := mcpExec(t, []string{"PODIUM_REGISTRY=" + reg, "PODIUM_CACHE_DIR=" + t.TempDir()},
@@ -86,12 +86,12 @@ func TestHIW_MCPRejectsFilesystemPath(t *testing.T) {
 }
 
 // T-D-how-it-works-4 — zero-flag auto-bootstrap banner and ~/.podium files.
-func TestHIW_ZeroFlagAutoBootstrap(t *testing.T) {
+func TestDeployment_ZeroFlagAutoBootstrap(t *testing.T) {
 	t.Skip("blocked by F-13.10.1: zero-flag detection emits no 'No config found' banner and does not create ~/.podium/registry.yaml or ~/podium-artifacts/")
 }
 
 // T-D-how-it-works-5 — explicit --standalone --layer-path serves the API.
-func TestHIW_StandaloneExplicit(t *testing.T) {
+func TestDeployment_StandaloneExplicit(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"hello/ARTIFACT.md": greetSkillArtifact,
@@ -113,7 +113,7 @@ func TestHIW_StandaloneExplicit(t *testing.T) {
 }
 
 // T-D-how-it-works-6 — standalone state lives under ~/.podium/standalone/.
-func TestHIW_StandaloneStateFiles(t *testing.T) {
+func TestDeployment_StandaloneStateFiles(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
 	db := filepath.Join(srv.Home, ".podium", "standalone", "podium.db")
@@ -127,7 +127,7 @@ func TestHIW_StandaloneStateFiles(t *testing.T) {
 }
 
 // T-D-how-it-works-7 — /healthz and /readyz return the documented JSON.
-func TestHIW_HealthReadyJSON(t *testing.T) {
+func TestDeployment_HealthReadyJSON(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
 	var health map[string]any
@@ -152,7 +152,7 @@ func TestHIW_HealthReadyJSON(t *testing.T) {
 
 // T-D-how-it-works-8 — MCP exposes the four meta-tools and declares
 // capabilities.tools and capabilities.sessionCorrelation.
-func TestHIW_MCPMetaToolsAndCapabilities(t *testing.T) {
+func TestDeployment_MCPMetaToolsAndCapabilities(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
 	res := mcpExec(t, []string{"PODIUM_REGISTRY=" + srv.BaseURL},
@@ -176,7 +176,7 @@ func TestHIW_MCPMetaToolsAndCapabilities(t *testing.T) {
 }
 
 // T-D-how-it-works-9 — MCP load_domain (root) returns the root domain map.
-func TestHIW_MCPLoadDomainRoot(t *testing.T) {
+func TestDeployment_MCPLoadDomainRoot(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"greetings/hello/ARTIFACT.md": greetSkillArtifact,
@@ -193,7 +193,7 @@ func TestHIW_MCPLoadDomainRoot(t *testing.T) {
 
 // T-D-how-it-works-10 — MCP load_artifact materializes via the claude-code
 // adapter to PODIUM_MATERIALIZE_ROOT, atomically.
-func TestHIW_MCPLoadArtifactMaterializes(t *testing.T) {
+func TestDeployment_MCPLoadArtifactMaterializes(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"greetings/hello/ARTIFACT.md": greetSkillArtifact,
@@ -226,7 +226,7 @@ func TestHIW_MCPLoadArtifactMaterializes(t *testing.T) {
 
 // T-D-how-it-works-11 — load_artifact on a missing id aborts with a
 // structured error and writes nothing; the bridge stays usable.
-func TestHIW_MCPLoadArtifactNotFound(t *testing.T) {
+func TestDeployment_MCPLoadArtifactNotFound(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
 	mat := t.TempDir()
@@ -253,12 +253,12 @@ func TestHIW_MCPLoadArtifactNotFound(t *testing.T) {
 }
 
 // T-D-how-it-works-12 — sync in server-source mode.
-func TestHIW_SyncServerSource(t *testing.T) {
+func TestDeployment_SyncServerSource(t *testing.T) {
 	t.Skip("blocked by F-2.2.2: podium sync has no server-source HTTP path; a URL registry is treated as a filesystem path")
 }
 
 // T-D-how-it-works-13 — sync writes an independent .podium/sync.lock per target.
-func TestHIW_SyncLockPerTarget(t *testing.T) {
+func TestDeployment_SyncLockPerTarget(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
 	t1, t2 := t.TempDir(), t.TempDir()
@@ -270,7 +270,7 @@ func TestHIW_SyncLockPerTarget(t *testing.T) {
 
 // T-D-how-it-works-14 — load_artifact populates the content cache under the
 // configured cache dir, shared across processes.
-func TestHIW_ContentCacheShared(t *testing.T) {
+func TestDeployment_ContentCacheShared(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
 	cache := t.TempDir()
@@ -302,7 +302,7 @@ func TestHIW_ContentCacheShared(t *testing.T) {
 
 // T-D-how-it-works-15 — workspace overlay (PODIUM_OVERLAY_PATH) has the
 // highest precedence in the effective view.
-func TestHIW_OverlayHighestPrecedence(t *testing.T) {
+func TestDeployment_OverlayHighestPrecedence(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"greetings/hello/ARTIFACT.md": contextArtifact("registry-version"),
@@ -325,7 +325,7 @@ func TestHIW_OverlayHighestPrecedence(t *testing.T) {
 }
 
 // T-D-how-it-works-16 — exact-semver version pinning via ?version=.
-func TestHIW_VersionPinning(t *testing.T) {
+func TestDeployment_VersionPinning(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"greetings/hello/ARTIFACT.md": contextArtifact("v1"),
@@ -342,28 +342,28 @@ func TestHIW_VersionPinning(t *testing.T) {
 }
 
 // T-D-how-it-works-17 — version immutability on re-ingest.
-func TestHIW_VersionImmutability(t *testing.T) {
+func TestDeployment_VersionImmutability(t *testing.T) {
 	t.Skip("blocked by F-7.3.4: the manual reingest endpoint records intent but never runs the ingest pipeline, so re-ingest rejection cannot be exercised")
 }
 
 // T-D-how-it-works-18 — session_id version snapshot.
-func TestHIW_SessionSnapshot(t *testing.T) {
+func TestDeployment_SessionSnapshot(t *testing.T) {
 	t.Skip("blocked by F-7.3.4: a new version cannot be ingested into a running standalone server (reingest is a no-op), so session snapshot consistency is untestable end-to-end")
 }
 
 // T-D-how-it-works-19 — standard deployment health (Docker Compose).
-func TestHIW_StandardDeploymentHealth(t *testing.T) {
+func TestDeployment_StandardDeploymentHealth(t *testing.T) {
 	t.Skip("requires the Docker Compose standard stack (Postgres + pgvector + S3 + OIDC); not available in the test sandbox")
 }
 
 // T-D-how-it-works-20 — standard deployment device-code login.
-func TestHIW_StandardDeviceCodeLogin(t *testing.T) {
+func TestDeployment_StandardDeviceCodeLogin(t *testing.T) {
 	t.Skip("requires a running standard deployment with a Dex IdP container; not available in the test sandbox")
 }
 
 // T-D-how-it-works-21 — filesystem-source registries apply no visibility
 // filter: a sensitivity:high artifact still materializes.
-func TestHIW_FilesystemNoVisibilityFilter(t *testing.T) {
+func TestDeployment_FilesystemNoVisibilityFilter(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"secret/tool/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: secret\nsensitivity: high\n---\n\nbody\n",
@@ -377,12 +377,12 @@ func TestHIW_FilesystemNoVisibilityFilter(t *testing.T) {
 }
 
 // T-D-how-it-works-22 — injected-session-token identity provider.
-func TestHIW_InjectedSessionToken(t *testing.T) {
+func TestDeployment_InjectedSessionToken(t *testing.T) {
 	t.Skip("requires a registered runtime signing key (podium admin runtime register) and a self-signed JWT; standard-deployment identity scenario not wired in the sandbox")
 }
 
 // T-D-how-it-works-23 — migrate-to-standard into a SQLite target.
-func TestHIW_MigrateToStandard(t *testing.T) {
+func TestDeployment_MigrateToStandard(t *testing.T) {
 	t.Parallel()
 	src := makeStandaloneDB(t)
 	targetDB := filepath.Join(t.TempDir(), "target.db")
@@ -409,7 +409,7 @@ func TestHIW_MigrateToStandard(t *testing.T) {
 }
 
 // T-D-how-it-works-24 — migrate-to-standard --dry-run writes nothing.
-func TestHIW_MigrateDryRun(t *testing.T) {
+func TestDeployment_MigrateDryRun(t *testing.T) {
 	t.Parallel()
 	src := makeStandaloneDB(t)
 	targetDB := filepath.Join(t.TempDir(), "target.db")
@@ -429,7 +429,7 @@ func TestHIW_MigrateDryRun(t *testing.T) {
 // T-D-how-it-works-25 — /v1/load_domain returns the subdomain structure.
 // Doc-accuracy (F-0.0.2): the wire keys are subdomains/notable, not the
 // quickstart's domains/artifacts.
-func TestHIW_LoadDomainStructure(t *testing.T) {
+func TestDeployment_LoadDomainStructure(t *testing.T) {
 	t.Parallel()
 	// A direct artifact under finance (glossary) plus the ap subtree keeps
 	// finance from being folded into its single child at the root level.
@@ -461,7 +461,7 @@ func TestHIW_LoadDomainStructure(t *testing.T) {
 
 // T-D-how-it-works-26 — /v1/search_artifacts returns ranked descriptors with
 // no manifest bodies.
-func TestHIW_SearchArtifactsDescriptors(t *testing.T) {
+func TestDeployment_SearchArtifactsDescriptors(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"greet/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\n---\n\n",
@@ -495,7 +495,7 @@ func TestHIW_SearchArtifactsDescriptors(t *testing.T) {
 
 // T-D-how-it-works-27 — /v1/load_artifact returns the manifest body and a
 // content hash.
-func TestHIW_LoadArtifactFields(t *testing.T) {
+func TestDeployment_LoadArtifactFields(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"greetings/hello/ARTIFACT.md": contextArtifact("greeting"),
@@ -526,7 +526,7 @@ func TestHIW_LoadArtifactFields(t *testing.T) {
 }
 
 // T-D-how-it-works-28 — /v1/artifacts:batchLoad returns multiple artifacts.
-func TestHIW_BatchLoad(t *testing.T) {
+func TestDeployment_BatchLoad(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"a/ARTIFACT.md": contextArtifact("a"),
@@ -547,7 +547,7 @@ func TestHIW_BatchLoad(t *testing.T) {
 }
 
 // T-D-how-it-works-29 — /v1/dependents returns extends-based edges.
-func TestHIW_Dependents(t *testing.T) {
+func TestDeployment_Dependents(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":               "multi_layer: true\nlayer_order:\n  - org\n  - team\n",
@@ -565,7 +565,7 @@ func TestHIW_Dependents(t *testing.T) {
 }
 
 // T-D-how-it-works-30 — /v1/scope/preview returns aggregate visibility counts.
-func TestHIW_ScopePreview(t *testing.T) {
+func TestDeployment_ScopePreview(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"a/ARTIFACT.md": contextArtifact("a"),
@@ -586,7 +586,7 @@ func TestHIW_ScopePreview(t *testing.T) {
 }
 
 // T-D-how-it-works-31 — sync --dry-run resolves and writes nothing.
-func TestHIW_SyncDryRun(t *testing.T) {
+func TestDeployment_SyncDryRun(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
 	tgt := t.TempDir()
@@ -600,19 +600,19 @@ func TestHIW_SyncDryRun(t *testing.T) {
 }
 
 // T-D-how-it-works-32 — serve --strict refuses without config.
-func TestHIW_ServeStrict(t *testing.T) {
+func TestDeployment_ServeStrict(t *testing.T) {
 	t.Skip("blocked by F-13.10.1: --strict is unimplemented (the flag is not defined and there is no strict-config gate)")
 }
 
 // T-D-how-it-works-33 — PODIUM_NO_AUTOSTANDALONE=1 suppresses bootstrap.
-func TestHIW_NoAutostandalone(t *testing.T) {
+func TestDeployment_NoAutostandalone(t *testing.T) {
 	t.Skip("blocked by F-13.10.1: PODIUM_NO_AUTOSTANDALONE is not honored; the server still auto-bootstraps standalone mode")
 }
 
 // T-D-how-it-works-34 — public mode: all artifacts visible without auth.
 // Doc-accuracy: the banner text differs (mode=public on the listen line),
 // but /healthz reports mode=public and reads need no token.
-func TestHIW_PublicMode(t *testing.T) {
+func TestDeployment_PublicMode(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
 	srv := startServerArgs(t, []string{"HOME=" + t.TempDir()}, "serve", "--public-mode", "--layer-path", reg)
@@ -627,12 +627,12 @@ func TestHIW_PublicMode(t *testing.T) {
 }
 
 // T-D-how-it-works-35 — read-only mode response headers.
-func TestHIW_ReadOnlyHeaders(t *testing.T) {
+func TestDeployment_ReadOnlyHeaders(t *testing.T) {
 	t.Skip("read-only mode has no external CLI toggle; flipping the ModeTracker requires an in-process server option (covered by pkg/registry/server unit tests)")
 }
 
 // T-D-how-it-works-36 — cache prune removes old buckets.
-func TestHIW_CachePrune(t *testing.T) {
+func TestDeployment_CachePrune(t *testing.T) {
 	t.Parallel()
 	cache := t.TempDir()
 	bucket := filepath.Join(cache, "abc123abc123")
@@ -661,22 +661,22 @@ func TestHIW_CachePrune(t *testing.T) {
 }
 
 // T-D-how-it-works-37 — shared library: filesystem and server modes byte-equal.
-func TestHIW_SharedLibraryEquivalence(t *testing.T) {
+func TestDeployment_SharedLibraryEquivalence(t *testing.T) {
 	t.Skip("blocked by F-2.2.2: the server-source sync path is unimplemented, so the filesystem-vs-server adapter-output comparison cannot run")
 }
 
 // T-D-how-it-works-38 — Python SDK requires a server.
-func TestHIW_PythonSDKRequiresServer(t *testing.T) {
+func TestDeployment_PythonSDKRequiresServer(t *testing.T) {
 	t.Skip("requires the installed Python SDK (sdks/podium-py via pip); Python toolchain not provisioned in the test sandbox")
 }
 
 // T-D-how-it-works-39 — TypeScript SDK requires a server.
-func TestHIW_TypeScriptSDKRequiresServer(t *testing.T) {
+func TestDeployment_TypeScriptSDKRequiresServer(t *testing.T) {
 	t.Skip("requires the built TypeScript SDK (sdks/podium-ts via npm); Node toolchain not provisioned in the test sandbox")
 }
 
 // T-D-how-it-works-40 — config show reflects the active deployment mode.
-func TestHIW_ConfigShowDeploymentMode(t *testing.T) {
+func TestDeployment_ConfigShowDeploymentMode(t *testing.T) {
 	// spec §7.7 (F-7.7.1): config show prints the merged sync.yaml, so the
 	// active deployment's registry surfaces as defaults.registry.
 	ws := t.TempDir()
@@ -694,12 +694,12 @@ func TestHIW_ConfigShowDeploymentMode(t *testing.T) {
 }
 
 // T-D-how-it-works-41 — /metrics endpoint.
-func TestHIW_MetricsEndpoint(t *testing.T) {
+func TestDeployment_MetricsEndpoint(t *testing.T) {
 	t.Skip("blocked by F-13.8.1: the Prometheus /metrics endpoint is absent on the registry (returns 404)")
 }
 
 // T-D-how-it-works-42 — cursor harness writes rules with the .mdc extension.
-func TestHIW_CursorRuleLayout(t *testing.T) {
+func TestDeployment_CursorRuleLayout(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"rules/ts-style/ARTIFACT.md": "---\ntype: rule\nversion: 1.0.0\ndescription: ts\nrule_mode: always\n---\n\nrules\n",
@@ -713,12 +713,12 @@ func TestHIW_CursorRuleLayout(t *testing.T) {
 }
 
 // T-D-how-it-works-43 — mcp-server artifacts filtered from MCP bridge results.
-func TestHIW_MCPServerFiltered(t *testing.T) {
+func TestDeployment_MCPServerFiltered(t *testing.T) {
 	t.Skip("spec §5: mcp-server artifacts should be filtered from MCP bridge results; the bridge does not filter them and no BUILD-GAPS finding is filed for this gap")
 }
 
 // T-D-how-it-works-44 — version command prints a version string.
-func TestHIW_Version(t *testing.T) {
+func TestDeployment_Version(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "version")
 	if res.Exit != 0 || !strings.HasPrefix(res.Stdout, "podium ") {
@@ -727,7 +727,7 @@ func TestHIW_Version(t *testing.T) {
 }
 
 // T-D-how-it-works-45 — /objects/ serves content-addressed blobs.
-func TestHIW_ObjectsRoute(t *testing.T) {
+func TestDeployment_ObjectsRoute(t *testing.T) {
 	t.Skip("bundled large-resource externalization (>256 KB) is not populated at standalone boot ingest, so load_artifact returns no large_resources link to fetch from /objects/")
 }
 
