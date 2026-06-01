@@ -21,16 +21,19 @@ import (
 	"github.com/lennylabs/podium/pkg/materialize"
 	"github.com/lennylabs/podium/pkg/overlay"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // Errors returned by Run. Tests assert against them via errors.Is.
 var (
 	// ErrNoTarget signals that Options.Target was empty.
 	ErrNoTarget = errors.New("sync: target directory not specified")
-	// ErrNoRegistry signals that no registry source was configured.
-	// Maps to config.no_registry in §6.10. Surfaces when neither
-	// Options.RegistryPath nor a discoverable .podium/sync.yaml /
-	// PODIUM_REGISTRY env var is set.
+	// ErrNoRegistry signals that no registry source was configured: Run
+	// returns it when Options.RegistryPath is empty. Maps to
+	// config.no_registry in §6.10. Resolving the registry from CLI flags,
+	// PODIUM_REGISTRY, or a discovered sync.yaml (the §7.5.2 precedence
+	// chain) is the caller's responsibility; pkg/sync reads no environment
+	// variables or config files.
 	ErrNoRegistry = errors.New("config.no_registry: no registry configured")
 	// ErrOfflineCacheMiss signals a §7.4 offline-only sync against a
 	// server-source registry. podium sync keeps no offline content cache, so
@@ -139,11 +142,12 @@ type Result struct {
 // Version and Type come from the parsed manifest (empty when the frontmatter
 // did not parse) and feed the §7.5 --json artifact entries.
 type ArtifactResult struct {
-	ID      string
-	Version string
-	Type    string
-	Layer   string
-	Files   []string
+	ID          string
+	Version     string
+	Type        string
+	ContentHash string
+	Layer       string
+	Files       []string
 }
 
 // Run executes one sync. The registry source is dispatched per §7.5.2: an
@@ -236,17 +240,18 @@ func Run(opts Options) (*Result, error) {
 			paths[i] = f.Path
 		}
 		sort.Strings(paths)
-		version, artType := "", ""
+		ver, artType := "", ""
 		if rec.Artifact != nil {
-			version = rec.Artifact.Version
+			ver = rec.Artifact.Version
 			artType = string(rec.Artifact.Type)
 		}
 		res.Artifacts = append(res.Artifacts, ArtifactResult{
-			ID:      rec.ID,
-			Version: version,
-			Type:    artType,
-			Layer:   rec.LayerID,
-			Files:   paths,
+			ID:          rec.ID,
+			Version:     ver,
+			Type:        artType,
+			ContentHash: contentHashFor(rec),
+			Layer:       rec.LayerID,
+			Files:       paths,
 		})
 		allFiles = append(allFiles, out...)
 	}
@@ -300,6 +305,7 @@ func Run(opts Options) (*Result, error) {
 			lock.Artifacts = append(lock.Artifacts, LockArtifact{
 				ID:               art.ID,
 				Version:          art.Version,
+				ContentHash:      art.ContentHash,
 				Layer:            art.Layer,
 				MaterializedPath: p,
 			})
@@ -312,6 +318,29 @@ func Run(opts Options) (*Result, error) {
 		fmt.Fprintf(os.Stderr, "sync: lock write failed: %v\n", err)
 	}
 	return res, nil
+}
+
+// contentHashFor computes the §7.5.3 content_hash for a materialized record.
+// It hashes the served content bytes (a skill's frontmatter+body when present,
+// otherwise the artifact frontmatter) followed by each large resource in sorted
+// key order, so the digest is deterministic across runs. The result is the
+// spec's "sha256:<hex>" form. spec: §7.5.3, §14.11.
+func contentHashFor(rec materialRecord) string {
+	var parts [][]byte
+	if len(rec.SkillBytes) > 0 {
+		parts = append(parts, rec.SkillBytes)
+	} else {
+		parts = append(parts, rec.ArtifactBytes)
+	}
+	keys := make([]string, 0, len(rec.Resources))
+	for k := range rec.Resources {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		parts = append(parts, []byte(k), rec.Resources[k])
+	}
+	return "sha256:" + version.ContentHash(parts...)
 }
 
 // offlineFirstNoop builds the §7.4 offline-first result for a sync whose
@@ -331,7 +360,7 @@ func offlineFirstNoop(opts Options, adapterID string) *Result {
 		if !ok {
 			i = len(res.Artifacts)
 			idx[la.ID] = i
-			res.Artifacts = append(res.Artifacts, ArtifactResult{ID: la.ID, Version: la.Version, Layer: la.Layer})
+			res.Artifacts = append(res.Artifacts, ArtifactResult{ID: la.ID, Version: la.Version, ContentHash: la.ContentHash, Layer: la.Layer})
 		}
 		res.Artifacts[i].Files = append(res.Artifacts[i].Files, la.MaterializedPath)
 	}
