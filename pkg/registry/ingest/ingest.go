@@ -312,6 +312,11 @@ type Result struct {
 	// Idempotent is the number of pairs that matched an existing
 	// (id, version, content_hash) triple and were no-ops.
 	Idempotent int
+	// Ingested lists the (artifact_id, version) pairs present in the layer
+	// after this snapshot: both newly accepted pairs and idempotent no-ops.
+	// It backs the per-artifact confirmation the `podium layer reingest` CLI
+	// prints (§0 quickstart) and the reingest endpoint's `artifacts` field.
+	Ingested []IngestedArtifact
 	// LintFailures collects diagnostics for artifacts rejected by lint.
 	LintFailures []lint.Diagnostic
 	// Conflicts reports (id, version) pairs that already exist with a
@@ -332,6 +337,13 @@ type Result struct {
 	// severity) and never block ingest; they surface to domain owners so
 	// authored descriptions can be improved.
 	Advisories []lint.Diagnostic
+}
+
+// IngestedArtifact names an (artifact_id, version) pair present in a layer
+// after a snapshot. It is the unit the reingest endpoint and CLI report.
+type IngestedArtifact struct {
+	ArtifactID string
+	Version    string
 }
 
 // EmbeddingFailure names an artifact whose post-ingest embedding
@@ -626,6 +638,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		case err == nil:
 			if existing.ContentHash == mr.ContentHash {
 				res.Idempotent++
+				res.Ingested = append(res.Ingested, IngestedArtifact{ArtifactID: mr.ArtifactID, Version: mr.Version})
 				continue
 			}
 			res.Conflicts = append(res.Conflicts, ConflictReport{
@@ -684,6 +697,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			return nil, err
 		}
 		res.Accepted++
+		res.Ingested = append(res.Ingested, IngestedArtifact{ArtifactID: mr.ArtifactID, Version: mr.Version})
 
 		// §7.3.2 — artifact.deprecated fires only when a manifest update
 		// "flipped deprecated: true", i.e. a prior non-deprecated version

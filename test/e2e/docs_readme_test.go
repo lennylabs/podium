@@ -647,11 +647,23 @@ func TestReadme_HTTPLayers(t *testing.T) {
 
 // T-D-readme-46 — layer reingest triggers a fresh ingest.
 func TestReadme_LayerReingest(t *testing.T) {
-	// F-14.10.1 (the Git source is never ingested) is resolved: reingest now
-	// runs the ingest pipeline (0f8db6f). The remaining blocker is F-0.0.1, the
-	// CLI output format: reingest prints the raw `{queued, accepted, ...}` JSON,
-	// not the synchronous `artifact: …@… layer: …` line the quickstart shows.
-	t.Skip("blocked by F-0.0.1: podium layer reingest prints the queued-result JSON, not the per-artifact line the quickstart shows")
+	t.Parallel()
+	// §0 quickstart: `podium layer reingest <id>` prints a per-artifact
+	// confirmation line `artifact: <id>@<version>   layer: <layer>`.
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
+	extra := writeRegistry(t, map[string]string{"docs/note/ARTIFACT.md": contextArtifact("note")})
+	reg := runPodium(t, "", nil, "layer", "register", "--id", "reingest-layer", "--local", extra, "--registry", srv.BaseURL)
+	if reg.Exit != 0 {
+		t.Fatalf("layer register exit=%d stderr=%s", reg.Exit, reg.Stderr)
+	}
+	res := runPodium(t, "", nil, "layer", "reingest", "--registry", srv.BaseURL, "reingest-layer")
+	if res.Exit != 0 {
+		t.Fatalf("layer reingest exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stdout, "artifact: docs/note@1.0.0") || !strings.Contains(res.Stdout, "layer: reingest-layer") {
+		t.Errorf("reingest output missing per-artifact confirmation line\nwant %q and %q\ngot:\n%s",
+			"artifact: docs/note@1.0.0", "layer: reingest-layer", res.Stdout)
+	}
 }
 
 // T-D-readme-47 — layer register registers a local layer; list shows it.

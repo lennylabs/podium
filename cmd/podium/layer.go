@@ -394,6 +394,27 @@ func layerReingest(args []string) int {
 		fmt.Fprintf(os.Stderr, "reingest failed: HTTP %d\n%s\n", status, out)
 		return 1
 	}
+	// §0 quickstart: print one `artifact: <id>@<version>   layer: <layer>`
+	// line per ingested artifact. Fall back to the raw response body when the
+	// registry returned no artifact list (for example a queue-only
+	// acknowledgement from a server with no ingest runner wired).
+	var parsed struct {
+		Layer     string `json:"layer"`
+		Artifacts []struct {
+			ID      string `json:"id"`
+			Version string `json:"version"`
+		} `json:"artifacts"`
+	}
+	if err := json.Unmarshal(out, &parsed); err == nil && len(parsed.Artifacts) > 0 {
+		layer := parsed.Layer
+		if layer == "" {
+			layer = fs.Arg(0)
+		}
+		for _, a := range parsed.Artifacts {
+			fmt.Printf("artifact: %s@%s   layer: %s\n", a.ID, a.Version, layer)
+		}
+		return 0
+	}
 	fmt.Println(string(out))
 	return 0
 }

@@ -918,13 +918,21 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 		writeReingestError(w, err)
 		return
 	}
+	// §0 quickstart: report the (artifact_id, version) pairs the snapshot
+	// produced so the CLI can print the per-artifact confirmation line.
+	arts := make([]map[string]string, 0, len(res.Ingested))
+	for _, a := range res.Ingested {
+		arts = append(arts, map[string]string{"id": a.ArtifactID, "version": a.Version})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"queued":        cfg.ID,
 		"queued_at":     time.Now().UTC().Format(time.RFC3339),
+		"layer":         cfg.ID,
 		"accepted":      res.Accepted,
 		"idempotent":    res.Idempotent,
 		"conflicts":     len(res.Conflicts),
 		"lint_failures": len(res.LintFailures),
+		"artifacts":     arts,
 	})
 }
 
