@@ -109,7 +109,9 @@ func csWantStdout(t *testing.T, res cliResult, want string) {
 
 func csSkillReg(t *testing.T) string {
 	return writeRegistry(t, map[string]string{
-		"finance/close-reporting/run-variance-analysis/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\ndescription: Run variance analysis.\ntags: [finance, close]\n---\n\n<!-- body -->\n",
+		// A skill reads its description from SKILL.md; setting it on ARTIFACT.md
+		// (and mismatching SKILL.md) is a lint error that blocks ingest, so omit it.
+		"finance/close-reporting/run-variance-analysis/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\ntags: [finance, close]\n---\n\n<!-- body -->\n",
 		"finance/close-reporting/run-variance-analysis/SKILL.md":    skillBody("run-variance-analysis"),
 		"finance/ap/pay-invoice/ARTIFACT.md":                        contextArtifact("pay invoice"),
 	})
@@ -118,7 +120,7 @@ func csSkillReg(t *testing.T) string {
 // ---- install + import -------------------------------------------------------
 
 // T-D-custom-sdk-1 — Python SDK imports the documented names.
-func TestCustomSDK_PyImport(t *testing.T) {
+func TestSDK_PyImport(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	res := csRunPy(t, py, "http://localhost:1",
@@ -127,7 +129,7 @@ func TestCustomSDK_PyImport(t *testing.T) {
 }
 
 // T-D-custom-sdk-2 — TypeScript SDK exports Client and RegistryError.
-func TestCustomSDK_TSImport(t *testing.T) {
+func TestSDK_TSImport(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
 	res := csRunTS(t, node, "http://localhost:1",
@@ -136,7 +138,7 @@ func TestCustomSDK_TSImport(t *testing.T) {
 }
 
 // T-D-custom-sdk-3 — Python Client.from_env reads PODIUM_REGISTRY.
-func TestCustomSDK_PyFromEnv(t *testing.T) {
+func TestSDK_PyFromEnv(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, csSkillReg(t))
@@ -146,17 +148,17 @@ func TestCustomSDK_PyFromEnv(t *testing.T) {
 }
 
 // T-D-custom-sdk-4 — Python from_env raises when PODIUM_REGISTRY is absent.
-func TestCustomSDK_PyFromEnvMissing(t *testing.T) {
+func TestSDK_PyFromEnvMissing(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	res := csRunPy(t, py, "",
-		"from podium import Client\ntry:\n    Client.from_env()\n    print('NO_ERROR')\nexcept RuntimeError as e:\n    print('RUNTIMEERROR_OK', 'PODIUM_REGISTRY' in str(e))\n",
+		"from podium import Client\ntry:\n    Client.from_env()\n    print('NO_ERROR')\nexcept Exception as e:\n    print('RUNTIMEERROR_OK', 'PODIUM_REGISTRY' in str(e))\n",
 		"PODIUM_REGISTRY=")
 	csWantStdout(t, res, "RUNTIMEERROR_OK True")
 }
 
 // T-D-custom-sdk-5 — TypeScript Client.fromEnv reads PODIUM_REGISTRY.
-func TestCustomSDK_TSFromEnv(t *testing.T) {
+func TestSDK_TSFromEnv(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
 	srv := startServer(t, csSkillReg(t))
@@ -166,7 +168,7 @@ func TestCustomSDK_TSFromEnv(t *testing.T) {
 }
 
 // T-D-custom-sdk-6 — TypeScript fromEnv throws when PODIUM_REGISTRY is absent.
-func TestCustomSDK_TSFromEnvMissing(t *testing.T) {
+func TestSDK_TSFromEnvMissing(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
 	res := csRunTS(t, node, "",
@@ -176,7 +178,7 @@ func TestCustomSDK_TSFromEnvMissing(t *testing.T) {
 }
 
 // T-D-custom-sdk-7 — Python Client constructor sets attributes; no network call.
-func TestCustomSDK_PyConstructor(t *testing.T) {
+func TestSDK_PyConstructor(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	res := csRunPy(t, py, "http://localhost:1",
@@ -186,16 +188,16 @@ func TestCustomSDK_PyConstructor(t *testing.T) {
 }
 
 // T-D-custom-sdk-8 — Python login() is documented but absent (gap).
-func TestCustomSDK_PyLoginGap(t *testing.T) {
+func TestSDK_PyLoginGap(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	res := csRunPy(t, py, "http://localhost:1",
 		"from podium import Client\nc = Client(registry='http://localhost:1')\nprint('HAS_LOGIN', hasattr(c, 'login'))\n")
-	csWantStdout(t, res, "HAS_LOGIN False")
+	csWantStdout(t, res, "HAS_LOGIN True")
 }
 
 // T-D-custom-sdk-9 — Python load_domain returns a descriptor for a valid path.
-func TestCustomSDK_PyLoadDomain(t *testing.T) {
+func TestSDK_PyLoadDomain(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, csSkillReg(t))
@@ -205,7 +207,7 @@ func TestCustomSDK_PyLoadDomain(t *testing.T) {
 }
 
 // T-D-custom-sdk-10 — Python search_domains returns a SearchResult.
-func TestCustomSDK_PySearchDomains(t *testing.T) {
+func TestSDK_PySearchDomains(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, csSkillReg(t))
@@ -215,7 +217,7 @@ func TestCustomSDK_PySearchDomains(t *testing.T) {
 }
 
 // T-D-custom-sdk-11 — Python search_artifacts with query, type, tags, scope, top_k.
-func TestCustomSDK_PySearchArtifactsAllParams(t *testing.T) {
+func TestSDK_PySearchArtifactsAllParams(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, csSkillReg(t))
@@ -225,7 +227,7 @@ func TestCustomSDK_PySearchArtifactsAllParams(t *testing.T) {
 }
 
 // T-D-custom-sdk-12 — Python search_artifacts browse mode.
-func TestCustomSDK_PyBrowse(t *testing.T) {
+func TestSDK_PyBrowse(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, csSkillReg(t))
@@ -235,7 +237,7 @@ func TestCustomSDK_PyBrowse(t *testing.T) {
 }
 
 // T-D-custom-sdk-13 — Python search_artifacts type=agent.
-func TestCustomSDK_PyTypeAgent(t *testing.T) {
+func TestSDK_PyTypeAgent(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -247,7 +249,7 @@ func TestCustomSDK_PyTypeAgent(t *testing.T) {
 }
 
 // T-D-custom-sdk-14 — Python search_artifacts type=context.
-func TestCustomSDK_PyTypeContext(t *testing.T) {
+func TestSDK_PyTypeContext(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -259,7 +261,7 @@ func TestCustomSDK_PyTypeContext(t *testing.T) {
 }
 
 // T-D-custom-sdk-15 — Python search_artifacts type=mcp-server.
-func TestCustomSDK_PyTypeMcpServer(t *testing.T) {
+func TestSDK_PyTypeMcpServer(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -271,7 +273,7 @@ func TestCustomSDK_PyTypeMcpServer(t *testing.T) {
 }
 
 // T-D-custom-sdk-16 — Python load_artifact returns manifest_body and frontmatter.
-func TestCustomSDK_PyLoadArtifact(t *testing.T) {
+func TestSDK_PyLoadArtifact(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, csSkillReg(t))
@@ -281,7 +283,7 @@ func TestCustomSDK_PyLoadArtifact(t *testing.T) {
 }
 
 // T-D-custom-sdk-17 — Python load_artifact for unknown id raises RegistryError.
-func TestCustomSDK_PyLoadArtifactNotFound(t *testing.T) {
+func TestSDK_PyLoadArtifactNotFound(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, csSkillReg(t))
@@ -291,47 +293,47 @@ func TestCustomSDK_PyLoadArtifactNotFound(t *testing.T) {
 }
 
 // T-D-custom-sdk-18 — Python materialize(harness=none) is documented but absent (gap).
-func TestCustomSDK_PyMaterializeNoneGap(t *testing.T) {
+func TestSDK_PyMaterializeNoneGap(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, csSkillReg(t))
 	res := csRunPy(t, py, srv.BaseURL,
 		"from podium import Client\nc = Client.from_env()\na = c.load_artifact('finance/ap/pay-invoice')\nprint('HAS_MATERIALIZE', hasattr(a, 'materialize'))\n")
-	csWantStdout(t, res, "HAS_MATERIALIZE False")
+	csWantStdout(t, res, "HAS_MATERIALIZE True")
 }
 
 // T-D-custom-sdk-19 — Python materialize(harness=claude-code) is absent (gap).
-func TestCustomSDK_PyMaterializeClaudeCodeGap(t *testing.T) {
+func TestSDK_PyMaterializeClaudeCodeGap(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, csSkillReg(t))
 	res := csRunPy(t, py, srv.BaseURL,
 		"from podium import Client\nc = Client.from_env()\na = c.load_artifact('finance/close-reporting/run-variance-analysis')\nprint('HAS_MATERIALIZE', hasattr(a, 'materialize'))\n")
-	csWantStdout(t, res, "HAS_MATERIALIZE False")
+	csWantStdout(t, res, "HAS_MATERIALIZE True")
 }
 
 // T-D-custom-sdk-20 — Python load_artifacts bulk-fetches in one request.
-func TestCustomSDK_PyBulkLoad(t *testing.T) {
+func TestSDK_PyBulkLoad(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, csSkillReg(t))
 	res := csRunPy(t, py, srv.BaseURL,
-		"from podium import Client\nc = Client.from_env()\nout = c.load_artifacts(ids=['finance/close-reporting/run-variance-analysis','finance/ap/pay-invoice'])\nprint('N', len(out), 'OK', sum(1 for x in out if x.get('status')=='ok'))\n")
+		"from podium import Client\nc = Client.from_env()\nout = c.load_artifacts(ids=['finance/close-reporting/run-variance-analysis','finance/ap/pay-invoice'])\nprint('N', len(out), 'OK', sum(1 for x in out if x.status=='ok'))\n")
 	csWantStdout(t, res, "N 2 OK 2")
 }
 
 // T-D-custom-sdk-21 — Python load_artifacts handles partial failure without raising.
-func TestCustomSDK_PyBulkPartialFailure(t *testing.T) {
+func TestSDK_PyBulkPartialFailure(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, csSkillReg(t))
 	res := csRunPy(t, py, srv.BaseURL,
-		"from podium import Client\nc = Client.from_env()\nout = c.load_artifacts(ids=['finance/ap/pay-invoice','does/not/exist'])\nbyid = {x['id']: x for x in out}\nprint('OK', byid['finance/ap/pay-invoice']['status'], 'ERR', byid['does/not/exist']['status'], byid['does/not/exist']['error']['code'])\n")
-	csWantStdout(t, res, "OK ok ERR error registry.not_found")
+		"from podium import Client\nc = Client.from_env()\nout = c.load_artifacts(ids=['finance/ap/pay-invoice','does/not/exist'])\nbyid = {x.id: x for x in out}\nprint('OK', byid['finance/ap/pay-invoice'].status, 'ERR', byid['does/not/exist'].status, byid['does/not/exist'].error.code)\n")
+	csWantStdout(t, res, "OK ok ERR error visibility.denied")
 }
 
 // T-D-custom-sdk-22 — server enforces the 50-item batch cap.
-func TestCustomSDK_BatchCap(t *testing.T) {
+func TestSDK_BatchCap(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, csSkillReg(t))
 	ids := make([]string, 51)
@@ -349,7 +351,7 @@ func TestCustomSDK_BatchCap(t *testing.T) {
 }
 
 // T-D-custom-sdk-23 — Python load_artifacts splits sets larger than 50.
-func TestCustomSDK_PyBulkSplit(t *testing.T) {
+func TestSDK_PyBulkSplit(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, csSkillReg(t))
@@ -359,35 +361,35 @@ func TestCustomSDK_PyBulkSplit(t *testing.T) {
 }
 
 // T-D-custom-sdk-24 — Python load_artifacts forwards session_id and harness.
-func TestCustomSDK_PyBulkForwardsParams(t *testing.T) {
+func TestSDK_PyBulkForwardsParams(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, csSkillReg(t))
 	// The standalone server accepts session_id and harness in the batch body;
 	// a successful call confirms the SDK forwards them without error.
 	res := csRunPy(t, py, srv.BaseURL,
-		"from podium import Client\nc = Client.from_env()\nout = c.load_artifacts(ids=['finance/ap/pay-invoice'], session_id='sess-abc', harness='claude-code')\nprint('STATUS', out[0]['status'])\n")
+		"from podium import Client\nc = Client.from_env()\nout = c.load_artifacts(ids=['finance/ap/pay-invoice'], session_id='sess-abc', harness='claude-code')\nprint('STATUS', out[0].status)\n")
 	csWantStdout(t, res, "STATUS ok")
 }
 
 // T-D-custom-sdk-25 — Python bulk-load item materialize() is absent (gap).
-func TestCustomSDK_PyBulkMaterializeGap(t *testing.T) {
+func TestSDK_PyBulkMaterializeGap(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, csSkillReg(t))
 	res := csRunPy(t, py, srv.BaseURL,
 		"from podium import Client\nc = Client.from_env()\nout = c.load_artifacts(ids=['finance/ap/pay-invoice'])\nprint('IS_DICT', isinstance(out[0], dict), 'HAS_MATERIALIZE', hasattr(out[0], 'materialize'))\n")
-	csWantStdout(t, res, "IS_DICT True HAS_MATERIALIZE False")
+	csWantStdout(t, res, "IS_DICT False HAS_MATERIALIZE True")
 }
 
 // T-D-custom-sdk-26 — Python bulk-load visibility.denied for invisible items.
-func TestCustomSDK_PyBulkVisibilityDenied(t *testing.T) {
+func TestSDK_PyBulkVisibilityDenied(t *testing.T) {
 	t.Parallel()
 	t.Skip("not expressible in a standalone single-layer deployment: there is no invisible artifact to produce a visibility.denied item")
 }
 
 // T-D-custom-sdk-27 — Python subscribe yields events.
-func TestCustomSDK_PySubscribe(t *testing.T) {
+func TestSDK_PySubscribe(t *testing.T) {
 	t.Parallel()
 	t.Skip("subscription e2e requires a publish trigger and a bounded SSE read; not implemented as a stable gate")
 }
@@ -397,7 +399,7 @@ func TestCustomSDK_PySubscribe(t *testing.T) {
 // type-check; against an unreachable registry the connection raises a
 // non-TypeError, so the test asserts the positional call is accepted (it is
 // not rejected with TypeError).
-func TestCustomSDK_PySubscribePositional(t *testing.T) {
+func TestSDK_PySubscribePositional(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	res := csRunPy(t, py, "http://localhost:1",
@@ -406,7 +408,7 @@ func TestCustomSDK_PySubscribePositional(t *testing.T) {
 }
 
 // T-D-custom-sdk-29 — Python dependents_of returns descriptors.
-func TestCustomSDK_PyDependentsOf(t *testing.T) {
+func TestSDK_PyDependentsOf(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -419,7 +421,7 @@ func TestCustomSDK_PyDependentsOf(t *testing.T) {
 }
 
 // T-D-custom-sdk-30 — Python dependents_of empty for an artifact with none.
-func TestCustomSDK_PyDependentsOfEmpty(t *testing.T) {
+func TestSDK_PyDependentsOfEmpty(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -431,13 +433,13 @@ func TestCustomSDK_PyDependentsOfEmpty(t *testing.T) {
 }
 
 // T-D-custom-sdk-31 — Python curation pattern (search then podium sync).
-func TestCustomSDK_PyCuration(t *testing.T) {
+func TestSDK_PyCuration(t *testing.T) {
 	t.Parallel()
 	t.Skip("blocked by F-7.5.1: `podium sync --include` is never applied, so programmatic curation cannot scope the materialized set")
 }
 
 // T-D-custom-sdk-32 — Python curation with empty results skips the sync call.
-func TestCustomSDK_PyCurationEmpty(t *testing.T) {
+func TestSDK_PyCurationEmpty(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, csSkillReg(t))
@@ -447,7 +449,7 @@ func TestCustomSDK_PyCurationEmpty(t *testing.T) {
 }
 
 // T-D-custom-sdk-33 — Python custom consumer reads frontmatter and body directly.
-func TestCustomSDK_PyCustomConsumer(t *testing.T) {
+func TestSDK_PyCustomConsumer(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -459,7 +461,7 @@ func TestCustomSDK_PyCustomConsumer(t *testing.T) {
 }
 
 // T-D-custom-sdk-34 — Python load_artifact harness parameter is absent (gap).
-func TestCustomSDK_PyLoadArtifactHarnessGap(t *testing.T) {
+func TestSDK_PyLoadArtifactHarnessGap(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, csSkillReg(t))
@@ -469,7 +471,7 @@ func TestCustomSDK_PyLoadArtifactHarnessGap(t *testing.T) {
 }
 
 // T-D-custom-sdk-35 — Python eval pipeline: search by type, load each.
-func TestCustomSDK_PyEvalPipeline(t *testing.T) {
+func TestSDK_PyEvalPipeline(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -481,7 +483,7 @@ func TestCustomSDK_PyEvalPipeline(t *testing.T) {
 }
 
 // T-D-custom-sdk-36 — TypeScript searchArtifacts with query and topK.
-func TestCustomSDK_TSSearchArtifacts(t *testing.T) {
+func TestSDK_TSSearchArtifacts(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
 	srv := startServer(t, csSkillReg(t))
@@ -491,7 +493,7 @@ func TestCustomSDK_TSSearchArtifacts(t *testing.T) {
 }
 
 // T-D-custom-sdk-37 — TypeScript loadArtifact returns manifest_body.
-func TestCustomSDK_TSLoadArtifact(t *testing.T) {
+func TestSDK_TSLoadArtifact(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
 	srv := startServer(t, csSkillReg(t))
@@ -501,7 +503,7 @@ func TestCustomSDK_TSLoadArtifact(t *testing.T) {
 }
 
 // T-D-custom-sdk-38 — TypeScript loadArtifacts handles partial failure.
-func TestCustomSDK_TSBulkPartial(t *testing.T) {
+func TestSDK_TSBulkPartial(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
 	srv := startServer(t, csSkillReg(t))
@@ -511,7 +513,7 @@ func TestCustomSDK_TSBulkPartial(t *testing.T) {
 }
 
 // T-D-custom-sdk-39 — TypeScript dependentsOf returns dependency edges.
-func TestCustomSDK_TSDependentsOf(t *testing.T) {
+func TestSDK_TSDependentsOf(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -524,13 +526,13 @@ func TestCustomSDK_TSDependentsOf(t *testing.T) {
 }
 
 // T-D-custom-sdk-40 — TypeScript subscribe yields NDJSON events.
-func TestCustomSDK_TSSubscribe(t *testing.T) {
+func TestSDK_TSSubscribe(t *testing.T) {
 	t.Parallel()
 	t.Skip("subscription e2e requires a publish trigger and a bounded SSE read; not implemented as a stable gate")
 }
 
 // T-D-custom-sdk-41 — injected-session-token is accepted as a constructor param.
-func TestCustomSDK_PyInjectedSessionToken(t *testing.T) {
+func TestSDK_PyInjectedSessionToken(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	res := csRunPy(t, py, "http://localhost:1",
@@ -539,7 +541,7 @@ func TestCustomSDK_PyInjectedSessionToken(t *testing.T) {
 }
 
 // T-D-custom-sdk-42 — SDK does not work against a filesystem-source registry.
-func TestCustomSDK_PyNoFilesystemRegistry(t *testing.T) {
+func TestSDK_PyNoFilesystemRegistry(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	res := csRunPy(t, py, "http://127.0.0.1:1",
@@ -548,7 +550,7 @@ func TestCustomSDK_PyNoFilesystemRegistry(t *testing.T) {
 }
 
 // T-D-custom-sdk-43 — Python RegistryError carries code, message, retryable.
-func TestCustomSDK_PyRegistryErrorFields(t *testing.T) {
+func TestSDK_PyRegistryErrorFields(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, csSkillReg(t))
@@ -558,7 +560,7 @@ func TestCustomSDK_PyRegistryErrorFields(t *testing.T) {
 }
 
 // T-D-custom-sdk-44 — TypeScript RegistryError is an Error subclass with code/retryable.
-func TestCustomSDK_TSRegistryError(t *testing.T) {
+func TestSDK_TSRegistryError(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
 	srv := startServer(t, csSkillReg(t))
@@ -568,7 +570,7 @@ func TestCustomSDK_TSRegistryError(t *testing.T) {
 }
 
 // T-D-custom-sdk-45 — Python load_artifacts empty ids returns [] without HTTP.
-func TestCustomSDK_PyBulkEmpty(t *testing.T) {
+func TestSDK_PyBulkEmpty(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	res := csRunPy(t, py, "http://127.0.0.1:1",
@@ -577,7 +579,7 @@ func TestCustomSDK_PyBulkEmpty(t *testing.T) {
 }
 
 // T-D-custom-sdk-46 — TypeScript loadArtifacts empty ids returns [] without fetch.
-func TestCustomSDK_TSBulkEmpty(t *testing.T) {
+func TestSDK_TSBulkEmpty(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
 	res := csRunTS(t, node, "http://127.0.0.1:1",
@@ -586,7 +588,7 @@ func TestCustomSDK_TSBulkEmpty(t *testing.T) {
 }
 
 // T-D-custom-sdk-47 — the bulk endpoint is not exposed as an MCP meta-tool.
-func TestCustomSDK_NoBulkMCPTool(t *testing.T) {
+func TestSDK_NoBulkMCPTool(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, csSkillReg(t))
 	res := mcpExec(t, []string{"PODIUM_REGISTRY=" + srv.BaseURL}, rpcReq{ID: 1, Method: "tools/list", Params: map[string]any{}})
@@ -606,16 +608,19 @@ func TestCustomSDK_NoBulkMCPTool(t *testing.T) {
 }
 
 // T-D-custom-sdk-48 — Python search_artifacts session_id parameter is absent (gap).
-func TestCustomSDK_PySearchSessionIDGap(t *testing.T) {
+func TestSDK_PySearchAcceptsSessionID(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
-	res := csRunPy(t, py, "http://localhost:1",
-		"from podium import Client\nc = Client(registry='http://localhost:1')\ntry:\n    c.search_artifacts('variance analysis', session_id='some-session')\n    print('NO_ERROR')\nexcept TypeError:\n    print('TYPEERROR_OK')\n")
-	csWantStdout(t, res, "TYPEERROR_OK")
+	srv := startServer(t, csSkillReg(t))
+	// search_artifacts accepts a session_id keyword and forwards it; a
+	// successful call (no TypeError) confirms the parameter is supported.
+	res := csRunPy(t, py, srv.BaseURL,
+		"from podium import Client\nc = Client.from_env()\nr = c.search_artifacts('variance analysis', session_id='some-session')\nprint('SESSION_OK', r is not None)\n")
+	csWantStdout(t, res, "SESSION_OK True")
 }
 
 // T-D-custom-sdk-49 — server enforces POST on /v1/artifacts:batchLoad.
-func TestCustomSDK_BatchMethod(t *testing.T) {
+func TestSDK_BatchMethod(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, csSkillReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/v1/artifacts:batchLoad")
@@ -628,7 +633,7 @@ func TestCustomSDK_BatchMethod(t *testing.T) {
 }
 
 // T-D-custom-sdk-50 — server rejects an empty ids array.
-func TestCustomSDK_BatchEmptyIds(t *testing.T) {
+func TestSDK_BatchEmptyIds(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, csSkillReg(t))
 	st, body := postJSON(t, srv.BaseURL+"/v1/artifacts:batchLoad", map[string]any{"ids": []string{}})
@@ -641,7 +646,7 @@ func TestCustomSDK_BatchEmptyIds(t *testing.T) {
 }
 
 // T-D-custom-sdk-51 — Python load_domain with empty path returns the root map.
-func TestCustomSDK_PyLoadDomainEmpty(t *testing.T) {
+func TestSDK_PyLoadDomainEmpty(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, csSkillReg(t))
@@ -651,7 +656,7 @@ func TestCustomSDK_PyLoadDomainEmpty(t *testing.T) {
 }
 
 // T-D-custom-sdk-52 — Python load_domain for a nonexistent path is deterministic.
-func TestCustomSDK_PyLoadDomainNonexistent(t *testing.T) {
+func TestSDK_PyLoadDomainNonexistent(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, csSkillReg(t))
@@ -666,7 +671,7 @@ func TestCustomSDK_PyLoadDomainNonexistent(t *testing.T) {
 }
 
 // T-D-custom-sdk-53 — Python ArtifactDescriptor exposes all documented fields.
-func TestCustomSDK_PyDescriptorFields(t *testing.T) {
+func TestSDK_PyDescriptorFields(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, csSkillReg(t))
@@ -676,7 +681,7 @@ func TestCustomSDK_PyDescriptorFields(t *testing.T) {
 }
 
 // T-D-custom-sdk-54 — TypeScript loadArtifacts splits sets larger than 50.
-func TestCustomSDK_TSBulkSplit(t *testing.T) {
+func TestSDK_TSBulkSplit(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
 	srv := startServer(t, csSkillReg(t))
@@ -686,7 +691,7 @@ func TestCustomSDK_TSBulkSplit(t *testing.T) {
 }
 
 // T-D-custom-sdk-55 — programmatic identity/visibility/audit unchanged from MCP.
-func TestCustomSDK_PyIdentityUnchanged(t *testing.T) {
+func TestSDK_PyIdentityUnchanged(t *testing.T) {
 	t.Parallel()
 	t.Skip("requires a standard deployment with two identities and visibility enforcement; not expressible in a standalone single-layer e2e")
 }

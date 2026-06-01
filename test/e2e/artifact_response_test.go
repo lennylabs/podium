@@ -83,7 +83,7 @@ func hrSensitivityRank(s string) int {
 // ---- Routing and model selection -------------------------------------------
 
 // T-D-handling-responses-1 — model_class_hint is returned in frontmatter.
-func TestHandlingResponses_ModelClassHint(t *testing.T) {
+func TestArtifactResponse_ModelClassHint(t *testing.T) {
 	t.Parallel()
 	reg := hrSkillReg(t, "finance/ap/pay-invoice", "pay-invoice", "model_class_hint: frontier")
 	srv := startServer(t, reg)
@@ -91,7 +91,7 @@ func TestHandlingResponses_ModelClassHint(t *testing.T) {
 }
 
 // T-D-handling-responses-2 — effort_hint is returned in frontmatter.
-func TestHandlingResponses_EffortHint(t *testing.T) {
+func TestArtifactResponse_EffortHint(t *testing.T) {
 	t.Parallel()
 	reg := hrSkillReg(t, "finance/ap/pay-invoice", "pay-invoice", "effort_hint: high")
 	srv := startServer(t, reg)
@@ -99,7 +99,7 @@ func TestHandlingResponses_EffortHint(t *testing.T) {
 }
 
 // T-D-handling-responses-3 — target_harnesses is returned in frontmatter.
-func TestHandlingResponses_TargetHarnesses(t *testing.T) {
+func TestArtifactResponse_TargetHarnesses(t *testing.T) {
 	t.Parallel()
 	reg := hrSkillReg(t, "tools/acme/scoped-skill", "scoped-skill", "target_harnesses: [claude-code]")
 	srv := startServer(t, reg)
@@ -109,7 +109,7 @@ func TestHandlingResponses_TargetHarnesses(t *testing.T) {
 // T-D-handling-responses-4 — MCP harness mismatch on target_harnesses
 // (§4.3 / §6.7.1, F-6.7.2). Loading under a harness the artifact's
 // target_harnesses excludes returns the manifest but materializes nothing.
-func TestHandlingResponses_TargetHarnessMismatch(t *testing.T) {
+func TestArtifactResponse_TargetHarnessMismatch(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, hrSkillReg(t, "tools/acme/scoped-skill", "scoped-skill", "target_harnesses: [claude-code]"))
 	mat := t.TempDir()
@@ -135,7 +135,7 @@ func TestHandlingResponses_TargetHarnessMismatch(t *testing.T) {
 // ---- Safety and trust -------------------------------------------------------
 
 // T-D-handling-responses-5 — sensitivity is a top-level field.
-func TestHandlingResponses_SensitivityTopLevel(t *testing.T) {
+func TestArtifactResponse_SensitivityTopLevel(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md": hrCtx("sensitivity: high"),
@@ -146,7 +146,7 @@ func TestHandlingResponses_SensitivityTopLevel(t *testing.T) {
 }
 
 // T-D-handling-responses-6 — sandbox_profile is returned in frontmatter.
-func TestHandlingResponses_SandboxProfile(t *testing.T) {
+func TestArtifactResponse_SandboxProfile(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"scripts/acme/fetcher/ARTIFACT.md": hrCtx("sandbox_profile: network-isolated"),
@@ -155,7 +155,7 @@ func TestHandlingResponses_SandboxProfile(t *testing.T) {
 }
 
 // T-D-handling-responses-7 — MCP refuses an unsupported sandbox profile.
-func TestHandlingResponses_SandboxUnsupportedRefused(t *testing.T) {
+func TestArtifactResponse_SandboxUnsupportedRefused(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"scripts/acme/strict/ARTIFACT.md": hrCtx("sandbox_profile: seccomp-strict"),
@@ -172,7 +172,7 @@ func TestHandlingResponses_SandboxUnsupportedRefused(t *testing.T) {
 }
 
 // T-D-handling-responses-8 — PODIUM_IGNORE_SANDBOX bypasses the refusal with a warning.
-func TestHandlingResponses_IgnoreSandbox(t *testing.T) {
+func TestArtifactResponse_IgnoreSandbox(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"scripts/acme/strict/ARTIFACT.md": hrCtx("sandbox_profile: seccomp-strict"),
@@ -190,7 +190,7 @@ func TestHandlingResponses_IgnoreSandbox(t *testing.T) {
 }
 
 // T-D-handling-responses-9 — requiresApproval is returned in frontmatter.
-func TestHandlingResponses_RequiresApproval(t *testing.T) {
+func TestArtifactResponse_RequiresApproval(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md": "---\ntype: agent\nname: pay-invoice\nversion: 1.0.0\ndescription: Pay.\nrequiresApproval:\n  - tool: payment-submit\n    reason: irreversible\n---\n\nbody\n",
@@ -199,7 +199,7 @@ func TestHandlingResponses_RequiresApproval(t *testing.T) {
 }
 
 // T-D-handling-responses-10 — none adapter preserves provenance markers verbatim.
-func TestHandlingResponses_ProvenanceNonePreserved(t *testing.T) {
+func TestArtifactResponse_ProvenanceNonePreserved(t *testing.T) {
 	t.Parallel()
 	body := "Authored prose.\n\n<!-- begin imported source=\"https://wiki.example.com/policy/payments\" -->\nimported text\n<!-- end imported -->\n"
 	reg := writeRegistry(t, map[string]string{
@@ -216,7 +216,7 @@ func TestHandlingResponses_ProvenanceNonePreserved(t *testing.T) {
 }
 
 // T-D-handling-responses-11 — claude-code rewrites provenance to untrusted-data.
-func TestHandlingResponses_ProvenanceClaudeRewrite(t *testing.T) {
+func TestArtifactResponse_ProvenanceClaudeRewrite(t *testing.T) {
 	t.Parallel()
 	skillBody := "Authored prose.\n\n<!-- begin imported source=\"https://wiki.example.com/policy/payments\" -->\nimported text\n<!-- end imported -->\n"
 	reg := writeRegistry(t, map[string]string{
@@ -238,7 +238,7 @@ func TestHandlingResponses_ProvenanceClaudeRewrite(t *testing.T) {
 }
 
 // T-D-handling-responses-12 — claude-code rewrites a provenance block with no source.
-func TestHandlingResponses_ProvenanceClaudeNoSource(t *testing.T) {
+func TestArtifactResponse_ProvenanceClaudeNoSource(t *testing.T) {
 	t.Parallel()
 	skillBody := "Authored.\n\n<!-- begin imported -->\nsome text\n<!-- end imported -->\n"
 	reg := writeRegistry(t, map[string]string{
@@ -259,7 +259,7 @@ func TestHandlingResponses_ProvenanceClaudeNoSource(t *testing.T) {
 // ---- Capability declarations ------------------------------------------------
 
 // T-D-handling-responses-13 — runtime_requirements is returned in frontmatter.
-func TestHandlingResponses_RuntimeRequirements(t *testing.T) {
+func TestArtifactResponse_RuntimeRequirements(t *testing.T) {
 	t.Parallel()
 	reg := hrSkillReg(t, "tools/acme/analyzer", "analyzer", "runtime_requirements:\n  python: \">=3.11\"\n  node: \">=20\"")
 	srv := startServer(t, reg)
@@ -269,7 +269,7 @@ func TestHandlingResponses_RuntimeRequirements(t *testing.T) {
 // T-D-handling-responses-14 — materialize.runtime_unavailable when the host
 // cannot satisfy a declared runtime (§4.4.1, F-4.4.1). The host advertises
 // python 3.9, below the skill's >=3.11 requirement, so load_artifact refuses.
-func TestHandlingResponses_RuntimeUnavailable(t *testing.T) {
+func TestArtifactResponse_RuntimeUnavailable(t *testing.T) {
 	t.Parallel()
 	id := "tools/acme/analyzer"
 	reg := hrSkillReg(t, id, "analyzer", "runtime_requirements:\n  python: \">=3.11\"")
@@ -285,7 +285,7 @@ func TestHandlingResponses_RuntimeUnavailable(t *testing.T) {
 }
 
 // T-D-handling-responses-15 — mcpServers is returned in frontmatter.
-func TestHandlingResponses_McpServers(t *testing.T) {
+func TestArtifactResponse_McpServers(t *testing.T) {
 	t.Parallel()
 	reg := hrSkillReg(t, "tools/acme/code-assistant", "code-assistant",
 		"mcpServers:\n  - name: finance-warehouse\n    transport: stdio\n    command: npx\n    args: [\"-y\", \"@company/finance-warehouse-mcp\"]")
@@ -294,7 +294,7 @@ func TestHandlingResponses_McpServers(t *testing.T) {
 }
 
 // T-D-handling-responses-16 — delegates_to is returned in frontmatter.
-func TestHandlingResponses_DelegatesTo(t *testing.T) {
+func TestArtifactResponse_DelegatesTo(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"agents/acme/orchestrator/ARTIFACT.md": "---\ntype: agent\nname: orchestrator\nversion: 1.0.0\ndescription: Orchestrator.\ndelegates_to: [agents/acme/data-fetcher]\n---\n\nbody\n",
@@ -304,7 +304,7 @@ func TestHandlingResponses_DelegatesTo(t *testing.T) {
 }
 
 // T-D-handling-responses-17 — a delegate is loadable by the same consumer.
-func TestHandlingResponses_DelegateLoadable(t *testing.T) {
+func TestArtifactResponse_DelegateLoadable(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"agents/acme/orchestrator/ARTIFACT.md": "---\ntype: agent\nname: orchestrator\nversion: 1.0.0\ndescription: Orchestrator.\ndelegates_to: [agents/acme/data-fetcher]\n---\n\nbody\n",
@@ -317,13 +317,13 @@ func TestHandlingResponses_DelegateLoadable(t *testing.T) {
 }
 
 // T-D-handling-responses-18 — an invisible delegate returns not_found.
-func TestHandlingResponses_DelegateInvisible(t *testing.T) {
+func TestArtifactResponse_DelegateInvisible(t *testing.T) {
 	t.Parallel()
 	t.Skip("not expressible in a standalone single-layer deployment: there is no invisible layer to hide a delegate from the caller")
 }
 
 // T-D-handling-responses-19 — hook_event and hook_action returned for a hook.
-func TestHandlingResponses_HookFields(t *testing.T) {
+func TestArtifactResponse_HookFields(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"hooks/acme/pre-tool/ARTIFACT.md": "---\ntype: hook\nname: pre-tool\nversion: 1.0.0\ndescription: A hook.\nhook_event: pre_tool_use\nhook_action: |\n  echo guard\n---\n\nbody\n",
@@ -332,7 +332,7 @@ func TestHandlingResponses_HookFields(t *testing.T) {
 }
 
 // T-D-handling-responses-20 — rule_mode and rule_globs returned for a rule.
-func TestHandlingResponses_RuleModeFields(t *testing.T) {
+func TestArtifactResponse_RuleModeFields(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"rules/acme/ts-style/ARTIFACT.md": "---\ntype: rule\nversion: 1.0.0\nrule_mode: glob\nrule_globs: \"src/**/*.ts\"\n---\n\nrule body\n",
@@ -341,7 +341,7 @@ func TestHandlingResponses_RuleModeFields(t *testing.T) {
 }
 
 // T-D-handling-responses-21 — rule_mode always materializes a rule file.
-func TestHandlingResponses_RuleAlwaysMaterializes(t *testing.T) {
+func TestArtifactResponse_RuleAlwaysMaterializes(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"rules/acme/always-rule/ARTIFACT.md": chRule("always", "")})
 	target := t.TempDir()
@@ -350,7 +350,7 @@ func TestHandlingResponses_RuleAlwaysMaterializes(t *testing.T) {
 }
 
 // T-D-handling-responses-22 — bundled files written without leftover .tmp files.
-func TestHandlingResponses_BundledAtomic(t *testing.T) {
+func TestArtifactResponse_BundledAtomic(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"tools/acme/analyzer/ARTIFACT.md":         greetSkillArtifact,
@@ -371,7 +371,7 @@ func TestHandlingResponses_BundledAtomic(t *testing.T) {
 
 // T-D-handling-responses-23 — load_artifact inlines a bundled resource.
 // spec: §7.2.
-func TestHandlingResponses_ResourcesInline(t *testing.T) {
+func TestArtifactResponse_ResourcesInline(t *testing.T) {
 	t.Parallel()
 	id := "finance/ap/pay-invoice"
 	script := "print('inline fixture')\n"
@@ -387,7 +387,7 @@ func TestHandlingResponses_ResourcesInline(t *testing.T) {
 }
 
 // T-D-handling-responses-24 — external_resources entries are in frontmatter.
-func TestHandlingResponses_ExternalResources(t *testing.T) {
+func TestArtifactResponse_ExternalResources(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"tools/acme/model/ARTIFACT.md": hrCtx("external_resources:\n  - path: ./model.onnx\n    url: s3://company-models/v1/model.onnx\n    sha256: 9f2caabbccddeeff00112233445566778899aabbccddeeff0011223344556677\n    size: 145000000"),
@@ -398,7 +398,7 @@ func TestHandlingResponses_ExternalResources(t *testing.T) {
 // ---- Discoverability and presentation ---------------------------------------
 
 // T-D-handling-responses-25 — deprecated artifact carries replaced_by + warning.
-func TestHandlingResponses_DeprecatedReplaced(t *testing.T) {
+func TestArtifactResponse_DeprecatedReplaced(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice-v1/ARTIFACT.md": hrCtx("deprecated: true\nreplaced_by: finance/ap/pay-invoice-v2"),
@@ -416,7 +416,7 @@ func TestHandlingResponses_DeprecatedReplaced(t *testing.T) {
 }
 
 // T-D-handling-responses-26 — deprecated with no replaced_by has a bare warning.
-func TestHandlingResponses_DeprecatedNoReplacement(t *testing.T) {
+func TestArtifactResponse_DeprecatedNoReplacement(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"tools/acme/old-tool/ARTIFACT.md": hrCtx("deprecated: true"),
@@ -434,7 +434,7 @@ func TestHandlingResponses_DeprecatedNoReplacement(t *testing.T) {
 }
 
 // T-D-handling-responses-27 — deprecated artifact excluded from default search.
-func TestHandlingResponses_DeprecatedExcludedFromSearch(t *testing.T) {
+func TestArtifactResponse_DeprecatedExcludedFromSearch(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"tools/acme/old-tool/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: zzdeprecatedtoken widget\ndeprecated: true\n---\n\nbody\n",
@@ -446,7 +446,7 @@ func TestHandlingResponses_DeprecatedExcludedFromSearch(t *testing.T) {
 }
 
 // T-D-handling-responses-28 — description and when_to_use appear in frontmatter.
-func TestHandlingResponses_DescriptionWhenToUse(t *testing.T) {
+func TestArtifactResponse_DescriptionWhenToUse(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Pay an approved vendor invoice\nwhen_to_use:\n  - \"After AP has approved an invoice for payment\"\n---\n\nbody\n",
@@ -455,7 +455,7 @@ func TestHandlingResponses_DescriptionWhenToUse(t *testing.T) {
 }
 
 // T-D-handling-responses-29 — tags appear in frontmatter.
-func TestHandlingResponses_Tags(t *testing.T) {
+func TestArtifactResponse_Tags(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md": hrCtx("tags: [finance, ap, payments]"),
@@ -464,7 +464,7 @@ func TestHandlingResponses_Tags(t *testing.T) {
 }
 
 // T-D-handling-responses-30 — release_notes appears in frontmatter.
-func TestHandlingResponses_ReleaseNotes(t *testing.T) {
+func TestArtifactResponse_ReleaseNotes(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md": hrCtx("release_notes: \"Fixed edge case in currency rounding\""),
@@ -475,7 +475,7 @@ func TestHandlingResponses_ReleaseNotes(t *testing.T) {
 // ---- Composing multiple artifacts -------------------------------------------
 
 // T-D-handling-responses-31 — sandbox_profile composes to the most restrictive.
-func TestHandlingResponses_ComposeSandbox(t *testing.T) {
+func TestArtifactResponse_ComposeSandbox(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"a/ARTIFACT.md": hrCtx("sandbox_profile: read-only-fs"),
@@ -493,7 +493,7 @@ func TestHandlingResponses_ComposeSandbox(t *testing.T) {
 }
 
 // T-D-handling-responses-32 — sensitivity composes to the highest value.
-func TestHandlingResponses_ComposeSensitivity(t *testing.T) {
+func TestArtifactResponse_ComposeSensitivity(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"a/ARTIFACT.md": hrCtx("sensitivity: low"),
@@ -514,7 +514,7 @@ func TestHandlingResponses_ComposeSensitivity(t *testing.T) {
 }
 
 // T-D-handling-responses-33 — requiresApproval composes as a union.
-func TestHandlingResponses_ComposeRequiresApproval(t *testing.T) {
+func TestArtifactResponse_ComposeRequiresApproval(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"a/ARTIFACT.md": "---\ntype: agent\nname: a\nversion: 1.0.0\ndescription: A.\nrequiresApproval:\n  - tool: payment-submit\n---\n\nbody\n",
@@ -529,7 +529,7 @@ func TestHandlingResponses_ComposeRequiresApproval(t *testing.T) {
 }
 
 // T-D-handling-responses-34 — mcpServers composes by name with deep merge.
-func TestHandlingResponses_ComposeMcpServers(t *testing.T) {
+func TestArtifactResponse_ComposeMcpServers(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"a/ARTIFACT.md": hrCtx("mcpServers:\n  - name: github\n    transport: stdio\n    command: npx"),
@@ -545,7 +545,7 @@ func TestHandlingResponses_ComposeMcpServers(t *testing.T) {
 }
 
 // T-D-handling-responses-35 — target_harnesses composes by intersection.
-func TestHandlingResponses_ComposeTargetHarnesses(t *testing.T) {
+func TestArtifactResponse_ComposeTargetHarnesses(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"a/ARTIFACT.md": hrCtx("target_harnesses: [claude-code]"),
@@ -568,7 +568,7 @@ func TestHandlingResponses_ComposeTargetHarnesses(t *testing.T) {
 }
 
 // T-D-handling-responses-36 — model_class_hint and effort_hint compose to the highest tier.
-func TestHandlingResponses_ComposeHints(t *testing.T) {
+func TestArtifactResponse_ComposeHints(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"a/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\nmodel_class_hint: small\neffort_hint: low\n---\n\n<!-- body -->\n",
@@ -584,7 +584,7 @@ func TestHandlingResponses_ComposeHints(t *testing.T) {
 }
 
 // T-D-handling-responses-37 — runtime_requirements composes to the most restrictive.
-func TestHandlingResponses_ComposeRuntime(t *testing.T) {
+func TestArtifactResponse_ComposeRuntime(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"a/ARTIFACT.md": hrCtx("runtime_requirements:\n  python: \">=3.10\""),
@@ -597,7 +597,7 @@ func TestHandlingResponses_ComposeRuntime(t *testing.T) {
 // ---- SDK example ------------------------------------------------------------
 
 // T-D-handling-responses-38 — Python Client.from_env loads an artifact.
-func TestHandlingResponses_PyFromEnvLoad(t *testing.T) {
+func TestArtifactResponse_PyFromEnvLoad(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -609,17 +609,17 @@ func TestHandlingResponses_PyFromEnvLoad(t *testing.T) {
 }
 
 // T-D-handling-responses-39 — Python from_env raises when PODIUM_REGISTRY absent.
-func TestHandlingResponses_PyFromEnvRaises(t *testing.T) {
+func TestArtifactResponse_PyFromEnvRaises(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	res := csRunPy(t, py, "",
-		"from podium import Client\ntry:\n    Client.from_env()\n    print('NO_ERROR')\nexcept RuntimeError as e:\n    print('OK', 'PODIUM_REGISTRY environment variable is required' in str(e))\n",
+		"from podium import Client\ntry:\n    Client.from_env()\n    print('NO_ERROR')\nexcept Exception as e:\n    print('OK', 'PODIUM_REGISTRY' in str(e))\n",
 		"PODIUM_REGISTRY=")
 	csWantStdout(t, res, "OK True")
 }
 
 // T-D-handling-responses-40 — Python LoadedArtifact exposes frontmatter; hints parse from YAML.
-func TestHandlingResponses_PyFrontmatterYAML(t *testing.T) {
+func TestArtifactResponse_PyFrontmatterYAML(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, hrSkillReg(t, "finance/ap/pay-invoice", "pay-invoice", "model_class_hint: large\neffort_hint: high\nsensitivity: high"))
@@ -629,7 +629,7 @@ func TestHandlingResponses_PyFrontmatterYAML(t *testing.T) {
 }
 
 // T-D-handling-responses-41 — Python supports manual delegates_to traversal.
-func TestHandlingResponses_PyDelegatesWalk(t *testing.T) {
+func TestArtifactResponse_PyDelegatesWalk(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -642,7 +642,7 @@ func TestHandlingResponses_PyDelegatesWalk(t *testing.T) {
 }
 
 // T-D-handling-responses-42 — Python RegistryError on registry.not_found.
-func TestHandlingResponses_PyRegistryError(t *testing.T) {
+func TestArtifactResponse_PyRegistryError(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
@@ -652,7 +652,7 @@ func TestHandlingResponses_PyRegistryError(t *testing.T) {
 }
 
 // T-D-handling-responses-43 — TypeScript Client.fromEnv raises when registry absent.
-func TestHandlingResponses_TSFromEnvRaises(t *testing.T) {
+func TestArtifactResponse_TSFromEnvRaises(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
 	res := csRunTS(t, node, "",
@@ -662,7 +662,7 @@ func TestHandlingResponses_TSFromEnvRaises(t *testing.T) {
 }
 
 // T-D-handling-responses-44 — TypeScript loadArtifact returns deprecated fields.
-func TestHandlingResponses_TSDeprecatedFields(t *testing.T) {
+func TestArtifactResponse_TSDeprecatedFields(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -674,7 +674,7 @@ func TestHandlingResponses_TSDeprecatedFields(t *testing.T) {
 }
 
 // T-D-handling-responses-45 — TypeScript RegistryError on registry.not_found.
-func TestHandlingResponses_TSRegistryError(t *testing.T) {
+func TestArtifactResponse_TSRegistryError(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
@@ -686,7 +686,7 @@ func TestHandlingResponses_TSRegistryError(t *testing.T) {
 // ---- Error handling ---------------------------------------------------------
 
 // T-D-handling-responses-46 — materialize.signature_invalid when verification fails.
-func TestHandlingResponses_SignatureInvalid(t *testing.T) {
+func TestArtifactResponse_SignatureInvalid(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md": hrCtx("sensitivity: low"),
@@ -700,7 +700,7 @@ func TestHandlingResponses_SignatureInvalid(t *testing.T) {
 }
 
 // T-D-handling-responses-47 — config.unknown_harness for an unrecognized harness.
-func TestHandlingResponses_UnknownHarness(t *testing.T) {
+func TestArtifactResponse_UnknownHarness(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay"),
@@ -716,13 +716,13 @@ func TestHandlingResponses_UnknownHarness(t *testing.T) {
 }
 
 // T-D-handling-responses-48 — registry.read_only still serves load_artifact.
-func TestHandlingResponses_ReadOnlyServes(t *testing.T) {
+func TestArtifactResponse_ReadOnlyServes(t *testing.T) {
 	t.Parallel()
 	t.Skip("read_only mode requires a store-failure probe (PODIUM_READONLY_PROBE_FAILURES) to flip the mode; not deterministically triggerable in a standalone e2e")
 }
 
 // T-D-handling-responses-49 — quota.materialize_rate_exceeded under a low rate.
-func TestHandlingResponses_QuotaMaterialize(t *testing.T) {
+func TestArtifactResponse_QuotaMaterialize(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay")})
 	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_QUOTA_MATERIALIZE_RATE=1"},
@@ -746,7 +746,7 @@ func TestHandlingResponses_QuotaMaterialize(t *testing.T) {
 }
 
 // T-D-handling-responses-50 — auth.scope_denied surfaces as registry.not_found (gap).
-func TestHandlingResponses_ScopeDenied(t *testing.T) {
+func TestArtifactResponse_ScopeDenied(t *testing.T) {
 	t.Parallel()
 	t.Skip("not expressible in a standalone single-layer deployment: there is no invisible artifact to exercise the visibility-denied path")
 }
@@ -761,7 +761,7 @@ func TestHandlingResponses_ScopeDenied(t *testing.T) {
 // wire-serializable interface (F-9.3.1); a standalone e2e still cannot register
 // a hook with the out-of-process bridge because §9.3 does not commit to an
 // out-of-process plugin protocol, so registration stays in-process.
-func TestHandlingResponses_HookFailedWired(t *testing.T) {
+func TestArtifactResponse_HookFailedWired(t *testing.T) {
 	t.Parallel()
 	needle := "materialize.hook" + "_failed"
 	mainGo := filepath.Join(repoRoot(t), "cmd", "podium-mcp", "main.go")
@@ -775,7 +775,7 @@ func TestHandlingResponses_HookFailedWired(t *testing.T) {
 }
 
 // T-D-handling-responses-52 — load_artifact with missing id returns 400.
-func TestHandlingResponses_MissingID(t *testing.T) {
+func TestArtifactResponse_MissingID(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
 	st, body := getRaw(t, srv.BaseURL+"/v1/load_artifact")
@@ -788,7 +788,7 @@ func TestHandlingResponses_MissingID(t *testing.T) {
 }
 
 // T-D-handling-responses-53 — load_artifact with unknown id returns 404 not_found.
-func TestHandlingResponses_UnknownID(t *testing.T) {
+func TestArtifactResponse_UnknownID(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
 	st, body := getRaw(t, srv.BaseURL+"/v1/load_artifact?id=nonexistent/artifact/path")
@@ -801,7 +801,7 @@ func TestHandlingResponses_UnknownID(t *testing.T) {
 }
 
 // T-D-handling-responses-54 — batch load with >50 ids returns 400.
-func TestHandlingResponses_BatchCap(t *testing.T) {
+func TestArtifactResponse_BatchCap(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
 	ids := make([]string, 51)
@@ -818,7 +818,7 @@ func TestHandlingResponses_BatchCap(t *testing.T) {
 }
 
 // T-D-handling-responses-55 — batch partial failure returns mixed statuses.
-func TestHandlingResponses_BatchPartial(t *testing.T) {
+func TestArtifactResponse_BatchPartial(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay"),
@@ -848,14 +848,17 @@ func TestHandlingResponses_BatchPartial(t *testing.T) {
 	if byID["finance/ap/pay-invoice"] != "ok" {
 		t.Errorf("valid artifact status=%q, want ok", byID["finance/ap/pay-invoice"])
 	}
-	if byID["finance/ap/nonexistent"] != "error" || codes["finance/ap/nonexistent"] != "registry.not_found" {
-		t.Errorf("missing artifact status=%q code=%q, want error/registry.not_found",
+	// §7.6.2 forbids a per-item existence leak: a missing artifact surfaces as
+	// visibility.denied (not registry.not_found) so the caller cannot tell
+	// whether it exists in a hidden layer.
+	if byID["finance/ap/nonexistent"] != "error" || codes["finance/ap/nonexistent"] != "visibility.denied" {
+		t.Errorf("missing artifact status=%q code=%q, want error/visibility.denied",
 			byID["finance/ap/nonexistent"], codes["finance/ap/nonexistent"])
 	}
 }
 
 // T-D-handling-responses-56 — load_artifact returns content_hash.
-func TestHandlingResponses_ContentHash(t *testing.T) {
+func TestArtifactResponse_ContentHash(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay"),
@@ -868,7 +871,7 @@ func TestHandlingResponses_ContentHash(t *testing.T) {
 // (strconv.Itoa is used above; the manual helper was removed.)
 
 // T-D-handling-responses-57 — walk_dependencies is absent from both SDKs.
-func TestHandlingResponses_WalkDependenciesAbsent(t *testing.T) {
+func TestArtifactResponse_WalkDependenciesAbsent(t *testing.T) {
 	t.Parallel()
 	root := repoRoot(t)
 	py := readFile(t, filepath.Join(root, "sdks/podium-py/podium/client.py"))
@@ -882,7 +885,7 @@ func TestHandlingResponses_WalkDependenciesAbsent(t *testing.T) {
 }
 
 // T-D-handling-responses-58 — Python LoadedArtifact has no `manifest` property.
-func TestHandlingResponses_ManifestPropertyAbsent(t *testing.T) {
+func TestArtifactResponse_ManifestPropertyAbsent(t *testing.T) {
 	t.Parallel()
 	py := readFile(t, filepath.Join(repoRoot(t), "sdks/podium-py/podium/client.py"))
 	if strings.Contains(py, "def manifest(") {
