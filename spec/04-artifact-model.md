@@ -827,7 +827,6 @@ Tag co-occurrence is **not** a dependency edge (too noisy for impact analysis).
 The index drives:
 
 - **Impact analysis.** Before deprecating an artifact, list everything that depends on it.
-- **Cascading review.** When a high-sensitivity dependency changes, flag downstream artifacts for re-review.
 - **Search ranking signals.** Frequently-depended-on artifacts surface higher.
 
 ### 4.7.4 Classification and Lifecycle

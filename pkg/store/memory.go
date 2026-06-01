@@ -171,6 +171,31 @@ func (s *Memory) DependentsOf(_ context.Context, tenantID, artifactID string) ([
 	return out, nil
 }
 
+// DependencyInDegree counts distinct dependents per target artifact (§4.7.3).
+func (s *Memory) DependencyInDegree(_ context.Context, tenantID string) (map[string]int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Collect the distinct source set per target, then count, so an artifact
+	// that both extends and delegates to the same target counts once.
+	sources := map[string]map[string]struct{}{}
+	for _, e := range s.deps[tenantID] {
+		if e.To == "" || e.From == "" {
+			continue
+		}
+		set := sources[e.To]
+		if set == nil {
+			set = map[string]struct{}{}
+			sources[e.To] = set
+		}
+		set[e.From] = struct{}{}
+	}
+	out := make(map[string]int, len(sources))
+	for to, set := range sources {
+		out[to] = len(set)
+	}
+	return out, nil
+}
+
 // RevokeAdmin removes the admin grant; missing key is a no-op.
 func (s *Memory) RevokeAdmin(_ context.Context, userID, orgID string) error {
 	s.mu.Lock()

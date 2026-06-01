@@ -50,6 +50,40 @@ func (r *Registry) DependentsOf(ctx context.Context, id layer.Identity, artifact
 	return out, nil
 }
 
+// dependencyRanking returns the §4.7.3 "frequently-depended-on artifacts
+// surface higher" signal restricted to the allowed candidate set: the IDs
+// ordered by descending reverse-dependency in-degree, ties broken by ID for
+// determinism. Artifacts with no dependents are omitted, so callers fuse this
+// partial order with the lexical/vector/usage ranks. Returns nil (cheap skip)
+// when no candidate has dependents or the store lookup fails; ranking is a
+// best-effort signal and a store error must not fail the search.
+func (r *Registry) dependencyRanking(ctx context.Context, allowed map[string]bool) []string {
+	inDegree, err := r.store.DependencyInDegree(ctx, r.tenantID)
+	if err != nil || len(inDegree) == 0 {
+		return nil
+	}
+	ranked := make([]string, 0, len(inDegree))
+	for id, n := range inDegree {
+		if n <= 0 {
+			continue
+		}
+		if allowed == nil || allowed[id] {
+			ranked = append(ranked, id)
+		}
+	}
+	if len(ranked) == 0 {
+		return nil
+	}
+	sort.Slice(ranked, func(i, j int) bool {
+		di, dj := inDegree[ranked[i]], inDegree[ranked[j]]
+		if di != dj {
+			return di > dj
+		}
+		return ranked[i] < ranked[j]
+	})
+	return ranked
+}
+
 // ScopePreview is the §3.5 aggregated scope preview: counts only,
 // no per-artifact metadata.
 type ScopePreview struct {

@@ -371,6 +371,30 @@ func (s *SQLite) DependentsOf(ctx context.Context, tenantID, artifactID string) 
 	return out, rows.Err()
 }
 
+// DependencyInDegree counts distinct dependents per target artifact (§4.7.3).
+func (s *SQLite) DependencyInDegree(ctx context.Context, tenantID string) (map[string]int, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT to_artifact, COUNT(DISTINCT from_artifact)
+		FROM dependencies
+		WHERE tenant_id = ?
+		GROUP BY to_artifact`,
+		tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var to string
+		var n int
+		if err := rows.Scan(&to, &n); err != nil {
+			return nil, err
+		}
+		out[to] = n
+	}
+	return out, rows.Err()
+}
+
 // GrantAdmin records an admin grant.
 func (s *SQLite) GrantAdmin(ctx context.Context, g AdminGrant) error {
 	granted := g.Granted

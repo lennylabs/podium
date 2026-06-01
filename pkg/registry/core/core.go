@@ -1056,6 +1056,19 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 		}
 	}
 
+	// §4.7.3 search ranking signal: frequently-depended-on artifacts surface
+	// higher. Blend the reverse-dependency in-degree into the ranked order,
+	// restricted to the current result IDs (like the usage rerank) so it
+	// reorders matches without injecting non-matching artifacts. Empty-query
+	// browse keeps the deterministic §4.7 listing.
+	if opts.Query != "" && len(scored) > 1 {
+		curIDs := scoredIDs(scored)
+		if depRank := r.dependencyRanking(ctx, idSet(curIDs)); len(depRank) > 0 {
+			fused := RRFFuse(curIDs, depRank)
+			scored = reorderScored(scored, latestByID(filtered), fused)
+		}
+	}
+
 	res := &SearchResult{
 		Query:        opts.Query,
 		TotalMatched: totalMatched,

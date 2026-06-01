@@ -37,6 +37,7 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("ListManifestsStableOrder", func(t *testing.T) { listManifestsStableOrder(t, factory(t)) })
 	t.Run("DependencyEdges", func(t *testing.T) { dependencyEdges(t, factory(t)) })
 	t.Run("DependentsScopedToTenant", func(t *testing.T) { dependentsScopedToTenant(t, factory(t)) })
+	t.Run("DependencyInDegree", func(t *testing.T) { dependencyInDegree(t, factory(t)) })
 	t.Run("AdminGrants", func(t *testing.T) { adminGrants(t, factory(t)) })
 	t.Run("AdminGrantsAreOrgScoped", func(t *testing.T) { adminGrantsAreOrgScoped(t, factory(t)) })
 	t.Run("RevokeAdmin", func(t *testing.T) { revokeAdmin(t, factory(t)) })
@@ -330,6 +331,38 @@ func dependencyEdges(t *testing.T, s store.Store) {
 	}
 	if len(got) != 3 {
 		t.Errorf("got %d edges, want 3", len(got))
+	}
+}
+
+// Spec: §4.7.3 "frequently-depended-on artifacts surface higher" —
+// DependencyInDegree counts distinct dependents per target, tenant-scoped,
+// collapsing multiple edge kinds from the same source to one.
+func dependencyInDegree(t *testing.T, s store.Store) {
+	t.Helper()
+	mustCreateTenant(t, s, "a")
+	mustCreateTenant(t, s, "b")
+	ctx := context.Background()
+	// parent has two distinct dependents (child, agent1); the third edge is a
+	// second kind from agent1 and must not double-count.
+	must(t, s.PutDependency(ctx, "a", store.DependencyEdge{From: "child", To: "parent", Kind: "extends"}))
+	must(t, s.PutDependency(ctx, "a", store.DependencyEdge{From: "agent1", To: "parent", Kind: "delegates_to"}))
+	must(t, s.PutDependency(ctx, "a", store.DependencyEdge{From: "agent1", To: "parent", Kind: "mcpServers"}))
+	// lonely has a single dependent; another tenant's edge must not leak in.
+	must(t, s.PutDependency(ctx, "a", store.DependencyEdge{From: "x", To: "lonely", Kind: "extends"}))
+	must(t, s.PutDependency(ctx, "b", store.DependencyEdge{From: "y", To: "parent", Kind: "extends"}))
+
+	got, err := s.DependencyInDegree(ctx, "a")
+	if err != nil {
+		t.Fatalf("DependencyInDegree: %v", err)
+	}
+	if got["parent"] != 2 {
+		t.Errorf("parent in-degree = %d, want 2", got["parent"])
+	}
+	if got["lonely"] != 1 {
+		t.Errorf("lonely in-degree = %d, want 1", got["lonely"])
+	}
+	if _, ok := got["child"]; ok {
+		t.Errorf("child has no dependents; should be absent, got %d", got["child"])
 	}
 }
 

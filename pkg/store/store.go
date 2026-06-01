@@ -337,6 +337,12 @@ type Store interface {
 	// Dependencies
 	PutDependency(ctx context.Context, tenantID string, edge DependencyEdge) error
 	DependentsOf(ctx context.Context, tenantID, artifactID string) ([]DependencyEdge, error)
+	// DependencyInDegree returns, per depended-on artifact, the number of
+	// distinct artifacts that depend on it (§4.7.3 "frequently-depended-on
+	// artifacts surface higher"). The key is the target artifact ID; the
+	// value counts distinct sources across all edge kinds. Artifacts with no
+	// dependents are absent. Tenant-scoped.
+	DependencyInDegree(ctx context.Context, tenantID string) (map[string]int, error)
 
 	// Admin grants
 	GrantAdmin(ctx context.Context, g AdminGrant) error
