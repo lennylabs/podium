@@ -305,7 +305,7 @@ Features that require **specifically a remote server** (not just any server):
 
 ### 13.11.4 Watch Mode
 
-`podium sync --watch` against a filesystem source uses `fsnotify` to watch the registry path and the workspace overlay; when files change, it re-runs composition and materialization for the affected artifacts.
+`podium sync --watch` against a filesystem source uses `fsnotify` to watch the registry path and the workspace overlay; when files change, it re-runs composition and materialization and reconciles the target through the same stale-file cleanup as a one-shot sync, so the materialized output reflects every change.
 
 ### 13.11.5 Multi-User via a Shared Directory
 
