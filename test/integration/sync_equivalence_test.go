@@ -91,6 +91,47 @@ func TestSyncEquivalence_FilesystemVsServerByteIdentical(t *testing.T) {
 	}
 }
 
+// Spec: §6.4 (F-14.6.2) — the workspace overlay merges as the highest-precedence
+// layer for a server source. The consumer merges it client-side because the
+// developer's overlay directory is local to the machine running podium sync; the
+// server pointed at the reference fixture cannot see it. The overlay overrides an
+// artifact the server also serves, and that override must win in the materialized
+// output. The server runs in-process so the test owns its lifecycle.
+func TestSyncServerSource_WorkspaceOverlayWins(t *testing.T) {
+	t.Parallel()
+	dir := referenceRegistryPath(t)
+
+	srv, err := server.NewFromFilesystem(dir)
+	if err != nil {
+		t.Fatalf("NewFromFilesystem: %v", err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	// Stage a workspace overlay overriding notes/journal (served by the
+	// reference fixture's personal layer) with a distinct body.
+	overlayDir := t.TempDir()
+	overlayBody := "---\ntype: context\nversion: 9.9.9\ndescription: overlay override\nsensitivity: low\n---\n\noverlay wins\n"
+	testharness.WriteTree(t, overlayDir, testharness.WriteTreeOption{
+		Path:    "notes/journal/ARTIFACT.md",
+		Content: overlayBody,
+	})
+
+	target := t.TempDir()
+	if _, err := sync.Run(sync.Options{
+		RegistryPath: ts.URL,
+		Target:       target,
+		AdapterID:    "none",
+		OverlayPath:  overlayDir,
+	}); err != nil {
+		t.Fatalf("server sync.Run with overlay: %v", err)
+	}
+	got := testharness.ReadTree(t, target)["notes/journal/ARTIFACT.md"]
+	if got != overlayBody {
+		t.Errorf("overlay did not override the server artifact:\n got=%q\n want=%q", got, overlayBody)
+	}
+}
+
 // materializedTree reads the target tree minus the lock file.
 func materializedTree(t testing.TB, target string) map[string]string {
 	t.Helper()

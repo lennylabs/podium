@@ -7,8 +7,6 @@ package e2e
 // bridge against filesystem-source registries.
 //
 // Several documented behaviors are known gaps:
-//   - F-14.11.1: `podium sync` has no server/URL registry source, so the
-//     standalone-against-a-server path (test 63) is skipped.
 //   - F-6.7.1 / F-6.7.2: the ingest-time capability-matrix lint and the
 //     target_harnesses opt-out are absent, so the lint-warning / lint-error
 //     expectations (21, 37, 38, 42, 43, 46, 50) are skipped.
@@ -18,6 +16,8 @@ package e2e
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -883,6 +883,64 @@ func TestConfigureHarness_UnknownHarness(t *testing.T) {
 	}
 }
 
+// T-D-configure-harness-63b — sync auto-resolves <CWD>/.podium/overlay/ with no
+// --overlay flag and no env var (§6.4 rule 3 / F-14.6.2). The overlay artifact
+// sits at the highest precedence and overrides the registry at the same ID.
+func TestConfigureHarness_SyncAutoResolvesWorkspaceOverlay(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"finance/intro/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: from registry\nsensitivity: low\n---\n\nfrom registry\n",
+	})
+	ws := t.TempDir()
+	overlayArt := "---\ntype: context\nversion: 1.0.0\ndescription: from overlay\nsensitivity: low\n---\n\nfrom overlay\n"
+	if err := os.MkdirAll(filepath.Join(ws, ".podium", "overlay", "finance", "intro"), 0o755); err != nil {
+		t.Fatalf("mkdir overlay: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, ".podium", "overlay", "finance", "intro", "ARTIFACT.md"), []byte(overlayArt), 0o644); err != nil {
+		t.Fatalf("write overlay: %v", err)
+	}
+	target := t.TempDir()
+	// No --overlay flag and no PODIUM_OVERLAY_PATH: the CWD fallback applies.
+	res := runPodium(t, ws, nil, "sync", "--registry", reg, "--target", target)
+	if res.Exit != 0 {
+		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	got := readFile(t, filepath.Join(target, "finance", "intro", "ARTIFACT.md"))
+	if !strings.Contains(got, "from overlay") {
+		t.Errorf("overlay did not auto-resolve; materialized:\n%s", got)
+	}
+}
+
+// T-D-configure-harness-63c — sync --dry-run resolves a server source from
+// PODIUM_REGISTRY alone and writes nothing (§7.5.2 / §14.15.3, F-14.15.3).
+func TestConfigureHarness_SyncDryRunServerFromEnv(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/sync/manifest":
+			_, _ = w.Write([]byte(`{"artifacts":[{"id":"greet","type":"context","version":"1.2.0","layer":"org"}]}`))
+		case "/v1/load_artifact":
+			_, _ = w.Write([]byte(`{"id":"greet","type":"context","layer":"org","frontmatter":"---\ntype: context\nversion: 1.2.0\ndescription: served\nsensitivity: low\n---\n\nbody\n"}`))
+		default:
+			http.Error(w, `{"code":"not_found","message":"x"}`, 404)
+		}
+	}))
+	defer srv.Close()
+
+	ws := t.TempDir()
+	target := t.TempDir()
+	env := []string{"PODIUM_REGISTRY=" + srv.URL}
+	res := runPodium(t, ws, env, "sync", "--harness", "claude-code", "--target", target, "--dry-run")
+	if res.Exit != 0 {
+		t.Fatalf("dry-run server sync from env exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	entries, _ := os.ReadDir(target)
+	if len(entries) != 0 {
+		t.Errorf("--dry-run wrote %d entries to target, want 0", len(entries))
+	}
+}
+
 // ---- Standalone -------------------------------------------------------------
 
 // T-D-configure-harness-62 — init --standalone writes the localhost registry.
@@ -899,9 +957,52 @@ func TestConfigureHarness_InitStandalone(t *testing.T) {
 }
 
 // T-D-configure-harness-63 — standalone sync against a server URL from sync.yaml.
+// spec: §7.5.2, §14.11 — a URL routes podium sync to the Podium server over
+// HTTP. The test stands up a stub registry serving the §7.5 server-source
+// endpoints, points sync.yaml at its URL, and asserts the CLI materializes the
+// served artifact and forwards the §6.3.2 injected session token as a bearer
+// credential (F-14.6.1 / F-14.11.1 / F-14.11.5).
 func TestConfigureHarness_StandaloneSyncFromServer(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-14.11.1: podium sync has no server/URL registry source — sync.Run only opens a filesystem registry")
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if a := r.Header.Get("Authorization"); a != "" {
+			gotAuth = a
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/sync/manifest":
+			_, _ = w.Write([]byte(`{"artifacts":[{"id":"greet","type":"context","version":"1.0.0","layer":"org"}]}`))
+		case "/v1/load_artifact":
+			_, _ = w.Write([]byte(`{"id":"greet","type":"context","layer":"org","frontmatter":"---\ntype: context\nversion: 1.0.0\ndescription: served\nsensitivity: low\n---\n\nhello from server\n"}`))
+		default:
+			http.Error(w, `{"code":"not_found","message":"x"}`, 404)
+		}
+	}))
+	defer srv.Close()
+
+	ws := t.TempDir()
+	chWriteSyncYAML(t, ws, "defaults:\n  registry: "+srv.URL+"\n")
+	target := t.TempDir()
+	env := []string{"PODIUM_SESSION_TOKEN=tok-abc123"}
+	res := runPodium(t, ws, env, "sync", "--harness", "claude-code", "--target", target)
+	if res.Exit != 0 {
+		t.Fatalf("server-source sync exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	if gotAuth != "Bearer tok-abc123" {
+		t.Errorf("registry did not receive forwarded session token; Authorization=%q", gotAuth)
+	}
+	// claude-code materializes a context artifact under .claude/.
+	found := false
+	_ = filepath.Walk(target, func(p string, info os.FileInfo, _ error) error {
+		if info != nil && !info.IsDir() && strings.Contains(readFile(t, p), "hello from server") {
+			found = true
+		}
+		return nil
+	})
+	if !found {
+		t.Errorf("server-source artifact body not materialized under %s", target)
+	}
 }
 
 // T-D-configure-harness-64 — standalone recipe (§6.11): the MCP server resolves

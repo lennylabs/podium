@@ -77,13 +77,13 @@ func fetchServerRecords(ctx context.Context, opts Options) ([]materialRecord, er
 	base := strings.TrimRight(opts.RegistryPath, "/")
 
 	var list syncManifestResponse
-	if err := httpGetJSON(ctx, client, base+"/v1/sync/manifest", &list); err != nil {
+	if err := httpGetJSON(ctx, client, base+"/v1/sync/manifest", opts.Token, &list); err != nil {
 		return nil, fmt.Errorf("sync manifest: %w", err)
 	}
 
 	out := make([]materialRecord, 0, len(list.Artifacts))
 	for _, entry := range list.Artifacts {
-		rec, err := fetchServerRecord(ctx, client, base, entry.ID, entry.Layer)
+		rec, err := fetchServerRecord(ctx, client, base, opts.Token, entry.ID, entry.Layer)
 		if err != nil {
 			return nil, err
 		}
@@ -93,10 +93,10 @@ func fetchServerRecords(ctx context.Context, opts Options) ([]materialRecord, er
 }
 
 // fetchServerRecord loads one artifact over HTTP and assembles its record.
-func fetchServerRecord(ctx context.Context, client *http.Client, base, id, layerID string) (materialRecord, error) {
+func fetchServerRecord(ctx context.Context, client *http.Client, base, token, id, layerID string) (materialRecord, error) {
 	var resp serverLoadResponse
 	loadURL := base + "/v1/load_artifact?id=" + url.QueryEscape(id)
-	if err := httpGetJSON(ctx, client, loadURL, &resp); err != nil {
+	if err := httpGetJSON(ctx, client, loadURL, token, &resp); err != nil {
 		return materialRecord{}, fmt.Errorf("load_artifact %s: %w", id, err)
 	}
 	if resp.Layer != "" {
@@ -168,11 +168,16 @@ func decodeInlineResources(in map[string]string, b64 bool) (map[string][]byte, e
 }
 
 // httpGetJSON issues a bounded GET and decodes a JSON body, mapping a
-// non-2xx response to the registry's §6.10 error envelope.
-func httpGetJSON(ctx context.Context, client *http.Client, rawURL string, out any) error {
+// non-2xx response to the registry's §6.10 error envelope. When token is
+// non-empty it is attached as Authorization: Bearer so the registry resolves
+// the caller's identity (§6.3.2 / §14.11).
+func httpGetJSON(ctx context.Context, client *http.Client, rawURL, token string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	resp, err := client.Do(req)
 	if err != nil {

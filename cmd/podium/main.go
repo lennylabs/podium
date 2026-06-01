@@ -25,6 +25,7 @@ import (
 	"github.com/lennylabs/podium/internal/buildinfo"
 	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/lint"
+	overlaypkg "github.com/lennylabs/podium/pkg/overlay"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/sync"
 )
@@ -300,18 +301,36 @@ func syncCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", cmErr)
 		return 2
 	}
+	// §6.4 overlay resolution: an explicit --overlay wins; otherwise honor the
+	// PODIUM_OVERLAY_PATH env var and the <CWD>/.podium/overlay/ fallback. A
+	// disabled overlay (the directory is absent) leaves OverlayPath empty.
+	overlayPath := *overlay
+	if overlayPath == "" {
+		if ovl, oerr := overlaypkg.ResolveWorkspaceOverlay(ws, os.Getenv("PODIUM_OVERLAY_PATH")); oerr == nil {
+			overlayPath = ovl
+		}
+	}
+	// §6.3.2 / §14.11: attach the caller credential (injected session token,
+	// then a keychain oauth-device-code token) so a server-source sync reaches
+	// an authenticated registry with the same identity the read CLI uses. A
+	// filesystem source ignores it.
+	token := ""
+	if sync.IsServerSource(registryPath) {
+		token = readCLIToken(registryPath)
+	}
 	syncOpts := sync.Options{
 		RegistryPath: registryPath,
 		Target:       abs,
 		AdapterID:    resolved.Harness,
 		DryRun:       *dryRun,
-		OverlayPath:  *overlay,
+		OverlayPath:  overlayPath,
 		Profile:      resolved.Profile,
 		Scope:        resolved.Scope,
 		CacheMode:    cacheMode,
+		Token:        token,
 	}
 	if *watch {
-		return runWatchLoop(syncOpts, *overlay, *asJSON)
+		return runWatchLoop(syncOpts, overlayPath, *asJSON)
 	}
 	res, err := sync.Run(syncOpts)
 	if err != nil {

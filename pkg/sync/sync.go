@@ -54,12 +54,23 @@ type Options struct {
 	// OverlayPath, when non-empty, points at a workspace overlay
 	// directory whose records sit at the highest precedence of the
 	// effective view (§4.6 / §6.4). Overlay artifacts override the
-	// registry's contribution at the same canonical ID. Applies to the
-	// filesystem source; a server source composes the overlay server-side.
+	// registry's contribution at the same canonical ID. The consumer merges
+	// it client-side for both registry sources: the developer's overlay
+	// directory is local, so a server source cannot see it.
 	OverlayPath string
 	// HTTPClient, when set, is used for server-source requests. Nil uses a
 	// default client with a bounded timeout. Tests inject a stub here.
 	HTTPClient *http.Client
+	// Token is the caller credential attached as Authorization: Bearer on
+	// every server-source registry API request (a §6.3.2 injected-session-token
+	// or a §6.3.1 oauth-device-code access token). Empty reaches the registry
+	// anonymously. It applies only to a server source; a filesystem source is
+	// read locally with no request to authenticate.
+	//
+	// spec: §6.3.2, §14.11 — CI supplies a runtime-issued JWT via
+	// PODIUM_SESSION_TOKEN_FILE so podium sync authenticates against the
+	// remote registry the same way the MCP server and read CLI do.
+	Token string
 	// Scope narrows the effective view per §7.5.1 (--include / --exclude /
 	// --type). The empty filter materializes the full effective view. The
 	// resolved scope is persisted into the lock (§7.5.3).
@@ -331,14 +342,70 @@ func offlineFirstNoop(opts Options, adapterID string) *Result {
 // source-neutral records to materialize. A server URL reads the effective
 // view over HTTP; any other value reads the local filesystem registry.
 func resolveRecords(opts Options) ([]materialRecord, error) {
+	var records []materialRecord
+	var err error
 	if isServerSource(opts.RegistryPath) {
-		return fetchServerRecords(context.Background(), opts)
+		records, err = fetchServerRecords(context.Background(), opts)
+	} else {
+		records, err = filesystemRecords(opts)
 	}
-	return filesystemRecords(opts)
+	if err != nil {
+		return nil, err
+	}
+	// §6.4 workspace overlay: records under OverlayPath sit at the highest
+	// precedence for both registry sources. The consumer (podium sync) merges
+	// the overlay client-side because the developer's overlay directory is
+	// local; a server source has no access to it.
+	if opts.OverlayPath != "" {
+		records, err = applyOverlay(records, opts.OverlayPath)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return records, nil
 }
 
-// filesystemRecords reads the filesystem registry, applies the §6.4
-// workspace overlay, and converts the result to source-neutral records.
+// applyOverlay resolves the §6.4 workspace overlay and merges its records on
+// top of base at the source-neutral materialRecord level. An overlay record
+// replaces the same-ID base record (or appends when no base record matches),
+// matching the highest-precedence semantics of §4.6. ErrNoOverlay (the
+// directory is absent) leaves base unchanged.
+func applyOverlay(base []materialRecord, overlayPath string) ([]materialRecord, error) {
+	overlayRecords, oerr := overlay.Filesystem{Path: overlayPath}.Resolve(context.Background())
+	if oerr != nil && !errors.Is(oerr, overlay.ErrNoOverlay) {
+		return nil, fmt.Errorf("overlay: %w", oerr)
+	}
+	if len(overlayRecords) == 0 {
+		return base, nil
+	}
+	idx := map[string]int{}
+	for i, rec := range base {
+		idx[rec.ID] = i
+	}
+	out := make([]materialRecord, len(base))
+	copy(out, base)
+	for _, rec := range overlayRecords {
+		mr := materialRecord{
+			ID:            rec.ID,
+			LayerID:       rec.Layer.ID,
+			Artifact:      rec.Artifact,
+			ArtifactBytes: rec.ArtifactBytes,
+			SkillBytes:    rec.SkillBytes,
+			Resources:     rec.Resources,
+		}
+		if i, ok := idx[rec.ID]; ok {
+			out[i] = mr
+			continue
+		}
+		idx[rec.ID] = len(out)
+		out = append(out, mr)
+	}
+	return out, nil
+}
+
+// filesystemRecords reads the filesystem registry and converts the result to
+// source-neutral records. The §6.4 workspace overlay is merged by the caller
+// (resolveRecords) so both registry sources honor it identically.
 func filesystemRecords(opts Options) ([]materialRecord, error) {
 	reg, err := filesystem.Open(opts.RegistryPath)
 	if err != nil {
@@ -353,19 +420,6 @@ func filesystemRecords(opts Options) ([]materialRecord, error) {
 	})
 	if err != nil {
 		return nil, err
-	}
-
-	// §6.4 workspace overlay: records under OverlayPath sit at the
-	// highest precedence; overlay IDs replace the registry's
-	// contribution at the same canonical ID.
-	if opts.OverlayPath != "" {
-		overlayRecords, oerr := overlay.Filesystem{Path: opts.OverlayPath}.Resolve(context.Background())
-		if oerr != nil && !errors.Is(oerr, overlay.ErrNoOverlay) {
-			return nil, fmt.Errorf("overlay: %w", oerr)
-		}
-		if len(overlayRecords) > 0 {
-			records = mergeOverlay(records, overlayRecords)
-		}
 	}
 
 	out := make([]materialRecord, 0, len(records))
@@ -460,26 +514,4 @@ func removeStalePaths(target string, prior, current map[string]bool) {
 		// fails non-empty dirs naturally, which is what we want.
 		_ = os.Remove(filepath.Dir(full))
 	}
-}
-
-// mergeOverlay returns base with each overlay record replacing the
-// same-ID base record (or appended when no base record matches).
-// Overlay records keep their original Layer so downstream callers
-// can identify the override path.
-func mergeOverlay(base, overlay []filesystem.ArtifactRecord) []filesystem.ArtifactRecord {
-	idx := map[string]int{}
-	for i, rec := range base {
-		idx[rec.ID] = i
-	}
-	out := make([]filesystem.ArtifactRecord, len(base))
-	copy(out, base)
-	for _, rec := range overlay {
-		if i, ok := idx[rec.ID]; ok {
-			out[i] = rec
-			continue
-		}
-		idx[rec.ID] = len(out)
-		out = append(out, rec)
-	}
-	return out
 }
