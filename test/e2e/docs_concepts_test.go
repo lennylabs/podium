@@ -728,16 +728,23 @@ func TestConcepts_ClaudeDesktopExtension(t *testing.T) {
 }
 
 // T-D-concepts-54 — claude-cowork materializes one plugin per artifact under
-// plugins/<id>/ with a .claude-plugin/plugin.json manifest. A context artifact
-// ships as a skill inside the plugin (the plugin format has no context
-// component).
+// plugins/<id>/ with a .claude-plugin/plugin.json manifest. A skill ships as a
+// plugin; a context artifact goes to the harness-neutral .podium/context/
+// bucket instead (§6.7, identical across every adapter).
 func TestConcepts_ClaudeCoworkPlugin(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"tools/helper/ARTIFACT.md": contextArtifact("helper")})
+	reg := writeRegistry(t, map[string]string{
+		"tools/greet/ARTIFACT.md": greetSkillArtifact,
+		"tools/greet/SKILL.md":    skillBody("greet"),
+		"tools/helper/ARTIFACT.md": contextArtifact("helper"),
+	})
 	tgt := t.TempDir()
 	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-cowork")
-	mustExist(t, filepath.Join(tgt, "plugins/tools/helper/.claude-plugin/plugin.json"))
-	mustExist(t, filepath.Join(tgt, "plugins/tools/helper/skills/helper/SKILL.md"))
+	mustExist(t, filepath.Join(tgt, "plugins/tools/greet/.claude-plugin/plugin.json"))
+	mustExist(t, filepath.Join(tgt, "plugins/tools/greet/skills/greet/SKILL.md"))
+	// Standalone context is harness-neutral, not a plugin.
+	mustExist(t, filepath.Join(tgt, ".podium/context/tools/helper/ARTIFACT.md"))
+	mustNotExist(t, filepath.Join(tgt, "plugins/tools/helper"))
 }
 
 // T-D-concepts-55 — podium-mcp fails at startup when PODIUM_REGISTRY is unset.

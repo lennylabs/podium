@@ -35,8 +35,13 @@ type ClaudeCowork struct{}
 // ID returns "claude-cowork".
 func (ClaudeCowork) ID() string { return "claude-cowork" }
 
-// Adapt writes the plugin layout for the artifact.
+// Adapt writes the plugin layout for the artifact. A type: context artifact
+// goes to the harness-neutral .podium/context/<id>/ bucket like every other
+// adapter (§6.7), not into a plugin.
 func (ClaudeCowork) Adapt(ctx context.Context, src Source) ([]File, error) {
+	if frontmatterType(src.ArtifactBytes) == "context" {
+		return contextOut(src), nil
+	}
 	return coworkPlugin(src), nil
 }
 

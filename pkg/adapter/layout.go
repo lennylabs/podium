@@ -317,7 +317,10 @@ func coworkPlugin(src Source) []File {
 		{Path: path.Join(pluginRoot, ".claude-plugin", "plugin.json"), Content: []byte(`{"name":"` + name + `"}` + "\n")},
 	}
 	switch frontmatterType(src.ArtifactBytes) {
-	case "skill", "rule", "context":
+	case "skill", "rule":
+		// A skill ships natively; a rule has no native plugin component, so it
+		// ships as a skill (the §6.7.1 fallback). context is handled by the
+		// caller via the harness-neutral .podium/context/ bucket.
 		body := src.SkillBytes
 		if len(body) == 0 {
 			body = src.ArtifactBytes
