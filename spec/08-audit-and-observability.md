@@ -50,7 +50,6 @@ Defaults, configurable per deployment:
 | Query text                          | 30 days (redacted to placeholders after 7 days)         |
 | Deprecated artifact versions        | 90 days after the deprecation flag is set               |
 | Layers unregistered by their owners | 30 days (artifacts soft-deleted, recoverable via admin) |
-| Vulnerability scan history          | 1 year                                                  |
 
 Optional sampling for high-volume low-sensitivity events (e.g., `domain.loaded` at 10% sample) reduces storage cost.
 

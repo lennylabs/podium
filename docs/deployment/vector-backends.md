@@ -119,7 +119,7 @@ Server-side environment variables:
 | `PODIUM_WEAVIATE_URL` | Cluster REST URL. | required |
 | `PODIUM_WEAVIATE_API_KEY` | API key. | required |
 | `PODIUM_WEAVIATE_COLLECTION` | Collection name. | required |
-| `PODIUM_WEAVIATE_GRPC_URL` | gRPC endpoint. | derived from the REST URL |
+| `PODIUM_WEAVIATE_GRPC_URL` | gRPC endpoint. Reserved and not currently read; the Weaviate backend uses the REST data plane. | derived from the REST URL |
 | `PODIUM_WEAVIATE_VECTORIZER` | Vectorizer module (`text2vec-openai`, `text2vec-weaviate`, and similar) to enable self-embedding. | unset (storage-only mode) |
 
 ### Standalone server with Weaviate Cloud
@@ -159,7 +159,7 @@ Server-side environment variables:
 | `PODIUM_QDRANT_URL` | Cluster REST URL. | required |
 | `PODIUM_QDRANT_API_KEY` | API key. | required |
 | `PODIUM_QDRANT_COLLECTION` | Collection name. | required |
-| `PODIUM_QDRANT_GRPC_PORT` | gRPC port. | `6334` |
+| `PODIUM_QDRANT_GRPC_PORT` | gRPC port. Reserved and not currently read; the Qdrant backend uses the REST data plane. | `6334` |
 | `PODIUM_QDRANT_INFERENCE_MODEL` | Hosted Cloud Inference model name to enable self-embedding. | unset (storage-only mode) |
 
 ### Standalone server with Qdrant Cloud

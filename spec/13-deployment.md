@@ -399,7 +399,7 @@ Selected via `PODIUM_VECTOR_BACKEND` (`pgvector` | `sqlite-vec` | `pinecone` | `
 | `PODIUM_WEAVIATE_URL`        | Cluster REST URL                                                                                     | required                                                |
 | `PODIUM_WEAVIATE_API_KEY`    | API key                                                                                              | required                                                |
 | `PODIUM_WEAVIATE_COLLECTION` | Collection name                                                                                      | required                                                |
-| `PODIUM_WEAVIATE_GRPC_URL`   | gRPC endpoint                                                                                        | (derived from REST URL)                                   |
+| `PODIUM_WEAVIATE_GRPC_URL`   | gRPC endpoint. Reserved and not currently read; the Weaviate backend uses the REST data plane.                                                                                        | (derived from REST URL)                                   |
 | `PODIUM_WEAVIATE_VECTORIZER` | Vectorizer module name (e.g., `text2vec-openai`, `text2vec-weaviate`); set to enable self-embedding | (unset → storage-only mode; `EmbeddingProvider` required) |
 
 `qdrant-cloud`:
@@ -409,7 +409,7 @@ Selected via `PODIUM_VECTOR_BACKEND` (`pgvector` | `sqlite-vec` | `pinecone` | `
 | `PODIUM_QDRANT_URL`             | Cluster REST URL                                                 | required                                                |
 | `PODIUM_QDRANT_API_KEY`         | API key                                                          | required                                                |
 | `PODIUM_QDRANT_COLLECTION`      | Collection name                                                  | required                                                |
-| `PODIUM_QDRANT_GRPC_PORT`       | gRPC port                                                        | `6334`                                                    |
+| `PODIUM_QDRANT_GRPC_PORT`       | gRPC port. Reserved and not currently read; the Qdrant backend uses the REST data plane.                                                        | `6334`                                                    |
 | `PODIUM_QDRANT_INFERENCE_MODEL` | Hosted Cloud Inference model name; set to enable self-embedding  | (unset → storage-only mode; `EmbeddingProvider` required) |
 
 ### Embedding provider
