@@ -371,30 +371,41 @@ func TestConfigureHarness_ClaudeCodeNonSkillResources(t *testing.T) {
 	mustExist(t, filepath.Join(target, ".podium", "resources", "tools", "deploy", "scripts", "deploy.sh"))
 }
 
-// T-D-configure-harness-21 — claude-code/glob falls back (the rule file does
-// not carry Claude Code's native per-file scoping), so targeting claude-code
-// for a glob rule draws a capability fallback warning. §6.7.1: claude-code/glob = ⚠.
-func TestConfigureHarness_ClaudeCodeGlobLintWarning(t *testing.T) {
+// T-D-configure-harness-21 — claude-code/glob is native: the rule file carries
+// Claude Code's `paths:` list, which scopes the rule per file, so targeting
+// claude-code for a glob rule lints clean. §6.7.1: claude-code/glob = ✓.
+func TestConfigureHarness_ClaudeCodeGlobNativeClean(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"rules/ts/ARTIFACT.md": rmRuleArtifact("ts", "glob",
 			[]string{`rule_globs: "src/**/*.ts"`, "target_harnesses: [claude-code]"}, "TS rules.\n"),
 	})
-	rmExpectWarn(t, reg, "claude-code")
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 0 {
+		t.Fatalf("lint exit=%d, want 0\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if strings.Contains(res.Stdout, "lint.harness_capability") {
+		t.Errorf("claude-code/glob is native; expected no capability diagnostic:\n%s", res.Stdout)
+	}
 }
 
-// T-D-configure-harness-22 — claude-code rule_mode auto carries the description
-// field through to the materialized rule file.
-func TestConfigureHarness_ClaudeCodeAutoDescription(t *testing.T) {
+// T-D-configure-harness-22 — claude-code has no description-attach for rules, so
+// an auto-mode rule falls back to a load-always .claude/rules/ file: the prose
+// body is preserved with no scoping frontmatter (no undocumented description:
+// rules key). §6.7.1: claude-code/auto = ⚠.
+func TestConfigureHarness_ClaudeCodeAutoFallback(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"rules/py-style/ARTIFACT.md": chRule("auto", "description: Use when working with Python files"),
+		"rules/py-style/ARTIFACT.md": chRule("auto", `rule_description: "Use when working with Python files"`),
 	})
 	target := t.TempDir()
 	chSync(t, reg, target, "claude-code")
 	got := readFile(t, filepath.Join(target, ".claude", "rules", "py-style.md"))
-	if !strings.Contains(got, "Use when working with Python files") {
-		t.Errorf("rule file missing description value:\n%s", got)
+	if !strings.Contains(got, "Rule body for auto.") {
+		t.Errorf("rule file missing the prose body:\n%s", got)
+	}
+	if strings.Contains(got, "rule_mode") || strings.Contains(got, "rule_description") || strings.Contains(got, "description:") {
+		t.Errorf("auto rule leaked frontmatter into the Claude rule file:\n%s", got)
 	}
 }
 

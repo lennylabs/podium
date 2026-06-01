@@ -26,9 +26,9 @@ var wantGrid = map[Capability]string{
 	{Field: "requiresApproval"}:             "NXNNXNNXX",
 	{Field: "sandbox_profile"}:              "NXNNXNNXX",
 	{Field: "rule_mode", Value: "always"}:   "NXFNNNNNN",
-	{Field: "rule_mode", Value: "glob"}:     "FXFNFFFFN",
+	{Field: "rule_mode", Value: "glob"}:     "NXFNFFFFN",
 	{Field: "rule_mode", Value: "auto"}:     "FXFNFFFFN",
-	{Field: "rule_mode", Value: "explicit"}: "NXFNFFFFN",
+	{Field: "rule_mode", Value: "explicit"}: "FXFNFFFFN",
 	{Field: "hook_event"}:                   "NXNFNXNXX",
 }
 
@@ -138,16 +138,17 @@ func TestCapability_UsedCapabilities(t *testing.T) {
 func TestCapability_Evaluate(t *testing.T) {
 	t.Parallel()
 	rule := &manifest.Artifact{Type: manifest.TypeRule, RuleMode: manifest.RuleModeGlob}
-	// cursor is ✓ for glob -> no mismatch; claude-desktop is ✗; claude-code is ⚠.
-	got := Evaluate(rule, []string{"cursor", "claude-desktop", "claude-code"})
+	// cursor and claude-code are ✓ for glob (native per-file scoping) -> no
+	// mismatch; claude-desktop is ✗; codex is ⚠ (AGENTS.md inject loses scoping).
+	got := Evaluate(rule, []string{"cursor", "claude-code", "claude-desktop", "codex"})
 	if len(got) != 2 {
 		t.Fatalf("Evaluate = %v, want 2 mismatches", got)
 	}
 	if got[0].Harness != "claude-desktop" || got[0].Support != SupportUnsupported {
 		t.Errorf("Evaluate[0] = %+v, want claude-desktop ✗", got[0])
 	}
-	if got[1].Harness != "claude-code" || got[1].Support != SupportFallback {
-		t.Errorf("Evaluate[1] = %+v, want claude-code ⚠", got[1])
+	if got[1].Harness != "codex" || got[1].Support != SupportFallback {
+		t.Errorf("Evaluate[1] = %+v, want codex ⚠", got[1])
 	}
 	// "none" is not a matrix harness -> skipped.
 	if got := Evaluate(rule, []string{"none"}); len(got) != 0 {
@@ -166,7 +167,7 @@ func TestCapability_TranslationError(t *testing.T) {
 		!containsAll(err.Error(), "claude-desktop", "rule_mode: glob", "harness: none") {
 		t.Errorf("TranslationError(claude-desktop, glob) = %v", err)
 	}
-	// claude-code ⚠ for glob -> no error (fallback, not unsupported).
+	// claude-code ✓ for glob (native `paths:` list) -> no error.
 	if err := TranslationError("claude-code", rule); err != nil {
 		t.Errorf("TranslationError(claude-code, glob) = %v, want nil", err)
 	}

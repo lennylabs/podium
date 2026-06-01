@@ -181,7 +181,7 @@ podium sync
 
 **Notes:**
 
-- The rule file carries the prose under a Claude-native scoping frontmatter and drops the Podium-internal fields. `always` and `explicit` are fully supported. `glob` writes `paths: <rule_globs>` and `auto` writes `description: <rule_description>`; both are best-effort and draw a lint warning, because Podium cannot guarantee Claude Code scopes the rule rather than loading it for every turn.
+- The rule file carries the prose with the Podium-internal fields dropped. `always` loads at launch and `glob` writes the native `paths:` YAML list, both fully supported. `auto` and `explicit` fall back to a load-always file and draw a lint warning, because `.claude/rules/` files have no description-attach or mention-only mode (a rule without `paths:` loads on every turn).
 - Native hook system available; see [Hooks](../authoring/hooks).
 
 ---

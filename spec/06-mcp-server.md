@@ -238,10 +238,12 @@ Rule modes (`type: rule`) and hook events (`type: hook`):
 | Capability            | claude-code | claude-desktop | claude-cowork | cursor | codex | opencode | gemini | pi  | hermes |
 | --------------------- | ----------- | -------------- | ------------- | ------ | ----- | -------- | ------ | --- | ------ |
 | `rule_mode: always`   | ✓           | ✗              | ⚠             | ✓      | ✓     | ✓        | ✓      | ✓   | ✓      |
-| `rule_mode: glob`     | ⚠           | ✗              | ⚠             | ✓      | ⚠     | ⚠        | ⚠      | ⚠   | ✓      |
+| `rule_mode: glob`     | ✓           | ✗              | ⚠             | ✓      | ⚠     | ⚠        | ⚠      | ⚠   | ✓      |
 | `rule_mode: auto`     | ⚠           | ✗              | ⚠             | ✓      | ⚠     | ⚠        | ⚠      | ⚠   | ✓      |
-| `rule_mode: explicit` | ✓           | ✗              | ⚠             | ✓      | ⚠     | ⚠        | ⚠      | ⚠   | ✓      |
+| `rule_mode: explicit` | ⚠           | ✗              | ⚠             | ✓      | ⚠     | ⚠        | ⚠      | ⚠   | ✓      |
 | `hook_event` (any)    | ✓           | ✗              | ✓             | ⚠      | ✓     | ✗        | ✓      | ✗   | ✗      |
+
+A rule mode is ✓ where the adapter produces native per-file or per-mode scoping, and ⚠ where the rule degrades to an always-loaded block. Cursor and Hermes write `.cursor/rules/*.mdc`, which carry every mode natively. Claude Code writes `.claude/rules/` files: `always` loads at launch (native), `glob` uses the native `paths:` list (native), and `auto` and `explicit` fall back to a load-always file because Claude Code has no description-attach or mention-only rule mode. The `AGENTS.md` and `GEMINI.md` inject harnesses (codex, opencode, gemini, pi) honor `always` natively and degrade the scoped modes to the always-loaded block. Claude Cowork ships rules as skills, a fallback for every mode.
 
 The `hook_event` row summarizes hook support at the field level. Per-event coverage (which canonical events from §4.3.5 each adapter translates) is tracked in the adapter implementation rather than in this spec; the row marks ✓ when the adapter config-merges the common events (`session_start`, `session_end`, `pre_tool_use`, `post_tool_use`, `stop`, `pre_compact`) and ⚠ when only a subset translates. Cursor is ⚠ because it exposes per-category subtype events (`beforeShellExecution` and the like) rather than the generic tool events. For the harness's own current event surface, refer to the harness's documentation.
 

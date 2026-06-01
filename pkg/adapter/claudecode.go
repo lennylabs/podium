@@ -137,30 +137,25 @@ func lastSegmentClaude(p string) string {
 	return p
 }
 
-// claudeRuleBody renders a Claude Code rule file: the rule prose under a
-// Claude-native scoping frontmatter derived from rule_mode. A glob rule writes
-// `paths: <rule_globs>`; an auto rule writes `description: <rule_description>`
-// (falling back to the general description); always and explicit rules carry no
-// scoping key. The Podium-internal frontmatter is dropped. On a parse error the
-// raw ARTIFACT.md is returned so nothing is silently lost.
+// claudeRuleBody renders a Claude Code rule file: the rule prose under the
+// Claude-native scoping frontmatter Claude Code documents for `.claude/rules/`.
+// Only `paths:` is a native rules field, and it is a YAML list of globs, so a
+// glob rule writes `paths:` from rule_globs (comma-split). always, auto, and
+// explicit carry no scoping key: a `.claude/rules/` file without `paths:` loads
+// at launch like CLAUDE.md, which is native for always and the load-always
+// fallback for auto and explicit (Claude Code has no description-attach or
+// mention-only rule mode). The Podium-internal frontmatter is dropped. On a
+// parse error the raw ARTIFACT.md is returned so nothing is silently lost.
 func claudeRuleBody(src Source) []byte {
 	art, err := manifest.ParseArtifact(src.ArtifactBytes)
 	if err != nil || art == nil {
 		return src.ArtifactBytes
 	}
 	var fm strings.Builder
-	switch art.RuleMode {
-	case manifest.RuleModeGlob:
-		if art.RuleGlobs != "" {
-			fm.WriteString("paths: " + art.RuleGlobs + "\n")
-		}
-	case manifest.RuleModeAuto:
-		desc := art.RuleDescription
-		if desc == "" {
-			desc = art.Description
-		}
-		if desc != "" {
-			fm.WriteString("description: " + desc + "\n")
+	if art.RuleMode == manifest.RuleModeGlob && art.RuleGlobs != "" {
+		fm.WriteString("paths:\n")
+		for _, g := range splitGlobs(art.RuleGlobs) {
+			fm.WriteString("  - \"" + g + "\"\n")
 		}
 	}
 	var b strings.Builder
@@ -171,4 +166,16 @@ func claudeRuleBody(src Source) []byte {
 	}
 	b.WriteString(art.Body)
 	return []byte(b.String())
+}
+
+// splitGlobs splits a comma-separated rule_globs string into trimmed,
+// non-empty patterns for the Claude Code `paths:` list.
+func splitGlobs(globs string) []string {
+	var out []string
+	for _, g := range strings.Split(globs, ",") {
+		if g = strings.TrimSpace(g); g != "" {
+			out = append(out, g)
+		}
+	}
+	return out
 }

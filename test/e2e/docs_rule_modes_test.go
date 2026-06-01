@@ -342,8 +342,10 @@ func TestRuleModes_SyncClaudeCodeGlob(t *testing.T) {
 }
 
 // T-D-rule-modes-18 — claude-code materializes an auto-mode rule to
-// .claude/rules/<name>.md carrying its rule_description.
-// spec: docs/authoring/rule-modes.md § "What each adapter writes", claude-code auto.
+// .claude/rules/<name>.md. Claude Code has no description-attach for rules, so
+// auto falls back to a load-always file: the prose is preserved with no scoping
+// frontmatter, and the Podium-internal fields (including rule_description) are
+// not leaked. spec: §6.7.1 claude-code/auto = ⚠.
 func TestRuleModes_SyncClaudeCodeAuto(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -355,13 +357,12 @@ func TestRuleModes_SyncClaudeCodeAuto(t *testing.T) {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
 	got := readFile(t, filepath.Join(tgt, ".claude/rules/db-migration-checks.md"))
-	// The auto trigger lands in Claude's native `description:` frontmatter; the
-	// Podium-internal field names are not leaked.
-	if !strings.Contains(got, "description: Apply when working with database migrations or schema changes") {
-		t.Errorf("materialized auto rule missing Claude-native description:\n%s", got)
+	if !strings.Contains(got, "DB checks.") {
+		t.Errorf("materialized auto rule missing the prose body:\n%s", got)
 	}
-	if strings.Contains(got, "rule_mode") || strings.Contains(got, "rule_description") {
-		t.Errorf("Podium-internal frontmatter leaked into the Claude rule file:\n%s", got)
+	// No Podium-internal fields, and no undocumented description: rules key.
+	if strings.Contains(got, "rule_mode") || strings.Contains(got, "rule_description") || strings.Contains(got, "description:") {
+		t.Errorf("auto rule leaked frontmatter into the Claude rule file:\n%s", got)
 	}
 }
 

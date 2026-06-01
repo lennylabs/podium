@@ -107,8 +107,13 @@ func TestHookEvents_CursorSubtypeConfigMerge(t *testing.T) {
 	if len(out) != 1 || out[0].Path != ".cursor/hooks.json" || out[0].Op != OpMergeJSON {
 		t.Fatalf("got %+v, want a single .cursor/hooks.json OpMergeJSON", out)
 	}
-	if body := string(out[0].Content); !strings.Contains(body, "beforeShellExecution") || !strings.Contains(body, "echo audit") {
+	body := string(out[0].Content)
+	if !strings.Contains(body, "beforeShellExecution") || !strings.Contains(body, "echo audit") {
 		t.Errorf("fragment missing the native event / command:\n%s", body)
+	}
+	// Cursor's hooks.json schema requires a top-level version field.
+	if !strings.Contains(body, `"version":1`) {
+		t.Errorf("fragment missing the required top-level version:\n%s", body)
 	}
 }
 

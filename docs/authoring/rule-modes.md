@@ -66,9 +66,9 @@ The harness adapter does the translation at materialization time. Each adapter w
 | Mode | claude-code | claude-desktop | claude-cowork | cursor | codex | opencode | gemini | pi | hermes |
 |:--|:--|:--|:--|:--|:--|:--|:--|:--|:--|
 | `always` | ✓ | ✗ | ⚠ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `glob` | ⚠ | ✗ | ⚠ | ✓ | ⚠ | ⚠ | ⚠ | ⚠ | ✓ |
+| `glob` | ✓ | ✗ | ⚠ | ✓ | ⚠ | ⚠ | ⚠ | ⚠ | ✓ |
 | `auto` | ⚠ | ✗ | ⚠ | ✓ | ⚠ | ⚠ | ⚠ | ⚠ | ✓ |
-| `explicit` | ✓ | ✗ | ⚠ | ✓ | ⚠ | ⚠ | ⚠ | ⚠ | ✓ |
+| `explicit` | ⚠ | ✗ | ⚠ | ✓ | ⚠ | ⚠ | ⚠ | ⚠ | ✓ |
 
 Legend: ✓ supported natively, ⚠ supported via fallback (lint warning), ✗ not supported (lint error or `target_harnesses:` opt-out required). This table mirrors the `rule_mode` rows of the §6.7.1 capability matrix.
 
@@ -78,7 +78,7 @@ Legend: ✓ supported natively, ⚠ supported via fallback (lint warning), ✗ n
 
 | Adapter | Output |
 |:--|:--|
-| **claude-code** | A standalone `.claude/rules/<name>.md` for every mode, carrying the prose under a Claude-native scoping frontmatter (the Podium-internal fields are dropped). `always` and `explicit` map natively; `glob` writes `paths: <rule_globs>` and `auto` writes `description: <rule_description>` as a best-effort scoping that draws a lint warning. |
+| **claude-code** | A standalone `.claude/rules/<name>.md` for every mode, carrying the prose with the Podium-internal fields dropped. `always` loads at launch and `glob` writes the native `paths:` YAML list, both native. `auto` and `explicit` fall back to a load-always file (no scoping frontmatter) and draw a lint warning, because Claude Code's `.claude/rules/` files have no description-attach or mention-only mode. |
 | **cursor** | `.cursor/rules/<name>.mdc` for every mode, with the native key set per the mode: `always` writes `alwaysApply: true`, `glob` writes `globs: <rule_globs>`, `auto` writes `description: <rule_description>`, and `explicit` writes no auto-apply key. |
 | **hermes** | `.cursor/rules/<name>.mdc` in the Cursor `.mdc` format for every mode. Hermes natively reads `.cursor/rules/*.mdc`, root `AGENTS.md`, and `.cursorrules`; it does not read `.claude/rules/`. |
 | **codex, opencode, pi** | The rule body injects into root `AGENTS.md` between Podium-managed markers. `always` maps natively; `glob`, `auto`, and `explicit` fall back to always-loaded with a lint warning, because an injected block carries no per-file scoping. |

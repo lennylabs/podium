@@ -94,13 +94,18 @@ var capabilityMatrix = map[Capability][]Support{
 	{Field: "delegates_to"}:     row("NXNNXNNXX"),
 	{Field: "requiresApproval"}: row("NXNNXNNXX"),
 	{Field: "sandbox_profile"}:  row("NXNNXNNXX"),
-	// rule_mode (type: rule). Cursor and Hermes write .mdc and support every
-	// mode; the AGENTS.md/GEMINI.md inject harnesses support always natively
-	// and degrade glob/auto/explicit; Cowork ships rules as skills (fallback).
+	// rule_mode (type: rule). Native per-file scoping is the discriminator.
+	// Cursor and Hermes write .mdc and support every mode natively. Claude Code
+	// writes .claude/rules/ files: always is native (load-at-launch), glob is
+	// native via the `paths:` list, and auto/explicit fall back to load-always
+	// (Claude Code has no description-attach or mention-only rule mode). The
+	// AGENTS.md/GEMINI.md inject harnesses support always natively and degrade
+	// glob/auto/explicit to the always-loaded block. Cowork ships rules as
+	// skills (fallback for every mode).
 	{Field: "rule_mode", Value: "always"}:   row("NXFNNNNNN"),
-	{Field: "rule_mode", Value: "glob"}:     row("FXFNFFFFN"),
+	{Field: "rule_mode", Value: "glob"}:     row("NXFNFFFFN"),
 	{Field: "rule_mode", Value: "auto"}:     row("FXFNFFFFN"),
-	{Field: "rule_mode", Value: "explicit"}: row("NXFNFFFFN"),
+	{Field: "rule_mode", Value: "explicit"}: row("FXFNFFFFN"),
 	// hook_event (type: hook). Config-merge harnesses translate the §4.3.5
 	// event to a native event: claude-code, cowork, codex, and gemini cover the
 	// common events (✓); Cursor exposes only per-category subtype events, so it

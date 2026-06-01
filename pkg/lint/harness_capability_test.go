@@ -65,13 +65,14 @@ func TestHarnessCapability_GlobTargetingClaudeDesktopErrors(t *testing.T) {
 // Spec: §6.7.1 — a ⚠ cell on a targeted harness is a warning, not an error.
 func TestHarnessCapability_FallbackWarns(t *testing.T) {
 	t.Parallel()
-	// claude-code is ⚠ for rule_mode: glob.
-	diags := capDiags(t, "---\ntype: rule\nversion: 1.0.0\nname: r\ndescription: d.\nrule_mode: glob\nrule_globs: \"src/**\"\ntarget_harnesses: [claude-code]\n---\n\nbody\n")
+	// codex is ⚠ for rule_mode: glob (the AGENTS.md inject loses per-file
+	// scoping). claude-code is ✓ for glob via the native `paths:` list.
+	diags := capDiags(t, "---\ntype: rule\nversion: 1.0.0\nname: r\ndescription: d.\nrule_mode: glob\nrule_globs: \"src/**\"\ntarget_harnesses: [codex]\n---\n\nbody\n")
 	if hasErrorMessage(diags, capCode, "") {
 		t.Errorf("a ⚠ cell must not error, got: %v", diags)
 	}
 	if !hasWarnMessage(diags, capCode, "falls back") {
-		t.Errorf("expected a fallback warning for claude-code + glob, got: %v", diags)
+		t.Errorf("expected a fallback warning for codex + glob, got: %v", diags)
 	}
 }
 

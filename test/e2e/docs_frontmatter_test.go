@@ -484,10 +484,11 @@ func TestFrontmatter_RuleGlobClaudeCode(t *testing.T) {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
 	got := readFile(t, filepath.Join(tgt, ".claude/rules/glob-rule.md"))
-	if !strings.Contains(got, "paths: src/**/*.ts") {
-		t.Errorf("materialized rule missing Claude-native paths frontmatter:\n%s", got)
+	// Claude Code's `paths:` is a YAML list of quoted globs.
+	if !strings.Contains(got, "paths:") || !strings.Contains(got, `- "src/**/*.ts"`) {
+		t.Errorf("materialized rule missing Claude-native paths list:\n%s", got)
 	}
-	if strings.Contains(got, "rule_mode") || strings.Contains(got, "type: rule") {
+	if strings.Contains(got, "rule_mode") || strings.Contains(got, "type: rule") || strings.Contains(got, "rule_globs") {
 		t.Errorf("Podium-internal frontmatter leaked into the Claude rule file:\n%s", got)
 	}
 }

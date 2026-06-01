@@ -298,9 +298,11 @@ var cursorHookEvents = map[string]string{
 }
 
 // cursorHookFragmentJSON builds the Cursor .cursor/hooks.json config-merge
-// fragment: a top-level `hooks` object keyed by the native event, each holding
-// an array of `{command}` entries (§6.7 config-merge). Returns nil when Cursor
-// has no native event for the canonical hook_event.
+// fragment. Cursor's schema is `{"version": 1, "hooks": {"<event>": [{"command":
+// "..."}]}}`: a required top-level schema version plus a `hooks` object keyed by
+// the native event, each holding an array of `{command}` entries (§6.7
+// config-merge). Returns nil when Cursor has no native event for the canonical
+// hook_event. The version scalar is idempotent across merges.
 func cursorHookFragmentJSON(src Source) []byte {
 	art := parsed(src)
 	native, ok := cursorHookEvents[art.HookEvent]
@@ -308,7 +310,10 @@ func cursorHookFragmentJSON(src Source) []byte {
 		return nil
 	}
 	entry := map[string]any{"command": hookActionFor(src), PodiumOwnedKey: src.ArtifactID}
-	frag := map[string]any{"hooks": map[string]any{native: []any{entry}}}
+	frag := map[string]any{
+		"version": 1,
+		"hooks":   map[string]any{native: []any{entry}},
+	}
 	b, _ := json.Marshal(frag)
 	return b
 }
