@@ -71,7 +71,7 @@ func solofsWriteSyncYAML(t *testing.T, ws, body string) {
 // ---- tests ------------------------------------------------------------------
 
 // T-D-solo-fs-1
-func TestSoloFS_1_InitWritesSyncYAML(t *testing.T) {
+func TestFilesystemSync_InitWritesSyncYAML(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
 	reg := t.TempDir()
@@ -92,7 +92,7 @@ func TestSoloFS_1_InitWritesSyncYAML(t *testing.T) {
 }
 
 // T-D-solo-fs-2
-func TestSoloFS_2_InitWritesGitignore(t *testing.T) {
+func TestFilesystemSync_InitWritesGitignore(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
 	res := runPodium(t, ws, nil, "init", "--registry", "/some/path")
@@ -108,7 +108,7 @@ func TestSoloFS_2_InitWritesGitignore(t *testing.T) {
 }
 
 // T-D-solo-fs-3
-func TestSoloFS_3_InitGlobalWritesHomeConfig(t *testing.T) {
+func TestFilesystemSync_InitGlobalWritesHomeConfig(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	res := runPodium(t, "", []string{"HOME=" + home}, "init", "--global", "--registry", "/path/to/registry")
@@ -122,7 +122,7 @@ func TestSoloFS_3_InitGlobalWritesHomeConfig(t *testing.T) {
 }
 
 // T-D-solo-fs-4
-func TestSoloFS_4_InitRefusesOverwriteWithoutForce(t *testing.T) {
+func TestFilesystemSync_InitRefusesOverwriteWithoutForce(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
 	if r := runPodium(t, ws, nil, "init", "--registry", "/first-path"); r.Exit != 0 {
@@ -150,7 +150,7 @@ func TestSoloFS_4_InitRefusesOverwriteWithoutForce(t *testing.T) {
 }
 
 // T-D-solo-fs-5
-func TestSoloFS_5_MultiLayerEachSubdirIsLayer(t *testing.T) {
+func TestFilesystemSync_MultiLayerEachSubdirIsLayer(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config": solofsMultiLayerConfig,
@@ -171,7 +171,7 @@ func TestSoloFS_5_MultiLayerEachSubdirIsLayer(t *testing.T) {
 // T-D-solo-fs-6
 // Layer order defaults to alphabetical when layer_order is absent.
 // Verified via filesystem.Open directly, asserting Layers slice order.
-func TestSoloFS_6_LayerOrderDefaultsAlphabetical(t *testing.T) {
+func TestFilesystemSync_LayerOrderDefaultsAlphabetical(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":             solofsMultiLayerConfig,
@@ -196,7 +196,7 @@ func TestSoloFS_6_LayerOrderDefaultsAlphabetical(t *testing.T) {
 // T-D-solo-fs-7
 // layer_order in .registry-config overrides alphabetical ordering.
 // Verified via filesystem.Open directly.
-func TestSoloFS_7_LayerOrderExplicitOverridesAlphabetical(t *testing.T) {
+func TestFilesystemSync_LayerOrderExplicitOverridesAlphabetical(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":             solofsRegistryConfig("team-shared", "personal"),
@@ -219,7 +219,7 @@ func TestSoloFS_7_LayerOrderExplicitOverridesAlphabetical(t *testing.T) {
 }
 
 // T-D-solo-fs-8
-func TestSoloFS_8_AbsentRegistryConfigSingleLayer(t *testing.T) {
+func TestFilesystemSync_AbsentRegistryConfigSingleLayer(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"finance/report/ARTIFACT.md": contextArtifact("report"),
@@ -233,7 +233,7 @@ func TestSoloFS_8_AbsentRegistryConfigSingleLayer(t *testing.T) {
 }
 
 // T-D-solo-fs-9
-func TestSoloFS_9_MultiLayerFalseSingleLayer(t *testing.T) {
+func TestFilesystemSync_MultiLayerFalseSingleLayer(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":          "multi_layer: false\n",
@@ -248,7 +248,7 @@ func TestSoloFS_9_MultiLayerFalseSingleLayer(t *testing.T) {
 }
 
 // T-D-solo-fs-10
-func TestSoloFS_10_TopLevelArtifactAmbiguous(t *testing.T) {
+func TestFilesystemSync_TopLevelArtifactAmbiguous(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config": solofsMultiLayerConfig,
@@ -265,7 +265,7 @@ func TestSoloFS_10_TopLevelArtifactAmbiguous(t *testing.T) {
 }
 
 // T-D-solo-fs-11
-func TestSoloFS_11_DotDirectoriesSkippedAsLayers(t *testing.T) {
+func TestFilesystemSync_DotDirectoriesSkippedAsLayers(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":            solofsMultiLayerConfig,
@@ -281,7 +281,7 @@ func TestSoloFS_11_DotDirectoriesSkippedAsLayers(t *testing.T) {
 }
 
 // T-D-solo-fs-12
-func TestSoloFS_12_InvalidRegistryConfigNonZero(t *testing.T) {
+func TestFilesystemSync_InvalidRegistryConfigNonZero(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config": "multi_layer: [not a bool",
@@ -299,7 +299,7 @@ func TestSoloFS_12_InvalidRegistryConfigNonZero(t *testing.T) {
 }
 
 // T-D-solo-fs-13
-func TestSoloFS_13_NonExistentRegistryNonZero(t *testing.T) {
+func TestFilesystemSync_NonExistentRegistryNonZero(t *testing.T) {
 	t.Parallel()
 	target := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", "/tmp/definitely-does-not-exist-podium-test-solo", "--target", target)
@@ -313,7 +313,7 @@ func TestSoloFS_13_NonExistentRegistryNonZero(t *testing.T) {
 }
 
 // T-D-solo-fs-14
-func TestSoloFS_14_SyncSkillViaClaudeCode(t *testing.T) {
+func TestFilesystemSync_SyncSkillViaClaudeCode(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config": solofsMultiLayerConfig,
@@ -329,7 +329,7 @@ func TestSoloFS_14_SyncSkillViaClaudeCode(t *testing.T) {
 }
 
 // T-D-solo-fs-15
-func TestSoloFS_15_SyncRuleViaClaudeCode(t *testing.T) {
+func TestFilesystemSync_SyncRuleViaClaudeCode(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"shared/ts-style/ARTIFACT.md": solofsRuleArtifact("always"),
@@ -343,7 +343,7 @@ func TestSoloFS_15_SyncRuleViaClaudeCode(t *testing.T) {
 }
 
 // T-D-solo-fs-16
-func TestSoloFS_16_SyncAgentViaClaudeCode(t *testing.T) {
+func TestFilesystemSync_SyncAgentViaClaudeCode(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"shared/pay-invoice/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Pay invoice agent.\n---\n\nAgent body.\n",
@@ -357,7 +357,7 @@ func TestSoloFS_16_SyncAgentViaClaudeCode(t *testing.T) {
 }
 
 // T-D-solo-fs-17
-func TestSoloFS_17_SyncContextViaClaudeCode(t *testing.T) {
+func TestFilesystemSync_SyncContextViaClaudeCode(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"shared/company-glossary/ARTIFACT.md": contextArtifact("company glossary"),
@@ -372,7 +372,7 @@ func TestSoloFS_17_SyncContextViaClaudeCode(t *testing.T) {
 }
 
 // T-D-solo-fs-18
-func TestSoloFS_18_SyncProducesLockFile(t *testing.T) {
+func TestFilesystemSync_SyncProducesLockFile(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"shared/note/ARTIFACT.md": contextArtifact("note"),
@@ -398,7 +398,7 @@ func TestSoloFS_18_SyncProducesLockFile(t *testing.T) {
 }
 
 // T-D-solo-fs-19
-func TestSoloFS_19_SyncIdempotent(t *testing.T) {
+func TestFilesystemSync_SyncIdempotent(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"shared/glossary/ARTIFACT.md": contextArtifact("glossary"),
@@ -427,7 +427,7 @@ func TestSoloFS_19_SyncIdempotent(t *testing.T) {
 }
 
 // T-D-solo-fs-20
-func TestSoloFS_20_StaleFilesRemovedOnDelete(t *testing.T) {
+func TestFilesystemSync_StaleFilesRemovedOnDelete(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"shared/artifact-a/ARTIFACT.md": contextArtifact("artifact-a"),
@@ -457,7 +457,7 @@ func TestSoloFS_20_StaleFilesRemovedOnDelete(t *testing.T) {
 }
 
 // T-D-solo-fs-21
-func TestSoloFS_21_SyncDryRunWritesNothing(t *testing.T) {
+func TestFilesystemSync_SyncDryRunWritesNothing(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"shared/note/ARTIFACT.md": contextArtifact("note"),
@@ -481,7 +481,7 @@ func TestSoloFS_21_SyncDryRunWritesNothing(t *testing.T) {
 }
 
 // T-D-solo-fs-22
-func TestSoloFS_22_SyncReadsRegistryFromSyncYAML(t *testing.T) {
+func TestFilesystemSync_SyncReadsRegistryFromSyncYAML(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"shared/note/ARTIFACT.md": contextArtifact("note"),
@@ -497,7 +497,7 @@ func TestSoloFS_22_SyncReadsRegistryFromSyncYAML(t *testing.T) {
 }
 
 // T-D-solo-fs-23
-func TestSoloFS_23_SyncNoRegistryNoConfigFails(t *testing.T) {
+func TestFilesystemSync_SyncNoRegistryNoConfigFails(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
 	target := t.TempDir()
@@ -511,7 +511,7 @@ func TestSoloFS_23_SyncNoRegistryNoConfigFails(t *testing.T) {
 }
 
 // T-D-solo-fs-24
-func TestSoloFS_24_SyncUnknownHarnessFails(t *testing.T) {
+func TestFilesystemSync_SyncUnknownHarnessFails(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"shared/note/ARTIFACT.md": contextArtifact("note"),
@@ -527,7 +527,7 @@ func TestSoloFS_24_SyncUnknownHarnessFails(t *testing.T) {
 }
 
 // T-D-solo-fs-25
-func TestSoloFS_25_LintCleanRegistryExits0(t *testing.T) {
+func TestFilesystemSync_LintCleanRegistryExits0(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md": greetSkillArtifact,
@@ -543,7 +543,7 @@ func TestSoloFS_25_LintCleanRegistryExits0(t *testing.T) {
 }
 
 // T-D-solo-fs-26
-func TestSoloFS_26_LintMissingRegistryExits1(t *testing.T) {
+func TestFilesystemSync_LintMissingRegistryExits1(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "lint", "--registry", "/tmp/no-such-podium-registry-solo")
 	if res.Exit != 1 {
@@ -552,7 +552,7 @@ func TestSoloFS_26_LintMissingRegistryExits1(t *testing.T) {
 }
 
 // T-D-solo-fs-27
-func TestSoloFS_27_LintNoRegistryFlagExits2(t *testing.T) {
+func TestFilesystemSync_LintNoRegistryFlagExits2(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "lint")
 	if res.Exit != 2 {
@@ -564,7 +564,7 @@ func TestSoloFS_27_LintNoRegistryFlagExits2(t *testing.T) {
 }
 
 // T-D-solo-fs-28
-func TestSoloFS_28_WatchRematerializesOnChange(t *testing.T) {
+func TestFilesystemSync_WatchRematerializesOnChange(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"shared/note/ARTIFACT.md": contextArtifact("note"),
@@ -583,7 +583,7 @@ func TestSoloFS_28_WatchRematerializesOnChange(t *testing.T) {
 }
 
 // T-D-solo-fs-29
-func TestSoloFS_29_WatchExits0OnSIGINT(t *testing.T) {
+func TestFilesystemSync_WatchExits0OnSIGINT(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"shared/note/ARTIFACT.md": contextArtifact("note"),
@@ -599,7 +599,7 @@ func TestSoloFS_29_WatchExits0OnSIGINT(t *testing.T) {
 }
 
 // T-D-solo-fs-30
-func TestSoloFS_30_OverlayOverridesRegistry(t *testing.T) {
+func TestFilesystemSync_OverlayOverridesRegistry(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"shared/glossary/ARTIFACT.md": contextArtifact("from-registry"),
@@ -619,7 +619,7 @@ func TestSoloFS_30_OverlayOverridesRegistry(t *testing.T) {
 }
 
 // T-D-solo-fs-31
-func TestSoloFS_31_OverrideAddRecordsInLock(t *testing.T) {
+func TestFilesystemSync_OverrideAddRecordsInLock(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"shared/base/ARTIFACT.md":  contextArtifact("base"),
@@ -644,7 +644,7 @@ func TestSoloFS_31_OverrideAddRecordsInLock(t *testing.T) {
 }
 
 // T-D-solo-fs-32
-func TestSoloFS_32_OverrideRemoveRecordsInLock(t *testing.T) {
+func TestFilesystemSync_OverrideRemoveRecordsInLock(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"shared/artifact-a/ARTIFACT.md": contextArtifact("artifact-a"),
@@ -668,7 +668,7 @@ func TestSoloFS_32_OverrideRemoveRecordsInLock(t *testing.T) {
 }
 
 // T-D-solo-fs-33
-func TestSoloFS_33_OverrideResetClearsToggles(t *testing.T) {
+func TestFilesystemSync_OverrideResetClearsToggles(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"shared/artifact-a/ARTIFACT.md": contextArtifact("artifact-a"),
@@ -692,7 +692,7 @@ func TestSoloFS_33_OverrideResetClearsToggles(t *testing.T) {
 }
 
 // T-D-solo-fs-34
-func TestSoloFS_34_SaveAsCreatesProfile(t *testing.T) {
+func TestFilesystemSync_SaveAsCreatesProfile(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"shared/note/ARTIFACT.md": contextArtifact("note"),
@@ -711,7 +711,7 @@ func TestSoloFS_34_SaveAsCreatesProfile(t *testing.T) {
 }
 
 // T-D-solo-fs-35
-func TestSoloFS_35_SaveAsNoProfileExits2(t *testing.T) {
+func TestFilesystemSync_SaveAsNoProfileExits2(t *testing.T) {
 	t.Parallel()
 	target := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "save-as", "--target", target)
@@ -724,7 +724,7 @@ func TestSoloFS_35_SaveAsNoProfileExits2(t *testing.T) {
 }
 
 // T-D-solo-fs-36
-func TestSoloFS_36_MultipleWorkspacesIndependentLocks(t *testing.T) {
+func TestFilesystemSync_MultipleWorkspacesIndependentLocks(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"shared/note/ARTIFACT.md": contextArtifact("note"),
@@ -758,7 +758,7 @@ func TestSoloFS_36_MultipleWorkspacesIndependentLocks(t *testing.T) {
 
 // T-D-solo-fs-37
 // podium serve --standalone --layer-path accepts the same filesystem registry.
-func TestSoloFS_37_ServeStandaloneLayerPath(t *testing.T) {
+func TestFilesystemSync_ServeStandaloneLayerPath(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":                         solofsMultiLayerConfig,
@@ -786,7 +786,7 @@ func TestSoloFS_37_ServeStandaloneLayerPath(t *testing.T) {
 // T-D-solo-fs-38
 // --layer-path flag maps to PODIUM_LAYER_PATH; confirmed via e2e: start server with
 // --layer-path and verify /v1/layers reflects it (same as -37 effectively).
-func TestSoloFS_38_LayerPathFlagEnvMapping(t *testing.T) {
+func TestFilesystemSync_LayerPathFlagEnvMapping(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":         solofsMultiLayerConfig,
@@ -813,7 +813,7 @@ func TestSoloFS_38_LayerPathFlagEnvMapping(t *testing.T) {
 }
 
 // T-D-solo-fs-39
-func TestSoloFS_39_SearchFailsAgainstFilesystemRegistry(t *testing.T) {
+func TestFilesystemSync_SearchFailsAgainstFilesystemRegistry(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"shared/note/ARTIFACT.md": contextArtifact("note"),
@@ -825,7 +825,7 @@ func TestSoloFS_39_SearchFailsAgainstFilesystemRegistry(t *testing.T) {
 }
 
 // T-D-solo-fs-40
-func TestSoloFS_40_LoginRequiresIssuer(t *testing.T) {
+func TestFilesystemSync_LoginRequiresIssuer(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "login", "--registry", "/tmp/some/filesystem/path")
 	if res.Exit != 2 {
@@ -837,7 +837,7 @@ func TestSoloFS_40_LoginRequiresIssuer(t *testing.T) {
 }
 
 // T-D-solo-fs-41
-func TestSoloFS_41_LayerOrderGhostLayerIgnored(t *testing.T) {
+func TestFilesystemSync_LayerOrderGhostLayerIgnored(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":            solofsRegistryConfig("ghost-layer", "real-layer"),
@@ -854,7 +854,7 @@ func TestSoloFS_41_LayerOrderGhostLayerIgnored(t *testing.T) {
 // T-D-solo-fs-42
 // layer_order extra layers not in explicit list are appended alphabetically.
 // Verified via filesystem.Open directly.
-func TestSoloFS_42_LayerOrderExtraLayersAppendedAlphabetically(t *testing.T) {
+func TestFilesystemSync_LayerOrderExtraLayersAppendedAlphabetically(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":             solofsRegistryConfig("beta-layer"),
@@ -883,7 +883,7 @@ func TestSoloFS_42_LayerOrderExtraLayersAppendedAlphabetically(t *testing.T) {
 // T-D-solo-fs-43
 // Same artifact ID in two layers raises ingest.collision via lint
 // (lint uses CollisionPolicyDefault; sync uses CollisionPolicyHighestWins).
-func TestSoloFS_43_CollisionRaisedByLint(t *testing.T) {
+func TestFilesystemSync_CollisionRaisedByLint(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":                solofsMultiLayerConfig,
@@ -902,7 +902,7 @@ func TestSoloFS_43_CollisionRaisedByLint(t *testing.T) {
 
 // T-D-solo-fs-44
 // sync with CollisionPolicyHighestWins: later layer in layer_order wins.
-func TestSoloFS_44_CollisionHighestWinsLaterLayerWins(t *testing.T) {
+func TestFilesystemSync_CollisionHighestWinsLaterLayerWins(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":                       solofsRegistryConfig("base-layer", "override-layer"),
@@ -922,7 +922,7 @@ func TestSoloFS_44_CollisionHighestWinsLaterLayerWins(t *testing.T) {
 
 // T-D-solo-fs-45
 // DOMAIN.md files at layer root are not treated as artifacts.
-func TestSoloFS_45_DomainMDInLayerNotTreatedAsArtifact(t *testing.T) {
+func TestFilesystemSync_DomainMDInLayerNotTreatedAsArtifact(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":              solofsMultiLayerConfig,
@@ -943,7 +943,7 @@ func TestSoloFS_45_DomainMDInLayerNotTreatedAsArtifact(t *testing.T) {
 
 // T-D-solo-fs-46
 // DOMAIN.md at multi_layer root top level triggers ErrLayerPathAmbiguous.
-func TestSoloFS_46_TopLevelDomainMDAmbiguous(t *testing.T) {
+func TestFilesystemSync_TopLevelDomainMDAmbiguous(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config": solofsMultiLayerConfig,
@@ -960,7 +960,7 @@ func TestSoloFS_46_TopLevelDomainMDAmbiguous(t *testing.T) {
 }
 
 // T-D-solo-fs-47
-func TestSoloFS_47_SyncDryRunJSONStructured(t *testing.T) {
+func TestFilesystemSync_SyncDryRunJSONStructured(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"shared/note/ARTIFACT.md": contextArtifact("note"),
@@ -981,7 +981,7 @@ func TestSoloFS_47_SyncDryRunJSONStructured(t *testing.T) {
 
 // T-D-solo-fs-48
 // Visibility declarations are recorded but not enforced in filesystem mode.
-func TestSoloFS_48_VisibilityNotEnforced(t *testing.T) {
+func TestFilesystemSync_VisibilityNotEnforced(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"shared/private-note/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: private note\nsensitivity: high\n---\n\nPrivate body.\n",
@@ -996,7 +996,7 @@ func TestSoloFS_48_VisibilityNotEnforced(t *testing.T) {
 
 // T-D-solo-fs-49
 // sync.yaml relative registry path resolves against the workspace directory.
-func TestSoloFS_49_RelativeRegistryPathResolved(t *testing.T) {
+func TestFilesystemSync_RelativeRegistryPathResolved(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
 	// Create the registry inside the workspace directory.
@@ -1019,7 +1019,7 @@ func TestSoloFS_49_RelativeRegistryPathResolved(t *testing.T) {
 
 // T-D-solo-fs-50
 // Git history serves as the audit trail; no Podium-side audit stream in filesystem mode.
-func TestSoloFS_50_NoAuditLogInFilesystemMode(t *testing.T) {
+func TestFilesystemSync_NoAuditLogInFilesystemMode(t *testing.T) {
 	t.Parallel()
 	if _, ok := runExternal(t, t.TempDir(), 10*time.Second, "git", "version"); !ok {
 		t.Skip("git not installed")
@@ -1068,7 +1068,7 @@ func TestSoloFS_50_NoAuditLogInFilesystemMode(t *testing.T) {
 // T-D-solo-fs-51
 // Freeze windows and signing enforcement are unavailable in filesystem mode:
 // podium sync succeeds without requiring a signature or checking a freeze window.
-func TestSoloFS_51_NoFreezeOrSigningEnforcement(t *testing.T) {
+func TestFilesystemSync_NoFreezeOrSigningEnforcement(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"shared/note/ARTIFACT.md": contextArtifact("note"),
@@ -1096,7 +1096,7 @@ func TestSoloFS_51_NoFreezeOrSigningEnforcement(t *testing.T) {
 
 // T-D-solo-fs-52
 // podium-mcp cannot be used against a filesystem registry path.
-func TestSoloFS_52_MCPFailsAgainstFilesystemRegistry(t *testing.T) {
+func TestFilesystemSync_MCPFailsAgainstFilesystemRegistry(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"shared/note/ARTIFACT.md": contextArtifact("note"),
@@ -1139,7 +1139,7 @@ func TestSoloFS_52_MCPFailsAgainstFilesystemRegistry(t *testing.T) {
 // byte for byte.
 //
 // spec: §2.2, §7.5
-func TestSoloFS_53_BitIdenticalFilesystemVsServer(t *testing.T) {
+func TestFilesystemSync_BitIdenticalFilesystemVsServer(t *testing.T) {
 	t.Parallel()
 	registry := writeRegistry(t, map[string]string{
 		".registry-config":          "multi_layer: true\n",

@@ -55,7 +55,7 @@ const cmwFullExtraFM = "runtime_requirements:\n" +
 
 // T-D-first-agent-1 — the minimal agent materializes to
 // .claude/agents/<name>.md with the ARTIFACT.md bytes verbatim.
-func TestFirstAgent_MinimalMaterializes(t *testing.T) {
+func TestAgentTutorial_MinimalMaterializes(t *testing.T) {
 	t.Parallel()
 	art := cmwAgent("1.0.0", "", cmwMinimalBody)
 	reg := writeRegistry(t, map[string]string{cmwID + "/ARTIFACT.md": art})
@@ -80,7 +80,7 @@ func TestFirstAgent_MinimalMaterializes(t *testing.T) {
 
 // T-D-first-agent-2 — the minimal agent lints with no issues (no SKILL.md
 // is required for type: agent).
-func TestFirstAgent_MinimalLintsClean(t *testing.T) {
+func TestAgentTutorial_MinimalLintsClean(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{cmwID + "/ARTIFACT.md": cmwAgent("1.0.0", "", cmwMinimalBody)})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
@@ -90,7 +90,7 @@ func TestFirstAgent_MinimalLintsClean(t *testing.T) {
 }
 
 // T-D-first-agent-3 — an agent missing version fails lint.
-func TestFirstAgent_MissingVersionFails(t *testing.T) {
+func TestAgentTutorial_MissingVersionFails(t *testing.T) {
 	t.Parallel()
 	art := "---\ntype: agent\nname: commit-message-writer\ndescription: x\n---\n\nbody\n"
 	reg := writeRegistry(t, map[string]string{cmwID + "/ARTIFACT.md": art})
@@ -104,7 +104,7 @@ func TestFirstAgent_MissingVersionFails(t *testing.T) {
 }
 
 // T-D-first-agent-4 — an agent with a non-semver version fails lint.
-func TestFirstAgent_NonSemverFails(t *testing.T) {
+func TestAgentTutorial_NonSemverFails(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{cmwID + "/ARTIFACT.md": cmwAgent("not-a-version", "", cmwMinimalBody)})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
@@ -117,7 +117,7 @@ func TestFirstAgent_NonSemverFails(t *testing.T) {
 }
 
 // T-D-first-agent-5 — sync against a non-existent registry path exits non-zero.
-func TestFirstAgent_SyncMissingRegistry(t *testing.T) {
+func TestAgentTutorial_SyncMissingRegistry(t *testing.T) {
 	t.Parallel()
 	missing := filepath.Join(t.TempDir(), "nope")
 	res := runPodium(t, "", nil, "sync", "--registry", missing, "--target", t.TempDir(), "--harness", "claude-code")
@@ -131,7 +131,7 @@ func TestFirstAgent_SyncMissingRegistry(t *testing.T) {
 
 // T-D-first-agent-6 — an agent's bundled resources land under
 // .claude/podium/<artifact-id>/ for claude-code. spec: doc "Part 3".
-func TestFirstAgent_BundledResourcePath(t *testing.T) {
+func TestAgentTutorial_BundledResourcePath(t *testing.T) {
 	t.Parallel()
 	body := cmwMinimalBody + "\nRead the staged diff by running [scripts/staged-diff.sh](scripts/staged-diff.sh).\n"
 	reg := writeRegistry(t, map[string]string{
@@ -152,7 +152,7 @@ func TestFirstAgent_BundledResourcePath(t *testing.T) {
 
 // T-D-first-agent-7 — a resolved markdown-link prose reference lints clean.
 // spec: doc "Part 3" (broken paths fail lint).
-func TestFirstAgent_ProseRefResolves(t *testing.T) {
+func TestAgentTutorial_ProseRefResolves(t *testing.T) {
 	t.Parallel()
 	body := cmwMinimalBody + "\nRead the staged diff by running [scripts/staged-diff.sh](scripts/staged-diff.sh).\n"
 	reg := writeRegistry(t, map[string]string{
@@ -167,7 +167,7 @@ func TestFirstAgent_ProseRefResolves(t *testing.T) {
 
 // T-D-first-agent-8 — a markdown-link reference to a missing bundled file
 // fails lint. spec: doc "Part 3".
-func TestFirstAgent_ProseRefBrokenFails(t *testing.T) {
+func TestAgentTutorial_ProseRefBrokenFails(t *testing.T) {
 	t.Parallel()
 	body := cmwMinimalBody + "\nRead the staged diff by running [staged-diff](scripts/staged-diff.sh).\n"
 	reg := writeRegistry(t, map[string]string{cmwID + "/ARTIFACT.md": cmwAgent("1.1.0", "", body)})
@@ -182,7 +182,7 @@ func TestFirstAgent_ProseRefBrokenFails(t *testing.T) {
 
 // T-D-first-agent-9 — runtime_requirements (system_packages) round-trips
 // through ARTIFACT.md after a none sync. spec: doc "Part 2".
-func TestFirstAgent_RuntimeRequirementsRoundTrip(t *testing.T) {
+func TestAgentTutorial_RuntimeRequirementsRoundTrip(t *testing.T) {
 	t.Parallel()
 	extra := "runtime_requirements:\n  system_packages: [git]\n"
 	reg := writeRegistry(t, map[string]string{cmwID + "/ARTIFACT.md": cmwAgent("1.0.0", extra, cmwMinimalBody)})
@@ -202,7 +202,7 @@ func TestFirstAgent_RuntimeRequirementsRoundTrip(t *testing.T) {
 // T-D-first-agent-10 — CheckRuntimeRequirements reports ErrRuntimeUnavailable
 // when a required system package is absent. spec: doc "Part 2",
 // materialize.CheckRuntimeRequirements.
-func TestFirstAgent_RuntimeUnavailableWhenGitMissing(t *testing.T) {
+func TestAgentTutorial_RuntimeUnavailableWhenGitMissing(t *testing.T) {
 	t.Parallel()
 	err := materialize.CheckRuntimeRequirements(
 		map[string]any{"system_packages": []string{"git"}},
@@ -221,7 +221,7 @@ func TestFirstAgent_RuntimeUnavailableWhenGitMissing(t *testing.T) {
 
 // T-D-first-agent-11 — CheckRuntimeRequirements returns nil when the host
 // provides the required package.
-func TestFirstAgent_RuntimeAvailableWhenGitPresent(t *testing.T) {
+func TestAgentTutorial_RuntimeAvailableWhenGitPresent(t *testing.T) {
 	t.Parallel()
 	err := materialize.CheckRuntimeRequirements(
 		map[string]any{"system_packages": []string{"git"}},
@@ -234,7 +234,7 @@ func TestFirstAgent_RuntimeAvailableWhenGitPresent(t *testing.T) {
 
 // T-D-first-agent-12 — scaffold --delegates-to writes a delegates_to block.
 // spec: doc "Part 4".
-func TestFirstAgent_ScaffoldDelegatesTo(t *testing.T) {
+func TestAgentTutorial_ScaffoldDelegatesTo(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), cmwID)
 	res := runPodium(t, "", nil, "artifact", "scaffold",
@@ -253,7 +253,7 @@ func TestFirstAgent_ScaffoldDelegatesTo(t *testing.T) {
 
 // T-D-first-agent-13 — the delegates_to edge is indexed and surfaced by
 // /v1/dependents on the standalone server. spec: doc "Part 4".
-func TestFirstAgent_DelegatesEdgeIndexed(t *testing.T) {
+func TestAgentTutorial_DelegatesEdgeIndexed(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/dev-loop/conventional-commits/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\n---\n\n<!-- body -->\n",
@@ -280,7 +280,7 @@ func TestFirstAgent_DelegatesEdgeIndexed(t *testing.T) {
 
 // T-D-first-agent-14 — podium impact lists the agent as a dependent of the
 // delegated artifact. spec: doc "Part 4".
-func TestFirstAgent_ImpactListsDependent(t *testing.T) {
+func TestAgentTutorial_ImpactListsDependent(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/dev-loop/conventional-commits/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\n---\n\n<!-- body -->\n",
@@ -299,7 +299,7 @@ func TestFirstAgent_ImpactListsDependent(t *testing.T) {
 
 // T-D-first-agent-15 — the full agent (script + delegates_to) lints clean.
 // spec: doc "The full agent".
-func TestFirstAgent_FullLintsClean(t *testing.T) {
+func TestAgentTutorial_FullLintsClean(t *testing.T) {
 	t.Parallel()
 	body := cmwMinimalBody + "\nRead the staged diff by running [scripts/staged-diff.sh](scripts/staged-diff.sh).\n"
 	reg := writeRegistry(t, map[string]string{
@@ -315,7 +315,7 @@ func TestFirstAgent_FullLintsClean(t *testing.T) {
 // T-D-first-agent-16 — the full agent materializes both the manifest under
 // .claude/agents/ and the script under .claude/podium/<id>/. spec: doc
 // "The full agent".
-func TestFirstAgent_FullMaterializes(t *testing.T) {
+func TestAgentTutorial_FullMaterializes(t *testing.T) {
 	t.Parallel()
 	body := cmwMinimalBody + "\nRead the staged diff by running [scripts/staged-diff.sh](scripts/staged-diff.sh).\n"
 	reg := writeRegistry(t, map[string]string{
@@ -336,7 +336,7 @@ func TestFirstAgent_FullMaterializes(t *testing.T) {
 }
 
 // T-D-first-agent-17 — sync --dry-run reports the agent but writes nothing.
-func TestFirstAgent_DryRun(t *testing.T) {
+func TestAgentTutorial_DryRun(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{cmwID + "/ARTIFACT.md": cmwAgent("1.0.0", "", cmwMinimalBody)})
 	tgt := t.TempDir()
@@ -351,7 +351,7 @@ func TestFirstAgent_DryRun(t *testing.T) {
 
 // T-D-first-agent-18 — sync --json emits an envelope naming the adapter and
 // the agent.
-func TestFirstAgent_SyncJSON(t *testing.T) {
+func TestAgentTutorial_SyncJSON(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{cmwID + "/ARTIFACT.md": cmwAgent("1.0.0", "", cmwMinimalBody)})
 	tgt := t.TempDir()
@@ -383,7 +383,7 @@ func TestFirstAgent_SyncJSON(t *testing.T) {
 }
 
 // T-D-first-agent-19 — an agent missing the type field fails lint.
-func TestFirstAgent_MissingType(t *testing.T) {
+func TestAgentTutorial_MissingType(t *testing.T) {
 	t.Parallel()
 	art := "---\nname: commit-message-writer\nversion: 1.0.0\n---\n\nbody\n"
 	reg := writeRegistry(t, map[string]string{cmwID + "/ARTIFACT.md": art})
@@ -398,7 +398,7 @@ func TestFirstAgent_MissingType(t *testing.T) {
 
 // T-D-first-agent-20 — an agent name containing an underscore fails lint
 // with lint.invalid_name. spec: ruleNameSyntax.
-func TestFirstAgent_InvalidNameUnderscore(t *testing.T) {
+func TestAgentTutorial_InvalidNameUnderscore(t *testing.T) {
 	t.Parallel()
 	art := "---\ntype: agent\nname: commit_message_writer\nversion: 1.0.0\ndescription: x\n---\n\nbody\n"
 	reg := writeRegistry(t, map[string]string{"personal/dev-loop/commit_message_writer/ARTIFACT.md": art})
@@ -412,7 +412,7 @@ func TestFirstAgent_InvalidNameUnderscore(t *testing.T) {
 }
 
 // T-D-first-agent-21 — scaffold produces a lint-clean agent ARTIFACT.md.
-func TestFirstAgent_ScaffoldLintsClean(t *testing.T) {
+func TestAgentTutorial_ScaffoldLintsClean(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	out := filepath.Join(root, cmwID)
@@ -436,7 +436,7 @@ func TestFirstAgent_ScaffoldLintsClean(t *testing.T) {
 }
 
 // T-D-first-agent-22 — sync with an unknown harness exits non-zero.
-func TestFirstAgent_UnknownHarness(t *testing.T) {
+func TestAgentTutorial_UnknownHarness(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{cmwID + "/ARTIFACT.md": cmwAgent("1.0.0", "", cmwMinimalBody)})
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", t.TempDir(), "--harness", "unknown-harness-xyz")
@@ -451,7 +451,7 @@ func TestFirstAgent_UnknownHarness(t *testing.T) {
 // T-D-first-agent-23 — a backtick (non-link) prose reference is NOT scanned
 // by lint.prose_reference, so a missing target passes. Documents the gap
 // between the doc's backtick prose and the markdown-link lint rule.
-func TestFirstAgent_BacktickRefNotScanned(t *testing.T) {
+func TestAgentTutorial_BacktickRefNotScanned(t *testing.T) {
 	t.Parallel()
 	body := cmwMinimalBody + "\nRead the staged diff by running `scripts/staged-diff.sh`.\n"
 	reg := writeRegistry(t, map[string]string{cmwID + "/ARTIFACT.md": cmwAgent("1.1.0", "", body)})
@@ -466,7 +466,7 @@ func TestFirstAgent_BacktickRefNotScanned(t *testing.T) {
 
 // T-D-first-agent-24 — sync removes a stale .claude/agents/<name>.md when
 // the artifact is deleted from the registry. spec: §7.5 stale cleanup.
-func TestFirstAgent_StaleCleanup(t *testing.T) {
+func TestAgentTutorial_StaleCleanup(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{cmwID + "/ARTIFACT.md": cmwAgent("1.0.0", "", cmwMinimalBody)})
 	tgt := t.TempDir()
@@ -490,7 +490,7 @@ func TestFirstAgent_StaleCleanup(t *testing.T) {
 // filesystem sync; no filesystem lint rule validates the edge. Documents
 // the doc-accuracy gap (the existence/type/version checks the doc
 // describes apply on server ingest, not filesystem lint/sync).
-func TestFirstAgent_UnresolvedDelegateDoesNotBlockSync(t *testing.T) {
+func TestAgentTutorial_UnresolvedDelegateDoesNotBlockSync(t *testing.T) {
 	t.Parallel()
 	extra := "delegates_to:\n  - personal/dev-loop/conventional-commits@1.x\n"
 	reg := writeRegistry(t, map[string]string{cmwID + "/ARTIFACT.md": cmwAgent("1.0.0", extra, cmwMinimalBody)})
@@ -507,7 +507,7 @@ func TestFirstAgent_UnresolvedDelegateDoesNotBlockSync(t *testing.T) {
 }
 
 // T-D-first-agent-26 — the none harness writes the canonical agent layout.
-func TestFirstAgent_NoneCanonical(t *testing.T) {
+func TestAgentTutorial_NoneCanonical(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{cmwID + "/ARTIFACT.md": cmwAgent("1.0.0", "", cmwMinimalBody)})
 	tgt := t.TempDir()

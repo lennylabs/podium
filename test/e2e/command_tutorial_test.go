@@ -37,7 +37,7 @@ func mcpServerEnv(t *testing.T, baseURL string) []string {
 
 // T-D-first-command-1 — the command directory and ARTIFACT.md exist at the
 // documented path with a $ARGUMENTS body and no SKILL.md.
-func TestFirstCommand_ArtifactLayout(t *testing.T) {
+func TestCommandTutorial_ArtifactLayout(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})
 	art := readFile(t, filepath.Join(reg, standupID, "ARTIFACT.md"))
@@ -53,7 +53,7 @@ func TestFirstCommand_ArtifactLayout(t *testing.T) {
 }
 
 // T-D-first-command-2 — scaffold produces a lint-clean command (no SKILL.md).
-func TestFirstCommand_ScaffoldLintsClean(t *testing.T) {
+func TestCommandTutorial_ScaffoldLintsClean(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	out := filepath.Join(root, standupID)
@@ -82,7 +82,7 @@ func TestFirstCommand_ScaffoldLintsClean(t *testing.T) {
 }
 
 // T-D-first-command-3 — lint passes on the tutorial standup manifest.
-func TestFirstCommand_LintClean(t *testing.T) {
+func TestCommandTutorial_LintClean(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
@@ -93,7 +93,7 @@ func TestFirstCommand_LintClean(t *testing.T) {
 
 // T-D-first-command-4 — the doc's positional `podium lint <path>` form is
 // not runnable; --registry is required, exit 2. (doc-accuracy)
-func TestFirstCommand_LintPositionalRejected(t *testing.T) {
+func TestCommandTutorial_LintPositionalRejected(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})
 	res := runPodium(t, "", nil, "lint", filepath.Join(reg, standupID))
@@ -106,7 +106,7 @@ func TestFirstCommand_LintPositionalRejected(t *testing.T) {
 }
 
 // T-D-first-command-5 — missing version fails lint.
-func TestFirstCommand_MissingVersion(t *testing.T) {
+func TestCommandTutorial_MissingVersion(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"standup/ARTIFACT.md": "---\ntype: command\ndescription: A standup command.\n---\n\n$ARGUMENTS\n"})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
@@ -119,7 +119,7 @@ func TestFirstCommand_MissingVersion(t *testing.T) {
 }
 
 // T-D-first-command-6 — missing type fails lint.
-func TestFirstCommand_MissingType(t *testing.T) {
+func TestCommandTutorial_MissingType(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"standup/ARTIFACT.md": "---\nname: standup\nversion: 1.0.0\n---\n\n$ARGUMENTS\n"})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
@@ -132,7 +132,7 @@ func TestFirstCommand_MissingType(t *testing.T) {
 }
 
 // T-D-first-command-7 — a non-semver version fails lint.
-func TestFirstCommand_NonSemver(t *testing.T) {
+func TestCommandTutorial_NonSemver(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"standup/ARTIFACT.md": "---\ntype: command\nversion: v1\ndescription: x\n---\n\n$ARGUMENTS\n"})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
@@ -145,7 +145,7 @@ func TestFirstCommand_NonSemver(t *testing.T) {
 }
 
 // T-D-first-command-8 — lint with no --registry exits 2.
-func TestFirstCommand_LintNoRegistry(t *testing.T) {
+func TestCommandTutorial_LintNoRegistry(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "lint")
 	if res.Exit != 2 || !strings.Contains(res.Stderr, "error: --registry is required") {
@@ -154,7 +154,7 @@ func TestFirstCommand_LintNoRegistry(t *testing.T) {
 }
 
 // T-D-first-command-9 — lint on a non-existent registry exits 1.
-func TestFirstCommand_LintBadPath(t *testing.T) {
+func TestCommandTutorial_LintBadPath(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "lint", "--registry", filepath.Join(t.TempDir(), "nope"))
 	if res.Exit != 1 {
@@ -166,7 +166,7 @@ func TestFirstCommand_LintBadPath(t *testing.T) {
 }
 
 // T-D-first-command-10 — the none harness materializes the canonical layout.
-func TestFirstCommand_NoneCanonical(t *testing.T) {
+func TestCommandTutorial_NoneCanonical(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})
 	tgt := t.TempDir()
@@ -185,7 +185,7 @@ func TestFirstCommand_NoneCanonical(t *testing.T) {
 
 // T-D-first-command-11 — claude-code places a command at .claude/commands/<n>.md
 // (§6.7 type-target table), not under the .claude/podium/ extension bucket.
-func TestFirstCommand_ClaudeCodePodiumNotCommands(t *testing.T) {
+func TestCommandTutorial_ClaudeCodePodiumNotCommands(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})
 	tgt := t.TempDir()
@@ -200,7 +200,7 @@ func TestFirstCommand_ClaudeCodePodiumNotCommands(t *testing.T) {
 }
 
 // T-D-first-command-12 — sync reads the registry from .podium/sync.yaml.
-func TestFirstCommand_SyncReadsConfig(t *testing.T) {
+func TestCommandTutorial_SyncReadsConfig(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
 	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})
@@ -214,7 +214,7 @@ func TestFirstCommand_SyncReadsConfig(t *testing.T) {
 }
 
 // T-D-first-command-13 — sync with no registry and no sync.yaml exits 2.
-func TestFirstCommand_SyncNoRegistry(t *testing.T) {
+func TestCommandTutorial_SyncNoRegistry(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, t.TempDir(), []string{"HOME=" + t.TempDir(), "PODIUM_REGISTRY="}, "sync", "--target", t.TempDir())
 	if res.Exit != 2 || !strings.Contains(res.Stderr, "config.no_registry") {
@@ -223,7 +223,7 @@ func TestFirstCommand_SyncNoRegistry(t *testing.T) {
 }
 
 // T-D-first-command-14 — sync against a missing registry directory exits 1.
-func TestFirstCommand_SyncMissingRegistry(t *testing.T) {
+func TestCommandTutorial_SyncMissingRegistry(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "sync", "--registry", filepath.Join(t.TempDir(), "nope"), "--target", t.TempDir(), "--harness", "none")
 	if res.Exit != 1 {
@@ -235,7 +235,7 @@ func TestFirstCommand_SyncMissingRegistry(t *testing.T) {
 }
 
 // T-D-first-command-15 — sync with an unknown harness fails and writes nothing.
-func TestFirstCommand_UnknownHarness(t *testing.T) {
+func TestCommandTutorial_UnknownHarness(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})
 	tgt := t.TempDir()
@@ -252,7 +252,7 @@ func TestFirstCommand_UnknownHarness(t *testing.T) {
 }
 
 // T-D-first-command-16 — sync --dry-run writes nothing.
-func TestFirstCommand_DryRun(t *testing.T) {
+func TestCommandTutorial_DryRun(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})
 	tgt := t.TempDir()
@@ -266,7 +266,7 @@ func TestFirstCommand_DryRun(t *testing.T) {
 }
 
 // T-D-first-command-17 — sync --json emits valid JSON with the command.
-func TestFirstCommand_SyncJSON(t *testing.T) {
+func TestCommandTutorial_SyncJSON(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})
 	tgt := t.TempDir()
@@ -296,7 +296,7 @@ func TestFirstCommand_SyncJSON(t *testing.T) {
 
 // T-D-first-command-18 — human sync output lists adapter, target, and the
 // artifact id.
-func TestFirstCommand_SyncHumanOutput(t *testing.T) {
+func TestCommandTutorial_SyncHumanOutput(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})
 	tgt := t.TempDir()
@@ -313,7 +313,7 @@ func TestFirstCommand_SyncHumanOutput(t *testing.T) {
 }
 
 // T-D-first-command-19 — $ARGUMENTS is preserved verbatim through sync.
-func TestFirstCommand_ArgumentsPreserved(t *testing.T) {
+func TestCommandTutorial_ArgumentsPreserved(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})
 	tgt := t.TempDir()
@@ -326,7 +326,7 @@ func TestFirstCommand_ArgumentsPreserved(t *testing.T) {
 
 // T-D-first-command-28 — init writes sync.yaml with registry + harness so a
 // later `podium sync` needs no flags.
-func TestFirstCommand_InitWritesSyncYAML(t *testing.T) {
+func TestCommandTutorial_InitWritesSyncYAML(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
 	reg := t.TempDir()
@@ -341,7 +341,7 @@ func TestFirstCommand_InitWritesSyncYAML(t *testing.T) {
 }
 
 // T-D-first-command-29 — init refuses to overwrite an existing sync.yaml.
-func TestFirstCommand_InitRefusesOverwrite(t *testing.T) {
+func TestCommandTutorial_InitRefusesOverwrite(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
 	home := t.TempDir()
@@ -357,7 +357,7 @@ func TestFirstCommand_InitRefusesOverwrite(t *testing.T) {
 
 // T-D-first-command-30 — a command declaring variables: with defaults lints
 // clean. spec: doc "What's next".
-func TestFirstCommand_VariablesAccepted(t *testing.T) {
+func TestCommandTutorial_VariablesAccepted(t *testing.T) {
 	t.Parallel()
 	art := "---\n" +
 		"type: command\n" +
@@ -379,7 +379,7 @@ func TestFirstCommand_VariablesAccepted(t *testing.T) {
 
 // T-D-first-command-31 — the full tutorial sequence on the none harness:
 // write, lint, sync, verify the file with the $ARGUMENTS body preserved.
-func TestFirstCommand_FullSequenceNone(t *testing.T) {
+func TestCommandTutorial_FullSequenceNone(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})
 	if l := runPodium(t, "", nil, "lint", "--registry", reg); l.Exit != 0 || !strings.Contains(l.Stdout, "lint: no issues.") {
@@ -398,7 +398,7 @@ func TestFirstCommand_FullSequenceNone(t *testing.T) {
 // T-D-first-command-32 — the full sequence on the claude-code harness: lint is
 // clean and the command lands at .claude/commands/standup.md, matching the
 // tutorial's verify step (§6.7 type-target table).
-func TestFirstCommand_FullSequenceClaudeCode(t *testing.T) {
+func TestCommandTutorial_FullSequenceClaudeCode(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})
 	if l := runPodium(t, "", nil, "lint", "--registry", reg); l.Exit != 0 {

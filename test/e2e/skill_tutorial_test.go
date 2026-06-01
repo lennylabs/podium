@@ -70,7 +70,7 @@ func greetSkillWithBody(body string) string {
 // T-D-first-skill-1 — podium init writes .podium/sync.yaml with the
 // registry path and harness; a second init without --force is refused.
 // spec: doc "## Starting point", quickstart step 2.
-func TestFirstSkill_InitWritesSyncYAML(t *testing.T) {
+func TestSkillTutorial_InitWritesSyncYAML(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
 	reg := t.TempDir()
@@ -106,7 +106,7 @@ func TestFirstSkill_InitWritesSyncYAML(t *testing.T) {
 
 // T-D-first-skill-2 — init refuses to overwrite an existing sync.yaml
 // without --force, leaving the first registry intact.
-func TestFirstSkill_InitRefusesOverwrite(t *testing.T) {
+func TestSkillTutorial_InitRefusesOverwrite(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
 	home := t.TempDir()
@@ -125,7 +125,7 @@ func TestFirstSkill_InitRefusesOverwrite(t *testing.T) {
 
 // T-D-first-skill-3 — the minimal two-file greet skill lints cleanly.
 // spec: doc "## Starting point".
-func TestFirstSkill_MinimalTwoFileLints(t *testing.T) {
+func TestSkillTutorial_MinimalTwoFileLints(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md": greetSkillArtifact,
@@ -144,7 +144,7 @@ func TestFirstSkill_MinimalTwoFileLints(t *testing.T) {
 
 // T-D-first-skill-4 — the fuller SKILL.md/ARTIFACT.md frontmatter is
 // accepted by lint. spec: doc "## Add fuller frontmatter".
-func TestFirstSkill_FullerFrontmatterLints(t *testing.T) {
+func TestSkillTutorial_FullerFrontmatterLints(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md": greetArtifactFuller,
@@ -163,7 +163,7 @@ func TestFirstSkill_FullerFrontmatterLints(t *testing.T) {
 
 // T-D-first-skill-4b — a Podium-only field in SKILL.md is an ingest error;
 // SKILL.md stays within the agentskills.io subset (spec §4.3.4, F-4.3.6).
-func TestFirstSkill_SkillMDPodiumFieldErrors(t *testing.T) {
+func TestSkillTutorial_SkillMDPodiumFieldErrors(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md": greetSkillArtifact,
@@ -180,7 +180,7 @@ func TestFirstSkill_SkillMDPodiumFieldErrors(t *testing.T) {
 
 // T-D-first-skill-4c — name/description/license in a skill's ARTIFACT.md that
 // disagree with SKILL.md are an ingest error (spec §4.3.4, F-4.3.6).
-func TestFirstSkill_ArtifactFieldMismatchErrors(t *testing.T) {
+func TestSkillTutorial_ArtifactFieldMismatchErrors(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\ndescription: A different description than SKILL.md.\n---\n\n<!-- Skill body lives in SKILL.md. -->\n",
@@ -197,7 +197,7 @@ func TestFirstSkill_ArtifactFieldMismatchErrors(t *testing.T) {
 
 // T-D-first-skill-5 — a non-comment ARTIFACT.md body for a skill warns
 // (lint.skill_artifact_body) but does not fail. spec: §4.3.4.
-func TestFirstSkill_ArtifactBodyMustBeComment(t *testing.T) {
+func TestSkillTutorial_ArtifactBodyMustBeComment(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\ntags: [demo]\nsensitivity: low\n---\n\nThis is plain prose, not the required HTML comment.\n",
@@ -214,7 +214,7 @@ func TestFirstSkill_ArtifactBodyMustBeComment(t *testing.T) {
 
 // T-D-first-skill-6 — SKILL.md name must match the parent directory.
 // spec: lint.skill_md_compliance.
-func TestFirstSkill_NameMustMatchDir(t *testing.T) {
+func TestSkillTutorial_NameMustMatchDir(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\n---\n\n<!-- body -->\n",
@@ -234,7 +234,7 @@ func TestFirstSkill_NameMustMatchDir(t *testing.T) {
 // error. The registry walk (filesystem.Walk) rejects it before the lint
 // rules run, so lint exits 1 with "<id>: type: skill missing SKILL.md" on
 // stderr rather than a lint.skill_md_compliance diagnostic on stdout.
-func TestFirstSkill_MissingSkillMD(t *testing.T) {
+func TestSkillTutorial_MissingSkillMD(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\n---\n\n<!-- body -->\n",
@@ -251,7 +251,7 @@ func TestFirstSkill_MissingSkillMD(t *testing.T) {
 
 // T-D-first-skill-8 — a markdown-link prose reference to an existing
 // bundled script resolves; lint passes. spec: doc "## Add a bundled script".
-func TestFirstSkill_ProseRefResolves(t *testing.T) {
+func TestSkillTutorial_ProseRefResolves(t *testing.T) {
 	t.Parallel()
 	body := "Tell them today's date by reading [scripts/today.py](scripts/today.py).\n"
 	reg := writeRegistry(t, map[string]string{
@@ -270,7 +270,7 @@ func TestFirstSkill_ProseRefResolves(t *testing.T) {
 
 // T-D-first-skill-9 — a markdown-link prose reference to a missing
 // bundled file fails lint. spec: doc "## Add a bundled script".
-func TestFirstSkill_ProseRefBrokenFails(t *testing.T) {
+func TestSkillTutorial_ProseRefBrokenFails(t *testing.T) {
 	t.Parallel()
 	body := "Run [scripts/today.py](scripts/today.py) to print the date.\n"
 	reg := writeRegistry(t, map[string]string{
@@ -288,7 +288,7 @@ func TestFirstSkill_ProseRefBrokenFails(t *testing.T) {
 
 // T-D-first-skill-10 — a prose reference escaping the artifact package
 // fails lint. spec: ruleProseReferenceResolution.checkBundled.
-func TestFirstSkill_ProseRefEscapesPackage(t *testing.T) {
+func TestSkillTutorial_ProseRefEscapesPackage(t *testing.T) {
 	t.Parallel()
 	body := "See [secret](../../../etc/passwd) for details.\n"
 	reg := writeRegistry(t, map[string]string{
@@ -306,7 +306,7 @@ func TestFirstSkill_ProseRefEscapesPackage(t *testing.T) {
 
 // T-D-first-skill-11 — runtime_requirements is parsed and lints clean.
 // spec: doc "## Declare runtime requirements".
-func TestFirstSkill_RuntimeRequirementsLints(t *testing.T) {
+func TestSkillTutorial_RuntimeRequirementsLints(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md":      greetArtifactRuntime,
@@ -322,7 +322,7 @@ func TestFirstSkill_RuntimeRequirementsLints(t *testing.T) {
 // T-D-first-skill-12 — the complete greet skill materializes under the
 // claude-code skill layout (SKILL.md + bundled script, no ARTIFACT.md).
 // spec: doc "## Declare runtime requirements", quickstart step 4.
-func TestFirstSkill_ClaudeCodeMaterializes(t *testing.T) {
+func TestSkillTutorial_ClaudeCodeMaterializes(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md":      greetArtifactRuntime,
@@ -352,7 +352,7 @@ func TestFirstSkill_ClaudeCodeMaterializes(t *testing.T) {
 // adapter derives it from runtime_requirements/sandbox_profile and injects it
 // into the materialized SKILL.md (spec §4.3.4, F-4.3.9). The none adapter,
 // which materializes the canonical layout verbatim, does not.
-func TestFirstSkill_ClaudeCodeDerivesCompatibility(t *testing.T) {
+func TestSkillTutorial_ClaudeCodeDerivesCompatibility(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md": greetArtifactRuntime,
@@ -378,7 +378,7 @@ func TestFirstSkill_ClaudeCodeDerivesCompatibility(t *testing.T) {
 
 // T-D-first-skill-13 — the none harness materializes the canonical layout
 // including the bundled script. spec: doc "## Declare runtime requirements".
-func TestFirstSkill_NoneCanonical(t *testing.T) {
+func TestSkillTutorial_NoneCanonical(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md":      greetArtifactRuntime,
@@ -402,7 +402,7 @@ func TestFirstSkill_NoneCanonical(t *testing.T) {
 
 // T-D-first-skill-14 — sync stdout reports the materialized artifact ID
 // and the destination path under .claude/skills/. spec: quickstart step 4.
-func TestFirstSkill_SyncReportsPath(t *testing.T) {
+func TestSkillTutorial_SyncReportsPath(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md": greetSkillArtifact,
@@ -423,7 +423,7 @@ func TestFirstSkill_SyncReportsPath(t *testing.T) {
 
 // T-D-first-skill-15 — sync reads defaults.registry from sync.yaml when
 // --registry is absent. spec: quickstart step 4.
-func TestFirstSkill_SyncReadsConfigRegistry(t *testing.T) {
+func TestSkillTutorial_SyncReadsConfigRegistry(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
 	reg := writeRegistry(t, map[string]string{
@@ -441,7 +441,7 @@ func TestFirstSkill_SyncReadsConfigRegistry(t *testing.T) {
 
 // T-D-first-skill-16 — sync with no registry configured exits 2.
 // spec: quickstart troubleshooting (config.no_registry).
-func TestFirstSkill_SyncNoRegistryExits2(t *testing.T) {
+func TestSkillTutorial_SyncNoRegistryExits2(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, t.TempDir(), []string{"HOME=" + t.TempDir(), "PODIUM_REGISTRY="}, "sync", "--target", t.TempDir())
 	if res.Exit != 2 {
@@ -454,7 +454,7 @@ func TestFirstSkill_SyncNoRegistryExits2(t *testing.T) {
 
 // T-D-first-skill-17 — sync --watch performs the initial sync and exits 0
 // on SIGINT. spec: doc "## Iterate with watch mode".
-func TestFirstSkill_WatchExitsCleanOnSIGINT(t *testing.T) {
+func TestSkillTutorial_WatchExitsCleanOnSIGINT(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md": greetSkillArtifact,
@@ -472,7 +472,7 @@ func TestFirstSkill_WatchExitsCleanOnSIGINT(t *testing.T) {
 
 // T-D-first-skill-18 — editing SKILL.md during watch re-materializes.
 // spec: doc "## Iterate with watch mode".
-func TestFirstSkill_WatchRematerializesOnEdit(t *testing.T) {
+func TestSkillTutorial_WatchRematerializesOnEdit(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md": greetSkillArtifact,
@@ -503,7 +503,7 @@ func TestFirstSkill_WatchRematerializesOnEdit(t *testing.T) {
 // T-D-first-skill-19 — `podium lint` with no flags exits 2. The doc's
 // positional `podium lint <path>` form is not accepted; --registry is
 // required. spec: doc "## Lint before you commit" (doc-accuracy).
-func TestFirstSkill_LintNoRegistryExits2(t *testing.T) {
+func TestSkillTutorial_LintNoRegistryExits2(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "lint")
 	if res.Exit != 2 {
@@ -516,7 +516,7 @@ func TestFirstSkill_LintNoRegistryExits2(t *testing.T) {
 
 // T-D-first-skill-20 — the end-state greet artifact (fuller frontmatter,
 // runtime_requirements, resolved prose reference) lints with no issues.
-func TestFirstSkill_EndStateLintsClean(t *testing.T) {
+func TestSkillTutorial_EndStateLintsClean(t *testing.T) {
 	t.Parallel()
 	body := "Tell them today's date by reading [scripts/today.py](scripts/today.py).\n"
 	reg := writeRegistry(t, map[string]string{
@@ -534,7 +534,7 @@ func TestFirstSkill_EndStateLintsClean(t *testing.T) {
 }
 
 // T-D-first-skill-21 — missing type field fails lint. spec: ruleRequiredFields.
-func TestFirstSkill_MissingType(t *testing.T) {
+func TestSkillTutorial_MissingType(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md": "---\nversion: 1.0.0\n---\n\n<!-- body -->\n",
@@ -550,7 +550,7 @@ func TestFirstSkill_MissingType(t *testing.T) {
 }
 
 // T-D-first-skill-22 — missing version field fails lint. spec: ruleRequiredFields.
-func TestFirstSkill_MissingVersion(t *testing.T) {
+func TestSkillTutorial_MissingVersion(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md": "---\ntype: skill\n---\n\n<!-- body -->\n",
@@ -566,7 +566,7 @@ func TestFirstSkill_MissingVersion(t *testing.T) {
 }
 
 // T-D-first-skill-23 — an invalid semver version fails lint. spec: ruleVersionSemver.
-func TestFirstSkill_InvalidVersion(t *testing.T) {
+func TestSkillTutorial_InvalidVersion(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md": "---\ntype: skill\nversion: not-semver\n---\n\n<!-- body -->\n",
@@ -582,7 +582,7 @@ func TestFirstSkill_InvalidVersion(t *testing.T) {
 }
 
 // T-D-first-skill-24 — lint on a non-existent registry path exits 1.
-func TestFirstSkill_LintBadRegistryPath(t *testing.T) {
+func TestSkillTutorial_LintBadRegistryPath(t *testing.T) {
 	t.Parallel()
 	missing := filepath.Join(t.TempDir(), "does-not-exist-xyz")
 	res := runPodium(t, "", nil, "lint", "--registry", missing)
@@ -597,7 +597,7 @@ func TestFirstSkill_LintBadRegistryPath(t *testing.T) {
 // T-D-first-skill-25 — the claude-code adapter writes a skill under
 // .claude/skills/, not .claude/agents/. spec: doc-accuracy gap vs the
 // quickstart output example.
-func TestFirstSkill_ClaudeCodeNotAgents(t *testing.T) {
+func TestSkillTutorial_ClaudeCodeNotAgents(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md": greetSkillArtifact,
@@ -612,7 +612,7 @@ func TestFirstSkill_ClaudeCodeNotAgents(t *testing.T) {
 }
 
 // T-D-first-skill-26 — sync is idempotent across two runs. spec: quickstart step 4.
-func TestFirstSkill_SyncIdempotent(t *testing.T) {
+func TestSkillTutorial_SyncIdempotent(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md":      greetArtifactRuntime,
@@ -633,7 +633,7 @@ func TestFirstSkill_SyncIdempotent(t *testing.T) {
 }
 
 // T-D-first-skill-27 — sync --dry-run prints a plan and writes nothing.
-func TestFirstSkill_SyncDryRun(t *testing.T) {
+func TestSkillTutorial_SyncDryRun(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md": greetSkillArtifact,
@@ -654,7 +654,7 @@ func TestFirstSkill_SyncDryRun(t *testing.T) {
 
 // T-D-first-skill-28 — bundled script bytes survive the none adapter
 // verbatim. spec: doc "## Add a bundled script".
-func TestFirstSkill_ScriptVerbatimNone(t *testing.T) {
+func TestSkillTutorial_ScriptVerbatimNone(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md":      greetSkillArtifact,
@@ -670,7 +670,7 @@ func TestFirstSkill_ScriptVerbatimNone(t *testing.T) {
 
 // T-D-first-skill-29 — bundled script bytes survive the claude-code
 // adapter verbatim. spec: doc "## Add a bundled script".
-func TestFirstSkill_ScriptVerbatimClaudeCode(t *testing.T) {
+func TestSkillTutorial_ScriptVerbatimClaudeCode(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md":      greetSkillArtifact,
@@ -686,7 +686,7 @@ func TestFirstSkill_ScriptVerbatimClaudeCode(t *testing.T) {
 
 // T-D-first-skill-30 — a bundled resource over the 1 MB per-file soft cap
 // warns but does not fail lint. spec: §4.1 per-file soft cap.
-func TestFirstSkill_PerFileSoftCapWarns(t *testing.T) {
+func TestSkillTutorial_PerFileSoftCapWarns(t *testing.T) {
 	t.Parallel()
 	big := strings.Repeat("a", 1024*1024+1) // 1 MB + 1 byte
 	reg := writeRegistry(t, map[string]string{
@@ -706,7 +706,7 @@ func TestFirstSkill_PerFileSoftCapWarns(t *testing.T) {
 
 // T-D-first-skill-31 — total bundled resources over the 10 MB per-package
 // cap fail lint with an error. spec: §4.1 per-package cap.
-func TestFirstSkill_PerPackageHardCapErrors(t *testing.T) {
+func TestSkillTutorial_PerPackageHardCapErrors(t *testing.T) {
 	t.Parallel()
 	chunk := strings.Repeat("b", 6*1024*1024) // 6 MB each; two -> 12 MB > 10 MB
 	reg := writeRegistry(t, map[string]string{
@@ -725,7 +725,7 @@ func TestFirstSkill_PerPackageHardCapErrors(t *testing.T) {
 }
 
 // T-D-first-skill-32 — podium version prints a version string.
-func TestFirstSkill_Version(t *testing.T) {
+func TestSkillTutorial_Version(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "version")
 	if res.Exit != 0 || !strings.HasPrefix(res.Stdout, "podium ") {
@@ -734,7 +734,7 @@ func TestFirstSkill_Version(t *testing.T) {
 }
 
 // T-D-first-skill-33 — an unknown harness fails sync with config.unknown_harness.
-func TestFirstSkill_UnknownHarness(t *testing.T) {
+func TestSkillTutorial_UnknownHarness(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md": greetSkillArtifact,
@@ -750,7 +750,7 @@ func TestFirstSkill_UnknownHarness(t *testing.T) {
 }
 
 // T-D-first-skill-34 — the tags field round-trips through lint.
-func TestFirstSkill_TagsRoundTrip(t *testing.T) {
+func TestSkillTutorial_TagsRoundTrip(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\ntags: [demo, hello-world, greeting]\nsensitivity: low\n---\n\n<!-- body -->\n",
@@ -763,7 +763,7 @@ func TestFirstSkill_TagsRoundTrip(t *testing.T) {
 }
 
 // T-D-first-skill-35 — sensitivity accepts low, medium, and high.
-func TestFirstSkill_SensitivityValues(t *testing.T) {
+func TestSkillTutorial_SensitivityValues(t *testing.T) {
 	t.Parallel()
 	for _, level := range []string{"low", "medium", "high"} {
 		reg := writeRegistry(t, map[string]string{
@@ -780,7 +780,7 @@ func TestFirstSkill_SensitivityValues(t *testing.T) {
 // T-D-first-skill-36 — the doc's positional `podium lint <path>` form is
 // not runnable: the CLI ignores the positional argument and requires
 // --registry, exiting 2. spec: doc "## Lint before you commit" (doc-accuracy).
-func TestFirstSkill_LintPositionalPathRejected(t *testing.T) {
+func TestSkillTutorial_LintPositionalPathRejected(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md": greetSkillArtifact,
