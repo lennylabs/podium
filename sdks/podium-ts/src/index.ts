@@ -1,6 +1,21 @@
 // Podium TypeScript SDK — thin HTTP client over the registry API
-// (spec §7.6). Phase 14 ships the meta-tool surface plus device-code
-// scaffolding; identity-provider integration matures in later phases.
+// (spec §7.6). The client resolves the registry from sync.yaml, merges the
+// workspace overlay client-side, and runs the §6.3 oauth-device-code flow
+// via Client.login(). The config/overlay/oauth helpers load Node's fs/path
+// lazily, so importing the SDK stays safe in edge bundles.
+
+import { resolveRegistry } from "./config.js";
+import { LocalOverlay, resolveOverlayPath, rrfFuse } from "./overlay.js";
+import {
+  DeviceCodeError,
+  DEFAULT_TIMEOUT_MS,
+  discoverIdp,
+  initiate,
+  poll,
+  type Tokens,
+} from "./oauth.js";
+
+export { DeviceCodeError, type Tokens };
 
 export interface ArtifactDescriptor {
   id: string;
@@ -337,12 +352,18 @@ export class Client {
   readonly overlayPath?: string;
   readonly cacheMode: CacheMode;
   private readonly fetcher: typeof fetch;
-  private readonly token: string;
+  private token: string;
+  // spec §6.4 — the overlay index is read on demand and cached per
+  // session_id ("cached for the duration of a session_id"). The empty-string
+  // key holds the most recent no-session read, which is refreshed each call.
+  private readonly overlayCache = new Map<string, LocalOverlay | null>();
 
   constructor(opts: ClientOptions) {
     this.registry = opts.registry.replace(/\/$/, "");
     this.identityProvider = opts.identityProvider ?? "oauth-device-code";
-    this.overlayPath = opts.overlayPath;
+    // The explicit/env overlay candidate; the <CWD>/.podium/overlay/ fallback
+    // is applied lazily on the first overlay read (§6.4).
+    this.overlayPath = opts.overlayPath ?? process.env.PODIUM_OVERLAY_PATH;
     this.fetcher = opts.fetcher ?? fetch;
     this.token = opts.token ?? "";
     // spec: §7.4 — "podium sync and the SDKs apply the same cache modes." The
@@ -359,10 +380,24 @@ export class Client {
     this.cacheMode = mode;
   }
 
-  static fromEnv(): Client {
-    const registry = process.env.PODIUM_REGISTRY;
+  // spec §14.4 / §13.10 — fromEnv "picks up registry URL from sync.yaml +
+  // overlay path". The registry resolves from PODIUM_REGISTRY first, then the
+  // project-local, project-shared, and user-global sync.yaml scopes (§7.5.2);
+  // reading sync.yaml is async, so fromEnv returns a promise. When the
+  // registry is unset across every scope the SDK reports the same
+  // config.no_registry condition the CLI does (§6.10), pointing at
+  // `podium init`.
+  static async fromEnv(): Promise<Client> {
+    const registry = await resolveRegistry(
+      process.env.PODIUM_REGISTRY,
+      process.cwd(),
+      process.env.HOME ?? process.env.USERPROFILE,
+    );
     if (!registry) {
-      throw new Error("PODIUM_REGISTRY environment variable is required");
+      throw new RegistryError(
+        "config.no_registry",
+        "no registry configured: set PODIUM_REGISTRY, add defaults.registry to sync.yaml, or run `podium init`",
+      );
     }
     return new Client({
       registry,
@@ -395,6 +430,68 @@ export class Client {
     const h: Record<string, string> = { ...(extra ?? {}) };
     if (this.token) h.Authorization = `Bearer ${this.token}`;
     return h;
+  }
+
+  // overlayIndex reads the overlay on demand, applying the §6.4 CWD fallback
+  // and caching per session_id. With no session_id the overlay is re-read on
+  // each call so in-progress edits stay visible.
+  private async overlayIndex(sessionID = ""): Promise<LocalOverlay | null> {
+    if (sessionID && this.overlayCache.has(sessionID)) {
+      return this.overlayCache.get(sessionID) ?? null;
+    }
+    const path = await resolveOverlayPath(
+      this.overlayPath,
+      undefined,
+      process.cwd(),
+    );
+    let index: LocalOverlay | null = path ? await LocalOverlay.load(path) : null;
+    if (index && index.artifacts.size === 0) index = null;
+    if (sessionID) this.overlayCache.set(sessionID, index);
+    return index;
+  }
+
+  // spec §14.8 / §7.7 — login() runs the §6.3 oauth-device-code flow before
+  // any catalog calls. The IdP is discovered from the registry's RFC 8414
+  // metadata (overridable via opts or the PODIUM_OAUTH_* env vars). The
+  // verification URL and user code print to stderr; polling is bounded by
+  // timeoutMs (10 minutes by default). On success the access token is stored
+  // on the client and attached as the Authorization: Bearer credential on
+  // every subsequent request (§7.6).
+  async login(
+    opts: {
+      timeoutMs?: number;
+      clientID?: string;
+      scopes?: string[];
+      audience?: string;
+      deviceAuthorizationEndpoint?: string;
+      tokenEndpoint?: string;
+    } = {},
+  ): Promise<Tokens> {
+    const clientID =
+      opts.clientID ?? process.env.PODIUM_OAUTH_CLIENT_ID ?? "podium-cli";
+    const scopes = opts.scopes ?? ["openid", "profile", "email", "groups"];
+    const audience = opts.audience ?? process.env.PODIUM_OAUTH_AUDIENCE ?? "";
+    let deviceUrl =
+      opts.deviceAuthorizationEndpoint ??
+      process.env.PODIUM_OAUTH_AUTHORIZATION_ENDPOINT ??
+      "";
+    let tokenUrl = opts.tokenEndpoint ?? process.env.PODIUM_OAUTH_TOKEN_URL ?? "";
+    if (!deviceUrl) {
+      const discovered = await discoverIdp(this.registry, this.fetcher);
+      deviceUrl = discovered.deviceUrl;
+      if (!tokenUrl) tokenUrl = discovered.tokenUrl;
+    }
+    if (!tokenUrl) tokenUrl = this.registry.replace(/\/$/, "") + "/oauth2/token";
+
+    const auth = await initiate(deviceUrl, clientID, scopes, audience, this.fetcher);
+    process.stderr.write(`Visit: ${auth.verificationUri}\n`);
+    process.stderr.write(`User code: ${auth.userCode}\n`);
+    const tokens = await poll(tokenUrl, clientID, auth, {
+      timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      fetcher: this.fetcher,
+    });
+    this.token = tokens.accessToken;
+    return tokens;
   }
 
   async loadDomain(path = "", depth = 1): Promise<Record<string, unknown>> {
@@ -437,7 +534,51 @@ export class Client {
     if (opts.scope) params.scope = opts.scope;
     if (opts.tags?.length) params.tags = opts.tags.join(",");
     if (opts.sessionID) params.session_id = opts.sessionID;
-    return this.get("/v1/search_artifacts", params) as Promise<SearchResult>;
+    const body = (await this.get("/v1/search_artifacts", params)) as SearchResult;
+    return this.fuseOverlay(body, query, opts);
+  }
+
+  // fuseOverlay merges workspace-overlay hits into the registry results via
+  // RRF (spec §6.4, §6.4.1). The overlay is the highest-precedence layer, so
+  // an overlay artifact's metadata wins over a same-id registry hit. With no
+  // overlay configured the registry result passes through unchanged.
+  private async fuseOverlay(
+    body: SearchResult,
+    query: string,
+    opts: { type?: string; tags?: string[]; topK?: number; sessionID?: string },
+  ): Promise<SearchResult> {
+    const index = await this.overlayIndex(opts.sessionID ?? "");
+    const registryResults = body.results ?? [];
+    if (!index) return { ...body, results: registryResults };
+    const topK = opts.topK ?? 10;
+    const hits = index.search(query, { type: opts.type, tags: opts.tags, topK });
+    if (hits.length === 0) return { ...body, results: registryResults };
+    const overlayIDs = hits.map((h) => h.id);
+    const registryIDs = registryResults.map((r) => r.id);
+    const fused = rrfFuse([overlayIDs, registryIDs]);
+    const byID = new Map<string, ArtifactDescriptor>();
+    for (const r of registryResults) byID.set(r.id, { ...r });
+    for (const h of hits) {
+      byID.set(h.id, {
+        id: h.id,
+        type: h.type,
+        version: h.version,
+        description: h.description,
+        tags: [...h.tags],
+        score: fused.get(h.id) ?? 0,
+      });
+    }
+    for (const r of registryResults) {
+      if (!overlayIDs.includes(r.id)) {
+        const d = byID.get(r.id);
+        if (d) d.score = fused.get(r.id) ?? r.score ?? 0;
+      }
+    }
+    const merged = [...byID.values()]
+      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || (a.id < b.id ? -1 : 1))
+      .slice(0, topK);
+    const extra = overlayIDs.filter((id) => !registryIDs.includes(id)).length;
+    return { ...body, results: merged, total_matched: (body.total_matched ?? 0) + extra };
   }
 
   // spec: §7.6.1 — load_artifact accepts session_id for consistent latest
@@ -447,6 +588,26 @@ export class Client {
     version?: string,
     opts: { sessionID?: string } = {},
   ): Promise<LoadedArtifact> {
+    // spec §6.4 — the overlay is the highest-precedence layer, so an
+    // in-progress overlay artifact resolves ahead of the registry. A pinned
+    // version still goes to the registry: the overlay carries a single
+    // working copy, not a version history.
+    if (!version) {
+      const index = await this.overlayIndex(opts.sessionID ?? "");
+      const art = index?.get(id);
+      if (art) {
+        return new LoadedArtifact({
+          id: art.id,
+          type: art.type,
+          version: art.version,
+          manifest_body: art.body,
+          frontmatter: art.frontmatter,
+          skill_raw: art.skillRaw,
+          resources: art.resources,
+          large_resources: {},
+        });
+      }
+    }
     const params: Record<string, unknown> = { id };
     if (version) params.version = version;
     if (opts.sessionID) params.session_id = opts.sessionID;

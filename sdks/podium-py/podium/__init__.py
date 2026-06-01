@@ -1,5 +1,6 @@
 """Podium Python SDK — thin HTTP client over the registry API."""
 
+from ._oauth import DeviceCodeError, Tokens
 from .client import (
     BatchResult,
     Client,
@@ -21,9 +22,11 @@ except ImportError:
 __all__ = [
     "BatchResult",
     "Client",
+    "DeviceCodeError",
     "DeviceCodeRequired",
     "LoadedArtifact",
     "MaterializeError",
     "RegistryError",
     "RegistryReadOnly",
+    "Tokens",
 ]

@@ -107,9 +107,9 @@ describe("Client", () => {
   });
 
   // Spec: §6.2 — fromEnv reads PODIUM_REGISTRY and provider env vars.
-  it("fromEnv reads PODIUM_REGISTRY", () => {
+  it("fromEnv reads PODIUM_REGISTRY", async () => {
     process.env.PODIUM_REGISTRY = "http://localhost:8080";
-    const c = Client.fromEnv();
+    const c = await Client.fromEnv();
     expect(c.registry).toBe("http://localhost:8080");
   });
 

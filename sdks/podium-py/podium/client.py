@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+import time
 import urllib.parse
 import urllib.request
+import webbrowser
 from dataclasses import dataclass, field
 from typing import Any, Callable
+
+from . import _config, _oauth, _overlay
 
 
 class RegistryError(Exception):
@@ -127,6 +132,14 @@ def _write_file(path: str, content: bytes) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as fh:
         fh.write(content)
+
+
+def _open_browser(url: str) -> None:
+    """Best-effort open the verification URL; never blocks or raises."""
+    try:
+        webbrowser.open(url)
+    except Exception:  # noqa: BLE001 - browser launch is best-effort (§7.7)
+        pass
 
 
 def _fetch_bytes(url: str) -> bytes:
@@ -341,7 +354,16 @@ class Client:
     ) -> None:
         self.registry = registry.rstrip("/")
         self.identity_provider = identity_provider
-        self.overlay_path = overlay_path
+        # spec §6.4 — the SDK honors the overlay lookup order: an explicit
+        # Client(overlay_path=...) wins over PODIUM_OVERLAY_PATH, which wins
+        # over the <CWD>/.podium/overlay/ fallback. The resolved path drives
+        # the client-side overlay merge in search_artifacts and load_artifact.
+        self.overlay_path = _overlay.resolve_overlay_path(
+            overlay_path, os.environ.get("PODIUM_OVERLAY_PATH"), os.getcwd()
+        )
+        # The overlay index is read on demand and cached per session_id
+        # (§6.4: "cached for the duration of a session_id").
+        self._overlay_cache: dict[str, "_overlay.LocalOverlay | None"] = {}
         # spec: §7.6 — the SDK reaches the registry with the same identity as
         # the MCP path. The caller passes a session/access token here (or via
         # PODIUM_SESSION_TOKEN in from_env); it is attached as the Bearer
@@ -360,9 +382,21 @@ class Client:
 
     @classmethod
     def from_env(cls) -> "Client":
-        registry = os.environ.get("PODIUM_REGISTRY")
+        # spec §14.4 / §13.10 — from_env "picks up registry URL from
+        # sync.yaml + overlay path". The registry resolves from
+        # PODIUM_REGISTRY first, then the project-local, project-shared, and
+        # user-global sync.yaml scopes (§7.5.2). When unset across every
+        # scope the SDK reports the same config.no_registry condition the
+        # CLI does (§6.10, §7.5.2), pointing the caller at `podium init`.
+        registry = _config.resolve_registry(
+            os.environ.get("PODIUM_REGISTRY"), os.getcwd(), os.path.expanduser("~")
+        )
         if not registry:
-            raise RuntimeError("PODIUM_REGISTRY environment variable is required")
+            raise RegistryError(
+                "config.no_registry",
+                "no registry configured: set PODIUM_REGISTRY, add defaults.registry "
+                "to sync.yaml, or run `podium init`",
+            )
         return cls(
             registry=registry,
             identity_provider=os.environ.get("PODIUM_IDENTITY_PROVIDER", "oauth-device-code"),
@@ -395,6 +429,80 @@ class Client:
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         return headers
+
+    def _overlay_index(self, session_id: str = "") -> "_overlay.LocalOverlay | None":
+        """Return the overlay index, reading it per call (cached per session).
+
+        spec §6.4 — the SDK reads the overlay on each search_artifacts /
+        load_artifact call, cached for the duration of a session_id. With no
+        session_id the overlay is re-read every call so in-progress edits are
+        always visible.
+        """
+        if not self.overlay_path:
+            return None
+        if session_id and session_id in self._overlay_cache:
+            return self._overlay_cache[session_id]
+        index = _overlay.LocalOverlay(self.overlay_path)
+        if not index.artifacts:
+            index = None
+        if session_id:
+            self._overlay_cache[session_id] = index
+        return index
+
+    def login(
+        self,
+        *,
+        open_browser: bool = False,
+        timeout: float = _oauth.DEFAULT_TIMEOUT,
+        client_id: str | None = None,
+        scopes: list[str] | None = None,
+        audience: str = "",
+        device_authorization_endpoint: str = "",
+        token_endpoint: str = "",
+        opener: Callable[[Any], Any] | None = None,
+        sleep: Callable[[float], None] | None = None,
+    ) -> _oauth.Tokens:
+        """Run the §6.3 oauth-device-code flow and cache the access token.
+
+        spec §14.8 / §7.7 — ``client.login()`` performs the device-code
+        flow before any catalog calls. The IdP is discovered from the
+        registry's RFC 8414 metadata (overridable via the endpoint
+        parameters or the ``PODIUM_OAUTH_*`` env vars). The verification URL
+        and user code print to stderr; polling is bounded by ``timeout``
+        (10 minutes by default). On success the access token is stored on
+        the client and attached as the ``Authorization: Bearer`` credential
+        on every subsequent request (§7.6).
+        """
+        cid = client_id or os.environ.get("PODIUM_OAUTH_CLIENT_ID") or "podium-cli"
+        req_scopes = scopes if scopes is not None else ["openid", "profile", "email", "groups"]
+        aud = audience or os.environ.get("PODIUM_OAUTH_AUDIENCE", "")
+        device_url = (
+            device_authorization_endpoint
+            or os.environ.get("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT", "")
+        )
+        tok_url = token_endpoint or os.environ.get("PODIUM_OAUTH_TOKEN_URL", "")
+        if not device_url:
+            device_url, discovered = _oauth.discover_idp(self.registry, opener=opener)
+            if not tok_url:
+                tok_url = discovered
+        if not tok_url:
+            tok_url = self.registry.rstrip("/") + "/oauth2/token"
+
+        auth = _oauth.initiate(device_url, cid, req_scopes, aud, opener=opener)
+        print(f"Visit: {auth.verification_uri}", file=sys.stderr)
+        print(f"User code: {auth.user_code}", file=sys.stderr)
+        if open_browser and auth.verification_uri_complete:
+            _open_browser(auth.verification_uri_complete)
+        tokens = _oauth.poll(
+            tok_url,
+            cid,
+            auth,
+            timeout=timeout,
+            opener=opener,
+            sleep=sleep or time.sleep,
+        )
+        self.token = tokens.access_token
+        return tokens
 
     def load_domain(self, path: str = "", depth: int = 1) -> dict[str, Any]:
         params = {}
@@ -449,7 +557,7 @@ class Client:
         if session_id:
             params["session_id"] = session_id
         body = self._get("/v1/search_artifacts", params)
-        results = [
+        registry_results = [
             ArtifactDescriptor(
                 id=r.get("id", ""),
                 type=r.get("type", ""),
@@ -460,15 +568,90 @@ class Client:
             )
             for r in body.get("results", []) or []
         ]
+        results, total = self._fuse_overlay(
+            registry_results,
+            body.get("total_matched", 0),
+            query=query,
+            type_filter=type,
+            tags=tags,
+            top_k=top_k,
+            session_id=session_id,
+        )
         return SearchResult(
             query=body.get("query", ""),
-            total_matched=body.get("total_matched", 0),
+            total_matched=total,
             results=results,
         )
+
+    def _fuse_overlay(
+        self,
+        registry_results: list[ArtifactDescriptor],
+        registry_total: int,
+        *,
+        query: str,
+        type_filter: str,
+        tags: list[str] | None,
+        top_k: int,
+        session_id: str,
+    ) -> tuple[list[ArtifactDescriptor], int]:
+        """Fuse overlay hits into the registry results via RRF (§6.4, §6.4.1).
+
+        The workspace overlay is the highest-precedence layer, so an overlay
+        artifact's metadata wins over a registry hit with the same id. With
+        no overlay configured the registry results pass through unchanged.
+        """
+        index = self._overlay_index(session_id)
+        if index is None:
+            return registry_results, registry_total
+        overlay_hits = index.search(
+            query, type_filter=type_filter, tags_filter=tags, top_k=top_k
+        )
+        if not overlay_hits:
+            return registry_results, registry_total
+        overlay_ids = [a.id for a in overlay_hits]
+        registry_ids = [r.id for r in registry_results]
+        fused = _overlay.rrf_fuse([overlay_ids, registry_ids])
+        by_id: dict[str, ArtifactDescriptor] = {r.id: r for r in registry_results}
+        for art in overlay_hits:
+            # Overlay precedence: overwrite any same-id registry descriptor.
+            by_id[art.id] = ArtifactDescriptor(
+                id=art.id,
+                type=art.type,
+                version=art.version,
+                description=art.description,
+                tags=list(art.tags),
+                score=fused.get(art.id, 0.0),
+            )
+        for desc in registry_results:
+            if desc.id in by_id and desc.id not in overlay_ids:
+                by_id[desc.id].score = fused.get(desc.id, desc.score)
+        merged = sorted(by_id.values(), key=lambda d: (-d.score, d.id))[:top_k]
+        # New overlay-only ids enlarge the matched count beyond the registry's.
+        total = registry_total + len([i for i in overlay_ids if i not in registry_ids])
+        return merged, total
 
     def load_artifact(
         self, artifact_id: str, *, version: str = "", session_id: str = ""
     ) -> LoadedArtifact:
+        # spec §6.4 — the overlay is the highest-precedence layer, so an
+        # in-progress overlay artifact resolves ahead of the registry. A
+        # pinned --version still goes to the registry: the overlay carries a
+        # single working copy, not a version history.
+        if not version:
+            index = self._overlay_index(session_id)
+            if index is not None:
+                art = index.get(artifact_id)
+                if art is not None:
+                    return LoadedArtifact(
+                        id=art.id,
+                        type=art.type,
+                        version=art.version,
+                        manifest_body=art.body,
+                        frontmatter=art.frontmatter,
+                        skill_raw=art.skill_raw,
+                        resources=dict(art.resources),
+                        large_resources={},
+                    )
         params = {"id": artifact_id}
         if version:
             params["version"] = version
