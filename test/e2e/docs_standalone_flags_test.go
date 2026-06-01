@@ -80,6 +80,37 @@ func TestStandaloneFlags_SignRegistryKey(t *testing.T) {
 	}
 }
 
+// F-14.3.2 / F-14.10.4 (spec: §13.10 lines 116, 223) — a first-run standalone
+// `podium serve` auto-bootstraps ~/.podium/sync.yaml with defaults.registry
+// pointing at the local server, so a consumer resolves the registry without an
+// extra env var. The bound address is a free loopback port chosen by the
+// harness, so the written pointer must carry that exact bind.
+func TestStandaloneFlags_AutoBootstrapsSyncYAML(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	reg := writeRegistry(t, map[string]string{
+		"my-skill/ARTIFACT.md": smallteamLowArtifact("bootstrap artifact"),
+	})
+	srv := startServerArgs(t, []string{"HOME=" + home},
+		"serve", "--standalone", "--layer-path", reg)
+
+	syncPath := filepath.Join(home, ".podium", "sync.yaml")
+	body, err := os.ReadFile(syncPath)
+	if err != nil {
+		t.Fatalf("read %s: %v\nlog:\n%s", syncPath, err, srv.log())
+	}
+	want := "registry: " + srv.BaseURL
+	if !strings.Contains(string(body), want) {
+		t.Errorf("sync.yaml missing %q:\n%s", want, body)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".podium", "registry.yaml")); err != nil {
+		t.Errorf("registry.yaml not auto-bootstrapped: %v", err)
+	}
+	if fi, err := os.Stat(filepath.Join(home, "podium-artifacts")); err != nil || !fi.IsDir() {
+		t.Errorf("~/podium-artifacts not created: err=%v", err)
+	}
+}
+
 // F-13.10.14 — an unrecognized --sign value is refused at startup; the process
 // exits non-zero before binding a listener.
 func TestStandaloneFlags_SignRejectsUnknown(t *testing.T) {

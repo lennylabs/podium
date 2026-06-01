@@ -568,6 +568,12 @@ func Run() error {
 		return err
 	}
 
+	// §13.10 / §14.3 / §14.10: on the standalone path, write the client and
+	// server default config files on first run so consumers resolve the
+	// registry from ~/.podium/sync.yaml without an extra env var. Existing
+	// files are preserved; PODIUM_NO_AUTOSTANDALONE and --config suppress it.
+	bootstrapStandaloneFiles(cfg)
+
 	st, err := openStore(cfg)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
