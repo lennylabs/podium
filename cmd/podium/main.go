@@ -1344,9 +1344,13 @@ func printDomainHuman(body []byte) {
 	walk = func(nodes []domainNode, depth int) {
 		indent := strings.Repeat("  ", depth)
 		for _, n := range nodes {
-			label := n.Name
+			// Show the full subdomain path so the user can drill in with
+			// `podium domain show <path>`; the display name follows when set.
+			label := n.Path
 			if label == "" {
-				label = n.Path
+				label = n.Name
+			} else if n.Name != "" {
+				label = n.Path + "  " + n.Name
 			}
 			fmt.Printf("%s- %s\n", indent, label)
 			if n.Description != "" {
