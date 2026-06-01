@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 )
 
@@ -83,6 +84,15 @@ func errorResultFrom(err error) map[string]any {
 		return errorEnvelope(re.Code, re.Message, re.Details, re.Retryable, re.SuggestedAction)
 	}
 	return errorResult(err.Error())
+}
+
+// errorResultWithStatus surfaces a non-200 HTTP status alongside the error
+// message for callers that fetch over HTTP.
+func errorResultWithStatus(msg string, status int) any {
+	if status == http.StatusOK {
+		return errorResult(msg)
+	}
+	return errorResult(fmt.Sprintf("%s (HTTP %d)", msg, status))
 }
 
 // errorEnvelope assembles the MCP error result map. `error` holds the

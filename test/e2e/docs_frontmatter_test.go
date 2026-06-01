@@ -426,44 +426,6 @@ func TestFrontmatter_AgentScaffoldDelegatesTo(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-24 — command scaffold writes expose_as_mcp_prompt: true.
-func TestFrontmatter_CommandScaffoldExpose(t *testing.T) {
-	t.Parallel()
-	out := filepath.Join(t.TempDir(), "eng/my-cmd")
-	sc := runPodium(t, "", nil, "artifact", "scaffold", "--type", "command", "--description", "A slash command.",
-		"--expose-as-mcp-prompt", "--yes", out)
-	if sc.Exit != 0 {
-		t.Fatalf("scaffold exit=%d stderr=%s", sc.Exit, sc.Stderr)
-	}
-	if art := readFile(t, filepath.Join(out, "ARTIFACT.md")); !strings.Contains(art, "expose_as_mcp_prompt: true") {
-		t.Errorf("ARTIFACT.md missing expose_as_mcp_prompt:\n%s", art)
-	}
-}
-
-// T-D-frontmatter-25 — a command with expose_as_mcp_prompt appears in MCP
-// prompts/list.
-func TestFrontmatter_ExposedCommandInPromptsList(t *testing.T) {
-	t.Parallel()
-	art := "---\ntype: command\nname: my-cmd\nversion: 1.0.0\ndescription: A command.\nexpose_as_mcp_prompt: true\n---\n\n$ARGUMENTS\n"
-	srv := startServer(t, writeRegistry(t, map[string]string{"eng/my-cmd/ARTIFACT.md": art}))
-	res := mcpExec(t, mcpServerEnv(t, srv.BaseURL), rpcReq{ID: 1, Method: "prompts/list", Params: map[string]any{}})
-	if body := mustJSON(rpcResult(t, res.Stdout, 1)); !strings.Contains(body, "eng/my-cmd") {
-		t.Errorf("prompts/list missing the exposed command:\n%s", body)
-	}
-}
-
-// T-D-frontmatter-26 — a command without expose_as_mcp_prompt is absent from
-// prompts/list.
-func TestFrontmatter_NonExposedCommandNotInPromptsList(t *testing.T) {
-	t.Parallel()
-	art := "---\ntype: command\nname: my-cmd\nversion: 1.0.0\ndescription: A command.\n---\n\n$ARGUMENTS\n"
-	srv := startServer(t, writeRegistry(t, map[string]string{"eng/my-cmd/ARTIFACT.md": art}))
-	res := mcpExec(t, mcpServerEnv(t, srv.BaseURL), rpcReq{ID: 1, Method: "prompts/list", Params: map[string]any{}})
-	if body := mustJSON(rpcResult(t, res.Stdout, 1)); strings.Contains(body, "eng/my-cmd") {
-		t.Errorf("prompts/list leaked a non-exposed command:\n%s", body)
-	}
-}
-
 // T-D-frontmatter-27 — rule scaffold (always) writes rule_mode: always.
 func TestFrontmatter_RuleScaffoldAlways(t *testing.T) {
 	t.Parallel()

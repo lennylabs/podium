@@ -20,7 +20,6 @@ var wantGrid = map[Capability]string{
 	{Field: "delegates_to"}:                 "NFNXFNXNN",
 	{Field: "requiresApproval"}:             "NFNXNNXFF",
 	{Field: "sandbox_profile"}:              "NFFXNNXFF",
-	{Field: "expose_as_mcp_prompt"}:         "NNNNNNNNN",
 	{Field: "rule_mode", Value: "always"}:   "NNNNNNFNN",
 	{Field: "rule_mode", Value: "glob"}:     "FXFNFFXFN",
 	{Field: "rule_mode", Value: "auto"}:     "FXFNXXXXF",
@@ -78,14 +77,12 @@ func TestCapability_CellUnknown(t *testing.T) {
 }
 
 // Spec: §6.7.1 mitigation 1 — the core feature set is exactly the cells
-// native on every first-class harness: description, mcpServers, and
-// expose_as_mcp_prompt.
+// native on every first-class harness: description and mcpServers.
 func TestCapability_CoreFeatureSet(t *testing.T) {
 	t.Parallel()
 	got := CoreFeatureSet()
 	want := []Capability{
 		{Field: "description"},
-		{Field: "expose_as_mcp_prompt"},
 		{Field: "mcpServers"},
 	}
 	if len(got) != len(want) {

@@ -45,7 +45,6 @@ var podiumOnlySkillFields = []string{
 	"input",
 	"output",
 	"delegates_to",
-	"expose_as_mcp_prompt",
 	"rule_mode",
 	"rule_globs",
 	"rule_description",

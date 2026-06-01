@@ -218,7 +218,6 @@ Authors who must use a non-portable feature can declare `target_harnesses:` in f
 | `delegates_to` (subagents) | ✓           | ⚠              | ✓             | ✗      | ⚠     | ✓        | ✗      | ✓   | ✓      |
 | `requiresApproval`         | ✓           | ⚠              | ✓             | ✗      | ✓     | ✓        | ✗      | ⚠   | ⚠      |
 | `sandbox_profile`          | ✓           | ⚠              | ⚠             | ✗      | ✓     | ✓        | ✗      | ⚠   | ⚠      |
-| `expose_as_mcp_prompt`     | ✓           | ✓              | ✓             | ✓      | ✓     | ✓        | ✓      | ✓   | ✓      |
 | `rule_mode: always`        | ✓           | ✓              | ✓             | ✓      | ✓     | ✓        | ⚠      | ✓   | ✓      |
 | `rule_mode: glob`          | ⚠           | ✗              | ⚠             | ✓      | ⚠     | ⚠        | ✗      | ⚠   | ✓      |
 | `rule_mode: auto`          | ⚠           | ✗              | ⚠             | ✓      | ✗     | ✗        | ✗      | ✗   | ⚠      |

@@ -304,7 +304,7 @@ podium artifact scaffold --type <type> --description <text>
 | `skill` | ARTIFACT.md + SKILL.md (per §4.3.4 field allocation) | — |
 | `agent` | ARTIFACT.md | `--input-schema`, `--output-schema`, `--delegates-to` |
 | `context` | ARTIFACT.md | — |
-| `command` | ARTIFACT.md | `--expose-as-mcp-prompt` |
+| `command` | ARTIFACT.md | — |
 | `rule` | ARTIFACT.md | `--rule-mode` (default `always`), `--rule-globs`, `--rule-description` |
 | `hook` | ARTIFACT.md | `--hook-event` (required), `--hook-action` |
 | `mcp-server` | ARTIFACT.md | `--server-identifier` (required) |

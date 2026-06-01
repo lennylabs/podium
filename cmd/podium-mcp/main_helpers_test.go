@@ -134,48 +134,6 @@ func TestErrorResultWithStatus(t *testing.T) {
 	}
 }
 
-// spec: §5.2 — the `prompts` capability is advertised conditional on the
-// presence of at least one opted-in command artifact (F-5.2.2).
-func TestPromptsCapabilityActive_ReflectsOptIns(t *testing.T) {
-	t.Parallel()
-	exposed := map[string]map[string]any{
-		"ops/restart": {
-			"id":          "ops/restart",
-			"type":        "command",
-			"frontmatter": "---\ntype: command\nname: restart\nversion: 1.0.0\nexpose_as_mcp_prompt: true\n---\n",
-		},
-	}
-	ts := promptsFixture(t, nil, exposed)
-	s := &mcpServer{cfg: &config{registry: ts.URL}, http: &http.Client{}}
-	if !s.promptsCapabilityActive() {
-		t.Errorf("with an opted-in command: got false, want true")
-	}
-
-	// No opted-in command: the only command lacks expose_as_mcp_prompt.
-	plain := map[string]map[string]any{
-		"ops/audit": {
-			"id":          "ops/audit",
-			"type":        "command",
-			"frontmatter": "---\ntype: command\nname: audit\nversion: 1.0.0\n---\n",
-		},
-	}
-	ts2 := promptsFixture(t, nil, plain)
-	s2 := &mcpServer{cfg: &config{registry: ts2.URL}, http: &http.Client{}}
-	if s2.promptsCapabilityActive() {
-		t.Errorf("with no opt-in: got true, want false")
-	}
-}
-
-// A registry-fetch failure fails open so a transient error never hides a
-// present prompts capability (F-5.2.2).
-func TestPromptsCapabilityActive_FailsOpenOnError(t *testing.T) {
-	t.Parallel()
-	s := &mcpServer{cfg: &config{registry: "http://127.0.0.1:0"}, http: &http.Client{}}
-	if !s.promptsCapabilityActive() {
-		t.Errorf("on registry error: got false, want true (fail open)")
-	}
-}
-
 // --- loadConfig --------------------------------------------------------------
 
 // spec: §6.10 / §7.5.2 / §13.10 — registry unset across env, flags, and every

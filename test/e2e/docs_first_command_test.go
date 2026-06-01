@@ -1,13 +1,9 @@
 package e2e
 
 // End-to-end tests for docs/authoring/your-first-command.md (D-first-command).
-// The tutorial authors a /standup slash command, materializes it, and
-// exposes it through MCP's prompts/list + prompts/get. Tests drive the
-// podium CLI, and the podium-mcp bridge against a standalone server for
-// the prompt-projection surface. The doc claims commands land in
-// .claude/commands/<name>.md; the claude-code adapter actually places
-// type: command under .claude/podium/<id>/, asserted here as a
-// doc-accuracy gap.
+// The tutorial authors a /standup slash command and materializes it. Commands
+// are delivered through harness-native materialization (§6.7), not an MCP
+// prompt projection.
 
 import (
 	"encoding/json"
@@ -19,8 +15,7 @@ import (
 
 const standupID = "personal/dev-loop/standup"
 
-// standupArtifact is the tutorial's ARTIFACT.md (type: command,
-// expose_as_mcp_prompt: true, $ARGUMENTS body).
+// standupArtifact is the tutorial's ARTIFACT.md (type: command, $ARGUMENTS body).
 const standupArtifact = "---\n" +
 	"type: command\n" +
 	"name: standup\n" +
@@ -30,7 +25,6 @@ const standupArtifact = "---\n" +
 	"  - \"At standup time, when summarizing yesterday's work into the team's standard format.\"\n" +
 	"tags: [dev-loop, standup, daily]\n" +
 	"sensitivity: low\n" +
-	"expose_as_mcp_prompt: true\n" +
 	"---\n\n" +
 	"# Daily standup\n\n## User input\n\n$ARGUMENTS\n\n## Instructions\n\n" +
 	"Reformat the user's free-text input into the team's standup format.\n"
@@ -58,8 +52,7 @@ func TestFirstCommand_ArtifactLayout(t *testing.T) {
 	}
 }
 
-// T-D-first-command-2 — scaffold produces a lint-clean command (no SKILL.md,
-// expose_as_mcp_prompt: true).
+// T-D-first-command-2 — scaffold produces a lint-clean command (no SKILL.md).
 func TestFirstCommand_ScaffoldLintsClean(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -69,13 +62,12 @@ func TestFirstCommand_ScaffoldLintsClean(t *testing.T) {
 		"--description", "Format a daily standup update from a free-text summary of yesterday's work.",
 		"--tags", "dev-loop,standup,daily",
 		"--sensitivity", "low",
-		"--expose-as-mcp-prompt",
 		"--yes", out)
 	if sc.Exit != 0 {
 		t.Fatalf("scaffold exit=%d stderr=%s", sc.Exit, sc.Stderr)
 	}
 	art := readFile(t, filepath.Join(out, "ARTIFACT.md"))
-	for _, want := range []string{"type: command", "expose_as_mcp_prompt: true", "sensitivity: low"} {
+	for _, want := range []string{"type: command", "sensitivity: low"} {
 		if !strings.Contains(art, want) {
 			t.Errorf("scaffolded ARTIFACT.md missing %q:\n%s", want, art)
 		}
@@ -332,144 +324,6 @@ func TestFirstCommand_ArgumentsPreserved(t *testing.T) {
 	}
 }
 
-// T-D-first-command-20 — expose_as_mcp_prompt survives materialization.
-func TestFirstCommand_ExposeFieldPreserved(t *testing.T) {
-	t.Parallel()
-	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})
-	tgt := t.TempDir()
-	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none")
-	got := readFile(t, filepath.Join(tgt, standupID, "ARTIFACT.md"))
-	if !strings.Contains(got, "expose_as_mcp_prompt: true") {
-		t.Errorf("materialized command lost expose_as_mcp_prompt:\n%s", got)
-	}
-}
-
-// T-D-first-command-21 — expose_as_mcp_prompt: true makes the command appear
-// in MCP prompts/list, keyed by its canonical ID. spec: §5.2.
-func TestFirstCommand_PromptsListIncludes(t *testing.T) {
-	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact}))
-	res := mcpExec(t, mcpServerEnv(t, srv.BaseURL), rpcReq{ID: 1, Method: "prompts/list", Params: map[string]any{}})
-	result := rpcResult(t, res.Stdout, 1)
-	prompts, _ := result["prompts"].([]any)
-	found := false
-	for _, p := range prompts {
-		m, _ := p.(map[string]any)
-		if m["name"] == standupID {
-			found = true
-			if desc, _ := m["description"].(string); !strings.Contains(desc, "standup update") {
-				t.Errorf("prompt description does not match artifact: %q", desc)
-			}
-		}
-	}
-	if !found {
-		t.Errorf("prompts/list missing %s: %v", standupID, prompts)
-	}
-}
-
-// T-D-first-command-22 — a command without expose_as_mcp_prompt is excluded
-// from prompts/list but remains discoverable via search_artifacts.
-func TestFirstCommand_PromptsListExcludesUnexposed(t *testing.T) {
-	t.Parallel()
-	notExposed := "---\ntype: command\nname: notes\nversion: 1.0.0\ndescription: A private notes command not exposed to the slash menu.\n---\n\n$ARGUMENTS\n"
-	srv := startServer(t, writeRegistry(t, map[string]string{
-		standupID + "/ARTIFACT.md":            standupArtifact,
-		"personal/dev-loop/notes/ARTIFACT.md": notExposed,
-	}))
-	env := mcpServerEnv(t, srv.BaseURL)
-	res := mcpExec(t, env, rpcReq{ID: 1, Method: "prompts/list", Params: map[string]any{}})
-	body := mustJSON(rpcResult(t, res.Stdout, 1))
-	if !strings.Contains(body, standupID) {
-		t.Errorf("prompts/list missing the exposed command:\n%s", body)
-	}
-	if strings.Contains(body, "personal/dev-loop/notes") {
-		t.Errorf("prompts/list leaked the non-exposed command:\n%s", body)
-	}
-	// Still discoverable via search_artifacts.
-	sres := mcpExec(t, env, toolCall(2, "search_artifacts", map[string]any{"type": "command"}))
-	if sbody := mustJSON(rpcResult(t, sres.Stdout, 2)); !strings.Contains(sbody, "personal/dev-loop/notes") {
-		t.Errorf("non-exposed command not discoverable via search_artifacts:\n%s", sbody)
-	}
-}
-
-// T-D-first-command-23 — prompts/get returns the command body (including
-// $ARGUMENTS) as a user-message content block. spec: §5.2.
-func TestFirstCommand_PromptsGetBody(t *testing.T) {
-	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact}))
-	res := mcpExec(t, mcpServerEnv(t, srv.BaseURL), rpcReq{ID: 1, Method: "prompts/get", Params: map[string]any{"name": standupID}})
-	result := rpcResult(t, res.Stdout, 1)
-	if desc, _ := result["description"].(string); !strings.Contains(desc, "standup update") {
-		t.Errorf("description does not match artifact: %q", desc)
-	}
-	msgs, _ := result["messages"].([]any)
-	if len(msgs) == 0 {
-		t.Fatalf("messages empty: %v", result)
-	}
-	first, _ := msgs[0].(map[string]any)
-	if first["role"] != "user" {
-		t.Errorf("first message role=%v, want user", first["role"])
-	}
-	content, _ := first["content"].(map[string]any)
-	if content["type"] != "text" {
-		t.Errorf("content type=%v, want text", content["type"])
-	}
-	if text, _ := content["text"].(string); !strings.Contains(text, "$ARGUMENTS") {
-		t.Errorf("content text missing $ARGUMENTS: %q", text)
-	}
-}
-
-// T-D-first-command-24 — prompts/get on a command with expose absent returns
-// prompts.not_exposed.
-func TestFirstCommand_PromptsGetNotExposed(t *testing.T) {
-	t.Parallel()
-	notExposed := "---\ntype: command\nname: notes\nversion: 1.0.0\ndescription: A private notes command.\n---\n\n$ARGUMENTS\n"
-	srv := startServer(t, writeRegistry(t, map[string]string{"personal/dev-loop/notes/ARTIFACT.md": notExposed}))
-	res := mcpExec(t, mcpServerEnv(t, srv.BaseURL), rpcReq{ID: 1, Method: "prompts/get", Params: map[string]any{"name": "personal/dev-loop/notes"}})
-	result := rpcResult(t, res.Stdout, 1)
-	if e, _ := result["error"].(string); !strings.Contains(e, "prompts.not_exposed") {
-		t.Errorf("error=%q, want prompts.not_exposed", e)
-	}
-}
-
-// T-D-first-command-25 — prompts/get on a non-command artifact returns
-// prompts.not_a_command.
-func TestFirstCommand_PromptsGetNotACommand(t *testing.T) {
-	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"reference/glossary/ARTIFACT.md": contextArtifact("glossary")}))
-	res := mcpExec(t, mcpServerEnv(t, srv.BaseURL), rpcReq{ID: 1, Method: "prompts/get", Params: map[string]any{"name": "reference/glossary"}})
-	result := rpcResult(t, res.Stdout, 1)
-	if e, _ := result["error"].(string); !strings.Contains(e, "prompts.not_a_command") {
-		t.Errorf("error=%q, want prompts.not_a_command", e)
-	}
-}
-
-// T-D-first-command-26 — prompts/get with no name returns prompts.invalid_argument.
-func TestFirstCommand_PromptsGetInvalidArgument(t *testing.T) {
-	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact}))
-	res := mcpExec(t, mcpServerEnv(t, srv.BaseURL), rpcReq{ID: 1, Method: "prompts/get", Params: map[string]any{}})
-	result := rpcResult(t, res.Stdout, 1)
-	if e, _ := result["error"].(string); !strings.Contains(e, "prompts.invalid_argument") {
-		t.Errorf("error=%q, want prompts.invalid_argument", e)
-	}
-}
-
-// T-D-first-command-27 — prompts/get for an unknown id surfaces a not_found
-// error. Against the standalone server the unknown id 404s at the registry,
-// so the bridge returns the registry's "registry.not_found" rather than
-// synthesizing "prompts.not_found" (which only fires when load_artifact
-// returns 200 with an empty id).
-func TestFirstCommand_PromptsGetNotFound(t *testing.T) {
-	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact}))
-	res := mcpExec(t, mcpServerEnv(t, srv.BaseURL), rpcReq{ID: 1, Method: "prompts/get", Params: map[string]any{"name": "does-not-exist"}})
-	result := rpcResult(t, res.Stdout, 1)
-	if e, _ := result["error"].(string); !strings.Contains(e, "not_found") {
-		t.Errorf("error=%q, want a not_found error", e)
-	}
-}
-
 // T-D-first-command-28 — init writes sync.yaml with registry + harness so a
 // later `podium sync` needs no flags.
 func TestFirstCommand_InitWritesSyncYAML(t *testing.T) {
@@ -524,7 +378,7 @@ func TestFirstCommand_VariablesAccepted(t *testing.T) {
 }
 
 // T-D-first-command-31 — the full tutorial sequence on the none harness:
-// write, lint, sync, verify the file with $ARGUMENTS and the expose field.
+// write, lint, sync, verify the file with the $ARGUMENTS body preserved.
 func TestFirstCommand_FullSequenceNone(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})
@@ -536,8 +390,8 @@ func TestFirstCommand_FullSequenceNone(t *testing.T) {
 		t.Fatalf("sync exit=%d stderr=%s", s.Exit, s.Stderr)
 	}
 	got := readFile(t, filepath.Join(tgt, standupID, "ARTIFACT.md"))
-	if !strings.Contains(got, "$ARGUMENTS") || !strings.Contains(got, "expose_as_mcp_prompt: true") {
-		t.Errorf("materialized command missing $ARGUMENTS / expose field:\n%s", got)
+	if !strings.Contains(got, "$ARGUMENTS") {
+		t.Errorf("materialized command missing $ARGUMENTS body:\n%s", got)
 	}
 }
 

@@ -135,16 +135,15 @@ type Artifact struct {
 	// documents. The documented YAML form is a mapping with a $ref key
 	// (input: { $ref: ./schemas/input.json }); SchemaRef.UnmarshalYAML
 	// also accepts a bare scalar path. Nil when the field is absent.
-	Input             *SchemaRef `yaml:"input,omitempty"`
-	Output            *SchemaRef `yaml:"output,omitempty"`
-	DelegatesTo       []string   `yaml:"delegates_to,omitempty"`
-	ExposeAsMCPPrompt bool       `yaml:"expose_as_mcp_prompt,omitempty"`
-	RuleMode          RuleMode   `yaml:"rule_mode,omitempty"`
-	RuleGlobs         string     `yaml:"rule_globs,omitempty"`
-	RuleDescription   string     `yaml:"rule_description,omitempty"`
-	HookEvent         string     `yaml:"hook_event,omitempty"`
-	HookAction        string     `yaml:"hook_action,omitempty"`
-	ServerIdentifier  string     `yaml:"server_identifier,omitempty"`
+	Input            *SchemaRef `yaml:"input,omitempty"`
+	Output           *SchemaRef `yaml:"output,omitempty"`
+	DelegatesTo      []string   `yaml:"delegates_to,omitempty"`
+	RuleMode         RuleMode   `yaml:"rule_mode,omitempty"`
+	RuleGlobs        string     `yaml:"rule_globs,omitempty"`
+	RuleDescription  string     `yaml:"rule_description,omitempty"`
+	HookEvent        string     `yaml:"hook_event,omitempty"`
+	HookAction       string     `yaml:"hook_action,omitempty"`
+	ServerIdentifier string     `yaml:"server_identifier,omitempty"`
 
 	// Inheritance / targeting (§4.3, §4.6).
 	Extends         string   `yaml:"extends,omitempty"`

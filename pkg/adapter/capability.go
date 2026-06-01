@@ -83,7 +83,6 @@ var capabilityMatrix = map[Capability][]Support{
 	{Field: "delegates_to"}:                 row("NFNXFNXNN"),
 	{Field: "requiresApproval"}:             row("NFNXNNXFF"),
 	{Field: "sandbox_profile"}:              row("NFFXNNXFF"),
-	{Field: "expose_as_mcp_prompt"}:         row("NNNNNNNNN"),
 	{Field: "rule_mode", Value: "always"}:   row("NNNNNNFNN"),
 	{Field: "rule_mode", Value: "glob"}:     row("FXFNFFXFN"),
 	{Field: "rule_mode", Value: "auto"}:     row("FXFNXXXXF"),
@@ -138,7 +137,7 @@ func Cell(c Capability, harness string) (level Support, ok bool) {
 
 // UsedCapabilities returns the §6.7.1 capability rows the artifact
 // exercises that can carry a non-native cell. The always-native rows
-// (description, mcpServers, expose_as_mcp_prompt) are omitted because they
+// (description, mcpServers) are omitted because they
 // never produce a mismatch; the core-feature-set query reads the matrix
 // directly. rule_mode and hook_event are scoped to the type that owns them
 // so a stray field on the wrong type is left to the dedicated hygiene

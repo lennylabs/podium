@@ -70,13 +70,10 @@ func MergeExtends(parent, child Artifact) Artifact {
 	if child.Type != "" {
 		out.Type = child.Type
 	}
-	// deprecated / expose_as_mcp_prompt are booleans: a child can only set
-	// (true), so a true child overrides; an unset child inherits the parent.
+	// deprecated is a boolean: a child can only set it (true), so a true
+	// child overrides; an unset child inherits the parent.
 	if child.Deprecated {
 		out.Deprecated = true
-	}
-	if child.ExposeAsMCPPrompt {
-		out.ExposeAsMCPPrompt = true
 	}
 	if child.ReplacedBy != "" {
 		out.ReplacedBy = child.ReplacedBy

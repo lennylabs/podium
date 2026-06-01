@@ -54,7 +54,6 @@ Every artifact directory contains an `ARTIFACT.md`. Skill artifacts (`type: skil
 | `input` | `agent` | JSON Schema for the agent's input. |
 | `output` | `agent` | JSON Schema for the agent's output. |
 | `delegates_to` | `agent` | List of agent IDs this agent can call. Constrained to `agent`-type targets. |
-| `expose_as_mcp_prompt` | `command` | When `true`, exposed via MCP's `prompts/get` for slash-menu support. |
 | `rule_mode` | `rule` | `always` (default), `glob`, `auto`, `explicit`. |
 | `rule_globs` | `rule` | Required when `rule_mode: glob`. Comma-separated glob patterns. |
 | `rule_description` | `rule` | Required when `rule_mode: auto`. Drives the harness's autoload heuristic. |

@@ -1236,12 +1236,12 @@ func TestDocCLI_81_ScaffoldAgent(t *testing.T) {
 	}
 }
 
-// spec: doc "podium artifact scaffold", command row, `--expose-as-mcp-prompt`.
-func TestDocCLI_82_ScaffoldCommandExpose(t *testing.T) {
+// spec: doc "podium artifact scaffold", command row.
+func TestDocCLI_82_ScaffoldCommand(t *testing.T) {
 	root := t.TempDir()
 	dst := filepath.Join(root, "personal/code-change-pr")
-	cliWantExit(t, runPodium(t, "", nil, "artifact", "scaffold", "--type", "command", "--description", "Open a PR.", "--expose-as-mcp-prompt", "--yes", dst), 0, "scaffold command")
-	cliContains(t, readFile(t, filepath.Join(dst, "ARTIFACT.md")), "expose_as_mcp_prompt: true", "expose flag")
+	cliWantExit(t, runPodium(t, "", nil, "artifact", "scaffold", "--type", "command", "--description", "Open a PR.", "--yes", dst), 0, "scaffold command")
+	cliContains(t, readFile(t, filepath.Join(dst, "ARTIFACT.md")), "type: command", "command type")
 }
 
 // spec: doc "podium artifact scaffold", rule row, `--rule-mode`/`--rule-globs`.

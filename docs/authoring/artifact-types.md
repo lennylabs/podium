@@ -115,7 +115,6 @@ version: 1.0.0
 description: Guided module refactoring with configurable focus areas.
 tags: [command, refactoring]
 sensitivity: low
-expose_as_mcp_prompt: true
 variables:
   FOCUS: all
   PRESERVE_API: "true"
@@ -132,7 +131,7 @@ Analyze the specified module and refactor with focus on: **{{FOCUS}}**.
 ...
 ```
 
-Setting `expose_as_mcp_prompt: true` exposes the command via MCP's `prompts/get` so harnesses with slash-menu support can surface it directly to users. The wire field name keeps MCP's word for slash-menu templates, which MCP itself calls "prompts."
+Both `podium sync` and the MCP server materialize a command into the target harness's native command location (§6.7), so the harness's slash-command system surfaces it and applies the harness's own argument convention to the body. Podium does not project commands through MCP and defines no argument syntax of its own.
 
 ---
 

@@ -124,16 +124,11 @@ func TestScaffold_Command_LintClean(t *testing.T) {
 	exit, _, stderr := runScaffold([]string{
 		"--type", "command",
 		"--description", "Open a PR from the working tree.",
-		"--expose-as-mcp-prompt",
 		"--yes",
 		target,
 	}, "")
 	if exit != 0 {
 		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
-	}
-	body, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
-	if !bytes.Contains(body, []byte("expose_as_mcp_prompt: true")) {
-		t.Errorf("expected expose_as_mcp_prompt: true, got: %s", body)
 	}
 	assertLintClean(t, root)
 }

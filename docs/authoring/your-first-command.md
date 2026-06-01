@@ -33,7 +33,6 @@ when_to_use:
   - "At standup time, when summarizing yesterday's work into the team's standard format."
 tags: [dev-loop, standup, daily]
 sensitivity: low
-expose_as_mcp_prompt: true
 ---
 
 # Daily standup
@@ -62,8 +61,8 @@ Rules:
 
 A few field notes:
 
-- **`$ARGUMENTS`** is the substitution slot the harness fills with whatever follows the slash command. Different harnesses use slightly different placeholders natively; the canonical name in Podium frontmatter is `$ARGUMENTS`, and adapters translate as needed.
-- **`expose_as_mcp_prompt: true`** advertises the command via MCP's `prompts/get` endpoint so harnesses with a slash menu (Claude Code, Cursor, OpenCode, and similar) can surface it directly from the catalog. When `false`, the command still materializes for harnesses that read commands from disk, but it does not appear in MCP-driven slash menus.
+- The command body is materialized verbatim into the target harness's native command location (§6.7), so the harness's own argument convention applies to the body. For example, Claude Code reads `$ARGUMENTS` and `$1` from `.claude/commands/<name>.md`. Podium does not define an argument syntax of its own; write the body for the harness you target, or stay within a portable form.
+- Podium does not project commands through MCP. Both `podium sync` and the MCP server materialize the command to disk in the harness-native format, and the harness's slash-command system surfaces it.
 
 ---
 

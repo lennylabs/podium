@@ -199,11 +199,6 @@ output: { $ref: ./schemas/output.json }
 delegates_to:
   - finance/procurement/vendor-compliance-check@1.x
 
-# For type: command — opt-in projection as MCP prompt (see §5.2). The wire field
-# keeps the MCP-protocol name (`expose_as_mcp_prompt`) since MCP itself uses the
-# word "prompt" for slash-menu templates of this kind.
-expose_as_mcp_prompt: true
-
 # For type: rule — controls when the harness loads this rule into the agent's context.
 # The harness adapter (§6.7.1) translates these to the harness-native rule format.
 rule_mode: always | glob | auto | explicit  # default: always
@@ -700,7 +695,7 @@ To intentionally replace an artifact rather than extend it, the lower-precedence
 | `license`                              | Scalar; child wins (lint warning if changed across layers) |
 | `search_visibility`                    | Scalar; most-restrictive (`direct-only` > `indexed`)       |
 
-**Default for unlisted fields.** A child can override any frontmatter field by setting it; if the child omits the field, the parent's value is inherited unchanged. This applies to `deprecated`, `replaced_by`, `effort_hint`, `model_class_hint`, `sbom`, `expose_as_mcp_prompt`, `rule_mode`, `rule_globs`, `rule_description`, `hook_event`, `hook_action`, `server_identifier`, `target_harnesses`, `input`, `output`, and any extension-type fields not declared by their `TypeProvider`. Two fields are special cases. The child's `type:` must match the parent's; ingest rejects an `extends:` chain that crosses types. The child's `version:` is independent of the parent's; each artifact has its own version stored in the registry, and the parent version is pinned at the child's ingest time per §4.7.6.
+**Default for unlisted fields.** A child can override any frontmatter field by setting it; if the child omits the field, the parent's value is inherited unchanged. This applies to `deprecated`, `replaced_by`, `effort_hint`, `model_class_hint`, `sbom`, `rule_mode`, `rule_globs`, `rule_description`, `hook_event`, `hook_action`, `server_identifier`, `target_harnesses`, `input`, `output`, and any extension-type fields not declared by their `TypeProvider`. Two fields are special cases. The child's `type:` must match the parent's; ingest rejects an `extends:` chain that crosses types. The child's `version:` is independent of the parent's; each artifact has its own version stored in the registry, and the parent version is pinned at the child's ingest time per §4.7.6.
 
 Extension types register their own field semantics via `TypeProvider`.
 

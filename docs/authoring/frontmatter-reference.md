@@ -36,7 +36,7 @@ Skills split their frontmatter between `SKILL.md` and `ARTIFACT.md` so that `SKI
 | `type` | — | Yes (`type: skill`) | Yes |
 | `version`, `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes` | — | Yes | Yes |
 | `mcpServers`, `requiresApproval`, `runtime_requirements`, `sandbox_profile`, `effort_hint`, `model_class_hint`, `sbom`, `external_resources`, `extends`, `target_harnesses` | — | Yes | Yes |
-| Type-specific fields (`input`, `output`, `delegates_to`, `expose_as_mcp_prompt`, `rule_*`, `hook_*`, `server_identifier`) | — | Yes (when applicable) | Yes (when applicable) |
+| Type-specific fields (`input`, `output`, `delegates_to`, `rule_*`, `hook_*`, `server_identifier`) | — | Yes (when applicable) | Yes (when applicable) |
 
 For non-skill types (`agent`, `context`, `command`, `rule`, `hook`, `mcp-server`, extension types), `ARTIFACT.md` carries every field. There is no `SKILL.md`.
 
@@ -173,9 +173,6 @@ output: { $ref: ./schemas/output.json }
 delegates_to:
   - finance/procurement/vendor-compliance-check@1.x
 
-# For type: command — opt-in projection as MCP prompt
-expose_as_mcp_prompt: true
-
 # For type: rule — controls when the harness loads this rule
 rule_mode: always | glob | auto | explicit   # default: always
 rule_globs: "src/**/*.ts,src/**/*.tsx"        # required when rule_mode: glob
@@ -212,7 +209,6 @@ target_harnesses: [claude-code, opencode]
 |:--|:--|:--|
 | `input` / `output` | `agent` | JSON Schemas the agent expects (input) and produces (output). |
 | `delegates_to` | `agent` | List of agent IDs this agent can delegate to. Constrained to `agent`-type targets at lint time. |
-| `expose_as_mcp_prompt` | `command` | When `true`, the MCP server exposes the command via MCP's `prompts/get` for slash-menu support. The field name keeps MCP's protocol vocabulary. |
 | `rule_mode` | `rule` | One of `always`, `glob`, `auto`, `explicit`. See [Rule modes](rule-modes). |
 | `rule_globs` | `rule` | Required when `rule_mode: glob`. Comma-separated glob patterns. |
 | `rule_description` | `rule` | Required when `rule_mode: auto`. Drives the harness's autoload heuristic. |

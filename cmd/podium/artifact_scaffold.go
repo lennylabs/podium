@@ -50,16 +50,15 @@ type scaffoldOpts struct {
 	extends     string
 
 	// Type-specific.
-	inputSchema     string
-	outputSchema    string
-	delegatesTo     string
-	exposeMCPPrompt bool
-	ruleMode        string
-	ruleGlobs       string
-	ruleDesc        string
-	hookEvent       string
-	hookAction      string
-	serverID        string
+	inputSchema  string
+	outputSchema string
+	delegatesTo  string
+	ruleMode     string
+	ruleGlobs    string
+	ruleDesc     string
+	hookEvent    string
+	hookAction   string
+	serverID     string
 
 	// Behavior.
 	force          bool
@@ -88,7 +87,6 @@ func artifactScaffoldWithIO(args []string, in io.Reader, out, errOut io.Writer) 
 	fs.StringVar(&opts.inputSchema, "input-schema", "", "type=agent: relative path to input JSON schema")
 	fs.StringVar(&opts.outputSchema, "output-schema", "", "type=agent: relative path to output JSON schema")
 	fs.StringVar(&opts.delegatesTo, "delegates-to", "", "type=agent: comma-separated delegation targets")
-	fs.BoolVar(&opts.exposeMCPPrompt, "expose-as-mcp-prompt", false, "type=command: project as MCP prompt")
 	fs.StringVar(&opts.ruleMode, "rule-mode", "always", "type=rule: one of "+strings.Join(validRuleModes, "|"))
 	fs.StringVar(&opts.ruleGlobs, "rule-globs", "", "type=rule: required when --rule-mode=glob")
 	fs.StringVar(&opts.ruleDesc, "rule-description", "", "type=rule: required when --rule-mode=auto")
@@ -411,10 +409,6 @@ func writeTypeSpecific(sb *strings.Builder, o *scaffoldOpts) {
 			for _, t := range targets {
 				fmt.Fprintf(sb, "  - %s\n", t)
 			}
-		}
-	case "command":
-		if o.exposeMCPPrompt {
-			sb.WriteString("expose_as_mcp_prompt: true\n")
 		}
 	case "rule":
 		fmt.Fprintf(sb, "rule_mode: %s\n", o.ruleMode)

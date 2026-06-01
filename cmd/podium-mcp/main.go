@@ -917,19 +917,15 @@ func (s *mcpServer) handle(req rpcRequest) rpcResponse {
 			}
 			return resp
 		}
-		// §5 capability set: `{tools: true, prompts: <conditional on
-		// opted-in command artifacts>, sessionCorrelation: true}`. The
-		// `resources` capability backs the §5.0 read-only mirror of
-		// load_artifact (F-5.0.1). `prompts` is advertised only when at
-		// least one `type: command` artifact opted into projection, per
-		// §5.2's conditional wording (F-5.2.2).
+		// §5 capability set: `{tools: true, resources: true,
+		// sessionCorrelation: true}`. The `resources` capability backs the
+		// §5.0 read-only mirror of load_artifact (F-5.0.1). Command artifacts
+		// are delivered through harness-native materialization (§6.7), not an
+		// MCP prompt projection, so no `prompts` capability is advertised.
 		caps := map[string]any{
 			"tools":              map[string]any{},
 			"sessionCorrelation": true,
 			"resources":          map[string]any{},
-		}
-		if s.promptsCapabilityActive() {
-			caps["prompts"] = map[string]any{}
 		}
 		resp.Result = map[string]any{
 			// §6.9: the negotiated version, the lower of the host's request
@@ -950,11 +946,6 @@ func (s *mcpServer) handle(req rpcRequest) rpcResponse {
 		}
 	case "tools/call":
 		resp.Result = s.callTool(req.Params)
-	case "prompts/list":
-		// §5.2 — opt-in projection of `type: command` artifacts.
-		resp.Result = s.handlePromptsList()
-	case "prompts/get":
-		resp.Result = s.handlePromptsGet(req.Params)
 	case "resources/list":
 		// §5.0 — read-only mirror of load_artifact: artifact bodies are
 		// also exposed through MCP's resource protocol.

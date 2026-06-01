@@ -221,9 +221,8 @@ func TestArtifactTypes_ContextClaudeCodeLayout(t *testing.T) {
 
 // ---- command ---------------------------------------------------------------
 
-// T-D-artifact-types-11 — scaffold command --expose-as-mcp-prompt writes the
-// field and lints clean.
-func TestArtifactTypes_ScaffoldCommandExpose(t *testing.T) {
+// T-D-artifact-types-11 — scaffold command lints clean.
+func TestArtifactTypes_ScaffoldCommand(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	out := filepath.Join(root, "tools/refactor-module")
@@ -232,40 +231,16 @@ func TestArtifactTypes_ScaffoldCommandExpose(t *testing.T) {
 		"--description", "Guided module refactoring with configurable focus areas.",
 		"--tags", "command,refactoring",
 		"--sensitivity", "low",
-		"--expose-as-mcp-prompt",
 		"--yes", out)
 	if sc.Exit != 0 {
 		t.Fatalf("scaffold exit=%d stderr=%s", sc.Exit, sc.Stderr)
 	}
 	art := readFile(t, filepath.Join(out, "ARTIFACT.md"))
-	if !strings.Contains(art, "type: command") || !strings.Contains(art, "expose_as_mcp_prompt: true") {
-		t.Errorf("ARTIFACT.md missing command/expose fields:\n%s", art)
+	if !strings.Contains(art, "type: command") {
+		t.Errorf("ARTIFACT.md missing type: command:\n%s", art)
 	}
 	if l := runPodium(t, "", nil, "lint", "--registry", root); l.Exit != 0 {
 		t.Errorf("lint exit=%d stdout=%q", l.Exit, l.Stdout)
-	}
-}
-
-// T-D-artifact-types-12 — an exposed command is visible via MCP prompts/list.
-func TestArtifactTypes_CommandInPromptsList(t *testing.T) {
-	t.Parallel()
-	art := "---\ntype: command\nname: refactor-module\nversion: 1.0.0\ndescription: Guided refactoring.\nexpose_as_mcp_prompt: true\n---\n\n$ARGUMENTS\n"
-	srv := startServer(t, writeRegistry(t, map[string]string{"tools/refactor-module/ARTIFACT.md": art}))
-	res := mcpExec(t, mcpServerEnv(t, srv.BaseURL), rpcReq{ID: 1, Method: "prompts/list", Params: map[string]any{}})
-	if body := mustJSON(rpcResult(t, res.Stdout, 1)); !strings.Contains(body, "tools/refactor-module") {
-		t.Errorf("prompts/list missing the exposed command:\n%s", body)
-	}
-}
-
-// T-D-artifact-types-13 — a command without expose_as_mcp_prompt is absent
-// from prompts/list.
-func TestArtifactTypes_CommandNotInPromptsList(t *testing.T) {
-	t.Parallel()
-	art := "---\ntype: command\nname: refactor-module\nversion: 1.0.0\ndescription: Guided refactoring.\n---\n\n$ARGUMENTS\n"
-	srv := startServer(t, writeRegistry(t, map[string]string{"tools/refactor-module/ARTIFACT.md": art}))
-	res := mcpExec(t, mcpServerEnv(t, srv.BaseURL), rpcReq{ID: 1, Method: "prompts/list", Params: map[string]any{}})
-	if body := mustJSON(rpcResult(t, res.Stdout, 1)); strings.Contains(body, "tools/refactor-module") {
-		t.Errorf("prompts/list leaked a non-exposed command:\n%s", body)
 	}
 }
 

@@ -116,24 +116,6 @@ func TestCapabilityMatrix_MCPServers(t *testing.T) {
 	}
 }
 
-// Spec: §6.7.1 — expose_as_mcp_prompt is ✓ across every first-class
-// adapter.
-// Matrix: §6.7.1 (claude-code, expose_as_mcp_prompt)
-// Matrix: §6.7.1 (claude-desktop, expose_as_mcp_prompt)
-// Matrix: §6.7.1 (claude-cowork, expose_as_mcp_prompt)
-// Matrix: §6.7.1 (cursor, expose_as_mcp_prompt)
-// Matrix: §6.7.1 (codex, expose_as_mcp_prompt)
-// Matrix: §6.7.1 (opencode, expose_as_mcp_prompt)
-// Matrix: §6.7.1 (gemini, expose_as_mcp_prompt)
-// Matrix: §6.7.1 (pi, expose_as_mcp_prompt)
-// Matrix: §6.7.1 (hermes, expose_as_mcp_prompt)
-func TestCapabilityMatrix_ExposeAsMCPPrompt(t *testing.T) {
-	t.Parallel()
-	for _, id := range firstClassAdapters {
-		runMatrixField(t, id, "expose_as_mcp_prompt", "true")
-	}
-}
-
 // Spec: §6.7.1 — rule_mode: always is ✓ on every adapter except
 // gemini (⚠ fallback).
 // Matrix: §6.7.1 (claude-code, rule_mode_always)
