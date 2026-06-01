@@ -102,7 +102,7 @@ func vbMockEmbedder(t *testing.T) *httptest.Server {
 // T-D-vector-backends-1: sqlite-vec default not implemented (F-13.10.10).
 // Doc claims sqlite-vec is the standalone default; the implementation uses ""
 // (BM25 only) when PODIUM_VECTOR_BACKEND is unset.
-func TestVectorBackends_1_SqliteVecDefaultNotImplemented(t *testing.T) {
+func TestVectorBackend_SqliteVecDefaultNotImplemented(t *testing.T) {
 	t.Parallel()
 	// F-13.10.10: standalone sqlite-vec hybrid default is not implemented.
 	// Assert actual behavior: server starts, /healthz 200, no sqlite-vec line.
@@ -123,7 +123,7 @@ func TestVectorBackends_1_SqliteVecDefaultNotImplemented(t *testing.T) {
 }
 
 // T-D-vector-backends-2: filesystem-only registry has no vector search.
-func TestVectorBackends_2_FilesystemOnlyNoVectorSearch(t *testing.T) {
+func TestVectorBackend_FilesystemOnlyNoVectorSearch(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
 	target := t.TempDir()
@@ -146,7 +146,7 @@ func TestVectorBackends_2_FilesystemOnlyNoVectorSearch(t *testing.T) {
 // PODIUM_PINECONE_INFERENCE_MODEL (F-13.12.6). The inference model enables
 // self-embedding, so vector search is wired with no separate embedding
 // provider; the server logs vector=pinecone with a self-embedding model.
-func TestVectorBackends_3_PineconeSelfEmbedding(t *testing.T) {
+func TestVectorBackend_PineconeSelfEmbedding(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
 	srv := startServerArgs(t, vbServerEnv(t,
@@ -171,7 +171,7 @@ func TestVectorBackends_3_PineconeSelfEmbedding(t *testing.T) {
 // T-D-vector-backends-4: Pinecone storage-only happy path needs mock vector +
 // mock embedder with correct dimensions; skipped as too uncertain without
 // verified wiring.
-func TestVectorBackends_4_PineconeStorageOnlyHappyPath(t *testing.T) {
+func TestVectorBackend_PineconeStorageOnlyHappyPath(t *testing.T) {
 	t.Parallel()
 	t.Skip("storage-only happy path needs a faithful mock embedder + vector server; covered by pkg/vector cloud tests")
 }
@@ -180,7 +180,7 @@ func TestVectorBackends_4_PineconeStorageOnlyHappyPath(t *testing.T) {
 // misconfiguration; §13.12 ("refuses to start when a backend is selected but
 // its required values are missing, naming the missing keys") makes it a hard
 // startup error rather than a silent BM25 fallback (F-13.12.10).
-func TestVectorBackends_5_PineconeMissingAPIKey(t *testing.T) {
+func TestVectorBackend_PineconeMissingAPIKey(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
 	vbExpectRefuseToStart(t, reg, "PODIUM_PINECONE_API_KEY",
@@ -193,7 +193,7 @@ func TestVectorBackends_5_PineconeMissingAPIKey(t *testing.T) {
 }
 
 // T-D-vector-backends-6: Pinecone INDEX without HOST => clear error.
-func TestVectorBackends_6_PineconeIndexWithoutHost(t *testing.T) {
+func TestVectorBackend_PineconeIndexWithoutHost(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
 	srv := startServerArgs(t, vbServerEnv(t,
@@ -220,13 +220,13 @@ func TestVectorBackends_6_PineconeIndexWithoutHost(t *testing.T) {
 
 // T-D-vector-backends-7: Pinecone namespace default is empty (not "default").
 // Wire-level assertion requires a mock Pinecone recording upsert namespace.
-func TestVectorBackends_7_PineconeNamespaceDefault(t *testing.T) {
+func TestVectorBackend_PineconeNamespaceDefault(t *testing.T) {
 	t.Parallel()
 	t.Skip("namespace default is a wire-level assertion needing a mock Pinecone recording the upsert body; covered by pkg/vector NewPinecone tests")
 }
 
 // T-D-vector-backends-8: Pinecone standard YAML config sets vector_backend.
-func TestVectorBackends_8_PineconeYAMLConfig(t *testing.T) {
+func TestVectorBackend_PineconeYAMLConfig(t *testing.T) {
 	t.Parallel()
 	cfgDir := t.TempDir()
 	cfgFile := cfgDir + "/registry.yaml"
@@ -264,7 +264,7 @@ func TestVectorBackends_8_PineconeYAMLConfig(t *testing.T) {
 }
 
 // T-D-vector-backends-9: env overrides YAML vector_backend.
-func TestVectorBackends_9_EnvOverridesYAMLVectorBackend(t *testing.T) {
+func TestVectorBackend_EnvOverridesYAMLVectorBackend(t *testing.T) {
 	t.Parallel()
 	cfgDir := t.TempDir()
 	cfgFile := cfgDir + "/registry.yaml"
@@ -292,7 +292,7 @@ func TestVectorBackends_9_EnvOverridesYAMLVectorBackend(t *testing.T) {
 // T-D-vector-backends-10: Weaviate self-embedding via PODIUM_WEAVIATE_VECTORIZER
 // (F-13.12.6). The vectorizer module enables self-embedding, so vector search
 // is wired with no separate embedding provider.
-func TestVectorBackends_10_WeaviateSelfEmbedding(t *testing.T) {
+func TestVectorBackend_WeaviateSelfEmbedding(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
 	srv := startServerArgs(t, vbServerEnv(t,
@@ -316,7 +316,7 @@ func TestVectorBackends_10_WeaviateSelfEmbedding(t *testing.T) {
 }
 
 // T-D-vector-backends-11: Weaviate storage-only happy path.
-func TestVectorBackends_11_WeaviateStorageOnlyHappyPath(t *testing.T) {
+func TestVectorBackend_WeaviateStorageOnlyHappyPath(t *testing.T) {
 	t.Parallel()
 	t.Skip("storage-only happy path needs a faithful mock Weaviate + mock embedder; covered by pkg/vector cloud tests")
 }
@@ -324,7 +324,7 @@ func TestVectorBackends_11_WeaviateStorageOnlyHappyPath(t *testing.T) {
 // T-D-vector-backends-12: Weaviate selected without its URL is a
 // misconfiguration; §13.12 makes it a hard startup error naming the missing
 // key rather than a silent BM25 fallback (F-13.12.10).
-func TestVectorBackends_12_WeaviateMissingURL(t *testing.T) {
+func TestVectorBackend_WeaviateMissingURL(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
 	vbExpectRefuseToStart(t, reg, "PODIUM_WEAVIATE_URL",
@@ -339,13 +339,13 @@ func TestVectorBackends_12_WeaviateMissingURL(t *testing.T) {
 
 // T-D-vector-backends-13: Weaviate default collection PodiumArtifacts.
 // Wire-level assertion requires a mock Weaviate recording the PUT path.
-func TestVectorBackends_13_WeaviateDefaultCollection(t *testing.T) {
+func TestVectorBackend_WeaviateDefaultCollection(t *testing.T) {
 	t.Parallel()
 	t.Skip("default collection is a wire-level assertion needing a mock Weaviate recording PUT paths; covered by pkg/vector tests")
 }
 
 // T-D-vector-backends-14: Weaviate YAML standard deployment config sets vector_backend.
-func TestVectorBackends_14_WeaviateYAMLConfig(t *testing.T) {
+func TestVectorBackend_WeaviateYAMLConfig(t *testing.T) {
 	t.Parallel()
 	cfgDir := t.TempDir()
 	cfgFile := cfgDir + "/registry.yaml"
@@ -373,7 +373,7 @@ func TestVectorBackends_14_WeaviateYAMLConfig(t *testing.T) {
 // PODIUM_QDRANT_INFERENCE_MODEL (F-13.12.6). The inference model enables
 // self-embedding, so vector search is wired with no separate embedding
 // provider.
-func TestVectorBackends_15_QdrantSelfEmbedding(t *testing.T) {
+func TestVectorBackend_QdrantSelfEmbedding(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
 	srv := startServerArgs(t, vbServerEnv(t,
@@ -397,7 +397,7 @@ func TestVectorBackends_15_QdrantSelfEmbedding(t *testing.T) {
 }
 
 // T-D-vector-backends-16: Qdrant storage-only happy path.
-func TestVectorBackends_16_QdrantStorageOnlyHappyPath(t *testing.T) {
+func TestVectorBackend_QdrantStorageOnlyHappyPath(t *testing.T) {
 	t.Parallel()
 	t.Skip("storage-only happy path needs a faithful mock Qdrant + mock embedder; covered by pkg/vector cloud tests")
 }
@@ -405,7 +405,7 @@ func TestVectorBackends_16_QdrantStorageOnlyHappyPath(t *testing.T) {
 // T-D-vector-backends-17: Qdrant selected without its URL is a
 // misconfiguration; §13.12 makes it a hard startup error naming the missing
 // key rather than a silent BM25 fallback (F-13.12.10).
-func TestVectorBackends_17_QdrantMissingURL(t *testing.T) {
+func TestVectorBackend_QdrantMissingURL(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
 	vbExpectRefuseToStart(t, reg, "PODIUM_QDRANT_URL",
@@ -420,13 +420,13 @@ func TestVectorBackends_17_QdrantMissingURL(t *testing.T) {
 
 // T-D-vector-backends-18: Qdrant default collection name is podium_artifacts (underscore).
 // Wire-level assertion requires a mock Qdrant recording PUT paths.
-func TestVectorBackends_18_QdrantDefaultCollection(t *testing.T) {
+func TestVectorBackend_QdrantDefaultCollection(t *testing.T) {
 	t.Parallel()
 	t.Skip("default collection name is a wire-level assertion needing a mock Qdrant recording request paths; covered by pkg/vector tests. Doc-accuracy note: doc shows podium-artifacts (hyphen), implementation defaults to podium_artifacts (underscore)")
 }
 
 // T-D-vector-backends-19: Qdrant YAML standard deployment config sets vector_backend.
-func TestVectorBackends_19_QdrantYAMLConfig(t *testing.T) {
+func TestVectorBackend_QdrantYAMLConfig(t *testing.T) {
 	t.Parallel()
 	cfgDir := t.TempDir()
 	cfgFile := cfgDir + "/registry.yaml"
@@ -451,7 +451,7 @@ func TestVectorBackends_19_QdrantYAMLConfig(t *testing.T) {
 }
 
 // T-D-vector-backends-20: admin reembed bare POST exits 0 with JSON.
-func TestVectorBackends_20_AdminReembedBarePOST(t *testing.T) {
+func TestVectorBackend_AdminReembedBarePOST(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
 	srv := startServer(t, reg)
@@ -477,7 +477,7 @@ func TestVectorBackends_20_AdminReembedBarePOST(t *testing.T) {
 }
 
 // T-D-vector-backends-21: admin reembed --all flag is not recognized (exits 2).
-func TestVectorBackends_21_AdminReembedAllFlagUnknown(t *testing.T) {
+func TestVectorBackend_AdminReembedAllFlagUnknown(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
 	srv := startServer(t, reg)
@@ -495,7 +495,7 @@ func TestVectorBackends_21_AdminReembedAllFlagUnknown(t *testing.T) {
 // recognized flag (spec §4.7 "podium admin reembed --since"; F-4.7.8).
 // A valid RFC3339 timestamp reaches the endpoint (no flag-parse error);
 // a malformed one is rejected with a usage error before any request.
-func TestVectorBackends_22_AdminReembedSinceFlag(t *testing.T) {
+func TestVectorBackend_AdminReembedSinceFlag(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
 	srv := startServer(t, reg)
@@ -529,7 +529,7 @@ func TestVectorBackends_22_AdminReembedSinceFlag(t *testing.T) {
 }
 
 // T-D-vector-backends-23: admin reembed --artifact --version for a specific artifact.
-func TestVectorBackends_23_AdminReembedArtifactVersion(t *testing.T) {
+func TestVectorBackend_AdminReembedArtifactVersion(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
 	srv := startServer(t, reg)
@@ -549,7 +549,7 @@ func TestVectorBackends_23_AdminReembedArtifactVersion(t *testing.T) {
 }
 
 // T-D-vector-backends-24: admin reembed --artifact without --version exits 2.
-func TestVectorBackends_24_AdminReembedArtifactNoVersion(t *testing.T) {
+func TestVectorBackend_AdminReembedArtifactNoVersion(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
 	srv := startServer(t, reg)
@@ -567,7 +567,7 @@ func TestVectorBackends_24_AdminReembedArtifactNoVersion(t *testing.T) {
 }
 
 // T-D-vector-backends-25: admin reembed without --registry exits 2.
-func TestVectorBackends_25_AdminReembedNoRegistry(t *testing.T) {
+func TestVectorBackend_AdminReembedNoRegistry(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY="},
 		"admin", "reembed",
@@ -581,7 +581,7 @@ func TestVectorBackends_25_AdminReembedNoRegistry(t *testing.T) {
 }
 
 // T-D-vector-backends-26: GET /v1/admin/reembed => 405 registry.invalid_argument.
-func TestVectorBackends_26_GetReembedIs405(t *testing.T) {
+func TestVectorBackend_GetReembedIs405(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
 	srv := startServer(t, reg)
@@ -595,7 +595,7 @@ func TestVectorBackends_26_GetReembedIs405(t *testing.T) {
 }
 
 // T-D-vector-backends-27: POST /v1/admin/reembed?artifact=foo without version => 400.
-func TestVectorBackends_27_PostReembedArtifactNoVersion400(t *testing.T) {
+func TestVectorBackend_PostReembedArtifactNoVersion400(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
 	srv := startServer(t, reg)
@@ -611,7 +611,7 @@ func TestVectorBackends_27_PostReembedArtifactNoVersion400(t *testing.T) {
 // T-D-vector-backends-28: search degrades to BM25 when vector backend unreachable.
 // Also documents the doc-accuracy gap: the response does NOT include a "degraded"
 // key in the HTTP body (only SearchResult.Degraded is set internally).
-func TestVectorBackends_28_SearchDegradesToBM25WhenVectorUnreachable(t *testing.T) {
+func TestVectorBackend_SearchDegradesToBM25WhenVectorUnreachable(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
 	// Use a Pinecone backend with a host that will refuse connections.
@@ -640,7 +640,7 @@ func TestVectorBackends_28_SearchDegradesToBM25WhenVectorUnreachable(t *testing.
 }
 
 // T-D-vector-backends-29: PODIUM_EMBEDDING_PROVIDER empty disables embedding => BM25.
-func TestVectorBackends_29_EmptyEmbeddingProviderDegradesToBM25(t *testing.T) {
+func TestVectorBackend_EmptyEmbeddingProviderDegradesToBM25(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
 	srv := startServerArgs(t, vbServerEnv(t,
@@ -661,7 +661,7 @@ func TestVectorBackends_29_EmptyEmbeddingProviderDegradesToBM25(t *testing.T) {
 }
 
 // T-D-vector-backends-30: unknown PODIUM_VECTOR_BACKEND => warning + BM25 fallback.
-func TestVectorBackends_30_UnknownVectorBackendWarning(t *testing.T) {
+func TestVectorBackend_UnknownVectorBackendWarning(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
 	srv := startServerArgs(t, vbServerEnv(t,
@@ -682,7 +682,7 @@ func TestVectorBackends_30_UnknownVectorBackendWarning(t *testing.T) {
 }
 
 // T-D-vector-backends-31: unknown PODIUM_EMBEDDING_PROVIDER => warning.
-func TestVectorBackends_31_UnknownEmbeddingProviderWarning(t *testing.T) {
+func TestVectorBackend_UnknownEmbeddingProviderWarning(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
 	srv := startServerArgs(t, vbServerEnv(t,
@@ -704,7 +704,7 @@ func TestVectorBackends_31_UnknownEmbeddingProviderWarning(t *testing.T) {
 // OPENAI_API_KEY is a misconfiguration; §13.12 makes it a hard startup error
 // naming the missing key (F-13.12.10). An embedding provider set to the empty
 // string is a separate, intentional disable that degrades to BM25 (test 29).
-func TestVectorBackends_32_OpenAIMissingAPIKey(t *testing.T) {
+func TestVectorBackend_OpenAIMissingAPIKey(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
 	vbExpectRefuseToStart(t, reg, "OPENAI_API_KEY",
@@ -714,7 +714,7 @@ func TestVectorBackends_32_OpenAIMissingAPIKey(t *testing.T) {
 }
 
 // T-D-vector-backends-33: MCP overlay search uses BM25 regardless of PODIUM_VECTOR_BACKEND.
-func TestVectorBackends_33_MCPOverlaySearchBM25Regardless(t *testing.T) {
+func TestVectorBackend_MCPOverlaySearchBM25Regardless(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"registry-item/ARTIFACT.md": contextArtifact("registry-item"),
@@ -755,7 +755,7 @@ func TestVectorBackends_33_MCPOverlaySearchBM25Regardless(t *testing.T) {
 }
 
 // T-D-vector-backends-34: MCP merges registry and overlay results.
-func TestVectorBackends_34_MCPMergesRegistryAndOverlayResults(t *testing.T) {
+func TestVectorBackend_MCPMergesRegistryAndOverlayResults(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"registry-artifact/ARTIFACT.md": contextArtifact("unique-registry-term"),
@@ -789,55 +789,55 @@ func TestVectorBackends_34_MCPMergesRegistryAndOverlayResults(t *testing.T) {
 }
 
 // T-D-vector-backends-35: backend switch Pinecone => Qdrant with reembed.
-func TestVectorBackends_35_BackendSwitchReembed(t *testing.T) {
+func TestVectorBackend_BackendSwitchReembed(t *testing.T) {
 	t.Parallel()
 	t.Skip("backend switch needs two mock vector servers and a verified embedder wiring; covered by pkg/vector cloud tests")
 }
 
 // T-D-vector-backends-36: reembed --only-missing skips already-embedded artifacts.
-func TestVectorBackends_36_ReembedOnlyMissing(t *testing.T) {
+func TestVectorBackend_ReembedOnlyMissing(t *testing.T) {
 	t.Parallel()
 	t.Skip("--only-missing skip logic requires a mock vector backend that correctly answers probe queries; covered by pkg/vector tests")
 }
 
 // T-D-vector-backends-37: Pinecone per-tenant namespace isolation wire assertion.
-func TestVectorBackends_37_PineconeNamespaceIsolation(t *testing.T) {
+func TestVectorBackend_PineconeNamespaceIsolation(t *testing.T) {
 	t.Parallel()
 	t.Skip("per-tenant namespace isolation is a wire-level assertion needing a mock Pinecone recording upsert bodies; covered by pkg/vector Pinecone tests")
 }
 
 // T-D-vector-backends-38: Qdrant per-tenant tenant_id filter wire assertion.
-func TestVectorBackends_38_QdrantTenantIDFilter(t *testing.T) {
+func TestVectorBackend_QdrantTenantIDFilter(t *testing.T) {
 	t.Parallel()
 	t.Skip("tenant_id filter is a wire-level assertion needing a mock Qdrant recording query bodies; covered by pkg/vector Qdrant tests")
 }
 
 // T-D-vector-backends-39: Weaviate per-tenant tenantId property filter wire assertion.
-func TestVectorBackends_39_WeaviateTenantIDFilter(t *testing.T) {
+func TestVectorBackend_WeaviateTenantIDFilter(t *testing.T) {
 	t.Parallel()
 	t.Skip("tenantId filter is a wire-level assertion needing a mock Weaviate recording GraphQL bodies; covered by pkg/vector Weaviate tests")
 }
 
 // T-D-vector-backends-40: Pinecone Api-Key header wire assertion.
-func TestVectorBackends_40_PineconeApiKeyHeader(t *testing.T) {
+func TestVectorBackend_PineconeApiKeyHeader(t *testing.T) {
 	t.Parallel()
 	t.Skip("Api-Key header is a wire-level assertion needing a mock Pinecone validating headers; covered by pkg/vector Pinecone tests")
 }
 
 // T-D-vector-backends-41: Weaviate Authorization Bearer header wire assertion.
-func TestVectorBackends_41_WeaviateAuthorizationHeader(t *testing.T) {
+func TestVectorBackend_WeaviateAuthorizationHeader(t *testing.T) {
 	t.Parallel()
 	t.Skip("Authorization Bearer header is a wire-level assertion needing a mock Weaviate validating headers; covered by pkg/vector Weaviate tests")
 }
 
 // T-D-vector-backends-42: Qdrant api-key header (lowercase) wire assertion.
-func TestVectorBackends_42_QdrantApiKeyHeaderLowercase(t *testing.T) {
+func TestVectorBackend_QdrantApiKeyHeaderLowercase(t *testing.T) {
 	t.Parallel()
 	t.Skip("api-key (lowercase) header is a wire-level assertion needing a mock Qdrant validating headers; covered by pkg/vector Qdrant tests")
 }
 
 // T-D-vector-backends-43: config show reflects resolved vector_backend and embedding_provider.
-func TestVectorBackends_43_ConfigShowReflectsVectorAndEmbedder(t *testing.T) {
+func TestVectorBackend_ConfigShowReflectsVectorAndEmbedder(t *testing.T) {
 	t.Parallel()
 	out := vbConfigShowRow(t, []string{
 		"PODIUM_VECTOR_BACKEND=qdrant-cloud",
@@ -859,7 +859,7 @@ func TestVectorBackends_43_ConfigShowReflectsVectorAndEmbedder(t *testing.T) {
 
 // T-D-vector-backends-44: Pinecone trailing slash stripped from host URL.
 // Wire-level: covered by pkg/vector NewPinecone TrimRight test.
-func TestVectorBackends_44_PineconeTrailingSlashStripped(t *testing.T) {
+func TestVectorBackend_PineconeTrailingSlashStripped(t *testing.T) {
 	t.Parallel()
 	t.Skip("trailing slash stripping is a unit-level assertion in pkg/vector NewPinecone (strings.TrimRight); covered by pkg/vector tests")
 }

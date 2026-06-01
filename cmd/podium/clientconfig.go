@@ -151,25 +151,7 @@ func configClientShowAt(cwd, home string, asJSON bool, explain string) int {
 	profs := resolveProfiles(scopes)
 
 	if asJSON {
-		type collisionJSON struct {
-			Profile string   `json:"profile"`
-			Scopes  []string `json:"scopes"`
-			Winner  string   `json:"winner"`
-		}
-		payload := map[string]any{}
-		payload["workspace"] = ws
-		payload["defaults"] = defs
-		profOut := map[string]any{}
-		var collisions []collisionJSON
-		for name, r := range profs {
-			profOut[name] = map[string]any{"from": r.Winner, "profile": r.Profile}
-			if len(r.Defined) > 1 {
-				collisions = append(collisions, collisionJSON{Profile: name, Scopes: r.Defined, Winner: r.Winner})
-			}
-		}
-		payload["profiles"] = profOut
-		payload["collisions"] = collisions
-		_ = json.NewEncoder(os.Stdout).Encode(payload)
+		_ = json.NewEncoder(os.Stdout).Encode(clientPayload(ws, defs, profs))
 		return 0
 	}
 
@@ -207,6 +189,39 @@ func configClientShowAt(cwd, home string, asJSON bool, explain string) int {
 		fmt.Fprintf(os.Stdout, "\nProfile collisions: %d (%s)\n", collisionCount, strings.Join(collisionLines, "; "))
 	}
 	return 0
+}
+
+// clientPayloadAt resolves the client sync.yaml scopes at cwd/home and returns
+// the JSON payload for the combined effective view (config show --json).
+func clientPayloadAt(cwd, home string) (map[string]any, error) {
+	scopes, ws, err := loadClientScopes(cwd, home)
+	if err != nil {
+		return nil, err
+	}
+	return clientPayload(ws, resolveDefaults(scopes), resolveProfiles(scopes)), nil
+}
+
+// clientPayload builds the JSON object for the client sync.yaml view: the
+// workspace, the resolved defaults, the per-profile winners, and the profile
+// collisions. Shared by `config show --json` and the combined effective view.
+func clientPayload(ws string, defs map[string]provValue, profs map[string]profileResolution) map[string]any {
+	type collisionJSON struct {
+		Profile string   `json:"profile"`
+		Scopes  []string `json:"scopes"`
+		Winner  string   `json:"winner"`
+	}
+	payload := map[string]any{"workspace": ws, "defaults": defs}
+	profOut := map[string]any{}
+	var collisions []collisionJSON
+	for name, r := range profs {
+		profOut[name] = map[string]any{"from": r.Winner, "profile": r.Profile}
+		if len(r.Defined) > 1 {
+			collisions = append(collisions, collisionJSON{Profile: name, Scopes: r.Defined, Winner: r.Winner})
+		}
+	}
+	payload["profiles"] = profOut
+	payload["collisions"] = collisions
+	return payload
 }
 
 // profileLines renders a profile's non-empty fields for the human view.
