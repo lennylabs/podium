@@ -141,7 +141,7 @@ The adapter set grows as new harnesses appear. Custom adapters register through 
 
 ## Claude Code
 
-**MCP server** (project-level `.claude/mcp.json` or user-level `~/.claude/mcp.json`):
+**MCP server** (project-level `.mcp.json` at the repository root, or user-level `~/.claude.json`; `claude mcp add` writes either):
 
 ```json
 {
@@ -396,21 +396,7 @@ podium sync
 
 ## Pi
 
-**MCP server** (`~/.pi/mcp.json` or project-local `.pi/mcp.json`):
-
-```json
-{
-  "mcpServers": {
-    "podium": {
-      "command": "podium-mcp",
-      "env": {
-        "PODIUM_REGISTRY": "https://podium.acme.com",
-        "PODIUM_HARNESS": "pi"
-      }
-    }
-  }
-}
-```
+**MCP server**: not applicable. Pi deliberately omits MCP, so the Podium MCP server cannot run inside Pi. Use `podium sync` for filesystem materialization.
 
 **`podium sync`**:
 
@@ -441,20 +427,16 @@ Pi loads `AGENTS.md` from the project tree (and `~/.pi/agent/AGENTS.md` globally
 
 ## Hermes
 
-**MCP server** (`~/.config/hermes/mcp.json` or project-local `.hermes/mcp.json`):
+**MCP server** (`~/.hermes/config.yaml` under the `mcp_servers:` key; YAML, not JSON):
 
-```json
-{
-  "mcpServers": {
-    "podium": {
-      "command": "podium-mcp",
-      "env": {
-        "PODIUM_REGISTRY": "https://podium.acme.com",
-        "PODIUM_HARNESS": "hermes"
-      }
-    }
-  }
-}
+```yaml
+# ~/.hermes/config.yaml
+mcp_servers:
+  podium:
+    command: podium-mcp
+    env:
+      PODIUM_REGISTRY: https://podium.acme.com
+      PODIUM_HARNESS: hermes
 ```
 
 **`podium sync`**:

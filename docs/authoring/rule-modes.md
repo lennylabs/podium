@@ -93,10 +93,10 @@ Legend: ✓ supported natively, ⚠ supported via fallback (lint warning), ✗ n
 | **codex, `always` and `explicit`** | Injected into root `AGENTS.md`. |
 | **codex, `glob`** | Common-ancestor `AGENTS.md` fallback (warning). |
 | **codex, `auto`** | Lint error. |
-| **pi, `always` and `explicit`** | Injected into project-local `.pi/AGENTS.md` or root `AGENTS.md`. Explicit-mode rules at `.pi/rules/<name>.md`. |
+| **pi, `always` and `explicit`** | Injected into root `AGENTS.md`. Pi has no native `.pi/rules/` directory in core. |
 | **pi, `glob`** | Common-ancestor `AGENTS.md` (warning). |
 | **pi, `auto`** | Lint error. |
-| **hermes, all modes** | `.claude/rules/<name>.md` written in cursor-`.mdc` format (Hermes natively reads `.cursor/rules/*.mdc`, so the cursor adapter output works directly). |
+| **hermes, all modes** | `.cursor/rules/<name>.mdc` written in cursor-`.mdc` format (Hermes natively reads `.cursor/rules/*.mdc`, `AGENTS.md`, and `.cursorrules`; it does not read `.claude/rules/`). |
 | **gemini** | Limited rule support; most modes fall back or fail. |
 | **generic** | AGENTS.md injection for `always`; common-ancestor for `glob`; standalone files referenced manually for `explicit`; `auto` not supported. |
 
