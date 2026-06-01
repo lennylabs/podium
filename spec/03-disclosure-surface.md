@@ -30,7 +30,7 @@ The disclosure surface only works if three other things hold.
 
 **Description quality.** Layers 1 and 2 only work if manifests and domains describe themselves well. Each artifact's `description` field must answer "when should I use this?" in one or two sentences; each `DOMAIN.md` author should similarly invest in `description`, `keywords`, and (where useful) the prose body. Those are what `search_domains` retrieves over and what `load_domain` returns. The registry lints for thin descriptions and flags clusters of artifacts whose summaries collide.
 
-**Learn-from-usage reranking.** The registry observes which artifacts actually get loaded after which queries (correlated within a `session_id`; see §5), and uses that signal to (a) rerank search results, (b) suggest import candidates to domain owners, and (c) flag artifacts whose authored descriptions underperform retrieval expectations.
+**Learn-from-usage reranking.** This concern is planned and not yet implemented; it is recorded here so the design intent is explicit. When built, the registry will observe which artifacts actually get loaded after which queries (correlated within a `session_id`; see §5), and use that signal to (a) rerank search results, (b) suggest import candidates to domain owners, and (c) flag artifacts whose authored descriptions underperform retrieval expectations. Until then, `search_domains` and `search_artifacts` order results by RRF fusion of BM25 and vector ranks, and `load_domain` orders notable artifacts by `featured` and then alphabetically. References to the learn-from-usage signal elsewhere (the §5 notable ordering and the §12 mitigations) denote this planned capability.
 
 ## 3.4 Discovery Flow
 
