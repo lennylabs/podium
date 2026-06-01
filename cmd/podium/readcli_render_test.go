@@ -107,6 +107,48 @@ func TestReadCLI_AttachesSessionToken(t *testing.T) {
 	}
 }
 
+// Spec: §7.6 / §7.6.1 — the doJSON helper (layer, admin, and quota commands)
+// attaches the same caller credential as the read commands, so authenticated
+// registry endpoints receive the Bearer token (F-14.15.1). The keychain key is
+// the registry base, so a full request URL with a path still resolves it.
+func TestDoJSON_AttachesSessionToken(t *testing.T) {
+	var gotAuth string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(ts.Close)
+	t.Setenv("PODIUM_SESSION_TOKEN", "layer-token")
+	if _, status := doJSON(ts.URL+"/v1/quota", "GET", nil); status != 200 {
+		t.Fatalf("doJSON status = %d, want 200", status)
+	}
+	if gotAuth != "Bearer layer-token" {
+		t.Errorf("Authorization = %q, want %q", gotAuth, "Bearer layer-token")
+	}
+}
+
+// Spec: §7.6.1 — with no credential configured doJSON reaches the registry
+// anonymously (no Authorization header).
+func TestDoJSON_NoTokenSendsNoAuthHeader(t *testing.T) {
+	var gotAuth string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(ts.Close)
+	t.Setenv("PODIUM_SESSION_TOKEN", "")
+	t.Setenv("PODIUM_SESSION_TOKEN_FILE", "")
+	t.Setenv("PODIUM_TOKEN_KEYCHAIN_NAME", "podium-nonexistent-test-service")
+	if _, status := doJSON(ts.URL+"/v1/quota", "GET", nil); status != 200 {
+		t.Fatalf("doJSON status = %d, want 200", status)
+	}
+	if gotAuth != "" {
+		t.Errorf("Authorization = %q, want empty", gotAuth)
+	}
+}
+
 // Spec: §7.6.1 — with no credential configured the read CLI reaches the
 // registry anonymously (no Authorization header), matching the prior behavior.
 func TestReadCLI_NoTokenSendsNoAuthHeader(t *testing.T) {

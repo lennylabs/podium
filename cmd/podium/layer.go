@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"time"
 )
@@ -397,6 +398,17 @@ func layerReingest(args []string) int {
 	return 0
 }
 
+// requestBase strips the path and query from a full request URL, recovering
+// the registry base (scheme://host[:port]) used as the keychain key by
+// `podium login`. On a parse failure it returns the input unchanged.
+func requestBase(rawURL string) string {
+	u, err := neturl.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return rawURL
+	}
+	return u.Scheme + "://" + u.Host
+}
+
 // doJSON makes an HTTP request with optional JSON body and returns
 // the response bytes + status code.
 func doJSON(url, method string, body any) ([]byte, int) {
@@ -411,6 +423,14 @@ func doJSON(url, method string, body any) ([]byte, int) {
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	// spec: §7.6 / §7.6.1 — layer, admin, and quota commands reach
+	// authenticated registry endpoints with the caller's identity. Attach the
+	// resolved credential (injected session token, then the keychain access
+	// token keyed by the registry URL) so the same omission flagged for the
+	// read commands does not recur here (F-14.15.1).
+	if tok := readCLIToken(requestBase(url)); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
