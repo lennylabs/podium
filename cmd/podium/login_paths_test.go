@@ -39,7 +39,9 @@ func TestLoginCmd_ExplicitTokenURL(t *testing.T) {
 
 // loginCmd reaches Poll when Initiate succeeds. The fixture stubs
 // the device endpoint with a valid response then refuses Poll;
-// exit 1 proves the polling branch was reached.
+// exit 1 proves the polling branch was reached. Initiate succeeds here, so
+// loginCmd reaches the browser auto-open step; TestMain pins PODIUM_NO_BROWSER
+// so this never execs `open https://x`.
 func TestLoginCmd_PollFailureExits1(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/token" {
