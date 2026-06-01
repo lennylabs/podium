@@ -197,7 +197,7 @@ func cliSeedAudit(t testing.TB, path, caller string) {
 // ===== Top-level flags & subcommand help (T-D-cli-1..9) =================
 
 // spec: doc "Top-level flags" — podium --help lists the subcommands.
-func TestDocCLI_1_HelpListsCommands(t *testing.T) {
+func TestCLI_HelpListsCommands(t *testing.T) {
 	res := runPodium(t, "", nil, "--help")
 	cliWantExit(t, res, 0, "podium --help")
 	for _, sub := range []string{"serve", "sync", "search", "layer", "admin"} {
@@ -209,21 +209,21 @@ func TestDocCLI_1_HelpListsCommands(t *testing.T) {
 }
 
 // spec: doc "Top-level flags" (`-h` form).
-func TestDocCLI_2_HelpShortForm(t *testing.T) {
+func TestCLI_HelpShortForm(t *testing.T) {
 	res := runPodium(t, "", nil, "-h")
 	cliWantExit(t, res, 0, "podium -h")
 	cliContains(t, res.Stdout, "serve", "-h listing")
 }
 
 // spec: doc "Top-level flags" (`podium help` form).
-func TestDocCLI_3_HelpWordForm(t *testing.T) {
+func TestCLI_HelpWordForm(t *testing.T) {
 	res := runPodium(t, "", nil, "help")
 	cliWantExit(t, res, 0, "podium help")
 	cliContains(t, res.Stdout, "serve", "help listing")
 }
 
 // spec: doc "Top-level flags" — podium --version prints a version string.
-func TestDocCLI_4_Version(t *testing.T) {
+func TestCLI_Version(t *testing.T) {
 	res := runPodium(t, "", nil, "--version")
 	cliWantExit(t, res, 0, "podium --version")
 	if !versionRE.MatchString(res.Stdout) {
@@ -232,7 +232,7 @@ func TestDocCLI_4_Version(t *testing.T) {
 }
 
 // spec: doc "Top-level flags" (`-v` form).
-func TestDocCLI_5_VersionShortForm(t *testing.T) {
+func TestCLI_VersionShortForm(t *testing.T) {
 	res := runPodium(t, "", nil, "-v")
 	cliWantExit(t, res, 0, "podium -v")
 	if !versionRE.MatchString(res.Stdout) {
@@ -241,7 +241,7 @@ func TestDocCLI_5_VersionShortForm(t *testing.T) {
 }
 
 // spec: doc "Top-level flags" (`podium version` form).
-func TestDocCLI_6_VersionWordForm(t *testing.T) {
+func TestCLI_VersionWordForm(t *testing.T) {
 	res := runPodium(t, "", nil, "version")
 	cliWantExit(t, res, 0, "podium version")
 	if !versionRE.MatchString(res.Stdout) {
@@ -250,7 +250,7 @@ func TestDocCLI_6_VersionWordForm(t *testing.T) {
 }
 
 // spec: doc "Subcommand help" — `podium serve --help` flag list.
-func TestDocCLI_7_ServeHelp(t *testing.T) {
+func TestCLI_ServeHelp(t *testing.T) {
 	res := runPodium(t, "", nil, "serve", "--help")
 	cliWantExit(t, res, 0, "serve --help")
 	// Leaf-subcommand --help is printed via the flag package to its
@@ -264,7 +264,7 @@ func TestDocCLI_7_ServeHelp(t *testing.T) {
 }
 
 // spec: doc "Subcommand help" — `podium admin --help` subcommand list.
-func TestDocCLI_8_AdminHelp(t *testing.T) {
+func TestCLI_AdminHelp(t *testing.T) {
 	for _, form := range [][]string{{"admin", "--help"}, {"admin", "-h"}, {"admin", "help"}} {
 		res := runPodium(t, "", nil, form...)
 		cliWantExit(t, res, 0, strings.Join(form, " "))
@@ -278,7 +278,7 @@ func TestDocCLI_8_AdminHelp(t *testing.T) {
 
 // spec: doc "Subcommand help" — a dispatcher group with no subcommand
 // exits 2 and prints the listing.
-func TestDocCLI_9_GroupWithoutSubcommandExits2(t *testing.T) {
+func TestCLI_GroupWithoutSubcommandExits2(t *testing.T) {
 	groups := [][]string{
 		{"admin"}, {"cache"}, {"config"}, {"domain"},
 		{"artifact"}, {"layer"}, {"profile"}, {"admin", "runtime"},
@@ -292,7 +292,7 @@ func TestDocCLI_9_GroupWithoutSubcommandExits2(t *testing.T) {
 // ===== Setup and config — podium init (T-D-cli-10..20) ==================
 
 // spec: doc "Setup and config — podium init".
-func TestDocCLI_10_InitWritesSyncYAML(t *testing.T) {
+func TestCLI_InitWritesSyncYAML(t *testing.T) {
 	ws := t.TempDir()
 	res := runPodium(t, ws, []string{"HOME=" + t.TempDir()}, "init", "--registry", "https://podium.example/")
 	cliWantExit(t, res, 0, "podium init")
@@ -303,7 +303,7 @@ func TestDocCLI_10_InitWritesSyncYAML(t *testing.T) {
 }
 
 // spec: doc "podium init", scope table row `--global`.
-func TestDocCLI_11_InitGlobal(t *testing.T) {
+func TestCLI_InitGlobal(t *testing.T) {
 	ws := t.TempDir()
 	home := t.TempDir()
 	res := runPodium(t, ws, []string{"HOME=" + home}, "init", "--global", "--registry", "https://podium.example/")
@@ -315,7 +315,7 @@ func TestDocCLI_11_InitGlobal(t *testing.T) {
 }
 
 // spec: doc "podium init", scope table row `--local`.
-func TestDocCLI_12_InitLocal(t *testing.T) {
+func TestCLI_InitLocal(t *testing.T) {
 	ws := t.TempDir()
 	res := runPodium(t, ws, []string{"HOME=" + t.TempDir()}, "init", "--local", "--registry", "https://staging.example/")
 	cliWantExit(t, res, 0, "init --local")
@@ -326,7 +326,7 @@ func TestDocCLI_12_InitLocal(t *testing.T) {
 }
 
 // spec: doc "podium init", value flag `--harness`.
-func TestDocCLI_13_InitHarness(t *testing.T) {
+func TestCLI_InitHarness(t *testing.T) {
 	ws := t.TempDir()
 	res := runPodium(t, ws, []string{"HOME=" + t.TempDir()}, "init", "--registry", "https://podium.example/", "--harness", "claude-code")
 	cliWantExit(t, res, 0, "init --harness")
@@ -337,7 +337,7 @@ func TestDocCLI_13_InitHarness(t *testing.T) {
 // the harness name (an unknown name is written verbatim), so every
 // documented name is accepted; the doc's implied rejection of unknown
 // names is not enforced (see T-D-cli-15).
-func TestDocCLI_14_InitHarnessRoster(t *testing.T) {
+func TestCLI_InitHarnessRoster(t *testing.T) {
 	names := []string{"none", "claude-code", "claude-desktop", "claude-cowork", "cursor", "codex", "gemini", "opencode", "pi", "hermes"}
 	for _, name := range names {
 		ws := t.TempDir()
@@ -350,7 +350,7 @@ func TestDocCLI_14_InitHarnessRoster(t *testing.T) {
 // spec: doc "podium init", `--harness` validation. The doc note says an
 // unknown harness "should exit non-zero"; the binary does not validate
 // and exits 0, writing the name verbatim. Recorded as a doc-accuracy gap.
-func TestDocCLI_15_InitUnknownHarness(t *testing.T) {
+func TestCLI_InitUnknownHarness(t *testing.T) {
 	ws := t.TempDir()
 	res := runPodium(t, ws, []string{"HOME=" + t.TempDir()}, "init", "--registry", "https://podium.example/", "--harness", "not-a-real-harness")
 	// Documented expectation: non-zero. Actual: 0 (no validation).
@@ -362,7 +362,7 @@ func TestDocCLI_15_InitUnknownHarness(t *testing.T) {
 }
 
 // spec: doc "podium init", `--standalone` flag.
-func TestDocCLI_16_InitStandalone(t *testing.T) {
+func TestCLI_InitStandalone(t *testing.T) {
 	ws := t.TempDir()
 	res := runPodium(t, ws, []string{"HOME=" + t.TempDir()}, "init", "--standalone")
 	cliWantExit(t, res, 0, "init --standalone")
@@ -370,7 +370,7 @@ func TestDocCLI_16_InitStandalone(t *testing.T) {
 }
 
 // spec: doc "podium init", `--force` flag (refuses overwrite).
-func TestDocCLI_17_InitRefusesOverwrite(t *testing.T) {
+func TestCLI_InitRefusesOverwrite(t *testing.T) {
 	ws := t.TempDir()
 	env := []string{"HOME=" + t.TempDir()}
 	cliWantExit(t, runPodium(t, ws, env, "init", "--registry", "first"), 0, "init first")
@@ -380,7 +380,7 @@ func TestDocCLI_17_InitRefusesOverwrite(t *testing.T) {
 }
 
 // spec: doc "podium init", `--force` flag (overwrites).
-func TestDocCLI_18_InitForceOverwrites(t *testing.T) {
+func TestCLI_InitForceOverwrites(t *testing.T) {
 	ws := t.TempDir()
 	env := []string{"HOME=" + t.TempDir()}
 	cliWantExit(t, runPodium(t, ws, env, "init", "--registry", "first"), 0, "init first")
@@ -389,7 +389,7 @@ func TestDocCLI_18_InitForceOverwrites(t *testing.T) {
 }
 
 // spec: doc "podium init", gitignore behavior (no duplicate entries).
-func TestDocCLI_19_InitGitignoreNoDuplicate(t *testing.T) {
+func TestCLI_InitGitignoreNoDuplicate(t *testing.T) {
 	ws := t.TempDir()
 	if err := os.WriteFile(filepath.Join(ws, ".gitignore"), []byte(".podium/sync.local.yaml\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -403,7 +403,7 @@ func TestDocCLI_19_InitGitignoreNoDuplicate(t *testing.T) {
 }
 
 // spec: doc "podium init", `--target` value flag.
-func TestDocCLI_20_InitTarget(t *testing.T) {
+func TestCLI_InitTarget(t *testing.T) {
 	ws := t.TempDir()
 	res := runPodium(t, ws, []string{"HOME=" + t.TempDir()}, "init", "--registry", "https://podium.example/", "--target", "/tmp/materialized")
 	cliWantExit(t, res, 0, "init --target")
@@ -445,7 +445,7 @@ func TestDocCLI_20b_InitNextStepHints(t *testing.T) {
 // column; it does not surface the client PODIUM_REGISTRY value (a
 // doc-accuracy gap noted in BUILD-GAPS §7.7). This test asserts the
 // provenance feature via PODIUM_BIND.
-func TestDocCLI_21_ConfigShowProvenance(t *testing.T) {
+func TestCLI_ConfigShowProvenance(t *testing.T) {
 	res := runPodium(t, "", []string{"HOME=" + t.TempDir(), "PODIUM_BIND=127.0.0.1:9999"}, "config", "show", "--server")
 	cliWantExit(t, res, 0, "config show --server")
 	cliContains(t, res.Stdout, "source", "provenance column header")
@@ -455,7 +455,7 @@ func TestDocCLI_21_ConfigShowProvenance(t *testing.T) {
 
 // spec: §7.7 (F-7.7.2) — `config show --explain <key>` prints one key's
 // full resolution chain across the sync.yaml scopes and which won.
-func TestDocCLI_22_ConfigShowExplain(t *testing.T) {
+func TestCLI_ConfigShowExplain(t *testing.T) {
 	ws := t.TempDir()
 	env := []string{"HOME=" + t.TempDir()}
 	cliWantExit(t, runPodium(t, ws, env, "init", "--registry", "https://podium.example/"), 0, "init")
@@ -468,21 +468,21 @@ func TestDocCLI_22_ConfigShowExplain(t *testing.T) {
 // spec: §7.7 (F-7.7.5) — `--no-browser` is accepted and the flow runs
 // without opening a browser. An unreachable issuer makes device
 // authorization fail (exit 1), proving the flag parsed and the flow ran.
-func TestDocCLI_23_LoginNoBrowser(t *testing.T) {
+func TestCLI_LoginNoBrowser(t *testing.T) {
 	res := runPodium(t, "", []string{"HOME=" + t.TempDir()},
 		"login", "--registry", "https://podium.example", "--issuer", "http://127.0.0.1:1/device", "--no-browser")
 	cliWantExit(t, res, 1, "login --no-browser")
 }
 
 // spec: §7.7 (F-7.7.5) — login is a no-op for a filesystem registry.
-func TestDocCLI_24_LoginFilesystemNoOp(t *testing.T) {
+func TestCLI_LoginFilesystemNoOp(t *testing.T) {
 	res := runPodium(t, "", []string{"HOME=" + t.TempDir()}, "login", "--registry", t.TempDir())
 	cliWantExit(t, res, 0, "login filesystem no-op")
 	cliContains(t, res.Stderr, "no authentication", "filesystem no-op notice")
 }
 
 // spec: §7.7 (F-7.7.5) — login is a no-op for the standalone server.
-func TestDocCLI_25_LoginStandaloneNoOp(t *testing.T) {
+func TestCLI_LoginStandaloneNoOp(t *testing.T) {
 	res := runPodium(t, "", []string{"HOME=" + t.TempDir()}, "login", "--registry", "http://127.0.0.1:8080")
 	cliWantExit(t, res, 0, "login standalone no-op")
 	cliContains(t, res.Stderr, "no authentication", "standalone no-op notice")
@@ -491,7 +491,7 @@ func TestDocCLI_25_LoginStandaloneNoOp(t *testing.T) {
 // ===== Server — podium serve / status (T-D-cli-26..35) =================
 
 // spec: doc "Server — podium serve", `--standalone` flag.
-func TestDocCLI_26_ServeStandaloneHealthz(t *testing.T) {
+func TestCLI_ServeStandaloneHealthz(t *testing.T) {
 	srv := startServer(t, "")
 	st, body := getRaw(t, srv.BaseURL+"/healthz")
 	if st != 200 {
@@ -504,7 +504,7 @@ func TestDocCLI_26_ServeStandaloneHealthz(t *testing.T) {
 }
 
 // spec: doc "Server — podium serve", zero-flag auto-standalone.
-func TestDocCLI_27_ZeroFlagAutoStandalone(t *testing.T) {
+func TestCLI_ZeroFlagAutoStandalone(t *testing.T) {
 	env := []string{
 		"HOME=" + t.TempDir(),
 		"PODIUM_CONFIG_FILE=" + filepath.Join(t.TempDir(), "nonexistent.yaml"),
@@ -516,17 +516,17 @@ func TestDocCLI_27_ZeroFlagAutoStandalone(t *testing.T) {
 }
 
 // spec: doc "Server — podium serve", `--strict` flag.
-func TestDocCLI_28_ServeStrict(t *testing.T) {
+func TestCLI_ServeStrict(t *testing.T) {
 	t.Skip("blocked by F-13.10.1: `podium serve --strict` is unimplemented (no --strict flag; serverboot always auto-bootstraps)")
 }
 
 // spec: doc "Server — podium serve", PODIUM_NO_AUTOSTANDALONE.
-func TestDocCLI_29_NoAutoStandaloneEnv(t *testing.T) {
+func TestCLI_NoAutoStandaloneEnv(t *testing.T) {
 	t.Skip("blocked by F-13.10.1: PODIUM_NO_AUTOSTANDALONE is never read by serverboot; serve always auto-bootstraps")
 }
 
 // spec: doc "Server — podium serve", `--layer-path` single layer.
-func TestDocCLI_30_LayerPathSingleLayer(t *testing.T) {
+func TestCLI_LayerPathSingleLayer(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		"team/x/ARTIFACT.md": contextArtifact("A single local-source layer artifact for coverage."),
 	})
@@ -541,7 +541,7 @@ func TestDocCLI_30_LayerPathSingleLayer(t *testing.T) {
 }
 
 // spec: doc "Server — podium serve", `--layer-path` polymorphic multi_layer.
-func TestDocCLI_31_LayerPathMultiLayer(t *testing.T) {
+func TestCLI_LayerPathMultiLayer(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":       "multi_layer: true\n",
 		"team-a/svc/ARTIFACT.md": contextArtifact("Team A service reference documentation for coverage here."),
@@ -567,7 +567,7 @@ func TestDocCLI_31_LayerPathMultiLayer(t *testing.T) {
 }
 
 // spec: doc "Server — podium serve", `--public-mode` bypasses auth.
-func TestDocCLI_32_PublicModeBypassesAuth(t *testing.T) {
+func TestCLI_PublicModeBypassesAuth(t *testing.T) {
 	reg := cliReg(t)
 	srv := startServerArgs(t, []string{"HOME=" + t.TempDir()}, "serve", "--standalone", "--public-mode", "--layer-path", reg)
 	st, _ := getRaw(t, srv.BaseURL+"/v1/search_artifacts?q=x")
@@ -578,7 +578,7 @@ func TestDocCLI_32_PublicModeBypassesAuth(t *testing.T) {
 
 // spec: doc "Server — podium serve", `--public-mode` mutually exclusive
 // with an identity provider.
-func TestDocCLI_33_PublicModeExcludesIdP(t *testing.T) {
+func TestCLI_PublicModeExcludesIdP(t *testing.T) {
 	port := freePort(t)
 	env := []string{"HOME=" + t.TempDir(), "PODIUM_IDENTITY_PROVIDER=oauth-device-code"}
 	res, timedOut := cliRunServe(t, env, 20*time.Second, "serve", "--public-mode", "--bind", localBind(port))
@@ -616,7 +616,7 @@ func TestServe_PublicModeAllowPublicBind(t *testing.T) {
 }
 
 // spec: doc "Server — podium status".
-func TestDocCLI_34_Status(t *testing.T) {
+func TestCLI_Status(t *testing.T) {
 	srv := startServer(t, cliReg(t))
 	res := runPodium(t, "", brEnv(srv.BaseURL), "status")
 	cliWantExit(t, res, 0, "podium status")
@@ -625,7 +625,7 @@ func TestDocCLI_34_Status(t *testing.T) {
 }
 
 // spec: doc "Server — podium status" — unreachable registry.
-func TestDocCLI_35_StatusUnreachable(t *testing.T) {
+func TestCLI_StatusUnreachable(t *testing.T) {
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY=http://127.0.0.1:1"}, "status")
 	// Must not panic; exits cleanly with a meaningful message.
 	cliWantExit(t, res, 0, "status unreachable")
@@ -638,7 +638,7 @@ func TestDocCLI_35_StatusUnreachable(t *testing.T) {
 // filesystem-source registry via `--registry`; the documented positional
 // `<path>` form is not accepted (BUILD-GAPS doc-accuracy: lint is
 // registry-rooted). This test uses the registry form for a valid tree.
-func TestDocCLI_36_LintValid(t *testing.T) {
+func TestCLI_LintValid(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		"personal/greet/ARTIFACT.md": greetSkillArtifact,
 		"personal/greet/SKILL.md":    greetSkillBody,
@@ -649,7 +649,7 @@ func TestDocCLI_36_LintValid(t *testing.T) {
 }
 
 // spec: doc "podium lint", "Exits non-zero on lint errors".
-func TestDocCLI_37_LintInvalidExitsNonZero(t *testing.T) {
+func TestCLI_LintInvalidExitsNonZero(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		// type is required and absent.
 		"personal/broken/ARTIFACT.md": "---\nversion: 1.0.0\n---\nbody\n",
@@ -660,7 +660,7 @@ func TestDocCLI_37_LintInvalidExitsNonZero(t *testing.T) {
 }
 
 // spec: doc "podium lint", "a directory tree (recurses into all artifacts)".
-func TestDocCLI_38_LintTreeRecurses(t *testing.T) {
+func TestCLI_LintTreeRecurses(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		"personal/greet/ARTIFACT.md": greetSkillArtifact,
 		"personal/greet/SKILL.md":    greetSkillBody,
@@ -672,7 +672,7 @@ func TestDocCLI_38_LintTreeRecurses(t *testing.T) {
 
 // spec: doc "podium lint", "`<path>` can be ... a single `ARTIFACT.md`".
 // The single-file positional form is not supported (requires --registry).
-func TestDocCLI_39_LintSingleArtifactFileGap(t *testing.T) {
+func TestCLI_LintSingleArtifactFileGap(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		"personal/greet/ARTIFACT.md": greetSkillArtifact,
 		"personal/greet/SKILL.md":    greetSkillBody,
@@ -684,7 +684,7 @@ func TestDocCLI_39_LintSingleArtifactFileGap(t *testing.T) {
 }
 
 // spec: doc "podium lint", "`<path>` can be ... `SKILL.md`".
-func TestDocCLI_40_LintSingleSkillFileGap(t *testing.T) {
+func TestCLI_LintSingleSkillFileGap(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		"personal/greet/ARTIFACT.md": greetSkillArtifact,
 		"personal/greet/SKILL.md":    greetSkillBody,
@@ -697,7 +697,7 @@ func TestDocCLI_40_LintSingleSkillFileGap(t *testing.T) {
 // ===== Sync and materialization — podium sync (T-D-cli-41..58) =========
 
 // spec: doc "Sync and materialization — podium sync".
-func TestDocCLI_41_SyncMaterializes(t *testing.T) {
+func TestCLI_SyncMaterializes(t *testing.T) {
 	reg := cliReg(t)
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none")
@@ -710,7 +710,7 @@ func TestDocCLI_41_SyncMaterializes(t *testing.T) {
 }
 
 // spec: doc "podium sync", `--dry-run` flag.
-func TestDocCLI_42_SyncDryRun(t *testing.T) {
+func TestCLI_SyncDryRun(t *testing.T) {
 	reg := cliReg(t)
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none", "--dry-run")
@@ -725,7 +725,7 @@ func TestDocCLI_42_SyncDryRun(t *testing.T) {
 }
 
 // spec: doc "podium sync", `--json` flag.
-func TestDocCLI_43_SyncJSON(t *testing.T) {
+func TestCLI_SyncJSON(t *testing.T) {
 	reg := cliReg(t)
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", t.TempDir(), "--harness", "none", "--dry-run", "--json")
 	cliWantExit(t, res, 0, "sync --json")
@@ -737,7 +737,7 @@ func TestDocCLI_43_SyncJSON(t *testing.T) {
 
 // spec: §7.5.1 — `podium sync --include` narrows the materialized set to
 // canonical IDs matching the glob (F-7.5.1).
-func TestDocCLI_44_SyncInclude(t *testing.T) {
+func TestCLI_SyncInclude(t *testing.T) {
 	reg := cliReg(t)
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none", "--include", "finance/**")
@@ -753,7 +753,7 @@ func TestDocCLI_44_SyncInclude(t *testing.T) {
 
 // spec: §7.5.1 — `podium sync --exclude` drops matching IDs after the include
 // set (F-7.5.1).
-func TestDocCLI_45_SyncExclude(t *testing.T) {
+func TestCLI_SyncExclude(t *testing.T) {
 	reg := cliReg(t)
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none",
@@ -769,7 +769,7 @@ func TestDocCLI_45_SyncExclude(t *testing.T) {
 }
 
 // spec: §7.5.1 — `podium sync --type` restricts to the listed types (F-7.5.1).
-func TestDocCLI_46_SyncType(t *testing.T) {
+func TestCLI_SyncType(t *testing.T) {
 	reg := cliReg(t)
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none", "--type", "skill")
@@ -784,7 +784,7 @@ func TestDocCLI_46_SyncType(t *testing.T) {
 }
 
 // spec: doc "podium sync", claude-code adapter layout for skills.
-func TestDocCLI_47_SyncClaudeCodeSkill(t *testing.T) {
+func TestCLI_SyncClaudeCodeSkill(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		"personal/greet/ARTIFACT.md": greetSkillArtifact,
 		"personal/greet/SKILL.md":    greetSkillBody,
@@ -796,7 +796,7 @@ func TestDocCLI_47_SyncClaudeCodeSkill(t *testing.T) {
 }
 
 // spec: doc "podium sync", claude-code adapter layout for agents.
-func TestDocCLI_48_SyncClaudeCodeAgent(t *testing.T) {
+func TestCLI_SyncClaudeCodeAgent(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		"personal/deploy-agent/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Coordinate the release across the team and report status here.\n---\n\nAgent body.\n",
 	})
@@ -806,7 +806,7 @@ func TestDocCLI_48_SyncClaudeCodeAgent(t *testing.T) {
 }
 
 // spec: doc "podium sync", claude-code adapter layout for rules.
-func TestDocCLI_49_SyncClaudeCodeRule(t *testing.T) {
+func TestCLI_SyncClaudeCodeRule(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		"personal/style-guide/ARTIFACT.md": "---\ntype: rule\nversion: 1.0.0\nrule_mode: always\ndescription: Style guide rule for code formatting conventions used here.\n---\n\nRule body.\n",
 	})
@@ -816,7 +816,7 @@ func TestDocCLI_49_SyncClaudeCodeRule(t *testing.T) {
 }
 
 // spec: doc "podium sync"; none adapter writes `<artifact-id>/ARTIFACT.md`.
-func TestDocCLI_50_SyncNoneCanonicalLayout(t *testing.T) {
+func TestCLI_SyncNoneCanonicalLayout(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		"personal/greet/ARTIFACT.md": greetSkillArtifact,
 		"personal/greet/SKILL.md":    greetSkillBody,
@@ -827,7 +827,7 @@ func TestDocCLI_50_SyncNoneCanonicalLayout(t *testing.T) {
 }
 
 // spec: doc "podium sync", "Lock file at `<target>/.podium/sync.lock`".
-func TestDocCLI_51_SyncLockFile(t *testing.T) {
+func TestCLI_SyncLockFile(t *testing.T) {
 	reg := cliReg(t)
 	tgt := t.TempDir()
 	cliWantExit(t, runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none"), 0, "sync")
@@ -837,7 +837,7 @@ func TestDocCLI_51_SyncLockFile(t *testing.T) {
 // spec: doc "Sync and materialization — podium sync override", `--add`.
 // The override command records the toggle in the target's sync.lock
 // without touching sync.yaml.
-func TestDocCLI_52_OverrideAdd(t *testing.T) {
+func TestCLI_OverrideAdd(t *testing.T) {
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "override", "--add", "personal/greet", "--target", tgt)
 	cliWantExit(t, res, 0, "override --add")
@@ -846,7 +846,7 @@ func TestDocCLI_52_OverrideAdd(t *testing.T) {
 }
 
 // spec: doc "podium sync override", `--remove` flag.
-func TestDocCLI_53_OverrideRemove(t *testing.T) {
+func TestCLI_OverrideRemove(t *testing.T) {
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "override", "--remove", "personal/greet", "--target", tgt)
 	cliWantExit(t, res, 0, "override --remove")
@@ -855,7 +855,7 @@ func TestDocCLI_53_OverrideRemove(t *testing.T) {
 }
 
 // spec: doc "podium sync override", `--reset` flag.
-func TestDocCLI_54_OverrideReset(t *testing.T) {
+func TestCLI_OverrideReset(t *testing.T) {
 	tgt := t.TempDir()
 	cliWantExit(t, runPodium(t, "", nil, "sync", "override", "--add", "personal/greet", "--target", tgt), 0, "override --add")
 	res := runPodium(t, "", nil, "sync", "override", "--reset", "--target", tgt)
@@ -864,7 +864,7 @@ func TestDocCLI_54_OverrideReset(t *testing.T) {
 }
 
 // spec: doc "podium sync override", `--dry-run` form.
-func TestDocCLI_55_OverrideDryRun(t *testing.T) {
+func TestCLI_OverrideDryRun(t *testing.T) {
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "override", "--add", "personal/greet", "--dry-run", "--target", tgt)
 	cliWantExit(t, res, 0, "override --dry-run")
@@ -877,14 +877,14 @@ func TestDocCLI_55_OverrideDryRun(t *testing.T) {
 }
 
 // spec: doc "Sync and materialization — podium sync save-as".
-func TestDocCLI_56_SaveAs(t *testing.T) {
+func TestCLI_SaveAs(t *testing.T) {
 	tgt := t.TempDir()
 	cliWantExit(t, runPodium(t, "", nil, "sync", "save-as", "--profile", "my-profile", "--target", tgt), 0, "save-as")
 	cliContains(t, readFile(t, filepath.Join(tgt, ".podium/sync.yaml")), "my-profile", "profile written")
 }
 
 // spec: doc "podium sync save-as", `--update` flag.
-func TestDocCLI_57_SaveAsUpdate(t *testing.T) {
+func TestCLI_SaveAsUpdate(t *testing.T) {
 	tgt := t.TempDir()
 	cliWantExit(t, runPodium(t, "", nil, "sync", "save-as", "--profile", "my-profile", "--target", tgt), 0, "save-as create")
 	dup := runPodium(t, "", nil, "sync", "save-as", "--profile", "my-profile", "--target", tgt)
@@ -893,7 +893,7 @@ func TestDocCLI_57_SaveAsUpdate(t *testing.T) {
 }
 
 // spec: doc "podium sync save-as", `--dry-run` flag.
-func TestDocCLI_58_SaveAsDryRun(t *testing.T) {
+func TestCLI_SaveAsDryRun(t *testing.T) {
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "save-as", "--profile", "my-profile", "--dry-run", "--target", tgt)
 	cliWantExit(t, res, 0, "save-as --dry-run")
@@ -920,7 +920,7 @@ func cliProfileWS(t testing.TB) string {
 }
 
 // spec: doc "Sync and materialization — podium profile edit".
-func TestDocCLI_59_ProfileAddInclude(t *testing.T) {
+func TestCLI_ProfileAddInclude(t *testing.T) {
 	ws := cliProfileWS(t)
 	res := runPodium(t, ws, nil, "profile", "edit", "team", "--add-include", "personal/*")
 	cliWantExit(t, res, 0, "profile edit --add-include")
@@ -928,7 +928,7 @@ func TestDocCLI_59_ProfileAddInclude(t *testing.T) {
 }
 
 // spec: doc "podium profile edit", `--remove-include` flag.
-func TestDocCLI_60_ProfileRemoveInclude(t *testing.T) {
+func TestCLI_ProfileRemoveInclude(t *testing.T) {
 	ws := cliProfileWS(t)
 	cliWantExit(t, runPodium(t, ws, nil, "profile", "edit", "team", "--add-include", "personal/*"), 0, "add")
 	cliWantExit(t, runPodium(t, ws, nil, "profile", "edit", "team", "--remove-include", "personal/*"), 0, "remove")
@@ -936,7 +936,7 @@ func TestDocCLI_60_ProfileRemoveInclude(t *testing.T) {
 }
 
 // spec: doc "podium profile edit", `--add-exclude` flag.
-func TestDocCLI_61_ProfileAddExclude(t *testing.T) {
+func TestCLI_ProfileAddExclude(t *testing.T) {
 	ws := cliProfileWS(t)
 	res := runPodium(t, ws, nil, "profile", "edit", "team", "--add-exclude", "drafts/*")
 	cliWantExit(t, res, 0, "profile edit --add-exclude")
@@ -944,7 +944,7 @@ func TestDocCLI_61_ProfileAddExclude(t *testing.T) {
 }
 
 // spec: doc "podium profile edit", `--dry-run` form.
-func TestDocCLI_62_ProfileEditDryRun(t *testing.T) {
+func TestCLI_ProfileEditDryRun(t *testing.T) {
 	ws := cliProfileWS(t)
 	res := runPodium(t, ws, nil, "profile", "edit", "team", "--add-include", "personal/*", "--dry-run")
 	cliWantExit(t, res, 0, "profile edit --dry-run")
@@ -954,7 +954,7 @@ func TestDocCLI_62_ProfileEditDryRun(t *testing.T) {
 // ===== Read CLI — podium search (T-D-cli-63..68) =======================
 
 // spec: doc "Read CLI — podium search".
-func TestDocCLI_63_Search(t *testing.T) {
+func TestCLI_Search(t *testing.T) {
 	srv := startServer(t, cliReg(t))
 	res := runPodium(t, "", brEnv(srv.BaseURL), "search", "variance")
 	cliWantExit(t, res, 0, "search")
@@ -964,7 +964,7 @@ func TestDocCLI_63_Search(t *testing.T) {
 
 // spec: doc "podium search", `--type` flag. Flags must precede the query;
 // the type filter narrows results by artifact type.
-func TestDocCLI_64_SearchType(t *testing.T) {
+func TestCLI_SearchType(t *testing.T) {
 	srv := startServer(t, cliReg(t))
 	ctx := runPodium(t, "", brEnv(srv.BaseURL), "search", "--type", "context", "--json", "")
 	cliWantExit(t, ctx, 0, "search --type context")
@@ -981,16 +981,16 @@ func TestDocCLI_64_SearchType(t *testing.T) {
 
 // spec: doc "podium search", `--tags` flag. The flag is not implemented;
 // the documented `--tags` invocation fails to parse.
-func TestDocCLI_65_SearchTagsGap(t *testing.T) {
+func TestCLI_SearchTagsGap(t *testing.T) {
 	srv := startServer(t, cliReg(t))
 	res := runPodium(t, "", brEnv(srv.BaseURL), "search", "--tags", "release", "x")
-	cliWantNonZero(t, res, "search --tags")
-	cliContains(t, res.Stderr, "not defined", "tags flag absent")
-	t.Log("doc-accuracy gap: `podium search --tags` is documented but not implemented")
+	// `podium search --tags` is implemented: the flag is accepted and the
+	// search runs (zero results is fine when nothing carries the tag).
+	cliWantExit(t, res, 0, "search --tags")
 }
 
 // spec: doc "podium search", `--top-k` flag.
-func TestDocCLI_66_SearchTopK(t *testing.T) {
+func TestCLI_SearchTopK(t *testing.T) {
 	srv := startServer(t, cliReg(t))
 	res := runPodium(t, "", brEnv(srv.BaseURL), "search", "--top-k", "1", "--json", "variance")
 	cliWantExit(t, res, 0, "search --top-k 1")
@@ -1000,7 +1000,7 @@ func TestDocCLI_66_SearchTopK(t *testing.T) {
 }
 
 // spec: doc "podium search", `--json` flag.
-func TestDocCLI_67_SearchJSON(t *testing.T) {
+func TestCLI_SearchJSON(t *testing.T) {
 	srv := startServer(t, cliReg(t))
 	res := runPodium(t, "", brEnv(srv.BaseURL), "search", "--json", "variance")
 	cliWantExit(t, res, 0, "search --json")
@@ -1022,7 +1022,7 @@ func TestDocCLI_67_SearchJSON(t *testing.T) {
 // Client.from_env()), and the on-disk set is exactly the curated ids. The
 // harness adapter is orthogonal to scoping; `none` is used so the canonical
 // layout makes the per-id assertion deterministic. (F-9.4.1, F-9.4.2, F-9.4.3)
-func TestDocCLI_68_JSONPipeline(t *testing.T) {
+func TestCLI_JSONPipeline(t *testing.T) {
 	srv := startServer(t, cliReg(t))
 	env := brEnv(srv.BaseURL)
 
@@ -1082,10 +1082,10 @@ func TestDocCLI_68_JSONPipeline(t *testing.T) {
 // ===== Read CLI — domain (T-D-cli-69..73) ==============================
 
 // spec: doc "Read CLI — podium domain show" (root).
-func TestDocCLI_69_DomainShowRoot(t *testing.T) {
+func TestCLI_DomainShowRoot(t *testing.T) {
 	srv := startServer(t, cliReg(t))
-	res := runPodium(t, "", brEnv(srv.BaseURL), "domain", "show")
-	cliWantExit(t, res, 0, "domain show")
+	res := runPodium(t, "", brEnv(srv.BaseURL), "domain", "show", "--json")
+	cliWantExit(t, res, 0, "domain show --json")
 	m := cliJSON(t, res.Stdout)
 	if _, ok := m["subdomains"]; !ok {
 		t.Fatalf("domain show missing subdomains: %v", m)
@@ -1093,7 +1093,7 @@ func TestDocCLI_69_DomainShowRoot(t *testing.T) {
 }
 
 // spec: doc "podium domain show" (path).
-func TestDocCLI_70_DomainShowPath(t *testing.T) {
+func TestCLI_DomainShowPath(t *testing.T) {
 	srv := startServer(t, cliReg(t))
 	res := runPodium(t, "", brEnv(srv.BaseURL), "domain", "show", "finance")
 	cliWantExit(t, res, 0, "domain show finance")
@@ -1101,7 +1101,7 @@ func TestDocCLI_70_DomainShowPath(t *testing.T) {
 }
 
 // spec: doc "podium domain show", `--json` flag.
-func TestDocCLI_71_DomainShowJSON(t *testing.T) {
+func TestCLI_DomainShowJSON(t *testing.T) {
 	srv := startServer(t, cliReg(t))
 	res := runPodium(t, "", brEnv(srv.BaseURL), "domain", "show", "--json")
 	cliWantExit(t, res, 0, "domain show --json")
@@ -1109,15 +1109,20 @@ func TestDocCLI_71_DomainShowJSON(t *testing.T) {
 }
 
 // spec: doc "Read CLI — podium domain search".
-func TestDocCLI_72_DomainSearch(t *testing.T) {
-	srv := startServer(t, cliReg(t))
+func TestCLI_DomainSearch(t *testing.T) {
+	// search_domains ranks DOMAIN.md projections; a domain without a DOMAIN.md
+	// is excluded (§3.2, F-3.2.1), so stage one for the finance domain.
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/DOMAIN.md":           "---\ndescription: \"Finance operations and vendor payments\"\ndiscovery:\n  keywords:\n    - finance\n---\n",
+		"finance/invoice/ARTIFACT.md": contextArtifact("Invoice variance for finance teams."),
+	}))
 	res := runPodium(t, "", brEnv(srv.BaseURL), "domain", "search", "finance")
 	cliWantExit(t, res, 0, "domain search")
 	cliContains(t, res.Stdout, "finance", "domain result")
 }
 
 // spec: doc "Read CLI — podium domain analyze".
-func TestDocCLI_73_DomainAnalyze(t *testing.T) {
+func TestCLI_DomainAnalyze(t *testing.T) {
 	srv := startServer(t, cliReg(t))
 	res := runPodium(t, "", brEnv(srv.BaseURL), "domain", "analyze")
 	cliWantExit(t, res, 0, "domain analyze")
@@ -1130,10 +1135,10 @@ func TestDocCLI_73_DomainAnalyze(t *testing.T) {
 // ===== Read CLI — artifact show (T-D-cli-74..78) =======================
 
 // spec: doc "Read CLI — podium artifact show".
-func TestDocCLI_74_ArtifactShow(t *testing.T) {
+func TestCLI_ArtifactShow(t *testing.T) {
 	srv := startServer(t, cliReg(t))
-	res := runPodium(t, "", brEnv(srv.BaseURL), "artifact", "show", "personal/greet")
-	cliWantExit(t, res, 0, "artifact show")
+	res := runPodium(t, "", brEnv(srv.BaseURL), "artifact", "show", "--json", "personal/greet")
+	cliWantExit(t, res, 0, "artifact show --json")
 	m := cliJSON(t, res.Stdout)
 	if body, _ := m["manifest_body"].(string); strings.TrimSpace(body) == "" {
 		t.Fatalf("artifact show missing manifest_body: %v", m)
@@ -1142,7 +1147,7 @@ func TestDocCLI_74_ArtifactShow(t *testing.T) {
 }
 
 // spec: doc "podium artifact show", "Does not materialize bundled resources".
-func TestDocCLI_75_ArtifactShowNoResourcesWritten(t *testing.T) {
+func TestCLI_ArtifactShowNoResourcesWritten(t *testing.T) {
 	srv := startServer(t, cliReg(t))
 	cwd := t.TempDir()
 	res := runPodium(t, cwd, brEnv(srv.BaseURL), "artifact", "show", "personal/greet")
@@ -1154,20 +1159,19 @@ func TestDocCLI_75_ArtifactShowNoResourcesWritten(t *testing.T) {
 
 // spec: doc "podium artifact show", `--version` flag. The flag is not
 // implemented; placed before the id it fails to parse.
-func TestDocCLI_76_ArtifactShowVersionGap(t *testing.T) {
+func TestCLI_ArtifactShowVersionGap(t *testing.T) {
 	srv := startServer(t, cliReg(t))
-	res := runPodium(t, "", brEnv(srv.BaseURL), "artifact", "show", "--version", "1.0.0", "personal/greet")
-	cliWantNonZero(t, res, "artifact show --version")
-	cliContains(t, res.Stderr, "not defined", "version flag absent")
-	t.Log("doc-accuracy gap: `podium artifact show --version` is documented but not implemented")
+	res := runPodium(t, "", brEnv(srv.BaseURL), "artifact", "show", "--version", "1.0.0", "--json", "personal/greet")
+	// `podium artifact show --version` is implemented: the flag is accepted.
+	cliWantExit(t, res, 0, "artifact show --version")
 }
 
 // spec: doc "podium artifact show", `--json` flag. The command already
 // prints JSON; `--json` is not a separate flag.
-func TestDocCLI_77_ArtifactShowJSON(t *testing.T) {
+func TestCLI_ArtifactShowJSON(t *testing.T) {
 	srv := startServer(t, cliReg(t))
-	res := runPodium(t, "", brEnv(srv.BaseURL), "artifact", "show", "personal/greet")
-	cliWantExit(t, res, 0, "artifact show")
+	res := runPodium(t, "", brEnv(srv.BaseURL), "artifact", "show", "--json", "personal/greet")
+	cliWantExit(t, res, 0, "artifact show --json")
 	m := cliJSON(t, res.Stdout)
 	for _, k := range []string{"id", "type", "manifest_body"} {
 		if _, ok := m[k]; !ok {
@@ -1177,12 +1181,12 @@ func TestDocCLI_77_ArtifactShowJSON(t *testing.T) {
 }
 
 // spec: doc "podium artifact show", directs to `podium sync --include`.
-func TestDocCLI_78_ArtifactShowNoSideEffects(t *testing.T) {
+func TestCLI_ArtifactShowNoSideEffects(t *testing.T) {
 	srv := startServer(t, cliReg(t))
 	cwd := t.TempDir()
 	res := runPodium(t, cwd, brEnv(srv.BaseURL), "artifact", "show", "personal/greet")
 	cliWantExit(t, res, 0, "artifact show")
-	cliContains(t, res.Stdout, "personal/greet", "body shown")
+	cliContains(t, res.Stdout, "type: skill", "frontmatter+body shown")
 	if len(readTreeAll(t, cwd)) != 0 {
 		t.Fatalf("artifact show produced side-effect files")
 	}
@@ -1191,7 +1195,7 @@ func TestDocCLI_78_ArtifactShowNoSideEffects(t *testing.T) {
 // ===== Read CLI — artifact scaffold (T-D-cli-79..92) ===================
 
 // spec: doc "Read CLI — podium artifact scaffold", skill row.
-func TestDocCLI_79_ScaffoldSkill(t *testing.T) {
+func TestCLI_ScaffoldSkill(t *testing.T) {
 	root := t.TempDir()
 	dst := filepath.Join(root, "finance/release/release-notes")
 	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill", "--description", "Draft release notes.", "--license", "MIT", "--yes", dst)
@@ -1203,7 +1207,7 @@ func TestDocCLI_79_ScaffoldSkill(t *testing.T) {
 }
 
 // spec: doc "podium artifact scaffold", "Non-interactive example".
-func TestDocCLI_80_ScaffoldSkillExample(t *testing.T) {
+func TestCLI_ScaffoldSkillExample(t *testing.T) {
 	root := t.TempDir()
 	dst := filepath.Join(root, "finance/release/release-notes")
 	res := runPodium(t, "", nil, "artifact", "scaffold",
@@ -1226,7 +1230,7 @@ func TestDocCLI_80_ScaffoldSkillExample(t *testing.T) {
 }
 
 // spec: doc "podium artifact scaffold", agent row (ARTIFACT.md only).
-func TestDocCLI_81_ScaffoldAgent(t *testing.T) {
+func TestCLI_ScaffoldAgent(t *testing.T) {
 	root := t.TempDir()
 	dst := filepath.Join(root, "personal/release-orchestrator")
 	cliWantExit(t, runPodium(t, "", nil, "artifact", "scaffold", "--type", "agent", "--description", "Coordinate the release.", "--yes", dst), 0, "scaffold agent")
@@ -1237,7 +1241,7 @@ func TestDocCLI_81_ScaffoldAgent(t *testing.T) {
 }
 
 // spec: doc "podium artifact scaffold", command row.
-func TestDocCLI_82_ScaffoldCommand(t *testing.T) {
+func TestCLI_ScaffoldCommand(t *testing.T) {
 	root := t.TempDir()
 	dst := filepath.Join(root, "personal/code-change-pr")
 	cliWantExit(t, runPodium(t, "", nil, "artifact", "scaffold", "--type", "command", "--description", "Open a PR.", "--yes", dst), 0, "scaffold command")
@@ -1245,7 +1249,7 @@ func TestDocCLI_82_ScaffoldCommand(t *testing.T) {
 }
 
 // spec: doc "podium artifact scaffold", rule row, `--rule-mode`/`--rule-globs`.
-func TestDocCLI_83_ScaffoldRuleGlob(t *testing.T) {
+func TestCLI_ScaffoldRuleGlob(t *testing.T) {
 	root := t.TempDir()
 	dst := filepath.Join(root, "personal/go-files")
 	cliWantExit(t, runPodium(t, "", nil, "artifact", "scaffold", "--type", "rule", "--description", "Go file rule.", "--rule-mode", "glob", "--rule-globs", "*.go", "--yes", dst), 0, "scaffold rule glob")
@@ -1255,7 +1259,7 @@ func TestDocCLI_83_ScaffoldRuleGlob(t *testing.T) {
 }
 
 // spec: doc "podium artifact scaffold", "--rule-globs required when --rule-mode glob".
-func TestDocCLI_84_ScaffoldRuleGlobMissingGlobs(t *testing.T) {
+func TestCLI_ScaffoldRuleGlobMissingGlobs(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "personal/broken-rule")
 	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "rule", "--description", "Rule.", "--rule-mode", "glob", "--yes", dst)
 	cliWantNonZero(t, res, "scaffold rule glob without globs")
@@ -1263,7 +1267,7 @@ func TestDocCLI_84_ScaffoldRuleGlobMissingGlobs(t *testing.T) {
 }
 
 // spec: doc "podium artifact scaffold", "--rule-description required when --rule-mode auto".
-func TestDocCLI_85_ScaffoldRuleAutoMissingDesc(t *testing.T) {
+func TestCLI_ScaffoldRuleAutoMissingDesc(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "personal/auto-rule")
 	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "rule", "--description", "Rule.", "--rule-mode", "auto", "--yes", dst)
 	cliWantNonZero(t, res, "scaffold rule auto without rule-description")
@@ -1271,7 +1275,7 @@ func TestDocCLI_85_ScaffoldRuleAutoMissingDesc(t *testing.T) {
 }
 
 // spec: doc "podium artifact scaffold", "--hook-event required for --type hook".
-func TestDocCLI_86_ScaffoldHookMissingEvent(t *testing.T) {
+func TestCLI_ScaffoldHookMissingEvent(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "personal/my-hook")
 	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "hook", "--description", "A hook.", "--yes", dst)
 	cliWantNonZero(t, res, "scaffold hook without event")
@@ -1279,14 +1283,14 @@ func TestDocCLI_86_ScaffoldHookMissingEvent(t *testing.T) {
 }
 
 // spec: doc "podium artifact scaffold", hook row, `--hook-event`.
-func TestDocCLI_87_ScaffoldHook(t *testing.T) {
+func TestCLI_ScaffoldHook(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "personal/my-hook")
 	cliWantExit(t, runPodium(t, "", nil, "artifact", "scaffold", "--type", "hook", "--description", "Pre-tool hook.", "--hook-event", "PreToolUse", "--yes", dst), 0, "scaffold hook")
 	cliContains(t, readFile(t, filepath.Join(dst, "ARTIFACT.md")), "hook_event: PreToolUse", "hook_event")
 }
 
 // spec: doc "podium artifact scaffold", "--server-identifier required for --type mcp-server".
-func TestDocCLI_88_ScaffoldMCPMissingID(t *testing.T) {
+func TestCLI_ScaffoldMCPMissingID(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "personal/my-mcp")
 	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "mcp-server", "--description", "An MCP server.", "--yes", dst)
 	cliWantNonZero(t, res, "scaffold mcp-server without identifier")
@@ -1294,14 +1298,14 @@ func TestDocCLI_88_ScaffoldMCPMissingID(t *testing.T) {
 }
 
 // spec: doc "podium artifact scaffold", mcp-server row, `--server-identifier`.
-func TestDocCLI_89_ScaffoldMCP(t *testing.T) {
+func TestCLI_ScaffoldMCP(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "personal/my-mcp")
 	cliWantExit(t, runPodium(t, "", nil, "artifact", "scaffold", "--type", "mcp-server", "--description", "An MCP server.", "--server-identifier", "my-mcp-srv", "--yes", dst), 0, "scaffold mcp-server")
 	cliContains(t, readFile(t, filepath.Join(dst, "ARTIFACT.md")), "server_identifier: my-mcp-srv", "server_identifier")
 }
 
 // spec: doc "podium artifact scaffold", extension types accepted with a warning.
-func TestDocCLI_90_ScaffoldExtensionType(t *testing.T) {
+func TestCLI_ScaffoldExtensionType(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "personal/my-widget")
 	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "custom-widget", "--description", "Custom extension.", "--yes", dst)
 	cliWantExit(t, res, 0, "scaffold extension type")
@@ -1310,7 +1314,7 @@ func TestDocCLI_90_ScaffoldExtensionType(t *testing.T) {
 }
 
 // spec: doc "podium artifact scaffold", `--force` overwrites.
-func TestDocCLI_91_ScaffoldForce(t *testing.T) {
+func TestCLI_ScaffoldForce(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "personal/greet")
 	cliWantExit(t, runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill", "--description", "Original.", "--yes", dst), 0, "scaffold first")
 	cliWantExit(t, runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill", "--description", "Updated description here.", "--yes", "--force", dst), 0, "scaffold --force")
@@ -1318,7 +1322,7 @@ func TestDocCLI_91_ScaffoldForce(t *testing.T) {
 }
 
 // spec: doc "podium artifact scaffold", "Without --yes, prompts for missing values".
-func TestDocCLI_92_ScaffoldInteractive(t *testing.T) {
+func TestCLI_ScaffoldInteractive(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "personal/greet")
 	res := runPodiumStdin(t, "", nil, "Greet the user.\n", "artifact", "scaffold", "--type", "skill", dst)
 	cliWantExit(t, res, 0, "scaffold interactive")
@@ -1328,7 +1332,7 @@ func TestDocCLI_92_ScaffoldInteractive(t *testing.T) {
 // ===== Layer management (T-D-cli-93..101) ==============================
 
 // spec: doc "Layer management — podium layer register" (local source).
-func TestDocCLI_93_LayerRegisterLocal(t *testing.T) {
+func TestCLI_LayerRegisterLocal(t *testing.T) {
 	srv := startServer(t, "")
 	lp := writeRegistry(t, map[string]string{
 		"x/y/ARTIFACT.md": contextArtifact("A registered local layer artifact body for coverage here today."),
@@ -1339,7 +1343,7 @@ func TestDocCLI_93_LayerRegisterLocal(t *testing.T) {
 }
 
 // spec: doc "podium layer register" (git source returns webhook URL + secret).
-func TestDocCLI_94_LayerRegisterGit(t *testing.T) {
+func TestCLI_LayerRegisterGit(t *testing.T) {
 	srv := startServer(t, "")
 	res := runPodium(t, "", brEnv(srv.BaseURL), "layer", "register", "--id", "git-layer", "--repo", "https://git.example/alice/artifacts.git", "--ref", "main")
 	cliWantExit(t, res, 0, "layer register git")
@@ -1348,7 +1352,7 @@ func TestDocCLI_94_LayerRegisterGit(t *testing.T) {
 }
 
 // spec: doc "Layer management — podium layer list".
-func TestDocCLI_95_LayerList(t *testing.T) {
+func TestCLI_LayerList(t *testing.T) {
 	srv := startServer(t, "")
 	cliWantExit(t, runPodium(t, "", brEnv(srv.BaseURL), "layer", "register", "--id", "my-layer", "--local", t.TempDir()), 0, "register")
 	res := runPodium(t, "", brEnv(srv.BaseURL), "layer", "list")
@@ -1357,7 +1361,7 @@ func TestDocCLI_95_LayerList(t *testing.T) {
 }
 
 // spec: doc "Layer management — podium layer reorder".
-func TestDocCLI_96_LayerReorder(t *testing.T) {
+func TestCLI_LayerReorder(t *testing.T) {
 	srv := startServer(t, "")
 	for _, id := range []string{"layer-a", "layer-b"} {
 		cliWantExit(t, runPodium(t, "", brEnv(srv.BaseURL), "layer", "register", "--id", id, "--local", t.TempDir()), 0, "register "+id)
@@ -1372,7 +1376,7 @@ func TestDocCLI_96_LayerReorder(t *testing.T) {
 }
 
 // spec: doc "Layer management — podium layer unregister".
-func TestDocCLI_97_LayerUnregister(t *testing.T) {
+func TestCLI_LayerUnregister(t *testing.T) {
 	srv := startServer(t, "")
 	cliWantExit(t, runPodium(t, "", brEnv(srv.BaseURL), "layer", "register", "--id", "my-layer", "--local", t.TempDir()), 0, "register")
 	cliWantExit(t, runPodium(t, "", brEnv(srv.BaseURL), "layer", "unregister", "my-layer"), 0, "unregister")
@@ -1381,7 +1385,7 @@ func TestDocCLI_97_LayerUnregister(t *testing.T) {
 }
 
 // spec: doc "Layer management — podium layer reingest" (records intent).
-func TestDocCLI_98_LayerReingest(t *testing.T) {
+func TestCLI_LayerReingest(t *testing.T) {
 	srv := startServer(t, "")
 	cliWantExit(t, runPodium(t, "", brEnv(srv.BaseURL), "layer", "register", "--id", "my-layer", "--local", t.TempDir()), 0, "register")
 	res := runPodium(t, "", brEnv(srv.BaseURL), "layer", "reingest", "my-layer")
@@ -1392,7 +1396,7 @@ func TestDocCLI_98_LayerReingest(t *testing.T) {
 // spec: doc "podium layer reingest", freeze-window behavior (§4.7.2). A
 // reingest inside an active freeze window is rejected; break-glass with a
 // valid dual-signoff grant bypasses it.
-func TestDocCLI_99_LayerReingestFreeze(t *testing.T) {
+func TestCLI_LayerReingestFreeze(t *testing.T) {
 	t.Parallel()
 	srv, layerID := progressiveFreezeBoot(t, true)
 
@@ -1412,7 +1416,7 @@ func TestDocCLI_99_LayerReingestFreeze(t *testing.T) {
 // spec: doc "Layer management — podium layer watch". The watcher polls
 // reingest, which now runs the pipeline, so a post-registration artifact is
 // picked up and becomes searchable.
-func TestDocCLI_100_LayerWatchReingests(t *testing.T) {
+func TestCLI_LayerWatchReingests(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
 	layerDir := t.TempDir()
@@ -1443,7 +1447,7 @@ func TestDocCLI_100_LayerWatchReingests(t *testing.T) {
 // spec: doc "podium layer watch", `--interval`. The binary takes an
 // integer-seconds `--interval` and uses `--id`; it polls reingest on the
 // interval. This drives one poll cycle and tears the watcher down.
-func TestDocCLI_101_LayerWatchInterval(t *testing.T) {
+func TestCLI_LayerWatchInterval(t *testing.T) {
 	srv := startServer(t, "")
 	cliWantExit(t, runPodium(t, "", brEnv(srv.BaseURL), "layer", "register", "--id", "my-layer", "--local", t.TempDir()), 0, "register")
 	w := cliStartWatchLayer(t, srv.BaseURL, "my-layer", time.Second)
@@ -1458,28 +1462,28 @@ func TestDocCLI_101_LayerWatchInterval(t *testing.T) {
 // spec: doc "Admin — podium admin grant / revoke". The positive path
 // needs an authenticated admin identity, which the standalone server
 // (system:public) cannot provide.
-func TestDocCLI_102_AdminGrant(t *testing.T) {
+func TestCLI_AdminGrant(t *testing.T) {
 	t.Skip("requires a standard deployment with an authenticated admin identity; standalone serves as system:public and rejects admin grants with 403")
 }
 
 // spec: doc "Admin — podium admin grant / revoke".
-func TestDocCLI_103_AdminRevoke(t *testing.T) {
+func TestCLI_AdminRevoke(t *testing.T) {
 	t.Skip("requires a standard deployment with an authenticated admin identity; standalone serves as system:public and rejects admin revokes with 403")
 }
 
 // spec: doc "Admin — podium admin show-effective".
-func TestDocCLI_104_AdminShowEffective(t *testing.T) {
+func TestCLI_AdminShowEffective(t *testing.T) {
 	t.Skip("requires a standard deployment with an authenticated admin identity; standalone serves as system:public and rejects show-effective with 403")
 }
 
 // spec: doc "Admin — podium admin reembed".
-func TestDocCLI_105_AdminReembed(t *testing.T) {
+func TestCLI_AdminReembed(t *testing.T) {
 	t.Skip("requires a configured vector backend; standalone has no embedder so reembed returns registry.unavailable. The doc's --all flag is also not implemented")
 }
 
 // spec: doc "Admin — podium admin migrate", `--finalize`. The command
 // `podium admin migrate` does not exist (only migrate-to-standard).
-func TestDocCLI_106_AdminMigrateFinalizeGap(t *testing.T) {
+func TestCLI_AdminMigrateFinalizeGap(t *testing.T) {
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY=http://127.0.0.1:1"}, "admin", "migrate", "--finalize")
 	cliWantNonZero(t, res, "admin migrate --finalize")
 	cliContains(t, res.Stderr, "unknown admin subcommand", "admin migrate not a command")
@@ -1487,13 +1491,13 @@ func TestDocCLI_106_AdminMigrateFinalizeGap(t *testing.T) {
 }
 
 // spec: doc "Admin — podium admin migrate-to-standard".
-func TestDocCLI_107_AdminMigrateToStandard(t *testing.T) {
+func TestCLI_AdminMigrateToStandard(t *testing.T) {
 	t.Skip("requires a target Postgres DSN and object-store URL; not available in the test environment")
 }
 
 // spec: doc "Admin — podium admin verify", `--check audit-chain`. The
 // `podium admin verify` command does not exist.
-func TestDocCLI_108_AdminVerifyAuditChainGap(t *testing.T) {
+func TestCLI_AdminVerifyAuditChainGap(t *testing.T) {
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY=http://127.0.0.1:1"}, "admin", "verify", "--check", "audit-chain")
 	cliWantNonZero(t, res, "admin verify")
 	cliContains(t, res.Stderr, "unknown admin subcommand", "admin verify not a command")
@@ -1501,14 +1505,14 @@ func TestDocCLI_108_AdminVerifyAuditChainGap(t *testing.T) {
 }
 
 // spec: doc "Admin — podium admin verify", `--check signatures`.
-func TestDocCLI_109_AdminVerifySignaturesGap(t *testing.T) {
+func TestCLI_AdminVerifySignaturesGap(t *testing.T) {
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY=http://127.0.0.1:1"}, "admin", "verify", "--check", "signatures")
 	cliWantNonZero(t, res, "admin verify signatures")
 	cliContains(t, res.Stderr, "unknown admin subcommand", "admin verify not a command")
 }
 
 // spec: doc "Admin — podium admin verify", `--check schema`.
-func TestDocCLI_110_AdminVerifySchemaGap(t *testing.T) {
+func TestCLI_AdminVerifySchemaGap(t *testing.T) {
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY=http://127.0.0.1:1"}, "admin", "verify", "--check", "schema")
 	cliWantNonZero(t, res, "admin verify schema")
 	cliContains(t, res.Stderr, "unknown admin subcommand", "admin verify not a command")
@@ -1518,7 +1522,7 @@ func TestDocCLI_110_AdminVerifySchemaGap(t *testing.T) {
 // caller identity in the local audit log and appends a user.erased
 // event (layer unregistration is a server-side concern not performed by
 // the CLI command).
-func TestDocCLI_111_AdminErase(t *testing.T) {
+func TestCLI_AdminErase(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "audit.log")
 	cliSeedAudit(t, logPath, "alice@acme.com")
 	res := runPodium(t, "", nil, "admin", "erase",
@@ -1533,7 +1537,7 @@ func TestDocCLI_111_AdminErase(t *testing.T) {
 }
 
 // spec: doc "podium admin erase", "Erasure is itself logged as user.erased".
-func TestDocCLI_112_AdminEraseAudited(t *testing.T) {
+func TestCLI_AdminEraseAudited(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "audit.log")
 	cliSeedAudit(t, logPath, "alice@acme.com")
 	cliWantExit(t, runPodium(t, "", nil, "admin", "erase",
@@ -1549,7 +1553,7 @@ func TestDocCLI_112_AdminEraseAudited(t *testing.T) {
 // operates on a raw hash. The noop provider is the default.
 
 // spec: doc "Signing — podium sign" (lower-level --content-hash form).
-func TestDocCLI_113_Sign(t *testing.T) {
+func TestCLI_Sign(t *testing.T) {
 	hash := "sha256:" + strings.Repeat("a", 64)
 	res := runPodium(t, "", nil, "sign", "--content-hash", hash)
 	cliWantExit(t, res, 0, "sign")
@@ -1579,7 +1583,7 @@ func TestDocCLI_114b_VerifyPositionalArtifactUnsigned(t *testing.T) {
 }
 
 // spec: doc "Signing — podium verify" (valid signature).
-func TestDocCLI_114_VerifyValid(t *testing.T) {
+func TestCLI_VerifyValid(t *testing.T) {
 	hash := "sha256:" + strings.Repeat("b", 64)
 	sig := strings.TrimSpace(runPodium(t, "", nil, "sign", "--content-hash", hash).Stdout)
 	res := runPodium(t, "", nil, "verify", "--content-hash", hash, "--signature", sig)
@@ -1587,7 +1591,7 @@ func TestDocCLI_114_VerifyValid(t *testing.T) {
 }
 
 // spec: doc "Signing — podium verify" (tampered/mismatched).
-func TestDocCLI_115_VerifyTampered(t *testing.T) {
+func TestCLI_VerifyTampered(t *testing.T) {
 	hash := "sha256:" + strings.Repeat("c", 64)
 	sig := strings.TrimSpace(runPodium(t, "", nil, "sign", "--content-hash", hash).Stdout)
 	other := "sha256:" + strings.Repeat("d", 64)
@@ -1598,7 +1602,7 @@ func TestDocCLI_115_VerifyTampered(t *testing.T) {
 // ===== Cache and quota (T-D-cli-116..118) ==============================
 
 // spec: doc "Cache and quota — podium cache prune".
-func TestDocCLI_116_CachePrune(t *testing.T) {
+func TestCLI_CachePrune(t *testing.T) {
 	cacheDir := t.TempDir()
 	// An old bucket older than the 30-day cutoff is pruned.
 	old := filepath.Join(cacheDir, "deadbeef")
@@ -1617,7 +1621,7 @@ func TestDocCLI_116_CachePrune(t *testing.T) {
 }
 
 // spec: doc "podium cache prune", "override with PODIUM_CACHE_DIR".
-func TestDocCLI_117_CacheDirOverride(t *testing.T) {
+func TestCLI_CacheDirOverride(t *testing.T) {
 	// Point at a not-yet-created subdir so the prune summary echoes the
 	// overridden path, proving the override (rather than ~/.podium/cache)
 	// was targeted.
@@ -1628,7 +1632,7 @@ func TestDocCLI_117_CacheDirOverride(t *testing.T) {
 }
 
 // spec: doc "Cache and quota — podium quota".
-func TestDocCLI_118_Quota(t *testing.T) {
+func TestCLI_Quota(t *testing.T) {
 	srv := startServer(t, cliReg(t))
 	res := runPodium(t, "", brEnv(srv.BaseURL), "quota")
 	cliWantExit(t, res, 0, "quota")
@@ -1644,7 +1648,7 @@ func TestDocCLI_118_Quota(t *testing.T) {
 // ===== Environment variables (T-D-cli-119..126) ========================
 
 // spec: doc "Environment variables", PODIUM_REGISTRY default source.
-func TestDocCLI_119_RegistryEnvDefault(t *testing.T) {
+func TestCLI_RegistryEnvDefault(t *testing.T) {
 	srv := startServer(t, cliReg(t))
 	res := runPodium(t, "", brEnv(srv.BaseURL), "search", "--json", "variance")
 	cliWantExit(t, res, 0, "search via PODIUM_REGISTRY")
@@ -1654,44 +1658,44 @@ func TestDocCLI_119_RegistryEnvDefault(t *testing.T) {
 }
 
 // spec: doc "Environment variables", PODIUM_HARNESS default harness.
-func TestDocCLI_120_HarnessEnvDefault(t *testing.T) {
+func TestCLI_HarnessEnvDefault(t *testing.T) {
 	t.Skip("blocked by F-7.5.13: `podium sync` ignores PODIUM_HARNESS and always defaults the adapter to none")
 }
 
 // spec: doc "Environment variables", PODIUM_CACHE_MODE offline-only.
-func TestDocCLI_121_CacheModeOfflineOnly(t *testing.T) {
+func TestCLI_CacheModeOfflineOnly(t *testing.T) {
 	t.Skip("PODIUM_CACHE_MODE governs the MCP/SDK consumer cache path, not filesystem-source `podium sync`; covered by the MCP/SDK doc suites")
 }
 
 // spec: doc "Environment variables", PODIUM_CACHE_MODE offline-first.
-func TestDocCLI_122_CacheModeOfflineFirst(t *testing.T) {
+func TestCLI_CacheModeOfflineFirst(t *testing.T) {
 	t.Skip("PODIUM_CACHE_MODE governs the MCP/SDK consumer cache path, not filesystem-source `podium sync`; covered by the MCP/SDK doc suites")
 }
 
 // spec: doc "Environment variables", PODIUM_VERIFY_SIGNATURES always (verifies).
-func TestDocCLI_123_VerifySignaturesAlways(t *testing.T) {
+func TestCLI_VerifySignaturesAlways(t *testing.T) {
 	t.Skip("filesystem-source `podium sync` does not verify signatures; PODIUM_VERIFY_SIGNATURES applies on the MCP/SDK materialization path with signed artifacts")
 }
 
 // spec: doc "Environment variables", PODIUM_VERIFY_SIGNATURES always (unsigned fails).
-func TestDocCLI_124_VerifySignaturesAlwaysFailsUnsigned(t *testing.T) {
+func TestCLI_VerifySignaturesAlwaysFailsUnsigned(t *testing.T) {
 	t.Skip("filesystem-source `podium sync` does not verify signatures; PODIUM_VERIFY_SIGNATURES applies on the MCP/SDK materialization path with signed artifacts")
 }
 
 // spec: doc "Environment variables", PODIUM_VERIFY_SIGNATURES never.
-func TestDocCLI_125_VerifySignaturesNever(t *testing.T) {
+func TestCLI_VerifySignaturesNever(t *testing.T) {
 	t.Skip("filesystem-source `podium sync` does not verify signatures; PODIUM_VERIFY_SIGNATURES applies on the MCP/SDK materialization path with signed artifacts")
 }
 
 // spec: doc "Environment variables", PODIUM_NO_AUTOSTANDALONE.
-func TestDocCLI_126_NoAutoStandalone(t *testing.T) {
+func TestCLI_NoAutoStandalone(t *testing.T) {
 	t.Skip("blocked by F-13.10.1: PODIUM_NO_AUTOSTANDALONE is never read by serverboot; zero-flag serve always auto-bootstraps")
 }
 
 // ===== Authorization & misc (T-D-cli-127..140) =========================
 
 // spec: doc "Admin", "Admin commands require the admin role on the tenant".
-func TestDocCLI_127_AdminGrantWithoutRights(t *testing.T) {
+func TestCLI_AdminGrantWithoutRights(t *testing.T) {
 	srv := startServer(t, "")
 	res := runPodium(t, "", brEnv(srv.BaseURL), "admin", "grant", "bob@acme.com")
 	cliWantNonZero(t, res, "admin grant without admin rights")
@@ -1699,17 +1703,17 @@ func TestDocCLI_127_AdminGrantWithoutRights(t *testing.T) {
 }
 
 // spec: doc "podium layer reorder", admin-layer authorization.
-func TestDocCLI_128_LayerReorderAdminLayers(t *testing.T) {
+func TestCLI_LayerReorderAdminLayers(t *testing.T) {
 	t.Skip("requires a standard deployment that distinguishes admin vs. user-defined layers; standalone wires a no-op admin authorizer")
 }
 
 // spec: doc "podium layer unregister", admin-layer authorization.
-func TestDocCLI_129_LayerUnregisterAdminRights(t *testing.T) {
+func TestCLI_LayerUnregisterAdminRights(t *testing.T) {
 	t.Skip("requires a standard deployment that distinguishes admin vs. user-defined layers; standalone wires a no-op admin authorizer")
 }
 
 // spec: doc "podium sync", `--watch` re-materializes on change.
-func TestDocCLI_130_SyncWatch(t *testing.T) {
+func TestCLI_SyncWatch(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		"personal/greet/ARTIFACT.md": greetSkillArtifact,
 		"personal/greet/SKILL.md":    greetSkillBody,
@@ -1735,7 +1739,7 @@ func TestDocCLI_130_SyncWatch(t *testing.T) {
 // workspace resolves the global registry (F-14.2.2 / F-14.5.2), parses the
 // --profile flag (F-14.1.1 / F-14.2.1 / F-14.11.2), and materializes only the
 // scoped subset (F-14.1.2).
-func TestDocCLI_131_SyncProfile(t *testing.T) {
+func TestCLI_SyncProfile(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		// Included by finance/**.
 		"finance/invoicing/run-variance/ARTIFACT.md": contextArtifact("Run variance analysis over vendor invoices for the finance team."),
@@ -1810,12 +1814,12 @@ func TestDocCLI_131c_SyncRegistryFromEnv(t *testing.T) {
 }
 
 // spec: doc "podium logout".
-func TestDocCLI_132_Logout(t *testing.T) {
+func TestCLI_Logout(t *testing.T) {
 	t.Skip("requires OS keychain access (zalando/go-keyring); not exercised to avoid keychain prompts/hangs in headless runs")
 }
 
 // spec: doc "podium artifact scaffold", "--description required for every type".
-func TestDocCLI_133_ScaffoldDescriptionRequired(t *testing.T) {
+func TestCLI_ScaffoldDescriptionRequired(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "personal/greet")
 	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill", "--yes", dst)
 	cliWantNonZero(t, res, "scaffold without --description")
@@ -1823,14 +1827,14 @@ func TestDocCLI_133_ScaffoldDescriptionRequired(t *testing.T) {
 }
 
 // spec: doc "podium artifact scaffold", `--sensitivity` flag.
-func TestDocCLI_134_ScaffoldSensitivity(t *testing.T) {
+func TestCLI_ScaffoldSensitivity(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "personal/pub")
 	cliWantExit(t, runPodium(t, "", nil, "artifact", "scaffold", "--type", "context", "--description", "Low-sensitivity context.", "--sensitivity", "low", "--yes", dst), 0, "scaffold sensitivity")
 	cliContains(t, readFile(t, filepath.Join(dst, "ARTIFACT.md")), "sensitivity: low", "sensitivity field")
 }
 
 // spec: doc "podium artifact scaffold", `--extends` flag.
-func TestDocCLI_135_ScaffoldExtends(t *testing.T) {
+func TestCLI_ScaffoldExtends(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "personal/extended")
 	cliWantExit(t, runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill", "--description", "Extended skill.", "--extends", "base/base-skill@1.x", "--yes", dst), 0, "scaffold extends")
 	combined := readFile(t, filepath.Join(dst, "ARTIFACT.md"))
@@ -1838,7 +1842,7 @@ func TestDocCLI_135_ScaffoldExtends(t *testing.T) {
 }
 
 // spec: doc "Admin — podium admin scim-sync". The command does not exist.
-func TestDocCLI_136_AdminScimSyncGap(t *testing.T) {
+func TestCLI_AdminScimSyncGap(t *testing.T) {
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY=http://127.0.0.1:1"}, "admin", "scim-sync", "--user", "alice@acme.com")
 	cliWantNonZero(t, res, "admin scim-sync")
 	cliContains(t, res.Stderr, "unknown admin subcommand", "scim-sync not a command")
@@ -1848,7 +1852,7 @@ func TestDocCLI_136_AdminScimSyncGap(t *testing.T) {
 // spec: doc "Read CLI — podium domain analyze", optional `<path>`. The
 // binary scopes via a `--path` flag (the documented positional path is a
 // doc gap; placed positionally it is ignored).
-func TestDocCLI_137_DomainAnalyzePath(t *testing.T) {
+func TestCLI_DomainAnalyzePath(t *testing.T) {
 	srv := startServer(t, cliReg(t))
 	res := runPodium(t, "", brEnv(srv.BaseURL), "domain", "analyze", "--path", "finance")
 	cliWantExit(t, res, 0, "domain analyze --path")
@@ -1858,13 +1862,13 @@ func TestDocCLI_137_DomainAnalyzePath(t *testing.T) {
 }
 
 // spec: doc "podium login", multiple registries authenticated simultaneously.
-func TestDocCLI_138_MultiRegistryLogin(t *testing.T) {
+func TestCLI_MultiRegistryLogin(t *testing.T) {
 	t.Skip("requires two OAuth-configured registries and OS keychain access; not available in the test environment")
 }
 
 // spec: doc "podium artifact scaffold", non-interactive without TTY must
 // not hang.
-func TestDocCLI_139_ScaffoldNoYesNoTTY(t *testing.T) {
+func TestCLI_ScaffoldNoYesNoTTY(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "personal/greet")
 	// runPodium feeds empty stdin under a hard deadline: the command must
 	// exit (non-zero) rather than block forever.
@@ -1873,6 +1877,6 @@ func TestDocCLI_139_ScaffoldNoYesNoTTY(t *testing.T) {
 }
 
 // spec: doc "Environment variables", PODIUM_PRESIGN_TTL_SECONDS.
-func TestDocCLI_140_PresignTTL(t *testing.T) {
+func TestCLI_PresignTTL(t *testing.T) {
 	t.Skip("requires an object store surfacing presigned URLs; the standalone bootstrap does not surface large-resource URLs to inspect the TTL")
 }
