@@ -885,10 +885,24 @@ func TestArtifactTypes_RuntimeRequirementsPassThrough(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-50 — target_harnesses should restrict materialization to
-// the listed harnesses. The field is parsed but has no behavioral effect.
+// T-D-artifact-types-50 — target_harnesses restricts materialization to the
+// listed harnesses: a sync for a listed harness materializes the artifact and a
+// sync for an unlisted one skips it. spec: §4.3.5 / §6.7.1.
 func TestArtifactTypes_TargetHarnessesRestrictsSync(t *testing.T) {
-	t.Skip("blocked by F-6.7.2: target_harnesses is parsed but has no behavioral effect, so an artifact materializes for every harness regardless of the list")
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"reference/glossary/ARTIFACT.md": "---\ntype: context\nname: glossary\nversion: 1.0.0\ndescription: Glossary.\ntarget_harnesses: [claude-code]\n---\n\nbody\n",
+	})
+	// Listed harness materializes it (context lands in the neutral bucket).
+	included := t.TempDir()
+	runPodium(t, "", nil, "sync", "--registry", reg, "--target", included, "--harness", "claude-code")
+	mustExist(t, filepath.Join(included, ".podium/context/reference/glossary/ARTIFACT.md"))
+	// Unlisted harness skips it.
+	excluded := t.TempDir()
+	runPodium(t, "", nil, "sync", "--registry", reg, "--target", excluded, "--harness", "codex")
+	if _, err := os.Stat(filepath.Join(excluded, ".podium/context/reference/glossary/ARTIFACT.md")); err == nil {
+		t.Errorf("artifact excluded by target_harnesses must not materialize for codex")
+	}
 }
 
 // T-D-artifact-types-51 — scaffold --extends writes the extends field.
@@ -1038,11 +1052,24 @@ func TestArtifactTypes_AgentSearchHTTP(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-59 — a hook using an event the configured harness does
-// not support should produce a lint diagnostic. No ingest-time
-// capability-mismatch lint exists.
+// T-D-artifact-types-59 — a hook that targets a harness with no hook surface
+// (opencode is ✗ for hook_event) is an ingest error: the capability lint
+// reports the untranslatable field. spec: §6.7.1 hook_event row.
 func TestArtifactTypes_HookUnsupportedHarnessLint(t *testing.T) {
-	t.Skip("blocked by F-6.7.1: ingest-time capability-mismatch lint is absent, so a hook_event unsupported by the configured harness produces no diagnostic")
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"audit/log/ARTIFACT.md": "---\ntype: hook\nname: log\nversion: 1.0.0\ndescription: Log stop.\nhook_event: stop\nhook_action: |\n  echo hi\ntarget_harnesses: [opencode]\n---\n\nbody\n",
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 1 {
+		t.Fatalf("lint exit=%d, want 1 (error)\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "lint.harness_capability") || !strings.Contains(res.Stdout, "[error]") {
+		t.Errorf("expected a capability error for opencode + hook_event:\n%s", res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "hook_event") || !strings.Contains(res.Stdout, "opencode") {
+		t.Errorf("error should name hook_event and opencode:\n%s", res.Stdout)
+	}
 }
 
 // T-D-artifact-types-60 — a hook with target_harnesses set and a supported

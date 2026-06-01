@@ -371,10 +371,16 @@ func TestConfigureHarness_ClaudeCodeNonSkillResources(t *testing.T) {
 	mustExist(t, filepath.Join(target, ".podium", "resources", "tools", "deploy", "scripts", "deploy.sh"))
 }
 
-// T-D-configure-harness-21 — claude-code rule_mode glob fallback warning.
+// T-D-configure-harness-21 — claude-code/glob falls back (the rule file does
+// not carry Claude Code's native per-file scoping), so targeting claude-code
+// for a glob rule draws a capability fallback warning. §6.7.1: claude-code/glob = ⚠.
 func TestConfigureHarness_ClaudeCodeGlobLintWarning(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-6.7.1: the ingest-time capability-matrix lint is absent, so claude-code/glob emits no fallback warning")
+	reg := writeRegistry(t, map[string]string{
+		"rules/ts/ARTIFACT.md": rmRuleArtifact("ts", "glob",
+			[]string{`rule_globs: "src/**/*.ts"`, "target_harnesses: [claude-code]"}, "TS rules.\n"),
+	})
+	rmExpectWarn(t, reg, "claude-code")
 }
 
 // T-D-configure-harness-22 — claude-code rule_mode auto carries the description
@@ -599,16 +605,33 @@ func TestConfigureHarness_OpenCodeNonRuleDefaultCase(t *testing.T) {
 	mustExist(t, filepath.Join(target, ".opencode", "skills", "greet", "SKILL.md"))
 }
 
-// T-D-configure-harness-37 — opencode rule_mode auto lint error.
-func TestConfigureHarness_OpenCodeAutoLintError(t *testing.T) {
+// T-D-configure-harness-37 — opencode/auto falls back (the AGENTS.md inject
+// loses the auto-attach trigger), so targeting opencode warns. §6.7.1: opencode/auto = ⚠.
+func TestConfigureHarness_OpenCodeAutoFallbackWarning(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-6.7.1: the ingest-time capability-matrix lint is absent, so opencode/auto materializes without an error")
+	reg := writeRegistry(t, map[string]string{
+		"rules/db/ARTIFACT.md": rmRuleArtifact("db", "auto",
+			[]string{`rule_description: "When migrating"`, "target_harnesses: [opencode]"}, "DB checks.\n"),
+	})
+	rmExpectWarn(t, reg, "opencode")
 }
 
-// T-D-configure-harness-38 — opencode auto passes lint when target_harnesses excludes opencode.
+// T-D-configure-harness-38 — an auto rule targeting only cursor (native for
+// auto) lints clean: opencode is not in target_harnesses, so its ⚠ cell is not
+// checked. spec: §4.3.5 target_harnesses scopes the capability lint.
 func TestConfigureHarness_OpenCodeAutoTargetHarnessesExclude(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-6.7.2: target_harnesses is parsed but never honored, so it cannot suppress a cross-harness error")
+	reg := writeRegistry(t, map[string]string{
+		"rules/db/ARTIFACT.md": rmRuleArtifact("db", "auto",
+			[]string{`rule_description: "When migrating"`, "target_harnesses: [cursor]"}, "DB checks.\n"),
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 0 {
+		t.Fatalf("lint exit=%d, want 0\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if strings.Contains(res.Stdout, "lint.harness_capability") {
+		t.Errorf("opencode excluded from target_harnesses; expected no capability diagnostic:\n%s", res.Stdout)
+	}
 }
 
 // T-D-configure-harness-39 — opencode init+sync two-step.
@@ -649,16 +672,32 @@ func TestConfigureHarness_CodexRule(t *testing.T) {
 	}
 }
 
-// T-D-configure-harness-42 — codex rule_mode auto lint error.
-func TestConfigureHarness_CodexAutoLintError(t *testing.T) {
+// T-D-configure-harness-42 — codex/auto falls back (the AGENTS.md inject loses
+// the auto-attach trigger), so targeting codex warns. §6.7.1: codex/auto = ⚠.
+func TestConfigureHarness_CodexAutoFallbackWarning(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-6.7.1: the ingest-time capability-matrix lint is absent, so codex/auto materializes without an error")
+	reg := writeRegistry(t, map[string]string{
+		"rules/db/ARTIFACT.md": rmRuleArtifact("db", "auto",
+			[]string{`rule_description: "When migrating"`, "target_harnesses: [codex]"}, "DB checks.\n"),
+	})
+	rmExpectWarn(t, reg, "codex")
 }
 
-// T-D-configure-harness-43 — codex hook-type lint error.
-func TestConfigureHarness_CodexHookLintError(t *testing.T) {
+// T-D-configure-harness-43 — Codex has a native hook surface (.codex/hooks.json),
+// so a hook targeting codex lints clean rather than failing ingest.
+// §6.7.1: codex hook_event = ✓.
+func TestConfigureHarness_CodexHookNativeClean(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-6.7.1: the ingest-time capability-matrix lint is absent, so a codex hook artifact is not flagged")
+	reg := writeRegistry(t, map[string]string{
+		"audit/log/ARTIFACT.md": "---\ntype: hook\nname: log\nversion: 1.0.0\ndescription: Log stop.\nhook_event: stop\nhook_action: |\n  echo hi\ntarget_harnesses: [codex]\n---\n\nbody\n",
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 0 {
+		t.Fatalf("lint exit=%d, want 0 (codex supports hooks natively)\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if strings.Contains(res.Stdout, "lint.harness_capability") {
+		t.Errorf("codex natively supports hooks; expected no capability diagnostic:\n%s", res.Stdout)
+	}
 }
 
 // T-D-configure-harness-44 — codex init+sync two-step.
@@ -689,10 +728,21 @@ func TestConfigureHarness_GeminiExtensionLayout(t *testing.T) {
 	mustExist(t, filepath.Join(target, ".podium", "context", "glossary", "ARTIFACT.md"))
 }
 
-// T-D-configure-harness-46 — gemini rule_mode always fallback warning.
-func TestConfigureHarness_GeminiAlwaysLintWarning(t *testing.T) {
+// T-D-configure-harness-46 — gemini/always maps natively to GEMINI.md, so an
+// always-mode rule targeting gemini lints clean. §6.7.1: gemini/always = ✓.
+func TestConfigureHarness_GeminiAlwaysNativeClean(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-6.7.1: the ingest-time capability-matrix lint is absent, so gemini/always emits no fallback warning")
+	reg := writeRegistry(t, map[string]string{
+		"rules/house/ARTIFACT.md": rmRuleArtifact("house", "always",
+			[]string{"target_harnesses: [gemini]"}, "House style.\n"),
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 0 {
+		t.Fatalf("lint exit=%d, want 0\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if strings.Contains(res.Stdout, "lint.harness_capability") {
+		t.Errorf("gemini/always is native; expected no capability diagnostic:\n%s", res.Stdout)
+	}
 }
 
 // T-D-configure-harness-47 — gemini init+sync two-step.
@@ -737,10 +787,15 @@ func TestConfigureHarness_PiNonRuleDefaultCase(t *testing.T) {
 	mustExist(t, filepath.Join(target, ".pi", "skills", "greet", "SKILL.md"))
 }
 
-// T-D-configure-harness-50 — pi rule_mode auto lint failure.
-func TestConfigureHarness_PiAutoLintError(t *testing.T) {
+// T-D-configure-harness-50 — pi/auto falls back (the AGENTS.md inject loses the
+// auto-attach trigger), so targeting pi warns. §6.7.1: pi/auto = ⚠.
+func TestConfigureHarness_PiAutoFallbackWarning(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-6.7.1: the ingest-time capability-matrix lint is absent, so pi/auto materializes without an error")
+	reg := writeRegistry(t, map[string]string{
+		"rules/db/ARTIFACT.md": rmRuleArtifact("db", "auto",
+			[]string{`rule_description: "When migrating"`, "target_harnesses: [pi]"}, "DB checks.\n"),
+	})
+	rmExpectWarn(t, reg, "pi")
 }
 
 // T-D-configure-harness-51 — pi init+sync two-step.

@@ -453,48 +453,118 @@ func TestRuleModes_SyncPiExplicit(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-24 — codex/auto should surface a capability-matrix lint error.
-// spec: docs/authoring/rule-modes.md § capability matrix, codex/auto = ✗.
-func TestRuleModes_CodexAutoLintError(t *testing.T) {
-	t.Parallel()
-	t.Skip("blocked by F-6.7.1: the ingest-time capability-matrix lint is absent, so codex/auto is not flagged as an error")
+// rmCapWarns reports whether the lint output carries a capability fallback
+// warning naming the harness, with no error severity. rmCapErrors is its
+// error-severity counterpart.
+func rmExpectWarn(t *testing.T, reg, harness string) {
+	t.Helper()
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 0 {
+		t.Fatalf("lint exit=%d, want 0 (warning only)\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "lint.harness_capability") || !strings.Contains(res.Stdout, "[warning]") {
+		t.Errorf("expected a capability fallback warning:\n%s", res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "falls back on adapter \""+harness+"\"") {
+		t.Errorf("warning should name adapter %q:\n%s", harness, res.Stdout)
+	}
 }
 
-// T-D-rule-modes-25 — opencode/auto should surface a capability-matrix lint
-// error.
-// spec: docs/authoring/rule-modes.md § "What each adapter writes", opencode auto.
-func TestRuleModes_OpencodeAutoLintError(t *testing.T) {
+// T-D-rule-modes-24 — codex/auto falls back (the AGENTS.md inject loses the
+// auto-attach trigger), so targeting codex draws a capability warning.
+// spec: docs/authoring/rule-modes.md § capability matrix, codex/auto = ⚠.
+func TestRuleModes_CodexAutoFallbackWarning(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-6.7.1: the ingest-time capability-matrix lint is absent, so opencode/auto materializes without an error")
+	reg := writeRegistry(t, map[string]string{
+		"rules/db/ARTIFACT.md": rmRuleArtifact("db", "auto",
+			[]string{`rule_description: "When migrating"`, "target_harnesses: [codex]"}, "DB checks.\n"),
+	})
+	rmExpectWarn(t, reg, "codex")
 }
 
-// T-D-rule-modes-26 — pi/auto should surface a capability-matrix lint error.
-// spec: docs/authoring/rule-modes.md § "What each adapter writes", pi auto.
-func TestRuleModes_PiAutoLintError(t *testing.T) {
+// T-D-rule-modes-25 — opencode/auto falls back, so targeting opencode warns.
+// spec: docs/authoring/rule-modes.md § "What each adapter writes", opencode auto = ⚠.
+func TestRuleModes_OpencodeAutoFallbackWarning(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-6.7.1: the ingest-time capability-matrix lint is absent, so pi/auto materializes without an error")
+	reg := writeRegistry(t, map[string]string{
+		"rules/db/ARTIFACT.md": rmRuleArtifact("db", "auto",
+			[]string{`rule_description: "When migrating"`, "target_harnesses: [opencode]"}, "DB checks.\n"),
+	})
+	rmExpectWarn(t, reg, "opencode")
 }
 
-// T-D-rule-modes-27 — target_harnesses opt-out should suppress the cross-harness
-// lint error and skip materialization for the excluded harness.
-// spec: docs/authoring/rule-modes.md § "Lint behavior", target_harnesses opt-out.
+// T-D-rule-modes-26 — pi/auto falls back, so targeting pi warns.
+// spec: docs/authoring/rule-modes.md § "What each adapter writes", pi auto = ⚠.
+func TestRuleModes_PiAutoFallbackWarning(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"rules/db/ARTIFACT.md": rmRuleArtifact("db", "auto",
+			[]string{`rule_description: "When migrating"`, "target_harnesses: [pi]"}, "DB checks.\n"),
+	})
+	rmExpectWarn(t, reg, "pi")
+}
+
+// T-D-rule-modes-27 — target_harnesses scopes the capability lint and the
+// materialization set: a rule targeting only cursor (native for every rule
+// mode) lints clean even though claude-desktop is ✗ for rules, and a sync for a
+// harness not in the list skips the artifact entirely.
+// spec: §4.3.5 / §6.7.1 — target_harnesses is the cross-harness opt-out.
 func TestRuleModes_TargetHarnessesOptOut(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-6.7.2: target_harnesses is parsed but never honored, so it cannot suppress a cross-harness error or skip materialization")
+	reg := writeRegistry(t, map[string]string{
+		"rules/incident/ARTIFACT.md": rmRuleArtifact("incident", "auto",
+			[]string{`rule_description: "When responding to incidents"`, "target_harnesses: [cursor]"},
+			"Incident steps.\n"),
+	})
+	// Lint is clean: cursor is native for auto, and the unlisted harnesses
+	// (including the ✗ claude-desktop) are not checked.
+	if res := runPodium(t, "", nil, "lint", "--registry", reg); res.Exit != 0 || strings.Contains(res.Stdout, "[error]") {
+		t.Errorf("rule targeting only cursor should lint clean: exit=%d stdout=%s", res.Exit, res.Stdout)
+	}
+	// A sync for an excluded harness skips the artifact (nothing injected).
+	excluded := t.TempDir()
+	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", excluded, "--harness", "codex"); res.Exit != 0 {
+		t.Fatalf("sync codex exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	if _, err := os.Stat(filepath.Join(excluded, "AGENTS.md")); err == nil {
+		t.Errorf("a rule excluded by target_harnesses must not materialize for codex")
+	}
+	// A sync for the listed harness materializes it.
+	included := t.TempDir()
+	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", included, "--harness", "cursor"); res.Exit != 0 {
+		t.Fatalf("sync cursor exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	mustExist(t, filepath.Join(included, ".cursor/rules/incident.mdc"))
 }
 
-// T-D-rule-modes-28 — gemini/always should surface a fallback warning.
-// spec: docs/authoring/rule-modes.md § capability matrix, gemini/always = ⚠.
-func TestRuleModes_GeminiAlwaysFallbackWarning(t *testing.T) {
+// T-D-rule-modes-28 — gemini/always maps natively to GEMINI.md, so targeting
+// gemini for an always-mode rule lints clean with no fallback warning.
+// spec: docs/authoring/rule-modes.md § capability matrix, gemini/always = ✓.
+func TestRuleModes_GeminiAlwaysNativeClean(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-6.7.1: the ingest-time capability-matrix lint is absent, so gemini/always emits no fallback warning")
+	reg := writeRegistry(t, map[string]string{
+		"rules/house/ARTIFACT.md": rmRuleArtifact("house", "always",
+			[]string{"target_harnesses: [gemini]"}, "House style.\n"),
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 0 {
+		t.Fatalf("lint exit=%d, want 0\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if strings.Contains(res.Stdout, "lint.harness_capability") {
+		t.Errorf("gemini/always is native; expected no capability diagnostic:\n%s", res.Stdout)
+	}
 }
 
-// T-D-rule-modes-29 — gemini/glob should surface a capability-matrix error.
-// spec: docs/authoring/rule-modes.md § capability matrix, gemini/glob = ✗.
-func TestRuleModes_GeminiGlobRejected(t *testing.T) {
+// T-D-rule-modes-29 — gemini/glob falls back (the GEMINI.md inject loses glob
+// scoping), so targeting gemini for a glob rule warns rather than errors.
+// spec: docs/authoring/rule-modes.md § capability matrix, gemini/glob = ⚠.
+func TestRuleModes_GeminiGlobFallbackWarning(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-6.7.1: the ingest-time capability-matrix lint is absent, so gemini/glob is not flagged as an error")
+	reg := writeRegistry(t, map[string]string{
+		"rules/ts/ARTIFACT.md": rmRuleArtifact("ts", "glob",
+			[]string{`rule_globs: "src/**/*.ts"`, "target_harnesses: [gemini]"}, "TS rules.\n"),
+	})
+	rmExpectWarn(t, reg, "gemini")
 }
 
 // ---- MCP materialization (claude-code harness) ----------------------------

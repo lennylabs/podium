@@ -798,19 +798,47 @@ func TestHooks_MCPBundledScriptMaterialize(t *testing.T) {
 	}
 }
 
-// T-D-hooks-36 — when the configured harness does not support the event, lint
-// should reject ingest unless target_harnesses excludes it. No ingest-time
-// capability-matrix lint exists.
+// T-D-hooks-36 — a hook that targets a harness with no project-level hook
+// surface (pi is ✗ for hook_event) is rejected at ingest by the capability
+// lint. spec: §6.7.1 hook_event row, pi = ✗.
 func TestHooks_LintUnsupportedEventRejected(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-6.7.1: there is no ingest-time capability-matrix lint, so an event unsupported by the configured harness is not rejected")
+	reg := writeRegistry(t, map[string]string{
+		"hooks/log/ARTIFACT.md": hkArtifact("log", "stop", "target_harnesses: [pi]"),
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 1 {
+		t.Fatalf("lint exit=%d, want 1 (error)\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "lint.harness_capability") || !strings.Contains(res.Stdout, "hook_event") || !strings.Contains(res.Stdout, "pi") {
+		t.Errorf("expected a capability error naming hook_event and pi:\n%s", res.Stdout)
+	}
 }
 
-// T-D-hooks-37 — target_harnesses should filter materialization to the listed
-// harnesses. The field is parsed but never honored at sync time.
+// T-D-hooks-37 — target_harnesses filters materialization to the listed
+// harnesses: a hook targeting only claude-code config-merges into
+// .claude/settings.json on a claude-code sync and is skipped on a codex sync.
+// spec: §4.3.5 / §6.7.1.
 func TestHooks_TargetHarnessesFiltersMaterialize(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-6.7.2: target_harnesses is parsed but never honored, so a hook materializes for every harness regardless of the list")
+	reg := writeRegistry(t, map[string]string{
+		"hooks/log/ARTIFACT.md": hkArtifact("log", "stop", "target_harnesses: [claude-code]"),
+	})
+	// Listed harness materializes the config-merge.
+	included := t.TempDir()
+	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", included, "--harness", "claude-code"); res.Exit != 0 {
+		t.Fatalf("sync claude-code exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	mustExist(t, filepath.Join(included, ".claude", "settings.json"))
+	// Unlisted harness (codex, which also supports hooks) is skipped because it
+	// is not in target_harnesses.
+	excluded := t.TempDir()
+	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", excluded, "--harness", "codex"); res.Exit != 0 {
+		t.Fatalf("sync codex exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	if _, err := os.Stat(filepath.Join(excluded, ".codex", "hooks.json")); err == nil {
+		t.Errorf("hook excluded by target_harnesses must not materialize for codex")
+	}
 }
 
 // T-D-hooks-38 — effort_hint on a hook produces a hint_on_unsupported_type
