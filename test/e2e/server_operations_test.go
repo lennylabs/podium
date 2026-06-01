@@ -447,7 +447,7 @@ func TestServerOps_MigrateToStandardObjectsCopy(t *testing.T) {
 // filesystem backend; --target-store=sqlite stands in for --postgres so
 // the test needs no live Postgres. The run reports admin-grant
 // preservation (F-13.4.2).
-func TestOpGuide_18b_MigrateToStandardShortForm(t *testing.T) {
+func TestServerOps_MigrateToStandardShortForm(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	srcDB := filepath.Join(home, "src.db")

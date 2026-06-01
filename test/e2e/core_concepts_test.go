@@ -15,7 +15,7 @@ import (
 
 // T-D-concepts-1 — the canonical skill layout (ARTIFACT.md + SKILL.md +
 // scripts/ + references/) lints cleanly.
-func TestConcepts_SkillLayoutLints(t *testing.T) {
+func TestCoreConcept_SkillLayoutLints(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"finance/close-reporting/run-variance-analysis/ARTIFACT.md":                      greetSkillArtifact,
@@ -31,7 +31,7 @@ func TestConcepts_SkillLayoutLints(t *testing.T) {
 
 // T-D-concepts-2 — the canonical artifact ID is the directory path under the
 // registry root.
-func TestConcepts_CanonicalID(t *testing.T) {
+func TestCoreConcept_CanonicalID(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/close-reporting/run-variance-analysis/ARTIFACT.md": greetSkillArtifact,
@@ -49,7 +49,7 @@ func TestConcepts_CanonicalID(t *testing.T) {
 
 // T-D-concepts-3 — a non-skill artifact uses ARTIFACT.md with frontmatter and
 // a prose body; no SKILL.md is required.
-func TestConcepts_NonSkillArtifact(t *testing.T) {
+func TestCoreConcept_NonSkillArtifact(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Accounts payable payment guide.\n---\n\nPay invoices on time.\n",
@@ -61,7 +61,7 @@ func TestConcepts_NonSkillArtifact(t *testing.T) {
 }
 
 // T-D-concepts-4 — every first-class type is accepted by lint.
-func TestConcepts_AllFirstClassTypesLint(t *testing.T) {
+func TestCoreConcept_AllFirstClassTypesLint(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"sk/ARTIFACT.md":  greetSkillArtifact,
@@ -80,7 +80,7 @@ func TestConcepts_AllFirstClassTypesLint(t *testing.T) {
 }
 
 // T-D-concepts-5 — an unknown type value is rejected by lint.
-func TestConcepts_UnknownTypeRejected(t *testing.T) {
+func TestCoreConcept_UnknownTypeRejected(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"weird/ARTIFACT.md": "---\ntype: unicorn\nversion: 1.0.0\ndescription: w\n---\n\nbody\n",
@@ -95,7 +95,7 @@ func TestConcepts_UnknownTypeRejected(t *testing.T) {
 }
 
 // T-D-concepts-6 — a domain is navigable without a DOMAIN.md file.
-func TestConcepts_DomainWithoutDomainMD(t *testing.T) {
+func TestCoreConcept_DomainWithoutDomainMD(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/glossary/ARTIFACT.md": contextArtifact("glossary"),
@@ -108,12 +108,12 @@ func TestConcepts_DomainWithoutDomainMD(t *testing.T) {
 }
 
 // T-D-concepts-7 — DOMAIN.md description and keywords surface in load_domain.
-func TestConcepts_DomainMDDescriptionKeywords(t *testing.T) {
+func TestCoreConcept_DomainMDDescriptionKeywords(t *testing.T) {
 	t.Skip("blocked by F-4.5.2: load_domain never ingests DOMAIN.md, so the domain description and keywords are not surfaced")
 }
 
 // T-D-concepts-8 — filesystem-mode sync works with no server process.
-func TestConcepts_FilesystemSyncNoServer(t *testing.T) {
+func TestCoreConcept_FilesystemSyncNoServer(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":              "multi_layer: true\n",
@@ -129,12 +129,12 @@ func TestConcepts_FilesystemSyncNoServer(t *testing.T) {
 }
 
 // T-D-concepts-9 — filesystem and standalone modes produce equivalent content.
-func TestConcepts_FilesystemVsStandaloneEquivalent(t *testing.T) {
+func TestCoreConcept_FilesystemVsStandaloneEquivalent(t *testing.T) {
 	t.Skip("blocked by F-2.2.2: the server-source sync path is unimplemented, so the filesystem-vs-server content comparison cannot run")
 }
 
 // T-D-concepts-10 — a higher-precedence layer overrides a lower one on collision.
-func TestConcepts_LayerPrecedenceOverride(t *testing.T) {
+func TestCoreConcept_LayerPrecedenceOverride(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":                       "multi_layer: true\nlayer_order: [low-layer, high-layer]\n",
@@ -150,7 +150,7 @@ func TestConcepts_LayerPrecedenceOverride(t *testing.T) {
 }
 
 // T-D-concepts-11 — the workspace overlay has the highest precedence.
-func TestConcepts_OverlayHighestPrecedence(t *testing.T) {
+func TestCoreConcept_OverlayHighestPrecedence(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"shared/glossary/ARTIFACT.md": contextArtifact("registry-version"),
@@ -167,7 +167,7 @@ func TestConcepts_OverlayHighestPrecedence(t *testing.T) {
 }
 
 // T-D-concepts-12 — layer ordering defaults to alphabetical by subdirectory.
-func TestConcepts_LayerOrderAlphabeticalDefault(t *testing.T) {
+func TestCoreConcept_LayerOrderAlphabeticalDefault(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":                "multi_layer: true\n",
@@ -183,7 +183,7 @@ func TestConcepts_LayerOrderAlphabeticalDefault(t *testing.T) {
 }
 
 // T-D-concepts-13 — a public layer is accessible to unauthenticated callers.
-func TestConcepts_PublicLayerUnauthenticated(t *testing.T) {
+func TestCoreConcept_PublicLayerUnauthenticated(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"test/ARTIFACT.md": contextArtifact("test")})
 	srv := startServerArgs(t, []string{"HOME=" + t.TempDir()}, "serve", "--public-mode", "--layer-path", reg)
@@ -193,17 +193,17 @@ func TestConcepts_PublicLayerUnauthenticated(t *testing.T) {
 }
 
 // T-D-concepts-14 — group-restricted layer excluded from a non-member caller.
-func TestConcepts_GroupRestrictedExcluded(t *testing.T) {
+func TestCoreConcept_GroupRestrictedExcluded(t *testing.T) {
 	t.Skip("requires a standard deployment with an OIDC IdP and group claims; per-group visibility is not exercisable in the standalone sandbox (see F-2.2.3)")
 }
 
 // T-D-concepts-15 — visibility is enforced on every registry call.
-func TestConcepts_VisibilityPerCall(t *testing.T) {
+func TestCoreConcept_VisibilityPerCall(t *testing.T) {
 	t.Skip("requires a standard deployment with an OIDC IdP and changeable group membership; not exercisable in the standalone sandbox (see F-2.2.3)")
 }
 
 // T-D-concepts-16 — harness none writes the canonical layout.
-func TestConcepts_HarnessNoneCanonical(t *testing.T) {
+func TestCoreConcept_HarnessNoneCanonical(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"company/glossary/ARTIFACT.md": contextArtifact("glossary")})
 	tgt := t.TempDir()
@@ -217,7 +217,7 @@ func TestConcepts_HarnessNoneCanonical(t *testing.T) {
 }
 
 // T-D-concepts-17 — claude-code writes a skill to .claude/skills/<name>/SKILL.md.
-func TestConcepts_ClaudeCodeSkill(t *testing.T) {
+func TestCoreConcept_ClaudeCodeSkill(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"tools/formatter/ARTIFACT.md": greetSkillArtifact,
@@ -229,7 +229,7 @@ func TestConcepts_ClaudeCodeSkill(t *testing.T) {
 }
 
 // T-D-concepts-18 — claude-code writes a rule to .claude/rules/<name>.md.
-func TestConcepts_ClaudeCodeRule(t *testing.T) {
+func TestCoreConcept_ClaudeCodeRule(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"rules/ts-style/ARTIFACT.md": "---\ntype: rule\nversion: 1.0.0\ndescription: ts\nrule_mode: always\n---\n\nrules\n",
@@ -240,7 +240,7 @@ func TestConcepts_ClaudeCodeRule(t *testing.T) {
 }
 
 // T-D-concepts-19 — claude-code writes an agent to .claude/agents/<name>.md.
-func TestConcepts_ClaudeCodeAgent(t *testing.T) {
+func TestCoreConcept_ClaudeCodeAgent(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"agents/reviewer/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: reviewer\n---\n\nbody\n",
@@ -251,7 +251,7 @@ func TestConcepts_ClaudeCodeAgent(t *testing.T) {
 }
 
 // T-D-concepts-20 — cursor writes a rule to .cursor/rules/<name>.mdc.
-func TestConcepts_CursorRule(t *testing.T) {
+func TestCoreConcept_CursorRule(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"rules/ts-style/ARTIFACT.md": "---\ntype: rule\nversion: 1.0.0\ndescription: ts\nrule_mode: always\n---\n\nrules\n",
@@ -262,7 +262,7 @@ func TestConcepts_CursorRule(t *testing.T) {
 }
 
 // T-D-concepts-21 — an unknown harness is rejected with config.unknown_harness.
-func TestConcepts_UnknownHarness(t *testing.T) {
+func TestCoreConcept_UnknownHarness(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", t.TempDir(), "--harness", "not-a-valid-harness")
@@ -272,7 +272,7 @@ func TestConcepts_UnknownHarness(t *testing.T) {
 }
 
 // T-D-concepts-22 — MCP load_artifact materializes to PODIUM_MATERIALIZE_ROOT.
-func TestConcepts_MCPMaterialize(t *testing.T) {
+func TestCoreConcept_MCPMaterialize(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"company-glossary/ARTIFACT.md": contextArtifact("glossary")}))
 	mat := t.TempDir()
@@ -291,7 +291,7 @@ func TestConcepts_MCPMaterialize(t *testing.T) {
 
 // T-D-concepts-23 — with PODIUM_MATERIALIZE_ROOT unset, load_artifact returns
 // the manifest without writing files (materialized_at: []).
-func TestConcepts_MCPNoMaterializeRoot(t *testing.T) {
+func TestCoreConcept_MCPNoMaterializeRoot(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"company-glossary/ARTIFACT.md": contextArtifact("glossary")}))
 	res := mcpExec(t, []string{
@@ -308,7 +308,7 @@ func TestConcepts_MCPNoMaterializeRoot(t *testing.T) {
 }
 
 // T-D-concepts-24 — sync materializes the full effective view in one batch.
-func TestConcepts_SyncBatch(t *testing.T) {
+func TestCoreConcept_SyncBatch(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"finance/glossary/ARTIFACT.md": contextArtifact("glossary"),
@@ -324,7 +324,7 @@ func TestConcepts_SyncBatch(t *testing.T) {
 }
 
 // T-D-concepts-25 — load_domain with no path returns the root map.
-func TestConcepts_LoadDomainRoot(t *testing.T) {
+func TestCoreConcept_LoadDomainRoot(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"alpha/x/ARTIFACT.md": contextArtifact("x"),
@@ -338,7 +338,7 @@ func TestConcepts_LoadDomainRoot(t *testing.T) {
 }
 
 // T-D-concepts-26 — load_domain with a path returns that domain's subdomains.
-func TestConcepts_LoadDomainPath(t *testing.T) {
+func TestCoreConcept_LoadDomainPath(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md":                        contextArtifact("pay"),
@@ -353,7 +353,7 @@ func TestConcepts_LoadDomainPath(t *testing.T) {
 
 // T-D-concepts-27 — search_domains retrieves a domain matching a query via
 // its DOMAIN.md projection. spec: §3.2 / §4.7 (F-3.2.1)
-func TestConcepts_SearchDomains(t *testing.T) {
+func TestCoreConcept_SearchDomains(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/DOMAIN.md":               "---\ndescription: \"Accounts payable operations\"\ndiscovery:\n  keywords:\n    - reconciliation\n---\n",
@@ -367,7 +367,7 @@ func TestConcepts_SearchDomains(t *testing.T) {
 }
 
 // T-D-concepts-28 — search_artifacts returns ranked descriptors (no bodies).
-func TestConcepts_SearchArtifactsQuery(t *testing.T) {
+func TestCoreConcept_SearchArtifactsQuery(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/va/ARTIFACT.md": contextArtifact("variance analysis report"),
@@ -384,7 +384,7 @@ func TestConcepts_SearchArtifactsQuery(t *testing.T) {
 }
 
 // T-D-concepts-29 — search_artifacts with scope and no query browses a domain.
-func TestConcepts_SearchArtifactsScope(t *testing.T) {
+func TestCoreConcept_SearchArtifactsScope(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/a/ARTIFACT.md": contextArtifact("a"),
@@ -403,7 +403,7 @@ func TestConcepts_SearchArtifactsScope(t *testing.T) {
 }
 
 // T-D-concepts-30 — search_artifacts type filter returns only that type.
-func TestConcepts_SearchArtifactsType(t *testing.T) {
+func TestCoreConcept_SearchArtifactsType(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"sk/ARTIFACT.md":  greetSkillArtifact,
@@ -422,7 +422,7 @@ func TestConcepts_SearchArtifactsType(t *testing.T) {
 }
 
 // T-D-concepts-31 — load_artifact returns absolute materialized_at paths.
-func TestConcepts_LoadArtifactAbsolutePaths(t *testing.T) {
+func TestCoreConcept_LoadArtifactAbsolutePaths(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"company-glossary/ARTIFACT.md": contextArtifact("glossary")}))
 	mat := t.TempDir()
@@ -444,7 +444,7 @@ func TestConcepts_LoadArtifactAbsolutePaths(t *testing.T) {
 }
 
 // T-D-concepts-32 — the MCP server exposes exactly the four meta-tools.
-func TestConcepts_FourMetaTools(t *testing.T) {
+func TestCoreConcept_FourMetaTools(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
 	res := mcpExec(t, []string{"PODIUM_REGISTRY=" + srv.BaseURL}, rpcReq{ID: 1, Method: "tools/list"})
@@ -456,13 +456,13 @@ func TestConcepts_FourMetaTools(t *testing.T) {
 }
 
 // T-D-concepts-33 — mcp-server artifacts absent from MCP bridge search results.
-func TestConcepts_MCPServerFilteredFromSearch(t *testing.T) {
+func TestCoreConcept_MCPServerFilteredFromSearch(t *testing.T) {
 	t.Skip("spec §5: mcp-server artifacts should be filtered from MCP bridge results; the bridge does not filter them and no BUILD-GAPS finding is filed for this gap")
 }
 
 // T-D-concepts-34 — the read CLI (podium search) hits the same HTTP API as the
 // MCP search_artifacts tool.
-func TestConcepts_SearchCLIMatchesHTTP(t *testing.T) {
+func TestCoreConcept_SearchCLIMatchesHTTP(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"company-glossary/ARTIFACT.md": contextArtifact("the company glossary of terms"),
@@ -478,7 +478,7 @@ func TestConcepts_SearchCLIMatchesHTTP(t *testing.T) {
 }
 
 // T-D-concepts-35 — podium domain show is a thin client over /v1/load_domain.
-func TestConcepts_DomainShowThinClient(t *testing.T) {
+func TestCoreConcept_DomainShowThinClient(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/glossary/ARTIFACT.md": contextArtifact("glossary"),
@@ -496,7 +496,7 @@ func TestConcepts_DomainShowThinClient(t *testing.T) {
 
 // T-D-concepts-36 — lazy navigation: load_domain and search write nothing;
 // only load_artifact materializes.
-func TestConcepts_LazyNavigation(t *testing.T) {
+func TestCoreConcept_LazyNavigation(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/glossary/ARTIFACT.md": contextArtifact("glossary"),
@@ -529,7 +529,7 @@ func TestConcepts_LazyNavigation(t *testing.T) {
 }
 
 // T-D-concepts-37 — eager loading: sync materializes the whole effective view.
-func TestConcepts_EagerSync(t *testing.T) {
+func TestCoreConcept_EagerSync(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"finance/a/ARTIFACT.md": contextArtifact("a"),
@@ -550,7 +550,7 @@ func TestConcepts_EagerSync(t *testing.T) {
 }
 
 // T-D-concepts-38 — sync --watch re-materializes when the registry changes.
-func TestConcepts_WatchRematerializes(t *testing.T) {
+func TestCoreConcept_WatchRematerializes(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"first/ARTIFACT.md": contextArtifact("first")})
 	tgt := t.TempDir()
@@ -570,17 +570,17 @@ func TestConcepts_WatchRematerializes(t *testing.T) {
 }
 
 // T-D-concepts-39 — eager and lazy produce identical adapter output.
-func TestConcepts_EagerLazyIdentical(t *testing.T) {
+func TestCoreConcept_EagerLazyIdentical(t *testing.T) {
 	t.Skip("blocked by F-2.2.2: the eager path (podium sync against a server URL) is unimplemented, so eager-vs-lazy adapter output cannot be compared")
 }
 
 // T-D-concepts-40 — sync works against a server registry.
-func TestConcepts_SyncServerRegistry(t *testing.T) {
+func TestCoreConcept_SyncServerRegistry(t *testing.T) {
 	t.Skip("blocked by F-2.2.2: podium sync has no server-source HTTP path; a URL registry is treated as a filesystem path")
 }
 
 // T-D-concepts-41 — version prints a version string and exits cleanly.
-func TestConcepts_Version(t *testing.T) {
+func TestCoreConcept_Version(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "version")
 	if res.Exit != 0 || !strings.HasPrefix(res.Stdout, "podium ") {
@@ -589,7 +589,7 @@ func TestConcepts_Version(t *testing.T) {
 }
 
 // T-D-concepts-42 — sync with no registry and no sync.yaml fails descriptively.
-func TestConcepts_SyncNoRegistry(t *testing.T) {
+func TestCoreConcept_SyncNoRegistry(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, t.TempDir(), []string{"HOME=" + t.TempDir(), "PODIUM_REGISTRY="}, "sync", "--target", t.TempDir())
 	if res.Exit != 2 || !strings.Contains(res.Stderr, "config.no_registry") {
@@ -600,7 +600,7 @@ func TestConcepts_SyncNoRegistry(t *testing.T) {
 // T-D-concepts-43 — version pinning via @semver in the artifact ID.
 // Doc-accuracy: inline @<semver> in the id is not resolved (404); the
 // ?version= query parameter is the working pin.
-func TestConcepts_VersionPinInID(t *testing.T) {
+func TestCoreConcept_VersionPinInID(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/glossary/ARTIFACT.md": contextArtifact("glossary"),
@@ -616,7 +616,7 @@ func TestConcepts_VersionPinInID(t *testing.T) {
 }
 
 // T-D-concepts-44 — artifact scaffold generates a skill directory structure.
-func TestConcepts_ScaffoldSkill(t *testing.T) {
+func TestCoreConcept_ScaffoldSkill(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "finance/close-reporting/run-variance-analysis")
 	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill", "--description", "Runs variance analysis.", "--yes", out)
@@ -631,17 +631,17 @@ func TestConcepts_ScaffoldSkill(t *testing.T) {
 }
 
 // T-D-concepts-45 — load_domain note field when truncated by token budget.
-func TestConcepts_LoadDomainNoteField(t *testing.T) {
+func TestCoreConcept_LoadDomainNoteField(t *testing.T) {
 	t.Skip("blocked by F-4.5.7: load_domain renders a single level and the discovery rendering controls (notable_count, token budget, the note field) are not applied")
 }
 
 // T-D-concepts-46 — layer visibility fields combine as a union.
-func TestConcepts_VisibilityUnion(t *testing.T) {
+func TestCoreConcept_VisibilityUnion(t *testing.T) {
 	t.Skip("requires a standard deployment with an OIDC IdP and org/group claims; union visibility is not exercisable in the standalone sandbox (see F-2.2.3)")
 }
 
 // T-D-concepts-47 — a registry with no .registry-config runs as single-layer.
-func TestConcepts_SingleLayerNoConfig(t *testing.T) {
+func TestCoreConcept_SingleLayerNoConfig(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
 	tgt := t.TempDir()
@@ -654,7 +654,7 @@ func TestConcepts_SingleLayerNoConfig(t *testing.T) {
 
 // T-D-concepts-48 — a context artifact materializes to the harness-neutral
 // .podium/context/<id>/ bucket under codex (identical across every adapter).
-func TestConcepts_CodexHarness(t *testing.T) {
+func TestCoreConcept_CodexHarness(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"tools/helper/ARTIFACT.md": contextArtifact("helper")})
 	tgt := t.TempDir()
@@ -667,7 +667,7 @@ func TestConcepts_CodexHarness(t *testing.T) {
 
 // T-D-concepts-49 — hermes reuses the Cursor .mdc format and writes a rule to
 // .cursor/rules/<name>.mdc.
-func TestConcepts_HermesRule(t *testing.T) {
+func TestCoreConcept_HermesRule(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"rules/style/ARTIFACT.md": "---\ntype: rule\nversion: 1.0.0\ndescription: style\nrule_mode: always\n---\n\nrules\n",
@@ -678,7 +678,7 @@ func TestConcepts_HermesRule(t *testing.T) {
 }
 
 // T-D-concepts-50 — pi injects a rule into AGENTS.md (§6.7 inject mechanism).
-func TestConcepts_PiRule(t *testing.T) {
+func TestCoreConcept_PiRule(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"rules/style/ARTIFACT.md": "---\ntype: rule\nversion: 1.0.0\ndescription: style\nrule_mode: always\n---\n\nrules\n",
@@ -692,7 +692,7 @@ func TestConcepts_PiRule(t *testing.T) {
 
 // T-D-concepts-51 — a context artifact materializes to .podium/context/<id>/
 // under gemini (the harness-neutral bucket).
-func TestConcepts_GeminiExtension(t *testing.T) {
+func TestCoreConcept_GeminiExtension(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"tools/helper/ARTIFACT.md": contextArtifact("helper")})
 	tgt := t.TempDir()
@@ -701,7 +701,7 @@ func TestConcepts_GeminiExtension(t *testing.T) {
 }
 
 // T-D-concepts-52 — opencode injects a rule into AGENTS.md (§6.7 inject).
-func TestConcepts_OpencodeRule(t *testing.T) {
+func TestCoreConcept_OpencodeRule(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"rules/style/ARTIFACT.md": "---\ntype: rule\nversion: 1.0.0\ndescription: style\nrule_mode: always\n---\n\nrules\n",
@@ -715,7 +715,7 @@ func TestConcepts_OpencodeRule(t *testing.T) {
 
 // T-D-concepts-53 — claude-desktop has no project-level surface, so sync
 // produces no project output for it (§6.7).
-func TestConcepts_ClaudeDesktopExtension(t *testing.T) {
+func TestCoreConcept_ClaudeDesktopExtension(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"tools/helper/ARTIFACT.md": contextArtifact("helper")})
 	tgt := t.TempDir()
@@ -731,7 +731,7 @@ func TestConcepts_ClaudeDesktopExtension(t *testing.T) {
 // plugins/<id>/ with a .claude-plugin/plugin.json manifest. A skill ships as a
 // plugin; a context artifact goes to the harness-neutral .podium/context/
 // bucket instead (§6.7, identical across every adapter).
-func TestConcepts_ClaudeCoworkPlugin(t *testing.T) {
+func TestCoreConcept_ClaudeCoworkPlugin(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"tools/greet/ARTIFACT.md": greetSkillArtifact,
@@ -748,7 +748,7 @@ func TestConcepts_ClaudeCoworkPlugin(t *testing.T) {
 }
 
 // T-D-concepts-55 — podium-mcp fails at startup when PODIUM_REGISTRY is unset.
-func TestConcepts_MCPRequiresRegistry(t *testing.T) {
+func TestCoreConcept_MCPRequiresRegistry(t *testing.T) {
 	t.Parallel()
 	res := mcpExec(t, []string{"PODIUM_REGISTRY="}, rpcReq{ID: 1, Method: "initialize"})
 	out := res.Stdout + res.Stderr
@@ -761,7 +761,7 @@ func TestConcepts_MCPRequiresRegistry(t *testing.T) {
 }
 
 // T-D-concepts-56 — none adapter preserves skill bundled resources at relative paths.
-func TestConcepts_NoneBundledResources(t *testing.T) {
+func TestCoreConcept_NoneBundledResources(t *testing.T) {
 	t.Parallel()
 	base := "finance/close-reporting/run-variance-analysis"
 	reg := writeRegistry(t, map[string]string{
@@ -778,7 +778,7 @@ func TestConcepts_NoneBundledResources(t *testing.T) {
 }
 
 // T-D-concepts-57 — claude-code co-locates skill resources under .claude/skills/<name>/.
-func TestConcepts_ClaudeCodeColocatesResources(t *testing.T) {
+func TestCoreConcept_ClaudeCodeColocatesResources(t *testing.T) {
 	t.Parallel()
 	base := "finance/close-reporting/run-variance-analysis"
 	reg := writeRegistry(t, map[string]string{
@@ -793,7 +793,7 @@ func TestConcepts_ClaudeCodeColocatesResources(t *testing.T) {
 }
 
 // T-D-concepts-58 — sync --dry-run reports a plan and writes nothing.
-func TestConcepts_DryRun(t *testing.T) {
+func TestCoreConcept_DryRun(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
 	tgt := t.TempDir()
@@ -807,7 +807,7 @@ func TestConcepts_DryRun(t *testing.T) {
 }
 
 // T-D-concepts-59 — sync is idempotent across two runs.
-func TestConcepts_Idempotent(t *testing.T) {
+func TestCoreConcept_Idempotent(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"a/ARTIFACT.md": contextArtifact("a"),
@@ -828,7 +828,7 @@ func TestConcepts_Idempotent(t *testing.T) {
 
 // T-D-concepts-60 — a per-call harness override on load_artifact switches the
 // adapter without restarting the bridge.
-func TestConcepts_PerCallHarnessOverride(t *testing.T) {
+func TestCoreConcept_PerCallHarnessOverride(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"rules/ts-style/ARTIFACT.md": "---\ntype: rule\nversion: 1.0.0\ndescription: ts\nrule_mode: always\n---\n\nrules\n",

@@ -115,7 +115,7 @@ func extPollContains(path, substr string, within time.Duration) bool {
 // ---- T-D-extending-1 through T-D-extending-50 ----------------------------
 
 // T-D-extending-1 — HarnessAdapter SPI: unknown adapter returns config.unknown_harness.
-func TestExtending_1_UnknownHarness(t *testing.T) {
+func TestPluginSPI_UnknownHarness(t *testing.T) {
 	t.Parallel()
 	reg := extSkillReg(t)
 	tgt := t.TempDir()
@@ -149,7 +149,7 @@ func TestExtending_1_UnknownHarness(t *testing.T) {
 }
 
 // T-D-extending-2 — HarnessAdapter SPI: DefaultRegistry contains documented adapters.
-func TestExtending_2_DefaultRegistryAdapters(t *testing.T) {
+func TestPluginSPI_DefaultRegistryAdapters(t *testing.T) {
 	t.Parallel()
 	reg := extSkillReg(t)
 	// At minimum none, claude-code, cursor must succeed. Others are verified
@@ -186,7 +186,7 @@ func TestExtending_2_DefaultRegistryAdapters(t *testing.T) {
 }
 
 // T-D-extending-3 — TypeProvider SPI: extension type artifact behavior without registered provider.
-func TestExtending_3_EvalExtensionType(t *testing.T) {
+func TestPluginSPI_EvalExtensionType(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"evals/suite/run-week-42/ARTIFACT.md": "---\ntype: eval\nversion: 1.0.0\ndescription: Week 42 eval suite.\n---\n\nEval body.\n",
@@ -205,7 +205,7 @@ func TestExtending_3_EvalExtensionType(t *testing.T) {
 }
 
 // T-D-extending-4 — TypeProvider SPI: first-class type artifacts pass lint.
-func TestExtending_4_FirstClassTypesPassLint(t *testing.T) {
+func TestPluginSPI_FirstClassTypesPassLint(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		// skill
@@ -235,7 +235,7 @@ func TestExtending_4_FirstClassTypesPassLint(t *testing.T) {
 }
 
 // T-D-extending-5 — IngestLinter SPI: manifest lint rejects artifact with missing required fields.
-func TestExtending_5_LintMissingRequired(t *testing.T) {
+func TestPluginSPI_LintMissingRequired(t *testing.T) {
 	t.Parallel()
 	// version: is absent
 	reg := writeRegistry(t, map[string]string{
@@ -255,7 +255,7 @@ func TestExtending_5_LintMissingRequired(t *testing.T) {
 }
 
 // T-D-extending-6 — IngestLinter SPI: lint accepts a fully-valid artifact.
-func TestExtending_6_LintValidArtifact(t *testing.T) {
+func TestPluginSPI_LintValidArtifact(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md": greetSkillArtifact,
@@ -268,7 +268,7 @@ func TestExtending_6_LintValidArtifact(t *testing.T) {
 }
 
 // T-D-extending-7 — LayerSourceProvider SPI: local source bridge — register, ingest, change pickup.
-func TestExtending_7_LocalLayerBridge(t *testing.T) {
+func TestPluginSPI_LocalLayerBridge(t *testing.T) {
 	t.Parallel()
 	t.Skip("blocked by F-7.3.4: registering a local layer via the API stores config but never ingests, and POST /v1/layers/reingest records intent without running the pipeline, so the bridged artifact is never discoverable")
 	layerDir := t.TempDir()
@@ -320,7 +320,7 @@ func TestExtending_7_LocalLayerBridge(t *testing.T) {
 }
 
 // T-D-extending-8 — LayerSourceProvider SPI: local source reingest with no changes is idempotent.
-func TestExtending_8_ReingestIdempotent(t *testing.T) {
+func TestPluginSPI_ReingestIdempotent(t *testing.T) {
 	t.Parallel()
 	layerDir := t.TempDir()
 	mkArtifact(t, filepath.Join(layerDir, "finance/ap/pay-invoice"), greetSkillArtifact)
@@ -344,7 +344,7 @@ func TestExtending_8_ReingestIdempotent(t *testing.T) {
 }
 
 // T-D-extending-9 — LayerSourceProvider SPI: reingest of non-existent layer returns an error.
-func TestExtending_9_ReingestGhostLayer(t *testing.T) {
+func TestPluginSPI_ReingestGhostLayer(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
 	res := runPodium(t, "", nil, "layer", "reingest", "--registry", srv.BaseURL, "ghost-layer-zzz")
@@ -354,7 +354,7 @@ func TestExtending_9_ReingestGhostLayer(t *testing.T) {
 }
 
 // T-D-extending-10 — LayerSourceProvider SPI: reingest with missing id argument fails at CLI level.
-func TestExtending_10_ReingestMissingID(t *testing.T) {
+func TestPluginSPI_ReingestMissingID(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
 	res := runPodium(t, "", nil, "layer", "reingest", "--registry", srv.BaseURL)
@@ -368,7 +368,7 @@ func TestExtending_10_ReingestMissingID(t *testing.T) {
 
 // T-D-extending-11 — IdentityProvider SPI: injected-session-token with an
 // unregistered runtime key returns auth.untrusted_runtime. F-6.3.2.
-func TestExtending_11_InjectedSessionTokenUntrusted(t *testing.T) {
+func TestPluginSPI_InjectedSessionTokenUntrusted(t *testing.T) {
 	t.Parallel()
 	priv, pem := injKeyPair(t)
 	srv := injServer(t, extSkillReg(t), priv, pem)
@@ -387,7 +387,7 @@ func TestExtending_11_InjectedSessionTokenUntrusted(t *testing.T) {
 }
 
 // T-D-extending-12 — IdentityProvider SPI: admin runtime register and list roundtrip.
-func TestExtending_12_RuntimeRegisterList(t *testing.T) {
+func TestPluginSPI_RuntimeRegisterList(t *testing.T) {
 	t.Parallel()
 	pubKeyFile := extGenRSAPubKeyFile(t)
 	srv := startServer(t, "")
@@ -421,7 +421,7 @@ func TestExtending_12_RuntimeRegisterList(t *testing.T) {
 }
 
 // T-D-extending-13 — IdentityProvider SPI: admin runtime register requires all four flags.
-func TestExtending_13_RuntimeRegisterMissingFlags(t *testing.T) {
+func TestPluginSPI_RuntimeRegisterMissingFlags(t *testing.T) {
 	t.Parallel()
 	pubKeyFile := extGenRSAPubKeyFile(t)
 	srv := startServer(t, "")
@@ -462,22 +462,22 @@ func TestExtending_13_RuntimeRegisterMissingFlags(t *testing.T) {
 }
 
 // T-D-extending-14 — IdentityProvider SPI: oauth-device-code triggers device prompt.
-func TestExtending_14_OAuthDeviceCodePrompt(t *testing.T) {
+func TestPluginSPI_OAuthDeviceCodePrompt(t *testing.T) {
 	t.Skip("podium status does not initiate device flow; requires OIDC standard-mode registry with no cached token and an interactive device-code prompt")
 }
 
 // T-D-extending-15 — MaterializationHook SPI: hook chain runs in order.
-func TestExtending_15_HookChainOrder(t *testing.T) {
+func TestPluginSPI_HookChainOrder(t *testing.T) {
 	t.Skip("F-6.6.1 and F-9.3.1 fixed: the §6.6 step 4 hook chain runs in both bridge materialization paths (covered in-process by cmd/podium-mcp TestDeliver_HookChainRunsInOrder) and the hook SPI is now a context-first wire-serializable interface. A standalone e2e still cannot register a hook with the out-of-process bridge because §9.3 does not commit to an out-of-process plugin protocol (\"What's not committed\"); registration remains in-process via boot-time wiring")
 }
 
 // T-D-extending-16 — MaterializationHook SPI: hook that drops a file prevents write.
-func TestExtending_16_HookDropsFile(t *testing.T) {
+func TestPluginSPI_HookDropsFile(t *testing.T) {
 	t.Skip("F-6.6.1 and F-9.3.1 fixed: the hook chain runs and a drop suppresses the write (covered in-process by cmd/podium-mcp TestDeliver_HookDropsFile) and the hook SPI is now context-first and wire-serializable. Registering a hook with the out-of-process bridge would need an out-of-process plugin protocol, which §9.3 does not commit to; registration remains in-process")
 }
 
 // T-D-extending-17 — MaterializationHook SPI: hook error aborts write.
-func TestExtending_17_HookErrorAborts(t *testing.T) {
+func TestPluginSPI_HookErrorAborts(t *testing.T) {
 	t.Skip("F-6.6.1 and F-9.3.1 fixed: a hook error aborts the write with materialize.hook_failed (covered in-process by cmd/podium-mcp TestDeliver_HookErrorAbortsWrite) and the hook SPI is now context-first and wire-serializable. Registering a hook with the out-of-process bridge would need an out-of-process plugin protocol, which §9.3 does not commit to; registration remains in-process")
 }
 
@@ -534,7 +534,7 @@ func extDeprecatedArtifact(version string, deprecated bool) []byte {
 // spec: §7.3.2 — ingesting a new (artifact_id, version) fires artifact.published
 // to every matching receiver with the full {event, trace_id, timestamp, actor,
 // data} body (F-7.3.1, F-7.3.3 wiring).
-func TestExtending_18_WebhookArtifactPublished(t *testing.T) {
+func TestPluginSPI_WebhookArtifactPublished(t *testing.T) {
 	srv, st, bodies := extWebhookHarness(t, "artifact.published")
 	_, err := ingest.Ingest(context.Background(), st, ingest.Request{
 		TenantID: "default", LayerID: "L", PublishEvent: srv.PublishEvent,
@@ -569,7 +569,7 @@ func TestExtending_18_WebhookArtifactPublished(t *testing.T) {
 // deprecated:true. A first non-deprecated version then a deprecated successor
 // delivers exactly one artifact.deprecated event; the receiver filtered to that
 // type sees nothing for the first publish (F-7.3.10, F-7.3.1).
-func TestExtending_19_WebhookArtifactDeprecated(t *testing.T) {
+func TestPluginSPI_WebhookArtifactDeprecated(t *testing.T) {
 	srv, st, bodies := extWebhookHarness(t, "artifact.deprecated")
 	// v1 is not deprecated: no artifact.deprecated delivery.
 	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
@@ -616,7 +616,7 @@ func TestExtending_19_WebhookArtifactDeprecated(t *testing.T) {
 // T-D-extending-19b — Webhook outbound delivery: domain.published reaches receiver.
 // spec: §7.3.2 — adding or changing a DOMAIN.md fires domain.published to
 // matching receivers (F-7.3.3).
-func TestExtending_19b_WebhookDomainPublished(t *testing.T) {
+func TestPluginSPI_WebhookDomainPublished(t *testing.T) {
 	srv, st, bodies := extWebhookHarness(t, "domain.published")
 	_, err := ingest.Ingest(context.Background(), st, ingest.Request{
 		TenantID: "default", LayerID: "L", PublishEvent: srv.PublishEvent,
@@ -643,22 +643,22 @@ func TestExtending_19b_WebhookDomainPublished(t *testing.T) {
 }
 
 // T-D-extending-20 — Webhook outbound delivery: layer.ingested event reaches receiver.
-func TestExtending_20_WebhookLayerIngested(t *testing.T) {
+func TestPluginSPI_WebhookLayerIngested(t *testing.T) {
 	t.Skip("outbound webhook delivery for layer.ingested is not reachable via the standalone HTTP surface; webhook store not wired to trigger delivery in standalone mode")
 }
 
 // T-D-extending-21 — Webhook outbound delivery: non-matching filter receives no events.
-func TestExtending_21_WebhookNonMatchingFilter(t *testing.T) {
+func TestPluginSPI_WebhookNonMatchingFilter(t *testing.T) {
 	t.Skip("outbound webhook delivery filter is not exercisable via the standalone HTTP surface; blocked by same gap as T-D-extending-20")
 }
 
 // T-D-extending-22 — Webhook outbound delivery: receiver auto-disables after consecutive failures.
-func TestExtending_22_WebhookAutoDisable(t *testing.T) {
+func TestPluginSPI_WebhookAutoDisable(t *testing.T) {
 	t.Skip("auto-disable requires a MaxFailures override not exposed in the standalone e2e harness; outbound delivery not wired to standalone")
 }
 
 // T-D-extending-23 — Webhook outbound delivery: HMAC VerifyBody rejects wrong secret.
-func TestExtending_23_WebhookHMACWrongSecret(t *testing.T) {
+func TestPluginSPI_WebhookHMACWrongSecret(t *testing.T) {
 	t.Parallel()
 	body := []byte(`{"event":"artifact.published","data":{"id":"finance/ap/pay-invoice"}}`)
 	correct := "correct-secret"
@@ -680,7 +680,7 @@ func TestExtending_23_WebhookHMACWrongSecret(t *testing.T) {
 }
 
 // T-D-extending-24 — Programmatic curation: podium sync with --include materializes only named artifacts.
-func TestExtending_24_SyncIncludeOne(t *testing.T) {
+func TestPluginSPI_SyncIncludeOne(t *testing.T) {
 	t.Parallel()
 	t.Skip("blocked by F-7.5.3: podium sync has no --include flag and scope filtering is never wired into the sync execution path")
 	reg := writeRegistry(t, map[string]string{
@@ -716,7 +716,7 @@ func TestExtending_24_SyncIncludeOne(t *testing.T) {
 }
 
 // T-D-extending-25 — Programmatic curation: multiple --include flags materialize the union.
-func TestExtending_25_SyncIncludeMultiple(t *testing.T) {
+func TestPluginSPI_SyncIncludeMultiple(t *testing.T) {
 	t.Parallel()
 	t.Skip("blocked by F-7.5.3: podium sync has no --include flag; multi-include union semantics are not implemented")
 	reg := writeRegistry(t, map[string]string{
@@ -760,7 +760,7 @@ func TestExtending_25_SyncIncludeMultiple(t *testing.T) {
 }
 
 // T-D-extending-26 — Programmatic curation: on-disk result is reproducible from the include list.
-func TestExtending_26_SyncIncludeReproducible(t *testing.T) {
+func TestPluginSPI_SyncIncludeReproducible(t *testing.T) {
 	t.Parallel()
 	t.Skip("blocked by F-7.5.3: podium sync has no --include flag, so the include-list reproducibility claim is not exercisable")
 	reg := writeRegistry(t, map[string]string{
@@ -800,7 +800,7 @@ func TestExtending_26_SyncIncludeReproducible(t *testing.T) {
 }
 
 // T-D-extending-27 — Custom CI check: podium lint exits non-zero for an artifact with lint errors.
-func TestExtending_27_LintStructuralError(t *testing.T) {
+func TestPluginSPI_LintStructuralError(t *testing.T) {
 	t.Parallel()
 	// A manifest missing the required version field is a lint error.
 	reg := writeRegistry(t, map[string]string{
@@ -817,7 +817,7 @@ func TestExtending_27_LintStructuralError(t *testing.T) {
 }
 
 // T-D-extending-28 — Custom CI check: podium lint exits 0 for a clean registry.
-func TestExtending_28_LintClean(t *testing.T) {
+func TestPluginSPI_LintClean(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md": greetSkillArtifact,
@@ -830,7 +830,7 @@ func TestExtending_28_LintClean(t *testing.T) {
 }
 
 // T-D-extending-29 — Custom consumer via SDK (none harness): load_artifact returns canonical layout.
-func TestExtending_29_HarnessNoneCanonicalLayout(t *testing.T) {
+func TestPluginSPI_HarnessNoneCanonicalLayout(t *testing.T) {
 	t.Parallel()
 	id := "finance/ap/pay-invoice"
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -860,17 +860,17 @@ func TestExtending_29_HarnessNoneCanonicalLayout(t *testing.T) {
 }
 
 // T-D-extending-30 — Custom consumer surfaces: HTTP API visibility filtering applies.
-func TestExtending_30_VisibilityFilteringDirect(t *testing.T) {
+func TestPluginSPI_VisibilityFilteringDirect(t *testing.T) {
 	t.Skip("requires a standard registry with two authenticated users and a private layer visible only to one; not expressible in a standalone single-layer e2e")
 }
 
 // T-D-extending-31 — SPI forward compatibility: every blocking SPI method takes context as first parameter.
-func TestExtending_31_SPIContextFirstParam(t *testing.T) {
+func TestPluginSPI_SPIContextFirstParam(t *testing.T) {
 	t.Skip("structural static check over SPI interface declarations; covered by package-level review, not an e2e test")
 }
 
 // T-D-extending-32 — SPI forward compatibility: structured error envelope present in HTTP error responses.
-func TestExtending_32_StructuredErrorEnvelope(t *testing.T) {
+func TestPluginSPI_StructuredErrorEnvelope(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, extSkillReg(t))
 
@@ -918,7 +918,7 @@ func TestExtending_32_StructuredErrorEnvelope(t *testing.T) {
 }
 
 // T-D-extending-33 — Eval pipeline pattern: search_artifacts by type returns only matching type.
-func TestExtending_33_SearchByTypeFilter(t *testing.T) {
+func TestPluginSPI_SearchByTypeFilter(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md": greetSkillArtifact,
@@ -950,7 +950,7 @@ func TestExtending_33_SearchByTypeFilter(t *testing.T) {
 }
 
 // T-D-extending-34 — Bulk fetch: batchLoad returns correct per-item status.
-func TestExtending_34_BatchLoadPerItemStatus(t *testing.T) {
+func TestPluginSPI_BatchLoadPerItemStatus(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md":                        greetSkillArtifact,
@@ -999,7 +999,7 @@ func TestExtending_34_BatchLoadPerItemStatus(t *testing.T) {
 }
 
 // T-D-extending-35 — Bulk fetch: batch exceeding 50 IDs is handled without server panic.
-func TestExtending_35_BatchLoadOver50(t *testing.T) {
+func TestPluginSPI_BatchLoadOver50(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, extSkillReg(t))
 	ids := make([]string, 51)
@@ -1017,7 +1017,7 @@ func TestExtending_35_BatchLoadOver50(t *testing.T) {
 }
 
 // T-D-extending-36 — Dependents endpoint: dependents_of returns artifacts that extend a given artifact.
-func TestExtending_36_DependentsOfExtends(t *testing.T) {
+func TestPluginSPI_DependentsOfExtends(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md":     "---\ntype: context\nversion: 1.2.0\ndescription: Pay invoice.\n---\n\npay invoice body\n",
@@ -1051,7 +1051,7 @@ func TestExtending_36_DependentsOfExtends(t *testing.T) {
 }
 
 // T-D-extending-37 — Dependents endpoint: artifact with no dependents returns an empty list.
-func TestExtending_37_DependentsOfEmpty(t *testing.T) {
+func TestPluginSPI_DependentsOfEmpty(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"finance/standalone/artifact/ARTIFACT.md": contextArtifact("standalone artifact"),
@@ -1074,7 +1074,7 @@ func TestExtending_37_DependentsOfEmpty(t *testing.T) {
 }
 
 // T-D-extending-38 — Community plugin registry URL: doc mentions the registry but omits a URL.
-func TestExtending_38_CommunityPluginRegistryDocGap(t *testing.T) {
+func TestPluginSPI_CommunityPluginRegistryDocGap(t *testing.T) {
 	t.Parallel()
 	docPath := filepath.Join(repoRoot(t), "docs", "deployment", "extending.md")
 	content := readFile(t, docPath)
@@ -1089,7 +1089,7 @@ func TestExtending_38_CommunityPluginRegistryDocGap(t *testing.T) {
 }
 
 // T-D-extending-39 — Out-of-process plugin protocol: no transport surface exposed.
-func TestExtending_39_NoOutOfProcessTransport(t *testing.T) {
+func TestPluginSPI_NoOutOfProcessTransport(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "--help")
 	help := res.Stdout + res.Stderr
@@ -1101,7 +1101,7 @@ func TestExtending_39_NoOutOfProcessTransport(t *testing.T) {
 }
 
 // T-D-extending-40 — RegistryAuditSink SPI: layer.ingested event written to audit log after reingest.
-func TestExtending_40_AuditLayerIngested(t *testing.T) {
+func TestPluginSPI_AuditLayerIngested(t *testing.T) {
 	t.Parallel()
 	t.Skip("blocked by F-7.3.4: POST /v1/layers/reingest records intent but runs no ingest pipeline, so no layer.ingested audit event is emitted")
 	layerDir := t.TempDir()
@@ -1135,7 +1135,7 @@ func TestExtending_40_AuditLayerIngested(t *testing.T) {
 }
 
 // T-D-extending-41 — RegistryAuditSink SPI: artifact.published event written to audit log after ingest.
-func TestExtending_41_AuditArtifactPublished(t *testing.T) {
+func TestPluginSPI_AuditArtifactPublished(t *testing.T) {
 	t.Parallel()
 	t.Skip("blocked by F-7.3.4: the reingest endpoint runs no ingest pipeline, so no artifact.published audit event is emitted")
 	layerDir := t.TempDir()
@@ -1164,17 +1164,17 @@ func TestExtending_41_AuditArtifactPublished(t *testing.T) {
 }
 
 // T-D-extending-42 — SignatureProvider SPI: materialize.signature_invalid for tampered artifact.
-func TestExtending_42_SignatureInvalidTampered(t *testing.T) {
+func TestPluginSPI_SignatureInvalidTampered(t *testing.T) {
 	t.Skip("requires a signed-then-tampered artifact in the object store; not constructable via the filesystem-source standalone harness")
 }
 
 // T-D-extending-43 — Subscription: client receives artifact.published via SSE.
-func TestExtending_43_SSEArtifactPublished(t *testing.T) {
+func TestPluginSPI_SSEArtifactPublished(t *testing.T) {
 	t.Skip("SSE change-stream consumption needs a streaming HTTP client with a bounded read and a reliable ingest trigger; not implemented as a stable e2e gate")
 }
 
 // T-D-extending-44 — Ingest immutability: same version with different content returns ingest.immutable_violation.
-func TestExtending_44_IngestImmutableViolation(t *testing.T) {
+func TestPluginSPI_IngestImmutableViolation(t *testing.T) {
 	t.Parallel()
 	t.Skip("blocked by F-7.3.4: reingest runs no ingest pipeline, so a same-version content conflict is never detected as ingest.immutable_violation")
 	layerDir := t.TempDir()
@@ -1213,12 +1213,12 @@ func TestExtending_44_IngestImmutableViolation(t *testing.T) {
 }
 
 // T-D-extending-45 — Ingest sensitivity: public-mode rejects medium/high sensitivity artifacts.
-func TestExtending_45_PublicModeRejectsSensitive(t *testing.T) {
+func TestPluginSPI_PublicModeRejectsSensitive(t *testing.T) {
 	t.Skip("blocked by F-13.10.6: public-mode sensitivity ceiling at ingest not implemented")
 }
 
 // T-D-extending-46 — LocalSearchProvider SPI: search_artifacts includes results from local overlay.
-func TestExtending_46_LocalOverlaySearch(t *testing.T) {
+func TestPluginSPI_LocalOverlaySearch(t *testing.T) {
 	t.Parallel()
 	// Build a server registry with one artifact
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -1265,12 +1265,12 @@ func TestExtending_46_LocalOverlaySearch(t *testing.T) {
 }
 
 // T-D-extending-47 — LocalOverlayProvider SPI: default overlay path falls back to workspace .podium/overlay/.
-func TestExtending_47_DefaultOverlayPath(t *testing.T) {
+func TestPluginSPI_DefaultOverlayPath(t *testing.T) {
 	t.Skip("default overlay path fallback to .podium/overlay/ requires the MCP cwd to be the workspace root; the PODIUM_MATERIALIZE_ROOT-based setup does not place the overlay at the expected relative path without explicit PODIUM_OVERLAY_PATH")
 }
 
 // T-D-extending-48 — LocalAuditSink SPI: MCP meta-tool calls recorded in local audit log.
-func TestExtending_48_LocalAuditSinkMCP(t *testing.T) {
+func TestPluginSPI_LocalAuditSinkMCP(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	srv := startServer(t, extSkillReg(t))
@@ -1303,11 +1303,11 @@ func TestExtending_48_LocalAuditSinkMCP(t *testing.T) {
 }
 
 // T-D-extending-49 — NotificationProvider SPI: ingest failure triggers notification.
-func TestExtending_49_NotificationProviderIngestFailure(t *testing.T) {
+func TestPluginSPI_NotificationProviderIngestFailure(t *testing.T) {
 	t.Skip("requires a configured notification provider (email+webhook); not configurable in standalone e2e without a live notification endpoint")
 }
 
 // T-D-extending-50 — EmbeddingProvider SPI: search_artifacts with semantic query returns ranked results.
-func TestExtending_50_EmbeddingProviderSemanticSearch(t *testing.T) {
+func TestPluginSPI_EmbeddingProviderSemanticSearch(t *testing.T) {
 	t.Skip("requires a live EmbeddingProvider (openai, voyage, ollama, etc.) or a self-embedding cloud backend, plus a reachable vector backend; standalone has neither. Self-embedding wiring exists (F-13.12.6) but needs a live cloud index; the no-config standalone path is blocked by F-13.10.10 (sqlite-vec not default)")
 }

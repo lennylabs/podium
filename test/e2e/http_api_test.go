@@ -131,7 +131,7 @@ func apiInProcCore(t testing.TB) *core.Registry {
 // conveys liveness through the 200 status; it carries no readiness
 // boolean (F-13.9.5). The http-api.md doc shows {status:"ok",
 // mode:"standalone", read_only:false}, recorded as a doc/impl gap.
-func TestDocHTTPAPI_1_Healthz(t *testing.T) {
+func TestHTTPAPI_Healthz(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/healthz")
 	apiWantStatus(t, st, 200, "/healthz", body)
@@ -147,7 +147,7 @@ func TestDocHTTPAPI_1_Healthz(t *testing.T) {
 
 // spec: http-api.md § Health and § Read-only mode. Flipping mode needs
 // in-process access (no HTTP route exposes it on the binary).
-func TestDocHTTPAPI_2_HealthzReadOnly(t *testing.T) {
+func TestHTTPAPI_HealthzReadOnly(t *testing.T) {
 	mode := server.NewModeTracker()
 	mode.Set(server.ModeReadOnly)
 	srv := server.New(apiInProcCore(t), server.WithMode(mode))
@@ -177,7 +177,7 @@ func TestDocHTTPAPI_2_HealthzReadOnly(t *testing.T) {
 // outage) reports ready→200; the not_ready→503 branch is exercised by
 // the server unit tests, which inject a failing dependency probe
 // (F-13.9.2, F-13.9.3).
-func TestDocHTTPAPI_3_Readyz(t *testing.T) {
+func TestHTTPAPI_Readyz(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/readyz")
 	apiWantStatus(t, st, 200, "/readyz", body)
@@ -191,7 +191,7 @@ func TestDocHTTPAPI_3_Readyz(t *testing.T) {
 
 // spec: http-api.md § Discovery / load_domain (root). The server mounts
 // /v1/load_domain?path=, not /v1/domains/{path}.
-func TestDocHTTPAPI_4_LoadDomainRoot(t *testing.T) {
+func TestHTTPAPI_LoadDomainRoot(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/v1/load_domain")
 	apiWantStatus(t, st, 200, "/v1/load_domain", body)
@@ -211,7 +211,7 @@ func TestDocHTTPAPI_4_LoadDomainRoot(t *testing.T) {
 }
 
 // spec: http-api.md § Discovery / load_domain (path).
-func TestDocHTTPAPI_5_LoadDomainPath(t *testing.T) {
+func TestHTTPAPI_LoadDomainPath(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/v1/load_domain?path=finance&session_id=abc")
 	apiWantStatus(t, st, 200, "/v1/load_domain?path=finance", body)
@@ -231,7 +231,7 @@ func TestDocHTTPAPI_5_LoadDomainPath(t *testing.T) {
 }
 
 // spec: http-api.md § load_domain; error-codes.md § domain.not_found.
-func TestDocHTTPAPI_6_LoadDomainNotFound(t *testing.T) {
+func TestHTTPAPI_LoadDomainNotFound(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/v1/load_domain?path=does-not-exist")
 	apiWantStatus(t, st, 404, "load_domain unknown", body)
@@ -248,7 +248,7 @@ func TestDocHTTPAPI_6_LoadDomainNotFound(t *testing.T) {
 }
 
 // spec: http-api.md § load_domain — depth bound.
-func TestDocHTTPAPI_7_LoadDomainDepth(t *testing.T) {
+func TestHTTPAPI_LoadDomainDepth(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st1, _ := getRaw(t, srv.BaseURL+"/v1/load_domain?path=finance&depth=1")
 	st2, _ := getRaw(t, srv.BaseURL+"/v1/load_domain?path=finance&depth=2")
@@ -262,7 +262,7 @@ func TestDocHTTPAPI_7_LoadDomainDepth(t *testing.T) {
 
 // spec: http-api.md § load_domain — note absent when not reduced. With a
 // small notable list no reduction occurs, so note is omitted.
-func TestDocHTTPAPI_8_LoadDomainNoteAbsent(t *testing.T) {
+func TestHTTPAPI_LoadDomainNoteAbsent(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	_, body := getRaw(t, srv.BaseURL+"/v1/load_domain?path=finance")
 	if _, ok := apiJSONObj(t, body)["note"]; ok {
@@ -276,7 +276,7 @@ func TestDocHTTPAPI_8_LoadDomainNoteAbsent(t *testing.T) {
 // server keys domain hits under "domains" (the doc shows "results").
 // Keyword retrieval (no vector backend in standalone) matches the domain
 // name/path, so "finance" returns the finance domain with a score.
-func TestDocHTTPAPI_9_SearchDomains(t *testing.T) {
+func TestHTTPAPI_SearchDomains(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/v1/search_domains?query=finance")
 	apiWantStatus(t, st, 200, "search_domains", body)
@@ -302,7 +302,7 @@ func TestDocHTTPAPI_9_SearchDomains(t *testing.T) {
 }
 
 // spec: http-api.md § search_domains; top_k max 50.
-func TestDocHTTPAPI_10_SearchDomainsTopKCap(t *testing.T) {
+func TestHTTPAPI_SearchDomainsTopKCap(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/v1/search_domains?query=test&top_k=51")
 	apiWantStatus(t, st, 400, "search_domains top_k=51", body)
@@ -312,7 +312,7 @@ func TestDocHTTPAPI_10_SearchDomainsTopKCap(t *testing.T) {
 }
 
 // spec: http-api.md § search_domains — scope restricts to a subtree.
-func TestDocHTTPAPI_11_SearchDomainsScope(t *testing.T) {
+func TestHTTPAPI_SearchDomainsScope(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/v1/search_domains?query=&scope=finance")
 	apiWantStatus(t, st, 200, "search_domains scope", body)
@@ -330,7 +330,7 @@ func TestDocHTTPAPI_11_SearchDomainsScope(t *testing.T) {
 // ===== Discovery / search_artifacts (T-D-http-api-12..16) =============
 
 // spec: http-api.md § search_artifacts. Mounted at /v1/search_artifacts.
-func TestDocHTTPAPI_12_SearchArtifacts(t *testing.T) {
+func TestHTTPAPI_SearchArtifacts(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=variance+analysis")
 	apiWantStatus(t, st, 200, "search_artifacts", body)
@@ -353,7 +353,7 @@ func TestDocHTTPAPI_12_SearchArtifacts(t *testing.T) {
 }
 
 // spec: http-api.md § search_artifacts — type filter.
-func TestDocHTTPAPI_13_SearchArtifactsType(t *testing.T) {
+func TestHTTPAPI_SearchArtifactsType(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/v1/search_artifacts?type=context")
 	apiWantStatus(t, st, 200, "search_artifacts type", body)
@@ -365,7 +365,7 @@ func TestDocHTTPAPI_13_SearchArtifactsType(t *testing.T) {
 }
 
 // spec: http-api.md § search_artifacts — tags filter.
-func TestDocHTTPAPI_14_SearchArtifactsTags(t *testing.T) {
+func TestHTTPAPI_SearchArtifactsTags(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/v1/search_artifacts?tags=finance")
 	apiWantStatus(t, st, 200, "search_artifacts tags", body)
@@ -403,7 +403,7 @@ func apiTagSet(fm map[string]any, descriptor map[string]any) map[string]bool {
 }
 
 // spec: http-api.md § search_artifacts — no query acts as browse.
-func TestDocHTTPAPI_15_SearchArtifactsBrowse(t *testing.T) {
+func TestHTTPAPI_SearchArtifactsBrowse(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/v1/search_artifacts")
 	apiWantStatus(t, st, 200, "search_artifacts browse", body)
@@ -414,7 +414,7 @@ func TestDocHTTPAPI_15_SearchArtifactsBrowse(t *testing.T) {
 }
 
 // spec: http-api.md § search_artifacts — top_k max 50.
-func TestDocHTTPAPI_16_SearchArtifactsTopKCap(t *testing.T) {
+func TestHTTPAPI_SearchArtifactsTopKCap(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=test&top_k=51")
 	apiWantStatus(t, st, 400, "search_artifacts top_k=51", body)
@@ -427,7 +427,7 @@ func TestDocHTTPAPI_16_SearchArtifactsTopKCap(t *testing.T) {
 
 // spec: http-api.md § load_artifact. The server registers a GET handler
 // at /v1/load_artifact?id= (the doc shows POST /v1/artifacts/load).
-func TestDocHTTPAPI_17_LoadArtifact(t *testing.T) {
+func TestHTTPAPI_LoadArtifact(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/v1/load_artifact?id=finance/run&version=1.2.0")
 	apiWantStatus(t, st, 200, "load_artifact", body)
@@ -445,7 +445,7 @@ func TestDocHTTPAPI_17_LoadArtifact(t *testing.T) {
 }
 
 // spec: http-api.md § load_artifact — version defaults to latest.
-func TestDocHTTPAPI_18_LoadArtifactDefaultLatest(t *testing.T) {
+func TestHTTPAPI_LoadArtifactDefaultLatest(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/v1/load_artifact?id=finance/run")
 	apiWantStatus(t, st, 200, "load_artifact no version", body)
@@ -458,7 +458,7 @@ func TestDocHTTPAPI_18_LoadArtifactDefaultLatest(t *testing.T) {
 // The standalone binary does not surface bundled resources, so this runs
 // in-process against NewFromFilesystem + a filesystem object store, the
 // real code path that splits resources at objectstore.InlineCutoff.
-func TestDocHTTPAPI_19_LoadArtifactLargeResource(t *testing.T) {
+func TestHTTPAPI_LoadArtifactLargeResource(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		"finance/big/ARTIFACT.md":       "---\ntype: context\nversion: 1.0.0\ndescription: An artifact with a large bundled script resource for delivery tests.\n---\n\nBody.\n",
 		"finance/big/scripts/big.txt":   strings.Repeat("x", int(objectstore.InlineCutoff)+4096),
@@ -500,7 +500,7 @@ func TestDocHTTPAPI_19_LoadArtifactLargeResource(t *testing.T) {
 }
 
 // spec: http-api.md § load_artifact — unknown id → not_found.
-func TestDocHTTPAPI_20_LoadArtifactNotFound(t *testing.T) {
+func TestHTTPAPI_LoadArtifactNotFound(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/v1/load_artifact?id=no/such/artifact")
 	apiWantStatus(t, st, 404, "load_artifact unknown", body)
@@ -510,7 +510,7 @@ func TestDocHTTPAPI_20_LoadArtifactNotFound(t *testing.T) {
 }
 
 // spec: http-api.md § load_artifact — missing id → invalid_argument.
-func TestDocHTTPAPI_21_LoadArtifactMissingID(t *testing.T) {
+func TestHTTPAPI_LoadArtifactMissingID(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/v1/load_artifact")
 	apiWantStatus(t, st, 400, "load_artifact no id", body)
@@ -527,7 +527,7 @@ func TestDocHTTPAPI_21_LoadArtifactMissingID(t *testing.T) {
 // spec: http-api.md § load_artifact — session_id snapshot. The fixture
 // holds one version, so this asserts that session_id is accepted and the
 // version is stable across same-session loads.
-func TestDocHTTPAPI_22_LoadArtifactSession(t *testing.T) {
+func TestHTTPAPI_LoadArtifactSession(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st1, b1 := getRaw(t, srv.BaseURL+"/v1/load_artifact?id=finance/run&session_id=abc-123")
 	st2, b2 := getRaw(t, srv.BaseURL+"/v1/load_artifact?id=finance/run&session_id=abc-123")
@@ -542,7 +542,7 @@ func TestDocHTTPAPI_22_LoadArtifactSession(t *testing.T) {
 // ===== Materialization / batchLoad (T-D-http-api-23..27) ==============
 
 // spec: http-api.md § load_artifacts (bulk) — per-item envelopes.
-func TestDocHTTPAPI_23_BatchLoad(t *testing.T) {
+func TestHTTPAPI_BatchLoad(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := apiDo(t, "POST", srv.BaseURL+"/v1/artifacts:batchLoad",
 		map[string]any{"ids": []string{"finance/run", "no/such/artifact"}})
@@ -567,12 +567,12 @@ func TestDocHTTPAPI_23_BatchLoad(t *testing.T) {
 // spec: http-api.md § load_artifacts (bulk) — restricted item per-item
 // error. Standalone serves every layer publicly, so a caller-denied
 // item cannot be constructed without a standard-deployment identity.
-func TestDocHTTPAPI_24_BatchLoadVisibilityDenied(t *testing.T) {
+func TestHTTPAPI_BatchLoadVisibilityDenied(t *testing.T) {
 	t.Skip("requires a standard deployment with group-based layer visibility; standalone serves all layers publicly so visibility.denied cannot be exercised")
 }
 
 // spec: http-api.md § load_artifacts (bulk) — >50 ids → invalid_argument.
-func TestDocHTTPAPI_25_BatchLoadCap(t *testing.T) {
+func TestHTTPAPI_BatchLoadCap(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	ids := make([]string, 51)
 	for i := range ids {
@@ -586,7 +586,7 @@ func TestDocHTTPAPI_25_BatchLoadCap(t *testing.T) {
 }
 
 // spec: http-api.md § load_artifacts (bulk) — empty ids → invalid_argument.
-func TestDocHTTPAPI_26_BatchLoadEmpty(t *testing.T) {
+func TestHTTPAPI_BatchLoadEmpty(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := apiDo(t, "POST", srv.BaseURL+"/v1/artifacts:batchLoad", map[string]any{"ids": []string{}})
 	apiWantStatus(t, st, 400, "batchLoad empty", body)
@@ -596,7 +596,7 @@ func TestDocHTTPAPI_26_BatchLoadEmpty(t *testing.T) {
 }
 
 // spec: http-api.md § load_artifacts (bulk) — version_pins applied.
-func TestDocHTTPAPI_27_BatchLoadVersionPins(t *testing.T) {
+func TestHTTPAPI_BatchLoadVersionPins(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := apiDo(t, "POST", srv.BaseURL+"/v1/artifacts:batchLoad", map[string]any{
 		"ids":          []string{"finance/run"},
@@ -614,7 +614,7 @@ func TestDocHTTPAPI_27_BatchLoadVersionPins(t *testing.T) {
 // spec: http-api.md § Register a layer. The body is flat
 // (source_type/repo/ref/root/groups), not the doc's nested
 // source.git/visibility.groups.
-func TestDocHTTPAPI_28_RegisterGitLayer(t *testing.T) {
+func TestHTTPAPI_RegisterGitLayer(t *testing.T) {
 	srv := startServer(t, "")
 	st, body := apiDo(t, "POST", srv.BaseURL+"/v1/layers", map[string]any{
 		"id": "team-finance", "source_type": "git",
@@ -636,7 +636,7 @@ func TestDocHTTPAPI_28_RegisterGitLayer(t *testing.T) {
 }
 
 // spec: http-api.md § Register a layer — missing required fields → 400.
-func TestDocHTTPAPI_29_RegisterMissingFields(t *testing.T) {
+func TestHTTPAPI_RegisterMissingFields(t *testing.T) {
 	srv := startServer(t, "")
 	st, body := apiDo(t, "POST", srv.BaseURL+"/v1/layers", map[string]any{"id": "team-finance"})
 	apiWantStatus(t, st, 400, "register missing source_type", body)
@@ -646,12 +646,12 @@ func TestDocHTTPAPI_29_RegisterMissingFields(t *testing.T) {
 }
 
 // spec: http-api.md § Register a layer — admin auth for admin-defined.
-func TestDocHTTPAPI_30_RegisterAdminAuth(t *testing.T) {
+func TestHTTPAPI_RegisterAdminAuth(t *testing.T) {
 	t.Skip("requires a standard deployment with admin authorization; standalone wires a no-op admin authorizer so admin-defined layer registration returns 201")
 }
 
 // spec: http-api.md § List layers.
-func TestDocHTTPAPI_31_ListLayers(t *testing.T) {
+func TestHTTPAPI_ListLayers(t *testing.T) {
 	srv := startServer(t, "")
 	apiDo(t, "POST", srv.BaseURL+"/v1/layers", map[string]any{
 		"id": "team-finance", "source_type": "git", "repo": "git@github.com:acme/x.git", "ref": "main",
@@ -669,7 +669,7 @@ func TestDocHTTPAPI_31_ListLayers(t *testing.T) {
 }
 
 // spec: http-api.md § Reingest. Server uses POST /v1/layers/reingest?id=.
-func TestDocHTTPAPI_32_Reingest(t *testing.T) {
+func TestHTTPAPI_Reingest(t *testing.T) {
 	srv := startServer(t, "")
 	apiDo(t, "POST", srv.BaseURL+"/v1/layers", map[string]any{"id": "team-finance", "source_type": "local", "local_path": t.TempDir()})
 	st, body := apiDo(t, "POST", srv.BaseURL+"/v1/layers/reingest?id=team-finance", nil)
@@ -684,7 +684,7 @@ func TestDocHTTPAPI_32_Reingest(t *testing.T) {
 }
 
 // spec: http-api.md § Reingest — unknown layer → not_found.
-func TestDocHTTPAPI_33_ReingestNotFound(t *testing.T) {
+func TestHTTPAPI_ReingestNotFound(t *testing.T) {
 	srv := startServer(t, "")
 	st, body := apiDo(t, "POST", srv.BaseURL+"/v1/layers/reingest?id=no-such-layer", nil)
 	apiWantStatus(t, st, 404, "reingest unknown", body)
@@ -695,7 +695,7 @@ func TestDocHTTPAPI_33_ReingestNotFound(t *testing.T) {
 
 // spec: http-api.md § Reorder. Server uses POST /v1/layers/reorder with
 // field `order` (doc shows /v1/layers/user:reorder with field `ids`).
-func TestDocHTTPAPI_34_Reorder(t *testing.T) {
+func TestHTTPAPI_Reorder(t *testing.T) {
 	srv := startServer(t, "")
 	for _, id := range []string{"layer-a", "layer-b"} {
 		apiDo(t, "POST", srv.BaseURL+"/v1/layers", map[string]any{"id": id, "source_type": "local", "local_path": t.TempDir(), "user_defined": true, "owner": "alice@acme.com"})
@@ -721,7 +721,7 @@ func apiLayerOrder(t testing.TB, body []byte, id string) float64 {
 }
 
 // spec: http-api.md § Unregister. Server uses DELETE /v1/layers?id=.
-func TestDocHTTPAPI_35_Unregister(t *testing.T) {
+func TestHTTPAPI_Unregister(t *testing.T) {
 	srv := startServer(t, "")
 	apiDo(t, "POST", srv.BaseURL+"/v1/layers", map[string]any{"id": "team-finance", "source_type": "local", "local_path": t.TempDir()})
 	st, body := apiDo(t, "DELETE", srv.BaseURL+"/v1/layers?id=team-finance", nil)
@@ -736,7 +736,7 @@ func TestDocHTTPAPI_35_Unregister(t *testing.T) {
 }
 
 // spec: http-api.md § Unregister — unknown id → not_found.
-func TestDocHTTPAPI_36_UnregisterNotFound(t *testing.T) {
+func TestHTTPAPI_UnregisterNotFound(t *testing.T) {
 	srv := startServer(t, "")
 	st, body := apiDo(t, "DELETE", srv.BaseURL+"/v1/layers?id=no-such-layer", nil)
 	apiWantStatus(t, st, 404, "unregister unknown", body)
@@ -797,7 +797,7 @@ func TestDocHTTPAPI_LayerCapConfigurable(t *testing.T) {
 // ===== Scope preview (T-D-http-api-37..38) ============================
 
 // spec: http-api.md § Scope preview.
-func TestDocHTTPAPI_37_ScopePreview(t *testing.T) {
+func TestHTTPAPI_ScopePreview(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/v1/scope/preview")
 	apiWantStatus(t, st, 200, "scope/preview", body)
@@ -815,7 +815,7 @@ func TestDocHTTPAPI_37_ScopePreview(t *testing.T) {
 // spec: http-api.md § Scope preview — 403 when disabled. F-3.5.1: the
 // standalone binary honors PODIUM_EXPOSE_SCOPE_PREVIEW=false and answers
 // 403 scope_preview_disabled.
-func TestDocHTTPAPI_38_ScopePreviewDisabled(t *testing.T) {
+func TestHTTPAPI_ScopePreviewDisabled(t *testing.T) {
 	t.Parallel()
 	srv := startServerArgs(t,
 		[]string{"HOME=" + t.TempDir(), "PODIUM_EXPOSE_SCOPE_PREVIEW=false"},
@@ -834,7 +834,7 @@ func TestDocHTTPAPI_38_ScopePreviewDisabled(t *testing.T) {
 // webhook endpoint is mounted at /v1/ingest/webhook/{id}: an invalid HMAC
 // signature is rejected as ingest.webhook_invalid and never reaches the
 // content store; a valid signature drives the ingest pipeline.
-func TestDocHTTPAPI_39_IngestWebhookInvalid(t *testing.T) {
+func TestHTTPAPI_IngestWebhookInvalid(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
 
@@ -901,7 +901,7 @@ func TestDocHTTPAPI_39_IngestWebhookInvalid(t *testing.T) {
 
 // spec: http-api.md § Subscriptions (SDK). Driven in-process so the
 // heartbeat interval can be shortened (SetHeartbeatForTesting).
-func TestDocHTTPAPI_40_EventsHeartbeat(t *testing.T) {
+func TestHTTPAPI_EventsHeartbeat(t *testing.T) {
 	srv := server.New(apiInProcCore(t))
 	srv.SetHeartbeatForTesting(50 * time.Millisecond)
 	ts := httptest.NewServer(srv.Handler())
@@ -934,7 +934,7 @@ func TestDocHTTPAPI_40_EventsHeartbeat(t *testing.T) {
 }
 
 // spec: http-api.md § Subscriptions (SDK) — type filter.
-func TestDocHTTPAPI_41_EventsTypeFilter(t *testing.T) {
+func TestHTTPAPI_EventsTypeFilter(t *testing.T) {
 	srv := server.New(apiInProcCore(t))
 	// A short heartbeat flushes the response headers promptly; heartbeat
 	// lines are ignored below.
@@ -998,7 +998,7 @@ func TestDocHTTPAPI_41_EventsTypeFilter(t *testing.T) {
 // can be published to a configured receiver. The delivered body carries
 // the full §7.3.2 schema {event, trace_id, timestamp, actor, data} and an
 // X-Podium-Signature header (F-7.3.1).
-func TestDocHTTPAPI_42_OutboundWebhook(t *testing.T) {
+func TestHTTPAPI_OutboundWebhook(t *testing.T) {
 	received := make(chan []byte, 1)
 	sigHeader := make(chan string, 1)
 	recv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1048,7 +1048,7 @@ func TestDocHTTPAPI_42_OutboundWebhook(t *testing.T) {
 }
 
 // spec: http-api.md § Outbound webhooks — all five events.
-func TestDocHTTPAPI_43_AllOutboundEvents(t *testing.T) {
+func TestHTTPAPI_AllOutboundEvents(t *testing.T) {
 	t.Skip("requires a wired ingest orchestrator to emit artifact.published/deprecated, domain.published, layer.ingested, layer.history_rewritten end to end; not available against the standalone fixture")
 }
 
@@ -1057,7 +1057,7 @@ func TestDocHTTPAPI_43_AllOutboundEvents(t *testing.T) {
 // spec: http-api.md § Read-only mode — write endpoints rejected. Driven
 // in-process against the layer endpoint (the write surface that consults
 // the mode tracker).
-func TestDocHTTPAPI_44_ReadOnlyRejectsWrites(t *testing.T) {
+func TestHTTPAPI_ReadOnlyRejectsWrites(t *testing.T) {
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
@@ -1078,7 +1078,7 @@ func TestDocHTTPAPI_44_ReadOnlyRejectsWrites(t *testing.T) {
 }
 
 // spec: http-api.md § Read-only mode — reads continue + carry headers.
-func TestDocHTTPAPI_45_ReadOnlyServesReads(t *testing.T) {
+func TestHTTPAPI_ReadOnlyServesReads(t *testing.T) {
 	mode := server.NewModeTracker()
 	mode.Set(server.ModeReadOnly)
 	srv := server.New(apiInProcCore(t), server.WithMode(mode))
@@ -1105,19 +1105,19 @@ func TestDocHTTPAPI_45_ReadOnlyServesReads(t *testing.T) {
 // offline behaviors are exercised by the D-handling-responses and
 // D-custom-sdk suites against the MCP server and SDKs.
 
-func TestDocHTTPAPI_46_CacheAlwaysRevalidateOffline(t *testing.T) {
+func TestHTTPAPI_CacheAlwaysRevalidateOffline(t *testing.T) {
 	t.Skip("PODIUM_CACHE_MODE=always-revalidate is an MCP/SDK consumer-cache behavior; covered by the D-handling-responses / D-custom-sdk suites")
 }
 
-func TestDocHTTPAPI_47_CacheAlwaysRevalidateMiss(t *testing.T) {
+func TestHTTPAPI_CacheAlwaysRevalidateMiss(t *testing.T) {
 	t.Skip("PODIUM_CACHE_MODE=always-revalidate cache-miss behavior is an MCP/SDK consumer-cache concern; covered by the D-handling-responses / D-custom-sdk suites")
 }
 
-func TestDocHTTPAPI_48_CacheOfflineFirst(t *testing.T) {
+func TestHTTPAPI_CacheOfflineFirst(t *testing.T) {
 	t.Skip("PODIUM_CACHE_MODE=offline-first is an MCP/SDK consumer-cache behavior; covered by the D-handling-responses / D-custom-sdk suites")
 }
 
-func TestDocHTTPAPI_49_CacheOfflineOnly(t *testing.T) {
+func TestHTTPAPI_CacheOfflineOnly(t *testing.T) {
 	t.Skip("PODIUM_CACHE_MODE=offline-only is an MCP/SDK consumer-cache behavior; covered by the D-handling-responses / D-custom-sdk suites")
 }
 
@@ -1127,7 +1127,7 @@ func TestDocHTTPAPI_49_CacheOfflineOnly(t *testing.T) {
 // injected-session-token mode the registry verifies the bearer token on
 // every meta-tool call (§6.3.2), so a call with no Authorization header is
 // rejected rather than served anonymously. F-6.3.1.
-func TestDocHTTPAPI_50_AuthRequired(t *testing.T) {
+func TestHTTPAPI_AuthRequired(t *testing.T) {
 	t.Parallel()
 	priv, pem := injKeyPair(t)
 	srv := injServer(t, apiReg(t), priv, pem)
@@ -1144,7 +1144,7 @@ func TestDocHTTPAPI_50_AuthRequired(t *testing.T) {
 // spec: http-api.md § Authentication; error-codes.md § auth.untrusted_runtime.
 // A token whose issuer is not a registered runtime key is rejected with
 // auth.untrusted_runtime carrying details.runtime_iss. F-6.3.2.
-func TestDocHTTPAPI_51_UntrustedRuntime(t *testing.T) {
+func TestHTTPAPI_UntrustedRuntime(t *testing.T) {
 	t.Parallel()
 	priv, pem := injKeyPair(t)
 	srv := injServer(t, apiReg(t), priv, pem)
@@ -1168,7 +1168,7 @@ func TestDocHTTPAPI_51_UntrustedRuntime(t *testing.T) {
 
 // spec: §6.3.2 — a token signed by the registered runtime key verifies and
 // the meta-tool call succeeds (the positive path for 50/51). F-6.3.1.
-func TestDocHTTPAPI_51b_RegisteredRuntimeAccepted(t *testing.T) {
+func TestHTTPAPI_RegisteredRuntimeAccepted(t *testing.T) {
 	t.Parallel()
 	priv, pem := injKeyPair(t)
 	srv := injServer(t, apiReg(t), priv, pem)
@@ -1184,7 +1184,7 @@ func TestDocHTTPAPI_51b_RegisteredRuntimeAccepted(t *testing.T) {
 // records caller.identity=system:public, the caller_public_mode flag, and the
 // source IP and any X-Forwarded-User in caller.network, plus a trace id (§8.1
 // "W3C Trace Context"). F-8.1.1, F-8.1.6.
-func TestDocHTTPAPI_52_PublicModeAudit(t *testing.T) {
+func TestHTTPAPI_PublicModeAudit(t *testing.T) {
 	reg := apiReg(t)
 	auditPath := filepath.Join(t.TempDir(), "audit.log")
 	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_AUDIT_LOG_PATH=" + auditPath},
@@ -1234,7 +1234,7 @@ func readOrEmpty(path string) string {
 // ===== Error envelope, objects, quota (T-D-http-api-53..57) ===========
 
 // spec: error-codes.md § Error envelope.
-func TestDocHTTPAPI_53_ErrorEnvelope(t *testing.T) {
+func TestHTTPAPI_ErrorEnvelope(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/v1/load_domain?path=does-not-exist")
 	apiWantStatus(t, st, 404, "error envelope", body)
@@ -1254,7 +1254,7 @@ func TestDocHTTPAPI_53_ErrorEnvelope(t *testing.T) {
 // Driven in-process (the standalone bootstrap does not surface large
 // resources). The revocation re-check needs non-public layer visibility,
 // which the NewFromFilesystem bootstrap (all layers public) cannot model.
-func TestDocHTTPAPI_54_ObjectsServesBytes(t *testing.T) {
+func TestHTTPAPI_ObjectsServesBytes(t *testing.T) {
 	payload := strings.Repeat("z", int(objectstore.InlineCutoff)+2048)
 	reg := writeRegistry(t, map[string]string{
 		"finance/big/ARTIFACT.md":     "---\ntype: context\nversion: 1.0.0\ndescription: An artifact with a large bundled resource for object serving tests.\n---\n\nBody.\n",
@@ -1293,7 +1293,7 @@ func TestDocHTTPAPI_54_ObjectsServesBytes(t *testing.T) {
 }
 
 // spec: http-api.md (quota endpoint not explicitly documented).
-func TestDocHTTPAPI_55_Quota(t *testing.T) {
+func TestHTTPAPI_Quota(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/v1/quota")
 	apiWantStatus(t, st, 200, "quota", body)
@@ -1312,7 +1312,7 @@ func TestDocHTTPAPI_55_Quota(t *testing.T) {
 }
 
 // spec: error-codes.md § quota.search_qps_exceeded.
-func TestDocHTTPAPI_56_SearchQPSQuota(t *testing.T) {
+func TestHTTPAPI_SearchQPSQuota(t *testing.T) {
 	reg := apiReg(t)
 	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_QUOTA_SEARCH_QPS=1"},
 		"serve", "--standalone", "--layer-path", reg)
@@ -1340,7 +1340,7 @@ func TestDocHTTPAPI_56_SearchQPSQuota(t *testing.T) {
 }
 
 // spec: error-codes.md § quota.materialize_rate_exceeded.
-func TestDocHTTPAPI_57_MaterializeRateQuota(t *testing.T) {
+func TestHTTPAPI_MaterializeRateQuota(t *testing.T) {
 	reg := apiReg(t)
 	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_QUOTA_MATERIALIZE_RATE=1"},
 		"serve", "--standalone", "--layer-path", reg)
@@ -1361,7 +1361,7 @@ func TestDocHTTPAPI_57_MaterializeRateQuota(t *testing.T) {
 // ===== Undocumented endpoints & SLOs (T-D-http-api-58..64) ============
 
 // spec: http-api.md (domain analyze not explicitly documented).
-func TestDocHTTPAPI_58_DomainAnalyze(t *testing.T) {
+func TestHTTPAPI_DomainAnalyze(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/v1/domain/analyze?path=finance")
 	apiWantStatus(t, st, 200, "domain/analyze", body)
@@ -1372,32 +1372,32 @@ func TestDocHTTPAPI_58_DomainAnalyze(t *testing.T) {
 }
 
 // spec: http-api.md (admin grants not explicitly documented).
-func TestDocHTTPAPI_59_AdminGrants(t *testing.T) {
+func TestHTTPAPI_AdminGrants(t *testing.T) {
 	t.Skip("requires a standard deployment with an authenticated admin identity; standalone serves as system:public so /v1/admin/grants returns 403")
 }
 
 // spec: http-api.md (show-effective not documented).
-func TestDocHTTPAPI_60_AdminShowEffective(t *testing.T) {
+func TestHTTPAPI_AdminShowEffective(t *testing.T) {
 	t.Skip("requires a standard deployment with an authenticated admin identity; standalone serves as system:public so /v1/admin/show-effective returns 403")
 }
 
 // spec: http-api.md (metrics route mentioned but not documented).
-func TestDocHTTPAPI_61_Metrics(t *testing.T) {
+func TestHTTPAPI_Metrics(t *testing.T) {
 	t.Skip("blocked by F-13.8.1: the registry exposes no /metrics endpoint")
 }
 
 // spec: http-api.md § SLO targets — load_domain p99.
-func TestDocHTTPAPI_62_SLOLoadDomain(t *testing.T) {
+func TestHTTPAPI_SLOLoadDomain(t *testing.T) {
 	t.Skip("SLO p99 latency is a benchmark concern; covered by test/bench/latency_test.go rather than the doc e2e suite")
 }
 
 // spec: http-api.md § SLO targets — load_artifact p99.
-func TestDocHTTPAPI_63_SLOLoadArtifact(t *testing.T) {
+func TestHTTPAPI_SLOLoadArtifact(t *testing.T) {
 	t.Skip("SLO p99 latency is a benchmark concern; covered by test/bench/latency_test.go rather than the doc e2e suite")
 }
 
 // spec: http-api.md § load_artifact — deprecated/replaced_by fields.
-func TestDocHTTPAPI_64_DeprecatedFields(t *testing.T) {
+func TestHTTPAPI_DeprecatedFields(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/v1/load_artifact?id=finance/old")
 	apiWantStatus(t, st, 200, "load_artifact deprecated", body)

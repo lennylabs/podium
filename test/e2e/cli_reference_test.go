@@ -413,7 +413,7 @@ func TestCLI_InitTarget(t *testing.T) {
 // spec: §7.7 workspace-mode step 1 (F-7.7.11) — init walks up from CWD to
 // reuse an existing `.podium/` workspace; running it from a subdirectory
 // does not create a second workspace.
-func TestDocCLI_20a_InitWalksUpToWorkspace(t *testing.T) {
+func TestCLI_InitWalksUpToWorkspace(t *testing.T) {
 	ws := t.TempDir()
 	env := []string{"HOME=" + t.TempDir()}
 	cliWantExit(t, runPodium(t, ws, env, "init", "--registry", "https://podium.example/"), 0, "root init")
@@ -430,7 +430,7 @@ func TestDocCLI_20a_InitWalksUpToWorkspace(t *testing.T) {
 
 // spec: §7.7 workspace-mode step 4 (F-7.7.13) — init prints next-step hints
 // to commit the file and run `podium sync`.
-func TestDocCLI_20b_InitNextStepHints(t *testing.T) {
+func TestCLI_InitNextStepHints(t *testing.T) {
 	ws := t.TempDir()
 	res := runPodium(t, ws, []string{"HOME=" + t.TempDir()}, "init", "--registry", "https://podium.example/")
 	cliWantExit(t, res, 0, "init next-step hints")
@@ -1565,7 +1565,7 @@ func TestCLI_Sign(t *testing.T) {
 // spec: §4.7.9 — `podium sign <artifact>` resolves the artifact's
 // content hash from the registry and signs it (F-4.7.9). The documented
 // positional form must not be a usage error.
-func TestDocCLI_113b_SignPositionalArtifact(t *testing.T) {
+func TestCLI_SignPositionalArtifact(t *testing.T) {
 	srv := startServer(t, cliReg(t))
 	res := runPodium(t, "", brEnv(srv.BaseURL), "sign", "finance/invoice")
 	cliWantExit(t, res, 0, "sign <artifact>")
@@ -1575,7 +1575,7 @@ func TestDocCLI_113b_SignPositionalArtifact(t *testing.T) {
 // spec: §4.7.9 — `podium verify <artifact>` resolves the stored
 // signature. The standalone server signs no artifacts at ingest, so an
 // unsigned artifact reports the missing envelope rather than passing.
-func TestDocCLI_114b_VerifyPositionalArtifactUnsigned(t *testing.T) {
+func TestCLI_VerifyPositionalArtifactUnsigned(t *testing.T) {
 	srv := startServer(t, cliReg(t))
 	res := runPodium(t, "", brEnv(srv.BaseURL), "verify", "finance/invoice")
 	cliWantNonZero(t, res, "verify <artifact> unsigned")
@@ -1793,7 +1793,7 @@ func TestCLI_SyncProfile(t *testing.T) {
 
 // spec: doc "podium sync", `--profile <name>` with an undefined profile name
 // is an error (§7.5.2 profile lookup). Corner case for F-14.1.1.
-func TestDocCLI_131b_SyncProfileUndefined(t *testing.T) {
+func TestCLI_SyncProfileUndefined(t *testing.T) {
 	reg := cliReg(t)
 	ws := t.TempDir()
 	tgt := t.TempDir()
@@ -1804,7 +1804,7 @@ func TestDocCLI_131b_SyncProfileUndefined(t *testing.T) {
 // spec: doc "Environment variables", PODIUM_REGISTRY honored by `podium sync`
 // (§7.5.2 precedence; §14.11 step 2). Corner case for F-14.11.3: a bare sync
 // with no --registry flag and no sync.yaml picks the registry up from the env.
-func TestDocCLI_131c_SyncRegistryFromEnv(t *testing.T) {
+func TestCLI_SyncRegistryFromEnv(t *testing.T) {
 	reg := cliReg(t)
 	ws := t.TempDir() // no .podium/sync.yaml anywhere
 	tgt := t.TempDir()

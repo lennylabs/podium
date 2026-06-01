@@ -633,7 +633,7 @@ func TestStandardDeploy_AdminErase(t *testing.T) {
 // registry's /v1/admin/erase endpoint, which purges the user's owned layers
 // and redacts the registry audit stream. Exercises the route end-to-end
 // against a live standalone server.
-func TestOrg_25b_AdminEraseRegistry(t *testing.T) {
+func TestStandardDeploy_AdminEraseRegistry(t *testing.T) {
 	t.Parallel()
 	srv, auditPath := brStartAuditServer(t, t.TempDir())
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY=" + srv.BaseURL},
