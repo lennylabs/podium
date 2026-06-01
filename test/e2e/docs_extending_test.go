@@ -133,17 +133,18 @@ func TestExtending_1_UnknownHarness(t *testing.T) {
 		t.Errorf("--harness flag: unexpected files written to target: %v", files)
 	}
 
-	// `podium sync` resolves the adapter from the --harness flag, not from
-	// PODIUM_HARNESS (F-7.5.3), so a bogus env value is ignored and the sync
-	// falls back to the default "none" adapter rather than failing.
+	// `podium sync` resolves the adapter per the §7.5.2 precedence: the
+	// --harness flag, then PODIUM_HARNESS, then the lock / sync.yaml, then
+	// none. A bogus PODIUM_HARNESS therefore fails the same way as a bogus
+	// --harness flag.
 	tgt2 := t.TempDir()
 	res2 := runPodium(t, "", []string{"PODIUM_HARNESS=totally-unknown-adapter"},
 		"sync", "--registry", reg, "--target", tgt2)
-	if res2.Exit != 0 {
-		t.Errorf("PODIUM_HARNESS env should be ignored by sync (default 'none'), got exit=%d stderr=%s", res2.Exit, res2.Stderr)
+	if res2.Exit == 0 {
+		t.Errorf("PODIUM_HARNESS env: expected non-zero exit, got 0")
 	}
-	if strings.Contains(res2.Stderr, "config.unknown_harness") {
-		t.Errorf("PODIUM_HARNESS env unexpectedly triggered config.unknown_harness:\n%s", res2.Stderr)
+	if !strings.Contains(res2.Stderr, "config.unknown_harness") {
+		t.Errorf("PODIUM_HARNESS env: stderr missing config.unknown_harness:\n%s", res2.Stderr)
 	}
 }
 
