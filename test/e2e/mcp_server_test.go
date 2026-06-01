@@ -1,12 +1,12 @@
 package e2e
 
 // End-to-end coverage for the §5.0 resource mirror (F-5.0.1) and the
-// §5.2 conditional `prompts` capability (F-5.2.2). The resource mirror
-// exposes artifact bodies through MCP's resources/list + resources/read
-// as a read-only mirror of load_artifact. The prompts capability is
-// advertised in initialize only when at least one command artifact opted
-// into projection. Tests drive the podium-mcp bridge against a
-// standalone server.
+// MCP server's initialize capability set. The resource mirror exposes
+// artifact bodies through MCP's resources/list + resources/read as a
+// read-only mirror of load_artifact. Command artifacts are delivered
+// through harness-native materialization (§5.2, §6.7), not an MCP prompt
+// projection, so initialize advertises no `prompts` capability. Tests
+// drive the podium-mcp bridge against a standalone server.
 
 import (
 	"strings"
@@ -15,7 +15,7 @@ import (
 
 // spec: §5.0 — resources/list mirrors the effective view and
 // resources/read returns the artifact manifest body. F-5.0.1.
-func TestMCP_ResourcesMirrorListAndRead(t *testing.T) {
+func TestMCPResources_MirrorListAndRead(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"reference/glossary/ARTIFACT.md": contextArtifact("glossary"),
@@ -45,7 +45,7 @@ func TestMCP_ResourcesMirrorListAndRead(t *testing.T) {
 
 // spec: §5.0 — a URI that does not carry the podium artifact scheme is
 // rejected with resources.invalid_argument.
-func TestMCP_ResourcesReadRejectsBadURI(t *testing.T) {
+func TestMCPResources_ReadRejectsBadURI(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"reference/glossary/ARTIFACT.md": contextArtifact("glossary"),
@@ -57,35 +57,36 @@ func TestMCP_ResourcesReadRejectsBadURI(t *testing.T) {
 	}
 }
 
-// spec: §5.2 — initialize advertises the `prompts` capability only when
-// at least one command artifact opted into projection. F-5.2.2.
-func TestMCP_PromptsCapabilityConditional(t *testing.T) {
+// Covers: spec §5.2 (Command Materialization), §5.0 — MCP prompt projection of
+// commands was removed; commands materialize through the harness adapters (§6.7)
+// instead. initialize advertises {tools, resources, sessionCorrelation} and no
+// `prompts` capability, even when a command artifact is present.
+func TestMCPInitialize_AdvertisesNoPromptsCapability(t *testing.T) {
 	t.Parallel()
 
-	// With an opted-in command, prompts must be advertised.
-	exposed := startServer(t, writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact}))
-	res := mcpExec(t, mcpServerEnv(t, exposed.BaseURL),
+	// A command artifact in the view does not add a prompts capability.
+	withCommand := startServer(t, writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact}))
+	res := mcpExec(t, mcpServerEnv(t, withCommand.BaseURL),
 		rpcReq{ID: 1, Method: "initialize", Params: map[string]any{"protocolVersion": "2024-11-05"}})
 	caps, _ := rpcResult(t, res.Stdout, 1)["capabilities"].(map[string]any)
-	if _, ok := caps["prompts"]; !ok {
-		t.Errorf("initialize omitted prompts despite an opted-in command: %+v", caps)
+	if _, ok := caps["prompts"]; ok {
+		t.Errorf("initialize advertised a prompts capability (projection was removed): %+v", caps)
 	}
 
-	// With only a non-command (or non-exposed) artifact, prompts is absent
-	// while tools and resources remain present.
-	none := startServer(t, writeRegistry(t, map[string]string{
+	// The advertised set is tools + resources + sessionCorrelation, both with
+	// and without a command artifact.
+	plain := startServer(t, writeRegistry(t, map[string]string{
 		"reference/glossary/ARTIFACT.md": contextArtifact("glossary"),
 	}))
-	res2 := mcpExec(t, mcpServerEnv(t, none.BaseURL),
+	res2 := mcpExec(t, mcpServerEnv(t, plain.BaseURL),
 		rpcReq{ID: 1, Method: "initialize", Params: map[string]any{"protocolVersion": "2024-11-05"}})
 	caps2, _ := rpcResult(t, res2.Stdout, 1)["capabilities"].(map[string]any)
 	if _, ok := caps2["prompts"]; ok {
-		t.Errorf("initialize advertised prompts with no opt-in: %+v", caps2)
+		t.Errorf("initialize advertised prompts: %+v", caps2)
 	}
-	if _, ok := caps2["tools"]; !ok {
-		t.Errorf("initialize dropped tools capability: %+v", caps2)
-	}
-	if _, ok := caps2["resources"]; !ok {
-		t.Errorf("initialize dropped resources capability: %+v", caps2)
+	for _, want := range []string{"tools", "resources", "sessionCorrelation"} {
+		if _, ok := caps2[want]; !ok {
+			t.Errorf("initialize missing %q capability: %+v", want, caps2)
+		}
 	}
 }

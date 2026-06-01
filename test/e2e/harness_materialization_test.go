@@ -35,10 +35,14 @@ func chRule(mode, extra string) string {
 	return s + "---\n\nRule body for " + mode + ".\n"
 }
 
-// chMCPEnv points podium-mcp at a filesystem-source registry (the bridge
-// accepts a filesystem path for PODIUM_REGISTRY, see how-it-works tests).
+// chMCPEnv starts a standalone server over the filesystem registry and returns
+// the env a podium-mcp subprocess needs to talk to it. The MCP server speaks
+// HTTP and rejects a filesystem-source PODIUM_REGISTRY (config.filesystem_registry_unsupported,
+// §6.1 / §7.5.2), so the bridge is pointed at the server's URL. `extra` carries
+// bridge-side settings (PODIUM_HARNESS, PODIUM_OVERLAY_PATH, PODIUM_MATERIALIZE_ROOT, …).
 func chMCPEnv(t *testing.T, reg string, extra ...string) []string {
-	return append([]string{"PODIUM_REGISTRY=" + reg, "PODIUM_CACHE_DIR=" + t.TempDir()}, extra...)
+	srv := startServer(t, reg)
+	return append(mcpServerEnv(t, srv.BaseURL), extra...)
 }
 
 // chInitParams is the documented JSON-RPC initialize params.
@@ -92,7 +96,7 @@ func chSync(t *testing.T, reg, target, harness string) cliResult {
 // ---- Common pieces: init + sync config --------------------------------------
 
 // T-D-configure-harness-1 — podium init writes sync.yaml with registry and harness.
-func TestConfigureHarness_InitWritesSyncYAML(t *testing.T) {
+func TestHarness_InitWritesSyncYAML(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
 	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
@@ -113,7 +117,7 @@ func TestConfigureHarness_InitWritesSyncYAML(t *testing.T) {
 }
 
 // T-D-configure-harness-2 — podium sync reads registry from sync.yaml when --registry omitted.
-func TestConfigureHarness_SyncReadsRegistryFromConfig(t *testing.T) {
+func TestHarness_SyncReadsRegistryFromConfig(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
 	ws := t.TempDir()
@@ -128,7 +132,7 @@ func TestConfigureHarness_SyncReadsRegistryFromConfig(t *testing.T) {
 // T-D-configure-harness-3 — podium sync honors the sync.yaml harness field
 // (F-7.5.13). With defaults.harness: claude-code and no --harness flag, sync
 // materializes the Claude Code layout.
-func TestConfigureHarness_SyncHonorsConfigHarness(t *testing.T) {
+func TestHarness_SyncHonorsConfigHarness(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"greet/ARTIFACT.md": greetSkillArtifact,
@@ -149,7 +153,7 @@ func TestConfigureHarness_SyncHonorsConfigHarness(t *testing.T) {
 }
 
 // T-D-configure-harness-4 — podium sync honors PODIUM_HARNESS (F-7.5.13).
-func TestConfigureHarness_SyncHonorsEnvHarness(t *testing.T) {
+func TestHarness_SyncHonorsEnvHarness(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"greet/ARTIFACT.md": greetSkillArtifact,
@@ -168,20 +172,22 @@ func TestConfigureHarness_SyncHonorsEnvHarness(t *testing.T) {
 }
 
 // T-D-configure-harness-5 — sync with no registry and no sync.yaml exits 2.
-func TestConfigureHarness_SyncNoRegistryFails(t *testing.T) {
+func TestHarness_SyncNoRegistryFails(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
 	res := runPodium(t, ws, []string{"PODIUM_REGISTRY="}, "sync")
 	if res.Exit != 2 {
 		t.Errorf("exit=%d, want 2 (stderr=%s)", res.Exit, res.Stderr)
 	}
-	if !strings.Contains(res.Stderr, "--registry is required") {
-		t.Errorf("stderr missing '--registry is required':\n%s", res.Stderr)
+	// spec: §6.10 — an unconfigured registry surfaces the config.no_registry
+	// error code and points the user at `podium init` / --registry.
+	if !strings.Contains(res.Stderr, "config.no_registry") {
+		t.Errorf("stderr missing 'config.no_registry':\n%s", res.Stderr)
 	}
 }
 
 // T-D-configure-harness-6 — sync one-shot completes without --watch.
-func TestConfigureHarness_SyncOneShot(t *testing.T) {
+func TestHarness_SyncOneShot(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
 	target := t.TempDir()
@@ -193,7 +199,7 @@ func TestConfigureHarness_SyncOneShot(t *testing.T) {
 }
 
 // T-D-configure-harness-7 — sync --watch exits cleanly on SIGINT.
-func TestConfigureHarness_WatchSIGINT(t *testing.T) {
+func TestHarness_WatchSIGINT(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
 	target := t.TempDir()
@@ -207,7 +213,7 @@ func TestConfigureHarness_WatchSIGINT(t *testing.T) {
 }
 
 // T-D-configure-harness-8 — sync --watch picks up a new artifact.
-func TestConfigureHarness_WatchPicksUpNewArtifact(t *testing.T) {
+func TestHarness_WatchPicksUpNewArtifact(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
 	target := t.TempDir()
@@ -223,7 +229,7 @@ func TestConfigureHarness_WatchPicksUpNewArtifact(t *testing.T) {
 }
 
 // T-D-configure-harness-9 — podium-mcp exits 2 when PODIUM_REGISTRY is unset.
-func TestConfigureHarness_MCPRequiresRegistry(t *testing.T) {
+func TestHarness_MCPRequiresRegistry(t *testing.T) {
 	t.Parallel()
 	res := mcpExec(t, []string{"PODIUM_REGISTRY="}, rpcReq{ID: 1, Method: "initialize", Params: chInitParams})
 	if res.Exit != 2 {
@@ -238,14 +244,14 @@ func TestConfigureHarness_MCPRequiresRegistry(t *testing.T) {
 
 // T-D-configure-harness-10 — podium-mcp accepts PODIUM_HARNESS=claude-code and
 // responds to initialize.
-func TestConfigureHarness_MCPClaudeCodeInitialize(t *testing.T) {
+func TestHarness_MCPClaudeCodeInitialize(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
 	chAssertInitOK(t, chMCPEnv(t, reg, "PODIUM_HARNESS=claude-code"))
 }
 
 // T-D-configure-harness-11 — podium-mcp accepts PODIUM_OVERLAY_PATH.
-func TestConfigureHarness_MCPOverlayPathAccepted(t *testing.T) {
+func TestHarness_MCPOverlayPathAccepted(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
 	overlay := t.TempDir()
@@ -253,7 +259,7 @@ func TestConfigureHarness_MCPOverlayPathAccepted(t *testing.T) {
 }
 
 // T-D-configure-harness-12 — podium-mcp exposes the four meta-tools.
-func TestConfigureHarness_MCPFourTools(t *testing.T) {
+func TestHarness_MCPFourTools(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
 	res := mcpExec(t, chMCPEnv(t, reg), rpcReq{ID: 2, Method: "tools/list", Params: map[string]any{}})
@@ -267,7 +273,7 @@ func TestConfigureHarness_MCPFourTools(t *testing.T) {
 // ---- Claude Code adapter ----------------------------------------------------
 
 // T-D-configure-harness-13 — claude-code skill writes .claude/skills/<name>/SKILL.md.
-func TestConfigureHarness_ClaudeCodeSkill(t *testing.T) {
+func TestHarness_ClaudeCodeSkill(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"greetings/hello/ARTIFACT.md": greetSkillArtifact,
@@ -282,7 +288,7 @@ func TestConfigureHarness_ClaudeCodeSkill(t *testing.T) {
 }
 
 // T-D-configure-harness-14 — claude-code agent writes .claude/agents/<name>.md.
-func TestConfigureHarness_ClaudeCodeAgent(t *testing.T) {
+func TestHarness_ClaudeCodeAgent(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"assistants/qa-agent/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: QA.\n---\n\nQA agent body\n",
@@ -296,7 +302,7 @@ func TestConfigureHarness_ClaudeCodeAgent(t *testing.T) {
 }
 
 // T-D-configure-harness-15 — claude-code rule writes .claude/rules/<name>.md.
-func TestConfigureHarness_ClaudeCodeRule(t *testing.T) {
+func TestHarness_ClaudeCodeRule(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"rules/code-style/ARTIFACT.md": chRule("always", "")})
 	target := t.TempDir()
@@ -309,7 +315,7 @@ func TestConfigureHarness_ClaudeCodeRule(t *testing.T) {
 
 // T-D-configure-harness-16 — claude-code context lands in the harness-neutral
 // .podium/context/<id>/ bucket (§6.7).
-func TestConfigureHarness_ClaudeCodeContextDefaultCase(t *testing.T) {
+func TestHarness_ClaudeCodeContextDefaultCase(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"glossary/company/ARTIFACT.md": contextArtifact("company glossary")})
 	target := t.TempDir()
@@ -318,7 +324,7 @@ func TestConfigureHarness_ClaudeCodeContextDefaultCase(t *testing.T) {
 }
 
 // T-D-configure-harness-17 — claude-code command lands at .claude/commands/<name>.md.
-func TestConfigureHarness_ClaudeCodeCommandDefaultCase(t *testing.T) {
+func TestHarness_ClaudeCodeCommandDefaultCase(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"tools/deploy/ARTIFACT.md": "---\ntype: command\nversion: 1.0.0\ndescription: Deploy.\n---\n\n$ARGUMENTS\n",
@@ -329,7 +335,7 @@ func TestConfigureHarness_ClaudeCodeCommandDefaultCase(t *testing.T) {
 }
 
 // T-D-configure-harness-18 — claude-code hook merges into .claude/settings.json.
-func TestConfigureHarness_ClaudeCodeHookDefaultCase(t *testing.T) {
+func TestHarness_ClaudeCodeHookDefaultCase(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"hooks/pre-commit/ARTIFACT.md": "---\ntype: hook\nversion: 1.0.0\ndescription: A hook.\nhook_event: stop\nhook_action: echo done\n---\n\nbody\n",
@@ -344,7 +350,7 @@ func TestConfigureHarness_ClaudeCodeHookDefaultCase(t *testing.T) {
 
 // T-D-configure-harness-19 — claude-code skill bundled resources co-locate under
 // .claude/skills/<name>/.
-func TestConfigureHarness_ClaudeCodeSkillResources(t *testing.T) {
+func TestHarness_ClaudeCodeSkillResources(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"tools/analyzer/ARTIFACT.md":    greetSkillArtifact,
@@ -359,7 +365,7 @@ func TestConfigureHarness_ClaudeCodeSkillResources(t *testing.T) {
 
 // T-D-configure-harness-20 — claude-code command is a native file; its non-skill
 // bundled resources land in the .podium/resources/<id>/ bucket.
-func TestConfigureHarness_ClaudeCodeNonSkillResources(t *testing.T) {
+func TestHarness_ClaudeCodeNonSkillResources(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"tools/deploy/ARTIFACT.md":       "---\ntype: command\nversion: 1.0.0\ndescription: Deploy.\n---\n\n$ARGUMENTS\n",
@@ -374,7 +380,7 @@ func TestConfigureHarness_ClaudeCodeNonSkillResources(t *testing.T) {
 // T-D-configure-harness-21 — claude-code/glob is native: the rule file carries
 // Claude Code's `paths:` list, which scopes the rule per file, so targeting
 // claude-code for a glob rule lints clean. §6.7.1: claude-code/glob = ✓.
-func TestConfigureHarness_ClaudeCodeGlobNativeClean(t *testing.T) {
+func TestHarness_ClaudeCodeGlobNativeClean(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"rules/ts/ARTIFACT.md": rmRuleArtifact("ts", "glob",
@@ -393,7 +399,7 @@ func TestConfigureHarness_ClaudeCodeGlobNativeClean(t *testing.T) {
 // an auto-mode rule falls back to a load-always .claude/rules/ file: the prose
 // body is preserved with no scoping frontmatter (no undocumented description:
 // rules key). §6.7.1: claude-code/auto = ⚠.
-func TestConfigureHarness_ClaudeCodeAutoFallback(t *testing.T) {
+func TestHarness_ClaudeCodeAutoFallback(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"rules/py-style/ARTIFACT.md": chRule("auto", `rule_description: "Use when working with Python files"`),
@@ -410,7 +416,7 @@ func TestConfigureHarness_ClaudeCodeAutoFallback(t *testing.T) {
 }
 
 // T-D-configure-harness-23 — claude-code always and explicit are fully supported.
-func TestConfigureHarness_ClaudeCodeAlwaysExplicit(t *testing.T) {
+func TestHarness_ClaudeCodeAlwaysExplicit(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"rules/always-rule/ARTIFACT.md":   chRule("always", ""),
@@ -428,7 +434,7 @@ func TestConfigureHarness_ClaudeCodeAlwaysExplicit(t *testing.T) {
 // T-D-configure-harness-24 — claude-code init+sync two-step. init writes
 // harness: claude-code into sync.yaml; the subsequent sync honors it without
 // an explicit --harness flag (F-7.5.13).
-func TestConfigureHarness_ClaudeCodeInitSync(t *testing.T) {
+func TestHarness_ClaudeCodeInitSync(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"greetings/hello/ARTIFACT.md": greetSkillArtifact,
@@ -452,7 +458,7 @@ func TestConfigureHarness_ClaudeCodeInitSync(t *testing.T) {
 
 // T-D-configure-harness-25 — claude-desktop has no project-level surface, so
 // sync materializes nothing for it (§6.7).
-func TestConfigureHarness_ClaudeDesktopExtensionLayout(t *testing.T) {
+func TestHarness_ClaudeDesktopExtensionLayout(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"greet/ARTIFACT.md": greetSkillArtifact,
@@ -465,7 +471,7 @@ func TestConfigureHarness_ClaudeDesktopExtensionLayout(t *testing.T) {
 }
 
 // T-D-configure-harness-26 — claude-desktop MCP startup.
-func TestConfigureHarness_MCPClaudeDesktop(t *testing.T) {
+func TestHarness_MCPClaudeDesktop(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
 	chAssertInitOK(t, chMCPEnv(t, reg, "PODIUM_HARNESS=claude-desktop"))
@@ -474,7 +480,7 @@ func TestConfigureHarness_MCPClaudeDesktop(t *testing.T) {
 // ---- Claude Cowork ----------------------------------------------------------
 
 // T-D-configure-harness-27 — claude-cowork writes .claude-cowork/plugins/<id>/.
-func TestConfigureHarness_ClaudeCoworkPluginLayout(t *testing.T) {
+func TestHarness_ClaudeCoworkPluginLayout(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"greet/ARTIFACT.md": greetSkillArtifact,
@@ -487,7 +493,7 @@ func TestConfigureHarness_ClaudeCoworkPluginLayout(t *testing.T) {
 }
 
 // T-D-configure-harness-28 — claude-cowork sync, git add, git commit sequence.
-func TestConfigureHarness_ClaudeCoworkGitCommit(t *testing.T) {
+func TestHarness_ClaudeCoworkGitCommit(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"greet/ARTIFACT.md": greetSkillArtifact,
@@ -512,7 +518,7 @@ func TestConfigureHarness_ClaudeCoworkGitCommit(t *testing.T) {
 }
 
 // T-D-configure-harness-29 — claude-cowork MCP startup is not refused.
-func TestConfigureHarness_MCPClaudeCowork(t *testing.T) {
+func TestHarness_MCPClaudeCowork(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
 	chAssertInitOK(t, chMCPEnv(t, reg, "PODIUM_HARNESS=claude-cowork"))
@@ -521,7 +527,7 @@ func TestConfigureHarness_MCPClaudeCowork(t *testing.T) {
 // ---- Cursor -----------------------------------------------------------------
 
 // T-D-configure-harness-30 — cursor rule writes .cursor/rules/<name>.mdc.
-func TestConfigureHarness_CursorRule(t *testing.T) {
+func TestHarness_CursorRule(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"style/naming/ARTIFACT.md": chRule("always", "")})
 	target := t.TempDir()
@@ -536,7 +542,7 @@ func TestConfigureHarness_CursorRule(t *testing.T) {
 }
 
 // T-D-configure-harness-31 — cursor skill lands at .cursor/skills/<name>/SKILL.md.
-func TestConfigureHarness_CursorNonRuleDefaultCase(t *testing.T) {
+func TestHarness_CursorNonRuleDefaultCase(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"tools/greet/ARTIFACT.md": greetSkillArtifact,
@@ -548,7 +554,7 @@ func TestConfigureHarness_CursorNonRuleDefaultCase(t *testing.T) {
 }
 
 // T-D-configure-harness-32 — cursor: all four rule_mode values produce .mdc with no lint errors.
-func TestConfigureHarness_CursorAllRuleModes(t *testing.T) {
+func TestHarness_CursorAllRuleModes(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"r/always/ARTIFACT.md":   chRule("always", ""),
@@ -567,7 +573,7 @@ func TestConfigureHarness_CursorAllRuleModes(t *testing.T) {
 }
 
 // T-D-configure-harness-33 — cursor init+sync two-step.
-func TestConfigureHarness_CursorInitSync(t *testing.T) {
+func TestHarness_CursorInitSync(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"style/naming/ARTIFACT.md": chRule("always", "")})
 	ws := t.TempDir()
@@ -584,7 +590,7 @@ func TestConfigureHarness_CursorInitSync(t *testing.T) {
 }
 
 // T-D-configure-harness-34 — cursor MCP startup.
-func TestConfigureHarness_MCPCursor(t *testing.T) {
+func TestHarness_MCPCursor(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
 	chAssertInitOK(t, chMCPEnv(t, reg, "PODIUM_HARNESS=cursor"))
@@ -593,7 +599,7 @@ func TestConfigureHarness_MCPCursor(t *testing.T) {
 // ---- OpenCode ---------------------------------------------------------------
 
 // T-D-configure-harness-35 — opencode rule injects into AGENTS.md.
-func TestConfigureHarness_OpenCodeRule(t *testing.T) {
+func TestHarness_OpenCodeRule(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"style/naming/ARTIFACT.md": chRule("explicit", "")})
 	target := t.TempDir()
@@ -605,7 +611,7 @@ func TestConfigureHarness_OpenCodeRule(t *testing.T) {
 }
 
 // T-D-configure-harness-36 — opencode skill lands at .opencode/skills/<name>/SKILL.md.
-func TestConfigureHarness_OpenCodeNonRuleDefaultCase(t *testing.T) {
+func TestHarness_OpenCodeNonRuleDefaultCase(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"tools/greet/ARTIFACT.md": greetSkillArtifact,
@@ -618,7 +624,7 @@ func TestConfigureHarness_OpenCodeNonRuleDefaultCase(t *testing.T) {
 
 // T-D-configure-harness-37 — opencode/auto falls back (the AGENTS.md inject
 // loses the auto-attach trigger), so targeting opencode warns. §6.7.1: opencode/auto = ⚠.
-func TestConfigureHarness_OpenCodeAutoFallbackWarning(t *testing.T) {
+func TestHarness_OpenCodeAutoFallbackWarning(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"rules/db/ARTIFACT.md": rmRuleArtifact("db", "auto",
@@ -630,7 +636,7 @@ func TestConfigureHarness_OpenCodeAutoFallbackWarning(t *testing.T) {
 // T-D-configure-harness-38 — an auto rule targeting only cursor (native for
 // auto) lints clean: opencode is not in target_harnesses, so its ⚠ cell is not
 // checked. spec: §4.3.5 target_harnesses scopes the capability lint.
-func TestConfigureHarness_OpenCodeAutoTargetHarnessesExclude(t *testing.T) {
+func TestHarness_OpenCodeAutoTargetHarnessesExclude(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"rules/db/ARTIFACT.md": rmRuleArtifact("db", "auto",
@@ -646,7 +652,7 @@ func TestConfigureHarness_OpenCodeAutoTargetHarnessesExclude(t *testing.T) {
 }
 
 // T-D-configure-harness-39 — opencode init+sync two-step.
-func TestConfigureHarness_OpenCodeInitSync(t *testing.T) {
+func TestHarness_OpenCodeInitSync(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"style/naming/ARTIFACT.md": chRule("always", "")})
 	ws := t.TempDir()
@@ -663,7 +669,7 @@ func TestConfigureHarness_OpenCodeInitSync(t *testing.T) {
 }
 
 // T-D-configure-harness-40 — opencode MCP startup.
-func TestConfigureHarness_MCPOpenCode(t *testing.T) {
+func TestHarness_MCPOpenCode(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
 	chAssertInitOK(t, chMCPEnv(t, reg, "PODIUM_HARNESS=opencode"))
@@ -672,7 +678,7 @@ func TestConfigureHarness_MCPOpenCode(t *testing.T) {
 // ---- Codex ------------------------------------------------------------------
 
 // T-D-configure-harness-41 — codex rule injects into AGENTS.md.
-func TestConfigureHarness_CodexRule(t *testing.T) {
+func TestHarness_CodexRule(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"style/naming/ARTIFACT.md": chRule("always", "")})
 	target := t.TempDir()
@@ -685,7 +691,7 @@ func TestConfigureHarness_CodexRule(t *testing.T) {
 
 // T-D-configure-harness-42 — codex/auto falls back (the AGENTS.md inject loses
 // the auto-attach trigger), so targeting codex warns. §6.7.1: codex/auto = ⚠.
-func TestConfigureHarness_CodexAutoFallbackWarning(t *testing.T) {
+func TestHarness_CodexAutoFallbackWarning(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"rules/db/ARTIFACT.md": rmRuleArtifact("db", "auto",
@@ -697,7 +703,7 @@ func TestConfigureHarness_CodexAutoFallbackWarning(t *testing.T) {
 // T-D-configure-harness-43 — Codex has a native hook surface (.codex/hooks.json),
 // so a hook targeting codex lints clean rather than failing ingest.
 // §6.7.1: codex hook_event = ✓.
-func TestConfigureHarness_CodexHookNativeClean(t *testing.T) {
+func TestHarness_CodexHookNativeClean(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"audit/log/ARTIFACT.md": "---\ntype: hook\nname: log\nversion: 1.0.0\ndescription: Log stop.\nhook_event: stop\nhook_action: |\n  echo hi\ntarget_harnesses: [codex]\n---\n\nbody\n",
@@ -712,7 +718,7 @@ func TestConfigureHarness_CodexHookNativeClean(t *testing.T) {
 }
 
 // T-D-configure-harness-44 — codex init+sync two-step.
-func TestConfigureHarness_CodexInitSync(t *testing.T) {
+func TestHarness_CodexInitSync(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
 	ws := t.TempDir()
@@ -731,7 +737,7 @@ func TestConfigureHarness_CodexInitSync(t *testing.T) {
 // ---- Gemini -----------------------------------------------------------------
 
 // T-D-configure-harness-45 — gemini context lands in .podium/context/<id>/.
-func TestConfigureHarness_GeminiExtensionLayout(t *testing.T) {
+func TestHarness_GeminiExtensionLayout(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
 	target := t.TempDir()
@@ -741,7 +747,7 @@ func TestConfigureHarness_GeminiExtensionLayout(t *testing.T) {
 
 // T-D-configure-harness-46 — gemini/always maps natively to GEMINI.md, so an
 // always-mode rule targeting gemini lints clean. §6.7.1: gemini/always = ✓.
-func TestConfigureHarness_GeminiAlwaysNativeClean(t *testing.T) {
+func TestHarness_GeminiAlwaysNativeClean(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"rules/house/ARTIFACT.md": rmRuleArtifact("house", "always",
@@ -757,7 +763,7 @@ func TestConfigureHarness_GeminiAlwaysNativeClean(t *testing.T) {
 }
 
 // T-D-configure-harness-47 — gemini init+sync two-step.
-func TestConfigureHarness_GeminiInitSync(t *testing.T) {
+func TestHarness_GeminiInitSync(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
 	ws := t.TempDir()
@@ -775,7 +781,7 @@ func TestConfigureHarness_GeminiInitSync(t *testing.T) {
 // ---- Pi ---------------------------------------------------------------------
 
 // T-D-configure-harness-48 — pi rule injects into AGENTS.md.
-func TestConfigureHarness_PiRule(t *testing.T) {
+func TestHarness_PiRule(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"style/naming/ARTIFACT.md": chRule("explicit", "")})
 	target := t.TempDir()
@@ -787,7 +793,7 @@ func TestConfigureHarness_PiRule(t *testing.T) {
 }
 
 // T-D-configure-harness-49 — pi skill lands at .pi/skills/<name>/SKILL.md.
-func TestConfigureHarness_PiNonRuleDefaultCase(t *testing.T) {
+func TestHarness_PiNonRuleDefaultCase(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"tools/greet/ARTIFACT.md": greetSkillArtifact,
@@ -800,7 +806,7 @@ func TestConfigureHarness_PiNonRuleDefaultCase(t *testing.T) {
 
 // T-D-configure-harness-50 — pi/auto falls back (the AGENTS.md inject loses the
 // auto-attach trigger), so targeting pi warns. §6.7.1: pi/auto = ⚠.
-func TestConfigureHarness_PiAutoFallbackWarning(t *testing.T) {
+func TestHarness_PiAutoFallbackWarning(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"rules/db/ARTIFACT.md": rmRuleArtifact("db", "auto",
@@ -810,7 +816,7 @@ func TestConfigureHarness_PiAutoFallbackWarning(t *testing.T) {
 }
 
 // T-D-configure-harness-51 — pi init+sync two-step.
-func TestConfigureHarness_PiInitSync(t *testing.T) {
+func TestHarness_PiInitSync(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"style/naming/ARTIFACT.md": chRule("explicit", "")})
 	ws := t.TempDir()
@@ -827,7 +833,7 @@ func TestConfigureHarness_PiInitSync(t *testing.T) {
 }
 
 // T-D-configure-harness-52 — pi MCP startup.
-func TestConfigureHarness_MCPPi(t *testing.T) {
+func TestHarness_MCPPi(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
 	chAssertInitOK(t, chMCPEnv(t, reg, "PODIUM_HARNESS=pi"))
@@ -836,7 +842,7 @@ func TestConfigureHarness_MCPPi(t *testing.T) {
 // ---- Hermes -----------------------------------------------------------------
 
 // T-D-configure-harness-53 — hermes rule writes .cursor/rules/<name>.mdc.
-func TestConfigureHarness_HermesRule(t *testing.T) {
+func TestHarness_HermesRule(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"style/naming/ARTIFACT.md": chRule("always", "")})
 	target := t.TempDir()
@@ -849,7 +855,7 @@ func TestConfigureHarness_HermesRule(t *testing.T) {
 
 // T-D-configure-harness-54 — hermes does not materialize skills at project
 // scope (its skill surface is user-scope ~/.hermes/), so sync writes nothing.
-func TestConfigureHarness_HermesNonRuleDefaultCase(t *testing.T) {
+func TestHarness_HermesNonRuleDefaultCase(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"tools/greet/ARTIFACT.md": greetSkillArtifact,
@@ -862,7 +868,7 @@ func TestConfigureHarness_HermesNonRuleDefaultCase(t *testing.T) {
 }
 
 // T-D-configure-harness-55 — hermes: all four rule_mode values materialize.
-func TestConfigureHarness_HermesAllRuleModes(t *testing.T) {
+func TestHarness_HermesAllRuleModes(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"r/always/ARTIFACT.md":   chRule("always", ""),
@@ -878,7 +884,7 @@ func TestConfigureHarness_HermesAllRuleModes(t *testing.T) {
 }
 
 // T-D-configure-harness-56 — hermes init+sync two-step.
-func TestConfigureHarness_HermesInitSync(t *testing.T) {
+func TestHarness_HermesInitSync(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"style/naming/ARTIFACT.md": chRule("always", "")})
 	ws := t.TempDir()
@@ -895,7 +901,7 @@ func TestConfigureHarness_HermesInitSync(t *testing.T) {
 }
 
 // T-D-configure-harness-57 — hermes MCP startup.
-func TestConfigureHarness_MCPHermes(t *testing.T) {
+func TestHarness_MCPHermes(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
 	chAssertInitOK(t, chMCPEnv(t, reg, "PODIUM_HARNESS=hermes"))
@@ -904,7 +910,7 @@ func TestConfigureHarness_MCPHermes(t *testing.T) {
 // ---- Generic / none ---------------------------------------------------------
 
 // T-D-configure-harness-58 — none writes the canonical <id>/ layout.
-func TestConfigureHarness_NoneCanonicalLayout(t *testing.T) {
+func TestHarness_NoneCanonicalLayout(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"glossary/ARTIFACT.md": contextArtifact("glossary"),
@@ -924,14 +930,14 @@ func TestConfigureHarness_NoneCanonicalLayout(t *testing.T) {
 }
 
 // T-D-configure-harness-59 — none MCP startup.
-func TestConfigureHarness_MCPNone(t *testing.T) {
+func TestHarness_MCPNone(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
 	chAssertInitOK(t, chMCPEnv(t, reg, "PODIUM_HARNESS=none"))
 }
 
 // T-D-configure-harness-60 — none init+sync (default adapter when omitted).
-func TestConfigureHarness_NoneInitSync(t *testing.T) {
+func TestHarness_NoneInitSync(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"greet/ARTIFACT.md": greetSkillArtifact,
@@ -948,7 +954,7 @@ func TestConfigureHarness_NoneInitSync(t *testing.T) {
 }
 
 // T-D-configure-harness-61 — unknown harness rejected with config.unknown_harness.
-func TestConfigureHarness_UnknownHarness(t *testing.T) {
+func TestHarness_UnknownHarness(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", t.TempDir(), "--harness", "totally-unknown-harness")
@@ -963,7 +969,7 @@ func TestConfigureHarness_UnknownHarness(t *testing.T) {
 // T-D-configure-harness-63b — sync auto-resolves <CWD>/.podium/overlay/ with no
 // --overlay flag and no env var (§6.4 rule 3 / F-14.6.2). The overlay artifact
 // sits at the highest precedence and overrides the registry at the same ID.
-func TestConfigureHarness_SyncAutoResolvesWorkspaceOverlay(t *testing.T) {
+func TestHarness_SyncAutoResolvesWorkspaceOverlay(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"finance/intro/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: from registry\nsensitivity: low\n---\n\nfrom registry\n",
@@ -990,7 +996,7 @@ func TestConfigureHarness_SyncAutoResolvesWorkspaceOverlay(t *testing.T) {
 
 // T-D-configure-harness-63c — sync --dry-run resolves a server source from
 // PODIUM_REGISTRY alone and writes nothing (§7.5.2 / §14.15.3, F-14.15.3).
-func TestConfigureHarness_SyncDryRunServerFromEnv(t *testing.T) {
+func TestHarness_SyncDryRunServerFromEnv(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1021,7 +1027,7 @@ func TestConfigureHarness_SyncDryRunServerFromEnv(t *testing.T) {
 // ---- Standalone -------------------------------------------------------------
 
 // T-D-configure-harness-62 — init --standalone writes the localhost registry.
-func TestConfigureHarness_InitStandalone(t *testing.T) {
+func TestHarness_InitStandalone(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
 	res := runPodium(t, ws, nil, "init", "--standalone")
@@ -1039,7 +1045,7 @@ func TestConfigureHarness_InitStandalone(t *testing.T) {
 // endpoints, points sync.yaml at its URL, and asserts the CLI materializes the
 // served artifact and forwards the §6.3.2 injected session token as a bearer
 // credential (F-14.6.1 / F-14.11.1 / F-14.11.5).
-func TestConfigureHarness_StandaloneSyncFromServer(t *testing.T) {
+func TestHarness_StandaloneSyncFromServer(t *testing.T) {
 	t.Parallel()
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1086,7 +1092,7 @@ func TestConfigureHarness_StandaloneSyncFromServer(t *testing.T) {
 // the registry from the bootstrapped ~/.podium/sync.yaml and PODIUM_REGISTRY can
 // be omitted (F-6.11.1). With defaults.registry set there, initialize succeeds
 // rather than failing with config.no_registry.
-func TestConfigureHarness_StandaloneMCPResolvesRegistryFromSyncYAML(t *testing.T) {
+func TestHarness_StandaloneMCPResolvesRegistryFromSyncYAML(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	// The §6.11 standalone bootstrap writes the loopback server URL; initialize
@@ -1099,7 +1105,7 @@ func TestConfigureHarness_StandaloneMCPResolvesRegistryFromSyncYAML(t *testing.T
 // T-D-configure-harness-66 — standalone recipe negative: with no PODIUM_REGISTRY
 // and no sync.yaml in any scope, the MCP server exits 2 with config.no_registry
 // (§6.10) rather than a bare "required" message (F-6.11.1).
-func TestConfigureHarness_StandaloneMCPNoRegistryAnywhere(t *testing.T) {
+func TestHarness_StandaloneMCPNoRegistryAnywhere(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir() // empty: no ~/.podium/sync.yaml
 	res := mcpExec(t, []string{"PODIUM_REGISTRY=", "PODIUM_CACHE_DIR=" + t.TempDir(), "HOME=" + home},
@@ -1113,7 +1119,7 @@ func TestConfigureHarness_StandaloneMCPNoRegistryAnywhere(t *testing.T) {
 }
 
 // T-D-configure-harness-65 — init --standalone conflicts with --registry.
-func TestConfigureHarness_StandaloneRegistryConflict(t *testing.T) {
+func TestHarness_StandaloneRegistryConflict(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, t.TempDir(), nil, "init", "--standalone", "--registry", "https://other.example.com")
 	if res.Exit != 2 {
@@ -1125,7 +1131,7 @@ func TestConfigureHarness_StandaloneRegistryConflict(t *testing.T) {
 }
 
 // T-D-configure-harness-66 — init --global and --local are mutually exclusive.
-func TestConfigureHarness_GlobalLocalExclusive(t *testing.T) {
+func TestHarness_GlobalLocalExclusive(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, t.TempDir(), nil, "init", "--global", "--local", "--registry", "http://127.0.0.1:8080")
 	if res.Exit != 2 {
@@ -1137,7 +1143,7 @@ func TestConfigureHarness_GlobalLocalExclusive(t *testing.T) {
 }
 
 // T-D-configure-harness-67 — init refuses to overwrite sync.yaml without --force.
-func TestConfigureHarness_InitOverwriteGuard(t *testing.T) {
+func TestHarness_InitOverwriteGuard(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
 	if r := runPodium(t, ws, nil, "init", "--registry", "https://first.example.com"); r.Exit != 0 {
@@ -1160,7 +1166,7 @@ func TestConfigureHarness_InitOverwriteGuard(t *testing.T) {
 }
 
 // T-D-configure-harness-68 — workspace init adds .gitignore entries.
-func TestConfigureHarness_InitGitignore(t *testing.T) {
+func TestHarness_InitGitignore(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
 	if r := runPodium(t, ws, nil, "init", "--registry", "https://example.com"); r.Exit != 0 {
@@ -1175,7 +1181,7 @@ func TestConfigureHarness_InitGitignore(t *testing.T) {
 }
 
 // T-D-configure-harness-69 — sync --dry-run reports without writing.
-func TestConfigureHarness_SyncDryRun(t *testing.T) {
+func TestHarness_SyncDryRun(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
 	target := t.TempDir()
@@ -1192,7 +1198,7 @@ func TestConfigureHarness_SyncDryRun(t *testing.T) {
 }
 
 // T-D-configure-harness-70 — sync --json emits a structured envelope.
-func TestConfigureHarness_SyncJSON(t *testing.T) {
+func TestHarness_SyncJSON(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
 	target := t.TempDir()
@@ -1216,7 +1222,7 @@ func TestConfigureHarness_SyncJSON(t *testing.T) {
 }
 
 // T-D-configure-harness-71 — PODIUM_IDENTITY_PROVIDER=injected-session-token accepted.
-func TestConfigureHarness_MCPInjectedSessionToken(t *testing.T) {
+func TestHarness_MCPInjectedSessionToken(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
 	// A syntactically valid (unsigned) JWT shape; the bridge accepts the var at startup.
@@ -1228,14 +1234,14 @@ func TestConfigureHarness_MCPInjectedSessionToken(t *testing.T) {
 }
 
 // T-D-configure-harness-72 — oauth-device-code is the default (absent var) and the binary still starts.
-func TestConfigureHarness_MCPDefaultIdentityProvider(t *testing.T) {
+func TestHarness_MCPDefaultIdentityProvider(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
 	chAssertInitOK(t, chMCPEnv(t, reg, "PODIUM_IDENTITY_PROVIDER="))
 }
 
 // T-D-configure-harness-73 — every documented harness adapter id is registered.
-func TestConfigureHarness_AllHarnessIDsRegistered(t *testing.T) {
+func TestHarness_AllHarnessIDsRegistered(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
 	ids := []string{"none", "claude-code", "claude-desktop", "claude-cowork", "cursor", "codex", "gemini", "opencode", "pi", "hermes"}
@@ -1256,7 +1262,7 @@ func TestConfigureHarness_AllHarnessIDsRegistered(t *testing.T) {
 }
 
 // T-D-configure-harness-74 — sync is idempotent across two runs.
-func TestConfigureHarness_SyncIdempotent(t *testing.T) {
+func TestHarness_SyncIdempotent(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"greet/ARTIFACT.md":      greetSkillArtifact,
@@ -1279,7 +1285,7 @@ func TestConfigureHarness_SyncIdempotent(t *testing.T) {
 }
 
 // T-D-configure-harness-75 — PODIUM_OVERLAY_PATH overrides the registry for load_artifact.
-func TestConfigureHarness_MCPOverlayOverridesRegistry(t *testing.T) {
+func TestHarness_MCPOverlayOverridesRegistry(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"my-rule/ARTIFACT.md": "---\ntype: rule\nversion: 1.0.0\nrule_mode: always\n---\n\nREGISTRY V1 body.\n",
