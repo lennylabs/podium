@@ -13,12 +13,37 @@ import (
 	"strings"
 )
 
-// File is one output file produced by an adapter. Path is relative to the
-// destination root; Mode defaults to 0o644 when zero.
+// FileOp selects how the materializer applies a File to its destination.
+type FileOp int
+
+const (
+	// OpWrite writes Content as a standalone file, replacing any prior
+	// content. This is the default (zero value) and covers skill folders,
+	// agent/command/rule files, and bundled resources.
+	OpWrite FileOp = iota
+	// OpInject merges Content into a shared text file (markdown or TOML)
+	// between Podium-managed markers keyed by Key, so the operator's other
+	// content in the file is preserved and a re-sync reconciles only Podium's
+	// block. Used for rules injected into AGENTS.md / GEMINI.md and for
+	// config.toml tables.
+	OpInject
+	// OpMergeJSON deep-merges Content (a JSON object) into the JSON file at
+	// Path under Podium-owned keys, preserving the operator's other keys.
+	// Used for hook and mcp-server config (settings.json, .mcp.json,
+	// .cursor/*.json, opencode.json, .codex/hooks.json).
+	OpMergeJSON
+)
+
+// File is one output produced by an adapter. Path is relative to the
+// destination root; Mode defaults to 0o644 when zero. Op selects the apply
+// mode (default OpWrite); Key is the artifact ID that scopes a Podium-managed
+// inject block.
 type File struct {
 	Path    string
 	Content []byte
 	Mode    uint32
+	Op      FileOp
+	Key     string
 }
 
 // Source is the canonical input given to an adapter. It bundles the

@@ -232,10 +232,18 @@ func Write(destination string, files []adapter.File) error {
 		return err
 	}
 
-	// Stage phase: create parent directories and write every file to its
+	// Fold inject/merge ops into one final content per destination path. This
+	// reads any existing on-disk file for OpInject / OpMergeJSON targets so
+	// the operator's other content is preserved (§6.7 config-merge / inject).
+	items, err := foldOps(files, resolved)
+	if err != nil {
+		return err
+	}
+
+	// Stage phase: create parent directories and write every item to its
 	// "<path>.tmp" sibling. Nothing is renamed into place yet, so a failure
 	// here is fully reversible by removing the staged temporaries.
-	staged := make([]string, len(files))
+	staged := make([]string, len(items))
 	cleanup := func() {
 		for _, t := range staged {
 			if t != "" {
@@ -243,25 +251,21 @@ func Write(destination string, files []adapter.File) error {
 			}
 		}
 	}
-	for i, f := range files {
+	for i, it := range items {
 		// §6.7 symlink containment: confirm the target's deepest existing
 		// ancestor resolves inside the destination before creating or
 		// writing anything, so a pre-existing symlinked directory cannot
 		// redirect the write outside the root.
-		if err := checkSymlinkContainment(realDest, resolved[i]); err != nil {
+		if err := checkSymlinkContainment(realDest, it.resolved); err != nil {
 			cleanup()
 			return err
 		}
-		if err := os.MkdirAll(filepath.Dir(resolved[i]), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(it.resolved), 0o755); err != nil {
 			cleanup()
 			return err
 		}
-		mode := os.FileMode(f.Mode)
-		if mode == 0 {
-			mode = 0o644
-		}
-		tmp := resolved[i] + ".tmp"
-		if err := os.WriteFile(tmp, f.Content, mode); err != nil {
+		tmp := it.resolved + ".tmp"
+		if err := os.WriteFile(tmp, it.content, it.mode); err != nil {
 			cleanup()
 			return err
 		}
@@ -272,8 +276,8 @@ func Write(destination string, files []adapter.File) error {
 	// already succeeded, so a same-directory rename is atomic and does not
 	// fail under the disk-full / unwritable conditions that abort the stage
 	// phase. A leftover temporary from a rename error is cleaned up.
-	for i := range files {
-		if err := os.Rename(staged[i], resolved[i]); err != nil {
+	for i := range items {
+		if err := os.Rename(staged[i], items[i].resolved); err != nil {
 			cleanup()
 			return err
 		}
