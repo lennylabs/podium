@@ -903,7 +903,7 @@ func TestOrg_36_MigrateToStandardDryRun(t *testing.T) {
 // T-D-organization-37 -- `podium admin migrate-to-standard` requires --source-sqlite.
 func TestOrg_37_MigrateRequiresSourceSQLite(t *testing.T) {
 	t.Parallel()
-	res := runPodium(t, "", nil,
+	res := runPodium(t, "", []string{"HOME=" + t.TempDir()},
 		"admin", "migrate-to-standard",
 		"--target-postgres-dsn", "postgres://x/y",
 	)

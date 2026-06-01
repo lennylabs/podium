@@ -381,18 +381,20 @@ func TestServerOps_MigrateToStandardSQLiteToSQLite(t *testing.T) {
 // (~/.podium/standalone/podium.db). When that default does not exist the
 // command fails opening the source rather than treating the source as a
 // missing required argument.
-func TestServerOps_MigrateToStandardDefaultsSource(t *testing.T) {
+func TestServerOps_MigrateRequiresSourceWhenDefaultAbsent(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir() // clean HOME: no ~/.podium/standalone/podium.db
 	res := runPodium(t, "", []string{"HOME=" + home},
 		"admin", "migrate-to-standard",
 		"--target-store", "sqlite",
 		"--target-sqlite", filepath.Join(t.TempDir(), "dst.db"))
-	if res.Exit != 1 {
-		t.Errorf("exit=%d, want 1 (source default absent) (stderr=%s)", res.Exit, res.Stderr)
+	// --source-sqlite defaults to the standalone DB only when it exists; with a
+	// clean HOME there is no default, so the source is reported as required.
+	if res.Exit != 2 {
+		t.Errorf("exit=%d, want 2 (no default source) (stderr=%s)", res.Exit, res.Stderr)
 	}
-	if !strings.Contains(res.Stderr, "open source SQLite") {
-		t.Errorf("stderr missing 'open source SQLite':\n%s", res.Stderr)
+	if !strings.Contains(res.Stderr, "--source-sqlite is required") {
+		t.Errorf("stderr missing '--source-sqlite is required':\n%s", res.Stderr)
 	}
 }
 

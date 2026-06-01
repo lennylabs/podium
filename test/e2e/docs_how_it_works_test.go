@@ -403,7 +403,7 @@ func TestHIW_MigrateToStandard(t *testing.T) {
 	mustExist(t, targetDB)
 
 	// Negative: omitting --source-sqlite exits 2.
-	neg := runPodium(t, "", nil, "admin", "migrate-to-standard", "--target-store", "sqlite", "--target-sqlite", filepath.Join(t.TempDir(), "t.db"))
+	neg := runPodium(t, "", []string{"HOME=" + t.TempDir()}, "admin", "migrate-to-standard", "--target-store", "sqlite", "--target-sqlite", filepath.Join(t.TempDir(), "t.db"))
 	if neg.Exit != 2 {
 		t.Errorf("missing --source-sqlite exit=%d, want 2\nstderr=%s", neg.Exit, neg.Stderr)
 	}

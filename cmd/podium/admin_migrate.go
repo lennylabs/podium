@@ -99,8 +99,15 @@ func adminMigrateToStandard(args []string) int {
 	// audit log default only when the standalone path is present, so a
 	// deployment without them is not forced to a failure.
 	home, _ := os.UserHomeDir()
+	// Default the source SQLite path only when the standalone DB actually
+	// exists, mirroring the objects/audit defaults below. Otherwise an absent
+	// --source-sqlite is reported as required (exit 2) rather than silently
+	// pointing at a non-existent default.
 	if *srcSQLite == "" && home != "" {
-		*srcSQLite = filepath.Join(home, ".podium", "standalone", "podium.db")
+		def := filepath.Join(home, ".podium", "standalone", "podium.db")
+		if fi, err := os.Stat(def); err == nil && !fi.IsDir() {
+			*srcSQLite = def
+		}
 	}
 	if *srcObjects == "" && home != "" {
 		def := filepath.Join(home, ".podium", "standalone", "objects")
@@ -115,16 +122,18 @@ func adminMigrateToStandard(args []string) int {
 		}
 	}
 
+	// Validate the source first so a bare invocation reports the source
+	// requirement (the standalone DB) before the target requirements.
+	if *srcSQLite == "" {
+		fmt.Fprintln(os.Stderr, "error: --source-sqlite is required")
+		return 2
+	}
 	if *targetStore == "postgres" && *targetPostgresDSN == "" {
-		fmt.Fprintln(os.Stderr, "error: --postgres (or --target-postgres-dsn) is required when --target-store=postgres")
+		fmt.Fprintln(os.Stderr, "error: --target-postgres-dsn is required when --target-store=postgres")
 		return 2
 	}
 	if *targetStore == "sqlite" && *targetSQLite == "" {
 		fmt.Fprintln(os.Stderr, "error: --target-sqlite is required when --target-store=sqlite")
-		return 2
-	}
-	if *srcSQLite == "" {
-		fmt.Fprintln(os.Stderr, "error: --source-sqlite is required")
 		return 2
 	}
 
@@ -154,7 +163,16 @@ func adminMigrateToStandard(args []string) int {
 	}
 	fmt.Printf("metadata migration complete (%d admin grant(s) preserved)\n", plan.adminCount)
 
-	if *srcObjects != "" {
+	// Migrate objects only when a target object destination is configured. A
+	// filesystem target needs a root and an s3 target needs a bucket; without
+	// one (for example a metadata-only sqlite→sqlite migration) there is
+	// nowhere to copy blobs, so skip rather than fail on an empty root.
+	objectsTargetSet := (*targetObjectsType == "filesystem" && *targetObjects != "") ||
+		(*targetObjectsType == "s3" && *targetS3Bucket != "")
+	if *srcObjects != "" && !objectsTargetSet {
+		fmt.Fprintln(os.Stderr, "note: source objects found but no target object store configured (--object-store / --target-objects); skipping object migration")
+	}
+	if *srcObjects != "" && objectsTargetSet {
 		copied, err := pumpObjects(*srcObjects, *targetObjectsType, *targetObjects, objectstore.S3Config{
 			Endpoint:        *targetS3Endpoint,
 			Bucket:          *targetS3Bucket,
