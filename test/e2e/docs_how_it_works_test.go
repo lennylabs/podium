@@ -41,7 +41,7 @@ func TestHIW_FilesystemSyncNone(t *testing.T) {
 
 	// Negative: omitting --registry yields a non-zero config error.
 	neg := runPodium(t, t.TempDir(), []string{"HOME=" + t.TempDir(), "PODIUM_REGISTRY="}, "sync", "--target", t.TempDir())
-	if neg.Exit == 0 || !strings.Contains(neg.Stderr, "registry is required") {
+	if neg.Exit == 0 || !strings.Contains(neg.Stderr, "config.no_registry") {
 		t.Errorf("expected no_registry error, exit=%d stderr=%s", neg.Exit, neg.Stderr)
 	}
 }
@@ -77,12 +77,11 @@ func TestHIW_MCPRejectsFilesystemPath(t *testing.T) {
 		rpcReq{ID: 1, Method: "initialize"},
 		toolCall(2, "search_artifacts", map[string]any{}),
 	)
-	env := rpcEnvelope(t, res.Stdout, 2)
-	body, _ := json.Marshal(env)
-	// The bridge cannot speak HTTP to a bare path; it reports a protocol
-	// error rather than returning results.
-	if !strings.Contains(string(body), "error") || !strings.Contains(string(body), "scheme") {
-		t.Errorf("expected an unsupported-scheme error for a filesystem-path registry: %s", body)
+	// The MCP server speaks HTTP and rejects a filesystem-source registry at
+	// startup (config.filesystem_registry_unsupported, §6.1 / §7.5.2), exiting
+	// before it answers any request.
+	if !strings.Contains(res.Stderr, "filesystem") {
+		t.Errorf("expected a filesystem-source rejection at startup; stderr=%q stdout=%q", res.Stderr, res.Stdout)
 	}
 }
 
@@ -760,14 +759,26 @@ func readFileBytes(t testing.TB, path string) []byte {
 	return b
 }
 
+// mkdirOld stages a realistic aged cache bucket: a directory holding the
+// `frontmatter` sentinel that marks a content bucket (prune skips bare
+// directories), with both the file and the directory aged daysAgo so
+// bucketAccessTime (the latest mtime in the bucket) reports the old time.
 func mkdirOld(t testing.TB, dir string, daysAgo int) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}
+	fm := filepath.Join(dir, "frontmatter")
+	if err := os.WriteFile(fm, []byte("---\ntype: context\nversion: 1.0.0\n---\n"), 0o644); err != nil {
+		t.Fatalf("write frontmatter: %v", err)
+	}
 	old := time.Now().Add(-time.Duration(daysAgo) * 24 * time.Hour)
-	if err := os.Chtimes(dir, old, old); err != nil {
-		t.Fatalf("chtimes %s: %v", dir, err)
+	// Age the file before the directory: writing the file bumps the dir mtime,
+	// so the directory must be touched last.
+	for _, p := range []string{fm, dir} {
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatalf("chtimes %s: %v", p, err)
+		}
 	}
 }
 

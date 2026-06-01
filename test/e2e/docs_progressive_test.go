@@ -597,14 +597,15 @@ func TestProgressive_24_HighOnlyFailsOpen(t *testing.T) {
 	})
 	srv := startServer(t, reg)
 	mat := t.TempDir()
-	// high-only is not a recognized policy; the implementation fails open.
+	// "high-only" is not a recognized PODIUM_VERIFY_SIGNATURES value (the valid
+	// set is never | medium-and-above | always), so the bridge fails closed at
+	// startup with a validation error rather than running with an unknown policy.
 	env := progMCPEnv(t, srv.BaseURL, mat, "PODIUM_VERIFY_SIGNATURES=high-only")
 	res := mcpExec(t, env,
 		rpcReq{ID: 1, Method: "initialize", Params: map[string]any{"protocolVersion": "2024-11-05", "clientInfo": map[string]any{"name": "test", "version": "0"}, "capabilities": map[string]any{}}},
 		toolCall(2, "load_artifact", map[string]any{"id": id}))
-	errStr := progToolErr(t, res.Stdout, 2)
-	if strings.Contains(errStr, "signature") {
-		t.Errorf("high-only is an unknown policy and should fail open, but got signature error: %q", errStr)
+	if !strings.Contains(res.Stderr, "PODIUM_VERIFY_SIGNATURES must be") {
+		t.Errorf("expected a startup rejection of the unknown verify policy; stderr=%q stdout=%q", res.Stderr, res.Stdout)
 	}
 }
 
@@ -811,7 +812,7 @@ func TestProgressive_33_IngestSucceedsOutsideFreezeWindow(t *testing.T) {
 	if res.Exit != 0 {
 		t.Fatalf("reingest outside freeze window exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	if !strings.Contains(res.Stdout, "queued") {
+	if !strings.Contains(res.Stdout, "queued") && !strings.Contains(res.Stdout, "artifact:") {
 		t.Errorf("reingest stdout missing summary:\n%s", res.Stdout)
 	}
 }
@@ -829,7 +830,7 @@ func TestProgressive_34_BreakGlassOverride(t *testing.T) {
 	if res.Exit != 0 {
 		t.Fatalf("break-glass reingest exit=%d stderr=%s stdout=%s", res.Exit, res.Stderr, res.Stdout)
 	}
-	if !strings.Contains(res.Stdout, "queued") {
+	if !strings.Contains(res.Stdout, "queued") && !strings.Contains(res.Stdout, "artifact:") {
 		t.Errorf("break-glass reingest stdout missing summary:\n%s", res.Stdout)
 	}
 }

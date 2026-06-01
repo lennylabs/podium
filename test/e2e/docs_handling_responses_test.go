@@ -708,9 +708,10 @@ func TestHandlingResponses_UnknownHarness(t *testing.T) {
 	mat := t.TempDir()
 	res := mcpExec(t, append(mcpServerEnv(t, srv.BaseURL), "PODIUM_HARNESS=nonexistent-harness", "PODIUM_MATERIALIZE_ROOT="+mat),
 		toolCall(1, "load_artifact", map[string]any{"id": "finance/ap/pay-invoice"}))
-	e, _ := rpcResult(t, res.Stdout, 1)["error"].(string)
-	if !strings.Contains(e, "config.unknown_harness") && !strings.Contains(res.Stderr, "config.unknown_harness") {
-		t.Errorf("expected config.unknown_harness; result error=%q stderr=%s", e, res.Stderr)
+	// An unrecognized PODIUM_HARNESS is rejected at startup
+	// (config.unknown_harness), so the bridge exits before answering.
+	if !strings.Contains(res.Stderr, "config.unknown_harness") {
+		t.Errorf("expected config.unknown_harness at startup; stderr=%s stdout=%s", res.Stderr, res.Stdout)
 	}
 }
 

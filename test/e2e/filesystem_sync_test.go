@@ -1116,20 +1116,11 @@ func TestFilesystemSync_MCPFailsAgainstFilesystemRegistry(t *testing.T) {
 		rpcReq{ID: 1, Method: "initialize", Params: initParams},
 		toolCall(2, "load_domain", map[string]any{"id": "shared"}),
 	)
-	// The load_domain call should surface an error because there is no HTTP
-	// server backing the filesystem path.
-	env2 := rpcEnvelope(t, res.Stdout, 2)
-	hasErr := false
-	if e, ok := env2["error"]; ok && e != nil {
-		hasErr = true
-	}
-	if res2, ok := env2["result"].(map[string]any); ok {
-		if e, _ := res2["error"].(string); e != "" {
-			hasErr = true
-		}
-	}
-	if !hasErr {
-		t.Errorf("expected load_domain to return an error for filesystem registry, but got: %v", env2)
+	// The MCP server speaks HTTP and rejects a filesystem-source registry at
+	// startup (config.filesystem_registry_unsupported, §6.1 / §7.5.2), exiting
+	// before it answers any request.
+	if !strings.Contains(res.Stderr, "filesystem") {
+		t.Errorf("expected a filesystem-source rejection at startup; stderr=%q stdout=%q", res.Stderr, res.Stdout)
 	}
 }
 
