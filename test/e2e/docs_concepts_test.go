@@ -592,7 +592,7 @@ func TestConcepts_Version(t *testing.T) {
 func TestConcepts_SyncNoRegistry(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, t.TempDir(), []string{"HOME=" + t.TempDir(), "PODIUM_REGISTRY="}, "sync", "--target", t.TempDir())
-	if res.Exit != 2 || !strings.Contains(res.Stderr, "--registry is required") {
+	if res.Exit != 2 || !strings.Contains(res.Stderr, "config.no_registry") {
 		t.Errorf("exit=%d stderr=%q, want 2 + '--registry is required'", res.Exit, res.Stderr)
 	}
 }

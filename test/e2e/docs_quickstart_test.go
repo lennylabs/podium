@@ -53,8 +53,9 @@ func TestQuickstart_InitWritesSyncYAML(t *testing.T) {
 	if res.Exit != 0 {
 		t.Fatalf("init exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	if !strings.Contains(res.Stdout, "Wrote .podium/sync.yaml") {
-		t.Errorf("stdout missing 'Wrote .podium/sync.yaml': %q", res.Stdout)
+	// init reports the written path (absolute), so match the path suffix.
+	if !strings.Contains(res.Stdout, "Wrote") || !strings.Contains(res.Stdout, ".podium/sync.yaml") {
+		t.Errorf("stdout missing the written .podium/sync.yaml path: %q", res.Stdout)
 	}
 	sync := readFile(t, filepath.Join(ws, ".podium", "sync.yaml"))
 	if !strings.Contains(sync, "registry: "+reg) {
@@ -248,7 +249,7 @@ func TestQuickstart_SyncNoRegistryExits2(t *testing.T) {
 	if res.Exit != 2 {
 		t.Fatalf("exit=%d, want 2\nstderr=%s", res.Exit, res.Stderr)
 	}
-	if !strings.Contains(res.Stderr, "registry is required") {
+	if !strings.Contains(res.Stderr, "config.no_registry") {
 		t.Errorf("stderr missing 'registry is required': %q", res.Stderr)
 	}
 }
@@ -582,7 +583,7 @@ func TestQuickstart_SyncJSON(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
 	var env struct {
-		Adapter   string `json:"adapter"`
+		Harness   string `json:"harness"`
 		Target    string `json:"target"`
 		Artifacts []struct {
 			ID string `json:"id"`
@@ -591,8 +592,8 @@ func TestQuickstart_SyncJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(res.Stdout), &env); err != nil {
 		t.Fatalf("stdout is not valid JSON: %v\n%s", err, res.Stdout)
 	}
-	if env.Adapter == "" || env.Target == "" {
-		t.Errorf("missing adapter/target: %+v", env)
+	if env.Harness == "" || env.Target == "" {
+		t.Errorf("missing harness/target: %+v", env)
 	}
 	found := false
 	for _, a := range env.Artifacts {

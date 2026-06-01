@@ -217,7 +217,7 @@ func TestFirstCommand_SyncReadsConfig(t *testing.T) {
 func TestFirstCommand_SyncNoRegistry(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, t.TempDir(), []string{"HOME=" + t.TempDir(), "PODIUM_REGISTRY="}, "sync", "--target", t.TempDir())
-	if res.Exit != 2 || !strings.Contains(res.Stderr, "registry is required") {
+	if res.Exit != 2 || !strings.Contains(res.Stderr, "config.no_registry") {
 		t.Errorf("exit=%d stderr=%q, want 2 + 'registry is required'", res.Exit, res.Stderr)
 	}
 }
@@ -275,7 +275,7 @@ func TestFirstCommand_SyncJSON(t *testing.T) {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
 	var env struct {
-		Adapter   string `json:"adapter"`
+		Harness   string `json:"harness"`
 		Artifacts []struct {
 			ID string `json:"id"`
 		} `json:"artifacts"`
@@ -289,7 +289,7 @@ func TestFirstCommand_SyncJSON(t *testing.T) {
 			found = true
 		}
 	}
-	if env.Adapter == "" || !found {
+	if env.Harness == "" || !found {
 		t.Errorf("envelope missing adapter or %s: %+v", standupID, env)
 	}
 }

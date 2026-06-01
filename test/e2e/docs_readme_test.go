@@ -254,32 +254,33 @@ func TestReadme_SyncDryRun(t *testing.T) {
 	}
 }
 
-// T-D-readme-20 — sync --json envelope has adapter/target/artifacts, each
-// artifact with id/layer/files.
+// T-D-readme-20 — the sync --json envelope (spec §7.5) carries harness, target,
+// and artifacts:[{id, version, type, layer}]; the artifacts actually
+// materialize under the target.
 func TestReadme_SyncJSON(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--json")
 	var env struct {
-		Adapter   string `json:"adapter"`
+		Harness   string `json:"harness"`
 		Target    string `json:"target"`
 		Artifacts []struct {
-			ID    string   `json:"id"`
-			Layer string   `json:"layer"`
-			Files []string `json:"files"`
+			ID    string `json:"id"`
+			Layer string `json:"layer"`
 		} `json:"artifacts"`
 	}
 	if err := json.Unmarshal([]byte(res.Stdout), &env); err != nil {
 		t.Fatalf("invalid JSON: %v\n%s", err, res.Stdout)
 	}
-	if env.Adapter == "" || env.Target == "" || len(env.Artifacts) == 0 {
+	if env.Harness == "" || env.Target == "" || len(env.Artifacts) == 0 {
 		t.Fatalf("incomplete envelope: %+v", env)
 	}
-	a := env.Artifacts[0]
-	if a.ID == "" || a.Layer == "" || len(a.Files) == 0 {
-		t.Errorf("artifact entry missing id/layer/files: %+v", a)
+	if a := env.Artifacts[0]; a.ID == "" || a.Layer == "" {
+		t.Errorf("artifact entry missing id/layer: %+v", a)
 	}
+	// The default (none) harness writes the canonical <id>/ARTIFACT.md layout.
+	mustExist(t, filepath.Join(tgt, "x", "ARTIFACT.md"))
 }
 
 // T-D-readme-21 — sync is idempotent.

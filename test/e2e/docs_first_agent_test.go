@@ -360,7 +360,7 @@ func TestFirstAgent_SyncJSON(t *testing.T) {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
 	var env struct {
-		Adapter   string `json:"adapter"`
+		Harness   string `json:"harness"`
 		Artifacts []struct {
 			ID string `json:"id"`
 		} `json:"artifacts"`
@@ -368,8 +368,8 @@ func TestFirstAgent_SyncJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(res.Stdout), &env); err != nil {
 		t.Fatalf("stdout not valid JSON: %v\n%s", err, res.Stdout)
 	}
-	if env.Adapter != "claude-code" {
-		t.Errorf("adapter=%q, want claude-code", env.Adapter)
+	if env.Harness != "claude-code" {
+		t.Errorf("harness=%q, want claude-code", env.Harness)
 	}
 	found := false
 	for _, a := range env.Artifacts {

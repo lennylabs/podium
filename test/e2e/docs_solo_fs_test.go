@@ -505,7 +505,7 @@ func TestSoloFS_23_SyncNoRegistryNoConfigFails(t *testing.T) {
 	if res.Exit == 0 {
 		t.Fatalf("expected non-zero exit with no registry, got 0")
 	}
-	if !strings.Contains(res.Stderr, "--registry is required") {
+	if !strings.Contains(res.Stderr, "config.no_registry") {
 		t.Errorf("stderr missing '--registry is required': %q", res.Stderr)
 	}
 }

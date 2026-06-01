@@ -447,7 +447,7 @@ func TestFirstSkill_SyncNoRegistryExits2(t *testing.T) {
 	if res.Exit != 2 {
 		t.Fatalf("exit=%d, want 2\nstderr=%s", res.Exit, res.Stderr)
 	}
-	if !strings.Contains(res.Stderr, "registry is required") {
+	if !strings.Contains(res.Stderr, "config.no_registry") {
 		t.Errorf("stderr missing 'registry is required': %q", res.Stderr)
 	}
 }
