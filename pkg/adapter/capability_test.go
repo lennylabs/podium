@@ -15,16 +15,21 @@ import (
 //
 // spec: §6.7.1 capability matrix
 var wantGrid = map[Capability]string{
-	{Field: "description"}:                  "NNNNNNNNN",
-	{Field: "mcpServers"}:                   "NNNNNNNNN",
-	{Field: "delegates_to"}:                 "NFNXFNXNN",
-	{Field: "requiresApproval"}:             "NFNXNNXFF",
-	{Field: "sandbox_profile"}:              "NFFXNNXFF",
-	{Field: "rule_mode", Value: "always"}:   "NNNNNNFNN",
-	{Field: "rule_mode", Value: "glob"}:     "FXFNFFXFN",
-	{Field: "rule_mode", Value: "auto"}:     "FXFNXXXXF",
-	{Field: "rule_mode", Value: "explicit"}: "NNNNNNFNN",
-	{Field: "hook_event"}:                   "NXFNNFFFF",
+	{Field: "type", Value: "skill"}:         "NXNNNNNNX",
+	{Field: "type", Value: "agent"}:         "NXNNNNNXX",
+	{Field: "type", Value: "context"}:       "NXNNNNNNN",
+	{Field: "type", Value: "command"}:       "NXNNXNNNX",
+	{Field: "type", Value: "mcp-server"}:    "NXNNNNNXX",
+	{Field: "description"}:                  "NXNNNNNXX",
+	{Field: "mcpServers"}:                   "NXNNXNNXX",
+	{Field: "delegates_to"}:                 "NXNNXNNXX",
+	{Field: "requiresApproval"}:             "NXNNXNNXX",
+	{Field: "sandbox_profile"}:              "NXNNXNNXX",
+	{Field: "rule_mode", Value: "always"}:   "NXFNNNNNN",
+	{Field: "rule_mode", Value: "glob"}:     "FXFNFFFFN",
+	{Field: "rule_mode", Value: "auto"}:     "FXFNFFFFN",
+	{Field: "rule_mode", Value: "explicit"}: "NXFNFFFFN",
+	{Field: "hook_event"}:                   "NXNFNXNXX",
 }
 
 func wantSupport(r byte) Support {
@@ -76,32 +81,22 @@ func TestCapability_CellUnknown(t *testing.T) {
 	}
 }
 
-// Spec: §6.7.1 mitigation 1 — the core feature set is exactly the cells
-// native on every first-class harness: description and mcpServers.
+// Spec: §6.7.1 mitigation 1 — the core feature set is the cells native on
+// every first-class harness. Claude Desktop has no project-level
+// materialization surface (every cell ✗), so no capability is native on
+// every harness and the core set is empty.
 func TestCapability_CoreFeatureSet(t *testing.T) {
 	t.Parallel()
-	got := CoreFeatureSet()
-	want := []Capability{
-		{Field: "description"},
-		{Field: "mcpServers"},
+	if got := CoreFeatureSet(); len(got) != 0 {
+		t.Errorf("CoreFeatureSet() = %v, want empty (claude-desktop materializes nothing)", got)
 	}
-	if len(got) != len(want) {
-		t.Fatalf("CoreFeatureSet() = %v, want %v", got, want)
+	// context is native on every harness except claude-desktop, so it is not
+	// in the core set under the literal "every harness" definition.
+	if InCoreFeatureSet(Capability{Field: "type", Value: "context"}) {
+		t.Errorf("InCoreFeatureSet(type: context) = true; claude-desktop is ✗")
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("CoreFeatureSet()[%d] = %s, want %s", i, got[i], want[i])
-		}
-	}
-	if !InCoreFeatureSet(Capability{Field: "mcpServers"}) {
-		t.Errorf("InCoreFeatureSet(mcpServers) = false")
-	}
-	// A ⚠/✗-carrying cell is not in the core set.
 	if InCoreFeatureSet(Capability{Field: "sandbox_profile"}) {
-		t.Errorf("InCoreFeatureSet(sandbox_profile) = true; cursor/gemini are ✗")
-	}
-	if InCoreFeatureSet(Capability{Field: "rule_mode", Value: "glob"}) {
-		t.Errorf("InCoreFeatureSet(rule_mode: glob) = true; claude-desktop is ✗")
+		t.Errorf("InCoreFeatureSet(sandbox_profile) = true")
 	}
 }
 
@@ -123,14 +118,15 @@ func TestCapability_UsedCapabilities(t *testing.T) {
 		DelegatesTo:      []string{"x/y"},
 		RequiresApproval: []manifest.ApprovalRequirement{{}},
 	}
-	if got := UsedCapabilities(agent); len(got) != 3 {
-		t.Errorf("UsedCapabilities(agent) = %v, want 3", got)
+	// type: agent emits its type row plus the three frontmatter-field rows.
+	if got := UsedCapabilities(agent); len(got) != 4 {
+		t.Errorf("UsedCapabilities(agent) = %v, want 4 (type + 3 fields)", got)
 	}
-	// rule_mode on a non-rule type is not a capability row (the hygiene
-	// rule covers it).
+	// A type with a type row emits it; a stray rule_mode on a non-rule type is
+	// ignored (the hygiene rule covers it).
 	ctx := &manifest.Artifact{Type: manifest.TypeContext, RuleMode: manifest.RuleModeGlob}
-	if got := UsedCapabilities(ctx); len(got) != 0 {
-		t.Errorf("UsedCapabilities(context with rule_mode) = %v, want none", got)
+	if got := UsedCapabilities(ctx); len(got) != 1 || got[0] != (Capability{Field: "type", Value: "context"}) {
+		t.Errorf("UsedCapabilities(context) = %v, want [type: context]", got)
 	}
 	if got := UsedCapabilities(nil); got != nil {
 		t.Errorf("UsedCapabilities(nil) = %v", got)
@@ -186,9 +182,9 @@ func TestCapability_TranslationError(t *testing.T) {
 	if err := TranslationError("custom-harness", agent); err != nil {
 		t.Errorf("TranslationError(custom) = %v, want nil", err)
 	}
-	// cursor ✗ for sandbox_profile -> error.
-	if err := TranslationError("cursor", agent); err == nil || !containsAll(err.Error(), "cursor", "sandbox_profile") {
-		t.Errorf("TranslationError(cursor, sandbox_profile) = %v", err)
+	// codex ✗ for sandbox_profile (the TOML agent translation drops it) -> error.
+	if err := TranslationError("codex", agent); err == nil || !containsAll(err.Error(), "codex", "sandbox_profile") {
+		t.Errorf("TranslationError(codex, sandbox_profile) = %v", err)
 	}
 }
 

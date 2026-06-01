@@ -484,6 +484,13 @@ func mustExist(t testing.TB, path string) {
 	}
 }
 
+func mustNotExist(t testing.TB, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); err == nil {
+		t.Errorf("expected %s to not exist", path)
+	}
+}
+
 func appendLine(t testing.TB, path, text string) {
 	t.Helper()
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)

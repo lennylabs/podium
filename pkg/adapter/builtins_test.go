@@ -88,16 +88,23 @@ func TestRuleAdapters_PlaceUnderNativeRulesDir(t *testing.T) {
 		ArtifactID:    "ts-style",
 		ArtifactBytes: []byte("---\ntype: rule\nversion: 1.0.0\nrule_mode: always\n---\n\nrules\n"),
 	}
-	want := map[string]string{
-		"claude-code": ".claude/rules/ts-style.md",
-		"codex":       ".codex/rules/ts-style.md",
-		"cursor":      ".cursor/rules/ts-style.mdc",
-		"opencode":    ".opencode/rules/ts-style.md",
-		"pi":          ".pi/rules/ts-style.md",
-		"hermes":      ".claude/rules/ts-style.md",
+	// Standalone-file rule harnesses write a discrete file; the AGENTS.md /
+	// GEMINI.md harnesses inject the rule body into the shared context file.
+	type want struct {
+		path string
+		op   FileOp
+	}
+	cases := map[string]want{
+		"claude-code": {".claude/rules/ts-style.md", OpWrite},
+		"cursor":      {".cursor/rules/ts-style.mdc", OpWrite},
+		"hermes":      {".cursor/rules/ts-style.mdc", OpWrite},
+		"codex":       {"AGENTS.md", OpInject},
+		"opencode":    {"AGENTS.md", OpInject},
+		"pi":          {"AGENTS.md", OpInject},
+		"gemini":      {"GEMINI.md", OpInject},
 	}
 	r := DefaultRegistry()
-	for id, expected := range want {
+	for id, w := range cases {
 		a, err := r.Get(id)
 		if err != nil {
 			t.Fatalf("Get(%q): %v", id, err)
@@ -108,13 +115,13 @@ func TestRuleAdapters_PlaceUnderNativeRulesDir(t *testing.T) {
 		}
 		found := false
 		for _, f := range out {
-			if f.Path == expected {
+			if f.Path == w.path && f.Op == w.op {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Errorf("%s: expected rule at %q, got: %v", id, expected, paths(out))
+			t.Errorf("%s: expected rule at %q (op %v), got: %v", id, w.path, w.op, paths(out))
 		}
 	}
 }

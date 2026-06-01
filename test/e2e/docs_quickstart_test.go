@@ -314,8 +314,8 @@ func TestQuickstart_SyncClaudeCodeRule(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, ".claude/rules/code-style.md"))
 }
 
-// T-D-quickstart-16 — sync claude-code places context/command/hook/mcp-server
-// under .claude/podium/<id>/. Doc: quickstart § What's next.
+// T-D-quickstart-16 — sync claude-code places a context artifact in the
+// harness-neutral .podium/context/<id>/ bucket. Doc: quickstart § What's next.
 func TestQuickstart_SyncClaudeCodeFallbackPath(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -323,7 +323,7 @@ func TestQuickstart_SyncClaudeCodeFallbackPath(t *testing.T) {
 	})
 	tgt := t.TempDir()
 	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code")
-	mustExist(t, filepath.Join(tgt, ".claude/podium/personal/hello/ctx-demo/ARTIFACT.md"))
+	mustExist(t, filepath.Join(tgt, ".podium/context/personal/hello/ctx-demo/ARTIFACT.md"))
 }
 
 // T-D-quickstart-17 — sync --watch performs an initial sync and exits 0 on

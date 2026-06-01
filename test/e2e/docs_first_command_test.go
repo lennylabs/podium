@@ -183,8 +183,8 @@ func TestFirstCommand_NoneCanonical(t *testing.T) {
 	}
 }
 
-// T-D-first-command-11 — claude-code places a command under .claude/podium/,
-// not .claude/commands/ as the doc claims. (doc-accuracy)
+// T-D-first-command-11 — claude-code places a command at .claude/commands/<n>.md
+// (§6.7 type-target table), not under the .claude/podium/ extension bucket.
 func TestFirstCommand_ClaudeCodePodiumNotCommands(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})
@@ -193,10 +193,10 @@ func TestFirstCommand_ClaudeCodePodiumNotCommands(t *testing.T) {
 	if res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	if _, err := os.Stat(filepath.Join(tgt, ".claude/commands/standup.md")); err == nil {
-		t.Errorf(".claude/commands/standup.md exists; the doc claim is inaccurate per the current adapter")
+	mustExist(t, filepath.Join(tgt, ".claude/commands/standup.md"))
+	if _, err := os.Stat(filepath.Join(tgt, ".claude/podium", standupID, "ARTIFACT.md")); err == nil {
+		t.Errorf("a command must not land under the .claude/podium/ extension bucket")
 	}
-	mustExist(t, filepath.Join(tgt, ".claude/podium", standupID, "ARTIFACT.md"))
 }
 
 // T-D-first-command-12 — sync reads the registry from .podium/sync.yaml.
@@ -395,9 +395,9 @@ func TestFirstCommand_FullSequenceNone(t *testing.T) {
 	}
 }
 
-// T-D-first-command-32 — the full sequence on the claude-code harness: the
-// command lands under .claude/podium/<id>/, and the doc's
-// .claude/commands/standup.md does not exist. (doc-accuracy)
+// T-D-first-command-32 — the full sequence on the claude-code harness: lint is
+// clean and the command lands at .claude/commands/standup.md, matching the
+// tutorial's verify step (§6.7 type-target table).
 func TestFirstCommand_FullSequenceClaudeCode(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})
@@ -408,13 +408,11 @@ func TestFirstCommand_FullSequenceClaudeCode(t *testing.T) {
 	if s := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); s.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", s.Exit, s.Stderr)
 	}
-	mustExist(t, filepath.Join(tgt, ".claude/podium", standupID, "ARTIFACT.md"))
-	if _, err := os.Stat(filepath.Join(tgt, ".claude/commands/standup.md")); err == nil {
-		t.Errorf(".claude/commands/standup.md exists; the tutorial's verify step is inaccurate")
+	cmd := readFile(t, filepath.Join(tgt, ".claude/commands/standup.md"))
+	if !strings.Contains(cmd, "$ARGUMENTS") {
+		t.Errorf("materialized command missing the $ARGUMENTS body:\n%s", cmd)
 	}
-	// The .claude/commands directory the tutorial's `ls` targets is not
-	// created at all.
-	if entries, err := os.ReadDir(filepath.Join(tgt, ".claude/commands")); err == nil && len(entries) > 0 {
-		t.Errorf(".claude/commands is non-empty: %v", entries)
+	if _, err := os.Stat(filepath.Join(tgt, ".claude/podium", standupID, "ARTIFACT.md")); err == nil {
+		t.Errorf("a command must not also land under the .claude/podium/ extension bucket")
 	}
 }

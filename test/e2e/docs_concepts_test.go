@@ -652,7 +652,8 @@ func TestConcepts_SingleLayerNoConfig(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, "glossary/ARTIFACT.md"))
 }
 
-// T-D-concepts-48 — codex harness materializes using the codex-native layout.
+// T-D-concepts-48 — a context artifact materializes to the harness-neutral
+// .podium/context/<id>/ bucket under codex (identical across every adapter).
 func TestConcepts_CodexHarness(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"tools/helper/ARTIFACT.md": contextArtifact("helper")})
@@ -661,10 +662,11 @@ func TestConcepts_CodexHarness(t *testing.T) {
 	if res.Exit != 0 {
 		t.Fatalf("codex sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	mustExist(t, filepath.Join(tgt, ".codex/packages/tools/helper/ARTIFACT.md"))
+	mustExist(t, filepath.Join(tgt, ".podium/context/tools/helper/ARTIFACT.md"))
 }
 
-// T-D-concepts-49 — hermes writes a rule to .claude/rules/<name>.md.
+// T-D-concepts-49 — hermes reuses the Cursor .mdc format and writes a rule to
+// .cursor/rules/<name>.mdc.
 func TestConcepts_HermesRule(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -672,10 +674,10 @@ func TestConcepts_HermesRule(t *testing.T) {
 	})
 	tgt := t.TempDir()
 	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "hermes")
-	mustExist(t, filepath.Join(tgt, ".claude/rules/style.md"))
+	mustExist(t, filepath.Join(tgt, ".cursor/rules/style.mdc"))
 }
 
-// T-D-concepts-50 — pi writes a rule to .pi/rules/<name>.md.
+// T-D-concepts-50 — pi injects a rule into AGENTS.md (§6.7 inject mechanism).
 func TestConcepts_PiRule(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -683,19 +685,22 @@ func TestConcepts_PiRule(t *testing.T) {
 	})
 	tgt := t.TempDir()
 	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "pi")
-	mustExist(t, filepath.Join(tgt, ".pi/rules/style.md"))
+	if got := readFile(t, filepath.Join(tgt, "AGENTS.md")); !strings.Contains(got, "rules") {
+		t.Errorf("AGENTS.md missing the injected rule body:\n%s", got)
+	}
 }
 
-// T-D-concepts-51 — gemini places a non-rule artifact under .gemini/extensions/.
+// T-D-concepts-51 — a context artifact materializes to .podium/context/<id>/
+// under gemini (the harness-neutral bucket).
 func TestConcepts_GeminiExtension(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"tools/helper/ARTIFACT.md": contextArtifact("helper")})
 	tgt := t.TempDir()
 	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "gemini")
-	mustExist(t, filepath.Join(tgt, ".gemini/extensions/tools/helper/ARTIFACT.md"))
+	mustExist(t, filepath.Join(tgt, ".podium/context/tools/helper/ARTIFACT.md"))
 }
 
-// T-D-concepts-52 — opencode writes a rule to .opencode/rules/<name>.md.
+// T-D-concepts-52 — opencode injects a rule into AGENTS.md (§6.7 inject).
 func TestConcepts_OpencodeRule(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -703,25 +708,36 @@ func TestConcepts_OpencodeRule(t *testing.T) {
 	})
 	tgt := t.TempDir()
 	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "opencode")
-	mustExist(t, filepath.Join(tgt, ".opencode/rules/style.md"))
+	if got := readFile(t, filepath.Join(tgt, "AGENTS.md")); !strings.Contains(got, "rules") {
+		t.Errorf("AGENTS.md missing the injected rule body:\n%s", got)
+	}
 }
 
-// T-D-concepts-53 — claude-desktop places an artifact under .claude-desktop/extensions/.
+// T-D-concepts-53 — claude-desktop has no project-level surface, so sync
+// produces no project output for it (§6.7).
 func TestConcepts_ClaudeDesktopExtension(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"tools/helper/ARTIFACT.md": contextArtifact("helper")})
 	tgt := t.TempDir()
 	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-desktop")
-	mustExist(t, filepath.Join(tgt, ".claude-desktop/extensions/tools/helper/ARTIFACT.md"))
+	// The sync writes its own .podium/ bookkeeping, but no artifact is
+	// materialized: neither the harness-neutral context bucket nor any
+	// claude-desktop subtree is produced.
+	mustNotExist(t, filepath.Join(tgt, ".podium", "context"))
+	mustNotExist(t, filepath.Join(tgt, ".claude-desktop"))
 }
 
-// T-D-concepts-54 — claude-cowork places an artifact under .claude-cowork/plugins/.
+// T-D-concepts-54 — claude-cowork materializes one plugin per artifact under
+// plugins/<id>/ with a .claude-plugin/plugin.json manifest. A context artifact
+// ships as a skill inside the plugin (the plugin format has no context
+// component).
 func TestConcepts_ClaudeCoworkPlugin(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"tools/helper/ARTIFACT.md": contextArtifact("helper")})
 	tgt := t.TempDir()
 	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-cowork")
-	mustExist(t, filepath.Join(tgt, ".claude-cowork/plugins/tools/helper/ARTIFACT.md"))
+	mustExist(t, filepath.Join(tgt, "plugins/tools/helper/.claude-plugin/plugin.json"))
+	mustExist(t, filepath.Join(tgt, "plugins/tools/helper/skills/helper/SKILL.md"))
 }
 
 // T-D-concepts-55 — podium-mcp fails at startup when PODIUM_REGISTRY is unset.

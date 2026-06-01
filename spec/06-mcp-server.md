@@ -204,27 +204,46 @@ Adapters can only translate features the target harness supports. Authors who us
 
 Two mitigations:
 
-1. **Core feature set.** A documented subset of canonical fields and patterns that all built-in adapters support. Authors writing to the core feature set get true "author once, load anywhere."
-2. **Capability matrix.** Per-(field, harness) compatibility table maintained alongside the adapters. Ingest-time lint surfaces capability mismatches: "field `X` is used but adapter `cursor` cannot translate it."
+1. **Core feature set.** A documented subset of canonical fields and patterns that the project-scope adapters support natively. Authors writing to the core feature set get author-once, load-anywhere materialization across the harnesses with a project-level surface. A harness configured out of band (claude-desktop has no project-scope surface) sits outside this subset, so an artifact that targets it relies on `target_harnesses:` rather than the core set.
+2. **Capability matrix.** A compatibility table maintained alongside the adapters. Ingest-time lint surfaces capability mismatches: "field `X` is used but adapter `cursor` cannot translate it."
 
 Authors who must use a non-portable feature can declare `target_harnesses:` in frontmatter to opt out of cross-harness materialization for that artifact.
 
-**Capability matrix (excerpt; maintained in sync with adapter implementations).** Legend: ✓ supported natively, ⚠ supported via fallback (lint warning), ✗ not supported (lint error or `target_harnesses:` opt-out required).
+**Capability matrix (maintained in sync with adapter implementations).** Legend: ✓ supported natively, ⚠ supported via fallback (lint warning), ✗ not supported (lint error or `target_harnesses:` opt-out required). The matrix grades type-level materialization, frontmatter-field fidelity, and the `rule_mode` and `hook_event` rows. `rule` and `hook` are graded by their dedicated rows rather than a type row.
 
-| Field                      | claude-code | claude-desktop | claude-cowork | cursor | codex | opencode | gemini | pi  | hermes |
-| -------------------------- | ----------- | -------------- | ------------- | ------ | ----- | -------- | ------ | --- | ------ |
-| `description`              | ✓           | ✓              | ✓             | ✓      | ✓     | ✓        | ✓      | ✓   | ✓      |
-| `mcpServers`               | ✓           | ✓              | ✓             | ✓      | ✓     | ✓        | ✓      | ✓   | ✓      |
-| `delegates_to` (subagents) | ✓           | ⚠              | ✓             | ✗      | ⚠     | ✓        | ✗      | ✓   | ✓      |
-| `requiresApproval`         | ✓           | ⚠              | ✓             | ✗      | ✓     | ✓        | ✗      | ⚠   | ⚠      |
-| `sandbox_profile`          | ✓           | ⚠              | ⚠             | ✗      | ✓     | ✓        | ✗      | ⚠   | ⚠      |
-| `rule_mode: always`        | ✓           | ✓              | ✓             | ✓      | ✓     | ✓        | ⚠      | ✓   | ✓      |
-| `rule_mode: glob`          | ⚠           | ✗              | ⚠             | ✓      | ⚠     | ⚠        | ✗      | ⚠   | ✓      |
-| `rule_mode: auto`          | ⚠           | ✗              | ⚠             | ✓      | ✗     | ✗        | ✗      | ✗   | ⚠      |
-| `rule_mode: explicit`      | ✓           | ✓              | ✓             | ✓      | ✓     | ✓        | ⚠      | ✓   | ✓      |
-| `hook_event` (any)         | ✓           | ✗              | ⚠             | ✓      | ✓     | ⚠        | ⚠      | ⚠   | ⚠      |
+Type materialization (can the harness materialize an artifact of this type at project scope):
 
-The `hook_event` row summarizes hook support at the field level. Per-event coverage (which canonical events from §4.3.5 each adapter translates) is tracked in the adapter implementation rather than in this spec; the row above marks ✓ when the adapter supports the common events (`session_start`, `session_end`, `pre_tool_use`, `post_tool_use`, `stop`, `pre_compact`) and ⚠ when only a subset of canonical events translate. For the harness's own current event surface, refer to the harness's documentation.
+| Type         | claude-code | claude-desktop | claude-cowork | cursor | codex | opencode | gemini | pi  | hermes |
+| ------------ | ----------- | -------------- | ------------- | ------ | ----- | -------- | ------ | --- | ------ |
+| `skill`      | ✓           | ✗              | ✓             | ✓      | ✓     | ✓        | ✓      | ✓   | ✗      |
+| `agent`      | ✓           | ✗              | ✓             | ✓      | ✓     | ✓        | ✓      | ✗   | ✗      |
+| `context`    | ✓           | ✗              | ✓             | ✓      | ✓     | ✓        | ✓      | ✓   | ✓      |
+| `command`    | ✓           | ✗              | ✓             | ✓      | ✗     | ✓        | ✓      | ✓   | ✗      |
+| `mcp-server` | ✓           | ✗              | ✓             | ✓      | ✓     | ✓        | ✓      | ✗   | ✗      |
+
+Frontmatter-field fidelity, measured on a `type: agent` carrier (does the field survive the harness's agent output):
+
+| Field              | claude-code | claude-desktop | claude-cowork | cursor | codex | opencode | gemini | pi  | hermes |
+| ------------------ | ----------- | -------------- | ------------- | ------ | ----- | -------- | ------ | --- | ------ |
+| `description`      | ✓           | ✗              | ✓             | ✓      | ✓     | ✓        | ✓      | ✗   | ✗      |
+| `mcpServers`       | ✓           | ✗              | ✓             | ✓      | ✗     | ✓        | ✓      | ✗   | ✗      |
+| `delegates_to`     | ✓           | ✗              | ✓             | ✓      | ✗     | ✓        | ✓      | ✗   | ✗      |
+| `requiresApproval` | ✓           | ✗              | ✓             | ✓      | ✗     | ✓        | ✓      | ✗   | ✗      |
+| `sandbox_profile`  | ✓           | ✗              | ✓             | ✓      | ✗     | ✓        | ✓      | ✗   | ✗      |
+
+A field row records whether the value survives the harness's agent materialization. The pass-through `.md` agents (claude-code, claude-cowork, cursor, opencode, gemini) preserve every field; the Codex TOML agent keeps `name` and `description` and drops the rest; a harness with no project-level agent surface (claude-desktop, pi, hermes) drops the row.
+
+Rule modes (`type: rule`) and hook events (`type: hook`):
+
+| Capability            | claude-code | claude-desktop | claude-cowork | cursor | codex | opencode | gemini | pi  | hermes |
+| --------------------- | ----------- | -------------- | ------------- | ------ | ----- | -------- | ------ | --- | ------ |
+| `rule_mode: always`   | ✓           | ✗              | ⚠             | ✓      | ✓     | ✓        | ✓      | ✓   | ✓      |
+| `rule_mode: glob`     | ⚠           | ✗              | ⚠             | ✓      | ⚠     | ⚠        | ⚠      | ⚠   | ✓      |
+| `rule_mode: auto`     | ⚠           | ✗              | ⚠             | ✓      | ⚠     | ⚠        | ⚠      | ⚠   | ✓      |
+| `rule_mode: explicit` | ✓           | ✗              | ⚠             | ✓      | ⚠     | ⚠        | ⚠      | ⚠   | ✓      |
+| `hook_event` (any)    | ✓           | ✗              | ✓             | ⚠      | ✓     | ✗        | ✓      | ✗   | ✗      |
+
+The `hook_event` row summarizes hook support at the field level. Per-event coverage (which canonical events from §4.3.5 each adapter translates) is tracked in the adapter implementation rather than in this spec; the row marks ✓ when the adapter config-merges the common events (`session_start`, `session_end`, `pre_tool_use`, `post_tool_use`, `stop`, `pre_compact`) and ⚠ when only a subset translates. Cursor is ⚠ because it exposes per-category subtype events (`beforeShellExecution` and the like) rather than the generic tool events. For the harness's own current event surface, refer to the harness's documentation.
 
 ## 6.8 Process Model
 

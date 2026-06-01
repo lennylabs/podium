@@ -78,16 +78,35 @@ func (c Capability) String() string {
 //	column order: claude-code claude-desktop claude-cowork cursor codex
 //	              opencode gemini pi hermes
 var capabilityMatrix = map[Capability][]Support{
-	{Field: "description"}:                  row("NNNNNNNNN"),
-	{Field: "mcpServers"}:                   row("NNNNNNNNN"),
-	{Field: "delegates_to"}:                 row("NFNXFNXNN"),
-	{Field: "requiresApproval"}:             row("NFNXNNXFF"),
-	{Field: "sandbox_profile"}:              row("NFFXNNXFF"),
-	{Field: "rule_mode", Value: "always"}:   row("NNNNNNFNN"),
-	{Field: "rule_mode", Value: "glob"}:     row("FXFNFFXFN"),
-	{Field: "rule_mode", Value: "auto"}:     row("FXFNXXXXF"),
-	{Field: "rule_mode", Value: "explicit"}: row("NNNNNNFNN"),
-	{Field: "hook_event"}:                   row("NXFNNFFFF"),
+	// Type materialization (§6.7): can the harness materialize this artifact
+	// type at project scope? rule and hook are graded by their dedicated rows.
+	{Field: "type", Value: "skill"}:      row("NXNNNNNNX"),
+	{Field: "type", Value: "agent"}:      row("NXNNNNNXX"),
+	{Field: "type", Value: "context"}:    row("NXNNNNNNN"),
+	{Field: "type", Value: "command"}:    row("NXNNXNNNX"),
+	{Field: "type", Value: "mcp-server"}: row("NXNNNNNXX"),
+	// Frontmatter-field fidelity, exercised on a type: agent carrier: does the
+	// field survive the harness's agent output? Pass-through .md preserves
+	// everything; the Codex TOML translation keeps only name/description; a
+	// harness with no agent surface drops the field.
+	{Field: "description"}:      row("NXNNNNNXX"),
+	{Field: "mcpServers"}:       row("NXNNXNNXX"),
+	{Field: "delegates_to"}:     row("NXNNXNNXX"),
+	{Field: "requiresApproval"}: row("NXNNXNNXX"),
+	{Field: "sandbox_profile"}:  row("NXNNXNNXX"),
+	// rule_mode (type: rule). Cursor and Hermes write .mdc and support every
+	// mode; the AGENTS.md/GEMINI.md inject harnesses support always natively
+	// and degrade glob/auto/explicit; Cowork ships rules as skills (fallback).
+	{Field: "rule_mode", Value: "always"}:   row("NXFNNNNNN"),
+	{Field: "rule_mode", Value: "glob"}:     row("FXFNFFFFN"),
+	{Field: "rule_mode", Value: "auto"}:     row("FXFNFFFFN"),
+	{Field: "rule_mode", Value: "explicit"}: row("NXFNFFFFN"),
+	// hook_event (type: hook). Config-merge harnesses translate the §4.3.5
+	// event to a native event: claude-code, cowork, codex, and gemini cover the
+	// common events (✓); Cursor exposes only per-category subtype events, so it
+	// covers a subset (⚠). The no-hook harnesses (claude-desktop, opencode, pi,
+	// hermes) are unsupported (✗).
+	{Field: "hook_event"}: row("NXNFNXNXX"),
 }
 
 // row decodes a 9-rune capability string into per-harness Support values.
@@ -135,18 +154,22 @@ func Cell(c Capability, harness string) (level Support, ok bool) {
 	return supports[col], true
 }
 
-// UsedCapabilities returns the §6.7.1 capability rows the artifact
-// exercises that can carry a non-native cell. The always-native rows
-// (description, mcpServers) are omitted because they
-// never produce a mismatch; the core-feature-set query reads the matrix
-// directly. rule_mode and hook_event are scoped to the type that owns them
-// so a stray field on the wrong type is left to the dedicated hygiene
-// rules.
+// UsedCapabilities returns the §6.7.1 capability rows the artifact exercises
+// that can carry a non-native cell. The artifact's type is emitted as a
+// `type` capability for the types graded by a type row (skill, agent, context,
+// command, mcp-server); rule and hook are graded by their dedicated rule_mode
+// and hook_event rows instead. The frontmatter-field rows (delegates_to,
+// requiresApproval, sandbox_profile) are emitted when the field is set.
 func UsedCapabilities(art *manifest.Artifact) []Capability {
 	if art == nil {
 		return nil
 	}
 	var out []Capability
+	switch art.Type {
+	case manifest.TypeSkill, manifest.TypeAgent, manifest.TypeContext,
+		manifest.TypeCommand, manifest.TypeMCPServer:
+		out = append(out, Capability{Field: "type", Value: string(art.Type)})
+	}
 	if len(art.DelegatesTo) > 0 {
 		out = append(out, Capability{Field: "delegates_to"})
 	}

@@ -399,9 +399,9 @@ func TestRuleModes_SyncCursorGlob(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-21 — hermes materializes an always-mode rule to
-// .claude/rules/<name>.md.
-// spec: docs/authoring/rule-modes.md § "What each adapter writes", hermes all modes.
+// T-D-rule-modes-21 — hermes reuses the Cursor .mdc format and materializes an
+// always-mode rule to .cursor/rules/<name>.mdc.
+// spec: §6.7 type-target table, hermes rule = .cursor/rules/<n>.mdc.
 func TestRuleModes_SyncHermesAlways(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -411,14 +411,12 @@ func TestRuleModes_SyncHermesAlways(t *testing.T) {
 	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "hermes"); res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	mustExist(t, filepath.Join(tgt, ".claude/rules/house-style.md"))
+	mustExist(t, filepath.Join(tgt, ".cursor/rules/house-style.mdc"))
 }
 
-// T-D-rule-modes-22 — opencode materializes an always-mode rule to
-// .opencode/rules/<name>.md. The doc says opencode injects rules into root
-// AGENTS.md; the implementation writes .opencode/rules/<name>.md (doc-accuracy
-// gap), so the test asserts the on-disk path.
-// spec: docs/authoring/rule-modes.md § "What each adapter writes", opencode always.
+// T-D-rule-modes-22 — opencode injects an always-mode rule into root AGENTS.md
+// (§6.7 inject mechanism).
+// spec: §6.7 type-target table, opencode rule = AGENTS.md (inject).
 func TestRuleModes_SyncOpencodeAlways(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -428,12 +426,14 @@ func TestRuleModes_SyncOpencodeAlways(t *testing.T) {
 	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "opencode"); res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	mustExist(t, filepath.Join(tgt, ".opencode/rules/house-style.md"))
+	if got := readFile(t, filepath.Join(tgt, "AGENTS.md")); !strings.Contains(got, "House style guide.") {
+		t.Errorf("AGENTS.md missing the injected rule body:\n%s", got)
+	}
 }
 
-// T-D-rule-modes-23 — pi materializes an explicit-mode rule to
-// .pi/rules/<name>.md.
-// spec: docs/authoring/rule-modes.md § "What each adapter writes", pi all modes.
+// T-D-rule-modes-23 — pi injects an explicit-mode rule into root AGENTS.md
+// (§6.7 inject mechanism).
+// spec: §6.7 type-target table, pi rule = AGENTS.md (inject).
 func TestRuleModes_SyncPiExplicit(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -443,7 +443,9 @@ func TestRuleModes_SyncPiExplicit(t *testing.T) {
 	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "pi"); res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	mustExist(t, filepath.Join(tgt, ".pi/rules/incident-response.md"))
+	if got := readFile(t, filepath.Join(tgt, "AGENTS.md")); !strings.Contains(got, "Incident response steps.") {
+		t.Errorf("AGENTS.md missing the injected rule body:\n%s", got)
+	}
 }
 
 // T-D-rule-modes-24 — codex/auto should surface a capability-matrix lint error.

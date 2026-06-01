@@ -208,7 +208,8 @@ func TestArtifactTypes_ContextExampleLints(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-10 — claude-code places a context under .claude/podium/<id>/.
+// T-D-artifact-types-10 — claude-code places a context in the harness-neutral
+// .podium/context/<id>/ bucket.
 func TestArtifactTypes_ContextClaudeCodeLayout(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -216,7 +217,7 @@ func TestArtifactTypes_ContextClaudeCodeLayout(t *testing.T) {
 	})
 	tgt := t.TempDir()
 	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code")
-	mustExist(t, filepath.Join(tgt, ".claude/podium/reference/company-glossary/ARTIFACT.md"))
+	mustExist(t, filepath.Join(tgt, ".podium/context/reference/company-glossary/ARTIFACT.md"))
 }
 
 // ---- command ---------------------------------------------------------------
@@ -385,7 +386,8 @@ func TestArtifactTypes_ScaffoldHookMissingEvent(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-22 — claude-code places a hook under .claude/podium/<id>/.
+// T-D-artifact-types-22 — claude-code config-merges a hook into
+// .claude/settings.json under its native event key (stop -> Stop).
 func TestArtifactTypes_HookClaudeCodeLayout(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -393,7 +395,10 @@ func TestArtifactTypes_HookClaudeCodeLayout(t *testing.T) {
 	})
 	tgt := t.TempDir()
 	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code")
-	mustExist(t, filepath.Join(tgt, ".claude/podium/audit/log-session-end/ARTIFACT.md"))
+	got := readFile(t, filepath.Join(tgt, ".claude", "settings.json"))
+	if !strings.Contains(got, `"Stop"`) || !strings.Contains(got, "echo done") {
+		t.Errorf("settings.json missing the Stop event / hook_action command:\n%s", got)
+	}
 }
 
 // T-D-artifact-types-23 — declaring both a generic hook_event (pre_tool_use)

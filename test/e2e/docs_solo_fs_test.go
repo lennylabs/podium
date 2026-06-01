@@ -367,8 +367,8 @@ func TestSoloFS_17_SyncContextViaClaudeCode(t *testing.T) {
 	if res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	// context lands under .claude/podium/<artifact-id>/
-	mustExist(t, filepath.Join(target, ".claude", "podium", "shared", "company-glossary", "ARTIFACT.md"))
+	// context lands in the harness-neutral .podium/context/<artifact-id>/ bucket
+	mustExist(t, filepath.Join(target, ".podium", "context", "shared", "company-glossary", "ARTIFACT.md"))
 }
 
 // T-D-solo-fs-18

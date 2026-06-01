@@ -72,19 +72,36 @@ func (c ClaudeCode) Adapt(ctx context.Context, src Source) ([]File, error) {
 				Content: data,
 			})
 		}
+	case "command":
+		out = append(out, File{
+			Path:    path.Join(".claude", "commands", name+".md"),
+			Content: rewriteProvenanceForClaude(src.ArtifactBytes),
+		})
+		out = appendResources(out, path.Join(".podium", "resources", src.ArtifactID), src.Resources)
+	case "context":
+		return contextOut(src), nil
+	case "hook":
+		// §6.7 — a hook config-merges its registration into the shared
+		// settings.json. Bundled scripts have no native home under a
+		// config-merge, so they materialize to the harness-neutral
+		// .podium/resources/<id>/ bucket alongside the merge.
+		hookOut := []File{}
+		if frag := hookFragmentJSON(claudeHookEvents, src); frag != nil {
+			hookOut = append(hookOut, File{Path: ".claude/settings.json", Op: OpMergeJSON, Content: frag})
+		}
+		hookOut = appendResources(hookOut, path.Join(".podium", "resources", src.ArtifactID), src.Resources)
+		sortFiles(hookOut)
+		return hookOut, nil
+	case "mcp-server":
+		return []File{{Path: ".mcp.json", Op: OpMergeJSON, Content: mcpFragmentJSON(src)}}, nil
 	default:
-		// context, command, hook, mcp-server, and extensions all land
-		// under .claude/podium/<id>/ with the canonical layout.
+		// extension types land under .claude/podium/<id>/ with the canonical
+		// layout.
 		out = append(out, File{
 			Path:    path.Join(".claude", "podium", src.ArtifactID, "ARTIFACT.md"),
 			Content: rewriteProvenanceForClaude(src.ArtifactBytes),
 		})
-		for rel, data := range src.Resources {
-			out = append(out, File{
-				Path:    path.Join(".claude", "podium", src.ArtifactID, rel),
-				Content: data,
-			})
-		}
+		out = appendResources(out, path.Join(".claude", "podium", src.ArtifactID), src.Resources)
 	}
 
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })

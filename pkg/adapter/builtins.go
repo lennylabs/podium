@@ -3,82 +3,88 @@ package adapter
 import (
 	"context"
 	"path"
-	"sort"
 	"strings"
 
 	"github.com/lennylabs/podium/pkg/manifest"
 )
 
-// This file gathers the harness-specific built-in adapters whose
-// placement logic is small enough to live alongside each other. Each
-// adapter implements the §6.7 table for its target harness.
-//
-// Phase 13 adapters land here: claude-desktop, claude-cowork, cursor,
-// gemini, opencode, pi, hermes. The full §6.7.1 capability matrix
-// (frontmatter mapping, rule_mode handling, hook_event translation)
-// is enforced incrementally through dedicated tests.
+// This file gathers the harness-specific built-in adapters. Each implements the
+// §6.7 materialization matrix for its target harness; shared helpers live in
+// layout.go. A type a harness has no project-level surface for returns no
+// output (the §6.7.1 capability matrix grades it ✗ and the ingest lint and
+// §6.9 guard act on that).
 
-// ClaudeDesktop is the adapter for Anthropic Claude Desktop.
-// Outputs a Claude Desktop extension layout: a manifest.json derived
-// from canonical frontmatter, plus bundled resources alongside.
+// ClaudeDesktop is the adapter for Anthropic Claude Desktop. Claude Desktop is
+// a chat application whose only on-disk surface is the user/OS-scope MCP config
+// (claude_desktop_config.json); it has no project-level materialization target,
+// so the adapter emits nothing (§6.7).
 type ClaudeDesktop struct{}
 
 // ID returns "claude-desktop".
 func (ClaudeDesktop) ID() string { return "claude-desktop" }
 
-// Adapt writes the canonical artifact under .claude-desktop/<id>/.
+// Adapt produces no project-level output for Claude Desktop.
 func (ClaudeDesktop) Adapt(ctx context.Context, src Source) ([]File, error) {
-	return placeUnder(".claude-desktop/extensions", src), nil
+	return nil, nil
 }
 
-// ClaudeCowork is the adapter for Anthropic Claude Cowork.
-// Outputs a Claude Cowork plugin layout (marketplace.json plus
-// per-plugin folders containing skills, commands, agents, hooks, and
-// MCP server registrations).
+// ClaudeCowork is the adapter for Anthropic Claude Cowork. It materializes the
+// artifact into the Claude Code plugin layout under plugins/<id>/ (§6.7).
 type ClaudeCowork struct{}
 
 // ID returns "claude-cowork".
 func (ClaudeCowork) ID() string { return "claude-cowork" }
 
-// Adapt writes the canonical artifact under .claude-cowork/plugins/<id>/.
+// Adapt writes the plugin layout for the artifact.
 func (ClaudeCowork) Adapt(ctx context.Context, src Source) ([]File, error) {
-	return placeUnder(".claude-cowork/plugins", src), nil
+	return coworkPlugin(src), nil
 }
 
-// Cursor is the adapter for Cursor IDE.
-// type: rule outputs go to .cursor/rules/<name>.mdc per the §6.7
-// table; other types land under .cursor/extensions/<id>/.
+// Cursor is the adapter for Cursor IDE (§6.7).
 type Cursor struct{}
 
 // ID returns "cursor".
 func (Cursor) ID() string { return "cursor" }
 
-// Adapt translates per type.
-func (c Cursor) Adapt(ctx context.Context, src Source) ([]File, error) {
-	ty := frontmatterType(src.ArtifactBytes)
-	if ty == "rule" {
-		name := lastSeg(src.ArtifactID)
-		return []File{{
-			Path:    path.Join(".cursor", "rules", name+".mdc"),
-			Content: cursorRuleBody(src),
-		}}, nil
+// Adapt routes each type to its Cursor-native location.
+func (Cursor) Adapt(ctx context.Context, src Source) ([]File, error) {
+	name := lastSeg(src.ArtifactID)
+	switch frontmatterType(src.ArtifactBytes) {
+	case "skill":
+		return skillOut(path.Join(".cursor", "skills", name), src), nil
+	case "agent":
+		return singleFileOut(path.Join(".cursor", "agents", name+".md"), src.ArtifactBytes, src), nil
+	case "command":
+		return singleFileOut(path.Join(".cursor", "commands", name+".md"), src.ArtifactBytes, src), nil
+	case "rule":
+		return []File{{Path: path.Join(".cursor", "rules", name+".mdc"), Content: cursorRuleBody(src)}}, nil
+	case "context":
+		return contextOut(src), nil
+	case "mcp-server":
+		return []File{{Path: ".cursor/mcp.json", Op: OpMergeJSON, Content: mcpFragmentJSON(src)}}, nil
+	case "hook":
+		// §6.7 — config-merge into .cursor/hooks.json. Bundled scripts land in
+		// the harness-neutral resource bucket (a config-merge has no native
+		// home for them).
+		out := []File{}
+		if frag := cursorHookFragmentJSON(src); frag != nil {
+			out = append(out, File{Path: ".cursor/hooks.json", Op: OpMergeJSON, Content: frag})
+		}
+		out = appendResources(out, path.Join(".podium", "resources", src.ArtifactID), src.Resources)
+		sortFiles(out)
+		return out, nil
 	}
-	return placeUnder(".cursor/extensions", src), nil
+	return nil, nil
 }
 
 // cursorRuleBody emits the .mdc content with rule_mode-derived
-// alwaysApply / globs / description frontmatter, per spec §6.7 ("writes
-// `.cursor/rules/<name>.mdc` with `alwaysApply` / `globs` / `description`
-// per `rule_mode`"). Each canonical mode maps to the Cursor-native key
-// that drives the same attach behavior:
+// alwaysApply / globs / description frontmatter, per spec §6.7. Each canonical
+// mode maps to the Cursor-native key that drives the same attach behavior:
 //
 //	always   -> alwaysApply: true
 //	glob     -> globs: <rule_globs>
 //	auto     -> description: <rule_description>
 //	explicit -> (no auto-apply key; attaches on @-mention only)
-//
-// The rule prose follows the frontmatter. A parse quirk falls back to the
-// canonical bytes so the adapter never emits an empty .mdc.
 func cursorRuleBody(src Source) []byte {
 	art, err := manifest.ParseArtifact(src.ArtifactBytes)
 	if err != nil {
@@ -102,8 +108,8 @@ func cursorRuleBody(src Source) []byte {
 	return cursorMDC(fm.String(), []byte(art.Body))
 }
 
-// cursorMDC assembles a Cursor .mdc file: a YAML frontmatter block holding
-// the native keys (possibly empty), then the rule prose.
+// cursorMDC assembles a Cursor .mdc file: a YAML frontmatter block holding the
+// native keys (possibly empty), then the rule prose.
 func cursorMDC(frontmatter string, body []byte) []byte {
 	var b strings.Builder
 	b.WriteString("---\n")
@@ -113,105 +119,110 @@ func cursorMDC(frontmatter string, body []byte) []byte {
 	return []byte(b.String())
 }
 
-// Gemini is the adapter for Google Gemini CLI.
+// Gemini is the adapter for Google Gemini CLI (§6.7).
 type Gemini struct{}
 
 // ID returns "gemini".
 func (Gemini) ID() string { return "gemini" }
 
-// Adapt writes the canonical artifact under .gemini/extensions/<id>/.
+// Adapt routes each type to its Gemini-native location.
 func (Gemini) Adapt(ctx context.Context, src Source) ([]File, error) {
-	return placeUnder(".gemini/extensions", src), nil
+	name := lastSeg(src.ArtifactID)
+	switch frontmatterType(src.ArtifactBytes) {
+	case "skill":
+		return skillOut(path.Join(".gemini", "skills", name), src), nil
+	case "agent":
+		return singleFileOut(path.Join(".gemini", "agents", name+".md"), src.ArtifactBytes, src), nil
+	case "command":
+		return singleFileOut(path.Join(".gemini", "commands", name+".toml"), geminiCommandTOML(src), src), nil
+	case "rule":
+		return []File{injectRule("GEMINI.md", src)}, nil
+	case "context":
+		return contextOut(src), nil
+	case "hook":
+		if frag := hookFragmentJSON(geminiHookEvents, src); frag != nil {
+			return []File{{Path: ".gemini/settings.json", Op: OpMergeJSON, Content: frag}}, nil
+		}
+		return nil, nil
+	case "mcp-server":
+		return []File{{Path: ".gemini/settings.json", Op: OpMergeJSON, Content: mcpFragmentJSON(src)}}, nil
+	}
+	return nil, nil
 }
 
-// OpenCode is the adapter for OpenCode.
-// type: rule injects into AGENTS.md between markers; other types
-// land under .opencode/packages/<id>/.
+// OpenCode is the adapter for OpenCode. It uses plural component directories and
+// injects rules into AGENTS.md (§6.7).
 type OpenCode struct{}
 
 // ID returns "opencode".
 func (OpenCode) ID() string { return "opencode" }
 
-// Adapt translates per type.
+// Adapt routes each type to its OpenCode-native location.
 func (OpenCode) Adapt(ctx context.Context, src Source) ([]File, error) {
-	ty := frontmatterType(src.ArtifactBytes)
-	if ty == "rule" {
-		name := lastSeg(src.ArtifactID)
-		return []File{{
-			Path:    path.Join(".opencode", "rules", name+".md"),
-			Content: src.ArtifactBytes,
-		}}, nil
+	name := lastSeg(src.ArtifactID)
+	switch frontmatterType(src.ArtifactBytes) {
+	case "skill":
+		return skillOut(path.Join(".opencode", "skills", name), src), nil
+	case "agent":
+		return singleFileOut(path.Join(".opencode", "agents", name+".md"), src.ArtifactBytes, src), nil
+	case "command":
+		return singleFileOut(path.Join(".opencode", "commands", name+".md"), src.ArtifactBytes, src), nil
+	case "rule":
+		return []File{injectRule("AGENTS.md", src)}, nil
+	case "context":
+		return contextOut(src), nil
+	case "mcp-server":
+		return []File{{Path: "opencode.json", Op: OpMergeJSON, Content: opencodeMCPJSON(src)}}, nil
 	}
-	return placeUnder(".opencode/packages", src), nil
+	// hook: OpenCode hooks are JS/TS plugin modules, not declarative config.
+	return nil, nil
 }
 
-// Pi is the adapter for the Pi coding agent.
-// type: rule lands at .pi/rules/<name>.md (explicit-mode); others
-// under .pi/packages/<id>/.
+// Pi is the adapter for the Pi coding agent. Pi omits subagents, hooks, and
+// MCP; rules inject into AGENTS.md and commands are prompt templates (§6.7).
 type Pi struct{}
 
 // ID returns "pi".
 func (Pi) ID() string { return "pi" }
 
-// Adapt translates per type.
+// Adapt routes each supported type to its Pi-native location.
 func (Pi) Adapt(ctx context.Context, src Source) ([]File, error) {
-	ty := frontmatterType(src.ArtifactBytes)
-	if ty == "rule" {
-		name := lastSeg(src.ArtifactID)
-		return []File{{
-			Path:    path.Join(".pi", "rules", name+".md"),
-			Content: src.ArtifactBytes,
-		}}, nil
+	name := lastSeg(src.ArtifactID)
+	switch frontmatterType(src.ArtifactBytes) {
+	case "skill":
+		return skillOut(path.Join(".pi", "skills", name), src), nil
+	case "command":
+		return singleFileOut(path.Join(".pi", "prompts", name+".md"), src.ArtifactBytes, src), nil
+	case "rule":
+		return []File{injectRule("AGENTS.md", src)}, nil
+	case "context":
+		return contextOut(src), nil
 	}
-	return placeUnder(".pi/packages", src), nil
+	// agent, hook, mcp-server: not supported by Pi.
+	return nil, nil
 }
 
-// Hermes is the adapter for the Hermes Agent (Nous Research).
-// Per §6.7, type: rule writes .claude/rules/<name>.md (Hermes natively
-// reads .cursor/rules too, but the adapter prefers Claude's path).
+// Hermes is the adapter for the Hermes Agent (Nous Research). Hermes natively
+// reads .cursor/rules/*.mdc, AGENTS.md, and .cursorrules; its skill, command,
+// hook, and MCP surfaces are user-scope, so they are out of project-level
+// materialization (§6.7).
 type Hermes struct{}
 
 // ID returns "hermes".
 func (Hermes) ID() string { return "hermes" }
 
-// Adapt translates per type.
+// Adapt routes the project-level types Hermes reads.
 func (Hermes) Adapt(ctx context.Context, src Source) ([]File, error) {
-	ty := frontmatterType(src.ArtifactBytes)
-	if ty == "rule" {
-		name := lastSeg(src.ArtifactID)
-		return []File{{
-			Path:    path.Join(".claude", "rules", name+".md"),
-			Content: src.ArtifactBytes,
-		}}, nil
+	name := lastSeg(src.ArtifactID)
+	switch frontmatterType(src.ArtifactBytes) {
+	case "rule":
+		return []File{{Path: path.Join(".cursor", "rules", name+".mdc"), Content: cursorRuleBody(src)}}, nil
+	case "context":
+		return contextOut(src), nil
 	}
-	return placeUnder(".hermes/packages", src), nil
-}
-
-// placeUnder writes ARTIFACT.md, optional SKILL.md, and every bundled
-// resource under <root>/<artifact-id>/, sorted for deterministic
-// golden-file output.
-func placeUnder(root string, src Source) []File {
-	out := []File{}
-	if len(src.ArtifactBytes) > 0 {
-		out = append(out, File{
-			Path:    path.Join(root, src.ArtifactID, "ARTIFACT.md"),
-			Content: src.ArtifactBytes,
-		})
-	}
-	if len(src.SkillBytes) > 0 {
-		out = append(out, File{
-			Path:    path.Join(root, src.ArtifactID, "SKILL.md"),
-			Content: src.SkillBytes,
-		})
-	}
-	for rel, data := range src.Resources {
-		out = append(out, File{
-			Path:    path.Join(root, src.ArtifactID, rel),
-			Content: data,
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
-	return out
+	// skill, agent, command, hook, mcp-server: user-scope (~/.hermes/), not
+	// materialized at project level.
+	return nil, nil
 }
 
 func lastSeg(p string) string {

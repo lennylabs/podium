@@ -708,24 +708,48 @@ func TestBundled_ProvenanceAuthoredOnlyPassthrough(t *testing.T) {
 }
 
 // T-D-bundled-resources-24b — the claude-code adapter rewrites imported
-// provenance in a non-skill (context) body too, not just skills (§4.4.2,
-// F-4.4.3). The materialized ARTIFACT.md under .claude/podium/<id>/ carries
-// the <untrusted-data> region.
+// provenance in a claude-native non-skill body (command), not just skills
+// (§4.4.2, F-4.4.3). The materialized .claude/commands/<n>.md carries the
+// <untrusted-data> region. A `type: context` body is excluded here because it
+// materializes to the harness-neutral .podium/context/ bucket, which keeps the
+// canonical markers rather than the Claude rewrite (see the context case below).
 func TestBundled_ProvenanceClaudeCodeNonSkill(t *testing.T) {
 	t.Parallel()
-	id := "finance/policy/payments-context"
-	art := "---\ntype: context\nversion: 1.0.0\ndescription: Aggregated payments policy.\n---\n\nAuthored intro.\n\n" + brProvenanceBody
+	id := "finance/policy/payments-command"
+	art := "---\ntype: command\nname: payments-command\nversion: 1.0.0\ndescription: Aggregated payments policy.\n---\n\nAuthored intro.\n\n" + brProvenanceBody
 	reg := writeRegistry(t, map[string]string{id + "/ARTIFACT.md": art})
 	tgt := t.TempDir()
 	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	got := readFile(t, filepath.Join(tgt, ".claude/podium", id, "ARTIFACT.md"))
+	got := readFile(t, filepath.Join(tgt, ".claude/commands/payments-command.md"))
 	if !strings.Contains(got, "<untrusted-data source=\"https://wiki.example.com/policy/payments\">") {
 		t.Errorf("non-skill body missing untrusted-data region:\n%s", got)
 	}
 	if strings.Contains(got, "begin imported") {
 		t.Errorf("begin-imported marker should be rewritten in a non-skill body:\n%s", got)
+	}
+}
+
+// T-D-bundled-resources-24c — a `type: context` body materializes to the
+// harness-neutral .podium/context/<id>/ bucket and keeps the canonical
+// provenance markers. The bucket is identical across every adapter, so it does
+// not receive the Claude-specific <untrusted-data> rewrite (§6.7).
+func TestBundled_ProvenanceContextNeutralBucket(t *testing.T) {
+	t.Parallel()
+	id := "finance/policy/payments-context"
+	art := "---\ntype: context\nname: payments-context\nversion: 1.0.0\ndescription: Aggregated payments policy.\n---\n\nAuthored intro.\n\n" + brProvenanceBody
+	reg := writeRegistry(t, map[string]string{id + "/ARTIFACT.md": art})
+	tgt := t.TempDir()
+	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
+		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	got := readFile(t, filepath.Join(tgt, ".podium/context", id, "ARTIFACT.md"))
+	if !strings.Contains(got, "begin imported") {
+		t.Errorf("canonical provenance markers should be preserved in the neutral bucket:\n%s", got)
+	}
+	if strings.Contains(got, "<untrusted-data") {
+		t.Errorf("the neutral context bucket should not receive the Claude rewrite:\n%s", got)
 	}
 }
 
@@ -905,8 +929,9 @@ func TestBundled_PatternHookNoneAdapter(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, id, "scripts/log.sh"))
 }
 
-// T-D-bundled-resources-33 — the hook pattern materializes under claude-code at
-// .claude/podium/<id>/ with its bundled script.
+// T-D-bundled-resources-33 — the hook pattern under claude-code config-merges
+// its registration into .claude/settings.json and materializes its bundled
+// script to the harness-neutral .podium/resources/<id>/ bucket.
 func TestBundled_PatternHookClaudeCode(t *testing.T) {
 	t.Parallel()
 	id := "finance/audit/log-session-end"
@@ -918,8 +943,8 @@ func TestBundled_PatternHookClaudeCode(t *testing.T) {
 	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	mustExist(t, filepath.Join(tgt, ".claude/podium", id, "ARTIFACT.md"))
-	mustExist(t, filepath.Join(tgt, ".claude/podium", id, "scripts/log.sh"))
+	mustExist(t, filepath.Join(tgt, ".claude/settings.json"))
+	mustExist(t, filepath.Join(tgt, ".podium/resources", id, "scripts/log.sh"))
 }
 
 // T-D-bundled-resources-34 — a skill missing SKILL.md is rejected before the

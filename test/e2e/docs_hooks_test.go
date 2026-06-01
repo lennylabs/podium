@@ -83,6 +83,14 @@ func hkArtifact(name, event string, extra ...string) string {
 // hkNoError reports whether the lint output is free of error-severity lines.
 func hkNoError(out string) bool { return !strings.Contains(out, "[error]") }
 
+// hkClaudeSettings reads the claude-code config-merge target .claude/settings.json
+// from root and returns its contents. A hook materializes by merging a handler
+// into this file under its native event key (§6.7 config-merge).
+func hkClaudeSettings(t *testing.T, root string) string {
+	t.Helper()
+	return readFile(t, filepath.Join(root, ".claude", "settings.json"))
+}
+
 // ---- Scaffold ---------------------------------------------------------------
 
 // T-D-hooks-1 — scaffold a hook with a canonical event writes type: hook,
@@ -173,8 +181,9 @@ func TestHooks_ScaffoldAllCanonicalEvents(t *testing.T) {
 
 // ---- Sync (filesystem) ------------------------------------------------------
 
-// T-D-hooks-5 — a hook materializes under .claude/podium/<id>/ for claude-code,
-// carrying hook_event, and is not routed to .claude/rules or .claude/agents.
+// T-D-hooks-5 — a hook config-merges into .claude/settings.json for claude-code
+// under the native event key (stop -> Stop), carrying the hook_action command,
+// and is not routed to .claude/rules or .claude/agents.
 func TestHooks_SyncClaudeCodePodiumLayout(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -184,9 +193,9 @@ func TestHooks_SyncClaudeCodePodiumLayout(t *testing.T) {
 	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	got := readFile(t, filepath.Join(tgt, ".claude/podium/audit/log-session-end/ARTIFACT.md"))
-	if !strings.Contains(got, "hook_event: stop") {
-		t.Errorf("materialized ARTIFACT.md missing hook_event: stop:\n%s", got)
+	got := hkClaudeSettings(t, tgt)
+	if !strings.Contains(got, `"Stop"`) || !strings.Contains(got, "echo hi") {
+		t.Errorf("settings.json missing the Stop event / hook_action command:\n%s", got)
 	}
 	for _, bad := range []string{".claude/rules", ".claude/agents"} {
 		if _, err := os.Stat(filepath.Join(tgt, bad)); err == nil {
@@ -232,8 +241,10 @@ func TestHooks_SyncNoneBundledScript(t *testing.T) {
 	}
 }
 
-// T-D-hooks-8 — a bundled-script hook materializes ARTIFACT.md and scripts/
-// nested under .claude/podium/<id>/ for claude-code.
+// T-D-hooks-8 — a bundled-script hook config-merges its registration into
+// .claude/settings.json and materializes the bundled script to the
+// harness-neutral .podium/resources/<id>/ bucket (a config-merge has no native
+// home for the script).
 func TestHooks_SyncClaudeCodeBundledScript(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -244,8 +255,10 @@ func TestHooks_SyncClaudeCodeBundledScript(t *testing.T) {
 	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	mustExist(t, filepath.Join(tgt, ".claude/podium/finance/audit/log-session-end/ARTIFACT.md"))
-	got := readFile(t, filepath.Join(tgt, ".claude/podium/finance/audit/log-session-end/scripts/log.sh"))
+	if s := hkClaudeSettings(t, tgt); !strings.Contains(s, `"Stop"`) {
+		t.Errorf("settings.json missing the Stop event:\n%s", s)
+	}
+	got := readFile(t, filepath.Join(tgt, ".podium/resources/finance/audit/log-session-end/scripts/log.sh"))
 	if got != hkLogScript {
 		t.Errorf("materialized script content differs from source:\n%s", got)
 	}
@@ -474,8 +487,9 @@ func TestHooks_ScaffoldDefaultAction(t *testing.T) {
 	}
 }
 
-// T-D-hooks-20 — a session_end hook materializes under claude-code with the
-// canonical event name unchanged.
+// T-D-hooks-20 — a session_end hook config-merges into claude-code's
+// settings.json under the translated native event name (session_end ->
+// SessionEnd).
 func TestHooks_SyncClaudeCodeSessionEnd(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -485,9 +499,9 @@ func TestHooks_SyncClaudeCodeSessionEnd(t *testing.T) {
 	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	got := readFile(t, filepath.Join(tgt, ".claude/podium/audit/session-logger/ARTIFACT.md"))
-	if !strings.Contains(got, "hook_event: session_end") {
-		t.Errorf("materialized ARTIFACT.md missing hook_event: session_end:\n%s", got)
+	got := hkClaudeSettings(t, tgt)
+	if !strings.Contains(got, `"SessionEnd"`) {
+		t.Errorf("settings.json missing the SessionEnd event:\n%s", got)
 	}
 }
 
@@ -566,8 +580,8 @@ func TestHooks_LintTargetHarnessesScoped(t *testing.T) {
 	}
 }
 
-// T-D-hooks-26 — an MCP load_artifact under claude-code materializes the hook
-// to .claude/podium/<id>/ and not to skills/rules/agents subtrees.
+// T-D-hooks-26 — an MCP load_artifact under claude-code config-merges the hook
+// into .claude/settings.json and not into skills/rules/agents subtrees.
 func TestHooks_MCPClaudeCodeLayout(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -577,7 +591,9 @@ func TestHooks_MCPClaudeCodeLayout(t *testing.T) {
 	env := append(mcpServerEnv(t, srv.BaseURL), "PODIUM_HARNESS=claude-code", "PODIUM_MATERIALIZE_ROOT="+mat)
 	res := mcpExec(t, env, toolCall(1, "load_artifact", map[string]any{"id": "audit/log-session-end"}))
 	rpcResult(t, res.Stdout, 1)
-	mustExist(t, filepath.Join(mat, ".claude/podium/audit/log-session-end/ARTIFACT.md"))
+	if s := hkClaudeSettings(t, mat); !strings.Contains(s, `"Stop"`) {
+		t.Errorf("settings.json missing the Stop event:\n%s", s)
+	}
 	for _, bad := range []string{".claude/skills", ".claude/rules", ".claude/agents"} {
 		if _, err := os.Stat(filepath.Join(mat, bad)); err == nil {
 			t.Errorf("hook must not produce a %s subtree", bad)
@@ -602,9 +618,9 @@ func TestHooks_LintBundledScriptClean(t *testing.T) {
 	}
 }
 
-// T-D-hooks-28 — the bundled-script hook materializes ARTIFACT.md (with the
-// pipe-literal action referencing scripts/log.sh) and the script under
-// .claude/podium/<id>/ for claude-code.
+// T-D-hooks-28 — the bundled-script hook config-merges its handler (whose
+// command is the pipe-literal action referencing scripts/log.sh) into
+// settings.json and materializes the script under .podium/resources/<id>/.
 func TestHooks_SyncClaudeCodeBundledFull(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -615,11 +631,11 @@ func TestHooks_SyncClaudeCodeBundledFull(t *testing.T) {
 	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	art := readFile(t, filepath.Join(tgt, ".claude/podium/finance/audit/log-session-end/ARTIFACT.md"))
-	if !strings.Contains(art, "hook_action: |") || !strings.Contains(art, "scripts/log.sh") {
-		t.Errorf("materialized ARTIFACT.md missing pipe-literal action / scripts/log.sh:\n%s", art)
+	settings := hkClaudeSettings(t, tgt)
+	if !strings.Contains(settings, `"Stop"`) || !strings.Contains(settings, "scripts/log.sh") {
+		t.Errorf("settings.json missing the Stop event / scripts/log.sh command:\n%s", settings)
 	}
-	got := readFile(t, filepath.Join(tgt, ".claude/podium/finance/audit/log-session-end/scripts/log.sh"))
+	got := readFile(t, filepath.Join(tgt, ".podium/resources/finance/audit/log-session-end/scripts/log.sh"))
 	if got != hkLogScript {
 		t.Errorf("materialized script content differs from source:\n%s", got)
 	}
@@ -640,7 +656,7 @@ func TestHooks_BundledScriptNotExecutable(t *testing.T) {
 	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	fi, err := os.Stat(filepath.Join(tgt, ".claude/podium/finance/audit/log-session-end/scripts/log.sh"))
+	fi, err := os.Stat(filepath.Join(tgt, ".podium/resources/finance/audit/log-session-end/scripts/log.sh"))
 	if err != nil {
 		t.Fatalf("stat materialized script: %v", err)
 	}
@@ -649,8 +665,12 @@ func TestHooks_BundledScriptNotExecutable(t *testing.T) {
 	}
 }
 
-// T-D-hooks-30 — one hook per canonical event materializes under claude-code,
-// each carrying its hook_event.
+// T-D-hooks-30 — one hook per canonical event config-merges into claude-code's
+// settings.json. The canonical events collapse onto Claude Code's native event
+// names (several map to PreToolUse/PostToolUse), so the test asserts that every
+// distinct native event key the adapter targets is present after the merge.
+// (Same-native-event handlers currently clobber under the array-replace merge;
+// that limitation is tracked for the §6.7 config-merge review.)
 func TestHooks_SyncClaudeCodeAllEvents(t *testing.T) {
 	t.Parallel()
 	entries := map[string]string{}
@@ -664,17 +684,19 @@ func TestHooks_SyncClaudeCodeAllEvents(t *testing.T) {
 	if res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	for _, ev := range hkCanonicalEvents {
-		id := "hooks/" + strings.ReplaceAll(ev, "_", "-")
-		got := readFile(t, filepath.Join(tgt, ".claude/podium", id, "ARTIFACT.md"))
-		if !strings.Contains(got, "hook_event: "+ev) {
-			t.Errorf("materialized %s missing hook_event: %s:\n%s", id, ev, got)
+	settings := hkClaudeSettings(t, tgt)
+	for _, native := range []string{
+		"SessionStart", "SessionEnd", "UserPromptSubmit", "PreToolUse",
+		"PostToolUse", "SubagentStop", "Stop", "PreCompact", "Notification",
+	} {
+		if !strings.Contains(settings, `"`+native+`"`) {
+			t.Errorf("settings.json missing native event %q:\n%s", native, settings)
 		}
 	}
 }
 
-// T-D-hooks-31 — a hook lands under .claude/podium/<id>/ARTIFACT.md (containing
-// type: hook) and not under .claude/rules or .claude/agents for claude-code.
+// T-D-hooks-31 — a hook config-merges into .claude/settings.json (under the
+// Stop event) and not under .claude/rules or .claude/agents for claude-code.
 func TestHooks_SyncClaudeCodeNotRulesOrAgents(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -684,9 +706,9 @@ func TestHooks_SyncClaudeCodeNotRulesOrAgents(t *testing.T) {
 	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	got := readFile(t, filepath.Join(tgt, ".claude/podium/hooks/stop-hook/ARTIFACT.md"))
-	if !strings.Contains(got, "type: hook") {
-		t.Errorf("materialized ARTIFACT.md missing type: hook:\n%s", got)
+	got := hkClaudeSettings(t, tgt)
+	if !strings.Contains(got, `"Stop"`) || !strings.Contains(got, "echo hi") {
+		t.Errorf("settings.json missing the Stop event / command:\n%s", got)
 	}
 	for _, bad := range []string{".claude/rules", ".claude/agents"} {
 		if _, err := os.Stat(filepath.Join(tgt, bad)); err == nil {
@@ -695,8 +717,10 @@ func TestHooks_SyncClaudeCodeNotRulesOrAgents(t *testing.T) {
 	}
 }
 
-// T-D-hooks-32 — a hook with a jq action and runtime_requirements
-// system_packages [jq] materializes under claude-code preserving all of it.
+// T-D-hooks-32 — a hook with a jq action config-merges into settings.json with
+// the jq pipeline preserved verbatim in the handler command. The Podium-side
+// runtime_requirements field gates materialization (§4.4.1) but is not a Claude
+// Code config key, so it is not carried into settings.json.
 func TestHooks_SyncClaudeCodeRuntimeAndAction(t *testing.T) {
 	t.Parallel()
 	art := "---\ntype: hook\nname: stats\nversion: 1.0.0\ndescription: Log stats.\nhook_event: session_end\n" +
@@ -707,11 +731,14 @@ func TestHooks_SyncClaudeCodeRuntimeAndAction(t *testing.T) {
 	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	got := readFile(t, filepath.Join(tgt, ".claude/podium/audit/stats/ARTIFACT.md"))
-	for _, want := range []string{"system_packages", "jq", "hook_action: |", `jq -r '.session_id // .conversation_id // "unknown"'`} {
-		if !strings.Contains(got, want) {
-			t.Errorf("materialized ARTIFACT.md missing %q:\n%s", want, got)
-		}
+	got := hkClaudeSettings(t, tgt)
+	if !strings.Contains(got, `"SessionEnd"`) {
+		t.Errorf("settings.json missing the SessionEnd event:\n%s", got)
+	}
+	// The command is JSON-escaped in settings.json, so match the jq invocation
+	// on its escaped form.
+	if !strings.Contains(got, `jq -r`) || !strings.Contains(got, "session_id") {
+		t.Errorf("settings.json command missing the jq pipeline:\n%s", got)
 	}
 }
 
@@ -740,9 +767,9 @@ func TestHooks_MCPLoadArtifactFields(t *testing.T) {
 	env := append(mcpServerEnv(t, srv.BaseURL), "PODIUM_HARNESS=claude-code", "PODIUM_MATERIALIZE_ROOT="+mat)
 	res := mcpExec(t, env, toolCall(1, "load_artifact", map[string]any{"id": "hooks/log-stop"}))
 	rpcResult(t, res.Stdout, 1)
-	got := readFile(t, filepath.Join(mat, ".claude/podium/hooks/log-stop/ARTIFACT.md"))
-	if !strings.Contains(got, "hook_event: stop") || !strings.Contains(got, "hook_action") {
-		t.Errorf("materialized ARTIFACT.md missing hook_event/hook_action:\n%s", got)
+	got := hkClaudeSettings(t, mat)
+	if !strings.Contains(got, `"Stop"`) || !strings.Contains(got, "echo done") {
+		t.Errorf("settings.json missing the Stop event / hook_action command:\n%s", got)
 	}
 }
 
@@ -933,7 +960,10 @@ func TestHooks_SyncNoneStopLogger(t *testing.T) {
 	}
 }
 
-// T-D-hooks-47 — tags and sensitivity survive a claude-code sync round-trip.
+// T-D-hooks-47 — tags and sensitivity are Podium-side catalog metadata. The
+// claude-code config-merge projects only the hook registration into
+// settings.json, so tags and sensitivity are not carried into the harness
+// config. The hook still registers under its native event.
 func TestHooks_SyncClaudeCodeTagsSensitivity(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -943,11 +973,12 @@ func TestHooks_SyncClaudeCodeTagsSensitivity(t *testing.T) {
 	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	got := readFile(t, filepath.Join(tgt, ".claude/podium/hooks/tagged/ARTIFACT.md"))
-	for _, want := range []string{"hook", "audit", "sensitivity: low"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("materialized ARTIFACT.md missing %q:\n%s", want, got)
-		}
+	got := hkClaudeSettings(t, tgt)
+	if !strings.Contains(got, `"Stop"`) {
+		t.Errorf("settings.json missing the Stop event:\n%s", got)
+	}
+	if strings.Contains(got, "sensitivity") || strings.Contains(got, "audit") {
+		t.Errorf("settings.json should not carry Podium catalog metadata:\n%s", got)
 	}
 }
 
@@ -998,7 +1029,9 @@ func TestHooks_HTTPLoadArtifactFrontmatter(t *testing.T) {
 }
 
 // T-D-hooks-51 — a hook with a non-canonical event value does not panic during
-// sync; the event passes through and the file materializes.
+// sync. Claude Code has no native mapping for the event, so the config-merge
+// emits no fragment and the hook produces no settings.json entry. Sync still
+// exits 0.
 func TestHooks_SyncUnknownEventNoPanic(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -1012,7 +1045,9 @@ func TestHooks_SyncUnknownEventNoPanic(t *testing.T) {
 	if strings.Contains(res.Stderr, "panic") {
 		t.Errorf("sync stderr contains panic:\n%s", res.Stderr)
 	}
-	mustExist(t, filepath.Join(tgt, ".claude/podium/hooks/vendor/ARTIFACT.md"))
+	if _, err := os.Stat(filepath.Join(tgt, ".claude", "settings.json")); err == nil {
+		t.Errorf("an unmapped hook event must not produce a settings.json entry")
+	}
 }
 
 // T-D-hooks-52 — a hook in a domain hierarchy is discoverable via domain show;

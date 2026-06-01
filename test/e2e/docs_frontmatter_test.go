@@ -608,10 +608,10 @@ func TestFrontmatter_TargetHarnessesExcludesSkips(t *testing.T) {
 	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	if _, err := os.Stat(filepath.Join(tgt, ".claude/podium/eng/scoped/ARTIFACT.md")); err == nil {
+	if _, err := os.Stat(filepath.Join(tgt, ".podium/context/eng/scoped/ARTIFACT.md")); err == nil {
 		t.Errorf("artifact excluded by target_harnesses must not materialize for claude-code")
 	}
-	mustExist(t, filepath.Join(tgt, ".claude/podium/eng/open/ARTIFACT.md"))
+	mustExist(t, filepath.Join(tgt, ".podium/context/eng/open/ARTIFACT.md"))
 }
 
 // T-D-frontmatter-39 — sync materializes an artifact whose target_harnesses
@@ -626,7 +626,7 @@ func TestFrontmatter_TargetHarnessesIncludesMaterializes(t *testing.T) {
 	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	mustExist(t, filepath.Join(tgt, ".claude/podium/eng/my-context/ARTIFACT.md"))
+	mustExist(t, filepath.Join(tgt, ".podium/context/eng/my-context/ARTIFACT.md"))
 }
 
 // T-D-frontmatter-40 — external_resources metadata is stored verbatim and

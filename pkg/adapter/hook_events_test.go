@@ -89,3 +89,44 @@ func TestHookEvents_AllCanonicalEventsClaudeCode(t *testing.T) {
 		runHookEventCell(t, event)
 	}
 }
+
+// Spec: §6.7 / §6.7.1 — the cursor adapter config-merges a hook whose canonical
+// event has a Cursor-native subtype into .cursor/hooks.json under that native
+// event key. pre_shell_execution maps to beforeShellExecution.
+func TestHookEvents_CursorSubtypeConfigMerge(t *testing.T) {
+	t.Parallel()
+	src := Source{
+		ArtifactID: "hooks/audit",
+		ArtifactBytes: []byte("---\ntype: hook\nversion: 1.0.0\ndescription: a hook\n" +
+			"hook_event: pre_shell_execution\nhook_action: |\n  echo audit\n---\n\n"),
+	}
+	out, err := Cursor{}.Adapt(context.Background(), src)
+	if err != nil {
+		t.Fatalf("Adapt: %v", err)
+	}
+	if len(out) != 1 || out[0].Path != ".cursor/hooks.json" || out[0].Op != OpMergeJSON {
+		t.Fatalf("got %+v, want a single .cursor/hooks.json OpMergeJSON", out)
+	}
+	if body := string(out[0].Content); !strings.Contains(body, "beforeShellExecution") || !strings.Contains(body, "echo audit") {
+		t.Errorf("fragment missing the native event / command:\n%s", body)
+	}
+}
+
+// Spec: §6.7.1 — a canonical event Cursor has no native subtype for (the
+// generic pre_tool_use) produces no Cursor hook output, reflecting the ⚠
+// partial-coverage cell.
+func TestHookEvents_CursorGenericEventNoOutput(t *testing.T) {
+	t.Parallel()
+	src := Source{
+		ArtifactID: "hooks/generic",
+		ArtifactBytes: []byte("---\ntype: hook\nversion: 1.0.0\ndescription: a hook\n" +
+			"hook_event: pre_tool_use\nhook_action: |\n  echo generic\n---\n\n"),
+	}
+	out, err := Cursor{}.Adapt(context.Background(), src)
+	if err != nil {
+		t.Fatalf("Adapt: %v", err)
+	}
+	if len(out) != 0 {
+		t.Errorf("generic pre_tool_use should produce no Cursor hook output, got %+v", out)
+	}
+}

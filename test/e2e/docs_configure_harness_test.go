@@ -307,17 +307,17 @@ func TestConfigureHarness_ClaudeCodeRule(t *testing.T) {
 	}
 }
 
-// T-D-configure-harness-16 — claude-code context lands under .claude/podium/<id>/
-// (doc says .claude/context/). Doc-accuracy gap; assert actual.
+// T-D-configure-harness-16 — claude-code context lands in the harness-neutral
+// .podium/context/<id>/ bucket (§6.7).
 func TestConfigureHarness_ClaudeCodeContextDefaultCase(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"glossary/company/ARTIFACT.md": contextArtifact("company glossary")})
 	target := t.TempDir()
 	chSync(t, reg, target, "claude-code")
-	mustExist(t, filepath.Join(target, ".claude", "podium", "glossary", "company", "ARTIFACT.md"))
+	mustExist(t, filepath.Join(target, ".podium", "context", "glossary", "company", "ARTIFACT.md"))
 }
 
-// T-D-configure-harness-17 — claude-code command lands under .claude/podium/<id>/.
+// T-D-configure-harness-17 — claude-code command lands at .claude/commands/<name>.md.
 func TestConfigureHarness_ClaudeCodeCommandDefaultCase(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -325,10 +325,10 @@ func TestConfigureHarness_ClaudeCodeCommandDefaultCase(t *testing.T) {
 	})
 	target := t.TempDir()
 	chSync(t, reg, target, "claude-code")
-	mustExist(t, filepath.Join(target, ".claude", "podium", "tools", "deploy", "ARTIFACT.md"))
+	mustExist(t, filepath.Join(target, ".claude", "commands", "deploy.md"))
 }
 
-// T-D-configure-harness-18 — claude-code hook lands under .claude/podium/<id>/.
+// T-D-configure-harness-18 — claude-code hook merges into .claude/settings.json.
 func TestConfigureHarness_ClaudeCodeHookDefaultCase(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -336,7 +336,10 @@ func TestConfigureHarness_ClaudeCodeHookDefaultCase(t *testing.T) {
 	})
 	target := t.TempDir()
 	chSync(t, reg, target, "claude-code")
-	mustExist(t, filepath.Join(target, ".claude", "podium", "hooks", "pre-commit", "ARTIFACT.md"))
+	got := readFile(t, filepath.Join(target, ".claude", "settings.json"))
+	if !strings.Contains(got, "Stop") || !strings.Contains(got, "echo done") {
+		t.Errorf("settings.json missing the merged hook (Stop / echo done):\n%s", got)
+	}
 }
 
 // T-D-configure-harness-19 — claude-code skill bundled resources co-locate under
@@ -354,8 +357,8 @@ func TestConfigureHarness_ClaudeCodeSkillResources(t *testing.T) {
 	mustExist(t, filepath.Join(target, ".claude", "skills", "analyzer", "scripts", "run.py"))
 }
 
-// T-D-configure-harness-20 — claude-code non-skill bundled resources land under
-// .claude/podium/<id>/.
+// T-D-configure-harness-20 — claude-code command is a native file; its non-skill
+// bundled resources land in the .podium/resources/<id>/ bucket.
 func TestConfigureHarness_ClaudeCodeNonSkillResources(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -364,8 +367,8 @@ func TestConfigureHarness_ClaudeCodeNonSkillResources(t *testing.T) {
 	})
 	target := t.TempDir()
 	chSync(t, reg, target, "claude-code")
-	mustExist(t, filepath.Join(target, ".claude", "podium", "tools", "deploy", "ARTIFACT.md"))
-	mustExist(t, filepath.Join(target, ".claude", "podium", "tools", "deploy", "scripts", "deploy.sh"))
+	mustExist(t, filepath.Join(target, ".claude", "commands", "deploy.md"))
+	mustExist(t, filepath.Join(target, ".podium", "resources", "tools", "deploy", "scripts", "deploy.sh"))
 }
 
 // T-D-configure-harness-21 — claude-code rule_mode glob fallback warning.
@@ -430,7 +433,8 @@ func TestConfigureHarness_ClaudeCodeInitSync(t *testing.T) {
 
 // ---- Claude Desktop ---------------------------------------------------------
 
-// T-D-configure-harness-25 — claude-desktop writes .claude-desktop/extensions/<id>/.
+// T-D-configure-harness-25 — claude-desktop has no project-level surface, so
+// sync materializes nothing for it (§6.7).
 func TestConfigureHarness_ClaudeDesktopExtensionLayout(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -439,8 +443,8 @@ func TestConfigureHarness_ClaudeDesktopExtensionLayout(t *testing.T) {
 	})
 	target := t.TempDir()
 	chSync(t, reg, target, "claude-desktop")
-	mustExist(t, filepath.Join(target, ".claude-desktop", "extensions", "greet", "ARTIFACT.md"))
-	mustExist(t, filepath.Join(target, ".claude-desktop", "extensions", "greet", "SKILL.md"))
+	mustNotExist(t, filepath.Join(target, ".claude-desktop"))
+	mustNotExist(t, filepath.Join(target, ".claude", "skills", "greet", "SKILL.md"))
 }
 
 // T-D-configure-harness-26 — claude-desktop MCP startup.
@@ -461,7 +465,8 @@ func TestConfigureHarness_ClaudeCoworkPluginLayout(t *testing.T) {
 	})
 	cowork := t.TempDir()
 	chSync(t, reg, cowork, "claude-cowork")
-	mustExist(t, filepath.Join(cowork, ".claude-cowork", "plugins", "greet", "ARTIFACT.md"))
+	mustExist(t, filepath.Join(cowork, "plugins", "greet", "skills", "greet", "SKILL.md"))
+	mustExist(t, filepath.Join(cowork, "plugins", "greet", ".claude-plugin", "plugin.json"))
 }
 
 // T-D-configure-harness-28 — claude-cowork sync, git add, git commit sequence.
@@ -484,7 +489,7 @@ func TestConfigureHarness_ClaudeCoworkGitCommit(t *testing.T) {
 		"commit", "-m", "Sync from Podium"); r.Exit != 0 {
 		t.Fatalf("git commit exit=%d stderr=%s stdout=%s", r.Exit, r.Stderr, r.Stdout)
 	}
-	if r, _ := runExternal(t, cowork, 30*time.Second, "git", "show", "--stat", "HEAD"); !strings.Contains(r.Stdout, ".claude-cowork") {
+	if r, _ := runExternal(t, cowork, 30*time.Second, "git", "show", "--stat", "HEAD"); !strings.Contains(r.Stdout, "plugins/greet") {
 		t.Errorf("commit does not include the plugin layout:\n%s", r.Stdout)
 	}
 }
@@ -513,7 +518,7 @@ func TestConfigureHarness_CursorRule(t *testing.T) {
 	}
 }
 
-// T-D-configure-harness-31 — cursor non-rule lands under .cursor/extensions/<id>/.
+// T-D-configure-harness-31 — cursor skill lands at .cursor/skills/<name>/SKILL.md.
 func TestConfigureHarness_CursorNonRuleDefaultCase(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -522,7 +527,7 @@ func TestConfigureHarness_CursorNonRuleDefaultCase(t *testing.T) {
 	})
 	target := t.TempDir()
 	chSync(t, reg, target, "cursor")
-	mustExist(t, filepath.Join(target, ".cursor", "extensions", "tools", "greet", "ARTIFACT.md"))
+	mustExist(t, filepath.Join(target, ".cursor", "skills", "greet", "SKILL.md"))
 }
 
 // T-D-configure-harness-32 — cursor: all four rule_mode values produce .mdc with no lint errors.
@@ -570,19 +575,19 @@ func TestConfigureHarness_MCPCursor(t *testing.T) {
 
 // ---- OpenCode ---------------------------------------------------------------
 
-// T-D-configure-harness-35 — opencode rule writes .opencode/rules/<name>.md.
+// T-D-configure-harness-35 — opencode rule injects into AGENTS.md.
 func TestConfigureHarness_OpenCodeRule(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"style/naming/ARTIFACT.md": chRule("explicit", "")})
 	target := t.TempDir()
 	chSync(t, reg, target, "opencode")
-	got := readFile(t, filepath.Join(target, ".opencode", "rules", "naming.md"))
-	if !strings.Contains(got, "Rule body") {
-		t.Errorf("rule file missing content:\n%s", got)
+	got := readFile(t, filepath.Join(target, "AGENTS.md"))
+	if !strings.Contains(got, "Rule body") || !strings.Contains(got, "podium:begin:style/naming") {
+		t.Errorf("AGENTS.md missing the injected rule:\n%s", got)
 	}
 }
 
-// T-D-configure-harness-36 — opencode non-rule lands under .opencode/packages/<id>/.
+// T-D-configure-harness-36 — opencode skill lands at .opencode/skills/<name>/SKILL.md.
 func TestConfigureHarness_OpenCodeNonRuleDefaultCase(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -591,7 +596,7 @@ func TestConfigureHarness_OpenCodeNonRuleDefaultCase(t *testing.T) {
 	})
 	target := t.TempDir()
 	chSync(t, reg, target, "opencode")
-	mustExist(t, filepath.Join(target, ".opencode", "packages", "tools", "greet", "ARTIFACT.md"))
+	mustExist(t, filepath.Join(target, ".opencode", "skills", "greet", "SKILL.md"))
 }
 
 // T-D-configure-harness-37 — opencode rule_mode auto lint error.
@@ -620,7 +625,7 @@ func TestConfigureHarness_OpenCodeInitSync(t *testing.T) {
 	if yaml := readFile(t, filepath.Join(ws, ".podium", "sync.yaml")); !strings.Contains(yaml, "harness: opencode") {
 		t.Errorf("sync.yaml missing harness: opencode:\n%s", yaml)
 	}
-	mustExist(t, filepath.Join(ws, ".opencode"))
+	mustExist(t, filepath.Join(ws, "AGENTS.md"))
 }
 
 // T-D-configure-harness-40 — opencode MCP startup.
@@ -632,15 +637,16 @@ func TestConfigureHarness_MCPOpenCode(t *testing.T) {
 
 // ---- Codex ------------------------------------------------------------------
 
-// T-D-configure-harness-41 — codex rule writes .codex/rules/<name>.md plus the
-// canonical .codex/packages/<id>/ copy.
+// T-D-configure-harness-41 — codex rule injects into AGENTS.md.
 func TestConfigureHarness_CodexRule(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"style/naming/ARTIFACT.md": chRule("always", "")})
 	target := t.TempDir()
 	chSync(t, reg, target, "codex")
-	mustExist(t, filepath.Join(target, ".codex", "rules", "naming.md"))
-	mustExist(t, filepath.Join(target, ".codex", "packages", "style", "naming", "ARTIFACT.md"))
+	got := readFile(t, filepath.Join(target, "AGENTS.md"))
+	if !strings.Contains(got, "Rule body") || !strings.Contains(got, "podium:begin:style/naming") {
+		t.Errorf("AGENTS.md missing the injected rule:\n%s", got)
+	}
 }
 
 // T-D-configure-harness-42 — codex rule_mode auto lint error.
@@ -669,18 +675,18 @@ func TestConfigureHarness_CodexInitSync(t *testing.T) {
 	if yaml := readFile(t, filepath.Join(ws, ".podium", "sync.yaml")); !strings.Contains(yaml, "harness: codex") {
 		t.Errorf("sync.yaml missing harness: codex:\n%s", yaml)
 	}
-	mustExist(t, filepath.Join(ws, ".codex", "packages", "glossary", "ARTIFACT.md"))
+	mustExist(t, filepath.Join(ws, ".podium", "context", "glossary", "ARTIFACT.md"))
 }
 
 // ---- Gemini -----------------------------------------------------------------
 
-// T-D-configure-harness-45 — gemini writes under .gemini/extensions/<id>/.
+// T-D-configure-harness-45 — gemini context lands in .podium/context/<id>/.
 func TestConfigureHarness_GeminiExtensionLayout(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
 	target := t.TempDir()
 	chSync(t, reg, target, "gemini")
-	mustExist(t, filepath.Join(target, ".gemini", "extensions", "glossary", "ARTIFACT.md"))
+	mustExist(t, filepath.Join(target, ".podium", "context", "glossary", "ARTIFACT.md"))
 }
 
 // T-D-configure-harness-46 — gemini rule_mode always fallback warning.
@@ -707,16 +713,19 @@ func TestConfigureHarness_GeminiInitSync(t *testing.T) {
 
 // ---- Pi ---------------------------------------------------------------------
 
-// T-D-configure-harness-48 — pi rule writes .pi/rules/<name>.md.
+// T-D-configure-harness-48 — pi rule injects into AGENTS.md.
 func TestConfigureHarness_PiRule(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"style/naming/ARTIFACT.md": chRule("explicit", "")})
 	target := t.TempDir()
 	chSync(t, reg, target, "pi")
-	mustExist(t, filepath.Join(target, ".pi", "rules", "naming.md"))
+	got := readFile(t, filepath.Join(target, "AGENTS.md"))
+	if !strings.Contains(got, "Rule body") {
+		t.Errorf("AGENTS.md missing the injected rule:\n%s", got)
+	}
 }
 
-// T-D-configure-harness-49 — pi non-rule lands under .pi/packages/<id>/.
+// T-D-configure-harness-49 — pi skill lands at .pi/skills/<name>/SKILL.md.
 func TestConfigureHarness_PiNonRuleDefaultCase(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -725,7 +734,7 @@ func TestConfigureHarness_PiNonRuleDefaultCase(t *testing.T) {
 	})
 	target := t.TempDir()
 	chSync(t, reg, target, "pi")
-	mustExist(t, filepath.Join(target, ".pi", "packages", "tools", "greet", "ARTIFACT.md"))
+	mustExist(t, filepath.Join(target, ".pi", "skills", "greet", "SKILL.md"))
 }
 
 // T-D-configure-harness-50 — pi rule_mode auto lint failure.
@@ -748,7 +757,7 @@ func TestConfigureHarness_PiInitSync(t *testing.T) {
 	if yaml := readFile(t, filepath.Join(ws, ".podium", "sync.yaml")); !strings.Contains(yaml, "harness: pi") {
 		t.Errorf("sync.yaml missing harness: pi:\n%s", yaml)
 	}
-	mustExist(t, filepath.Join(ws, ".pi"))
+	mustExist(t, filepath.Join(ws, "AGENTS.md"))
 }
 
 // T-D-configure-harness-52 — pi MCP startup.
@@ -760,19 +769,20 @@ func TestConfigureHarness_MCPPi(t *testing.T) {
 
 // ---- Hermes -----------------------------------------------------------------
 
-// T-D-configure-harness-53 — hermes rule writes .claude/rules/<name>.md.
+// T-D-configure-harness-53 — hermes rule writes .cursor/rules/<name>.mdc.
 func TestConfigureHarness_HermesRule(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"style/naming/ARTIFACT.md": chRule("always", "")})
 	target := t.TempDir()
 	chSync(t, reg, target, "hermes")
-	got := readFile(t, filepath.Join(target, ".claude", "rules", "naming.md"))
+	got := readFile(t, filepath.Join(target, ".cursor", "rules", "naming.mdc"))
 	if !strings.Contains(got, "Rule body") {
 		t.Errorf("rule file missing content:\n%s", got)
 	}
 }
 
-// T-D-configure-harness-54 — hermes non-rule lands under .hermes/packages/<id>/.
+// T-D-configure-harness-54 — hermes does not materialize skills at project
+// scope (its skill surface is user-scope ~/.hermes/), so sync writes nothing.
 func TestConfigureHarness_HermesNonRuleDefaultCase(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -781,7 +791,8 @@ func TestConfigureHarness_HermesNonRuleDefaultCase(t *testing.T) {
 	})
 	target := t.TempDir()
 	chSync(t, reg, target, "hermes")
-	mustExist(t, filepath.Join(target, ".hermes", "packages", "tools", "greet", "ARTIFACT.md"))
+	mustNotExist(t, filepath.Join(target, ".hermes"))
+	mustNotExist(t, filepath.Join(target, ".cursor", "skills", "greet", "SKILL.md"))
 }
 
 // T-D-configure-harness-55 — hermes: all four rule_mode values materialize.
@@ -796,7 +807,7 @@ func TestConfigureHarness_HermesAllRuleModes(t *testing.T) {
 	target := t.TempDir()
 	chSync(t, reg, target, "hermes")
 	for _, n := range []string{"always", "glob", "auto", "explicit"} {
-		mustExist(t, filepath.Join(target, ".claude", "rules", n+".md"))
+		mustExist(t, filepath.Join(target, ".cursor", "rules", n+".mdc"))
 	}
 }
 
@@ -814,7 +825,7 @@ func TestConfigureHarness_HermesInitSync(t *testing.T) {
 	if yaml := readFile(t, filepath.Join(ws, ".podium", "sync.yaml")); !strings.Contains(yaml, "harness: hermes") {
 		t.Errorf("sync.yaml missing harness: hermes:\n%s", yaml)
 	}
-	mustExist(t, filepath.Join(ws, ".claude", "rules", "naming.md"))
+	mustExist(t, filepath.Join(ws, ".cursor", "rules", "naming.mdc"))
 }
 
 // T-D-configure-harness-57 — hermes MCP startup.

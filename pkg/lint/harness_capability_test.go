@@ -43,13 +43,13 @@ func TestHarnessCapability_NoTargetHarnessesSilent(t *testing.T) {
 // whose cell is ✗ for a used field is an ingest error.
 func TestHarnessCapability_TargetUnsupportedErrors(t *testing.T) {
 	t.Parallel()
-	// cursor is ✗ for sandbox_profile.
-	diags := capDiags(t, "---\ntype: agent\nversion: 1.0.0\nname: a\ndescription: d.\nsandbox_profile: read-only-fs\ntarget_harnesses: [cursor]\n---\n\nbody\n")
+	// codex is ✗ for sandbox_profile (the TOML agent translation drops it).
+	diags := capDiags(t, "---\ntype: agent\nversion: 1.0.0\nname: a\ndescription: d.\nsandbox_profile: read-only-fs\ntarget_harnesses: [codex]\n---\n\nbody\n")
 	if !hasErrorMessage(diags, capCode, "cannot translate") {
-		t.Errorf("expected a capability error for cursor + sandbox_profile, got: %v", diags)
+		t.Errorf("expected a capability error for codex + sandbox_profile, got: %v", diags)
 	}
-	if !hasErrorMessage(diags, capCode, "cursor") {
-		t.Errorf("error should name the harness cursor, got: %v", diags)
+	if !hasErrorMessage(diags, capCode, "codex") {
+		t.Errorf("error should name the harness codex, got: %v", diags)
 	}
 }
 
@@ -85,15 +85,16 @@ func TestHarnessCapability_NativeClean(t *testing.T) {
 	}
 }
 
-// Spec: §6.7.1 — gemini is ⚠ for rule_mode: always; targeting it warns.
-func TestHarnessCapability_AlwaysGeminiWarns(t *testing.T) {
+// Spec: §6.7.1 — gemini is ⚠ for rule_mode: glob (the GEMINI.md inject loses
+// glob scoping); targeting it warns.
+func TestHarnessCapability_GlobGeminiWarns(t *testing.T) {
 	t.Parallel()
-	diags := capDiags(t, "---\ntype: rule\nversion: 1.0.0\nname: r\ndescription: d.\nrule_mode: always\ntarget_harnesses: [gemini]\n---\n\nbody\n")
+	diags := capDiags(t, "---\ntype: rule\nversion: 1.0.0\nname: r\ndescription: d.\nrule_mode: glob\nrule_globs: \"src/**\"\ntarget_harnesses: [gemini]\n---\n\nbody\n")
 	if hasErrorMessage(diags, capCode, "") {
-		t.Errorf("always on gemini is ⚠, must not error: %v", diags)
+		t.Errorf("glob on gemini is ⚠, must not error: %v", diags)
 	}
 	if !hasWarnMessage(diags, capCode, "falls back") {
-		t.Errorf("expected a fallback warning for gemini + always, got: %v", diags)
+		t.Errorf("expected a fallback warning for gemini + glob, got: %v", diags)
 	}
 }
 

@@ -3,50 +3,36 @@ package adapter
 import (
 	"context"
 	"path"
-	"sort"
-	"strings"
 )
 
-// Codex is the adapter for OpenAI Codex (§6.7). Places skills
-// alongside agents under a Codex-native package layout per the
-// §6.7.1 capability matrix.
+// Codex is the adapter for OpenAI Codex (§6.7). Skills live under .agents/
+// (not .codex/), subagents are TOML, rules inject into AGENTS.md, and hook and
+// mcp-server merge into the Codex config.
 type Codex struct{}
 
 // ID returns "codex".
 func (Codex) ID() string { return "codex" }
 
-// Adapt produces a Codex-flavored layout.
-func (c Codex) Adapt(ctx context.Context, src Source) ([]File, error) {
-	ty := frontmatterType(src.ArtifactBytes)
-	out := []File{}
-	name := lastSegmentCodex(src.ArtifactID)
-	root := path.Join(".codex", "packages", src.ArtifactID)
-
-	if len(src.ArtifactBytes) > 0 {
-		out = append(out, File{Path: path.Join(root, "ARTIFACT.md"), Content: src.ArtifactBytes})
+// Adapt routes each type to its Codex-native location.
+func (Codex) Adapt(ctx context.Context, src Source) ([]File, error) {
+	name := lastSeg(src.ArtifactID)
+	switch frontmatterType(src.ArtifactBytes) {
+	case "skill":
+		return skillOut(path.Join(".agents", "skills", name), src), nil
+	case "agent":
+		return singleFileOut(path.Join(".codex", "agents", name+".toml"), codexAgentTOML(src, name), src), nil
+	case "rule":
+		return []File{injectRule("AGENTS.md", src)}, nil
+	case "context":
+		return contextOut(src), nil
+	case "hook":
+		if frag := hookFragmentJSON(codexHookEvents, src); frag != nil {
+			return []File{{Path: ".codex/hooks.json", Op: OpMergeJSON, Content: frag}}, nil
+		}
+		return nil, nil
+	case "mcp-server":
+		return []File{{Path: ".codex/config.toml", Op: OpInject, Key: src.ArtifactID, Content: codexMCPTOML(src)}}, nil
 	}
-	if ty == "skill" && len(src.SkillBytes) > 0 {
-		out = append(out, File{Path: path.Join(root, "SKILL.md"), Content: src.SkillBytes})
-	}
-	for rel, data := range src.Resources {
-		out = append(out, File{Path: path.Join(root, rel), Content: data})
-	}
-	if ty == "rule" {
-		// Rules also land at .codex/rules/<name>.md so Codex's native
-		// rule loader picks them up directly.
-		out = append(out, File{
-			Path:    path.Join(".codex", "rules", name+".md"),
-			Content: src.ArtifactBytes,
-		})
-	}
-
-	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
-	return out, nil
-}
-
-func lastSegmentCodex(p string) string {
-	if i := strings.LastIndex(p, "/"); i >= 0 {
-		return p[i+1:]
-	}
-	return p
+	// command: Codex custom prompts are user-scope and deprecated.
+	return nil, nil
 }

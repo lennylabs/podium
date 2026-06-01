@@ -139,7 +139,11 @@ func nonSkillProvenanceArtifact(ty string) []byte {
 // trust. Before the fix only the skill path was rewritten.
 func TestClaudeCode_RewritesProvenanceForNonSkillTypes(t *testing.T) {
 	t.Parallel()
-	for _, ty := range []string{"context", "agent", "rule", "command", "hook"} {
+	// agent, rule, and command materialize as Claude-native files with the
+	// §4.4.2 provenance rewrite. context goes to the harness-neutral
+	// .podium/context/ bucket (canonical markers, no Claude rewrite) and hook
+	// is a config-merge with no prose body, so neither is covered here.
+	for _, ty := range []string{"agent", "rule", "command"} {
 		ty := ty
 		t.Run(ty, func(t *testing.T) {
 			t.Parallel()
