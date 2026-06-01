@@ -241,6 +241,68 @@ func TestLoadConfig_RegistryFromHomeSyncYAML(t *testing.T) {
 	}
 }
 
+// spec: §4.7.9 / §13.10 — a standalone deployment writes
+// defaults.verify_signatures: never into ~/.podium/sync.yaml; the bridge
+// honors it when PODIUM_VERIFY_SIGNATURES is unset (F-13.10.12).
+func TestLoadConfig_VerifySignaturesFromSyncYAML(t *testing.T) {
+	hermetic(t)
+	t.Setenv("PODIUM_REGISTRY", "")
+	t.Setenv("PODIUM_VERIFY_SIGNATURES", "")
+	home := os.Getenv("HOME")
+	if err := os.MkdirAll(filepath.Join(home, ".podium"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	yaml := "defaults:\n  registry: http://127.0.0.1:8080\n  verify_signatures: never\n"
+	if err := os.WriteFile(filepath.Join(home, ".podium", "sync.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if cfg.verifyPolicy != "never" {
+		t.Errorf("verifyPolicy = %q, want never (from sync.yaml)", cfg.verifyPolicy)
+	}
+}
+
+// spec: §13.10 — an explicit PODIUM_VERIFY_SIGNATURES overrides the
+// sync.yaml standalone default.
+func TestLoadConfig_VerifySignaturesEnvOverridesSyncYAML(t *testing.T) {
+	hermetic(t)
+	t.Setenv("PODIUM_REGISTRY", "")
+	t.Setenv("PODIUM_VERIFY_SIGNATURES", "always")
+	home := os.Getenv("HOME")
+	if err := os.MkdirAll(filepath.Join(home, ".podium"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	yaml := "defaults:\n  registry: http://127.0.0.1:8080\n  verify_signatures: never\n"
+	if err := os.WriteFile(filepath.Join(home, ".podium", "sync.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if cfg.verifyPolicy != "always" {
+		t.Errorf("verifyPolicy = %q, want always (env overrides sync.yaml)", cfg.verifyPolicy)
+	}
+}
+
+// spec: §4.7.9 — with neither env nor sync.yaml setting it, the policy is the
+// secure medium-and-above default.
+func TestLoadConfig_VerifySignaturesDefaultsToMediumAndAbove(t *testing.T) {
+	hermetic(t)
+	t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:8080")
+	t.Setenv("PODIUM_VERIFY_SIGNATURES", "")
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if cfg.verifyPolicy != "medium-and-above" {
+		t.Errorf("verifyPolicy = %q, want medium-and-above (default)", cfg.verifyPolicy)
+	}
+}
+
 // spec: §6.2 / §6.5 — when PODIUM_CACHE_DIR is unset and the home
 // directory cannot be resolved, the cache is disabled with a warning
 // rather than silently (F-6.2.8). Startup still succeeds.

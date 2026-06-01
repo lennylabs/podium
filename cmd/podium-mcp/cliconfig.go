@@ -162,3 +162,31 @@ func registryFromWorkspace(workspace string) string {
 	}
 	return synccfg.ResolveRegistryPath(workspace, cfg.Defaults.Registry)
 }
+
+// verifySignaturesFromSyncYAML resolves defaults.verify_signatures from
+// sync.yaml using the same scope order as the registry lookup: the workspace
+// overlay first, then the home-global ~/.podium/sync.yaml a standalone
+// deployment writes. Returns "" when no scope sets it (§13.10).
+func verifySignaturesFromSyncYAML() string {
+	if ws, err := os.Getwd(); err == nil {
+		if v := verifySignaturesFromWorkspace(ws); v != "" {
+			return v
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		if v := verifySignaturesFromWorkspace(home); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// verifySignaturesFromWorkspace reads <workspace>/.podium/sync.yaml and
+// returns its defaults.verify_signatures, or "" when absent or invalid.
+func verifySignaturesFromWorkspace(workspace string) string {
+	cfg, err := synccfg.ReadConfig(workspace)
+	if err != nil || cfg == nil {
+		return ""
+	}
+	return cfg.Defaults.VerifySignatures
+}

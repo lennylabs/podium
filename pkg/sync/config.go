@@ -33,6 +33,11 @@ type Defaults struct {
 	Harness  string `yaml:"harness,omitempty"`
 	Target   string `yaml:"target,omitempty"`
 	Profile  string `yaml:"profile,omitempty"`
+	// VerifySignatures is the consumer-side §4.7.9 signature-verification
+	// policy (never | medium-and-above | always). A standalone deployment
+	// writes `never` here on first run so consumers relax the default without
+	// an env var (§13.10); PODIUM_VERIFY_SIGNATURES overrides it.
+	VerifySignatures string `yaml:"verify_signatures,omitempty"`
 }
 
 // Profile is one entry under `profiles:`. Names without explicit

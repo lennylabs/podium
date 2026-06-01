@@ -225,8 +225,11 @@ func loadConfig() (*config, error) {
 		oauthClientID:     envDefault("PODIUM_OAUTH_CLIENT_ID", "podium-cli"),
 		oauthScopes:       envDefault("PODIUM_OAUTH_SCOPES", "openid profile email groups"),
 		tokenKeychainName: envDefault("PODIUM_TOKEN_KEYCHAIN_NAME", "podium"),
-		// §4.7.9 / §6.2: never | medium-and-above (default) | always.
-		verifyPolicy:      sign.VerificationPolicy(envDefault("PODIUM_VERIFY_SIGNATURES", string(sign.PolicyMediumAndAbove))),
+		// §4.7.9 / §6.2 / §13.10: never | medium-and-above | always. The
+		// default is consumer-side and resolved after sync.yaml is known
+		// (env/flag/config, then defaults.verify_signatures, then
+		// medium-and-above); an empty value here means "env did not set it."
+		verifyPolicy:      sign.VerificationPolicy(os.Getenv("PODIUM_VERIFY_SIGNATURES")),
 		signatureProvider: envDefault("PODIUM_SIGNATURE_PROVIDER", "noop"),
 		// §4.4.1 sandbox enforcement.
 		enforceSandbox: os.Getenv("PODIUM_ENFORCE_SANDBOX_PROFILE") == "true",
@@ -278,6 +281,18 @@ func loadConfig() (*config, error) {
 	// opaquely on the first tool call with an HTTP-client scheme error.
 	if !synccfg.IsServerSource(c.registry) {
 		return nil, fmt.Errorf("config.filesystem_registry_unsupported: PODIUM_REGISTRY %q is a filesystem-source registry; the MCP server speaks HTTP and requires a server source (http:// or https://). Use `podium sync` to consume a filesystem registry (§6.1, §7.5.2)", c.registry)
+	}
+	// §4.7.9 / §13.10: resolve the consumer-side signature-verification
+	// default. Precedence: an explicit env/flag/config value (already applied
+	// above) wins; otherwise honor defaults.verify_signatures from sync.yaml,
+	// which a standalone deployment writes as `never` on first run; otherwise
+	// fall back to the secure medium-and-above default.
+	if c.verifyPolicy == "" {
+		if v := verifySignaturesFromSyncYAML(); v != "" {
+			c.verifyPolicy = sign.VerificationPolicy(v)
+		} else {
+			c.verifyPolicy = sign.PolicyMediumAndAbove
+		}
 	}
 	if c.cacheDir == "" {
 		home, err := os.UserHomeDir()
