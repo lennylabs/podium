@@ -148,20 +148,36 @@ The `HarnessAdapter` translates a canonical artifact into the format a specific 
 
 The adapter set grows as new harnesses appear. Custom adapters register through the `HarnessAdapter` SPI (§9.1).
 
-**Adapter outputs.** What each built-in adapter writes, by artifact type:
+**Adapter outputs.** Each adapter writes an artifact into the target harness's native location for that type, using one of these mechanisms:
 
-| Adapter          | Target                                                                                                                                                                  |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `none`           | _(default)_ Writes the canonical layout as-is. |
-| `claude-code`    | Writes `.claude/agents/<name>.md` (frontmatter + composed prompt) and `.claude/rules/<name>.md` for `type: rule`. Places skill packages at `.claude/skills/<name>/SKILL.md` (per the agentskills.io standard). Places bundled resources for non-skill types under `.claude/podium/<artifact-id>/`. |
-| `claude-desktop` | Writes a Claude Desktop extension layout (`manifest.json` derived from canonical frontmatter; resources alongside). |
-| `claude-cowork`  | Writes a Claude Cowork plugin layout (`marketplace.json` plus per-plugin folders containing skills, commands, agents, hooks, and MCP server registrations). The output directory tree is intended to be committed to a private GitHub repo that the org admin imports as a private marketplace. |
-| `cursor`         | Writes Cursor's native agent / extension format. For `type: rule`, writes `.cursor/rules/<name>.mdc` with `alwaysApply` / `globs` / `description` per `rule_mode`. |
-| `codex`          | Writes Codex's native package layout. For `type: rule`, injects into `AGENTS.md` between markers. |
-| `gemini`         | Writes Gemini CLI's native package layout. |
-| `opencode`       | Writes OpenCode's native package layout. For `type: rule`, injects into `AGENTS.md` between markers (or writes `.opencode/rules/<name>.md` for `rule_mode: explicit`). |
-| `pi`             | Writes Pi's native layout. For `type: rule`, injects into `AGENTS.md` (project-local `.pi/AGENTS.md` or root `AGENTS.md`); explicit-mode rules at `.pi/rules/<name>.md`. |
-| `hermes`         | Writes Hermes Agent's native layout. For `type: rule`, writes `.claude/rules/<name>.md` (Hermes also reads `.cursor/rules/*.mdc` natively, so cursor-format output works too). |
+- **Standalone file.** The artifact becomes a discrete file, or a skill folder, that the harness discovers natively. This covers most cells in the matrix below.
+- **Bundled resources.** A skill's `scripts/`, `references/`, and `assets/` subfolders ship verbatim inside the skill's native folder. Reference material that belongs to a skill travels this way as part of the skill package (§4.4); it is not a separate artifact.
+- **Inject.** The artifact body is merged into a shared always-loaded instruction file (`AGENTS.md` or `GEMINI.md`) between Podium-managed markers, so a later sync reconciles only Podium's section and leaves the rest of the file intact.
+- **Config-merge.** A `hook` or `mcp-server` artifact is merged into the harness's shared configuration file as a Podium-owned entry keyed by the artifact ID. The adapter emits a structured fragment and the materialization layer performs the read-merge-write, so the operator's other entries are preserved and removing the artifact removes its entry.
+
+A `✗` cell means the harness has no native concept for that type, or the only native location is outside the materialization target. Materialization writes project-level files only, so a surface that exists solely at user or operating-system scope is `✗` here. The §6.7.1 capability matrix grades each `✗` cell, ingest lint warns or errors against it, and an author excludes a harness for a non-portable artifact with `target_harnesses:`.
+
+`type: context` has no native concept in any harness. A `type: context` artifact materializes to a harness-neutral `.podium/context/<artifact-id>/` directory, identical across every adapter. Reference material that belongs to a skill is shipped as that skill's bundled `references/` resources instead, not as a separate context artifact.
+
+The target for each remaining type, by adapter (paths are project-relative; `<n>` is the artifact's leaf name):
+
+| Type         | claude-code               | claude-desktop | claude-cowork        | cursor                     | codex                  | opencode                    | gemini                     | pi                  | hermes                |
+| ------------ | ------------------------- | -------------- | -------------------- | -------------------------- | ---------------------- | --------------------------- | -------------------------- | ------------------- | --------------------- |
+| `skill`      | `.claude/skills/<n>/SKILL.md` | ✗          | `skills/<n>/SKILL.md` | `.cursor/skills/<n>/SKILL.md` | `.agents/skills/<n>/SKILL.md` | `.opencode/skills/<n>/SKILL.md` | `.gemini/skills/<n>/SKILL.md` | `.pi/skills/<n>/SKILL.md` | ✗                |
+| `agent`      | `.claude/agents/<n>.md`   | ✗              | `agents/<n>.md`      | `.cursor/agents/<n>.md`    | `.codex/agents/<n>.toml` | `.opencode/agents/<n>.md` | `.gemini/agents/<n>.md`    | ✗                   | ✗                     |
+| `command`    | `.claude/commands/<n>.md` | ✗              | `commands/<n>.md`    | `.cursor/commands/<n>.md`  | ✗                      | `.opencode/commands/<n>.md` | `.gemini/commands/<n>.toml` | `.pi/prompts/<n>.md` | ✗                    |
+| `rule`       | `.claude/rules/<n>.md`    | ✗              | ✗                    | `.cursor/rules/<n>.mdc`    | `AGENTS.md` (inject)   | `AGENTS.md` (inject)        | `GEMINI.md` (inject)       | `AGENTS.md` (inject) | `.cursor/rules/<n>.mdc` |
+| `hook`       | `settings.json` (cfg)     | ✗              | `hooks/hooks.json`   | `.cursor/hooks.json` (cfg) | `.codex/hooks.json` (cfg) | ✗                       | `settings.json` (cfg)      | ✗                   | ✗                     |
+| `mcp-server` | `.mcp.json` (cfg)         | ✗              | `.mcp.json`          | `.cursor/mcp.json` (cfg)   | `config.toml` (cfg)    | `opencode.json` (cfg)       | `settings.json` (cfg)      | ✗                   | ✗                     |
+
+`none` writes the canonical layout (`ARTIFACT.md`, `SKILL.md`, bundled resources) without translation. Claude Cowork paths are relative to a plugin directory inside a marketplace repository: the repository root holds `.claude-plugin/marketplace.json`, and each plugin lives under `plugins/<plugin>/` with a `.claude-plugin/plugin.json` manifest. The config-merge targets resolve to the harness's project-scope config file: `.claude/settings.json`, `.cursor/hooks.json` and `.cursor/mcp.json`, `.codex/config.toml`, `.gemini/settings.json`, and root `opencode.json`.
+
+Notes on partial and migrating surfaces:
+
+- Codex custom prompts are user-scope (`~/.codex/prompts/`) and are being folded into skills, so `command` is `✗` for Codex. Cursor and Cowork are likewise folding command files into skills; authors targeting those harnesses should prefer `type: skill`.
+- Hermes reads project-level `.cursor/rules/*.mdc`, `AGENTS.md`, and `.cursorrules`, so its `rule` output reuses the Cursor `.mdc` format. Its skill, command, hook, and MCP surfaces live under user-scope `~/.hermes/`, so they are `✗` for project-level materialization.
+- Claude Desktop configures MCP servers at user or operating-system scope (`claude_desktop_config.json`, or a `.mcpb` bundle) and exposes no project-level surface, so project materialization produces no Claude Desktop output. Configure it out of band.
+- OpenCode hooks are JavaScript or TypeScript plugin modules and Pi hooks are extension code, so `hook` is `✗` for both.
 
 **What an adapter does.** Mechanical translation:
 

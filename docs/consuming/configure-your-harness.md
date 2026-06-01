@@ -170,12 +170,14 @@ podium sync
 
 | Type | Location |
 |:--|:--|
-| `skill`, `agent` | `.claude/agents/<name>.md` |
-| `rule` | `.claude/rules/<name>.md` |
+| `skill` | `.claude/skills/<name>/SKILL.md` (folder per skill, agentskills.io layout) |
+| `agent` | `.claude/agents/<name>.md` |
+| `rule` | `.claude/rules/<name>.md` (optional `paths:` frontmatter for path-scoping) |
 | `command` | `.claude/commands/<name>.md` |
-| `hook` | `.claude/hooks/<name>.json` (or the harness's hook config). |
-| `context` | `.claude/context/<name>.md` |
-| Bundled resources | `.claude/podium/<artifact-id>/` |
+| `hook` | Merged into `.claude/settings.json` under the `hooks` key. `.claude/hooks/` holds only the scripts a hook entry references. |
+| `context` | No native Claude Code concept. A `context` artifact lands at `.podium/context/<artifact-id>/`; reference material that belongs to a skill ships in that skill's `references/`. |
+| `mcp-server` | Merged into `.mcp.json` (project root) under `mcpServers`. |
+| Bundled resources | Inside the skill folder (`scripts/`, `references/`, `assets/`). |
 
 **Notes:**
 
@@ -202,19 +204,19 @@ podium sync
 }
 ```
 
-**`podium sync`** writes a Claude Desktop extension layout: `manifest.json` derived from the canonical frontmatter, with bundled resources alongside. Target the Claude Desktop extensions directory.
+**`podium sync`** has no project-level surface for Claude Desktop. Claude Desktop is a chat application whose only on-disk install points are the user/OS-scope MCP config above (`claude_desktop_config.json`) and Desktop Extension bundles (`.mcpb`); it has no native concept for `skill`, `agent`, `context`, `command`, `rule`, or `hook`, and it does not read project-level artifact files. Register the Podium MCP server (above) for runtime discovery, or package an MCP server as a `.mcpb` bundle. For on-disk materialization of other artifact types, target a coding harness instead.
 
 **Notes:**
 
-- Limited rule and hook surface. Most artifact types map to extension manifest entries.
+- Only `mcp-server` has a Claude Desktop home, and it is user/OS-scope. Other artifact types are `✗` for this harness; exclude it with `target_harnesses:` or use a coding harness for materialization.
 
 ---
 
 ## Claude Cowork
 
-Cowork is Anthropic's web product for organizations (claude.ai). Plugin distribution to Cowork uses a private GitHub-hosted plugin marketplace that an org admin imports.
+Cowork is Anthropic's web product for organizations (claude.ai). Plugin distribution to Cowork uses a private Git-hosted plugin marketplace that an org admin imports.
 
-**`podium sync`** writes a Claude Cowork plugin layout: a `marketplace.json` plus per-plugin folders containing skills (`SKILL.md`), commands, agents, hooks, and MCP server registrations. The output directory tree is intended to be committed to a private GitHub repo that the org admin imports as a private marketplace.
+**`podium sync`** writes a Claude Cowork plugin marketplace: a `.claude-plugin/marketplace.json` at the repository root, and each plugin under `plugins/<plugin>/` with a `.claude-plugin/plugin.json` manifest. Inside a plugin, components use the Claude Code plugin layout: `skills/<name>/SKILL.md`, `agents/<name>.md`, `commands/<name>.md`, `hooks/hooks.json`, and `.mcp.json`. Plugins have no native `rule` or `context` component, so those types ship as skills (`skills/<name>/SKILL.md`). The output tree is intended to be committed to a private Git repository that the org admin imports as a private marketplace.
 
 ```bash
 podium sync --harness claude-cowork --target ./cowork-marketplace/
@@ -264,9 +266,12 @@ podium sync
 | Type | Location |
 |:--|:--|
 | `rule` | `.cursor/rules/<name>.mdc` with `alwaysApply` / `globs` / `description` set per `rule_mode`. |
-| `skill` | `.cursor/skills/<name>.md` |
+| `skill` | `.cursor/skills/<name>/SKILL.md` (folder per skill, with `SKILL.md`). |
+| `agent` | `.cursor/agents/<name>.md` |
 | `command` | `.cursor/commands/<name>.md` |
-| `hook` | `.cursor/hooks/<name>.json` |
+| `hook` | Merged into `.cursor/hooks.json` under the `hooks` key. `.cursor/hooks/` holds only the scripts a hook entry references. |
+| `mcp-server` | Merged into `.cursor/mcp.json` under `mcpServers`. |
+| `context` | No native Cursor concept (`@Docs` is URL-indexed). A `context` artifact lands at `.podium/context/<artifact-id>/`. |
 
 **Notes:**
 
@@ -303,13 +308,17 @@ podium sync
 
 **Where artifacts land:**
 
-OpenCode centers on `AGENTS.md`. Most artifact types inject into the appropriate `AGENTS.md`:
+OpenCode uses plural component directories (`.opencode/agents/`, `.opencode/commands/`, `.opencode/skills/`) and centers rules on `AGENTS.md`. OpenCode has no `.opencode/rules/` directory.
 
 | Type | Location |
 |:--|:--|
-| `rule`, `skill`, `context` | Injected into `AGENTS.md` between Podium-managed XML markers. Project-root for `rule_mode: always`, common-ancestor directory for `rule_mode: glob`, standalone `.opencode/rules/<name>.md` for `rule_mode: explicit`. |
-| `agent` | OpenCode-native agent definition. |
-| `command`, `hook` | OpenCode-native locations. |
+| `skill` | `.opencode/skills/<name>/SKILL.md` (folder per skill). |
+| `agent` | `.opencode/agents/<name>.md` |
+| `command` | `.opencode/commands/<name>.md` (supports `$ARGUMENTS` and positional `$1`/`$2`). |
+| `rule` | Injected into `AGENTS.md` between Podium-managed XML markers (project-root, or common-ancestor for `rule_mode: glob`). Extra files referenced via the `instructions` array in `opencode.json`. |
+| `mcp-server` | Merged into `opencode.json` under the `mcp` key. |
+| `hook` | No declarative file. OpenCode hooks are JavaScript or TypeScript plugin modules (`.opencode/plugins/<name>.ts`), so `hook` artifacts are not materialized; exclude OpenCode with `target_harnesses:`. |
+| `context` | No native concept. A `context` artifact lands at `.podium/context/<artifact-id>/`. |
 
 **Notes:**
 
@@ -333,17 +342,23 @@ podium sync
 
 **Where artifacts land:**
 
-Codex consumes `AGENTS.md`. Most artifact types inject into the appropriate `AGENTS.md`:
+Codex consumes `AGENTS.md` for rules and now has native skill, subagent, and hook surfaces.
 
 | Type | Location |
 |:--|:--|
-| `rule`, `skill`, `context` | Injected into root `AGENTS.md` (or common-ancestor for `rule_mode: glob`). |
-| `agent` | Codex's native package layout. |
+| `skill` | `.agents/skills/<name>/SKILL.md` (folder per skill; note the `.agents/` root, not `.codex/`). |
+| `agent` | `.codex/agents/<name>.toml` |
+| `rule` | Injected into root `AGENTS.md` (or common-ancestor for `rule_mode: glob`) between Podium-managed markers. |
+| `hook` | Merged into `.codex/hooks.json` (or `.codex/config.toml` `[hooks]`). |
+| `mcp-server` | Merged into `.codex/config.toml` under `[mcp_servers]`. |
+| `command` | No project-level target. Codex custom prompts are user-scope (`~/.codex/prompts/`) and deprecated in favor of skills; exclude Codex with `target_harnesses:` or author as `type: skill`. |
+| `context` | No native concept. A `context` artifact lands at `.podium/context/<artifact-id>/`. |
 
 **Notes:**
 
 - `rule_mode: auto` is not supported; ingest fails with a lint error.
-- No native hook surface today; `hook`-type artifacts fail ingest unless `target_harnesses:` excludes codex.
+- Codex has a native hook surface (`.codex/hooks.json` or `[hooks]` in `config.toml`), so `hook` artifacts materialize rather than failing ingest.
+- Skills live at `.agents/skills/`, not `.codex/skills/`. Subagents are TOML at `.codex/agents/<name>.toml`.
 
 ---
 
@@ -359,9 +374,22 @@ podium init --registry ~/podium-artifacts/ --harness gemini
 podium sync
 ```
 
+**Where artifacts land:**
+
+| Type | Location |
+|:--|:--|
+| `skill` | `.gemini/skills/<name>/SKILL.md` (folder per skill). |
+| `agent` | `.gemini/agents/<name>.md` |
+| `command` | `.gemini/commands/<name>.toml` (TOML with a `prompt` key; `{{args}}` for arguments). |
+| `rule` | Injected into `GEMINI.md` (the hierarchical context file) between Podium-managed markers. |
+| `hook` | Merged into `.gemini/settings.json` under the `hooks` key. |
+| `mcp-server` | Merged into `.gemini/settings.json` under `mcpServers`. |
+| `context` | `.podium/context/<artifact-id>/` (harness-neutral; reference material that belongs to a skill ships in that skill's `references/`). |
+
 **Notes:**
 
-- Limited rule and hook surface today. `rule_mode: always` falls back to "best-effort always" with a lint warning. Other rule modes fail or fall back per the per-harness capability matrix.
+- `rule_mode: always` maps to `GEMINI.md`. Other rule modes fall back with a lint warning per the per-harness capability matrix.
+- Gemini commands are TOML and use the `{{args}}` placeholder; positional arguments are not supported.
 - See [Rule modes](../authoring/rule-modes) for the per-harness mapping.
 
 ---
@@ -394,13 +422,15 @@ podium sync
 
 **Where artifacts land:**
 
-Pi loads `AGENTS.md` from `~/.pi/agent/`, parent directories, and the CWD. Project-local `.pi/` overrides global `~/.pi/agent/`:
+Pi loads `AGENTS.md` from the project tree (and `~/.pi/agent/AGENTS.md` globally). Pi deliberately omits subagents, hooks, and MCP, so those types have no native surface. There is no native `.pi/rules/` directory in core Pi.
 
 | Type | Location |
 |:--|:--|
-| `rule` (`always`) | Project-local `.pi/AGENTS.md` (or root `AGENTS.md`). Standalone files at `.pi/rules/<name>.md` for `rule_mode: explicit`. |
-| `skill` | Pi's native skill location. |
-| `command` | Pi's native command location. |
+| `skill` | `.pi/skills/<name>/SKILL.md` (folder per skill). |
+| `command` | `.pi/prompts/<name>.md` (Pi calls these prompt templates; supports `$1`/`$@`/`{{var}}`). |
+| `rule` | Injected into root `AGENTS.md` between Podium-managed markers. |
+| `agent`, `hook`, `mcp-server` | Not supported. Pi omits subagents, on-disk hooks, and MCP; exclude Pi with `target_harnesses:`. |
+| `context` | No native concept. A `context` artifact lands at `.podium/context/<artifact-id>/`. |
 
 **Notes:**
 
@@ -437,12 +467,13 @@ podium sync
 
 **Where artifacts land:**
 
-Hermes natively reads several rule formats: `.claude/rules/*.md`, `.cursor/rules/*.mdc`, root `AGENTS.md`, `.cursorrules`. The Hermes adapter writes the most-permissive format by default:
+Hermes natively reads project-level `.cursor/rules/*.mdc`, root `AGENTS.md`, and `.cursorrules`. Its own skill, command, hook, and MCP surfaces live under user-scope `~/.hermes/`, which project-level materialization does not write, so those types are out of scope for sync.
 
 | Type | Location |
 |:--|:--|
-| `rule` | `.claude/rules/<name>.md` (team-shared) or `~/.claude/rules/<name>.md` (personal). Cursor-style `.mdc` is also accepted directly. |
-| `skill`, `command` | Hermes's native locations. |
+| `rule` | `.cursor/rules/<name>.mdc` (reused from the Cursor format) or root `AGENTS.md`. |
+| `context` | `.podium/context/<artifact-id>/` (harness-neutral). |
+| `skill`, `command`, `hook`, `mcp-server` | User-scope only (`~/.hermes/skills/`, `~/.hermes/config.yaml`, and similar). Not materialized at project level; exclude Hermes with `target_harnesses:` or configure these out of band. |
 
 **Notes:**
 
