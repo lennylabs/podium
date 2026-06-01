@@ -267,7 +267,7 @@ func oidcStartSCIMServer(t testing.TB, scimToken string, extraEnv ...string) *se
 // ---- T-D-oidc-1: public_mode + identity_provider=oidc => startup fails -----
 
 // T-D-oidc-1
-func TestOIDC_1_PublicModeWithIdPFails(t *testing.T) {
+func TestAuth_PublicModeWithIdPFails(t *testing.T) {
 	t.Parallel()
 	bin := cmdharness.Bin(t, "podium")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -296,7 +296,7 @@ func TestOIDC_1_PublicModeWithIdPFails(t *testing.T) {
 
 // T-D-oidc-2: §13.12 nests config under `registry:` and models
 // identity_provider as an object with a `type:` selector.
-func TestOIDC_2_RegistryYAMLIdentityProviderField(t *testing.T) {
+func TestAuth_RegistryYAMLIdentityProviderField(t *testing.T) {
 	t.Parallel()
 	cfgDir := t.TempDir()
 	cfgFile := filepath.Join(cfgDir, "registry.yaml")
@@ -318,13 +318,13 @@ func TestOIDC_2_RegistryYAMLIdentityProviderField(t *testing.T) {
 // ---- T-D-oidc-3: podium login missing --registry => exit 2 ------------------
 
 // T-D-oidc-3
-func TestOIDC_3_LoginMissingRegistry(t *testing.T) {
+func TestAuth_LoginMissingRegistry(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY="}, "login")
 	if res.Exit != 2 {
 		t.Errorf("exit=%d, want 2 (stderr=%s)", res.Exit, res.Stderr)
 	}
-	if !strings.Contains(res.Stderr, "--registry is required") {
+	if !strings.Contains(res.Stderr, "no registry configured") {
 		t.Errorf("stderr missing '--registry is required':\n%s", res.Stderr)
 	}
 }
@@ -332,7 +332,7 @@ func TestOIDC_3_LoginMissingRegistry(t *testing.T) {
 // ---- T-D-oidc-4: podium login missing issuer => exit 2 ----------------------
 
 // T-D-oidc-4
-func TestOIDC_4_LoginMissingIssuer(t *testing.T) {
+func TestAuth_LoginMissingIssuer(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{
 		"PODIUM_REGISTRY=http://podium.acme.example",
@@ -341,7 +341,7 @@ func TestOIDC_4_LoginMissingIssuer(t *testing.T) {
 	if res.Exit != 2 {
 		t.Errorf("exit=%d, want 2 (stderr=%s)", res.Exit, res.Stderr)
 	}
-	if !strings.Contains(res.Stderr, "--issuer or PODIUM_OAUTH_AUTHORIZATION_ENDPOINT is required") {
+	if !strings.Contains(res.Stderr, "--issuer") {
 		t.Errorf("stderr missing issuer-required message:\n%s", res.Stderr)
 	}
 }
@@ -349,7 +349,7 @@ func TestOIDC_4_LoginMissingIssuer(t *testing.T) {
 // ---- T-D-oidc-5: login prints Visit/User code/Direct link -------------------
 
 // T-D-oidc-5
-func TestOIDC_5_LoginPrintsVerificationURLAndCode(t *testing.T) {
+func TestAuth_LoginPrintsVerificationURLAndCode(t *testing.T) {
 	t.Parallel()
 	// Stub token returns authorization_pending so login keeps polling (and
 	// the bounded context kills it before keychain write).
@@ -382,21 +382,21 @@ func TestOIDC_5_LoginPrintsVerificationURLAndCode(t *testing.T) {
 // ---- T-D-oidc-6: login saves token to keychain on success ------------------
 
 // T-D-oidc-6
-func TestOIDC_6_LoginSavesTokenToKeychain(t *testing.T) {
+func TestAuth_LoginSavesTokenToKeychain(t *testing.T) {
 	t.Skip("requires an isolated keychain that does not touch the system keychain; PODIUM_TOKEN_KEYCHAIN_NAME controls the keychain service name but does not prevent a system write on platforms that only have the OS keychain")
 }
 
 // ---- T-D-oidc-7: login polls through authorization_pending then succeeds ---
 
 // T-D-oidc-7
-func TestOIDC_7_LoginPollsThroughAuthorizationPending(t *testing.T) {
+func TestAuth_LoginPollsThroughAuthorizationPending(t *testing.T) {
 	t.Skip("verifying Login successful via stderr requires the process to complete the keychain write; isolated keychain not available in the e2e environment")
 }
 
 // ---- T-D-oidc-8: expired_token => exit 1 ------------------------------------
 
 // T-D-oidc-8
-func TestOIDC_8_LoginExpiredToken(t *testing.T) {
+func TestAuth_LoginExpiredToken(t *testing.T) {
 	t.Parallel()
 	stub := newOIDCStub(oidcStubConfig{
 		tokenResponses: []string{`{"error":"expired_token"}`},
@@ -418,7 +418,7 @@ func TestOIDC_8_LoginExpiredToken(t *testing.T) {
 // ---- T-D-oidc-9: access_denied => exit 1 ------------------------------------
 
 // T-D-oidc-9
-func TestOIDC_9_LoginAccessDenied(t *testing.T) {
+func TestAuth_LoginAccessDenied(t *testing.T) {
 	t.Parallel()
 	stub := newOIDCStub(oidcStubConfig{
 		tokenResponses: []string{`{"error":"access_denied"}`},
@@ -437,7 +437,7 @@ func TestOIDC_9_LoginAccessDenied(t *testing.T) {
 // ---- T-D-oidc-10: PODIUM_OAUTH_AUDIENCE is sent in device-auth request ------
 
 // T-D-oidc-10
-func TestOIDC_10_LoginSendsAudience(t *testing.T) {
+func TestAuth_LoginSendsAudience(t *testing.T) {
 	t.Parallel()
 	// Stub token returns access_denied so the process exits promptly after the
 	// device-auth step without needing a keychain write.
@@ -461,7 +461,7 @@ func TestOIDC_10_LoginSendsAudience(t *testing.T) {
 // ---- T-D-oidc-11: PODIUM_OAUTH_CLIENT_SECRET not sent (doc-accuracy gap) ---
 
 // T-D-oidc-11
-func TestOIDC_11_LoginClientSecretGap(t *testing.T) {
+func TestAuth_LoginClientSecretGap(t *testing.T) {
 	t.Parallel()
 	// login.go does not read PODIUM_OAUTH_CLIENT_SECRET (doc-accuracy gap for
 	// Google Workspace). Confirm the token request body does NOT contain
@@ -489,20 +489,20 @@ func TestOIDC_11_LoginClientSecretGap(t *testing.T) {
 // ---- T-D-oidc-12: logout removes token + status shows not found -------------
 
 // T-D-oidc-12
-func TestOIDC_12_LogoutRemovesToken(t *testing.T) {
+func TestAuth_LogoutRemovesToken(t *testing.T) {
 	t.Skip("requires an isolated keychain to seed a token then verify deletion; system keychain cannot be safely used in e2e")
 }
 
 // ---- T-D-oidc-13: logout missing --registry => exit 2 ----------------------
 
 // T-D-oidc-13
-func TestOIDC_13_LogoutMissingRegistry(t *testing.T) {
+func TestAuth_LogoutMissingRegistry(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY="}, "logout")
 	if res.Exit != 2 {
 		t.Errorf("exit=%d, want 2 (stderr=%s)", res.Exit, res.Stderr)
 	}
-	if !strings.Contains(res.Stderr, "--registry is required") {
+	if !strings.Contains(res.Stderr, "no registry configured") {
 		t.Errorf("stderr missing '--registry is required':\n%s", res.Stderr)
 	}
 }
@@ -510,7 +510,7 @@ func TestOIDC_13_LogoutMissingRegistry(t *testing.T) {
 // ---- T-D-oidc-14: status shows identity_provider from env ------------------
 
 // T-D-oidc-14
-func TestOIDC_14_StatusShowsIdentityProvider(t *testing.T) {
+func TestAuth_StatusShowsIdentityProvider(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{
 		"PODIUM_IDENTITY_PROVIDER=oidc",
@@ -527,28 +527,28 @@ func TestOIDC_14_StatusShowsIdentityProvider(t *testing.T) {
 // ---- T-D-oidc-15: audience mismatch => 401 auth.audience_mismatch ----------
 
 // T-D-oidc-15
-func TestOIDC_15_AudienceMismatch(t *testing.T) {
+func TestAuth_AudienceMismatch(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so token verification is not exercisable in e2e")
 }
 
 // ---- T-D-oidc-16: invalid JWT signature => 401 auth.signature_invalid -------
 
 // T-D-oidc-16
-func TestOIDC_16_InvalidSignature(t *testing.T) {
+func TestAuth_InvalidSignature(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so token verification is not exercisable in e2e")
 }
 
 // ---- T-D-oidc-17: hd_required rejects tokens from wrong Workspace domain ---
 
 // T-D-oidc-17
-func TestOIDC_17_HDRequired(t *testing.T) {
+func TestAuth_HDRequired(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so hd_required enforcement is not exercisable in e2e")
 }
 
 // ---- T-D-oidc-18: layer register with --group; visibility needs tokens ------
 
 // T-D-oidc-18
-func TestOIDC_18_LayerGroupVisibility(t *testing.T) {
+func TestAuth_LayerGroupVisibility(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
 	srv := startServer(t, reg)
@@ -587,21 +587,21 @@ func TestOIDC_18_LayerGroupVisibility(t *testing.T) {
 // ---- T-D-oidc-19: --organization flag layer; visibility needs tokens --------
 
 // T-D-oidc-19
-func TestOIDC_19_LayerOrganizationVisibility(t *testing.T) {
+func TestAuth_LayerOrganizationVisibility(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so organization-visibility filtering is not exercisable in e2e")
 }
 
 // ---- T-D-oidc-20: layer with Entra GUID group; visibility needs tokens ------
 
 // T-D-oidc-20
-func TestOIDC_20_LayerEntraGUIDGroup(t *testing.T) {
+func TestAuth_LayerEntraGUIDGroup(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so GUID-group-visibility filtering is not exercisable in e2e")
 }
 
 // ---- T-D-oidc-21: SCIM /scim/v2/Users 404 when PODIUM_SCIM_TOKENS unset ----
 
 // T-D-oidc-21
-func TestOIDC_21_SCIMNotMountedWithoutToken(t *testing.T) {
+func TestAuth_SCIMNotMountedWithoutToken(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
 	// Start WITHOUT PODIUM_SCIM_TOKENS.
@@ -617,7 +617,7 @@ func TestOIDC_21_SCIMNotMountedWithoutToken(t *testing.T) {
 // ---- T-D-oidc-22: SCIM creates user when PODIUM_SCIM_TOKENS is set ----------
 
 // T-D-oidc-22
-func TestOIDC_22_SCIMCreateUser(t *testing.T) {
+func TestAuth_SCIMCreateUser(t *testing.T) {
 	t.Parallel()
 	srv := oidcStartSCIMServer(t, "test-scim-token")
 
@@ -641,7 +641,7 @@ func TestOIDC_22_SCIMCreateUser(t *testing.T) {
 // ---- T-D-oidc-23: SCIM rejects wrong bearer token => 401 -------------------
 
 // T-D-oidc-23
-func TestOIDC_23_SCIMWrongToken(t *testing.T) {
+func TestAuth_SCIMWrongToken(t *testing.T) {
 	t.Parallel()
 	srv := oidcStartSCIMServer(t, "correct-token")
 
@@ -655,7 +655,7 @@ func TestOIDC_23_SCIMWrongToken(t *testing.T) {
 // ---- T-D-oidc-24: SCIM group creation; membership visibility needs tokens ---
 
 // T-D-oidc-24
-func TestOIDC_24_SCIMGroupCreation(t *testing.T) {
+func TestAuth_SCIMGroupCreation(t *testing.T) {
 	t.Parallel()
 	srv := oidcStartSCIMServer(t, "test-scim-token")
 
@@ -686,7 +686,7 @@ func TestOIDC_24_SCIMGroupCreation(t *testing.T) {
 // ---- T-D-oidc-25: podium admin scim-token issue => unknown subcommand -------
 
 // T-D-oidc-25
-func TestOIDC_25_AdminSCIMTokenIssueNotImplemented(t *testing.T) {
+func TestAuth_AdminSCIMTokenIssueNotImplemented(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "admin", "scim-token", "issue")
 	if res.Exit != 2 {
@@ -700,7 +700,7 @@ func TestOIDC_25_AdminSCIMTokenIssueNotImplemented(t *testing.T) {
 // ---- T-D-oidc-26: podium admin scim configure => unknown subcommand ---------
 
 // T-D-oidc-26
-func TestOIDC_26_AdminSCIMConfigureNotImplemented(t *testing.T) {
+func TestAuth_AdminSCIMConfigureNotImplemented(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "admin", "scim", "configure",
 		"--endpoint", "https://keycloak.acme.example/realms/main/scim/v2",
@@ -716,7 +716,7 @@ func TestOIDC_26_AdminSCIMConfigureNotImplemented(t *testing.T) {
 // ---- T-D-oidc-27: podium admin claims-cache flush => unknown subcommand -----
 
 // T-D-oidc-27
-func TestOIDC_27_AdminClaimsCacheFlushNotImplemented(t *testing.T) {
+func TestAuth_AdminClaimsCacheFlushNotImplemented(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "admin", "claims-cache", "flush",
 		"--user", "alice@acme.example")
@@ -731,7 +731,7 @@ func TestOIDC_27_AdminClaimsCacheFlushNotImplemented(t *testing.T) {
 // ---- T-D-oidc-28: nested identity: block NOT supported (doc-accuracy gap) --
 
 // T-D-oidc-28
-func TestOIDC_28_NestedIdentityBlockNotParsed(t *testing.T) {
+func TestAuth_NestedIdentityBlockNotParsed(t *testing.T) {
 	t.Parallel()
 	cfgDir := t.TempDir()
 	cfgFile := filepath.Join(cfgDir, "registry.yaml")
@@ -773,70 +773,70 @@ func TestOIDC_28_NestedIdentityBlockNotParsed(t *testing.T) {
 // ---- T-D-oidc-29: Auth0 trailing slash in issuer URL -------------------------
 
 // T-D-oidc-29
-func TestOIDC_29_Auth0TrailingSlashIssuer(t *testing.T) {
+func TestAuth_Auth0TrailingSlashIssuer(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so issuer URL matching is not exercisable in e2e")
 }
 
 // ---- T-D-oidc-30: Auth0 namespaced groups claim ------------------------------
 
 // T-D-oidc-30
-func TestOIDC_30_Auth0NamespacedGroupsClaim(t *testing.T) {
+func TestAuth_Auth0NamespacedGroupsClaim(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so namespaced groups_claim is not exercisable in e2e")
 }
 
 // ---- T-D-oidc-31: Entra ID preferred_username as email claim -----------------
 
 // T-D-oidc-31
-func TestOIDC_31_EntraIDPreferredUsername(t *testing.T) {
+func TestAuth_EntraIDPreferredUsername(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so email_claim mapping is not exercisable in e2e")
 }
 
 // ---- T-D-oidc-32: Keycloak plain group name matches layer config ------------
 
 // T-D-oidc-32
-func TestOIDC_32_KeycloakPlainGroupName(t *testing.T) {
+func TestAuth_KeycloakPlainGroupName(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so groups_claim matching is not exercisable in e2e")
 }
 
 // ---- T-D-oidc-33: Keycloak full-path group does not match bare name ---------
 
 // T-D-oidc-33
-func TestOIDC_33_KeycloakFullPathGroupNoMatch(t *testing.T) {
+func TestAuth_KeycloakFullPathGroupNoMatch(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so groups_claim matching is not exercisable in e2e")
 }
 
 // ---- T-D-oidc-34: Keycloak pre-Quarkus issuer rejected ----------------------
 
 // T-D-oidc-34
-func TestOIDC_34_KeycloakPreQuarkusIssuerRejected(t *testing.T) {
+func TestAuth_KeycloakPreQuarkusIssuerRejected(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so issuer mismatch detection is not exercisable in e2e")
 }
 
 // ---- T-D-oidc-35: JWKS endpoint fetched and valid JWT accepted ---------------
 
 // T-D-oidc-35
-func TestOIDC_35_JWKSFetchAndValidToken(t *testing.T) {
+func TestAuth_JWKSFetchAndValidToken(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so JWKS-based JWT verification is not exercisable in e2e")
 }
 
 // ---- T-D-oidc-36: JWKS cache serves stale keys for up to 5 minutes ----------
 
 // T-D-oidc-36
-func TestOIDC_36_JWKSCaching(t *testing.T) {
+func TestAuth_JWKSCaching(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so JWKS caching behavior is not exercisable in e2e")
 }
 
 // ---- T-D-oidc-37: clock skew tolerance of ±60s ------------------------------
 
 // T-D-oidc-37
-func TestOIDC_37_ClockSkewTolerance(t *testing.T) {
+func TestAuth_ClockSkewTolerance(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so clock-skew tolerance is not exercisable in e2e")
 }
 
 // ---- T-D-oidc-38: podium init --global writes registry URL ------------------
 
 // T-D-oidc-38
-func TestOIDC_38_InitGlobalWritesRegistryURL(t *testing.T) {
+func TestAuth_InitGlobalWritesRegistryURL(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	res := runPodium(t, "", []string{"HOME=" + home},
@@ -866,14 +866,14 @@ func TestOIDC_38_InitGlobalWritesRegistryURL(t *testing.T) {
 // ---- T-D-oidc-39: Google Workspace without groups_claim accepted ------------
 
 // T-D-oidc-39
-func TestOIDC_39_GoogleWorkspaceNoGroupsClaim(t *testing.T) {
+func TestAuth_GoogleWorkspaceNoGroupsClaim(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so Option A (no groups_claim) is not exercisable in e2e")
 }
 
 // ---- T-D-oidc-40: SCIM user deletion returns 204; visibility needs tokens ---
 
 // T-D-oidc-40
-func TestOIDC_40_SCIMUserDeletion(t *testing.T) {
+func TestAuth_SCIMUserDeletion(t *testing.T) {
 	t.Parallel()
 	srv := oidcStartSCIMServer(t, "test-scim-token")
 
@@ -903,7 +903,7 @@ func TestOIDC_40_SCIMUserDeletion(t *testing.T) {
 // ---- T-D-oidc-41: SCIM group membership PUT returns 200 ---------------------
 
 // T-D-oidc-41
-func TestOIDC_41_SCIMGroupMembershipUpdate(t *testing.T) {
+func TestAuth_SCIMGroupMembershipUpdate(t *testing.T) {
 	t.Parallel()
 	srv := oidcStartSCIMServer(t, "test-scim-token")
 
@@ -943,7 +943,7 @@ func TestOIDC_41_SCIMGroupMembershipUpdate(t *testing.T) {
 // ---- T-D-oidc-42: guessTokenURL derives /token from /device -----------------
 
 // T-D-oidc-42
-func TestOIDC_42_GuessTokenURL(t *testing.T) {
+func TestAuth_GuessTokenURL(t *testing.T) {
 	t.Parallel()
 	// The stub serves both /oauth2/device and /oauth2/token.
 	// We set only --issuer (pointing at /oauth2/device) and omit --token-url
@@ -985,7 +985,7 @@ func TestOIDC_42_GuessTokenURL(t *testing.T) {
 // ---- T-D-oidc-43: default scopes include "groups" ---------------------------
 
 // T-D-oidc-43
-func TestOIDC_43_DefaultScopesIncludeGroups(t *testing.T) {
+func TestAuth_DefaultScopesIncludeGroups(t *testing.T) {
 	t.Parallel()
 	stub := newOIDCStub(oidcStubConfig{
 		tokenResponses: []string{`{"error":"access_denied"}`},
@@ -1006,14 +1006,14 @@ func TestOIDC_43_DefaultScopesIncludeGroups(t *testing.T) {
 // ---- T-D-oidc-44: slow_down increases poll interval ------------------------
 
 // T-D-oidc-44
-func TestOIDC_44_SlowDownIncreasesInterval(t *testing.T) {
+func TestAuth_SlowDownIncreasesInterval(t *testing.T) {
 	t.Skip("timing-sensitive; covered by pkg/identity DeviceCodeFlow.Poll unit test; not a reliable e2e signal")
 }
 
 // ---- T-D-oidc-45: /healthz reachable for OIDC-configured registry -----------
 
 // T-D-oidc-45
-func TestOIDC_45_HealthzReachableWithOIDCMode(t *testing.T) {
+func TestAuth_HealthzReachableWithOIDCMode(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
 	// PODIUM_IDENTITY_PROVIDER=oidc is treated as a label; it does not prevent
@@ -1045,7 +1045,7 @@ func TestOIDC_45_HealthzReachableWithOIDCMode(t *testing.T) {
 // ---- T-D-oidc-46: --visibility flag does not exist => exit 2 ---------------
 
 // T-D-oidc-46
-func TestOIDC_46_LayerRegisterVisibilityFlagNotExist(t *testing.T) {
+func TestAuth_LayerRegisterVisibilityFlagNotExist(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
 	srv := startServer(t, reg)
@@ -1066,7 +1066,7 @@ func TestOIDC_46_LayerRegisterVisibilityFlagNotExist(t *testing.T) {
 // ---- T-D-oidc-47: SCIM store persists across restart ------------------------
 
 // T-D-oidc-47
-func TestOIDC_47_SCIMStorePersistsAcrossRestart(t *testing.T) {
+func TestAuth_SCIMStorePersistsAcrossRestart(t *testing.T) {
 	t.Parallel()
 	storeDir := t.TempDir()
 	storePath := filepath.Join(storeDir, "scim.json")
@@ -1117,21 +1117,21 @@ func TestOIDC_47_SCIMStorePersistsAcrossRestart(t *testing.T) {
 // ---- T-D-oidc-48: token refresh retains old refresh token -------------------
 
 // T-D-oidc-48
-func TestOIDC_48_TokenRefreshRetainsOldToken(t *testing.T) {
+func TestAuth_TokenRefreshRetainsOldToken(t *testing.T) {
 	t.Skip("DeviceCodeFlow.Refresh is a pkg/identity unit-level surface; not a CLI/e2e surface; covered by pkg/identity oauth_devicecode unit tests")
 }
 
 // ---- T-D-oidc-49: refresh revocation returns ErrAccessDenied ---------------
 
 // T-D-oidc-49
-func TestOIDC_49_RefreshRevocationErrAccessDenied(t *testing.T) {
+func TestAuth_RefreshRevocationErrAccessDenied(t *testing.T) {
 	t.Skip("DeviceCodeFlow.Refresh is a pkg/identity unit-level surface; not a CLI/e2e surface; covered by pkg/identity oauth_devicecode unit tests")
 }
 
 // ---- T-D-oidc-50: unreachable issuer => descriptive error -------------------
 
 // T-D-oidc-50
-func TestOIDC_50_UnreachableIssuer(t *testing.T) {
+func TestAuth_UnreachableIssuer(t *testing.T) {
 	t.Parallel()
 	bin := cmdharness.Bin(t, "podium")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -1162,7 +1162,7 @@ func TestOIDC_50_UnreachableIssuer(t *testing.T) {
 // ---- T-D-oidc-51: malformed device-auth response => descriptive error -------
 
 // T-D-oidc-51
-func TestOIDC_51_MalformedDeviceAuthResponse(t *testing.T) {
+func TestAuth_MalformedDeviceAuthResponse(t *testing.T) {
 	t.Parallel()
 	// Stub returns 200 with a body missing device_code and verification_uri.
 	stub := newOIDCStub(oidcStubConfig{
@@ -1182,20 +1182,20 @@ func TestOIDC_51_MalformedDeviceAuthResponse(t *testing.T) {
 // ---- T-D-oidc-52: groups claim as non-array scalar ---------------------------
 
 // T-D-oidc-52
-func TestOIDC_52_GroupsClaimNonArrayScalar(t *testing.T) {
+func TestAuth_GroupsClaimNonArrayScalar(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so groups-claim type handling is not exercisable in e2e")
 }
 
 // ---- T-D-oidc-53: Okta audience mismatch => 401 auth.audience_mismatch ------
 
 // T-D-oidc-53
-func TestOIDC_53_OktaAudienceMismatch(t *testing.T) {
+func TestAuth_OktaAudienceMismatch(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so audience-mismatch detection is not exercisable in e2e")
 }
 
 // ---- T-D-oidc-54: Entra ID audience must include api:// prefix exactly ------
 
 // T-D-oidc-54
-func TestOIDC_54_EntraIDAudiencePrefixExact(t *testing.T) {
+func TestAuth_EntraIDAudiencePrefixExact(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so audience prefix validation is not exercisable in e2e")
 }

@@ -794,7 +794,7 @@ func TestReadme_CursorSkill(t *testing.T) {
 func TestReadme_LoginNoRegistry(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY="}, "login")
-	if res.Exit != 2 || !strings.Contains(res.Stderr, "--registry is required") {
+	if res.Exit != 2 || !strings.Contains(res.Stderr, "no registry configured") {
 		t.Errorf("exit=%d stderr=%q", res.Exit, res.Stderr)
 	}
 }
@@ -815,7 +815,7 @@ func TestReadme_LoginNoIssuer(t *testing.T) {
 func TestReadme_LogoutNoRegistry(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY="}, "logout")
-	if res.Exit != 2 || !strings.Contains(res.Stderr, "--registry is required") {
+	if res.Exit != 2 || !strings.Contains(res.Stderr, "no registry configured") {
 		t.Errorf("exit=%d stderr=%q", res.Exit, res.Stderr)
 	}
 }

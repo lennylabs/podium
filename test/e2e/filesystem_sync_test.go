@@ -824,15 +824,17 @@ func TestFilesystemSync_SearchFailsAgainstFilesystemRegistry(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-40
-func TestFilesystemSync_LoginRequiresIssuer(t *testing.T) {
+// T-D-solo-fs-40 — login against a filesystem-path registry is a no-op: a
+// filesystem source needs no authentication (§7.7, F-7.7.5), so login exits 0
+// with a "nothing to do" notice rather than attempting a device-code flow.
+func TestFilesystemSync_LoginNoAuthNoOp(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "login", "--registry", "/tmp/some/filesystem/path")
-	if res.Exit != 2 {
-		t.Errorf("exit=%d, want 2 (stderr=%s)", res.Exit, res.Stderr)
+	if res.Exit != 0 {
+		t.Errorf("exit=%d, want 0 (stderr=%s)", res.Exit, res.Stderr)
 	}
-	if !strings.Contains(res.Stderr, "--issuer or PODIUM_OAUTH_AUTHORIZATION_ENDPOINT is required") {
-		t.Errorf("stderr missing issuer message: %q", res.Stderr)
+	if !strings.Contains(res.Stderr, "no authentication") {
+		t.Errorf("stderr missing 'no authentication' notice: %q", res.Stderr)
 	}
 }
 

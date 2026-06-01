@@ -21,7 +21,7 @@ import (
 // suppressed case is a real regression guard rather than a no-op. The fake
 // launcher shadows the real `open`/`xdg-open`, so no real browser opens in
 // either case.
-func TestOIDC_LoginDoesNotOpenBrowser(t *testing.T) {
+func TestAuthDeviceCode_DoesNotOpenBrowser(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("login uses rundll32 on Windows; the fake-launcher shim is POSIX-only")

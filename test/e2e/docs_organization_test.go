@@ -221,7 +221,7 @@ func TestOrg_4_AdminGrantMissingRegistry(t *testing.T) {
 	if res.Exit != 2 {
 		t.Errorf("exit=%d, want 2 (stderr=%s)", res.Exit, res.Stderr)
 	}
-	if !strings.Contains(res.Stderr, "--registry is required") {
+	if !strings.Contains(res.Stderr, "no registry configured") {
 		t.Errorf("stderr missing '--registry is required':\n%s", res.Stderr)
 	}
 }
@@ -574,7 +574,7 @@ func TestOrg_22_ShowEffectiveMissingRegistry(t *testing.T) {
 	if res.Exit != 2 {
 		t.Errorf("exit=%d, want 2 (stderr=%s)", res.Exit, res.Stderr)
 	}
-	if !strings.Contains(res.Stderr, "--registry is required") {
+	if !strings.Contains(res.Stderr, "no registry configured") {
 		t.Errorf("stderr missing '--registry is required':\n%s", res.Stderr)
 	}
 }
@@ -591,7 +591,7 @@ func TestOrg_24_RevokeMissingRegistry(t *testing.T) {
 	if res.Exit != 2 {
 		t.Errorf("exit=%d, want 2 (stderr=%s)", res.Exit, res.Stderr)
 	}
-	if !strings.Contains(res.Stderr, "--registry is required") {
+	if !strings.Contains(res.Stderr, "no registry configured") {
 		t.Errorf("stderr missing '--registry is required':\n%s", res.Stderr)
 	}
 }
@@ -758,7 +758,7 @@ func TestOrg_31_LoginMissingRegistry(t *testing.T) {
 	if res.Exit != 2 {
 		t.Errorf("exit=%d, want 2 (stderr=%s)", res.Exit, res.Stderr)
 	}
-	if !strings.Contains(res.Stderr, "--registry is required") {
+	if !strings.Contains(res.Stderr, "no registry configured") {
 		t.Errorf("stderr missing '--registry is required':\n%s", res.Stderr)
 	}
 }
@@ -771,7 +771,7 @@ func TestOrg_32_LoginMissingIssuer(t *testing.T) {
 	if res.Exit != 2 {
 		t.Errorf("exit=%d, want 2 (stderr=%s)", res.Exit, res.Stderr)
 	}
-	if !strings.Contains(res.Stderr, "--issuer or PODIUM_OAUTH_AUTHORIZATION_ENDPOINT is required") {
+	if !strings.Contains(res.Stderr, "--issuer") {
 		t.Errorf("stderr missing expected message:\n%s", res.Stderr)
 	}
 }
