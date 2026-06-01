@@ -682,7 +682,12 @@ func (s *Server) handleSearchArtifacts(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := SearchResponse{Query: res.Query, TotalMatched: res.TotalMatched}
 	for _, a := range res.Results {
-		resp.Results = append(resp.Results, descriptorOf(a))
+		d := descriptorOf(a)
+		// spec: §3.2 / §5 — search_artifacts returns descriptors only; the
+		// manifest body stays at the registry until load_artifact. Clear the
+		// frontmatter so the body never rides along in a search descriptor.
+		d.Frontmatter = ""
+		resp.Results = append(resp.Results, d)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

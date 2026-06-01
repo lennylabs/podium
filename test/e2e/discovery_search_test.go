@@ -91,7 +91,7 @@ func brReadOrEmpty(path string) string {
 // ---- load_domain ------------------------------------------------------------
 
 // T-D-browsing-1 — load_domain() with no path returns top-level subdomains.
-func TestBrowsing_LoadDomainRoot(t *testing.T) {
+func TestSearch_LoadDomainRoot(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/pay-invoice/ARTIFACT.md":   contextArtifact("pay invoice"),
@@ -112,7 +112,7 @@ func TestBrowsing_LoadDomainRoot(t *testing.T) {
 }
 
 // T-D-browsing-2 — load_domain("finance") returns finance subdomains.
-func TestBrowsing_LoadDomainFinance(t *testing.T) {
+func TestSearch_LoadDomainFinance(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md":                        contextArtifact("pay"),
@@ -131,7 +131,7 @@ func TestBrowsing_LoadDomainFinance(t *testing.T) {
 }
 
 // T-D-browsing-3 — load_domain("finance/close-reporting") returns its children.
-func TestBrowsing_LoadDomainThirdLevel(t *testing.T) {
+func TestSearch_LoadDomainThirdLevel(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/close-reporting/run-variance-analysis/ARTIFACT.md": contextArtifact("variance"),
@@ -151,7 +151,7 @@ func TestBrowsing_LoadDomainThirdLevel(t *testing.T) {
 }
 
 // T-D-browsing-4 — load_domain response carries descriptors, not manifest bodies.
-func TestBrowsing_LoadDomainNoBodies(t *testing.T) {
+func TestSearch_LoadDomainNoBodies(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/report/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: A report.\n---\n\nLong multi-line\nprose body here.\n",
@@ -167,7 +167,7 @@ func TestBrowsing_LoadDomainNoBodies(t *testing.T) {
 
 // T-D-browsing-5 — a depth override expands the rendered subtree: depth=2
 // nests a grandchild that depth=1 omits (§4.5.5). spec: §4.5.5 (F-4.5.7)
-func TestBrowsing_LoadDomainDepth(t *testing.T) {
+func TestSearch_LoadDomainDepth(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/direct/ARTIFACT.md":   contextArtifact("direct"),
@@ -193,7 +193,7 @@ func TestBrowsing_LoadDomainDepth(t *testing.T) {
 
 // T-D-browsing-6 — the rendering note describes a notable reduction driven by
 // target_response_tokens (§4.5.5). spec: §4.5.5 (F-4.5.7)
-func TestBrowsing_LoadDomainNote(t *testing.T) {
+func TestSearch_LoadDomainNote(t *testing.T) {
 	t.Parallel()
 	files := map[string]string{
 		"finance/DOMAIN.md": "---\ndescription: Finance\ndiscovery:\n  target_response_tokens: 20\n---\n\n# Finance\n",
@@ -211,7 +211,7 @@ func TestBrowsing_LoadDomainNote(t *testing.T) {
 
 // T-D-browsing-7 — load_domain returns DOMAIN.md keywords verbatim (§4.5.5).
 // spec: §4.5.5 (F-4.5.3)
-func TestBrowsing_LoadDomainKeywords(t *testing.T) {
+func TestSearch_LoadDomainKeywords(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/DOMAIN.md":       "---\ndescription: Finance\ndiscovery:\n  keywords:\n    - reconciliation\n    - 1099\n---\n\n# Finance\n",
@@ -243,7 +243,7 @@ func brDomainPaths(result map[string]any) []string {
 // T-D-browsing-8 — search_domains matches a domain by a DOMAIN.md keyword
 // that does not appear in its path or description (§3.2 Layer 1, hybrid
 // retrieval over projections). spec: §3.2 / §4.7 (F-3.2.1)
-func TestBrowsing_SearchDomainsSemantic(t *testing.T) {
+func TestSearch_SearchDomainsSemantic(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/DOMAIN.md":               "---\ndescription: \"Accounts payable operations\"\ndiscovery:\n  keywords:\n    - reconciliation\n---\n",
@@ -258,7 +258,7 @@ func TestBrowsing_SearchDomainsSemantic(t *testing.T) {
 
 // T-D-browsing-9 — search_domains scope constrains results to a path
 // prefix. spec: §5 (F-3.2.1)
-func TestBrowsing_SearchDomainsScope(t *testing.T) {
+func TestSearch_SearchDomainsScope(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/DOMAIN.md":     "---\ndescription: AP\n---\n",
@@ -280,7 +280,7 @@ func TestBrowsing_SearchDomainsScope(t *testing.T) {
 
 // T-D-browsing-10 — search_domains top_k caps the result count. spec: §5
 // (F-3.2.1)
-func TestBrowsing_SearchDomainsTopK(t *testing.T) {
+func TestSearch_SearchDomainsTopK(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"alpha/DOMAIN.md":       "---\ndescription: \"shared topic\"\n---\n",
@@ -300,7 +300,7 @@ func TestBrowsing_SearchDomainsTopK(t *testing.T) {
 // T-D-browsing-11 — a domain without a DOMAIN.md has no projection and is
 // not indexed in search_domains; it stays reachable via load_domain
 // enumeration only. spec: §4.5.1 / §4.7 (F-3.2.1)
-func TestBrowsing_SearchDomainsRequiresDomainMD(t *testing.T) {
+func TestSearch_SearchDomainsRequiresDomainMD(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/DOMAIN.md":               "---\ndescription: \"Accounts payable\"\n---\n",
@@ -323,7 +323,7 @@ func TestBrowsing_SearchDomainsRequiresDomainMD(t *testing.T) {
 // ---- search_artifacts -------------------------------------------------------
 
 // T-D-browsing-12 — search_artifacts with query returns ranked descriptors.
-func TestBrowsing_SearchArtifactsQuery(t *testing.T) {
+func TestSearch_SearchArtifactsQuery(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/close-reporting/run-variance-analysis/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\n---\n\n<!-- body -->\n",
@@ -344,7 +344,7 @@ func TestBrowsing_SearchArtifactsQuery(t *testing.T) {
 }
 
 // T-D-browsing-13 — search_artifacts browse mode (scope only).
-func TestBrowsing_SearchArtifactsBrowse(t *testing.T) {
+func TestSearch_SearchArtifactsBrowse(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md":       contextArtifact("pay invoice"),
@@ -364,7 +364,7 @@ func TestBrowsing_SearchArtifactsBrowse(t *testing.T) {
 }
 
 // T-D-browsing-14 — search_artifacts with query, scope, and type.
-func TestBrowsing_SearchArtifactsQueryScopeType(t *testing.T) {
+func TestSearch_SearchArtifactsQueryScopeType(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\n---\n\n<!-- body -->\n",
@@ -384,7 +384,7 @@ func TestBrowsing_SearchArtifactsQueryScopeType(t *testing.T) {
 }
 
 // T-D-browsing-15 — search_artifacts type filter.
-func TestBrowsing_SearchArtifactsType(t *testing.T) {
+func TestSearch_SearchArtifactsType(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"sk/ARTIFACT.md":  greetSkillArtifact,
@@ -402,7 +402,7 @@ func TestBrowsing_SearchArtifactsType(t *testing.T) {
 }
 
 // T-D-browsing-16 — search_artifacts tags filter.
-func TestBrowsing_SearchArtifactsTags(t *testing.T) {
+func TestSearch_SearchArtifactsTags(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"a/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: A.\ntags: [finance, variance]\n---\n\nbody\n",
@@ -422,7 +422,7 @@ func TestBrowsing_SearchArtifactsTags(t *testing.T) {
 }
 
 // T-D-browsing-17 — search_artifacts top_k default 10 / max 50.
-func TestBrowsing_SearchArtifactsTopK(t *testing.T) {
+func TestSearch_SearchArtifactsTopK(t *testing.T) {
 	t.Parallel()
 	entries := map[string]string{}
 	for i := 0; i < 15; i++ {
@@ -441,7 +441,7 @@ func TestBrowsing_SearchArtifactsTopK(t *testing.T) {
 }
 
 // T-D-browsing-18 — total_matched reflects full count when capped.
-func TestBrowsing_SearchArtifactsTotalMatched(t *testing.T) {
+func TestSearch_SearchArtifactsTotalMatched(t *testing.T) {
 	t.Parallel()
 	entries := map[string]string{}
 	for i := 0; i < 12; i++ {
@@ -459,7 +459,7 @@ func TestBrowsing_SearchArtifactsTotalMatched(t *testing.T) {
 }
 
 // T-D-browsing-19 — search_artifacts returns descriptors only.
-func TestBrowsing_SearchArtifactsNoBodies(t *testing.T) {
+func TestSearch_SearchArtifactsNoBodies(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/report/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: A report.\n---\n\nVery long prose body content here.\n",
@@ -474,13 +474,13 @@ func TestBrowsing_SearchArtifactsNoBodies(t *testing.T) {
 }
 
 // T-D-browsing-20 — mcp-server artifacts filtered from search via the MCP bridge.
-func TestBrowsing_McpServerFilteredFromSearch(t *testing.T) {
+func TestSearch_McpServerFilteredFromSearch(t *testing.T) {
 	t.Parallel()
 	t.Skip("spec §5: mcp-server artifacts should be filtered from MCP-bridge results; the bridge does not filter them and no BUILD-GAPS finding is filed")
 }
 
 // T-D-browsing-21 — mcp-server artifacts filtered from load via the MCP bridge.
-func TestBrowsing_McpServerFilteredFromLoad(t *testing.T) {
+func TestSearch_McpServerFilteredFromLoad(t *testing.T) {
 	t.Parallel()
 	t.Skip("spec §5: mcp-server artifacts should be blocked from load_artifact via the MCP bridge; the bridge does not block them and no BUILD-GAPS finding is filed")
 }
@@ -488,7 +488,7 @@ func TestBrowsing_McpServerFilteredFromLoad(t *testing.T) {
 // ---- load_artifact ----------------------------------------------------------
 
 // T-D-browsing-22 — load_artifact returns the manifest body inline and materializes.
-func TestBrowsing_LoadArtifactInline(t *testing.T) {
+func TestSearch_LoadArtifactInline(t *testing.T) {
 	t.Parallel()
 	id := "finance/close-reporting/run-variance-analysis"
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -510,19 +510,19 @@ func TestBrowsing_LoadArtifactInline(t *testing.T) {
 }
 
 // T-D-browsing-23 — load_artifact with version parameter (multi-version).
-func TestBrowsing_LoadArtifactVersion(t *testing.T) {
+func TestSearch_LoadArtifactVersion(t *testing.T) {
 	t.Parallel()
 	t.Skip("requires two ingested versions of one id; a filesystem-source layer holds a single version per path, so version selection is not expressible here")
 }
 
 // T-D-browsing-24 — load_artifact default resolves latest non-deprecated.
-func TestBrowsing_LoadArtifactLatestSkipsDeprecated(t *testing.T) {
+func TestSearch_LoadArtifactLatestSkipsDeprecated(t *testing.T) {
 	t.Parallel()
 	t.Skip("requires two ingested versions (one deprecated) of one id; not expressible in a filesystem-source layer (covered by pkg/registry/core/latest_skips_deprecated_test.go)")
 }
 
 // T-D-browsing-25 — load_artifact per-call harness override switches adapter.
-func TestBrowsing_LoadArtifactHarnessOverride(t *testing.T) {
+func TestSearch_LoadArtifactHarnessOverride(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"ts-style/ARTIFACT.md": chRule("always", ""),
@@ -538,7 +538,7 @@ func TestBrowsing_LoadArtifactHarnessOverride(t *testing.T) {
 }
 
 // T-D-browsing-26 — load_artifact harness=none produces canonical layout.
-func TestBrowsing_LoadArtifactHarnessNone(t *testing.T) {
+func TestSearch_LoadArtifactHarnessNone(t *testing.T) {
 	t.Parallel()
 	id := "finance/ap/pay-invoice"
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -558,7 +558,7 @@ func TestBrowsing_LoadArtifactHarnessNone(t *testing.T) {
 
 // T-D-browsing-27 — load_artifact materializes bundled resources atomically.
 // spec: §7.2.
-func TestBrowsing_LoadArtifactResourcesAtomic(t *testing.T) {
+func TestSearch_LoadArtifactResourcesAtomic(t *testing.T) {
 	t.Parallel()
 	id := "finance/close-reporting/run-variance-analysis"
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -578,7 +578,7 @@ func TestBrowsing_LoadArtifactResourcesAtomic(t *testing.T) {
 }
 
 // T-D-browsing-28 — only load_artifact writes to the host filesystem.
-func TestBrowsing_OnlyLoadArtifactWrites(t *testing.T) {
+func TestSearch_OnlyLoadArtifactWrites(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay"),
@@ -601,7 +601,7 @@ func TestBrowsing_OnlyLoadArtifactWrites(t *testing.T) {
 }
 
 // T-D-browsing-29 — full discovery flow: cold start, drill, browse, load.
-func TestBrowsing_DiscoveryFlow(t *testing.T) {
+func TestSearch_DiscoveryFlow(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md":                        greetSkillArtifact,
@@ -638,7 +638,7 @@ func TestBrowsing_DiscoveryFlow(t *testing.T) {
 // T-D-browsing-30 — discovery flow cold start via search_domains: a
 // topical query finds a domain neighborhood, then the agent drills in
 // with load_domain. spec: §3.4 / §3.2 (F-3.2.1)
-func TestBrowsing_DiscoveryFlowSearchDomains(t *testing.T) {
+func TestSearch_DiscoveryFlowSearchDomains(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/DOMAIN.md":               "---\ndescription: \"Accounts payable: money out to vendors\"\ndiscovery:\n  keywords:\n    - invoice\n---\n",
@@ -661,7 +661,7 @@ func TestBrowsing_DiscoveryFlowSearchDomains(t *testing.T) {
 // ---- audit ------------------------------------------------------------------
 
 // T-D-browsing-31 — domain.loaded audit event.
-func TestBrowsing_AuditDomainLoaded(t *testing.T) {
+func TestSearch_AuditDomainLoaded(t *testing.T) {
 	t.Parallel()
 	srv, audit := brStartAuditServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
 	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance", nil)
@@ -671,7 +671,7 @@ func TestBrowsing_AuditDomainLoaded(t *testing.T) {
 }
 
 // T-D-browsing-32 — domains.searched audit event.
-func TestBrowsing_AuditDomainsSearched(t *testing.T) {
+func TestSearch_AuditDomainsSearched(t *testing.T) {
 	t.Parallel()
 	srv, audit := brStartAuditServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
 	getJSON(t, srv.BaseURL+"/v1/search_domains?query=vendor+payments", nil)
@@ -681,7 +681,7 @@ func TestBrowsing_AuditDomainsSearched(t *testing.T) {
 }
 
 // T-D-browsing-33 — artifacts.searched audit event.
-func TestBrowsing_AuditArtifactsSearched(t *testing.T) {
+func TestSearch_AuditArtifactsSearched(t *testing.T) {
 	t.Parallel()
 	srv, audit := brStartAuditServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("invoice approval")}))
 	getJSON(t, srv.BaseURL+"/v1/search_artifacts?query=invoice+approval", nil)
@@ -691,7 +691,7 @@ func TestBrowsing_AuditArtifactsSearched(t *testing.T) {
 }
 
 // T-D-browsing-34 — artifact.loaded audit event.
-func TestBrowsing_AuditArtifactLoaded(t *testing.T) {
+func TestSearch_AuditArtifactLoaded(t *testing.T) {
 	t.Parallel()
 	srv, audit := brStartAuditServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
 	getJSON(t, srv.BaseURL+"/v1/load_artifact?id=finance/x", nil)
@@ -703,7 +703,7 @@ func TestBrowsing_AuditArtifactLoaded(t *testing.T) {
 // T-D-browsing-35 — search query PII scrubbed before audit. spec: §8.2
 // (F-8.2.1): free-text queries are regex-scrubbed (SSN, credit-card,
 // email, phone) before being written to audit. Default-on.
-func TestBrowsing_AuditPIIScrubbed(t *testing.T) {
+func TestSearch_AuditPIIScrubbed(t *testing.T) {
 	t.Parallel()
 	srv, auditLog := brStartAuditServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
 	// A query carrying an SSN and an email address.
@@ -724,7 +724,7 @@ func TestBrowsing_AuditPIIScrubbed(t *testing.T) {
 
 // T-D-browsing-35b — PODIUM_PII_REDACTION=false writes the raw query.
 // spec: §8.2 (F-8.2.2) the scrub is configurable and default-on.
-func TestBrowsing_AuditPIIScrubDisabled(t *testing.T) {
+func TestSearch_AuditPIIScrubDisabled(t *testing.T) {
 	t.Parallel()
 	auditPath := filepath.Join(t.TempDir(), "audit.log")
 	srv := startServerArgs(t, []string{
@@ -742,19 +742,19 @@ func TestBrowsing_AuditPIIScrubDisabled(t *testing.T) {
 
 // T-D-browsing-36..40 — p99 SLO targets. These are benchmark gates that belong
 // in test/bench; asserting wall-clock p99 from an e2e test is timing-flaky.
-func TestBrowsing_SLOLoadDomain(t *testing.T) {
+func TestSearch_SLOLoadDomain(t *testing.T) {
 	t.Skip("SLO/benchmark gate (load_domain p99 < 200ms): belongs in test/bench, not asserted in e2e to avoid timing flakiness")
 }
-func TestBrowsing_SLOSearchDomains(t *testing.T) {
+func TestSearch_SLOSearchDomains(t *testing.T) {
 	t.Skip("SLO/benchmark gate (search_domains p99 < 200ms): belongs in test/bench, not asserted in e2e")
 }
-func TestBrowsing_SLOSearchArtifacts(t *testing.T) {
+func TestSearch_SLOSearchArtifacts(t *testing.T) {
 	t.Skip("SLO/benchmark gate (search_artifacts p99 < 200ms): belongs in test/bench, not asserted in e2e")
 }
-func TestBrowsing_SLOLoadArtifactManifest(t *testing.T) {
+func TestSearch_SLOLoadArtifactManifest(t *testing.T) {
 	t.Skip("SLO/benchmark gate (load_artifact manifest p99 < 500ms): belongs in test/bench, not asserted in e2e")
 }
-func TestBrowsing_SLOLoadArtifactResources(t *testing.T) {
+func TestSearch_SLOLoadArtifactResources(t *testing.T) {
 	t.Skip("SLO/benchmark gate (load_artifact + resources p99 < 2s): belongs in test/bench, not asserted in e2e")
 }
 
@@ -762,7 +762,7 @@ func TestBrowsing_SLOLoadArtifactResources(t *testing.T) {
 
 // T-D-browsing-41 — a search_domains descriptor carries path, name,
 // description, keywords, and score (§3.2 Layer 1). spec: §3.2 (F-3.2.1)
-func TestBrowsing_SearchDomainsDescriptorFields(t *testing.T) {
+func TestSearch_SearchDomainsDescriptorFields(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/DOMAIN.md":               "---\ndescription: \"Accounts payable operations\"\ndiscovery:\n  keywords:\n    - reconciliation\n    - remittance\n---\n",
@@ -789,7 +789,7 @@ func TestBrowsing_SearchDomainsDescriptorFields(t *testing.T) {
 }
 
 // T-D-browsing-42 — search_domains returns no subdomain list or notable.
-func TestBrowsing_SearchDomainsNoSubtree(t *testing.T) {
+func TestSearch_SearchDomainsNoSubtree(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay"),
@@ -810,7 +810,7 @@ func TestBrowsing_SearchDomainsNoSubtree(t *testing.T) {
 // "offline" status, not an error. The "Registry offline" row requires the
 // fresh search meta-tool to "return explicit 'offline' status" so the host
 // can distinguish a transient outage from a request rejection (F-6.9.1).
-func TestBrowsing_OfflineSearchArtifacts(t *testing.T) {
+func TestSearch_OfflineSearchArtifacts(t *testing.T) {
 	t.Parallel()
 	res := mcpExec(t, []string{"PODIUM_REGISTRY=http://127.0.0.1:1", "PODIUM_CACHE_MODE=always-revalidate", "PODIUM_CACHE_DIR=" + t.TempDir()},
 		toolCall(1, "search_artifacts", map[string]any{"query": "anything"}))
@@ -828,7 +828,7 @@ func TestBrowsing_OfflineSearchArtifacts(t *testing.T) {
 
 // T-D-browsing-44 — registry offline: load_domain returns the §6.9 "offline"
 // status, not an error (F-6.9.1).
-func TestBrowsing_OfflineLoadDomain(t *testing.T) {
+func TestSearch_OfflineLoadDomain(t *testing.T) {
 	t.Parallel()
 	res := mcpExec(t, []string{"PODIUM_REGISTRY=http://127.0.0.1:1", "PODIUM_CACHE_MODE=always-revalidate", "PODIUM_CACHE_DIR=" + t.TempDir()},
 		toolCall(1, "load_domain", map[string]any{}))
@@ -842,19 +842,19 @@ func TestBrowsing_OfflineLoadDomain(t *testing.T) {
 }
 
 // T-D-browsing-45 — search_artifacts forwards session_id to the registry.
-func TestBrowsing_SearchArtifactsSessionID(t *testing.T) {
+func TestSearch_SearchArtifactsSessionID(t *testing.T) {
 	t.Parallel()
 	t.Skip("gap: the MCP bridge does not forward session_id to the registry, and the HTTP search_artifacts endpoint has no session_id parameter (no BUILD-GAPS finding filed)")
 }
 
 // T-D-browsing-46 — load_artifact session_id pins latest for the session.
-func TestBrowsing_LoadArtifactSessionPin(t *testing.T) {
+func TestSearch_LoadArtifactSessionPin(t *testing.T) {
 	t.Parallel()
 	t.Skip("not expressible: the HTTP load_artifact endpoint has no session_id parameter, and new versions cannot be ingested into a live standalone server mid-test")
 }
 
 // T-D-browsing-47 — load_artifact for a nonexistent artifact returns a structured error.
-func TestBrowsing_LoadArtifactNotFound(t *testing.T) {
+func TestSearch_LoadArtifactNotFound(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
 	mat := t.TempDir()
@@ -868,7 +868,7 @@ func TestBrowsing_LoadArtifactNotFound(t *testing.T) {
 }
 
 // T-D-browsing-48 — load_artifact for a nonexistent version returns an error.
-func TestBrowsing_LoadArtifactBadVersion(t *testing.T) {
+func TestSearch_LoadArtifactBadVersion(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay"),
@@ -884,7 +884,7 @@ func TestBrowsing_LoadArtifactBadVersion(t *testing.T) {
 
 // T-D-browsing-49 — tools/list returns the meta-tools plus the §13.9
 // health tool, each with a description.
-func TestBrowsing_ToolsList(t *testing.T) {
+func TestSearch_ToolsList(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
 	res := mcpExec(t, brEnv(srv.BaseURL), rpcReq{ID: 1, Method: "tools/list", Params: map[string]any{}})
@@ -906,7 +906,7 @@ func TestBrowsing_ToolsList(t *testing.T) {
 }
 
 // T-D-browsing-50 — search_artifacts on an empty registry returns empty results.
-func TestBrowsing_SearchArtifactsEmptyRegistry(t *testing.T) {
+func TestSearch_SearchArtifactsEmptyRegistry(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{}))
 	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "search_artifacts", map[string]any{"query": "anything"}))
@@ -922,7 +922,7 @@ func TestBrowsing_SearchArtifactsEmptyRegistry(t *testing.T) {
 // T-D-browsing-51 — load_domain on a path with no content. The doc describes a
 // graceful empty result, but the implementation returns domain.not_found for a
 // path that resolves to no visible artifacts; this asserts the actual behavior.
-func TestBrowsing_LoadDomainEmptyPath(t *testing.T) {
+func TestSearch_LoadDomainEmptyPath(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
 	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "load_domain", map[string]any{"path": "empty/domain"}))
@@ -932,7 +932,7 @@ func TestBrowsing_LoadDomainEmptyPath(t *testing.T) {
 }
 
 // T-D-browsing-52 — browse mode returns all non-filtered artifact types.
-func TestBrowsing_BrowseAllTypes(t *testing.T) {
+func TestSearch_BrowseAllTypes(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"tools/sk/ARTIFACT.md":  greetSkillArtifact,
@@ -950,7 +950,7 @@ func TestBrowsing_BrowseAllTypes(t *testing.T) {
 }
 
 // T-D-browsing-53 — authoring quality: specific description scores higher.
-func TestBrowsing_DescriptionScoring(t *testing.T) {
+func TestSearch_DescriptionScoring(t *testing.T) {
 	t.Parallel()
 	t.Skip("ranking-quality assertion is embedding/scoring-dependent and not a stable e2e gate")
 }
@@ -959,7 +959,7 @@ func TestBrowsing_DescriptionScoring(t *testing.T) {
 // projection) does not surface in search_domains but stays reachable via
 // load_domain enumeration; a keyworded sibling is found by query.
 // spec: §4.5.1 / §4.7 (F-3.2.1)
-func TestBrowsing_DomainWithoutKeywords(t *testing.T) {
+func TestSearch_DomainWithoutKeywords(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/DOMAIN.md":           "---\ndescription: AP\ndiscovery:\n  keywords:\n    - reconciliation\n---\n",
@@ -982,7 +982,7 @@ func TestBrowsing_DomainWithoutKeywords(t *testing.T) {
 }
 
 // T-D-browsing-55 — authoring quality: when_to_use improves retrieval signal.
-func TestBrowsing_WhenToUseSignal(t *testing.T) {
+func TestSearch_WhenToUseSignal(t *testing.T) {
 	t.Parallel()
 	t.Skip("ranking-quality assertion is embedding/scoring-dependent and not a stable e2e gate")
 }
@@ -990,7 +990,7 @@ func TestBrowsing_WhenToUseSignal(t *testing.T) {
 // ---- HTTP endpoint structure ------------------------------------------------
 
 // T-D-browsing-56 — GET /v1/load_domain returns the documented structure.
-func TestBrowsing_HTTPLoadDomain(t *testing.T) {
+func TestSearch_HTTPLoadDomain(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
 	var resp struct {
@@ -1010,7 +1010,7 @@ func TestBrowsing_HTTPLoadDomain(t *testing.T) {
 }
 
 // T-D-browsing-57 — GET /v1/search_artifacts returns the documented structure.
-func TestBrowsing_HTTPSearchArtifacts(t *testing.T) {
+func TestSearch_HTTPSearchArtifacts(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/va/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\n---\n\n<!-- body -->\n",
@@ -1035,7 +1035,7 @@ func TestBrowsing_HTTPSearchArtifacts(t *testing.T) {
 // structure. The finance domain carries a DOMAIN.md so it has a
 // projection to retrieve over (§4.7); without one a domain is reachable
 // by load_domain enumeration only.
-func TestBrowsing_HTTPSearchDomains(t *testing.T) {
+func TestSearch_HTTPSearchDomains(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/DOMAIN.md":     "---\ndescription: \"The finance function\"\n---\n",
@@ -1054,7 +1054,7 @@ func TestBrowsing_HTTPSearchDomains(t *testing.T) {
 }
 
 // T-D-browsing-59 — GET /v1/load_artifact returns the documented structure.
-func TestBrowsing_HTTPLoadArtifact(t *testing.T) {
+func TestSearch_HTTPLoadArtifact(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay"),
@@ -1071,7 +1071,7 @@ func TestBrowsing_HTTPLoadArtifact(t *testing.T) {
 }
 
 // T-D-browsing-60 — GET /v1/load_artifact with missing id returns 400.
-func TestBrowsing_HTTPLoadArtifactMissingID(t *testing.T) {
+func TestSearch_HTTPLoadArtifactMissingID(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
 	st, body := getRaw(t, srv.BaseURL+"/v1/load_artifact")
