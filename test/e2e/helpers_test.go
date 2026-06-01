@@ -51,7 +51,18 @@ func mergeEnv(extra ...string) []string {
 		if i := strings.IndexByte(kv, '='); i > 0 && override[kv[:i]] {
 			continue
 		}
+		// Never inherit the developer's PODIUM_NO_BROWSER; the harness pins it
+		// below so a device-code login test can never launch the system
+		// browser (the login command auto-opens the verification URL).
+		if strings.HasPrefix(kv, "PODIUM_NO_BROWSER=") {
+			continue
+		}
 		out = append(out, kv)
+	}
+	// Suppress the login browser auto-open for every CLI subprocess unless the
+	// caller set PODIUM_NO_BROWSER explicitly.
+	if !override["PODIUM_NO_BROWSER"] {
+		out = append(out, "PODIUM_NO_BROWSER=1")
 	}
 	return append(out, extra...)
 }

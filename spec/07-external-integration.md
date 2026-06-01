@@ -654,7 +654,7 @@ podium login --no-browser                       # don't auto-open the verificati
 podium logout                                   # clears the cached token from the OS keychain
 ```
 
-Behavior: resolves the registry from the merged config (or `--registry` flag), prints the verification URL and code to stderr, attempts to open the URL in the system browser, polls the IdP's token endpoint until the user completes the flow or a 10-minute timeout elapses, caches the access + refresh tokens in the OS keychain (per `oauth-device-code` in §6.3), and prints the resolved identity (`sub`, `email`, OIDC groups) on success. Exits non-zero on timeout, denial, or `auth.untrusted_runtime`.
+Behavior: resolves the registry from the merged config (or `--registry` flag), prints the verification URL and code to stderr, attempts to open the URL in the system browser, polls the IdP's token endpoint until the user completes the flow or a 10-minute timeout elapses, caches the access + refresh tokens in the OS keychain (per `oauth-device-code` in §6.3), and prints the resolved identity (`sub`, `email`, OIDC groups) on success. Exits non-zero on timeout, denial, or `auth.untrusted_runtime`. The `--no-browser` flag and the `PODIUM_NO_BROWSER` environment variable (truthy: `1`, `true`, `yes`, or `on`) both suppress the browser auto-open for headless and CI environments.
 
 **Multi-endpoint behavior.** Tokens cache in the OS keychain keyed by registry URL. A developer logged into both `https://podium.acme.com` and `https://podium-finance.acme.com` keeps both tokens simultaneously; switching projects (or running `podium login` in any context) authenticates against whichever registry the merged config resolves to. No `podium logout` between project switches required.
 

@@ -104,7 +104,10 @@ func loginCmd(args []string) int {
 	if auth.VerificationURLComplete != "" {
 		fmt.Fprintln(os.Stderr, "Direct link:", auth.VerificationURLComplete)
 	}
-	if !*noBrowser {
+	// Auto-open the verification URL unless suppressed. PODIUM_NO_BROWSER is
+	// the env-var form of --no-browser, for headless and CI environments (and
+	// the test suite) where launching the system browser is unwanted.
+	if !*noBrowser && !browserSuppressed() {
 		openBrowser(target)
 	}
 
@@ -190,6 +193,18 @@ func discoverIdP(registry string, client *http.Client) (deviceURL, tokenURL stri
 		return "", "", fmt.Errorf("metadata has no device_authorization_endpoint")
 	}
 	return meta.DeviceAuthorizationEndpoint, meta.TokenEndpoint, nil
+}
+
+// browserSuppressed reports whether PODIUM_NO_BROWSER disables the login
+// browser auto-open. It accepts the usual truthy values (true/1/yes/on) so a
+// headless or CI environment, or the test suite, can suppress the launch
+// without passing --no-browser to every invocation.
+func browserSuppressed() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("PODIUM_NO_BROWSER"))) {
+	case "true", "1", "yes", "on":
+		return true
+	}
+	return false
 }
 
 // openBrowser best-effort opens url in the system browser. It never

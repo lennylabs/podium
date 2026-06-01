@@ -107,7 +107,7 @@ podium login [--registry <url>] [--no-browser]
 podium logout
 ```
 
-`--no-browser` skips auto-opening the verification URL. Tokens cache in the OS keychain keyed by registry URL; multiple registries can be authenticated simultaneously.
+`--no-browser` skips auto-opening the verification URL. Setting `PODIUM_NO_BROWSER` to a truthy value (`1`, `true`, `yes`, or `on`) has the same effect for headless and CI environments. Tokens cache in the OS keychain keyed by registry URL; multiple registries can be authenticated simultaneously.
 
 `podium login` is a no-op when the resolved registry is a filesystem path or a `--standalone` server (no auth in either).
 

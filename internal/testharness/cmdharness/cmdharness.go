@@ -37,7 +37,10 @@ func Run(t testing.TB, binary, cwd string, args ...string) Result {
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
-	cmd.Env = append(os.Environ(), "PODIUM_NO_AUTOSTANDALONE=1")
+	// PODIUM_NO_BROWSER suppresses the login command's verification-URL
+	// browser auto-open so a device-code test never launches the system
+	// browser; PODIUM_NO_AUTOSTANDALONE keeps a CLI path from spawning a daemon.
+	cmd.Env = append(os.Environ(), "PODIUM_NO_AUTOSTANDALONE=1", "PODIUM_NO_BROWSER=1")
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
