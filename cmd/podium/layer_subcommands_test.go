@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // --- --help and validation paths -------------------------------------------
@@ -107,6 +108,40 @@ func TestLayerWatch_BadIntervalExits2(t *testing.T) {
 			t.Errorf("layerWatch(bad interval) = %d, want 2", code)
 		}
 	})
+}
+
+// spec §7.3.1 / §14.10 (F-14.10.5): --interval takes a Go-style duration, so
+// the documented `--interval 1h` parses. A bare integer (the old
+// seconds-only form) is rejected by flag parsing with exit 2.
+func TestLayerWatch_IntervalIsDuration(t *testing.T) {
+	t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:1")
+
+	// A bare integer is no longer a valid interval.
+	withStderr(t, func() {
+		if code := layerWatch([]string{"--id", "x", "--interval", "3600"}); code != 2 {
+			t.Errorf("layerWatch(--interval 3600) = %d, want 2 (bare int rejected)", code)
+		}
+	})
+
+	// The §14.10 duration example parses; stub the sleep so the watch loop
+	// exits after the first poke instead of blocking.
+	orig := sleepFor
+	t.Cleanup(func() { sleepFor = orig })
+	var gotInterval time.Duration
+	sleepFor = func(d time.Duration) { gotInterval = d; runtimeGoexit() }
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		withStderr(t, func() {
+			captureStdout(t, func() {
+				_ = layerWatch([]string{"--id", "x", "--registry", "http://127.0.0.1:1", "--interval", "1h"})
+			})
+		})
+	}()
+	<-done
+	if gotInterval != time.Hour {
+		t.Errorf("parsed interval = %v, want 1h", gotInterval)
+	}
 }
 
 func TestLayerWatch_MissingIDExits2(t *testing.T) {

@@ -1412,7 +1412,7 @@ func TestOrg_58_LayerWatchPolls(t *testing.T) {
 		"layer", "watch",
 		"--registry", srv.BaseURL,
 		"--id", "local-test",
-		"--interval", "1",
+		"--interval", "1s",
 	)
 	cmd.Env = mergeEnv("PODIUM_NO_AUTOSTANDALONE=1")
 	cmd.Stdout = lf
@@ -1447,7 +1447,7 @@ func TestOrg_58_LayerWatchPolls(t *testing.T) {
 func TestOrg_59_LayerWatchMissingID(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY=http://127.0.0.1:19999"},
-		"layer", "watch", "--interval", "1")
+		"layer", "watch", "--interval", "1s")
 	if res.Exit != 2 {
 		t.Errorf("exit=%d, want 2 (stderr=%s)", res.Exit, res.Stderr)
 	}

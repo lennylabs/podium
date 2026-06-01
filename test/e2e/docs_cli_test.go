@@ -22,7 +22,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -145,17 +144,17 @@ func cliLayerOrder(t testing.TB, stdout, id string) float64 {
 	return -1
 }
 
-// cliStartWatchLayer launches `podium layer watch --id <id> --interval N`
+// cliStartWatchLayer launches `podium layer watch --id <id> --interval <dur>`
 // against the registry in the background, returning a watchProc the
 // caller stops. The watcher loops forever, so the test owns teardown.
-func cliStartWatchLayer(t testing.TB, baseURL, id string, intervalSec int) *watchProc {
+func cliStartWatchLayer(t testing.TB, baseURL, id string, interval time.Duration) *watchProc {
 	t.Helper()
 	logf, err := os.CreateTemp(t.TempDir(), "layerwatch-*.log")
 	if err != nil {
 		t.Fatalf("watch log: %v", err)
 	}
 	cmd := exec.Command(cmdharness.Bin(t, "podium"),
-		"layer", "watch", "--id", id, "--interval", strconv.Itoa(intervalSec), "--registry", baseURL)
+		"layer", "watch", "--id", id, "--interval", interval.String(), "--registry", baseURL)
 	cmd.Env = mergeEnv("PODIUM_NO_AUTOSTANDALONE=1")
 	cmd.Stdin = bytes.NewReader(nil)
 	cmd.Stdout = logf
@@ -1421,7 +1420,7 @@ func TestDocCLI_100_LayerWatchReingests(t *testing.T) {
 	cliWantExit(t, runPodium(t, "", brEnv(srv.BaseURL),
 		"layer", "register", "--id", "watch-layer", "--local", layerDir), 0, "register")
 
-	w := cliStartWatchLayer(t, srv.BaseURL, "watch-layer", 1)
+	w := cliStartWatchLayer(t, srv.BaseURL, "watch-layer", time.Second)
 	defer w.stop(t)
 
 	// Add a new artifact and wait for a poll cycle to pick it up.
@@ -1447,7 +1446,7 @@ func TestDocCLI_100_LayerWatchReingests(t *testing.T) {
 func TestDocCLI_101_LayerWatchInterval(t *testing.T) {
 	srv := startServer(t, "")
 	cliWantExit(t, runPodium(t, "", brEnv(srv.BaseURL), "layer", "register", "--id", "my-layer", "--local", t.TempDir()), 0, "register")
-	w := cliStartWatchLayer(t, srv.BaseURL, "my-layer", 1)
+	w := cliStartWatchLayer(t, srv.BaseURL, "my-layer", time.Second)
 	defer w.stop(t)
 	if !cliPollLog(w, "queued", 8*time.Second) {
 		t.Fatalf("layer watch did not poll reingest within deadline\nlog:\n%s", w.log())

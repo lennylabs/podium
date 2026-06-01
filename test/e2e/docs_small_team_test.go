@@ -501,7 +501,7 @@ func TestSmallTeam_17_LayerWatch(t *testing.T) {
 	}
 	bin := cmdharness.Bin(t, "podium")
 	watchCmd := exec.Command(bin, "layer", "watch",
-		"--registry", srv.BaseURL, "--id", layerID, "--interval", "2")
+		"--registry", srv.BaseURL, "--id", layerID, "--interval", "2s")
 	watchCmd.Env = mergeEnv("HOME="+t.TempDir(), "PODIUM_NO_AUTOSTANDALONE=1")
 	watchCmd.Stdin = bytes.NewReader(nil)
 	watchCmd.Stdout = logf

@@ -11,9 +11,9 @@ import (
 	"time"
 )
 
-// sleepSeconds blocks for n seconds. Wrapped so tests can override
-// without relying on time.Sleep.
-var sleepSeconds = func(n int) { time.Sleep(time.Duration(n) * time.Second) }
+// sleepFor blocks for d. Wrapped so tests can override without
+// relying on time.Sleep.
+var sleepFor = func(d time.Duration) { time.Sleep(d) }
 
 // layerCmd dispatches `podium layer ...` subcommands per spec §7.3.1.
 //
@@ -143,7 +143,10 @@ func layerWatch(args []string) int {
 	setUsage(fs, "Poll a layer's source on an interval.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	id := fs.String("id", "", "layer id (required)")
-	intervalSec := fs.Int("interval", 60, "seconds between reingest pokes")
+	// spec §7.3.1 / §14.10: `podium layer watch <id> [--interval <duration>]`.
+	// The interval is a Go-style duration (e.g. 30s, 1h) so the §14.10 example
+	// `--interval 1h` parses; a bare integer is rejected by flag parsing.
+	interval := fs.Duration("interval", time.Minute, "duration between reingest pokes (e.g. 30s, 1h)")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
@@ -152,7 +155,7 @@ func layerWatch(args []string) int {
 		fmt.Fprintln(os.Stderr, "error: --registry and --id are required")
 		return 2
 	}
-	if *intervalSec <= 0 {
+	if *interval <= 0 {
 		fmt.Fprintln(os.Stderr, "error: --interval must be positive")
 		return 2
 	}
@@ -164,7 +167,7 @@ func layerWatch(args []string) int {
 		} else {
 			fmt.Printf("[reingest %s] %s\n", *id, out)
 		}
-		sleepSeconds(*intervalSec)
+		sleepFor(*interval)
 	}
 }
 

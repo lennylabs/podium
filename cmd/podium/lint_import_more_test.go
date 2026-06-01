@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func runtimeGoexit() { runtime.Goexit() }
@@ -97,15 +98,15 @@ func TestLayerWatch_OneIteration(t *testing.T) {
 	}))
 	defer srv.Close()
 	t.Setenv("PODIUM_REGISTRY", srv.URL)
-	orig := sleepSeconds
-	t.Cleanup(func() { sleepSeconds = orig })
-	sleepSeconds = func(int) { runtimeGoexit() }
+	orig := sleepFor
+	t.Cleanup(func() { sleepFor = orig })
+	sleepFor = func(time.Duration) { runtimeGoexit() }
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		withStderr(t, func() {
 			captureStdout(t, func() {
-				_ = layerWatch([]string{"--id", "team", "--interval", "1"})
+				_ = layerWatch([]string{"--id", "team", "--interval", "1s"})
 			})
 		})
 	}()
@@ -124,15 +125,15 @@ func TestLayerWatch_HTTPErrorIsNotFatal(t *testing.T) {
 	}))
 	defer srv.Close()
 	t.Setenv("PODIUM_REGISTRY", srv.URL)
-	orig := sleepSeconds
-	t.Cleanup(func() { sleepSeconds = orig })
-	sleepSeconds = func(int) { runtimeGoexit() }
+	orig := sleepFor
+	t.Cleanup(func() { sleepFor = orig })
+	sleepFor = func(time.Duration) { runtimeGoexit() }
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		withStderr(t, func() {
 			captureStdout(t, func() {
-				_ = layerWatch([]string{"--id", "team", "--interval", "1"})
+				_ = layerWatch([]string{"--id", "team", "--interval", "1s"})
 			})
 		})
 	}()

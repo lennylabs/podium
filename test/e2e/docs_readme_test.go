@@ -647,7 +647,11 @@ func TestReadme_HTTPLayers(t *testing.T) {
 
 // T-D-readme-46 — layer reingest triggers a fresh ingest.
 func TestReadme_LayerReingest(t *testing.T) {
-	t.Skip("blocked by F-0.0.1: podium layer reingest does not emit the artifact/layer line the quickstart shows (and F-14.10.1: the Git source is never ingested)")
+	// F-14.10.1 (the Git source is never ingested) is resolved: reingest now
+	// runs the ingest pipeline (0f8db6f). The remaining blocker is F-0.0.1, the
+	// CLI output format: reingest prints the raw `{queued, accepted, ...}` JSON,
+	// not the synchronous `artifact: …@… layer: …` line the quickstart shows.
+	t.Skip("blocked by F-0.0.1: podium layer reingest prints the queued-result JSON, not the per-artifact line the quickstart shows")
 }
 
 // T-D-readme-47 — layer register registers a local layer; list shows it.
@@ -980,8 +984,23 @@ func TestReadme_ProfileEdit(t *testing.T) {
 }
 
 // T-D-readme-74 — layer watch polls a source and re-ingests.
+//
+// spec §7.3.1 / §14.10 (F-14.10.2): `podium layer watch` polls the reingest
+// endpoint on its interval, and that endpoint now runs the real ingest
+// pipeline (wired in 0f8db6f), so the watcher drives periodic ingestion. The
+// watcher loops forever, so the test backgrounds it and owns teardown.
 func TestReadme_LayerWatch(t *testing.T) {
-	t.Skip("blocked by F-14.10.2: podium layer watch polls a no-op endpoint and never ingests")
+	t.Parallel()
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
+	extra := writeRegistry(t, map[string]string{"extra/note/ARTIFACT.md": contextArtifact("note")})
+	reg := runPodium(t, "", nil, "layer", "register", "--id", "watch-layer", "--local", extra, "--registry", srv.BaseURL)
+	if reg.Exit != 0 {
+		t.Fatalf("layer register exit=%d stderr=%s", reg.Exit, reg.Stderr)
+	}
+	w := cliStartWatchLayer(t, srv.BaseURL, "watch-layer", time.Second)
+	if !cliPollLog(w, "[reingest watch-layer]", 8*time.Second) {
+		t.Errorf("layer watch did not poll reingest within 8s\nlog:\n%s", w.log())
+	}
 }
 
 // T-D-readme-75 — admin migrate-to-standard into a live standard deployment.
