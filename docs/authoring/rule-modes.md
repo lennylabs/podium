@@ -78,7 +78,7 @@ Legend: ✓ supported natively, ⚠ supported via fallback (lint warning), ✗ n
 
 | Adapter | Output |
 |:--|:--|
-| **claude-code** | A standalone `.claude/rules/<name>.md` for every mode. `always` and `explicit` map natively; `glob` and `auto` fall back to always-loaded with a lint warning, because the file form does not carry Claude Code's native scoping. |
+| **claude-code** | A standalone `.claude/rules/<name>.md` for every mode, carrying the prose under a Claude-native scoping frontmatter (the Podium-internal fields are dropped). `always` and `explicit` map natively; `glob` writes `paths: <rule_globs>` and `auto` writes `description: <rule_description>` as a best-effort scoping that draws a lint warning. |
 | **cursor** | `.cursor/rules/<name>.mdc` for every mode, with the native key set per the mode: `always` writes `alwaysApply: true`, `glob` writes `globs: <rule_globs>`, `auto` writes `description: <rule_description>`, and `explicit` writes no auto-apply key. |
 | **hermes** | `.cursor/rules/<name>.mdc` in the Cursor `.mdc` format for every mode. Hermes natively reads `.cursor/rules/*.mdc`, root `AGENTS.md`, and `.cursorrules`; it does not read `.claude/rules/`. |
 | **codex, opencode, pi** | The rule body injects into root `AGENTS.md` between Podium-managed markers. `always` maps natively; `glob`, `auto`, and `explicit` fall back to always-loaded with a lint warning, because an injected block carries no per-file scoping. |

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/lennylabs/podium/pkg/manifest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -57,9 +58,15 @@ func (c ClaudeCode) Adapt(ctx context.Context, src Source) ([]File, error) {
 	// passing the full ARTIFACT.md (frontmatter included) is a no-op when
 	// none are present.
 	case "rule":
+		// A Claude Code rule file carries the rule prose under Claude-native
+		// scoping frontmatter (paths for glob, description for auto). The
+		// Podium-internal fields (type, version, rule_mode, rule_globs, ...) are
+		// catalog metadata, not Claude Code rule fields, so they are dropped.
+		// Provenance markers in the body are rewritten to <untrusted-data>
+		// regions (§4.4.2).
 		out = append(out, File{
 			Path:    path.Join(".claude", "rules", name+".md"),
-			Content: rewriteProvenanceForClaude(src.ArtifactBytes),
+			Content: rewriteProvenanceForClaude(claudeRuleBody(src)),
 		})
 	case "agent":
 		out = append(out, File{
@@ -82,16 +89,9 @@ func (c ClaudeCode) Adapt(ctx context.Context, src Source) ([]File, error) {
 		return contextOut(src), nil
 	case "hook":
 		// §6.7 — a hook config-merges its registration into the shared
-		// settings.json. Bundled scripts have no native home under a
-		// config-merge, so they materialize to the harness-neutral
-		// .podium/resources/<id>/ bucket alongside the merge.
-		hookOut := []File{}
-		if frag := hookFragmentJSON(claudeHookEvents, src); frag != nil {
-			hookOut = append(hookOut, File{Path: ".claude/settings.json", Op: OpMergeJSON, Content: frag})
-		}
-		hookOut = appendResources(hookOut, path.Join(".podium", "resources", src.ArtifactID), src.Resources)
-		sortFiles(hookOut)
-		return hookOut, nil
+		// settings.json; bundled scripts materialize to the harness-neutral
+		// .podium/resources/<id>/ bucket and the merged command references them.
+		return hookConfigOut(".claude/settings.json", hookFragmentJSON(claudeHookEvents, src), src), nil
 	case "mcp-server":
 		return []File{{Path: ".mcp.json", Op: OpMergeJSON, Content: mcpFragmentJSON(src)}}, nil
 	default:
@@ -135,4 +135,40 @@ func lastSegmentClaude(p string) string {
 		return p[i+1:]
 	}
 	return p
+}
+
+// claudeRuleBody renders a Claude Code rule file: the rule prose under a
+// Claude-native scoping frontmatter derived from rule_mode. A glob rule writes
+// `paths: <rule_globs>`; an auto rule writes `description: <rule_description>`
+// (falling back to the general description); always and explicit rules carry no
+// scoping key. The Podium-internal frontmatter is dropped. On a parse error the
+// raw ARTIFACT.md is returned so nothing is silently lost.
+func claudeRuleBody(src Source) []byte {
+	art, err := manifest.ParseArtifact(src.ArtifactBytes)
+	if err != nil || art == nil {
+		return src.ArtifactBytes
+	}
+	var fm strings.Builder
+	switch art.RuleMode {
+	case manifest.RuleModeGlob:
+		if art.RuleGlobs != "" {
+			fm.WriteString("paths: " + art.RuleGlobs + "\n")
+		}
+	case manifest.RuleModeAuto:
+		desc := art.RuleDescription
+		if desc == "" {
+			desc = art.Description
+		}
+		if desc != "" {
+			fm.WriteString("description: " + desc + "\n")
+		}
+	}
+	var b strings.Builder
+	if fm.Len() > 0 {
+		b.WriteString("---\n")
+		b.WriteString(fm.String())
+		b.WriteString("---\n\n")
+	}
+	b.WriteString(art.Body)
+	return []byte(b.String())
 }

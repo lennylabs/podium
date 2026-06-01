@@ -70,14 +70,8 @@ func (Cursor) Adapt(ctx context.Context, src Source) ([]File, error) {
 	case "hook":
 		// §6.7 — config-merge into .cursor/hooks.json. Bundled scripts land in
 		// the harness-neutral resource bucket (a config-merge has no native
-		// home for them).
-		out := []File{}
-		if frag := cursorHookFragmentJSON(src); frag != nil {
-			out = append(out, File{Path: ".cursor/hooks.json", Op: OpMergeJSON, Content: frag})
-		}
-		out = appendResources(out, path.Join(".podium", "resources", src.ArtifactID), src.Resources)
-		sortFiles(out)
-		return out, nil
+		// home for them) and the merged command references them.
+		return hookConfigOut(".cursor/hooks.json", cursorHookFragmentJSON(src), src), nil
 	}
 	return nil, nil
 }
@@ -145,10 +139,7 @@ func (Gemini) Adapt(ctx context.Context, src Source) ([]File, error) {
 	case "context":
 		return contextOut(src), nil
 	case "hook":
-		if frag := hookFragmentJSON(geminiHookEvents, src); frag != nil {
-			return []File{{Path: ".gemini/settings.json", Op: OpMergeJSON, Content: frag}}, nil
-		}
-		return nil, nil
+		return hookConfigOut(".gemini/settings.json", hookFragmentJSON(geminiHookEvents, src), src), nil
 	case "mcp-server":
 		return []File{{Path: ".gemini/settings.json", Op: OpMergeJSON, Content: mcpFragmentJSON(src)}}, nil
 	}

@@ -355,8 +355,13 @@ func TestRuleModes_SyncClaudeCodeAuto(t *testing.T) {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
 	got := readFile(t, filepath.Join(tgt, ".claude/rules/db-migration-checks.md"))
-	if !strings.Contains(got, "rule_description") {
-		t.Errorf("materialized auto rule missing rule_description:\n%s", got)
+	// The auto trigger lands in Claude's native `description:` frontmatter; the
+	// Podium-internal field names are not leaked.
+	if !strings.Contains(got, "description: Apply when working with database migrations or schema changes") {
+		t.Errorf("materialized auto rule missing Claude-native description:\n%s", got)
+	}
+	if strings.Contains(got, "rule_mode") || strings.Contains(got, "rule_description") {
+		t.Errorf("Podium-internal frontmatter leaked into the Claude rule file:\n%s", got)
 	}
 }
 

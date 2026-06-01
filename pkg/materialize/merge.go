@@ -39,6 +39,22 @@ func foldOps(files []adapter.File, resolved []string) ([]writeItem, error) {
 					return nil, fmt.Errorf("materialize: read %q for merge: %w", rp, err)
 				}
 			}
+			// §6.7 config-merge reconciliation: strip the prior Podium-owned
+			// entries from the base before this sync's fragments fold in, so a
+			// re-sync rebuilds Podium's contribution from scratch (removing
+			// entries whose artifact is gone) while leaving the operator's
+			// untagged entries in place. Done once per path, before the first
+			// fragment, so accumulating fragments are not re-stripped.
+			switch f.Op {
+			case adapter.OpMergeJSON:
+				base = stripPodiumOwnedBytes(base)
+			case adapter.OpInject:
+				// Symmetric reconciliation for the marker-based inject files
+				// (AGENTS.md / GEMINI.md / config.toml): drop every prior
+				// Podium block so a removed artifact's block does not linger,
+				// then the current fragments re-add only the live blocks.
+				base = stripPodiumBlocks(base, commentStyleFor(f.Path))
+			}
 			items = append(items, writeItem{resolved: rp, content: base, mode: modeOf(f)})
 			j = len(items) - 1
 			idx[rp] = j
@@ -117,6 +133,69 @@ func injectBlock(base []byte, key string, block []byte, cs commentStyle) []byte 
 	return []byte(b.String())
 }
 
+// stripPodiumBlocks removes every Podium-managed inject block (the region
+// between a `podium:begin:<key>` and `podium:end:<key>` marker pair in the
+// given comment style) from a text file, leaving the operator's surrounding
+// content intact. It is the inject counterpart to stripPodiumOwnedBytes: the
+// prior sync's blocks are removed before the current fragments re-add the live
+// ones, so a removed artifact's block does not survive.
+func stripPodiumBlocks(base []byte, cs commentStyle) []byte {
+	s := string(base)
+	beginTag := cs.open + "podium:begin:"
+	endTag := cs.open + "podium:end:"
+	for {
+		bi := strings.Index(s, beginTag)
+		if bi < 0 {
+			break
+		}
+		ej := strings.Index(s[bi:], endTag)
+		if ej < 0 {
+			break
+		}
+		ej += bi
+		var ee int
+		if cs.close != "" {
+			ce := strings.Index(s[ej:], cs.close)
+			if ce < 0 {
+				break
+			}
+			ee = ej + ce + len(cs.close)
+		} else {
+			if nl := strings.IndexByte(s[ej:], '\n'); nl < 0 {
+				ee = len(s)
+			} else {
+				ee = ej + nl
+			}
+		}
+		if ee < len(s) && s[ee] == '\n' {
+			ee++
+		}
+		start := bi
+		for start > 0 && s[start-1] == '\n' {
+			start--
+		}
+		sep := ""
+		if start > 0 && ee < len(s) {
+			sep = "\n"
+		}
+		s = s[:start] + sep + s[ee:]
+	}
+	return []byte(s)
+}
+
+// StripPodiumOwnedBytes is the exported form of the §6.7 config-merge JSON
+// reconciliation: it removes every Podium-owned entry from a JSON config
+// document, leaving the operator's entries intact. The sync layer calls it to
+// clean an orphaned config file whose last contributing artifact is gone.
+func StripPodiumOwnedBytes(base []byte) []byte { return stripPodiumOwnedBytes(base) }
+
+// StripPodiumBlocks is the exported form of the inject reconciliation: it
+// removes every Podium-managed block from a text inject file (AGENTS.md /
+// GEMINI.md / config.toml), selecting the marker style from the path.
+func StripPodiumBlocks(base []byte, path string) []byte {
+	return stripPodiumBlocks(base, commentStyleFor(path))
+}
+
 // mergeJSON deep-merges the fragment object into the existing JSON document,
 // preserving keys the operator set that the fragment does not touch. The
 // fragment's leaf values win on conflict. Output is indented with a trailing
@@ -140,8 +219,14 @@ func mergeJSON(base, fragment []byte) ([]byte, error) {
 	return append(out, '\n'), nil
 }
 
-// deepMerge recursively merges src into dst. Nested objects are merged; every
-// other value (scalars, arrays) is replaced by the src value.
+// deepMerge recursively merges src into dst. Nested objects are merged
+// recursively; arrays at the same key are concatenated (dst first, then src),
+// so multiple Podium config-merge fragments accumulate their entries instead of
+// the last one replacing the rest (for example two hooks that map to the same
+// native event both land in that event's array). Scalars are replaced by the
+// src value. Reconciliation relies on the base having been stripped of prior
+// Podium-owned entries (see stripPodiumOwnedBytes), so concatenation does not
+// duplicate across re-syncs.
 func deepMerge(dst, src map[string]any) {
 	for k, sv := range src {
 		if sm, ok := sv.(map[string]any); ok {
@@ -150,6 +235,74 @@ func deepMerge(dst, src map[string]any) {
 				continue
 			}
 		}
+		if sa, ok := sv.([]any); ok {
+			if da, ok := dst[k].([]any); ok {
+				dst[k] = append(da, sa...)
+				continue
+			}
+		}
 		dst[k] = sv
 	}
+}
+
+// stripPodiumOwnedBytes removes every Podium-owned entry (an object carrying
+// the adapter.PodiumOwnedKey tag) from a JSON config document, returning the
+// document with the operator's untagged entries intact. It is the read half of
+// the §6.7 config-merge reconciliation: the prior sync's Podium entries are
+// removed before the current sync's fragments are merged. A document that is
+// empty or not valid JSON is returned unchanged (the merge step then reports
+// the parse error).
+func stripPodiumOwnedBytes(base []byte) []byte {
+	if len(bytes.TrimSpace(base)) == 0 {
+		return base
+	}
+	var v any
+	if err := json.Unmarshal(base, &v); err != nil {
+		return base
+	}
+	stripped := stripPodiumOwned(v)
+	out, err := json.MarshalIndent(stripped, "", "  ")
+	if err != nil {
+		return base
+	}
+	return append(out, '\n')
+}
+
+// stripPodiumOwned walks a decoded JSON value and removes any object that
+// carries the Podium ownership tag: object members whose value is a tagged
+// object are deleted, and array elements that are tagged objects are dropped.
+func stripPodiumOwned(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, val := range t {
+			if podiumOwned(val) {
+				delete(t, k)
+				continue
+			}
+			t[k] = stripPodiumOwned(val)
+		}
+		return t
+	case []any:
+		out := make([]any, 0, len(t))
+		for _, el := range t {
+			if podiumOwned(el) {
+				continue
+			}
+			out = append(out, stripPodiumOwned(el))
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+// podiumOwned reports whether v is a JSON object carrying the
+// adapter.PodiumOwnedKey tag.
+func podiumOwned(v any) bool {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return false
+	}
+	_, has := m[adapter.PodiumOwnedKey]
+	return has
 }

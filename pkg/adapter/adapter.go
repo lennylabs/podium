@@ -34,6 +34,16 @@ const (
 	OpMergeJSON
 )
 
+// PodiumOwnedKey tags a config-merge entry as Podium-owned, keyed to the
+// artifact ID (§6.7 "a Podium-owned entry keyed by the artifact ID", carried
+// in the §6.7 x-podium-* extension namespace). Each config-merge fragment
+// stamps its entry with this key so the materialize layer can rebuild Podium's
+// contribution on every sync: prior Podium entries are stripped before the
+// current set is merged, which preserves the operator's untagged entries,
+// accumulates multiple Podium entries, and removes an artifact's entry once it
+// is gone.
+const PodiumOwnedKey = "x-podium-id"
+
 // File is one output produced by an adapter. Path is relative to the
 // destination root; Mode defaults to 0o644 when zero. Op selects the apply
 // mode (default OpWrite); Key is the artifact ID that scopes a Podium-managed

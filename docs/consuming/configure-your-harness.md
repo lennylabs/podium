@@ -174,14 +174,14 @@ podium sync
 | `agent` | `.claude/agents/<name>.md` |
 | `rule` | `.claude/rules/<name>.md` (optional `paths:` frontmatter for path-scoping) |
 | `command` | `.claude/commands/<name>.md` |
-| `hook` | Merged into `.claude/settings.json` under the `hooks` key. `.claude/hooks/` holds only the scripts a hook entry references. |
+| `hook` | Merged into `.claude/settings.json` under the `hooks` key, keyed by the artifact ID so a re-sync reconciles only Podium's entries. A hook's bundled scripts materialize to `.podium/resources/<artifact-id>/`, and the merged command references them there. |
 | `context` | No native Claude Code concept. A `context` artifact lands at `.podium/context/<artifact-id>/`; reference material that belongs to a skill ships in that skill's `references/`. |
-| `mcp-server` | Merged into `.mcp.json` (project root) under `mcpServers`. |
+| `mcp-server` | Merged into `.mcp.json` (project root) under `mcpServers`, keyed by the artifact ID. |
 | Bundled resources | Inside the skill folder (`scripts/`, `references/`, `assets/`). |
 
 **Notes:**
 
-- Native rule modes: `always` and `explicit` are fully supported. `glob` falls back to always-loaded with a lint warning. `auto` works via the `description` field.
+- The rule file carries the prose under a Claude-native scoping frontmatter and drops the Podium-internal fields. `always` and `explicit` are fully supported. `glob` writes `paths: <rule_globs>` and `auto` writes `description: <rule_description>`; both are best-effort and draw a lint warning, because Podium cannot guarantee Claude Code scopes the rule rather than loading it for every turn.
 - Native hook system available; see [Hooks](../authoring/hooks).
 
 ---

@@ -115,6 +115,84 @@ func TestWrite_InjectAndMergeIntegration(t *testing.T) {
 	}
 }
 
+// taggedHook builds a Podium-owned hook fragment for native event ev keyed by
+// id, mirroring what adapter.hookFragmentJSON emits.
+func taggedHook(ev, id, cmd string) []byte {
+	return []byte(`{"hooks":{"` + ev + `":[{"hooks":[{"type":"command","command":"` + cmd + `"}],"` + adapter.PodiumOwnedKey + `":"` + id + `"}]}}`)
+}
+
+// §6.7 config-merge contract: two Podium hooks on the same native event both
+// land in the event's array (no clobber), the operator's untagged entry is
+// preserved, a re-sync is idempotent, and dropping one hook removes only its
+// entry.
+func TestConfigMerge_AccumulateIdempotentRemove(t *testing.T) {
+	dest := t.TempDir()
+	settings := filepath.Join(dest, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settings), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Operator-owned entry the merge must never disturb.
+	operator := `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"op"}]}]},"theme":"dark"}`
+	if err := os.WriteFile(settings, []byte(operator), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	syncHooks := func(ids ...string) {
+		files := make([]adapter.File, 0, len(ids))
+		for _, id := range ids {
+			files = append(files, adapter.File{Path: ".claude/settings.json", Op: adapter.OpMergeJSON, Content: taggedHook("PreToolUse", id, "cmd-"+id)})
+		}
+		if err := Write(dest, files); err != nil {
+			t.Fatalf("Write: %v", err)
+		}
+	}
+
+	syncHooks("h/a", "h/b")
+	got := readString(t, settings)
+	for _, want := range []string{`"op"`, `"theme"`, "cmd-h/a", "cmd-h/b"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("after A+B sync, missing %q:\n%s", want, got)
+		}
+	}
+
+	// Re-sync the same set: idempotent (no duplicate entries).
+	syncHooks("h/a", "h/b")
+	got = readString(t, settings)
+	if n := strings.Count(got, "cmd-h/a"); n != 1 {
+		t.Errorf("re-sync duplicated h/a (count=%d):\n%s", n, got)
+	}
+
+	// Drop h/b: its entry is removed, h/a and the operator entry remain.
+	syncHooks("h/a")
+	got = readString(t, settings)
+	if strings.Contains(got, "cmd-h/b") {
+		t.Errorf("removed hook h/b still present:\n%s", got)
+	}
+	for _, want := range []string{`"op"`, `"theme"`, "cmd-h/a"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("after removing h/b, missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// stripPodiumBlocks removes only the Podium-managed inject blocks and leaves
+// the operator's surrounding content intact.
+func TestStripPodiumBlocks_PreservesOperatorContent(t *testing.T) {
+	md := commentStyleFor("AGENTS.md")
+	base := injectBlock([]byte("# House rules\n\nKeep PRs small.\n"), "team/a", []byte("Rule A."), md)
+	base = injectBlock(base, "team/b", []byte("Rule B."), md)
+
+	out := string(stripPodiumBlocks(base, md))
+	if !strings.Contains(out, "Keep PRs small.") || !strings.Contains(out, "# House rules") {
+		t.Errorf("operator content lost:\n%s", out)
+	}
+	for _, gone := range []string{"podium:begin:team/a", "podium:begin:team/b", "Rule A.", "Rule B."} {
+		if strings.Contains(out, gone) {
+			t.Errorf("Podium block content %q survived the strip:\n%s", gone, out)
+		}
+	}
+}
+
 func readString(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)

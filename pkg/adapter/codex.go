@@ -26,10 +26,7 @@ func (Codex) Adapt(ctx context.Context, src Source) ([]File, error) {
 	case "context":
 		return contextOut(src), nil
 	case "hook":
-		if frag := hookFragmentJSON(codexHookEvents, src); frag != nil {
-			return []File{{Path: ".codex/hooks.json", Op: OpMergeJSON, Content: frag}}, nil
-		}
-		return nil, nil
+		return hookConfigOut(".codex/hooks.json", hookFragmentJSON(codexHookEvents, src), src), nil
 	case "mcp-server":
 		return []File{{Path: ".codex/config.toml", Op: OpInject, Key: src.ArtifactID, Content: codexMCPTOML(src)}}, nil
 	}

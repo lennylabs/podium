@@ -263,18 +263,24 @@ func Run(opts Options) (*Result, error) {
 	// §7.5 stale-file cleanup: compute the paths this run wrote and delete
 	// anything the prior run wrote that this run didn't. Without this,
 	// syncing a registry that drops an artifact leaves the artifact's files
-	// behind in the target.
-	priorPaths := lockPaths(priorLock)
+	// behind in the target. The prior merge kinds (§6.7 config-merge) are
+	// carried so a shared config file is reconciled rather than deleted.
+	priorMerge := lockMergeKinds(priorLock)
 
 	if err := materialize.Write(opts.Target, allFiles); err != nil {
 		return nil, err
 	}
 
+	// fileMerge records the §6.7 config-merge kind per path written this run:
+	// "json" for OpMergeJSON, "inject" for OpInject, empty for a standalone
+	// file. It feeds both the stale-file cleanup and the lock entries.
+	fileMerge := map[string]string{}
 	currentPaths := map[string]bool{}
 	for _, f := range allFiles {
 		currentPaths[f.Path] = true
+		fileMerge[f.Path] = mergeKind(f.Op)
 	}
-	removeStalePaths(opts.Target, priorPaths, currentPaths)
+	removeStalePaths(opts.Target, priorMerge, currentPaths)
 
 	// Persist the new lock entry list so the next run can repeat
 	// the diff. Each artifact records every path it wrote so a
@@ -308,6 +314,7 @@ func Run(opts Options) (*Result, error) {
 				ContentHash:      art.ContentHash,
 				Layer:            art.Layer,
 				MaterializedPath: p,
+				Merge:            fileMerge[p],
 			})
 		}
 	}
@@ -465,19 +472,32 @@ func filesystemRecords(opts Options) ([]materialRecord, error) {
 	return out, nil
 }
 
-// lockPaths returns the set of materialized paths recorded in a lock.
-// A nil lock returns an empty set.
-func lockPaths(lock *LockFile) map[string]bool {
-	out := map[string]bool{}
+// lockMergeKinds returns the materialized paths recorded in a lock, each
+// mapped to its §6.7 config-merge kind ("json", "inject", or "" for a
+// standalone file). A nil lock returns an empty map.
+func lockMergeKinds(lock *LockFile) map[string]string {
+	out := map[string]string{}
 	if lock == nil {
 		return out
 	}
 	for _, a := range lock.Artifacts {
 		if a.MaterializedPath != "" {
-			out[a.MaterializedPath] = true
+			out[a.MaterializedPath] = a.Merge
 		}
 	}
 	return out
+}
+
+// mergeKind maps an adapter.FileOp to the lock's config-merge kind string.
+func mergeKind(op adapter.FileOp) string {
+	switch op {
+	case adapter.OpMergeJSON:
+		return "json"
+	case adapter.OpInject:
+		return "inject"
+	default:
+		return ""
+	}
 }
 
 // selectRecords computes the materialization set from the full effective view
@@ -525,16 +545,23 @@ func selectRecords(scope ScopeFilter, all []materialRecord, toggles LockToggles)
 	return out
 }
 
-// removeStalePaths deletes every prior path that's not in the
-// current set. Best-effort: log to stderr on error and continue,
-// since a partial cleanup is better than a hard failure that
-// rolls back a successful materialize.
-func removeStalePaths(target string, prior, current map[string]bool) {
-	for p := range prior {
+// removeStalePaths reconciles every prior path that this run did not write.
+// A standalone path is deleted. A §6.7 config-merge path is shared with the
+// operator, so it is reconciled in place (Podium's tagged entries or inject
+// blocks are stripped) rather than deleted, which preserves the operator's
+// other entries when the last contributing artifact is removed. Best-effort:
+// log to stderr on error and continue, since a partial cleanup is better than
+// a hard failure that rolls back a successful materialize.
+func removeStalePaths(target string, prior map[string]string, current map[string]bool) {
+	for p, merge := range prior {
 		if current[p] {
 			continue
 		}
 		full := filepath.Join(target, p)
+		if merge != "" {
+			reconcileOrphanConfig(full, merge)
+			continue
+		}
 		if err := os.Remove(full); err != nil && !os.IsNotExist(err) {
 			fmt.Fprintf(os.Stderr, "sync: stale-file cleanup: %v\n", err)
 			continue
@@ -542,5 +569,31 @@ func removeStalePaths(target string, prior, current map[string]bool) {
 		// Try to remove the now-empty parent directory; Remove
 		// fails non-empty dirs naturally, which is what we want.
 		_ = os.Remove(filepath.Dir(full))
+	}
+}
+
+// reconcileOrphanConfig strips Podium's contribution from a config-merge file
+// whose last contributing artifact is gone, leaving the operator's content in
+// place (§6.7 "removing the artifact removes its entry"). The file is left on
+// disk because the operator may own the rest of it. A missing file is a no-op.
+func reconcileOrphanConfig(full, merge string) {
+	data, err := os.ReadFile(full)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "sync: config reconcile read: %v\n", err)
+		}
+		return
+	}
+	var out []byte
+	switch merge {
+	case "json":
+		out = materialize.StripPodiumOwnedBytes(data)
+	case "inject":
+		out = materialize.StripPodiumBlocks(data, full)
+	default:
+		return
+	}
+	if err := os.WriteFile(full, out, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "sync: config reconcile write: %v\n", err)
 	}
 }

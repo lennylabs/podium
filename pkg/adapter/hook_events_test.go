@@ -112,6 +112,41 @@ func TestHookEvents_CursorSubtypeConfigMerge(t *testing.T) {
 	}
 }
 
+// Spec: §6.7 — a config-merge hook's bundled script materializes to the
+// harness-neutral .podium/resources/<id>/ bucket, and the merged command is
+// rewritten from the registry-relative path to that materialized path so it
+// resolves from the project root.
+func TestHookEvents_BundledScriptPathRewrite(t *testing.T) {
+	t.Parallel()
+	src := Source{
+		ArtifactID: "audit/log-stop",
+		ArtifactBytes: []byte("---\ntype: hook\nversion: 1.0.0\ndescription: a hook\n" +
+			"hook_event: stop\nhook_action: |\n  scripts/log.sh\n---\n\n"),
+		Resources: map[string][]byte{"scripts/log.sh": []byte("#!/bin/sh\necho hi\n")},
+	}
+	out, err := ClaudeCode{}.Adapt(context.Background(), src)
+	if err != nil {
+		t.Fatalf("Adapt: %v", err)
+	}
+	var settings, script string
+	var haveScript bool
+	for _, f := range out {
+		switch f.Path {
+		case ".claude/settings.json":
+			settings = string(f.Content)
+		case ".podium/resources/audit/log-stop/scripts/log.sh":
+			script = string(f.Content)
+			haveScript = true
+		}
+	}
+	if !haveScript || script == "" {
+		t.Fatalf("bundled script not materialized to the resource bucket: %+v", out)
+	}
+	if !strings.Contains(settings, ".podium/resources/audit/log-stop/scripts/log.sh") {
+		t.Errorf("merged command not rewritten to the materialized path:\n%s", settings)
+	}
+}
+
 // Spec: §6.7.1 — a canonical event Cursor has no native subtype for (the
 // generic pre_tool_use) produces no Cursor hook output, reflecting the ⚠
 // partial-coverage cell.

@@ -31,13 +31,19 @@ type LockScope struct {
 	Type    []string `yaml:"type,omitempty"`
 }
 
-// LockArtifact is one entry in artifacts: per §7.5.3.
+// LockArtifact is one entry in artifacts: per §7.5.3. Merge records the
+// §6.7 config-merge kind for the materialized path ("json" for a JSON
+// config-merge, "inject" for a marker-based inject, empty for a standalone
+// file). Stale-file cleanup uses it: a standalone path is deleted when no
+// longer written, but a config-merge path is shared with the operator, so it
+// is reconciled (Podium's entries stripped) rather than removed.
 type LockArtifact struct {
 	ID               string `yaml:"id"`
 	Version          string `yaml:"version,omitempty"`
 	ContentHash      string `yaml:"content_hash,omitempty"`
 	Layer            string `yaml:"layer,omitempty"`
 	MaterializedPath string `yaml:"materialized_path,omitempty"`
+	Merge            string `yaml:"merge,omitempty"`
 }
 
 // LockToggles tracks ephemeral overrides applied since the last full

@@ -471,7 +471,9 @@ func TestFrontmatter_RuleScaffoldAuto(t *testing.T) {
 }
 
 // T-D-frontmatter-30 — a glob-mode rule materializes under claude-code at
-// .claude/rules/<name>.md carrying its rule_mode/rule_globs frontmatter.
+// .claude/rules/<name>.md with the glob pattern carried in the Claude-native
+// `paths:` frontmatter. The Podium-internal fields (type, rule_mode,
+// rule_globs) are not leaked into the harness file.
 func TestFrontmatter_RuleGlobClaudeCode(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -482,8 +484,11 @@ func TestFrontmatter_RuleGlobClaudeCode(t *testing.T) {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
 	got := readFile(t, filepath.Join(tgt, ".claude/rules/glob-rule.md"))
-	if !strings.Contains(got, "rule_mode: glob") || !strings.Contains(got, "rule_globs") {
-		t.Errorf("materialized rule missing rule_mode/rule_globs:\n%s", got)
+	if !strings.Contains(got, "paths: src/**/*.ts") {
+		t.Errorf("materialized rule missing Claude-native paths frontmatter:\n%s", got)
+	}
+	if strings.Contains(got, "rule_mode") || strings.Contains(got, "type: rule") {
+		t.Errorf("Podium-internal frontmatter leaked into the Claude rule file:\n%s", got)
 	}
 }
 

@@ -173,9 +173,18 @@ func TestClaudeCode_RewritesProvenanceForNonSkillTypes(t *testing.T) {
 			if strings.Contains(body, "begin imported") {
 				t.Errorf("%s: raw begin-imported marker survived:\n%s", ty, body)
 			}
-			// Authored prose and the frontmatter are preserved.
-			if !strings.Contains(body, "Authored intro.") || !strings.Contains(body, "type: "+ty) {
-				t.Errorf("%s: authored prose or frontmatter dropped:\n%s", ty, body)
+			// Authored prose is preserved for every type. agent and command
+			// materialize the ARTIFACT.md verbatim (frontmatter kept); a rule
+			// carries the prose only, with the Podium frontmatter stripped.
+			if !strings.Contains(body, "Authored intro.") {
+				t.Errorf("%s: authored prose dropped:\n%s", ty, body)
+			}
+			if ty == "rule" {
+				if strings.Contains(body, "type: rule") {
+					t.Errorf("rule: Podium frontmatter should be stripped from the Claude rule file:\n%s", body)
+				}
+			} else if !strings.Contains(body, "type: "+ty) {
+				t.Errorf("%s: frontmatter dropped:\n%s", ty, body)
 			}
 		})
 	}

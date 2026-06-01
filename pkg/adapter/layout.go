@@ -148,9 +148,12 @@ func mcpName(src Source) string {
 	return lastSeg(src.ArtifactID)
 }
 
-// mcpFragmentJSON builds the {"mcpServers": {...}} OpMergeJSON fragment.
+// mcpFragmentJSON builds the {"mcpServers": {...}} OpMergeJSON fragment. The
+// server entry is tagged Podium-owned so the merge layer can reconcile it.
 func mcpFragmentJSON(src Source) []byte {
-	frag := map[string]any{"mcpServers": map[string]any{mcpName(src): mcpServerConfig(parsed(src).ServerIdentifier)}}
+	cfg := mcpServerConfig(parsed(src).ServerIdentifier)
+	cfg[PodiumOwnedKey] = src.ArtifactID
+	frag := map[string]any{"mcpServers": map[string]any{mcpName(src): cfg}}
 	b, _ := json.Marshal(frag)
 	return b
 }
@@ -159,7 +162,7 @@ func mcpFragmentJSON(src Source) []byte {
 // type/command-array shape distinct from the mcpServers object.
 func opencodeMCPJSON(src Source) []byte {
 	cfg := mcpServerConfig(parsed(src).ServerIdentifier)
-	entry := map[string]any{"enabled": true}
+	entry := map[string]any{"enabled": true, PodiumOwnedKey: src.ArtifactID}
 	if url, ok := cfg["url"].(string); ok {
 		entry["type"], entry["url"] = "remote", url
 	} else {
@@ -194,6 +197,49 @@ func codexMCPTOML(src Source) []byte {
 
 // --- hook config-merge -------------------------------------------------------
 
+// hookResourceBucket is the harness-neutral directory a hook's bundled scripts
+// materialize into. A config-merge has no native home for the script, so it
+// lands here and the merged command is rewritten to reference it (§6.7).
+func hookResourceBucket(src Source) string {
+	return path.Join(".podium", "resources", src.ArtifactID)
+}
+
+// hookActionFor returns the hook_action with each bundled-resource reference
+// rewritten from its registry-relative path to the materialized
+// .podium/resources/<id>/ path, so the command a config-merge installs resolves
+// from the project root. Longer keys are rewritten first so a key that is a
+// suffix of another does not corrupt the longer path.
+func hookActionFor(src Source) string {
+	action := parsed(src).HookAction
+	if len(src.Resources) == 0 {
+		return action
+	}
+	keys := make([]string, 0, len(src.Resources))
+	for k := range src.Resources {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
+	bucket := hookResourceBucket(src)
+	for _, k := range keys {
+		action = strings.ReplaceAll(action, k, path.Join(bucket, k))
+	}
+	return action
+}
+
+// hookConfigOut assembles a config-merge hook's output: the OpMergeJSON
+// fragment at configPath plus the bundled scripts in the .podium/resources/<id>/
+// bucket. A nil fragment (the harness has no native event for this hook_event)
+// produces no output, so the bundled scripts are not orphaned.
+func hookConfigOut(configPath string, frag []byte, src Source) []File {
+	if frag == nil {
+		return nil
+	}
+	out := []File{{Path: configPath, Op: OpMergeJSON, Content: frag}}
+	out = appendResources(out, hookResourceBucket(src), src.Resources)
+	sortFiles(out)
+	return out
+}
+
 // hookFragmentJSON builds the {"hooks": {"<nativeEvent>": [...]}} OpMergeJSON
 // fragment. The §4.3.5 canonical event is translated to the harness-native
 // event name by eventMap. Returns nil when the harness has no mapping for the
@@ -204,8 +250,8 @@ func hookFragmentJSON(eventMap map[string]string, src Source) []byte {
 	if !ok || native == "" {
 		return nil
 	}
-	handler := map[string]any{"type": "command", "command": art.HookAction}
-	entry := map[string]any{"hooks": []any{handler}}
+	handler := map[string]any{"type": "command", "command": hookActionFor(src)}
+	entry := map[string]any{"hooks": []any{handler}, PodiumOwnedKey: src.ArtifactID}
 	frag := map[string]any{"hooks": map[string]any{native: []any{entry}}}
 	b, _ := json.Marshal(frag)
 	return b
@@ -261,7 +307,7 @@ func cursorHookFragmentJSON(src Source) []byte {
 	if !ok || native == "" {
 		return nil
 	}
-	entry := map[string]any{"command": art.HookAction}
+	entry := map[string]any{"command": hookActionFor(src), PodiumOwnedKey: src.ArtifactID}
 	frag := map[string]any{"hooks": map[string]any{native: []any{entry}}}
 	b, _ := json.Marshal(frag)
 	return b

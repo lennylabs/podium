@@ -3,6 +3,7 @@ package sync_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lennylabs/podium/pkg/sync"
@@ -61,6 +62,65 @@ func TestRun_RemovesFilesForDroppedArtifact(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(target, "beta", "ARTIFACT.md")); !os.IsNotExist(err) {
 		t.Errorf("beta should have been cleaned up; got err=%v", err)
 	}
+}
+
+// Spec: §6.7 / §7.5 — when the last artifact contributing to a shared
+// config-merge file is dropped, the file is reconciled (Podium's entries
+// stripped) rather than deleted, so the operator's own entries survive.
+func TestRun_OrphanedConfigMergeReconciledNotDeleted(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	registry := filepath.Join(dir, "registry")
+	target := filepath.Join(dir, "out")
+
+	// One hook artifact; claude-code config-merges it into .claude/settings.json.
+	if err := os.MkdirAll(filepath.Join(registry, "audit", "stop"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	hook := "---\ntype: hook\nname: stop\nversion: 1.0.0\ndescription: Stop hook.\nhook_event: stop\nhook_action: |\n  echo done\n---\n\nbody\n"
+	if err := os.WriteFile(filepath.Join(registry, "audit", "stop", "ARTIFACT.md"), []byte(hook), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, err := sync.Run(sync.Options{RegistryPath: registry, Target: target, AdapterID: "claude-code"}); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	settings := filepath.Join(target, ".claude", "settings.json")
+	if _, err := os.Stat(settings); err != nil {
+		t.Fatalf("settings.json not materialized: %v", err)
+	}
+	// The operator adds their own key to the shared file after the first sync.
+	merged := readFileString(t, settings)
+	withOperator := merged[:len(merged)-2] + `,"theme":"dark"}` + "\n"
+	if err := os.WriteFile(settings, []byte(withOperator), 0o644); err != nil {
+		t.Fatalf("seed operator key: %v", err)
+	}
+
+	// Drop the hook; the second sync must reconcile settings.json in place.
+	if err := os.RemoveAll(filepath.Join(registry, "audit")); err != nil {
+		t.Fatalf("RemoveAll: %v", err)
+	}
+	if _, err := sync.Run(sync.Options{RegistryPath: registry, Target: target, AdapterID: "claude-code"}); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	if _, err := os.Stat(settings); err != nil {
+		t.Fatalf("settings.json must not be deleted, got err=%v", err)
+	}
+	got := readFileString(t, settings)
+	if !strings.Contains(got, `"theme"`) {
+		t.Errorf("operator key lost from settings.json:\n%s", got)
+	}
+	if strings.Contains(got, "echo done") || strings.Contains(got, "x-podium-id") {
+		t.Errorf("Podium hook entry not stripped from orphaned settings.json:\n%s", got)
+	}
+}
+
+func readFileString(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(b)
 }
 
 // Spec: §7.5 — the lock file persists every materialized path so
