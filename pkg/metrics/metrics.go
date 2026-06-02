@@ -39,7 +39,7 @@ type Registry struct {
 
 	requestTotal     *prometheus.CounterVec
 	requestDuration  *prometheus.HistogramVec
-	visibilityDenied   prometheus.Counter
+	visibilityDenied prometheus.Counter
 	cacheHits        prometheus.Counter
 	cacheMisses      prometheus.Counter
 	ingestSuccess    prometheus.Counter

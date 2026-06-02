@@ -54,6 +54,7 @@ import (
 	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/materialize"
+	"github.com/lennylabs/podium/pkg/metrics"
 	"github.com/lennylabs/podium/pkg/overlay"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/sign"
@@ -193,6 +194,12 @@ type config struct {
 	// ignoreRuntime is the §4.4.1 escape hatch mirroring
 	// ignoreSandbox: bypass the runtime gate with a loud warning.
 	ignoreRuntime bool
+	// metricsAddr is the §13.8 opt-in Prometheus listener bind address. The
+	// bridge is a stdio process with no HTTP server of its own, so metrics are
+	// off unless an operator names an address (PODIUM_MCP_METRICS_ADDR or
+	// --metrics-addr), e.g. 127.0.0.1:9090. Empty disables the listener and the
+	// per-call / cache recording.
+	metricsAddr string
 }
 
 func loadConfig() (*config, error) {
@@ -241,6 +248,8 @@ func loadConfig() (*config, error) {
 		hostPackages:   splitCSV(os.Getenv("PODIUM_HOST_PACKAGES")),
 		enforceRuntime: os.Getenv("PODIUM_ENFORCE_RUNTIME_REQUIREMENTS") == "true",
 		ignoreRuntime:  os.Getenv("PODIUM_IGNORE_RUNTIME_REQUIREMENTS") == "true",
+		// §13.8 opt-in Prometheus listener for the bridge.
+		metricsAddr: os.Getenv("PODIUM_MCP_METRICS_ADDR"),
 	}
 	// §6.2 PODIUM_AUDIT_SINK: distinguish unset (registry audit only) from
 	// set-but-empty (use the default ~/.podium/audit.log). os.Getenv cannot
@@ -418,6 +427,10 @@ type mcpServer struct {
 	// boot-time loading of configured hook plugins is the wire-serializable
 	// SPI work tracked by F-9.3.1. Tests inject hooks directly.
 	hooks []hook.Hook
+	// metrics is the §13.8 bridge metric set, non-nil only when an operator
+	// configured the opt-in listener (PODIUM_MCP_METRICS_ADDR). When nil the
+	// per-call and resolution-cache recording sites no-op.
+	metrics *metrics.MCPRegistry
 }
 
 // recordSuccess stamps the time of a successful registry call for the
@@ -451,6 +464,13 @@ func newServer(cfg *config) (*mcpServer, error) {
 		// §6.3: oauth-device-code tokens cache in the OS keychain, keyed by
 		// registry URL (matching `podium login`).
 		tokens: identity.KeychainStore{Service: cfg.tokenKeychainName},
+	}
+	// §13.8 opt-in metrics: build the bridge metric set and wire the
+	// resolution-cache hit/miss observer only when a listener address is
+	// configured, so the default stdio bridge takes no recording overhead.
+	if cfg.metricsAddr != "" {
+		srv.metrics = metrics.NewMCP()
+		srv.resolutions.observe = srv.metrics.ObserveCache
 	}
 	// §6.4 workspace overlay: load the initial records. The §6.4.1 watcher
 	// (started in serve) re-resolves and swaps them on every filesystem
@@ -676,6 +696,10 @@ func (s *mcpServer) serve(r io.Reader, w io.Writer) error {
 	// the bridge subprocess.
 	stopOverlay := s.startOverlayWatch()
 	defer stopOverlay()
+	// §13.8: opt-in Prometheus listener for the bridge. No-op unless an
+	// operator named PODIUM_MCP_METRICS_ADDR; shuts down when serve returns.
+	stopMetrics := s.startMetricsListener(s.cfg.metricsAddr)
+	defer stopMetrics()
 	// §6.8: the host owns the lifecycle. The loop ends only when stdin
 	// reaches EOF (the host closing the pipe); there is no signal-driven
 	// shutdown here (F-6.8.3). A read error other than EOF propagates.
@@ -968,6 +992,30 @@ func (s *mcpServer) callTool(raw json.RawMessage) any {
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return errorResult(err.Error())
 	}
+	// §13.8: record the per-tool request count, error count, and latency when
+	// the opt-in metrics listener is active. The dispatch is unchanged; only
+	// the timing and outcome are observed around it.
+	if s.metrics == nil {
+		return s.dispatchTool(p)
+	}
+	start := time.Now()
+	result := s.dispatchTool(p)
+	s.metrics.ObserveCall(p.Name, isErrorResult(result), time.Since(start))
+	return result
+}
+
+// isErrorResult reports whether a meta-tool result is a §6.10 error envelope,
+// identified by the presence of an "error" key in the returned result map.
+func isErrorResult(result any) bool {
+	m, ok := result.(map[string]any)
+	if !ok {
+		return false
+	}
+	_, hasErr := m["error"]
+	return hasErr
+}
+
+func (s *mcpServer) dispatchTool(p toolCallParams) any {
 	switch p.Name {
 	case "load_domain":
 		s.auditMeta(audit.EventDomainLoaded, argString(p.Arguments, "path"))

@@ -97,7 +97,7 @@ Presigned URLs are CDN-friendly. Recommend CloudFront / Fastly / Cloudflare in f
 
 ## 13.8 Observability
 
-- **Metrics.** Prometheus endpoint on registry and MCP server. Histograms for latency; counters for cache hit rate, error rate, visibility-denial rate, ingest success/failure rate; gauges for queue depths.
+- **Metrics.** Prometheus endpoint on registry and MCP server. Histograms for latency; counters for cache hit rate, error rate, visibility-denial rate, ingest success/failure rate; gauges for queue depths. The registry serves `/metrics` by default; set `PODIUM_METRICS=false` to remove it. The MCP server is a stdio process with no HTTP listener of its own, so it serves `/metrics` on a separate address only when `PODIUM_MCP_METRICS_ADDR` (or `--metrics-addr`) names a bind address.
 - **Tracing.** OpenTelemetry trace export. W3C Trace Context propagation across all calls. One root span per `load_domain` / `search_domains` / `search_artifacts` / `load_artifact`; child spans for registry round-trip, object-storage fetch, adapter translation, materialization.
 - **Reference Grafana dashboard** ships with the registry.
 

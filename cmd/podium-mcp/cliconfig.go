@@ -128,6 +128,8 @@ func applyConfigKV(c *config, key, val string) {
 		c.sessionToken = val
 	case "session-token-file":
 		c.sessionTokenFile = val
+	case "metrics-addr":
+		c.metricsAddr = val
 	}
 }
 

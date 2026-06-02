@@ -29,6 +29,12 @@ type resolutionCache struct {
 	mu  sync.Mutex
 	dir string
 	db  *bolt.DB
+	// observe, when set, receives one call per Resolve reporting whether the
+	// lookup hit (true) or missed (false). It feeds the §13.8
+	// podium_cache_hits_total / podium_cache_misses_total counters. Calls
+	// against a disabled cache (no backing db) are not reported. nil disables
+	// the callback.
+	observe func(hit bool)
 }
 
 // resolutionBucket is the single BoltDB bucket holding every resolution entry.
@@ -169,7 +175,12 @@ func (r *resolutionCache) RefreshLatest(id string, now time.Time) {
 // allowStale is set: offline-only mode and the degraded-network fallback serve
 // a stale `latest` because they cannot refresh it. Pinned versions are
 // immutable and never expire.
-func (r *resolutionCache) Resolve(id, version string, now time.Time, ttl time.Duration, allowStale bool) (string, bool) {
+func (r *resolutionCache) Resolve(id, version string, now time.Time, ttl time.Duration, allowStale bool) (hash string, hit bool) {
+	// §13.8: report the lookup outcome once, on the way out, but only when the
+	// cache is operational so a disabled cache does not inflate the miss count.
+	if r != nil && r.db != nil && r.observe != nil {
+		defer func() { r.observe(hit) }()
+	}
 	e, ok := r.getEntry(resolutionKey(id, version))
 	if !ok {
 		return "", false
