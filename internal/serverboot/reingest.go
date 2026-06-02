@@ -28,8 +28,18 @@ func buildReingestRunner(
 	scrubber *audit.PIIScrubber,
 	signer ingest.SignerFunc,
 	mreg *metrics.Registry,
+	auditMeter *server.AuditVolumeMeter,
+	tenantID string,
 ) server.ReingestRunner {
 	return func(ctx context.Context, lc store.LayerConfig, bg *server.BreakGlass) (*ingest.Result, error) {
+		// §4.7.8: refuse a new auditable write once the tenant has spent its
+		// daily audit-volume budget. The budget rolls over at the UTC day
+		// boundary; reads still serve.
+		if !auditMeter.Allow(tenantID) {
+			err := fmt.Errorf("%w: tenant %s exceeded its daily audit-volume budget", ingest.ErrAuditVolumeExceeded, tenantID)
+			countIngest(mreg, err)
+			return nil, err
+		}
 		prov, err := sourceProviderFor(lc.SourceType)
 		if err != nil {
 			countIngest(mreg, err)

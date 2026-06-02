@@ -44,6 +44,10 @@ var (
 	ErrInvalidArtifact = errors.New("ingest.invalid_artifact")
 	// ErrQuotaExceeded maps to quota.storage_exceeded (§4.7.8).
 	ErrQuotaExceeded = errors.New("quota.storage_exceeded")
+	// ErrAuditVolumeExceeded maps to quota.audit_volume_exceeded (§4.7.8): the
+	// tenant has spent its daily audit-volume budget, so a new auditable write
+	// is refused until the budget rolls over at the UTC day boundary.
+	ErrAuditVolumeExceeded = errors.New("quota.audit_volume_exceeded")
 )
 
 // FreezeWindow is one §4.7.2 freeze window: ingest is blocked when

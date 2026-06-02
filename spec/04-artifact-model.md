@@ -863,6 +863,8 @@ Per-org limits, admin-configurable: storage (bytes), search QPS, materialization
 
 `podium quota` CLI surfaces current usage and limits. Quota exhaustion returns structured errors (`quota.storage_exceeded`, etc.).
 
+The audit-volume limit is a per-tenant daily cap on emitted audit events. Each event counts against the current UTC day; once the cap is reached, new ingest writes are refused with `quota.audit_volume_exceeded` until the count resets at the day boundary. Reads continue to serve, so a spent budget bounds write-driven audit growth without dropping events.
+
 ### 4.7.9 Signing
 
 Each artifact version is signed by the author's key at commit time, or by a registry-managed key at ingest. Two key models:

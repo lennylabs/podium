@@ -197,6 +197,18 @@ func envInt(key string, def int) int {
 	return n
 }
 
+func envInt64(key string, def int64) int64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n < 0 {
+		return def
+	}
+	return n
+}
+
 // parseAuditSampleRates parses the §8.4 sampling spec
 // "TYPE=RATE,TYPE=RATE" (e.g. "domain.loaded=0.1,artifact.loaded=0.5")
 // into a per-event-type keep-rate map. Malformed entries and rates
@@ -953,14 +965,22 @@ func Run() error {
 	if auditSink != nil {
 		baseEmitter = auditEmitterFor(auditSink, scrubber, auditSampler)
 	}
+	// §4.7.8 audit-volume quota: count every emitted audit event against the
+	// tenant's daily budget so the §7.3.1 reingest path can refuse new writes
+	// once it is spent. The recorder is added only when enforcement is on.
+	auditMeter := server.NewAuditVolumeMeter(cfg.auditVolumePerDay)
+	emitter := baseEmitter
+	if cfg.auditVolumePerDay > 0 {
+		emitter = auditVolumeEmitter(auditMeter, tenantID, emitter)
+	}
 	// §13.8: the visibility-denial metric is driven from the registry audit
-	// stream, so wrap the base emitter (which may be nil) when metrics are on.
-	// This installs an emitter even with no sink, so the counter still moves.
+	// stream, so wrap the emitter (which may be nil) when metrics are on. This
+	// installs an emitter even with no sink, so the counter still moves.
 	switch {
 	case mreg != nil:
-		registry = registry.WithAudit(metricsAuditEmitter(mreg, baseEmitter))
-	case baseEmitter != nil:
-		registry = registry.WithAudit(baseEmitter)
+		registry = registry.WithAudit(metricsAuditEmitter(mreg, emitter))
+	case emitter != nil:
+		registry = registry.WithAudit(emitter)
 	}
 	if auditSink != nil {
 		// spec §8.1: the same §8.3 sink records the HTTP-boundary events —
@@ -976,7 +996,7 @@ func Run() error {
 	// lint, hash, store, publish events) instead of only recording intent.
 	// It carries the §4.7.2 freeze windows so an active window blocks ingest
 	// unless the manual reingest passes break-glass.
-	layers.WithReingestRunner(buildReingestRunner(st, srv, cfg, resourcePut, auditSink, scrubber, ingestSigner, mreg))
+	layers.WithReingestRunner(buildReingestRunner(st, srv, cfg, resourcePut, auditSink, scrubber, ingestSigner, mreg, auditMeter, tenantID))
 
 	// §8.6 transparency anchoring: when the operator enables
 	// PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS, a goroutine periodically
@@ -1215,6 +1235,11 @@ type Config struct {
 	// §4.7.8 rate limits.
 	searchQPSLimit       int
 	materializeRateLimit int
+	// §4.7.8 audit-volume quota: the per-tenant maximum number of audit
+	// events per UTC day. When exceeded, new auditable writes (reingest /
+	// inbound webhook) are refused with quota.audit_volume_exceeded. Zero
+	// disables enforcement.
+	auditVolumePerDay int64
 	// §13.10 standalone bootstrap layer path. When non-empty,
 	// Run() opens the filesystem registry at the path, ingests
 	// every resolved layer, and persists a store.LayerConfig per
@@ -1451,6 +1476,7 @@ func LoadConfig() *Config {
 		// §4.7.8 rate limits.
 		searchQPSLimit:       envInt("PODIUM_QUOTA_SEARCH_QPS", 0),
 		materializeRateLimit: envInt("PODIUM_QUOTA_MATERIALIZE_RATE", 0),
+		auditVolumePerDay:    envInt64("PODIUM_QUOTA_AUDIT_VOLUME_PER_DAY", 0),
 		// §13.10 standalone bootstrap layer path.
 		layerPath: os.Getenv("PODIUM_LAYER_PATH"),
 		// §13.1.1 evaluation-stack bootstrap admins.

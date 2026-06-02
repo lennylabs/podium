@@ -948,6 +948,8 @@ func writeReingestError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusUnprocessableEntity, "ingest.lint_failed", err.Error())
 	case errors.Is(err, ingest.ErrQuotaExceeded):
 		writeError(w, http.StatusTooManyRequests, "quota.storage_exceeded", err.Error())
+	case errors.Is(err, ingest.ErrAuditVolumeExceeded):
+		writeError(w, http.StatusTooManyRequests, "quota.audit_volume_exceeded", err.Error())
 	case errors.Is(err, ingest.ErrPublicModeSensitive):
 		writeError(w, http.StatusUnprocessableEntity, "ingest.public_mode_rejects_sensitive", err.Error())
 	case errors.Is(err, source.ErrSourceUnreachable):
