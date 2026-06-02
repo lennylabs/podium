@@ -931,8 +931,34 @@ func TestReadme_SyncOverrideAdd(t *testing.T) {
 }
 
 // T-D-readme-70 — sync save-as captures a named profile.
+// §7.5.6: a real sync records the resolved scope in the target lock, and
+// save-as renders that scope into a sync.yaml profile (F-7.5.8, fixed: the
+// lock's scope is populated, so the captured profile reproduces --include).
 func TestReadme_SyncSaveAs(t *testing.T) {
-	t.Skip("blocked by F-7.5.8: sync.Run never populates the lock's profile and scope, breaking save-as")
+	t.Parallel()
+	ws := t.TempDir()
+	tgt := t.TempDir()
+	env := []string{"HOME=" + t.TempDir()}
+	reg := writeRegistry(t, map[string]string{
+		"finance/invoice/ARTIFACT.md": contextArtifact("Vendor invoice variance reference for the finance team here."),
+		"personal/note/ARTIFACT.md":   contextArtifact("Personal note about variance tracking and reminders for later."),
+	})
+	// Seed: a real sync scoped to finance/** writes the lock's scope.include.
+	seed := runPodium(t, ws, env, "sync", "--registry", reg, "--target", tgt, "--harness", "none", "--include", "finance/**")
+	if seed.Exit != 0 {
+		t.Fatalf("seed sync exit=%d stderr=%s", seed.Exit, seed.Stderr)
+	}
+	// save-as captures the lock's scope as a named profile.
+	res := runPodium(t, ws, env, "sync", "save-as", "--profile", "dev-focus", "--target", tgt)
+	if res.Exit != 0 {
+		t.Fatalf("sync save-as exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stdout, "profile: dev-focus") {
+		t.Errorf("stdout missing `profile: dev-focus`:\n%s", res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "finance/**") {
+		t.Errorf("save-as did not reproduce the lock's include scope (F-7.5.8):\n%s", res.Stdout)
+	}
 }
 
 // T-D-readme-71 — cache prune removes content-cache buckets older than N days.

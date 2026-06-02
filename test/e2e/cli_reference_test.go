@@ -1666,9 +1666,20 @@ func TestCLI_RegistryEnvDefault(t *testing.T) {
 	}
 }
 
-// spec: doc "Environment variables", PODIUM_HARNESS default harness.
+// spec: doc "Environment variables", PODIUM_HARNESS default harness. §7.5.2:
+// an unset --harness falls through to PODIUM_HARNESS, so the skill materializes
+// in the claude-code layout (.claude/skills/<name>/SKILL.md) with no flag.
 func TestCLI_HarnessEnvDefault(t *testing.T) {
-	t.Skip("blocked by F-7.5.13: `podium sync` ignores PODIUM_HARNESS and always defaults the adapter to none")
+	reg := writeRegistry(t, map[string]string{
+		"personal/greet/ARTIFACT.md": greetSkillArtifact,
+		"personal/greet/SKILL.md":    greetSkillBody,
+	})
+	tgt := t.TempDir()
+	env := []string{"HOME=" + t.TempDir(), "PODIUM_HARNESS=claude-code"}
+	res := runPodium(t, t.TempDir(), env, "sync", "--registry", reg, "--target", tgt)
+	cliWantExit(t, res, 0, "sync with PODIUM_HARNESS=claude-code")
+	body := readFile(t, filepath.Join(tgt, ".claude/skills/greet/SKILL.md"))
+	cliContains(t, body, "Greet", "skill materialized via PODIUM_HARNESS=claude-code")
 }
 
 // spec: doc "Environment variables", PODIUM_CACHE_MODE offline-only.
@@ -1696,9 +1707,21 @@ func TestCLI_VerifySignaturesNever(t *testing.T) {
 	t.Skip("filesystem-source `podium sync` does not verify signatures; PODIUM_VERIFY_SIGNATURES applies on the MCP/SDK materialization path with signed artifacts")
 }
 
-// spec: doc "Environment variables", PODIUM_NO_AUTOSTANDALONE.
+// spec: doc "Environment variables", PODIUM_NO_AUTOSTANDALONE. §13.10: with
+// PODIUM_NO_AUTOSTANDALONE=1 and no registry.yaml on any searched path, a
+// zero-flag `podium serve` refuses to auto-bootstrap and exits non-zero without
+// binding a port. No --bind is passed: --bind maps to PODIUM_BIND, which counts
+// as explicit server config and would suppress the refusal. cliRunServe enforces
+// a deadline so a regression that does bootstrap is caught as a timeout rather
+// than hanging the suite.
 func TestCLI_NoAutoStandalone(t *testing.T) {
-	t.Skip("blocked by F-13.10.1: PODIUM_NO_AUTOSTANDALONE is never read by serverboot; zero-flag serve always auto-bootstraps")
+	env := []string{"HOME=" + t.TempDir(), "PODIUM_NO_AUTOSTANDALONE=1"}
+	res, timedOut := cliRunServe(t, env, 20*time.Second, "serve")
+	if timedOut {
+		t.Fatalf("serve with PODIUM_NO_AUTOSTANDALONE=1 kept running; expected a refusal without binding a port")
+	}
+	cliWantNonZero(t, res, "serve with PODIUM_NO_AUTOSTANDALONE=1")
+	cliContains(t, res.Stderr, "requires explicit setup", "no-autostandalone refusal message")
 }
 
 // ===== Authorization & misc (T-D-cli-127..140) =========================
