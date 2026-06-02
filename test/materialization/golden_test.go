@@ -74,8 +74,10 @@ var canonicalArtifacts = []fixture{
 		artifact: "---\ntype: rule\nversion: 1.0.0\nrule_mode: explicit\n---\n\nPerform a deep architectural review when invoked.\n",
 	},
 	{
-		id:       "team/notify",
-		artifact: "---\ntype: hook\nversion: 1.0.0\nhook_event: stop\nhook_action: echo done\n---\n\nNotify when the agent stops.\n",
+		id: "team/notify",
+		// Multiline block-scalar action: the embedded newline must be escaped in
+		// the Codex config.toml basic string or the TOML is invalid.
+		artifact: "---\ntype: hook\nversion: 1.0.0\nhook_event: stop\nhook_action: |\n  echo done\n  echo bye\n---\n\nNotify when the agent stops.\n",
 	},
 	{
 		id:       "team/guard",

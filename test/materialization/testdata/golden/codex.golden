@@ -22,7 +22,7 @@ Review the diff and report defects.
 [[hooks.Stop]]
 [[hooks.Stop.hooks]]
 type = "command"
-command = "echo done"
+command = "echo done\necho bye"
 # podium:end:team/notify
 
 # podium:begin:team/guard

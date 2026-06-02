@@ -726,6 +726,35 @@ func TestHarness_CodexHookNativeClean(t *testing.T) {
 	}
 }
 
+// T-D-configure-harness-43a — a codex hook materializes into the config.toml
+// `hooks` table (the `[[hooks.<Event>]]` array-of-tables), not a standalone
+// .codex/hooks.json (which codex never reads). The block-scalar action's newline
+// is escaped so the config.toml stays valid TOML. §6.7: codex hook = config.toml
+// (cfg).
+func TestHarness_CodexHookMaterializesToConfigToml(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"audit/log/ARTIFACT.md": "---\ntype: hook\nname: log\nversion: 1.0.0\ndescription: Log stop.\nhook_event: stop\nhook_action: |\n  echo hi\n  echo bye\ntarget_harnesses: [codex]\n---\n\nbody\n",
+	})
+	target := t.TempDir()
+	chSync(t, reg, target, "codex")
+
+	// The hook merges into config.toml under [[hooks.Stop]], inside a marker block.
+	cfg := readFile(t, filepath.Join(target, ".codex", "config.toml"))
+	for _, want := range []string{"podium:begin:audit/log", "[[hooks.Stop]]", "[[hooks.Stop.hooks]]", `type = "command"`, `command = "echo hi\necho bye`} {
+		if !strings.Contains(cfg, want) {
+			t.Errorf(".codex/config.toml missing %q:\n%s", want, cfg)
+		}
+	}
+	// The embedded newline must be escaped, never a literal newline inside the
+	// basic string (that would be invalid TOML).
+	if strings.Contains(cfg, "command = \"echo hi\n") {
+		t.Errorf(".codex/config.toml has an unescaped newline in the hook command (invalid TOML):\n%s", cfg)
+	}
+	// The dead standalone hooks.json must not be written.
+	mustNotExist(t, filepath.Join(target, ".codex", "hooks.json"))
+}
+
 // T-D-configure-harness-44 — codex init+sync two-step.
 func TestHarness_CodexInitSync(t *testing.T) {
 	t.Parallel()

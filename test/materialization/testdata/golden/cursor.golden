@@ -21,7 +21,7 @@ Run the deploy pipeline for the named environment.
   "hooks": {
     "stop": [
       {
-        "command": "echo done",
+        "command": "echo done\necho bye",
         "x-podium-id": "team/notify"
       }
     ]

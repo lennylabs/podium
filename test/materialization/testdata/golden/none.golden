@@ -59,7 +59,9 @@ print('hello')
 type: hook
 version: 1.0.0
 hook_event: stop
-hook_action: echo done
+hook_action: |
+  echo done
+  echo bye
 ---
 
 Notify when the agent stops.

@@ -114,9 +114,16 @@ func codexAgentTOML(src Source, name string) []byte {
 	return []byte(b.String())
 }
 
+// tomlBasic returns s as a TOML basic string. A basic string cannot contain a
+// literal control character, so newline, carriage return, and tab are escaped
+// (a multiline hook_action block scalar otherwise produces invalid TOML). The
+// backslash is escaped first so the inserted escapes are not doubled.
 func tomlBasic(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, "\n", `\n`)
+	s = strings.ReplaceAll(s, "\r", `\r`)
+	s = strings.ReplaceAll(s, "\t", `\t`)
 	return `"` + s + `"`
 }
 

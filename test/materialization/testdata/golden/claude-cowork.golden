@@ -131,7 +131,7 @@ print('hello')
       {
         "hooks": [
           {
-            "command": "echo done",
+            "command": "echo done\necho bye",
             "type": "command"
           }
         ],
