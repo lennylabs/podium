@@ -72,9 +72,13 @@ func (p *Postgres) ReplicationLagSeconds(ctx context.Context) (int, error) {
 
 // applySchema runs the schema migrations idempotently. The Postgres
 // schema mirrors the SQLite layout but uses native types: BYTEA for
-// blobs, BOOLEAN for bool fields, TIMESTAMPTZ for timestamps.
+// blobs, BOOLEAN for bool fields, TIMESTAMPTZ for timestamps. Per spec
+// §13.4 the setup is additive: tables are created when absent and columns
+// added after a table first shipped are backfilled by
+// applyAdditivePostgres, so a binary upgrade migrates an existing database
+// forward in place without a separate migration step.
 func (p *Postgres) applySchema() error {
-	stmts := []string{
+	tableStmts := []string{
 		`CREATE TABLE IF NOT EXISTS tenants (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
@@ -108,10 +112,6 @@ func (p *Postgres) applySchema() error {
 			deleted_at TIMESTAMPTZ,
 			PRIMARY KEY (tenant_id, artifact_id, version)
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_manifests_tenant_type
-			ON manifests(tenant_id, type)`,
-		`CREATE INDEX IF NOT EXISTS idx_manifests_tenant_layer
-			ON manifests(tenant_id, layer)`,
 		`CREATE TABLE IF NOT EXISTS domains (
 			tenant_id TEXT NOT NULL,
 			layer TEXT NOT NULL,
@@ -119,16 +119,12 @@ func (p *Postgres) applySchema() error {
 			raw BYTEA,
 			PRIMARY KEY (tenant_id, layer, path)
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_domains_tenant_path
-			ON domains(tenant_id, path)`,
 		`CREATE TABLE IF NOT EXISTS dependencies (
 			tenant_id TEXT NOT NULL,
 			from_artifact TEXT NOT NULL,
 			to_artifact TEXT NOT NULL,
 			kind TEXT NOT NULL
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_deps_to
-			ON dependencies(tenant_id, to_artifact)`,
 		`CREATE TABLE IF NOT EXISTS admin_grants (
 			user_id TEXT NOT NULL,
 			org_id TEXT NOT NULL,
@@ -170,10 +166,35 @@ func (p *Postgres) applySchema() error {
 			last_error TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY (tenant_id, artifact_id, version)
 		)`,
+	}
+	// Indexes are created after the additive column migration because
+	// idx_manifests_tenant_layer references the `layer` column, which the
+	// migration backfills on a database initialized by an earlier binary.
+	indexStmts := []string{
+		`CREATE INDEX IF NOT EXISTS idx_manifests_tenant_type
+			ON manifests(tenant_id, type)`,
+		`CREATE INDEX IF NOT EXISTS idx_manifests_tenant_layer
+			ON manifests(tenant_id, layer)`,
+		`CREATE INDEX IF NOT EXISTS idx_domains_tenant_path
+			ON domains(tenant_id, path)`,
+		`CREATE INDEX IF NOT EXISTS idx_deps_to
+			ON dependencies(tenant_id, to_artifact)`,
 		`CREATE INDEX IF NOT EXISTS idx_vector_pending_next_retry
 			ON vector_pending(next_retry_at)`,
 	}
-	for _, sql := range stmts {
+	for _, sql := range tableStmts {
+		if _, err := p.db.Exec(sql); err != nil {
+			return fmt.Errorf("schema: %w (statement: %s)", err, sql)
+		}
+	}
+	// §13.4 additive migration: CREATE TABLE IF NOT EXISTS is a no-op on a
+	// table that already exists, so columns added after that table first
+	// shipped are added here against a database initialized by an earlier
+	// binary.
+	if err := applyAdditivePostgres(p.db); err != nil {
+		return err
+	}
+	for _, sql := range indexStmts {
 		if _, err := p.db.Exec(sql); err != nil {
 			return fmt.Errorf("schema: %w (statement: %s)", err, sql)
 		}
