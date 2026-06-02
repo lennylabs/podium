@@ -9,10 +9,13 @@
 // whose binary is absent, or that exposes no such command (an IDE or web
 // product), is skipped with a reason.
 //
-// Tier C (TestHarnessAgentSmoke) is double-gated (this build tag plus
+// Tier C (TestHarnessArtifactTypes) is double-gated (this build tag plus
 // PODIUM_HARNESS_AGENT=1 and the harness being authenticated, via an API key or
-// a stored CLI login) and runs one real headless agent turn that must surface a
-// marker carried by a materialized always-rule.
+// a stored CLI login). It materializes each artifact type and drives a real
+// headless agent turn per type, asserting the harness surfaces the type's unique
+// marker (in the reply for rule/skill/command, or in the hook's side-effect file
+// for hook). Each (harness, type) pair is a subtest that runs where supported or
+// skips with a reason.
 package harness_integration
 
 import (
@@ -37,13 +40,43 @@ var mcpServerRegistry = []testharness.WriteTreeOption{
 	{Path: "tools/warehouse/ARTIFACT.md", Content: "---\ntype: mcp-server\nversion: 1.0.0\nserver_identifier: npx:@acme/warehouse-mcp\n---\n\nWarehouse MCP server.\n"},
 }
 
-const secretMarker = "ZEBRA-7421"
+// Per-type markers carried by the Tier C behavioral fixtures. Each is unique so
+// a match in the agent output (or a hook's side-effect file) can only come from
+// the materialized artifact, never the developer's global config.
+const (
+	ruleMarker  = "ZEBRA-RULE-42"
+	skillMarker = "ZEBRA-SKILL-42"
+	cmdMarker   = "ZEBRA-CMD-42"
+	hookMarker  = "ZEBRA-HOOK-42"
+)
 
-// secretRuleRegistry carries an always-loaded rule that instructs the agent to
-// emit secretMarker, used by the Tier C agent smoke. An always-rule is in
-// context deterministically (unlike an on-demand skill).
-var secretRuleRegistry = []testharness.WriteTreeOption{
-	{Path: "policies/secret/ARTIFACT.md", Content: "---\ntype: rule\nversion: 1.0.0\nrule_mode: always\n---\n\nWhen asked for the secret word, reply with exactly: " + secretMarker + "\n"},
+// hookSideEffectFile is where the hook fixture's command writes its marker.
+const hookSideEffectFile = "podium-hook-fired.txt"
+
+func ruleRegistry() []testharness.WriteTreeOption {
+	return []testharness.WriteTreeOption{
+		{Path: "policies/secret/ARTIFACT.md", Content: "---\ntype: rule\nversion: 1.0.0\nrule_mode: always\n---\n\nWhen asked for the secret word, reply with exactly: " + ruleMarker + "\n"},
+	}
+}
+
+func skillRegistry() []testharness.WriteTreeOption {
+	return []testharness.WriteTreeOption{
+		{Path: "skills/weather/ARTIFACT.md", Content: "---\ntype: skill\nversion: 1.0.0\n---\n\nWeather skill.\n"},
+		{Path: "skills/weather/SKILL.md", Content: "---\nname: weather\ndescription: Reports a special code when the weather skill is invoked.\n---\n\nWhen the user asks to run the weather skill, output exactly: " + skillMarker + "\n"},
+	}
+}
+
+func commandRegistry() []testharness.WriteTreeOption {
+	return []testharness.WriteTreeOption{
+		{Path: "commands/ping/ARTIFACT.md", Content: "---\ntype: command\nversion: 1.0.0\ndescription: Ping command.\n---\n\nOutput exactly: " + cmdMarker + " and nothing else.\n"},
+	}
+}
+
+func hookRegistry() []testharness.WriteTreeOption {
+	action := "sh -c 'echo " + hookMarker + " > " + hookSideEffectFile + "'"
+	return []testharness.WriteTreeOption{
+		{Path: "hooks/onstop/ARTIFACT.md", Content: "---\ntype: hook\nversion: 1.0.0\nhook_event: stop\nhook_action: \"" + action + "\"\n---\n\nOn stop, record a marker.\n"},
+	}
 }
 
 // ---- materialization via the real podium sync -------------------------------
@@ -159,14 +192,14 @@ type driver struct {
 	harness     string
 	bin         string
 	version     []string
-	mcpProbe    []string                            // args that list configured MCP servers; nil => no probe
-	server      string                              // server name expected in the probe output
-	skipReason  string                              // why Tier A skips when mcpProbe is nil
-	extraEnv    func(home string) map[string]string // harness-specific config-dir redirects
-	agentExec   func(prompt string) []string        // Tier C headless prompt; nil => no agent smoke
-	keyEnv      string                              // API-key env var that authorizes the agent smoke
-	loginProbe  []string                            // command reporting auth status (stored-login alternative to keyEnv)
-	loginMarker string                              // substring of loginProbe output meaning "authenticated"
+	mcpProbe    []string                                     // args that list configured MCP servers; nil => no probe
+	server      string                                       // server name expected in the probe output
+	skipReason  string                                       // why Tier A skips when mcpProbe is nil
+	extraEnv    func(home, project string) map[string]string // harness-specific config-dir redirects for the Tier A probe
+	agentExec   func(prompt string) []string                 // Tier C headless prompt; nil => no agent exec
+	keyEnv      string                                       // API-key env var that authorizes the agent run
+	loginProbe  []string                                     // command reporting auth status (stored-login alternative to keyEnv)
+	loginMarker string                                       // substring of loginProbe output meaning "authenticated"
 }
 
 var drivers = []driver{
@@ -176,11 +209,16 @@ var drivers = []driver{
 		version:  []string{"--version"},
 		mcpProbe: []string{"mcp", "list"},
 		server:   "warehouse",
-		extraEnv: func(home string) map[string]string {
+		// claude reads the project .mcp.json from cwd; point CLAUDE_CONFIG_DIR at
+		// an empty dir so the user-level ~/.claude.json cannot supply the server.
+		extraEnv: func(home, project string) map[string]string {
 			return map[string]string{"CLAUDE_CONFIG_DIR": filepath.Join(home, ".claude")}
 		},
 		agentExec: func(prompt string) []string { return []string{"-p", prompt} },
 		keyEnv:    "ANTHROPIC_API_KEY",
+		// No status command; a tiny headless turn proves the stored login works.
+		loginProbe:  []string{"-p", "Reply with exactly: PODIUMOK"},
+		loginMarker: "PODIUMOK",
 	},
 	{
 		harness:  "codex",
@@ -188,11 +226,16 @@ var drivers = []driver{
 		version:  []string{"--version"},
 		mcpProbe: []string{"mcp", "list"},
 		server:   "warehouse",
-		extraEnv: func(home string) map[string]string {
-			return map[string]string{"CODEX_HOME": filepath.Join(home, ".codex")}
+		// codex reads MCP config from CODEX_HOME/config.toml, not the project
+		// .codex/config.toml; point CODEX_HOME at the materialized .codex dir so
+		// `codex mcp list` validates the config.toml format Podium wrote.
+		extraEnv: func(home, project string) map[string]string {
+			return map[string]string{"CODEX_HOME": filepath.Join(project, ".codex")}
 		},
-		agentExec: func(prompt string) []string { return []string{"exec", prompt} },
-		keyEnv:    "OPENAI_API_KEY",
+		agentExec:   func(prompt string) []string { return []string{"exec", "--skip-git-repo-check", prompt} },
+		keyEnv:      "OPENAI_API_KEY",
+		loginProbe:  []string{"login", "status"},
+		loginMarker: "Logged in",
 	},
 	{
 		harness:   "gemini",
@@ -224,7 +267,7 @@ var drivers = []driver{
 		skipReason: "cursor-agent mcp list reflects approved servers, not raw .cursor/mcp.json; Cursor is covered by the Tier C agent run over .cursor/rules/*.mdc",
 		// --force accepts the workspace-trust prompt non-interactively; --print
 		// is the headless mode. cursor-agent authorizes via a stored login (its
-		// `status` command), so the agent smoke accepts that or CURSOR_API_KEY.
+		// `status` command), so the agent run accepts that or CURSOR_API_KEY.
 		agentExec:   func(prompt string) []string { return []string{"--print", "--force", "--output-format", "text", prompt} },
 		keyEnv:      "CURSOR_API_KEY",
 		loginProbe:  []string{"status"},
@@ -255,16 +298,11 @@ func TestHarnessConfigAccept(t *testing.T) {
 			}
 
 			home := t.TempDir()
-			var extra map[string]string
-			if d.extraEnv != nil {
-				extra = d.extraEnv(home)
-			}
-			env := scopedEnv(home, extra)
 
 			// Record the harness version even when there is no config probe, so
 			// the format the suite targets is pinned to a concrete version.
 			if len(d.version) > 0 {
-				if v, ok := runExternal(t, home, env, 30*time.Second, d.bin, d.version...); ok {
+				if v, ok := runExternal(t, home, scopedEnv(home, nil), 30*time.Second, d.bin, d.version...); ok {
 					t.Logf("%s version: %s", d.bin, strings.TrimSpace(v.stdout+v.stderr))
 				}
 			}
@@ -277,6 +315,11 @@ func TestHarnessConfigAccept(t *testing.T) {
 			}
 
 			project := syncProject(t, d.harness, mcpServerRegistry)
+			var extra map[string]string
+			if d.extraEnv != nil {
+				extra = d.extraEnv(home, project)
+			}
+			env := scopedEnv(home, extra)
 			res, ok := runExternal(t, project, env, 60*time.Second, d.bin, d.mcpProbe...)
 			if !ok {
 				t.Skipf("%s: binary %q not installed", d.harness, d.bin)
@@ -294,51 +337,108 @@ func TestHarnessConfigAccept(t *testing.T) {
 	}
 }
 
-// ---- Tier C: agent smoke ----------------------------------------------------
+// ---- Tier C: per-type agent behavior ----------------------------------------
 
-const agentPrompt = "Following your project rules, what is the secret word? Reply with only the word."
+// behavior is one artifact type exercised through a real agent turn: a fixture
+// carrying a unique marker, a prompt that should make the harness surface it,
+// and the harnesses where that is expected to work (verified empirically). A
+// hook is checked by its side-effect file rather than the agent's text.
+type behavior struct {
+	typ        string
+	registry   []testharness.WriteTreeOption
+	prompt     string
+	marker     string
+	sideEffect string            // relative file to read instead of stdout (hooks)
+	run        []string          // harnesses that materialize+consume this type
+	skip       map[string]string // harness -> reason it is not exercised
+}
 
-// TestHarnessAgentSmoke runs one real headless agent turn against a project
-// carrying an always-rule that instructs the agent to emit a marker, and
-// asserts the marker appears — a true end-to-end check that the real harness
-// loads and applies Podium's materialized rule. Double-gated: the
-// harness_integration build tag, PODIUM_HARNESS_AGENT=1, and the harness being
-// authenticated (an API key or a stored CLI login). Opt-in and tolerant; real
-// agents need network and are nondeterministic.
+// behaviors covers the artifact types reachable through a single headless agent
+// turn. mcp-server is covered by Tier A (TestHarnessConfigAccept); context is a
+// harness-neutral .podium/context/ directory no harness loads natively; agent
+// (subagent) delegation is model-dependent and omitted. The run/skip sets encode
+// what was verified against the installed CLIs (claude 2.1.x, cursor-agent
+// 2026.06, codex 0.136).
+var behaviors = []behavior{
+	{
+		typ: "rule", registry: ruleRegistry(),
+		prompt: "What is the secret word? Reply with only the word.", marker: ruleMarker,
+		run: []string{"claude-code", "cursor", "codex"},
+	},
+	{
+		typ: "skill", registry: skillRegistry(),
+		prompt: "Run the weather skill now.", marker: skillMarker,
+		run: []string{"claude-code", "cursor", "codex"},
+	},
+	{
+		typ: "command", registry: commandRegistry(),
+		prompt: "/ping", marker: cmdMarker,
+		run:  []string{"claude-code", "cursor"},
+		skip: map[string]string{"codex": "command is ✗ for codex (§6.7.1): folded into skills"},
+	},
+	{
+		typ: "hook", registry: hookRegistry(),
+		prompt: "Reply with only: hi", marker: hookMarker, sideEffect: hookSideEffectFile,
+		run: []string{"claude-code"},
+		skip: map[string]string{
+			"cursor": "cursor-agent --print did not fire the materialized .cursor/hooks.json stop hook in testing",
+			"codex":  "codex exec did not fire the materialized .codex/hooks.json Stop hook in testing",
+		},
+	},
+}
+
+// TestHarnessArtifactTypes materializes each artifact type through the real
+// `podium sync` and drives the real harness agent to confirm it loads and
+// applies the materialized artifact — a true end-to-end check per type. Each
+// type's marker is unique, so a match can only come from Podium's output.
 //
-// Unlike Tier A, this runs with the real environment (not a scoped HOME): the
-// harness's stored login lives in $HOME, and the synced project supplies the
-// rule via the working directory. The unique marker makes a false positive from
-// the developer's global config effectively impossible.
-func TestHarnessAgentSmoke(t *testing.T) {
+// Double-gated: the harness_integration build tag, PODIUM_HARNESS_AGENT=1, and
+// the harness being authenticated. It runs with the real environment (the
+// harness's stored login lives in $HOME; the synced project supplies the
+// artifact via the working directory). Opt-in and tolerant; real agents need
+// network and are nondeterministic.
+func TestHarnessArtifactTypes(t *testing.T) {
 	if os.Getenv("PODIUM_HARNESS_AGENT") != "1" {
-		t.Skip("agent smoke is opt-in: set PODIUM_HARNESS_AGENT=1 (and authenticate the harness CLI) to run")
+		t.Skip("opt-in: set PODIUM_HARNESS_AGENT=1 (and authenticate the harness CLI) to run")
 	}
-	for _, d := range drivers {
-		d := d
-		if d.agentExec == nil {
-			continue
-		}
-		t.Run(d.harness, func(t *testing.T) {
+	for _, harness := range []string{"claude-code", "cursor", "codex"} {
+		harness := harness
+		d, found := driverFor(harness)
+		t.Run(harness, func(t *testing.T) {
+			if !found || d.agentExec == nil {
+				t.Skipf("%s: no agent driver", harness)
+			}
 			if _, err := exec.LookPath(d.bin); err != nil {
-				t.Skipf("%s: binary %q not installed", d.harness, d.bin)
+				t.Skipf("%s: binary %q not installed", harness, d.bin)
 			}
 			if !agentAuthed(t, d) {
-				t.Skipf("%s: not authenticated (set %s or log in via the harness CLI)", d.harness, d.keyEnv)
+				t.Skipf("%s: not authenticated (set %s or log in via the harness CLI)", harness, d.keyEnv)
 			}
-
-			project := syncProject(t, d.harness, secretRuleRegistry)
-			args := d.agentExec(agentPrompt)
-			res, ok := runExternal(t, project, os.Environ(), 180*time.Second, d.bin, args...)
-			if !ok {
-				t.Skipf("%s: binary %q not installed", d.harness, d.bin)
+			for _, b := range behaviors {
+				b := b
+				t.Run(b.typ, func(t *testing.T) {
+					if reason, ok := b.skip[harness]; ok {
+						t.Skipf("%s/%s: %s", harness, b.typ, reason)
+					}
+					if !contains(b.run, harness) {
+						t.Skipf("%s/%s: not applicable", harness, b.typ)
+					}
+					project := syncProject(t, harness, b.registry)
+					res, ok := runExternal(t, project, os.Environ(), 180*time.Second, d.bin, d.agentExec(b.prompt)...)
+					if !ok {
+						t.Skipf("%s: binary %q not installed", harness, d.bin)
+					}
+					got := res.stdout + res.stderr
+					if b.sideEffect != "" {
+						got = readSideEffect(project, b.sideEffect)
+					}
+					if !strings.Contains(got, b.marker) {
+						t.Errorf("%s/%s: marker %q absent (exit=%d):\n%s", harness, b.typ, b.marker, res.exit, truncate(got, 1200))
+						return
+					}
+					t.Logf("%s/%s: materialized and consumed (marker %q present)", harness, b.typ, b.marker)
+				})
 			}
-			out := res.stdout + res.stderr
-			if !strings.Contains(out, secretMarker) {
-				t.Errorf("%s agent did not surface the always-rule marker %q (exit=%d):\n%s",
-					d.harness, secretMarker, res.exit, out)
-			}
-			t.Logf("%s applied the materialized always-rule (marker %q present)", d.harness, secretMarker)
 		})
 	}
 }
@@ -356,4 +456,37 @@ func agentAuthed(t *testing.T, d driver) bool {
 		}
 	}
 	return false
+}
+
+func driverFor(harness string) (driver, bool) {
+	for _, d := range drivers {
+		if d.harness == harness {
+			return d, true
+		}
+	}
+	return driver{}, false
+}
+
+func readSideEffect(project, rel string) string {
+	b, err := os.ReadFile(filepath.Join(project, rel))
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+func contains(xs []string, x string) bool {
+	for _, v := range xs {
+		if v == x {
+			return true
+		}
+	}
+	return false
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }

@@ -29,46 +29,67 @@ recorded against a concrete version.
 A harness that exposes no non-interactive config command (an IDE or a web
 product) is listed and skipped with a reason rather than silently omitted.
 
-## Tier C — agent smoke (opt-in, needs network + auth)
+## Tier C — per-type agent behavior (opt-in, needs network + auth)
 
-`TestHarnessAgentSmoke` runs one real headless agent turn against a project
-carrying an always-loaded rule that instructs the agent to emit a marker
-(`ZEBRA-7421`), and asserts the marker appears — a true end-to-end check that the
-harness loaded and applied Podium's materialized rule. It is double-gated: the
-`harness_integration` build tag, `PODIUM_HARNESS_AGENT=1`, and the harness being
-authenticated (an API-key env var, or a stored CLI login the driver detects).
-It runs with the real environment (so the stored login in `$HOME` works); the
-unique marker makes a false positive from global config effectively impossible.
-It is tolerant and may be flaky; real agents need network and are
-nondeterministic.
+`TestHarnessArtifactTypes` materializes each artifact type through the real
+`podium sync` and drives the real harness agent to confirm it loads and applies
+the artifact. Each type carries a **unique marker**; a `rule` / `skill` /
+`command` is verified by the marker in the agent's reply, a `hook` by the marker
+in the side-effect file its command writes. A match can only come from Podium's
+output, so it is a true end-to-end check per type.
+
+Double-gated: the `harness_integration` build tag, `PODIUM_HARNESS_AGENT=1`, and
+the harness being authenticated (an API-key env var, or a stored CLI login the
+driver detects, e.g. `cursor-agent login`, `codex login`, `claude` login). It
+runs with the real environment so the stored login in `$HOME` works; the synced
+project supplies the artifact via the working directory.
 
 ```bash
-# stored CLI logins (e.g. `cursor-agent login`) are detected automatically;
-# API keys are an alternative for the harnesses that read them.
 PODIUM_HARNESS_AGENT=1 \
-  go test -tags harness_integration ./test/harness_integration/ -run TestHarnessAgentSmoke -v
+  go test -tags harness_integration ./test/harness_integration/ -run TestHarnessArtifactTypes -v -timeout 900s
 ```
 
-Verified here: **cursor** (cursor-agent 2026.06.02, logged in) loads the
-materialized `.cursor/rules/secret.mdc` and returns the marker.
+Every `(harness, type)` is a subtest: it runs and asserts where the type is
+supported, or skips with a reason otherwise. It is tolerant and may be flaky;
+real agents need network and are nondeterministic.
 
 ## Coverage and verification status
 
-| Harness | Tier A probe | Tier C exec | Notes |
-|---|---|---|---|
-| claude-code | `claude mcp list` | `claude -p` | **Verified** here against Claude Code 2.1.160 (Tier A passes: the synced `.mcp.json` is listed). |
-| codex | `codex mcp list` | `codex exec` | Candidate command; verify against the installed `codex --help`. |
-| gemini | `gemini mcp list` | `gemini -p` | Candidate command; verify against the installed `gemini --help`. |
-| opencode | (none yet) | `opencode run` | Confirm whether OpenCode exposes a non-interactive MCP-list command; until then the config probe skips. |
-| cursor | (approval-gated) | `cursor-agent --print --force` | `cursor-agent mcp list` reflects only *approved* servers (it has `mcp login`/`disable` approval commands), not the raw `.cursor/mcp.json`, so Tier A records the version and skips. **Verified end-to-end via Tier C** against `cursor-agent` 2026.06.02: with the CLI logged in, the agent loaded the materialized `.cursor/rules/secret.mdc` and returned the marker. Needs `--force` (accepts the workspace-trust prompt) and either a stored `cursor-agent login` or `CURSOR_API_KEY`. |
-| claude-desktop | — | — | No project-level surface. Skipped. |
-| claude-cowork | — | — | Web/marketplace; no local binary. Skipped. |
-| pi | — | — | No MCP surface. Skipped. |
-| hermes | — | — | No non-interactive config command. Skipped. |
+Verified end-to-end against **Claude Code 2.1.160**, **cursor-agent 2026.06.02**
+(logged in), and **codex-cli 0.136.0** (logged in). ✅ = the real harness
+consumed Podium's materialized artifact; ✗ = skipped with the noted reason.
 
-The `driver` table in `integration_test.go` holds these commands. The candidate
-rows (`codex`, `gemini`, `opencode`) were authored from each tool's documented
-CLI and must be confirmed against the installed binary the first time the suite
-runs where that binary is present; adjust the subcommand or demote `mcpProbe` to
-`nil` (skip) if the command differs. The recorded `--version` makes drift easy to
-spot.
+| Type | claude-code | cursor | codex | How it is checked |
+|---|---|---|---|---|
+| `mcp-server` | ✅ | approval-gated | ✅ | Tier A: `<harness> mcp list` reads back the synced server |
+| `rule` | ✅ | ✅ | ✅ | agent emits the always-rule marker |
+| `skill` | ✅ | ✅ | ✅ | agent loads SKILL.md on a triggering prompt |
+| `command` | ✅ | ✅ | ✗ (by design) | agent runs the slash command (`/ping`) |
+| `hook` | ✅ | ✗ (didn't fire) | ✗ (didn't fire) | the stop hook's command writes a marker file |
+| `agent` (subagent) | not covered | not covered | not covered | delegation is model-dependent; no deterministic marker |
+| `context` | n/a | n/a | n/a | harness-neutral `.podium/context/`; no harness loads it natively |
+
+Findings worth noting:
+
+- **mcp-server**: `cursor-agent mcp list` reflects only *approved* servers (it has
+  `mcp login`/`disable` approval commands), not the raw `.cursor/mcp.json`, so
+  Tier A records the cursor version and skips. Codex reads MCP config from
+  `CODEX_HOME/config.toml`, not the project `.codex/config.toml`, so the probe
+  points `CODEX_HOME` at the materialized `.codex` dir.
+- **hook**: Claude Code fires the materialized `.claude/settings.json` stop hook
+  in `-p` mode. `cursor-agent --print` and `codex exec` did **not** fire the
+  materialized `.cursor/hooks.json` / `.codex/hooks.json` stop hook in testing —
+  either headless mode does not run hooks, or those CLIs read hooks from a
+  different location/format. Worth a follow-up against each tool's hook docs.
+- **command**: `command` is `✗` for codex (§6.7.1), folded into skills.
+
+### Tier A harness commands
+
+| Harness | Tier A probe | Status |
+|---|---|---|
+| claude-code | `claude mcp list` | verified |
+| codex | `codex mcp list` (with `CODEX_HOME` at the synced `.codex`) | verified |
+| gemini | `gemini mcp list` | candidate — confirm against `gemini --help` |
+| opencode | (none yet) | confirm whether a non-interactive MCP-list exists |
+| cursor | (approval-gated) | records version, skips |
+| claude-desktop / claude-cowork / pi / hermes | — | skipped (no project surface / no CLI) |

@@ -9,8 +9,8 @@
 //
 //	go test -tags harness_integration ./test/harness_integration/ -v
 //
-// See README.md for the tiers (config-accept vs. agent smoke), the gates, and
-// the per-harness coverage. This file exists with no build tag so the package
-// is always buildable (and `go test` reports "no test files" rather than
+// See README.md for the tiers (config-accept vs. per-type agent behavior), the
+// gates, and the per-harness coverage. This file exists with no build tag so the
+// package is always buildable (and `go test` reports "no test files" rather than
 // failing) when the tag is absent.
 package harness_integration
