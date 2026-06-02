@@ -107,7 +107,7 @@ Don't declare both a generic hook (`pre_tool_use`) and the corresponding subtype
 
 ## Coverage varies by harness
 
-Not every harness implements every event in the canonical list. When the configured harness adapter does not support the chosen event, lint rejects ingest unless `target_harnesses:` excludes the unsupported harness.
+Not every harness implements every event in the canonical list. When an artifact declares `target_harnesses:`, lint rejects ingest if a named harness does not support the chosen event. When `target_harnesses:` is absent, ingest stays permissive and the unsupported event is caught at materialization: a `load_artifact` onto a harness that cannot translate the event fails with `materialize.untranslatable` (§6.9).
 
 For the events a specific harness emits, refer to that harness's hook documentation. The harness's own docs are the source of truth, since each vendor's surface evolves independently. The full roster of supported harnesses (with adapter values and documentation links) is in [Configure your harness](../consuming/configure-your-harness#supported-harnesses).
 

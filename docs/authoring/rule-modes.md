@@ -61,7 +61,7 @@ rule_mode: explicit
 
 ## How each harness honors them
 
-The harness adapter does the translation at materialization time. Each adapter writes the rule into the harness's native format using the closest equivalent it has. When a harness can't honor a mode natively, the adapter falls back (with a lint warning) or refuses (with a lint error), per the capability matrix.
+The harness adapter does the translation at materialization time. Each adapter writes the rule into the harness's native format using the closest equivalent it has. When a harness cannot honor a mode natively, the adapter falls back to an always-loaded block. A rule that declares `target_harnesses:` draws an ingest lint warning for a ⚠ mode and a lint error for a ✗ mode on a named harness. Without `target_harnesses:`, a ✗ mode is refused at materialization when the rule loads onto that harness (§6.9).
 
 | Mode | claude-code | claude-desktop | claude-cowork | cursor | codex | opencode | gemini | pi | hermes |
 |:--|:--|:--|:--|:--|:--|:--|:--|:--|:--|
@@ -70,7 +70,7 @@ The harness adapter does the translation at materialization time. Each adapter w
 | `auto` | ⚠ | ✗ | ⚠ | ✓ | ⚠ | ⚠ | ⚠ | ⚠ | ✓ |
 | `explicit` | ⚠ | ✗ | ⚠ | ✓ | ⚠ | ⚠ | ⚠ | ⚠ | ✓ |
 
-Legend: ✓ supported natively, ⚠ supported via fallback (lint warning), ✗ not supported (lint error or `target_harnesses:` opt-out required). This table mirrors the `rule_mode` rows of the §6.7.1 capability matrix.
+Legend: ✓ supported natively, ⚠ supported via fallback (ingest lint warns when a declared `target_harnesses:` names the harness, and materialization emits the degraded fallback), ✗ not supported (ingest lint errors when a declared `target_harnesses:` names the harness, and materialization onto that harness otherwise fails per §6.9). This table mirrors the `rule_mode` rows of the §6.7.1 capability matrix.
 
 ---
 
@@ -107,4 +107,4 @@ Lint enforces the field requirements per mode:
 - `rule_mode: auto` with `rule_globs` set: lint warning ("rule-mode 'auto' uses description only; rule-globs is ignored").
 - A type other than `rule` with `rule_mode` set: lint warning ("rule-mode is only applicable to type: rule").
 
-When ingest crosses an unsupported (mode, harness) cell from the capability matrix, the lint surfaces the mismatch. Authors who must use a non-portable mode can declare `target_harnesses:` in frontmatter to opt out of cross-harness materialization for that artifact.
+When an artifact declares `target_harnesses:`, ingest lint surfaces a mismatch for any named harness whose cell for the chosen mode is ⚠ (warning) or ✗ (error). When `target_harnesses:` is absent, ingest stays permissive and an unsupported mode is caught at materialization onto that harness (§6.9). Authors who must use a non-portable mode can declare `target_harnesses:` in frontmatter to opt out of cross-harness materialization for that artifact.
