@@ -503,26 +503,35 @@ func TestCLI_ServeStandaloneHealthz(t *testing.T) {
 	cliJSON(t, string(body)) // must be JSON
 }
 
-// spec: doc "Server — podium serve", zero-flag auto-standalone.
+// spec: doc "Server — podium serve", zero-flag auto-standalone. §13.10: serve
+// with no config auto-enters standalone mode and answers /healthz. A named-but-
+// missing --config is a separate hard error (F-13.10.2) and is not used here.
 func TestCLI_ZeroFlagAutoStandalone(t *testing.T) {
-	env := []string{
-		"HOME=" + t.TempDir(),
-		"PODIUM_CONFIG_FILE=" + filepath.Join(t.TempDir(), "nonexistent.yaml"),
-	}
-	srv := startServerArgs(t, env, "serve")
+	srv := startServerArgs(t, []string{"HOME=" + t.TempDir()}, "serve")
 	if getStatus(t, srv.BaseURL+"/healthz") != 200 {
 		t.Fatalf("zero-flag serve did not auto-enter standalone")
 	}
 }
 
-// spec: doc "Server — podium serve", `--strict` flag.
+// spec: doc "Server — podium serve", `--strict` flag. §13.10: --strict refuses
+// to start without explicit configuration instead of auto-bootstrapping.
 func TestCLI_ServeStrict(t *testing.T) {
-	t.Skip("blocked by F-13.10.1: `podium serve --strict` is unimplemented (no --strict flag; serverboot always auto-bootstraps)")
+	res := runPodium(t, "", []string{"HOME=" + t.TempDir()}, "serve", "--strict")
+	if res.Exit == 0 {
+		t.Fatalf("serve --strict exited 0; want a refusal\nstderr: %s", res.Stderr)
+	}
+	cliContains(t, res.Stderr, "requires explicit setup", "strict refusal message")
 }
 
-// spec: doc "Server — podium serve", PODIUM_NO_AUTOSTANDALONE.
+// spec: doc "Server — podium serve", PODIUM_NO_AUTOSTANDALONE. §13.10: the env
+// var has the same effect as --strict. runPodium pins PODIUM_NO_AUTOSTANDALONE=1
+// for every CLI subprocess, so a bare `serve` with a clean home refuses.
 func TestCLI_NoAutoStandaloneEnv(t *testing.T) {
-	t.Skip("blocked by F-13.10.1: PODIUM_NO_AUTOSTANDALONE is never read by serverboot; serve always auto-bootstraps")
+	res := runPodium(t, "", []string{"HOME=" + t.TempDir()}, "serve")
+	if res.Exit == 0 {
+		t.Fatalf("serve with PODIUM_NO_AUTOSTANDALONE=1 exited 0; want a refusal\nstderr: %s", res.Stderr)
+	}
+	cliContains(t, res.Stderr, "requires explicit setup", "no-autostandalone refusal message")
 }
 
 // spec: doc "Server — podium serve", `--layer-path` single layer.
