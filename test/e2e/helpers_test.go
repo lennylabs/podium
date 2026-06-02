@@ -146,6 +146,47 @@ func getStatus(t testing.TB, url string) int {
 	return st
 }
 
+// metricsDashboardSeries lists the Prometheus series the reference Grafana
+// dashboard (deploy/grafana-dashboard.json) queries. The §13.8 /metrics
+// endpoint must emit every one so the shipped dashboard resolves.
+var metricsDashboardSeries = []string{
+	"podium_request_total",
+	"podium_request_duration_seconds",
+	"podium_visibility_denied_total",
+	"podium_cache_hits_total",
+	"podium_cache_misses_total",
+	"podium_ingest_success_total",
+	"podium_ingest_failure_total",
+	"podium_vector_outbox_depth",
+	"podium_audit_outbox_depth",
+}
+
+// assertMetricsScrape drives one observed meta-tool request, then GETs
+// baseURL/metrics, requires HTTP 200, and asserts the body carries the
+// Prometheus exposition format plus every §13.8 dashboard series. The leading
+// request populates the per-endpoint request_total / request_duration_seconds
+// label vectors, which emit no series on a server that has served no traffic.
+// It returns the scrape body for further per-test assertions.
+func assertMetricsScrape(t testing.TB, baseURL string) string {
+	t.Helper()
+	// A search with no match still returns 200 and records one observation.
+	_ = getStatus(t, baseURL+"/v1/search_artifacts?q=ping")
+	st, body := getRaw(t, baseURL+"/metrics")
+	if st != 200 {
+		t.Fatalf("GET /metrics = HTTP %d, want 200\nbody: %s", st, body)
+	}
+	text := string(body)
+	if !strings.Contains(text, "# HELP ") || !strings.Contains(text, "# TYPE ") {
+		t.Errorf("/metrics body is not Prometheus exposition format:\n%s", text)
+	}
+	for _, series := range metricsDashboardSeries {
+		if !strings.Contains(text, series) {
+			t.Errorf("/metrics missing series %q", series)
+		}
+	}
+	return text
+}
+
 // getJSON GETs url, requires HTTP 200, and decodes the body into dst.
 func getJSON(t testing.TB, url string, dst any) {
 	t.Helper()

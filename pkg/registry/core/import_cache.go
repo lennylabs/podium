@@ -30,6 +30,12 @@ const importCacheCap = 4096
 type importCache struct {
 	mu      sync.Mutex
 	entries map[importKey][]string
+	// observe, when set, receives one call per keyed lookup reporting whether
+	// the expansion was served from the cache (true) or recomputed (false). It
+	// feeds the §13.8 podium_cache_hits_total / podium_cache_misses_total
+	// counters. Lookups that skip the cache (no include patterns) are not
+	// reported. nil disables the callback.
+	observe func(hit bool)
 }
 
 // importKey identifies one memoized expansion: the include/exclude pattern
@@ -60,9 +66,15 @@ func (c *importCache) resolve(include, exclude, ids []string) []string {
 	c.mu.Lock()
 	if got, ok := c.entries[key]; ok {
 		c.mu.Unlock()
+		if c.observe != nil {
+			c.observe(true)
+		}
 		return got
 	}
 	c.mu.Unlock()
+	if c.observe != nil {
+		c.observe(false)
+	}
 
 	resolved := domainpkg.ResolveImports(include, exclude, ids)
 

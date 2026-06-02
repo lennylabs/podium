@@ -183,6 +183,18 @@ func (r *Registry) WithAudit(emit AuditEmitter) *Registry {
 	return r
 }
 
+// WithCacheObserver attaches a callback that fires once per server-side
+// import-glob cache lookup, reporting whether the result was served from the
+// cache (true) or recomputed (false). It feeds the §13.8 cache-hit/miss
+// counters without giving the core a metrics dependency. nil disables it.
+// Returns the registry for chaining.
+func (r *Registry) WithCacheObserver(observe func(hit bool)) *Registry {
+	if r.importCache != nil {
+		r.importCache.observe = observe
+	}
+	return r
+}
+
 // WithUsageSignals attaches the §3.3 learn-from-usage signal store so
 // load_artifact records accesses and search_artifacts / load_domain rerank by
 // access frequency (§12). Nil disables the feature; ranking stays on its

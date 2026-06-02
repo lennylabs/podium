@@ -29,6 +29,7 @@ import (
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/manifest"
+	"github.com/lennylabs/podium/pkg/metrics"
 	"github.com/lennylabs/podium/pkg/notification"
 	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/registry/core"
@@ -668,6 +669,16 @@ func Run() error {
 	// search_artifacts and load_domain rerank by access frequency. The signal
 	// is in-process advisory ordering; a restart relearns it from live traffic.
 	registry = registry.WithUsageSignals(core.NewMemoryUsageSignals())
+
+	// §13.8 Prometheus instrumentation: build the metric set once and thread it
+	// through the request, cache, visibility, and ingest seams. Nil when
+	// disabled (PODIUM_METRICS=false), in which case every recording site
+	// no-ops and /metrics is not mounted.
+	var mreg *metrics.Registry
+	if metricsEnabled() {
+		mreg = metrics.New()
+		registry = registry.WithCacheObserver(mreg.ObserveCache)
+	}
 	if v, e, err := openVectorAndEmbedder(cfg); err != nil {
 		log.Printf("warning: vector search disabled: %v", err)
 	} else if v != nil {
@@ -774,15 +785,23 @@ func Run() error {
 	}
 	bootOpts = append(bootOpts, server.WithQuotaLimiter(server.NewQuotaLimiter(quotaLimits)))
 
-	// §7.1 latency SLO surface: time every meta-tool request and emit a
-	// structured access-log line keyed by operation name so a deployment can
-	// compare observed latency against the SLO budgets. On by default;
-	// PODIUM_ACCESS_LOG=false (or 0/off/no) silences it. The registry holds
-	// no metrics dependency; the /metrics histogram endpoint is tracked
-	// separately (F-13.8.1) and can reuse this same observer seam.
+	// §7.1 latency SLO surface and §13.8 request metrics share the single
+	// per-request LatencyObserver seam: the access log emits a structured line
+	// keyed by operation name, and the metrics recorder feeds
+	// podium_request_total / podium_request_duration_seconds. The access log is
+	// on by default (PODIUM_ACCESS_LOG=false silences it); the metrics recorder
+	// is present when PODIUM_METRICS is not disabled. With both off, no observer
+	// is installed and the server adds zero per-request overhead.
+	var latencyObs server.LatencyObserver
 	if accessLogEnabled() {
-		bootOpts = append(bootOpts, server.WithLatencyObserver(accessLogObserver()))
+		latencyObs = accessLogObserver()
 		log.Printf("access log: enabled (per-request latency keyed by operation; §7.1 SLO surface)")
+	}
+	if mreg != nil {
+		latencyObs = combineObservers(latencyObs, metricsLatencyObserver(mreg))
+	}
+	if latencyObs != nil {
+		bootOpts = append(bootOpts, server.WithLatencyObserver(latencyObs))
 	}
 
 	// §6.3.2 runtime trust keys: when PODIUM_RUNTIME_KEYS_PATH is set,
@@ -897,6 +916,12 @@ func Run() error {
 		mux.Handle("/ui/", http.StripPrefix("/ui/", http.FileServer(http.FS(web.Assets()))))
 		log.Printf("web UI mounted at /ui/")
 	}
+	if mreg != nil {
+		// §13.8 Prometheus scrape endpoint. operationName("/metrics") is "", so
+		// the latency observer does not record scrapes against any meta-tool.
+		mux.Handle("/metrics", mreg.Handler())
+		log.Printf("metrics: Prometheus endpoint mounted at /metrics (§13.8)")
+	}
 	mux.Handle("/", srv.Handler())
 
 	// §8.3 audit sink: file-backed, hash-chained, shared by the
@@ -918,12 +943,24 @@ func Run() error {
 	// (e.g. domain.loaded at 10%). Built from PODIUM_AUDIT_SAMPLE_RATES;
 	// nil when unset, in which case every event is kept.
 	auditSampler := audit.NewSampler(cfg.auditSampleRates)
+	// §8.1/§8.3/F-8.4.7: when a sink is configured this FileSink is the
+	// registry's own sink for catalogue events (the metadata store persists no
+	// audit stream), so the §8.4 retention scheduler below, which enforces
+	// against this same sink, ages out registry-owned catalogue events.
+	var baseEmitter core.AuditEmitter
 	if auditSink != nil {
-		// §8.1/§8.3/F-8.4.7: this FileSink is the registry's own sink for
-		// catalogue events (the metadata store persists no audit stream),
-		// so the §8.4 retention scheduler below, which enforces against
-		// this same sink, ages out registry-owned catalogue events.
-		registry = registry.WithAudit(auditEmitterFor(auditSink, scrubber, auditSampler))
+		baseEmitter = auditEmitterFor(auditSink, scrubber, auditSampler)
+	}
+	// §13.8: the visibility-denial metric is driven from the registry audit
+	// stream, so wrap the base emitter (which may be nil) when metrics are on.
+	// This installs an emitter even with no sink, so the counter still moves.
+	switch {
+	case mreg != nil:
+		registry = registry.WithAudit(metricsAuditEmitter(mreg, baseEmitter))
+	case baseEmitter != nil:
+		registry = registry.WithAudit(baseEmitter)
+	}
+	if auditSink != nil {
 		// spec §8.1: the same §8.3 sink records the HTTP-boundary events —
 		// admin.granted (grants handler) and layer.config_changed /
 		// layer.user_registered (layer endpoint) — so every audit stream
@@ -937,7 +974,7 @@ func Run() error {
 	// lint, hash, store, publish events) instead of only recording intent.
 	// It carries the §4.7.2 freeze windows so an active window blocks ingest
 	// unless the manual reingest passes break-glass.
-	layers.WithReingestRunner(buildReingestRunner(st, srv, cfg, resourcePut, auditSink, scrubber, ingestSigner))
+	layers.WithReingestRunner(buildReingestRunner(st, srv, cfg, resourcePut, auditSink, scrubber, ingestSigner, mreg))
 
 	// §8.6 transparency anchoring: when the operator enables
 	// PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS, a goroutine periodically

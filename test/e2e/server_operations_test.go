@@ -15,7 +15,6 @@ package e2e
 //     for that reason, like the Postgres tests 45-47.
 //   - F-13.2.8: X-Podium-Read-Only-Lag-Seconds is always "0".
 //   - F-7.3.7: force_push_policy not settable via API/CLI/config. Tests 29, 30.
-//   - F-13.8.1: /metrics endpoint absent. Test 34.
 //   - podium admin verify: not implemented. Tests 11, 12, 22, 40.
 //   - podium admin migrate --finalize/--revert: not implemented. Tests 13, 14.
 //   - podium admin scim-sync: not implemented. Test 31.
@@ -903,11 +902,14 @@ func TestServerOps_ReadyzInReadOnlyMode(t *testing.T) {
 	t.Skip("verifying /readyz stays 200 in read_only requires inducing a Postgres primary outage; not inducible against standalone SQLite")
 }
 
-// ---- T-D-operator-guide-34: /metrics not exposed ---------------------------
+// ---- T-D-operator-guide-34: /metrics serves Prometheus output --------------
 
-// T-D-operator-guide-34
-func TestServerOps_MetricsNotExposed(t *testing.T) {
-	t.Skip("blocked by F-13.8.1: /metrics route is absent from the registry handler; the test would assert 404 but the doc claims 200 with Prometheus output")
+// T-D-operator-guide-34. spec §13.8.
+func TestServerOps_MetricsExposed(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{"ctx/ARTIFACT.md": opguideSimpleArtifact()})
+	srv := opguideStartStandalone(t, []string{"HOME=" + t.TempDir()}, reg)
+	assertMetricsScrape(t, srv.BaseURL)
 }
 
 // opguideAlertsYAML is the alerting YAML from the operator guide, wrapped in

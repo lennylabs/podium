@@ -7,6 +7,7 @@ import (
 
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/layer/source"
+	"github.com/lennylabs/podium/pkg/metrics"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
@@ -26,10 +27,12 @@ func buildReingestRunner(
 	auditSink *audit.FileSink,
 	scrubber *audit.PIIScrubber,
 	signer ingest.SignerFunc,
+	mreg *metrics.Registry,
 ) server.ReingestRunner {
 	return func(ctx context.Context, lc store.LayerConfig, bg *server.BreakGlass) (*ingest.Result, error) {
 		prov, err := sourceProviderFor(lc.SourceType)
 		if err != nil {
+			countIngest(mreg, err)
 			return nil, err
 		}
 		caller := reingestCaller(ctx)
@@ -50,8 +53,24 @@ func buildReingestRunner(
 		if auditSink != nil {
 			opts.AuditEmit = ingestAuditEmitter(ctx, auditSink, scrubber, caller)
 		}
-		return ingest.SourceIngestWithOptions(ctx, st, prov, lc, opts)
+		res, err := ingest.SourceIngestWithOptions(ctx, st, prov, lc, opts)
+		countIngest(mreg, err)
+		return res, err
 	}
+}
+
+// countIngest records one §13.8 ingest outcome: a non-nil error increments
+// podium_ingest_failure_total, otherwise podium_ingest_success_total. A nil
+// metric registry (PODIUM_METRICS=false) makes it a no-op.
+func countIngest(mreg *metrics.Registry, err error) {
+	if mreg == nil {
+		return
+	}
+	if err != nil {
+		mreg.IncIngestFailure()
+		return
+	}
+	mreg.IncIngestSuccess()
 }
 
 // sourceProviderFor returns the built-in §4.6 source provider for a layer's

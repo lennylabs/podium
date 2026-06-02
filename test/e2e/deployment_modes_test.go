@@ -693,9 +693,13 @@ func TestDeployment_ConfigShowDeploymentMode(t *testing.T) {
 	cliContains(t, res.Stdout, reg, "active registry value")
 }
 
-// T-D-how-it-works-41 — /metrics endpoint.
+// T-D-how-it-works-41 — /metrics endpoint serves Prometheus data. spec §13.8.
 func TestDeployment_MetricsEndpoint(t *testing.T) {
-	t.Skip("blocked by F-13.8.1: the Prometheus /metrics endpoint is absent on the registry (returns 404)")
+	t.Parallel()
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"obs/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: observability demo artifact\nsensitivity: low\n---\n\nbody\n",
+	}))
+	assertMetricsScrape(t, srv.BaseURL)
 }
 
 // T-D-how-it-works-42 — cursor harness writes rules with the .mdc extension.

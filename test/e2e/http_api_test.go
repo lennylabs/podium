@@ -1381,9 +1381,10 @@ func TestHTTPAPI_AdminShowEffective(t *testing.T) {
 	t.Skip("requires a standard deployment with an authenticated admin identity; standalone serves as system:public so /v1/admin/show-effective returns 403")
 }
 
-// spec: http-api.md (metrics route mentioned but not documented).
+// spec: http-api.md / §13.8 — the registry exposes a Prometheus /metrics route.
 func TestHTTPAPI_Metrics(t *testing.T) {
-	t.Skip("blocked by F-13.8.1: the registry exposes no /metrics endpoint")
+	srv := startServer(t, apiReg(t))
+	assertMetricsScrape(t, srv.BaseURL)
 }
 
 // spec: http-api.md § SLO targets — load_domain p99.

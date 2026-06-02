@@ -10,7 +10,6 @@ package e2e
 //   - F-13.10.6: public-mode sensitivity ceiling not wired into ingest paths.
 //   - F-13.10.8: public-mode startup warning banner not emitted.
 //   - F-13.10.11: --no-embeddings flag now exists; see TestStandaloneFlags_NoEmbeddingsSearchWorks.
-//   - F-13.8.1: /metrics endpoint absent.
 
 import (
 	"bytes"
@@ -770,10 +769,23 @@ func TestStandaloneServer_HTTPReingestRescan(t *testing.T) {
 	}
 }
 
-// T-D-small-team-26 — GET /metrics returns Prometheus data (blocked by F-13.8.1).
+// T-D-small-team-26 — GET /metrics returns Prometheus data. spec §13.8.
 func TestStandaloneServer_MetricsEndpoint(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-13.8.1: /metrics endpoint is absent from the standalone server")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"metricsdemo/ARTIFACT.md": smallteamLowArtifact("variance analysis reference"),
+	}))
+
+	// Drive one observed meta-tool request so the per-endpoint request series
+	// carries a search_artifacts sample.
+	if st := getStatus(t, srv.BaseURL+"/v1/search_artifacts?q=variance"); st != 200 {
+		t.Fatalf("search_artifacts = HTTP %d, want 200", st)
+	}
+
+	text := assertMetricsScrape(t, srv.BaseURL)
+	if !strings.Contains(text, `endpoint="search_artifacts"`) {
+		t.Errorf("/metrics missing the search_artifacts endpoint label after a search:\n%s", text)
+	}
 }
 
 // T-D-small-team-27 — GET /healthz and GET /readyz both answer 200 in standalone mode.
