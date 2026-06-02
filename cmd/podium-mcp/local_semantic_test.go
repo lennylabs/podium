@@ -126,6 +126,72 @@ func TestLocalSemantic_NilAndEmptyQuery(t *testing.T) {
 
 // Spec: §9.1 — buildLocalSemantic returns no index when no overlay backend
 // or embedding provider is configured, leaving the overlay BM25-only.
+// spec: §6.4.1 / F-6.4.1 — the overlay vector backend reaches the same set
+// the registry bootstrap does: sqlite-vec, a local pgvector, or a managed
+// service (Pinecone, Weaviate Cloud, Qdrant Cloud). Before the fix the
+// overlay switch handled only memory and sqlite-vec and returned
+// "unsupported overlay vector backend" for the others.
+func TestMCPOverlayVectorBackend_ReachesAllDocumentedBackends(t *testing.T) {
+	cases := []struct {
+		name       string
+		id         string
+		env        map[string]string
+		wantID     string
+		wantErrSub string
+	}{
+		{name: "memory", id: "memory", wantID: "memory"},
+		{name: "sqlite-vec", id: "sqlite-vec", wantID: "sqlite-vec"},
+		{
+			name: "pgvector-missing-dsn", id: "pgvector",
+			// Reachable: the error names the DSN env vars rather than
+			// "unsupported overlay vector backend".
+			wantErrSub: "DSN",
+		},
+		{
+			name:   "pinecone",
+			id:     "pinecone",
+			env:    map[string]string{"PODIUM_PINECONE_API_KEY": "k", "PODIUM_PINECONE_HOST": "https://h"},
+			wantID: "pinecone",
+		},
+		{
+			name:   "weaviate-cloud",
+			id:     "weaviate-cloud",
+			env:    map[string]string{"PODIUM_WEAVIATE_URL": "https://w", "PODIUM_WEAVIATE_COLLECTION": "Podium"},
+			wantID: "weaviate-cloud",
+		},
+		{
+			name:   "qdrant-cloud",
+			id:     "qdrant-cloud",
+			env:    map[string]string{"PODIUM_QDRANT_URL": "https://q", "PODIUM_QDRANT_COLLECTION": "podium"},
+			wantID: "qdrant-cloud",
+		},
+		{name: "unknown", id: "bogus", wantErrSub: "unknown"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			for k, v := range c.env {
+				t.Setenv(k, v)
+			}
+			got, err := mcpOverlayVectorBackend(c.id, 8)
+			if err != nil && strings.Contains(err.Error(), "unsupported overlay vector backend") {
+				t.Fatalf("backend %q still unsupported: %v", c.id, err)
+			}
+			if c.wantErrSub != "" {
+				if err == nil || !strings.Contains(err.Error(), c.wantErrSub) {
+					t.Fatalf("err = %v, want substring %q", err, c.wantErrSub)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected err = %v", err)
+			}
+			if got == nil || got.ID() != c.wantID {
+				t.Fatalf("provider = %v, want id %q", got, c.wantID)
+			}
+		})
+	}
+}
+
 func TestBuildLocalSemantic_DisabledByDefault(t *testing.T) {
 	for _, c := range []config{
 		{},

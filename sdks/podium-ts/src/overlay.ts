@@ -232,15 +232,20 @@ export class LocalOverlay {
     return score;
   }
 
+  // spec §6.4: the overlay is the highest-precedence layer in the caller's
+  // effective view, so a scoped query excludes overlay artifacts whose id
+  // falls outside the requested domain path. The `scope` prefix match mirrors
+  // the MCP server's overlay filter (cmd/podium-mcp/local_search.go).
   search(
     query: string,
-    opts: { type?: string; tags?: string[]; topK?: number } = {},
+    opts: { type?: string; scope?: string; tags?: string[]; topK?: number } = {},
   ): OverlayArtifact[] {
     const topK = opts.topK ?? 10;
     const wantTags = new Set(opts.tags ?? []);
     const candidates = [...this.artifacts.values()].filter(
       (a) =>
         (!opts.type || a.type === opts.type) &&
+        (!opts.scope || a.id.startsWith(opts.scope)) &&
         (wantTags.size === 0 || [...wantTags].every((t) => a.tags.includes(t))),
     );
     if (query) {

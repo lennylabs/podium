@@ -1931,63 +1931,37 @@ func openVectorBackend(c *Config, dim int) (vector.Provider, error) {
 	} else if ok {
 		return p, nil
 	}
-	switch c.vectorBackend {
-	case "", "none":
-		return nil, nil
-	case "memory":
+	if c.vectorBackend == "memory" {
 		// §13.12 lists pgvector | sqlite-vec | pinecone | weaviate-cloud |
 		// qdrant-cloud; `memory` is an undocumented test affordance. Warn so
 		// an operator who selects it knows it persists nothing (F-13.12.14).
 		log.Printf("warning: PODIUM_VECTOR_BACKEND=memory is a non-durable test backend; it persists nothing across restarts")
-		return vector.NewMemory(dim), nil
-	case "pgvector":
-		if c.pgvectorDSN == "" {
-			return nil, fmt.Errorf("PODIUM_PGVECTOR_DSN or PODIUM_POSTGRES_DSN required for pgvector")
-		}
-		return vector.OpenPgVector(vector.PgVectorConfig{DSN: c.pgvectorDSN, Dimensions: dim})
-	case "sqlite-vec":
-		path := c.sqlitePath
-		if path == "" {
-			path = ":memory:"
-		}
-		return vector.OpenSQLiteVec(vector.SQLiteVecConfig{Path: path, Dimensions: dim})
-	case "pinecone":
-		host := c.pineconeHost
-		if host == "" {
-			// §13: PODIUM_PINECONE_INDEX is auto-resolved to a host
-			// for serverless. Ship a clear error pointing at Host
-			// for now; an SDK call to the Pinecone control plane
-			// would resolve it but adds dep weight.
-			if idx := c.pineconeIndex; idx != "" {
-				return nil, fmt.Errorf(
-					"PODIUM_PINECONE_INDEX=%q set but PODIUM_PINECONE_HOST is required for serverless; supply the index host URL", idx)
-			}
-		}
-		return vector.NewPinecone(vector.PineconeConfig{
-			APIKey: c.pineconeKey, Host: host,
-			Namespace: c.pineconeNS, Dimensions: dim,
-			// §13.12 (F-13.12.6) Integrated Inference; empty leaves
-			// storage-only mode.
-			InferenceModel: c.vectorInferenceModel,
-		})
-	case "weaviate-cloud":
-		return vector.NewWeaviate(vector.WeaviateConfig{
-			URL: c.weaviateURL, APIKey: c.weaviateKey,
-			Collection: c.weaviateColl, Dimensions: dim,
-			// §13.12 (F-13.12.6) vectorizer module; empty leaves
-			// storage-only mode.
-			Vectorizer: c.vectorInferenceModel,
-		})
-	case "qdrant-cloud":
-		return vector.NewQdrant(vector.QdrantConfig{
-			URL: c.qdrantURL, APIKey: c.qdrantKey,
-			Collection: c.qdrantColl, Dimensions: dim,
-			// §13.12 (F-13.12.6) Cloud Inference; empty leaves
-			// storage-only mode.
-			InferenceModel: c.vectorInferenceModel,
-		})
 	}
-	return nil, fmt.Errorf("unknown PODIUM_VECTOR_BACKEND: %s", c.vectorBackend)
+	// §13.12 (F-13.12.6) self-embedding leaves InferenceModel empty for
+	// storage-only mode. The built-in backends are constructed by the shared
+	// vector.OpenBuiltin factory so the overlay path (§6.4.1) selects the
+	// same set the same way.
+	return vector.OpenBuiltin(c.vectorBackend, c.backendConfig(), dim)
+}
+
+// backendConfig projects the resolved vector configuration into the shared
+// vector.BackendConfig consumed by vector.OpenBuiltin.
+func (c *Config) backendConfig() vector.BackendConfig {
+	return vector.BackendConfig{
+		PgVectorDSN:    c.pgvectorDSN,
+		SQLitePath:     c.sqlitePath,
+		PineconeKey:    c.pineconeKey,
+		PineconeHost:   c.pineconeHost,
+		PineconeIndex:  c.pineconeIndex,
+		PineconeNS:     c.pineconeNS,
+		WeaviateURL:    c.weaviateURL,
+		WeaviateKey:    c.weaviateKey,
+		WeaviateColl:   c.weaviateColl,
+		QdrantURL:      c.qdrantURL,
+		QdrantKey:      c.qdrantKey,
+		QdrantColl:     c.qdrantColl,
+		InferenceModel: c.vectorInferenceModel,
+	}
 }
 
 // openObjectStore returns the configured §13.10 object-storage

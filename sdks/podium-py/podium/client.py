@@ -577,6 +577,7 @@ class Client:
             body.get("total_matched", 0),
             query=query,
             type_filter=type,
+            scope=scope,
             tags=tags,
             top_k=top_k,
             session_id=session_id,
@@ -594,6 +595,7 @@ class Client:
         *,
         query: str,
         type_filter: str,
+        scope: str = "",
         tags: list[str] | None,
         top_k: int,
         session_id: str,
@@ -602,13 +604,16 @@ class Client:
 
         The workspace overlay is the highest-precedence layer, so an overlay
         artifact's metadata wins over a registry hit with the same id. With
-        no overlay configured the registry results pass through unchanged.
+        no overlay configured the registry results pass through unchanged. The
+        ``scope`` filter is threaded into the overlay search so a scoped query
+        excludes out-of-scope overlay artifacts, matching the registry stream
+        and the Go MCP server.
         """
         index = self._overlay_index(session_id)
         if index is None:
             return registry_results, registry_total
         overlay_hits = index.search(
-            query, type_filter=type_filter, tags_filter=tags, top_k=top_k
+            query, type_filter=type_filter, scope=scope, tags_filter=tags, top_k=top_k
         )
         if not overlay_hits:
             return registry_results, registry_total

@@ -372,6 +372,19 @@ func envDefault(key, def string) string {
 	return def
 }
 
+// envFirst returns the value of the first set, non-empty env var among keys,
+// or "" when none is set. It mirrors the registry bootstrap's envFirst so the
+// overlay vector backend reads the same fallback chains (for example
+// PODIUM_PGVECTOR_DSN then PODIUM_POSTGRES_DSN).
+func envFirst(keys ...string) string {
+	for _, k := range keys {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // parseTTLSeconds converts a §6.5 resolution-cache TTL expressed in seconds to
 // a Duration. A non-numeric or negative value falls back to the 30s default; a
 // value of 0 disables expiry.

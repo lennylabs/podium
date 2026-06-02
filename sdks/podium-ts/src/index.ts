@@ -550,13 +550,16 @@ export class Client {
   private async fuseOverlay(
     body: SearchResult,
     query: string,
-    opts: { type?: string; tags?: string[]; topK?: number; sessionID?: string },
+    opts: { type?: string; scope?: string; tags?: string[]; topK?: number; sessionID?: string },
   ): Promise<SearchResult> {
     const index = await this.overlayIndex(opts.sessionID ?? "");
     const registryResults = body.results ?? [];
     if (!index) return { ...body, results: registryResults };
     const topK = opts.topK ?? 10;
-    const hits = index.search(query, { type: opts.type, tags: opts.tags, topK });
+    // spec §6.4: thread `scope` into the overlay search so a scoped query
+    // excludes out-of-scope overlay artifacts, matching the registry stream
+    // and the Go MCP server.
+    const hits = index.search(query, { type: opts.type, scope: opts.scope, tags: opts.tags, topK });
     if (hits.length === 0) return { ...body, results: registryResults };
     const overlayIDs = hits.map((h) => h.id);
     const registryIDs = registryResults.map((r) => r.id);

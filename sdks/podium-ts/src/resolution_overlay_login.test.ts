@@ -123,6 +123,36 @@ describe("overlay merge (F-14.4.2)", () => {
     expect(hitNetwork).toBe(false);
   });
 
+  // F-6.4.4 — the overlay search honors the `scope` prefix filter so a scoped
+  // query excludes out-of-scope overlay artifacts (spec §6.4).
+  it("LocalOverlay.search excludes out-of-scope ids", async () => {
+    const overlay = join(dir, "overlay");
+    await overlayArtifact(overlay, "finance/budget", { desc: "budget helper" });
+    await overlayArtifact(overlay, "drafts/routing-helper", { desc: "routing helper" });
+    const index = await LocalOverlay.load(overlay);
+
+    expect(index.search("helper", { scope: "finance" }).map((a) => a.id)).toEqual(["finance/budget"]);
+    // Browse mode (no query) is scoped too.
+    expect(index.search("", { scope: "finance" }).map((a) => a.id)).toEqual(["finance/budget"]);
+    // No scope leaves both visible.
+    expect(new Set(index.search("helper").map((a) => a.id))).toEqual(
+      new Set(["finance/budget", "drafts/routing-helper"]),
+    );
+  });
+
+  it("searchArtifacts excludes out-of-scope overlay hits when scoped", async () => {
+    const overlay = join(dir, "overlay");
+    await overlayArtifact(overlay, "finance/budget", { desc: "quarterly budget" });
+    await overlayArtifact(overlay, "drafts/routing-helper", { desc: "quarterly routing" });
+    const fetcher: typeof fetch = async () =>
+      new Response(JSON.stringify({ total_matched: 0, results: [] }), { status: 200 });
+    const c = new Client({ registry: "http://reg", overlayPath: overlay, fetcher });
+    const res = await c.searchArtifacts("quarterly", { scope: "finance" });
+    const ids = (res.results ?? []).map((r) => r.id);
+    expect(ids).toContain("finance/budget");
+    expect(ids).not.toContain("drafts/routing-helper");
+  });
+
   it("LocalOverlay.load with no directory yields no artifacts", async () => {
     const overlay = await LocalOverlay.load(join(dir, "missing"));
     expect(overlay.artifacts.size).toBe(0);

@@ -94,7 +94,7 @@ func runWatch(ctx context.Context, opts WatchOptions, events chan<- WatchEvent) 
 		}
 	}
 
-	if tw, err := newTreeWatcher(opts.Sync.RegistryPath, opts.OverlayPath); err == nil {
+	if tw, err := NewTreeWatcher(opts.Sync.RegistryPath, opts.OverlayPath); err == nil {
 		defer tw.Close()
 		runFSNotifyWatch(ctx, opts, tw, emit)
 		return

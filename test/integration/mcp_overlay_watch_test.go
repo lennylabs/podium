@@ -15,11 +15,12 @@ import (
 	"github.com/lennylabs/podium/internal/testharness/registryharness"
 )
 
-// Spec: §6.4 / §6.4.1 — the MCP bridge watches the resolved overlay path and
-// re-indexes on change, so an artifact added to the workspace overlay while
-// the bridge is running becomes searchable without restarting the subprocess.
-// The pre-fix bridge loaded the overlay once at startup and never refreshed
-// it, so a draft created after launch stayed invisible. F-6.4.1.
+// Spec: §6.4 / §6.4.1 / §14.7 — the MCP bridge watches the resolved overlay
+// path via fsnotify and re-indexes on change, so an artifact added to the
+// workspace overlay while the bridge is running becomes searchable without
+// restarting the subprocess. The pre-fix bridge loaded the overlay once at
+// startup and never refreshed it, so a draft created after launch stayed
+// invisible. Findings F-6.4.3 / F-14.7.1 (watcher mechanism).
 //
 // The test owns the subprocess lifecycle: it drives stdin over a pipe with
 // timed writes, bounds the run with a context deadline, and always closes
@@ -75,7 +76,7 @@ func TestPodiumMCP_OverlayWatchReindexesOnChange(t *testing.T) {
 		Path:    "beta/ARTIFACT.md",
 		Content: "---\ntype: context\nversion: 0.1.0\ndescription: variance analysis helper\n---\n\nbeta body\n",
 	})
-	// Wait past several poll intervals (500ms) for the re-index.
+	// Wait for the fsnotify event plus the re-index debounce.
 	time.Sleep(2 * time.Second)
 
 	write(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/call",

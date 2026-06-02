@@ -144,6 +144,40 @@ def test_search_artifacts_fuses_overlay(artifacts_server, tmp_path):
     assert res.total_matched == 2  # overlay-only id enlarges the count
 
 
+# F-6.4.4 — the SDK overlay search honors the `scope` prefix filter so a
+# scoped query excludes out-of-scope overlay artifacts (spec §6.4).
+def test_overlay_search_scope_filters_out_of_scope(tmp_path):
+    overlay = tmp_path / "overlay"
+    _overlay_artifact(str(overlay), "finance/budget", desc="budget helper")
+    _overlay_artifact(str(overlay), "drafts/routing-helper", desc="routing helper")
+    index = _overlay.LocalOverlay(str(overlay))
+
+    in_scope = {a.id for a in index.search("helper", scope="finance")}
+    assert in_scope == {"finance/budget"}
+
+    # Empty query (browse mode) is scoped too.
+    browse = {a.id for a in index.search("", scope="finance")}
+    assert browse == {"finance/budget"}
+
+    # No scope leaves both visible.
+    all_ids = {a.id for a in index.search("helper")}
+    assert all_ids == {"finance/budget", "drafts/routing-helper"}
+
+
+def test_search_artifacts_scope_excludes_out_of_scope_overlay(artifacts_server, tmp_path):
+    overlay = tmp_path / "overlay"
+    _overlay_artifact(str(overlay), "finance/budget", desc="quarterly budget")
+    _overlay_artifact(str(overlay), "drafts/routing-helper", desc="quarterly routing")
+    artifacts_server.next_response = {"query": "quarterly", "total_matched": 0, "results": []}
+    base = f"http://127.0.0.1:{artifacts_server.server_address[1]}"
+    client = Client(registry=base, overlay_path=str(overlay))
+
+    res = client.search_artifacts("quarterly", scope="finance")
+    ids = [r.id for r in res.results]
+    assert "finance/budget" in ids
+    assert "drafts/routing-helper" not in ids  # out-of-scope overlay hit excluded
+
+
 def test_search_artifacts_no_overlay_passthrough(artifacts_server, tmp_path, monkeypatch):
     monkeypatch.delenv("PODIUM_OVERLAY_PATH", raising=False)
     monkeypatch.chdir(tmp_path)  # no .podium/overlay/ here

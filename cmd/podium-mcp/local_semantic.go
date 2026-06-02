@@ -211,29 +211,53 @@ func mcpOverlayEmbedder(id string) (embedding.Provider, error) {
 	return nil, fmt.Errorf("unknown overlay embedding provider: %s", id)
 }
 
-// mcpOverlayVectorBackend selects the §9.1 LocalSearchProvider vector
-// backend. The "memory" backend is an in-process index that needs no
-// external service, suited to the workspace overlay; sqlite-vec
-// collocates with a local file; custom backends register through
-// vector.Default.Register.
+// mcpOverlayVectorBackend selects the §6.4.1 LocalSearchProvider vector
+// backend for the workspace overlay. The "memory" backend is an in-process
+// index that needs no external service; sqlite-vec collocates with a local
+// file; and per §6.4.1 the overlay also reaches a local pgvector instance or
+// a managed service (Pinecone, Weaviate Cloud, Qdrant Cloud). Custom backends
+// register through vector.Default.Register. The built-in backends are
+// constructed by the shared vector.OpenBuiltin factory, so the overlay
+// selects the same set the registry bootstrap does, configured by the same
+// env vars (PODIUM_PGVECTOR_DSN/PODIUM_POSTGRES_DSN, PODIUM_PINECONE_*,
+// PODIUM_WEAVIATE_*, PODIUM_QDRANT_*).
 func mcpOverlayVectorBackend(id string, dim int) (vector.Provider, error) {
+	cfg := vector.BackendConfig{
+		PgVectorDSN:    envFirst("PODIUM_PGVECTOR_DSN", "PODIUM_POSTGRES_DSN"),
+		SQLitePath:     envFirst("PODIUM_LOCAL_SQLITE_VEC_PATH", "PODIUM_SQLITE_PATH"),
+		PineconeKey:    os.Getenv("PODIUM_PINECONE_API_KEY"),
+		PineconeHost:   os.Getenv("PODIUM_PINECONE_HOST"),
+		PineconeIndex:  os.Getenv("PODIUM_PINECONE_INDEX"),
+		PineconeNS:     envDefault("PODIUM_PINECONE_NAMESPACE", "default"),
+		WeaviateURL:    os.Getenv("PODIUM_WEAVIATE_URL"),
+		WeaviateKey:    os.Getenv("PODIUM_WEAVIATE_API_KEY"),
+		WeaviateColl:   os.Getenv("PODIUM_WEAVIATE_COLLECTION"),
+		QdrantURL:      os.Getenv("PODIUM_QDRANT_URL"),
+		QdrantKey:      os.Getenv("PODIUM_QDRANT_API_KEY"),
+		QdrantColl:     os.Getenv("PODIUM_QDRANT_COLLECTION"),
+		InferenceModel: envFirst("PODIUM_PINECONE_INFERENCE_MODEL", "PODIUM_WEAVIATE_VECTORIZER", "PODIUM_QDRANT_INFERENCE_MODEL"),
+	}
+	// The Default registry (custom backends) consumes the wire-serializable
+	// settings map so a future out-of-process provider receives the same
+	// inputs.
 	settings := map[string]string{
-		"sqlite_path": os.Getenv("PODIUM_LOCAL_SQLITE_VEC_PATH"),
+		"pgvector_dsn":    cfg.PgVectorDSN,
+		"sqlite_path":     cfg.SQLitePath,
+		"pinecone_key":    cfg.PineconeKey,
+		"pinecone_host":   cfg.PineconeHost,
+		"pinecone_index":  cfg.PineconeIndex,
+		"namespace":       cfg.PineconeNS,
+		"weaviate_url":    cfg.WeaviateURL,
+		"weaviate_key":    cfg.WeaviateKey,
+		"collection":      cfg.WeaviateColl,
+		"qdrant_url":      cfg.QdrantURL,
+		"qdrant_key":      cfg.QdrantKey,
+		"inference_model": cfg.InferenceModel,
 	}
 	if p, ok, err := vector.Default.New(id, settings, dim); err != nil {
 		return nil, err
 	} else if ok {
 		return p, nil
 	}
-	switch id {
-	case "memory":
-		return vector.NewMemory(dim), nil
-	case "sqlite-vec":
-		path := os.Getenv("PODIUM_LOCAL_SQLITE_VEC_PATH")
-		if path == "" {
-			path = ":memory:"
-		}
-		return vector.OpenSQLiteVec(vector.SQLiteVecConfig{Path: path, Dimensions: dim})
-	}
-	return nil, fmt.Errorf("unsupported overlay vector backend: %s", id)
+	return vector.OpenBuiltin(id, cfg, dim)
 }

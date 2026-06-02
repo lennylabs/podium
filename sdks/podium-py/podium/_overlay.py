@@ -213,15 +213,24 @@ class LocalOverlay:
         query: str,
         *,
         type_filter: str = "",
+        scope: str = "",
         tags_filter: list[str] | None = None,
         top_k: int = 10,
     ) -> list[OverlayArtifact]:
-        """Return overlay artifacts ranked by BM25 (or by id when no query)."""
+        """Return overlay artifacts ranked by BM25 (or by id when no query).
+
+        spec §6.4: the overlay is the highest-precedence layer in the
+        caller's effective view, so a scoped query excludes overlay
+        artifacts whose id falls outside the requested domain path. The
+        ``scope`` prefix match mirrors the MCP server's overlay filter
+        (cmd/podium-mcp/local_search.go).
+        """
         wanted_tags = set(tags_filter or [])
         candidates = [
             art
             for art in self.artifacts.values()
             if (not type_filter or art.type == type_filter)
+            and (not scope or art.id.startswith(scope))
             and (not wanted_tags or wanted_tags.issubset(set(art.tags)))
         ]
         if query:
