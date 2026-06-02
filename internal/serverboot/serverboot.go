@@ -38,9 +38,11 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/scim"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/tracing"
 	"github.com/lennylabs/podium/pkg/vector"
 	"github.com/lennylabs/podium/pkg/webhook"
 	"github.com/lennylabs/podium/web"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // envFirst returns the value of the first non-empty env var.
@@ -1051,9 +1053,29 @@ func Run() error {
 		}()
 	}
 
+	// §13.8 OpenTelemetry: install the W3C TraceContext propagator and, when
+	// PODIUM_TRACING (or an OTLP endpoint) is configured, the trace exporter.
+	// Off by default; the propagator is installed regardless so inbound
+	// traceparent extraction works. Wrap the handler with otelhttp so each
+	// request opens a server span named by the operation, with the incoming
+	// W3C context as its parent. The shutdown flushes the exporter on exit.
+	shutdownTracing, terr := tracing.Init(context.Background(), "podium-registry")
+	if terr != nil {
+		return fmt.Errorf("tracing: %w", terr)
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
+	handler := otelhttp.NewHandler(mux, "podium-registry",
+		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
+			if op := server.OperationName(r.URL.Path); op != "" {
+				return op
+			}
+			return r.Method + " " + r.URL.Path
+		}),
+	)
+
 	httpServer := &http.Server{
 		Addr:              cfg.bind,
-		Handler:           mux,
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	// spec: §13.2.2 / §13.10 — when public mode is engaged, emit the

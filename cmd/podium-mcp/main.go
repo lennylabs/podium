@@ -59,7 +59,9 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/sign"
 	synccfg "github.com/lennylabs/podium/pkg/sync"
+	"github.com/lennylabs/podium/pkg/tracing"
 	"github.com/lennylabs/podium/pkg/version"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // protocolVersion is the maximum MCP wire-protocol version this binary
@@ -102,6 +104,16 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
+	// §13.8 OpenTelemetry: install the W3C propagator and, when PODIUM_TRACING
+	// (or an OTLP endpoint) is configured, the trace exporter. Off by default;
+	// the propagator is installed regardless so the bridge injects trace
+	// context on its registry calls.
+	shutdownTracing, terr := tracing.Init(context.Background(), "podium-mcp")
+	if terr != nil {
+		fmt.Fprintln(os.Stderr, terr)
+		os.Exit(2)
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
 	srv, err := newServer(cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -431,6 +443,25 @@ type mcpServer struct {
 	// configured the opt-in listener (PODIUM_MCP_METRICS_ADDR). When nil the
 	// per-call and resolution-cache recording sites no-op.
 	metrics *metrics.MCPRegistry
+	// activeCtx carries the §13.8 trace context of the in-flight meta-tool call
+	// so the outbound registry request and the local adapter-translation and
+	// materialization spans attach to the call's root span. The serve loop
+	// dispatches one call at a time (§6.8 host-owned lifecycle, single-threaded
+	// stdio loop), so a single field needs no synchronization; it is set around
+	// dispatchTool and is nil otherwise. reqCtx reads it with a Background
+	// fallback for the off-call paths (prefetch, resource reads).
+	activeCtx context.Context
+}
+
+// reqCtx returns the in-flight call's trace context, or context.Background()
+// when no meta-tool call is active. Outbound registry requests build on it so
+// the otelhttp transport injects W3C trace context and parents the round-trip
+// span under the call's root span.
+func (s *mcpServer) reqCtx() context.Context {
+	if s.activeCtx != nil {
+		return s.activeCtx
+	}
+	return context.Background()
 }
 
 // recordSuccess stamps the time of a successful registry call for the
@@ -455,8 +486,12 @@ func newServer(cfg *config) (*mcpServer, error) {
 		return nil, err
 	}
 	srv := &mcpServer{
-		cfg:         cfg,
-		http:        &http.Client{},
+		cfg: cfg,
+		// §13.8: wrap the transport so every registry call injects W3C trace
+		// context and opens a "registry round-trip" client span under the
+		// active meta-tool root span. With tracing off the global no-op tracer
+		// makes this a passthrough.
+		http:        &http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)},
 		cache:       cache,
 		resolutions: newResolutionCache(cfg.cacheDir),
 		adapters:    adapter.DefaultRegistry(),
@@ -992,9 +1027,22 @@ func (s *mcpServer) callTool(raw json.RawMessage) any {
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return errorResult(err.Error())
 	}
-	// §13.8: record the per-tool request count, error count, and latency when
-	// the opt-in metrics listener is active. The dispatch is unchanged; only
-	// the timing and outcome are observed around it.
+	// §13.8: open one root span per meta-tool call and carry its context so the
+	// registry round-trip, adapter translation, and materialization spans
+	// attach beneath it. The span is non-recording (negligible cost) when
+	// tracing is off. activeCtx is restored after dispatch so off-call paths
+	// fall back to context.Background().
+	ctx, span := tracing.Tracer().Start(context.Background(), "mcp."+p.Name)
+	prev := s.activeCtx
+	s.activeCtx = ctx
+	defer func() {
+		s.activeCtx = prev
+		span.End()
+	}()
+
+	// Record the per-tool request count, error count, and latency when the
+	// opt-in metrics listener is active. The dispatch is unchanged; only the
+	// timing and outcome are observed around it.
 	if s.metrics == nil {
 		return s.dispatchTool(p)
 	}
@@ -1325,7 +1373,10 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 			if resp.Type == "skill" {
 				src.SkillBytes = []byte(synthesizeSkillMD(resp))
 			}
-			out, err := a.Adapt(context.Background(), src)
+			// §13.8: child span for the §6.7 adapter translation stage.
+			adaptCtx, adaptSpan := tracing.Tracer().Start(s.reqCtx(), "adapter.translate")
+			out, err := a.Adapt(adaptCtx, src)
+			adaptSpan.End()
 			if err != nil {
 				return errorResult("adapter: " + err.Error())
 			}
@@ -1334,14 +1385,18 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 			// rewrite or drop files and emit warnings; the chain is a no-op
 			// when none are configured and runs whether or not an adapter
 			// translated (harness: none still produces the canonical layout).
-			hookedOut, hookWarnings, herr := hook.Run(context.Background(), s.hooks, manifestContext(resp.Frontmatter), out)
+			hookedOut, hookWarnings, herr := hook.Run(s.reqCtx(), s.hooks, manifestContext(resp.Frontmatter), out)
 			if herr != nil {
 				return errorResult("materialize.hook_failed: " + herr.Error())
 			}
 			warnings = append(warnings, hookWarnings...)
 			out = hookedOut
-			if err := materialize.Write(root, out); err != nil {
-				return errorResult("materialize: " + err.Error())
+			// §13.8: child span for the §6.6 materialization write stage.
+			_, matSpan := tracing.Tracer().Start(s.reqCtx(), "materialize")
+			werr := materialize.Write(root, out)
+			matSpan.End()
+			if werr != nil {
+				return errorResult("materialize: " + werr.Error())
 			}
 			for _, f := range out {
 				materialized = append(materialized, filepath.Join(root, filepath.FromSlash(f.Path)))
@@ -1869,7 +1924,10 @@ func (s *mcpServer) newRegistryRequest(method, path string, args map[string]any)
 		q.Set("session_id", s.sessionID)
 	}
 	u.RawQuery = q.Encode()
-	req, err := http.NewRequest(method, u.String(), nil)
+	// §13.8: build on the in-flight call's trace context so the otelhttp
+	// transport injects W3C trace-context headers and the round-trip span
+	// parents under the call's root span.
+	req, err := http.NewRequestWithContext(s.reqCtx(), method, u.String(), nil)
 	if err != nil {
 		return nil, err
 	}

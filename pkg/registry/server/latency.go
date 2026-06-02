@@ -30,6 +30,11 @@ func WithLatencyObserver(fn LatencyObserver) Option {
 	return func(s *Server) { s.latency = fn }
 }
 
+// OperationName maps a request path to the stable §7.1 operation key, exported
+// so the boot layer names §13.8 trace spans with the same operation keys the
+// latency observer and request metrics use. Returns "" for unobserved paths.
+func OperationName(path string) string { return operationName(path) }
+
 // operationName maps a request path to the stable §7.1 operation key used
 // in latency observations. The four SLO-budgeted meta-tools get their spec
 // names; the other meta-tool routes get a stable key so the access log
