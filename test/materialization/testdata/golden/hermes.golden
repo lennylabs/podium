@@ -13,14 +13,14 @@ Indent with tabs, not spaces.
 
 === .cursor/rules/ts-auto.mdc ===
 ---
-description: Apply when editing TypeScript.
+description: "Apply when editing TypeScript."
 ---
 
 Prefer interfaces over type aliases.
 
 === .cursor/rules/ts-glob.mdc ===
 ---
-globs: *.ts,*.tsx
+globs: "*.ts,*.tsx"
 ---
 
 Enable strict type-checking in TypeScript files.

@@ -95,11 +95,14 @@ func cursorRuleBody(src Source) []byte {
 		fm.WriteString("alwaysApply: true\n")
 	case manifest.RuleModeGlob:
 		if art.RuleGlobs != "" {
-			fm.WriteString("globs: " + art.RuleGlobs + "\n")
+			// Quote the value: a glob like *.ts starts with `*`, which is a
+			// YAML alias indicator and breaks the .mdc frontmatter parse if
+			// emitted bare.
+			fm.WriteString("globs: " + yamlDoubleQuote(art.RuleGlobs) + "\n")
 		}
 	case manifest.RuleModeAuto:
 		if art.RuleDescription != "" {
-			fm.WriteString("description: " + art.RuleDescription + "\n")
+			fm.WriteString("description: " + yamlDoubleQuote(art.RuleDescription) + "\n")
 		}
 	case manifest.RuleModeExplicit:
 		// Explicit rules attach only when @-mentioned; no auto-apply key.

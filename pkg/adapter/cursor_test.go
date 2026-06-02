@@ -47,8 +47,10 @@ func TestCursor_RuleModeAlwaysAlwaysApply(t *testing.T) {
 func TestCursor_RuleModeGlobGlobs(t *testing.T) {
 	t.Parallel()
 	got := cursorMDCFor(t, "---\ntype: rule\nversion: 1.0.0\nrule_mode: glob\nrule_globs: \"src/**/*.ts,src/**/*.tsx\"\n---\n\nTS rules.\n")
-	if !strings.Contains(got, "globs: src/**/*.ts,src/**/*.tsx") {
-		t.Errorf("glob rule must emit globs from rule_globs:\n%s", got)
+	// The value is double-quoted: a glob starting with `*` is a YAML alias
+	// indicator and would make the .mdc frontmatter invalid YAML if emitted bare.
+	if !strings.Contains(got, `globs: "src/**/*.ts,src/**/*.tsx"`) {
+		t.Errorf("glob rule must emit a quoted globs value from rule_globs:\n%s", got)
 	}
 	if strings.Contains(got, "alwaysApply") {
 		t.Errorf("glob rule must not emit alwaysApply:\n%s", got)
@@ -58,8 +60,8 @@ func TestCursor_RuleModeGlobGlobs(t *testing.T) {
 func TestCursor_RuleModeAutoDescription(t *testing.T) {
 	t.Parallel()
 	got := cursorMDCFor(t, "---\ntype: rule\nversion: 1.0.0\nrule_mode: auto\nrule_description: Apply when migrating databases.\n---\n\nDB rules.\n")
-	if !strings.Contains(got, "description: Apply when migrating databases.") {
-		t.Errorf("auto rule must emit description from rule_description:\n%s", got)
+	if !strings.Contains(got, `description: "Apply when migrating databases."`) {
+		t.Errorf("auto rule must emit a quoted description from rule_description:\n%s", got)
 	}
 }
 

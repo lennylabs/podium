@@ -120,6 +120,16 @@ func tomlBasic(s string) string {
 	return `"` + s + `"`
 }
 
+// yamlDoubleQuote returns s as a YAML double-quoted scalar, escaping the
+// backslash and double-quote so a value with YAML-significant leading
+// characters (a `*` glob, a `:` in a description) stays a plain string instead
+// of being parsed as an alias, mapping, or flow indicator.
+func yamlDoubleQuote(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return `"` + s + `"`
+}
+
 func tomlMultiline(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `"""`, `\"\"\"`)

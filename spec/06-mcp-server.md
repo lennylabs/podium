@@ -194,7 +194,7 @@ Notes on partial and migrating surfaces:
 
 **Cache behavior.** The cache stores canonical artifact bytes (§6.5). Adapter output is regenerated on each materialization by default. An optional in-memory memo cache keyed on `(content_hash, harness)` with 5-minute TTL is enabled for sessions that load the same artifact repeatedly.
 
-**Conformance test suite.** Every built-in adapter passes the same set of tests (§11): load a canonical fixture, produce the harness-native output, verify the harness can spawn an agent that uses the materialized artifact end-to-end.
+**Conformance test suite.** Every built-in adapter is covered by the §11 materialization suite: a canonical artifact set is materialized through each adapter, the exact harness-native output is pinned (paths and file contents) against golden files, each produced file is checked to parse and satisfy the target harness's config schema (JSON config keys, TOML tables, `SKILL.md` and `.mdc` frontmatter), and re-materialization into the same tree is asserted idempotent. Driving a real harness binary against the materialized output to spawn an agent end-to-end is an opt-in integration check that runs only where the harness binary is available.
 
 **Versioning.** Adapter behavior is versioned alongside the MCP server binary. Profile and harness combinations that need a newer adapter behavior pin a minimum MCP server version; older binaries refuse to start.
 

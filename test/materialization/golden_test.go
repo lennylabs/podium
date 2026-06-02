@@ -102,28 +102,7 @@ func TestGolden_HarnessMaterialization(t *testing.T) {
 	for _, h := range harnesses {
 		h := h
 		t.Run(h, func(t *testing.T) {
-			a, err := adapter.DefaultRegistry().Get(h)
-			if err != nil {
-				t.Fatalf("Get(%q): %v", h, err)
-			}
-			var files []adapter.File
-			for _, fx := range canonicalArtifacts {
-				src := adapter.Source{
-					ArtifactID:    fx.id,
-					ArtifactBytes: []byte(fx.artifact),
-					SkillBytes:    []byte(fx.skill),
-					Resources:     resourceBytes(fx.resources),
-				}
-				out, err := a.Adapt(context.Background(), src)
-				if err != nil {
-					t.Fatalf("%s.Adapt(%s): %v", h, fx.id, err)
-				}
-				files = append(files, out...)
-			}
-			dir := t.TempDir()
-			if err := materialize.Write(dir, files); err != nil {
-				t.Fatalf("%s materialize.Write: %v", h, err)
-			}
+			dir, files := materializeCanonical(t, h)
 			snap := snapshotTree(t, dir)
 			testharness.AssertGoldenFile(t, filepath.Join("testdata", "golden", h+".golden"), snap)
 
@@ -158,6 +137,37 @@ func diffSnips(a, b []byte) string {
 		}
 	}
 	return fmt.Sprintf("differ in length: pass1=%d lines, pass2=%d lines", len(al), len(bl))
+}
+
+// materializeCanonical runs the canonical artifact set through the named
+// adapter and writes the result into a fresh temp directory, returning the
+// directory and the adapter.File set (so callers can re-materialize for the
+// idempotency check). Shared by the golden and validity suites.
+func materializeCanonical(t *testing.T, harness string) (string, []adapter.File) {
+	t.Helper()
+	a, err := adapter.DefaultRegistry().Get(harness)
+	if err != nil {
+		t.Fatalf("Get(%q): %v", harness, err)
+	}
+	var files []adapter.File
+	for _, fx := range canonicalArtifacts {
+		src := adapter.Source{
+			ArtifactID:    fx.id,
+			ArtifactBytes: []byte(fx.artifact),
+			SkillBytes:    []byte(fx.skill),
+			Resources:     resourceBytes(fx.resources),
+		}
+		out, err := a.Adapt(context.Background(), src)
+		if err != nil {
+			t.Fatalf("%s.Adapt(%s): %v", harness, fx.id, err)
+		}
+		files = append(files, out...)
+	}
+	dir := t.TempDir()
+	if err := materialize.Write(dir, files); err != nil {
+		t.Fatalf("%s materialize.Write: %v", harness, err)
+	}
+	return dir, files
 }
 
 func resourceBytes(m map[string]string) map[string][]byte {
