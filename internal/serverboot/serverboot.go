@@ -563,16 +563,31 @@ func layerConfigFromEntry(tenantID string, entry yamlLayerEntry, order int, cfg 
 // http.Server's error (always non-nil — at minimum
 // http.ErrServerClosed when the listener exits cleanly).
 func Run() error {
+	// §13.10 (F-13.10.2): an explicitly named --config / PODIUM_CONFIG_FILE that
+	// does not exist is a hard error — the operator named a config, so a missing
+	// one is not a cue to invent standalone defaults.
+	if cf := os.Getenv("PODIUM_CONFIG_FILE"); cf != "" {
+		if _, err := os.Stat(cf); err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("config file %q does not exist", cf)
+			}
+			return fmt.Errorf("config file %q: %w", cf, err)
+		}
+	}
+
 	cfg := LoadConfig()
 	if err := cfg.validate(); err != nil {
 		return err
 	}
 
-	// §13.10 / §14.3 / §14.10: on the standalone path, write the client and
-	// server default config files on first run so consumers resolve the
-	// registry from ~/.podium/sync.yaml without an extra env var. Existing
-	// files are preserved; PODIUM_NO_AUTOSTANDALONE and --config suppress it.
-	bootstrapStandaloneFiles(cfg)
+	// §13.10 / §14.3 / §14.10: apply the zero-flag standalone policy — refuse to
+	// start under --strict when no config is present, otherwise emit the
+	// first-run notice and write the client and server default files so
+	// consumers resolve the registry from ~/.podium/sync.yaml without an extra
+	// env var. Existing files are preserved.
+	if err := standaloneStartup(cfg); err != nil {
+		return err
+	}
 
 	st, err := openStore(cfg)
 	if err != nil {

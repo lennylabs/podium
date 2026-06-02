@@ -1,11 +1,73 @@
 package serverboot
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// standaloneStartup applies the §13.10 zero-flag standalone policy before the
+// server opens its backends. When the operator provided no explicit
+// configuration, it refuses to start under --strict / PODIUM_NO_AUTOSTANDALONE,
+// otherwise emits the documented first-run notice and writes the standalone
+// default files. With explicit configuration it writes any missing default
+// files (unless suppressed) and stays quiet. A non-nil error aborts startup.
+func standaloneStartup(cfg *Config) error {
+	// A standard (Postgres) deployment is never a zero-flag standalone first run.
+	if cfg.storeType == "postgres" {
+		return nil
+	}
+	if hasExplicitServerConfig() {
+		bootstrapStandaloneFiles(cfg)
+		return nil
+	}
+	// Zero-flag: no registry.yaml, no PODIUM_CONFIG_FILE, no --standalone, no
+	// --layer-path, no server PODIUM_* env. §13.10: --strict / PODIUM_NO_AUTOSTANDALONE
+	// makes a missing config a hard error rather than a cue to auto-bootstrap.
+	if isTrue(os.Getenv("PODIUM_NO_AUTOSTANDALONE")) {
+		return fmt.Errorf("no server configuration found at ~/.podium/registry.yaml and no PODIUM_* server settings are set; --strict (or PODIUM_NO_AUTOSTANDALONE) requires explicit setup. Run `podium serve` without --strict to auto-bootstrap a standalone deployment, or pass --config / --layer-path")
+	}
+	fmt.Fprintf(os.Stderr,
+		"No config found at ~/.podium/registry.yaml. Starting in standalone mode at http://%s. Run `podium serve --strict` to require explicit setup.\n",
+		cfg.bind)
+	bootstrapStandaloneFiles(cfg)
+	return nil
+}
+
+// hasExplicitServerConfig reports whether the operator supplied server
+// configuration explicitly, so the §13.10 zero-flag auto-bootstrap should not
+// engage (and the first-run notice should be suppressed).
+func hasExplicitServerConfig() bool {
+	if os.Getenv("PODIUM_CONFIG_FILE") != "" || isTrue(os.Getenv("PODIUM_STANDALONE")) {
+		return true
+	}
+	if registryYAMLExists() {
+		return true
+	}
+	for _, k := range []string{
+		"PODIUM_BIND", "PODIUM_REGISTRY_STORE", "PODIUM_POSTGRES_DSN",
+		"PODIUM_SQLITE_PATH", "PODIUM_OBJECT_STORE", "PODIUM_FILESYSTEM_ROOT",
+		"PODIUM_S3_BUCKET", "PODIUM_S3_ENDPOINT", "PODIUM_VECTOR_BACKEND",
+		"PODIUM_IDENTITY_PROVIDER", "PODIUM_PUBLIC_MODE", "PODIUM_LAYER_PATH",
+	} {
+		if os.Getenv(k) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// registryYAMLExists reports whether ~/.podium/registry.yaml is present.
+func registryYAMLExists() bool {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return false
+	}
+	_, err = os.Stat(filepath.Join(home, ".podium", "registry.yaml"))
+	return err == nil
+}
 
 // bootstrapStandaloneFiles writes the §13.10 standalone default files on first
 // run so a consumer (CLI, MCP server, SDK) resolves the registry from

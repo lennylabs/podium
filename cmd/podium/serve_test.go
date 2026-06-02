@@ -6,12 +6,29 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/lennylabs/podium/internal/serverboot"
 )
+
+// emptyServerConfig writes an empty registry.yaml in a fresh temp dir and
+// returns its path. A serve test names this as PODIUM_CONFIG_FILE so the
+// §13.10 explicit-config check (F-13.10.2: a named-but-missing config is a hard
+// error) is satisfied while the server is still configured through the
+// PODIUM_* env vars the test sets. The empty document overlays nothing, so env
+// values win, and an explicit PODIUM_CONFIG_FILE suppresses the standalone
+// first-run bootstrap, so the test never writes into the real home directory.
+func emptyServerConfig(t *testing.T) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "registry.yaml")
+	if err := os.WriteFile(p, []byte(""), 0o644); err != nil {
+		t.Fatalf("write empty config: %v", err)
+	}
+	return p
+}
 
 // freePort grabs an unused TCP port for the test, releases it, and
 // returns the chosen number. Acceptable race window for tests.
@@ -35,7 +52,7 @@ func TestServe_BootsAndAnswersHealthz(t *testing.T) {
 	t.Setenv("PODIUM_BIND", fmt.Sprintf("127.0.0.1:%d", port))
 	t.Setenv("PODIUM_REGISTRY_STORE", "memory")
 	t.Setenv("PODIUM_OBJECT_STORE", "none")
-	t.Setenv("PODIUM_CONFIG_FILE", filepath.Join(tmp, "missing.yaml"))
+	t.Setenv("PODIUM_CONFIG_FILE", emptyServerConfig(t))
 	t.Setenv("PODIUM_FILESYSTEM_ROOT", tmp)
 	t.Setenv("PODIUM_VECTOR_BACKEND", "")
 

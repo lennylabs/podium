@@ -23,6 +23,9 @@ func serveCmd(args []string) int {
 	publicMode := fs.Bool("public-mode", false, "run in public mode (overrides PODIUM_PUBLIC_MODE)")
 	allowPublicBind := fs.Bool("allow-public-bind", false, "allow public mode to bind a non-loopback address (overrides PODIUM_ALLOW_PUBLIC_BIND)")
 	standalone := fs.Bool("standalone", false, "alias for the zero-flag standalone bootstrap")
+	// §13.10: --strict refuses to start without explicit configuration instead
+	// of auto-entering standalone mode (the same effect as PODIUM_NO_AUTOSTANDALONE).
+	strict := fs.Bool("strict", false, "refuse to start without explicit configuration (overrides the zero-flag standalone auto-bootstrap)")
 	configFile := fs.String("config", "", "path to registry.yaml (overrides PODIUM_CONFIG_FILE)")
 	layerPath := fs.String("layer-path", "", "filesystem registry root to ingest at startup (§13.10; overrides PODIUM_LAYER_PATH)")
 	// §13.10 Web UI: opt-in single-page UI at /ui/. The non-loopback bind is
@@ -72,6 +75,11 @@ func serveCmd(args []string) int {
 	// future flag-only tweaks have a single source of truth.
 	if *standalone {
 		_ = os.Setenv("PODIUM_STANDALONE", "true")
+	}
+	// §13.10: --strict has the same effect as PODIUM_NO_AUTOSTANDALONE — a
+	// missing config is a hard error rather than a cue to auto-bootstrap.
+	if *strict {
+		_ = os.Setenv("PODIUM_NO_AUTOSTANDALONE", "1")
 	}
 	if err := serverboot.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "podium serve: %v\n", err)
