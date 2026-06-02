@@ -113,9 +113,12 @@ func (r *Registry) mergedDomains(ctx context.Context, id layer.Identity) (map[st
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
-	allowed := r.visibleLayerIDs(id)
+	// spec: §4.6 — resolve the caller's layer list (admin + runtime-registered)
+	// per request so load_domain composes user-defined layers too (F-4.6.1).
+	resolved := r.resolveLayers(ctx)
+	allowed := r.allowedLayers(resolved, id)
 	prec := map[string]int{}
-	for _, l := range r.layers {
+	for _, l := range resolved {
 		prec[l.ID] = l.Precedence
 	}
 	byPath := map[string][]store.DomainRecord{}
@@ -145,16 +148,17 @@ func (r *Registry) mergedDomains(ctx context.Context, id layer.Identity) (map[st
 	return out, nil
 }
 
-// visibleLayerIDs returns the set of layer IDs visible to id, or nil
-// when every layer is visible (public mode, filesystem-source, or no
-// configured layer list). Mirrors visibleManifests so domain records
-// and manifest records share one visibility view.
-func (r *Registry) visibleLayerIDs(id layer.Identity) map[string]bool {
-	if id.IsPublic || len(r.layers) == 0 {
+// allowedLayers returns the set of layer IDs from resolved that id may see,
+// or nil when every layer is visible (public mode, filesystem-source, or no
+// configured layer list). Mirrors visibleManifests so domain records and
+// manifest records share one visibility view. Callers pass the per-request
+// resolved layer list from resolveLayers (§4.6, F-4.6.1).
+func (r *Registry) allowedLayers(resolved []layer.Layer, id layer.Identity) map[string]bool {
+	if id.IsPublic || len(resolved) == 0 {
 		return nil
 	}
 	allowed := map[string]bool{}
-	for _, l := range layer.EffectiveLayersWith(r.layers, id, r.resolveGroup) {
+	for _, l := range layer.EffectiveLayersWith(resolved, id, r.resolveGroup) {
 		allowed[l.ID] = true
 	}
 	return allowed

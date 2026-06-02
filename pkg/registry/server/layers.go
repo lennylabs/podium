@@ -924,6 +924,18 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 	for _, a := range res.Ingested {
 		arts = append(arts, map[string]string{"id": a.ArtifactID, "version": a.Version})
 	}
+	// spec: §4.6 / §3.3 — surface the non-blocking ingest advisories (e.g. the
+	// cross-layer license change, F-4.6.3) so a publisher reingesting at
+	// runtime sees the same flags the boot path logs.
+	advisories := make([]map[string]string, 0, len(res.Advisories))
+	for _, a := range res.Advisories {
+		advisories = append(advisories, map[string]string{
+			"artifact_id": a.ArtifactID,
+			"code":        a.Code,
+			"severity":    string(a.Severity),
+			"message":     a.Message,
+		})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"queued":        cfg.ID,
 		"queued_at":     time.Now().UTC().Format(time.RFC3339),
@@ -933,6 +945,7 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 		"conflicts":     len(res.Conflicts),
 		"lint_failures": len(res.LintFailures),
 		"artifacts":     arts,
+		"advisories":    advisories,
 	})
 }
 

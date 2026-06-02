@@ -839,6 +839,28 @@ func TestExtends_SyncFilesystemNotMerged(t *testing.T) {
 	}
 }
 
+// T-D-extends-47b — podium sync over a filesystem registry rejects a
+// cross-type extends chain. The child's type: must match the parent's; the
+// filesystem-source materialization path enforces the same rejection the
+// server ingest path applies (F-4.6.2). spec: docs/authoring/extends.md §
+// "Default for unlisted fields"; §4.6.
+func TestExtends_SyncFilesystemCrossTypeRejected(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		".registry-config": "multi_layer: true\nlayer_order:\n  - org-defaults\n  - team-foo\n",
+		"org-defaults/" + exParentID + "/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: base agent\n---\n\nagent body\n",
+		"team-foo/" + exParentID + "/ARTIFACT.md":     "---\ntype: context\nversion: 2.0.0\ndescription: overlay context\nextends: " + exParentID + "@1.x\n---\n\ncontext body\n",
+	})
+	tgt := t.TempDir()
+	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none")
+	if res.Exit == 0 {
+		t.Fatalf("sync of a cross-type extends chain should fail; exit=0 stdout=%s", res.Stdout)
+	}
+	if !strings.Contains(res.Stderr, "extends.type_mismatch") {
+		t.Errorf("stderr should cite extends.type_mismatch:\n%s", res.Stderr)
+	}
+}
+
 // ---- search sensitivity / cross-layer visibility (T-D-extends-48..49) -------
 
 // T-D-extends-48 — search_artifacts reflects the most-restrictive sensitivity

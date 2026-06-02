@@ -404,6 +404,12 @@ func layerReingest(args []string) int {
 			ID      string `json:"id"`
 			Version string `json:"version"`
 		} `json:"artifacts"`
+		Advisories []struct {
+			ArtifactID string `json:"artifact_id"`
+			Code       string `json:"code"`
+			Severity   string `json:"severity"`
+			Message    string `json:"message"`
+		} `json:"advisories"`
 	}
 	if err := json.Unmarshal(out, &parsed); err == nil && len(parsed.Artifacts) > 0 {
 		layer := parsed.Layer
@@ -412,6 +418,11 @@ func layerReingest(args []string) int {
 		}
 		for _, a := range parsed.Artifacts {
 			fmt.Printf("artifact: %s@%s   layer: %s\n", a.ID, a.Version, layer)
+		}
+		// §4.6 / §3.3: print any non-blocking advisories (e.g. a cross-layer
+		// license change) so the publisher sees them on a runtime reingest.
+		for _, a := range parsed.Advisories {
+			fmt.Printf("advisory: %s [%s] %s (%s)\n", a.ArtifactID, a.Severity, a.Message, a.Code)
 		}
 		return 0
 	}

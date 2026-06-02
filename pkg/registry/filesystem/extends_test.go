@@ -163,6 +163,55 @@ func TestResolveExtends_SameIDWithoutLowerLayerErrors(t *testing.T) {
 	}
 }
 
+// Spec: §4.6 — "The child's type: must match the parent's; ingest rejects an
+// extends: chain that crosses types." The filesystem-source materialization
+// path must reject a cross-type chain rather than silently merge the parent's
+// fields into a differently-typed child (F-4.6.2). Mirrors the server ingest
+// rejection.
+func TestResolveExtends_CrossTypeRejected(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent agent\n---\n\nagent body\n"
+	child := "---\ntype: context\nversion: 1.0.0\ndescription: child context\nextends: acme/base\n---\n\ncontext body\n"
+	testharness.WriteTree(t, root,
+		testharness.WriteTreeOption{Path: "acme/base/ARTIFACT.md", Content: parent},
+		testharness.WriteTreeOption{Path: "acme/derived/ARTIFACT.md", Content: child},
+	)
+	reg, err := Open(root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	_, err = reg.Walk(WalkOptions{CollisionPolicy: CollisionPolicyHighestWins, ResolveExtends: true})
+	if err == nil || !strings.Contains(err.Error(), "extends.type_mismatch") {
+		t.Fatalf("Walk err = %v, want extends.type_mismatch", err)
+	}
+}
+
+// Spec: §4.6 — the cross-type rejection also fires on a same-ID overlay whose
+// type differs from the lower-precedence layer's artifact at the same ID.
+func TestResolveExtends_SameIDCrossTypeRejected(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: base agent\n---\n\nbody\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: overlay context\nextends: x\n---\n\nbody\n"
+	testharness.WriteTree(t, root,
+		testharness.WriteTreeOption{
+			Path:    ".registry-config",
+			Content: "multi_layer: true\nlayer_order:\n  - team-shared\n  - personal\n",
+		},
+		testharness.WriteTreeOption{Path: "team-shared/x/ARTIFACT.md", Content: parent},
+		testharness.WriteTreeOption{Path: "personal/x/ARTIFACT.md", Content: child},
+	)
+	reg, err := Open(root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	_, err = reg.Walk(WalkOptions{CollisionPolicy: CollisionPolicyHighestWins, ResolveExtends: true})
+	if err == nil || !strings.Contains(err.Error(), "extends.type_mismatch") {
+		t.Fatalf("Walk err = %v, want extends.type_mismatch", err)
+	}
+}
+
 // Spec: §13.11.3 — with ResolveExtends disabled (the default for lint and
 // conformance callers), the authored frontmatter is left unchanged.
 func TestResolveExtends_DisabledLeavesBytesUnchanged(t *testing.T) {

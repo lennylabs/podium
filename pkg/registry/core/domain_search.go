@@ -60,7 +60,7 @@ func (r *Registry) SearchDomains(ctx context.Context, id layer.Identity, opts Se
 		Type:           "domains.searched",
 		Caller:         callerOf(id),
 		Context:        map[string]string{"query": opts.Query, "scope": opts.Scope},
-		ResolvedLayers: r.effectiveLayerComposition(id),
+		ResolvedLayers: r.effectiveLayerComposition(ctx, id),
 	}
 	defer func() { r.emit(ctx, ev) }()
 	if opts.TopK > 50 {

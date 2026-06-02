@@ -122,6 +122,35 @@ func TestPodiumSync_FilesystemSourceResolvesExtends(t *testing.T) {
 	}
 }
 
+// Spec: §4.6 (F-4.6.2) — "The child's type: must match the parent's; ingest
+// rejects an extends: chain that crosses types." `podium sync` over a
+// filesystem source resolves extends through the same merge; a cross-type
+// chain must be rejected rather than silently materialized with the parent's
+// fields folded into a differently-typed child. End-to-end via the real binary.
+func TestPodiumSync_FilesystemSourceRejectsCrossTypeExtends(t *testing.T) {
+	t.Parallel()
+	registry := t.TempDir()
+	target := t.TempDir()
+	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: base agent\n---\n\nagent body\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: overlay context\nextends: x\n---\n\ncontext body\n"
+	testharness.WriteTree(t, registry,
+		testharness.WriteTreeOption{
+			Path: ".registry-config", Content: "multi_layer: true\nlayer_order:\n  - team-shared\n  - personal\n",
+		},
+		testharness.WriteTreeOption{Path: "team-shared/x/ARTIFACT.md", Content: parent},
+		testharness.WriteTreeOption{Path: "personal/x/ARTIFACT.md", Content: child},
+	)
+	res := cmdharness.Run(t, "podium", "",
+		"sync", "--registry", registry, "--target", target, "--harness", "none",
+	)
+	if res.ExitCode == 0 {
+		t.Fatalf("expected non-zero exit for a cross-type extends chain, stdout:\n%s", res.Stdout)
+	}
+	if !strings.Contains(res.Stderr, "extends.type_mismatch") {
+		t.Errorf("stderr missing extends.type_mismatch: %s", res.Stderr)
+	}
+}
+
 // Spec: §13.11.2 — when defaults.registry is unset across all scopes and no
 // --registry / PODIUM_REGISTRY is given, the CLI errors with config.no_registry
 // and points the user at podium init (F-13.11.3).

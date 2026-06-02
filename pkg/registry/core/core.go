@@ -328,8 +328,8 @@ func (r *Registry) emit(ctx context.Context, e AuditEvent) {
 // audit "resolved layer composition" field. Returns nil when no layer
 // list is configured (filesystem source) so the audit field stays empty
 // rather than carrying a misleading value.
-func (r *Registry) effectiveLayerComposition(id layer.Identity) []string {
-	eff := layer.EffectiveLayersWith(r.layers, id, r.resolveGroup)
+func (r *Registry) effectiveLayerComposition(ctx context.Context, id layer.Identity) []string {
+	eff := layer.EffectiveLayersWith(r.resolveLayers(ctx), id, r.resolveGroup)
 	if len(eff) == 0 {
 		return nil
 	}
@@ -338,6 +338,66 @@ func (r *Registry) effectiveLayerComposition(id layer.Identity) []string {
 		out[i] = l.ID
 	}
 	return out
+}
+
+// resolveLayers builds the tenant's ordered layer list for one read call,
+// composing admin-defined layers (config order, lowest precedence) below the
+// caller's user-defined layers, per the §4.6 composition order. Runtime-
+// registered layers — user-defined layers (§7.3.1) and admin-defined layers
+// added through the API after boot — are persisted as store.LayerConfig rows,
+// so resolving the list per request is what brings them into the effective
+// view; a static slice fixed at construction never sees them (F-4.6.1). The
+// boot-time slice is the fallback when the store carries no layer configs (the
+// standalone filesystem path does not persist them and bypasses visibility in
+// public mode anyway).
+//
+// spec: §4.6 — "Resolution of layers 1 and 2 happens at the registry on every
+// load_domain, search_domains, search_artifacts, and load_artifact call."
+func (r *Registry) resolveLayers(ctx context.Context) []layer.Layer {
+	cfgs, err := r.store.ListLayerConfigs(ctx, r.tenantID)
+	if err != nil || len(cfgs) == 0 {
+		return r.layers
+	}
+	var admin, user []store.LayerConfig
+	for _, c := range cfgs {
+		if c.UserDefined {
+			user = append(user, c)
+		} else {
+			admin = append(admin, c)
+		}
+	}
+	// ListLayerConfigs already orders by Order ascending; sort defensively so
+	// precedence does not depend on a backend's iteration order.
+	sort.SliceStable(admin, func(i, j int) bool { return admin[i].Order < admin[j].Order })
+	sort.SliceStable(user, func(i, j int) bool { return user[i].Order < user[j].Order })
+	out := make([]layer.Layer, 0, len(cfgs))
+	prec := 1
+	for _, c := range admin {
+		out = append(out, layerFromConfig(c, prec))
+		prec++
+	}
+	// §4.6 composition order places every user-defined layer above every
+	// admin-defined layer, regardless of the stored Order values.
+	for _, c := range user {
+		out = append(out, layerFromConfig(c, prec))
+		prec++
+	}
+	return out
+}
+
+// layerFromConfig projects a stored layer config onto the visibility layer
+// the §4.6 evaluator consumes, at the given precedence.
+func layerFromConfig(c store.LayerConfig, precedence int) layer.Layer {
+	return layer.Layer{
+		ID:         c.ID,
+		Precedence: precedence,
+		Visibility: layer.Visibility{
+			Public:       c.Public,
+			Organization: c.Organization,
+			Groups:       c.Groups,
+			Users:        c.Users,
+		},
+	}
 }
 
 // ----- LoadDomain ----------------------------------------------------------
@@ -464,7 +524,7 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 		Type:           "domain.loaded",
 		Caller:         callerOf(id),
 		Target:         path,
-		ResolvedLayers: r.effectiveLayerComposition(id),
+		ResolvedLayers: r.effectiveLayerComposition(ctx, id),
 	}
 	defer func() {
 		if res != nil {
@@ -1004,7 +1064,7 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 		Type:           "artifacts.searched",
 		Caller:         callerOf(id),
 		Context:        map[string]string{"query": opts.Query, "scope": opts.Scope, "type": opts.Type},
-		ResolvedLayers: r.effectiveLayerComposition(id),
+		ResolvedLayers: r.effectiveLayerComposition(ctx, id),
 	}
 	defer func() { r.emit(ctx, ev) }()
 	if opts.TopK > 50 {
@@ -1286,7 +1346,7 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 		Caller:         callerOf(id),
 		Target:         artifactID,
 		Context:        map[string]string{"version": opts.Version},
-		ResolvedLayers: r.effectiveLayerComposition(id),
+		ResolvedLayers: r.effectiveLayerComposition(ctx, id),
 	}
 	defer func() {
 		if res != nil {
@@ -1701,10 +1761,13 @@ func (r *Registry) visibleManifests(ctx context.Context, id layer.Identity) ([]s
 	// smaller surface wins. A public-mode caller bypasses layer filtering
 	// but a presented scope still narrows the read surface.
 	scopes := layer.ParseScopes(id.Scopes)
-	if id.IsPublic || len(r.layers) == 0 {
+	// spec: §4.6 — resolve the caller's layer list (admin + runtime-registered)
+	// per request rather than from a static boot-time slice (F-4.6.1).
+	resolved := r.resolveLayers(ctx)
+	if id.IsPublic || len(resolved) == 0 {
 		return applyReadScope(all, scopes), nil
 	}
-	visible := layer.EffectiveLayersWith(r.layers, id, r.resolveGroup)
+	visible := layer.EffectiveLayersWith(resolved, id, r.resolveGroup)
 	allowed := map[string]bool{}
 	for _, l := range visible {
 		allowed[l.ID] = true

@@ -594,7 +594,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		// manifests and pin to an exact version. Parent updates do
 		// not silently propagate; only re-ingesting the child does.
 		if rec.Artifact.Extends != "" {
-			pin, parentType, perr := resolveExtendsPin(ctx, st, req.TenantID, rec.Artifact.Extends, rec.ID, rec.Artifact.Version)
+			pin, parentType, parentLicense, perr := resolveExtendsPin(ctx, st, req.TenantID, rec.Artifact.Extends, rec.ID, rec.Artifact.Version)
 			if perr != nil {
 				res.Rejected = append(res.Rejected, RejectedArtifact{
 					ArtifactID: rec.ID,
@@ -613,6 +613,20 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 					Code: "ingest.invalid_artifact",
 				})
 				continue
+			}
+			// spec: §4.6 field-semantics table — license is "Scalar; child
+			// wins (lint warning if changed across layers)". The merge already
+			// gives the child its license; emit the advisory the table mandates
+			// when the child's license differs from the resolved parent's so the
+			// publisher sees the cross-layer change (F-4.6.3).
+			if rec.Artifact.License != "" && parentLicense != "" && rec.Artifact.License != parentLicense {
+				res.Advisories = append(res.Advisories, lint.Diagnostic{
+					ArtifactID: rec.ID,
+					Code:       "lint.license_changed_across_layers",
+					Severity:   lint.SeverityWarning,
+					Message: fmt.Sprintf("license %q differs from extended parent %s license %q; the child's license wins per §4.6",
+						rec.Artifact.License, stripPin(rec.Artifact.Extends), parentLicense),
+				})
 			}
 			mr.ExtendsPin = pin
 		}
@@ -1256,23 +1270,27 @@ func stripPin(ref string) string {
 // being ingested; we use it to detect a self-reference (the simplest
 // cycle case). The returned type lets the caller enforce the §4.6 rule
 // that a child's type must match its parent's.
-func resolveExtendsPin(ctx context.Context, st store.Store, tenantID, ref, childID, childVersion string) (pin, parentType string, err error) {
+func resolveExtendsPin(ctx context.Context, st store.Store, tenantID, ref, childID, childVersion string) (pin, parentType, parentLicense string, err error) {
 	id, pinStr := splitRef(ref)
 	if id == "" {
-		return "", "", fmt.Errorf("invalid extends reference %q", ref)
+		return "", "", "", fmt.Errorf("invalid extends reference %q", ref)
 	}
 	p, err := version.ParsePin(pinStr)
 	if err != nil {
-		return "", "", fmt.Errorf("parse pin: %w", err)
+		return "", "", "", fmt.Errorf("parse pin: %w", err)
 	}
 
 	all, err := st.ListManifests(ctx, tenantID)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	versions := make([]string, 0, 4)
 	hashByVersion := map[string]string{}
 	typeByVersion := map[string]string{}
+	// frontmatterByVersion lets the resolver recover the parent's license
+	// (not an indexed column) so ingest can flag a cross-layer license
+	// change per the §4.6 field-semantics table (F-4.6.3).
+	frontmatterByVersion := map[string][]byte{}
 	for _, m := range all {
 		if m.ArtifactID != id {
 			continue
@@ -1287,12 +1305,13 @@ func resolveExtendsPin(ctx context.Context, st store.Store, tenantID, ref, child
 		versions = append(versions, m.Version)
 		hashByVersion[m.Version] = m.ContentHash
 		typeByVersion[m.Version] = m.Type
+		frontmatterByVersion[m.Version] = m.Frontmatter
 	}
 	if len(versions) == 0 {
 		if id == childID {
-			return "", "", fmt.Errorf("self-extends cycle: %q", ref)
+			return "", "", "", fmt.Errorf("self-extends cycle: %q", ref)
 		}
-		return "", "", fmt.Errorf("no parent artifact %q ingested yet", id)
+		return "", "", "", fmt.Errorf("no parent artifact %q ingested yet", id)
 	}
 
 	var resolved string
@@ -1304,15 +1323,21 @@ func resolveExtendsPin(ctx context.Context, st store.Store, tenantID, ref, child
 			}
 		}
 		if resolved == "" {
-			return "", "", fmt.Errorf("no parent version with content hash sha256:%s", p.Hash)
+			return "", "", "", fmt.Errorf("no parent version with content hash sha256:%s", p.Hash)
 		}
 	} else {
 		resolved, err = version.Resolve(p, versions)
 		if err != nil {
-			return "", "", fmt.Errorf("no parent version satisfies %q", ref)
+			return "", "", "", fmt.Errorf("no parent version satisfies %q", ref)
 		}
 	}
-	return id + "@" + resolved, typeByVersion[resolved], nil
+	// Parse the resolved parent's license from its stored source. The
+	// frontmatter holds the full ARTIFACT.md bytes; a parse failure leaves
+	// the license empty so the license-change check simply does not fire.
+	if a, perr := manifest.ParseArtifact(frontmatterByVersion[resolved]); perr == nil {
+		parentLicense = a.License
+	}
+	return id + "@" + resolved, typeByVersion[resolved], parentLicense, nil
 }
 
 func splitRef(ref string) (id, pin string) {

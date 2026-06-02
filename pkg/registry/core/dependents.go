@@ -134,10 +134,12 @@ func (r *Registry) PreviewScope(ctx context.Context, id layer.Identity) (*ScopeP
 	// spec: §3.5 / §4.6 — `layers` is the ordered composition (lowest
 	// precedence first) of every layer the identity is entitled to see,
 	// including layers with zero visible artifacts. Derive it from the
-	// layer config so the order is deterministic and an empty-but-visible
-	// layer is not dropped (F-3.5.6).
-	if len(r.layers) > 0 {
-		for _, l := range layer.EffectiveLayersWith(r.layers, id, r.resolveGroup) {
+	// per-request resolved layer list (admin + runtime-registered, F-4.6.1)
+	// so the order is deterministic and an empty-but-visible layer is not
+	// dropped (F-3.5.6).
+	resolved := r.resolveLayers(ctx)
+	if len(resolved) > 0 {
+		for _, l := range layer.EffectiveLayersWith(resolved, id, r.resolveGroup) {
 			preview.Layers = append(preview.Layers, l.ID)
 		}
 	} else {

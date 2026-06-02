@@ -62,6 +62,30 @@ func TestVisible_FieldUnion(t *testing.T) {
 	}
 }
 
+// Spec: §4.6 (F-4.6.4) — the visibility table calls `users:` entries "OIDC
+// subject", but the section's own config example uses email-style identifiers
+// (users: [alice@acme.com]). The table and example contradict each other; the
+// evaluator follows the example and matches a configured entry against either
+// the caller's Sub or Email, which is what makes the documented example
+// functional. This change-detector pins that dual-match behavior. Reconciling
+// the spec wording is a read-only spec edit and is tracked as deferred.
+func TestVisible_UsersMatchSubjectOrEmail(t *testing.T) {
+	t.Parallel()
+	layer := Layer{ID: "x", Visibility: Visibility{Users: []string{"alice@acme.com"}}}
+	// Email-style identifier carried in Email (Sub is opaque).
+	if !Visible(layer, Identity{Sub: "auth0|abc123", Email: "alice@acme.com", IsAuthenticated: true}) {
+		t.Errorf("a users: entry should match the caller's Email")
+	}
+	// Same identifier carried as the subject.
+	if !Visible(layer, Identity{Sub: "alice@acme.com", IsAuthenticated: true}) {
+		t.Errorf("a users: entry should match the caller's Sub")
+	}
+	// A caller matching neither attribute is not granted.
+	if Visible(layer, Identity{Sub: "auth0|other", Email: "bob@acme.com", IsAuthenticated: true}) {
+		t.Errorf("a caller matching neither Sub nor Email must not be granted")
+	}
+}
+
 // Spec: §13.10 — public-mode bypasses the visibility evaluator.
 func TestVisible_PublicModeBypass(t *testing.T) {
 	t.Parallel()

@@ -110,6 +110,14 @@ func mergeRecord(rec ArtifactRecord, layerIdx int, deduped []ArtifactRecord, eff
 	if parentMerged == nil {
 		return nil, fmt.Errorf("extends.unresolved: parent %q of %q has no parseable manifest", parentID, rec.ID)
 	}
+	// spec: §4.6 — "The child's type: must match the parent's; ingest rejects
+	// an extends: chain that crosses types." The server ingest path enforces
+	// this; the filesystem-source materialization path must reject it too
+	// rather than silently merge an incompatible parent (F-4.6.2).
+	if parentMerged.Type != rec.Artifact.Type {
+		return nil, fmt.Errorf("extends.type_mismatch: %q (type %q) extends %q (type %q); a child's type must match the parent's",
+			rec.ID, rec.Artifact.Type, parentID, parentMerged.Type)
+	}
 	merged := manifest.MergeExtends(*parentMerged, *rec.Artifact)
 	return &merged, nil
 }
