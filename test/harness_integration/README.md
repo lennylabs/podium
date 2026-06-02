@@ -65,7 +65,7 @@ consumed Podium's materialized artifact; ✗ = skipped with the noted reason.
 | `rule` | ✅ | ✅ | ✅ | agent emits the always-rule marker |
 | `skill` | ✅ | ✅ | ✅ | agent loads SKILL.md on a triggering prompt |
 | `command` | ✅ | ✅ | ✗ (by design) | agent runs the slash command (`/ping`) |
-| `hook` | ✅ | ✗ (didn't fire) | ✗ (didn't fire) | the stop hook's command writes a marker file |
+| `hook` | ✅ | ✗ (headless runtime) | ✗ (exec runtime) | the stop hook's command writes a marker file |
 | `agent` (subagent) | not covered | not covered | not covered | delegation is model-dependent; no deterministic marker |
 | `context` | n/a | n/a | n/a | harness-neutral `.podium/context/`; no harness loads it natively |
 
@@ -77,10 +77,20 @@ Findings worth noting:
   `CODEX_HOME/config.toml`, not the project `.codex/config.toml`, so the probe
   points `CODEX_HOME` at the materialized `.codex` dir.
 - **hook**: Claude Code fires the materialized `.claude/settings.json` stop hook
-  in `-p` mode. `cursor-agent --print` and `codex exec` did **not** fire the
-  materialized `.cursor/hooks.json` / `.codex/hooks.json` stop hook in testing —
-  either headless mode does not run hooks, or those CLIs read hooks from a
-  different location/format. Worth a follow-up against each tool's hook docs.
+  in `-p` mode. For cursor and codex, the materialization is correct but the
+  harness does not run the hook in its non-interactive mode:
+  - **cursor**: Podium writes `.cursor/hooks.json`, which matches cursor-agent's
+    own `projectConfigPath` and recognized `stop` event. `cursor-agent --print`
+    does not run the stop lifecycle hook in headless mode (re-tested with an
+    absolute-path marker to rule out a working-directory artifact).
+  - **codex**: codex reads hooks from a `hooks` table in `.codex/config.toml`
+    (a `HooksToml` struct), not from a standalone JSON file. Podium previously
+    wrote a `.codex/hooks.json` that codex never read; it now merges
+    `[[hooks.<Event>]]` into `.codex/config.toml`, verified accepted by
+    `codex --strict-config`. `codex exec` still does not fire config.toml
+    lifecycle hooks in codex-cli 0.136.0 (confirmed: not even `SessionStart`
+    fires under `--dangerously-bypass-hook-trust`), so the materialized hook is
+    likely consumed only by the interactive TUI.
 - **command**: `command` is `✗` for codex (§6.7.1), folded into skills.
 
 ### Tier A harness commands

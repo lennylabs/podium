@@ -381,8 +381,10 @@ var behaviors = []behavior{
 		prompt: "Reply with only: hi", marker: hookMarker, sideEffect: hookSideEffectFile,
 		run: []string{"claude-code"},
 		skip: map[string]string{
-			"cursor": "cursor-agent --print did not fire the materialized .cursor/hooks.json stop hook in testing",
-			"codex":  "codex exec did not fire the materialized .codex/hooks.json Stop hook in testing",
+			// Materialization is correct in both cases; the limitation is the
+			// harness's non-interactive runtime, not Podium's output.
+			"cursor": "materialized .cursor/hooks.json is correct (verified against cursor-agent's projectConfigPath + stop event); cursor-agent --print does not run the stop lifecycle hook in headless mode",
+			"codex":  "materialized .codex/config.toml [[hooks.Stop]] is the correct native schema (verified with codex --strict-config); codex exec does not fire config.toml lifecycle hooks (not even SessionStart) in codex-cli 0.136.0",
 		},
 	},
 }
@@ -428,7 +430,14 @@ func TestHarnessArtifactTypes(t *testing.T) {
 					if !ok {
 						t.Skipf("%s: binary %q not installed", harness, d.bin)
 					}
-					got := res.stdout + res.stderr
+					raw := res.stdout + res.stderr
+					// A credential revoked or expired mid-run (the loginProbe can
+					// report a stale "logged in") is an auth failure, not a
+					// materialization failure, so skip rather than fail.
+					if sig := harnessAuthError(raw); sig != "" {
+						t.Skipf("%s/%s: harness auth unavailable at run time (%q); not a materialization result", harness, b.typ, sig)
+					}
+					got := raw
 					if b.sideEffect != "" {
 						got = readSideEffect(project, b.sideEffect)
 					}
@@ -441,6 +450,24 @@ func TestHarnessArtifactTypes(t *testing.T) {
 			}
 		})
 	}
+}
+
+// harnessAuthError returns a matched signature when the harness output shows an
+// authentication failure (a revoked, expired, or missing credential). The
+// signatures are credential-specific so ordinary model text does not trip them.
+// A loginProbe can report a stale "logged in" after the token is revoked
+// server-side, so the run itself is the authoritative auth signal.
+func harnessAuthError(out string) string {
+	lower := strings.ToLower(out)
+	for _, sig := range []string{
+		"token_revoked", "invalidated oauth token", "401 unauthorized",
+		"invalid_api_key", "invalid api key", "authentication_error", "not logged in",
+	} {
+		if strings.Contains(lower, sig) {
+			return sig
+		}
+	}
+	return ""
 }
 
 // agentAuthed reports whether the harness can run an agent turn: an explicit API

@@ -205,6 +205,43 @@ func codexMCPTOML(src Source) []byte {
 	return []byte(b.String())
 }
 
+// codexHookOut assembles a Codex hook: an OpInject of the [[hooks.<Event>]]
+// table into .codex/config.toml plus the bundled scripts in the
+// .podium/resources/<id>/ bucket. Codex reads hooks from its config.toml under
+// the `hooks` table (a `HooksToml` struct), not from a standalone JSON file, so
+// the hook merges into the same config.toml the mcp-server entries use. A nil
+// fragment (no native event for this hook_event) produces no output.
+func codexHookOut(src Source) []File {
+	frag := codexHookTOML(src)
+	if frag == nil {
+		return nil
+	}
+	out := []File{{Path: ".codex/config.toml", Op: OpInject, Key: src.ArtifactID, Content: frag}}
+	out = appendResources(out, hookResourceBucket(src), src.Resources)
+	sortFiles(out)
+	return out
+}
+
+// codexHookTOML renders the [[hooks.<Event>]] array-of-tables fragment for
+// Codex's config.toml. Codex's HooksToml schema keys each native event to a
+// list of matcher groups, each carrying a list of {type = "command", command}
+// handlers (verified against `codex --strict-config` on codex-cli 0.136.0).
+// Reconciliation is by the OpInject marker, so no x-podium-id key is emitted
+// (an unknown key would fail --strict-config). Returns nil when Codex has no
+// native event for the canonical hook_event.
+func codexHookTOML(src Source) []byte {
+	native, ok := codexHookEvents[parsed(src).HookEvent]
+	if !ok || native == "" {
+		return nil
+	}
+	var b strings.Builder
+	b.WriteString("[[hooks." + native + "]]\n")
+	b.WriteString("[[hooks." + native + ".hooks]]\n")
+	b.WriteString("type = " + tomlBasic("command") + "\n")
+	b.WriteString("command = " + tomlBasic(hookActionFor(src)) + "\n")
+	return []byte(b.String())
+}
+
 // --- hook config-merge -------------------------------------------------------
 
 // hookResourceBucket is the harness-neutral directory a hook's bundled scripts

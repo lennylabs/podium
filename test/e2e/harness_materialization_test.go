@@ -709,9 +709,9 @@ func TestHarness_CodexAutoFallbackWarning(t *testing.T) {
 	rmExpectWarn(t, reg, "codex")
 }
 
-// T-D-configure-harness-43 — Codex has a native hook surface (.codex/hooks.json),
-// so a hook targeting codex lints clean rather than failing ingest.
-// §6.7.1: codex hook_event = ✓.
+// T-D-configure-harness-43 — Codex has a native hook surface (the config.toml
+// `hooks` table), so a hook targeting codex lints clean rather than failing
+// ingest. §6.7.1: codex hook_event = ✓.
 func TestHarness_CodexHookNativeClean(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{

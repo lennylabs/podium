@@ -18,39 +18,25 @@ Review the diff and report defects.
 """
 
 === .codex/config.toml ===
+# podium:begin:team/notify
+[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = "echo done"
+# podium:end:team/notify
+
+# podium:begin:team/guard
+[[hooks.PreToolUse]]
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "./scripts/guard.sh"
+# podium:end:team/guard
+
 # podium:begin:team/warehouse
 [mcp_servers.warehouse]
 command = "npx"
 args = ["@acme/warehouse-mcp"]
 # podium:end:team/warehouse
-
-=== .codex/hooks.json ===
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "hooks": [
-          {
-            "command": "./scripts/guard.sh",
-            "type": "command"
-          }
-        ],
-        "x-podium-id": "team/guard"
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "command": "echo done",
-            "type": "command"
-          }
-        ],
-        "x-podium-id": "team/notify"
-      }
-    ]
-  }
-}
 
 === .podium/context/team/glossary/ARTIFACT.md ===
 ---

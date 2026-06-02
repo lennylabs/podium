@@ -349,7 +349,7 @@ Codex consumes `AGENTS.md` for rules and now has native skill, subagent, and hoo
 | `skill` | `.agents/skills/<name>/SKILL.md` (folder per skill; note the `.agents/` root, not `.codex/`). |
 | `agent` | `.codex/agents/<name>.toml` |
 | `rule` | Injected into root `AGENTS.md` (or common-ancestor for `rule_mode: glob`) between Podium-managed markers. |
-| `hook` | Merged into `.codex/hooks.json` (or `.codex/config.toml` `[hooks]`). |
+| `hook` | Merged into the `[hooks]` table in `.codex/config.toml`, keyed by the native event (for example `[[hooks.Stop]]`). |
 | `mcp-server` | Merged into `.codex/config.toml` under `[mcp_servers]`. |
 | `command` | No project-level target. Codex custom prompts are user-scope (`~/.codex/prompts/`) and deprecated in favor of skills; exclude Codex with `target_harnesses:` or author as `type: skill`. |
 | `context` | No native concept. A `context` artifact lands at `.podium/context/<artifact-id>/`. |
@@ -357,7 +357,7 @@ Codex consumes `AGENTS.md` for rules and now has native skill, subagent, and hoo
 **Notes:**
 
 - `rule_mode: auto` is not supported; ingest fails with a lint error.
-- Codex has a native hook surface (`.codex/hooks.json` or `[hooks]` in `config.toml`), so `hook` artifacts materialize rather than failing ingest.
+- Codex reads hooks from the `[hooks]` table in `.codex/config.toml`, so `hook` artifacts materialize rather than failing ingest. Codex runs these hooks in its interactive mode; `codex exec` does not fire lifecycle hooks in codex-cli 0.136.0.
 - Skills live at `.agents/skills/`, not `.codex/skills/`. Subagents are TOML at `.codex/agents/<name>.toml`.
 
 ---

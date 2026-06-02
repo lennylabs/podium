@@ -30,7 +30,8 @@ const (
 	// OpMergeJSON deep-merges Content (a JSON object) into the JSON file at
 	// Path under Podium-owned keys, preserving the operator's other keys.
 	// Used for hook and mcp-server config (settings.json, .mcp.json,
-	// .cursor/*.json, opencode.json, .codex/hooks.json).
+	// .cursor/*.json, opencode.json). Codex hooks merge into config.toml via
+	// OpInject instead.
 	OpMergeJSON
 )
 

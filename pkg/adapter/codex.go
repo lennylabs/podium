@@ -7,7 +7,8 @@ import (
 
 // Codex is the adapter for OpenAI Codex (§6.7). Skills live under .agents/
 // (not .codex/), subagents are TOML, rules inject into AGENTS.md, and hook and
-// mcp-server merge into the Codex config.
+// mcp-server merge into .codex/config.toml (the `hooks` and `mcp_servers`
+// tables).
 type Codex struct{}
 
 // ID returns "codex".
@@ -26,7 +27,7 @@ func (Codex) Adapt(ctx context.Context, src Source) ([]File, error) {
 	case "context":
 		return contextOut(src), nil
 	case "hook":
-		return hookConfigOut(".codex/hooks.json", hookFragmentJSON(codexHookEvents, src), src), nil
+		return codexHookOut(src), nil
 	case "mcp-server":
 		return []File{{Path: ".codex/config.toml", Op: OpInject, Key: src.ArtifactID, Content: codexMCPTOML(src)}}, nil
 	}
