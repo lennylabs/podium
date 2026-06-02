@@ -479,9 +479,14 @@ type LoadArtifactResponse struct {
 	LargeResources map[string]LargeResourceLink `json:"large_resources,omitempty"`
 	// ManifestMerged signals that Frontmatter is an extends-merged
 	// re-serialization with the hidden parent stripped (§4.6), so its bytes
-	// no longer reproduce ContentHash. The consumer skips local content-hash
-	// verification for such manifests (§6.6 step 2).
+	// no longer reproduce ContentHash. The consumer recomputes the §6.6 step 2
+	// content hash over RawFrontmatter instead.
 	ManifestMerged bool `json:"manifest_merged,omitempty"`
+	// RawFrontmatter carries the leaf child's original pre-merge ARTIFACT.md
+	// bytes when ManifestMerged is set, so the consumer reproduces the §4.7.6
+	// content hash for the merged manifest rather than skipping the check.
+	// Empty for a non-merged response.
+	RawFrontmatter string `json:"raw_frontmatter,omitempty"`
 	// Deprecated, ReplacedBy, and DeprecationWarning surface the
 	// §4.7.4 lifecycle signal so consumers see the warning
 	// alongside the served bytes and can route callers to the
@@ -891,6 +896,7 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 		DeprecationWarning: res.DeprecationWarning,
 		Signature:          res.Signature,
 		ManifestMerged:     res.Merged,
+		RawFrontmatter:     string(res.RawFrontmatter),
 	}
 	// §7.2 data plane: resources at or below the inline cutoff return
 	// inline; larger ones return as presigned URLs the consumer fetches

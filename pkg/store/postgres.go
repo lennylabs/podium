@@ -99,6 +99,7 @@ func (p *Postgres) applySchema() error {
 			ingested_at TIMESTAMPTZ NOT NULL,
 			frontmatter BYTEA,
 			body BYTEA,
+			skill_raw BYTEA,
 			extends_pin TEXT NOT NULL DEFAULT '',
 			signature TEXT NOT NULL DEFAULT '',
 			search_visibility TEXT NOT NULL DEFAULT '',
@@ -240,8 +241,8 @@ func (p *Postgres) PutManifest(ctx context.Context, rec ManifestRecord) error {
 		INSERT INTO manifests
 			(tenant_id, artifact_id, version, content_hash, type, description,
 			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-			 extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+			 extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at, skill_raw)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 		ON CONFLICT (tenant_id, artifact_id, version) DO NOTHING`,
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
 		rec.Type, rec.Description,
@@ -250,7 +251,7 @@ func (p *Postgres) PutManifest(ctx context.Context, rec ManifestRecord) error {
 		rec.Deprecated, ingestedAt.UTC(),
 		rec.Frontmatter, rec.Body,
 		rec.ExtendsPin, rec.Signature, rec.SearchVisibility, resources,
-		nullTimePG(rec.DeprecatedAt), nullTimePG(rec.DeletedAt))
+		nullTimePG(rec.DeprecatedAt), nullTimePG(rec.DeletedAt), rec.SkillRaw)
 	if err != nil {
 		return err
 	}
@@ -304,8 +305,8 @@ func (p *Postgres) PutManifestWithVectorPending(ctx context.Context, rec Manifes
 		INSERT INTO manifests
 			(tenant_id, artifact_id, version, content_hash, type, description,
 			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-			 extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+			 extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at, skill_raw)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 		ON CONFLICT (tenant_id, artifact_id, version) DO NOTHING`,
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
 		rec.Type, rec.Description,
@@ -314,7 +315,7 @@ func (p *Postgres) PutManifestWithVectorPending(ctx context.Context, rec Manifes
 		rec.Deprecated, ingestedAt.UTC(),
 		rec.Frontmatter, rec.Body,
 		rec.ExtendsPin, rec.Signature, rec.SearchVisibility, resources,
-		nullTimePG(rec.DeprecatedAt), nullTimePG(rec.DeletedAt))
+		nullTimePG(rec.DeprecatedAt), nullTimePG(rec.DeletedAt), rec.SkillRaw)
 	if err != nil {
 		return err
 	}
@@ -419,7 +420,7 @@ func (p *Postgres) GetManifest(ctx context.Context, tenantID, artifactID, versio
 	row := p.db.QueryRowContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-		       extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at
+		       extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at, skill_raw
 		FROM manifests
 		WHERE tenant_id = $1 AND artifact_id = $2 AND version = $3 AND deleted_at IS NULL`,
 		tenantID, artifactID, version)
@@ -436,7 +437,7 @@ func (p *Postgres) ListManifests(ctx context.Context, tenantID string) ([]Manife
 	rows, err := p.db.QueryContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-		       extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at
+		       extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at, skill_raw
 		FROM manifests
 		WHERE tenant_id = $1 AND deleted_at IS NULL
 		ORDER BY artifact_id ASC, version ASC`, tenantID)
@@ -814,7 +815,7 @@ func scanManifestPG(scanner rowScanner) (ManifestRecord, error) {
 		&rec.Type, &rec.Description, &tags, &rec.Sensitivity, &rec.Layer,
 		&rec.Deprecated, &rec.IngestedAt, &rec.Frontmatter, &rec.Body,
 		&rec.ExtendsPin, &rec.Signature, &rec.SearchVisibility, &resources,
-		&deprecatedAt, &deletedAt)
+		&deprecatedAt, &deletedAt, &rec.SkillRaw)
 	if err != nil {
 		return ManifestRecord{}, err
 	}

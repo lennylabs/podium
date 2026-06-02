@@ -86,6 +86,7 @@ func (s *SQLite) applySchema() error {
 			ingested_at TEXT NOT NULL,
 			frontmatter BLOB,
 			body BLOB,
+			skill_raw BLOB,
 			extends_pin TEXT NOT NULL DEFAULT '',
 			signature TEXT NOT NULL DEFAULT '',
 			search_visibility TEXT NOT NULL DEFAULT '',
@@ -224,9 +225,9 @@ func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO manifests
 			(tenant_id, artifact_id, version, content_hash, type, description,
-			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
+			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body, skill_raw,
 			 extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (tenant_id, artifact_id, version) DO NOTHING`,
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
 		rec.Type, rec.Description,
@@ -234,7 +235,7 @@ func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
 		rec.Sensitivity, rec.Layer,
 		boolToInt(rec.Deprecated),
 		ingestedAt.UTC().Format(time.RFC3339Nano),
-		rec.Frontmatter, rec.Body,
+		rec.Frontmatter, rec.Body, rec.SkillRaw,
 		rec.ExtendsPin, rec.Signature, rec.SearchVisibility, resources,
 		nullTimeText(rec.DeprecatedAt), nullTimeText(rec.DeletedAt))
 	if err != nil {
@@ -289,9 +290,9 @@ func (s *SQLite) PutManifestWithVectorPending(ctx context.Context, rec ManifestR
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO manifests
 			(tenant_id, artifact_id, version, content_hash, type, description,
-			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
+			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body, skill_raw,
 			 extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (tenant_id, artifact_id, version) DO NOTHING`,
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
 		rec.Type, rec.Description,
@@ -299,7 +300,7 @@ func (s *SQLite) PutManifestWithVectorPending(ctx context.Context, rec ManifestR
 		rec.Sensitivity, rec.Layer,
 		boolToInt(rec.Deprecated),
 		ingestedAt.UTC().Format(time.RFC3339Nano),
-		rec.Frontmatter, rec.Body,
+		rec.Frontmatter, rec.Body, rec.SkillRaw,
 		rec.ExtendsPin, rec.Signature, rec.SearchVisibility, resources,
 		nullTimeText(rec.DeprecatedAt), nullTimeText(rec.DeletedAt))
 	if err != nil {
@@ -409,7 +410,7 @@ func (s *SQLite) VectorOutboxStats(ctx context.Context) (int, time.Time, error) 
 func (s *SQLite) GetManifest(ctx context.Context, tenantID, artifactID, version string) (ManifestRecord, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
-		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
+		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body, skill_raw,
 		       extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at
 		FROM manifests
 		WHERE tenant_id = ? AND artifact_id = ? AND version = ? AND deleted_at IS NULL`,
@@ -426,7 +427,7 @@ func (s *SQLite) GetManifest(ctx context.Context, tenantID, artifactID, version 
 func (s *SQLite) ListManifests(ctx context.Context, tenantID string) ([]ManifestRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
-		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
+		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body, skill_raw,
 		       extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at
 		FROM manifests
 		WHERE tenant_id = ? AND deleted_at IS NULL
@@ -819,7 +820,7 @@ func scanManifest(scanner rowScanner) (ManifestRecord, error) {
 	err := scanner.Scan(
 		&rec.TenantID, &rec.ArtifactID, &rec.Version, &rec.ContentHash,
 		&rec.Type, &rec.Description, &tags, &rec.Sensitivity, &rec.Layer,
-		&deprecated, &ingestedAt, &rec.Frontmatter, &rec.Body,
+		&deprecated, &ingestedAt, &rec.Frontmatter, &rec.Body, &rec.SkillRaw,
 		&rec.ExtendsPin, &rec.Signature, &rec.SearchVisibility, &resources,
 		&deprecatedAt, &deletedAt)
 	if err != nil {

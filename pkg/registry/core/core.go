@@ -1383,9 +1383,14 @@ type LoadArtifactResult struct {
 	// Merged is true when the served Frontmatter is an extends-merged
 	// re-serialization with the hidden parent stripped (§4.6) rather than
 	// the original child bytes the ContentHash was computed over. The
-	// consumer uses it to skip local content-hash recomputation, which the
-	// served bytes cannot reproduce for a merged manifest (§6.6 step 2).
+	// consumer reads RawFrontmatter (below) to reproduce the §4.7.6 hash.
 	Merged bool
+	// RawFrontmatter carries the leaf child's original (pre-merge) ARTIFACT.md
+	// bytes when Merged is set, so the consumer can reproduce the §4.7.6
+	// content hash (computed over these bytes, the verbatim SKILL.md, and the
+	// bundled resources) instead of skipping the §6.6 step 2 check. Empty for
+	// a non-merged result, where Frontmatter already holds the hashed bytes.
+	RawFrontmatter []byte
 }
 
 // LoadArtifactOptions captures §5 arguments. Empty Version means
@@ -1600,10 +1605,13 @@ func (r *Registry) assembleResult(ctx context.Context, rec store.ManifestRecord)
 	result := resultFromRecord(merged)
 	// This branch runs only for an extends artifact, and mergeChain always
 	// re-serializes the frontmatter with the hidden parent stripped (§4.6),
-	// so the served bytes no longer reproduce the stored ContentHash. Flag
-	// the result so the consumer skips local content-hash verification and
-	// relies on the signature gate instead (§6.6 step 2).
+	// so the served Frontmatter no longer reproduces the stored ContentHash.
+	// Flag the result and deliver the leaf child's original ARTIFACT.md bytes
+	// (rec is the leaf of the chain) as RawFrontmatter so the consumer can
+	// still run the §6.6 step 2 content-hash match against the bytes the hash
+	// was computed over rather than skipping it.
 	result.Merged = true
+	result.RawFrontmatter = append([]byte(nil), rec.Frontmatter...)
 	return withDeprecationWarning(result), nil
 }
 

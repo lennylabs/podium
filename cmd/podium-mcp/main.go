@@ -1121,11 +1121,16 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 	now := time.Now()
 	ttl := s.cfg.resolutionTTL
 	if (s.cfg.cacheMode == "offline-first" || s.cfg.cacheMode == "offline-only") && id != "" {
-		// offline-only serves a stale `latest` because it can never refresh;
-		// offline-first treats a stale `latest` as a miss and falls through to
-		// the registry. Pinned versions are immutable and never expire.
-		allowStale := s.cfg.cacheMode == "offline-only"
-		if hash, ok := s.resolutions.Resolve(id, version, now, ttl, allowStale); ok {
+		// §6.5: both offline modes serve a present resolution rather than
+		// revalidating it. offline-first is "use cached resolution and content
+		// if present; only call the registry on miss" and offline-only "never
+		// call the registry; cache only", so a present-but-stale `latest`
+		// resolution is served without a registry call. The resolution TTL
+		// governs HEAD revalidation, which the spec scopes to always-revalidate
+		// ("Revalidated via HEAD on hit when PODIUM_CACHE_MODE=always-revalidate").
+		// A genuine miss (no entry at all) still falls through to the registry
+		// in offline-first. Pinned versions are immutable and never expire.
+		if hash, ok := s.resolutions.Resolve(id, version, now, ttl, true); ok {
 			if cached, cerr := s.loadArtifactFromCache(hash, id); cerr == nil {
 				return s.deliverLoadArtifact(*cached, deliverOpts{harness: harnessFromArgs(s.cfg.harness, args), destination: destFromArgs(args)})
 			}
@@ -1289,6 +1294,28 @@ func destFromArgs(args map[string]any) string {
 	return ""
 }
 
+// absMaterializeRoot returns root as an absolute path so the materialized_at
+// entries the bridge reports are absolute and ready to use (spec: §5.1 "The
+// returned materialized_at paths are absolute and ready to use"). The
+// destination may arrive relative via the per-call destination argument or
+// PODIUM_MATERIALIZE_ROOT; absolutizing it once means every joined path is
+// absolute regardless of the caller's working directory, so a host that
+// resolves the paths against its own CWD (which can differ from the MCP server
+// process CWD) lands on the correct location. The on-disk write absolutizes
+// internally (materialize.Write -> filepath.Abs), so this only aligns the
+// reported paths with where the files actually land. A filepath.Abs failure
+// (it only fails when the working directory is unknowable) leaves root
+// unchanged so materialization still proceeds.
+func absMaterializeRoot(root string) string {
+	if root == "" {
+		return root
+	}
+	if abs, err := filepath.Abs(root); err == nil {
+		return abs
+	}
+	return root
+}
+
 // deliverLoadArtifact runs §6.6 verification + materialization
 // against an already-fetched (or cached) load_artifact response.
 // Shared between the live-fetch and cache-served code paths so
@@ -1349,6 +1376,10 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 	if root == "" {
 		root = s.cfg.materializeRoot
 	}
+	// §5.1: absolutize the root so every materialized_at entry is absolute,
+	// matching the sandbox-profile entry (already absolute) and the actual
+	// on-disk write location.
+	root = absMaterializeRoot(root)
 	if root != "" {
 		harnessID := o.harness
 		if harnessID == "" {
@@ -1460,29 +1491,38 @@ func decodeInlineResources(resp *loadArtifactResponse) error {
 
 // verifyContentHash recomputes the canonical content hash over the served
 // manifest bytes and bundled resources and compares it to resp.ContentHash
-// (§4.7.6 / §6.6 step 2). It binds the delivered frontmatter, manifest body,
-// and inline resources to the content_hash so a registry response (or a
-// non-TLS hop) that tampered with the bytes while keeping a consistent
+// (§4.7.6 / §6.6 step 2). It binds the delivered artifact bytes, the verbatim
+// SKILL.md, and the inline resources to the content_hash so a registry response
+// (or a non-TLS hop) that tampered with the bytes while keeping a consistent
 // (content_hash, signature) pair is rejected before materialization. For
 // sub-threshold artifacts that carry no signature this is the only integrity
-// gate the spec defines.
+// gate the spec defines, so step 2 runs the match for every artifact type.
 //
-// The recomputation reproduces the registry's canonicalization (contentHashOf
-// over version.ContentHash): artifact bytes, the SKILL.md slot, then each
-// bundled resource in sorted-path order. It is skipped when the served bytes
-// cannot reproduce the stored hash by construction:
-//   - skills, whose content_hash covers the original SKILL.md bytes the
-//     registry parses and discards at ingest (only the prose body is served);
-//   - extends-merged manifests (resp.ManifestMerged), whose served frontmatter
-//     is a re-serialization with the hidden parent stripped (§4.6).
-//
-// Those paths rely on the signature gate. A skip never weakens the common
-// path: the registry sets manifest_merged only when it actually merged.
+// The recomputation reproduces the registry's ingest canonicalization
+// (contentHashOf over version.ContentHash): the original ARTIFACT.md bytes, the
+// SKILL.md slot, then each bundled resource in sorted-path order.
+//   - For a skill the SKILL.md slot carries the verbatim SKILL.md the registry
+//     ships in skill_raw; the content_hash covers those bytes, which the prose
+//     body alone could not reproduce.
+//   - For an extends-merged manifest (resp.ManifestMerged) the served
+//     frontmatter is a re-serialization with the hidden parent stripped (§4.6),
+//     so the recomputation reads the leaf child's original ARTIFACT.md bytes
+//     from raw_frontmatter, which is what the hash was computed over.
 func (s *mcpServer) verifyContentHash(resp loadArtifactResponse) error {
-	if resp.ContentHash == "" || resp.Type == "skill" || resp.ManifestMerged {
+	if resp.ContentHash == "" {
 		return nil
 	}
-	parts := [][]byte{[]byte(resp.Frontmatter), nil}
+	// Slot 0: the original ARTIFACT.md bytes the hash was computed over. For a
+	// merged manifest that is the pre-merge raw_frontmatter, not the served
+	// (re-serialized) frontmatter.
+	artifactBytes := []byte(resp.Frontmatter)
+	if resp.ManifestMerged {
+		artifactBytes = []byte(resp.RawFrontmatter)
+	}
+	// Slot 1: the verbatim SKILL.md for a skill (skill_raw), empty otherwise —
+	// matching the registry's contentHashOf, which hashes rec.SkillBytes (nil
+	// for non-skills) in this position.
+	parts := [][]byte{artifactBytes, []byte(resp.SkillRaw)}
 	keys := make([]string, 0, len(resp.Resources))
 	for k := range resp.Resources {
 		keys = append(keys, k)
@@ -1573,6 +1613,9 @@ func (s *mcpServer) loadArtifactFromOverlay(rec *filesystem.ArtifactRecord, args
 	if root == "" {
 		root = s.cfg.materializeRoot
 	}
+	// §5.1: absolutize the root so the overlay path returns absolute
+	// materialized_at entries, matching the registry-served path.
+	root = absMaterializeRoot(root)
 	if root != "" {
 		harnessID := s.cfg.harness
 		if h, ok := args["harness"].(string); ok && h != "" {
@@ -1672,10 +1715,14 @@ type loadArtifactResponse struct {
 	Signature      string                       `json:"signature,omitempty"`
 	// ManifestMerged signals that the served frontmatter is an extends-merged
 	// re-serialization with the hidden parent stripped (§4.6) rather than the
-	// original bytes the content_hash was computed over. The consumer skips
-	// the local content-hash recomputation for such manifests (F-6.6.2),
-	// since the served bytes cannot reproduce the stored hash by design.
+	// original bytes the content_hash was computed over. The consumer
+	// recomputes the §6.6 step 2 content hash over RawFrontmatter for such
+	// manifests instead of over the served (merged) frontmatter.
 	ManifestMerged bool `json:"manifest_merged,omitempty"`
+	// RawFrontmatter is the leaf child's original pre-merge ARTIFACT.md bytes,
+	// delivered when ManifestMerged is set so the bridge reproduces the §4.7.6
+	// content hash for a merged manifest. Empty for a non-merged response.
+	RawFrontmatter string `json:"raw_frontmatter,omitempty"`
 }
 
 // largeResourceLink mirrors the registry's per-resource link. The

@@ -51,6 +51,7 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("LayerSoftDeleteRecovery", func(t *testing.T) { layerSoftDeleteRecovery(t, factory(t)) })
 	t.Run("LayerDeletionPurgedAfterWindow", func(t *testing.T) { layerDeletionPurgedAfterWindow(t, factory(t)) })
 	t.Run("SearchVisibilityRoundTrip", func(t *testing.T) { searchVisibilityRoundTrip(t, factory(t)) })
+	t.Run("SkillRawRoundTrip", func(t *testing.T) { skillRawRoundTrip(t, factory(t)) })
 	t.Run("ResourcesRoundTrip", func(t *testing.T) { resourcesRoundTrip(t, factory(t)) })
 	t.Run("DomainRecordRoundTrip", func(t *testing.T) { domainRecordRoundTrip(t, factory(t)) })
 	t.Run("DomainPutReplacesPerLayer", func(t *testing.T) { domainPutReplacesPerLayer(t, factory(t)) })
@@ -144,6 +145,38 @@ func searchVisibilityRoundTrip(t *testing.T, s store.Store) {
 	}
 	if len(list) != 1 || list[0].SearchVisibility != "direct-only" {
 		t.Errorf("ListManifests SearchVisibility not preserved: %+v", list)
+	}
+}
+
+// Spec: §4.3.4 / §6.6 step 2 / §11 — the verbatim SKILL.md bytes (SkillRaw)
+// are persisted on the manifest record and survive both GetManifest and
+// ListManifests, so server-source delivery reproduces the authored skill file
+// and the §6.6 content_hash (which covers SkillRaw) can be re-verified by the
+// consumer. Without a backing column the SQLite and Postgres backends silently
+// dropped the bytes, returning skill_raw="".
+func skillRawRoundTrip(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "a")
+	rec := manifestRec("a", "skill/demo", "1.0.0", "sha:1")
+	skillRaw := []byte("---\nname: demo\ndescription: a demo skill\n---\n\ndemo body.\n")
+	rec.SkillRaw = skillRaw
+	mustPut(t, s, rec)
+
+	got, err := s.GetManifest(ctx, "a", "skill/demo", "1.0.0")
+	if err != nil {
+		t.Fatalf("GetManifest: %v", err)
+	}
+	if string(got.SkillRaw) != string(skillRaw) {
+		t.Errorf("GetManifest SkillRaw = %q, want %q", got.SkillRaw, skillRaw)
+	}
+
+	list, err := s.ListManifests(ctx, "a")
+	if err != nil {
+		t.Fatalf("ListManifests: %v", err)
+	}
+	if len(list) != 1 || string(list[0].SkillRaw) != string(skillRaw) {
+		t.Errorf("ListManifests SkillRaw not preserved: %+v", list)
 	}
 }
 
