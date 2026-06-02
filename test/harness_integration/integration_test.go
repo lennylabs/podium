@@ -10,8 +10,9 @@
 // product), is skipped with a reason.
 //
 // Tier C (TestHarnessAgentSmoke) is double-gated (this build tag plus
-// PODIUM_HARNESS_AGENT=1 and the harness's API key) and runs one real headless
-// agent turn that must surface a marker carried by a materialized always-rule.
+// PODIUM_HARNESS_AGENT=1 and the harness being authenticated, via an API key or
+// a stored CLI login) and runs one real headless agent turn that must surface a
+// marker carried by a materialized always-rule.
 package harness_integration
 
 import (
@@ -155,15 +156,17 @@ func scopedEnv(home string, extra map[string]string) []string {
 // harness with no non-interactive config command leaves mcpProbe nil and is
 // skipped by Tier A.
 type driver struct {
-	harness    string
-	bin        string
-	version    []string
-	mcpProbe   []string                            // args that list configured MCP servers; nil => no probe
-	server     string                              // server name expected in the probe output
-	skipReason string                              // why Tier A skips when mcpProbe is nil
-	extraEnv   func(home string) map[string]string // harness-specific config-dir redirects
-	agentExec  func(prompt string) []string        // Tier C headless prompt; nil => no agent smoke
-	keyEnv     string                              // API-key env var required for the agent smoke
+	harness     string
+	bin         string
+	version     []string
+	mcpProbe    []string                            // args that list configured MCP servers; nil => no probe
+	server      string                              // server name expected in the probe output
+	skipReason  string                              // why Tier A skips when mcpProbe is nil
+	extraEnv    func(home string) map[string]string // harness-specific config-dir redirects
+	agentExec   func(prompt string) []string        // Tier C headless prompt; nil => no agent smoke
+	keyEnv      string                              // API-key env var that authorizes the agent smoke
+	loginProbe  []string                            // command reporting auth status (stored-login alternative to keyEnv)
+	loginMarker string                              // substring of loginProbe output meaning "authenticated"
 }
 
 var drivers = []driver{
@@ -219,8 +222,13 @@ var drivers = []driver{
 		bin:        "cursor-agent",
 		version:    []string{"--version"},
 		skipReason: "cursor-agent mcp list reflects approved servers, not raw .cursor/mcp.json; Cursor is covered by the Tier C agent run over .cursor/rules/*.mdc",
-		agentExec:  func(prompt string) []string { return []string{"--print", "--output-format", "text", prompt} },
-		keyEnv:     "CURSOR_API_KEY",
+		// --force accepts the workspace-trust prompt non-interactively; --print
+		// is the headless mode. cursor-agent authorizes via a stored login (its
+		// `status` command), so the agent smoke accepts that or CURSOR_API_KEY.
+		agentExec:   func(prompt string) []string { return []string{"--print", "--force", "--output-format", "text", prompt} },
+		keyEnv:      "CURSOR_API_KEY",
+		loginProbe:  []string{"status"},
+		loginMarker: "Logged in",
 	},
 	// IDE / web / no-MCP harnesses: no non-interactive config probe. Listed so
 	// the suite reports them explicitly rather than silently omitting them.
@@ -288,14 +296,23 @@ func TestHarnessConfigAccept(t *testing.T) {
 
 // ---- Tier C: agent smoke ----------------------------------------------------
 
+const agentPrompt = "Following your project rules, what is the secret word? Reply with only the word."
+
 // TestHarnessAgentSmoke runs one real headless agent turn against a project
 // carrying an always-rule that instructs the agent to emit a marker, and
-// asserts the marker appears. Double-gated: the harness_integration build tag,
-// PODIUM_HARNESS_AGENT=1, and the harness's API key. Opt-in and tolerant; real
+// asserts the marker appears — a true end-to-end check that the real harness
+// loads and applies Podium's materialized rule. Double-gated: the
+// harness_integration build tag, PODIUM_HARNESS_AGENT=1, and the harness being
+// authenticated (an API key or a stored CLI login). Opt-in and tolerant; real
 // agents need network and are nondeterministic.
+//
+// Unlike Tier A, this runs with the real environment (not a scoped HOME): the
+// harness's stored login lives in $HOME, and the synced project supplies the
+// rule via the working directory. The unique marker makes a false positive from
+// the developer's global config effectively impossible.
 func TestHarnessAgentSmoke(t *testing.T) {
 	if os.Getenv("PODIUM_HARNESS_AGENT") != "1" {
-		t.Skip("agent smoke is opt-in: set PODIUM_HARNESS_AGENT=1 (and the harness API key) to run")
+		t.Skip("agent smoke is opt-in: set PODIUM_HARNESS_AGENT=1 (and authenticate the harness CLI) to run")
 	}
 	for _, d := range drivers {
 		d := d
@@ -306,20 +323,13 @@ func TestHarnessAgentSmoke(t *testing.T) {
 			if _, err := exec.LookPath(d.bin); err != nil {
 				t.Skipf("%s: binary %q not installed", d.harness, d.bin)
 			}
-			if d.keyEnv != "" && os.Getenv(d.keyEnv) == "" {
-				t.Skipf("%s: %s not set", d.harness, d.keyEnv)
+			if !agentAuthed(t, d) {
+				t.Skipf("%s: not authenticated (set %s or log in via the harness CLI)", d.harness, d.keyEnv)
 			}
 
 			project := syncProject(t, d.harness, secretRuleRegistry)
-			home := t.TempDir()
-			var extra map[string]string
-			if d.extraEnv != nil {
-				extra = d.extraEnv(home)
-			}
-			env := scopedEnv(home, extra)
-
-			args := d.agentExec("Following your project rules, what is the secret word? Reply with only the word.")
-			res, ok := runExternal(t, project, env, 180*time.Second, d.bin, args...)
+			args := d.agentExec(agentPrompt)
+			res, ok := runExternal(t, project, os.Environ(), 180*time.Second, d.bin, args...)
 			if !ok {
 				t.Skipf("%s: binary %q not installed", d.harness, d.bin)
 			}
@@ -328,6 +338,22 @@ func TestHarnessAgentSmoke(t *testing.T) {
 				t.Errorf("%s agent did not surface the always-rule marker %q (exit=%d):\n%s",
 					d.harness, secretMarker, res.exit, out)
 			}
+			t.Logf("%s applied the materialized always-rule (marker %q present)", d.harness, secretMarker)
 		})
 	}
+}
+
+// agentAuthed reports whether the harness can run an agent turn: an explicit API
+// key, or a stored CLI login detected by loginProbe.
+func agentAuthed(t *testing.T, d driver) bool {
+	t.Helper()
+	if d.keyEnv != "" && os.Getenv(d.keyEnv) != "" {
+		return true
+	}
+	if len(d.loginProbe) > 0 {
+		if r, ok := runExternal(t, t.TempDir(), os.Environ(), 30*time.Second, d.bin, d.loginProbe...); ok {
+			return strings.Contains(r.stdout+r.stderr, d.loginMarker)
+		}
+	}
+	return false
 }

@@ -29,19 +29,28 @@ recorded against a concrete version.
 A harness that exposes no non-interactive config command (an IDE or a web
 product) is listed and skipped with a reason rather than silently omitted.
 
-## Tier C — agent smoke (opt-in, needs network + API key)
+## Tier C — agent smoke (opt-in, needs network + auth)
 
 `TestHarnessAgentSmoke` runs one real headless agent turn against a project
 carrying an always-loaded rule that instructs the agent to emit a marker
-(`ZEBRA-7421`), and asserts the marker appears in the output. It is double-gated:
-the `harness_integration` build tag, `PODIUM_HARNESS_AGENT=1`, and the harness's
-API-key env var. It is tolerant and may be flaky; real agents need network and
-are nondeterministic.
+(`ZEBRA-7421`), and asserts the marker appears — a true end-to-end check that the
+harness loaded and applied Podium's materialized rule. It is double-gated: the
+`harness_integration` build tag, `PODIUM_HARNESS_AGENT=1`, and the harness being
+authenticated (an API-key env var, or a stored CLI login the driver detects).
+It runs with the real environment (so the stored login in `$HOME` works); the
+unique marker makes a false positive from global config effectively impossible.
+It is tolerant and may be flaky; real agents need network and are
+nondeterministic.
 
 ```bash
-PODIUM_HARNESS_AGENT=1 ANTHROPIC_API_KEY=… OPENAI_API_KEY=… GEMINI_API_KEY=… \
+# stored CLI logins (e.g. `cursor-agent login`) are detected automatically;
+# API keys are an alternative for the harnesses that read them.
+PODIUM_HARNESS_AGENT=1 \
   go test -tags harness_integration ./test/harness_integration/ -run TestHarnessAgentSmoke -v
 ```
+
+Verified here: **cursor** (cursor-agent 2026.06.02, logged in) loads the
+materialized `.cursor/rules/secret.mdc` and returns the marker.
 
 ## Coverage and verification status
 
@@ -51,7 +60,7 @@ PODIUM_HARNESS_AGENT=1 ANTHROPIC_API_KEY=… OPENAI_API_KEY=… GEMINI_API_KEY=�
 | codex | `codex mcp list` | `codex exec` | Candidate command; verify against the installed `codex --help`. |
 | gemini | `gemini mcp list` | `gemini -p` | Candidate command; verify against the installed `gemini --help`. |
 | opencode | (none yet) | `opencode run` | Confirm whether OpenCode exposes a non-interactive MCP-list command; until then the config probe skips. |
-| cursor | (approval-gated) | `cursor-agent --print` | **Checked** against `cursor-agent` 2025.09.18: `cursor-agent mcp list` reflects only *approved* servers (it has `mcp login`/`disable` approval commands), not the raw `.cursor/mcp.json` Podium writes, so Tier A records the version and skips. Cursor is exercised by the Tier C agent run over the materialized `.cursor/rules/*.mdc`; it needs `cursor-agent login` or `CURSOR_API_KEY` (this machine is not logged in, so the agent smoke skips here). |
+| cursor | (approval-gated) | `cursor-agent --print --force` | `cursor-agent mcp list` reflects only *approved* servers (it has `mcp login`/`disable` approval commands), not the raw `.cursor/mcp.json`, so Tier A records the version and skips. **Verified end-to-end via Tier C** against `cursor-agent` 2026.06.02: with the CLI logged in, the agent loaded the materialized `.cursor/rules/secret.mdc` and returned the marker. Needs `--force` (accepts the workspace-trust prompt) and either a stored `cursor-agent login` or `CURSOR_API_KEY`. |
 | claude-desktop | — | — | No project-level surface. Skipped. |
 | claude-cowork | — | — | Web/marketplace; no local binary. Skipped. |
 | pi | — | — | No MCP surface. Skipped. |
