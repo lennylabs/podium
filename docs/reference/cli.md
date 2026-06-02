@@ -437,7 +437,7 @@ podium admin reembed [--all] [--since <timestamp>]
 
 ### `podium admin migrate`
 
-Schema migrations. The expand-contract pattern means most upgrades don't require operator intervention; this command handles the rare cases.
+Schema migrations. The binary applies its schema additively on startup, so most upgrades require no operator intervention; this command handles the rare cases.
 
 ```
 podium admin migrate --finalize           # drop now-unused old columns/indexes
