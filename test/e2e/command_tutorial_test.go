@@ -365,7 +365,6 @@ func TestCommandTutorial_VariablesAccepted(t *testing.T) {
 		"version: 1.0.0\n" +
 		"description: Guided module refactoring with configurable focus areas.\n" +
 		"sensitivity: low\n" +
-		"expose_as_mcp_prompt: true\n" +
 		"variables:\n" +
 		"  FOCUS: all\n" +
 		"  PRESERVE_API: \"true\"\n" +
@@ -414,5 +413,84 @@ func TestCommandTutorial_FullSequenceClaudeCode(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(tgt, ".claude/podium", standupID, "ARTIFACT.md")); err == nil {
 		t.Errorf("a command must not also land under the .claude/podium/ extension bucket")
+	}
+}
+
+// The following tests cover T-D-first-command-20 through T-D-first-command-27.
+// Those gap entries were written against an earlier draft that projected
+// commands through MCP via an `expose_as_mcp_prompt` field and `prompts/list`
+// / `prompts/get` endpoints. That feature was removed. The spec now states the
+// canonical behavior directly: "A `type: command` artifact ... Podium does not
+// project commands through MCP. Both `podium sync` and the MCP server
+// materialize a command into the target harness's native command location and
+// format" (spec/05-meta-tools.md §command). The doc repeats it in the "Create
+// the artifact" field notes ("Podium does not project commands through MCP").
+// The schema carries no `expose_as_mcp_prompt` field, and the MCP server
+// advertises no `prompts` capability (cmd/podium-mcp/main.go initialize). The
+// tests below assert the current behavior the spec and doc claim.
+
+// TestCommandTutorial_MaterializedBodyVerbatim asserts that the none adapter
+// writes the command manifest to disk byte-for-byte, so every frontmatter
+// field and the prose body survive intact for a harness that reads the file
+// directly. This is the surviving intent of T-D-first-command-20 after the
+// MCP-projection field was removed: delivery is the canonical layout on disk.
+// spec: §6.7 (none adapter writes ArtifactBytes verbatim); doc "Materialize".
+func TestCommandTutorial_MaterializedBodyVerbatim(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})
+	tgt := t.TempDir()
+	if s := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none"); s.Exit != 0 {
+		t.Fatalf("sync exit=%d stderr=%s", s.Exit, s.Stderr)
+	}
+	if got := readFile(t, filepath.Join(tgt, standupID, "ARTIFACT.md")); got != standupArtifact {
+		t.Errorf("none adapter did not write the manifest verbatim:\n--- got ---\n%s\n--- want ---\n%s", got, standupArtifact)
+	}
+}
+
+// TestCommandTutorial_NotProjectedThroughMCP drives podium-mcp against a
+// standalone server holding the standup command and asserts the doc's claim
+// that commands are not projected through MCP. The prompt-projection methods
+// the removed feature defined (`prompts/list`, `prompts/get`) are absent, so
+// every former argument and error branch collapses to a single JSON-RPC
+// "method not found" (-32601): T-D-first-command-21 (the prompts/list entry),
+// T-D-first-command-22 (the false/absent exclusion), T-D-first-command-23 (the
+// user-message body), T-D-first-command-24 (not_exposed), T-D-first-command-25
+// (not_a_command), T-D-first-command-26 (invalid_argument), and
+// T-D-first-command-27 (not_found). The
+// companion TestMCPInitialize_AdvertisesNoPromptsCapability asserts the
+// matching absence of a `prompts` capability on initialize.
+// spec: §command (no MCP projection); cmd/podium-mcp/main.go default case.
+func TestCommandTutorial_NotProjectedThroughMCP(t *testing.T) {
+	t.Parallel()
+	srv := startServer(t, writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact}))
+	env := mcpServerEnv(t, srv.BaseURL)
+	res := mcpExec(t, env,
+		rpcReq{ID: 1, Method: "prompts/list", Params: map[string]any{}},
+		rpcReq{ID: 2, Method: "prompts/get", Params: map[string]any{"name": standupID}},
+		rpcReq{ID: 3, Method: "prompts/get", Params: map[string]any{}},
+		rpcReq{ID: 4, Method: "prompts/get", Params: map[string]any{"name": "does-not-exist"}},
+	)
+	assertMethodNotFound(t, res.Stdout, 1, "prompts/list")
+	assertMethodNotFound(t, res.Stdout, 2, "prompts/get(name=command-id)")
+	assertMethodNotFound(t, res.Stdout, 3, "prompts/get(no name)")
+	assertMethodNotFound(t, res.Stdout, 4, "prompts/get(unknown id)")
+}
+
+// assertMethodNotFound asserts the JSON-RPC response with the given id is a
+// -32601 "method not found" error. A removed MCP method returns this for every
+// call regardless of params, which is why the former prompt-projection error
+// envelopes no longer apply.
+func assertMethodNotFound(t testing.TB, stdout string, id int, label string) {
+	t.Helper()
+	env := rpcEnvelope(t, stdout, id)
+	e, ok := env["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("%s (id=%d): expected a JSON-RPC error, got envelope %v", label, id, env)
+	}
+	if code, _ := e["code"].(float64); int(code) != -32601 {
+		t.Errorf("%s (id=%d): error code = %v, want -32601", label, id, e["code"])
+	}
+	if msg, _ := e["message"].(string); !strings.Contains(msg, "method not found") {
+		t.Errorf("%s (id=%d): error message = %q, want it to contain \"method not found\"", label, id, msg)
 	}
 }
