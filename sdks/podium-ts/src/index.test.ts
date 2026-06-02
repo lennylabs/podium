@@ -386,6 +386,53 @@ describe("LoadedArtifact.materialize", () => {
       await expect(bad.materialize(dir)).rejects.toBeInstanceOf(RegistryError);
     });
   });
+
+  // Spec: §4.1/§7.2 (F-4.1.1) — materialize decodes a base64-flagged inline set
+  // (resources_base64) back to raw bytes so a binary resource is uncorrupted.
+  it("decodes base64 inline resources back to raw bytes", async () => {
+    await withTempDir(async (dir) => {
+      const blob = new Uint8Array([0xff, 0xfe, 0x00, 0x01, 0x02, 0xfd]);
+      const art = new LoadedArtifact({
+        id: "a/b",
+        type: "context",
+        version: "1",
+        manifest_body: "x",
+        frontmatter: "---\ntype: context\n---\n",
+        resources: { "data/blob.bin": Buffer.from(blob).toString("base64") },
+        resources_base64: true,
+      });
+      await art.materialize(dir);
+      const got = await readFile(join(dir, "a", "b", "data", "blob.bin"));
+      expect(new Uint8Array(got)).toEqual(blob);
+    });
+  });
+
+  // Spec: §7.6.2 (F-7.6.4) — a batch item materializes inline resources
+  // delivered without an object store: a text resource as a literal string, a
+  // binary one decoded from inline_base64. No presigned URL is fetched.
+  it("BatchResult materializes inline resources without fetching", async () => {
+    await withTempDir(async (dir) => {
+      const blob = new Uint8Array([0xff, 0xfe, 0x10, 0x20]);
+      const item = new BatchResult({
+        id: "a/b",
+        status: "ok",
+        type: "context",
+        manifest_body: "x",
+        frontmatter: "---\ntype: context\n---\n",
+        resources: [
+          { path: "scripts/run.py", inline: "print('hi')\n" },
+          { path: "data/blob.bin", inline: Buffer.from(blob).toString("base64"), inline_base64: true },
+        ],
+      });
+      const fetcher: typeof fetch = async (input) => {
+        throw new Error(`unexpected fetch of ${String(input)}`);
+      };
+      await item.materialize(dir, { fetcher });
+      const root = join(dir, "a", "b");
+      expect(await readFile(join(root, "scripts", "run.py"), "utf8")).toBe("print('hi')\n");
+      expect(new Uint8Array(await readFile(join(root, "data", "blob.bin")))).toEqual(blob);
+    });
+  });
 });
 
 describe("Client cache modes (§7.4)", () => {

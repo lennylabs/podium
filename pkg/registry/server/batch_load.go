@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"unicode/utf8"
 
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
@@ -42,6 +44,9 @@ type BatchLoadEnvelope struct {
 	// per the §7.6.2 wire example {path, presigned_url, content_hash}.
 	// The batch path keeps the response body small by delivering all
 	// resources via URL; the SDK fetches them concurrently afterward.
+	// In the standalone-without-storage mode (§13.11) ingest keeps every
+	// resource inline, so the reference carries the bytes inline instead
+	// of a presigned_url (F-7.6.4).
 	Resources          []BatchResource `json:"resources,omitempty"`
 	Deprecated         bool            `json:"deprecated,omitempty"`
 	ReplacedBy         string          `json:"replaced_by,omitempty"`
@@ -50,11 +55,17 @@ type BatchLoadEnvelope struct {
 }
 
 // BatchResource is one §7.6.2 bundled-resource reference in a batch
-// envelope. The field names match the spec example exactly.
+// envelope. With an object store configured the resource travels as a
+// presigned_url (the §7.6.2 wire example). In the standalone-without-storage
+// mode the bytes travel inline in Inline (base64-encoded, with InlineBase64
+// set, when the payload is not valid UTF-8) so a batch consumer materializes
+// the same complete package the single-load path delivers (F-7.6.4).
 type BatchResource struct {
 	Path         string `json:"path"`
-	PresignedURL string `json:"presigned_url"`
+	PresignedURL string `json:"presigned_url,omitempty"`
 	ContentHash  string `json:"content_hash"`
+	Inline       string `json:"inline,omitempty"`
+	InlineBase64 bool   `json:"inline_base64,omitempty"`
 }
 
 // handleBatchLoad answers POST /v1/artifacts:batchLoad per
@@ -116,11 +127,12 @@ func (s *Server) loadOneForBatch(ctx context.Context, id layer.Identity, artifac
 		DeprecationWarning: res.DeprecationWarning,
 	}
 	// §7.6.2: bundled resources travel as presigned URLs so the batch
-	// response body stays small. When no object store is configured the
-	// references are omitted (the data plane is unavailable); the manifest
-	// still loads.
-	if s.objectStore != nil {
-		for _, ref := range res.Resources {
+	// response body stays small. In the standalone-without-storage mode
+	// (§13.11) ingest kept every resource inline regardless of size, so
+	// with no object store deliver those bytes inline rather than dropping
+	// them (F-7.6.4), mirroring attachResources on the single-load path.
+	for _, ref := range res.Resources {
+		if s.objectStore != nil {
 			url, err := s.objectStore.Presign(ctx, resourceKey(ref), s.presignTTL)
 			if err != nil {
 				return BatchLoadEnvelope{
@@ -134,7 +146,26 @@ func (s *Server) loadOneForBatch(ctx context.Context, id layer.Identity, artifac
 				PresignedURL: url,
 				ContentHash:  ref.ContentHash,
 			})
+			continue
 		}
+		body, err := s.inlineBytes(ctx, ref)
+		if err != nil {
+			return BatchLoadEnvelope{
+				ID:     artifactID,
+				Status: "error",
+				Error:  errorEnvelopeFor(err),
+			}
+		}
+		br := BatchResource{Path: ref.Path, ContentHash: ref.ContentHash}
+		// §4.1/§7.2 (F-4.1.1): a binary resource is base64-encoded so
+		// encoding/json does not replace its non-UTF-8 bytes with U+FFFD.
+		if utf8.Valid(body) {
+			br.Inline = string(body)
+		} else {
+			br.Inline = base64.StdEncoding.EncodeToString(body)
+			br.InlineBase64 = true
+		}
+		env.Resources = append(env.Resources, br)
 	}
 	return env
 }

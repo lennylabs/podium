@@ -76,7 +76,7 @@ async function materializeCanonical(args: {
   frontmatter: string;
   manifestBody: string;
   skillRaw: string;
-  inline: Record<string, string>;
+  inline: Record<string, string | Uint8Array>;
   large: Record<string, LargeResourceLink>;
   fetcher: typeof fetch;
 }): Promise<string[]> {
@@ -136,6 +136,24 @@ async function materializeCanonical(args: {
   return written;
 }
 
+// decodeInlineForMaterialize decodes a base64-flagged inline resource set
+// (spec §4.1 / §7.2 resources_base64, F-4.1.1) back to raw bytes so a binary
+// resource materializes uncorrupted. encoding/json replaces invalid UTF-8 in
+// a string with U+FFFD, so the registry base64-encodes the whole inline set
+// when any member is binary; the flag is response-wide. Runs only inside
+// materialize (a Node context), so the Node Buffer global is available.
+function decodeInlineForMaterialize(
+  resources: Record<string, string>,
+  b64: boolean | undefined,
+): Record<string, string | Uint8Array> {
+  if (!b64) return resources;
+  const out: Record<string, Uint8Array> = {};
+  for (const [k, v] of Object.entries(resources)) {
+    out[k] = Uint8Array.from(Buffer.from(v, "base64"));
+  }
+  return out;
+}
+
 // Spec §7.6 / §2.2 — the loaded-artifact object exposes
 // materialize(to, { harness }). resources are inline bytes; largeResources
 // are §7.2 presigned references fetched on demand.
@@ -149,6 +167,9 @@ export class LoadedArtifact {
   // materialized file is byte-identical to the authored source.
   skill_raw?: string;
   resources?: Record<string, string>;
+  // §4.1/§7.2 (F-4.1.1): when true, every resources value is base64-encoded
+  // so a binary bundled resource survives JSON transport. materialize decodes.
+  resources_base64?: boolean;
   large_resources?: Record<string, LargeResourceLink>;
   deprecated?: boolean;
   replaced_by?: string;
@@ -162,6 +183,7 @@ export class LoadedArtifact {
     this.frontmatter = data.frontmatter ?? "";
     this.skill_raw = data.skill_raw;
     this.resources = data.resources;
+    this.resources_base64 = data.resources_base64;
     this.large_resources = data.large_resources;
     this.deprecated = data.deprecated;
     this.replaced_by = data.replaced_by;
@@ -176,7 +198,7 @@ export class LoadedArtifact {
       frontmatter: this.frontmatter,
       manifestBody: this.manifest_body,
       skillRaw: this.skill_raw ?? "",
-      inline: this.resources ?? {},
+      inline: decodeInlineForMaterialize(this.resources ?? {}, this.resources_base64),
       large: this.large_resources ?? {},
       fetcher: opts.fetcher ?? fetch,
     });
@@ -197,7 +219,16 @@ export class BatchResult {
   frontmatter?: string;
   // spec: §4.3.4 / §11 — verbatim SKILL.md for a skill (byte-identical).
   skill_raw?: string;
-  resources?: { path: string; presigned_url: string; content_hash?: string }[];
+  // A resource carries presigned_url with an object store configured, or the
+  // bytes inline (base64-encoded when inline_base64 is set) in the
+  // standalone-without-storage mode (§7.6.2, F-7.6.4).
+  resources?: {
+    path: string;
+    presigned_url?: string;
+    content_hash?: string;
+    inline?: string;
+    inline_base64?: boolean;
+  }[];
   deprecated?: boolean;
   replaced_by?: string;
   deprecation_warning?: string;
@@ -233,9 +264,19 @@ export class BatchResult {
         retryable: this.error?.retryable,
       });
     }
+    // §7.6.2: a resource carries a presigned_url with an object store
+    // configured. In the standalone-without-storage mode it carries the bytes
+    // inline (base64-encoded when inline_base64 is set), so deliver those
+    // rather than fetching a URL that does not exist (F-7.6.4).
     const large: Record<string, LargeResourceLink> = {};
+    const inline: Record<string, string | Uint8Array> = {};
     for (const r of this.resources ?? []) {
-      large[r.path] = { url: r.presigned_url, content_hash: r.content_hash };
+      if (r.presigned_url) {
+        large[r.path] = { url: r.presigned_url, content_hash: r.content_hash };
+      } else {
+        const v = r.inline ?? "";
+        inline[r.path] = r.inline_base64 ? Uint8Array.from(Buffer.from(v, "base64")) : v;
+      }
     }
     return materializeCanonical({
       to,
@@ -244,7 +285,7 @@ export class BatchResult {
       frontmatter: this.frontmatter ?? "",
       manifestBody: this.manifest_body ?? "",
       skillRaw: this.skill_raw ?? "",
-      inline: {},
+      inline,
       large,
       fetcher: opts.fetcher ?? fetch,
     });

@@ -6,6 +6,7 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/layer"
@@ -947,9 +949,14 @@ func ifNoneMatchHit(ifNoneMatch, etag string) bool {
 // the large set (above it). Small resources serve from the bytes ingest
 // stored inline, falling back to an object-store read; large resources
 // presign against the configured store.
+//
+// A large resource presigns only when an object store is configured. In
+// the standalone-without-storage mode (§13.11) ingest keeps every
+// resource inline regardless of size, so when no object store is present
+// those bytes serve inline rather than failing the load (F-7.2.1, §7.2).
 func (s *Server) attachResources(ctx context.Context, resp *LoadArtifactResponse, refs []store.ResourceRef) error {
 	for _, ref := range refs {
-		if ref.Size > objectstore.InlineCutoff {
+		if ref.Size > objectstore.InlineCutoff && s.objectStore != nil {
 			link, err := s.presignResource(ctx, ref)
 			if err != nil {
 				return err
@@ -969,7 +976,28 @@ func (s *Server) attachResources(ctx context.Context, resp *LoadArtifactResponse
 		}
 		resp.Resources[ref.Path] = string(body)
 	}
+	encodeBinaryInlineResources(resp)
 	return nil
+}
+
+// encodeBinaryInlineResources base64-encodes the inline resource set and
+// sets resources_base64 when any inline payload is not valid UTF-8
+// (F-4.1.1, §4.1). encoding/json replaces invalid UTF-8 bytes in a Go
+// string with the U+FFFD replacement character, which silently corrupts a
+// binary bundled resource on the wire. The resources_base64 flag is
+// response-wide, so one binary resource forces the whole inline set to
+// base64; the consumer decode path is all-or-nothing to match.
+func encodeBinaryInlineResources(resp *LoadArtifactResponse) {
+	for _, v := range resp.Resources {
+		if utf8.ValidString(v) {
+			continue
+		}
+		for k, b := range resp.Resources {
+			resp.Resources[k] = base64.StdEncoding.EncodeToString([]byte(b))
+		}
+		resp.ResourcesB64 = true
+		return
+	}
 }
 
 // presignResource builds a §7.2 large-resource link, presigning the

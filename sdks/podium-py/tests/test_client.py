@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import http.server
 import json
 import socket
@@ -384,6 +385,53 @@ def test_batch_result_materialize_ok_and_error(tmp_path):
     bad = BatchResult(id="x/y", status="error", error=RegistryError("visibility.denied", "no"))
     with pytest.raises(RegistryError):
         bad.materialize(str(tmp_path))
+
+
+# Spec: §4.1/§7.2 (F-4.1.1) — load_artifact decodes a base64-flagged inline set
+# (resources_base64) back to raw bytes, so a binary resource materializes
+# uncorrupted instead of as a U+FFFD-mangled string.
+def test_load_artifact_decodes_base64_binary_resources(stub_server, tmp_path):
+    blob = bytes([0xFF, 0xFE, 0x00, 0x01, 0x02, 0xFD])
+    stub_server.next_response = {
+        "id": "a/b",
+        "type": "context",
+        "version": "1.0.0",
+        "manifest_body": "x",
+        "frontmatter": "---\ntype: context\n---\n",
+        "resources": {"data/blob.bin": base64.b64encode(blob).decode()},
+        "resources_base64": True,
+    }
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    art = client.load_artifact("a/b")
+    assert art.resources["data/blob.bin"] == blob
+    art.materialize(str(tmp_path))
+    assert (tmp_path / "a" / "b" / "data" / "blob.bin").read_bytes() == blob
+
+
+# Spec: §7.6.2 (F-7.6.4) — a batch item materializes inline resources delivered
+# without an object store: a text resource as a literal string, a binary one
+# decoded from inline_base64. No presigned URL is fetched.
+def test_batch_result_materializes_inline_resources(tmp_path):
+    blob = bytes([0xFF, 0xFE, 0x10, 0x20])
+    item = BatchResult(
+        id="a/b",
+        status="ok",
+        type="context",
+        manifest_body="x",
+        frontmatter="---\ntype: context\n---\n",
+        resources=[
+            {"path": "scripts/run.py", "inline": "print('hi')\n"},
+            {"path": "data/blob.bin", "inline": base64.b64encode(blob).decode(), "inline_base64": True},
+        ],
+    )
+
+    def fail_fetch(url):  # a presigned fetch must not happen in this mode
+        raise AssertionError(f"unexpected fetch of {url}")
+
+    item.materialize(str(tmp_path), fetch=fail_fetch)
+    root = tmp_path / "a" / "b"
+    assert (root / "scripts" / "run.py").read_text() == "print('hi')\n"
+    assert (root / "data" / "blob.bin").read_bytes() == blob
 
 
 # Spec: §2.2 — materialize on an empty destination is rejected.

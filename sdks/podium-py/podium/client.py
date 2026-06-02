@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
@@ -147,6 +148,23 @@ def _fetch_bytes(url: str) -> bytes:
         return resp.read()
 
 
+def _decode_inline_resources(
+    resources: dict[str, str], b64: bool
+) -> dict[str, str | bytes]:
+    """Decode inline bundled resources for materialization.
+
+    spec §4.1 / §7.2 (F-4.1.1): a binary resource at or below the inline
+    cutoff is base64-encoded on the wire and the response carries
+    ``resources_base64: true`` so ``encoding/json`` does not replace its
+    non-UTF-8 bytes with U+FFFD. The flag is response-wide, so when set
+    every inline value is decoded back to raw bytes; otherwise the values
+    are UTF-8 text and pass through unchanged.
+    """
+    if not b64:
+        return dict(resources)
+    return {k: base64.b64decode(v) for k, v in resources.items()}
+
+
 @dataclass
 class LoadedArtifact:
     """Manifest body and bundled resources returned by load_artifact.
@@ -162,7 +180,9 @@ class LoadedArtifact:
     version: str
     manifest_body: str
     frontmatter: str
-    resources: dict[str, str] = field(default_factory=dict)
+    # str for UTF-8 text resources; bytes for a base64-decoded binary
+    # resource (§7.2 resources_base64). materialize writes either faithfully.
+    resources: dict[str, str | bytes] = field(default_factory=dict)
     large_resources: dict[str, dict[str, Any]] = field(default_factory=dict)
     # spec: §4.3.4 / §11 — the verbatim SKILL.md for a skill, delivered so the
     # materialized file is byte-identical to the authored source.
@@ -240,7 +260,18 @@ class BatchResult:
         """
         if self.status != "ok":
             raise self.error or RegistryError("registry.unknown", f"cannot materialize {self.id}")
-        large = {r["path"]: {"url": r.get("presigned_url", "")} for r in self.resources}
+        # §7.6.2: a resource carries a presigned_url with an object store
+        # configured. In the standalone-without-storage mode it carries the
+        # bytes inline (base64-encoded when inline_base64 is set), so deliver
+        # those rather than fetching a URL that does not exist (F-7.6.4).
+        inline: dict[str, str | bytes] = {}
+        large: dict[str, dict[str, Any]] = {}
+        for r in self.resources:
+            if r.get("presigned_url"):
+                large[r["path"]] = {"url": r["presigned_url"]}
+            else:
+                value = r.get("inline", "")
+                inline[r["path"]] = base64.b64decode(value) if r.get("inline_base64") else value
         return _materialize_canonical(
             to,
             artifact_id=self.id,
@@ -248,7 +279,7 @@ class BatchResult:
             frontmatter=self.frontmatter,
             manifest_body=self.manifest_body,
             skill_raw=self.skill_raw,
-            inline_resources={},
+            inline_resources=inline,
             large_resources=large,
             fetch=fetch or _fetch_bytes,
         )
@@ -262,7 +293,7 @@ def _materialize_canonical(
     frontmatter: str,
     manifest_body: str,
     skill_raw: str,
-    inline_resources: dict[str, str],
+    inline_resources: dict[str, str | bytes],
     large_resources: dict[str, dict[str, Any]],
     fetch: Callable[[str], bytes],
 ) -> list[str]:
@@ -676,7 +707,11 @@ class Client:
             manifest_body=body.get("manifest_body", ""),
             frontmatter=body.get("frontmatter", ""),
             skill_raw=body.get("skill_raw", ""),
-            resources=body.get("resources", {}) or {},
+            # §4.1/§7.2 (F-4.1.1): decode a base64-flagged inline set back to
+            # raw bytes so a binary resource materializes uncorrupted.
+            resources=_decode_inline_resources(
+                body.get("resources", {}) or {}, body.get("resources_base64", False)
+            ),
             # §7.2 large resources travel as presigned references the
             # consumer fetches from object storage; materialize() pulls them.
             large_resources=body.get("large_resources", {}) or {},
