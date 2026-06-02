@@ -90,6 +90,25 @@ func identityVisibilityGuard(identityProvider string, providerSelected, publicMo
 	return fmt.Errorf("config.identity_provider_unverified: PODIUM_IDENTITY_PROVIDER=%q has no request-time token verifier wired, so the registry would resolve every caller as anonymous-public and never apply per-layer visibility (§2.2, §6.3.1); only injected-session-token is verified server-side in this build. Set PODIUM_PUBLIC_MODE=true to run an open registry, or use injected-session-token", identityProvider)
 }
 
+// injectedTokenAudienceGuard refuses startup when the injected-session-token
+// provider is selected without a configured audience.
+//
+// spec: §6.3.2 — aud ("registry endpoint") is one of the claims the registry
+// verifies on every injected-session-token call. The audience is the
+// registry's own endpoint, so without PODIUM_OAUTH_AUDIENCE set the verifier
+// cannot validate aud and would accept a runtime-signed token regardless of
+// its audience, including one bound to a different registry. Because runtime
+// signing keys are shared trust anchors, that is a cross-registry
+// token-confusion surface. Fail closed at boot with an actionable error
+// rather than reject every token at request time. Other providers (the
+// audience is optional for oauth-device-code) are exempt.
+func injectedTokenAudienceGuard(identityProvider, audience string) error {
+	if identityProvider == "injected-session-token" && strings.TrimSpace(audience) == "" {
+		return fmt.Errorf("config.injected_token_audience_unset: PODIUM_IDENTITY_PROVIDER=injected-session-token requires PODIUM_OAUTH_AUDIENCE set to this registry's endpoint so the required aud claim is verified on every token (§6.3.2)")
+	}
+	return nil
+}
+
 // selectIdentityProvider resolves the §9.1 IdentityProvider for
 // cfg.identityProvider from the process-global identity.Default registry
 // (§9.2). It returns the instantiated provider when the id is registered

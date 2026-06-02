@@ -379,6 +379,53 @@ func TestAuth_LoginPrintsVerificationURLAndCode(t *testing.T) {
 	}
 }
 
+// Spec: §6.3 — `podium login --json` suppresses the human prompt and replaces
+// it with a structured auth.device_code_pending event emitted on stderr,
+// carrying the verification URI and user code for a machine caller. F-6.3.3.
+func TestAuth_LoginJSONEmitsDeviceCodePending(t *testing.T) {
+	t.Parallel()
+	// authorization_pending keeps login polling until the bounded context
+	// kills it, so it stays past the device-auth step where the event is
+	// emitted.
+	stub := newOIDCStub(oidcStubConfig{
+		tokenResponses: []string{`{"error":"authorization_pending"}`},
+	})
+	t.Cleanup(stub.Stop)
+
+	res := oidcRunLogin(t, stub, nil, 5*time.Second, "--json")
+
+	// The human prompt is suppressed under --json.
+	if strings.Contains(res.Stderr, "Visit:") || strings.Contains(res.Stderr, "User code:") {
+		t.Errorf("--json must suppress the human prompt; stderr:\n%s", res.Stderr)
+	}
+
+	// A structured auth.device_code_pending envelope is present on stderr.
+	var found bool
+	for _, line := range strings.Split(res.Stderr, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var env struct {
+			Code    string            `json:"code"`
+			Details map[string]string `json:"details"`
+		}
+		if json.Unmarshal([]byte(line), &env) != nil || env.Code != "auth.device_code_pending" {
+			continue
+		}
+		found = true
+		if env.Details["verification_uri"] != "http://stub.example/activate" {
+			t.Errorf("details.verification_uri = %q", env.Details["verification_uri"])
+		}
+		if env.Details["user_code"] != "WXYZ-1234" {
+			t.Errorf("details.user_code = %q", env.Details["user_code"])
+		}
+	}
+	if !found {
+		t.Errorf("stderr missing auth.device_code_pending event:\n%s", res.Stderr)
+	}
+}
+
 // ---- T-D-oidc-6: login saves token to keychain on success ------------------
 
 // T-D-oidc-6

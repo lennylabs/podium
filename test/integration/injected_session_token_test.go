@@ -156,6 +156,29 @@ func TestInjectedSessionToken_LoadScopeOverHTTP(t *testing.T) {
 	}
 }
 
+// Spec: §6.3.2 — aud ("registry endpoint") is a required claim verified on
+// every call. With the registry audience configured, a token that omits aud is
+// rejected end-to-end with auth.untrusted_runtime rather than served. F-6.3.1.
+func TestInjectedSessionToken_MissingAudRejectedOverHTTP(t *testing.T) {
+	t.Parallel()
+	ts, priv := istServer(t)
+	claims := istClaims("")
+	delete(claims, "aud") // omit the required aud claim
+	status, body := istGet(t, ts.URL+"/v1/search_artifacts?query=", istSign(t, priv, claims))
+	if status != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 for a token missing aud\nbody: %s", status, body)
+	}
+	var env struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if env.Code != "auth.untrusted_runtime" {
+		t.Errorf("code = %q, want auth.untrusted_runtime", env.Code)
+	}
+}
+
 // Spec: §6.3.2 / §6.10 — a token from an unregistered runtime is rejected
 // with auth.untrusted_runtime and details.runtime_iss. F-6.3.2.
 func TestInjectedSessionToken_UntrustedRejectedOverHTTP(t *testing.T) {

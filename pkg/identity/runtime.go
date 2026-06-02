@@ -154,13 +154,22 @@ func (r *RuntimeKeyRegistry) JWTVerifier(audience string, clock func() jwt.Numer
 			return Identity{}, untrusted(issuer, "issuer is not a registered runtime")
 		}
 
+		// §6.3.2 lists aud ("registry endpoint") among the claims the registry
+		// verifies on every call. The audience is the registry's own endpoint,
+		// so without it configured the verifier cannot validate aud and must
+		// fail closed: a runtime signing key is a shared trust anchor, so an
+		// unvalidated aud is a cross-registry token-confusion surface. With the
+		// audience set, jwt.WithAudience requires the aud claim to be present
+		// and to match (a missing aud is rejected as a required-claim error).
+		// (spec: §6.3.2)
+		if audience == "" {
+			return Identity{}, untrusted(issuer, "registry audience is not configured; the required aud claim cannot be verified")
+		}
 		opts := []jwt.ParserOption{
 			jwt.WithIssuer(issuer),
 			jwt.WithValidMethods([]string{runtime.Algorithm}),
 			jwt.WithExpirationRequired(),
-		}
-		if audience != "" {
-			opts = append(opts, jwt.WithAudience(audience))
+			jwt.WithAudience(audience),
 		}
 		if clock != nil {
 			opts = append(opts, jwt.WithTimeFunc(func() (out jwtTime) {

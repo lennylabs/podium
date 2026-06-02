@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -37,6 +38,7 @@ func loginCmd(args []string) int {
 	audience := fs.String("audience", os.Getenv("PODIUM_OAUTH_AUDIENCE"), "audience claim for the issued token")
 	scopes := fs.String("scopes", "openid profile email groups", "space-separated OAuth scopes")
 	noBrowser := fs.Bool("no-browser", false, "don't auto-open the verification URL")
+	jsonOut := fs.Bool("json", false, "suppress the human prompt and emit a structured auth.device_code_pending event on stderr")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
@@ -95,14 +97,20 @@ func loginCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "device authorization: %v\n", err)
 		return 1
 	}
-	fmt.Fprintln(os.Stderr, "Visit:", auth.VerificationURL)
-	fmt.Fprintln(os.Stderr, "User code:", auth.UserCode)
 	target := auth.VerificationURLComplete
 	if target == "" {
 		target = auth.VerificationURL
 	}
-	if auth.VerificationURLComplete != "" {
-		fmt.Fprintln(os.Stderr, "Direct link:", auth.VerificationURLComplete)
+	if *jsonOut {
+		// §6.3: under --json the human prompt is suppressed and replaced with a
+		// structured auth.device_code_pending event emitted on stderr.
+		emitDeviceCodePending(os.Stderr, auth)
+	} else {
+		fmt.Fprintln(os.Stderr, "Visit:", auth.VerificationURL)
+		fmt.Fprintln(os.Stderr, "User code:", auth.UserCode)
+		if auth.VerificationURLComplete != "" {
+			fmt.Fprintln(os.Stderr, "Direct link:", auth.VerificationURLComplete)
+		}
 	}
 	// Auto-open the verification URL unless suppressed. PODIUM_NO_BROWSER is
 	// the env-var form of --no-browser, for headless and CI environments (and
@@ -126,10 +134,14 @@ func loginCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "save token: %v\n", err)
 		return 1
 	}
-	if id := decodeIdentity(tokens.IDToken); id != "" {
-		fmt.Fprintln(os.Stderr, "Logged in as:", id)
+	// §6.3: under --json the human success chatter is suppressed; the exit
+	// code reports the outcome to a machine caller.
+	if !*jsonOut {
+		if id := decodeIdentity(tokens.IDToken); id != "" {
+			fmt.Fprintln(os.Stderr, "Logged in as:", id)
+		}
+		fmt.Fprintln(os.Stderr, "Login successful; token saved to keychain.")
 	}
-	fmt.Fprintln(os.Stderr, "Login successful; token saved to keychain.")
 	return 0
 }
 
@@ -207,24 +219,71 @@ func browserSuppressed() bool {
 	return false
 }
 
-// openBrowser best-effort opens url in the system browser. It never
-// blocks and ignores launch failures. spec: §7.7 — login "attempts to
-// open the URL in the system browser".
-func openBrowser(url string) {
-	if url == "" {
-		return
+// deviceCodePendingEvent is the §6.10 structured envelope emitted on stderr by
+// `podium login --json` in place of the human device-code prompt (§6.3). The
+// details carry the verification URL and user code a machine caller surfaces to
+// the user. The event is retryable because the caller polls until the user
+// completes the flow.
+type deviceCodePendingEvent struct {
+	Code            string            `json:"code"`
+	Message         string            `json:"message"`
+	Details         map[string]string `json:"details"`
+	Retryable       bool              `json:"retryable"`
+	SuggestedAction string            `json:"suggested_action"`
+}
+
+// emitDeviceCodePending writes the auth.device_code_pending event to w as one
+// JSON line. spec: §6.3 (the --json prompt replacement) / §6.10 (envelope).
+func emitDeviceCodePending(w io.Writer, auth *identity.DeviceAuth) {
+	details := map[string]string{
+		"verification_uri": auth.VerificationURL,
+		"user_code":        auth.UserCode,
 	}
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
-	default:
-		cmd = exec.Command("xdg-open", url)
+	if auth.VerificationURLComplete != "" {
+		details["verification_uri_complete"] = auth.VerificationURLComplete
+	}
+	ev := deviceCodePendingEvent{
+		Code:            "auth.device_code_pending",
+		Message:         "Authorize this device to complete login.",
+		Details:         details,
+		Retryable:       true,
+		SuggestedAction: "Visit the verification URI and enter the user code to complete the device-code flow.",
+	}
+	// Best-effort: a stderr write failure does not change the login outcome.
+	_ = json.NewEncoder(w).Encode(ev)
+}
+
+// openBrowser best-effort opens url in the system browser. It never
+// blocks and ignores launch failures. spec: §6.3 — login "attempts to open
+// the URL in the system browser (via open on macOS, xdg-open on Linux, start
+// on Windows)".
+func openBrowser(url string) {
+	cmd := browserCommand(runtime.GOOS, url)
+	if cmd == nil {
+		return
 	}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil
 	_ = cmd.Start()
+}
+
+// browserCommand returns the per-OS command that opens url in the system
+// browser, or nil when url is empty. spec: §6.3 names open (macOS), xdg-open
+// (Linux), and start (Windows). On Windows, start is a cmd builtin, so it is
+// invoked as `cmd /c start "" <url>`; the empty first argument is start's
+// window-title placeholder, which keeps a URL containing & or spaces from
+// being parsed as the title.
+func browserCommand(goos, url string) *exec.Cmd {
+	if url == "" {
+		return nil
+	}
+	switch goos {
+	case "darwin":
+		return exec.Command("open", url)
+	case "windows":
+		return exec.Command("cmd", "/c", "start", "", url)
+	default:
+		return exec.Command("xdg-open", url)
+	}
 }
 
 // saveTokens persists the access token (under the registry label) and,

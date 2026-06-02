@@ -161,6 +161,58 @@ func TestJWTVerifier_RejectsWrongAudience(t *testing.T) {
 	}
 }
 
+// Spec: §6.3.2 — aud ("registry endpoint") is a required claim. With the
+// registry audience configured, a token that omits aud is rejected rather than
+// accepted. F-6.3.1.
+func TestJWTVerifier_RejectsMissingAud(t *testing.T) {
+	t.Parallel()
+	priv, pub := newRSAKeyPair(t)
+	reg := identity.NewRuntimeKeyRegistry()
+	if err := reg.Register(identity.RuntimeKey{
+		Issuer: "rt", Algorithm: "RS256", Key: pub,
+	}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	verify := reg.JWTVerifier("https://podium.acme.com", nil)
+	signed := signJWT(t, priv, jwt.SigningMethodRS256, jwt.MapClaims{
+		"iss": "rt", // no aud claim
+		"sub": "joan", "act": "rt",
+		"exp": time.Now().Add(5 * time.Minute).Unix(),
+	})
+	_, err := verify(signed)
+	if !errors.Is(err, identity.ErrUntrustedRuntime) {
+		t.Fatalf("got %v, want ErrUntrustedRuntime for a token missing aud", err)
+	}
+}
+
+// Spec: §6.3.2 — the audience is the registry's own endpoint; aud cannot be
+// verified without it, so a verifier built with no configured audience fails
+// closed and rejects every token rather than accept one whose audience goes
+// unchecked. F-6.3.1.
+func TestJWTVerifier_FailsClosedWhenAudienceUnconfigured(t *testing.T) {
+	t.Parallel()
+	priv, pub := newRSAKeyPair(t)
+	reg := identity.NewRuntimeKeyRegistry()
+	if err := reg.Register(identity.RuntimeKey{
+		Issuer: "rt", Algorithm: "RS256", Key: pub,
+	}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	verify := reg.JWTVerifier("", nil) // audience unconfigured
+	signed := signJWT(t, priv, jwt.SigningMethodRS256, jwt.MapClaims{
+		"iss": "rt", "aud": "https://podium.acme.com",
+		"sub": "joan", "act": "rt",
+		"exp": time.Now().Add(5 * time.Minute).Unix(),
+	})
+	_, err := verify(signed)
+	if !errors.Is(err, identity.ErrUntrustedRuntime) {
+		t.Fatalf("got %v, want ErrUntrustedRuntime when audience is unconfigured", err)
+	}
+	if !strings.Contains(err.Error(), "audience") {
+		t.Errorf("error should explain the audience is unconfigured, got %v", err)
+	}
+}
+
 // Spec: §6.3.2 — sub claim is required.
 func TestJWTVerifier_RejectsMissingSub(t *testing.T) {
 	t.Parallel()

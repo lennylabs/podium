@@ -1179,6 +1179,26 @@ func TestHTTPAPI_RegisteredRuntimeAccepted(t *testing.T) {
 	}
 }
 
+// spec: §6.3.2 — aud ("registry endpoint") is a required claim. With the
+// registry audience configured, a runtime-signed token that omits aud is
+// rejected with auth.untrusted_runtime rather than accepted. F-6.3.1.
+func TestHTTPAPI_MissingAudRejected(t *testing.T) {
+	t.Parallel()
+	priv, pem := injKeyPair(t)
+	srv := injServer(t, apiReg(t), priv, pem)
+	claims := injClaims("alice")
+	delete(claims, "aud") // omit the required aud claim
+	token := injSignJWT(t, priv, claims)
+	status, body := injGet(t, srv.BaseURL+"/v1/search_artifacts?query=variance", token)
+	if status != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 (token missing aud)\nbody: %s", status, body)
+	}
+	env := apiJSONObj(t, body)
+	if code, _ := env["code"].(string); code != "auth.untrusted_runtime" {
+		t.Errorf("code = %v, want auth.untrusted_runtime", env["code"])
+	}
+}
+
 // spec: http-api.md § Authentication — public mode records system:public.
 // spec: §8.1 "Caller identity in audit events" — in public mode a read event
 // records caller.identity=system:public, the caller_public_mode flag, and the

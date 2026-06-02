@@ -902,6 +902,12 @@ func Run() error {
 		providerSelected = true
 		log.Printf("identity provider: %s (registered via identity.Default)", prov.ID())
 		if cfg.identityProvider == "injected-session-token" {
+			// §6.3.2: the verifier validates aud against this registry's
+			// endpoint on every call; refuse to start without it rather than
+			// accept tokens whose audience goes unchecked.
+			if err := injectedTokenAudienceGuard(cfg.identityProvider, cfg.oauthAudience); err != nil {
+				return err
+			}
 			layerVerify = injectedTokenVerifier(runtimeKeys, cfg.oauthAudience, cfg.idpGroupMapping)
 			bootOpts = append(bootOpts, server.WithIdentityVerifier(layerVerify))
 			verifierInstalled = true

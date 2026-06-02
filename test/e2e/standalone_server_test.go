@@ -384,6 +384,22 @@ func TestSmallTeam_IdentityProviderUnverifiedFailsStartup(t *testing.T) {
 	}
 }
 
+// spec: §6.3.2 — injected-session-token mode requires PODIUM_OAUTH_AUDIENCE so
+// the verifier validates the required aud claim against this registry's
+// endpoint on every call. Booting without it refuses to start with
+// config.injected_token_audience_unset rather than accept tokens whose
+// audience would go unchecked (a cross-registry token-confusion surface).
+// F-6.3.1.
+func TestInjectedToken_AudienceUnsetFailsStartup(t *testing.T) {
+	t.Parallel()
+	out := smallteamRawExecFail(t,
+		[]string{"HOME=" + t.TempDir(), "PODIUM_IDENTITY_PROVIDER=injected-session-token"},
+		"serve", "--standalone")
+	if !strings.Contains(out, "config.injected_token_audience_unset") {
+		t.Errorf("expected config.injected_token_audience_unset in output; got:\n%s", out)
+	}
+}
+
 // T-D-small-team-8 — public mode reports mode:public in /healthz.
 func TestStandaloneServer_PublicModeHealthz(t *testing.T) {
 	t.Parallel()

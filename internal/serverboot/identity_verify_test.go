@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -140,6 +141,40 @@ func TestLayerIdentityResolver(t *testing.T) {
 	// Nil verifier => anonymous-public fallback.
 	if id := layerIdentityResolver(nil)(req); id.IsAuthenticated || !id.IsPublic {
 		t.Errorf("nil verifier resolved to %+v, want anonymous-public", id)
+	}
+}
+
+// Spec: §6.3.2 — injected-session-token mode must refuse to start without a
+// configured audience: the verifier validates aud against this registry's
+// endpoint on every call, and an unset audience would leave aud unchecked (a
+// cross-registry token-confusion surface). Other providers are exempt. F-6.3.1.
+func TestInjectedTokenAudienceGuard(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		provider string
+		audience string
+		wantErr  bool
+	}{
+		{"injected no audience refuses", "injected-session-token", "", true},
+		{"injected blank audience refuses", "injected-session-token", "   ", true},
+		{"injected with audience starts", "injected-session-token", "https://podium.acme.com", false},
+		{"oauth-device-code exempt", "oauth-device-code", "", false},
+		{"empty provider exempt", "", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := injectedTokenAudienceGuard(tc.provider, tc.audience)
+			if tc.wantErr && err == nil {
+				t.Fatalf("provider=%q audience=%q: want refusal, got nil", tc.provider, tc.audience)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("provider=%q audience=%q: want nil, got %v", tc.provider, tc.audience, err)
+			}
+			if tc.wantErr && !strings.Contains(err.Error(), "config.injected_token_audience_unset") {
+				t.Errorf("error should carry the namespaced code, got %v", err)
+			}
+		})
 	}
 }
 
