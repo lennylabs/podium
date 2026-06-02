@@ -69,9 +69,8 @@ ARR means annual recurring revenue.
 
 === plugins/team/deep-review/skills/deep-review/SKILL.md ===
 ---
-type: rule
-version: 1.0.0
-rule_mode: explicit
+name: deep-review
+description: Project rule shipped as a Claude Cowork skill.
 ---
 
 Perform a deep architectural review when invoked.
@@ -159,9 +158,8 @@ Review the diff and report defects.
 
 === plugins/team/tabs-always/skills/tabs-always/SKILL.md ===
 ---
-type: rule
-version: 1.0.0
-rule_mode: always
+name: tabs-always
+description: Project rule shipped as a Claude Cowork skill.
 ---
 
 Indent with tabs, not spaces.
@@ -171,10 +169,8 @@ Indent with tabs, not spaces.
 
 === plugins/team/ts-auto/skills/ts-auto/SKILL.md ===
 ---
-type: rule
-version: 1.0.0
-rule_mode: auto
-rule_description: Apply when editing TypeScript.
+name: ts-auto
+description: Apply when editing TypeScript.
 ---
 
 Prefer interfaces over type aliases.
@@ -184,10 +180,8 @@ Prefer interfaces over type aliases.
 
 === plugins/team/ts-glob/skills/ts-glob/SKILL.md ===
 ---
-type: rule
-version: 1.0.0
-rule_mode: glob
-rule_globs: "*.ts,*.tsx"
+name: ts-glob
+description: Project rule shipped as a Claude Cowork skill.
 ---
 
 Enable strict type-checking in TypeScript files.

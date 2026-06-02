@@ -376,7 +376,14 @@ func coworkPlugin(src Source) []File {
 		// caller via the harness-neutral .podium/context/ bucket.
 		body := src.SkillBytes
 		if len(body) == 0 {
-			body = src.ArtifactBytes
+			if frontmatterType(src.ArtifactBytes) == "rule" {
+				// Synthesize a valid SKILL.md (name + description + the rule
+				// body) so the fallback follows the skill format rather than
+				// emitting a SKILL.md with raw `type: rule` frontmatter.
+				body = coworkRuleSkillBody(src)
+			} else {
+				body = src.ArtifactBytes
+			}
 		}
 		out = append(out, File{Path: path.Join(pluginRoot, "skills", name, "SKILL.md"), Content: body})
 		out = appendResources(out, path.Join(pluginRoot, "skills", name), src.Resources)
@@ -393,6 +400,30 @@ func coworkPlugin(src Source) []File {
 	}
 	sortFiles(out)
 	return out
+}
+
+// coworkRuleSkillBody synthesizes a valid SKILL.md for a rule shipped as a
+// Claude Cowork skill (the §6.7.1 fallback): the skill name is the artifact's
+// leaf name, the description prefers the rule's own description and falls back
+// to a generic line, and the body is the rule's prose. This keeps the fallback
+// output in the SKILL.md format the harness expects instead of leaking the
+// rule's `type:`/`rule_mode:` frontmatter.
+func coworkRuleSkillBody(src Source) []byte {
+	art := parsed(src)
+	desc := art.RuleDescription
+	if desc == "" {
+		desc = art.Description
+	}
+	if desc == "" {
+		desc = "Project rule shipped as a Claude Cowork skill."
+	}
+	var b strings.Builder
+	b.WriteString("---\nname: " + lastSeg(src.ArtifactID) + "\ndescription: " + desc + "\n---\n\n")
+	b.WriteString(art.Body)
+	if !strings.HasSuffix(art.Body, "\n") {
+		b.WriteByte('\n')
+	}
+	return []byte(b.String())
 }
 
 // coworkMarketplaceFragment builds the OpMergeJSON fragment that adds this
