@@ -17,6 +17,17 @@ Run the deploy pipeline for the named environment.
 === .gemini/settings.json ===
 {
   "hooks": {
+    "AfterAgent": [
+      {
+        "hooks": [
+          {
+            "command": "echo done\necho bye",
+            "type": "command"
+          }
+        ],
+        "x-podium-id": "team/notify"
+      }
+    ],
     "BeforeTool": [
       {
         "hooks": [

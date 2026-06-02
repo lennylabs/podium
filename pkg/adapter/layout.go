@@ -391,11 +391,16 @@ var codexHookEvents = map[string]string{
 }
 
 // geminiHookEvents maps the canonical events to Gemini CLI's native hook events.
+// Gemini has no event named "Stop"; the agent-finished lifecycle point is
+// AfterAgent, so canonical stop and subagent_stop both map there (confirmed by
+// `gemini hooks migrate --from-claude`, which rewrites Claude's Stop to
+// AfterAgent on Gemini CLI 0.44.1).
 var geminiHookEvents = map[string]string{
 	"session_start":        "SessionStart",
 	"session_end":          "SessionEnd",
 	"subagent_start":       "BeforeAgent",
 	"subagent_stop":        "AfterAgent",
+	"stop":                 "AfterAgent",
 	"pre_tool_use":         "BeforeTool",
 	"post_tool_use":        "AfterTool",
 	"pre_shell_execution":  "BeforeTool",

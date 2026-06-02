@@ -238,13 +238,23 @@ var drivers = []driver{
 		loginMarker: "Logged in",
 	},
 	{
-		harness:   "gemini",
-		bin:       "gemini",
-		version:   []string{"--version"},
-		mcpProbe:  []string{"mcp", "list"},
-		server:    "warehouse",
-		agentExec: func(prompt string) []string { return []string{"-p", prompt} },
-		keyEnv:    "GEMINI_API_KEY",
+		// Gemini CLI. `gemini mcp list` reads the project .gemini/settings.json,
+		// but Podium tags each merged entry with x-podium-id for reconciliation
+		// and Gemini's settings schema is strict ("Unrecognized key(s) in object:
+		// 'x-podium-id'"), so it flags the config invalid (the server still lists,
+		// with a loud warning). Gemini also gates project config behind folder
+		// trust (--skip-trust). mcp-server is demoted to a skip until the
+		// reconciliation marker moves out of the entry; rule/skill/command run via
+		// Tier C with --skip-trust.
+		harness:    "gemini",
+		bin:        "gemini",
+		version:    []string{"--version"},
+		skipReason: "gemini settings.json schema rejects Podium's x-podium-id reconciliation key as an unrecognized key; mcp-server and hook need the marker moved out of the merged entry",
+		agentExec:  func(prompt string) []string { return []string{"--skip-trust", "--yolo", "-p", prompt} },
+		keyEnv:     "GEMINI_API_KEY",
+		// OAuth login (no status command); a tiny headless turn proves it works.
+		loginProbe:  []string{"--skip-trust", "-p", "Reply with exactly: PODIUMOK"},
+		loginMarker: "PODIUMOK",
 	},
 	{
 		harness:   "opencode",
@@ -363,17 +373,17 @@ var behaviors = []behavior{
 	{
 		typ: "rule", registry: ruleRegistry(),
 		prompt: "What is the secret word? Reply with only the word.", marker: ruleMarker,
-		run: []string{"claude-code", "cursor", "codex"},
+		run: []string{"claude-code", "cursor", "codex", "gemini"},
 	},
 	{
 		typ: "skill", registry: skillRegistry(),
 		prompt: "Run the weather skill now.", marker: skillMarker,
-		run: []string{"claude-code", "cursor", "codex"},
+		run: []string{"claude-code", "cursor", "codex", "gemini"},
 	},
 	{
 		typ: "command", registry: commandRegistry(),
 		prompt: "/ping", marker: cmdMarker,
-		run:  []string{"claude-code", "cursor"},
+		run:  []string{"claude-code", "cursor", "gemini"},
 		skip: map[string]string{"codex": "command is ✗ for codex (§6.7.1): folded into skills"},
 	},
 	{
@@ -385,6 +395,10 @@ var behaviors = []behavior{
 			// harness's non-interactive runtime, not Podium's output.
 			"cursor": "materialized .cursor/hooks.json is correct (verified against cursor-agent's projectConfigPath + stop event); cursor-agent --print does not run the stop lifecycle hook in headless mode",
 			"codex":  "materialized .codex/config.toml [[hooks.Stop]] is the correct native schema (verified with codex --strict-config); codex exec does not fire config.toml lifecycle hooks (not even SessionStart) in codex-cli 0.136.0",
+			// stop now maps to AfterAgent (gemini has no Stop event), but the
+			// settings.json entry still carries x-podium-id, which gemini's strict
+			// schema rejects; fix the reconciliation marker before claiming this.
+			"gemini": "gemini maps stop->AfterAgent, but the .gemini/settings.json hook entry carries x-podium-id, which gemini's strict schema flags invalid; needs the reconciliation marker moved out of the entry",
 		},
 	},
 }
@@ -403,7 +417,7 @@ func TestHarnessArtifactTypes(t *testing.T) {
 	if os.Getenv("PODIUM_HARNESS_AGENT") != "1" {
 		t.Skip("opt-in: set PODIUM_HARNESS_AGENT=1 (and authenticate the harness CLI) to run")
 	}
-	for _, harness := range []string{"claude-code", "cursor", "codex"} {
+	for _, harness := range []string{"claude-code", "cursor", "codex", "gemini"} {
 		harness := harness
 		d, found := driverFor(harness)
 		t.Run(harness, func(t *testing.T) {

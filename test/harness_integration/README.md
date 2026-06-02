@@ -56,18 +56,22 @@ real agents need network and are nondeterministic.
 ## Coverage and verification status
 
 Verified end-to-end against **Claude Code 2.1.160**, **cursor-agent 2026.06.02**
-(logged in), and **codex-cli 0.136.0** (logged in). ✅ = the real harness
-consumed Podium's materialized artifact; ✗ = skipped with the noted reason.
+(logged in), **codex-cli 0.136.0** (logged in), and **Gemini CLI 0.44.1**
+(logged in). ✅ = the real harness consumed Podium's materialized artifact; ✗ =
+skipped with the noted reason.
 
-| Type | claude-code | cursor | codex | How it is checked |
-|---|---|---|---|---|
-| `mcp-server` | ✅ | approval-gated | ✅ | Tier A: `<harness> mcp list` reads back the synced server |
-| `rule` | ✅ | ✅ | ✅ | agent emits the always-rule marker |
-| `skill` | ✅ | ✅ | ✅ | agent loads SKILL.md on a triggering prompt |
-| `command` | ✅ | ✅ | ✗ (by design) | agent runs the slash command (`/ping`) |
-| `hook` | ✅ | ✗ (headless runtime) | ✗ (exec runtime) | the stop hook's command writes a marker file |
-| `agent` (subagent) | not covered | not covered | not covered | delegation is model-dependent; no deterministic marker |
-| `context` | n/a | n/a | n/a | harness-neutral `.podium/context/`; no harness loads it natively |
+| Type | claude-code | cursor | codex | gemini | How it is checked |
+|---|---|---|---|---|---|
+| `mcp-server` | ✅ | approval-gated | ✅ | ✗ (x-podium-id) | Tier A: `<harness> mcp list` reads back the synced server |
+| `rule` | ✅ | ✅ | ✅ | ✅ | agent emits the always-rule marker |
+| `skill` | ✅ | ✅ | ✅ | ✅ | agent loads SKILL.md on a triggering prompt |
+| `command` | ✅ | ✅ | ✗ (by design) | ✅ | agent runs the slash command (`/ping`) |
+| `hook` | ✅ | ✗ (headless runtime) | ✗ (exec runtime) | ✗ (x-podium-id) | the stop hook's command writes a marker file |
+| `agent` (subagent) | not covered | not covered | not covered | not covered | delegation is model-dependent; no deterministic marker |
+| `context` | n/a | n/a | n/a | n/a | harness-neutral `.podium/context/`; no harness loads it natively |
+
+Gemini needs `--skip-trust` for the agent runs (it gates project config, skills,
+and hooks behind folder trust).
 
 Findings worth noting:
 
@@ -75,10 +79,15 @@ Findings worth noting:
   `mcp login`/`disable` approval commands), not the raw `.cursor/mcp.json`, so
   Tier A records the cursor version and skips. Codex reads MCP config from
   `CODEX_HOME/config.toml`, not the project `.codex/config.toml`, so the probe
-  points `CODEX_HOME` at the materialized `.codex` dir.
+  points `CODEX_HOME` at the materialized `.codex` dir. Gemini reads the project
+  `.gemini/settings.json`, but its settings schema is strict and rejects Podium's
+  `x-podium-id` reconciliation key (`Unrecognized key(s) in object`); the server
+  still lists, with a loud "Invalid configuration" warning, so Tier A records the
+  gemini version and skips. The fix is to move the reconciliation marker out of
+  the merged entry (see the gemini section below).
 - **hook**: Claude Code fires the materialized `.claude/settings.json` stop hook
-  in `-p` mode. For cursor and codex, the materialization is correct but the
-  harness does not run the hook in its non-interactive mode:
+  in `-p` mode. For cursor, codex, and gemini, the harness does not consume the
+  materialized hook in its non-interactive path:
   - **cursor**: Podium writes `.cursor/hooks.json`, which matches cursor-agent's
     own `projectConfigPath` and recognized `stop` event. `cursor-agent --print`
     does not run the stop lifecycle hook in headless mode (re-tested with an
@@ -91,7 +100,20 @@ Findings worth noting:
     lifecycle hooks in codex-cli 0.136.0 (confirmed: not even `SessionStart`
     fires under `--dangerously-bypass-hook-trust`), so the materialized hook is
     likely consumed only by the interactive TUI.
-- **command**: `command` is `✗` for codex (§6.7.1), folded into skills.
+  - **gemini**: gemini has no `Stop` event; the agent-finished lifecycle point is
+    `AfterAgent` (confirmed by `gemini hooks migrate --from-claude`), so Podium
+    now maps `stop -> AfterAgent`. The merged `.gemini/settings.json` entry still
+    carries `x-podium-id`, which gemini's strict schema flags invalid, so the
+    hook is skipped on the same defect as gemini mcp-server.
+- **command**: `command` is `✗` for codex (§6.7.1), folded into skills. Gemini
+  runs custom `.gemini/commands/<n>.toml` slash commands in headless `-p` mode.
+- **gemini x-podium-id (open defect)**: gemini's `.gemini/settings.json` schema is
+  strict and rejects unknown keys *inside* an entry, so Podium's `x-podium-id`
+  reconciliation tag makes both the `mcpServers` and `hooks` config read as
+  invalid. Gemini tolerates unknown *top-level* keys, so the marker can be
+  relocated out of the entry. Until then, gemini `mcp-server` and `hook` are
+  skipped; `rule`, `skill`, and `command` (which do not touch settings.json) are
+  verified end-to-end.
 
 ### Tier A harness commands
 
@@ -99,7 +121,7 @@ Findings worth noting:
 |---|---|---|
 | claude-code | `claude mcp list` | verified |
 | codex | `codex mcp list` (with `CODEX_HOME` at the synced `.codex`) | verified |
-| gemini | `gemini mcp list` | candidate — confirm against `gemini --help` |
+| gemini | `gemini mcp list` (reads the project settings) | records version, skips (x-podium-id flagged invalid by the strict schema) |
 | opencode | (none yet) | confirm whether a non-interactive MCP-list exists |
 | cursor | (approval-gated) | records version, skips |
 | claude-desktop / claude-cowork / pi / hermes | — | skipped (no project surface / no CLI) |
