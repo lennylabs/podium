@@ -2,6 +2,9 @@ package lint
 
 import (
 	"context"
+	"fmt"
+	"strings"
+
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 )
@@ -88,6 +91,35 @@ func (r ruleRuleModeHygiene) Check(_ context.Context, _ *filesystem.Registry, re
 					"rule-mode 'auto' uses description only; rule-globs is ignored"))
 			}
 		}
+	}
+	return out
+}
+
+// ruleRuleModeCanonical enforces spec 04-artifact-model.md §4.3: a
+// type: rule artifact's rule_mode is constrained to the closed
+// enumeration "always | glob | auto | explicit". An unrecognized value
+// (for example rule_mode: sometimes) is an ingest error, since no harness
+// adapter has a native mapping for it and the Cursor adapter would emit a
+// rule with no auto-apply key. An empty rule_mode is left to the §4.3
+// default (always); this rule only rejects a non-empty value outside the
+// canonical set, mirroring ruleHookEventCanonical for hook_event.
+type ruleRuleModeCanonical struct{}
+
+func (ruleRuleModeCanonical) Code() string { return "lint.unknown_rule_mode" }
+
+func (r ruleRuleModeCanonical) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+	var out []Diagnostic
+	for _, rec := range records {
+		a := rec.Artifact
+		if a == nil || a.Type != manifest.TypeRule {
+			continue
+		}
+		if a.RuleMode == "" || manifest.IsCanonicalRuleMode(a.RuleMode) {
+			continue
+		}
+		out = append(out, errMsg(rec.ID, r,
+			fmt.Sprintf("rule_mode %q is not a canonical §4.3 value; valid modes: %s",
+				a.RuleMode, strings.Join(manifest.CanonicalRuleModes(), ", "))))
 	}
 	return out
 }

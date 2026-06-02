@@ -44,6 +44,26 @@ func TestCursor_RuleModeAlwaysAlwaysApply(t *testing.T) {
 	}
 }
 
+// Spec: 04-artifact-model.md §4.3 — rule_mode defaults to `always` when
+// unset, and an always rule loads at session start. A rule that omits
+// rule_mode must therefore materialize on Cursor with alwaysApply: true,
+// not as empty frontmatter (which Cursor treats as a non-always rule).
+func TestCursor_RuleModeUnsetDefaultsToAlways(t *testing.T) {
+	t.Parallel()
+	got := cursorMDCFor(t, "---\ntype: rule\nversion: 1.0.0\ndescription: A rule.\n---\n\nRule prose.\n")
+	if !strings.Contains(got, "alwaysApply: true") {
+		t.Errorf("rule with no rule_mode must default to alwaysApply: true:\n%s", got)
+	}
+	for _, key := range []string{"globs:", "description:"} {
+		if strings.Contains(got, key) {
+			t.Errorf("default-always rule must not emit %q:\n%s", key, got)
+		}
+	}
+	if !strings.Contains(got, "Rule prose.") {
+		t.Errorf(".mdc must carry the rule prose:\n%s", got)
+	}
+}
+
 func TestCursor_RuleModeGlobGlobs(t *testing.T) {
 	t.Parallel()
 	got := cursorMDCFor(t, "---\ntype: rule\nversion: 1.0.0\nrule_mode: glob\nrule_globs: \"src/**/*.ts,src/**/*.tsx\"\n---\n\nTS rules.\n")

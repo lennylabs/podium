@@ -776,3 +776,46 @@ func TestRuleModes_AbsentModeDefaultsAlways(t *testing.T) {
 	}
 	mustExist(t, filepath.Join(tgt, ".claude/rules/implicit-always.md"))
 }
+
+// F-4.3.1 — a rule that omits rule_mode defaults to `always`
+// (spec/04-artifact-model.md §4.3: "rule_mode: ... # default: always"), so
+// the Cursor adapter must emit alwaysApply: true. Without the default an
+// unset rule materialized on Cursor with empty frontmatter, which Cursor
+// treats as a non-always rule.
+func TestRuleModes_AbsentModeCursorAlwaysApply(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"style/implicit-always/ARTIFACT.md": rmRuleArtifact("implicit-always", "", nil, "Implicit always rule.\n"),
+	})
+	tgt := t.TempDir()
+	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "cursor"); res.Exit != 0 {
+		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	got := readFile(t, filepath.Join(tgt, ".cursor/rules/implicit-always.mdc"))
+	if !strings.Contains(got, "alwaysApply: true") {
+		t.Errorf("unset rule_mode must materialize on Cursor as alwaysApply: true:\n%s", got)
+	}
+	if strings.Contains(got, "globs:") || strings.Contains(got, "description:") {
+		t.Errorf("default-always Cursor rule must carry no glob/description key:\n%s", got)
+	}
+}
+
+// F-4.3.2 — rule_mode is the closed enumeration always | glob | auto |
+// explicit (spec/04-artifact-model.md §4.3). An out-of-enum value on a
+// type: rule artifact is an ingest error surfaced by `podium lint`.
+func TestRuleModes_LintRejectsOutOfEnumMode(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"rules/bad-mode/ARTIFACT.md": rmRuleArtifact("bad-mode", "sometimes", nil, "Bad mode rule.\n"),
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 1 {
+		t.Fatalf("lint exit=%d, want 1 (error)\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "[error]") || !strings.Contains(res.Stdout, "lint.unknown_rule_mode") {
+		t.Errorf("expected an unknown_rule_mode error:\n%s", res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "sometimes") {
+		t.Errorf("error should name the offending value:\n%s", res.Stdout)
+	}
+}

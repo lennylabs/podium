@@ -89,8 +89,18 @@ func cursorRuleBody(src Source) []byte {
 	if err != nil {
 		return cursorMDC("", src.ArtifactBytes)
 	}
+	// spec: 04-artifact-model.md §4.3 — rule_mode defaults to `always` when
+	// unset ("rule_mode: always | glob | auto | explicit  # default: always"),
+	// and an `always` rule loads when the session starts. Cursor needs an
+	// explicit `alwaysApply: true` for that, so map an unset mode to always
+	// rather than emitting empty frontmatter (which Cursor treats as a
+	// non-always rule).
+	mode := art.RuleMode
+	if mode == "" {
+		mode = manifest.RuleModeAlways
+	}
 	var fm strings.Builder
-	switch art.RuleMode {
+	switch mode {
 	case manifest.RuleModeAlways:
 		fm.WriteString("alwaysApply: true\n")
 	case manifest.RuleModeGlob:

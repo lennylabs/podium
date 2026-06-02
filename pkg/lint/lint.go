@@ -101,6 +101,7 @@ func AllRulesWithClient(client *http.Client) []Rule {
 		ruleRequiredFields{},
 		ruleTypeRequiredFields{},
 		ruleRuleModeHygiene{},
+		ruleRuleModeCanonical{},
 		ruleTypeProviderValidate{},
 		ruleSkillCompliance{},
 		ruleSkillPodiumOnlyFields{},

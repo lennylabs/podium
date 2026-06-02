@@ -164,3 +164,72 @@ func TestLint_RuleAlwaysClean(t *testing.T) {
 		}
 	}
 }
+
+// rmCanonicalDiags runs only the §4.3 rule_mode enum rule over a single
+// artifact so the assertions are not perturbed by the other rules.
+func rmCanonicalDiags(t *testing.T, content string) []Diagnostic {
+	t.Helper()
+	reg, records := openFixture(t, testharness.WriteTreeOption{
+		Path:    "rules/x/ARTIFACT.md",
+		Content: content,
+	})
+	return (&Linter{Rules: []Rule{ruleRuleModeCanonical{}}}).Lint(context.Background(), reg, records)
+}
+
+// spec: 04-artifact-model.md §4.3 — rule_mode is constrained to the closed
+// enumeration always | glob | auto | explicit. An out-of-enum value on a
+// type: rule artifact is an ingest error.
+func TestLint_RuleModeOutOfEnumErrors(t *testing.T) {
+	t.Parallel()
+	diags := rmCanonicalDiags(t, "---\ntype: rule\nversion: 1.0.0\nrule_mode: sometimes\n---\n\nbody\n")
+	if !hasErrorMessage(diags, "lint.unknown_rule_mode", "sometimes") {
+		t.Errorf("expected an unknown_rule_mode error naming the bad value, got: %v", diags)
+	}
+	if !hasErrorMessage(diags, "lint.unknown_rule_mode", "always, glob, auto, explicit") {
+		t.Errorf("error should list the canonical modes, got: %v", diags)
+	}
+}
+
+// spec: §4.3 — each canonical rule_mode value passes the enum rule.
+func TestLint_RuleModeCanonicalClean(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"always", "glob", "auto", "explicit"} {
+		diags := rmCanonicalDiags(t, "---\ntype: rule\nversion: 1.0.0\nrule_mode: "+mode+"\n---\n\nbody\n")
+		if hasCode(diags, "lint.unknown_rule_mode") {
+			t.Errorf("canonical rule_mode %q must not error: %v", mode, diags)
+		}
+	}
+}
+
+// spec: §4.3 — an unset rule_mode defaults to always at materialization, so
+// the enum rule leaves it clean rather than treating "" as out of enum.
+func TestLint_RuleModeUnsetClean(t *testing.T) {
+	t.Parallel()
+	diags := rmCanonicalDiags(t, "---\ntype: rule\nversion: 1.0.0\n---\n\nbody\n")
+	if hasCode(diags, "lint.unknown_rule_mode") {
+		t.Errorf("an unset rule_mode must not error (defaults to always): %v", diags)
+	}
+}
+
+// spec: §4.3 — the enum rule scopes to type: rule (mirroring the hook_event
+// canonical rule). A non-rule artifact's stray rule_mode is covered by the
+// rule_mode_on_non_rule hygiene warning, not by this enum error.
+func TestLint_RuleModeEnumScopedToRule(t *testing.T) {
+	t.Parallel()
+	diags := rmCanonicalDiags(t, "---\ntype: context\nversion: 1.0.0\nrule_mode: sometimes\n---\n\nbody\n")
+	if hasCode(diags, "lint.unknown_rule_mode") {
+		t.Errorf("the enum rule must only apply to type: rule, got: %v", diags)
+	}
+}
+
+// The enum rule ships in the default rule set so both `podium lint` and
+// ingest enforce it.
+func TestLint_RuleModeCanonicalRegistered(t *testing.T) {
+	t.Parallel()
+	for _, r := range AllRules() {
+		if r.Code() == "lint.unknown_rule_mode" {
+			return
+		}
+	}
+	t.Errorf("ruleRuleModeCanonical is not registered in AllRules()")
+}

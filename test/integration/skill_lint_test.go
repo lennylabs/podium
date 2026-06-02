@@ -45,6 +45,26 @@ func TestPodiumLint_RuleGlobMissingGlobsErrors(t *testing.T) {
 	}
 }
 
+// TestPodiumLint_RuleModeOutOfEnumErrors covers F-4.3.2.
+// Spec: 04-artifact-model.md §4.3 — rule_mode is the closed enumeration
+// always | glob | auto | explicit; the real binary's lint pipeline rejects
+// an out-of-enum value such as rule_mode: sometimes.
+func TestPodiumLint_RuleModeOutOfEnumErrors(t *testing.T) {
+	t.Parallel()
+	registry := t.TempDir()
+	testharness.WriteTree(t, registry, testharness.WriteTreeOption{
+		Path:    "rules/bad-mode/ARTIFACT.md",
+		Content: "---\ntype: rule\nversion: 1.0.0\nrule_mode: sometimes\n---\n\nrule body\n",
+	})
+	res := cmdharness.Run(t, "podium", "", "lint", "--registry", registry)
+	if res.ExitCode != 1 {
+		t.Fatalf("lint exit=%d, want 1\nstdout:\n%s", res.ExitCode, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "lint.unknown_rule_mode") || !strings.Contains(res.Stdout, "sometimes") {
+		t.Errorf("expected an unknown_rule_mode error naming the bad value:\n%s", res.Stdout)
+	}
+}
+
 // TestPodiumLint_SkillPodiumFieldErrors covers F-4.3.6.
 // Spec: §4.3.4 — a Podium-only field in SKILL.md is an ingest error; the
 // field belongs in ARTIFACT.md. ParseSkill drops the key, so the lint
