@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode"
@@ -628,6 +629,9 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 	// Immediate children: fold sparse subdomains into the notable list
 	// (§4.5.5 folding mechanics) and render the rest as the subdomain
 	// tree, dropping any unlisted subtree.
+	// foldedSubdomains counts how many sparse subdomains fold_below_artifacts
+	// collapses here, for the §4.5.5 / §8 domain.loaded fold summary (F-4.5.1).
+	foldedSubdomains := 0
 	groups := groupByImmediateChild(under, path)
 	childNames := make([]string, 0, len(groups))
 	for name := range groups {
@@ -643,6 +647,7 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 		// members a DOMAIN.md in the subtree pulls in via include: (F-4.5.13).
 		recursiveCount := subtreeMemberCount(groups[name], childPath, merged, resolveImports)
 		if knobs.foldBelow > 0 && recursiveCount < knobs.foldBelow {
+			foldedSubdomains++
 			for _, m := range dedupeLatest(groups[name]) {
 				if domainpkg.MatchAny(knobs.exclude, m.ArtifactID) {
 					continue
@@ -673,6 +678,12 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 	sort.Slice(res.Subdomains, func(i, j int) bool {
 		return res.Subdomains[i].Path < res.Subdomains[j].Path
 	})
+
+	// §4.5.5 / §8 (F-4.5.1): whether pass-through chain collapse fired, read
+	// off the rendered tree before the budget pass trims it. A rendered
+	// subdomain sitting more than one path segment below its parent is the
+	// signature of a collapsed single-child chain.
+	passthroughCollapsed := knobs.foldPassthrough && passthroughFired(path, res.Subdomains)
 
 	// §12 learn-from-usage reranking restricted to the notable pool so the
 	// signal orders the candidates within their tier without pulling in
@@ -741,7 +752,45 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 	if path != "" && len(res.Subdomains) == 0 && len(res.Notable) == 0 && requested == nil {
 		return nil, fmt.Errorf("%w: %s", ErrDomainNotFound, path)
 	}
+
+	// spec: §4.5.5 line 540 — "Audit events (§8) record the resolved depth
+	// and fold decisions per call." Record the resolved render depth (after
+	// caller-override capping), whether the requested depth was capped at the
+	// ceiling, the count of sparse subdomains folded into the leaf set, and
+	// whether pass-through chain collapse fired. The deferred emitter reads
+	// ev.Context, so set it before the success return (F-4.5.1).
+	ev.Context = map[string]string{
+		"depth":                 strconv.Itoa(renderDepth),
+		"depth_capped":          strconv.FormatBool(depthCapped),
+		"folded_subdomains":     strconv.Itoa(foldedSubdomains),
+		"passthrough_collapsed": strconv.FormatBool(passthroughCollapsed),
+	}
 	return res, nil
+}
+
+// passthroughFired reports whether any rendered subdomain sits more than one
+// path segment below its parent, the signature of a §4.5.5 pass-through chain
+// collapse. It walks the rendered tree so a collapse at any depth is detected.
+// Used for the domain.loaded audit fold summary (F-4.5.1).
+func passthroughFired(parent string, subs []DomainDescriptor) bool {
+	for _, s := range subs {
+		if segmentCount(s.Path)-segmentCount(parent) > 1 {
+			return true
+		}
+		if passthroughFired(s.Path, s.Subdomains) {
+			return true
+		}
+	}
+	return false
+}
+
+// segmentCount returns the number of "/"-delimited path segments; the empty
+// (root) path has zero segments.
+func segmentCount(path string) int {
+	if path == "" {
+		return 0
+	}
+	return strings.Count(path, "/") + 1
 }
 
 // manifestsUnder returns the subset of manifests whose ArtifactID is

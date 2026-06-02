@@ -108,8 +108,27 @@ func TestCoreConcept_DomainWithoutDomainMD(t *testing.T) {
 }
 
 // T-D-concepts-7 — DOMAIN.md description and keywords surface in load_domain.
+// The server reads DOMAIN.md at ingest and load_domain returns the requested
+// domain's description (prose body, else frontmatter) and curated keywords.
+// spec: §4.5.5 description rendering and keywords.
 func TestCoreConcept_DomainMDDescriptionKeywords(t *testing.T) {
-	t.Skip("blocked by F-4.5.2: load_domain never ingests DOMAIN.md, so the domain description and keywords are not surfaced")
+	t.Parallel()
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/ap/DOMAIN.md":               "---\ndescription: \"Accounts payable: money out to vendors\"\ndiscovery:\n  keywords:\n    - invoice\n    - remittance\n---\n\n# Accounts Payable\n\nInvoice processing and vendor remittance.\n",
+		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay invoice"),
+	}))
+	var m map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance/ap", &m)
+	desc, _ := m["description"].(string)
+	if !strings.Contains(desc, "Invoice processing and vendor remittance") {
+		t.Errorf("requested-domain description missing prose body: %q", desc)
+	}
+	kw := dmKeywords(m)
+	for _, want := range []string{"invoice", "remittance"} {
+		if !dmContains(kw, want) {
+			t.Errorf("keywords %v missing %q", kw, want)
+		}
+	}
 }
 
 // T-D-concepts-8 — filesystem-mode sync works with no server process.
@@ -734,8 +753,8 @@ func TestCoreConcept_ClaudeDesktopExtension(t *testing.T) {
 func TestCoreConcept_ClaudeCoworkPlugin(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"tools/greet/ARTIFACT.md": greetSkillArtifact,
-		"tools/greet/SKILL.md":    skillBody("greet"),
+		"tools/greet/ARTIFACT.md":  greetSkillArtifact,
+		"tools/greet/SKILL.md":     skillBody("greet"),
 		"tools/helper/ARTIFACT.md": contextArtifact("helper"),
 	})
 	tgt := t.TempDir()

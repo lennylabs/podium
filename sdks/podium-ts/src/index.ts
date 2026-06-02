@@ -494,10 +494,15 @@ export class Client {
     return tokens;
   }
 
-  async loadDomain(path = "", depth = 1): Promise<Record<string, unknown>> {
-    return this.get("/v1/load_domain", { ...(path ? { path } : {}), depth }) as Promise<
-      Record<string, unknown>
-    >;
+  // spec: §4.5.5 / §5.1 (F-4.5.4) — depth is unset by default. The query
+  // parameter is omitted unless the caller supplies one (get() drops undefined
+  // values), so the registry applies its configured default max_depth (3)
+  // rather than the SDK forcing a single rendered level.
+  async loadDomain(path = "", depth?: number): Promise<Record<string, unknown>> {
+    return this.get("/v1/load_domain", {
+      ...(path ? { path } : {}),
+      ...(depth !== undefined ? { depth } : {}),
+    }) as Promise<Record<string, unknown>>;
   }
 
   async searchDomains(

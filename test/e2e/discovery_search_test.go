@@ -671,6 +671,24 @@ func TestSearch_AuditDomainLoaded(t *testing.T) {
 	}
 }
 
+// spec: §4.5.5 line 540 (F-4.5.1) — the domain.loaded audit event records the
+// resolved render depth and the fold decisions for the call, so a reviewer can
+// recover the depth and whether folding occurred from the audit trail.
+func TestSearch_AuditDomainLoadedRecordsDepthAndFolds(t *testing.T) {
+	t.Parallel()
+	srv, audit := brStartAuditServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance", nil)
+	if !brPollContains(audit, "domain.loaded", 5*time.Second) {
+		t.Fatalf("audit log missing domain.loaded:\n%s", brReadOrEmpty(audit))
+	}
+	body := brReadOrEmpty(audit)
+	for _, want := range []string{`"depth"`, `"depth_capped"`, `"folded_subdomains"`, `"passthrough_collapsed"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("domain.loaded audit context missing %s:\n%s", want, body)
+		}
+	}
+}
+
 // T-D-browsing-32 — domains.searched audit event.
 func TestSearch_AuditDomainsSearched(t *testing.T) {
 	t.Parallel()

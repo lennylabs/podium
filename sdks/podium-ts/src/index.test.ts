@@ -33,6 +33,39 @@ describe("Client", () => {
     expect(out.results?.[0].id).toBe("finance/run-variance");
   });
 
+  // Spec: §4.5.5 / §5.1 (F-4.5.4) — loadDomain omits the depth query parameter
+  // by default so the registry applies its configured default max_depth (3)
+  // instead of the SDK forcing a single rendered level.
+  it("loadDomain omits depth by default", async () => {
+    let observedURL = "";
+    const fetcher: typeof fetch = async (input) => {
+      observedURL = String(input);
+      return new Response(JSON.stringify({ path: "finance", subdomains: [], notable: [] }), {
+        status: 200,
+      });
+    };
+    const c = new Client({ registry: "http://reg", fetcher });
+    await c.loadDomain("finance");
+    expect(observedURL).toContain("load_domain");
+    expect(observedURL).toContain("path=finance");
+    expect(observedURL).not.toContain("depth");
+  });
+
+  // Spec: §4.5.5 / §5.1 (F-4.5.4) — an explicit depth is forwarded so a caller
+  // can still override the configured default.
+  it("loadDomain forwards an explicit depth", async () => {
+    let observedURL = "";
+    const fetcher: typeof fetch = async (input) => {
+      observedURL = String(input);
+      return new Response(JSON.stringify({ path: "finance", subdomains: [], notable: [] }), {
+        status: 200,
+      });
+    };
+    const c = new Client({ registry: "http://reg", fetcher });
+    await c.loadDomain("finance", 2);
+    expect(observedURL).toContain("depth=2");
+  });
+
   // Spec: §11 (Search browse mode test) — top_k > 50 is rejected client-side
   // with a structured registry.invalid_argument error before any request.
   it("searchArtifacts rejects topK over 50 before the request", async () => {

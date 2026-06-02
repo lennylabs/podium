@@ -215,6 +215,27 @@ def test_preview_scope_sends_no_constraints(stub_server):
     assert out["by_sensitivity"] == {"low": 12}
 
 
+# Spec: §4.5.5 / §5.1 (F-4.5.4) — load_domain omits the depth query parameter
+# by default so the registry applies its configured default max_depth (3)
+# instead of the SDK forcing a single rendered level.
+def test_load_domain_omits_depth_by_default(stub_server):
+    stub_server.next_response = {"path": "finance", "subdomains": [], "notable": []}
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    client.load_domain("finance")
+    assert "/v1/load_domain" in stub_server.last_path
+    assert "path=finance" in stub_server.last_path
+    assert "depth" not in stub_server.last_path
+
+
+# Spec: §4.5.5 / §5.1 (F-4.5.4) — an explicit depth is forwarded so a caller
+# can still override the configured default.
+def test_load_domain_forwards_explicit_depth(stub_server):
+    stub_server.next_response = {"path": "finance", "subdomains": [], "notable": []}
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    client.load_domain("finance", depth=2)
+    assert "depth=2" in stub_server.last_path
+
+
 # Spec: §7.6.2 — load_artifacts POSTs to /v1/artifacts:batchLoad
 # and returns per-item envelopes; partial failures do not raise.
 def test_load_artifacts_returns_envelopes(stub_server):

@@ -1329,6 +1329,7 @@ func printDomainHuman(body []byte) {
 	var d struct {
 		Path        string       `json:"path"`
 		Description string       `json:"description"`
+		Keywords    []string     `json:"keywords"`
 		Subdomains  []domainNode `json:"subdomains"`
 		Notable     []struct {
 			ID      string `json:"id"`
@@ -1347,6 +1348,11 @@ func printDomainHuman(body []byte) {
 	fmt.Println(title)
 	if d.Description != "" {
 		fmt.Printf("  %s\n", d.Description)
+	}
+	// spec: §4.5.5 — the requested domain's author-curated keywords are
+	// returned verbatim in load_domain output; surface them in the human view.
+	if len(d.Keywords) > 0 {
+		fmt.Printf("  keywords: %s\n", strings.Join(d.Keywords, ", "))
 	}
 	var walk func(nodes []domainNode, depth int)
 	walk = func(nodes []domainNode, depth int) {

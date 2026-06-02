@@ -2,6 +2,7 @@ package core_test
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -186,6 +187,93 @@ func TestAudit_ResolvedLayersReflectEffectiveView(t *testing.T) {
 	}
 	if got := evs[1].ResolvedLayers; len(got) != 2 || got[0] != "pub" || got[1] != "alice-personal" {
 		t.Errorf("alice ResolvedLayers = %v, want [pub alice-personal]", got)
+	}
+}
+
+// Spec: §4.5.5 line 540 — the domain.loaded event records the resolved
+// render depth and the fold decisions per call (F-4.5.1). A plain root
+// load reports the default depth, no cap, no folds, and no pass-through
+// collapse.
+func TestAudit_LoadDomainRecordsDepthAndFoldDecisions(t *testing.T) {
+	t.Parallel()
+	reg, rec := setupRegistryWithAudit(t)
+	if _, err := reg.LoadDomain(context.Background(), publicID, "", core.LoadDomainOptions{}); err != nil {
+		t.Fatalf("LoadDomain: %v", err)
+	}
+	ev := rec.snapshot()[0]
+	want := map[string]string{
+		"depth":                 strconv.Itoa(core.DefaultMaxDepth),
+		"depth_capped":          "false",
+		"folded_subdomains":     "0",
+		"passthrough_collapsed": "false",
+	}
+	for k, v := range want {
+		if ev.Context[k] != v {
+			t.Errorf("Context[%q] = %q, want %q (full: %v)", k, ev.Context[k], v, ev.Context)
+		}
+	}
+}
+
+// Spec: §4.5.5 / §8 — a caller depth above the resolved ceiling is recorded
+// as the capped depth with depth_capped=true (F-4.5.1).
+func TestAudit_LoadDomainRecordsDepthCap(t *testing.T) {
+	t.Parallel()
+	reg, rec := setupRegistryWithAudit(t)
+	if _, err := reg.LoadDomain(context.Background(), publicID, "", core.LoadDomainOptions{Depth: 99}); err != nil {
+		t.Fatalf("LoadDomain: %v", err)
+	}
+	ev := rec.snapshot()[0]
+	if ev.Context["depth"] != strconv.Itoa(core.DefaultMaxDepth) {
+		t.Errorf("depth = %q, want capped to %d", ev.Context["depth"], core.DefaultMaxDepth)
+	}
+	if ev.Context["depth_capped"] != "true" {
+		t.Errorf("depth_capped = %q, want true", ev.Context["depth_capped"])
+	}
+}
+
+// Spec: §4.5.5 / §8 — fold_below_artifacts collapses sparse subdomains and
+// the count is recorded in the fold summary (F-4.5.1). The nested registry
+// has two sparse subdomains (risk, close-reporting) below the threshold.
+func TestAudit_LoadDomainRecordsFoldedSubdomainCount(t *testing.T) {
+	t.Parallel()
+	reg := nestedRegistry(t)
+	rec := &recorder{}
+	reg.WithAudit(rec.emit)
+	if _, err := reg.LoadDomain(context.Background(), publicID, "finance", core.LoadDomainOptions{FoldBelowArtifacts: 2}); err != nil {
+		t.Fatalf("LoadDomain: %v", err)
+	}
+	ev := rec.snapshot()[0]
+	if ev.Context["folded_subdomains"] != "2" {
+		t.Errorf("folded_subdomains = %q, want 2 (full: %v)", ev.Context["folded_subdomains"], ev.Context)
+	}
+}
+
+// Spec: §4.5.5 / §8 — a collapsed single-child pass-through chain sets
+// passthrough_collapsed=true in the fold summary (F-4.5.1).
+func TestAudit_LoadDomainRecordsPassthroughCollapse(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	for _, leaf := range []string{"x", "y"} {
+		if err := st.PutManifest(context.Background(), store.ManifestRecord{
+			TenantID: "t", ArtifactID: "a/b/c/d/" + leaf,
+			Version: "1.0.0", ContentHash: "sha256:" + leaf, Type: "skill", Layer: "L",
+		}); err != nil {
+			t.Fatalf("PutManifest: %v", err)
+		}
+	}
+	rec := &recorder{}
+	reg := core.New(st, "t", []layer.Layer{
+		{ID: "L", Visibility: layer.Visibility{Public: true}},
+	}).WithAudit(rec.emit)
+	if _, err := reg.LoadDomain(context.Background(), publicID, "a", core.LoadDomainOptions{}); err != nil {
+		t.Fatalf("LoadDomain: %v", err)
+	}
+	ev := rec.snapshot()[0]
+	if ev.Context["passthrough_collapsed"] != "true" {
+		t.Errorf("passthrough_collapsed = %q, want true (full: %v)", ev.Context["passthrough_collapsed"], ev.Context)
 	}
 }
 

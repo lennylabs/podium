@@ -504,8 +504,12 @@ class Client:
         self.token = tokens.access_token
         return tokens
 
-    def load_domain(self, path: str = "", depth: int = 1) -> dict[str, Any]:
-        params = {}
+    def load_domain(self, path: str = "", depth: int | None = None) -> dict[str, Any]:
+        # spec: §4.5.5 / §5.1 (F-4.5.4) — depth is unset by default. The query
+        # parameter is omitted unless the caller supplies one, so the registry
+        # applies its configured default max_depth (3) rather than the SDK
+        # forcing a single rendered level.
+        params: dict[str, Any] = {}
         if path:
             params["path"] = path
         if depth:
