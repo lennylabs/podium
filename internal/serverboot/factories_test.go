@@ -201,6 +201,74 @@ func TestOpenVectorAndEmbedder_PropagatesEmbedderError(t *testing.T) {
 	}
 }
 
+// Spec: §9.1 / §4.7 (F-9.1.1) — an explicitly-configured EmbeddingProvider
+// overrides a self-embedding backend's hosted model. openVectorAndEmbedder
+// then builds the embedder and returns it (non-nil) so the core embeds locally
+// and writes vectors; a defaulted provider or an explicit none leaves the
+// backend self-embedding (nil embedder).
+func TestOpenVectorAndEmbedder_SelfEmbedOverride(t *testing.T) {
+	t.Parallel()
+	base := func() *Config {
+		return &Config{
+			vectorBackend:        "pinecone",
+			pineconeKey:          "k",
+			pineconeHost:         "http://127.0.0.1:19999",
+			vectorInferenceModel: "multilingual-e5-large",
+		}
+	}
+	t.Run("explicit provider overrides", func(t *testing.T) {
+		c := base()
+		c.embeddingProvider = "openai"
+		c.openaiAPIKey = "sk-test"
+		c.embeddingProviderExplicit = true
+		v, e, err := openVectorAndEmbedder(c)
+		if err != nil {
+			t.Fatalf("err = %v", err)
+		}
+		if v == nil {
+			t.Fatal("vector provider = nil, want pinecone backend")
+		}
+		if e == nil {
+			t.Fatal("embedder = nil, want the explicit override embedder")
+		}
+		if e.ID() != "openai" {
+			t.Errorf("embedder ID = %q, want openai", e.ID())
+		}
+	})
+	t.Run("defaulted provider is not an override", func(t *testing.T) {
+		c := base()
+		// Looks set, but the operator did not choose it (mode default).
+		c.embeddingProvider = "openai"
+		c.openaiAPIKey = "sk-test"
+		c.embeddingProviderExplicit = false
+		v, e, err := openVectorAndEmbedder(c)
+		if err != nil {
+			t.Fatalf("err = %v", err)
+		}
+		if v == nil {
+			t.Fatal("vector provider = nil")
+		}
+		if e != nil {
+			t.Errorf("embedder = %q, want nil (backend self-embeds)", e.ID())
+		}
+	})
+	t.Run("explicit none stays self-embedding", func(t *testing.T) {
+		c := base()
+		c.embeddingProvider = "none"
+		c.embeddingProviderExplicit = true
+		v, e, err := openVectorAndEmbedder(c)
+		if err != nil {
+			t.Fatalf("err = %v", err)
+		}
+		if v == nil {
+			t.Fatal("vector provider = nil")
+		}
+		if e != nil {
+			t.Errorf("embedder = %q, want nil (explicit none disables override)", e.ID())
+		}
+	})
+}
+
 func TestConfigValidate(t *testing.T) {
 	t.Parallel()
 	if err := (&Config{storeType: "postgres"}).validate(); err == nil ||

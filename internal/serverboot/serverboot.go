@@ -1221,22 +1221,28 @@ type Config struct {
 	// Vector + embedding (§4.7).
 	vectorBackend     string
 	embeddingProvider string
-	embeddingModel    string
-	openaiAPIKey      string
-	voyageAPIKey      string
-	cohereAPIKey      string
-	ollamaURL         string
-	pgvectorDSN       string
-	pineconeKey       string
-	pineconeHost      string
-	pineconeIndex     string
-	pineconeNS        string
-	weaviateURL       string
-	weaviateKey       string
-	weaviateColl      string
-	qdrantURL         string
-	qdrantKey         string
-	qdrantColl        string
+	// embeddingProviderExplicit records whether the operator explicitly chose
+	// an EmbeddingProvider (PODIUM_EMBEDDING_PROVIDER set, or registry.yaml
+	// embedding.type) as opposed to inheriting the per-mode default. §9.1 / §4.7
+	// (F-9.1.1): a self-embedding backend honors an explicit provider as an
+	// override of its hosted model, but a defaulted provider is not an override.
+	embeddingProviderExplicit bool
+	embeddingModel            string
+	openaiAPIKey              string
+	voyageAPIKey              string
+	cohereAPIKey              string
+	ollamaURL                 string
+	pgvectorDSN               string
+	pineconeKey               string
+	pineconeHost              string
+	pineconeIndex             string
+	pineconeNS                string
+	weaviateURL               string
+	weaviateKey               string
+	weaviateColl              string
+	qdrantURL                 string
+	qdrantKey                 string
+	qdrantColl                string
 	// vectorInferenceModel captures the §13.12 self-embedding model name
 	// (PODIUM_PINECONE_INFERENCE_MODEL / PODIUM_WEAVIATE_VECTORIZER /
 	// PODIUM_QDRANT_INFERENCE_MODEL, or vector_backend.inference_model). The
@@ -1589,7 +1595,15 @@ func LoadConfig() *Config {
 				c.vectorBackend = "sqlite-vec"
 			}
 		}
-		if _, set := os.LookupEnv("PODIUM_EMBEDDING_PROVIDER"); !set && c.embeddingProvider == "" {
+		_, embedSet := os.LookupEnv("PODIUM_EMBEDDING_PROVIDER")
+		// §9.1 / §4.7 (F-9.1.1): an explicit choice is the env var being set
+		// (even to the empty string, which §13.12 reads as "disable embedding
+		// generation") or a registry.yaml value (already merged into
+		// c.embeddingProvider). Capture it before the per-mode default is
+		// applied so a self-embedding backend can distinguish an operator
+		// override from an inherited default.
+		c.embeddingProviderExplicit = embedSet || c.embeddingProvider != ""
+		if !embedSet && c.embeddingProvider == "" {
 			if standard {
 				c.embeddingProvider = "openai"
 			} else {
@@ -1716,11 +1730,14 @@ func (c *Config) missingBackendValues() []string {
 	case "pgvector":
 		req(c.pgvectorDSN != "", "PODIUM_PGVECTOR_DSN")
 	}
-	// §13.12 (F-13.12.6): the embedding provider is optional when the selected
-	// vector backend self-embeds (an *_INFERENCE_MODEL / *_VECTORIZER is set),
-	// so its per-provider key is required only when no self-embedding model is
-	// configured.
-	if c.vectorInferenceModel == "" {
+	// §9.1 / §13.12 (F-13.12.6, F-9.1.3): an embedder is built, and so its
+	// per-provider API key is required, unless the selected backend genuinely
+	// self-embeds. A storage-only backend (pgvector, sqlite-vec) cannot
+	// self-embed even with a stray *_INFERENCE_MODEL set, so gate on
+	// vectorSelfEmbeds() rather than on the inference-model string alone.
+	// §9.1 / §4.7 (F-9.1.1): even on a self-embedding backend, an explicit
+	// EmbeddingProvider override is built and needs its key.
+	if !c.vectorSelfEmbeds() || c.embeddingProviderExplicit {
 		switch c.embeddingProvider {
 		case "openai":
 			req(c.openaiAPIKey != "", "OPENAI_API_KEY")
@@ -1846,8 +1863,29 @@ func (c *Config) vectorSettings() map[string]string {
 // §13.12 (F-13.12.6): when the selected backend self-embeds, the embedding
 // provider is optional; the backend is opened with no local dimension and a
 // nil embedder is returned so the registry sends raw text on Put/Query.
+//
+// §9.1 / §4.7 (F-9.1.1): an explicitly-configured EmbeddingProvider overrides
+// the backend's hosted model even when the backend self-embeds. The embedder
+// is built and the backend is opened at the embedder's dimension, so the
+// core's override path (queryVector / upsertVector prefer a present embedder)
+// embeds locally and writes vectors instead of sending raw text. A defaulted
+// provider, or an explicit "none"/empty, is not an override and leaves the
+// backend self-embedding.
 func openVectorAndEmbedder(c *Config) (vector.Provider, embedding.Provider, error) {
 	if c.vectorSelfEmbeds() {
+		if c.embeddingProviderExplicit {
+			emb, err := openEmbedder(c)
+			if err != nil {
+				return nil, nil, err
+			}
+			if emb != nil {
+				v, err := openVectorBackend(c, emb.Dimensions())
+				if err != nil {
+					return nil, nil, err
+				}
+				return v, emb, nil
+			}
+		}
 		v, err := openVectorBackend(c, 0)
 		if err != nil {
 			return nil, nil, err

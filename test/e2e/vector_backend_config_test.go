@@ -168,6 +168,67 @@ func TestVectorBackend_PineconeSelfEmbedding(t *testing.T) {
 	}
 }
 
+// T-D-vector-backends-3b (F-9.1.1): an explicitly-configured EmbeddingProvider
+// overrides a self-embedding backend's hosted model. With a self-embedding
+// Pinecone backend and PODIUM_EMBEDDING_PROVIDER=openai (+ key), the registry
+// wires the override embedder rather than silently dropping it; the startup
+// log shows embedder=openai and is not in the self-embedding branch.
+func TestVectorBackend_SelfEmbedExplicitOverride(t *testing.T) {
+	t.Parallel()
+	reg := vbReg(t)
+	srv := startServerArgs(t, vbServerEnv(t,
+		"PODIUM_VECTOR_BACKEND=pinecone",
+		"PODIUM_PINECONE_API_KEY=pcn-test",
+		"PODIUM_PINECONE_HOST=http://127.0.0.1:19999",
+		"PODIUM_PINECONE_INFERENCE_MODEL=multilingual-e5-large",
+		"PODIUM_EMBEDDING_PROVIDER=openai",
+		"OPENAI_API_KEY=sk-test",
+	), "serve", "--standalone", "--layer-path", reg)
+	if st := getStatus(t, srv.BaseURL+"/healthz"); st != 200 {
+		t.Fatalf("healthz = %d, want 200", st)
+	}
+	log := srv.log()
+	if !strings.Contains(log, "embedder=openai") {
+		t.Errorf("expected the explicit override 'embedder=openai' in startup log:\n%s", log)
+	}
+	if strings.Contains(log, "self-embedding") {
+		t.Errorf("explicit override must not take the self-embedding branch:\n%s", log)
+	}
+	if strings.Contains(log, "vector search disabled") {
+		t.Errorf("override embedder built from a present key must not disable vector search:\n%s", log)
+	}
+}
+
+// T-D-vector-backends-3c (F-9.1.1): the explicit override embedder is built, so
+// a missing OPENAI_API_KEY is a hard startup error naming the key even though
+// the backend self-embeds.
+func TestVectorBackend_SelfEmbedOverrideMissingKeyRefuses(t *testing.T) {
+	t.Parallel()
+	reg := vbReg(t)
+	vbExpectRefuseToStart(t, reg, "OPENAI_API_KEY",
+		"PODIUM_VECTOR_BACKEND=pinecone",
+		"PODIUM_PINECONE_API_KEY=pcn-test",
+		"PODIUM_PINECONE_HOST=https://h.example.com",
+		"PODIUM_PINECONE_INFERENCE_MODEL=multilingual-e5-large",
+		"PODIUM_EMBEDDING_PROVIDER=openai",
+	)
+}
+
+// T-D-vector-backends-3d (F-9.1.3): a storage-only backend cannot self-embed
+// even with a stray *_INFERENCE_MODEL set. The embedding-provider key stays
+// required, so a missing OPENAI_API_KEY refuses startup naming the key rather
+// than being skipped by the stray inference model.
+func TestVectorBackend_StorageOnlyStrayInferenceNeedsKey(t *testing.T) {
+	t.Parallel()
+	reg := vbReg(t)
+	vbExpectRefuseToStart(t, reg, "OPENAI_API_KEY",
+		"PODIUM_VECTOR_BACKEND=pgvector",
+		"PODIUM_PGVECTOR_DSN=postgres://user:pass@127.0.0.1:5432/bogus",
+		"PODIUM_PINECONE_INFERENCE_MODEL=stray-model",
+		"PODIUM_EMBEDDING_PROVIDER=openai",
+	)
+}
+
 // T-D-vector-backends-4: Pinecone storage-only happy path needs mock vector +
 // mock embedder with correct dimensions; skipped as too uncertain without
 // verified wiring.

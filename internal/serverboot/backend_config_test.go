@@ -163,8 +163,18 @@ func TestValidate_MissingBackendValues(t *testing.T) {
 		{"openai without key", Config{embeddingProvider: "openai"}, true, "OPENAI_API_KEY"},
 		{"openai ok", Config{embeddingProvider: "openai", openaiAPIKey: "sk"}, false, ""},
 		// §13.12 (F-13.12.6): a self-embedding backend makes the embedding
-		// provider optional, so a missing embedder key is not an error.
+		// provider optional, so a missing embedder key is not an error (the
+		// provider here is the inherited default, not an explicit override).
 		{"self-embedding makes embedder optional", Config{vectorBackend: "pinecone", pineconeKey: "k", pineconeHost: "h", vectorInferenceModel: "m", embeddingProvider: "openai"}, false, ""},
+		// §9.1 / §4.7 (F-9.1.1): an explicit EmbeddingProvider override on a
+		// self-embedding backend is built, so its missing key is a hard error.
+		{"self-embedding explicit override needs key", Config{vectorBackend: "pinecone", pineconeKey: "k", pineconeHost: "h", vectorInferenceModel: "m", embeddingProvider: "openai", embeddingProviderExplicit: true}, true, "OPENAI_API_KEY"},
+		// §9.1 / §4.7 (F-9.1.1): the override with its key present starts.
+		{"self-embedding explicit override with key ok", Config{vectorBackend: "pinecone", pineconeKey: "k", pineconeHost: "h", vectorInferenceModel: "m", embeddingProvider: "openai", openaiAPIKey: "sk", embeddingProviderExplicit: true}, false, ""},
+		// §9.1 / §13.12 (F-9.1.3): a storage-only backend cannot self-embed even
+		// with a stray *_INFERENCE_MODEL set, so the embedder key stays required
+		// and a missing key is named even though an inference model is present.
+		{"storage-only with stray inference model still needs key", Config{vectorBackend: "pgvector", pgvectorDSN: "dsn", vectorInferenceModel: "stray", embeddingProvider: "openai"}, true, "OPENAI_API_KEY"},
 		{"unknown vector backend is not a missing-value error", Config{vectorBackend: "nope"}, false, ""},
 		{"empty embedding provider is intentional disable", Config{embeddingProvider: ""}, false, ""},
 		{"none selections", Config{vectorBackend: "none", objectStore: "none"}, false, ""},

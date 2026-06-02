@@ -78,6 +78,36 @@ func TestLoadConfig_ExplicitEmptyDisables(t *testing.T) {
 	}
 }
 
+// Spec: §9.1 / §4.7 (F-9.1.1) — embeddingProviderExplicit records whether the
+// operator chose a provider (env set, even to empty) versus inheriting the
+// per-mode default, so a self-embedding backend can tell an override from a
+// default.
+func TestLoadConfig_EmbeddingProviderExplicitFlag(t *testing.T) {
+	t.Run("defaulted is not explicit", func(t *testing.T) {
+		clearSearchEnv(t)
+		c := LoadConfig()
+		if c.embeddingProviderExplicit {
+			t.Errorf("embeddingProviderExplicit = true, want false (mode default applied)")
+		}
+	})
+	t.Run("explicit env is explicit", func(t *testing.T) {
+		clearSearchEnv(t)
+		t.Setenv("PODIUM_EMBEDDING_PROVIDER", "openai")
+		c := LoadConfig()
+		if !c.embeddingProviderExplicit {
+			t.Errorf("embeddingProviderExplicit = false, want true (explicit env)")
+		}
+	})
+	t.Run("explicit empty is explicit", func(t *testing.T) {
+		clearSearchEnv(t)
+		t.Setenv("PODIUM_EMBEDDING_PROVIDER", "")
+		c := LoadConfig()
+		if !c.embeddingProviderExplicit {
+			t.Errorf("embeddingProviderExplicit = false, want true (explicit empty disables)")
+		}
+	})
+}
+
 // Spec: §9.1 (F-9.1.5) — explicit env values keep precedence over the mode
 // defaults so an operator can run a managed backend in either mode.
 func TestLoadConfig_ExplicitBackendsWin(t *testing.T) {
