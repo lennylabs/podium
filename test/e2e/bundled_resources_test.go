@@ -254,6 +254,105 @@ func TestBundled_ProseReferenceEscapes(t *testing.T) {
 	}
 }
 
+// T-D-bundled-resources-6b (F-4.4.1) — a Markdown-link prose reference that
+// names another artifact by its canonical ID resolves against the visible
+// catalog, so lint passes with no lint.prose_reference diagnostic. spec: §4.4
+// line 348.
+func TestBundled_ProseReferenceResolvesArtifact(t *testing.T) {
+	t.Parallel()
+	ref := "finance/close-reporting/reconcile"
+	id := "finance/close-reporting/run-variance-analysis"
+	reg := writeRegistry(t, map[string]string{
+		id + "/ARTIFACT.md":  brSkillArtifact,
+		id + "/SKILL.md":     brSkillMD("run-variance-analysis", brVarianceDesc, "Run after [reconcile]("+ref+") completes.\n"),
+		ref + "/ARTIFACT.md": brSkillArtifact,
+		ref + "/SKILL.md":    brSkillMD("reconcile", "Reconcile the closed period.", "Reconcile the ledger.\n"),
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 0 {
+		t.Fatalf("lint exit=%d, want 0\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if strings.Contains(res.Stdout, "lint.prose_reference") {
+		t.Errorf("a reference to a catalog artifact should resolve:\n%s", res.Stdout)
+	}
+}
+
+// T-D-bundled-resources-6c (F-4.4.1) — a Markdown-link prose reference that
+// matches neither a bundled file nor any artifact in the catalog is an ingest
+// error naming the unresolved reference. spec: §4.4 lines 348-350.
+func TestBundled_ProseReferenceUnknownArtifactErrors(t *testing.T) {
+	t.Parallel()
+	id := "finance/close-reporting/run-variance-analysis"
+	reg := writeRegistry(t, map[string]string{
+		id + "/ARTIFACT.md": brSkillArtifact,
+		id + "/SKILL.md":    brSkillMD("run-variance-analysis", brVarianceDesc, "See [ghost](finance/close-reporting/does-not-exist).\n"),
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 1 {
+		t.Fatalf("lint exit=%d, want 1\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "lint.prose_reference") ||
+		!strings.Contains(res.Stdout, "finance/close-reporting/does-not-exist") {
+		t.Errorf("expected a prose_reference error naming the unresolved reference:\n%s", res.Stdout)
+	}
+}
+
+// T-D-bundled-resources-5d (F-4.4.3) — a URL reference whose HEAD returns a
+// non-200 2xx code (204 No Content) does not confirm the named resource, so
+// lint rejects it; a sibling 200 reference still passes. spec: §4.4 line 347.
+func TestBundled_ProseURLRejectsNonOK2xx(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/nc") {
+			w.WriteHeader(http.StatusNoContent) // 204
+			return
+		}
+		w.WriteHeader(http.StatusOK) // 200
+	}))
+	defer ts.Close()
+
+	id := "finance/close-reporting/run-variance-analysis"
+	reg := writeRegistry(t, map[string]string{
+		id + "/ARTIFACT.md": brSkillArtifact,
+		id + "/SKILL.md":    brSkillMD("run-variance-analysis", brVarianceDesc, "Live [a]("+ts.URL+"/ok). NoContent [b]("+ts.URL+"/nc).\n"),
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 1 {
+		t.Fatalf("lint exit=%d, want 1\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "lint.prose_reference") || !strings.Contains(res.Stdout, "/nc") {
+		t.Errorf("expected a prose_reference error naming the 204 URL:\n%s", res.Stdout)
+	}
+	if strings.Contains(res.Stdout, "/ok") {
+		t.Errorf("the 200 URL should pass; no diagnostic expected for it:\n%s", res.Stdout)
+	}
+}
+
+// T-D-bundled-resources-24d (F-4.4.2) — a document-level `source: imported`
+// declaration wraps the manifest's authored prose in a Claude Code
+// <untrusted-data> region at materialization, so a host can apply differential
+// trust to a body whose default provenance is external. spec: §4.4.2.
+func TestBundled_DocumentSourceImportedWrapsProse(t *testing.T) {
+	t.Parallel()
+	id := "finance/policy/payments-imported"
+	art := "---\ntype: command\nname: payments-imported\nversion: 1.0.0\ndescription: Imported payments policy.\nsource: imported\n---\n\nAggregated external policy text.\n"
+	reg := writeRegistry(t, map[string]string{id + "/ARTIFACT.md": art})
+	tgt := t.TempDir()
+	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
+		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	got := readFile(t, filepath.Join(tgt, ".claude/commands/payments-imported.md"))
+	if !strings.Contains(got, "<untrusted-data source=\"imported\">") {
+		t.Errorf("imported document source should wrap the prose:\n%s", got)
+	}
+	if !strings.Contains(got, "</untrusted-data>") {
+		t.Errorf("untrusted-data region not closed:\n%s", got)
+	}
+	if !strings.Contains(got, "Aggregated external policy text.") {
+		t.Errorf("authored prose dropped:\n%s", got)
+	}
+}
+
 // T-D-bundled-resources-7 — a bundled resource below the 256 KB inline cutoff is
 // returned inline in the load_artifact response. spec: §7.2.
 func TestBundled_InlineResourceBelowCutoff(t *testing.T) {

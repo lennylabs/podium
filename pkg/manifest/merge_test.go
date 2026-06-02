@@ -170,6 +170,32 @@ func TestMergeExtends_UnlistedChildOverrides(t *testing.T) {
 	}
 }
 
+// Spec: §4.4.2 (F-4.4.2) — the document-level `source:` provenance field
+// parses into Artifact.Source instead of being silently dropped, and follows
+// the default-for-unlisted merge rule (child overrides when set).
+func TestSource_ParseAndMerge(t *testing.T) {
+	t.Parallel()
+	src := []byte("---\ntype: context\nversion: 1.0.0\nsource: imported\n---\n\nbody\n")
+	got, err := ParseArtifact(src)
+	if err != nil {
+		t.Fatalf("ParseArtifact: %v", err)
+	}
+	if got.Source != "imported" {
+		t.Fatalf("source = %q, want %q", got.Source, "imported")
+	}
+
+	// Child overrides the parent's source.
+	merged := MergeExtends(Artifact{Source: "authored"}, Artifact{Source: "imported"})
+	if merged.Source != "imported" {
+		t.Errorf("merged source = %q, want child's %q", merged.Source, "imported")
+	}
+	// An unset child source inherits the parent's.
+	inherited := MergeExtends(Artifact{Source: "authored"}, Artifact{})
+	if inherited.Source != "authored" {
+		t.Errorf("inherited source = %q, want parent's %q", inherited.Source, "authored")
+	}
+}
+
 // SerializeArtifact is the inverse of ParseArtifact for structured fields:
 // a merged artifact round-trips through serialize → parse unchanged.
 func TestSerializeArtifact_RoundTrip(t *testing.T) {

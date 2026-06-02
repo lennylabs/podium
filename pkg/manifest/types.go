@@ -119,6 +119,12 @@ type Artifact struct {
 	// is overly strict"; listing lint.skill_ref_validate here silences
 	// that warning. Only advisory (non-error) rules honor the list.
 	LintSuppress []string `yaml:"lint_suppress,omitempty"`
+	// Source declares the document-level provenance of the manifest's
+	// prose (§4.4.2). The documented value is `authored`; a non-authored
+	// value (for example `imported`) marks the body's default trust region
+	// as untrusted, so adapters that support trust regions wrap the prose.
+	// Inline `<!-- begin imported ... -->` blocks override this per region.
+	Source string `yaml:"source,omitempty"`
 
 	// Caller-interpreted (§4.3).
 	MCPServers          []MCPServerRef        `yaml:"mcpServers,omitempty"`

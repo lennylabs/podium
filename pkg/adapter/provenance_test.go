@@ -190,6 +190,93 @@ func TestClaudeCode_RewritesProvenanceForNonSkillTypes(t *testing.T) {
 	}
 }
 
+// Spec: §4.4.2 (F-4.4.2) — a document-level `source:` that declares a
+// non-authored default provenance wraps the manifest's authored prose in an
+// <untrusted-data> region. The agent body keeps its frontmatter and gains the
+// region around the prose.
+func TestClaudeCode_DocumentSourceImportedWrapsProse(t *testing.T) {
+	t.Parallel()
+	art := []byte("---\ntype: agent\nversion: 1.0.0\nname: aggregate\nsource: imported\n---\n\nAggregated external knowledge.\n")
+	out, err := adapter.ClaudeCode{}.Adapt(context.Background(), adapter.Source{
+		ArtifactID:    "team/aggregate",
+		ArtifactBytes: art,
+	})
+	if err != nil {
+		t.Fatalf("Adapt: %v", err)
+	}
+	var body string
+	for _, f := range out {
+		if strings.HasSuffix(f.Path, "aggregate.md") {
+			body = string(f.Content)
+		}
+	}
+	if body == "" {
+		t.Fatalf("agent file not in output: %+v", out)
+	}
+	if !strings.Contains(body, "<untrusted-data source=\"imported\">") {
+		t.Errorf("document-level imported source did not wrap the prose:\n%s", body)
+	}
+	if !strings.Contains(body, "</untrusted-data>") {
+		t.Errorf("untrusted-data region not closed:\n%s", body)
+	}
+	if !strings.Contains(body, "Aggregated external knowledge.") {
+		t.Errorf("authored prose dropped:\n%s", body)
+	}
+	// The frontmatter is preserved and must not be wrapped.
+	if !strings.HasPrefix(body, "---\ntype: agent\n") {
+		t.Errorf("frontmatter should be preserved unwrapped:\n%s", body)
+	}
+}
+
+// Spec: §4.4.2 (F-4.4.2) — `source: authored` (the documented value) is the
+// trusted default, so the body is not wrapped. Only inline imported blocks, if
+// any, become <untrusted-data> regions.
+func TestClaudeCode_DocumentSourceAuthoredLeavesProseTrusted(t *testing.T) {
+	t.Parallel()
+	art := []byte("---\ntype: agent\nversion: 1.0.0\nname: aggregate\nsource: authored\n---\n\nMy own prose.\n")
+	out, err := adapter.ClaudeCode{}.Adapt(context.Background(), adapter.Source{
+		ArtifactID:    "team/aggregate",
+		ArtifactBytes: art,
+	})
+	if err != nil {
+		t.Fatalf("Adapt: %v", err)
+	}
+	for _, f := range out {
+		if strings.HasSuffix(f.Path, "aggregate.md") {
+			if strings.Contains(string(f.Content), "untrusted-data") {
+				t.Errorf("authored source should not wrap the prose:\n%s", f.Content)
+			}
+		}
+	}
+}
+
+// Spec: §4.4.2 (F-4.4.2) — for a skill the `source:` lives in ARTIFACT.md
+// while the prose lives in SKILL.md. An imported document source wraps the
+// SKILL.md prose, leaving its own frontmatter intact.
+func TestClaudeCode_DocumentSourceImportedWrapsSkillProse(t *testing.T) {
+	t.Parallel()
+	out, err := adapter.ClaudeCode{}.Adapt(context.Background(), adapter.Source{
+		ArtifactID:    "team/aggregate",
+		ArtifactBytes: []byte("---\ntype: skill\nversion: 1.0.0\nname: aggregate\nsource: imported\n---\n"),
+		SkillBytes:    []byte("---\nname: aggregate\ndescription: aggregate\n---\n\nImported skill prose.\n"),
+	})
+	if err != nil {
+		t.Fatalf("Adapt: %v", err)
+	}
+	var body string
+	for _, f := range out {
+		if strings.HasSuffix(f.Path, "SKILL.md") {
+			body = string(f.Content)
+		}
+	}
+	if !strings.Contains(body, "<untrusted-data source=\"imported\">") {
+		t.Errorf("skill prose not wrapped for imported document source:\n%s", body)
+	}
+	if !strings.HasPrefix(body, "---\nname: aggregate\n") {
+		t.Errorf("SKILL.md frontmatter should be preserved unwrapped:\n%s", body)
+	}
+}
+
 // Spec: §4.4.2 — bodies without provenance markers pass
 // through unchanged (no-op when there's nothing to rewrite).
 func TestClaudeCode_NoMarkersPassesThrough(t *testing.T) {

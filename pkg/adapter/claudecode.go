@@ -29,6 +29,10 @@ func (ClaudeCode) ID() string { return "claude-code" }
 // alphabetically for golden-file stability.
 func (c ClaudeCode) Adapt(ctx context.Context, src Source) ([]File, error) {
 	ty := frontmatterType(src.ArtifactBytes)
+	// §4.4.2 — the document-level source: declares the default trust region
+	// for the manifest's prose. For a skill it lives in ARTIFACT.md while the
+	// prose lives in SKILL.md, so it is read from ARTIFACT.md for every type.
+	source := documentSource(src.ArtifactBytes)
 	out := []File{}
 	name := lastSegmentClaude(src.ArtifactID)
 
@@ -45,7 +49,7 @@ func (c ClaudeCode) Adapt(ctx context.Context, src Source) ([]File, error) {
 			// §4.4.2 — rewrite imported provenance blocks into
 			// Claude Code <untrusted-data> regions so the host
 			// can apply differential trust at read time.
-			out = append(out, File{Path: path.Join(skillRoot, "SKILL.md"), Content: rewriteProvenanceForClaude(skill)})
+			out = append(out, File{Path: path.Join(skillRoot, "SKILL.md"), Content: rewriteProvenanceForClaude(skill, source)})
 		}
 		for rel, data := range src.Resources {
 			out = append(out, File{Path: path.Join(skillRoot, rel), Content: data})
@@ -66,12 +70,12 @@ func (c ClaudeCode) Adapt(ctx context.Context, src Source) ([]File, error) {
 		// regions (§4.4.2).
 		out = append(out, File{
 			Path:    path.Join(".claude", "rules", name+".md"),
-			Content: rewriteProvenanceForClaude(claudeRuleBody(src)),
+			Content: rewriteProvenanceForClaude(claudeRuleBody(src), source),
 		})
 	case "agent":
 		out = append(out, File{
 			Path:    path.Join(".claude", "agents", name+".md"),
-			Content: rewriteProvenanceForClaude(src.ArtifactBytes),
+			Content: rewriteProvenanceForClaude(src.ArtifactBytes, source),
 		})
 		for rel, data := range src.Resources {
 			out = append(out, File{
@@ -82,7 +86,7 @@ func (c ClaudeCode) Adapt(ctx context.Context, src Source) ([]File, error) {
 	case "command":
 		out = append(out, File{
 			Path:    path.Join(".claude", "commands", name+".md"),
-			Content: rewriteProvenanceForClaude(src.ArtifactBytes),
+			Content: rewriteProvenanceForClaude(src.ArtifactBytes, source),
 		})
 		out = appendResources(out, path.Join(".podium", "resources", src.ArtifactID), src.Resources)
 	case "context":
@@ -99,7 +103,7 @@ func (c ClaudeCode) Adapt(ctx context.Context, src Source) ([]File, error) {
 		// layout.
 		out = append(out, File{
 			Path:    path.Join(".claude", "podium", src.ArtifactID, "ARTIFACT.md"),
-			Content: rewriteProvenanceForClaude(src.ArtifactBytes),
+			Content: rewriteProvenanceForClaude(src.ArtifactBytes, source),
 		})
 		out = appendResources(out, path.Join(".claude", "podium", src.ArtifactID), src.Resources)
 	}
@@ -128,6 +132,29 @@ func frontmatterType(src []byte) string {
 		return ""
 	}
 	return holder.Type
+}
+
+// documentSource extracts the §4.4.2 document-level `source:` provenance
+// field from the leading frontmatter of an ARTIFACT.md, using the same
+// lightweight parse as frontmatterType. Returns "" when absent or
+// unparseable.
+func documentSource(src []byte) string {
+	s := string(src)
+	if !strings.HasPrefix(s, "---\n") && !strings.HasPrefix(s, "---\r\n") {
+		return ""
+	}
+	end := strings.Index(s[3:], "\n---")
+	if end < 0 {
+		return ""
+	}
+	fm := s[3 : 3+end]
+	var holder struct {
+		Source string `yaml:"source"`
+	}
+	if err := yaml.Unmarshal([]byte(fm), &holder); err != nil {
+		return ""
+	}
+	return holder.Source
 }
 
 func lastSegmentClaude(p string) string {

@@ -120,6 +120,12 @@ func MergeExtends(parent, child Artifact) Artifact {
 	if len(child.LintSuppress) > 0 {
 		out.LintSuppress = child.LintSuppress
 	}
+	// source: document-level provenance (§4.4.2). Not in the §4.6 table, so
+	// it follows the default-for-unlisted rule: the child's value overrides
+	// when set, since out already carries the parent's.
+	if child.Source != "" {
+		out.Source = child.Source
+	}
 	// The merged artifact represents the child; carry the child's extends
 	// reference and body. Callers that serve a resolved manifest strip
 	// extends to preserve §4.6 hidden-parent privacy.
