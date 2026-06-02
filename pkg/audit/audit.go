@@ -42,11 +42,19 @@ const (
 	EventLayerUserRegistered   EventType = "layer.user_registered"
 	EventAdminGranted          EventType = "admin.granted"
 	EventVisibilityDenied      EventType = "visibility.denied"
-	EventFreezeBreakGlass      EventType = "freeze.break_glass"
-	EventUserErased            EventType = "user.erased"
-	EventReadOnlyEntered       EventType = "registry.read_only_entered"
-	EventReadOnlyExited        EventType = "registry.read_only_exited"
-	EventAuditAnchored         EventType = "audit.anchored"
+	// EventAdminVisibilityOverride records a §4.7.2 admin diagnostic read
+	// that overrode per-layer visibility ("View any layer's contents for
+	// diagnostic purposes (override visibility; the override is itself
+	// audited)"). The §8.1 table is non-exhaustive (additional stable types
+	// are permitted); this is the registry event that makes the override
+	// auditable. Caller is the acting admin; Target is the artifact ID for a
+	// load or the query for a search.
+	EventAdminVisibilityOverride EventType = "admin.visibility_override"
+	EventFreezeBreakGlass        EventType = "freeze.break_glass"
+	EventUserErased              EventType = "user.erased"
+	EventReadOnlyEntered         EventType = "registry.read_only_entered"
+	EventReadOnlyExited          EventType = "registry.read_only_exited"
+	EventAuditAnchored           EventType = "audit.anchored"
 	// EventAuditAnchorFailed records a failed transparency-anchor attempt
 	// (signer outage, network blip, or sink write error) so operators
 	// monitoring the audit log, and SIEM mirrors, see anchoring failures

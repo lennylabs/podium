@@ -667,6 +667,15 @@ func (s *Server) handleSearchArtifacts(w http.ResponseWriter, r *http.Request) {
 	if t := q.Get("tags"); t != "" {
 		tags = splitCSV(t)
 	}
+	// spec: §4.7.2 — as_admin=1 requests the admin diagnostic visibility
+	// override on search, gated the same way as load_artifact.
+	asAdmin := isTrue(q.Get("as_admin"))
+	if asAdmin {
+		if err := s.requireAdmin(r); err != nil {
+			writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
+			return
+		}
+	}
 	res, err := s.core.SearchArtifacts(r.Context(), s.identity(r), core.SearchArtifactsOptions{
 		Query: q.Get("query"),
 		Type:  q.Get("type"),
@@ -675,6 +684,7 @@ func (s *Server) handleSearchArtifacts(w http.ResponseWriter, r *http.Request) {
 		TopK:  atoiOr(q.Get("top_k"), 10),
 		// spec: §7.6 — search_artifacts accepts session_id.
 		SessionID: q.Get("session_id"),
+		AsAdmin:   asAdmin,
 	})
 	if err != nil {
 		s.writeCoreError(w, err)
@@ -815,8 +825,20 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "id is required")
 		return
 	}
+	// spec: §4.7.2 — as_admin=1 requests the admin diagnostic visibility
+	// override. Gate it at the handler so a non-admin caller gets a 403
+	// auth.forbidden rather than a silent normal-visibility load; core
+	// re-checks the grant before bypassing visibility.
+	asAdmin := isTrue(q.Get("as_admin"))
+	if asAdmin {
+		if err := s.requireAdmin(r); err != nil {
+			writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
+			return
+		}
+	}
 	res, err := s.core.LoadArtifact(r.Context(), s.identity(r), id, core.LoadArtifactOptions{
 		Version: q.Get("version"),
+		AsAdmin: asAdmin,
 		// §5 load_artifact "Optional session_id"; §4.7.6 — within a
 		// session the first `latest` lookup pins, so a later same-id
 		// lookup resolves to the same version even after a newer ingest.
@@ -1095,6 +1117,10 @@ func (s *Server) identity(r *http.Request) layer.Identity {
 
 func (s *Server) writeCoreError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, core.ErrForbidden):
+		// spec: §4.7.2 / §6.10 — an admin-gated operation (e.g. the
+		// diagnostic visibility override) invoked without the admin role.
+		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
 	case errors.Is(err, core.ErrInvalidArgument):
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
 	case errors.Is(err, core.ErrDomainNotFound):
@@ -1165,6 +1191,13 @@ func atoiOr(s string, def int) int {
 		return def
 	}
 	return n
+}
+
+// isTrue reports whether a query-string flag is set to an affirmative
+// value. The §4.7.2 as_admin override accepts both "1" (the documented
+// form) and "true" for symmetry with the other boolean query flags.
+func isTrue(s string) bool {
+	return s == "1" || s == "true"
 }
 
 func splitCSV(s string) []string {

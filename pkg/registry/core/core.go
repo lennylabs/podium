@@ -1035,6 +1035,12 @@ type SearchArtifactsOptions struct {
 	// IncludeDeprecated opts deprecated artifacts back into the
 	// result set. Default search excludes them per §4.7.4.
 	IncludeDeprecated bool
+	// AsAdmin requests the §4.7.2 admin diagnostic override: the search
+	// ignores per-layer visibility so an admin can enumerate artifacts in
+	// layers their own identity cannot otherwise see. The caller must hold
+	// the admin role; the override is itself audited via
+	// admin.visibility_override.
+	AsAdmin bool
 }
 
 // SearchResult is the common envelope for both search functions.
@@ -1074,7 +1080,18 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 		opts.TopK = 10
 	}
 
-	visible, err := r.visibleManifests(ctx, id)
+	// spec: §4.7.2 — an admin diagnostic search overrides per-layer
+	// visibility (audited inside the helper); otherwise it enumerates only
+	// the caller's effective view.
+	var (
+		visible []store.ManifestRecord
+		err     error
+	)
+	if opts.AsAdmin {
+		visible, err = r.adminVisibleManifests(ctx, id, opts.Query)
+	} else {
+		visible, err = r.visibleManifests(ctx, id)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1330,6 +1347,12 @@ type LoadArtifactOptions struct {
 	// (§4.7.6). The first latest lookup within a session is recorded
 	// and reused for all subsequent same-id lookups in the session.
 	SessionID string
+	// AsAdmin requests the §4.7.2 admin diagnostic override: the read
+	// ignores per-layer visibility so an admin can inspect an artifact in
+	// a layer their own identity cannot otherwise see. The caller must hold
+	// the admin role (adminVisibleManifests re-checks); the override is
+	// itself audited via admin.visibility_override.
+	AsAdmin bool
 }
 
 // LoadArtifact returns the manifest body. When the resolved manifest
@@ -1358,7 +1381,15 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 		}
 		r.emit(ctx, ev)
 	}()
-	visible, err := r.visibleManifests(ctx, id)
+	// spec: §4.7.2 — an admin diagnostic load overrides per-layer
+	// visibility (the override is itself audited inside the helper);
+	// otherwise the read sees only the caller's effective view.
+	var visible []store.ManifestRecord
+	if opts.AsAdmin {
+		visible, err = r.adminVisibleManifests(ctx, id, artifactID)
+	} else {
+		visible, err = r.visibleManifests(ctx, id)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1779,6 +1810,31 @@ func (r *Registry) visibleManifests(ctx context.Context, id layer.Identity) ([]s
 		}
 	}
 	return applyReadScope(out, scopes), nil
+}
+
+// adminVisibleManifests returns every manifest in the tenant for a §4.7.2
+// admin diagnostic read that overrides per-layer visibility. The caller
+// must hold the admin role; a non-admin (or public-mode) identity is
+// rejected with ErrForbidden so the bypass cannot be reached without the
+// grant. The override is itself audited via admin.visibility_override
+// before any record is returned, satisfying the spec's "the override is
+// itself audited" clause. OAuth read scopes (§6.3.1) still narrow the
+// surface, so a scoped admin token does not silently widen its read grant.
+func (r *Registry) adminVisibleManifests(ctx context.Context, id layer.Identity, target string) ([]store.ManifestRecord, error) {
+	if err := r.AdminAuthorize(ctx, id); err != nil {
+		return nil, err
+	}
+	r.emit(ctx, AuditEvent{
+		Type:    "admin.visibility_override",
+		Caller:  callerOf(id),
+		Target:  target,
+		Context: map[string]string{"override": "visibility"},
+	})
+	all, err := r.store.ListManifests(ctx, r.tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	return applyReadScope(all, layer.ParseScopes(id.Scopes)), nil
 }
 
 // applyReadScope narrows a visible-manifest set to the records the

@@ -629,16 +629,14 @@ func Run() error {
 		return fmt.Errorf("open store: %w", err)
 	}
 
-	// Standalone bootstrap: ensure the default tenant exists so
-	// initial requests don't fail on missing-tenant lookups (§13.10
-	// auto-bootstrap). The §3.5 expose_scope_preview gate is seeded from
-	// config at creation; a nil pointer leaves the default (true).
-	const tenantID = "default"
-	_ = st.CreateTenant(context.Background(), store.Tenant{
-		ID:                 tenantID,
-		Name:               tenantID,
-		ExposeScopePreview: cfg.exposeScopePreview,
-	})
+	// Standalone bootstrap: ensure the bootstrapped org exists so initial
+	// requests don't fail on missing-tenant lookups (§13.10 auto-bootstrap).
+	// spec: §4.7.1 — the org ID is a UUID while "default" stays the
+	// human-readable name; the deterministic UUID keeps the ID stable across
+	// restarts so persisted tenant-scoped rows are not orphaned. Everything
+	// below threads this tenantID as the org. CreateTenant is idempotent, so
+	// a store fault is tolerated (the ID is still returned).
+	tenantID, _ := bootstrapDefaultTenant(context.Background(), st, cfg.exposeScopePreview)
 
 	// §13.1.1 evaluation-stack bootstrap: seed the configured admin users
 	// for the default tenant so the documented `docker compose up` →
