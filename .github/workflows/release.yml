@@ -356,7 +356,7 @@ jobs:
             echo "No CHANGELOG entry for ${VERSION}; falling back to tag name." >&2
             echo "Release ${TAG}" > release-notes.md
           fi
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           body_path: release-notes.md
