@@ -21,6 +21,7 @@ type Memory struct {
 type memVec struct {
 	id, ver string
 	vec     []float32
+	model   string
 }
 
 // NewMemory returns an empty in-memory backend with the given
@@ -87,6 +88,79 @@ func (m *Memory) Query(_ context.Context, tenantID string, vec []float32, topK i
 		out = out[:topK]
 	}
 	return out, nil
+}
+
+// PutModel stores or replaces the vector for (tenant, id, version) tagged with
+// modelID (§4.7 model versioning). It does not enforce the configured dimension
+// so a model switch can store a different-dimension vector transiently; queries
+// restricted to a single model never mix dimensions.
+func (m *Memory) PutModel(_ context.Context, tenantID, artifactID, version string, vec []float32, modelID string) error {
+	if tenantID == "" || artifactID == "" || version == "" {
+		return ErrInvalidArgument
+	}
+	if len(vec) == 0 {
+		return ErrDimensionMismatch
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	bucket, ok := m.rows[tenantID]
+	if !ok {
+		bucket = map[string]memVec{}
+		m.rows[tenantID] = bucket
+	}
+	cp := make([]float32, len(vec))
+	copy(cp, vec)
+	bucket[memKey(artifactID, version)] = memVec{id: artifactID, ver: version, vec: cp, model: modelID}
+	return nil
+}
+
+// QueryModel returns the topK nearest rows whose model is modelID or empty,
+// skipping rows whose stored dimension differs from the query vector so a
+// transient mixed-dimension state never produces a meaningless score.
+func (m *Memory) QueryModel(_ context.Context, tenantID string, vec []float32, topK int, modelID string) ([]Match, error) {
+	if tenantID == "" || topK < 1 || len(vec) == 0 {
+		return nil, ErrInvalidArgument
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	bucket := m.rows[tenantID]
+	if len(bucket) == 0 {
+		return nil, nil
+	}
+	out := make([]Match, 0, len(bucket))
+	for _, row := range bucket {
+		if modelID != "" && row.model != "" && row.model != modelID {
+			continue
+		}
+		if len(row.vec) != len(vec) {
+			continue
+		}
+		out = append(out, Match{ArtifactID: row.id, Version: row.ver, Distance: cosineDistance(vec, row.vec)})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Distance < out[j].Distance })
+	if len(out) > topK {
+		out = out[:topK]
+	}
+	return out, nil
+}
+
+// PurgeModelExcept removes every row for the tenant whose model differs from
+// modelID, returning the count removed. An empty modelID purges nothing.
+func (m *Memory) PurgeModelExcept(_ context.Context, tenantID, modelID string) (int, error) {
+	if modelID == "" {
+		return 0, nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	bucket := m.rows[tenantID]
+	n := 0
+	for k, row := range bucket {
+		if row.model != modelID {
+			delete(bucket, k)
+			n++
+		}
+	}
+	return n, nil
 }
 
 // Delete removes the vector for (tenant, id, version). Missing key

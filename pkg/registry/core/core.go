@@ -235,6 +235,12 @@ func (r *Registry) queryVector(ctx context.Context, query string, topK int) ([]v
 	if err != nil || len(vecs) == 0 {
 		return nil, fmt.Errorf("embed: %w", err)
 	}
+	// §4.7 model versioning: on a model-versioned backend, restrict results to
+	// the currently-configured model so a transient mixed-model state during a
+	// re-embed never scores the stale model's vectors.
+	if mv, ok := vector.ModelVersionedOf(r.vector); ok {
+		return mv.QueryModel(ctx, r.tenantID, vecs[0], topK, r.embedder.Model())
+	}
 	return r.vector.Query(ctx, r.tenantID, vecs[0], topK)
 }
 
@@ -258,6 +264,14 @@ func (r *Registry) upsertVector(ctx context.Context, tenantID, artifactID, versi
 	}
 	if len(vecs) != 1 {
 		return fmt.Errorf("embed: expected 1 vector, got %d", len(vecs))
+	}
+	// §4.7 model versioning: tag the row with the embedding model so a query
+	// during a later model switch can restrict to the current model.
+	if mv, ok := vector.ModelVersionedOf(r.vector); ok {
+		if err := mv.PutModel(ctx, tenantID, artifactID, version, vecs[0], r.embedder.Model()); err != nil {
+			return fmt.Errorf("vector put: %w", err)
+		}
+		return nil
 	}
 	if err := r.vector.Put(ctx, tenantID, artifactID, version, vecs[0]); err != nil {
 		return fmt.Errorf("vector put: %w", err)

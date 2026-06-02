@@ -70,6 +70,9 @@ func (p *PgVector) applySchema() error {
 		)`, p.dim),
 		`CREATE INDEX IF NOT EXISTS idx_vec_artifacts_tenant
 			ON vec_artifacts(tenant_id)`,
+		// §4.7 model versioning: tag each row with the embedding model. ADD
+		// COLUMN IF NOT EXISTS migrates a table created before this column.
+		`ALTER TABLE vec_artifacts ADD COLUMN IF NOT EXISTS model_id TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, s := range stmts {
 		if _, err := p.db.Exec(s); err != nil {
@@ -138,6 +141,79 @@ func (p *PgVector) Query(ctx context.Context, tenantID string, vec []float32, to
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// PutModel upserts the embedding tagged with modelID (§4.7 model versioning).
+func (p *PgVector) PutModel(ctx context.Context, tenantID, artifactID, version string, vec []float32, modelID string) error {
+	if tenantID == "" || artifactID == "" || version == "" {
+		return ErrInvalidArgument
+	}
+	if err := validateDim(vec, p.dim); err != nil {
+		return err
+	}
+	literal := vecLiteral(vec)
+	_, err := p.db.ExecContext(ctx, `
+		INSERT INTO vec_artifacts (tenant_id, artifact_id, version, embedding, model_id)
+		VALUES ($1, $2, $3, $4::vector, $5)
+		ON CONFLICT (tenant_id, artifact_id, version) DO UPDATE
+			SET embedding = EXCLUDED.embedding, model_id = EXCLUDED.model_id`,
+		tenantID, artifactID, version, literal, modelID)
+	return err
+}
+
+// QueryModel returns the topK nearest rows whose model_id is modelID or empty,
+// so a model switch never scores the stale model's vectors.
+func (p *PgVector) QueryModel(ctx context.Context, tenantID string, vec []float32, topK int, modelID string) ([]Match, error) {
+	if tenantID == "" || topK < 1 {
+		return nil, ErrInvalidArgument
+	}
+	if err := validateDim(vec, p.dim); err != nil {
+		return nil, err
+	}
+	literal := vecLiteral(vec)
+	q := `
+		SELECT artifact_id, version, embedding <=> $1::vector AS distance
+		FROM vec_artifacts
+		WHERE tenant_id = $2`
+	args := []any{literal, tenantID}
+	if modelID != "" {
+		q += ` AND (model_id = $3 OR model_id = '')`
+		args = append(args, modelID)
+	}
+	q += ` ORDER BY embedding <=> $1::vector ASC LIMIT $` + strconv.Itoa(len(args)+1)
+	args = append(args, topK)
+	rows, err := p.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
+	}
+	defer rows.Close()
+	var out []Match
+	for rows.Next() {
+		var m Match
+		var dist float64
+		if err := rows.Scan(&m.ArtifactID, &m.Version, &dist); err != nil {
+			return nil, err
+		}
+		m.Distance = float32(dist)
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// PurgeModelExcept deletes rows whose model_id differs from modelID. An empty
+// modelID purges nothing.
+func (p *PgVector) PurgeModelExcept(ctx context.Context, tenantID, modelID string) (int, error) {
+	if modelID == "" {
+		return 0, nil
+	}
+	res, err := p.db.ExecContext(ctx, `
+		DELETE FROM vec_artifacts WHERE tenant_id = $1 AND model_id <> $2`,
+		tenantID, modelID)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
 }
 
 // Delete removes the (tenant, id, version) vector. Missing key is a

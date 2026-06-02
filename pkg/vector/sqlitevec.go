@@ -101,6 +101,7 @@ func (v *SQLiteVec) applySchema() error {
 			artifact_id TEXT NOT NULL,
 			version TEXT NOT NULL,
 			rowid INTEGER NOT NULL,
+			model_id TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY (tenant_id, artifact_id, version)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_vec_index_rowid
@@ -110,6 +111,13 @@ func (v *SQLiteVec) applySchema() error {
 		if _, err := v.db.Exec(s); err != nil {
 			return fmt.Errorf("sqlite-vec schema: %w (statement: %s)", err, s)
 		}
+	}
+	// §4.7 model versioning: add model_id to a vec_index created before this
+	// column existed. SQLite has no ADD COLUMN IF NOT EXISTS, so ignore the
+	// duplicate-column error on an already-migrated database.
+	if _, err := v.db.Exec(`ALTER TABLE vec_index ADD COLUMN model_id TEXT NOT NULL DEFAULT ''`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("sqlite-vec schema: add model_id: %w", err)
 	}
 	return nil
 }
@@ -221,6 +229,145 @@ func (v *SQLiteVec) Query(ctx context.Context, tenantID string, vec []float32, t
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// PutModel upserts the embedding and tags the index row with modelID (§4.7
+// model versioning). The fixed vec0 dimension is enforced as for Put; a genuine
+// dimension change still requires a full reembed into a fresh store.
+func (v *SQLiteVec) PutModel(ctx context.Context, tenantID, artifactID, version string, vec []float32, modelID string) error {
+	if tenantID == "" || artifactID == "" || version == "" {
+		return ErrInvalidArgument
+	}
+	if err := validateDim(vec, v.dim); err != nil {
+		return err
+	}
+	blob := serialize(vec)
+	tx, err := v.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	row := tx.QueryRowContext(ctx, `
+		SELECT rowid FROM vec_index
+		WHERE tenant_id = ? AND artifact_id = ? AND version = ?`,
+		tenantID, artifactID, version)
+	var rowid int64
+	switch err := row.Scan(&rowid); err {
+	case nil:
+		if _, err := tx.ExecContext(ctx, `UPDATE vec_artifacts SET embedding = ? WHERE rowid = ?`, blob, rowid); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE vec_index SET model_id = ? WHERE rowid = ?`, modelID, rowid); err != nil {
+			return err
+		}
+	case sql.ErrNoRows:
+		res, err := tx.ExecContext(ctx, `INSERT INTO vec_artifacts (embedding) VALUES (?)`, blob)
+		if err != nil {
+			return err
+		}
+		newRowid, err := res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO vec_index (tenant_id, artifact_id, version, rowid, model_id)
+			VALUES (?, ?, ?, ?, ?)`,
+			tenantID, artifactID, version, newRowid, modelID); err != nil {
+			return err
+		}
+	default:
+		return err
+	}
+	return tx.Commit()
+}
+
+// QueryModel runs the KNN query restricted to rows whose model_id is modelID or
+// empty, so a query during a model switch never scores the stale model's rows.
+func (v *SQLiteVec) QueryModel(ctx context.Context, tenantID string, vec []float32, topK int, modelID string) ([]Match, error) {
+	if tenantID == "" || topK < 1 {
+		return nil, ErrInvalidArgument
+	}
+	if err := validateDim(vec, v.dim); err != nil {
+		return nil, err
+	}
+	blob := serialize(vec)
+	overK := topK * 10
+	if overK > 1000 {
+		overK = 1000
+	}
+	q := fmt.Sprintf(`
+		SELECT vi.artifact_id, vi.version, va.distance
+		FROM (
+			SELECT rowid, distance FROM vec_artifacts
+			WHERE embedding MATCH ? AND k = %d
+		) AS va
+		JOIN vec_index vi ON vi.rowid = va.rowid
+		WHERE vi.tenant_id = ?`, overK)
+	args := []any{blob, tenantID}
+	if modelID != "" {
+		q += ` AND (vi.model_id = ? OR vi.model_id = '')`
+		args = append(args, modelID)
+	}
+	q += ` ORDER BY va.distance ASC LIMIT ?`
+	args = append(args, topK)
+	rows, err := v.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
+	}
+	defer rows.Close()
+	var out []Match
+	for rows.Next() {
+		var m Match
+		var dist float64
+		if err := rows.Scan(&m.ArtifactID, &m.Version, &dist); err != nil {
+			return nil, err
+		}
+		m.Distance = float32(dist)
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// PurgeModelExcept deletes index rows (and their vec0 rows) whose model_id
+// differs from modelID. An empty modelID purges nothing.
+func (v *SQLiteVec) PurgeModelExcept(ctx context.Context, tenantID, modelID string) (int, error) {
+	if modelID == "" {
+		return 0, nil
+	}
+	tx, err := v.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.QueryContext(ctx, `
+		SELECT rowid FROM vec_index WHERE tenant_id = ? AND model_id <> ?`,
+		tenantID, modelID)
+	if err != nil {
+		return 0, err
+	}
+	var rowids []int64
+	for rows.Next() {
+		var r int64
+		if err := rows.Scan(&r); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		rowids = append(rowids, r)
+	}
+	rows.Close()
+	for _, r := range rowids {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM vec_artifacts WHERE rowid = ?`, r); err != nil {
+			return 0, err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM vec_index WHERE rowid = ?`, r); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return len(rowids), nil
 }
 
 // Delete removes the (tenant, id, version) row from both the index

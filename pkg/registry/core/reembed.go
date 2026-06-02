@@ -3,11 +3,13 @@ package core
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	domainpkg "github.com/lennylabs/podium/pkg/domain"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/vector"
 )
 
 // ReembedResult reports what `Reembed` did across the tenant. Used
@@ -108,8 +110,20 @@ func (r *Registry) Reembed(ctx context.Context, opts ReembedOptions) (*ReembedRe
 		}
 	}
 
+	// §4.7 model versioning: the model the rows are being (re-)tagged with, used
+	// for the stale-row purge and the progress events. Empty for a
+	// self-embedding backend (it carries no local model id).
+	modelID := ""
+	if r.embedder != nil {
+		modelID = r.embedder.Model()
+	}
+
 	res := &ReembedResult{Total: len(manifests)}
-	for _, m := range manifests {
+	// §4.7 "emits embedding.reembed_in_progress events for progress monitoring":
+	// announce the pass, then emit periodic progress so an operator can watch a
+	// long re-embed advance.
+	r.emitReembedProgress(ctx, 0, res.Total, modelID)
+	for i, m := range manifests {
 		if opts.OnlyIfMissing && present[m.ArtifactID+"@"+m.Version] {
 			continue
 		}
@@ -122,6 +136,9 @@ func (r *Registry) Reembed(ctx context.Context, opts ReembedOptions) (*ReembedRe
 			continue
 		}
 		res.Succeeded++
+		if (i+1)%50 == 0 {
+			r.emitReembedProgress(ctx, i+1, res.Total, modelID)
+		}
 	}
 
 	// §4.7 "Domain embeddings": re-embed every DOMAIN.md projection so
@@ -143,7 +160,42 @@ func (r *Registry) Reembed(ctx context.Context, opts ReembedOptions) (*ReembedRe
 			res.Succeeded++
 		}
 	}
+
+	// §4.7 "Once re-embedding completes, stale-dimension rows are purged." A
+	// full pass (every visible artifact re-tagged with the current model) drops
+	// the previous model's rows on a model-versioned backend. A partial pass
+	// (--only-missing or --since) leaves them, since it did not re-tag the whole
+	// catalogue.
+	if modelID != "" && !opts.OnlyIfMissing && opts.Since.IsZero() {
+		if mv, ok := vector.ModelVersionedOf(r.vector); ok {
+			if purged, err := mv.PurgeModelExcept(ctx, r.tenantID, modelID); err == nil && purged > 0 {
+				r.emit(ctx, AuditEvent{
+					Type:    "embedding.reembed_purged",
+					Caller:  "system",
+					Target:  r.tenantID,
+					Context: map[string]string{"purged": strconv.Itoa(purged), "model": modelID},
+				})
+			}
+		}
+	}
+	r.emitReembedProgress(ctx, res.Succeeded, res.Total, modelID)
 	return res, nil
+}
+
+// emitReembedProgress fires an embedding.reembed_in_progress audit event with
+// the done/total counts and the target model so operators can monitor a long
+// re-embed (§4.7). A nil audit emitter makes it a no-op.
+func (r *Registry) emitReembedProgress(ctx context.Context, done, total int, modelID string) {
+	r.emit(ctx, AuditEvent{
+		Type:   "embedding.reembed_in_progress",
+		Caller: "system",
+		Target: r.tenantID,
+		Context: map[string]string{
+			"done":  strconv.Itoa(done),
+			"total": strconv.Itoa(total),
+			"model": modelID,
+		},
+	})
 }
 
 // ReembedOne re-embeds a single (artifact_id, version). Used by the
