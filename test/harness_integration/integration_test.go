@@ -155,14 +155,15 @@ func scopedEnv(home string, extra map[string]string) []string {
 // harness with no non-interactive config command leaves mcpProbe nil and is
 // skipped by Tier A.
 type driver struct {
-	harness   string
-	bin       string
-	version   []string
-	mcpProbe  []string                            // args that list configured MCP servers; nil => no probe
-	server    string                              // server name expected in the probe output
-	extraEnv  func(home string) map[string]string // harness-specific config-dir redirects
-	agentExec func(prompt string) []string        // Tier C headless prompt; nil => no agent smoke
-	keyEnv    string                              // API-key env var required for the agent smoke
+	harness    string
+	bin        string
+	version    []string
+	mcpProbe   []string                            // args that list configured MCP servers; nil => no probe
+	server     string                              // server name expected in the probe output
+	skipReason string                              // why Tier A skips when mcpProbe is nil
+	extraEnv   func(home string) map[string]string // harness-specific config-dir redirects
+	agentExec  func(prompt string) []string        // Tier C headless prompt; nil => no agent smoke
+	keyEnv     string                              // API-key env var required for the agent smoke
 }
 
 var drivers = []driver{
@@ -207,9 +208,22 @@ var drivers = []driver{
 		agentExec: func(prompt string) []string { return []string{"run", prompt} },
 		keyEnv:    "ANTHROPIC_API_KEY",
 	},
+	{
+		// The Cursor CLI agent (cursor-agent). Its `mcp list` reflects only
+		// approved/connected servers (see the `mcp login` / `disable` approval
+		// commands), not the raw .cursor/mcp.json Podium writes, so it is not a
+		// pure config-accept probe. Cursor is exercised by the Tier C agent run,
+		// which loads the materialized .cursor/rules/*.mdc natively; `--print`
+		// is cursor-agent's headless mode (needs CURSOR_API_KEY / login).
+		harness:    "cursor",
+		bin:        "cursor-agent",
+		version:    []string{"--version"},
+		skipReason: "cursor-agent mcp list reflects approved servers, not raw .cursor/mcp.json; Cursor is covered by the Tier C agent run over .cursor/rules/*.mdc",
+		agentExec:  func(prompt string) []string { return []string{"--print", "--output-format", "text", prompt} },
+		keyEnv:     "CURSOR_API_KEY",
+	},
 	// IDE / web / no-MCP harnesses: no non-interactive config probe. Listed so
 	// the suite reports them explicitly rather than silently omitting them.
-	{harness: "cursor", bin: "cursor"},
 	{harness: "claude-desktop", bin: "claude"},
 	{harness: "claude-cowork", bin: ""},
 	{harness: "pi", bin: "pi"},
@@ -225,9 +239,6 @@ func TestHarnessConfigAccept(t *testing.T) {
 	for _, d := range drivers {
 		d := d
 		t.Run(d.harness, func(t *testing.T) {
-			if d.mcpProbe == nil {
-				t.Skipf("%s: no non-interactive MCP-config probe (IDE/web/no-MCP harness)", d.harness)
-			}
 			if d.bin == "" {
 				t.Skipf("%s: no harness binary", d.harness)
 			}
@@ -235,7 +246,6 @@ func TestHarnessConfigAccept(t *testing.T) {
 				t.Skipf("%s: binary %q not installed", d.harness, d.bin)
 			}
 
-			project := syncProject(t, d.harness, mcpServerRegistry)
 			home := t.TempDir()
 			var extra map[string]string
 			if d.extraEnv != nil {
@@ -243,12 +253,22 @@ func TestHarnessConfigAccept(t *testing.T) {
 			}
 			env := scopedEnv(home, extra)
 
+			// Record the harness version even when there is no config probe, so
+			// the format the suite targets is pinned to a concrete version.
 			if len(d.version) > 0 {
-				if v, ok := runExternal(t, project, env, 30*time.Second, d.bin, d.version...); ok {
+				if v, ok := runExternal(t, home, env, 30*time.Second, d.bin, d.version...); ok {
 					t.Logf("%s version: %s", d.bin, strings.TrimSpace(v.stdout+v.stderr))
 				}
 			}
+			if d.mcpProbe == nil {
+				reason := d.skipReason
+				if reason == "" {
+					reason = "no non-interactive MCP-config probe (IDE/web/no-MCP harness)"
+				}
+				t.Skipf("%s: %s", d.harness, reason)
+			}
 
+			project := syncProject(t, d.harness, mcpServerRegistry)
 			res, ok := runExternal(t, project, env, 60*time.Second, d.bin, d.mcpProbe...)
 			if !ok {
 				t.Skipf("%s: binary %q not installed", d.harness, d.bin)

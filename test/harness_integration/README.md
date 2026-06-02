@@ -51,7 +51,7 @@ PODIUM_HARNESS_AGENT=1 ANTHROPIC_API_KEY=… OPENAI_API_KEY=… GEMINI_API_KEY=�
 | codex | `codex mcp list` | `codex exec` | Candidate command; verify against the installed `codex --help`. |
 | gemini | `gemini mcp list` | `gemini -p` | Candidate command; verify against the installed `gemini --help`. |
 | opencode | (none yet) | `opencode run` | Confirm whether OpenCode exposes a non-interactive MCP-list command; until then the config probe skips. |
-| cursor | — | — | IDE; no non-interactive config command. Skipped. |
+| cursor | (approval-gated) | `cursor-agent --print` | **Checked** against `cursor-agent` 2025.09.18: `cursor-agent mcp list` reflects only *approved* servers (it has `mcp login`/`disable` approval commands), not the raw `.cursor/mcp.json` Podium writes, so Tier A records the version and skips. Cursor is exercised by the Tier C agent run over the materialized `.cursor/rules/*.mdc`; it needs `cursor-agent login` or `CURSOR_API_KEY` (this machine is not logged in, so the agent smoke skips here). |
 | claude-desktop | — | — | No project-level surface. Skipped. |
 | claude-cowork | — | — | Web/marketplace; no local binary. Skipped. |
 | pi | — | — | No MCP surface. Skipped. |
