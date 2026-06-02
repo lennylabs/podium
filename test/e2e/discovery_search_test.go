@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -738,24 +739,156 @@ func TestSearch_AuditPIIScrubDisabled(t *testing.T) {
 	}
 }
 
-// ---- SLO benchmarks (placement) --------------------------------------------
+// ---- SLO benchmarks ---------------------------------------------------------
+//
+// docs/consuming/browsing-the-catalog.md "Latency and cost" documents p99 SLO
+// targets for the meta-tools. The authoritative reproducible measurement lives
+// in test/bench (go test -bench). These e2e variants drive the real surface at
+// the documented request volume and assert only a generous catastrophic-
+// regression ceiling: the strict SLO depends on the deployment and is timing-
+// flaky to gate in e2e, so the measured p99 is logged against the target rather
+// than enforced as the literal SLO, mirroring the rationale in
+// test/verification/performance_test.go. These tests do not run in parallel so
+// the timing reading is not skewed by concurrent CPU contention.
 
-// T-D-browsing-36..40 — p99 SLO targets. These are benchmark gates that belong
-// in test/bench; asserting wall-clock p99 from an e2e test is timing-flaky.
+// brP99 returns the p99 (nearest-rank) of ds. Empty input returns zero.
+func brP99(ds []time.Duration) time.Duration {
+	if len(ds) == 0 {
+		return 0
+	}
+	sorted := append([]time.Duration(nil), ds...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	idx := int(0.99 * float64(len(sorted)))
+	if idx >= len(sorted) {
+		idx = len(sorted) - 1
+	}
+	return sorted[idx]
+}
+
+// brSeedDomains returns a registry map with n domains, each carrying a
+// DOMAIN.md (so search_domains indexes it per F-3.2.1) whose keywords match
+// "vendor", plus one artifact.
+func brSeedDomains(n int) map[string]string {
+	entries := make(map[string]string, n*2)
+	for i := 0; i < n; i++ {
+		d := fmt.Sprintf("dom%02d", i)
+		entries[d+"/DOMAIN.md"] = fmt.Sprintf("---\ndescription: \"Vendor onboarding and management for unit %d\"\ndiscovery:\n  keywords:\n    - vendor\n---\n\n# %s\n", i, d)
+		entries[d+"/onboard/ARTIFACT.md"] = contextArtifact("vendor onboarding workflow")
+	}
+	return entries
+}
+
+// brSeedArtifacts returns a registry map with n artifacts whose descriptions
+// match "variance".
+func brSeedArtifacts(n int) map[string]string {
+	entries := make(map[string]string, n)
+	for i := 0; i < n; i++ {
+		entries[fmt.Sprintf("finance/art%02d/ARTIFACT.md", i)] = contextArtifact(fmt.Sprintf("variance analysis report %d", i))
+	}
+	return entries
+}
+
+// brMeasureHTTP issues n GETs against url (after a short warm-up), computes the
+// p99 request latency, logs it against the SLO target, and fails only if it
+// exceeds a generous catastrophic-regression ceiling. Every request must
+// return HTTP 200.
+func brMeasureHTTP(t *testing.T, url, label string, n int, target, ceiling time.Duration) {
+	t.Helper()
+	for i := 0; i < 5; i++ {
+		if st := getStatus(t, url); st != 200 {
+			t.Fatalf("%s warm-up returned HTTP %d", label, st)
+		}
+	}
+	samples := make([]time.Duration, 0, n)
+	for i := 0; i < n; i++ {
+		t0 := time.Now()
+		st := getStatus(t, url)
+		samples = append(samples, time.Since(t0))
+		if st != 200 {
+			t.Fatalf("%s request %d returned HTTP %d", label, i, st)
+		}
+	}
+	p99 := brP99(samples)
+	t.Logf("%s: %d requests, p99=%s (SLO target p99<%s; authoritative benchmark in test/bench)", label, n, p99, target)
+	if p99 > ceiling {
+		t.Errorf("%s p99 %s exceeds the %s catastrophic-regression ceiling (SLO target %s)", label, p99, ceiling, target)
+	}
+}
+
+// T-D-browsing-36 — load_domain p99 SLO target (< 200 ms). spec:
+// docs/consuming/browsing-the-catalog.md "Latency and cost".
 func TestSearch_SLOLoadDomain(t *testing.T) {
-	t.Skip("SLO/benchmark gate (load_domain p99 < 200ms): belongs in test/bench, not asserted in e2e to avoid timing flakiness")
+	srv := startServer(t, writeRegistry(t, brSeedDomains(24)))
+	brMeasureHTTP(t, srv.BaseURL+"/v1/load_domain", "load_domain", 100, 200*time.Millisecond, 2*time.Second)
 }
+
+// T-D-browsing-37 — search_domains p99 SLO target (< 200 ms). spec:
+// docs/consuming/browsing-the-catalog.md "Latency and cost". >=20 domains, warm.
 func TestSearch_SLOSearchDomains(t *testing.T) {
-	t.Skip("SLO/benchmark gate (search_domains p99 < 200ms): belongs in test/bench, not asserted in e2e")
+	srv := startServer(t, writeRegistry(t, brSeedDomains(24)))
+	brMeasureHTTP(t, srv.BaseURL+"/v1/search_domains?query=vendor", "search_domains", 100, 200*time.Millisecond, 2*time.Second)
 }
+
+// T-D-browsing-38 — search_artifacts p99 SLO target (< 200 ms). spec:
+// docs/consuming/browsing-the-catalog.md "Latency and cost". >=50 artifacts, warm.
 func TestSearch_SLOSearchArtifacts(t *testing.T) {
-	t.Skip("SLO/benchmark gate (search_artifacts p99 < 200ms): belongs in test/bench, not asserted in e2e")
+	srv := startServer(t, writeRegistry(t, brSeedArtifacts(60)))
+	brMeasureHTTP(t, srv.BaseURL+"/v1/search_artifacts?query=variance", "search_artifacts", 100, 200*time.Millisecond, 2*time.Second)
 }
+
+// T-D-browsing-39 — load_artifact (manifest only) p99 SLO target (< 500 ms).
+// spec: docs/consuming/browsing-the-catalog.md "Latency and cost". The artifact
+// has no bundled resources.
 func TestSearch_SLOLoadArtifactManifest(t *testing.T) {
-	t.Skip("SLO/benchmark gate (load_artifact manifest p99 < 500ms): belongs in test/bench, not asserted in e2e")
+	id := "finance/report"
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		id + "/ARTIFACT.md": contextArtifact("variance report"),
+	}))
+	brMeasureHTTP(t, srv.BaseURL+"/v1/load_artifact?id="+id, "load_artifact_manifest", 100, 500*time.Millisecond, 3*time.Second)
 }
+
+// T-D-browsing-40 — load_artifact (manifest + bundled resources up to 10 MB)
+// p99 SLO target (< 2 s). spec: docs/consuming/browsing-the-catalog.md "Latency
+// and cost". The resource set has a small inline file (<256 KB) and a ~5 MB file
+// (>256 KB, delivered via presigned URL per the §4.1 cutoff), so materialization
+// exercises both inline and URL delivery. Each call materializes to a fresh root
+// and cache dir so the bridge re-fetches rather than serving a cache hit. The
+// per-call wall time includes the podium-mcp subprocess and the resource fetch,
+// so the e2e ceiling is well above the in-process SLO. A wall-time budget caps
+// total runtime; the sample count actually gathered is logged.
 func TestSearch_SLOLoadArtifactResources(t *testing.T) {
-	t.Skip("SLO/benchmark gate (load_artifact + resources p99 < 2s): belongs in test/bench, not asserted in e2e")
+	id := "finance/close-reporting/run-variance-analysis"
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		id + "/ARTIFACT.md":      brSkillArtifact,
+		id + "/SKILL.md":         brSkillMD("run-variance-analysis", brVarianceDesc, "Run the analysis.\n"),
+		id + "/assets/notes.txt": strings.Repeat("y", 1024),
+		id + "/data/big.bin":     strings.Repeat("x", 5*1024*1024),
+	}))
+	const n = 50
+	const target, ceiling = 2 * time.Second, 15 * time.Second
+	budget := time.Now().Add(120 * time.Second)
+	samples := make([]time.Duration, 0, n)
+	for i := 0; i < n; i++ {
+		if time.Now().After(budget) {
+			break
+		}
+		mat := t.TempDir()
+		t0 := time.Now()
+		res := mcpExec(t, brMatEnv(t, srv.BaseURL, mat), toolCall(1, "load_artifact", map[string]any{"id": id}))
+		_ = rpcResult(t, res.Stdout, 1)
+		samples = append(samples, time.Since(t0))
+		// Materialization is synchronous before the bridge responds, so the
+		// timed call above already includes the ~5 MB fetch and write.
+		mustExist(t, filepath.Join(mat, id, "data/big.bin"))
+	}
+	if len(samples) < 10 {
+		t.Skipf("host gathered only %d materialization samples within the time budget; p99 not meaningful", len(samples))
+	}
+	p99 := brP99(samples)
+	t.Logf("load_artifact+resources: %d materializations (~5MB each via podium-mcp), p99=%s (SLO target p99<%s; authoritative benchmark in test/bench)", len(samples), p99, target)
+	if p99 > ceiling {
+		t.Errorf("load_artifact+resources p99 %s exceeds the %s catastrophic-regression ceiling (SLO target %s)", p99, ceiling, target)
+	}
 }
 
 // ---- descriptor structure ---------------------------------------------------
