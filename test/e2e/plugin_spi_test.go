@@ -24,7 +24,9 @@ package e2e
 //   - T-D-extending-31: structural static check over SPI interface decls.
 //   - T-D-extending-42: needs a signed-then-tampered artifact.
 //   - T-D-extending-43: SSE change-stream consumption with a bounded read.
-//   - T-D-extending-45: blocked by F-13.10.6.
+//   - T-D-extending-44: blocked by F-7.3.2 — the reingest path detects a
+//     same-version content conflict but returns an opaque conflicts count
+//     rather than surfacing ingest.immutable_violation.
 //   - T-D-extending-47: default overlay path fallback behavior is uncertain
 //     without explicit PODIUM_OVERLAY_PATH; SKIP honest.
 //   - T-D-extending-48: LocalAuditSink MCP audit log path behavior uncertain.
@@ -270,7 +272,6 @@ func TestPluginSPI_LintValidArtifact(t *testing.T) {
 // T-D-extending-7 — LayerSourceProvider SPI: local source bridge — register, ingest, change pickup.
 func TestPluginSPI_LocalLayerBridge(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-7.3.4: registering a local layer via the API stores config but never ingests, and POST /v1/layers/reingest records intent without running the pipeline, so the bridged artifact is never discoverable")
 	layerDir := t.TempDir()
 	mkArtifact(t, filepath.Join(layerDir, "finance/ap/pay-invoice"), greetSkillArtifact)
 	if err := os.WriteFile(filepath.Join(layerDir, "finance/ap/pay-invoice", "SKILL.md"), []byte(skillBody("pay-invoice")), 0o644); err != nil {
@@ -285,8 +286,8 @@ func TestPluginSPI_LocalLayerBridge(t *testing.T) {
 		t.Fatalf("layer register: exit=%d stderr=%s", reg.Exit, reg.Stderr)
 	}
 
-	// 2. initial ingest
-	ri1 := runPodium(t, "", nil, "layer", "reingest", "ext-bridge-layer", "--registry", srv.BaseURL)
+	// 2. initial ingest (flags precede the positional <id>).
+	ri1 := runPodium(t, "", nil, "layer", "reingest", "--registry", srv.BaseURL, "ext-bridge-layer")
 	if ri1.Exit != 0 {
 		t.Fatalf("initial reingest: exit=%d stderr=%s", ri1.Exit, ri1.Stderr)
 	}
@@ -304,8 +305,8 @@ func TestPluginSPI_LocalLayerBridge(t *testing.T) {
 	newContent := "---\ntype: skill\nversion: 2.0.0\ntags: [demo, hello-world]\nsensitivity: low\n---\n\n<!-- Skill body lives in SKILL.md. -->\n"
 	mkArtifact(t, filepath.Join(layerDir, "finance/ap/pay-invoice"), newContent)
 
-	// 5. reingest after change
-	ri2 := runPodium(t, "", nil, "layer", "reingest", "ext-bridge-layer", "--registry", srv.BaseURL)
+	// 5. reingest after change (flags precede the positional <id>).
+	ri2 := runPodium(t, "", nil, "layer", "reingest", "--registry", srv.BaseURL, "ext-bridge-layer")
 	if ri2.Exit != 0 {
 		t.Fatalf("second reingest: exit=%d stderr=%s", ri2.Exit, ri2.Stderr)
 	}
@@ -682,7 +683,6 @@ func TestPluginSPI_WebhookHMACWrongSecret(t *testing.T) {
 // T-D-extending-24 — Programmatic curation: podium sync with --include materializes only named artifacts.
 func TestPluginSPI_SyncIncludeOne(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-7.5.3: podium sync has no --include flag and scope filtering is never wired into the sync execution path")
 	reg := writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md":   greetSkillArtifact,
 		"finance/ap/pay-invoice/SKILL.md":      skillBody("pay-invoice"),
@@ -718,7 +718,6 @@ func TestPluginSPI_SyncIncludeOne(t *testing.T) {
 // T-D-extending-25 — Programmatic curation: multiple --include flags materialize the union.
 func TestPluginSPI_SyncIncludeMultiple(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-7.5.3: podium sync has no --include flag; multi-include union semantics are not implemented")
 	reg := writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md":   greetSkillArtifact,
 		"finance/ap/pay-invoice/SKILL.md":      skillBody("pay-invoice"),
@@ -762,7 +761,6 @@ func TestPluginSPI_SyncIncludeMultiple(t *testing.T) {
 // T-D-extending-26 — Programmatic curation: on-disk result is reproducible from the include list.
 func TestPluginSPI_SyncIncludeReproducible(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-7.5.3: podium sync has no --include flag, so the include-list reproducibility claim is not exercisable")
 	reg := writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md": greetSkillArtifact,
 		"finance/ap/pay-invoice/SKILL.md":    skillBody("pay-invoice"),
@@ -1103,9 +1101,10 @@ func TestPluginSPI_NoOutOfProcessTransport(t *testing.T) {
 // T-D-extending-40 — RegistryAuditSink SPI: layer.ingested event written to audit log after reingest.
 func TestPluginSPI_AuditLayerIngested(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-7.3.4: POST /v1/layers/reingest records intent but runs no ingest pipeline, so no layer.ingested audit event is emitted")
 	layerDir := t.TempDir()
-	mkArtifact(t, filepath.Join(layerDir, "finance/ap/pay-invoice"), greetSkillArtifact)
+	// A context artifact needs no SKILL.md sibling, so the reingest pipeline
+	// accepts it without the skill dual-file requirement.
+	mkArtifact(t, filepath.Join(layerDir, "finance/ap/pay-invoice"), contextArtifact("auditlayeringested"))
 
 	srv, auditPath := extAuditServer(t, "")
 
@@ -1113,7 +1112,7 @@ func TestPluginSPI_AuditLayerIngested(t *testing.T) {
 	if reg.Exit != 0 {
 		t.Fatalf("layer register: exit=%d stderr=%s", reg.Exit, reg.Stderr)
 	}
-	ri := runPodium(t, "", nil, "layer", "reingest", "ext-audit-layer", "--registry", srv.BaseURL)
+	ri := runPodium(t, "", nil, "layer", "reingest", "--registry", srv.BaseURL, "ext-audit-layer")
 	if ri.Exit != 0 {
 		t.Fatalf("layer reingest: exit=%d stderr=%s", ri.Exit, ri.Stderr)
 	}
@@ -1137,9 +1136,10 @@ func TestPluginSPI_AuditLayerIngested(t *testing.T) {
 // T-D-extending-41 — RegistryAuditSink SPI: artifact.published event written to audit log after ingest.
 func TestPluginSPI_AuditArtifactPublished(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-7.3.4: the reingest endpoint runs no ingest pipeline, so no artifact.published audit event is emitted")
 	layerDir := t.TempDir()
-	mkArtifact(t, filepath.Join(layerDir, "finance/ap/pay-invoice"), greetSkillArtifact)
+	// A context artifact needs no SKILL.md sibling, so the reingest pipeline
+	// accepts it without the skill dual-file requirement.
+	mkArtifact(t, filepath.Join(layerDir, "finance/ap/pay-invoice"), contextArtifact("auditartifactpublished"))
 
 	srv, auditPath := extAuditServer(t, "")
 
@@ -1147,7 +1147,7 @@ func TestPluginSPI_AuditArtifactPublished(t *testing.T) {
 	if reg.Exit != 0 {
 		t.Fatalf("layer register: exit=%d stderr=%s", reg.Exit, reg.Stderr)
 	}
-	ri := runPodium(t, "", nil, "layer", "reingest", "ext-pub-layer", "--registry", srv.BaseURL)
+	ri := runPodium(t, "", nil, "layer", "reingest", "--registry", srv.BaseURL, "ext-pub-layer")
 	if ri.Exit != 0 {
 		t.Fatalf("layer reingest: exit=%d stderr=%s", ri.Exit, ri.Stderr)
 	}
@@ -1176,7 +1176,7 @@ func TestPluginSPI_SSEArtifactPublished(t *testing.T) {
 // T-D-extending-44 — Ingest immutability: same version with different content returns ingest.immutable_violation.
 func TestPluginSPI_IngestImmutableViolation(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-7.3.4: reingest runs no ingest pipeline, so a same-version content conflict is never detected as ingest.immutable_violation")
+	t.Skip("blocked by F-7.3.2: the reingest path detects a same-version content conflict but returns HTTP 200 with an opaque conflicts count instead of surfacing ingest.immutable_violation through the reingest response")
 	layerDir := t.TempDir()
 	mkArtifact(t, filepath.Join(layerDir, "finance/ap/pay-invoice"), greetSkillArtifact)
 	if err := os.WriteFile(filepath.Join(layerDir, "finance/ap/pay-invoice", "SKILL.md"), []byte(skillBody("pay-invoice")), 0o644); err != nil {
@@ -1212,9 +1212,27 @@ func TestPluginSPI_IngestImmutableViolation(t *testing.T) {
 	}
 }
 
-// T-D-extending-45 — Ingest sensitivity: public-mode rejects medium/high sensitivity artifacts.
+// T-D-extending-45 — Ingest sensitivity: public-mode rejects medium/high
+// sensitivity artifacts. spec: §13.10 — ingest.public_mode_rejects_sensitive.
+// The rejection is per-artifact (non-fatal), so the low artifact still ingests.
 func TestPluginSPI_PublicModeRejectsSensitive(t *testing.T) {
-	t.Skip("blocked by F-13.10.6: public-mode sensitivity ceiling at ingest not implemented")
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"low-ok/ARTIFACT.md":    contextArtifact("publiclowokkw"),
+		"medium-no/ARTIFACT.md": smallteamMediumArtifact("publicmediumnokw"),
+	})
+	srv := startServerArgs(t,
+		[]string{"HOME=" + t.TempDir(), "PODIUM_PUBLIC_MODE=true"},
+		"serve", "--standalone", "--layer-path", reg)
+
+	_, lowBody := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=publiclowokkw")
+	if !strings.Contains(string(lowBody), "low-ok") {
+		t.Errorf("low-sensitivity artifact missing from public-mode search: %s", lowBody)
+	}
+	_, medBody := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=publicmediumnokw")
+	if strings.Contains(string(medBody), "medium-no") {
+		t.Errorf("medium-sensitivity artifact was ingested in public mode but must be rejected: %s", medBody)
+	}
 }
 
 // T-D-extending-46 — LocalSearchProvider SPI: search_artifacts includes results from local overlay.

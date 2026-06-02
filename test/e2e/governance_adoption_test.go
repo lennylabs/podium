@@ -168,10 +168,9 @@ func TestGovernance_UnauthedSearch(t *testing.T) {
 // T-D-progressive-3
 func TestGovernance_PublicLayerSearch(t *testing.T) {
 	t.Parallel()
-	// The Day-0 catalog is ingested at startup via --layer-path. (Registering
-	// a local layer through the API does NOT ingest it — F-7.3.4 — so the
-	// bootstrap path is the searchable one. Standalone bootstrap layers are
-	// public by default, matching the "public catalog, no auth" promise.)
+	// The Day-0 catalog is ingested at startup via --layer-path. Standalone
+	// bootstrap layers are public by default, matching the "public catalog,
+	// no auth" promise, so `podium search` finds the artifact without a token.
 	reg := writeRegistry(t, map[string]string{
 		"acme/my-skill/ARTIFACT.md": greetSkillArtifact,
 		"acme/my-skill/SKILL.md":    skillBody("my-skill"),

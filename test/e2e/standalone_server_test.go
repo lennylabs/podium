@@ -5,11 +5,15 @@ package e2e
 // config precedence, public mode, client init, layer management, MCP
 // discovery, lint, impact analysis, audit, and admin migrate-to-standard.
 //
-// Known gaps drive several skips:
-//   - F-13.10.5: --allow-public-bind flag absent; loopback enforcement not implemented.
-//   - F-13.10.6: public-mode sensitivity ceiling not wired into ingest paths.
-//   - F-13.10.8: public-mode startup warning banner not emitted.
-//   - F-13.10.11: --no-embeddings flag now exists; see TestStandaloneFlags_NoEmbeddingsSearchWorks.
+// The §13.10 public-mode guards are implemented and exercised end-to-end:
+//   - F-13.10.5: --allow-public-bind flag and the loopback-bind refusal
+//     (config.public_bind_refused) are wired (cmd/podium/serve.go,
+//     pkg/registry/server/config_validate.go).
+//   - F-13.10.6: the public-mode sensitivity ceiling rejects medium/high at
+//     ingest (ingest.public_mode_rejects_sensitive; serverboot publicSensitivityFloor).
+//   - F-13.10.8: the public-mode startup warning banner is emitted (serverboot
+//     emitStartupBanner).
+//   - F-13.10.11: --no-embeddings flag exists; see TestStandaloneFlags_NoEmbeddingsSearchWorks.
 
 import (
 	"bytes"
@@ -92,6 +96,48 @@ func smallteamRawExecFail(t *testing.T, env []string, args ...string) string {
 	cmd.Stderr = &out
 	_ = cmd.Run()
 	return out.String()
+}
+
+// startServerExplicitBind starts `podium <args> --bind <bind>` and probes
+// http://127.0.0.1:<probePort>/healthz (the probe host is always loopback,
+// even when the listen address is not). The default startServerArgs binds
+// 127.0.0.1 only, so this is the path used where the listen address must be
+// non-loopback (the --allow-public-bind case). It owns the process lifecycle
+// with a bounded readiness deadline and SIGINT/SIGKILL teardown.
+func startServerExplicitBind(t *testing.T, bind string, probePort int, env []string, args ...string) *serverProc {
+	t.Helper()
+	full := append(append([]string{}, args...), "--bind", bind)
+	logf, err := os.CreateTemp(t.TempDir(), "server-*.log")
+	if err != nil {
+		t.Fatalf("server log: %v", err)
+	}
+	cmd := exec.Command(cmdharness.Bin(t, "podium"), full...)
+	cmd.Env = mergeEnv(env...)
+	cmd.Stdin = bytes.NewReader(nil)
+	cmd.Stdout = logf
+	cmd.Stderr = logf
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	s := &serverProc{BaseURL: fmt.Sprintf("http://127.0.0.1:%d", probePort), logPath: logf.Name(), cmd: cmd}
+	t.Cleanup(func() { stopProc(s.cmd) })
+
+	deadline := time.Now().Add(25 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := httpClient.Get(s.BaseURL + "/healthz")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == 200 {
+				return s
+			}
+		}
+		if s.cmd.ProcessState != nil && s.cmd.ProcessState.Exited() {
+			t.Fatalf("server exited before ready\nlog:\n%s", s.log())
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("server not ready at %s within deadline\nlog:\n%s", s.BaseURL, s.log())
+	return nil
 }
 
 // ---- tests -----------------------------------------------------------------
@@ -355,22 +401,67 @@ func TestStandaloneServer_PublicModeHealthz(t *testing.T) {
 	}
 }
 
-// T-D-small-team-9 — public mode loopback enforcement (blocked by F-13.10.5).
+// T-D-small-team-9 — public mode refuses a non-loopback bind unless
+// --allow-public-bind is set. spec: §13.10 / §13.2.2 — the loopback-bind
+// default surfaces config.public_bind_refused at startup, naming the address.
 func TestStandaloneServer_PublicModeLoopbackEnforce(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-13.10.5: --allow-public-bind flag absent; loopback enforcement in public mode not implemented")
+	port := freePort(t)
+	out := smallteamRawExecFail(t,
+		[]string{
+			"HOME=" + t.TempDir(),
+			"PODIUM_PUBLIC_MODE=true",
+			fmt.Sprintf("PODIUM_BIND=0.0.0.0:%d", port),
+		},
+		"serve", "--standalone")
+	if !strings.Contains(out, "config.public_bind_refused") {
+		t.Errorf("expected config.public_bind_refused for public mode on a non-loopback bind; got:\n%s", out)
+	}
 }
 
-// T-D-small-team-10 — --allow-public-bind flag permits non-loopback bind (blocked by F-13.10.5).
+// T-D-small-team-10 — --allow-public-bind permits a non-loopback bind in
+// public mode. spec: §13.10 / §13.2.2 — the explicit opt-in lets the registry
+// bind a non-loopback address (typically behind an authenticated proxy).
 func TestStandaloneServer_AllowPublicBindFlag(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-13.10.5: --allow-public-bind flag does not exist in cmd/podium/serve.go")
+	port := freePort(t)
+	srv := startServerExplicitBind(t, fmt.Sprintf("0.0.0.0:%d", port), port,
+		[]string{"HOME=" + t.TempDir()},
+		"serve", "--standalone", "--public-mode", "--allow-public-bind")
+
+	var health struct {
+		Mode string `json:"mode"`
+	}
+	getJSON(t, srv.BaseURL+"/healthz", &health)
+	if health.Mode != "public" {
+		t.Errorf("healthz mode=%q, want public", health.Mode)
+	}
 }
 
-// T-D-small-team-11 — public mode rejects sensitivity:medium ingest (blocked by F-13.10.6).
+// T-D-small-team-11 — public mode rejects sensitivity:medium at ingest.
+// spec: §13.10 / §13.2.2 — ingest.public_mode_rejects_sensitive. The medium
+// artifact is dropped per-artifact (non-fatal) so the server still boots.
 func TestStandaloneServer_PublicModeRejectsMedium(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-13.10.6: ingest.Request.RejectAtOrAbove is never set by bootstrap or reingest paths when public mode is on")
+	reg := writeRegistry(t, map[string]string{
+		"low-note/ARTIFACT.md":    smallteamLowArtifact("lowsensitivekw"),
+		"medium-note/ARTIFACT.md": smallteamMediumArtifact("mediumsensitivekw"),
+	})
+	srv := startServerArgs(t,
+		[]string{"HOME=" + t.TempDir(), "PODIUM_PUBLIC_MODE=true"},
+		"serve", "--standalone", "--layer-path", reg)
+
+	// The low-sensitivity artifact is ingested and searchable.
+	_, lowBody := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=lowsensitivekw")
+	if !strings.Contains(string(lowBody), "low-note") {
+		t.Errorf("low-sensitivity artifact missing from public-mode search: %s", lowBody)
+	}
+	// The medium-sensitivity artifact is rejected at ingest, so its ID never
+	// reaches the index.
+	_, medBody := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=mediumsensitivekw")
+	if strings.Contains(string(medBody), "medium-note") {
+		t.Errorf("medium-sensitivity artifact was ingested in public mode but must be rejected: %s", medBody)
+	}
 }
 
 // T-D-small-team-12 — public mode audit log records system:public caller.
@@ -402,10 +493,17 @@ func TestStandaloneServer_PublicModeAuditCaller(t *testing.T) {
 	}
 }
 
-// T-D-small-team-13 — public mode startup warning banner (blocked by F-13.10.8).
+// T-D-small-team-13 — public mode emits the §13.2.2 startup warning banner.
+// The banner is written to stderr during boot, before /healthz reports ready.
 func TestStandaloneServer_PublicModeStartupBanner(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-13.10.8: public-mode startup warning banner is not emitted; log only shows mode=public in listening line")
+	reg := writeRegistry(t, map[string]string{"a/ARTIFACT.md": smallteamLowArtifact("a")})
+	srv := startServerArgs(t,
+		[]string{"HOME=" + t.TempDir(), "PODIUM_PUBLIC_MODE=true"},
+		"serve", "--standalone", "--layer-path", reg)
+	if log := srv.log(); !strings.Contains(log, "PUBLIC MODE") {
+		t.Errorf("startup log missing public-mode warning banner:\n%s", log)
+	}
 }
 
 // T-D-small-team-14 — podium init writes .podium/sync.yaml with registry URL and harness.
@@ -448,10 +546,25 @@ func TestStandaloneServer_PodiumInit(t *testing.T) {
 	}
 }
 
-// T-D-small-team-15 — podium sync against server registry (http://) not implemented as documented.
+// T-D-small-team-15 — client-side podium sync against a server registry
+// materializes the claude-code layout. spec: §2.2 / §7.5.2 — a URL source
+// reads the effective view over HTTP and runs the same harness adapter as the
+// filesystem source. A rule is single-file (body in ARTIFACT.md) and
+// round-trips through the server source; the multi-file (skill) parity gap is
+// documented by TestStandaloneServer_MigrateOutputBitIdentical.
 func TestStandaloneServer_PodiumSyncServerRegistry(t *testing.T) {
 	t.Parallel()
-	t.Skip("podium sync --registry http:// (server-source) is not implemented; sync currently operates on filesystem registries only")
+	reg := writeRegistry(t, map[string]string{
+		"ts-style/ARTIFACT.md": "---\ntype: rule\nversion: 1.0.0\ndescription: TS style rule.\nsensitivity: low\n---\n\nUse tabs.\n",
+	})
+	srv := startServer(t, reg)
+	tgt := t.TempDir()
+	res := runPodium(t, "", []string{"HOME=" + t.TempDir()},
+		"sync", "--registry", srv.BaseURL, "--target", tgt, "--harness", "claude-code")
+	if res.Exit != 0 {
+		t.Fatalf("server-source sync exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	mustExist(t, filepath.Join(tgt, ".claude", "rules", "ts-style.md"))
 }
 
 // T-D-small-team-16 — local source: podium layer reingest updates the layer.
@@ -620,10 +733,60 @@ func TestStandaloneServer_MigrateInitForce(t *testing.T) {
 	}
 }
 
-// T-D-small-team-20 — filesystem→server migration: podium sync output matches.
+// T-D-small-team-20 — filesystem→server migration: podium sync output is
+// bit-identical for the same target and profile, so end-user behavior is
+// preserved across the cut-over. spec: §2.2 / §7.5 — the shared library does
+// the same parsing, composition, and adapter work in both modes.
+//
+// This encodes the strong, general claim (including a multi-file skill), which
+// currently fails: server-source sync omits the SKILL.md secondary file. The
+// single-file (context/rule) case is verified and passing in
+// TestFilesystemSync_BitIdenticalFilesystemVsServer.
 func TestStandaloneServer_MigrateOutputBitIdentical(t *testing.T) {
 	t.Parallel()
-	t.Skip("podium sync --registry http:// (server-source) not implemented; cannot compare server sync output against filesystem sync output")
+	t.Skip("deferred gap (no BUILD-GAPS finding yet): server-source sync omits the SKILL.md secondary file for multi-file artifacts (skills/agents), so the §2.2 bit-identical claim fails for a skill — the filesystem source writes ARTIFACT.md + SKILL.md while the server source writes ARTIFACT.md only and the claude-code adapter then emits nothing for the skill. Single-file (context/rule) parity passes in TestFilesystemSync_BitIdenticalFilesystemVsServer")
+	reg := writeRegistry(t, map[string]string{
+		".registry-config":                     "multi_layer: true\n",
+		"team/glossary/ARTIFACT.md":            contextArtifact("glossary"),
+		"team/finance/pay-invoice/ARTIFACT.md": greetSkillArtifact,
+		"team/finance/pay-invoice/SKILL.md":    skillBody("pay-invoice"),
+	})
+
+	fsTarget := t.TempDir()
+	resFS := runPodium(t, "", []string{"HOME=" + t.TempDir()},
+		"sync", "--registry", reg, "--target", fsTarget, "--harness", "none")
+	if resFS.Exit != 0 {
+		t.Fatalf("filesystem sync exit=%d stderr=%s", resFS.Exit, resFS.Stderr)
+	}
+
+	srv := startServer(t, reg)
+	srvTarget := t.TempDir()
+	resSrv := runPodium(t, "", []string{"HOME=" + t.TempDir()},
+		"sync", "--registry", srv.BaseURL, "--target", srvTarget, "--harness", "none")
+	if resSrv.Exit != 0 {
+		t.Fatalf("server-source sync exit=%d stderr=%s", resSrv.Exit, resSrv.Stderr)
+	}
+
+	fsFiles := readTreeFiltered(t, fsTarget)
+	srvFiles := readTreeFiltered(t, srvTarget)
+	if len(fsFiles) == 0 {
+		t.Fatal("filesystem sync materialized nothing")
+	}
+	for path, fsContent := range fsFiles {
+		srvContent, ok := srvFiles[path]
+		if !ok {
+			t.Errorf("server sync missing %s that filesystem sync wrote", path)
+			continue
+		}
+		if fsContent != srvContent {
+			t.Errorf("content mismatch for %s:\nfs:     %q\nserver: %q", path, fsContent, srvContent)
+		}
+	}
+	for path := range srvFiles {
+		if _, ok := fsFiles[path]; !ok {
+			t.Errorf("server sync wrote %s that filesystem sync did not", path)
+		}
+	}
 }
 
 // T-D-small-team-21 — runtime discovery via MCP: load_artifact returns artifact.
