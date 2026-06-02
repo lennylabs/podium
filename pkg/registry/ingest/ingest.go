@@ -445,6 +445,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		}
 	}
 	domainRecs := walkDomains(req.Files, req.TenantID, req.LayerID)
+	var domainAdvisories []lint.Diagnostic
 	for _, dr := range domainRecs {
 		prev, seen := prevDomains[dr.Path]
 		if err := st.PutDomain(ctx, dr); err != nil {
@@ -467,6 +468,15 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 					map[string]string{"layer": dr.Layer})
 			}
 		}
+		// spec: §12 — "ingest-time lint flags newly-set unlisted: true for
+		// review" (F-12.0.1). An unlisted: true DOMAIN.md hides its whole
+		// subtree from enumeration (§4.5.3), so a freshly-set value is
+		// surfaced as an advisory. A domain that was already unlisted in the
+		// prior ingest draws no advisory (the flag is not newly-set), so a
+		// steady-state reingest stays quiet.
+		if adv := newlyUnlistedAdvisory(dr, prev, seen); adv != nil {
+			domainAdvisories = append(domainAdvisories, *adv)
+		}
 	}
 
 	// Walk the layer's filesystem to find every ARTIFACT.md.
@@ -488,6 +498,11 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 	// author-facing `podium lint` shares) over the ingested record set;
 	// the colliding-summary check needs that set to spot a cluster.
 	res.Advisories = (&lint.Linter{Rules: lint.DescriptionAdvisoryRules()}).Lint(ctx, nil, records)
+	// §12 (F-12.0.1): carry the newly-set unlisted: true advisories
+	// collected while persisting DOMAIN.md records. DOMAIN.md is not an
+	// artifact, so the check runs in the domain loop above rather than as
+	// an artifact lint rule.
+	res.Advisories = append(res.Advisories, domainAdvisories...)
 
 	// §4.7 "Domain embeddings": embed each DOMAIN.md projection
 	// (description + keywords + truncated body) into the domain index so
@@ -976,6 +991,36 @@ func walkDomains(fsys fs.FS, tenantID, layerID string) []store.DomainRecord {
 		return nil
 	})
 	return out
+}
+
+// newlyUnlistedAdvisory implements the §12 mitigation "ingest-time lint
+// flags newly-set unlisted: true for review" (F-12.0.1). It returns a
+// warning advisory when dr sets unlisted: true and the value is newly set:
+// either the DOMAIN.md is new to this layer (no prior record), or the prior
+// record did not set unlisted. A domain that was already unlisted before
+// this ingest draws no advisory so a steady-state reingest stays quiet. A
+// DOMAIN.md that fails to parse draws nothing here (manifest-parse lint
+// covers it). prevRaw/seen come from the prior stored DOMAIN.md for the
+// same (tenant, layer, path).
+func newlyUnlistedAdvisory(dr store.DomainRecord, prevRaw string, seen bool) *lint.Diagnostic {
+	cur, err := manifest.ParseDomain(dr.Raw)
+	if err != nil || cur == nil || !cur.Unlisted {
+		return nil
+	}
+	if seen {
+		// Already unlisted in the prior ingest? Then it is not newly set.
+		if prev, perr := manifest.ParseDomain([]byte(prevRaw)); perr == nil && prev != nil && prev.Unlisted {
+			return nil
+		}
+	}
+	return &lint.Diagnostic{
+		ArtifactID: dr.Path,
+		Code:       "lint.domain_newly_unlisted",
+		Severity:   lint.SeverityWarning,
+		Message: fmt.Sprintf(
+			"DOMAIN.md %q sets unlisted: true, hiding the subtree from load_domain and search_domains enumeration (§4.5.3); review whether this is intended",
+			dr.Path),
+	}
 }
 
 func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecord, error) {

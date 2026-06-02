@@ -13,7 +13,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -73,6 +75,15 @@ type Linter struct {
 	// (the default) leaves overrides allowed and skips the check. Ignored
 	// when Rules is set explicitly.
 	AllowPerDomainOverrides *bool
+	// PerFileSoftCapBytes overrides the §4.1 per-file bundled-resource
+	// soft cap (the warning threshold) so an operator can tune it per §12
+	// ("soft cap is configurable", F-12.0.2). Zero uses the default
+	// PerFileSoftCapBytes constant. Ignored when Rules is set explicitly.
+	PerFileSoftCapBytes int64
+	// PerPackageSoftCapBytes overrides the §4.1 per-package bundled-resource
+	// soft cap (the error threshold). Zero uses the default
+	// PerPackageSoftCapBytes constant. Ignored when Rules is set explicitly.
+	PerPackageSoftCapBytes int64
 }
 
 // Rule is one lint check. Receiving the registry plus parsed records
@@ -120,6 +131,7 @@ func AllRulesWithClient(client *http.Client) []Rule {
 		ruleDomainImportsResolve{},
 		ruleDomainImportCycle{},
 		ruleDomainImportBroadGlob{},
+		ruleDomainBodySize{},
 	}
 }
 
@@ -135,11 +147,35 @@ func DefaultHTTPClient() *http.Client {
 // when true it skips the network probe (the bundled-file existence check
 // still runs). Callers supply offline from their own deployment config
 // (for example PODIUM_INGEST_OFFLINE or a --offline flag).
+//
+// The §4.1 bundled-resource soft caps are configurable per §12 via
+// PODIUM_LINT_PER_FILE_SOFT_CAP_BYTES and
+// PODIUM_LINT_PER_PACKAGE_SOFT_CAP_BYTES (F-12.0.2); an unset or
+// non-positive value leaves the default constant in force.
 func NewIngestLinter(offline bool) *Linter {
-	if offline {
-		return &Linter{}
+	l := &Linter{
+		PerFileSoftCapBytes:    envInt64("PODIUM_LINT_PER_FILE_SOFT_CAP_BYTES"),
+		PerPackageSoftCapBytes: envInt64("PODIUM_LINT_PER_PACKAGE_SOFT_CAP_BYTES"),
 	}
-	return &Linter{HTTPClient: DefaultHTTPClient()}
+	if !offline {
+		l.HTTPClient = DefaultHTTPClient()
+	}
+	return l
+}
+
+// envInt64 parses a non-negative int64 from the named environment
+// variable, returning 0 when unset or unparseable so the caller's
+// default applies.
+func envInt64(name string) int64 {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return 0
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }
 
 // Lint runs every configured rule against the registry and returns the
@@ -149,6 +185,18 @@ func (l *Linter) Lint(ctx context.Context, reg *filesystem.Registry, records []f
 	rules := l.Rules
 	if len(rules) == 0 {
 		rules = AllRulesWithClient(l.HTTPClient)
+		// §12 (F-12.0.2): apply the configured bundled-resource soft caps.
+		// Zero values fall back to the §4.1 defaults inside the rule.
+		if l.PerFileSoftCapBytes > 0 || l.PerPackageSoftCapBytes > 0 {
+			for i := range rules {
+				if _, ok := rules[i].(ruleBundledResourceSize); ok {
+					rules[i] = ruleBundledResourceSize{
+						perFileCap:    l.PerFileSoftCapBytes,
+						perPackageCap: l.PerPackageSoftCapBytes,
+					}
+				}
+			}
+		}
 		// §4.5.5: when the tenant disables per-domain discovery
 		// overrides, warn on any DOMAIN.md that still carries a
 		// `discovery:` block (ingest succeeds; the block is ignored).

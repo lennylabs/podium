@@ -679,6 +679,35 @@ func TestCLI_LintTreeRecurses(t *testing.T) {
 	cliWantExit(t, res, 0, "lint tree")
 }
 
+// spec: §4.5.5 (F-4.5.3) — "Body length is recommended <= 2000 tokens; lint
+// warns above." `podium lint` over a registry whose DOMAIN.md prose body
+// exceeds the recommendation emits a warning naming the lint.domain_body_size
+// rule, and exits 0 because the diagnostic is advisory.
+func TestCLI_LintDomainBodyOverCapWarns(t *testing.T) {
+	// ~2750 tokens of body (well over the 2000-token recommendation).
+	bigBody := strings.Repeat("word ", 2200)
+	reg := writeRegistry(t, map[string]string{
+		"finance/note/ARTIFACT.md": contextArtifact("Finance note reference documentation for coverage here today."),
+		"finance/DOMAIN.md":        "---\ndescription: Finance\n---\n\n" + bigBody,
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	cliWantExit(t, res, 0, "lint domain body over cap (advisory)")
+	cliContains(t, res.Stdout, "lint.domain_body_size", "domain body-size warning surfaced")
+	cliContains(t, res.Stdout, "[warning]", "body-size diagnostic is a warning")
+}
+
+// spec: §4.5.5 (F-4.5.3) — a DOMAIN.md body within the recommendation draws
+// no body-size warning.
+func TestCLI_LintDomainBodyWithinCapClean(t *testing.T) {
+	reg := writeRegistry(t, map[string]string{
+		"finance/note/ARTIFACT.md": contextArtifact("Finance note reference documentation for coverage here today."),
+		"finance/DOMAIN.md":        "---\ndescription: Finance\n---\n\n# Finance\n\nA short prose body well under the recommendation.\n",
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	cliWantExit(t, res, 0, "lint domain body within cap")
+	cliNotContains(t, res.Stdout, "lint.domain_body_size", "no body-size warning for a short body")
+}
+
 // spec: doc "podium lint", "`<path>` can be ... a single `ARTIFACT.md`".
 // The single-file positional form is not supported (requires --registry).
 func TestCLI_LintSingleArtifactFileGap(t *testing.T) {
