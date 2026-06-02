@@ -4,8 +4,9 @@ package e2e
 // Covers every built-in type (skill, agent, context, command, rule, hook,
 // mcp-server) plus the extension-type path: scaffolding, lint acceptance
 // and rejection, the per-harness materialization layout, and the
-// registry-side behaviors (MCP prompt projection, search type filtering,
-// deprecation, dependents). Tests drive the podium CLI, the standalone
+// registry-side behaviors (search type filtering, deprecation, dependents)
+// including the documented absence of MCP prompt projection for commands.
+// Tests drive the podium CLI, the standalone
 // server, and the podium-mcp bridge. Behaviors blocked by a known
 // BUILD-GAPS finding are encoded as skips so the acceptance criterion is
 // recorded without failing the suite.
@@ -243,6 +244,42 @@ func TestArtifactTypes_ScaffoldCommand(t *testing.T) {
 	if l := runPodium(t, "", nil, "lint", "--registry", root); l.Exit != 0 {
 		t.Errorf("lint exit=%d stdout=%q", l.Exit, l.Stdout)
 	}
+}
+
+// T-D-artifact-types-12 and T-D-artifact-types-13 were written against an
+// earlier draft in which a command opted into MCP prompt projection via an
+// `expose_as_mcp_prompt` frontmatter field: an opted-in command appeared in the
+// MCP `prompts/list` response (-12) and a non-opted-in command did not (-13).
+// That feature was removed. The doc now states the canonical behavior in its
+// command section: "Both `podium sync` and the MCP server materialize a command
+// into the target harness's native command location ... Podium does not project
+// commands through MCP" (docs/authoring/artifact-types.md § command). The spec
+// agrees (spec/05-meta-tools.md § command), the manifest schema carries no
+// `expose_as_mcp_prompt` field, and the MCP server advertises no `prompts`
+// capability and defines no `prompts/list` JSON-RPC method (BUILD-GAPS F-5.2
+// reviewed §5.2 and recorded "No findings"). Both specs therefore collapse to a
+// single observable: `prompts/list` is an unknown method.
+//
+// TestArtifactTypes_CommandNotProjectedThroughMCP drives podium-mcp against a
+// standalone server holding a command artifact and asserts that `prompts/list`
+// returns JSON-RPC -32601 ("method not found"), the absence the doc claims.
+// spec: §5.2 (no MCP projection); cmd/podium-mcp/main.go default case.
+func TestArtifactTypes_CommandNotProjectedThroughMCP(t *testing.T) {
+	t.Parallel()
+	const cmdID = "tools/refactor-module"
+	const cmdArtifact = "---\n" +
+		"type: command\n" +
+		"name: refactor-module\n" +
+		"version: 1.0.0\n" +
+		"description: Guided module refactoring with configurable focus areas.\n" +
+		"tags: [command, refactoring]\n" +
+		"sensitivity: low\n" +
+		"---\n\n# Refactor Module\n\n## User Input\n$ARGUMENTS\n"
+	srv := startServer(t, writeRegistry(t, map[string]string{cmdID + "/ARTIFACT.md": cmdArtifact}))
+	res := mcpExec(t, mcpServerEnv(t, srv.BaseURL),
+		rpcReq{ID: 1, Method: "prompts/list", Params: map[string]any{}},
+	)
+	assertMethodNotFound(t, res.Stdout, 1, "prompts/list")
 }
 
 // ---- rule ------------------------------------------------------------------

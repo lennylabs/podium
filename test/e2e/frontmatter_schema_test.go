@@ -426,6 +426,56 @@ func TestFrontmatter_AgentScaffoldDelegatesTo(t *testing.T) {
 	}
 }
 
+// T-D-frontmatter-24, T-D-frontmatter-25, and T-D-frontmatter-26 were written
+// against an earlier draft that defined a command-specific `expose_as_mcp_prompt`
+// field. Scaffolding with `--expose-as-mcp-prompt` would write the field (-24),
+// an opted-in command would appear in MCP `prompts/list` (-25), and a
+// non-opted-in command would not (-26). That field was removed. The doc states
+// "Podium does not project commands through MCP" (docs/authoring/artifact-types.md
+// § command), the frontmatter reference lists no such type-specific field, the
+// manifest schema does not parse it, and the MCP server defines no `prompts/list`
+// method (BUILD-GAPS F-5.2 — "No findings"). The two tests below assert the
+// current observable behavior the doc claims.
+
+// TestFrontmatter_CommandScaffoldRejectsExposeFlag covers the realigned
+// T-D-frontmatter-24: `--expose-as-mcp-prompt` is not a defined scaffold flag,
+// so the flag parse fails with exit 2, and a valid command scaffold writes an
+// ARTIFACT.md that carries no `expose_as_mcp_prompt` field.
+func TestFrontmatter_CommandScaffoldRejectsExposeFlag(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	bad := runPodium(t, "", nil, "artifact", "scaffold", "--type", "command",
+		"--description", "A slash command.", "--expose-as-mcp-prompt", "--yes",
+		filepath.Join(root, "eng/my-cmd"))
+	if bad.Exit != 2 {
+		t.Errorf("scaffold with unknown --expose-as-mcp-prompt flag: exit=%d, want 2; stderr=%s", bad.Exit, bad.Stderr)
+	}
+	out := filepath.Join(root, "eng/valid-cmd")
+	good := runPodium(t, "", nil, "artifact", "scaffold", "--type", "command",
+		"--description", "A slash command.", "--yes", out)
+	if good.Exit != 0 {
+		t.Fatalf("scaffold exit=%d stderr=%s", good.Exit, good.Stderr)
+	}
+	if art := readFile(t, filepath.Join(out, "ARTIFACT.md")); strings.Contains(art, "expose_as_mcp_prompt") {
+		t.Errorf("scaffolded command ARTIFACT.md unexpectedly contains expose_as_mcp_prompt:\n%s", art)
+	}
+}
+
+// TestFrontmatter_CommandNotProjectedThroughMCP covers the realigned
+// T-D-frontmatter-25 and T-D-frontmatter-26, which both collapse to one
+// observable now that the opt-in field is gone: the MCP server defines no
+// `prompts/list` method, so the request returns JSON-RPC -32601 ("method not
+// found") regardless of any command in the registry.
+// spec: §5.2 (no MCP projection); cmd/podium-mcp/main.go default case.
+func TestFrontmatter_CommandNotProjectedThroughMCP(t *testing.T) {
+	t.Parallel()
+	srv := startServer(t, writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact}))
+	res := mcpExec(t, mcpServerEnv(t, srv.BaseURL),
+		rpcReq{ID: 1, Method: "prompts/list", Params: map[string]any{}},
+	)
+	assertMethodNotFound(t, res.Stdout, 1, "prompts/list")
+}
+
 // T-D-frontmatter-27 — rule scaffold (always) writes rule_mode: always.
 func TestFrontmatter_RuleScaffoldAlways(t *testing.T) {
 	t.Parallel()
