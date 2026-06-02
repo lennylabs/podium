@@ -36,9 +36,14 @@ Run the deploy pipeline for the named environment.
       "args": [
         "@acme/warehouse-mcp"
       ],
-      "command": "npx",
-      "x-podium-id": "team/warehouse"
+      "command": "npx"
     }
+  },
+  "x-podium": {
+    "team/warehouse": [
+      "mcpServers",
+      "warehouse"
+    ]
   }
 }
 

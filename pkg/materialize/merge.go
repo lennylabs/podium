@@ -260,12 +260,61 @@ func stripPodiumOwnedBytes(base []byte) []byte {
 	if err := json.Unmarshal(base, &v); err != nil {
 		return base
 	}
+	// First remove the keyed-map entries named by the top-level ownership index
+	// (mcpServers/mcp servers), then the index. Then the recursive walk removes
+	// in-entry-tagged entries (hook arrays, marketplace plugins, and legacy
+	// in-entry mcp tags written before the index existed).
+	if root, ok := v.(map[string]any); ok {
+		stripIndexedEntries(root)
+	}
 	stripped := stripPodiumOwned(v)
 	out, err := json.MarshalIndent(stripped, "", "  ")
 	if err != nil {
 		return base
 	}
 	return append(out, '\n')
+}
+
+// stripIndexedEntries removes every config-map entry named by the top-level
+// adapter.PodiumIndexKey object, then removes the index itself. Each index value
+// is a path ([container, key]) into the document; the entry it points at is the
+// Podium-owned one to drop before the current sync's fragments merge in. A
+// missing or malformed index, or a path to an entry that no longer exists, is a
+// no-op so the strip is safe on a hand-edited file.
+func stripIndexedEntries(root map[string]any) {
+	idx, ok := root[adapter.PodiumIndexKey].(map[string]any)
+	if !ok {
+		return
+	}
+	for _, loc := range idx {
+		path, ok := loc.([]any)
+		if !ok || len(path) == 0 {
+			continue
+		}
+		deleteAtPath(root, path)
+	}
+	delete(root, adapter.PodiumIndexKey)
+}
+
+// deleteAtPath walks the string path from root and deletes the leaf key from its
+// parent object. A non-string path element, or a parent that is not an object,
+// stops the walk without deleting.
+func deleteAtPath(root map[string]any, path []any) {
+	cur := root
+	for i := 0; i < len(path)-1; i++ {
+		k, ok := path[i].(string)
+		if !ok {
+			return
+		}
+		next, ok := cur[k].(map[string]any)
+		if !ok {
+			return
+		}
+		cur = next
+	}
+	if leaf, ok := path[len(path)-1].(string); ok {
+		delete(cur, leaf)
+	}
 }
 
 // stripPodiumOwned walks a decoded JSON value and removes any object that

@@ -238,20 +238,18 @@ var drivers = []driver{
 		loginMarker: "Logged in",
 	},
 	{
-		// Gemini CLI. `gemini mcp list` reads the project .gemini/settings.json,
-		// but Podium tags each merged entry with x-podium-id for reconciliation
-		// and Gemini's settings schema is strict ("Unrecognized key(s) in object:
-		// 'x-podium-id'"), so it flags the config invalid (the server still lists,
-		// with a loud warning). Gemini also gates project config behind folder
-		// trust (--skip-trust). mcp-server is demoted to a skip until the
-		// reconciliation marker moves out of the entry; rule/skill/command run via
-		// Tier C with --skip-trust.
-		harness:    "gemini",
-		bin:        "gemini",
-		version:    []string{"--version"},
-		skipReason: "gemini settings.json schema rejects Podium's x-podium-id reconciliation key as an unrecognized key; mcp-server and hook need the marker moved out of the merged entry",
-		agentExec:  func(prompt string) []string { return []string{"--skip-trust", "--yolo", "-p", prompt} },
-		keyEnv:     "GEMINI_API_KEY",
+		// Gemini CLI. `gemini mcp list` reads the project .gemini/settings.json and
+		// lists the server Podium wrote. Ownership of the mcpServers entry is
+		// tracked by the top-level x-podium index, not an in-entry key, so Gemini's
+		// strict mcpServers schema accepts it. Gemini gates project config behind
+		// folder trust, so the agent runs pass --skip-trust.
+		harness:   "gemini",
+		bin:       "gemini",
+		version:   []string{"--version"},
+		mcpProbe:  []string{"mcp", "list"},
+		server:    "warehouse",
+		agentExec: func(prompt string) []string { return []string{"--skip-trust", "--yolo", "-p", prompt} },
+		keyEnv:    "GEMINI_API_KEY",
 		// OAuth login (no status command); a tiny headless turn proves it works.
 		loginProbe:  []string{"--skip-trust", "-p", "Reply with exactly: PODIUMOK"},
 		loginMarker: "PODIUMOK",
@@ -395,10 +393,11 @@ var behaviors = []behavior{
 			// harness's non-interactive runtime, not Podium's output.
 			"cursor": "materialized .cursor/hooks.json is correct (verified against cursor-agent's projectConfigPath + stop event); cursor-agent --print does not run the stop lifecycle hook in headless mode",
 			"codex":  "materialized .codex/config.toml [[hooks.Stop]] is the correct native schema (verified with codex --strict-config); codex exec does not fire config.toml lifecycle hooks (not even SessionStart) in codex-cli 0.136.0",
-			// stop now maps to AfterAgent (gemini has no Stop event), but the
-			// settings.json entry still carries x-podium-id, which gemini's strict
-			// schema rejects; fix the reconciliation marker before claiming this.
-			"gemini": "gemini maps stop->AfterAgent, but the .gemini/settings.json hook entry carries x-podium-id, which gemini's strict schema flags invalid; needs the reconciliation marker moved out of the entry",
+			// stop maps to AfterAgent (gemini has no Stop event); the
+			// .gemini/settings.json hook materializes correctly (gemini tolerates
+			// the in-entry x-podium-id on hook arrays), but gemini -p does not fire
+			// the AfterAgent lifecycle hook in headless mode.
+			"gemini": "materialized .gemini/settings.json AfterAgent hook is correct (gemini has no Stop event; stop->AfterAgent), but gemini -p does not fire the AfterAgent lifecycle hook in headless mode",
 		},
 	},
 }

@@ -62,9 +62,14 @@ Perform a deep architectural review when invoked.
         "@acme/warehouse-mcp"
       ],
       "enabled": true,
-      "type": "local",
-      "x-podium-id": "team/warehouse"
+      "type": "local"
     }
+  },
+  "x-podium": {
+    "team/warehouse": [
+      "mcp",
+      "warehouse"
+    ]
   }
 }
 

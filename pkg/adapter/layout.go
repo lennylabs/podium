@@ -165,21 +165,33 @@ func mcpName(src Source) string {
 	return lastSeg(src.ArtifactID)
 }
 
-// mcpFragmentJSON builds the {"mcpServers": {...}} OpMergeJSON fragment. The
-// server entry is tagged Podium-owned so the merge layer can reconcile it.
-func mcpFragmentJSON(src Source) []byte {
-	cfg := mcpServerConfig(parsed(src).ServerIdentifier)
-	cfg[PodiumOwnedKey] = src.ArtifactID
-	frag := map[string]any{"mcpServers": map[string]any{mcpName(src): cfg}}
+// jsonMapMergeFragment builds an OpMergeJSON fragment for a single Podium-owned
+// entry in a keyed config map (container is "mcpServers" or "mcp"). Ownership is
+// recorded in the top-level PodiumIndexKey object as artifact ID -> [container,
+// key], not inside the entry, so a strict harness schema (Gemini's mcpServers)
+// does not reject an unrecognized in-entry key. The map key is the stable
+// identity the merge layer reconciles the entry by.
+func jsonMapMergeFragment(container, key string, entry map[string]any, artifactID string) []byte {
+	frag := map[string]any{
+		container:      map[string]any{key: entry},
+		PodiumIndexKey: map[string]any{artifactID: []string{container, key}},
+	}
 	b, _ := json.Marshal(frag)
 	return b
+}
+
+// mcpFragmentJSON builds the {"mcpServers": {...}} OpMergeJSON fragment with the
+// server's ownership recorded in the top-level index.
+func mcpFragmentJSON(src Source) []byte {
+	cfg := mcpServerConfig(parsed(src).ServerIdentifier)
+	return jsonMapMergeFragment("mcpServers", mcpName(src), cfg, src.ArtifactID)
 }
 
 // opencodeMCPJSON builds the OpenCode `mcp` config entry, which uses a
 // type/command-array shape distinct from the mcpServers object.
 func opencodeMCPJSON(src Source) []byte {
 	cfg := mcpServerConfig(parsed(src).ServerIdentifier)
-	entry := map[string]any{"enabled": true, PodiumOwnedKey: src.ArtifactID}
+	entry := map[string]any{"enabled": true}
 	if url, ok := cfg["url"].(string); ok {
 		entry["type"], entry["url"] = "remote", url
 	} else {
@@ -190,9 +202,7 @@ func opencodeMCPJSON(src Source) []byte {
 		}
 		entry["command"] = cmdline
 	}
-	frag := map[string]any{"mcp": map[string]any{mcpName(src): entry}}
-	b, _ := json.Marshal(frag)
-	return b
+	return jsonMapMergeFragment("mcp", mcpName(src), entry, src.ArtifactID)
 }
 
 // codexMCPTOML renders an [mcp_servers.<name>] table for Codex's config.toml.

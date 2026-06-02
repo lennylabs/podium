@@ -80,9 +80,14 @@ print('hello')
       "args": [
         "@acme/warehouse-mcp"
       ],
-      "command": "npx",
-      "x-podium-id": "team/warehouse"
+      "command": "npx"
     }
+  },
+  "x-podium": {
+    "team/warehouse": [
+      "mcpServers",
+      "warehouse"
+    ]
   }
 }
 

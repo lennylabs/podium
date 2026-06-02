@@ -175,6 +175,77 @@ func TestConfigMerge_AccumulateIdempotentRemove(t *testing.T) {
 	}
 }
 
+// taggedServer builds a Podium-owned mcpServers fragment for server name keyed
+// by id, mirroring adapter.mcpFragmentJSON: the entry carries no in-entry tag and
+// ownership lives in the top-level index.
+func taggedServer(name, id string) []byte {
+	return []byte(`{"mcpServers":{"` + name + `":{"command":"cmd-` + name + `"}},"` +
+		adapter.PodiumIndexKey + `":{"` + id + `":["mcpServers","` + name + `"]}}`)
+}
+
+// §6.7 config-merge contract for a keyed map (mcpServers): the entry carries no
+// in-entry tag, ownership is tracked by the top-level index, two servers
+// accumulate, the operator's untagged server is preserved, a re-sync is
+// idempotent, dropping one removes only its entry, and a legacy in-entry tag
+// (written before the index existed) is still reconciled on the next sync.
+func TestConfigMerge_MapIndexReconcile(t *testing.T) {
+	dest := t.TempDir()
+	mcp := filepath.Join(dest, ".mcp.json")
+	// Operator server plus a legacy Podium entry tagged the old in-entry way.
+	operator := `{"mcpServers":{"op":{"command":"op"},"legacy":{"command":"l","x-podium-id":"old/legacy"}}}`
+	if err := os.WriteFile(mcp, []byte(operator), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	syncServers := func(specs ...[2]string) {
+		files := make([]adapter.File, 0, len(specs))
+		for _, s := range specs {
+			files = append(files, adapter.File{Path: ".mcp.json", Op: adapter.OpMergeJSON, Content: taggedServer(s[0], s[1])})
+		}
+		if err := Write(dest, files); err != nil {
+			t.Fatalf("Write: %v", err)
+		}
+	}
+
+	syncServers([2]string{"alpha", "s/a"}, [2]string{"bravo", "s/b"})
+	got := readString(t, mcp)
+	for _, want := range []string{`"op"`, `"alpha"`, `"bravo"`, `"s/a"`, `"s/b"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("after A+B sync, missing %q:\n%s", want, got)
+		}
+	}
+	// The Podium entries carry no in-entry tag; the index carries the ownership.
+	if strings.Contains(got, `"command":"cmd-alpha","x-podium-id"`) {
+		t.Errorf("Podium map entry should not carry an in-entry tag:\n%s", got)
+	}
+	// The legacy in-entry-tagged entry is reconciled away (its artifact is gone).
+	if strings.Contains(got, `"legacy"`) {
+		t.Errorf("legacy in-entry-tagged entry should have been stripped:\n%s", got)
+	}
+
+	// Re-sync the same set: idempotent (no duplicate server entries). Count the
+	// command value, which is unique to the server entry (the name also appears
+	// in the index path).
+	syncServers([2]string{"alpha", "s/a"}, [2]string{"bravo", "s/b"})
+	got = readString(t, mcp)
+	if n := strings.Count(got, `"cmd-alpha"`); n != 1 {
+		t.Errorf("re-sync duplicated alpha (count=%d):\n%s", n, got)
+	}
+
+	// Drop bravo: only its entry and index record are removed; alpha and the
+	// operator server remain.
+	syncServers([2]string{"alpha", "s/a"})
+	got = readString(t, mcp)
+	if strings.Contains(got, "bravo") || strings.Contains(got, "s/b") {
+		t.Errorf("removed server bravo still present:\n%s", got)
+	}
+	for _, want := range []string{`"op"`, `"alpha"`, `"s/a"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("after removing bravo, missing %q:\n%s", want, got)
+		}
+	}
+}
+
 // stripPodiumBlocks removes only the Podium-managed inject blocks and leaves
 // the operator's surrounding content intact.
 func TestStripPodiumBlocks_PreservesOperatorContent(t *testing.T) {

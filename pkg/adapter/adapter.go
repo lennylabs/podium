@@ -43,7 +43,23 @@ const (
 // current set is merged, which preserves the operator's untagged entries,
 // accumulates multiple Podium entries, and removes an artifact's entry once it
 // is gone.
+//
+// This in-entry tag is used for entries inside a JSON array (a hook event's
+// handler list, the Cowork marketplace plugin list), where the array has no
+// stable key to reference the entry by. Entries inside a keyed JSON object (an
+// mcpServers map, the OpenCode mcp map) are tracked by PodiumIndexKey instead,
+// because some harness schemas (Gemini's mcpServers) reject an unrecognized key
+// inside the entry object.
 const PodiumOwnedKey = "x-podium-id"
+
+// PodiumIndexKey is the top-level object that records ownership of keyed
+// config-map entries (an mcpServers server, an OpenCode mcp server) without
+// placing a tag inside the entry. It maps each artifact ID to the path of its
+// entry (`["mcpServers", "<name>"]`). Reconciliation reads this index to remove
+// Podium's prior entries before the current sync's fragments merge in. Harness
+// config loaders tolerate this unknown top-level key (verified against Claude
+// Code and Gemini CLI) even when they reject an unknown key inside an entry.
+const PodiumIndexKey = "x-podium"
 
 // File is one output produced by an adapter. Path is relative to the
 // destination root; Mode defaults to 0o644 when zero. Op selects the apply
