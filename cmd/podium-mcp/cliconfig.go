@@ -192,3 +192,35 @@ func verifySignaturesFromWorkspace(workspace string) string {
 	}
 	return cfg.Defaults.VerifySignatures
 }
+
+// checkServerVersionFromSyncYAML enforces the §6.7 "Versioning" pin: if any
+// sync.yaml scope (workspace overlay first, then the home-global
+// ~/.podium/sync.yaml) pins a min_server_version above this binary's version,
+// the bridge refuses to start. The bridge can serve any profile, so it must
+// satisfy the highest pin across defaults and every profile in each scope.
+// Returns the first config.server_version_too_old error found, or nil.
+//
+// spec: §6.7 "Versioning", §6.9 "older binaries refuse to start".
+func checkServerVersionFromSyncYAML(binaryVersion string) error {
+	scopes := []string{}
+	if ws, err := os.Getwd(); err == nil {
+		scopes = append(scopes, ws)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		scopes = append(scopes, home)
+	}
+	for _, workspace := range scopes {
+		cfg, err := synccfg.ReadConfig(workspace)
+		if err != nil || cfg == nil {
+			continue
+		}
+		profiles := make([]string, 0, len(cfg.Profiles))
+		for name := range cfg.Profiles {
+			profiles = append(profiles, name)
+		}
+		if verr := cfg.CheckServerVersion(binaryVersion, profiles...); verr != nil {
+			return verr
+		}
+	}
+	return nil
+}

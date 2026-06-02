@@ -152,6 +152,80 @@ func TestHookEvents_BundledScriptPathRewrite(t *testing.T) {
 	}
 }
 
+// codexCommonHookEvents are the §6.7.1 "common events" the Codex hook_event ✓
+// grade requires the adapter to config-merge: session_start, session_end,
+// pre_tool_use, post_tool_use, stop, and pre_compact.
+var codexCommonHookEvents = []string{
+	"session_start", "session_end",
+	"pre_tool_use", "post_tool_use",
+	"stop", "pre_compact",
+}
+
+// Spec: §6.7.1 — the Codex hook_event cell is graded ✓, which the spec defines
+// as config-merging all the common events. session_end was previously unmapped
+// in codexHookEvents, so a session_end hook materialized nothing while the
+// matrix still advertised ✓ (the ⚠ subset condition). Every common event must
+// now config-merge a [[hooks.<Event>]] table into .codex/config.toml.
+func TestHookEvents_CodexCoversCommonEvents(t *testing.T) {
+	t.Parallel()
+	a, err := DefaultRegistry().Get("codex")
+	if err != nil {
+		t.Fatalf("Get(codex): %v", err)
+	}
+	for _, event := range codexCommonHookEvents {
+		src := Source{
+			ArtifactID: "hooks/" + event,
+			ArtifactBytes: []byte("---\ntype: hook\nversion: 1.0.0\ndescription: a hook\n" +
+				"hook_event: " + event + "\nhook_action: |\n  echo " + event + "\n---\n\n"),
+		}
+		out, err := a.Adapt(context.Background(), src)
+		if err != nil {
+			t.Fatalf("Adapt(%s): %v", event, err)
+		}
+		var merged string
+		for _, f := range out {
+			if f.Path == ".codex/config.toml" && f.Op == OpInject {
+				merged = string(f.Content)
+			}
+		}
+		if merged == "" {
+			t.Errorf("codex hook %s: no .codex/config.toml inject produced; the ✓ grade requires every common event to config-merge", event)
+			continue
+		}
+		if !strings.Contains(merged, "[[hooks.") || !strings.Contains(merged, "echo "+event) {
+			t.Errorf("codex hook %s: fragment missing the hooks table or command:\n%s", event, merged)
+		}
+	}
+}
+
+// Spec: §6.7.1 — session_end specifically maps to the Codex-native SessionEnd
+// event, the regression this finding fixed.
+func TestHookEvents_CodexSessionEnd(t *testing.T) {
+	t.Parallel()
+	a, err := DefaultRegistry().Get("codex")
+	if err != nil {
+		t.Fatalf("Get(codex): %v", err)
+	}
+	src := Source{
+		ArtifactID: "hooks/teardown",
+		ArtifactBytes: []byte("---\ntype: hook\nversion: 1.0.0\ndescription: a hook\n" +
+			"hook_event: session_end\nhook_action: |\n  echo bye\n---\n\n"),
+	}
+	out, err := a.Adapt(context.Background(), src)
+	if err != nil {
+		t.Fatalf("Adapt: %v", err)
+	}
+	var merged string
+	for _, f := range out {
+		if f.Path == ".codex/config.toml" {
+			merged = string(f.Content)
+		}
+	}
+	if !strings.Contains(merged, "[[hooks.SessionEnd]]") {
+		t.Errorf("session_end did not config-merge a SessionEnd table:\n%s", merged)
+	}
+}
+
 // Spec: §6.7.1 — a canonical event Cursor has no native subtype for (the
 // generic pre_tool_use) produces no Cursor hook output, reflecting the ⚠
 // partial-coverage cell.

@@ -355,6 +355,13 @@ func loadConfig() (*config, error) {
 	if _, err := adapter.DefaultRegistry().Get(c.harness); err != nil {
 		return nil, err
 	}
+	// spec: §6.7 "Versioning" — a profile or harness combination that needs a
+	// newer adapter behavior pins a minimum binary version via
+	// min_server_version in sync.yaml; an older binary refuses to start rather
+	// than materializing with stale adapter behavior.
+	if err := checkServerVersionFromSyncYAML(buildinfo.Version); err != nil {
+		return nil, err
+	}
 	return c, nil
 }
 

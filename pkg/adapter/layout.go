@@ -383,8 +383,12 @@ func cursorHookFragmentJSON(src Source) []byte {
 }
 
 // codexHookEvents maps the canonical events to Codex's native hook events.
+// Codex covers all the §6.7.1 common events (session_start, session_end,
+// pre_tool_use, post_tool_use, stop, pre_compact), which is what its ✓
+// hook_event grade requires. spec: §6.7.1 (Codex hook_event graded ✓).
 var codexHookEvents = map[string]string{
 	"session_start":        "SessionStart",
+	"session_end":          "SessionEnd",
 	"user_prompt_submit":   "UserPromptSubmit",
 	"pre_tool_use":         "PreToolUse",
 	"post_tool_use":        "PostToolUse",

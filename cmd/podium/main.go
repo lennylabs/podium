@@ -252,6 +252,14 @@ func syncCmd(args []string) int {
 	if resolved.CollisionWarning != "" {
 		fmt.Fprintln(os.Stderr, resolved.CollisionWarning)
 	}
+	// spec: §6.7 "Versioning" — refuse to run when the merged defaults or the
+	// active profile pin a min_server_version above this binary. podium sync
+	// runs the same versioned adapters as the MCP server, so an older binary
+	// must not materialize with stale adapter behavior.
+	if verr := merged.CheckServerVersion(buildinfo.Version, resolved.Profile); verr != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", verr)
+		return 2
+	}
 
 	registryPath := resolved.Registry
 	if registryPath != "" {

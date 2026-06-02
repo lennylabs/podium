@@ -65,6 +65,29 @@ func TestPodiumLint_RuleModeOutOfEnumErrors(t *testing.T) {
 	}
 }
 
+// TestPodiumLint_MCPServersUntranslatableErrors covers F-6.7.2.
+// Spec: §6.7.1 — mcpServers is graded ✗ for codex (the TOML agent translation
+// drops it). An agent that declares mcpServers and targets codex is an ingest
+// error. Before the fix the lint never evaluated the mcpServers row, so the
+// combination passed silently and the field was lost.
+func TestPodiumLint_MCPServersUntranslatableErrors(t *testing.T) {
+	t.Parallel()
+	registry := t.TempDir()
+	testharness.WriteTree(t, registry, testharness.WriteTreeOption{
+		Path: "agents/warehouse/ARTIFACT.md",
+		Content: "---\ntype: agent\nversion: 1.0.0\ndescription: a.\n" +
+			"mcpServers:\n  - name: finance-warehouse\n    command: npx\n" +
+			"target_harnesses: [codex]\n---\n\nbody\n",
+	})
+	res := cmdharness.Run(t, "podium", "", "lint", "--registry", registry)
+	if res.ExitCode != 1 {
+		t.Fatalf("lint exit=%d, want 1\nstdout:\n%s", res.ExitCode, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "[error]") || !strings.Contains(res.Stdout, "mcpServers") {
+		t.Errorf("expected an error naming mcpServers:\n%s", res.Stdout)
+	}
+}
+
 // TestPodiumLint_SkillPodiumFieldErrors covers F-4.3.6.
 // Spec: §4.3.4 — a Podium-only field in SKILL.md is an ingest error; the
 // field belongs in ARTIFACT.md. ParseSkill drops the key, so the lint

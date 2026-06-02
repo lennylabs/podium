@@ -162,6 +162,9 @@ func mergeDefaults(dst *Defaults, src Defaults) {
 	if src.Profile != "" {
 		dst.Profile = src.Profile
 	}
+	if src.MinServerVersion != "" {
+		dst.MinServerVersion = src.MinServerVersion
+	}
 }
 
 // ResolveInput carries the sync CLI flag values. An empty string or slice

@@ -23,6 +23,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lennylabs/podium/internal/testharness/cmdharness"
 )
 
 // ---- fixtures + helpers -----------------------------------------------------
@@ -1339,5 +1341,112 @@ func TestHarness_MCPOverlayOverridesRegistry(t *testing.T) {
 	fm, _ := result["frontmatter"].(string)
 	if !strings.Contains(body+fm, "OVERLAY V2") && !strings.Contains(fm, "2.0.0") {
 		t.Errorf("overlay did not take precedence; body=%q frontmatter=%q", body, fm)
+	}
+}
+
+// ---- §6.7 harness-adapter findings (F-6.7.1, F-6.7.2, F-6.7.3) --------------
+
+// F-6.7.1 — a session_end hook materializes for codex. The §6.7.1 matrix grades
+// codex hook_event ✓, which requires the adapter to config-merge every common
+// event; session_end was previously unmapped and produced no output. spec: §6.7.1.
+func TestHarness_CodexSessionEndHookMaterializes(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"audit/teardown/ARTIFACT.md": "---\ntype: hook\nversion: 1.0.0\ndescription: teardown.\n" +
+			"hook_event: session_end\nhook_action: |\n  echo bye\n---\n\nbody\n",
+	})
+	target := t.TempDir()
+	chSync(t, reg, target, "codex")
+	cfg := readFile(t, filepath.Join(target, ".codex", "config.toml"))
+	if !strings.Contains(cfg, "[[hooks.SessionEnd]]") {
+		t.Errorf("session_end hook did not config-merge a SessionEnd table:\n%s", cfg)
+	}
+}
+
+// F-6.7.2 — an agent that declares mcpServers and targets codex (✗ for the
+// mcpServers field) is an ingest lint error. Before the fix the lint never
+// evaluated the mcpServers row, so the field was dropped silently. spec: §6.7.1.
+func TestHarness_MCPServersTargetingCodexLintErrors(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"agents/warehouse/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: d.\n" +
+			"mcpServers:\n  - name: finance-warehouse\n    command: npx\n" +
+			"target_harnesses: [codex]\n---\n\nbody\n",
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 1 {
+		t.Fatalf("lint exit=%d, want 1\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "mcpServers") || !strings.Contains(res.Stdout, "codex") {
+		t.Errorf("expected a capability error naming mcpServers and codex:\n%s", res.Stdout)
+	}
+}
+
+// F-6.7.2 — the same agent targeting claude-code (✓ for mcpServers) lints clean.
+func TestHarness_MCPServersTargetingClaudeCodeLintClean(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"agents/warehouse/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: d.\n" +
+			"mcpServers:\n  - name: finance-warehouse\n    command: npx\n" +
+			"target_harnesses: [claude-code]\n---\n\nbody\n",
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 0 {
+		t.Fatalf("lint exit=%d, want 0\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if strings.Contains(res.Stdout, "[error]") {
+		t.Errorf("claude-code ✓ for mcpServers must lint clean:\n%s", res.Stdout)
+	}
+}
+
+// F-6.7.3 — podium sync refuses when sync.yaml pins a min_server_version above
+// this binary (§6.7 "Versioning": older binaries refuse to start).
+func TestHarness_SyncRefusesBelowMinServerVersion(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
+	ws := t.TempDir()
+	chWriteSyncYAML(t, ws, "defaults:\n  registry: "+reg+"\n  min_server_version: \"99.0.0\"\n")
+	res := runPodium(t, ws, []string{"PODIUM_REGISTRY="}, "sync")
+	if res.Exit != 2 {
+		t.Fatalf("sync exit=%d, want 2\nstderr=%s", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "config.server_version_too_old") {
+		t.Errorf("stderr missing config.server_version_too_old:\n%s", res.Stderr)
+	}
+}
+
+// F-6.7.3 — podium sync proceeds when the pinned min_server_version is at or
+// below this binary's version.
+func TestHarness_SyncAllowsAtOrAboveMinServerVersion(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
+	ws := t.TempDir()
+	chWriteSyncYAML(t, ws, "defaults:\n  registry: "+reg+"\n  min_server_version: \"0.0.1\"\n")
+	res := runPodium(t, ws, []string{"PODIUM_REGISTRY="}, "sync")
+	if res.Exit != 0 {
+		t.Fatalf("sync exit=%d, want 0\nstderr=%s", res.Exit, res.Stderr)
+	}
+	mustExist(t, filepath.Join(ws, "glossary", "ARTIFACT.md"))
+}
+
+// F-6.7.3 — the podium-mcp bridge refuses to start when sync.yaml pins a
+// min_server_version above this binary. The bridge reads the pin from the
+// workspace .podium/sync.yaml in its working directory. spec: §6.7 "Versioning".
+func TestHarness_MCPRefusesBelowMinServerVersion(t *testing.T) {
+	t.Parallel()
+	ws := t.TempDir()
+	chWriteSyncYAML(t, ws, "defaults:\n  registry: https://registry.example\n  min_server_version: \"99.0.0\"\n")
+	env := []string{
+		"PODIUM_REGISTRY=https://registry.example",
+		"PODIUM_CACHE_DIR=" + t.TempDir(),
+	}
+	// loadConfig refuses before the serve loop, so the bridge exits without
+	// reading stdin; a bounded deadline guards against any hang.
+	res := runBin(t, cmdharness.Bin(t, "podium-mcp"), ws, env, nil, 30*time.Second)
+	if res.Exit != 2 {
+		t.Fatalf("podium-mcp exit=%d, want 2\nstderr=%s", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "config.server_version_too_old") {
+		t.Errorf("stderr missing config.server_version_too_old:\n%s", res.Stderr)
 	}
 }

@@ -164,6 +164,61 @@ func ResolveLatest(candidates []Candidate) (string, error) {
 	return best, nil
 }
 
+// parseCore parses the major.minor.patch core of an exact semver string,
+// discarding any prerelease or build suffix (so a "-dev" or "-rc.1" binary
+// version compares by its release core). It returns ErrInvalidPin when the
+// core is not an exact major.minor.patch triple.
+func parseCore(s string) (Pin, error) {
+	core := s
+	if i := strings.IndexAny(core, "-+"); i >= 0 {
+		core = core[:i]
+	}
+	p, err := ParsePin(core)
+	if err != nil {
+		return Pin{}, err
+	}
+	if p.Kind != PinExact {
+		return Pin{}, fmt.Errorf("%w: %q is not an exact version", ErrInvalidPin, s)
+	}
+	return p, nil
+}
+
+// Compare orders two exact semver strings by their major.minor.patch core,
+// ignoring any prerelease or build suffix. It returns -1, 0, or 1 when a is
+// below, equal to, or above b, and ErrInvalidPin when either string is not
+// an exact version.
+func Compare(a, b string) (int, error) {
+	pa, err := parseCore(a)
+	if err != nil {
+		return 0, err
+	}
+	pb, err := parseCore(b)
+	if err != nil {
+		return 0, err
+	}
+	switch {
+	case less(pa, pb):
+		return -1, nil
+	case less(pb, pa):
+		return 1, nil
+	default:
+		return 0, nil
+	}
+}
+
+// AtLeast reports whether version is greater than or equal to minimum,
+// comparing the major.minor.patch core and ignoring any prerelease or
+// build suffix. It returns ErrInvalidPin when either string is not an
+// exact version. Used by the §6.7 adapter-versioning pin to decide whether
+// a binary satisfies a declared minimum MCP server version.
+func AtLeast(version, minimum string) (bool, error) {
+	c, err := Compare(version, minimum)
+	if err != nil {
+		return false, err
+	}
+	return c >= 0, nil
+}
+
 func matches(pin, candidate Pin) bool {
 	switch pin.Kind {
 	case PinLatest:

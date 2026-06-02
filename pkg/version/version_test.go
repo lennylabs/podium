@@ -171,6 +171,72 @@ func TestResolveLatest_EmptyIsError(t *testing.T) {
 	}
 }
 
+// Spec: §6.7 "Versioning" — Compare orders two exact versions by their
+// major.minor.patch core, ignoring any -prerelease or +build suffix.
+func TestCompare_Ordering(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		a, b string
+		want int
+	}{
+		{"1.2.3", "1.2.3", 0},
+		{"1.2.3", "1.2.4", -1},
+		{"1.2.4", "1.2.3", 1},
+		{"1.3.0", "1.2.9", 1},
+		{"2.0.0", "1.9.9", 1},
+		{"0.1.2", "0.2.0", -1},
+		// Pre-release and build suffixes compare by the release core.
+		{"0.0.0-dev", "0.0.0", 0},
+		{"1.2.0-rc.1", "1.2.0", 0},
+		{"1.2.3+build.5", "1.2.3", 0},
+	}
+	for _, c := range cases {
+		got, err := Compare(c.a, c.b)
+		if err != nil {
+			t.Fatalf("Compare(%q,%q): %v", c.a, c.b, err)
+		}
+		if got != c.want {
+			t.Errorf("Compare(%q,%q) = %d, want %d", c.a, c.b, got, c.want)
+		}
+	}
+}
+
+// Spec: §6.7 "Versioning" — Compare rejects a non-exact version string.
+func TestCompare_InvalidIsError(t *testing.T) {
+	t.Parallel()
+	for _, s := range []string{"1.x", "1.2.x", "", "not-a-version", "1.2"} {
+		if _, err := Compare(s, "1.0.0"); !errors.Is(err, ErrInvalidPin) {
+			t.Errorf("Compare(%q,...) = %v, want ErrInvalidPin", s, err)
+		}
+	}
+}
+
+// Spec: §6.7 "Versioning" — AtLeast reports whether a binary version meets a
+// pinned minimum.
+func TestAtLeast(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		version, min string
+		want         bool
+	}{
+		{"1.2.3", "1.2.3", true},
+		{"1.2.4", "1.2.3", true},
+		{"1.2.2", "1.2.3", false},
+		{"0.1.2", "0.2.0", false},
+		{"2.0.0", "1.9.9", true},
+		{"0.0.0-dev", "0.0.0", true},
+	}
+	for _, c := range cases {
+		got, err := AtLeast(c.version, c.min)
+		if err != nil {
+			t.Fatalf("AtLeast(%q,%q): %v", c.version, c.min, err)
+		}
+		if got != c.want {
+			t.Errorf("AtLeast(%q,%q) = %v, want %v", c.version, c.min, got, c.want)
+		}
+	}
+}
+
 func repeat(s string, n int) string {
 	out := make([]byte, n*len(s))
 	for i := 0; i < n; i++ {

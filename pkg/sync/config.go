@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/lennylabs/podium/pkg/version"
 	"gopkg.in/yaml.v3"
 )
 
@@ -38,6 +39,12 @@ type Defaults struct {
 	// writes `never` here on first run so consumers relax the default without
 	// an env var (§13.10); PODIUM_VERIFY_SIGNATURES overrides it.
 	VerifySignatures string `yaml:"verify_signatures,omitempty"`
+	// MinServerVersion pins the minimum MCP server / CLI binary version this
+	// configuration requires (§6.7 "Versioning": a profile or harness
+	// combination that needs a newer adapter behavior pins a minimum, and an
+	// older binary refuses to start). A profile pin overrides this default-wide
+	// pin when it is higher.
+	MinServerVersion string `yaml:"min_server_version,omitempty"`
 }
 
 // Profile is one entry under `profiles:`. Names without explicit
@@ -48,6 +55,10 @@ type Profile struct {
 	Type    []string `yaml:"type,omitempty"`
 	Target  string   `yaml:"target,omitempty"`
 	Harness string   `yaml:"harness,omitempty"`
+	// MinServerVersion pins the minimum binary version this profile requires
+	// (§6.7 "Versioning"). A binary below this refuses to start when the
+	// profile is active.
+	MinServerVersion string `yaml:"min_server_version,omitempty"`
 }
 
 // TargetEntry is one entry under `targets:` (multi-target mode).
@@ -173,4 +184,71 @@ func EnsureConfig(workspace string) (*SyncConfig, error) {
 		cfg.Profiles = map[string]Profile{}
 	}
 	return cfg, nil
+}
+
+// requiredServerVersion returns the highest min_server_version pinned by the
+// `defaults:` block or by any of the named profiles, and whether any pin was
+// found (§6.7 "Versioning"). An unparsable pin is treated as higher than a
+// parsable one so checkServerVersion surfaces it rather than dropping it.
+func requiredServerVersion(defaults Defaults, profiles map[string]Profile, names []string) (string, bool) {
+	pins := []string{defaults.MinServerVersion}
+	for _, name := range names {
+		if p, ok := profiles[name]; ok {
+			pins = append(pins, p.MinServerVersion)
+		}
+	}
+	highest := ""
+	for _, p := range pins {
+		if p == "" {
+			continue
+		}
+		if highest == "" {
+			highest = p
+			continue
+		}
+		if c, err := version.Compare(p, highest); err != nil || c > 0 {
+			highest = p
+		}
+	}
+	return highest, highest != ""
+}
+
+// checkServerVersion verifies that binaryVersion satisfies the highest pin
+// across defaults and the named profiles. It returns a
+// config.server_version_too_old error when binaryVersion is below the pin, a
+// config.invalid_min_version error when a pin (or the binary version) is
+// unparsable, or nil when no pin applies or the binary satisfies it.
+func checkServerVersion(binaryVersion string, defaults Defaults, profiles map[string]Profile, names []string) error {
+	min, ok := requiredServerVersion(defaults, profiles, names)
+	if !ok {
+		return nil
+	}
+	atLeast, err := version.AtLeast(binaryVersion, min)
+	if err != nil {
+		return fmt.Errorf("config.invalid_min_version: cannot compare binary version %q against min_server_version %q: %w",
+			binaryVersion, min, err)
+	}
+	if !atLeast {
+		return fmt.Errorf("config.server_version_too_old: this binary is version %s but the configuration pins min_server_version %s; upgrade Podium to run this profile",
+			binaryVersion, min)
+	}
+	return nil
+}
+
+// CheckServerVersion enforces the §6.7 "Versioning" pin against a raw
+// SyncConfig: binaryVersion must satisfy the highest min_server_version pinned
+// by defaults or by any of the named profiles. Pass every profile name for a
+// server that can serve any profile (the MCP bridge). See checkServerVersion
+// for the error codes.
+func (cfg *SyncConfig) CheckServerVersion(binaryVersion string, profiles ...string) error {
+	return checkServerVersion(binaryVersion, cfg.Defaults, cfg.Profiles, profiles)
+}
+
+// CheckServerVersion enforces the §6.7 "Versioning" pin against a merged
+// (multi-scope) config: binaryVersion must satisfy the highest
+// min_server_version pinned by the merged defaults or by the active profile.
+// Pass the single resolved profile name (a `podium sync` run resolves exactly
+// one profile). See checkServerVersion for the error codes.
+func (cfg *MergedConfig) CheckServerVersion(binaryVersion string, profiles ...string) error {
+	return checkServerVersion(binaryVersion, cfg.Defaults, cfg.Profiles, profiles)
 }

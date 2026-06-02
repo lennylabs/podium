@@ -163,8 +163,9 @@ func Cell(c Capability, harness string) (level Support, ok bool) {
 // that can carry a non-native cell. The artifact's type is emitted as a
 // `type` capability for the types graded by a type row (skill, agent, context,
 // command, mcp-server); rule and hook are graded by their dedicated rule_mode
-// and hook_event rows instead. The frontmatter-field rows (delegates_to,
-// requiresApproval, sandbox_profile) are emitted when the field is set.
+// and hook_event rows instead. The frontmatter-field rows (mcpServers,
+// delegates_to, requiresApproval, sandbox_profile) are emitted when the field
+// is set.
 func UsedCapabilities(art *manifest.Artifact) []Capability {
 	if art == nil {
 		return nil
@@ -174,6 +175,13 @@ func UsedCapabilities(art *manifest.Artifact) []Capability {
 	case manifest.TypeSkill, manifest.TypeAgent, manifest.TypeContext,
 		manifest.TypeCommand, manifest.TypeMCPServer:
 		out = append(out, Capability{Field: "type", Value: string(art.Type)})
+	}
+	// spec: §6.7.1 — mcpServers is a graded frontmatter-field row (✗ for codex,
+	// pi, hermes). Emit it when the agent carries it so the §6.7.1 lint and the
+	// §6.9 untranslatable guard evaluate the row rather than dropping the field
+	// silently.
+	if len(art.MCPServers) > 0 {
+		out = append(out, Capability{Field: "mcpServers"})
 	}
 	if len(art.DelegatesTo) > 0 {
 		out = append(out, Capability{Field: "delegates_to"})

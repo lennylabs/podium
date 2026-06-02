@@ -99,6 +99,31 @@ func TestHarnessCapability_GlobGeminiWarns(t *testing.T) {
 	}
 }
 
+// Spec: §6.7.1 — the mcpServers field is graded ✗ for codex (the TOML agent
+// translation drops it). An agent that declares mcpServers and targets codex
+// is an ingest error. Before the fix the lint never evaluated the mcpServers
+// row, so this combination passed silently and the field was dropped.
+func TestHarnessCapability_MCPServersTargetingCodexErrors(t *testing.T) {
+	t.Parallel()
+	diags := capDiags(t, "---\ntype: agent\nversion: 1.0.0\nname: a\ndescription: d.\nmcpServers:\n  - name: finance-warehouse\n    command: npx\ntarget_harnesses: [codex]\n---\n\nbody\n")
+	if !hasErrorMessage(diags, capCode, "mcpServers") {
+		t.Errorf("expected a capability error naming mcpServers for codex, got: %v", diags)
+	}
+	if !hasErrorMessage(diags, capCode, "codex") {
+		t.Errorf("error should name the harness codex, got: %v", diags)
+	}
+}
+
+// Spec: §6.7.1 — mcpServers is ✓ for claude-code (the pass-through .md agent
+// preserves it), so targeting claude-code is clean.
+func TestHarnessCapability_MCPServersTargetingClaudeCodeClean(t *testing.T) {
+	t.Parallel()
+	diags := capDiags(t, "---\ntype: agent\nversion: 1.0.0\nname: a\ndescription: d.\nmcpServers:\n  - name: finance-warehouse\n    command: npx\ntarget_harnesses: [claude-code]\n---\n\nbody\n")
+	if hasCode(diags, capCode) {
+		t.Errorf("claude-code ✓ for mcpServers must be clean, got: %v", diags)
+	}
+}
+
 // The capability rule ships in the default rule set so both `podium lint`
 // and ingest enforce it (§6.7.1 "ingest-time lint").
 func TestHarnessCapability_RegisteredInAllRules(t *testing.T) {

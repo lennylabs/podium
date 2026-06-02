@@ -122,6 +122,28 @@ func TestCapability_UsedCapabilities(t *testing.T) {
 	if got := UsedCapabilities(agent); len(got) != 4 {
 		t.Errorf("UsedCapabilities(agent) = %v, want 4 (type + 3 fields)", got)
 	}
+	// spec: §6.7.1 — a declared mcpServers list emits the graded mcpServers row
+	// so the lint and the §6.9 guard evaluate it (previously it was dropped).
+	mcpAgent := &manifest.Artifact{
+		Type:       manifest.TypeAgent,
+		MCPServers: []manifest.MCPServerRef{{Name: "finance-warehouse"}},
+	}
+	got := UsedCapabilities(mcpAgent)
+	hasMCP := false
+	for _, c := range got {
+		if c == (Capability{Field: "mcpServers"}) {
+			hasMCP = true
+		}
+	}
+	if !hasMCP {
+		t.Errorf("UsedCapabilities(agent+mcpServers) = %v, want it to include {mcpServers}", got)
+	}
+	// An agent without an mcpServers list does not emit the row.
+	for _, c := range UsedCapabilities(agent) {
+		if c == (Capability{Field: "mcpServers"}) {
+			t.Errorf("UsedCapabilities(agent w/o mcpServers) unexpectedly emitted {mcpServers}")
+		}
+	}
 	// A type with a type row emits it; a stray rule_mode on a non-rule type is
 	// ignored (the hygiene rule covers it).
 	ctx := &manifest.Artifact{Type: manifest.TypeContext, RuleMode: manifest.RuleModeGlob}
