@@ -256,11 +256,21 @@ type LayerConfig struct {
 	UserDefined bool
 	Owner       string // OIDC sub of the registrant for user-defined layers
 	// Visibility fields (subset of layer.Visibility per §4.6).
-	Public        bool
-	Organization  bool
-	Groups        []string
-	Users         []string
-	WebhookSecret string // HMAC secret for git source webhook (§7.3.1)
+	Public       bool
+	Organization bool
+	Groups       []string
+	Users        []string
+	// WebhookSecret is the HMAC secret for a git source's inbound webhook
+	// (§7.3.1). spec §7.3.1 frames it as a credential returned once at
+	// registration ("podium layer register returns the webhook URL and HMAC
+	// secret"). It is redacted from every API response that marshals a
+	// LayerConfig (notably GET /v1/layers, which is not admin-gated) via the
+	// json:"-" tag, mirroring the outbound-receiver masking in webhooks.go;
+	// the secret reaches the caller only through the dedicated webhook_secret
+	// field on the one-time register and rotate-secret responses (F-7.3.1).
+	// The SQL backends persist it through explicit columns, so the tag does
+	// not affect storage.
+	WebhookSecret string `json:"-"`
 	// GitProvider names the §9.1 GitProvider whose signature scheme
 	// verifies this layer's inbound webhook deliveries (e.g. "github",
 	// "gitlab", "bitbucket", or a custom provider registered via

@@ -650,12 +650,18 @@ func TestHTTPAPI_RegisterAdminAuth(t *testing.T) {
 	t.Skip("requires a standard deployment with admin authorization; standalone wires a no-op admin authorizer so admin-defined layer registration returns 201")
 }
 
-// spec: http-api.md § List layers.
+// spec: http-api.md § List layers. F-7.3.1: GET /v1/layers must not leak the
+// inbound webhook HMAC secret; the secret is a one-time registration credential
+// and the list endpoint is not admin-gated.
 func TestHTTPAPI_ListLayers(t *testing.T) {
 	srv := startServer(t, "")
-	apiDo(t, "POST", srv.BaseURL+"/v1/layers", map[string]any{
+	_, regBody := apiDo(t, "POST", srv.BaseURL+"/v1/layers", map[string]any{
 		"id": "team-finance", "source_type": "git", "repo": "git@github.com:acme/x.git", "ref": "main",
 	})
+	secret, _ := apiJSONObj(t, regBody)["webhook_secret"].(string)
+	if secret == "" {
+		t.Fatalf("register response omitted the one-time webhook_secret: %s", regBody)
+	}
 	st, body := getRaw(t, srv.BaseURL+"/v1/layers")
 	apiWantStatus(t, st, 200, "list layers", body)
 	m := apiJSONObj(t, body)
@@ -663,8 +669,11 @@ func TestHTTPAPI_ListLayers(t *testing.T) {
 	if len(layers) == 0 {
 		t.Fatalf("layers list empty")
 	}
-	if strings.Contains(string(body), "WebhookSecret") {
-		t.Log("security gap: GET /v1/layers leaks the capitalized WebhookSecret field (store.LayerConfig has no json:\"-\" tag)")
+	if strings.Contains(string(body), secret) {
+		t.Errorf("F-7.3.1: GET /v1/layers leaked the inbound webhook HMAC secret:\n%s", body)
+	}
+	if strings.Contains(string(body), "WebhookSecret") || strings.Contains(string(body), "webhook_secret") {
+		t.Errorf("F-7.3.1: GET /v1/layers emitted a webhook-secret field:\n%s", body)
 	}
 }
 

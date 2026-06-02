@@ -35,6 +35,13 @@ var errorCodeRegistry = map[string]errorCodeMeta{
 		retryable:       true,
 		suggestedAction: "Reduce the load_artifact request rate or raise the tenant's materialize quota.",
 	},
+	// spec §7.3.1 ingest-cases: "Same version, different content_hash |
+	// Rejected as ingest.immutable_violation. The author bumps the version."
+	// A stored (artifact_id, version) is immutable (§4.7), so retrying the
+	// same content never succeeds; the remediation is a version bump.
+	"ingest.immutable_violation": {
+		suggestedAction: "Bump the artifact version; an existing version's content is immutable.",
+	},
 	// Hard caps: retrying without operator action does not succeed.
 	"quota.layer_count_exceeded": {
 		suggestedAction: "Remove an existing user-defined layer or raise the tenant's layer quota.",

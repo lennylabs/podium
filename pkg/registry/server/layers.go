@@ -936,13 +936,49 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 			"message":     a.Message,
 		})
 	}
+	// spec: §7.3.1 — "Same version, different content_hash | Rejected as
+	// ingest.immutable_violation", and ingest.immutable_violation is one of the
+	// §7.3.1 error codes. Report each same-version content conflict as a
+	// per-artifact object carrying the named code and the conflicting
+	// (artifact_id, version) plus the old/new hashes so the author can tell
+	// which artifact collided and bump its version (F-7.3.2), rather than the
+	// opaque count this previously returned.
+	conflicts := make([]map[string]any, 0, len(res.Conflicts))
+	for _, c := range res.Conflicts {
+		conflicts = append(conflicts, map[string]any{
+			"artifact_id": c.ArtifactID,
+			"version":     c.Version,
+			"old_hash":    c.OldHash,
+			"new_hash":    c.NewHash,
+			"code":        "ingest.immutable_violation",
+		})
+	}
+	// A snapshot whose only outcome is conflicts (nothing accepted, nothing
+	// idempotent) is a pure rejection: surface it as the §6.10
+	// ingest.immutable_violation error envelope (HTTP 409, matching
+	// ingest.frozen / ingest.history_rewritten) so a manual reingest or webhook
+	// delivery sees the rejection the spec promises. This mirrors the
+	// pipeline's lint hard-error rule (ingest.Ingest returns ErrLintFailed only
+	// when nothing else succeeded), so a mixed snapshot still returns 200 with
+	// the accepted artifacts and the conflicts reported per-artifact.
+	if len(res.Conflicts) > 0 && res.Accepted == 0 && res.Idempotent == 0 {
+		first := res.Conflicts[0]
+		msg := fmt.Sprintf("same-version content conflict: %s@%s already exists with different content; bump the version",
+			first.ArtifactID, first.Version)
+		if len(res.Conflicts) > 1 {
+			msg = fmt.Sprintf("%s (and %d more)", msg, len(res.Conflicts)-1)
+		}
+		writeErrorDetails(w, http.StatusConflict, "ingest.immutable_violation", msg,
+			map[string]any{"conflicts": conflicts})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"queued":        cfg.ID,
 		"queued_at":     time.Now().UTC().Format(time.RFC3339),
 		"layer":         cfg.ID,
 		"accepted":      res.Accepted,
 		"idempotent":    res.Idempotent,
-		"conflicts":     len(res.Conflicts),
+		"conflicts":     conflicts,
 		"lint_failures": len(res.LintFailures),
 		"artifacts":     arts,
 		"advisories":    advisories,

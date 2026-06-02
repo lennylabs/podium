@@ -24,9 +24,6 @@ package e2e
 //   - T-D-extending-31: structural static check over SPI interface decls.
 //   - T-D-extending-42: needs a signed-then-tampered artifact.
 //   - T-D-extending-43: SSE change-stream consumption with a bounded read.
-//   - T-D-extending-44: blocked by F-7.3.2 — the reingest path detects a
-//     same-version content conflict but returns an opaque conflicts count
-//     rather than surfacing ingest.immutable_violation.
 //   - T-D-extending-47: default overlay path fallback behavior is uncertain
 //     without explicit PODIUM_OVERLAY_PATH; SKIP honest.
 //   - T-D-extending-48: LocalAuditSink MCP audit log path behavior uncertain.
@@ -1173,10 +1170,13 @@ func TestPluginSPI_SSEArtifactPublished(t *testing.T) {
 	t.Skip("SSE change-stream consumption needs a streaming HTTP client with a bounded read and a reliable ingest trigger; not implemented as a stable e2e gate")
 }
 
-// T-D-extending-44 — Ingest immutability: same version with different content returns ingest.immutable_violation.
+// T-D-extending-44 — Ingest immutability: same version with different content
+// returns ingest.immutable_violation. spec: §7.3.1 — "Same version, different
+// content_hash | Rejected as ingest.immutable_violation. The author bumps the
+// version." A pure-conflict snapshot surfaces the named §6.10 code through the
+// reingest response (HTTP 409), so the CLI exits non-zero (F-7.3.2).
 func TestPluginSPI_IngestImmutableViolation(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-7.3.2: the reingest path detects a same-version content conflict but returns HTTP 200 with an opaque conflicts count instead of surfacing ingest.immutable_violation through the reingest response")
 	layerDir := t.TempDir()
 	mkArtifact(t, filepath.Join(layerDir, "finance/ap/pay-invoice"), greetSkillArtifact)
 	if err := os.WriteFile(filepath.Join(layerDir, "finance/ap/pay-invoice", "SKILL.md"), []byte(skillBody("pay-invoice")), 0o644); err != nil {
@@ -1190,25 +1190,25 @@ func TestPluginSPI_IngestImmutableViolation(t *testing.T) {
 	}
 
 	// initial ingest
-	ri1 := runPodium(t, "", nil, "layer", "reingest", "ext-immutable-layer", "--registry", srv.BaseURL)
+	ri1 := runPodium(t, "", nil, "layer", "reingest", "--registry", srv.BaseURL, "ext-immutable-layer")
 	if ri1.Exit != 0 {
 		t.Fatalf("initial reingest: exit=%d stderr=%s", ri1.Exit, ri1.Stderr)
 	}
 
-	// modify body, keep same version
+	// Change the ARTIFACT.md body while keeping version 1.0.0. The content hash
+	// covers the ARTIFACT.md bytes, so the second snapshot's hash differs from
+	// the stored one at the same (artifact_id, version): a same-version conflict.
 	changedArtifact := "---\ntype: skill\nversion: 1.0.0\ntags: [demo, hello-world]\nsensitivity: low\n---\n\n<!-- CHANGED body - different content, same version -->\n"
 	mkArtifact(t, filepath.Join(layerDir, "finance/ap/pay-invoice"), changedArtifact)
 
-	// second reingest: should fail with ingest.immutable_violation
-	ri2 := runPodium(t, "", nil, "layer", "reingest", "ext-immutable-layer", "--registry", srv.BaseURL)
+	// second reingest: rejected as ingest.immutable_violation (CLI exit != 0).
+	ri2 := runPodium(t, "", nil, "layer", "reingest", "--registry", srv.BaseURL, "ext-immutable-layer")
 	if ri2.Exit == 0 {
-		// may or may not be enforced; if it passes, log and skip
-		t.Logf("ingest with changed body same version did not fail (immutability may not be enforced via reingest path); stdout=%s stderr=%s", ri2.Stdout, ri2.Stderr)
-		t.Skip("ingest.immutable_violation not surfaced through reingest path in standalone mode")
+		t.Fatalf("second reingest with same version + changed content must fail; stdout=%s stderr=%s", ri2.Stdout, ri2.Stderr)
 	}
 	combined := ri2.Stdout + ri2.Stderr
-	if !strings.Contains(combined, "immutable") {
-		t.Logf("reingest failed (exit=%d) but no immutable error code: %s", ri2.Exit, combined)
+	if !strings.Contains(combined, "ingest.immutable_violation") {
+		t.Errorf("reingest output missing ingest.immutable_violation code (exit=%d):\n%s", ri2.Exit, combined)
 	}
 }
 
