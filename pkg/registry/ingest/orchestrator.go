@@ -60,6 +60,9 @@ type SourceIngestOptions struct {
 	// Nil leaves manifests unsigned (the standalone default; §13.10 signing
 	// is disabled unless --sign registry-key is set).
 	Signer SignerFunc
+	// UseVectorOutbox routes embedding through the §4.7.2 transactional outbox
+	// (set for an external vector backend). See ingest.Request.UseVectorOutbox.
+	UseVectorOutbox bool
 }
 
 // SourceIngest snapshots the layer via the supplied provider, runs
@@ -148,6 +151,7 @@ func SourceIngestWithOptions(
 		FreezeWindows:   opts.FreezeWindows,
 		RejectAtOrAbove: opts.RejectAtOrAbove,
 		Signer:          opts.Signer,
+		UseVectorOutbox: opts.UseVectorOutbox,
 	})
 	if err != nil {
 		return nil, err

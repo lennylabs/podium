@@ -35,7 +35,7 @@ func TestBootstrapDeclaredLayers_LocalIngestsAndSeeds(t *testing.T) {
 			Visibility: yamlLayerVisibility{Organization: true},
 		}},
 	}
-	layers, err := bootstrapDeclaredLayers(st, "default", cfg, nil, nil)
+	layers, err := bootstrapDeclaredLayers(st, "default", cfg, nil, nil, false)
 	if err != nil {
 		t.Fatalf("bootstrapDeclaredLayers: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestBootstrapDeclaredLayers_GitSeedsWithoutClone(t *testing.T) {
 			Visibility: yamlLayerVisibility{Groups: []string{"acme-finance"}},
 		}},
 	}
-	layers, err := bootstrapDeclaredLayers(st, "default", cfg, nil, nil)
+	layers, err := bootstrapDeclaredLayers(st, "default", cfg, nil, nil, false)
 	if err != nil {
 		t.Fatalf("bootstrapDeclaredLayers: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestBootstrapDeclaredLayers_EmptyVisibilityUsesDefault(t *testing.T) {
 			Source: yamlLayerSource{Local: &yamlLocalSource{Path: path}},
 		}},
 	}
-	layers, err := bootstrapDeclaredLayers(st, "default", cfg, nil, nil)
+	layers, err := bootstrapDeclaredLayers(st, "default", cfg, nil, nil, false)
 	if err != nil {
 		t.Fatalf("bootstrapDeclaredLayers: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestBootstrapDeclaredLayers_OrdersByListPosition(t *testing.T) {
 			{ID: "second", Source: yamlLayerSource{Local: &yamlLocalSource{Path: declaredLocalTree(t, "b")}}},
 		},
 	}
-	layers, err := bootstrapDeclaredLayers(st, "default", cfg, nil, nil)
+	layers, err := bootstrapDeclaredLayers(st, "default", cfg, nil, nil, false)
 	if err != nil {
 		t.Fatalf("bootstrapDeclaredLayers: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestBootstrapDeclaredLayers_ValidationErrors(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			st := newMemoryStoreWithTenant(t)
 			cfg := &Config{declaredLayers: []yamlLayerEntry{c.entry}}
-			if _, err := bootstrapDeclaredLayers(st, "default", cfg, nil, nil); err == nil {
+			if _, err := bootstrapDeclaredLayers(st, "default", cfg, nil, nil, false); err == nil {
 				t.Errorf("err = nil, want a validation error for %s", c.name)
 			}
 		})

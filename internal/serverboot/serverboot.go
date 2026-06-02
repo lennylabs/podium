@@ -209,6 +209,21 @@ func envInt64(key string, def int64) int64 {
 	return n
 }
 
+// isManagedVectorBackend reports whether the configured vector backend is an
+// external managed service (Pinecone, Weaviate, Qdrant, or any backend not
+// collocated with the metadata store) rather than an in-process or
+// store-collocated one (memory, sqlite-vec, pgvector). External backends route
+// §4.7.2 embedding through the transactional outbox so ingest never blocks on
+// the remote service.
+func isManagedVectorBackend(id string) bool {
+	switch id {
+	case "", "none", "memory", "sqlite-vec", "pgvector":
+		return false
+	default:
+		return true
+	}
+}
+
 // parseAuditSampleRates parses the §8.4 sampling spec
 // "TYPE=RATE,TYPE=RATE" (e.g. "domain.loaded=0.1,artifact.loaded=0.5")
 // into a per-event-type keep-rate map. Malformed entries and rates
@@ -315,7 +330,7 @@ func seedBootstrapAdmins(ctx context.Context, st store.Store, tenantID string, a
 	return seeded, nil
 }
 
-func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Visibility, startOrder int, allowPerDomain bool, resourcePut ingest.ResourcePutFunc, rejectAtOrAbove manifest.Sensitivity, signer ingest.SignerFunc) ([]layer.Layer, error) {
+func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Visibility, startOrder int, allowPerDomain bool, resourcePut ingest.ResourcePutFunc, rejectAtOrAbove manifest.Sensitivity, signer ingest.SignerFunc, useVectorOutbox bool) ([]layer.Layer, error) {
 	if layerPath == "" {
 		return []layer.Layer{}, nil
 	}
@@ -345,6 +360,9 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			ResourcePut: resourcePut,
 			// §13.10/§4.7.9 ingest signing: nil leaves manifests unsigned.
 			Signer: signer,
+			// §4.7.2: an external vector backend commits a vector_pending row
+			// in the same transaction; the drain worker embeds it later.
+			UseVectorOutbox: useVectorOutbox,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("ingest layer %s from %s: %w", l.ID, l.Path, err)
@@ -458,7 +476,7 @@ func visibilityIsEmpty(v layer.Visibility) bool {
 //
 // Ingest runs against context.Background: a bootstrap failure aborts startup
 // before any HTTP listener binds.
-func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resourcePut ingest.ResourcePutFunc, signer ingest.SignerFunc) ([]layer.Layer, error) {
+func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resourcePut ingest.ResourcePutFunc, signer ingest.SignerFunc, useVectorOutbox bool) ([]layer.Layer, error) {
 	if len(cfg.declaredLayers) == 0 {
 		return []layer.Layer{}, nil
 	}
@@ -486,6 +504,8 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resou
 				ResourcePut: resourcePut,
 				// §13.10/§4.7.9 ingest signing: nil leaves manifests unsigned.
 				Signer: signer,
+				// §4.7.2 external-backend outbox enqueue at ingest.
+				UseVectorOutbox: useVectorOutbox,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("ingest declared layer %s from %s: %w", lc.ID, lc.LocalPath, err)
@@ -654,11 +674,23 @@ func Run() error {
 		log.Printf("ingest signing: registry-managed key (§4.7.9)")
 	}
 
+	// §4.7.2: route ingest embedding through the transactional outbox when the
+	// configured vector backend is an external managed service and the store
+	// supports the outbox. Computed from config (the backend is opened later),
+	// so boot ingest and the §7.3.1 reingest runner enqueue vector_pending
+	// rows the drain worker reconciles asynchronously.
+	useVectorOutbox := isManagedVectorBackend(cfg.vectorBackend)
+	if useVectorOutbox {
+		if _, ok := st.(store.VectorOutbox); !ok {
+			useVectorOutbox = false
+		}
+	}
+
 	// §4.6 declarative layers: the registry.yaml `layers:` list seeds an
 	// admin-defined layer per entry (lowest precedence first, in config
 	// order). Local sources are ingested at boot; git sources are seeded as
 	// config rows for the §7.3.1 reingest/webhook path.
-	declared, err := bootstrapDeclaredLayers(st, tenantID, cfg, resourcePut, ingestSigner)
+	declared, err := bootstrapDeclaredLayers(st, tenantID, cfg, resourcePut, ingestSigner, useVectorOutbox)
 	if err != nil {
 		return err
 	}
@@ -670,7 +702,7 @@ func Run() error {
 	// DELETE /v1/layers) see the bootstrap layers. These layers carry no
 	// per-layer visibility input, so they take the deployment default
 	// (§4.6 / §13.10 / F-4.6.9). They append after the declared layers.
-	pathLayers, err := bootstrapLayerPath(st, tenantID, cfg.layerPath, defaultBootstrapVisibility(cfg), len(declared), cfg.allowPerDomain(), resourcePut, publicSensitivityFloor(cfg), ingestSigner)
+	pathLayers, err := bootstrapLayerPath(st, tenantID, cfg.layerPath, defaultBootstrapVisibility(cfg), len(declared), cfg.allowPerDomain(), resourcePut, publicSensitivityFloor(cfg), ingestSigner, useVectorOutbox)
 	if err != nil {
 		return err
 	}
@@ -693,9 +725,15 @@ func Run() error {
 		mreg = metrics.New()
 		registry = registry.WithCacheObserver(mreg.ObserveCache)
 	}
+	// vecProvider / embedProvider are captured beyond the open block so the
+	// §4.7.2 outbox drain worker (started later) can embed and write pending
+	// rows to the external backend.
+	var vecProvider vector.Provider
+	var embedProvider embedding.Provider
 	if v, e, err := openVectorAndEmbedder(cfg); err != nil {
 		log.Printf("warning: vector search disabled: %v", err)
 	} else if v != nil {
+		vecProvider, embedProvider = v, e
 		registry = registry.WithVectorSearch(v, e)
 		if e != nil {
 			log.Printf("hybrid search: vector=%s embedder=%s dim=%d", v.ID(), e.ID(), e.Dimensions())
@@ -996,7 +1034,15 @@ func Run() error {
 	// lint, hash, store, publish events) instead of only recording intent.
 	// It carries the §4.7.2 freeze windows so an active window blocks ingest
 	// unless the manual reingest passes break-glass.
-	layers.WithReingestRunner(buildReingestRunner(st, srv, cfg, resourcePut, auditSink, scrubber, ingestSigner, mreg, auditMeter, tenantID))
+	layers.WithReingestRunner(buildReingestRunner(st, srv, cfg, resourcePut, auditSink, scrubber, ingestSigner, mreg, auditMeter, tenantID, useVectorOutbox))
+
+	// §4.7.2: when ingest routes embedding through the transactional outbox
+	// (external vector backend), start the drain worker that embeds and writes
+	// pending rows to the backend, publishes the outbox-depth gauge, and emits
+	// vector.outbox_lagging when the backend falls behind.
+	if useVectorOutbox {
+		startVectorOutboxWorker(cfg, st, vecProvider, embedProvider, mreg, auditSink, tenantID)
+	}
 
 	// §8.6 transparency anchoring: when the operator enables
 	// PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS, a goroutine periodically
@@ -1240,6 +1286,11 @@ type Config struct {
 	// inbound webhook) are refused with quota.audit_volume_exceeded. Zero
 	// disables enforcement.
 	auditVolumePerDay int64
+	// §4.7.2 vector-outbox drain worker tuning (external backends only).
+	vectorOutboxInterval int // poll interval seconds (default 5)
+	vectorOutboxBatch    int // rows drained per pass (default 50)
+	vectorOutboxLagDepth int // depth that trips vector.outbox_lagging (default 100)
+	vectorOutboxLagAge   int // oldest-row age seconds that trips it (default 300)
 	// §13.10 standalone bootstrap layer path. When non-empty,
 	// Run() opens the filesystem registry at the path, ingests
 	// every resolved layer, and persists a store.LayerConfig per
@@ -1477,6 +1528,10 @@ func LoadConfig() *Config {
 		searchQPSLimit:       envInt("PODIUM_QUOTA_SEARCH_QPS", 0),
 		materializeRateLimit: envInt("PODIUM_QUOTA_MATERIALIZE_RATE", 0),
 		auditVolumePerDay:    envInt64("PODIUM_QUOTA_AUDIT_VOLUME_PER_DAY", 0),
+		vectorOutboxInterval: envInt("PODIUM_VECTOR_OUTBOX_INTERVAL_SECONDS", 5),
+		vectorOutboxBatch:    envInt("PODIUM_VECTOR_OUTBOX_BATCH", 50),
+		vectorOutboxLagDepth: envInt("PODIUM_VECTOR_OUTBOX_LAG_DEPTH", 100),
+		vectorOutboxLagAge:   envInt("PODIUM_VECTOR_OUTBOX_LAG_AGE_SECONDS", 300),
 		// §13.10 standalone bootstrap layer path.
 		layerPath: os.Getenv("PODIUM_LAYER_PATH"),
 		// §13.1.1 evaluation-stack bootstrap admins.

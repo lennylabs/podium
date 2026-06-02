@@ -379,3 +379,56 @@ type Store interface {
 // Implementations import test/conformance/store and reference this
 // constant in their test names so suite discovery is deterministic.
 const SuiteName = "store.RegistryStore"
+
+// VectorPending is one row in the §4.7.2 transactional vector outbox. It holds
+// the composed embedding text for a (tenant, artifact, version) whose vector
+// has not yet been written to an external backend, plus the retry bookkeeping
+// the drain worker maintains.
+type VectorPending struct {
+	TenantID   string
+	ArtifactID string
+	Version    string
+	// Text is the composed embedding text the drain worker embeds and puts to
+	// the external backend.
+	Text string
+	// EnqueuedAt is when the row was committed alongside the manifest. The
+	// drain worker uses the oldest EnqueuedAt to compute outbox age for the
+	// vector.outbox_lagging signal.
+	EnqueuedAt time.Time
+	// Attempts counts drain attempts so the worker can back off and, after a
+	// ceiling, surface a stuck row.
+	Attempts int
+	// NextRetryAt gates when the worker may try the row again (exponential
+	// backoff). A row is eligible when NextRetryAt is not after now.
+	NextRetryAt time.Time
+	// LastError is the most recent drain failure, retained for diagnostics.
+	LastError string
+}
+
+// VectorOutbox is the §4.7.2 transactional-outbox capability a RegistryStore
+// backend may implement so ingest against an external vector backend commits
+// the manifest and a vector_pending row atomically, and a background worker
+// reconciles the backend without ingest blocking on it. Collocated backends
+// (pgvector, sqlite-vec) keep the inline fast path and do not need this. A
+// caller probes for it with a type assertion on the Store.
+type VectorOutbox interface {
+	// PutManifestWithVectorPending commits the manifest and the vector_pending
+	// row in a single transaction, so a crash never leaves a stored artifact
+	// without a queued embedding. It enforces the same immutability invariant
+	// as PutManifest; on an idempotent re-ingest (same content hash) the row is
+	// upserted so a previously-drained artifact is re-queued only when its
+	// content actually changed.
+	PutManifestWithVectorPending(ctx context.Context, rec ManifestRecord, pending VectorPending) error
+	// ListVectorPending returns up to limit rows eligible for a drain attempt
+	// (NextRetryAt not after now), oldest first.
+	ListVectorPending(ctx context.Context, limit int, now time.Time) ([]VectorPending, error)
+	// MarkVectorPendingDone removes the row after a successful backend write.
+	MarkVectorPendingDone(ctx context.Context, tenantID, artifactID, version string) error
+	// MarkVectorPendingRetry records a failed attempt: it increments Attempts,
+	// sets NextRetryAt, and stores the error.
+	MarkVectorPendingRetry(ctx context.Context, tenantID, artifactID, version string, nextRetryAt time.Time, errMsg string) error
+	// VectorOutboxStats returns the current outbox depth and the oldest
+	// EnqueuedAt across pending rows (zero time when the outbox is empty), for
+	// the §13.8 depth gauge and the vector.outbox_lagging threshold.
+	VectorOutboxStats(ctx context.Context) (depth int, oldest time.Time, err error)
+}

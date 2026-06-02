@@ -17,17 +17,21 @@ type Memory struct {
 	admins    map[string]AdminGrant   // key: userID + "/" + orgID
 	layers    map[string]LayerConfig  // key: tenantID + "/" + id
 	domains   map[string]DomainRecord // key: tenantID + "/" + layer + "/" + path
+	// vectorPending is the §4.7.2 transactional vector outbox, keyed like
+	// manifests (tenant/artifact@version).
+	vectorPending map[string]VectorPending
 }
 
 // NewMemory returns a fresh in-memory Store.
 func NewMemory() *Memory {
 	return &Memory{
-		tenants:   map[string]Tenant{},
-		manifests: map[string]ManifestRecord{},
-		deps:      map[string][]DependencyEdge{},
-		admins:    map[string]AdminGrant{},
-		layers:    map[string]LayerConfig{},
-		domains:   map[string]DomainRecord{},
+		tenants:       map[string]Tenant{},
+		manifests:     map[string]ManifestRecord{},
+		deps:          map[string][]DependencyEdge{},
+		admins:        map[string]AdminGrant{},
+		layers:        map[string]LayerConfig{},
+		domains:       map[string]DomainRecord{},
+		vectorPending: map[string]VectorPending{},
 	}
 }
 
@@ -70,6 +74,80 @@ func (s *Memory) PutManifest(_ context.Context, rec ManifestRecord) error {
 	}
 	s.manifests[key] = rec
 	return nil
+}
+
+// PutManifestWithVectorPending commits the manifest and the §4.7.2 outbox row
+// atomically (under the single store lock). The pending row is written only
+// when the manifest is newly inserted, so an idempotent re-ingest does not
+// re-queue an unchanged artifact.
+func (s *Memory) PutManifestWithVectorPending(_ context.Context, rec ManifestRecord, pending VectorPending) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stampDeprecation(&rec)
+	key := mkey(rec.TenantID, rec.ArtifactID, rec.Version)
+	if existing, ok := s.manifests[key]; ok {
+		if existing.ContentHash != rec.ContentHash {
+			return ErrImmutableViolation
+		}
+		return nil // idempotent; an existing pending row stands
+	}
+	s.manifests[key] = rec
+	s.vectorPending[key] = pending
+	return nil
+}
+
+// ListVectorPending returns up to limit eligible outbox rows, oldest first.
+func (s *Memory) ListVectorPending(_ context.Context, limit int, now time.Time) ([]VectorPending, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]VectorPending, 0, len(s.vectorPending))
+	for _, p := range s.vectorPending {
+		if !p.NextRetryAt.After(now) {
+			out = append(out, p)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].EnqueuedAt.Before(out[j].EnqueuedAt) })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// MarkVectorPendingDone removes a drained outbox row.
+func (s *Memory) MarkVectorPendingDone(_ context.Context, tenantID, artifactID, version string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.vectorPending, mkey(tenantID, artifactID, version))
+	return nil
+}
+
+// MarkVectorPendingRetry records a failed drain attempt with backoff.
+func (s *Memory) MarkVectorPendingRetry(_ context.Context, tenantID, artifactID, version string, nextRetryAt time.Time, errMsg string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := mkey(tenantID, artifactID, version)
+	p, ok := s.vectorPending[key]
+	if !ok {
+		return nil
+	}
+	p.Attempts++
+	p.NextRetryAt = nextRetryAt
+	p.LastError = errMsg
+	s.vectorPending[key] = p
+	return nil
+}
+
+// VectorOutboxStats returns the outbox depth and the oldest enqueue time.
+func (s *Memory) VectorOutboxStats(_ context.Context) (int, time.Time, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var oldest time.Time
+	for _, p := range s.vectorPending {
+		if oldest.IsZero() || p.EnqueuedAt.Before(oldest) {
+			oldest = p.EnqueuedAt
+		}
+	}
+	return len(s.vectorPending), oldest, nil
 }
 
 // GetManifest returns the manifest or ErrNotFound.

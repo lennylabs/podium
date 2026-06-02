@@ -235,6 +235,14 @@ type Request struct {
 	// CallerID identifies the operator triggering ingest. Embedded
 	// into the audit event's Caller field. Optional.
 	CallerID string
+	// UseVectorOutbox routes embedding through the §4.7.2 transactional outbox
+	// instead of the synchronous inline path. The orchestrator sets it for an
+	// external (managed) vector backend so ingest commits the manifest and a
+	// vector_pending row in one transaction and never blocks on the external
+	// service; a background drain worker reconciles the backend. It has effect
+	// only when the store implements store.VectorOutbox; collocated backends
+	// leave it false and keep the inline fast path.
+	UseVectorOutbox bool
 }
 
 // AuditEmitterFunc is the audit-emission seam ingest uses to
@@ -689,7 +697,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			continue
 		}
 
-		if err := st.PutManifest(ctx, mr); err != nil {
+		if err := commitManifest(ctx, st, req, mr); err != nil {
 			if errors.Is(err, store.ErrImmutableViolation) {
 				res.Conflicts = append(res.Conflicts, ConflictReport{
 					ArtifactID: mr.ArtifactID,
@@ -769,8 +777,10 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		// store: search returns the prior embedding until this
 		// upsert lands. A failed embedding does not reject the
 		// artifact; it ingests BM25-only and `podium admin reembed`
-		// can retry.
-		if req.Embedder != nil && req.VectorPut != nil {
+		// can retry. Skipped under the §4.7.2 outbox path: the manifest
+		// commit already enqueued the embedding and the drain worker
+		// writes it to the external backend asynchronously.
+		if req.Embedder != nil && req.VectorPut != nil && !req.UseVectorOutbox {
 			if err := embedAndStore(ctx, req, mr); err != nil {
 				res.EmbeddingFailures = append(res.EmbeddingFailures, EmbeddingFailure{
 					ArtifactID: mr.ArtifactID,
@@ -785,6 +795,31 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		return res, fmt.Errorf("%w: %d diagnostics", ErrLintFailed, len(res.LintFailures))
 	}
 	return res, nil
+}
+
+// commitManifest persists the manifest. Under the §4.7.2 outbox path
+// (req.UseVectorOutbox set and the store implementing store.VectorOutbox) it
+// commits the manifest and a vector_pending row atomically, so an external
+// backend is reconciled asynchronously without ingest blocking on it. With no
+// embedding text, or a store that does not implement the outbox, or the inline
+// path, it falls back to a plain PutManifest.
+func commitManifest(ctx context.Context, st store.Store, req Request, mr store.ManifestRecord) error {
+	if req.UseVectorOutbox {
+		if ob, ok := st.(store.VectorOutbox); ok {
+			if text := composeEmbeddingText(mr); text != "" {
+				now := time.Now().UTC()
+				return ob.PutManifestWithVectorPending(ctx, mr, store.VectorPending{
+					TenantID:    mr.TenantID,
+					ArtifactID:  mr.ArtifactID,
+					Version:     mr.Version,
+					Text:        text,
+					EnqueuedAt:  now,
+					NextRetryAt: now,
+				})
+			}
+		}
+	}
+	return st.PutManifest(ctx, mr)
 }
 
 // embedAndStore composes the §4.7 embedding text projection from the

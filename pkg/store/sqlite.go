@@ -145,6 +145,19 @@ func (s *SQLite) applySchema() error {
 			last_ingested_at TEXT,
 			PRIMARY KEY (tenant_id, id)
 		)`,
+		`CREATE TABLE IF NOT EXISTS vector_pending (
+			tenant_id TEXT NOT NULL,
+			artifact_id TEXT NOT NULL,
+			version TEXT NOT NULL,
+			text BLOB NOT NULL,
+			enqueued_at TEXT NOT NULL,
+			attempts INTEGER NOT NULL DEFAULT 0,
+			next_retry_at TEXT NOT NULL,
+			last_error TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (tenant_id, artifact_id, version)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_vector_pending_next_retry
+			ON vector_pending(next_retry_at)`,
 	}
 	for _, sql := range stmts {
 		if _, err := s.db.Exec(sql); err != nil {
@@ -249,6 +262,147 @@ func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
 		return ErrImmutableViolation
 	}
 	return nil // idempotent — same hash
+}
+
+// PutManifestWithVectorPending commits the manifest and the §4.7.2 vector
+// outbox row in a single transaction, so a crash never leaves a stored
+// artifact without a queued embedding. The pending row is written only when
+// the manifest is newly inserted; an idempotent re-ingest (same hash) commits
+// the manifest no-op without re-queuing, and a differing hash rolls back with
+// ErrImmutableViolation.
+func (s *SQLite) PutManifestWithVectorPending(ctx context.Context, rec ManifestRecord, pending VectorPending) error {
+	ingestedAt := rec.IngestedAt
+	if ingestedAt.IsZero() {
+		ingestedAt = time.Now().UTC()
+	}
+	stampDeprecation(&rec)
+	resources, err := MarshalResources(rec.Resources)
+	if err != nil {
+		return fmt.Errorf("marshal resources: %w", err)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, `
+		INSERT INTO manifests
+			(tenant_id, artifact_id, version, content_hash, type, description,
+			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
+			 extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (tenant_id, artifact_id, version) DO NOTHING`,
+		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
+		rec.Type, rec.Description,
+		strings.Join(rec.Tags, "\n"),
+		rec.Sensitivity, rec.Layer,
+		boolToInt(rec.Deprecated),
+		ingestedAt.UTC().Format(time.RFC3339Nano),
+		rec.Frontmatter, rec.Body,
+		rec.ExtendsPin, rec.Signature, rec.SearchVisibility, resources,
+		nullTimeText(rec.DeprecatedAt), nullTimeText(rec.DeletedAt))
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		var existing string
+		err = tx.QueryRowContext(ctx, `
+			SELECT content_hash FROM manifests
+			WHERE tenant_id = ? AND artifact_id = ? AND version = ?`,
+			rec.TenantID, rec.ArtifactID, rec.Version).Scan(&existing)
+		if err != nil {
+			return err
+		}
+		if existing != rec.ContentHash {
+			return ErrImmutableViolation
+		}
+		return tx.Commit() // idempotent — same hash, no re-queue
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO vector_pending
+			(tenant_id, artifact_id, version, text, enqueued_at, attempts, next_retry_at, last_error)
+		VALUES (?, ?, ?, ?, ?, ?, ?, '')
+		ON CONFLICT (tenant_id, artifact_id, version) DO UPDATE SET
+			text = excluded.text, enqueued_at = excluded.enqueued_at,
+			attempts = 0, next_retry_at = excluded.next_retry_at, last_error = ''`,
+		rec.TenantID, rec.ArtifactID, rec.Version, []byte(pending.Text),
+		pending.EnqueuedAt.UTC().Format(time.RFC3339Nano), pending.Attempts,
+		pending.NextRetryAt.UTC().Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ListVectorPending returns up to limit eligible outbox rows, oldest first.
+func (s *SQLite) ListVectorPending(ctx context.Context, limit int, now time.Time) ([]VectorPending, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT tenant_id, artifact_id, version, text, enqueued_at, attempts, next_retry_at, last_error
+		FROM vector_pending
+		WHERE next_retry_at <= ?
+		ORDER BY enqueued_at ASC
+		LIMIT ?`, now.UTC().Format(time.RFC3339Nano), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []VectorPending
+	for rows.Next() {
+		var p VectorPending
+		var text []byte
+		var enqueued, nextRetry string
+		if err := rows.Scan(&p.TenantID, &p.ArtifactID, &p.Version, &text,
+			&enqueued, &p.Attempts, &nextRetry, &p.LastError); err != nil {
+			return nil, err
+		}
+		p.Text = string(text)
+		p.EnqueuedAt, _ = time.Parse(time.RFC3339Nano, enqueued)
+		p.NextRetryAt, _ = time.Parse(time.RFC3339Nano, nextRetry)
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// MarkVectorPendingDone removes a drained outbox row.
+func (s *SQLite) MarkVectorPendingDone(ctx context.Context, tenantID, artifactID, version string) error {
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM vector_pending
+		WHERE tenant_id = ? AND artifact_id = ? AND version = ?`,
+		tenantID, artifactID, version)
+	return err
+}
+
+// MarkVectorPendingRetry records a failed drain attempt with backoff.
+func (s *SQLite) MarkVectorPendingRetry(ctx context.Context, tenantID, artifactID, version string, nextRetryAt time.Time, errMsg string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE vector_pending
+		SET attempts = attempts + 1, next_retry_at = ?, last_error = ?
+		WHERE tenant_id = ? AND artifact_id = ? AND version = ?`,
+		nextRetryAt.UTC().Format(time.RFC3339Nano), errMsg, tenantID, artifactID, version)
+	return err
+}
+
+// VectorOutboxStats returns the outbox depth and oldest enqueue time.
+func (s *SQLite) VectorOutboxStats(ctx context.Context) (int, time.Time, error) {
+	var depth int
+	var oldest sql.NullString
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*), MIN(enqueued_at) FROM vector_pending`).Scan(&depth, &oldest)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+	var t time.Time
+	if oldest.Valid {
+		t, _ = time.Parse(time.RFC3339Nano, oldest.String)
+	}
+	return depth, t, nil
 }
 
 // GetManifest returns the manifest or ErrNotFound.

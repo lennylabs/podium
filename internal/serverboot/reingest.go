@@ -30,6 +30,7 @@ func buildReingestRunner(
 	mreg *metrics.Registry,
 	auditMeter *server.AuditVolumeMeter,
 	tenantID string,
+	useVectorOutbox bool,
 ) server.ReingestRunner {
 	return func(ctx context.Context, lc store.LayerConfig, bg *server.BreakGlass) (*ingest.Result, error) {
 		// §4.7.8: refuse a new auditable write once the tenant has spent its
@@ -59,6 +60,10 @@ func buildReingestRunner(
 			RejectAtOrAbove: publicSensitivityFloor(cfg),
 			// §13.10/§4.7.9 ingest signing: nil leaves manifests unsigned.
 			Signer: signer,
+			// §4.7.2: an external vector backend commits a vector_pending row in
+			// the same transaction as the manifest; the drain worker reconciles
+			// the backend asynchronously so reingest never blocks on it.
+			UseVectorOutbox: useVectorOutbox,
 		}
 		if auditSink != nil {
 			opts.AuditEmit = ingestAuditEmitter(ctx, auditSink, scrubber, caller)

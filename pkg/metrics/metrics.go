@@ -150,9 +150,9 @@ func (m *Registry) IncIngestSuccess() { m.ingestSuccess.Inc() }
 func (m *Registry) IncIngestFailure() { m.ingestFailure.Inc() }
 
 // SetVectorOutboxDepth publishes the current depth of the §4.7.2 external
-// vector-backend outbox to the podium_vector_outbox_depth gauge. The outbox
-// writer calls this after each drain; until the outbox is wired the gauge
-// reports 0.
+// vector-backend outbox to the podium_vector_outbox_depth gauge. The drain
+// worker calls it after each pass; the gauge reads 0 on a collocated backend
+// that uses no outbox.
 func (m *Registry) SetVectorOutboxDepth(n int64) { m.vectorOutbox.Store(n) }
 
 // SetAuditOutboxDepth publishes the current depth of the audit-export outbox to

@@ -158,6 +158,19 @@ func (p *Postgres) applySchema() error {
 			last_ingested_at TIMESTAMPTZ,
 			PRIMARY KEY (tenant_id, id)
 		)`,
+		`CREATE TABLE IF NOT EXISTS vector_pending (
+			tenant_id TEXT NOT NULL,
+			artifact_id TEXT NOT NULL,
+			version TEXT NOT NULL,
+			text BYTEA NOT NULL,
+			enqueued_at TIMESTAMPTZ NOT NULL,
+			attempts BIGINT NOT NULL DEFAULT 0,
+			next_retry_at TIMESTAMPTZ NOT NULL,
+			last_error TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (tenant_id, artifact_id, version)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_vector_pending_next_retry
+			ON vector_pending(next_retry_at)`,
 	}
 	for _, sql := range stmts {
 		if _, err := p.db.Exec(sql); err != nil {
@@ -263,6 +276,142 @@ func (p *Postgres) PutManifest(ctx context.Context, rec ManifestRecord) error {
 		return ErrImmutableViolation
 	}
 	return nil // idempotent — same hash
+}
+
+// PutManifestWithVectorPending commits the manifest and the §4.7.2 vector
+// outbox row in one transaction, so a crash never leaves a stored artifact
+// without a queued embedding. The pending row is written only when the
+// manifest is newly inserted; an idempotent re-ingest commits the no-op
+// without re-queuing, and a differing hash rolls back with
+// ErrImmutableViolation.
+func (p *Postgres) PutManifestWithVectorPending(ctx context.Context, rec ManifestRecord, pending VectorPending) error {
+	ingestedAt := rec.IngestedAt
+	if ingestedAt.IsZero() {
+		ingestedAt = time.Now().UTC()
+	}
+	stampDeprecation(&rec)
+	resources, err := MarshalResources(rec.Resources)
+	if err != nil {
+		return fmt.Errorf("marshal resources: %w", err)
+	}
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, `
+		INSERT INTO manifests
+			(tenant_id, artifact_id, version, content_hash, type, description,
+			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
+			 extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+		ON CONFLICT (tenant_id, artifact_id, version) DO NOTHING`,
+		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
+		rec.Type, rec.Description,
+		strings.Join(rec.Tags, "\n"),
+		rec.Sensitivity, rec.Layer,
+		rec.Deprecated, ingestedAt.UTC(),
+		rec.Frontmatter, rec.Body,
+		rec.ExtendsPin, rec.Signature, rec.SearchVisibility, resources,
+		nullTimePG(rec.DeprecatedAt), nullTimePG(rec.DeletedAt))
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		var existing string
+		err = tx.QueryRowContext(ctx, `
+			SELECT content_hash FROM manifests
+			WHERE tenant_id = $1 AND artifact_id = $2 AND version = $3`,
+			rec.TenantID, rec.ArtifactID, rec.Version).Scan(&existing)
+		if err != nil {
+			return err
+		}
+		if existing != rec.ContentHash {
+			return ErrImmutableViolation
+		}
+		return tx.Commit() // idempotent — same hash, no re-queue
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO vector_pending
+			(tenant_id, artifact_id, version, text, enqueued_at, attempts, next_retry_at, last_error)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, '')
+		ON CONFLICT (tenant_id, artifact_id, version) DO UPDATE SET
+			text = EXCLUDED.text, enqueued_at = EXCLUDED.enqueued_at,
+			attempts = 0, next_retry_at = EXCLUDED.next_retry_at, last_error = ''`,
+		rec.TenantID, rec.ArtifactID, rec.Version, []byte(pending.Text),
+		pending.EnqueuedAt.UTC(), pending.Attempts, pending.NextRetryAt.UTC()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ListVectorPending returns up to limit eligible outbox rows, oldest first.
+func (p *Postgres) ListVectorPending(ctx context.Context, limit int, now time.Time) ([]VectorPending, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := p.db.QueryContext(ctx, `
+		SELECT tenant_id, artifact_id, version, text, enqueued_at, attempts, next_retry_at, last_error
+		FROM vector_pending
+		WHERE next_retry_at <= $1
+		ORDER BY enqueued_at ASC
+		LIMIT $2`, now.UTC(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []VectorPending
+	for rows.Next() {
+		var pend VectorPending
+		var text []byte
+		if err := rows.Scan(&pend.TenantID, &pend.ArtifactID, &pend.Version, &text,
+			&pend.EnqueuedAt, &pend.Attempts, &pend.NextRetryAt, &pend.LastError); err != nil {
+			return nil, err
+		}
+		pend.Text = string(text)
+		out = append(out, pend)
+	}
+	return out, rows.Err()
+}
+
+// MarkVectorPendingDone removes a drained outbox row.
+func (p *Postgres) MarkVectorPendingDone(ctx context.Context, tenantID, artifactID, version string) error {
+	_, err := p.db.ExecContext(ctx, `
+		DELETE FROM vector_pending
+		WHERE tenant_id = $1 AND artifact_id = $2 AND version = $3`,
+		tenantID, artifactID, version)
+	return err
+}
+
+// MarkVectorPendingRetry records a failed drain attempt with backoff.
+func (p *Postgres) MarkVectorPendingRetry(ctx context.Context, tenantID, artifactID, version string, nextRetryAt time.Time, errMsg string) error {
+	_, err := p.db.ExecContext(ctx, `
+		UPDATE vector_pending
+		SET attempts = attempts + 1, next_retry_at = $1, last_error = $2
+		WHERE tenant_id = $3 AND artifact_id = $4 AND version = $5`,
+		nextRetryAt.UTC(), errMsg, tenantID, artifactID, version)
+	return err
+}
+
+// VectorOutboxStats returns the outbox depth and oldest enqueue time.
+func (p *Postgres) VectorOutboxStats(ctx context.Context) (int, time.Time, error) {
+	var depth int
+	var oldest sql.NullTime
+	err := p.db.QueryRowContext(ctx, `
+		SELECT COUNT(*), MIN(enqueued_at) FROM vector_pending`).Scan(&depth, &oldest)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+	var t time.Time
+	if oldest.Valid {
+		t = oldest.Time
+	}
+	return depth, t, nil
 }
 
 // GetManifest returns the manifest or ErrNotFound.
