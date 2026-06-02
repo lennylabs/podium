@@ -1,0 +1,70 @@
+=== .opencode/agents/reviewer.md ===
+---
+type: agent
+version: 1.0.0
+description: Reviews pull requests for bugs.
+---
+
+Review the diff and report defects.
+
+=== .opencode/commands/deploy.md ===
+---
+type: command
+version: 1.0.0
+description: Deploy the service.
+---
+
+Run the deploy pipeline for the named environment.
+
+=== .opencode/skills/hello/SKILL.md ===
+---
+name: hello
+description: Greet a teammate warmly by name.
+---
+
+Say hello to the person and offer help.
+
+=== .opencode/skills/hello/scripts/run.py ===
+print('hello')
+
+=== .podium/context/team/glossary/ARTIFACT.md ===
+---
+type: context
+version: 1.0.0
+description: Company glossary.
+---
+
+ARR means annual recurring revenue.
+
+=== AGENTS.md ===
+<!-- podium:begin:team/tabs-always -->
+Indent with tabs, not spaces.
+<!-- podium:end:team/tabs-always -->
+
+<!-- podium:begin:team/ts-glob -->
+Enable strict type-checking in TypeScript files.
+<!-- podium:end:team/ts-glob -->
+
+<!-- podium:begin:team/ts-auto -->
+Prefer interfaces over type aliases.
+<!-- podium:end:team/ts-auto -->
+
+<!-- podium:begin:team/deep-review -->
+Perform a deep architectural review when invoked.
+<!-- podium:end:team/deep-review -->
+
+=== opencode.json ===
+{
+  "mcp": {
+    "warehouse": {
+      "command": [
+        "npx",
+        "@acme/warehouse-mcp"
+      ],
+      "enabled": true,
+      "type": "local",
+      "x-podium-id": "team/warehouse"
+    }
+  }
+}
+

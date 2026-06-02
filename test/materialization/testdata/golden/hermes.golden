@@ -1,0 +1,36 @@
+=== .cursor/rules/deep-review.mdc ===
+---
+---
+
+Perform a deep architectural review when invoked.
+
+=== .cursor/rules/tabs-always.mdc ===
+---
+alwaysApply: true
+---
+
+Indent with tabs, not spaces.
+
+=== .cursor/rules/ts-auto.mdc ===
+---
+description: Apply when editing TypeScript.
+---
+
+Prefer interfaces over type aliases.
+
+=== .cursor/rules/ts-glob.mdc ===
+---
+globs: *.ts,*.tsx
+---
+
+Enable strict type-checking in TypeScript files.
+
+=== .podium/context/team/glossary/ARTIFACT.md ===
+---
+type: context
+version: 1.0.0
+description: Company glossary.
+---
+
+ARR means annual recurring revenue.
+

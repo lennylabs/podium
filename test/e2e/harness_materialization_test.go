@@ -6,13 +6,13 @@ package e2e
 // (runtime discovery). Tests drive the real CLI and the podium-mcp stdio
 // bridge against filesystem-source registries.
 //
-// Several documented behaviors are known gaps:
-//   - F-6.7.1 / F-6.7.2: the ingest-time capability-matrix lint and the
-//     target_harnesses opt-out are absent, so the lint-warning / lint-error
-//     expectations (21, 37, 38, 42, 43, 46, 50) are skipped.
-//
-// Several adapter destination paths in the doc tables are doc-accuracy gaps;
-// these tests assert the implementation's actual on-disk layout.
+// The §6.7.1 capability-matrix lint and the §4.3.5 target_harnesses opt-out are
+// implemented (pkg/lint/harness_capability.go), so the lint-warning and
+// lint-error cases run here rather than being skipped. The exact per-harness
+// on-disk layout these tests check is pinned byte-for-byte by the golden suite
+// in test/materialization, which materializes a canonical artifact set through
+// every adapter; this file asserts the documented behaviors over the real CLI
+// and MCP bridge.
 
 import (
 	"encoding/json"
@@ -490,6 +490,15 @@ func TestHarness_ClaudeCoworkPluginLayout(t *testing.T) {
 	chSync(t, reg, cowork, "claude-cowork")
 	mustExist(t, filepath.Join(cowork, "plugins", "greet", "skills", "greet", "SKILL.md"))
 	mustExist(t, filepath.Join(cowork, "plugins", "greet", ".claude-plugin", "plugin.json"))
+	// The repository-root marketplace.json lists the plugin so a Cowork admin
+	// can import the synced repo as a private marketplace.
+	market := filepath.Join(cowork, ".claude-plugin", "marketplace.json")
+	mustExist(t, market)
+	if b, err := os.ReadFile(market); err != nil {
+		t.Fatalf("read marketplace.json: %v", err)
+	} else if !strings.Contains(string(b), `"./plugins/greet"`) {
+		t.Errorf("marketplace.json does not list the greet plugin source:\n%s", b)
+	}
 }
 
 // T-D-configure-harness-28 — claude-cowork sync, git add, git commit sequence.

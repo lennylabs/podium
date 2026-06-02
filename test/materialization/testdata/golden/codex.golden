@@ -1,0 +1,80 @@
+=== .agents/skills/hello/SKILL.md ===
+---
+name: hello
+description: Greet a teammate warmly by name.
+---
+
+Say hello to the person and offer help.
+
+=== .agents/skills/hello/scripts/run.py ===
+print('hello')
+
+=== .codex/agents/reviewer.toml ===
+name = "reviewer"
+description = "Reviews pull requests for bugs."
+developer_instructions = """
+Review the diff and report defects.
+
+"""
+
+=== .codex/config.toml ===
+# podium:begin:team/warehouse
+[mcp_servers.warehouse]
+command = "npx"
+args = ["@acme/warehouse-mcp"]
+# podium:end:team/warehouse
+
+=== .codex/hooks.json ===
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "./scripts/guard.sh",
+            "type": "command"
+          }
+        ],
+        "x-podium-id": "team/guard"
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "echo done",
+            "type": "command"
+          }
+        ],
+        "x-podium-id": "team/notify"
+      }
+    ]
+  }
+}
+
+=== .podium/context/team/glossary/ARTIFACT.md ===
+---
+type: context
+version: 1.0.0
+description: Company glossary.
+---
+
+ARR means annual recurring revenue.
+
+=== AGENTS.md ===
+<!-- podium:begin:team/tabs-always -->
+Indent with tabs, not spaces.
+<!-- podium:end:team/tabs-always -->
+
+<!-- podium:begin:team/ts-glob -->
+Enable strict type-checking in TypeScript files.
+<!-- podium:end:team/ts-glob -->
+
+<!-- podium:begin:team/ts-auto -->
+Prefer interfaces over type aliases.
+<!-- podium:end:team/ts-auto -->
+
+<!-- podium:begin:team/deep-review -->
+Perform a deep architectural review when invoked.
+<!-- podium:end:team/deep-review -->
+
