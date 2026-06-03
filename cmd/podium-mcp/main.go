@@ -1423,10 +1423,33 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 	}
 
 	return s.deliverLoadArtifact(resp, deliverOpts{
-		harness:     harnessFromArgs(s.cfg.harness, args),
-		destination: destFromArgs(args),
-		refresh:     s.largeResourceRefresher(args),
+		harness:         harnessFromArgs(s.cfg.harness, args),
+		destination:     destFromArgs(args),
+		refresh:         s.largeResourceRefresher(args),
+		manifestRefresh: s.manifestBodyRefresher(args),
 	})
+}
+
+// manifestBodyRefresher returns a closure that re-requests /v1/load_artifact
+// with the same arguments and yields a freshly presigned manifest_body_url,
+// backing the §6.6 step 1 "retry with a fresh URL" contract for the
+// manifest-body channel. Used only on the live-fetch path; cache and overlay
+// deliveries pass nil.
+func (s *mcpServer) manifestBodyRefresher(args map[string]any) resourceRefresher {
+	return func() (map[string]largeResourceLink, error) {
+		body, err := s.fetchJSON("/v1/load_artifact", args)
+		if err != nil {
+			return nil, err
+		}
+		var fresh loadArtifactResponse
+		if err := json.Unmarshal(body, &fresh); err != nil {
+			return nil, err
+		}
+		if fresh.ManifestBodyURL == nil {
+			return nil, nil
+		}
+		return map[string]largeResourceLink{manifestBodyRefreshKey: *fresh.ManifestBodyURL}, nil
+	}
 }
 
 // largeResourceRefresher returns a closure that re-requests /v1/load_artifact
@@ -1461,6 +1484,10 @@ type deliverOpts struct {
 	// 1). Set only on the live-fetch path; nil on cache/overlay paths, which
 	// cannot reach the registry.
 	refresh resourceRefresher
+	// manifestRefresh re-requests a freshly presigned manifest_body_url so a
+	// 403/expired body URL is replaced rather than retried unchanged (§6.6
+	// step 1). Set only on the live-fetch path; nil on cache/overlay paths.
+	manifestRefresh resourceRefresher
 }
 
 // destFromArgs returns the per-call materialization destination from a
@@ -1506,6 +1533,13 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 	var o deliverOpts
 	if len(opts) > 0 {
 		o = opts[0]
+	}
+	// §6.6 step 1 — when the manifest body was delivered above the inline
+	// cutoff as a presigned URL, fetch and reconstitute it before any policy
+	// gate or the content-hash check reads the frontmatter. A no-op when the
+	// body arrived inline (cache and overlay paths never presign).
+	if err := s.fetchManifestBody(&resp, o.manifestRefresh); err != nil {
+		return errorResult("materialize.fetch_failed: " + err.Error())
 	}
 	// §8.1 / §8.2: record the local artifact.loaded event with the in-flight
 	// trace id and the manifest's audit_redact directive applied. Emitted here
@@ -1902,7 +1936,15 @@ type loadArtifactResponse struct {
 	// raw bytes before the content-hash check and materialization (F-6.6.8).
 	ResourcesB64   bool                         `json:"resources_base64,omitempty"`
 	LargeResources map[string]largeResourceLink `json:"large_resources,omitempty"`
-	Signature      string                       `json:"signature,omitempty"`
+	// ManifestBodyURL delivers the canonical manifest document via a
+	// presigned object-store URL when it exceeds the §4.2 inline cutoff
+	// (§6.6). When set, the inline ManifestBody and the canonical-document
+	// field (Frontmatter, or SkillRaw for a skill) arrive empty;
+	// deliverLoadArtifact fetches the URL in §6.6 step 1 and reconstitutes
+	// them before any policy gate or the content-hash check. Nil for a
+	// below-cutoff body delivered inline.
+	ManifestBodyURL *largeResourceLink `json:"manifest_body_url,omitempty"`
+	Signature       string             `json:"signature,omitempty"`
 	// ManifestMerged signals that the served frontmatter is an extends-merged
 	// re-serialization with the hidden parent stripped (§4.6) rather than the
 	// original bytes the content_hash was computed over. The consumer

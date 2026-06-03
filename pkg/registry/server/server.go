@@ -482,6 +482,15 @@ type LoadArtifactResponse struct {
 	Resources      map[string]string            `json:"resources,omitempty"`
 	ResourcesB64   bool                         `json:"resources_base64,omitempty"`
 	LargeResources map[string]LargeResourceLink `json:"large_resources,omitempty"`
+	// ManifestBodyURL delivers the canonical manifest document (the
+	// ARTIFACT.md bytes, or the verbatim SKILL.md for a skill) via a
+	// presigned object-store URL when that document exceeds the §4.2 inline
+	// cutoff, keeping the §7.2 control-plane response small (§6.6). When set,
+	// the inline ManifestBody and the canonical-document field (Frontmatter,
+	// or SkillRaw for a skill) are empty; the MCP server fetches the URL in
+	// §6.6 step 1 and reconstitutes them. Nil when the body is below the
+	// cutoff or no object store is configured (delivered inline).
+	ManifestBodyURL *LargeResourceLink `json:"manifest_body_url,omitempty"`
 	// ManifestMerged signals that Frontmatter is an extends-merged
 	// re-serialization with the hidden parent stripped (§4.6), so its bytes
 	// no longer reproduce ContentHash. The consumer recomputes the §6.6 step 2
@@ -956,6 +965,13 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return
 	}
+	// §6.6/§7.2: when the canonical manifest body exceeds the inline cutoff,
+	// deliver it via a presigned URL instead of inline so the control-plane
+	// response stays small.
+	if err := s.attachManifestBody(r.Context(), &resp, res); err != nil {
+		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1047,6 +1063,58 @@ func encodeBinaryInlineResources(resp *LoadArtifactResponse) {
 		resp.ResourcesB64 = true
 		return
 	}
+}
+
+// attachManifestBody realizes the §6.6 presigned manifest-body channel.
+// When the canonical manifest document (the verbatim SKILL.md for a skill,
+// the ARTIFACT.md bytes otherwise) exceeds objectstore.InlineCutoff and an
+// object store is configured, it uploads the document keyed by its sha256
+// (idempotent, deduplicated by content), presigns it, and returns the
+// reference in ManifestBodyURL while clearing the inline ManifestBody and
+// the canonical-document field. Below the cutoff, or without an object
+// store (the §13.11 standalone-without-storage mode), the body stays inline.
+//
+// An extends-merged manifest keeps its body inline: the served frontmatter
+// is a re-serialization distinct from the hash-bound raw bytes, so it is
+// excluded from the channel to avoid an ambiguous reconstitution.
+func (s *Server) attachManifestBody(ctx context.Context, resp *LoadArtifactResponse, res *core.LoadArtifactResult) error {
+	if s.objectStore == nil || res.Merged {
+		return nil
+	}
+	doc := core.CanonicalManifestDoc(res.Type, res.Frontmatter, res.SkillRaw)
+	if len(doc) <= objectstore.InlineCutoff {
+		return nil
+	}
+	key := core.ManifestBodyKey(doc)
+	// Idempotent, content-addressed upload: skip the Put when the object is
+	// already present so the hot path costs a Stat rather than a re-upload.
+	if _, err := s.objectStore.Stat(ctx, key); errors.Is(err, objectstore.ErrNotFound) {
+		if err := s.objectStore.Put(ctx, key, doc, "text/markdown"); err != nil {
+			return fmt.Errorf("upload manifest body: %w", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("stat manifest body: %w", err)
+	}
+	url, err := s.objectStore.Presign(ctx, key, s.presignTTL)
+	if err != nil {
+		return fmt.Errorf("presign manifest body: %w", err)
+	}
+	resp.ManifestBodyURL = &LargeResourceLink{
+		URL:         url,
+		ContentHash: "sha256:" + key,
+		Size:        int64(len(doc)),
+		ContentType: "text/markdown",
+	}
+	// §6.6: clear the inline copies so the large body does not also travel
+	// inline. ManifestBody is a substring of the canonical document the URL
+	// now carries, so leaving either inline would defeat the cutoff.
+	resp.ManifestBody = ""
+	if res.Type == string(manifest.TypeSkill) {
+		resp.SkillRaw = ""
+	} else {
+		resp.Frontmatter = ""
+	}
+	return nil
 }
 
 // presignResource builds a §7.2 large-resource link, presigning the

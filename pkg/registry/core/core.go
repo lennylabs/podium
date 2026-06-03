@@ -10,6 +10,8 @@ package core
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
@@ -22,6 +24,7 @@ import (
 	"github.com/lennylabs/podium/pkg/embedding"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/manifest"
+	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/vector"
 	"github.com/lennylabs/podium/pkg/version"
@@ -1802,6 +1805,26 @@ func resultFromRecord(rec store.ManifestRecord) *LoadArtifactResult {
 	}
 }
 
+// CanonicalManifestDoc returns the document whose body the §6.6 presigned
+// manifest-body channel delivers when it exceeds the inline cutoff: the
+// verbatim SKILL.md for a skill (§4.3.4), the ARTIFACT.md bytes otherwise.
+func CanonicalManifestDoc(typ string, frontmatter, skillRaw []byte) []byte {
+	if typ == string(manifest.TypeSkill) {
+		return skillRaw
+	}
+	return frontmatter
+}
+
+// ManifestBodyKey is the object-store key for a presigned manifest body:
+// the bare sha256 hex of the canonical document bytes. It mirrors the
+// content-hash keying the §7.2 data plane uses for bundled resources, so an
+// /objects/{key} fetch verifies and deduplicates identical bodies the same
+// way.
+func ManifestBodyKey(doc []byte) string {
+	sum := sha256.Sum256(doc)
+	return hex.EncodeToString(sum[:])
+}
+
 // ResolveResourceOwner returns the ID of a visible artifact that
 // bundles a resource whose content hash matches key (the bare hex
 // digest, no "sha256:" prefix), and ok=false when the caller can see no
@@ -1810,6 +1833,14 @@ func resultFromRecord(rec store.ManifestRecord) *LoadArtifactResult {
 // every artifact bundling the bytes can no longer follow a
 // previously-issued URL. Bytes are deduplicated by content hash across
 // artifacts (§4.4), so any one visible owner authorizes the read.
+//
+// The same route serves the §6.6 presigned manifest body, keyed by the
+// sha256 of a manifest's canonical document (SKILL.md for a skill,
+// ARTIFACT.md otherwise). A manifest-body key is authorized for the same
+// caller/visibility as the artifact, so the presigned body is
+// access-controlled identically to the inline path. Only documents above
+// the inline cutoff are ever stored externally, so the hash is computed
+// for those alone.
 func (r *Registry) ResolveResourceOwner(ctx context.Context, id layer.Identity, key string) (string, bool) {
 	visible, err := r.visibleManifests(ctx, id)
 	if err != nil {
@@ -1821,6 +1852,12 @@ func (r *Registry) ResolveResourceOwner(ctx context.Context, id layer.Identity, 
 			if ref.ContentHash == want {
 				return m.ArtifactID, true
 			}
+		}
+	}
+	for _, m := range visible {
+		doc := CanonicalManifestDoc(m.Type, m.Frontmatter, m.SkillRaw)
+		if len(doc) > objectstore.InlineCutoff && ManifestBodyKey(doc) == key {
+			return m.ArtifactID, true
 		}
 	}
 	return "", false

@@ -8,8 +8,57 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/tracing"
 )
+
+// manifestBodyRefreshKey is the synthetic resource path under which the
+// manifest-body channel reuses fetchOneLargeResource's 403-refresh retry
+// loop. A real bundled-resource path is slash-separated and non-empty, so
+// this NUL-prefixed sentinel cannot collide with one.
+const manifestBodyRefreshKey = "\x00podium-manifest-body"
+
+// fetchManifestBody resolves a presigned manifest_body_url (§6.6 step 1)
+// back into the inline manifest fields. It downloads the canonical manifest
+// document with the same retry/refresh contract as a large resource,
+// verifies its content hash, restores the canonical-document field
+// (Frontmatter, or SkillRaw for a skill), and re-derives ManifestBody from
+// it. The frontmatter/body split reproduces ingest's own split, so the
+// derived body is byte-identical to the inline value the registry would have
+// served below the cutoff. A no-op when the body arrived inline
+// (ManifestBodyURL nil).
+func (s *mcpServer) fetchManifestBody(resp *loadArtifactResponse, refresh resourceRefresher) error {
+	if resp.ManifestBodyURL == nil {
+		return nil
+	}
+	_, span := tracing.Tracer().Start(s.reqCtx(), "objectstore.fetch")
+	defer span.End()
+	link := *resp.ManifestBodyURL
+	body, err := s.fetchOneLargeResource(manifestBodyRefreshKey, link, refresh)
+	if err != nil {
+		return fmt.Errorf("manifest body: %w", err)
+	}
+	if link.ContentHash != "" {
+		sum := sha256.Sum256(body)
+		got := "sha256:" + hex.EncodeToString(sum[:])
+		if got != link.ContentHash {
+			return fmt.Errorf("manifest body content hash mismatch: got %s want %s", got, link.ContentHash)
+		}
+	}
+	if resp.Type == "skill" {
+		resp.SkillRaw = string(body)
+		if sk, perr := manifest.ParseSkill(body); perr == nil {
+			resp.ManifestBody = sk.Body
+		}
+	} else {
+		resp.Frontmatter = string(body)
+		if art, perr := manifest.ParseArtifact(body); perr == nil {
+			resp.ManifestBody = art.Body
+		}
+	}
+	resp.ManifestBodyURL = nil
+	return nil
+}
 
 // resourceRefresher re-requests /v1/load_artifact and returns a freshly
 // presigned large_resources URL set. It is non-nil only on the live-fetch
