@@ -172,7 +172,7 @@ The sync command reads the caller's effective view (the composed layer list afte
 
 The sync model is type-agnostic: skills, agents, contexts, commands, rules, hooks, and `mcp-server` registrations all sync through the same path; the harness adapter decides where each type lands.
 
-**`--dry-run`** resolves the artifact set against the current scope and prints it without writing. Default output is human-readable; `--json` produces a structured envelope (`{profile, target, harness, scope, artifacts: [{id, version, type, layer}, ...]}`) for piping into `jq`.
+**`--dry-run`** resolves the artifact set against the current scope and prints it without writing. Default output is human-readable; `--json` produces a structured envelope (`{profile, target, harness, scope, artifacts: [{id, version, content_hash, type, layer}, ...]}`) for piping into `jq`. The per-artifact `content_hash` lets a pre-flight check verify the full §14.11 `(artifact_id, version, content_hash)` triple before the lock file is committed.
 
 ### 7.5.1 Scope Filters
 
