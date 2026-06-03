@@ -149,6 +149,21 @@ func msS3UseSSL() string {
 	return "false"
 }
 
+// msGitInit turns dir into a git repo with one commit on main so a standard-mode
+// server can register it as a git source and clone it on reingest. A remote
+// server cannot read a client-side --local path, so git source is the author
+// flow. Skips when git is not on PATH.
+func msGitInit(t *testing.T, dir string) {
+	t.Helper()
+	if _, ok := runExternal(t, dir, 10*time.Second, "git", "init", "-b", "main"); !ok {
+		t.Skip("git not on PATH; skipping managed-stack parity e2e")
+	}
+	runExternal(t, dir, 10*time.Second, "git", "config", "user.email", "alice@acme.com")
+	runExternal(t, dir, 10*time.Second, "git", "config", "user.name", "alice")
+	runExternal(t, dir, 10*time.Second, "git", "add", ".")
+	runExternal(t, dir, 10*time.Second, "git", "commit", "-m", "managed-stack parity fixture")
+}
+
 // msLoadResponse mirrors the §7.6.1 load_artifact JSON envelope: the manifest
 // frontmatter and body, the inline resource set, and the presigned large-resource
 // links the S3 data plane returns above the 256 KB inline cutoff (§7.2).
@@ -180,14 +195,15 @@ func TestStandardStackParity_AuthorToConsumer(t *testing.T) {
 	// schema, which is shared and cannot be isolated per test (see the file
 	// header).
 	//
-	// Opt-in gate. The standard-mode boot, injected-token admin auth, and layer
-	// register/reingest are validated against a live Postgres + S3 stack, but the
-	// consumer search-after-ingest assertion does not yet pass: a runtime --local
-	// layer registered against a remote standard-mode server does not become
-	// searchable, which points at the standard-mode author-publish model (local
-	// source versus git/upload) rather than a flake. Until that is resolved this
-	// test runs only under PODIUM_STACK_PARITY=1 so it does not break CI. See
-	// TEST-GAPS.md G-STACK-1.
+	// Opt-in gate. The standard-mode boot, injected-token admin auth, and the
+	// git-source layer register/reingest are validated against a live Postgres +
+	// S3 stack: the layer is recorded ingested (its last_ingested_ref is set to
+	// the cloned commit). But the reingest parses zero manifests, so the artifact
+	// never reaches the metadata store, the vector index, or search, and the
+	// consumer journey cannot proceed. That is a standard-mode ingest-pipeline
+	// question (why a registered git layer ingests no artifacts), not a flake or
+	// a source-type issue. Until it is resolved this test runs only under
+	// PODIUM_STACK_PARITY=1 so it does not break CI. See TEST-GAPS.md G-STACK-1.
 	if os.Getenv("PODIUM_STACK_PARITY") != "1" {
 		t.Skip("PODIUM_STACK_PARITY != 1; managed-stack parity e2e is opt-in (work in progress, see TEST-GAPS.md G-STACK-1)")
 	}
@@ -211,17 +227,21 @@ func TestStandardStackParity_AuthorToConsumer(t *testing.T) {
 		id + "/SKILL.md":            brSkillMD("run-variance-analysis", brVarianceDesc, "Run the analysis.\n"),
 		id + "/scripts/variance.py": "print('variance')\n",
 	})
-	// The author registers the layer as the bootstrapped admin. The CLI sends the
-	// injected session token, which the standard-mode verifier checks before
-	// core.AdminAuthorize gates the registration (§4.7.2, §6.3.2).
+	// A remote standard-mode server cannot read a client --local path, so the
+	// author publishes through a git source: commit the registry to a local git
+	// repo and register it with --repo. The server clones the repo and ingests it
+	// on reingest. The CLI sends the injected session token, which the verifier
+	// checks before core.AdminAuthorize gates the registration (§7.3.1, §6.3.2).
+	msGitInit(t, reg)
 	if rr := runPodium(t, "", []string{
 		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
 		"PODIUM_SESSION_TOKEN=" + token,
-	}, "layer", "register", "--registry", srv.BaseURL, "--id", "finance", "--local", reg); rr.Exit != 0 {
+	}, "layer", "register", "--registry", srv.BaseURL, "--id", "finance", "--repo", reg, "--ref", "main"); rr.Exit != 0 {
 		t.Fatalf("admin layer register exit=%d stderr=%s stdout=%s", rr.Exit, rr.Stderr, rr.Stdout)
 	}
-	// Registration records the local-source layer config; reingest parses the
-	// artifacts into the metadata store and indexes them (§7.3.1, §4.7.2).
+	// Registration records the git-source layer config; reingest clones the repo
+	// and parses the artifacts into the metadata store and the search index
+	// (§7.3.1, §4.7.2).
 	if rr := runPodium(t, "", []string{
 		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
 		"PODIUM_SESSION_TOKEN=" + token,
@@ -250,7 +270,7 @@ func TestStandardStackParity_AuthorToConsumer(t *testing.T) {
 		t.Fatalf("authenticated search_artifacts = HTTP %d\nbody: %s", st, body)
 	}
 	if !strings.Contains(string(body), id) {
-		t.Fatalf("authenticated search did not return %q via the managed stack within the deadline:\n%s", id, body)
+		t.Fatalf("authenticated search did not return %q within the deadline:\nsearch body: %s\nserver log:\n%s", id, body, srv.log())
 	}
 
 	// Negative control: an unverifiable token is rejected at the verifier
