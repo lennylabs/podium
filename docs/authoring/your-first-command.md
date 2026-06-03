@@ -100,7 +100,7 @@ Claude Code substitutes the trailing text into `$ARGUMENTS`, sends the resulting
 ## Lint
 
 ```bash
-podium lint ~/podium-artifacts/personal/dev-loop/standup/
+podium lint --registry ~/podium-artifacts/
 ```
 
 Lint validates frontmatter against the `command` schema, checks the prose body for unresolved placeholders, and flags vague descriptions. CI runs the same checks on PRs.

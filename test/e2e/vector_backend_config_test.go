@@ -518,11 +518,12 @@ func TestVectorBackend_QdrantMissingURL(t *testing.T) {
 	)
 }
 
-// T-D-vector-backends-18: Qdrant default collection name is podium_artifacts (underscore).
+// T-D-vector-backends-18: PODIUM_QDRANT_COLLECTION is required (no default);
+// the underscore form podium_artifacts is the in-tree convention.
 // Wire-level assertion requires a mock Qdrant recording PUT paths.
 func TestVectorBackend_QdrantDefaultCollection(t *testing.T) {
 	t.Parallel()
-	t.Skip("default collection name is a wire-level assertion needing a mock Qdrant recording request paths; covered by pkg/vector tests. Doc-accuracy note: doc shows podium-artifacts (hyphen), implementation defaults to podium_artifacts (underscore)")
+	t.Skip("collection name on the wire is a wire-level assertion needing a mock Qdrant recording request paths; covered by pkg/vector tests. Doc-accuracy note: the doc now uses the podium_artifacts (underscore) convention, matching the rest of the tree")
 }
 
 // T-D-vector-backends-19: Qdrant YAML standard deployment config sets vector_backend.

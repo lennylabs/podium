@@ -1,0 +1,68 @@
+# doccov manifest — runnable doc-page coverage.
+#
+# Every documentation page under docs/ and the repository README that contains
+# a runnable command example (a fenced bash/sh/shell/console block, or an
+# untagged block whose lines begin with a podium/make/curl/go/pip/npm/docker
+# command) must appear here. Each entry maps the page to one of:
+#
+#   slug:   the D-<slug> of the feature-named end-to-end test that covers the
+#           page. doccov resolves the slug to its test file by scanning the
+#           `// End-to-end tests for <path> (D-<slug>).` header comments under
+#           test/e2e and verifies the file exists.
+#   waiver: a one-line reason the page carries no independent test.
+#
+# doccov fails when a runnable page is missing here, when a mapped slug resolves
+# to no test file, or when an entry names a page that no longer exists.
+#
+# Format:
+#   pages:
+#     - path: <repo-relative doc path>      # README.md or docs/...
+#       slug: D-<slug>                      # exactly one of slug or waiver
+#       waiver: <reason>
+
+pages:
+  # ----- Covered by a feature-named e2e file (resolved via D-<slug>) ---------
+  - path: README.md
+    slug: D-readme
+  - path: docs/getting-started/quickstart.md
+    slug: D-quickstart
+  - path: docs/reference/cli.md
+    slug: D-cli
+  - path: docs/authoring/your-first-skill.md
+    slug: D-first-skill
+  - path: docs/authoring/your-first-command.md
+    slug: D-first-command
+  - path: docs/authoring/your-first-agent.md
+    slug: D-first-agent
+  - path: docs/authoring/hooks.md
+    slug: D-hooks
+  - path: docs/consuming/configure-your-harness.md
+    slug: D-configure-harness
+  - path: docs/deployment/solo-filesystem.md
+    slug: D-solo-fs
+  - path: docs/deployment/small-team.md
+    slug: D-small-team
+  - path: docs/deployment/organization.md
+    slug: D-organization
+  - path: docs/deployment/vector-backends.md
+    slug: D-vector-backends
+
+  # The OIDC provider cookbook pages share one e2e file via a directory glob
+  # (D-oidc covers docs/deployment/oidc/*.md). Each runnable provider page maps
+  # to the same slug.
+  - path: docs/deployment/oidc/okta.md
+    slug: D-oidc
+  - path: docs/deployment/oidc/auth0.md
+    slug: D-oidc
+  - path: docs/deployment/oidc/keycloak.md
+    slug: D-oidc
+  - path: docs/deployment/oidc/google-workspace.md
+    slug: D-oidc
+  - path: docs/deployment/oidc/entra-id.md
+    slug: D-oidc
+
+  # ----- Waived (runnable content, no independent behavioral e2e) -----------
+  - path: docs/index.md
+    waiver: Landing page; the hello-world init/sync recap duplicates the quickstart and README, which are covered by D-quickstart and D-readme.
+  - path: docs/about/contributing.md
+    waiver: Contributor workflow page; the commands are dev/CI tasks (go build, make test, SDK installs) exercised by the build and CI gates rather than a behavioral e2e.

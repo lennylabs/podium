@@ -172,8 +172,8 @@ func TestQuickstart_LintMissingSkillBody(t *testing.T) {
 }
 
 // T-D-quickstart-8 / T-D-quickstart-30 — sync with claude-code materializes a
-// type:skill to .claude/skills/<name>/SKILL.md (NOT .claude/agents/greet.md
-// as § 4 / § 5 of the doc claim). Doc-accuracy gap asserted here.
+// type:skill to .claude/skills/<name>/SKILL.md. The quickstart § 4 / § 5 now
+// document this path; .claude/agents/greet.md is asserted absent.
 func TestQuickstart_SyncClaudeCodeSkillLayout(t *testing.T) {
 	t.Parallel()
 	reg := greetRegistry(t)
@@ -196,12 +196,14 @@ func TestQuickstart_SyncClaudeCodeSkillLayout(t *testing.T) {
 		t.Errorf("materialized SKILL.md missing name: greet:\n%s", skill)
 	}
 	if _, err := os.Stat(filepath.Join(tgt, ".claude", "agents", "greet.md")); err == nil {
-		t.Errorf(".claude/agents/greet.md exists; doc claims this path but skills go to .claude/skills/")
+		t.Errorf(".claude/agents/greet.md exists; skills go to .claude/skills/<name>/SKILL.md")
 	}
 }
 
-// T-D-quickstart-9 — sync output uses adapter/target/artifacts, not the
-// doc's "Materialized N artifact" / arrow notation. Doc-accuracy gap.
+// T-D-quickstart-9 — sync output uses adapter/target/artifacts with an
+// indented file list. The quickstart output block now matches this format
+// and the .claude/skills/greet/SKILL.md path; the doc's earlier
+// "Materialized N artifact" / arrow notation is gone.
 func TestQuickstart_SyncOutputFormat(t *testing.T) {
 	t.Parallel()
 	reg := greetRegistry(t)
@@ -686,18 +688,28 @@ func TestQuickstart_BuildFromSource(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-39 — watch mode is poll-based, not fsnotify. Doc-accuracy:
-// the quickstart says fsnotify; pkg/sync/watch.go is poll-based.
-func TestQuickstart_WatchIsPollBased(t *testing.T) {
+// T-D-quickstart-39 — watch mode uses fsnotify with a poll fallback, matching
+// the quickstart and spec §13.11.4. An earlier version of this test asserted
+// poll-only, which was wrong: the fsnotify import lives in the sibling
+// watch_fsnotify.go, and runWatch tries the fsnotify TreeWatcher before falling
+// back to polling.
+//
+// Spec: §13.11.4 — podium sync --watch against a filesystem source uses fsnotify.
+func TestQuickstart_WatchUsesFsnotify(t *testing.T) {
 	t.Parallel()
+	// The fsnotify watcher is the primary path; the dependency lives in the
+	// sync package's watch_fsnotify.go.
+	fsSrc := readFile(t, filepath.Join("..", "..", "pkg", "sync", "watch_fsnotify.go"))
+	if !strings.Contains(fsSrc, "fsnotify") {
+		t.Errorf("pkg/sync/watch_fsnotify.go does not use fsnotify; the quickstart and spec §13.11.4 say it should")
+	}
+	// runWatch tries the fsnotify TreeWatcher first, polling only as a fallback.
 	src := readFile(t, filepath.Join("..", "..", "pkg", "sync", "watch.go"))
-	if strings.Contains(src, "fsnotify/fsnotify") {
-		t.Errorf("watch.go imports fsnotify; doc-accuracy gap would be resolved")
+	if !strings.Contains(src, "NewTreeWatcher") {
+		t.Errorf("watch.go does not use the fsnotify TreeWatcher as the primary watch path")
 	}
-	if !strings.Contains(src, "poll-based") {
-		t.Errorf("watch.go does not document poll-based detection")
-	}
-	// Behavioral confirmation: an edit is picked up by polling.
+	// Behavioral confirmation: an edit is picked up (via fsnotify, or the poll
+	// fallback on filesystems where fsnotify cannot initialize).
 	reg := writeRegistry(t, map[string]string{"a/ARTIFACT.md": contextArtifact("a")})
 	tgt := t.TempDir()
 	w := startWatch(t, reg, tgt, "none")
@@ -708,6 +720,6 @@ func TestQuickstart_WatchIsPollBased(t *testing.T) {
 	got := pollFile(filepath.Join(tgt, "b/ARTIFACT.md"), 5*time.Second)
 	w.stop(t)
 	if !got {
-		t.Errorf("poll-based watcher did not pick up the new artifact\nlog:\n%s", w.log())
+		t.Errorf("watcher did not pick up the new artifact\nlog:\n%s", w.log())
 	}
 }

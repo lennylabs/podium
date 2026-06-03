@@ -211,7 +211,7 @@ documented examples are covered only in the sense that the test proves the
 documented command or output is wrong.
 
 ### G-DOC-1: No machine-checked floor on doc-example coverage
-- **Severity**: P1. **Lane**: PR. **Status**: open.
+- **Severity**: P1. **Lane**: PR. **Status**: closed (built). Stage 3 added `tools/doccov`, which extracts runnable fenced blocks from `docs/**` and `README.md`, maps each page to a feature-named `D-<slug>` e2e file or an explicit waiver, and fails on an unmapped example; wired into `.github/workflows/spec-coverage.yml`.
 - **Current**: `tools/speccov` measures spec-section coverage and never reads
   `docs/`. A new documentation page with a runnable example and no test fails no
   check.
@@ -224,7 +224,7 @@ documented command or output is wrong.
 - **Unblocks**: a standing guarantee that every documented example is tested.
 
 ### G-DOC-2: `close-build-gaps.py` doc-coverage detection is self-defeating
-- **Severity**: P1. **Lane**: tooling. **Status**: open.
+- **Severity**: P1. **Lane**: tooling. **Status**: closed (fixed). Stage 3 repointed built-detection at the feature-named convention: a D-slug now resolves to its covering file by scanning `test/e2e/*_test.go` headers for the `(D-<slug>)` marker instead of `ls test/e2e/docs_<slug>_test.go`, and the doc-batch generator no longer instructs sessions to write the gate-forbidden `docs_<slug>_test.go` files.
 - **Current**: The script decides a doc source is "already built" by checking for
   `test/e2e/docs_<slug>_test.go`. The committed gate forbids that exact filename,
   and the real tests are feature-named, so the check always reports every source
@@ -235,12 +235,14 @@ documented command or output is wrong.
   G-DOC-1 manifest, or retire the script.
 
 ### G-DOC-3: Quickstart examples are documented incorrectly
-- **Severity**: P1. **Lane**: PR. **Status**: open.
+- **Severity**: P1. **Lane**: PR. **Status**: closed. Stage 3 corrected the quickstart to the implemented `adapter:`/`target:`/`artifacts:` output format and the `.claude/skills/greet/SKILL.md` path (the `Materialized N artifact → .claude/agents/greet.md` text was wrong), matching the e2e assertions. The "watch mode uses `fsnotify`" wording was correct all along: spec §13.11.4 mandates fsnotify and the implementation is fsnotify-primary with a poll fallback (`pkg/sync/watch_fsnotify.go`). The real bug was the inverted `TestQuickstart_WatchIsPollBased` test (now `TestQuickstart_WatchUsesFsnotify`) and the stale `pkg/sync/watch.go` "no fsnotify dependency" comment, both corrected.
 - **Current**: The quickstart shows output and paths the suite asserts are wrong.
   The documented `podium sync` output reads `personal/hello/greet@1.0.0 →
   .claude/agents/greet.md`, but a skill materializes to
   `.claude/skills/greet/SKILL.md`. The doc also claims watch mode uses `fsnotify`,
-  while the implementation polls.
+  which is correct: spec §13.11.4 mandates it and the implementation is
+  fsnotify-primary with a poll fallback. A test wrongly asserted poll-only; the
+  Status above records the fix.
 - **Evidence**: `docs/getting-started/quickstart.md:155-157`, `:175`, and
   `:183-184`; assertions at `test/e2e/quickstart_flow_test.go:194-200` (skills
   path and absence of the agents path) and `:205-225` (output format), plus the
@@ -249,7 +251,7 @@ documented command or output is wrong.
   match. The tests already enumerate every divergence.
 
 ### G-DOC-4: `podium lint <path>` positional form is documented but fails
-- **Severity**: P1. **Lane**: PR. **Status**: open.
+- **Severity**: P1. **Lane**: PR. **Status**: closed (doc fix). Stage 3 rewrote the documented invocation to `podium lint --registry <path>` in both authoring tutorials and the CLI reference, since the implemented command requires `--registry` and exits 2 without it (asserted by `TestCommandTutorial_LintPositionalRejected`). The CLI reference's `<path>` prose now describes what the registry root may contain rather than a positional argument.
 - **Current**: Both authoring tutorials document `podium lint <path>` with a
   positional path, which exits 2 because `--registry` is required. The CLI
   reference repeats the broken form.
@@ -270,7 +272,7 @@ documented command or output is wrong.
   config schema, then cover the documented flow with the JWKS harness.
 
 ### G-DOC-6: Vector-backends doc default collection name mismatch
-- **Severity**: P2. **Lane**: PR. **Status**: open.
+- **Severity**: P2. **Lane**: PR. **Status**: closed (doc fix). Stage 3 changed the two Qdrant example values from the hyphenated `podium-artifacts` to the underscore form `podium_artifacts`, matching the in-tree convention (`selfembed_config_test.go`). The "default" framing here is imprecise: `PODIUM_QDRANT_COLLECTION` has no default and is required (spec §13.12), so the fix corrects the example separator rather than a default cell; the doc table's `required` value was already correct.
 - **Current**: A worked example uses a hyphenated default collection while the
   implementation defaults to an underscore form (flagged in the
   `vector_backend_config_test.go` skip note).
@@ -279,7 +281,7 @@ documented command or output is wrong.
 - **Target**: Align the doc with the implemented default, then assert it.
 
 ### G-DOC-7: Landing and index pages with duplicated runnable content
-- **Severity**: P2. **Lane**: PR. **Status**: open.
+- **Severity**: P2. **Lane**: PR. **Status**: closed (waiver). Stage 3 waived `docs/index.md` in the G-DOC-1 doccov manifest, since its hello-world block duplicates the quickstart and README flows already covered by `quickstart_flow_test.go` and `readme_claims_test.go`. The remaining `docs/**/index.md` pages carry no runnable fenced blocks and need neither a waiver nor a dedupe.
 - **Current**: `docs/index.md` and the section index pages repeat the
   hello-world example without an independent test. The content duplicates the
   README and quickstart that are already covered.
@@ -494,7 +496,7 @@ pgvector runs live on the PR lane already, but the conformance is shallow.
   absence.
 
 ### G-INFRA-3: `TEST_INFRASTRUCTURE_PLAN.md` describes an unbuilt system
-- **Severity**: P2. **Lane**: documentation. **Status**: open.
+- **Severity**: P2. **Lane**: documentation. **Status**: closed (superseded). Stage 3 marked `TEST_INFRASTRUCTURE_PLAN.md` superseded with a header that points to the current model (this file's lane table, the real `Makefile` targets, the env-gated live tests, and the overall `COVERAGE_MIN=50` floor) and annotated each aspirational section (the fast/medium/slow lanes, `testcontainers-go`, phase gating, the 95% line and 90% branch floors, `goleak`, mutation testing, and the `identityfaker` family of harnesses) inline as not built, so the file no longer implies coverage that does not exist.
 - **Current**: The plan describes fast, medium, and slow lanes, `testcontainers-go`,
   phase gating, 95% coverage floors, and mutation testing. None of it is built,
   and the real coverage floor is 50.

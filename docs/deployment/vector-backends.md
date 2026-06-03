@@ -168,7 +168,7 @@ Server-side environment variables:
 export PODIUM_VECTOR_BACKEND=qdrant-cloud
 export PODIUM_QDRANT_URL=https://acme.eu-central.aws.cloud.qdrant.io:6333
 export PODIUM_QDRANT_API_KEY=qdr-...
-export PODIUM_QDRANT_COLLECTION=podium-artifacts
+export PODIUM_QDRANT_COLLECTION=podium_artifacts
 export PODIUM_QDRANT_INFERENCE_MODEL=bge-small-en  # optional
 
 podium serve --standalone --layer-path ~/podium-artifacts/
@@ -181,7 +181,7 @@ podium serve --standalone --layer-path ~/podium-artifacts/
     type: qdrant-cloud
     url: ${PODIUM_QDRANT_URL}
     api_key: ${PODIUM_QDRANT_API_KEY}
-    collection: podium-artifacts
+    collection: podium_artifacts
     inference_model: bge-small-en  # enables self-embedding
 ```
 

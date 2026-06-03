@@ -163,7 +163,7 @@ The watcher re-materializes on every save. Open Claude Code in another window; t
 Before committing or pushing, run lint:
 
 ```bash
-podium lint ~/podium-artifacts/personal/hello/greet/
+podium lint --registry ~/podium-artifacts/
 ```
 
 Lint checks the frontmatter against the type's schema in both files, validates that prose references in `SKILL.md` resolve to bundled files, runs the agentskills.io compliance checks on `SKILL.md` (name format, description constraints, parent-directory match), runs type-specific rules, and flags weak descriptions. CI runs the same checks on PRs to a Git-source layer.

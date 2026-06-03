@@ -91,8 +91,8 @@ func TestCommandTutorial_LintClean(t *testing.T) {
 	}
 }
 
-// T-D-first-command-4 — the doc's positional `podium lint <path>` form is
-// not runnable; --registry is required, exit 2. (doc-accuracy)
+// T-D-first-command-4 — a positional `podium lint <path>` is rejected;
+// --registry is required, exit 2. The doc now uses `podium lint --registry`.
 func TestCommandTutorial_LintPositionalRejected(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})

@@ -155,10 +155,10 @@ podium status
 Validates manifests against the type's schema and runs type-specific rules. CI-friendly; runs the same checks the registry runs at ingest.
 
 ```
-podium lint <path>
+podium lint --registry <path>
 ```
 
-`<path>` can be an artifact directory (containing `ARTIFACT.md`, plus `SKILL.md` for skills), a single `ARTIFACT.md`, `SKILL.md`, or `DOMAIN.md` file, or a directory tree (recurses into all artifacts). Exits non-zero on lint errors.
+`--registry <path>` is required and points at a filesystem registry root. The command walks every artifact under that root, validating each `ARTIFACT.md` (plus `SKILL.md` for skills) and any `DOMAIN.md` against the type's schema. To lint a single artifact, point `--registry` at a root that resolves that artifact's canonical ID. Exits 2 when `--registry` is absent, exits 1 on lint errors, and exits 0 when the registry is clean. Pass `--offline` to skip the URL HEAD check and validate only bundled-file references.
 
 ---
 

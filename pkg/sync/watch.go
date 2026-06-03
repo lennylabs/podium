@@ -15,8 +15,9 @@ import (
 // WatchOptions configures the long-running --watch mode (§7.5).
 //
 // Watch reruns Run whenever the registry path or overlay path
-// changes. Detection is poll-based (no fsnotify dependency); the
-// poller computes a content-fingerprint over each watched tree and
+// changes. Detection uses fsnotify (§13.11.4); polling is the fallback
+// for platforms or filesystems where fsnotify cannot initialize, where
+// the poller computes a content-fingerprint over each watched tree and
 // reruns the sync when the fingerprint moves. Debounce coalesces
 // bursts of edits into a single sync.
 type WatchOptions struct {

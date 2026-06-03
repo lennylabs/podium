@@ -233,8 +233,15 @@ func TestVectorOutbox_RetriesTransientFailureToConsistentState(t *testing.T) {
 	// Drain with a deterministic clock. The first failPuts passes fail the write
 	// (the row stays queued, hidden by backoff); advancing past each backoff
 	// re-exposes it until the backend recovers and the vector lands.
+	//
+	// Anchor the clock to the same wall-clock origin ingest used to stamp the
+	// row's NextRetryAt (commitManifest stamps time.Now().UTC()). A fixed start
+	// date would make the row ineligible whenever the real UTC hour is later than
+	// the pinned date plus its per-pass advances, which is a wall-clock-dependent
+	// flake. The +1h advance and backoff math below remain fully deterministic;
+	// only the origin tracks real time so the row is eligible from the first pass.
 	base := time.Second
-	now := time.Date(2026, 6, 3, 12, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	const maxPasses = 12
 	drained := false
 	for pass := 0; pass < maxPasses; pass++ {

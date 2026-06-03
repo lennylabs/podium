@@ -24,6 +24,7 @@ LDFLAGS := -X 'github.com/lennylabs/podium/internal/buildinfo.Version=$(VERSION)
 .PHONY: help test test-live test-live-external test-auth-dex bench build \
         lint update-golden \
         speccov speccov-uncovered speccov-drift speccov-report \
+        doccov doccov-report doccov-check \
         coverage coverage-budget coverage-per-package coverage-gate \
         matrix matrix-list matrix-audit matrix-scaffold \
         services-up services-down services-logs services-status \
@@ -42,6 +43,8 @@ help:
 	@echo "  speccov          Print spec-section coverage report"
 	@echo "  speccov-uncovered  Print spec sections with no citing test"
 	@echo "  speccov-drift    Fail if any test cites a missing spec section"
+	@echo "  doccov-report    Print runnable doc pages with their manifest disposition"
+	@echo "  doccov-check     Fail if a runnable doc page lacks a covering test or waiver"
 	@echo "  coverage         Run tests with -coverprofile and print summary"
 	@echo "  coverage-budget  Assert overall coverage >= COVERAGE_MIN (default 50)"
 	@echo "  coverage-per-package  Print per-package coverage breakdown"
@@ -209,6 +212,16 @@ speccov-uncovered: tools
 speccov-drift: tools
 	@./bin/speccov drift
 
+# ----- Doc-example coverage -------------------------------------------------
+
+doccov: doccov-check
+
+doccov-report: tools
+	@./bin/doccov report
+
+doccov-check: tools
+	@./bin/doccov check
+
 COVERAGE_MIN ?= 50
 
 coverage: tools
@@ -233,7 +246,7 @@ matrix-list: tools
 matrix-scaffold: tools
 	@./bin/matrix scaffold
 
-coverage-gate: lint speccov-drift matrix-audit coverage-budget
+coverage-gate: lint speccov-drift matrix-audit doccov-check coverage-budget
 
 # ----- Lint / golden / tools / clean ----------------------------------------
 
@@ -259,6 +272,7 @@ tools:
 	$(GO) build -o bin/speccov ./tools/speccov
 	$(GO) build -o bin/matrix ./tools/matrix
 	$(GO) build -o bin/coverage ./tools/coverage
+	$(GO) build -o bin/doccov ./tools/doccov
 
 clean:
 	rm -rf bin coverage.out

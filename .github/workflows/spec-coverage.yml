@@ -20,5 +20,9 @@ jobs:
           ./bin/speccov drift
       - name: Matrix audit
         run: ./bin/matrix audit || true   # advisory until we close the gaps
+      - name: Doc-example coverage
+        run: |
+          ./bin/doccov report
+          ./bin/doccov check
       - name: Coverage budget
         run: make coverage-budget

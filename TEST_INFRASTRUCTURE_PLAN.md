@@ -1,5 +1,39 @@
 # Test infrastructure plan
 
+> **Status: superseded.** This plan described a phase-gated, single-session build
+> harness with three latency lanes, container-managed backends, and per-package
+> coverage floors. That model was not adopted. Podium is implemented, and the test
+> system that shipped differs structurally from this plan. Read the current model
+> in the following places instead of this file:
+>
+> - **Test lanes and gating**: the lane table in `TEST-GAPS.md` (PR, nightly,
+>   release, and manual lanes, with env-gated live tests). There are no
+>   `test-fast` / `test-medium` / `test-slow` lanes; the single `make test` runs
+>   `go test ./...`.
+> - **Make targets**: the `Makefile` help block. The real targets are `test`,
+>   `test-live`, `test-live-external`, `test-auth-dex`, `speccov*`, `coverage*`,
+>   and `matrix*`. There is no `status`, `next`, `advance`, or `test-phase`.
+> - **Coverage gate**: overall `COVERAGE_MIN=50` enforced by `make
+>   coverage-budget` (`tools/coverage`). The 95% line and 90% branch floors below
+>   were never enforced; branch coverage and the per-file regression gate are not
+>   built.
+> - **Spec traceability**: `make speccov-drift` plus `// Spec:` annotations
+>   (`tools/speccov`). Matrix coverage is `// Matrix:` annotations audited by
+>   `make matrix-audit` (`tools/matrix`), which reads hardcoded matrices rather
+>   than parsing spec tables.
+> - **Live-service tests**: env-gated (`PODIUM_POSTGRES_DSN`, `PODIUM_S3_*`,
+>   `PODIUM_LIVE_EXTERNAL`), provisioned by CI `services:` steps. There is no
+>   `testcontainers-go`.
+>
+> Phase tags (`.phase`, `RequirePhase`, the phase-to-§11 table), `goleak`,
+> mutation testing, property-test lanes, and the `identityfaker` /
+> `mcpclientharness` / `webhookemitter` / `clockfreezer` / `fsregistryfixture` /
+> `harnessbridge` harnesses are not implemented. Where any of these remain wanted,
+> they are tracked as open gaps in `TEST-GAPS.md` (G-INFRA-1 for `goleak`,
+> G-AUTH-3 for the identity issuer harness). The sections below are retained for
+> historical reference; the inline `NOT BUILT` notes mark the aspirational
+> machinery that never shipped. The original plan is recoverable from Git history.
+
 This branch builds the test infrastructure that lets Claude implement Podium end-to-end in a single autonomous session, spec-driven and test-driven. The spec in `spec/` is frozen as executable tests; the test runner reports the next failing test; Claude implements until the test passes; the runner advances. Phases gate progress so Phase 0 ships before Phase 1 begins.
 
 The §11 verification list and the §10 MVP build sequence are the inputs. This plan converts both into concrete test artifacts, scaffolding, and an operating loop.
@@ -16,6 +50,12 @@ The §11 verification list and the §10 MVP build sequence are the inputs. This 
 - The infrastructure supports three languages: Go for the registry, MCP server, CLI, and `podium sync`; Python for `podium-py`; TypeScript for `podium-ts`. Coverage commitments apply to all three.
 
 ## 2. Operating model
+
+**NOT BUILT.** The phase loop below was not adopted. There is no `.phase` file and
+no `make status`, `make next`, `make advance`, or `make test-phase` target. No
+test carries a `// Phase:` annotation, and nothing parses or enforces phases. The
+`Phase: N` line survives only as aspirational text in the `tools/speccov` and
+`tools/internal/specparser` doc comments.
 
 How Claude uses the infrastructure to build Podium:
 
@@ -46,6 +86,12 @@ Three layers stack from data to execution:
 2. **Harnesses** (`internal/testharness/`): reusable runtime helpers. In-process registry, in-process MCP client, simulated webhook emitter, identity faker, frozen clock.
 3. **Tests** (`*_test.go` next to each package, plus `test/integration/`, `test/e2e/`, `test/conformance/`): the actual assertions.
 
+**NOT BUILT.** The three latency lanes below were not adopted. The shipped system
+has one `make test` target running `go test ./...`. The real lanes are PR,
+nightly, release, and manual (see the lane table in `TEST-GAPS.md`). The
+`test-fast.yml` / `test-medium.yml` / `test-slow.yml` workflows do not exist;
+the real workflows are `test.yml`, `nightly.yml`, and `live-external.yml`.
+
 Three execution lanes match the latency budgets:
 
 - **Fast lane** (`make test-fast`): unit tests across all Go packages. Target: < 60 s on a laptop. Runs on every commit.
@@ -59,6 +105,14 @@ Three languages are tested in parallel:
 - **TypeScript** (Phase 14 onward): `podium-ts`. `vitest` + `tsup` + the same shared HTTP fixture.
 
 ## 5. Project layout
+
+**Diverged.** The tree below is aspirational. `.phase`, `tools/phasegate`,
+`tools/golden`, the `test/soak/` and `test/chaos/` directories, and the
+`testdata/{manifests,webhooks,oidc,golden}/` fixture trees do not exist.
+`cmd/podium-server/` does exist (the registry server binary). `tools/` holds
+`speccov`, `matrix`, `coverage`, `doccov`, and `internal/specparser`. The object store, store, webhook, and search code lives
+under `pkg/` rather than `internal/`. Golden trees live next to the features they
+verify (for example `test/materialization/`).
 
 ```
 podium/
@@ -129,6 +183,11 @@ The single Go module avoids the friction of multi-module setups. SDKs in `sdks/`
 
 ### 6.2 Integration tests
 
+**`testcontainers-go` NOT BUILT.** It is not a dependency and is not used. Live
+backends come from externally-managed services that tests reach through env vars
+(`PODIUM_POSTGRES_DSN`, `PODIUM_S3_*`); CI provisions them as GitHub Actions
+`services:` or `docker run` steps, and tests `t.Skip` when the env is unset.
+
 - Cross-package scenarios that exercise composition: layer merge under realistic data, ingest pipeline with a real `GitProvider`, materialization with an adapter and a hook chain.
 - Located under `test/integration/`. Use `testcontainers-go` for Postgres, MinIO, and Dex when the test exercises those backends.
 - Each test owns its container set; `t.Parallel()` is the default.
@@ -150,6 +209,9 @@ The single Go module avoids the friction of multi-module setups. SDKs in `sdks/`
 
 ### 6.5 Property tests
 
+**NOT BUILT.** There are no `//go:build property` files, no `gopter` import, and
+no `-tags=property` lane.
+
 - Located alongside unit tests, gated behind `-tags=property`.
 - Properties cover invariants: content-hash determinism over canonicalized manifests, ingest idempotency, layer-composition associativity within precedence order, frontmatter round-trip through parser and serializer, error-envelope shape.
 - Use `gopter` or stdlib `testing/quick` with seeded RNGs.
@@ -162,11 +224,22 @@ The single Go module avoids the friction of multi-module setups. SDKs in `sdks/`
 
 ### 6.7 Soak and chaos tests
 
+**NOT BUILT.** There is no `test/soak/` or `test/chaos/` directory. Soak and chaos
+work is tracked as future work in `TEST-GAPS.md`.
+
 - Located under `test/soak/` and `test/chaos/`. Run on a schedule rather than on PR.
 - Soak: 24 h continuous load via a load generator that exercises the meta-tools. Asserts no memory growth, no descriptor leaks, audit-chain integrity preserved across registry restarts.
 - Chaos: induced failures (Postgres failover, S3 stalls, IdP outages, full disk) with deterministic injection points.
 
 ## 7. Test harnesses
+
+**Mostly NOT BUILT.** The shipped `internal/testharness/` holds `goldenfile`,
+`tempdir`, `registryharness`, and `cmdharness` only. The `registryharness` that
+shipped exposes none of the `With*` builder options described in §7.1; its only
+constructor wraps a filesystem registry behind `httptest.Server`. The
+`mcpclientharness`, `webhookemitter`, `clockfreezer`, `identityfaker`,
+`fsregistryfixture`, and `harnessbridge` harnesses do not exist. The absent
+`identityfaker` is tracked under `TEST-GAPS.md` G-AUTH-3.
 
 Each harness is a Go package under `internal/testharness/`. The harnesses below cover what tests need to share without duplicating setup.
 
@@ -283,11 +356,17 @@ Reads every `*_test.go` (Go), `test_*.py` / `*_test.py` (Python), and `*.test.ts
 - `speccov report`: a table of every spec section with the count of tests citing it and the per-section assertion list each test covers.
 - `speccov uncovered`: spec sections with zero citing tests. Broken into "no tests" and "tests exist but cite a different sub-claim."
 - `speccov drift`: tests citing sections that no longer exist in the spec.
-- `speccov sentences`: a sentence-level matrix that breaks each spec paragraph into its observable claims and reports whether each claim has a citing test. Generated by a deterministic spec parser that splits on sentence boundaries inside spec sections that contain normative behavior.
+- `speccov sentences`: a sentence-level matrix that breaks each spec paragraph into its observable claims and reports whether each claim has a citing test. Generated by a deterministic spec parser that splits on sentence boundaries inside spec sections that contain normative behavior. **NOT BUILT.** The shipped `speccov` implements `report`, `uncovered`, and `drift` only; there is no `sentences` subcommand and no sentence-coverage gate.
 
 `speccov` is required to pass on every PR. The fast lane runs `speccov drift`; the medium lane runs `speccov uncovered` and `speccov sentences`. Both fail on regressions.
 
 #### `tools/coverage`
+
+**Partly built; the floors below are NOT enforced.** The shipped `tools/coverage`
+enforces a single overall floor of `COVERAGE_MIN=50` via `make coverage-budget`.
+The 95% line floor, the 90% branch floor, and the per-file 0.1pp regression gate
+are not built; branch coverage is not measured, and `tools/coverage` defers
+per-file regression detection in its own doc comment.
 
 Wraps language-native coverage tools and enforces budgets:
 
@@ -299,11 +378,21 @@ The tool emits `coverage/summary.md` with a per-package and per-file breakdown, 
 
 #### `tools/mutation`
 
+**NOT BUILT.** There is no `tools/mutation` directory and no `gremlins` / `mutmut`
+/ `stryker` dependency. No mutation score is computed or gated.
+
 Mutation testing via `gremlins` (Go), `mutmut` (Python), `stryker` (TypeScript). Configured to mutate every package under `pkg/`, `internal/registry/`, and the SDKs. Each release-candidate run must achieve a mutation score ≥ 85%. Mutations that survive the test suite are surfaced in `coverage/mutations.md` as TODOs.
 
 Mutation testing is too slow for every PR; it runs nightly and on release branches. PR-time mutation testing is scoped to changed files only.
 
 #### `tools/matrix`
+
+**Built, but the mechanism below differs.** The shipped `tools/matrix` does not
+read spec tables and does not generate or look for files in
+`test/conformance/adapter/` (which does not exist). It audits `// Matrix: §X.Y
+(key, ...)` annotations on tests against matrices hardcoded in
+`tools/matrix/matrices.go`. The "99 cells" figure is not computed from the spec.
+`make matrix-audit` runs the audit.
 
 Generates the expected-test list from spec tables. The spec contains explicit matrices that translate one-to-one into test cases:
 
@@ -319,13 +408,30 @@ Generates the expected-test list from spec tables. The spec contains explicit ma
 
 ### 9.3 Lint
 
+**NOT BUILT as described.** `make lint` runs stock `golangci-lint run` (or `go
+vet` when it is absent); no custom citation rule is wired. Citation enforcement is
+the standalone `speccov drift`, matching the §16 recommendation rather than this
+section.
+
 A `golangci-lint` custom rule (and Python / TypeScript equivalents) rejects new test functions without a `// Spec:` and `// Phase:` annotation. The rule is bypassable for genuinely spec-orthogonal helpers, with an explicit `// Spec: n/a — <reason>` form. The lint also rejects tests with no assertions (a common Go anti-pattern), tests that only check `err == nil`, and tests longer than 100 lines without a clear comment block explaining the structure.
 
 ### 9.4 Coverage gate
 
+**Partly built.** A single `make coverage-gate` target exists and chains `lint`,
+`speccov-drift`, `matrix-audit`, `doccov-check`, and `coverage-budget` (overall
+50% floor). It has no `mutation` sub-check, which does not exist. The sub-checks
+also run separately on the relevant lanes: `speccov-drift` and `coverage-budget`
+per lane, and `matrix-audit` advisory in nightly.
+
 A single command, `make coverage-gate`, runs `speccov`, `coverage`, `matrix audit`, and (on release branches) `mutation`. CI invokes it on every PR. Failure on any sub-check blocks the merge.
 
 ## 10. Phase tagging and gates
+
+**NOT BUILT.** None of the phase machinery in this section exists: no `// Phase:`
+annotations on tests, no `RequirePhase` / `ActivePhase` helper, no
+`internal/testharness/phase.go`, no `tools/phasegate` directory or
+`mapping.yaml`, and no `.phase` file. The phase-to-§11 mapping table is
+historical; nothing consumes it.
 
 ### 10.1 Tags
 
@@ -384,6 +490,14 @@ The verification tests in §11 map onto MVP phases (§10). The mapping is mainta
 | 19    | Example artifact registry verifying the full multi-layer, multi-type catalog end-to-end                                 |
 
 ## 11. Build order for the test infrastructure itself
+
+**Historical.** This staged sequence assumed the phase loop and the three-lane
+machinery in §2, §4, and §10, none of which shipped. The artifacts it references
+that do not exist include `make test-fast` / `test-medium` / `test-slow`, the
+spec-citation linter, `.phase`, `tools/phasegate`, the `fsregistryfixture` /
+`webhookemitter` / `identityfaker` harnesses, and the `WithPostgres()` /
+`WithSQLite()` `registryharness` builders. The stages below are retained for
+historical reference.
 
 The infrastructure is built in five stages. Each stage produces something usable; no stage waits on later stages.
 
@@ -444,6 +558,13 @@ Exit criteria: every test through Phase 19 is written and tagged. `make test-pha
 
 ## 12. CI integration
 
+**NOT BUILT as described.** The `test-fast.yml`, `test-medium.yml`, and
+`test-slow.yml` workflows do not exist, and CI does not read a `.phase` file. The
+real workflows are `test.yml` (PR and push to `main`), `nightly.yml` (cron and
+manual), `live-external.yml` (release and manual), plus `bench.yml`, `codeql.yml`,
+`spec-coverage.yml`, and `release.yml`. The lane definitions live in the
+`TEST-GAPS.md` lane table.
+
 Three workflows under `.github/workflows/`:
 
 - `test-fast.yml`: triggered on every commit. Runs `make test-fast` + `make lint` + `make speccov-drift`. Required check.
@@ -455,6 +576,9 @@ The active phase determines which test set is required. CI reads `.phase` and ru
 A separate `.github/workflows/spec-coverage.yml` runs the speccov reporter on PR and posts a comment showing newly uncovered sections.
 
 ## 13. Observability for autonomous runs
+
+**Mostly NOT BUILT.** `make next` and the phase-scoped `make status` do not exist.
+`make speccov` (the spec-coverage table) is the one signal below that shipped.
 
 Claude needs feedback that compresses into the conversation context. Three signals matter:
 
@@ -500,6 +624,12 @@ Every observable behavior in the spec has a dedicated test. Observable means: a 
 | Read-only mode | §13.2.1 | 1 test per state transition, 1 test per affected endpoint |
 
 ### 14.3 Quality coverage
+
+**NOT ENFORCED as stated.** The shipped coverage gate is a single overall floor of
+50% (`COVERAGE_MIN=50`). The 95% line floor, the 90% branch floor, the 85%
+mutation score, and the 95% spec-sentence coverage below are not enforced;
+branch coverage, mutation testing, and the sentence-coverage parser are not
+built.
 
 - **Line coverage** ≥ 95% on `pkg/`, `internal/registry/`, `sdks/podium-py/podium/`, `sdks/podium-ts/src/`. Files below 95% block merges.
 - **Branch coverage** ≥ 90% on the same set.
@@ -548,10 +678,10 @@ The full set of determinism guarantees:
 
 - **Time**: `internal/clock.Clock` is the only time source. Production code calls it; tests inject `clockfreezer`. No `time.Now()` in non-test code outside `internal/clock`.
 - **Randomness**: every random source takes a `*rand.Rand` parameter. Tests pass a seeded RNG.
-- **Network**: no test makes outbound network calls. The webhook emitter, identity faker, and HTTP harness are in-process. Container-backed tests bind only to loopback ports allocated by `testcontainers-go`.
+- **Network**: no test makes outbound network calls. The webhook emitter, identity faker, and HTTP harness are in-process. Container-backed tests bind only to loopback ports allocated by `testcontainers-go`. (`testcontainers-go` is NOT BUILT; live-backend tests reach externally-provisioned services through env vars and skip when unset.)
 - **Filesystem**: every test uses `t.TempDir()`. The registry-as-disk fixtures are constructed under the temp dir.
 - **Concurrency**: parallelism is the default. `t.Parallel()` is invoked at the top of every test that doesn't share global state. Tests that mutate shared state are marked and serialized.
-- **Goroutine leaks**: `goleak.VerifyTestMain` runs in every package's `TestMain`.
+- **Goroutine leaks**: `goleak.VerifyTestMain` runs in every package's `TestMain`. (NOT BUILT; `goleak` runs in no package. Tracked as `TEST-GAPS.md` G-INFRA-1.)
 
 ## 16. Open decisions
 
