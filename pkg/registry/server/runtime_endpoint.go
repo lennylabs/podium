@@ -71,11 +71,8 @@ type RuntimeRegisterResponse struct {
 }
 
 func (e *RuntimeKeyEndpoint) register(w http.ResponseWriter, r *http.Request) {
-	if e.mode != nil {
-		if err := e.mode.CheckConfig(); err != nil {
-			writeError(w, http.StatusServiceUnavailable, "config.read_only", err.Error())
-			return
-		}
+	if rejectIfReadOnly(w, e.mode) {
+		return
 	}
 	if err := e.authAdmin(r); err != nil {
 		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())

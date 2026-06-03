@@ -31,15 +31,12 @@ func (s *Server) handleWebhooksList(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"receivers": out})
 	case http.MethodPost:
-		// spec: §13.2.1 — creating a webhook receiver is a configuration
-		// change, rejected in read-only mode with config.read_only
-		// (consistent with the layer-admin handlers). GET above stays
-		// available so operators can still inspect receivers.
-		if s.mode != nil {
-			if err := s.mode.CheckConfig(); err != nil {
-				writeError(w, http.StatusServiceUnavailable, "config.read_only", err.Error())
-				return
-			}
+		// spec: §13.2.1 — creating a webhook receiver is a write endpoint,
+		// rejected in read-only mode with registry.read_only (consistent
+		// with the layer-admin handlers). GET above stays available so
+		// operators can still inspect receivers.
+		if rejectIfReadOnly(w, s.mode) {
+			return
 		}
 		var body struct {
 			URL         string   `json:"url"`
@@ -103,13 +100,10 @@ func (s *Server) handleWebhookOne(w http.ResponseWriter, r *http.Request) {
 		rec.Secret = "***"
 		writeJSON(w, http.StatusOK, rec)
 	case http.MethodPut:
-		// spec: §13.2.1 — editing a webhook receiver is a configuration
-		// change, rejected in read-only mode with config.read_only.
-		if s.mode != nil {
-			if err := s.mode.CheckConfig(); err != nil {
-				writeError(w, http.StatusServiceUnavailable, "config.read_only", err.Error())
-				return
-			}
+		// spec: §13.2.1 — editing a webhook receiver is a write endpoint,
+		// rejected in read-only mode with registry.read_only.
+		if rejectIfReadOnly(w, s.mode) {
+			return
 		}
 		current, err := s.webhooks.Store.Get(r.Context(), s.tenant, id)
 		if err != nil {
@@ -150,13 +144,10 @@ func (s *Server) handleWebhookOne(w http.ResponseWriter, r *http.Request) {
 		current.Secret = "***"
 		writeJSON(w, http.StatusOK, current)
 	case http.MethodDelete:
-		// spec: §13.2.1 — removing a webhook receiver is a configuration
-		// change, rejected in read-only mode with config.read_only.
-		if s.mode != nil {
-			if err := s.mode.CheckConfig(); err != nil {
-				writeError(w, http.StatusServiceUnavailable, "config.read_only", err.Error())
-				return
-			}
+		// spec: §13.2.1 — removing a webhook receiver is a write endpoint,
+		// rejected in read-only mode with registry.read_only.
+		if rejectIfReadOnly(w, s.mode) {
+			return
 		}
 		if err := s.webhooks.Store.Delete(r.Context(), s.tenant, id); err != nil {
 			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())

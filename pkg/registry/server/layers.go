@@ -298,11 +298,8 @@ func (e *LayerEndpoint) erase(w http.ResponseWriter, r *http.Request) {
 			"method not allowed: "+r.Method)
 		return
 	}
-	if e.mode != nil {
-		if err := e.mode.CheckConfig(); err != nil {
-			writeError(w, http.StatusServiceUnavailable, "config.read_only", err.Error())
-			return
-		}
+	if rejectIfReadOnly(w, e.mode) {
+		return
 	}
 	if err := e.authAdmin(r); err != nil {
 		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
@@ -393,11 +390,8 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 			"method not allowed: "+r.Method)
 		return
 	}
-	if e.mode != nil {
-		if err := e.mode.CheckConfig(); err != nil {
-			writeError(w, http.StatusServiceUnavailable, "config.read_only", err.Error())
-			return
-		}
+	if rejectIfReadOnly(w, e.mode) {
+		return
 	}
 	id := r.URL.Query().Get("id")
 	if id == "" {
@@ -500,11 +494,8 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 
 // register handles POST /v1/layers.
 func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
-	if e.mode != nil {
-		if err := e.mode.CheckConfig(); err != nil {
-			writeError(w, http.StatusServiceUnavailable, "config.read_only", err.Error())
-			return
-		}
+	if rejectIfReadOnly(w, e.mode) {
+		return
 	}
 	var req LayerRegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -711,11 +702,8 @@ func (e *LayerEndpoint) restore(w http.ResponseWriter, r *http.Request) {
 			"method not allowed: "+r.Method)
 		return
 	}
-	if e.mode != nil {
-		if err := e.mode.CheckConfig(); err != nil {
-			writeError(w, http.StatusServiceUnavailable, "config.read_only", err.Error())
-			return
-		}
+	if rejectIfReadOnly(w, e.mode) {
+		return
 	}
 	id := r.URL.Query().Get("id")
 	if id == "" {
@@ -762,11 +750,8 @@ func (e *LayerEndpoint) restore(w http.ResponseWriter, r *http.Request) {
 
 // unregister handles DELETE /v1/layers?id=ID.
 func (e *LayerEndpoint) unregister(w http.ResponseWriter, r *http.Request) {
-	if e.mode != nil {
-		if err := e.mode.CheckConfig(); err != nil {
-			writeError(w, http.StatusServiceUnavailable, "config.read_only", err.Error())
-			return
-		}
+	if rejectIfReadOnly(w, e.mode) {
+		return
 	}
 	id := r.URL.Query().Get("id")
 	if id == "" {
@@ -805,11 +790,8 @@ func (e *LayerEndpoint) reorder(w http.ResponseWriter, r *http.Request) {
 			"method not allowed: "+r.Method)
 		return
 	}
-	if e.mode != nil {
-		if err := e.mode.CheckConfig(); err != nil {
-			writeError(w, http.StatusServiceUnavailable, "config.read_only", err.Error())
-			return
-		}
+	if rejectIfReadOnly(w, e.mode) {
+		return
 	}
 	var req struct {
 		Order []string `json:"order"`
@@ -880,11 +862,8 @@ func (e *LayerEndpoint) reingest(w http.ResponseWriter, r *http.Request) {
 			"method not allowed: "+r.Method)
 		return
 	}
-	if e.mode != nil {
-		if err := e.mode.CheckConfig(); err != nil {
-			writeError(w, http.StatusServiceUnavailable, "config.read_only", err.Error())
-			return
-		}
+	if rejectIfReadOnly(w, e.mode) {
+		return
 	}
 	id := r.URL.Query().Get("id")
 	if id == "" {

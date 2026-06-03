@@ -55,6 +55,7 @@ func TestEnrichEnvelope_RetryableByCode(t *testing.T) {
 		"registry.unavailable":            true,
 		"quota.search_qps_exceeded":       true,
 		"quota.materialize_rate_exceeded": true,
+		"registry.read_only":              true,
 		"quota.layer_count_exceeded":      false,
 		"domain.not_found":                false,
 		"registry.not_found":              false,

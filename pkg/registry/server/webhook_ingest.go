@@ -32,11 +32,8 @@ func (e *LayerEndpoint) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			"method not allowed: "+r.Method)
 		return
 	}
-	if e.mode != nil {
-		if err := e.mode.CheckConfig(); err != nil {
-			writeError(w, http.StatusServiceUnavailable, "config.read_only", err.Error())
-			return
-		}
+	if rejectIfReadOnly(w, e.mode) {
+		return
 	}
 	id := r.PathValue("id")
 	if id == "" {

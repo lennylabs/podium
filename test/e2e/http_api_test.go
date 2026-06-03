@@ -1080,9 +1080,11 @@ func TestHTTPAPI_ReadOnlyRejectsWrites(t *testing.T) {
 		"id": "team-finance", "source_type": "local", "local_path": t.TempDir(),
 	})
 	apiWantStatus(t, code, 503, "read-only register", body)
+	// spec: §13.2.1 (F-13.2.1) — every write endpoint rejects with the
+	// single registry.read_only code; the spec defines no config.read_only.
 	got := apiJSONObj(t, body)["code"]
-	if got != "registry.read_only" && got != "config.read_only" {
-		t.Fatalf("code=%v, want registry.read_only or config.read_only", got)
+	if got != "registry.read_only" {
+		t.Fatalf("code=%v, want registry.read_only", got)
 	}
 }
 

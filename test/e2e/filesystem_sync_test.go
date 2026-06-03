@@ -959,8 +959,13 @@ func TestFilesystemSync_TopLevelDomainMDAmbiguous(t *testing.T) {
 	if res.Exit == 0 {
 		t.Fatalf("expected non-zero exit for DOMAIN.md at multi_layer root, got 0")
 	}
-	if !strings.Contains(res.Stderr, "ambiguous") {
-		t.Errorf("stderr missing 'ambiguous': %q", res.Stderr)
+	// spec: §13.10 (F-13.10.3) — the surfaced startup/sync error names the
+	// documented config.layer_path_ambiguous code and the conflicting file.
+	if !strings.Contains(res.Stderr, "config.layer_path_ambiguous") {
+		t.Errorf("stderr missing 'config.layer_path_ambiguous': %q", res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "DOMAIN.md") {
+		t.Errorf("stderr does not name the conflicting manifest: %q", res.Stderr)
 	}
 }
 

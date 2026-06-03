@@ -35,6 +35,14 @@ var errorCodeRegistry = map[string]errorCodeMeta{
 		retryable:       true,
 		suggestedAction: "Reduce the load_artifact request rate or raise the tenant's materialize quota.",
 	},
+	// spec §13.2.1: read-only mode is a transient state the registry
+	// leaves automatically once the Postgres primary is reachable again,
+	// so a write rejected with registry.read_only succeeds on retry once
+	// the registry recovers, with no operator action required.
+	"registry.read_only": {
+		retryable:       true,
+		suggestedAction: "Retry the write once the registry leaves read-only mode; reads continue to serve from the replica.",
+	},
 	// spec §7.3.1 ingest-cases: "Same version, different content_hash |
 	// Rejected as ingest.immutable_violation. The author bumps the version."
 	// A stored (artifact_id, version) is immutable (§4.7), so retrying the

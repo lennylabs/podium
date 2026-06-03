@@ -87,7 +87,6 @@ func KnownMatrices() []Matrix {
 					"config.unknown_harness",
 					"config.layer_path_ambiguous",
 					"config.public_mode_with_idp",
-					"config.read_only",
 					"ingest.lint_failed",
 					"ingest.immutable_violation",
 					"ingest.frozen",

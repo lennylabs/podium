@@ -3,6 +3,7 @@ package filesystem
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lennylabs/podium/internal/testharness"
@@ -161,6 +162,14 @@ func TestOpen_MultiLayer_AmbiguousFails(t *testing.T) {
 	_, err := Open(root)
 	if !errors.Is(err, ErrLayerPathAmbiguous) {
 		t.Fatalf("got %v, want ErrLayerPathAmbiguous", err)
+	}
+	// spec: §13.10 (F-13.10.3) — the surfaced error names the documented
+	// config.layer_path_ambiguous code and the conflicting manifest path.
+	if got := err.Error(); !strings.Contains(got, "config.layer_path_ambiguous") {
+		t.Errorf("error %q missing config.layer_path_ambiguous code", got)
+	}
+	if got := err.Error(); !strings.Contains(got, "ARTIFACT.md") {
+		t.Errorf("error %q does not name the conflicting manifest", got)
 	}
 }
 

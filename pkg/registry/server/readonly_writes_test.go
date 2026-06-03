@@ -27,9 +27,9 @@ func readOnlyErrorCode(t *testing.T, resp *http.Response) string {
 	return env.Code
 }
 
-// Spec: §13.2.1 — admin grants are a configuration change, so POST and
+// Spec: §13.2.1 — admin grants are a write endpoint, so POST and
 // DELETE /v1/admin/grants are rejected in read-only mode with the §6.10
-// config.read_only envelope (503), consistent with the layer handlers.
+// registry.read_only envelope (503), consistent with the layer handlers.
 func TestAdminGrants_RejectedInReadOnly(t *testing.T) {
 	t.Parallel()
 	mode := server.NewModeTracker()
@@ -46,8 +46,8 @@ func TestAdminGrants_RejectedInReadOnly(t *testing.T) {
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("POST status = %d, want 503", resp.StatusCode)
 	}
-	if code := readOnlyErrorCode(t, resp); code != "config.read_only" {
-		t.Errorf("POST code = %q, want config.read_only", code)
+	if code := readOnlyErrorCode(t, resp); code != "registry.read_only" {
+		t.Errorf("POST code = %q, want registry.read_only", code)
 	}
 	resp.Body.Close()
 
@@ -59,8 +59,8 @@ func TestAdminGrants_RejectedInReadOnly(t *testing.T) {
 	if del.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("DELETE status = %d, want 503", del.StatusCode)
 	}
-	if code := readOnlyErrorCode(t, del); code != "config.read_only" {
-		t.Errorf("DELETE code = %q, want config.read_only", code)
+	if code := readOnlyErrorCode(t, del); code != "registry.read_only" {
+		t.Errorf("DELETE code = %q, want registry.read_only", code)
 	}
 	del.Body.Close()
 }
@@ -87,8 +87,8 @@ func newReadOnlyWebhookServer(t *testing.T) (*httptest.Server, string) {
 }
 
 // Spec: §13.2.1 — webhook-receiver writes (POST create, PUT edit,
-// DELETE) are configuration changes and are rejected in read-only mode
-// with config.read_only (503).
+// DELETE) are write endpoints and are rejected in read-only mode
+// with registry.read_only (503).
 func TestWebhookReceiverWrites_RejectedInReadOnly(t *testing.T) {
 	t.Parallel()
 	ts, id := newReadOnlyWebhookServer(t)
@@ -102,8 +102,8 @@ func TestWebhookReceiverWrites_RejectedInReadOnly(t *testing.T) {
 	if post.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("POST status = %d, want 503", post.StatusCode)
 	}
-	if code := readOnlyErrorCode(t, post); code != "config.read_only" {
-		t.Errorf("POST code = %q, want config.read_only", code)
+	if code := readOnlyErrorCode(t, post); code != "registry.read_only" {
+		t.Errorf("POST code = %q, want registry.read_only", code)
 	}
 	post.Body.Close()
 
@@ -118,8 +118,8 @@ func TestWebhookReceiverWrites_RejectedInReadOnly(t *testing.T) {
 	if put.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("PUT status = %d, want 503", put.StatusCode)
 	}
-	if code := readOnlyErrorCode(t, put); code != "config.read_only" {
-		t.Errorf("PUT code = %q, want config.read_only", code)
+	if code := readOnlyErrorCode(t, put); code != "registry.read_only" {
+		t.Errorf("PUT code = %q, want registry.read_only", code)
 	}
 	put.Body.Close()
 
@@ -132,8 +132,8 @@ func TestWebhookReceiverWrites_RejectedInReadOnly(t *testing.T) {
 	if del.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("DELETE status = %d, want 503", del.StatusCode)
 	}
-	if code := readOnlyErrorCode(t, del); code != "config.read_only" {
-		t.Errorf("DELETE code = %q, want config.read_only", code)
+	if code := readOnlyErrorCode(t, del); code != "registry.read_only" {
+		t.Errorf("DELETE code = %q, want registry.read_only", code)
 	}
 	del.Body.Close()
 }

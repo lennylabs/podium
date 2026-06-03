@@ -25,8 +25,10 @@ var (
 	ErrConfigInvalid = errors.New("filesystem: invalid .registry-config")
 	// ErrLayerPathAmbiguous signals that .registry-config sets
 	// multi_layer: true but manifest files appear at the top level.
-	// Maps to config.layer_path_ambiguous in §13.10 / §6.10.
-	ErrLayerPathAmbiguous = errors.New("filesystem: layer path ambiguous (multi_layer: true but manifests at top level)")
+	// The message leads with the config.layer_path_ambiguous code so the
+	// §13.10 startup refusal surfaces the documented code verbatim to
+	// operators and tooling, not only an English description.
+	ErrLayerPathAmbiguous = errors.New("config.layer_path_ambiguous: multi_layer: true but manifest files are present at the top level")
 )
 
 // Mode is the dispatch result for a filesystem registry path.

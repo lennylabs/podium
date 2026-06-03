@@ -24,15 +24,12 @@ func (s *Server) handleAdminGrants(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
 		return
 	}
-	// spec: §13.2.1 — admin grants are a configuration change, so they are
-	// rejected in read-only mode with config.read_only, consistent with the
-	// layer-admin and runtime-key handlers. Both routes below mutate the
-	// store, so the check runs before the method switch.
-	if s.mode != nil {
-		if err := s.mode.CheckConfig(); err != nil {
-			writeError(w, http.StatusServiceUnavailable, "config.read_only", err.Error())
-			return
-		}
+	// spec: §13.2.1 — admin grants are a write endpoint, so they are
+	// rejected in read-only mode with registry.read_only, consistent with
+	// the layer-admin and runtime-key handlers. Both routes below mutate
+	// the store, so the check runs before the method switch.
+	if rejectIfReadOnly(w, s.mode) {
+		return
 	}
 	switch r.Method {
 	case http.MethodPost:
