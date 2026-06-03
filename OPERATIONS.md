@@ -277,14 +277,14 @@ The target database needs the `vector` extension installed (`CREATE EXTENSION ve
 
 ### Sigstore (keyless signing)
 
-`pkg/sign/sigstore_live_test.go` skips unless **all four** are set:
+`TestSigstoreKeyless_LiveSmoke` in `pkg/sign/sigstore_live_test.go` skips unless `PODIUM_SIGSTORE_FULCIO_URL`, `PODIUM_SIGSTORE_OIDC_TOKEN`, and `PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE` are set; `PODIUM_SIGSTORE_REKOR_URL` is read when present. Run it manually against the staging instance, never production. See `RELEASING.md` → "Sigstore live tests are manual" for the cadence and the reason a credentialed CI lane is not wired.
 
-| Variable                              | Purpose                                                                       | Example                       |
-| :------------------------------------ | :---------------------------------------------------------------------------- | :---------------------------- |
-| `PODIUM_SIGSTORE_FULCIO_URL`          | Fulcio CA endpoint.                                                           | `https://fulcio.sigstore.dev` |
-| `PODIUM_SIGSTORE_REKOR_URL`           | Rekor transparency log.                                                       | `https://rekor.sigstore.dev`  |
-| `PODIUM_SIGSTORE_OIDC_TOKEN`          | OIDC token Fulcio binds into the cert. In CI, sourced from `id-token: write`. | `eyJ…`                        |
-| `PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE` | Path to the trust bundle (intermediate + root CA chain).                      | `/path/to/sigstore-root.pem`  |
+| Variable                              | Purpose                                                                       | Example                        |
+| :------------------------------------ | :---------------------------------------------------------------------------- | :----------------------------- |
+| `PODIUM_SIGSTORE_FULCIO_URL`          | Fulcio CA endpoint. Use the staging instance for manual runs.                | `https://fulcio.sigstage.dev`  |
+| `PODIUM_SIGSTORE_REKOR_URL`           | Rekor transparency log. Use the staging instance for manual runs.            | `https://rekor.sigstage.dev`   |
+| `PODIUM_SIGSTORE_OIDC_TOKEN`          | OIDC token Fulcio binds into the cert. The configured issuer must accept it.  | `eyJ…`                         |
+| `PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE` | Path to the trust bundle (intermediate + root CA chain) for the chosen instance. | `/path/to/sigstage-root.pem`   |
 
 ### What's not gated by env vars today
 
@@ -347,7 +347,7 @@ These run alongside the `RELEASING.md` flow. Most are reminders rather than bloc
 - [ ] `make test` passes locally on the release commit.
 - [ ] The four version files agree on the release number (see RELEASING.md for the list).
 - [ ] Last night's `nightly.yml` run is green for `main`. If not, fix before tagging — the release runs the same battery and will fail too.
-- [ ] If the release touches `pkg/sign` or the `SignatureProvider` contract, run the Sigstore live tests manually against real Fulcio + Rekor (see `RELEASING.md` → "Sigstore live tests are manual"). The release workflow does not exercise them.
+- [ ] If the release touches `pkg/sign` or the `SignatureProvider` contract, run `TestSigstoreKeyless_LiveSmoke` manually against the Sigstore staging instance (see `RELEASING.md` → "Sigstore live tests are manual"). The release workflow does not exercise it.
 - [ ] After the release workflow runs, smoke-test one published artifact (download a binary, run `podium version`).
 
 ---

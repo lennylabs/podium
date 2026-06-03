@@ -53,12 +53,39 @@ Every `(harness, type)` is a subtest: it runs and asserts where the type is
 supported, or skips with a reason otherwise. It is tolerant and may be flaky;
 real agents need network and are nondeterministic.
 
+## Targeted harness CLI versions
+
+The goldens in `test/materialization/testdata/golden/*.golden` and the per-type
+checks here assume the harness-native config formats produced by the CLI
+versions below. These are the versions the suite was last verified against. They
+are the reference point for drift detection: each Tier A run logs the installed
+harness `--version`, and a logged version that differs from the value here means
+the harness may have changed its native format and the goldens and findings need
+re-validation.
+
+| Harness | Targeted version | Probed with | Recorded by |
+|---|---|---|---|
+| claude-code | 2.1.160 | `claude --version` | this table |
+| cursor-agent | 2026.06.02 (logged in) | `cursor-agent --version` | this table |
+| codex-cli | 0.136.0 (logged in) | `codex --version` | this table |
+| Gemini CLI | 0.44.1 (logged in) | `gemini --version` | this table |
+
+OpenCode, claude-desktop, claude-cowork, pi, and hermes have no recorded version
+because they expose no probe or ship no CLI on the verified machine.
+
+The suite does not assert these versions automatically. `integration_test.go`
+logs `--version` (`t.Logf`) but pins no constant and gates on no minimum, so a
+harness that ships a new native format does not fail any check. The golden suite
+in `test/materialization` runs the in-process adapters and never drives the real
+CLI. Drift is detectable only by running the build-tagged suite by hand and
+comparing the logged versions against this table. Keep this table and the inline version
+references in the findings below in sync on every manual run.
+
 ## Coverage and verification status
 
-Verified end-to-end against **Claude Code 2.1.160**, **cursor-agent 2026.06.02**
-(logged in), **codex-cli 0.136.0** (logged in), and **Gemini CLI 0.44.1**
-(logged in). ✅ = the real harness consumed Podium's materialized artifact; ✗ =
-skipped with the noted reason.
+Verified end-to-end against the versions in the table above. ✅ = the real
+harness consumed Podium's materialized artifact; ✗ = skipped with the noted
+reason.
 
 | Type | claude-code | cursor | codex | gemini | How it is checked |
 |---|---|---|---|---|---|
@@ -126,3 +153,37 @@ Findings worth noting:
 | opencode | (none yet) | confirm whether a non-interactive MCP-list exists |
 | cursor | (approval-gated) | records version, skips |
 | claude-desktop / claude-cowork / pi / hermes | — | skipped (no project surface / no CLI) |
+
+## Manual cadence and drift detection
+
+This suite needs the proprietary harness CLIs and cannot run in standard CI: the
+`harness_integration` build tag excludes it from `go test ./...`, and Tier C also
+needs an authenticated harness and network access. Drift detection is therefore a
+recorded manual act on a machine with the CLIs installed. No automated gate runs
+it. The golden suite in `test/materialization` runs on the PR lane and catches
+Podium-side format regressions. This suite catches harness-side format drift, and
+catches it only when a maintainer runs it by hand.
+
+Run Tier A whenever an adapter's native output changes or a targeted harness
+ships a new CLI version. It is deterministic and needs no API key. Anything not
+on `PATH` skips with a reason, so it is safe to run with whatever subset of CLIs
+is installed.
+
+```bash
+go test -tags harness_integration ./test/harness_integration/ -v
+```
+
+Run Tier C before a release that changes adapter materialization, and on a
+periodic cadence (for example monthly, or when a targeted CLI bumps a minor
+version) to refresh the verification matrix. It is network-dependent and flaky.
+
+```bash
+PODIUM_HARNESS_AGENT=1 \
+  go test -tags harness_integration ./test/harness_integration/ -run TestHarnessArtifactTypes -v -timeout 900s
+```
+
+On each run, read the logged `--version` lines and update the targeted-versions
+table and the inline version references in the findings together. Note any
+harness whose native format changed (the kind of finding recorded above). This is
+the act that keeps drift detectable; without a scheduled cadence the recorded
+versions silently age.

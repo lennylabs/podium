@@ -442,7 +442,7 @@ pgvector runs live on the PR lane already, but the conformance is shallow.
 # STACK: Managed-stack parity and concurrency
 
 ### G-STACK-1: No author-to-consumer parity on the managed stack
-- **Severity**: P1. **Lane**: PR (Postgres and S3 already present) plus Release (vector). **Status**: open.
+- **Severity**: P1. **Lane**: opt-in (`PODIUM_STACK_PARITY=1`) plus live Postgres + S3. **Status**: partial (flagged). `test/e2e/standard_stack_parity_test.go` boots the registry in standard mode (Postgres + S3 + injected-session-token) and validates the boot, admin authorization, and `layer register`/`reingest` against a live stack. The consumer search-after-ingest assertion does not yet pass: a runtime `--local` layer registered against a remote standard-mode server does not become searchable, which points at the standard-mode author-publish model (local source versus git or upload) rather than a flake. The test is gated behind `PODIUM_STACK_PARITY=1` so it does not break CI, and is flagged for follow-up (rework the author flow to a git source or an upload).
 - **Current**: Live Postgres, pgvector, and S3 are exercised at the package
   conformance level, but no full author-to-consumer journey runs against the
   managed stack.
@@ -451,7 +451,7 @@ pgvector runs live on the PR lane already, but the conformance is shallow.
   backend.
 
 ### G-STACK-2: Concurrency and atomicity are thin
-- **Severity**: P1. **Lane**: PR. **Status**: open.
+- **Severity**: P1. **Lane**: PR. **Status**: closed (two non-atomic spots left open). Stage 4 added genuinely-concurrent, race-clean coverage: `pkg/audit/file_concurrent_append_test.go` (16 writers on one sink plus 8 sinks in a forest, asserting the linear-chain invariant and one root per writer), `test/integration/ingest_convergence_test.go` (24 concurrent racers, asserting exactly one durable manifest and reader agreement on the content hash), and `test/integration/sync_concurrent_target_test.go` (distinct-target completeness). Two non-atomic spots are left explicitly open with documented reasons: the `cmd/podium-mcp` `contentCache.put` bare `os.WriteFile`, and concurrent same-target sync as a guarantee (`pkg/materialize` uses a fixed `.tmp` with no target lock, a single-writer-per-target design, so the test asserts convergence and recovery rather than corruption-free mid-race).
 - **Current**: The shared cache directory, the shared audit hash chain, and
   concurrent sync to one target are tested single-threaded or not at all.
 - **Target**: Add tests for concurrent same-version ingest, concurrent sync to a
@@ -463,7 +463,7 @@ pgvector runs live on the PR lane already, but the conformance is shallow.
 # HARN: Harness drift
 
 ### G-HARN-1: Real-agent harness suite is out of CI
-- **Severity**: P1. **Lane**: a dedicated scheduled job. **Status**: open.
+- **Severity**: P1. **Lane**: manual-only (needs the proprietary CLIs). **Status**: partial (decision: keep manual + documented). `test/harness_integration/README.md` now pins the targeted harness CLI versions the goldens assume (claude-code 2.1.160, cursor-agent 2026.06.02, codex-cli 0.136.0, Gemini CLI 0.44.1) in a single table, and documents the manual cadence for the build-tagged suite (Tier A on adapter-output or CLI-version change; Tier C before a materialization-changing release and on a periodic refresh), so drift is detectable by comparing each run's logged `--version` against the table. A scheduled CI job is not wired because the suite needs the proprietary CLIs and Tier C needs an authenticated harness; promoting the recorded versions into an in-code `testedVersion` assertion in `integration_test.go` is the recommended follow-up.
 - **Current**: `test/harness_integration` drives the real Claude Code, Codex,
   Gemini, and Cursor CLIs, gated behind `//go:build harness_integration`, and
   runs in no workflow. Format drift in a harness is caught only against Podium's
@@ -478,14 +478,14 @@ pgvector runs live on the PR lane already, but the conformance is shallow.
 # INFRA: Test infrastructure and hermeticity
 
 ### G-INFRA-1: No goroutine-leak detection
-- **Severity**: P2. **Lane**: PR. **Status**: open.
+- **Severity**: P2. **Lane**: PR. **Status**: partial. `goleak.VerifyTestMain` is added to `pkg/sync/leak_test.go`, a package with real watch and server-source SSE goroutines; the package passes goleak under `-race`. `internal/serverboot` is flagged, not guarded: its anchor, verify, retention, and vector-outbox schedulers run on `context.Background()` with no stop path, so they leak by design until process exit and would fail goleak; guarding them needs a cancelable scheduler lifecycle, which is a production change held for human review. `cmd/podium-mcp` (stdio serve goroutines) is a candidate for a follow-up guard and was not added this stage.
 - **Current**: `goleak` appears in no package. Watch mode, MCP stdio, and SSE
   goroutine leaks are unguarded.
 - **Target**: Add `goleak.VerifyTestMain` to the packages with long-running
   goroutines.
 
 ### G-INFRA-2: Ambient backend env can leak into "backend absent" tests
-- **Severity**: P1. **Lane**: PR. **Status**: open.
+- **Severity**: P1. **Lane**: PR. **Status**: closed. The scrub is in place (`test/e2e/helpers_test.go`, commit `1b39c60`): `mergeEnv` is the single subprocess-env chokepoint and strips `PODIUM_POSTGRES_DSN[_VECTOR]`, `PODIUM_PGVECTOR_DSN`, and the `PODIUM_S3_*` family. Stage 4 landed the guard in `test/e2e/ambient_env_guard_test.go`: a unit assertion that `mergeEnv` strips each backend var while a non-backend var survives, an explicit-override-survives test, and a real subprocess test that boots a bare `podium serve` with ambient backend env set and asserts the §13.10 no-autostandalone refusal still fires (catching a leak that bypasses `mergeEnv`, not only one inside it).
 - **Current**: A recent fix scrubbed `PODIUM_POSTGRES_DSN` and `PODIUM_S3_*` from
   CLI subprocess env so `make test-live` would not suppress the no-autostandalone
   refusal. The class of bug remains: any new test asserting "backend absent"
@@ -504,7 +504,7 @@ pgvector runs live on the PR lane already, but the conformance is shallow.
   superseded, so it stops implying coverage that does not exist.
 
 ### G-INFRA-4: Sigstore live signing is manual-only
-- **Severity**: P2. **Lane**: manual today; consider Release. **Status**: open.
+- **Severity**: P2. **Lane**: manual-only (existing). **Status**: closed (decision: keep manual + documented). `RELEASING.md` → "Sigstore live tests are manual" now records the cadence (run `TestSigstoreKeyless_LiveSmoke` against the Sigstore staging instance on any release whose diff touches `pkg/sign` or the `SignatureProvider` contract), the env it needs, and the corrected `-run` pattern; `OPERATIONS.md` aligns the per-release checklist and the env table to staging. A credentialed CI lane is not wired: the live test needs an ambient OIDC token the Fulcio issuer accepts, and even staging writes to a public transparency log; the staging-Sigstore release-lane wiring is recorded in `RELEASING.md` as an opt-in follow-up.
 - **Current**: Live Fulcio and Rekor tests run only through the RELEASING.md
   procedure. They cost money and write to the public transparency log.
 - **Target**: Decide whether to fold a single signing smoke into the Release lane
