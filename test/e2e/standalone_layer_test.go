@@ -39,13 +39,14 @@ func TestStandaloneLayer_ResolvesBootstrappedRegistry(t *testing.T) {
 	cliContains(t, ri.Stdout, "finance/forecast", "reingested artifact id")
 
 	// register a git layer (no --registry): the CLI prints the absolute webhook
-	// URL on its own labeled line, built from the server's public base URL.
+	// URL on its own labeled line on stderr, built from the server's public base
+	// URL, while stdout stays a single decodable JSON object.
 	git := runPodium(t, cwd, env, "layer", "register",
 		"--id", "community-skills",
 		"--repo", "https://github.com/podium-community/skills.git", "--ref", "main")
 	cliWantExit(t, git, 0, "git layer register resolves bootstrapped registry")
 	wantWebhook := "webhook URL: " + srv.BaseURL + "/v1/ingest/webhook/community-skills"
-	cliContains(t, git.Stdout, wantWebhook, "absolute webhook URL on labeled line")
+	cliContains(t, git.Stderr, wantWebhook, "absolute webhook URL on labeled line")
 }
 
 // spec §14.10 (F-14.10.1): with no registry configured anywhere (clean HOME,

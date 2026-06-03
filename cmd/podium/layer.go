@@ -249,12 +249,13 @@ func layerRegister(args []string) int {
 	// spec §14.10 step 3: "The CLI prints the webhook URL it would expect."
 	// Surface the server's absolute webhook URL on its own labeled line so a
 	// developer can paste it into a Git host's webhook configuration without
-	// digging it out of the raw JSON.
+	// digging it out of the raw JSON. Write it to stderr so stdout stays a
+	// single JSON object that callers can decode directly.
 	var reg struct {
 		WebhookURL string `json:"webhook_url"`
 	}
 	if err := json.Unmarshal(out, &reg); err == nil && reg.WebhookURL != "" {
-		fmt.Printf("webhook URL: %s\n", reg.WebhookURL)
+		fmt.Fprintf(os.Stderr, "webhook URL: %s\n", reg.WebhookURL)
 	}
 	return 0
 }
