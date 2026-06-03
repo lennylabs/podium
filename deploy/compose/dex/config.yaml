@@ -32,13 +32,17 @@ staticClients:
     public: true
     redirectURIs:
       - http://localhost:8080/callback
+      # Dex's RFC 8628 device flow authenticates the user through an internal
+      # redirect to /device/callback and validates it against this list, so the
+      # device-code login fails with "Unregistered redirect_uri" without it.
+      - /device/callback
 
 # A static example user so the device-code flow has an identity to
-# authenticate. The bcrypt hash is Dex's own documentation example for the
-# password "password"; it is an evaluation credential, not a secret.
+# authenticate. The hash is bcrypt("password"), verified; it is an evaluation
+# credential, not a secret.
 enablePasswordDB: true
 staticPasswords:
   - email: alice@acme.com
-    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leD81F.UNkrm"
+    hash: "$2a$10$aBrFsW/NM4tVbQ2PfZy4Yu4pJ3u4rrNQcUaapVKUGW3ZO2DVo9cJ6"
     username: alice
     userID: "alice-0001"

@@ -7,18 +7,25 @@ package e2e
 // They drive the real podium binary and, for device-code tests, a local
 // stub OIDC server built with net/http/httptest.
 //
-// Skip policy:
+// Identity model under test (spec/06-mcp-server.md §6.3): the registry
+// verifies a caller server-side only under injected-session-token, a JWT
+// signed by a runtime key registered with the registry. oauth-device-code is
+// the client-side token-acquisition flow; the registry does not ship a
+// server-side verifier for it. Group membership resolves registry-side via
+// SCIM 2.0 push, or the IdpGroupMapping adapter maps OIDC group claims to
+// group names (§6.3.1). Tests that assert verified-caller behavior (group
+// visibility, group-claim remapping) drive the injected-session-token path
+// using the helpers in injected_token_helpers_test.go.
 //
-//   Tests that require the registry to verify a real JWT (audience, JWKS,
-//   signature, hd_required, groups-claim mapping, clock skew, JWKS caching,
-//   trailing-slash issuer) are skipped honestly: the standalone server does
-//   not parse the nested identity: YAML block (T-D-oidc-28 doc-accuracy gap)
-//   and therefore cannot exercise those paths in an e2e setting.
+// Skip policy:
 //
 //   Tests that need the OS keychain (login success persistence, logout/status
 //   round-trip, token refresh) are skipped honestly: writing to the system
 //   keychain from CI is unsafe, and PODIUM_TOKEN_KEYCHAIN_NAME is used by
 //   login.go for the keychain service name only, not to isolate the store.
+//   Tests that exercise a pkg/identity unit surface (slow_down backoff,
+//   refresh-token retention) are skipped here because that surface is covered
+//   by the pkg/identity oauth_devicecode unit tests.
 
 import (
 	"bytes"
@@ -573,27 +580,6 @@ func TestAuth_StatusShowsIdentityProvider(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-15: audience mismatch => 401 auth.audience_mismatch ----------
-
-// T-D-oidc-15
-func TestAuth_AudienceMismatch(t *testing.T) {
-	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so token verification is not exercisable in e2e")
-}
-
-// ---- T-D-oidc-16: invalid JWT signature => 401 auth.signature_invalid -------
-
-// T-D-oidc-16
-func TestAuth_InvalidSignature(t *testing.T) {
-	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so token verification is not exercisable in e2e")
-}
-
-// ---- T-D-oidc-17: hd_required rejects tokens from wrong Workspace domain ---
-
-// T-D-oidc-17
-func TestAuth_HDRequired(t *testing.T) {
-	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so hd_required enforcement is not exercisable in e2e")
-}
-
 // ---- T-D-oidc-18: layer register with --group; visibility needs tokens ------
 
 // T-D-oidc-18
@@ -618,33 +604,20 @@ func TestAuth_LayerGroupVisibility(t *testing.T) {
 		t.Errorf("register stdout missing layer id:\n%s", res.Stdout)
 	}
 
-	// Layer list succeeds (standalone resolves callers to system:public which sees
-	// public layers; the group-visibility filtering requires verified JWT groups,
-	// which is not exercisable in the standalone e2e without OIDC JWKS verification).
+	// Layer list succeeds. The standalone server with no identity provider
+	// resolves callers to system:public, which sees public layers. This test
+	// covers the register + list CLI surface only.
 	listRes := runPodium(t, "", nil,
 		"layer", "list", "--registry", srv.BaseURL,
 	)
 	if listRes.Exit != 0 {
 		t.Fatalf("layer list exit=%d stderr=%s", listRes.Exit, listRes.Stderr)
 	}
-	// NOTE: Visibility filtering (group-membership enforcement) requires a verified
-	// JWT with groups claims. The standalone e2e cannot test that path because the
-	// nested identity: block is not parsed (T-D-oidc-28 doc-accuracy gap).
-	t.Log("layer register with --group: exit 0 and layer appears in list (visibility filtering requires OIDC tokens; skipped)")
-}
-
-// ---- T-D-oidc-19: --organization flag layer; visibility needs tokens --------
-
-// T-D-oidc-19
-func TestAuth_LayerOrganizationVisibility(t *testing.T) {
-	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so organization-visibility filtering is not exercisable in e2e")
-}
-
-// ---- T-D-oidc-20: layer with Entra GUID group; visibility needs tokens ------
-
-// T-D-oidc-20
-func TestAuth_LayerEntraGUIDGroup(t *testing.T) {
-	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so GUID-group-visibility filtering is not exercisable in e2e")
+	// Group-membership visibility enforcement for a verified caller is covered
+	// by TestServerOps_PerLayerVisibilityInjectedToken (group claim drives
+	// visibility) and TestAuth_IdpGroupMappingRemapsClaim (a mapped group claim
+	// drives visibility) over the injected-session-token path.
+	t.Log("layer register with --group: exit 0 and the layer appears in list")
 }
 
 // ---- T-D-oidc-21: SCIM /scim/v2/Users 404 when PODIUM_SCIM_TOKENS unset ----
@@ -727,9 +700,10 @@ func TestAuth_SCIMGroupCreation(t *testing.T) {
 	if !strings.Contains(string(body), "engineering") {
 		t.Errorf("group response missing displayName 'engineering':\n%s", body)
 	}
-	// NOTE: membership-driven layer visibility requires verified JWT tokens with
-	// SCIM-resolved group membership; not exercisable in standalone e2e without
-	// the nested identity: block (T-D-oidc-28).
+	// This test covers SCIM group provisioning over HTTP. Group-membership
+	// visibility for a verified caller is covered over the
+	// injected-session-token path (TestServerOps_PerLayerVisibilityInjectedToken,
+	// TestAuth_IdpGroupMappingRemapsClaim).
 }
 
 // ---- T-D-oidc-25: podium admin scim-token issue => unknown subcommand -------
@@ -820,67 +794,73 @@ func TestAuth_NestedIdentityBlockNotParsed(t *testing.T) {
 	t.Log("confirmed: a top-level identity: block is not parsed; the supported form is registry.identity_provider.type (§13.12)")
 }
 
-// ---- T-D-oidc-29: Auth0 trailing slash in issuer URL -------------------------
+// ---- T-D-oidc-grpmap: IdpGroupMapping remaps OIDC group claims end-to-end ----
 
-// T-D-oidc-29
-func TestAuth_Auth0TrailingSlashIssuer(t *testing.T) {
-	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so issuer URL matching is not exercisable in e2e")
-}
+// TestAuth_IdpGroupMappingRemapsClaim drives the IdpGroupMapping adapter
+// through the verified injected-session-token path. PODIUM_IDP_GROUP_MAPPING
+// rewrites a raw IdP group value carried in the token's groups claim to the
+// layer's friendly group name before visibility is evaluated, so a caller
+// whose token carries only the raw value sees a layer scoped to the mapped
+// name. A caller whose group has no mapping entry passes through unchanged and
+// does not match the layer. This replaces the former per-IdP groups_claim
+// tests (Auth0/Entra/Keycloak), which asserted an in-registry JWT verifier
+// that the spec does not define; the spec model resolves groups registry-side
+// via SCIM 2.0 push or the IdpGroupMapping adapter.
+//
+// Spec: §6.3.1 — the IdpGroupMapping adapter reads OIDC group claims from the
+// token and maps them to group names per a registry-side configuration.
+func TestAuth_IdpGroupMappingRemapsClaim(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	priv, pem := injKeyPair(t)
 
-// ---- T-D-oidc-30: Auth0 namespaced groups claim ------------------------------
+	// A finance-only layer (visibility: groups: [finance]) declared in
+	// registry.yaml so its visibility is explicit rather than the default.
+	layerRoot := writeRegistry(t, map[string]string{
+		"finance/secret/ARTIFACT.md": contextArtifact("finance secret"),
+	})
+	cfgPath := filepath.Join(home, "registry.yaml")
+	cfg := "" +
+		"registry:\n" +
+		"  layers:\n" +
+		"    - id: finance-layer\n" +
+		"      source:\n" +
+		"        local:\n" +
+		"          path: " + layerRoot + "\n" +
+		"      visibility:\n" +
+		"        groups: [finance]\n"
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatalf("write registry.yaml: %v", err)
+	}
 
-// T-D-oidc-30
-func TestAuth_Auth0NamespacedGroupsClaim(t *testing.T) {
-	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so namespaced groups_claim is not exercisable in e2e")
-}
+	// The mapping rewrites the raw IdP group OID to the friendly name the
+	// layer's visibility declares.
+	srv := startServerArgs(t, []string{
+		"HOME=" + home,
+		"PODIUM_CONFIG_FILE=" + cfgPath,
+		"PODIUM_INGEST_OFFLINE=true",
+		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
+		"PODIUM_OAUTH_AUDIENCE=" + injAudience,
+		"PODIUM_IDP_GROUP_MAPPING=00g1financeOID=finance",
+	}, "serve", "--standalone")
+	injRegisterRuntime(t, srv, pem)
 
-// ---- T-D-oidc-31: Entra ID preferred_username as email claim -----------------
+	// A caller whose token carries the raw OID (not the friendly name) sees the
+	// finance-only artifact, because the mapping rewrites 00g1financeOID ->
+	// finance before visibility is evaluated.
+	mappedClaims := injClaims("alice")
+	mappedClaims["groups"] = []string{"00g1financeOID"}
+	if status, body := injGet(t, srv.BaseURL+"/v1/load_artifact?id=finance/secret", injSignJWT(t, priv, mappedClaims)); status != 200 {
+		t.Fatalf("mapped caller: status=%d, want 200 (00g1financeOID remapped to finance)\nbody: %s\nlog:\n%s", status, body, srv.log())
+	}
 
-// T-D-oidc-31
-func TestAuth_EntraIDPreferredUsername(t *testing.T) {
-	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so email_claim mapping is not exercisable in e2e")
-}
-
-// ---- T-D-oidc-32: Keycloak plain group name matches layer config ------------
-
-// T-D-oidc-32
-func TestAuth_KeycloakPlainGroupName(t *testing.T) {
-	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so groups_claim matching is not exercisable in e2e")
-}
-
-// ---- T-D-oidc-33: Keycloak full-path group does not match bare name ---------
-
-// T-D-oidc-33
-func TestAuth_KeycloakFullPathGroupNoMatch(t *testing.T) {
-	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so groups_claim matching is not exercisable in e2e")
-}
-
-// ---- T-D-oidc-34: Keycloak pre-Quarkus issuer rejected ----------------------
-
-// T-D-oidc-34
-func TestAuth_KeycloakPreQuarkusIssuerRejected(t *testing.T) {
-	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so issuer mismatch detection is not exercisable in e2e")
-}
-
-// ---- T-D-oidc-35: JWKS endpoint fetched and valid JWT accepted ---------------
-
-// T-D-oidc-35
-func TestAuth_JWKSFetchAndValidToken(t *testing.T) {
-	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so JWKS-based JWT verification is not exercisable in e2e")
-}
-
-// ---- T-D-oidc-36: JWKS cache serves stale keys for up to 5 minutes ----------
-
-// T-D-oidc-36
-func TestAuth_JWKSCaching(t *testing.T) {
-	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so JWKS caching behavior is not exercisable in e2e")
-}
-
-// ---- T-D-oidc-37: clock skew tolerance of ±60s ------------------------------
-
-// T-D-oidc-37
-func TestAuth_ClockSkewTolerance(t *testing.T) {
-	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so clock-skew tolerance is not exercisable in e2e")
+	// A caller whose group has no mapping entry passes through unchanged and
+	// does not match the finance layer (404, no leak).
+	unmappedClaims := injClaims("bob")
+	unmappedClaims["groups"] = []string{"00g9unmappedOID"}
+	if status, _ := injGet(t, srv.BaseURL+"/v1/load_artifact?id=finance/secret", injSignJWT(t, priv, unmappedClaims)); status != 404 {
+		t.Errorf("unmapped caller: status=%d, want 404 (group not remapped to finance)", status)
+	}
 }
 
 // ---- T-D-oidc-38: podium init --global writes registry URL ------------------
@@ -913,13 +893,6 @@ func TestAuth_InitGlobalWritesRegistryURL(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-39: Google Workspace without groups_claim accepted ------------
-
-// T-D-oidc-39
-func TestAuth_GoogleWorkspaceNoGroupsClaim(t *testing.T) {
-	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so Option A (no groups_claim) is not exercisable in e2e")
-}
-
 // ---- T-D-oidc-40: SCIM user deletion returns 204; visibility needs tokens ---
 
 // T-D-oidc-40
@@ -946,8 +919,10 @@ func TestAuth_SCIMUserDeletion(t *testing.T) {
 	if st != http.StatusNoContent {
 		t.Errorf("DELETE /scim/v2/Users/%s = HTTP %d, want 204", userID, st)
 	}
-	// NOTE: membership-driven visibility changes after deletion require verified
-	// JWT tokens; not exercisable in standalone e2e (T-D-oidc-28).
+	// This test covers SCIM user deletion over HTTP. Verified-caller visibility
+	// is covered over the injected-session-token path
+	// (TestServerOps_PerLayerVisibilityInjectedToken,
+	// TestAuth_IdpGroupMappingRemapsClaim).
 }
 
 // ---- T-D-oidc-41: SCIM group membership PUT returns 200 ---------------------
@@ -986,8 +961,10 @@ func TestAuth_SCIMGroupMembershipUpdate(t *testing.T) {
 	if st != http.StatusOK {
 		t.Errorf("PUT /scim/v2/Groups/%s = HTTP %d, want 200", groupID, st)
 	}
-	// NOTE: the effect on layer visibility requires verified JWT tokens;
-	// not exercisable in standalone e2e (T-D-oidc-28).
+	// This test covers SCIM group-membership updates over HTTP. The effect on
+	// layer visibility for a verified caller is covered over the
+	// injected-session-token path (TestServerOps_PerLayerVisibilityInjectedToken,
+	// TestAuth_IdpGroupMappingRemapsClaim).
 }
 
 // ---- T-D-oidc-42: guessTokenURL derives /token from /device -----------------
@@ -1066,8 +1043,9 @@ func TestAuth_SlowDownIncreasesInterval(t *testing.T) {
 func TestAuth_HealthzReachableWithOIDCMode(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
-	// PODIUM_IDENTITY_PROVIDER=oidc is treated as a label; it does not prevent
-	// startup because the nested identity: block (issuer/JWKS) is not parsed.
+	// PODIUM_IDENTITY_PROVIDER=oidc is a free-form label that is not a
+	// registered provider, so no verifier is installed and startup is not
+	// blocked. The registry verifies callers only under injected-session-token.
 	srv := startServerArgs(t, []string{
 		"HOME=" + t.TempDir(),
 		"PODIUM_IDENTITY_PROVIDER=oidc",
@@ -1227,25 +1205,4 @@ func TestAuth_MalformedDeviceAuthResponse(t *testing.T) {
 	if !strings.Contains(res.Stderr, "device authorization:") {
 		t.Errorf("stderr missing 'device authorization:':\n%s", res.Stderr)
 	}
-}
-
-// ---- T-D-oidc-52: groups claim as non-array scalar ---------------------------
-
-// T-D-oidc-52
-func TestAuth_GroupsClaimNonArrayScalar(t *testing.T) {
-	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so groups-claim type handling is not exercisable in e2e")
-}
-
-// ---- T-D-oidc-53: Okta audience mismatch => 401 auth.audience_mismatch ------
-
-// T-D-oidc-53
-func TestAuth_OktaAudienceMismatch(t *testing.T) {
-	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so audience-mismatch detection is not exercisable in e2e")
-}
-
-// ---- T-D-oidc-54: Entra ID audience must include api:// prefix exactly ------
-
-// T-D-oidc-54
-func TestAuth_EntraIDAudiencePrefixExact(t *testing.T) {
-	t.Skip("requires a configured OIDC identity provider with JWKS verification; the standalone server does not parse the nested identity: block (T-D-oidc-28 doc-accuracy gap), so audience prefix validation is not exercisable in e2e")
 }

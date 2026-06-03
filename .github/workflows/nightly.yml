@@ -157,3 +157,47 @@ jobs:
           PODIUM_S3_SECRET_ACCESS_KEY: minioadmin
           PODIUM_S3_USE_SSL: "false"
         run: go test ./pkg/objectstore/... -count=1 -v
+
+  dex-login:
+    name: live Dex device-code login
+    runs-on: ubuntu-latest
+    # The bundled Dex IdP backs the host-side `podium login` device-code flow.
+    # Started from a step rather than via `services:` because Dex needs
+    # `dex serve <config>` as its command and the services block cannot set CMD.
+    # Image pinned to match docker-compose.yml; keep them in sync. This lane is
+    # nightly + manual only (never on pull_request), like the rest of nightly.yml.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Start Dex
+        # Mount the same evaluation config the compose stack uses. Dex serves
+        # the OIDC discovery document at <issuer>/.well-known/openid-configuration
+        # once ready; the e2e probes that same URL to decide whether to skip.
+        run: |
+          docker run -d --name dex \
+            -p 5556:5556 \
+            -v ${{ github.workspace }}/deploy/compose/dex/config.yaml:/etc/dex/config.yaml:ro \
+            ghcr.io/dexidp/dex:v2.41.1 \
+            dex serve /etc/dex/config.yaml
+          for i in $(seq 1 30); do
+            if curl -fs http://localhost:5556/dex/.well-known/openid-configuration >/dev/null; then
+              echo "Dex ready"
+              exit 0
+            fi
+            echo "Waiting for Dex ($i/30)..."
+            sleep 2
+          done
+          echo "Dex did not become ready in time" >&2
+          docker logs dex
+          exit 1
+
+      - name: device-code login e2e
+        # PODIUM_LIVE_DEX marks the opt-in for parity with the other live lanes;
+        # the test gates on Dex reachability regardless and self-skips when it is
+        # absent, so this step never fails on missing infrastructure.
+        env:
+          PODIUM_LIVE_DEX: "1"
+        run: go test ./test/e2e/... -count=1 -run TestDexLogin -v

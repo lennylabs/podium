@@ -69,8 +69,18 @@ runs only `serve --standalone` (no auth, every caller resolves to
 axis is skipped end-to-end. `test/e2e/auth_oidc_test.go` alone carries 24
 `t.Skip` calls.
 
+**Stage 2 (2026-06-03) adopted option A: reconcile.** The spec defines no
+in-registry JWKS/OIDC verifier, so rather than build one, the OIDC cookbooks were
+reconciled to the shipped identity model and e2e coverage was added for the
+spec-mandated, implemented features (admin/RBAC, SCIM-to-visibility, multi-tenant
+isolation, IdpGroupMapping) over the verified injected-session-token path, plus a
+live Dex device-code login test. `auth_oidc_test.go` dropped from 24 skips to 6
+(18 non-spec tests deleted, 1 converted). Where a gap entry's Target or Work below
+describes building the verifier, that path was intentionally not taken; the Status
+line on each gap records the actual resolution.
+
 ### G-AUTH-1: Server-side OIDC and JWKS verifier is not implemented
-- **Severity**: P0. **Lane**: Release plus nightly once built. **Status**: open.
+- **Severity**: P0. **Lane**: n/a (reconciled). **Status**: closed (option A, reconcile). The spec defines no in-registry JWKS verifier, so one was not built. The OIDC docs were reconciled to the shipped model (injected-session-token is the server-verified path; oauth-device-code is client-side acquisition), and the JWKS, audience-mismatch, and clock-skew tests were deleted. The Target and Work below describe the build path that was intentionally not taken.
 - **Current**: The registry ships no request-time OIDC verifier. A free-form
   provider label such as `oidc` resolves to no verifier, and every caller falls
   back to anonymous-public.
@@ -88,7 +98,7 @@ axis is skipped end-to-end. `test/e2e/auth_oidc_test.go` alone carries 24
   cases in `test/e2e/auth_oidc_test.go`.
 
 ### G-AUTH-2: The documented `identity:` config block is not parsed
-- **Severity**: P0. **Lane**: PR (config-load unit) plus Release (live). **Status**: open.
+- **Severity**: P0. **Lane**: PR. **Status**: closed (reconciled). The docs were corrected to the implemented `identity_provider:` schema (`type`, `audience`, `authorization_endpoint`); `test/e2e/auth_oidc_test.go::TestAuth_NestedIdentityBlockNotParsed` proves the nested `identity:` block is dropped.
 - **Current**: The OIDC cookbooks instruct writing a top-level `identity:` block
   in `registry.yaml` with `provider`, `issuer`, `audience`, `jwks_uri`,
   `groups_claim`, `email_claim`, and `sub_claim`. The loader reads
@@ -104,7 +114,7 @@ axis is skipped end-to-end. `test/e2e/auth_oidc_test.go` alone carries 24
   asserting each field reaches the verifier.
 
 ### G-AUTH-3: In-process JWKS issuer test harness is missing
-- **Severity**: P0. **Lane**: PR once built. **Status**: open.
+- **Severity**: P0. **Lane**: n/a. **Status**: closed (not built, obviated by option A). With no JWKS verifier to test, coverage uses the injected-token signing harness (`test/e2e/injected_token_helpers_test.go`) rather than a JWKS issuer.
 - **Current**: No automated test mints a signed JWT against a served JWKS. The
   only "OIDC server" in tests is an `httptest` device-code stub that returns an
   unverifiable string.
@@ -120,7 +130,7 @@ axis is skipped end-to-end. `test/e2e/auth_oidc_test.go` alone carries 24
 - **Depends on**: G-AUTH-1.
 
 ### G-AUTH-4: No automated test stands up a real identity provider
-- **Severity**: P1. **Lane**: Release (or a dedicated scheduled job). **Status**: open.
+- **Severity**: P1. **Lane**: nightly plus manual. **Status**: closed (built). `test/e2e/dex_login_test.go` drives a live device-code login against the bundled Dex with a concurrent approval driver; wired as the nightly `dex-login` job and `make test-auth-dex`.
 - **Current**: `docker-compose.yml` ships Dex for local evaluation, but
   `make services-up` excludes it and no workflow starts it. No Go test references
   Dex.
@@ -133,7 +143,7 @@ axis is skipped end-to-end. `test/e2e/auth_oidc_test.go` alone carries 24
 - **Depends on**: G-AUTH-1.
 
 ### G-AUTH-5: Admin and RBAC enforcement is skipped end-to-end
-- **Severity**: P1. **Lane**: PR. **Status**: open.
+- **Severity**: P1. **Lane**: PR. **Status**: closed (built). `test/e2e/auth_admin_rbac_test.go` exercises grant/revoke/show-effective/load-override over a minted admin injected token and asserts the `auth.forbidden` envelope on denial.
 - **Current**: Grant, revoke, and show-effective e2e tests skip because the
   standalone server resolves callers to `system:public` and `core.AdminAuthorize`
   rejects them.
@@ -144,7 +154,7 @@ axis is skipped end-to-end. `test/e2e/auth_oidc_test.go` alone carries 24
 - **Work**: This needs no OIDC and can land now. It is the quickest auth win.
 
 ### G-AUTH-6: SCIM-to-visibility lifecycle is never closed end-to-end
-- **Severity**: P1. **Lane**: PR (with the JWKS harness) or Release (with a real IdP). **Status**: open.
+- **Severity**: P1. **Lane**: PR. **Status**: closed (built). `test/e2e/auth_scim_visibility_test.go`: a caller with no group claim sees a group-restricted layer via SCIM `MembersOf`; group removal and user deletion revoke it.
 - **Current**: SCIM provisioning is tested as isolated HTTP CRUD authenticated
   by a static bearer token. The membership-to-visibility resolver is wired but
   untested above the unit level.
@@ -157,7 +167,7 @@ axis is skipped end-to-end. `test/e2e/auth_oidc_test.go` alone carries 24
 - **Depends on**: G-AUTH-3 or G-AUTH-4.
 
 ### G-AUTH-7: Multi-tenant token isolation is not tested end-to-end
-- **Severity**: P0. **Lane**: PR (live Postgres). **Status**: open.
+- **Severity**: P0. **Lane**: PR (live Postgres). **Status**: closed (built). `test/integration/auth_org_isolation_test.go`: an `org_id=acme` token reads only Acme data and gets 404 on Globex through the full request path, on a per-org Postgres schema, with org-scoped search. Gates on `PODIUM_POSTGRES_DSN`.
 - **Current**: Storage-level cross-org denial is tested on live Postgres. No test
   asserts that a token's `org_id` claim routes a request to the correct per-org
   schema and is denied another org's data through the full request path.
@@ -169,7 +179,7 @@ axis is skipped end-to-end. `test/e2e/auth_oidc_test.go` alone carries 24
 - **Depends on**: G-AUTH-3.
 
 ### G-AUTH-8: Token expiry and clock-skew leeway are unit-only or absent
-- **Severity**: P1. **Lane**: PR. **Status**: open.
+- **Severity**: P1. **Lane**: PR. **Status**: closed (reconciled, partly deferred). The clock-skew leeway depended on the not-built verifier, so the ±60s promise was removed from the docs. Injected-token expiry remains integration-tested; no new boundary test was added.
 - **Current**: Expiry rejection is integration-tested for injected tokens. The
   shipped verifier applies no clock-skew leeway, while the OIDC docs promise a
   ±60s tolerance.
@@ -179,7 +189,7 @@ axis is skipped end-to-end. `test/e2e/auth_oidc_test.go` alone carries 24
 - **Depends on**: G-AUTH-1.
 
 ### G-AUTH-9: Documented auth surfaces that do not exist
-- **Severity**: P1. **Lane**: PR (doc-accuracy assertions). **Status**: open.
+- **Severity**: P1. **Lane**: PR. **Status**: closed (reconciled). The non-existent commands and codes were removed from the docs; `auth_oidc_test.go` keeps does-not-exist guards for `admin scim-token issue`, `admin claims-cache flush`, and the `layer register --visibility` form.
 - **Current**: The OIDC docs reference commands and behaviors absent from the
   binary: `podium admin scim-token issue`, `podium layer register --visibility`,
   a SAML-over-OIDC bridge, Google Workspace `hd_required` enforcement, and the
@@ -249,7 +259,7 @@ documented command or output is wrong.
 - **Target**: Fix the documented invocation or accept a positional path in the CLI.
 
 ### G-DOC-5: OIDC cookbooks document an unshipped feature
-- **Severity**: P0. **Lane**: PR plus Release. **Status**: open.
+- **Severity**: P0. **Lane**: PR. **Status**: closed (reconciled). The six OIDC cookbooks were rewritten to the implemented `identity_provider:` model and shipped behavior; the verify gate confirms the non-spec terms are gone.
 - **Current**: Every OIDC cookbook's central `registry.yaml` snippet and its
   setup commands describe behavior the binary does not provide. A reader who
   follows any guide verbatim gets a registry that resolves every caller as

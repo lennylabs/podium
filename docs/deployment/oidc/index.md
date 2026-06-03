@@ -9,51 +9,60 @@ description: Per-IdP setup recipes for Okta, Entra ID, Google Workspace, Auth0, 
 
 # OIDC integration cookbooks
 
-Podium uses OIDC for identity in standard deployments. The registry doesn't ship its own user database. It accepts a JWT issued by your identity provider, validates the signature against the IdP's JWKS, and reads the `sub`, `email`, and `groups` claims to determine the caller's effective view.
+Podium uses OIDC for identity in standard deployments. The registry does not ship its own user database. Consumers acquire a token from the identity provider through the `oauth-device-code` provider, and the token is cached in the OS keychain. The token carries the `sub`, `email`, and `groups` claims that determine the caller's effective view. Group membership is resolved registry-side, either through SCIM 2.0 push from the IdP or through the `IdpGroupMapping` adapter reading OIDC group claims from the token. When the deployment needs the registry HTTP boundary to enforce human OIDC, the registry sits behind an upstream identity-aware proxy that authenticates who can reach it.
 
-These per-IdP guides walk through the setup steps. Each guide assumes a Podium registry is already running at a known URL, for example `https://podium.your-org.example`, and authentication is being configured for it.
+These per-IdP guides cover the setup steps. Each guide assumes a Podium registry is already running at a known URL, for example `https://podium.acme.com`, and authentication is being configured for it.
 
 ## What's covered
 
 | IdP | Guide | Notes |
 | --- | --- | --- |
 | Okta | [`okta.md`](okta.md) | Native group claim support; SCIM available. |
-| Microsoft Entra ID | [`entra-id.md`](entra-id.md) | Formerly Azure AD. Group claim emits group _IDs_ rather than names; extra mapping needed. |
-| Google Workspace | [`google-workspace.md`](google-workspace.md) | No group claim natively in OIDC; uses Cloud Identity API or directory mapping. |
-| Auth0 | [`auth0.md`](auth0.md) | Group claim via custom action / rule. |
-| Keycloak | [`keycloak.md`](keycloak.md) | Self-hosted; group claim via mapper. The Compose stack uses Keycloak's sibling Dex for evaluation deployments. |
+| Microsoft Entra ID | [`entra-id.md`](entra-id.md) | Formerly Azure AD. Group claim emits group _IDs_ rather than names, so `IdpGroupMapping` resolves them to names. |
+| Google Workspace | [`google-workspace.md`](google-workspace.md) | No group claim natively in OIDC. Groups arrive via SCIM 2.0 push or as OIDC group claims mapped by `IdpGroupMapping`. |
+| Auth0 | [`auth0.md`](auth0.md) | Group claim via custom action or rule. |
+| Keycloak | [`keycloak.md`](keycloak.md) | Self-hosted; group claim via mapper. The Compose stack uses the sibling Dex for evaluation deployments. |
 
 ## What every guide produces
 
-Each guide ends with a working `~/.podium/registry.yaml` snippet:
+Each guide ends with a working `registry.yaml` `identity_provider:` block:
 
 ```yaml
-identity:
-  provider: oidc
-  issuer: https://<idp-issuer-url>
-  audience: podium                          # or whatever you set when registering the app
-  jwks_uri: https://<idp-issuer-url>/.well-known/jwks.json
-  groups_claim: groups                      # IdP-specific; see each guide
-  email_claim: email                        # standard
-  sub_claim: sub                            # standard
+identity_provider:
+  type: oauth-device-code
+  audience: https://podium.acme.com          # or api://podium, per IdP convention
+  authorization_endpoint: https://<idp-issuer-url>
 ```
 
-…and a confirmation that `podium login` against your registry from a developer machine completes the device-code flow and prints the resolved identity (`sub`, `email`, groups).
+Group resolution is configured registry-side. Use SCIM 2.0 push from the IdP, or the `IdpGroupMapping` adapter that reads OIDC group claims from the token and maps them to group names.
+
+Each guide also confirms that `podium login` against the registry from a developer machine completes the device-code flow and prints the resolved identity (`sub`, `email`, and groups).
+
+## Human callers and managed runtimes
+
+These guides configure the `oauth-device-code` provider for human callers on developer machines. The consumer acquires and caches the token, and the registry trusts the bearer presented to it.
+
+Managed runtimes (for example Bedrock Agents or custom orchestrators) use the `injected-session-token` provider instead. The runtime issues a JWT signed by a key registered with the registry, and the registry verifies that signature on every call. That path is configured at the runtime and the registry rather than at the IdP, so it falls outside these per-IdP guides; see the [operator guide](../operator-guide) for the runtime-trust setup.
 
 ## What every guide does not cover
 
-- **TLS termination**: assumed to be handled by your load balancer / reverse proxy.
-- **Network reachability**: the registry must be able to reach the IdP's JWKS endpoint outbound, and developers must be able to reach the IdP's verification endpoint from their browser.
-- **SCIM provisioning**: not covered in these guides. The OIDC `groups` claim mechanism described here is the immediate-but-on-login path; SCIM is the push-on-change path. Use SCIM when the IdP provides it and group-membership changes must apply without waiting for re-login.
+- **TLS termination**: handled by the load balancer or reverse proxy in front of the registry.
+- **Network reachability**: developers must be able to reach the IdP's verification endpoint from their browser to complete the device-code flow.
+- **Registry HTTP-boundary enforcement**: when the registry must enforce who can reach it, place it behind an upstream identity-aware proxy. The proxy authenticates the human caller; these guides configure the IdP that the proxy and the device-code flow use.
+
+## Group resolution paths
+
+Two mechanisms resolve group membership registry-side, and each guide names the one its IdP supports.
+
+- **SCIM 2.0 push.** The IdP pushes user and group records to the registry's SCIM endpoint. The registry maintains a directory of `(user_id → groups)`. Group-membership changes apply without waiting for the user's next login.
+- **OIDC group claims via `IdpGroupMapping`.** The registry reads the group claim from the token and maps the raw values to group names through a registry-side configuration. Group membership reflects what was in the token at login time.
 
 ## Common pitfalls (across IdPs)
 
-- **Audience mismatch.** The IdP must issue tokens with `aud` matching what the registry expects. The registry rejects with `auth.audience_mismatch` if not.
-- **Clock skew.** ±60s tolerance. Run NTP on registry hosts.
-- **Stale JWKS.** The registry caches the JWKS for 5 minutes. After IdP key rotation, expect up to 5 minutes of `auth.signature_invalid` for the affected key.
-- **Groups claim format.** Some IdPs emit groups as a JSON array of names; others emit IDs that you have to resolve. The registry expects an array of strings; adapt with the IdP-specific configuration described in each guide.
-- **Browser-mediated flows blocked.** Some corporate networks block the device-code verification URL pattern. Test with a developer on the corporate network before declaring success.
+- **Audience mismatch.** The IdP must issue tokens with `aud` matching the `audience:` configured for the registry. A token whose `aud` does not match is rejected.
+- **Groups claim format.** Some IdPs emit groups as a JSON array of names; others emit IDs. The `IdpGroupMapping` adapter maps raw group values to the group names used in layer visibility.
+- **Browser-mediated flows blocked.** Some corporate networks block the device-code verification URL. Test with a developer on the corporate network before declaring success.
 
 ## When to use SAML instead
 
-If your org standardizes on SAML rather than OIDC, the registry supports SAML via an OIDC bridge (a small adapter that translates SAML assertions into OIDC tokens for the registry). This is documented separately; the per-IdP guides here all assume OIDC.
+When an organization standardizes on SAML rather than OIDC, the registry supports SAML through an OIDC bridge that translates SAML assertions into OIDC tokens. The per-IdP guides here assume OIDC.

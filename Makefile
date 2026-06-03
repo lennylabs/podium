@@ -21,12 +21,13 @@ LDFLAGS := -X 'github.com/lennylabs/podium/internal/buildinfo.Version=$(VERSION)
            -X 'github.com/lennylabs/podium/internal/buildinfo.Commit=$(COMMIT)' \
            -X 'github.com/lennylabs/podium/internal/buildinfo.Date=$(DATE)'
 
-.PHONY: help test test-live test-live-external bench build \
+.PHONY: help test test-live test-live-external test-auth-dex bench build \
         lint update-golden \
         speccov speccov-uncovered speccov-drift speccov-report \
         coverage coverage-budget coverage-per-package coverage-gate \
         matrix matrix-list matrix-audit matrix-scaffold \
         services-up services-down services-logs services-status \
+        dex-up dex-down \
         tools clean
 
 help:
@@ -34,6 +35,7 @@ help:
 	@echo "  test             Run the full Go test suite"
 	@echo "  test-live        Run the suite with env vars pointing at docker-compose services"
 	@echo "  test-live-external  Run the suite against managed vector/embedding services (PODIUM_LIVE_EXTERNAL=1)"
+	@echo "  test-auth-dex    Bring up the bundled Dex and run the live device-code login e2e"
 	@echo "  bench            Run §7.1 latency benchmarks (informational)"
 	@echo "  lint             Run linters (golangci-lint when available)"
 	@echo "  update-golden    Re-run tests with UPDATE_GOLDEN=1"
@@ -51,6 +53,8 @@ help:
 	@echo "  services-down    Stop the local services (keeps volumes)"
 	@echo "  services-logs    Tail logs from the local services"
 	@echo "  services-status  Show the local service container status"
+	@echo "  dex-up           Start only the bundled Dex IdP (issuer http://localhost:5556/dex)"
+	@echo "  dex-down         Stop and remove the bundled Dex IdP"
 	@echo "  build            Build podium, podium-server, podium-mcp into ./bin/ with version metadata"
 	@echo "  tools            Build the helper binaries to ./bin/"
 	@echo "  clean            Remove build artifacts"
@@ -160,6 +164,32 @@ services-logs:
 
 services-status:
 	$(DOCKER_COMPOSE) ps
+
+# ----- Bundled Dex IdP for the device-code login e2e ------------------------
+
+# `make services-up` deliberately excludes Dex; the device-code login e2e is
+# the only test that needs it, so it gets its own targets. Dex has no
+# dependencies and stores to an ephemeral SQLite file, so `dex-up` alone is
+# enough to exercise `podium login`. The issuer is reached from the host at
+# http://localhost:5556/dex (the compose file maps container port 5556).
+dex-up:
+	$(DOCKER_COMPOSE) up -d dex
+	@echo "Dex starting at http://localhost:5556/dex; readiness is probed by the test."
+
+dex-down:
+	$(DOCKER_COMPOSE) rm -sf dex
+
+# Bring up the bundled Dex and run the live device-code login e2e against it.
+# The test (test/e2e/dex_login_test.go) drives the real `podium login`
+# RFC 8628 device-code flow against Dex (http://localhost:5556/dex),
+# programmatically completes the device approval as the static user, and
+# asserts login obtains a token and prints the issued sub/email. It self-skips
+# when Dex is unreachable, so this target is the supported way to run it.
+# PODIUM_LIVE_DEX=1 marks the opt-in for parity with the other live lanes; the
+# test gates on Dex reachability regardless. -run pins the single test so the
+# rest of the suite is not pulled in.
+test-auth-dex: dex-up
+	PODIUM_LIVE_DEX=1 $(GO) test $(GOFLAGS) -count=1 -run TestDexLogin ./test/e2e/...
 
 # Run the §7.1 latency benchmark suite. Output is informational;
 # CI does not gate on absolute numbers because cloud runners vary.
