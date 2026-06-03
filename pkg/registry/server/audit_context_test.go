@@ -93,9 +93,9 @@ func TestEmitAuditEvent_PublicCallerNetwork(t *testing.T) {
 	got := string(data)
 	for _, want := range []string{
 		`"type":"admin.granted"`,
-		`"caller":"system:public"`,
+		`"caller":{"identity":"system:public"`,
 		`"target":"carol"`,
-		`"caller_public_mode":true`,
+		`"public_mode":true`,
 		`"source_ip":"203.0.113.7"`,
 		`"action":"grant"`,
 	} {
@@ -124,12 +124,12 @@ func TestEmitAuditEvent_AuthenticatedCaller(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(got)
-	for _, want := range []string{`"caller":"alice"`, `"caller_email":"alice@acme.com"`, `"caller_groups":["admins"]`, `"action":"revoke"`} {
+	for _, want := range []string{`"caller":{"identity":"alice"`, `"email":"alice@acme.com"`, `"groups":["admins"]`, `"action":"revoke"`} {
 		if !strings.Contains(s, want) {
 			t.Errorf("missing %s\nlog:\n%s", want, s)
 		}
 	}
-	if strings.Contains(s, "caller_network") || strings.Contains(s, "caller_public_mode") {
+	if strings.Contains(s, `"network"`) || strings.Contains(s, "public_mode") {
 		t.Errorf("authenticated caller leaked public-mode fields:\n%s", s)
 	}
 }

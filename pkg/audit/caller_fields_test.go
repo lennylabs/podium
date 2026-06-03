@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -30,8 +31,12 @@ func TestCanonicalBody_IncludesCallerFields(t *testing.T) {
 	}
 }
 
-// spec §8.1: caller attributes round-trip through the FileSink JSON-Lines log
-// with the documented field names, and the chain verifies.
+// spec §8.1 / §13.2.2 / §13.10 (F-8.1.2, F-13.2.2, F-13.10.4): the caller
+// identity attributes serialize under a nested "caller" object whose keys
+// are the dotted names the spec illustrates (caller.identity, caller.email,
+// caller.groups, caller.network, caller.public_mode), and the chain
+// verifies. A SIEM consumer keying on caller.public_mode resolves the
+// nested field directly.
 func TestFileSink_CallerFieldsRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "audit.log")
 	sink, err := NewFileSink(path)
@@ -63,19 +68,73 @@ func TestFileSink_CallerFieldsRoundTrip(t *testing.T) {
 	got := string(data)
 	for _, want := range []string{
 		`"trace_id":"abc123"`,
-		`"caller_email":"alice@acme.com"`,
-		`"caller_groups":["eng","sec"]`,
-		`"caller_public_mode":true`,
-		`"caller_network":{"source_ip":"203.0.113.7","forwarded_user":"bob"}`,
+		`"caller":{"identity":"alice","email":"alice@acme.com","groups":["eng","sec"]}`,
+		`"caller":{"identity":"system:public","network":{"source_ip":"203.0.113.7","forwarded_user":"bob"},"public_mode":true}`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("audit log missing %s\nlog:\n%s", want, got)
 		}
 	}
+	// The spec's flat snake_case keys must no longer appear; the dotted names
+	// live inside the nested caller object instead.
+	for _, gone := range []string{"caller_email", "caller_groups", "caller_public_mode", "caller_network"} {
+		if strings.Contains(got, gone) {
+			t.Errorf("audit log still emits the flat key %q (should be nested under caller)\nlog:\n%s", gone, got)
+		}
+	}
 	// The authenticated event must not emit public-mode-only fields.
 	lines := strings.Split(strings.TrimSpace(got), "\n")
-	if strings.Contains(lines[0], "caller_public_mode") || strings.Contains(lines[0], "caller_network") {
+	if strings.Contains(lines[0], "public_mode") || strings.Contains(lines[0], "network") {
 		t.Errorf("authenticated event leaked public-mode fields: %s", lines[0])
+	}
+}
+
+// spec §8.1 / §13.2.2 / §13.10 (F-8.1.2, F-13.2.2, F-13.10.4): the nested
+// caller object decodes through dotted-path field access, which is how a
+// SIEM consumer queries caller.identity and caller.public_mode. Asserting
+// against a typed decode pins the exact key names the spec names.
+func TestFileSink_CallerDottedKeysDecode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.log")
+	sink, err := NewFileSink(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := sink.Append(ctx, Event{
+		Type: EventDomainLoaded, Caller: "system:public", PublicMode: true,
+		CallerNetwork: &CallerNetwork{SourceIP: "203.0.113.7", ForwardedUser: "bob"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec struct {
+		Caller struct {
+			Identity   string `json:"identity"`
+			PublicMode bool   `json:"public_mode"`
+			Network    struct {
+				SourceIP      string `json:"source_ip"`
+				ForwardedUser string `json:"forwarded_user"`
+			} `json:"network"`
+		} `json:"caller"`
+	}
+	line := strings.TrimSpace(string(data))
+	if err := json.Unmarshal([]byte(line), &rec); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if rec.Caller.Identity != "system:public" {
+		t.Errorf("caller.identity = %q, want system:public", rec.Caller.Identity)
+	}
+	if !rec.Caller.PublicMode {
+		t.Errorf("caller.public_mode = false, want true")
+	}
+	if rec.Caller.Network.SourceIP != "203.0.113.7" {
+		t.Errorf("caller.network.source_ip = %q, want 203.0.113.7", rec.Caller.Network.SourceIP)
+	}
+	if rec.Caller.Network.ForwardedUser != "bob" {
+		t.Errorf("caller.network.forwarded_user = %q, want bob", rec.Caller.Network.ForwardedUser)
 	}
 }
 

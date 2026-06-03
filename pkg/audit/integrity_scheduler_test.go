@@ -101,7 +101,7 @@ func TestVerifyScheduler_DetectsGapAndAlerts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	tampered := strings.Replace(string(raw), `"caller":"alice"`, `"caller":"mallory"`, 1)
+	tampered := strings.Replace(string(raw), `"identity":"alice"`, `"identity":"mallory"`, 1)
 	if tampered == string(raw) {
 		t.Fatal("test setup: expected to tamper a caller field")
 	}

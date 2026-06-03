@@ -45,7 +45,7 @@ func TestAuditGapDetection_SchedulerDetectsOutOfBandEdit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	tampered := strings.Replace(string(raw), `"caller":"alice@acme.com"`, `"caller":"mallory@evil.com"`, 1)
+	tampered := strings.Replace(string(raw), `"identity":"alice@acme.com"`, `"identity":"mallory@evil.com"`, 1)
 	if tampered == string(raw) {
 		t.Fatal("test setup: nothing tampered")
 	}

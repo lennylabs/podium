@@ -1211,10 +1211,12 @@ func TestHTTPAPI_MissingAudRejected(t *testing.T) {
 }
 
 // spec: http-api.md § Authentication — public mode records system:public.
-// spec: §8.1 "Caller identity in audit events" — in public mode a read event
-// records caller.identity=system:public, the caller_public_mode flag, and the
-// source IP and any X-Forwarded-User in caller.network, plus a trace id (§8.1
-// "W3C Trace Context"). F-8.1.1, F-8.1.6.
+// spec: §8.1 / §13.2.2 / §13.10 "Caller identity in audit events" — in public
+// mode a read event records caller.identity=system:public, the
+// caller.public_mode flag, and the source IP and any X-Forwarded-User under
+// caller.network, plus a trace id (§8.1 "W3C Trace Context"). The caller
+// attributes nest under a single caller object so the spec's dotted keys
+// resolve. F-8.1.1, F-8.1.6, F-13.2.2, F-13.10.4.
 func TestHTTPAPI_PublicModeAudit(t *testing.T) {
 	reg := apiReg(t)
 	auditPath := filepath.Join(t.TempDir(), "audit.log")
@@ -1238,16 +1240,22 @@ func TestHTTPAPI_PublicModeAudit(t *testing.T) {
 	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
 		got := readOrEmpty(auditPath)
-		if strings.Contains(got, "caller_public_mode") {
+		if strings.Contains(got, "public_mode") {
 			for _, want := range []string{
-				`"caller":"system:public"`,
-				`"caller_public_mode":true`,
+				`"caller":{"identity":"system:public"`,
+				`"public_mode":true`,
 				`"source_ip":"127.0.0.1"`,
 				`"forwarded_user":"upstream-alice"`,
 				`"trace_id"`,
 			} {
 				if !strings.Contains(got, want) {
 					t.Errorf("public-mode audit log missing %s\nlog:\n%s", want, got)
+				}
+			}
+			// The flat snake_case keys must no longer appear.
+			for _, gone := range []string{"caller_public_mode", "caller_network", "caller_email", "caller_groups"} {
+				if strings.Contains(got, gone) {
+					t.Errorf("public-mode audit log still emits flat key %q\nlog:\n%s", gone, got)
 				}
 			}
 			return

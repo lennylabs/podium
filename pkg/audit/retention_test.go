@@ -200,39 +200,41 @@ func TestEraseUser_ReplacesIdentifiersAndAppendsTombstone(t *testing.T) {
 	}
 }
 
-// erasedEvents parses the file-backed sink and returns the events with the
-// given type. Used to inspect the appended user.erased record.
-func parseEvents(t *testing.T, path string) []struct {
-	Type    string            `json:"type"`
-	Caller  string            `json:"caller"`
-	Target  string            `json:"target"`
-	Context map[string]string `json:"context"`
-} {
+// parsedEvent mirrors the §8.1 JSON-Lines wire form for the fields these
+// tests inspect. The caller identity is nested under "caller" per §8.1
+// (caller.identity), so Caller is the unpacked identity string.
+type parsedEvent struct {
+	Type    string
+	Caller  string
+	Target  string
+	Context map[string]string
+}
+
+// parseEvents parses the file-backed sink and returns its events. Used to
+// inspect the appended user.erased record.
+func parseEvents(t *testing.T, path string) []parsedEvent {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
-	var out []struct {
-		Type    string            `json:"type"`
-		Caller  string            `json:"caller"`
-		Target  string            `json:"target"`
-		Context map[string]string `json:"context"`
-	}
+	var out []parsedEvent
 	for _, line := range bytes.Split(data, []byte("\n")) {
 		if len(line) == 0 {
 			continue
 		}
 		var e struct {
-			Type    string            `json:"type"`
-			Caller  string            `json:"caller"`
+			Type   string `json:"type"`
+			Caller struct {
+				Identity string `json:"identity"`
+			} `json:"caller"`
 			Target  string            `json:"target"`
 			Context map[string]string `json:"context"`
 		}
 		if err := json.Unmarshal(line, &e); err != nil {
 			t.Fatalf("parse event: %v", err)
 		}
-		out = append(out, e)
+		out = append(out, parsedEvent{Type: e.Type, Caller: e.Caller.Identity, Target: e.Target, Context: e.Context})
 	}
 	return out
 }

@@ -69,7 +69,7 @@ func TestAdminGrants_EmitsAdminGranted(t *testing.T) {
 	got := readAuditLog(t, sink)
 	for _, want := range []string{
 		`"type":"admin.granted"`,
-		`"caller":"alice"`,
+		`"caller":{"identity":"alice"`,
 		`"target":"bob"`,
 		`"action":"grant"`,
 		`"action":"revoke"`,
@@ -116,7 +116,7 @@ func TestLayerEndpoint_EmitsUserRegistered(t *testing.T) {
 	for _, want := range []string{
 		`"type":"layer.user_registered"`,
 		`"target":"alice-personal"`,
-		`"caller":"alice"`,
+		`"caller":{"identity":"alice"`,
 		`"owner":"alice"`,
 		`"action":"register"`,
 		`"action":"unregister"`,

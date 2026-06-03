@@ -84,40 +84,39 @@ func TestReadEvent_AuthenticatedCallerCarriesEmailGroupsAndTrace(t *testing.T) {
 	got := s.drive(t, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", "")
 	for _, want := range []string{
 		`"type":"artifacts.searched"`,
-		`"caller":"alice"`,
-		`"caller_email":"alice@acme.com"`,
-		`"caller_groups":["eng","sec"]`,
+		`"caller":{"identity":"alice"`,
+		`"email":"alice@acme.com"`,
+		`"groups":["eng","sec"]`,
 		`"trace_id":"4bf92f3577b34da6a3ce929d0e0e4736"`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("authenticated read audit missing %s\nlog:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "caller_public_mode") || strings.Contains(got, "caller_network") {
+	if strings.Contains(got, "public_mode") || strings.Contains(got, `"network"`) {
 		t.Errorf("authenticated read leaked public-mode fields:\n%s", got)
 	}
 }
 
-// spec: §8.1 — a public-mode read records caller.identity=system:public, the
-// caller_public_mode flag, and the source IP and X-Forwarded-User in
-// caller.network so a SIEM can filter without parsing identity strings.
-// A request without a traceparent still carries a generated trace id.
-// F-8.1.1, F-8.1.6.
+// spec: §8.1 / §13.2.2 / §13.10 — a public-mode read records
+// caller.identity=system:public, the caller.public_mode flag, and the source
+// IP and X-Forwarded-User under caller.network so a SIEM can filter without
+// parsing identity strings. A request without a traceparent still carries a
+// generated trace id. F-8.1.1, F-8.1.6, F-13.2.2, F-13.10.4.
 func TestReadEvent_PublicCallerCarriesNetworkAndFlag(t *testing.T) {
 	s := newReadEventServer(t, server.WithPublicMode())
 	got := s.drive(t, "", "upstream-bob")
 	for _, want := range []string{
 		`"type":"artifacts.searched"`,
-		`"caller":"system:public"`,
-		`"caller_public_mode":true`,
-		`"source_ip":"127.0.0.1"`,
-		`"forwarded_user":"upstream-bob"`,
+		`"caller":{"identity":"system:public"`,
+		`"public_mode":true`,
+		`"network":{"source_ip":"127.0.0.1","forwarded_user":"upstream-bob"}`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("public read audit missing %s\nlog:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "caller_email") || strings.Contains(got, "caller_groups") {
+	if strings.Contains(got, "email") || strings.Contains(got, "groups") {
 		t.Errorf("public read leaked authenticated fields:\n%s", got)
 	}
 	if !strings.Contains(got, `"trace_id"`) {

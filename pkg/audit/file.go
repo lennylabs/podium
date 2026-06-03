@@ -161,21 +161,38 @@ func (f *FileSink) Verify(_ context.Context) error {
 func (f *FileSink) Path() string { return f.path }
 
 // jsonEvent is the wire form of an event in the JSON-Lines log.
+//
+// The caller identity attributes are nested under a single "caller" object
+// so their wire keys are the dotted names §8.1, §13.2.2, and §13.10 use:
+// caller.identity, caller.email, caller.groups, caller.network, and
+// caller.public_mode. A SIEM consumer keying on the dotted path
+// caller.public_mode resolves the nested field directly. spec: §8.1.
 type jsonEvent struct {
 	Type           string            `json:"type"`
 	Timestamp      string            `json:"timestamp"`
 	TraceID        string            `json:"trace_id,omitempty"`
-	Caller         string            `json:"caller,omitempty"`
-	CallerEmail    string            `json:"caller_email,omitempty"`
-	CallerGroups   []string          `json:"caller_groups,omitempty"`
-	CallerNetwork  *jsonNetwork      `json:"caller_network,omitempty"`
-	PublicMode     bool              `json:"caller_public_mode,omitempty"`
+	Caller         *jsonCaller       `json:"caller,omitempty"`
 	Target         string            `json:"target,omitempty"`
 	Context        map[string]string `json:"context,omitempty"`
 	ResolvedLayers []string          `json:"resolved_layers,omitempty"`
 	ResultSize     int               `json:"result_size,omitempty"`
 	Hash           string            `json:"hash"`
 	PrevHash       string            `json:"prev_hash,omitempty"`
+}
+
+// jsonCaller is the wire form of the §8.1 caller-identity attributes. The
+// nested keys serialize the dotted names the spec illustrates: the OAuth
+// sub-claim under caller.identity, the attached email and groups, the
+// public-mode source network under caller.network, and the public-mode flag
+// under caller.public_mode. The public-mode-only fields (network,
+// public_mode) are omitted for authenticated callers. spec: §8.1, §13.2.2,
+// §13.10.
+type jsonCaller struct {
+	Identity   string       `json:"identity,omitempty"`
+	Email      string       `json:"email,omitempty"`
+	Groups     []string     `json:"groups,omitempty"`
+	Network    *jsonNetwork `json:"network,omitempty"`
+	PublicMode bool         `json:"public_mode,omitempty"`
 }
 
 // jsonNetwork is the wire form of CallerNetwork (§8.1 caller.network).
@@ -189,11 +206,7 @@ func eventForJSON(e Event) jsonEvent {
 		Type:           string(e.Type),
 		Timestamp:      e.Timestamp.UTC().Format(time.RFC3339Nano),
 		TraceID:        e.TraceID,
-		Caller:         e.Caller,
-		CallerEmail:    e.CallerEmail,
-		CallerGroups:   e.CallerGroups,
-		CallerNetwork:  networkForJSON(e.CallerNetwork),
-		PublicMode:     e.PublicMode,
+		Caller:         callerForJSON(e),
 		Target:         e.Target,
 		Context:        e.Context,
 		ResolvedLayers: e.ResolvedLayers,
@@ -203,17 +216,29 @@ func eventForJSON(e Event) jsonEvent {
 	}
 }
 
+// callerForJSON builds the nested caller object, or nil when the event
+// carries no caller attributes at all (so the "caller" key is omitted
+// entirely rather than serialized as an empty object).
+func callerForJSON(e Event) *jsonCaller {
+	if e.Caller == "" && e.CallerEmail == "" && len(e.CallerGroups) == 0 &&
+		e.CallerNetwork == nil && !e.PublicMode {
+		return nil
+	}
+	return &jsonCaller{
+		Identity:   e.Caller,
+		Email:      e.CallerEmail,
+		Groups:     e.CallerGroups,
+		Network:    networkForJSON(e.CallerNetwork),
+		PublicMode: e.PublicMode,
+	}
+}
+
 func eventFromJSON(je jsonEvent) Event {
 	t, _ := time.Parse(time.RFC3339Nano, je.Timestamp)
-	return Event{
+	e := Event{
 		Type:           EventType(je.Type),
 		Timestamp:      t,
 		TraceID:        je.TraceID,
-		Caller:         je.Caller,
-		CallerEmail:    je.CallerEmail,
-		CallerGroups:   je.CallerGroups,
-		CallerNetwork:  networkFromJSON(je.CallerNetwork),
-		PublicMode:     je.PublicMode,
 		Target:         je.Target,
 		Context:        je.Context,
 		ResolvedLayers: je.ResolvedLayers,
@@ -221,6 +246,14 @@ func eventFromJSON(je jsonEvent) Event {
 		Hash:           je.Hash,
 		PrevHash:       je.PrevHash,
 	}
+	if je.Caller != nil {
+		e.Caller = je.Caller.Identity
+		e.CallerEmail = je.Caller.Email
+		e.CallerGroups = je.Caller.Groups
+		e.CallerNetwork = networkFromJSON(je.Caller.Network)
+		e.PublicMode = je.Caller.PublicMode
+	}
+	return e
 }
 
 func networkForJSON(n *CallerNetwork) *jsonNetwork {
