@@ -626,7 +626,10 @@ func TestFilesystemSync_OverrideAddRecordsInLock(t *testing.T) {
 		"shared/extra/ARTIFACT.md": contextArtifact("extra"),
 	})
 	target := t.TempDir()
-	res1 := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none")
+	// Scope the baseline to shared/base so shared/extra is out of the
+	// materialized set; otherwise `--add shared/extra` is a redundant no-op
+	// (§7.5.5) rather than the toggle this test records.
+	res1 := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none", "--include", "shared/base")
 	if res1.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res1.Exit, res1.Stderr)
 	}

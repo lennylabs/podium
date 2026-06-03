@@ -9,11 +9,32 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// nullProfile serializes the empty profile name as the YAML null literal
+// (`profile: null`) instead of omitting the key, matching the §7.5.3 lock
+// schema annotation ("null when no profile was used"). A present name
+// serializes as a plain string. The default reflection-based decoder reads
+// both `profile: null` and `profile: finance-team` back into a string, so no
+// custom unmarshaler is needed.
+//
+// spec: §7.5.3 — the lock's `profile:` field is null when no profile was used.
+type nullProfile string
+
+// MarshalYAML emits null for the empty name and the bare string otherwise.
+func (p nullProfile) MarshalYAML() (any, error) {
+	if p == "" {
+		return nil, nil
+	}
+	return string(p), nil
+}
+
 // LockFile is the per-target sync state stored at <target>/.podium/sync.lock
 // (spec §7.5.3).
 type LockFile struct {
-	Version      int            `yaml:"version"`
-	Profile      string         `yaml:"profile,omitempty"`
+	Version int `yaml:"version"`
+	// Profile is the active profile for this target. It is written without
+	// omitempty so a target synced with no active profile records the explicit
+	// `profile: null` the §7.5.3 schema documents rather than dropping the key.
+	Profile      nullProfile    `yaml:"profile"`
 	Scope        LockScope      `yaml:"scope,omitempty"`
 	Harness      string         `yaml:"harness,omitempty"`
 	Target       string         `yaml:"target,omitempty"`

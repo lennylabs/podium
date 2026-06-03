@@ -48,11 +48,13 @@ type OverrideOptions struct {
 	HTTPClient      *http.Client
 }
 
-// OverrideResult is what Override returns: the new lock state and
-// whether anything actually changed.
+// OverrideResult is what Override returns: the new lock state, whether
+// anything actually changed, and any advisory warnings (e.g. a redundant
+// --add on an already-materialized artifact, per §7.5.5).
 type OverrideResult struct {
-	Lock    *LockFile
-	Changed bool
+	Lock     *LockFile
+	Changed  bool
+	Warnings []string
 }
 
 // Override applies the §7.5.5 toggle semantics to the lock file at
@@ -81,6 +83,7 @@ func Override(opts OverrideOptions) (*OverrideResult, error) {
 
 	now := opts.Clock.Now().UTC()
 	changed := false
+	var warnings []string
 
 	if opts.Reset {
 		if len(lock.Toggles.Add) > 0 || len(lock.Toggles.Remove) > 0 {
@@ -89,14 +92,33 @@ func Override(opts OverrideOptions) (*OverrideResult, error) {
 		lock.Toggles = LockToggles{}
 	}
 
+	// "Already materialized" is the set in the lock's artifacts list, minus any
+	// pending removal: an ID slated for removal is not currently on disk, so
+	// re-adding it is a real operation rather than a redundant no-op.
+	materialized := map[string]bool{}
+	for _, a := range lock.Artifacts {
+		materialized[a.ID] = true
+	}
+	pendingRemove := map[string]bool{}
+	for _, t := range lock.Toggles.Remove {
+		pendingRemove[t.ID] = true
+	}
+
 	for _, id := range opts.Add {
-		if !alreadyAdded(lock.Toggles.Add, id) {
-			lock.Toggles.Add = append(lock.Toggles.Add, LockToggle{
-				ID:      id,
-				AddedAt: now,
-			})
-			changed = true
+		// spec: §7.5.5 — "running --add on something already materialized is a
+		// no-op with a warning." An ID already in toggles.add, or already in the
+		// resolved/materialized set (and not pending removal), is redundant: skip
+		// the toggle so it does not survive into a later save-as as a stray
+		// pinned include, and surface a warning.
+		if alreadyAdded(lock.Toggles.Add, id) || (materialized[id] && !pendingRemove[id]) {
+			warnings = append(warnings, fmt.Sprintf("%q is already materialized; --add is a no-op", id))
+			continue
 		}
+		lock.Toggles.Add = append(lock.Toggles.Add, LockToggle{
+			ID:      id,
+			AddedAt: now,
+		})
+		changed = true
 		// An add invalidates any prior remove for the same ID.
 		lock.Toggles.Remove = removeToggleByID(lock.Toggles.Remove, id)
 	}
@@ -129,7 +151,7 @@ func Override(opts OverrideOptions) (*OverrideResult, error) {
 			AdapterRegistry: opts.AdapterRegistry,
 			OverlayPath:     opts.OverlayPath,
 			HTTPClient:      opts.HTTPClient,
-			Profile:         lock.Profile,
+			Profile:         string(lock.Profile),
 			Scope: ScopeFilter{
 				Include: lock.Scope.Include,
 				Exclude: lock.Scope.Exclude,
@@ -148,7 +170,7 @@ func Override(opts OverrideOptions) (*OverrideResult, error) {
 			lock = reread
 		}
 	}
-	return &OverrideResult{Lock: lock, Changed: changed}, nil
+	return &OverrideResult{Lock: lock, Changed: changed, Warnings: warnings}, nil
 }
 
 // alreadyAdded reports whether id appears in the toggle list.
@@ -211,9 +233,18 @@ func SaveAs(opts SaveAsOptions) (*SaveAsResult, error) {
 	if lock == nil {
 		lock = &LockFile{Version: 1, Target: opts.Target}
 	}
-	cfg, err := EnsureConfig(opts.Target)
+	// Detect a fresh sync.yaml so the write can emit the empty defaults: block
+	// §7.5.6 documents for a newly created file.
+	cfg, err := ReadConfig(opts.Target)
 	if err != nil {
 		return nil, err
+	}
+	fresh := cfg == nil
+	if cfg == nil {
+		cfg = &SyncConfig{Profiles: map[string]Profile{}}
+	}
+	if cfg.Profiles == nil {
+		cfg.Profiles = map[string]Profile{}
 	}
 	if _, exists := cfg.Profiles[opts.Profile]; exists && !opts.Update {
 		return nil, fmt.Errorf("save-as: profile %q already exists; pass --update to overwrite", opts.Profile)
@@ -235,11 +266,14 @@ func SaveAs(opts SaveAsOptions) (*SaveAsResult, error) {
 		return res, nil
 	}
 	cfg.Profiles[opts.Profile] = prof
-	if err := WriteConfig(opts.Target, cfg); err != nil {
+	if err := writeConfig(opts.Target, cfg, fresh); err != nil {
 		return nil, err
 	}
-	// Clear toggles in the lock file.
+	// spec: §7.5.6 / §11 "Save-as test" — the toggles are now part of the
+	// profile's scope, so clear them, and the saved profile becomes the target's
+	// active profile (the lock's `profile:` field).
 	lock.Toggles = LockToggles{}
+	lock.Profile = nullProfile(opts.Profile)
 	if err := WriteLock(opts.Target, lock); err != nil {
 		return nil, err
 	}

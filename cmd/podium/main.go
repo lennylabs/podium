@@ -532,6 +532,11 @@ func syncOverrideCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "override failed: %v\n", err)
 		return 1
 	}
+	// spec: §7.5.5 — a redundant --add on an already-materialized artifact is a
+	// no-op with a warning.
+	for _, w := range res.Warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+	}
 	if *dryRun {
 		fmt.Println("(dry-run; nothing written)")
 	}

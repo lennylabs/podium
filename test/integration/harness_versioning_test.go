@@ -87,6 +87,31 @@ func TestPodiumSync_AllowsAtOrAboveMinServerVersion(t *testing.T) {
 	}
 }
 
+// TestPodiumSync_ProfilePinRefusesOlderAdapter covers F-12.0.3.
+// Spec: §12 "Harness adapter drift" — "Adapters are versioned with the MCP
+// server binary; profiles can pin a minimum version." §6.7 establishes that
+// adapter behavior versions alongside the binary, so a profile that needs newer
+// adapter behavior pins min_server_version; `podium sync` against that profile
+// refuses an older binary rather than materializing with a stale adapter.
+func TestPodiumSync_ProfilePinRefusesOlderAdapter(t *testing.T) {
+	t.Parallel()
+	registry := t.TempDir()
+	testharness.WriteTree(t, registry, testharness.WriteTreeOption{
+		Path:    "glossary/ARTIFACT.md",
+		Content: contextArtifact,
+	})
+	ws := t.TempDir()
+	// The pin lives on the profile, not defaults, and the run selects it.
+	writeSyncYAML(t, ws, "profiles:\n  prod:\n    min_server_version: \"99.0.0\"\n    include: [\"glossary\"]\n")
+	res := cmdharness.Run(t, "podium", ws, "sync", "--registry", registry, "--profile", "prod")
+	if res.ExitCode != 2 {
+		t.Fatalf("sync exit=%d, want 2\nstderr:\n%s", res.ExitCode, res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "config.server_version_too_old") {
+		t.Errorf("stderr missing config.server_version_too_old:\n%s", res.Stderr)
+	}
+}
+
 // writeSyncYAML writes <ws>/.podium/sync.yaml with the given body.
 func writeSyncYAML(t *testing.T, ws, body string) {
 	t.Helper()

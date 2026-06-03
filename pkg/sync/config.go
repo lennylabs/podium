@@ -153,11 +153,19 @@ func ReadConfig(workspace string) (*SyncConfig, error) {
 // WriteConfig writes the SyncConfig back to the workspace's
 // sync.yaml atomically via .tmp + rename.
 func WriteConfig(workspace string, cfg *SyncConfig) error {
+	return writeConfig(workspace, cfg, false)
+}
+
+// writeConfig writes cfg to the workspace's sync.yaml atomically. When
+// ensureDefaults is true and cfg carries no defaults, an empty `defaults:`
+// mapping is emitted ahead of `profiles:` so a freshly created sync.yaml has
+// the structure §7.5.6 / §7.5.7 describe.
+func writeConfig(workspace string, cfg *SyncConfig, ensureDefaults bool) error {
 	dir := filepath.Join(workspace, ".podium")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	data, err := yaml.Marshal(cfg)
+	data, err := marshalConfig(cfg, ensureDefaults)
 	if err != nil {
 		return err
 	}
@@ -169,21 +177,35 @@ func WriteConfig(workspace string, cfg *SyncConfig) error {
 	return os.Rename(tmp, final)
 }
 
-// EnsureConfig loads sync.yaml or returns a fresh SyncConfig when the
-// file does not exist. Used by save-as / profile edit which create
-// the file as needed.
-func EnsureConfig(workspace string) (*SyncConfig, error) {
-	cfg, err := ReadConfig(workspace)
-	if err != nil {
+// marshalConfig renders cfg to YAML. When ensureDefaults is true and the
+// rendered config has no `defaults:` key (a zero-value Defaults is dropped by
+// omitempty), an empty `defaults:` mapping is prepended so it precedes
+// `profiles:`, matching the fresh-file layout `podium profile edit` produces.
+//
+// spec: §7.5.6 — a fresh sync.yaml is created "with the new profile and an
+// empty defaults: block".
+func marshalConfig(cfg *SyncConfig, ensureDefaults bool) ([]byte, error) {
+	var node yaml.Node
+	if err := node.Encode(cfg); err != nil {
 		return nil, err
 	}
-	if cfg == nil {
-		return &SyncConfig{Profiles: map[string]Profile{}}, nil
+	if ensureDefaults && findConfigKey(&node, "defaults") == nil {
+		node.Content = append([]*yaml.Node{
+			{Kind: yaml.ScalarNode, Tag: "!!str", Value: "defaults"},
+			{Kind: yaml.MappingNode, Tag: "!!map"},
+		}, node.Content...)
 	}
-	if cfg.Profiles == nil {
-		cfg.Profiles = map[string]Profile{}
+	return yaml.Marshal(&node)
+}
+
+// findConfigKey returns the value node for key in a mapping node, or nil.
+func findConfigKey(m *yaml.Node, key string) *yaml.Node {
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			return m.Content[i+1]
+		}
 	}
-	return cfg, nil
+	return nil
 }
 
 // requiredServerVersion returns the highest min_server_version pinned by the

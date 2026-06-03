@@ -296,7 +296,7 @@ func Run(opts Options) (*Result, error) {
 	lock := &LockFile{
 		Target:  opts.Target,
 		Harness: a.ID(),
-		Profile: opts.Profile,
+		Profile: nullProfile(opts.Profile),
 		Scope: LockScope{
 			Include: opts.Scope.Include,
 			Exclude: opts.Scope.Exclude,
