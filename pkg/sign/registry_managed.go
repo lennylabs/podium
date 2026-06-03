@@ -5,8 +5,9 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
+
+	"github.com/lennylabs/podium/pkg/spi"
 )
 
 // RegistryManagedKey implements §4.7.9's per-org registry-managed
@@ -34,9 +35,10 @@ type RegistryManagedKey struct {
 func (RegistryManagedKey) ID() string { return "registry-managed" }
 
 // ErrRegistryManagedUnavailable signals the keypair is not configured.
+// Structured per §9.3.
 // Sign returns this when PrivateKey is unset; Verify returns it when
 // PublicKey is unset.
-var ErrRegistryManagedUnavailable = errors.New("sign: registry-managed key not configured")
+var ErrRegistryManagedUnavailable = &spi.Error{Code: "config.signature_provider_unavailable", Message: "sign: registry-managed key not configured"}
 
 // registryManagedEnvelope is the JSON encoding of a registry-managed
 // signature. Compact, no version field — the format is internal to

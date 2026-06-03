@@ -9,16 +9,18 @@ package hook
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/lennylabs/podium/pkg/adapter"
+	"github.com/lennylabs/podium/pkg/spi"
 )
 
-// Errors returned by hook functions.
+// Errors returned by hook functions. Structured *spi.Error per the §9.3
+// "Structured errors" constraint on the MaterializationHook SPI.
 var (
-	// ErrSandboxViolation maps to materialize.sandbox_violation in §6.10.
-	ErrSandboxViolation = errors.New("hook: sandbox_violation")
+	// ErrSandboxViolation reports a hook write outside the materialization
+	// destination or another sandbox breach.
+	ErrSandboxViolation = &spi.Error{Code: "materialize.sandbox_violation", Message: "hook: sandbox_violation"}
 )
 
 // File is one (path, content) pair flowing through the chain. Each hook

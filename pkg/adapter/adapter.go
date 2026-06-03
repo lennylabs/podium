@@ -11,6 +11,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/lennylabs/podium/pkg/spi"
 )
 
 // FileOp selects how the materializer applies a File to its destination.
@@ -127,8 +129,15 @@ func (r *Registry) Register(a HarnessAdapter) error {
 func (r *Registry) Get(id string) (HarnessAdapter, error) {
 	a, ok := r.byID[id]
 	if !ok {
-		return nil, fmt.Errorf("config.unknown_harness: no adapter registered for %q (have: %s)",
-			id, strings.Join(r.IDs(), ", "))
+		// Structured per §9.3; the code prefix in Message is preserved so
+		// existing callers that match the §6.10 code in the message string
+		// (and the §6.7 unknown-harness wire path) are unaffected.
+		return nil, &spi.Error{
+			Code: "config.unknown_harness",
+			Message: fmt.Sprintf("config.unknown_harness: no adapter registered for %q (have: %s)",
+				id, strings.Join(r.IDs(), ", ")),
+			Details: map[string]any{"harness": id, "available": r.IDs()},
+		}
 	}
 	return a, nil
 }

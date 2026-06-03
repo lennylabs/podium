@@ -9,8 +9,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"time"
+
+	"github.com/lennylabs/podium/pkg/spi"
 )
 
 // nullBoolFromPtr converts an optional bool to a sql.NullBool for the SQL
@@ -33,17 +34,20 @@ func ptrFromNullBool(nb sql.NullBool) *bool {
 	return &v
 }
 
-// Errors returned by Store implementations.
+// Errors returned by Store implementations. Each is a structured *spi.Error
+// carrying its §6.10 code so the RegistryStore SPI conforms to the §9.3
+// "Structured errors" constraint. The pointer is a package-level sentinel, so
+// errors.Is matching through fmt.Errorf wrapping is unchanged.
 var (
 	// ErrNotFound is returned by Get* methods when the record is absent.
-	ErrNotFound = errors.New("store: not found")
+	ErrNotFound = &spi.Error{Code: "registry.not_found", Message: "store: not found"}
 	// ErrImmutableViolation is returned when an ingest attempts to
 	// re-write a (artifact_id, version) pair with different content
-	// (§4.7 immutability invariant). Maps to ingest.immutable_violation.
-	ErrImmutableViolation = errors.New("store: immutable_violation")
+	// (§4.7 immutability invariant).
+	ErrImmutableViolation = &spi.Error{Code: "ingest.immutable_violation", Message: "store: immutable_violation"}
 	// ErrTenantNotFound signals that the tenant referenced by an
 	// operation does not exist.
-	ErrTenantNotFound = errors.New("store: tenant_not_found")
+	ErrTenantNotFound = &spi.Error{Code: "registry.tenant_not_found", Message: "store: tenant_not_found"}
 )
 
 // Tenant identifies a Podium tenant (org). Tenant boundaries are the

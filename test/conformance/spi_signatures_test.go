@@ -1,6 +1,7 @@
 package conformance
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -26,9 +27,12 @@ import (
 // bare func type is rejected outright; the "...Func" adapter idiom (an
 // in-process convenience that wraps a function into the interface) is exempt.
 //
+// It covers every built-in SPI package §9.3 names as conforming today,
+// including the RegistryStore (pkg/store) and LayerSourceProvider
+// (pkg/layer/source) SPIs that §9.3 highlights by name.
+//
 // spec: §9.3 SPI Catalogue; spec/11-verification.md SPI wire-compatibility
-// test. Guards F-9.3.1 (hook), F-9.3.2 (sign), F-9.3.3 (adapter), F-9.3.4
-// (lint, typeprovider).
+// test.
 func TestSPISignatures(t *testing.T) {
 	// SPI packages, relative to the repository root.
 	spiPkgs := []string{
@@ -37,6 +41,8 @@ func TestSPISignatures(t *testing.T) {
 		"pkg/hook",
 		"pkg/lint",
 		"pkg/typeprovider",
+		"pkg/store",
+		"pkg/layer/source",
 	}
 
 	root := spiRepoRoot(t)
@@ -78,7 +84,9 @@ func TestSPISignatures(t *testing.T) {
 							continue // embedded interface, not a method
 						}
 						checked++
-						checkMethod(t, fset, pkg, ts.Name.Name, m.Names[0].Name, ft)
+						for _, v := range methodViolations(fset, pkg, ts.Name.Name, m.Names[0].Name, ft) {
+							t.Error(v)
+						}
 					}
 					return true
 				})
@@ -91,35 +99,39 @@ func TestSPISignatures(t *testing.T) {
 	}
 }
 
-// checkMethod enforces the §9.3 parameter rules on a single interface method.
-func checkMethod(t *testing.T, fset *token.FileSet, pkg, iface, method string, ft *ast.FuncType) {
-	t.Helper()
-
+// methodViolations returns the §9.3 parameter-rule violations for a single
+// interface method, formatted for t.Error. An empty slice means the method
+// conforms. Returning the violations (rather than calling t.Errorf directly)
+// lets the guard logic be exercised by a unit test.
+func methodViolations(fset *token.FileSet, pkg, iface, method string, ft *ast.FuncType) []string {
 	var params []*ast.Field
 	if ft.Params != nil {
 		params = ft.Params.List
 	}
 
+	var violations []string
+
 	// Rule: no func-typed or channel-typed parameters.
 	for _, p := range params {
 		switch p.Type.(type) {
 		case *ast.FuncType:
-			t.Errorf("%s.%s: parameter has a func type, which §9.3 forbids (cannot cross a process boundary) at %s",
-				iface, method, fset.Position(p.Pos()))
+			violations = append(violations, fmt.Sprintf("%s.%s: parameter has a func type, which §9.3 forbids (cannot cross a process boundary) at %s",
+				iface, method, fset.Position(p.Pos())))
 		case *ast.ChanType:
-			t.Errorf("%s.%s: parameter has a channel type, which §9.3 forbids at %s",
-				iface, method, fset.Position(p.Pos()))
+			violations = append(violations, fmt.Sprintf("%s.%s: parameter has a channel type, which §9.3 forbids at %s",
+				iface, method, fset.Position(p.Pos())))
 		}
 	}
 
 	// Rule: a method with parameters must take a leading context.Context.
 	if len(params) == 0 {
-		return // accessor; exempt
+		return violations // accessor; exempt
 	}
 	if !isContextContext(params[0].Type) {
-		t.Errorf("%s.%s in %s: first parameter is not context.Context; §9.3 requires a context-first signature",
-			iface, method, pkg)
+		violations = append(violations, fmt.Sprintf("%s.%s in %s: first parameter is not context.Context; §9.3 requires a context-first signature",
+			iface, method, pkg))
 	}
+	return violations
 }
 
 // isContextContext reports whether expr is the type context.Context.

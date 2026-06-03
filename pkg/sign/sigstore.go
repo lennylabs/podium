@@ -10,10 +10,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/lennylabs/podium/pkg/spi"
 )
 
 // SigstoreKeyless implements §4.7.9 Sigstore-keyless signing.
@@ -92,8 +93,8 @@ type envelope struct {
 
 // ErrSigstoreUnavailable signals that the Sigstore endpoints are
 // not configured and the keyless flow cannot proceed. Sign returns
-// this when FulcioURL or OIDCToken is empty.
-var ErrSigstoreUnavailable = errors.New("sign: sigstore-keyless not configured")
+// this when FulcioURL or OIDCToken is empty. Structured per §9.3.
+var ErrSigstoreUnavailable = &spi.Error{Code: "config.signature_provider_unavailable", Message: "sign: sigstore-keyless not configured"}
 
 // Sign produces a Sigstore-keyless envelope over contentHash.
 //

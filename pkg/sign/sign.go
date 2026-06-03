@@ -6,22 +6,24 @@ package sign
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/lennylabs/podium/pkg/manifest"
+	"github.com/lennylabs/podium/pkg/spi"
 )
 
-// Errors returned by Verify and Sign. Tests assert against them via errors.Is.
+// Errors returned by Verify and Sign. Each is a structured *spi.Error carrying
+// its §6.10 code so the SignatureProvider SPI conforms to the §9.3 "Structured
+// errors" constraint. Tests assert against them via errors.Is, which matches
+// the package-level sentinel pointer through fmt.Errorf wrapping.
 var (
 	// ErrSignatureInvalid signals that the signature does not validate
-	// against the artifact's content hash. Maps to
-	// materialize.signature_invalid in §6.10.
-	ErrSignatureInvalid = errors.New("signature_invalid")
+	// against the artifact's content hash.
+	ErrSignatureInvalid = &spi.Error{Code: "materialize.signature_invalid", Message: "signature_invalid"}
 	// ErrSignatureMissing signals that an artifact requires a signature
 	// (sensitivity ≥ medium under the default policy) but none was
 	// provided.
-	ErrSignatureMissing = errors.New("signature_missing")
+	ErrSignatureMissing = &spi.Error{Code: "materialize.signature_missing", Message: "signature_missing"}
 )
 
 // VerificationPolicy controls when Verify enforces the presence of a

@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -9,6 +10,7 @@ import (
 	"testing/fstest"
 
 	"github.com/lennylabs/podium/pkg/registry/ingest"
+	"github.com/lennylabs/podium/pkg/spi"
 	"github.com/lennylabs/podium/pkg/store"
 )
 
@@ -84,5 +86,56 @@ func TestIngest_ConcurrentConflict_SQLiteReportsConflicts(t *testing.T) {
 	if got := acceptedSum.Load() + conflictSum.Load(); got != goroutines {
 		t.Errorf("Accepted (%d) + Conflicts (%d) = %d, want %d",
 			acceptedSum.Load(), conflictSum.Load(), got, goroutines)
+	}
+}
+
+// Spec: §9.3 "Structured errors" + §4.7 immutability — the RegistryStore SPI
+// (the file-backed SQLite standalone backend) returns the immutability
+// violation as a structured *spi.Error carrying the §6.10
+// ingest.immutable_violation code, recoverable via spi.AsError from the real
+// backend rather than only from the package-level sentinel. Guards the §9.3
+// claim that the default RegistryStore conforms today.
+func TestStore_ImmutableViolation_IsStructured(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "registry.db")
+	st, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	ctx := context.Background()
+	if err := st.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	base := store.ManifestRecord{
+		TenantID:    "t",
+		ArtifactID:  "x",
+		Version:     "1.0.0",
+		ContentHash: "sha256:aaa",
+		Type:        "skill",
+		Description: "desc",
+		Sensitivity: "low",
+		Layer:       "L",
+		Frontmatter: []byte("---\ntype: skill\n---\n"),
+		Body:        []byte("body"),
+	}
+	if err := st.PutManifest(ctx, base); err != nil {
+		t.Fatalf("first PutManifest: %v", err)
+	}
+	// Same (id, version), different content hash: the immutability invariant
+	// rejects it.
+	conflict := base
+	conflict.ContentHash = "sha256:bbb"
+	err = st.PutManifest(ctx, conflict)
+	if !errors.Is(err, store.ErrImmutableViolation) {
+		t.Fatalf("PutManifest conflict = %v, want ErrImmutableViolation", err)
+	}
+	e, ok := spi.AsError(err)
+	if !ok {
+		t.Fatalf("immutability error is not a structured *spi.Error: %T %v", err, err)
+	}
+	if e.Code != "ingest.immutable_violation" {
+		t.Errorf("Code = %q, want ingest.immutable_violation", e.Code)
 	}
 }

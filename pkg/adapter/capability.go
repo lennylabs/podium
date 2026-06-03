@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/lennylabs/podium/pkg/manifest"
+	"github.com/lennylabs/podium/pkg/spi"
 )
 
 // This file encodes the spec §6.7.1 capability matrix as a production data
@@ -289,6 +290,12 @@ func TranslationError(harnessID string, art *manifest.Artifact) error {
 		return nil
 	}
 	sort.Strings(unsupported)
-	return fmt.Errorf("materialize.untranslatable: adapter %q cannot translate %s; use harness: none for raw output",
-		harnessID, strings.Join(unsupported, ", "))
+	// Structured per §9.3; the §6.10 code prefix in Message is preserved so
+	// callers that match the code in the message string are unaffected.
+	return &spi.Error{
+		Code: "materialize.untranslatable",
+		Message: fmt.Sprintf("materialize.untranslatable: adapter %q cannot translate %s; use harness: none for raw output",
+			harnessID, strings.Join(unsupported, ", ")),
+		Details: map[string]any{"harness": harnessID, "unsupported": unsupported},
+	}
 }
