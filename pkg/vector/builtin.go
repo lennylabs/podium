@@ -1,6 +1,10 @@
 package vector
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+	"time"
+)
 
 // BackendConfig carries the resolved configuration for the built-in §13.12
 // vector backends. It is the typed input to OpenBuiltin so the registry
@@ -17,6 +21,10 @@ type BackendConfig struct {
 	PineconeHost  string
 	PineconeIndex string
 	PineconeNS    string
+	// PineconeControlPlane overrides the control-plane base used to resolve the
+	// data-plane host from the index name when PineconeHost is empty (§13.12,
+	// F-13.12.3). Empty uses the real control plane (PineconeControlPlane const).
+	PineconeControlPlane string
 	// weaviate-cloud
 	WeaviateURL  string
 	WeaviateKey  string
@@ -62,11 +70,18 @@ func OpenBuiltin(id string, cfg BackendConfig, dim int) (Provider, error) {
 	case "pinecone":
 		host := cfg.PineconeHost
 		if host == "" && cfg.PineconeIndex != "" {
-			// §13.12: PODIUM_PINECONE_INDEX is auto-resolved to a host for
-			// serverless. Point the operator at the host URL rather than
-			// dialing the Pinecone control plane here.
-			return nil, fmt.Errorf(
-				"PODIUM_PINECONE_INDEX=%q set but PODIUM_PINECONE_HOST is required for serverless; supply the index host URL", cfg.PineconeIndex)
+			// §13.12 (F-13.12.3): PODIUM_PINECONE_HOST defaults to
+			// "auto-resolved from index name". Look the host up via the
+			// Pinecone control-plane describe-index endpoint. A bounded context
+			// keeps startup from hanging on an unreachable control plane; a
+			// failure surfaces as an error so the caller degrades to BM25.
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			resolved, err := ResolvePineconeHost(ctx, cfg.PineconeControlPlane, cfg.PineconeKey, cfg.PineconeIndex, nil)
+			if err != nil {
+				return nil, fmt.Errorf("resolve PODIUM_PINECONE_HOST from index %q: %w", cfg.PineconeIndex, err)
+			}
+			host = resolved
 		}
 		return NewPinecone(PineconeConfig{
 			APIKey: cfg.PineconeKey, Host: host,

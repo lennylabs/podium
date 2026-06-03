@@ -106,6 +106,14 @@ type yamlObjectCfg struct {
 	// ForcePathStyle mirrors §13.12 PODIUM_S3_FORCE_PATH_STYLE as a
 	// config-file key (snake-cased under the section per spec line 343).
 	ForcePathStyle bool `yaml:"force_path_style,omitempty"`
+	// AccessKeyID / SecretAccessKey mirror §13.12 PODIUM_S3_ACCESS_KEY_ID /
+	// PODIUM_S3_SECRET_ACCESS_KEY (F-13.12.1): static S3 credentials so an
+	// operator can configure them entirely in registry.yaml (typically via
+	// ${ENV_VAR} interpolation) rather than only as env vars.
+	AccessKeyID     string `yaml:"access_key_id,omitempty"`
+	SecretAccessKey string `yaml:"secret_access_key,omitempty"`
+	// PresignTTLSeconds mirrors §13.12 PODIUM_PRESIGN_TTL_SECONDS (F-13.12.1).
+	PresignTTLSeconds int `yaml:"presign_ttl_seconds,omitempty"`
 }
 
 // yamlVectorCfg mirrors the §13.12 `vector_backend:` block. Beyond `type`,
@@ -121,6 +129,12 @@ type yamlVectorCfg struct {
 	// Collection is the §13.12 weaviate-cloud / qdrant-cloud collection name,
 	// required for those backends (F-13.12.12). Routed by applyVectorYAML.
 	Collection string `yaml:"collection,omitempty"`
+	// Host mirrors §13.12 PODIUM_PINECONE_HOST and URL mirrors
+	// PODIUM_WEAVIATE_URL / PODIUM_QDRANT_URL (F-13.12.1), so a managed backend
+	// that marks the host/URL required can be configured entirely in
+	// registry.yaml. applyVectorYAML routes them to the selected backend.
+	Host string `yaml:"host,omitempty"`
+	URL  string `yaml:"url,omitempty"`
 }
 
 // yamlEmbedCfg mirrors the §13.12 `embedding_provider:` block. The selector
@@ -130,6 +144,12 @@ type yamlEmbedCfg struct {
 	Type   string `yaml:"type,omitempty"`
 	APIKey string `yaml:"api_key,omitempty"`
 	Model  string `yaml:"model,omitempty"`
+	// BaseURL mirrors §13.12 PODIUM_OPENAI_BASE_URL, Org mirrors
+	// PODIUM_OPENAI_ORG, and URL mirrors PODIUM_OLLAMA_URL (F-13.12.1).
+	// applyEmbeddingYAML routes them to the selected provider.
+	BaseURL string `yaml:"base_url,omitempty"`
+	Org     string `yaml:"org,omitempty"`
+	URL     string `yaml:"url,omitempty"`
 }
 
 // yamlDiscovery mirrors the §13.12 tenant-scope `discovery:` block. The
@@ -239,10 +259,14 @@ func applyYAML(c *Config, y *yamlConfig) {
 	if y == nil {
 		return
 	}
-	if c.bind == "" || c.bind == "127.0.0.1:8080" {
-		if y.Bind != "" {
-			c.bind = y.Bind
-		}
+	// §13.12 precedence (env beats config file): consult PODIUM_BIND directly
+	// rather than comparing c.bind against the loopback default literal. An
+	// operator who sets PODIUM_BIND=127.0.0.1:8080 explicitly (a value that
+	// happens to equal the default) keeps it; the config-file bind only fills
+	// an unset env var (F-13.12.4). The --bind flag also routes through
+	// PODIUM_BIND (cmd/podium/serve.go), so the flag still wins over the file.
+	if os.Getenv("PODIUM_BIND") == "" && y.Bind != "" {
+		c.bind = y.Bind
 	}
 	// §13.12 endpoint: the advertised public URL (PODIUM_PUBLIC_URL). It is
 	// defaulted to http://<bind> later in LoadConfig only when still empty.
@@ -288,6 +312,21 @@ func applyYAML(c *Config, y *yamlConfig) {
 	}
 	if !c.s3ForcePathStyle && y.ObjectStore.ForcePathStyle && os.Getenv("PODIUM_S3_FORCE_PATH_STYLE") == "" {
 		c.s3ForcePathStyle = true
+	}
+	// §13.12 (F-13.12.1): static S3 credentials. The env-derived fields are
+	// empty when PODIUM_S3_ACCESS_KEY_ID / PODIUM_S3_SECRET_ACCESS_KEY are
+	// unset, so a non-empty target already encodes env precedence.
+	if c.s3AccessKey == "" && y.ObjectStore.AccessKeyID != "" {
+		c.s3AccessKey = y.ObjectStore.AccessKeyID
+	}
+	if c.s3SecretKey == "" && y.ObjectStore.SecretAccessKey != "" {
+		c.s3SecretKey = y.ObjectStore.SecretAccessKey
+	}
+	// §13.12 (F-13.12.1): presigned-URL TTL. LoadConfig reads the env var and
+	// applies the package default after applyYAML, so set the duration here only
+	// when the env var is unset; the later env read still overrides a file value.
+	if os.Getenv("PODIUM_PRESIGN_TTL_SECONDS") == "" && y.ObjectStore.PresignTTLSeconds > 0 {
+		c.presignTTL = time.Duration(y.ObjectStore.PresignTTLSeconds) * time.Second
 	}
 	if c.vectorBackend == "" && y.Vector.Type != "" {
 		c.vectorBackend = y.Vector.Type
@@ -383,12 +422,21 @@ func applyVectorYAML(c *Config, v yamlVectorCfg) {
 		if c.pineconeNS == "" && v.Namespace != "" {
 			c.pineconeNS = v.Namespace
 		}
+		// §13.12 (F-13.12.1): PODIUM_PINECONE_HOST as a config-file key.
+		if c.pineconeHost == "" && v.Host != "" {
+			c.pineconeHost = v.Host
+		}
 	case "weaviate-cloud":
 		if c.weaviateKey == "" && v.APIKey != "" {
 			c.weaviateKey = v.APIKey
 		}
 		if c.weaviateColl == "" && v.Collection != "" {
 			c.weaviateColl = v.Collection
+		}
+		// §13.12 (F-13.12.1): PODIUM_WEAVIATE_URL as a config-file key, so a
+		// weaviate-cloud deployment can be configured entirely in registry.yaml.
+		if c.weaviateURL == "" && v.URL != "" {
+			c.weaviateURL = v.URL
 		}
 	case "qdrant-cloud":
 		if c.qdrantKey == "" && v.APIKey != "" {
@@ -397,30 +445,44 @@ func applyVectorYAML(c *Config, v yamlVectorCfg) {
 		if c.qdrantColl == "" && v.Collection != "" {
 			c.qdrantColl = v.Collection
 		}
+		// §13.12 (F-13.12.1): PODIUM_QDRANT_URL as a config-file key.
+		if c.qdrantURL == "" && v.URL != "" {
+			c.qdrantURL = v.URL
+		}
 	}
 	if c.vectorInferenceModel == "" && v.InferenceModel != "" {
 		c.vectorInferenceModel = v.InferenceModel
 	}
 }
 
-// applyEmbeddingYAML routes the §13.12 `embedding_provider.api_key` to the
-// selected provider's key field (F-13.12.4). Env values keep precedence.
+// applyEmbeddingYAML routes the §13.12 `embedding_provider` sub-keys to the
+// selected provider's config fields (F-13.12.4, F-13.12.1): api_key for every
+// provider, plus base_url / org for openai and url for ollama. Env values keep
+// precedence (a non-empty target is left untouched; PODIUM_OLLAMA_URL is read
+// directly because it carries a non-empty env default).
 func applyEmbeddingYAML(c *Config, e yamlEmbedCfg) {
-	if e.APIKey == "" {
-		return
-	}
 	switch c.embeddingProvider {
 	case "openai":
-		if c.openaiAPIKey == "" {
+		if c.openaiAPIKey == "" && e.APIKey != "" {
 			c.openaiAPIKey = e.APIKey
 		}
+		if c.openaiBaseURL == "" && e.BaseURL != "" {
+			c.openaiBaseURL = e.BaseURL
+		}
+		if c.openaiOrg == "" && e.Org != "" {
+			c.openaiOrg = e.Org
+		}
 	case "voyage":
-		if c.voyageAPIKey == "" {
+		if c.voyageAPIKey == "" && e.APIKey != "" {
 			c.voyageAPIKey = e.APIKey
 		}
 	case "cohere":
-		if c.cohereAPIKey == "" {
+		if c.cohereAPIKey == "" && e.APIKey != "" {
 			c.cohereAPIKey = e.APIKey
+		}
+	case "ollama":
+		if os.Getenv("PODIUM_OLLAMA_URL") == "" && e.URL != "" {
+			c.ollamaURL = e.URL
 		}
 	}
 }

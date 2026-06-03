@@ -42,6 +42,65 @@ type PineconeConfig struct {
 	InferenceModel string
 }
 
+// PineconeControlPlane is the default Pinecone control-plane base used to
+// resolve a serverless index's data-plane host from its name (§13.12:
+// PODIUM_PINECONE_HOST default "auto-resolved from index name"). It is
+// overridable so tests and private deployments can point elsewhere.
+const PineconeControlPlane = "https://api.pinecone.io"
+
+// ResolvePineconeHost looks up the data-plane host for a serverless index via
+// the Pinecone control-plane describe-index endpoint
+// (GET {controlPlane}/indexes/{name} with the Api-Key header) and returns the
+// `host` field. A bare host is normalized to an https URL. An empty
+// controlPlane falls back to PineconeControlPlane and a nil client to
+// http.DefaultClient. A transport failure or non-2xx response is wrapped with
+// ErrUnreachable so the caller can degrade to BM25 rather than fail hard.
+// spec: §13.12 (F-13.12.3, PODIUM_PINECONE_HOST auto-resolution).
+func ResolvePineconeHost(ctx context.Context, controlPlane, apiKey, index string, client *http.Client) (string, error) {
+	if apiKey == "" {
+		return "", fmt.Errorf("vector.pinecone: APIKey is required to resolve the index host")
+	}
+	if index == "" {
+		return "", fmt.Errorf("vector.pinecone: index name is required to resolve the host")
+	}
+	if controlPlane == "" {
+		controlPlane = PineconeControlPlane
+	}
+	if client == nil {
+		client = http.DefaultClient
+	}
+	u := strings.TrimRight(controlPlane, "/") + "/indexes/" + url.PathEscape(index)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Api-Key", apiKey)
+	req.Header.Set("Accept", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrUnreachable, err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode/100 != 2 {
+		return "", fmt.Errorf("%w: control-plane HTTP %d: %s", ErrUnreachable, resp.StatusCode, string(body))
+	}
+	var parsed struct {
+		Host string `json:"host"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "", fmt.Errorf("vector.pinecone: decode describe-index: %w", err)
+	}
+	if parsed.Host == "" {
+		return "", fmt.Errorf("vector.pinecone: control-plane returned no host for index %q", index)
+	}
+	host := parsed.Host
+	if !strings.Contains(host, "://") {
+		host = "https://" + host
+	}
+	return host, nil
+}
+
 // NewPinecone returns a configured Pinecone backend. Validation
 // happens lazily on first call so a misconfigured Host fails on the
 // first Put rather than at startup.

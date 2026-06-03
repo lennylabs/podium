@@ -223,19 +223,22 @@ func mcpOverlayEmbedder(id string) (embedding.Provider, error) {
 // PODIUM_WEAVIATE_*, PODIUM_QDRANT_*).
 func mcpOverlayVectorBackend(id string, dim int) (vector.Provider, error) {
 	cfg := vector.BackendConfig{
-		PgVectorDSN:    envFirst("PODIUM_PGVECTOR_DSN", "PODIUM_POSTGRES_DSN"),
-		SQLitePath:     envFirst("PODIUM_LOCAL_SQLITE_VEC_PATH", "PODIUM_SQLITE_PATH"),
-		PineconeKey:    os.Getenv("PODIUM_PINECONE_API_KEY"),
-		PineconeHost:   os.Getenv("PODIUM_PINECONE_HOST"),
-		PineconeIndex:  os.Getenv("PODIUM_PINECONE_INDEX"),
-		PineconeNS:     envDefault("PODIUM_PINECONE_NAMESPACE", "default"),
-		WeaviateURL:    os.Getenv("PODIUM_WEAVIATE_URL"),
-		WeaviateKey:    os.Getenv("PODIUM_WEAVIATE_API_KEY"),
-		WeaviateColl:   os.Getenv("PODIUM_WEAVIATE_COLLECTION"),
-		QdrantURL:      os.Getenv("PODIUM_QDRANT_URL"),
-		QdrantKey:      os.Getenv("PODIUM_QDRANT_API_KEY"),
-		QdrantColl:     os.Getenv("PODIUM_QDRANT_COLLECTION"),
-		InferenceModel: envFirst("PODIUM_PINECONE_INFERENCE_MODEL", "PODIUM_WEAVIATE_VECTORIZER", "PODIUM_QDRANT_INFERENCE_MODEL"),
+		PgVectorDSN:   envFirst("PODIUM_PGVECTOR_DSN", "PODIUM_POSTGRES_DSN"),
+		SQLitePath:    envFirst("PODIUM_LOCAL_SQLITE_VEC_PATH", "PODIUM_SQLITE_PATH"),
+		PineconeKey:   os.Getenv("PODIUM_PINECONE_API_KEY"),
+		PineconeHost:  os.Getenv("PODIUM_PINECONE_HOST"),
+		PineconeIndex: os.Getenv("PODIUM_PINECONE_INDEX"),
+		PineconeNS:    envDefault("PODIUM_PINECONE_NAMESPACE", "default"),
+		// §13.12 (F-13.12.3): the same control-plane override applies on the MCP
+		// server, so an index-only Pinecone overlay resolves its host the same way.
+		PineconeControlPlane: os.Getenv("PODIUM_PINECONE_CONTROL_PLANE"),
+		WeaviateURL:          os.Getenv("PODIUM_WEAVIATE_URL"),
+		WeaviateKey:          os.Getenv("PODIUM_WEAVIATE_API_KEY"),
+		WeaviateColl:         os.Getenv("PODIUM_WEAVIATE_COLLECTION"),
+		QdrantURL:            os.Getenv("PODIUM_QDRANT_URL"),
+		QdrantKey:            os.Getenv("PODIUM_QDRANT_API_KEY"),
+		QdrantColl:           os.Getenv("PODIUM_QDRANT_COLLECTION"),
+		InferenceModel:       envFirst("PODIUM_PINECONE_INFERENCE_MODEL", "PODIUM_WEAVIATE_VECTORIZER", "PODIUM_QDRANT_INFERENCE_MODEL"),
 	}
 	// The Default registry (custom backends) consumes the wire-serializable
 	// settings map so a future out-of-process provider receives the same

@@ -253,8 +253,47 @@ func TestVectorBackend_PineconeMissingAPIKey(t *testing.T) {
 	)
 }
 
-// T-D-vector-backends-6: Pinecone INDEX without HOST => clear error.
-func TestVectorBackend_PineconeIndexWithoutHost(t *testing.T) {
+// T-D-vector-backends-6 (F-13.12.3): Pinecone INDEX without HOST auto-resolves
+// the data-plane host from the index name via the control plane. §13.12 marks
+// only the index required and documents the host default as "auto-resolved from
+// index name", so an index-only deployment is functional. A mock control plane
+// (PODIUM_PINECONE_CONTROL_PLANE) returns the host so the test stays offline;
+// the registry wires vector=pinecone rather than disabling vector search.
+func TestVectorBackend_PineconeIndexResolvesHost(t *testing.T) {
+	t.Parallel()
+	cp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"host": "http://127.0.0.1:19998"})
+	}))
+	t.Cleanup(cp.Close)
+	emb := vbMockEmbedder(t) // keep ingest embedding off the real OpenAI API
+	reg := vbReg(t)
+	srv := startServerArgs(t, vbServerEnv(t,
+		"PODIUM_VECTOR_BACKEND=pinecone",
+		"PODIUM_PINECONE_API_KEY=pcn-test",
+		"PODIUM_PINECONE_INDEX=podium-dev",
+		"PODIUM_PINECONE_HOST=",
+		"PODIUM_PINECONE_CONTROL_PLANE="+cp.URL,
+		"PODIUM_EMBEDDING_PROVIDER=openai",
+		"OPENAI_API_KEY=sk-test",
+		"PODIUM_OPENAI_BASE_URL="+emb.URL,
+	), "serve", "--standalone", "--layer-path", reg)
+	if st := getStatus(t, srv.BaseURL+"/healthz"); st != 200 {
+		t.Fatalf("healthz = %d, want 200", st)
+	}
+	log := srv.log()
+	if !strings.Contains(log, "vector=pinecone") {
+		t.Errorf("expected resolved 'vector=pinecone' in startup log:\n%s", log)
+	}
+	if strings.Contains(log, "vector search disabled") {
+		t.Errorf("index-only pinecone must resolve its host, not disable vector search:\n%s", log)
+	}
+}
+
+// T-D-vector-backends-6b (F-13.12.3): when the control plane is unreachable the
+// host cannot be resolved, so vector search degrades to BM25 (the documented
+// behavior for a fully-selected backend that is unreachable) rather than the
+// server refusing to start. The control plane points at a refused port.
+func TestVectorBackend_PineconeIndexResolveUnreachableDegrades(t *testing.T) {
 	t.Parallel()
 	reg := vbReg(t)
 	srv := startServerArgs(t, vbServerEnv(t,
@@ -262,6 +301,7 @@ func TestVectorBackend_PineconeIndexWithoutHost(t *testing.T) {
 		"PODIUM_PINECONE_API_KEY=pcn-test",
 		"PODIUM_PINECONE_INDEX=podium-dev",
 		"PODIUM_PINECONE_HOST=",
+		"PODIUM_PINECONE_CONTROL_PLANE=http://127.0.0.1:1",
 		"PODIUM_EMBEDDING_PROVIDER=openai",
 		"OPENAI_API_KEY=sk-test",
 	), "serve", "--standalone", "--layer-path", reg)
@@ -272,10 +312,8 @@ func TestVectorBackend_PineconeIndexWithoutHost(t *testing.T) {
 	if !strings.Contains(log, "warning: vector search disabled") {
 		t.Errorf("expected 'warning: vector search disabled' in startup log:\n%s", log)
 	}
-	// The implementation emits PODIUM_PINECONE_HOST is required for serverless.
-	lowerLog := strings.ToLower(log)
-	if !strings.Contains(lowerLog, "host") && !strings.Contains(lowerLog, "serverless") {
-		t.Logf("doc-accuracy note: expected HOST/serverless mention in log; got:\n%s", log)
+	if !strings.Contains(strings.ToUpper(log), "PODIUM_PINECONE_HOST") {
+		t.Errorf("expected the resolve error to name PODIUM_PINECONE_HOST:\n%s", log)
 	}
 }
 

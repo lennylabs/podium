@@ -1239,20 +1239,31 @@ type Config struct {
 	embeddingProviderExplicit bool
 	embeddingModel            string
 	openaiAPIKey              string
-	voyageAPIKey              string
-	cohereAPIKey              string
-	ollamaURL                 string
-	pgvectorDSN               string
-	pineconeKey               string
-	pineconeHost              string
-	pineconeIndex             string
-	pineconeNS                string
-	weaviateURL               string
-	weaviateKey               string
-	weaviateColl              string
-	qdrantURL                 string
-	qdrantKey                 string
-	qdrantColl                string
+	// openaiBaseURL / openaiOrg mirror §13.12 PODIUM_OPENAI_BASE_URL /
+	// PODIUM_OPENAI_ORG (F-13.12.1). Sourced from env or registry.yaml's
+	// embedding_provider.base_url / org and passed to the openai embedder.
+	openaiBaseURL string
+	openaiOrg     string
+	voyageAPIKey  string
+	cohereAPIKey  string
+	ollamaURL     string
+	pgvectorDSN   string
+	pineconeKey   string
+	pineconeHost  string
+	pineconeIndex string
+	pineconeNS    string
+	// pineconeControlPlane overrides the Pinecone control-plane base URL used
+	// to auto-resolve PODIUM_PINECONE_HOST from the index name (§13.12,
+	// F-13.12.3). Empty uses the real control plane (https://api.pinecone.io);
+	// it exists for tests and private Pinecone deployments. Sourced from
+	// PODIUM_PINECONE_CONTROL_PLANE.
+	pineconeControlPlane string
+	weaviateURL          string
+	weaviateKey          string
+	weaviateColl         string
+	qdrantURL            string
+	qdrantKey            string
+	qdrantColl           string
 	// vectorInferenceModel captures the §13.12 self-embedding model name
 	// (PODIUM_PINECONE_INFERENCE_MODEL / PODIUM_WEAVIATE_VECTORIZER /
 	// PODIUM_QDRANT_INFERENCE_MODEL, or vector_backend.inference_model). The
@@ -1493,6 +1504,8 @@ func LoadConfig() *Config {
 		embeddingProvider: os.Getenv("PODIUM_EMBEDDING_PROVIDER"),
 		embeddingModel:    os.Getenv("PODIUM_EMBEDDING_MODEL"),
 		openaiAPIKey:      os.Getenv("OPENAI_API_KEY"),
+		openaiBaseURL:     os.Getenv("PODIUM_OPENAI_BASE_URL"),
+		openaiOrg:         os.Getenv("PODIUM_OPENAI_ORG"),
 		voyageAPIKey:      os.Getenv("VOYAGE_API_KEY"),
 		cohereAPIKey:      os.Getenv("COHERE_API_KEY"),
 		ollamaURL:         envDefault("PODIUM_OLLAMA_URL", "http://localhost:11434"),
@@ -1500,6 +1513,8 @@ func LoadConfig() *Config {
 		pineconeKey:       os.Getenv("PODIUM_PINECONE_API_KEY"),
 		pineconeHost:      os.Getenv("PODIUM_PINECONE_HOST"),
 		pineconeIndex:     os.Getenv("PODIUM_PINECONE_INDEX"),
+		// §13.12 (F-13.12.3) Pinecone control-plane override (test/private use).
+		pineconeControlPlane: os.Getenv("PODIUM_PINECONE_CONTROL_PLANE"),
 		// Read raw here; the §13.12 "default" namespace fallback (F-13.12.11)
 		// is applied after applyYAML so env > registry.yaml > default holds.
 		pineconeNS:  os.Getenv("PODIUM_PINECONE_NAMESPACE"),
@@ -1922,11 +1937,26 @@ func openVectorAndEmbedder(c *Config) (vector.Provider, embedding.Provider, erro
 	return v, emb, nil
 }
 
+// embeddingModelFor resolves the §13.12 model name for a built-in provider.
+// The per-provider env var (e.g. PODIUM_OPENAI_MODEL) wins; otherwise it falls
+// back to c.embeddingModel, which already carries the generic
+// PODIUM_EMBEDDING_MODEL env var or the registry.yaml embedding_provider.model
+// key. An empty result leaves the provider's hardcoded default model in force.
+// spec: §13.12 (F-13.12.2 — the config-file model: key takes effect for the
+// built-in providers, not just the per-provider env vars).
+func (c *Config) embeddingModelFor(perProviderEnv string) string {
+	if v := os.Getenv(perProviderEnv); v != "" {
+		return v
+	}
+	return c.embeddingModel
+}
+
 // openEmbedder honors §13 per-provider model env vars
 // (PODIUM_OPENAI_MODEL, PODIUM_VOYAGE_MODEL, PODIUM_COHERE_MODEL,
-// PODIUM_OLLAMA_MODEL). The generic PODIUM_EMBEDDING_MODEL acts as
-// a cross-provider fallback when the per-provider variable isn't
-// set.
+// PODIUM_OLLAMA_MODEL). The generic PODIUM_EMBEDDING_MODEL and the
+// registry.yaml embedding_provider.model key (both captured in
+// c.embeddingModel) act as a cross-provider fallback when the per-provider
+// variable isn't set (F-13.12.2).
 func openEmbedder(c *Config) (embedding.Provider, error) {
 	// §9.1/§9.2: consult the process-global embedding.Default registry first
 	// so a custom EmbeddingProvider imported into a source build (via
@@ -1946,9 +1976,9 @@ func openEmbedder(c *Config) (embedding.Provider, error) {
 		}
 		return embedding.OpenAI{
 			APIKey:  c.openaiAPIKey,
-			Model_:  envFirst("PODIUM_OPENAI_MODEL", "PODIUM_EMBEDDING_MODEL"),
-			BaseURL: os.Getenv("PODIUM_OPENAI_BASE_URL"),
-			Org:     os.Getenv("PODIUM_OPENAI_ORG"),
+			Model_:  c.embeddingModelFor("PODIUM_OPENAI_MODEL"),
+			BaseURL: c.openaiBaseURL,
+			Org:     c.openaiOrg,
 		}, nil
 	case "voyage":
 		if c.voyageAPIKey == "" {
@@ -1956,7 +1986,7 @@ func openEmbedder(c *Config) (embedding.Provider, error) {
 		}
 		return embedding.Voyage{
 			APIKey: c.voyageAPIKey,
-			Model_: envFirst("PODIUM_VOYAGE_MODEL", "PODIUM_EMBEDDING_MODEL"),
+			Model_: c.embeddingModelFor("PODIUM_VOYAGE_MODEL"),
 		}, nil
 	case "cohere":
 		if c.cohereAPIKey == "" {
@@ -1964,12 +1994,12 @@ func openEmbedder(c *Config) (embedding.Provider, error) {
 		}
 		return embedding.Cohere{
 			APIKey: c.cohereAPIKey,
-			Model_: envFirst("PODIUM_COHERE_MODEL", "PODIUM_EMBEDDING_MODEL"),
+			Model_: c.embeddingModelFor("PODIUM_COHERE_MODEL"),
 		}, nil
 	case "ollama":
 		return embedding.Ollama{
 			BaseURL: c.ollamaURL,
-			Model_:  envFirst("PODIUM_OLLAMA_MODEL", "PODIUM_EMBEDDING_MODEL"),
+			Model_:  c.embeddingModelFor("PODIUM_OLLAMA_MODEL"),
 		}, nil
 	}
 	return nil, fmt.Errorf("unknown PODIUM_EMBEDDING_PROVIDER: %s", c.embeddingProvider)
@@ -2002,19 +2032,20 @@ func openVectorBackend(c *Config, dim int) (vector.Provider, error) {
 // vector.BackendConfig consumed by vector.OpenBuiltin.
 func (c *Config) backendConfig() vector.BackendConfig {
 	return vector.BackendConfig{
-		PgVectorDSN:    c.pgvectorDSN,
-		SQLitePath:     c.sqlitePath,
-		PineconeKey:    c.pineconeKey,
-		PineconeHost:   c.pineconeHost,
-		PineconeIndex:  c.pineconeIndex,
-		PineconeNS:     c.pineconeNS,
-		WeaviateURL:    c.weaviateURL,
-		WeaviateKey:    c.weaviateKey,
-		WeaviateColl:   c.weaviateColl,
-		QdrantURL:      c.qdrantURL,
-		QdrantKey:      c.qdrantKey,
-		QdrantColl:     c.qdrantColl,
-		InferenceModel: c.vectorInferenceModel,
+		PgVectorDSN:          c.pgvectorDSN,
+		SQLitePath:           c.sqlitePath,
+		PineconeKey:          c.pineconeKey,
+		PineconeHost:         c.pineconeHost,
+		PineconeIndex:        c.pineconeIndex,
+		PineconeNS:           c.pineconeNS,
+		PineconeControlPlane: c.pineconeControlPlane,
+		WeaviateURL:          c.weaviateURL,
+		WeaviateKey:          c.weaviateKey,
+		WeaviateColl:         c.weaviateColl,
+		QdrantURL:            c.qdrantURL,
+		QdrantKey:            c.qdrantKey,
+		QdrantColl:           c.qdrantColl,
+		InferenceModel:       c.vectorInferenceModel,
 	}
 }
 

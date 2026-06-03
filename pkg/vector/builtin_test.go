@@ -27,11 +27,6 @@ func TestOpenBuiltin_DispatchesByBackend(t *testing.T) {
 		{name: "pgvector-missing-dsn", id: "pgvector", dim: 4, wantErrSub: "DSN"},
 		{name: "pinecone-missing-key", id: "pinecone", cfg: BackendConfig{PineconeHost: "https://h"}, dim: 4, wantErrSub: "APIKey"},
 		{
-			name: "pinecone-index-without-host", id: "pinecone",
-			cfg: BackendConfig{PineconeKey: "k", PineconeIndex: "idx"}, dim: 4,
-			wantErrSub: "PODIUM_PINECONE_HOST",
-		},
-		{
 			name: "pinecone-ok", id: "pinecone",
 			cfg: BackendConfig{PineconeKey: "k", PineconeHost: "https://h"}, dim: 4,
 			wantID: "pinecone",
