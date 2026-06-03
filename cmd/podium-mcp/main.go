@@ -1117,11 +1117,14 @@ func (s *mcpServer) handle(req rpcRequest) rpcResponse {
 			}
 			return resp
 		}
-		// §5 capability set: `{tools: true, resources: true,
-		// sessionCorrelation: true}`. The `resources` capability backs the
-		// §5.0 read-only mirror of load_artifact (F-5.0.1). Command artifacts
-		// are delivered through harness-native materialization (§6.7), not an
-		// MCP prompt projection, so no `prompts` capability is advertised.
+		// §5 capability set: `{tools: {}, resources: {},
+		// sessionCorrelation: true}`. tools/resources are MCP capability
+		// objects ({} = present, no listChanged/subscribe sub-features);
+		// sessionCorrelation is a Podium extension carried as a boolean. The
+		// `resources` capability backs the §5.0 read-only mirror of
+		// load_artifact (F-5.0.1). Command artifacts are delivered through
+		// harness-native materialization (§6.7), not an MCP prompt
+		// projection, so no `prompts` capability is advertised.
 		caps := map[string]any{
 			"tools":              map[string]any{},
 			"sessionCorrelation": true,
