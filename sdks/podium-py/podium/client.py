@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
@@ -19,10 +20,24 @@ from . import _config, _oauth, _overlay
 class RegistryError(Exception):
     """Raised when the registry returns a structured error envelope (§6.10)."""
 
-    def __init__(self, code: str, message: str, retryable: bool = False) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        retryable: bool = False,
+        *,
+        details: dict[str, Any] | None = None,
+        suggested_action: str = "",
+    ) -> None:
         self.code = code
         self.message = message
         self.retryable = retryable
+        # spec: §6.10 — the full envelope carries a machine-readable details map
+        # (for example {"runtime_iss": ...}) and an operator remediation hint.
+        # Callers read both off the exception (F-6.10.1); they default to an
+        # empty map and empty string when the registry omits them.
+        self.details: dict[str, Any] = details or {}
+        self.suggested_action = suggested_action
         super().__init__(f"{code}: {message}")
 
 
@@ -64,9 +79,26 @@ def _registry_error_from_envelope(envelope: dict) -> RegistryError:
     code = envelope.get("code", "registry.unknown")
     message = envelope.get("message", "")
     retryable = bool(envelope.get("retryable", False))
+    # spec: §6.10 — preserve the machine-readable details map and the operator
+    # remediation hint so callers can read the full envelope (F-6.10.1).
+    raw_details = envelope.get("details")
+    details = raw_details if isinstance(raw_details, dict) else {}
+    suggested_action = envelope.get("suggested_action") or ""
     if code == "registry.read_only":
-        return RegistryReadOnly(code, message, retryable=retryable)
-    return RegistryError(code, message, retryable=retryable)
+        return RegistryReadOnly(
+            code,
+            message,
+            retryable=retryable,
+            details=details,
+            suggested_action=suggested_action,
+        )
+    return RegistryError(
+        code,
+        message,
+        retryable=retryable,
+        details=details,
+        suggested_action=suggested_action,
+    )
 
 
 @dataclass
@@ -458,6 +490,27 @@ class Client:
                 "offline-only mode: the registry was not contacted and the SDK keeps no offline cache",
             )
 
+    def _unreachable_error(self, exc: Exception) -> RegistryError:
+        """Map a transport-level failure to the §7.4 network.registry_unreachable
+        structured error (F-7.4.1).
+
+        A connection refused, DNS failure, or connect timeout raises
+        ``urllib.error.URLError`` rather than ``HTTPError``. The SDK keeps no
+        content cache, so an unreachable registry in any mode that contacts it
+        (always-revalidate and offline-first; offline-only short-circuits in
+        ``_guard_offline``) is a no-cache miss. The returned error mirrors the
+        MCP bridge's namespaced code, retryable flag, and remediation hint.
+        """
+        return RegistryError(
+            "network.registry_unreachable",
+            f"the registry at {self.registry} is unreachable: {exc}",
+            retryable=True,
+            suggested_action=(
+                "Check network connectivity to the registry; the request can be "
+                "retried once it is reachable."
+            ),
+        )
+
     def _headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
         """Return request headers with the Bearer credential when configured."""
         headers = dict(extra or {})
@@ -767,6 +820,10 @@ class Client:
                     raw = resp.read()
             except urllib.error.HTTPError as exc:
                 self._raise_from_http_error(exc)
+            except urllib.error.URLError as exc:
+                # spec: §7.4 — an unreachable registry on the batch path also
+                # surfaces the structured no-cache error (F-7.4.1).
+                raise self._unreachable_error(exc) from exc
             out.extend(_batch_result_from(env) for env in json.loads(raw))
         return out
 
@@ -821,7 +878,15 @@ class Client:
         if params:
             url = url + "?" + urllib.parse.urlencode(params)
         req = urllib.request.Request(url, headers=self._headers())
-        with urllib.request.urlopen(req) as resp:
+        try:
+            resp = urllib.request.urlopen(req)
+        except urllib.error.HTTPError as exc:
+            self._raise_from_http_error(exc)
+        except urllib.error.URLError as exc:
+            # spec: §7.4 — an unreachable registry on the event stream surfaces
+            # the structured no-cache error (F-7.4.1).
+            raise self._unreachable_error(exc) from exc
+        with resp:
             for raw in resp:
                 line = raw.decode("utf-8").rstrip("\n")
                 if not line:
@@ -843,6 +908,10 @@ class Client:
                 body = resp.read()
         except urllib.error.HTTPError as exc:
             self._raise_from_http_error(exc)
+        except urllib.error.URLError as exc:
+            # spec: §7.4 — a transport failure (no HTTP response) is the
+            # always-revalidate no-cache case (F-7.4.1).
+            raise self._unreachable_error(exc) from exc
         return json.loads(body)
 
     def _raise_from_http_error(self, exc: urllib.error.HTTPError) -> None:

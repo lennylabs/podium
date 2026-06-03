@@ -695,3 +695,115 @@ func TestSDK_PyIdentityUnchanged(t *testing.T) {
 	t.Parallel()
 	t.Skip("requires a standard deployment with two identities and visibility enforcement; not expressible in a standalone single-layer e2e")
 }
+
+// deadRegistry returns a registry URL pointing at a closed local port so a
+// transport-level connection is refused immediately (no listener).
+func deadRegistry(t *testing.T) string {
+	t.Helper()
+	return "http://127.0.0.1:" + strconv.Itoa(freePort(t))
+}
+
+// T-D-custom-sdk-56 — Python: an unreachable registry surfaces the structured
+// §7.4 network.registry_unreachable code, the §6.10 retryable flag, and a
+// remediation hint rather than leaking a raw transport exception (F-7.4.1).
+func TestSDK_PyUnreachableRegistry(t *testing.T) {
+	t.Parallel()
+	py := csPython(t)
+	res := csRunPy(t, py, deadRegistry(t),
+		"from podium import Client, RegistryError\n"+
+			"c = Client.from_env()\n"+
+			"try:\n"+
+			"    c.load_artifact('finance/x')\n"+
+			"    print('NO_ERROR')\n"+
+			"except RegistryError as e:\n"+
+			"    print('CODE', e.code, 'RETRY', e.retryable, 'HINT', bool(e.suggested_action))\n")
+	csWantStdout(t, res, "CODE network.registry_unreachable RETRY True HINT True")
+}
+
+// T-D-custom-sdk-57 — Python: offline-first keeps no cache, so an unreachable
+// registry is the same structured no-cache miss (F-7.4.1).
+func TestSDK_PyUnreachableOfflineFirst(t *testing.T) {
+	t.Parallel()
+	py := csPython(t)
+	res := csRunPy(t, py, deadRegistry(t),
+		"from podium import Client, RegistryError\n"+
+			"c = Client.from_env()\n"+
+			"try:\n"+
+			"    c.search_artifacts('x')\n"+
+			"    print('NO_ERROR')\n"+
+			"except RegistryError as e:\n"+
+			"    print('CODE', e.code)\n",
+		"PODIUM_CACHE_MODE=offline-first")
+	csWantStdout(t, res, "CODE network.registry_unreachable")
+}
+
+// T-D-custom-sdk-58 — TypeScript: an unreachable registry surfaces the
+// structured §7.4 network.registry_unreachable code with the retryable flag and
+// a remediation hint rather than a raw fetch rejection (F-7.4.2).
+func TestSDK_TSUnreachableRegistry(t *testing.T) {
+	t.Parallel()
+	node := csNode(t)
+	res := csRunTS(t, node, deadRegistry(t),
+		"import { Client, RegistryError } from "+csTSImport(t)+";\n"+
+			"const c = new Client({ registry: process.env.PODIUM_REGISTRY });\n"+
+			"try { await c.loadArtifact('finance/x'); console.log('NO_ERROR'); }\n"+
+			"catch (e) { const r = e as RegistryError; console.log('CODE', r.code, 'RETRY', r.retryable, 'HINT', r.suggestedAction.length > 0); }\n")
+	csWantStdout(t, res, "CODE network.registry_unreachable RETRY true HINT true")
+}
+
+// T-D-custom-sdk-59 — TypeScript: offline-first keeps no cache, so an
+// unreachable registry is the same structured no-cache miss (F-7.4.2).
+func TestSDK_TSUnreachableOfflineFirst(t *testing.T) {
+	t.Parallel()
+	node := csNode(t)
+	res := csRunTS(t, node, deadRegistry(t),
+		"import { Client, RegistryError } from "+csTSImport(t)+";\n"+
+			"const c = new Client({ registry: process.env.PODIUM_REGISTRY, cacheMode: 'offline-first' });\n"+
+			"try { await c.searchArtifacts('x'); console.log('NO_ERROR'); }\n"+
+			"catch (e) { const r = e as RegistryError; console.log('CODE', r.code); }\n")
+	csWantStdout(t, res, "CODE network.registry_unreachable")
+}
+
+// T-D-custom-sdk-60 — Python: the SDK surfaces the full §6.10 envelope. A
+// reachable server's quota error carries a populated suggested_action and a
+// details map that the RegistryError exposes (F-6.10.1).
+func TestSDK_PyErrorEnvelopeFull(t *testing.T) {
+	t.Parallel()
+	py := csPython(t)
+	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_QUOTA_SEARCH_QPS=1"},
+		"serve", "--standalone", "--layer-path", csSkillReg(t))
+	res := csRunPy(t, py, srv.BaseURL,
+		"from podium import Client, RegistryError\n"+
+			"c = Client.from_env()\n"+
+			"hint = None\n"+
+			"for _ in range(40):\n"+
+			"    try:\n"+
+			"        c.search_artifacts('variance')\n"+
+			"    except RegistryError as e:\n"+
+			"        if e.code == 'quota.search_qps_exceeded':\n"+
+			"            assert isinstance(e.details, dict)\n"+
+			"            hint = e.suggested_action\n"+
+			"            break\n"+
+			"print('FULL_OK', bool(hint))\n")
+	csWantStdout(t, res, "FULL_OK True")
+}
+
+// T-D-custom-sdk-61 — TypeScript: the SDK surfaces the full §6.10 envelope. A
+// reachable server's quota error carries a populated suggestedAction and a
+// details map that the RegistryError exposes (F-6.10.1).
+func TestSDK_TSErrorEnvelopeFull(t *testing.T) {
+	t.Parallel()
+	node := csNode(t)
+	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_QUOTA_SEARCH_QPS=1"},
+		"serve", "--standalone", "--layer-path", csSkillReg(t))
+	res := csRunTS(t, node, srv.BaseURL,
+		"import { Client, RegistryError } from "+csTSImport(t)+";\n"+
+			"const c = new Client({ registry: process.env.PODIUM_REGISTRY });\n"+
+			"let hint = '';\n"+
+			"for (let i = 0; i < 40; i++) {\n"+
+			"  try { await c.searchArtifacts('variance'); }\n"+
+			"  catch (e) { const r = e as RegistryError; if (r.code === 'quota.search_qps_exceeded') { hint = r.suggestedAction; if (typeof r.details !== 'object') throw new Error('details not an object'); break; } }\n"+
+			"}\n"+
+			"console.log('FULL_OK', hint.length > 0);\n")
+	csWantStdout(t, res, "FULL_OK true")
+}

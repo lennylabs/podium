@@ -7,6 +7,8 @@ import http.server
 import json
 import socket
 import threading
+import urllib.error
+import urllib.request
 
 import pytest
 
@@ -565,3 +567,92 @@ def test_from_env_reads_cache_mode(monkeypatch):
 def test_rejects_unknown_cache_mode():
     with pytest.raises(ValueError):
         Client(registry="http://127.0.0.1:9999", cache_mode="bogus")
+
+
+# Spec: §7.4 / §6.10 (F-7.4.1) — a transport-level failure (connection refused,
+# DNS, timeout) raises urllib.error.URLError, which the SDK converts to the
+# structured network.registry_unreachable error rather than leaking the raw
+# exception. The SDK keeps no cache, so this is the always-revalidate no-cache
+# miss. The error carries the §6.10 retryable flag and a remediation hint.
+def test_get_transport_error_maps_to_unreachable(monkeypatch):
+    def boom(*_a, **_k):
+        raise urllib.error.URLError("Connection refused")
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    client = Client(registry="http://127.0.0.1:9", cache_mode="always-revalidate")
+    with pytest.raises(RegistryError) as exc:
+        client.load_domain("finance")
+    assert exc.value.code == "network.registry_unreachable"
+    assert exc.value.retryable is True
+    assert exc.value.suggested_action
+
+
+# Spec: §7.4 — offline-first keeps no cache either, so an unreachable registry
+# is the same no-cache miss (F-7.4.1).
+def test_get_transport_error_offline_first_also_unreachable(monkeypatch):
+    def boom(*_a, **_k):
+        raise urllib.error.URLError("name resolution failed")
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    client = Client(registry="http://127.0.0.1:9", cache_mode="offline-first")
+    with pytest.raises(RegistryError) as exc:
+        client.search_artifacts("x")
+    assert exc.value.code == "network.registry_unreachable"
+
+
+# Spec: §7.4 — the batch path wraps transport errors too (F-7.4.1).
+def test_batch_transport_error_maps_to_unreachable(monkeypatch):
+    def boom(*_a, **_k):
+        raise urllib.error.URLError("Connection refused")
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    client = Client(registry="http://127.0.0.1:9")
+    with pytest.raises(RegistryError) as exc:
+        client.load_artifacts(["finance/x"])
+    assert exc.value.code == "network.registry_unreachable"
+
+
+# Spec: §7.4 — the event stream wraps transport errors too. urlopen is opened
+# lazily on the first iteration, so the structured error surfaces from next()
+# (F-7.4.1).
+def test_subscribe_transport_error_maps_to_unreachable(monkeypatch):
+    def boom(*_a, **_k):
+        raise urllib.error.URLError("Connection refused")
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    client = Client(registry="http://127.0.0.1:9")
+    gen = client.subscribe(["artifact.published"])
+    with pytest.raises(RegistryError) as exc:
+        next(gen)
+    assert exc.value.code == "network.registry_unreachable"
+
+
+# Spec: §7.4 / §6.10 (F-7.4.1) — a reachable server returning a structured
+# error envelope is NOT a transport failure; the envelope's code is preserved
+# rather than rewritten to network.registry_unreachable.
+def test_reachable_error_not_rewritten_to_unreachable(stub_server):
+    stub_server.next_status = 404
+    stub_server.next_response = {"code": "registry.not_found", "message": "nope"}
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    with pytest.raises(RegistryError) as exc:
+        client.load_artifact("missing/x")
+    assert exc.value.code == "registry.not_found"
+
+
+# Spec: §6.10 (F-6.10.1) — the SDK surfaces the full envelope: a reachable
+# server's structured error carries details and suggested_action through to the
+# RegistryError the caller catches.
+def test_error_envelope_carries_details_and_suggested_action(stub_server):
+    stub_server.next_status = 403
+    stub_server.next_response = {
+        "code": "auth.untrusted_runtime",
+        "message": "Runtime is not registered.",
+        "details": {"runtime_iss": "managed-runtime-x"},
+        "retryable": False,
+        "suggested_action": "Register the runtime's signing key.",
+    }
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    with pytest.raises(RegistryError) as exc:
+        client.load_artifact("finance/x")
+    assert exc.value.details == {"runtime_iss": "managed-runtime-x"}
+    assert exc.value.suggested_action == "Register the runtime's signing key."

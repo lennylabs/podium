@@ -51,6 +51,66 @@ class RegistryReadOnlyTest(unittest.TestCase):
         with self.assertRaises(RegistryReadOnly):
             result.materialize("/tmp/should-not-write")
 
+    # spec: §6.10 (F-6.10.1) — the envelope parser captures the machine-readable
+    # details map and the operator remediation hint so callers can read the full
+    # envelope, not only code/message/retryable.
+    def test_envelope_captures_details_and_suggested_action(self):
+        err = _registry_error_from_envelope(
+            {
+                "code": "auth.untrusted_runtime",
+                "message": "Runtime is not registered.",
+                "details": {"runtime_iss": "managed-runtime-x"},
+                "retryable": False,
+                "suggested_action": "Register the runtime's signing key.",
+            }
+        )
+        self.assertEqual(err.details, {"runtime_iss": "managed-runtime-x"})
+        self.assertEqual(err.suggested_action, "Register the runtime's signing key.")
+
+    # spec: §6.10 — a registry.read_only envelope threads details and
+    # suggested_action through the RegistryReadOnly subclass too.
+    def test_read_only_envelope_threads_full_envelope(self):
+        err = _registry_error_from_envelope(
+            {
+                "code": "registry.read_only",
+                "message": "read-only",
+                "details": {"since": "2026-01-01"},
+                "suggested_action": "Retry after maintenance.",
+            }
+        )
+        self.assertIsInstance(err, RegistryReadOnly)
+        self.assertEqual(err.details, {"since": "2026-01-01"})
+        self.assertEqual(err.suggested_action, "Retry after maintenance.")
+
+    # spec: §6.10 — when the registry omits details/suggested_action they
+    # default to an empty map and empty string rather than None.
+    def test_envelope_defaults_details_and_suggested_action(self):
+        err = _registry_error_from_envelope({"code": "auth.forbidden", "message": "no"})
+        self.assertEqual(err.details, {})
+        self.assertEqual(err.suggested_action, "")
+
+    # spec: §6.10 — a batch error item carries the full envelope, which
+    # materialize() re-raises with details and suggested_action intact.
+    def test_batch_error_item_carries_full_envelope(self):
+        result = _batch_result_from(
+            {
+                "id": "finance/x",
+                "status": "error",
+                "error": {
+                    "code": "auth.untrusted_runtime",
+                    "message": "Runtime is not registered.",
+                    "details": {"runtime_iss": "managed-runtime-x"},
+                    "suggested_action": "Register the runtime's signing key.",
+                },
+            }
+        )
+        with self.assertRaises(RegistryError) as ctx:
+            result.materialize("/tmp/should-not-write")
+        self.assertEqual(ctx.exception.details, {"runtime_iss": "managed-runtime-x"})
+        self.assertEqual(
+            ctx.exception.suggested_action, "Register the runtime's signing key."
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

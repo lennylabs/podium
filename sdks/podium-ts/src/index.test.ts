@@ -511,4 +511,68 @@ describe("Client cache modes (§7.4)", () => {
       () => new Client({ registry: "http://reg", cacheMode: "bogus" as unknown as never }),
     ).toThrow();
   });
+
+  // Spec: §7.4 / §6.10 (F-7.4.2) — a transport-level fetch rejection
+  // (connection refused, DNS failure) becomes the structured
+  // network.registry_unreachable error rather than leaking the raw TypeError.
+  // The SDK keeps no cache, so this is the always-revalidate no-cache miss.
+  it("maps a rejected fetch to network.registry_unreachable", async () => {
+    const fetcher: typeof fetch = async () => {
+      throw new TypeError("fetch failed");
+    };
+    const c = new Client({ registry: "http://reg", fetcher });
+    await expect(c.loadDomain("finance")).rejects.toMatchObject({
+      code: "network.registry_unreachable",
+      retryable: true,
+    });
+    const err = await c.loadDomain("finance").catch((e: RegistryError) => e);
+    expect(err).toBeInstanceOf(RegistryError);
+    expect((err as RegistryError).suggestedAction).not.toBe("");
+  });
+
+  // Spec: §7.4 — offline-first keeps no cache either, so an unreachable
+  // registry is the same no-cache miss (F-7.4.2).
+  it("maps a rejected fetch to unreachable in offline-first", async () => {
+    const fetcher: typeof fetch = async () => {
+      throw new TypeError("getaddrinfo ENOTFOUND reg");
+    };
+    const c = new Client({ registry: "http://reg", fetcher, cacheMode: "offline-first" });
+    await expect(c.searchArtifacts("q")).rejects.toMatchObject({
+      code: "network.registry_unreachable",
+    });
+  });
+
+  // Spec: §7.4 — the batch path wraps fetch rejections too (F-7.4.2).
+  it("maps a rejected fetch to unreachable on the batch path", async () => {
+    const fetcher: typeof fetch = async () => {
+      throw new TypeError("fetch failed");
+    };
+    const c = new Client({ registry: "http://reg", fetcher });
+    await expect(c.loadArtifacts(["finance/x"])).rejects.toMatchObject({
+      code: "network.registry_unreachable",
+    });
+  });
+
+  // Spec: §7.4 / §6.10 — a reachable server returning a structured error is NOT
+  // rewritten to unreachable; the envelope code is preserved and the full
+  // envelope (details + suggested_action) reaches the caller (F-6.10.1).
+  it("preserves a reachable server's structured error and full envelope", async () => {
+    const fetcher: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          code: "auth.untrusted_runtime",
+          message: "Runtime is not registered.",
+          details: { runtime_iss: "managed-runtime-x" },
+          retryable: false,
+          suggested_action: "Register the runtime's signing key.",
+        }),
+        { status: 403 },
+      );
+    const c = new Client({ registry: "http://reg", fetcher });
+    await expect(c.loadArtifact("finance/x")).rejects.toMatchObject({
+      code: "auth.untrusted_runtime",
+      details: { runtime_iss: "managed-runtime-x" },
+      suggestedAction: "Register the runtime's signing key.",
+    });
+  });
 });

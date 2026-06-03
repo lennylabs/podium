@@ -240,6 +240,9 @@ export class BatchResult {
     code: string;
     message: string;
     retryable?: boolean;
+    // spec: §6.10 — a batch error item carries the full envelope (F-6.10.1).
+    details?: Record<string, unknown>;
+    suggested_action?: string;
   };
 
   constructor(data: Partial<BatchResult>) {
@@ -266,6 +269,8 @@ export class BatchResult {
         code: this.error?.code ?? "registry.unknown",
         message: this.error?.message ?? `cannot materialize ${this.id}`,
         retryable: this.error?.retryable,
+        details: this.error?.details,
+        suggested_action: this.error?.suggested_action,
       });
     }
     // §7.6.2: a resource carries a presigned_url with an object store
@@ -322,6 +327,12 @@ export class RegistryError extends Error {
     public readonly code: string,
     message: string,
     public readonly retryable: boolean = false,
+    // spec: §6.10 — the full envelope carries a machine-readable details map
+    // (for example {runtime_iss: ...}) and an operator remediation hint.
+    // Callers read both off the error (F-6.10.1); they default to an empty map
+    // and empty string when the registry omits them.
+    public readonly details: Record<string, unknown> = {},
+    public readonly suggestedAction: string = "",
   ) {
     super(`${code}: ${message}`);
     this.name = "RegistryError";
@@ -334,8 +345,13 @@ export class RegistryError extends Error {
 // error keep working while callers that want to retry once the registry
 // leaves read-only mode can catch this type specifically.
 export class RegistryReadOnly extends RegistryError {
-  constructor(message: string, retryable = false) {
-    super("registry.read_only", message, retryable);
+  constructor(
+    message: string,
+    retryable = false,
+    details: Record<string, unknown> = {},
+    suggestedAction = "",
+  ) {
+    super("registry.read_only", message, retryable, details, suggestedAction);
     this.name = "RegistryReadOnly";
   }
 }
@@ -348,14 +364,24 @@ export function registryErrorFromEnvelope(env: {
   code?: unknown;
   message?: unknown;
   retryable?: unknown;
+  details?: unknown;
+  suggested_action?: unknown;
 }): RegistryError {
   const code = (env.code as string) ?? "registry.unknown";
   const message = (env.message as string) ?? "";
   const retryable = Boolean(env.retryable);
+  // spec: §6.10 — preserve the machine-readable details map and the operator
+  // remediation hint so callers can read the full envelope (F-6.10.1).
+  const details =
+    env.details && typeof env.details === "object"
+      ? (env.details as Record<string, unknown>)
+      : {};
+  const suggestedAction =
+    typeof env.suggested_action === "string" ? env.suggested_action : "";
   if (code === "registry.read_only") {
-    return new RegistryReadOnly(message, retryable);
+    return new RegistryReadOnly(message, retryable, details, suggestedAction);
   }
-  return new RegistryError(code, message, retryable);
+  return new RegistryError(code, message, retryable, details, suggestedAction);
 }
 
 // spec: §11 (Search browse mode test) — the search top_k cap. Distinct from the
@@ -467,6 +493,24 @@ export class Client {
         "offline-only mode: the registry was not contacted and the SDK keeps no offline cache",
       );
     }
+  }
+
+  // unreachableError maps a transport-level fetch rejection to the §7.4
+  // network.registry_unreachable structured error (F-7.4.2). A connection
+  // refused or DNS failure rejects the fetch promise (a TypeError) before any
+  // Response exists. The SDK keeps no content cache, so an unreachable registry
+  // in any mode that contacts it (always-revalidate and offline-first;
+  // offline-only short-circuits in guardOffline) is a no-cache miss. The error
+  // mirrors the MCP bridge's namespaced code, retryable flag, and hint.
+  private unreachableError(cause: unknown): RegistryError {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    return new RegistryError(
+      "network.registry_unreachable",
+      `the registry at ${this.registry} is unreachable: ${detail}`,
+      true,
+      {},
+      "Check network connectivity to the registry; the request can be retried once it is reachable.",
+    );
   }
 
   // headers returns request headers with the Bearer credential attached when
@@ -698,11 +742,18 @@ export class Client {
         }
         if (Object.keys(subset).length > 0) body.version_pins = subset;
       }
-      const resp = await this.fetcher(this.registry + "/v1/artifacts:batchLoad", {
-        method: "POST",
-        headers: this.headers({ "Content-Type": "application/json" }),
-        body: JSON.stringify(body),
-      });
+      let resp: Response;
+      try {
+        resp = await this.fetcher(this.registry + "/v1/artifacts:batchLoad", {
+          method: "POST",
+          headers: this.headers({ "Content-Type": "application/json" }),
+          body: JSON.stringify(body),
+        });
+      } catch (e) {
+        // spec: §7.4 — an unreachable registry on the batch path also surfaces
+        // the structured no-cache error (F-7.4.2).
+        throw this.unreachableError(e);
+      }
       if (!resp.ok) {
         let envelope: Record<string, unknown> = {};
         try {
@@ -716,6 +767,8 @@ export class Client {
           code: envelope.code ?? "registry.unknown",
           message: envelope.message ?? `HTTP ${resp.status}`,
           retryable: envelope.retryable,
+          details: envelope.details,
+          suggested_action: envelope.suggested_action,
         });
       }
       const part = (await resp.json()) as Partial<BatchResult>[];
@@ -749,7 +802,14 @@ export class Client {
     for (const t of eventTypes) {
       url.searchParams.append("type", t);
     }
-    const resp = await this.fetcher(url.toString(), { headers: this.headers() });
+    let resp: Response;
+    try {
+      resp = await this.fetcher(url.toString(), { headers: this.headers() });
+    } catch (e) {
+      // spec: §7.4 — an unreachable registry on the event stream surfaces the
+      // structured no-cache error (F-7.4.2).
+      throw this.unreachableError(e);
+    }
     if (!resp.ok || !resp.body) {
       throw new RegistryError(
         "registry.unavailable",
@@ -783,7 +843,14 @@ export class Client {
       if (v === undefined || v === null) continue;
       url.searchParams.set(k, String(v));
     }
-    const resp = await this.fetcher(url.toString(), { headers: this.headers() });
+    let resp: Response;
+    try {
+      resp = await this.fetcher(url.toString(), { headers: this.headers() });
+    } catch (e) {
+      // spec: §7.4 — a rejected fetch (no Response) is the always-revalidate
+      // no-cache case (F-7.4.2).
+      throw this.unreachableError(e);
+    }
     if (!resp.ok) {
       let envelope: Record<string, unknown> = {};
       try {
@@ -797,6 +864,8 @@ export class Client {
         code: envelope.code ?? "registry.unknown",
         message: envelope.message ?? `HTTP ${resp.status}`,
         retryable: envelope.retryable,
+        details: envelope.details,
+        suggested_action: envelope.suggested_action,
       });
     }
     return resp.json();
