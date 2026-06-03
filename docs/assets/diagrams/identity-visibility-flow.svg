@@ -103,7 +103,7 @@
   <rect class="b-row-yes" x="40" y="386" width="1000" height="42" rx="6"/>
   <text class="b-mono" x="60" y="412">alice-personal</text>
   <text class="b-mono" x="320" y="412">users: [alice@acme.com]</text>
-  <text class="b-sub" x="620" y="412">subject matches</text>
+  <text class="b-sub" x="620" y="412">subject/email match</text>
   <text class="b-yes" x="900" y="412">YES</text>
 
   <!-- Row 4: marketing-public YES -->

@@ -84,7 +84,7 @@ func layerUpdate(args []string) int {
 	rotateSecret := fs.Bool("rotate-webhook-secret", false, "regenerate the git layer's HMAC webhook secret and print the new value")
 	var groups, users stringSliceFlag
 	fs.Var(&groups, "group", "OIDC group with visibility (repeatable)")
-	fs.Var(&users, "user", "OIDC sub with visibility (repeatable)")
+	fs.Var(&users, "user", "OIDC subject or email with visibility (repeatable)")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
@@ -191,7 +191,7 @@ func layerRegister(args []string) int {
 	forcePush := fs.String("force-push-policy", "", "git force-push handling: tolerant (default) or strict")
 	var groups, users stringSliceFlag
 	fs.Var(&groups, "group", "OIDC group with visibility (repeatable)")
-	fs.Var(&users, "user", "OIDC sub with visibility (repeatable)")
+	fs.Var(&users, "user", "OIDC subject or email with visibility (repeatable)")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)

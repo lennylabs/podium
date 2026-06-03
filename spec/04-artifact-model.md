@@ -606,7 +606,7 @@ Each layer declares one or more of the following:
 | `public: true`                | Anyone, including unauthenticated callers. |
 | `organization: true`          | Any authenticated user in the tenant org.  |
 | `groups: [<oidc-group>, ...]` | Members of the listed OIDC groups.         |
-| `users: [<user-id>, ...]`     | Listed user identifiers (OIDC subject).    |
+| `users: [<user-id>, ...]`     | Listed user identifiers, matched against the caller's OIDC subject or email. |
 
 Multiple fields combine as a union; a caller sees the layer if any condition matches. User-defined layers (§7.3.1) have implicit visibility `users: [<registrant>]`; the field is set automatically and cannot be widened.
 
