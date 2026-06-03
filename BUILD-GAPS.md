@@ -695,9 +695,16 @@ I reviewed §7.1 (`spec/07-external-integration.md:3`-`spec/07-external-integrat
 
 The checkable claims hold. The URL-versus-path dispatch is implemented in `pkg/sync/config.go:115` (`isServerSource` treats `http://` and `https://` as a server and every other value as a filesystem source) and is applied consistently at the sync dispatch (`pkg/sync/sync.go:383`) and in the CLI (`cmd/podium/main.go:278`, `cmd/podium/main.go:318`). Both modes apply layer composition: the filesystem source resolves `extends:` and effective-view assembly in `pkg/registry/filesystem/extends.go:10` and `pkg/sync/sync.go:445`, while the server source composes through `pkg/registry/core`. The SDKs are HTTP-only (`sdks/podium-ts/src/index.ts:127`, `sdks/podium-py/podium/client.py:718`), the filesystem source carries no per-caller identity filtering (it reads only layer-config visibility metadata at `pkg/registry/filesystem/registry.go:155`), and the four SLO-budgeted operations map to their spec names in `pkg/registry/server/latency.go:44`, wired as the outermost middleware in `pkg/registry/server/server.go:359` and installed by the boot layer (`internal/serverboot/access_log.go:30`, `internal/serverboot/metrics_wiring.go:26`). The single item below is an observation with no defect.
 
-### - [ ] F-7.1.1 — load_artifact latency observer collapses the two SLO budgets into one key [Info] — OPEN
+### - [x] F-7.1.1 — load_artifact latency observer collapses the two SLO budgets into one key [Info] — CLOSED
 
 (inconsistency) §7.1 defines two distinct `load_artifact` SLO targets: manifest only at p99 < 500 ms and manifest plus resources from a cache miss at p99 < 2 s (`spec/07-external-integration.md:19`-`spec/07-external-integration.md:20`). The latency observer maps the `/v1/load_artifact` route to a single operation key `load_artifact` (`pkg/registry/server/latency.go:52`-`pkg/registry/server/latency.go:53`), and the metrics observer records duration under that one key (`internal/serverboot/metrics_wiring.go:27`-`internal/serverboot/metrics_wiring.go:28`). A deployment that buckets observed latency by operation name therefore cannot separate the manifest-only path from the manifest-plus-resources path, so it cannot compare against the two budgets independently. This is an observation rather than a defect: §7.1 states the budgets as operator-facing SLO targets ("Server deployments that miss these should investigate." at `spec/07-external-integration.md:22`) and mandates no wire field or label that the implementation must expose to distinguish the two. Suggested direction: leave as-is unless operators need per-budget tracking, in which case add a label (for example whether resources were inlined or fetched) to the `load_artifact` observation so the two budgets can be measured separately.
+
+Resolution (commit 542ab69): no defect. §7.1 states the two `load_artifact`
+budgets as operator-facing SLO targets and mandates no wire field or label to
+distinguish the manifest-only path from the manifest-plus-resources path, so the
+single `load_artifact` operation key conforms. Adding a discriminating label
+would introduce observability surface the spec does not define; left unchanged.
+The single-key mapping stays locked by `TestOperationName` (`pkg/registry/server`).
 
 ## F-7.2 — 7.2 Control Plane / Data Plane Split
 
@@ -1193,17 +1200,41 @@ Most of the surface holds. The registry exposes the `/metrics` endpoint by defau
 
 Three deviations remain: the registry metric set has no error-rate counter even though the spec lists one for the registry and MCP server, the spec-named object-storage fetch child span is never created, and the `podium_audit_outbox_depth` queue-depth gauge is registered but never updated.
 
-### - [ ] F-13.8.1 — Registry metric set has no error-rate counter [Medium] — OPEN
+### - [x] F-13.8.1 — Registry metric set has no error-rate counter [Medium] — CLOSED
 
 (gap) The spec mandates "counters for cache hit rate, error rate, visibility-denial rate, ingest success/failure rate" on the metrics surface for "registry and MCP server" (`spec/13-deployment.md:102`). The MCP bridge implements the error counter (`podium_mcp_request_errors_total` at `pkg/metrics/mcp.go:37`, incremented in `pkg/metrics/mcp.go:80`), but the registry metric set has no error counter. The registry's only request series is `podium_request_total{endpoint}` (`pkg/metrics/metrics.go:57`), and `ObserveRequest` discards the HTTP status it receives: the signature is `ObserveRequest(endpoint string, _ int, elapsed time.Duration)` and the status argument is dropped (`pkg/metrics/metrics.go:125`). No status label and no separate error counter exist, so the registry error rate cannot be derived from its `/metrics` output, and the shipped dashboard carries no error panel (the metric names in `deploy/grafana-dashboard.json` do not include any error series). Suggested direction: add a registry error counter (for example `podium_request_errors_total{endpoint}`) incremented when `ObserveRequest` receives a status at or above 400, or add a status-class label to `podium_request_total`, and reference it from the reference dashboard.
 
-### - [ ] F-13.8.2 — Object-storage fetch child span is never created [Medium] — OPEN
+Resolution (commit 542ab69): added the `podium_request_errors_total{endpoint}`
+counter to the registry metric set. `ObserveRequest` now uses the response
+status it already receives and increments the error counter for any status at or
+above 400, so the per-endpoint error rate is derivable. Added an "Error rate by
+endpoint" panel to `deploy/grafana-dashboard.json` and the series to the e2e
+dashboard-coverage list (`assertMetricsScrape` now drives a 400 so the series is
+populated).
+
+### - [x] F-13.8.2 — Object-storage fetch child span is never created [Medium] — CLOSED
 
 (gap) The spec lists "child spans for registry round-trip, object-storage fetch, adapter translation, materialization" under one root span per meta-tool call (`spec/13-deployment.md:103`). The implementation creates the root span (`cmd/podium-mcp/main.go:1035`), the registry round-trip span via the otelhttp transport (`cmd/podium-mcp/main.go:494`), the `adapter.translate` span (`cmd/podium-mcp/main.go:1377`), and the `materialize` span (`cmd/podium-mcp/main.go:1395`), but no span is opened for the object-storage fetch. A repository-wide search for span-start sites returns only those three explicit `tracing.Tracer().Start` calls plus the otelhttp transport and handler wrappers; the object-storage read on the registry side (`pkg/objectstore`) is not wrapped in any `tracing.Tracer().Start`, and the registry's per-request otelhttp server span has no child span for the storage read. The named child span the spec requires is absent. Suggested direction: open a child span (for example `objectstore.fetch`) around the registry-side object-storage read so the four spans the spec names all appear in an exported trace.
 
-### - [ ] F-13.8.3 — `podium_audit_outbox_depth` gauge is registered but never updated [Low] — OPEN
+Resolution (commit 542ab69): `fetchLargeResources` (the bridge's §6.6 step 1
+data-plane read of each large_resource from object storage via its presigned
+URL) now opens an `objectstore.fetch` child span under the active meta-tool root
+span, as a sibling to the registry round-trip, `adapter.translate`, and
+`materialize` spans, so an exported `load_artifact` trace carries all four named
+child spans. The span is opened only when the manifest carries large resources,
+so a manifest-only call records no empty span.
+
+### - [x] F-13.8.3 — `podium_audit_outbox_depth` gauge is registered but never updated [Low] — CLOSED
 
 (bug) The spec requires "gauges for queue depths" (`spec/13-deployment.md:102`). The implementation registers two outbox gauges, `podium_vector_outbox_depth` and `podium_audit_outbox_depth` (`pkg/metrics/metrics.go:91`, `pkg/metrics/metrics.go:95`). The vector gauge is driven from the drain worker through `SetVectorOutboxDepth` (`internal/serverboot/vector_outbox.go:98`), but `SetAuditOutboxDepth` (`pkg/metrics/metrics.go:160`) has no caller anywhere in `pkg/`, `internal/`, or `cmd/`, so the audit gauge always reports 0. No audit-export outbox queue mechanism exists to feed it (`pkg/audit` contains no outbox or queue-depth source). The gauge advertises a queue depth that is never observed. Suggested direction: either wire `SetAuditOutboxDepth` to the audit-export backlog once that queue exists, or remove the gauge so `/metrics` does not export a series that is permanently 0.
+
+Resolution (commit 542ab69): removed the phantom `podium_audit_outbox_depth`
+gauge (the field, the `GaugeFunc`, and the dead `SetAuditOutboxDepth` setter).
+No audit-export outbox queue exists to feed it (`EndpointSink` POSTs each event
+synchronously with no backlog), so the series was permanently 0. §13.8's "gauges
+for queue depths" is satisfied by the live `podium_vector_outbox_depth`. Dropped
+the audit target from the dashboard's outbox panel and the series from the e2e
+dashboard-coverage list.
 
 ## F-13.9 — 13.9 Health and Readiness
 

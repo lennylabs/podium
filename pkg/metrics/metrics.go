@@ -9,6 +9,7 @@
 // instrumentation:
 //
 //   - podium_request_total{endpoint}                 counter
+//   - podium_request_errors_total{endpoint}          counter
 //   - podium_request_duration_seconds{endpoint}      histogram
 //   - podium_visibility_denied_total                 counter
 //   - podium_cache_hits_total                         counter
@@ -16,7 +17,6 @@
 //   - podium_ingest_success_total                     counter
 //   - podium_ingest_failure_total                     counter
 //   - podium_vector_outbox_depth                      gauge
-//   - podium_audit_outbox_depth                       gauge
 //
 // spec: §13.8 Observability (Prometheus endpoint on registry and MCP server).
 package metrics
@@ -38,6 +38,7 @@ type Registry struct {
 	reg *prometheus.Registry
 
 	requestTotal     *prometheus.CounterVec
+	requestErrors    *prometheus.CounterVec
 	requestDuration  *prometheus.HistogramVec
 	visibilityDenied prometheus.Counter
 	cacheHits        prometheus.Counter
@@ -45,7 +46,6 @@ type Registry struct {
 	ingestSuccess    prometheus.Counter
 	ingestFailure    prometheus.Counter
 	vectorOutbox     atomic.Int64
-	auditOutbox      atomic.Int64
 }
 
 // New builds the Podium metric set, registers it (plus the Go runtime and
@@ -57,6 +57,14 @@ func New() *Registry {
 	m.requestTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "podium_request_total",
 		Help: "Total meta-tool requests served, by operation endpoint.",
+	}, []string{"endpoint"})
+
+	// spec: §13.8 mandates an error-rate counter on the registry metrics
+	// surface. ObserveRequest increments it for any response status at or
+	// above 400, so the error rate is derivable per endpoint.
+	m.requestErrors = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "podium_request_errors_total",
+		Help: "Total meta-tool requests that returned a 4xx/5xx status, by operation endpoint.",
 	}, []string{"endpoint"})
 
 	m.requestDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
@@ -92,15 +100,11 @@ func New() *Registry {
 		Name: "podium_vector_outbox_depth",
 		Help: "Pending rows in the §4.7.2 external-vector-backend outbox.",
 	}, func() float64 { return float64(m.vectorOutbox.Load()) })
-	auditOutbox := prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-		Name: "podium_audit_outbox_depth",
-		Help: "Pending rows in the audit-export outbox.",
-	}, func() float64 { return float64(m.auditOutbox.Load()) })
 
 	m.reg.MustRegister(
-		m.requestTotal, m.requestDuration, m.visibilityDenied,
+		m.requestTotal, m.requestErrors, m.requestDuration, m.visibilityDenied,
 		m.cacheHits, m.cacheMisses, m.ingestSuccess, m.ingestFailure,
-		vectorOutbox, auditOutbox,
+		vectorOutbox,
 		collectors(),
 	)
 	return m
@@ -117,17 +121,20 @@ func (m *Registry) Handler() http.Handler {
 // assert on the emitted families.
 func (m *Registry) Gatherer() prometheus.Gatherer { return m.reg }
 
-// ObserveRequest records one served request: the operation endpoint name and
-// the elapsed handler time. It is the sink wired into server.LatencyObserver,
-// so it fires once per meta-tool request. The status code is accepted for
-// signature parity with the observer but is not a label, matching the
-// dashboard's endpoint-only aggregation.
-func (m *Registry) ObserveRequest(endpoint string, _ int, elapsed time.Duration) {
+// ObserveRequest records one served request: the operation endpoint name, the
+// response status, and the elapsed handler time. It is the sink wired into
+// server.LatencyObserver, so it fires once per meta-tool request. A status at
+// or above 400 also increments podium_request_errors_total{endpoint} (§13.8),
+// so the per-endpoint error rate is derivable from the scrape.
+func (m *Registry) ObserveRequest(endpoint string, status int, elapsed time.Duration) {
 	if endpoint == "" {
 		return
 	}
 	m.requestTotal.WithLabelValues(endpoint).Inc()
 	m.requestDuration.WithLabelValues(endpoint).Observe(elapsed.Seconds())
+	if status >= 400 {
+		m.requestErrors.WithLabelValues(endpoint).Inc()
+	}
 }
 
 // IncVisibilityDenied counts one read rejected by §4.6 visibility filtering.
@@ -154,10 +161,6 @@ func (m *Registry) IncIngestFailure() { m.ingestFailure.Inc() }
 // worker calls it after each pass; the gauge reads 0 on a collocated backend
 // that uses no outbox.
 func (m *Registry) SetVectorOutboxDepth(n int64) { m.vectorOutbox.Store(n) }
-
-// SetAuditOutboxDepth publishes the current depth of the audit-export outbox to
-// the podium_audit_outbox_depth gauge.
-func (m *Registry) SetAuditOutboxDepth(n int64) { m.auditOutbox.Store(n) }
 
 // collectors bundles the Go runtime and process collectors so /metrics carries
 // the standard process_* and go_* series alongside the Podium metrics.

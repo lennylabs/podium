@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/lennylabs/podium/pkg/tracing"
 )
 
 // resourceRefresher re-requests /v1/load_artifact and returns a freshly
@@ -25,6 +27,13 @@ func (s *mcpServer) fetchLargeResources(resp *loadArtifactResponse, refresh reso
 	if len(resp.LargeResources) == 0 {
 		return nil
 	}
+	// §13.8: child span for the object-storage fetch stage. It nests under the
+	// active meta-tool root span (via reqCtx) as a sibling to the registry
+	// round-trip, adapter.translate, and materialize spans, so an exported
+	// load_artifact trace carries all four named child spans. Opened after the
+	// no-op early return above so a manifest-only call records no empty span.
+	_, span := tracing.Tracer().Start(s.reqCtx(), "objectstore.fetch")
+	defer span.End()
 	if resp.Resources == nil {
 		resp.Resources = map[string]string{}
 	}

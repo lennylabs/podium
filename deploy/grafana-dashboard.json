@@ -37,6 +37,18 @@
       }
     },
     {
+      "title": "Error rate by endpoint",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum by (endpoint) (rate(podium_request_errors_total[1m]))",
+          "legendFormat": "{{endpoint}}"
+        }
+      ],
+      "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8}
+    },
+    {
       "title": "Visibility-denial rate",
       "type": "timeseries",
       "datasource": "Prometheus",
@@ -46,7 +58,7 @@
           "legendFormat": "denied/sec"
         }
       ],
-      "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8}
+      "gridPos": {"x": 12, "y": 12, "w": 6, "h": 4}
     },
     {
       "title": "Cache hit rate",
@@ -90,12 +102,11 @@
       "gridPos": {"x": 18, "y": 8, "w": 6, "h": 8}
     },
     {
-      "title": "Outbox depth",
+      "title": "Vector outbox depth",
       "type": "timeseries",
       "datasource": "Prometheus",
       "targets": [
-        {"expr": "podium_vector_outbox_depth", "legendFormat": "vector"},
-        {"expr": "podium_audit_outbox_depth",  "legendFormat": "audit"}
+        {"expr": "podium_vector_outbox_depth", "legendFormat": "vector"}
       ],
       "gridPos": {"x": 0, "y": 16, "w": 24, "h": 8}
     }

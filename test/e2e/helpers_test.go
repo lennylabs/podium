@@ -151,6 +151,7 @@ func getStatus(t testing.TB, url string) int {
 // endpoint must emit every one so the shipped dashboard resolves.
 var metricsDashboardSeries = []string{
 	"podium_request_total",
+	"podium_request_errors_total",
 	"podium_request_duration_seconds",
 	"podium_visibility_denied_total",
 	"podium_cache_hits_total",
@@ -158,7 +159,6 @@ var metricsDashboardSeries = []string{
 	"podium_ingest_success_total",
 	"podium_ingest_failure_total",
 	"podium_vector_outbox_depth",
-	"podium_audit_outbox_depth",
 }
 
 // assertMetricsScrape drives one observed meta-tool request, then GETs
@@ -171,6 +171,9 @@ func assertMetricsScrape(t testing.TB, baseURL string) string {
 	t.Helper()
 	// A search with no match still returns 200 and records one observation.
 	_ = getStatus(t, baseURL+"/v1/search_artifacts?q=ping")
+	// A load_artifact with no id returns 400, populating the per-endpoint
+	// podium_request_errors_total series (§13.8) so the scrape carries it.
+	_ = getStatus(t, baseURL+"/v1/load_artifact")
 	st, body := getRaw(t, baseURL+"/metrics")
 	if st != 200 {
 		t.Fatalf("GET /metrics = HTTP %d, want 200\nbody: %s", st, body)
