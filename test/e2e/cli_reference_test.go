@@ -1610,6 +1610,40 @@ func TestCLI_AdminErase(t *testing.T) {
 	cliContains(t, body, "user.erased", "erasure audit event")
 }
 
+// spec: §8.5 (F-8.5.1/F-8.5.2) — erase removes the caller's attached email and
+// group membership, not just the sub-claim, and passing the email (the value a
+// GDPR request supplies) erases the attached sub-claim too.
+func TestCLI_AdminEraseRemovesEmailAndGroups(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "audit.log")
+	const (
+		sub   = "auth0|alice"
+		email = "alice@acme.com"
+		group = "acme-engineering"
+	)
+	sink, err := audit.NewFileSink(logPath)
+	if err != nil {
+		t.Fatalf("audit sink: %v", err)
+	}
+	if err := sink.Append(context.Background(), audit.Event{
+		Type: audit.EventArtifactLoaded, Timestamp: time.Now().UTC(),
+		Caller: sub, CallerEmail: email, CallerGroups: []string{group}, Target: "skill/x",
+	}); err != nil {
+		t.Fatalf("seed audit: %v", err)
+	}
+	// The operator passes the email, the identifier a human knows for a GDPR
+	// request, rather than the OAuth sub-claim.
+	res := runPodium(t, "", nil, "admin", "erase",
+		"--audit-path", logPath, "--salt", "tenant-salt", "--operator", "carol@acme.com",
+		email)
+	cliWantExit(t, res, 0, "admin erase")
+	body := readFile(t, logPath)
+	cliNotContains(t, body, email, "email redacted")
+	cliNotContains(t, body, sub, "sub-claim redacted via email input")
+	cliNotContains(t, body, group, "group membership cleared")
+	cliContains(t, body, "redacted-", "tombstone identity")
+	cliContains(t, body, "user.erased", "erasure audit event")
+}
+
 // spec: doc "podium admin erase", "Erasure is itself logged as user.erased".
 func TestCLI_AdminEraseAudited(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "audit.log")

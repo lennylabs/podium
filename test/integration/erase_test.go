@@ -68,7 +68,9 @@ func TestErase_SQLitePurgesLayersAndRedactsAudit(t *testing.T) {
 		t.Fatalf("PutManifest: %v", err)
 	}
 	_ = sink.Append(ctx, audit.Event{
-		Type: audit.EventArtifactsSearched, Caller: "alice@acme.com", Timestamp: time.Now().UTC(),
+		Type: audit.EventArtifactsSearched, Caller: "alice@acme.com",
+		CallerEmail: "alice@acme.com", CallerGroups: []string{"acme-engineering"},
+		Timestamp: time.Now().UTC(),
 	})
 
 	body, _ := json.Marshal(map[string]any{"user_id": "alice@acme.com", "salt": "tenant-salt"})
@@ -97,6 +99,10 @@ func TestErase_SQLitePurgesLayersAndRedactsAudit(t *testing.T) {
 	data, _ := os.ReadFile(sinkPath)
 	if strings.Contains(string(data), "alice@acme.com") {
 		t.Errorf("erased identity still present in audit stream")
+	}
+	// F-8.5.1: the attached email and group membership are redacted too.
+	if strings.Contains(string(data), "acme-engineering") {
+		t.Errorf("erased user's group membership still present in audit stream")
 	}
 	if !strings.Contains(string(data), "carol@acme.com") {
 		t.Errorf("invoking admin not recorded")

@@ -160,12 +160,28 @@ func Enforce(_ context.Context, sink *FileSink, now time.Time, policies []Policy
 	return dropped, nil
 }
 
-// EraseUser implements the §8.5 GDPR right-to-be-forgotten flow:
-// every Caller and userID-bearing Context value matching userID is
-// replaced with the salted tombstone redacted-<sha256(user_id+salt)>,
-// then the chain is rewritten over the transformed events. The salted
-// form preserves cross-event correlation for SIEM consumers that know
-// the salt while removing the original identifier.
+// EraseUser implements the §8.5 GDPR right-to-be-forgotten flow: every
+// directly-identifying field of the erased user (the sub-claim Caller, the
+// attached CallerEmail, the CallerGroups membership, and any userID-bearing
+// Context value) is replaced with the salted tombstone
+// redacted-<sha256(user_id+salt)> or, for group membership, cleared. The
+// chain is then rewritten over the transformed events. The salted tombstone
+// preserves cross-event correlation for SIEM consumers that know the salt
+// while removing the original identifier.
+//
+// §8.5 takes a single <user_id> argument without fixing which identity field
+// it denotes. §8.1 records a read event's caller as the OAuth sub-claim
+// (Caller) with the email attached separately (CallerEmail), so the value a
+// human knows for a GDPR request is usually the email while the sub-claim is
+// what appears in the layer-owner context. EraseUser therefore (F-8.5.2)
+// first discovers every alias of the user by scanning for events whose Caller
+// or CallerEmail matches the passed userID and collecting both fields, so
+// passing either the email or the sub-claim erases the complete identity. The
+// redaction pass then (F-8.5.1) removes the email and group membership, not
+// just the sub-claim, so the persisted record no longer carries the user's
+// PII. Public-mode CallerNetwork attributes (source IP, X-Forwarded-User)
+// describe the request path of a system:public call rather than the erased
+// user's account identity and are left intact.
 //
 // EraseUser appends a user.erased audit event to the rewritten log,
 // recording the invoking admin (§8.1: "Admin invoked the GDPR erasure
@@ -192,17 +208,51 @@ func EraseUser(_ context.Context, sink *FileSink, userID, salt, admin string) (i
 	if err != nil {
 		return 0, err
 	}
+	// Alias-discovery pass (§8.5, F-8.5.2): an event belongs to the erased
+	// user when the passed userID matches its sub-claim or its email. Collect
+	// both identifiers from every such event so passing one form (e.g. the
+	// email) also redacts records that carry the other (e.g. the sub-claim in
+	// the layer-owner context). The empty string is never an alias, so events
+	// with an empty Caller or CallerEmail do not poison the set.
+	aliases := map[string]bool{userID: true}
+	for i := range events {
+		ev := &events[i]
+		if ev.Caller == userID || ev.CallerEmail == userID {
+			if ev.Caller != "" {
+				aliases[ev.Caller] = true
+			}
+			if ev.CallerEmail != "" {
+				aliases[ev.CallerEmail] = true
+			}
+		}
+	}
 	tombstone := tombstoneFor(userID, salt)
 	transformed := 0
 	for i := range events {
 		ev := &events[i]
 		mutated := false
-		if ev.Caller == userID {
-			ev.Caller = tombstone
+		// Redact the full caller identity (F-8.5.1) when either identity field
+		// is an alias of the erased user: the sub-claim, the attached email,
+		// and the group membership. Group names are quasi-identifiers, so the
+		// membership is cleared rather than tombstoned.
+		if aliases[ev.Caller] || aliases[ev.CallerEmail] {
+			if ev.Caller != "" {
+				ev.Caller = tombstone
+			}
+			if ev.CallerEmail != "" {
+				ev.CallerEmail = tombstone
+			}
+			if len(ev.CallerGroups) > 0 {
+				ev.CallerGroups = nil
+			}
 			mutated = true
 		}
+		// The erased user can also appear as a context value (e.g. the owner of
+		// a registered layer). Redact only the matching value; the surrounding
+		// caller may be a different principal, such as an admin acting on the
+		// user's layer.
 		for k, v := range ev.Context {
-			if v == userID {
+			if aliases[v] {
 				ev.Context[k] = tombstone
 				mutated = true
 			}

@@ -89,10 +89,14 @@ func TestErase_PurgesLayersAndRedactsRegistryStream(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("PutManifest: %v", err)
 	}
-	// Seed an audit event whose caller is the erased identity.
+	// Seed an audit event whose caller is the erased identity, carrying the
+	// §8.1 attached email and group membership so the redaction pass has PII to
+	// remove (F-8.5.1).
 	sink, _ := audit.NewFileSink(sinkPath)
 	_ = sink.Append(ctx, audit.Event{
-		Type: audit.EventArtifactsSearched, Caller: "alice@acme.com", Timestamp: time.Now().UTC(),
+		Type: audit.EventArtifactsSearched, Caller: "alice@acme.com",
+		CallerEmail: "alice@acme.com", CallerGroups: []string{"acme-engineering"},
+		Timestamp: time.Now().UTC(),
 	})
 
 	resp := postErase(t, ts.URL, map[string]any{"user_id": "alice@acme.com", "salt": "tenant-salt"})
@@ -129,6 +133,10 @@ func TestErase_PurgesLayersAndRedactsRegistryStream(t *testing.T) {
 	data, _ := os.ReadFile(sinkPath)
 	if strings.Contains(string(data), "alice@acme.com") {
 		t.Errorf("erased identity still present in registry audit stream")
+	}
+	// F-8.5.1: the attached email and group membership are gone too.
+	if strings.Contains(string(data), "acme-engineering") {
+		t.Errorf("erased user's group membership still present in registry audit stream")
 	}
 	if !strings.Contains(string(data), "user.erased") {
 		t.Errorf("user.erased event not appended")

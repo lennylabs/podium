@@ -200,6 +200,185 @@ func TestEraseUser_ReplacesIdentifiersAndAppendsTombstone(t *testing.T) {
 	}
 }
 
+// Spec: §8.5 (F-8.5.1) — erasure removes the caller's directly-identifying
+// email and group membership, not only the sub-claim, so the persisted audit
+// record no longer carries the erased user's PII.
+func TestEraseUser_RedactsEmailAndGroups(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.log")
+	sink, _ := audit.NewFileSink(path)
+	const (
+		sub   = "auth0|alice"
+		email = "alice@acme.com"
+		group = "acme-engineering"
+	)
+	for i := 0; i < 2; i++ {
+		_ = sink.Append(context.Background(), audit.Event{
+			Type:         audit.EventArtifactLoaded,
+			Caller:       sub,
+			CallerEmail:  email,
+			CallerGroups: []string{group},
+			Target:       "skill/x",
+			Timestamp:    time.Now().UTC(),
+		})
+	}
+	transformed, err := audit.EraseUser(context.Background(), sink, sub, "tenant-salt", "carol@acme.com")
+	if err != nil {
+		t.Fatalf("EraseUser: %v", err)
+	}
+	if transformed != 2 {
+		t.Errorf("transformed = %d, want 2", transformed)
+	}
+	want := func() string {
+		h := sha256.Sum256([]byte(sub + "tenant-salt"))
+		return "redacted-" + hex.EncodeToString(h[:])
+	}()
+	data, _ := readSinkBytes(path)
+	if containsBytes(data, []byte(email)) {
+		t.Errorf("caller email still present in audit log after erasure")
+	}
+	if containsBytes(data, []byte(group)) {
+		t.Errorf("caller group membership still present after erasure")
+	}
+	if !containsBytes(data, []byte(want)) {
+		t.Errorf("tombstone %q not found after erasure", want)
+	}
+	// The nested caller.email now holds the tombstone and caller.groups is gone.
+	for _, e := range parseFullEvents(t, path) {
+		if e.Type == string(audit.EventUserErased) {
+			continue
+		}
+		if e.Caller.Email != want {
+			t.Errorf("caller.email = %q, want tombstone %q", e.Caller.Email, want)
+		}
+		if len(e.Caller.Groups) != 0 {
+			t.Errorf("caller.groups = %v, want empty after erasure", e.Caller.Groups)
+		}
+	}
+	if err := sink.Verify(context.Background()); err != nil {
+		t.Errorf("Verify after EraseUser: %v", err)
+	}
+}
+
+// Spec: §8.5 (F-8.5.2) — §8.5 takes a single <user_id> and §8.1 records the
+// sub-claim with the email attached separately. Passing the email (the value a
+// human knows for a GDPR request) erases the sub-claim too, including the
+// sub-claim stored in the layer-owner context, while an unrelated user
+// survives.
+func TestEraseUser_EmailInputErasesSubClaimAndContext(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.log")
+	sink, _ := audit.NewFileSink(path)
+	ctx := context.Background()
+	const (
+		sub   = "auth0|alice"
+		email = "alice@acme.com"
+	)
+	// A read event records the sub-claim with the email attached (§8.1).
+	_ = sink.Append(ctx, audit.Event{
+		Type: audit.EventArtifactLoaded, Caller: sub, CallerEmail: email,
+		Target: "skill/x", Timestamp: time.Now().UTC(),
+	})
+	// A layer.user_registered event carries the sub-claim in the owner context
+	// with no email attached.
+	_ = sink.Append(ctx, audit.Event{
+		Type: audit.EventLayerUserRegistered, Caller: sub,
+		Context: map[string]string{"owner": sub, "action": "register"},
+		Target:  "alice-personal", Timestamp: time.Now().UTC(),
+	})
+	// An unrelated user must survive untouched.
+	_ = sink.Append(ctx, audit.Event{
+		Type: audit.EventArtifactLoaded, Caller: "auth0|bob", CallerEmail: "bob@acme.com",
+		Target: "skill/y", Timestamp: time.Now().UTC(),
+	})
+	transformed, err := audit.EraseUser(ctx, sink, email, "tenant-salt", "carol@acme.com")
+	if err != nil {
+		t.Fatalf("EraseUser: %v", err)
+	}
+	if transformed != 2 {
+		t.Errorf("transformed = %d, want 2", transformed)
+	}
+	data, _ := readSinkBytes(path)
+	if containsBytes(data, []byte(sub)) {
+		t.Errorf("sub-claim still present after email-input erasure")
+	}
+	if containsBytes(data, []byte(email)) {
+		t.Errorf("email still present after email-input erasure")
+	}
+	if !containsBytes(data, []byte("auth0|bob")) || !containsBytes(data, []byte("bob@acme.com")) {
+		t.Errorf("unrelated user wrongly redacted")
+	}
+	if err := sink.Verify(ctx); err != nil {
+		t.Errorf("Verify after EraseUser: %v", err)
+	}
+}
+
+// Spec: §8.5 — when the erased user appears only as a context value (the
+// subject of an action recorded by a different principal), the matching
+// context value is redacted while the distinct event Caller is preserved.
+func TestEraseUser_ContextMatchPreservesDistinctCaller(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.log")
+	sink, _ := audit.NewFileSink(path)
+	ctx := context.Background()
+	const aliceSub = "auth0|alice"
+	_ = sink.Append(ctx, audit.Event{
+		Type:   audit.EventLayerConfigChanged,
+		Caller: "auth0|admin", CallerEmail: "dave@acme.com",
+		Context: map[string]string{"owner": aliceSub, "action": "erase"},
+		Target:  "alice-personal", Timestamp: time.Now().UTC(),
+	})
+	transformed, err := audit.EraseUser(ctx, sink, aliceSub, "salt", "carol@acme.com")
+	if err != nil {
+		t.Fatalf("EraseUser: %v", err)
+	}
+	if transformed != 1 {
+		t.Errorf("transformed = %d, want 1", transformed)
+	}
+	data, _ := readSinkBytes(path)
+	if containsBytes(data, []byte(aliceSub)) {
+		t.Errorf("erased user's context identity still present")
+	}
+	if !containsBytes(data, []byte("auth0|admin")) || !containsBytes(data, []byte("dave@acme.com")) {
+		t.Errorf("distinct event caller wrongly redacted")
+	}
+	if err := sink.Verify(ctx); err != nil {
+		t.Errorf("Verify after EraseUser: %v", err)
+	}
+}
+
+// fullEvent mirrors the §8.1 nested caller wire form including the email and
+// group membership the erasure tests inspect.
+type fullEvent struct {
+	Type   string `json:"type"`
+	Caller struct {
+		Identity string   `json:"identity"`
+		Email    string   `json:"email"`
+		Groups   []string `json:"groups"`
+	} `json:"caller"`
+	Context map[string]string `json:"context"`
+}
+
+func parseFullEvents(t *testing.T, path string) []fullEvent {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var out []fullEvent
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		if len(line) == 0 {
+			continue
+		}
+		var e fullEvent
+		if err := json.Unmarshal(line, &e); err != nil {
+			t.Fatalf("parse event: %v", err)
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
 // parsedEvent mirrors the §8.1 JSON-Lines wire form for the fields these
 // tests inspect. The caller identity is nested under "caller" per §8.1
 // (caller.identity), so Caller is the unpacked identity string.
