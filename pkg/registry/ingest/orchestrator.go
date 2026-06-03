@@ -56,6 +56,12 @@ type SourceIngestOptions struct {
 	// RejectAtOrAbove is the §13.10 public-mode sensitivity floor passed
 	// through to the ingest Request. Empty means no floor.
 	RejectAtOrAbove manifest.Sensitivity
+	// EnforceSandboxProfile and EnforceableSandboxProfiles thread the §13.10
+	// sandbox-profile ingest gate (PODIUM_ENFORCE_SANDBOX_PROFILE +
+	// PODIUM_HOST_SANDBOXES) through to the ingest Request. See
+	// ingest.Request for the semantics.
+	EnforceSandboxProfile      bool
+	EnforceableSandboxProfiles []string
 	// Signer signs every newly accepted manifest's content hash (§4.7.9).
 	// Nil leaves manifests unsigned (the standalone default; §13.10 signing
 	// is disabled unless --sign registry-key is set).
@@ -137,21 +143,23 @@ func SourceIngestWithOptions(
 	}
 
 	res, err := Ingest(ctx, st, Request{
-		TenantID:        cfg.TenantID,
-		LayerID:         cfg.ID,
-		Files:           snap.Files,
-		Linter:          opts.Linter,
-		Embedder:        opts.Embedder,
-		VectorPut:       opts.VectorPut,
-		DomainVectorPut: opts.DomainVectorPut,
-		PublishEvent:    opts.PublishEvent,
-		AuditEmit:       opts.AuditEmit,
-		CallerID:        opts.CallerID,
-		ResourcePut:     opts.ResourcePut,
-		FreezeWindows:   opts.FreezeWindows,
-		RejectAtOrAbove: opts.RejectAtOrAbove,
-		Signer:          opts.Signer,
-		UseVectorOutbox: opts.UseVectorOutbox,
+		TenantID:                   cfg.TenantID,
+		LayerID:                    cfg.ID,
+		Files:                      snap.Files,
+		Linter:                     opts.Linter,
+		Embedder:                   opts.Embedder,
+		VectorPut:                  opts.VectorPut,
+		DomainVectorPut:            opts.DomainVectorPut,
+		PublishEvent:               opts.PublishEvent,
+		AuditEmit:                  opts.AuditEmit,
+		CallerID:                   opts.CallerID,
+		ResourcePut:                opts.ResourcePut,
+		FreezeWindows:              opts.FreezeWindows,
+		RejectAtOrAbove:            opts.RejectAtOrAbove,
+		EnforceSandboxProfile:      opts.EnforceSandboxProfile,
+		EnforceableSandboxProfiles: opts.EnforceableSandboxProfiles,
+		Signer:                     opts.Signer,
+		UseVectorOutbox:            opts.UseVectorOutbox,
 	})
 	if err != nil {
 		return nil, err

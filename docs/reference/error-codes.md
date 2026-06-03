@@ -81,6 +81,7 @@ Codes map to MCP error payloads per the MCP spec for harnesses that consume Podi
 | `ingest.frozen` | A freeze window blocks ingest. Use `--break-glass` (with dual-signoff and justification) to override. |
 | `ingest.source_unreachable` | The layer's source (Git repo, S3 prefix, etc.) couldn't be reached at ingest time. Existing served artifacts are unaffected. |
 | `ingest.public_mode_rejects_sensitive` | Public-mode deployments reject ingest of `sensitivity: medium` and `sensitivity: high` artifacts. |
+| `ingest.sandbox_profile_unenforceable` | With `PODIUM_ENFORCE_SANDBOX_PROFILE=true` the registry rejects an artifact whose `sandbox_profile` the local host cannot honor; the host advertises its enforceable set via `PODIUM_HOST_SANDBOXES`. |
 
 ### materialize.*
 

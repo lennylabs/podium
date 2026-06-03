@@ -46,6 +46,41 @@ func SplitFrontmatter(src []byte) (frontmatter []byte, body []byte, err error) {
 	return m[1], bytes.TrimLeft(m[2], "\r\n"), nil
 }
 
+// FrontmatterFields extracts the named top-level frontmatter fields from a
+// manifest source, returning a name->value map for the names present as YAML
+// scalars. It is the value source for the §8.2 manifest-declared redaction
+// surface: the registry surfaces the author-named sensitive fields (for
+// example bank_account or ssn) into the audit context so an audit_redact
+// directive has a concrete value to mask. Names absent from the frontmatter,
+// and non-scalar values (mappings or sequences), are skipped; a source
+// without parseable frontmatter yields nil. The returned values are raw and
+// must pass through redaction before reaching an audit sink.
+func FrontmatterFields(src []byte, names []string) map[string]string {
+	if len(names) == 0 {
+		return nil
+	}
+	fm, _, err := SplitFrontmatter(src)
+	if err != nil {
+		return nil
+	}
+	var all map[string]yaml.Node
+	if err := yaml.Unmarshal(fm, &all); err != nil {
+		return nil
+	}
+	out := make(map[string]string, len(names))
+	for _, n := range names {
+		node, ok := all[n]
+		if !ok || node.Kind != yaml.ScalarNode {
+			continue
+		}
+		out[n] = node.Value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // ParseArtifact decodes an ARTIFACT.md source into an Artifact. The
 // frontmatter populates the typed fields; the markdown after the
 // frontmatter populates Artifact.Body.

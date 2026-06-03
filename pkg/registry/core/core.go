@@ -1499,7 +1499,28 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 				"content_hash": rec.ContentHash,
 				"layer":        rec.Layer,
 			}
-			ev.RedactKeys = rec.AuditRedact
+			// §8.2 manifest-declared redaction. The audit_redact directive is
+			// the authoritative source of truth in the stored frontmatter; the
+			// SQL backends do not persist ManifestRecord.AuditRedact as its own
+			// column, so derive the key set from the frontmatter when the field
+			// is absent. This keeps redaction working uniformly across the
+			// memory, SQLite, and Postgres stores.
+			redactKeys := rec.AuditRedact
+			if len(redactKeys) == 0 && len(rec.Frontmatter) > 0 {
+				if a, perr := manifest.ParseArtifact(rec.Frontmatter); perr == nil {
+					redactKeys = a.AuditRedact
+				}
+			}
+			// Surface the author-named sensitive frontmatter fields (e.g.
+			// bank_account, ssn) into the read-event context so the directive
+			// has a concrete target. The audit emitter masks every RedactKeys
+			// entry, so these values reach the sink only as [redacted].
+			for k, v := range manifest.FrontmatterFields(rec.Frontmatter, redactKeys) {
+				if _, exists := ev.Context[k]; !exists {
+					ev.Context[k] = v
+				}
+			}
+			ev.RedactKeys = redactKeys
 		}
 		return res, err
 	}

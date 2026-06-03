@@ -58,6 +58,11 @@ func buildReingestRunner(
 			// path too, matching the boot ingest paths, so a public reingest
 			// cannot smuggle in medium/high artifacts.
 			RejectAtOrAbove: publicSensitivityFloor(cfg),
+			// §13.10 sandbox-profile ingest gate: PODIUM_ENFORCE_SANDBOX_PROFILE
+			// refuses artifacts whose sandbox_profile the host cannot honor on
+			// the manual-reingest / inbound-webhook path too.
+			EnforceSandboxProfile:      cfg.enforceSandboxProfile,
+			EnforceableSandboxProfiles: cfg.hostSandboxes,
 			// §13.10/§4.7.9 ingest signing: nil leaves manifests unsigned.
 			Signer: signer,
 			// §4.7.2: an external vector backend commits a vector_pending row in

@@ -39,6 +39,11 @@ var (
 	// ErrPublicModeSensitive maps to
 	// ingest.public_mode_rejects_sensitive (§13.10).
 	ErrPublicModeSensitive = errors.New("ingest.public_mode_rejects_sensitive")
+	// ErrSandboxProfileUnenforceable maps to
+	// ingest.sandbox_profile_unenforceable (§13.10): the registry is
+	// configured with PODIUM_ENFORCE_SANDBOX_PROFILE=true and the artifact's
+	// sandbox_profile cannot be honored by the local host.
+	ErrSandboxProfileUnenforceable = errors.New("ingest.sandbox_profile_unenforceable")
 	// ErrInvalidArtifact wraps parse / structural errors that surface at
 	// ingest as ingest.lint_failed.
 	ErrInvalidArtifact = errors.New("ingest.invalid_artifact")
@@ -158,6 +163,18 @@ type Request struct {
 	// rejected at ingest. Used by §13.10 public mode to refuse medium
 	// and high sensitivity. Empty means no floor.
 	RejectAtOrAbove manifest.Sensitivity
+	// EnforceSandboxProfile turns the §13.10 sandbox-profile ingest gate on.
+	// When true, an artifact whose sandbox_profile is neither unrestricted
+	// nor listed in EnforceableSandboxProfiles is rejected with
+	// ingest.sandbox_profile_unenforceable. The standalone default leaves
+	// this false so sandbox_profile stays informational (§13.10);
+	// PODIUM_ENFORCE_SANDBOX_PROFILE=true sets it for multi-user setups.
+	EnforceSandboxProfile bool
+	// EnforceableSandboxProfiles lists the sandbox profiles the local host
+	// can honor (PODIUM_HOST_SANDBOXES, default unrestricted). unrestricted
+	// and the empty profile are always enforceable. Consulted only when
+	// EnforceSandboxProfile is true.
+	EnforceableSandboxProfiles []string
 	// FreezeWindows blocks ingest when any window is currently active
 	// (§4.7.2). An ingest with BreakGlass=true bypasses the windows.
 	FreezeWindows []FreezeWindow
@@ -560,6 +577,22 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			continue
 		}
 
+		// Sandbox-profile ingest gate per §13.10: with
+		// PODIUM_ENFORCE_SANDBOX_PROFILE=true the registry refuses to ingest
+		// an artifact whose declared sandbox_profile cannot be honored by the
+		// local host. Off by default so standalone treats sandbox_profile as
+		// informational.
+		if req.EnforceSandboxProfile &&
+			sandboxProfileUnenforceable(string(rec.Artifact.SandboxProfile), req.EnforceableSandboxProfiles) {
+			res.Rejected = append(res.Rejected, RejectedArtifact{
+				ArtifactID: rec.ID,
+				Reason: fmt.Sprintf("sandbox_profile %q cannot be enforced locally (host honors %s)",
+					rec.Artifact.SandboxProfile, sandboxProfileList(req.EnforceableSandboxProfiles)),
+				Code: "ingest.sandbox_profile_unenforceable",
+			})
+			continue
+		}
+
 		mr, err := manifestRecordFor(rec, req.TenantID, req.LayerID, now)
 		if err != nil {
 			res.Rejected = append(res.Rejected, RejectedArtifact{
@@ -776,22 +809,36 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		// fields in audit_redact, the registry replaces those
 		// values with [redacted] before emitting.
 		if req.AuditEmit != nil {
-			req.AuditEmit("artifact.published", mr.ArtifactID, audit.RedactFields(map[string]string{
+			// §8.2 manifest-declared redaction: merge the author-named
+			// sensitive frontmatter fields into each event's context so the
+			// audit_redact directive has a concrete target, then redact.
+			// Structural keys win on collision. The redacted map is what
+			// AuditEmit receives, so a raw value never leaves this closure.
+			redactExtra := manifest.FrontmatterFields(mr.Frontmatter, mr.AuditRedact)
+			redacted := func(base map[string]string) map[string]string {
+				for k, v := range redactExtra {
+					if _, ok := base[k]; !ok {
+						base[k] = v
+					}
+				}
+				return audit.RedactFields(base, mr.AuditRedact)
+			}
+			req.AuditEmit("artifact.published", mr.ArtifactID, redacted(map[string]string{
 				"version":      mr.Version,
 				"content_hash": mr.ContentHash,
 				"layer":        mr.Layer,
-			}, mr.AuditRedact))
+			}))
 			if deprecatedFlip {
-				req.AuditEmit("artifact.deprecated", mr.ArtifactID, audit.RedactFields(map[string]string{
+				req.AuditEmit("artifact.deprecated", mr.ArtifactID, redacted(map[string]string{
 					"version": mr.Version,
 					"layer":   mr.Layer,
-				}, mr.AuditRedact))
+				}))
 			}
 			if mr.Signature != "" {
-				req.AuditEmit("artifact.signed", mr.ArtifactID, audit.RedactFields(map[string]string{
+				req.AuditEmit("artifact.signed", mr.ArtifactID, redacted(map[string]string{
 					"version":      mr.Version,
 					"content_hash": mr.ContentHash,
-				}, mr.AuditRedact))
+				}))
 			}
 		}
 
@@ -1436,6 +1483,33 @@ func rejectsSensitivity(floor, actual manifest.Sensitivity) bool {
 		return 0
 	}
 	return rank(actual) >= rank(floor)
+}
+
+// sandboxProfileUnenforceable reports whether profile cannot be honored by a
+// host whose enforceable set is enforceable (§13.10 / §4.4.1). The empty
+// profile and unrestricted impose no constraint and are always enforceable;
+// any other profile must appear in the host's enforceable set. Callers gate
+// this on Request.EnforceSandboxProfile so the standalone default never
+// rejects on sandbox grounds.
+func sandboxProfileUnenforceable(profile string, enforceable []string) bool {
+	if profile == "" || profile == string(manifest.SandboxUnrestricted) {
+		return false
+	}
+	for _, e := range enforceable {
+		if e == profile {
+			return false
+		}
+	}
+	return true
+}
+
+// sandboxProfileList renders the host's enforceable sandbox set for a
+// rejection message, defaulting to unrestricted when the set is empty.
+func sandboxProfileList(enforceable []string) string {
+	if len(enforceable) == 0 {
+		return string(manifest.SandboxUnrestricted)
+	}
+	return strings.Join(enforceable, ", ")
 }
 
 // groupLintErrors keeps only error-severity diagnostics, grouped by

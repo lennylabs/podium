@@ -330,7 +330,7 @@ func seedBootstrapAdmins(ctx context.Context, st store.Store, tenantID string, a
 	return seeded, nil
 }
 
-func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Visibility, startOrder int, allowPerDomain bool, resourcePut ingest.ResourcePutFunc, rejectAtOrAbove manifest.Sensitivity, signer ingest.SignerFunc, useVectorOutbox bool) ([]layer.Layer, error) {
+func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Visibility, startOrder int, allowPerDomain bool, resourcePut ingest.ResourcePutFunc, rejectAtOrAbove manifest.Sensitivity, signer ingest.SignerFunc, useVectorOutbox bool, enforceSandbox bool, hostSandboxes []string) ([]layer.Layer, error) {
 	if layerPath == "" {
 		return []layer.Layer{}, nil
 	}
@@ -350,6 +350,9 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			// high artifacts at ingest with ingest.public_mode_rejects_sensitive.
 			// Empty (non-public deployments) imposes no floor.
 			RejectAtOrAbove: rejectAtOrAbove,
+			// §13.10 sandbox-profile ingest gate (off unless enforced).
+			EnforceSandboxProfile:      enforceSandbox,
+			EnforceableSandboxProfiles: hostSandboxes,
 			// §4.4: validate prose URL references with an HTTP HEAD by
 			// default; PODIUM_INGEST_OFFLINE=true skips the network probe.
 			// §4.5.5: warn on DOMAIN.md discovery: blocks when per-domain
@@ -499,7 +502,10 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resou
 				Files:    os.DirFS(lc.LocalPath),
 				// §13.10/§13.2.2 public-mode sensitivity ceiling.
 				RejectAtOrAbove: publicSensitivityFloor(cfg),
-				Linter:          ingestLinter(cfg.allowPerDomain()),
+				// §13.10 sandbox-profile ingest gate (off unless enforced).
+				EnforceSandboxProfile:      cfg.enforceSandboxProfile,
+				EnforceableSandboxProfiles: cfg.hostSandboxes,
+				Linter:                     ingestLinter(cfg.allowPerDomain()),
 				// §7.2 data plane: persist bundled resources at ingest.
 				ResourcePut: resourcePut,
 				// §13.10/§4.7.9 ingest signing: nil leaves manifests unsigned.
@@ -700,7 +706,7 @@ func Run() error {
 	// DELETE /v1/layers) see the bootstrap layers. These layers carry no
 	// per-layer visibility input, so they take the deployment default
 	// (§4.6 / §13.10 / F-4.6.9). They append after the declared layers.
-	pathLayers, err := bootstrapLayerPath(st, tenantID, cfg.layerPath, defaultBootstrapVisibility(cfg), len(declared), cfg.allowPerDomain(), resourcePut, publicSensitivityFloor(cfg), ingestSigner, useVectorOutbox)
+	pathLayers, err := bootstrapLayerPath(st, tenantID, cfg.layerPath, defaultBootstrapVisibility(cfg), len(declared), cfg.allowPerDomain(), resourcePut, publicSensitivityFloor(cfg), ingestSigner, useVectorOutbox, cfg.enforceSandboxProfile, cfg.hostSandboxes)
 	if err != nil {
 		return err
 	}
@@ -1280,6 +1286,14 @@ type Config struct {
 	// server.DefaultMaxUserLayers default (3); a negative value disables
 	// the cap.
 	maxUserLayers int
+	// §13.10 sandbox-profile ingest gate. enforceSandboxProfile is set by
+	// PODIUM_ENFORCE_SANDBOX_PROFILE=true; when true the registry refuses to
+	// ingest an artifact whose sandbox_profile cannot be honored by the local
+	// host. hostSandboxes is the locally-enforceable set (PODIUM_HOST_SANDBOXES,
+	// default unrestricted). Off by default so standalone treats
+	// sandbox_profile as informational.
+	enforceSandboxProfile bool
+	hostSandboxes         []string
 	// §13.2.1 read-only mode probe.
 	readOnlyProbeFailures int
 	readOnlyProbeInterval int
@@ -1440,6 +1454,8 @@ func (c *Config) Settings() []Setting {
 		{"embedding_model", c.embeddingModel, envOrSrc("PODIUM_EMBEDDING_MODEL", yamlSrc)},
 		{"layers.default_visibility", c.defaultLayerVisibility, envOrSrc("PODIUM_DEFAULT_LAYER_VISIBILITY", defaultSrc)},
 		{"layers.max_user_layers", intStr(c.maxUserLayers), envOrSrc("PODIUM_MAX_USER_LAYERS", defaultSrc)},
+		{"sandbox_profile.enforced", boolStr(c.enforceSandboxProfile), envOrSrc("PODIUM_ENFORCE_SANDBOX_PROFILE", defaultSrc)},
+		{"sandbox_profile.host_sandboxes", strings.Join(c.hostSandboxes, ","), envOrSrc("PODIUM_HOST_SANDBOXES", defaultSrc)},
 		{"layers.path", c.layerPath, envOrSrc("PODIUM_LAYER_PATH", yamlSrc)},
 		{"tenant.expose_scope_preview", boolStr(c.exposeScopePreview == nil || *c.exposeScopePreview), envOrSrc("PODIUM_EXPOSE_SCOPE_PREVIEW", yamlSrc)},
 		{"read_only.probe_failures", intStr(c.readOnlyProbeFailures), envOrSrc("PODIUM_READONLY_PROBE_FAILURES", defaultSrc)},
@@ -1533,6 +1549,10 @@ func LoadConfig() *Config {
 		defaultLayerVisibility: os.Getenv("PODIUM_DEFAULT_LAYER_VISIBILITY"),
 		// §7.3.1 user-defined-layer cap (0 = default of 3).
 		maxUserLayers: envInt("PODIUM_MAX_USER_LAYERS", 0),
+		// §13.10 sandbox-profile ingest gate. Off unless flipped to
+		// standard-mode behavior; hostSandboxes defaults to unrestricted.
+		enforceSandboxProfile: isTrue(os.Getenv("PODIUM_ENFORCE_SANDBOX_PROFILE")),
+		hostSandboxes:         splitCSVTrim(envDefault("PODIUM_HOST_SANDBOXES", "unrestricted")),
 		// §13.2.1 read-only probe. Sentinel -1 means "unset by env" so the
 		// registry.yaml overlay and the spec defaults below can distinguish an
 		// absent value from an explicit 0 (which disables the probe). The

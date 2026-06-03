@@ -91,6 +91,7 @@ func KnownMatrices() []Matrix {
 					"ingest.immutable_violation",
 					"ingest.frozen",
 					"ingest.public_mode_rejects_sensitive",
+					"ingest.sandbox_profile_unenforceable",
 					"ingest.webhook_invalid",
 					"ingest.source_unreachable",
 					"ingest.collision",
