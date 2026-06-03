@@ -75,7 +75,7 @@ A misconfigured public-mode deployment is the most common security-relevant oper
 
 ## 13.4 Migrations
 
-The registry applies its metadata-store schema from the binary on startup. Each backend's setup is idempotent and additive: tables are created when absent and new columns are added when absent (`CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`), so a binary upgrade migrates an existing database forward in place, without a separate migration step and without downtime. The SQLite and Postgres schema live in their respective `applySchema` paths.
+The registry applies its metadata-store schema from the binary on startup. Each backend's setup is idempotent and additive: tables are created when absent (`CREATE TABLE IF NOT EXISTS`) and new columns are added when absent (Postgres uses `ADD COLUMN IF NOT EXISTS`; SQLite, which lacks that syntax, issues `ALTER TABLE ... ADD COLUMN` and ignores the duplicate-column error on an already-migrated database), so a binary upgrade migrates an existing database forward in place, without a separate migration step and without downtime. The SQLite and Postgres schema live in their respective `applySchema` paths.
 
 Type definitions are compiled into the binary and evolve with it. The first-class types and any registered `TypeProvider` validators ship as code, so a binary upgrade is the type-system migration; there is no separate versioned type-migration artifact.
 

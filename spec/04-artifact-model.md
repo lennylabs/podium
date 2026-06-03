@@ -195,7 +195,7 @@ The `sbom:` field is informational. Podium stores whatever YAML the author write
 input: { $ref: ./schemas/input.json }
 output: { $ref: ./schemas/output.json }
 
-# For type: agent — well-known delegation targets (constrained to agent-type)
+# For type: agent — well-known delegation targets (advisory; any artifact type, not enforced at ingest)
 delegates_to:
   - finance/procurement/vendor-compliance-check@1.x
 
@@ -814,7 +814,7 @@ During a freeze, blocked operations are rejected unless `--break-glass` is passe
 The registry indexes "X depends on Y" edges across artifacts:
 
 - `extends:` chains
-- `delegates_to:` references (constrained to `agent`-type targets)
+- `delegates_to:` references (target type is advisory, not enforced at ingest)
 - `mcpServers:` references that resolve to `mcp-server`-type artifacts via `server_identifier`
 
 Tag co-occurrence is **not** a dependency edge (too noisy for impact analysis).

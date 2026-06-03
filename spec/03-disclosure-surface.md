@@ -16,7 +16,7 @@ When the host doesn't know which domain to start in, it calls `search_domains(qu
 
 ### Layer 2: Search (`search_artifacts`)
 
-When the host has the right neighborhood but doesn't know which artifact, it calls `search_artifacts(query?, scope?, type?, tags?)`. The registry runs a hybrid retriever (BM25 + embeddings, fused via reciprocal rank) over manifest text, returning a ranked list of `(artifact_id, summary, score)` tuples. All args are optional. `search_artifacts(scope="<path>")` with no query is the canonical "browse all artifacts in a domain" move. Search returns descriptors only.
+When the host has the right neighborhood but doesn't know which artifact, it calls `search_artifacts(query?, scope?, type?, tags?)`. The registry runs a hybrid retriever (BM25 + embeddings, fused via reciprocal rank) over manifest text, returning a ranked list of `(artifact_id, description, score)` tuples (the exact descriptor schema is normative in §7.6.1). All args are optional. `search_artifacts(scope="<path>")` with no query is the canonical "browse all artifacts in a domain" move. Search returns descriptors only.
 
 ### Layer 3: Load (`load_artifact`)
 

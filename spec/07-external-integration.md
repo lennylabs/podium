@@ -84,7 +84,7 @@ Artifacts enter the registry by being merged into a tracked Git ref (or, for `lo
 podium layer register --id <id> --repo <git-url> --ref <ref> [--root <subpath>]
 podium layer register --id <id> --local <path>
 podium layer list
-podium layer reorder <id> [<id> ...]            # user-defined layers only
+podium layer reorder <id> [<id> ...]            # admin-defined layers (admin auth) or your own user-defined layers
 podium layer unregister <id>
 podium layer reingest <id> [--break-glass --justification <text>]
 podium layer watch <id> [--interval <duration>]
