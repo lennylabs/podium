@@ -112,7 +112,7 @@ func (w *vectorDrainWorker) publishStats(ctx context.Context, now time.Time) {
 // supports the outbox and a vector backend is configured. It mirrors the
 // retention/anchor scheduler goroutine pattern: an immediate pass, then one per
 // tick, running until the process exits.
-func startVectorOutboxWorker(cfg *Config, st store.Store, vec vector.Provider, embedder embedding.Provider, mreg *metrics.Registry, auditSink *audit.FileSink, tenantID string) {
+func startVectorOutboxWorker(cfg *Config, st store.Store, vec vector.Provider, embedder embedding.Provider, mreg *metrics.Registry, auditSink audit.Sink, tenantID string) {
 	ob, ok := st.(store.VectorOutbox)
 	if !ok {
 		return
@@ -153,7 +153,7 @@ func startVectorOutboxWorker(cfg *Config, st store.Store, vec vector.Provider, e
 // when an audit sink is configured, records a vector.outbox_lagging event with
 // the observed depth and oldest-row age so operators can alert on a backed-up
 // external backend.
-func vectorOutboxLaggingCallback(sink *audit.FileSink, tenantID string) func(int, time.Duration) {
+func vectorOutboxLaggingCallback(sink audit.Sink, tenantID string) func(int, time.Duration) {
 	return func(depth int, age time.Duration) {
 		log.Printf("vector outbox lagging: depth=%d oldest_age=%s", depth, age)
 		if sink == nil {

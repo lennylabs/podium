@@ -305,9 +305,20 @@ type LayerConfig struct {
 
 // stampDeprecation sets DeprecatedAt from IngestedAt (falling back to
 // now) when a manifest is deprecated and the timestamp is unset, so the
-// §8.4 90-day purge window has an anchor. A version's deprecated state is
-// fixed at ingest time; the flag is "set" when the deprecated version is
-// stored. Every backend's PutManifest calls this before persisting.
+// §8.4 deprecated-version purge window has an anchor.
+//
+// §8.4 specifies the window as "90 days after the deprecation flag is set".
+// In this implementation `deprecated` is a per-version manifest frontmatter
+// field, so a version's deprecated state is fixed when that version is
+// ingested: deprecating an artifact means ingesting a manifest with
+// `deprecated: true`, which produces a distinct record (new content hash)
+// with its own IngestedAt. There is no in-place toggle that flips an
+// already-stored version's flag, so IngestedAt of the deprecated record is
+// the moment the flag was set, and anchoring DeprecatedAt to it matches the
+// spec. Were a post-ingest deprecation path ever added, it would need to
+// stamp DeprecatedAt at that transition instead of inheriting IngestedAt.
+// Every backend's PutManifest calls this before persisting. spec: §8.4
+// (F-8.4.2).
 func stampDeprecation(rec *ManifestRecord) {
 	if rec.Deprecated && rec.DeprecatedAt == nil {
 		t := rec.IngestedAt

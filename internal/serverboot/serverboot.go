@@ -986,7 +986,13 @@ func Run() error {
 	// hook on the registry. Nil when the path can't be resolved
 	// (probes still log; downstream features that need the sink
 	// gracefully no-op).
-	auditSink := openAuditSink(cfg)
+	// auditSink is the §8.3 registry sink every event is emitted through
+	// (a file sink, or an EndpointSink when PODIUM_AUDIT_LOG_PATH names a
+	// SIEM endpoint, F-8.3.1). auditFile is the same sink in its file form,
+	// non-nil only for the file case; the §8.6 anchor/verify, §8.4 retention,
+	// and §8.5 erasure paths rewrite the on-disk chain and run only against
+	// it.
+	auditSink, auditFile := openAuditSink(cfg)
 	// §8.2 default-on query-text scrubbing: build the scrubber from the
 	// resolved PIIRedactionConfig (env PODIUM_PII_REDACTION + registry.yaml
 	// pii_redaction). A nil scrubber means an operator disabled it. Resolved
@@ -1031,6 +1037,10 @@ func Run() error {
 		// shares one §8.6 hash chain.
 		server.WithAudit(auditSink)(srv)
 		layers.WithAudit(auditSink)
+		// §8.5 erasure rewrites the on-disk chain in place, so the layer
+		// endpoint also needs the file form of the sink; nil when redirected
+		// to an endpoint (F-8.3.1).
+		layers.WithEraseSink(auditFile)
 	}
 
 	// §7.3.1: wire the ingest-pipeline driver so the manual reingest and
@@ -1054,12 +1064,12 @@ func Run() error {
 	// Operators monitor audit.anchored / audit.anchor_failed events.
 	var reAnchor func()
 	if cfg.auditAnchorInterval > 0 {
-		if signer := startAnchorScheduler(cfg, auditSink); signer != nil {
+		if signer := startAnchorScheduler(cfg, auditFile); signer != nil {
 			// §8.6/F-8.4.8: after a retention pass drops events the chain
 			// head moves, invalidating the last anchor. Re-anchor the new
 			// head immediately so verifiers do not wait for the next tick.
 			reAnchor = func() {
-				if _, err := audit.Anchor(context.Background(), auditSink, signer); err != nil {
+				if _, err := audit.Anchor(context.Background(), auditFile, signer); err != nil {
 					log.Printf("audit re-anchor after retention failed: %v", err)
 				}
 			}
@@ -1073,7 +1083,7 @@ func Run() error {
 	// (PODIUM_AUDIT_VERIFY_INTERVAL_SECONDS defaults to one hour); set the
 	// interval to 0 to disable.
 	if cfg.auditVerifyInterval > 0 {
-		startVerifyScheduler(cfg, auditSink)
+		startVerifyScheduler(cfg, auditFile)
 	}
 
 	// §8.4 audit-event retention: a goroutine truncates the audit log on
@@ -1082,7 +1092,7 @@ func Run() error {
 	// Enabled by default (PODIUM_AUDIT_RETENTION_INTERVAL_SECONDS defaults
 	// to one day); set the interval to 0 to disable.
 	if cfg.auditRetentionInterval > 0 {
-		startRetentionScheduler(cfg, auditSink, reAnchor)
+		startRetentionScheduler(cfg, auditFile, reAnchor)
 	}
 
 	// §8.4 store retention: when PODIUM_STORE_RETENTION_INTERVAL_SECONDS
@@ -1279,9 +1289,11 @@ type Config struct {
 	auditSampleRates map[audit.EventType]float64
 	// §8.4 store retention sweeps. storeRetentionInterval > 0 enables a
 	// goroutine that purges deprecated artifact versions and expired
-	// soft-deleted layers on a cadence; the day windows default to the
-	// §8.4 table (90 days for deprecated versions, 30 days for the
-	// owner-unregistered-layer recovery window).
+	// soft-deleted layers on a cadence; it defaults to one day so the
+	// windows are enforced out of the box (set the interval to 0 to
+	// disable). The day windows default to the §8.4 table (90 days for
+	// deprecated versions, 30 days for the owner-unregistered-layer recovery
+	// window).
 	storeRetentionInterval  int
 	deprecatedRetentionDays int
 	layerRecoveryDays       int
@@ -1528,8 +1540,12 @@ func LoadConfig() *Config {
 		auditRetentionMaxAgeDays: envInt("PODIUM_AUDIT_RETENTION_MAX_AGE_DAYS", 365),
 		// §8.4 optional sampling, e.g. PODIUM_AUDIT_SAMPLE_RATES="domain.loaded=0.1".
 		auditSampleRates: parseAuditSampleRates(os.Getenv("PODIUM_AUDIT_SAMPLE_RATES")),
-		// §8.4 store retention sweeps (deprecated-version + layer-recovery purge).
-		storeRetentionInterval:  envInt("PODIUM_STORE_RETENTION_INTERVAL_SECONDS", 0),
+		// §8.4 store retention sweeps (deprecated-version + layer-recovery
+		// purge). The interval defaults to one day so the §8.4 "90 days after
+		// the deprecation flag is set" and "30 days" (owner-unregistered layer)
+		// windows are enforced out of the box, matching the audit-retention
+		// scheduler; set PODIUM_STORE_RETENTION_INTERVAL_SECONDS=0 to disable.
+		storeRetentionInterval:  envInt("PODIUM_STORE_RETENTION_INTERVAL_SECONDS", 86400),
 		deprecatedRetentionDays: envInt("PODIUM_DEPRECATED_RETENTION_DAYS", 90),
 		layerRecoveryDays:       envInt("PODIUM_LAYER_RECOVERY_DAYS", 30),
 		// §8.2 query-text scrub: default-on, disabled with PODIUM_PII_REDACTION=false.

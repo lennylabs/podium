@@ -61,8 +61,16 @@ type LayerEndpoint struct {
 	maxUserLayers int
 	// auditSink records §8.1 layer.config_changed (admin-defined) and
 	// layer.user_registered (personal) events on register, unregister, and
-	// reorder. Nil is a no-op.
-	auditSink *audit.FileSink
+	// reorder. It is the §8.3 registry sink (a file sink or an EndpointSink
+	// when redirected to a SIEM, F-8.3.1). Nil is a no-op.
+	auditSink audit.Sink
+	// auditFile is the file-backed form of the §8.3 registry sink, set only
+	// when the sink writes a local log. The §8.5 erasure pass rewrites the
+	// on-disk hash chain in place (audit.EraseUser), so it needs the concrete
+	// file sink; it is nil when the registry is redirected to an external
+	// endpoint, where the receiving aggregator owns erasure of the shipped
+	// stream. spec: §8.3, §8.5.
+	auditFile *audit.FileSink
 	// reingestRunner runs the §7.3.1 ingest pipeline for a resolved layer
 	// (the manual reingest and inbound-webhook triggers). serverboot wires
 	// it with the source-provider resolver, linter, event publisher, audit
@@ -136,8 +144,19 @@ func (e *LayerEndpoint) WithMaxUserLayers(n int) *LayerEndpoint {
 
 // WithAudit installs the §8.3 audit sink the endpoint records layer
 // lifecycle events to (§8.1 layer.config_changed / layer.user_registered).
-func (e *LayerEndpoint) WithAudit(sink *audit.FileSink) *LayerEndpoint {
+// The sink may be a file sink or an EndpointSink (SIEM redirect, F-8.3.1).
+func (e *LayerEndpoint) WithAudit(sink audit.Sink) *LayerEndpoint {
 	e.auditSink = sink
+	return e
+}
+
+// WithEraseSink installs the file-backed sink the §8.5 erasure flow
+// rewrites in place. Pass the same file sink given to WithAudit when the
+// registry writes a local log; pass nil when redirected to an external
+// endpoint, in which case the erase endpoint purges layers but performs no
+// local-log redaction (the aggregator owns the shipped stream). F-8.3.1.
+func (e *LayerEndpoint) WithEraseSink(file *audit.FileSink) *LayerEndpoint {
+	e.auditFile = file
 	return e
 }
 
@@ -326,13 +345,16 @@ func (e *LayerEndpoint) erase(w http.ResponseWriter, r *http.Request) {
 	}
 	// spec §8.5 (F-8.5.3): redact the user identity across the registry audit
 	// stream and append the registry-sourced user.erased event naming the
-	// invoking admin (F-8.5.4). The registry's §8.3 sink is the same file the
-	// retention and anchor schedulers operate on, so the redaction lands on
-	// the authoritative stream.
+	// invoking admin (F-8.5.4). The registry's §8.3 file sink is the same log
+	// the retention and anchor schedulers operate on, so the redaction lands
+	// on the authoritative stream. When the registry is redirected to an
+	// external endpoint (no local file, F-8.3.1) there is no on-disk chain to
+	// rewrite: the layers are still purged and the aggregator owns redaction
+	// of the shipped stream.
 	admin := callerIdentityString(e.identify(r))
 	redacted := 0
-	if e.auditSink != nil {
-		redacted, err = audit.EraseUser(r.Context(), e.auditSink, body.UserID, body.Salt, admin)
+	if e.auditFile != nil {
+		redacted, err = audit.EraseUser(r.Context(), e.auditFile, body.UserID, body.Salt, admin)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 			return

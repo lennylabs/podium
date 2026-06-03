@@ -35,6 +35,7 @@ func eraseTestEndpoint(t *testing.T, admin layer.Identity, authErr error) (*http
 	}
 	ep := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
 		WithAudit(sink).
+		WithEraseSink(sink).
 		WithIdentityResolver(func(*http.Request) layer.Identity { return admin }).
 		WithAdminAuth(func(*http.Request) error { return authErr })
 	mux := http.NewServeMux()

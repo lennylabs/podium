@@ -19,22 +19,50 @@ import (
 	"github.com/lennylabs/podium/pkg/sign"
 )
 
-// openAuditSink returns a file-backed audit sink at the configured
-// path (defaults to ~/.podium/audit.log). Returns nil + a logged
-// warning when the path can't be resolved; callers treat nil as
-// "no audit sink available" and continue without persisting.
-func openAuditSink(cfg *Config) *audit.FileSink {
+// openAuditSink builds the registry's §8.3 audit sink from
+// PODIUM_AUDIT_LOG_PATH. A filesystem path (or the empty default,
+// ~/.podium/audit.log) yields a hash-chained file sink. An http(s) value
+// yields an EndpointSink that forwards catalogue events to an external
+// SIEM / log aggregator, mirroring the local sink's PODIUM_AUDIT_SINK
+// redirect so "both the registry and local sinks can be redirected to
+// external SIEM / log aggregation independently" (§8.3). spec: §8.3, §9.1.
+// F-8.3.1.
+//
+// It returns the emit sink (the audit.Sink every event flows through) plus
+// the *FileSink, which is non-nil only for the file case. The §8.6
+// anchor/verify and §8.4 retention schedulers, and the §8.5 erasure pass,
+// walk and rewrite the on-disk chain, so they run only against the file
+// sink; with an endpoint, the receiving aggregator owns durability,
+// integrity, and erasure of the shipped stream. Both returns are nil (with
+// a logged warning) when the sink can't be constructed; callers treat a
+// nil emit sink as "no audit sink available" and continue.
+func openAuditSink(cfg *Config) (audit.Sink, *audit.FileSink) {
+	if isAuditEndpoint(cfg.auditLogPath) {
+		sink, err := audit.NewEndpointSink(cfg.auditLogPath)
+		if err != nil {
+			log.Printf("warning: audit sink disabled (endpoint): %v", err)
+			return nil, nil
+		}
+		return sink, nil
+	}
 	logPath, err := resolveAuditPath(cfg.auditLogPath)
 	if err != nil {
 		log.Printf("warning: audit sink disabled (path): %v", err)
-		return nil
+		return nil, nil
 	}
 	sink, err := audit.NewFileSink(logPath)
 	if err != nil {
 		log.Printf("warning: audit sink disabled (open): %v", err)
-		return nil
+		return nil, nil
 	}
-	return sink
+	return sink, sink
+}
+
+// isAuditEndpoint reports whether a PODIUM_AUDIT_LOG_PATH value selects the
+// external-endpoint sink rather than a local file path. The MCP local sink
+// applies the same http(s) test to PODIUM_AUDIT_SINK. spec: §8.3.
+func isAuditEndpoint(v string) bool {
+	return strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://")
 }
 
 // startAnchorScheduler bootstraps the §8.6 audit-anchoring

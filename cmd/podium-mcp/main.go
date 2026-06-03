@@ -445,10 +445,11 @@ type mcpServer struct {
 	// loop is single-threaded, so these need no extra synchronization.
 	hostSupportsRoots bool
 	rootsRequested    bool
-	// audit is the optional §6.2 local audit sink (PODIUM_AUDIT_SINK).
-	// Nil when the var is unset, in which case auditing is left to the
-	// registry. When set, meta-tool calls append a local audit event.
-	audit audit.Sink
+	// audit is the optional §6.2/§8.3 local audit sink (PODIUM_AUDIT_SINK),
+	// the §9.1 LocalAuditSink seam. Nil when the var is unset, in which case
+	// auditing is left to the registry. When set, meta-tool calls append a
+	// local audit event.
+	audit audit.LocalAuditSink
 	// scrubber applies the §8.2 default-on query-text PII scrub before a
 	// search event is written to the local audit sink. Nil when an operator
 	// disabled scrubbing via PODIUM_PII_REDACTION=false.
@@ -582,7 +583,7 @@ func piiDisabledValue(v string) bool {
 //
 // spec: §6.2 — "When set without a value (or set to `default`), uses
 // ~/.podium/audit.log".
-func newAuditSink(cfg *config) (audit.Sink, error) {
+func newAuditSink(cfg *config) (audit.LocalAuditSink, error) {
 	if !cfg.auditSinkSet {
 		return nil, nil
 	}

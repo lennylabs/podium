@@ -84,8 +84,10 @@ type Server struct {
 	lag LagReporter
 	// auditSink records §8.1 events that originate at the HTTP boundary
 	// (admin.granted). Read events flow through the core emitter; sharing
-	// the same sink keeps both on one §8.6 hash chain. Nil is a no-op.
-	auditSink *audit.FileSink
+	// the same sink keeps both on one §8.6 hash chain. It is the §8.3
+	// registry sink, which is a file sink or an EndpointSink when redirected
+	// to a SIEM (§8.3, F-8.3.1). Nil is a no-op.
+	auditSink audit.Sink
 	// latency, when set, receives one §7.1 timing observation per served
 	// request (operation name, status, elapsed) so a deployment can compare
 	// observed latency against the SLO budgets. Nil disables timing with
@@ -216,7 +218,7 @@ func WithTenant(t string) Option {
 // WithAudit installs the §8.3 audit sink used to record HTTP-boundary
 // events (admin.granted). The same sink backs the core read-event emitter
 // so both streams stay on one §8.6 hash chain.
-func WithAudit(sink *audit.FileSink) Option {
+func WithAudit(sink audit.Sink) Option {
 	return func(s *Server) { s.auditSink = sink }
 }
 

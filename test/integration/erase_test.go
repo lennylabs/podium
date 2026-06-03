@@ -45,6 +45,7 @@ func TestErase_SQLitePurgesLayersAndRedactsAudit(t *testing.T) {
 	admin := layer.Identity{Sub: "carol@acme.com", IsAuthenticated: true}
 	ep := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
 		WithAudit(sink).
+		WithEraseSink(sink).
 		WithIdentityResolver(func(*http.Request) layer.Identity { return admin }).
 		WithAdminAuth(func(*http.Request) error { return nil })
 	mux := http.NewServeMux()

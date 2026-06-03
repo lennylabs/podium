@@ -73,6 +73,39 @@ const (
 	EventRetentionEnforced EventType = "audit.retention_enforced"
 )
 
+// AllEventTypes returns every audit EventType this package defines. The
+// §8.4 retention layer uses it to assert that each type is classified
+// (operational vs. retained-indefinitely) so a newly added type cannot be
+// silently omitted from the default policy. Keep it in sync with the const
+// block above. spec: §8.1, §8.4.
+func AllEventTypes() []EventType {
+	return []EventType{
+		EventDomainLoaded,
+		EventDomainsSearched,
+		EventArtifactsSearched,
+		EventArtifactLoaded,
+		EventArtifactPublished,
+		EventArtifactDeprecated,
+		EventArtifactSigned,
+		EventDomainPublished,
+		EventLayerIngested,
+		EventLayerHistoryRewritten,
+		EventLayerConfigChanged,
+		EventLayerUserRegistered,
+		EventAdminGranted,
+		EventVisibilityDenied,
+		EventAdminVisibilityOverride,
+		EventFreezeBreakGlass,
+		EventUserErased,
+		EventReadOnlyEntered,
+		EventReadOnlyExited,
+		EventAuditAnchored,
+		EventAuditAnchorFailed,
+		EventAuditGapDetected,
+		EventRetentionEnforced,
+	}
+}
+
 // CallerNetwork captures the source network attributes recorded for a
 // public-mode caller per §8.1: the source IP address and any upstream
 // X-Forwarded-User header. Filtered out (nil) for authenticated callers.
@@ -160,6 +193,19 @@ type Sink interface {
 	Append(ctx context.Context, e Event) error
 	Verify(ctx context.Context) error
 }
+
+// LocalAuditSink and RegistryAuditSink are the §9.1 SPI-table names for
+// the two audit seams. §9.1 lists them as distinct interfaces (the local
+// MCP-server log and the registry's catalogue-event sink) while stating
+// that "the audit.Sink interface is the seam"; both are therefore aliases
+// of Sink. The §8.3 prose names LocalAuditSink as the interface the MCP
+// server writes the local file log through, and the §9.1 default column
+// names FileSink as RegistryAuditSink's backing. The aliases let code and
+// the spec reference the same names. spec: §8.3, §9.1.
+type (
+	LocalAuditSink    = Sink
+	RegistryAuditSink = Sink
+)
 
 // Memory is an in-memory hash-chained Sink.
 type Memory struct {

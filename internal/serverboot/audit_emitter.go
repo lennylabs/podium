@@ -8,8 +8,9 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/server"
 )
 
-// auditEmitterFor adapts the §8 file-backed sink to the core.AuditEmitter
-// so every meta-tool call surfaces in the audit log. It carries the §8.1
+// auditEmitterFor adapts the §8.3 registry sink (a file sink, or an
+// EndpointSink when redirected to a SIEM) to the core.AuditEmitter so
+// every meta-tool call surfaces in the audit log. It carries the §8.1
 // trace id and structured caller attributes (email, groups, public-mode
 // network, and the public_mode flag) from the per-request audit metadata
 // the server's identity middleware attached to the context.
@@ -22,7 +23,7 @@ import (
 // The §8.4 sampler is consulted first: when an event type carries a
 // configured keep-rate (e.g. domain.loaded at 10%), the emitter drops the
 // event before it enters the hash chain. A nil sampler keeps every event.
-func auditEmitterFor(sink *audit.FileSink, scrubber *audit.PIIScrubber, sampler *audit.Sampler) core.AuditEmitter {
+func auditEmitterFor(sink audit.Sink, scrubber *audit.PIIScrubber, sampler *audit.Sampler) core.AuditEmitter {
 	return func(ctx context.Context, e core.AuditEvent) {
 		if !sampler.Keep(audit.EventType(e.Type)) {
 			return

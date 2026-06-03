@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // Spec: §4.7.1 Tenancy — tenants isolate manifest visibility; a
@@ -79,6 +80,61 @@ func TestMemory_AdminGrants(t *testing.T) {
 	}
 	if ok, _ := s.IsAdmin(ctx, "joan", "other"); ok {
 		t.Errorf("admin grant leaked across orgs")
+	}
+}
+
+// Spec: §8.4 (F-8.4.2) — the deprecated-version retention window is
+// anchored to the moment "the deprecation flag is set". Deprecation is a
+// per-version manifest field set at ingest, so stampDeprecation anchors
+// DeprecatedAt to each deprecated version's own IngestedAt. A later
+// "deprecation flip" (a new version ingested deprecated) anchors to its own
+// later ingest time, not an earlier version's, so the 90-day window starts
+// when that version's flag was set.
+func TestStampDeprecation_AnchorsToPerVersionIngestTime(t *testing.T) {
+	t.Parallel()
+
+	// Not deprecated: never stamped.
+	live := &ManifestRecord{IngestedAt: time.Now().UTC()}
+	stampDeprecation(live)
+	if live.DeprecatedAt != nil {
+		t.Errorf("non-deprecated version was stamped: %v", live.DeprecatedAt)
+	}
+
+	// Born deprecated: DeprecatedAt == that version's IngestedAt (= flag-set
+	// time).
+	v1Ingest := time.Now().UTC().Add(-200 * 24 * time.Hour)
+	v1 := &ManifestRecord{Deprecated: true, IngestedAt: v1Ingest}
+	stampDeprecation(v1)
+	if v1.DeprecatedAt == nil || !v1.DeprecatedAt.Equal(v1Ingest) {
+		t.Errorf("born-deprecated DeprecatedAt = %v, want %v", v1.DeprecatedAt, v1Ingest)
+	}
+
+	// Deprecation flip: a newer version ingested deprecated anchors to its
+	// own (later) ingest time, not v1's.
+	v2Ingest := time.Now().UTC().Add(-1 * 24 * time.Hour)
+	v2 := &ManifestRecord{Deprecated: true, IngestedAt: v2Ingest}
+	stampDeprecation(v2)
+	if v2.DeprecatedAt == nil || !v2.DeprecatedAt.Equal(v2Ingest) {
+		t.Errorf("flip DeprecatedAt = %v, want %v", v2.DeprecatedAt, v2Ingest)
+	}
+	if v2.DeprecatedAt.Equal(*v1.DeprecatedAt) {
+		t.Error("flipped version inherited the earlier version's deprecation anchor")
+	}
+
+	// Zero IngestedAt falls back to a non-zero stamp so the window still has
+	// an anchor.
+	noTime := &ManifestRecord{Deprecated: true}
+	stampDeprecation(noTime)
+	if noTime.DeprecatedAt == nil || noTime.DeprecatedAt.IsZero() {
+		t.Errorf("zero-IngestedAt deprecated version got no anchor: %v", noTime.DeprecatedAt)
+	}
+
+	// An already-set DeprecatedAt is preserved (idempotent).
+	preset := time.Now().UTC().Add(-10 * 24 * time.Hour)
+	pre := &ManifestRecord{Deprecated: true, IngestedAt: v1Ingest, DeprecatedAt: &preset}
+	stampDeprecation(pre)
+	if !pre.DeprecatedAt.Equal(preset) {
+		t.Errorf("preset DeprecatedAt overwritten: got %v, want %v", pre.DeprecatedAt, preset)
 	}
 }
 

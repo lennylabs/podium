@@ -24,7 +24,7 @@ func buildReingestRunner(
 	srv *server.Server,
 	cfg *Config,
 	resourcePut ingest.ResourcePutFunc,
-	auditSink *audit.FileSink,
+	auditSink audit.Sink,
 	scrubber *audit.PIIScrubber,
 	signer ingest.SignerFunc,
 	mreg *metrics.Registry,
@@ -141,7 +141,7 @@ func reingestCaller(ctx context.Context) string {
 // pipeline's §8.1 events (artifact.published, layer.ingested,
 // layer.history_rewritten, freeze.break_glass) land in the audit log with the
 // request's trace id and caller. A nil scrubber disables query-text scrubbing.
-func ingestAuditEmitter(ctx context.Context, sink *audit.FileSink, scrubber *audit.PIIScrubber, caller string) ingest.AuditEmitterFunc {
+func ingestAuditEmitter(ctx context.Context, sink audit.Sink, scrubber *audit.PIIScrubber, caller string) ingest.AuditEmitterFunc {
 	traceID := ""
 	if m, ok := server.AuditMetaFromContext(ctx); ok {
 		traceID = m.TraceID

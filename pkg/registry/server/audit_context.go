@@ -158,7 +158,7 @@ func (s *Server) withAuditMetaMiddleware(next http.Handler) http.Handler {
 // otherwise derives it from the request directly, so write handlers that
 // are not behind the middleware still record a trace id and caller
 // network. A nil sink is a no-op.
-func emitAuditEvent(sink *audit.FileSink, r *http.Request, id layer.Identity, typ audit.EventType, target string, fields map[string]string) {
+func emitAuditEvent(sink audit.Sink, r *http.Request, id layer.Identity, typ audit.EventType, target string, fields map[string]string) {
 	if sink == nil {
 		return
 	}

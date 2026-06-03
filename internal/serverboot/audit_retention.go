@@ -69,31 +69,66 @@ func runRetentionOnce(ctx context.Context, sink *audit.FileSink, policies []audi
 	}
 }
 
-// defaultRetentionPolicies builds a per-event-type policy table
-// that applies maxAge to every event the registry emits. Deployers
-// needing differentiated retention fork the slice.
+// operationalEventTypes are the §8.1 operational audit events the §8.4
+// "Audit events (metadata): 1 year" default applies to. defaultRetention
+// Policies assigns each of them maxAge.
+var operationalEventTypes = []audit.EventType{
+	audit.EventDomainLoaded,
+	audit.EventDomainsSearched,
+	audit.EventArtifactsSearched,
+	audit.EventArtifactLoaded,
+	audit.EventArtifactPublished,
+	audit.EventArtifactDeprecated,
+	audit.EventArtifactSigned,
+	audit.EventDomainPublished,
+	audit.EventLayerIngested,
+	audit.EventLayerHistoryRewritten,
+	audit.EventLayerConfigChanged,
+	audit.EventLayerUserRegistered,
+	audit.EventAdminGranted,
+	audit.EventVisibilityDenied,
+	// admin.visibility_override is a §4.7.2 access-control accountability
+	// event, retained on the same 1-year window as admin.granted and
+	// visibility.denied (F-8.4.3).
+	audit.EventAdminVisibilityOverride,
+	audit.EventFreezeBreakGlass,
+	audit.EventReadOnlyEntered,
+	audit.EventReadOnlyExited,
+}
+
+// retainedIndefinitelyEventTypes are the integrity and GDPR-accountability
+// events deliberately kept past the §8.4 metadata window. The §8.4 table
+// frames its rows as "Defaults, configurable per deployment"; these types
+// carry no default policy, so Enforce never drops them (F-8.4.3):
+//
+//   - The §8.6 transparency-anchor markers (audit.anchored / anchor_failed /
+//     gap_detected) and the §8.4/§8.6 audit.retention_enforced boundary
+//     marker record the chain state needed to reconcile an external anchor
+//     of a superseded head; aging them out would erase the reconciliation
+//     trail.
+//   - user.erased is the §8.5 GDPR right-to-erasure accountability record;
+//     it persists to prove the erasure was honored.
+//
+// An operator wanting a finite window for any of these adds an explicit
+// Policy to the slice defaultRetentionPolicies returns.
+var retainedIndefinitelyEventTypes = []audit.EventType{
+	audit.EventUserErased,
+	audit.EventAuditAnchored,
+	audit.EventAuditAnchorFailed,
+	audit.EventAuditGapDetected,
+	audit.EventRetentionEnforced,
+}
+
+// defaultRetentionPolicies builds the §8.4 per-event-type policy table.
+// Every operationalEventTypes entry gets maxAge (the 1-year "Audit events
+// (metadata)" default); the retainedIndefinitelyEventTypes carry no policy
+// and are kept indefinitely. The two sets together classify every
+// audit.EventType (asserted by a unit test) so a newly added type is not
+// silently dropped from retention. Deployers needing differentiated
+// retention fork the returned slice.
 func defaultRetentionPolicies(maxAge time.Duration) []audit.Policy {
-	types := []audit.EventType{
-		audit.EventDomainLoaded,
-		audit.EventDomainsSearched,
-		audit.EventArtifactsSearched,
-		audit.EventArtifactLoaded,
-		audit.EventArtifactPublished,
-		audit.EventArtifactDeprecated,
-		audit.EventArtifactSigned,
-		audit.EventDomainPublished,
-		audit.EventLayerIngested,
-		audit.EventLayerHistoryRewritten,
-		audit.EventLayerConfigChanged,
-		audit.EventLayerUserRegistered,
-		audit.EventAdminGranted,
-		audit.EventVisibilityDenied,
-		audit.EventFreezeBreakGlass,
-		audit.EventReadOnlyEntered,
-		audit.EventReadOnlyExited,
-	}
-	out := make([]audit.Policy, 0, len(types))
-	for _, t := range types {
+	out := make([]audit.Policy, 0, len(operationalEventTypes))
+	for _, t := range operationalEventTypes {
 		out = append(out, audit.Policy{Type: t, MaxAge: maxAge})
 	}
 	return out
