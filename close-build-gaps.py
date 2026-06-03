@@ -71,8 +71,28 @@ DEFAULTS = {
     "verify_timeout": 1800,  # seconds for the verify session (30 min)
     "retries": 5,          # resume-retries after a failed/timed-out batch
     "model": "claude-opus-4-8",
-    "effort": "medium",
+    "effort": "xhigh",
     "no_progress_limit": 5,  # abort if this many iterations close nothing and build nothing
+}
+
+# Live backend services (Postgres + MinIO object store) for the Tier 2 tests,
+# injected into every `claude -p` subprocess so findings that need a real
+# backend (Postgres schema-per-org / row-level security; object-store delivery)
+# are implemented and VERIFIED against it rather than deferred. Values match the
+# Makefile `test-live` target and the dev-deps scripts. Each is applied with
+# setdefault, so a value the operator already exported wins. The live tests
+# self-skip when the service is unreachable, so injecting these is safe even if
+# the services happen to be down.
+LIVE_ENV = {
+    "PODIUM_POSTGRES_DSN": "postgres://podium:podium@localhost:5432/podium?sslmode=disable",
+    # The endpoint is a URL whose scheme selects TLS (ParseS3Endpoint, §13.12);
+    # http:// is required for a plaintext local MinIO. A bare host defaults to
+    # HTTPS and fails against MinIO with an HTTP/HTTPS mismatch.
+    "PODIUM_S3_ENDPOINT": "http://localhost:9000",
+    "PODIUM_S3_BUCKET": "podium",
+    "PODIUM_S3_ACCESS_KEY_ID": "minioadmin",
+    "PODIUM_S3_SECRET_ACCESS_KEY": "minioadmin",
+    "PODIUM_S3_USE_SSL": "false",
 }
 
 # --------------------------------------------------------------------------
@@ -116,14 +136,19 @@ F. ANTI-HANG -- THIS IS CRITICAL. Never run a blocking, interactive, or
      - Run `go test` with an explicit timeout, scoped to the packages you
        touched, e.g. `go test -timeout 120s ./pkg/<pkg>/...`. Do NOT run a
        bare `go test ./...` (it is slow and can hang on e2e tests).
-     - Never run `podium serve`, `podium-mcp`, any `... --watch`,
-       `podium login`, or any TUI / long-running / interactive command in
-       the foreground. If a test must drive a server or the MCP subprocess,
-       the TEST owns its lifecycle: start it as a child process, use context
-       deadlines and bounded reads, and always tear it down (t.Cleanup or
-       defer). Every end-to-end test must have a hard timeout and must never
-       block forever.
-     - Redirect stdin from /dev/null for any command that might read it.
+     - Never run `podium serve`, `podium-mcp`, any `... --watch`, or
+       `podium login` in the foreground. If a test must drive a server or the
+       MCP subprocess, the TEST owns its lifecycle: start it as a child
+       process, use context deadlines and bounded reads, and always tear it
+       down (t.Cleanup or defer). Every end-to-end test must have a hard
+       timeout and must never block forever.
+     - TUI EXCEPTION: developing the Podium TUI is allowed (for example the
+       `podium sync override` and `podium profile edit` interactive modes,
+       F-7.5.1). You may build and run that TUI. Do NOT block on it
+       interactively in the foreground: drive it from tests via scripted
+       stdin or a pseudo-terminal under a hard timeout with teardown, and keep
+       a non-TTY fallback path. The TUI under test must never block forever.
+     - Redirect stdin from /dev/null for any non-TUI command that might read it.
 
 G. REUSE existing packages and patterns before creating new ones. Prefer
    small functions and modules; add comments only to explain why.
@@ -135,6 +160,20 @@ I. CONTINUITY. A running log of prior sessions is at the path in the
    REMEDIATION_RUNNING_LOG environment variable. When it exists and is
    non-empty, read its tail (e.g. `tail -200 "$REMEDIATION_RUNNING_LOG"`)
    before you start so you do not re-attempt finished work.
+
+J. LIVE BACKENDS ARE AVAILABLE -- USE THEM. A real Postgres and a MinIO
+   object store run locally, Docker is available, and their connection env
+   vars are already set in your environment: PODIUM_POSTGRES_DSN for Postgres
+   and the PODIUM_S3_* vars for the object store. Findings that require a real
+   backend -- Postgres tenancy/isolation (schema-per-org + row-level security)
+   and object-store delivery (presigned manifest bodies / bundled resources)
+   -- MUST be implemented and VERIFIED against these live services. Do not
+   defer such a finding for "no backend available." Run the live tests for the
+   packages you touch, e.g.
+     PODIUM_POSTGRES_DSN="$PODIUM_POSTGRES_DSN" go test -timeout 300s ./pkg/store/...
+   and the object-store / resource-delivery integration + e2e tests. These
+   self-skip ONLY when the service is genuinely unreachable, so a skip means
+   the service is down: report that rather than marking the finding done.
 """
 
 RESUME_PROMPT = (
@@ -152,8 +191,11 @@ VERIFY_PROMPT = (
     "  go build ./...\n"
     "  go vet ./...\n"
     "  go test -timeout 300s ./... -count=1\n"
-    "(Tier 1 only; the live Tier 2 tests self-skip without PODIUM_LIVE_* env "
-    "vars. The -timeout bounds each package so nothing hangs.)\n"
+    "(The live backend env is set for you -- PODIUM_POSTGRES_DSN and the "
+    "PODIUM_S3_* vars -- so the Tier 2 Postgres and object-store tests run "
+    "against the local Postgres + MinIO. They self-skip only when a service is "
+    "unreachable; note any such skip. The -timeout bounds each package so "
+    "nothing hangs.)\n"
     "Report, concisely: whether `go build ./...` passed, whether `go vet` "
     "passed, whether the test suite passed, and a one-line entry per failing "
     "package with the cause. Do not attempt fixes; this is a read-only "
@@ -387,6 +429,11 @@ def run_claude(prompt: str, resume_id, timeout: int, cfg) -> ClaudeResult:
 
     env = dict(os.environ)
     env["REMEDIATION_RUNNING_LOG"] = RUNNING_LOG
+    # Expose the live backends (Postgres + MinIO) to every batch so
+    # backend-dependent findings are verified, not deferred. setdefault keeps
+    # any value the operator already exported.
+    for _k, _v in LIVE_ENV.items():
+        env.setdefault(_k, _v)
 
     # start_new_session=True puts claude (and any go test / server children)
     # in its own process group so a timeout can kill the whole tree.

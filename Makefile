@@ -71,7 +71,7 @@ test:
 # Sigstore live tests stay manual; see RELEASING.md for the env vars
 # to set when validating signing changes before a release.
 LIVE_POSTGRES_DSN ?= postgres://podium:podium@localhost:5432/podium?sslmode=disable
-LIVE_S3_ENDPOINT  ?= localhost:9000
+LIVE_S3_ENDPOINT  ?= http://localhost:9000
 LIVE_S3_BUCKET    ?= podium
 LIVE_S3_KEY       ?= minioadmin
 LIVE_S3_SECRET    ?= minioadmin

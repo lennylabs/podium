@@ -38,7 +38,7 @@ func TestPostgres_ConformanceSuite(t *testing.T) {
 	storetest.Suite(t, func(t *testing.T) store.Store {
 		t.Helper()
 		if _, err := s.DB().ExecContext(context.Background(),
-			`TRUNCATE manifests, dependencies, admin_grants, layer_configs, tenants
+			`TRUNCATE manifests, domains, dependencies, admin_grants, layer_configs, tenants
 			 RESTART IDENTITY CASCADE`); err != nil {
 			t.Fatalf("truncate before sub-test: %v", err)
 		}

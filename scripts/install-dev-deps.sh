@@ -63,8 +63,10 @@ install_docker_path() {
   echo "Starting Postgres + MinIO + bucket bootstrap..."
   make services-up
   echo
-  echo "Done. Verify with:"
+  echo "Done. Postgres (:5432) and MinIO (:9000, console :9001) are up; the"
+  echo "bootstrap container created the 'podium' bucket. Verify with:"
   echo "    scripts/preflight-postgres.sh"
+  echo "    scripts/preflight-minio.sh"
 }
 
 install_native_path() {
@@ -95,13 +97,68 @@ install_native_path() {
       exit 1
       ;;
   esac
+  install_native_minio
   echo
   echo "Done. Verify with:"
   echo "    scripts/preflight-postgres.sh"
+  echo "    scripts/preflight-minio.sh"
+}
+
+# install_native_minio installs the MinIO server + mc client, starts a local
+# server with the docker-compose credentials (minioadmin/minioadmin) and data
+# under .podium-dev/minio-data/, then creates the `podium` bucket. This gives
+# the object-store live tests (PODIUM_S3_*) a real backend on the native path,
+# matching what the Docker path provides via `make services-up`.
+install_native_minio() {
+  local data_dir alias_set
+  data_dir="$(pwd)/.podium-dev/minio-data"
+  mkdir -p "$data_dir"
+
+  if ! have minio; then
+    case "$uname_s" in
+      Darwin)
+        have brew || { echo "Homebrew required to install MinIO on macOS."; exit 1; }
+        echo "Installing MinIO server + client via Homebrew..."
+        brew install minio/stable/minio minio/stable/mc
+        ;;
+      Linux)
+        echo "Installing MinIO server + client binaries from dl.min.io..."
+        local bindir="${HOME}/.local/bin"; mkdir -p "$bindir"
+        curl -fsSL https://dl.min.io/server/minio/release/linux-amd64/minio  -o "$bindir/minio" && chmod +x "$bindir/minio"
+        curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc        -o "$bindir/mc"    && chmod +x "$bindir/mc"
+        case ":$PATH:" in *":$bindir:"*) ;; *) echo "Add $bindir to your PATH.";; esac
+        export PATH="$bindir:$PATH"
+        ;;
+    esac
+  else
+    echo "MinIO already installed."
+  fi
+
+  if nc -z -w2 localhost 9000 >/dev/null 2>&1 || (exec 3<>/dev/tcp/localhost/9000) 2>/dev/null; then
+    echo "MinIO already serving on :9000."
+  else
+    echo "Starting MinIO server in the background (console on :9001)..."
+    MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD=minioadmin \
+      nohup minio server "$data_dir" --address ':9000' --console-address ':9001' \
+      >.podium-dev/minio.log 2>&1 &
+    # Wait for readiness (bounded).
+    for _ in $(seq 1 20); do
+      nc -z -w1 localhost 9000 >/dev/null 2>&1 && break
+      sleep 0.5
+    done
+  fi
+
+  # Create the bucket with mc (idempotent).
+  if have mc; then
+    mc alias set podiumlocal http://localhost:9000 minioadmin minioadmin >/dev/null 2>&1 && alias_set=1
+    [ -n "${alias_set:-}" ] && mc mb --ignore-existing podiumlocal/podium >/dev/null 2>&1 && echo "Bucket 'podium' ready."
+  else
+    echo "mc client not found; create the 'podium' bucket manually via the console at http://localhost:9001"
+  fi
 }
 
 echo "Podium dev-dependency install (mode: $MODE)"
 case "$MODE" in
-  docker) install_docker_path ;;
-  native) install_native_path ;;
+  docker) install_docker_path ;;   # Docker path provisions MinIO via `make services-up` (minio + bucket bootstrap)
+  native) install_native_path ;;   # native path installs Postgres + pgvector and MinIO + mc
 esac
