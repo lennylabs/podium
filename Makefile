@@ -21,7 +21,7 @@ LDFLAGS := -X 'github.com/lennylabs/podium/internal/buildinfo.Version=$(VERSION)
            -X 'github.com/lennylabs/podium/internal/buildinfo.Commit=$(COMMIT)' \
            -X 'github.com/lennylabs/podium/internal/buildinfo.Date=$(DATE)'
 
-.PHONY: help test test-live bench build \
+.PHONY: help test test-live test-live-external bench build \
         lint update-golden \
         speccov speccov-uncovered speccov-drift speccov-report \
         coverage coverage-budget coverage-per-package coverage-gate \
@@ -33,6 +33,7 @@ help:
 	@echo "Podium make targets:"
 	@echo "  test             Run the full Go test suite"
 	@echo "  test-live        Run the suite with env vars pointing at docker-compose services"
+	@echo "  test-live-external  Run the suite against managed vector/embedding services (PODIUM_LIVE_EXTERNAL=1)"
 	@echo "  bench            Run §7.1 latency benchmarks (informational)"
 	@echo "  lint             Run linters (golangci-lint when available)"
 	@echo "  update-golden    Re-run tests with UPDATE_GOLDEN=1"
@@ -84,6 +85,57 @@ test-live:
 	PODIUM_S3_ACCESS_KEY_ID="$(LIVE_S3_KEY)" \
 	PODIUM_S3_SECRET_ACCESS_KEY="$(LIVE_S3_SECRET)" \
 	PODIUM_S3_USE_SSL="$(LIVE_S3_USE_SSL)" \
+	$(GO) test $(GOFLAGS) -count=1 ./...
+
+# Run the full suite against managed vector backends (Pinecone, Weaviate
+# Cloud, Qdrant Cloud) and embedding providers (OpenAI, Cohere, Voyage,
+# Ollama). PODIUM_LIVE_EXTERNAL=1 is the master switch; each managed
+# vector/embedding live test additionally gates on its own per-service
+# credentials and skips with a reason when they are absent, so a partial
+# credential set runs only the subset it can reach. Per-service credentials
+# are read from the ambient environment (CI injects them from secrets; set
+# them in your shell for local runs). The vars are forwarded explicitly
+# below so the credential surface this lane consumes is legible; an unset
+# var stays empty and its sub-suite skips.
+#
+# Postgres and S3 are forwarded too so the pgvector depth tests and the
+# managed-stack e2e take their live paths when a stack is running (the
+# release workflow sets these to its service values).
+test-live-external:
+	PODIUM_LIVE_EXTERNAL=1 \
+	PODIUM_VECTOR_BACKEND="$$PODIUM_VECTOR_BACKEND" \
+	PODIUM_EMBEDDING_PROVIDER="$$PODIUM_EMBEDDING_PROVIDER" \
+	PODIUM_EMBEDDING_MODEL="$$PODIUM_EMBEDDING_MODEL" \
+	PODIUM_PINECONE_API_KEY="$$PODIUM_PINECONE_API_KEY" \
+	PODIUM_PINECONE_INDEX="$$PODIUM_PINECONE_INDEX" \
+	PODIUM_PINECONE_HOST="$$PODIUM_PINECONE_HOST" \
+	PODIUM_PINECONE_NAMESPACE="$$PODIUM_PINECONE_NAMESPACE" \
+	PODIUM_PINECONE_INFERENCE_MODEL="$$PODIUM_PINECONE_INFERENCE_MODEL" \
+	PODIUM_PINECONE_CONTROL_PLANE="$$PODIUM_PINECONE_CONTROL_PLANE" \
+	PODIUM_WEAVIATE_URL="$$PODIUM_WEAVIATE_URL" \
+	PODIUM_WEAVIATE_API_KEY="$$PODIUM_WEAVIATE_API_KEY" \
+	PODIUM_WEAVIATE_COLLECTION="$$PODIUM_WEAVIATE_COLLECTION" \
+	PODIUM_WEAVIATE_VECTORIZER="$$PODIUM_WEAVIATE_VECTORIZER" \
+	PODIUM_QDRANT_URL="$$PODIUM_QDRANT_URL" \
+	PODIUM_QDRANT_API_KEY="$$PODIUM_QDRANT_API_KEY" \
+	PODIUM_QDRANT_COLLECTION="$$PODIUM_QDRANT_COLLECTION" \
+	PODIUM_QDRANT_INFERENCE_MODEL="$$PODIUM_QDRANT_INFERENCE_MODEL" \
+	OPENAI_API_KEY="$$OPENAI_API_KEY" \
+	PODIUM_OPENAI_MODEL="$$PODIUM_OPENAI_MODEL" \
+	PODIUM_OPENAI_BASE_URL="$$PODIUM_OPENAI_BASE_URL" \
+	PODIUM_OPENAI_ORG="$$PODIUM_OPENAI_ORG" \
+	COHERE_API_KEY="$$COHERE_API_KEY" \
+	PODIUM_COHERE_MODEL="$$PODIUM_COHERE_MODEL" \
+	VOYAGE_API_KEY="$$VOYAGE_API_KEY" \
+	PODIUM_VOYAGE_MODEL="$$PODIUM_VOYAGE_MODEL" \
+	PODIUM_OLLAMA_URL="$$PODIUM_OLLAMA_URL" \
+	PODIUM_OLLAMA_MODEL="$$PODIUM_OLLAMA_MODEL" \
+	PODIUM_POSTGRES_DSN="$$PODIUM_POSTGRES_DSN" \
+	PODIUM_S3_ENDPOINT="$$PODIUM_S3_ENDPOINT" \
+	PODIUM_S3_BUCKET="$$PODIUM_S3_BUCKET" \
+	PODIUM_S3_ACCESS_KEY_ID="$$PODIUM_S3_ACCESS_KEY_ID" \
+	PODIUM_S3_SECRET_ACCESS_KEY="$$PODIUM_S3_SECRET_ACCESS_KEY" \
+	PODIUM_S3_USE_SSL="$$PODIUM_S3_USE_SSL" \
 	$(GO) test $(GOFLAGS) -count=1 ./...
 
 # ----- Local services for live tests ---------------------------------------

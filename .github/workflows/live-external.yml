@@ -1,0 +1,132 @@
+name: live-external
+
+# Release-and-manual only. This is the only lane that contacts the managed
+# vector backends (Pinecone, Weaviate Cloud, Qdrant Cloud) and the paid
+# embedding providers (OpenAI, Cohere, Voyage). Those calls cost money and
+# consume per-account quotas, so the suite runs when a release is cut or a
+# maintainer triggers it by hand, and never on pull_request or schedule.
+#
+# It needs the account secrets listed in the env block below. Any secret
+# that is absent leaves its sub-suite skipped (PODIUM_LIVE_EXTERNAL=1 is the
+# master switch; each live test gates again on its own per-service
+# credentials), so a partial secret set runs only the subset it can reach.
+#
+# Postgres + pgvector and MinIO come up as a local stack so the pgvector
+# depth tests and the managed-stack e2e take their live paths. Ollama is
+# installed on the runner so the storage-only matrix has a no-account
+# embedding provider. Mirror the pinned action versions and the service
+# bootstrap from nightly.yml; keep them in sync.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-external:
+    name: live managed vector + embedding services
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # pgvector/pgvector:pg16 ships Postgres 16 with the `vector`
+        # extension preinstalled, so both pkg/store and pkg/vector
+        # exercise the same container. Kept in sync with nightly.yml.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: podium
+          POSTGRES_DB: podium
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
+
+      - name: Start MinIO
+        # Pinned; keep in sync with docker-compose.yml, release.yml, and
+        # nightly.yml. MinIO starts from a step rather than a service
+        # because the image needs `server /data` as its command and the
+        # services block cannot set CMD.
+        run: |
+          docker run -d --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:RELEASE.2024-10-29T16-01-48Z \
+            server /data
+          for i in $(seq 1 30); do
+            if curl -fs http://localhost:9000/minio/health/ready; then
+              echo "MinIO ready"
+              exit 0
+            fi
+            echo "Waiting for MinIO ($i/30)..."
+            sleep 2
+          done
+          echo "MinIO did not become ready in time" >&2
+          docker logs minio
+          exit 1
+
+      - name: Create test bucket
+        run: |
+          curl -sSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc
+          chmod +x /usr/local/bin/mc
+          mc alias set local http://localhost:9000 minioadmin minioadmin
+          mc mb --ignore-existing local/podium
+
+      - name: Install and start Ollama
+        # The no-account embedding provider for the storage-only matrix.
+        # Pull nomic-embed-text (the offline default model) so the storage
+        # -only pairing has a local embedder with no external key.
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve >/tmp/ollama.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fs http://localhost:11434/api/tags >/dev/null; then
+              echo "Ollama ready"
+              break
+            fi
+            echo "Waiting for Ollama ($i/30)..."
+            sleep 2
+          done
+          ollama pull nomic-embed-text
+
+      - name: live external-services suite
+        env:
+          PODIUM_LIVE_EXTERNAL: "1"
+          # Postgres + S3 service values (mirrors nightly.yml) so the
+          # pgvector depth tests and managed-stack e2e take their live paths.
+          PODIUM_POSTGRES_DSN: postgres://postgres:podium@localhost:5432/podium?sslmode=disable
+          PODIUM_S3_ENDPOINT: localhost:9000
+          PODIUM_S3_BUCKET: podium
+          PODIUM_S3_ACCESS_KEY_ID: minioadmin
+          PODIUM_S3_SECRET_ACCESS_KEY: minioadmin
+          PODIUM_S3_USE_SSL: "false"
+          # Managed vector backends. Absent secrets leave the sub-suite skipped.
+          PODIUM_PINECONE_API_KEY: ${{ secrets.PODIUM_PINECONE_API_KEY }}
+          PODIUM_PINECONE_INDEX: ${{ secrets.PODIUM_PINECONE_INDEX }}
+          PODIUM_WEAVIATE_URL: ${{ secrets.PODIUM_WEAVIATE_URL }}
+          PODIUM_WEAVIATE_API_KEY: ${{ secrets.PODIUM_WEAVIATE_API_KEY }}
+          PODIUM_WEAVIATE_COLLECTION: ${{ secrets.PODIUM_WEAVIATE_COLLECTION }}
+          PODIUM_QDRANT_URL: ${{ secrets.PODIUM_QDRANT_URL }}
+          PODIUM_QDRANT_API_KEY: ${{ secrets.PODIUM_QDRANT_API_KEY }}
+          PODIUM_QDRANT_COLLECTION: ${{ secrets.PODIUM_QDRANT_COLLECTION }}
+          # Embedding providers. Ollama needs no key (served locally above).
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
+          VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
+        run: make test-live-external
