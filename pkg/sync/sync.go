@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/lennylabs/podium/pkg/adapter"
@@ -263,6 +264,7 @@ func Run(opts Options) (*Result, error) {
 		if err != nil {
 			return nil, fmt.Errorf("adapter %q failed for %s: %w", a.ID(), rec.ID, err)
 		}
+		stripHarnessConfigPrefix(opts.Target, out)
 		paths := make([]string, len(out))
 		for i, f := range out {
 			paths[i] = f.Path
@@ -353,6 +355,32 @@ func Run(opts Options) (*Result, error) {
 		fmt.Fprintf(os.Stderr, "sync: lock write failed: %v\n", err)
 	}
 	return res, nil
+}
+
+// stripHarnessConfigPrefix removes the leading path segment from each
+// adapter-emitted file when that segment already names the sync target's final
+// directory component. The §7.5/§7.5.3/§14.11 model points --target at the
+// harness config directory itself (e.g. ./build/.claude/) and records each
+// materialized_path relative to it (agents/pay-invoice.md). Harness adapters
+// prefix that same config directory onto every emitted path (.claude/agents/…),
+// so a --target that already ends in .claude/ would otherwise produce a doubled
+// .claude/.claude/ tree on disk and a lock recording .claude/agents/… instead
+// of the spec's agents/…. Neutral buckets whose leading segment differs from the
+// target directory (.podium/, .mcp.json, AGENTS.md) are left untouched.
+// spec: §7.5.3, §14.11.
+func stripHarnessConfigPrefix(target string, files []adapter.File) {
+	base := filepath.Base(filepath.Clean(target))
+	if base == "." || base == string(filepath.Separator) || base == "" {
+		return
+	}
+	for i := range files {
+		// adapter.File.Path is slash-separated (built with path.Join), so the
+		// first segment is everything up to the first "/".
+		seg, rest, found := strings.Cut(files[i].Path, "/")
+		if found && rest != "" && seg == base {
+			files[i].Path = rest
+		}
+	}
 }
 
 // lockContentHash returns the §7.5.3 content_hash to pin in the lock for a

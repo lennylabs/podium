@@ -4,6 +4,7 @@
 package integration
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -298,6 +299,51 @@ func TestPodiumSync_IsIdempotent(t *testing.T) {
 		if _, ok := got[want]; !ok {
 			t.Errorf("missing %q after second run", want)
 		}
+	}
+}
+
+// Spec: §7.5.3 / §14.11 (F-14.11.2) — when --target already names the harness
+// config directory (./build/.claude/, as in the §14.11 pipeline step), the
+// claude-code adapter's .claude/ prefix must not be doubled on disk, and the
+// committed lock records each materialized_path relative to the target
+// (agents/pay-invoice.md), matching the §7.5.3 lock example. End-to-end via the
+// real binary against a single-layer filesystem source.
+func TestPodiumSync_TargetNamesHarnessConfigDir_NoDoubledClaude(t *testing.T) {
+	t.Parallel()
+	registry := t.TempDir()
+	agent := "---\ntype: agent\nversion: 1.2.0\ndescription: Pay an invoice.\n---\n\nPay-invoice body.\n"
+	testharness.WriteTree(t, registry,
+		testharness.WriteTreeOption{Path: "finance/ap/pay-invoice/ARTIFACT.md", Content: agent},
+	)
+	// The target's final segment is the claude-code config dir.
+	target := filepath.Join(t.TempDir(), "build", ".claude")
+	res := cmdharness.Run(t, "podium", "",
+		"sync", "--registry", registry, "--target", target, "--harness", "claude-code",
+	)
+	if res.ExitCode != 0 {
+		t.Fatalf("podium sync exit=%d\nstderr:\n%s", res.ExitCode, res.Stderr)
+	}
+	got := testharness.ReadTree(t, target)
+	// Single .claude/ deep: the agent lands directly under the target.
+	if _, ok := got["agents/pay-invoice.md"]; !ok {
+		t.Errorf("target missing agents/pay-invoice.md (got: %v)", keys(got))
+	}
+	// No doubled .claude/.claude/ segment.
+	for p := range got {
+		if strings.HasPrefix(p, ".claude/") {
+			t.Errorf("doubled .claude/ segment under target: %q", p)
+		}
+	}
+	// The committed lock records the path relative to the target.
+	lock, ok := got[".podium/sync.lock"]
+	if !ok {
+		t.Fatalf("target missing .podium/sync.lock (got: %v)", keys(got))
+	}
+	if !strings.Contains(lock, "materialized_path: agents/pay-invoice.md") {
+		t.Errorf("lock missing relative materialized_path:\n%s", lock)
+	}
+	if strings.Contains(lock, "materialized_path: .claude/") {
+		t.Errorf("lock recorded a doubled .claude/ materialized_path:\n%s", lock)
 	}
 }
 
