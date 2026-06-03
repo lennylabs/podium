@@ -1,9 +1,13 @@
 package store
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/lib/pq"
 )
 
 // additiveColumn describes a non-primary-key column that a binary upgrade
@@ -106,17 +110,49 @@ func applyAdditiveSQLite(db *sql.DB) error {
 	return nil
 }
 
+// execContexter is the subset of *sql.DB / *sql.Conn the additive migration
+// runs against. The §4.7.1 schema-per-org split applies the migration both on
+// the pooled DB (shared tables in public) and on a per-org connection pinned to
+// an org schema, so the migration must accept either handle.
+type execContexter interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
 // applyAdditivePostgres backfills any §13.4 additive column missing from an
 // existing Postgres database using the native ADD COLUMN IF NOT EXISTS
 // guard, which makes a re-run against a current schema a no-op.
 func applyAdditivePostgres(db *sql.DB) error {
+	return applyAdditivePostgresCtx(context.Background(), db)
+}
+
+// applyAdditivePostgresCtx runs the additive migration against ex. Under the
+// §4.7.1 schema-per-org layout no single schema context holds every table the
+// additiveColumns list names (org tables live in per-org schemas, shared tables
+// in public), so a table absent from the current search_path is skipped rather
+// than treated as an error: there is nothing to migrate for a table that does
+// not exist in this context.
+func applyAdditivePostgresCtx(ctx context.Context, ex execContexter) error {
 	for _, c := range additiveColumns {
 		stmt := fmt.Sprintf(`ALTER TABLE %s ADD COLUMN IF NOT EXISTS %s`, c.table, c.pgDef)
-		if _, err := db.Exec(stmt); err != nil {
+		if _, err := ex.ExecContext(ctx, stmt); err != nil {
+			if isUndefinedTable(err) {
+				continue
+			}
 			return fmt.Errorf("schema: %s: %w", stmt, err)
 		}
 	}
 	return nil
+}
+
+// isUndefinedTable reports whether err is Postgres undefined_table (SQLSTATE
+// 42P01), raised when an ALTER targets a table that is not visible in the
+// current search_path.
+func isUndefinedTable(err error) bool {
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) {
+		return pqErr.Code == "42P01"
+	}
+	return false
 }
 
 // isDuplicateColumn reports whether err is SQLite's "duplicate column
