@@ -130,6 +130,8 @@ func applyConfigKV(c *config, key, val string) {
 		c.sessionTokenFile = val
 	case "metrics-addr":
 		c.metricsAddr = val
+	case "min-client-version":
+		c.minClientVersion = val
 	}
 }
 

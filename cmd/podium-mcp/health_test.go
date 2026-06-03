@@ -26,6 +26,30 @@ func readyzStub(t *testing.T, mode string, status int) *httptest.Server {
 	return ts
 }
 
+// healthStub returns an httptest server whose /readyz answers with the
+// given readyMode and status and whose /healthz answers with the given
+// healthMode (always 200, the liveness contract). Any other path 404s.
+// It models the registry's two endpoints so the §13.10 public-mode probe,
+// which reads /healthz, can be exercised independently of /readyz.
+func healthStub(t *testing.T, readyMode string, readyStatus int, healthMode string) *httptest.Server {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/readyz":
+			w.WriteHeader(readyStatus)
+			_ = json.NewEncoder(w).Encode(map[string]any{"mode": readyMode, "replication_lag_seconds": 0})
+		case "/healthz":
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{"mode": healthMode})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(ts.Close)
+	return ts
+}
+
 func newHealthServer(registry string) *mcpServer {
 	return &mcpServer{
 		cfg:         &config{registry: registry},
@@ -76,6 +100,52 @@ func TestHealthTool_ReadOnlyRegistry(t *testing.T) {
 	}
 	if !res.Connected {
 		t.Errorf("connected = false, want true (registry answered)")
+	}
+}
+
+// Spec: §13.10 (F-13.10.1) — the health tool surfaces mode public when the
+// registry runs in public mode. Public is a /healthz-only signal (/readyz
+// reports ready), so the tool must probe /healthz to detect it; a consumer
+// reading the health tool can then tell the registry is unauthenticated.
+func TestHealthTool_PublicMode(t *testing.T) {
+	t.Parallel()
+	ts := healthStub(t, "ready", http.StatusOK, "public")
+	s := newHealthServer(ts.URL)
+
+	res := s.healthTool().(healthResult)
+	if res.Mode != "public" {
+		t.Errorf("mode = %q, want public", res.Mode)
+	}
+	if !res.Connected {
+		t.Errorf("connected = false, want true (registry answered)")
+	}
+}
+
+// Spec: §13.10 (F-13.10.1) — public mode outranks read_only in the
+// registry's modeBanner, so a registry reporting read_only on /readyz but
+// public on /healthz surfaces public.
+func TestHealthTool_PublicOutranksReadOnly(t *testing.T) {
+	t.Parallel()
+	ts := healthStub(t, "read_only", http.StatusOK, "public")
+	s := newHealthServer(ts.URL)
+
+	res := s.healthTool().(healthResult)
+	if res.Mode != "public" {
+		t.Errorf("mode = %q, want public (public outranks read_only)", res.Mode)
+	}
+}
+
+// Spec: §13.9 / §13.10 (F-13.10.1) — a non-public /healthz leaves the
+// /readyz readiness mode intact, so a plain ready registry still reports
+// ready after the public probe.
+func TestHealthTool_NonPublicKeepsReadyMode(t *testing.T) {
+	t.Parallel()
+	ts := healthStub(t, "ready", http.StatusOK, "ready")
+	s := newHealthServer(ts.URL)
+
+	res := s.healthTool().(healthResult)
+	if res.Mode != "ready" {
+		t.Errorf("mode = %q, want ready", res.Mode)
 	}
 }
 

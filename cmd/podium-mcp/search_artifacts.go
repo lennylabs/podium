@@ -20,12 +20,12 @@ func (s *mcpServer) searchArtifacts(args map[string]any) any {
 	}
 	body, err := s.fetchJSON("/v1/search_artifacts", args)
 	if err != nil {
-		// spec: §7.4 / §12 — when the registry is unreachable, surface an
-		// explicit "offline" status the host can present rather than an error
-		// (always-revalidate and offline-first both report the offline status
-		// hosts can surface). The workspace overlay is reachable without the
-		// registry, so a fresh search still returns the local matches alongside
-		// the status.
+		// spec: §7.4 / §12 — when the registry is unreachable, return the
+		// offline envelope rather than an error. always-revalidate surfaces an
+		// explicit "offline" status the host can present; offline-first serves
+		// silently with no status field (F-7.4.4). The workspace overlay is
+		// reachable without the registry, so a fresh search still returns the
+		// local matches either way.
 		if isRegistryUnreachable(err) {
 			return s.offlineSearchArtifacts(args)
 		}
@@ -133,18 +133,18 @@ func stripSearchResultFrontmatter(decoded any) {
 
 // offlineSearchArtifacts builds the §12 offline result for search_artifacts
 // when the registry is unreachable. The workspace overlay (and its optional
-// §9.1 semantic index) is local, so any overlay matches are still returned;
-// the status tells the host the registry stream was unavailable.
+// §9.1 semantic index) is local, so any overlay matches are still returned.
+// Per §7.4, always-revalidate carries an explicit "offline" status; offline-first
+// serves silently with no status field (offlineEnvelope honors the mode). F-7.4.4.
 func (s *mcpServer) offlineSearchArtifacts(args map[string]any) any {
 	query, _ := args["query"].(string)
 	overlayRecords := s.overlaySnapshot()
 	if len(overlayRecords) == 0 {
-		return map[string]any{
-			"status":        "offline",
+		return s.offlineEnvelope(map[string]any{
 			"query":         query,
 			"total_matched": 0,
 			"results":       []any{},
-		}
+		})
 	}
 	typeFilter, _ := args["type"].(string)
 	scope, _ := args["scope"].(string)
@@ -158,14 +158,13 @@ func (s *mcpServer) offlineSearchArtifacts(args map[string]any) any {
 		cancel()
 	}
 	fused := rrfFuse(nil, topK, local, semantic)
-	return map[string]any{
-		"status": "offline",
-		"query":  query,
+	return s.offlineEnvelope(map[string]any{
+		"query": query,
 		// No registry stream offline; the total is the count of distinct
 		// overlay artifacts matched across the local and semantic streams.
 		"total_matched": fusedTotalMatched(0, nil, local, semantic),
 		"results":       fused,
-	}
+	})
 }
 
 // offlineOnlySearchArtifacts serves the §7.4 offline-only contract for

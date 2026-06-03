@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"net"
+	"net/http/httptest"
 	"os/exec"
 	"testing"
 
+	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/internal/testharness/registryharness"
+	"github.com/lennylabs/podium/pkg/registry/server"
 )
 
 // healthToolResult mirrors the §13.9 health tool payload on the wire.
@@ -75,6 +78,39 @@ func TestPodiumMCP_HealthToolReportsUnreachable(t *testing.T) {
 	}
 	if res.Connected {
 		t.Errorf("connected = true, want false (no listener)")
+	}
+}
+
+// Spec: §13.10 (F-13.10.1) — the MCP health tool surfaces mode public when
+// the registry runs in public mode. The real binary probes /healthz (the
+// public-mode signal) in addition to /readyz, so a consumer reading the tool
+// can detect the unauthenticated deployment without inspecting startup config.
+func TestPodiumMCP_HealthToolReportsPublicMode(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	testharness.WriteTree(t, dir,
+		testharness.WriteTreeOption{
+			Path:    "alice-personal/notes/welcome/ARTIFACT.md",
+			Content: "---\ntype: skill\nversion: 1.0.0\nsensitivity: low\n---\n\n<!-- body in SKILL.md -->\n",
+		},
+		testharness.WriteTreeOption{
+			Path:    "alice-personal/notes/welcome/SKILL.md",
+			Content: "---\nname: welcome\ndescription: A welcome skill for the workspace.\n---\n\nhi\n",
+		},
+	)
+	srv, err := server.NewFromFilesystem(dir, server.WithPublicMode())
+	if err != nil {
+		t.Fatalf("server.NewFromFilesystem: %v", err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	res := runHealthTool(t, ts.URL)
+	if res.Mode != "public" {
+		t.Errorf("mode = %q, want public", res.Mode)
+	}
+	if !res.Connected {
+		t.Errorf("connected = false, want true (public registry answered)")
 	}
 }
 

@@ -28,6 +28,10 @@ func serveCmd(args []string) int {
 	strict := fs.Bool("strict", false, "refuse to start without explicit configuration (overrides the zero-flag standalone auto-bootstrap)")
 	configFile := fs.String("config", "", "path to registry.yaml (overrides PODIUM_CONFIG_FILE)")
 	layerPath := fs.String("layer-path", "", "filesystem registry root to ingest at startup (§13.10; overrides PODIUM_LAYER_PATH)")
+	// §6.2: the presigned-URL TTL has env, flag, and config-file forms. The flag
+	// overrides PODIUM_PRESIGN_TTL_SECONDS and the registry.yaml
+	// object_store.presign_ttl_seconds key (env-or-flag wins over the file).
+	presignTTLSeconds := fs.String("presign-ttl-seconds", "", "presigned-URL TTL in seconds (overrides PODIUM_PRESIGN_TTL_SECONDS)")
 	// §13.10 Web UI: opt-in single-page UI at /ui/. The non-loopback bind is
 	// refused unless --web-ui-allow-public-bind is also set and an identity
 	// provider is configured (serverboot validates this).
@@ -57,6 +61,9 @@ func serveCmd(args []string) int {
 	}
 	if *layerPath != "" {
 		_ = os.Setenv("PODIUM_LAYER_PATH", *layerPath)
+	}
+	if *presignTTLSeconds != "" {
+		_ = os.Setenv("PODIUM_PRESIGN_TTL_SECONDS", *presignTTLSeconds)
 	}
 	if *webUI {
 		_ = os.Setenv("PODIUM_WEB_UI", "true")

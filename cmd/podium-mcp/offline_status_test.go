@@ -109,6 +109,61 @@ func TestSearchArtifacts_OfflineStatusServesOverlay(t *testing.T) {
 	}
 }
 
+// Spec: §7.4 (F-7.4.4) — offline-first "serve cached results silently": the
+// discovery meta-tools must NOT carry an explicit "offline" status field in
+// offline-first mode, distinguishing it from always-revalidate, which does.
+func TestProxyGet_OfflineFirstServesSilently(t *testing.T) {
+	t.Parallel()
+	srv := &mcpServer{cfg: &config{registry: unreachableRegistry, cacheMode: "offline-first"}, http: &http.Client{}}
+	out := srv.proxyGet("/v1/search_domains", map[string]any{"query": "x"}, map[string]any{"results": []any{}})
+	m, ok := out.(map[string]any)
+	if !ok {
+		t.Fatalf("got %T, want map", out)
+	}
+	if _, has := m["status"]; has {
+		t.Errorf("offline-first must serve silently (no status field): %v", m)
+	}
+	if _, has := m["error"]; has {
+		t.Errorf("offline-first must not carry an error key: %v", m)
+	}
+	if results, ok := m["results"].([]any); !ok || len(results) != 0 {
+		t.Errorf("results = %v, want empty list", m["results"])
+	}
+}
+
+// Spec: §7.4 (F-7.4.4) — search_artifacts also serves silently in
+// offline-first mode: overlay matches return with no "offline" status field.
+func TestSearchArtifacts_OfflineFirstServesSilently(t *testing.T) {
+	t.Parallel()
+	srv := &mcpServer{cfg: &config{registry: unreachableRegistry, cacheMode: "offline-first"}, http: &http.Client{}}
+	out := srv.searchArtifacts(map[string]any{"query": "variance"})
+	m, ok := out.(map[string]any)
+	if !ok {
+		t.Fatalf("got %T, want map", out)
+	}
+	if _, has := m["status"]; has {
+		t.Errorf("offline-first search must serve silently (no status field): %v", m)
+	}
+	if m["query"] != "variance" {
+		t.Errorf("query = %v, want variance", m["query"])
+	}
+}
+
+// Spec: §7.4 (F-7.4.4) — always-revalidate (the default mode) keeps the
+// explicit "offline" status, the contrast offline-first drops.
+func TestProxyGet_AlwaysRevalidateKeepsOfflineStatus(t *testing.T) {
+	t.Parallel()
+	srv := &mcpServer{cfg: &config{registry: unreachableRegistry, cacheMode: "always-revalidate"}, http: &http.Client{}}
+	out := srv.proxyGet("/v1/load_domain", map[string]any{"path": "finance"}, nil)
+	m, ok := out.(map[string]any)
+	if !ok {
+		t.Fatalf("got %T, want map", out)
+	}
+	if m["status"] != "offline" {
+		t.Errorf("status = %v, want offline (always-revalidate surfaces it)", m["status"])
+	}
+}
+
 // Spec: §7.4 — offline-only "never contact the registry; structured error if
 // cache miss." The discovery meta-tools keep no content cache, so an
 // offline-only load_domain / search_domains returns the structured

@@ -62,6 +62,7 @@ import (
 	"github.com/lennylabs/podium/pkg/tracing"
 	"github.com/lennylabs/podium/pkg/version"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
 // protocolVersion is the maximum MCP wire-protocol version this binary
@@ -96,6 +97,31 @@ func negotiateProtocol(requested string) (agreed string, ok bool) {
 		return requested, true
 	}
 	return protocolVersion, true
+}
+
+// clientVersionRefusal implements the §6.9 "Binary version mismatch with
+// host caller" row. It reports whether a host reporting clientVersion in its
+// initialize clientInfo must be refused against the configured floor
+// (config.minClientVersion), returning the mcp.client_too_old §6.10 message
+// to emit. The check is opt-in: with no floor configured it never refuses,
+// because host version strings are not portably comparable across MCP
+// runtimes. A floor that is itself unparsable, or a host version that is
+// absent or unparsable, also does not refuse: the binary cannot establish a
+// mismatch, so it errs toward serving rather than locking the host out.
+func (s *mcpServer) clientVersionRefusal(clientVersion string) (message string, refuse bool) {
+	floor := s.cfg.minClientVersion
+	if floor == "" || clientVersion == "" {
+		return "", false
+	}
+	atLeast, err := version.AtLeast(clientVersion, floor)
+	if err != nil {
+		return "", false
+	}
+	if atLeast {
+		return "", false
+	}
+	return "mcp.client_too_old: host caller version " + clientVersion +
+		" is below the minimum " + floor + " this binary serves; update the host", true
 }
 
 func main() {
@@ -212,6 +238,15 @@ type config struct {
 	// --metrics-addr), e.g. 127.0.0.1:9090. Empty disables the listener and the
 	// per-call / cache recording.
 	metricsAddr string
+	// minClientVersion is the §6.9 "Binary version mismatch with host caller"
+	// floor: the lowest host (MCP client) version this binary serves. The host
+	// reports its version in the initialize clientInfo.version field; a request
+	// below this floor is refused with mcp.client_too_old so the host can prompt
+	// an update. Empty (the default) disables the check, since host version
+	// strings are not portably comparable across runtimes; a distributor that
+	// pairs a specific host with the binary sets the floor. Sourced from
+	// PODIUM_MIN_CLIENT_VERSION or the min-client-version flag / config key.
+	minClientVersion string
 }
 
 func loadConfig() (*config, error) {
@@ -262,6 +297,8 @@ func loadConfig() (*config, error) {
 		ignoreRuntime:  os.Getenv("PODIUM_IGNORE_RUNTIME_REQUIREMENTS") == "true",
 		// §13.8 opt-in Prometheus listener for the bridge.
 		metricsAddr: os.Getenv("PODIUM_MCP_METRICS_ADDR"),
+		// §6.9 host (MCP client) version floor; empty disables the check.
+		minClientVersion: os.Getenv("PODIUM_MIN_CLIENT_VERSION"),
 	}
 	// §6.2 PODIUM_AUDIT_SINK: distinguish unset (registry audit only) from
 	// set-but-empty (use the default ~/.podium/audit.log). os.Getenv cannot
@@ -485,6 +522,21 @@ func (s *mcpServer) reqCtx() context.Context {
 	return context.Background()
 }
 
+// traceID returns the 32-hex W3C trace id of the in-flight meta-tool
+// call's span, or "" when no recording span is active (tracing off). The
+// registry derives its audit stream's trace id from the same span via the
+// W3C `traceparent` header the otelhttp transport injects on the outbound
+// call (pkg/registry/server/audit_context.go traceIDFromRequest), so
+// stamping this id on the local audit event makes the registry and MCP
+// local streams share one trace id per call, as §8.1 requires.
+func (s *mcpServer) traceID() string {
+	sc := oteltrace.SpanContextFromContext(s.reqCtx())
+	if !sc.HasTraceID() {
+		return ""
+	}
+	return sc.TraceID().String()
+}
+
 // recordSuccess stamps the time of a successful registry call for the
 // §13.9 health tool's last-successful-call field.
 func (s *mcpServer) recordSuccess(t time.Time) {
@@ -610,7 +662,9 @@ func isAuditEndpoint(v string) bool {
 // auditMeta appends a local audit event for a meta-tool call when a sink
 // is configured (§6.2). It is a no-op when auditing is registry-only.
 // Failures are swallowed: a local-audit write must not break a tool call,
-// and the registry audit stream remains the authoritative record.
+// and the registry audit stream remains the authoritative record. The
+// in-flight call's trace id (§8.1) is stamped so the local event shares
+// the registry stream's trace id.
 func (s *mcpServer) auditMeta(t audit.EventType, target string) {
 	if s.audit == nil {
 		return
@@ -619,14 +673,65 @@ func (s *mcpServer) auditMeta(t audit.EventType, target string) {
 		Type:    t,
 		Caller:  s.sessionID,
 		Target:  target,
+		TraceID: s.traceID(),
 		Context: map[string]string{"source": "mcp"},
 	})
+}
+
+// auditLoadArtifact appends the local artifact.loaded event, applying the
+// §8.2 manifest-declared redaction directives before the event reaches the
+// sink. The artifact's audit_redact directive names sensitive frontmatter
+// fields (for example bank_account or ssn); auditLoadArtifact surfaces
+// those field values into the event context and masks them to [redacted],
+// the same directive the registry honors on its own stream. With no
+// audit_redact directive the event carries only the structural source key.
+// The in-flight trace id (§8.1) is stamped for cross-stream correlation.
+func (s *mcpServer) auditLoadArtifact(id, frontmatter string) {
+	if s.audit == nil {
+		return
+	}
+	ev := audit.Event{
+		Type:    audit.EventArtifactLoaded,
+		Caller:  s.sessionID,
+		Target:  id,
+		TraceID: s.traceID(),
+		Context: map[string]string{"source": "mcp"},
+	}
+	// §8.2 manifest-declared redaction: pull the author-named sensitive
+	// fields into the context so the directive has a concrete target, then
+	// mask them. RedactFields lower-cases keys for matching, so the value
+	// reaches the sink only as [redacted].
+	if redactKeys := manifestRedactKeys(frontmatter); len(redactKeys) > 0 {
+		for k, v := range manifest.FrontmatterFields([]byte(frontmatter), redactKeys) {
+			if _, exists := ev.Context[k]; !exists {
+				ev.Context[k] = v
+			}
+		}
+		ev.Context = audit.RedactFields(ev.Context, redactKeys)
+	}
+	_ = s.audit.Append(context.Background(), ev)
+}
+
+// manifestRedactKeys returns the audit_redact field names declared in an
+// artifact's frontmatter, or nil when the frontmatter is absent, unparsable,
+// or declares no directive. It is the value source for the §8.2
+// manifest-declared redaction the MCP local sink applies.
+func manifestRedactKeys(frontmatter string) []string {
+	if frontmatter == "" {
+		return nil
+	}
+	a, err := manifest.ParseArtifact([]byte(frontmatter))
+	if err != nil {
+		return nil
+	}
+	return a.AuditRedact
 }
 
 // auditSearch appends a local audit event for a search meta-tool call,
 // applying the §8.2 default-on query-text scrub to the free-text query
 // before it lands in the local sink. A nil sink is a no-op; a nil scrubber
-// (operator-disabled) writes the query unredacted.
+// (operator-disabled) writes the query unredacted. The in-flight trace id
+// (§8.1) is stamped so the local event shares the registry stream's id.
 func (s *mcpServer) auditSearch(t audit.EventType, query string) {
 	if s.audit == nil {
 		return
@@ -634,6 +739,7 @@ func (s *mcpServer) auditSearch(t audit.EventType, query string) {
 	ev := audit.Event{
 		Type:    t,
 		Caller:  s.sessionID,
+		TraceID: s.traceID(),
 		Context: map[string]string{"source": "mcp", "query": query},
 	}
 	ev = s.scrubber.ScrubEvent(ev)
@@ -982,8 +1088,22 @@ func (s *mcpServer) handle(req rpcRequest) rpcResponse {
 			Capabilities    struct {
 				Roots json.RawMessage `json:"roots"`
 			} `json:"capabilities"`
+			ClientInfo struct {
+				Name    string `json:"name"`
+				Version string `json:"version"`
+			} `json:"clientInfo"`
 		}
 		_ = json.Unmarshal(req.Params, &initParams)
+		// §6.9 "Binary version mismatch with host caller": when this binary is
+		// pinned to a minimum host version, refuse to start a session with a
+		// host older than the floor so the host's CLI can prompt an update. The
+		// refusal is an initialize error, the handshake-level signal a host
+		// surfaces. An absent or unparsable clientInfo.version is not refused
+		// (the mismatch cannot be established).
+		if msg, refuse := s.clientVersionRefusal(initParams.ClientInfo.Version); refuse {
+			resp.Error = &rpcError{Code: -32600, Message: msg}
+			return resp
+		}
 		// §6.4 step 2: record whether the host can answer roots/list so
 		// the serve loop knows it may resolve the workspace overlay from
 		// the host's reported workspace root.
@@ -1096,7 +1216,10 @@ func (s *mcpServer) dispatchTool(p toolCallParams) any {
 		s.auditSearch(audit.EventArtifactsSearched, argString(p.Arguments, "query"))
 		return s.searchArtifacts(p.Arguments)
 	case "load_artifact":
-		s.auditMeta(audit.EventArtifactLoaded, argString(p.Arguments, "id"))
+		// The artifact.loaded local audit event is emitted from the load
+		// paths (deliverLoadArtifact / loadArtifactFromOverlay) where the
+		// resolved manifest is available, so the §8.2 audit_redact directive
+		// has its sensitive frontmatter fields to mask.
 		return s.loadArtifact(p.Arguments)
 	case "health":
 		// §13.9 health tool: registry connectivity + observed mode +
@@ -1340,6 +1463,11 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 	if len(opts) > 0 {
 		o = opts[0]
 	}
+	// §8.1 / §8.2: record the local artifact.loaded event with the in-flight
+	// trace id and the manifest's audit_redact directive applied. Emitted here
+	// (rather than at dispatch) so the resolved frontmatter supplies the
+	// sensitive field values the directive masks.
+	s.auditLoadArtifact(resp.ID, resp.Frontmatter)
 	// §4.7.9 / §6.2: enforce signature verification per
 	// PODIUM_VERIFY_SIGNATURES before the artifact materializes
 	// onto the host filesystem.
@@ -1618,6 +1746,10 @@ func (s *mcpServer) loadArtifactFromOverlay(rec *filesystem.ArtifactRecord, args
 		resp.Version = rec.Artifact.Version
 		resp.ManifestBody = rec.Artifact.Body
 	}
+	// §8.1 / §8.2: the overlay load path emits its own artifact.loaded event,
+	// matching the registry-served path (deliverLoadArtifact), so an overlay
+	// artifact's audit_redact directive is honored on the local sink too.
+	s.auditLoadArtifact(resp.ID, resp.Frontmatter)
 	if err := s.cache.put(contentHash, resp.Frontmatter, resp.ManifestBody, resp.Resources); err != nil {
 		return errorResult("cache: " + err.Error())
 	}
@@ -2242,16 +2374,16 @@ func (s *mcpServer) proxyGet(path string, args, offline map[string]any) any {
 	body, err := s.fetchJSON(path, args)
 	if err != nil {
 		// §7.4 / §12 degraded network: a transport-level failure (registry
-		// unreachable) in always-revalidate or offline-first mode surfaces the
-		// explicit "offline" status hosts can present (§12), letting the host
-		// tell a transient outage from a request rejection. The discovery tools
-		// have no content cache to fall back to, so the envelope carries no
-		// served_from_cache results; the §7.4 network.registry_unreachable code
-		// is the no-cache signal for load_artifact, which does have a content
-		// cache. A structured >=400 response means the registry answered and
-		// refused; it passes through as a §6.10 error (F-7.4.1).
+		// unreachable) returns the offline envelope rather than an error, so
+		// the host can tell a transient outage from a request rejection.
+		// always-revalidate surfaces the explicit "offline" status; offline-first
+		// serves silently with no status field (offlineEnvelope honors the mode).
+		// The discovery tools have no content cache to fall back to, so the
+		// envelope carries no served_from_cache results. A structured >=400
+		// response means the registry answered and refused; it passes through as
+		// a §6.10 error (F-7.4.1).
 		if isRegistryUnreachable(err) {
-			return offlineResult(offline)
+			return s.offlineEnvelope(offline)
 		}
 		return errorResultFrom(err)
 	}
@@ -2280,6 +2412,24 @@ func offlineResult(extra map[string]any) map[string]any {
 		m[k] = v
 	}
 	return m
+}
+
+// offlineEnvelope builds the degraded-network result for the discovery and
+// search meta-tools, honoring the §7.4 per-mode distinction: always-revalidate
+// surfaces the explicit "offline" status hosts can present, while offline-first
+// serves cached results "silently" with no status field. The tool-specific
+// keys in extra (for example an empty results list) are always carried.
+// offline-only never reaches this path; it returns a structured cache-miss
+// error before dialing the registry. F-7.4.4.
+func (s *mcpServer) offlineEnvelope(extra map[string]any) map[string]any {
+	if s.cfg.cacheMode == "offline-first" {
+		m := map[string]any{}
+		for k, v := range extra {
+			m[k] = v
+		}
+		return m
+	}
+	return offlineResult(extra)
 }
 
 func jsonAny(b []byte) any {

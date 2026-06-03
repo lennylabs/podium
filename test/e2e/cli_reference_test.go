@@ -585,6 +585,24 @@ func TestCLI_PublicModeBypassesAuth(t *testing.T) {
 	}
 }
 
+// spec: §13.10 (F-13.10.1) — public mode is "loud at every checkpoint",
+// including the MCP `health` tool. Driving the real podium-mcp binary's
+// health tool against a real public-mode server must report mode public, so
+// downstream tooling can detect the unauthenticated deployment.
+func TestCLI_PublicModeSurfacedInMCPHealthTool(t *testing.T) {
+	reg := cliReg(t)
+	srv := startServerArgs(t, []string{"HOME=" + t.TempDir()}, "serve", "--standalone", "--public-mode", "--layer-path", reg)
+	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "health", nil))
+	cliWantExit(t, res, 0, "mcp health tool")
+	health := rpcResult(t, res.Stdout, 1)
+	if health["mode"] != "public" {
+		t.Errorf("MCP health mode = %v, want public\nstdout:\n%s", health["mode"], res.Stdout)
+	}
+	if connected, _ := health["connected"].(bool); !connected {
+		t.Errorf("MCP health connected = false, want true")
+	}
+}
+
 // spec: doc "Server — podium serve", `--public-mode` mutually exclusive
 // with an identity provider.
 func TestCLI_PublicModeExcludesIdP(t *testing.T) {
