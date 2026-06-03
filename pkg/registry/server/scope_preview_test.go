@@ -58,7 +58,7 @@ func TestScopePreview_RejectsNonGET(t *testing.T) {
 }
 
 // Spec: §3.5 (F-3.5.1) — when tenant config expose_scope_preview is false,
-// GET /v1/scope/preview returns 403 with error code scope_preview_disabled.
+// GET /v1/scope/preview returns 403 with error code config.scope_preview_disabled.
 func TestScopePreview_DisabledReturns403(t *testing.T) {
 	t.Parallel()
 	off := false
@@ -78,8 +78,8 @@ func TestScopePreview_DisabledReturns403(t *testing.T) {
 	if err := json.Unmarshal(body, &env); err != nil {
 		t.Fatalf("unmarshal: %v: %s", err, body)
 	}
-	if env.Code != "scope_preview_disabled" {
-		t.Errorf("error code = %q, want scope_preview_disabled (body: %s)", env.Code, body)
+	if env.Code != "config.scope_preview_disabled" {
+		t.Errorf("error code = %q, want config.scope_preview_disabled (body: %s)", env.Code, body)
 	}
 }
 

@@ -48,11 +48,11 @@ func TestFetchScopePreview_Decodes(t *testing.T) {
 // Spec: §3.5 (F-3.5.1) — a tenant with expose_scope_preview false makes the
 // endpoint answer 403, which fetchScopePreview maps to the disabled sentinel.
 func TestFetchScopePreview_Disabled(t *testing.T) {
-	ts := scopePreviewServer(t, http.StatusForbidden, `{"code":"scope_preview_disabled"}`)
+	ts := scopePreviewServer(t, http.StatusForbidden, `{"code":"config.scope_preview_disabled"}`)
 
 	_, err := fetchScopePreview(ts.URL)
 	if !isScopePreviewDisabled(err) {
-		t.Fatalf("err = %v, want scope_preview_disabled sentinel", err)
+		t.Fatalf("err = %v, want config.scope_preview_disabled sentinel", err)
 	}
 }
 
@@ -126,7 +126,7 @@ func TestStatus_ScopePreviewDisabled(t *testing.T) {
 			_, _ = w.Write([]byte(`{"mode":"ready","ready":true}`))
 		case "/v1/scope/preview":
 			w.WriteHeader(http.StatusForbidden)
-			_, _ = w.Write([]byte(`{"code":"scope_preview_disabled"}`))
+			_, _ = w.Write([]byte(`{"code":"config.scope_preview_disabled"}`))
 		default:
 			http.NotFound(w, r)
 		}

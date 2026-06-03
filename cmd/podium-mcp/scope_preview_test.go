@@ -55,12 +55,12 @@ func TestScopePreviewTool_ListedAndProxies(t *testing.T) {
 }
 
 // Spec: §3.5 (F-3.5.1/F-3.5.3) — when the tenant gate is off the endpoint
-// answers 403 scope_preview_disabled, and the MCP tool surfaces that
+// answers 403 config.scope_preview_disabled, and the MCP tool surfaces that
 // structured error rather than masking it as offline.
 func TestScopePreviewTool_DisabledSurfaces403(t *testing.T) {
 	t.Parallel()
 	ts := scopePreviewStub(t, http.StatusForbidden,
-		`{"code":"scope_preview_disabled","message":"scope preview is disabled for this tenant"}`)
+		`{"code":"config.scope_preview_disabled","message":"scope preview is disabled for this tenant"}`)
 	s := newHealthServer(ts.URL)
 
 	params, _ := json.Marshal(toolCallParams{Name: "scope_preview"})
@@ -69,7 +69,7 @@ func TestScopePreviewTool_DisabledSurfaces403(t *testing.T) {
 	if !ok {
 		t.Fatalf("callTool(scope_preview) = %T, want map", out)
 	}
-	if m["code"] != "scope_preview_disabled" {
-		t.Errorf("code = %v, want scope_preview_disabled (full envelope: %v)", m["code"], m)
+	if m["code"] != "config.scope_preview_disabled" {
+		t.Errorf("code = %v, want config.scope_preview_disabled (full envelope: %v)", m["code"], m)
 	}
 }

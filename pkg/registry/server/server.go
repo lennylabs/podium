@@ -798,7 +798,7 @@ func (s *Server) handleDomainAnalyze(w http.ResponseWriter, r *http.Request) {
 // handleScopePreview serves §3.5 GET /v1/scope/preview. It rejects
 // non-GET methods like the sibling read endpoints (F-3.5.9) and maps the
 // §3.5 tenant gate (expose_scope_preview: false) to 403
-// scope_preview_disabled (F-3.5.1).
+// config.scope_preview_disabled (F-3.5.1).
 func (s *Server) handleScopePreview(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "registry.invalid_argument",
@@ -808,7 +808,7 @@ func (s *Server) handleScopePreview(w http.ResponseWriter, r *http.Request) {
 	preview, err := s.core.PreviewScope(r.Context(), s.identity(r))
 	if err != nil {
 		if errors.Is(err, core.ErrScopePreviewDisabled) {
-			writeError(w, http.StatusForbidden, "scope_preview_disabled",
+			writeError(w, http.StatusForbidden, "config.scope_preview_disabled",
 				"scope preview is disabled for this tenant")
 			return
 		}

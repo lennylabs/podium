@@ -59,7 +59,7 @@ type Tenant struct {
 	// ExposeScopePreview is the §3.5 tenant gate for GET
 	// /v1/scope/preview. A nil pointer selects the documented default
 	// (true); a non-nil false disables the endpoint so the registry
-	// answers 403 scope_preview_disabled. The tri-state distinguishes
+	// answers 403 config.scope_preview_disabled. The tri-state distinguishes
 	// "operator left it unset" from "operator set it false".
 	ExposeScopePreview *bool
 }

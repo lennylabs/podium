@@ -1234,7 +1234,7 @@ func (s *mcpServer) dispatchTool(p toolCallParams) any {
 		// use this as a discovery surface during a session; it answers
 		// "what could this identity have loaded?" for an operator or
 		// reviewer. Proxies GET /v1/scope/preview, returning the §3.5 403
-		// scope_preview_disabled envelope verbatim when the tenant gate is off.
+		// config.scope_preview_disabled envelope verbatim when the tenant gate is off.
 		return s.proxyGet("/v1/scope/preview", nil, nil)
 	default:
 		return errorResult("unknown tool: " + p.Name)

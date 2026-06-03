@@ -21,11 +21,11 @@ type scopePreview struct {
 }
 
 // scopePreviewDisabled is returned by fetchScopePreview when the tenant
-// gate expose_scope_preview is false (the §3.5 403 scope_preview_disabled
+// gate expose_scope_preview is false (the §3.5 403 config.scope_preview_disabled
 // response). Callers surface it as a disabled notice rather than an error.
 type scopePreviewDisabledError struct{}
 
-func (scopePreviewDisabledError) Error() string { return "scope_preview_disabled" }
+func (scopePreviewDisabledError) Error() string { return "config.scope_preview_disabled" }
 
 // isScopePreviewDisabled reports whether err is the §3.5 tenant-gate refusal.
 func isScopePreviewDisabled(err error) bool {
@@ -36,7 +36,7 @@ func isScopePreviewDisabled(err error) bool {
 // fetchScopePreview calls §3.5 GET /v1/scope/preview against a server-source
 // registry, attaching the resolved caller credential so layer composition and
 // visibility filtering apply to this identity (matching the MCP and SDK
-// paths). A 403 scope_preview_disabled maps to scopePreviewDisabledError; any
+// paths). A 403 config.scope_preview_disabled maps to scopePreviewDisabledError; any
 // other non-2xx or transport failure is returned verbatim.
 //
 // spec: §3.5 — the consumer paths (MCP server, SDK, podium sync) and the

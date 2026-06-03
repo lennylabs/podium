@@ -823,7 +823,7 @@ func TestHTTPAPI_ScopePreview(t *testing.T) {
 
 // spec: http-api.md § Scope preview — 403 when disabled. F-3.5.1: the
 // standalone binary honors PODIUM_EXPOSE_SCOPE_PREVIEW=false and answers
-// 403 scope_preview_disabled.
+// 403 config.scope_preview_disabled.
 func TestHTTPAPI_ScopePreviewDisabled(t *testing.T) {
 	t.Parallel()
 	srv := startServerArgs(t,
@@ -832,8 +832,8 @@ func TestHTTPAPI_ScopePreviewDisabled(t *testing.T) {
 	st, body := getRaw(t, srv.BaseURL+"/v1/scope/preview")
 	apiWantStatus(t, st, 403, "scope/preview disabled", body)
 	m := apiJSONObj(t, body)
-	if m["code"] != "scope_preview_disabled" {
-		t.Fatalf("error code = %v, want scope_preview_disabled\nbody:\n%s", m["code"], body)
+	if m["code"] != "config.scope_preview_disabled" {
+		t.Fatalf("error code = %v, want config.scope_preview_disabled\nbody:\n%s", m["code"], body)
 	}
 }
 

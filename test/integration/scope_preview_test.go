@@ -106,7 +106,7 @@ func TestScopePreview_SQLiteAggregation(t *testing.T) {
 
 // Spec: §3.5 (F-3.5.1) — the expose_scope_preview tenant gate survives the
 // SQLite column round-trip: a tenant persisted with the flag false makes
-// GET /v1/scope/preview answer 403 scope_preview_disabled.
+// GET /v1/scope/preview answer 403 config.scope_preview_disabled.
 func TestScopePreview_SQLiteTenantGateDisabled(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -147,7 +147,7 @@ func TestScopePreview_SQLiteTenantGateDisabled(t *testing.T) {
 	if err := json.Unmarshal(body, &env); err != nil {
 		t.Fatalf("unmarshal: %v: %s", err, body)
 	}
-	if env.Code != "scope_preview_disabled" {
-		t.Errorf("error code = %q, want scope_preview_disabled", env.Code)
+	if env.Code != "config.scope_preview_disabled" {
+		t.Errorf("error code = %q, want config.scope_preview_disabled", env.Code)
 	}
 }

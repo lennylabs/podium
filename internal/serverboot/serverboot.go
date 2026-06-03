@@ -1371,7 +1371,7 @@ type Config struct {
 	allowPerDomainOverrides *bool
 	// §3.5 expose_scope_preview tenant gate. nil leaves the default
 	// (true); a tenant sets it false so GET /v1/scope/preview answers
-	// 403 scope_preview_disabled. Sourced from PODIUM_EXPOSE_SCOPE_PREVIEW
+	// 403 config.scope_preview_disabled. Sourced from PODIUM_EXPOSE_SCOPE_PREVIEW
 	// or registry.yaml's tenant.expose_scope_preview.
 	exposeScopePreview *bool
 }

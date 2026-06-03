@@ -63,7 +63,7 @@ tenant:
   expose_scope_preview: true # default
 ```
 
-When `false`, the endpoint returns `403 scope_preview_disabled`. When `true`, the endpoint always returns aggregate counts only, never identifiers, descriptions, or any per-artifact metadata.
+When `false`, the endpoint returns `403 config.scope_preview_disabled`. When `true`, the endpoint always returns aggregate counts only, never identifiers, descriptions, or any per-artifact metadata.
 
 **Honored by all consumer paths.** The MCP server, SDK, and `podium sync` all expose this preview. The `podium status` CLI surfaces the same data for human inspection.
 

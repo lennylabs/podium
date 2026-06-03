@@ -1121,7 +1121,7 @@ func TestOpGuide_AccessLogDisabled(t *testing.T) {
 
 // T-D-operator-guide-38: an operator disables the §3.5 scope-preview
 // surface per tenant via registry.yaml's tenant.expose_scope_preview, and
-// the endpoint then answers 403 scope_preview_disabled. F-3.5.1.
+// the endpoint then answers 403 config.scope_preview_disabled. F-3.5.1.
 func TestServerOps_ScopePreviewGating(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -1139,8 +1139,8 @@ func TestServerOps_ScopePreviewGating(t *testing.T) {
 	if st != 403 {
 		t.Fatalf("scope/preview status = %d, want 403 (gated by registry.yaml tenant.expose_scope_preview)\nbody:\n%s", st, body)
 	}
-	if !strings.Contains(string(body), "scope_preview_disabled") {
-		t.Errorf("403 body missing scope_preview_disabled code:\n%s", body)
+	if !strings.Contains(string(body), "config.scope_preview_disabled") {
+		t.Errorf("403 body missing config.scope_preview_disabled code:\n%s", body)
 	}
 
 	// The operator can confirm the resolved setting through config show

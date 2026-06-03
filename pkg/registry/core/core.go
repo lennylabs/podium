@@ -44,8 +44,8 @@ var (
 	ErrUnavailable = errors.New("registry.unavailable")
 	// ErrScopePreviewDisabled signals the §3.5 tenant gate is closed
 	// (expose_scope_preview: false). The HTTP layer maps it to
-	// 403 scope_preview_disabled.
-	ErrScopePreviewDisabled = errors.New("scope_preview_disabled")
+	// 403 config.scope_preview_disabled.
+	ErrScopePreviewDisabled = errors.New("config.scope_preview_disabled")
 )
 
 // Registry is the core registry type. Construct one per tenant; the

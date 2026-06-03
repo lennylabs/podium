@@ -96,7 +96,7 @@ type ScopePreview struct {
 // PreviewScope returns aggregated metadata for the calling identity's
 // effective view per §3.5. The §3.5 tenant gate expose_scope_preview is
 // checked first: a disabled tenant yields ErrScopePreviewDisabled, which
-// the HTTP layer maps to 403 scope_preview_disabled.
+// the HTTP layer maps to 403 config.scope_preview_disabled.
 func (r *Registry) PreviewScope(ctx context.Context, id layer.Identity) (*ScopePreview, error) {
 	enabled, err := r.scopePreviewEnabled(ctx)
 	if err != nil {
