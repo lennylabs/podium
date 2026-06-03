@@ -27,7 +27,7 @@ The compose file includes:
 - **`postgres`**: `pgvector/pgvector:pg16` for metadata and embeddings.
 - **`minio`**: S3-compatible object storage (path-style URLs, `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` for auth).
 - **`dex`**: OIDC IdP for the OAuth device-code flow.
-- **`bootstrap`**: one-shot container that creates the MinIO bucket, registers the registry as an OIDC client with Dex, creates the first tenant and admin user (configurable via env vars), then exits.
+- **`bootstrap`**: one-shot container that creates the MinIO bucket, then exits. The registry's OIDC client is registered declaratively in the Dex config, and the default tenant and admin grant (configurable via `PODIUM_BOOTSTRAP_ADMINS`) are seeded by the registry at boot, consistent with §13.10 standalone self-seeding.
 
 **Not production-grade.** Single-replica services, default credentials, local volumes. The compose stack is _standard-topology in shape_ so consumers exercise the same code paths as a real deployment, but it is intended only for evaluation pilots, CI integration tests, and adapter / SDK development. For genuine non-prod or solo use, prefer §13.10's standalone mode (one binary instead of four containers).
 
