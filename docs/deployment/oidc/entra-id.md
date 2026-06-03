@@ -67,6 +67,8 @@ For groups synced from on-prem AD, Entra can emit `sAMAccountName` in the groups
 
 Most teams find Option A faster; the GUID-versus-name tradeoff is a layer-config readability concern that `IdpGroupMapping` resolves.
 
+**Large group memberships (overage).** When a user belongs to more than about 200 groups, Entra omits the groups claim from the token and instead emits a `_claim_names` and `_claim_sources` overage reference that points at Microsoft Graph. Podium reads groups from the token claim and does not call Graph, so a user in overage resolves to no groups from the token. Keep the emitted set small by selecting **Groups assigned to the application** in the groups-claim configuration rather than **All groups**, or resolve membership through SCIM (below) instead of the token claim.
+
 ## 3. Expose Podium as an API
 
 Under **Expose an API**:
