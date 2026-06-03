@@ -487,7 +487,7 @@ If multiple layers contribute a `DOMAIN.md` for the same path, the registry merg
 - `discovery.fold_passthrough_chains`: most-restrictive-wins (`true` over `false`).
 - `discovery.featured`, `discovery.deprioritize`, `discovery.keywords`: append-unique.
 
-When a workspace-local-overlay `DOMAIN.md` is involved, the MCP server applies the merge client-side after the registry returns its result for the registry-side layers.
+When a workspace-local-overlay `DOMAIN.md` is involved, the consumers that expose `load_domain` apply the merge client-side after the registry returns its result for the registry-side layers: the MCP server and the language SDKs. `podium sync` materializes by the sync.yaml scope rather than by domain enumeration, so it does not apply this merge.
 
 ### 4.5.5 Discovery Rendering
 
