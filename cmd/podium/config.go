@@ -14,7 +14,7 @@ import (
 func configCmd(args []string) int {
 	if len(args) < 1 || isHelpArg(args[0]) {
 		printGroupHelp("config", "Inspect the merged configuration.", [][2]string{
-			{"show", "Print the merged sync.yaml and the resolved server settings with per-key provenance (--server for server settings only)."},
+			{"show", "Print the merged sync.yaml with per-key provenance (--server for the resolved server settings)."},
 		})
 		if len(args) < 1 {
 			return 2
@@ -46,40 +46,13 @@ func configShow(args []string) int {
 	if *server {
 		return configServerShow(*asJSON)
 	}
-	// --explain resolves a single client sync.yaml key (client-only).
-	if *explain != "" {
-		cwd, _ := os.Getwd()
-		home, _ := os.UserHomeDir()
-		return configClientShowAt(cwd, home, *asJSON, *explain)
-	}
-	return configEffectiveShow(*asJSON)
-}
-
-// configEffectiveShow prints the merged client sync.yaml together with the
-// resolved server settings and their provenance. The client section answers
-// "what registry / profiles will the CLI use" (§7.7); the settings section
-// answers "what would a server resolve from this environment" (§13.10, §13.12).
-// `config show --server` prints only the latter.
-func configEffectiveShow(asJSON bool) int {
+	// Bare `config show` and `--explain` both render only the merged client
+	// sync.yaml with per-key provenance. The §7.7 example shows the client
+	// config alone; the resolved server settings are a §13.10/§13.12 concern,
+	// isolated behind --server. spec: §7.7.
 	cwd, _ := os.Getwd()
 	home, _ := os.UserHomeDir()
-	settings := serverboot.LoadConfig().Settings()
-	if asJSON {
-		payload, err := clientPayloadAt(cwd, home)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			return 1
-		}
-		payload["settings"] = settings
-		_ = json.NewEncoder(os.Stdout).Encode(payload)
-		return 0
-	}
-	if rc := configClientShowAt(cwd, home, false, ""); rc != 0 {
-		return rc
-	}
-	fmt.Fprintln(os.Stdout)
-	printSettingsTable(settings)
-	return 0
+	return configClientShowAt(cwd, home, *asJSON, *explain)
 }
 
 // configServerShow prints the resolved server configuration with the

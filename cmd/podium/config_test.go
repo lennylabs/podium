@@ -94,6 +94,57 @@ func TestConfigShow_JSONIsStructured(t *testing.T) {
 	}
 }
 
+// Spec: §7.7 — bare `config show` prints only the merged client sync.yaml.
+// The resolved server settings table is a §13.10/§13.12 concern isolated
+// behind --server; it must not leak into the default view.
+func TestConfigShow_BareOmitsServerSettings(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PODIUM_BIND", "0.0.0.0:9099")
+	t.Setenv("PODIUM_CONFIG_FILE", filepath.Join(t.TempDir(), "missing.yaml"))
+
+	bare := captureStdout(t, func() {
+		if rc := configShow(nil); rc != 0 {
+			t.Errorf("bare rc = %d, want 0", rc)
+		}
+	})
+	if strings.Contains(bare, "0.0.0.0:9099") || strings.Contains(bare, "PODIUM_BIND") {
+		t.Errorf("bare config show leaked server settings:\n%s", bare)
+	}
+
+	server := captureStdout(t, func() {
+		if rc := configShow([]string{"--server"}); rc != 0 {
+			t.Errorf("--server rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(server, "0.0.0.0:9099") {
+		t.Errorf("--server should still surface the bind value:\n%s", server)
+	}
+}
+
+// Spec: §7.7 — bare `config show --json` carries the client payload only.
+// The `settings` key belongs to the --server view.
+func TestConfigShow_BareJSONHasNoSettings(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PODIUM_BIND", "0.0.0.0:9098")
+	t.Setenv("PODIUM_CONFIG_FILE", filepath.Join(t.TempDir(), "missing.yaml"))
+
+	out := captureStdout(t, func() {
+		if rc := configShow([]string{"--json"}); rc != 0 {
+			t.Errorf("rc = %d, want 0", rc)
+		}
+	})
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("unmarshal: %v: %s", err, out)
+	}
+	if _, ok := payload["settings"]; ok {
+		t.Errorf("bare config show --json must not carry a settings key:\n%s", out)
+	}
+	if _, ok := payload["defaults"]; !ok {
+		t.Errorf("client payload missing defaults block:\n%s", out)
+	}
+}
+
 // Spec: §6.10 — secrets in resolved settings are redacted.
 func TestConfigShow_RedactsSecrets(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "sk-very-secret-key-do-not-leak")

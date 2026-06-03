@@ -303,10 +303,12 @@ func TestAuth_RegistryYAMLIdentityProviderField(t *testing.T) {
 	if err := os.WriteFile(cfgFile, []byte("registry:\n  identity_provider:\n    type: oidc\n"), 0o644); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)
 	}
+	// spec §7.7 (F-7.7.2): identity_provider is a §13.12 server setting,
+	// surfaced by `config show --server` rather than the client view.
 	res := runPodium(t, "", []string{
 		"PODIUM_CONFIG_FILE=" + cfgFile,
 		"PODIUM_REGISTRY=",
-	}, "config", "show")
+	}, "config", "show", "--server")
 	if res.Exit != 0 {
 		t.Fatalf("config show exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
@@ -796,10 +798,11 @@ func TestAuth_NestedIdentityBlockNotParsed(t *testing.T) {
 		t.Fatalf("write registry.yaml: %v", err)
 	}
 
-	// config show runs server-free.
+	// config show --server runs server-free; identity_provider is a §13.12
+	// server setting (F-7.7.2).
 	res := runPodium(t, "", []string{
 		"PODIUM_CONFIG_FILE=" + cfgFile,
-	}, "config", "show")
+	}, "config", "show", "--server")
 	if res.Exit != 0 {
 		t.Fatalf("config show exit=%d stderr=%s", res.Exit, res.Stderr)
 	}

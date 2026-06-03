@@ -58,11 +58,12 @@ func vbReg(t *testing.T) string {
 	})
 }
 
-// vbConfigShowRow runs `podium config show` with the given env and returns the
-// stdout. It does not start a server.
+// vbConfigShowRow runs `podium config show --server` with the given env and
+// returns the stdout. Vector-backend keys are §13.12 server settings, so they
+// surface under --server (F-7.7.2). It does not start a server.
 func vbConfigShowRow(t *testing.T, env []string) string {
 	t.Helper()
-	res := runPodium(t, "", env, "config", "show")
+	res := runPodium(t, "", env, "config", "show", "--server")
 	if res.Exit != 0 {
 		t.Fatalf("config show exit=%d stderr=%s", res.Exit, res.Stderr)
 	}

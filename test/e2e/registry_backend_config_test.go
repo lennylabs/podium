@@ -11,12 +11,13 @@ import (
 	"testing"
 )
 
-// rcShowSetting runs `podium config show --json` and returns the named setting
-// row. It pins HOME so the resolution is hermetic.
+// rcShowSetting runs `podium config show --server --json` and returns the named
+// setting row. Backend settings live behind --server (F-7.7.2). It pins HOME so
+// the resolution is hermetic.
 func rcShowSetting(t *testing.T, env []string, name string) (value, source string, found bool) {
 	t.Helper()
 	env = append([]string{"HOME=" + t.TempDir()}, env...)
-	res := runPodium(t, "", env, "config", "show", "--json")
+	res := runPodium(t, "", env, "config", "show", "--server", "--json")
 	if res.Exit != 0 {
 		t.Fatalf("config show --json exit=%d stderr=%s", res.Exit, res.Stderr)
 	}

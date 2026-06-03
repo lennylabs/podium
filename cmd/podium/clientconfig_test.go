@@ -33,6 +33,60 @@ func TestConfigClientShow_Provenance(t *testing.T) {
 	}
 }
 
+// spec: §7.7 — each rendered profile field carries the scope it resolved
+// from. The §7.7 example annotates `include`/`exclude` with `(from <scope>)`
+// per field; whole-profile overwrite (§7.5.2) makes every field share the
+// profile's winning scope.
+func TestConfigClientShow_ProfileFieldProvenance(t *testing.T) {
+	home := t.TempDir()
+	ws := t.TempDir()
+	mustWrite(t, filepath.Join(ws, ".podium", "sync.yaml"),
+		"profiles:\n  project-default:\n    include: [\"finance/**\"]\n    exclude: [\"finance/**/legacy/**\"]\n")
+
+	out := captureStdout(t, func() {
+		if rc := configClientShowAt(ws, home, false, ""); rc != 0 {
+			t.Errorf("rc = %d, want 0", rc)
+		}
+	})
+	// The header names the profile without an inline provenance suffix.
+	if !strings.Contains(out, "profiles.project-default:\n") {
+		t.Errorf("profile header should stand alone:\n%s", out)
+	}
+	// Each field line carries the winning scope.
+	for _, field := range []string{"include:", "exclude:"} {
+		var fieldLine string
+		for _, l := range strings.Split(out, "\n") {
+			if strings.Contains(l, field) {
+				fieldLine = l
+			}
+		}
+		if fieldLine == "" {
+			t.Fatalf("missing %q field line:\n%s", field, out)
+		}
+		if !strings.Contains(fieldLine, "(from <ws>/.podium/sync.yaml)") {
+			t.Errorf("%q field omits per-field provenance: %q", field, fieldLine)
+		}
+	}
+}
+
+// spec: §7.7 — a profile with no printable fields keeps the source on its
+// header line so provenance is never lost.
+func TestConfigClientShow_EmptyProfileHeaderProvenance(t *testing.T) {
+	home := t.TempDir()
+	ws := t.TempDir()
+	mustWrite(t, filepath.Join(ws, ".podium", "sync.yaml"),
+		"profiles:\n  bare:\n    min_server_version: 1.2.0\n")
+
+	out := captureStdout(t, func() {
+		_ = configClientShowAt(ws, home, false, "")
+	})
+	// min_server_version is not a rendered field, so the header carries
+	// the provenance instead.
+	if !strings.Contains(out, "profiles.bare:   (from <ws>/.podium/sync.yaml)") {
+		t.Errorf("empty profile should keep header provenance:\n%s", out)
+	}
+}
+
 // spec: §7.7 (F-7.7.3), §7.5.2 — config show surfaces profile-name
 // collisions across scopes for debugging.
 func TestConfigClientShow_ProfileCollision(t *testing.T) {

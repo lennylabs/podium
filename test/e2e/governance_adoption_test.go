@@ -290,8 +290,10 @@ func TestGovernance_LayerPathIngestsAtStartup(t *testing.T) {
 // T-D-progressive-8
 func TestGovernance_ConfigShowIdentityProvider(t *testing.T) {
 	t.Parallel()
+	// spec §7.7 (F-7.7.2): identity_provider is a §13.12 server setting,
+	// surfaced via `config show --server`.
 	res := runPodium(t, "", []string{"PODIUM_IDENTITY_PROVIDER=oauth-device-code"},
-		"config", "show")
+		"config", "show", "--server")
 	if res.Exit != 0 {
 		t.Fatalf("config show exit=%d\nstderr: %s", res.Exit, res.Stderr)
 	}

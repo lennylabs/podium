@@ -200,7 +200,7 @@ func TestServerOps_ConfigShowReadOnlyProbeSettings(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "",
 		[]string{"PODIUM_READONLY_PROBE_FAILURES=3", "PODIUM_READONLY_PROBE_INTERVAL=10"},
-		"config", "show")
+		"config", "show", "--server")
 	if res.Exit != 0 {
 		t.Fatalf("config show exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
@@ -726,10 +726,11 @@ func TestServerOps_EnvOverridesYAMLPublicMode(t *testing.T) {
 		t.Errorf("/healthz mode=%v, want public (env should override yaml public_mode:false)", h["mode"])
 	}
 
-	// Also verify config show reports the env var as the source.
+	// Also verify config show --server reports the env var as the source
+	// (public_mode is a §13.10 server setting; F-7.7.2).
 	res := runPodium(t, "",
 		[]string{"PODIUM_CONFIG_FILE=" + cfgFile, "PODIUM_PUBLIC_MODE=true"},
-		"config", "show")
+		"config", "show", "--server")
 	if res.Exit != 0 {
 		t.Fatalf("config show exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
@@ -1142,8 +1143,9 @@ func TestServerOps_ScopePreviewGating(t *testing.T) {
 		t.Errorf("403 body missing scope_preview_disabled code:\n%s", body)
 	}
 
-	// The operator can confirm the resolved setting through config show.
-	res := runPodium(t, "", []string{"HOME=" + home}, "config", "show")
+	// The operator can confirm the resolved setting through config show
+	// --server (tenant.expose_scope_preview is a §13.12 server setting; F-7.7.2).
+	res := runPodium(t, "", []string{"HOME=" + home}, "config", "show", "--server")
 	if res.Exit != 0 {
 		t.Fatalf("config show exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
@@ -1204,7 +1206,7 @@ func TestServerOps_ConfigShowEmbeddingProviderModel(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "",
 		[]string{"PODIUM_EMBEDDING_PROVIDER=voyage", "PODIUM_EMBEDDING_MODEL=voyage-3"},
-		"config", "show")
+		"config", "show", "--server")
 	if res.Exit != 0 {
 		t.Fatalf("config show exit=%d stderr=%s", res.Exit, res.Stderr)
 	}

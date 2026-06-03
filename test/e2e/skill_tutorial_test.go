@@ -92,9 +92,9 @@ func TestSkillTutorial_InitWritesSyncYAML(t *testing.T) {
 			t.Errorf(".gitignore missing %q:\n%s", want, gi)
 		}
 	}
-	// config show exits cleanly; per F-7.7.1 it prints the server config
-	// rather than the sync.yaml values, so the assertion above reads the
-	// file directly.
+	// config show exits cleanly. It prints the merged sync.yaml (§7.7), not
+	// .gitignore entries, so the .gitignore assertion above reads the file
+	// directly.
 	if cs := runPodium(t, ws, []string{"HOME=" + t.TempDir()}, "config", "show"); cs.Exit != 0 {
 		t.Errorf("config show exit=%d stderr=%s", cs.Exit, cs.Stderr)
 	}

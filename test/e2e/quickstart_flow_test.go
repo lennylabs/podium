@@ -72,10 +72,10 @@ func TestQuickstart_InitWritesSyncYAML(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-3 — podium config show prints a name/value/source table.
-// Doc: quickstart § 2 ("Verify: podium config show"). Doc-accuracy: per
-// F-7.7.1 config show prints the server config, not the sync.yaml registry
-// and harness; this test asserts the actual table content.
+// T-D-quickstart-3 — podium config show prints the merged sync.yaml with
+// per-key provenance. Doc: quickstart § 2 ("Verify: podium config show").
+// spec §7.7: the bare view shows the client config (the registry and harness
+// from `init`), each annotated with the scope it came from.
 func TestQuickstart_ConfigShowTable(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()

@@ -264,7 +264,7 @@ func TestStandaloneServer_ConfigShowLayersPathSource(t *testing.T) {
 
 	// Without PODIUM_LAYER_PATH: source should be registry.yaml.
 	res := runPodium(t, "", []string{"HOME=" + t.TempDir(), "PODIUM_CONFIG_FILE=" + cfgFile},
-		"config", "show")
+		"config", "show", "--server")
 	if res.Exit != 0 {
 		t.Fatalf("config show exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
@@ -278,7 +278,7 @@ func TestStandaloneServer_ConfigShowLayersPathSource(t *testing.T) {
 	// With PODIUM_LAYER_PATH: env overrides yaml, source should be PODIUM_LAYER_PATH.
 	res2 := runPodium(t, "",
 		[]string{"HOME=" + t.TempDir(), "PODIUM_CONFIG_FILE=" + cfgFile, "PODIUM_LAYER_PATH=/from/env"},
-		"config", "show")
+		"config", "show", "--server")
 	if res2.Exit != 0 {
 		t.Fatalf("config show exit=%d stderr=%s", res2.Exit, res2.Stderr)
 	}
@@ -1197,7 +1197,7 @@ func TestStandaloneServer_RegistryYAMLIdentityProvider(t *testing.T) {
 	}
 
 	res := runPodium(t, "", []string{"HOME=" + t.TempDir(), "PODIUM_CONFIG_FILE=" + cfgFile},
-		"config", "show")
+		"config", "show", "--server")
 	if res.Exit != 0 {
 		t.Fatalf("config show exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
@@ -1323,7 +1323,7 @@ func TestStandaloneServer_ConfigShowLayerPathEnv(t *testing.T) {
 	testPath := "/tmp/podium-test-layers-42"
 	res := runPodium(t, "",
 		[]string{"HOME=" + t.TempDir(), "PODIUM_LAYER_PATH=" + testPath},
-		"config", "show")
+		"config", "show", "--server")
 	if res.Exit != 0 {
 		t.Fatalf("config show exit=%d stderr=%s", res.Exit, res.Stderr)
 	}

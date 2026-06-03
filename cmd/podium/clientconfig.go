@@ -169,9 +169,19 @@ func configClientShowAt(cwd, home string, asJSON bool, explain string) int {
 	sort.Strings(names)
 	for _, name := range names {
 		r := profs[name]
-		fmt.Fprintf(os.Stdout, "profiles.%s:   (from %s)\n", name, r.Winner)
-		for _, line := range profileLines(r.Profile) {
-			fmt.Fprintf(os.Stdout, "  %s\n", line)
+		lines := profileLines(r.Profile)
+		if len(lines) == 0 {
+			// A profile with no printable fields keeps its source on the
+			// header so provenance is not dropped. spec: §7.7.
+			fmt.Fprintf(os.Stdout, "profiles.%s:   (from %s)\n", name, r.Winner)
+			continue
+		}
+		fmt.Fprintf(os.Stdout, "profiles.%s:\n", name)
+		for _, line := range lines {
+			// spec: §7.7 — annotate each rendered profile field with the
+			// scope it resolved from. Whole-profile overwrite (§7.5.2) means
+			// every field shares the profile's winning scope.
+			fmt.Fprintf(os.Stdout, "  %s   (from %s)\n", line, r.Winner)
 		}
 	}
 	collisionCount := 0
@@ -189,16 +199,6 @@ func configClientShowAt(cwd, home string, asJSON bool, explain string) int {
 		fmt.Fprintf(os.Stdout, "\nProfile collisions: %d (%s)\n", collisionCount, strings.Join(collisionLines, "; "))
 	}
 	return 0
-}
-
-// clientPayloadAt resolves the client sync.yaml scopes at cwd/home and returns
-// the JSON payload for the combined effective view (config show --json).
-func clientPayloadAt(cwd, home string) (map[string]any, error) {
-	scopes, ws, err := loadClientScopes(cwd, home)
-	if err != nil {
-		return nil, err
-	}
-	return clientPayload(ws, resolveDefaults(scopes), resolveProfiles(scopes)), nil
 }
 
 // clientPayload builds the JSON object for the client sync.yaml view: the

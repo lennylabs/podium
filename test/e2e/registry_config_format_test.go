@@ -57,7 +57,9 @@ func TestRegistryConfig_SpecExampleNestedInterpolation(t *testing.T) {
 		"PODIUM_S3_BUCKET=", "PODIUM_S3_REGION=", "PODIUM_PINECONE_INDEX=",
 		"PODIUM_PINECONE_NAMESPACE=", "PODIUM_IDENTITY_PROVIDER=", "PODIUM_OAUTH_AUDIENCE=",
 	}
-	res := runPodium(t, "", env, "config", "show")
+	// spec §7.7 (F-7.7.2): the backend selectors are §13.12 server settings,
+	// surfaced by `config show --server`.
+	res := runPodium(t, "", env, "config", "show", "--server")
 	if res.Exit != 0 {
 		t.Fatalf("config show exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
