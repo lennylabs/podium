@@ -10,9 +10,9 @@ import (
 func TestParseSpecHeading_RecognizesSectionIDs(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		line    string
-		wantID  string
-		wantOK  bool
+		line   string
+		wantID string
+		wantOK bool
 	}{
 		{"## 4. Artifact Model", "§4", true},
 		{"## 4.6 Layers and Visibility", "§4.6", true},
@@ -131,7 +131,7 @@ Matrix: §6.7.1 (claude-code, rule_mode_always)`
 func TestSplitNote_HandlesSeparatorVariants(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		in              string
+		in               string
 		wantTitle, wantA string
 	}{
 		{"Layer ordering — admin layers come first.", "Layer ordering", "admin layers come first."},
