@@ -41,20 +41,20 @@ func (s *mcpServer) startOverlayWatch() func() {
 // §6.9 "Workspace overlay path missing" failure mode, then disables the layer.
 func (s *mcpServer) reindexOverlay(path string) {
 	if path == "" {
-		s.setOverlay(nil)
+		s.setOverlay(nil, nil)
 		return
 	}
-	records, err := overlay.Filesystem{Path: path}.Resolve(nil)
+	records, domains, err := resolveOverlayAll(path)
 	if err != nil {
 		if !errors.Is(err, overlay.ErrNoOverlay) {
 			fmt.Fprintf(os.Stderr, "WARN: workspace overlay path %q became unavailable (%v); overlay disabled\n", path, err)
 		} else {
 			fmt.Fprintf(os.Stderr, "WARN: workspace overlay path %q no longer exists; overlay disabled\n", path)
 		}
-		s.setOverlay(nil)
+		s.setOverlay(nil, nil)
 		return
 	}
-	s.setOverlay(records)
+	s.setOverlay(records, domains)
 }
 
 // startOverlayWatch wires the testable watch loop and returns a stop function.

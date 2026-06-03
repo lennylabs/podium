@@ -5,7 +5,17 @@
 // lazily, so importing the SDK stays safe in edge bundles.
 
 import { resolveRegistry } from "./config.js";
-import { LocalOverlay, resolveOverlayPath, rrfFuse } from "./overlay.js";
+import {
+  LocalOverlay,
+  resolveOverlayPath,
+  rrfFuse,
+  fallbackDescription,
+  globLiteralPrefix,
+  resolveImports,
+  matchAny,
+  type OverlayArtifact,
+  type OverlayDomain,
+} from "./overlay.js";
 import {
   DeviceCodeError,
   DEFAULT_TIMEOUT_MS,
@@ -35,6 +45,292 @@ export interface SearchResult {
   total_matched: number;
   results?: ArtifactDescriptor[];
   domains?: Record<string, unknown>[];
+}
+
+// LoadDomainResult mirrors the /v1/load_domain wire envelope (§5). subdomains
+// and notable are always present arrays, matching the registry; the merge
+// composes the workspace overlay onto this same schema and re-emits it.
+export interface LoadDomainResult {
+  path: string;
+  description?: string;
+  keywords?: string[];
+  subdomains: LoadDomainSubdomain[];
+  notable: LoadDomainNotable[];
+  note?: string;
+}
+
+// LoadDomainSubdomain mirrors a load_domain subdomain entry.
+export interface LoadDomainSubdomain {
+  path: string;
+  name: string;
+  description?: string;
+  subdomains?: LoadDomainSubdomain[];
+}
+
+// LoadDomainNotable mirrors a load_domain notable entry ({id, type, summary,
+// source, folded_from}, §7.6.1). overlay marks an entry surfaced from the
+// workspace overlay, mirroring the search_artifacts overlay annotation; the
+// registry never sets it.
+export interface LoadDomainNotable {
+  id: string;
+  type?: string;
+  version?: string;
+  summary?: string;
+  source?: string;
+  folded_from?: string;
+  overlay?: boolean;
+}
+
+// defaultRenderDepth is the §4.5.5 max_depth default. The SDK does not know
+// the tenant's resolved max_depth, so an overlay-introduced subtree renders to
+// the caller's requested depth, falling back to this default.
+const DEFAULT_RENDER_DEPTH = 3;
+
+// renderDepth reads the caller's requested depth, falling back to the §4.5.5
+// default when unset or non-positive.
+function renderDepth(depth?: number): number {
+  return depth !== undefined && depth > 0 ? depth : DEFAULT_RENDER_DEPTH;
+}
+
+// uniqueAppend appends src to dst, dropping values already present, preserving
+// order (§4.5.4 append-unique).
+function uniqueAppend(dst: string[], src: string[]): string[] {
+  const seen = new Set(dst);
+  const out = [...dst];
+  for (const v of src) {
+    if (!seen.has(v)) {
+      seen.add(v);
+      out.push(v);
+    }
+  }
+  return out;
+}
+
+// parentOf returns the parent domain path of a canonical id ("" for a
+// top-level id).
+function parentOf(p: string): string {
+  const i = p.lastIndexOf("/");
+  return i >= 0 ? p.slice(0, i) : "";
+}
+
+// joinSeg joins a domain path and a child segment.
+function joinSeg(path: string, seg: string): string {
+  return path === "" ? seg : path + "/" + seg;
+}
+
+// underRest returns id's remainder beyond prefix when id is at or under prefix
+// (segment-aligned), or "" otherwise. An empty prefix returns id unchanged.
+function underRest(id: string, prefix: string): string {
+  if (prefix === "") return id;
+  if (!id.startsWith(prefix)) return "";
+  if (id.length === prefix.length) return "";
+  if (id[prefix.length] !== "/") return "";
+  return id.slice(prefix.length + 1);
+}
+
+// overlayHasDomainContent reports whether the overlay carries anything at or
+// under path: a DOMAIN.md at path, a deeper DOMAIN.md, or an artifact under
+// path. Gates synthesizing a result for an overlay-only domain the registry
+// 404s (§4.5.2, §6.4).
+function overlayHasDomainContent(
+  path: string,
+  domains: Map<string, OverlayDomain>,
+  records: OverlayArtifact[],
+): boolean {
+  if (domains.has(path)) return true;
+  for (const dp of domains.keys()) {
+    if (dp !== path && underRest(dp, path) !== "") return true;
+  }
+  return records.some((r) => underRest(r.id, path) !== "");
+}
+
+// overlayArtifactDescriptor maps an overlay artifact to a load_domain notable
+// descriptor, tagged as overlay-sourced (§4.5.5).
+function overlayArtifactDescriptor(rec: OverlayArtifact): LoadDomainNotable {
+  return {
+    id: rec.id,
+    type: rec.type,
+    version: rec.version,
+    summary: rec.description,
+    overlay: true,
+  };
+}
+
+// mergeNotable appends the overlay candidates to the registry notable list with
+// overlay precedence on a shared id, tags each entry's §4.5.5 notable source
+// (featured wins), orders featured entries first, and caps the result when the
+// overlay DOMAIN.md sets a notable_count.
+function mergeNotable(
+  reg: LoadDomainNotable[],
+  candidates: LoadDomainNotable[],
+  featured: Set<string>,
+  cap: number,
+): LoadDomainNotable[] {
+  const out: LoadDomainNotable[] = [];
+  const idx = new Map<string, number>();
+  for (const a of reg) {
+    idx.set(a.id, out.length);
+    out.push(a);
+  }
+  for (const c of candidates) {
+    const i = idx.get(c.id);
+    if (i !== undefined) {
+      out[i] = c; // overlay precedence shadows the registry descriptor
+      continue;
+    }
+    idx.set(c.id, out.length);
+    out.push(c);
+  }
+  for (const a of out) {
+    if (featured.has(a.id)) a.source = "featured";
+    else if (!a.source) a.source = "signal";
+  }
+  const feat = out.filter((a) => a.source === "featured");
+  const rest = out.filter((a) => a.source !== "featured");
+  let merged = [...feat, ...rest];
+  if (cap > 0 && merged.length > cap) merged = merged.slice(0, cap);
+  return merged;
+}
+
+// mergedFeatured is the union of the registry's featured ids (notable entries
+// already tagged source: featured) and the overlay DOMAIN.md featured list
+// (§4.5.4 featured append-unique).
+function mergedFeatured(reg: LoadDomainNotable[], od: OverlayDomain | undefined): Set<string> {
+  const m = new Set<string>();
+  for (const a of reg) {
+    if (a.source === "featured") m.add(a.id);
+  }
+  if (od) {
+    for (const f of od.featured) m.add(f);
+  }
+  return m;
+}
+
+// unlistedOverlay reports whether path resolves under an overlay-unlisted
+// folder (the path or any ancestor has an overlay DOMAIN.md with unlisted:
+// true). The root ("") carries no DOMAIN.md (§4.5.3).
+function unlistedOverlay(path: string, domains: Map<string, OverlayDomain>): boolean {
+  for (let p = path; p !== ""; p = parentOf(p)) {
+    const d = domains.get(p);
+    if (d && d.unlisted) return true;
+  }
+  return false;
+}
+
+// overlayChildDescription resolves a child/sibling subdomain's §4.5.5
+// description: the overlay DOMAIN.md frontmatter description when set, otherwise
+// the synthesized basename fallback. The prose body is never returned for a
+// non-requested entry (§4.5.5).
+function overlayChildDescription(path: string, domains: Map<string, OverlayDomain>): string {
+  const d = domains.get(path);
+  if (d && d.description !== "") return d.description;
+  return fallbackDescription(path);
+}
+
+// overlayImmediateChildren returns the immediate subdomain child names under
+// path implied by the overlay: a first segment beyond path that has an overlay
+// artifact below it (id has a deeper segment) or an overlay DOMAIN.md at or
+// below it. A direct child artifact (no deeper segment) is a notable entry, not
+// a subdomain, and is excluded here.
+function overlayImmediateChildren(
+  path: string,
+  domains: Map<string, OverlayDomain>,
+  records: OverlayArtifact[],
+): string[] {
+  const seen = new Set<string>();
+  const names: string[] = [];
+  const add = (name: string): void => {
+    if (name === "" || seen.has(name)) return;
+    seen.add(name);
+    names.push(name);
+  };
+  for (const rec of records) {
+    const rest = underRest(rec.id, path);
+    if (rest === "" || !rest.includes("/")) continue;
+    add(rest.split("/", 1)[0]);
+  }
+  for (const dp of domains.keys()) {
+    if (dp === path) continue;
+    const rest = underRest(dp, path);
+    if (rest === "") continue;
+    add(rest.split("/", 1)[0]);
+  }
+  names.sort();
+  return names;
+}
+
+// renderOverlaySubtree renders the overlay-only subdomain tree under path to
+// depth levels, dropping unlisted subtrees (§4.5.5). It does not apply
+// pass-through folding; an overlay-introduced subtree renders its literal
+// directory structure.
+function renderOverlaySubtree(
+  path: string,
+  depth: number,
+  domains: Map<string, OverlayDomain>,
+  records: OverlayArtifact[],
+): LoadDomainSubdomain[] {
+  if (depth <= 0) return [];
+  const out: LoadDomainSubdomain[] = [];
+  for (const name of overlayImmediateChildren(path, domains, records)) {
+    const childPath = joinSeg(path, name);
+    if (unlistedOverlay(childPath, domains)) continue;
+    out.push({
+      path: childPath,
+      name,
+      description: overlayChildDescription(childPath, domains),
+      subdomains: renderOverlaySubtree(childPath, depth - 1, domains, records),
+    });
+  }
+  out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return out;
+}
+
+// pruneUnlisted recursively drops every subdomain the overlay marks unlisted
+// (the path or an ancestor carries unlisted: true), per §4.5.3.
+function pruneUnlisted(
+  subs: LoadDomainSubdomain[],
+  domains: Map<string, OverlayDomain>,
+): LoadDomainSubdomain[] {
+  const out: LoadDomainSubdomain[] = [];
+  for (const sd of subs) {
+    if (unlistedOverlay(sd.path, domains)) continue;
+    sd.subdomains = pruneUnlisted(sd.subdomains ?? [], domains);
+    out.push(sd);
+  }
+  return out;
+}
+
+// mergeSubdomains extends the registry subdomain list with overlay-only
+// children, overrides a child's description from an overlay DOMAIN.md, and
+// drops every overlay-unlisted subtree (§4.5.3, §4.5.5).
+function mergeSubdomains(
+  reg: LoadDomainSubdomain[],
+  path: string,
+  depth: number,
+  domains: Map<string, OverlayDomain>,
+  records: OverlayArtifact[],
+): LoadDomainSubdomain[] {
+  const out = pruneUnlisted(reg, domains);
+  const byPath = new Map<string, number>();
+  out.forEach((sd, i) => byPath.set(sd.path, i));
+  for (const name of overlayImmediateChildren(path, domains, records)) {
+    const childPath = joinSeg(path, name);
+    if (unlistedOverlay(childPath, domains)) continue;
+    const i = byPath.get(childPath);
+    if (i !== undefined) {
+      const od = domains.get(childPath);
+      if (od && od.description !== "") out[i].description = od.description;
+      continue;
+    }
+    out.push({
+      path: childPath,
+      name,
+      description: overlayChildDescription(childPath, domains),
+      subdomains: renderOverlaySubtree(childPath, depth - 1, domains, records),
+    });
+  }
+  out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return out;
 }
 
 // §7.2 large-resource reference: the response delivers bytes out of band
@@ -583,15 +879,221 @@ export class Client {
     return tokens;
   }
 
-  // spec: §4.5.5 / §5.1 (F-4.5.4) — depth is unset by default. The query
-  // parameter is omitted unless the caller supplies one (get() drops undefined
-  // values), so the registry applies its configured default max_depth (3)
-  // rather than the SDK forcing a single rendered level.
-  async loadDomain(path = "", depth?: number): Promise<Record<string, unknown>> {
-    return this.get("/v1/load_domain", {
+  // spec: §4.5.4 / §4.5.5 / §5.1 (F-4.5.2/F-6.4.2) — load_domain proxies the
+  // registry's rendered result and, when a workspace overlay is configured,
+  // composes the overlay DOMAIN.md set and overlay artifacts onto it
+  // client-side. The overlay is the highest-precedence layer in the caller's
+  // effective view (§6.4). With no overlay the behavior is identical to the
+  // pre-merge proxy.
+  //
+  // depth is unset by default. The query parameter is omitted unless the
+  // caller supplies one (get() drops undefined values), so the registry
+  // applies its configured default max_depth (3) rather than the SDK forcing a
+  // single rendered level.
+  async loadDomain(path = "", depth?: number): Promise<LoadDomainResult> {
+    const params = {
       ...(path ? { path } : {}),
       ...(depth !== undefined ? { depth } : {}),
-    }) as Promise<Record<string, unknown>>;
+    };
+    const index = await this.overlayForDomain();
+    if (!index || (index.domains.size === 0 && index.artifacts.size === 0)) {
+      return (await this.get("/v1/load_domain", params)) as LoadDomainResult;
+    }
+    let reg: LoadDomainResult;
+    try {
+      reg = (await this.get("/v1/load_domain", params)) as LoadDomainResult;
+    } catch (e) {
+      // spec §4.5.2 / §6.4 — a domain that exists only in the workspace overlay
+      // is part of the effective view, but the registry 404s it because it never
+      // sees the overlay. Synthesize an empty result and compose the overlay onto
+      // it; any other error propagates.
+      if (
+        e instanceof RegistryError &&
+        e.code === "domain.not_found" &&
+        overlayHasDomainContent(path, index.domains, [...index.artifacts.values()])
+      ) {
+        reg = { path, subdomains: [], notable: [] };
+      } else {
+        throw e;
+      }
+    }
+    return this.mergeDomain(reg, path, depth, index);
+  }
+
+  // catalog issues GET /v1/catalog?scope=<scope> and returns the visible
+  // artifact descriptors under that scope (§4.5.2 merged-view glob
+  // resolution). A registry-side error degrades the merge to overlay-only
+  // resolution rather than failing the call, so any rejection yields [].
+  private async catalog(
+    scope: string,
+  ): Promise<Array<{ id: string; type?: string; summary?: string }>> {
+    try {
+      const body = (await this.get("/v1/catalog", scope ? { scope } : {})) as {
+        artifacts?: Array<{ id: string; type?: string; summary?: string }>;
+      };
+      return body.artifacts ?? [];
+    } catch {
+      return [];
+    }
+  }
+
+  // mergeDomain composes the workspace overlay onto the registry load_domain
+  // result for path, per §4.5.4. With no overlay domains and no overlay
+  // artifacts the registry result passes through unchanged.
+  private async mergeDomain(
+    reg: LoadDomainResult,
+    path: string,
+    depth: number | undefined,
+    index: LocalOverlay | null,
+  ): Promise<LoadDomainResult> {
+    if (!index || (index.domains.size === 0 && index.artifacts.size === 0)) {
+      reg.subdomains = reg.subdomains ?? [];
+      reg.notable = reg.notable ?? [];
+      return reg;
+    }
+    const domains = index.domains;
+    const records = [...index.artifacts.values()];
+    const od = domains.get(path);
+
+    // §4.5.4 keywords append-unique. The root has no DOMAIN.md (§4.5.5), so a
+    // description/keyword override applies only to a non-root requested path.
+    if (path !== "" && od && od.keywords.length > 0) {
+      reg.keywords = uniqueAppend(reg.keywords ?? [], od.keywords);
+    }
+    // §4.5.4 description/body, overlay highest precedence.
+    if (path !== "" && od) {
+      if (od.body.trim() !== "") reg.description = od.body;
+      else if (od.description !== "") reg.description = od.description;
+    }
+
+    // §4.5.5 notable candidate pool extension.
+    const candidates = await this.overlayNotableCandidates(path, od, records);
+    reg.notable = mergeNotable(
+      reg.notable ?? [],
+      candidates,
+      mergedFeatured(reg.notable ?? [], od),
+      od?.notableCount ?? 0,
+    );
+
+    // §4.5.5 subdomain enumeration extension and §4.5.3 unlisted pruning.
+    reg.subdomains = mergeSubdomains(
+      reg.subdomains ?? [],
+      path,
+      renderDepth(depth),
+      domains,
+      records,
+    );
+    return reg;
+  }
+
+  // overlayNotableCandidates returns the overlay's contribution to the §4.5.5
+  // notable candidate pool for path: the overlay's direct child artifacts
+  // (after the merged DOMAIN.md exclude:) plus the overlay DOMAIN.md include:
+  // set resolved over the merged view (registry catalog ∪ overlay).
+  private async overlayNotableCandidates(
+    path: string,
+    od: OverlayDomain | undefined,
+    records: OverlayArtifact[],
+  ): Promise<LoadDomainNotable[]> {
+    const include = od?.include ?? [];
+    const exclude = od?.exclude ?? [];
+    const out: LoadDomainNotable[] = [];
+    const seen = new Set<string>();
+    for (const rec of records) {
+      if (parentOf(rec.id) !== path) continue;
+      if (matchAny(exclude, rec.id)) continue;
+      if (seen.has(rec.id)) continue;
+      seen.add(rec.id);
+      out.push(overlayArtifactDescriptor(rec));
+    }
+    if (include.length > 0) {
+      for (const m of await this.resolveOverlayIncludes(include, exclude, records)) {
+        if (seen.has(m.id)) continue;
+        seen.add(m.id);
+        out.push(m);
+      }
+    }
+    return out;
+  }
+
+  // resolveOverlayIncludes resolves the overlay DOMAIN.md include:/exclude:
+  // globs over the merged view (registry catalog ∪ overlay) per §4.5.2 and maps
+  // each match to a notable descriptor: an overlay record (highest precedence)
+  // when the id is in the overlay, otherwise the registry catalog descriptor.
+  private async resolveOverlayIncludes(
+    include: string[],
+    exclude: string[],
+    records: OverlayArtifact[],
+  ): Promise<LoadDomainNotable[]> {
+    const catalog = await this.fetchCatalogForIncludes(include);
+    const overlayByID = new Map<string, OverlayArtifact>();
+    for (const rec of records) overlayByID.set(rec.id, rec);
+    const seen = new Set<string>();
+    const ids: string[] = [];
+    for (const id of catalog.keys()) {
+      if (!seen.has(id)) {
+        seen.add(id);
+        ids.push(id);
+      }
+    }
+    for (const id of overlayByID.keys()) {
+      if (!seen.has(id)) {
+        seen.add(id);
+        ids.push(id);
+      }
+    }
+    ids.sort();
+    const out: LoadDomainNotable[] = [];
+    for (const id of resolveImports(include, exclude, ids)) {
+      const rec = overlayByID.get(id);
+      if (rec) {
+        out.push(overlayArtifactDescriptor(rec));
+        continue;
+      }
+      const e = catalog.get(id);
+      if (e) out.push(e);
+    }
+    return out;
+  }
+
+  // fetchCatalogForIncludes fetches the registry catalog descriptors needed to
+  // resolve include over the merged view, keyed by id. It scopes each request
+  // to the literal path prefix of an include pattern; a leading-glob pattern
+  // widens the fetch to the whole visible catalog.
+  private async fetchCatalogForIncludes(
+    include: string[],
+  ): Promise<Map<string, LoadDomainNotable>> {
+    const prefixes = new Set<string>();
+    let full = false;
+    for (const p of include) {
+      const pre = globLiteralPrefix(p);
+      if (pre === "") {
+        full = true;
+        break;
+      }
+      prefixes.add(pre);
+    }
+    const out = new Map<string, LoadDomainNotable>();
+    const fetch = async (scope: string): Promise<void> => {
+      for (const e of await this.catalog(scope)) {
+        out.set(e.id, { id: e.id, type: e.type, summary: e.summary });
+      }
+    };
+    if (full) {
+      await fetch("");
+      return out;
+    }
+    for (const pre of prefixes) await fetch(pre);
+    return out;
+  }
+
+  // overlayForDomain reads the overlay for the load_domain merge. Unlike
+  // overlayIndex it keeps a domain-only overlay (DOMAIN.md files with no
+  // overlay artifacts) visible, so an overlay that only re-describes or prunes
+  // domains still composes onto the registry tree (§4.5.4).
+  private async overlayForDomain(): Promise<LocalOverlay | null> {
+    const overlayPath = await resolveOverlayPath(this.overlayPath, undefined, process.cwd());
+    return overlayPath ? LocalOverlay.load(overlayPath) : null;
   }
 
   async searchDomains(

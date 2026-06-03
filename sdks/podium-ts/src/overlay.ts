@@ -101,6 +101,210 @@ export interface OverlayArtifact {
   tokens: string[];
 }
 
+// OverlayDomain holds the workspace-overlay DOMAIN.md fields the §4.5.4
+// load_domain merge reads: the frontmatter description, the prose body, the
+// include/exclude globs, the unlisted flag, and the discovery knobs (keywords,
+// featured, notable_count). It mirrors pkg/manifest.Domain as the merge
+// consumes it.
+export interface OverlayDomain {
+  description: string;
+  body: string;
+  include: string[];
+  exclude: string[];
+  unlisted: boolean;
+  keywords: string[];
+  featured: string[];
+  notableCount: number;
+}
+
+// parseDomainFrontmatter hand-parses a DOMAIN.md frontmatter block the same way
+// parseFrontmatter reads an ARTIFACT.md, with no YAML dependency. It reads the
+// top-level description, unlisted (bool), include/exclude lists (inline
+// `[a, b]` and block `- x` forms), and the nested discovery: block's keywords,
+// featured, and notable_count. The body is everything after the closing `---`.
+// Returns null for a malformed file (no frontmatter) so the caller can skip it.
+function parseDomainFrontmatter(text: string): OverlayDomain | null {
+  if (!text.startsWith("---")) return null;
+  const lines = text.split(/\r?\n/);
+  let end = -1;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim() === "---") {
+      end = i;
+      break;
+    }
+  }
+  if (end === -1) return null;
+  const body = lines.slice(end + 1).join("\n");
+  const dom: OverlayDomain = {
+    description: "",
+    body,
+    include: [],
+    exclude: [],
+    unlisted: false,
+    keywords: [],
+    featured: [],
+    notableCount: 0,
+  };
+  const unquote = (s: string): string => s.trim().replace(/^['"]|['"]$/g, "");
+  const inlineList = (val: string): string[] => {
+    const out: string[] = [];
+    if (val.startsWith("[") && val.endsWith("]")) {
+      for (const t of val.slice(1, -1).split(",")) {
+        if (t.trim()) out.push(unquote(t));
+      }
+    }
+    return out;
+  };
+  // indentOf returns the leading-space count of a line.
+  const indentOf = (s: string): number => s.length - s.trimStart().length;
+  // pending tracks which list a `- x` block item appends to. discovery tracks
+  // whether the cursor is inside the nested discovery: block.
+  let pending: "include" | "exclude" | "keywords" | "featured" | null = null;
+  let inDiscovery = false;
+  for (const raw of lines.slice(1, end)) {
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const indent = indentOf(raw);
+    // A block list item appends to the pending list.
+    if (pending && trimmed.startsWith("- ")) {
+      const item = unquote(trimmed.slice(2));
+      if (item) {
+        if (pending === "include") dom.include.push(item);
+        else if (pending === "exclude") dom.exclude.push(item);
+        else if (pending === "keywords") dom.keywords.push(item);
+        else dom.featured.push(item);
+      }
+      continue;
+    }
+    pending = null;
+    const sep = raw.indexOf(":");
+    if (sep === -1) continue;
+    const key = raw.slice(0, sep).trim();
+    const val = raw.slice(sep + 1).trim();
+    if (indent === 0) {
+      // A new top-level key closes the discovery: block.
+      inDiscovery = false;
+      if (key === "description") {
+        dom.description = unquote(val);
+      } else if (key === "unlisted") {
+        dom.unlisted = unquote(val).toLowerCase() === "true";
+      } else if (key === "include") {
+        if (val) dom.include.push(...inlineList(val));
+        else pending = "include";
+      } else if (key === "exclude") {
+        if (val) dom.exclude.push(...inlineList(val));
+        else pending = "exclude";
+      } else if (key === "discovery") {
+        inDiscovery = true;
+      }
+      continue;
+    }
+    // Nested keys belong to the discovery: block.
+    if (inDiscovery) {
+      if (key === "keywords") {
+        if (val) dom.keywords.push(...inlineList(val));
+        else pending = "keywords";
+      } else if (key === "featured") {
+        if (val) dom.featured.push(...inlineList(val));
+        else pending = "featured";
+      } else if (key === "notable_count") {
+        const n = parseInt(unquote(val), 10);
+        if (Number.isFinite(n)) dom.notableCount = n;
+      }
+    }
+  }
+  return dom;
+}
+
+// match reports whether the §4.5.2 glob pattern matches the canonical artifact
+// id. `*` matches one path segment, `**` matches zero or more segments
+// (recursive), `{a,b,c}` matches any alternative. Mirrors pkg/domain.Match.
+export function match(pattern: string, id: string): boolean {
+  for (const alt of expandAlternatives(pattern)) {
+    if (matchSegments(alt.split("/"), id.split("/"))) return true;
+  }
+  return false;
+}
+
+// matchAny reports whether any non-empty pattern matches id.
+export function matchAny(patterns: string[], id: string): boolean {
+  return patterns.some((p) => p !== "" && match(p, id));
+}
+
+// resolveImports computes the §4.5.2 import set: every id in ids matching an
+// include pattern, with anything matching an exclude pattern removed (exclude
+// after include). The result preserves the input order of ids.
+export function resolveImports(include: string[], exclude: string[], ids: string[]): string[] {
+  return ids.filter((id) => matchAny(include, id) && !matchAny(exclude, id));
+}
+
+// fallbackDescription synthesizes the §4.5.5 description fallback for a domain
+// with no DOMAIN.md description: the directory basename, de-slugged (hyphens
+// and underscores become spaces) and title-cased. Mirrors
+// pkg/domain.FallbackDescription.
+export function fallbackDescription(path: string): string {
+  let base = path;
+  const i = path.lastIndexOf("/");
+  if (i >= 0) base = path.slice(i + 1);
+  base = base.replace(/-/g, " ").replace(/_/g, " ");
+  return base
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+// globLiteralPrefix returns the leading literal path segments of a §4.5.2 glob,
+// stopping at the first segment carrying a glob metacharacter. It scopes a
+// catalog fetch to the slice an include pattern can match
+// ("finance/ap/*" -> "finance/ap"); a leading glob yields "" (the whole
+// catalog). Mirrors cmd/podium-mcp.globLiteralPrefix.
+export function globLiteralPrefix(pattern: string): string {
+  const out: string[] = [];
+  for (const seg of pattern.split("/")) {
+    if (/[*{},]/.test(seg)) break;
+    out.push(seg);
+  }
+  return out.join("/");
+}
+
+// expandAlternatives expands a single `{a,b,c}` group into its alternatives,
+// recursing so multiple groups all expand. A pattern with no group returns
+// itself.
+function expandAlternatives(pattern: string): string[] {
+  const open = pattern.indexOf("{");
+  if (open < 0) return [pattern];
+  const rel = pattern.slice(open).indexOf("}");
+  if (rel < 0) return [pattern];
+  const closeIdx = rel + open;
+  const prefix = pattern.slice(0, open);
+  const suffix = pattern.slice(closeIdx + 1);
+  const out: string[] = [];
+  for (const choice of pattern.slice(open + 1, closeIdx).split(",")) {
+    out.push(...expandAlternatives(prefix + choice + suffix));
+  }
+  return out;
+}
+
+// matchSegments matches pattern segments against target segments, honoring `*`
+// (one segment) and `**` (zero or more segments).
+function matchSegments(pat: string[], tgt: string[]): boolean {
+  for (let i = 0; i < pat.length; i++) {
+    const seg = pat[i];
+    if (seg === "**") {
+      if (i === pat.length - 1) return true;
+      const rest = pat.slice(i + 1);
+      for (let j = 0; j <= tgt.length; j++) {
+        if (matchSegments(rest, tgt.slice(j))) return true;
+      }
+      return false;
+    }
+    if (i >= tgt.length) return false;
+    if (seg !== "*" && seg !== tgt[i]) return false;
+  }
+  return pat.length === tgt.length;
+}
+
 // LocalOverlay indexes an overlay directory and ranks it with BM25 (§6.4.1).
 export class LocalOverlay {
   // spec §6.4.1 — BM25 is the default overlay ranker (standard Okapi params).
@@ -108,6 +312,9 @@ export class LocalOverlay {
   private static readonly B = 0.75;
 
   readonly artifacts = new Map<string, OverlayArtifact>();
+  // §4.5.4 — every DOMAIN.md under the overlay keyed by canonical domain path
+  // (the dir relative to the overlay root, "/"-joined; "" for the root level).
+  readonly domains = new Map<string, OverlayDomain>();
   private avgLen = 0;
   private readonly docFreq = new Map<string, number>();
 
@@ -126,15 +333,25 @@ export class LocalOverlay {
     }
     if (!exists) return overlay;
 
-    // Walk for directories that directly contain an ARTIFACT.md.
+    // Walk for directories that directly contain an ARTIFACT.md or a
+    // DOMAIN.md. The canonical key is the dir relative to the overlay root
+    // ("/"-joined); the root level is keyed "".
     const walk = async (dir: string): Promise<void> => {
       const entries = await fs.readdir(dir, { withFileTypes: true });
+      const rel = path.relative(overlayPath, dir).split(path.sep).join("/");
+      const key = rel === "." ? "" : rel;
       const hasManifest = entries.some((e) => e.isFile() && e.name === "ARTIFACT.md");
-      if (hasManifest) {
-        const rel = path.relative(overlayPath, dir).split(path.sep).join("/");
-        if (rel && rel !== ".") {
-          const art = await overlay.readPackage(fs, path, dir, rel);
-          if (art) overlay.artifacts.set(rel, art);
+      if (hasManifest && key) {
+        const art = await overlay.readPackage(fs, path, dir, key);
+        if (art) overlay.artifacts.set(key, art);
+      }
+      if (entries.some((e) => e.isFile() && e.name === "DOMAIN.md")) {
+        try {
+          const text = await fs.readFile(path.join(dir, "DOMAIN.md"), "utf-8");
+          const dom = parseDomainFrontmatter(text);
+          if (dom) overlay.domains.set(key, dom);
+        } catch {
+          // skip a malformed or unreadable DOMAIN.md
         }
       }
       for (const e of entries) {

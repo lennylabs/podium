@@ -243,6 +243,39 @@ func (r *Registry) renderSubtree(under []store.ManifestRecord, merged map[string
 	return out
 }
 
+// CatalogEntry is one visible artifact in the §4.5.2 catalog: the canonical
+// ID, type, and short summary, with no manifest body. It carries exactly what
+// a client-side load_domain merge needs to resolve a workspace-local
+// DOMAIN.md's include:/exclude: globs over the merged view and to render an
+// imported registry artifact in the notable list without fetching its body.
+type CatalogEntry struct {
+	ID      string
+	Type    string
+	Summary string
+}
+
+// Catalog returns the visible artifacts whose canonical ID falls under scope
+// (a path-segment prefix; an empty scope returns the whole visible catalog),
+// one latest-version entry per artifact, ordered by ID. It is the cheap
+// descriptor surface a consumer that exposes load_domain uses to resolve a
+// workspace-local DOMAIN.md's include:/exclude: globs over the merged view
+// (registry ∪ overlay) per §4.5.2 and §6.4, and to render registry artifacts
+// a local include: pulls in without a load_artifact round-trip. Visibility is
+// filtered per caller through visibleManifests, so the catalog never widens
+// the caller's read surface (F-4.5.2, F-6.4.2).
+func (r *Registry) Catalog(ctx context.Context, id layer.Identity, scope string) ([]CatalogEntry, error) {
+	visible, err := r.visibleManifests(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	under := dedupeLatest(manifestsUnder(visible, scope))
+	out := make([]CatalogEntry, 0, len(under))
+	for _, m := range under {
+		out = append(out, CatalogEntry{ID: m.ArtifactID, Type: m.Type, Summary: m.Description})
+	}
+	return out, nil
+}
+
 // manifestIDs returns the unique, sorted set of artifact IDs in the
 // visible set, used as the catalog for §4.5.2 import resolution.
 func manifestIDs(visible []store.ManifestRecord) []string {

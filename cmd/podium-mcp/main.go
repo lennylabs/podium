@@ -441,11 +441,18 @@ type mcpServer struct {
 	resolutions *resolutionCache
 	adapters    *adapter.Registry
 	overlay     []filesystem.ArtifactRecord
-	// overlayMu guards overlay and cfg.overlayPath. The §6.4 overlay
-	// watcher (a separate goroutine, startOverlayWatch) re-resolves the
-	// overlay records and swaps them on a filesystem change, while request
-	// handlers read them on the serve goroutine; the roots/list reply also
-	// writes both. All access goes through the guarded accessors below.
+	// overlayDomains is the §6.4 workspace-overlay DOMAIN.md set merged
+	// across the overlay's layers, keyed by canonical domain path. The
+	// load_domain merge composes it onto the registry result client-side
+	// (§4.5.4, F-4.5.2/F-6.4.2). Swapped together with overlay by the
+	// watcher and the roots/list reply.
+	overlayDomains map[string]*manifest.Domain
+	// overlayMu guards overlay, overlayDomains, and cfg.overlayPath. The
+	// §6.4 overlay watcher (a separate goroutine, startOverlayWatch)
+	// re-resolves the overlay records and swaps them on a filesystem
+	// change, while request handlers read them on the serve goroutine; the
+	// roots/list reply also writes them. All access goes through the
+	// guarded accessors below.
 	overlayMu sync.RWMutex
 	// localSem is the §9.1 LocalSearchProvider semantic index over the
 	// overlay. Nil when no overlay vector backend is configured, in which
@@ -584,9 +591,10 @@ func newServer(cfg *config) (*mcpServer, error) {
 	// (started in serve) re-resolves and swaps them on every filesystem
 	// change so an edit, add, or remove is reflected without a restart.
 	if cfg.overlayPath != "" {
-		records, err := overlay.Filesystem{Path: cfg.overlayPath}.Resolve(nil)
+		records, domains, err := resolveOverlayAll(cfg.overlayPath)
 		if err == nil {
 			srv.overlay = records
+			srv.overlayDomains = domains
 		} else {
 			// spec: §6.9 "Workspace overlay path missing" — skip the
 			// overlay but warn once, identifying the path, so a
@@ -786,13 +794,43 @@ func (s *mcpServer) overlaySnapshot() []filesystem.ArtifactRecord {
 	return s.overlay
 }
 
-// setOverlay swaps in a fresh set of overlay records under the write lock.
-// Called at startup, by the §6.4 watcher on a filesystem change, and by the
-// roots/list resolution.
-func (s *mcpServer) setOverlay(records []filesystem.ArtifactRecord) {
+// setOverlay swaps in a fresh set of overlay records (artifacts and the
+// merged DOMAIN.md set) under the write lock. Called at startup, by the §6.4
+// watcher on a filesystem change, and by the roots/list resolution. Both maps
+// are replaced wholesale so request handlers always observe a consistent pair.
+func (s *mcpServer) setOverlay(records []filesystem.ArtifactRecord, domains map[string]*manifest.Domain) {
 	s.overlayMu.Lock()
 	s.overlay = records
+	s.overlayDomains = domains
 	s.overlayMu.Unlock()
+}
+
+// overlayDomainsSnapshot returns the current overlay DOMAIN.md set under the
+// read lock. The map is never mutated in place (setOverlay replaces it
+// wholesale), so callers may read it without holding the lock.
+func (s *mcpServer) overlayDomainsSnapshot() map[string]*manifest.Domain {
+	s.overlayMu.RLock()
+	defer s.overlayMu.RUnlock()
+	return s.overlayDomains
+}
+
+// resolveOverlayAll resolves both the artifact records and the merged
+// DOMAIN.md set at path. The artifact-resolution error (including ErrNoOverlay
+// for a missing or unset path) propagates verbatim so the caller's §6.9
+// warn-and-disable handling is unchanged. A DOMAIN.md-only ErrNoOverlay (the
+// path vanished between the two reads) degrades to an empty domain map rather
+// than failing the artifact load.
+func resolveOverlayAll(path string) ([]filesystem.ArtifactRecord, map[string]*manifest.Domain, error) {
+	prov := overlay.Filesystem{Path: path}
+	records, err := prov.Resolve(nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	domains, derr := prov.ResolveDomains(nil)
+	if derr != nil && !errors.Is(derr, overlay.ErrNoOverlay) {
+		return records, nil, derr
+	}
+	return records, domains, nil
 }
 
 // overlayPath returns the currently resolved overlay path under the read
@@ -1044,14 +1082,14 @@ func (s *mcpServer) resolveWorkspaceOverlay(workspace string) bool {
 	if err != nil {
 		return false
 	}
-	records, err := overlay.Filesystem{Path: path}.Resolve(nil)
+	records, domains, err := resolveOverlayAll(path)
 	if err != nil {
 		return false
 	}
 	// Set the path before the records so the watcher, which keys off the
 	// resolved path, observes a consistent (path, records) pair.
 	s.setOverlayPath(path)
-	s.setOverlay(records)
+	s.setOverlay(records, domains)
 	return true
 }
 
@@ -1210,8 +1248,11 @@ func isErrorResult(result any) bool {
 func (s *mcpServer) dispatchTool(p toolCallParams) any {
 	switch p.Name {
 	case "load_domain":
-		s.auditMeta(audit.EventDomainLoaded, argString(p.Arguments, "path"))
-		return s.proxyGet("/v1/load_domain", p.Arguments, nil)
+		// §4.5.4 / §6.4: the workspace overlay merges client-side. loadDomain
+		// proxies the registry result and composes the overlay DOMAIN.md set
+		// and overlay artifacts onto it (F-4.5.2/F-6.4.2). The audit event is
+		// emitted inside loadDomain so it fires once on every path.
+		return s.loadDomain(p.Arguments)
 	case "search_domains":
 		s.auditSearch(audit.EventDomainsSearched, argString(p.Arguments, "query"))
 		return s.proxyGet("/v1/search_domains", p.Arguments, map[string]any{"results": []any{}})

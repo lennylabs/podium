@@ -402,6 +402,199 @@ def _batch_result_from(env: dict[str, Any]) -> BatchResult:
 _CACHE_MODES = ("always-revalidate", "offline-first", "offline-only")
 
 
+# ---------------------------------------------------------------------------
+# §4.5.4 load_domain overlay-merge helpers (ported from
+# cmd/podium-mcp/load_domain.go).
+# ---------------------------------------------------------------------------
+
+
+def _parent_of(path: str) -> str:
+    """Return the parent domain path of a canonical id ("" for a top-level id)."""
+    i = path.rfind("/")
+    return path[:i] if i >= 0 else ""
+
+
+def _join_seg(path: str, seg: str) -> str:
+    """Join a domain path and a child segment."""
+    return seg if path == "" else path + "/" + seg
+
+
+def _under_rest(id: str, prefix: str) -> str:
+    """Return id's remainder beyond prefix when id is at or under prefix.
+
+    The match is segment-aligned; an empty prefix returns id unchanged and a
+    non-match returns "".
+    """
+    if prefix == "":
+        return id
+    if not id.startswith(prefix):
+        return ""
+    if len(id) == len(prefix):
+        return ""
+    if id[len(prefix)] != "/":
+        return ""
+    return id[len(prefix) + 1 :]
+
+
+def _unique_append(dst: list[str], src: list[str]) -> list[str]:
+    """Append src to dst, dropping values already present, preserving order."""
+    seen = set(dst)
+    out = list(dst)
+    for v in src:
+        if v not in seen:
+            seen.add(v)
+            out.append(v)
+    return out
+
+
+def _overlay_artifact_descriptor(art: "_overlay.OverlayArtifact") -> dict[str, Any]:
+    """Map an overlay artifact to a notable descriptor, tagged overlay-sourced."""
+    return {
+        "id": art.id,
+        "type": art.type,
+        "version": art.version,
+        "summary": art.description,
+        "overlay": True,
+    }
+
+
+def _merge_notable(
+    reg: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    featured: set[str],
+    cap: int,
+) -> list[dict[str, Any]]:
+    """Append overlay candidates to the registry notable list (§4.5.5).
+
+    Overlay precedence shadows a same-id registry descriptor, each entry's
+    notable source is tagged (featured wins, else signal), featured entries
+    sort first (stable), and the result is capped when the overlay DOMAIN.md
+    sets a notable_count.
+    """
+    out: list[dict[str, Any]] = []
+    idx: dict[str, int] = {}
+    for a in reg:
+        idx[a.get("id", "")] = len(out)
+        out.append(dict(a))
+    for c in candidates:
+        cid = c.get("id", "")
+        if cid in idx:
+            out[idx[cid]] = dict(c)  # overlay precedence shadows the registry
+            continue
+        idx[cid] = len(out)
+        out.append(dict(c))
+    for entry in out:
+        if entry.get("id", "") in featured:
+            entry["source"] = "featured"
+        elif not entry.get("source"):
+            entry["source"] = "signal"
+    feat = [a for a in out if a.get("source") == "featured"]
+    rest = [a for a in out if a.get("source") != "featured"]
+    merged = feat + rest
+    if cap > 0 and len(merged) > cap:
+        merged = merged[:cap]
+    return merged
+
+
+def _prune_unlisted(
+    subs: list[dict[str, Any]], domains: dict[str, "_overlay.OverlayDomain"]
+) -> list[dict[str, Any]]:
+    """Recursively drop every subdomain the overlay marks unlisted (§4.5.3)."""
+    out: list[dict[str, Any]] = []
+    for sd in subs:
+        if _unlisted_overlay(sd.get("path", ""), domains):
+            continue
+        sd = dict(sd)
+        if sd.get("subdomains"):
+            sd["subdomains"] = _prune_unlisted(sd["subdomains"], domains)
+        out.append(sd)
+    return out
+
+
+def _overlay_has_domain_content(
+    path: str,
+    domains: dict[str, "_overlay.OverlayDomain"],
+    records: dict[str, "_overlay.OverlayArtifact"],
+) -> bool:
+    """Whether the overlay carries anything at or under path (§4.5.2 / §6.4).
+
+    A DOMAIN.md at path, a deeper DOMAIN.md, or an artifact under path. Gates
+    synthesizing a result for an overlay-only domain the registry 404s.
+    """
+    if path in domains:
+        return True
+    for dp in domains:
+        if dp != path and _under_rest(dp, path) != "":
+            return True
+    return any(_under_rest(oid, path) != "" for oid in records)
+
+
+def _unlisted_overlay(path: str, domains: dict[str, "_overlay.OverlayDomain"]) -> bool:
+    """Report whether path resolves under an overlay-unlisted folder (§4.5.3).
+
+    The path or any ancestor carries an overlay DOMAIN.md with unlisted: true.
+    The root ("") carries no DOMAIN.md.
+    """
+    p = path
+    while p != "":
+        d = domains.get(p)
+        if d is not None and d.unlisted:
+            return True
+        p = _parent_of(p)
+    return False
+
+
+def _overlay_child_description(
+    path: str, domains: dict[str, "_overlay.OverlayDomain"]
+) -> str:
+    """Resolve a child subdomain's §4.5.5 short description.
+
+    The overlay DOMAIN.md frontmatter description when set, otherwise the
+    synthesized basename fallback. The prose body is never returned for a
+    non-requested entry (§4.5.5).
+    """
+    d = domains.get(path)
+    if d is not None and d.description:
+        return d.description
+    return _overlay.fallback_description(path)
+
+
+def _overlay_immediate_children(
+    path: str,
+    domains: dict[str, "_overlay.OverlayDomain"],
+    records: dict[str, "_overlay.OverlayArtifact"],
+) -> list[str]:
+    """Return the immediate subdomain child names under path implied by overlay.
+
+    spec §4.5.5 — a first segment beyond path that has an overlay artifact
+    below it (the id has a deeper segment) or an overlay DOMAIN.md at or below
+    it. A direct child artifact (no deeper segment) is a notable entry rather
+    than a subdomain and is excluded.
+    """
+    seen: set[str] = set()
+    names: list[str] = []
+
+    def add(name: str) -> None:
+        if name and name not in seen:
+            seen.add(name)
+            names.append(name)
+
+    for art in records.values():
+        rest = _under_rest(art.id, path)
+        if rest == "" or "/" not in rest:
+            continue
+        add(rest.split("/", 1)[0])
+    for dp in domains:
+        if dp == path:
+            continue
+        rest = _under_rest(dp, path)
+        if rest == "":
+            continue
+        add(rest.split("/", 1)[0])
+    names.sort()
+    return names
+
+
 class Client:
     """Thin HTTP client over the registry's meta-tool API.
 
@@ -531,7 +724,10 @@ class Client:
         if session_id and session_id in self._overlay_cache:
             return self._overlay_cache[session_id]
         index = _overlay.LocalOverlay(self.overlay_path)
-        if not index.artifacts:
+        # spec §6.4 — an overlay with neither artifacts nor DOMAIN.md files
+        # contributes nothing, so it is treated as absent. load_domain reads
+        # the DOMAIN.md set, so a domains-only overlay is retained here.
+        if not index.artifacts and not index.domains:
             index = None
         if session_id:
             self._overlay_cache[session_id] = index
@@ -592,6 +788,11 @@ class Client:
         self.token = tokens.access_token
         return tokens
 
+    # spec §4.5.5 — the default render depth for an overlay-introduced subtree.
+    # The SDK does not know the tenant's resolved max_depth, so it renders to
+    # the caller's requested depth, falling back to this default.
+    _DEFAULT_RENDER_DEPTH = 3
+
     def load_domain(self, path: str = "", depth: int | None = None) -> dict[str, Any]:
         # spec: §4.5.5 / §5.1 (F-4.5.4) — depth is unset by default. The query
         # parameter is omitted unless the caller supplies one, so the registry
@@ -602,7 +803,280 @@ class Client:
             params["path"] = path
         if depth:
             params["depth"] = depth
-        return self._get("/v1/load_domain", params)
+
+        # spec §4.5.4 / §6.4 (F-4.5.2/F-6.4.2) — when a workspace overlay is
+        # configured the SDK composes the overlay DOMAIN.md set and overlay
+        # artifacts onto the registry result client-side, mirroring the MCP
+        # bridge. With no overlay the behavior is the pre-merge proxy.
+        index = self._overlay_index()
+        if index is None or (not index.domains and not index.artifacts):
+            return self._get("/v1/load_domain", params)
+
+        render_depth = depth if depth and depth > 0 else self._DEFAULT_RENDER_DEPTH
+        try:
+            result = self._get("/v1/load_domain", params)
+        except RegistryError as exc:
+            # spec §4.5.2 / §6.4 — a domain that exists only in the workspace
+            # overlay is part of the effective view, but the registry 404s it
+            # because it never sees the overlay. Synthesize an empty result and
+            # compose the overlay onto it; any other error propagates.
+            if exc.code == "domain.not_found" and _overlay_has_domain_content(
+                path, index.domains, index.artifacts
+            ):
+                result = {"path": path, "subdomains": [], "notable": []}
+            else:
+                raise
+        return self._merge_domain(result, path, render_depth, index)
+
+    def _merge_domain(
+        self,
+        result: dict[str, Any],
+        path: str,
+        depth: int,
+        index: "_overlay.LocalOverlay",
+    ) -> dict[str, Any]:
+        """Compose the workspace overlay onto the registry load_domain result.
+
+        spec §4.5.4 / §6.4 — the overlay is the highest-precedence layer:
+        description/body and keywords come from the overlay DOMAIN.md at the
+        requested path, the notable candidate pool is extended with overlay
+        direct-child artifacts and the overlay include: set resolved over the
+        merged view, and the subdomain enumeration is extended with
+        overlay-only children with overlay-unlisted subtrees pruned.
+        """
+        domains = index.domains
+        records = index.artifacts
+        od = domains.get(path)
+
+        # §4.5.4 keywords append-unique. The root carries no DOMAIN.md, so a
+        # description/keyword override applies only to a non-root path.
+        if path != "" and od is not None and od.keywords:
+            result["keywords"] = _unique_append(result.get("keywords") or [], od.keywords)
+        # §4.5.4 description/body, overlay highest precedence.
+        if path != "" and od is not None:
+            if od.body.strip():
+                result["description"] = od.body
+            elif od.description:
+                result["description"] = od.description
+
+        # §4.5.5 notable candidate pool extension.
+        candidates = self._overlay_notable_candidates(path, od, records)
+        featured = self._merged_featured(result.get("notable") or [], od)
+        cap = od.notable_count if od is not None else 0
+        result["notable"] = _merge_notable(
+            result.get("notable") or [], candidates, featured, cap
+        )
+
+        # §4.5.5 subdomain enumeration extension and §4.5.3 unlisted pruning.
+        result["subdomains"] = self._merge_subdomains(
+            result.get("subdomains") or [], path, depth, domains, records
+        )
+        return result
+
+    def _catalog(self, scope: str) -> list[dict[str, Any]]:
+        """Return the visible /v1/catalog artifact descriptors under scope.
+
+        spec §4.5.2 — the merged-view glob resolution consults the registry
+        catalog for the slice an include pattern can match. On any error this
+        returns ``[]`` so the merge degrades to overlay-only resolution rather
+        than failing the call.
+        """
+        params: dict[str, Any] = {}
+        if scope:
+            params["scope"] = scope
+        try:
+            body = self._get("/v1/catalog", params)
+        except Exception:  # noqa: BLE001 - best-effort; degrade to overlay-only
+            return []
+        return body.get("artifacts") or []
+
+    def _overlay_notable_candidates(
+        self,
+        path: str,
+        od: "_overlay.OverlayDomain | None",
+        records: dict[str, "_overlay.OverlayArtifact"],
+    ) -> list[dict[str, Any]]:
+        """Return the overlay's contribution to the §4.5.5 notable pool.
+
+        The pool is the overlay's direct child artifacts (after the merged
+        DOMAIN.md exclude:) plus the overlay DOMAIN.md include: set resolved
+        over the merged view.
+        """
+        include = od.include if od is not None else []
+        exclude = od.exclude if od is not None else []
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for art in sorted(records.values(), key=lambda a: a.id):
+            if _parent_of(art.id) != path:
+                continue
+            if _overlay.match_any(exclude, art.id):
+                continue
+            if art.id in seen:
+                continue
+            seen.add(art.id)
+            out.append(_overlay_artifact_descriptor(art))
+        if include:
+            for m in self._resolve_overlay_includes(include, exclude, records):
+                if m["id"] in seen:
+                    continue
+                seen.add(m["id"])
+                out.append(m)
+        return out
+
+    def _resolve_overlay_includes(
+        self,
+        include: list[str],
+        exclude: list[str],
+        records: dict[str, "_overlay.OverlayArtifact"],
+    ) -> list[dict[str, Any]]:
+        """Resolve the overlay include:/exclude: globs over the merged view.
+
+        spec §4.5.2 — each match maps to a notable descriptor: the overlay
+        record (highest precedence) when the id is in the overlay, otherwise
+        the registry catalog descriptor.
+        """
+        catalog = self._fetch_catalog_for_includes(include)
+        ids: list[str] = []
+        seen: set[str] = set()
+        for cid in catalog:
+            if cid not in seen:
+                seen.add(cid)
+                ids.append(cid)
+        for oid in records:
+            if oid not in seen:
+                seen.add(oid)
+                ids.append(oid)
+        ids.sort()
+        out: list[dict[str, Any]] = []
+        for rid in _overlay.resolve_imports(include, exclude, ids):
+            art = records.get(rid)
+            if art is not None:
+                out.append(_overlay_artifact_descriptor(art))
+                continue
+            entry = catalog.get(rid)
+            if entry is not None:
+                out.append(entry)
+        return out
+
+    def _fetch_catalog_for_includes(
+        self, include: list[str]
+    ) -> dict[str, dict[str, Any]]:
+        """Fetch the registry catalog descriptors needed to resolve include.
+
+        spec §4.5.2 — each request is scoped to the literal path prefix of an
+        include pattern; a leading-glob pattern widens the fetch to the whole
+        visible catalog. The result is keyed by id.
+        """
+        prefixes: set[str] = set()
+        full = False
+        for p in include:
+            pre = _overlay.glob_literal_prefix(p)
+            if pre == "":
+                full = True
+                break
+            prefixes.add(pre)
+        out: dict[str, dict[str, Any]] = {}
+
+        def fetch(scope: str) -> None:
+            for e in self._catalog(scope):
+                eid = e.get("id", "")
+                if not eid:
+                    continue
+                out[eid] = {
+                    "id": eid,
+                    "type": e.get("type", ""),
+                    "summary": e.get("summary", ""),
+                }
+
+        if full:
+            fetch("")
+            return out
+        for pre in prefixes:
+            fetch(pre)
+        return out
+
+    def _merged_featured(
+        self, reg_notable: list[dict[str, Any]], od: "_overlay.OverlayDomain | None"
+    ) -> set[str]:
+        """Return the union of the registry's featured ids and the overlay's.
+
+        spec §4.5.4 — featured append-unique: the registry notable entries
+        already tagged ``source: featured`` plus the overlay DOMAIN.md
+        ``featured`` list.
+        """
+        out: set[str] = {a.get("id", "") for a in reg_notable if a.get("source") == "featured"}
+        if od is not None:
+            out.update(od.featured)
+        return out
+
+    def _merge_subdomains(
+        self,
+        reg: list[dict[str, Any]],
+        path: str,
+        depth: int,
+        domains: dict[str, "_overlay.OverlayDomain"],
+        records: dict[str, "_overlay.OverlayArtifact"],
+    ) -> list[dict[str, Any]]:
+        """Extend the registry subdomain list with overlay-only children.
+
+        spec §4.5.3 / §4.5.5 — overrides a child's description from an overlay
+        DOMAIN.md and drops every overlay-unlisted subtree.
+        """
+        out = _prune_unlisted(reg, domains)
+        by_path = {sd.get("path", ""): i for i, sd in enumerate(out)}
+        for name in _overlay_immediate_children(path, domains, records):
+            child_path = _join_seg(path, name)
+            if _unlisted_overlay(child_path, domains):
+                continue
+            if child_path in by_path:
+                cod = domains.get(child_path)
+                if cod is not None and cod.description:
+                    out[by_path[child_path]]["description"] = cod.description
+                continue
+            out.append(
+                {
+                    "path": child_path,
+                    "name": name,
+                    "description": _overlay_child_description(child_path, domains),
+                    "subdomains": self._render_overlay_subtree(
+                        child_path, depth - 1, domains, records
+                    ),
+                }
+            )
+        out.sort(key=lambda sd: sd.get("path", ""))
+        return out
+
+    def _render_overlay_subtree(
+        self,
+        path: str,
+        depth: int,
+        domains: dict[str, "_overlay.OverlayDomain"],
+        records: dict[str, "_overlay.OverlayArtifact"],
+    ) -> list[dict[str, Any]]:
+        """Render the overlay-only subdomain tree under path to depth levels.
+
+        spec §4.5.5 — drops unlisted subtrees. The literal directory structure
+        renders; no pass-through folding is applied (a registry-side nicety).
+        """
+        if depth <= 0:
+            return []
+        out: list[dict[str, Any]] = []
+        for name in _overlay_immediate_children(path, domains, records):
+            child_path = _join_seg(path, name)
+            if _unlisted_overlay(child_path, domains):
+                continue
+            out.append(
+                {
+                    "path": child_path,
+                    "name": name,
+                    "description": _overlay_child_description(child_path, domains),
+                    "subdomains": self._render_overlay_subtree(
+                        child_path, depth - 1, domains, records
+                    ),
+                }
+            )
+        out.sort(key=lambda sd: sd.get("path", ""))
+        return out
 
     def search_domains(
         self, query: str = "", *, scope: str = "", top_k: int = 10

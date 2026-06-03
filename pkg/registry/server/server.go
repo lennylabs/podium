@@ -331,6 +331,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/load_domain", s.handleLoadDomain)
 	mux.HandleFunc("/v1/search_domains", s.handleSearchDomains)
 	mux.HandleFunc("/v1/search_artifacts", s.handleSearchArtifacts)
+	mux.HandleFunc("/v1/catalog", s.handleCatalog)
 	mux.HandleFunc("/v1/load_artifact", s.handleLoadArtifact)
 	mux.HandleFunc("/v1/artifacts:batchLoad", s.handleBatchLoad)
 	mux.HandleFunc("/v1/sync/manifest", s.handleSyncManifest)
@@ -637,6 +638,51 @@ func (s *Server) handleLoadDomain(w http.ResponseWriter, r *http.Request) {
 	}
 	if resp.Notable == nil {
 		resp.Notable = []ArtifactDescriptor{}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// CatalogResponse is GET /v1/catalog output (§4.5.2 merged-view glob
+// resolution for the client-side load_domain merge, F-4.5.2). ids carries the
+// flat visible-ID list; artifacts carries the lean per-artifact descriptor a
+// consumer needs to render a registry artifact pulled in by a workspace-local
+// DOMAIN.md include: without a load_artifact round-trip. No manifest body
+// rides along.
+type CatalogResponse struct {
+	Ids       []string       `json:"ids"`
+	Artifacts []CatalogEntry `json:"artifacts"`
+}
+
+// CatalogEntry is one /v1/catalog artifact: id, type, and short summary.
+type CatalogEntry struct {
+	ID      string `json:"id"`
+	Type    string `json:"type,omitempty"`
+	Summary string `json:"summary,omitempty"`
+}
+
+// handleCatalog serves §4.5.2 GET /v1/catalog?scope=<path>, returning the
+// visible artifact catalog under the scope prefix (IDs plus lean descriptors),
+// visibility-filtered per caller. The client-side load_domain merge resolves a
+// workspace-local DOMAIN.md's globs over this set unioned with the overlay
+// (F-4.5.2, F-6.4.2).
+func (s *Server) handleCatalog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "registry.invalid_argument",
+			"method not allowed: "+r.Method)
+		return
+	}
+	entries, err := s.core.Catalog(r.Context(), s.identity(r), r.URL.Query().Get("scope"))
+	if err != nil {
+		s.writeCoreError(w, err)
+		return
+	}
+	resp := CatalogResponse{
+		Ids:       make([]string, 0, len(entries)),
+		Artifacts: make([]CatalogEntry, 0, len(entries)),
+	}
+	for _, e := range entries {
+		resp.Ids = append(resp.Ids, e.ID)
+		resp.Artifacts = append(resp.Artifacts, CatalogEntry{ID: e.ID, Type: e.Type, Summary: e.Summary})
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
