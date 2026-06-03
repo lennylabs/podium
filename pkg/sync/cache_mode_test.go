@@ -126,6 +126,80 @@ func TestRun_OfflineFirstServerUnreachableIsNoop(t *testing.T) {
 	}
 }
 
+// spec: §7.4 — always-revalidate (the default mode) "returns ... structured
+// error network.registry_unreachable" when there is no cache. podium sync keeps
+// no offline content cache, so an always-revalidate sync against an unreachable
+// server-source registry surfaces ErrRegistryUnreachable rather than the raw
+// transport message, and never ErrOfflineCacheMiss (which is the offline-only
+// code). An empty CacheMode behaves as always-revalidate (F-7.4.3).
+func TestRun_AlwaysRevalidateServerUnreachable(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []struct{ name, value string }{
+		{"explicit", "always-revalidate"},
+		{"default", ""},
+	} {
+		mode := mode
+		t.Run(mode.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := Run(Options{
+				RegistryPath: "http://127.0.0.1:1", // unbound port → connect refused
+				Target:       t.TempDir(),
+				AdapterID:    "none",
+				CacheMode:    mode.value,
+				HTTPClient:   &http.Client{},
+			})
+			if !errors.Is(err, ErrRegistryUnreachable) {
+				t.Fatalf("err = %v, want ErrRegistryUnreachable", err)
+			}
+			if errors.Is(err, ErrOfflineCacheMiss) {
+				t.Errorf("always-revalidate unreachable mislabeled as offline cache miss: %v", err)
+			}
+		})
+	}
+}
+
+// spec: §7.4 — a structured registry rejection is not the unreachable
+// condition: a reachable server returning a 5xx envelope in always-revalidate
+// mode surfaces its own error, not network.registry_unreachable. Only a
+// transport-level failure (dial/DNS/timeout) maps to the namespaced code
+// (F-7.4.3).
+func TestRun_AlwaysRevalidateStructuredErrorNotUnreachable(t *testing.T) {
+	t.Parallel()
+	srv := newErrorRegistry(t, http.StatusInternalServerError, `{"code":"registry.unavailable","message":"boom"}`)
+	_, err := Run(Options{
+		RegistryPath: srv.URL,
+		Target:       t.TempDir(),
+		AdapterID:    "none",
+		HTTPClient:   srv.Client(),
+		CacheMode:    "always-revalidate",
+	})
+	if err == nil {
+		t.Fatal("expected an error from a 5xx server source")
+	}
+	if errors.Is(err, ErrRegistryUnreachable) {
+		t.Errorf("structured rejection mislabeled as registry unreachable: %v", err)
+	}
+}
+
+// spec: §7.4 — a filesystem source is always reachable, so always-revalidate
+// is a no-op there: the sync materializes normally and never surfaces
+// ErrRegistryUnreachable (which is a server-source-only condition).
+func TestRun_AlwaysRevalidateFilesystemSourceMaterializes(t *testing.T) {
+	t.Parallel()
+	res, err := Run(Options{
+		RegistryPath: writeFilesystemRegistry(t),
+		Target:       t.TempDir(),
+		AdapterID:    "none",
+		CacheMode:    "always-revalidate",
+	})
+	if err != nil {
+		t.Fatalf("filesystem always-revalidate Run: %v", err)
+	}
+	if len(res.Artifacts) == 0 {
+		t.Fatalf("always-revalidate filesystem sync materialized nothing: %+v", res)
+	}
+}
+
 // spec: §7.4 — a structured registry rejection is not the unreachable
 // condition, so offline-first must still fail rather than masking it as a
 // silent no-op. A server returning a 5xx envelope is reachable.

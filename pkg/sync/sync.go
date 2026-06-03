@@ -41,6 +41,15 @@ var (
 	// miss") has nothing local to materialize. The code lives in the §6.10
 	// network.* namespace, matching the MCP server (F-7.4.3, F-7.4.5).
 	ErrOfflineCacheMiss = errors.New("network.offline_cache_miss: offline-only mode cannot reach a server-source registry and podium sync keeps no offline cache")
+	// ErrRegistryUnreachable signals a §7.4 always-revalidate sync (the
+	// default mode) against an unreachable server-source registry.
+	// always-revalidate returns "structured error network.registry_unreachable"
+	// when there is no cache; podium sync keeps no offline content cache, so an
+	// unreachable server-source registry has nothing to serve and surfaces this
+	// namespaced §6.10 code rather than the raw transport message. offline-first
+	// is the silent no-op above; offline-only returns ErrOfflineCacheMiss
+	// (F-7.4.3).
+	ErrRegistryUnreachable = errors.New("network.registry_unreachable: always-revalidate mode cannot reach the server-source registry and podium sync keeps no offline cache")
 )
 
 // Options are the inputs to Run. RegistryPath is the registry source: an
@@ -116,6 +125,15 @@ type materialRecord struct {
 	ArtifactBytes []byte
 	SkillBytes    []byte
 	Resources     map[string][]byte
+	// ContentHash is the registry's authoritative §6.6 content hash for a
+	// server-source record, decoded from the /v1/load_artifact response. The
+	// lock pins it verbatim so the committed (id, version, content_hash) triple
+	// matches the registry's system-of-record value, which a locally recomputed
+	// digest does not for an extends-merged manifest whose served bytes no
+	// longer reproduce ContentHash (§4.6). Empty for a filesystem source, which
+	// has no separate recorded hash and falls back to contentHashFor.
+	// spec: §14.11, §7.5.3.
+	ContentHash string
 }
 
 // Result describes what a Run actually did. Used by callers (CLI, tests)
@@ -193,12 +211,22 @@ func Run(opts Options) (*Result, error) {
 	// first; scope and toggles narrow it below.
 	all, err := resolveRecords(opts)
 	if err != nil {
-		// §7.4 offline-first: "no error; serve cached results silently." When
-		// the server-source registry is unreachable, leave the already
-		// materialized output untouched and report a no-op offline result
-		// rather than failing the sync (F-7.4.3).
-		if opts.CacheMode == "offline-first" && errors.As(err, new(*serverUnreachableError)) {
-			return offlineFirstNoop(opts, a.ID()), nil
+		var unreachable *serverUnreachableError
+		if errors.As(err, &unreachable) {
+			// §7.4 offline-first: "no error; serve cached results silently."
+			// When the server-source registry is unreachable, leave the already
+			// materialized output untouched and report a no-op offline result
+			// rather than failing the sync (F-7.4.3).
+			if opts.CacheMode == "offline-first" {
+				return offlineFirstNoop(opts, a.ID()), nil
+			}
+			// §7.4 always-revalidate (the default): "if no cache, structured
+			// error network.registry_unreachable." podium sync keeps no offline
+			// content cache, so an unreachable server-source registry has
+			// nothing to serve and surfaces the namespaced code rather than the
+			// raw transport message (F-7.4.3). offline-only never reaches here:
+			// it returned ErrOfflineCacheMiss above without dialing.
+			return nil, fmt.Errorf("%w: %v", ErrRegistryUnreachable, unreachable.err)
 		}
 		return nil, err
 	}
@@ -249,7 +277,7 @@ func Run(opts Options) (*Result, error) {
 			ID:          rec.ID,
 			Version:     ver,
 			Type:        artType,
-			ContentHash: contentHashFor(rec),
+			ContentHash: lockContentHash(rec),
 			Layer:       rec.LayerID,
 			Files:       paths,
 		})
@@ -325,6 +353,19 @@ func Run(opts Options) (*Result, error) {
 		fmt.Fprintf(os.Stderr, "sync: lock write failed: %v\n", err)
 	}
 	return res, nil
+}
+
+// lockContentHash returns the §7.5.3 content_hash to pin in the lock for a
+// record. A server source carries the registry's authoritative §6.6 value
+// (decoded from /v1/load_artifact), used verbatim so the committed lock matches
+// the registry's system-of-record hash even when an extends-merged manifest's
+// served bytes no longer reproduce it (§4.6). A filesystem source has no
+// recorded hash, so it is computed from the served bytes. spec: §14.11, §7.5.3.
+func lockContentHash(rec materialRecord) string {
+	if rec.ContentHash != "" {
+		return rec.ContentHash
+	}
+	return contentHashFor(rec)
 }
 
 // contentHashFor computes the §7.5.3 content_hash for a materialized record.

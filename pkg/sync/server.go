@@ -44,8 +44,14 @@ type syncManifestResponse struct {
 // serverLoadResponse mirrors the subset of GET /v1/load_artifact that
 // podium sync materializes.
 type serverLoadResponse struct {
-	ID             string            `json:"id"`
-	Type           string            `json:"type"`
+	ID   string `json:"id"`
+	Type string `json:"type"`
+	// ContentHash is the registry's authoritative §6.6 content hash for the
+	// resolved (id, version) pair. podium sync pins it into the lock verbatim
+	// so the committed (id, version, content_hash) triple is the registry's
+	// system-of-record value rather than a digest recomputed from the served
+	// bytes (§14.11, F-14.11.1).
+	ContentHash    string            `json:"content_hash"`
 	Layer          string            `json:"layer"`
 	ManifestBody   string            `json:"manifest_body"`
 	Frontmatter    string            `json:"frontmatter"`
@@ -123,6 +129,7 @@ func fetchServerRecord(ctx context.Context, client *http.Client, base, token, id
 	rec := materialRecord{
 		ID:            id,
 		LayerID:       layerID,
+		ContentHash:   resp.ContentHash,
 		ArtifactBytes: []byte(resp.Frontmatter),
 		Resources:     resources,
 	}

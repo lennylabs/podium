@@ -23,6 +23,10 @@ type stubArtifact struct {
 	resources     map[string]string
 	resourcesB64  bool
 	largeResource map[string]string // path -> bytes served from a side endpoint
+	// contentHash, when set, is served as the §6.6 authoritative content_hash
+	// in the /v1/load_artifact response, so a test can assert the lock pins the
+	// registry's value rather than a locally recomputed digest (F-14.11.1).
+	contentHash string
 }
 
 // newStubRegistry serves the §7.5 server-source endpoints podium sync reads:
@@ -67,6 +71,9 @@ func newStubRegistry(t *testing.T, arts map[string]stubArtifact) *httptest.Serve
 			"layer":         a.layer,
 			"manifest_body": a.manifestBody,
 			"frontmatter":   a.frontmatter,
+		}
+		if a.contentHash != "" {
+			resp["content_hash"] = a.contentHash
 		}
 		// spec: §4.3.4 / §11 — the registry delivers a skill's verbatim
 		// SKILL.md so the consumer materializes it byte-for-byte.
