@@ -57,6 +57,20 @@ func mergeEnv(extra ...string) []string {
 		if strings.HasPrefix(kv, "PODIUM_NO_BROWSER=") {
 			continue
 		}
+		// Do not inherit ambient backend configuration into CLI subprocesses.
+		// PODIUM_POSTGRES_DSN[_VECTOR], PODIUM_PGVECTOR_DSN, and PODIUM_S3_* are
+		// set by `make test-live` (and the gap-remediation harness) so the live
+		// store + object-store tests run; inherited into a `serve` subprocess
+		// they count as explicit server config and suppress the §13.10
+		// no-autostandalone refusal these tests assert. A test that needs a
+		// backend passes it explicitly in `extra` (applied above and appended
+		// below), so this scrub only removes ambient, unrequested config.
+		if strings.HasPrefix(kv, "PODIUM_POSTGRES_DSN=") ||
+			strings.HasPrefix(kv, "PODIUM_POSTGRES_DSN_VECTOR=") ||
+			strings.HasPrefix(kv, "PODIUM_PGVECTOR_DSN=") ||
+			strings.HasPrefix(kv, "PODIUM_S3_") {
+			continue
+		}
 		out = append(out, kv)
 	}
 	// Suppress the login browser auto-open for every CLI subprocess unless the

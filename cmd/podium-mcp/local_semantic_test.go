@@ -169,6 +169,12 @@ func TestMCPOverlayVectorBackend_ReachesAllDocumentedBackends(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			// Scrub ambient pgvector DSNs (set by `make test-live` / the live
+			// harness) so the missing-dsn case is hermetic; a case that needs a
+			// backend supplies it via c.env, applied after this clear.
+			for _, k := range []string{"PODIUM_POSTGRES_DSN", "PODIUM_POSTGRES_DSN_VECTOR", "PODIUM_PGVECTOR_DSN"} {
+				t.Setenv(k, "")
+			}
 			for k, v := range c.env {
 				t.Setenv(k, v)
 			}
