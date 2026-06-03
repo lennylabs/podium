@@ -2,7 +2,9 @@ package e2e
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -31,10 +33,11 @@ func TestSync_DryRunJSONEnvelope(t *testing.T) {
 			Type    []string `json:"type"`
 		} `json:"scope"`
 		Artifacts []struct {
-			ID      string `json:"id"`
-			Version string `json:"version"`
-			Type    string `json:"type"`
-			Layer   string `json:"layer"`
+			ID          string `json:"id"`
+			Version     string `json:"version"`
+			ContentHash string `json:"content_hash"`
+			Type        string `json:"type"`
+			Layer       string `json:"layer"`
 		} `json:"artifacts"`
 	}
 	if err := json.Unmarshal([]byte(res.Stdout), &env); err != nil {
@@ -52,6 +55,11 @@ func TestSync_DryRunJSONEnvelope(t *testing.T) {
 	a := env.Artifacts[0]
 	if a.ID != "finance/invoice" || a.Version != "1.0.0" || a.Type != "context" {
 		t.Errorf("artifact = %+v, want finance/invoice 1.0.0 context", a)
+	}
+	// spec: §7.5 / §14.11 (F-14.11.3) — each artifact carries content_hash so a
+	// pre-flight check can verify the full (id, version, content_hash) triple.
+	if !strings.HasPrefix(a.ContentHash, "sha256:") {
+		t.Errorf("artifact content_hash = %q, want sha256: prefix", a.ContentHash)
 	}
 }
 
@@ -93,26 +101,36 @@ func TestSync_CheckReportsWarnings(t *testing.T) {
 	cliContains(t, res.Stderr, "malformed glob", "malformed glob warning")
 }
 
-// spec: §7.5.5 / §7.5.7 — the no-flag interactive (TUI) forms of
-// `podium sync override` and `podium profile edit` are not available; they
-// print a clear message and exit 2 rather than silently doing nothing
-// (F-7.5.12).
-func TestSync_InteractiveTUIDeferral(t *testing.T) {
-	ws := t.TempDir()
+// spec: §7.5.5 / §7.5.7 (F-7.5.1) — the no-flag interactive (TUI) forms of
+// `podium sync override` and `podium profile edit` launch a checklist / editor
+// driven from stdin. Scripted commands write the same result the batch flags
+// produce. `podium profile edit` with no name still errors asking for a name.
+func TestSync_InteractiveTUIApplies(t *testing.T) {
 	reg := cliReg(t)
-	writeWorkspaceConfig(t, ws, "defaults:\n  registry: "+reg+"\n")
 
-	ovr := runPodium(t, ws, nil, "sync", "override", "--target", t.TempDir())
-	cliWantExit(t, ovr, 2, "override no-flags")
-	cliContains(t, ovr.Stderr, "interactive override (TUI) is not available", "override TUI message")
+	// override no-flags: leaf 1 is finance/invoice (IDs sort
+	// finance/invoice, personal/greet, personal/note). Checking it and saving
+	// materializes the artifact and records it in toggles.add, like `--add`.
+	tgt := t.TempDir()
+	ovr := runPodiumStdin(t, "", nil, "1\nsave\n",
+		"sync", "override", "--target", tgt, "--registry", reg, "--harness", "none")
+	cliWantExit(t, ovr, 0, "override TUI add")
+	if _, err := os.Stat(filepath.Join(tgt, "finance/invoice/ARTIFACT.md")); err != nil {
+		t.Errorf("checked artifact not materialized: %v", err)
+	}
+	lock := readFile(t, filepath.Join(tgt, ".podium/sync.lock"))
+	cliContains(t, lock, "finance/invoice", "override TUI records the toggle in the lock")
 
-	// profile edit with no name errors asking for a name.
-	noName := runPodium(t, ws, nil, "profile", "edit", "--target", t.TempDir())
+	// profile edit with no name still errors asking for a name.
+	noName := runPodium(t, "", nil, "profile", "edit", "--target", t.TempDir())
 	cliWantExit(t, noName, 2, "profile edit no-name")
 	cliContains(t, noName.Stderr, "profile name required", "name-required message")
 
-	// profile edit with a name but no batch flags defers to the TUI.
-	noFlags := runPodium(t, ws, nil, "profile", "edit", "team", "--target", t.TempDir())
-	cliWantExit(t, noFlags, 2, "profile edit no-flags")
-	cliContains(t, noFlags.Stderr, "interactive profile editing (TUI) is not available", "profile-edit TUI message")
+	// profile edit <name> no-flags: scripted add-include writes the pattern.
+	pdir := t.TempDir()
+	pe := runPodiumStdin(t, "", nil, "add-include finance/**\nsave\n",
+		"profile", "edit", "team", "--target", pdir)
+	cliWantExit(t, pe, 0, "profile edit TUI add-include")
+	cfg := readFile(t, filepath.Join(pdir, ".podium/sync.yaml"))
+	cliContains(t, cfg, "finance/**", "profile edit TUI writes the include pattern")
 }

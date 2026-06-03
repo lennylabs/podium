@@ -1,8 +1,10 @@
 package e2e
 
 import (
+	"encoding/json"
 	"net/url"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -48,11 +50,11 @@ func TestSyncServerSource_LockContentHashIsRegistryAuthoritative(t *testing.T) {
 }
 
 // spec: §7.5 / §14.11 (F-14.11.3) — the --dry-run --json pre-flight envelope
-// emits exactly {id, version, type, layer} per artifact (§7.5), so it carries
-// no content_hash field. The (id, version, content_hash) triple §14.11
-// emphasizes lives in the committed lock, not the pre-flight envelope. This
-// guards the §7.5 envelope contract against an incidental content_hash addition.
-func TestSync_DryRunJSONEnvelopeOmitsContentHash(t *testing.T) {
+// carries content_hash per artifact so a pre-flight check can verify the full
+// §14.11 (artifact_id, version, content_hash) triple before the lock file is
+// committed. The dry-run hash must equal the hash the subsequent committed lock
+// records for the same artifact.
+func TestSync_DryRunJSONEnvelopeIncludesContentHash(t *testing.T) {
 	reg := cliReg(t)
 	ws := t.TempDir()
 	tgt := t.TempDir()
@@ -60,11 +62,34 @@ func TestSync_DryRunJSONEnvelopeOmitsContentHash(t *testing.T) {
 
 	dry := runPodium(t, ws, nil, "sync", "--target", tgt, "--dry-run", "--json")
 	cliWantExit(t, dry, 0, "sync --dry-run --json")
-	cliNotContains(t, dry.Stdout, "content_hash", "dry-run envelope omits content_hash per §7.5")
 
-	// The committed lock, by contrast, does record the triple's content_hash.
+	var env struct {
+		Artifacts []struct {
+			ID          string `json:"id"`
+			Version     string `json:"version"`
+			ContentHash string `json:"content_hash"`
+		} `json:"artifacts"`
+	}
+	if err := json.Unmarshal([]byte(dry.Stdout), &env); err != nil {
+		t.Fatalf("dry-run envelope not valid JSON: %v\n%s", err, dry.Stdout)
+	}
+	if len(env.Artifacts) == 0 {
+		t.Fatalf("no artifacts in dry-run envelope:\n%s", dry.Stdout)
+	}
+	want := map[string]string{}
+	for _, a := range env.Artifacts {
+		if !strings.HasPrefix(a.ContentHash, "sha256:") {
+			t.Errorf("artifact %q content_hash = %q, want sha256: prefix", a.ID, a.ContentHash)
+		}
+		want[a.ID] = a.ContentHash
+	}
+
+	// The committed lock records the same content_hash the dry-run reported, so
+	// the pre-flight triple matches what lands in the image (§14.11).
 	full := runPodium(t, ws, nil, "sync", "--target", tgt, "--harness", "none")
 	cliWantExit(t, full, 0, "full sync")
 	lock := readFile(t, filepath.Join(tgt, ".podium/sync.lock"))
-	cliContains(t, lock, "content_hash: sha256:", "lock records the content_hash half of the triple")
+	for id, hash := range want {
+		cliContains(t, lock, "content_hash: "+hash, "lock content_hash for "+id+" matches the dry-run pre-flight")
+	}
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -76,16 +77,28 @@ func TestProfileEdit_MissingNameExits2(t *testing.T) {
 	})
 }
 
-// spec: §7.5.7 — `podium profile edit <name>` with no batch flags defers to the
-// (unavailable) TUI with a clear message (exit 2), rather than a silent no-op.
-func TestProfileEdit_NoFlagsTUIDeferral(t *testing.T) {
+// spec: §7.5.7 (F-7.5.1) — `podium profile edit <name>` with no batch flags
+// opens the interactive editor; scripted commands write the same result the
+// --add-include flag would. The stdin indirection keeps the loop from reading a
+// real terminal so the test never blocks.
+func TestProfileEdit_NoFlagsTUIApplies(t *testing.T) {
 	dir := t.TempDir()
 	writeSyncYAML(t, dir)
+	withInteractiveStdin(t, "add-include personal/*\nsave\n", true)
 	withStderr(t, func() {
-		if rc := profileCmd([]string{"edit", "team", "--target", dir}); rc != 2 {
-			t.Errorf("rc = %d, want 2", rc)
-		}
+		captureStdout(t, func() {
+			if rc := profileCmd([]string{"edit", "team", "--target", dir}); rc != 0 {
+				t.Errorf("rc = %d, want 0", rc)
+			}
+		})
 	})
+	body, err := os.ReadFile(filepath.Join(dir, ".podium", "sync.yaml"))
+	if err != nil {
+		t.Fatalf("read sync.yaml: %v", err)
+	}
+	if !strings.Contains(string(body), "personal/*") {
+		t.Errorf("profile edit TUI did not write the include pattern:\n%s", body)
+	}
 }
 
 func TestSyncSaveAs_HappyPath(t *testing.T) {

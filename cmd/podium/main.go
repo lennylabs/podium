@@ -509,12 +509,11 @@ func syncOverrideCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 2
 	}
-	// §7.5.5 TUI deferral: no batch flags is the interactive checklist form,
-	// which is not yet available. Print a clear message rather than silently
-	// writing nothing.
+	// §7.5.5 TUI mode: no batch flags launches the interactive checklist over
+	// the caller's effective view. The resulting toggles are applied through the
+	// same Override path the --add/--remove flags use.
 	if len(add) == 0 && len(remove) == 0 && !*reset {
-		fmt.Fprintln(os.Stderr, "interactive override (TUI) is not available; use --add <id>, --remove <id>, or --reset")
-		return 2
+		return runSyncOverrideInteractive(abs, *registry, *harness, *dryRun)
 	}
 	// §7.5.5: override writes/deletes files through the active adapter. Resolve
 	// the registry the same way sync does so --add materializes and --remove
@@ -668,13 +667,13 @@ func profileCmd(args []string) int {
 		fmt.Fprintln(os.Stderr, "error: profile name required (usage: podium profile edit <name> [--add-include ...])")
 		return 2
 	}
-	// §7.5.7 TUI deferral: no batch flags is the interactive form, not yet
-	// available. Print a clear message rather than rewriting the file as a no-op.
-	if len(addInc) == 0 && len(removeInc) == 0 && len(addExc) == 0 && len(removeExc) == 0 {
-		fmt.Fprintln(os.Stderr, "interactive profile editing (TUI) is not available; use --add-include/--remove-include/--add-exclude/--remove-exclude")
-		return 2
-	}
 	abs, _ := filepath.Abs(*target)
+	// §7.5.7 TUI mode: no batch flags opens the interactive editor over the
+	// profile's include/exclude lists, writing the resulting deltas through the
+	// same ProfileEdit path the batch flags use.
+	if len(addInc) == 0 && len(removeInc) == 0 && len(addExc) == 0 && len(removeExc) == 0 {
+		return runProfileEditInteractive(name, abs, *dryRun)
+	}
 	res, err := sync.ProfileEdit(sync.ProfileEditOptions{
 		Target:        abs,
 		Profile:       name,
@@ -1430,17 +1429,19 @@ func printDomainSearchHuman(body []byte) {
 	}
 }
 
-// printJSON emits a stable JSON envelope.
 // printJSON emits the §7.5 dry-run envelope:
-// {profile, target, harness, scope, artifacts: [{id, version, type, layer}]}.
-// A jq consumer reads .harness, .scope.include, or .artifacts[].version
-// directly.
+// {profile, target, harness, scope, artifacts: [{id, version, content_hash,
+// type, layer}]}. A jq consumer reads .harness, .scope.include, or
+// .artifacts[].version directly. The per-artifact content_hash lets a pre-flight
+// check verify the full §14.11 (artifact_id, version, content_hash) triple
+// before the lock file is committed (spec: §7.5, §14.11; F-14.11.3).
 func printJSON(res *sync.Result) {
 	type artOut struct {
-		ID      string `json:"id"`
-		Version string `json:"version"`
-		Type    string `json:"type"`
-		Layer   string `json:"layer"`
+		ID          string `json:"id"`
+		Version     string `json:"version"`
+		ContentHash string `json:"content_hash"`
+		Type        string `json:"type"`
+		Layer       string `json:"layer"`
 	}
 	type scopeOut struct {
 		Include []string `json:"include"`
@@ -1465,7 +1466,7 @@ func printJSON(res *sync.Result) {
 		Artifacts: []artOut{},
 	}
 	for _, a := range res.Artifacts {
-		env.Artifacts = append(env.Artifacts, artOut{ID: a.ID, Version: a.Version, Type: a.Type, Layer: a.Layer})
+		env.Artifacts = append(env.Artifacts, artOut{ID: a.ID, Version: a.Version, ContentHash: a.ContentHash, Type: a.Type, Layer: a.Layer})
 	}
 	b, err := json.MarshalIndent(env, "", "  ")
 	if err != nil {
