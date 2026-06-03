@@ -1159,6 +1159,28 @@ func TestCLI_DomainSearch(t *testing.T) {
 	cliContains(t, res.Stdout, "finance", "domain result")
 }
 
+// spec: §7.6.1 — `podium domain search --json` keys the ranked domains under
+// "results" (matching the artifact-search envelope), not the wire "domains"
+// key (F-7.6.1).
+func TestCLI_DomainSearchJSON(t *testing.T) {
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/DOMAIN.md":           "---\ndescription: \"Finance operations and vendor payments\"\ndiscovery:\n  keywords:\n    - finance\n---\n",
+		"finance/invoice/ARTIFACT.md": contextArtifact("Invoice variance for finance teams."),
+	}))
+	res := runPodium(t, "", brEnv(srv.BaseURL), "domain", "search", "--json", "finance")
+	cliWantExit(t, res, 0, "domain search --json")
+	m := cliJSON(t, res.Stdout)
+	if _, ok := m["results"]; !ok {
+		t.Fatalf("domain search --json missing documented `results` key: %v", m)
+	}
+	if _, ok := m["domains"]; ok {
+		t.Fatalf("domain search --json leaked the wire `domains` key: %v", m)
+	}
+	if _, ok := m["total_matched"]; !ok {
+		t.Fatalf("domain search --json missing total_matched: %v", m)
+	}
+}
+
 // spec: doc "Read CLI — podium domain analyze".
 func TestCLI_DomainAnalyze(t *testing.T) {
 	srv := startServer(t, cliReg(t))
@@ -1178,10 +1200,22 @@ func TestCLI_ArtifactShow(t *testing.T) {
 	res := runPodium(t, "", brEnv(srv.BaseURL), "artifact", "show", "--json", "personal/greet")
 	cliWantExit(t, res, 0, "artifact show --json")
 	m := cliJSON(t, res.Stdout)
-	if body, _ := m["manifest_body"].(string); strings.TrimSpace(body) == "" {
-		t.Fatalf("artifact show missing manifest_body: %v", m)
+	// spec: §7.6.1 — the --json envelope keys the manifest text "body" (the
+	// wire calls it "manifest_body") and delivers frontmatter as an object
+	// (F-7.6.2).
+	if body, _ := m["body"].(string); strings.TrimSpace(body) == "" {
+		t.Fatalf("artifact show missing body: %v", m)
 	}
-	cliContains(t, res.Stdout, "type: skill", "frontmatter")
+	if _, ok := m["manifest_body"]; ok {
+		t.Fatalf("artifact show --json leaked the wire manifest_body key: %v", m)
+	}
+	fm, ok := m["frontmatter"].(map[string]any)
+	if !ok {
+		t.Fatalf("frontmatter is not an object: %v", m["frontmatter"])
+	}
+	if fm["type"] != "skill" {
+		t.Fatalf("frontmatter.type = %v, want skill", fm["type"])
+	}
 }
 
 // spec: doc "podium artifact show", "Does not materialize bundled resources".
@@ -1211,7 +1245,9 @@ func TestCLI_ArtifactShowJSON(t *testing.T) {
 	res := runPodium(t, "", brEnv(srv.BaseURL), "artifact", "show", "--json", "personal/greet")
 	cliWantExit(t, res, 0, "artifact show --json")
 	m := cliJSON(t, res.Stdout)
-	for _, k := range []string{"id", "type", "manifest_body"} {
+	// spec: §7.6.1 — the documented schema is {id, version, content_hash,
+	// frontmatter, body} (F-7.6.2).
+	for _, k := range []string{"id", "version", "content_hash", "frontmatter", "body"} {
 		if _, ok := m[k]; !ok {
 			t.Fatalf("artifact show JSON missing %q: %v", k, m)
 		}

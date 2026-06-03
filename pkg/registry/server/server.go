@@ -699,12 +699,13 @@ func (s *Server) handleSearchArtifacts(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := SearchResponse{Query: res.Query, TotalMatched: res.TotalMatched}
 	for _, a := range res.Results {
-		d := descriptorOf(a)
-		// spec: §3.2 / §5 — search_artifacts returns descriptors only; the
-		// manifest body stays at the registry until load_artifact. Clear the
-		// frontmatter so the body never rides along in a search descriptor.
-		d.Frontmatter = ""
-		resp.Results = append(resp.Results, d)
+		// spec: §5 / §7.6.1 — search_artifacts returns descriptors carrying the
+		// artifact's frontmatter (the §7.6.1 {id, type, version, score,
+		// frontmatter} read-CLI/SDK schema). Only the manifest body stays at the
+		// registry until load_artifact; the descriptor has no body field, so
+		// nothing about the body rides along. The MCP bridge drops frontmatter
+		// for the lean agent-facing surface (§3.2/§5).
+		resp.Results = append(resp.Results, descriptorOf(a))
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

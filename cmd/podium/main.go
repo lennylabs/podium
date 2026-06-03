@@ -817,7 +817,10 @@ func searchCmd(args []string) int {
 	}
 	body := mustGetJSON(*registry, "/v1/search_artifacts", params)
 	if *asJSON {
-		fmt.Println(string(body))
+		// spec: §7.6.1 — emit the documented {query, total_matched,
+		// results:[{id, type, version, score, frontmatter}]} schema rather than
+		// the raw wire descriptor.
+		emitSearchJSON(body)
 		return 0
 	}
 	printSearchHuman(body)
@@ -933,7 +936,10 @@ func domainSearch(args []string) int {
 	}
 	body := mustGetJSON(*registry, "/v1/search_domains", params)
 	if *asJSON {
-		fmt.Println(string(body))
+		// spec: §7.6.1 — the documented schema keys the ranked domains under
+		// "results" (matching the artifact-search envelope); the wire response
+		// keys them "domains". Map before emitting.
+		emitDomainSearchJSON(body)
 		return 0
 	}
 	printDomainSearchHuman(body)
@@ -994,7 +1000,10 @@ func artifactShow(args []string) int {
 	}
 	body := mustGetJSON(*registry, "/v1/load_artifact", params)
 	if *asJSON {
-		fmt.Println(string(body))
+		// spec: §7.6.1 — emit the documented {id, version, content_hash,
+		// frontmatter, body} schema. The wire response keys the manifest text
+		// "manifest_body" and delivers frontmatter as a raw string.
+		emitArtifactShowJSON(body)
 		return 0
 	}
 	printArtifactHuman(body)

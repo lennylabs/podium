@@ -39,11 +39,21 @@ func (s *mcpServer) searchArtifacts(args map[string]any) any {
 	if err := json.Unmarshal(body, &registry); err != nil {
 		return errorResult("decode search_artifacts: " + err.Error())
 	}
+	// spec: §3.2 / §5 — the MCP meta-tool surface returns lean descriptors and
+	// the agent loads full content via load_artifact. The registry carries the
+	// artifact frontmatter on the wire for the §7.6.1 read-CLI/SDK schema, so
+	// the bridge drops it before handing results to the agent (and keeps
+	// registry hits uniform with overlay descriptors, which carry none).
 	overlayRecords := s.overlaySnapshot()
 	if len(overlayRecords) == 0 {
-		// No overlay: pass the registry response through untouched
-		// so single-deployment behavior is unchanged.
-		return jsonAny(body)
+		// No overlay: pass the registry response through (frontmatter stripped)
+		// so single-deployment behavior is otherwise unchanged.
+		decoded := jsonAny(body)
+		stripSearchResultFrontmatter(decoded)
+		return decoded
+	}
+	for _, r := range registry.Results {
+		delete(r, "frontmatter")
 	}
 
 	query, _ := args["query"].(string)
@@ -99,6 +109,26 @@ func fusedTotalMatched(registryTotal int, registryResults []map[string]any, loca
 		}
 	}
 	return registryTotal + overlayOnly
+}
+
+// stripSearchResultFrontmatter removes the "frontmatter" key from each search
+// descriptor in a jsonAny-decoded /v1/search_artifacts response. spec: §3.2/§5
+// — the MCP meta-tool surface is lean; the frontmatter rides the §7.6.1
+// read-CLI/SDK schema only.
+func stripSearchResultFrontmatter(decoded any) {
+	m, ok := decoded.(map[string]any)
+	if !ok {
+		return
+	}
+	results, ok := m["results"].([]any)
+	if !ok {
+		return
+	}
+	for _, r := range results {
+		if rm, ok := r.(map[string]any); ok {
+			delete(rm, "frontmatter")
+		}
+	}
 }
 
 // offlineSearchArtifacts builds the §12 offline result for search_artifacts

@@ -24,6 +24,10 @@ export interface ArtifactDescriptor {
   description?: string;
   tags?: string[];
   score?: number;
+  // spec: §7.6.1 — a search_artifacts result carries the artifact's
+  // frontmatter (the documented {id, type, version, score, frontmatter}
+  // schema). Absent on load_domain notable entries.
+  frontmatter?: string;
 }
 
 export interface SearchResult {

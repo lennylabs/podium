@@ -33,6 +33,31 @@ describe("Client", () => {
     expect(out.results?.[0].id).toBe("finance/run-variance");
   });
 
+  // Spec: §7.6.1 — a search_artifacts result carries the artifact's frontmatter
+  // (the documented {id, type, version, score, frontmatter} schema), mapping
+  // 1:1 with `podium search --json`.
+  it("searchArtifacts surfaces a result's frontmatter", async () => {
+    const fetcher: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          query: "variance",
+          total_matched: 1,
+          results: [
+            {
+              id: "finance/run-variance",
+              type: "skill",
+              version: "1.0.0",
+              frontmatter: "---\ntype: skill\nname: run-variance\n---\n",
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    const c = new Client({ registry: "http://reg", fetcher });
+    const out = await c.searchArtifacts("variance", { topK: 5 });
+    expect(out.results?.[0].frontmatter).toBe("---\ntype: skill\nname: run-variance\n---\n");
+  });
+
   // Spec: §4.5.5 / §5.1 (F-4.5.4) — loadDomain omits the depth query parameter
   // by default so the registry applies its configured default max_depth (3)
   // instead of the SDK forcing a single rendered level.

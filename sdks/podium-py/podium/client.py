@@ -79,6 +79,10 @@ class ArtifactDescriptor:
     description: str = ""
     tags: list[str] = field(default_factory=list)
     score: float = 0.0
+    # spec: §7.6.1 — a search_artifacts result carries the artifact's
+    # frontmatter (the documented {id, type, version, score, frontmatter}
+    # schema). Empty for load_domain notable entries.
+    frontmatter: str = ""
 
 
 @dataclass
@@ -600,6 +604,9 @@ class Client:
                 description=r.get("description", ""),
                 tags=r.get("tags") or [],
                 score=r.get("score", 0.0),
+                # spec: §7.6.1 — surface the artifact frontmatter the registry
+                # carries on each search result.
+                frontmatter=r.get("frontmatter", ""),
             )
             for r in body.get("results", []) or []
         ]

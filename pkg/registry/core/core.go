@@ -465,10 +465,12 @@ type ArtifactDescriptor struct {
 	// enumeration ranking. Empty outside load_domain (search results do
 	// not carry a notable source).
 	Source string
-	// Frontmatter is the artifact's full ARTIFACT.md frontmatter, surfaced
-	// in search_artifacts results per the §7.6.1 read-CLI/SDK JSON schema
-	// ({id, type, version, score, frontmatter}). Empty for load_domain
-	// notable entries, which carry Summary instead.
+	// Frontmatter is the artifact's ---fenced--- frontmatter block (the YAML
+	// header without the prose body), surfaced in search_artifacts results per
+	// the §7.6.1 read-CLI/SDK JSON schema ({id, type, version, score,
+	// frontmatter}). The manifest body stays at the registry until
+	// load_artifact (§5). Empty for load_domain notable entries, which carry
+	// Summary instead.
 	Frontmatter string
 	// Summary is the artifact's short description, surfaced in load_domain
 	// notable entries per the §7.6.1 schema ({id, type, summary, source,
@@ -1919,10 +1921,26 @@ func descriptorOf(m store.ManifestRecord) ArtifactDescriptor {
 		Version:     m.Version,
 		Description: m.Description,
 		Tags:        append([]string(nil), m.Tags...),
-		// spec: §7.6.1 — search_artifacts results carry the artifact's
-		// frontmatter for the read-CLI/SDK JSON schema ({..., frontmatter}).
-		Frontmatter: string(m.Frontmatter),
+		// spec: §5 / §7.6.1 — search_artifacts results carry the artifact's
+		// frontmatter block for the read-CLI/SDK JSON schema ({..., frontmatter}).
+		// Only the frontmatter metadata travels; the stored bytes are the full
+		// ARTIFACT.md source, so the prose body is split off and dropped here
+		// because the body stays at the registry until load_artifact.
+		Frontmatter: frontmatterBlock(m.Frontmatter),
 	}
+}
+
+// frontmatterBlock returns the ---fenced--- YAML frontmatter header of a stored
+// ARTIFACT.md source, dropping the prose manifest body. spec: §5 — a search
+// descriptor carries the frontmatter metadata while the body stays at the
+// registry until load_artifact. Returns "" when the source has no parseable
+// frontmatter.
+func frontmatterBlock(src []byte) string {
+	fm, _, err := manifest.SplitFrontmatter(src)
+	if err != nil {
+		return ""
+	}
+	return "---\n" + string(fm) + "\n---\n"
 }
 
 func inPrefix(id, prefix string) bool {

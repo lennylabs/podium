@@ -81,9 +81,15 @@ func TestReadCLI_ArtifactShowHumanAndJSON(t *testing.T) {
 	if strings.Contains(human, "\"manifest_body\"") {
 		t.Errorf("default output should be human-readable, got JSON:\n%s", human)
 	}
+	// spec: §7.6.1 — the --json envelope keys the manifest text "body" (the
+	// wire calls it "manifest_body") and delivers frontmatter as an object
+	// (F-7.6.2).
 	js := captureStdout(t, func() { _ = artifactShow([]string{"--registry", ts.URL, "--json", "finance/run"}) })
-	if !strings.Contains(js, "\"manifest_body\"") {
-		t.Errorf("--json output should be the raw envelope:\n%s", js)
+	if !strings.Contains(js, "\"body\"") {
+		t.Errorf("--json output should key the manifest text \"body\":\n%s", js)
+	}
+	if strings.Contains(js, "\"manifest_body\"") {
+		t.Errorf("--json output emitted the wire \"manifest_body\" key:\n%s", js)
 	}
 }
 

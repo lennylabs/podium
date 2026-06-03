@@ -86,6 +86,29 @@ def test_search_artifacts_forwards_query(stub_server):
     assert out.results[0].id == "finance/run-variance"
 
 
+# Spec: §7.6.1 — a search_artifacts result carries the artifact's frontmatter
+# (the documented {id, type, version, score, frontmatter} schema), mapping 1:1
+# with `podium search --json`.
+def test_search_artifacts_surfaces_frontmatter(stub_server):
+    stub_server.next_response = {
+        "query": "variance",
+        "total_matched": 1,
+        "results": [
+            {
+                "id": "finance/run-variance",
+                "type": "skill",
+                "version": "1.0.0",
+                "description": "Variance analysis",
+                "frontmatter": "---\ntype: skill\nname: run-variance\n---\n",
+            },
+        ],
+    }
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    out = client.search_artifacts("variance", top_k=5)
+
+    assert out.results[0].frontmatter == "---\ntype: skill\nname: run-variance\n---\n"
+
+
 # Spec: §7.6 SDK surface — load_artifact returns a LoadedArtifact with
 # manifest body and bundled resources.
 def test_load_artifact_returns_manifest_and_resources(stub_server):
