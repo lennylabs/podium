@@ -861,8 +861,11 @@ func TestHTTPAPI_IngestWebhookInvalid(t *testing.T) {
 	if err := json.Unmarshal(body, &reg); err != nil {
 		t.Fatalf("decode register response: %v\n%s", err, body)
 	}
-	if reg.WebhookURL != "/v1/ingest/webhook/vendor-hooks" {
-		t.Fatalf("webhook_url = %q, want /v1/ingest/webhook/vendor-hooks", reg.WebhookURL)
+	// spec §14.10 (F-14.10.2): register advertises an absolute webhook URL
+	// built from the server's public base URL, not the relative path.
+	wantWebhook := srv.BaseURL + "/v1/ingest/webhook/vendor-hooks"
+	if reg.WebhookURL != wantWebhook {
+		t.Fatalf("webhook_url = %q, want %q", reg.WebhookURL, wantWebhook)
 	}
 	if reg.WebhookSecret == "" {
 		t.Fatalf("register did not return a webhook secret")
@@ -870,8 +873,9 @@ func TestHTTPAPI_IngestWebhookInvalid(t *testing.T) {
 
 	payload := []byte(`{"ref":"refs/heads/main"}`)
 
-	// Invalid signature → 401 ingest.webhook_invalid, never ingests.
-	badReq, _ := http.NewRequest("POST", srv.BaseURL+reg.WebhookURL, bytes.NewReader(payload))
+	// Invalid signature → 401 ingest.webhook_invalid, never ingests. The
+	// advertised webhook URL is already absolute, so post to it directly.
+	badReq, _ := http.NewRequest("POST", reg.WebhookURL, bytes.NewReader(payload))
 	badSig, _ := layerwebhook.Sign("github", payload, "the-wrong-secret")
 	badReq.Header.Set("X-Hub-Signature-256", badSig)
 	badResp, err := httpClient.Do(badReq)
@@ -890,7 +894,7 @@ func TestHTTPAPI_IngestWebhookInvalid(t *testing.T) {
 	// fake repo is unreachable, so the pipeline surfaces ingest.source_unreachable
 	// (502), which proves the delivery passed verification and reached ingest
 	// rather than 404/401.
-	okReq, _ := http.NewRequest("POST", srv.BaseURL+reg.WebhookURL, bytes.NewReader(payload))
+	okReq, _ := http.NewRequest("POST", reg.WebhookURL, bytes.NewReader(payload))
 	okSig, _ := layerwebhook.Sign("github", payload, reg.WebhookSecret)
 	okReq.Header.Set("X-Hub-Signature-256", okSig)
 	okResp, err := httpClient.Do(okReq)

@@ -10,6 +10,8 @@ import (
 	neturl "net/url"
 	"os"
 	"time"
+
+	"github.com/lennylabs/podium/pkg/sync"
 )
 
 // sleepFor blocks for d. Wrapped so tests can override without
@@ -152,6 +154,7 @@ func layerWatch(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
+	*registry = resolveLayerRegistry(*registry)
 	if *registry == "" || *id == "" {
 		fmt.Fprintln(os.Stderr, "error: --registry and --id are required")
 		return 2
@@ -193,8 +196,9 @@ func layerRegister(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
+	*registry = resolveLayerRegistry(*registry)
 	if *registry == "" {
-		fmt.Fprintln(os.Stderr, "error: --registry is required (or set PODIUM_REGISTRY)")
+		fmt.Fprintln(os.Stderr, "error: --registry is required (set --registry, PODIUM_REGISTRY, or defaults.registry in ~/.podium/sync.yaml)")
 		return 2
 	}
 	if *id == "" {
@@ -242,6 +246,16 @@ func layerRegister(args []string) int {
 		return 1
 	}
 	fmt.Println(string(out))
+	// spec §14.10 step 3: "The CLI prints the webhook URL it would expect."
+	// Surface the server's absolute webhook URL on its own labeled line so a
+	// developer can paste it into a Git host's webhook configuration without
+	// digging it out of the raw JSON.
+	var reg struct {
+		WebhookURL string `json:"webhook_url"`
+	}
+	if err := json.Unmarshal(out, &reg); err == nil && reg.WebhookURL != "" {
+		fmt.Printf("webhook URL: %s\n", reg.WebhookURL)
+	}
 	return 0
 }
 
@@ -369,8 +383,9 @@ func layerReingest(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: podium layer reingest [--break-glass --justification <text>] <id>")
 		return 2
 	}
+	*registry = resolveLayerRegistry(*registry)
 	if *registry == "" {
-		fmt.Fprintln(os.Stderr, "error: --registry is required")
+		fmt.Fprintln(os.Stderr, "error: --registry is required (set --registry, PODIUM_REGISTRY, or defaults.registry in ~/.podium/sync.yaml)")
 		return 2
 	}
 	if *justification != "" && !*breakGlass {
@@ -440,6 +455,36 @@ func layerReingest(args []string) int {
 	}
 	fmt.Println(string(out))
 	return 0
+}
+
+// resolveLayerRegistry resolves the registry URL for the standalone `podium
+// layer` subcommands. flagVal is the --registry flag value (already defaulted
+// to PODIUM_REGISTRY). When both are empty it falls back to defaults.registry
+// in the merged ~/.podium/sync.yaml, the same precedence `podium sync` uses
+// (resolveOverrideRegistry). This lets the §14.10 register / reingest / watch
+// commands run against the standalone server that `podium serve --standalone`
+// bootstrapped into ~/.podium/sync.yaml, with no explicit --registry.
+//
+// spec: §14.10 — the standalone bootstrap writes defaults.registry into
+// ~/.podium/sync.yaml; the layer commands resolve it.
+func resolveLayerRegistry(flagVal string) string {
+	if flagVal != "" {
+		return flagVal
+	}
+	ws, _ := os.Getwd()
+	home, _ := os.UserHomeDir()
+	return mergedRegistry(ws, home)
+}
+
+// mergedRegistry returns defaults.registry from the merged sync.yaml resolved
+// under workspace + home, or "" when none is configured. It is split out from
+// resolveLayerRegistry so a unit test can supply explicit directories without
+// mutating the process working directory or HOME.
+func mergedRegistry(workspace, home string) string {
+	if merged, _, _ := sync.LoadMergedConfig(workspace, home); merged != nil {
+		return merged.Defaults.Registry
+	}
+	return ""
 }
 
 // requestBase strips the path and query from a full request URL, recovering

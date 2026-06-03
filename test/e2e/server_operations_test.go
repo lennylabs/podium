@@ -547,10 +547,16 @@ func TestServerOps_WebhookInvalidHMAC(t *testing.T) {
 	if reg.WebhookURL == "" || reg.WebhookSecret == "" {
 		t.Fatalf("register did not advertise webhook url/secret: %s", body)
 	}
+	// spec §14.10 (F-14.10.2): the advertised webhook URL is absolute, built
+	// from the server's public base URL.
+	if want := srv.BaseURL + "/v1/ingest/webhook/vendor-hooks"; reg.WebhookURL != want {
+		t.Fatalf("webhook_url = %q, want absolute %q", reg.WebhookURL, want)
+	}
 
 	// A delivery with a bogus signature header fails verification: 401
-	// ingest.webhook_invalid, and no ingest is triggered.
-	badReq, _ := http.NewRequest("POST", srv.BaseURL+reg.WebhookURL,
+	// ingest.webhook_invalid, and no ingest is triggered. The webhook URL is
+	// already absolute, so post to it directly.
+	badReq, _ := http.NewRequest("POST", reg.WebhookURL,
 		bytes.NewReader([]byte(`{"ref":"refs/heads/main"}`)))
 	badReq.Header.Set("X-Hub-Signature-256", "sha256=deadbeefdeadbeef")
 	resp, err := httpClient.Do(badReq)

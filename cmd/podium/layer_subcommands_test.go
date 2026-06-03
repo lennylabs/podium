@@ -34,6 +34,11 @@ func TestLayerSubcommands_HelpExitsZero(t *testing.T) {
 
 func TestLayerSubcommands_MissingRegistryExits2(t *testing.T) {
 	t.Setenv("PODIUM_REGISTRY", "")
+	// Isolate HOME and the working directory so the F-14.10.1 sync.yaml fallback
+	// (register/reingest) finds no merged defaults.registry and the commands
+	// still refuse with exit 2.
+	t.Setenv("HOME", t.TempDir())
+	t.Chdir(t.TempDir())
 	for name, args := range map[string][]string{
 		"layerList":       nil,
 		"layerRegister":   {"--id", "x", "--local", "/tmp"},
@@ -250,6 +255,86 @@ func TestLayerReingest_HappyPathPosts(t *testing.T) {
 			t.Errorf("layerReingest = %d, want 0", code)
 		}
 	})
+}
+
+// --- F-14.10.1: standalone sync.yaml registry fallback ---------------------
+
+// spec §14.10 (F-14.10.1): an explicit --registry / PODIUM_REGISTRY value
+// always wins; resolveLayerRegistry returns it unchanged.
+func TestResolveLayerRegistry_FlagValueWins(t *testing.T) {
+	t.Parallel()
+	if got := resolveLayerRegistry("http://flag.example"); got != "http://flag.example" {
+		t.Errorf("resolveLayerRegistry(flag) = %q, want the flag value", got)
+	}
+}
+
+// spec §14.10 (F-14.10.1): with no flag/env registry, the layer commands fall
+// back to defaults.registry in the merged ~/.podium/sync.yaml that
+// `podium serve --standalone` bootstraps.
+func TestMergedRegistry_ReadsHomeSyncYAML(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	podiumDir := filepath.Join(home, ".podium")
+	if err := os.MkdirAll(podiumDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("defaults:\n  registry: http://127.0.0.1:8088\n")
+	if err := os.WriteFile(filepath.Join(podiumDir, "sync.yaml"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A clean workspace dir (no .podium) so only the home scope contributes.
+	if got := mergedRegistry(t.TempDir(), home); got != "http://127.0.0.1:8088" {
+		t.Errorf("mergedRegistry = %q, want the bootstrapped registry", got)
+	}
+}
+
+// spec §14.10 (F-14.10.1): with no sync.yaml anywhere, mergedRegistry resolves
+// to the empty string so the command refuses with the missing-registry error.
+func TestMergedRegistry_EmptyWhenNoConfig(t *testing.T) {
+	t.Parallel()
+	if got := mergedRegistry(t.TempDir(), t.TempDir()); got != "" {
+		t.Errorf("mergedRegistry(no config) = %q, want empty", got)
+	}
+}
+
+// spec §14.10 (F-14.10.1): `podium layer register` with no --registry resolves
+// the registry from the bootstrapped ~/.podium/sync.yaml and reaches the
+// server, end to end through the command.
+func TestLayerRegister_FallsBackToSyncYAMLRegistry(t *testing.T) {
+	// Isolate HOME and the working directory so only the sync.yaml we write
+	// contributes; empty PODIUM_REGISTRY forces the fallback path.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PODIUM_REGISTRY", "")
+	t.Chdir(t.TempDir())
+
+	gotPath := ""
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"community-skills","registered":true}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	podiumDir := filepath.Join(home, ".podium")
+	if err := os.MkdirAll(podiumDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("defaults:\n  registry: " + srv.URL + "\n")
+	if err := os.WriteFile(filepath.Join(podiumDir, "sync.yaml"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	withStderr(t, func() {
+		captureStdout(t, func() {
+			if code := layerRegister([]string{"--id", "community-skills", "--local", t.TempDir()}); code != 0 {
+				t.Fatalf("layerRegister (sync.yaml fallback) = %d, want 0", code)
+			}
+		})
+	})
+	if gotPath != "/v1/layers" {
+		t.Errorf("registry not reached via fallback; server saw path %q", gotPath)
+	}
 }
 
 // adminRuntime list/register also have validation paths.

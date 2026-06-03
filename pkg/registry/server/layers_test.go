@@ -145,6 +145,54 @@ func TestLayerEndpoint_RegisterGitLayer(t *testing.T) {
 	}
 }
 
+// Spec: §14.10 (F-14.10.2) — with a configured public base URL, register
+// advertises an absolute webhook URL a developer can paste into a Git host's
+// webhook configuration. A trailing slash on the base is collapsed.
+func TestLayerEndpoint_RegisterGitLayer_AbsoluteWebhookURL(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	endpoint := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
+		WithPublicBaseURL("https://podium.acme.com/")
+	ts := httptest.NewServer(endpoint.Handler())
+	defer ts.Close()
+
+	_, body := mustPost(t, ts.URL, "/v1/layers", map[string]any{
+		"id": "community-skills", "source_type": "git",
+		"repo": "https://github.com/podium-community/skills.git", "ref": "main",
+	})
+	var got server.LayerRegisterResponse
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, body)
+	}
+	if want := "https://podium.acme.com/v1/ingest/webhook/community-skills"; got.WebhookURL != want {
+		t.Errorf("WebhookURL = %q, want %q", got.WebhookURL, want)
+	}
+}
+
+// Spec: §14.10 (F-14.10.2) — without a configured public base URL the webhook
+// URL falls back to the relative path (e.g. an embedding harness that does not
+// know its own external address).
+func TestLayerEndpoint_RegisterGitLayer_RelativeWebhookURLWithoutBase(t *testing.T) {
+	t.Parallel()
+	base, _, cleanup := newLayerHarness(t) // no WithPublicBaseURL
+	defer cleanup()
+
+	_, body := mustPost(t, base, "/v1/layers", map[string]any{
+		"id": "vendor", "source_type": "git",
+		"repo": "git@github.com:acme/vendor.git", "ref": "main",
+	})
+	var got server.LayerRegisterResponse
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, body)
+	}
+	if want := "/v1/ingest/webhook/vendor"; got.WebhookURL != want {
+		t.Errorf("WebhookURL = %q, want relative %q", got.WebhookURL, want)
+	}
+}
+
 // Spec: §7.3.1 — GET /v1/layers lists registered layers in Order.
 func TestLayerEndpoint_ListReturnsRegisteredLayers(t *testing.T) {
 	t.Parallel()

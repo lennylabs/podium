@@ -949,6 +949,7 @@ func Run() error {
 	layers := server.NewLayerEndpoint(st, tenantID, mode).
 		WithDefaultVisibility(cfg.defaultLayerVisibility).
 		WithMaxUserLayers(cfg.maxUserLayers).
+		WithPublicBaseURL(cfg.publicURL).
 		WithIdentityResolver(layerIdentity).
 		WithAdminAuth(func(r *http.Request) error {
 			// §13.10/§13.11: a standalone deployment configures no identity

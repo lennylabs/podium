@@ -77,6 +77,11 @@ type LayerEndpoint struct {
 	// emitter, and freeze windows. Nil leaves the endpoint in record-intent
 	// mode (the queue-only response) for harnesses that do not wire ingest.
 	reingestRunner ReingestRunner
+	// publicBaseURL is the deployment's externally reachable base URL
+	// (PODIUM_PUBLIC_URL, else http://<bind>). register advertises an absolute
+	// webhook URL built from it so the §14.10 CLI prints a URL a developer can
+	// paste into a Git host. Empty falls back to the relative path. spec: §14.10.
+	publicBaseURL string
 }
 
 // BreakGlass carries a §4.7.2 break-glass override supplied on the manual
@@ -108,6 +113,29 @@ func (e *LayerEndpoint) WithReingestRunner(fn ReingestRunner) *LayerEndpoint {
 func (e *LayerEndpoint) WithDefaultVisibility(v string) *LayerEndpoint {
 	e.defaultLayerVisibility = v
 	return e
+}
+
+// WithPublicBaseURL installs the deployment's externally reachable base URL so
+// register advertises an absolute webhook URL (§14.10 step 3). serverboot
+// passes the resolved public URL (PODIUM_PUBLIC_URL, else http://<bind>). An
+// empty value leaves the webhook URL relative.
+func (e *LayerEndpoint) WithPublicBaseURL(u string) *LayerEndpoint {
+	e.publicBaseURL = u
+	return e
+}
+
+// webhookURL returns the inbound Git-provider webhook endpoint for a git
+// layer. When the deployment's public base URL is configured it returns an
+// absolute URL a developer can paste into a Git host's webhook configuration;
+// otherwise it falls back to the relative path.
+//
+// spec: §14.10 step 3 — "The CLI prints the webhook URL it would expect."
+func (e *LayerEndpoint) webhookURL(layerID string) string {
+	path := "/v1/ingest/webhook/" + layerID
+	if e.publicBaseURL == "" {
+		return path
+	}
+	return strings.TrimRight(e.publicBaseURL, "/") + path
 }
 
 // NewLayerEndpoint returns an endpoint backed by the given store +
@@ -486,7 +514,7 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	// Return the freshly rotated secret once so the operator can register
 	// it on the source repo; it is never echoed on a plain update.
 	if rotated {
-		resp.WebhookURL = "/v1/ingest/webhook/" + cfg.ID
+		resp.WebhookURL = e.webhookURL(cfg.ID)
 		resp.WebhookSecret = cfg.WebhookSecret
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -664,7 +692,7 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 
 	resp := LayerRegisterResponse{Layer: cfg}
 	if cfg.SourceType == "git" {
-		resp.WebhookURL = "/v1/ingest/webhook/" + cfg.ID
+		resp.WebhookURL = e.webhookURL(cfg.ID)
 		resp.WebhookSecret = cfg.WebhookSecret
 	}
 	writeJSON(w, http.StatusCreated, resp)
