@@ -588,27 +588,45 @@ reingest`, source updates.
 ## S10: Standalone server, multiple Git-source layers
 
 **Goal.** Validate composition across two real Git repositories registered as
-two layers, including precedence on a name collision.
+two layers, including a higher-precedence layer overlaying a same-ID artifact
+from a lower-precedence layer.
 
 **Covers.** Standalone deployment, multiple Git layers, layer ordering, the
-merged view.
+`extends:` overlay, the merged view.
 
 **Steps.**
 
 1. Run the isolation block.
-2. Create two repositories, each with a `greet` skill and one unique skill.
+2. Create two repositories. The `base` repository holds a `greet` skill. The
+   `team` repository holds its own `greet` skill plus a unique `team-only`
+   skill. Per §4.6, two layers contributing the same canonical ID is a
+   forbidden silent shadow unless the higher-precedence artifact declares
+   `extends: <id>`. Per §4.7.6 each artifact carries its own version, so the
+   `team` overlay bumps its `version:` and declares `extends: greet` to overlay
+   the `base` copy. The `extends:` field is top-level frontmatter in
+   `ARTIFACT.md`.
 
    ```bash
-   for L in base team; do
-     mkdir -p "$WORK/$L" && cd "$WORK/$L" && git init -q
-     podium artifact scaffold --type skill --description "$L greet" "$WORK/$L/greet" --force
-     git add -A && git -c user.email=alice@acme.com -c user.name=alice commit -qm "$L"
-   done
+   mkdir -p "$WORK/base" && cd "$WORK/base" && git init -q
+   podium artifact scaffold --type skill --description "base greet" "$WORK/base/greet" --force
+   git add -A && git -c user.email=alice@acme.com -c user.name=alice commit -qm "base"
+
+   mkdir -p "$WORK/team" && cd "$WORK/team" && git init -q
+   podium artifact scaffold --type skill --description "team greet" "$WORK/team/greet" --force
+   # Overlay the base greet: bump the version and declare extends in ARTIFACT.md.
+   python3 - "$WORK/team/greet/ARTIFACT.md" <<'PY'
+   import sys
+   p = sys.argv[1]; s = open(p).read()
+   open(p, "w").write(s.replace("version: 0.1.0\n", "version: 0.2.0\nextends: greet\n"))
+   PY
    podium artifact scaffold --type skill --description "Team only" "$WORK/team/team-only" --force
-   cd "$WORK/team" && git add -A && git -c user.email=alice@acme.com -c user.name=alice commit -qm "team-only"
+   git add -A && git -c user.email=alice@acme.com -c user.name=alice commit -qm "team"
    ```
 
-3. Serve, register both layers with `team` second, and query.
+3. Serve, register both layers with `team` second, reingest each layer, then
+   query. Registering a Git source without a configured webhook leaves the
+   layer at its initial commit until the first manual reingest (§7.3.1), so each
+   layer holds no searchable artifacts until `layer reingest` runs.
 
    ```bash
    podium serve --standalone --no-embeddings --bind 127.0.0.1:8106 > "$WORK/srv.log" 2>&1 &
@@ -617,6 +635,8 @@ merged view.
    export PODIUM_REGISTRY=http://127.0.0.1:8106
    podium layer register --registry "$PODIUM_REGISTRY" --id base --repo "$WORK/base" --ref main --public
    podium layer register --registry "$PODIUM_REGISTRY" --id team --repo "$WORK/team" --ref main --public
+   podium layer reingest --registry "$PODIUM_REGISTRY" base
+   podium layer reingest --registry "$PODIUM_REGISTRY" team
    podium layer list --registry "$PODIUM_REGISTRY"
    podium search --registry "$PODIUM_REGISTRY" "greet"
    podium search --registry "$PODIUM_REGISTRY" "team only"
@@ -626,10 +646,16 @@ merged view.
 **Expected.**
 
 - `layer list` shows `base` then `team`.
-- Searching `greet` returns one merged `greet` whose body is the team layer's
-  version (`team greet`).
-- Searching `team only` returns the team-only skill.
-- `artifact show greet` confirms the team layer won.
+- `layer reingest base` ingests `greet@0.1.0` into `base`. `layer reingest team`
+  ingests both `greet@0.2.0` and `team-only@0.1.0` into `team` with no
+  collision rejection, because the team `greet` declares `extends: greet`.
+- Searching `greet` returns one merged `greet` whose description is the team
+  layer's version (`team greet`); the two underlying versions collapse to a
+  single entry in the results.
+- Searching `team only` returns the `team-only` skill. The merged `greet` also
+  matches because its description contains "team".
+- `artifact show greet` returns version `0.2.0`, confirming the team overlay
+  won.
 
 **Cleanup.** Stop the server and `rm -rf "$WORK"`.
 
