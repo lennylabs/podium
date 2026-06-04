@@ -102,11 +102,14 @@ func msStartStandardServer(t *testing.T, dsn, bucket, region string) *serverProc
 		"PODIUM_OBJECT_STORE=s3",
 		"PODIUM_S3_BUCKET=" + bucket,
 		"PODIUM_S3_REGION=" + region,
-		"PODIUM_S3_ENDPOINT=" + os.Getenv("PODIUM_S3_ENDPOINT"),
+		// §13.12: the S3 endpoint is a URL whose scheme selects TLS (http
+		// disables it, https or a bare host enables it). There is no separate
+		// USE_SSL knob, so the scheme is baked into the endpoint here; a bare
+		// host would default to TLS and fail against plain-HTTP MinIO.
+		"PODIUM_S3_ENDPOINT=" + msS3Endpoint(),
 		"PODIUM_S3_ACCESS_KEY_ID=" + os.Getenv("PODIUM_S3_ACCESS_KEY_ID"),
 		"PODIUM_S3_SECRET_ACCESS_KEY=" + os.Getenv("PODIUM_S3_SECRET_ACCESS_KEY"),
 		"PODIUM_S3_FORCE_PATH_STYLE=" + msS3PathStyle(),
-		"PODIUM_S3_USE_SSL=" + msS3UseSSL(),
 		// Standard mode defaults to pgvector plus an embedding provider, which
 		// requires OPENAI_API_KEY and fails closed without it. A mock OpenAI-format
 		// embedder runs search through the real pgvector path without a live API
@@ -139,14 +142,33 @@ func msS3PathStyle() string {
 	return "true"
 }
 
-// msS3UseSSL resolves the SSL flag for the object store. A MinIO endpoint speaks
-// plain HTTP, so an unset value defaults to "false"; the live lane sets
-// PODIUM_S3_USE_SSL explicitly, and a real HTTPS endpoint can set "true".
+// msS3UseSSL resolves the test's TLS intent for the object store. A MinIO
+// endpoint speaks plain HTTP, so an unset value defaults to "false"; the live
+// lane sets PODIUM_S3_USE_SSL explicitly, and a real HTTPS endpoint can set
+// "true". The server has no USE_SSL knob (§13.12 derives TLS from the endpoint
+// scheme), so this only feeds msS3Endpoint's scheme selection.
 func msS3UseSSL() string {
 	if v := os.Getenv("PODIUM_S3_USE_SSL"); v != "" {
 		return v
 	}
 	return "false"
+}
+
+// msS3Endpoint returns PODIUM_S3_ENDPOINT as a scheme-qualified URL. The server
+// derives the object-store TLS flag from the endpoint scheme (§13.12: the S3
+// endpoint is a URL; http disables TLS, https or a bare host[:port] enables it),
+// so a bare MinIO host must be qualified with http:// or every data-plane PUT
+// fails with "server gave HTTP response to HTTPS client". An endpoint that
+// already carries a scheme is passed through unchanged.
+func msS3Endpoint() string {
+	ep := os.Getenv("PODIUM_S3_ENDPOINT")
+	if ep == "" || strings.Contains(ep, "://") {
+		return ep
+	}
+	if msS3UseSSL() == "true" {
+		return "https://" + ep
+	}
+	return "http://" + ep
 }
 
 // msGitInit turns dir into a git repo with one commit on main so a standard-mode
@@ -162,6 +184,30 @@ func msGitInit(t *testing.T, dir string) {
 	runExternal(t, dir, 10*time.Second, "git", "config", "user.name", "alice")
 	runExternal(t, dir, 10*time.Second, "git", "add", ".")
 	runExternal(t, dir, 10*time.Second, "git", "commit", "-m", "managed-stack parity fixture")
+}
+
+// msPublishGitLayer publishes reg as a git-source layer through the standard
+// server: it commits reg to a local git repo, registers the layer with the
+// admin session token, and reingests so the server clones and parses the
+// artifacts into the metadata store and the search index. A remote standard
+// server cannot read a client-side --local path, so the git source is the
+// author flow (§7.3.1, §6.3.2). It returns the reingest CLI output.
+func msPublishGitLayer(t *testing.T, baseURL, token, layerID, reg string) cliResult {
+	t.Helper()
+	msGitInit(t, reg)
+	tokenEnv := []string{
+		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
+		"PODIUM_SESSION_TOKEN=" + token,
+	}
+	if rr := runPodium(t, "", tokenEnv, "layer", "register", "--registry", baseURL,
+		"--id", layerID, "--repo", reg, "--ref", "main"); rr.Exit != 0 {
+		t.Fatalf("layer register %s exit=%d stderr=%s stdout=%s", layerID, rr.Exit, rr.Stderr, rr.Stdout)
+	}
+	ri := runPodium(t, "", tokenEnv, "layer", "reingest", "--registry", baseURL, layerID)
+	if ri.Exit != 0 {
+		t.Fatalf("layer reingest %s exit=%d stderr=%s stdout=%s", layerID, ri.Exit, ri.Stderr, ri.Stdout)
+	}
+	return ri
 }
 
 // msLoadResponse mirrors the §7.6.1 load_artifact JSON envelope: the manifest
@@ -193,20 +239,10 @@ type msLoadResponse struct {
 func TestStandardStackParity_AuthorToConsumer(t *testing.T) {
 	// Not parallel: standard mode keys metadata by the fixed "default" org
 	// schema, which is shared and cannot be isolated per test (see the file
-	// header).
-	//
-	// Opt-in gate. The standard-mode boot, injected-token admin auth, and the
-	// git-source layer register/reingest are validated against a live Postgres +
-	// S3 stack: the layer is recorded ingested (its last_ingested_ref is set to
-	// the cloned commit). But the reingest parses zero manifests, so the artifact
-	// never reaches the metadata store, the vector index, or search, and the
-	// consumer journey cannot proceed. That is a standard-mode ingest-pipeline
-	// question (why a registered git layer ingests no artifacts), not a flake or
-	// a source-type issue. Until it is resolved this test runs only under
-	// PODIUM_STACK_PARITY=1 so it does not break CI. See TEST-GAPS.md G-STACK-1.
-	if os.Getenv("PODIUM_STACK_PARITY") != "1" {
-		t.Skip("PODIUM_STACK_PARITY != 1; managed-stack parity e2e is opt-in (work in progress, see TEST-GAPS.md G-STACK-1)")
-	}
+	// header). The test runs whenever a live Postgres DSN and an S3 bucket are
+	// configured (msSkipIfNoStack), matching the sibling pkg/objectstore S3 live
+	// test; it skips otherwise, so the PR lane stays hermetic and the live and
+	// release lanes exercise the full author-to-consumer journey.
 	dsn, bucket, region := msSkipIfNoStack(t)
 
 	priv, pemPath := injKeyPair(t)
@@ -229,25 +265,10 @@ func TestStandardStackParity_AuthorToConsumer(t *testing.T) {
 	})
 	// A remote standard-mode server cannot read a client --local path, so the
 	// author publishes through a git source: commit the registry to a local git
-	// repo and register it with --repo. The server clones the repo and ingests it
-	// on reingest. The CLI sends the injected session token, which the verifier
+	// repo, register it with --repo, and reingest so the server clones and parses
+	// the artifacts. The CLI sends the injected session token, which the verifier
 	// checks before core.AdminAuthorize gates the registration (§7.3.1, §6.3.2).
-	msGitInit(t, reg)
-	if rr := runPodium(t, "", []string{
-		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
-		"PODIUM_SESSION_TOKEN=" + token,
-	}, "layer", "register", "--registry", srv.BaseURL, "--id", "finance", "--repo", reg, "--ref", "main"); rr.Exit != 0 {
-		t.Fatalf("admin layer register exit=%d stderr=%s stdout=%s", rr.Exit, rr.Stderr, rr.Stdout)
-	}
-	// Registration records the git-source layer config; reingest clones the repo
-	// and parses the artifacts into the metadata store and the search index
-	// (§7.3.1, §4.7.2).
-	if rr := runPodium(t, "", []string{
-		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
-		"PODIUM_SESSION_TOKEN=" + token,
-	}, "layer", "reingest", "--registry", srv.BaseURL, "finance"); rr.Exit != 0 {
-		t.Fatalf("admin layer reingest exit=%d stderr=%s stdout=%s", rr.Exit, rr.Stderr, rr.Stdout)
-	}
+	msPublishGitLayer(t, srv.BaseURL, token, "finance", reg)
 
 	// ---- Consumer 1: search the control plane as the authenticated caller ----
 	// The injected-token verifier resolves a valid bearer to an authenticated
@@ -309,11 +330,11 @@ func TestStandardStackParity_AuthorToConsumer(t *testing.T) {
 	// `podium sync` in server-source mode calls the registry over HTTP, then runs
 	// the shared materialize writer locally. It forwards the injected token as
 	// Authorization: Bearer (resolved from PODIUM_SESSION_TOKEN_FILE). The
-	// resulting tree, filtered of .podium/ deployment state, must equal the tree
-	// the standalone/filesystem path produces from the same registry, which is
-	// the single-canonical-implementation parity guarantee. This runs while only
-	// the inline `finance` layer is registered, so the full-effective-view sync
-	// materializes exactly the single-layer baseline.
+	// resulting tree, filtered of .podium/ deployment state, must reproduce the
+	// tree the standalone/filesystem path produces for this layer's artifact,
+	// which is the single-canonical-implementation parity guarantee. The
+	// comparison below scopes to this layer's artifact, so a shared org schema
+	// that also holds other layers does not perturb the claim.
 	tokFile := filepath.Join(t.TempDir(), "session.jwt")
 	if err := os.WriteFile(tokFile, []byte(token+"\n"), 0o600); err != nil {
 		t.Fatalf("write token file: %v", err)
@@ -333,10 +354,23 @@ func TestStandardStackParity_AuthorToConsumer(t *testing.T) {
 	// path (sync --harness none against the filesystem registry).
 	standalone := syncAndSnapshot(t, reg, t.TempDir())
 
-	if !reflect.DeepEqual(managed, standalone) {
+	// The standard-mode "default" org schema is shared across runs and sibling
+	// tests, so the managed materialization can include artifacts from other
+	// layers (for example the large-resource layer this test registers below,
+	// persisted by a prior run). Scope the comparison to this layer's artifact:
+	// every file the standalone path produces must be reproduced byte-for-byte by
+	// the managed stack. Extra managed artifacts from other layers fall outside
+	// this layer's parity claim.
+	managedScoped := map[string]string{}
+	for k, v := range managed {
+		if strings.HasPrefix(k, id+"/") {
+			managedScoped[k] = v
+		}
+	}
+	if !reflect.DeepEqual(managedScoped, standalone) {
 		t.Errorf("managed-stack materialization differs from the standalone path:\nmanaged keys: %v\nstandalone keys: %v",
-			msKeys(managed), msKeys(standalone))
-		for k, mv := range managed {
+			msKeys(managedScoped), msKeys(standalone))
+		for k, mv := range managedScoped {
 			if sv, ok := standalone[k]; !ok {
 				t.Errorf("  %s: present in managed, absent in standalone", k)
 			} else if mv != sv {
@@ -344,7 +378,7 @@ func TestStandardStackParity_AuthorToConsumer(t *testing.T) {
 			}
 		}
 		for k := range standalone {
-			if _, ok := managed[k]; !ok {
+			if _, ok := managedScoped[k]; !ok {
 				t.Errorf("  %s: present in standalone, absent in managed", k)
 			}
 		}
@@ -363,7 +397,7 @@ func TestStandardStackParity_AuthorToConsumer(t *testing.T) {
 		largeID + "/SKILL.md":     brSkillMD("variance-dataset", brVarianceDesc, "Reference the dataset.\n"),
 		largeID + "/data/big.bin": large,
 	})
-	orgMustRegisterLayer(t, srv.BaseURL, "finance-data", largeReg)
+	msPublishGitLayer(t, srv.BaseURL, token, "finance-data", largeReg)
 
 	stBig, bigBody := injGet(t, srv.BaseURL+"/v1/load_artifact?id="+largeID, token)
 	if stBig != 200 {

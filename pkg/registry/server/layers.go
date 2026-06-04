@@ -1001,16 +1001,41 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 			map[string]any{"conflicts": conflicts})
 		return
 	}
+	// spec: §7.3.1 / §4.6 — surface the artifacts the snapshot dropped for
+	// reasons other than lint or immutability (sensitivity floor, sandbox
+	// profile, cross-layer collision, extends mismatch, quota). Without this a
+	// reingest that accepts nothing returns accepted:0 with no indication of
+	// why, which is indistinguishable from "the snapshot was empty."
+	rejected := make([]map[string]string, 0, len(res.Rejected))
+	for _, rj := range res.Rejected {
+		rejected = append(rejected, map[string]string{
+			"artifact_id": rj.ArtifactID,
+			"code":        rj.Code,
+			"reason":      rj.Reason,
+		})
+	}
+	// §4.7 hybrid search: an artifact whose manifest stored but whose embedding
+	// call failed is searchable by BM25 only until `podium admin reembed`.
+	embeddingFailures := make([]map[string]string, 0, len(res.EmbeddingFailures))
+	for _, ef := range res.EmbeddingFailures {
+		embeddingFailures = append(embeddingFailures, map[string]string{
+			"artifact_id": ef.ArtifactID,
+			"version":     ef.Version,
+			"reason":      ef.Reason,
+		})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"queued":        cfg.ID,
-		"queued_at":     time.Now().UTC().Format(time.RFC3339),
-		"layer":         cfg.ID,
-		"accepted":      res.Accepted,
-		"idempotent":    res.Idempotent,
-		"conflicts":     conflicts,
-		"lint_failures": len(res.LintFailures),
-		"artifacts":     arts,
-		"advisories":    advisories,
+		"queued":             cfg.ID,
+		"queued_at":          time.Now().UTC().Format(time.RFC3339),
+		"layer":              cfg.ID,
+		"accepted":           res.Accepted,
+		"idempotent":         res.Idempotent,
+		"conflicts":          conflicts,
+		"lint_failures":      len(res.LintFailures),
+		"rejected":           rejected,
+		"embedding_failures": embeddingFailures,
+		"artifacts":          arts,
+		"advisories":         advisories,
 	})
 }
 

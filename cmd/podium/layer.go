@@ -431,6 +431,11 @@ func layerReingest(args []string) int {
 			Version    string `json:"version"`
 			Code       string `json:"code"`
 		} `json:"conflicts"`
+		Rejected []struct {
+			ArtifactID string `json:"artifact_id"`
+			Code       string `json:"code"`
+			Reason     string `json:"reason"`
+		} `json:"rejected"`
 	}
 	if err := json.Unmarshal(out, &parsed); err == nil && len(parsed.Artifacts) > 0 {
 		layer := parsed.Layer
@@ -451,6 +456,14 @@ func layerReingest(args []string) int {
 		// (F-7.3.2). A snapshot with only conflicts surfaces as a 409 above.
 		for _, c := range parsed.Conflicts {
 			fmt.Fprintf(os.Stderr, "conflict: %s@%s rejected (%s); bump the version\n", c.ArtifactID, c.Version, c.Code)
+		}
+		// §13.10 / §4.6 / §4.7.8: an artifact dropped for a non-conflict reason
+		// (sensitivity floor, sandbox profile, cross-layer collision, quota,
+		// unresolved extends, or a data-plane resource-store failure). Print each
+		// so a mixed snapshot that accepted some artifacts still tells the author
+		// why the others did not land.
+		for _, rj := range parsed.Rejected {
+			fmt.Fprintf(os.Stderr, "rejected: %s (%s): %s\n", rj.ArtifactID, rj.Code, rj.Reason)
 		}
 		return 0
 	}
