@@ -407,7 +407,7 @@ show`, `artifact show`, and the HTTP endpoints.
    export PODIUM_REGISTRY=http://127.0.0.1:8102
    podium search --registry "$PODIUM_REGISTRY" "close the books"
    podium domain show --registry "$PODIUM_REGISTRY"
-   podium artifact show --registry "$PODIUM_REGISTRY" run-close
+   podium artifact show --registry "$PODIUM_REGISTRY" finance/run-close
    curl -s "$PODIUM_REGISTRY/healthz"; echo
    ```
 
@@ -417,7 +417,10 @@ show`, `artifact show`, and the HTTP endpoints.
 - Keyword search for `close the books` ranks the `run-close` finance skill
   first by term overlap.
 - `domain show` lists the `finance`, `support`, and `eng` domains.
-- `artifact show run-close` prints the finance skill's manifest and body.
+- `artifact show finance/run-close` prints the finance skill's manifest and body.
+  The canonical artifact ID is the directory path under the layer root (§7.6.1),
+  so the domain-qualified `finance/run-close` resolves and the bare leaf name
+  `run-close` does not.
 - The server log shows embeddings disabled and no embedding-provider calls.
 
 **Cleanup.** Stop the server and `rm -rf "$WORK"`.
