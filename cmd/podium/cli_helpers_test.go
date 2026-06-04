@@ -329,8 +329,14 @@ func TestDispatchers_NoArgsExit2_HelpExit0(t *testing.T) {
 
 func TestSubcommands_MissingRegistryExits2(t *testing.T) {
 	// Each of these requires --registry. Without the env var or flag
-	// set, they should exit 2 before touching the network.
+	// set, they should exit 2 before touching the network. Isolate the
+	// config scopes (§7.5.2) so a developer's real ~/.podium/sync.yaml or a
+	// project sync.yaml in a parent directory cannot resolve a registry and
+	// turn the expected exit-2 into a network attempt.
 	t.Setenv("PODIUM_REGISTRY", "")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+	t.Chdir(t.TempDir())
 	cases := map[string][]string{
 		"logoutCmd":       nil,
 		"quotaCmd":        nil,
