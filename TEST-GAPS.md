@@ -739,6 +739,12 @@ These gaps come from a 2026-06-03 user-journey coverage pass. The pass enumerate
 - **Target**: Under PODIUM_LIVE_EXTERNAL=1 boot the server against live Pinecone twice, once with PODIUM_PINECONE_INFERENCE_MODEL set for self-embedding and once with an external embedder, ingest the same layer in each, and assert search_artifacts returns the same expected artifact at rank one while the log records the chosen route.
 - **Sketch**: Boot against live Pinecone self-embedding and again with an external embedder, ingest the same layer in each, and assert the same rank-one artifact while the log records the route.
 
+#### G-VEC-12: Embedding provider and managed backend cross-product through the server
+- **Severity**: P2. **Lane**: Release or manual; needs PODIUM_LIVE_EXTERNAL=1 plus, per cell, both an embedding provider key and a managed backend's credentials. **Status**: open (partial). **Realism**: occasional. **Nearest test**: test/e2e/vector_semantic_search_test.go:TestVectorSemanticSearch_ManagedThroughServer.
+- **Current**: TestVectorSemanticSearch_ManagedThroughServer now iterates every managed backend (Pinecone, Weaviate Cloud, Qdrant Cloud) but with a mock OpenAI-format embedder for storage-only vectors, and the pkg/embedding live tests exercise each provider (OpenAI, Cohere, Voyage, Ollama) with no managed backend, so no test boots a server with a real embedding provider and a managed backend together. The "Storage-only pairings" section asks only for at least one provider per backend, so the full provider-by-backend matrix is untested.
+- **Target**: A Release-lane matrix that, for each (embedding provider, managed backend) pair whose credentials are both present, boots a standalone server wired to that provider and backend, ingests the fixture set, and asserts semantic search returns the expected artifact at rank one. Add the self-embedding backends (Pinecone, Weaviate, and Qdrant with an inference model) as their own cells with no external provider. Skip a cell only when its provider key or its backend credentials are absent, so the matrix runs every reachable combination.
+- **Sketch**: Iterate the (embedding provider, managed backend) pairs plus the self-embedding backends, boot a server per reachable cell, ingest, and assert the expected rank-one semantic hit; skip a cell only when its provider key or backend credentials are missing.
+
 ### SCALE: Scale, load, and rich catalog
 
 #### G-SCALE-1: Large catalog of hundreds of artifacts ingested then walked through paginated load_domain
