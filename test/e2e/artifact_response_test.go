@@ -411,9 +411,15 @@ func TestArtifactResponse_DeprecatedReplaced(t *testing.T) {
 	if !strings.Contains(r.DeprecationWarning, "deprecated") {
 		t.Errorf("deprecation_warning=%q, want a deprecation notice", r.DeprecationWarning)
 	}
-	// replaced_by does not round-trip into the load response (doc-accuracy
-	// gap; no BUILD-GAPS finding is filed for that narrower gap), so the
-	// upgrade target is not asserted here.
+	// §4.7.4: the replaced_by upgrade target round-trips into the load response
+	// (recovered from the stored frontmatter for the SQL backends) and is named
+	// in the warning.
+	if r.ReplacedBy != "finance/ap/pay-invoice-v2" {
+		t.Errorf("replaced_by=%q, want finance/ap/pay-invoice-v2", r.ReplacedBy)
+	}
+	if !strings.Contains(r.DeprecationWarning, "finance/ap/pay-invoice-v2") {
+		t.Errorf("deprecation_warning=%q does not name the replaced_by target", r.DeprecationWarning)
+	}
 }
 
 // T-D-handling-responses-26 — deprecated with no replaced_by has a bare warning.

@@ -1514,17 +1514,18 @@ func TestHTTPAPI_DeprecatedFields(t *testing.T) {
 	if m["deprecated"] != true {
 		t.Fatalf("deprecated=%v, want true", m["deprecated"])
 	}
-	// replaced_by is preserved in the raw frontmatter blob. The structured
-	// replaced_by field is dropped at ingest: the store schema has a
-	// `deprecated` column but no `replaced_by` column, so the documented
-	// top-level replaced_by/deprecation_warning fields do not round-trip.
+	// replaced_by is preserved in the raw frontmatter blob and also surfaces as
+	// the structured top-level field. The store schema has no replaced_by column,
+	// so the load path recovers it from the stored frontmatter (core.replacedByOf)
+	// for the SQL backends, satisfying the §4.7.4 documented round-trip.
 	fm, _ := m["frontmatter"].(string)
 	if !strings.Contains(fm, "replaced_by: finance/run") {
 		t.Fatalf("frontmatter does not preserve replaced_by: %q", fm)
 	}
-	if m["replaced_by"] == "finance/run" {
-		t.Log("note: structured replaced_by now round-trips (store gained a replaced_by column)")
-	} else {
-		t.Log("doc/impl gap: the structured replaced_by/deprecation_warning fields are dropped at ingest (no replaced_by store column); only the raw frontmatter preserves it")
+	if m["replaced_by"] != "finance/run" {
+		t.Errorf("structured replaced_by = %v, want finance/run (the §4.7.4 upgrade target round-trips)", m["replaced_by"])
+	}
+	if dw, _ := m["deprecation_warning"].(string); !strings.Contains(dw, "finance/run") {
+		t.Errorf("deprecation_warning = %q does not name the replaced_by target", dw)
 	}
 }

@@ -1800,9 +1800,27 @@ func resultFromRecord(rec store.ManifestRecord) *LoadArtifactResult {
 		Sensitivity:  rec.Sensitivity,
 		Resources:    rec.Resources,
 		Deprecated:   rec.Deprecated,
-		ReplacedBy:   rec.ReplacedBy,
+		ReplacedBy:   replacedByOf(rec),
 		Signature:    rec.Signature,
 	}
+}
+
+// replacedByOf returns the §4.7.4 upgrade target for a deprecated record. The
+// SQL metadata stores do not persist replaced_by as an indexed column (it lives
+// in the stored ARTIFACT.md frontmatter, not a manifests column), so a record
+// scanned from SQLite or Postgres carries an empty ReplacedBy even when the
+// manifest names a successor. Recover it from the stored frontmatter so an
+// explicit load of a deprecated version surfaces the upgrade target on every
+// backend, matching the in-memory store that retains the field. A non-deprecated
+// record never carries the warning, so the parse is skipped for it.
+func replacedByOf(rec store.ManifestRecord) string {
+	if rec.ReplacedBy != "" || !rec.Deprecated {
+		return rec.ReplacedBy
+	}
+	if a, err := manifest.ParseArtifact(rec.Frontmatter); err == nil && a != nil {
+		return a.ReplacedBy
+	}
+	return ""
 }
 
 // CanonicalManifestDoc returns the document whose body the §6.6 presigned

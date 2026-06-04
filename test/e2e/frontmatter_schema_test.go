@@ -221,10 +221,9 @@ func TestFrontmatter_DeprecatedExcludedFromSearch(t *testing.T) {
 }
 
 // T-D-frontmatter-12 — a deprecated artifact remains reachable via load_artifact
-// and carries the deprecation signal. Observed: deprecation_warning is
-// "artifact is deprecated" and replaced_by does not round-trip into the load
-// response (no BUILD-GAPS finding is filed for that narrow gap), so this test
-// asserts the deprecated flag and warning rather than the upgrade target.
+// and carries the deprecation signal, including the replaced_by upgrade target
+// (§4.7.4). The load path recovers replaced_by from the stored frontmatter for
+// the SQL backends, so the upgrade target round-trips into the load response.
 func TestFrontmatter_DeprecatedReachableWithWarning(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, fmDeprecationRegistry(t))
@@ -239,6 +238,9 @@ func TestFrontmatter_DeprecatedReachableWithWarning(t *testing.T) {
 	}
 	if !strings.Contains(load.DeprecationWarning, "deprecated") {
 		t.Errorf("load response missing deprecation warning: %+v", load)
+	}
+	if load.ReplacedBy != "finance/active-tool" {
+		t.Errorf("replaced_by = %q, want finance/active-tool (the upgrade target)", load.ReplacedBy)
 	}
 }
 
@@ -992,21 +994,31 @@ func TestFrontmatter_ReleaseNotesVerbatim(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-60 — replaced_by should surface in the deprecation warning.
-// Observed: the warning is "artifact is deprecated" and the replaced_by target
-// does not round-trip (no BUILD-GAPS finding filed); this test asserts the
-// deprecated flag and warning and flags the gap if replaced_by later appears.
+// T-D-frontmatter-60 — replaced_by surfaces in the load response and the
+// deprecation warning. Per §4.7.4 "if replaced_by: is set, the registry surfaces
+// the upgrade target alongside the warning." The SQL metadata stores do not
+// persist replaced_by as an indexed column, so the load path recovers it from
+// the stored frontmatter (core.replacedByOf); this test asserts the deprecated
+// flag, the replaced_by upgrade target, and the warning naming it.
 func TestFrontmatter_ReplacedBySurfaced(t *testing.T) {
 	t.Parallel()
-	art := "---\ntype: context\nname: old-tool\nversion: 1.0.0\ndescription: Old tool.\ndeprecated: true\nreplaced_by: finance/close-reporting/run-variance-analysis-v2\n---\n\nbody\n"
+	const target = "finance/close-reporting/run-variance-analysis-v2"
+	art := "---\ntype: context\nname: old-tool\nversion: 1.0.0\ndescription: Old tool.\ndeprecated: true\nreplaced_by: " + target + "\n---\n\nbody\n"
 	srv := startServer(t, writeRegistry(t, map[string]string{"finance/old-tool/ARTIFACT.md": art}))
 	var load struct {
 		Deprecated         bool   `json:"deprecated"`
+		ReplacedBy         string `json:"replaced_by"`
 		DeprecationWarning string `json:"deprecation_warning"`
 	}
 	getJSON(t, srv.BaseURL+"/v1/load_artifact?id=finance/old-tool", &load)
 	if !load.Deprecated || !strings.Contains(load.DeprecationWarning, "deprecated") {
 		t.Errorf("expected deprecated flag + warning: %+v", load)
+	}
+	if load.ReplacedBy != target {
+		t.Errorf("replaced_by = %q, want %q (the §4.7.4 upgrade target)", load.ReplacedBy, target)
+	}
+	if !strings.Contains(load.DeprecationWarning, target) {
+		t.Errorf("deprecation_warning %q does not name the replaced_by target %q", load.DeprecationWarning, target)
 	}
 }
 
