@@ -205,61 +205,75 @@ func TestVectorSemanticSearch_PgVectorThroughServer(t *testing.T) {
 	}
 }
 
-// managedBackendEnv resolves the first managed vector backend whose credentials
-// are present in the environment and returns the server env entries that select
-// it, plus a human-readable name. It returns ok=false when no managed backend's
-// credentials are configured. Self-embedding is left off (storage-only) so the
-// registry computes vectors through the configured embedder, matching the
-// pgvector form and keeping the assertion identical across backends.
-func managedBackendEnv() (name string, env []string, ok bool) {
-	switch {
-	case os.Getenv("PODIUM_PINECONE_API_KEY") != "" &&
-		(os.Getenv("PODIUM_PINECONE_HOST") != "" || os.Getenv("PODIUM_PINECONE_INDEX") != ""):
-		env = []string{
-			"PODIUM_VECTOR_BACKEND=pinecone",
-			"PODIUM_PINECONE_API_KEY=" + os.Getenv("PODIUM_PINECONE_API_KEY"),
-			"PODIUM_PINECONE_HOST=" + os.Getenv("PODIUM_PINECONE_HOST"),
-			"PODIUM_PINECONE_INDEX=" + os.Getenv("PODIUM_PINECONE_INDEX"),
-			"PODIUM_PINECONE_NAMESPACE=" + os.Getenv("PODIUM_PINECONE_NAMESPACE"),
-			"PODIUM_PINECONE_CONTROL_PLANE=" + os.Getenv("PODIUM_PINECONE_CONTROL_PLANE"),
-		}
-		return "pinecone", env, true
-	case os.Getenv("PODIUM_WEAVIATE_URL") != "" &&
-		os.Getenv("PODIUM_WEAVIATE_API_KEY") != "" &&
-		os.Getenv("PODIUM_WEAVIATE_COLLECTION") != "":
-		env = []string{
-			"PODIUM_VECTOR_BACKEND=weaviate-cloud",
-			"PODIUM_WEAVIATE_URL=" + os.Getenv("PODIUM_WEAVIATE_URL"),
-			"PODIUM_WEAVIATE_API_KEY=" + os.Getenv("PODIUM_WEAVIATE_API_KEY"),
-			"PODIUM_WEAVIATE_COLLECTION=" + os.Getenv("PODIUM_WEAVIATE_COLLECTION"),
-		}
-		return "weaviate-cloud", env, true
-	case os.Getenv("PODIUM_QDRANT_URL") != "" &&
-		os.Getenv("PODIUM_QDRANT_API_KEY") != "" &&
-		os.Getenv("PODIUM_QDRANT_COLLECTION") != "":
-		env = []string{
-			"PODIUM_VECTOR_BACKEND=qdrant-cloud",
-			"PODIUM_QDRANT_URL=" + os.Getenv("PODIUM_QDRANT_URL"),
-			"PODIUM_QDRANT_API_KEY=" + os.Getenv("PODIUM_QDRANT_API_KEY"),
-			"PODIUM_QDRANT_COLLECTION=" + os.Getenv("PODIUM_QDRANT_COLLECTION"),
-		}
-		return "qdrant-cloud", env, true
+// managedBackend names a managed vector backend, the server env that selects
+// it, and whether its credentials are present. The e2e iterates every backend so
+// a live run exercises Pinecone, Weaviate Cloud, and Qdrant Cloud independently
+// and skips only the ones whose variables are absent. Self-embedding is left off
+// (storage-only) so the registry computes vectors through the configured
+// embedder, matching the pgvector form and keeping the assertion identical
+// across backends.
+type managedBackend struct {
+	name    string
+	env     []string
+	present bool
+}
+
+// managedBackends returns all three managed vector backends with their wiring
+// and credential presence, read from the environment.
+func managedBackends() []managedBackend {
+	return []managedBackend{
+		{
+			name: "pinecone",
+			present: os.Getenv("PODIUM_PINECONE_API_KEY") != "" &&
+				(os.Getenv("PODIUM_PINECONE_HOST") != "" || os.Getenv("PODIUM_PINECONE_INDEX") != ""),
+			env: []string{
+				"PODIUM_VECTOR_BACKEND=pinecone",
+				"PODIUM_PINECONE_API_KEY=" + os.Getenv("PODIUM_PINECONE_API_KEY"),
+				"PODIUM_PINECONE_HOST=" + os.Getenv("PODIUM_PINECONE_HOST"),
+				"PODIUM_PINECONE_INDEX=" + os.Getenv("PODIUM_PINECONE_INDEX"),
+				"PODIUM_PINECONE_NAMESPACE=" + os.Getenv("PODIUM_PINECONE_NAMESPACE"),
+				"PODIUM_PINECONE_CONTROL_PLANE=" + os.Getenv("PODIUM_PINECONE_CONTROL_PLANE"),
+			},
+		},
+		{
+			name: "weaviate-cloud",
+			present: os.Getenv("PODIUM_WEAVIATE_URL") != "" &&
+				os.Getenv("PODIUM_WEAVIATE_API_KEY") != "" &&
+				os.Getenv("PODIUM_WEAVIATE_COLLECTION") != "",
+			env: []string{
+				"PODIUM_VECTOR_BACKEND=weaviate-cloud",
+				"PODIUM_WEAVIATE_URL=" + os.Getenv("PODIUM_WEAVIATE_URL"),
+				"PODIUM_WEAVIATE_API_KEY=" + os.Getenv("PODIUM_WEAVIATE_API_KEY"),
+				"PODIUM_WEAVIATE_COLLECTION=" + os.Getenv("PODIUM_WEAVIATE_COLLECTION"),
+			},
+		},
+		{
+			name: "qdrant-cloud",
+			present: os.Getenv("PODIUM_QDRANT_URL") != "" &&
+				os.Getenv("PODIUM_QDRANT_API_KEY") != "" &&
+				os.Getenv("PODIUM_QDRANT_COLLECTION") != "",
+			env: []string{
+				"PODIUM_VECTOR_BACKEND=qdrant-cloud",
+				"PODIUM_QDRANT_URL=" + os.Getenv("PODIUM_QDRANT_URL"),
+				"PODIUM_QDRANT_API_KEY=" + os.Getenv("PODIUM_QDRANT_API_KEY"),
+				"PODIUM_QDRANT_COLLECTION=" + os.Getenv("PODIUM_QDRANT_COLLECTION"),
+			},
+		},
 	}
-	return "", nil, false
 }
 
 // TestVectorSemanticSearch_ManagedThroughServer is the G-VEC-3 Release-lane form
-// (managed backend). It boots the standalone server with the first managed
-// backend whose credentials are present, ingests the same artifacts, and
-// asserts the same end-to-end semantic query returns the matching artifact at
-// rank 1. The mock embedder supplies storage-only vectors so the assertion is
-// identical to the pgvector form.
+// (managed backends). It iterates Pinecone, Weaviate Cloud, and Qdrant Cloud and
+// runs one subtest per backend: each boots the standalone server wired to that
+// backend, ingests the same artifacts, and asserts the same end-to-end semantic
+// query returns the matching artifact at rank 1. The mock embedder supplies
+// storage-only vectors so each assertion is identical to the pgvector form.
 //
-// Gating: PODIUM_LIVE_EXTERNAL=1 plus a managed backend's credentials. With the
-// switch off or no managed credentials present the test skips cleanly, so a
-// plain `go test ./...` with no credentials passes with this test skipped. This
-// mirrors the live-suite idiom in pkg/objectstore/s3_live_test.go and
-// pkg/sign/sigstore_live_test.go.
+// Gating: PODIUM_LIVE_EXTERNAL=1 arms the suite; within it each backend subtest
+// skips only when its own credentials are absent, so credentials for two of the
+// three backends exercise those two and skip the third. A plain `go test ./...`
+// with no credentials skips the parent cleanly. This mirrors the live-suite
+// idiom in pkg/objectstore/s3_live_test.go and pkg/sign/sigstore_live_test.go.
 //
 // Spec: §9.1 (RegistrySearchProvider: managed built-ins via
 // PODIUM_VECTOR_BACKEND)
@@ -268,31 +282,35 @@ func TestVectorSemanticSearch_ManagedThroughServer(t *testing.T) {
 	if os.Getenv("PODIUM_LIVE_EXTERNAL") != "1" {
 		t.Skip("PODIUM_LIVE_EXTERNAL != 1; skipping managed-backend semantic-search e2e")
 	}
-	emb := semanticMockEmbedder(t)
-	name, backendEnv, ok := managedBackendEnv()
-	if !ok {
-		t.Skip("no managed vector backend credentials (PODIUM_PINECONE_*/PODIUM_WEAVIATE_*/PODIUM_QDRANT_*); skipping")
+	for _, b := range managedBackends() {
+		b := b
+		t.Run(b.name, func(t *testing.T) {
+			t.Parallel()
+			if !b.present {
+				t.Skipf("%s credentials absent; skipping (set its PODIUM_* variables to run it)", b.name)
+			}
+			emb := semanticMockEmbedder(t)
+			env := append([]string{
+				"HOME=" + t.TempDir(),
+				"PODIUM_EMBEDDING_PROVIDER=openai",
+				"OPENAI_API_KEY=sk-test",
+				"PODIUM_OPENAI_BASE_URL=" + emb.URL,
+			}, b.env...)
+
+			srv := startServerArgs(t, env, "serve", "--standalone", "--layer-path", semanticRegistry(t))
+
+			log := srv.log()
+			if !strings.Contains(log, "vector="+b.name) {
+				t.Fatalf("startup log missing 'vector=%s' (managed backend not wired):\n%s", b.name, log)
+			}
+			if strings.Contains(log, "vector search disabled") {
+				t.Fatalf("vector search was disabled at startup:\n%s", log)
+			}
+
+			assertSemanticTopHit(t, srv.BaseURL,
+				"invoice reconciliation vendor payments", "finance/reconcile")
+		})
 	}
-
-	env := append([]string{
-		"HOME=" + t.TempDir(),
-		"PODIUM_EMBEDDING_PROVIDER=openai",
-		"OPENAI_API_KEY=sk-test",
-		"PODIUM_OPENAI_BASE_URL=" + emb.URL,
-	}, backendEnv...)
-
-	srv := startServerArgs(t, env, "serve", "--standalone", "--layer-path", semanticRegistry(t))
-
-	log := srv.log()
-	if !strings.Contains(log, "vector="+name) {
-		t.Fatalf("startup log missing 'vector=%s' (managed backend not wired):\n%s", name, log)
-	}
-	if strings.Contains(log, "vector search disabled") {
-		t.Fatalf("vector search was disabled at startup:\n%s", log)
-	}
-
-	assertSemanticTopHit(t, srv.BaseURL,
-		"invoice reconciliation vendor payments", "finance/reconcile")
 }
 
 // firstEnv returns the value of the first non-empty environment variable among
