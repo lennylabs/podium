@@ -46,17 +46,91 @@ func requireLiveExternal(t *testing.T) {
 const liveTenantPrefix = "podium_live"
 
 // runLiveSuite runs the shared §4.7 conformance contract against a live managed
-// backend (G-VEC-2). A remote store has no TRUNCATE affordance, so each of the
-// suite's sub-tests gets a fresh tenant prefix (open instructs the factory to
-// bind a unique tenant) — the suite already scopes every Put/Query to a tenant,
-// so unique tenants give each sub-test an isolated key space inside the one
-// shared index. The factory returns the same Provider per sub-test; isolation
-// comes from the tenant boundary, not from a fresh store.
+// backend (G-VEC-2). A remote store has no TRUNCATE affordance and persists
+// across runs, so the conformance suite's fixed tenants (t1, t2) and fixed
+// artifact ids (a, b, c) would otherwise collide with rows a previous run or an
+// earlier sub-test left behind, surfacing as phantom matches and apparent tenant
+// leaks. The factory wraps the shared Provider in a per-sub-test tenant
+// namespace: every (non-empty) tenant the suite names is prefixed with a token
+// unique to this run and this sub-test, so each sub-test queries a key space no
+// other run or sub-test can reach. The empty-tenant rejection case is preserved
+// (an empty tenant is passed through unprefixed so the backend still rejects it).
 //
 // Spec: §4.7 — RegistrySearchProvider conformance (the package's one contract).
 func runLiveSuite(t *testing.T, dim int, p vector.Provider) {
 	t.Helper()
-	vectortest.Suite(t, dim, func(t *testing.T) vector.Provider { return p })
+	vectortest.Suite(t, dim, func(t *testing.T) vector.Provider {
+		// One namespace per sub-test: stable within the sub-test (Put and the
+		// following Query share it) and disjoint from every other sub-test and
+		// every prior run (uniqueSuffix is random per call).
+		return &nsProvider{inner: p, ns: liveTenantPrefix + "_cf_" + uniqueSuffix() + "_"}
+	})
+}
+
+// nsProvider wraps a vector.Provider and rewrites every non-empty tenant id with
+// a fixed namespace prefix, giving the conformance suite an isolated key space on
+// a shared, persistent managed backend without changing the suite. An empty
+// tenant is passed through unprefixed so the suite's EmptyTenantRejected case
+// still exercises the backend's argument validation.
+type nsProvider struct {
+	inner vector.Provider
+	ns    string
+}
+
+func (n *nsProvider) tenant(t string) string {
+	if t == "" {
+		return ""
+	}
+	return n.ns + t
+}
+
+func (n *nsProvider) ID() string      { return n.inner.ID() }
+func (n *nsProvider) Dimensions() int { return n.inner.Dimensions() }
+func (n *nsProvider) Close() error    { return nil } // the shared inner Provider is closed by its own test
+func (n *nsProvider) Put(ctx context.Context, tenantID, artifactID, version string, embedding []float32) error {
+	scoped := n.tenant(tenantID)
+	if err := n.inner.Put(ctx, scoped, artifactID, version, embedding); err != nil {
+		return err
+	}
+	// The conformance suite does Put then an immediate Query with no poll,
+	// which the synchronous local backends satisfy. A managed backend indexes
+	// asynchronously (Weaviate most visibly), so a write is not guaranteed to be
+	// on the next read. Settle the write here — poll until the just-written
+	// vector is queryable — so the suite's Put/Query and upsert assertions hold
+	// against an eventually-consistent backend without changing the shared suite.
+	// An already-consistent backend (Pinecone, Qdrant with ?wait=true) returns on
+	// the first poll. An empty tenant is a rejection case that never reaches here.
+	if scoped == "" {
+		return nil
+	}
+	deadline := time.Now().Add(liveConsistencyDeadline)
+	for {
+		// Require the just-written vector to be the near-zero-distance self-match,
+		// not merely present by id. On an upsert (same id, new vector) the prior
+		// vector is still indexed for a moment; waiting for the self-match at
+		// ~zero distance confirms the new vector is the one now indexed, which is
+		// exactly what the suite's post-upsert distance assertion checks.
+		matches, qerr := n.inner.Query(ctx, scoped, embedding, 5)
+		if qerr == nil {
+			for _, m := range matches {
+				if m.ArtifactID == artifactID && m.Distance <= 0.001 {
+					return nil
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			// Do not fail the Put: return success and let the suite's own Query
+			// assertion report the precise mismatch, preserving its messages.
+			return nil
+		}
+		time.Sleep(liveConsistencyInterval)
+	}
+}
+func (n *nsProvider) Query(ctx context.Context, tenantID string, vec []float32, topK int) ([]vector.Match, error) {
+	return n.inner.Query(ctx, n.tenant(tenantID), vec, topK)
+}
+func (n *nsProvider) Delete(ctx context.Context, tenantID, artifactID, version string) error {
+	return n.inner.Delete(ctx, n.tenant(tenantID), artifactID, version)
 }
 
 // charEmbedder is a deterministic storage-only embedder for the live
