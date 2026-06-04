@@ -262,3 +262,120 @@ func mlGetJSON(t *testing.T, url, token string, dst any) int {
 	}
 	return st
 }
+
+// ---- G-MULTILAYER-2 ---------------------------------------------------------
+
+// G-MULTILAYER-2 — a child extends a parent in a layer the caller cannot see:
+// the registry resolves and merges the parent server-side and serves the merged
+// manifest, but the parent's ID stays unloadable and unenumerable for that
+// caller (§4.6 hidden parents).
+//
+// Layer secret-parent (lowest precedence) holds shared/parent restricted to
+// users: [alice@acme.com] with a distinctive tag and high sensitivity. Layer
+// public-child (higher precedence) holds finance/child, public, declaring
+// extends: shared/parent@1.x with low sensitivity. bob is a verified caller who
+// is not alice, so the parent's layer is invisible to him. Loading finance/child
+// as bob returns the merged manifest: the parent's inherited tag is folded in
+// and the sensitivity is the most-restrictive (high, the parent's). The parent
+// shared/parent is not loadable as bob (404) and never appears in his
+// search_artifacts or load_domain enumeration.
+//
+// Reconciliation note: the gap names an "organization-visibility" parent and an
+// "unauthenticated public-mode" caller, but §4.6 makes an organization layer
+// visible to every authenticated caller and §13.10 public mode bypasses
+// visibility entirely, so neither hides the parent from a caller who can reach
+// the public child. The standalone harness expresses "a caller who cannot
+// discover the parent" with a users:-restricted parent and a verified non-owner
+// caller (the same construction as the registry-core TestExtends_HiddenParent),
+// which is the realizable per-identity hiding the gap intends.
+//
+// spec: §4.6 (hidden parents, extends merge, most-restrictive sensitivity),
+// §6.3.2 (injected-session-token verification), §5 (search_artifacts visibility),
+// §4.5 (load_domain visibility).
+func TestMultiLayer_HiddenParentMergedButUndiscoverable(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	priv, pemPath := injKeyPair(t)
+
+	parentRoot := writeRegistry(t, map[string]string{
+		"shared/parent/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\n" +
+			"description: hidden parent\ntags: [from-hidden-parent]\nsensitivity: high\n---\n\nparent body\n",
+	})
+	childRoot := writeRegistry(t, map[string]string{
+		"finance/child/ARTIFACT.md": "---\ntype: context\nversion: 2.0.0\n" +
+			"description: visible child\ntags: [child-tag]\nsensitivity: low\n" +
+			"extends: shared/parent@1.x\n---\n\nchild body\n",
+	})
+
+	srv := mlVisServer(t, home, []mlVisLayer{
+		{id: "secret-parent", path: parentRoot, vis: "        users: [alice@acme.com]\n"},
+		{id: "public-child", path: childRoot, vis: "        public: true\n"},
+	}, pemPath)
+
+	bob := mlToken(t, priv, "bob@acme.com")
+
+	// bob loads the public child: the hidden parent is merged server-side.
+	var child exLoadResp
+	if st := mlGetJSON(t, srv.BaseURL+"/v1/load_artifact?id=finance/child", bob, &child); st != http.StatusOK {
+		t.Fatalf("bob load finance/child = HTTP %d, want 200\nlog:\n%s", st, srv.log())
+	}
+	if child.Version != "2.0.0" {
+		t.Errorf("merged child version = %q, want 2.0.0", child.Version)
+	}
+	if !strings.Contains(child.Frontmatter, "from-hidden-parent") {
+		t.Errorf("merged manifest missing the hidden parent's inherited tag:\n%s", child.Frontmatter)
+	}
+	if !strings.Contains(child.Frontmatter, "child-tag") {
+		t.Errorf("merged manifest missing the child's own tag:\n%s", child.Frontmatter)
+	}
+	// Most-restrictive sensitivity: the child declared low, but the parent's high
+	// wins (the child cannot relax the parent).
+	if child.Sensitivity != "high" {
+		t.Errorf("merged sensitivity = %q, want high (most-restrictive from the hidden parent)", child.Sensitivity)
+	}
+
+	// The parent itself is not loadable as bob.
+	if st, _ := injGet(t, srv.BaseURL+"/v1/load_artifact?id=shared/parent", bob); st != http.StatusNotFound {
+		t.Errorf("bob load shared/parent = HTTP %d, want 404 (hidden parent not loadable)", st)
+	}
+
+	// The parent never appears in bob's search_artifacts.
+	var search struct {
+		Results []struct {
+			ID string `json:"id"`
+		} `json:"results"`
+	}
+	if st := mlGetJSON(t, srv.BaseURL+"/v1/search_artifacts?query=parent", bob, &search); st != http.StatusOK {
+		t.Fatalf("bob search_artifacts = HTTP %d, want 200", st)
+	}
+	for _, r := range search.Results {
+		if r.ID == "shared/parent" {
+			t.Errorf("hidden parent shared/parent leaked through bob's search_artifacts: %+v", search.Results)
+		}
+	}
+
+	// The parent never appears in bob's load_domain enumeration of `shared`.
+	var dom struct {
+		Notable []struct {
+			ID string `json:"id"`
+		} `json:"notable"`
+	}
+	// load_domain for the parent's domain is itself invisible to bob (the only
+	// artifact under `shared` is the hidden parent), so it is either 404 or an
+	// empty notable set; in neither case may shared/parent appear.
+	st := mlGetJSON(t, srv.BaseURL+"/v1/load_domain?path=shared", bob, &dom)
+	if st == http.StatusOK {
+		for _, n := range dom.Notable {
+			if n.ID == "shared/parent" {
+				t.Errorf("hidden parent shared/parent leaked through bob's load_domain: %+v", dom.Notable)
+			}
+		}
+	}
+
+	// Control: alice (the parent layer's sole grantee) can load the parent
+	// directly, proving the parent exists and the hiding is per-identity.
+	alice := mlToken(t, priv, "alice@acme.com")
+	if st, _ := injGet(t, srv.BaseURL+"/v1/load_artifact?id=shared/parent", alice); st != http.StatusOK {
+		t.Errorf("alice load shared/parent = HTTP %d, want 200 (grantee can see the parent)", st)
+	}
+}

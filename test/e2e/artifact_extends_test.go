@@ -289,14 +289,14 @@ func TestExtends_McpServersParentOnlyInherited(t *testing.T) {
 // result. spec: docs/authoring/extends.md § "Hidden parents".
 func TestExtends_HiddenParentMergedResult(t *testing.T) {
 	t.Parallel()
-	t.Skip("the standalone e2e harness has no per-identity layer visibility (bootstrap layers are all public), so a parent layer cannot be hidden from a caller. The server-side hidden-parent merge is covered by pkg/registry/core TestExtends_HiddenParent")
+	t.Skip("the all-public standalone boot cannot hide a parent layer from a caller; the per-identity hidden-parent merge is exercised end to end through the injected-session-token visibility harness in multilayer_journeys_test.go TestMultiLayer_HiddenParentMergedButUndiscoverable (G-MULTILAYER-2) and at unit scale in pkg/registry/core TestExtends_HiddenParent")
 }
 
 // T-D-extends-17 — the parent does not appear in search results for an
 // unauthorized caller. spec: docs/authoring/extends.md § "Hidden parents".
 func TestExtends_HiddenParentNotInSearch(t *testing.T) {
 	t.Parallel()
-	t.Skip("the standalone e2e harness has no per-identity layer visibility to hide the parent layer from search; the hidden-parent search exclusion is covered by pkg/registry/core TestExtends_HiddenParent")
+	t.Skip("the all-public standalone boot cannot hide the parent layer from search; the per-identity search_artifacts and load_domain exclusion of a hidden parent is exercised end to end through the injected-session-token visibility harness in multilayer_journeys_test.go TestMultiLayer_HiddenParentMergedButUndiscoverable (G-MULTILAYER-2) and at unit scale in pkg/registry/core TestExtends_HiddenParent")
 }
 
 // ---- Bundled-file merge (T-D-extends-18..21) --------------------------------
