@@ -866,6 +866,8 @@ absent.
    podium config show --server | grep -E 'store|object_store|vector'
    podium search --registry "$PODIUM_REGISTRY" "quarterly report"
    podium artifact show --registry "$PODIUM_REGISTRY" report
+   curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=report" \
+     | python3 -c "import sys,json; d=json.load(sys.stdin); print('large_resources:', json.dumps(d.get('large_resources'), indent=2)); print('inline resources:', list((d.get('resources') or {}).keys()))"
    ```
 
 **Expected.**
@@ -875,8 +877,10 @@ absent.
 - The server boots and `healthz` returns 200.
 - Semantic search returns the `report` skill.
 - The large resource is stored in S3 and served through a presigned URL when
-  loaded; the server log shows the presign and no inline transfer of the large
-  body.
+  loaded. The `load_artifact` response lists `big-template.txt` under
+  `large_resources` with a presigned `http://localhost:9000/podium/...` URL and
+  an empty inline `resources` map, so the control plane does not stream the
+  large body inline (§7.2 sets the inline cutoff at 256 KB).
 
 **Cleanup.** Stop the server, `rm -rf "$WORK"`, and `make services-down` when
 finished with the standard-mode scenarios.
