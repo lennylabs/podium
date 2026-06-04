@@ -156,7 +156,7 @@ func TestExtends_PinBareID(t *testing.T) {
 // spec: docs/authoring/extends.md § "Pinning", last paragraph.
 func TestExtends_PinNoSilentPropagation(t *testing.T) {
 	t.Parallel()
-	t.Skip("the standalone boot ingests each layer exactly once; there is no post-boot reingest path to publish a newer parent version and observe non-propagation. Pin stability is covered by pkg/registry/ingest TestIngest_CrossLayerExtendsOverlayAllowed (ExtendsPin is fixed at ingest)")
+	t.Skip("pin non-propagation is exercised end to end in multilayer_journeys_test.go TestMultiLayer_PerCallerWinnerAndPinnedParentStable (G-MULTILAYER-3): an org layer publishes a newer base patch and reingests, and the team/personal overlays loaded at their explicit versions still fold the pinned parent version, never the newly published one. Pin stability is also covered at unit scale by pkg/registry/ingest TestIngest_CrossLayerExtendsOverlayAllowed (ExtendsPin is fixed at ingest)")
 }
 
 // T-D-extends-7 — re-ingesting the child after a version bump picks up the newer

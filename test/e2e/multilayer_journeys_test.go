@@ -379,3 +379,175 @@ func TestMultiLayer_HiddenParentMergedButUndiscoverable(t *testing.T) {
 		t.Errorf("alice load shared/parent = HTTP %d, want 200 (grantee can see the parent)", st)
 	}
 }
+
+// ---- G-MULTILAYER-3 ---------------------------------------------------------
+
+// mlWriteArtifact writes a single-file context ARTIFACT.md under dir at the
+// slash id with the given version, a distinctive tag, and an optional extends
+// pin. The journey under test (per-caller visibility-filtered latest selection
+// plus pinned-parent stability) is type-agnostic; context keeps the fixture to
+// one file per version with no SKILL.md plumbing while still carrying the tag
+// the merge folds.
+func mlWriteArtifact(t *testing.T, dir, id, version, tag, extends string) {
+	t.Helper()
+	artDir := filepath.Join(dir, filepath.FromSlash(id))
+	if err := os.MkdirAll(artDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", artDir, err)
+	}
+	var b strings.Builder
+	b.WriteString("---\ntype: context\nversion: " + version + "\ndescription: runbook " + version + "\n")
+	b.WriteString("tags: [" + tag + "]\n")
+	if extends != "" {
+		b.WriteString("extends: " + extends + "\n")
+	}
+	b.WriteString("---\n\nrunbook body " + version + "\n")
+	if err := os.WriteFile(filepath.Join(artDir, "ARTIFACT.md"), []byte(b.String()), 0o644); err != nil {
+		t.Fatalf("write artifact %s@%s: %v", id, version, err)
+	}
+}
+
+// G-MULTILAYER-3 — org, team, and personal layers carry one artifact with
+// extends up the chain; the per-caller winner differs by which layers each
+// caller can see, and a pinned parent stays fixed when the org publishes a newer
+// patch.
+//
+// Three layers carry eng/runbook. The org layer (organization-visible) holds
+// v1.0.0; the team layer (group engineering) holds v2.0.0 extending
+// eng/runbook@1.x; alice's personal layer (users:[alice]) holds v3.0.0 extending
+// eng/runbook@2.x. §4.7.6 resolves latest as the most-recently-ingested visible
+// version: alice (who sees all three) resolves the personal v3.0.0; bob (no
+// personal layer) resolves the team v2.0.0. The per-caller winners differ.
+//
+// The team's v2 pins its parent to the org's exact 1.0.0 at ingest (the stored
+// pin is eng/runbook@1.0.0, not the @1.x range). When the org publishes a new
+// patch v1.0.1 with a different marker tag and the org layer reingests, the
+// team overlay loaded by its explicit version still folds the org's v1.0.0
+// marker, never the v1.0.1 marker: the pinned parent does not silently
+// propagate. The personal overlay's pinned chain is stable the same way.
+//
+// Reconciliation note: pin stability is asserted by loading the team and
+// personal overlays at their explicit versions, because §4.7.6 latest is the
+// most-recently-ingested visible version, so the org's later v1.0.1 publish
+// legitimately becomes bob's new latest winner; that recency shift is separate
+// from the extends pin, which stays fixed. The journey uses context artifacts
+// rather than a skill (the gap's illustrative type); the visibility-filtered
+// latest selection and the §4.6 extends pin are type-agnostic, and context
+// keeps each version to a single file.
+//
+// spec: §4.6 (layer composition, extends pin fixed at ingest, no silent
+// propagation), §4.7.6 (latest = most-recently-ingested across the caller's
+// effective view), §6.3.1 (group/users visibility), §6.3.2
+// (injected-session-token).
+func TestMultiLayer_PerCallerWinnerAndPinnedParentStable(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	priv, pemPath := injKeyPair(t)
+
+	orgRoot := writeRegistry(t, nil)
+	teamRoot := writeRegistry(t, nil)
+	personalRoot := writeRegistry(t, nil)
+
+	// Lowest precedence first. Each higher layer extends the one below.
+	mlWriteArtifact(t, orgRoot, "eng/runbook", "1.0.0", "org-base-v1", "")
+	mlWriteArtifact(t, teamRoot, "eng/runbook", "2.0.0", "team-v2", "eng/runbook@1.x")
+	mlWriteArtifact(t, personalRoot, "eng/runbook", "3.0.0", "alice-v3", "eng/runbook@2.x")
+
+	srv := mlVisServer(t, home, []mlVisLayer{
+		{id: "org", path: orgRoot, vis: "        organization: true\n"},
+		{id: "team", path: teamRoot, vis: "        groups: [engineering]\n"},
+		{id: "personal", path: personalRoot, vis: "        users: [alice@acme.com]\n"},
+	}, pemPath)
+
+	alice := mlToken(t, priv, "alice@acme.com", "engineering")
+	bob := mlToken(t, priv, "bob@acme.com", "engineering")
+
+	// alice sees all three layers; her winner is the personal v3.0.0.
+	var aliceView exLoadResp
+	if st := mlGetJSON(t, srv.BaseURL+"/v1/load_artifact?id=eng/runbook", alice, &aliceView); st != http.StatusOK {
+		t.Fatalf("alice load eng/runbook = HTTP %d, want 200\nlog:\n%s", st, srv.log())
+	}
+	if aliceView.Version != "3.0.0" {
+		t.Errorf("alice winner = %q, want 3.0.0 (her personal layer)", aliceView.Version)
+	}
+	// The full chain folds: alice-v3 + team-v2 + org-base-v1 tags.
+	for _, tag := range []string{"alice-v3", "team-v2", "org-base-v1"} {
+		if !strings.Contains(aliceView.Frontmatter, tag) {
+			t.Errorf("alice merged frontmatter missing %q (full chain should fold):\n%s", tag, aliceView.Frontmatter)
+		}
+	}
+
+	// bob has no personal layer; his winner is the team v2.0.0.
+	var bobView exLoadResp
+	if st := mlGetJSON(t, srv.BaseURL+"/v1/load_artifact?id=eng/runbook", bob, &bobView); st != http.StatusOK {
+		t.Fatalf("bob load eng/runbook = HTTP %d, want 200", st)
+	}
+	if bobView.Version != "2.0.0" {
+		t.Errorf("bob winner = %q, want 2.0.0 (team layer; personal hidden)", bobView.Version)
+	}
+	if strings.Contains(bobView.Frontmatter, "alice-v3") {
+		t.Errorf("bob merged frontmatter leaked alice's personal v3 content:\n%s", bobView.Frontmatter)
+	}
+	// bob's merged result folds the org base at its pinned version 1.0.0.
+	if !strings.Contains(bobView.Frontmatter, "org-base-v1") {
+		t.Errorf("bob merged frontmatter missing the pinned org base tag org-base-v1:\n%s", bobView.Frontmatter)
+	}
+
+	// Capture the team overlay (v2.0.0) and personal overlay (v3.0.0) at their
+	// explicit versions before the org publish. Their merged frontmatter folds
+	// the org base at the pinned 1.0.0.
+	teamBefore := mlLoadVersion(t, srv, alice, "eng/runbook", "2.0.0").Frontmatter
+	personalBefore := mlLoadVersion(t, srv, alice, "eng/runbook", "3.0.0").Frontmatter
+	for _, fm := range []string{teamBefore, personalBefore} {
+		if !strings.Contains(fm, "org-base-v1") {
+			t.Fatalf("pinned overlay did not fold the org base v1.0.0 before publish:\n%s", fm)
+		}
+	}
+
+	// The org publishes a new patch v1.0.1 with a different marker and reingests
+	// the org layer. The reingest needs a verified token (injected-session-token
+	// mode verifies every caller-identity route); reingest is not admin-gated.
+	mlWriteArtifact(t, orgRoot, "eng/runbook", "1.0.1", "org-base-v101", "")
+	ri := runPodium(t, "", []string{"PODIUM_SESSION_TOKEN=" + alice},
+		"layer", "reingest", "--registry", srv.BaseURL, "org")
+	if ri.Exit != 0 {
+		t.Fatalf("org layer reingest exit=%d stderr=%s stdout=%s", ri.Exit, ri.Stderr, ri.Stdout)
+	}
+	// The new org version is resolvable (confirms the reingest landed).
+	if st, _ := injGet(t, srv.BaseURL+"/v1/load_artifact?id=eng/runbook&version=1.0.1", alice); st != http.StatusOK {
+		t.Fatalf("org v1.0.1 not resolvable after reingest")
+	}
+
+	// The team and personal pinned parents do not change: loading each overlay
+	// at its explicit version still folds the org's pinned v1.0.0 marker and
+	// never the new v1.0.1 marker. The extends pin is fixed at the child's
+	// ingest, so the org publish does not silently propagate.
+	teamAfter := mlLoadVersion(t, srv, alice, "eng/runbook", "2.0.0").Frontmatter
+	personalAfter := mlLoadVersion(t, srv, alice, "eng/runbook", "3.0.0").Frontmatter
+	for label, pair := range map[string][2]string{
+		"team":     {teamBefore, teamAfter},
+		"personal": {personalBefore, personalAfter},
+	} {
+		after := pair[1]
+		if !strings.Contains(after, "org-base-v1") {
+			t.Errorf("%s pinned parent changed after the org publish: dropped org-base-v1:\n%s", label, after)
+		}
+		if strings.Contains(after, "org-base-v101") {
+			t.Errorf("%s pinned parent silently propagated the org publish (org-base-v101 leaked):\n%s", label, after)
+		}
+		if after != pair[0] {
+			t.Errorf("%s overlay merged frontmatter changed across the org publish:\nbefore:\n%s\nafter:\n%s", label, pair[0], after)
+		}
+	}
+}
+
+// mlLoadVersion loads an artifact at an explicit version as a verified caller
+// and returns the decoded envelope, failing on a non-200.
+func mlLoadVersion(t *testing.T, srv *serverProc, token, id, version string) exLoadResp {
+	t.Helper()
+	var r exLoadResp
+	st := mlGetJSON(t, srv.BaseURL+"/v1/load_artifact?id="+id+"&version="+version, token, &r)
+	if st != http.StatusOK {
+		t.Fatalf("load %s@%s = HTTP %d, want 200", id, version, st)
+	}
+	return r
+}
