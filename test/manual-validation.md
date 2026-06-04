@@ -1065,10 +1065,27 @@ that loading a deprecated artifact surfaces the replacement.
 **Steps.**
 
 1. Run the isolation block.
-2. Create a Git-source layer with version 1.0.0 of a skill, serve, and register
-   it (as in S09, on `127.0.0.1:8114`).
+2. Create a Git-source layer holding version 1.0.0 of a skill, serve, and
+   register it (as in S09, on `127.0.0.1:8114`). The scaffold writes
+   `version: 0.1.0`, so edit `$WORK/repo/deploy/ARTIFACT.md` to `version: 1.0.0`
+   before the first commit.
+
+   ```bash
+   mkdir -p "$WORK/repo" && cd "$WORK/repo" && git init -q
+   podium artifact scaffold --type skill --description "Deploy the service" "$WORK/repo/deploy"
+   # set version: 1.0.0 in $WORK/repo/deploy/ARTIFACT.md, then:
+   git add -A && git -c user.email=alice@acme.com -c user.name=alice commit -qm "add deploy skill 1.0.0"
+   podium serve --standalone --no-embeddings --bind 127.0.0.1:8114 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8114/healthz
+   export PODIUM_REGISTRY=http://127.0.0.1:8114
+   podium layer register --registry "$PODIUM_REGISTRY" --id team --repo "$WORK/repo" --ref main --public
+   podium layer reingest --registry "$PODIUM_REGISTRY" team
+   ```
+
 3. Publish version 2.0.0 by editing the artifact's `version` and committing,
-   then re-ingest.
+   then re-ingest. A bare `artifact show` resolves `latest`, which is the most
+   recently ingested non-deprecated version, so it reports 2.0.0.
 
    ```bash
    # bump the version in $WORK/repo/deploy/ARTIFACT.md to 2.0.0, then:
@@ -1077,20 +1094,36 @@ that loading a deprecated artifact surfaces the replacement.
    podium artifact show --registry "$PODIUM_REGISTRY" deploy
    ```
 
-4. Deprecate 1.0.0 in favor of a successor and observe search and load.
+4. Deprecate the artifact line in favor of the live 2.0.0 successor. Each
+   `(artifact_id, version)` is immutable by content hash (§4.7.6), so an
+   already-published version cannot be re-published with a changed `deprecated`
+   flag. Deprecation is published as a new version that carries
+   `deprecated: true` and a `replaced_by` upgrade target. Edit
+   `$WORK/repo/deploy/ARTIFACT.md` to version 3.0.0 with those two frontmatter
+   fields added, commit, re-ingest, then observe search and an explicit load of
+   the deprecated version. Flags precede the positional id, so `--version 3.0.0`
+   comes before `deploy`.
 
    ```bash
+   # set version: 3.0.0 and add `deprecated: true` and
+   # `replaced_by: deploy@2.0.0` to $WORK/repo/deploy/ARTIFACT.md, then:
+   cd "$WORK/repo" && git commit -aqm "deploy 3.0.0 deprecated"
+   podium layer reingest --registry "$PODIUM_REGISTRY" team
    podium search --registry "$PODIUM_REGISTRY" "deploy"
-   podium artifact show --registry "$PODIUM_REGISTRY" deploy --version 1.0.0
+   podium artifact show --registry "$PODIUM_REGISTRY" --version 3.0.0 deploy
    ```
 
 **Expected.**
 
-- After the re-ingest, `artifact show deploy` reports version 2.0.0 as current.
-- Search returns the current version, and the deprecated version is excluded
-  from default results.
-- Loading the deprecated version surfaces the `replaced_by` pointer to the
-  successor.
+- After the 2.0.0 re-ingest, `artifact show deploy` reports version 2.0.0 as
+  current.
+- After the deprecated 3.0.0 re-ingest, `artifact show deploy` still reports
+  2.0.0, because `latest` skips the deprecated 3.0.0 (§4.7.6).
+- Search returns the current 2.0.0, and the deprecated 3.0.0 is excluded from
+  default results.
+- An explicit load of the deprecated 3.0.0 surfaces the `replaced_by` pointer
+  to `deploy@2.0.0` in the frontmatter, and the wire response carries a
+  `deprecation_warning` that names the upgrade target.
 
 **Cleanup.** Stop the server and `rm -rf "$WORK"`.
 
