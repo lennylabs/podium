@@ -21,9 +21,11 @@ import (
 // Spec: §13.12 — Pinecone backend selection and env vars (PODIUM_PINECONE_*).
 
 // livePineconeDim is the dimension the storage-only Pinecone index must be
-// created at. Small so the deterministic char embedder ranks cleanly; the
-// production-dimension round trip lives in the pgvector depth suite (G-PGV-2).
-const livePineconeDim = 8
+// created at. It matches the managed semantic-search e2e (1536) so one storage
+// index serves both that e2e and these conformance suites; the deterministic
+// char embedder and vectortest.Suite are dimension-agnostic, and the live
+// corpus self-matches exactly, so recall holds at any dimension.
+const livePineconeDim = 1536
 
 // livePineconeHost resolves the data-plane host. It prefers an explicit
 // PODIUM_PINECONE_HOST and otherwise resolves PODIUM_PINECONE_INDEX through the
@@ -78,18 +80,25 @@ func livePineconeStorage(t *testing.T) *vector.Pinecone {
 }
 
 // livePineconeSelfEmbed builds a self-embedding Pinecone backend, or skips when
-// the inference model or credentials are absent.
+// the inference model, credentials, or the dedicated self-embedding index are
+// absent. It resolves the host from PODIUM_PINECONE_SELFEMBED_INDEX rather than
+// the storage index: an Integrated Inference index is bound to its model at the
+// model's dimension, so it must be a separate index from the dim-8 storage one,
+// which lets both modes run in the same suite.
 func livePineconeSelfEmbed(t *testing.T) *vector.Pinecone {
 	t.Helper()
 	requireLiveExternal(t)
 	apiKey := os.Getenv("PODIUM_PINECONE_API_KEY")
 	model := os.Getenv("PODIUM_PINECONE_INFERENCE_MODEL")
-	if apiKey == "" || model == "" {
-		t.Skip("PODIUM_PINECONE_API_KEY/INFERENCE_MODEL unset; skipping self-embedding Pinecone")
+	index := os.Getenv("PODIUM_PINECONE_SELFEMBED_INDEX")
+	if apiKey == "" || model == "" || index == "" {
+		t.Skip("PODIUM_PINECONE_API_KEY/INFERENCE_MODEL/SELFEMBED_INDEX unset; skipping self-embedding Pinecone")
 	}
-	host, ok := livePineconeHost(t, apiKey)
-	if !ok {
-		t.Skip("PODIUM_PINECONE_HOST/INDEX unset; skipping live Pinecone")
+	ctx, cancel := contextWithTimeout(10 * time.Second)
+	defer cancel()
+	host, err := vector.ResolvePineconeHost(ctx, os.Getenv("PODIUM_PINECONE_CONTROL_PLANE"), apiKey, index, &http.Client{Timeout: 10 * time.Second})
+	if err != nil {
+		t.Skipf("Pinecone self-embed host resolution from index %q failed: %v", index, err)
 	}
 	ns := os.Getenv("PODIUM_PINECONE_NAMESPACE")
 	if ns == "" {

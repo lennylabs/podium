@@ -18,9 +18,10 @@ import (
 // (PODIUM_QDRANT_*).
 
 // liveQdrantDim is the dimension the storage-only Qdrant collection must be
-// created at. The production-dimension round trip lives in the pgvector depth
-// suite (G-PGV-2).
-const liveQdrantDim = 8
+// created at. It matches the managed semantic-search e2e (1536) so one storage
+// collection serves both that e2e and these conformance suites; the
+// deterministic char embedder and vectortest.Suite are dimension-agnostic.
+const liveQdrantDim = 1536
 
 // liveQdrantStorage builds a storage-only Qdrant backend, or skips when the
 // switch or credentials are absent.
@@ -48,15 +49,17 @@ func liveQdrantStorage(t *testing.T) *vector.Qdrant {
 }
 
 // liveQdrantSelfEmbed builds a self-embedding Qdrant backend, or skips when the
-// inference model or credentials are absent.
+// inference model, credentials, or the dedicated self-embedding collection are
+// absent. It uses PODIUM_QDRANT_SELFEMBED_COLLECTION, sized to the inference
+// model's dimension, separate from the storage collection.
 func liveQdrantSelfEmbed(t *testing.T) *vector.Qdrant {
 	t.Helper()
 	requireLiveExternal(t)
 	url := os.Getenv("PODIUM_QDRANT_URL")
-	collection := os.Getenv("PODIUM_QDRANT_COLLECTION")
+	collection := os.Getenv("PODIUM_QDRANT_SELFEMBED_COLLECTION")
 	model := os.Getenv("PODIUM_QDRANT_INFERENCE_MODEL")
 	if url == "" || collection == "" || model == "" {
-		t.Skip("PODIUM_QDRANT_URL/COLLECTION/INFERENCE_MODEL unset; skipping self-embedding Qdrant")
+		t.Skip("PODIUM_QDRANT_URL/SELFEMBED_COLLECTION/INFERENCE_MODEL unset; skipping self-embedding Qdrant")
 	}
 	q, err := vector.NewQdrant(vector.QdrantConfig{
 		URL:            url,

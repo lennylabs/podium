@@ -20,9 +20,10 @@ import (
 // (PODIUM_WEAVIATE_*).
 
 // liveWeaviateDim is the dimension the storage-only Weaviate class must be
-// created at. The production-dimension round trip lives in the pgvector depth
-// suite (G-PGV-2).
-const liveWeaviateDim = 8
+// created at. It matches the managed semantic-search e2e (1536) so one storage
+// class serves both that e2e and these conformance suites; the deterministic
+// char embedder and vectortest.Suite are dimension-agnostic.
+const liveWeaviateDim = 1536
 
 // liveWeaviateStorage builds a storage-only Weaviate backend, or skips when the
 // switch or credentials are absent.
@@ -50,15 +51,17 @@ func liveWeaviateStorage(t *testing.T) *vector.Weaviate {
 }
 
 // liveWeaviateSelfEmbed builds a self-embedding Weaviate backend, or skips when
-// the vectorizer or credentials are absent.
+// the vectorizer, credentials, or the dedicated self-embedding collection are
+// absent. It uses PODIUM_WEAVIATE_SELFEMBED_COLLECTION, a class configured with
+// the vectorizer module, separate from the storage class that has none.
 func liveWeaviateSelfEmbed(t *testing.T) *vector.Weaviate {
 	t.Helper()
 	requireLiveExternal(t)
 	url := os.Getenv("PODIUM_WEAVIATE_URL")
-	collection := os.Getenv("PODIUM_WEAVIATE_COLLECTION")
+	collection := os.Getenv("PODIUM_WEAVIATE_SELFEMBED_COLLECTION")
 	vectorizer := os.Getenv("PODIUM_WEAVIATE_VECTORIZER")
 	if url == "" || collection == "" || vectorizer == "" {
-		t.Skip("PODIUM_WEAVIATE_URL/COLLECTION/VECTORIZER unset; skipping self-embedding Weaviate")
+		t.Skip("PODIUM_WEAVIATE_URL/SELFEMBED_COLLECTION/VECTORIZER unset; skipping self-embedding Weaviate")
 	}
 	w, err := vector.NewWeaviate(vector.WeaviateConfig{
 		URL:        url,
