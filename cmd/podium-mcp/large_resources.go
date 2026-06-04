@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/lennylabs/podium/pkg/manifest"
@@ -146,27 +147,38 @@ func (s *mcpServer) fetchOneLargeResource(path string, link largeResourceLink, r
 	return nil, fmt.Errorf("after %d attempts: %v", maxAttempts, lastErr)
 }
 
-// getLargeResource issues one authenticated GET against a presigned large
-// resource URL and returns the body and HTTP status. Per §13.11 the
-// filesystem backend's /objects/{content_hash} route has no embedded
-// signature: the consumer sends the same session token and tenant header it
-// used for load_artifact, which the registry validates before serving. The
-// S3 backend's URL carries its own Signature V4 and ignores the extra header,
-// so attaching the credential is safe on both backends (§6.6 step 1).
+// getLargeResource issues one GET against a large-resource URL and returns the
+// body and HTTP status. The §13.11 authentication mechanism differs by backend:
+//
+//   - Filesystem backend: the URL points at the registry's token-bound
+//     /objects/{content_hash} route, which carries no embedded signature. The
+//     consumer sends the same session token and tenant header it used for
+//     load_artifact, which the registry validates before serving.
+//   - S3 backend: the URL is presigned with AWS Signature V4 and is
+//     self-validating. The spec is explicit that "consumers do not send
+//     credentials when following the URL." Sending an Authorization header
+//     alongside the SigV4 query makes S3 reject the request as "multiple
+//     authentication types" (HTTP 400), so the credential MUST be withheld.
+//
+// presignedSigV4 distinguishes the two by the SigV4 query parameters only the
+// S3 URL carries, so the credential is attached to the registry /objects route
+// and withheld from a presigned S3 URL.
 func (s *mcpServer) getLargeResource(rawURL string) ([]byte, int, error) {
 	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
 		return nil, 0, err
 	}
-	tok, err := s.bearerToken()
-	if err != nil {
-		return nil, 0, err
-	}
-	if tok != "" {
-		req.Header.Set("Authorization", "Bearer "+tok)
-	}
-	if s.cfg.tenantID != "" {
-		req.Header.Set("X-Podium-Tenant", s.cfg.tenantID)
+	if !presignedSigV4(rawURL) {
+		tok, terr := s.bearerToken()
+		if terr != nil {
+			return nil, 0, terr
+		}
+		if tok != "" {
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
+		if s.cfg.tenantID != "" {
+			req.Header.Set("X-Podium-Tenant", s.cfg.tenantID)
+		}
 	}
 	httpResp, err := s.http.Do(req)
 	if err != nil {
@@ -181,4 +193,20 @@ func (s *mcpServer) getLargeResource(rawURL string) ([]byte, int, error) {
 		return nil, httpResp.StatusCode, err
 	}
 	return body, httpResp.StatusCode, nil
+}
+
+// presignedSigV4 reports whether rawURL is an AWS Signature V4 presigned URL,
+// identified by the X-Amz-Signature query parameter the S3 backend appends
+// (X-Amz-Algorithm/X-Amz-Credential accompany it). The filesystem backend's
+// /objects/{content_hash} route carries none of these, so this cleanly
+// separates a self-validating S3 URL (no caller credential) from the
+// token-bound registry route (§13.11). A URL that fails to parse is treated as
+// not presigned so the caller credential is attached, which is the safe default
+// for the registry route.
+func presignedSigV4(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	return u.Query().Get("X-Amz-Signature") != ""
 }

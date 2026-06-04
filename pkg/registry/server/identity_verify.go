@@ -56,16 +56,25 @@ func (s *Server) withIdentityVerification(next http.Handler) http.Handler {
 
 // pathRequiresIdentity reports whether a route carries caller identity and
 // must therefore be verified in injected-session-token mode. Health and
-// readiness probes, the SCIM 2.0 receiver (authenticated by the IdP's own
-// bearer token), and the data-plane object store (presigned-URL access)
-// run without a caller session token and are exempt.
+// readiness probes and the SCIM 2.0 receiver (authenticated by the IdP's own
+// bearer token) run without a caller session token and are exempt.
+//
+// The filesystem object-store route /objects/{content_hash} is NOT exempt:
+// §13.11 requires that the consumer "sends the same session token it used for
+// load_artifact" and that "the registry validates the token, confirms
+// visibility for the artifact owning the content hash, and serves the bytes,"
+// so that a caller who shares a large_resources URL "cannot grant access to
+// bytes the other caller is not entitled to read." Exempting the route left
+// handleObjectsRoute on the anonymous resolver, which resolves IsPublic=true
+// and sees every layer, defeating the visibility re-check. Verifying the route
+// makes s.identity(r) the real caller so the re-check is enforced. The S3
+// backend is unaffected: its presigned URLs target object storage directly and
+// never reach this route (consumers send no credential there).
 func pathRequiresIdentity(p string) bool {
 	switch {
 	case p == "/healthz", p == "/readyz":
 		return false
 	case strings.HasPrefix(p, "/scim/"):
-		return false
-	case strings.HasPrefix(p, "/objects/"):
 		return false
 	}
 	return true

@@ -70,6 +70,46 @@ func TestGetLargeResource_NoCredentialWhenUnset(t *testing.T) {
 	}
 }
 
+// Spec: §13.11 — an S3 presigned URL is self-validating; "consumers do not send
+// credentials when following the URL." Sending an Authorization header
+// alongside the Signature V4 query makes S3 reject the request as "multiple
+// authentication types" (HTTP 400). So even with a session token and tenant
+// configured (the managed-runtime case), a URL carrying X-Amz-Signature is
+// fetched credential-free.
+func TestGetLargeResource_NoCredentialOnSigV4PresignedURL(t *testing.T) {
+	t.Parallel()
+	var hadAuth, hadTenant bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, hadAuth = r.Header["Authorization"]
+		_, hadTenant = r.Header["X-Podium-Tenant"]
+		_, _ = w.Write([]byte("ok"))
+	}))
+	t.Cleanup(ts.Close)
+
+	tokFile := filepath.Join(t.TempDir(), "tok")
+	if err := os.WriteFile(tokFile, []byte("session-jwt"), 0o600); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
+	s := &mcpServer{cfg: &config{
+		sessionTokenFile: tokFile,
+		tenantID:         "acme",
+		identityProvider: "injected-session-token",
+	}, http: &http.Client{}}
+
+	// The presigned-URL marker S3 appends; the host is the httptest recorder so
+	// the request lands and the absence of credentials can be observed.
+	sigV4URL := ts.URL + "/blob?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AK%2F20260604%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Signature=deadbeef"
+	if _, status, err := s.getLargeResource(sigV4URL); err != nil || status != http.StatusOK {
+		t.Fatalf("getLargeResource: status=%d err=%v", status, err)
+	}
+	if hadAuth {
+		t.Error("Authorization header was sent to a SigV4 presigned URL; S3 rejects multiple auth types")
+	}
+	if hadTenant {
+		t.Error("X-Podium-Tenant header was sent to a SigV4 presigned URL")
+	}
+}
+
 // Spec: §6.6 step 1 — on a 403 (expired presigned URL) the fetch requests a
 // fresh URL set and retries against the new URL rather than reusing the stale
 // one (F-6.6.6).

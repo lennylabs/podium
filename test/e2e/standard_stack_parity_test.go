@@ -94,8 +94,18 @@ func msSkipIfNoStack(t *testing.T) (dsn, bucket, region string) {
 // managed identity path is wired (§6.3.2).
 func msStartStandardServer(t *testing.T, dsn, bucket, region string) *serverProc {
 	t.Helper()
+	return msStartStandardServerEnv(t, dsn, bucket, region)
+}
+
+// msStartStandardServerEnv is msStartStandardServer with extra environment
+// appended after the standard-mode backend config (last write wins). G-STACK-3
+// uses it to set PODIUM_PRESIGN_TTL_SECONDS so an S3 presigned URL expires
+// inside the test and the 403-driven refresh can be exercised against the live
+// data plane (§6.2 / §6.6).
+func msStartStandardServerEnv(t *testing.T, dsn, bucket, region string, extraEnv ...string) *serverProc {
+	t.Helper()
 	emb := semanticMockEmbedder(t)
-	srv := startServerArgs(t, []string{
+	env := []string{
 		"HOME=" + t.TempDir(),
 		"PODIUM_REGISTRY_STORE=postgres",
 		"PODIUM_POSTGRES_DSN=" + dsn,
@@ -127,8 +137,9 @@ func msStartStandardServer(t *testing.T, dsn, bucket, region string) *serverProc
 		// unverifiable caller is still rejected at the verifier before
 		// visibility is consulted, which the negative control asserts.
 		"PODIUM_DEFAULT_LAYER_VISIBILITY=public",
-	}, "serve")
-	return srv
+	}
+	env = append(env, extraEnv...)
+	return startServerArgs(t, env, "serve")
 }
 
 // msS3PathStyle resolves the path-style flag for the object store. MinIO needs

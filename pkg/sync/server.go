@@ -119,7 +119,7 @@ func fetchServerRecord(ctx context.Context, client *http.Client, base, token, id
 		if link.URL == "" {
 			return materialRecord{}, fmt.Errorf("load_artifact %s: large resource %q missing presigned URL", id, path)
 		}
-		body, ferr := fetchBytes(ctx, client, link.URL)
+		body, ferr := fetchBytes(ctx, client, link.URL, token)
 		if ferr != nil {
 			return materialRecord{}, fmt.Errorf("load_artifact %s: fetch resource %q: %w", id, path, ferr)
 		}
@@ -208,11 +208,27 @@ func httpGetJSON(ctx context.Context, client *http.Client, rawURL, token string,
 	return json.Unmarshal(body, out)
 }
 
-// fetchBytes downloads a presigned large-resource URL with a bounded read.
-func fetchBytes(ctx context.Context, client *http.Client, rawURL string) ([]byte, error) {
+// fetchBytes downloads a large-resource URL with a bounded read. The §13.11
+// authentication mechanism differs by backend, so the caller credential is
+// attached selectively:
+//
+//   - Filesystem backend: the URL is the registry's token-bound
+//     /objects/{content_hash} route, which has no embedded signature. The token
+//     is attached as Authorization: Bearer so the registry validates it and
+//     confirms visibility before serving (the consumer sends the same session
+//     token it used for load_artifact).
+//   - S3 backend: the URL is presigned with AWS Signature V4 and is
+//     self-validating; "consumers do not send credentials when following the
+//     URL." An Authorization header alongside the SigV4 query makes S3 reject
+//     the request as "multiple authentication types" (HTTP 400), so the token
+//     MUST be withheld. presignedSigV4 detects this case by the SigV4 query.
+func fetchBytes(ctx context.Context, client *http.Client, rawURL, token string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
+	}
+	if token != "" && !presignedSigV4(rawURL) {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -223,4 +239,19 @@ func fetchBytes(ctx context.Context, client *http.Client, rawURL string) ([]byte
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, 256<<20))
+}
+
+// presignedSigV4 reports whether rawURL is an AWS Signature V4 presigned URL,
+// identified by the X-Amz-Signature query parameter the S3 backend appends. The
+// filesystem backend's /objects/{content_hash} route carries none, so this
+// separates a self-validating S3 URL (no caller credential) from the
+// token-bound registry route (§13.11). A URL that fails to parse is treated as
+// not presigned so the caller credential is attached, the safe default for the
+// registry route.
+func presignedSigV4(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	return u.Query().Get("X-Amz-Signature") != ""
 }

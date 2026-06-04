@@ -342,6 +342,41 @@ func TestIsServerSource(t *testing.T) {
 	}
 }
 
+// spec: §13.11 — fetchBytes attaches the caller token to the filesystem
+// backend's token-bound /objects route, but withholds it from an S3 presigned
+// URL (sending Authorization alongside the SigV4 query makes S3 reject the
+// request as "multiple authentication types"). The two cases are distinguished
+// by the X-Amz-Signature query parameter.
+func TestFetchBytes_WithholdsCredentialFromSigV4URL(t *testing.T) {
+	t.Parallel()
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte("bytes"))
+	}))
+	t.Cleanup(srv.Close)
+	client := srv.Client()
+	ctx := context.Background()
+
+	// The registry /objects route carries no SigV4 query: the token is attached.
+	if _, err := fetchBytes(ctx, client, srv.URL+"/objects/abc123", "session-jwt"); err != nil {
+		t.Fatalf("fetchBytes (objects route): %v", err)
+	}
+	if gotAuth != "Bearer session-jwt" {
+		t.Errorf("objects route Authorization = %q, want Bearer session-jwt", gotAuth)
+	}
+
+	// A SigV4 presigned URL: the token is withheld so S3 does not reject it.
+	gotAuth = ""
+	sigV4 := srv.URL + "/blob?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=deadbeef"
+	if _, err := fetchBytes(ctx, client, sigV4, "session-jwt"); err != nil {
+		t.Fatalf("fetchBytes (sigv4): %v", err)
+	}
+	if gotAuth != "" {
+		t.Errorf("SigV4 URL received Authorization = %q, want none", gotAuth)
+	}
+}
+
 func readFileT(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)
