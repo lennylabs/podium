@@ -114,6 +114,67 @@ func TestRun_OrphanedConfigMergeReconciledNotDeleted(t *testing.T) {
 	}
 }
 
+// Spec: §7.5 — removing an artifact whose materialized output sits in a nested
+// directory tree (claude-cowork's plugins/<id>/skills/<name>/) cleans the whole
+// emptied subtree, not just the file's immediate parent. A sibling directory the
+// operator still populates is left intact.
+func TestRun_RemovesEmptyParentTreeForDroppedArtifact(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	registry := filepath.Join(dir, "registry")
+	target := filepath.Join(dir, "out")
+
+	// One skill; claude-cowork materializes it into the nested
+	// plugins/<id>/skills/<name>/SKILL.md plugin tree.
+	skillDir := filepath.Join(registry, "tools", "greet")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "ARTIFACT.md"),
+		[]byte("---\ntype: skill\nversion: 1.0.0\ndescription: x\n---\n\nbody\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile artifact: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"),
+		[]byte("---\nname: greet\ndescription: The greet skill. Use when greeting.\n---\n\nbody\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile SKILL.md: %v", err)
+	}
+	if _, err := sync.Run(sync.Options{RegistryPath: registry, Target: target, AdapterID: "claude-cowork"}); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	pluginTree := filepath.Join(target, "plugins", "tools", "greet")
+	if _, err := os.Stat(filepath.Join(pluginTree, "skills", "greet", "SKILL.md")); err != nil {
+		t.Fatalf("expected the plugin skill materialized: %v", err)
+	}
+	// An operator file in a sibling plugin directory that must survive cleanup.
+	operatorDir := filepath.Join(target, "plugins", "operator")
+	if err := os.MkdirAll(operatorDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll operator: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(operatorDir, "keep.txt"), []byte("keep"), 0o644); err != nil {
+		t.Fatalf("WriteFile operator: %v", err)
+	}
+
+	// Drop the skill; the second sync must clean the entire emptied plugin
+	// subtree, including the plugins/tools/greet parent.
+	if err := os.RemoveAll(skillDir); err != nil {
+		t.Fatalf("RemoveAll skill: %v", err)
+	}
+	if _, err := sync.Run(sync.Options{RegistryPath: registry, Target: target, AdapterID: "claude-cowork"}); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	if _, err := os.Stat(pluginTree); !os.IsNotExist(err) {
+		t.Errorf("emptied plugin tree %s not cleaned; stat err=%v", pluginTree, err)
+	}
+	// The intermediate plugins/tools directory is also emptied and removed.
+	if _, err := os.Stat(filepath.Join(target, "plugins", "tools")); !os.IsNotExist(err) {
+		t.Errorf("emptied plugins/tools not cleaned; stat err=%v", err)
+	}
+	// The operator's sibling directory survives (plugins/ is not empty).
+	if _, err := os.Stat(filepath.Join(operatorDir, "keep.txt")); err != nil {
+		t.Errorf("operator sibling file lost during cleanup: %v", err)
+	}
+}
+
 func readFileString(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)

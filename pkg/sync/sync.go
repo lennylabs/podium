@@ -635,9 +635,31 @@ func removeStalePaths(target string, prior map[string]string, current map[string
 			fmt.Fprintf(os.Stderr, "sync: stale-file cleanup: %v\n", err)
 			continue
 		}
-		// Try to remove the now-empty parent directory; Remove
-		// fails non-empty dirs naturally, which is what we want.
-		_ = os.Remove(filepath.Dir(full))
+		// Prune the now-empty parent directories up the chain, stopping at the
+		// target root. A nested layout (claude-cowork's plugins/<id>/skills/<name>/,
+		// a hook's plugins/<id>/hooks/) leaves several empty ancestors when its
+		// only file is removed; pruning a single level would strip the leaf
+		// directory but orphan plugins/<id>/. os.Remove fails on a non-empty
+		// directory naturally, so the walk halts at the first ancestor that still
+		// holds an operator file or a sibling artifact's output.
+		pruneEmptyParents(target, filepath.Dir(full))
+	}
+}
+
+// pruneEmptyParents removes dir and each empty ancestor above it, stopping
+// before target (the sync root is never removed). os.Remove deletes only an
+// empty directory; the first non-empty ancestor stops the walk, so a directory
+// the operator still populates or a sibling artifact still writes into survives.
+func pruneEmptyParents(target, dir string) {
+	root := filepath.Clean(target)
+	cur := filepath.Clean(dir)
+	for cur != root && strings.HasPrefix(cur, root+string(filepath.Separator)) {
+		if err := os.Remove(cur); err != nil {
+			// Non-empty directory or any other error stops the ascent: a parent
+			// of a non-empty child is itself non-empty.
+			return
+		}
+		cur = filepath.Dir(cur)
 	}
 }
 

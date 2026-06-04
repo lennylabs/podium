@@ -320,7 +320,23 @@ func deleteAtPath(root map[string]any, path []any) {
 // stripPodiumOwned walks a decoded JSON value and removes any object that
 // carries the Podium ownership tag: object members whose value is a tagged
 // object are deleted, and array elements that are tagged objects are dropped.
+// When removing the tagged elements empties an array (a hook event whose only
+// handler was Podium's), the now-empty array is dropped from its parent map so
+// a changed hook_event does not leave a stale empty native-event key behind
+// (for example .gemini/settings.json {"hooks": {"BeforeTool": []}} after the
+// event moved to AfterTool). An array the operator left empty carried no Podium
+// element, so it is preserved.
 func stripPodiumOwned(v any) any {
+	out, _ := stripPodiumOwnedTracked(v)
+	return out
+}
+
+// stripPodiumOwnedTracked is stripPodiumOwned with an extra return reporting
+// whether v is an array that this call emptied by removing a Podium-tagged
+// element. The map case uses that signal to delete a key whose array value was
+// emptied by stripping while keeping a key whose array the operator already left
+// empty.
+func stripPodiumOwnedTracked(v any) (any, bool) {
 	switch t := v.(type) {
 	case map[string]any:
 		for k, val := range t {
@@ -328,20 +344,28 @@ func stripPodiumOwned(v any) any {
 				delete(t, k)
 				continue
 			}
-			t[k] = stripPodiumOwned(val)
-		}
-		return t
-	case []any:
-		out := make([]any, 0, len(t))
-		for _, el := range t {
-			if podiumOwned(el) {
+			nv, emptied := stripPodiumOwnedTracked(val)
+			if emptied {
+				delete(t, k)
 				continue
 			}
-			out = append(out, stripPodiumOwned(el))
+			t[k] = nv
 		}
-		return out
+		return t, false
+	case []any:
+		out := make([]any, 0, len(t))
+		removed := false
+		for _, el := range t {
+			if podiumOwned(el) {
+				removed = true
+				continue
+			}
+			nv, _ := stripPodiumOwnedTracked(el)
+			out = append(out, nv)
+		}
+		return out, removed && len(out) == 0
 	default:
-		return v
+		return v, false
 	}
 }
 

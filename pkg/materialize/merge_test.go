@@ -175,6 +175,54 @@ func TestConfigMerge_AccumulateIdempotentRemove(t *testing.T) {
 	}
 }
 
+// §6.7 config-merge reconciliation: when a hook's hook_event changes, the prior
+// translated native-event entry is stripped, and the now-empty native-event key
+// is dropped rather than left as a stale empty array. A re-merge under the new
+// event then carries only the new key. An array the operator left empty (no
+// Podium element) is preserved, since stripping removed nothing from it.
+func TestConfigMerge_EmptyEventKeyDroppedAfterEventChange(t *testing.T) {
+	dest := t.TempDir()
+	settings := filepath.Join(dest, ".gemini", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settings), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Operator carries a settings key plus a deliberately empty native-event
+	// array; reconciliation must leave both untouched.
+	operator := `{"hooks":{"OperatorEvent":[]},"theme":"dark"}`
+	if err := os.WriteFile(settings, []byte(operator), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	syncHook := func(ev string) {
+		f := adapter.File{Path: ".gemini/settings.json", Op: adapter.OpMergeJSON, Content: taggedHook(ev, "audit/guard", "echo guard")}
+		if err := Write(dest, []adapter.File{f}); err != nil {
+			t.Fatalf("Write: %v", err)
+		}
+	}
+
+	// First sync under BeforeTool.
+	syncHook("BeforeTool")
+	got := readString(t, settings)
+	if !strings.Contains(got, "BeforeTool") {
+		t.Fatalf("first sync missing BeforeTool entry:\n%s", got)
+	}
+
+	// Re-sync under AfterTool (the event changed): the BeforeTool key is dropped,
+	// AfterTool carries the single entry, and the operator's empty array and key
+	// survive.
+	syncHook("AfterTool")
+	got = readString(t, settings)
+	if strings.Contains(got, "BeforeTool") {
+		t.Errorf("stale empty BeforeTool key not dropped after the event change:\n%s", got)
+	}
+	if !strings.Contains(got, "AfterTool") || strings.Count(got, "echo guard") != 1 {
+		t.Errorf("AfterTool entry not present exactly once:\n%s", got)
+	}
+	if !strings.Contains(got, "OperatorEvent") || !strings.Contains(got, `"theme"`) {
+		t.Errorf("operator empty-array key or theme lost:\n%s", got)
+	}
+}
+
 // taggedServer builds a Podium-owned mcpServers fragment for server name keyed
 // by id, mirroring adapter.mcpFragmentJSON: the entry carries no in-entry tag and
 // ownership lives in the top-level index.
