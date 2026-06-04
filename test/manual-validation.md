@@ -271,11 +271,16 @@ and removes a materialized artifact when its source is deleted.
 1. Run the isolation block.
 2. Create a registry and a project, then start a watch in the background.
 
+   `podium init` writes the configuration into the workspace it discovers by
+   walking up from the current directory (§7.5.2), so change into the project
+   before running it; that writes `$WORK/proj/.podium/sync.yaml`. The `--target`
+   flag only sets the `defaults.target` value inside the file.
+
    ```bash
    podium artifact scaffold --type skill --description "First skill" "$WORK/reg/alpha"
    mkdir -p "$WORK/proj"
-   podium init --target "$WORK/proj" --registry "$WORK/reg" --harness claude-code
    cd "$WORK/proj"
+   podium init --target "$WORK/proj" --registry "$WORK/reg" --harness claude-code
    podium sync --watch > "$WORK/watch.log" 2>&1 &
    WATCH=$!
    sleep 2
