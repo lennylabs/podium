@@ -1141,7 +1141,9 @@ is refused.
 **Steps.**
 
 1. Run the isolation block.
-2. Author two high-sensitivity artifacts and serve with ingest signing enabled.
+2. Author one high-sensitivity artifact and serve it with ingest signing
+   enabled. The server log reports `ingest signing: registry-managed key` and
+   the signing keypair is written to `PODIUM_SIGN_KEY_PATH` on first run.
 
    ```bash
    podium artifact scaffold --type skill --sensitivity high --description "Signed runbook" "$WORK/reg/signed-runbook"
@@ -1150,26 +1152,86 @@ is refused.
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8115/healthz
    export PODIUM_REGISTRY=http://127.0.0.1:8115
+   grep "ingest signing" "$WORK/srv.log"
    ```
 
-3. Load with verification required and confirm the signature.
+3. Confirm the registry stored a signature at ingest, then load the artifact.
+   `podium artifact show` prints the body without verifying; the signature lives
+   in the `load_artifact` response and consumer-side verification happens at
+   materialization (next step).
 
    ```bash
+   curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=signed-runbook" \
+     | python3 -c 'import sys,json; print(json.load(sys.stdin)["signature"])'
    export PODIUM_VERIFY_SIGNATURES=medium-and-above
    podium artifact show --registry "$PODIUM_REGISTRY" signed-runbook
    ```
 
+4. Verify the signature at the consumer. The MCP bridge enforces
+   `PODIUM_VERIFY_SIGNATURES` at materialization. With `registry-managed`
+   verification it needs the registry's signing public key, which the
+   standalone server writes into the `public:` line of `PODIUM_SIGN_KEY_PATH`.
+   Load the signed artifact through the bridge with the policy enforcing.
+
+   ```bash
+   export PODIUM_SIGNATURE_VERIFY_KEY="$(awk '/^public:/{print $2}' "$WORK/registry-sign.key")"
+   echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"signed-runbook"}}}' \
+     | PODIUM_HARNESS=none \
+       PODIUM_MATERIALIZE_ROOT="$WORK/out" \
+       PODIUM_SIGNATURE_PROVIDER=registry-managed \
+       PODIUM_SIGNATURE_VERIFY_KEY="$PODIUM_SIGNATURE_VERIFY_KEY" \
+       podium-mcp 2>/dev/null | python3 -m json.tool
+   find "$WORK/out" -type f
+   ```
+
+5. Author a second high-sensitivity artifact, serve it on a separate port
+   without `--sign`, and load it through the bridge under the same enforcing
+   policy. An unsigned high-sensitivity artifact is refused.
+
+   ```bash
+   podium artifact scaffold --type skill --sensitivity high --description "Unsigned runbook" "$WORK/reg-unsigned/unsigned-runbook"
+   PODIUM_SQLITE_PATH="$WORK/podium2.db" PODIUM_FILESYSTEM_ROOT="$WORK/objects2" \
+     podium serve --standalone --no-embeddings --layer-path "$WORK/reg-unsigned" \
+     --bind 127.0.0.1:8116 > "$WORK/srv-unsigned.log" 2>&1 &
+   SRV2=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8116/healthz
+   echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"unsigned-runbook"}}}' \
+     | PODIUM_REGISTRY=http://127.0.0.1:8116 \
+       PODIUM_HARNESS=none \
+       PODIUM_MATERIALIZE_ROOT="$WORK/out-unsigned" \
+       PODIUM_VERIFY_SIGNATURES=medium-and-above \
+       PODIUM_SIGNATURE_PROVIDER=registry-managed \
+       PODIUM_SIGNATURE_VERIFY_KEY="$PODIUM_SIGNATURE_VERIFY_KEY" \
+       podium-mcp 2>/dev/null | python3 -m json.tool
+   ```
+
+6. Confirm the bridge rejects an unrecognized policy value at startup.
+
+   ```bash
+   echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"signed-runbook"}}}' \
+     | PODIUM_REGISTRY=http://127.0.0.1:8115 PODIUM_VERIFY_SIGNATURES=sometimes podium-mcp; echo "exit=$?"
+   ```
+
 **Expected.**
 
-- The server signs each artifact at ingest using the registry key.
-- With `PODIUM_VERIFY_SIGNATURES=medium-and-above`, the signed
-  high-sensitivity artifact loads and its signature verifies.
-- A tampered or unsigned high-sensitivity artifact loaded under the same policy
-  fails with a signature error at the consumer side. (`PODIUM_VERIFY_SIGNATURES`
-  accepts `never`, `medium-and-above`, or `always`; any other value exits the
-  bridge with an error.)
+- The server signs each artifact at ingest using the registry key. The server
+  log reports `ingest signing: registry-managed key`, and the `load_artifact`
+  response carries a `signature` envelope (`{"key_id":...,"signature":...}`).
+- `podium artifact show` prints the signed artifact's body. The CLI read path
+  does not verify; it confirms the artifact loads.
+- With `PODIUM_VERIFY_SIGNATURES=medium-and-above`, loading the signed
+  high-sensitivity artifact through the MCP bridge verifies the signature and
+  materializes the artifact under `$WORK/out`.
+- An unsigned high-sensitivity artifact loaded under the same policy fails with
+  `materialize.signature_invalid` (`signature_missing: sensitivity "high"
+  requires a signature`) and writes nothing. A signature that does not validate
+  against the configured public key fails the same way
+  (`signature_invalid: signature does not verify`).
+- `PODIUM_VERIFY_SIGNATURES` accepts `never`, `medium-and-above`, or `always`.
+  Any other value exits the bridge with a nonzero status and the message
+  `PODIUM_VERIFY_SIGNATURES must be never | medium-and-above | always`.
 
-**Cleanup.** Stop the server and `rm -rf "$WORK"`.
+**Cleanup.** Stop both servers (`kill "$SRV" "$SRV2"`) and `rm -rf "$WORK"`.
 
 ---
 
