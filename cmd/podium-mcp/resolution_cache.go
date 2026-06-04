@@ -248,16 +248,50 @@ func (s *mcpServer) loadArtifactFromCache(contentHash, idHint string) (*loadArti
 		ManifestBody: string(body),
 		Resources:    map[string]string{},
 	}
+	// Restore the auxiliary content putExtras persisted so the cache-served
+	// response drives the §6.6 gates exactly as a live fetch does. Without
+	// skill_raw a cache-served skill recomputes its §6.6 step 2 hash over
+	// ARTIFACT.md only (slot 1 empty) and fails content_hash_mismatch, and
+	// materializes a synthesized SKILL.md rather than the authored bytes. A
+	// present raw_frontmatter marks an extends-merged manifest so
+	// verifyContentHash hashes the pre-merge frontmatter. sensitivity and
+	// signature drive enforceSignaturePolicy: dropping sensitivity would skip
+	// §4.7.9 verification on a cache hit (a high-sensitivity artifact would
+	// materialize unverified), and dropping the signature would fail a policy it
+	// should pass. Each file is absent when its field was empty at ingest, so a
+	// plain low-sensitivity context artifact restores none of them.
+	if sr, err := os.ReadFile(filepath.Join(bucket, "skill_raw")); err == nil {
+		resp.SkillRaw = string(sr)
+	}
+	if rf, err := os.ReadFile(filepath.Join(bucket, "raw_frontmatter")); err == nil {
+		resp.RawFrontmatter = string(rf)
+		resp.ManifestMerged = true
+	}
+	if sv, err := os.ReadFile(filepath.Join(bucket, "sensitivity")); err == nil {
+		resp.Sensitivity = string(sv)
+	}
+	if sig, err := os.ReadFile(filepath.Join(bucket, "signature")); err == nil {
+		resp.Signature = string(sig)
+	}
 	// Recover the resolved version and type from the cached frontmatter so a
 	// cache-served load reports the same version/type as a live fetch (the
 	// content bucket is keyed by hash, which is 1:1 with a version because the
-	// frontmatter carries the version line).
+	// frontmatter carries the version line). Recover sensitivity from the
+	// frontmatter too when the side file is absent (a prefetch-warmed entry does
+	// not write one): the §4.7.9 policy gate must know the sensitivity so a
+	// high-sensitivity cache-served artifact is verified rather than waved
+	// through, and the frontmatter is the authoritative source for it.
 	if ctx := manifestContext(string(frontmatter)); ctx != nil {
 		if v, ok := ctx["version"].(string); ok {
 			resp.Version = v
 		}
 		if tp, ok := ctx["type"].(string); ok {
 			resp.Type = tp
+		}
+		if resp.Sensitivity == "" {
+			if sv, ok := ctx["sensitivity"].(string); ok {
+				resp.Sensitivity = sv
+			}
 		}
 	}
 	resourcesDir := filepath.Join(bucket, "resources")

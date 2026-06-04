@@ -1582,8 +1582,18 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 	}
 
 	// Cache the canonical bytes (content cache is forever-immutable
-	// per §6.5).
+	// per §6.5). Persist skill_raw / raw_frontmatter alongside so a
+	// cache-served skill or extends-merged manifest reproduces the exact
+	// bytes the §6.6 step 2 content hash was computed over (F-6.5).
 	if err := s.cache.put(resp.ContentHash, resp.Frontmatter, resp.ManifestBody, resp.Resources); err != nil {
+		return errorResult("cache: " + err.Error())
+	}
+	if err := s.cache.putExtras(resp.ContentHash, cacheExtras{
+		SkillRaw:       resp.SkillRaw,
+		RawFrontmatter: resp.RawFrontmatter,
+		Sensitivity:    resp.Sensitivity,
+		Signature:      resp.Signature,
+	}); err != nil {
 		return errorResult("cache: " + err.Error())
 	}
 
@@ -2378,6 +2388,11 @@ type batchLoadEnvelope struct {
 	ContentHash  string `json:"content_hash"`
 	ManifestBody string `json:"manifest_body"`
 	Frontmatter  string `json:"frontmatter"`
+	// SkillRaw is the verbatim SKILL.md for a type: skill artifact. The
+	// §7.6.2 batch endpoint emits it (§4.3.4); prefetch persists it so a
+	// later cache-served load of a warmed skill reproduces the bytes its
+	// content hash covers rather than failing content_hash_mismatch.
+	SkillRaw string `json:"skill_raw"`
 }
 
 // prefetch warms the §6.5 content and resolution caches from the §7.6.2
@@ -2449,6 +2464,12 @@ func (s *mcpServer) prefetchChunk(chunk []string) error {
 			continue
 		}
 		_ = s.cache.put(e.ContentHash, e.Frontmatter, e.ManifestBody, nil)
+		// The §7.6.2 batch envelope carries skill_raw (so a warmed skill keeps
+		// its content hash) but not sensitivity/signature, so a prefetched entry
+		// records neither. A later cache-served load of such an entry that needs
+		// signature verification re-fetches rather than serving the unverified
+		// warmed bytes (see loadArtifactFromCache + always-revalidate).
+		_ = s.cache.putExtras(e.ContentHash, cacheExtras{SkillRaw: e.SkillRaw})
 		// (id, "latest") -> version -> content_hash so always-revalidate finds
 		// the cached content on the next load.
 		s.resolutions.PutLatest(e.ID, e.Version, e.ContentHash, now)
@@ -2613,6 +2634,53 @@ func (c *contentCache) put(hash, frontmatter, body string, resources map[string]
 			return err
 		}
 		if err := os.WriteFile(dest, []byte(content), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// cacheExtras is the auxiliary per-artifact content a cache-served load must
+// reproduce so the §6.6 verification + content-hash gates behave identically to
+// a live fetch. The plain frontmatter/body the base put writes is not enough.
+type cacheExtras struct {
+	// SkillRaw is the verbatim SKILL.md for a skill, whose bytes the registry
+	// folds into the canonical content hash (§4.3.4). Without it the §6.6 step 2
+	// recompute hashes ARTIFACT.md with an empty slot 1 and fails.
+	SkillRaw string
+	// RawFrontmatter is the leaf child's pre-merge ARTIFACT.md for an
+	// extends-merged manifest (§4.7.6), which the content hash covers in place
+	// of the re-serialized frontmatter.
+	RawFrontmatter string
+	// Sensitivity and Signature drive the §4.7.9 signature policy. They are not
+	// inputs to the content hash, but enforceSignaturePolicy needs them: a
+	// cache-served high-sensitivity artifact that dropped its sensitivity would
+	// skip verification entirely, and one that dropped its signature envelope
+	// would fail a policy it should pass. Persisting both makes verification run
+	// uniformly whether the bytes came from the registry or the cache.
+	Sensitivity string
+	Signature   string
+}
+
+// putExtras persists the cacheExtras side files next to the base
+// frontmatter/body. Each file is written only when its field is non-empty, so a
+// non-skill, non-merged, low-sensitivity, unsigned artifact leaves the bucket
+// exactly as the base put left it. Call after put, which created the bucket.
+func (c *contentCache) putExtras(hash string, ex cacheExtras) error {
+	if c.dir == "" || hash == "" {
+		return nil
+	}
+	bucket := filepath.Join(c.dir, sanitizeHash(hash))
+	for name, content := range map[string]string{
+		"skill_raw":       ex.SkillRaw,
+		"raw_frontmatter": ex.RawFrontmatter,
+		"sensitivity":     ex.Sensitivity,
+		"signature":       ex.Signature,
+	} {
+		if content == "" {
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(bucket, name), []byte(content), 0o644); err != nil {
 			return err
 		}
 	}
