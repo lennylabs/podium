@@ -177,8 +177,8 @@ the Claude Code adapter across all of them.
    podium artifact scaffold --type skill   --description "A skill"   "$WORK/reg/my-skill"
    podium artifact scaffold --type command --description "A command" "$WORK/reg/my-command"
    podium artifact scaffold --type context --description "A context" "$WORK/reg/my-context"
-   podium artifact scaffold --type rule --rule-globs "**/*.go" --rule-mode always --rule-description "A rule" "$WORK/reg/my-rule"
-   podium artifact scaffold --type hook --hook-event PreToolUse --hook-action "echo hi" --description "A hook" "$WORK/reg/my-hook"
+   podium artifact scaffold --type rule --description "A rule" --rule-globs "**/*.go" --rule-mode always "$WORK/reg/my-rule"
+   podium artifact scaffold --type hook --hook-event pre_tool_use --hook-action "echo hi" --description "A hook" "$WORK/reg/my-hook"
    podium artifact scaffold --type agent --delegates-to my-skill --description "An agent" "$WORK/reg/my-agent"
    podium artifact scaffold --type mcp-server --server-identifier acme-tools --description "An MCP server" "$WORK/reg/my-mcp"
    ```
@@ -186,22 +186,30 @@ the Claude Code adapter across all of them.
 3. Validate the registry and materialize.
 
    ```bash
-   podium lint "$WORK/reg"
+   podium lint --registry "$WORK/reg"
    mkdir -p "$WORK/proj"
+   cd "$WORK/proj"
    podium init --target "$WORK/proj" --registry "$WORK/reg" --harness claude-code
-   cd "$WORK/proj" && podium sync
-   find "$WORK/proj/.claude" -type f | sort
+   podium sync
+   find "$WORK/proj/.claude" "$WORK/proj/.podium/context" -type f | sort
+   ls "$WORK/proj/.mcp.json"
    ```
 
 **Expected.**
 
 - Every scaffold command succeeds.
-- `podium lint` reports no errors.
-- `podium sync` materializes seven artifacts.
-- The `.claude` tree contains files for each type at the adapter's per-type
-  locations (skills, commands, agents, hooks, rules, and MCP server
-  configuration). A type the Claude Code adapter does not place as a file (if
-  any) is reported by sync as skipped with a reason rather than failing.
+- `podium lint` reports `lint: no issues.`
+- `podium sync` lists every scaffolded artifact under the `claude-code` adapter
+  with its materialized path.
+- The Claude Code adapter writes a file for each type at its per-type location.
+  The skill, command, agent, and rule each land under `.claude/` (at
+  `.claude/skills/my-skill/SKILL.md`, `.claude/commands/my-command.md`,
+  `.claude/agents/my-agent.md`, and `.claude/rules/my-rule.md`). The hook merges
+  into `.claude/settings.json`. The mcp-server writes the workspace-root
+  `.mcp.json`. The context materializes to the harness-neutral
+  `.podium/context/my-context/` directory that every adapter shares. The first
+  `find` lists the `.claude/` and `.podium/context/` files, and the `ls` confirms
+  the workspace-root `.mcp.json`.
 
 **Cleanup.** `rm -rf "$WORK"`.
 
