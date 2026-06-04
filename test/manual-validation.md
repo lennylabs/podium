@@ -541,7 +541,11 @@ reingest`, source updates.
    git add -A && git -c user.email=alice@acme.com -c user.name=alice commit -qm "add deploy skill"
    ```
 
-3. Serve an empty standalone registry, then register the repository as a layer.
+3. Serve an empty standalone registry, register the repository as a layer, then
+   run the first manual reingest. Registering a Git source without a configured
+   webhook leaves the layer at its initial commit until the first manual
+   reingest, so the layer holds no searchable artifacts until `layer reingest`
+   runs.
 
    ```bash
    podium serve --standalone --no-embeddings --bind 127.0.0.1:8105 > "$WORK/srv.log" 2>&1 &
@@ -549,6 +553,7 @@ reingest`, source updates.
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8105/healthz
    export PODIUM_REGISTRY=http://127.0.0.1:8105
    podium layer register --registry "$PODIUM_REGISTRY" --id team --repo "$WORK/repo" --ref main --public
+   podium layer reingest --registry "$PODIUM_REGISTRY" team
    podium layer list --registry "$PODIUM_REGISTRY"
    podium search --registry "$PODIUM_REGISTRY" "deploy"
    ```
@@ -564,13 +569,17 @@ reingest`, source updates.
 
 **Expected.**
 
-- `layer register` succeeds and `layer list` shows the `team` layer with a Git
-  source.
-- The first search returns the `deploy` skill.
-- `layer reingest` reports the new commit ingested, and the post-reingest search
+- `layer register` succeeds and returns the webhook URL and HMAC secret. `layer
+  list` shows the `team` layer with a Git source.
+- The first `layer reingest` ingests the initial commit and prints `artifact:
+  deploy@0.1.0   layer: team`. The first search then returns the `deploy` skill.
+- After the new commit, `layer reingest` ingests it (the layer's
+  `LastIngestedRef` advances to the new commit), and the post-reingest search
   returns the `rollback` skill.
 - The reingest response reports the count accepted and any rejected with a
-  reason, rather than a bare zero.
+  reason, rather than a bare zero. An artifact dropped for a cross-layer
+  collision is reported under `rejected` with `code: ingest.collision` and a
+  reason.
 
 **Cleanup.** Stop the server and `rm -rf "$WORK"`.
 
