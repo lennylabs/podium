@@ -82,7 +82,20 @@ type LayerEndpoint struct {
 	// webhook URL built from it so the §14.10 CLI prints a URL a developer can
 	// paste into a Git host. Empty falls back to the relative path. spec: §14.10.
 	publicBaseURL string
+	// notify delivers a §9.1 operational notification when the manual reingest or
+	// inbound-webhook trigger fails to ingest a layer (spec §9: "Delivery for
+	// ingest-failure and operational notifications"). serverboot wires it to the
+	// configured PODIUM_NOTIFICATION_PROVIDER. Nil leaves the failure path
+	// notification-free (the de facto standalone default unless a provider is set).
+	notify NotificationFunc
 }
+
+// NotificationFunc delivers one §9.1 operational notification. It mirrors
+// core.NotificationFunc so serverboot can wire the same provider into both the
+// registry and the layer endpoint without this package importing core. The
+// registry keeps running on a delivery outage; the failure response is written
+// regardless of whether the notification succeeds.
+type NotificationFunc func(ctx context.Context, severity, title, body string, tags map[string]string)
 
 // BreakGlass carries a §4.7.2 break-glass override supplied on the manual
 // reingest path (`podium layer reingest <id> --break-glass --justification
@@ -104,6 +117,15 @@ type ReingestRunner func(ctx context.Context, cfg store.LayerConfig, bg *BreakGl
 // the intent (the queue-only response).
 func (e *LayerEndpoint) WithReingestRunner(fn ReingestRunner) *LayerEndpoint {
 	e.reingestRunner = fn
+	return e
+}
+
+// WithNotifier installs the §9.1 operational-notification sink fired when a
+// reingest fails. serverboot passes the configured NotificationProvider so an
+// operator is alerted on an ingest-failure (spec §9). Without it the failure
+// path writes the error envelope but sends no notification.
+func (e *LayerEndpoint) WithNotifier(fn NotificationFunc) *LayerEndpoint {
+	e.notify = fn
 	return e
 }
 
@@ -944,6 +966,10 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 	}
 	res, err := e.reingestRunner(r.Context(), cfg, bg)
 	if err != nil {
+		// spec §9: fire a §9.1 operational notification on an ingest-failure so a
+		// configured NotificationProvider alerts the operator. Delivery is
+		// best-effort; the structured error envelope is written regardless.
+		e.notifyIngestFailure(r.Context(), cfg.ID, err)
 		writeReingestError(w, err)
 		return
 	}
@@ -1062,6 +1088,21 @@ func writeReingestError(w http.ResponseWriter, err error) {
 	default:
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 	}
+}
+
+// notifyIngestFailure fires a §9.1 operational notification for a failed layer
+// reingest. The severity is error, the title names the failing layer, and the
+// body carries the ingest-pipeline error; a layer tag lets a receiver route on
+// the layer id. A nil notifier (no configured provider) makes this a no-op.
+// spec: §9 — "Delivery for ingest-failure and operational notifications."
+func (e *LayerEndpoint) notifyIngestFailure(ctx context.Context, layerID string, err error) {
+	if e.notify == nil {
+		return
+	}
+	e.notify(ctx, "error",
+		fmt.Sprintf("ingest failed for layer %s", layerID),
+		err.Error(),
+		map[string]string{"layer": layerID, "tenant": e.tenantID})
 }
 
 // generateSecret returns a 32-byte hex-encoded HMAC secret for git

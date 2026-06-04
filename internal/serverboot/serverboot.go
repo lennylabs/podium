@@ -803,10 +803,13 @@ func Run() error {
 	// §9 NotificationProvider: chosen via PODIUM_NOTIFICATION_PROVIDER
 	// (one of "noop", "log", "webhook", or "multi"). Wraps the
 	// notifier in core.NotificationFunc so the registry can fire
-	// operational notifications without depending on this package.
-	if np := openNotifier(); np != nil {
-		registry = registry.WithNotifier(adaptNotifier(np))
-		log.Printf("notification provider: %s", np.ID())
+	// operational notifications without depending on this package. The
+	// adapted func is reused by the layer endpoint so an ingest-failure on
+	// the §7.3.1 reingest path fires a §9.1 notification too (spec §9).
+	notifier := openNotifier()
+	if notifier != nil {
+		registry = registry.WithNotifier(adaptNotifier(notifier))
+		log.Printf("notification provider: %s", notifier.ID())
 	}
 
 	// §6.3.1 SCIM 2.0: when at least one bearer token is configured,
@@ -1126,6 +1129,14 @@ func Run() error {
 	// It carries the §4.7.2 freeze windows so an active window blocks ingest
 	// unless the manual reingest passes break-glass.
 	layers.WithReingestRunner(buildReingestRunner(st, srv, cfg, resourcePut, auditSink, scrubber, ingestSigner, mreg, auditMeter, tenantID, useVectorOutbox, collocatedVec))
+
+	// §9: fire a §9.1 operational notification when the reingest path above fails
+	// to ingest a layer. Reuses the same NotificationProvider wired into the
+	// registry so an operator is alerted on an ingest-failure regardless of which
+	// trigger (manual reingest or inbound webhook) hit it.
+	if notifier != nil {
+		layers.WithNotifier(server.NotificationFunc(adaptNotifier(notifier)))
+	}
 
 	// §4.7.2: when ingest routes embedding through the transactional outbox
 	// (external vector backend), start the drain worker that embeds and writes
