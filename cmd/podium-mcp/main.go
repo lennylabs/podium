@@ -2140,7 +2140,10 @@ func splitCSV(s string) []string {
 
 // buildSignatureProvider mirrors the CLI side: a Noop default,
 // Sigstore-keyless when env vars supply Fulcio + Rekor, and
-// registry-managed for tenant-key deployments.
+// registry-managed for tenant-key deployments. The registry-managed
+// verifier loads the registry's public key from
+// PODIUM_SIGNATURE_VERIFY_KEY (base64 Ed25519) so the consumer can check
+// the detached signature envelope (§4.7.9).
 func buildSignatureProvider(name string) (sign.Provider, error) {
 	switch name {
 	case "", "noop":
@@ -2154,7 +2157,23 @@ func buildSignatureProvider(name string) (sign.Provider, error) {
 			TrustRoot: root,
 		}, nil
 	case "registry-managed":
-		return sign.RegistryManagedKey{}, nil
+		// §4.7.9: verification runs in the consumer, so the MCP server holds
+		// the registry's public key. PODIUM_SIGNATURE_VERIFY_KEY carries the
+		// base64-encoded Ed25519 public key the registry publishes for its
+		// signing keypair; PODIUM_SIGNATURE_KEY_ID, when set, pins the
+		// expected key fingerprint so a signature from a rotated key is
+		// refused. When the verify key is unset the provider has no public
+		// key and Verify returns config.signature_provider_unavailable, which
+		// surfaces as materialize.signature_invalid under an enforcing policy.
+		k := sign.RegistryManagedKey{KeyID: os.Getenv("PODIUM_SIGNATURE_KEY_ID")}
+		if raw := os.Getenv("PODIUM_SIGNATURE_VERIFY_KEY"); raw != "" {
+			pub, err := sign.PublicKeyFromBase64(raw)
+			if err != nil {
+				return nil, fmt.Errorf("PODIUM_SIGNATURE_VERIFY_KEY: %w", err)
+			}
+			k.PublicKey = pub
+		}
+		return k, nil
 	}
 	return nil, fmt.Errorf("unknown PODIUM_SIGNATURE_PROVIDER: %s", name)
 }

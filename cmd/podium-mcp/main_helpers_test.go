@@ -2,12 +2,19 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"crypto/ed25519"
+	crand "crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/lennylabs/podium/pkg/sign"
 )
 
 func TestEnvDefault(t *testing.T) {
@@ -474,6 +481,48 @@ func TestBuildSignatureProvider(t *testing.T) {
 	}
 	if _, err := buildSignatureProvider("unknown"); err == nil {
 		t.Errorf("buildSignatureProvider(unknown) = nil error, want error")
+	}
+}
+
+// buildSignatureProvider for registry-managed loads the verification public key
+// from PODIUM_SIGNATURE_VERIFY_KEY (base64 Ed25519) and pins the key id from
+// PODIUM_SIGNATURE_KEY_ID, so the resulting provider verifies a real envelope.
+// A malformed verify key is a startup error. Not parallel: it mutates env.
+func TestBuildSignatureProvider_RegistryManagedVerifyKey(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(crand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	hash := "sha256:" + hex.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+	envelope, err := sign.RegistryManagedKey{PrivateKey: priv, KeyID: "key-v1"}.Sign(context.Background(), hash)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+
+	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", base64.StdEncoding.EncodeToString(pub))
+	t.Setenv("PODIUM_SIGNATURE_KEY_ID", "key-v1")
+	p, err := buildSignatureProvider("registry-managed")
+	if err != nil {
+		t.Fatalf("buildSignatureProvider(registry-managed) = %v", err)
+	}
+	if err := p.Verify(context.Background(), hash, envelope); err != nil {
+		t.Errorf("verify with wired public key: %v", err)
+	}
+
+	// A wrong-id pin rejects the same envelope.
+	t.Setenv("PODIUM_SIGNATURE_KEY_ID", "key-v2")
+	p2, err := buildSignatureProvider("registry-managed")
+	if err != nil {
+		t.Fatalf("buildSignatureProvider(registry-managed) = %v", err)
+	}
+	if err := p2.Verify(context.Background(), hash, envelope); err == nil {
+		t.Error("a non-pinned key id should be refused")
+	}
+
+	// A malformed verify key is a startup error.
+	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", "!!!not base64")
+	if _, err := buildSignatureProvider("registry-managed"); err == nil {
+		t.Error("malformed PODIUM_SIGNATURE_VERIFY_KEY should error")
 	}
 }
 

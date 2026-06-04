@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/lennylabs/podium/pkg/spi"
 )
@@ -33,6 +34,26 @@ type RegistryManagedKey struct {
 
 // ID returns "registry-managed".
 func (RegistryManagedKey) ID() string { return "registry-managed" }
+
+// PublicKeyFromBase64 decodes a standard-base64-encoded Ed25519 public
+// key (the 32-byte form the registry publishes for its §4.7.9
+// registry-managed signing key) into an ed25519.PublicKey. A consumer
+// that verifies registry-managed signatures loads the registry's public
+// key this way and constructs a RegistryManagedKey for Verify.
+//
+// spec: §4.7.9 — verification runs in the consumer (the MCP server),
+// which holds the registry's public key to check the detached
+// signature envelope.
+func PublicKeyFromBase64(s string) (ed25519.PublicKey, error) {
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(s))
+	if err != nil {
+		return nil, fmt.Errorf("decode public key: %w", err)
+	}
+	if len(raw) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("public key is %d bytes, want %d", len(raw), ed25519.PublicKeySize)
+	}
+	return ed25519.PublicKey(raw), nil
+}
 
 // ErrRegistryManagedUnavailable signals the keypair is not configured.
 // Structured per §9.3.
