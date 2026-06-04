@@ -607,6 +607,373 @@ Dex is the remaining external account-free dependency for auth: it runs from
   storage-only matrix has a no-account provider available.
 - Secret names matching the credential column above.
 
+## User-journey coverage gaps
+
+These gaps come from a 2026-06-03 user-journey coverage pass. The pass enumerated realistic deployment and usage journeys and gap-checked each against the e2e and integration suites. It covered solo filesystem, team git-source, standard or managed, harness materialization, multi-layer composition, search and discovery, scale and load, configuration permutations, and lifecycle operations. The entries below are the journeys that are partially covered or missing, grouped by area.
+
+### JOURNEY: End-to-end author-to-consumer journeys
+
+#### G-JOURNEY-1: Git-source webhook reingest produces a new searchable artifact version
+- **Severity**: P1. **Lane**: PR; needs a standard server and a seeded file:// git repo, no external network. **Status**: open (partial). **Realism**: common. **Nearest test**: test/e2e/http_api_test.go:TestHTTPAPI_IngestWebhookInvalid.
+- **Current**: TestHTTPAPI_IngestWebhookInvalid registers a git layer, signs a valid HMAC delivery, and confirms it reaches the ingest pipeline, but the fake repo is unreachable so the delivery stops at ingest.source_unreachable and never ingests a new version, and TestReingestPipeline_GitSource asserts only accepted=1 and last_ingested_at on a manual reingest.
+- **Target**: Boot a standard server, register a git layer pointing at a seeded file:// repo, deliver a valid-HMAC webhook for the initial commit, assert the artifact ingests and is searchable, push a new commit, deliver the webhook again, and assert search_artifacts returns the new version.
+- **Sketch**: Register a git layer over a seeded file:// repo, POST a valid-HMAC webhook, assert the artifact is searchable, commit a new version, POST again, and assert search_artifacts returns the updated version.
+
+#### G-JOURNEY-2: Git-source polling reingest detects a new commit without a webhook
+- **Severity**: P2. **Lane**: PR; needs a standalone server and a seeded file:// git repo with poll trigger invocable, no external network. **Status**: open (missing). **Realism**: common. **Nearest test**: test/integration/reingest_pipeline_test.go:TestReingestPipeline_GitSource.
+- **Current**: The source SPI defines TriggerPoll in pkg/layer/source/source.go and only manual git reingest is exercised through TestReingestPipeline_GitSource, so no test drives a poll cycle that detects a changed ref and reingests.
+- **Target**: Register a git layer with no webhook over a seeded file:// repo, commit a new artifact, invoke the poll cycle, and assert the registry detects the changed ref, reingests, load_artifact returns the updated artifact, and the audit log records a poll-driven reingest.
+- **Sketch**: Register a git layer with no webhook, commit a new artifact to the seeded repo, trigger the poll cycle, and assert load_artifact returns the updated artifact and the audit log records a poll-driven reingest.
+
+### MATERIALIZE: Harness materialization matrix
+
+#### G-MATERIALIZE-1: Single-pass sync of every first-class type asserts mcp-server and hook config-merge files
+- **Severity**: P1. **Lane**: PR; CLI sync over a filesystem registry, no external infra. **Status**: open (partial). **Realism**: common. **Nearest test**: test/e2e/artifact_types_test.go:TestArtifactTypes_MCPServerVisibleViaSync.
+- **Current**: artifact_types_test.go scaffolds, lints, and asserts the claude-code layout for skill, agent, context, command, rule, and hook, TestHarness_ClaudeCodeHookDefaultCase asserts the hook merges into .claude/settings.json, and the golden suite snapshots the full tree, but TestArtifactTypes_MCPServerVisibleViaSync syncs the mcp-server with --harness none and never asserts the .mcp.json config-merge file through a real podium sync. Two gap-checked scenarios (all-types claude-code and the mcp-server path) merge here.
+- **Target**: Scaffold one artifact of each first-class type into a single-layer registry, run one podium sync --harness claude-code, and assert every per-type output path together including .claude/settings.json for the hook and a Podium-owned server entry in .mcp.json derived from server_identifier, with both config-merge files carrying ownership markers.
+- **Sketch**: Build a one-artifact-per-type registry, run a single podium sync --harness claude-code, and assert all per-type paths plus Podium-owned entries in .claude/settings.json and .mcp.json in one pass.
+
+#### G-MATERIALIZE-2: Re-sync idempotency and config-merge reconciliation through the CLI against a Cursor target
+- **Severity**: P1. **Lane**: PR; CLI sync over a filesystem registry into a Cursor target, no external infra. **Status**: open (partial). **Realism**: common. **Nearest test**: pkg/sync/cleanup_test.go:TestRun_OrphanedConfigMergeReconciledNotDeleted.
+- **Current**: TestRun_OrphanedConfigMergeReconciledNotDeleted and TestRun_RemovesFilesForDroppedArtifact are pkg/sync unit tests, TestHarness_SyncIdempotent re-runs only claude-code, and TestFilesystemSync_SyncIdempotent covers standalone OpWrite for the none harness, so config-merge re-sync idempotency through the CLI against a Cursor target with operator edits is not asserted. Two gap-checked scenarios (resync-config-merge-reconcile and resync-no-diff cursor) merge here.
+- **Target**: Run podium sync --harness cursor twice over a rule, a hook, and an mcp-server, add a non-Podium entry to .cursor/hooks.json and .cursor/mcp.json between runs, and assert the second tree is byte-identical, lock content_hash entries are unchanged, each config file holds exactly one Podium entry per artifact, and the operator entries survive.
+- **Sketch**: Sync --harness cursor over a rule, hook, and mcp-server, insert operator entries into .cursor/hooks.json and .cursor/mcp.json, re-sync, and assert byte-equal Podium entries, stable lock hashes, and surviving operator content.
+
+#### G-MATERIALIZE-3: Watch loop rematerializes on a rule-body edit and cleans stale output within one session
+- **Severity**: P1. **Lane**: PR; CLI watch against a temp registry and target, no external infra. **Status**: open (partial). **Realism**: common. **Nearest test**: test/e2e/filesystem_sync_test.go:TestFilesystemSync_WatchRematerializesOnChange.
+- **Current**: TestFilesystemSync_WatchRematerializesOnChange adds a new artifact and polls without editing an existing rule body, TestFilesystemSync_StaleFilesRemovedOnDelete exercises delete-driven cleanup only on a manual second sync, and TestFilesystemSync_WatchExits0OnSIGINT covers shutdown, so the edit-and-stale-cleanup-inside-the-watch-loop path is split across three journeys.
+- **Target**: Start podium sync watch against a temp registry and target, edit the rule ARTIFACT.md and poll .claude/rules/{name}.md until the new content appears, delete the command artifact directory and poll until .claude/commands/{name}.md is removed by the watcher, then send SIGINT and assert exit 0.
+- **Sketch**: Run sync watch, edit a rule body and poll the materialized rule file for new content, delete a command artifact and poll until its output is removed, then SIGINT and assert exit 0.
+
+#### G-MATERIALIZE-4: Unsupported-type matrix enforced through podium sync for pi and claude-desktop
+- **Severity**: P1. **Lane**: PR; CLI sync over a filesystem registry, no external infra. **Status**: open (partial). **Realism**: occasional. **Nearest test**: pkg/adapter/capability_matrix_test.go:TestCapabilityMatrix_Types.
+- **Current**: TestCapabilityMatrix_Types sweeps every type against every adapter at the adapter.Adapt level and asserts unsupported cells yield zero files, but no test asserts through podium sync that pi writes only .pi/prompts for a command while emitting no agent output, that claude-desktop writes no project-level files, or that a declared-but-unsupported combination surfaces a materialize warning or error.
+- **Target**: Run podium sync of an agent and a command for harness pi and separately for claude-desktop, assert pi materializes only .pi/prompts/{name}.md, claude-desktop writes nothing project-level, and the declared-but-unsupported combinations surface a diagnostic.
+- **Sketch**: Sync an agent and a command for pi and for claude-desktop, assert pi writes only the command prompt, claude-desktop writes nothing project-level, and the unsupported combinations emit a diagnostic.
+
+#### G-MATERIALIZE-5: Changing a hook event reconciles the prior translated entry before re-merge on gemini
+- **Severity**: P1. **Lane**: PR; CLI sync over a filesystem registry, no external infra. **Status**: open (partial). **Realism**: occasional. **Nearest test**: pkg/materialize/merge_test.go:TestConfigMerge_AccumulateIdempotentRemove.
+- **Current**: TestConfigMerge_AccumulateIdempotentRemove and TestConfigMerge_MapIndexReconcile prove strip-before-merge at the unit level, and the gemini golden snapshot pins event translation, but no test changes a hook_event and bumps the version then re-syncs gemini to assert the old translated entry is removed and the new one appears once with the bundled script path rewritten.
+- **Target**: Sync a hook for harness gemini producing a .gemini/settings.json event entry, change its hook_event from pre_tool_use to pre_shell_execution and bump the version, re-sync, and assert the prior translated event entry is gone, the new translated event appears once, the script path is rewritten, and operator keys survive.
+- **Sketch**: Sync a gemini hook, change its hook_event and bump the version, re-sync, and assert the old translated entry is removed, the new one appears once with the script path rewritten, and operator settings survive.
+
+#### G-MATERIALIZE-6: Removing an agent and mcp-server deletes standalone output, cleans empty parents, and reconciles config-merge
+- **Severity**: P1. **Lane**: PR; CLI sync over a filesystem registry, no external infra. **Status**: open (partial). **Realism**: common. **Nearest test**: pkg/sync/cleanup_test.go:TestRun_RemovesFilesForDroppedArtifact.
+- **Current**: TestRun_RemovesFilesForDroppedArtifact deletes a dropped context artifact's file and TestRun_OrphanedConfigMergeReconciledNotDeleted strips a removed hook's entry while preserving an operator key, but the standalone case uses context rather than an agent, the config-merge case uses a hook rather than an mcp-server with an operator-authored entry, and empty-parent-directory cleanup is not asserted.
+- **Target**: Sync an agent and an mcp-server, seed an operator entry into .mcp.json, remove both artifacts, re-sync, and assert the agent file is deleted, the now-empty parent directory is cleaned, the Podium mcp-server entry is stripped, and the operator entry survives.
+- **Sketch**: Sync an agent and an mcp-server with a seeded operator .mcp.json entry, remove both, re-sync, and assert agent-file deletion, empty-parent cleanup, the Podium entry stripped, and the operator entry intact.
+
+#### G-MATERIALIZE-7: Re-sync reconciliation of the OpInject text and TOML path through real sync for codex, opencode, and pi
+- **Severity**: P1. **Lane**: PR; CLI sync over a filesystem registry, no external infra. **Status**: open (partial). **Realism**: common. **Nearest test**: pkg/materialize/merge_test.go:TestStripPodiumBlocks_PreservesOperatorContent.
+- **Current**: Strip-before-inject idempotency and operator-content preservation for AGENTS.md, GEMINI.md, and .codex/config.toml are unit-tested in pkg/materialize/merge_test.go, and a single codex hook inject into config.toml is asserted in harness_materialization_test.go, but no test runs podium sync twice for codex, opencode, or pi with an operator edit between runs to assert the OpInject path reconciles in place. The new-gap MATERIALIZE entries cover the OpMergeJSON JSON path (cursor, gemini, .mcp.json) but not the OpInject markdown and TOML path.
+- **Target**: Run podium sync --harness codex over a rule and a hook producing AGENTS.md Podium-injected blocks and a .codex/config.toml [[hooks]] entry, hand-edit a non-Podium line into each file between runs, change the rule body and bump the version, re-sync, and assert each prior Podium block is replaced once in place, the operator lines survive, and the TOML stays valid.
+- **Sketch**: Sync --harness codex over a rule and a hook, insert operator lines into AGENTS.md and .codex/config.toml, edit the rule body and bump the version, re-sync, and assert one reconciled Podium block per artifact, surviving operator lines, and valid TOML.
+
+#### G-MATERIALIZE-8: Type-filtered multi-harness sync materializes only the selected types and stays idempotent
+- **Severity**: P2. **Lane**: PR; CLI sync over a filesystem registry, no external infra. **Status**: open (partial). **Realism**: occasional. **Nearest test**: pkg/sync/scope_run_test.go:TestRun_ScopeTypeFilters.
+- **Current**: TestRun_ScopeTypeFilters runs sync.Run with a single skill-only type filter and the e2e scope tests cover --include, but no test runs podium sync --harness opencode --type rule --type context and asserts excluded hook and mcp-server outputs are absent while the filtered set stays idempotent.
+- **Target**: Run podium sync --harness opencode --type rule --type context over an all-types registry, assert AGENTS.md injected rules and .podium/context buckets exist while .opencode/commands and opencode.json mcp entries are absent, and re-run to confirm idempotency.
+- **Sketch**: Run sync --harness opencode --type rule --type context over an all-types registry, assert rule and context outputs present and command and mcp outputs absent, and re-run for idempotence.
+
+#### G-MATERIALIZE-9: Removing a claude-cowork plugin reconciles marketplace.json and cleans the plugin tree
+- **Severity**: P2. **Lane**: PR; CLI sync over a filesystem registry into a claude-cowork target, no external infra. **Status**: open (partial). **Realism**: occasional. **Nearest test**: test/e2e/harness_materialization_test.go:TestHarness_ClaudeCoworkPluginLayout.
+- **Current**: harness_materialization_test.go asserts the initial claude-cowork write of plugins/{id}/, the .claude-plugin/plugin.json manifest, and the repository-root .claude-plugin/marketplace.json entry, and pkg/sync/cleanup_test.go covers standalone deletion and JSON reconciliation at unit scale, but no test re-syncs claude-cowork after removing a plugin to assert the marketplace.json Podium entry is stripped, the plugins/{id} tree is cleaned, and an operator marketplace entry survives.
+- **Target**: Sync --harness claude-cowork over a skill, an mcp-server, and a hook producing a plugins/{id} tree plus marketplace.json and plugins/{id}/.mcp.json entries, seed an operator marketplace entry, remove the artifacts, re-sync, and assert the Podium marketplace and .mcp.json entries are stripped, the emptied plugins/{id} directories are cleaned, and the operator entry survives.
+- **Sketch**: Sync --harness claude-cowork over a skill, mcp-server, and hook with a seeded operator marketplace entry, remove the artifacts, re-sync, and assert the Podium marketplace and .mcp.json entries are stripped, the plugin tree is cleaned, and the operator entry survives.
+
+### MULTILAYER: Multi-layer composition and overlays
+
+#### G-MULTILAYER-1: Layer reorder flips the winning artifact and re-sync cleans the prior winner outputs
+- **Severity**: P1. **Lane**: PR; needs a server with two user layers plus CLI sync, no external infra. **Status**: open (missing). **Realism**: occasional. **Nearest test**: test/e2e/cli_reference_test.go:TestCLI_LayerReorder.
+- **Current**: TestCLI_LayerReorder registers two layers with no shared artifact ID and asserts only that the reordered layer's Order value increases with no sync, and pkg/sync/cleanup_test.go covers stale deletion only on artifact removal, so no test ties a reorder to a re-sync that flips the winning artifact version and cleans the prior winner's outputs.
+- **Target**: Register two personal layers carrying the same artifact at distinct versions and outputs, sync to materialize layer B's winner, run podium layer reorder so layer A wins, re-sync, and assert the version flips, the prior winner's standalone files are deleted, the prior Podium entries are stripped from a config-merge file, and operator content is preserved.
+- **Sketch**: Register two personal layers sharing one artifact at distinct versions, sync, reorder so the other layer wins, re-sync, and assert the winning version flips, prior standalone files are deleted, the config-merge file keeps only the new Podium entries, and operator content survives.
+
+#### G-MULTILAYER-2: Hidden parent merges fields from a restricted layer the caller cannot discover
+- **Severity**: P1. **Lane**: PR; needs a server with mixed-visibility layers (per-identity visibility, blocked by all-public standalone harness). **Status**: open (partial). **Realism**: occasional. **Nearest test**: test/e2e/artifact_extends_test.go:TestExtends_HiddenParentMergedResult.
+- **Current**: TestExtends_HiddenParentMergedResult and TestExtends_HiddenParentNotInSearch are skipped because the standalone e2e harness boots all layers public and cannot hide a parent from a caller, and the behavior is covered only in pkg/registry/core TestExtends_HiddenParent.
+- **Target**: Boot a server with a parent in an organization-visibility layer and a public child that extends it in a higher-precedence layer, query as an unauthenticated public-mode caller, assert the child's merged manifest carries the parent's inherited fields and most-restrictive sensitivity, and assert the parent ID is not loadable and never appears in search_artifacts or load_domain.
+- **Sketch**: Ingest a parent into an org-visibility layer and a public child that extends it, query as an unauthenticated caller, and assert the child merges inherited fields while the parent ID is not loadable or enumerable.
+
+#### G-MULTILAYER-3: Personal, team, and org layers shadow per-caller and pinned parents stay fixed on org publish
+- **Severity**: P1. **Lane**: PR; needs a server with org, team, and personal layers plus per-caller tokens (per-identity visibility). **Status**: open (partial). **Realism**: common. **Nearest test**: test/e2e/artifact_extends_test.go:TestExtends_ChainedInheritance.
+- **Current**: TestExtends_ChainedInheritance resolves a three-layer A-extends-B-extends-C chain to the top version with merged fields and TestExtends_OrgWideSkillExample covers a two-layer team-over-org union, but parent-pin stability is unit-only because TestExtends_PinNoSilentPropagation and TestExtends_PinReingestPicksNewerParent are skipped, so the per-caller-winner-differs plus pinned-parent-unchanged-on-org-publish journey is not exercised.
+- **Target**: Boot a server with an org layer, a registered team layer, and alice's personal layer all carrying the same skill with extends up the chain, resolve the effective view as alice to her personal version and a caller without the personal layer to the team version, and assert the org and team pinned parents do not change when the org publishes a new patch.
+- **Sketch**: Boot org, team, and personal layers carrying one skill with extends declarations, call load_artifact as alice and as bob, assert the per-caller winners differ, and assert pinned parents stay fixed after an org publish.
+
+#### G-MULTILAYER-4: Conflicting multi-layer DOMAIN.md featured and deprioritize lists merge with overlay search fusion
+- **Severity**: P2. **Lane**: PR; needs a server with two layers plus a workspace overlay, no external infra. **Status**: open (partial). **Realism**: edge. **Nearest test**: test/e2e/overlay_domain_merge_test.go:TestOverlayDomainMerge_DescriptionAndDirectChild.
+- **Current**: overlay_domain_merge_test.go asserts an overlay DOMAIN.md description and direct child merge into load_domain and domain_modeling_test.go asserts layer-merge folding for unlisted, max_depth, fold_below, and keywords, but no test composes two layers with conflicting featured and deprioritize lists nor asserts an overlay keyword surfaces an overlay artifact in fused search.
+- **Target**: Compose an admin layer and a user layer whose DOMAIN.md files conflict on featured and deprioritize, add a workspace overlay artifact and keyword, assert the merged notable ordering applies append-unique with most-restrictive folding in load_domain, and assert the overlay artifact surfaces in search_artifacts via the overlay keyword.
+- **Sketch**: Compose two layers with conflicting featured and deprioritize DOMAIN.md lists plus an overlay artifact and keyword, assert the merged notable ordering in load_domain, and assert the overlay artifact surfaces in search_artifacts via the overlay keyword.
+
+### VEC: Semantic and hybrid search journeys
+
+#### G-VEC-7: Query-time embedding-provider failure degrades to BM25 and recovers semantic fusion
+- **Severity**: P1. **Lane**: PR; needs pgvector (PODIUM_POSTGRES_DSN) plus a controllable mock embedder. **Status**: open (partial). **Realism**: occasional. **Nearest test**: test/e2e/vector_backend_config_test.go:TestVectorBackend_SearchDegradesToBM25WhenVectorUnreachable.
+- **Current**: TestVectorBackend_SearchDegradesToBM25WhenVectorUnreachable and EmptyEmbeddingProviderDegradesToBM25 assert BM25 fallback for an unreachable backend or disabled provider at startup, but no test makes the embedding provider return 429 or errors during a live query then restores it. Five gap-checked VEC and SEARCH scenarios collapse onto this degrade-under-error-then-recover gap.
+- **Target**: Boot pgvector with a controllable mock embedder, serve a baseline query, flip the embedder to return 429 and assert search_artifacts keeps returning ranked BM25 results with a degraded response or readiness signal and no silent empty set, then restore the embedder and assert semantic fusion resumes and the ranking changes on the same query.
+- **Sketch**: Boot pgvector with a controllable mock embedder, serve a baseline query, flip the embedder to 429 and assert non-empty BM25 results plus a degraded signal, then restore it and assert semantic fusion resumes and the ranking changes.
+
+#### G-VEC-8: Hybrid RRF ranks a paraphrased query whose words are absent from the target
+- **Severity**: P1. **Lane**: PR; needs pgvector (PODIUM_POSTGRES_DSN) plus a mock embedder. **Status**: open (partial). **Realism**: common. **Nearest test**: test/e2e/vector_semantic_search_test.go:TestVectorSemanticSearch_PgVectorThroughServer.
+- **Current**: TestVectorSemanticSearch_PgVectorThroughServer asserts the matching artifact ranks first, but the query is lexically present in the target description and the file states the assertion holds whether the vector path contributes or silently degrades, so the semantic contribution is not isolated.
+- **Target**: Reuse the pgvector boot, ingest a corpus where the target description and when_to_use share no words with the query, assert the semantically correct artifact ranks first, then re-run with PODIUM_EMBEDDING_PROVIDER unset and assert the rank order changes to prove reciprocal rank fusion supplied the top result.
+- **Sketch**: Ingest a corpus whose target shares no words with a paraphrased query, assert the semantic match ranks first, then unset the embedding provider and assert the rank order differs.
+
+#### G-VEC-9: Vector outbox lag signal fires under a bulk-ingest burst then drains to consistency
+- **Severity**: P1. **Lane**: PR; needs pgvector (PODIUM_POSTGRES_DSN), a mock embedder, and low lag thresholds. **Status**: open (partial). **Realism**: occasional. **Nearest test**: test/integration/vector_outbox_consistency_test.go:TestVectorOutbox_RetriesToConsistency.
+- **Current**: vector_outbox_consistency_test.go drives a fault-injecting provider and asserts the outbox drains to zero with no lost or duplicated vectors, and vector_outbox_test.go unit-tests the publishStats lagging transition, but no test ingests a burst large enough to cross PODIUM_VECTOR_OUTBOX_LAG_DEPTH or LAG_AGE and observe the vector.outbox_lagging signal end to end.
+- **Target**: Boot pgvector with a mock embedder and low lag thresholds, ingest 300-plus artifacts in a short window, assert the outbox crosses LAG_DEPTH or LAG_AGE and records vector.outbox_lagging, then assert the batched drain reaches consistency and semantic search ranks the expected artifact first.
+- **Sketch**: Boot pgvector with low lag thresholds, ingest 300-plus artifacts rapidly, assert the outbox crosses the lag threshold and signals vector.outbox_lagging, then assert the drain catches up and semantic search ranks the expected artifact first.
+
+#### G-VEC-10: Admin reembed re-tags vectors after a model switch and purges stale-model vectors
+- **Severity**: P2. **Lane**: PR; needs pgvector (PODIUM_POSTGRES_DSN) plus a mock embedder. **Status**: open (partial). **Realism**: occasional. **Nearest test**: pkg/vector/pgvector_depth_test.go:TestPgVector_Depth_ModelVersioning.
+- **Current**: pgvector_depth_test.go exercises PutModel, model-restricted QueryModel, and PurgeModelExcept against live Postgres, and extra_handlers_test.go asserts the /v1/admin/reembed handler runs past validation, but no test drives the admin reembed flow after a configured model switch end to end.
+- **Target**: Ingest artifacts with a mock embedder at model A on pgvector, change the configured embedding model to B, POST /v1/admin/reembed, and assert vectors carry model B, model-A vectors are purged, the operation is tenant-scoped, semantic search returns the expected top result, and manifest content hashes are unchanged.
+- **Sketch**: Ingest at model A on pgvector, switch the configured model to B, POST /v1/admin/reembed, and assert vectors re-tag to B, model-A vectors purge tenant-scoped, semantic search is correct, and content hashes are untouched.
+
+#### G-VEC-11: Pinecone self-embedding versus external embedder return the same top result live
+- **Severity**: P2. **Lane**: Release or manual; needs live Pinecone (PODIUM_LIVE_EXTERNAL=1, PODIUM_PINECONE_API_KEY, PODIUM_PINECONE_INFERENCE_MODEL). **Status**: open (partial). **Realism**: occasional. **Nearest test**: test/e2e/vector_backend_config_test.go:TestVectorBackend_PineconeSelfEmbedding.
+- **Current**: TestVectorBackend_PineconeSelfEmbedding and SelfEmbedExplicitOverride assert the chosen embedding route from the startup log against a refused host, and TestVectorSemanticSearch_ManagedThroughServer runs a live managed backend storage-only with an external mock embedder, so no test ingests and queries through Pinecone self-embedding live nor compares both routes.
+- **Target**: Under PODIUM_LIVE_EXTERNAL=1 boot the server against live Pinecone twice, once with PODIUM_PINECONE_INFERENCE_MODEL set for self-embedding and once with an external embedder, ingest the same layer in each, and assert search_artifacts returns the same expected artifact at rank one while the log records the chosen route.
+- **Sketch**: Boot against live Pinecone self-embedding and again with an external embedder, ingest the same layer in each, and assert the same rank-one artifact while the log records the route.
+
+### SCALE: Scale, load, and rich catalog
+
+#### G-SCALE-1: Large catalog of hundreds of artifacts ingested then walked through paginated load_domain
+- **Severity**: P1. **Lane**: PR or Nightly; needs a standard server, no external network for a generated registry. **Status**: open (partial). **Realism**: common. **Nearest test**: test/e2e/domain_modeling_test.go:TestDomains_TargetResponseTokensTightensSubtree.
+- **Current**: domain_modeling_test.go and discovery_search_test.go exercise target_response_tokens, folding, and notable caps on small hand-built domain trees and ingest_convergence_test.go ingests through the real pipeline, but no test ingests several hundred artifacts across a deep domain tree then walks it.
+- **Target**: Generate a registry of 400-plus artifacts across at least 12 domains and 30 subdomains with varied DOMAIN.md knobs, boot a standard server, and assert root load_domain returns a bounded subtree within the token budget, nested load_domain applies folding and notable caps, and search_artifacts paginates deterministically across pages.
+- **Sketch**: Generate a 400-plus-artifact registry with varied DOMAIN.md knobs, boot a standard server, and assert root load_domain stays within the token budget, nested load_domain folds and caps, and search_artifacts paginates with stable ranking.
+
+#### G-SCALE-2: Large-catalog re-sync after dozens of removals cleans stale outputs and reconciles config-merge at scale
+- **Severity**: P1. **Lane**: PR or Nightly; CLI sync over a generated filesystem registry, no external infra. **Status**: open (partial). **Realism**: common. **Nearest test**: pkg/sync/cleanup_test.go:TestRun_OrphanedConfigMergeReconciledNotDeleted.
+- **Current**: pkg/sync/cleanup_test.go asserts dropped standalone artifacts are deleted and orphaned config-merge files are reconciled at unit scale, and filesystem_sync_test.go checks one stale artifact on a second sync, but no test drops dozens of artifacts spanning standalone files, hooks, and mcp-server entries from a large catalog and re-syncs.
+- **Target**: Materialize a several-hundred-artifact catalog for claude-code, drop 40-plus artifacts spanning standalone files, hooks, and mcp-server entries, re-sync, and assert removed standalone files and emptied parent directories are cleaned, config-merge files retain operator-authored and surviving Podium entries, and a second re-sync is idempotent with the lock reflecting the current set.
+- **Sketch**: Materialize a several-hundred-artifact catalog, drop 40-plus standalone, hook, and mcp-server artifacts, re-sync and assert stale files and emptied parents are cleaned while config-merge files keep operator and surviving Podium entries, then re-run for idempotence.
+
+#### G-SCALE-3: Concurrent consumers sync overlapping catalog slices to distinct targets with byte-identical shared output
+- **Severity**: P2. **Lane**: PR; needs a booted server plus concurrent CLI syncs under -race, no external infra. **Status**: open (partial). **Realism**: occasional. **Nearest test**: test/integration/sync_concurrent_target_test.go:TestSyncConcurrent_DistinctTargets.
+- **Current**: sync_concurrent_target_test.go runs 8 writers for 200 rounds each to distinct targets under -race and asserts zero errors, each target complete, and no stray .tmp siblings, but each writer emits its own content token so overlapping --include slices and byte-identical shared-artifact output across targets are not asserted.
+- **Target**: Boot a server, run concurrent syncs to distinct targets with overlapping --include filters, and additionally assert byte-identical materialized output across targets for the shared artifacts with no stray .tmp siblings.
+- **Sketch**: Boot a server, run concurrent syncs to distinct targets with overlapping --include filters, then diff the shared artifacts across targets and assert byte-identical output and no stray .tmp siblings.
+
+#### G-SCALE-4: Audit sampling and retention purging under high event volume with signature integrity
+- **Severity**: P2. **Lane**: Nightly; needs a standalone server with sample rates and short retention, no external infra. **Status**: open (missing). **Realism**: occasional. **Nearest test**: internal/serverboot/audit_sampling_config_test.go:TestParseAuditSampleRates.
+- **Current**: audit_sampling_config_test.go parses PODIUM_AUDIT_SAMPLE_RATES and verifies retention defaults and audit_volume_enforce_test.go covers the reingest audit-volume gate, but no test drives high-frequency events and asserts the recorded count approximates the configured sampling fraction, that critical events are always recorded, or that retention purges aged events while signing stays intact.
+- **Target**: Boot a server with PODIUM_AUDIT_SAMPLE_RATES on domain.loaded and search_domains plus short retention, drive a high volume of those events, assert the recorded fraction is within tolerance while ingest and admin-grant events are never sampled out, assert the retention sweep purges aged events with signatures still verifying, and assert PODIUM_QUOTA_AUDIT_VOLUME_PER_DAY caps total writes.
+- **Sketch**: Boot with sample rates on high-frequency events and short retention, drive a high volume, assert the recorded fraction is within tolerance with ingest and admin grants always recorded, then assert the retention sweep purges aged events with verification intact and the per-day volume quota caps writes.
+
+### LIFECYCLE: Artifact and deployment lifecycle
+
+#### G-LIFECYCLE-1: Extends parent-pin stability and reingest-driven re-resolution end to end
+- **Severity**: P1. **Lane**: PR; needs a standalone server able to publish a second parent version post-boot (F-7.3.4 reingest), no external infra. **Status**: open (partial). **Realism**: common. **Nearest test**: test/e2e/artifact_extends_test.go:TestExtends_PinReingestPicksNewerParent.
+- **Current**: TestExtends_PinNoSilentPropagation and TestExtends_PinReingestPicksNewerParent are skipped because the standalone harness cannot build a multi-version parent layer, and pin storage at ingest is covered only in pkg/registry/ingest, so the journey where a newer parent ships, the child still resolves the old pin, and a child reingest re-resolves is not exercised end to end. Three gap-checked scenarios across MULTILAYER and LIFECYCLE collapse here.
+- **Target**: Ingest a parent at 1.2.0 and a child pinning the major range, publish parent 1.3.0 without reingesting the child and assert the child's merged manifest still reflects 1.2.0 with inherited when_to_use and most-restrictive sensitivity, then reingest the child and assert it merges 1.3.0 with the recorded pin advanced.
+- **Sketch**: Ingest parent 1.2.0 and a child pinning 1.x, publish parent 1.3.0 and assert the child still merges 1.2.0, reingest the child and assert it merges 1.3.0 with the pin advanced.
+
+#### G-LIFECYCLE-2: Deprecation with replaced_by excludes from search while load surfaces the upgrade target
+- **Severity**: P1. **Lane**: PR; needs a standalone server with post-boot reingest, no external infra. **Status**: open (partial). **Realism**: common. **Nearest test**: pkg/registry/core/latest_skips_deprecated_test.go:TestLoadArtifact_LatestSkipsDeprecatedVersion.
+- **Current**: core lifecycle tests cover latest-skips-deprecated and search exclusion, and artifact_response_test.go asserts a deprecation warning on load, but frontmatter_schema_test.go T-D-frontmatter-60 records that replaced_by does not round-trip into the load warning, so the upgrade target is unit-only and not asserted in the e2e load response.
+- **Target**: Ingest two versions of one id, reingest the older as deprecated with replaced_by, assert search_artifacts omits it, assert a bare load resolves to the newer version, and assert an explicit load of the older version returns a warning that names the replaced_by upgrade target.
+- **Sketch**: Reingest the older of two versions as deprecated with replaced_by, assert search omits it, bare load resolves to the newer version, and explicit load of the older version warns with the replaced_by target named.
+
+#### G-LIFECYCLE-3: Store retention purges deprecated object bytes while protecting extends-pinned parents
+- **Severity**: P1. **Lane**: PR or Release; needs an object store (filesystem or S3) plus a backdating hook, no external network for filesystem. **Status**: open (partial). **Realism**: occasional. **Nearest test**: internal/serverboot/store_retention_test.go:TestRunStoreRetentionOnce_PurgesExpiredRecords.
+- **Current**: store_retention_test.go backdates a deprecated version and asserts its manifest record is purged while a live version survives, but no test asserts the associated object-store resource bytes are reclaimed or that a version still pinned as an extends parent is protected from purge.
+- **Target**: Ingest a deprecated version with a bundled resource plus a non-deprecated successor and a child that pins the deprecated version via extends, backdate the deprecation past PODIUM_DEPRECATED_RETENTION_DAYS, run retention, and assert the deprecated record and its object bytes are gone while the successor and the pinned parent remain.
+- **Sketch**: Backdate a deprecated version with a bundled resource past the window, run retention, and assert the record and object bytes are reclaimed while a successor and an extends-pinned parent survive.
+
+#### G-LIFECYCLE-4: In-place legacy SQLite schema upgrade preserves artifacts and audit history idempotently
+- **Severity**: P1. **Lane**: PR; needs a seeded legacy-schema SQLite file, no external infra. **Status**: open (partial). **Realism**: occasional. **Nearest test**: test/e2e/schema_forward_migration_test.go:TestForwardMigration_MigrateToStandardReadsLegacySQLite.
+- **Current**: schema_forward_migration_test.go reads a legacy SQLite source into a fresh standard target and asserts the migrated artifact and content hash become readable, but the in-place upgrade-and-boot-against-the-same-database, audit-history preservation, and migrate idempotency are not asserted.
+- **Target**: Seed a legacy-schema SQLite database with ingested artifacts and audit rows, run the in-place admin migrate, boot the server against the upgraded file, assert artifacts resolve with original content hashes and audit history is intact, and assert a second migrate reports a no-op.
+- **Sketch**: Run in-place migrate on a legacy SQLite database with seeded artifacts and audit rows, boot against the upgraded file, assert artifacts and audit history survive, then re-run migrate and assert idempotence.
+
+#### G-LIFECYCLE-5: Migration chain from filesystem to standalone to standard preserves content hashes and bundled bytes
+- **Severity**: P1. **Lane**: PR; needs Postgres and S3 for the final hop (PODIUM_POSTGRES_DSN, PODIUM_S3_*). **Status**: open (partial). **Realism**: occasional. **Nearest test**: cmd/podium/admin_migrate_test.go:TestAdminMigrateToStandard_PumpsMetadataAndObjects.
+- **Current**: admin_migrate_test.go and schema_forward_migration_test.go exercise the standalone-SQLite-to-standard migration, and standard_stack_parity_test.go proves author-to-consumer byte parity, but parity stages only inline-sized resources and no single test chains filesystem sync to standalone to standard asserting byte identity at each stage.
+- **Target**: Author a layer with an above-cutoff bundled resource, sync it on the filesystem, boot a standalone server over the same source and ingest, migrate into standard Postgres plus S3, and assert load_artifact returns the same content hash and resource bytes and search returns the same top result across all three modes.
+- **Sketch**: Carry one bundled-resource catalog through filesystem sync, standalone ingest, and standard migration, and assert identical content hash, resource bytes, and top search result at each stage.
+
+#### G-LIFECYCLE-6: Force-push history rewrite tolerated via PriorRef through the reingest endpoint
+- **Severity**: P2. **Lane**: PR; needs a server and a seeded file:// git repo, no external network. **Status**: open (partial). **Realism**: occasional. **Nearest test**: pkg/layer/source/git_test.go:TestGit_SnapshotForcePushDetected.
+- **Current**: git_test.go drives a real force-push and asserts Snapshot reports HistoryRewritten, and TestServerOps_ForcePushPolicyStrict and ForcePushDefaultTolerant cover force_push_policy persistence, but no test combines a force-push of a registered layer's repo with a reingest through the endpoint.
+- **Target**: Register a git layer and ingest at commit A, hard-reset and commit C so A's history is rewritten, reingest through the endpoint, and assert the second reingest succeeds, records the new ref against the existing layer via PriorRef tolerance, serves the rewritten content, and emits the history_rewritten signal.
+- **Sketch**: Register a git layer, ingest at A, force-push to a rewritten head, reingest, and assert the stored ref advances, load_artifact returns post-rewrite content, and the history_rewritten signal records the prior and new refs.
+
+### CONFIG: Deployment and configuration permutations
+
+#### G-CONFIG-1: Probe-driven read-only flip on primary outage refuses writes, serves reads, and recovers
+- **Severity**: P1. **Lane**: Nightly or Release; needs a Postgres primary plus replica topology that can be severed on demand. **Status**: open (missing). **Realism**: occasional. **Nearest test**: test/e2e/server_operations_test.go:TestServerOps_ReadOnlyAutoExit.
+- **Current**: Every probe-driven read-only case in server_operations_test.go (ReadOnlyWriteEndpoints, ReadOnlyAutoExit, ReadOnlyAuditEvents, ReadOnlyProbeTuning, ReadyzInReadOnlyMode) is t.Skip because a standalone SQLite store cannot be failed after boot, and http_api_test.go forces the mode with mode.Set, so probe tuning is observable only through config show and the flip itself is not inducible. Six gap-checked scenarios across CONFIG and STACK collapse onto this single inducement gap.
+- **Target**: Boot a Postgres-backed server with low PODIUM_READONLY_PROBE_FAILURES and PODIUM_READONLY_PROBE_INTERVAL, sever the primary until the probe trips, assert /readyz reports read_only while load and search keep serving and ingest returns registry.read_only, then restore the primary and assert writes resume and the read_only_entered and read_only_exited audit events are recorded.
+- **Sketch**: Against a severable Postgres primary or replica deployment, set probe thresholds low, drive concurrent reads and an ingest, sever the primary, assert the read-only flip with reads serving and ingest refused, restore the primary, and assert writes resume with matching audit events.
+
+#### G-CONFIG-2: Zero-flag standalone bootstrap selects SQLite, filesystem, Ollama, and loopback defaults
+- **Severity**: P1. **Lane**: PR; needs an empty HOME temp dir and a stub Ollama endpoint, no external infra. **Status**: open (missing). **Realism**: common. **Nearest test**: test/e2e/deployment_modes_test.go:TestDeployment_ZeroFlagAutoBootstrap.
+- **Current**: TestDeployment_ZeroFlagAutoBootstrap is skipped pending F-13.10.1 because zero-flag detection emits no banner and creates no ~/.podium/registry.yaml, and TestDeployment_StandaloneExplicit covers only the explicit --standalone --layer-path form, so the empty-environment defaults of sqlite metadata, filesystem objects, ollama embeddings, sqlite-vec, and bind 127.0.0.1:8080 are unverified.
+- **Target**: Run podium serve with HOME pointed at a temp dir and all PODIUM_* unset, assert the startup log records the standalone defaults and bind 127.0.0.1:8080, ingest a filesystem layer, and assert search_artifacts ranks the expected artifact first against a stub Ollama embedder.
+- **Sketch**: With an empty environment and temp HOME, boot podium serve, assert the standalone default backend log lines and loopback bind, ingest a filesystem layer, and run search_artifacts against a stub Ollama endpoint.
+
+#### G-CONFIG-3: Full config precedence chain resolves CLI flag over env over registry.yaml over default through config show
+- **Severity**: P1. **Lane**: PR; CLI plus config show, no external infra. **Status**: open (partial). **Realism**: occasional. **Nearest test**: test/e2e/registry_config_keys_test.go:TestRegistryConfig_BindEnvBeatsConfigFile.
+- **Current**: TestRegistryConfig_BindEnvBeatsConfigFile, TestStandaloneServer_ConfigShowLayersPathSource, and TestRegistryConfig_BindFromConfigFileWhenEnvUnset cover adjacent precedence pairs, and serve_flags_test.go unit-tests the flag-to-env mapping, but no single test resolves a CLI flag winning over an env var for the same field observed through config show.
+- **Target**: In one run set registry.yaml store to sqlite, PODIUM_REGISTRY_STORE to postgres, and a CLI --bind override, then assert config show resolves the store to postgres from the environment, the bind to the CLI value, and a yaml-only field to its yaml value with each reported source.
+- **Sketch**: Run podium config show with a registry.yaml value, an overriding env var, and an overriding CLI flag for distinct fields, and assert each field resolves to its winning layer value and source.
+
+#### G-CONFIG-4: Standard-mode first run fails fast and names the missing backend credential
+- **Severity**: P1. **Lane**: PR; CLI serve under PODIUM_NO_AUTOSTANDALONE, no external infra. **Status**: open (partial). **Realism**: common. **Nearest test**: internal/serverboot/backend_config_test.go:TestValidate_MissingBackendValues.
+- **Current**: TestValidate_MissingBackendValues unit-tests that validate names each missing variable per selected backend (PODIUM_S3_BUCKET, PODIUM_PINECONE_API_KEY, OPENAI_API_KEY, and others), and ambient_env_guard_test.go drives the no-autostandalone refusal for a bare serve, but no e2e boots a real podium serve with a backend explicitly selected and a required credential absent to assert the process exits non-zero with the missing-configuration message naming the variable.
+- **Target**: Run podium serve with PODIUM_REGISTRY_STORE=postgres and no PODIUM_POSTGRES_DSN, and separately with PODIUM_OBJECT_STORE=s3 and no PODIUM_S3_BUCKET, and assert each run exits non-zero before binding with a startup error that names the specific missing variable.
+- **Sketch**: Boot podium serve with a backend selected and its required env var unset, and assert a non-zero exit before bind with the missing-configuration error naming the absent variable.
+
+### AUTH: Multi-tenant isolation, visibility, and audit
+
+#### G-AUTH-10: Audit transparency-log signing, anchoring, verification, and PII redaction in one journey
+- **Severity**: P1. **Lane**: Nightly; needs a standalone server plus an Ed25519 key file, no external infra. **Status**: open (partial). **Realism**: occasional. **Nearest test**: test/integration/audit_retention_reanchor_test.go:TestAuditRetention_ReanchorsNewHeadAfterDrop.
+- **Current**: PII redaction is unit-tested in pkg/audit/redact_config_test.go and anchoring plus chain verification are integration-tested in audit_retention_reanchor_test.go, but PODIUM_AUDIT_SIGNING_KEY_PATH is read only by serverboot and is never set in any test, so no single journey combines key-path signing, anchor and verify intervals, redaction of a freeform query, and tamper detection.
+- **Target**: Boot the server with PODIUM_AUDIT_SIGNING_KEY_PATH, PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS, PODIUM_AUDIT_VERIFY_INTERVAL_SECONDS, and PODIUM_PII_REDACTION enabled, issue a search_artifacts call carrying PII in the freeform query, then assert exported audit entries are Ed25519-signed and chain-verifiable, the recorded event redacts the PII, and a manually tampered entry fails verification.
+- **Sketch**: Boot with a signing key path and short anchor and verify intervals, run a search_artifacts query containing an email, export the audit log, assert entries are signed and chain-verifiable and the query is redacted, then mutate one entry and assert verification fails.
+
+#### G-AUTH-11: Cross-tenant search and quota non-interference over shared Postgres
+- **Severity**: P1. **Lane**: PR; needs live Postgres (PODIUM_POSTGRES_DSN). **Status**: open (partial). **Realism**: common. **Nearest test**: test/integration/auth_org_isolation_test.go:TestAuthOrgIsolation_OrgScopedReadsAreIsolated.
+- **Current**: TestAuthOrgIsolation_OrgScopedReadsAreIsolated proves load_artifact, shared-id content_hash, and search isolation for two orgs over a shared Postgres, and TestHTTPAPI_SearchQPSQuota throttles a single tenant, but no test drives one org over PODIUM_QUOTA_SEARCH_QPS while a second org stays served, and dependency edges, scope-preview counts, quota buckets, audit events, and object blobs are not asserted cross-org. This refines existing gap G-AUTH-7 by adding cross-tenant quota and resource-class isolation rather than re-listing org-scoped reads.
+- **Target**: Extend the org-isolation test to drive acme above PODIUM_QUOTA_SEARCH_QPS while globex issues in-budget searches, assert acme is throttled with quota.search_qps_exceeded while globex stays served, and assert acme receives org-scoped results or 404 on globex dependency edges, scope-preview counts, audit events, and object blobs.
+- **Sketch**: Boot a shared-Postgres multi-tenant server with a low search QPS quota, exceed it with an acme token while globex searches in budget, and assert acme throttles while globex serves and dependency edges, scope preview, audit, and object reads exclude the other org.
+
+#### G-AUTH-12: Per-caller visibility filters search across a group-restricted layer and a public layer
+- **Severity**: P1. **Lane**: PR; needs a standalone server with injected-session-token JWTs, no external infra. **Status**: open (partial). **Realism**: common. **Nearest test**: test/integration/runtime_layer_visibility_test.go:TestRuntimeLayerVisibility_FullServerReadPath.
+- **Current**: TestRuntimeLayerVisibility asserts search_artifacts returns the admin layer plus the caller's own user-defined layer, and server_operations_test.go asserts group visibility only on load_artifact, so no test issues one broad search across a group-restricted layer and a public layer and asserts the group filter applies to the search result set.
+- **Target**: Boot a server with a groups:finance layer and a public layer both holding query-matching artifacts, mint injected-session-token JWTs with and without the finance group, and assert the two search_artifacts result sets differ by exactly the finance-layer matches while a finance member sees them.
+- **Sketch**: Mint finance-group and non-member JWTs, run the identical broad search_artifacts query for each, and assert the result sets differ by exactly the finance-layer matches.
+
+#### G-AUTH-13: Token-bound object route refuses a blob after the caller loses layer visibility
+- **Severity**: P1. **Lane**: PR; needs a server with a non-public layer and per-caller tokens (per-identity visibility, blocked by all-public filesystem bootstrap). **Status**: open (partial). **Realism**: occasional. **Nearest test**: test/integration/data_plane_test.go:TestDataPlane_IngestToLoadArtifactRoundTrip.
+- **Current**: TestDataPlane_IngestToLoadArtifactRoundTrip and TestHTTPAPI_ObjectsServesBytes assert the happy-path /objects/{content_hash} fetch of an above-cutoff resource with byte length and X-Content-Hash, but http_api_test.go records that the revocation re-check needs non-public layer visibility the all-public filesystem bootstrap cannot model, so no test asserts the route re-evaluates authorization and returns 403 once the caller can no longer see the owning layer.
+- **Target**: Boot a server with an above-cutoff resource in a group-restricted layer, fetch the token-bound /objects route as a member and assert 200 with matching bytes, then remove the caller from the group and assert the same presigned object URL returns 403 while a still-authorized caller keeps fetching.
+- **Sketch**: Ingest an above-cutoff resource into a restricted layer, fetch its /objects URL as an authorized caller and assert 200, revoke the caller's group membership, and assert the same fetch returns 403 while a still-authorized caller succeeds.
+
+### STACK: Managed-stack data plane
+
+#### G-STACK-3: Large bundled resource delivered via live S3 presigned URL with 403 refresh and filesystem-route contrast
+- **Severity**: P1. **Lane**: PR or Release; needs S3 (PODIUM_S3_*) for the presigned path and a filesystem deployment for the /objects route. **Status**: open (partial). **Realism**: occasional. **Nearest test**: test/e2e/standard_stack_parity_test.go:TestStandardStackParity_AuthorToConsumer.
+- **Current**: TestStandardStackParity_AuthorToConsumer asserts an above-cutoff resource loads under large_resources with a non-empty presigned_url and matching size, the 403 refresh is unit-tested at the MCP layer, and data_plane_test.go asserts presigned streaming, but no end-to-end test fetches the presigned URL through the real S3 data plane, triggers a 403-driven refresh there, or contrasts an S3 presigned URL against a filesystem token-bound /objects/{content_hash} route. Several large-resource scenarios merge here.
+- **Target**: Load the same above-cutoff resource through an S3-backed standard server and a filesystem-backed standalone server, fetch the S3 presigned URL successfully, assert an expired URL returning 403 triggers a refresh that yields a working URL, and assert the filesystem deployment delivers via a token-bound /objects route while sub-cutoff resources stay inline on both.
+- **Sketch**: Load an above-cutoff resource on S3-backed and filesystem-backed deployments, fetch the S3 presigned URL, assert a stale 403 triggers refresh, and assert the filesystem deployment uses a token-bound /objects route with inline below the cutoff.
+
+### DOC: Description quality
+
+#### G-DOC-8: Description-quality lint flags a vague manifest end to end while ingest accepts both
+- **Severity**: P2. **Lane**: PR; CLI lint plus a standalone server, no external infra. **Status**: open (partial). **Realism**: common. **Nearest test**: pkg/lint/description_rules_test.go:TestThinDescription_FlagsSingleWordAndShort.
+- **Current**: pkg/lint unit tests assert lint.thin_description fires on single-word and short descriptions and not on a three-word description, and the rule appears in server_operations_test.go, but no e2e drives podium lint over a registry containing a vague, a precise, and a borderline artifact then confirms ingest still succeeds for all three despite the advisory.
+- **Target**: Run the real podium CLI lint over a filesystem registry with a vague, a precise, and a borderline-acceptable artifact, assert the advisory fires only on the vague one with no false positive on the borderline one, then ingest all three into the standalone server and assert success.
+- **Sketch**: Run podium lint over a registry with vague, precise, and borderline descriptions, assert the advisory fires only on the vague one, then ingest all three and assert success.
+
+### OPS: Operational notifications
+
+#### G-OPS-1: Layer-event notification is delivered to a configured webhook receiver with an HMAC signature
+- **Severity**: P2. **Lane**: PR; needs a standalone server plus an in-test webhook receiver, no external infra. **Status**: open (partial). **Realism**: occasional. **Nearest test**: pkg/notification/notification_test.go:TestWebhook_PostsJSONWithHMAC.
+- **Current**: pkg/notification/notification_test.go asserts the webhook provider POSTs JSON with an HMAC and that the multi provider fans out, and serverboot openNotifier selects the provider from PODIUM_NOTIFICATION_PROVIDER, but no test boots a server with PODIUM_NOTIFICATION_PROVIDER=webhook pointed at an in-test receiver and asserts a registry-side event produces a delivered, signature-valid notification through the wired path.
+- **Target**: Boot a standalone server with PODIUM_NOTIFICATION_PROVIDER=webhook and PODIUM_NOTIFICATION_WEBHOOK_URL pointed at an in-test recorder plus a secret, drive a registry event that fires the notifier, and assert the recorder receives one POST whose HMAC verifies against the secret and whose body carries the event title and severity.
+- **Sketch**: Boot a server with a webhook notifier pointed at an in-test recorder, trigger a registry event, and assert one delivered POST with a verifying HMAC and the expected title and severity.
+
+## Test-harness evolution and harness-blocked journeys
+
+The test harness cannot express several worthy journeys today, so they are skipped. The journeys are valuable; the limitation is in the test infrastructure. The standalone e2e harness boots every layer public and resolves every caller to `system:public`, a standalone SQLite store cannot be made to fail after boot, the boot path ingests each layer once from a static fixture, and the filesystem bootstrap attaches no signatures. These are test-infrastructure limits. The harness must evolve to remove them. The journeys they block are recorded as gaps below and cross-referenced to the currently-skipped tests so none is dropped.
+
+The capability to lift mostly exists already. `test/integration/injected_session_token_test.go` boots a server with the injected-session-token verifier and mints JWTs carrying groups and scopes; `test/integration/runtime_layer_visibility_test.go` constructs `server.New(core.New(st, "default", bootLayers), ...)` with layers of chosen visibility and issues requests as distinct callers; the managed-stack parity work added `injKeyPair`, `injGet`, `msStartStandardServer`, and `msPublishGitLayer`. The work is to package these into reusable primitives. The visibility and fault-injection journeys are cheapest and highest-fidelity in-process, where a test constructs `core.New` with chosen layers and can wrap the store; the subprocess CLI path needs more invasive seams and should be reserved for journeys that exercise the CLI and real backends.
+
+### Enabling test-infrastructure primitives
+
+#### G-INFRA-5: Authenticated, visibility-capable server harness
+- **Severity**: P0. **Lane**: PR; in-process needs no external infra. **Status**: open (missing). **Realism**: enabling.
+- **Current**: e2e boots `serve --standalone` (`helpers_test.go:308`), which wires no identity provider and materializes every layer public, so any per-caller or per-layer-visibility assertion is inexpressible. The capability exists only inside `test/integration` (`istServer`/`istVerifier`, `runtime_layer_visibility_test.go`) and the parity injected-token helpers.
+- **Target**: a shared helper that boots a server with injected-session-token (or a stub verifier), accepts a declarative layer set with explicit visibility (public, org, `groups:<g>`, private), and mints a caller token for a given identity, org, and group set. Convert the skipped visibility, hidden-parent, group-filter, and admin-RBAC tests onto it.
+- **Unblocks**: `artifact_extends_test.go:292,299,910`, `artifact_response_test.go:322,751`, `core_concepts_test.go:216,221,659`, `http_api_test.go:571,650,1419,1424`, `cli_reference_test.go:1558,1563,1568,1856,1861`, `standard_deployment_test.go:214,562,567,584`, `governance_adoption_test.go:354-429,962`, `sdk_clients_test.go:388,696`, `plugin_spi_test.go:859`, `server_operations_test.go:504,1233,1240`, `http_api_test.go:1065`, `plugin_spi_test.go:1127,1159` (the standalone fixture does not wire the orchestrator and audit sink to emit ingest events). Feeds G-AUTH-12, G-AUTH-14, G-AUTH-16, G-MULTILAYER-2, G-MULTILAYER-3.
+
+#### G-INFRA-6: Fault-injectable store for an induced read-only flip
+- **Severity**: P1. **Lane**: PR; in-process, no external infra. **Status**: open (missing). **Realism**: enabling.
+- **Current**: the read-only flip is driven by `ReadOnlyProbe.Run` calling `Store.GetTenant` (`readonly_probe.go:43`); a standalone SQLite store never errors, so the e2e tests skip or force the mode with `mode.Set`, which bypasses the probe, the audit events, and the recovery path.
+- **Target**: a `store.Store` decorator whose health call returns an error while a flag is set, wired into an in-process server so the real probe trips, serves reads, refuses writes with `registry.read_only`, emits `read_only_entered` and `read_only_exited`, and recovers when the flag clears. A severable-Postgres lane can follow for higher fidelity.
+- **Unblocks**: `server_operations_test.go:165,172,179,186,193,909`, `artifact_response_test.go:721`, `deployment_modes_test.go:631`. Closes the inducement half of G-CONFIG-1.
+
+#### G-INFRA-7: Runtime layer republish and multi-version fixtures
+- **Severity**: P1. **Lane**: PR; no external infra. **Status**: open (partial). **Realism**: enabling.
+- **Current**: the standalone harness ingests each layer once at boot from a static fixture, so publishing a second version of a parent or a deprecated successor post-boot is unbuildable. The parity work added `msPublishGitLayer` (git-source register plus reingest at runtime), which is the missing primitive in narrow form.
+- **Target**: generalize runtime publish into "publish version N of a layer," so pin-stability, deprecation, version-selection, and session-snapshot journeys can stage multiple versions.
+- **Unblocks**: `artifact_extends_test.go:123,159,166`, `discovery_search_test.go:516,522,1004`, `deployment_modes_test.go:351`. Feeds G-LIFECYCLE-1, G-LIFECYCLE-2, G-JOURNEY-3.
+
+#### G-INFRA-8: Signed-artifact ingest and tamper fixture
+- **Severity**: P1. **Lane**: PR; offline keypair, no external infra. **Status**: open (missing). **Realism**: enabling.
+- **Current**: the filesystem bootstrap attaches no signatures, so signed-artifact verification and signed-then-tampered detection are inexpressible end to end and skip across `server_operations`, `governance_adoption`, and `plugin_spi`.
+- **Target**: a fixture that ingests an artifact with a valid signature envelope from an offline key, plus a hook to tamper the stored bytes, so the verifier path can be asserted: a valid signature loads, a tampered blob is refused.
+- **Unblocks**: `server_operations_test.go:490,497,1199`, `governance_adoption_test.go:730,953,971`, `plugin_spi_test.go:1165`. Feeds G-AUTH-15.
+
+#### G-INFRA-9: Notification delivery sink and override seam
+- **Severity**: P2. **Lane**: PR; in-process recorder, no external infra. **Status**: open (missing). **Realism**: enabling.
+- **Current**: outbound webhook and email delivery is not wired to the standalone HTTP surface and the MaxFailures auto-disable override is not exposed to the harness, so delivery, filtering, and auto-disable skip. SSE change-stream subscription also lacks a bounded streaming test client.
+- **Target**: an in-test notification recorder, harness control over the provider config and MaxFailures, and a bounded SSE client, so a registry event produces a delivered signature-valid notification and the auto-disable, filter, and subscription paths can be driven.
+- **Unblocks**: `plugin_spi_test.go:645,650,655,1170,1325`, `sdk_clients_test.go:394,531`. Feeds G-OPS-1, G-OPS-2.
+
+Other harness-blocked skips map to journey gaps already recorded: large-resource externalization and presign at standalone boot (`cli_reference_test.go:2030`, `deployment_modes_test.go:735`) map to G-STACK-3; the simultaneous standalone-and-standard migration drill (`readme_claims_test.go:1047`) maps to G-LIFECYCLE-5; CLI reembed against a wired backend (`cli_reference_test.go:1573`) maps to G-VEC-10.
+
+### Harness-blocked journeys to capture
+
+#### G-AUTH-14: Admin RBAC through the CLI against an authenticated server
+- **Severity**: P1. **Lane**: PR (needs G-INFRA-5). **Status**: open (missing). **Realism**: common. **Nearest test**: `test/e2e/cli_reference_test.go:1558` (skipped).
+- **Current**: admin grant, revoke, show-effective, and the admin-versus-user layer distinction are exercised only against standalone, which resolves callers to `system:public` and rejects admin operations with 403, so `cli_reference_test.go:1558,1563,1568,1856,1861`, `standard_deployment_test.go:214,562,567,584`, `http_api_test.go:650,1419,1424`, and `readme_claims_test.go:892,897` skip. The grant table is covered only at the integration and core level.
+- **Target**: boot the authenticated harness with a seeded bootstrap admin, run `podium admin grant`, `revoke`, and `show-effective` and an admin-defined layer registration as the admin token, assert the grants apply and that a non-admin token is refused with 403.
+- **Sketch**: as a bootstrap-admin token grant a role through the CLI, assert show-effective reflects it, revoke it, and assert a non-admin caller is refused.
+
+#### G-AUTH-15: Signed artifact verifies on load and a tampered blob is refused
+- **Severity**: P1. **Lane**: PR (needs G-INFRA-8). **Status**: open (missing). **Realism**: occasional. **Nearest test**: `test/e2e/server_operations_test.go:490` (skipped).
+- **Current**: the filesystem bootstrap attaches no signatures, so verification and tamper-detection skip at `server_operations_test.go:490,497,1199`, `governance_adoption_test.go:730,953,971`, and `plugin_spi_test.go:1165`. Signing and verification are unit-tested in `pkg/sign`.
+- **Target**: ingest a validly-signed artifact, assert load verifies the signature, tamper the stored bytes, and assert the default-on verifier blocks the load with the signature error while an untampered artifact still loads.
+- **Sketch**: ingest a signed artifact, load and assert verification passes, tamper the stored blob, and assert the load is refused.
+
+#### G-AUTH-16: visibility.denied returned to an unauthorized caller on search, load, and objects
+- **Severity**: P1. **Lane**: PR (needs G-INFRA-5). **Status**: open (missing). **Realism**: common. **Nearest test**: `test/e2e/http_api_test.go:571` (skipped).
+- **Current**: standalone serves all layers public, so the visibility-denied path on `search_artifacts`, `load_artifact`, and `/objects` cannot be triggered, and `artifact_response_test.go:322,751`, `http_api_test.go:571`, `sdk_clients_test.go:388,696`, `server_operations_test.go:504`, and `plugin_spi_test.go:859` skip.
+- **Target**: place an artifact in a restricted layer, query as a caller who cannot see it, and assert search omits it while `load_artifact` and the object route return `visibility.denied`, with an authorized caller succeeding on all three.
+- **Sketch**: query a restricted artifact as an unauthorized caller, assert search omission plus `visibility.denied` on load and objects, and assert an authorized caller succeeds.
+
+#### G-OPS-2: Outbound webhook delivery applies the event filter and auto-disables after repeated failures
+- **Severity**: P2. **Lane**: PR (needs G-INFRA-9). **Status**: open (missing). **Realism**: occasional. **Nearest test**: `test/e2e/plugin_spi_test.go:650` (skipped).
+- **Current**: outbound delivery is not wired to the standalone surface and the MaxFailures override is not exposed, so the delivery filter and auto-disable skip at `plugin_spi_test.go:645,650,655`.
+- **Target**: configure an event filter and a low MaxFailures against a failing in-test receiver, fire matching and non-matching events, and assert only matching events attempt delivery and the provider auto-disables after the failure threshold.
+- **Sketch**: configure a filtered webhook with a low failure cap against a failing receiver, fire events, and assert filtered delivery and auto-disable.
+
+#### G-JOURNEY-3: Session snapshot stays consistent across a mid-session republish
+- **Severity**: P1. **Lane**: PR (needs G-INFRA-7). **Status**: open (missing). **Realism**: occasional. **Nearest test**: `test/e2e/discovery_search_test.go:1004` (skipped).
+- **Current**: a new version cannot be ingested into a running standalone server mid-test and the MCP bridge does not forward `session_id`, so session-snapshot consistency is inexpressible and `discovery_search_test.go:998,1004` and `deployment_modes_test.go:351` skip.
+- **Target**: open a session, load an artifact, republish a newer version, and assert the same session keeps serving the pinned snapshot while a new session sees the new version. Forwarding `session_id` through the bridge is a product prerequisite.
+- **Sketch**: load within a session, republish a newer version, and assert the session snapshot is stable while a fresh session sees the update.
+
+#### G-LIFECYCLE-7: Expand-contract rolling upgrade across two binaries over one Postgres
+- **Severity**: P2. **Lane**: Nightly or Release; needs Postgres and two built binaries. **Status**: open (missing). **Realism**: occasional. **Nearest test**: `test/e2e/server_operations_test.go:1247` (skipped).
+- **Current**: an expand-contract rolling upgrade requires two binary versions sharing a Postgres database, which is not available in e2e, so `server_operations_test.go:1247,1254` skip. In-place single-binary SQLite upgrade is G-LIFECYCLE-4.
+- **Target**: run an old and a new binary against one Postgres through an expand-contract migration, and assert both serve reads and writes during the overlap, the additive migration applies without downtime, and the finalize step runs cleanly.
+- **Sketch**: run two binary versions over one Postgres through expand-contract, asserting both serve during the overlap and finalize is clean.
+
+### Skips blocked on unbuilt product features
+
+These skips name an unbuilt feature, so the test cannot pass until the feature ships. They belong in BUILD-GAPS, and several record that no BUILD-GAPS finding is filed.
+
+- MCP-bridge mcp-server result filtering (spec §5): `artifact_types_test.go:551`, `core_concepts_test.go:479`, `discovery_search_test.go:480,486`, `deployment_modes_test.go:721` (no finding filed).
+- Server-source sync HTTP path (F-2.2.2): `core_concepts_test.go:152,593,598`, `deployment_modes_test.go:257,665`.
+- Server-source sync omits the SKILL.md secondary file, breaking the §2.2 bit-identical claim: `standalone_server_test.go:763`.
+- `sandbox_profile` enforcement not wired: `governance_adoption_test.go:907`.
+- Bundled-resource (file) merge across `extends` is unimplemented; `core.mergeChain` serves the child's resources only, so a parent-only bundled file is never composed into the child (§4.4/§4.6): `artifact_extends_test.go:308,315,322,329`.
+- Zero-flag bootstrap banner, `--strict`, and `PODIUM_NO_AUTOSTANDALONE` (F-13.10.1): `deployment_modes_test.go:90,604,609`. Feeds G-CONFIG-2.
+- `session_id` forwarding through the MCP bridge (F): `discovery_search_test.go:998`. Prerequisite for G-JOURNEY-3.
+- Postgres PITR plus S3 bucket restore disaster-recovery drill: `server_operations_test.go:1261` (Release or manual lane).
+
+### Stale skips to re-check
+
+The managed-stack parity work confirmed the §7.3.4 reingest pipeline runs (it ingested the parity artifact). Skips that assert reingest is a no-op predate that fix and should be re-evaluated: `deployment_modes_test.go:346,351`.
+
 ## Priority summary
 
 P0 gaps: G-AUTH-1, G-AUTH-2, G-AUTH-7, G-DOC-5, G-VEC-4.
@@ -620,3 +987,7 @@ verifier it tests (G-AUTH-1) unblocks the most skipped auth tests and turns the
 OIDC documentation into a tested flow. The live external-services suite (G-VEC
 and G-EMB) is the largest new build, and it needs the accounts above and the
 Release-lane wiring.
+
+The 2026-06-03 user-journey coverage pass added 41 gaps (30 P1 and 11 P2) in the User-journey coverage gaps section: G-JOURNEY-1 and G-JOURNEY-2, G-MATERIALIZE-1 through G-MATERIALIZE-9, G-MULTILAYER-1 through G-MULTILAYER-4, G-VEC-7 through G-VEC-11, G-SCALE-1 through G-SCALE-4, G-LIFECYCLE-1 through G-LIFECYCLE-6, G-CONFIG-1 through G-CONFIG-4, G-AUTH-10 through G-AUTH-13, G-STACK-3, G-DOC-8, and G-OPS-1.
+
+The harness-evolution pass (2026-06-03) added the enabling test-infrastructure primitives G-INFRA-5 through G-INFRA-9 and the harness-blocked journeys G-AUTH-14 through G-AUTH-16, G-OPS-2, G-JOURNEY-3, and G-LIFECYCLE-7. Each primitive lists the skipped tests it unblocks, so every harness-capability skip in the suite maps to a gap. Skips that name an unbuilt feature are listed under "Skips blocked on unbuilt product features" and belong in BUILD-GAPS.
