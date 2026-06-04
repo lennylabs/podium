@@ -1195,6 +1195,14 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 			lexIDs := scoredIDs(scored)
 			fused := RRFFuse(lexIDs, vecRanks)
 			scored = reorderScored(scored, latestByID(filtered), fused)
+			// §5 total_matched reflects the true match count. Hybrid
+			// retrieval matches an artifact when BM25 or the vector ranker
+			// surfaces it, so the count is the size of the fused union, not
+			// the BM25-only subset. reorderScored materializes every fused
+			// ID (including vector-only hits with no query-term overlap), so
+			// len(scored) is the union size here. The usage and dependency
+			// reranks below only reorder this set, so the count is final.
+			totalMatched = len(scored)
 		}
 	}
 
