@@ -1252,12 +1252,24 @@ absent.
 2. Build standalone state: author a registry, serve standalone, register a
    Git layer, and confirm a search returns results (as in S09, on
    `127.0.0.1:8116`). Stop the standalone server.
-3. Load the standard-store environment and run the migration.
+3. Load the standard-store environment and run the migration. The migration
+   command takes its target from `--postgres <dsn>` and `--object-store <url>`
+   (the §13.4 short form). The `--object-store` S3 URL carries the endpoint,
+   bucket, credentials, region, and TLS toggle from `test.env`. The standalone
+   source lives under `$WORK`, so name it with `--source-sqlite` and
+   `--source-objects`. The `PODIUM_REGISTRY_STORE`, `PODIUM_OBJECT_STORE`, and
+   `PODIUM_VECTOR_BACKEND` exports select the standard backends for the
+   `podium serve --strict` run in step 4.
 
    ```bash
    set -a; source ~/projects/podium/test.env; set +a
    export PODIUM_REGISTRY_STORE=postgres PODIUM_OBJECT_STORE=s3 PODIUM_VECTOR_BACKEND=pgvector
-   podium admin migrate-to-standard --sqlite-path "$WORK/podium.db" --filesystem-root "$WORK/objects"
+   S3URL="s3://${PODIUM_S3_ACCESS_KEY_ID}:${PODIUM_S3_SECRET_ACCESS_KEY}@localhost:9000/${PODIUM_S3_BUCKET}?region=${PODIUM_S3_REGION}&ssl=false"
+   podium admin migrate-to-standard \
+     --postgres "$PODIUM_POSTGRES_DSN" \
+     --object-store "$S3URL" \
+     --source-sqlite "$WORK/podium.db" \
+     --source-objects "$WORK/objects"
    ```
 
 4. Serve in strict mode against the standard stores and compare.
