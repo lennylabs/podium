@@ -17,6 +17,7 @@ package e2e
 
 import (
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -745,10 +746,38 @@ func TestArtifactResponse_QuotaMaterialize(t *testing.T) {
 	}
 }
 
-// T-D-handling-responses-50 — auth.scope_denied surfaces as registry.not_found (gap).
+// T-D-handling-responses-50 — a load the caller is not authorized to see
+// surfaces as registry.not_found, not a 403, so the response does not leak the
+// artifact's existence in a hidden layer (the doc's "auth.scope_denied
+// surfaces as registry.not_found" note). The authenticated harness (G-INFRA-5)
+// places the artifact in a users:-restricted layer; an unauthorized caller's
+// load is 404 with registry.not_found while the authorized owner loads it.
 func TestArtifactResponse_ScopeDenied(t *testing.T) {
 	t.Parallel()
-	t.Skip("not expressible in a standalone single-layer deployment: there is no invisible artifact to exercise the visibility-denied path")
+	srv := startAuthServer(t, authServerSpec{
+		Layers: []authLayer{{
+			ID:         "restricted",
+			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+			Visibility: authVisibility{Users: []string{"bob@acme.com"}},
+		}},
+	})
+	alice := srv.token(authIdentity{Sub: "alice@acme.com", Email: "alice@acme.com"})
+	bob := srv.token(authIdentity{Sub: "bob@acme.com", Email: "bob@acme.com"})
+
+	// The unauthorized caller gets 404 registry.not_found, never 403: the
+	// existence of the artifact in a hidden layer must not leak.
+	st, code := srv.loadCode("finance/ledger", alice)
+	if st != http.StatusNotFound {
+		t.Errorf("unauthorized load = %d, want 404 (no existence leak)", st)
+	}
+	if code != "registry.not_found" {
+		t.Errorf("unauthorized load code = %q, want registry.not_found", code)
+	}
+
+	// The authorized owner loads it.
+	if st := srv.loadStatus("finance/ledger", bob); st != http.StatusOK {
+		t.Errorf("authorized owner load = %d, want 200", st)
+	}
 }
 
 // T-D-handling-responses-51 — materialize.hook_failed is a documented error

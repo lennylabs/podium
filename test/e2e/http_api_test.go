@@ -565,10 +565,74 @@ func TestHTTPAPI_BatchLoad(t *testing.T) {
 }
 
 // spec: http-api.md § load_artifacts (bulk) — restricted item per-item
-// error. Standalone serves every layer publicly, so a caller-denied
-// item cannot be constructed without a standard-deployment identity.
+// error. The authenticated, visibility-capable harness (G-INFRA-5) places one
+// artifact in a restricted (users:) layer and one in a public layer, then
+// issues a batchLoad as a caller who cannot see the restricted item. §7.6.2
+// requires the denied item to surface as a per-item visibility.denied envelope
+// (not a top-level error and not an existence leak) while the visible item
+// loads. An authorized caller sees both as ok.
 func TestHTTPAPI_BatchLoadVisibilityDenied(t *testing.T) {
-	t.Skip("requires a standard deployment with group-based layer visibility; standalone serves all layers publicly so visibility.denied cannot be exercised")
+	t.Parallel()
+	srv := startAuthServer(t, authServerSpec{
+		Layers: []authLayer{
+			{
+				ID:         "public",
+				Files:      map[string]string{"finance/run/ARTIFACT.md": authContext("public run report")},
+				Visibility: authVisibility{Public: true},
+			},
+			{
+				ID:         "restricted",
+				Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+				Visibility: authVisibility{Users: []string{"bob@acme.com"}},
+			},
+		},
+	})
+
+	// alice cannot see the restricted layer; bob can.
+	alice := srv.token(authIdentity{Sub: "alice@acme.com", Email: "alice@acme.com"})
+	bob := srv.token(authIdentity{Sub: "bob@acme.com", Email: "bob@acme.com"})
+
+	reqBody, _ := json.Marshal(map[string]any{"ids": []string{"finance/run", "finance/ledger"}})
+
+	// alice: the public item is ok; the restricted item is a per-item
+	// visibility.denied with status "error".
+	st, body := srv.do(http.MethodPost, "/v1/artifacts:batchLoad", alice, reqBody)
+	apiWantStatus(t, st, 200, "batchLoad (alice)", body)
+	byID := batchByID(t, body)
+	if byID["finance/run"]["status"] != "ok" {
+		t.Errorf("finance/run status=%v, want ok", byID["finance/run"]["status"])
+	}
+	denied := byID["finance/ledger"]
+	if denied["status"] != "error" {
+		t.Fatalf("restricted finance/ledger status=%v, want error", denied["status"])
+	}
+	errObj, _ := denied["error"].(map[string]any)
+	if errObj["code"] != "visibility.denied" {
+		t.Errorf("restricted item code=%v, want visibility.denied (no existence leak)", errObj["code"])
+	}
+
+	// bob sees both items as ok.
+	st, body = srv.do(http.MethodPost, "/v1/artifacts:batchLoad", bob, reqBody)
+	apiWantStatus(t, st, 200, "batchLoad (bob)", body)
+	byID = batchByID(t, body)
+	if byID["finance/run"]["status"] != "ok" {
+		t.Errorf("bob finance/run status=%v, want ok", byID["finance/run"]["status"])
+	}
+	if byID["finance/ledger"]["status"] != "ok" {
+		t.Errorf("bob finance/ledger status=%v, want ok (authorized)", byID["finance/ledger"]["status"])
+	}
+}
+
+// batchByID indexes a batchLoad response array by item id.
+func batchByID(t *testing.T, body []byte) map[string]map[string]any {
+	t.Helper()
+	arr := apiJSONArr(t, body)
+	out := map[string]map[string]any{}
+	for _, e := range arr {
+		obj := e.(map[string]any)
+		out[obj["id"].(string)] = obj
+	}
+	return out
 }
 
 // spec: http-api.md § load_artifacts (bulk) — >50 ids → invalid_argument.
