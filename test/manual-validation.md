@@ -970,13 +970,23 @@ if absent.
 
 1. Run the isolation block, start services, and load the environment, selecting
    the self-embedding backend and leaving the external embedding provider unset.
+   The self-embedding text is written only when the bootstrap ingest accepts a
+   new `(artifact_id, version)`; an identical re-ingest is a no-op (§7 ingest
+   cases) and enqueues nothing, so a shared Postgres store that already holds
+   these IDs from a prior run leaves the backend index untouched. Point the
+   server at a fresh registry store for this run so the ingest accepts the two
+   artifacts and the drain worker sends their text to the backend, and export a
+   unique `PODIUM_PINECONE_NAMESPACE` so the run's vectors stay out of the
+   shared self-embedding index.
 
    ```bash
+   cd ~/projects/podium && make services-up
    set -a; source ~/projects/podium/test.env; set +a
    export PODIUM_REGISTRY_STORE=postgres
    export PODIUM_OBJECT_STORE=s3
    export PODIUM_VECTOR_BACKEND=pinecone
    export PODIUM_PINECONE_INDEX="$PODIUM_PINECONE_SELFEMBED_INDEX"
+   export PODIUM_PINECONE_NAMESPACE="manual-s16-$$-$(date +%s)"
    unset PODIUM_EMBEDDING_PROVIDER PODIUM_EMBEDDING_MODEL
    ```
 
@@ -988,12 +998,16 @@ if absent.
 
 **Expected.**
 
-- The server boots without an external embedding provider, and the log shows the
-  artifact text sent to the backend for inference rather than vectors computed
-  locally.
+- The server boots without an external embedding provider. The startup log
+  records `hybrid search: vector=pinecone self-embedding=<model>` (the
+  `<model>` is `PODIUM_PINECONE_INFERENCE_MODEL`), which reports that the
+  backend embeds the artifact text server-side and the server computes no
+  vectors locally. The query path stays non-degraded, so the backend's
+  integrated inference is answering the search.
 - The paraphrased query returns the `reconcile` skill as the top result.
 
-**Cleanup.** Stop the server and `rm -rf "$WORK"`.
+**Cleanup.** Stop the server, `rm -rf "$WORK"`, and drop the throwaway registry
+store created for the run.
 
 ---
 
