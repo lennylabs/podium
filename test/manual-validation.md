@@ -312,22 +312,26 @@ and removes a materialized artifact when its source is deleted.
 ## S05: Multiple filesystem layers and precedence
 
 **Goal.** Validate that a registry composed of two layers merges into one
-effective view, and that the higher-precedence layer wins on a name collision.
+effective view, and that a bare cross-layer name collision is rejected at
+ingest rather than silently shadowed (§4.6).
 
-**Covers.** Multiple layers, layer ordering, the merged effective view.
+**Covers.** Multiple layers, layer ordering, the merged effective view, the
+collision-rejection rule.
 
 **Steps.**
 
 1. Run the isolation block.
 2. Build a standalone server over a registry that declares two layers. Write a
    `registry.yaml` that names a base layer and a team layer, with the team layer
-   second so it takes precedence.
+   second so it is higher precedence. Both layers contribute a `greet` skill,
+   which collides on the canonical ID `greet`; the team layer also contributes a
+   `deploy` skill that does not collide.
 
    ```bash
    mkdir -p "$WORK/base/greet" "$WORK/team/greet" "$WORK/team/deploy"
-   podium artifact scaffold --type skill --description "Base greet" "$WORK/base/greet" --force
-   podium artifact scaffold --type skill --description "Team greet override" "$WORK/team/greet" --force
-   podium artifact scaffold --type skill --description "Team deploy" "$WORK/team/deploy" --force
+   podium artifact scaffold --type skill --description "Base greet" --force "$WORK/base/greet"
+   podium artifact scaffold --type skill --description "Team greet override" --force "$WORK/team/greet"
+   podium artifact scaffold --type skill --description "Team deploy" --force "$WORK/team/deploy"
    cat > "$WORK/registry.yaml" <<YAML
    registry:
      layers:
@@ -346,10 +350,12 @@ effective view, and that the higher-precedence layer wins on a name collision.
    export PODIUM_REGISTRY=http://127.0.0.1:8101
    ```
 
-3. List layers and search.
+3. List layers, reingest the team layer to surface the collision report, and
+   search.
 
    ```bash
    podium layer list --registry "$PODIUM_REGISTRY"
+   podium layer reingest --registry "$PODIUM_REGISTRY" team
    podium search --registry "$PODIUM_REGISTRY" "greet"
    podium search --registry "$PODIUM_REGISTRY" "deploy"
    podium artifact show --registry "$PODIUM_REGISTRY" greet
@@ -357,11 +363,17 @@ effective view, and that the higher-precedence layer wins on a name collision.
 
 **Expected.**
 
-- `layer list` shows `base` and `team` in order.
+- `layer list` shows `base` and `team` in order (`base` at `Order` 1, `team` at
+  `Order` 2).
+- `layer reingest team` reports `greet` rejected with code `ingest.collision`
+  and a reason naming the layer that already contributed it: `cross-layer
+  collision: "greet" already contributed by layer "base"; declare extends: greet
+  to overlay it`. The team layer's non-colliding `deploy` is ingested.
 - Searching `greet` returns a single `greet` artifact whose description is the
-  team override (`Team greet override`), confirming the higher layer wins.
+  base layer's (`Base greet`), confirming the base artifact survives and the
+  colliding team artifact was rejected rather than silently shadowing it.
 - Searching `deploy` returns the team-only `deploy` skill.
-- `artifact show greet` prints the team layer's body.
+- `artifact show greet` prints the base layer's body.
 
 **Cleanup.** Stop the server and `rm -rf "$WORK"`.
 
