@@ -18,6 +18,8 @@ package e2e
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -992,16 +994,115 @@ func TestSearch_OfflineLoadDomain(t *testing.T) {
 	}
 }
 
-// T-D-browsing-45 — search_artifacts forwards session_id to the registry.
+// T-D-browsing-45 — search_artifacts forwards session_id to the registry. The
+// real podium-mcp binary threads its per-process session_id onto every registry
+// call (§5 "Optional session_id"), and a host-supplied session_id argument
+// overrides it for that call. Driven against a capturing stub registry so the
+// forwarded query parameter is observable end to end.
 func TestSearch_SearchArtifactsSessionID(t *testing.T) {
 	t.Parallel()
-	t.Skip("gap: the MCP bridge does not forward session_id to the registry, and the HTTP search_artifacts endpoint has no session_id parameter (no BUILD-GAPS finding filed)")
+	got := make(chan string, 4)
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/search_artifacts") {
+			got <- r.URL.Query().Get("session_id")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"query":"x","total_matched":0,"results":[]}`))
+	}))
+	t.Cleanup(stub.Close)
+
+	// A host-supplied session_id is forwarded verbatim.
+	res := mcpExec(t, brEnv(stub.URL),
+		toolCall(1, "search_artifacts", map[string]any{"query": "x", "session_id": "host-session-42"}))
+	_ = rpcResult(t, res.Stdout, 1)
+	select {
+	case s := <-got:
+		if s != "host-session-42" {
+			t.Errorf("forwarded session_id = %q, want host-session-42", s)
+		}
+	default:
+		t.Fatalf("registry received no search_artifacts call\nstdout: %s", res.Stdout)
+	}
+
+	// With no host session_id, the bridge forwards its own per-process session
+	// (a non-empty UUID), so registry-side correlation still has a key.
+	res2 := mcpExec(t, brEnv(stub.URL),
+		toolCall(1, "search_artifacts", map[string]any{"query": "y"}))
+	_ = rpcResult(t, res2.Stdout, 1)
+	select {
+	case s := <-got:
+		if s == "" {
+			t.Errorf("bridge forwarded an empty session_id; want its per-process session")
+		}
+	default:
+		t.Fatalf("registry received no second search_artifacts call\nstdout: %s", res2.Stdout)
+	}
 }
 
-// T-D-browsing-46 — load_artifact session_id pins latest for the session.
+// T-D-browsing-46 — load_artifact session_id pins latest for the session
+// across a mid-session republish (gap G-JOURNEY-3). Driven through the real
+// podium-mcp bridge: a host opens a session, loads an artifact at the current
+// latest, a newer version is republished mid-session, and the same session
+// keeps materializing the pinned snapshot while a fresh session sees the new
+// version. The bridge forwards session_id to the registry (§5 "Optional
+// session_id"; cmd/podium-mcp/session_id_test.go) and the registry pins a
+// session's first `latest` lookup (§4.7.6). The runtime-republish primitive
+// (G-INFRA-7) stages the second version against the live standalone server.
 func TestSearch_LoadArtifactSessionPin(t *testing.T) {
 	t.Parallel()
-	t.Skip("not expressible: the HTTP load_artifact endpoint has no session_id parameter, and new versions cannot be ingested into a live standalone server mid-test")
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"seed/ARTIFACT.md": contextArtifact("seed context keeps the boot non-empty here"),
+	}))
+	layer := newRepublishLayer(t, srv, "session-pin")
+
+	const id = "team/reports/run-variance"
+	layer.publishVersion(t, versionSpec{ID: id, Version: "1.0.0", Description: "run the variance report"})
+
+	// Session s1 opens and loads the artifact at the current latest, 1.0.0.
+	// Passing session_id as a load_artifact argument makes the bridge forward
+	// it verbatim, so the registry pins this session's `latest` to 1.0.0.
+	if v, _ := brSessionLoad(t, srv, id, "s1"); v != "1.0.0" {
+		t.Fatalf("s1 first load version=%q, want 1.0.0", v)
+	}
+
+	// A newer version is republished mid-session.
+	layer.publishVersion(t, versionSpec{ID: id, Version: "2.0.0", Description: "run the variance report"})
+
+	// s1 reloads in a fresh bridge process (so nothing is served from the
+	// per-process bridge cache) carrying the same session_id; the registry
+	// resolves the pinned snapshot, so the bridge materializes 1.0.0 to disk.
+	v, body := brSessionLoad(t, srv, id, "s1")
+	if v != "1.0.0" {
+		t.Errorf("s1 second load version=%q, want 1.0.0 (pinned snapshot stable across republish)", v)
+	}
+	if !strings.Contains(body, "version: 1.0.0") {
+		t.Errorf("s1 materialized body did not carry the pinned version 1.0.0:\n%s", body)
+	}
+
+	// A fresh session s2 pins to the current latest, 2.0.0.
+	if v, _ := brSessionLoad(t, srv, id, "s2"); v != "2.0.0" {
+		t.Errorf("s2 first load version=%q, want 2.0.0 (fresh session sees the new version)", v)
+	}
+}
+
+// brSessionLoad loads id through a fresh podium-mcp bridge process within the
+// given session (passed as the load_artifact session_id argument the bridge
+// forwards), returning the resolved version and the materialized ARTIFACT.md
+// body. Each call uses a fresh materialize root and cache dir so the result
+// reflects the registry's session-resolved snapshot rather than a prior
+// process's cache.
+func brSessionLoad(t *testing.T, srv *serverProc, id, sessionID string) (version, body string) {
+	t.Helper()
+	mat := t.TempDir()
+	res := mcpExec(t, brMatEnv(t, srv.BaseURL, mat),
+		toolCall(1, "load_artifact", map[string]any{"id": id, "session_id": sessionID}))
+	result := rpcResult(t, res.Stdout, 1)
+	v, _ := result["version"].(string)
+	art := filepath.Join(mat, filepath.FromSlash(id), "ARTIFACT.md")
+	if !pollFile(art, 2*time.Second) {
+		t.Fatalf("session %s load of %s did not materialize %s\nstdout: %s", sessionID, id, art, res.Stdout)
+	}
+	return v, readFile(t, art)
 }
 
 // T-D-browsing-47 — load_artifact for a nonexistent artifact returns a structured error.
