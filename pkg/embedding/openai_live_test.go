@@ -30,6 +30,21 @@ func liveContext(t *testing.T) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 30*time.Second)
 }
 
+// skipIfQuotaExhausted skips when err is ErrQuota (HTTP 429 insufficient_quota).
+// A quota-exhausted or unbilled account cannot serve the happy-path embed at
+// all, which is an account-state condition like an absent key, not a Podium
+// defect; the rate-limit-to-ErrQuota mapping itself is asserted deterministically
+// in classify_test.go. The auth-failure live test is unaffected (it drives the
+// error path directly). Returns true when it skipped.
+func skipIfQuotaExhausted(t *testing.T, err error) bool {
+	t.Helper()
+	if errors.Is(err, embedding.ErrQuota) {
+		t.Skipf("provider account over quota (insufficient_quota / 429); skipping happy-path live embed: %v", err)
+		return true
+	}
+	return false
+}
+
 // withinTolerance reports whether two vectors of equal length agree on
 // every component within tol. It is the determinism predicate: a provider
 // asked to embed the same text twice must return the same vector up to
@@ -75,6 +90,9 @@ func TestOpenAI_Live_DimensionAndDeterminism(t *testing.T) {
 	defer cancel()
 
 	first, err := p.Embed(ctx, []string{liveEmbedPhrase})
+	if skipIfQuotaExhausted(t, err) {
+		return
+	}
 	if err != nil {
 		t.Fatalf("Embed (first): %v", err)
 	}
@@ -110,6 +128,9 @@ func TestOpenAI_Live_BatchAlignment(t *testing.T) {
 		"alice published a deployment skill for acme",
 	}
 	batch, err := p.Embed(ctx, phrases)
+	if skipIfQuotaExhausted(t, err) {
+		return
+	}
 	if err != nil {
 		t.Fatalf("Embed (batch): %v", err)
 	}
