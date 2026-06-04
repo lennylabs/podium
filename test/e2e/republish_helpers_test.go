@@ -64,6 +64,12 @@ type republishLayer struct {
 // surfaced in the deprecation advisory. Files adds further bundled files in the
 // artifact directory (for example a SKILL.md body or a script), keyed by path
 // relative to the artifact directory.
+//
+// Extends, WhenToUse, and Sensitivity carry the §4.6 extends-merge inputs so a
+// version can declare a pinned parent (Extends: "<id>@<pin>"), inherited
+// when_to_use entries, and a sensitivity the merge folds most-restrictively.
+// They are emitted into the frontmatter only when set, so a plain artifact
+// carries none of them.
 type versionSpec struct {
 	ID          string
 	Version     string
@@ -71,6 +77,9 @@ type versionSpec struct {
 	Type        string
 	Deprecated  bool
 	ReplacedBy  string
+	Extends     string
+	WhenToUse   []string
+	Sensitivity string
 	Files       map[string]string
 }
 
@@ -200,6 +209,18 @@ func republishArtifact(spec versionSpec) string {
 	fmt.Fprintf(&b, "---\ntype: %s\nversion: %s\n", typ, spec.Version)
 	if spec.Description != "" {
 		fmt.Fprintf(&b, "description: %s\n", spec.Description)
+	}
+	if spec.Extends != "" {
+		fmt.Fprintf(&b, "extends: %s\n", spec.Extends)
+	}
+	if spec.Sensitivity != "" {
+		fmt.Fprintf(&b, "sensitivity: %s\n", spec.Sensitivity)
+	}
+	if len(spec.WhenToUse) > 0 {
+		b.WriteString("when_to_use:\n")
+		for _, w := range spec.WhenToUse {
+			fmt.Fprintf(&b, "  - %s\n", w)
+		}
 	}
 	if spec.Deprecated {
 		b.WriteString("deprecated: true\n")
