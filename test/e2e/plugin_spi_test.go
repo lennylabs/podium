@@ -640,19 +640,106 @@ func TestPluginSPI_WebhookDomainPublished(t *testing.T) {
 	}
 }
 
-// T-D-extending-20 — Webhook outbound delivery: layer.ingested event reaches receiver.
+// T-D-extending-20 — Webhook outbound delivery: layer.ingested event reaches receiver
+// over the real standalone HTTP surface (gap G-OPS-2, via the G-INFRA-9 sink).
+// A §7.3.2 receiver filtered to layer.ingested records the event a runtime
+// reingest fires, with a verifying HMAC signature and the §7.3.2 body schema.
 func TestPluginSPI_WebhookLayerIngested(t *testing.T) {
-	t.Skip("outbound webhook delivery for layer.ingested is not reachable via the standalone HTTP surface; webhook store not wired to trigger delivery in standalone mode")
+	t.Parallel()
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"seed/ARTIFACT.md": smallteamLowArtifact("seed"),
+	}))
+	const secret = "spi-layer-ingested-secret"
+	sink := newNotificationSink(t, withSinkSecret(secret))
+	registerWebhook(t, srv, sink.URL(), secret, "layer.ingested")
+
+	publishProbe(t, srv, "spi-ingested-layer", "1.0.0")
+
+	if !sink.waitForDelivery(1, 5*time.Second) {
+		t.Fatalf("no layer.ingested webhook delivery within deadline\nserver log:\n%s", srv.log())
+	}
+	d, ok := sink.firstMatching("layer.ingested")
+	if !ok {
+		t.Fatalf("no layer.ingested delivery recorded; got %d deliveries: %+v", sink.count(), sink.all())
+	}
+	if !d.SigValid {
+		t.Errorf("delivered layer.ingested body failed HMAC verification against the receiver secret")
+	}
+	for _, k := range []string{"event", "trace_id", "timestamp", "actor", "data"} {
+		if _, present := d.Body[k]; !present {
+			t.Errorf("delivered body missing %q key: %+v", k, d.Body)
+		}
+	}
 }
 
-// T-D-extending-21 — Webhook outbound delivery: non-matching filter receives no events.
+// T-D-extending-21 — Webhook outbound delivery: a receiver whose filter matches
+// no fired event type records nothing while an all-events receiver on the same
+// server records the reingest (gap G-OPS-2, via the G-INFRA-9 sink). This
+// isolates the §7.3.2 event filter from "no delivery happened at all."
 func TestPluginSPI_WebhookNonMatchingFilter(t *testing.T) {
-	t.Skip("outbound webhook delivery filter is not exercisable via the standalone HTTP surface; blocked by same gap as T-D-extending-20")
+	t.Parallel()
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"seed/ARTIFACT.md": smallteamLowArtifact("seed"),
+	}))
+	// layer.history_rewritten is never fired by a clean local-source reingest.
+	const filteredSecret = "spi-filter-none-secret"
+	const allSecret = "spi-filter-all-secret"
+	filtered := newNotificationSink(t, withSinkSecret(filteredSecret))
+	all := newNotificationSink(t, withSinkSecret(allSecret))
+	registerWebhook(t, srv, filtered.URL(), filteredSecret, "layer.history_rewritten")
+	registerWebhook(t, srv, all.URL(), allSecret) // no filter: all events
+
+	publishProbe(t, srv, "spi-filter-layer", "1.0.0")
+
+	if !all.waitForDelivery(1, 5*time.Second) {
+		t.Fatalf("all-events receiver recorded nothing for the reingest\nserver log:\n%s", srv.log())
+	}
+	if _, ok := all.firstMatching("artifact.published"); !ok {
+		t.Errorf("all-events receiver missing artifact.published; got: %+v", all.all())
+	}
+	time.Sleep(500 * time.Millisecond)
+	if n := filtered.count(); n != 0 {
+		t.Errorf("filtered receiver recorded %d deliveries, want 0 (filter excluded every fired type): %+v", n, filtered.all())
+	}
 }
 
-// T-D-extending-22 — Webhook outbound delivery: receiver auto-disables after consecutive failures.
+// T-D-extending-22 — Webhook outbound delivery: a receiver auto-disables after
+// MaxFailures consecutive failures (gap G-OPS-2, via the G-INFRA-9 sink and the
+// PODIUM_WEBHOOK_MAX_FAILURES override). Filtering to layer.ingested makes
+// exactly one delivery fire per reingest, so two reingests are two consecutive
+// failures and reach the cap of 2.
 func TestPluginSPI_WebhookAutoDisable(t *testing.T) {
-	t.Skip("auto-disable requires a MaxFailures override not exposed in the standalone e2e harness; outbound delivery not wired to standalone")
+	t.Parallel()
+	srv := startServerWebhooks(t, writeRegistry(t, map[string]string{
+		"seed/ARTIFACT.md": smallteamLowArtifact("seed"),
+	}), 2)
+	const secret = "spi-autodisable-secret"
+	sink := newNotificationSink(t, withSinkSecret(secret), withSinkFailEvery())
+	rec := registerWebhook(t, srv, sink.URL(), secret, "layer.ingested")
+
+	rl := publishProbe(t, srv, "spi-autodisable-layer", "1.0.0")
+	if !sink.waitForDelivery(1, 5*time.Second) {
+		t.Fatalf("first failing delivery not attempted\nserver log:\n%s", srv.log())
+	}
+	got, reached := waitForWebhookFailureCount(t, srv, rec.ID, 1, 5*time.Second)
+	if !reached {
+		t.Fatalf("failure_count did not reach 1 after one failing reingest (got %d)\nserver log:\n%s",
+			got.FailureCount, srv.log())
+	}
+	if got.Disabled {
+		t.Fatalf("receiver disabled after one failure; want disable only at the cap of 2")
+	}
+
+	rl.publishVersion(t, versionSpec{
+		ID:          niArtifact,
+		Version:     "2.0.0",
+		Description: "notification delivery probe for vendor payment events here today",
+	})
+	final, disabled := waitForWebhookDisabled(t, srv, rec.ID, 5*time.Second)
+	if !disabled {
+		t.Fatalf("receiver not auto-disabled after reaching MaxFailures=2 (failure_count=%d)\nserver log:\n%s",
+			final.FailureCount, srv.log())
+	}
 }
 
 // T-D-extending-23 — Webhook outbound delivery: HMAC VerifyBody rejects wrong secret.
