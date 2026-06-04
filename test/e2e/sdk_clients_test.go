@@ -382,10 +382,44 @@ func TestSDK_PyBulkMaterializeGap(t *testing.T) {
 	csWantStdout(t, res, "IS_DICT False HAS_MATERIALIZE True")
 }
 
-// T-D-custom-sdk-26 — Python bulk-load visibility.denied for invisible items.
+// T-D-custom-sdk-26 — Python bulk-load surfaces visibility.denied for an item
+// the caller cannot see. The authenticated, visibility-capable harness
+// (G-INFRA-5) places one artifact in a layer restricted to bob and one in a
+// public layer; the Python SDK runs as alice (her minted token forwarded via
+// PODIUM_SESSION_TOKEN, the same credential from_env reads for the §6.3.2
+// injected-session-token path). c.load_artifacts over both ids returns the
+// public artifact with status="ok" and the restricted artifact with
+// status="error" carrying the §7.6.2 visibility.denied code, which does not
+// leak the artifact's existence in the hidden layer.
 func TestSDK_PyBulkVisibilityDenied(t *testing.T) {
 	t.Parallel()
-	t.Skip("not expressible in a standalone single-layer deployment: there is no invisible artifact to produce a visibility.denied item")
+	py := csPython(t)
+	srv := startAuthServer(t, authServerSpec{
+		Layers: []authLayer{
+			{
+				ID:         "shared",
+				Files:      map[string]string{"finance/ap/pay-invoice/ARTIFACT.md": authContext("pay invoice")},
+				Visibility: authVisibility{Public: true},
+			},
+			{
+				ID:         "restricted",
+				Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+				Visibility: authVisibility{Users: []string{"bob@acme.com"}},
+			},
+		},
+	})
+	alice := srv.token(authIdentity{Sub: "alice@acme.com", Email: "alice@acme.com"})
+
+	res := csRunPy(t, py, srv.BaseURL,
+		"from podium import Client\n"+
+			"c = Client.from_env()\n"+
+			"out = c.load_artifacts(ids=['finance/ap/pay-invoice','finance/ledger'])\n"+
+			"byid = {x.id: x for x in out}\n"+
+			"vis = byid['finance/ap/pay-invoice']\n"+
+			"den = byid['finance/ledger']\n"+
+			"print('OK', vis.status, 'DEN', den.status, den.error.code)\n",
+		"PODIUM_SESSION_TOKEN="+alice, "PODIUM_IDENTITY_PROVIDER=injected-session-token")
+	csWantStdout(t, res, "OK ok DEN error visibility.denied")
 }
 
 // T-D-custom-sdk-27 — Python subscribe yields events.
@@ -690,10 +724,63 @@ func TestSDK_TSBulkSplit(t *testing.T) {
 	csWantStdout(t, res, "N 55")
 }
 
-// T-D-custom-sdk-55 — programmatic identity/visibility/audit unchanged from MCP.
+// T-D-custom-sdk-55 — programmatic identity and visibility are unchanged from
+// the MCP path: the same server, driven by the SDK as two distinct identities,
+// returns the per-caller surface each token's identity grants. The
+// authenticated harness (G-INFRA-5) restricts one layer to bob while a second
+// layer is public. The Python SDK runs once as bob and once as alice, each
+// caller's minted token forwarded via PODIUM_SESSION_TOKEN (the §6.3.2
+// injected-session-token credential from_env reads). bob loads the restricted
+// artifact; alice is denied it on both the object route (a RegistryError) and
+// the §7.6.2 batch route (a visibility.denied item) while still loading the
+// public artifact, so the identity bound to the token, rather than the SDK
+// caller, decides the view.
 func TestSDK_PyIdentityUnchanged(t *testing.T) {
 	t.Parallel()
-	t.Skip("requires a standard deployment with two identities and visibility enforcement; not expressible in a standalone single-layer e2e")
+	py := csPython(t)
+	srv := startAuthServer(t, authServerSpec{
+		Layers: []authLayer{
+			{
+				ID:         "shared",
+				Files:      map[string]string{"finance/ap/pay-invoice/ARTIFACT.md": authContext("pay invoice")},
+				Visibility: authVisibility{Public: true},
+			},
+			{
+				ID:         "restricted",
+				Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+				Visibility: authVisibility{Users: []string{"bob@acme.com"}},
+			},
+		},
+	})
+	alice := srv.token(authIdentity{Sub: "alice@acme.com", Email: "alice@acme.com"})
+	bob := srv.token(authIdentity{Sub: "bob@acme.com", Email: "bob@acme.com"})
+
+	// bob's identity sees the restricted artifact.
+	bobRes := csRunPy(t, py, srv.BaseURL,
+		"from podium import Client\n"+
+			"c = Client.from_env()\n"+
+			"a = c.load_artifact('finance/ledger')\n"+
+			"print('BOB_SEES', a.id)\n",
+		"PODIUM_SESSION_TOKEN="+bob, "PODIUM_IDENTITY_PROVIDER=injected-session-token")
+	csWantStdout(t, bobRes, "BOB_SEES finance/ledger")
+
+	// alice's identity is denied the restricted artifact on the object route and
+	// in the batch, but still loads the public artifact: the surface is bound to
+	// the token's identity, exactly as on the MCP path.
+	aliceRes := csRunPy(t, py, srv.BaseURL,
+		"from podium import Client, RegistryError\n"+
+			"c = Client.from_env()\n"+
+			"try:\n"+
+			"    c.load_artifact('finance/ledger')\n"+
+			"    print('LEAK')\n"+
+			"except RegistryError as e:\n"+
+			"    print('ALICE_DENIED', e.code)\n"+
+			"out = c.load_artifacts(ids=['finance/ap/pay-invoice','finance/ledger'])\n"+
+			"byid = {x.id: x for x in out}\n"+
+			"print('PUB', byid['finance/ap/pay-invoice'].status, 'BATCH', byid['finance/ledger'].status, byid['finance/ledger'].error.code)\n",
+		"PODIUM_SESSION_TOKEN="+alice, "PODIUM_IDENTITY_PROVIDER=injected-session-token")
+	csWantStdout(t, aliceRes, "ALICE_DENIED registry.not_found")
+	csWantStdout(t, aliceRes, "PUB ok BATCH error visibility.denied")
 }
 
 // deadRegistry returns a registry URL pointing at a closed local port so a

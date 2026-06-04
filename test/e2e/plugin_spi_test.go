@@ -941,9 +941,58 @@ func TestPluginSPI_HarnessNoneCanonicalLayout(t *testing.T) {
 	}
 }
 
-// T-D-extending-30 — Custom consumer surfaces: HTTP API visibility filtering applies.
+// T-D-extending-30 — Custom consumer surfaces: HTTP API visibility filtering
+// applies per identity. The authenticated harness places a public artifact and a
+// private artifact in a layer visible only to bob, then drives the identical
+// search and load surface as two callers: alice (who cannot see the private
+// layer) and bob (its sole grantee). search_artifacts filters the private
+// artifact out of alice's effective view but includes it for bob, and a direct
+// load_artifact of the private id returns 404 registry.not_found for alice (no
+// existence leak) while bob loads it.
 func TestPluginSPI_VisibilityFilteringDirect(t *testing.T) {
-	t.Skip("requires a standard registry with two authenticated users and a private layer visible only to one; not expressible in a standalone single-layer e2e")
+	t.Parallel()
+	const (
+		publicID  = "finance/handbook/overview"
+		privateID = "finance/ledger/detail"
+	)
+	srv := startAuthServer(t, authServerSpec{
+		Layers: []authLayer{
+			{
+				ID:         "public",
+				Files:      map[string]string{publicID + "/ARTIFACT.md": authContext("public overview")},
+				Visibility: authVisibility{Public: true},
+			},
+			{
+				ID:         "private",
+				Files:      map[string]string{privateID + "/ARTIFACT.md": authContext("private ledger detail")},
+				Visibility: authVisibility{Users: []string{"bob@acme.com"}},
+			},
+		},
+	})
+	alice := srv.token(authIdentity{Sub: "alice@acme.com", Email: "alice@acme.com"})
+	bob := srv.token(authIdentity{Sub: "bob@acme.com", Email: "bob@acme.com"})
+
+	// search_artifacts filters per identity: alice sees only the public
+	// artifact; bob (the private layer's grantee) sees both.
+	aliceIDs := srv.searchIDs(alice)
+	assertHas(t, aliceIDs, publicID, "alice search includes the public artifact")
+	assertMissing(t, aliceIDs, privateID, "alice search omits the private artifact")
+	bobIDs := srv.searchIDs(bob)
+	assertHas(t, bobIDs, publicID, "bob search includes the public artifact")
+	assertHas(t, bobIDs, privateID, "bob search includes the private artifact he owns")
+
+	// A direct load of the private id is 404 registry.not_found for alice (no
+	// existence leak) and 200 for bob.
+	st, code := srv.loadCode(privateID, alice)
+	if st != http.StatusNotFound {
+		t.Errorf("alice load private artifact = %d, want 404 (no existence leak)", st)
+	}
+	if code != "registry.not_found" {
+		t.Errorf("alice load code = %q, want registry.not_found", code)
+	}
+	if st := srv.loadStatus(privateID, bob); st != http.StatusOK {
+		t.Errorf("bob load private artifact = %d, want 200", st)
+	}
 }
 
 // T-D-extending-31 — SPI forward compatibility: every blocking SPI method takes context as first parameter.

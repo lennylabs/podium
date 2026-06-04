@@ -1551,21 +1551,112 @@ func TestCLI_LayerWatchInterval(t *testing.T) {
 
 // ===== Admin (T-D-cli-102..112) ========================================
 
-// spec: doc "Admin — podium admin grant / revoke". The positive path
-// needs an authenticated admin identity, which the standalone server
-// (system:public) cannot provide.
+// spec: doc "Admin — podium admin grant / revoke". The documented
+// `podium admin grant <user-id>` succeeds for a bootstrap admin and is
+// refused with HTTP 403 for a verified non-admin. The authenticated
+// harness (G-INFRA-5) supplies the admin identity the standalone server
+// alone cannot.
 func TestCLI_AdminGrant(t *testing.T) {
-	t.Skip("requires a standard deployment with an authenticated admin identity; standalone serves as system:public and rejects admin grants with 403")
+	t.Parallel()
+	srv := startAuthServer(t, authServerSpec{
+		BootstrapAdmins: []string{"alice@acme.com"},
+		Layers: []authLayer{{
+			ID:         "restricted",
+			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+			Visibility: authVisibility{Users: []string{"bob@acme.com"}},
+		}},
+	})
+	adminToken := srv.adminToken("alice@acme.com")
+	carolToken := srv.token(authIdentity{Sub: "carol@acme.com", Email: "carol@acme.com"})
+
+	// The admin grants bob through the documented CLI command.
+	grant := runPodium(t, "", acliEnv(t, srv, adminToken), "admin", "grant", "bob@acme.com")
+	cliWantExit(t, grant, 0, "admin grant bob")
+	cliContains(t, grant.Stdout, "bob@acme.com", "grant response names the granted user")
+
+	// The grant took effect: bob can now run an admin-only command. His token
+	// holds no bootstrap admin, so the grant is the only thing that admits him.
+	bobToken := srv.token(authIdentity{Sub: "bob@acme.com", Email: "bob@acme.com"})
+	bobShow := runPodium(t, "", acliEnv(t, srv, bobToken), "admin", "show-effective", "carol@acme.com")
+	cliWantExit(t, bobShow, 0, "granted bob show-effective")
+
+	// A verified non-admin is refused at the gate with HTTP 403.
+	deny := runPodium(t, "", acliEnv(t, srv, carolToken), "admin", "grant", "dave@acme.com")
+	cliWantNonZero(t, deny, "non-admin grant")
+	cliContains(t, deny.Stderr, "403", "non-admin grant refused with 403")
 }
 
-// spec: doc "Admin — podium admin grant / revoke".
+// spec: doc "Admin — podium admin grant / revoke". The documented
+// `podium admin revoke <user-id>` succeeds for a bootstrap admin and
+// removes a prior grant, and is refused with HTTP 403 for a verified
+// non-admin.
 func TestCLI_AdminRevoke(t *testing.T) {
-	t.Skip("requires a standard deployment with an authenticated admin identity; standalone serves as system:public and rejects admin revokes with 403")
+	t.Parallel()
+	srv := startAuthServer(t, authServerSpec{
+		BootstrapAdmins: []string{"alice@acme.com"},
+		Layers: []authLayer{{
+			ID:         "restricted",
+			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+			Visibility: authVisibility{Users: []string{"bob@acme.com"}},
+		}},
+	})
+	adminToken := srv.adminToken("alice@acme.com")
+	carolToken := srv.token(authIdentity{Sub: "carol@acme.com", Email: "carol@acme.com"})
+
+	// Grant bob first so revoke has a grant to remove, then confirm bob held
+	// the admin role.
+	cliWantExit(t, runPodium(t, "", acliEnv(t, srv, adminToken), "admin", "grant", "bob@acme.com"), 0, "admin grant bob")
+	bobToken := srv.token(authIdentity{Sub: "bob@acme.com", Email: "bob@acme.com"})
+	cliWantExit(t, runPodium(t, "", acliEnv(t, srv, bobToken), "admin", "show-effective", "carol@acme.com"), 0, "granted bob show-effective")
+
+	// The admin revokes bob through the documented CLI command. The command
+	// prints "revoked" to stderr and exits 0.
+	revoke := runPodium(t, "", acliEnv(t, srv, adminToken), "admin", "revoke", "bob@acme.com")
+	cliWantExit(t, revoke, 0, "admin revoke bob")
+	cliContains(t, revoke.Stderr, "revoked", "revoke confirmation on stderr")
+
+	// The revoke took effect: bob is no longer an admin and is now refused.
+	bobAfter := runPodium(t, "", acliEnv(t, srv, bobToken), "admin", "show-effective", "carol@acme.com")
+	cliWantNonZero(t, bobAfter, "revoked bob show-effective")
+	cliContains(t, bobAfter.Stderr, "403", "revoked bob refused with 403")
+
+	// A verified non-admin is refused at the gate with HTTP 403.
+	deny := runPodium(t, "", acliEnv(t, srv, carolToken), "admin", "revoke", "dave@acme.com")
+	cliWantNonZero(t, deny, "non-admin revoke")
+	cliContains(t, deny.Stderr, "403", "non-admin revoke refused with 403")
 }
 
-// spec: doc "Admin — podium admin show-effective".
+// spec: doc "Admin — podium admin show-effective". The documented
+// `podium admin show-effective <user-id>` returns the per-layer
+// visibility for a bootstrap admin and is refused with HTTP 403 for a
+// verified non-admin.
 func TestCLI_AdminShowEffective(t *testing.T) {
-	t.Skip("requires a standard deployment with an authenticated admin identity; standalone serves as system:public and rejects show-effective with 403")
+	t.Parallel()
+	srv := startAuthServer(t, authServerSpec{
+		BootstrapAdmins: []string{"alice@acme.com"},
+		Layers: []authLayer{{
+			ID:         "restricted",
+			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+			Visibility: authVisibility{Users: []string{"bob@acme.com"}},
+		}},
+	})
+	adminToken := srv.adminToken("alice@acme.com")
+	carolToken := srv.token(authIdentity{Sub: "carol@acme.com", Email: "carol@acme.com"})
+
+	// The admin's show-effective computes the per-target view: the restricted
+	// layer is visible to bob (listed in its users) and not to carol.
+	show := runPodium(t, "", acliEnv(t, srv, adminToken), "admin", "show-effective", "bob@acme.com")
+	cliWantExit(t, show, 0, "admin show-effective bob")
+	acliAssertLayerVisible(t, show.Stdout, "restricted", true, "bob is in the restricted layer's user list")
+
+	showCarol := runPodium(t, "", acliEnv(t, srv, adminToken), "admin", "show-effective", "carol@acme.com")
+	cliWantExit(t, showCarol, 0, "admin show-effective carol")
+	acliAssertLayerVisible(t, showCarol.Stdout, "restricted", false, "carol is not in the restricted layer's user list")
+
+	// A verified non-admin is refused at the gate with HTTP 403.
+	deny := runPodium(t, "", acliEnv(t, srv, carolToken), "admin", "show-effective", "bob@acme.com")
+	cliWantNonZero(t, deny, "non-admin show-effective")
+	cliContains(t, deny.Stderr, "403", "non-admin show-effective refused with 403")
 }
 
 // spec: doc "Admin — podium admin reembed".

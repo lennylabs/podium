@@ -19,6 +19,8 @@ package e2e
 // extends resolution now applied to the filesystem path.
 
 import (
+	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -285,18 +287,113 @@ func TestExtends_McpServersParentOnlyInherited(t *testing.T) {
 
 // ---- Hidden parents (T-D-extends-16..17) ------------------------------------
 
+// exHiddenParentServer boots the authenticated, visibility-capable harness with
+// a restricted parent layer and a public child layer that extends it. The parent
+// shared/parent is restricted to bob and carries a distinctive tag and high
+// sensitivity; the child finance/child is public and declares extends:
+// shared/parent@1.x with low sensitivity. Layers are listed lowest-precedence
+// first, so the parent (secret-parent) is the extends target the higher child
+// resolves at ingest. It returns the server with tokens for alice (who cannot
+// see the parent) and bob (the parent's grantee).
+func exHiddenParentServer(t *testing.T) (srv *authServer, alice, bob string) {
+	t.Helper()
+	srv = startAuthServer(t, authServerSpec{
+		Layers: []authLayer{
+			{
+				ID: "secret-parent",
+				Files: map[string]string{
+					"shared/parent/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\n" +
+						"description: hidden parent\ntags: [from-hidden-parent]\nsensitivity: high\n---\n\nparent body\n",
+				},
+				Visibility: authVisibility{Users: []string{"bob@acme.com"}},
+			},
+			{
+				ID: "public-child",
+				Files: map[string]string{
+					"finance/child/ARTIFACT.md": "---\ntype: context\nversion: 2.0.0\n" +
+						"description: visible child\ntags: [child-tag]\nsensitivity: low\n" +
+						"extends: shared/parent@1.x\n---\n\nchild body\n",
+				},
+				Visibility: authVisibility{Public: true},
+			},
+		},
+	})
+	alice = srv.token(authIdentity{Sub: "alice@acme.com", Email: "alice@acme.com"})
+	bob = srv.token(authIdentity{Sub: "bob@acme.com", Email: "bob@acme.com"})
+	return srv, alice, bob
+}
+
+// exLoadAs GETs /v1/load_artifact for id as token and decodes the response,
+// failing the test on a non-200.
+func exLoadAs(t *testing.T, srv *authServer, id, token string) exLoadResp {
+	t.Helper()
+	st, body := srv.get("/v1/load_artifact?id="+id, token)
+	if st != http.StatusOK {
+		t.Fatalf("load %s = HTTP %d, want 200 (body=%s)\nlog:\n%s", id, st, body, srv.log())
+	}
+	var r exLoadResp
+	if err := json.Unmarshal(body, &r); err != nil {
+		t.Fatalf("decode load %s: %v (body=%s)", id, err, body)
+	}
+	return r
+}
+
 // T-D-extends-16 — a caller without access to the parent layer sees the merged
-// result. spec: docs/authoring/extends.md § "Hidden parents".
+// result. The parent lives in a layer restricted to bob; alice cannot see it,
+// yet loading the public child folds the hidden parent's inherited tag and the
+// most-restrictive sensitivity into the served manifest.
+// spec: docs/authoring/extends.md § "Hidden parents".
 func TestExtends_HiddenParentMergedResult(t *testing.T) {
 	t.Parallel()
-	t.Skip("the all-public standalone boot cannot hide a parent layer from a caller; the per-identity hidden-parent merge is exercised end to end through the injected-session-token visibility harness in multilayer_journeys_test.go TestMultiLayer_HiddenParentMergedButUndiscoverable (G-MULTILAYER-2) and at unit scale in pkg/registry/core TestExtends_HiddenParent")
+	srv, alice, _ := exHiddenParentServer(t)
+
+	// alice cannot see the parent layer, but the public child resolves and
+	// merges the parent server-side. The merged manifest carries the child
+	// version and the parent's inherited fields.
+	got := exLoadAs(t, srv, "finance/child", alice)
+	if got.Version != "2.0.0" {
+		t.Errorf("merged child version = %q, want 2.0.0", got.Version)
+	}
+	if !strings.Contains(got.Frontmatter, "from-hidden-parent") {
+		t.Errorf("merged manifest missing the hidden parent's inherited tag:\n%s", got.Frontmatter)
+	}
+	if !strings.Contains(got.Frontmatter, "child-tag") {
+		t.Errorf("merged manifest missing the child's own tag:\n%s", got.Frontmatter)
+	}
+	// Most-restrictive sensitivity: the child declared low, but the parent's
+	// high wins (the child cannot relax the parent).
+	if got.Sensitivity != "high" {
+		t.Errorf("merged sensitivity = %q, want high (most-restrictive from the hidden parent)", got.Sensitivity)
+	}
 }
 
 // T-D-extends-17 — the parent does not appear in search results for an
-// unauthorized caller. spec: docs/authoring/extends.md § "Hidden parents".
+// unauthorized caller. alice loads the merged child but the hidden parent
+// shared/parent is neither loadable nor discoverable through her search, while
+// bob (the parent's grantee) can load it.
+// spec: docs/authoring/extends.md § "Hidden parents".
 func TestExtends_HiddenParentNotInSearch(t *testing.T) {
 	t.Parallel()
-	t.Skip("the all-public standalone boot cannot hide the parent layer from search; the per-identity search_artifacts and load_domain exclusion of a hidden parent is exercised end to end through the injected-session-token visibility harness in multilayer_journeys_test.go TestMultiLayer_HiddenParentMergedButUndiscoverable (G-MULTILAYER-2) and at unit scale in pkg/registry/core TestExtends_HiddenParent")
+	srv, alice, bob := exHiddenParentServer(t)
+
+	// alice can load the public child (proving the merge is reachable) but the
+	// hidden parent is not loadable for her: 404, no existence leak.
+	exLoadAs(t, srv, "finance/child", alice)
+	if st := srv.loadStatus("shared/parent", alice); st != http.StatusNotFound {
+		t.Errorf("alice load shared/parent = HTTP %d, want 404 (hidden parent not loadable)", st)
+	}
+
+	// The hidden parent never appears in alice's search_artifacts surface.
+	aliceIDs := srv.searchIDs(alice)
+	assertHas(t, aliceIDs, "finance/child", "alice search includes the public child")
+	assertMissing(t, aliceIDs, "shared/parent", "alice search omits the hidden parent")
+
+	// Control: bob (the parent layer's sole grantee) can load the parent
+	// directly and sees it in his search, proving the hiding is per-identity.
+	if st := srv.loadStatus("shared/parent", bob); st != http.StatusOK {
+		t.Errorf("bob load shared/parent = HTTP %d, want 200 (grantee can see the parent)", st)
+	}
+	assertHas(t, srv.searchIDs(bob), "shared/parent", "bob search includes the parent he owns")
 }
 
 // ---- Bundled-file merge (T-D-extends-18..21) --------------------------------
@@ -904,10 +1001,58 @@ func TestExtends_SearchSensitivityMostRestrictive(t *testing.T) {
 }
 
 // T-D-extends-49 — the child is not visible to a caller without access to the
-// child layer. spec: docs/authoring/extends.md § "Hidden parents".
+// child layer. The extends child finance/child lives in a layer restricted to
+// the finance group; carol (not in finance) cannot load or discover it, while a
+// finance-group member can. The parent shared/parent is public so the only thing
+// gating the child is its own layer's membership.
+// spec: docs/authoring/extends.md § "Hidden parents".
 func TestExtends_ChildHiddenWithoutLayerAccess(t *testing.T) {
 	t.Parallel()
-	t.Skip("the standalone e2e harness has no per-identity layer visibility (bootstrap layers are all public), so a child layer cannot be hidden from a caller; per-identity visibility is covered by pkg/layer and pkg/registry/core tests")
+	srv := startAuthServer(t, authServerSpec{
+		SCIMToken: "scim-extends-child",
+		SCIMUsers: map[string][]string{"dave@acme.com": {"finance"}},
+		Layers: []authLayer{
+			{
+				ID: "public-parent",
+				Files: map[string]string{
+					"shared/parent/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\n" +
+						"description: public parent\ntags: [from-parent]\n---\n\nparent body\n",
+				},
+				Visibility: authVisibility{Public: true},
+			},
+			{
+				ID: "finance-child",
+				Files: map[string]string{
+					"finance/child/ARTIFACT.md": "---\ntype: context\nversion: 2.0.0\n" +
+						"description: finance-only child\ntags: [child-tag]\n" +
+						"extends: shared/parent@1.x\n---\n\nchild body\n",
+				},
+				Visibility: authVisibility{Groups: []string{"finance"}},
+			},
+		},
+	})
+
+	// dave is a finance-group member (resolved through SCIM); carol is not.
+	dave := srv.token(authIdentity{Sub: "dave@acme.com", Email: "dave@acme.com", Groups: []string{"finance"}})
+	carol := srv.token(authIdentity{Sub: "carol@acme.com", Email: "carol@acme.com"})
+
+	// The finance member loads the child and sees it in search.
+	got := exLoadAs(t, srv, "finance/child", dave)
+	if got.Version != "2.0.0" || !strings.Contains(got.Frontmatter, "from-parent") {
+		t.Errorf("finance member load = version %q frontmatter:\n%s", got.Version, got.Frontmatter)
+	}
+	assertHas(t, srv.searchIDs(dave), "finance/child", "finance member search includes the child")
+
+	// carol lacks the finance group, so the child layer is hidden from her: the
+	// load is 404 (no existence leak) and the child never appears in her search.
+	if st := srv.loadStatus("finance/child", carol); st != http.StatusNotFound {
+		t.Errorf("carol load finance/child = HTTP %d, want 404 (child layer hidden)", st)
+	}
+	carolIDs := srv.searchIDs(carol)
+	assertMissing(t, carolIDs, "finance/child", "carol search omits the hidden child")
+	// The public parent stays visible to carol, confirming only the child layer
+	// is gated.
+	assertHas(t, carolIDs, "shared/parent", "carol search still includes the public parent")
 }
 
 // Spec: §6.6 step 2 / §4.7.6 — a real extends-merged artifact's served

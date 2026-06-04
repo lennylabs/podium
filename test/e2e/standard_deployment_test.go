@@ -5,21 +5,21 @@ package e2e
 // storage + OIDC + replicated registry, with layer management, SCIM,
 // admin grants, GDPR erasure, runtime key registration, and migration.
 //
-// Identity model: standalone resolves callers to system:public. core.AdminAuthorize
-// rejects unauthenticated callers, so admin grant/revoke/show-effective happy
-// paths return HTTP 403 (exit 1) and cannot succeed in plain standalone e2e.
-// Those happy paths are skipped with an honest reason. All error-path tests
-// (missing flag / missing arg) run server-free and pass. The 403 negative
-// tests also pass. Layer endpoints are not admin-gated, so their happy paths
-// are real tests.
+// Identity model: standalone resolves callers to system:public, which cannot
+// tell an admin from a non-admin. The admin grant/revoke/show-effective happy
+// paths run instead against the authenticated harness (G-INFRA-5): startAuthServer
+// boots `serve --standalone` behind the injected-session-token verifier, seeds a
+// bootstrap admin, and mints caller tokens, so the documented CLI commands
+// exercise core.AdminAuthorize end to end and a verified non-admin is refused
+// with HTTP 403. All error-path tests (missing flag / missing arg) run
+// server-free and pass. Layer endpoints are not admin-gated, so their happy
+// paths are real tests.
 //
 // Known gaps:
 //   - F-7.3.5: user-defined layer cap of 3 is not enforced (T-D-organization-60).
 //   - T-D-organization-1 live bring-up requires Docker (skipped); the
 //     compose file's §13.1.1 structure is asserted in
 //     docs_organization_compose_test.go without Docker.
-//   - T-D-organization-3, -20, -21, -23 need an authenticated admin identity
-//     (skipped with honest reason).
 //   - T-D-organization-34, -35 need a registered runtime key and signed JWT
 //     (skipped with honest reason).
 
@@ -209,9 +209,49 @@ func TestStandardDeploy_ServeHealthzReadyz(t *testing.T) {
 	}
 }
 
-// T-D-organization-3 -- `podium admin grant` happy path (skipped: needs admin identity).
+// T-D-organization-3 -- `podium admin grant` happy path. A bootstrap admin
+// grants the admin role through the documented CLI command and the grant takes
+// effect (the promoted user can run an admin-only command); a verified
+// non-admin is refused with HTTP 403. The authenticated harness (G-INFRA-5)
+// supplies the admin identity standalone alone cannot.
 func TestStandardDeploy_AdminGrantHappyPath(t *testing.T) {
-	t.Skip("admin grant/revoke/show-effective require an authenticated admin identity; standalone resolves callers to system:public and core.AdminAuthorize rejects them — needs OIDC + a seeded grant")
+	t.Parallel()
+	srv := startAuthServer(t, authServerSpec{
+		BootstrapAdmins: []string{"alice@acme.com"},
+		Layers: []authLayer{{
+			ID:         "restricted",
+			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+			Visibility: authVisibility{Users: []string{"bob@acme.com"}},
+		}},
+	})
+	adminToken := srv.adminToken("alice@acme.com")
+	carolToken := srv.token(authIdentity{Sub: "carol@acme.com", Email: "carol@acme.com"})
+
+	// The admin grants bob through the documented CLI command.
+	grant := runPodium(t, "", acliEnv(t, srv, adminToken), "admin", "grant", "bob@acme.com")
+	if grant.Exit != 0 {
+		t.Fatalf("admin grant bob exit=%d stderr=%s", grant.Exit, grant.Stderr)
+	}
+	if !strings.Contains(grant.Stdout, "bob@acme.com") {
+		t.Errorf("grant response does not name the granted user:\n%s", grant.Stdout)
+	}
+
+	// The grant took effect: bob (no bootstrap admin of his own) can now run an
+	// admin-only command.
+	bobToken := srv.token(authIdentity{Sub: "bob@acme.com", Email: "bob@acme.com"})
+	bobShow := runPodium(t, "", acliEnv(t, srv, bobToken), "admin", "show-effective", "carol@acme.com")
+	if bobShow.Exit != 0 {
+		t.Errorf("granted bob show-effective exit=%d stderr=%s", bobShow.Exit, bobShow.Stderr)
+	}
+
+	// A verified non-admin is refused at the gate with HTTP 403.
+	deny := runPodium(t, "", acliEnv(t, srv, carolToken), "admin", "grant", "dave@acme.com")
+	if deny.Exit == 0 {
+		t.Errorf("non-admin grant exit=0, want non-zero\nstdout:%s\nstderr:%s", deny.Stdout, deny.Stderr)
+	}
+	if !strings.Contains(deny.Stderr, "403") {
+		t.Errorf("non-admin grant: stderr missing 403\nstderr: %s", deny.Stderr)
+	}
 }
 
 // T-D-organization-4 -- `podium admin grant` fails with exit 2 when --registry is missing.
@@ -557,14 +597,92 @@ func TestStandardDeploy_LayerUpdateNoField(t *testing.T) {
 	}
 }
 
-// T-D-organization-20 -- `podium admin show-effective` happy path (skipped: needs admin identity).
+// T-D-organization-20 -- `podium admin show-effective` happy path. A bootstrap
+// admin reads the per-layer visibility for a target through the documented CLI
+// command; a verified non-admin is refused with HTTP 403.
 func TestStandardDeploy_ShowEffectiveHappyPath(t *testing.T) {
-	t.Skip("admin grant/revoke/show-effective require an authenticated admin identity; standalone resolves callers to system:public and core.AdminAuthorize rejects them — needs OIDC + a seeded grant")
+	t.Parallel()
+	srv := startAuthServer(t, authServerSpec{
+		BootstrapAdmins: []string{"alice@acme.com"},
+		Layers: []authLayer{{
+			ID:         "restricted",
+			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+			Visibility: authVisibility{Users: []string{"bob@acme.com"}},
+		}},
+	})
+	adminToken := srv.adminToken("alice@acme.com")
+	carolToken := srv.token(authIdentity{Sub: "carol@acme.com", Email: "carol@acme.com"})
+
+	// The admin's per-target view: the restricted layer is visible to bob
+	// (listed in its users) and not to carol.
+	show := runPodium(t, "", acliEnv(t, srv, adminToken), "admin", "show-effective", "bob@acme.com")
+	if show.Exit != 0 {
+		t.Fatalf("admin show-effective bob exit=%d stderr=%s", show.Exit, show.Stderr)
+	}
+	orgAssertLayerVisible(t, show.Stdout, "restricted", true, "bob is in the restricted layer's user list")
+
+	showCarol := runPodium(t, "", acliEnv(t, srv, adminToken), "admin", "show-effective", "carol@acme.com")
+	if showCarol.Exit != 0 {
+		t.Fatalf("admin show-effective carol exit=%d stderr=%s", showCarol.Exit, showCarol.Stderr)
+	}
+	orgAssertLayerVisible(t, showCarol.Stdout, "restricted", false, "carol is not in the restricted layer's user list")
+
+	// A verified non-admin is refused at the gate with HTTP 403.
+	deny := runPodium(t, "", acliEnv(t, srv, carolToken), "admin", "show-effective", "bob@acme.com")
+	if deny.Exit == 0 {
+		t.Errorf("non-admin show-effective exit=0, want non-zero\nstderr:%s", deny.Stderr)
+	}
+	if !strings.Contains(deny.Stderr, "403") {
+		t.Errorf("non-admin show-effective: stderr missing 403\nstderr: %s", deny.Stderr)
+	}
 }
 
-// T-D-organization-21 -- `podium admin show-effective` with --group happy path (skipped: needs admin identity).
+// T-D-organization-21 -- `podium admin show-effective --group` happy path. The
+// repeatable --group flag injects the target's group claims so a group-gated
+// layer resolves: the layer is visible when the documented group is supplied
+// and hidden when it is not. A non-admin is refused with HTTP 403.
 func TestStandardDeploy_ShowEffectiveWithGroups(t *testing.T) {
-	t.Skip("admin grant/revoke/show-effective require an authenticated admin identity; standalone resolves callers to system:public and core.AdminAuthorize rejects them — needs OIDC + a seeded grant")
+	t.Parallel()
+	srv := startAuthServer(t, authServerSpec{
+		BootstrapAdmins: []string{"alice@acme.com"},
+		Layers: []authLayer{{
+			ID:         "team-finance",
+			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("team finance ledger")},
+			Visibility: authVisibility{Groups: []string{"acme-finance"}},
+		}},
+	})
+	adminToken := srv.adminToken("alice@acme.com")
+	carolToken := srv.token(authIdentity{Sub: "carol@acme.com", Email: "carol@acme.com"})
+
+	// With the documented group supplied, the group-gated layer is visible to
+	// the target. The Go flag parser stops at the first positional, so the
+	// repeatable --group flag precedes the user-id, matching how every other
+	// flag-bearing admin command is invoked (e.g. admin erase).
+	withGroup := runPodium(t, "", acliEnv(t, srv, adminToken),
+		"admin", "show-effective", "--group", "acme-finance", "bob@acme.com")
+	if withGroup.Exit != 0 {
+		t.Fatalf("admin show-effective --group exit=%d stderr=%s", withGroup.Exit, withGroup.Stderr)
+	}
+	orgAssertLayerVisible(t, withGroup.Stdout, "team-finance", true, "bob carries the acme-finance group claim")
+
+	// Without the group the same layer is hidden, confirming --group feeds the
+	// visibility computation.
+	noGroup := runPodium(t, "", acliEnv(t, srv, adminToken),
+		"admin", "show-effective", "bob@acme.com")
+	if noGroup.Exit != 0 {
+		t.Fatalf("admin show-effective (no group) exit=%d stderr=%s", noGroup.Exit, noGroup.Stderr)
+	}
+	orgAssertLayerVisible(t, noGroup.Stdout, "team-finance", false, "no group claim supplied")
+
+	// A verified non-admin is refused at the gate with HTTP 403.
+	deny := runPodium(t, "", acliEnv(t, srv, carolToken),
+		"admin", "show-effective", "--group", "acme-finance", "bob@acme.com")
+	if deny.Exit == 0 {
+		t.Errorf("non-admin show-effective --group exit=0, want non-zero\nstderr:%s", deny.Stderr)
+	}
+	if !strings.Contains(deny.Stderr, "403") {
+		t.Errorf("non-admin show-effective --group: stderr missing 403\nstderr: %s", deny.Stderr)
+	}
 }
 
 // T-D-organization-22 -- `podium admin show-effective` fails when --registry is missing.
@@ -579,9 +697,90 @@ func TestStandardDeploy_ShowEffectiveMissingRegistry(t *testing.T) {
 	}
 }
 
-// T-D-organization-23 -- `podium admin revoke` happy path (skipped: needs admin identity).
+// T-D-organization-23 -- `podium admin revoke` happy path. A bootstrap admin
+// revokes a prior grant through the documented CLI command and the revocation
+// takes effect (the demoted user is refused afterward); a verified non-admin is
+// refused with HTTP 403.
 func TestStandardDeploy_RevokeHappyPath(t *testing.T) {
-	t.Skip("admin grant/revoke/show-effective require an authenticated admin identity; standalone resolves callers to system:public and core.AdminAuthorize rejects them — needs OIDC + a seeded grant")
+	t.Parallel()
+	srv := startAuthServer(t, authServerSpec{
+		BootstrapAdmins: []string{"alice@acme.com"},
+		Layers: []authLayer{{
+			ID:         "restricted",
+			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+			Visibility: authVisibility{Users: []string{"bob@acme.com"}},
+		}},
+	})
+	adminToken := srv.adminToken("alice@acme.com")
+	carolToken := srv.token(authIdentity{Sub: "carol@acme.com", Email: "carol@acme.com"})
+
+	// Grant bob first so revoke has a grant to remove, then confirm bob holds
+	// the admin role.
+	if g := runPodium(t, "", acliEnv(t, srv, adminToken), "admin", "grant", "bob@acme.com"); g.Exit != 0 {
+		t.Fatalf("admin grant bob exit=%d stderr=%s", g.Exit, g.Stderr)
+	}
+	bobToken := srv.token(authIdentity{Sub: "bob@acme.com", Email: "bob@acme.com"})
+	if s := runPodium(t, "", acliEnv(t, srv, bobToken), "admin", "show-effective", "carol@acme.com"); s.Exit != 0 {
+		t.Fatalf("granted bob show-effective exit=%d stderr=%s", s.Exit, s.Stderr)
+	}
+
+	// The admin revokes bob through the documented CLI command. The command
+	// prints "revoked" to stderr and exits 0.
+	revoke := runPodium(t, "", acliEnv(t, srv, adminToken), "admin", "revoke", "bob@acme.com")
+	if revoke.Exit != 0 {
+		t.Fatalf("admin revoke bob exit=%d stderr=%s", revoke.Exit, revoke.Stderr)
+	}
+	if !strings.Contains(revoke.Stderr, "revoked") {
+		t.Errorf("revoke confirmation missing from stderr:\n%s", revoke.Stderr)
+	}
+
+	// The revocation took effect: bob is no longer an admin and is refused.
+	bobAfter := runPodium(t, "", acliEnv(t, srv, bobToken), "admin", "show-effective", "carol@acme.com")
+	if bobAfter.Exit == 0 {
+		t.Errorf("revoked bob show-effective exit=0, want non-zero\nstderr:%s", bobAfter.Stderr)
+	}
+	if !strings.Contains(bobAfter.Stderr, "403") {
+		t.Errorf("revoked bob: stderr missing 403\nstderr: %s", bobAfter.Stderr)
+	}
+
+	// A verified non-admin is refused at the gate with HTTP 403.
+	deny := runPodium(t, "", acliEnv(t, srv, carolToken), "admin", "revoke", "dave@acme.com")
+	if deny.Exit == 0 {
+		t.Errorf("non-admin revoke exit=0, want non-zero\nstderr:%s", deny.Stderr)
+	}
+	if !strings.Contains(deny.Stderr, "403") {
+		t.Errorf("non-admin revoke: stderr missing 403\nstderr: %s", deny.Stderr)
+	}
+}
+
+// orgAssertLayerVisible decodes a `podium admin show-effective` JSON response
+// and asserts the named layer's Visible flag matches want, so the test confirms
+// the per-target computation rather than only the exit code. The server
+// serializes core.EffectiveLayer with capitalized Go field names (LayerID,
+// Visible) under a "layers" array.
+func orgAssertLayerVisible(t *testing.T, stdout, layerID string, want bool, why string) {
+	t.Helper()
+	var eff struct {
+		Layers []struct {
+			LayerID string `json:"LayerID"`
+			Visible bool   `json:"Visible"`
+		} `json:"layers"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &eff); err != nil {
+		t.Fatalf("decode show-effective: %v\nstdout: %s", err, stdout)
+	}
+	var saw bool
+	for _, l := range eff.Layers {
+		if l.LayerID == layerID {
+			saw = true
+			if l.Visible != want {
+				t.Errorf("show-effective layer %q Visible=%v, want %v (%s)", layerID, l.Visible, want, why)
+			}
+		}
+	}
+	if !saw {
+		t.Fatalf("show-effective response missing layer %q: %s", layerID, stdout)
+	}
 }
 
 // T-D-organization-24 -- `podium admin revoke` fails when --registry is missing.

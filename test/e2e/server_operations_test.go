@@ -10,9 +10,13 @@ package e2e
 //   - Read-only fallback (§13.2.1) flips on a metadata-store/primary outage.
 //     The probe is enabled by default (F-13.2.3, resolved), but a standalone
 //     SQLite/memory store cannot be made to fail after boot (the open handle
-//     keeps serving reads), so the read_only transition is only inducible on a
-//     Postgres primary/replica deployment. Tests 5, 6, 7, 8, 9, 33 honest-skip
-//     for that reason, like the Postgres PITR + S3 test 47.
+//     keeps serving reads), and the in-process storetest.FaultStore health-sever
+//     decorator cannot reach into a subprocess, so the probe-driven read_only
+//     transition is not inducible against these standalone subprocess tests.
+//     Tests 5, 6, 7, 8, 9, 33 honest-skip and point to the coverage that does
+//     induce the flip: TestConfigReadOnlyFlip_PostgresPrimaryOutage over a
+//     severable live Postgres primary (G-CONFIG-1) and TestHTTPAPI_ReadOnly*
+//     in-process. The Postgres PITR + S3 test 47 honest-skips similarly.
 //   - F-13.2.8: X-Podium-Read-Only-Lag-Seconds is always "0".
 //   - F-7.3.7: force_push_policy not settable via API/CLI/config. Tests 29, 30.
 //   - podium admin verify: not implemented. Tests 11, 12, 22, 40.
@@ -22,8 +26,10 @@ package e2e
 //     from filesystem bootstrap.
 //   - Test 20: default policy assertion; mcp starts fine, signing assertion
 //     requires a signed medium artifact.
-//   - Test 21: private layer visibility.denied audit event — default standalone
-//     layers are public; private layer visibility control is uncertain.
+//   - Test 21: private layer visibility.denied audit event — converted to the
+//     authenticated, visibility-capable harness (startAuthServer, G-INFRA-5): a
+//     users:-restricted layer plus a caller outside the user set drives a denied
+//     load that records visibility.denied in the audit stream.
 //   - Test 23: webhook ingest invalid HMAC — REAL. The inbound route is
 //     mounted at /v1/ingest/webhook/{id} and advertised at register (F-12.0.1).
 //   - Tests 43, 44: need OIDC IdP or runtime-verified JWT.
@@ -163,8 +169,22 @@ func TestServerOps_ReadyzReturns200(t *testing.T) {
 // ---- T-D-operator-guide-5: write endpoints return registry.read_only --------
 
 // T-D-operator-guide-5
+//
+// This case asserts that write endpoints return registry.read_only once the
+// §13.2.1 probe flips the registry to read_only. The flip is driven by
+// ReadOnlyProbe pinging the metadata store (GetTenant) and tripping after a run
+// of failures. This test boots `serve --standalone` as a subprocess over a
+// SQLite/Memory store whose open handle cannot be made to fail after boot, and
+// the storetest.FaultStore severable-health decorator is in-process only, so it
+// cannot reach into the subprocess. The probe-driven flip is therefore not
+// inducible here. The full journey (writes refused with registry.read_only,
+// reads keep serving, /readyz stays 200, then recovery) is covered against a
+// severable live Postgres primary by TestConfigReadOnlyFlip_PostgresPrimaryOutage
+// in test/integration/readonly_postgres_flip_test.go (gap G-CONFIG-1), and the
+// read-only write rejection is unit-covered in-process by
+// TestHTTPAPI_ReadOnlyRejectsWrites.
 func TestServerOps_ReadOnlyWriteEndpoints(t *testing.T) {
-	t.Skip("read_only requires a metadata-store/primary outage; a standalone SQLite store cannot be made to fail after boot, so this is only inducible on a Postgres primary/replica deployment")
+	t.Skip("probe-driven read_only flip is not inducible against this standalone subprocess (in-process FaultStore cannot sever a subprocess SQLite store); covered over live Postgres by TestConfigReadOnlyFlip_PostgresPrimaryOutage (G-CONFIG-1) and in-process by TestHTTPAPI_ReadOnlyRejectsWrites")
 }
 
 // ---- T-D-operator-guide-6: read endpoints serve with X-Podium-Read-Only headers
@@ -177,8 +197,19 @@ func TestServerOps_ReadOnlyHeaders(t *testing.T) {
 // ---- T-D-operator-guide-7: auto-exit read-only mode -------------------------
 
 // T-D-operator-guide-7
+//
+// This case asserts auto-exit: the registry enters read_only on a metadata-store
+// outage and recovers to ready once the store is reachable again. Both edges are
+// driven by ReadOnlyProbe's run-of-failures / run-of-recoveries against GetTenant.
+// A standalone subprocess over a SQLite/Memory store cannot have that health call
+// severed after boot, and the in-process storetest.FaultStore decorator cannot be
+// injected across the subprocess boundary, so neither edge is inducible here. The
+// entry-then-recovery journey, including the read_only_entered / read_only_exited
+// audit events and writes resuming after recovery, is covered against a severable
+// live Postgres primary by TestConfigReadOnlyFlip_PostgresPrimaryOutage in
+// test/integration/readonly_postgres_flip_test.go (gap G-CONFIG-1).
 func TestServerOps_ReadOnlyAutoExit(t *testing.T) {
-	t.Skip("read_only entry/recovery requires a Postgres primary outage; a standalone SQLite store cannot be made to fail after boot")
+	t.Skip("probe-driven read_only entry/recovery is not inducible against this standalone subprocess (in-process FaultStore cannot sever a subprocess SQLite store); the entry-and-recovery journey is covered over live Postgres by TestConfigReadOnlyFlip_PostgresPrimaryOutage (G-CONFIG-1)")
 }
 
 // ---- T-D-operator-guide-8: read_only_entered / read_only_exited audit events
@@ -501,9 +532,60 @@ func TestServerOps_VerifySignaturesDefault(t *testing.T) {
 
 // ---- T-D-operator-guide-21: visibility.denied audit event ------------------
 
-// T-D-operator-guide-21
+// T-D-operator-guide-21 — operator-guide security review: a read that §4.6
+// visibility filtering rejects is recorded in the registry audit stream as
+// visibility.denied, naming the target, so an operator can attribute the
+// refusal. The wire body withholds the layer's existence (the load returns
+// registry.not_found, not 403), so the audit event is where the denial is
+// named (§6.9, §8.1, §8.2). The default standalone harness serves every layer
+// public; this uses the authenticated, visibility-capable harness (G-INFRA-5)
+// to place an artifact in a users:-restricted layer and drive a denied load as
+// a caller outside that user set.
 func TestServerOps_VisibilityDeniedAuditEvent(t *testing.T) {
-	t.Skip("default standalone layers are public; triggering visibility.denied for an anonymous caller requires a private layer with confirmed private visibility enforcement, which is uncertain in standalone")
+	t.Parallel()
+	auditPath := filepath.Join(t.TempDir(), "audit.log")
+	const restrictedID = "ops/secrets/rotation-runbook"
+	srv := startAuthServer(t, authServerSpec{
+		Layers: []authLayer{
+			{
+				ID: "restricted",
+				Files: map[string]string{
+					restrictedID + "/ARTIFACT.md": authContext("secret rotation runbook, restricted to the on-call owner"),
+				},
+				Visibility: authVisibility{Users: []string{"bob@acme.com"}},
+			},
+		},
+		ExtraEnv: []string{"PODIUM_AUDIT_LOG_PATH=" + auditPath},
+	})
+
+	// alice is outside the restricted layer's user set; bob is its listed owner.
+	alice := srv.token(authIdentity{Sub: "alice@acme.com", Email: "alice@acme.com"})
+	bob := srv.token(authIdentity{Sub: "bob@acme.com", Email: "bob@acme.com"})
+
+	// The owner can load it, confirming the artifact exists and is resolvable;
+	// the denial below is therefore visibility filtering, not a missing row.
+	if st := srv.loadStatus(restrictedID, bob); st != http.StatusOK {
+		t.Fatalf("owner bob load of restricted artifact = %d, want 200\nlog:\n%s", st, srv.log())
+	}
+
+	// alice's direct load is refused without leaking the layer's existence:
+	// 404 registry.not_found on the wire, never 403.
+	st, code := srv.loadCode(restrictedID, alice)
+	if st != http.StatusNotFound {
+		t.Errorf("alice load of restricted artifact = %d, want 404 (no existence leak)\nlog:\n%s", st, srv.log())
+	}
+	if code != "registry.not_found" {
+		t.Errorf("alice load code = %q, want registry.not_found (the hidden layer must not leak as 403)", code)
+	}
+
+	// The audit stream records visibility.denied for the rejected load, naming
+	// the denied target so a SIEM can attribute the refusal (§8.1 target field).
+	if !brPollContains(auditPath, "visibility.denied", 5*time.Second) {
+		t.Fatalf("audit stream did not record visibility.denied for the denied load\naudit log:\n%s", brReadOrEmpty(auditPath))
+	}
+	if !strings.Contains(brReadOrEmpty(auditPath), restrictedID) {
+		t.Errorf("visibility.denied audit event does not name the denied target %q\naudit log:\n%s", restrictedID, brReadOrEmpty(auditPath))
+	}
 }
 
 // ---- T-D-operator-guide-22: admin verify --check audit-chain not implemented

@@ -317,10 +317,64 @@ func TestArtifactResponse_DelegateLoadable(t *testing.T) {
 	}
 }
 
-// T-D-handling-responses-18 — an invisible delegate returns not_found.
+// T-D-handling-responses-18 — an invisible delegate returns not_found. The
+// orchestrator is public and declares delegates_to a data-fetcher that lives in
+// a layer restricted to bob. alice loads the orchestrator and sees the delegate
+// edge in its frontmatter, but loading the delegate itself returns 404
+// registry.not_found (the hidden layer's existence must not leak); bob, the
+// delegate layer's grantee, loads both.
 func TestArtifactResponse_DelegateInvisible(t *testing.T) {
 	t.Parallel()
-	t.Skip("not expressible in a standalone single-layer deployment: there is no invisible layer to hide a delegate from the caller")
+	srv := startAuthServer(t, authServerSpec{
+		Layers: []authLayer{
+			{
+				ID: "public-agents",
+				Files: map[string]string{
+					"agents/acme/orchestrator/ARTIFACT.md": "---\ntype: agent\nname: orchestrator\nversion: 1.0.0\n" +
+						"description: Orchestrator.\ndelegates_to: [agents/acme/data-fetcher]\n---\n\nbody\n",
+				},
+				Visibility: authVisibility{Public: true},
+			},
+			{
+				ID: "restricted-agents",
+				Files: map[string]string{
+					"agents/acme/data-fetcher/ARTIFACT.md": "---\ntype: agent\nname: data-fetcher\nversion: 1.0.0\n" +
+						"description: Fetcher.\n---\n\nfetcher body\n",
+				},
+				Visibility: authVisibility{Users: []string{"bob@acme.com"}},
+			},
+		},
+	})
+	alice := srv.token(authIdentity{Sub: "alice@acme.com", Email: "alice@acme.com"})
+	bob := srv.token(authIdentity{Sub: "bob@acme.com", Email: "bob@acme.com"})
+
+	// alice loads the public orchestrator and the delegate edge is present in
+	// its frontmatter, but she cannot resolve the delegate itself.
+	st, body := srv.get("/v1/load_artifact?id=agents/acme/orchestrator", alice)
+	if st != http.StatusOK {
+		t.Fatalf("alice load orchestrator = %d, want 200 (body=%s)", st, body)
+	}
+	if !strings.Contains(string(body), "agents/acme/data-fetcher") {
+		t.Errorf("orchestrator frontmatter missing the delegates_to edge:\n%s", body)
+	}
+	// The invisible delegate surfaces as 404 registry.not_found, never 403: the
+	// hidden layer's existence must not leak.
+	dst, dcode := srv.loadCode("agents/acme/data-fetcher", alice)
+	if dst != http.StatusNotFound {
+		t.Errorf("alice load invisible delegate = %d, want 404 (no existence leak)", dst)
+	}
+	if dcode != "registry.not_found" {
+		t.Errorf("invisible delegate load code = %q, want registry.not_found", dcode)
+	}
+
+	// bob, the delegate layer's grantee, loads both the orchestrator and the
+	// delegate, proving the hiding is per-identity.
+	if st := srv.loadStatus("agents/acme/orchestrator", bob); st != http.StatusOK {
+		t.Errorf("bob load orchestrator = %d, want 200", st)
+	}
+	if st := srv.loadStatus("agents/acme/data-fetcher", bob); st != http.StatusOK {
+		t.Errorf("bob load delegate = %d, want 200 (grantee can see it)", st)
+	}
 }
 
 // T-D-handling-responses-19 — hook_event and hook_action returned for a hook.

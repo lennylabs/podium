@@ -1478,14 +1478,122 @@ func TestHTTPAPI_DomainAnalyze(t *testing.T) {
 	t.Log("note: /v1/domain/analyze is implemented but not listed in the HTTP API reference")
 }
 
-// spec: http-api.md (admin grants not explicitly documented).
+// spec: http-api.md / §4.7.2 — POST/DELETE /v1/admin/grants. An
+// authenticated admin grants (201) and revokes (204) the admin role; a
+// verified non-admin is refused with HTTP 403 (auth.forbidden). The
+// authenticated harness (G-INFRA-5) supplies the admin identity the
+// standalone server alone cannot.
 func TestHTTPAPI_AdminGrants(t *testing.T) {
-	t.Skip("requires a standard deployment with an authenticated admin identity; standalone serves as system:public so /v1/admin/grants returns 403")
+	t.Parallel()
+	srv := startAuthServer(t, authServerSpec{
+		BootstrapAdmins: []string{"alice@acme.com"},
+		Layers: []authLayer{{
+			ID:         "restricted",
+			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+			Visibility: authVisibility{Users: []string{"bob@acme.com"}},
+		}},
+	})
+	adminToken := srv.adminToken("alice@acme.com")
+	carolToken := srv.token(authIdentity{Sub: "carol@acme.com", Email: "carol@acme.com"})
+	grantsURL := "/v1/admin/grants"
+
+	// A verified non-admin is refused at the gate with auth.forbidden (403).
+	if st, body := srv.do(http.MethodPost, grantsURL, carolToken, []byte(`{"user_id":"dave@acme.com"}`)); st != http.StatusForbidden {
+		t.Errorf("non-admin grant = %d, want 403 (body=%s)", st, body)
+	} else if code := authErrCode(body); code != "auth.forbidden" {
+		t.Errorf("non-admin grant code = %q, want auth.forbidden", code)
+	}
+
+	// The admin grants bob: 201, echoing the granted user id.
+	if st, body := srv.do(http.MethodPost, grantsURL, adminToken, []byte(`{"user_id":"bob@acme.com"}`)); st != http.StatusCreated {
+		t.Fatalf("admin grant bob = %d, want 201 (body=%s)", st, body)
+	}
+
+	// The grant took effect: bob can now exercise an admin-only endpoint.
+	bobToken := srv.token(authIdentity{Sub: "bob@acme.com", Email: "bob@acme.com"})
+	if st, body := srv.get("/v1/admin/show-effective?user_id=carol@acme.com", bobToken); st != http.StatusOK {
+		t.Errorf("granted bob show-effective = %d, want 200 (body=%s)", st, body)
+	}
+
+	// The admin revokes bob: 204.
+	if st, body := srv.do(http.MethodDelete, grantsURL+"?user_id=bob@acme.com", adminToken, nil); st != http.StatusNoContent {
+		t.Fatalf("admin revoke bob = %d, want 204 (body=%s)", st, body)
+	}
+
+	// After revocation bob is no longer an admin: show-effective is 403.
+	if st, _ := srv.get("/v1/admin/show-effective?user_id=carol@acme.com", bobToken); st != http.StatusForbidden {
+		t.Errorf("revoked bob show-effective = %d, want 403", st)
+	}
 }
 
-// spec: http-api.md (show-effective not documented).
+// spec: http-api.md / §4.6.1 — GET /v1/admin/show-effective. An
+// authenticated admin reads the per-layer visibility for a target
+// identity, computed per target; a verified non-admin is refused with
+// HTTP 403 (auth.forbidden).
 func TestHTTPAPI_AdminShowEffective(t *testing.T) {
-	t.Skip("requires a standard deployment with an authenticated admin identity; standalone serves as system:public so /v1/admin/show-effective returns 403")
+	t.Parallel()
+	srv := startAuthServer(t, authServerSpec{
+		BootstrapAdmins: []string{"alice@acme.com"},
+		Layers: []authLayer{{
+			ID:         "restricted",
+			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+			Visibility: authVisibility{Users: []string{"bob@acme.com"}},
+		}},
+	})
+	adminToken := srv.adminToken("alice@acme.com")
+	carolToken := srv.token(authIdentity{Sub: "carol@acme.com", Email: "carol@acme.com"})
+
+	// The admin reads the per-layer view for bob: the restricted layer is
+	// visible because bob is in its user list.
+	st, body := srv.get("/v1/admin/show-effective?user_id=bob@acme.com", adminToken)
+	apiWantStatus(t, st, 200, "admin show-effective bob", body)
+	var eff struct {
+		UserID string `json:"user_id"`
+		Layers []struct {
+			LayerID string `json:"LayerID"`
+			Visible bool   `json:"Visible"`
+		} `json:"layers"`
+	}
+	if err := json.Unmarshal(body, &eff); err != nil {
+		t.Fatalf("decode show-effective: %v (body=%s)", err, body)
+	}
+	if eff.UserID != "bob@acme.com" {
+		t.Errorf("show-effective user_id = %q, want bob@acme.com", eff.UserID)
+	}
+	var sawRestricted, restrictedVisible bool
+	for _, l := range eff.Layers {
+		if l.LayerID == "restricted" {
+			sawRestricted = true
+			restrictedVisible = l.Visible
+		}
+	}
+	if !sawRestricted {
+		t.Fatalf("show-effective missing the restricted layer: %s", body)
+	}
+	if !restrictedVisible {
+		t.Errorf("restricted layer not visible to its listed user bob: %s", body)
+	}
+
+	// The same diagnostic for carol, who is not listed, reports the restricted
+	// layer as not visible, confirming the view is computed per target.
+	st, body = srv.get("/v1/admin/show-effective?user_id=carol@acme.com", adminToken)
+	apiWantStatus(t, st, 200, "admin show-effective carol", body)
+	eff.Layers = nil
+	if err := json.Unmarshal(body, &eff); err != nil {
+		t.Fatalf("decode show-effective (carol): %v (body=%s)", err, body)
+	}
+	for _, l := range eff.Layers {
+		if l.LayerID == "restricted" && l.Visible {
+			t.Errorf("restricted layer visible to non-listed carol: %s", body)
+		}
+	}
+
+	// A verified non-admin is refused at the gate with auth.forbidden (403).
+	if st, b := srv.get("/v1/admin/show-effective?user_id=bob@acme.com", carolToken); st != http.StatusForbidden {
+		t.Errorf("non-admin show-effective = %d, want 403 (body=%s)", st, b)
+	} else if code := authErrCode(b); code != "auth.forbidden" {
+		t.Errorf("non-admin show-effective code = %q, want auth.forbidden", code)
+	}
 }
 
 // spec: http-api.md / §13.8 — the registry exposes a Prometheus /metrics route.

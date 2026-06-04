@@ -480,7 +480,13 @@ func TestStandaloneServer_PublicModeRejectsMedium(t *testing.T) {
 	}
 }
 
-// T-D-small-team-12 — public mode audit log records system:public caller.
+// T-D-small-team-12 — public mode audit log records the anonymous caller as
+// system:public. spec §8.1 / §13.2.2 / §13.10 (F-8.1.2, F-13.10.4): the §8.3
+// file sink serializes the caller-identity attributes under a nested "caller"
+// object whose dotted keys are caller.identity, caller.network, and
+// caller.public_mode. An anonymous public-mode read therefore records
+// {"caller":{"identity":"system:public",...,"public_mode":true}}, the form a
+// SIEM consumer keys on to scope public traffic.
 func TestStandaloneServer_PublicModeAuditCaller(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -498,14 +504,25 @@ func TestStandaloneServer_PublicModeAuditCaller(t *testing.T) {
 	// Trigger a load to produce an audit entry.
 	getJSON(t, srv.BaseURL+"/v1/load_artifact?id=pub", nil)
 
-	if !smallteamPollContains(auditPath, "system:public", 5*time.Second) {
+	// The load event is written after the response, so poll the file. The
+	// caller identity is nested: "caller":{"identity":"system:public",...}.
+	if !smallteamPollContains(auditPath, `"identity":"system:public"`, 5*time.Second) {
 		b, _ := os.ReadFile(auditPath)
-		// The audit format may differ; if "system:public" is absent, skip
-		// honestly rather than failing.
-		if !strings.Contains(string(b), "public") {
-			t.Skip("audit log does not contain 'system:public' or 'public'; audit format uncertain — skipping")
-		}
-		t.Errorf("audit log missing 'system:public':\n%s", string(b))
+		t.Fatalf("audit log missing nested caller identity system:public:\n%s", string(b))
+	}
+	b, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatalf("read audit log: %v", err)
+	}
+	got := string(b)
+	// The public-mode flag is recorded under caller.public_mode so SIEM
+	// filters resolve it without parsing the identity string.
+	if !strings.Contains(got, `"public_mode":true`) {
+		t.Errorf("audit log missing caller.public_mode=true for an anonymous public-mode call:\n%s", got)
+	}
+	// The recorded event is the load of the requested artifact.
+	if !strings.Contains(got, `"type":"artifact.loaded"`) || !strings.Contains(got, `"target":"pub"`) {
+		t.Errorf("audit log missing the artifact.loaded event for target pub:\n%s", got)
 	}
 }
 

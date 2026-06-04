@@ -9,11 +9,19 @@ package e2e
 // Known gaps:
 //   - T-D-progressive-9..11,13..17: require a configured OIDC identity provider
 //     with per-user tokens; not expressible in a no-auth standalone e2e.
-//   - T-D-progressive-30,40,42: require an artifact ingested with a valid
-//     signature envelope; filesystem bootstrap does not attach signatures.
 //   - T-D-progressive-32..37: blocked by F-7.3.9 (break-glass CLI flags absent;
 //     freeze window not reachable via e2e HTTP/CLI surface).
 //   - T-D-progressive-41: requires a standard deployment with OIDC.
+//
+// T-D-progressive-30,40,42 (signing) now run against the G-INFRA-8
+// signedArtifactFixture for the signed half and the filesystem server for the
+// unsigned half. progressive-adoption.md's Month 3 step names
+// PODIUM_VERIFY_SIGNATURES=high-only, which the product rejects (the bridge
+// accepts only never | medium-and-above | always per spec §6.2 and exits 2 on
+// any other value). The documented behavior — high-sensitivity content requires
+// a valid signature to materialize — is enforced by medium-and-above, so these
+// tests use medium-and-above over high-sensitivity content. The literal
+// high-only string is a doc inaccuracy tracked separately.
 
 import (
 	"encoding/json"
@@ -719,15 +727,47 @@ func TestGovernance_SignMissingContentHash(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-30 — signed artifact materializes under policy (skip) --
+// ---- T-D-progressive-30 — signed artifact materializes under policy ----------
 
-// TestProgressive_30_SignedArtifactMaterializes documents that verifying a
-// genuinely signed artifact under medium-and-above requires an artifact ingested
-// with a valid signature envelope; filesystem bootstrap does not attach
-// signatures.
+// TestProgressive_30_SignedArtifactMaterializes exercises the Month 3 signing
+// exit criterion: a validly-signed high-sensitivity artifact materializes under
+// an enforcing verification policy, while the same artifact left unsigned cannot
+// be loaded. The signed half uses the G-INFRA-8 signedArtifactFixture, which
+// attaches a real registry-managed signature envelope at the registry boundary
+// (the standalone filesystem bootstrap attaches none). The unsigned half uses
+// the filesystem server, which serves the artifact without a signature, so the
+// enforcing consumer refuses it.
+//
+// Doc note: progressive-adoption.md's Month 3 step names
+// PODIUM_VERIFY_SIGNATURES=high-only. The product accepts only never |
+// medium-and-above | always (spec §6.2); the bridge exits 2 on any other value.
+// The documented behavior — high-sensitivity artifacts require a valid signature
+// to materialize — is what medium-and-above enforces (it covers medium and high),
+// so the policy here is medium-and-above with high-sensitivity content. The
+// literal high-only string is a doc inaccuracy tracked separately.
 // T-D-progressive-30
 func TestGovernance_SignedArtifactMaterializes(t *testing.T) {
-	t.Skip("requires an artifact ingested with a valid signature envelope; filesystem bootstrap does not attach signatures")
+	t.Parallel()
+
+	// Signed high-sensitivity artifact: verifies and materializes under the
+	// enforcing policy (the envelope validates against the served content hash).
+	f := newSignedArtifactFixture(t, signedArtifactSpec{
+		ID:          "security/playbook/incident-response",
+		Sensitivity: "high",
+	})
+	env := f.Env(t, "medium-and-above")
+	if errStr, result := loadSignedArtifact(t, env, f.ID()); errStr != "" {
+		t.Fatalf("signed high-sensitivity artifact should materialize under the enforcing policy, got: %s\nresult=%v", errStr, result)
+	}
+	if f.LoadHits() == 0 {
+		t.Error("signed fixture registry was never consulted")
+	}
+
+	// Unsigned high-sensitivity artifact: the filesystem server attaches no
+	// signature, so the enforcing consumer refuses the load. The doc's Month 3
+	// exit criterion is "an unsigned high-sensitivity artifact cannot be loaded";
+	// the surfaced error code is materialize.signature_invalid.
+	assertUnsignedHighRefused(t, "security/playbook/unsigned")
 }
 
 // ---- T-D-progressive-31 — lint missing sensitivity does not error (gap) -----
@@ -943,14 +983,57 @@ func TestGovernance_SandboxInformationalWithoutEnforcement(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-40 — compliance-driven signing (skip) ------------------
+// ---- T-D-progressive-40 — compliance-driven signing -------------------------
 
-// TestProgressive_40_ComplianceDrivenSigning documents that the compliance
-// alternate ordering (signed artifact loads, unsigned does not) requires an
-// artifact with a valid signature envelope attached at ingest.
+// assertUnsignedHighRefused boots a filesystem server holding one unsigned
+// high-sensitivity artifact, loads it through the real bridge under the
+// medium-and-above policy, and asserts the load is refused with
+// materialize.signature_invalid. The filesystem bootstrap attaches no signature,
+// so an enforcing consumer rejects the artifact: this is the "unsigned does not
+// load" half of the doc's signing-posture claims.
+func assertUnsignedHighRefused(t *testing.T, id string) {
+	t.Helper()
+	reg := writeRegistry(t, map[string]string{
+		id + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Unsigned high-sensitivity artifact.\nsensitivity: high\n---\n\nsecret body\n",
+	})
+	srv := startServer(t, reg)
+	mat := t.TempDir()
+	env := progMCPEnv(t, srv.BaseURL, mat, "PODIUM_VERIFY_SIGNATURES=medium-and-above")
+	res := mcpExec(t, env, toolCall(2, "load_artifact", map[string]any{"id": id}))
+	errStr := progToolErr(t, res.Stdout, 2)
+	if !strings.Contains(errStr, "materialize.signature_invalid") {
+		t.Fatalf("unsigned high-sensitivity artifact must be refused under the enforcing policy, got: %q\nstdout: %s", errStr, res.Stdout)
+	}
+}
+
+// TestProgressive_40_ComplianceDrivenSigning exercises the compliance-driven
+// alternate ordering: a team under SOC2/ISO/contract pressure jumps from Day 0
+// straight to Month 3's signing posture. The behavioral claim is that a signed
+// artifact loads and an unsigned one does not. The signed half uses the
+// G-INFRA-8 signedArtifactFixture (a real registry-managed envelope over an
+// offline key); the unsigned half uses the filesystem server, which attaches no
+// signature. The same doc note as TestGovernance_SignedArtifactMaterializes
+// applies: the literal high-only env value is rejected by the product, so the
+// enforcing policy used here is medium-and-above over high-sensitivity content.
 // T-D-progressive-40
 func TestGovernance_ComplianceDrivenSigning(t *testing.T) {
-	t.Skip("requires an artifact ingested with a valid signature envelope; filesystem bootstrap does not attach signatures")
+	t.Parallel()
+
+	// Signed artifact loads under the enforcing policy.
+	f := newSignedArtifactFixture(t, signedArtifactSpec{
+		ID:          "compliance/runbook/soc2",
+		Sensitivity: "high",
+	})
+	env := f.Env(t, "medium-and-above")
+	if errStr, result := loadSignedArtifact(t, env, f.ID()); errStr != "" {
+		t.Fatalf("signed artifact should load under the compliance signing posture, got: %s\nresult=%v", errStr, result)
+	}
+	if f.LoadHits() == 0 {
+		t.Error("signed fixture registry was never consulted")
+	}
+
+	// Unsigned artifact does not load under the same posture.
+	assertUnsignedHighRefused(t, "compliance/runbook/unsigned")
 }
 
 // ---- T-D-progressive-41 — standard deployment rejects unauthenticated (OIDC) -
@@ -962,13 +1045,39 @@ func TestGovernance_StandardDeploymentRejectsUnauth(t *testing.T) {
 	t.Skip("requires a standard deployment with a configured OIDC identity provider; not expressible in standalone no-auth e2e")
 }
 
-// ---- T-D-progressive-42 — high-sensitivity domain signing (skip) -------------
+// ---- T-D-progressive-42 — high-sensitivity domain signing -------------------
 
-// TestProgressive_42_HighSensitivityDomainSigning documents that the high-
-// sensitivity alternate ordering requires signed artifacts at ingest.
+// TestProgressive_42_HighSensitivityDomainSigning exercises the
+// high-sensitivity-domain alternate ordering: a catalog of only sensitivity:
+// high content (security playbooks, compliance runbooks) enables signing on day
+// 1. Every artifact in such a catalog is high-sensitivity, so the enforcing
+// policy must verify every load. The signed high-sensitivity artifact loads and
+// verifies through the G-INFRA-8 fixture; an unsigned high-sensitivity artifact
+// is refused. The same doc note as TestGovernance_SignedArtifactMaterializes
+// applies regarding the high-only env value.
 // T-D-progressive-42
 func TestGovernance_HighSensitivityDomainSigning(t *testing.T) {
-	t.Skip("requires an artifact ingested with a valid signature envelope; filesystem bootstrap does not attach signatures")
+	t.Parallel()
+
+	// A signed high-sensitivity artifact verifies and materializes.
+	f := newSignedArtifactFixture(t, signedArtifactSpec{
+		ID:          "security/playbook/ransomware",
+		Sensitivity: "high",
+	})
+	env := f.Env(t, "medium-and-above")
+	errStr, result := loadSignedArtifact(t, env, f.ID())
+	if errStr != "" {
+		t.Fatalf("signed high-sensitivity artifact should materialize in a high-sensitivity-only catalog, got: %s\nresult=%v", errStr, result)
+	}
+	if mb, _ := result["manifest_body"].(string); !strings.Contains(mb, "Signed policy body.") {
+		t.Errorf("loaded result missing the signed body (len=%d)", len(mb))
+	}
+	if f.LoadHits() == 0 {
+		t.Error("signed fixture registry was never consulted")
+	}
+
+	// An unsigned high-sensitivity artifact in the same catalog is refused.
+	assertUnsignedHighRefused(t, "security/playbook/unsigned")
 }
 
 // ---- T-D-progressive-43 — scaffold --sensitivity high embeds field ----------
