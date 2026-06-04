@@ -551,3 +551,104 @@ func mlLoadVersion(t *testing.T, srv *serverProc, token, id, version string) exL
 	}
 	return r
 }
+
+// ---- G-MULTILAYER-4 ---------------------------------------------------------
+
+// G-MULTILAYER-4 — two layers contribute conflicting DOMAIN.md featured and
+// deprioritize lists for one domain, and a workspace overlay adds an artifact
+// surfaced by a distinctive keyword.
+//
+// A multi_layer filesystem registry stages layer-admin (lower precedence) and
+// layer-user (higher) each with a finance/ap/DOMAIN.md. The admin layer features
+// finance/ap/alpha and deprioritizes finance/ap/beta with notable_count 10; the
+// user layer features finance/ap/gamma and deprioritizes finance/ap/delta with
+// notable_count 4. The §4.5.4 cross-layer merge unions the lists append-unique
+// (featured = [alpha, gamma], deprioritize = [beta, delta]) and takes the
+// most-restrictive notable_count (4). load_domain therefore lists exactly four
+// notable artifacts: both featured first (each tagged source: featured), then
+// both deprioritized last. The most-restrictive folding is observable because
+// the list is capped at the lower count (4), not the admin layer's 10.
+//
+// A workspace overlay adds finance/overlay-helper (a sibling domain so it does
+// not perturb the finance/ap notable list) carrying a distinctive keyword in its
+// description. Driven through the podium-mcp bridge, search_artifacts fuses the
+// registry and overlay streams via RRF, so a query for the overlay keyword
+// surfaces finance/overlay-helper flagged overlay: true.
+//
+// spec: §4.5.4 (cross-layer DOMAIN.md merge: featured/deprioritize append-unique,
+// notable_count most-restrictive), §4.5.5 (notable selection ordering), §6.4.1
+// (overlay search fusion via RRF).
+func TestMultiLayer_ConflictingDomainListsMergeAndOverlaySearch(t *testing.T) {
+	t.Parallel()
+	reg := dmMultiLayer(t, map[string]string{
+		// Four artifacts under finance/ap, two featured and two deprioritized
+		// across the conflicting layers.
+		"layer-admin/finance/ap/alpha/ARTIFACT.md": contextArtifact("alpha"),
+		"layer-admin/finance/ap/beta/ARTIFACT.md":  contextArtifact("beta"),
+		"layer-user/finance/ap/gamma/ARTIFACT.md":  contextArtifact("gamma"),
+		"layer-user/finance/ap/delta/ARTIFACT.md":  contextArtifact("delta"),
+		// Conflicting DOMAIN.md featured/deprioritize plus differing notable_count.
+		"layer-admin/finance/ap/DOMAIN.md": "---\ndescription: AP admin\ndiscovery:\n" +
+			"  notable_count: 10\n  featured:\n    - finance/ap/alpha\n  deprioritize:\n    - finance/ap/beta\n---\n\n# AP\n",
+		"layer-user/finance/ap/DOMAIN.md": "---\ndescription: AP user\ndiscovery:\n" +
+			"  notable_count: 4\n  featured:\n    - finance/ap/gamma\n  deprioritize:\n    - finance/ap/delta\n---\n\n# AP\n",
+	})
+	srv := startServer(t, reg)
+
+	// load_domain merges the two layers' DOMAIN.md lists.
+	var dom map[string]any
+	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance/ap", &dom)
+	ids := dmNotableIDs(dom)
+
+	// Most-restrictive folding: notable_count is the lower value (4), not 10.
+	if len(ids) != 4 {
+		t.Fatalf("notable has %d entries, want 4 (most-restrictive notable_count from the user layer): %v", len(ids), ids)
+	}
+	// Append-unique featured union: both featured artifacts appear, both tagged
+	// source: featured, and both occupy the first two notable slots ahead of the
+	// deprioritized tier.
+	featuredSet := map[string]bool{"finance/ap/alpha": true, "finance/ap/gamma": true}
+	if !featuredSet[ids[0]] || !featuredSet[ids[1]] || ids[0] == ids[1] {
+		t.Errorf("first two notable = %v, want the union of both layers' featured {alpha, gamma}", ids[:2])
+	}
+	for _, id := range []string{"finance/ap/alpha", "finance/ap/gamma"} {
+		entry := dmNotableEntry(dom, id)
+		if entry == nil {
+			t.Errorf("featured %s missing from notable: %v", id, ids)
+			continue
+		}
+		if entry["source"] != "featured" {
+			t.Errorf("notable %s source = %v, want featured", id, entry["source"])
+		}
+	}
+	// Append-unique deprioritize union: both deprioritized artifacts are ranked
+	// in the last two slots (after both featured).
+	depriSet := map[string]bool{"finance/ap/beta": true, "finance/ap/delta": true}
+	if !depriSet[ids[2]] || !depriSet[ids[3]] || ids[2] == ids[3] {
+		t.Errorf("last two notable = %v, want the union of both layers' deprioritize {beta, delta} ranked last", ids[2:])
+	}
+
+	// A workspace overlay adds a sibling-domain artifact with a distinctive
+	// keyword. Driven through the bridge, search_artifacts fuses it in.
+	overlay := t.TempDir()
+	writeOverlayFile(t, overlay, "finance/overlay-helper/ARTIFACT.md",
+		"---\ntype: context\nversion: 0.1.0\ndescription: zircon reconciliation overlay helper\nsensitivity: low\n---\n\noverlay body\n")
+
+	res := mcpExec(t, chMCPEnv(t, reg, "PODIUM_HARNESS=none", "PODIUM_OVERLAY_PATH="+overlay),
+		toolCall(1, "search_artifacts", map[string]any{"query": "zircon"}))
+	search := rpcResult(t, res.Stdout, 1)
+	results, _ := search["results"].([]any)
+	var found map[string]any
+	for _, r := range results {
+		if m, ok := r.(map[string]any); ok && m["id"] == "finance/overlay-helper" {
+			found = m
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("overlay artifact finance/overlay-helper did not surface in fused search for its keyword:\n%s", res.Stdout)
+	}
+	if found["overlay"] != true {
+		t.Errorf("fused overlay hit missing overlay: true flag: %v", found)
+	}
+}
