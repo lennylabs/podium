@@ -66,3 +66,5 @@ pages:
     waiver: Landing page; the hello-world init/sync recap duplicates the quickstart and README, which are covered by D-quickstart and D-readme.
   - path: docs/about/contributing.md
     waiver: Contributor workflow page; the commands are dev/CI tasks (go build, make test, SDK installs) exercised by the build and CI gates rather than a behavioral e2e.
+  - path: docs/testing/live-vector-backends.md
+    waiver: Test-setup page; the commands provision managed vector-backend accounts and collections and invoke the make test-live-external lane, which runs against external services rather than a hermetic e2e.
