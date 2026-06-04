@@ -105,6 +105,65 @@ func TestIngest_CrossLayerExtendsOverlayAllowed(t *testing.T) {
 	}
 }
 
+// Spec: §4.6 — a higher-precedence layer overlays a same-ID artifact from a
+// lower-precedence layer by declaring extends: <id> and carrying its own
+// version (§4.7.6: "each artifact has its own version stored in the
+// registry"). The parent reference (unpinned) must resolve against the
+// lower-precedence layer's record even though that record shares the
+// canonical ID, and the merged child wins per the field-semantics table.
+func TestIngest_CrossLayerExtendsOverlayDistinctVersion(t *testing.T) {
+	t.Parallel()
+	st := newStore(t)
+	base := "---\ntype: context\nversion: 0.1.0\ndescription: base\nsensitivity: low\n---\n\nbase body\n"
+	ingestOne(t, st, "base", "greet", base)
+	overlay := "---\ntype: context\nversion: 0.2.0\ndescription: overlay\nsensitivity: low\nextends: greet\n---\n\noverlay body\n"
+	res := ingestOne(t, st, "team", "greet", overlay)
+	if res.Accepted != 1 || len(res.Rejected) != 0 {
+		t.Fatalf("accepted=%d rejected=%+v, want a clean accept for the same-ID overlay", res.Accepted, res.Rejected)
+	}
+	rec, err := st.GetManifest(context.Background(), "tenant-1", "greet", "0.2.0")
+	if err != nil {
+		t.Fatalf("overlay not stored: %v", err)
+	}
+	// The unpinned parent reference resolves to the lower-precedence record.
+	if rec.ExtendsPin != "greet@0.1.0" {
+		t.Errorf("ExtendsPin = %q, want greet@0.1.0", rec.ExtendsPin)
+	}
+	if rec.Layer != "team" {
+		t.Errorf("stored Layer = %q, want team", rec.Layer)
+	}
+	if rec.Description != "overlay" {
+		t.Errorf("Description = %q, want overlay (child wins)", rec.Description)
+	}
+}
+
+// Spec: §4.6 / §4.7.6 — when a child names its own canonical ID as the
+// extends parent but no lower-precedence record carries a different version,
+// the only candidate is the child's own record, which is a genuine
+// self-cycle. resolveExtendsPin excludes only the child's own-layer record,
+// so a same-ID record from a different layer at the SAME version is still a
+// candidate parent; that path collides on the (id, version) store key and is
+// reported as a version conflict rather than a false self-extends cycle.
+func TestIngest_SameVersionOverlayIsConflictNotSelfCycle(t *testing.T) {
+	t.Parallel()
+	st := newStore(t)
+	base := "---\ntype: context\nversion: 0.1.0\ndescription: base\nsensitivity: low\n---\n\nbase body\n"
+	ingestOne(t, st, "base", "greet", base)
+	overlay := "---\ntype: context\nversion: 0.1.0\ndescription: overlay\nsensitivity: low\nextends: greet\n---\n\noverlay body\n"
+	res := ingestOne(t, st, "team", "greet", overlay)
+	// The lower-precedence parent resolves, so this is not a self-cycle
+	// rejection; the same (id, version) store key makes it a version
+	// conflict instead.
+	for _, r := range res.Rejected {
+		if strings.Contains(r.Reason, "self-extends cycle") {
+			t.Fatalf("must not report a self-extends cycle for a cross-layer same-ID parent: %+v", r)
+		}
+	}
+	if len(res.Conflicts) != 1 {
+		t.Fatalf("conflicts=%+v, want exactly one version conflict", res.Conflicts)
+	}
+}
+
 // Spec: §4.7.6 — a version bump within the SAME layer is not a cross-layer
 // collision; the new version is accepted alongside the old.
 func TestIngest_SameLayerVersionBumpNotCollision(t *testing.T) {

@@ -642,7 +642,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		// manifests and pin to an exact version. Parent updates do
 		// not silently propagate; only re-ingesting the child does.
 		if rec.Artifact.Extends != "" {
-			pin, parentType, parentLicense, perr := resolveExtendsPin(ctx, st, req.TenantID, rec.Artifact.Extends, rec.ID, rec.Artifact.Version)
+			pin, parentType, parentLicense, perr := resolveExtendsPin(ctx, st, req.TenantID, rec.Artifact.Extends, rec.ID, rec.Artifact.Version, req.LayerID)
 			if perr != nil {
 				res.Rejected = append(res.Rejected, RejectedArtifact{
 					ArtifactID: rec.ID,
@@ -1359,10 +1359,13 @@ func stripPin(ref string) string {
 // "finance/parent@sha256:<hex>") against existing manifests for the
 // tenant and returns the pinned form "<id>@<exact-version>" together with
 // the parent's type at the resolved version. childID is the artifact
-// being ingested; we use it to detect a self-reference (the simplest
-// cycle case). The returned type lets the caller enforce the §4.6 rule
-// that a child's type must match its parent's.
-func resolveExtendsPin(ctx context.Context, st store.Store, tenantID, ref, childID, childVersion string) (pin, parentType, parentLicense string, err error) {
+// being ingested; we use it together with childLayer to detect a genuine
+// self-reference (the child's own record in its own layer) while still
+// allowing a same-ID, same-version record from a lower-precedence layer to
+// serve as the parent (the §4.6 same-ID extends overlay). The returned type
+// lets the caller enforce the §4.6 rule that a child's type must match its
+// parent's.
+func resolveExtendsPin(ctx context.Context, st store.Store, tenantID, ref, childID, childVersion, childLayer string) (pin, parentType, parentLicense string, err error) {
 	id, pinStr := splitRef(ref)
 	if id == "" {
 		return "", "", "", fmt.Errorf("invalid extends reference %q", ref)
@@ -1389,9 +1392,13 @@ func resolveExtendsPin(ctx context.Context, st store.Store, tenantID, ref, child
 		}
 		// A child may extend its own canonical ID to overlay a
 		// lower-precedence layer's artifact (§4.6 same-ID extends
-		// exception). Its own version is never a valid parent — that
-		// would be a self-cycle — so exclude it from the candidate set.
-		if id == childID && m.Version == childVersion {
+		// exception). The child's own record in its own layer is never a
+		// valid parent (that would be a self-cycle), so exclude only that
+		// row. A same-ID, same-version record contributed by a different
+		// (lower-precedence) layer is a legitimate parent and must stay in
+		// the candidate set; two repositories that scaffold the same
+		// artifact at the default version land here.
+		if id == childID && m.Version == childVersion && m.Layer == childLayer {
 			continue
 		}
 		versions = append(versions, m.Version)
