@@ -20,6 +20,10 @@ node_modules/
 .env.local
 .envrc.local
 
+# Local integration/live-test credentials. Copy test.env.example to test.env
+# and fill it in; the test harness loads it (see internal/testenv + Makefile).
+/test.env
+
 # close-build-gaps.py driver scratch (not part of the project)
 close-build-gaps-reference-only.sh
 .claude/scheduled_tasks.lock

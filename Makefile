@@ -64,11 +64,23 @@ help:
 
 # ----- Test lanes ------------------------------------------------------------
 
+# Optional env file (gitignored) supplying the credentials the integration and
+# live tests read: Postgres, S3, the managed vector backends, the embedding
+# providers, and the live-lane switches. Copy test.env.example to test.env and
+# fill in the services you have. LOAD_TEST_ENV sources it into the recipe shell
+# when present so a single file drives every lane below; each recipe's own
+# assignments still win, and a missing file is a no-op (CI uses its injected
+# secrets instead). The test/e2e and test/integration suites also load it
+# directly through internal/testenv, so `go test ./test/...` without make picks
+# it up too. Override the path with `make test TEST_ENV_FILE=/path/to/env`.
+TEST_ENV_FILE ?= test.env
+LOAD_TEST_ENV = set -a; [ -f "$(TEST_ENV_FILE)" ] && . "./$(TEST_ENV_FILE)"; set +a;
+
 # Single-lane test target: the entire Go suite runs in one invocation.
 # Tier 2 integration tests gate themselves on PODIUM_LIVE_* env vars and
 # are skipped by default. Use `make test-live` to opt in.
 test:
-	$(GO) test $(GOFLAGS) -count=1 ./...
+	$(LOAD_TEST_ENV) $(GO) test $(GOFLAGS) -count=1 ./...
 
 # Run the full suite with env vars pointing at the local docker-compose
 # services (see docker-compose.yml + `make services-up`). Tests that
@@ -86,7 +98,7 @@ LIVE_S3_SECRET    ?= minioadmin
 LIVE_S3_USE_SSL   ?= false
 
 test-live:
-	PODIUM_POSTGRES_DSN="$(LIVE_POSTGRES_DSN)" \
+	$(LOAD_TEST_ENV) PODIUM_POSTGRES_DSN="$(LIVE_POSTGRES_DSN)" \
 	PODIUM_S3_ENDPOINT="$(LIVE_S3_ENDPOINT)" \
 	PODIUM_S3_BUCKET="$(LIVE_S3_BUCKET)" \
 	PODIUM_S3_ACCESS_KEY_ID="$(LIVE_S3_KEY)" \
@@ -109,7 +121,7 @@ test-live:
 # managed-stack e2e take their live paths when a stack is running (the
 # release workflow sets these to its service values).
 test-live-external:
-	PODIUM_LIVE_EXTERNAL=1 \
+	$(LOAD_TEST_ENV) PODIUM_LIVE_EXTERNAL=1 \
 	PODIUM_VECTOR_BACKEND="$$PODIUM_VECTOR_BACKEND" \
 	PODIUM_EMBEDDING_PROVIDER="$$PODIUM_EMBEDDING_PROVIDER" \
 	PODIUM_EMBEDDING_MODEL="$$PODIUM_EMBEDDING_MODEL" \
@@ -192,7 +204,7 @@ dex-down:
 # test gates on Dex reachability regardless. -run pins the single test so the
 # rest of the suite is not pulled in.
 test-auth-dex: dex-up
-	PODIUM_LIVE_DEX=1 $(GO) test $(GOFLAGS) -count=1 -run TestDexLogin ./test/e2e/...
+	$(LOAD_TEST_ENV) PODIUM_LIVE_DEX=1 $(GO) test $(GOFLAGS) -count=1 -run TestDexLogin ./test/e2e/...
 
 # Run the §7.1 latency benchmark suite. Output is informational;
 # CI does not gate on absolute numbers because cloud runners vary.
