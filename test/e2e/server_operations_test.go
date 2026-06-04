@@ -12,7 +12,7 @@ package e2e
 //     SQLite/memory store cannot be made to fail after boot (the open handle
 //     keeps serving reads), so the read_only transition is only inducible on a
 //     Postgres primary/replica deployment. Tests 5, 6, 7, 8, 9, 33 honest-skip
-//     for that reason, like the Postgres tests 45-47.
+//     for that reason, like the Postgres PITR + S3 test 47.
 //   - F-13.2.8: X-Podium-Read-Only-Lag-Seconds is always "0".
 //   - F-7.3.7: force_push_policy not settable via API/CLI/config. Tests 29, 30.
 //   - podium admin verify: not implemented. Tests 11, 12, 22, 40.
@@ -30,7 +30,9 @@ package e2e
 //   - Tests 25: sandbox enforcement via MCP — REAL (feasible).
 //   - Tests 33: /readyz in read_only — probe not triggerable.
 //   - Tests 35, 36, 37: promtool checks — REAL when promtool installed.
-//   - Tests 45, 46: two binary versions + Postgres; honest skip.
+//   - Tests 45, 46: two binary versions + Postgres; implemented over a live
+//     Postgres metadata store (G-LIFECYCLE-7) in
+//     server_ops_rolling_upgrade_test.go, gated on PODIUM_POSTGRES_DSN.
 //   - Test 47: Postgres PITR + S3; honest skip.
 
 import (
@@ -1241,18 +1243,16 @@ func TestServerOps_ClockSkewTokenExpired(t *testing.T) {
 }
 
 // ---- T-D-operator-guide-45: rolling upgrade coexistence ---------------------
-
-// T-D-operator-guide-45
-func TestServerOps_RollingUpgradeCoexistence(t *testing.T) {
-	t.Skip("requires two binary versions sharing a Postgres database with expand-contract migration applied; not available in e2e")
-}
-
 // ---- T-D-operator-guide-46: rollback before finalize is safe ----------------
-
-// T-D-operator-guide-46
-func TestServerOps_RollbackBeforeFinalize(t *testing.T) {
-	t.Skip("requires two binary versions sharing a Postgres database; expand-contract migration with finalize step not available in e2e")
-}
+//
+// TestServerOps_RollingUpgradeCoexistence (T-D-operator-guide-45) and
+// TestServerOps_RollbackBeforeFinalize (T-D-operator-guide-46) live in
+// server_ops_rolling_upgrade_test.go. They drive the §13.4 additive upgrade
+// over a live Postgres metadata store (gap G-LIFECYCLE-7): a database written
+// by an earlier binary's schema is migrated forward in place by the current
+// binary, two server processes coexist against the one Postgres during the
+// overlap, and reverting to the earlier binary's column set still reads and
+// writes the migrated database.
 
 // ---- T-D-operator-guide-47: restore verification content_hash matches ------
 
