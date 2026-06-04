@@ -806,9 +806,18 @@ func (p *Postgres) purgeDeprecatedInSchema(ctx context.Context, ident string, be
 	if _, err := conn.ExecContext(ctx, `SET search_path TO `+ident+`, public`); err != nil {
 		return 0, err
 	}
+	// §4.6/§4.7.6 extends-pin protection: retain a deprecated version still
+	// pinned as an extends parent by another manifest so the child's
+	// load_artifact (which resolves the parent through the hard pin) is not
+	// orphaned. The pin form ExtendsPin stores is "<artifact_id>@<version>".
 	res, err := conn.ExecContext(ctx, `
 		DELETE FROM manifests
-		WHERE deprecated = TRUE AND deprecated_at IS NOT NULL AND deprecated_at < $1`,
+		WHERE deprecated = TRUE AND deprecated_at IS NOT NULL AND deprecated_at < $1
+		  AND NOT EXISTS (
+			SELECT 1 FROM manifests AS child
+			WHERE child.tenant_id = manifests.tenant_id
+			  AND child.extends_pin = manifests.artifact_id || '@' || manifests.version
+		  )`,
 		before.UTC())
 	if err != nil {
 		return 0, err

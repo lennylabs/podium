@@ -186,9 +186,22 @@ func (s *Memory) ListManifests(_ context.Context, tenantID string) ([]ManifestRe
 func (s *Memory) PurgeDeprecatedManifests(_ context.Context, before time.Time) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// §4.6/§4.7.6 extends-pin protection: collect the set of versions still
+	// pinned as an extends parent so a deprecated parent a live child depends on
+	// is not purged out from under it (purging it would orphan the child's
+	// load_artifact). The pin form is "<artifact_id>@<version>".
+	pinned := map[string]bool{}
+	for _, rec := range s.manifests {
+		if rec.TenantID != "" && rec.ExtendsPin != "" {
+			pinned[rec.TenantID+"\x00"+rec.ExtendsPin] = true
+		}
+	}
 	n := 0
 	for key, rec := range s.manifests {
 		if rec.Deprecated && rec.DeprecatedAt != nil && rec.DeprecatedAt.Before(before) {
+			if pinned[rec.TenantID+"\x00"+rec.ArtifactID+"@"+rec.Version] {
+				continue
+			}
 			delete(s.manifests, key)
 			n++
 		}

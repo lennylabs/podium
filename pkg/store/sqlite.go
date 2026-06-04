@@ -472,9 +472,23 @@ func (s *SQLite) ListManifests(ctx context.Context, tenantID string) ([]Manifest
 // DeprecatedAt predates `before` (§8.4 90-day window). Timestamps are
 // stored as RFC3339Nano UTC text, which sorts lexicographically.
 func (s *SQLite) PurgeDeprecatedManifests(ctx context.Context, before time.Time) (int, error) {
+	// §4.6/§4.7.6 extends-pin protection: a deprecated version that is still
+	// pinned as an extends parent by another manifest must not be purged. The
+	// child's pin is a hard reference resolved to this exact version at the
+	// child's ingest time, and load_artifact resolves the parent through it
+	// (resolveExtendsChain). Purging the pinned parent would orphan the child
+	// and make it unloadable, so the version is retained until no manifest pins
+	// it (the child is itself reingested onto a newer parent or removed). The
+	// NOT EXISTS clause keys on the canonical "<artifact_id>@<version>" pin form
+	// ExtendsPin stores.
 	res, err := s.db.ExecContext(ctx, `
 		DELETE FROM manifests
-		WHERE deprecated = 1 AND deprecated_at IS NOT NULL AND deprecated_at < ?`,
+		WHERE deprecated = 1 AND deprecated_at IS NOT NULL AND deprecated_at < ?
+		  AND NOT EXISTS (
+			SELECT 1 FROM manifests AS child
+			WHERE child.tenant_id = manifests.tenant_id
+			  AND child.extends_pin = manifests.artifact_id || '@' || manifests.version
+		  )`,
 		before.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return 0, err
