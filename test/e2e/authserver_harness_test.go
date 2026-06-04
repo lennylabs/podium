@@ -29,6 +29,7 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -426,5 +427,79 @@ func (as *authServer) authGrantAdmin(adminToken, userID string) {
 	body, _ := json.Marshal(map[string]any{"user_id": userID})
 	if st, b := as.do(http.MethodPost, "/v1/admin/grants", adminToken, body); st != http.StatusCreated {
 		as.t.Fatalf("admin grant %s = %d, want 201 (body=%s)", userID, st, b)
+	}
+}
+
+// scimGroupID looks up the server-assigned id of a SCIM group by its
+// displayName, so a test can edit the group's membership at runtime after the
+// declarative seed created it. It uses the SCIM list endpoint with a
+// displayName filter and fails the test when the group is absent.
+func (as *authServer) scimGroupID(scimToken, displayName string) string {
+	as.t.Helper()
+	q := url.Values{}
+	q.Set("filter", `displayName eq "`+displayName+`"`)
+	st, body := as.do2(http.MethodGet, "/scim/v2/Groups?"+q.Encode(), scimToken, "application/scim+json", nil)
+	if st != http.StatusOK {
+		as.t.Fatalf("SCIM list groups (displayName=%q): HTTP %d body=%s", displayName, st, body)
+	}
+	var resp struct {
+		Resources []struct {
+			ID          string `json:"id"`
+			DisplayName string `json:"displayName"`
+		} `json:"Resources"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		as.t.Fatalf("decode SCIM group list: %v (body=%s)", err, body)
+	}
+	for _, g := range resp.Resources {
+		if g.DisplayName == displayName {
+			return g.ID
+		}
+	}
+	as.t.Fatalf("SCIM group %q not found in directory (body=%s)", displayName, body)
+	return ""
+}
+
+// scimUserID looks up the server-assigned id of a SCIM user by its userName
+// (the value the §4.6 evaluator matches against the token sub or email). Used
+// to rebuild a group's member list when revoking a single member's
+// visibility at runtime.
+func (as *authServer) scimUserID(scimToken, userName string) string {
+	as.t.Helper()
+	q := url.Values{}
+	q.Set("filter", `userName eq "`+userName+`"`)
+	st, body := as.do2(http.MethodGet, "/scim/v2/Users?"+q.Encode(), scimToken, "application/scim+json", nil)
+	if st != http.StatusOK {
+		as.t.Fatalf("SCIM list users (userName=%q): HTTP %d body=%s", userName, st, body)
+	}
+	var resp struct {
+		Resources []struct {
+			ID       string `json:"id"`
+			UserName string `json:"userName"`
+		} `json:"Resources"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		as.t.Fatalf("decode SCIM user list: %v (body=%s)", err, body)
+	}
+	for _, u := range resp.Resources {
+		if u.UserName == userName {
+			return u.ID
+		}
+	}
+	as.t.Fatalf("SCIM user %q not found in directory (body=%s)", userName, body)
+	return ""
+}
+
+// scimSetGroupMembers replaces a SCIM group's membership with the given member
+// ids (PUT /scim/v2/Groups/{id}), failing the test on a non-200. Passing no ids
+// empties the group so MembersOf resolves it to the empty set, which the §4.6
+// evaluator treats as "no member sees the layer." This is the runtime
+// revocation seam: a member's visibility is removed without changing their
+// verified identity.
+func (as *authServer) scimSetGroupMembers(scimToken, groupID, displayName string, memberIDs []string) {
+	as.t.Helper()
+	st, body := as.do2(http.MethodPut, "/scim/v2/Groups/"+groupID, scimToken, "application/scim+json", oidcSCIMGroupBody(displayName, memberIDs))
+	if st != http.StatusOK {
+		as.t.Fatalf("SCIM replace group %q members: HTTP %d body=%s", displayName, st, body)
 	}
 }
