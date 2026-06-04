@@ -86,8 +86,36 @@ func TestDeployment_MCPRejectsFilesystemPath(t *testing.T) {
 }
 
 // T-D-how-it-works-4 — zero-flag auto-bootstrap banner and ~/.podium files.
+// F-13.10.1 is closed: a flag-free serve emits the first-run notice and writes
+// the standalone bootstrap files. The backend-default and bind assertions are
+// the sibling TestConfigZeroFlag_BootstrapDefaults; this test asserts the
+// doc-named artifacts: the banner, ~/.podium/registry.yaml, ~/.podium/sync.yaml,
+// and the ~/podium-artifacts/ default directory.
 func TestDeployment_ZeroFlagAutoBootstrap(t *testing.T) {
-	t.Skip("blocked by F-13.10.1: zero-flag detection emits no 'No config found' banner and does not create ~/.podium/registry.yaml or ~/podium-artifacts/")
+	// Not parallel: binds the fixed default port 127.0.0.1:8080.
+	srv := startZeroFlagServer(t)
+
+	if !strings.Contains(srv.log(), "No config found at ~/.podium/registry.yaml") {
+		t.Errorf("zero-flag serve did not emit the first-run notice:\n%s", srv.log())
+	}
+	for _, rel := range []string{
+		filepath.Join(".podium", "registry.yaml"),
+		filepath.Join(".podium", "sync.yaml"),
+	} {
+		if _, err := os.Stat(filepath.Join(srv.Home, rel)); err != nil {
+			t.Errorf("zero-flag bootstrap did not create %s: %v", rel, err)
+		}
+	}
+	// The documented `--layer-path ~/podium-artifacts/` graduation directory is
+	// created at first run.
+	if fi, err := os.Stat(filepath.Join(srv.Home, "podium-artifacts")); err != nil || !fi.IsDir() {
+		t.Errorf("zero-flag bootstrap did not create ~/podium-artifacts/: %v", err)
+	}
+	// sync.yaml points clients at the standalone registry.
+	sync := readFile(t, filepath.Join(srv.Home, ".podium", "sync.yaml"))
+	if !strings.Contains(sync, "registry: http://127.0.0.1:8080") {
+		t.Errorf("bootstrapped sync.yaml does not point at the standalone registry:\n%s", sync)
+	}
 }
 
 // T-D-how-it-works-5 — explicit --standalone --layer-path serves the API.
@@ -599,14 +627,35 @@ func TestDeployment_SyncDryRun(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-32 — serve --strict refuses without config.
+// T-D-how-it-works-32 — serve --strict refuses without config. F-13.10.1 is
+// closed: --strict maps onto the §13.10 no-autostandalone gate, so a serve with
+// no explicit config (no registry.yaml, no PODIUM_* server settings, no --bind)
+// exits non-zero naming the missing setup rather than auto-bootstrapping.
 func TestDeployment_ServeStrict(t *testing.T) {
-	t.Skip("blocked by F-13.10.1: --strict is unimplemented (the flag is not defined and there is no strict-config gate)")
+	t.Parallel()
+	exit, out := serveNoBindExpectRefusal(t, []string{"HOME=" + t.TempDir()}, "--strict")
+	if exit == 0 {
+		t.Fatalf("serve --strict exited 0; expected a refusal without config\noutput:\n%s", out)
+	}
+	if !strings.Contains(out, "--strict") || !strings.Contains(out, "registry.yaml") {
+		t.Errorf("serve --strict refusal does not name --strict and the missing registry.yaml:\n%s", out)
+	}
 }
 
-// T-D-how-it-works-33 — PODIUM_NO_AUTOSTANDALONE=1 suppresses bootstrap.
+// T-D-how-it-works-33 — PODIUM_NO_AUTOSTANDALONE=1 refuses the zero-flag
+// bootstrap. F-13.10.1 is closed: the env var has the same effect as --strict,
+// so a serve with no explicit config and no --bind exits non-zero rather than
+// auto-bootstrapping a standalone deployment.
 func TestDeployment_NoAutostandalone(t *testing.T) {
-	t.Skip("blocked by F-13.10.1: PODIUM_NO_AUTOSTANDALONE is not honored; the server still auto-bootstraps standalone mode")
+	t.Parallel()
+	exit, out := serveNoBindExpectRefusal(t,
+		[]string{"HOME=" + t.TempDir(), "PODIUM_NO_AUTOSTANDALONE=1"})
+	if exit == 0 {
+		t.Fatalf("serve under PODIUM_NO_AUTOSTANDALONE exited 0; expected a refusal\noutput:\n%s", out)
+	}
+	if !strings.Contains(out, "registry.yaml") {
+		t.Errorf("no-autostandalone refusal does not name the missing registry.yaml:\n%s", out)
+	}
 }
 
 // T-D-how-it-works-34 — public mode: all artifacts visible without auth.
