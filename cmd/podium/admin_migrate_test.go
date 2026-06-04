@@ -194,6 +194,62 @@ func TestAdminMigrateToStandard_PumpsMetadataAndObjects(t *testing.T) {
 	}
 }
 
+// Spec: §13.10 / §4.7.1 — a real standalone source keys every row by the
+// deterministic UUIDv5 of the "default" org, not the literal string "default".
+// The migration must resolve that tenant id and pump its manifests; probing only
+// the literal id silently migrates zero metadata (blobs copy, manifests do not).
+func TestAdminMigrateToStandard_MigratesStandaloneUUIDTenant(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	srcDB := filepath.Join(dir, "source.db")
+	dstDB := filepath.Join(dir, "dest.db")
+
+	// Seed the source the way a running standalone server does: under the UUID
+	// tenant id, not the literal "default".
+	uuidTenant := standaloneDefaultOrgID()
+	if uuidTenant == "default" {
+		t.Fatal("standaloneDefaultOrgID returned the literal default; the UUID derivation is wrong")
+	}
+	src, err := store.OpenSQLite(srcDB)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	if err := src.CreateTenant(context.Background(), store.Tenant{ID: uuidTenant, Name: "default"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	if err := src.PutManifest(context.Background(), store.ManifestRecord{
+		TenantID: uuidTenant, ArtifactID: "team/standalone-skill", Version: "1.0.0",
+		ContentHash: "sha256:uuidtenant", Type: "skill", Layer: "team-shared",
+	}); err != nil {
+		t.Fatalf("PutManifest: %v", err)
+	}
+	_ = src.Close()
+
+	rc := adminMigrateToStandard([]string{
+		"--source-sqlite", srcDB,
+		"--target-store", "sqlite",
+		"--target-sqlite", dstDB,
+	})
+	if rc != 0 {
+		t.Fatalf("rc = %d, want 0", rc)
+	}
+
+	// The target carries the manifest keyed by the same UUID tenant; resolving
+	// only the literal "default" would have left it empty.
+	dst, err := store.OpenSQLite(dstDB)
+	if err != nil {
+		t.Fatalf("open dest: %v", err)
+	}
+	t.Cleanup(func() { _ = dst.Close() })
+	manifests, err := dst.ListManifests(context.Background(), uuidTenant)
+	if err != nil {
+		t.Fatalf("ListManifests on target: %v", err)
+	}
+	if len(manifests) != 1 || manifests[0].ArtifactID != "team/standalone-skill" {
+		t.Errorf("target manifests = %+v, want one team/standalone-skill under the UUID tenant", manifests)
+	}
+}
+
 // Spec: §13.10 — --dry-run reports the plan and writes nothing.
 func TestAdminMigrateToStandard_DryRunWritesNothing(t *testing.T) {
 	t.Parallel()

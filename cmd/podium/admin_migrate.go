@@ -10,9 +10,18 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/store"
 )
+
+// standaloneDefaultOrgID returns the deterministic UUIDv5 the standalone /
+// auto-bootstrap deployment assigns the "default" org. It mirrors
+// serverboot.orgIDForName so the migration reads the same tenant key a running
+// standalone server writes under. spec: §4.7.1.
+func standaloneDefaultOrgID() string {
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("podium:org:default")).String()
+}
 
 // adminMigrateToStandard pumps the standalone deployment's state
 // (SQLite metadata + filesystem object store) into a standard
@@ -286,9 +295,15 @@ func planMigration(sqlitePath string) (*migrationPlan, error) {
 		layerConfigs: map[string][]store.LayerConfig{},
 		adminGrants:  map[string][]store.AdminGrant{},
 	}
-	// Standalone has one tenant. Future multi-tenant migration
-	// passes plug a ListTenants implementation here.
-	for _, id := range []string{"default"} {
+	// Standalone has one tenant, but its id is the deterministic UUIDv5 the
+	// auto-bootstrap derives for the "default" org (§4.7.1: org IDs are UUIDs,
+	// names are aliases), not the literal string "default". A real standalone
+	// source keys every manifest, layer config, and grant by that UUID, so
+	// migrating only the literal "default" would silently pump zero metadata
+	// (the symptom: blobs copy but no manifests). Probe both ids: the UUID for a
+	// real standalone database and the literal for a directly-seeded source.
+	// Future multi-tenant migration plugs a ListTenants enumeration here.
+	for _, id := range []string{standaloneDefaultOrgID(), "default"} {
 		t, err := src.GetTenant(context.Background(), id)
 		if err != nil {
 			continue
