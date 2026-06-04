@@ -78,7 +78,7 @@ Goal: surface the existing risk profile of artifacts. No enforcement yet.
 
 Goal: integrity guarantees on artifacts where integrity matters.
 
-- Set `PODIUM_VERIFY_SIGNATURES=high-only`. Ingest of unsigned `sensitivity: high` artifacts now fails with `materialize.signature_invalid` at the consumer side.
+- Set `PODIUM_VERIFY_SIGNATURES=medium-and-above`. Loading an unsigned `sensitivity: high` or `sensitivity: medium` artifact then fails with `materialize.signature_invalid` at the consumer side.
 - Roll signing into the author flow: each `high` artifact gets signed at PR-merge time (Sigstore-keyless via OIDC, or a tenant signing key managed by the registry).
 - Promote the lint check from warning to error: missing `sensitivity:` is now an ingest failure.
 

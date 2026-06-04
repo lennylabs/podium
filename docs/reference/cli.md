@@ -556,7 +556,7 @@ podium search "month-end close OR variance" --type skill --top-k 15 --json \
 | `PODIUM_AUDIT_SINK` | Local audit destination. |
 | `PODIUM_MATERIALIZE_ROOT` | Default destination for `load_artifact` materialization. |
 | `PODIUM_PRESIGN_TTL_SECONDS` | Override for presigned URL TTL. |
-| `PODIUM_VERIFY_SIGNATURES` | `never`, `medium-and-above` (default), `high-only`, `always`. |
+| `PODIUM_VERIFY_SIGNATURES` | `never`, `medium-and-above` (default), `always`. |
 | `PODIUM_IDENTITY_PROVIDER` | `oauth-device-code` (default), `injected-session-token`. |
 | `PODIUM_OAUTH_AUDIENCE`, `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` | OAuth provider config. |
 | `PODIUM_SESSION_TOKEN_ENV`, `PODIUM_SESSION_TOKEN_FILE` | Injected-token sources. |
