@@ -120,11 +120,17 @@ Claude Code adapter.
    podium artifact scaffold --type skill --description "Greet a user politely" "$WORK/reg/greet"
    ```
 
-3. Create a project and write its project-local configuration.
+3. Create a project and write its project-local configuration. `podium init`
+   discovers the workspace by walking up from the current directory (§7.5.2), so
+   change into the project first; that makes init write
+   `$WORK/proj/.podium/sync.yaml`. The `--target` flag only sets the
+   `defaults.target` value inside the file. The workspace discovery decides where
+   the file goes.
 
    ```bash
    mkdir -p "$WORK/proj"
-   podium init --target "$WORK/proj" --registry "$WORK/reg" --harness claude-code
+   cd "$WORK/proj"
+   podium init --registry "$WORK/reg" --harness claude-code --target "$WORK/proj"
    ```
 
 4. Materialize into the project.
