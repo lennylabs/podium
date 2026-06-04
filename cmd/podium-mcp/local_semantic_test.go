@@ -194,6 +194,10 @@ func TestMCPOverlayVectorBackend_ReachesAllDocumentedBackends(t *testing.T) {
 			if got == nil || got.ID() != c.wantID {
 				t.Fatalf("provider = %v, want id %q", got, c.wantID)
 			}
+			// Release the backend's resources. The sqlite-vec provider opens a
+			// *sql.DB whose connectionOpener goroutine runs until Close, so a
+			// test that constructs it must close it or leak that goroutine.
+			t.Cleanup(func() { _ = got.Close() })
 		})
 	}
 }
