@@ -155,6 +155,14 @@ func configClientShowAt(cwd, home string, asJSON bool, explain string) int {
 		return 0
 	}
 
+	// A run from a directory with no sync.yaml in scope (and no user-global
+	// config) has nothing to render. Say so rather than printing an empty
+	// screen, and point at how to configure one.
+	if len(defs) == 0 && len(profs) == 0 {
+		fmt.Fprintln(os.Stdout, "(no client configuration in scope; run `podium init` or pass --registry)")
+		return 0
+	}
+
 	// Human view: defaults block, then each profile, then a collision
 	// summary line. spec: §7.7 example output.
 	for _, key := range defaultsKeys {

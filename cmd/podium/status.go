@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/pkg/identity"
+	"github.com/lennylabs/podium/pkg/sync"
 )
 
 // statusCmd prints a one-screen summary of the current Podium
@@ -23,13 +24,42 @@ import (
 func statusCmd(args []string) int {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	setUsage(fs, "Print a diagnostic summary of the current Podium client setup.")
-	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
+	registryFlag := fs.String("registry", "", "registry URL")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
-	fmt.Printf("registry:           %s\n", orMissing(*registry))
-	fmt.Printf("harness:            %s\n", envOr("PODIUM_HARNESS", "none"))
+	// §7.5.2: resolve the registry and harness the way `podium sync` and
+	// `podium config show` do — the flag, then the PODIUM_* env var, then the
+	// merged sync.yaml — so this diagnostic reflects what a sync would actually
+	// use, not only the process environment. A relative filesystem registry
+	// resolves against the workspace.
+	cwd, _ := os.Getwd()
+	home, _ := os.UserHomeDir()
+	merged, workspace, _ := sync.LoadMergedConfig(cwd, home)
+	registry := *registryFlag
+	if registry == "" {
+		registry = os.Getenv("PODIUM_REGISTRY")
+	}
+	if registry == "" && merged != nil {
+		registry = merged.Defaults.Registry
+	}
+	if registry != "" {
+		ws := workspace
+		if ws == "" {
+			ws = cwd
+		}
+		registry = sync.ResolveRegistryPath(ws, registry)
+	}
+	harness := os.Getenv("PODIUM_HARNESS")
+	if harness == "" && merged != nil {
+		harness = merged.Defaults.Harness
+	}
+	if harness == "" {
+		harness = "none"
+	}
+	fmt.Printf("registry:           %s\n", orMissing(registry))
+	fmt.Printf("harness:            %s\n", harness)
 	fmt.Printf("cache dir:          %s\n", envOr("PODIUM_CACHE_DIR", "~/.podium/cache/"))
 	fmt.Printf("cache mode:         %s\n", envOr("PODIUM_CACHE_MODE", "always-revalidate"))
 	fmt.Printf("overlay path:       %s\n", envOr("PODIUM_OVERLAY_PATH", "(disabled)"))
@@ -37,10 +67,17 @@ func statusCmd(args []string) int {
 	fmt.Printf("session token:      %s\n", maskedToken(os.Getenv("PODIUM_SESSION_TOKEN")))
 	fmt.Printf("tenant:             %s\n", envOr("PODIUM_TENANT_ID", "(unset)"))
 
-	if *registry != "" {
+	// Reachability, scope preview, and the keychain token only apply to a
+	// server-source registry (an HTTP URL). A filesystem-source registry has no
+	// /healthz endpoint, so probing it would print a spurious UNREACHABLE.
+	serverURL := registry != "" && sync.IsServerSource(registry)
+	if registry != "" && !serverURL {
+		fmt.Printf("source:             filesystem (no server to reach)\n")
+	}
+	if serverURL {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, *registry+"/healthz", nil)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, registry+"/healthz", nil)
 		resp, err := http.DefaultClient.Do(req)
 		switch {
 		case err != nil:
@@ -63,7 +100,7 @@ func statusCmd(args []string) int {
 		// counts the MCP server, SDK, and podium sync expose, for human
 		// inspection of "what could this identity have loaded?".
 		fmt.Printf("scope preview:\n")
-		switch preview, err := fetchScopePreview(*registry); {
+		switch preview, err := fetchScopePreview(registry); {
 		case err == nil:
 			printScopePreview(os.Stdout, preview)
 		case isScopePreviewDisabled(err):
@@ -71,11 +108,9 @@ func statusCmd(args []string) int {
 		default:
 			fmt.Printf("  (unavailable: %v)\n", err)
 		}
-	}
 
-	store := identity.KeychainStore{Service: envOr("PODIUM_TOKEN_KEYCHAIN_NAME", "podium")}
-	if *registry != "" {
-		if _, err := store.Load(*registry); err == nil {
+		store := identity.KeychainStore{Service: envOr("PODIUM_TOKEN_KEYCHAIN_NAME", "podium")}
+		if _, err := store.Load(registry); err == nil {
 			fmt.Printf("keychain token:     present\n")
 		} else {
 			fmt.Printf("keychain token:     not found (run `podium login`)\n")

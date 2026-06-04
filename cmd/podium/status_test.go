@@ -3,6 +3,8 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -57,5 +59,45 @@ func TestStatus_UnreachableRegistry(t *testing.T) {
 	})
 	if !strings.Contains(out, "UNREACHABLE") {
 		t.Errorf("status output missing UNREACHABLE marker:\n%s", out)
+	}
+}
+
+// Spec: §7.5.2 / §7.7 — `podium status` resolves the registry and harness from
+// the merged sync.yaml (not only the environment), so the diagnostic reflects
+// what a sync would actually use. A filesystem-source registry is marked as
+// such and skips the HTTP reachability probe.
+func TestStatus_ResolvesRegistryAndHarnessFromSyncYAML(t *testing.T) {
+	t.Setenv("PODIUM_REGISTRY", "")
+	t.Setenv("PODIUM_HARNESS", "")
+	t.Setenv("HOME", t.TempDir()) // isolate the user-global config scope
+	t.Setenv("USERPROFILE", t.TempDir())
+
+	dir := t.TempDir()
+	regDir := filepath.Join(dir, "reg")
+	if err := os.MkdirAll(filepath.Join(dir, ".podium"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(regDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	yaml := "defaults:\n  registry: " + regDir + "\n  harness: claude-code\n"
+	if err := os.WriteFile(filepath.Join(dir, ".podium", "sync.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	out := captureStdout(t, func() {
+		if rc := statusCmd(nil); rc != 0 {
+			t.Errorf("rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(out, "registry:           "+regDir) {
+		t.Errorf("status did not resolve registry from sync.yaml:\n%s", out)
+	}
+	if !strings.Contains(out, "harness:            claude-code") {
+		t.Errorf("status did not resolve harness from sync.yaml:\n%s", out)
+	}
+	if !strings.Contains(out, "source:             filesystem") {
+		t.Errorf("status did not mark the filesystem registry:\n%s", out)
 	}
 }

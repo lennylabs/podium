@@ -121,6 +121,25 @@ func TestConfigShow_BareOmitsServerSettings(t *testing.T) {
 	}
 }
 
+// Spec: §7.7 — a bare `config show` from a directory with no sync.yaml in scope
+// (and no user-global config) hints at how to configure one rather than
+// printing an empty screen.
+func TestConfigShow_BareEmptyHints(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+	t.Setenv("PODIUM_CONFIG_FILE", filepath.Join(t.TempDir(), "missing.yaml"))
+	t.Chdir(t.TempDir())
+
+	out := captureStdout(t, func() {
+		if rc := configShow(nil); rc != 0 {
+			t.Errorf("rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(out, "no client configuration in scope") {
+		t.Errorf("bare config show did not hint on an empty config:\n%q", out)
+	}
+}
+
 // Spec: §7.7 — bare `config show --json` carries the client payload only.
 // The `settings` key belongs to the --server view.
 func TestConfigShow_BareJSONHasNoSettings(t *testing.T) {
