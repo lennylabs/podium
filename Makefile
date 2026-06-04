@@ -104,7 +104,7 @@ test-live:
 	PODIUM_S3_ACCESS_KEY_ID="$(LIVE_S3_KEY)" \
 	PODIUM_S3_SECRET_ACCESS_KEY="$(LIVE_S3_SECRET)" \
 	PODIUM_S3_USE_SSL="$(LIVE_S3_USE_SSL)" \
-	$(GO) test $(GOFLAGS) -count=1 ./...
+	$(GO) test $(GOFLAGS) -p 1 -count=1 ./...
 
 # Run the full suite against managed vector backends (Pinecone, Weaviate
 # Cloud, Qdrant Cloud) and embedding providers (OpenAI, Cohere, Voyage,
@@ -117,13 +117,32 @@ test-live:
 # below so the credential surface this lane consumes is legible; an unset
 # var stays empty and its sub-suite skips.
 #
+# PODIUM_VECTOR_BACKEND and PODIUM_EMBEDDING_PROVIDER are deliberately NOT
+# forwarded. Both are read with os.LookupEnv (serverboot.go), so a var set to
+# the empty string is an explicit §13.12 choice ("disable embedding
+# generation; search degrades to BM25-only"), distinct from unset. Forwarding
+# `PODIUM_VECTOR_BACKEND="$$PODIUM_VECTOR_BACKEND"` when the operator left it
+# unset injects an empty-but-set value, which the zero-flag standalone tests
+# (TestConfigZeroFlag_*) see as "embeddings off" and the sqlite-vec + ollama
+# default never engages. make exports the ambient environment to recipes
+# anyway, so an operator who does pin a backend in their shell still has it
+# applied; leaving these two off keeps an unset var unset.
+#
 # Postgres and S3 are forwarded too so the pgvector depth tests and the
 # managed-stack e2e take their live paths when a stack is running (the
 # release workflow sets these to its service values).
+#
+# -p 1 serializes package test binaries. Several packages (pkg/store,
+# pkg/vector, test/integration, test/e2e) drive the one shared Postgres
+# database and reset global state (store.Postgres.ResetForTest drops every org
+# schema and truncates public.tenants). go test runs package binaries in
+# parallel by default, so without -p 1 one package's reset wipes another
+# package's rows mid-test. The release/nightly workflows avoid this by running
+# the Postgres-backed packages as separate serial steps; this single-invocation
+# lane needs -p 1 to get the same isolation. Tests inside one package stay
+# parallel.
 test-live-external:
 	$(LOAD_TEST_ENV) PODIUM_LIVE_EXTERNAL=1 \
-	PODIUM_VECTOR_BACKEND="$$PODIUM_VECTOR_BACKEND" \
-	PODIUM_EMBEDDING_PROVIDER="$$PODIUM_EMBEDDING_PROVIDER" \
 	PODIUM_EMBEDDING_MODEL="$$PODIUM_EMBEDDING_MODEL" \
 	PODIUM_PINECONE_API_KEY="$$PODIUM_PINECONE_API_KEY" \
 	PODIUM_PINECONE_INDEX="$$PODIUM_PINECONE_INDEX" \
@@ -155,7 +174,7 @@ test-live-external:
 	PODIUM_S3_ACCESS_KEY_ID="$$PODIUM_S3_ACCESS_KEY_ID" \
 	PODIUM_S3_SECRET_ACCESS_KEY="$$PODIUM_S3_SECRET_ACCESS_KEY" \
 	PODIUM_S3_USE_SSL="$$PODIUM_S3_USE_SSL" \
-	$(GO) test $(GOFLAGS) -count=1 ./...
+	$(GO) test $(GOFLAGS) -p 1 -count=1 ./...
 
 # ----- Local services for live tests ---------------------------------------
 

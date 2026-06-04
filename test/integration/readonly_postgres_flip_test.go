@@ -76,6 +76,10 @@ func TestConfigReadOnlyFlip_PostgresPrimaryOutage(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = pg.Close() })
 	ctx := context.Background()
+	// ResetForTest wipes every org schema on the shared database; hold the
+	// whole-database lock across the reset and every later assertion so no
+	// sibling reset lands mid-flight.
+	lockPostgresReset(t)
 	if err := pg.ResetForTest(ctx); err != nil {
 		t.Fatalf("ResetForTest: %v", err)
 	}

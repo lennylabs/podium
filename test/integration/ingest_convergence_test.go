@@ -62,6 +62,11 @@ func ingestConvergenceStores(t *testing.T) []ingestConvergenceFactory {
 		factories = append(factories, ingestConvergenceFactory{
 			name: "postgres",
 			open: func(t *testing.T) store.Store {
+				// ResetForTest drops every org schema on the shared database, so
+				// this Postgres subtest holds the whole-database lock for its full
+				// run; the memory and sqlite factories are unaffected and stay
+				// parallel.
+				lockPostgresReset(t)
 				pg, err := store.OpenPostgres(dsn)
 				if err != nil {
 					t.Skipf("OpenPostgres %q: %v (database unreachable)", dsn, err)

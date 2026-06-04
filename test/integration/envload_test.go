@@ -2,6 +2,7 @@ package integration
 
 import (
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/lennylabs/podium/internal/testenv"
@@ -14,4 +15,27 @@ import (
 func TestMain(m *testing.M) {
 	testenv.Load()
 	os.Exit(m.Run())
+}
+
+// pgGlobalResetMu serializes the integration tests that call
+// store.Postgres.ResetForTest, which drops every org schema and truncates
+// public.tenants on the one shared Postgres database. A reset is global, so two
+// such tests interleaving corrupts whichever one is mid-flight: a parallel
+// test's reset lands during another test's seed-then-assert window and wipes its
+// rows. Each whole-database test holds this lock for its full body (reset, seed,
+// and assertions) so the destructive resets cannot overlap. This is the heavier
+// live-external lane's failure mode (the managed-backend and pgvector tests
+// change the concurrency and timing enough to expose the race); under the
+// PR/hermetic lane the same tests pass, but the guard removes the latent
+// ordering dependency on both lanes.
+var pgGlobalResetMu sync.Mutex
+
+// lockPostgresReset acquires the shared whole-database lock and releases it when
+// the test ends. A test that resets the shared Postgres database calls this
+// before ResetForTest and holds it across every later assertion, so no other
+// whole-database test can reset underneath it.
+func lockPostgresReset(t *testing.T) {
+	t.Helper()
+	pgGlobalResetMu.Lock()
+	t.Cleanup(pgGlobalResetMu.Unlock)
 }

@@ -133,6 +133,10 @@ func TestAuthOrgIsolation_OrgScopedReadsAreIsolated(t *testing.T) {
 		t.Skipf("OpenPostgres %q: %v (database unreachable)", dsn, err)
 	}
 	t.Cleanup(func() { _ = pg.Close() })
+	// ResetForTest wipes every org schema on the shared database; hold the
+	// whole-database lock across the reset, the seed, and every later assertion
+	// so no sibling reset lands mid-flight.
+	lockPostgresReset(t)
 	if err := pg.ResetForTest(context.Background()); err != nil {
 		t.Fatalf("ResetForTest: %v", err)
 	}
