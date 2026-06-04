@@ -1307,11 +1307,32 @@ restarted independently (for example the `make services-up` Postgres container).
 This scenario requires interrupting Postgres mid-run, so it is the hardest to
 perform by hand; skip it if the database cannot be severed.
 
+The read path during the outage depends on the database topology. §13.2.1
+defines read-only mode as the state reached when the Postgres primary becomes
+unreachable while a read replica stays up, and read endpoints serve from that
+replica. The registry binary connects reads and writes through a single
+`PODIUM_POSTGRES_DSN`, so replica-served reads require that DSN to point at an
+endpoint that survives the primary outage (a connection pooler or replica
+service). The `make services-up` stack runs a single Postgres with no replica.
+Against that stack, stopping the single Postgres instance also stops reads, so
+the read-continuity item below is observable on a primary-plus-replica deployment
+instead. The mode flip, the write refusal, and the recovery are observable on
+the single-Postgres stack.
+
 **Steps.**
 
 1. Run the isolation block, start services, load `test.env`, and serve in strict
-   mode with Postgres and S3 (as in S14, on `127.0.0.1:8118`). Confirm a search
-   works.
+   mode with Postgres and S3 (as in S14, on `127.0.0.1:8118`). Author the
+   `report` skill from S14 and create the Git repository the write in step 2
+   registers. Confirm a search works.
+
+   ```bash
+   podium artifact scaffold --type skill --description "Generate a quarterly report" "$WORK/reg/report"
+   git -C "$WORK" init -q repo
+   git -C "$WORK/repo" -c user.email=alice@acme.com -c user.name=alice commit -q --allow-empty -m init
+   git -C "$WORK/repo" branch -M main
+   ```
+
 2. Stop the Postgres container (`docker stop` the database service), wait for the
    health probe to flip, and observe.
 
@@ -1325,9 +1346,19 @@ perform by hand; skip it if the database cannot be severed.
 
 **Expected.**
 
-- After Postgres stops, `podium status` reports `registry mode: read_only`.
-- Reads (search and load) continue to serve from the available stores and cache.
-- The write (`layer register`) is refused with a read-only error.
-- After Postgres restarts, the mode returns to ready and writes succeed again.
+- After Postgres stops, `podium status` reports `registry mode: read_only`, and
+  `/healthz` reports `mode: read_only`. The server log records `registry entered
+  read_only mode after 3 probe failures` and the audit log records a
+  `registry.read_only_entered` event.
+- On a primary-plus-replica deployment, reads (search and load) continue to serve
+  from the replica. On the single-Postgres `make services-up` stack there is no
+  replica, so `podium search` returns HTTP 500 `registry.unavailable` while the
+  primary is down; the read-continuity behavior is verified on a replica-backed
+  deployment instead.
+- The write (`layer register`) is refused with HTTP 503 `registry.read_only`.
+- After Postgres restarts, the mode returns to ready after three consecutive
+  probe successes, and `layer register` succeeds. The server log records
+  `registry exited read_only mode` and the audit log records a
+  `registry.read_only_exited` event.
 
 **Cleanup.** Stop the server, `rm -rf "$WORK"`, and `make services-down`.
