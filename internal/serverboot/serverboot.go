@@ -165,6 +165,29 @@ func splitCSVTrim(raw string) []string {
 	return out
 }
 
+// parseDurationList parses a comma-separated list of Go durations (for example
+// "1s,5s,30s") into a slice, used by the §7.3.2 webhook retry-backoff override.
+// Entries that do not parse or are negative are dropped; an empty or fully
+// invalid input returns nil so the caller keeps its default schedule.
+func parseDurationList(raw string) []time.Duration {
+	parts := splitCSVTrim(raw)
+	if len(parts) == 0 {
+		return nil
+	}
+	out := make([]time.Duration, 0, len(parts))
+	for _, p := range parts {
+		d, err := time.ParseDuration(p)
+		if err != nil || d < 0 {
+			continue
+		}
+		out = append(out, d)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // adaptNotifier turns a notification.Provider into the
 // core.NotificationFunc shape, swallowing errors (the registry
 // keeps running on outage; the audit log records what happened).
@@ -801,6 +824,24 @@ func Run() error {
 		}
 	}
 	webhookWorker := &webhook.Worker{Store: webhookStore}
+	// §7.3.2 auto-disable threshold: a receiver auto-disables after this many
+	// consecutive delivery failures (default 32, applied by the worker when the
+	// field is zero). PODIUM_WEBHOOK_MAX_FAILURES tunes it, matching the pattern
+	// of the other operator-tunable failure counters (PODIUM_READONLY_PROBE_FAILURES).
+	// A value of 0 leaves the worker default in effect.
+	if mf := envInt("PODIUM_WEBHOOK_MAX_FAILURES", 0); mf > 0 {
+		webhookWorker.MaxFailures = mf
+		log.Printf("webhook auto-disable threshold: %d consecutive failures", mf)
+	}
+	// §7.3.2 retry backoff: PODIUM_WEBHOOK_RETRY_BACKOFF overrides the per-attempt
+	// retry schedule (default 1s,2s,4s,8s,16s,30s,60s) with a comma-separated list
+	// of Go durations (for example "1s,5s,30s"). Deployments that prefer a tighter
+	// or looser retry cadence than the default tune it here; an empty list leaves
+	// the worker default in effect.
+	if bo := parseDurationList(os.Getenv("PODIUM_WEBHOOK_RETRY_BACKOFF")); len(bo) > 0 {
+		webhookWorker.Backoff = bo
+		log.Printf("webhook retry backoff: %v", bo)
+	}
 
 	bootOpts := bootstrapOptions(cfg, objStore)
 	bootOpts = append(bootOpts, server.WithWebhooks(webhookWorker), server.WithMode(mode))

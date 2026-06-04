@@ -127,14 +127,23 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			"streaming not supported")
 		return
 	}
+	types := r.URL.Query()["type"]
+	sub, cancel := s.events.subscribe(types)
+	defer cancel()
+
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no") // disable nginx buffering
 	w.WriteHeader(http.StatusOK)
-
-	types := r.URL.Query()["type"]
-	sub, cancel := s.events.subscribe(types)
-	defer cancel()
+	// Flush the response headers immediately so a subscriber's client returns
+	// from its request as soon as the stream is established, rather than blocking
+	// until the first event or the heartbeat interval. net/http buffers the
+	// status line and headers until the first body write or flush; without this
+	// a quiet stream withholds the 200 from the client for up to one heartbeat.
+	// Subscribing before the flush guarantees that once the client observes the
+	// 200, the subscription is active, so no event fired after the response is
+	// missed by the new subscriber.
+	flusher.Flush()
 
 	enc := json.NewEncoder(w)
 	hb := s.events.heartbeat
