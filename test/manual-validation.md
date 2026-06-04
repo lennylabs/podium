@@ -7,7 +7,11 @@ scenarios cover the deployment modes (solo filesystem, standalone server, and
 standard server), embeddings on and off, the local and managed vector backends,
 single and multiple layers backed by real Git repositories, the four harness
 adapters, and the governance features (per-caller visibility, admin RBAC,
-signing, public mode, lifecycle, and migration).
+signing, public mode, lifecycle, and migration). Later scenarios cover domain
+modeling and discovery, authoring guardrails, sync profiles and scope filtering,
+reverse-dependency impact, webhook-driven reingest, audit and right-to-be-forgotten
+erasure, workspace overlays, offline-cache resilience, and importing an existing
+skill tree.
 
 The same scenarios are executed by the agentic workflow in
 `tools/workflows` (the `agentic-manual-validation` workflow), which runs one
@@ -99,6 +103,16 @@ rm -rf "$WORK"
 | S19 | Signing and signature verification | standalone | none | none | none |
 | S20 | Migration from standalone to standard | standalone then standard | none | pgvector | Postgres, S3 |
 | S21 | Read-only fallback on a primary outage | standard | none | pgvector | severable Postgres, S3 |
+| S22 | Domain modeling and discovery | standalone | none | none | none |
+| S23 | Authoring guardrails: lint rejects invalid manifests | solo | none | none | none |
+| S24 | Sync profiles and overrides | solo | none | none | none |
+| S25 | Sync scope filtering by path and type | solo | none | none | none |
+| S26 | Reverse-dependency impact analysis | standalone | none | none | none |
+| S27 | Inbound webhook-driven reingest | standalone | none | none | none |
+| S28 | Audit log and right-to-be-forgotten erasure | standalone | none | none | none |
+| S29 | Workspace overlay merges local artifacts | standalone | none | none | none |
+| S30 | Offline-first cache resilience | standalone | none | none | none |
+| S31 | Import an existing skill tree into a layer | solo | none | none | none |
 
 ---
 
@@ -1362,3 +1376,541 @@ the single-Postgres stack.
   `registry.read_only_exited` event.
 
 **Cleanup.** Stop the server, `rm -rf "$WORK"`, and `make services-down`.
+
+---
+
+## S22: Domain modeling and discovery
+
+**Goal.** Validate that a `DOMAIN.md` hierarchy defines the domain tree, and that
+`domain show`, `domain search`, and `domain analyze` report it.
+
+**Covers.** Standalone deployment, `DOMAIN.md` composition, `domain show`,
+`domain search`, `domain analyze`.
+
+**Steps.**
+
+1. Run the isolation block.
+2. Build a registry with two top-level domains and one nested domain, each
+   carrying a `DOMAIN.md`, plus a few skills.
+
+   ```bash
+   mkdir -p "$WORK/reg/finance/close" "$WORK/reg/eng"
+   cat > "$WORK/reg/finance/DOMAIN.md" <<'MD'
+   ---
+   description: "Finance team artifacts: AP, AR, close, and reporting."
+   discovery:
+     max_depth: 3
+     fold_below_artifacts: 3
+     keywords: [finance, accounting, close]
+   ---
+
+   # Finance
+
+   Operations and reference material for the finance function.
+   MD
+   cat > "$WORK/reg/eng/DOMAIN.md" <<'MD'
+   ---
+   description: "Engineering runbooks and deploy automation."
+   discovery:
+     keywords: [engineering, deploy, infra]
+   ---
+
+   # Engineering
+   MD
+   podium artifact scaffold --type skill --description "Reconcile the general ledger at period end" "$WORK/reg/finance/close/reconcile"
+   podium artifact scaffold --type skill --description "Post the monthly accrual journal" "$WORK/reg/finance/close/accrual"
+   podium artifact scaffold --type skill --description "Roll out a service to production" "$WORK/reg/eng/deploy"
+   ```
+
+3. Serve and inspect the domain tree.
+
+   ```bash
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8119 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8119/healthz
+   export PODIUM_REGISTRY=http://127.0.0.1:8119
+   podium domain show --registry "$PODIUM_REGISTRY"
+   podium domain search --registry "$PODIUM_REGISTRY" "accounting close"
+   podium domain analyze --registry "$PODIUM_REGISTRY" --path finance
+   ```
+
+**Expected.**
+
+- `domain show` renders the `finance`, `finance/close`, and `eng` domains, with
+  the `DOMAIN.md` descriptions attached to `finance` and `eng`.
+- `domain search "accounting close"` returns the `finance` domain ahead of `eng`,
+  matching on the `DOMAIN.md` description and keywords.
+- `domain analyze --path finance` prints domain-discovery metrics for the
+  subtree (the artifact count and the fold or split candidates relative to the
+  `fold_below_artifacts` and `max_depth` settings).
+
+**Cleanup.** Stop the server and `rm -rf "$WORK"`.
+
+---
+
+## S23: Authoring guardrails: lint rejects invalid manifests
+
+**Goal.** Validate that `podium lint` accepts a valid registry and reports a
+specific error for each kind of invalid artifact, before any server is involved.
+
+**Covers.** Solo deployment, `lint`, required-field validation, the skill
+name-match rule.
+
+**Steps.**
+
+1. Run the isolation block.
+2. Author one valid skill and two invalid ones by hand.
+
+   ```bash
+   podium artifact scaffold --type skill --description "A valid skill" "$WORK/reg/good"
+
+   # Invalid: SKILL.md has no description (a required field).
+   mkdir -p "$WORK/reg/nodesc"
+   printf -- '---\ntype: skill\nversion: 0.1.0\n---\n\n<!-- body in SKILL.md -->\n' > "$WORK/reg/nodesc/ARTIFACT.md"
+   printf -- '---\nname: nodesc\n---\n\nbody\n' > "$WORK/reg/nodesc/SKILL.md"
+
+   # Invalid: SKILL.md name does not match the leaf directory.
+   mkdir -p "$WORK/reg/mismatch"
+   printf -- '---\ntype: skill\nversion: 0.1.0\n---\n\n<!-- body in SKILL.md -->\n' > "$WORK/reg/mismatch/ARTIFACT.md"
+   printf -- '---\nname: wrong-name\ndescription: Name does not match the directory\n---\n\nbody\n' > "$WORK/reg/mismatch/SKILL.md"
+   ```
+
+3. Lint the registry.
+
+   ```bash
+   podium lint --registry "$WORK/reg"; echo "exit=$?"
+   ```
+
+**Expected.**
+
+- `podium lint` exits nonzero.
+- It reports the missing-description violation for `nodesc` (a required-field
+  error naming the `description` field).
+- It reports the name-mismatch violation for `mismatch` (the SKILL.md `name`
+  must equal the leaf directory).
+- It does not report a violation for `good`. The output names each offending
+  artifact, so a reader can map each message to its directory.
+
+**Cleanup.** `rm -rf "$WORK"`.
+
+---
+
+## S24: Sync profiles and overrides
+
+**Goal.** Validate that a sync profile captures a named subset, that
+`profile edit` narrows it, and that `sync override` toggles a single artifact on
+top of the resolved set.
+
+**Covers.** Solo deployment, `sync save-as`, `profile edit`, `sync override`,
+`sync --profile`.
+
+**Steps.**
+
+1. Run the isolation block.
+2. Author a registry with three skills, configure a project, and materialize
+   everything.
+
+   ```bash
+   podium artifact scaffold --type skill --description "Alpha skill" "$WORK/reg/alpha"
+   podium artifact scaffold --type skill --description "Beta skill"  "$WORK/reg/beta"
+   podium artifact scaffold --type skill --description "Gamma skill" "$WORK/reg/gamma"
+   mkdir -p "$WORK/proj" && cd "$WORK/proj"
+   podium init --registry "$WORK/reg" --harness claude-code --target "$WORK/proj"
+   podium sync
+   find "$WORK/proj/.claude/skills" -maxdepth 1 -mindepth 1 -type d | sort
+   ```
+
+3. Capture the current target as a profile, then narrow it to exclude `gamma`,
+   and re-sync through the profile.
+
+   ```bash
+   podium sync save-as --profile minimal
+   podium profile edit minimal --add-exclude 'gamma'
+   podium sync --profile minimal
+   find "$WORK/proj/.claude/skills" -maxdepth 1 -mindepth 1 -type d | sort
+   ```
+
+4. Force `gamma` back on with an ephemeral override, then reset it.
+
+   ```bash
+   podium sync override --add 'gamma' --target "$WORK/proj"
+   podium sync --profile minimal
+   find "$WORK/proj/.claude/skills" -maxdepth 1 -mindepth 1 -type d | sort
+   podium sync override --reset --target "$WORK/proj"
+   podium sync --profile minimal
+   find "$WORK/proj/.claude/skills" -maxdepth 1 -mindepth 1 -type d | sort
+   ```
+
+**Expected.**
+
+- The first `sync` materializes `alpha`, `beta`, and `gamma`.
+- `sync save-as --profile minimal` writes a `profiles.minimal` block into
+  `$WORK/proj/.podium/sync.yaml`. `profile edit minimal --add-exclude 'gamma'`
+  adds the exclude pattern. The profile sync then materializes `alpha` and
+  `beta` only, and `gamma` is removed from the target.
+- `sync override --add 'gamma'` re-materializes `gamma` on top of the profile;
+  after `sync override --reset`, the next profile sync removes `gamma` again.
+
+**Cleanup.** `rm -rf "$WORK"`.
+
+---
+
+## S25: Sync scope filtering by path and type
+
+**Goal.** Validate that `sync --include`, `sync --exclude`, and `sync --type`
+materialize only the requested subset.
+
+**Covers.** Solo deployment, `sync` scope filters.
+
+**Steps.**
+
+1. Run the isolation block.
+2. Author a registry with two domains and mixed types.
+
+   ```bash
+   podium artifact scaffold --type skill   --description "Close the books" "$WORK/reg/finance/close"
+   podium artifact scaffold --type context --description "Finance policy"  "$WORK/reg/finance/policy"
+   podium artifact scaffold --type skill   --description "Deploy service"  "$WORK/reg/eng/deploy"
+   mkdir -p "$WORK/proj" && cd "$WORK/proj"
+   podium init --registry "$WORK/reg" --harness claude-code --target "$WORK/proj"
+   ```
+
+3. Materialize subsets with each filter, into a fresh target each time.
+
+   ```bash
+   echo "--- include finance only ---"
+   podium sync --include 'finance/**' --target "$WORK/inc"
+   find "$WORK/inc" -type f | sort
+
+   echo "--- exclude eng ---"
+   podium sync --exclude 'eng/**' --target "$WORK/exc"
+   find "$WORK/exc" -type f | sort
+
+   echo "--- type skill only ---"
+   podium sync --type skill --target "$WORK/onlyskill"
+   find "$WORK/onlyskill" -type f | sort
+   ```
+
+**Expected.**
+
+- `--include 'finance/**'` materializes only the two finance artifacts; `eng/deploy`
+  is absent.
+- `--exclude 'eng/**'` materializes the two finance artifacts and omits
+  `eng/deploy`.
+- `--type skill` materializes only the skills (`finance/close` and `eng/deploy`)
+  and omits the `finance/policy` context.
+
+**Cleanup.** `rm -rf "$WORK"`.
+
+---
+
+## S26: Reverse-dependency impact analysis
+
+**Goal.** Validate that `podium impact` lists the artifacts that depend on a
+given artifact through `extends` and `delegates_to` edges.
+
+**Covers.** Standalone deployment, the dependency graph, `impact`.
+
+**Steps.**
+
+1. Run the isolation block.
+2. Author a base skill, a skill that extends it, and an agent that delegates to
+   it.
+
+   ```bash
+   podium artifact scaffold --type skill --description "Base deploy routine" "$WORK/reg/deploy-base"
+   podium artifact scaffold --type skill --description "Pro deploy routine" "$WORK/reg/deploy-pro"
+   podium artifact scaffold --type agent --delegates-to deploy-base --description "Release agent" "$WORK/reg/release-agent"
+   # Make deploy-pro extend deploy-base (bump version and add the extends field).
+   python3 - "$WORK/reg/deploy-pro/ARTIFACT.md" <<'PY'
+   import sys
+   p = sys.argv[1]; s = open(p).read()
+   open(p, "w").write(s.replace("version: 0.1.0\n", "version: 0.2.0\nextends: deploy-base\n"))
+   PY
+   ```
+
+3. Serve and query impact.
+
+   ```bash
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8120 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8120/healthz
+   export PODIUM_REGISTRY=http://127.0.0.1:8120
+   podium impact --registry "$PODIUM_REGISTRY" deploy-base
+   ```
+
+**Expected.**
+
+- `impact deploy-base` lists `deploy-pro` (an `extends` dependent) and
+  `release-agent` (a `delegates_to` dependent).
+- A leaf artifact with no dependents (for example `release-agent`) reports an
+  empty impact set.
+
+**Cleanup.** Stop the server and `rm -rf "$WORK"`.
+
+---
+
+## S27: Inbound webhook-driven reingest
+
+**Goal.** Validate that an HMAC-signed inbound webhook delivery triggers a layer
+reingest, and that a delivery with a wrong signature is rejected.
+
+**Covers.** Standalone deployment, Git-source layers, the inbound webhook
+endpoint, HMAC verification.
+
+**Steps.**
+
+1. Run the isolation block.
+2. Create a Git repository with one artifact, serve, and register it as a layer.
+   Capture the layer's HMAC webhook secret from the register output (the secret
+   prints alongside the webhook URL).
+
+   ```bash
+   mkdir -p "$WORK/repo" && cd "$WORK/repo" && git init -q
+   podium artifact scaffold --type skill --description "Deploy the service" "$WORK/repo/deploy"
+   git add -A && git -c user.email=alice@acme.com -c user.name=alice commit -qm "deploy"
+   podium serve --standalone --no-embeddings --bind 127.0.0.1:8121 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8121/healthz
+   export PODIUM_REGISTRY=http://127.0.0.1:8121
+   podium layer register --registry "$PODIUM_REGISTRY" --id team --repo "$WORK/repo" --ref main --public > "$WORK/reg.out" 2> "$WORK/reg.err"
+   SECRET=$(grep -oiE 'secret[:= ]+[A-Za-z0-9._-]+' "$WORK/reg.out" "$WORK/reg.err" | grep -oE '[A-Za-z0-9._-]+$' | head -1)
+   echo "secret: ${SECRET:0:6}…"
+   podium layer reingest --registry "$PODIUM_REGISTRY" team   # first ingest at commit 1
+   ```
+
+3. Add a second artifact, commit, then deliver a signed webhook to trigger a
+   reingest instead of calling `layer reingest`.
+
+   ```bash
+   podium artifact scaffold --type skill --description "Roll back a deploy" "$WORK/repo/rollback"
+   cd "$WORK/repo" && git add -A && git -c user.email=alice@acme.com -c user.name=alice commit -qm "rollback"
+   BODY='{"ref":"refs/heads/main"}'
+   SIG="sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $NF}')"
+   curl -s -o /dev/null -w "valid delivery: %{http_code}\n" -X POST \
+     -H "X-Hub-Signature-256: $SIG" -H "Content-Type: application/json" \
+     --data "$BODY" "$PODIUM_REGISTRY/v1/ingest/webhook/team"
+   sleep 2
+   podium search --registry "$PODIUM_REGISTRY" "rollback"
+   echo "--- wrong signature ---"
+   curl -s -o /dev/null -w "bad delivery: %{http_code}\n" -X POST \
+     -H "X-Hub-Signature-256: sha256=deadbeef" -H "Content-Type: application/json" \
+     --data "$BODY" "$PODIUM_REGISTRY/v1/ingest/webhook/team"
+   ```
+
+**Expected.**
+
+- The valid webhook delivery returns a 2xx and the layer reingests the new
+  commit; the subsequent search returns the `rollback` skill.
+- The wrong-signature delivery is rejected with a 4xx and the
+  `ingest.webhook_invalid` code, and it does not reingest.
+
+**Cleanup.** Stop the server and `rm -rf "$WORK"`.
+
+---
+
+## S28: Audit log and right-to-be-forgotten erasure
+
+**Goal.** Validate that read calls are recorded in the audit log with the
+caller's identity, and that `admin erase` redacts a subject's entries while the
+hash chain still verifies.
+
+**Covers.** Standalone deployment, injected-session-token identity, the audit
+log, `admin erase`, `admin retention`.
+
+**Steps.**
+
+1. Run the isolation block.
+2. Boot an injected-session-token server over a small registry and register the
+   runtime key (as in S12, with `--bind 127.0.0.1:8122`). The audit log lands at
+   `$PODIUM_AUDIT_LOG_PATH` from the isolation block.
+
+   ```bash
+   podium artifact scaffold --type skill --description "Quarterly report" "$WORK/reg/report"
+   go run ./tools/minttoken --keys "$WORK/keys" >/dev/null 2>&1
+   export PODIUM_IDENTITY_PROVIDER=injected-session-token
+   export PODIUM_OAUTH_AUDIENCE=https://podium.manual
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8122 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8122/healthz
+   export PODIUM_REGISTRY=http://127.0.0.1:8122
+   podium admin runtime register --registry "$PODIUM_REGISTRY" --issuer manual-runtime --algorithm RS256 --public-key-file "$WORK/keys/runtime-pub.pem"
+   ```
+
+3. Generate audited activity as alice, then inspect the audit log.
+
+   ```bash
+   ALICE=$(go run ./tools/minttoken --keys "$WORK/keys" --sub alice@acme.com --email alice@acme.com)
+   PODIUM_SESSION_TOKEN="$ALICE" podium search --registry "$PODIUM_REGISTRY" "report"
+   PODIUM_SESSION_TOKEN="$ALICE" podium artifact show --registry "$PODIUM_REGISTRY" report
+   grep -c alice "$PODIUM_AUDIT_LOG_PATH"
+   ```
+
+4. Erase alice from the local audit log, then re-inspect.
+
+   ```bash
+   podium admin erase --local --audit-path "$PODIUM_AUDIT_LOG_PATH" --operator admin@acme.com --salt 0123456789abcdef alice@acme.com
+   grep -c alice@acme.com "$PODIUM_AUDIT_LOG_PATH" || echo "alice@acme.com no longer present"
+   ```
+
+**Expected.**
+
+- After alice's search and load, the audit log contains entries that carry her
+  subject and email.
+- `admin erase` reports the count of entries it redacted for alice.
+- After the erase, alice's email no longer appears in the audit log (it is
+  replaced by a salted tombstone), and the audit hash chain still verifies (the
+  erase rewrites the record in place without breaking the chain).
+
+**Cleanup.** Stop the server and `rm -rf "$WORK"`.
+
+---
+
+## S29: Workspace overlay merges local artifacts
+
+**Goal.** Validate that a workspace-local overlay directory contributes its
+artifacts to the effective view served through the MCP bridge, on top of the
+registry.
+
+**Covers.** Standalone deployment, the `podium-mcp` overlay
+(`PODIUM_OVERLAY_PATH`), search and load over the merged view.
+
+**Steps.**
+
+1. Run the isolation block.
+2. Serve a registry with one skill, and author a separate workspace-local
+   overlay directory with a different skill.
+
+   ```bash
+   podium artifact scaffold --type skill --description "Registry-published skill" "$WORK/reg/published"
+   podium artifact scaffold --type skill --description "Local draft skill not in the registry" "$WORK/overlay/local-draft"
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8123 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8123/healthz
+   export PODIUM_REGISTRY=http://127.0.0.1:8123
+   ```
+
+3. Search through the bridge without and then with the overlay.
+
+   ```bash
+   echo "--- no overlay: registry only ---"
+   printf '%s\n%s\n' \
+     '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"m","version":"0"}}}' \
+     '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_artifacts","arguments":{"query":"skill"}}}' \
+     | PODIUM_REGISTRY="$PODIUM_REGISTRY" podium-mcp 2>/dev/null | grep -o '"id":"[^"]*"' | sort -u
+
+   echo "--- with overlay: registry + local-draft ---"
+   printf '%s\n%s\n' \
+     '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"m","version":"0"}}}' \
+     '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_artifacts","arguments":{"query":"skill"}}}' \
+     | PODIUM_REGISTRY="$PODIUM_REGISTRY" PODIUM_OVERLAY_PATH="$WORK/overlay" podium-mcp 2>/dev/null | grep -o '"id":"[^"]*"' | sort -u
+   ```
+
+**Expected.**
+
+- Without the overlay, search returns `published` and not `local-draft`.
+- With `PODIUM_OVERLAY_PATH` set, search returns both `published` and
+  `local-draft`, confirming the overlay is merged into the effective view that
+  the bridge serves.
+- The overlay artifact is workspace-local: it is not present in the registry
+  (a direct `podium search` against the registry does not return `local-draft`).
+
+**Cleanup.** Stop the server and `rm -rf "$WORK"`.
+
+---
+
+## S30: Offline-first cache resilience
+
+**Goal.** Validate that the MCP bridge serves a previously-loaded artifact from
+its content cache when the registry is unreachable, under the offline-first
+cache mode.
+
+**Covers.** Standalone deployment, the `podium-mcp` content cache,
+`PODIUM_CACHE_MODE=offline-first`, `cache prune`.
+
+**Steps.**
+
+1. Run the isolation block.
+2. Serve a registry and warm the bridge cache by loading an artifact once.
+
+   ```bash
+   podium artifact scaffold --type skill --description "Cached runbook" "$WORK/reg/runbook"
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8124 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8124/healthz
+   export PODIUM_REGISTRY=http://127.0.0.1:8124
+   LOAD='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"runbook"}}}'
+   INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"m","version":"0"}}}'
+   printf '%s\n%s\n' "$INIT" "$LOAD" | PODIUM_REGISTRY="$PODIUM_REGISTRY" PODIUM_CACHE_DIR="$WORK/cache" podium-mcp 2>/dev/null | grep -c '"runbook"'
+   find "$WORK/cache" -type f | head
+   ```
+
+3. Stop the registry, then load the same artifact again in offline-first mode.
+
+   ```bash
+   kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
+   printf '%s\n%s\n' "$INIT" "$LOAD" \
+     | PODIUM_REGISTRY="$PODIUM_REGISTRY" PODIUM_CACHE_DIR="$WORK/cache" PODIUM_CACHE_MODE=offline-first podium-mcp 2>"$WORK/offline.log" | grep -c '"runbook"'
+   ```
+
+4. Inspect prunable cache buckets.
+
+   ```bash
+   podium cache prune --dir "$WORK/cache" --days 0 --dry-run
+   ```
+
+**Expected.**
+
+- The first load returns the `runbook` artifact and writes content into
+  `$WORK/cache`.
+- After the registry is stopped, the offline-first load still returns `runbook`
+  from the cache rather than failing with a network error.
+- `cache prune --dry-run` lists the cached bucket and reports that it would be
+  removed, without deleting it.
+
+**Cleanup.** `rm -rf "$WORK"` (the server is already stopped).
+
+---
+
+## S31: Import an existing skill tree into a layer
+
+**Goal.** Validate that `podium import` converts a directory of plain skills into
+a Podium-shaped layer that lints, serves, and is searchable.
+
+**Covers.** Solo and standalone deployment, `import`, `lint`, search over the
+imported layer.
+
+**Steps.**
+
+1. Run the isolation block.
+2. Create a plain skills tree in the Claude skills layout (one `SKILL.md` per
+   skill directory, without Podium's `ARTIFACT.md`).
+
+   ```bash
+   mkdir -p "$WORK/skills/greet" "$WORK/skills/summarize"
+   printf -- '---\nname: greet\ndescription: Greet a user politely\n---\n\nGreet the user by name.\n' > "$WORK/skills/greet/SKILL.md"
+   printf -- '---\nname: summarize\ndescription: Summarize a document\n---\n\nProduce a short summary.\n' > "$WORK/skills/summarize/SKILL.md"
+   ```
+
+3. Import the tree into a Podium layer, lint it, then serve and search.
+
+   ```bash
+   podium import --source "$WORK/skills" --target "$WORK/reg" --type skill
+   find "$WORK/reg" -name ARTIFACT.md | sort
+   podium lint --registry "$WORK/reg"; echo "lint exit=$?"
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8125 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8125/healthz
+   export PODIUM_REGISTRY=http://127.0.0.1:8125
+   podium search --registry "$PODIUM_REGISTRY" "greet"
+   ```
+
+**Expected.**
+
+- `podium import` writes a Podium-shaped layer under `$WORK/reg`: each source
+  skill becomes a directory with an `ARTIFACT.md` (declaring `type: skill` and a
+  version) beside its `SKILL.md`.
+- `podium lint` reports `lint: no issues.` on the imported layer.
+- The standalone server ingests the imported skills and search returns `greet`.
+
+**Cleanup.** Stop the server and `rm -rf "$WORK"`.
