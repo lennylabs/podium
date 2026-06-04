@@ -723,8 +723,8 @@ visibility, the mint helper in `tools/minttoken`.
 
    ```bash
    mkdir -p "$WORK/pub/handbook" "$WORK/eng/deploy"
-   podium artifact scaffold --type context --description "Company handbook" "$WORK/pub/handbook" --force
-   podium artifact scaffold --type skill --description "Engineering deploy" "$WORK/eng/deploy" --force
+   podium artifact scaffold --type context --description "Company handbook" --force "$WORK/pub/handbook"
+   podium artifact scaffold --type skill --description "Engineering deploy" --force "$WORK/eng/deploy"
    cat > "$WORK/registry.yaml" <<YAML
    registry:
      layers:
