@@ -31,6 +31,7 @@ func buildReingestRunner(
 	auditMeter *server.AuditVolumeMeter,
 	tenantID string,
 	useVectorOutbox bool,
+	collocatedVec collocatedVectorIngest,
 ) server.ReingestRunner {
 	return func(ctx context.Context, lc store.LayerConfig, bg *server.BreakGlass) (*ingest.Result, error) {
 		// §4.7.8: refuse a new auditable write once the tenant has spent its
@@ -69,6 +70,13 @@ func buildReingestRunner(
 			// the same transaction as the manifest; the drain worker reconciles
 			// the backend asynchronously so reingest never blocks on it.
 			UseVectorOutbox: useVectorOutbox,
+			// §4.7 collocated backend (pgvector, sqlite-vec): embed and store
+			// each artifact and domain vector in the same reingest transaction so
+			// a reingested layer stays semantically searchable. Nil for the
+			// outbox / self-embed / no-vector cases.
+			Embedder:        collocatedVec.Embedder,
+			VectorPut:       collocatedVec.VectorPut,
+			DomainVectorPut: collocatedVec.DomainVectorPut,
 		}
 		if auditSink != nil {
 			opts.AuditEmit = ingestAuditEmitter(ctx, auditSink, scrubber, caller)

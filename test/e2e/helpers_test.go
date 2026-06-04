@@ -71,6 +71,20 @@ func mergeEnv(extra ...string) []string {
 			strings.HasPrefix(kv, "PODIUM_S3_") {
 			continue
 		}
+		// Do not inherit ambient embedding-provider API keys into CLI
+		// subprocesses for the same reason: test.env (and the gap-remediation
+		// harness) export real OPENAI_API_KEY / VOYAGE_API_KEY / COHERE_API_KEY so
+		// the live embedding tests run, but inherited into a `serve` subprocess
+		// they satisfy the §13.12 backend-key requirement and suppress the
+		// refuse-to-start assertion the missing-key tests make (e.g.
+		// TestVectorBackend_OpenAIMissingAPIKey). A test that needs a key passes
+		// it explicitly in `extra`, so this scrub only removes ambient, unrequested
+		// keys.
+		if strings.HasPrefix(kv, "OPENAI_API_KEY=") ||
+			strings.HasPrefix(kv, "VOYAGE_API_KEY=") ||
+			strings.HasPrefix(kv, "COHERE_API_KEY=") {
+			continue
+		}
 		out = append(out, kv)
 	}
 	// Suppress the login browser auto-open for every CLI subprocess unless the

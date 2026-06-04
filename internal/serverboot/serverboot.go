@@ -353,7 +353,7 @@ func seedBootstrapAdmins(ctx context.Context, st store.Store, tenantID string, a
 	return seeded, nil
 }
 
-func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Visibility, startOrder int, allowPerDomain bool, resourcePut ingest.ResourcePutFunc, rejectAtOrAbove manifest.Sensitivity, signer ingest.SignerFunc, useVectorOutbox bool, enforceSandbox bool, hostSandboxes []string) ([]layer.Layer, error) {
+func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Visibility, startOrder int, allowPerDomain bool, resourcePut ingest.ResourcePutFunc, rejectAtOrAbove manifest.Sensitivity, signer ingest.SignerFunc, useVectorOutbox bool, collocatedVec collocatedVectorIngest, enforceSandbox bool, hostSandboxes []string) ([]layer.Layer, error) {
 	if layerPath == "" {
 		return []layer.Layer{}, nil
 	}
@@ -389,6 +389,13 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			// §4.7.2: an external vector backend commits a vector_pending row
 			// in the same transaction; the drain worker embeds it later.
 			UseVectorOutbox: useVectorOutbox,
+			// §4.7 collocated backend (pgvector, sqlite-vec): embed and store
+			// each artifact and domain vector in the same ingest transaction so
+			// the catalogue is semantically searchable at boot, not BM25-only
+			// until a reembed. Nil for the outbox / self-embed / no-vector cases.
+			Embedder:        collocatedVec.Embedder,
+			VectorPut:       collocatedVec.VectorPut,
+			DomainVectorPut: collocatedVec.DomainVectorPut,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("ingest layer %s from %s: %w", l.ID, l.Path, err)
@@ -502,7 +509,7 @@ func visibilityIsEmpty(v layer.Visibility) bool {
 //
 // Ingest runs against context.Background: a bootstrap failure aborts startup
 // before any HTTP listener binds.
-func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resourcePut ingest.ResourcePutFunc, signer ingest.SignerFunc, useVectorOutbox bool) ([]layer.Layer, error) {
+func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resourcePut ingest.ResourcePutFunc, signer ingest.SignerFunc, useVectorOutbox bool, collocatedVec collocatedVectorIngest) ([]layer.Layer, error) {
 	if len(cfg.declaredLayers) == 0 {
 		return []layer.Layer{}, nil
 	}
@@ -535,6 +542,12 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resou
 				Signer: signer,
 				// §4.7.2 external-backend outbox enqueue at ingest.
 				UseVectorOutbox: useVectorOutbox,
+				// §4.7 collocated backend: embed and store each artifact and
+				// domain vector in the same ingest transaction. Nil for the
+				// outbox / self-embed / no-vector cases.
+				Embedder:        collocatedVec.Embedder,
+				VectorPut:       collocatedVec.VectorPut,
+				DomainVectorPut: collocatedVec.DomainVectorPut,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("ingest declared layer %s from %s: %w", lc.ID, lc.LocalPath, err)
@@ -713,11 +726,31 @@ func Run() error {
 		}
 	}
 
+	// §4.7: open the vector backend and embedder before the bootstrap ingest so
+	// a collocated backend (pgvector, sqlite-vec) computes and writes each
+	// artifact's embedding in the same ingest that commits its manifest, rather
+	// than leaving the catalogue BM25-only until an explicit reembed. The
+	// provider handles are reused for the registry search wiring and the §4.7.2
+	// outbox drain worker below. An open failure degrades to BM25 with a warning
+	// and leaves the closures nil so ingest writes no vector inline.
+	var vecProvider vector.Provider
+	var embedProvider embedding.Provider
+	if v, e, verr := openVectorAndEmbedder(cfg); verr != nil {
+		log.Printf("warning: vector search disabled: %v", verr)
+	} else {
+		vecProvider, embedProvider = v, e
+	}
+	// §4.7: ingest-time embedding closures for a collocated backend. The zero
+	// value (managed/outbox backend, self-embedding backend, or no vector
+	// backend) writes no vector inline; the outbox or self-embed path handles
+	// those.
+	collocatedVec := buildCollocatedVectorIngest(vecProvider, embedProvider, useVectorOutbox)
+
 	// §4.6 declarative layers: the registry.yaml `layers:` list seeds an
 	// admin-defined layer per entry (lowest precedence first, in config
 	// order). Local sources are ingested at boot; git sources are seeded as
 	// config rows for the §7.3.1 reingest/webhook path.
-	declared, err := bootstrapDeclaredLayers(st, tenantID, cfg, resourcePut, ingestSigner, useVectorOutbox)
+	declared, err := bootstrapDeclaredLayers(st, tenantID, cfg, resourcePut, ingestSigner, useVectorOutbox, collocatedVec)
 	if err != nil {
 		return err
 	}
@@ -729,7 +762,7 @@ func Run() error {
 	// DELETE /v1/layers) see the bootstrap layers. These layers carry no
 	// per-layer visibility input, so they take the deployment default
 	// (§4.6 / §13.10 / F-4.6.9). They append after the declared layers.
-	pathLayers, err := bootstrapLayerPath(st, tenantID, cfg.layerPath, defaultBootstrapVisibility(cfg), len(declared), cfg.allowPerDomain(), resourcePut, publicSensitivityFloor(cfg), ingestSigner, useVectorOutbox, cfg.enforceSandboxProfile, cfg.hostSandboxes)
+	pathLayers, err := bootstrapLayerPath(st, tenantID, cfg.layerPath, defaultBootstrapVisibility(cfg), len(declared), cfg.allowPerDomain(), resourcePut, publicSensitivityFloor(cfg), ingestSigner, useVectorOutbox, collocatedVec, cfg.enforceSandboxProfile, cfg.hostSandboxes)
 	if err != nil {
 		return err
 	}
@@ -752,22 +785,18 @@ func Run() error {
 		mreg = metrics.New()
 		registry = registry.WithCacheObserver(mreg.ObserveCache)
 	}
-	// vecProvider / embedProvider are captured beyond the open block so the
-	// §4.7.2 outbox drain worker (started later) can embed and write pending
-	// rows to the external backend.
-	var vecProvider vector.Provider
-	var embedProvider embedding.Provider
-	if v, e, err := openVectorAndEmbedder(cfg); err != nil {
-		log.Printf("warning: vector search disabled: %v", err)
-	} else if v != nil {
-		vecProvider, embedProvider = v, e
-		registry = registry.WithVectorSearch(v, e)
-		if e != nil {
-			log.Printf("hybrid search: vector=%s embedder=%s dim=%d", v.ID(), e.ID(), e.Dimensions())
+	// §4.7 hybrid search: wire the vector backend and embedder (opened above,
+	// before bootstrap ingest, so a collocated backend embedded each artifact at
+	// ingest) into the registry's query path. vecProvider / embedProvider stay
+	// captured for the §4.7.2 outbox drain worker started later.
+	if vecProvider != nil {
+		registry = registry.WithVectorSearch(vecProvider, embedProvider)
+		if embedProvider != nil {
+			log.Printf("hybrid search: vector=%s embedder=%s dim=%d", vecProvider.ID(), embedProvider.ID(), embedProvider.Dimensions())
 		} else {
 			// §13.12 (F-13.12.6): the backend embeds text server-side, so no
 			// separate embedding provider is wired.
-			log.Printf("hybrid search: vector=%s self-embedding=%s", v.ID(), cfg.vectorInferenceModel)
+			log.Printf("hybrid search: vector=%s self-embedding=%s", vecProvider.ID(), cfg.vectorInferenceModel)
 		}
 	}
 
@@ -1096,7 +1125,7 @@ func Run() error {
 	// lint, hash, store, publish events) instead of only recording intent.
 	// It carries the §4.7.2 freeze windows so an active window blocks ingest
 	// unless the manual reingest passes break-glass.
-	layers.WithReingestRunner(buildReingestRunner(st, srv, cfg, resourcePut, auditSink, scrubber, ingestSigner, mreg, auditMeter, tenantID, useVectorOutbox))
+	layers.WithReingestRunner(buildReingestRunner(st, srv, cfg, resourcePut, auditSink, scrubber, ingestSigner, mreg, auditMeter, tenantID, useVectorOutbox, collocatedVec))
 
 	// §4.7.2: when ingest routes embedding through the transactional outbox
 	// (external vector backend), start the drain worker that embeds and writes

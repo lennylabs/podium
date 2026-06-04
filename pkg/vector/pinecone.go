@@ -264,14 +264,24 @@ func (p *Pinecone) Query(ctx context.Context, tenantID string, vec []float32, to
 
 // PutText upserts raw text via the Integrated Inference records API
 // (POST /records/namespaces/{ns}/upsert, NDJSON body). Pinecone embeds the
-// `chunk_text` field with the index's hosted model. spec: §13.12
+// record field its index field_map points the embed field at. spec: §13.12
 // PODIUM_PINECONE_INFERENCE_MODEL.
+//
+// The text is written under both `text` and `chunk_text` so the upsert succeeds
+// whichever record field the index's field_map names. A Serverless integrated
+// index created with the embed field as `text` (the Pinecone default,
+// field_map {"text": "text"}) reads `text`; one created against the Pinecone
+// quickstart convention (field_map {"text": "chunk_text"}) reads `chunk_text`.
+// The hosted model embeds only the mapped field; the other is stored as
+// metadata. QueryText submits its input under the `text` embed-field key, which
+// is the field_map key in both layouts, so search stays consistent.
 func (p *Pinecone) PutText(ctx context.Context, tenantID, artifactID, version, text string) error {
 	if tenantID == "" || artifactID == "" || version == "" {
 		return ErrInvalidArgument
 	}
 	rec := map[string]any{
 		"_id":         artifactID + "@" + version,
+		"text":        text,
 		"chunk_text":  text,
 		"artifact_id": artifactID,
 		"version":     version,

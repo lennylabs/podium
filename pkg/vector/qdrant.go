@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 )
 
 // Qdrant is the §4.7 Qdrant Cloud vector backend. Uses Qdrant's
@@ -27,6 +28,17 @@ type Qdrant struct {
 	// and Qdrant embeds them server-side; Dim is unused (0).
 	InferenceModel string
 	Client         *http.Client
+
+	// tenantIndexMu guards tenantIndexDone, a per-process latch for the
+	// best-effort creation of the tenant_id payload index. §4.7.1 isolation
+	// filters every read by tenant_id, and Qdrant requires a keyword payload
+	// index on a filtered field for the Cloud Inference query path; without it a
+	// self-embedding query returns "Index required but not found for tenant_id".
+	// The latch is set only after a successful create (which is idempotent), so a
+	// transient failure on the first write retries on the next one rather than
+	// permanently disabling indexing.
+	tenantIndexMu   sync.Mutex
+	tenantIndexDone bool
 }
 
 // QdrantConfig is the constructor input.
@@ -115,6 +127,28 @@ func (q *Qdrant) pointID(tenantID, artifactID, version string) uint64 {
 	return fnv64(tenantID + "/" + artifactID + "@" + version)
 }
 
+// ensureTenantIndex creates the tenant_id keyword payload index once per
+// process. Qdrant rejects a filtered Cloud Inference query when the filtered
+// field has no payload index ("Index required but not found for tenant_id"),
+// and the index also speeds the storage-only tenant filter at scale. The PUT is
+// idempotent: Qdrant treats a re-create of an existing index as a completed
+// no-op. The success latch is set only after a nil-error create, so a transient
+// outage during the first write retries on the next write rather than
+// permanently disabling indexing. It runs on the write path (Put/PutText) so a
+// read-only constructor stays network-free.
+func (q *Qdrant) ensureTenantIndex(ctx context.Context) {
+	q.tenantIndexMu.Lock()
+	defer q.tenantIndexMu.Unlock()
+	if q.tenantIndexDone {
+		return
+	}
+	body := map[string]any{"field_name": "tenant_id", "field_schema": "keyword"}
+	if _, err := q.doJSON(ctx, http.MethodPut,
+		fmt.Sprintf("/collections/%s/index?wait=true", q.Collection), body); err == nil {
+		q.tenantIndexDone = true
+	}
+}
+
 // Put upserts via PUT /collections/<col>/points with a single point.
 func (q *Qdrant) Put(ctx context.Context, tenantID, artifactID, version string, vec []float32) error {
 	if tenantID == "" || artifactID == "" || version == "" {
@@ -123,6 +157,7 @@ func (q *Qdrant) Put(ctx context.Context, tenantID, artifactID, version string, 
 	if err := validateDim(vec, q.Dim); err != nil {
 		return err
 	}
+	q.ensureTenantIndex(ctx)
 	body := map[string]any{
 		"points": []map[string]any{{
 			"id":     q.pointID(tenantID, artifactID, version),
@@ -195,6 +230,7 @@ func (q *Qdrant) PutText(ctx context.Context, tenantID, artifactID, version, tex
 	if tenantID == "" || artifactID == "" || version == "" {
 		return ErrInvalidArgument
 	}
+	q.ensureTenantIndex(ctx)
 	body := map[string]any{
 		"points": []map[string]any{{
 			"id":     q.pointID(tenantID, artifactID, version),

@@ -16,7 +16,7 @@ func TestReingestRunner_RefusesWhenAuditBudgetSpent(t *testing.T) {
 	meter := server.NewAuditVolumeMeter(1)
 	meter.Record("default") // spend the single-event budget
 
-	runner := buildReingestRunner(nil, nil, &Config{}, nil, nil, nil, nil, nil, meter, "default", false)
+	runner := buildReingestRunner(nil, nil, &Config{}, nil, nil, nil, nil, nil, meter, "default", false, collocatedVectorIngest{})
 	_, err := runner(context.Background(), store.LayerConfig{SourceType: "git"}, nil)
 	if !errors.Is(err, ingest.ErrAuditVolumeExceeded) {
 		t.Fatalf("err = %v, want ErrAuditVolumeExceeded", err)
@@ -27,7 +27,7 @@ func TestReingestRunner_RefusesWhenAuditBudgetSpent(t *testing.T) {
 // not the audit-volume one (here it reaches source resolution).
 func TestReingestRunner_AuditBudgetDisabledPassesGate(t *testing.T) {
 	meter := server.NewAuditVolumeMeter(0)
-	runner := buildReingestRunner(nil, nil, &Config{}, nil, nil, nil, nil, nil, meter, "default", false)
+	runner := buildReingestRunner(nil, nil, &Config{}, nil, nil, nil, nil, nil, meter, "default", false, collocatedVectorIngest{})
 	_, err := runner(context.Background(), store.LayerConfig{SourceType: "nonsense"}, nil)
 	if errors.Is(err, ingest.ErrAuditVolumeExceeded) {
 		t.Fatalf("disabled budget should not gate; got audit-volume error: %v", err)

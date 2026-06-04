@@ -124,6 +124,13 @@ func TestWeaviate_PutTextAndQueryText(t *testing.T) {
 	var putBody, graphqlBody string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
+		// The upsert POSTs to create (then PUTs on a 422 conflict); capture the
+		// create body, which carries the object the SPI sends.
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/objects" {
+			putBody = string(raw)
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "ack"})
+			return
+		}
 		if r.Method == http.MethodPut {
 			putBody = string(raw)
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": "ack"})

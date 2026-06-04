@@ -79,33 +79,50 @@ func (w *Weaviate) client() *http.Client {
 }
 
 func (w *Weaviate) doJSON(ctx context.Context, method, path string, body any) ([]byte, error) {
+	_, respBody, err := w.doStatus(ctx, method, path, body)
+	return respBody, err
+}
+
+// doStatus performs the request and returns the HTTP status code alongside the
+// body and a non-nil error on any non-2xx. The status is exposed so callers
+// (the upsert path) can branch on a specific code such as 422 "already exists"
+// without parsing the error string.
+func (w *Weaviate) doStatus(ctx context.Context, method, path string, body any) (int, []byte, error) {
 	var rdr io.Reader
 	if body != nil {
 		buf, err := json.Marshal(body)
 		if err != nil {
-			return nil, err
+			return 0, nil, err
 		}
 		rdr = bytes.NewReader(buf)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, w.URL+path, rdr)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	if w.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+w.APIKey)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	// §13.12 self-embedding: the hosted text2vec-weaviate vectorizer routes the
+	// embedding call back through the caller's Weaviate Cloud cluster and rejects
+	// a write or nearText query that omits the cluster URL ("no cluster URL found
+	// in request header: X-Weaviate-Cluster-Url"). The header is the cluster base
+	// URL. Other vectorizer modules and the storage-only path ignore it.
+	if w.Vectorizer == "text2vec-weaviate" {
+		req.Header.Set("X-Weaviate-Cluster-Url", w.URL)
+	}
 	resp, err := w.client().Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
+		return 0, nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode/100 != 2 {
-		return nil, fmt.Errorf("%w: HTTP %d: %s", ErrUnreachable, resp.StatusCode, string(respBody))
+		return resp.StatusCode, respBody, fmt.Errorf("%w: HTTP %d: %s", ErrUnreachable, resp.StatusCode, string(respBody))
 	}
-	return respBody, nil
+	return resp.StatusCode, respBody, nil
 }
 
 // objectID returns a deterministic UUID-like identifier from the
@@ -115,7 +132,7 @@ func (w *Weaviate) objectID(tenantID, artifactID, version string) string {
 	return weaviateUUID(tenantID + "/" + artifactID + "@" + version)
 }
 
-// Put upserts via PUT /v1/objects/<class>/<uuid>.
+// Put upserts the (tenant, id, version) object with a precomputed vector.
 func (w *Weaviate) Put(ctx context.Context, tenantID, artifactID, version string, vec []float32) error {
 	if tenantID == "" || artifactID == "" || version == "" {
 		return ErrInvalidArgument
@@ -134,9 +151,41 @@ func (w *Weaviate) Put(ctx context.Context, tenantID, artifactID, version string
 			"version":    version,
 		},
 	}
-	_, err := w.doJSON(ctx, http.MethodPut,
+	return w.upsertObject(ctx, id, body)
+}
+
+// upsertObject replaces an object via PUT /v1/objects/<class>/<id> and, when the
+// object does not yet exist, creates it via POST /v1/objects. Weaviate's PUT is
+// update-only and reports the object missing ("no object with id", surfaced as
+// 404 or a 500 naming the id) on the first write to an empty collection; the
+// POST fallback makes the write a true upsert on both the create and the replace
+// path. PUT is attempted first so a re-ingest replaces the prior object in one
+// round-trip (the common steady-state path), matching §4.7 (a re-ingest replaces
+// the prior embedding; search returns the prior vector until the replace lands).
+func (w *Weaviate) upsertObject(ctx context.Context, id string, body map[string]any) error {
+	status, respBody, err := w.doStatus(ctx, http.MethodPut,
 		fmt.Sprintf("/v1/objects/%s/%s", w.Collection, id), body)
-	return err
+	if err == nil {
+		return nil
+	}
+	if !weaviateObjectMissing(status, respBody) {
+		return err
+	}
+	// The object does not exist yet: create it.
+	_, _, perr := w.doStatus(ctx, http.MethodPost, "/v1/objects", body)
+	return perr
+}
+
+// weaviateObjectMissing reports whether a PUT-update response indicates the
+// target object does not exist, so the upsert should fall back to a create.
+// Weaviate returns 404 for a missing object on some versions and a 500 whose
+// body names the id ("no object with id '<uuid>'") on others, so both are
+// treated as missing.
+func weaviateObjectMissing(status int, body []byte) bool {
+	if status == http.StatusNotFound {
+		return true
+	}
+	return status == http.StatusInternalServerError && bytes.Contains(body, []byte("no object with id"))
 }
 
 // Query uses the GraphQL nearVector path. Weaviate's REST /v1/objects
@@ -224,9 +273,7 @@ func (w *Weaviate) PutText(ctx context.Context, tenantID, artifactID, version, t
 			"version":    version,
 		},
 	}
-	_, err := w.doJSON(ctx, http.MethodPut,
-		fmt.Sprintf("/v1/objects/%s/%s", w.Collection, id), body)
-	return err
+	return w.upsertObject(ctx, id, body)
 }
 
 // QueryText runs a nearText GraphQL search so the vectorizer module embeds

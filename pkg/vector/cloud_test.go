@@ -86,8 +86,13 @@ func TestPinecone_PutAndQuery(t *testing.T) {
 func TestWeaviate_PutAndQuery(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The upsert POSTs to create, then PUTs on a 422 conflict; the mock
+		// acknowledges the create so the common (first-write) path succeeds.
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/objects" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "ack"})
+			return
+		}
 		if r.Method == http.MethodPut {
-			// Object upsert; just acknowledge.
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": "ack"})
 			return
 		}
