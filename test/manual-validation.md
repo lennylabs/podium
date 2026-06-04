@@ -904,7 +904,11 @@ selection.
 **Steps.**
 
 1. Run the isolation block, start services, and load the environment as in S14,
-   but select the managed backend.
+   but select the managed backend. `PODIUM_PINECONE_INDEX` and the API key come
+   from `test.env`. `PODIUM_PINECONE_NAMESPACE` sets a namespace prefix that is
+   combined with the per-tenant ID for every vector; the default value is
+   `default`. The shared `podium-test` index is reused across runs, so export a
+   unique namespace per run to keep one run's vectors out of another's.
 
    ```bash
    cd ~/projects/podium && make services-up
@@ -914,12 +918,26 @@ selection.
    export PODIUM_VECTOR_BACKEND=pinecone
    export PODIUM_EMBEDDING_PROVIDER=openai
    export PODIUM_EMBEDDING_MODEL=text-embedding-3-small
+   export PODIUM_PINECONE_NAMESPACE="manual-s15-$$-$(date +%s)"
    ```
+
+   The same scenario runs against Weaviate (`PODIUM_VECTOR_BACKEND=weaviate-cloud`,
+   `PODIUM_WEAVIATE_*`) or Qdrant (`PODIUM_VECTOR_BACKEND=qdrant-cloud`,
+   `PODIUM_QDRANT_*`). Those backends isolate per tenant with a stored
+   `tenant_id` property and a deterministic object ID keyed by
+   `tenant/artifact@version`, so they do not take a per-run namespace prefix.
 
 2. Author the S07 registry (the `reconcile` and `rotate-oncall` skills), serve
    in strict mode on `127.0.0.1:8111`, and run a paraphrased query.
 
    ```bash
+   podium artifact scaffold --type skill --description "Reconcile the general ledger at period end" "$WORK/reg/finance/reconcile"
+   podium artifact scaffold --type skill --description "Rotate the on-call schedule" "$WORK/reg/ops/rotate-oncall"
+   podium serve --strict --layer-path "$WORK/reg" --bind 127.0.0.1:8111 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 60 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8111/healthz
+   export PODIUM_REGISTRY=http://127.0.0.1:8111
+   podium config show --server | grep -E 'store|object_store|vector|embedding'
    podium search --registry "$PODIUM_REGISTRY" "close the books for the month"
    ```
 
