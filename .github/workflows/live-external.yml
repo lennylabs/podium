@@ -116,15 +116,25 @@ jobs:
           PODIUM_S3_ACCESS_KEY_ID: minioadmin
           PODIUM_S3_SECRET_ACCESS_KEY: minioadmin
           PODIUM_S3_USE_SSL: "false"
-          # Managed vector backends. Absent secrets leave the sub-suite skipped.
+          # Managed vector backends. Each backend has a storage index (external
+          # embeddings) and a self-embedding index (backend-side integrated
+          # inference); the self-embedding sub-suite gates on the SELFEMBED index
+          # or collection plus the inference model or vectorizer. Any absent
+          # secret leaves its sub-suite skipped.
           PODIUM_PINECONE_API_KEY: ${{ secrets.PODIUM_PINECONE_API_KEY }}
           PODIUM_PINECONE_INDEX: ${{ secrets.PODIUM_PINECONE_INDEX }}
+          PODIUM_PINECONE_SELFEMBED_INDEX: ${{ secrets.PODIUM_PINECONE_SELFEMBED_INDEX }}
+          PODIUM_PINECONE_INFERENCE_MODEL: ${{ secrets.PODIUM_PINECONE_INFERENCE_MODEL }}
           PODIUM_WEAVIATE_URL: ${{ secrets.PODIUM_WEAVIATE_URL }}
           PODIUM_WEAVIATE_API_KEY: ${{ secrets.PODIUM_WEAVIATE_API_KEY }}
           PODIUM_WEAVIATE_COLLECTION: ${{ secrets.PODIUM_WEAVIATE_COLLECTION }}
+          PODIUM_WEAVIATE_SELFEMBED_COLLECTION: ${{ secrets.PODIUM_WEAVIATE_SELFEMBED_COLLECTION }}
+          PODIUM_WEAVIATE_VECTORIZER: ${{ secrets.PODIUM_WEAVIATE_VECTORIZER }}
           PODIUM_QDRANT_URL: ${{ secrets.PODIUM_QDRANT_URL }}
           PODIUM_QDRANT_API_KEY: ${{ secrets.PODIUM_QDRANT_API_KEY }}
           PODIUM_QDRANT_COLLECTION: ${{ secrets.PODIUM_QDRANT_COLLECTION }}
+          PODIUM_QDRANT_SELFEMBED_COLLECTION: ${{ secrets.PODIUM_QDRANT_SELFEMBED_COLLECTION }}
+          PODIUM_QDRANT_INFERENCE_MODEL: ${{ secrets.PODIUM_QDRANT_INFERENCE_MODEL }}
           # Embedding providers. Ollama needs no key (served locally above).
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
