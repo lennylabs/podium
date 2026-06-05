@@ -1306,7 +1306,13 @@ absent.
      --source-objects "$WORK/objects"
    ```
 
-4. Serve in strict mode against the standard stores and compare.
+4. Serve in strict mode against the standard stores and compare. The Postgres
+   registry store keeps a persistent volume across `make services-up` and
+   `make services-down`, and every standard-mode scenario writes under the same
+   deterministic `default` org schema, so a prior run's layers and artifacts
+   survive into this one and appear alongside the migrated `team` layer and
+   `deploy` skill. The comparison below confirms the migrated state is present
+   rather than that the listing contains only the migrated set.
 
    ```bash
    podium serve --strict --bind 127.0.0.1:8117 > "$WORK/srv2.log" 2>&1 &
@@ -1319,10 +1325,16 @@ absent.
 
 **Expected.**
 
-- The migration command reports the layers, artifacts, and objects pumped into
-  Postgres and S3.
-- The standard server lists the same layers and returns the same artifacts in
-  search as the standalone deployment did.
+- The migration command reports the source plan it pumped into Postgres and S3:
+  `tenants: 1`, `manifests: 1`, `layer configs: 1`, `admin grants: 0`, followed
+  by `metadata migration complete (0 admin grant(s) preserved)` and `object
+  migration complete (0 blob(s))`. The `deploy` skill stores its content inline
+  in the manifest, so the filesystem object store holds no blobs and the object
+  count is zero.
+- The standard server lists the migrated `team` Git layer and returns the
+  migrated `deploy` skill in a search for `deploy`. Layers and artifacts left in
+  the persistent Postgres store by earlier standard-mode runs may also appear in
+  the listing and the result set.
 
 **Cleanup.** Stop the server, `rm -rf "$WORK"`, and `make services-down`.
 
