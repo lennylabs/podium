@@ -1609,14 +1609,32 @@ top of the resolved set.
    find "$WORK/proj/.claude/skills" -maxdepth 1 -mindepth 1 -type d | sort
    ```
 
-4. Force `gamma` back on with an ephemeral override, then reset it.
+4. Force `gamma` back on with an ephemeral override and inspect the target. The
+   override writes `gamma` through the adapter immediately, so the target carries
+   it before any further sync runs.
 
    ```bash
    podium sync override --add 'gamma' --target "$WORK/proj"
+   find "$WORK/proj/.claude/skills" -maxdepth 1 -mindepth 1 -type d | sort
+   ```
+
+5. Run a manual `podium sync`. Per §7.5.4 a manual sync (no `--watch`) is the
+   "reset to baseline" gesture: it re-resolves the profile, rewrites the target,
+   and clears the lock's `toggles`. The override is discarded and `gamma` is
+   removed again.
+
+   ```bash
    podium sync --profile minimal
    find "$WORK/proj/.claude/skills" -maxdepth 1 -mindepth 1 -type d | sort
+   ```
+
+6. Re-apply the override, then clear it with `--reset` instead of a manual sync.
+   `--reset` clears the toggles and re-applies the profile's resolved set, which
+   drops the `add`ed `gamma`.
+
+   ```bash
+   podium sync override --add 'gamma' --target "$WORK/proj"
    podium sync override --reset --target "$WORK/proj"
-   podium sync --profile minimal
    find "$WORK/proj/.claude/skills" -maxdepth 1 -mindepth 1 -type d | sort
    ```
 
@@ -1627,8 +1645,13 @@ top of the resolved set.
   `$WORK/proj/.podium/sync.yaml`. `profile edit minimal --add-exclude 'gamma'`
   adds the exclude pattern. The profile sync then materializes `alpha` and
   `beta` only, and `gamma` is removed from the target.
-- `sync override --add 'gamma'` re-materializes `gamma` on top of the profile;
-  after `sync override --reset`, the next profile sync removes `gamma` again.
+- `sync override --add 'gamma'` reports `toggles.add: gamma` and re-materializes
+  `gamma` immediately, so the target lists `alpha`, `beta`, and `gamma`.
+- The manual `podium sync --profile minimal` clears the toggle and rewrites the
+  target to `alpha` and `beta` only, removing `gamma`.
+- After a second `sync override --add 'gamma'` followed by `sync override
+  --reset`, the target lists `alpha` and `beta` only; `--reset` removes the
+  `add`ed `gamma` the same way a manual sync would.
 
 **Cleanup.** `rm -rf "$WORK"`.
 
