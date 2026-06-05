@@ -116,15 +116,14 @@ Test restores quarterly. The runbook procedure:
 
 ## Upgrade procedure
 
-Schema migrations are bundled in the registry binary and follow expand-contract. Recommended cadence:
+Schema migrations are bundled in the registry binary and applied additively on startup: a new version creates tables and columns when absent and never drops or rewrites existing ones, so an upgrade migrates the database forward in place. Recommended cadence:
 
 1. **Pre-upgrade.** Read the changelog and the migration notes for the target version. If a migration is non-trivial (reshuffling embeddings, changing the audit schema), schedule a maintenance window.
 2. **Canary.** Roll one registry replica to the new version. Watch metrics for 30 min and confirm latency, error rate, and cache hit rate are unchanged.
-3. **Roll.** Roll the rest of the replicas. The expand-contract migration design means old and new replicas can coexist during the roll.
+3. **Roll.** Roll the rest of the replicas. Because migrations are additive, an older replica ignores the new tables and columns, so old and new replicas coexist during the roll.
 4. **Verify.** After the roll completes, run `podium admin verify --check schema --check audit-chain`.
-5. **Contract.** Run `podium admin migrate --finalize` once all replicas are on the new version. This drops the now-unused old columns and indexes.
 
-Roll back by reverting the binary; the new schema is forward-compatible with the previous version's binary by design (that's the expand half of expand-contract). If the schema migration itself was the problem, revert the migration via `podium admin migrate --revert` *before* rolling back binaries.
+Roll back by reverting the binary. The additive schema stays forward-compatible with the previous version's binary, so an older binary continues to run against the migrated database.
 
 ---
 

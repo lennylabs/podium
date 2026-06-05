@@ -17,17 +17,84 @@ type Policy struct {
 	MaxAge time.Duration
 }
 
+// queryContextField is the audit-event Context key that holds free-text
+// search query strings (set by SearchArtifacts / SearchDomains). It is
+// the §8.4 "Query text" retention category, distinct from the event
+// metadata the per-type Policy governs.
+const queryContextField = "query"
+
+// queryBearingEvent reports whether an event type carries free-text query
+// content subject to the §8.4 query-text retention window.
+func queryBearingEvent(t EventType) bool {
+	return t == EventDomainsSearched || t == EventArtifactsSearched
+}
+
+// QueryRetention is the §8.4 "Query text: 30 days (redacted to
+// placeholders after 7 days)" rule. Query text is a category distinct
+// from audit-event metadata: the surrounding event is kept under the
+// per-type Policy, but its query field is replaced with Placeholder once
+// it is older than PlaceholderAfter and removed entirely once it is older
+// than DropAfter. A zero duration disables that stage.
+type QueryRetention struct {
+	PlaceholderAfter time.Duration
+	DropAfter        time.Duration
+	Placeholder      string
+}
+
+// DefaultQueryRetention returns the §8.4 defaults: placeholder after 7
+// days, drop after 30 days.
+func DefaultQueryRetention() *QueryRetention {
+	return &QueryRetention{
+		PlaceholderAfter: 7 * 24 * time.Hour,
+		DropAfter:        30 * 24 * time.Hour,
+		Placeholder:      "[redacted]",
+	}
+}
+
+// apply transitions a single event's query field for its age. It returns
+// true when the event was modified. A nil receiver, a non-query event, or
+// an event with no query field is a no-op. The drop stage takes
+// precedence over the placeholder stage for an event past both marks.
+func (q *QueryRetention) apply(e *Event, now time.Time) bool {
+	if q == nil || !queryBearingEvent(e.Type) {
+		return false
+	}
+	cur, ok := e.Context[queryContextField]
+	if !ok {
+		return false
+	}
+	age := now.Sub(e.Timestamp)
+	if q.DropAfter > 0 && age > q.DropAfter {
+		delete(e.Context, queryContextField)
+		return true
+	}
+	if q.PlaceholderAfter > 0 && age > q.PlaceholderAfter {
+		if cur == q.Placeholder {
+			return false
+		}
+		e.Context[queryContextField] = q.Placeholder
+		return true
+	}
+	return false
+}
+
 // Enforce rewrites sink's underlying file with every event older
 // than its per-type policy removed. The hash chain is rebuilt over
-// the surviving events; external anchoring of the prior chain head
-// must be redone after Enforce.
+// the surviving events. When the rewrite changes the log it appends an
+// audit.retention_enforced marker recording the superseded chain head,
+// so an external anchor of the prior head can be reconciled and
+// re-anchored (§8.6).
 //
 // When two policies cover the same Type, the most-restrictive
 // (smallest MaxAge) wins — the §8.4 retention-by-default behavior.
 //
-// Returns the number of events dropped. Errors are returned as-is;
-// the file is left in its prior state on rewrite failure.
-func Enforce(_ context.Context, sink *FileSink, now time.Time, policies []Policy) (int, error) {
+// queryRet applies the §8.4 query-text window (placeholder at 7 days,
+// drop at 30 days) to the surviving search events; pass nil to skip it.
+//
+// Returns the number of events dropped (query-text redaction of a kept
+// event does not count as a drop). Errors are returned as-is; the file is
+// left in its prior state on rewrite failure.
+func Enforce(_ context.Context, sink *FileSink, now time.Time, policies []Policy, queryRet *QueryRetention) (int, error) {
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
 	events, err := readAllEvents(sink.path)
@@ -43,15 +110,44 @@ func Enforce(_ context.Context, sink *FileSink, now time.Time, policies []Policy
 	}
 	kept := events[:0:0]
 	dropped := 0
-	for _, e := range events {
+	redacted := false
+	for i := range events {
+		e := events[i]
 		if max, ok := maxAge[e.Type]; ok && now.Sub(e.Timestamp) > max {
 			dropped++
 			continue
 		}
+		// §8.4 query-text window: keep the event, age out its query field.
+		if queryRet.apply(&e, now) {
+			redacted = true
+		}
 		kept = append(kept, e)
 	}
-	if dropped == 0 {
+	if dropped == 0 && !redacted {
 		return 0, nil
+	}
+	// §8.4/§8.6: dropping events rebuilds the hash chain, which invalidates
+	// any external anchor of the prior chain head. Append a boundary marker
+	// recording the superseded head and the drop count so a verifier
+	// holding an older anchor can reconcile it with the truncated log and
+	// an anchor scheduler re-anchors the new head. Query-text
+	// redaction also rewrites the chain, but it removes no events; the
+	// marker is reserved for drops so a redaction-only pass stays quiet.
+	if dropped > 0 {
+		supersededHead := ""
+		if len(events) > 0 {
+			supersededHead = events[len(events)-1].Hash
+		}
+		kept = append(kept, Event{
+			Type:      EventRetentionEnforced,
+			Timestamp: now,
+			Caller:    "system:retention",
+			Target:    supersededHead,
+			Context: map[string]string{
+				"dropped":         fmt.Sprintf("%d", dropped),
+				"superseded_head": supersededHead,
+			},
+		})
 	}
 	if err := rewriteWithChain(sink.path, kept); err != nil {
 		return 0, err
@@ -64,22 +160,47 @@ func Enforce(_ context.Context, sink *FileSink, now time.Time, policies []Policy
 	return dropped, nil
 }
 
-// EraseUser implements the §8.5 GDPR right-to-be-forgotten flow:
-// every Caller and userID-bearing Context value matching userID is
-// replaced with a salted hash, then the chain is rewritten over the
-// transformed events. The salted-hash form preserves cross-event
-// correlation for SIEM consumers that know the salt while removing
-// the original identifier.
+// EraseUser implements the §8.5 GDPR right-to-be-forgotten flow: every
+// directly-identifying field of the erased user (the sub-claim Caller, the
+// attached CallerEmail, the CallerGroups membership, and any userID-bearing
+// Context value) is replaced with the salted tombstone
+// redacted-<sha256(user_id+salt)> or, for group membership, cleared. The
+// chain is then rewritten over the transformed events. The salted tombstone
+// preserves cross-event correlation for SIEM consumers that know the salt
+// while removing the original identifier.
 //
-// EraseUser appends a user.erased audit event to the rewritten log.
-// Pass a unique salt per tenant; the same userID with two salts
-// produces two unrelated tombstones, which is the desired property.
+// §8.5 takes a single <user_id> argument without fixing which identity field
+// it denotes. §8.1 records a read event's caller as the OAuth sub-claim
+// (Caller) with the email attached separately (CallerEmail), so the value a
+// human knows for a GDPR request is usually the email while the sub-claim is
+// what appears in the layer-owner context. EraseUser therefore
+// first discovers every alias of the user by scanning for events whose Caller
+// or CallerEmail matches the passed userID and collecting both fields, so
+// passing either the email or the sub-claim erases the complete identity. The
+// redaction pass then removes the email and group membership, not
+// just the sub-claim, so the persisted record no longer carries the user's
+// PII. Public-mode CallerNetwork attributes (source IP, X-Forwarded-User)
+// describe the request path of a system:public call rather than the erased
+// user's account identity and are left intact.
+//
+// EraseUser appends a user.erased audit event to the rewritten log,
+// recording the invoking admin (§8.1: "Admin invoked the GDPR erasure
+// command") as the event Caller and in the admin context field. Pass a
+// unique salt per tenant; the same userID with two salts produces two
+// unrelated tombstones, which is the desired property.
+//
+// salt must be non-empty (§8.5): an empty salt reduces the
+// tombstone to sha256(user_id), which is reversible by brute force or
+// dictionary over candidate user IDs and defeats de-identification.
 //
 // Returns the number of events transformed (excludes the appended
 // user.erased event).
-func EraseUser(_ context.Context, sink *FileSink, userID, salt string) (int, error) {
+func EraseUser(_ context.Context, sink *FileSink, userID, salt, admin string) (int, error) {
 	if userID == "" {
 		return 0, fmt.Errorf("audit.erase: userID is required")
+	}
+	if salt == "" {
+		return 0, fmt.Errorf("audit.erase: salt is required (an empty salt yields a guessable tombstone)")
 	}
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
@@ -87,17 +208,51 @@ func EraseUser(_ context.Context, sink *FileSink, userID, salt string) (int, err
 	if err != nil {
 		return 0, err
 	}
+	// Alias-discovery pass (§8.5): an event belongs to the erased
+	// user when the passed userID matches its sub-claim or its email. Collect
+	// both identifiers from every such event so passing one form (e.g. the
+	// email) also redacts records that carry the other (e.g. the sub-claim in
+	// the layer-owner context). The empty string is never an alias, so events
+	// with an empty Caller or CallerEmail do not poison the set.
+	aliases := map[string]bool{userID: true}
+	for i := range events {
+		ev := &events[i]
+		if ev.Caller == userID || ev.CallerEmail == userID {
+			if ev.Caller != "" {
+				aliases[ev.Caller] = true
+			}
+			if ev.CallerEmail != "" {
+				aliases[ev.CallerEmail] = true
+			}
+		}
+	}
 	tombstone := tombstoneFor(userID, salt)
 	transformed := 0
 	for i := range events {
 		ev := &events[i]
 		mutated := false
-		if ev.Caller == userID {
-			ev.Caller = tombstone
+		// Redact the full caller identity when either identity field
+		// is an alias of the erased user: the sub-claim, the attached email,
+		// and the group membership. Group names are quasi-identifiers, so the
+		// membership is cleared rather than tombstoned.
+		if aliases[ev.Caller] || aliases[ev.CallerEmail] {
+			if ev.Caller != "" {
+				ev.Caller = tombstone
+			}
+			if ev.CallerEmail != "" {
+				ev.CallerEmail = tombstone
+			}
+			if len(ev.CallerGroups) > 0 {
+				ev.CallerGroups = nil
+			}
 			mutated = true
 		}
+		// The erased user can also appear as a context value (e.g. the owner of
+		// a registered layer). Redact only the matching value; the surrounding
+		// caller may be a different principal, such as an admin acting on the
+		// user's layer.
 		for k, v := range ev.Context {
-			if v == userID {
+			if aliases[v] {
 				ev.Context[k] = tombstone
 				mutated = true
 			}
@@ -106,13 +261,24 @@ func EraseUser(_ context.Context, sink *FileSink, userID, salt string) (int, err
 			transformed++
 		}
 	}
-	// Append the user.erased record so the action is itself audited.
+	// Append the user.erased record so the action is itself audited. §8.1/
+	// §8.5: the invoking admin is recorded as the event Caller and
+	// in the admin context field for accountability; with no admin supplied
+	// (an internal call) it falls back to system:retention.
+	caller := admin
+	if caller == "" {
+		caller = "system:retention"
+	}
+	erasedCtx := map[string]string{"transformed": fmt.Sprintf("%d", transformed)}
+	if admin != "" {
+		erasedCtx["admin"] = admin
+	}
 	events = append(events, Event{
 		Type:      EventUserErased,
 		Timestamp: time.Now().UTC(),
-		Caller:    "system:retention",
+		Caller:    caller,
 		Target:    tombstone,
-		Context:   map[string]string{"transformed": fmt.Sprintf("%d", transformed)},
+		Context:   erasedCtx,
 	})
 	if err := rewriteWithChain(sink.path, events); err != nil {
 		return 0, err
@@ -123,9 +289,12 @@ func EraseUser(_ context.Context, sink *FileSink, userID, salt string) (int, err
 	return transformed, nil
 }
 
+// tombstoneFor returns the §8.5 audit redaction value
+// redacted-<sha256(user_id+salt)>: the full 32-byte SHA-256 digest of the
+// user id concatenated with the salt, with no delimiter between them.
 func tombstoneFor(userID, salt string) string {
-	h := sha256.Sum256([]byte(userID + "|" + salt))
-	return "erased:" + hex.EncodeToString(h[:8])
+	h := sha256.Sum256([]byte(userID + salt))
+	return "redacted-" + hex.EncodeToString(h[:])
 }
 
 // readAllEvents loads every event from a file-backed sink. A

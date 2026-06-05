@@ -16,7 +16,7 @@ When the host doesn't know which domain to start in, it calls `search_domains(qu
 
 ### Layer 2: Search (`search_artifacts`)
 
-When the host has the right neighborhood but doesn't know which artifact, it calls `search_artifacts(query?, scope?, type?, tags?)`. The registry runs a hybrid retriever (BM25 + embeddings, fused via reciprocal rank) over manifest text, returning a ranked list of `(artifact_id, summary, score)` tuples. All args are optional. `search_artifacts(scope="<path>")` with no query is the canonical "browse all artifacts in a domain" move. Search returns descriptors only.
+When the host has the right neighborhood but doesn't know which artifact, it calls `search_artifacts(query?, scope?, type?, tags?)`. The registry runs a hybrid retriever (BM25 + embeddings, fused via reciprocal rank) over manifest text, returning a ranked list of `(artifact_id, description, score)` tuples (the exact descriptor schema is normative in §7.6.1). All args are optional. `search_artifacts(scope="<path>")` with no query is the canonical "browse all artifacts in a domain" move. Search returns descriptors only.
 
 ### Layer 3: Load (`load_artifact`)
 
@@ -30,7 +30,7 @@ The disclosure surface only works if three other things hold.
 
 **Description quality.** Layers 1 and 2 only work if manifests and domains describe themselves well. Each artifact's `description` field must answer "when should I use this?" in one or two sentences; each `DOMAIN.md` author should similarly invest in `description`, `keywords`, and (where useful) the prose body. Those are what `search_domains` retrieves over and what `load_domain` returns. The registry lints for thin descriptions and flags clusters of artifacts whose summaries collide.
 
-**Learn-from-usage reranking.** The registry observes which artifacts actually get loaded after which queries (correlated within a `session_id`; see §5), and uses that signal to (a) rerank search results, (b) suggest import candidates to domain owners, and (c) flag artifacts whose authored descriptions underperform retrieval expectations.
+**Learn-from-usage reranking.** The registry records which artifacts get loaded (the access-frequency signal, correlated within a `session_id`; see §5) and uses it to rerank `search_artifacts` results and `load_domain` notable ordering, so artifacts agents actually load rise above equally-relevant but unused ones. Two further uses of the same signal are planned and not yet implemented: suggesting import candidates to domain owners, and flagging artifacts whose authored descriptions underperform retrieval expectations.
 
 ## 3.4 Discovery Flow
 
@@ -63,7 +63,7 @@ tenant:
   expose_scope_preview: true # default
 ```
 
-When `false`, the endpoint returns `403 scope_preview_disabled`. When `true`, the endpoint always returns aggregate counts only, never identifiers, descriptions, or any per-artifact metadata.
+When `false`, the endpoint returns `403 config.scope_preview_disabled`. When `true`, the endpoint always returns aggregate counts only, never identifiers, descriptions, or any per-artifact metadata.
 
 **Honored by all consumer paths.** The MCP server, SDK, and `podium sync` all expose this preview. The `podium status` CLI surfaces the same data for human inspection.
 

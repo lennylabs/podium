@@ -195,14 +195,9 @@ The `sbom:` field is informational. Podium stores whatever YAML the author write
 input: { $ref: ./schemas/input.json }
 output: { $ref: ./schemas/output.json }
 
-# For type: agent — well-known delegation targets (constrained to agent-type)
+# For type: agent — well-known delegation targets (advisory; any artifact type, not enforced at ingest)
 delegates_to:
   - finance/procurement/vendor-compliance-check@1.x
-
-# For type: command — opt-in projection as MCP prompt (see §5.2). The wire field
-# keeps the MCP-protocol name (`expose_as_mcp_prompt`) since MCP itself uses the
-# word "prompt" for slash-menu templates of this kind.
-expose_as_mcp_prompt: true
 
 # For type: rule — controls when the harness loads this rule into the agent's context.
 # The harness adapter (§6.7.1) translates these to the harness-native rule format.
@@ -330,7 +325,7 @@ The taxonomy is grouped by concern. The generic tool events (`pre_tool_use`, `po
 
 **Generic vs. subtype.** The adapter must accept either: a generic event (`pre_tool_use`) OR a subtype (`pre_shell_execution`). When the harness emits only the generic event natively, the adapter installs the subtype hook with a tool-name matcher so only matching tool calls fire it. When the harness emits the subtype natively (Cursor's `beforeShellExecution`, for example), the adapter wires it directly. Authors should not declare both a generic hook and the corresponding subtype hook for the same artifact; lint warns when this happens.
 
-**Coverage varies by harness.** No harness today implements every event in the table, and adapter coverage shifts as harnesses introduce or rename events. Authors choose an event from the canonical list; per the §6.7.1 capability matrix, lint rejects ingest at the unsupported (✗) intersection unless `target_harnesses:` (§4.3 universal fields) excludes the unsupported harness.
+**Coverage varies by harness.** No harness today implements every event in the table, and adapter coverage shifts as harnesses introduce or rename events. Authors choose an event from the canonical list. When an artifact declares `target_harnesses:` (§4.3 universal fields), ingest lint rejects a ✗ intersection for any named harness, so the author drops the field or removes that harness from the list. When `target_harnesses:` is absent, ingest stays permissive and the ✗ intersection is enforced at materialization: a `load_artifact` onto a harness that cannot translate the event fails with `materialize.untranslatable` (§6.9).
 
 The canonical-to-native mapping lives in the adapter implementation. For the current event surface of each harness, refer to the harness's own documentation rather than to a Podium-side per-harness table; the harness's documentation is the source of truth.
 
@@ -492,7 +487,7 @@ If multiple layers contribute a `DOMAIN.md` for the same path, the registry merg
 - `discovery.fold_passthrough_chains`: most-restrictive-wins (`true` over `false`).
 - `discovery.featured`, `discovery.deprioritize`, `discovery.keywords`: append-unique.
 
-When a workspace-local-overlay `DOMAIN.md` is involved, the MCP server applies the merge client-side after the registry returns its result for the registry-side layers.
+When a workspace-local-overlay `DOMAIN.md` is involved, the consumers that expose `load_domain` apply the merge client-side after the registry returns its result for the registry-side layers: the MCP server and the language SDKs. `podium sync` materializes by the sync.yaml scope rather than by domain enumeration, so it does not apply this merge.
 
 ### 4.5.5 Discovery Rendering
 
@@ -611,7 +606,7 @@ Each layer declares one or more of the following:
 | `public: true`                | Anyone, including unauthenticated callers. |
 | `organization: true`          | Any authenticated user in the tenant org.  |
 | `groups: [<oidc-group>, ...]` | Members of the listed OIDC groups.         |
-| `users: [<user-id>, ...]`     | Listed user identifiers (OIDC subject).    |
+| `users: [<user-id>, ...]`     | Listed user identifiers, matched against the caller's OIDC subject or email. |
 
 Multiple fields combine as a union; a caller sees the layer if any condition matches. User-defined layers (§7.3.1) have implicit visibility `users: [<registrant>]`; the field is set automatically and cannot be widened.
 
@@ -700,7 +695,7 @@ To intentionally replace an artifact rather than extend it, the lower-precedence
 | `license`                              | Scalar; child wins (lint warning if changed across layers) |
 | `search_visibility`                    | Scalar; most-restrictive (`direct-only` > `indexed`)       |
 
-**Default for unlisted fields.** A child can override any frontmatter field by setting it; if the child omits the field, the parent's value is inherited unchanged. This applies to `deprecated`, `replaced_by`, `effort_hint`, `model_class_hint`, `sbom`, `expose_as_mcp_prompt`, `rule_mode`, `rule_globs`, `rule_description`, `hook_event`, `hook_action`, `server_identifier`, `target_harnesses`, `input`, `output`, and any extension-type fields not declared by their `TypeProvider`. Two fields are special cases. The child's `type:` must match the parent's; ingest rejects an `extends:` chain that crosses types. The child's `version:` is independent of the parent's; each artifact has its own version stored in the registry, and the parent version is pinned at the child's ingest time per §4.7.6.
+**Default for unlisted fields.** A child can override any frontmatter field by setting it; if the child omits the field, the parent's value is inherited unchanged. This applies to `deprecated`, `replaced_by`, `effort_hint`, `model_class_hint`, `sbom`, `rule_mode`, `rule_globs`, `rule_description`, `hook_event`, `hook_action`, `server_identifier`, `target_harnesses`, `input`, `output`, and any extension-type fields not declared by their `TypeProvider`. Two fields are special cases. The child's `type:` must match the parent's; ingest rejects an `extends:` chain that crosses types. The child's `version:` is independent of the parent's; each artifact has its own version stored in the registry, and the parent version is pinned at the child's ingest time per §4.7.6.
 
 Extension types register their own field semantics via `TypeProvider`.
 
@@ -819,7 +814,7 @@ During a freeze, blocked operations are rejected unless `--break-glass` is passe
 The registry indexes "X depends on Y" edges across artifacts:
 
 - `extends:` chains
-- `delegates_to:` references (constrained to `agent`-type targets)
+- `delegates_to:` references (target type is advisory, not enforced at ingest)
 - `mcpServers:` references that resolve to `mcp-server`-type artifacts via `server_identifier`
 
 Tag co-occurrence is **not** a dependency edge (too noisy for impact analysis).
@@ -827,7 +822,6 @@ Tag co-occurrence is **not** a dependency edge (too noisy for impact analysis).
 The index drives:
 
 - **Impact analysis.** Before deprecating an artifact, list everything that depends on it.
-- **Cascading review.** When a high-sensitivity dependency changes, flag downstream artifacts for re-review.
 - **Search ranking signals.** Frequently-depended-on artifacts surface higher.
 
 ### 4.7.4 Classification and Lifecycle
@@ -868,6 +862,8 @@ Vulnerability scanning is not a registry responsibility. The natural place for C
 Per-org limits, admin-configurable: storage (bytes), search QPS, materialization rate, audit volume.
 
 `podium quota` CLI surfaces current usage and limits. Quota exhaustion returns structured errors (`quota.storage_exceeded`, etc.).
+
+The audit-volume limit is a per-tenant daily cap on emitted audit events. Each event counts against the current UTC day; once the cap is reached, new ingest writes are refused with `quota.audit_volume_exceeded` until the count resets at the day boundary. Reads continue to serve, so a spent budget bounds write-driven audit growth without dropping events.
 
 ### 4.7.9 Signing
 

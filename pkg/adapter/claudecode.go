@@ -1,10 +1,12 @@
 package adapter
 
 import (
+	"context"
 	"path"
 	"sort"
 	"strings"
 
+	"github.com/lennylabs/podium/pkg/manifest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,8 +27,12 @@ func (ClaudeCode) ID() string { return "claude-code" }
 
 // Adapt translates src into the Claude Code layout. Outputs are sorted
 // alphabetically for golden-file stability.
-func (c ClaudeCode) Adapt(src Source) ([]File, error) {
+func (c ClaudeCode) Adapt(ctx context.Context, src Source) ([]File, error) {
 	ty := frontmatterType(src.ArtifactBytes)
+	// §4.4.2 — the document-level source: declares the default trust region
+	// for the manifest's prose. For a skill it lives in ARTIFACT.md while the
+	// prose lives in SKILL.md, so it is read from ARTIFACT.md for every type.
+	source := documentSource(src.ArtifactBytes)
 	out := []File{}
 	name := lastSegmentClaude(src.ArtifactID)
 
@@ -34,23 +40,42 @@ func (c ClaudeCode) Adapt(src Source) ([]File, error) {
 	case "skill":
 		skillRoot := path.Join(".claude", "skills", name)
 		if len(src.SkillBytes) > 0 {
+			// Claude Code consumes only the agentskills.io subset
+			// (SKILL.md, not ARTIFACT.md). §4.3.4 — derive
+			// compatibility from runtime_requirements and
+			// sandbox_profile when the author omits it so the
+			// runtime constraints survive into SKILL.md.
+			skill := deriveSkillCompatibility(src.SkillBytes, src.ArtifactBytes)
 			// §4.4.2 — rewrite imported provenance blocks into
 			// Claude Code <untrusted-data> regions so the host
 			// can apply differential trust at read time.
-			out = append(out, File{Path: path.Join(skillRoot, "SKILL.md"), Content: rewriteProvenanceForClaude(src.SkillBytes)})
+			out = append(out, File{Path: path.Join(skillRoot, "SKILL.md"), Content: rewriteProvenanceForClaude(skill, source)})
 		}
 		for rel, data := range src.Resources {
 			out = append(out, File{Path: path.Join(skillRoot, rel), Content: data})
 		}
+	// §4.4.2 — every type's materialized body has its imported
+	// provenance blocks rewritten into Claude Code <untrusted-data>
+	// regions, not just skills. context bodies in particular aggregate
+	// external knowledge, so the prompt-injection defense must cover
+	// them. rewriteProvenanceForClaude only touches imported blocks, so
+	// passing the full ARTIFACT.md (frontmatter included) is a no-op when
+	// none are present.
 	case "rule":
+		// A Claude Code rule file carries the rule prose under Claude-native
+		// scoping frontmatter (paths for glob, description for auto). The
+		// Podium-internal fields (type, version, rule_mode, rule_globs, ...) are
+		// catalog metadata, not Claude Code rule fields, so they are dropped.
+		// Provenance markers in the body are rewritten to <untrusted-data>
+		// regions (§4.4.2).
 		out = append(out, File{
 			Path:    path.Join(".claude", "rules", name+".md"),
-			Content: src.ArtifactBytes,
+			Content: rewriteProvenanceForClaude(claudeRuleBody(src), source),
 		})
 	case "agent":
 		out = append(out, File{
 			Path:    path.Join(".claude", "agents", name+".md"),
-			Content: src.ArtifactBytes,
+			Content: rewriteProvenanceForClaude(src.ArtifactBytes, source),
 		})
 		for rel, data := range src.Resources {
 			out = append(out, File{
@@ -58,19 +83,29 @@ func (c ClaudeCode) Adapt(src Source) ([]File, error) {
 				Content: data,
 			})
 		}
+	case "command":
+		out = append(out, File{
+			Path:    path.Join(".claude", "commands", name+".md"),
+			Content: rewriteProvenanceForClaude(src.ArtifactBytes, source),
+		})
+		out = appendResources(out, path.Join(".podium", "resources", src.ArtifactID), src.Resources)
+	case "context":
+		return contextOut(src), nil
+	case "hook":
+		// §6.7 — a hook config-merges its registration into the shared
+		// settings.json; bundled scripts materialize to the harness-neutral
+		// .podium/resources/<id>/ bucket and the merged command references them.
+		return hookConfigOut(".claude/settings.json", hookFragmentJSON(claudeHookEvents, src), src), nil
+	case "mcp-server":
+		return []File{{Path: ".mcp.json", Op: OpMergeJSON, Content: mcpFragmentJSON(src)}}, nil
 	default:
-		// context, command, hook, mcp-server, and extensions all land
-		// under .claude/podium/<id>/ with the canonical layout.
+		// extension types land under .claude/podium/<id>/ with the canonical
+		// layout.
 		out = append(out, File{
 			Path:    path.Join(".claude", "podium", src.ArtifactID, "ARTIFACT.md"),
-			Content: src.ArtifactBytes,
+			Content: rewriteProvenanceForClaude(src.ArtifactBytes, source),
 		})
-		for rel, data := range src.Resources {
-			out = append(out, File{
-				Path:    path.Join(".claude", "podium", src.ArtifactID, rel),
-				Content: data,
-			})
-		}
+		out = appendResources(out, path.Join(".claude", "podium", src.ArtifactID), src.Resources)
 	}
 
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
@@ -99,9 +134,75 @@ func frontmatterType(src []byte) string {
 	return holder.Type
 }
 
+// documentSource extracts the §4.4.2 document-level `source:` provenance
+// field from the leading frontmatter of an ARTIFACT.md, using the same
+// lightweight parse as frontmatterType. Returns "" when absent or
+// unparseable.
+func documentSource(src []byte) string {
+	s := string(src)
+	if !strings.HasPrefix(s, "---\n") && !strings.HasPrefix(s, "---\r\n") {
+		return ""
+	}
+	end := strings.Index(s[3:], "\n---")
+	if end < 0 {
+		return ""
+	}
+	fm := s[3 : 3+end]
+	var holder struct {
+		Source string `yaml:"source"`
+	}
+	if err := yaml.Unmarshal([]byte(fm), &holder); err != nil {
+		return ""
+	}
+	return holder.Source
+}
+
 func lastSegmentClaude(p string) string {
 	if i := strings.LastIndex(p, "/"); i >= 0 {
 		return p[i+1:]
 	}
 	return p
+}
+
+// claudeRuleBody renders a Claude Code rule file: the rule prose under the
+// Claude-native scoping frontmatter Claude Code documents for `.claude/rules/`.
+// Only `paths:` is a native rules field, and it is a YAML list of globs, so a
+// glob rule writes `paths:` from rule_globs (comma-split). always, auto, and
+// explicit carry no scoping key: a `.claude/rules/` file without `paths:` loads
+// at launch like CLAUDE.md, which is native for always and the load-always
+// fallback for auto and explicit (Claude Code has no description-attach or
+// mention-only rule mode). The Podium-internal frontmatter is dropped. On a
+// parse error the raw ARTIFACT.md is returned so nothing is silently lost.
+func claudeRuleBody(src Source) []byte {
+	art, err := manifest.ParseArtifact(src.ArtifactBytes)
+	if err != nil || art == nil {
+		return src.ArtifactBytes
+	}
+	var fm strings.Builder
+	if art.RuleMode == manifest.RuleModeGlob && art.RuleGlobs != "" {
+		fm.WriteString("paths:\n")
+		for _, g := range splitGlobs(art.RuleGlobs) {
+			fm.WriteString("  - \"" + g + "\"\n")
+		}
+	}
+	var b strings.Builder
+	if fm.Len() > 0 {
+		b.WriteString("---\n")
+		b.WriteString(fm.String())
+		b.WriteString("---\n\n")
+	}
+	b.WriteString(art.Body)
+	return []byte(b.String())
+}
+
+// splitGlobs splits a comma-separated rule_globs string into trimmed,
+// non-empty patterns for the Claude Code `paths:` list.
+func splitGlobs(globs string) []string {
+	var out []string
+	for _, g := range strings.Split(globs, ",") {
+		if g = strings.TrimSpace(g); g != "" {
+			out = append(out, g)
+		}
+	}
+	return out
 }

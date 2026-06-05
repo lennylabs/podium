@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // --- --help and validation paths -------------------------------------------
@@ -33,6 +34,11 @@ func TestLayerSubcommands_HelpExitsZero(t *testing.T) {
 
 func TestLayerSubcommands_MissingRegistryExits2(t *testing.T) {
 	t.Setenv("PODIUM_REGISTRY", "")
+	// Isolate HOME and the working directory so the sync.yaml fallback
+	// (register/reingest) finds no merged defaults.registry and the commands
+	// still refuse with exit 2.
+	t.Setenv("HOME", t.TempDir())
+	t.Chdir(t.TempDir())
 	for name, args := range map[string][]string{
 		"layerList":       nil,
 		"layerRegister":   {"--id", "x", "--local", "/tmp"},
@@ -107,6 +113,40 @@ func TestLayerWatch_BadIntervalExits2(t *testing.T) {
 			t.Errorf("layerWatch(bad interval) = %d, want 2", code)
 		}
 	})
+}
+
+// spec §7.3.1 / §14.10: --interval takes a Go-style duration, so
+// the documented `--interval 1h` parses. A bare integer (the old
+// seconds-only form) is rejected by flag parsing with exit 2.
+func TestLayerWatch_IntervalIsDuration(t *testing.T) {
+	t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:1")
+
+	// A bare integer is no longer a valid interval.
+	withStderr(t, func() {
+		if code := layerWatch([]string{"--id", "x", "--interval", "3600"}); code != 2 {
+			t.Errorf("layerWatch(--interval 3600) = %d, want 2 (bare int rejected)", code)
+		}
+	})
+
+	// The §14.10 duration example parses; stub the sleep so the watch loop
+	// exits after the first poke instead of blocking.
+	orig := sleepFor
+	t.Cleanup(func() { sleepFor = orig })
+	var gotInterval time.Duration
+	sleepFor = func(d time.Duration) { gotInterval = d; runtimeGoexit() }
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		withStderr(t, func() {
+			captureStdout(t, func() {
+				_ = layerWatch([]string{"--id", "x", "--registry", "http://127.0.0.1:1", "--interval", "1h"})
+			})
+		})
+	}()
+	<-done
+	if gotInterval != time.Hour {
+		t.Errorf("parsed interval = %v, want 1h", gotInterval)
+	}
 }
 
 func TestLayerWatch_MissingIDExits2(t *testing.T) {
@@ -215,6 +255,86 @@ func TestLayerReingest_HappyPathPosts(t *testing.T) {
 			t.Errorf("layerReingest = %d, want 0", code)
 		}
 	})
+}
+
+// --- standalone sync.yaml registry fallback ---------------------
+
+// spec §14.10: an explicit --registry / PODIUM_REGISTRY value
+// always wins; resolveLayerRegistry returns it unchanged.
+func TestResolveLayerRegistry_FlagValueWins(t *testing.T) {
+	t.Parallel()
+	if got := resolveLayerRegistry("http://flag.example"); got != "http://flag.example" {
+		t.Errorf("resolveLayerRegistry(flag) = %q, want the flag value", got)
+	}
+}
+
+// spec §14.10: with no flag/env registry, the layer commands fall
+// back to defaults.registry in the merged ~/.podium/sync.yaml that
+// `podium serve --standalone` bootstraps.
+func TestMergedRegistry_ReadsHomeSyncYAML(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	podiumDir := filepath.Join(home, ".podium")
+	if err := os.MkdirAll(podiumDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("defaults:\n  registry: http://127.0.0.1:8088\n")
+	if err := os.WriteFile(filepath.Join(podiumDir, "sync.yaml"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A clean workspace dir (no .podium) so only the home scope contributes.
+	if got := mergedRegistry(t.TempDir(), home); got != "http://127.0.0.1:8088" {
+		t.Errorf("mergedRegistry = %q, want the bootstrapped registry", got)
+	}
+}
+
+// spec §14.10: with no sync.yaml anywhere, mergedRegistry resolves
+// to the empty string so the command refuses with the missing-registry error.
+func TestMergedRegistry_EmptyWhenNoConfig(t *testing.T) {
+	t.Parallel()
+	if got := mergedRegistry(t.TempDir(), t.TempDir()); got != "" {
+		t.Errorf("mergedRegistry(no config) = %q, want empty", got)
+	}
+}
+
+// spec §14.10: `podium layer register` with no --registry resolves
+// the registry from the bootstrapped ~/.podium/sync.yaml and reaches the
+// server, end to end through the command.
+func TestLayerRegister_FallsBackToSyncYAMLRegistry(t *testing.T) {
+	// Isolate HOME and the working directory so only the sync.yaml we write
+	// contributes; empty PODIUM_REGISTRY forces the fallback path.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PODIUM_REGISTRY", "")
+	t.Chdir(t.TempDir())
+
+	gotPath := ""
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"community-skills","registered":true}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	podiumDir := filepath.Join(home, ".podium")
+	if err := os.MkdirAll(podiumDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("defaults:\n  registry: " + srv.URL + "\n")
+	if err := os.WriteFile(filepath.Join(podiumDir, "sync.yaml"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	withStderr(t, func() {
+		captureStdout(t, func() {
+			if code := layerRegister([]string{"--id", "community-skills", "--local", t.TempDir()}); code != 0 {
+				t.Fatalf("layerRegister (sync.yaml fallback) = %d, want 0", code)
+			}
+		})
+	})
+	if gotPath != "/v1/layers" {
+		t.Errorf("registry not reached via fallback; server saw path %q", gotPath)
+	}
 }
 
 // adminRuntime list/register also have validation paths.

@@ -15,8 +15,9 @@ import (
 // WatchOptions configures the long-running --watch mode (§7.5).
 //
 // Watch reruns Run whenever the registry path or overlay path
-// changes. Detection is poll-based (no fsnotify dependency); the
-// poller computes a content-fingerprint over each watched tree and
+// changes. Detection uses fsnotify (§13.11.4); polling is the fallback
+// for platforms or filesystems where fsnotify cannot initialize, where
+// the poller computes a content-fingerprint over each watched tree and
 // reruns the sync when the fingerprint moves. Debounce coalesces
 // bursts of edits into a single sync.
 type WatchOptions struct {
@@ -58,14 +59,32 @@ func Watch(ctx context.Context, opts WatchOptions) (<-chan WatchEvent, error) {
 	if opts.Debounce <= 0 {
 		opts.Debounce = 200 * time.Millisecond
 	}
+	// §7.5.4: watch materializes "profile + toggles from the lock file" on
+	// startup and re-applies toggles on every event, so every Run on the
+	// watch path preserves the lock's toggles rather than clearing them.
+	opts.Sync.PreserveToggles = true
+	// spec: §7.5.3 — watcher-driven reruns stamp last_synced_by: watch.
+	opts.Sync.LastSyncedBy = "watch"
 
 	events := make(chan WatchEvent, 4)
+	// §7.5.2 dispatch: a server-source watcher subscribes to the registry's
+	// §7.5 change-event stream and reruns on every event; a filesystem
+	// source polls the local tree for content changes.
+	if isServerSource(opts.Sync.RegistryPath) {
+		go runServerWatch(ctx, opts, events)
+		return events, nil
+	}
 	go runWatch(ctx, opts, events)
 	return events, nil
 }
 
 // runWatch is the watcher goroutine. It owns the events channel and
 // closes it on exit.
+//
+// spec: §13.11.4 — a filesystem source uses fsnotify to watch the registry
+// path and the workspace overlay. Polling is the fallback for platforms or
+// filesystems where fsnotify cannot initialize (for example a network share
+// that does not deliver inotify events).
 func runWatch(ctx context.Context, opts WatchOptions, events chan<- WatchEvent) {
 	defer close(events)
 
@@ -76,6 +95,18 @@ func runWatch(ctx context.Context, opts WatchOptions, events chan<- WatchEvent) 
 		}
 	}
 
+	if tw, err := NewTreeWatcher(opts.Sync.RegistryPath, opts.OverlayPath); err == nil {
+		defer tw.Close()
+		runFSNotifyWatch(ctx, opts, tw, emit)
+		return
+	}
+	runPollWatch(ctx, opts, emit)
+}
+
+// runPollWatch is the poll-based fallback watcher. It computes a content
+// fingerprint over the watched trees on each tick and reruns the sync when
+// the fingerprint moves, debouncing bursts of edits.
+func runPollWatch(ctx context.Context, opts WatchOptions, emit func(*Result, error)) {
 	// Initial sync. Capture lastSig BEFORE emitting so a caller that
 	// reads the first event and immediately edits the registry can't
 	// race the signature snapshot. The previous order (emit, then
@@ -109,6 +140,15 @@ func runWatch(ctx context.Context, opts WatchOptions, events chan<- WatchEvent) 
 			}
 		}
 	}
+}
+
+// PathSignature returns a stable content fingerprint over one or more
+// filesystem trees, suitable for poll-based change detection. Two
+// signatures are equal iff every (path, modtime, size) tuple matches
+// across calls. It is exported so other poll-based watchers (the §6.4
+// MCP overlay watcher) reuse the same detection logic.
+func PathSignature(paths ...string) string {
+	return watchSignature(paths...)
 }
 
 // watchSignature returns a stable fingerprint of the watched paths.

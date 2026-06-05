@@ -26,10 +26,16 @@ var (
 // Identity is the OAuth-attested caller identity attached to every
 // registry call (§6.3.1).
 type Identity struct {
-	Sub             string
-	Email           string
-	OrgID           string
-	Groups          []string
+	Sub    string
+	Email  string
+	OrgID  string
+	Groups []string
+	// Scopes carries the fine-grained OAuth scope claims (§6.3.1), e.g.
+	// "podium:read:finance/*" or "podium:load:finance/ap/pay-invoice@1.x".
+	// A narrow scope intersects with the caller's layer visibility and the
+	// smaller surface wins. Empty means no scope narrowing (full layer
+	// visibility).
+	Scopes          []string
 	IsAuthenticated bool
 }
 

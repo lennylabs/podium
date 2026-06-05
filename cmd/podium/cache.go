@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -39,7 +40,7 @@ func cachePrune(args []string) int {
 	fs := flag.NewFlagSet("cache prune", flag.ContinueOnError)
 	setUsage(fs, "Remove content-cache buckets older than N days.")
 	dir := fs.String("dir", os.Getenv("PODIUM_CACHE_DIR"), "cache directory (defaults to ~/.podium/cache)")
-	days := fs.Int("days", 30, "remove buckets older than N days since last access")
+	days := fs.Int("days", 30, "remove buckets last accessed more than N days ago (0 = older than now)")
 	dryRun := fs.Bool("dry-run", false, "report what would be removed; remove nothing")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
@@ -53,8 +54,14 @@ func cachePrune(args []string) int {
 		}
 		*dir = filepath.Join(home, ".podium", "cache")
 	}
-	if *days <= 0 {
-		fmt.Fprintln(os.Stderr, "error: --days must be positive")
+	// --days 0 is the boundary "older than now": the cutoff is the present
+	// moment, so every bucket whose last access is in the past is prunable. This
+	// is the timing-independent way to select the whole cache, used to confirm a
+	// freshly-warmed bucket is prunable. A negative count would push the cutoff
+	// into the future and evict buckets newer than now, which is nonsensical, so
+	// reject it.
+	if *days < 0 {
+		fmt.Fprintln(os.Stderr, "error: --days must not be negative")
 		return 2
 	}
 	cutoff := time.Now().Add(-time.Duration(*days) * 24 * time.Hour)
@@ -75,7 +82,18 @@ func cachePrune(args []string) int {
 		if !e.IsDir() {
 			continue
 		}
+		// §6.5: the resolution index (`.resolutions`) and any other
+		// dot-prefixed bookkeeping directory are not content buckets; never
+		// prune them, or offline resolution loses its (id, version) index.
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
 		bucket := filepath.Join(*dir, e.Name())
+		// A content bucket always holds a `frontmatter` file; skip any
+		// directory that is not one so prune cannot delete unrelated data.
+		if _, err := os.Stat(filepath.Join(bucket, "frontmatter")); err != nil {
+			continue
+		}
 		mtime, size := bucketAccessTime(bucket)
 		if !mtime.Before(cutoff) {
 			kept++
@@ -100,7 +118,9 @@ func cachePrune(args []string) int {
 
 // bucketAccessTime returns the most recent mtime of any file
 // inside the bucket directory. Falls back to the bucket dir's
-// own mtime when empty.
+// own mtime when empty. The MCP server touches bucket files on every
+// cache hit (§6.5), so the newest mtime reflects last access
+// (read or write), not just the original write time.
 func bucketAccessTime(bucket string) (time.Time, int64) {
 	info, err := os.Stat(bucket)
 	if err != nil {

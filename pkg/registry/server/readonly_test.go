@@ -23,19 +23,6 @@ func TestModeTracker_CheckWriteInReadOnly(t *testing.T) {
 	}
 }
 
-// Spec: §13.2.1 / §6.10 — configuration edits rejected with
-// config.read_only.
-// Matrix: §6.10 (config.read_only)
-func TestModeTracker_CheckConfigInReadOnly(t *testing.T) {
-	t.Parallel()
-	m := server.NewModeTracker()
-	m.Set(server.ModeReadOnly)
-	err := m.CheckConfig()
-	if !errors.Is(err, server.ErrReadOnlyConfig) {
-		t.Errorf("got %v, want ErrReadOnlyConfig", err)
-	}
-}
-
 // Spec: §13.2.1 — Mode.String() renders the documented values.
 func TestMode_StringMatchesSpec(t *testing.T) {
 	t.Parallel()

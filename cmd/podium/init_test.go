@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,5 +121,110 @@ func TestInit_AddsGitignoreEntries(t *testing.T) {
 		if !strings.Contains(string(body), want) {
 			t.Errorf(".gitignore missing %q:\n%s", want, body)
 		}
+	}
+}
+
+// Spec: §7.7 workspace-mode step 1 — init walks up from CWD to
+// reuse an existing `.podium/` workspace instead of creating a second one
+// in a subdirectory.
+func TestInit_WalksUpToExistingWorkspace(t *testing.T) {
+	root := t.TempDir()
+	withCwd(t, root, func() {
+		if rc := initCmd([]string{"--registry", "https://podium.acme.com"}); rc != 0 {
+			t.Fatalf("root init rc = %d", rc)
+		}
+	})
+	sub := filepath.Join(root, "services", "api")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatalf("mkdir sub: %v", err)
+	}
+	withCwd(t, sub, func() {
+		// --local from the subdirectory must target the parent workspace's
+		// .podium/, not create a new one under the subdirectory.
+		if rc := initCmd([]string{"--local", "--registry", "https://staging.acme.com"}); rc != 0 {
+			t.Fatalf("sub init rc = %d", rc)
+		}
+	})
+	if _, err := os.Stat(filepath.Join(sub, ".podium")); err == nil {
+		t.Errorf("init created a second .podium/ in the subdirectory")
+	}
+	if _, err := os.Stat(filepath.Join(root, ".podium", "sync.local.yaml")); err != nil {
+		t.Errorf("sync.local.yaml not written to the discovered workspace: %v", err)
+	}
+}
+
+// Spec: §7.7 — with no value flags and an interactive stdin,
+// init prompts for the registry (and optional harness/target) and writes
+// the answers.
+func TestInit_InteractiveWizard(t *testing.T) {
+	dir := t.TempDir()
+	prevTerm := initIsTerminal
+	prevStdin := initStdin
+	initIsTerminal = func() bool { return true }
+	initStdin = strings.NewReader("https://wizard.acme.com\nclaude-code\n.claude/\n")
+	t.Cleanup(func() { initIsTerminal = prevTerm; initStdin = prevStdin })
+
+	withCwd(t, dir, func() {
+		if rc := initCmd(nil); rc != 0 {
+			t.Fatalf("wizard init rc = %d, want 0", rc)
+		}
+	})
+	body, err := os.ReadFile(filepath.Join(dir, ".podium", "sync.yaml"))
+	if err != nil {
+		t.Fatalf("read sync.yaml: %v", err)
+	}
+	for _, want := range []string{"https://wizard.acme.com", "claude-code", ".claude/"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("sync.yaml missing %q:\n%s", want, body)
+		}
+	}
+}
+
+// Spec: §7.7 — a non-terminal stdin skips the wizard and the
+// command exits 2 with the required-flag error rather than blocking.
+func TestInit_NonTerminalSkipsWizard(t *testing.T) {
+	dir := t.TempDir()
+	prevTerm := initIsTerminal
+	initIsTerminal = func() bool { return false }
+	t.Cleanup(func() { initIsTerminal = prevTerm })
+	withCwd(t, dir, func() {
+		if rc := initCmd(nil); rc != 2 {
+			t.Fatalf("rc = %d, want 2 (no wizard, no flags)", rc)
+		}
+	})
+}
+
+// Spec: §7.7 workspace-mode step 4 — the committed default
+// scope prints next-step hints to commit the file and run `podium sync`.
+func TestInit_PrintsNextStepHints(t *testing.T) {
+	dir := t.TempDir()
+	var out string
+	withCwd(t, dir, func() {
+		out = captureStdout(t, func() {
+			if rc := initCmd([]string{"--registry", "https://podium.acme.com"}); rc != 0 {
+				t.Fatalf("rc = %d", rc)
+			}
+		})
+	})
+	if !strings.Contains(out, "commit") {
+		t.Errorf("missing commit hint:\n%s", out)
+	}
+	if !strings.Contains(out, "podium sync") {
+		t.Errorf("missing sync hint:\n%s", out)
+	}
+}
+
+// Spec: §7.7 — the wizard reader collects the registry and the
+// optional defaults; blank optional answers stay unset.
+func TestRunInitWizard(t *testing.T) {
+	res, err := runInitWizard(strings.NewReader("https://podium.acme.com\n\n\n"), io.Discard)
+	if err != nil {
+		t.Fatalf("runInitWizard: %v", err)
+	}
+	if res.registry != "https://podium.acme.com" {
+		t.Errorf("registry = %q", res.registry)
+	}
+	if res.harness != "" || res.target != "" {
+		t.Errorf("blank answers should stay unset: harness=%q target=%q", res.harness, res.target)
 	}
 }

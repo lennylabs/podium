@@ -36,4 +36,11 @@ func TestSplitParentRef(t *testing.T) {
 	if id != "" || ver != "1.0.0" {
 		t.Errorf("got id=%q ver=%q", id, ver)
 	}
+	// spec: §4.2 — splits on the first "@" so it agrees with the
+	// other reference-split helpers; canonical-ID segments cannot contain
+	// "@", so the suffix always begins at the first "@".
+	id, ver = splitParentRef("a@b@c")
+	if id != "a" || ver != "b@c" {
+		t.Errorf("multi-@ got id=%q ver=%q, want id=a ver=b@c", id, ver)
+	}
 }

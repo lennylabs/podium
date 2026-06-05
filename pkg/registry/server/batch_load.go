@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"unicode/utf8"
 
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
@@ -26,18 +28,44 @@ type BatchLoadRequest struct {
 // BatchLoadEnvelope is one per-item response. Status is "ok" or
 // "error"; on error the Error field carries the §6.10 envelope.
 type BatchLoadEnvelope struct {
-	ID                 string            `json:"id"`
-	Status             string            `json:"status"`
-	Type               string            `json:"type,omitempty"`
-	Version            string            `json:"version,omitempty"`
-	ContentHash        string            `json:"content_hash,omitempty"`
-	ManifestBody       string            `json:"manifest_body,omitempty"`
-	Frontmatter        string            `json:"frontmatter,omitempty"`
-	Resources          map[string]string `json:"resources,omitempty"`
-	Deprecated         bool              `json:"deprecated,omitempty"`
-	ReplacedBy         string            `json:"replaced_by,omitempty"`
-	DeprecationWarning string            `json:"deprecation_warning,omitempty"`
-	Error              *ErrorResponse    `json:"error,omitempty"`
+	ID           string `json:"id"`
+	Status       string `json:"status"`
+	Type         string `json:"type,omitempty"`
+	Version      string `json:"version,omitempty"`
+	ContentHash  string `json:"content_hash,omitempty"`
+	ManifestBody string `json:"manifest_body,omitempty"`
+	Frontmatter  string `json:"frontmatter,omitempty"`
+	// SkillRaw is the verbatim SKILL.md for a type: skill artifact (§4.3.4),
+	// delivered so the SDK materializes the authored skill file byte-for-byte
+	// rather than reconstructing it from frontmatter plus body. Empty for
+	// non-skills.
+	SkillRaw string `json:"skill_raw,omitempty"`
+	// Resources carries every bundled resource as a presigned reference
+	// per the §7.6.2 wire example {path, presigned_url, content_hash}.
+	// The batch path keeps the response body small by delivering all
+	// resources via URL; the SDK fetches them concurrently afterward.
+	// In the standalone-without-storage mode (§13.11) ingest keeps every
+	// resource inline, so the reference carries the bytes inline instead
+	// of a presigned_url.
+	Resources          []BatchResource `json:"resources,omitempty"`
+	Deprecated         bool            `json:"deprecated,omitempty"`
+	ReplacedBy         string          `json:"replaced_by,omitempty"`
+	DeprecationWarning string          `json:"deprecation_warning,omitempty"`
+	Error              *ErrorResponse  `json:"error,omitempty"`
+}
+
+// BatchResource is one §7.6.2 bundled-resource reference in a batch
+// envelope. With an object store configured the resource travels as a
+// presigned_url (the §7.6.2 wire example). In the standalone-without-storage
+// mode the bytes travel inline in Inline (base64-encoded, with InlineBase64
+// set, when the payload is not valid UTF-8) so a batch consumer materializes
+// the same complete package the single-load path delivers.
+type BatchResource struct {
+	Path         string `json:"path"`
+	PresignedURL string `json:"presigned_url,omitempty"`
+	ContentHash  string `json:"content_hash"`
+	Inline       string `json:"inline,omitempty"`
+	InlineBase64 bool   `json:"inline_base64,omitempty"`
 }
 
 // handleBatchLoad answers POST /v1/artifacts:batchLoad per
@@ -82,10 +110,10 @@ func (s *Server) loadOneForBatch(ctx context.Context, id layer.Identity, artifac
 		return BatchLoadEnvelope{
 			ID:     artifactID,
 			Status: "error",
-			Error:  errorEnvelopeFor(err),
+			Error:  batchLoadError(err),
 		}
 	}
-	return BatchLoadEnvelope{
+	env := BatchLoadEnvelope{
 		ID:                 res.ID,
 		Status:             "ok",
 		Type:               res.Type,
@@ -93,21 +121,86 @@ func (s *Server) loadOneForBatch(ctx context.Context, id layer.Identity, artifac
 		ContentHash:        res.ContentHash,
 		ManifestBody:       res.ManifestBody,
 		Frontmatter:        string(res.Frontmatter),
+		SkillRaw:           string(res.SkillRaw),
 		Deprecated:         res.Deprecated,
 		ReplacedBy:         res.ReplacedBy,
 		DeprecationWarning: res.DeprecationWarning,
 	}
+	// §7.6.2: bundled resources travel as presigned URLs so the batch
+	// response body stays small. In the standalone-without-storage mode
+	// (§13.11) ingest kept every resource inline regardless of size, so
+	// with no object store deliver those bytes inline rather than dropping
+	// them, mirroring attachResources on the single-load path.
+	for _, ref := range res.Resources {
+		if s.objectStore != nil {
+			url, err := s.objectStore.Presign(ctx, resourceKey(ref), s.presignTTL)
+			if err != nil {
+				return BatchLoadEnvelope{
+					ID:     artifactID,
+					Status: "error",
+					Error:  errorEnvelopeFor(err),
+				}
+			}
+			env.Resources = append(env.Resources, BatchResource{
+				Path:         ref.Path,
+				PresignedURL: url,
+				ContentHash:  ref.ContentHash,
+			})
+			continue
+		}
+		body, err := s.inlineBytes(ctx, ref)
+		if err != nil {
+			return BatchLoadEnvelope{
+				ID:     artifactID,
+				Status: "error",
+				Error:  errorEnvelopeFor(err),
+			}
+		}
+		br := BatchResource{Path: ref.Path, ContentHash: ref.ContentHash}
+		// §4.1/§7.2: a binary resource is base64-encoded so
+		// encoding/json does not replace its non-UTF-8 bytes with U+FFFD.
+		if utf8.Valid(body) {
+			br.Inline = string(body)
+		} else {
+			br.Inline = base64.StdEncoding.EncodeToString(body)
+			br.InlineBase64 = true
+		}
+		env.Resources = append(env.Resources, br)
+	}
+	return env
 }
 
-// errorEnvelopeFor maps a core error to the §6.10 envelope.
+// batchLoadError maps a per-item load failure to the §7.6.2 envelope. A
+// not-found or visibility-filtered artifact both surface as
+// visibility.denied (the spec's documented per-item code) so the caller
+// cannot tell whether the artifact exists in some hidden layer; §7.6.2
+// forbids that existence leak. Other errors pass through errorEnvelopeFor.
+// spec: §7.6.2.
+func batchLoadError(err error) *ErrorResponse {
+	if errors.Is(err, core.ErrNotFound) {
+		e := &ErrorResponse{Code: "visibility.denied", Message: "artifact not visible to caller"}
+		enrichEnvelope(e)
+		return e
+	}
+	return errorEnvelopeFor(err)
+}
+
+// errorEnvelopeFor maps a core error to the §6.10 envelope. The
+// retryable flag and suggested_action are assigned by enrichEnvelope from
+// the per-code registry so per-item batch errors carry the same envelope
+// fields as the top-level writeError path.
 func errorEnvelopeFor(err error) *ErrorResponse {
+	var e *ErrorResponse
 	switch {
 	case errors.Is(err, core.ErrNotFound):
-		return &ErrorResponse{Code: "registry.not_found", Message: err.Error()}
+		e = &ErrorResponse{Code: "registry.not_found", Message: err.Error()}
 	case errors.Is(err, core.ErrUnavailable):
-		return &ErrorResponse{Code: "registry.unavailable", Message: err.Error(), Retryable: true}
+		e = &ErrorResponse{Code: "registry.unavailable", Message: err.Error()}
 	case errors.Is(err, core.ErrInvalidArgument):
-		return &ErrorResponse{Code: "registry.invalid_argument", Message: err.Error()}
+		e = &ErrorResponse{Code: "registry.invalid_argument", Message: err.Error()}
+	default:
+		e = &ErrorResponse{Code: "registry.unknown", Message: err.Error()}
 	}
-	return &ErrorResponse{Code: "registry.unknown", Message: err.Error()}
+	enrichEnvelope(e)
+	return e
 }

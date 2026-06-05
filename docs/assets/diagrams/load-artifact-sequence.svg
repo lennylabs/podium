@@ -50,8 +50,8 @@
   <text class="b-msg-mono" x="142" y="138">load_artifact(id)</text>
   <path class="b-line" d="M 130 146 L 366 146" marker-end="url(#b-arrow)"/>
 
-  <!-- 2. MCP -> registry: POST /artifacts -->
-  <text class="b-msg-mono" x="382" y="178">POST /artifacts (id, identity)</text>
+  <!-- 2. MCP -> registry: GET /v1/load_artifact -->
+  <text class="b-msg-mono" x="382" y="178">GET /v1/load_artifact?id=&lt;id&gt;</text>
   <path class="b-line" d="M 370 186 L 606 186" marker-end="url(#b-arrow)"/>
 
   <!-- 3. Registry self-action -->

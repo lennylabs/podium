@@ -1,0 +1,5 @@
+# A user-defined layer visible only to its registrant.
+# spec §4.6 visibility: users.
+visibility:
+  users:
+    - alice

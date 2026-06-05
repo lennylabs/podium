@@ -1,11 +1,33 @@
 package sync
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 )
+
+// ErrUnbalancedBraces signals a glob pattern with mismatched "{" / "}".
+var ErrUnbalancedBraces = errors.New("unbalanced braces")
+
+// validateGlob reports whether pattern is a well-formed §7.5.1 glob. It
+// rejects unbalanced brace alternation and any segment that filepath.Match
+// considers malformed (for example an unterminated "[" class). Used by the
+// §7.5.2 `podium sync --check` validation.
+func validateGlob(pattern string) error {
+	if strings.Count(pattern, "{") != strings.Count(pattern, "}") {
+		return ErrUnbalancedBraces
+	}
+	for _, expanded := range expandBraces(pattern) {
+		for _, seg := range splitSegments(expanded) {
+			if _, err := filepath.Match(seg, ""); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
 
 // ScopeFilter narrows a record set per §7.5.1: --include, --exclude, --type.
 // Patterns use the same glob syntax as DOMAIN.md include: (§4.5.2): "*"
@@ -38,6 +60,36 @@ func (f ScopeFilter) Apply(records []filesystem.ArtifactRecord) []filesystem.Art
 		}
 		if len(f.Types) > 0 && !containsType(f.Types, string(rec.Artifact.Type)) {
 			continue
+		}
+		out = append(out, rec)
+	}
+	return out
+}
+
+// filterMaterial applies the scope to source-neutral records (§7.5.1). It
+// mirrors Apply but operates on the materialRecord type used by both the
+// filesystem and server sources. A record whose manifest did not parse has an
+// empty type, so a non-empty Types filter drops it.
+func (f ScopeFilter) filterMaterial(records []materialRecord) []materialRecord {
+	if f.IsEmpty() {
+		return records
+	}
+	out := make([]materialRecord, 0, len(records))
+	for _, rec := range records {
+		if len(f.Include) > 0 && !matchesAny(rec.ID, f.Include) {
+			continue
+		}
+		if matchesAny(rec.ID, f.Exclude) {
+			continue
+		}
+		if len(f.Types) > 0 {
+			ty := ""
+			if rec.Artifact != nil {
+				ty = string(rec.Artifact.Type)
+			}
+			if !containsType(f.Types, ty) {
+				continue
+			}
 		}
 		out = append(out, rec)
 	}

@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -28,7 +27,7 @@ func TestServeCmd_LayerPathFlagSetsEnv(t *testing.T) {
 	t.Setenv("PODIUM_LAYER_PATH", "")
 	t.Setenv("PODIUM_REGISTRY_STORE", "postgres")
 	t.Setenv("PODIUM_POSTGRES_DSN", "")
-	t.Setenv("PODIUM_CONFIG_FILE", filepath.Join(t.TempDir(), "missing.yaml"))
+	t.Setenv("PODIUM_CONFIG_FILE", emptyServerConfig(t))
 
 	code := serveCmd([]string{"--layer-path", dir})
 	if code != 1 {
@@ -46,7 +45,7 @@ func TestServeCmd_LayerPathFlagOmittedPreservesEnv(t *testing.T) {
 	t.Setenv("PODIUM_LAYER_PATH", "/preexisting")
 	t.Setenv("PODIUM_REGISTRY_STORE", "postgres")
 	t.Setenv("PODIUM_POSTGRES_DSN", "")
-	t.Setenv("PODIUM_CONFIG_FILE", filepath.Join(t.TempDir(), "missing.yaml"))
+	t.Setenv("PODIUM_CONFIG_FILE", emptyServerConfig(t))
 
 	code := serveCmd([]string{})
 	if code != 1 {
@@ -81,7 +80,7 @@ func TestServe_LayerPathBootstrap_E2E(t *testing.T) {
 	t.Setenv("PODIUM_BIND", fmt.Sprintf("127.0.0.1:%d", port))
 	t.Setenv("PODIUM_REGISTRY_STORE", "memory")
 	t.Setenv("PODIUM_OBJECT_STORE", "none")
-	t.Setenv("PODIUM_CONFIG_FILE", filepath.Join(tmp, "missing.yaml"))
+	t.Setenv("PODIUM_CONFIG_FILE", emptyServerConfig(t))
 	t.Setenv("PODIUM_FILESYSTEM_ROOT", tmp)
 	t.Setenv("PODIUM_VECTOR_BACKEND", "")
 	t.Setenv("PODIUM_LAYER_PATH", layerDir)
@@ -114,6 +113,44 @@ func TestServe_LayerPathBootstrap_E2E(t *testing.T) {
 	results, _ := search["results"].([]any)
 	if len(results) == 0 {
 		t.Fatalf("search returned no results: %v", search)
+	}
+}
+
+// Spec: §6.2 — the presigned-URL TTL accepts a `--flag` form, not
+// just the env var. `podium serve --presign-ttl-seconds <n>` sets
+// PODIUM_PRESIGN_TTL_SECONDS, the value serverboot reads. Run() is forced to
+// fail fast (postgres store, no DSN) so the flag-to-env mapping is the
+// contract under test without binding a listener.
+func TestServeCmd_PresignTTLFlagSetsEnv(t *testing.T) {
+	t.Setenv("PODIUM_PRESIGN_TTL_SECONDS", "")
+	t.Setenv("PODIUM_REGISTRY_STORE", "postgres")
+	t.Setenv("PODIUM_POSTGRES_DSN", "")
+	t.Setenv("PODIUM_CONFIG_FILE", emptyServerConfig(t))
+
+	code := serveCmd([]string{"--presign-ttl-seconds", "7200"})
+	if code != 1 {
+		t.Fatalf("serveCmd exit = %d, want 1 (validate fails on missing PODIUM_POSTGRES_DSN)", code)
+	}
+	if got := os.Getenv("PODIUM_PRESIGN_TTL_SECONDS"); got != "7200" {
+		t.Errorf("PODIUM_PRESIGN_TTL_SECONDS = %q, want 7200 (flag side effect)", got)
+	}
+}
+
+// Spec: §6.2 — when the flag is omitted, an existing
+// PODIUM_PRESIGN_TTL_SECONDS is preserved (the empty-flag branch does not
+// clear it).
+func TestServeCmd_PresignTTLFlagOmittedPreservesEnv(t *testing.T) {
+	t.Setenv("PODIUM_PRESIGN_TTL_SECONDS", "1800")
+	t.Setenv("PODIUM_REGISTRY_STORE", "postgres")
+	t.Setenv("PODIUM_POSTGRES_DSN", "")
+	t.Setenv("PODIUM_CONFIG_FILE", emptyServerConfig(t))
+
+	code := serveCmd([]string{})
+	if code != 1 {
+		t.Fatalf("serveCmd exit = %d, want 1", code)
+	}
+	if got := os.Getenv("PODIUM_PRESIGN_TTL_SECONDS"); got != "1800" {
+		t.Errorf("PODIUM_PRESIGN_TTL_SECONDS = %q, want 1800 (env preserved when flag omitted)", got)
 	}
 }
 

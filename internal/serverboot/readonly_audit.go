@@ -9,7 +9,7 @@ import (
 // readOnlyEnterCallback returns a function that appends a
 // registry.read_only_entered event to sink. Used by the §13.2.1
 // read-only probe's OnEnter hook.
-func readOnlyEnterCallback(sink *audit.FileSink, tenantID, reason string) func() {
+func readOnlyEnterCallback(sink audit.Sink, tenantID, reason string) func() {
 	return func() {
 		if sink == nil {
 			return
@@ -25,7 +25,7 @@ func readOnlyEnterCallback(sink *audit.FileSink, tenantID, reason string) func()
 
 // readOnlyExitCallback returns a function that appends a
 // registry.read_only_exited event to sink.
-func readOnlyExitCallback(sink *audit.FileSink, tenantID string) func() {
+func readOnlyExitCallback(sink audit.Sink, tenantID string) func() {
 	return func() {
 		if sink == nil {
 			return

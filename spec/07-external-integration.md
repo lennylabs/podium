@@ -84,7 +84,7 @@ Artifacts enter the registry by being merged into a tracked Git ref (or, for `lo
 podium layer register --id <id> --repo <git-url> --ref <ref> [--root <subpath>]
 podium layer register --id <id> --local <path>
 podium layer list
-podium layer reorder <id> [<id> ...]            # user-defined layers only
+podium layer reorder <id> [<id> ...]            # admin-defined layers (admin auth) or your own user-defined layers
 podium layer unregister <id>
 podium layer reingest <id> [--break-glass --justification <text>]
 podium layer watch <id> [--interval <duration>]
@@ -172,7 +172,7 @@ The sync command reads the caller's effective view (the composed layer list afte
 
 The sync model is type-agnostic: skills, agents, contexts, commands, rules, hooks, and `mcp-server` registrations all sync through the same path; the harness adapter decides where each type lands.
 
-**`--dry-run`** resolves the artifact set against the current scope and prints it without writing. Default output is human-readable; `--json` produces a structured envelope (`{profile, target, harness, scope, artifacts: [{id, version, type, layer}, ...]}`) for piping into `jq`.
+**`--dry-run`** resolves the artifact set against the current scope and prints it without writing. Default output is human-readable; `--json` produces a structured envelope (`{profile, target, harness, scope, artifacts: [{id, version, content_hash, type, layer}, ...]}`) for piping into `jq`. The per-artifact `content_hash` lets a pre-flight check verify the full §14.11 `(artifact_id, version, content_hash)` triple before the lock file is committed.
 
 ### 7.5.1 Scope Filters
 
@@ -654,7 +654,7 @@ podium login --no-browser                       # don't auto-open the verificati
 podium logout                                   # clears the cached token from the OS keychain
 ```
 
-Behavior: resolves the registry from the merged config (or `--registry` flag), prints the verification URL and code to stderr, attempts to open the URL in the system browser, polls the IdP's token endpoint until the user completes the flow or a 10-minute timeout elapses, caches the access + refresh tokens in the OS keychain (per `oauth-device-code` in §6.3), and prints the resolved identity (`sub`, `email`, OIDC groups) on success. Exits non-zero on timeout, denial, or `auth.untrusted_runtime`.
+Behavior: resolves the registry from the merged config (or `--registry` flag), prints the verification URL and code to stderr, attempts to open the URL in the system browser, polls the IdP's token endpoint until the user completes the flow or a 10-minute timeout elapses, caches the access + refresh tokens in the OS keychain (per `oauth-device-code` in §6.3), and prints the resolved identity (`sub`, `email`, OIDC groups) on success. Exits non-zero on timeout or denial. The `--no-browser` flag and the `PODIUM_NO_BROWSER` environment variable (truthy: `1`, `true`, `yes`, or `on`) both suppress the browser auto-open for headless and CI environments.
 
 **Multi-endpoint behavior.** Tokens cache in the OS keychain keyed by registry URL. A developer logged into both `https://podium.acme.com` and `https://podium-finance.acme.com` keeps both tokens simultaneously; switching projects (or running `podium login` in any context) authenticates against whichever registry the merged config resolves to. No `podium logout` between project switches required.
 

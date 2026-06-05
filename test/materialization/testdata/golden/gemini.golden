@@ -1,0 +1,95 @@
+=== .gemini/agents/reviewer.md ===
+---
+type: agent
+version: 1.0.0
+description: Reviews pull requests for bugs.
+---
+
+Review the diff and report defects.
+
+=== .gemini/commands/deploy.toml ===
+description = "Deploy the service."
+prompt = """
+Run the deploy pipeline for the named environment.
+
+"""
+
+=== .gemini/settings.json ===
+{
+  "hooks": {
+    "AfterAgent": [
+      {
+        "hooks": [
+          {
+            "command": "echo done\necho bye",
+            "type": "command"
+          }
+        ],
+        "x-podium-id": "team/notify"
+      }
+    ],
+    "BeforeTool": [
+      {
+        "hooks": [
+          {
+            "command": "./scripts/guard.sh",
+            "type": "command"
+          }
+        ],
+        "x-podium-id": "team/guard"
+      }
+    ]
+  },
+  "mcpServers": {
+    "warehouse": {
+      "args": [
+        "@acme/warehouse-mcp"
+      ],
+      "command": "npx"
+    }
+  },
+  "x-podium": {
+    "team/warehouse": [
+      "mcpServers",
+      "warehouse"
+    ]
+  }
+}
+
+=== .gemini/skills/hello/SKILL.md ===
+---
+name: hello
+description: Greet a teammate warmly by name.
+---
+
+Say hello to the person and offer help.
+
+=== .gemini/skills/hello/scripts/run.py ===
+print('hello')
+
+=== .podium/context/team/glossary/ARTIFACT.md ===
+---
+type: context
+version: 1.0.0
+description: Company glossary.
+---
+
+ARR means annual recurring revenue.
+
+=== GEMINI.md ===
+<!-- podium:begin:team/tabs-always -->
+Indent with tabs, not spaces.
+<!-- podium:end:team/tabs-always -->
+
+<!-- podium:begin:team/ts-glob -->
+Enable strict type-checking in TypeScript files.
+<!-- podium:end:team/ts-glob -->
+
+<!-- podium:begin:team/ts-auto -->
+Prefer interfaces over type aliases.
+<!-- podium:end:team/ts-auto -->
+
+<!-- podium:begin:team/deep-review -->
+Perform a deep architectural review when invoked.
+<!-- podium:end:team/deep-review -->
+

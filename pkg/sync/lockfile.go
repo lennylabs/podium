@@ -9,11 +9,32 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// nullProfile serializes the empty profile name as the YAML null literal
+// (`profile: null`) instead of omitting the key, matching the §7.5.3 lock
+// schema annotation ("null when no profile was used"). A present name
+// serializes as a plain string. The default reflection-based decoder reads
+// both `profile: null` and `profile: finance-team` back into a string, so no
+// custom unmarshaler is needed.
+//
+// spec: §7.5.3 — the lock's `profile:` field is null when no profile was used.
+type nullProfile string
+
+// MarshalYAML emits null for the empty name and the bare string otherwise.
+func (p nullProfile) MarshalYAML() (any, error) {
+	if p == "" {
+		return nil, nil
+	}
+	return string(p), nil
+}
+
 // LockFile is the per-target sync state stored at <target>/.podium/sync.lock
 // (spec §7.5.3).
 type LockFile struct {
-	Version      int            `yaml:"version"`
-	Profile      string         `yaml:"profile,omitempty"`
+	Version int `yaml:"version"`
+	// Profile is the active profile for this target. It is written without
+	// omitempty so a target synced with no active profile records the explicit
+	// `profile: null` the §7.5.3 schema documents rather than dropping the key.
+	Profile      nullProfile    `yaml:"profile"`
 	Scope        LockScope      `yaml:"scope,omitempty"`
 	Harness      string         `yaml:"harness,omitempty"`
 	Target       string         `yaml:"target,omitempty"`
@@ -31,13 +52,19 @@ type LockScope struct {
 	Type    []string `yaml:"type,omitempty"`
 }
 
-// LockArtifact is one entry in artifacts: per §7.5.3.
+// LockArtifact is one entry in artifacts: per §7.5.3. Merge records the
+// §6.7 config-merge kind for the materialized path ("json" for a JSON
+// config-merge, "inject" for a marker-based inject, empty for a standalone
+// file). Stale-file cleanup uses it: a standalone path is deleted when no
+// longer written, but a config-merge path is shared with the operator, so it
+// is reconciled (Podium's entries stripped) rather than removed.
 type LockArtifact struct {
 	ID               string `yaml:"id"`
 	Version          string `yaml:"version,omitempty"`
 	ContentHash      string `yaml:"content_hash,omitempty"`
 	Layer            string `yaml:"layer,omitempty"`
 	MaterializedPath string `yaml:"materialized_path,omitempty"`
+	Merge            string `yaml:"merge,omitempty"`
 }
 
 // LockToggles tracks ephemeral overrides applied since the last full

@@ -1,7 +1,11 @@
 package audit_test
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -34,7 +38,7 @@ func TestEnforce_DropsExpiredEventsAndRebuildsChain(t *testing.T) {
 		})
 	}
 	dropped, err := audit.Enforce(context.Background(), sink, now,
-		[]audit.Policy{{Type: audit.EventArtifactsSearched, MaxAge: 30 * 24 * time.Hour}})
+		[]audit.Policy{{Type: audit.EventArtifactsSearched, MaxAge: 30 * 24 * time.Hour}}, nil)
 	if err != nil {
 		t.Fatalf("Enforce: %v", err)
 	}
@@ -43,6 +47,76 @@ func TestEnforce_DropsExpiredEventsAndRebuildsChain(t *testing.T) {
 	}
 	if err := sink.Verify(context.Background()); err != nil {
 		t.Errorf("Verify after Enforce: %v", err)
+	}
+}
+
+// Spec: §8.4/§8.6 — when a retention pass rewrites the chain it
+// appends an audit.retention_enforced marker recording the superseded
+// chain head, so a verifier holding an older anchor can reconcile it.
+func TestEnforce_AppendsRetentionMarkerRecordingSupersededHead(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.log")
+	sink, err := audit.NewFileSink(path)
+	if err != nil {
+		t.Fatalf("NewFileSink: %v", err)
+	}
+	now := time.Now().UTC()
+	old := now.Add(-2 * 365 * 24 * time.Hour)
+	recent := now.Add(-1 * time.Hour)
+	for _, ts := range []time.Time{old, recent} {
+		_ = sink.Append(context.Background(), audit.Event{
+			Type: audit.EventArtifactLoaded, Timestamp: ts, Caller: "u",
+		})
+	}
+	// Capture the chain head before retention; the marker must name it.
+	headBefore := chainHeadFromFile(t, path)
+
+	dropped, err := audit.Enforce(context.Background(), sink, now,
+		[]audit.Policy{{Type: audit.EventArtifactLoaded, MaxAge: 30 * 24 * time.Hour}}, nil)
+	if err != nil {
+		t.Fatalf("Enforce: %v", err)
+	}
+	if dropped != 1 {
+		t.Fatalf("dropped = %d, want 1", dropped)
+	}
+	if err := sink.Verify(context.Background()); err != nil {
+		t.Errorf("Verify after Enforce: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read sink: %v", err)
+	}
+	if !containsBytes(data, []byte("audit.retention_enforced")) {
+		t.Errorf("retention marker not appended")
+	}
+	if !containsBytes(data, []byte(headBefore)) {
+		t.Errorf("marker does not record superseded head %q", headBefore)
+	}
+}
+
+// Spec: §8.4 — a pass that drops nothing leaves the log
+// untouched and appends no marker, so a stable chain is not perturbed.
+func TestEnforce_NoMarkerWhenNothingChanges(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.log")
+	sink, _ := audit.NewFileSink(path)
+	now := time.Now().UTC()
+	_ = sink.Append(context.Background(), audit.Event{
+		Type: audit.EventArtifactLoaded, Timestamp: now.Add(-time.Hour), Caller: "u",
+	})
+	dropped, err := audit.Enforce(context.Background(), sink, now,
+		[]audit.Policy{{Type: audit.EventArtifactLoaded, MaxAge: 365 * 24 * time.Hour}}, nil)
+	if err != nil {
+		t.Fatalf("Enforce: %v", err)
+	}
+	if dropped != 0 {
+		t.Fatalf("dropped = %d, want 0", dropped)
+	}
+	data, _ := os.ReadFile(path)
+	if containsBytes(data, []byte("audit.retention_enforced")) {
+		t.Errorf("marker appended despite no change")
 	}
 }
 
@@ -64,7 +138,7 @@ func TestEnforce_MostRestrictivePolicyWins(t *testing.T) {
 	dropped, err := audit.Enforce(context.Background(), sink, now, []audit.Policy{
 		{Type: audit.EventDomainLoaded, MaxAge: 7 * 24 * time.Hour},
 		{Type: audit.EventDomainLoaded, MaxAge: 36 * time.Hour},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("Enforce: %v", err)
 	}
@@ -99,7 +173,7 @@ func TestEraseUser_ReplacesIdentifiersAndAppendsTombstone(t *testing.T) {
 		Timestamp: time.Now().UTC(),
 	})
 	transformed, err := audit.EraseUser(context.Background(), sink,
-		"joan@example.com", "tenant-salt")
+		"joan@example.com", "tenant-salt", "carol@acme.com")
 	if err != nil {
 		t.Fatalf("EraseUser: %v", err)
 	}
@@ -126,10 +200,348 @@ func TestEraseUser_ReplacesIdentifiersAndAppendsTombstone(t *testing.T) {
 	}
 }
 
+// Spec: §8.5 — erasure removes the caller's directly-identifying
+// email and group membership, not only the sub-claim, so the persisted audit
+// record no longer carries the erased user's PII.
+func TestEraseUser_RedactsEmailAndGroups(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.log")
+	sink, _ := audit.NewFileSink(path)
+	const (
+		sub   = "auth0|alice"
+		email = "alice@acme.com"
+		group = "acme-engineering"
+	)
+	for i := 0; i < 2; i++ {
+		_ = sink.Append(context.Background(), audit.Event{
+			Type:         audit.EventArtifactLoaded,
+			Caller:       sub,
+			CallerEmail:  email,
+			CallerGroups: []string{group},
+			Target:       "skill/x",
+			Timestamp:    time.Now().UTC(),
+		})
+	}
+	transformed, err := audit.EraseUser(context.Background(), sink, sub, "tenant-salt", "carol@acme.com")
+	if err != nil {
+		t.Fatalf("EraseUser: %v", err)
+	}
+	if transformed != 2 {
+		t.Errorf("transformed = %d, want 2", transformed)
+	}
+	want := func() string {
+		h := sha256.Sum256([]byte(sub + "tenant-salt"))
+		return "redacted-" + hex.EncodeToString(h[:])
+	}()
+	data, _ := readSinkBytes(path)
+	if containsBytes(data, []byte(email)) {
+		t.Errorf("caller email still present in audit log after erasure")
+	}
+	if containsBytes(data, []byte(group)) {
+		t.Errorf("caller group membership still present after erasure")
+	}
+	if !containsBytes(data, []byte(want)) {
+		t.Errorf("tombstone %q not found after erasure", want)
+	}
+	// The nested caller.email now holds the tombstone and caller.groups is gone.
+	for _, e := range parseFullEvents(t, path) {
+		if e.Type == string(audit.EventUserErased) {
+			continue
+		}
+		if e.Caller.Email != want {
+			t.Errorf("caller.email = %q, want tombstone %q", e.Caller.Email, want)
+		}
+		if len(e.Caller.Groups) != 0 {
+			t.Errorf("caller.groups = %v, want empty after erasure", e.Caller.Groups)
+		}
+	}
+	if err := sink.Verify(context.Background()); err != nil {
+		t.Errorf("Verify after EraseUser: %v", err)
+	}
+}
+
+// Spec: §8.5 — §8.5 takes a single <user_id> and §8.1 records the
+// sub-claim with the email attached separately. Passing the email (the value a
+// human knows for a GDPR request) erases the sub-claim too, including the
+// sub-claim stored in the layer-owner context, while an unrelated user
+// survives.
+func TestEraseUser_EmailInputErasesSubClaimAndContext(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.log")
+	sink, _ := audit.NewFileSink(path)
+	ctx := context.Background()
+	const (
+		sub   = "auth0|alice"
+		email = "alice@acme.com"
+	)
+	// A read event records the sub-claim with the email attached (§8.1).
+	_ = sink.Append(ctx, audit.Event{
+		Type: audit.EventArtifactLoaded, Caller: sub, CallerEmail: email,
+		Target: "skill/x", Timestamp: time.Now().UTC(),
+	})
+	// A layer.user_registered event carries the sub-claim in the owner context
+	// with no email attached.
+	_ = sink.Append(ctx, audit.Event{
+		Type: audit.EventLayerUserRegistered, Caller: sub,
+		Context: map[string]string{"owner": sub, "action": "register"},
+		Target:  "alice-personal", Timestamp: time.Now().UTC(),
+	})
+	// An unrelated user must survive untouched.
+	_ = sink.Append(ctx, audit.Event{
+		Type: audit.EventArtifactLoaded, Caller: "auth0|bob", CallerEmail: "bob@acme.com",
+		Target: "skill/y", Timestamp: time.Now().UTC(),
+	})
+	transformed, err := audit.EraseUser(ctx, sink, email, "tenant-salt", "carol@acme.com")
+	if err != nil {
+		t.Fatalf("EraseUser: %v", err)
+	}
+	if transformed != 2 {
+		t.Errorf("transformed = %d, want 2", transformed)
+	}
+	data, _ := readSinkBytes(path)
+	if containsBytes(data, []byte(sub)) {
+		t.Errorf("sub-claim still present after email-input erasure")
+	}
+	if containsBytes(data, []byte(email)) {
+		t.Errorf("email still present after email-input erasure")
+	}
+	if !containsBytes(data, []byte("auth0|bob")) || !containsBytes(data, []byte("bob@acme.com")) {
+		t.Errorf("unrelated user wrongly redacted")
+	}
+	if err := sink.Verify(ctx); err != nil {
+		t.Errorf("Verify after EraseUser: %v", err)
+	}
+}
+
+// Spec: §8.5 — when the erased user appears only as a context value (the
+// subject of an action recorded by a different principal), the matching
+// context value is redacted while the distinct event Caller is preserved.
+func TestEraseUser_ContextMatchPreservesDistinctCaller(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.log")
+	sink, _ := audit.NewFileSink(path)
+	ctx := context.Background()
+	const aliceSub = "auth0|alice"
+	_ = sink.Append(ctx, audit.Event{
+		Type:   audit.EventLayerConfigChanged,
+		Caller: "auth0|admin", CallerEmail: "dave@acme.com",
+		Context: map[string]string{"owner": aliceSub, "action": "erase"},
+		Target:  "alice-personal", Timestamp: time.Now().UTC(),
+	})
+	transformed, err := audit.EraseUser(ctx, sink, aliceSub, "salt", "carol@acme.com")
+	if err != nil {
+		t.Fatalf("EraseUser: %v", err)
+	}
+	if transformed != 1 {
+		t.Errorf("transformed = %d, want 1", transformed)
+	}
+	data, _ := readSinkBytes(path)
+	if containsBytes(data, []byte(aliceSub)) {
+		t.Errorf("erased user's context identity still present")
+	}
+	if !containsBytes(data, []byte("auth0|admin")) || !containsBytes(data, []byte("dave@acme.com")) {
+		t.Errorf("distinct event caller wrongly redacted")
+	}
+	if err := sink.Verify(ctx); err != nil {
+		t.Errorf("Verify after EraseUser: %v", err)
+	}
+}
+
+// fullEvent mirrors the §8.1 nested caller wire form including the email and
+// group membership the erasure tests inspect.
+type fullEvent struct {
+	Type   string `json:"type"`
+	Caller struct {
+		Identity string   `json:"identity"`
+		Email    string   `json:"email"`
+		Groups   []string `json:"groups"`
+	} `json:"caller"`
+	Context map[string]string `json:"context"`
+}
+
+func parseFullEvents(t *testing.T, path string) []fullEvent {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var out []fullEvent
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		if len(line) == 0 {
+			continue
+		}
+		var e fullEvent
+		if err := json.Unmarshal(line, &e); err != nil {
+			t.Fatalf("parse event: %v", err)
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// parsedEvent mirrors the §8.1 JSON-Lines wire form for the fields these
+// tests inspect. The caller identity is nested under "caller" per §8.1
+// (caller.identity), so Caller is the unpacked identity string.
+type parsedEvent struct {
+	Type    string
+	Caller  string
+	Target  string
+	Context map[string]string
+}
+
+// parseEvents parses the file-backed sink and returns its events. Used to
+// inspect the appended user.erased record.
+func parseEvents(t *testing.T, path string) []parsedEvent {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var out []parsedEvent
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		if len(line) == 0 {
+			continue
+		}
+		var e struct {
+			Type   string `json:"type"`
+			Caller struct {
+				Identity string `json:"identity"`
+			} `json:"caller"`
+			Target  string            `json:"target"`
+			Context map[string]string `json:"context"`
+		}
+		if err := json.Unmarshal(line, &e); err != nil {
+			t.Fatalf("parse event: %v", err)
+		}
+		out = append(out, parsedEvent{Type: e.Type, Caller: e.Caller.Identity, Target: e.Target, Context: e.Context})
+	}
+	return out
+}
+
+// Spec: §8.5 — the redaction value is
+// redacted-<sha256(user_id+salt)>: the redacted- prefix, the full 32-byte
+// (64 hex char) SHA-256 digest, and no delimiter inserted between user_id
+// and salt.
+func TestEraseUser_TombstoneFormatMatchesSpec(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.log")
+	sink, _ := audit.NewFileSink(path)
+	_ = sink.Append(context.Background(), audit.Event{
+		Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Timestamp: time.Now().UTC(),
+	})
+	if _, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "tenant-salt", "carol@acme.com"); err != nil {
+		t.Fatalf("EraseUser: %v", err)
+	}
+	want := func() string {
+		h := sha256.Sum256([]byte("alice@acme.com" + "tenant-salt"))
+		return "redacted-" + hex.EncodeToString(h[:])
+	}()
+	data, _ := readSinkBytes(path)
+	if !containsBytes(data, []byte(want)) {
+		t.Errorf("tombstone %q not found in log:\n%s", want, data)
+	}
+	// The pre-fix format must be gone: prefix, delimiter, and truncation.
+	if containsBytes(data, []byte("erased:")) {
+		t.Errorf("legacy erased: prefix still present")
+	}
+	wrongDelim := func() string {
+		h := sha256.Sum256([]byte("alice@acme.com" + "|" + "tenant-salt"))
+		return hex.EncodeToString(h[:])
+	}()
+	if containsBytes(data, []byte(wrongDelim)) {
+		t.Errorf("delimiter-bearing digest present; salt must be appended without a separator")
+	}
+	// 64 hex chars after the prefix = full SHA-256, not the 16-char truncation.
+	if len(want) != len("redacted-")+64 {
+		t.Fatalf("test bug: want length %d", len(want))
+	}
+}
+
+// Spec: §8.5 — an empty salt is rejected so the tombstone cannot
+// degrade to a guessable sha256(user_id).
+func TestEraseUser_EmptySaltRejected(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.log")
+	sink, _ := audit.NewFileSink(path)
+	_ = sink.Append(context.Background(), audit.Event{
+		Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Timestamp: time.Now().UTC(),
+	})
+	if _, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "", "carol@acme.com"); err == nil {
+		t.Fatalf("EraseUser with empty salt: want error, got nil")
+	}
+	// The log must be untouched: the original identity still present, no
+	// user.erased event appended.
+	data, _ := readSinkBytes(path)
+	if !containsBytes(data, []byte("alice@acme.com")) {
+		t.Errorf("rejected erase must not rewrite the log")
+	}
+	if containsBytes(data, []byte("user.erased")) {
+		t.Errorf("rejected erase must not append user.erased")
+	}
+}
+
+// Spec: §8.5 / §8.1 — the appended user.erased event records the
+// invoking admin as the Caller and in the admin context field.
+func TestEraseUser_RecordsInvokingAdmin(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.log")
+	sink, _ := audit.NewFileSink(path)
+	_ = sink.Append(context.Background(), audit.Event{
+		Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Timestamp: time.Now().UTC(),
+	})
+	if _, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "salt", "carol@acme.com"); err != nil {
+		t.Fatalf("EraseUser: %v", err)
+	}
+	events := parseEvents(t, path)
+	var found bool
+	for _, e := range events {
+		if e.Type != string(audit.EventUserErased) {
+			continue
+		}
+		found = true
+		if e.Caller != "carol@acme.com" {
+			t.Errorf("user.erased Caller = %q, want carol@acme.com", e.Caller)
+		}
+		if e.Context["admin"] != "carol@acme.com" {
+			t.Errorf("user.erased context admin = %q, want carol@acme.com", e.Context["admin"])
+		}
+	}
+	if !found {
+		t.Fatalf("no user.erased event appended")
+	}
+}
+
 // Helpers shared with the other audit tests.
 
 func readSinkBytes(path string) ([]byte, error) {
 	return os.ReadFile(path)
+}
+
+// chainHeadFromFile returns the Hash of the last JSON-Lines event in
+// the file, the chain head a prior anchor would have pinned.
+func chainHeadFromFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var head string
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		if len(line) == 0 {
+			continue
+		}
+		var je struct {
+			Hash string `json:"hash"`
+		}
+		if err := json.Unmarshal(line, &je); err != nil {
+			t.Fatalf("parse event: %v", err)
+		}
+		head = je.Hash
+	}
+	if head == "" {
+		t.Fatalf("no chain head found in %s", path)
+	}
+	return head
 }
 
 func containsBytes(haystack, needle []byte) bool {

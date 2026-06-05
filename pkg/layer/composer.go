@@ -19,10 +19,15 @@ type Visibility struct {
 
 // Identity is the OAuth-attested caller (§6.3).
 type Identity struct {
-	Sub             string
-	Email           string
-	OrgID           string
-	Groups          []string
+	Sub    string
+	Email  string
+	OrgID  string
+	Groups []string
+	// Scopes carries the raw "podium:*" OAuth scope claims (§6.3.1). When
+	// non-empty they narrow the caller's surface: the visible/loadable set
+	// is the intersection of layer visibility and the scope grants, and
+	// the smaller surface wins. Empty means no scope narrowing.
+	Scopes          []string
 	IsPublic        bool // true in public-mode (§13.10)
 	IsAuthenticated bool
 }
@@ -81,8 +86,12 @@ func VisibleWith(layer Layer, id Identity, resolveGroup GroupResolver) bool {
 			}
 		}
 	}
+	// spec: §4.6 — `users:` lists OIDC subjects, but the visibility table's
+	// own config example uses email-style identifiers (users: [alice@acme.com]).
+	// IdPs often carry the human identifier in Email while Sub is opaque
+	// (auth0|abc123), so match either, consistent with the group-resolver path.
 	for _, u := range v.Users {
-		if u == id.Sub {
+		if u == id.Sub || (id.Email != "" && u == id.Email) {
 			return true
 		}
 	}

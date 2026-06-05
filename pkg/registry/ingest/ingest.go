@@ -10,6 +10,8 @@ package ingest
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -19,8 +21,10 @@ import (
 
 	"github.com/lennylabs/podium/internal/clock"
 	"github.com/lennylabs/podium/pkg/audit"
+	domainpkg "github.com/lennylabs/podium/pkg/domain"
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/manifest"
+	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/version"
@@ -35,11 +39,20 @@ var (
 	// ErrPublicModeSensitive maps to
 	// ingest.public_mode_rejects_sensitive (§13.10).
 	ErrPublicModeSensitive = errors.New("ingest.public_mode_rejects_sensitive")
+	// ErrSandboxProfileUnenforceable maps to
+	// ingest.sandbox_profile_unenforceable (§13.10): the registry is
+	// configured with PODIUM_ENFORCE_SANDBOX_PROFILE=true and the artifact's
+	// sandbox_profile cannot be honored by the local host.
+	ErrSandboxProfileUnenforceable = errors.New("ingest.sandbox_profile_unenforceable")
 	// ErrInvalidArtifact wraps parse / structural errors that surface at
 	// ingest as ingest.lint_failed.
 	ErrInvalidArtifact = errors.New("ingest.invalid_artifact")
 	// ErrQuotaExceeded maps to quota.storage_exceeded (§4.7.8).
 	ErrQuotaExceeded = errors.New("quota.storage_exceeded")
+	// ErrAuditVolumeExceeded maps to quota.audit_volume_exceeded (§4.7.8): the
+	// tenant has spent its daily audit-volume budget, so a new auditable write
+	// is refused until the budget rolls over at the UTC day boundary.
+	ErrAuditVolumeExceeded = errors.New("quota.audit_volume_exceeded")
 )
 
 // FreezeWindow is one §4.7.2 freeze window: ingest is blocked when
@@ -150,6 +163,18 @@ type Request struct {
 	// rejected at ingest. Used by §13.10 public mode to refuse medium
 	// and high sensitivity. Empty means no floor.
 	RejectAtOrAbove manifest.Sensitivity
+	// EnforceSandboxProfile turns the §13.10 sandbox-profile ingest gate on.
+	// When true, an artifact whose sandbox_profile is neither unrestricted
+	// nor listed in EnforceableSandboxProfiles is rejected with
+	// ingest.sandbox_profile_unenforceable. The standalone default leaves
+	// this false so sandbox_profile stays informational (§13.10);
+	// PODIUM_ENFORCE_SANDBOX_PROFILE=true sets it for multi-user setups.
+	EnforceSandboxProfile bool
+	// EnforceableSandboxProfiles lists the sandbox profiles the local host
+	// can honor (PODIUM_HOST_SANDBOXES, default unrestricted). unrestricted
+	// and the empty profile are always enforceable. Consulted only when
+	// EnforceSandboxProfile is true.
+	EnforceableSandboxProfiles []string
 	// FreezeWindows blocks ingest when any window is currently active
 	// (§4.7.2). An ingest with BreakGlass=true bypasses the windows.
 	FreezeWindows []FreezeWindow
@@ -189,6 +214,12 @@ type Request struct {
 	// means search continues to return the prior vector until the
 	// new one lands.
 	VectorPut VectorPutFunc
+	// DomainVectorPut persists a DOMAIN.md projection embedding (§4.7
+	// "Domain embeddings") into the domain index that search_domains
+	// queries. Set alongside Embedder to embed domains at ingest; nil
+	// leaves search_domains BM25-only. The wiring closure supplies the
+	// reserved domain version sentinel, so ingest stays unaware of it.
+	DomainVectorPut DomainVectorPutFunc
 	// PublishEvent fires §7.6 change events as artifacts ingest.
 	// Optional: when nil, ingest stays silent. Per-artifact:
 	//   - artifact.published with {id, version, content_hash, layer, tenant}
@@ -209,9 +240,26 @@ type Request struct {
 	// downstream tooling; AuditEmit feeds the operator-side §8
 	// audit log.
 	AuditEmit AuditEmitterFunc
+	// ResourcePut uploads each bundled resource to the §7.2 data-plane
+	// object store keyed by its content hash (§4.4 deduplicates identical
+	// bytes across versions). Optional: when nil, ingest keeps every
+	// resource's bytes inline on the manifest record (the no-object-store
+	// deployment, where resources stay inline regardless of size). When
+	// set, resources above the §4.2 inline cutoff upload to the store and
+	// drop their inline copy so the control plane never carries large
+	// bytes.
+	ResourcePut ResourcePutFunc
 	// CallerID identifies the operator triggering ingest. Embedded
 	// into the audit event's Caller field. Optional.
 	CallerID string
+	// UseVectorOutbox routes embedding through the §4.7.2 transactional outbox
+	// instead of the synchronous inline path. The orchestrator sets it for an
+	// external (managed) vector backend so ingest commits the manifest and a
+	// vector_pending row in one transaction and never blocks on the external
+	// service; a background drain worker reconciles the backend. It has effect
+	// only when the store implements store.VectorOutbox; collocated backends
+	// leave it false and keep the inline fast path.
+	UseVectorOutbox bool
 }
 
 // AuditEmitterFunc is the audit-emission seam ingest uses to
@@ -219,8 +267,9 @@ type Request struct {
 type AuditEmitterFunc func(eventType, target string, ctxFields map[string]string)
 
 // SignerFunc signs the content hash of a freshly-ingested manifest
-// and returns an opaque envelope. Wraps sign.Provider.Sign.
-type SignerFunc func(contentHash string) (string, error)
+// and returns an opaque envelope. Wraps sign.Provider.Sign, whose
+// context-first signature it mirrors (spec: §9.3).
+type SignerFunc func(ctx context.Context, contentHash string) (string, error)
 
 // tenantHasArtifact reports whether the tenant already has a
 // manifest for artifactID — we don't double-count distinct
@@ -238,10 +287,31 @@ func (r *Request) tenantHasArtifact(ctx context.Context, st store.Store, artifac
 	return false
 }
 
-// EventEmitter is the §7.6 publish surface. The function shape
-// matches Server.PublishEvent so the orchestrator passes the
-// server's method directly.
-type EventEmitter func(eventType string, data map[string]any)
+// tenantHasNonDeprecatedVersion reports whether the tenant already
+// stores a non-deprecated manifest for artifactID. A new deprecated
+// version of an artifact that previously had a non-deprecated version
+// is the §7.3.2 "flipped deprecated: true" transition; a version born
+// deprecated has no such prior state. Called after the new version is
+// committed, the just-stored deprecated record is excluded by the
+// !Deprecated filter, so the result reflects the prior state.
+func (r *Request) tenantHasNonDeprecatedVersion(ctx context.Context, st store.Store, artifactID string) bool {
+	all, err := st.ListManifests(ctx, r.TenantID)
+	if err != nil {
+		return false
+	}
+	for _, m := range all {
+		if m.ArtifactID == artifactID && !m.Deprecated {
+			return true
+		}
+	}
+	return false
+}
+
+// EventEmitter is the §7.6 publish surface. The signature matches
+// Server.PublishEvent so the orchestrator passes the server's method
+// directly. The ctx carries the §7.3.2 trace id and actor (via the
+// request's audit metadata) through to the outbound webhook body.
+type EventEmitter func(ctx context.Context, eventType string, data map[string]any)
 
 // EmbedderFunc converts the embedding text projection of a manifest
 // into a vector. Implementations wrap pkg/embedding.Provider.Embed
@@ -252,6 +322,18 @@ type EmbedderFunc func(ctx context.Context, text string) ([]float32, error)
 // version) tuple. Atomic per row.
 type VectorPutFunc func(ctx context.Context, tenantID, artifactID, version string, vec []float32) error
 
+// DomainVectorPutFunc persists the embedding for one domain projection,
+// keyed by (tenant, domain path). The §4.7 domain index reuses the same
+// vector backend as artifacts under a reserved version sentinel; the
+// wiring closure supplies that sentinel so ingest need not know it.
+type DomainVectorPutFunc func(ctx context.Context, tenantID, domainPath string, vec []float32) error
+
+// ResourcePutFunc uploads one bundled resource's bytes to the §7.2
+// data-plane object store, keyed by its content hash. Wraps
+// objectstore.Provider.Put; the wiring closure supplies the configured
+// store so ingest stays unaware of the backend.
+type ResourcePutFunc func(ctx context.Context, key string, body []byte, contentType string) error
+
 // Result reports what happened.
 type Result struct {
 	// Accepted is the number of (artifact_id, version) pairs newly stored.
@@ -259,6 +341,11 @@ type Result struct {
 	// Idempotent is the number of pairs that matched an existing
 	// (id, version, content_hash) triple and were no-ops.
 	Idempotent int
+	// Ingested lists the (artifact_id, version) pairs present in the layer
+	// after this snapshot: both newly accepted pairs and idempotent no-ops.
+	// It backs the per-artifact confirmation the `podium layer reingest` CLI
+	// prints (§0 quickstart) and the reingest endpoint's `artifacts` field.
+	Ingested []IngestedArtifact
 	// LintFailures collects diagnostics for artifacts rejected by lint.
 	LintFailures []lint.Diagnostic
 	// Conflicts reports (id, version) pairs that already exist with a
@@ -273,6 +360,19 @@ type Result struct {
 	// store down). The manifest is searchable via BM25 only until
 	// `podium admin reembed` retries.
 	EmbeddingFailures []EmbeddingFailure
+	// Advisories collects the §3.3 / §12 description-quality flags the
+	// registry raises at ingest time: thin descriptions and clusters of
+	// artifacts whose summaries collide. They are advisory (warning
+	// severity) and never block ingest; they surface to domain owners so
+	// authored descriptions can be improved.
+	Advisories []lint.Diagnostic
+}
+
+// IngestedArtifact names an (artifact_id, version) pair present in a layer
+// after a snapshot. It is the unit the reingest endpoint and CLI report.
+type IngestedArtifact struct {
+	ArtifactID string
+	Version    string
 }
 
 // EmbeddingFailure names an artifact whose post-ingest embedding
@@ -344,6 +444,58 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 
 	now := req.Clock.Now().UTC()
 
+	// §4.5.1 — persist every DOMAIN.md so load_domain can read domain
+	// composition (description, keywords, unlisted, include/exclude,
+	// per-domain discovery overrides) and merge candidates across
+	// layers (§4.5.4). DOMAIN.md is not an artifact and is not subject
+	// to artifact lint; a malformed one is skipped (manifest-parse
+	// lint rules cover it) so it never blocks artifact ingest.
+	// §8.1: a DOMAIN.md that is newly added or whose source changed since
+	// the previous ingest emits domain.published. Compare against the
+	// stored record so an unchanged re-ingest stays quiet.
+	prevDomains := map[string]string{}
+	if existing, lerr := st.ListDomains(ctx, req.TenantID); lerr == nil {
+		for _, d := range existing {
+			if d.Layer == req.LayerID {
+				prevDomains[d.Path] = string(d.Raw)
+			}
+		}
+	}
+	domainRecs := walkDomains(req.Files, req.TenantID, req.LayerID)
+	var domainAdvisories []lint.Diagnostic
+	for _, dr := range domainRecs {
+		prev, seen := prevDomains[dr.Path]
+		if err := st.PutDomain(ctx, dr); err != nil {
+			return nil, err
+		}
+		if !seen || prev != string(dr.Raw) {
+			// §7.3.2 outbound webhook + §8.1 audit: a DOMAIN.md that was
+			// added or whose source changed emits domain.published. Both
+			// the change-event seam and the audit sink fire so receivers
+			// and SIEM pipelines see one event per real change.
+			if req.PublishEvent != nil {
+				req.PublishEvent(ctx, string(audit.EventDomainPublished), map[string]any{
+					"domain": dr.Path,
+					"layer":  dr.Layer,
+					"tenant": dr.TenantID,
+				})
+			}
+			if req.AuditEmit != nil {
+				req.AuditEmit(string(audit.EventDomainPublished), dr.Path,
+					map[string]string{"layer": dr.Layer})
+			}
+		}
+		// spec: §12 — "ingest-time lint flags newly-set unlisted: true for
+		// review". An unlisted: true DOMAIN.md hides its whole
+		// subtree from enumeration (§4.5.3), so a freshly-set value is
+		// surfaced as an advisory. A domain that was already unlisted in the
+		// prior ingest draws no advisory (the flag is not newly-set), so a
+		// steady-state reingest stays quiet.
+		if adv := newlyUnlistedAdvisory(dr, prev, seen); adv != nil {
+			domainAdvisories = append(domainAdvisories, *adv)
+		}
+	}
+
 	// Walk the layer's filesystem to find every ARTIFACT.md.
 	records, err := walkLayer(req.Files, req.LayerID)
 	if err != nil {
@@ -352,10 +504,61 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 
 	// Run lint over the collected set; diagnostics with severity Error
 	// abort their artifact's ingest.
-	diags := req.Linter.Lint(nil, records)
+	diags := req.Linter.Lint(ctx, nil, records)
 
 	res := &Result{}
 	errsByID := groupLintErrors(diags)
+
+	// §3.3 / §12 — the registry flags thin descriptions and clusters of
+	// artifacts whose summaries collide. These checks are advisory and do
+	// not gate ingest, so they run independently of req.Linter (which the
+	// author-facing `podium lint` shares) over the ingested record set;
+	// the colliding-summary check needs that set to spot a cluster.
+	res.Advisories = (&lint.Linter{Rules: lint.DescriptionAdvisoryRules()}).Lint(ctx, nil, records)
+	// §12: carry the newly-set unlisted: true advisories
+	// collected while persisting DOMAIN.md records. DOMAIN.md is not an
+	// artifact, so the check runs in the domain loop above rather than as
+	// an artifact lint rule.
+	res.Advisories = append(res.Advisories, domainAdvisories...)
+
+	// §4.7 "Domain embeddings": embed each DOMAIN.md projection
+	// (description + keywords + truncated body) into the domain index so
+	// search_domains has a semantic ranker. A failed embed does not block
+	// ingest; the domain stays BM25-searchable and `podium admin reembed`
+	// can retry. Runs after res is initialized so failures are reported.
+	if req.Embedder != nil && req.DomainVectorPut != nil {
+		for _, dr := range domainRecs {
+			if err := embedDomain(ctx, req, dr); err != nil {
+				res.EmbeddingFailures = append(res.EmbeddingFailures, EmbeddingFailure{
+					ArtifactID: dr.Path,
+					Reason:     err.Error(),
+				})
+			}
+		}
+	}
+
+	// spec: §4.6 — two layers contributing the same canonical ID is a
+	// forbidden silent shadow unless the higher-precedence artifact
+	// declares extends: <lower-precedence-id>. The server-store path keys
+	// records by (tenant, id, version) with the layer excluded, so without
+	// this check a same-ID record from another layer is stored and
+	// silently shadows at read time. Index the manifests already
+	// contributed by other layers so the per-record check can spot it.
+	crossLayerByID := map[string][]store.ManifestRecord{}
+	if existing, lerr := st.ListManifests(ctx, req.TenantID); lerr == nil {
+		for _, m := range existing {
+			if m.Layer != req.LayerID {
+				crossLayerByID[m.ArtifactID] = append(crossLayerByID[m.ArtifactID], m)
+			}
+		}
+	}
+
+	// spec: §4.7.3 — mcpServers edges resolve to the mcp-server
+	// artifact that declares the matching server_identifier. Index the
+	// server_identifier of every mcp-server in this ingest set once so
+	// edgesFor can resolve consumer references against siblings.
+	serverIDs := serverIdentifierIndex(records)
+
 	for _, rec := range records {
 		// Lint blocks ingest at error severity.
 		if errs, ok := errsByID[rec.ID]; ok {
@@ -370,6 +573,22 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 				Reason: fmt.Sprintf("sensitivity %q rejected at floor %q",
 					rec.Artifact.Sensitivity, req.RejectAtOrAbove),
 				Code: "ingest.public_mode_rejects_sensitive",
+			})
+			continue
+		}
+
+		// Sandbox-profile ingest gate per §13.10: with
+		// PODIUM_ENFORCE_SANDBOX_PROFILE=true the registry refuses to ingest
+		// an artifact whose declared sandbox_profile cannot be honored by the
+		// local host. Off by default so standalone treats sandbox_profile as
+		// informational.
+		if req.EnforceSandboxProfile &&
+			sandboxProfileUnenforceable(string(rec.Artifact.SandboxProfile), req.EnforceableSandboxProfiles) {
+			res.Rejected = append(res.Rejected, RejectedArtifact{
+				ArtifactID: rec.ID,
+				Reason: fmt.Sprintf("sandbox_profile %q cannot be enforced locally (host honors %s)",
+					rec.Artifact.SandboxProfile, sandboxProfileList(req.EnforceableSandboxProfiles)),
+				Code: "ingest.sandbox_profile_unenforceable",
 			})
 			continue
 		}
@@ -423,7 +642,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		// manifests and pin to an exact version. Parent updates do
 		// not silently propagate; only re-ingesting the child does.
 		if rec.Artifact.Extends != "" {
-			pin, perr := resolveExtendsPin(ctx, st, req.TenantID, rec.Artifact.Extends, rec.ID)
+			pin, parentType, parentLicense, perr := resolveExtendsPin(ctx, st, req.TenantID, rec.Artifact.Extends, rec.ID, rec.Artifact.Version, req.LayerID)
 			if perr != nil {
 				res.Rejected = append(res.Rejected, RejectedArtifact{
 					ArtifactID: rec.ID,
@@ -432,7 +651,58 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 				})
 				continue
 			}
+			// spec: §4.6 — "The child's type: must match the parent's;
+			// ingest rejects an extends: chain that crosses types."
+			if parentType != string(rec.Artifact.Type) {
+				res.Rejected = append(res.Rejected, RejectedArtifact{
+					ArtifactID: rec.ID,
+					Reason: fmt.Sprintf("extends: child type %q does not match parent %s type %q",
+						rec.Artifact.Type, stripPin(rec.Artifact.Extends), parentType),
+					Code: "ingest.invalid_artifact",
+				})
+				continue
+			}
+			// spec: §4.6 field-semantics table — license is "Scalar; child
+			// wins (lint warning if changed across layers)". The merge already
+			// gives the child its license; emit the advisory the table mandates
+			// when the child's license differs from the resolved parent's so the
+			// publisher sees the cross-layer change.
+			if rec.Artifact.License != "" && parentLicense != "" && rec.Artifact.License != parentLicense {
+				res.Advisories = append(res.Advisories, lint.Diagnostic{
+					ArtifactID: rec.ID,
+					Code:       "lint.license_changed_across_layers",
+					Severity:   lint.SeverityWarning,
+					Message: fmt.Sprintf("license %q differs from extended parent %s license %q; the child's license wins per §4.6",
+						rec.Artifact.License, stripPin(rec.Artifact.Extends), parentLicense),
+				})
+			}
 			mr.ExtendsPin = pin
+		}
+
+		// spec: §4.6 — reject a cross-layer same-ID collision unless an
+		// extends: overlay links the two records. The overlay is sanctioned
+		// when the incoming record extends the colliding ID, or when an
+		// existing cross-layer record does (the existing record is the
+		// overlay). Anything else is a silent shadow, which the spec forbids.
+		if crossLayer := crossLayerByID[mr.ArtifactID]; len(crossLayer) > 0 {
+			overlay := stripPin(rec.Artifact.Extends) == mr.ArtifactID
+			if !overlay {
+				for _, ex := range crossLayer {
+					if stripPin(ex.ExtendsPin) == mr.ArtifactID {
+						overlay = true
+						break
+					}
+				}
+			}
+			if !overlay {
+				res.Rejected = append(res.Rejected, RejectedArtifact{
+					ArtifactID: mr.ArtifactID,
+					Reason: fmt.Sprintf("cross-layer collision: %q already contributed by layer %q; declare extends: %s to overlay it",
+						mr.ArtifactID, crossLayer[0].Layer, mr.ArtifactID),
+					Code: "ingest.collision",
+				})
+				continue
+			}
 		}
 
 		// Check current state to distinguish accepted vs idempotent vs
@@ -442,6 +712,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		case err == nil:
 			if existing.ContentHash == mr.ContentHash {
 				res.Idempotent++
+				res.Ingested = append(res.Ingested, IngestedArtifact{ArtifactID: mr.ArtifactID, Version: mr.Version})
 				continue
 			}
 			res.Conflicts = append(res.Conflicts, ConflictReport{
@@ -463,7 +734,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		// signing failure rejects the artifact — unsigned bytes
 		// must not sneak in when a signer is configured.
 		if req.Signer != nil {
-			env, err := req.Signer(mr.ContentHash)
+			env, err := req.Signer(ctx, mr.ContentHash)
 			if err != nil {
 				res.Rejected = append(res.Rejected, RejectedArtifact{
 					ArtifactID: mr.ArtifactID,
@@ -475,7 +746,20 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			mr.Signature = env
 		}
 
-		if err := st.PutManifest(ctx, mr); err != nil {
+		// §7.2 data plane: persist bundled resources before the manifest
+		// commits so a served artifact's resources are retrievable the
+		// moment ingest accepts it. Large resources upload to object
+		// storage and drop their inline bytes; small ones stay inline.
+		if err := persistResources(ctx, req.ResourcePut, mr.Resources); err != nil {
+			res.Rejected = append(res.Rejected, RejectedArtifact{
+				ArtifactID: mr.ArtifactID,
+				Reason:     fmt.Sprintf("persist resources: %v", err),
+				Code:       "ingest.resource_store_failed",
+			})
+			continue
+		}
+
+		if err := commitManifest(ctx, st, req, mr); err != nil {
 			if errors.Is(err, store.ErrImmutableViolation) {
 				res.Conflicts = append(res.Conflicts, ConflictReport{
 					ArtifactID: mr.ArtifactID,
@@ -487,21 +771,31 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			return nil, err
 		}
 		res.Accepted++
+		res.Ingested = append(res.Ingested, IngestedArtifact{ArtifactID: mr.ArtifactID, Version: mr.Version})
+
+		// §7.3.2 — artifact.deprecated fires only when a manifest update
+		// "flipped deprecated: true", i.e. a prior non-deprecated version
+		// of the same artifact_id existed before this ingest. A version
+		// born deprecated on first publish is not a flip and emits only
+		// artifact.published. The just-committed deprecated version is
+		// excluded by the !Deprecated filter, so this reads the prior
+		// state correctly.
+		deprecatedFlip := mr.Deprecated && req.tenantHasNonDeprecatedVersion(ctx, st, mr.ArtifactID)
 
 		// §7.6 change events. Fire after the manifest commits so
 		// subscribers never see a published event for an ingest that
 		// rolled back. artifact.published carries the canonical
 		// metadata consumers need to look the artifact up.
 		if req.PublishEvent != nil {
-			req.PublishEvent("artifact.published", map[string]any{
+			req.PublishEvent(ctx, "artifact.published", map[string]any{
 				"id":           mr.ArtifactID,
 				"version":      mr.Version,
 				"content_hash": mr.ContentHash,
 				"layer":        mr.Layer,
 				"tenant":       mr.TenantID,
 			})
-			if mr.Deprecated {
-				req.PublishEvent("artifact.deprecated", map[string]any{
+			if deprecatedFlip {
+				req.PublishEvent(ctx, "artifact.deprecated", map[string]any{
 					"id":      mr.ArtifactID,
 					"version": mr.Version,
 					"layer":   mr.Layer,
@@ -515,27 +809,41 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		// fields in audit_redact, the registry replaces those
 		// values with [redacted] before emitting.
 		if req.AuditEmit != nil {
-			req.AuditEmit("artifact.published", mr.ArtifactID, audit.RedactFields(map[string]string{
+			// §8.2 manifest-declared redaction: merge the author-named
+			// sensitive frontmatter fields into each event's context so the
+			// audit_redact directive has a concrete target, then redact.
+			// Structural keys win on collision. The redacted map is what
+			// AuditEmit receives, so a raw value never leaves this closure.
+			redactExtra := manifest.FrontmatterFields(mr.Frontmatter, mr.AuditRedact)
+			redacted := func(base map[string]string) map[string]string {
+				for k, v := range redactExtra {
+					if _, ok := base[k]; !ok {
+						base[k] = v
+					}
+				}
+				return audit.RedactFields(base, mr.AuditRedact)
+			}
+			req.AuditEmit("artifact.published", mr.ArtifactID, redacted(map[string]string{
 				"version":      mr.Version,
 				"content_hash": mr.ContentHash,
 				"layer":        mr.Layer,
-			}, mr.AuditRedact))
-			if mr.Deprecated {
-				req.AuditEmit("artifact.deprecated", mr.ArtifactID, audit.RedactFields(map[string]string{
+			}))
+			if deprecatedFlip {
+				req.AuditEmit("artifact.deprecated", mr.ArtifactID, redacted(map[string]string{
 					"version": mr.Version,
 					"layer":   mr.Layer,
-				}, mr.AuditRedact))
+				}))
 			}
 			if mr.Signature != "" {
-				req.AuditEmit("artifact.signed", mr.ArtifactID, audit.RedactFields(map[string]string{
+				req.AuditEmit("artifact.signed", mr.ArtifactID, redacted(map[string]string{
 					"version":      mr.Version,
 					"content_hash": mr.ContentHash,
-				}, mr.AuditRedact))
+				}))
 			}
 		}
 
 		// Populate cross-type dependency edges for §4.7.3.
-		for _, edge := range edgesFor(rec.Artifact, rec.ID) {
+		for _, edge := range edgesFor(rec.Artifact, rec.ID, serverIDs) {
 			if err := st.PutDependency(ctx, req.TenantID, edge); err != nil {
 				return nil, err
 			}
@@ -545,8 +853,10 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		// store: search returns the prior embedding until this
 		// upsert lands. A failed embedding does not reject the
 		// artifact; it ingests BM25-only and `podium admin reembed`
-		// can retry.
-		if req.Embedder != nil && req.VectorPut != nil {
+		// can retry. Skipped under the §4.7.2 outbox path: the manifest
+		// commit already enqueued the embedding and the drain worker
+		// writes it to the external backend asynchronously.
+		if req.Embedder != nil && req.VectorPut != nil && !req.UseVectorOutbox {
 			if err := embedAndStore(ctx, req, mr); err != nil {
 				res.EmbeddingFailures = append(res.EmbeddingFailures, EmbeddingFailure{
 					ArtifactID: mr.ArtifactID,
@@ -563,10 +873,35 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 	return res, nil
 }
 
+// commitManifest persists the manifest. Under the §4.7.2 outbox path
+// (req.UseVectorOutbox set and the store implementing store.VectorOutbox) it
+// commits the manifest and a vector_pending row atomically, so an external
+// backend is reconciled asynchronously without ingest blocking on it. With no
+// embedding text, or a store that does not implement the outbox, or the inline
+// path, it falls back to a plain PutManifest.
+func commitManifest(ctx context.Context, st store.Store, req Request, mr store.ManifestRecord) error {
+	if req.UseVectorOutbox {
+		if ob, ok := st.(store.VectorOutbox); ok {
+			if text := composeEmbeddingText(mr); text != "" {
+				now := time.Now().UTC()
+				return ob.PutManifestWithVectorPending(ctx, mr, store.VectorPending{
+					TenantID:    mr.TenantID,
+					ArtifactID:  mr.ArtifactID,
+					Version:     mr.Version,
+					Text:        text,
+					EnqueuedAt:  now,
+					NextRetryAt: now,
+				})
+			}
+		}
+	}
+	return st.PutManifest(ctx, mr)
+}
+
 // embedAndStore composes the §4.7 embedding text projection from the
 // manifest, calls the configured embedder, and upserts the vector.
 // The composition is the canonical input format every Podium
-// embedding provider sees: id + description + tags + body prefix.
+// embedding provider sees: name + description + when_to_use + tags.
 func embedAndStore(ctx context.Context, req Request, mr store.ManifestRecord) error {
 	text := composeEmbeddingText(mr)
 	if text == "" {
@@ -582,24 +917,58 @@ func embedAndStore(ctx context.Context, req Request, mr store.ManifestRecord) er
 	return nil
 }
 
-// composeEmbeddingText is the canonical embedding-input projection.
-// Authors that want to influence retrieval write better descriptions
-// and tags; bundle-resource bytes don't enter the embedding because
-// they're opaque to the registry per §1.1.
-func composeEmbeddingText(mr store.ManifestRecord) string {
-	const bodyPrefixMax = 1024
-	body := string(mr.Body)
-	if len(body) > bodyPrefixMax {
-		body = body[:bodyPrefixMax]
+// embedDomain composes the §4.7 domain projection from a DOMAIN.md
+// record and upserts its embedding into the domain index. Malformed
+// frontmatter is skipped (the linter reports it at ingest); a domain with
+// no projectable text (e.g. an include-only DOMAIN.md) is a no-op.
+func embedDomain(ctx context.Context, req Request, dr store.DomainRecord) error {
+	d, err := manifest.ParseDomain(dr.Raw)
+	if err != nil {
+		return nil
 	}
-	parts := []string{mr.ArtifactID, mr.Description}
+	text := domainpkg.EmbeddingProjection(d)
+	if text == "" {
+		return nil
+	}
+	vec, err := req.Embedder(ctx, text)
+	if err != nil {
+		return fmt.Errorf("embed: %w", err)
+	}
+	if err := req.DomainVectorPut(ctx, dr.TenantID, dr.Path, vec); err != nil {
+		return fmt.Errorf("vector put: %w", err)
+	}
+	return nil
+}
+
+// composeEmbeddingText is the canonical §4.7 embedding-input
+// projection, built from frontmatter only: name, description,
+// when_to_use (joined with newlines), and tags (joined). The prose
+// body is deliberately excluded ("The prose body is not embedded");
+// it is noisy for retrieval and risks busting embedding-model context
+// limits. Authors influence recall via description and when_to_use.
+// spec: §4.7 "Artifact embeddings".
+func composeEmbeddingText(mr store.ManifestRecord) string {
+	parts := []string{mr.Name, mr.Description}
+	if len(mr.WhenToUse) > 0 {
+		parts = append(parts, strings.Join(mr.WhenToUse, "\n"))
+	}
 	if len(mr.Tags) > 0 {
 		parts = append(parts, strings.Join(mr.Tags, " "))
 	}
-	if body != "" {
-		parts = append(parts, body)
+	return joinNonEmpty(parts, "\n")
+}
+
+// joinNonEmpty joins the non-empty parts with sep so an absent name,
+// description, or when_to_use list does not leave a blank line in the
+// embedding projection.
+func joinNonEmpty(parts []string, sep string) string {
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p != "" {
+			out = append(out, p)
+		}
 	}
-	return strings.TrimSpace(strings.Join(parts, "\n"))
+	return strings.Join(out, sep)
 }
 
 func walkLayer(fsys fs.FS, layerID string) ([]filesystem.ArtifactRecord, error) {
@@ -631,9 +1000,85 @@ func walkLayer(fsys fs.FS, layerID string) ([]filesystem.ArtifactRecord, error) 
 	return out, nil
 }
 
+// walkDomains finds every DOMAIN.md in the snapshot and returns one
+// store.DomainRecord per file, keyed by the canonical domain path
+// (directory relative to the layer root). A root-level DOMAIN.md is
+// skipped: §4.5.5 gives the registry root no DOMAIN.md. Parse failures
+// are not surfaced here; the record stores the raw bytes and the
+// registry re-parses (and lint reports malformed frontmatter).
+func walkDomains(fsys fs.FS, tenantID, layerID string) []store.DomainRecord {
+	var out []store.DomainRecord
+	_ = fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if strings.HasPrefix(d.Name(), ".") && p != "." {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if d.Name() != "DOMAIN.md" {
+			return nil
+		}
+		path := dirToCanonical(dirOf(p))
+		if path == "" {
+			return nil // root has no DOMAIN.md (§4.5.5)
+		}
+		data, rerr := fs.ReadFile(fsys, p)
+		if rerr != nil {
+			return nil
+		}
+		out = append(out, store.DomainRecord{
+			TenantID: tenantID,
+			Layer:    layerID,
+			Path:     path,
+			Raw:      data,
+		})
+		return nil
+	})
+	return out
+}
+
+// newlyUnlistedAdvisory implements the §12 mitigation "ingest-time lint
+// flags newly-set unlisted: true for review". It returns a
+// warning advisory when dr sets unlisted: true and the value is newly set:
+// either the DOMAIN.md is new to this layer (no prior record), or the prior
+// record did not set unlisted. A domain that was already unlisted before
+// this ingest draws no advisory so a steady-state reingest stays quiet. A
+// DOMAIN.md that fails to parse draws nothing here (manifest-parse lint
+// covers it). prevRaw/seen come from the prior stored DOMAIN.md for the
+// same (tenant, layer, path).
+func newlyUnlistedAdvisory(dr store.DomainRecord, prevRaw string, seen bool) *lint.Diagnostic {
+	cur, err := manifest.ParseDomain(dr.Raw)
+	if err != nil || cur == nil || !cur.Unlisted {
+		return nil
+	}
+	if seen {
+		// Already unlisted in the prior ingest? Then it is not newly set.
+		if prev, perr := manifest.ParseDomain([]byte(prevRaw)); perr == nil && prev != nil && prev.Unlisted {
+			return nil
+		}
+	}
+	return &lint.Diagnostic{
+		ArtifactID: dr.Path,
+		Code:       "lint.domain_newly_unlisted",
+		Severity:   lint.SeverityWarning,
+		Message: fmt.Sprintf(
+			"DOMAIN.md %q sets unlisted: true, hiding the subtree from load_domain and search_domains enumeration (§4.5.3); review whether this is intended",
+			dr.Path),
+	}
+}
+
 func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecord, error) {
 	dir := dirOf(artifactPath)
 	id := dirToCanonical(dir)
+	// spec: §4.2 — enforce the canonical-ID invariants the filesystem-source
+	// registry already enforces, so both walk paths reject a root-level
+	// ARTIFACT.md (empty ID) and any segment containing "@" identically.
+	if err := filesystem.ValidateCanonicalID(id); err != nil {
+		return filesystem.ArtifactRecord{}, fmt.Errorf("%s: %w", artifactPath, err)
+	}
 
 	bytes, err := fs.ReadFile(fsys, artifactPath)
 	if err != nil {
@@ -669,6 +1114,12 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 			return err
 		}
 		if d.IsDir() {
+			// spec: §4.2/§4.4 — stop at a nested artifact-package boundary so
+			// a child artifact's files are not captured as the parent's
+			// bundled resources.
+			if p != dir && fsHasArtifactManifest(fsys, p) {
+				return fs.SkipDir
+			}
 			return nil
 		}
 		base := d.Name()
@@ -694,26 +1145,100 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 func manifestRecordFor(rec filesystem.ArtifactRecord, tenantID, layerID string, ingestedAt time.Time) (store.ManifestRecord, error) {
 	hash := contentHashOf(rec)
 	body := rec.Artifact.Body
+	name := rec.Artifact.Name
+	description := rec.Artifact.Description
 	if rec.Artifact.Type == manifest.TypeSkill && rec.Skill != nil {
 		body = rec.Skill.Body
+		// spec: §4.3.4 — a skill's name and description live in SKILL.md;
+		// ARTIFACT.md omits them ("Podium reads from SKILL.md"). Index the
+		// SKILL.md name and description so the skill is searchable without
+		// duplicating the fields into ARTIFACT.md. The §4.7 embedding
+		// projection leads with `name`, so it must be populated here.
+		if rec.Skill.Name != "" {
+			name = rec.Skill.Name
+		}
+		if rec.Skill.Description != "" {
+			description = rec.Skill.Description
+		}
 	}
 	return store.ManifestRecord{
-		TenantID:    tenantID,
-		ArtifactID:  rec.ID,
-		Version:     rec.Artifact.Version,
-		ContentHash: "sha256:" + hash,
-		Type:        string(rec.Artifact.Type),
-		Description: rec.Artifact.Description,
-		Tags:        rec.Artifact.Tags,
-		Sensitivity: string(rec.Artifact.Sensitivity),
-		Layer:       layerID,
-		Deprecated:  rec.Artifact.Deprecated,
-		ReplacedBy:  rec.Artifact.ReplacedBy,
-		AuditRedact: append([]string(nil), rec.Artifact.AuditRedact...),
-		IngestedAt:  ingestedAt,
-		Frontmatter: rec.ArtifactBytes,
-		Body:        []byte(body),
+		TenantID:         tenantID,
+		ArtifactID:       rec.ID,
+		Version:          rec.Artifact.Version,
+		ContentHash:      "sha256:" + hash,
+		Type:             string(rec.Artifact.Type),
+		Name:             name,
+		Description:      description,
+		WhenToUse:        append([]string(nil), rec.Artifact.WhenToUse...),
+		Tags:             rec.Artifact.Tags,
+		Sensitivity:      string(rec.Artifact.Sensitivity),
+		SearchVisibility: string(rec.Artifact.SearchVisibility),
+		Layer:            layerID,
+		Deprecated:       rec.Artifact.Deprecated,
+		ReplacedBy:       rec.Artifact.ReplacedBy,
+		AuditRedact:      append([]string(nil), rec.Artifact.AuditRedact...),
+		IngestedAt:       ingestedAt,
+		Frontmatter:      rec.ArtifactBytes,
+		Body:             []byte(body),
+		// spec: §11 / §2.2 — preserve the verbatim SKILL.md so server-source
+		// delivery reproduces the authored skill file byte-for-byte. The walk
+		// captured the raw bytes in rec.SkillBytes; empty for non-skills.
+		SkillRaw:  append([]byte(nil), rec.SkillBytes...),
+		Resources: resourceRefsFor(rec),
 	}, nil
+}
+
+// resourceRefsFor builds the §4.4 bundled-resource refs for a record in
+// sorted-path order. Each ref carries the per-resource content hash,
+// size, guessed content type, and (initially) the bytes inline. The
+// ingest loop later uploads the bytes to the object store and drops the
+// inline copy for resources above the §4.2 cutoff (see persistResources).
+func resourceRefsFor(rec filesystem.ArtifactRecord) []store.ResourceRef {
+	if len(rec.Resources) == 0 {
+		return nil
+	}
+	paths := make([]string, 0, len(rec.Resources))
+	for p := range rec.Resources {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	refs := make([]store.ResourceRef, 0, len(paths))
+	for _, p := range paths {
+		body := rec.Resources[p]
+		h := sha256.Sum256(body)
+		refs = append(refs, store.ResourceRef{
+			Path:        p,
+			ContentHash: "sha256:" + hex.EncodeToString(h[:]),
+			Size:        int64(len(body)),
+			ContentType: objectstore.GuessContentType(p),
+			Inline:      body,
+		})
+	}
+	return refs
+}
+
+// persistResources realizes the §7.2 data-plane split for one record's
+// bundled resources before the manifest commits. With an object store
+// configured (put non-nil), every resource uploads keyed by its content
+// hash (§4.4 deduplicates identical bytes), and resources above the
+// §4.2 inline cutoff drop their inline copy so the control plane never
+// carries large bytes. Without an object store, every resource keeps its
+// bytes inline regardless of size (the standalone-without-storage mode).
+func persistResources(ctx context.Context, put ResourcePutFunc, refs []store.ResourceRef) error {
+	if put == nil {
+		return nil
+	}
+	for i := range refs {
+		ref := &refs[i]
+		key := strings.TrimPrefix(ref.ContentHash, "sha256:")
+		if err := put(ctx, key, ref.Inline, ref.ContentType); err != nil {
+			return fmt.Errorf("%s: %w", ref.Path, err)
+		}
+		if ref.Size > objectstore.InlineCutoff {
+			ref.Inline = nil
+		}
+	}
+	return nil
 }
 
 // contentHashOf computes the canonical content hash for an artifact:
@@ -735,7 +1260,10 @@ func contentHashOf(rec filesystem.ArtifactRecord) string {
 
 // edgesFor extracts cross-type dependency edges from the artifact
 // frontmatter (§4.7.3): extends, delegates_to, mcpServers references.
-func edgesFor(a *manifest.Artifact, id string) []store.DependencyEdge {
+// serverIDs maps a canonical server_identifier to the mcp-server-type
+// artifact ID that declares it; an mcpServers entry produces an edge
+// only when its derived server identifier resolves to such an artifact.
+func edgesFor(a *manifest.Artifact, id string, serverIDs map[string]string) []store.DependencyEdge {
 	var out []store.DependencyEdge
 	if a.Extends != "" {
 		out = append(out, store.DependencyEdge{
@@ -747,10 +1275,66 @@ func edgesFor(a *manifest.Artifact, id string) []store.DependencyEdge {
 			From: id, To: stripPin(target), Kind: "delegates_to",
 		})
 	}
+	// spec: §4.7.3 — an mcpServers reference resolves to an
+	// mcp-server-type artifact via server_identifier. The consumer-side
+	// entry carries only name/transport/command/args, so derive the
+	// canonical identifier from it and match it against the ingested
+	// mcp-server artifacts. Emit no edge when nothing resolves: keying
+	// on the local consumer-side name would point the index at a
+	// non-existent artifact.
 	for _, srv := range a.MCPServers {
+		sid := serverIdentifierFor(srv)
+		if sid == "" {
+			continue
+		}
+		target, ok := serverIDs[sid]
+		if !ok {
+			continue
+		}
 		out = append(out, store.DependencyEdge{
-			From: id, To: srv.Name, Kind: "mcpServers",
+			From: id, To: target, Kind: "mcpServers",
 		})
+	}
+	return out
+}
+
+// serverIdentifierFor derives the canonical server_identifier (§4.3,
+// §4.7.3) from a consumer-side mcpServers entry. The spec example
+// `server_identifier: npx:@company/finance-warehouse-mcp` corresponds
+// to `command: npx` with `args: ["-y", "@company/finance-warehouse-mcp"]`,
+// so the identifier is `<command>:<first non-flag arg>`. A flag arg
+// begins with "-". When the entry has no command, the identifier
+// cannot be derived and the empty string is returned.
+func serverIdentifierFor(srv manifest.MCPServerRef) string {
+	if srv.Command == "" {
+		return srv.Transport
+	}
+	for _, arg := range srv.Args {
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		return srv.Command + ":" + arg
+	}
+	return srv.Command
+}
+
+// serverIdentifierIndex maps each mcp-server-type artifact's
+// server_identifier to its canonical artifact ID, for §4.7.3
+// mcpServers edge resolution. Records that are not mcp-server type or
+// that lack a server_identifier are skipped.
+func serverIdentifierIndex(records []filesystem.ArtifactRecord) map[string]string {
+	out := map[string]string{}
+	for _, rec := range records {
+		if rec.Artifact == nil {
+			continue
+		}
+		if rec.Artifact.Type != manifest.TypeMCPServer {
+			continue
+		}
+		if rec.Artifact.ServerIdentifier == "" {
+			continue
+		}
+		out[rec.Artifact.ServerIdentifier] = rec.ID
 	}
 	return out
 }
@@ -773,51 +1357,86 @@ func stripPin(ref string) string {
 // resolveExtendsPin resolves a parent reference (e.g.,
 // "finance/parent" or "finance/parent@1.x" or
 // "finance/parent@sha256:<hex>") against existing manifests for the
-// tenant and returns the pinned form "<id>@<exact-version>". childID
-// is the artifact being ingested; we use it to detect a self-reference
-// (the simplest cycle case).
-func resolveExtendsPin(ctx context.Context, st store.Store, tenantID, ref, childID string) (string, error) {
+// tenant and returns the pinned form "<id>@<exact-version>" together with
+// the parent's type at the resolved version. childID is the artifact
+// being ingested; we use it together with childLayer to detect a genuine
+// self-reference (the child's own record in its own layer) while still
+// allowing a same-ID, same-version record from a lower-precedence layer to
+// serve as the parent (the §4.6 same-ID extends overlay). The returned type
+// lets the caller enforce the §4.6 rule that a child's type must match its
+// parent's.
+func resolveExtendsPin(ctx context.Context, st store.Store, tenantID, ref, childID, childVersion, childLayer string) (pin, parentType, parentLicense string, err error) {
 	id, pinStr := splitRef(ref)
 	if id == "" {
-		return "", fmt.Errorf("invalid extends reference %q", ref)
+		return "", "", "", fmt.Errorf("invalid extends reference %q", ref)
 	}
-	if id == childID {
-		return "", fmt.Errorf("self-extends cycle: %q", ref)
-	}
-	pin, err := version.ParsePin(pinStr)
+	p, err := version.ParsePin(pinStr)
 	if err != nil {
-		return "", fmt.Errorf("parse pin: %w", err)
+		return "", "", "", fmt.Errorf("parse pin: %w", err)
 	}
 
 	all, err := st.ListManifests(ctx, tenantID)
 	if err != nil {
-		return "", err
+		return "", "", "", err
 	}
 	versions := make([]string, 0, 4)
 	hashByVersion := map[string]string{}
+	typeByVersion := map[string]string{}
+	// frontmatterByVersion lets the resolver recover the parent's license
+	// (not an indexed column) so ingest can flag a cross-layer license
+	// change per the §4.6 field-semantics table.
+	frontmatterByVersion := map[string][]byte{}
 	for _, m := range all {
-		if m.ArtifactID == id {
-			versions = append(versions, m.Version)
-			hashByVersion[m.Version] = m.ContentHash
+		if m.ArtifactID != id {
+			continue
 		}
+		// A child may extend its own canonical ID to overlay a
+		// lower-precedence layer's artifact (§4.6 same-ID extends
+		// exception). The child's own record in its own layer is never a
+		// valid parent (that would be a self-cycle), so exclude only that
+		// row. A same-ID, same-version record contributed by a different
+		// (lower-precedence) layer is a legitimate parent and must stay in
+		// the candidate set; two repositories that scaffold the same
+		// artifact at the default version land here.
+		if id == childID && m.Version == childVersion && m.Layer == childLayer {
+			continue
+		}
+		versions = append(versions, m.Version)
+		hashByVersion[m.Version] = m.ContentHash
+		typeByVersion[m.Version] = m.Type
+		frontmatterByVersion[m.Version] = m.Frontmatter
 	}
 	if len(versions) == 0 {
-		return "", fmt.Errorf("no parent artifact %q ingested yet", id)
+		if id == childID {
+			return "", "", "", fmt.Errorf("self-extends cycle: %q", ref)
+		}
+		return "", "", "", fmt.Errorf("no parent artifact %q ingested yet", id)
 	}
 
-	if pin.Kind == version.PinContentHash {
+	var resolved string
+	if p.Kind == version.PinContentHash {
 		for v, h := range hashByVersion {
-			if h == "sha256:"+pin.Hash {
-				return id + "@" + v, nil
+			if h == "sha256:"+p.Hash {
+				resolved = v
+				break
 			}
 		}
-		return "", fmt.Errorf("no parent version with content hash sha256:%s", pin.Hash)
+		if resolved == "" {
+			return "", "", "", fmt.Errorf("no parent version with content hash sha256:%s", p.Hash)
+		}
+	} else {
+		resolved, err = version.Resolve(p, versions)
+		if err != nil {
+			return "", "", "", fmt.Errorf("no parent version satisfies %q", ref)
+		}
 	}
-	resolved, err := version.Resolve(pin, versions)
-	if err != nil {
-		return "", fmt.Errorf("no parent version satisfies %q", ref)
+	// Parse the resolved parent's license from its stored source. The
+	// frontmatter holds the full ARTIFACT.md bytes; a parse failure leaves
+	// the license empty so the license-change check simply does not fire.
+	if a, perr := manifest.ParseArtifact(frontmatterByVersion[resolved]); perr == nil {
+		parentLicense = a.License
 	}
-	return id + "@" + resolved, nil
+	return id + "@" + resolved, typeByVersion[resolved], parentLicense, nil
 }
 
 func splitRef(ref string) (id, pin string) {
@@ -848,6 +1467,13 @@ func dirToCanonical(dir string) string {
 	return dir
 }
 
+// fsHasArtifactManifest reports whether dir directly contains an ARTIFACT.md
+// file, marking it as a nested artifact-package boundary (§4.2).
+func fsHasArtifactManifest(fsys fs.FS, dir string) bool {
+	info, err := fs.Stat(fsys, joinPath(dir, "ARTIFACT.md"))
+	return err == nil && !info.IsDir()
+}
+
 func rejectsSensitivity(floor, actual manifest.Sensitivity) bool {
 	if floor == "" {
 		return false
@@ -864,6 +1490,33 @@ func rejectsSensitivity(floor, actual manifest.Sensitivity) bool {
 		return 0
 	}
 	return rank(actual) >= rank(floor)
+}
+
+// sandboxProfileUnenforceable reports whether profile cannot be honored by a
+// host whose enforceable set is enforceable (§13.10 / §4.4.1). The empty
+// profile and unrestricted impose no constraint and are always enforceable;
+// any other profile must appear in the host's enforceable set. Callers gate
+// this on Request.EnforceSandboxProfile so the standalone default never
+// rejects on sandbox grounds.
+func sandboxProfileUnenforceable(profile string, enforceable []string) bool {
+	if profile == "" || profile == string(manifest.SandboxUnrestricted) {
+		return false
+	}
+	for _, e := range enforceable {
+		if e == profile {
+			return false
+		}
+	}
+	return true
+}
+
+// sandboxProfileList renders the host's enforceable sandbox set for a
+// rejection message, defaulting to unrestricted when the set is empty.
+func sandboxProfileList(enforceable []string) string {
+	if len(enforceable) == 0 {
+		return string(manifest.SandboxUnrestricted)
+	}
+	return strings.Join(enforceable, ", ")
 }
 
 // groupLintErrors keeps only error-severity diagnostics, grouped by

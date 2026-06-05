@@ -22,7 +22,7 @@ func TestIngest_PublishesArtifactPublished(t *testing.T) {
 		data map[string]any
 	}
 	events := []evt{}
-	publish := func(typ string, data map[string]any) {
+	publish := func(_ context.Context, typ string, data map[string]any) {
 		events = append(events, evt{typ, data})
 	}
 	res, err := ingest.Ingest(context.Background(), st, ingest.Request{
@@ -66,7 +66,7 @@ func TestIngest_IdempotentDoesNotRepublish(t *testing.T) {
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
 	count := 0
-	publish := func(typ string, _ map[string]any) {
+	publish := func(_ context.Context, typ string, _ map[string]any) {
 		if typ == "artifact.published" {
 			count++
 		}
@@ -89,15 +89,70 @@ func TestIngest_IdempotentDoesNotRepublish(t *testing.T) {
 	}
 }
 
-// Spec: §7.6 — when an ingested manifest sets deprecated:true, both
-// artifact.published and artifact.deprecated fire. Subscribers can
-// filter on either type independently.
-func TestIngest_PublishesArtifactDeprecated(t *testing.T) {
+// spec: §7.3.2 — artifact.deprecated fires when "a manifest update
+// flipped deprecated: true", i.e. a new deprecated version supersedes a
+// prior non-deprecated version of the same artifact_id. The flip ingest
+// emits both artifact.published and artifact.deprecated.
+func TestIngest_PublishesArtifactDeprecatedOnFlip(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
 	types := []string{}
-	publish := func(typ string, _ map[string]any) {
+	publish := func(_ context.Context, typ string, _ map[string]any) {
+		types = append(types, typ)
+	}
+	mk := func(version string, deprecated bool) fstest.MapFS {
+		dep := ""
+		if deprecated {
+			dep = "deprecated: true\n"
+		}
+		return fstest.MapFS{
+			"x/ARTIFACT.md": &fstest.MapFile{
+				Data: []byte("---\ntype: context\nversion: " + version +
+					"\ndescription: x\nsensitivity: low\n" + dep + "---\n\nbody\n"),
+			},
+		}
+	}
+	// v1 is not deprecated: only artifact.published fires.
+	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "t", LayerID: "L", PublishEvent: publish, Files: mk("1.0.0", false),
+	}); err != nil {
+		t.Fatalf("Ingest v1: %v", err)
+	}
+	for _, typ := range types {
+		if typ == "artifact.deprecated" {
+			t.Fatalf("artifact.deprecated fired on the non-deprecated v1 publish: %v", types)
+		}
+	}
+	// v2 flips deprecated: artifact.published + artifact.deprecated.
+	types = nil
+	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "t", LayerID: "L", PublishEvent: publish, Files: mk("2.0.0", true),
+	}); err != nil {
+		t.Fatalf("Ingest v2: %v", err)
+	}
+	expected := map[string]bool{"artifact.published": false, "artifact.deprecated": false}
+	for _, typ := range types {
+		if _, ok := expected[typ]; ok {
+			expected[typ] = true
+		}
+	}
+	for typ, seen := range expected {
+		if !seen {
+			t.Errorf("expected event type %q not emitted on flip; got %v", typ, types)
+		}
+	}
+}
+
+// spec: §7.3.2 — a version born deprecated on first publish is not a
+// "flip"; only artifact.published fires, never artifact.deprecated,
+// because no prior non-deprecated version of the artifact existed.
+func TestIngest_BornDeprecatedDoesNotPublishDeprecated(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemory()
+	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
+	types := []string{}
+	publish := func(_ context.Context, typ string, _ map[string]any) {
 		types = append(types, typ)
 	}
 	_, err := ingest.Ingest(context.Background(), st, ingest.Request{
@@ -111,15 +166,16 @@ func TestIngest_PublishesArtifactDeprecated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
-	expected := map[string]bool{"artifact.published": false, "artifact.deprecated": false}
+	sawPublished := false
 	for _, typ := range types {
-		if _, ok := expected[typ]; ok {
-			expected[typ] = true
+		if typ == "artifact.deprecated" {
+			t.Errorf("artifact.deprecated fired on first publish of a born-deprecated version: %v", types)
+		}
+		if typ == "artifact.published" {
+			sawPublished = true
 		}
 	}
-	for typ, seen := range expected {
-		if !seen {
-			t.Errorf("expected event type %q not emitted; got %v", typ, types)
-		}
+	if !sawPublished {
+		t.Errorf("artifact.published not emitted; got %v", types)
 	}
 }

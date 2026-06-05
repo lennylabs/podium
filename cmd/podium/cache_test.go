@@ -61,10 +61,84 @@ func TestCachePrune_DryRun(t *testing.T) {
 	}
 }
 
+// Spec: §6.5 — `--days 0` is the boundary "older than now": a freshly-written
+// bucket is prunable because its last access is already in the past. `--dry-run`
+// lists it without removing it.
+func TestCachePrune_DaysZeroListsFreshBucketDryRun(t *testing.T) {
+	dir := t.TempDir()
+	bucket := filepath.Join(dir, "sha256-fresh")
+	if err := os.MkdirAll(bucket, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	// Written just now, with no backdating: --days 30 would keep it, --days 0
+	// must select it.
+	if err := os.WriteFile(filepath.Join(bucket, "frontmatter"), []byte("fm"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if rc := cachePrune([]string{"--dir", dir, "--days", "0", "--dry-run"}); rc != 0 {
+		t.Fatalf("rc = %d, want 0 (--days 0 is valid)", rc)
+	}
+	if _, err := os.Stat(bucket); err != nil {
+		t.Errorf("dry-run removed the fresh bucket: %v", err)
+	}
+}
+
+// Spec: §6.5 — a negative `--days` is rejected; it would push the cutoff into
+// the future and evict buckets newer than now.
+func TestCachePrune_NegativeDaysRejected(t *testing.T) {
+	if rc := cachePrune([]string{"--dir", t.TempDir(), "--days", "-1"}); rc != 2 {
+		t.Errorf("rc = %d, want 2 for negative --days", rc)
+	}
+}
+
 // Spec: §6.5 — pruning a missing cache dir is a no-op success.
 func TestCachePrune_MissingDirIsNoop(t *testing.T) {
 	rc := cachePrune([]string{"--dir", filepath.Join(t.TempDir(), "absent"), "--days", "30"})
 	if rc != 0 {
 		t.Errorf("rc = %d, want 0", rc)
+	}
+}
+
+// Spec: §6.5 — prune never deletes the `.resolutions` index nor any
+// directory that is not a content bucket, even when their mtimes are stale.
+func TestCachePrune_PreservesResolutionIndexAndNonBuckets(t *testing.T) {
+	dir := t.TempDir()
+	past := time.Now().Add(-60 * 24 * time.Hour)
+
+	// A stale resolution index (dot-prefixed, no frontmatter).
+	res := filepath.Join(dir, ".resolutions")
+	if err := os.MkdirAll(res, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	idx := filepath.Join(res, "index.db")
+	_ = os.WriteFile(idx, []byte("db"), 0o644)
+	_ = os.Chtimes(idx, past, past)
+	_ = os.Chtimes(res, past, past)
+
+	// A stale non-bucket directory (no frontmatter file).
+	stray := filepath.Join(dir, "not-a-bucket")
+	_ = os.MkdirAll(stray, 0o755)
+	_ = os.WriteFile(filepath.Join(stray, "junk"), []byte("x"), 0o644)
+	_ = os.Chtimes(filepath.Join(stray, "junk"), past, past)
+	_ = os.Chtimes(stray, past, past)
+
+	// A genuine stale content bucket that should be removed.
+	bucket := filepath.Join(dir, "deadbeef")
+	_ = os.MkdirAll(bucket, 0o755)
+	_ = os.WriteFile(filepath.Join(bucket, "frontmatter"), []byte("fm"), 0o644)
+	_ = os.Chtimes(filepath.Join(bucket, "frontmatter"), past, past)
+	_ = os.Chtimes(bucket, past, past)
+
+	if rc := cachePrune([]string{"--dir", dir, "--days", "30"}); rc != 0 {
+		t.Fatalf("rc = %d, want 0", rc)
+	}
+	if _, err := os.Stat(res); err != nil {
+		t.Errorf(".resolutions index was pruned: %v", err)
+	}
+	if _, err := os.Stat(stray); err != nil {
+		t.Errorf("non-bucket directory was pruned: %v", err)
+	}
+	if _, err := os.Stat(bucket); !os.IsNotExist(err) {
+		t.Errorf("stale content bucket survived: %v", err)
 	}
 }

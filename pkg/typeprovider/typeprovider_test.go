@@ -1,6 +1,8 @@
 package typeprovider_test
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -8,22 +10,47 @@ import (
 	"github.com/lennylabs/podium/pkg/typeprovider"
 )
 
-// Spec: §9 TypeProvider SPI — the default registry pre-registers
-// every first-class type so callers can look them up without
-// extra setup.
-func TestDefaultRegistry_HasAllFirstClassTypes(t *testing.T) {
-	for _, want := range []manifest.ArtifactType{
-		manifest.TypeSkill,
-		manifest.TypeAgent,
-		manifest.TypeContext,
-		manifest.TypeCommand,
-		manifest.TypeRule,
-		manifest.TypeHook,
-		manifest.TypeMCPServer,
-	} {
+// Spec: §9 TypeProvider SPI / §4.1 — the default registry pre-registers
+// every first-class type and the built-in extension type (mcp-server) so
+// callers can look them up without extra setup.
+func TestDefaultRegistry_HasAllBuiltinTypes(t *testing.T) {
+	for _, want := range append(manifest.FirstClassTypes(), manifest.BuiltinExtensionTypes()...) {
 		if _, ok := typeprovider.Default.Get(want); !ok {
 			t.Errorf("type %q is not registered", want)
 		}
+	}
+}
+
+// Spec: §4.1 — Require reports an unregistered type with an
+// error wrapping manifest.ErrUnknownType and returns nil for a registered
+// type.
+func TestRegistry_Require(t *testing.T) {
+	t.Parallel()
+	r := typeprovider.NewRegistry()
+	if err := r.Register(macroProvider{}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if err := r.Require("macro"); err != nil {
+		t.Errorf("Require(macro) = %v, want nil", err)
+	}
+	err := r.Require("nonesuch")
+	if !errors.Is(err, manifest.ErrUnknownType) {
+		t.Errorf("Require(nonesuch) = %v, want a wrap of manifest.ErrUnknownType", err)
+	}
+}
+
+// Spec: §4.1 — the default registry recognizes every built-in
+// type via Require and reports an unregistered extension type with
+// manifest.ErrUnknownType.
+func TestDefaultRegistry_RequireBuiltins(t *testing.T) {
+	t.Parallel()
+	for _, ty := range append(manifest.FirstClassTypes(), manifest.BuiltinExtensionTypes()...) {
+		if err := typeprovider.Default.Require(ty); err != nil {
+			t.Errorf("Default.Require(%q) = %v, want nil", ty, err)
+		}
+	}
+	if err := typeprovider.Default.Require("dataset"); !errors.Is(err, manifest.ErrUnknownType) {
+		t.Errorf("Default.Require(dataset) = %v, want manifest.ErrUnknownType", err)
 	}
 }
 
@@ -51,7 +78,7 @@ func TestRegistry_ValidateDispatches(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 	a := &manifest.Artifact{Type: "macro"}
-	got := r.Validate(a)
+	got := r.Validate(context.Background(), a)
 	if len(got) != 1 || got[0].Code != "macro.no-name" {
 		t.Errorf("got %+v, want one macro.no-name diagnostic", got)
 	}
@@ -75,7 +102,7 @@ type macroProvider struct{}
 
 func (macroProvider) ID() string                  { return "macro" }
 func (macroProvider) Type() manifest.ArtifactType { return "macro" }
-func (macroProvider) Validate(a *manifest.Artifact) []typeprovider.Diagnostic {
+func (macroProvider) Validate(_ context.Context, a *manifest.Artifact) []typeprovider.Diagnostic {
 	if a.Name == "" {
 		return []typeprovider.Diagnostic{{Severity: "error", Code: "macro.no-name", Message: "macro: name required"}}
 	}
@@ -84,6 +111,8 @@ func (macroProvider) Validate(a *manifest.Artifact) []typeprovider.Diagnostic {
 
 type otherProvider struct{}
 
-func (otherProvider) ID() string                                            { return "other" }
-func (otherProvider) Type() manifest.ArtifactType                           { return "z-other" }
-func (otherProvider) Validate(*manifest.Artifact) []typeprovider.Diagnostic { return nil }
+func (otherProvider) ID() string                  { return "other" }
+func (otherProvider) Type() manifest.ArtifactType { return "z-other" }
+func (otherProvider) Validate(context.Context, *manifest.Artifact) []typeprovider.Diagnostic {
+	return nil
+}

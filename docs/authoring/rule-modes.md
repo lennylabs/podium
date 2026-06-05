@@ -61,44 +61,30 @@ rule_mode: explicit
 
 ## How each harness honors them
 
-The harness adapter does the translation at materialization time. Each adapter writes the rule into the harness's native format using the closest equivalent it has. When a harness can't honor a mode natively, the adapter falls back (with a lint warning) or refuses (with a lint error), per the capability matrix.
+The harness adapter does the translation at materialization time. Each adapter writes the rule into the harness's native format using the closest equivalent it has. When a harness cannot honor a mode natively, the adapter falls back to an always-loaded block. A rule that declares `target_harnesses:` draws an ingest lint warning for a ⚠ mode and a lint error for a ✗ mode on a named harness. Without `target_harnesses:`, a ✗ mode is refused at materialization when the rule loads onto that harness (§6.9).
 
-| Mode | claude-code | cursor | codex | opencode | gemini | pi | hermes | generic |
-|:--|:--|:--|:--|:--|:--|:--|:--|:--|
-| `always` | ✓ | ✓ | ✓ | ✓ | ⚠ | ✓ | ✓ | ✓ |
-| `glob` | ⚠ | ✓ | ⚠ | ⚠ | ✗ | ⚠ | ✓ | ⚠ |
-| `auto` | ⚠ | ✓ | ✗ | ✗ | ✗ | ✗ | ⚠ | ✗ |
-| `explicit` | ✓ | ✓ | ✓ | ✓ | ⚠ | ✓ | ✓ | ✓ |
+| Mode | claude-code | claude-desktop | claude-cowork | cursor | codex | opencode | gemini | pi | hermes |
+|:--|:--|:--|:--|:--|:--|:--|:--|:--|:--|
+| `always` | ✓ | ✗ | ⚠ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `glob` | ✓ | ✗ | ⚠ | ✓ | ⚠ | ⚠ | ⚠ | ⚠ | ✓ |
+| `auto` | ⚠ | ✗ | ⚠ | ✓ | ⚠ | ⚠ | ⚠ | ⚠ | ✓ |
+| `explicit` | ⚠ | ✗ | ⚠ | ✓ | ⚠ | ⚠ | ⚠ | ⚠ | ✓ |
 
-Legend: ✓ supported natively, ⚠ supported via fallback (lint warning), ✗ not supported (lint error or `target_harnesses:` opt-out required).
+Legend: ✓ supported natively, ⚠ supported via fallback (ingest lint warns when a declared `target_harnesses:` names the harness, and materialization emits the degraded fallback), ✗ not supported (ingest lint errors when a declared `target_harnesses:` names the harness, and materialization onto that harness otherwise fails per §6.9). This table mirrors the `rule_mode` rows of the §6.7.1 capability matrix.
 
 ---
 
 ## What each adapter writes
 
-| Mode | Adapter output |
+| Adapter | Output |
 |:--|:--|
-| **claude-code, `always`** | `.claude/rules/<name>.md` written, gets injected into `CLAUDE.md` between markers. |
-| **claude-code, `glob`** | Falls back to always-loaded with a lint warning (Claude Code doesn't natively scope rules by file pattern). |
-| **claude-code, `auto`** | `.claude/rules/<name>.md` with the `description` field; Claude's autoload heuristic uses it. |
-| **claude-code, `explicit`** | Standalone `.claude/rules/<name>.md`, referenced manually. |
-| **cursor, all modes** | `.cursor/rules/<name>.mdc` with `alwaysApply` / `globs` / `description` set per the mode. |
-| **copilot, `always`** | `.github/instructions/<name>.instructions.md` with `applyTo: "**"`. |
-| **copilot, `glob`** | `applyTo: "<globs>"`. |
-| **copilot, `auto`** | `description: "..."` only (no `applyTo`); Copilot semantically matches against the description. |
-| **copilot, `explicit`** | No `applyTo`, no `description`; user references manually. |
-| **opencode, `always` and `explicit`** | Injected into root `AGENTS.md` between markers. |
-| **opencode, `glob`** | Injected into the common-ancestor directory's `AGENTS.md` (warning issued; OpenCode lacks native glob semantics). |
-| **opencode, `auto`** | Lint error; OpenCode lacks an autoload heuristic. |
-| **codex, `always` and `explicit`** | Injected into root `AGENTS.md`. |
-| **codex, `glob`** | Common-ancestor `AGENTS.md` fallback (warning). |
-| **codex, `auto`** | Lint error. |
-| **pi, `always` and `explicit`** | Injected into project-local `.pi/AGENTS.md` or root `AGENTS.md`. Explicit-mode rules at `.pi/rules/<name>.md`. |
-| **pi, `glob`** | Common-ancestor `AGENTS.md` (warning). |
-| **pi, `auto`** | Lint error. |
-| **hermes, all modes** | `.claude/rules/<name>.md` written in cursor-`.mdc` format (Hermes natively reads `.cursor/rules/*.mdc`, so the cursor adapter output works directly). |
-| **gemini** | Limited rule support; most modes fall back or fail. |
-| **generic** | AGENTS.md injection for `always`; common-ancestor for `glob`; standalone files referenced manually for `explicit`; `auto` not supported. |
+| **claude-code** | A standalone `.claude/rules/<name>.md` for every mode, carrying the prose with the Podium-internal fields dropped. `always` loads at launch and `glob` writes the native `paths:` YAML list, both native. `auto` and `explicit` fall back to a load-always file (no scoping frontmatter) and draw a lint warning, because Claude Code's `.claude/rules/` files have no description-attach or mention-only mode. |
+| **cursor** | `.cursor/rules/<name>.mdc` for every mode, with the native key set per the mode: `always` writes `alwaysApply: true`, `glob` writes `globs: <rule_globs>`, `auto` writes `description: <rule_description>`, and `explicit` writes no auto-apply key. |
+| **hermes** | `.cursor/rules/<name>.mdc` in the Cursor `.mdc` format for every mode. Hermes natively reads `.cursor/rules/*.mdc`, root `AGENTS.md`, and `.cursorrules`; it does not read `.claude/rules/`. |
+| **codex, opencode, pi** | The rule body injects into root `AGENTS.md` between Podium-managed markers. `always` maps natively; `glob`, `auto`, and `explicit` fall back to always-loaded with a lint warning, because an injected block carries no per-file scoping. |
+| **gemini** | The rule body injects into root `GEMINI.md` between Podium-managed markers, with the same `always`-native, non-`always`-fallback behavior as the `AGENTS.md` harnesses. |
+| **claude-cowork** | A Cowork plugin has no native rule component, so the rule ships as a skill (`plugins/<id>/skills/<name>/SKILL.md`). Every mode is a fallback. |
+| **claude-desktop** | No project-level surface, so a rule produces no Claude Desktop output. |
 
 ---
 
@@ -121,4 +107,4 @@ Lint enforces the field requirements per mode:
 - `rule_mode: auto` with `rule_globs` set: lint warning ("rule-mode 'auto' uses description only; rule-globs is ignored").
 - A type other than `rule` with `rule_mode` set: lint warning ("rule-mode is only applicable to type: rule").
 
-When ingest crosses an unsupported (mode, harness) cell from the capability matrix, the lint surfaces the mismatch. Authors who must use a non-portable mode can declare `target_harnesses:` in frontmatter to opt out of cross-harness materialization for that artifact.
+When an artifact declares `target_harnesses:`, ingest lint surfaces a mismatch for any named harness whose cell for the chosen mode is ⚠ (warning) or ✗ (error). When `target_harnesses:` is absent, ingest stays permissive and an unsupported mode is caught at materialization onto that harness (§6.9). Authors who must use a non-portable mode can declare `target_harnesses:` in frontmatter to opt out of cross-harness materialization for that artifact.

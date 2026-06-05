@@ -12,10 +12,10 @@ import (
 func TestSplitContentHash(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		in       string
-		wantAlg  string
-		wantHex  string
-		wantErr  bool
+		in      string
+		wantAlg string
+		wantHex string
+		wantErr bool
 	}{
 		{"sha256:" + hex.EncodeToString([]byte("abc")), "sha256", "616263", false},
 		{"sha512:" + hex.EncodeToString([]byte("def")), "sha512", "646566", false},
@@ -78,4 +78,3 @@ func TestFetchRekor_HappyPath(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
-

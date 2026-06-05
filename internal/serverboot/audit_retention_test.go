@@ -31,10 +31,38 @@ func TestRunRetentionOnce_DropsOldEvents(t *testing.T) {
 	}
 
 	policies := defaultRetentionPolicies(365 * 24 * time.Hour)
-	runRetentionOnce(context.Background(), sink, policies)
+	anchored := 0
+	runRetentionOnce(context.Background(), sink, policies, func() { anchored++ })
 
 	if err := sink.Verify(context.Background()); err != nil {
 		t.Errorf("Verify after retention: %v", err)
+	}
+	// spec: §8.6 — dropping events must trigger a re-anchor.
+	if anchored != 1 {
+		t.Errorf("reAnchor invoked %d times, want 1 after a drop", anchored)
+	}
+}
+
+// Spec: §8.6 — a retention pass that drops nothing must not
+// re-anchor (the chain head is unchanged, so the prior anchor still
+// holds).
+func TestRunRetentionOnce_NoReAnchorWhenNothingDropped(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	sink, err := audit.NewFileSink(filepath.Join(dir, "audit.log"))
+	if err != nil {
+		t.Fatalf("NewFileSink: %v", err)
+	}
+	if err := sink.Append(context.Background(), audit.Event{
+		Type: audit.EventArtifactLoaded, Timestamp: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	anchored := 0
+	runRetentionOnce(context.Background(), sink,
+		defaultRetentionPolicies(365*24*time.Hour), func() { anchored++ })
+	if anchored != 0 {
+		t.Errorf("reAnchor invoked %d times, want 0 when nothing dropped", anchored)
 	}
 }
 
@@ -42,8 +70,8 @@ func TestRunRetentionOnce_DropsOldEvents(t *testing.T) {
 // non-positive max-age as "disabled" instead of crashing.
 func TestStartRetentionScheduler_NoOpWhenUnconfigured(t *testing.T) {
 	t.Parallel()
-	startRetentionScheduler(&Config{auditRetentionInterval: 60, auditRetentionMaxAgeDays: 0}, nil)
-	startRetentionScheduler(&Config{auditRetentionInterval: 0}, nil)
+	startRetentionScheduler(&Config{auditRetentionInterval: 60, auditRetentionMaxAgeDays: 0}, nil, nil)
+	startRetentionScheduler(&Config{auditRetentionInterval: 0}, nil, nil)
 	// Reaching here with no panic is the assertion.
 }
 

@@ -8,9 +8,10 @@ package source
 
 import (
 	"context"
-	"errors"
 	"io/fs"
 	"time"
+
+	"github.com/lennylabs/podium/pkg/spi"
 )
 
 // TriggerModel declares how the registry should ingest from a source.
@@ -81,12 +82,14 @@ type Visibility struct {
 	Users        []string
 }
 
-// Errors returned by providers.
+// Errors returned by providers. Each is a structured *spi.Error carrying its
+// §6.10 code so the LayerSourceProvider SPI conforms to the §9.3 "Structured
+// errors" constraint.
 var (
-	// ErrSourceUnreachable wraps a transient fetch failure. Maps to
-	// ingest.source_unreachable in §6.10.
-	ErrSourceUnreachable = errors.New("source: unreachable")
+	// ErrSourceUnreachable wraps a transient fetch failure. The condition is
+	// transient, so the structured envelope marks it retryable.
+	ErrSourceUnreachable = &spi.Error{Code: "ingest.source_unreachable", Message: "source: unreachable", Retryable: true}
 	// ErrInvalidConfig signals an invalid layer config (e.g., git source
 	// missing repo:).
-	ErrInvalidConfig = errors.New("source: invalid_config")
+	ErrInvalidConfig = &spi.Error{Code: "registry.invalid_argument", Message: "source: invalid_config"}
 )

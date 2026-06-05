@@ -2,6 +2,7 @@ package lint
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -19,9 +20,9 @@ import (
 // anything else warns.
 type ruleArtifactBodyForSkill struct{}
 
-func (ruleArtifactBodyForSkill) Code() string        { return "lint.skill_artifact_body" }
+func (ruleArtifactBodyForSkill) Code() string { return "lint.skill_artifact_body" }
 
-func (r ruleArtifactBodyForSkill) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleArtifactBodyForSkill) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
 	for _, rec := range records {
 		if rec.Artifact == nil || rec.Artifact.Type != manifest.TypeSkill {
@@ -100,7 +101,7 @@ func NewProseReferenceRule(client *http.Client) Rule {
 	return ruleProseReferenceResolution{HTTPClient: client}
 }
 
-func (ruleProseReferenceResolution) Code() string        { return "lint.prose_reference" }
+func (ruleProseReferenceResolution) Code() string { return "lint.prose_reference" }
 
 // proseLinkPattern matches Markdown links of the form [text](href)
 // without escaped backslashes. The HTTP / HTTPS branch matches
@@ -108,9 +109,22 @@ func (ruleProseReferenceResolution) Code() string        { return "lint.prose_re
 // path.
 var proseLinkPattern = regexp.MustCompile(`\[[^\]]+\]\(([^)]+)\)`)
 
-func (r ruleProseReferenceResolution) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleProseReferenceResolution) Check(ctx context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
+	// spec: §4.4 line 348 — a prose reference may resolve to another
+	// artifact, so build the visible catalog once up front and resolve
+	// non-bundled references against it. The registry argument is nil at
+	// ingest (pkg/registry/ingest/ingest.go), so the catalog is the linted
+	// record set: the full registry walk for `podium lint`, the layer's own
+	// records at single-layer ingest.
+	catalog := artifactCatalog(records)
+	// spec: §9.3 — this rule scans every record's body and may issue a URL
+	// HEAD per reference, so it is the long-running work the constraint
+	// names; it checks for cancellation before each record.
 	for _, rec := range records {
+		if ctx.Err() != nil {
+			break
+		}
 		body := r.relevantBody(rec)
 		if len(body) == 0 {
 			continue
@@ -121,7 +135,7 @@ func (r ruleProseReferenceResolution) Check(_ *filesystem.Registry, records []fi
 				continue
 			}
 			if isAbsoluteURL(href) {
-				if d := r.checkURL(rec.ID, href); d != nil {
+				if d := r.checkURL(ctx, rec.ID, href); d != nil {
 					out = append(out, *d)
 				}
 				continue
@@ -130,12 +144,34 @@ func (r ruleProseReferenceResolution) Check(_ *filesystem.Registry, records []fi
 				// Pure anchor — references the same document.
 				continue
 			}
-			if d := r.checkBundled(rec, href); d != nil {
+			if d := r.checkReference(rec, href, catalog); d != nil {
 				out = append(out, *d)
 			}
 		}
 	}
 	return out
+}
+
+// artifactCatalog returns the set of canonical artifact IDs in the linted
+// record set, the §4.4 "current visible catalog" a cross-artifact prose
+// reference resolves against. For `podium lint` this is the full registry
+// walk; at single-layer ingest it is the layer's own records.
+func artifactCatalog(records []filesystem.ArtifactRecord) map[string]bool {
+	m := make(map[string]bool, len(records))
+	for _, rec := range records {
+		m[rec.ID] = true
+	}
+	return m
+}
+
+// stripVersionPin removes a trailing §4.7.6 pin (@<semver>, @<semver>.x, or
+// @sha256:<hash>) from an artifact reference so the bare ID matches a
+// catalog entry.
+func stripVersionPin(ref string) string {
+	if i := strings.Index(ref, "@"); i >= 0 {
+		return ref[:i]
+	}
+	return ref
 }
 
 func (r ruleProseReferenceResolution) relevantBody(rec filesystem.ArtifactRecord) []byte {
@@ -145,7 +181,12 @@ func (r ruleProseReferenceResolution) relevantBody(rec filesystem.ArtifactRecord
 	return bodyAfterFrontmatter(rec.ArtifactBytes)
 }
 
-func (r ruleProseReferenceResolution) checkBundled(rec filesystem.ArtifactRecord, href string) *Diagnostic {
+// checkReference resolves a non-URL prose reference against the three §4.4
+// targets in order: bundled files (existence check), the artifact's own
+// manifest files, and other artifacts (registry-side resolution against the
+// current visible catalog). It returns a diagnostic only when the reference
+// escapes the package or matches none of the three.
+func (r ruleProseReferenceResolution) checkReference(rec filesystem.ArtifactRecord, href string, catalog map[string]bool) *Diagnostic {
 	clean := path.Clean(strings.TrimPrefix(href, "./"))
 	if clean == "." || clean == "" {
 		return nil
@@ -158,27 +199,35 @@ func (r ruleProseReferenceResolution) checkBundled(rec filesystem.ArtifactRecord
 			Message:    fmt.Sprintf("prose reference %q escapes the artifact package", href),
 		}
 	}
+	// §4.4 line 346: bundled files (existence check).
 	if _, ok := rec.Resources[clean]; ok {
 		return nil
 	}
-	// Tolerate references to manifest files themselves.
+	// Tolerate references to the artifact's own manifest files.
 	switch clean {
 	case "ARTIFACT.md", "SKILL.md":
+		return nil
+	}
+	// §4.4 line 348: other artifacts (registry-side resolution against the
+	// current visible catalog). A reference that names another artifact by
+	// its canonical ID resolves; an unknown ID is the ingest error §4.4
+	// line 350 mandates. Strip any §4.7.6 version pin before the lookup.
+	if catalog[stripVersionPin(clean)] {
 		return nil
 	}
 	return &Diagnostic{
 		ArtifactID: rec.ID,
 		Code:       "lint.prose_reference",
 		Severity:   SeverityError,
-		Message:    fmt.Sprintf("prose reference %q does not match any bundled file", href),
+		Message:    fmt.Sprintf("prose reference %q does not resolve to a bundled file or a known artifact", href),
 	}
 }
 
-func (r ruleProseReferenceResolution) checkURL(artifactID, href string) *Diagnostic {
+func (r ruleProseReferenceResolution) checkURL(ctx context.Context, artifactID, href string) *Diagnostic {
 	if r.HTTPClient == nil {
 		return nil
 	}
-	ctx, cancel := contextWithTimeout(5 * time.Second)
+	ctx, cancel := contextWithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, href, nil)
 	if err != nil {
@@ -199,7 +248,10 @@ func (r ruleProseReferenceResolution) checkURL(artifactID, href string) *Diagnos
 		}
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+	// spec: §4.4 line 347 — a URL reference is valid when HEAD returns 200
+	// or any 3xx redirect. Other 2xx codes (201, 204, 206) do not confirm
+	// the named resource is served, so they are rejected.
+	if resp.StatusCode == http.StatusOK || (resp.StatusCode >= 300 && resp.StatusCode < 400) {
 		return nil
 	}
 	return &Diagnostic{

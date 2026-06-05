@@ -130,7 +130,7 @@ podium sync --watch              # re-materialize on every save
 Lint catches the common authoring errors. Run it before commit:
 
 ```bash
-podium lint ~/podium-artifacts/team-shared/finance/close-reporting/run-variance-analysis/
+podium lint --registry ~/podium-artifacts/
 ```
 
 When the catalog is shared via git, CI on the registry repo runs `podium lint` as a required check on PRs, so issues are caught before merge.

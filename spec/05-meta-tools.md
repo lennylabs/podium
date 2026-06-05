@@ -11,7 +11,7 @@ Podium exposes the meta-tools through the Podium MCP server. These are the tools
 
 `load_domain`, `search_domains`, and `search_artifacts` round-trip through the registry on every call (no snapshot caching at session startup). Only `load_artifact` writes to the host filesystem, and only for the specific artifact requested. Programmatic consumers (SDK) can also call a non-MCP bulk variant of `load_artifact`; see §7.6.2.
 
-The MCP server declares its capabilities in the MCP `initialize` response: `{tools: true, prompts: <conditional on prompt artifacts with expose_as_mcp_prompt: true>, sessionCorrelation: true}`.
+The MCP server declares its capabilities in the MCP `initialize` response: `{tools: {}, resources: {}, sessionCorrelation: true}`. The `tools` and `resources` values are MCP capability objects, where `{}` denotes capability presence with no optional sub-features (such as `listChanged` or `subscribe`); `sessionCorrelation` is a Podium extension carried as a literal boolean. The `resources` capability backs the read-only artifact-body mirror described in §5.0.
 
 **`mcp-server` artifacts are filtered out of the MCP bridge's results.** Hosts that consume Podium through the MCP bridge cannot connect to a discovered MCP server mid-session. Claude Desktop, Claude Code, Cursor, and similar harnesses fix their MCP server list at startup. Surfacing `mcp-server` registrations through `search_artifacts` or `load_artifact` from the bridge would only add planning noise. They remain visible through the SDK (which owns its MCP client and can connect dynamically) and through `podium sync` (which materializes them into the harness's on-disk config for the next launch).
 
@@ -57,8 +57,8 @@ you're ready to use the artifact; it's the operation that puts content in
 your context.
 ```
 
-## 5.2 Prompt Projection
+## 5.2 Command Materialization
 
-When a `type: command` artifact is loaded with `expose_as_mcp_prompt: true` in frontmatter, the MCP server also exposes it via MCP's `prompts/get` so harnesses with slash-menu support can surface it directly to users. Opt-in. The wire field keeps the MCP-protocol name (`expose_as_mcp_prompt`) since MCP itself calls these "prompts."
+A `type: command` artifact is a parameterized prompt template a human invokes, typically as a slash command. Podium does not project commands through MCP. Both `podium sync` and the MCP server materialize a command into the target harness's native command location and format (§6.7), so the harness's own slash-command system surfaces it and applies the harness's native argument convention to the command body. Podium adds no argument layer of its own.
 
 The MCP tools declared in a loaded artifact's manifest (`mcpServers:`) are stored by Podium but registered by the host's runtime. Podium stores the declarations and exposes them via `load_artifact`; hosts decide whether and how to wire them up.

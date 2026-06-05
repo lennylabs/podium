@@ -86,6 +86,92 @@ func TestSourceIngest_TracksLastIngestedRef(t *testing.T) {
 		t.Errorf("LastIngestedRef = %q, want %q",
 			updated.LastIngestedRef, "fedcba9876543210")
 	}
+	// spec: §7.3.1 — a successful cycle stamps last_ingested_at.
+	if updated.LastIngestedAt == nil {
+		t.Errorf("LastIngestedAt not stamped after a successful ingest")
+	}
+}
+
+// Spec: §4.7.9 / §13.10 — a Signer supplied on
+// SourceIngestOptions threads through to the ingest Request so the
+// registry-managed-key signing the standalone --sign registry-key path
+// configures lands on the persisted manifest.
+func TestSourceIngest_SignerThreadsThrough(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemory()
+	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
+	cfg := store.LayerConfig{TenantID: "t", ID: "L", SourceType: "fake"}
+	_ = st.PutLayerConfig(context.Background(), cfg)
+	provider := &fakeProvider{
+		files: fstest.MapFS{"g/ARTIFACT.md": &fstest.MapFile{
+			Data: []byte(contextManifestBody("glossary")),
+		}},
+		reference: "ref-1",
+	}
+	signer := func(_ context.Context, contentHash string) (string, error) {
+		return "test-sig:" + contentHash, nil
+	}
+	res, err := ingest.SourceIngestWithOptions(context.Background(), st, provider, cfg,
+		ingest.SourceIngestOptions{Signer: signer})
+	if err != nil {
+		t.Fatalf("SourceIngestWithOptions: %v", err)
+	}
+	if res.Accepted != 1 {
+		t.Fatalf("Accepted = %d, want 1", res.Accepted)
+	}
+	stored, err := st.GetManifest(context.Background(), "t", "g", "1.0.0")
+	if err != nil {
+		t.Fatalf("GetManifest: %v", err)
+	}
+	if !strings.HasPrefix(stored.Signature, "test-sig:") {
+		t.Errorf("Signature = %q, want the signer's envelope (test-sig: prefix)", stored.Signature)
+	}
+}
+
+// Spec: §4.7.2 — an active freeze window passed through
+// SourceIngestOptions rejects ingest with ErrFrozen; a valid break-glass
+// grant on the same window bypasses it.
+func TestSourceIngest_FreezeWindowAndBreakGlass(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemory()
+	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
+	cfg := store.LayerConfig{TenantID: "t", ID: "L", SourceType: "fake"}
+	_ = st.PutLayerConfig(context.Background(), cfg)
+	provider := &fakeProvider{
+		files: fstest.MapFS{"g/ARTIFACT.md": &fstest.MapFile{
+			Data: []byte(contextManifestBody("glossary")),
+		}},
+		reference: "ref-1",
+	}
+	now := time.Now().UTC()
+	window := ingest.FreezeWindow{
+		Name:   "maint",
+		Start:  now.Add(-time.Hour),
+		End:    now.Add(time.Hour),
+		Blocks: []string{"ingest"},
+	}
+
+	// Active window with no grant → frozen.
+	_, err := ingest.SourceIngestWithOptions(context.Background(), st, provider, cfg,
+		ingest.SourceIngestOptions{FreezeWindows: []ingest.FreezeWindow{window}})
+	if !errors.Is(err, ingest.ErrFrozen) {
+		t.Fatalf("err = %v, want ErrFrozen", err)
+	}
+
+	// Same window carrying a valid dual-signoff grant → bypass.
+	bg := window
+	bg.BreakGlass = true
+	bg.Justification = "incident"
+	bg.Approvers = []string{"alice@acme.com", "bob@acme.com"}
+	bg.GrantedAt = now
+	res, err := ingest.SourceIngestWithOptions(context.Background(), st, provider, cfg,
+		ingest.SourceIngestOptions{FreezeWindows: []ingest.FreezeWindow{bg}})
+	if err != nil {
+		t.Fatalf("break-glass ingest: %v", err)
+	}
+	if res.Accepted != 1 {
+		t.Errorf("Accepted = %d, want 1", res.Accepted)
+	}
 }
 
 // Spec: §7.3.1 — tolerant policy accepts a rewritten history,

@@ -75,6 +75,56 @@ func TestRun_SyncsArtifactsToTarget(t *testing.T) {
 	}
 }
 
+// Spec: §4.3 target_harnesses — sync skips an artifact whose
+// target_harnesses excludes the active adapter and materializes one that
+// includes it (or omits the field). The skipped ID is recorded in
+// Result.Skipped so the omission is reported rather than silent.
+func TestRun_TargetHarnessesFiltersAdapter(t *testing.T) {
+	t.Parallel()
+	ccOnly := `---
+type: context
+version: 1.0.0
+description: claude-code only
+target_harnesses: [claude-code]
+---
+
+body
+`
+	noneTargeted := `---
+type: context
+version: 1.0.0
+description: targets none adapter
+target_harnesses: [none]
+---
+
+body
+`
+	registry := t.TempDir()
+	target := t.TempDir()
+	testharness.WriteTree(t, registry,
+		testharness.WriteTreeOption{Path: "team/cc-only/ARTIFACT.md", Content: ccOnly},
+		testharness.WriteTreeOption{Path: "team/none-targeted/ARTIFACT.md", Content: noneTargeted},
+		testharness.WriteTreeOption{Path: "team/everywhere/ARTIFACT.md", Content: contextArtifactSrc},
+	)
+	res, err := Run(Options{RegistryPath: registry, Target: target, AdapterID: "none"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(res.Skipped) != 1 || res.Skipped[0] != "team/cc-only" {
+		t.Errorf("Skipped = %v, want [team/cc-only]", res.Skipped)
+	}
+	got := testharness.ReadTree(t, target)
+	if _, ok := got["team/cc-only/ARTIFACT.md"]; ok {
+		t.Errorf("claude-code-only artifact must not materialize under the none adapter: %v", keys(got))
+	}
+	for _, want := range []string{"team/none-targeted/ARTIFACT.md", "team/everywhere/ARTIFACT.md"} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("expected %q to materialize, got files: %v", want, keys(got))
+		}
+	}
+}
+
 // Spec: §7.5 — DryRun resolves the artifact set without writing.
 func TestRun_DryRunWritesNothing(t *testing.T) {
 	t.Parallel()

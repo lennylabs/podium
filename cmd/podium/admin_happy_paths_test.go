@@ -128,20 +128,71 @@ func TestAdminReembedCmd_HappyPathOnlyMissing(t *testing.T) {
 	}
 }
 
-// admin erase against a temp audit log.
-func TestAdminEraseCmd_HappyPath(t *testing.T) {
+// admin erase local-log form against a temp audit log (§8.5).
+func TestAdminEraseCmd_LocalHappyPath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
 	withStderr(t, func() {
 		code := adminEraseCmd([]string{
 			"--audit-path", path,
 			"--salt", "pepper",
+			"--operator", "carol@acme.com",
 			"alice",
 		})
 		if code != 0 {
 			t.Errorf("adminEraseCmd = %d", code)
 		}
 	})
+}
+
+// spec: §8.5 — the local-log erase rejects an empty salt.
+func TestAdminEraseCmd_EmptySaltRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.log")
+	withStderr(t, func() {
+		code := adminEraseCmd([]string{
+			"--audit-path", path, "--operator", "carol@acme.com", "alice",
+		})
+		if code != 2 {
+			t.Errorf("adminEraseCmd with empty salt = %d, want 2", code)
+		}
+	})
+}
+
+// spec: §8.5 — the local-log erase requires --operator so the
+// invoking admin is recorded on user.erased.
+func TestAdminEraseCmd_MissingOperatorRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.log")
+	withStderr(t, func() {
+		code := adminEraseCmd([]string{
+			"--audit-path", path, "--salt", "pepper", "alice",
+		})
+		if code != 2 {
+			t.Errorf("adminEraseCmd without --operator = %d, want 2", code)
+		}
+	})
+}
+
+// spec: §8.5 — the default erase form POSTs to the registry's
+// /v1/admin/erase with the user_id and salt.
+func TestAdminEraseCmd_RegistryPath(t *testing.T) {
+	var gotPath, gotMethod string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotMethod = r.URL.Path, r.Method
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"erased":"alice","layers_purged":[],"audit_events_redacted":0}`))
+	}))
+	defer srv.Close()
+	t.Setenv("PODIUM_REGISTRY", srv.URL)
+	withStderr(t, func() {
+		if code := adminEraseCmd([]string{"--salt", "pepper", "alice"}); code != 0 {
+			t.Errorf("adminEraseCmd registry path = %d", code)
+		}
+	})
+	if gotPath != "/v1/admin/erase" || gotMethod != http.MethodPost {
+		t.Errorf("got %s %s, want POST /v1/admin/erase", gotMethod, gotPath)
+	}
 }
 
 // admin retention against a temp audit log with a parsable policy.

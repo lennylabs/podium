@@ -28,16 +28,19 @@ func pgVectorDSN() (string, bool) {
 // store DSN so operators can point them at different databases) so
 // CI without a Postgres+pgvector instance skips cleanly.
 func TestPgVector_Conformance(t *testing.T) {
-	dsn, ok := pgVectorDSN()
-	if !ok {
-		t.Skip("PODIUM_POSTGRES_DSN[_VECTOR] unset; skipping pgvector conformance")
-	}
 	dim := 8
-	bootstrap, err := vector.OpenPgVector(vector.PgVectorConfig{DSN: dsn, Dimensions: dim})
-	if err != nil {
-		t.Skipf("pgvector unreachable: %v", err)
-	}
-	t.Cleanup(func() { _ = bootstrap.Close() })
+	// Run inside a uniquely-named, ephemeral schema (the same isolation the
+	// depth tests use) rather than the shared public.vec_artifacts table. The
+	// conformance suite needs the table at dim 8, but OpenPgVector's
+	// CREATE TABLE IF NOT EXISTS is a no-op against a pre-existing
+	// public.vec_artifacts left at a different dimension by another lane (the
+	// managed-stack e2e and the §13.12 backends create it at the 1536
+	// production dimension). A dedicated schema makes the conformance run
+	// self-contained on the heavier live-external lane and immune to that
+	// leftover table.
+	scope := openPgSchema(t, dim)
+	t.Cleanup(scope.close)
+	bootstrap := scope.pg
 
 	vectortest.Suite(t, dim, func(t *testing.T) vector.Provider {
 		// Truncate before each sub-test for isolation.

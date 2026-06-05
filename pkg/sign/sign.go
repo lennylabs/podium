@@ -5,22 +5,25 @@
 package sign
 
 import (
-	"errors"
+	"context"
 	"fmt"
 
 	"github.com/lennylabs/podium/pkg/manifest"
+	"github.com/lennylabs/podium/pkg/spi"
 )
 
-// Errors returned by Verify and Sign. Tests assert against them via errors.Is.
+// Errors returned by Verify and Sign. Each is a structured *spi.Error carrying
+// its §6.10 code so the SignatureProvider SPI conforms to the §9.3 "Structured
+// errors" constraint. Tests assert against them via errors.Is, which matches
+// the package-level sentinel pointer through fmt.Errorf wrapping.
 var (
 	// ErrSignatureInvalid signals that the signature does not validate
-	// against the artifact's content hash. Maps to
-	// materialize.signature_invalid in §6.10.
-	ErrSignatureInvalid = errors.New("signature_invalid")
+	// against the artifact's content hash.
+	ErrSignatureInvalid = &spi.Error{Code: "materialize.signature_invalid", Message: "signature_invalid"}
 	// ErrSignatureMissing signals that an artifact requires a signature
 	// (sensitivity ≥ medium under the default policy) but none was
 	// provided.
-	ErrSignatureMissing = errors.New("signature_missing")
+	ErrSignatureMissing = &spi.Error{Code: "materialize.signature_missing", Message: "signature_missing"}
 )
 
 // VerificationPolicy controls when Verify enforces the presence of a
@@ -38,14 +41,34 @@ const (
 	PolicyAlways VerificationPolicy = "always"
 )
 
+// ValidPolicy reports whether p is one of the three recognized
+// PODIUM_VERIFY_SIGNATURES values (spec §6.2 / §4.7.9). Callers that
+// read the policy from configuration use this to refuse an unknown
+// value at startup rather than silently falling through to a skip.
+//
+// spec: §6.2 — PODIUM_VERIFY_SIGNATURES is never | medium-and-above | always.
+func ValidPolicy(p VerificationPolicy) bool {
+	switch p {
+	case PolicyNever, PolicyMediumAndAbove, PolicyAlways:
+		return true
+	default:
+		return false
+	}
+}
+
 // Provider is the SPI implementations satisfy.
 type Provider interface {
 	// ID returns the provider identifier (e.g., "sigstore-keyless").
 	ID() string
 	// Sign produces a signature over the canonical content hash.
-	Sign(contentHash string) (string, error)
+	//
+	// spec: §9.3 — context-first so deadlines and cancellation propagate to
+	// the network calls a real provider makes (Fulcio, Rekor).
+	Sign(ctx context.Context, contentHash string) (string, error)
 	// Verify checks that signature is valid for contentHash.
-	Verify(contentHash, signature string) error
+	//
+	// spec: §9.3 — context-first for the same reason as Sign.
+	Verify(ctx context.Context, contentHash, signature string) error
 }
 
 // Noop is a Provider that signs by returning a deterministic placeholder
@@ -57,13 +80,13 @@ type Noop struct{}
 func (Noop) ID() string { return "noop" }
 
 // Sign returns a placeholder signature derived from the content hash.
-func (Noop) Sign(contentHash string) (string, error) {
+func (Noop) Sign(_ context.Context, contentHash string) (string, error) {
 	return "noop:" + contentHash, nil
 }
 
 // Verify accepts the placeholder produced by Sign for the same content
 // hash and rejects anything else.
-func (Noop) Verify(contentHash, signature string) error {
+func (Noop) Verify(_ context.Context, contentHash, signature string) error {
 	want := "noop:" + contentHash
 	if signature != want {
 		return fmt.Errorf("%w: %q != %q", ErrSignatureInvalid, signature, want)
@@ -74,14 +97,14 @@ func (Noop) Verify(contentHash, signature string) error {
 // EnforceVerification applies policy to the artifact's sensitivity and
 // returns nil when the artifact does not require verification, or the
 // result of provider.Verify when it does.
-func EnforceVerification(policy VerificationPolicy, provider Provider, sensitivity manifest.Sensitivity, contentHash, signature string) error {
+func EnforceVerification(ctx context.Context, policy VerificationPolicy, provider Provider, sensitivity manifest.Sensitivity, contentHash, signature string) error {
 	if !needsVerification(policy, sensitivity) {
 		return nil
 	}
 	if signature == "" {
 		return fmt.Errorf("%w: sensitivity %q requires a signature", ErrSignatureMissing, sensitivity)
 	}
-	return provider.Verify(contentHash, signature)
+	return provider.Verify(ctx, contentHash, signature)
 }
 
 func needsVerification(policy VerificationPolicy, s manifest.Sensitivity) bool {
@@ -93,6 +116,10 @@ func needsVerification(policy VerificationPolicy, s manifest.Sensitivity) bool {
 	case PolicyNever:
 		return false
 	default:
-		return false
+		// Fail closed: an unrecognized policy enforces verification
+		// rather than silently skipping it. loadConfig refuses such a
+		// value at startup (§6.2), so this is defense in depth for any
+		// other caller that constructs a policy directly.
+		return true
 	}
 }

@@ -8,16 +8,19 @@
 package hook
 
 import (
-	"errors"
+	"context"
 	"fmt"
 
 	"github.com/lennylabs/podium/pkg/adapter"
+	"github.com/lennylabs/podium/pkg/spi"
 )
 
-// Errors returned by hook functions.
+// Errors returned by hook functions. Structured *spi.Error per the §9.3
+// "Structured errors" constraint on the MaterializationHook SPI.
 var (
-	// ErrSandboxViolation maps to materialize.sandbox_violation in §6.10.
-	ErrSandboxViolation = errors.New("hook: sandbox_violation")
+	// ErrSandboxViolation reports a hook write outside the materialization
+	// destination or another sandbox breach.
+	ErrSandboxViolation = &spi.Error{Code: "materialize.sandbox_violation", Message: "hook: sandbox_violation"}
 )
 
 // File is one (path, content) pair flowing through the chain. Each hook
@@ -41,13 +44,13 @@ type Hook interface {
 	ID() string
 	// Apply transforms one file. Returning a non-nil error aborts the
 	// chain; the materialization fails before any write.
-	Apply(manifest map[string]any, file File) (Result, error)
+	Apply(ctx context.Context, manifest map[string]any, file File) (Result, error)
 }
 
 // Run runs hooks in order over files. Each hook receives the previous
 // hook's output. Files where Drop=true are removed from subsequent
 // stages. The returned warnings are concatenated.
-func Run(hooks []Hook, manifest map[string]any, files []adapter.File) ([]adapter.File, []string, error) {
+func Run(ctx context.Context, hooks []Hook, manifest map[string]any, files []adapter.File) ([]adapter.File, []string, error) {
 	if len(hooks) == 0 {
 		return files, nil, nil
 	}
@@ -59,7 +62,7 @@ func Run(hooks []Hook, manifest map[string]any, files []adapter.File) ([]adapter
 	for _, h := range hooks {
 		next := make([]File, 0, len(current))
 		for _, f := range current {
-			res, err := h.Apply(manifest, f)
+			res, err := h.Apply(ctx, manifest, f)
 			if err != nil {
 				return nil, nil, fmt.Errorf("hook %s: %w", h.ID(), err)
 			}

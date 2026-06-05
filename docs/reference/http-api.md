@@ -310,7 +310,7 @@ Returns aggregated metadata for the calling identity's effective view, with no m
 }
 ```
 
-Gated by tenant config (`tenant.expose_scope_preview`). When `false`, returns `403 scope_preview_disabled`. Aggregate counts can hint at the existence of restricted content even when no individual artifact is leaked, so operators decide whether to expose this surface per tenant.
+Gated by tenant config (`tenant.expose_scope_preview`). When `false`, returns `403 config.scope_preview_disabled`. Aggregate counts can hint at the existence of restricted content even when no individual artifact is leaked, so operators decide whether to expose this surface per tenant.
 
 ---
 

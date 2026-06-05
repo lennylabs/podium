@@ -46,6 +46,41 @@ func SplitFrontmatter(src []byte) (frontmatter []byte, body []byte, err error) {
 	return m[1], bytes.TrimLeft(m[2], "\r\n"), nil
 }
 
+// FrontmatterFields extracts the named top-level frontmatter fields from a
+// manifest source, returning a name->value map for the names present as YAML
+// scalars. It is the value source for the §8.2 manifest-declared redaction
+// surface: the registry surfaces the author-named sensitive fields (for
+// example bank_account or ssn) into the audit context so an audit_redact
+// directive has a concrete value to mask. Names absent from the frontmatter,
+// and non-scalar values (mappings or sequences), are skipped; a source
+// without parseable frontmatter yields nil. The returned values are raw and
+// must pass through redaction before reaching an audit sink.
+func FrontmatterFields(src []byte, names []string) map[string]string {
+	if len(names) == 0 {
+		return nil
+	}
+	fm, _, err := SplitFrontmatter(src)
+	if err != nil {
+		return nil
+	}
+	var all map[string]yaml.Node
+	if err := yaml.Unmarshal(fm, &all); err != nil {
+		return nil
+	}
+	out := make(map[string]string, len(names))
+	for _, n := range names {
+		node, ok := all[n]
+		if !ok || node.Kind != yaml.ScalarNode {
+			continue
+		}
+		out[n] = node.Value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // ParseArtifact decodes an ARTIFACT.md source into an Artifact. The
 // frontmatter populates the typed fields; the markdown after the
 // frontmatter populates Artifact.Body.
@@ -80,6 +115,30 @@ func ParseSkill(src []byte) (*Skill, error) {
 	}
 	s.Body = string(body)
 	return s, nil
+}
+
+// UnmarshalYAML decodes a SchemaRef from either the documented mapping
+// form (input: { $ref: ./schemas/input.json }, §4.3 type-specific fields)
+// or a bare scalar path (input: ./schemas/input.json). Both populate Ref.
+// Without this, the spec's { $ref: ... } mapping fails to decode into the
+// field and ParseArtifact rejects the manifest with ErrInvalidYAML.
+func (s *SchemaRef) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		s.Ref = node.Value
+		return nil
+	case yaml.MappingNode:
+		var aux struct {
+			Ref string `yaml:"$ref"`
+		}
+		if err := node.Decode(&aux); err != nil {
+			return err
+		}
+		s.Ref = aux.Ref
+		return nil
+	default:
+		return fmt.Errorf("schema ref must be a scalar path or a { $ref: ... } mapping, got YAML kind %d", node.Kind)
+	}
 }
 
 // ParseDomain decodes a DOMAIN.md source per §4.5.1. Glob validation,
@@ -138,13 +197,70 @@ func ValidateVersion(v string) error {
 	return nil
 }
 
-// IsFirstClassType reports whether the given type is one of the seven
-// first-class types listed in §4.1.
+// firstClassTypes and builtinExtensionTypes encode the §4.1 type
+// taxonomy. They are the single source of truth for the IsFirstClassType
+// / IsBuiltinExtensionType predicates and for the default TypeProvider
+// registry seeded in pkg/typeprovider.
+var (
+	firstClassTypes       = []ArtifactType{TypeSkill, TypeAgent, TypeContext, TypeCommand, TypeRule, TypeHook}
+	builtinExtensionTypes = []ArtifactType{TypeMCPServer}
+)
+
+// FirstClassTypes returns the first-class artifact types listed in §4.1
+// (skill, agent, context, command, rule, hook). These types carry full
+// lint coverage and conformance-suite participation. The returned slice
+// is a copy the caller may modify.
+func FirstClassTypes() []ArtifactType {
+	return append([]ArtifactType(nil), firstClassTypes...)
+}
+
+// BuiltinExtensionTypes returns the built-in extension types listed in
+// §4.1. Podium ships schemas and lint rules for these but makes no
+// conformance commitment beyond the type owner's. mcp-server is the only
+// built-in extension type. The returned slice is a copy the caller may
+// modify.
+func BuiltinExtensionTypes() []ArtifactType {
+	return append([]ArtifactType(nil), builtinExtensionTypes...)
+}
+
+// IsFirstClassType reports whether t is one of the first-class types
+// listed in §4.1 (skill, agent, context, command, rule, hook). Per §4.1
+// mcp-server is a built-in extension type, not first-class; use
+// IsBuiltinExtensionType for it.
 func IsFirstClassType(t ArtifactType) bool {
-	switch t {
-	case TypeSkill, TypeAgent, TypeContext, TypeCommand,
-		TypeRule, TypeHook, TypeMCPServer:
+	for _, ft := range firstClassTypes {
+		if t == ft {
+			return true
+		}
+	}
+	return false
+}
+
+// IsBuiltinExtensionType reports whether t is one of the built-in
+// extension types listed in §4.1. mcp-server is currently the only one.
+func IsBuiltinExtensionType(t ArtifactType) bool {
+	for _, et := range builtinExtensionTypes {
+		if t == et {
+			return true
+		}
+	}
+	return false
+}
+
+// TargetsHarness reports whether an artifact whose target_harnesses field
+// is targets should materialize for harnessID. Per §4.3 the field is an
+// opt-out of cross-harness materialization: an empty (or absent) list
+// targets every harness, and a non-empty list restricts materialization
+// to the harnesses it names. Matching is exact on the adapter ID, which
+// is the PODIUM_HARNESS value (§6.7).
+func TargetsHarness(targets []string, harnessID string) bool {
+	if len(targets) == 0 {
 		return true
+	}
+	for _, h := range targets {
+		if h == harnessID {
+			return true
+		}
 	}
 	return false
 }

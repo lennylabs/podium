@@ -9,10 +9,10 @@ import (
 func TestStripPin(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
-		"foo/bar@1.0.0":         "foo/bar",
-		"foo/bar@sha256:abc":    "foo/bar",
-		"foo/bar":               "foo/bar",
-		"":                      "",
+		"foo/bar@1.0.0":      "foo/bar",
+		"foo/bar@sha256:abc": "foo/bar",
+		"foo/bar":            "foo/bar",
+		"":                   "",
 	}
 	for in, want := range cases {
 		if got := stripPin(in); got != want {

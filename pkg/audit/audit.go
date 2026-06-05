@@ -9,6 +9,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -40,12 +42,77 @@ const (
 	EventLayerUserRegistered   EventType = "layer.user_registered"
 	EventAdminGranted          EventType = "admin.granted"
 	EventVisibilityDenied      EventType = "visibility.denied"
-	EventFreezeBreakGlass      EventType = "freeze.break_glass"
-	EventUserErased            EventType = "user.erased"
-	EventReadOnlyEntered       EventType = "registry.read_only_entered"
-	EventReadOnlyExited        EventType = "registry.read_only_exited"
-	EventAuditAnchored         EventType = "audit.anchored"
+	// EventAdminVisibilityOverride records a §4.7.2 admin diagnostic read
+	// that overrode per-layer visibility ("View any layer's contents for
+	// diagnostic purposes (override visibility; the override is itself
+	// audited)"). The §8.1 table is non-exhaustive (additional stable types
+	// are permitted); this is the registry event that makes the override
+	// auditable. Caller is the acting admin; Target is the artifact ID for a
+	// load or the query for a search.
+	EventAdminVisibilityOverride EventType = "admin.visibility_override"
+	EventFreezeBreakGlass        EventType = "freeze.break_glass"
+	EventUserErased              EventType = "user.erased"
+	EventReadOnlyEntered         EventType = "registry.read_only_entered"
+	EventReadOnlyExited          EventType = "registry.read_only_exited"
+	EventAuditAnchored           EventType = "audit.anchored"
+	// EventAuditAnchorFailed records a failed transparency-anchor attempt
+	// (signer outage, network blip, or sink write error) so operators
+	// monitoring the audit log, and SIEM mirrors, see anchoring failures
+	// rather than relying solely on process logs. spec: §8.6.
+	EventAuditAnchorFailed EventType = "audit.anchor_failed"
+	// EventAuditGapDetected records a hash-chain gap found by the periodic
+	// verification pass (§8.6 "Detection of gaps is automated and alerted").
+	// The verifier appends it best-effort so SIEM mirroring (the §8.6
+	// operational backstop) surfaces the break even if the alerting seam is
+	// unconfigured. spec: §8.6.
+	EventAuditGapDetected EventType = "audit.gap_detected"
+	// EventRetentionEnforced marks a §8.4 retention pass that rewrote the
+	// hash chain. It records the superseded chain head so a verifier
+	// holding an external anchor of the prior head can reconcile it with
+	// the truncated log (§8.6). spec: §8.4, §8.6.
+	EventRetentionEnforced EventType = "audit.retention_enforced"
 )
+
+// AllEventTypes returns every audit EventType this package defines. The
+// §8.4 retention layer uses it to assert that each type is classified
+// (operational vs. retained-indefinitely) so a newly added type cannot be
+// silently omitted from the default policy. Keep it in sync with the const
+// block above. spec: §8.1, §8.4.
+func AllEventTypes() []EventType {
+	return []EventType{
+		EventDomainLoaded,
+		EventDomainsSearched,
+		EventArtifactsSearched,
+		EventArtifactLoaded,
+		EventArtifactPublished,
+		EventArtifactDeprecated,
+		EventArtifactSigned,
+		EventDomainPublished,
+		EventLayerIngested,
+		EventLayerHistoryRewritten,
+		EventLayerConfigChanged,
+		EventLayerUserRegistered,
+		EventAdminGranted,
+		EventVisibilityDenied,
+		EventAdminVisibilityOverride,
+		EventFreezeBreakGlass,
+		EventUserErased,
+		EventReadOnlyEntered,
+		EventReadOnlyExited,
+		EventAuditAnchored,
+		EventAuditAnchorFailed,
+		EventAuditGapDetected,
+		EventRetentionEnforced,
+	}
+}
+
+// CallerNetwork captures the source network attributes recorded for a
+// public-mode caller per §8.1: the source IP address and any upstream
+// X-Forwarded-User header. Filtered out (nil) for authenticated callers.
+type CallerNetwork struct {
+	SourceIP      string
+	ForwardedUser string
+}
 
 // Event is one audit record. Caller / target / context fields can be
 // empty depending on the event type; the renderer is responsible for
@@ -55,8 +122,24 @@ type Event struct {
 	Timestamp time.Time
 	TraceID   string
 	Caller    string
-	Target    string
-	Context   map[string]string
+	// §8.1 structured caller identity. CallerEmail and CallerGroups are
+	// attached for authenticated callers; CallerNetwork and PublicMode are
+	// recorded for public-mode calls so SIEM consumers can filter them
+	// without parsing the identity string. spec: §8.1.
+	CallerEmail   string
+	CallerGroups  []string
+	CallerNetwork *CallerNetwork
+	PublicMode    bool
+	Target        string
+	Context       map[string]string
+
+	// ResolvedLayers is the ordered layer composition of the caller's
+	// effective view, recorded on read events per §4.7.5. Empty for
+	// events that are not reads or when no layer list is configured.
+	ResolvedLayers []string
+	// ResultSize is the number of result items a read event returned
+	// (§4.7.5 "result size"). Zero for non-read events.
+	ResultSize int
 
 	// Hash is the chain hash sha256(body || prev_hash).
 	Hash     string
@@ -83,6 +166,20 @@ func (e Event) canonicalBody() []byte {
 	for _, k := range keys {
 		parts = append(parts, k+"="+e.Context[k])
 	}
+	// §4.7.5 read-call fields participate in the tamper-evident chain so
+	// resolved layer composition and result size cannot be altered after
+	// the fact without breaking the hash.
+	parts = append(parts, "resolved_layers="+strings.Join(e.ResolvedLayers, ","))
+	parts = append(parts, "result_size="+strconv.Itoa(e.ResultSize))
+	// §8.1 structured caller attributes are tamper-evident: identity email,
+	// group membership, the public-mode flag, and public-mode network
+	// cannot be altered after the fact without breaking the hash.
+	parts = append(parts, "caller_email="+e.CallerEmail)
+	parts = append(parts, "caller_groups="+strings.Join(e.CallerGroups, ","))
+	parts = append(parts, "caller_public_mode="+strconv.FormatBool(e.PublicMode))
+	if e.CallerNetwork != nil {
+		parts = append(parts, "caller_network="+e.CallerNetwork.SourceIP+"|"+e.CallerNetwork.ForwardedUser)
+	}
 	out := []byte{}
 	for _, p := range parts {
 		out = append(out, []byte(p)...)
@@ -96,6 +193,19 @@ type Sink interface {
 	Append(ctx context.Context, e Event) error
 	Verify(ctx context.Context) error
 }
+
+// LocalAuditSink and RegistryAuditSink are the §9.1 SPI-table names for
+// the two audit seams. §9.1 lists them as distinct interfaces (the local
+// MCP-server log and the registry's catalogue-event sink) while stating
+// that "the audit.Sink interface is the seam"; both are therefore aliases
+// of Sink. The §8.3 prose names LocalAuditSink as the interface the MCP
+// server writes the local file log through, and the §9.1 default column
+// names FileSink as RegistryAuditSink's backing. The aliases let code and
+// the spec reference the same names. spec: §8.3, §9.1.
+type (
+	LocalAuditSink    = Sink
+	RegistryAuditSink = Sink
+)
 
 // Memory is an in-memory hash-chained Sink.
 type Memory struct {

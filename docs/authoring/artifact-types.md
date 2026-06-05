@@ -115,7 +115,6 @@ version: 1.0.0
 description: Guided module refactoring with configurable focus areas.
 tags: [command, refactoring]
 sensitivity: low
-expose_as_mcp_prompt: true
 variables:
   FOCUS: all
   PRESERVE_API: "true"
@@ -132,7 +131,7 @@ Analyze the specified module and refactor with focus on: **{{FOCUS}}**.
 ...
 ```
 
-Setting `expose_as_mcp_prompt: true` exposes the command via MCP's `prompts/get` so harnesses with slash-menu support can surface it directly to users. The wire field name keeps MCP's word for slash-menu templates, which MCP itself calls "prompts."
+Both `podium sync` and the MCP server materialize a command into the target harness's native command location (§6.7), so the harness's slash-command system surfaces it and applies the harness's own argument convention to the body. Podium does not project commands through MCP and defines no argument syntax of its own.
 
 ---
 
@@ -191,7 +190,7 @@ hook_action: |
 
 `hook_event` is one of the canonical event names (session lifecycle, user prompts, tool calls in generic and subtype forms, permission events, subagent lifecycle, turn end, compaction, and notifications). The harness adapter translates the canonical name to the harness's native event. `hook_action` is a shell snippet executed when the event fires; the event payload comes in on stdin. See [Hooks](hooks) for the full event taxonomy.
 
-Hook support varies by harness, and not every harness implements every canonical event. When the configured harness adapter does not support the chosen event, lint rejects ingest unless `target_harnesses:` excludes the unsupported harness. For the events a specific harness emits, refer to the harness's own hook documentation. See [Hooks](hooks) for the full event taxonomy and authoring guidance.
+Hook support varies by harness, and not every harness implements every canonical event. When an artifact declares `target_harnesses:`, lint rejects ingest if a named harness does not support the chosen event. When `target_harnesses:` is absent, ingest stays permissive and the unsupported event is caught at materialization onto a harness that cannot translate it (§6.9). For the events a specific harness emits, refer to the harness's own hook documentation. See [Hooks](hooks) for the full event taxonomy and authoring guidance.
 
 ---
 

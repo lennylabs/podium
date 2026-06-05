@@ -107,7 +107,7 @@ podium login [--registry <url>] [--no-browser]
 podium logout
 ```
 
-`--no-browser` skips auto-opening the verification URL. Tokens cache in the OS keychain keyed by registry URL; multiple registries can be authenticated simultaneously.
+`--no-browser` skips auto-opening the verification URL. Setting `PODIUM_NO_BROWSER` to a truthy value (`1`, `true`, `yes`, or `on`) has the same effect for headless and CI environments. Tokens cache in the OS keychain keyed by registry URL; multiple registries can be authenticated simultaneously.
 
 `podium login` is a no-op when the resolved registry is a filesystem path or a `--standalone` server (no auth in either).
 
@@ -155,10 +155,10 @@ podium status
 Validates manifests against the type's schema and runs type-specific rules. CI-friendly; runs the same checks the registry runs at ingest.
 
 ```
-podium lint <path>
+podium lint --registry <path>
 ```
 
-`<path>` can be an artifact directory (containing `ARTIFACT.md`, plus `SKILL.md` for skills), a single `ARTIFACT.md`, `SKILL.md`, or `DOMAIN.md` file, or a directory tree (recurses into all artifacts). Exits non-zero on lint errors.
+`--registry <path>` is required and points at a filesystem registry root. The command walks every artifact under that root, validating each `ARTIFACT.md` (plus `SKILL.md` for skills) and any `DOMAIN.md` against the type's schema. To lint a single artifact, point `--registry` at a root that resolves that artifact's canonical ID. Exits 2 when `--registry` is absent, exits 1 on lint errors, and exits 0 when the registry is clean. Pass `--offline` to skip the URL HEAD check and validate only bundled-file references.
 
 ---
 
@@ -304,7 +304,7 @@ podium artifact scaffold --type <type> --description <text>
 | `skill` | ARTIFACT.md + SKILL.md (per §4.3.4 field allocation) | — |
 | `agent` | ARTIFACT.md | `--input-schema`, `--output-schema`, `--delegates-to` |
 | `context` | ARTIFACT.md | — |
-| `command` | ARTIFACT.md | `--expose-as-mcp-prompt` |
+| `command` | ARTIFACT.md | — |
 | `rule` | ARTIFACT.md | `--rule-mode` (default `always`), `--rule-globs`, `--rule-description` |
 | `hook` | ARTIFACT.md | `--hook-event` (required), `--hook-action` |
 | `mcp-server` | ARTIFACT.md | `--server-identifier` (required) |
@@ -344,11 +344,13 @@ Without `--yes`, the command prompts for missing values. `--force` overwrites an
 Registers a new layer.
 
 ```
-podium layer register --id <id> --repo <git-url> --ref <ref> [--root <subpath>]
+podium layer register --id <id> --repo <git-url> --ref <ref> [--root <subpath>] [--force-push-policy <tolerant|strict>]
 podium layer register --id <id> --local <path>
 ```
 
 For Git sources, the registry returns the webhook URL and HMAC secret to configure on the source repo. Without webhook configuration, the layer stays at its initial commit until the first manual reingest.
+
+`--force-push-policy` sets the per-layer force-push handling for a Git source. The default (`tolerant`) preserves previously-ingested commits and emits a `layer.history_rewritten` event; `strict` rejects an ingest whose history was rewritten. The policy is also settable with `podium layer update --force-push-policy` and through the registry.yaml `source.git.force_push_policy` key.
 
 ### `podium layer list`
 
@@ -381,10 +383,10 @@ podium layer unregister <id>
 Forces a re-pull of a layer's source.
 
 ```
-podium layer reingest <id> [--break-glass --justification <text>]
+podium layer reingest <id> [--break-glass --justification <text> --approver <id> --approver <id>]
 ```
 
-During a freeze window, ingest is blocked unless `--break-glass` is passed with a justification. Break-glass requires dual-signoff (two admins), auto-expires after 24h, and queues for post-hoc security review.
+During a freeze window, ingest is blocked unless `--break-glass` is passed with a justification. Break-glass requires dual-signoff, so supply two distinct approver identities with repeated `--approver` flags. A grant auto-expires after 24h and queues for post-hoc security review.
 
 ### `podium layer watch`
 
@@ -435,7 +437,7 @@ podium admin reembed [--all] [--since <timestamp>]
 
 ### `podium admin migrate`
 
-Schema migrations. The expand-contract pattern means most upgrades don't require operator intervention; this command handles the rare cases.
+Schema migrations. The binary applies its schema additively on startup, so most upgrades require no operator intervention; this command handles the rare cases.
 
 ```
 podium admin migrate --finalize           # drop now-unused old columns/indexes
@@ -554,7 +556,7 @@ podium search "month-end close OR variance" --type skill --top-k 15 --json \
 | `PODIUM_AUDIT_SINK` | Local audit destination. |
 | `PODIUM_MATERIALIZE_ROOT` | Default destination for `load_artifact` materialization. |
 | `PODIUM_PRESIGN_TTL_SECONDS` | Override for presigned URL TTL. |
-| `PODIUM_VERIFY_SIGNATURES` | `never`, `medium-and-above` (default), `high-only`, `always`. |
+| `PODIUM_VERIFY_SIGNATURES` | `never`, `medium-and-above` (default), `always`. |
 | `PODIUM_IDENTITY_PROVIDER` | `oauth-device-code` (default), `injected-session-token`. |
 | `PODIUM_OAUTH_AUDIENCE`, `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` | OAuth provider config. |
 | `PODIUM_SESSION_TOKEN_ENV`, `PODIUM_SESSION_TOKEN_FILE` | Injected-token sources. |

@@ -1,6 +1,7 @@
 package lint_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -19,7 +20,7 @@ func TestRuleBundledResourceSize_PerFileWarn(t *testing.T) {
 		Artifact:  &manifest.Artifact{Type: manifest.TypeContext},
 		Resources: map[string][]byte{"data.bin": big},
 	}
-	diags := (&lint.Linter{}).Lint(nil, []filesystem.ArtifactRecord{rec})
+	diags := (&lint.Linter{}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec})
 	gotWarn := false
 	for _, d := range diags {
 		if d.Code == "lint.bundled_resource_size" && d.Severity == lint.SeverityWarning {
@@ -49,7 +50,7 @@ func TestRuleBundledResourceSize_PerPackageError(t *testing.T) {
 		Artifact:  &manifest.Artifact{Type: manifest.TypeContext},
 		Resources: resources,
 	}
-	diags := (&lint.Linter{}).Lint(nil, []filesystem.ArtifactRecord{rec})
+	diags := (&lint.Linter{}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec})
 	gotErr := false
 	for _, d := range diags {
 		if d.Code == "lint.bundled_resource_size" && d.Severity == lint.SeverityError {
@@ -62,16 +63,16 @@ func TestRuleBundledResourceSize_PerPackageError(t *testing.T) {
 }
 
 // Spec: §4.1 / §4.3.4 — SKILL.md body above 5K tokens yields a
-// warning.
+// warning. The cap measures the parsed body (rec.Skill.Body), per §4.1.
 func TestRuleManifestSize_SkillBodyWarnsAtTokenBudget(t *testing.T) {
 	t.Parallel()
 	body := strings.Repeat("a", lint.SkillBodyWarnTokens*4+1) // ~5K+1 tokens
 	rec := filesystem.ArtifactRecord{
-		ID:         "skills/big",
-		Artifact:   &manifest.Artifact{Type: manifest.TypeSkill},
-		SkillBytes: []byte(body),
+		ID:       "skills/big",
+		Artifact: &manifest.Artifact{Type: manifest.TypeSkill},
+		Skill:    &manifest.Skill{Body: body},
 	}
-	diags := (&lint.Linter{}).Lint(nil, []filesystem.ArtifactRecord{rec})
+	diags := (&lint.Linter{}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec})
 	gotWarn := false
 	for _, d := range diags {
 		if d.Code == "lint.manifest_size" && d.Severity == lint.SeverityWarning &&
@@ -84,16 +85,17 @@ func TestRuleManifestSize_SkillBodyWarnsAtTokenBudget(t *testing.T) {
 	}
 }
 
-// Spec: §4.3.4 — SKILL.md body above 500 lines yields a warning.
+// Spec: §4.3.4 — SKILL.md body above 500 lines yields a warning,
+// measured on the parsed body.
 func TestRuleManifestSize_SkillBodyWarnsAtLineBudget(t *testing.T) {
 	t.Parallel()
 	body := strings.Repeat("x\n", lint.SkillBodyWarnLines+1)
 	rec := filesystem.ArtifactRecord{
-		ID:         "skills/many-lines",
-		Artifact:   &manifest.Artifact{Type: manifest.TypeSkill},
-		SkillBytes: []byte(body),
+		ID:       "skills/many-lines",
+		Artifact: &manifest.Artifact{Type: manifest.TypeSkill},
+		Skill:    &manifest.Skill{Body: body},
 	}
-	diags := (&lint.Linter{}).Lint(nil, []filesystem.ArtifactRecord{rec})
+	diags := (&lint.Linter{}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec})
 	gotWarn := false
 	for _, d := range diags {
 		if d.Code == "lint.manifest_size" && strings.Contains(d.Message, "lines") {
@@ -105,16 +107,17 @@ func TestRuleManifestSize_SkillBodyWarnsAtLineBudget(t *testing.T) {
 	}
 }
 
-// Spec: §4.1 — manifest above the 20K-token cap yields an error.
-func TestRuleManifestSize_ManifestErrorsAtTokenCap(t *testing.T) {
+// Spec: §4.1 — a non-skill manifest whose ARTIFACT.md content exceeds the
+// 20K-token cap yields an error.
+func TestRuleManifestSize_NonSkillManifestErrorsAtTokenCap(t *testing.T) {
 	t.Parallel()
 	body := strings.Repeat("a", lint.ManifestErrTokens*4+8)
 	rec := filesystem.ArtifactRecord{
-		ID:            "skills/huge",
-		Artifact:      &manifest.Artifact{Type: manifest.TypeSkill},
+		ID:            "context/huge",
+		Artifact:      &manifest.Artifact{Type: manifest.TypeContext},
 		ArtifactBytes: []byte(body),
 	}
-	diags := (&lint.Linter{}).Lint(nil, []filesystem.ArtifactRecord{rec})
+	diags := (&lint.Linter{}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec})
 	gotErr := false
 	for _, d := range diags {
 		if d.Code == "lint.manifest_size" && d.Severity == lint.SeverityError {
@@ -123,6 +126,72 @@ func TestRuleManifestSize_ManifestErrorsAtTokenCap(t *testing.T) {
 	}
 	if !gotErr {
 		t.Errorf("missing manifest size error; got %+v", diags)
+	}
+}
+
+// Spec: §4.1 — a skill whose SKILL.md body exceeds the 20K-token cap
+// yields an error even when the body is the only large content.
+func TestRuleManifestSize_SkillBodyErrorsAtHardCap(t *testing.T) {
+	t.Parallel()
+	body := strings.Repeat("a", lint.ManifestErrTokens*4+8)
+	rec := filesystem.ArtifactRecord{
+		ID:       "skills/huge-body",
+		Artifact: &manifest.Artifact{Type: manifest.TypeSkill},
+		Skill:    &manifest.Skill{Body: body},
+	}
+	diags := (&lint.Linter{}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec})
+	gotErr := false
+	for _, d := range diags {
+		if d.Code == "lint.manifest_size" && d.Severity == lint.SeverityError {
+			gotErr = true
+		}
+	}
+	if !gotErr {
+		t.Errorf("missing manifest size error for oversized SKILL.md body; got %+v", diags)
+	}
+}
+
+// Spec: §4.1 — for skills the 20K-token cap applies to the
+// SKILL.md body, not the ARTIFACT.md file or the SKILL.md frontmatter. A
+// skill whose whole files are large but whose parsed body is small
+// produces no size error. This fails under the pre-fix rule that summed
+// ArtifactBytes and SkillBytes.
+func TestRuleManifestSize_SkillCapMeasuresBodyNotFiles(t *testing.T) {
+	t.Parallel()
+	huge := strings.Repeat("a", lint.ManifestErrTokens*4+8) // > 20K tokens
+	rec := filesystem.ArtifactRecord{
+		ID:            "skills/frontmatter-heavy",
+		Artifact:      &manifest.Artifact{Type: manifest.TypeSkill},
+		ArtifactBytes: []byte(huge),
+		SkillBytes:    []byte("---\nname: x\nmetadata: " + huge + "\n---\nshort body"),
+		Skill:         &manifest.Skill{Body: "short body"},
+	}
+	diags := (&lint.Linter{}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec})
+	for _, d := range diags {
+		if d.Code == "lint.manifest_size" {
+			t.Errorf("unexpected manifest_size diagnostic; the skill cap must measure the SKILL.md body only: %s", d.Message)
+		}
+	}
+}
+
+// Spec: §4.3.4 — the SKILL.md body soft caps measure the parsed
+// body, not the whole SKILL.md file. Large frontmatter that pushes the
+// file over 5K tokens does not warn when the body is small. This fails
+// under the pre-fix rule that measured SkillBytes.
+func TestRuleManifestSize_SkillSoftCapMeasuresBodyNotFrontmatter(t *testing.T) {
+	t.Parallel()
+	bigFM := strings.Repeat("a", lint.SkillBodyWarnTokens*4+1)
+	rec := filesystem.ArtifactRecord{
+		ID:         "skills/fm-heavy",
+		Artifact:   &manifest.Artifact{Type: manifest.TypeSkill},
+		SkillBytes: []byte("---\nname: x\nmetadata: " + bigFM + "\n---\nshort"),
+		Skill:      &manifest.Skill{Body: "short"},
+	}
+	diags := (&lint.Linter{}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec})
+	for _, d := range diags {
+		if d.Code == "lint.manifest_size" {
+			t.Errorf("soft cap must measure the SKILL.md body, not frontmatter: %s", d.Message)
+		}
 	}
 }
 
@@ -136,7 +205,7 @@ func TestRuleManifestSize_SmallManifestPasses(t *testing.T) {
 		ArtifactBytes: []byte("---\ntype: skill\nversion: 1.0.0\nname: tiny\n---\n"),
 		SkillBytes:    []byte("---\nname: tiny\ndescription: x\n---\nbody"),
 	}
-	diags := (&lint.Linter{}).Lint(nil, []filesystem.ArtifactRecord{rec})
+	diags := (&lint.Linter{}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec})
 	for _, d := range diags {
 		if d.Code == "lint.manifest_size" || d.Code == "lint.bundled_resource_size" {
 			t.Errorf("unexpected size diagnostic on small manifest: %s", d.Message)

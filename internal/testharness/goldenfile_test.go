@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// Spec: n/a — internal harness primitive (TEST_INFRASTRUCTURE_PLAN.md §6.6).
+// Spec: n/a — internal harness primitive.
 func TestAssertGoldenFile_PassesOnMatch(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -22,7 +22,7 @@ func TestAssertGoldenFile_PassesOnMatch(t *testing.T) {
 	}
 }
 
-// Spec: n/a — internal harness primitive (TEST_INFRASTRUCTURE_PLAN.md §6.6).
+// Spec: n/a — internal harness primitive.
 func TestAssertGoldenFile_FailsWithDiff(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -40,7 +40,7 @@ func TestAssertGoldenFile_FailsWithDiff(t *testing.T) {
 	}
 }
 
-// Spec: n/a — internal harness primitive (TEST_INFRASTRUCTURE_PLAN.md §6.6).
+// Spec: n/a — internal harness primitive.
 func TestAssertGoldenFile_UpdatesWhenFlagSet(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "subdir", "expected.txt")
@@ -60,7 +60,7 @@ func TestAssertGoldenFile_UpdatesWhenFlagSet(t *testing.T) {
 	}
 }
 
-// Spec: n/a — internal harness primitive (TEST_INFRASTRUCTURE_PLAN.md §6.6).
+// Spec: n/a — internal harness primitive.
 func TestAssertGoldenFile_MissingFileFailsWithHint(t *testing.T) {
 	t.Parallel()
 	rec := &fatalRecorder{TB: t}

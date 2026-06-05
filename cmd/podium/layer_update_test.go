@@ -51,6 +51,42 @@ func TestLayerUpdateCmd_PatchesRef(t *testing.T) {
 	}
 }
 
+// Spec: §12 — `podium layer update --rotate-webhook-secret` regenerates
+// the git layer's HMAC secret through PUT /v1/layers/update.
+func TestLayerUpdateCmd_RotateWebhookSecret(t *testing.T) {
+	const tenantID = "default"
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: tenantID}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	if err := st.PutLayerConfig(context.Background(), store.LayerConfig{
+		TenantID: tenantID, ID: "vendor", SourceType: "git",
+		Repo: "git@example/vendor.git", Ref: "main",
+		WebhookSecret: "old-secret", CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	endpoint := server.NewLayerEndpoint(st, tenantID, server.NewModeTracker())
+	ts := httptest.NewServer(endpoint.Handler())
+	t.Cleanup(ts.Close)
+
+	rc := layerUpdate([]string{
+		"--registry", ts.URL,
+		"--id", "vendor",
+		"--rotate-webhook-secret",
+	})
+	if rc != 0 {
+		t.Fatalf("layerUpdate rc = %d, want 0", rc)
+	}
+	got, err := st.GetLayerConfig(context.Background(), tenantID, "vendor")
+	if err != nil {
+		t.Fatalf("GetLayerConfig: %v", err)
+	}
+	if got.WebhookSecret == "" || got.WebhookSecret == "old-secret" {
+		t.Errorf("WebhookSecret = %q, want a freshly rotated value", got.WebhookSecret)
+	}
+}
+
 // Spec: §7.3.1 — running update without any mutable flag is an
 // argument error.
 func TestLayerUpdateCmd_RequiresMutableField(t *testing.T) {

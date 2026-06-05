@@ -1,0 +1,115 @@
+=== team/deep-review/ARTIFACT.md ===
+---
+type: rule
+version: 1.0.0
+rule_mode: explicit
+---
+
+Perform a deep architectural review when invoked.
+
+=== team/deploy/ARTIFACT.md ===
+---
+type: command
+version: 1.0.0
+description: Deploy the service.
+---
+
+Run the deploy pipeline for the named environment.
+
+=== team/glossary/ARTIFACT.md ===
+---
+type: context
+version: 1.0.0
+description: Company glossary.
+---
+
+ARR means annual recurring revenue.
+
+=== team/guard/ARTIFACT.md ===
+---
+type: hook
+version: 1.0.0
+hook_event: pre_tool_use
+hook_action: ./scripts/guard.sh
+---
+
+Guard before each tool use.
+
+=== team/hello/ARTIFACT.md ===
+---
+type: skill
+version: 1.0.0
+---
+
+Use this skill to greet a teammate.
+
+=== team/hello/SKILL.md ===
+---
+name: hello
+description: Greet a teammate warmly by name.
+---
+
+Say hello to the person and offer help.
+
+=== team/hello/scripts/run.py ===
+print('hello')
+
+=== team/notify/ARTIFACT.md ===
+---
+type: hook
+version: 1.0.0
+hook_event: stop
+hook_action: |
+  echo done
+  echo bye
+---
+
+Notify when the agent stops.
+
+=== team/reviewer/ARTIFACT.md ===
+---
+type: agent
+version: 1.0.0
+description: Reviews pull requests for bugs.
+---
+
+Review the diff and report defects.
+
+=== team/tabs-always/ARTIFACT.md ===
+---
+type: rule
+version: 1.0.0
+rule_mode: always
+---
+
+Indent with tabs, not spaces.
+
+=== team/ts-auto/ARTIFACT.md ===
+---
+type: rule
+version: 1.0.0
+rule_mode: auto
+rule_description: Apply when editing TypeScript.
+---
+
+Prefer interfaces over type aliases.
+
+=== team/ts-glob/ARTIFACT.md ===
+---
+type: rule
+version: 1.0.0
+rule_mode: glob
+rule_globs: "*.ts,*.tsx"
+---
+
+Enable strict type-checking in TypeScript files.
+
+=== team/warehouse/ARTIFACT.md ===
+---
+type: mcp-server
+version: 1.0.0
+server_identifier: npx:@acme/warehouse-mcp
+---
+
+Warehouse MCP server.
+

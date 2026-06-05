@@ -13,7 +13,6 @@ import (
 const auditRedactArtifact = `---
 type: skill
 version: 1.0.0
-description: skill that bundles sensitive metadata
 sensitivity: low
 audit_redact:
   - content_hash

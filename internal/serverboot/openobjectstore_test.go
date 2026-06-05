@@ -24,6 +24,8 @@ func TestOpenObjectStore_S3RequiresBucket(t *testing.T) {
 	}
 }
 
+// spec: §13.12 — an unset PODIUM_S3_ENDPOINT resolves to AWS S3 with TLS via
+// ParseS3Endpoint (the Config field is no longer mutated).
 func TestOpenObjectStore_S3UsesDefaultEndpoint(t *testing.T) {
 	t.Parallel()
 	cfg := &Config{
@@ -37,9 +39,6 @@ func TestOpenObjectStore_S3UsesDefaultEndpoint(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatal("nil store")
-	}
-	if cfg.s3Endpoint == "" {
-		t.Errorf("default endpoint not applied; cfg.s3Endpoint = %q", cfg.s3Endpoint)
 	}
 }
 

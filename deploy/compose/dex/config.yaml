@@ -1,0 +1,48 @@
+# Dex configuration for the evaluation docker-compose stack (§13.1.1).
+# Dex is the bundled OIDC IdP that backs the `podium login` device-code
+# flow (RFC 8628). This configuration is for evaluation only: it uses an
+# ephemeral SQLite store, a public device-code client, and a static
+# example user with a documented password. Do not use it in production.
+#
+# The issuer is reached from the host (where `podium login` runs) at
+# http://localhost:5556/dex. The compose file maps container port 5556 to
+# the host so the device-code verification URL resolves from a browser.
+
+issuer: http://localhost:5556/dex
+
+storage:
+  type: sqlite3
+  config:
+    file: /var/dex/dex.db
+
+web:
+  http: 0.0.0.0:5556
+
+# Skip the approval screen so the evaluation device-code flow completes
+# without a manual consent click.
+oauth2:
+  skipApprovalScreen: true
+
+# The registry is registered as a public device-code client. "Registers
+# the registry as an OIDC client with Dex" (§13.1.1) is satisfied
+# declaratively here: the client exists as soon as Dex starts.
+staticClients:
+  - id: podium-registry
+    name: Podium Registry
+    public: true
+    redirectURIs:
+      - http://localhost:8080/callback
+      # Dex's RFC 8628 device flow authenticates the user through an internal
+      # redirect to /device/callback and validates it against this list, so the
+      # device-code login fails with "Unregistered redirect_uri" without it.
+      - /device/callback
+
+# A static example user so the device-code flow has an identity to
+# authenticate. The hash is bcrypt("password"), verified; it is an evaluation
+# credential, not a secret.
+enablePasswordDB: true
+staticPasswords:
+  - email: alice@acme.com
+    hash: "$2a$10$aBrFsW/NM4tVbQ2PfZy4Yu4pJ3u4rrNQcUaapVKUGW3ZO2DVo9cJ6"
+    username: alice
+    userID: "alice-0001"

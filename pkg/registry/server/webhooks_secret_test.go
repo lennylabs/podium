@@ -140,7 +140,6 @@ func TestHandleObjectsRoute_NotFoundWithoutObjectStore(t *testing.T) {
 	}
 }
 
-
 func TestHandleObjectsRoute_EmptyKeyReturns400(t *testing.T) {
 	t.Parallel()
 	_, ts := bootRegistry(t)

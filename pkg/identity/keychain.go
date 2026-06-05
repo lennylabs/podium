@@ -20,6 +20,17 @@ type TokenStore interface {
 // ErrTokenNotFound signals that no token is cached under the label.
 var ErrTokenNotFound = errors.New("identity: token not found in keychain")
 
+// RefreshLabel derives the keychain label under which the refresh token for
+// a registry is stored. The access token keeps the bare registry label so
+// existing readers are unaffected; the refresh token is stored alongside it
+// under this derived label. spec: §6.3 / §7.7 — cache the access and refresh
+// tokens for silent renewal. Shared by the CLI (`podium login`) and the MCP
+// bridge so both halves of the device-code credential are addressed the same
+// way.
+func RefreshLabel(registry string) string {
+	return registry + "#refresh"
+}
+
 // KeychainStore implements TokenStore against the OS keychain.
 type KeychainStore struct {
 	// Service is the namespace under which entries are stored. The

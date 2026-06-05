@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"context"
 	"testing"
 )
 
@@ -21,7 +22,7 @@ version: 1.0.0
 			"scripts/x.py": []byte("print('x')\n"),
 		},
 	}
-	out, err := ClaudeCode{}.Adapt(src)
+	out, err := ClaudeCode{}.Adapt(context.Background(), src)
 	if err != nil {
 		t.Fatalf("Adapt: %v", err)
 	}
@@ -52,7 +53,7 @@ version: 1.0.0
 ts style rules
 `),
 	}
-	out, err := ClaudeCode{}.Adapt(src)
+	out, err := ClaudeCode{}.Adapt(context.Background(), src)
 	if err != nil {
 		t.Fatalf("Adapt: %v", err)
 	}
@@ -69,7 +70,7 @@ func TestClaudeCode_AgentLayout(t *testing.T) {
 		ArtifactID:    "finance/pay-invoice",
 		ArtifactBytes: []byte("---\ntype: agent\nversion: 1.0.0\n---\nbody\n"),
 	}
-	out, err := ClaudeCode{}.Adapt(src)
+	out, err := ClaudeCode{}.Adapt(context.Background(), src)
 	if err != nil {
 		t.Fatalf("Adapt: %v", err)
 	}
@@ -86,38 +87,30 @@ func TestClaudeCode_FallbackPathForOtherTypes(t *testing.T) {
 		ArtifactID:    "company-glossary",
 		ArtifactBytes: []byte("---\ntype: context\nversion: 1.0.0\n---\nbody\n"),
 	}
-	out, err := ClaudeCode{}.Adapt(src)
+	out, err := ClaudeCode{}.Adapt(context.Background(), src)
 	if err != nil {
 		t.Fatalf("Adapt: %v", err)
 	}
-	if len(out) != 1 || out[0].Path != ".claude/podium/company-glossary/ARTIFACT.md" {
+	// type: context materializes to the harness-neutral .podium/context/ bucket.
+	if len(out) != 1 || out[0].Path != ".podium/context/company-glossary/ARTIFACT.md" {
 		t.Errorf("got %+v", out)
 	}
 }
 
-// Spec: §6.7 — codex adapter places packages under .codex/packages/<id>/
-// and additionally writes rules to .codex/rules/<name>.md.
+// Spec: §6.7 — the codex adapter injects rules into AGENTS.md between
+// Podium-managed markers.
 func TestCodex_RulePlacement(t *testing.T) {
 	t.Parallel()
 	src := Source{
 		ArtifactID:    "ts-style",
 		ArtifactBytes: []byte("---\ntype: rule\nversion: 1.0.0\n---\nrules\n"),
 	}
-	out, err := Codex{}.Adapt(src)
+	out, err := Codex{}.Adapt(context.Background(), src)
 	if err != nil {
 		t.Fatalf("Adapt: %v", err)
 	}
-	paths := map[string]bool{}
-	for _, f := range out {
-		paths[f.Path] = true
-	}
-	for _, want := range []string{
-		".codex/packages/ts-style/ARTIFACT.md",
-		".codex/rules/ts-style.md",
-	} {
-		if !paths[want] {
-			t.Errorf("missing %q in %v", want, paths)
-		}
+	if len(out) != 1 || out[0].Path != "AGENTS.md" || out[0].Op != OpInject || out[0].Key != "ts-style" {
+		t.Errorf("got %+v, want a single AGENTS.md OpInject keyed by ts-style", out)
 	}
 }
 

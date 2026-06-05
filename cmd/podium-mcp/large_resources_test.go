@@ -31,7 +31,7 @@ func TestFetchLargeResources_MergesIntoResources(t *testing.T) {
 			"data/big.bin": {URL: ts.URL, ContentHash: hash},
 		},
 	}
-	if err := srv.fetchLargeResources(&resp); err != nil {
+	if err := srv.fetchLargeResources(&resp, nil); err != nil {
 		t.Fatalf("fetchLargeResources: %v", err)
 	}
 	if got := resp.Resources["data/big.bin"]; got != string(body) {
@@ -55,7 +55,7 @@ func TestFetchLargeResources_HashMismatchAborts(t *testing.T) {
 			"x.bin": {URL: ts.URL, ContentHash: "sha256:" + strings.Repeat("a", 64)},
 		},
 	}
-	err := srv.fetchLargeResources(&resp)
+	err := srv.fetchLargeResources(&resp, nil)
 	if err == nil || !strings.Contains(err.Error(), "content hash mismatch") {
 		t.Errorf("err = %v, want hash-mismatch refusal", err)
 	}
@@ -78,7 +78,7 @@ func TestFetchOneLargeResource_RetriesOnTransientFailure(t *testing.T) {
 	}))
 	t.Cleanup(ts.Close)
 	srv := &mcpServer{cfg: &config{}, http: &http.Client{}}
-	got, err := srv.fetchOneLargeResource(largeResourceLink{URL: ts.URL})
+	got, err := srv.fetchOneLargeResource("data/big.bin", largeResourceLink{URL: ts.URL}, nil)
 	if err != nil {
 		t.Fatalf("fetchOneLargeResource: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestFetchOneLargeResource_ExhaustsRetriesOn403(t *testing.T) {
 	}))
 	t.Cleanup(ts.Close)
 	srv := &mcpServer{cfg: &config{}, http: &http.Client{}}
-	_, err := srv.fetchOneLargeResource(largeResourceLink{URL: ts.URL})
+	_, err := srv.fetchOneLargeResource("x.bin", largeResourceLink{URL: ts.URL}, nil)
 	if err == nil || !strings.Contains(err.Error(), "after 3 attempts") {
 		t.Errorf("err = %v, want exhaust-retry message", err)
 	}
@@ -114,7 +114,7 @@ func TestFetchOneLargeResource_404FailsFast(t *testing.T) {
 	}))
 	t.Cleanup(ts.Close)
 	srv := &mcpServer{cfg: &config{}, http: &http.Client{}}
-	_, err := srv.fetchOneLargeResource(largeResourceLink{URL: ts.URL})
+	_, err := srv.fetchOneLargeResource("y.bin", largeResourceLink{URL: ts.URL}, nil)
 	if err == nil {
 		t.Errorf("err = nil, want refusal")
 	}

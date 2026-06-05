@@ -1,11 +1,14 @@
 package sign
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"strings"
+
+	"github.com/lennylabs/podium/pkg/spi"
 )
 
 // RegistryManagedKey implements §4.7.9's per-org registry-managed
@@ -32,10 +35,31 @@ type RegistryManagedKey struct {
 // ID returns "registry-managed".
 func (RegistryManagedKey) ID() string { return "registry-managed" }
 
+// PublicKeyFromBase64 decodes a standard-base64-encoded Ed25519 public
+// key (the 32-byte form the registry publishes for its §4.7.9
+// registry-managed signing key) into an ed25519.PublicKey. A consumer
+// that verifies registry-managed signatures loads the registry's public
+// key this way and constructs a RegistryManagedKey for Verify.
+//
+// spec: §4.7.9 — verification runs in the consumer (the MCP server),
+// which holds the registry's public key to check the detached
+// signature envelope.
+func PublicKeyFromBase64(s string) (ed25519.PublicKey, error) {
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(s))
+	if err != nil {
+		return nil, fmt.Errorf("decode public key: %w", err)
+	}
+	if len(raw) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("public key is %d bytes, want %d", len(raw), ed25519.PublicKeySize)
+	}
+	return ed25519.PublicKey(raw), nil
+}
+
 // ErrRegistryManagedUnavailable signals the keypair is not configured.
+// Structured per §9.3.
 // Sign returns this when PrivateKey is unset; Verify returns it when
 // PublicKey is unset.
-var ErrRegistryManagedUnavailable = errors.New("sign: registry-managed key not configured")
+var ErrRegistryManagedUnavailable = &spi.Error{Code: "config.signature_provider_unavailable", Message: "sign: registry-managed key not configured"}
 
 // registryManagedEnvelope is the JSON encoding of a registry-managed
 // signature. Compact, no version field — the format is internal to
@@ -48,7 +72,7 @@ type registryManagedEnvelope struct {
 // Sign signs contentHash with the configured Ed25519 private key.
 // The returned envelope is a JSON object carrying the base64-encoded
 // signature plus the key ID.
-func (k RegistryManagedKey) Sign(contentHash string) (string, error) {
+func (k RegistryManagedKey) Sign(_ context.Context, contentHash string) (string, error) {
 	if len(k.PrivateKey) == 0 {
 		return "", ErrRegistryManagedUnavailable
 	}
@@ -70,7 +94,7 @@ func (k RegistryManagedKey) Sign(contentHash string) (string, error) {
 // Verify checks that signature is a valid Ed25519 signature for
 // contentHash under the configured public key. Mismatched KeyID
 // rejects with ErrSignatureInvalid so verifiers can detect rotation.
-func (k RegistryManagedKey) Verify(contentHash, signature string) error {
+func (k RegistryManagedKey) Verify(_ context.Context, contentHash, signature string) error {
 	pub := k.PublicKey
 	if len(pub) == 0 && len(k.PrivateKey) > 0 {
 		pub = k.PrivateKey.Public().(ed25519.PublicKey)

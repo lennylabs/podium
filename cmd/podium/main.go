@@ -7,6 +7,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -22,7 +23,9 @@ import (
 	"syscall"
 
 	"github.com/lennylabs/podium/internal/buildinfo"
+	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/lint"
+	overlaypkg "github.com/lennylabs/podium/pkg/overlay"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/sync"
 )
@@ -186,46 +189,156 @@ func syncCmd(args []string) int {
 	}
 	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
 	setUsage(fs, "Materialize the caller's effective view through a HarnessAdapter.")
-	registry := fs.String("registry", "", "filesystem registry path (required)")
-	target := fs.String("target", ".", "destination directory")
-	harness := fs.String("harness", "none", "harness adapter")
+	registry := fs.String("registry", "", "registry URL (server source) or filesystem path (required)")
+	target := fs.String("target", "", "destination directory (default: current directory)")
+	// §7.5.2: an unset --harness falls through to PODIUM_HARNESS, then the
+	// sync.yaml harness, then the built-in "none" adapter. The default is
+	// empty so an omitted flag does not pin "none" over the configured value.
+	harness := fs.String("harness", "", "harness adapter (default: PODIUM_HARNESS, sync.yaml, then none)")
 	dryRun := fs.Bool("dry-run", false, "resolve and report; write nothing")
+	preview := fs.Bool("preview", false, "print the §3.5 scope-preview aggregate counts and exit; write nothing")
 	asJSON := fs.Bool("json", false, "emit a structured JSON envelope on stdout")
 	watch := fs.Bool("watch", false, "rerun sync whenever the registry changes")
+	check := fs.Bool("check", false, "validate the merged sync.yaml and report warnings")
 	overlay := fs.String("overlay", "", "workspace overlay path watched alongside the registry")
+	profile := fs.String("profile", "", "load a named scope from sync.yaml profiles")
+	configPath := fs.String("config", "", "run one sync per entry in a sync.yaml targets: list")
+	typeStr := fs.String("type", "", "restrict to a comma-separated artifact type list")
+	var include, exclude stringSliceFlag
+	fs.Var(&include, "include", "glob over canonical IDs to include (repeatable)")
+	fs.Var(&exclude, "exclude", "glob over canonical IDs to exclude (repeatable)")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
 
-	// §13.11.2 — when --registry is unset, fall back to
-	// defaults.registry from sync.yaml. Relative paths resolve
-	// against the workspace; absolute paths pass through. Unset
-	// across all scopes surfaces config.no_registry via sync.Run.
-	if *registry == "" {
-		ws, _ := os.Getwd()
-		if cfg, _ := sync.ReadConfig(ws); cfg != nil && cfg.Defaults.Registry != "" {
-			*registry = sync.ResolveRegistryPath(ws, cfg.Defaults.Registry)
-		}
+	// §7.5.2 validation: --check loads the merged config and reports warnings
+	// (unresolved profiles, malformed globs, target/profile collisions).
+	if *check {
+		return runSyncCheck()
 	}
-	if *registry == "" {
-		fmt.Fprintln(os.Stderr, "error: --registry is required (filesystem path) — set it on the command line or in <ws>/.podium/sync.yaml")
+
+	// §7.5.2 multi-target: --config iterates a targets: list, one sync each.
+	if *configPath != "" {
+		return runMultiTargetSync(*configPath, *registry, *dryRun, *asJSON)
+	}
+
+	// §7.5.2 resolution: merge the three sync.yaml scopes by per-key
+	// precedence, then overlay CLI flags and PODIUM_* env. The merged
+	// config also resolves the active profile's scope.
+	ws, _ := os.Getwd()
+	home, _ := os.UserHomeDir()
+	merged, workspace, merrr := sync.LoadMergedConfig(ws, home)
+	if merrr != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", merrr)
+		return 1
+	}
+	if workspace == "" {
+		workspace = ws
+	}
+	resolved, rerr := sync.Resolve(sync.ResolveInput{
+		Registry: *registry,
+		Target:   *target,
+		Harness:  *harness,
+		Profile:  *profile,
+		Include:  []string(include),
+		Exclude:  []string(exclude),
+		Types:    splitCSV(*typeStr),
+	}, merged, os.Getenv)
+	if rerr != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", rerr)
 		return 2
 	}
-	abs, err := filepath.Abs(*target)
+	if resolved.CollisionWarning != "" {
+		fmt.Fprintln(os.Stderr, resolved.CollisionWarning)
+	}
+	// spec: §6.7 "Versioning" — refuse to run when the merged defaults or the
+	// active profile pin a min_server_version above this binary. podium sync
+	// runs the same versioned adapters as the MCP server, so an older binary
+	// must not materialize with stale adapter behavior.
+	if verr := merged.CheckServerVersion(buildinfo.Version, resolved.Profile); verr != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", verr)
+		return 2
+	}
+
+	registryPath := resolved.Registry
+	if registryPath != "" {
+		// Relative defaults.registry resolves against the workspace; URLs
+		// and absolute paths pass through (§13.11.2).
+		registryPath = sync.ResolveRegistryPath(workspace, registryPath)
+	}
+	if registryPath == "" {
+		// spec: §13.11.2 — "If defaults.registry is unset across all scopes,
+		// the client errors with config.no_registry and points the user at
+		// podium init." Registry resolution above already applies the §7.5.2
+		// precedence chain (CLI flag, PODIUM_REGISTRY, then the merged
+		// user-global/project-shared/project-local scopes), so reaching here
+		// means no scope set defaults.registry.
+		fmt.Fprintln(os.Stderr, "error: config.no_registry: no registry configured — run `podium init` to set defaults.registry, or pass --registry")
+		return 2
+	}
+
+	// §3.5: `podium sync --preview` is a transparency affordance. It prints
+	// the caller's effective-view aggregate counts and writes nothing. The
+	// preview is served by GET /v1/scope/preview, so it requires a
+	// server-source registry; a filesystem source has no such endpoint.
+	if *preview {
+		if !sync.IsServerSource(registryPath) {
+			fmt.Fprintln(os.Stderr, "error: --preview requires a server registry URL (the §3.5 scope preview is served by GET /v1/scope/preview)")
+			return 2
+		}
+		return runScopePreview(registryPath, *asJSON)
+	}
+
+	targetDir := resolved.Target
+	if targetDir == "" {
+		targetDir = "."
+	}
+	abs, err := filepath.Abs(targetDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: cannot resolve target: %v\n", err)
 		return 2
 	}
+	// §7.4: podium sync applies the same cache modes as the MCP server. The
+	// mode is read once from PODIUM_CACHE_MODE and threaded into the run; it
+	// governs the server source (offline-only never contacts the registry,
+	// offline-first tolerates an unreachable server) and is a no-op for a
+	// filesystem source.
+	cacheMode, cmErr := resolveCacheMode(os.Getenv("PODIUM_CACHE_MODE"))
+	if cmErr != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", cmErr)
+		return 2
+	}
+	// §6.4 overlay resolution: an explicit --overlay wins; otherwise honor the
+	// PODIUM_OVERLAY_PATH env var and the <CWD>/.podium/overlay/ fallback. A
+	// disabled overlay (the directory is absent) leaves OverlayPath empty.
+	overlayPath := *overlay
+	if overlayPath == "" {
+		if ovl, oerr := overlaypkg.ResolveWorkspaceOverlay(ws, os.Getenv("PODIUM_OVERLAY_PATH")); oerr == nil {
+			overlayPath = ovl
+		}
+	}
+	// §6.3.2 / §14.11: attach the caller credential (injected session token,
+	// then a keychain oauth-device-code token) so a server-source sync reaches
+	// an authenticated registry with the same identity the read CLI uses. A
+	// filesystem source ignores it.
+	token := ""
+	if sync.IsServerSource(registryPath) {
+		token = readCLIToken(registryPath)
+	}
 	syncOpts := sync.Options{
-		RegistryPath: *registry,
+		RegistryPath: registryPath,
 		Target:       abs,
-		AdapterID:    *harness,
+		AdapterID:    resolved.Harness,
 		DryRun:       *dryRun,
-		OverlayPath:  *overlay,
+		OverlayPath:  overlayPath,
+		Profile:      resolved.Profile,
+		Scope:        resolved.Scope,
+		CacheMode:    cacheMode,
+		Token:        token,
 	}
 	if *watch {
-		return runWatchLoop(syncOpts, *overlay, *asJSON)
+		return runWatchLoop(syncOpts, overlayPath, *asJSON)
 	}
 	res, err := sync.Run(syncOpts)
 	if err != nil {
@@ -238,6 +351,21 @@ func syncCmd(args []string) int {
 		printHuman(res, *dryRun)
 	}
 	return 0
+}
+
+// resolveCacheMode validates PODIUM_CACHE_MODE for the sync path (§7.4). An
+// empty value defaults to always-revalidate, matching the MCP server (§6.2);
+// an unrecognized value is rejected so a typo cannot silently change the
+// degraded-network behavior.
+func resolveCacheMode(v string) (string, error) {
+	switch v {
+	case "":
+		return "always-revalidate", nil
+	case "always-revalidate", "offline-first", "offline-only":
+		return v, nil
+	default:
+		return "", fmt.Errorf("PODIUM_CACHE_MODE must be always-revalidate | offline-first | offline-only, got %q", v)
+	}
 }
 
 // runWatchLoop drives sync.Watch until the user interrupts (SIGINT
@@ -273,6 +401,87 @@ func runWatchLoop(opts sync.Options, overlay string, asJSON bool) int {
 	return 0
 }
 
+// runMultiTargetSync implements `podium sync --config <path>` (§7.5.2): it
+// reads the config file's targets: list, resolves each entry's scope, target,
+// and harness, and runs one sync per entry. Each target writes its own lock.
+func runMultiTargetSync(configPath, registryOverride string, dryRun, asJSON bool) int {
+	cfg, err := sync.ReadConfigFile(configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+	if cfg == nil {
+		fmt.Fprintf(os.Stderr, "error: config not found: %s\n", configPath)
+		return 2
+	}
+	workspace := filepath.Dir(filepath.Dir(configPath))
+	plans, err := sync.PlanMultiTarget(cfg, registryOverride, workspace)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 2
+	}
+	cacheMode, cmErr := resolveCacheMode(os.Getenv("PODIUM_CACHE_MODE"))
+	if cmErr != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", cmErr)
+		return 2
+	}
+	failures := 0
+	for _, p := range plans {
+		abs, aerr := filepath.Abs(p.Target)
+		if aerr != nil {
+			fmt.Fprintf(os.Stderr, "target %s: %v\n", p.ID, aerr)
+			failures++
+			continue
+		}
+		res, rerr := sync.Run(sync.Options{
+			RegistryPath: p.Registry,
+			Target:       abs,
+			AdapterID:    p.Harness,
+			DryRun:       dryRun,
+			Profile:      p.Profile,
+			Scope:        p.Scope,
+			CacheMode:    cacheMode,
+		})
+		if rerr != nil {
+			fmt.Fprintf(os.Stderr, "target %s: %v\n", p.ID, rerr)
+			failures++
+			continue
+		}
+		fmt.Printf("== target %s ==\n", p.ID)
+		if asJSON {
+			printJSON(res)
+		} else {
+			printHuman(res, dryRun)
+		}
+	}
+	if failures > 0 {
+		return 1
+	}
+	return 0
+}
+
+// runSyncCheck implements `podium sync --check` (§7.5.2): it loads the merged
+// config and prints validation warnings. Warnings are not errors, so a config
+// with warnings still exits 0; only a config-load failure exits non-zero.
+func runSyncCheck() int {
+	ws, _ := os.Getwd()
+	home, _ := os.UserHomeDir()
+	merged, _, err := sync.LoadMergedConfig(ws, home)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+	warns := sync.Check(merged)
+	if len(warns) == 0 {
+		fmt.Println("sync.yaml: ok (no warnings)")
+		return 0
+	}
+	for _, w := range warns {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+	}
+	return 0
+}
+
 // stringSliceFlag is a flag.Value implementation for repeatable
 // string flags such as --add and --remove.
 type stringSliceFlag []string
@@ -284,6 +493,8 @@ func syncOverrideCmd(args []string) int {
 	fs := flag.NewFlagSet("sync override", flag.ContinueOnError)
 	setUsage(fs, "Add or remove ephemeral artifact toggles.")
 	target := fs.String("target", ".", "target directory")
+	registry := fs.String("registry", "", "registry URL or filesystem path (default: sync.yaml)")
+	harness := fs.String("harness", "", "harness adapter (default: PODIUM_HARNESS, lock, sync.yaml, then none)")
 	var add, remove stringSliceFlag
 	fs.Var(&add, "add", "artifact id to materialize on top of the profile (repeatable)")
 	fs.Var(&remove, "remove", "artifact id to drop from the profile (repeatable)")
@@ -298,14 +509,32 @@ func syncOverrideCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 2
 	}
+	// §7.5.5 TUI mode: no batch flags launches the interactive checklist over
+	// the caller's effective view. The resulting toggles are applied through the
+	// same Override path the --add/--remove flags use.
+	if len(add) == 0 && len(remove) == 0 && !*reset {
+		return runSyncOverrideInteractive(abs, *registry, *harness, *dryRun)
+	}
+	// §7.5.5: override writes/deletes files through the active adapter. Resolve
+	// the registry the same way sync does so --add materializes and --remove
+	// deletes. A missing registry leaves materialization off; the toggles are
+	// still recorded.
+	registryPath := resolveOverrideRegistry(*registry)
 	res, err := sync.Override(sync.OverrideOptions{
 		Target: abs,
 		Add:    []string(add), Remove: []string(remove),
 		Reset: *reset, DryRun: *dryRun,
+		RegistryPath: registryPath,
+		AdapterID:    resolveOverrideHarness(*harness, abs),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "override failed: %v\n", err)
 		return 1
+	}
+	// spec: §7.5.5 — a redundant --add on an already-materialized artifact is a
+	// no-op with a warning.
+	for _, w := range res.Warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 	}
 	if *dryRun {
 		fmt.Println("(dry-run; nothing written)")
@@ -316,6 +545,51 @@ func syncOverrideCmd(args []string) int {
 		fmt.Println("(no change)")
 	}
 	return 0
+}
+
+// resolveOverrideRegistry resolves the registry source for `podium sync
+// override` from the --registry flag, PODIUM_REGISTRY, or the merged
+// sync.yaml, returning "" when none is configured (materialization off).
+func resolveOverrideRegistry(flagVal string) string {
+	ws, _ := os.Getwd()
+	home, _ := os.UserHomeDir()
+	merged, workspace, _ := sync.LoadMergedConfig(ws, home)
+	if workspace == "" {
+		workspace = ws
+	}
+	reg := flagVal
+	if reg == "" {
+		reg = os.Getenv("PODIUM_REGISTRY")
+	}
+	if reg == "" && merged != nil {
+		reg = merged.Defaults.Registry
+	}
+	if reg == "" {
+		return ""
+	}
+	return sync.ResolveRegistryPath(workspace, reg)
+}
+
+// resolveOverrideHarness resolves the adapter id for `podium sync override`
+// per §7.5.2 precedence: the --harness flag, then PODIUM_HARNESS, then the
+// harness recorded in the target's lock (the adapter the last sync used), then
+// the merged sync.yaml default, then the built-in "none" adapter.
+func resolveOverrideHarness(flagVal, target string) string {
+	if flagVal != "" {
+		return flagVal
+	}
+	if h := os.Getenv("PODIUM_HARNESS"); h != "" {
+		return h
+	}
+	if lock, _ := sync.ReadLock(target); lock != nil && lock.Harness != "" {
+		return lock.Harness
+	}
+	ws, _ := os.Getwd()
+	home, _ := os.UserHomeDir()
+	if merged, _, _ := sync.LoadMergedConfig(ws, home); merged != nil && merged.Defaults.Harness != "" {
+		return merged.Defaults.Harness
+	}
+	return "none"
 }
 
 func syncSaveAsCmd(args []string) int {
@@ -367,10 +641,17 @@ func profileCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "unknown profile subcommand: %s\n", args[0])
 		return 2
 	}
+	// §7.5.7: the profile name is positional (`podium profile edit finance-team`).
+	// Pull it off before flag parsing; a leading flag means no name was given.
+	rest := args[1:]
+	var name string
+	if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
+		name = rest[0]
+		rest = rest[1:]
+	}
 	fs := flag.NewFlagSet("profile edit", flag.ContinueOnError)
 	setUsage(fs, "Add or remove patterns on a sync.yaml profile.")
 	target := fs.String("target", ".", "target directory")
-	profile := fs.String("profile", "", "profile name (required)")
 	var addInc, removeInc, addExc, removeExc stringSliceFlag
 	fs.Var(&addInc, "add-include", "include pattern to add (repeatable)")
 	fs.Var(&removeInc, "remove-include", "include pattern to remove (repeatable)")
@@ -378,17 +659,24 @@ func profileCmd(args []string) int {
 	fs.Var(&removeExc, "remove-exclude", "exclude pattern to remove (repeatable)")
 	dryRun := fs.Bool("dry-run", false, "print the proposed YAML diff and write nothing")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := fs.Parse(rest); err != nil {
 		return parseExit(err)
 	}
-	if *profile == "" {
-		fmt.Fprintln(os.Stderr, "error: --profile is required")
+	if name == "" {
+		// §7.5.7: `podium profile edit` with no name errors and asks for one.
+		fmt.Fprintln(os.Stderr, "error: profile name required (usage: podium profile edit <name> [--add-include ...])")
 		return 2
 	}
 	abs, _ := filepath.Abs(*target)
+	// §7.5.7 TUI mode: no batch flags opens the interactive editor over the
+	// profile's include/exclude lists, writing the resulting deltas through the
+	// same ProfileEdit path the batch flags use.
+	if len(addInc) == 0 && len(removeInc) == 0 && len(addExc) == 0 && len(removeExc) == 0 {
+		return runProfileEditInteractive(name, abs, *dryRun)
+	}
 	res, err := sync.ProfileEdit(sync.ProfileEditOptions{
 		Target:        abs,
-		Profile:       *profile,
+		Profile:       name,
 		AddInclude:    []string(addInc),
 		RemoveInclude: []string(removeInc),
 		AddExclude:    []string(addExc),
@@ -399,7 +687,7 @@ func profileCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "profile edit failed: %v\n", err)
 		return 1
 	}
-	fmt.Printf("profile: %s\n", *profile)
+	fmt.Printf("profile: %s\n", name)
 	fmt.Printf("  include: %s\n", formatList(res.Profile.Include))
 	fmt.Printf("  exclude: %s\n", formatList(res.Profile.Exclude))
 	if *dryRun {
@@ -445,6 +733,10 @@ func lintCmd(args []string) int {
 	fs := flag.NewFlagSet("lint", flag.ContinueOnError)
 	setUsage(fs, "Validate manifests in a filesystem-source registry.")
 	registry := fs.String("registry", "", "filesystem registry path (required)")
+	// §4.4: prose URL references are validated by an HTTP HEAD (200/3xx)
+	// by default; --offline (or PODIUM_INGEST_OFFLINE=true) skips the
+	// network probe and validates only bundled-file references.
+	offline := fs.Bool("offline", false, "skip the §4.4 URL HEAD check (validate bundled files only)")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
@@ -459,15 +751,23 @@ func lintCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
+	// spec: §4.6 — lint validates the registry, so it surfaces a
+	// same-canonical-ID cross-layer collision as an error ("silent
+	// shadowing is never permitted"). The default policy honors the
+	// extends exception, so a legitimate higher-precedence overlay that
+	// declares extends: passes; only an unsanctioned shadow errors. sync
+	// keeps CollisionPolicyHighestWins because it materializes the
+	// caller's composed effective view rather than validating it.
 	records, err := reg.Walk(filesystem.WalkOptions{
-		CollisionPolicy: filesystem.CollisionPolicyHighestWins,
+		CollisionPolicy: filesystem.CollisionPolicyDefault,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
 
-	diags := (&lint.Linter{}).Lint(reg, records)
+	linter := lint.NewIngestLinter(*offline || os.Getenv("PODIUM_INGEST_OFFLINE") == "true")
+	diags := linter.Lint(context.Background(), reg, records)
 	if len(diags) == 0 {
 		fmt.Println("lint: no issues.")
 		return 0
@@ -491,6 +791,8 @@ func searchCmd(args []string) int {
 	typeFilter := fs.String("type", "", "filter by artifact type")
 	scope := fs.String("scope", "", "constrain results to a path prefix")
 	topK := fs.Int("top-k", 10, "max results")
+	// spec: §7.6.1 — podium search flag --tags mirrors the SDK arg.
+	tagsFlag := fs.String("tags", "", "comma-separated tag filter")
 	asJSON := fs.Bool("json", false, "JSON output")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
@@ -511,12 +813,18 @@ func searchCmd(args []string) int {
 	if *scope != "" {
 		params["scope"] = *scope
 	}
+	if *tagsFlag != "" {
+		params["tags"] = *tagsFlag
+	}
 	if *topK > 0 {
 		params["top_k"] = fmt.Sprintf("%d", *topK)
 	}
 	body := mustGetJSON(*registry, "/v1/search_artifacts", params)
 	if *asJSON {
-		fmt.Println(string(body))
+		// spec: §7.6.1 — emit the documented {query, total_matched,
+		// results:[{id, type, version, score, frontmatter}]} schema rather than
+		// the raw wire descriptor.
+		emitSearchJSON(body)
 		return 0
 	}
 	printSearchHuman(body)
@@ -598,7 +906,10 @@ func domainShow(args []string) int {
 		fmt.Println(string(body))
 		return 0
 	}
-	fmt.Println(string(body))
+	// spec: §7.6.1 Output formats — the default is a human-readable
+	// rendering (domain trees are nested bullets); --json is the structured
+	// envelope.
+	printDomainHuman(body)
 	return 0
 }
 
@@ -608,6 +919,9 @@ func domainSearch(args []string) int {
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	scope := fs.String("scope", "", "constrain results")
 	topK := fs.Int("top-k", 10, "max results")
+	// spec: §7.6.1 — domain search exposes a --json structured envelope
+	// alongside the default human-readable ranked table.
+	asJSON := fs.Bool("json", false, "JSON output")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
@@ -625,7 +939,14 @@ func domainSearch(args []string) int {
 		params["scope"] = *scope
 	}
 	body := mustGetJSON(*registry, "/v1/search_domains", params)
-	fmt.Println(string(body))
+	if *asJSON {
+		// spec: §7.6.1 — the documented schema keys the ranked domains under
+		// "results" (matching the artifact-search envelope); the wire response
+		// keys them "domains". Map before emitting.
+		emitDomainSearchJSON(body)
+		return 0
+	}
+	printDomainSearchHuman(body)
 	return 0
 }
 
@@ -655,6 +976,13 @@ func artifactShow(args []string) int {
 	fs := flag.NewFlagSet("artifact show", flag.ContinueOnError)
 	setUsage(fs, "Print an artifact's manifest body and frontmatter.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
+	// spec: §7.6.1 — podium artifact show flags --version and --session-id.
+	version := fs.String("version", "", "specific version (default: latest)")
+	sessionID := fs.String("session-id", "", "session id for consistent latest resolution")
+	// spec: §7.6.1 — --json emits the structured {id, version, content_hash,
+	// frontmatter, body} envelope; the default prints the markdown body with
+	// frontmatter at the top.
+	asJSON := fs.Bool("json", false, "JSON output")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
@@ -667,9 +995,22 @@ func artifactShow(args []string) int {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")
 		return 2
 	}
-	body := mustGetJSON(*registry, "/v1/load_artifact",
-		map[string]string{"id": fs.Arg(0)})
-	fmt.Println(string(body))
+	params := map[string]string{"id": fs.Arg(0)}
+	if *version != "" {
+		params["version"] = *version
+	}
+	if *sessionID != "" {
+		params["session_id"] = *sessionID
+	}
+	body := mustGetJSON(*registry, "/v1/load_artifact", params)
+	if *asJSON {
+		// spec: §7.6.1 — emit the documented {id, version, content_hash,
+		// frontmatter, body} schema. The wire response keys the manifest text
+		// "manifest_body" and delivers frontmatter as a raw string.
+		emitArtifactShowJSON(body)
+		return 0
+	}
+	printArtifactHuman(body)
 	return 0
 }
 
@@ -698,6 +1039,24 @@ func initCmd(args []string) int {
 		}
 		*registry = "http://127.0.0.1:8080"
 	}
+	// (spec: §7.7) — with no value flags and an interactive
+	// stdin, prompt for the registry (and optionally harness/target). A
+	// non-terminal stdin (CI, tests, pipes) skips the wizard and falls
+	// through to the required-flag error below, so init never blocks.
+	if *registry == "" && initIsTerminal() {
+		w, err := runInitWizard(initStdin, os.Stderr)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		*registry = w.registry
+		if *harness == "" {
+			*harness = w.harness
+		}
+		if *target == "" {
+			*target = w.target
+		}
+	}
 	if *registry == "" {
 		fmt.Fprintln(os.Stderr, "error: --registry, --standalone, or interactive wizard required")
 		return 2
@@ -706,8 +1065,11 @@ func initCmd(args []string) int {
 	// §7.7 scope resolution: --global → ~/.podium; --local →
 	// <ws>/.podium/sync.local.yaml (gitignored); default →
 	// <ws>/.podium/sync.yaml (committed).
-	dir := ".podium"
 	filename := "sync.yaml"
+	// workspace is the directory holding `.podium/` for the workspace and
+	// local scopes; it is empty for the user-global scope.
+	var workspace string
+	var dir string
 	if *scopeGlobal {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -715,8 +1077,26 @@ func initCmd(args []string) int {
 			return 1
 		}
 		dir = filepath.Join(home, ".podium")
-	} else if *scopeLocal {
-		filename = "sync.local.yaml"
+	} else {
+		// (spec: §7.7 workspace-mode step 1) — walk up from CWD to
+		// reuse an existing `.podium/` workspace so init from a subdirectory
+		// does not create a second workspace; create one in CWD when none is
+		// found. Both the committed default scope and the `--local` override
+		// resolve against the discovered workspace.
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		ws, found := sync.DiscoverWorkspace(cwd)
+		if !found {
+			ws = cwd
+		}
+		workspace = ws
+		dir = filepath.Join(ws, ".podium")
+		if *scopeLocal {
+			filename = "sync.local.yaml"
+		}
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -744,13 +1124,72 @@ func initCmd(args []string) int {
 	// overlay dir to .gitignore so they don't accidentally land
 	// in commits.
 	if !*scopeGlobal && !*scopeLocal {
-		_ = ensureGitignoreEntries(".gitignore", []string{
+		_ = ensureGitignoreEntries(filepath.Join(workspace, ".gitignore"), []string{
 			".podium/sync.local.yaml",
 			".podium/overlay/",
 		})
 	}
 	fmt.Printf("Wrote %s\n", dest)
+	// (spec: §7.7 workspace-mode step 4) — print next-step hints.
+	// The committed default scope suggests committing the file; every
+	// workspace scope suggests running `podium sync` to materialize.
+	if !*scopeGlobal {
+		fmt.Println("Next steps:")
+		if !*scopeLocal {
+			fmt.Printf("  - commit %s to share the configuration with your team\n", dest)
+		}
+		fmt.Println("  - run `podium sync` to materialize artifacts")
+	}
 	return 0
+}
+
+// initWizardResult holds the values gathered from the interactive
+// `podium init` wizard. spec: §7.7.
+type initWizardResult struct {
+	registry string
+	harness  string
+	target   string
+}
+
+// initStdin and initIsTerminal are indirections so tests can drive the
+// interactive wizard without a real terminal. By default the wizard reads
+// os.Stdin and runs only when stdin is a character device.
+var (
+	initStdin      io.Reader = os.Stdin
+	initIsTerminal           = func() bool {
+		fi, err := os.Stdin.Stat()
+		if err != nil {
+			return false
+		}
+		return fi.Mode()&os.ModeCharDevice != 0
+	}
+)
+
+// runInitWizard prompts for the registry (required) and the optional
+// harness and target defaults, returning the collected values. Empty
+// answers leave the corresponding field unset. spec: §7.7.
+func runInitWizard(in io.Reader, out io.Writer) (initWizardResult, error) {
+	r := bufio.NewReader(in)
+	ask := func(prompt string) (string, error) {
+		fmt.Fprint(out, prompt)
+		line, err := r.ReadString('\n')
+		if err != nil && err != io.EOF {
+			return "", err
+		}
+		return strings.TrimSpace(line), nil
+	}
+	var res initWizardResult
+	var err error
+	if res.registry, err = ask("Registry URL or filesystem path: "); err != nil {
+		return res, err
+	}
+	if res.harness, err = ask("Default harness (optional): "); err != nil {
+		return res, err
+	}
+	if res.target, err = ask("Default target (optional): "); err != nil {
+		return res, err
+	}
+	return res, nil
 }
 
 // ensureGitignoreEntries appends every missing entry to path,
@@ -772,6 +1211,35 @@ func ensureGitignoreEntries(path string, entries []string) error {
 	return os.WriteFile(path, []byte(out), 0o644)
 }
 
+// readCLIToken resolves the read CLI's caller credential so its requests
+// reach the registry with the same identity the MCP path uses (spec: §7.6,
+// §7.6.1 — "uses the same identity ... server-side"). Resolution mirrors the
+// MCP bridge: the §6.3.2 injected session token (file, then env) wins, then a
+// §6.3.1 oauth-device-code access token cached in the OS keychain keyed by the
+// registry URL (matching `podium login`). Returns "" when none is configured,
+// in which case the caller reaches the registry anonymously.
+func readCLIToken(registry string) string {
+	if f := os.Getenv("PODIUM_SESSION_TOKEN_FILE"); f != "" {
+		if data, err := os.ReadFile(f); err == nil {
+			return strings.TrimSpace(string(data))
+		}
+	}
+	src := os.Getenv("PODIUM_SESSION_TOKEN_ENV")
+	if src == "" {
+		src = "PODIUM_SESSION_TOKEN"
+	}
+	if v := os.Getenv(src); v != "" {
+		return strings.TrimSpace(v)
+	}
+	if registry != "" {
+		store := identity.KeychainStore{Service: envDefault("PODIUM_TOKEN_KEYCHAIN_NAME", "podium")}
+		if tok, err := store.Load(registry); err == nil {
+			return strings.TrimSpace(tok)
+		}
+	}
+	return ""
+}
+
 func mustGetJSON(base, path string, params map[string]string) []byte {
 	u, err := url.Parse(base + path)
 	if err != nil {
@@ -783,7 +1251,18 @@ func mustGetJSON(base, path string, params map[string]string) []byte {
 		q.Set(k, v)
 	}
 	u.RawQuery = q.Encode()
-	resp, err := http.Get(u.String())
+	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	// §7.6 / §7.6.1 — attach the resolved caller credential so visibility
+	// filtering, layer composition, and audit apply to this identity
+	// server-side, matching the MCP path.
+	if tok := readCLIToken(base); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -825,21 +1304,183 @@ func printSearchHuman(body []byte) {
 	}
 }
 
-// printJSON emits a stable JSON envelope.
-func printJSON(res *sync.Result) {
-	fmt.Fprintf(os.Stdout, "{\n  \"adapter\": %q,\n  \"target\": %q,\n  \"artifacts\": [", res.Adapter, res.Target)
-	for i, a := range res.Artifacts {
-		if i > 0 {
-			fmt.Fprint(os.Stdout, ",")
-		}
-		fmt.Fprintf(os.Stdout, "\n    {\"id\": %q, \"layer\": %q, \"files\": [", a.ID, a.Layer)
-		for j, f := range a.Files {
-			if j > 0 {
-				fmt.Fprint(os.Stdout, ", ")
-			}
-			fmt.Fprintf(os.Stdout, "%q", f)
-		}
-		fmt.Fprint(os.Stdout, "]}")
+// printArtifactHuman renders artifact show output as the markdown body with
+// frontmatter at the top (spec: §7.6.1 Output formats). On a decode failure
+// it falls back to the raw JSON body so output is never lost.
+func printArtifactHuman(body []byte) {
+	var a struct {
+		Frontmatter  string `json:"frontmatter"`
+		ManifestBody string `json:"manifest_body"`
 	}
-	fmt.Fprintln(os.Stdout, "\n  ]\n}")
+	if err := json.Unmarshal(body, &a); err != nil {
+		fmt.Println(string(body))
+		return
+	}
+	if a.Frontmatter != "" {
+		fmt.Print(a.Frontmatter)
+		if !strings.HasSuffix(a.Frontmatter, "\n") {
+			fmt.Println()
+		}
+	}
+	if a.ManifestBody != "" {
+		fmt.Println(a.ManifestBody)
+	}
+}
+
+// domainNode is one node in the load_domain subdomain tree, used by
+// printDomainHuman to render the nested-bullet view.
+type domainNode struct {
+	Path        string       `json:"path"`
+	Name        string       `json:"name"`
+	Description string       `json:"description"`
+	Subdomains  []domainNode `json:"subdomains"`
+}
+
+// printDomainHuman renders a domain map as nested bullets (spec: §7.6.1
+// Output formats). On a decode failure it falls back to the raw JSON body.
+func printDomainHuman(body []byte) {
+	var d struct {
+		Path        string       `json:"path"`
+		Description string       `json:"description"`
+		Keywords    []string     `json:"keywords"`
+		Subdomains  []domainNode `json:"subdomains"`
+		Notable     []struct {
+			ID      string `json:"id"`
+			Type    string `json:"type"`
+			Summary string `json:"summary"`
+		} `json:"notable"`
+	}
+	if err := json.Unmarshal(body, &d); err != nil {
+		fmt.Println(string(body))
+		return
+	}
+	title := d.Path
+	if title == "" {
+		title = "(root)"
+	}
+	fmt.Println(title)
+	if d.Description != "" {
+		fmt.Printf("  %s\n", d.Description)
+	}
+	// spec: §4.5.5 — the requested domain's author-curated keywords are
+	// returned verbatim in load_domain output; surface them in the human view.
+	if len(d.Keywords) > 0 {
+		fmt.Printf("  keywords: %s\n", strings.Join(d.Keywords, ", "))
+	}
+	var walk func(nodes []domainNode, depth int)
+	walk = func(nodes []domainNode, depth int) {
+		indent := strings.Repeat("  ", depth)
+		for _, n := range nodes {
+			// Show the full subdomain path so the user can drill in with
+			// `podium domain show <path>`; the display name follows when set.
+			label := n.Path
+			if label == "" {
+				label = n.Name
+			} else if n.Name != "" {
+				label = n.Path + "  " + n.Name
+			}
+			fmt.Printf("%s- %s\n", indent, label)
+			if n.Description != "" {
+				fmt.Printf("%s    %s\n", indent, n.Description)
+			}
+			walk(n.Subdomains, depth+1)
+		}
+	}
+	if len(d.Subdomains) > 0 {
+		fmt.Println("subdomains:")
+		walk(d.Subdomains, 1)
+	}
+	if len(d.Notable) > 0 {
+		fmt.Println("notable:")
+		for _, a := range d.Notable {
+			fmt.Printf("  - %s  [%s]\n", a.ID, a.Type)
+			if a.Summary != "" {
+				fmt.Printf("      %s\n", a.Summary)
+			}
+		}
+	}
+}
+
+// printDomainSearchHuman renders a domain search result set as a ranked list
+// (spec: §7.6.1 Output formats). On a decode failure it falls back to raw JSON.
+func printDomainSearchHuman(body []byte) {
+	var resp struct {
+		TotalMatched int `json:"total_matched"`
+		Domains      []struct {
+			Path        string `json:"path"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
+		} `json:"domains"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		fmt.Println(string(body))
+		return
+	}
+	fmt.Printf("Showing %d of %d results\n\n", len(resp.Domains), resp.TotalMatched)
+	for _, d := range resp.Domains {
+		label := d.Name
+		if label == "" {
+			label = d.Path
+		}
+		fmt.Printf("  %s  (%s)\n", label, d.Path)
+		if d.Description != "" {
+			fmt.Printf("      %s\n", d.Description)
+		}
+	}
+}
+
+// printJSON emits the §7.5 dry-run envelope:
+// {profile, target, harness, scope, artifacts: [{id, version, content_hash,
+// type, layer}]}. A jq consumer reads .harness, .scope.include, or
+// .artifacts[].version directly. The per-artifact content_hash lets a pre-flight
+// check verify the full §14.11 (artifact_id, version, content_hash) triple
+// before the lock file is committed (spec: §7.5, §14.11).
+func printJSON(res *sync.Result) {
+	type artOut struct {
+		ID          string `json:"id"`
+		Version     string `json:"version"`
+		ContentHash string `json:"content_hash"`
+		Type        string `json:"type"`
+		Layer       string `json:"layer"`
+	}
+	type scopeOut struct {
+		Include []string `json:"include"`
+		Exclude []string `json:"exclude"`
+		Type    []string `json:"type"`
+	}
+	env := struct {
+		Profile   string   `json:"profile"`
+		Target    string   `json:"target"`
+		Harness   string   `json:"harness"`
+		Scope     scopeOut `json:"scope"`
+		Artifacts []artOut `json:"artifacts"`
+	}{
+		Profile: res.Profile,
+		Target:  res.Target,
+		Harness: res.Adapter,
+		Scope: scopeOut{
+			Include: emptyIfNil(res.Scope.Include),
+			Exclude: emptyIfNil(res.Scope.Exclude),
+			Type:    emptyIfNil(res.Scope.Types),
+		},
+		Artifacts: []artOut{},
+	}
+	for _, a := range res.Artifacts {
+		env.Artifacts = append(env.Artifacts, artOut{ID: a.ID, Version: a.Version, ContentHash: a.ContentHash, Type: a.Type, Layer: a.Layer})
+	}
+	b, err := json.MarshalIndent(env, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: encode json: %v\n", err)
+		return
+	}
+	fmt.Fprintln(os.Stdout, string(b))
+}
+
+// emptyIfNil normalizes a nil slice to a non-nil empty slice so the JSON
+// envelope renders [] rather than null for an unset scope field.
+func emptyIfNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }

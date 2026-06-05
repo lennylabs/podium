@@ -10,10 +10,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/lennylabs/podium/pkg/spi"
 )
 
 // SigstoreKeyless implements §4.7.9 Sigstore-keyless signing.
@@ -92,15 +93,15 @@ type envelope struct {
 
 // ErrSigstoreUnavailable signals that the Sigstore endpoints are
 // not configured and the keyless flow cannot proceed. Sign returns
-// this when FulcioURL or OIDCToken is empty.
-var ErrSigstoreUnavailable = errors.New("sign: sigstore-keyless not configured")
+// this when FulcioURL or OIDCToken is empty. Structured per §9.3.
+var ErrSigstoreUnavailable = &spi.Error{Code: "config.signature_provider_unavailable", Message: "sign: sigstore-keyless not configured"}
 
 // Sign produces a Sigstore-keyless envelope over contentHash.
 //
 // contentHash must be of the form "alg:hex" (e.g. "sha256:abc...").
 // The hex must decode cleanly; invalid forms return an error before
 // the network is touched.
-func (s SigstoreKeyless) Sign(contentHash string) (string, error) {
+func (s SigstoreKeyless) Sign(ctx context.Context, contentHash string) (string, error) {
 	if s.FulcioURL == "" || s.OIDCToken == "" {
 		return "", ErrSigstoreUnavailable
 	}
@@ -114,7 +115,6 @@ func (s SigstoreKeyless) Sign(contentHash string) (string, error) {
 		return "", fmt.Errorf("ephemeral key: %w", err)
 	}
 
-	ctx := context.Background()
 	leaf, intermediates, err := s.mintCert(ctx, priv)
 	if err != nil {
 		return "", fmt.Errorf("fulcio: %w", err)
@@ -152,7 +152,7 @@ func (s SigstoreKeyless) Sign(contentHash string) (string, error) {
 // configured trust root → verify signature with the leaf cert's
 // public key against contentHash. When RekorURL is set, also
 // confirm the log entry exists.
-func (s SigstoreKeyless) Verify(contentHash, signature string) error {
+func (s SigstoreKeyless) Verify(ctx context.Context, contentHash, signature string) error {
 	var env envelope
 	if err := json.Unmarshal([]byte(signature), &env); err != nil {
 		return fmt.Errorf("%w: parse envelope: %v", ErrSignatureInvalid, err)
@@ -202,7 +202,7 @@ func (s SigstoreKeyless) Verify(contentHash, signature string) error {
 	}
 
 	if s.RekorURL != "" && env.LogIndex >= 0 {
-		if err := s.fetchRekor(context.Background(), env.LogIndex); err != nil {
+		if err := s.fetchRekor(ctx, env.LogIndex); err != nil {
 			return fmt.Errorf("%w: rekor: %v", ErrSignatureInvalid, err)
 		}
 	}

@@ -29,7 +29,7 @@ Provider-specific options are passed as additional env vars (e.g., `PODIUM_OAUTH
 
 ## 6.3 Identity Providers
 
-Identity providers attach the caller's OAuth-attested identity to every registry call.
+Identity providers attach the caller's OAuth-attested identity to every registry call. `oauth-device-code` is the client-side acquisition provider: the consumer obtains and caches the token through the device-code flow. `injected-session-token` is the provider the registry verifies server-side, by checking the runtime's signature on each call (§6.3.2).
 
 - **`oauth-device-code`** _(default)_. Interactive device-code flow on first use; tokens cached in the OS keychain (macOS Keychain, Windows Credential Manager, libsecret on Linux). Refreshes transparently. Defaults: access-token TTL 15 min, refresh-token TTL 7 days, revocation propagation ≤60s. Options: `PODIUM_OAUTH_AUDIENCE`, `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT`, `PODIUM_TOKEN_KEYCHAIN_NAME`.
 
@@ -148,20 +148,36 @@ The `HarnessAdapter` translates a canonical artifact into the format a specific 
 
 The adapter set grows as new harnesses appear. Custom adapters register through the `HarnessAdapter` SPI (§9.1).
 
-**Adapter outputs.** What each built-in adapter writes, by artifact type:
+**Adapter outputs.** Each adapter writes an artifact into the target harness's native location for that type, using one of these mechanisms:
 
-| Adapter          | Target                                                                                                                                                                  |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `none`           | _(default)_ Writes the canonical layout as-is. |
-| `claude-code`    | Writes `.claude/agents/<name>.md` (frontmatter + composed prompt) and `.claude/rules/<name>.md` for `type: rule`. Places skill packages at `.claude/skills/<name>/SKILL.md` (per the agentskills.io standard). Places bundled resources for non-skill types under `.claude/podium/<artifact-id>/`. |
-| `claude-desktop` | Writes a Claude Desktop extension layout (`manifest.json` derived from canonical frontmatter; resources alongside). |
-| `claude-cowork`  | Writes a Claude Cowork plugin layout (`marketplace.json` plus per-plugin folders containing skills, commands, agents, hooks, and MCP server registrations). The output directory tree is intended to be committed to a private GitHub repo that the org admin imports as a private marketplace. |
-| `cursor`         | Writes Cursor's native agent / extension format. For `type: rule`, writes `.cursor/rules/<name>.mdc` with `alwaysApply` / `globs` / `description` per `rule_mode`. |
-| `codex`          | Writes Codex's native package layout. For `type: rule`, injects into `AGENTS.md` between markers. |
-| `gemini`         | Writes Gemini CLI's native package layout. |
-| `opencode`       | Writes OpenCode's native package layout. For `type: rule`, injects into `AGENTS.md` between markers (or writes `.opencode/rules/<name>.md` for `rule_mode: explicit`). |
-| `pi`             | Writes Pi's native layout. For `type: rule`, injects into `AGENTS.md` (project-local `.pi/AGENTS.md` or root `AGENTS.md`); explicit-mode rules at `.pi/rules/<name>.md`. |
-| `hermes`         | Writes Hermes Agent's native layout. For `type: rule`, writes `.claude/rules/<name>.md` (Hermes also reads `.cursor/rules/*.mdc` natively, so cursor-format output works too). |
+- **Standalone file.** The artifact becomes a discrete file, or a skill folder, that the harness discovers natively. This covers most cells in the matrix below.
+- **Bundled resources.** A skill's `scripts/`, `references/`, and `assets/` subfolders ship verbatim inside the skill's native folder. Reference material that belongs to a skill travels this way as part of the skill package (§4.4); it is not a separate artifact.
+- **Inject.** The artifact body is merged into a shared always-loaded instruction file (`AGENTS.md` or `GEMINI.md`) between Podium-managed markers, so a later sync reconciles only Podium's section and leaves the rest of the file intact.
+- **Config-merge.** A `hook` or `mcp-server` artifact is merged into the harness's shared configuration file as a Podium-owned entry keyed by the artifact ID. The adapter emits a structured fragment and the materialization layer performs the read-merge-write, so the operator's other entries are preserved and removing the artifact removes its entry.
+
+A `✗` cell means the harness has no native concept for that type, or the only native location is outside the materialization target. Materialization writes project-level files only, so a surface that exists solely at user or operating-system scope is `✗` here. The §6.7.1 capability matrix grades each `✗` cell. When an artifact declares `target_harnesses:`, ingest lint errors against a `✗` cell for a named harness and warns against a `⚠` cell. When `target_harnesses:` is absent, ingest stays permissive and the `✗` cell is enforced at materialization (§6.9) against the harness the artifact loads onto. An author scopes a non-portable artifact to the harnesses it supports with `target_harnesses:`.
+
+`type: context` has no native concept in any harness. A `type: context` artifact materializes to a harness-neutral `.podium/context/<artifact-id>/` directory, identical across every adapter. Reference material that belongs to a skill is shipped as that skill's bundled `references/` resources instead, not as a separate context artifact.
+
+The target for each remaining type, by adapter (paths are project-relative; `<n>` is the artifact's leaf name):
+
+| Type         | claude-code               | claude-desktop | claude-cowork        | cursor                     | codex                  | opencode                    | gemini                     | pi                  | hermes                |
+| ------------ | ------------------------- | -------------- | -------------------- | -------------------------- | ---------------------- | --------------------------- | -------------------------- | ------------------- | --------------------- |
+| `skill`      | `.claude/skills/<n>/SKILL.md` | ✗          | `skills/<n>/SKILL.md` | `.cursor/skills/<n>/SKILL.md` | `.agents/skills/<n>/SKILL.md` | `.opencode/skills/<n>/SKILL.md` | `.gemini/skills/<n>/SKILL.md` | `.pi/skills/<n>/SKILL.md` | ✗                |
+| `agent`      | `.claude/agents/<n>.md`   | ✗              | `agents/<n>.md`      | `.cursor/agents/<n>.md`    | `.codex/agents/<n>.toml` | `.opencode/agents/<n>.md` | `.gemini/agents/<n>.md`    | ✗                   | ✗                     |
+| `command`    | `.claude/commands/<n>.md` | ✗              | `commands/<n>.md`    | `.cursor/commands/<n>.md`  | ✗                      | `.opencode/commands/<n>.md` | `.gemini/commands/<n>.toml` | `.pi/prompts/<n>.md` | ✗                    |
+| `rule`       | `.claude/rules/<n>.md`    | ✗              | `skills/<n>/SKILL.md` (fallback) | `.cursor/rules/<n>.mdc`    | `AGENTS.md` (inject)   | `AGENTS.md` (inject)        | `GEMINI.md` (inject)       | `AGENTS.md` (inject) | `.cursor/rules/<n>.mdc` |
+| `hook`       | `settings.json` (cfg)     | ✗              | `hooks/hooks.json`   | `.cursor/hooks.json` (cfg) | `config.toml` (cfg)    | ✗                       | `settings.json` (cfg)      | ✗                   | ✗                     |
+| `mcp-server` | `.mcp.json` (cfg)         | ✗              | `.mcp.json`          | `.cursor/mcp.json` (cfg)   | `config.toml` (cfg)    | `opencode.json` (cfg)       | `settings.json` (cfg)      | ✗                   | ✗                     |
+
+`none` writes the canonical layout (`ARTIFACT.md`, `SKILL.md`, bundled resources) without translation. Claude Cowork paths are relative to a plugin directory inside a marketplace repository: the repository root holds `.claude-plugin/marketplace.json`, and each plugin lives under `plugins/<plugin>/` with a `.claude-plugin/plugin.json` manifest. The config-merge targets resolve to the harness's project-scope config file: `.claude/settings.json`, `.cursor/hooks.json` and `.cursor/mcp.json`, `.codex/config.toml`, `.gemini/settings.json`, and root `opencode.json`.
+
+Notes on partial and migrating surfaces:
+
+- Codex custom prompts are user-scope (`~/.codex/prompts/`) and are being folded into skills, so `command` is `✗` for Codex. Cursor and Cowork are likewise folding command files into skills; authors targeting those harnesses should prefer `type: skill`.
+- Hermes reads project-level `.cursor/rules/*.mdc`, `AGENTS.md`, and `.cursorrules`, so its `rule` output reuses the Cursor `.mdc` format. Its skill, command, hook, and MCP surfaces live under user-scope `~/.hermes/`, so they are `✗` for project-level materialization.
+- Claude Desktop configures MCP servers at user or operating-system scope (`claude_desktop_config.json`, or a `.mcpb` bundle) and exposes no project-level surface, so project materialization produces no Claude Desktop output. Configure it out of band.
+- OpenCode hooks are JavaScript or TypeScript plugin modules and Pi hooks are extension code, so `hook` is `✗` for both.
 
 **What an adapter does.** Mechanical translation:
 
@@ -178,7 +194,7 @@ The adapter set grows as new harnesses appear. Custom adapters register through 
 
 **Cache behavior.** The cache stores canonical artifact bytes (§6.5). Adapter output is regenerated on each materialization by default. An optional in-memory memo cache keyed on `(content_hash, harness)` with 5-minute TTL is enabled for sessions that load the same artifact repeatedly.
 
-**Conformance test suite.** Every built-in adapter passes the same set of tests (§11): load a canonical fixture, produce the harness-native output, verify the harness can spawn an agent that uses the materialized artifact end-to-end.
+**Conformance test suite.** Every built-in adapter is covered by the §11 materialization suite: a canonical artifact set is materialized through each adapter, the exact harness-native output is pinned (paths and file contents) against golden files, each produced file is checked to parse and satisfy the target harness's config schema (JSON config keys, TOML tables, `SKILL.md` and `.mdc` frontmatter), and re-materialization into the same tree is asserted idempotent. Driving a real harness binary against the materialized output to spawn an agent end-to-end is an opt-in integration check that runs only where the harness binary is available.
 
 **Versioning.** Adapter behavior is versioned alongside the MCP server binary. Profile and harness combinations that need a newer adapter behavior pin a minimum MCP server version; older binaries refuse to start.
 
@@ -188,28 +204,48 @@ Adapters can only translate features the target harness supports. Authors who us
 
 Two mitigations:
 
-1. **Core feature set.** A documented subset of canonical fields and patterns that all built-in adapters support. Authors writing to the core feature set get true "author once, load anywhere."
-2. **Capability matrix.** Per-(field, harness) compatibility table maintained alongside the adapters. Ingest-time lint surfaces capability mismatches: "field `X` is used but adapter `cursor` cannot translate it."
+1. **Core feature set.** A documented subset of canonical fields and patterns that the project-scope adapters support natively. Authors writing to the core feature set get author-once, load-anywhere materialization across the harnesses with a project-level surface. A harness configured out of band (claude-desktop has no project-scope surface) sits outside this subset, so an artifact that targets it relies on `target_harnesses:` rather than the core set.
+2. **Capability matrix.** A compatibility table maintained alongside the adapters. Ingest-time lint surfaces capability mismatches: "field `X` is used but adapter `cursor` cannot translate it."
 
 Authors who must use a non-portable feature can declare `target_harnesses:` in frontmatter to opt out of cross-harness materialization for that artifact.
 
-**Capability matrix (excerpt; maintained in sync with adapter implementations).** Legend: ✓ supported natively, ⚠ supported via fallback (lint warning), ✗ not supported (lint error or `target_harnesses:` opt-out required).
+**Capability matrix (maintained in sync with adapter implementations).** Legend: ✓ supported natively, ⚠ supported via fallback (ingest lint warns when a declared `target_harnesses:` names the harness, and materialization emits the degraded fallback), ✗ not supported (ingest lint errors when a declared `target_harnesses:` names the harness, and materialization onto that harness otherwise fails per §6.9). When `target_harnesses:` is absent, ingest applies no capability diagnostic and the per-harness grade is enforced at materialization. The matrix grades type-level materialization, frontmatter-field fidelity, and the `rule_mode` and `hook_event` rows. `rule` and `hook` are graded by their dedicated rows rather than a type row.
 
-| Field                      | claude-code | claude-desktop | claude-cowork | cursor | codex | opencode | gemini | pi  | hermes |
-| -------------------------- | ----------- | -------------- | ------------- | ------ | ----- | -------- | ------ | --- | ------ |
-| `description`              | ✓           | ✓              | ✓             | ✓      | ✓     | ✓        | ✓      | ✓   | ✓      |
-| `mcpServers`               | ✓           | ✓              | ✓             | ✓      | ✓     | ✓        | ✓      | ✓   | ✓      |
-| `delegates_to` (subagents) | ✓           | ⚠              | ✓             | ✗      | ⚠     | ✓        | ✗      | ✓   | ✓      |
-| `requiresApproval`         | ✓           | ⚠              | ✓             | ✗      | ✓     | ✓        | ✗      | ⚠   | ⚠      |
-| `sandbox_profile`          | ✓           | ⚠              | ⚠             | ✗      | ✓     | ✓        | ✗      | ⚠   | ⚠      |
-| `expose_as_mcp_prompt`     | ✓           | ✓              | ✓             | ✓      | ✓     | ✓        | ✓      | ✓   | ✓      |
-| `rule_mode: always`        | ✓           | ✓              | ✓             | ✓      | ✓     | ✓        | ⚠      | ✓   | ✓      |
-| `rule_mode: glob`          | ⚠           | ✗              | ⚠             | ✓      | ⚠     | ⚠        | ✗      | ⚠   | ✓      |
-| `rule_mode: auto`          | ⚠           | ✗              | ⚠             | ✓      | ✗     | ✗        | ✗      | ✗   | ⚠      |
-| `rule_mode: explicit`      | ✓           | ✓              | ✓             | ✓      | ✓     | ✓        | ⚠      | ✓   | ✓      |
-| `hook_event` (any)         | ✓           | ✗              | ⚠             | ✓      | ✓     | ⚠        | ⚠      | ⚠   | ⚠      |
+Type materialization (can the harness materialize an artifact of this type at project scope):
 
-The `hook_event` row summarizes hook support at the field level. Per-event coverage (which canonical events from §4.3.5 each adapter translates) is tracked in the adapter implementation rather than in this spec; the row above marks ✓ when the adapter supports the common events (`session_start`, `session_end`, `pre_tool_use`, `post_tool_use`, `stop`, `pre_compact`) and ⚠ when only a subset of canonical events translate. For the harness's own current event surface, refer to the harness's documentation.
+| Type         | claude-code | claude-desktop | claude-cowork | cursor | codex | opencode | gemini | pi  | hermes |
+| ------------ | ----------- | -------------- | ------------- | ------ | ----- | -------- | ------ | --- | ------ |
+| `skill`      | ✓           | ✗              | ✓             | ✓      | ✓     | ✓        | ✓      | ✓   | ✗      |
+| `agent`      | ✓           | ✗              | ✓             | ✓      | ✓     | ✓        | ✓      | ✗   | ✗      |
+| `context`    | ✓           | ✗              | ✓             | ✓      | ✓     | ✓        | ✓      | ✓   | ✓      |
+| `command`    | ✓           | ✗              | ✓             | ✓      | ✗     | ✓        | ✓      | ✓   | ✗      |
+| `mcp-server` | ✓           | ✗              | ✓             | ✓      | ✓     | ✓        | ✓      | ✗   | ✗      |
+
+Frontmatter-field fidelity, measured on a `type: agent` carrier (does the field survive the harness's agent output):
+
+| Field              | claude-code | claude-desktop | claude-cowork | cursor | codex | opencode | gemini | pi  | hermes |
+| ------------------ | ----------- | -------------- | ------------- | ------ | ----- | -------- | ------ | --- | ------ |
+| `description`      | ✓           | ✗              | ✓             | ✓      | ✓     | ✓        | ✓      | ✗   | ✗      |
+| `mcpServers`       | ✓           | ✗              | ✓             | ✓      | ✗     | ✓        | ✓      | ✗   | ✗      |
+| `delegates_to`     | ✓           | ✗              | ✓             | ✓      | ✗     | ✓        | ✓      | ✗   | ✗      |
+| `requiresApproval` | ✓           | ✗              | ✓             | ✓      | ✗     | ✓        | ✓      | ✗   | ✗      |
+| `sandbox_profile`  | ✓           | ✗              | ✓             | ✓      | ✗     | ✓        | ✓      | ✗   | ✗      |
+
+A field row records whether the value survives the harness's agent materialization. The pass-through `.md` agents (claude-code, claude-cowork, cursor, opencode, gemini) preserve every field; the Codex TOML agent keeps `name` and `description` and drops the rest; a harness with no project-level agent surface (claude-desktop, pi, hermes) drops the row.
+
+Rule modes (`type: rule`) and hook events (`type: hook`):
+
+| Capability            | claude-code | claude-desktop | claude-cowork | cursor | codex | opencode | gemini | pi  | hermes |
+| --------------------- | ----------- | -------------- | ------------- | ------ | ----- | -------- | ------ | --- | ------ |
+| `rule_mode: always`   | ✓           | ✗              | ⚠             | ✓      | ✓     | ✓        | ✓      | ✓   | ✓      |
+| `rule_mode: glob`     | ✓           | ✗              | ⚠             | ✓      | ⚠     | ⚠        | ⚠      | ⚠   | ✓      |
+| `rule_mode: auto`     | ⚠           | ✗              | ⚠             | ✓      | ⚠     | ⚠        | ⚠      | ⚠   | ✓      |
+| `rule_mode: explicit` | ⚠           | ✗              | ⚠             | ✓      | ⚠     | ⚠        | ⚠      | ⚠   | ✓      |
+| `hook_event` (any)    | ✓           | ✗              | ✓             | ⚠      | ✓     | ✗        | ✓      | ✗   | ✗      |
+
+A rule mode is ✓ where the adapter produces native per-file or per-mode scoping, and ⚠ where the rule degrades to an always-loaded block. Cursor and Hermes write `.cursor/rules/*.mdc`, which carry every mode natively. Claude Code writes `.claude/rules/` files: `always` loads at launch (native), `glob` uses the native `paths:` list (native), and `auto` and `explicit` fall back to a load-always file because Claude Code has no description-attach or mention-only rule mode. The `AGENTS.md` and `GEMINI.md` inject harnesses (codex, opencode, gemini, pi) honor `always` natively and degrade the scoped modes to the always-loaded block. Claude Cowork ships rules as skills, a fallback for every mode.
+
+The `hook_event` row summarizes hook support at the field level. Per-event coverage (which canonical events from §4.3.5 each adapter translates) is tracked in the adapter implementation rather than in this spec; the row marks ✓ when the adapter config-merges the common events (`session_start`, `session_end`, `pre_tool_use`, `post_tool_use`, `stop`, `pre_compact`) and ⚠ when only a subset translates. Cursor is ⚠ because it exposes per-category subtype events (`beforeShellExecution` and the like) rather than the generic tool events. For the harness's own current event surface, refer to the harness's documentation.
 
 ## 6.8 Process Model
 

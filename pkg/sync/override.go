@@ -3,9 +3,11 @@ package sync
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/lennylabs/podium/internal/clock"
+	"github.com/lennylabs/podium/pkg/adapter"
 )
 
 // Errors related to override / save-as / profile edit.
@@ -31,13 +33,28 @@ type OverrideOptions struct {
 	DryRun bool
 	// Clock provides timestamps; defaults to clock.Real.
 	Clock clock.Clock
+
+	// Materialization inputs (§7.5.5). When RegistryPath is set and DryRun is
+	// false, Override re-materializes the target after updating the toggles:
+	// --add then writes the artifact's files through the active adapter and
+	// --remove deletes them, just like a full sync would. The scope and
+	// profile come from the lock so the baseline matches the last sync. When
+	// RegistryPath is empty, Override only records the toggles (the caller
+	// materializes separately).
+	RegistryPath    string
+	AdapterID       string
+	AdapterRegistry *adapter.Registry
+	OverlayPath     string
+	HTTPClient      *http.Client
 }
 
-// OverrideResult is what Override returns: the new lock state and
-// whether anything actually changed.
+// OverrideResult is what Override returns: the new lock state, whether
+// anything actually changed, and any advisory warnings (e.g. a redundant
+// --add on an already-materialized artifact, per §7.5.5).
 type OverrideResult struct {
-	Lock    *LockFile
-	Changed bool
+	Lock     *LockFile
+	Changed  bool
+	Warnings []string
 }
 
 // Override applies the §7.5.5 toggle semantics to the lock file at
@@ -66,6 +83,7 @@ func Override(opts OverrideOptions) (*OverrideResult, error) {
 
 	now := opts.Clock.Now().UTC()
 	changed := false
+	var warnings []string
 
 	if opts.Reset {
 		if len(lock.Toggles.Add) > 0 || len(lock.Toggles.Remove) > 0 {
@@ -74,14 +92,33 @@ func Override(opts OverrideOptions) (*OverrideResult, error) {
 		lock.Toggles = LockToggles{}
 	}
 
+	// "Already materialized" is the set in the lock's artifacts list, minus any
+	// pending removal: an ID slated for removal is not currently on disk, so
+	// re-adding it is a real operation rather than a redundant no-op.
+	materialized := map[string]bool{}
+	for _, a := range lock.Artifacts {
+		materialized[a.ID] = true
+	}
+	pendingRemove := map[string]bool{}
+	for _, t := range lock.Toggles.Remove {
+		pendingRemove[t.ID] = true
+	}
+
 	for _, id := range opts.Add {
-		if !alreadyAdded(lock.Toggles.Add, id) {
-			lock.Toggles.Add = append(lock.Toggles.Add, LockToggle{
-				ID:      id,
-				AddedAt: now,
-			})
-			changed = true
+		// spec: §7.5.5 — "running --add on something already materialized is a
+		// no-op with a warning." An ID already in toggles.add, or already in the
+		// resolved/materialized set (and not pending removal), is redundant: skip
+		// the toggle so it does not survive into a later save-as as a stray
+		// pinned include, and surface a warning.
+		if alreadyAdded(lock.Toggles.Add, id) || (materialized[id] && !pendingRemove[id]) {
+			warnings = append(warnings, fmt.Sprintf("%q is already materialized; --add is a no-op", id))
+			continue
 		}
+		lock.Toggles.Add = append(lock.Toggles.Add, LockToggle{
+			ID:      id,
+			AddedAt: now,
+		})
+		changed = true
 		// An add invalidates any prior remove for the same ID.
 		lock.Toggles.Remove = removeToggleByID(lock.Toggles.Remove, id)
 	}
@@ -101,7 +138,39 @@ func Override(opts OverrideOptions) (*OverrideResult, error) {
 			return nil, err
 		}
 	}
-	return &OverrideResult{Lock: lock, Changed: changed}, nil
+
+	// §7.5.5: --add writes the artifact's files and --remove deletes them.
+	// Re-materialize the target from the lock's scope + the updated toggles
+	// so the on-disk set matches. PreserveToggles keeps the toggles we just
+	// wrote and rewrites the lock with the new materialized paths.
+	if !opts.DryRun && opts.RegistryPath != "" {
+		if _, err := Run(Options{
+			RegistryPath:    opts.RegistryPath,
+			Target:          opts.Target,
+			AdapterID:       opts.AdapterID,
+			AdapterRegistry: opts.AdapterRegistry,
+			OverlayPath:     opts.OverlayPath,
+			HTTPClient:      opts.HTTPClient,
+			Profile:         string(lock.Profile),
+			Scope: ScopeFilter{
+				Include: lock.Scope.Include,
+				Exclude: lock.Scope.Exclude,
+				Types:   lock.Scope.Type,
+			},
+			PreserveToggles: true,
+			// spec: §7.5.3 — override-driven lock writes stamp
+			// last_synced_by: override.
+			LastSyncedBy: "override",
+		}); err != nil {
+			return nil, fmt.Errorf("override: materialize: %w", err)
+		}
+		// Reflect the rewritten lock (materialized paths, last_synced_at) in
+		// the returned state.
+		if reread, rerr := ReadLock(opts.Target); rerr == nil && reread != nil {
+			lock = reread
+		}
+	}
+	return &OverrideResult{Lock: lock, Changed: changed, Warnings: warnings}, nil
 }
 
 // alreadyAdded reports whether id appears in the toggle list.
@@ -164,9 +233,18 @@ func SaveAs(opts SaveAsOptions) (*SaveAsResult, error) {
 	if lock == nil {
 		lock = &LockFile{Version: 1, Target: opts.Target}
 	}
-	cfg, err := EnsureConfig(opts.Target)
+	// Detect a fresh sync.yaml so the write can emit the empty defaults: block
+	// §7.5.6 documents for a newly created file.
+	cfg, err := ReadConfig(opts.Target)
 	if err != nil {
 		return nil, err
+	}
+	fresh := cfg == nil
+	if cfg == nil {
+		cfg = &SyncConfig{Profiles: map[string]Profile{}}
+	}
+	if cfg.Profiles == nil {
+		cfg.Profiles = map[string]Profile{}
 	}
 	if _, exists := cfg.Profiles[opts.Profile]; exists && !opts.Update {
 		return nil, fmt.Errorf("save-as: profile %q already exists; pass --update to overwrite", opts.Profile)
@@ -188,11 +266,14 @@ func SaveAs(opts SaveAsOptions) (*SaveAsResult, error) {
 		return res, nil
 	}
 	cfg.Profiles[opts.Profile] = prof
-	if err := WriteConfig(opts.Target, cfg); err != nil {
+	if err := writeConfig(opts.Target, cfg, fresh); err != nil {
 		return nil, err
 	}
-	// Clear toggles in the lock file.
+	// spec: §7.5.6 / §11 "Save-as test" — the toggles are now part of the
+	// profile's scope, so clear them, and the saved profile becomes the target's
+	// active profile (the lock's `profile:` field).
 	lock.Toggles = LockToggles{}
+	lock.Profile = nullProfile(opts.Profile)
 	if err := WriteLock(opts.Target, lock); err != nil {
 		return nil, err
 	}
@@ -219,7 +300,9 @@ type ProfileEditResult struct {
 
 // ProfileEdit modifies an entry in sync.yaml's `profiles:` block per
 // §7.5.7. The target directory and lock file are untouched; a
-// subsequent `podium sync` picks up the change.
+// subsequent `podium sync` picks up the change. The edit round-trips the
+// file through a yaml.Node tree so comments and formatting around the
+// untouched keys survive (§7.5.7 "preserving formatting and comments").
 func ProfileEdit(opts ProfileEditOptions) (*ProfileEditResult, error) {
 	if opts.Target == "" {
 		return nil, ErrNoTarget
@@ -227,49 +310,7 @@ func ProfileEdit(opts ProfileEditOptions) (*ProfileEditResult, error) {
 	if opts.Profile == "" {
 		return nil, fmt.Errorf("profile edit: profile name required")
 	}
-	cfg, err := EnsureConfig(opts.Target)
-	if err != nil {
-		return nil, err
-	}
-	prof, ok := cfg.Profiles[opts.Profile]
-	if !ok {
-		// §7.5.7: "If .podium/sync.yaml doesn't exist, podium profile
-		// edit <name> creates it with the named profile and an empty
-		// defaults: block."
-		prof = Profile{}
-	}
-	for _, p := range opts.AddInclude {
-		if !containsStr(prof.Include, p) {
-			prof.Include = append(prof.Include, p)
-		}
-	}
-	prof.Include = removeStrings(prof.Include, opts.RemoveInclude)
-	for _, p := range opts.AddExclude {
-		if !containsStr(prof.Exclude, p) {
-			prof.Exclude = append(prof.Exclude, p)
-		}
-	}
-	prof.Exclude = removeStrings(prof.Exclude, opts.RemoveExclude)
-
-	res := &ProfileEditResult{Profile: prof}
-	if opts.DryRun {
-		return res, nil
-	}
-	cfg.Profiles[opts.Profile] = prof
-	if err := WriteConfig(opts.Target, cfg); err != nil {
-		return nil, err
-	}
-	res.Wrote = true
-	return res, nil
-}
-
-func containsStr(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-	return false
+	return editProfileYAML(opts)
 }
 
 func removeStrings(haystack, drop []string) []string {

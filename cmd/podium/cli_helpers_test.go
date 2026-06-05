@@ -48,10 +48,10 @@ func TestParsePolicies_RejectsBadInput(t *testing.T) {
 func TestGuessTokenURL(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
-		"https://issuer.example/oauth2/device":    "https://issuer.example/oauth2/token",
-		"https://issuer.example/v1/oauth/device":  "https://issuer.example/v1/oauth/token",
-		"https://issuer.example/device":           "https://issuer.example/token",
-		"https://issuer.example/custom-auth":      "https://issuer.example/custom-auth/token",
+		"https://issuer.example/oauth2/device":   "https://issuer.example/oauth2/token",
+		"https://issuer.example/v1/oauth/device": "https://issuer.example/v1/oauth/token",
+		"https://issuer.example/device":          "https://issuer.example/token",
+		"https://issuer.example/custom-auth":     "https://issuer.example/custom-auth/token",
 	}
 	for in, want := range cases {
 		if got := guessTokenURL(in); got != want {
@@ -177,34 +177,59 @@ func TestFormatList_EmptyAndPopulated(t *testing.T) {
 	}
 }
 
-func TestPrintJSON_EmitsAdapterTargetAndArtifacts(t *testing.T) {
+// spec: §7.5 — the --json envelope is
+// {profile, target, harness, scope, artifacts: [{id, version, type, layer}]}.
+func TestPrintJSON_EmitsSpecEnvelope(t *testing.T) {
 	got := captureStdout(t, func() {
 		printJSON(&sync.Result{
 			Adapter: "claude-code",
+			Profile: "finance-team",
 			Target:  "/tmp/proj",
+			Scope: sync.ScopeFilter{
+				Include: []string{"finance/**"},
+				Exclude: []string{"finance/**/legacy/**"},
+				Types:   []string{"skill", "agent"},
+			},
 			Artifacts: []sync.ArtifactResult{
-				{ID: "personal/a", Layer: "personal", Files: []string{".claude/agents/a.md"}},
-				{ID: "personal/b", Layer: "personal", Files: []string{".claude/agents/b.md", ".claude/agents/b2.md"}},
+				{ID: "personal/a", Version: "1.0.0", Type: "agent", Layer: "personal", Files: []string{".claude/agents/a.md"}},
+				{ID: "personal/b", Version: "2.1.0", Type: "skill", Layer: "personal", Files: []string{".claude/agents/b.md"}},
 			},
 		})
 	})
 	var envelope struct {
-		Adapter   string `json:"adapter"`
-		Target    string `json:"target"`
+		Profile string `json:"profile"`
+		Target  string `json:"target"`
+		Harness string `json:"harness"`
+		Scope   struct {
+			Include []string `json:"include"`
+			Exclude []string `json:"exclude"`
+			Type    []string `json:"type"`
+		} `json:"scope"`
 		Artifacts []struct {
-			ID    string   `json:"id"`
-			Layer string   `json:"layer"`
-			Files []string `json:"files"`
+			ID      string `json:"id"`
+			Version string `json:"version"`
+			Type    string `json:"type"`
+			Layer   string `json:"layer"`
 		} `json:"artifacts"`
 	}
 	if err := json.Unmarshal([]byte(got), &envelope); err != nil {
 		t.Fatalf("printJSON output not valid JSON: %v\n%s", err, got)
 	}
-	if envelope.Adapter != "claude-code" || envelope.Target != "/tmp/proj" {
+	if envelope.Harness != "claude-code" || envelope.Profile != "finance-team" || envelope.Target != "/tmp/proj" {
 		t.Errorf("envelope = %+v", envelope)
 	}
-	if len(envelope.Artifacts) != 2 || envelope.Artifacts[1].Files[1] != ".claude/agents/b2.md" {
-		t.Errorf("artifacts = %+v", envelope.Artifacts)
+	if len(envelope.Scope.Include) != 1 || envelope.Scope.Include[0] != "finance/**" || len(envelope.Scope.Type) != 2 {
+		t.Errorf("scope = %+v", envelope.Scope)
+	}
+	if len(envelope.Artifacts) != 2 {
+		t.Fatalf("artifacts = %+v", envelope.Artifacts)
+	}
+	if envelope.Artifacts[1].Version != "2.1.0" || envelope.Artifacts[1].Type != "skill" || envelope.Artifacts[0].Layer != "personal" {
+		t.Errorf("artifact fields = %+v", envelope.Artifacts)
+	}
+	// The non-spec "files" key is gone.
+	if strings.Contains(got, "\"files\"") || strings.Contains(got, "\"adapter\"") {
+		t.Errorf("envelope still carries adapter/files keys:\n%s", got)
 	}
 }
 
@@ -270,13 +295,13 @@ func TestSubcommands_HelpExitsZero(t *testing.T) {
 func TestDispatchers_NoArgsExit2_HelpExit0(t *testing.T) {
 	t.Parallel()
 	for name, cmd := range map[string]func([]string) int{
-		"cacheCmd":         cacheCmd,
-		"configCmd":        configCmd,
-		"layerCmd":         layerCmd,
-		"profileCmd":       profileCmd,
-		"domainCmd":        domainCmd,
-		"artifactCmd":      artifactCmd,
-		"adminRuntimeCmd":  adminRuntimeCmd,
+		"cacheCmd":        cacheCmd,
+		"configCmd":       configCmd,
+		"layerCmd":        layerCmd,
+		"profileCmd":      profileCmd,
+		"domainCmd":       domainCmd,
+		"artifactCmd":     artifactCmd,
+		"adminRuntimeCmd": adminRuntimeCmd,
 	} {
 		t.Run(name+"_noargs", func(t *testing.T) {
 			withStderr(t, func() {
@@ -304,8 +329,14 @@ func TestDispatchers_NoArgsExit2_HelpExit0(t *testing.T) {
 
 func TestSubcommands_MissingRegistryExits2(t *testing.T) {
 	// Each of these requires --registry. Without the env var or flag
-	// set, they should exit 2 before touching the network.
+	// set, they should exit 2 before touching the network. Isolate the
+	// config scopes (§7.5.2) so a developer's real ~/.podium/sync.yaml or a
+	// project sync.yaml in a parent directory cannot resolve a registry and
+	// turn the expected exit-2 into a network attempt.
 	t.Setenv("PODIUM_REGISTRY", "")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+	t.Chdir(t.TempDir())
 	cases := map[string][]string{
 		"logoutCmd":       nil,
 		"quotaCmd":        nil,
@@ -458,4 +489,3 @@ func withStderr(t *testing.T, fn func()) {
 	}()
 	fn()
 }
-

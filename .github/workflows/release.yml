@@ -178,11 +178,10 @@ jobs:
           mc mb --ignore-existing local/podium
       - name: pkg/objectstore live S3 conformance
         env:
-          PODIUM_S3_ENDPOINT: localhost:9000
+          PODIUM_S3_ENDPOINT: http://localhost:9000
           PODIUM_S3_BUCKET: podium
           PODIUM_S3_ACCESS_KEY_ID: minioadmin
           PODIUM_S3_SECRET_ACCESS_KEY: minioadmin
-          PODIUM_S3_USE_SSL: "false"
         run: go test ./pkg/objectstore/... -count=1 -v
 
   # Cross-compile the three binaries for every supported (os, arch).

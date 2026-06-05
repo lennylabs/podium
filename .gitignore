@@ -19,3 +19,9 @@ sdks/podium-py/podium/_version.py
 node_modules/
 .env.local
 .envrc.local
+
+# Local integration/live-test credentials. Copy test.env.example to test.env
+# and fill it in; the test harness loads it (see internal/testenv + Makefile).
+/test.env
+
+.claude/scheduled_tasks.lock

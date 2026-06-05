@@ -114,8 +114,10 @@ func TestReadCLI_ArtifactShow(t *testing.T) {
 	if !strings.Contains(out, "Skill body content") {
 		t.Errorf("missing manifest body in output: %s", out)
 	}
-	if !strings.Contains(out, "team/x") {
-		t.Errorf("missing artifact id in output: %s", out)
+	// spec: §7.6.1 — the default rendering prints the markdown body with
+	// frontmatter at the top, so the frontmatter is present.
+	if !strings.Contains(out, "name: x") {
+		t.Errorf("missing frontmatter in output: %s", out)
 	}
 }
 

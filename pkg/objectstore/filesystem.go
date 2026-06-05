@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,6 +94,45 @@ func (f *Filesystem) Get(_ context.Context, key string) ([]byte, error) {
 		return nil, ErrNotFound
 	}
 	return body, err
+}
+
+// GetStream opens the body for key and returns it as a reader the
+// caller closes. The §7.2 data plane streams it to the response writer
+// so a multi-megabyte resource never sits fully in registry memory.
+func (f *Filesystem) GetStream(_ context.Context, key string) (io.ReadCloser, ObjectInfo, error) {
+	if err := validateKey(key); err != nil {
+		return nil, ObjectInfo{}, err
+	}
+	path := filepath.Join(f.Root, key)
+	file, err := os.Open(path)
+	if os.IsNotExist(err) {
+		return nil, ObjectInfo{}, ErrNotFound
+	}
+	if err != nil {
+		return nil, ObjectInfo{}, err
+	}
+	fi, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, ObjectInfo{}, err
+	}
+	return file, ObjectInfo{Size: fi.Size(), ContentType: f.ContentTypeOf(key)}, nil
+}
+
+// Stat reports the size and content type for key without reading the
+// body. Returns ErrNotFound when the object is absent.
+func (f *Filesystem) Stat(_ context.Context, key string) (ObjectInfo, error) {
+	if err := validateKey(key); err != nil {
+		return ObjectInfo{}, err
+	}
+	fi, err := os.Stat(filepath.Join(f.Root, key))
+	if os.IsNotExist(err) {
+		return ObjectInfo{}, ErrNotFound
+	}
+	if err != nil {
+		return ObjectInfo{}, err
+	}
+	return ObjectInfo{Size: fi.Size(), ContentType: f.ContentTypeOf(key)}, nil
 }
 
 // ContentTypeOf returns the recorded content type for key, or "" when

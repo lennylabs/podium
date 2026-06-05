@@ -84,7 +84,8 @@ type Store interface {
 }
 
 // Worker delivers events to every matching receiver. Construct one
-// per server process; call Deliver for each event.
+// per server process (always by pointer; Worker carries a mutex and
+// must not be copied); call Deliver for each event.
 type Worker struct {
 	Store      Store
 	HTTPClient *http.Client
@@ -96,15 +97,50 @@ type Worker struct {
 	Backoff []time.Duration
 	// Now overrides the clock for tests.
 	Now func() time.Time
+	// MaxConcurrent bounds the number of in-flight HTTP deliveries
+	// across every concurrent Deliver call so a burst of events (each
+	// fired from its own goroutine in Server.PublishEvent) cannot
+	// leave an unbounded number of outstanding requests. Zero
+	// defaults to 8. spec: §7.3.2.
+	MaxConcurrent int
+
+	// mu serializes the per-receiver failure-counter read-modify-write
+	// so two concurrent events never lose an increment.
+	mu sync.Mutex
+	// sem bounds concurrent deliveries; lazily sized from MaxConcurrent
+	// on first use via semOnce.
+	sem     chan struct{}
+	semOnce sync.Once
+}
+
+// semaphore lazily builds and returns the delivery concurrency limiter,
+// sized from MaxConcurrent (default 8).
+func (w *Worker) semaphore() chan struct{} {
+	w.semOnce.Do(func() {
+		n := w.MaxConcurrent
+		if n <= 0 {
+			n = 8
+		}
+		w.sem = make(chan struct{}, n)
+	})
+	return w.sem
 }
 
 // Deliver fans the event out to every matching receiver in tenantID.
 // Returns once every receiver has either acknowledged (2xx) or
 // exhausted its retry budget; failures don't abort the fan-out.
 //
+// The marshaled body carries the full §7.3.2 schema
+// {event, trace_id, timestamp, actor, data}. actor is always emitted
+// as an object (an empty object when no caller is resolved) so the
+// wire schema stays stable for receivers that key on it.
+//
 // Receivers that exceed MaxFailures consecutive failures are
 // auto-disabled and recorded back to the store with Disabled=true.
-func (w *Worker) Deliver(ctx context.Context, tenantID, eventType string, body map[string]any) error {
+// Concurrent deliveries are bounded by MaxConcurrent, and the
+// per-receiver failure-counter update is serialized so two events
+// firing close together never lose an increment.
+func (w *Worker) Deliver(ctx context.Context, tenantID, eventType, traceID string, actor, body map[string]any) error {
 	receivers, err := w.Store.List(ctx, tenantID)
 	if err != nil {
 		return fmt.Errorf("webhook.Deliver: list: %w", err)
@@ -117,14 +153,20 @@ func (w *Worker) Deliver(ctx context.Context, tenantID, eventType string, body m
 	if now == nil {
 		now = time.Now
 	}
+	if actor == nil {
+		actor = map[string]any{}
+	}
 	payload, err := json.Marshal(map[string]any{
 		"event":     eventType,
+		"trace_id":  traceID,
 		"timestamp": now().UTC().Format(time.RFC3339Nano),
+		"actor":     actor,
 		"data":      body,
 	})
 	if err != nil {
 		return fmt.Errorf("webhook.Deliver: marshal: %w", err)
 	}
+	sem := w.semaphore()
 	wg := sync.WaitGroup{}
 	for _, r := range receivers {
 		if r.Disabled || !r.Matches(eventType) {
@@ -134,22 +176,42 @@ func (w *Worker) Deliver(ctx context.Context, tenantID, eventType string, body m
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err := w.deliverWithRetry(ctx, r, payload)
-			if err != nil {
-				r.FailureCount++
-				r.LastFailure = now()
-				if r.FailureCount >= maxFailures {
-					r.Disabled = true
-				}
-			} else {
-				r.FailureCount = 0
-				r.LastDelivery = now()
-			}
-			_ = w.Store.Put(ctx, r)
+			// Bound concurrent in-flight HTTP across all Deliver calls.
+			sem <- struct{}{}
+			deliverErr := w.deliverWithRetry(ctx, r, payload)
+			<-sem
+			w.recordResult(ctx, tenantID, r, deliverErr, now, maxFailures)
 		}()
 	}
 	wg.Wait()
 	return nil
+}
+
+// recordResult applies one delivery outcome to the receiver's
+// persisted failure state. It re-reads the receiver from the store
+// under w.mu so concurrent deliveries serialize their read-modify-write
+// and no increment is lost. The HTTP delivery itself runs
+// outside the lock so a slow receiver never blocks another's update.
+func (w *Worker) recordResult(ctx context.Context, tenantID string, r Receiver, deliverErr error, now func() time.Time, maxFailures int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	cur, err := w.Store.Get(ctx, tenantID, r.ID)
+	if err != nil {
+		// Receiver vanished or store has no fresher copy; fall back to
+		// the snapshot we delivered against.
+		cur = r
+	}
+	if deliverErr != nil {
+		cur.FailureCount++
+		cur.LastFailure = now()
+		if cur.FailureCount >= maxFailures {
+			cur.Disabled = true
+		}
+	} else {
+		cur.FailureCount = 0
+		cur.LastDelivery = now()
+	}
+	_ = w.Store.Put(ctx, cur)
 }
 
 // deliverWithRetry POSTs payload to r.URL and retries on transient

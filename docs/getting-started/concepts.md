@@ -146,7 +146,7 @@ Each layer declares its visibility independently:
 | `public: true` | Anyone, including unauthenticated callers. |
 | `organization: true` | Any authenticated user in the tenant org. |
 | `groups: [<oidc-group>, ...]` | Members of the listed OIDC groups. |
-| `users: [<user-id>, ...]` | Listed user identifiers. |
+| `users: [<user-id>, ...]` | Listed user identifiers, by OIDC subject or email. |
 
 Multiple fields combine as a union. Visibility is enforced at the
 registry on every call. Git permissions and other source-side
@@ -176,7 +176,7 @@ ASCII fallback for the diagram above (identity and visibility flow):
     layer            visibility rule          alice's claims     in view?
     org-defaults     organization: true       acme tenant member YES
     team-finance     groups: [finance]        not in finance     NO
-    alice-personal   users: [alice@acme.com]  subject matches    YES
+    alice-personal   users: [alice@acme.com]  subject/email match YES
     marketing-public public: true             always visible     YES
 
   Visibility evaluation runs on every registry call. Layers the

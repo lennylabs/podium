@@ -1,0 +1,4 @@
+# Shared helpers are visible to any authenticated member of the
+# organization. spec §4.6 visibility: organization.
+visibility:
+  organization: true

@@ -8,16 +8,71 @@
 package adapter
 
 import (
+	"context"
 	"fmt"
 	"strings"
+
+	"github.com/lennylabs/podium/pkg/spi"
 )
 
-// File is one output file produced by an adapter. Path is relative to the
-// destination root; Mode defaults to 0o644 when zero.
+// FileOp selects how the materializer applies a File to its destination.
+type FileOp int
+
+const (
+	// OpWrite writes Content as a standalone file, replacing any prior
+	// content. This is the default (zero value) and covers skill folders,
+	// agent/command/rule files, and bundled resources.
+	OpWrite FileOp = iota
+	// OpInject merges Content into a shared text file (markdown or TOML)
+	// between Podium-managed markers keyed by Key, so the operator's other
+	// content in the file is preserved and a re-sync reconciles only Podium's
+	// block. Used for rules injected into AGENTS.md / GEMINI.md and for
+	// config.toml tables.
+	OpInject
+	// OpMergeJSON deep-merges Content (a JSON object) into the JSON file at
+	// Path under Podium-owned keys, preserving the operator's other keys.
+	// Used for hook and mcp-server config (settings.json, .mcp.json,
+	// .cursor/*.json, opencode.json). Codex hooks merge into config.toml via
+	// OpInject instead.
+	OpMergeJSON
+)
+
+// PodiumOwnedKey tags a config-merge entry as Podium-owned, keyed to the
+// artifact ID (§6.7 "a Podium-owned entry keyed by the artifact ID", carried
+// in the §6.7 x-podium-* extension namespace). Each config-merge fragment
+// stamps its entry with this key so the materialize layer can rebuild Podium's
+// contribution on every sync: prior Podium entries are stripped before the
+// current set is merged, which preserves the operator's untagged entries,
+// accumulates multiple Podium entries, and removes an artifact's entry once it
+// is gone.
+//
+// This in-entry tag is used for entries inside a JSON array (a hook event's
+// handler list, the Cowork marketplace plugin list), where the array has no
+// stable key to reference the entry by. Entries inside a keyed JSON object (an
+// mcpServers map, the OpenCode mcp map) are tracked by PodiumIndexKey instead,
+// because some harness schemas (Gemini's mcpServers) reject an unrecognized key
+// inside the entry object.
+const PodiumOwnedKey = "x-podium-id"
+
+// PodiumIndexKey is the top-level object that records ownership of keyed
+// config-map entries (an mcpServers server, an OpenCode mcp server) without
+// placing a tag inside the entry. It maps each artifact ID to the path of its
+// entry (`["mcpServers", "<name>"]`). Reconciliation reads this index to remove
+// Podium's prior entries before the current sync's fragments merge in. Harness
+// config loaders tolerate this unknown top-level key (verified against Claude
+// Code and Gemini CLI) even when they reject an unknown key inside an entry.
+const PodiumIndexKey = "x-podium"
+
+// File is one output produced by an adapter. Path is relative to the
+// destination root; Mode defaults to 0o644 when zero. Op selects the apply
+// mode (default OpWrite); Key is the artifact ID that scopes a Podium-managed
+// inject block.
 type File struct {
 	Path    string
 	Content []byte
 	Mode    uint32
+	Op      FileOp
+	Key     string
 }
 
 // Source is the canonical input given to an adapter. It bundles the
@@ -44,7 +99,7 @@ type HarnessAdapter interface {
 	// Adapt produces the harness-native output for src. Implementations
 	// must not perform IO; the returned files are written by
 	// pkg/materialize under the sandbox contract.
-	Adapt(src Source) ([]File, error)
+	Adapt(ctx context.Context, src Source) ([]File, error)
 }
 
 // Registry holds the set of HarnessAdapter implementations registered by
@@ -74,8 +129,15 @@ func (r *Registry) Register(a HarnessAdapter) error {
 func (r *Registry) Get(id string) (HarnessAdapter, error) {
 	a, ok := r.byID[id]
 	if !ok {
-		return nil, fmt.Errorf("config.unknown_harness: no adapter registered for %q (have: %s)",
-			id, strings.Join(r.IDs(), ", "))
+		// Structured per §9.3; the code prefix in Message is preserved so
+		// existing callers that match the §6.10 code in the message string
+		// (and the §6.7 unknown-harness wire path) are unaffected.
+		return nil, &spi.Error{
+			Code: "config.unknown_harness",
+			Message: fmt.Sprintf("config.unknown_harness: no adapter registered for %q (have: %s)",
+				id, strings.Join(r.IDs(), ", ")),
+			Details: map[string]any{"harness": id, "available": r.IDs()},
+		}
 	}
 	return a, nil
 }

@@ -1,0 +1,102 @@
+=== .claude/agents/reviewer.md ===
+---
+type: agent
+version: 1.0.0
+description: Reviews pull requests for bugs.
+---
+
+Review the diff and report defects.
+
+=== .claude/commands/deploy.md ===
+---
+type: command
+version: 1.0.0
+description: Deploy the service.
+---
+
+Run the deploy pipeline for the named environment.
+
+=== .claude/rules/deep-review.md ===
+Perform a deep architectural review when invoked.
+
+=== .claude/rules/tabs-always.md ===
+Indent with tabs, not spaces.
+
+=== .claude/rules/ts-auto.md ===
+Prefer interfaces over type aliases.
+
+=== .claude/rules/ts-glob.md ===
+---
+paths:
+  - "*.ts"
+  - "*.tsx"
+---
+
+Enable strict type-checking in TypeScript files.
+
+=== .claude/settings.json ===
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "./scripts/guard.sh",
+            "type": "command"
+          }
+        ],
+        "x-podium-id": "team/guard"
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "echo done\necho bye",
+            "type": "command"
+          }
+        ],
+        "x-podium-id": "team/notify"
+      }
+    ]
+  }
+}
+
+=== .claude/skills/hello/SKILL.md ===
+---
+name: hello
+description: Greet a teammate warmly by name.
+---
+
+Say hello to the person and offer help.
+
+=== .claude/skills/hello/scripts/run.py ===
+print('hello')
+
+=== .mcp.json ===
+{
+  "mcpServers": {
+    "warehouse": {
+      "args": [
+        "@acme/warehouse-mcp"
+      ],
+      "command": "npx"
+    }
+  },
+  "x-podium": {
+    "team/warehouse": [
+      "mcpServers",
+      "warehouse"
+    ]
+  }
+}
+
+=== .podium/context/team/glossary/ARTIFACT.md ===
+---
+type: context
+version: 1.0.0
+description: Company glossary.
+---
+
+ARR means annual recurring revenue.
+

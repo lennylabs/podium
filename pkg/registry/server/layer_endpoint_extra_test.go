@@ -161,35 +161,43 @@ func TestLayerEndpoint_RegisterBadJSONReturns400(t *testing.T) {
 	}
 }
 
-// register user-defined layer with visibility flags persists them.
+// Spec: §4.6 — a user-defined layer has implicit visibility
+// users:[<registrant>] that "cannot be widened." Caller-supplied
+// public/organization/groups (and a users: list naming someone else) are
+// stripped; only users:[owner] survives.
 func TestLayerEndpoint_RegisterUserDefinedWithVisibility(t *testing.T) {
 	t.Parallel()
 	base, _, cleanup := newLayerHarness(t)
 	defer cleanup()
 	resp, body := mustPost(t, base, "/v1/layers", map[string]any{
-		"id": "personal",
+		"id":           "personal",
 		"source_type":  "local",
 		"local_path":   "/tmp/personal",
 		"user_defined": true,
 		"owner":        "alice",
-		"public":       false,
-		"organization": false,
+		"public":       true,
+		"organization": true,
 		"groups":       []string{"team-a"},
-		"users":        []string{"alice"},
+		"users":        []string{"bob"},
 	})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("status = %d: %s", resp.StatusCode, body)
 	}
 	var got struct {
 		Layer struct {
-			Groups []string `json:"Groups"`
-			Users  []string `json:"Users"`
+			Public       bool     `json:"Public"`
+			Organization bool     `json:"Organization"`
+			Groups       []string `json:"Groups"`
+			Users        []string `json:"Users"`
 		} `json:"layer"`
 	}
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if len(got.Layer.Groups) != 1 || got.Layer.Users[0] != "alice" {
-		t.Errorf("got %+v", got)
+	if got.Layer.Public || got.Layer.Organization || len(got.Layer.Groups) != 0 {
+		t.Errorf("widened visibility not stripped from user-defined layer: %+v", got.Layer)
+	}
+	if len(got.Layer.Users) != 1 || got.Layer.Users[0] != "alice" {
+		t.Errorf("Users = %v, want [alice] (implicit, not caller-supplied [bob])", got.Layer.Users)
 	}
 }

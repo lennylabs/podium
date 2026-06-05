@@ -61,14 +61,45 @@ func (r *Registry) Walk(opts WalkOptions) ([]ArtifactRecord, error) {
 			deduped = append(deduped, rec)
 			continue
 		}
-		if collisionError {
+		// spec: §4.6 — "A collision is rejected at ingest unless the
+		// higher-precedence artifact declares extends: <lower-precedence-id>."
+		// rec is the higher-precedence record (later layers override
+		// earlier), so the collision is permitted when its extends:
+		// resolves to the colliding canonical ID; the extends merge is
+		// applied later at read time. A collision without that declaration
+		// is a forbidden silent shadow.
+		if collisionError && !declaresExtendsTo(rec, rec.ID) {
 			return nil, fmt.Errorf("ingest.collision: artifact %q present in layers %q and %q",
 				rec.ID, deduped[idx].Layer.ID, rec.Layer.ID)
 		}
 		// Highest-precedence wins; later layers override earlier.
 		deduped[idx] = rec
 	}
+
+	// spec: §13.11.3 — filesystem source resolves extends: through the same
+	// merge the registry applies at load time, so materialization produces
+	// equivalent output for the same artifact directory. Callers that want
+	// raw layer records (lint, conformance) leave ResolveExtends false.
+	if opts.ResolveExtends {
+		if err := resolveExtends(deduped, all); err != nil {
+			return nil, err
+		}
+	}
 	return deduped, nil
+}
+
+// declaresExtendsTo reports whether rec's frontmatter declares
+// extends: <id>, comparing against the pin-stripped reference. Used to
+// honor the §4.6 same-ID extends exception during collision detection.
+func declaresExtendsTo(rec ArtifactRecord, id string) bool {
+	if rec.Artifact == nil || rec.Artifact.Extends == "" {
+		return false
+	}
+	ref := rec.Artifact.Extends
+	if i := strings.Index(ref, "@"); i >= 0 {
+		ref = ref[:i]
+	}
+	return ref == id
 }
 
 // CollisionPolicy controls how Walk handles two layers contributing the
@@ -91,6 +122,12 @@ const (
 // WalkOptions configures Walk behavior.
 type WalkOptions struct {
 	CollisionPolicy CollisionPolicy
+	// ResolveExtends folds each record's extends: chain into the record via
+	// the shared manifest.MergeExtends before Walk returns, replacing the
+	// record's ArtifactBytes/Artifact with the merged, extends-stripped
+	// manifest (§4.6, §13.11.3). When false, records keep their authored
+	// frontmatter unchanged.
+	ResolveExtends bool
 }
 
 // walkLayer enumerates every artifact directory in a single layer.
@@ -180,6 +217,14 @@ func captureResources(rec *ArtifactRecord, dir string) error {
 			return walkErr
 		}
 		if d.IsDir() {
+			// spec: §4.2 — directories are domain paths and the leaves are
+			// artifact packages. A subdirectory that carries its own
+			// ARTIFACT.md is a separate package; its files belong to that
+			// artifact, so stop descending here instead of capturing them as
+			// this artifact's bundled resources (§4.4).
+			if path != dir && hasArtifactManifest(path) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if path == filepath.Join(dir, "ARTIFACT.md") {
@@ -202,14 +247,50 @@ func captureResources(rec *ArtifactRecord, dir string) error {
 }
 
 // canonicalID converts a filesystem directory path under a layer root to
-// a canonical artifact ID using forward slashes.
+// a canonical artifact ID using forward slashes, enforcing the §4.2
+// canonical-ID invariants via ValidateCanonicalID.
 func canonicalID(layerRoot, dir string) (string, error) {
 	rel, err := filepath.Rel(layerRoot, dir)
 	if err != nil {
 		return "", err
 	}
-	if rel == "." {
-		return "", fmt.Errorf("artifact must live in a subdirectory of the layer (root: %q)", layerRoot)
+	id := filepath.ToSlash(rel)
+	if id == "." {
+		// A root-level ARTIFACT.md has no directory path under the root.
+		id = ""
 	}
-	return filepath.ToSlash(rel), nil
+	if err := ValidateCanonicalID(id); err != nil {
+		return "", fmt.Errorf("%w (layer root: %q)", err, layerRoot)
+	}
+	return id, nil
+}
+
+// hasArtifactManifest reports whether dir directly contains an ARTIFACT.md
+// file, marking it as a nested artifact-package boundary (§4.2).
+func hasArtifactManifest(dir string) bool {
+	info, err := os.Stat(filepath.Join(dir, "ARTIFACT.md"))
+	return err == nil && !info.IsDir()
+}
+
+// ValidateCanonicalID enforces the §4.2 canonical-ID invariants that every
+// artifact-walk path shares: the ID is the non-empty directory path under
+// the registry root, and no path segment contains "@". A root-level
+// ARTIFACT.md yields an empty ID and is rejected, so every artifact has an
+// addressable canonical home. "@" is reserved as the reference delimiter in
+// the "<id>@<semver>" and "<id>@sha256:<hash>" grammar; allowing it inside a
+// segment makes a reference split ambiguously. Both the filesystem-source
+// walk and the server ingest walk call this so they share one invariant.
+func ValidateCanonicalID(id string) error {
+	if id == "" {
+		return errors.New("artifact must live in a subdirectory of the layer (a root-level ARTIFACT.md has no canonical ID)")
+	}
+	for _, seg := range strings.Split(id, "/") {
+		if seg == "" {
+			return fmt.Errorf("canonical ID %q has an empty path segment", id)
+		}
+		if strings.Contains(seg, "@") {
+			return fmt.Errorf("canonical ID segment %q must not contain '@' (reserved for the @version or @sha256 suffix)", seg)
+		}
+	}
+	return nil
 }

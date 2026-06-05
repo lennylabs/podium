@@ -52,10 +52,10 @@ In an agent session, the host has the Podium MCP server configured. The agent ca
 
 ```
 load_domain("finance/close-reporting")
-→ {domains: [...], artifacts: [{id: "finance/close-reporting/run-variance-analysis", ...}]}
+→ {subdomains: [...], notable: [{id: "finance/close-reporting/run-variance-analysis", ...}]}
 
 load_artifact("finance/close-reporting/run-variance-analysis")
-→ {manifest: <SKILL.md body>, materialized_at: "/workspace/.podium/runtime/.../SKILL.md"}
+→ {manifest_body: <SKILL.md body>, materialized_at: ["/workspace/.podium/runtime/.../SKILL.md"]}
 ```
 
 The agent now has the skill in its working set. Done.

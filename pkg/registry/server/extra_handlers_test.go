@@ -115,6 +115,51 @@ func TestAdminReembed_TenantWidePostReachesHandler(t *testing.T) {
 	}
 }
 
+// /v1/admin/reembed: a malformed `since` value is rejected with
+// registry.invalid_argument before the reembed runs (spec §4.7
+// `--since <timestamp>`).
+func TestAdminReembed_InvalidSinceReturns400(t *testing.T) {
+	t.Parallel()
+	h := registryharness.New(t,
+		fixture("a/ARTIFACT.md", contextFor("A", "")),
+	)
+	req, _ := http.NewRequest(http.MethodPost,
+		h.URL+"/v1/admin/reembed?since=not-a-timestamp", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "registry.invalid_argument") {
+		t.Errorf("body = %s, want registry.invalid_argument", body)
+	}
+}
+
+// /v1/admin/reembed: a valid RFC3339 `since` passes validation and
+// reaches the reembed path (the filesystem harness has no embedder, so
+// it returns 500, not the 400 a parse failure would produce).
+func TestAdminReembed_ValidSinceReachesHandler(t *testing.T) {
+	t.Parallel()
+	h := registryharness.New(t,
+		fixture("a/ARTIFACT.md", contextFor("A", "")),
+	)
+	req, _ := http.NewRequest(http.MethodPost,
+		h.URL+"/v1/admin/reembed?since=2026-01-01T00:00:00Z", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusMethodNotAllowed {
+		body, _ := io.ReadAll(resp.Body)
+		t.Errorf("status = %d (validation/method), want the handler to run: %s", resp.StatusCode, body)
+	}
+}
+
 // /v1/domain/analyze: GET returns the report; wrong method = 405.
 func TestDomainAnalyze_OKAndWrongMethod(t *testing.T) {
 	t.Parallel()

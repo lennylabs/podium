@@ -59,8 +59,11 @@ type EffectiveLayer struct {
 // operator can see why a given layer is (or is not) in the user's
 // view.
 func (r *Registry) ShowEffective(ctx context.Context, target layer.Identity) ([]EffectiveLayer, error) {
-	out := make([]EffectiveLayer, 0, len(r.layers))
-	for _, l := range r.layers {
+	// spec: §4.6 / §4.7.2 — resolve the layer list per request so the admin
+	// diagnostic reflects runtime-registered layers too.
+	resolved := r.resolveLayers(ctx)
+	out := make([]EffectiveLayer, 0, len(resolved))
+	for _, l := range resolved {
 		visible := layer.VisibleWith(l, target, r.resolveGroup)
 		out = append(out, EffectiveLayer{
 			LayerID: l.ID,

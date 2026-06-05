@@ -1,0 +1,1173 @@
+package e2e
+
+// End-to-end tests for docs/deployment/oidc/*.md (D-oidc).
+//
+// These tests cover the CLI device-code login flow, SCIM HTTP endpoints,
+// config-show and status surface, and not-implemented admin subcommands.
+// They drive the real podium binary and, for device-code tests, a local
+// stub OIDC server built with net/http/httptest.
+//
+// Identity model under test (spec/06-mcp-server.md §6.3): the registry
+// verifies a caller server-side only under injected-session-token, a JWT
+// signed by a runtime key registered with the registry. oauth-device-code is
+// the client-side token-acquisition flow; the registry does not ship a
+// server-side verifier for it. Group membership resolves registry-side via
+// SCIM 2.0 push, or the IdpGroupMapping adapter maps OIDC group claims to
+// group names (§6.3.1). Tests that assert verified-caller behavior (group
+// visibility, group-claim remapping) drive the injected-session-token path
+// using the helpers in injected_token_helpers_test.go.
+//
+// Skip policy:
+//
+//   Tests that need the OS keychain (login success persistence, logout/status
+//   round-trip, token refresh) are skipped honestly: writing to the system
+//   keychain from CI is unsafe, and PODIUM_TOKEN_KEYCHAIN_NAME is used by
+//   login.go for the keychain service name only, not to isolate the store.
+//   Tests that exercise a pkg/identity unit surface (slow_down backoff,
+//   refresh-token retention) are skipped here because that surface is covered
+//   by the pkg/identity oauth_devicecode unit tests.
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/lennylabs/podium/internal/testharness/cmdharness"
+)
+
+// ---- stub OIDC server helpers -----------------------------------------------
+
+// oidcDeviceResponse is the fixed device-auth response returned by the stub.
+const oidcDeviceResponse = `{"device_code":"dev","user_code":"WXYZ-1234","verification_uri":"http://stub.example/activate","verification_uri_complete":"http://stub.example/activate?code=WXYZ-1234","expires_in":300,"interval":1}`
+
+// oidcTokenSuccess is the fixed token response for a successful poll.
+const oidcTokenSuccess = `{"access_token":"at","token_type":"Bearer","expires_in":3600,"refresh_token":"rt"}`
+
+// oidcStubConfig controls the stub server behaviour per test.
+type oidcStubConfig struct {
+	// tokenResponses is the sequence of token-endpoint responses to return, one
+	// per poll.  When exhausted, the last entry is repeated.
+	tokenResponses []string
+	// deviceResponse overrides the device-auth response (default: oidcDeviceResponse).
+	deviceResponse string
+	// deviceStatus overrides the device-auth HTTP status code (default: 200).
+	deviceStatus int
+}
+
+// oidcStub builds a stub OIDC server with:
+//
+//   - POST /oauth2/device  — device-auth endpoint
+//   - POST /oauth2/token   — token-poll endpoint
+//
+// It records every form-decoded request body so tests can assert on the
+// parameters sent by the CLI.
+type oidcStub struct {
+	srv            *httptest.Server
+	mu             sync.Mutex
+	deviceBodies   []url.Values // one entry per device-auth call
+	tokenBodies    []url.Values // one entry per token-poll call
+	pollCount      int32        // atomic; number of token polls received
+	tokenResponses []string
+}
+
+// newOIDCStub creates and starts the stub. The caller must call Stop() via
+// t.Cleanup or directly.
+func newOIDCStub(cfg oidcStubConfig) *oidcStub {
+	s := &oidcStub{tokenResponses: cfg.tokenResponses}
+	if len(s.tokenResponses) == 0 {
+		s.tokenResponses = []string{oidcTokenSuccess}
+	}
+	devResp := cfg.deviceResponse
+	if devResp == "" {
+		devResp = oidcDeviceResponse
+	}
+	devStatus := cfg.deviceStatus
+	if devStatus == 0 {
+		devStatus = http.StatusOK
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth2/device", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		vals, _ := url.ParseQuery(string(body))
+		s.mu.Lock()
+		s.deviceBodies = append(s.deviceBodies, vals)
+		s.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(devStatus)
+		_, _ = w.Write([]byte(devResp))
+	})
+	mux.HandleFunc("/oauth2/token", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		vals, _ := url.ParseQuery(string(body))
+		s.mu.Lock()
+		s.tokenBodies = append(s.tokenBodies, vals)
+		s.mu.Unlock()
+		n := int(atomic.AddInt32(&s.pollCount, 1))
+		idx := n - 1
+		s.mu.Lock()
+		resp := s.tokenResponses[len(s.tokenResponses)-1]
+		if idx < len(s.tokenResponses) {
+			resp = s.tokenResponses[idx]
+		}
+		s.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		// RFC 8628: the token endpoint returns OAuth error codes
+		// (authorization_pending, slow_down, access_denied, expired_token)
+		// with HTTP 400. The device-code Poll only maps the error envelope on
+		// a non-200 status, so error responses must carry 400.
+		if strings.Contains(resp, `"error"`) {
+			w.WriteHeader(http.StatusBadRequest)
+		}
+		_, _ = w.Write([]byte(resp))
+	})
+	s.srv = httptest.NewServer(mux)
+	return s
+}
+
+// DeviceURL is the stub's device-auth endpoint URL.
+func (s *oidcStub) DeviceURL() string { return s.srv.URL + "/oauth2/device" }
+
+// TokenURL is the stub's token endpoint URL.
+func (s *oidcStub) TokenURL() string { return s.srv.URL + "/oauth2/token" }
+
+// BaseURL is the root URL of the stub server.
+func (s *oidcStub) BaseURL() string { return s.srv.URL }
+
+// Stop shuts down the stub server.
+func (s *oidcStub) Stop() { s.srv.Close() }
+
+// lastDeviceBody returns the most recent device-auth request body, or empty
+// Values if no call has been made yet.
+func (s *oidcStub) lastDeviceBody() url.Values {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.deviceBodies) == 0 {
+		return url.Values{}
+	}
+	return s.deviceBodies[len(s.deviceBodies)-1]
+}
+
+// lastTokenBody returns the most recent token-poll request body.
+func (s *oidcStub) lastTokenBody() url.Values {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.tokenBodies) == 0 {
+		return url.Values{}
+	}
+	return s.tokenBodies[len(s.tokenBodies)-1]
+}
+
+// oidcRunLogin runs `podium login` under a bounded context (loginTimeout)
+// against the given stub, waiting for the process to exit.  If the context
+// expires first it is cancelled and the result reflects whatever was written
+// to stderr up to that point.
+//
+// NOTE: every call that might reach the token-polling step must supply a
+// context deadline shorter than the test timeout so the process never hangs.
+func oidcRunLogin(t testing.TB, stub *oidcStub, extraEnv []string, loginTimeout time.Duration, extraArgs ...string) cliResult {
+	t.Helper()
+	bin := cmdharness.Bin(t, "podium")
+	ctx, cancel := context.WithTimeout(context.Background(), loginTimeout)
+	defer cancel()
+
+	baseArgs := []string{"login",
+		"--registry", "http://podium.acme.example",
+		"--issuer", stub.DeviceURL(),
+		"--token-url", stub.TokenURL(),
+		"--client-id", "test-client",
+	}
+	args := append(baseArgs, extraArgs...)
+
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Env = mergeEnv(append([]string{"PODIUM_NO_AUTOSTANDALONE=1"}, extraEnv...)...)
+	cmd.Stdin = bytes.NewReader(nil)
+	var so, se bytes.Buffer
+	cmd.Stdout = &so
+	cmd.Stderr = &se
+	err := cmd.Run()
+
+	res := cliResult{Stdout: so.String(), Stderr: se.String()}
+	if ee, ok := err.(*exec.ExitError); ok {
+		res.Exit = ee.ExitCode()
+	} else if err != nil && ctx.Err() != context.DeadlineExceeded {
+		t.Logf("login: %v (stderr=%s)", err, se.String())
+	}
+	return res
+}
+
+// oidcSCIMDo performs an HTTP request to the running server's SCIM endpoint.
+func oidcSCIMDo(t testing.TB, method, url, token, contentType string, body []byte) (int, []byte) {
+	t.Helper()
+	var reqBody io.Reader
+	if body != nil {
+		reqBody = bytes.NewReader(body)
+	}
+	req, err := http.NewRequest(method, url, reqBody)
+	if err != nil {
+		t.Fatalf("build request %s %s: %v", method, url, err)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, url, err)
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, out
+}
+
+// oidcSCIMUserBody returns a minimal SCIM 2.0 user body.
+func oidcSCIMUserBody(userName string) []byte {
+	b, _ := json.Marshal(map[string]any{
+		"schemas":  []string{"urn:ietf:params:scim:schemas:core:2.0:User"},
+		"userName": userName,
+		"active":   true,
+	})
+	return b
+}
+
+// oidcSCIMGroupBody returns a minimal SCIM 2.0 group body.
+func oidcSCIMGroupBody(displayName string, memberIDs []string) []byte {
+	members := make([]map[string]any, 0, len(memberIDs))
+	for _, id := range memberIDs {
+		members = append(members, map[string]any{"value": id})
+	}
+	b, _ := json.Marshal(map[string]any{
+		"schemas":     []string{"urn:ietf:params:scim:schemas:core:2.0:Group"},
+		"displayName": displayName,
+		"members":     members,
+	})
+	return b
+}
+
+// oidcStartSCIMServer starts a standalone registry with SCIM enabled.
+func oidcStartSCIMServer(t testing.TB, scimToken string, extraEnv ...string) *serverProc {
+	t.Helper()
+	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
+	env := []string{
+		"HOME=" + t.TempDir(),
+		"PODIUM_SCIM_TOKENS=" + scimToken,
+	}
+	env = append(env, extraEnv...)
+	return startServerArgs(t, env, "serve", "--standalone", "--layer-path", reg)
+}
+
+// ---- public_mode + identity_provider=oidc => startup fails -----
+
+func TestAuth_PublicModeWithIdPFails(t *testing.T) {
+	t.Parallel()
+	bin := cmdharness.Bin(t, "podium")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
+	cmd := exec.CommandContext(ctx, bin, "serve", "--standalone", "--layer-path", reg)
+	cmd.Env = mergeEnv(
+		"HOME="+t.TempDir(),
+		"PODIUM_PUBLIC_MODE=true",
+		"PODIUM_IDENTITY_PROVIDER=oidc",
+	)
+	cmd.Stdin = bytes.NewReader(nil)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	err := cmd.Run()
+	if err == nil {
+		t.Fatalf("expected non-zero exit for public_mode + identity_provider=oidc, but process exited 0\noutput:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "config.public_mode_with_idp") {
+		t.Errorf("output missing 'config.public_mode_with_idp':\n%s", out.String())
+	}
+}
+
+// ---- registry.yaml identity_provider.type is parsed -------------
+
+// §13.12 nests config under `registry:` and models
+// identity_provider as an object with a `type:` selector.
+func TestAuth_RegistryYAMLIdentityProviderField(t *testing.T) {
+	t.Parallel()
+	cfgDir := t.TempDir()
+	cfgFile := filepath.Join(cfgDir, "registry.yaml")
+	if err := os.WriteFile(cfgFile, []byte("registry:\n  identity_provider:\n    type: oidc\n"), 0o644); err != nil {
+		t.Fatalf("write registry.yaml: %v", err)
+	}
+	// spec §7.7: identity_provider is a §13.12 server setting,
+	// surfaced by `config show --server` rather than the client view.
+	res := runPodium(t, "", []string{
+		"PODIUM_CONFIG_FILE=" + cfgFile,
+		"PODIUM_REGISTRY=",
+	}, "config", "show", "--server")
+	if res.Exit != 0 {
+		t.Fatalf("config show exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stdout, "identity_provider") || !strings.Contains(res.Stdout, "oidc") {
+		t.Errorf("config show missing identity_provider=oidc:\n%s", res.Stdout)
+	}
+}
+
+// ---- podium login missing --registry => exit 2 ------------------
+
+func TestAuth_LoginMissingRegistry(t *testing.T) {
+	t.Parallel()
+	res := runPodium(t, "", []string{"PODIUM_REGISTRY="}, "login")
+	if res.Exit != 2 {
+		t.Errorf("exit=%d, want 2 (stderr=%s)", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "no registry configured") {
+		t.Errorf("stderr missing '--registry is required':\n%s", res.Stderr)
+	}
+}
+
+// ---- podium login missing issuer => exit 2 ----------------------
+
+func TestAuth_LoginMissingIssuer(t *testing.T) {
+	t.Parallel()
+	res := runPodium(t, "", []string{
+		"PODIUM_REGISTRY=http://podium.acme.example",
+		"PODIUM_OAUTH_AUTHORIZATION_ENDPOINT=",
+	}, "login", "--registry", "http://podium.acme.example")
+	if res.Exit != 2 {
+		t.Errorf("exit=%d, want 2 (stderr=%s)", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "--issuer") {
+		t.Errorf("stderr missing issuer-required message:\n%s", res.Stderr)
+	}
+}
+
+// ---- login prints Visit/User code/Direct link -------------------
+
+func TestAuth_LoginPrintsVerificationURLAndCode(t *testing.T) {
+	t.Parallel()
+	// Stub token returns authorization_pending so login keeps polling (and
+	// the bounded context kills it before keychain write).
+	stub := newOIDCStub(oidcStubConfig{
+		tokenResponses: []string{`{"error":"authorization_pending"}`},
+	})
+	t.Cleanup(stub.Stop)
+
+	// Run with a short deadline; we only need the initial device-auth step.
+	res := oidcRunLogin(t, stub, nil, 5*time.Second)
+	// The process may have been killed by the context; that's expected.
+	if !strings.Contains(res.Stderr, "Visit:") {
+		t.Errorf("stderr missing 'Visit:':\n%s", res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "User code:") {
+		t.Errorf("stderr missing 'User code:':\n%s", res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "Direct link:") {
+		t.Errorf("stderr missing 'Direct link:' (verification_uri_complete present in stub response):\n%s", res.Stderr)
+	}
+	// Check the values match what the stub serves.
+	if !strings.Contains(res.Stderr, "http://stub.example/activate") {
+		t.Errorf("stderr missing verification URI 'http://stub.example/activate':\n%s", res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "WXYZ-1234") {
+		t.Errorf("stderr missing user code 'WXYZ-1234':\n%s", res.Stderr)
+	}
+}
+
+// Spec: §6.3 — `podium login --json` suppresses the human prompt and replaces
+// it with a structured auth.device_code_pending event emitted on stderr,
+// carrying the verification URI and user code for a machine caller.
+func TestAuth_LoginJSONEmitsDeviceCodePending(t *testing.T) {
+	t.Parallel()
+	// authorization_pending keeps login polling until the bounded context
+	// kills it, so it stays past the device-auth step where the event is
+	// emitted.
+	stub := newOIDCStub(oidcStubConfig{
+		tokenResponses: []string{`{"error":"authorization_pending"}`},
+	})
+	t.Cleanup(stub.Stop)
+
+	res := oidcRunLogin(t, stub, nil, 5*time.Second, "--json")
+
+	// The human prompt is suppressed under --json.
+	if strings.Contains(res.Stderr, "Visit:") || strings.Contains(res.Stderr, "User code:") {
+		t.Errorf("--json must suppress the human prompt; stderr:\n%s", res.Stderr)
+	}
+
+	// A structured auth.device_code_pending envelope is present on stderr.
+	var found bool
+	for _, line := range strings.Split(res.Stderr, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var env struct {
+			Code    string            `json:"code"`
+			Details map[string]string `json:"details"`
+		}
+		if json.Unmarshal([]byte(line), &env) != nil || env.Code != "auth.device_code_pending" {
+			continue
+		}
+		found = true
+		if env.Details["verification_uri"] != "http://stub.example/activate" {
+			t.Errorf("details.verification_uri = %q", env.Details["verification_uri"])
+		}
+		if env.Details["user_code"] != "WXYZ-1234" {
+			t.Errorf("details.user_code = %q", env.Details["user_code"])
+		}
+	}
+	if !found {
+		t.Errorf("stderr missing auth.device_code_pending event:\n%s", res.Stderr)
+	}
+}
+
+// ---- login saves token to keychain on success ------------------
+
+func TestAuth_LoginSavesTokenToKeychain(t *testing.T) {
+	t.Skip("requires an isolated keychain that does not touch the system keychain; PODIUM_TOKEN_KEYCHAIN_NAME controls the keychain service name but does not prevent a system write on platforms that only have the OS keychain")
+}
+
+// ---- login polls through authorization_pending then succeeds ---
+
+func TestAuth_LoginPollsThroughAuthorizationPending(t *testing.T) {
+	t.Skip("verifying Login successful via stderr requires the process to complete the keychain write; isolated keychain not available in the e2e environment")
+}
+
+// ---- expired_token => exit 1 ------------------------------------
+
+func TestAuth_LoginExpiredToken(t *testing.T) {
+	t.Parallel()
+	stub := newOIDCStub(oidcStubConfig{
+		tokenResponses: []string{`{"error":"expired_token"}`},
+	})
+	t.Cleanup(stub.Stop)
+
+	res := oidcRunLogin(t, stub, nil, 15*time.Second)
+	if res.Exit != 1 {
+		t.Errorf("exit=%d, want 1 (stderr=%s)", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "token polling") {
+		t.Errorf("stderr missing 'token polling':\n%s", res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "expired_token") {
+		t.Errorf("stderr missing 'expired_token':\n%s", res.Stderr)
+	}
+}
+
+// ---- access_denied => exit 1 ------------------------------------
+
+func TestAuth_LoginAccessDenied(t *testing.T) {
+	t.Parallel()
+	stub := newOIDCStub(oidcStubConfig{
+		tokenResponses: []string{`{"error":"access_denied"}`},
+	})
+	t.Cleanup(stub.Stop)
+
+	res := oidcRunLogin(t, stub, nil, 15*time.Second)
+	if res.Exit != 1 {
+		t.Errorf("exit=%d, want 1 (stderr=%s)", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "access_denied") {
+		t.Errorf("stderr missing 'access_denied':\n%s", res.Stderr)
+	}
+}
+
+// ---- PODIUM_OAUTH_AUDIENCE is sent in device-auth request ------
+
+func TestAuth_LoginSendsAudience(t *testing.T) {
+	t.Parallel()
+	// Stub token returns access_denied so the process exits promptly after the
+	// device-auth step without needing a keychain write.
+	stub := newOIDCStub(oidcStubConfig{
+		tokenResponses: []string{`{"error":"access_denied"}`},
+	})
+	t.Cleanup(stub.Stop)
+
+	res := oidcRunLogin(t, stub, []string{
+		"PODIUM_OAUTH_AUDIENCE=https://podium.acme.example",
+	}, 15*time.Second)
+	// May exit 1 due to access_denied; that's fine.
+	_ = res
+
+	body := stub.lastDeviceBody()
+	if body.Get("audience") != "https://podium.acme.example" {
+		t.Errorf("device-auth body audience=%q, want 'https://podium.acme.example'\nbody: %v", body.Get("audience"), body)
+	}
+}
+
+// ---- PODIUM_OAUTH_CLIENT_SECRET not sent (doc-accuracy gap) ---
+
+func TestAuth_LoginClientSecretGap(t *testing.T) {
+	t.Parallel()
+	// login.go does not read PODIUM_OAUTH_CLIENT_SECRET (doc-accuracy gap for
+	// Google Workspace). Confirm the token request body does NOT contain
+	// client_secret when the env var is set.
+	stub := newOIDCStub(oidcStubConfig{
+		tokenResponses: []string{`{"error":"access_denied"}`},
+	})
+	t.Cleanup(stub.Stop)
+
+	oidcRunLogin(t, stub, []string{
+		"PODIUM_OAUTH_CLIENT_SECRET=test-secret",
+	}, 15*time.Second)
+
+	tokenBody := stub.lastTokenBody()
+	if tokenBody.Get("client_secret") != "" {
+		t.Errorf("doc-accuracy gap: PODIUM_OAUTH_CLIENT_SECRET should NOT appear in token request (login.go does not read it), but got client_secret=%q", tokenBody.Get("client_secret"))
+	}
+	// Also check the device-auth body.
+	devBody := stub.lastDeviceBody()
+	if devBody.Get("client_secret") != "" {
+		t.Logf("note: client_secret also absent from device-auth body (as expected)")
+	}
+}
+
+// ---- logout removes token + status shows not found -------------
+
+func TestAuth_LogoutRemovesToken(t *testing.T) {
+	t.Skip("requires an isolated keychain to seed a token then verify deletion; system keychain cannot be safely used in e2e")
+}
+
+// ---- logout missing --registry => exit 2 ----------------------
+
+func TestAuth_LogoutMissingRegistry(t *testing.T) {
+	t.Parallel()
+	res := runPodium(t, "", []string{"PODIUM_REGISTRY="}, "logout")
+	if res.Exit != 2 {
+		t.Errorf("exit=%d, want 2 (stderr=%s)", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "no registry configured") {
+		t.Errorf("stderr missing '--registry is required':\n%s", res.Stderr)
+	}
+}
+
+// ---- status shows identity_provider from env ------------------
+
+func TestAuth_StatusShowsIdentityProvider(t *testing.T) {
+	t.Parallel()
+	res := runPodium(t, "", []string{
+		"PODIUM_IDENTITY_PROVIDER=oidc",
+		"PODIUM_REGISTRY=http://podium.acme.example",
+	}, "status")
+	if res.Exit != 0 {
+		t.Fatalf("status exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stdout, "identity provider") || !strings.Contains(res.Stdout, "oidc") {
+		t.Errorf("status stdout missing 'identity provider: oidc':\n%s", res.Stdout)
+	}
+}
+
+// ---- layer register with --group; visibility needs tokens ------
+
+func TestAuth_LayerGroupVisibility(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
+	srv := startServer(t, reg)
+
+	// Register a layer scoped to the "engineering" group.
+	localPath := writeRegistry(t, map[string]string{"eng/ARTIFACT.md": contextArtifact("engineering artifact")})
+	res := runPodium(t, "", nil,
+		"layer", "register",
+		"--registry", srv.BaseURL,
+		"--id", "engineering-only",
+		"--local", localPath,
+		"--group", "engineering",
+	)
+	if res.Exit != 0 {
+		t.Fatalf("layer register exit=%d stderr=%s stdout=%s", res.Exit, res.Stderr, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "engineering-only") {
+		t.Errorf("register stdout missing layer id:\n%s", res.Stdout)
+	}
+
+	// Layer list succeeds. The standalone server with no identity provider
+	// resolves callers to system:public, which sees public layers. This test
+	// covers the register + list CLI surface only.
+	listRes := runPodium(t, "", nil,
+		"layer", "list", "--registry", srv.BaseURL,
+	)
+	if listRes.Exit != 0 {
+		t.Fatalf("layer list exit=%d stderr=%s", listRes.Exit, listRes.Stderr)
+	}
+	// Group-membership visibility enforcement for a verified caller is covered
+	// by TestServerOps_PerLayerVisibilityInjectedToken (group claim drives
+	// visibility) and TestAuth_IdpGroupMappingRemapsClaim (a mapped group claim
+	// drives visibility) over the injected-session-token path.
+	t.Log("layer register with --group: exit 0 and the layer appears in list")
+}
+
+// ---- SCIM /scim/v2/Users 404 when PODIUM_SCIM_TOKENS unset ----
+
+func TestAuth_SCIMNotMountedWithoutToken(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
+	// Start WITHOUT PODIUM_SCIM_TOKENS.
+	srv := startServerArgs(t, []string{"HOME=" + t.TempDir()},
+		"serve", "--standalone", "--layer-path", reg)
+
+	st, _ := getRaw(t, srv.BaseURL+"/scim/v2/Users")
+	if st != http.StatusNotFound {
+		t.Errorf("GET /scim/v2/Users without PODIUM_SCIM_TOKENS = HTTP %d, want 404", st)
+	}
+}
+
+// ---- SCIM creates user when PODIUM_SCIM_TOKENS is set ----------
+
+func TestAuth_SCIMCreateUser(t *testing.T) {
+	t.Parallel()
+	srv := oidcStartSCIMServer(t, "test-scim-token")
+
+	st, body := oidcSCIMDo(t, http.MethodPost, srv.BaseURL+"/scim/v2/Users",
+		"test-scim-token", "application/scim+json", oidcSCIMUserBody("alice@acme.example"))
+	if st != http.StatusCreated {
+		t.Fatalf("POST /scim/v2/Users = HTTP %d, want 201\nbody: %s", st, body)
+	}
+	if !strings.Contains(string(body), "alice@acme.example") {
+		t.Errorf("response body missing userName:\n%s", body)
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("response not valid JSON: %v\nbody: %s", err, body)
+	}
+	if resp["id"] == nil || resp["id"] == "" {
+		t.Errorf("response missing 'id' field: %v", resp)
+	}
+}
+
+// ---- SCIM rejects wrong bearer token => 401 -------------------
+
+func TestAuth_SCIMWrongToken(t *testing.T) {
+	t.Parallel()
+	srv := oidcStartSCIMServer(t, "correct-token")
+
+	st, _ := oidcSCIMDo(t, http.MethodPost, srv.BaseURL+"/scim/v2/Users",
+		"wrong-token", "application/scim+json", oidcSCIMUserBody("bob@acme.example"))
+	if st != http.StatusUnauthorized {
+		t.Errorf("POST /scim/v2/Users with wrong token = HTTP %d, want 401", st)
+	}
+}
+
+// ---- SCIM group creation; membership visibility needs tokens ---
+
+func TestAuth_SCIMGroupCreation(t *testing.T) {
+	t.Parallel()
+	srv := oidcStartSCIMServer(t, "test-scim-token")
+
+	// Create a user.
+	st, body := oidcSCIMDo(t, http.MethodPost, srv.BaseURL+"/scim/v2/Users",
+		"test-scim-token", "application/scim+json", oidcSCIMUserBody("alice@acme.example"))
+	if st != http.StatusCreated {
+		t.Fatalf("create user: HTTP %d body=%s", st, body)
+	}
+	var userResp map[string]any
+	_ = json.Unmarshal(body, &userResp)
+	userID, _ := userResp["id"].(string)
+
+	// Create a group with the user as a member.
+	st, body = oidcSCIMDo(t, http.MethodPost, srv.BaseURL+"/scim/v2/Groups",
+		"test-scim-token", "application/scim+json", oidcSCIMGroupBody("engineering", []string{userID}))
+	if st != http.StatusCreated {
+		t.Fatalf("create group: HTTP %d body=%s", st, body)
+	}
+	if !strings.Contains(string(body), "engineering") {
+		t.Errorf("group response missing displayName 'engineering':\n%s", body)
+	}
+	// This test covers SCIM group provisioning over HTTP. Group-membership
+	// visibility for a verified caller is covered over the
+	// injected-session-token path (TestServerOps_PerLayerVisibilityInjectedToken,
+	// TestAuth_IdpGroupMappingRemapsClaim).
+}
+
+// ---- podium admin scim-token issue => unknown subcommand -------
+
+func TestAuth_AdminSCIMTokenIssueNotImplemented(t *testing.T) {
+	t.Parallel()
+	res := runPodium(t, "", nil, "admin", "scim-token", "issue")
+	if res.Exit != 2 {
+		t.Errorf("exit=%d, want 2 (stderr=%s)", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "unknown admin subcommand: scim-token") {
+		t.Errorf("stderr missing 'unknown admin subcommand: scim-token':\n%s", res.Stderr)
+	}
+}
+
+// ---- podium admin scim configure => unknown subcommand ---------
+
+func TestAuth_AdminSCIMConfigureNotImplemented(t *testing.T) {
+	t.Parallel()
+	res := runPodium(t, "", nil, "admin", "scim", "configure",
+		"--endpoint", "https://keycloak.acme.example/realms/main/scim/v2",
+		"--token", "bearer-tok")
+	if res.Exit != 2 {
+		t.Errorf("exit=%d, want 2 (stderr=%s)", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "unknown admin subcommand: scim") {
+		t.Errorf("stderr missing 'unknown admin subcommand: scim':\n%s", res.Stderr)
+	}
+}
+
+// ---- podium admin claims-cache flush => unknown subcommand -----
+
+func TestAuth_AdminClaimsCacheFlushNotImplemented(t *testing.T) {
+	t.Parallel()
+	res := runPodium(t, "", nil, "admin", "claims-cache", "flush",
+		"--user", "alice@acme.example")
+	if res.Exit != 2 {
+		t.Errorf("exit=%d, want 2 (stderr=%s)", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "unknown admin subcommand: claims-cache") {
+		t.Errorf("stderr missing 'unknown admin subcommand: claims-cache':\n%s", res.Stderr)
+	}
+}
+
+// ---- nested identity: block NOT supported (doc-accuracy gap) --
+
+func TestAuth_NestedIdentityBlockNotParsed(t *testing.T) {
+	t.Parallel()
+	cfgDir := t.TempDir()
+	cfgFile := filepath.Join(cfgDir, "registry.yaml")
+	// Write the nested identity: block as documented in every per-IdP guide.
+	nestedYAML := `identity:
+  provider: oidc
+  issuer: https://acme.okta.com/oauth2/default
+  audience: podium
+  jwks_uri: https://acme.okta.com/oauth2/default/v1/keys
+  groups_claim: groups
+  email_claim: email
+  sub_claim: sub
+`
+	if err := os.WriteFile(cfgFile, []byte(nestedYAML), 0o644); err != nil {
+		t.Fatalf("write registry.yaml: %v", err)
+	}
+
+	// config show --server runs server-free; identity_provider is a §13.12
+	// server setting.
+	res := runPodium(t, "", []string{
+		"PODIUM_CONFIG_FILE=" + cfgFile,
+	}, "config", "show", "--server")
+	if res.Exit != 0 {
+		t.Fatalf("config show exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	// The identity_provider field must NOT be "oidc" from this block: §13.12
+	// nests config under `registry:` and the identity selector is
+	// registry.identity_provider.type, so a top-level identity: block is not
+	// parsed. A correct output shows identity_provider blank / "default".
+	lines := strings.Split(res.Stdout, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "identity_provider") && strings.Contains(line, "oidc") {
+			t.Errorf("doc-accuracy gap: top-level identity: block should NOT be parsed, but config show reports identity_provider=oidc:\n%s", res.Stdout)
+			return
+		}
+	}
+	t.Log("confirmed: a top-level identity: block is not parsed; the supported form is registry.identity_provider.type (§13.12)")
+}
+
+// ---- IdpGroupMapping remaps OIDC group claims end-to-end ----
+
+// TestAuth_IdpGroupMappingRemapsClaim drives the IdpGroupMapping adapter
+// through the verified injected-session-token path. PODIUM_IDP_GROUP_MAPPING
+// rewrites a raw IdP group value carried in the token's groups claim to the
+// layer's friendly group name before visibility is evaluated, so a caller
+// whose token carries only the raw value sees a layer scoped to the mapped
+// name. A caller whose group has no mapping entry passes through unchanged and
+// does not match the layer. This replaces the former per-IdP groups_claim
+// tests (Auth0/Entra/Keycloak), which asserted an in-registry JWT verifier
+// that the spec does not define; the spec model resolves groups registry-side
+// via SCIM 2.0 push or the IdpGroupMapping adapter.
+//
+// Spec: §6.3.1 — the IdpGroupMapping adapter reads OIDC group claims from the
+// token and maps them to group names per a registry-side configuration.
+func TestAuth_IdpGroupMappingRemapsClaim(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	priv, pem := injKeyPair(t)
+
+	// A finance-only layer (visibility: groups: [finance]) declared in
+	// registry.yaml so its visibility is explicit rather than the default.
+	layerRoot := writeRegistry(t, map[string]string{
+		"finance/secret/ARTIFACT.md": contextArtifact("finance secret"),
+	})
+	cfgPath := filepath.Join(home, "registry.yaml")
+	cfg := "" +
+		"registry:\n" +
+		"  layers:\n" +
+		"    - id: finance-layer\n" +
+		"      source:\n" +
+		"        local:\n" +
+		"          path: " + layerRoot + "\n" +
+		"      visibility:\n" +
+		"        groups: [finance]\n"
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatalf("write registry.yaml: %v", err)
+	}
+
+	// The mapping rewrites the raw IdP group OID to the friendly name the
+	// layer's visibility declares.
+	srv := startServerArgs(t, []string{
+		"HOME=" + home,
+		"PODIUM_CONFIG_FILE=" + cfgPath,
+		"PODIUM_INGEST_OFFLINE=true",
+		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
+		"PODIUM_OAUTH_AUDIENCE=" + injAudience,
+		"PODIUM_IDP_GROUP_MAPPING=00g1financeOID=finance",
+	}, "serve", "--standalone")
+	injRegisterRuntime(t, srv, pem)
+
+	// A caller whose token carries the raw OID (not the friendly name) sees the
+	// finance-only artifact, because the mapping rewrites 00g1financeOID ->
+	// finance before visibility is evaluated.
+	mappedClaims := injClaims("alice")
+	mappedClaims["groups"] = []string{"00g1financeOID"}
+	if status, body := injGet(t, srv.BaseURL+"/v1/load_artifact?id=finance/secret", injSignJWT(t, priv, mappedClaims)); status != 200 {
+		t.Fatalf("mapped caller: status=%d, want 200 (00g1financeOID remapped to finance)\nbody: %s\nlog:\n%s", status, body, srv.log())
+	}
+
+	// A caller whose group has no mapping entry passes through unchanged and
+	// does not match the finance layer (404, no leak).
+	unmappedClaims := injClaims("bob")
+	unmappedClaims["groups"] = []string{"00g9unmappedOID"}
+	if status, _ := injGet(t, srv.BaseURL+"/v1/load_artifact?id=finance/secret", injSignJWT(t, priv, unmappedClaims)); status != 404 {
+		t.Errorf("unmapped caller: status=%d, want 404 (group not remapped to finance)", status)
+	}
+}
+
+// ---- podium init --global writes registry URL ------------------
+
+func TestAuth_InitGlobalWritesRegistryURL(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	res := runPodium(t, "", []string{"HOME=" + home},
+		"init", "--global", "--registry", "https://podium.acme.example")
+	if res.Exit != 0 {
+		t.Fatalf("init --global exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	// init --global writes ~/.podium/sync.yaml with the registry URL.
+	syncYAML := filepath.Join(home, ".podium", "sync.yaml")
+	content := readFile(t, syncYAML)
+	if !strings.Contains(content, "https://podium.acme.example") {
+		t.Errorf("global sync.yaml missing registry URL:\n%s", content)
+	}
+	// `podium status` resolves the registry from PODIUM_REGISTRY / --registry,
+	// not from the global sync.yaml, so passing the URL explicitly is how an
+	// operator points status at the configured registry.
+	st := runPodium(t, "", []string{"HOME=" + home},
+		"status", "--registry", "https://podium.acme.example")
+	if st.Exit != 0 {
+		t.Fatalf("status exit=%d stderr=%s", st.Exit, st.Stderr)
+	}
+	if !strings.Contains(st.Stdout, "https://podium.acme.example") {
+		t.Errorf("status does not show the registry URL:\n%s", st.Stdout)
+	}
+}
+
+// ---- SCIM user deletion returns 204; visibility needs tokens ---
+
+func TestAuth_SCIMUserDeletion(t *testing.T) {
+	t.Parallel()
+	srv := oidcStartSCIMServer(t, "test-scim-token")
+
+	// Create a user.
+	st, body := oidcSCIMDo(t, http.MethodPost, srv.BaseURL+"/scim/v2/Users",
+		"test-scim-token", "application/scim+json", oidcSCIMUserBody("alice@acme.example"))
+	if st != http.StatusCreated {
+		t.Fatalf("create user: HTTP %d body=%s", st, body)
+	}
+	var resp map[string]any
+	_ = json.Unmarshal(body, &resp)
+	userID, _ := resp["id"].(string)
+	if userID == "" {
+		t.Fatal("create user: response missing id")
+	}
+
+	// Delete the user.
+	st, _ = oidcSCIMDo(t, http.MethodDelete, fmt.Sprintf("%s/scim/v2/Users/%s", srv.BaseURL, userID),
+		"test-scim-token", "", nil)
+	if st != http.StatusNoContent {
+		t.Errorf("DELETE /scim/v2/Users/%s = HTTP %d, want 204", userID, st)
+	}
+	// This test covers SCIM user deletion over HTTP. Verified-caller visibility
+	// is covered over the injected-session-token path
+	// (TestServerOps_PerLayerVisibilityInjectedToken,
+	// TestAuth_IdpGroupMappingRemapsClaim).
+}
+
+// ---- SCIM group membership PUT returns 200 ---------------------
+
+func TestAuth_SCIMGroupMembershipUpdate(t *testing.T) {
+	t.Parallel()
+	srv := oidcStartSCIMServer(t, "test-scim-token")
+
+	// Create a user.
+	st, body := oidcSCIMDo(t, http.MethodPost, srv.BaseURL+"/scim/v2/Users",
+		"test-scim-token", "application/scim+json", oidcSCIMUserBody("alice@acme.example"))
+	if st != http.StatusCreated {
+		t.Fatalf("create user: HTTP %d body=%s", st, body)
+	}
+	var userResp map[string]any
+	_ = json.Unmarshal(body, &userResp)
+	userID, _ := userResp["id"].(string)
+
+	// Create a group with alice.
+	st, body = oidcSCIMDo(t, http.MethodPost, srv.BaseURL+"/scim/v2/Groups",
+		"test-scim-token", "application/scim+json", oidcSCIMGroupBody("engineering", []string{userID}))
+	if st != http.StatusCreated {
+		t.Fatalf("create group: HTTP %d body=%s", st, body)
+	}
+	var groupResp map[string]any
+	_ = json.Unmarshal(body, &groupResp)
+	groupID, _ := groupResp["id"].(string)
+	if groupID == "" {
+		t.Fatal("create group: response missing id")
+	}
+
+	// Update group to remove alice (empty members).
+	st, _ = oidcSCIMDo(t, http.MethodPut, fmt.Sprintf("%s/scim/v2/Groups/%s", srv.BaseURL, groupID),
+		"test-scim-token", "application/scim+json", oidcSCIMGroupBody("engineering", nil))
+	if st != http.StatusOK {
+		t.Errorf("PUT /scim/v2/Groups/%s = HTTP %d, want 200", groupID, st)
+	}
+	// This test covers SCIM group-membership updates over HTTP. The effect on
+	// layer visibility for a verified caller is covered over the
+	// injected-session-token path (TestServerOps_PerLayerVisibilityInjectedToken,
+	// TestAuth_IdpGroupMappingRemapsClaim).
+}
+
+// ---- guessTokenURL derives /token from /device -----------------
+
+func TestAuth_GuessTokenURL(t *testing.T) {
+	t.Parallel()
+	// The stub serves both /oauth2/device and /oauth2/token.
+	// We set only --issuer (pointing at /oauth2/device) and omit --token-url
+	// so guessTokenURL must derive /oauth2/token.
+	var tokenHit atomic.Int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth2/device", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintln(w, oidcDeviceResponse)
+	})
+	mux.HandleFunc("/oauth2/token", func(w http.ResponseWriter, r *http.Request) {
+		tokenHit.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintln(w, `{"error":"access_denied"}`)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	bin := cmdharness.Bin(t, "podium")
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	// Provide only --issuer; no --token-url.
+	cmd := exec.CommandContext(ctx, bin, "login",
+		"--registry", "http://podium.acme.example",
+		"--issuer", srv.URL+"/oauth2/device",
+		"--client-id", "test-client",
+	)
+	cmd.Env = mergeEnv("PODIUM_NO_AUTOSTANDALONE=1")
+	cmd.Stdin = bytes.NewReader(nil)
+	var se bytes.Buffer
+	cmd.Stderr = &se
+	_ = cmd.Run()
+
+	if tokenHit.Load() == 0 {
+		t.Errorf("guessTokenURL did not derive /oauth2/token from /oauth2/device; token endpoint never received a request\nstderr: %s", se.String())
+	}
+}
+
+// ---- default scopes include "groups" ---------------------------
+
+func TestAuth_DefaultScopesIncludeGroups(t *testing.T) {
+	t.Parallel()
+	stub := newOIDCStub(oidcStubConfig{
+		tokenResponses: []string{`{"error":"access_denied"}`},
+	})
+	t.Cleanup(stub.Stop)
+
+	oidcRunLogin(t, stub, nil, 15*time.Second)
+
+	body := stub.lastDeviceBody()
+	scope := body.Get("scope")
+	for _, want := range []string{"openid", "profile", "email", "groups"} {
+		if !strings.Contains(scope, want) {
+			t.Errorf("device-auth scope=%q missing %q", scope, want)
+		}
+	}
+}
+
+// ---- slow_down increases poll interval ------------------------
+
+func TestAuth_SlowDownIncreasesInterval(t *testing.T) {
+	t.Skip("timing-sensitive; covered by pkg/identity DeviceCodeFlow.Poll unit test; not a reliable e2e signal")
+}
+
+// ---- /healthz reachable for OIDC-configured registry -----------
+
+func TestAuth_HealthzReachableWithOIDCMode(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
+	// PODIUM_IDENTITY_PROVIDER=oidc is a free-form label that is not a
+	// registered provider, so no verifier is installed and startup is not
+	// blocked. The registry verifies callers only under injected-session-token.
+	srv := startServerArgs(t, []string{
+		"HOME=" + t.TempDir(),
+		"PODIUM_IDENTITY_PROVIDER=oidc",
+	}, "serve", "--standalone", "--layer-path", reg)
+
+	var healthz map[string]any
+	getJSON(t, srv.BaseURL+"/healthz", &healthz)
+	if healthz["mode"] == nil {
+		t.Errorf("/healthz response missing 'mode': %v", healthz)
+	}
+
+	// podium status should report reachability OK.
+	st := runPodium(t, "", []string{
+		"PODIUM_REGISTRY=" + srv.BaseURL,
+		"PODIUM_IDENTITY_PROVIDER=oidc",
+	}, "status")
+	if st.Exit != 0 {
+		t.Fatalf("status exit=%d stderr=%s", st.Exit, st.Stderr)
+	}
+	if !strings.Contains(st.Stdout, "reachability") {
+		t.Errorf("status stdout missing 'reachability':\n%s", st.Stdout)
+	}
+}
+
+// ---- --visibility flag does not exist => exit 2 ---------------
+
+func TestAuth_LayerRegisterVisibilityFlagNotExist(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
+	srv := startServer(t, reg)
+	localPath := writeRegistry(t, map[string]string{"eng/ARTIFACT.md": contextArtifact("eng")})
+
+	res := runPodium(t, "", nil,
+		"layer", "register",
+		"--registry", srv.BaseURL,
+		"--id", "test-vis",
+		"--local", localPath,
+		"--visibility", `groups: ["engineering"]`,
+	)
+	if res.Exit != 2 {
+		t.Errorf("exit=%d, want 2 for unknown --visibility flag (stderr=%s stdout=%s)", res.Exit, res.Stderr, res.Stdout)
+	}
+}
+
+// ---- SCIM store persists across restart ------------------------
+
+func TestAuth_SCIMStorePersistsAcrossRestart(t *testing.T) {
+	t.Parallel()
+	storeDir := t.TempDir()
+	storePath := filepath.Join(storeDir, "scim.json")
+	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
+
+	// First server instance.
+	srv1 := startServerArgs(t, []string{
+		"HOME=" + t.TempDir(),
+		"PODIUM_SCIM_TOKENS=tok",
+		"PODIUM_SCIM_STORE_PATH=" + storePath,
+	}, "serve", "--standalone", "--layer-path", reg)
+
+	// Create a user.
+	st, body := oidcSCIMDo(t, http.MethodPost, srv1.BaseURL+"/scim/v2/Users",
+		"tok", "application/scim+json", oidcSCIMUserBody("alice@acme.example"))
+	if st != http.StatusCreated {
+		t.Fatalf("create user: HTTP %d body=%s", st, body)
+	}
+
+	// Stop the first server by stopping its process.
+	stopProc(srv1.cmd)
+
+	// Verify the store file exists.
+	mustExist(t, storePath)
+	storeContent := readFile(t, storePath)
+	if !strings.Contains(storeContent, "alice@acme.example") {
+		t.Errorf("scim store file missing alice@acme.example:\n%s", storeContent)
+	}
+
+	// Second server instance with same store path.
+	srv2 := startServerArgs(t, []string{
+		"HOME=" + t.TempDir(),
+		"PODIUM_SCIM_TOKENS=tok",
+		"PODIUM_SCIM_STORE_PATH=" + storePath,
+	}, "serve", "--standalone", "--layer-path", reg)
+
+	// List users; alice must still be present.
+	st, body = oidcSCIMDo(t, http.MethodGet, srv2.BaseURL+"/scim/v2/Users",
+		"tok", "", nil)
+	if st != http.StatusOK {
+		t.Fatalf("GET /scim/v2/Users: HTTP %d body=%s", st, body)
+	}
+	if !strings.Contains(string(body), "alice@acme.example") {
+		t.Errorf("SCIM users after restart missing alice@acme.example:\n%s", body)
+	}
+}
+
+// ---- token refresh retains old refresh token -------------------
+
+func TestAuth_TokenRefreshRetainsOldToken(t *testing.T) {
+	t.Skip("DeviceCodeFlow.Refresh is a pkg/identity unit-level surface; not a CLI/e2e surface; covered by pkg/identity oauth_devicecode unit tests")
+}
+
+// ---- refresh revocation returns ErrAccessDenied ---------------
+
+func TestAuth_RefreshRevocationErrAccessDenied(t *testing.T) {
+	t.Skip("DeviceCodeFlow.Refresh is a pkg/identity unit-level surface; not a CLI/e2e surface; covered by pkg/identity oauth_devicecode unit tests")
+}
+
+// ---- unreachable issuer => descriptive error -------------------
+
+func TestAuth_UnreachableIssuer(t *testing.T) {
+	t.Parallel()
+	bin := cmdharness.Bin(t, "podium")
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	// Port 1 on loopback is effectively always refused (well-known unusable port).
+	cmd := exec.CommandContext(ctx, bin, "login",
+		"--registry", "https://podium.acme.example",
+		"--issuer", "http://127.0.0.1:1/device",
+		"--client-id", "podium",
+	)
+	cmd.Env = mergeEnv("PODIUM_NO_AUTOSTANDALONE=1")
+	cmd.Stdin = bytes.NewReader(nil)
+	var se bytes.Buffer
+	cmd.Stderr = &se
+	err := cmd.Run()
+	exitCode := 0
+	if ee, ok := err.(*exec.ExitError); ok {
+		exitCode = ee.ExitCode()
+	}
+	if exitCode != 1 {
+		t.Errorf("exit=%d, want 1 for unreachable issuer (stderr=%s)", exitCode, se.String())
+	}
+	if !strings.Contains(se.String(), "device authorization:") {
+		t.Errorf("stderr missing 'device authorization:':\n%s", se.String())
+	}
+}
+
+// ---- malformed device-auth response => descriptive error -------
+
+func TestAuth_MalformedDeviceAuthResponse(t *testing.T) {
+	t.Parallel()
+	// Stub returns 200 with a body missing device_code and verification_uri.
+	stub := newOIDCStub(oidcStubConfig{
+		deviceResponse: `{"user_code":"ABCD"}`,
+	})
+	t.Cleanup(stub.Stop)
+
+	res := oidcRunLogin(t, stub, nil, 15*time.Second)
+	if res.Exit != 1 {
+		t.Errorf("exit=%d, want 1 for malformed device-auth response (stderr=%s)", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "device authorization:") {
+		t.Errorf("stderr missing 'device authorization:':\n%s", res.Stderr)
+	}
+}

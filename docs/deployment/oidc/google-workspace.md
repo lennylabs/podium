@@ -9,7 +9,7 @@ description: Configure Podium to authenticate against Google Workspace via OIDC 
 
 # Google Workspace
 
-Podium + Google Workspace. The setup is straightforward, but Workspace doesn't emit an OIDC `groups` claim natively. For group-based visibility, you either resolve group membership server-side via the Cloud Identity API or use a directory-sync pattern.
+This guide configures a Podium registry to authenticate against Google Workspace. Workspace does not emit an OIDC `groups` claim natively. For group-based visibility, groups arrive either through SCIM 2.0 push or as OIDC group claims mapped by the `IdpGroupMapping` adapter.
 
 ## Prerequisites
 
@@ -36,63 +36,58 @@ Configure the OAuth consent screen if it's not already configured:
 
 Three options, in increasing complexity:
 
-**Option A: no groups, email-only visibility.** Set layer visibility based on individual email addresses (`users: [a@you.com, b@you.com]`) or to `organization: true` (any authenticated user from the Workspace org). Works for small teams.
+**Option A: no groups, email-only visibility.** Set layer visibility based on individual email addresses (`users: [alice@acme.com, bob@acme.com]`) or to `organization: true` (any authenticated user from the Workspace org). Works for small teams.
 
-**Option B: sync Workspace groups via SCIM.** Workspace doesn't natively push SCIM, but a pattern using a Workspace add-on or a small sync script can populate Podium's directory. Maintainer-script approach; out of scope here.
+**Option B: push Workspace groups via SCIM.** Workspace does not push SCIM natively. A Workspace add-on or a sync script populates the registry's SCIM directory, and the registry resolves group membership from that directory. Maintainer-script approach; out of scope here.
 
-**Option C: resolve group membership at token-validation time.** The registry calls Google Cloud Identity's API to fetch the user's group memberships when the JWT arrives, caches for 5 minutes, treats those as the `groups` claim. Requires a service account in your Cloud project with `Cloud Identity Groups Reader` (`cloudidentity.googleapis.com/groups.readonly`). Configure on the registry side via the `IdpGroupMapping` adapter.
+**Option C: map OIDC group claims with `IdpGroupMapping`.** When a token carries a group claim (added through a custom OIDC configuration or a directory integration), the `IdpGroupMapping` adapter reads the raw group values from the token and maps them to the group names used in layer visibility. The adapter reads claims already present in the token; it does not call a Cloud Identity API.
 
-For most teams, Option A is enough to start. Move to Option C when different layers need to be visible to different Workspace groups.
+For most teams, Option A is enough to start. Move to Option B or C when different layers need to be visible to different Workspace groups.
 
 ## 3. Configure Podium
 
-Registry side (`~/.podium/registry.yaml`):
+Registry side (`registry.yaml`):
 
 ```yaml
-identity:
-  provider: oidc
-  issuer: https://accounts.google.com
+identity_provider:
+  type: oauth-device-code
   audience: <client-id>.apps.googleusercontent.com
-  jwks_uri: https://www.googleapis.com/oauth2/v3/certs
-  email_claim: email
-  sub_claim: sub
-  # Option A: no groups_claim
-  # Option C: configure IdpGroupMapping
-  hd_claim: hd                            # Google's hosted-domain claim; restricts tokens to the org
-  hd_required: your-org.example           # rejects tokens issued for other Workspace domains
+  authorization_endpoint: https://accounts.google.com
 ```
 
-The `hd_claim` enforcement is important for Workspace. Without it, any Google account (gmail.com or another Workspace org) with the right client ID can authenticate. Setting `hd_required` rejects everything except your domain.
-
-Restart the registry.
+For Option C, configure the `IdpGroupMapping` adapter registry-side to map the token's group values to group names. To restrict access to the Workspace domain, place the registry behind an upstream identity-aware proxy that authenticates the human caller and admits only accounts in the domain. Restart the registry.
 
 Developer side:
 
 ```bash
-podium init --global --registry https://podium.your-org.example
+podium init --global --registry https://podium.acme.com
 export PODIUM_OAUTH_CLIENT_ID=<client-id>.apps.googleusercontent.com
 export PODIUM_OAUTH_CLIENT_SECRET=<client-secret>
 export PODIUM_OAUTH_AUTHORIZATION_ENDPOINT=https://oauth2.googleapis.com/device/code
 podium login
 ```
 
-The verification URL is `https://www.google.com/device`. After the flow completes, `podium login` prints the `sub`, `email`, and `hd`.
+The verification URL is `https://www.google.com/device`. After the flow completes, `podium login` prints the `sub` and `email`.
 
 ## 4. Test
 
-```bash
-podium layer register \
-  --id team-shared \
-  --repo git@github.com:your-org/podium-artifacts.git \
-  --ref main \
-  --visibility 'organization: true'
+Configure an admin layer visible to the whole organization in the tenant's layer config. Organization-scoped visibility is set in the registry layer config, or with `podium layer register --organization` (also `--public`, `--group`, and `--user`). Layers registered with `--user-defined` are private to the registrant and cannot be widened.
+
+```yaml
+layers:
+  - id: team-shared
+    source:
+      git:
+        repo: git@github.com:acme/podium-artifacts.git
+        ref: main
+    visibility:
+      organization: true
 ```
 
-A user from the Workspace domain sees the layer; a user from outside, even with a valid Google login, is rejected with `auth.hd_mismatch` before layer composition.
+A user from the Workspace domain sees the layer. To keep accounts outside the domain from reaching the registry at all, the upstream identity-aware proxy admits only Workspace-domain accounts.
 
 ## Troubleshooting
 
-- **`auth.hd_mismatch` for legitimate users.** Confirm the user is in the Workspace domain and not signed in to a personal Gmail. Sign out, sign back in with the work account.
-- **Tokens issued but rejected as `auth.audience_mismatch`.** Google's `aud` claim is the full client ID with the `.apps.googleusercontent.com` suffix; make sure the registry's `audience:` matches exactly.
-- **Group membership doesn't update.** With Option C, the registry caches group lookups for 5 minutes per user. After a group change, either wait for the cache to expire or invalidate via `podium admin claims-cache flush --user <sub>`.
-- **Service account permissions denied (Option C).** The service account needs `Cloud Identity Groups Reader` and the Cloud Identity API enabled in the Google Cloud project.
+- **Token rejected.** Google's `aud` claim is the full client ID with the `.apps.googleusercontent.com` suffix. Confirm the registry's `audience:` matches it exactly.
+- **Accounts outside the domain can authenticate.** Domain restriction is enforced by the upstream identity-aware proxy, configured to admit only Workspace-domain accounts. Confirm the proxy is in front of the registry and its allow rule names the domain.
+- **Group membership does not update.** With Option B, group changes propagate when the IdP pushes to the registry's SCIM endpoint. With Option C, group membership reflects the token's group claim at login time, so a changed membership applies at the user's next login.

@@ -81,6 +81,58 @@ func TestSearchArtifacts_HybridFusionEngages(t *testing.T) {
 	}
 }
 
+// Spec: §5 / §11 — total_matched reflects the true match count. A query
+// with no lexical overlap (BM25 finds nothing) but live vector recall
+// still matches artifacts via cosine similarity, so total_matched counts
+// the fused union rather than the BM25-only subset. Regression for the
+// bug where total_matched was captured before vector fusion and reported
+// 0 alongside a non-empty Results slice.
+func TestSearchArtifacts_TotalMatchedCountsVectorOnlyHits(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	dim := 16
+	docs := []struct{ id, desc string }{
+		{"alpha", "reconcile the general ledger at period end"},
+		{"beta", "rotate the on-call schedule"},
+		{"gamma", "deploy the payments service"},
+	}
+	for _, d := range docs {
+		_ = st.PutManifest(context.Background(), store.ManifestRecord{
+			TenantID: "t", ArtifactID: d.id, Version: "1.0.0",
+			ContentHash: "sha256:" + d.id, Type: "skill", Description: d.desc, Layer: "L",
+		})
+	}
+	v := vector.NewMemory(dim)
+	e := fakeEmbedder{dim: dim}
+	for _, d := range docs {
+		vecs, _ := e.Embed(context.Background(), []string{d.desc})
+		_ = v.Put(context.Background(), "t", d.id, "1.0.0", vecs[0])
+	}
+	reg := core.New(st, "t", []layer.Layer{{ID: "L", Visibility: layer.Visibility{Public: true}}}).
+		WithVectorSearch(v, e)
+	// "xyzzy" appears in no artifact text, so BM25 matches nothing; the
+	// vector store still returns its nearest neighbours by cosine.
+	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{
+		Query: "xyzzy", TopK: 5,
+	})
+	if err != nil {
+		t.Fatalf("SearchArtifacts: %v", err)
+	}
+	if res.Degraded {
+		t.Errorf("Degraded = true; expected the hybrid path to stay active")
+	}
+	if len(res.Results) == 0 {
+		t.Fatalf("Results empty; expected vector-only matches to surface")
+	}
+	if res.TotalMatched != len(res.Results) {
+		t.Errorf("TotalMatched = %d, want %d (must count vector-only matches)",
+			res.TotalMatched, len(res.Results))
+	}
+}
+
 // Spec: §4.7 — when no vector store is configured, search degrades
 // to BM25-only and SearchResult.Degraded surfaces the reduced
 // fidelity.
@@ -147,7 +199,7 @@ func TestReembed_AllManifests(t *testing.T) {
 	e := fakeEmbedder{dim: 16}
 	reg := core.New(st, "t", []layer.Layer{{ID: "L", Visibility: layer.Visibility{Public: true}}}).
 		WithVectorSearch(v, e)
-	r, err := reg.Reembed(context.Background(), false)
+	r, err := reg.Reembed(context.Background(), core.ReembedOptions{})
 	if err != nil {
 		t.Fatalf("Reembed: %v", err)
 	}

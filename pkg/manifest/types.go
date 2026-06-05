@@ -113,6 +113,18 @@ type Artifact struct {
 	// with "[redacted]" in audit log entries that reference this
 	// artifact (§8.2 manifest-declared redaction surface).
 	AuditRedact []string `yaml:"audit_redact,omitempty"`
+	// LintSuppress lists lint rule codes to suppress for this artifact.
+	// Per §4.3.4 the agentskills.io `skills-ref validate` reference check
+	// ships a suppression flag "for cases where the standard's validator
+	// is overly strict"; listing lint.skill_ref_validate here silences
+	// that warning. Only advisory (non-error) rules honor the list.
+	LintSuppress []string `yaml:"lint_suppress,omitempty"`
+	// Source declares the document-level provenance of the manifest's
+	// prose (§4.4.2). The documented value is `authored`; a non-authored
+	// value (for example `imported`) marks the body's default trust region
+	// as untrusted, so adapters that support trust regions wrap the prose.
+	// Inline `<!-- begin imported ... -->` blocks override this per region.
+	Source string `yaml:"source,omitempty"`
 
 	// Caller-interpreted (§4.3).
 	MCPServers          []MCPServerRef        `yaml:"mcpServers,omitempty"`
@@ -124,16 +136,20 @@ type Artifact struct {
 	SBOM                *SBOMRef              `yaml:"sbom,omitempty"`
 
 	// Type-specific (§4.3).
-	Input             string   `yaml:"input,omitempty"`
-	Output            string   `yaml:"output,omitempty"`
-	DelegatesTo       []string `yaml:"delegates_to,omitempty"`
-	ExposeAsMCPPrompt bool     `yaml:"expose_as_mcp_prompt,omitempty"`
-	RuleMode          RuleMode `yaml:"rule_mode,omitempty"`
-	RuleGlobs         string   `yaml:"rule_globs,omitempty"`
-	RuleDescription   string   `yaml:"rule_description,omitempty"`
-	HookEvent         string   `yaml:"hook_event,omitempty"`
-	HookAction        string   `yaml:"hook_action,omitempty"`
-	ServerIdentifier  string   `yaml:"server_identifier,omitempty"`
+	//
+	// Input and Output (type: agent) reference external JSON Schema
+	// documents. The documented YAML form is a mapping with a $ref key
+	// (input: { $ref: ./schemas/input.json }); SchemaRef.UnmarshalYAML
+	// also accepts a bare scalar path. Nil when the field is absent.
+	Input            *SchemaRef `yaml:"input,omitempty"`
+	Output           *SchemaRef `yaml:"output,omitempty"`
+	DelegatesTo      []string   `yaml:"delegates_to,omitempty"`
+	RuleMode         RuleMode   `yaml:"rule_mode,omitempty"`
+	RuleGlobs        string     `yaml:"rule_globs,omitempty"`
+	RuleDescription  string     `yaml:"rule_description,omitempty"`
+	HookEvent        string     `yaml:"hook_event,omitempty"`
+	HookAction       string     `yaml:"hook_action,omitempty"`
+	ServerIdentifier string     `yaml:"server_identifier,omitempty"`
 
 	// Inheritance / targeting (§4.3, §4.6).
 	Extends         string   `yaml:"extends,omitempty"`
@@ -145,6 +161,15 @@ type Artifact struct {
 	// Body is the markdown prose below the frontmatter. Empty for
 	// type: skill (the body lives in SKILL.md).
 	Body string `yaml:"-"`
+}
+
+// SchemaRef references an external JSON Schema document. It backs the
+// type: agent input/output fields (§4.3 type-specific fields), whose
+// documented YAML form is a mapping with a $ref key
+// (input: { $ref: ./schemas/input.json }). The custom UnmarshalYAML in
+// parse.go also decodes a bare scalar path into Ref so both forms parse.
+type SchemaRef struct {
+	Ref string `yaml:"$ref,omitempty"`
 }
 
 // MCPServerRef is a single entry in the mcpServers list.

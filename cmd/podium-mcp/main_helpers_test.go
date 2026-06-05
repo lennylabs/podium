@@ -2,12 +2,19 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"crypto/ed25519"
+	crand "crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/lennylabs/podium/pkg/sign"
 )
 
 func TestEnvDefault(t *testing.T) {
@@ -25,9 +32,9 @@ func TestEnvDefault(t *testing.T) {
 func TestSplitCSV(t *testing.T) {
 	t.Parallel()
 	cases := map[string][]string{
-		"":              {},
-		"alone":         {"alone"},
-		"a,b,c":         {"a", "b", "c"},
+		"":             {},
+		"alone":        {"alone"},
+		"a,b,c":        {"a", "b", "c"},
 		" a , b ,  c ": {"a", "b", "c"},
 		",,a,,b,,":     {"a", "b"},
 	}
@@ -42,10 +49,10 @@ func TestSplitCSV(t *testing.T) {
 func TestSplitCSVMCP(t *testing.T) {
 	t.Parallel()
 	cases := map[string][]string{
-		"":         nil,
-		"x":        {"x"},
-		"x,y":      {"x", "y"},
-		"a,,b,,c":  {"a", "b", "c"},
+		"":        nil,
+		"x":       {"x"},
+		"x,y":     {"x", "y"},
+		"a,,b,,c": {"a", "b", "c"},
 	}
 	for in, want := range cases {
 		got := splitCSVMCP(in)
@@ -134,20 +141,25 @@ func TestErrorResultWithStatus(t *testing.T) {
 	}
 }
 
-func TestPromptsCapabilityActive_AlwaysTrue(t *testing.T) {
-	t.Parallel()
-	s := &mcpServer{}
-	if !s.promptsCapabilityActive() {
-		t.Errorf("promptsCapabilityActive() = false, want true")
-	}
-}
-
 // --- loadConfig --------------------------------------------------------------
 
+// spec: §6.10 / §7.5.2 / §13.10 — registry unset across env, flags, and every
+// sync.yaml scope surfaces the canonical config.no_registry code and points the
+// user at `podium init`, not a bare "required" message.
 func TestLoadConfig_MissingRegistryErrors(t *testing.T) {
+	// hermetic isolates HOME + cwd so the §7.5.2 sync.yaml fallback
+	// cannot resolve a registry from a real ~/.podium/sync.yaml.
+	hermetic(t)
 	t.Setenv("PODIUM_REGISTRY", "")
-	if _, err := loadConfig(); err == nil {
-		t.Errorf("missing PODIUM_REGISTRY: no error")
+	_, err := loadConfig()
+	if err == nil {
+		t.Fatalf("missing PODIUM_REGISTRY: no error")
+	}
+	if !strings.Contains(err.Error(), "config.no_registry") {
+		t.Errorf("error %q missing config.no_registry code", err)
+	}
+	if !strings.Contains(err.Error(), "podium init") {
+		t.Errorf("error %q should point the user at `podium init`", err)
 	}
 }
 
@@ -202,21 +214,36 @@ func TestNewServer_OK(t *testing.T) {
 	}
 }
 
-func TestNewServer_MissingOverlayIsSilent(t *testing.T) {
+// spec: §6.9 "Workspace overlay path missing" — a configured overlay path that
+// does not resolve is skipped (the overlay stays empty and the bridge still
+// starts), and the bridge warns exactly once, naming the path, so a developer
+// whose drafts are invisible gets a diagnostic rather than silence.
+func TestNewServer_MissingOverlayWarnsOnceAndSkips(t *testing.T) {
 	dir := t.TempDir()
+	absent := filepath.Join(t.TempDir(), "absent")
 	cfg := &config{
 		registry:    "http://127.0.0.1:1",
 		harness:     "none",
 		cacheDir:    dir,
 		cacheMode:   "always-revalidate",
-		overlayPath: filepath.Join(t.TempDir(), "absent"),
+		overlayPath: absent,
 	}
-	srv, err := newServer(cfg)
+	var srv *mcpServer
+	var err error
+	out := captureStderr(t, func() { srv, err = newServer(cfg) })
 	if err != nil {
 		t.Fatalf("newServer: %v", err)
 	}
 	if len(srv.overlay) != 0 {
-		t.Errorf("expected empty overlay, got %d records", len(srv.overlay))
+		t.Errorf("expected empty overlay (skipped), got %d records", len(srv.overlay))
+	}
+	if !strings.Contains(out, absent) || !strings.Contains(out, "overlay") {
+		t.Errorf("startup warning = %q, want a single warning naming %q", out, absent)
+	}
+	// Warn once: the path is resolved a single time at startup, so the
+	// warning must not be repeated.
+	if n := strings.Count(out, absent); n != 1 {
+		t.Errorf("warning emitted %d times, want exactly once", n)
 	}
 }
 
@@ -243,6 +270,79 @@ func TestHandle_InitializeAcceptsCurrentProtocol(t *testing.T) {
 	m, ok := resp.Result.(map[string]any)
 	if !ok || m["protocolVersion"] != protocolVersion {
 		t.Errorf("result = %+v", resp.Result)
+	}
+}
+
+// spec: §6.9 "MCP protocol version mismatch" — for a host that tops out below
+// this binary's max but within the supported window, initialize negotiates
+// DOWN to the host's version (echoing min(host, server)) rather than forcing
+// the server's own constant.
+func TestHandle_InitializeNegotiatesDownToHost(t *testing.T) {
+	t.Parallel()
+	srv := &mcpServer{cfg: &config{}}
+	// supportedSince <= 2024-11-03 < protocolVersion (2024-11-05).
+	hostMax := "2024-11-03"
+	params, _ := json.Marshal(map[string]string{"protocolVersion": hostMax})
+	resp := srv.handle(rpcRequest{JSONRPC: "2.0", Method: "initialize", Params: params})
+	if resp.Error != nil {
+		t.Fatalf("error on in-window host protocol: %v", resp.Error)
+	}
+	m, _ := resp.Result.(map[string]any)
+	if m["protocolVersion"] != hostMax {
+		t.Errorf("protocolVersion = %v, want negotiated-down %q", m["protocolVersion"], hostMax)
+	}
+}
+
+// spec: §6.9 — a host requesting a version newer than this binary's max is
+// capped at the server max (the server cannot speak a version it does not
+// implement); a host omitting the field gets the server max.
+func TestHandle_InitializeCapsNewerAndDefaultsEmpty(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name      string
+		requested string
+		want      string
+	}{
+		{"newer than server", "2025-06-01", protocolVersion},
+		{"empty defaults to max", "", protocolVersion},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			srv := &mcpServer{cfg: &config{}}
+			params, _ := json.Marshal(map[string]string{"protocolVersion": tc.requested})
+			resp := srv.handle(rpcRequest{JSONRPC: "2.0", Method: "initialize", Params: params})
+			if resp.Error != nil {
+				t.Fatalf("unexpected error: %v", resp.Error)
+			}
+			m, _ := resp.Result.(map[string]any)
+			if m["protocolVersion"] != tc.want {
+				t.Errorf("protocolVersion = %v, want %q", m["protocolVersion"], tc.want)
+			}
+		})
+	}
+}
+
+// spec: §6.9 — negotiateProtocol unit table covering the boundary at
+// supportedSince and the no-compatible-version case.
+func TestNegotiateProtocol(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		requested string
+		want      string
+		wantOK    bool
+	}{
+		{"", protocolVersion, true},              // host omitted the field
+		{"2023-01-01", "", false},                // older than supportedSince
+		{"2024-10-31", "", false},                // one day before supportedSince
+		{supportedSince, supportedSince, true},   // exact floor
+		{"2024-11-03", "2024-11-03", true},       // in-window, negotiate down
+		{protocolVersion, protocolVersion, true}, // exact server max
+		{"2025-06-01", protocolVersion, true},    // newer than server, capped
+	} {
+		got, ok := negotiateProtocol(tc.requested)
+		if got != tc.want || ok != tc.wantOK {
+			t.Errorf("negotiateProtocol(%q) = (%q, %v), want (%q, %v)", tc.requested, got, ok, tc.want, tc.wantOK)
+		}
 	}
 }
 
@@ -346,22 +446,27 @@ func TestServe_SkipsMalformedRequests(t *testing.T) {
 }
 
 // --- proxyGet ----------------------------------------------------------------
-// proxyGet wraps fetchJSON; covered transitively where the registry is
-// unreachable: the result is an error map.
 
-func TestProxyGet_UnreachableRegistryReturnsErrorResult(t *testing.T) {
+// spec: §12 — "Fresh load_domain / search_domains / search_artifacts returns
+// an explicit 'offline' status that hosts can surface." An unreachable
+// registry yields an offline status rather than an error so the host can tell
+// a transient outage from a request rejection.
+func TestProxyGet_UnreachableRegistryReturnsOfflineStatus(t *testing.T) {
 	t.Parallel()
 	srv := &mcpServer{
 		cfg:  &config{registry: "http://127.0.0.1:1"},
 		http: &http.Client{},
 	}
-	got := srv.proxyGet("/v1/load_domain", map[string]any{"path": "x"})
+	got := srv.proxyGet("/v1/load_domain", map[string]any{"path": "x"}, nil)
 	m, ok := got.(map[string]any)
 	if !ok {
 		t.Fatalf("type = %T", got)
 	}
-	if _, has := m["error"]; !has {
-		t.Errorf("expected error key in %v", m)
+	if m["status"] != "offline" {
+		t.Errorf("status = %v, want offline (%v)", m["status"], m)
+	}
+	if _, has := m["error"]; has {
+		t.Errorf("offline result must not carry an error key: %v", m)
 	}
 }
 
@@ -376,6 +481,48 @@ func TestBuildSignatureProvider(t *testing.T) {
 	}
 	if _, err := buildSignatureProvider("unknown"); err == nil {
 		t.Errorf("buildSignatureProvider(unknown) = nil error, want error")
+	}
+}
+
+// buildSignatureProvider for registry-managed loads the verification public key
+// from PODIUM_SIGNATURE_VERIFY_KEY (base64 Ed25519) and pins the key id from
+// PODIUM_SIGNATURE_KEY_ID, so the resulting provider verifies a real envelope.
+// A malformed verify key is a startup error. Not parallel: it mutates env.
+func TestBuildSignatureProvider_RegistryManagedVerifyKey(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(crand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	hash := "sha256:" + hex.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+	envelope, err := sign.RegistryManagedKey{PrivateKey: priv, KeyID: "key-v1"}.Sign(context.Background(), hash)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+
+	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", base64.StdEncoding.EncodeToString(pub))
+	t.Setenv("PODIUM_SIGNATURE_KEY_ID", "key-v1")
+	p, err := buildSignatureProvider("registry-managed")
+	if err != nil {
+		t.Fatalf("buildSignatureProvider(registry-managed) = %v", err)
+	}
+	if err := p.Verify(context.Background(), hash, envelope); err != nil {
+		t.Errorf("verify with wired public key: %v", err)
+	}
+
+	// A wrong-id pin rejects the same envelope.
+	t.Setenv("PODIUM_SIGNATURE_KEY_ID", "key-v2")
+	p2, err := buildSignatureProvider("registry-managed")
+	if err != nil {
+		t.Fatalf("buildSignatureProvider(registry-managed) = %v", err)
+	}
+	if err := p2.Verify(context.Background(), hash, envelope); err == nil {
+		t.Error("a non-pinned key id should be refused")
+	}
+
+	// A malformed verify key is a startup error.
+	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", "!!!not base64")
+	if _, err := buildSignatureProvider("registry-managed"); err == nil {
+		t.Error("malformed PODIUM_SIGNATURE_VERIFY_KEY should error")
 	}
 }
 

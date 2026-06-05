@@ -6,6 +6,44 @@ import (
 	"testing"
 )
 
+// Spec: §8.3/§9.1 — the SPI names LocalAuditSink and
+// RegistryAuditSink the spec references exist as Go types, aliased to the
+// audit.Sink seam. Every shipped backing satisfies all three.
+func TestAuditSinkAliases(t *testing.T) {
+	t.Parallel()
+	var (
+		_ LocalAuditSink    = NewMemory()
+		_ RegistryAuditSink = NewMemory()
+		_ Sink              = NewMemory()
+	)
+	// A LocalAuditSink value is interchangeable with a Sink value.
+	var ls LocalAuditSink = NewMemory()
+	var s Sink = ls
+	if err := s.Append(context.Background(), Event{Type: EventArtifactLoaded, Caller: "alice"}); err != nil {
+		t.Fatalf("Append through alias: %v", err)
+	}
+}
+
+// Spec: §8.1/§8.4 — AllEventTypes enumerates every defined event
+// type with no duplicates, so the retention layer can assert each type is
+// classified.
+func TestAllEventTypes_NoDuplicates(t *testing.T) {
+	t.Parallel()
+	seen := map[EventType]bool{}
+	for _, ty := range AllEventTypes() {
+		if ty == "" {
+			t.Error("empty event type in AllEventTypes")
+		}
+		if seen[ty] {
+			t.Errorf("duplicate event type %q", ty)
+		}
+		seen[ty] = true
+	}
+	if len(seen) == 0 {
+		t.Fatal("AllEventTypes returned nothing")
+	}
+}
+
 // Spec: §8.6 Audit Integrity — Append + Verify produce a sound chain
 // across multiple events.
 func TestMemory_AppendThenVerify(t *testing.T) {

@@ -9,12 +9,19 @@
 package lint
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"net/http"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
+	"github.com/lennylabs/podium/pkg/typeprovider"
 )
 
 // Severity is one of error, warning, info.
@@ -51,9 +58,32 @@ func (d Diagnostic) String() string {
 
 // Linter applies the configured rules to a registry.
 type Linter struct {
-	// Rules is the ordered set of rules to apply. Defaults to
-	// AllRules() when empty.
+	// Rules is the ordered set of rules to apply. Defaults to the
+	// rule set from AllRulesWithClient(HTTPClient) when empty.
 	Rules []Rule
+	// HTTPClient, when non-nil, enables the §4.4 URL HEAD check in the
+	// default rule set: prose references to URLs are validated by an
+	// HTTP HEAD that must return 200/3xx. When nil the URL check is
+	// skipped (offline ingest); the bundled-file existence check still
+	// runs. Ignored when Rules is set explicitly.
+	HTTPClient *http.Client
+	// AllowPerDomainOverrides reflects the §13.12 tenant
+	// discovery.allow_per_domain_overrides setting. When non-nil and
+	// false, the default rule set adds a warning on any DOMAIN.md that
+	// carries a `discovery:` block, since per-domain overrides are
+	// disabled registry-wide and the block has no effect (§4.5.5). Nil
+	// (the default) leaves overrides allowed and skips the check. Ignored
+	// when Rules is set explicitly.
+	AllowPerDomainOverrides *bool
+	// PerFileSoftCapBytes overrides the §4.1 per-file bundled-resource
+	// soft cap (the warning threshold) so an operator can tune it per §12
+	// ("soft cap is configurable"). Zero uses the default
+	// PerFileSoftCapBytes constant. Ignored when Rules is set explicitly.
+	PerFileSoftCapBytes int64
+	// PerPackageSoftCapBytes overrides the §4.1 per-package bundled-resource
+	// soft cap (the error threshold). Zero uses the default
+	// PerPackageSoftCapBytes constant. Ignored when Rules is set explicitly.
+	PerPackageSoftCapBytes int64
 }
 
 // Rule is one lint check. Receiving the registry plus parsed records
@@ -63,39 +93,120 @@ type Rule interface {
 	// Code returns the namespaced rule identifier.
 	Code() string
 	// Check evaluates the rule and returns any diagnostics it produces.
-	Check(reg *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic
+	Check(ctx context.Context, reg *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic
 }
 
 // AllRules returns the set of lint rules registered for the active
-// build.
+// build, with the §4.4 URL HEAD check disabled (offline). Equivalent to
+// AllRulesWithClient(nil).
 func AllRules() []Rule {
+	return AllRulesWithClient(nil)
+}
+
+// AllRulesWithClient returns the registered rule set with the §4.4
+// prose-reference rule driven by client: a non-nil client enables URL
+// HEAD validation, a nil client skips it. Every other rule is
+// client-independent.
+func AllRulesWithClient(client *http.Client) []Rule {
 	return []Rule{
 		ruleRequiredFields{},
+		ruleTypeRequiredFields{},
+		ruleRuleModeHygiene{},
+		ruleRuleModeCanonical{},
+		ruleTypeProviderValidate{},
 		ruleSkillCompliance{},
+		ruleSkillPodiumOnlyFields{},
+		ruleSkillArtifactFields{},
+		ruleSkillRefValidate{},
 		ruleNameSyntax{},
 		ruleVersionSemver{},
+		ruleHookEventCanonical{},
 		ruleHookConsistency{},
+		ruleHarnessCapability{},
 		ruleEffortHintAppliesToType{},
 		ruleBundledResourceSize{},
 		ruleManifestSize{},
 		ruleArtifactBodyForSkill{},
-		ruleProseReferenceResolution{},
+		ruleProseReferenceResolution{HTTPClient: client},
 		ruleDomainImportsResolve{},
 		ruleDomainImportCycle{},
+		ruleDomainImportBroadGlob{},
+		ruleDomainBodySize{},
 	}
+}
+
+// DefaultHTTPClient is the client NewIngestLinter uses for §4.4 URL HEAD
+// checks. The 10s overall timeout bounds a slow or unreachable host; the
+// per-request context in the prose rule adds a 5s ceiling per probe.
+func DefaultHTTPClient() *http.Client {
+	return &http.Client{Timeout: 10 * time.Second}
+}
+
+// NewIngestLinter returns a Linter for an ingest pass. When offline is
+// false it enables §4.4 URL HEAD validation with DefaultHTTPClient();
+// when true it skips the network probe (the bundled-file existence check
+// still runs). Callers supply offline from their own deployment config
+// (for example PODIUM_INGEST_OFFLINE or a --offline flag).
+//
+// The §4.1 bundled-resource soft caps are configurable per §12 via
+// PODIUM_LINT_PER_FILE_SOFT_CAP_BYTES and
+// PODIUM_LINT_PER_PACKAGE_SOFT_CAP_BYTES; an unset or
+// non-positive value leaves the default constant in force.
+func NewIngestLinter(offline bool) *Linter {
+	l := &Linter{
+		PerFileSoftCapBytes:    envInt64("PODIUM_LINT_PER_FILE_SOFT_CAP_BYTES"),
+		PerPackageSoftCapBytes: envInt64("PODIUM_LINT_PER_PACKAGE_SOFT_CAP_BYTES"),
+	}
+	if !offline {
+		l.HTTPClient = DefaultHTTPClient()
+	}
+	return l
+}
+
+// envInt64 parses a non-negative int64 from the named environment
+// variable, returning 0 when unset or unparseable so the caller's
+// default applies.
+func envInt64(name string) int64 {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return 0
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }
 
 // Lint runs every configured rule against the registry and returns the
 // concatenated diagnostics, sorted by ArtifactID then Code so output is
 // deterministic.
-func (l *Linter) Lint(reg *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (l *Linter) Lint(ctx context.Context, reg *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	rules := l.Rules
 	if len(rules) == 0 {
-		rules = AllRules()
+		rules = AllRulesWithClient(l.HTTPClient)
+		// §12: apply the configured bundled-resource soft caps.
+		// Zero values fall back to the §4.1 defaults inside the rule.
+		if l.PerFileSoftCapBytes > 0 || l.PerPackageSoftCapBytes > 0 {
+			for i := range rules {
+				if _, ok := rules[i].(ruleBundledResourceSize); ok {
+					rules[i] = ruleBundledResourceSize{
+						perFileCap:    l.PerFileSoftCapBytes,
+						perPackageCap: l.PerPackageSoftCapBytes,
+					}
+				}
+			}
+		}
+		// §4.5.5: when the tenant disables per-domain discovery
+		// overrides, warn on any DOMAIN.md that still carries a
+		// `discovery:` block (ingest succeeds; the block is ignored).
+		if l.AllowPerDomainOverrides != nil && !*l.AllowPerDomainOverrides {
+			rules = append(rules, ruleDomainDiscoveryOverrideDisallowed{})
+		}
 	}
 	var out []Diagnostic
 	for _, r := range rules {
-		out = append(out, r.Check(reg, records)...)
+		out = append(out, r.Check(ctx, reg, records)...)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].ArtifactID != out[j].ArtifactID {
@@ -108,19 +219,31 @@ func (l *Linter) Lint(reg *filesystem.Registry, records []filesystem.ArtifactRec
 
 // ----- Rules -----------------------------------------------------------------
 
-type ruleRequiredFields struct{}
+// ruleRequiredFields enforces the §4.3 universal-field requirements
+// (type and version) and the §4.1 type-registration check. providers is
+// the TypeProvider registry consulted for the type check; a nil registry
+// defaults to typeprovider.Default so the shipped binary recognizes
+// first-class and built-in extension types.
+type ruleRequiredFields struct {
+	providers *typeprovider.Registry
+}
 
-func (ruleRequiredFields) Code() string        { return "lint.required_field_missing" }
+func (ruleRequiredFields) Code() string { return "lint.required_field_missing" }
 
-func (r ruleRequiredFields) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleRequiredFields) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+	providers := resolveProviders(r.providers)
 	var out []Diagnostic
 	for _, rec := range records {
 		a := rec.Artifact
 		if a.Type == "" {
 			out = append(out, errMsg(rec.ID, r, "type is required"))
-		} else if !manifest.IsFirstClassType(a.Type) {
+		} else if err := providers.Require(a.Type); errors.Is(err, manifest.ErrUnknownType) {
+			// §4.1: a type registered with any TypeProvider (first-class,
+			// built-in extension, or deployment-registered extension) is
+			// accepted. Only an unregistered type warns, because the
+			// deployment may register a provider for it.
 			out = append(out, warn(rec.ID, "lint.unknown_type",
-				fmt.Sprintf("type %q is not first-class; extension TypeProvider required", a.Type)))
+				fmt.Sprintf("type %q is not registered with any TypeProvider; register an extension TypeProvider for it", a.Type)))
 		}
 		if a.Version == "" {
 			out = append(out, errMsg(rec.ID, r, "version is required"))
@@ -129,11 +252,50 @@ func (r ruleRequiredFields) Check(_ *filesystem.Registry, records []filesystem.A
 	return out
 }
 
+// ruleTypeProviderValidate dispatches each artifact to the TypeProvider
+// registered for its type and surfaces the provider's diagnostics
+// (§4.1 type-system extensibility, §9 TypeProvider SPI). The built-in
+// providers are no-ops; deployment-registered extension types contribute
+// their type-specific lint rules here. providers defaults to
+// typeprovider.Default when nil.
+type ruleTypeProviderValidate struct {
+	providers *typeprovider.Registry
+}
+
+func (ruleTypeProviderValidate) Code() string { return "lint.type_provider" }
+
+func (r ruleTypeProviderValidate) Check(ctx context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+	providers := resolveProviders(r.providers)
+	var out []Diagnostic
+	for _, rec := range records {
+		if rec.Artifact == nil {
+			continue
+		}
+		for _, d := range providers.Validate(ctx, rec.Artifact) {
+			msg := d.Message
+			if d.Path != "" {
+				msg = fmt.Sprintf("%s (%s)", msg, d.Path)
+			}
+			code := d.Code
+			if code == "" {
+				code = r.Code()
+			}
+			out = append(out, Diagnostic{
+				ArtifactID: rec.ID,
+				Code:       code,
+				Severity:   severityFromProvider(d.Severity),
+				Message:    msg,
+			})
+		}
+	}
+	return out
+}
+
 type ruleSkillCompliance struct{}
 
-func (ruleSkillCompliance) Code() string        { return "lint.skill_md_compliance" }
+func (ruleSkillCompliance) Code() string { return "lint.skill_md_compliance" }
 
-func (r ruleSkillCompliance) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleSkillCompliance) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
 	for _, rec := range records {
 		if rec.Artifact.Type != manifest.TypeSkill {
@@ -161,9 +323,9 @@ func (r ruleSkillCompliance) Check(_ *filesystem.Registry, records []filesystem.
 
 type ruleNameSyntax struct{}
 
-func (ruleNameSyntax) Code() string        { return "lint.invalid_name" }
+func (ruleNameSyntax) Code() string { return "lint.invalid_name" }
 
-func (r ruleNameSyntax) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleNameSyntax) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
 	for _, rec := range records {
 		if rec.Skill != nil && rec.Skill.Name != "" {
@@ -182,9 +344,9 @@ func (r ruleNameSyntax) Check(_ *filesystem.Registry, records []filesystem.Artif
 
 type ruleVersionSemver struct{}
 
-func (ruleVersionSemver) Code() string        { return "lint.invalid_version" }
+func (ruleVersionSemver) Code() string { return "lint.invalid_version" }
 
-func (r ruleVersionSemver) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleVersionSemver) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
 	for _, rec := range records {
 		if rec.Artifact.Version == "" {
@@ -197,46 +359,106 @@ func (r ruleVersionSemver) Check(_ *filesystem.Registry, records []filesystem.Ar
 	return out
 }
 
+// ruleHookEventCanonical enforces §4.3.5: a type: hook artifact's
+// hook_event is "constrained to a canonical event name from the table".
+// An unknown or misspelled event (for example on_stop) is an ingest
+// error, since the adapter has no canonical-to-native mapping for it. An
+// empty hook_event is left to ruleRequiredFields-style per-type checks;
+// this rule only rejects a non-empty value outside the canonical set.
+type ruleHookEventCanonical struct{}
+
+func (ruleHookEventCanonical) Code() string { return "lint.unknown_hook_event" }
+
+func (r ruleHookEventCanonical) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+	var out []Diagnostic
+	for _, rec := range records {
+		if rec.Artifact == nil || rec.Artifact.Type != manifest.TypeHook {
+			continue
+		}
+		event := rec.Artifact.HookEvent
+		if event == "" || manifest.IsCanonicalHookEvent(event) {
+			continue
+		}
+		out = append(out, errMsg(rec.ID, r,
+			fmt.Sprintf("hook_event %q is not a canonical §4.3.5 event; valid events: %s",
+				event, strings.Join(manifest.CanonicalHookEvents(), ", "))))
+	}
+	return out
+}
+
 type ruleHookConsistency struct{}
 
-func (ruleHookConsistency) Code() string        { return "lint.hook_generic_and_subtype" }
+func (ruleHookConsistency) Code() string { return "lint.hook_generic_and_subtype" }
 
-// genericToSubtypes maps each generic event to its subtype family. Used to
-// flag when both the generic and a subtype are declared on the same
-// artifact.
+// genericToSubtypes maps each generic tool event to its subtype family
+// (§4.3.5). Used to detect when a generic hook and one of its corresponding
+// subtype hooks are both declared.
 var genericToSubtypes = map[string][]string{
 	"pre_tool_use":  {"pre_shell_execution", "pre_mcp_execution", "pre_read_file"},
 	"post_tool_use": {"post_shell_execution", "post_mcp_execution", "post_file_edit"},
 }
 
-func (r ruleHookConsistency) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
-	var out []Diagnostic
+// subtypeToGeneric inverts genericToSubtypes for subtype lookup.
+var subtypeToGeneric = func() map[string]string {
+	m := map[string]string{}
+	for generic, subs := range genericToSubtypes {
+		for _, s := range subs {
+			m[s] = generic
+		}
+	}
+	return m
+}()
+
+// Check implements spec §4.3.5: "Authors should not declare both a generic
+// hook and the corresponding subtype hook for the same artifact; lint warns
+// when this happens." A hook_event is a single scalar (§4.3.5 shows
+// `hook_event: stop`), so one artifact cannot hold both a generic and a
+// subtype; the reachable form of "declaring both" is a generic hook and a
+// corresponding subtype hook present together in the linted set. The rule
+// warns on the generic hook and names the overlapping subtype hook. A lone
+// generic hook is valid (§4.3.5: "Authors choose the level of specificity")
+// and draws no diagnostic.
+func (r ruleHookConsistency) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+	// Collect the subtype hooks present, grouped by their parent generic.
+	subtypesByGeneric := map[string][]filesystem.ArtifactRecord{}
 	for _, rec := range records {
-		if rec.Artifact.Type != manifest.TypeHook {
+		if rec.Artifact == nil || rec.Artifact.Type != manifest.TypeHook {
 			continue
 		}
-		event := rec.Artifact.HookEvent
-		// Lint inspects a single hook_event field and emits info-
-		// level guidance when an authored generic event would
-		// shadow a more specific subtype.
-		if subs, ok := genericToSubtypes[event]; ok {
-			out = append(out, Diagnostic{
-				ArtifactID: rec.ID,
-				Code:       r.Code(),
-				Severity:   SeverityInfo,
-				Message: fmt.Sprintf("hook_event %q matches every subtype (%s); pick a subtype if you only need one",
-					event, strings.Join(subs, ", ")),
-			})
+		if generic, ok := subtypeToGeneric[rec.Artifact.HookEvent]; ok {
+			subtypesByGeneric[generic] = append(subtypesByGeneric[generic], rec)
 		}
+	}
+	var out []Diagnostic
+	for _, rec := range records {
+		if rec.Artifact == nil || rec.Artifact.Type != manifest.TypeHook {
+			continue
+		}
+		overlaps := subtypesByGeneric[rec.Artifact.HookEvent]
+		if len(overlaps) == 0 {
+			continue
+		}
+		labels := make([]string, 0, len(overlaps))
+		for _, s := range overlaps {
+			labels = append(labels, fmt.Sprintf("%q (%s)", s.Artifact.HookEvent, s.ID))
+		}
+		sort.Strings(labels)
+		out = append(out, Diagnostic{
+			ArtifactID: rec.ID,
+			Code:       r.Code(),
+			Severity:   SeverityWarning,
+			Message: fmt.Sprintf("generic hook_event %q overlaps the subtype hook(s) %s; a generic hook already covers the subtype, so pick one level of specificity",
+				rec.Artifact.HookEvent, strings.Join(labels, ", ")),
+		})
 	}
 	return out
 }
 
 type ruleEffortHintAppliesToType struct{}
 
-func (ruleEffortHintAppliesToType) Code() string        { return "lint.hint_on_unsupported_type" }
+func (ruleEffortHintAppliesToType) Code() string { return "lint.hint_on_unsupported_type" }
 
-func (r ruleEffortHintAppliesToType) Check(_ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleEffortHintAppliesToType) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
 	for _, rec := range records {
 		ty := rec.Artifact.Type
@@ -259,6 +481,31 @@ func (r ruleEffortHintAppliesToType) Check(_ *filesystem.Registry, records []fil
 }
 
 // ----- helpers --------------------------------------------------------------
+
+// resolveProviders returns p, or the process-global typeprovider.Default
+// when p is nil, so AllRules() works without explicit wiring while tests
+// can inject a registry.
+func resolveProviders(p *typeprovider.Registry) *typeprovider.Registry {
+	if p != nil {
+		return p
+	}
+	return typeprovider.Default
+}
+
+// severityFromProvider maps a typeprovider.Diagnostic severity string to a
+// lint Severity. typeprovider uses "warn"; lint uses "warning". Unknown
+// values default to warning so a misconfigured provider does not silently
+// drop a finding.
+func severityFromProvider(s string) Severity {
+	switch s {
+	case "error":
+		return SeverityError
+	case "info":
+		return SeverityInfo
+	default:
+		return SeverityWarning
+	}
+}
 
 func errMsg(id string, r Rule, msg string) Diagnostic {
 	return Diagnostic{

@@ -1,8 +1,9 @@
 // Package typeprovider implements the §9 TypeProvider SPI. Each
 // first-class artifact type (skill, agent, context, command, rule,
-// hook, mcp-server) ships as a TypeProvider; deployers register
-// extension types through the SPI to add validators, lint rules,
-// or harness-adapter outputs without forking pkg/manifest.
+// hook) and the built-in extension type (mcp-server) ships as a
+// TypeProvider; deployers register further extension types through the
+// SPI to add validators, lint rules, or harness-adapter outputs without
+// forking pkg/manifest.
 //
 // The registry is a process-global singleton keyed by ArtifactType.
 // Register-time conflicts return an error so deployments fail loud
@@ -10,6 +11,7 @@
 package typeprovider
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -37,7 +39,7 @@ type Diagnostic struct {
 type Provider interface {
 	ID() string
 	Type() manifest.ArtifactType
-	Validate(*manifest.Artifact) []Diagnostic
+	Validate(ctx context.Context, a *manifest.Artifact) []Diagnostic
 }
 
 // Registry holds the registered providers.
@@ -52,22 +54,14 @@ func NewRegistry() *Registry {
 }
 
 // Default is the process-global registry the rest of Podium reads
-// from when validating manifests. New() seeds it with the
-// first-class types as no-op validators; deployers extend via
-// Default.Register.
+// from when validating manifests. newDefault seeds it with the
+// first-class and built-in extension types as no-op validators;
+// deployers extend via Default.Register.
 var Default = newDefault()
 
 func newDefault() *Registry {
 	r := NewRegistry()
-	for _, t := range []manifest.ArtifactType{
-		manifest.TypeSkill,
-		manifest.TypeAgent,
-		manifest.TypeContext,
-		manifest.TypeCommand,
-		manifest.TypeRule,
-		manifest.TypeHook,
-		manifest.TypeMCPServer,
-	} {
+	for _, t := range append(manifest.FirstClassTypes(), manifest.BuiltinExtensionTypes()...) {
 		_ = r.Register(builtin{typ: t})
 	}
 	return r
@@ -100,6 +94,18 @@ func (r *Registry) Get(typ manifest.ArtifactType) (Provider, bool) {
 	return p, ok
 }
 
+// Require returns nil when a provider is registered for typ, and an
+// error wrapping manifest.ErrUnknownType otherwise. This is the §4.1
+// "type registered with any TypeProvider (first-class or extension)"
+// check: callers that warn or reject an unregistered type test the
+// result with errors.Is(err, manifest.ErrUnknownType).
+func (r *Registry) Require(typ manifest.ArtifactType) error {
+	if _, ok := r.Get(typ); ok {
+		return nil
+	}
+	return fmt.Errorf("%w: %q", manifest.ErrUnknownType, typ)
+}
+
 // Types returns every registered type id, sorted.
 func (r *Registry) Types() []manifest.ArtifactType {
 	r.mu.RLock()
@@ -115,7 +121,7 @@ func (r *Registry) Types() []manifest.ArtifactType {
 // Validate dispatches to the registered provider's Validate, or
 // returns nil when no provider matches a (the linter's other rules
 // catch the unknown-type case).
-func (r *Registry) Validate(a *manifest.Artifact) []Diagnostic {
+func (r *Registry) Validate(ctx context.Context, a *manifest.Artifact) []Diagnostic {
 	if a == nil {
 		return nil
 	}
@@ -125,16 +131,16 @@ func (r *Registry) Validate(a *manifest.Artifact) []Diagnostic {
 	if !ok {
 		return nil
 	}
-	return p.Validate(a)
+	return p.Validate(ctx, a)
 }
 
-// builtin is the default TypeProvider for every first-class type.
-// It does not run additional validation; the existing pkg/lint
-// rules continue to handle universal-field checks.
+// builtin is the default TypeProvider for every first-class and
+// built-in extension type. It does not run additional validation; the
+// existing pkg/lint rules continue to handle universal-field checks.
 type builtin struct {
 	typ manifest.ArtifactType
 }
 
-func (b builtin) ID() string                               { return "builtin:" + string(b.typ) }
-func (b builtin) Type() manifest.ArtifactType              { return b.typ }
-func (b builtin) Validate(*manifest.Artifact) []Diagnostic { return nil }
+func (b builtin) ID() string                                                { return "builtin:" + string(b.typ) }
+func (b builtin) Type() manifest.ArtifactType                               { return b.typ }
+func (b builtin) Validate(context.Context, *manifest.Artifact) []Diagnostic { return nil }

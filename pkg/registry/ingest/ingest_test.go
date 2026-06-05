@@ -289,6 +289,19 @@ func TestIngest_PopulatesDependencyEdges(t *testing.T) {
 		"  - finance/sub-agent@1.x\n" +
 		"mcpServers:\n" +
 		"  - name: finance-warehouse\n" +
+		"    command: npx\n" +
+		"    args: [\"-y\", \"@company/finance-warehouse-mcp\"]\n" +
+		"---\n\nbody\n"
+	// spec: §4.7.3 — the mcpServers edge resolves to the mcp-server
+	// artifact that declares the matching server_identifier. The
+	// consumer entry derives npx:@company/finance-warehouse-mcp, which
+	// this sibling artifact owns.
+	mcpSrc := "---\n" +
+		"type: mcp-server\n" +
+		"version: 1.0.0\n" +
+		"description: warehouse mcp\n" +
+		"sensitivity: low\n" +
+		"server_identifier: npx:@company/finance-warehouse-mcp\n" +
 		"---\n\nbody\n"
 	st := newStore(t)
 	// Per §4.7.6 the extends: parent must exist at the child's ingest
@@ -302,7 +315,8 @@ func TestIngest_PopulatesDependencyEdges(t *testing.T) {
 		t.Fatalf("Ingest parent: %v", err)
 	}
 	fsys := fstest.MapFS{
-		"finance/dependent/ARTIFACT.md": &fstest.MapFile{Data: []byte(src)},
+		"finance/dependent/ARTIFACT.md":   &fstest.MapFile{Data: []byte(src)},
+		"infra/mcp/warehouse/ARTIFACT.md": &fstest.MapFile{Data: []byte(mcpSrc)},
 	}
 	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
 		TenantID: "tenant-1", LayerID: "L", Files: fsys,
@@ -314,7 +328,9 @@ func TestIngest_PopulatesDependencyEdges(t *testing.T) {
 	}{
 		{"shared/parent", "extends"},
 		{"finance/sub-agent", "delegates_to"},
-		{"finance-warehouse", "mcpServers"},
+		// §4.7.3 — keyed on the resolved mcp-server artifact ID, not the
+		// consumer-side local name "finance-warehouse".
+		{"infra/mcp/warehouse", "mcpServers"},
 	}
 	for _, c := range cases {
 		got, err := st.DependentsOf(context.Background(), "tenant-1", c.to)
@@ -404,5 +420,78 @@ func TestIngest_ErrLintFailedExposed(t *testing.T) {
 	t.Parallel()
 	if !errors.Is(ingest.ErrLintFailed, ingest.ErrLintFailed) {
 		t.Errorf("ErrLintFailed should match itself")
+	}
+}
+
+// TestIngest_RootLevelArtifactRejected covers
+// Spec: §4.2 — a root-level ARTIFACT.md has no canonical ID; Ingest rejects
+// it instead of silently storing an artifact with an empty, unaddressable ID.
+func TestIngest_RootLevelArtifactRejected(t *testing.T) {
+	t.Parallel()
+	fsys := fstest.MapFS{
+		"ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("Root"))},
+	}
+	st := newStore(t)
+	_, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "tenant-1",
+		LayerID:  "team-shared",
+		Files:    fsys,
+	})
+	if err == nil {
+		t.Fatalf("Ingest accepted a root-level ARTIFACT.md")
+	}
+	if !strings.Contains(err.Error(), "subdirectory") {
+		t.Errorf("error %q missing 'subdirectory'", err)
+	}
+}
+
+// TestIngest_AtSegmentRejected covers
+// Spec: §4.2 — "@" inside a directory name makes the canonical-ID-plus-suffix
+// reference grammar ambiguous, so Ingest rejects it.
+func TestIngest_AtSegmentRejected(t *testing.T) {
+	t.Parallel()
+	fsys := fstest.MapFS{
+		"finance/pay@v2/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("Pay"))},
+	}
+	st := newStore(t)
+	_, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "tenant-1",
+		LayerID:  "team-shared",
+		Files:    fsys,
+	})
+	if err == nil {
+		t.Fatalf("Ingest accepted '@' in a canonical-ID segment")
+	}
+	if !strings.Contains(err.Error(), "@") {
+		t.Errorf("error %q missing '@'", err)
+	}
+}
+
+// TestIngest_NestedArtifactsIngestedSeparately covers
+// Spec: §4.2 — a nested artifact is a separate leaf package. Both the parent
+// and the nested artifact are ingested as distinct records keyed by their own
+// canonical IDs.
+func TestIngest_NestedArtifactsIngestedSeparately(t *testing.T) {
+	t.Parallel()
+	fsys := fstest.MapFS{
+		"outer/ARTIFACT.md":       &fstest.MapFile{Data: []byte(contextArtifact("Outer"))},
+		"outer/inner/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("Inner"))},
+	}
+	st := newStore(t)
+	res, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "tenant-1",
+		LayerID:  "team-shared",
+		Files:    fsys,
+	})
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if res.Accepted != 2 {
+		t.Fatalf("Accepted=%d, want 2 (parent + nested)", res.Accepted)
+	}
+	for _, id := range []string{"outer", "outer/inner"} {
+		if _, err := st.GetManifest(context.Background(), "tenant-1", id, "1.0.0"); err != nil {
+			t.Errorf("GetManifest(%q): %v", id, err)
+		}
 	}
 }

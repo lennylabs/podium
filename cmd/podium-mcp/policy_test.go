@@ -87,11 +87,16 @@ func TestEnforceSandboxPolicy_HostSupportsProfile(t *testing.T) {
 	}
 }
 
-// sanitizeHash replaces unsafe filename characters.
+// spec: §6.5 — the content-bucket name is the bare hex digest, so
+// the on-disk layout matches the spec's `${PODIUM_CACHE_DIR}/<sha256>/`.
 func TestSanitizeHash(t *testing.T) {
 	t.Parallel()
-	if got := sanitizeHash("sha256:abc"); got != "sha256-abc" {
-		t.Errorf("got %q", got)
+	if got := sanitizeHash("sha256:abc"); got != "abc" {
+		t.Errorf("got %q, want abc", got)
+	}
+	// A non-sha256 / malformed hash still produces a separator-free, safe name.
+	if got := sanitizeHash("md5:a/b"); got != "md5-a_b" {
+		t.Errorf("got %q, want md5-a_b", got)
 	}
 	// Empty input produces an opaque safe key, not empty.
 	if got := sanitizeHash(""); got == "" {

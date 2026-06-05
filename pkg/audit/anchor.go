@@ -35,7 +35,7 @@ func Anchor(ctx context.Context, sink *FileSink, signer sign.Provider) (int64, e
 		return -1, nil
 	}
 	contentHash := "sha256:" + chainHead
-	envelope, err := signer.Sign(contentHash)
+	envelope, err := signer.Sign(ctx, contentHash)
 	if err != nil {
 		return 0, fmt.Errorf("audit.anchor: sign chain head: %w", err)
 	}
@@ -74,18 +74,22 @@ func chainHeadOf(sink *FileSink) (string, error) {
 }
 
 // extractRekorLogIndex pulls the Rekor log index out of the
-// Sigstore-keyless envelope shape. Returns -1 when the envelope
-// does not carry a log index (e.g., RegistryManagedKey or a
+// Sigstore-keyless envelope. Returns -1 only when the envelope does
+// not carry a log_index field at all (e.g., RegistryManagedKey or a
 // Sigstore-keyless flow with no Rekor configured).
+//
+// Rekor indices are zero-based, so the first entry recorded against
+// an instance has index 0. The decode uses a *int64 so a field that
+// is present and zero is preserved as 0 and only true absence (or a
+// decode failure) maps to -1. spec: §8.6.
 func extractRekorLogIndex(envelope string) int64 {
 	type partial struct {
-		LogIndex int64 `json:"log_index"`
+		LogIndex *int64 `json:"log_index"`
 	}
 	var p partial
-	// Best-effort decode; any failure returns -1.
-	_ = json.Unmarshal([]byte(envelope), &p)
-	if p.LogIndex == 0 {
+	// Best-effort decode; any failure or absent field returns -1.
+	if err := json.Unmarshal([]byte(envelope), &p); err != nil || p.LogIndex == nil {
 		return -1
 	}
-	return p.LogIndex
+	return *p.LogIndex
 }

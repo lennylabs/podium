@@ -74,6 +74,66 @@ type Provider interface {
 	Close() error
 }
 
+// TextVectorizer is the optional capability a vector backend implements
+// when it embeds raw text server-side: Pinecone Integrated Inference, a
+// Weaviate vectorizer module, or Qdrant Cloud Inference (§13.12). When a
+// backend self-embeds, the registry sends text through PutText / QueryText
+// and no separate embedding.Provider is required; the hosted model
+// determines the vector dimension, so Dimensions reports 0 and the
+// dimension checks are skipped on the text path.
+type TextVectorizer interface {
+	// SelfEmbeds reports whether server-side embedding is active (an
+	// inference-model / vectorizer name is configured). A backend that
+	// implements this interface but is configured storage-only returns
+	// false, and the registry uses the precomputed-vector path instead.
+	SelfEmbeds() bool
+	// PutText upserts the (tenant, id, version) row from raw text; the
+	// backend embeds it with the configured hosted model.
+	PutText(ctx context.Context, tenantID, artifactID, version, text string) error
+	// QueryText embeds text server-side and returns the top-K nearest rows
+	// scoped to the tenant, ordered by ascending Distance.
+	QueryText(ctx context.Context, tenantID, text string, topK int) ([]Match, error)
+}
+
+// SelfEmbeds reports whether v is a TextVectorizer with server-side
+// embedding active. Nil-safe: a nil provider or a backend that does not
+// self-embed returns false.
+func SelfEmbeds(v Provider) bool {
+	tv, ok := v.(TextVectorizer)
+	return ok && tv.SelfEmbeds()
+}
+
+// ModelVersioned is the optional §4.7 "Model versioning and re-embedding"
+// capability a backend implements to record the embedding model per row and
+// restrict queries to the currently-configured model. The collocated backends
+// (memory, sqlite-vec, pgvector) implement it so a model switch runs as an
+// online re-embed: PutModel tags each new row with the current model id,
+// QueryModel returns only current-model rows (plus legacy untagged rows, so an
+// upgrade with no model change keeps serving), and PurgeModelExcept drops the
+// stale model's rows once the re-embed completes. A managed backend that
+// re-indexes per model need not implement it; the registry falls back to the
+// plain Put / Query.
+type ModelVersioned interface {
+	// PutModel upserts the (tenant, id, version) row and tags it with modelID.
+	PutModel(ctx context.Context, tenantID, artifactID, version string, embedding []float32, modelID string) error
+	// QueryModel returns the top-K nearest rows whose model_id is modelID or is
+	// empty (a legacy row ingested before model versioning), so a query during
+	// re-embed never scores a stale model's vectors. An empty modelID matches
+	// every row (no restriction).
+	QueryModel(ctx context.Context, tenantID string, vec []float32, topK int, modelID string) ([]Match, error)
+	// PurgeModelExcept removes rows whose model_id differs from modelID,
+	// returning the count purged. Called after a full re-embed completes to
+	// drop the stale model's vectors. An empty modelID purges nothing.
+	PurgeModelExcept(ctx context.Context, tenantID, modelID string) (int, error)
+}
+
+// ModelVersionedOf returns v as a ModelVersioned backend when it implements the
+// capability. Nil-safe.
+func ModelVersionedOf(v Provider) (ModelVersioned, bool) {
+	mv, ok := v.(ModelVersioned)
+	return mv, ok
+}
+
 // validateDim returns ErrDimensionMismatch when v's length doesn't
 // match the configured dimension. Backends call this on every Put /
 // Query so the error surface is consistent.

@@ -8,6 +8,7 @@ import (
 
 	"github.com/lennylabs/podium/pkg/layer/source"
 	"github.com/lennylabs/podium/pkg/lint"
+	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/store"
 )
 
@@ -32,11 +33,12 @@ type HistoryEmitter func(ctx context.Context, tenantID, layerID, priorRef, newRe
 // whenever the orchestrator runs against a server that exposes
 // /v1/events.
 type SourceIngestOptions struct {
-	Linter       *lint.Linter
-	Emit         HistoryEmitter
-	Embedder     EmbedderFunc
-	VectorPut    VectorPutFunc
-	PublishEvent EventEmitter
+	Linter          *lint.Linter
+	Emit            HistoryEmitter
+	Embedder        EmbedderFunc
+	VectorPut       VectorPutFunc
+	DomainVectorPut DomainVectorPutFunc
+	PublishEvent    EventEmitter
 	// AuditEmit, when non-nil, receives §8.1 audit events the
 	// orchestrator and ingest pipeline produce (artifact.published,
 	// layer.ingested, layer.history_rewritten, freeze.break_glass).
@@ -44,6 +46,29 @@ type SourceIngestOptions struct {
 	// CallerID identifies the operator triggering the ingest;
 	// embedded into emitted audit events.
 	CallerID string
+	// ResourcePut uploads bundled resources to the §7.2 object store at
+	// ingest. Nil keeps resource bytes inline on the manifest record.
+	ResourcePut ResourcePutFunc
+	// FreezeWindows are the §4.7.2 windows enforced for this ingest. An
+	// active window blocking "ingest" rejects with ErrFrozen unless a
+	// window carries a valid break-glass grant (§7.3.1 manual reingest).
+	FreezeWindows []FreezeWindow
+	// RejectAtOrAbove is the §13.10 public-mode sensitivity floor passed
+	// through to the ingest Request. Empty means no floor.
+	RejectAtOrAbove manifest.Sensitivity
+	// EnforceSandboxProfile and EnforceableSandboxProfiles thread the §13.10
+	// sandbox-profile ingest gate (PODIUM_ENFORCE_SANDBOX_PROFILE +
+	// PODIUM_HOST_SANDBOXES) through to the ingest Request. See
+	// ingest.Request for the semantics.
+	EnforceSandboxProfile      bool
+	EnforceableSandboxProfiles []string
+	// Signer signs every newly accepted manifest's content hash (§4.7.9).
+	// Nil leaves manifests unsigned (the standalone default; §13.10 signing
+	// is disabled unless --sign registry-key is set).
+	Signer SignerFunc
+	// UseVectorOutbox routes embedding through the §4.7.2 transactional outbox
+	// (set for an external vector backend). See ingest.Request.UseVectorOutbox.
+	UseVectorOutbox bool
 }
 
 // SourceIngest snapshots the layer via the supplied provider, runs
@@ -101,7 +126,7 @@ func SourceIngestWithOptions(
 				opts.Emit(ctx, cfg.TenantID, cfg.ID, cfg.LastIngestedRef, snap.Reference)
 			}
 			if opts.PublishEvent != nil {
-				opts.PublishEvent("layer.history_rewritten", map[string]any{
+				opts.PublishEvent(ctx, "layer.history_rewritten", map[string]any{
 					"tenant":    cfg.TenantID,
 					"layer":     cfg.ID,
 					"prior_ref": cfg.LastIngestedRef,
@@ -118,15 +143,23 @@ func SourceIngestWithOptions(
 	}
 
 	res, err := Ingest(ctx, st, Request{
-		TenantID:     cfg.TenantID,
-		LayerID:      cfg.ID,
-		Files:        snap.Files,
-		Linter:       opts.Linter,
-		Embedder:     opts.Embedder,
-		VectorPut:    opts.VectorPut,
-		PublishEvent: opts.PublishEvent,
-		AuditEmit:    opts.AuditEmit,
-		CallerID:     opts.CallerID,
+		TenantID:                   cfg.TenantID,
+		LayerID:                    cfg.ID,
+		Files:                      snap.Files,
+		Linter:                     opts.Linter,
+		Embedder:                   opts.Embedder,
+		VectorPut:                  opts.VectorPut,
+		DomainVectorPut:            opts.DomainVectorPut,
+		PublishEvent:               opts.PublishEvent,
+		AuditEmit:                  opts.AuditEmit,
+		CallerID:                   opts.CallerID,
+		ResourcePut:                opts.ResourcePut,
+		FreezeWindows:              opts.FreezeWindows,
+		RejectAtOrAbove:            opts.RejectAtOrAbove,
+		EnforceSandboxProfile:      opts.EnforceSandboxProfile,
+		EnforceableSandboxProfiles: opts.EnforceableSandboxProfiles,
+		Signer:                     opts.Signer,
+		UseVectorOutbox:            opts.UseVectorOutbox,
 	})
 	if err != nil {
 		return nil, err
@@ -136,7 +169,7 @@ func SourceIngestWithOptions(
 	// the result summary. Useful for build pipelines that gate on
 	// "ingest of the prod layer just completed."
 	if opts.PublishEvent != nil {
-		opts.PublishEvent("layer.ingested", map[string]any{
+		opts.PublishEvent(ctx, "layer.ingested", map[string]any{
 			"tenant":         cfg.TenantID,
 			"layer":          cfg.ID,
 			"reference":      snap.Reference,
@@ -155,6 +188,14 @@ func SourceIngestWithOptions(
 	}
 
 	cfg.LastIngestedRef = snap.Reference
+	// §7.3.1 "last_ingested_at is exposed per layer for staleness
+	// monitoring": stamp the completion time of this ingest cycle from
+	// the snapshot timestamp the provider reported.
+	ingestedAt := snap.CreatedAt
+	if !ingestedAt.IsZero() {
+		ts := ingestedAt.UTC()
+		cfg.LastIngestedAt = &ts
+	}
 	if perr := st.PutLayerConfig(ctx, cfg); perr != nil {
 		return res, fmt.Errorf("update last_ingested_ref: %w", perr)
 	}

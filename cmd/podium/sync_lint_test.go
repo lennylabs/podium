@@ -118,8 +118,6 @@ func TestSyncCmd_DryRunJSON(t *testing.T) {
 	}
 }
 
-
-
 func TestSearchCmd_HappyPath(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/search_artifacts" {

@@ -6,17 +6,22 @@ package server
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/lint"
+	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
@@ -28,26 +33,27 @@ import (
 
 // Server is a thin HTTP wrapper over a core.Registry.
 type Server struct {
-	core         *core.Registry
-	publicMode   bool
-	resolveID    func(*http.Request) layer.Identity
-	resourceFunc ResourceFunc
-	// resources caches bundled resources keyed by artifact ID.
-	// Populated by NewFromFilesystem; empty for callers that
-	// construct via New (the meta-tool API still returns the manifest
-	// body, just without bundled bytes inline).
-	resources map[string]map[string][]byte
+	core       *core.Registry
+	publicMode bool
+	resolveID  func(*http.Request) layer.Identity
+	// idVerifier verifies the per-request caller token and maps it to an
+	// Identity (§6.3.2 injected-session-token). When set, the meta-tool
+	// routes verify on every call: a verification failure rejects the
+	// request with the §6.10 auth.* envelope before the handler runs, and
+	// a success carries the Identity to the handler via the request
+	// context. Nil leaves the server on the resolveID path (anonymous
+	// public by default), preserving standalone / public-mode behavior.
+	idVerifier func(*http.Request) (layer.Identity, error)
 	// events is the §7.6 in-process pub/sub for /v1/events.
 	events *eventBus
-	// largeResources maps (artifactID, resourcePath) → object key for
-	// resources whose payload exceeded objectstore.InlineCutoff at
-	// ingest. The HTTP handler presigns a URL per key on read; the
-	// /objects/{key} route serves the bytes for filesystem-backed
-	// stores. Empty when no objectstore is configured.
-	largeResources map[string]map[string]largeRef
-	objectStore    objectstore.Provider
-	objectBaseURL  string
-	presignTTL     time.Duration
+	// objectStore is the §7.2 data-plane backend. load_artifact reads
+	// small resources from it (when not inline) and presigns large ones;
+	// the /objects/{key} route streams the bytes for the filesystem
+	// backend. Nil when no object store is configured, in which case the
+	// resources ingest left inline on the record still serve.
+	objectStore   objectstore.Provider
+	objectBaseURL string
+	presignTTL    time.Duration
 	// webhooks is the §7.3.2 outbound delivery worker. When set,
 	// PublishEvent fans the event out to every matching receiver.
 	webhooks *webhook.Worker
@@ -66,12 +72,65 @@ type Server struct {
 	// and /readyz consult it. Optional; nil leaves both endpoints
 	// reporting "ready".
 	mode *ModeTracker
+	// readiness holds the §13.9 dependency probes /readyz runs at
+	// request time (metadata store, object storage). A failing probe
+	// downgrades /readyz to not_ready (503). Empty leaves /readyz
+	// reporting ready / read_only from the mode tracker alone.
+	readiness []ReadinessCheck
+	// lag reports the §13.2.1 observed replication lag in seconds for
+	// /readyz and the X-Podium-Read-Only-Lag-Seconds header. Nil
+	// reports 0 (the genuine value for a standalone deployment with
+	// no read replica).
+	lag LagReporter
+	// auditSink records §8.1 events that originate at the HTTP boundary
+	// (admin.granted). Read events flow through the core emitter; sharing
+	// the same sink keeps both on one §8.6 hash chain. It is the §8.3
+	// registry sink, which is a file sink or an EndpointSink when redirected
+	// to a SIEM (§8.3). Nil is a no-op.
+	auditSink audit.Sink
+	// latency, when set, receives one §7.1 timing observation per served
+	// request (operation name, status, elapsed) so a deployment can compare
+	// observed latency against the SLO budgets. Nil disables timing with
+	// zero per-request overhead. Wired by serverboot to a structured access
+	// log; pluggable for a histogram exporter.
+	latency LatencyObserver
 }
+
+// readyProbeTimeout bounds the §13.9 dependency probes so a hung
+// metadata-store or object-store call can never block the /readyz
+// handler past this deadline.
+const readyProbeTimeout = 2 * time.Second
+
+// ReadinessCheck probes one dependency for §13.9 readiness. It returns
+// nil when the dependency is reachable and a non-nil error describing
+// the outage otherwise. Checks must honor ctx cancellation so /readyz
+// stays bounded.
+type ReadinessCheck func(ctx context.Context) error
+
+// LagReporter returns the §13.2.1 observed replication lag in seconds.
+// A standalone deployment with no replica reports 0; a standard
+// deployment wires a reporter backed by the replica's replay
+// timestamp.
+type LagReporter func(ctx context.Context) int
 
 // WithMode installs the §13.2.1 mode tracker so /healthz and
 // /readyz reflect the read-only / ready state.
 func WithMode(m *ModeTracker) Option {
 	return func(s *Server) { s.mode = m }
+}
+
+// WithReadinessChecks installs the §13.9 dependency probes consulted by
+// /readyz. Each check pings one dependency (the metadata store, object
+// storage); any failing check makes /readyz report not_ready and answer
+// 503 so a load balancer pulls the registry out of rotation.
+func WithReadinessChecks(checks ...ReadinessCheck) Option {
+	return func(s *Server) { s.readiness = append(s.readiness, checks...) }
+}
+
+// WithLagReporter installs the §13.2.1 replication-lag source threaded
+// into the /readyz body and the X-Podium-Read-Only-Lag-Seconds header.
+func WithLagReporter(fn LagReporter) Option {
+	return func(s *Server) { s.lag = fn }
 }
 
 // WithQuotaLimiter installs the §4.7.8 rate limiter for search
@@ -80,22 +139,6 @@ func WithMode(m *ModeTracker) Option {
 func WithQuotaLimiter(q *QuotaLimiter) Option {
 	return func(s *Server) { s.quota = q }
 }
-
-// largeRef is the per-resource metadata the server keeps so it can
-// presign URLs and validate visibility on /objects/{key} reads.
-type largeRef struct {
-	Key         string
-	Size        int64
-	ContentType string
-	ContentHash string
-}
-
-// ResourceFunc returns the bytes of one bundled resource for an
-// artifact load. The default implementation looks up the resource on
-// disk under a configured root; tests can swap it for an in-memory
-// fixture. Returning (nil, false) signals "not present" — the response
-// then omits Resources for that artifact.
-type ResourceFunc func(ctx context.Context, artifactID, resourcePath string) ([]byte, bool)
 
 // Option mutates the Server during construction.
 type Option func(*Server)
@@ -113,10 +156,15 @@ func WithIdentityResolver(fn func(*http.Request) layer.Identity) Option {
 	return func(s *Server) { s.resolveID = fn }
 }
 
-// WithResources installs a function that returns bundled resource bytes
-// for load_artifact responses. Empty → no Resources are attached.
-func WithResources(fn ResourceFunc) Option {
-	return func(s *Server) { s.resourceFunc = fn }
+// WithIdentityVerifier installs the §6.3.2 per-request token verifier used
+// when the registry runs the injected-session-token provider. The function
+// extracts and verifies the bearer token and returns the caller Identity,
+// or an error (identity.ErrUntrustedRuntime / identity.ErrTokenExpired)
+// that the meta-tool routes surface as the §6.10 auth.* envelope. Setting
+// it makes the registry verify the signature on every meta-tool call;
+// without it the server stays on the anonymous resolveID path.
+func WithIdentityVerifier(fn func(*http.Request) (layer.Identity, error)) Option {
+	return func(s *Server) { s.idVerifier = fn }
 }
 
 // WithObjectStore configures the §4.1 large-resource path. Resources
@@ -167,6 +215,13 @@ func WithTenant(t string) Option {
 	return func(s *Server) { s.tenant = t }
 }
 
+// WithAudit installs the §8.3 audit sink used to record HTTP-boundary
+// events (admin.granted). The same sink backs the core read-event emitter
+// so both streams stay on one §8.6 hash chain.
+func WithAudit(sink audit.Sink) Option {
+	return func(s *Server) { s.auditSink = sink }
+}
+
 // New returns a Server backed by the given core.Registry.
 func New(r *core.Registry, opts ...Option) *Server {
 	s := &Server{core: r, events: newEventBus(), tenant: "default"}
@@ -184,10 +239,13 @@ func New(r *core.Registry, opts ...Option) *Server {
 }
 
 // NewFromFilesystem opens the filesystem registry at path, ingests
-// every layer into a fresh in-memory store, captures bundled
-// resources for inline delivery, and returns a Server wrapping the
-// resulting core.Registry. This is the standalone bootstrap helper
-// used by tests and the standalone server.
+// every layer into a fresh in-memory store, and returns a Server
+// wrapping the resulting core.Registry. Bundled resources persist at
+// ingest (§7.2 data plane): when an object store is configured via
+// WithObjectStore, each resource uploads keyed by its content hash and
+// resources above the §4.2 cutoff serve via presigned URL; otherwise
+// they stay inline on the manifest record. This is the standalone
+// bootstrap helper used by tests and the standalone server.
 func NewFromFilesystem(path string, opts ...Option) (*Server, error) {
 	reg, err := filesystem.Open(path)
 	if err != nil {
@@ -198,112 +256,71 @@ func NewFromFilesystem(path string, opts ...Option) (*Server, error) {
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: tenant, Name: tenant}); err != nil {
 		return nil, err
 	}
-	resources := map[string]map[string][]byte{}
+	// Discover the configured object store ahead of ingest so the
+	// data-plane upload runs in the ingest pipeline (the same path the
+	// standalone server's bootstrapLayerPath uses). Applying the options
+	// to a throwaway server reads objectStore without duplicating the
+	// option wiring; New applies them again to the real server.
+	probe := &Server{}
+	for _, opt := range opts {
+		opt(probe)
+	}
+	var resourcePut ingest.ResourcePutFunc
+	if probe.objectStore != nil {
+		resourcePut = probe.objectStore.Put
+	}
+	// §13.10/§13.2.2 public-mode sensitivity ceiling: when the server runs in
+	// public mode, reject medium and high artifacts at ingest. Read from the
+	// applied options so the standalone bootstrap and tests share one floor.
+	var rejectAtOrAbove manifest.Sensitivity
+	if probe.publicMode {
+		rejectAtOrAbove = manifest.SensitivityMedium
+	}
 	layers := make([]layer.Layer, 0, len(reg.Layers))
 	for i, l := range reg.Layers {
 		layerFS := newDirFS(l.Path)
 		if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
-			TenantID: tenant,
-			LayerID:  l.ID,
-			Files:    layerFS,
+			TenantID:        tenant,
+			LayerID:         l.ID,
+			Files:           layerFS,
+			RejectAtOrAbove: rejectAtOrAbove,
+			// §4.4: validate prose URL references with an HTTP HEAD by
+			// default; PODIUM_INGEST_OFFLINE=true skips the network probe.
+			Linter:      lint.NewIngestLinter(os.Getenv("PODIUM_INGEST_OFFLINE") == "true"),
+			ResourcePut: resourcePut,
 		}); err != nil {
 			return nil, err
-		}
-		// Walk the layer once more to capture bundled resources for
-		// inline delivery via load_artifact responses (§4.1 inline
-		// cutoff). Higher-precedence layers overwrite lower ones for
-		// collision-free artifact IDs (sync's effective view).
-		records, err := reg.Walk(filesystem.WalkOptions{
-			CollisionPolicy: filesystem.CollisionPolicyHighestWins,
-		})
-		if err == nil {
-			for _, rec := range records {
-				if rec.Layer.ID != l.ID {
-					continue
-				}
-				resources[rec.ID] = rec.Resources
-			}
 		}
 		layers = append(layers, layer.Layer{
 			ID:         l.ID,
 			Precedence: i + 1,
-			Visibility: layer.Visibility{Public: true},
+			Visibility: bootstrapVisibility(l),
 		})
 	}
 
 	registry := core.New(st, tenant, layers)
-	server := New(registry, opts...)
-	server.resourceFunc = filesystemResourceFunc(reg)
-	if server.objectStore != nil {
-		// Split bundled resources by §4.1 inline cutoff: small ones
-		// stay in s.resources for inline embedding; large ones go to
-		// the objectstore and are referenced via presigned URLs.
-		large, err := uploadLargeResources(context.Background(), server.objectStore, resources)
-		if err != nil {
-			return nil, fmt.Errorf("upload large resources: %w", err)
-		}
-		server.largeResources = large
-		// Strip large resources from the inline cache so handleLoadArtifact
-		// doesn't double-deliver them.
-		for artifactID, paths := range large {
-			for path := range paths {
-				delete(resources[artifactID], path)
-			}
-		}
-	}
-	server.resources = resources
-	return server, nil
+	// §3.3 / §12 learn-from-usage: the standalone server reranks search and
+	// load_domain by access frequency, like the standard-topology registry.
+	registry = registry.WithUsageSignals(core.NewMemoryUsageSignals())
+	return New(registry, opts...), nil
 }
 
-// uploadLargeResources walks resources, uploads any blob above
-// objectstore.InlineCutoff to store, and returns the (artifactID →
-// path → ref) mapping for the server to use on /v1/load_artifact.
-func uploadLargeResources(ctx context.Context, store objectstore.Provider, resources map[string]map[string][]byte) (map[string]map[string]largeRef, error) {
-	out := map[string]map[string]largeRef{}
-	for artifactID, byPath := range resources {
-		for path, body := range byPath {
-			if int64(len(body)) <= objectstore.InlineCutoff {
-				continue
-			}
-			h := sha256.Sum256(body)
-			contentHash := "sha256:" + hex.EncodeToString(h[:])
-			key := contentHash[len("sha256:"):]
-			contentType := guessContentType(path)
-			if err := store.Put(ctx, key, body, contentType); err != nil {
-				return nil, fmt.Errorf("put %s/%s: %w", artifactID, path, err)
-			}
-			if out[artifactID] == nil {
-				out[artifactID] = map[string]largeRef{}
-			}
-			out[artifactID][path] = largeRef{
-				Key:         key,
-				Size:        int64(len(body)),
-				ContentType: contentType,
-				ContentHash: contentHash,
-			}
-		}
+// bootstrapVisibility resolves the runtime visibility of a filesystem-source
+// layer. A layer that declares visibility via its .layer-config file (§4.6)
+// uses that declaration; a layer without one defaults to public, the §13.10
+// standalone bootstrap default. This lets a fixture or migrated directory
+// express every visibility mode through the filesystem load path while
+// preserving the all-public default for layers that say nothing.
+func bootstrapVisibility(l filesystem.Layer) layer.Visibility {
+	if !l.HasVisibility {
+		return layer.Visibility{Public: true}
 	}
-	return out, nil
-}
-
-// guessContentType picks a Content-Type from path extension. Falls
-// back to application/octet-stream so a missing match is benign.
-func guessContentType(path string) string {
-	switch {
-	case strings.HasSuffix(path, ".json"):
-		return "application/json"
-	case strings.HasSuffix(path, ".md"):
-		return "text/markdown"
-	case strings.HasSuffix(path, ".txt"):
-		return "text/plain"
-	case strings.HasSuffix(path, ".yaml"), strings.HasSuffix(path, ".yml"):
-		return "application/yaml"
-	case strings.HasSuffix(path, ".png"):
-		return "image/png"
-	case strings.HasSuffix(path, ".jpg"), strings.HasSuffix(path, ".jpeg"):
-		return "image/jpeg"
+	return layer.Visibility{
+		Public:       l.Visibility.Public,
+		Organization: l.Visibility.Organization,
+		Groups:       l.Visibility.Groups,
+		Users:        l.Visibility.Users,
 	}
-	return "application/octet-stream"
 }
 
 // Handler returns an http.Handler with every meta-tool route registered.
@@ -314,8 +331,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/load_domain", s.handleLoadDomain)
 	mux.HandleFunc("/v1/search_domains", s.handleSearchDomains)
 	mux.HandleFunc("/v1/search_artifacts", s.handleSearchArtifacts)
+	mux.HandleFunc("/v1/catalog", s.handleCatalog)
 	mux.HandleFunc("/v1/load_artifact", s.handleLoadArtifact)
 	mux.HandleFunc("/v1/artifacts:batchLoad", s.handleBatchLoad)
+	mux.HandleFunc("/v1/sync/manifest", s.handleSyncManifest)
 	mux.HandleFunc("/v1/dependents", s.handleDependents)
 	mux.HandleFunc("/v1/scope/preview", s.handleScopePreview)
 	mux.HandleFunc("/v1/domain/analyze", s.handleDomainAnalyze)
@@ -334,7 +353,15 @@ func (s *Server) Handler() http.Handler {
 	if s.objectStore != nil {
 		mux.HandleFunc("/objects/", s.handleObjectsRoute)
 	}
-	return s.withReadOnlyHeaders(mux)
+	// §7.1: time the full request (outermost so the measured duration spans
+	// identity verification, audit, and the handler) and report it to the
+	// latency observer, keyed by operation name, for SLO comparison. Then
+	// §6.3.2: verify the caller token on every meta-tool call (a rejected
+	// request never reaches the audit emitter or a handler), then §8.1:
+	// attach per-request audit metadata (trace id + structured caller
+	// identity) to every request context so read events emitted by the core
+	// and the HTTP write handlers carry it.
+	return s.withLatencyObserver(s.withIdentityVerification(s.withAuditMetaMiddleware(s.withReadOnlyHeaders(mux))))
 }
 
 // withReadOnlyHeaders wraps the route mux so every response
@@ -345,11 +372,12 @@ func (s *Server) withReadOnlyHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.mode != nil && s.mode.Get() == ModeReadOnly {
 			w.Header().Set("X-Podium-Read-Only", "true")
-			// Replication lag is 0 by default (standalone has no
-			// replica). Standard deployments wire a probe that
-			// updates this; the field stays a numeric string so
-			// clients can parse uniformly.
-			w.Header().Set("X-Podium-Read-Only-Lag-Seconds", "0")
+			// Observed replication lag at response time (§13.2.1).
+			// A standalone deployment with no replica reports 0;
+			// the field stays a numeric string so clients parse it
+			// uniformly.
+			lag := s.replicationLagSeconds(r.Context())
+			w.Header().Set("X-Podium-Read-Only-Lag-Seconds", strconv.Itoa(lag))
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -357,10 +385,13 @@ func (s *Server) withReadOnlyHeaders(next http.Handler) http.Handler {
 
 // ----- Response shapes ------------------------------------------------------
 
-// HealthResponse describes /healthz output (§13.9).
+// HealthResponse describes /healthz output (§13.9). The endpoint is a
+// liveness signal: it reports the mode string (§13.2.1 read_only,
+// §13.2.2 public, or ready) and conveys liveness through the 200 status
+// alone. Readiness lives on /readyz; /healthz carries no readiness
+// boolean.
 type HealthResponse struct {
-	Mode  string `json:"mode"`
-	Ready bool   `json:"ready"`
+	Mode string `json:"mode"`
 }
 
 // LoadDomainResponse describes /v1/load_domain output (§5).
@@ -373,11 +404,21 @@ type LoadDomainResponse struct {
 	Note        string               `json:"note,omitempty"`
 }
 
-// DomainDescriptor is one subdomain entry.
+// DomainDescriptor is one subdomain entry. Subdomains carries the
+// nested child tree when load_domain expands more than one level
+// (§4.5.5 depth); it is omitted for leaf entries and at the deepest
+// rendered level.
 type DomainDescriptor struct {
 	Path        string `json:"path"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	// Keywords and Score populate the §3.2 Layer 1 search_domains
+	// descriptor (path, name, description, keywords, score). Both are
+	// omitted for load_domain subdomain entries, which carry
+	// path/name/description (and the nested subtree) only.
+	Keywords   []string           `json:"keywords,omitempty"`
+	Score      float64            `json:"score,omitempty"`
+	Subdomains []DomainDescriptor `json:"subdomains,omitempty"`
 }
 
 // ArtifactDescriptor is one artifact entry.
@@ -388,6 +429,28 @@ type ArtifactDescriptor struct {
 	Description string   `json:"description,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
 	Score       float64  `json:"score,omitempty"`
+	// Sensitivity is the classification label surfaced in search_artifacts
+	// results (§4.7.4), resolved most-restrictive across an extends chain
+	// (§4.6). Omitted when the artifact declares no sensitivity.
+	Sensitivity string `json:"sensitivity,omitempty"`
+	// FoldedFrom is the relative subpath a notable artifact was lifted
+	// from when fold_below_artifacts collapsed its sparse subdomain
+	// into this domain's leaf set (§4.5.5 folding mechanics). Empty for
+	// a direct child of the requested domain.
+	FoldedFrom string `json:"folded_from,omitempty"`
+	// Source tags a load_domain notable entry with its §4.5.5
+	// notable-selection source: "featured" for an author-curated entry,
+	// "signal" otherwise. Omitted on search results, which carry no
+	// notable source.
+	Source string `json:"source,omitempty"`
+	// Frontmatter carries the artifact's frontmatter on search_artifacts
+	// results per the §7.6.1 read-CLI JSON schema. Omitted on load_domain
+	// notable entries, which carry Summary instead.
+	Frontmatter string `json:"frontmatter,omitempty"`
+	// Summary carries the artifact's short summary on load_domain notable
+	// entries per the §7.6.1 schema. Omitted on search results, which carry
+	// Frontmatter instead.
+	Summary string `json:"summary,omitempty"`
 }
 
 // SearchResponse is the common envelope for both search endpoints.
@@ -403,17 +466,41 @@ type SearchResponse struct {
 // resources above the cutoff are returned in LargeResources as
 // follow-the-URL references the consumer fetches separately.
 type LoadArtifactResponse struct {
-	ID             string                       `json:"id"`
-	Type           string                       `json:"type"`
-	Version        string                       `json:"version"`
-	ContentHash    string                       `json:"content_hash"`
-	ManifestBody   string                       `json:"manifest_body"`
-	Frontmatter    string                       `json:"frontmatter"`
+	ID           string `json:"id"`
+	Type         string `json:"type"`
+	Version      string `json:"version"`
+	ContentHash  string `json:"content_hash"`
+	ManifestBody string `json:"manifest_body"`
+	Frontmatter  string `json:"frontmatter"`
+	// SkillRaw is the verbatim SKILL.md for a type: skill artifact (§4.3.4),
+	// so a server-source consumer materializes the authored skill file
+	// byte-for-byte instead of reconstructing it from ARTIFACT.md frontmatter
+	// plus body (§11 filesystem ↔ server equivalence). Empty for non-skills.
+	SkillRaw       string                       `json:"skill_raw,omitempty"`
 	Layer          string                       `json:"layer,omitempty"`
 	Sensitivity    string                       `json:"sensitivity,omitempty"`
 	Resources      map[string]string            `json:"resources,omitempty"`
 	ResourcesB64   bool                         `json:"resources_base64,omitempty"`
 	LargeResources map[string]LargeResourceLink `json:"large_resources,omitempty"`
+	// ManifestBodyURL delivers the canonical manifest document (the
+	// ARTIFACT.md bytes, or the verbatim SKILL.md for a skill) via a
+	// presigned object-store URL when that document exceeds the §4.2 inline
+	// cutoff, keeping the §7.2 control-plane response small (§6.6). When set,
+	// the inline ManifestBody and the canonical-document field (Frontmatter,
+	// or SkillRaw for a skill) are empty; the MCP server fetches the URL in
+	// §6.6 step 1 and reconstitutes them. Nil when the body is below the
+	// cutoff or no object store is configured (delivered inline).
+	ManifestBodyURL *LargeResourceLink `json:"manifest_body_url,omitempty"`
+	// ManifestMerged signals that Frontmatter is an extends-merged
+	// re-serialization with the hidden parent stripped (§4.6), so its bytes
+	// no longer reproduce ContentHash. The consumer recomputes the §6.6 step 2
+	// content hash over RawFrontmatter instead.
+	ManifestMerged bool `json:"manifest_merged,omitempty"`
+	// RawFrontmatter carries the leaf child's original pre-merge ARTIFACT.md
+	// bytes when ManifestMerged is set, so the consumer reproduces the §4.7.6
+	// content hash for the merged manifest rather than skipping the check.
+	// Empty for a non-merged response.
+	RawFrontmatter string `json:"raw_frontmatter,omitempty"`
 	// Deprecated, ReplacedBy, and DeprecationWarning surface the
 	// §4.7.4 lifecycle signal so consumers see the warning
 	// alongside the served bytes and can route callers to the
@@ -429,31 +516,37 @@ type LoadArtifactResponse struct {
 }
 
 // LargeResourceLink describes one resource whose payload exceeded
-// the inline cutoff. The URL's auth model is backend-specific:
+// the inline cutoff. The presigned URL's auth model is backend-specific:
 // the S3 backend embeds an AWS Signature V4 in the URL; the
 // filesystem backend's URL points at the registry's authenticated
 // /objects/{content_hash} route. ContentHash lets the consumer
-// verify the bytes after fetching.
+// verify the bytes after fetching. The field is named presigned_url to
+// match the §7.6.2 batch-load wire example, so both load paths use one
+// name for the same reference.
 type LargeResourceLink struct {
-	URL         string `json:"url"`
+	URL         string `json:"presigned_url"`
 	ContentHash string `json:"content_hash"`
 	Size        int64  `json:"size"`
 	ContentType string `json:"content_type,omitempty"`
 }
 
-// ErrorResponse is the JSON envelope for §6.10 structured errors.
+// ErrorResponse is the JSON envelope for §6.10 structured errors. The
+// field order mirrors the spec example: code, message, details,
+// retryable, suggested_action. Details carries machine-readable context
+// for codes whose spec example includes it (for example runtime_iss for
+// auth.untrusted_runtime); it is omitted when empty.
 type ErrorResponse struct {
-	Code            string `json:"code"`
-	Message         string `json:"message"`
-	Retryable       bool   `json:"retryable"`
-	SuggestedAction string `json:"suggested_action,omitempty"`
+	Code            string         `json:"code"`
+	Message         string         `json:"message"`
+	Details         map[string]any `json:"details,omitempty"`
+	Retryable       bool           `json:"retryable"`
+	SuggestedAction string         `json:"suggested_action,omitempty"`
 }
 
 // ----- Handlers -------------------------------------------------------------
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	mode := s.modeBanner()
-	writeJSON(w, http.StatusOK, HealthResponse{Mode: mode, Ready: true})
+	writeJSON(w, http.StatusOK, HealthResponse{Mode: s.modeBanner()})
 }
 
 // modeBanner returns the canonical mode string per §13.2.1:
@@ -479,17 +572,54 @@ type ReadyResponse struct {
 
 // handleReady answers /readyz per §13.9. The status code follows
 // load-balancer conventions: ready / read_only return 200 (the
-// registry stays in rotation), not_ready returns 503. Replication
-// lag is 0 in standalone deployments; standard deployments wire
-// a probe that updates the field.
-func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
-	mode := s.modeBanner()
-	resp := ReadyResponse{Mode: mode}
+// registry stays in rotation), not_ready returns 503. The body
+// always carries the observed replication lag in seconds (0 for a
+// standalone deployment with no replica).
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), readyProbeTimeout)
+	defer cancel()
+	mode := s.readyMode(ctx)
+	resp := ReadyResponse{Mode: mode, ReplicationLagSecs: s.replicationLagSeconds(ctx)}
 	status := http.StatusOK
 	if mode == "not_ready" {
 		status = http.StatusServiceUnavailable
 	}
 	writeJSON(w, status, resp)
+}
+
+// readyMode computes the §13.9 /readyz state, which the spec restricts
+// to ready, read_only, or not_ready (public mode is a /healthz signal,
+// not a readiness state, so it is intentionally absent here). The
+// precedence is: not_ready when any §13.9 dependency probe fails (a hard
+// outage takes the registry out of rotation), then read_only when the
+// §13.2.1 tracker has flipped (degraded but still serving reads), then
+// ready.
+func (s *Server) readyMode(ctx context.Context) string {
+	for _, check := range s.readiness {
+		if check == nil {
+			continue
+		}
+		if err := check(ctx); err != nil {
+			return ModeNotReady.String()
+		}
+	}
+	if s.mode != nil && s.mode.Get() == ModeReadOnly {
+		return ModeReadOnly.String()
+	}
+	return ModeReady.String()
+}
+
+// replicationLagSeconds returns the §13.2.1 observed replication lag.
+// Nil reporter (or a negative reading) reports 0, the genuine value for
+// a standalone deployment with no read replica.
+func (s *Server) replicationLagSeconds(ctx context.Context) int {
+	if s.lag == nil {
+		return 0
+	}
+	if n := s.lag(ctx); n > 0 {
+		return n
+	}
+	return 0
 }
 
 func (s *Server) handleLoadDomain(w http.ResponseWriter, r *http.Request) {
@@ -507,9 +637,7 @@ func (s *Server) handleLoadDomain(w http.ResponseWriter, r *http.Request) {
 		Note:        res.Note,
 	}
 	for _, d := range res.Subdomains {
-		resp.Subdomains = append(resp.Subdomains, DomainDescriptor{
-			Path: d.Path, Name: d.Name, Description: d.Description,
-		})
+		resp.Subdomains = append(resp.Subdomains, domainDescriptorOf(d))
 	}
 	for _, a := range res.Notable {
 		resp.Notable = append(resp.Notable, descriptorOf(a))
@@ -519,6 +647,50 @@ func (s *Server) handleLoadDomain(w http.ResponseWriter, r *http.Request) {
 	}
 	if resp.Notable == nil {
 		resp.Notable = []ArtifactDescriptor{}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// CatalogResponse is GET /v1/catalog output (§4.5.2 merged-view glob
+// resolution for the client-side load_domain merge). ids carries the
+// flat visible-ID list; artifacts carries the lean per-artifact descriptor a
+// consumer needs to render a registry artifact pulled in by a workspace-local
+// DOMAIN.md include: without a load_artifact round-trip. No manifest body
+// rides along.
+type CatalogResponse struct {
+	Ids       []string       `json:"ids"`
+	Artifacts []CatalogEntry `json:"artifacts"`
+}
+
+// CatalogEntry is one /v1/catalog artifact: id, type, and short summary.
+type CatalogEntry struct {
+	ID      string `json:"id"`
+	Type    string `json:"type,omitempty"`
+	Summary string `json:"summary,omitempty"`
+}
+
+// handleCatalog serves §4.5.2 GET /v1/catalog?scope=<path>, returning the
+// visible artifact catalog under the scope prefix (IDs plus lean descriptors),
+// visibility-filtered per caller. The client-side load_domain merge resolves a
+// workspace-local DOMAIN.md's globs over this set unioned with the overlay.
+func (s *Server) handleCatalog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "registry.invalid_argument",
+			"method not allowed: "+r.Method)
+		return
+	}
+	entries, err := s.core.Catalog(r.Context(), s.identity(r), r.URL.Query().Get("scope"))
+	if err != nil {
+		s.writeCoreError(w, err)
+		return
+	}
+	resp := CatalogResponse{
+		Ids:       make([]string, 0, len(entries)),
+		Artifacts: make([]CatalogEntry, 0, len(entries)),
+	}
+	for _, e := range entries {
+		resp.Ids = append(resp.Ids, e.ID)
+		resp.Artifacts = append(resp.Artifacts, CatalogEntry{ID: e.ID, Type: e.Type, Summary: e.Summary})
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -542,6 +714,7 @@ func (s *Server) handleSearchDomains(w http.ResponseWriter, r *http.Request) {
 	for _, d := range res.Domains {
 		resp.Domains = append(resp.Domains, DomainDescriptor{
 			Path: d.Path, Name: d.Name, Description: d.Description,
+			Keywords: d.Keywords, Score: d.Score,
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -557,12 +730,24 @@ func (s *Server) handleSearchArtifacts(w http.ResponseWriter, r *http.Request) {
 	if t := q.Get("tags"); t != "" {
 		tags = splitCSV(t)
 	}
+	// spec: §4.7.2 — as_admin=1 requests the admin diagnostic visibility
+	// override on search, gated the same way as load_artifact.
+	asAdmin := isTrue(q.Get("as_admin"))
+	if asAdmin {
+		if err := s.requireAdmin(r); err != nil {
+			writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
+			return
+		}
+	}
 	res, err := s.core.SearchArtifacts(r.Context(), s.identity(r), core.SearchArtifactsOptions{
 		Query: q.Get("query"),
 		Type:  q.Get("type"),
 		Scope: q.Get("scope"),
 		Tags:  tags,
 		TopK:  atoiOr(q.Get("top_k"), 10),
+		// spec: §7.6 — search_artifacts accepts session_id.
+		SessionID: q.Get("session_id"),
+		AsAdmin:   asAdmin,
 	})
 	if err != nil {
 		s.writeCoreError(w, err)
@@ -570,6 +755,12 @@ func (s *Server) handleSearchArtifacts(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := SearchResponse{Query: res.Query, TotalMatched: res.TotalMatched}
 	for _, a := range res.Results {
+		// spec: §5 / §7.6.1 — search_artifacts returns descriptors carrying the
+		// artifact's frontmatter (the §7.6.1 {id, type, version, score,
+		// frontmatter} read-CLI/SDK schema). Only the manifest body stays at the
+		// registry until load_artifact; the descriptor has no body field, so
+		// nothing about the body rides along. The MCP bridge drops frontmatter
+		// for the lean agent-facing surface (§3.2/§5).
 		resp.Results = append(resp.Results, descriptorOf(a))
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -622,8 +813,18 @@ func (s *Server) handleReembed(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	onlyMissing := q.Get("only_missing") == "true"
-	res, err := s.core.Reembed(r.Context(), onlyMissing)
+	opts := core.ReembedOptions{OnlyIfMissing: q.Get("only_missing") == "true"}
+	// spec: §4.7 `--since <timestamp>` — RFC3339 cutoff on IngestedAt.
+	if since := q.Get("since"); since != "" {
+		ts, perr := time.Parse(time.RFC3339, since)
+		if perr != nil {
+			writeError(w, http.StatusBadRequest, "registry.invalid_argument",
+				"since must be an RFC3339 timestamp: "+perr.Error())
+			return
+		}
+		opts.Since = ts
+	}
+	res, err := s.core.Reembed(r.Context(), opts)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return
@@ -648,9 +849,23 @@ func (s *Server) handleDomainAnalyze(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, report)
 }
 
+// handleScopePreview serves §3.5 GET /v1/scope/preview. It rejects
+// non-GET methods like the sibling read endpoints and maps the
+// §3.5 tenant gate (expose_scope_preview: false) to 403
+// config.scope_preview_disabled.
 func (s *Server) handleScopePreview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "registry.invalid_argument",
+			"method not allowed: "+r.Method)
+		return
+	}
 	preview, err := s.core.PreviewScope(r.Context(), s.identity(r))
 	if err != nil {
+		if errors.Is(err, core.ErrScopePreviewDisabled) {
+			writeError(w, http.StatusForbidden, "config.scope_preview_disabled",
+				"scope preview is disabled for this tenant")
+			return
+		}
 		s.writeCoreError(w, err)
 		return
 	}
@@ -658,6 +873,12 @@ func (s *Server) handleScopePreview(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
+	// §6.5: GET materializes; HEAD revalidates the MCP resolution cache by
+	// returning the resolved content hash in a header without a body.
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		writeError(w, http.StatusMethodNotAllowed, "registry.method_not_allowed", "method not allowed: "+r.Method)
+		return
+	}
 	if !s.quota.AllowMaterialize(s.tenant) {
 		writeQuotaError(w, "quota.materialize_rate_exceeded", "tenant materialize budget exhausted")
 		return
@@ -668,11 +889,55 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "id is required")
 		return
 	}
+	// spec: §4.7.2 — as_admin=1 requests the admin diagnostic visibility
+	// override. Gate it at the handler so a non-admin caller gets a 403
+	// auth.forbidden rather than a silent normal-visibility load; core
+	// re-checks the grant before bypassing visibility.
+	asAdmin := isTrue(q.Get("as_admin"))
+	if asAdmin {
+		if err := s.requireAdmin(r); err != nil {
+			writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
+			return
+		}
+	}
 	res, err := s.core.LoadArtifact(r.Context(), s.identity(r), id, core.LoadArtifactOptions{
 		Version: q.Get("version"),
+		AsAdmin: asAdmin,
+		// §5 load_artifact "Optional session_id"; §4.7.6 — within a
+		// session the first `latest` lookup pins, so a later same-id
+		// lookup resolves to the same version even after a newer ingest.
+		// The batch-load path already honors this; wiring it here lets
+		// the single-artifact GET (the MCP bridge's load_artifact) carry
+		// the same session consistency.
+		SessionID: q.Get("session_id"),
 	})
 	if err != nil {
 		s.writeCoreError(w, err)
+		return
+	}
+	// §12 ETag caching of immutable artifact versions: the content hash is a
+	// strong validator for a resolved (id, version) pair, so it is published
+	// as the response ETag. A request that carries a matching If-None-Match is
+	// served 304 Not Modified with no body, letting the MCP client read its
+	// content-addressed cache instead of re-downloading the manifest body and
+	// re-presigning resources. The check runs for GET and HEAD alike and
+	// before any resource presigning so a revalidated hit avoids that work.
+	if etag := contentHashETag(res.ContentHash); etag != "" {
+		w.Header().Set("ETag", etag)
+		if ifNoneMatchHit(r.Header.Get("If-None-Match"), etag) {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+	}
+	// §6.5 HEAD revalidation: report the resolved content hash (and version)
+	// in headers so the MCP cache confirms an unchanged artifact without
+	// downloading the manifest body or presigning resources.
+	if r.Method == http.MethodHead {
+		w.Header().Set("X-Podium-Content-Hash", res.ContentHash)
+		if res.Version != "" {
+			w.Header().Set("X-Podium-Version", res.Version)
+		}
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 	resp := LoadArtifactResponse{
@@ -682,37 +947,215 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 		ContentHash:        res.ContentHash,
 		ManifestBody:       res.ManifestBody,
 		Frontmatter:        string(res.Frontmatter),
+		SkillRaw:           string(res.SkillRaw),
 		Layer:              res.Layer,
 		Sensitivity:        res.Sensitivity,
 		Deprecated:         res.Deprecated,
 		ReplacedBy:         res.ReplacedBy,
 		DeprecationWarning: res.DeprecationWarning,
 		Signature:          res.Signature,
+		ManifestMerged:     res.Merged,
+		RawFrontmatter:     string(res.RawFrontmatter),
 	}
-	if cached, ok := s.resources[res.ID]; ok && len(cached) > 0 {
-		resp.Resources = make(map[string]string, len(cached))
-		for path, data := range cached {
-			resp.Resources[path] = string(data)
-		}
+	// §7.2 data plane: resources at or below the inline cutoff return
+	// inline; larger ones return as presigned URLs the consumer fetches
+	// directly from object storage.
+	if err := s.attachResources(r.Context(), &resp, res.Resources); err != nil {
+		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+		return
 	}
-	if largeMap, ok := s.largeResources[res.ID]; ok && len(largeMap) > 0 {
-		resp.LargeResources = make(map[string]LargeResourceLink, len(largeMap))
-		for path, ref := range largeMap {
-			url, perr := s.objectStore.Presign(r.Context(), ref.Key, s.presignTTL)
-			if perr != nil {
-				writeError(w, http.StatusInternalServerError, "registry.unavailable",
-					"presign large resource: "+perr.Error())
-				return
-			}
-			resp.LargeResources[path] = LargeResourceLink{
-				URL:         url,
-				ContentHash: ref.ContentHash,
-				Size:        ref.Size,
-				ContentType: ref.ContentType,
-			}
-		}
+	// §6.6/§7.2: when the canonical manifest body exceeds the inline cutoff,
+	// deliver it via a presigned URL instead of inline so the control-plane
+	// response stays small.
+	if err := s.attachManifestBody(r.Context(), &resp, res); err != nil {
+		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// contentHashETag formats a resolved content hash as a strong HTTP ETag
+// (a quoted opaque string). spec: §12 ETag caching of immutable artifact
+// versions. An empty hash yields an empty ETag so the caller skips the
+// header rather than emitting `""`.
+func contentHashETag(contentHash string) string {
+	if contentHash == "" {
+		return ""
+	}
+	return `"` + contentHash + `"`
+}
+
+// ifNoneMatchHit reports whether an If-None-Match request header matches the
+// artifact's ETag. It accepts the wildcard `*`, a comma-separated list of
+// entity tags, and weak validators (`W/"..."`), comparing on the opaque tag
+// value per RFC 7232. The MCP client sends the single content-hash ETag it
+// cached, so the common case is one entry.
+func ifNoneMatchHit(ifNoneMatch, etag string) bool {
+	if ifNoneMatch == "" {
+		return false
+	}
+	if strings.TrimSpace(ifNoneMatch) == "*" {
+		return true
+	}
+	want := strings.TrimPrefix(etag, "W/")
+	for _, candidate := range strings.Split(ifNoneMatch, ",") {
+		c := strings.TrimSpace(candidate)
+		c = strings.TrimPrefix(c, "W/")
+		if c == want {
+			return true
+		}
+	}
+	return false
+}
+
+// attachResources splits the §4.4 bundled resources of a load result
+// into the §7.2 inline set (at or below objectstore.InlineCutoff) and
+// the large set (above it). Small resources serve from the bytes ingest
+// stored inline, falling back to an object-store read; large resources
+// presign against the configured store.
+//
+// A large resource presigns only when an object store is configured. In
+// the standalone-without-storage mode (§13.11) ingest keeps every
+// resource inline regardless of size, so when no object store is present
+// those bytes serve inline rather than failing the load (§7.2).
+func (s *Server) attachResources(ctx context.Context, resp *LoadArtifactResponse, refs []store.ResourceRef) error {
+	for _, ref := range refs {
+		if ref.Size > objectstore.InlineCutoff && s.objectStore != nil {
+			link, err := s.presignResource(ctx, ref)
+			if err != nil {
+				return err
+			}
+			if resp.LargeResources == nil {
+				resp.LargeResources = map[string]LargeResourceLink{}
+			}
+			resp.LargeResources[ref.Path] = link
+			continue
+		}
+		body, err := s.inlineBytes(ctx, ref)
+		if err != nil {
+			return err
+		}
+		if resp.Resources == nil {
+			resp.Resources = map[string]string{}
+		}
+		resp.Resources[ref.Path] = string(body)
+	}
+	encodeBinaryInlineResources(resp)
+	return nil
+}
+
+// encodeBinaryInlineResources base64-encodes the inline resource set and
+// sets resources_base64 when any inline payload is not valid UTF-8
+// (§4.1). encoding/json replaces invalid UTF-8 bytes in a Go
+// string with the U+FFFD replacement character, which silently corrupts a
+// binary bundled resource on the wire. The resources_base64 flag is
+// response-wide, so one binary resource forces the whole inline set to
+// base64; the consumer decode path is all-or-nothing to match.
+func encodeBinaryInlineResources(resp *LoadArtifactResponse) {
+	for _, v := range resp.Resources {
+		if utf8.ValidString(v) {
+			continue
+		}
+		for k, b := range resp.Resources {
+			resp.Resources[k] = base64.StdEncoding.EncodeToString([]byte(b))
+		}
+		resp.ResourcesB64 = true
+		return
+	}
+}
+
+// attachManifestBody realizes the §6.6 presigned manifest-body channel.
+// When the canonical manifest document (the verbatim SKILL.md for a skill,
+// the ARTIFACT.md bytes otherwise) exceeds objectstore.InlineCutoff and an
+// object store is configured, it uploads the document keyed by its sha256
+// (idempotent, deduplicated by content), presigns it, and returns the
+// reference in ManifestBodyURL while clearing the inline ManifestBody and
+// the canonical-document field. Below the cutoff, or without an object
+// store (the §13.11 standalone-without-storage mode), the body stays inline.
+//
+// An extends-merged manifest keeps its body inline: the served frontmatter
+// is a re-serialization distinct from the hash-bound raw bytes, so it is
+// excluded from the channel to avoid an ambiguous reconstitution.
+func (s *Server) attachManifestBody(ctx context.Context, resp *LoadArtifactResponse, res *core.LoadArtifactResult) error {
+	if s.objectStore == nil || res.Merged {
+		return nil
+	}
+	doc := core.CanonicalManifestDoc(res.Type, res.Frontmatter, res.SkillRaw)
+	if len(doc) <= objectstore.InlineCutoff {
+		return nil
+	}
+	key := core.ManifestBodyKey(doc)
+	// Idempotent, content-addressed upload: skip the Put when the object is
+	// already present so the hot path costs a Stat rather than a re-upload.
+	if _, err := s.objectStore.Stat(ctx, key); errors.Is(err, objectstore.ErrNotFound) {
+		if err := s.objectStore.Put(ctx, key, doc, "text/markdown"); err != nil {
+			return fmt.Errorf("upload manifest body: %w", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("stat manifest body: %w", err)
+	}
+	url, err := s.objectStore.Presign(ctx, key, s.presignTTL)
+	if err != nil {
+		return fmt.Errorf("presign manifest body: %w", err)
+	}
+	resp.ManifestBodyURL = &LargeResourceLink{
+		URL:         url,
+		ContentHash: "sha256:" + key,
+		Size:        int64(len(doc)),
+		ContentType: "text/markdown",
+	}
+	// §6.6: clear the inline copies so the large body does not also travel
+	// inline. ManifestBody is a substring of the canonical document the URL
+	// now carries, so leaving either inline would defeat the cutoff.
+	resp.ManifestBody = ""
+	if res.Type == string(manifest.TypeSkill) {
+		resp.SkillRaw = ""
+	} else {
+		resp.Frontmatter = ""
+	}
+	return nil
+}
+
+// presignResource builds a §7.2 large-resource link, presigning the
+// object-store key (the bare content hash) for the consumer to fetch.
+func (s *Server) presignResource(ctx context.Context, ref store.ResourceRef) (LargeResourceLink, error) {
+	if s.objectStore == nil {
+		return LargeResourceLink{}, fmt.Errorf("no object store configured for large resource %s", ref.Path)
+	}
+	url, err := s.objectStore.Presign(ctx, resourceKey(ref), s.presignTTL)
+	if err != nil {
+		return LargeResourceLink{}, fmt.Errorf("presign large resource %s: %w", ref.Path, err)
+	}
+	return LargeResourceLink{
+		URL:         url,
+		ContentHash: ref.ContentHash,
+		Size:        ref.Size,
+		ContentType: ref.ContentType,
+	}, nil
+}
+
+// inlineBytes returns a small resource's bytes for inline delivery: the
+// copy ingest stored on the record when present, otherwise an
+// object-store read by content hash.
+func (s *Server) inlineBytes(ctx context.Context, ref store.ResourceRef) ([]byte, error) {
+	if ref.Inline != nil {
+		return ref.Inline, nil
+	}
+	if s.objectStore == nil {
+		return nil, fmt.Errorf("no object store configured for resource %s", ref.Path)
+	}
+	body, err := s.objectStore.Get(ctx, resourceKey(ref))
+	if err != nil {
+		return nil, fmt.Errorf("read resource %s: %w", ref.Path, err)
+	}
+	return body, nil
+}
+
+// resourceKey is the object-store key for a resource: the content hash
+// with the "sha256:" prefix stripped, which is what makes identical
+// bytes deduplicate across artifact versions (§4.4).
+func resourceKey(ref store.ResourceRef) string {
+	return strings.TrimPrefix(ref.ContentHash, "sha256:")
 }
 
 // handleObjectsRoute serves bytes for the filesystem objectstore via
@@ -737,69 +1180,84 @@ func (s *Server) handleObjectsRoute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "invalid object key")
 		return
 	}
-
-	// Find the artifact owning this key so we can re-check visibility.
-	artifactID, _, ok := s.findLargeRef(key)
-	if !ok {
+	if s.objectStore == nil {
 		writeError(w, http.StatusNotFound, "registry.not_found", "no such object")
 		return
 	}
-	id := s.identity(r)
-	visible, err := s.core.LoadArtifact(r.Context(), id, artifactID, core.LoadArtifactOptions{})
-	if err != nil || visible == nil {
-		writeError(w, http.StatusForbidden, "auth.forbidden",
-			"caller is not authorized for this object")
+
+	// Re-check visibility on every fetch: the caller must currently see
+	// an artifact that bundles these bytes (§4.4 deduplicates by content
+	// hash, so any one visible owner authorizes the read). A caller who
+	// has lost access can no longer follow a previously-issued URL.
+	if _, ok := s.core.ResolveResourceOwner(r.Context(), s.identity(r), key); !ok {
+		writeError(w, http.StatusNotFound, "registry.not_found", "no such object")
 		return
 	}
 
-	body, err := s.objectStore.Get(r.Context(), key)
-	if err != nil {
-		if errors.Is(err, objectstore.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "registry.not_found", "object not found")
+	// HEAD reports size without reading the body (§7.2: the control plane
+	// never streams large bytes it does not have to).
+	if r.Method == http.MethodHead {
+		info, err := s.objectStore.Stat(r.Context(), key)
+		if err != nil {
+			s.writeObjectStoreError(w, err)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+		s.writeObjectHeaders(w, key, info)
+		w.WriteHeader(http.StatusOK)
 		return
 	}
-	contentType := contentTypeFromStore(s.objectStore, key)
+
+	// GET streams the bytes straight to the client instead of buffering
+	// the whole resource in memory (§7.2).
+	reader, info, err := s.objectStore.GetStream(r.Context(), key)
+	if err != nil {
+		s.writeObjectStoreError(w, err)
+		return
+	}
+	defer reader.Close()
+	s.writeObjectHeaders(w, key, info)
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, reader)
+}
+
+// writeObjectHeaders sets the §7.2 data-plane response headers: the
+// content type (from the stored metadata, falling back to a generic
+// type), the content length, and the X-Content-Hash the consumer
+// verifies against.
+func (s *Server) writeObjectHeaders(w http.ResponseWriter, key string, info objectstore.ObjectInfo) {
+	contentType := info.ContentType
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
 	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Length", strconv.FormatInt(info.Size, 10))
 	w.Header().Set("X-Content-Hash", "sha256:"+key)
-	w.WriteHeader(http.StatusOK)
-	if r.Method == http.MethodGet {
-		_, _ = w.Write(body)
-	}
+	// §13.7: the object key is the content hash, so these bytes are immutable
+	// and safe to cache indefinitely. Emit the immutable Cache-Control header a
+	// CDN honors at the origin.
+	w.Header().Set("Cache-Control", objectstore.ImmutableCacheControl)
 }
 
-// findLargeRef returns (artifactID, path, ok) for the resource whose
-// stored key matches; ok=false when no artifact owns the key.
-func (s *Server) findLargeRef(key string) (string, string, bool) {
-	for artifactID, paths := range s.largeResources {
-		for path, ref := range paths {
-			if ref.Key == key {
-				return artifactID, path, true
-			}
-		}
+// writeObjectStoreError maps an object-store read error to the §6.10
+// envelope: a missing key is a 404, anything else a 503.
+func (s *Server) writeObjectStoreError(w http.ResponseWriter, err error) {
+	if errors.Is(err, objectstore.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "registry.not_found", "object not found")
+		return
 	}
-	return "", "", false
-}
-
-// contentTypeFromStore extracts a content type from the configured
-// store when the backend supports it. Filesystem records the type
-// alongside the body; S3 returns it on the GetObject response (we
-// don't query that here for the redirect path).
-func contentTypeFromStore(store objectstore.Provider, key string) string {
-	if fs, ok := store.(*objectstore.Filesystem); ok {
-		return fs.ContentTypeOf(key)
-	}
-	return ""
+	writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 }
 
 // ----- Helpers --------------------------------------------------------------
 
 func (s *Server) identity(r *http.Request) layer.Identity {
+	// §6.3.2: when a verifier is installed, the identity-verification
+	// middleware has already verified the token and stored the caller
+	// Identity on the context. Use it so handlers and the audit emitter
+	// agree on one verified identity per request.
+	if id, ok := verifiedIdentityFrom(r.Context()); ok {
+		return id
+	}
 	id := s.resolveID(r)
 	if s.publicMode {
 		id.IsPublic = true
@@ -809,6 +1267,10 @@ func (s *Server) identity(r *http.Request) layer.Identity {
 
 func (s *Server) writeCoreError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, core.ErrForbidden):
+		// spec: §4.7.2 / §6.10 — an admin-gated operation (e.g. the
+		// diagnostic visibility override) invoked without the admin role.
+		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
 	case errors.Is(err, core.ErrInvalidArgument):
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
 	case errors.Is(err, core.ErrDomainNotFound):
@@ -828,7 +1290,24 @@ func descriptorOf(a core.ArtifactDescriptor) ArtifactDescriptor {
 		Description: a.Description,
 		Tags:        append([]string(nil), a.Tags...),
 		Score:       a.Score,
+		Sensitivity: a.Sensitivity,
+		FoldedFrom:  a.FoldedFrom,
+		Source:      a.Source,
+		// spec: §7.6.1 — Frontmatter on search results, Summary on
+		// notable entries; each is omitempty so it appears only where set.
+		Frontmatter: a.Frontmatter,
+		Summary:     a.Summary,
 	}
+}
+
+// domainDescriptorOf converts a core subdomain descriptor to the wire
+// form, recursing so the §4.5.5 nested depth tree is preserved.
+func domainDescriptorOf(d core.DomainDescriptor) DomainDescriptor {
+	out := DomainDescriptor{Path: d.Path, Name: d.Name, Description: d.Description}
+	for _, c := range d.Subdomains {
+		out.Subdomains = append(out.Subdomains, domainDescriptorOf(c))
+	}
+	return out
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
@@ -840,7 +1319,17 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 }
 
 func writeError(w http.ResponseWriter, status int, code, msg string) {
-	writeJSON(w, status, ErrorResponse{Code: code, Message: msg})
+	writeErrorDetails(w, status, code, msg, nil)
+}
+
+// writeErrorDetails emits the §6.10 envelope with machine-readable
+// details. The retryable flag and suggested_action are filled from the
+// per-code registry (see enrichEnvelope) so every emission path reports
+// them consistently.
+func writeErrorDetails(w http.ResponseWriter, status int, code, msg string, details map[string]any) {
+	e := ErrorResponse{Code: code, Message: msg, Details: details}
+	enrichEnvelope(&e)
+	writeJSON(w, status, e)
 }
 
 func atoiOr(s string, def int) int {
@@ -852,6 +1341,13 @@ func atoiOr(s string, def int) int {
 		return def
 	}
 	return n
+}
+
+// isTrue reports whether a query-string flag is set to an affirmative
+// value. The §4.7.2 as_admin override accepts both "1" (the documented
+// form) and "true" for symmetry with the other boolean query flags.
+func isTrue(s string) bool {
+	return s == "1" || s == "true"
 }
 
 func splitCSV(s string) []string {

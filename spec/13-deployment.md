@@ -27,7 +27,7 @@ The compose file includes:
 - **`postgres`**: `pgvector/pgvector:pg16` for metadata and embeddings.
 - **`minio`**: S3-compatible object storage (path-style URLs, `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` for auth).
 - **`dex`**: OIDC IdP for the OAuth device-code flow.
-- **`bootstrap`**: one-shot container that creates the MinIO bucket, registers the registry as an OIDC client with Dex, creates the first tenant and admin user (configurable via env vars), then exits.
+- **`bootstrap`**: one-shot container that creates the MinIO bucket, then exits. The registry's OIDC client is registered declaratively in the Dex config, and the default tenant and admin grant (configurable via `PODIUM_BOOTSTRAP_ADMINS`) are seeded by the registry at boot, consistent with §13.10 standalone self-seeding.
 
 **Not production-grade.** Single-replica services, default credentials, local volumes. The compose stack is _standard-topology in shape_ so consumers exercise the same code paths as a real deployment, but it is intended only for evaluation pilots, CI integration tests, and adapter / SDK development. For genuine non-prod or solo use, prefer §13.10's standalone mode (one binary instead of four containers).
 
@@ -75,7 +75,9 @@ A misconfigured public-mode deployment is the most common security-relevant oper
 
 ## 13.4 Migrations
 
-Schema migrations bundled in the registry binary; expand-contract pattern for online migrations. Type-system migrations versioned alongside the binary.
+The registry applies its metadata-store schema from the binary on startup. Each backend's setup is idempotent and additive: tables are created when absent (`CREATE TABLE IF NOT EXISTS`) and new columns are added when absent (Postgres uses `ADD COLUMN IF NOT EXISTS`; SQLite, which lacks that syntax, issues `ALTER TABLE ... ADD COLUMN` and ignores the duplicate-column error on an already-migrated database), so a binary upgrade migrates an existing database forward in place, without a separate migration step and without downtime. The SQLite and Postgres schema live in their respective `applySchema` paths.
+
+Type definitions are compiled into the binary and evolve with it. The first-class types and any registered `TypeProvider` validators ship as code, so a binary upgrade is the type-system migration; there is no separate versioned type-migration artifact.
 
 ## 13.5 Multi-Region
 
@@ -97,8 +99,8 @@ Presigned URLs are CDN-friendly. Recommend CloudFront / Fastly / Cloudflare in f
 
 ## 13.8 Observability
 
-- **Metrics.** Prometheus endpoint on registry and MCP server. Histograms for latency; counters for cache hit rate, error rate, visibility-denial rate, ingest success/failure rate; gauges for queue depths.
-- **Tracing.** OpenTelemetry trace export. W3C Trace Context propagation across all calls. One root span per `load_domain` / `search_domains` / `search_artifacts` / `load_artifact`; child spans for registry round-trip, object-storage fetch, adapter translation, materialization.
+- **Metrics.** Prometheus endpoint on registry and MCP server. Histograms for latency; counters for cache hit rate, error rate, visibility-denial rate, ingest success/failure rate; gauges for queue depths. The registry serves `/metrics` by default; set `PODIUM_METRICS=false` to remove it. The MCP server is a stdio process with no HTTP listener of its own, so it serves `/metrics` on a separate address only when `PODIUM_MCP_METRICS_ADDR` (or `--metrics-addr`) names a bind address.
+- **Tracing.** OpenTelemetry trace export. W3C Trace Context propagation across all calls. One root span per `load_domain` / `search_domains` / `search_artifacts` / `load_artifact`; child spans for registry round-trip, object-storage fetch, adapter translation, materialization. Tracing is off by default; set `PODIUM_TRACING=otlp` (or a standard `OTEL_EXPORTER_OTLP_ENDPOINT`) to export over OTLP/HTTP, or `PODIUM_TRACING=stdout` for local inspection. The W3C propagator is always installed, so trace context flows between the bridge and the registry even when export is off.
 - **Reference Grafana dashboard** ships with the registry.
 
 ## 13.9 Health and Readiness
@@ -173,7 +175,7 @@ The UI is the recommended consumption path for non-developer users (analysts, pr
 **Sensible defaults for permissive deployments.** Standalone deployments shift several defaults toward low-friction rather than secure-by-default, appropriate for the solo and small-team contexts standalone targets:
 
 - **Layer visibility.** New layers registered via `podium layer register` default to `visibility: public` (instead of `users: [<registrant>]` as in standard mode for user-defined layers). Override with `PODIUM_DEFAULT_LAYER_VISIBILITY=users` for multi-user standalone deployments that want the standard behavior.
-- **Signature verification.** `PODIUM_VERIFY_SIGNATURES` defaults to `never` (instead of `medium-and-above`). Authors who want enforcement set it explicitly to `medium-and-above` or `always`.
+- **Signature verification.** The consumer-side signature-verification default relaxes to `never` (instead of `medium-and-above`). Verification runs in the consumer (the MCP server) rather than the registry, so the standalone server writes `defaults.verify_signatures: never` into the `~/.podium/sync.yaml` it creates on first run, and the MCP server honors that value when `PODIUM_VERIFY_SIGNATURES` is unset. Set `PODIUM_VERIFY_SIGNATURES` (or `defaults.verify_signatures` in `sync.yaml`) to `medium-and-above` or `always` to enforce.
 - **Sandbox profile.** `sandbox_profile:` is informational in standalone. Hosts honor it as in standard mode, but the registry does not refuse to ingest artifacts whose profiles can't be enforced locally. Override with `PODIUM_ENFORCE_SANDBOX_PROFILE=true` in multi-user setups.
 - **Sensitivity.** Artifacts without an explicit `sensitivity:` field default to `low`. The lint check that flags missing sensitivity is downgraded from a warning to a hint.
 
@@ -305,7 +307,7 @@ Features that require **specifically a remote server** (not just any server):
 
 ### 13.11.4 Watch Mode
 
-`podium sync --watch` against a filesystem source uses `fsnotify` to watch the registry path and the workspace overlay; when files change, it re-runs composition and materialization for the affected artifacts.
+`podium sync --watch` against a filesystem source uses `fsnotify` to watch the registry path and the workspace overlay; when files change, it re-runs composition and materialization and reconciles the target through the same stale-file cleanup as a one-shot sync, so the materialized output reflects every change.
 
 ### 13.11.5 Multi-User via a Shared Directory
 
@@ -399,7 +401,7 @@ Selected via `PODIUM_VECTOR_BACKEND` (`pgvector` | `sqlite-vec` | `pinecone` | `
 | `PODIUM_WEAVIATE_URL`        | Cluster REST URL                                                                                     | required                                                |
 | `PODIUM_WEAVIATE_API_KEY`    | API key                                                                                              | required                                                |
 | `PODIUM_WEAVIATE_COLLECTION` | Collection name                                                                                      | required                                                |
-| `PODIUM_WEAVIATE_GRPC_URL`   | gRPC endpoint                                                                                        | (derived from REST URL)                                   |
+| `PODIUM_WEAVIATE_GRPC_URL`   | gRPC endpoint. Reserved and not currently read; the Weaviate backend uses the REST data plane.                                                                                        | (derived from REST URL)                                   |
 | `PODIUM_WEAVIATE_VECTORIZER` | Vectorizer module name (e.g., `text2vec-openai`, `text2vec-weaviate`); set to enable self-embedding | (unset → storage-only mode; `EmbeddingProvider` required) |
 
 `qdrant-cloud`:
@@ -409,7 +411,7 @@ Selected via `PODIUM_VECTOR_BACKEND` (`pgvector` | `sqlite-vec` | `pinecone` | `
 | `PODIUM_QDRANT_URL`             | Cluster REST URL                                                 | required                                                |
 | `PODIUM_QDRANT_API_KEY`         | API key                                                          | required                                                |
 | `PODIUM_QDRANT_COLLECTION`      | Collection name                                                  | required                                                |
-| `PODIUM_QDRANT_GRPC_PORT`       | gRPC port                                                        | `6334`                                                    |
+| `PODIUM_QDRANT_GRPC_PORT`       | gRPC port. Reserved and not currently read; the Qdrant backend uses the REST data plane.                                                        | `6334`                                                    |
 | `PODIUM_QDRANT_INFERENCE_MODEL` | Hosted Cloud Inference model name; set to enable self-embedding  | (unset → storage-only mode; `EmbeddingProvider` required) |
 
 ### Embedding provider

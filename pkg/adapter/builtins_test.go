@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -57,7 +58,7 @@ func TestEveryAdapter_ProducesDeterministicOutput(t *testing.T) {
 		}
 		runs := make([][]File, 5)
 		for i := 0; i < 5; i++ {
-			runs[i], err = a.Adapt(src)
+			runs[i], err = a.Adapt(context.Background(), src)
 			if err != nil {
 				t.Fatalf("%s.Adapt: %v", id, err)
 			}
@@ -87,33 +88,40 @@ func TestRuleAdapters_PlaceUnderNativeRulesDir(t *testing.T) {
 		ArtifactID:    "ts-style",
 		ArtifactBytes: []byte("---\ntype: rule\nversion: 1.0.0\nrule_mode: always\n---\n\nrules\n"),
 	}
-	want := map[string]string{
-		"claude-code": ".claude/rules/ts-style.md",
-		"codex":       ".codex/rules/ts-style.md",
-		"cursor":      ".cursor/rules/ts-style.mdc",
-		"opencode":    ".opencode/rules/ts-style.md",
-		"pi":          ".pi/rules/ts-style.md",
-		"hermes":      ".claude/rules/ts-style.md",
+	// Standalone-file rule harnesses write a discrete file; the AGENTS.md /
+	// GEMINI.md harnesses inject the rule body into the shared context file.
+	type want struct {
+		path string
+		op   FileOp
+	}
+	cases := map[string]want{
+		"claude-code": {".claude/rules/ts-style.md", OpWrite},
+		"cursor":      {".cursor/rules/ts-style.mdc", OpWrite},
+		"hermes":      {".cursor/rules/ts-style.mdc", OpWrite},
+		"codex":       {"AGENTS.md", OpInject},
+		"opencode":    {"AGENTS.md", OpInject},
+		"pi":          {"AGENTS.md", OpInject},
+		"gemini":      {"GEMINI.md", OpInject},
 	}
 	r := DefaultRegistry()
-	for id, expected := range want {
+	for id, w := range cases {
 		a, err := r.Get(id)
 		if err != nil {
 			t.Fatalf("Get(%q): %v", id, err)
 		}
-		out, err := a.Adapt(src)
+		out, err := a.Adapt(context.Background(), src)
 		if err != nil {
 			t.Fatalf("%s.Adapt: %v", id, err)
 		}
 		found := false
 		for _, f := range out {
-			if f.Path == expected {
+			if f.Path == w.path && f.Op == w.op {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Errorf("%s: expected rule at %q, got: %v", id, expected, paths(out))
+			t.Errorf("%s: expected rule at %q (op %v), got: %v", id, w.path, w.op, paths(out))
 		}
 	}
 }
@@ -125,8 +133,8 @@ func TestEveryAdapter_DoesNotErrorOnEmptySource(t *testing.T) {
 	r := DefaultRegistry()
 	for _, id := range allAdapterIDs {
 		a, _ := r.Get(id)
-		if _, err := a.Adapt(Source{ArtifactID: "x", ArtifactBytes: []byte{}}); err != nil {
-			t.Errorf("%s.Adapt(empty): %v", id, err)
+		if _, err := a.Adapt(context.Background(), Source{ArtifactID: "x", ArtifactBytes: []byte{}}); err != nil {
+			t.Errorf("%s.Adapt(context.Background(), empty): %v", id, err)
 		}
 	}
 }
@@ -147,7 +155,7 @@ func TestEveryAdapter_OutputPathsAreSafe(t *testing.T) {
 	r := DefaultRegistry()
 	for _, id := range allAdapterIDs {
 		a, _ := r.Get(id)
-		out, err := a.Adapt(src)
+		out, err := a.Adapt(context.Background(), src)
 		if err != nil {
 			t.Fatalf("%s.Adapt: %v", id, err)
 		}

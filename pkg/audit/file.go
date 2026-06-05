@@ -15,7 +15,9 @@ import (
 // FileSink writes audit events as JSON Lines to ~/.podium/audit.log
 // or a configured override path (§8.3 LocalAuditSink). Concurrent
 // appends are safe under typical event sizes per §8.3:
-// "POSIX PIPE_BUF-bounded atomic writes."
+// "POSIX PIPE_BUF-bounded atomic writes." A single shared log written by
+// multiple processes is a forest of per-writer hash chains; Verify
+// validates it accordingly (see Verify).
 type FileSink struct {
 	mu       sync.Mutex
 	path     string
@@ -104,8 +106,22 @@ func (f *FileSink) Append(_ context.Context, e Event) error {
 	return nil
 }
 
-// Verify re-reads the audit log and walks the hash chain. Returns
+// Verify re-reads the audit log and validates the hash chain. Returns
 // ErrChainBroken on any mismatch.
+//
+// §9 scopes the local sink's concurrency guarantee to PIPE_BUF-bounded
+// atomic appends: several MCP server processes can append to one
+// ~/.podium/audit.log concurrently (§14.13). Each process chains off its
+// own in-process lastHash, so the file is a forest of per-writer chains
+// rather than one linear chain. Verifying it as a single linear chain
+// reported a spurious ErrChainBroken the moment two writers interleaved.
+// Verification therefore checks, per §8.6, that every event's
+// own hash satisfies event_hash = sha256(body || prev_hash), and that a
+// non-empty PrevHash references the Hash of some earlier event in the log.
+// A single-writer log is the degenerate one-chain case and still verifies.
+// Tampering with an event body breaks its self-hash, and deleting an
+// interior event leaves a later event's PrevHash dangling; both surface as
+// ErrChainBroken.
 func (f *FileSink) Verify(_ context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -116,7 +132,7 @@ func (f *FileSink) Verify(_ context.Context) error {
 		}
 		return err
 	}
-	prev := ""
+	seen := map[string]bool{}
 	idx := 0
 	for _, line := range splitLines(data) {
 		if len(line) == 0 {
@@ -127,14 +143,14 @@ func (f *FileSink) Verify(_ context.Context) error {
 			return errChainAt(ErrChainBroken, idx, "unparseable event")
 		}
 		e := eventFromJSON(je)
-		if e.PrevHash != prev {
-			return errChainAt(ErrChainBroken, idx, "PrevHash mismatch")
-		}
-		want := sha256.Sum256(append(e.canonicalBody(), []byte(prev)...))
+		want := sha256.Sum256(append(e.canonicalBody(), []byte(e.PrevHash)...))
 		if hex.EncodeToString(want[:]) != e.Hash {
 			return errChainAt(ErrChainBroken, idx, "Hash mismatch")
 		}
-		prev = e.Hash
+		if e.PrevHash != "" && !seen[e.PrevHash] {
+			return errChainAt(ErrChainBroken, idx, "PrevHash references no earlier event")
+		}
+		seen[e.Hash] = true
 		idx++
 	}
 	return nil
@@ -144,43 +160,114 @@ func (f *FileSink) Verify(_ context.Context) error {
 // commands.
 func (f *FileSink) Path() string { return f.path }
 
-// jsonEvent is the wire shape of an event in the JSON-Lines log.
+// jsonEvent is the wire form of an event in the JSON-Lines log.
+//
+// The caller identity attributes are nested under a single "caller" object
+// so their wire keys are the dotted names §8.1, §13.2.2, and §13.10 use:
+// caller.identity, caller.email, caller.groups, caller.network, and
+// caller.public_mode. A SIEM consumer keying on the dotted path
+// caller.public_mode resolves the nested field directly. spec: §8.1.
 type jsonEvent struct {
-	Type      string            `json:"type"`
-	Timestamp string            `json:"timestamp"`
-	TraceID   string            `json:"trace_id,omitempty"`
-	Caller    string            `json:"caller,omitempty"`
-	Target    string            `json:"target,omitempty"`
-	Context   map[string]string `json:"context,omitempty"`
-	Hash      string            `json:"hash"`
-	PrevHash  string            `json:"prev_hash,omitempty"`
+	Type           string            `json:"type"`
+	Timestamp      string            `json:"timestamp"`
+	TraceID        string            `json:"trace_id,omitempty"`
+	Caller         *jsonCaller       `json:"caller,omitempty"`
+	Target         string            `json:"target,omitempty"`
+	Context        map[string]string `json:"context,omitempty"`
+	ResolvedLayers []string          `json:"resolved_layers,omitempty"`
+	ResultSize     int               `json:"result_size,omitempty"`
+	Hash           string            `json:"hash"`
+	PrevHash       string            `json:"prev_hash,omitempty"`
+}
+
+// jsonCaller is the wire form of the §8.1 caller-identity attributes. The
+// nested keys serialize the dotted names the spec illustrates: the OAuth
+// sub-claim under caller.identity, the attached email and groups, the
+// public-mode source network under caller.network, and the public-mode flag
+// under caller.public_mode. The public-mode-only fields (network,
+// public_mode) are omitted for authenticated callers. spec: §8.1, §13.2.2,
+// §13.10.
+type jsonCaller struct {
+	Identity   string       `json:"identity,omitempty"`
+	Email      string       `json:"email,omitempty"`
+	Groups     []string     `json:"groups,omitempty"`
+	Network    *jsonNetwork `json:"network,omitempty"`
+	PublicMode bool         `json:"public_mode,omitempty"`
+}
+
+// jsonNetwork is the wire form of CallerNetwork (§8.1 caller.network).
+type jsonNetwork struct {
+	SourceIP      string `json:"source_ip,omitempty"`
+	ForwardedUser string `json:"forwarded_user,omitempty"`
 }
 
 func eventForJSON(e Event) jsonEvent {
 	return jsonEvent{
-		Type:      string(e.Type),
-		Timestamp: e.Timestamp.UTC().Format(time.RFC3339Nano),
-		TraceID:   e.TraceID,
-		Caller:    e.Caller,
-		Target:    e.Target,
-		Context:   e.Context,
-		Hash:      e.Hash,
-		PrevHash:  e.PrevHash,
+		Type:           string(e.Type),
+		Timestamp:      e.Timestamp.UTC().Format(time.RFC3339Nano),
+		TraceID:        e.TraceID,
+		Caller:         callerForJSON(e),
+		Target:         e.Target,
+		Context:        e.Context,
+		ResolvedLayers: e.ResolvedLayers,
+		ResultSize:     e.ResultSize,
+		Hash:           e.Hash,
+		PrevHash:       e.PrevHash,
+	}
+}
+
+// callerForJSON builds the nested caller object, or nil when the event
+// carries no caller attributes at all (so the "caller" key is omitted
+// entirely rather than serialized as an empty object).
+func callerForJSON(e Event) *jsonCaller {
+	if e.Caller == "" && e.CallerEmail == "" && len(e.CallerGroups) == 0 &&
+		e.CallerNetwork == nil && !e.PublicMode {
+		return nil
+	}
+	return &jsonCaller{
+		Identity:   e.Caller,
+		Email:      e.CallerEmail,
+		Groups:     e.CallerGroups,
+		Network:    networkForJSON(e.CallerNetwork),
+		PublicMode: e.PublicMode,
 	}
 }
 
 func eventFromJSON(je jsonEvent) Event {
 	t, _ := time.Parse(time.RFC3339Nano, je.Timestamp)
-	return Event{
-		Type:      EventType(je.Type),
-		Timestamp: t,
-		TraceID:   je.TraceID,
-		Caller:    je.Caller,
-		Target:    je.Target,
-		Context:   je.Context,
-		Hash:      je.Hash,
-		PrevHash:  je.PrevHash,
+	e := Event{
+		Type:           EventType(je.Type),
+		Timestamp:      t,
+		TraceID:        je.TraceID,
+		Target:         je.Target,
+		Context:        je.Context,
+		ResolvedLayers: je.ResolvedLayers,
+		ResultSize:     je.ResultSize,
+		Hash:           je.Hash,
+		PrevHash:       je.PrevHash,
 	}
+	if je.Caller != nil {
+		e.Caller = je.Caller.Identity
+		e.CallerEmail = je.Caller.Email
+		e.CallerGroups = je.Caller.Groups
+		e.CallerNetwork = networkFromJSON(je.Caller.Network)
+		e.PublicMode = je.Caller.PublicMode
+	}
+	return e
+}
+
+func networkForJSON(n *CallerNetwork) *jsonNetwork {
+	if n == nil {
+		return nil
+	}
+	return &jsonNetwork{SourceIP: n.SourceIP, ForwardedUser: n.ForwardedUser}
+}
+
+func networkFromJSON(n *jsonNetwork) *CallerNetwork {
+	if n == nil {
+		return nil
+	}
+	return &CallerNetwork{SourceIP: n.SourceIP, ForwardedUser: n.ForwardedUser}
 }
 
 // splitLines mirrors strings.Split on '\n' but operates on bytes so

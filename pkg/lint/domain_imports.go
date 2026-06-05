@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,9 +19,9 @@ import (
 // another layer later" case).
 type ruleDomainImportsResolve struct{}
 
-func (ruleDomainImportsResolve) Code() string        { return "lint.domain_import_unresolved" }
+func (ruleDomainImportsResolve) Code() string { return "lint.domain_import_unresolved" }
 
-func (r ruleDomainImportsResolve) Check(reg *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleDomainImportsResolve) Check(ctx context.Context, reg *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	if reg == nil {
 		return nil
 	}
@@ -29,7 +30,13 @@ func (r ruleDomainImportsResolve) Check(reg *filesystem.Registry, records []file
 		ids = append(ids, rec.ID)
 	}
 	var out []Diagnostic
+	// spec: §9.3 — resolving every include/exclude pattern against the full
+	// artifact set is unbounded with registry size, so the per-layer walk
+	// checks for cancellation.
 	for _, layer := range reg.Layers {
+		if ctx.Err() != nil {
+			break
+		}
 		domains := walkDomainsInLayer(layer)
 		for path, dom := range domains {
 			for _, pattern := range append([]string(nil), dom.Include...) {
@@ -57,15 +64,20 @@ func (r ruleDomainImportsResolve) Check(reg *filesystem.Registry, records []file
 // warning naming the participants.
 type ruleDomainImportCycle struct{}
 
-func (ruleDomainImportCycle) Code() string        { return "lint.domain_import_cycle" }
+func (ruleDomainImportCycle) Code() string { return "lint.domain_import_cycle" }
 
-func (r ruleDomainImportCycle) Check(reg *filesystem.Registry, _ []filesystem.ArtifactRecord) []Diagnostic {
+func (r ruleDomainImportCycle) Check(ctx context.Context, reg *filesystem.Registry, _ []filesystem.ArtifactRecord) []Diagnostic {
 	if reg == nil {
 		return nil
 	}
 	// Build domain → []domain edges.
 	graph := map[string][]string{}
+	// spec: §9.3 — the include-pattern graph is built from every domain in
+	// every layer, so the walk checks for cancellation.
 	for _, layer := range reg.Layers {
+		if ctx.Err() != nil {
+			break
+		}
 		for path, dom := range walkDomainsInLayer(layer) {
 			for _, pattern := range dom.Include {
 				if other := domainForPattern(pattern); other != "" && other != path {
@@ -83,6 +95,115 @@ func (r ruleDomainImportCycle) Check(reg *filesystem.Registry, _ []filesystem.Ar
 			Severity:   SeverityWarning,
 			Message:    fmt.Sprintf("DOMAIN.md import cycle: %s", strings.Join(cyc, " -> ")),
 		})
+	}
+	return out
+}
+
+// ruleDomainImportBroadGlob implements the §12 "Recursive globs in
+// DOMAIN.md are expensive" mitigation: "Lint warns on overly broad
+// recursive globs." An include pattern is overly broad when it contains a
+// `**` recursive segment with no literal path prefix to anchor it (for
+// example a bare `**` or `**/payments` at the domain root), so the
+// recursion can match the entire catalog. A pattern anchored by a literal
+// prefix (`finance/**`) is bounded and draws no warning. The warning is
+// advisory; ingest still succeeds (§4.5.2 keeps unresolved imports a
+// warning, and an over-broad import is likewise non-fatal).
+type ruleDomainImportBroadGlob struct{}
+
+func (ruleDomainImportBroadGlob) Code() string { return "lint.domain_import_broad_glob" }
+
+func (r ruleDomainImportBroadGlob) Check(ctx context.Context, reg *filesystem.Registry, _ []filesystem.ArtifactRecord) []Diagnostic {
+	if reg == nil {
+		return nil
+	}
+	var out []Diagnostic
+	// spec: §9.3 — bound the walk with the request context so a large
+	// registry cannot pin the linter.
+	for _, layer := range reg.Layers {
+		if ctx.Err() != nil {
+			break
+		}
+		for path, dom := range walkDomainsInLayer(layer) {
+			for _, pattern := range dom.Include {
+				if pattern == "" || !isBroadRecursiveGlob(pattern) {
+					continue
+				}
+				out = append(out, Diagnostic{
+					ArtifactID: path,
+					Code:       r.Code(),
+					Severity:   SeverityWarning,
+					Message: fmt.Sprintf(
+						"DOMAIN.md include pattern %q is an unbounded recursive glob; anchor it with a literal path prefix (for example finance/**) so it does not match the whole catalog",
+						pattern),
+				})
+			}
+		}
+	}
+	return out
+}
+
+// isBroadRecursiveGlob reports whether pattern, after `{a,b}` expansion,
+// has any alternative that is an unbounded recursive match: a `**` segment
+// with no literal leading segment to anchor it. `{a,b}/**` is bounded
+// (each alternative carries a literal prefix), so it does not warn; a bare
+// `**` or `**/...` does.
+func isBroadRecursiveGlob(pattern string) bool {
+	for _, alt := range expandAlternatives(pattern) {
+		if patternIsUnboundedRecursive(alt) {
+			return true
+		}
+	}
+	return false
+}
+
+// patternIsUnboundedRecursive reports whether a single (brace-free) glob
+// alternative contains a `**` segment yet has no literal leading path
+// segment. domainForPattern returns the literal prefix and "" when the
+// first segment is itself a wildcard, which is exactly the unbounded case.
+func patternIsUnboundedRecursive(alt string) bool {
+	hasDoubleStar := false
+	for _, seg := range strings.Split(alt, "/") {
+		if seg == "**" {
+			hasDoubleStar = true
+			break
+		}
+	}
+	if !hasDoubleStar {
+		return false
+	}
+	return domainForPattern(alt) == ""
+}
+
+// ruleDomainDiscoveryOverrideDisallowed implements the §4.5.5
+// "allow_per_domain_overrides: false" lint promise: when the tenant
+// disables per-domain discovery overrides registry-wide, a DOMAIN.md
+// that still carries a `discovery:` block has no effect, so lint warns
+// (ingest still succeeds). The rule is only added to the rule set when
+// the tenant setting is false (see Linter.AllowPerDomainOverrides).
+type ruleDomainDiscoveryOverrideDisallowed struct{}
+
+func (ruleDomainDiscoveryOverrideDisallowed) Code() string {
+	return "lint.domain_discovery_override_disabled"
+}
+
+func (r ruleDomainDiscoveryOverrideDisallowed) Check(_ context.Context, reg *filesystem.Registry, _ []filesystem.ArtifactRecord) []Diagnostic {
+	if reg == nil {
+		return nil
+	}
+	var out []Diagnostic
+	for _, layer := range reg.Layers {
+		for path, dom := range walkDomainsInLayer(layer) {
+			if dom.Discovery == nil {
+				continue
+			}
+			out = append(out, Diagnostic{
+				ArtifactID: path,
+				Code:       r.Code(),
+				Severity:   SeverityWarning,
+				Message: "DOMAIN.md discovery: block is ignored because the tenant " +
+					"sets discovery.allow_per_domain_overrides: false",
+			})
+		}
 	}
 	return out
 }

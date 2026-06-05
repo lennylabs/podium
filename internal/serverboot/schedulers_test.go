@@ -1,6 +1,7 @@
 package serverboot
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -36,14 +37,35 @@ func TestStartAnchorScheduler_BadKeyPathLogsAndReturns(t *testing.T) {
 
 func TestStartRetentionScheduler_NilSink(t *testing.T) {
 	t.Parallel()
-	startRetentionScheduler(&Config{}, nil)
+	startRetentionScheduler(&Config{}, nil, nil)
+}
+
+// Spec: §8.6 — startVerifyScheduler tolerates a nil sink by
+// logging and returning without launching a goroutine.
+func TestStartVerifyScheduler_NilSink(t *testing.T) {
+	t.Parallel()
+	startVerifyScheduler(&Config{auditVerifyInterval: 1}, nil)
+}
+
+// Spec: §8.6 — with a sink and a short interval the verify
+// scheduler runs its immediate pass without panicking. A clean chain
+// raises no alert.
+func TestStartVerifyScheduler_Runs(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	sink, _ := audit.NewFileSink(filepath.Join(dir, "audit.log"))
+	_ = sink.Append(context.Background(), audit.Event{Type: audit.EventArtifactLoaded, Caller: "alice"})
+	startVerifyScheduler(&Config{auditVerifyInterval: 1}, sink)
+	// Allow the immediate pass to run, then let process exit reclaim the
+	// goroutine.
+	time.Sleep(40 * time.Millisecond)
 }
 
 func TestStartRetentionScheduler_ZeroMaxAge(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	sink, _ := audit.NewFileSink(filepath.Join(dir, "audit.log"))
-	startRetentionScheduler(&Config{auditRetentionMaxAgeDays: 0}, sink)
+	startRetentionScheduler(&Config{auditRetentionMaxAgeDays: 0}, sink, nil)
 }
 
 func TestStartRetentionScheduler_ZeroInterval(t *testing.T) {
@@ -51,7 +73,7 @@ func TestStartRetentionScheduler_ZeroInterval(t *testing.T) {
 	dir := t.TempDir()
 	sink, _ := audit.NewFileSink(filepath.Join(dir, "audit.log"))
 	cfg := &Config{auditRetentionMaxAgeDays: 1, auditRetentionInterval: 0}
-	startRetentionScheduler(cfg, sink)
+	startRetentionScheduler(cfg, sink, nil)
 }
 
 func TestStartRetentionScheduler_Runs(t *testing.T) {
@@ -59,7 +81,7 @@ func TestStartRetentionScheduler_Runs(t *testing.T) {
 	dir := t.TempDir()
 	sink, _ := audit.NewFileSink(filepath.Join(dir, "audit.log"))
 	cfg := &Config{auditRetentionMaxAgeDays: 1, auditRetentionInterval: 1}
-	startRetentionScheduler(cfg, sink)
+	startRetentionScheduler(cfg, sink, nil)
 	// Allow the immediate pass to run.
 	time.Sleep(50 * time.Millisecond)
 }
@@ -74,6 +96,70 @@ func TestDefaultRetentionPolicies_NonEmpty(t *testing.T) {
 	for _, p := range policies {
 		if p.MaxAge != 24*time.Hour {
 			t.Errorf("policy %q MaxAge = %v", p.Type, p.MaxAge)
+		}
+	}
+}
+
+// Spec: §8.4 — every audit.EventType is classified as either
+// operational (subject to the 1-year metadata default) or retained
+// indefinitely (integrity / GDPR-erasure accountability), with no type in
+// both and none left unclassified. This guards against a newly added event
+// type being silently omitted from the default retention policy.
+func TestRetentionClassification_CoversEveryEventType(t *testing.T) {
+	t.Parallel()
+	operational := map[audit.EventType]bool{}
+	for _, ty := range operationalEventTypes {
+		if operational[ty] {
+			t.Errorf("duplicate operational type %q", ty)
+		}
+		operational[ty] = true
+	}
+	retained := map[audit.EventType]bool{}
+	for _, ty := range retainedIndefinitelyEventTypes {
+		if retained[ty] {
+			t.Errorf("duplicate retained-indefinitely type %q", ty)
+		}
+		if operational[ty] {
+			t.Errorf("type %q is both operational and retained-indefinitely", ty)
+		}
+		retained[ty] = true
+	}
+	for _, ty := range audit.AllEventTypes() {
+		if !operational[ty] && !retained[ty] {
+			t.Errorf("event type %q is unclassified: add it to operationalEventTypes "+
+				"(1-year metadata default) or retainedIndefinitelyEventTypes", ty)
+		}
+	}
+	// No extra types beyond the package's full set.
+	all := map[audit.EventType]bool{}
+	for _, ty := range audit.AllEventTypes() {
+		all[ty] = true
+	}
+	for ty := range operational {
+		if !all[ty] {
+			t.Errorf("operational type %q is not in audit.AllEventTypes()", ty)
+		}
+	}
+	for ty := range retained {
+		if !all[ty] {
+			t.Errorf("retained type %q is not in audit.AllEventTypes()", ty)
+		}
+	}
+}
+
+// Spec: §8.4 — the retained-indefinitely integrity and erasure
+// events carry no default policy, so audit.Enforce never drops them even
+// when they are older than the metadata window.
+func TestRetentionPolicy_OmitsIntegrityAndErasureTypes(t *testing.T) {
+	t.Parallel()
+	policies := defaultRetentionPolicies(365 * 24 * time.Hour)
+	covered := map[audit.EventType]bool{}
+	for _, p := range policies {
+		covered[p.Type] = true
+	}
+	for _, ty := range retainedIndefinitelyEventTypes {
+		if covered[ty] {
+			t.Errorf("integrity/erasure type %q must not have a default retention policy", ty)
 		}
 	}
 }
@@ -111,7 +197,43 @@ func TestOpenAuditSink_WithExplicitPath(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	cfg := &Config{auditLogPath: filepath.Join(dir, "x.log")}
-	if sink := openAuditSink(cfg); sink == nil {
-		t.Errorf("openAuditSink returned nil for writable path")
+	sink, file := openAuditSink(cfg)
+	if sink == nil {
+		t.Errorf("openAuditSink returned nil emit sink for writable path")
+	}
+	if file == nil {
+		t.Errorf("openAuditSink returned nil file sink for a filesystem path")
+	}
+}
+
+// Spec: §8.3 — an http(s) PODIUM_AUDIT_LOG_PATH redirects the
+// registry sink to an external endpoint, mirroring the local sink. The emit
+// sink is the EndpointSink; the file form is nil so the file-only schedulers
+// (anchor/verify/retention) and the §8.5 erasure pass stay disabled.
+func TestOpenAuditSink_EndpointRedirect(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []string{"http://siem.example/audit", "https://siem.example/audit"} {
+		cfg := &Config{auditLogPath: raw}
+		sink, file := openAuditSink(cfg)
+		if sink == nil {
+			t.Errorf("%s: emit sink is nil, want EndpointSink", raw)
+		}
+		if _, ok := sink.(*audit.EndpointSink); !ok {
+			t.Errorf("%s: emit sink is %T, want *audit.EndpointSink", raw, sink)
+		}
+		if file != nil {
+			t.Errorf("%s: file sink is non-nil for an endpoint redirect", raw)
+		}
+	}
+}
+
+// Spec: §8.3 — a malformed endpoint value disables the sink
+// (both returns nil) rather than falling back to a file named like a URL.
+func TestOpenAuditSink_BadEndpointDisables(t *testing.T) {
+	t.Parallel()
+	cfg := &Config{auditLogPath: "http://%zz"}
+	sink, file := openAuditSink(cfg)
+	if sink != nil || file != nil {
+		t.Errorf("bad endpoint: got (%v, %v), want (nil, nil)", sink, file)
 	}
 }

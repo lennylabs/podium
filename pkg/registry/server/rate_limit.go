@@ -6,10 +6,13 @@ import (
 	"time"
 )
 
-// QuotaLimits is the per-tenant rate-limit envelope. Mirrors the
-// §4.7.8 limit fields the spec lists (search QPS, materialize
-// rate). Storage and audit volume are enforced elsewhere
-// (ingest, audit retention scheduler).
+// QuotaLimits is the per-tenant rate-limit envelope. It covers the
+// two §4.7.8 limits expressed as a rate (search QPS and materialize
+// rate). The storage-bytes quota is enforced at ingest
+// (quota.storage_exceeded). The §4.7.8 audit-volume quota is enforced by
+// AuditVolumeMeter: the audit emitter records every event against the
+// tenant's daily budget and the §7.3.1 reingest path refuses new writes with
+// quota.audit_volume_exceeded once it is spent.
 type QuotaLimits struct {
 	SearchQPS       int
 	MaterializeRate int

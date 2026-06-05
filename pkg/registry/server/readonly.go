@@ -3,19 +3,17 @@ package server
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"sync/atomic"
 )
 
-// Errors related to §13.2.1 read-only mode.
-var (
-	// ErrReadOnly signals a write rejected because the registry is
-	// running in read-only mode. Maps to registry.read_only in §6.10.
-	ErrReadOnly = errors.New("registry.read_only")
-	// ErrReadOnlyConfig signals an attempt to change configuration
-	// while the registry is in read-only mode. Maps to
-	// config.read_only in §6.10.
-	ErrReadOnlyConfig = errors.New("config.read_only")
-)
+// ErrReadOnly signals a write rejected because the registry is running
+// in §13.2.1 read-only mode. It maps to the registry.read_only §6.10
+// code. Every write endpoint the spec enumerates (ingest webhooks,
+// layer admin operations, freeze toggles, admin grants, runtime-key
+// issuance) rejects with this single code; the spec defines no separate
+// config-rejection code.
+var ErrReadOnly = errors.New("registry.read_only")
 
 // Mode is one of the §13.9 health states.
 type Mode int32
@@ -66,13 +64,19 @@ func (m *ModeTracker) CheckWrite() error {
 	return nil
 }
 
-// CheckConfig returns ErrReadOnlyConfig when the registry is in
-// read-only mode. Configuration edits (admin grants, layer config,
-// freeze toggles) call this before applying.
-func (m *ModeTracker) CheckConfig() error {
-	if m.Get() == ModeReadOnly {
-		return fmt.Errorf("%w: configuration cannot be changed in read-only mode",
-			ErrReadOnlyConfig)
+// rejectIfReadOnly writes the §13.2.1 registry.read_only envelope (HTTP
+// 503) and returns true when the registry is in read-only mode, so a
+// write-path handler can return early. A nil tracker means read-only
+// mode tracking is disabled and never rejects. This is the single
+// choke point for the §13.2.1 write-rejection code so the wire string
+// cannot drift across the enumerated write endpoints.
+func rejectIfReadOnly(w http.ResponseWriter, mode *ModeTracker) bool {
+	if mode == nil {
+		return false
 	}
-	return nil
+	if err := mode.CheckWrite(); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "registry.read_only", err.Error())
+		return true
+	}
+	return false
 }

@@ -35,16 +35,7 @@ func localSearch(records []filesystem.ArtifactRecord, query, typeFilter, scope s
 	docs := make([][]string, 0, len(records))
 	keep := make([]filesystem.ArtifactRecord, 0, len(records))
 	for _, rec := range records {
-		if rec.Artifact == nil {
-			continue
-		}
-		if typeFilter != "" && string(rec.Artifact.Type) != typeFilter {
-			continue
-		}
-		if scope != "" && !strings.HasPrefix(rec.ID, scope) {
-			continue
-		}
-		if !overlayTagsMatch(rec.Artifact.Tags, tags) {
+		if !overlayRecordMatches(rec, typeFilter, scope, tags) {
 			continue
 		}
 		docs = append(docs, overlayTokens(rec))
@@ -84,6 +75,22 @@ func localSearch(records []filesystem.ArtifactRecord, query, typeFilter, scope s
 		out = out[:topK]
 	}
 	return out
+}
+
+// overlayRecordMatches reports whether rec passes the optional
+// type / scope / tag filters applied to every overlay search stream
+// (BM25 and the §9.1 LocalSearchProvider semantic stream).
+func overlayRecordMatches(rec filesystem.ArtifactRecord, typeFilter, scope string, tags []string) bool {
+	if rec.Artifact == nil {
+		return false
+	}
+	if typeFilter != "" && string(rec.Artifact.Type) != typeFilter {
+		return false
+	}
+	if scope != "" && !strings.HasPrefix(rec.ID, scope) {
+		return false
+	}
+	return overlayTagsMatch(rec.Artifact.Tags, tags)
 }
 
 func descriptorFor(rec filesystem.ArtifactRecord) localSearchResult {

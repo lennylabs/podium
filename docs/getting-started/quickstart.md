@@ -152,15 +152,18 @@ podium sync
 Output:
 
 ```
-Materialized 1 artifact to .:
-  personal/hello/greet@1.0.0 → .claude/agents/greet.md
+adapter: claude-code
+target:  /Users/alice/myproject
+artifacts:
+  - personal/hello/greet  [podium-artifacts]
+      .claude/skills/greet/SKILL.md
 ```
 
 Podium reads the registry, finds the artifact, runs the Claude Code
 harness adapter on it, and writes the result to the path Claude Code
 expects. The default sync target is the
-current directory; the adapter knows to write into `.claude/agents/`
-underneath.
+current directory; the adapter writes a skill into
+`.claude/skills/<name>/SKILL.md` underneath.
 
 ---
 
@@ -172,7 +175,7 @@ Open Claude Code in that project. Type:
 hello!
 ```
 
-Claude Code natively discovers `.claude/agents/greet.md`. Filesystem mode
+Claude Code natively discovers `.claude/skills/greet/SKILL.md`. Filesystem mode
 does not require MCP. Claude Code recognizes that the skill's description
 matches the prompt and uses it to produce a greeting with the current date.
 
@@ -235,7 +238,7 @@ artifact ID; intermediate directories without manifest files are domain
 nodes, not artifacts.
 
 **Claude Code doesn't see the skill.** Check that
-`.claude/agents/greet.md` actually exists. If it does, restart Claude
+`.claude/skills/greet/SKILL.md` actually exists. If it does, restart Claude
 Code so it re-reads its directory.
 
 **Skill is found but not loaded.** Claude reads the `description:`

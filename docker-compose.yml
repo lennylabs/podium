@@ -1,16 +1,29 @@
-# Local services for the live integration suite. Mirrors the service
-# containers used in nightly.yml and release.yml so behavior on the
-# laptop matches CI.
+# Evaluation deployment stack (§13.1.1). `docker compose up -d` brings up
+# the standard topology in single-replica form: the registry binary, a
+# pgvector Postgres, MinIO object storage, and a Dex OIDC IdP, plus a
+# one-shot bootstrap container. It is intended for team evaluation,
+# smoke-testing, CI integration tests, and adapter / SDK development.
 #
-# Usage:
-#   docker compose up -d      # start
+# Not production-grade: single-replica services, default credentials,
+# local volumes. For solo or non-prod use, prefer the standalone single
+# binary (§13.10).
+#
+# The `postgres` and `minio` services also back the Go live integration
+# suite. `make services-up` starts only those plus the bucket bootstrap,
+# so running live tests does not build the registry image. The same
+# Postgres + MinIO configuration is used by the manual docker runs in
+# nightly.yml and release.yml.
+#
+# Usage (full evaluation stack):
+#   docker compose up -d
+#   podium init --global --registry http://localhost:8080
+#   podium login    # device-code flow against the bundled Dex IdP
+#
 #   docker compose down       # stop (keeps volumes)
 #   docker compose down -v    # stop + wipe data
 #
-# Or via the Makefile wrappers:
+# Backing services only (live tests):
 #   make services-up
-#   make services-down
-#   make services-logs
 
 services:
   postgres:
@@ -51,14 +64,31 @@ services:
       timeout: 5s
       retries: 10
 
-  # The official MinIO image doesn't auto-create buckets (the bitnami
-  # MINIO_DEFAULT_BUCKETS env var was vendor-specific). This sidecar
-  # waits for MinIO to be healthy, then runs `mc mb` to ensure the
-  # `podium` bucket exists. It's a one-shot; restart: "no" prevents
-  # docker-compose from restarting it after success.
-  minio-init:
+  # OIDC IdP for the OAuth device-code flow that `podium login` runs.
+  # The static device-code client and example user are defined in the
+  # mounted config (deploy/compose/dex/config.yaml). The image is
+  # distroless, so the stack orders the registry after Dex with a plain
+  # depends_on rather than a container healthcheck.
+  dex:
+    image: ghcr.io/dexidp/dex:v2.41.1
+    container_name: podium-dex
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    ports:
+      - "5556:5556"   # OIDC issuer at http://localhost:5556/dex
+    volumes:
+      - ./deploy/compose/dex/config.yaml:/etc/dex/config.yaml:ro
+      - dex_data:/var/dex
+
+  # One-shot bootstrap (§13.1.1). It creates the MinIO bucket the registry
+  # writes resources to. The other two bootstrap responsibilities are met
+  # by the rest of the stack: the registry's OIDC client is registered
+  # declaratively in the Dex config, and the first tenant plus admin user
+  # are seeded by the registry at boot (the default tenant is auto-created;
+  # PODIUM_BOOTSTRAP_ADMINS seeds the admin grant). restart: "no" keeps it
+  # from rerunning after it exits.
+  bootstrap:
     image: minio/mc:RELEASE.2024-10-29T15-34-59Z
-    container_name: podium-minio-init
+    container_name: podium-bootstrap
     depends_on:
       minio:
         condition: service_healthy
@@ -71,6 +101,42 @@ services:
         echo "bucket ready"
     restart: "no"
 
+  # The registry binary, configured against the local services above. Built
+  # from the repo Dockerfile so `docker compose up` needs no published
+  # image. It runs the server-side injected-session-token verification mode
+  # (the only mode this build verifies server-side); Dex provides the
+  # device-code IdP for the host-side `podium login` flow.
+  registry:
+    build:
+      context: .
+    container_name: podium-registry
+    depends_on:
+      postgres:
+        condition: service_healthy
+      bootstrap:
+        condition: service_completed_successfully
+      dex:
+        condition: service_started
+    environment:
+      PODIUM_BIND: "0.0.0.0:8080"
+      PODIUM_PUBLIC_URL: "http://localhost:8080"
+      PODIUM_REGISTRY_STORE: "postgres"
+      PODIUM_POSTGRES_DSN: "postgres://podium:podium@postgres:5432/podium?sslmode=disable"
+      PODIUM_OBJECT_STORE: "s3"
+      PODIUM_S3_ENDPOINT: "http://minio:9000"
+      PODIUM_S3_BUCKET: "podium"
+      PODIUM_S3_REGION: "us-east-1"
+      PODIUM_S3_ACCESS_KEY_ID: "minioadmin"
+      PODIUM_S3_SECRET_ACCESS_KEY: "minioadmin"
+      PODIUM_S3_FORCE_PATH_STYLE: "true"
+      PODIUM_IDENTITY_PROVIDER: "injected-session-token"
+      PODIUM_OAUTH_AUDIENCE: "http://localhost:8080"
+      PODIUM_OAUTH_AUTHORIZATION_ENDPOINT: "http://localhost:5556/dex/device/code"
+      PODIUM_BOOTSTRAP_ADMINS: "alice@acme.com"
+    ports:
+      - "8080:8080"
+
 volumes:
   postgres_data:
   minio_data:
+  dex_data:
