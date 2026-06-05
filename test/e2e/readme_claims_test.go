@@ -962,8 +962,9 @@ func TestReadme_SyncSaveAs(t *testing.T) {
 }
 
 // T-D-readme-71 — cache prune removes content-cache buckets older than N days.
-// Doc-accuracy: the implementation requires a positive --days (--days 0 is
-// rejected), so the documented capability is exercised with an aged bucket.
+// Doc-accuracy: --days 0 is the boundary "older than now" and is accepted (it
+// prunes every bucket last accessed in the past); only a negative --days is
+// rejected, so the documented capability is exercised with an aged bucket.
 func TestReadme_CachePrune(t *testing.T) {
 	t.Parallel()
 	cache := t.TempDir()
@@ -976,10 +977,22 @@ func TestReadme_CachePrune(t *testing.T) {
 	if _, err := os.Stat(bucket); err == nil {
 		t.Errorf("aged bucket was not pruned")
 	}
-	// --days 0 is rejected with a clear error rather than silently pruning all.
-	zero := runPodium(t, "", nil, "cache", "prune", "--dir", t.TempDir(), "--days", "0")
-	if zero.Exit == 0 || !strings.Contains(zero.Stderr, "positive") {
-		t.Errorf("--days 0 should be rejected as non-positive, exit=%d stderr=%q", zero.Exit, zero.Stderr)
+	// --days 0 is accepted: the cutoff is the present moment, so a bucket last
+	// accessed before now is prunable.
+	zeroCache := t.TempDir()
+	zeroBucket := filepath.Join(zeroCache, "now-bucket")
+	mkdirOld(t, zeroBucket, 1)
+	zero := runPodium(t, "", nil, "cache", "prune", "--dir", zeroCache, "--days", "0")
+	if zero.Exit != 0 {
+		t.Fatalf("--days 0 should be accepted, exit=%d stderr=%q", zero.Exit, zero.Stderr)
+	}
+	if _, err := os.Stat(zeroBucket); err == nil {
+		t.Errorf("--days 0 did not prune a bucket aged before now")
+	}
+	// A negative --days would push the cutoff into the future; it is rejected.
+	neg := runPodium(t, "", nil, "cache", "prune", "--dir", t.TempDir(), "--days", "-1")
+	if neg.Exit != 2 || !strings.Contains(neg.Stderr, "negative") {
+		t.Errorf("--days -1 should be rejected as negative, exit=%d stderr=%q", neg.Exit, neg.Stderr)
 	}
 }
 
