@@ -112,15 +112,36 @@ func runPodiumStdin(t testing.TB, cwd string, env []string, stdin string, args .
 	return runBin(t, cmdharness.Bin(t, "podium"), cwd, append(env, "PODIUM_NO_AUTOSTANDALONE=1"), []byte(stdin), 90*time.Second, args...)
 }
 
+// withIsolatedHome appends HOME (and USERPROFILE on Windows) pointing at home
+// so a CLI subprocess resolves the §7.5.2 user-global config scope from an
+// empty directory instead of the developer's real ~/.podium, which would
+// otherwise leak a registry or other defaults into a test that assumes none. A
+// caller that already set HOME in env keeps it. mergeEnv scrubs the inherited
+// HOME in favor of this one because it appears in the extra set.
+func withIsolatedHome(env []string, home string) []string {
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "HOME=") {
+			return env
+		}
+	}
+	return append(env, "HOME="+home, "USERPROFILE="+home)
+}
+
 // runBin is the generic bounded subprocess runner.
 func runBin(t testing.TB, bin, cwd string, env []string, stdin []byte, timeout time.Duration, args ...string) cliResult {
 	t.Helper()
+	home := cmdharness.IsolatedHome(t)
+	env = withIsolatedHome(env, home)
+	if cwd == "" {
+		// Run in the isolated HOME dir so §7.5.2 workspace discovery walks up
+		// through empty parents instead of climbing from the repo working dir
+		// into the developer's ~/.podium and reading it as a project config.
+		cwd = home
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
-	if cwd != "" {
-		cmd.Dir = cwd
-	}
+	cmd.Dir = cwd
 	cmd.Env = mergeEnv(env...)
 	cmd.Stdin = bytes.NewReader(stdin)
 	var so, se bytes.Buffer
