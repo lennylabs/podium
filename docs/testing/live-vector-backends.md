@@ -112,6 +112,24 @@ make test-live-external
 
 For each configured backend, the run executes its storage suites and, when the self-embedding collection and inference model are set, its self-embedding test. A backend without credentials skips with a reason.
 
+## Running on GitHub Actions
+
+The `live-external` workflow (`.github/workflows/live-external.yml`) runs the same `make test-live-external` lane in CI. It triggers on a published release and on a manual dispatch from the Actions tab, and never on a pull request, because the managed backends and paid providers cost money and consume per-account quotas.
+
+The workflow supplies each credential from a repository secret whose name matches the `test.env` variable. Define the secrets under Settings, then Secrets and variables, then Actions. A secret that is absent leaves its sub-suite skipped, the same as an unset `test.env` variable, so a partial set runs the subset it can reach.
+
+Managed vector backends:
+
+- Pinecone: `PODIUM_PINECONE_API_KEY` and `PODIUM_PINECONE_INDEX`, plus `PODIUM_PINECONE_SELFEMBED_INDEX` and `PODIUM_PINECONE_INFERENCE_MODEL` for self-embedding.
+- Weaviate Cloud: `PODIUM_WEAVIATE_URL`, `PODIUM_WEAVIATE_API_KEY`, and `PODIUM_WEAVIATE_COLLECTION`, plus `PODIUM_WEAVIATE_SELFEMBED_COLLECTION` and `PODIUM_WEAVIATE_VECTORIZER` for self-embedding.
+- Qdrant Cloud: `PODIUM_QDRANT_URL`, `PODIUM_QDRANT_API_KEY`, and `PODIUM_QDRANT_COLLECTION`, plus `PODIUM_QDRANT_SELFEMBED_COLLECTION` and `PODIUM_QDRANT_INFERENCE_MODEL` for self-embedding.
+
+Embedding providers: `OPENAI_API_KEY`, `COHERE_API_KEY`, and `VOYAGE_API_KEY`.
+
+Postgres, the S3 object store, and Ollama need no configuration. The workflow starts Postgres and MinIO as job-local services with throwaway localhost credentials and installs Ollama on the runner with a local model, so `PODIUM_POSTGRES_DSN`, the `PODIUM_S3_*` variables, and the Ollama variables are set in the workflow itself.
+
+The workflow reads every value through the `secrets` context, so define each one as a secret. The repository is public, which makes an Actions log world-readable, and storing a value as a secret keeps it masked in the log. To keep a non-sensitive identifier such as an index or model name visible in the log, define it as a repository variable instead and change its reference in the workflow from `secrets.<NAME>` to `vars.<NAME>`.
+
 ## What each test exercises
 
 - **Conformance** runs the `RegistrySearchProvider` contract: put, query, tenant-boundary isolation, upsert replacement, delete, dimension-mismatch rejection, and bounded top-k.
