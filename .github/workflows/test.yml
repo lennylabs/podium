@@ -88,11 +88,10 @@ jobs:
       - name: Test with coverage
         env:
           PODIUM_POSTGRES_DSN: postgres://postgres:podium@localhost:5432/podium?sslmode=disable
-          PODIUM_S3_ENDPOINT: localhost:9000
+          PODIUM_S3_ENDPOINT: http://localhost:9000
           PODIUM_S3_BUCKET: podium
           PODIUM_S3_ACCESS_KEY_ID: minioadmin
           PODIUM_S3_SECRET_ACCESS_KEY: minioadmin
-          PODIUM_S3_USE_SSL: "false"
         run: |
           go test -count=1 -coverprofile=coverage.out -coverpkg=./... ./...
           echo "--- coverage.out ---"

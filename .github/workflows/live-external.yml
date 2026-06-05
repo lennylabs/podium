@@ -111,11 +111,10 @@ jobs:
           # Postgres + S3 service values (mirrors nightly.yml) so the
           # pgvector depth tests and managed-stack e2e take their live paths.
           PODIUM_POSTGRES_DSN: postgres://postgres:podium@localhost:5432/podium?sslmode=disable
-          PODIUM_S3_ENDPOINT: localhost:9000
+          PODIUM_S3_ENDPOINT: http://localhost:9000
           PODIUM_S3_BUCKET: podium
           PODIUM_S3_ACCESS_KEY_ID: minioadmin
           PODIUM_S3_SECRET_ACCESS_KEY: minioadmin
-          PODIUM_S3_USE_SSL: "false"
           # Managed vector backends. Each backend has a storage index (external
           # embeddings) and a self-embedding index (backend-side integrated
           # inference); the self-embedding sub-suite gates on the SELFEMBED index
