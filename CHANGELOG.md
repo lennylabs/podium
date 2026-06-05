@@ -6,7 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-[Unreleased]: https://github.com/lennylabs/podium/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/lennylabs/podium/compare/v0.1.3...HEAD
+
+## [0.1.3] - 2026-06-04
+
+Spec-conformance and reliability release. The bulk of the work reconciles the implementation with the specification across the registry, CLI, MCP bridge, and SDKs, and builds out the test infrastructure that verifies it (live integration lanes for Postgres, S3, and the managed vector backends; spec, doc, and matrix coverage gates; and a hand- and agent-runnable end-to-end validation suite). The user-facing changes are grouped below by area; the internal test and CI work is omitted.
+
+### Added
+
+- **Managed vector backends**: Pinecone, Weaviate Cloud, and Qdrant Cloud, alongside the existing `sqlite-vec` and `pgvector`, with both externally-computed embeddings and backend-side integrated inference.
+- **Observability** (§13.8): an opt-in Prometheus `/metrics` endpoint on the registry and the MCP bridge, and OpenTelemetry trace export with W3C context propagation.
+- **Per-tenant daily audit-volume quota** (§4.7.8) and **reverse-dependency in-degree ranking** in search (§4.7.3).
+- **Transactional vector outbox** with a drain worker, and **per-row embedding-model versioning** with a mixed-model query restriction (§4.7, §4.7.2).
+- **Consumer-side `verify_signatures` default** read from `sync.yaml` for standalone deployments (§13.10), and **config-merge / managed-marker materialization ops** (§6.7).
+
+### Changed
+
+- `podium status` and `podium config show` resolve the registry and harness from the merged `sync.yaml` (the flag, then the environment, then the config), not only from environment variables; `config show` hints when no configuration is in scope and surfaces effective server settings under `--server`.
+- The MCP bridge negotiates down to an older MCP protocol version, rejects a filesystem-source registry, and refuses an incompatible client version (§6.1, §6.9).
+
+### Fixed
+
+- **Artifact model, ingest, and lint** (§4.1–§4.4): the type system and sizing lint, canonical IDs and the resource boundary, manifest schema parsing, skill and hook ingest lint, prose artifact-reference resolution, document-source provenance, URL status checks, the seccomp baseline, DOMAIN.md body-size lint, and configurable bundled-resource caps; binary inline resources are base64-encoded and served without an object store.
+- **Domains** (§4.5): `DOMAIN.md` composition is ingested and applied at `load_domain`, with discovery rendering, tenant config, and imports.
+- **Layers, visibility, and versioning** (§4.6, §4.7): extends-merge / collision / visibility composition, the per-identity user-defined layer cap, runtime layer resolution, embedding projection and version resolution, `replaced_by` recovery on load for the SQL backends, and extends-pinned-parent protection from deprecated-version purge. A same-ID `extends` overlay from a lower-precedence layer is no longer rejected as a self-extends cycle.
+- **Meta-tools and MCP bridge** (§5, §6): verbatim §5.1 tool descriptions and input schemas, the §6.6 materialization pipeline (content-hash verification, hook script path, rule fidelity), the §6.5 resolution cache (TTL, HEAD revalidation, prune safety), the §6.4 workspace overlay (watch / re-index, fused `total_matched`), per-harness materialization targets (§6.7 — codex hooks into `config.toml`, cowork buckets, config-merge ownership so gemini accepts `mcpServers`), the §6.2 server config env vars, and the §6.10 structured error envelope. The content cache now persists `skill_raw` and the sensitivity/signature envelope, fixing a `content_hash_mismatch` and a skipped signature check on cache hits. `search_artifacts` `total_matched` counts vector-only hits, and the hybrid BM25 half indexes only the §4.7 searchable projection (name, description, when_to_use, tags) with stopword filtering, so a paraphrased query ranks by vector similarity.
+- **External integration and sync** (§7): §7.2 bundled-resource delivery and the presigned manifest-body channel above the inline cutoff, §7.3 inbound webhook and reingest pipeline (`last_ingested_at`, `force_push_policy`, break-glass, webhook-secret rotation and redaction), §7.4 degraded-network cache-mode fallback across the bridge / sync / SDKs, §7.5.2 sync honoring `PODIUM_HARNESS` with profile / scope and lock provenance, §7.6 read CLI and SDK `--json` schemas and caller-credential propagation, and §7.7 onboarding (`init` walk-up / wizard / hints, login resolution). `cache prune --days 0` is accepted as the "older than now" boundary.
+- **Identity and scope preview** (§6.3, §3.5): injected-session-token verification, device-code, scope and group mapping, `aud` enforcement, and token watch; scope-preview endpoint correctness and the tenant gate, surfaced in `status` / `sync` / MCP.
+- **Audit and observability** (§8, §12, §13.7, §13.9): registry audit events under dotted `caller.*` keys, §8.2 PII redaction, §8.4 sampling / retention / re-anchor, §8.5 right-to-be-forgotten erasure (purge, redaction, tombstone, salt guard), §8.6 gap-detection scheduling, immutable `Cache-Control` on content-addressed reads, §13.9 health and readiness probes, and §12 offline status / ETag revalidation / learn-from-usage rerank.
+- **Deployment and config** (§13, §14): the §13.1.1 evaluation compose stack (registry, Dex, bootstrap-admin seeding), §13.2 read-only write rejection / public-mode bind guard / sensitivity ceiling / read-only probe and recovery, §13.4 `migrate-to-standard` short-form flags and standalone-tenant resolution, §13.10 standalone zero-flag and first-run `~/.podium/sync.yaml` auto-bootstrap, §13.11 fsnotify watch and filesystem `extends`, and §14.9 / §14.10 enterprise-layer register-class inference and `layer watch --interval`.
+- **Retrieval and SPIs** (§3.2, §3.3, §9): hybrid domain search with vector-only fusion, description-quality advisories with MCP session correlation, the §9.1 operational notification on ingest failure, context-first SPI signatures, and a structured SPI error envelope.
+
+### Security
+
+- The `/objects/{content_hash}` data-plane route was exempt from identity verification and served restricted bytes to any caller. Visibility is now enforced on that route, and S3 presigned URLs no longer embed credentials.
+
+[0.1.3]: https://github.com/lennylabs/podium/releases/tag/v0.1.3
 
 ## [0.1.2] - 2026-05-11
 
