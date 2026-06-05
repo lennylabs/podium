@@ -798,6 +798,14 @@ func Run() error {
 			// separate embedding provider is wired.
 			log.Printf("hybrid search: vector=%s self-embedding=%s", vecProvider.ID(), cfg.vectorInferenceModel)
 		}
+	} else {
+		// §13.10 / §13.12: no vector backend is wired, so the registry serves
+		// BM25-only keyword search. This is the --no-embeddings / empty
+		// PODIUM_EMBEDDING_PROVIDER fallback. Log it for symmetry with the
+		// hybrid-search banner above so an operator can confirm from the
+		// startup log that embeddings are disabled and no embedding provider
+		// is contacted.
+		log.Printf("keyword search: embeddings disabled (BM25-only; no embedding provider)")
 	}
 
 	// §9 NotificationProvider: chosen via PODIUM_NOTIFICATION_PROVIDER
