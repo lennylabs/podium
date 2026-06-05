@@ -127,6 +127,15 @@ func TestCapabilityMatrix_Types(t *testing.T) {
 
 // --- frontmatter-field fidelity (carried on a type: agent) -------------------
 
+// Matrix: §6.7.1 (claude-code, description)
+// Matrix: §6.7.1 (claude-desktop, description)
+// Matrix: §6.7.1 (claude-cowork, description)
+// Matrix: §6.7.1 (cursor, description)
+// Matrix: §6.7.1 (codex, description)
+// Matrix: §6.7.1 (opencode, description)
+// Matrix: §6.7.1 (gemini, description)
+// Matrix: §6.7.1 (pi, description)
+// Matrix: §6.7.1 (hermes, description)
 func TestCapabilityMatrix_Description(t *testing.T) {
 	t.Parallel()
 	fm := string(makeArtifact(map[string]string{"description": "Sentinel-DESCRIPTION-7c0c4a"}))
@@ -135,6 +144,15 @@ func TestCapabilityMatrix_Description(t *testing.T) {
 	}
 }
 
+// Matrix: §6.7.1 (claude-code, mcpServers)
+// Matrix: §6.7.1 (claude-desktop, mcpServers)
+// Matrix: §6.7.1 (claude-cowork, mcpServers)
+// Matrix: §6.7.1 (cursor, mcpServers)
+// Matrix: §6.7.1 (codex, mcpServers)
+// Matrix: §6.7.1 (opencode, mcpServers)
+// Matrix: §6.7.1 (gemini, mcpServers)
+// Matrix: §6.7.1 (pi, mcpServers)
+// Matrix: §6.7.1 (hermes, mcpServers)
 func TestCapabilityMatrix_MCPServers(t *testing.T) {
 	t.Parallel()
 	const fm = "---\ntype: agent\nversion: 1.0.0\n" +
@@ -144,6 +162,15 @@ func TestCapabilityMatrix_MCPServers(t *testing.T) {
 	}
 }
 
+// Matrix: §6.7.1 (claude-code, delegates_to)
+// Matrix: §6.7.1 (claude-desktop, delegates_to)
+// Matrix: §6.7.1 (claude-cowork, delegates_to)
+// Matrix: §6.7.1 (cursor, delegates_to)
+// Matrix: §6.7.1 (codex, delegates_to)
+// Matrix: §6.7.1 (opencode, delegates_to)
+// Matrix: §6.7.1 (gemini, delegates_to)
+// Matrix: §6.7.1 (pi, delegates_to)
+// Matrix: §6.7.1 (hermes, delegates_to)
 func TestCapabilityMatrix_DelegatesTo(t *testing.T) {
 	t.Parallel()
 	const fm = "---\ntype: agent\nversion: 1.0.0\n" +
@@ -153,6 +180,15 @@ func TestCapabilityMatrix_DelegatesTo(t *testing.T) {
 	}
 }
 
+// Matrix: §6.7.1 (claude-code, requiresApproval)
+// Matrix: §6.7.1 (claude-desktop, requiresApproval)
+// Matrix: §6.7.1 (claude-cowork, requiresApproval)
+// Matrix: §6.7.1 (cursor, requiresApproval)
+// Matrix: §6.7.1 (codex, requiresApproval)
+// Matrix: §6.7.1 (opencode, requiresApproval)
+// Matrix: §6.7.1 (gemini, requiresApproval)
+// Matrix: §6.7.1 (pi, requiresApproval)
+// Matrix: §6.7.1 (hermes, requiresApproval)
 func TestCapabilityMatrix_RequiresApproval(t *testing.T) {
 	t.Parallel()
 	const fm = "---\ntype: agent\nversion: 1.0.0\n" +
@@ -162,6 +198,15 @@ func TestCapabilityMatrix_RequiresApproval(t *testing.T) {
 	}
 }
 
+// Matrix: §6.7.1 (claude-code, sandbox_profile)
+// Matrix: §6.7.1 (claude-desktop, sandbox_profile)
+// Matrix: §6.7.1 (claude-cowork, sandbox_profile)
+// Matrix: §6.7.1 (cursor, sandbox_profile)
+// Matrix: §6.7.1 (codex, sandbox_profile)
+// Matrix: §6.7.1 (opencode, sandbox_profile)
+// Matrix: §6.7.1 (gemini, sandbox_profile)
+// Matrix: §6.7.1 (pi, sandbox_profile)
+// Matrix: §6.7.1 (hermes, sandbox_profile)
 func TestCapabilityMatrix_SandboxProfile(t *testing.T) {
 	t.Parallel()
 	const fm = "---\ntype: agent\nversion: 1.0.0\nsandbox_profile: read-only-fs\n---\n\nbody\n"
@@ -179,6 +224,24 @@ func ruleSource(mode, extra string) Source {
 	}
 }
 
+// Matrix: §6.7.1 (claude-code, rule_mode_always)
+// Matrix: §6.7.1 (claude-desktop, rule_mode_always)
+// Matrix: §6.7.1 (claude-cowork, rule_mode_always)
+// Matrix: §6.7.1 (cursor, rule_mode_always)
+// Matrix: §6.7.1 (codex, rule_mode_always)
+// Matrix: §6.7.1 (opencode, rule_mode_always)
+// Matrix: §6.7.1 (gemini, rule_mode_always)
+// Matrix: §6.7.1 (pi, rule_mode_always)
+// Matrix: §6.7.1 (hermes, rule_mode_always)
+// Matrix: §4.3 (always, claude-code)
+// Matrix: §4.3 (always, claude-desktop)
+// Matrix: §4.3 (always, claude-cowork)
+// Matrix: §4.3 (always, cursor)
+// Matrix: §4.3 (always, codex)
+// Matrix: §4.3 (always, opencode)
+// Matrix: §4.3 (always, gemini)
+// Matrix: §4.3 (always, pi)
+// Matrix: §4.3 (always, hermes)
 func TestCapabilityMatrix_RuleModeAlways(t *testing.T) {
 	t.Parallel()
 	for _, id := range firstClassAdapters {
@@ -186,6 +249,24 @@ func TestCapabilityMatrix_RuleModeAlways(t *testing.T) {
 	}
 }
 
+// Matrix: §6.7.1 (claude-code, rule_mode_glob)
+// Matrix: §6.7.1 (claude-desktop, rule_mode_glob)
+// Matrix: §6.7.1 (claude-cowork, rule_mode_glob)
+// Matrix: §6.7.1 (cursor, rule_mode_glob)
+// Matrix: §6.7.1 (codex, rule_mode_glob)
+// Matrix: §6.7.1 (opencode, rule_mode_glob)
+// Matrix: §6.7.1 (gemini, rule_mode_glob)
+// Matrix: §6.7.1 (pi, rule_mode_glob)
+// Matrix: §6.7.1 (hermes, rule_mode_glob)
+// Matrix: §4.3 (glob, claude-code)
+// Matrix: §4.3 (glob, claude-desktop)
+// Matrix: §4.3 (glob, claude-cowork)
+// Matrix: §4.3 (glob, cursor)
+// Matrix: §4.3 (glob, codex)
+// Matrix: §4.3 (glob, opencode)
+// Matrix: §4.3 (glob, gemini)
+// Matrix: §4.3 (glob, pi)
+// Matrix: §4.3 (glob, hermes)
 func TestCapabilityMatrix_RuleModeGlob(t *testing.T) {
 	t.Parallel()
 	for _, id := range firstClassAdapters {
@@ -193,6 +274,24 @@ func TestCapabilityMatrix_RuleModeGlob(t *testing.T) {
 	}
 }
 
+// Matrix: §6.7.1 (claude-code, rule_mode_auto)
+// Matrix: §6.7.1 (claude-desktop, rule_mode_auto)
+// Matrix: §6.7.1 (claude-cowork, rule_mode_auto)
+// Matrix: §6.7.1 (cursor, rule_mode_auto)
+// Matrix: §6.7.1 (codex, rule_mode_auto)
+// Matrix: §6.7.1 (opencode, rule_mode_auto)
+// Matrix: §6.7.1 (gemini, rule_mode_auto)
+// Matrix: §6.7.1 (pi, rule_mode_auto)
+// Matrix: §6.7.1 (hermes, rule_mode_auto)
+// Matrix: §4.3 (auto, claude-code)
+// Matrix: §4.3 (auto, claude-desktop)
+// Matrix: §4.3 (auto, claude-cowork)
+// Matrix: §4.3 (auto, cursor)
+// Matrix: §4.3 (auto, codex)
+// Matrix: §4.3 (auto, opencode)
+// Matrix: §4.3 (auto, gemini)
+// Matrix: §4.3 (auto, pi)
+// Matrix: §4.3 (auto, hermes)
 func TestCapabilityMatrix_RuleModeAuto(t *testing.T) {
 	t.Parallel()
 	for _, id := range firstClassAdapters {
@@ -200,6 +299,24 @@ func TestCapabilityMatrix_RuleModeAuto(t *testing.T) {
 	}
 }
 
+// Matrix: §6.7.1 (claude-code, rule_mode_explicit)
+// Matrix: §6.7.1 (claude-desktop, rule_mode_explicit)
+// Matrix: §6.7.1 (claude-cowork, rule_mode_explicit)
+// Matrix: §6.7.1 (cursor, rule_mode_explicit)
+// Matrix: §6.7.1 (codex, rule_mode_explicit)
+// Matrix: §6.7.1 (opencode, rule_mode_explicit)
+// Matrix: §6.7.1 (gemini, rule_mode_explicit)
+// Matrix: §6.7.1 (pi, rule_mode_explicit)
+// Matrix: §6.7.1 (hermes, rule_mode_explicit)
+// Matrix: §4.3 (explicit, claude-code)
+// Matrix: §4.3 (explicit, claude-desktop)
+// Matrix: §4.3 (explicit, claude-cowork)
+// Matrix: §4.3 (explicit, cursor)
+// Matrix: §4.3 (explicit, codex)
+// Matrix: §4.3 (explicit, opencode)
+// Matrix: §4.3 (explicit, gemini)
+// Matrix: §4.3 (explicit, pi)
+// Matrix: §4.3 (explicit, hermes)
 func TestCapabilityMatrix_RuleModeExplicit(t *testing.T) {
 	t.Parallel()
 	for _, id := range firstClassAdapters {
@@ -209,6 +326,15 @@ func TestCapabilityMatrix_RuleModeExplicit(t *testing.T) {
 
 // --- hook_event (type: hook) -------------------------------------------------
 
+// Matrix: §6.7.1 (claude-code, hook_event)
+// Matrix: §6.7.1 (claude-desktop, hook_event)
+// Matrix: §6.7.1 (claude-cowork, hook_event)
+// Matrix: §6.7.1 (cursor, hook_event)
+// Matrix: §6.7.1 (codex, hook_event)
+// Matrix: §6.7.1 (opencode, hook_event)
+// Matrix: §6.7.1 (gemini, hook_event)
+// Matrix: §6.7.1 (pi, hook_event)
+// Matrix: §6.7.1 (hermes, hook_event)
 func TestCapabilityMatrix_HookEvent(t *testing.T) {
 	t.Parallel()
 	// pre_shell_execution maps on every config-merge harness, including Cursor

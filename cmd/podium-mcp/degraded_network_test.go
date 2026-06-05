@@ -48,6 +48,7 @@ func TestLoadArtifact_AlwaysRevalidateFallsBackToCacheOnNetworkError(t *testing.
 
 // Spec: §7.4 — always-revalidate + unreachable + cache miss:
 // returns network.registry_unreachable.
+// Matrix: §6.10 (network.registry_unreachable)
 func TestLoadArtifact_AlwaysRevalidateNetworkUnreachableErrors(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -13,7 +13,7 @@ func TestStartAnchorScheduler_NilSinkLogsAndReturns(t *testing.T) {
 	t.Parallel()
 	// nil sink path is the "audit anchor disabled" branch; reaching
 	// it without panicking is sufficient.
-	startAnchorScheduler(&Config{}, nil)
+	startAnchorScheduler(t.Context(), &Config{}, nil)
 }
 
 func TestStartAnchorScheduler_BadKeyPathLogsAndReturns(t *testing.T) {
@@ -29,7 +29,7 @@ func TestStartAnchorScheduler_BadKeyPathLogsAndReturns(t *testing.T) {
 		auditSigningKeyPath: filepath.Join(dir, "audit.key"),
 		auditAnchorInterval: 1,
 	}
-	startAnchorScheduler(cfg, sink)
+	startAnchorScheduler(t.Context(), cfg, sink)
 	// Give the scheduler a beat to run, then let test cleanup
 	// reclaim the goroutine via process exit.
 	time.Sleep(20 * time.Millisecond)
@@ -37,14 +37,14 @@ func TestStartAnchorScheduler_BadKeyPathLogsAndReturns(t *testing.T) {
 
 func TestStartRetentionScheduler_NilSink(t *testing.T) {
 	t.Parallel()
-	startRetentionScheduler(&Config{}, nil, nil)
+	startRetentionScheduler(t.Context(), &Config{}, nil, nil)
 }
 
 // Spec: §8.6 — startVerifyScheduler tolerates a nil sink by
 // logging and returning without launching a goroutine.
 func TestStartVerifyScheduler_NilSink(t *testing.T) {
 	t.Parallel()
-	startVerifyScheduler(&Config{auditVerifyInterval: 1}, nil)
+	startVerifyScheduler(t.Context(), &Config{auditVerifyInterval: 1}, nil)
 }
 
 // Spec: §8.6 — with a sink and a short interval the verify
@@ -55,7 +55,7 @@ func TestStartVerifyScheduler_Runs(t *testing.T) {
 	dir := t.TempDir()
 	sink, _ := audit.NewFileSink(filepath.Join(dir, "audit.log"))
 	_ = sink.Append(context.Background(), audit.Event{Type: audit.EventArtifactLoaded, Caller: "alice"})
-	startVerifyScheduler(&Config{auditVerifyInterval: 1}, sink)
+	startVerifyScheduler(t.Context(), &Config{auditVerifyInterval: 1}, sink)
 	// Allow the immediate pass to run, then let process exit reclaim the
 	// goroutine.
 	time.Sleep(40 * time.Millisecond)
@@ -65,7 +65,7 @@ func TestStartRetentionScheduler_ZeroMaxAge(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	sink, _ := audit.NewFileSink(filepath.Join(dir, "audit.log"))
-	startRetentionScheduler(&Config{auditRetentionMaxAgeDays: 0}, sink, nil)
+	startRetentionScheduler(t.Context(), &Config{auditRetentionMaxAgeDays: 0}, sink, nil)
 }
 
 func TestStartRetentionScheduler_ZeroInterval(t *testing.T) {
@@ -73,7 +73,7 @@ func TestStartRetentionScheduler_ZeroInterval(t *testing.T) {
 	dir := t.TempDir()
 	sink, _ := audit.NewFileSink(filepath.Join(dir, "audit.log"))
 	cfg := &Config{auditRetentionMaxAgeDays: 1, auditRetentionInterval: 0}
-	startRetentionScheduler(cfg, sink, nil)
+	startRetentionScheduler(t.Context(), cfg, sink, nil)
 }
 
 func TestStartRetentionScheduler_Runs(t *testing.T) {
@@ -81,7 +81,7 @@ func TestStartRetentionScheduler_Runs(t *testing.T) {
 	dir := t.TempDir()
 	sink, _ := audit.NewFileSink(filepath.Join(dir, "audit.log"))
 	cfg := &Config{auditRetentionMaxAgeDays: 1, auditRetentionInterval: 1}
-	startRetentionScheduler(cfg, sink, nil)
+	startRetentionScheduler(t.Context(), cfg, sink, nil)
 	// Allow the immediate pass to run.
 	time.Sleep(50 * time.Millisecond)
 }

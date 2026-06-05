@@ -19,7 +19,7 @@ import (
 //
 // The scheduler is best-effort: rewrite failures log a warning;
 // the next tick retries.
-func startRetentionScheduler(cfg *Config, sink *audit.FileSink, reAnchor func()) {
+func startRetentionScheduler(ctx context.Context, cfg *Config, sink *audit.FileSink, reAnchor func()) {
 	if sink == nil {
 		log.Printf("warning: audit retention disabled (no sink)")
 		return
@@ -37,13 +37,16 @@ func startRetentionScheduler(cfg *Config, sink *audit.FileSink, reAnchor func())
 	go func() {
 		t := time.NewTicker(interval)
 		defer t.Stop()
-		ctx := context.Background()
-		// One immediate pass so a long-running operator doesn't
-		// have to wait for the first tick after bumping the env
-		// var to see retention applied.
-		runRetentionOnce(ctx, sink, policies, reAnchor)
-		for range t.C {
+		// One immediate pass so a long-running operator doesn't have to wait for
+		// the first tick after bumping the env var, then one pass per tick until
+		// ctx is cancelled.
+		for {
 			runRetentionOnce(ctx, sink, policies, reAnchor)
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
 		}
 	}()
 	log.Printf("audit retention scheduler running (interval=%ds, max age=%dd)",

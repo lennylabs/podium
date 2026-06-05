@@ -18,7 +18,7 @@ import (
 //
 // The scheduler is best-effort: a sweep failure logs a warning and the
 // next tick retries. Disabled when the interval is non-positive.
-func startStoreRetentionScheduler(cfg *Config, st store.Store) {
+func startStoreRetentionScheduler(ctx context.Context, cfg *Config, st store.Store) {
 	if st == nil {
 		return
 	}
@@ -31,10 +31,14 @@ func startStoreRetentionScheduler(cfg *Config, st store.Store) {
 	go func() {
 		t := time.NewTicker(interval)
 		defer t.Stop()
-		ctx := context.Background()
-		runStoreRetentionOnce(ctx, st, deprecatedWindow, layerWindow)
-		for range t.C {
+		// An immediate pass, then one per tick, until ctx is cancelled.
+		for {
 			runStoreRetentionOnce(ctx, st, deprecatedWindow, layerWindow)
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
 		}
 	}()
 	log.Printf("store retention scheduler running (interval=%ds, deprecated=%dd, layer recovery=%dd)",

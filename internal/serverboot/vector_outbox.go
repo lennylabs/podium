@@ -111,8 +111,9 @@ func (w *vectorDrainWorker) publishStats(ctx context.Context, now time.Time) {
 // startVectorOutboxWorker launches the §4.7.2 drain worker when the store
 // supports the outbox and a vector backend is configured. It mirrors the
 // retention/anchor scheduler goroutine pattern: an immediate pass, then one per
-// tick, running until the process exits.
-func startVectorOutboxWorker(cfg *Config, st store.Store, vec vector.Provider, embedder embedding.Provider, mreg *metrics.Registry, auditSink audit.Sink, tenantID string) {
+// tick, until ctx is cancelled (the server's lifecycle context), so a graceful
+// shutdown stops the worker rather than leaking the goroutine.
+func startVectorOutboxWorker(ctx context.Context, cfg *Config, st store.Store, vec vector.Provider, embedder embedding.Provider, mreg *metrics.Registry, auditSink audit.Sink, tenantID string) {
 	ob, ok := st.(store.VectorOutbox)
 	if !ok {
 		return
@@ -139,10 +140,14 @@ func startVectorOutboxWorker(cfg *Config, st store.Store, vec vector.Provider, e
 	go func() {
 		t := time.NewTicker(interval)
 		defer t.Stop()
-		ctx := context.Background()
-		w.runOnce(ctx, time.Now().UTC())
-		for range t.C {
+		// An immediate pass, then one per tick, until ctx is cancelled.
+		for {
 			w.runOnce(ctx, time.Now().UTC())
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
 		}
 	}()
 	log.Printf("vector outbox: drain worker running (interval=%s, backend=%s, lag_depth=%d, lag_age=%ds)",

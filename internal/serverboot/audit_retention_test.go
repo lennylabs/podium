@@ -70,8 +70,8 @@ func TestRunRetentionOnce_NoReAnchorWhenNothingDropped(t *testing.T) {
 // non-positive max-age as "disabled" instead of crashing.
 func TestStartRetentionScheduler_NoOpWhenUnconfigured(t *testing.T) {
 	t.Parallel()
-	startRetentionScheduler(&Config{auditRetentionInterval: 60, auditRetentionMaxAgeDays: 0}, nil, nil)
-	startRetentionScheduler(&Config{auditRetentionInterval: 0}, nil, nil)
+	startRetentionScheduler(t.Context(), &Config{auditRetentionInterval: 60, auditRetentionMaxAgeDays: 0}, nil, nil)
+	startRetentionScheduler(t.Context(), &Config{auditRetentionInterval: 0}, nil, nil)
 	// Reaching here with no panic is the assertion.
 }
 

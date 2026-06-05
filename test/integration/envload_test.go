@@ -6,15 +6,20 @@ import (
 	"testing"
 
 	"github.com/lennylabs/podium/internal/testenv"
+	"github.com/lennylabs/podium/internal/testpg"
 )
 
 // TestMain loads the optional test.env (see internal/testenv) before the
 // integration suite runs, so the Postgres-backed and managed-backend tests
 // pick up their credentials from one file. Without the file the suite runs
-// unchanged; each integration test still self-skips on its own env gate.
+// unchanged; each integration test still self-skips on its own env gate. It then
+// runs the suite in a private Postgres database (see internal/testpg) so a global
+// reset here cannot collide with another package's test binary running
+// concurrently under `go test ./...`. The pgGlobalResetMu below still serializes
+// the resets within this binary.
 func TestMain(m *testing.M) {
 	testenv.Load()
-	os.Exit(m.Run())
+	os.Exit(testpg.RunMain(m))
 }
 
 // pgGlobalResetMu serializes the integration tests that call

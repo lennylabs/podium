@@ -19,7 +19,7 @@ jobs:
           ./bin/speccov uncovered || true
           ./bin/speccov drift
       - name: Matrix audit
-        run: ./bin/matrix audit || true   # advisory until we close the gaps
+        run: ./bin/matrix audit
       - name: Doc-example coverage
         run: |
           ./bin/doccov report

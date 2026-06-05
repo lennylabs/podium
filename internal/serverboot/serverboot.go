@@ -18,9 +18,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/lennylabs/podium/pkg/audit"
@@ -635,11 +637,22 @@ func layerConfigFromEntry(tenantID string, entry yamlLayerEntry, order int, cfg 
 	return lc, vis, nil
 }
 
-// Run loads configuration, opens the configured backends, mounts
-// every endpoint, and blocks on the HTTP listener. Returns the
-// http.Server's error (always non-nil — at minimum
-// http.ErrServerClosed when the listener exits cleanly).
+// Run loads configuration, opens the configured backends, mounts every
+// endpoint, and serves until a SIGINT or SIGTERM triggers a graceful shutdown.
+// It installs the signal handler, then delegates to run with the resulting
+// lifecycle context. It returns nil after a clean drain, or the underlying error
+// if the listener never binds or the drain times out.
 func Run() error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return run(ctx, stop)
+}
+
+// run is Run's body with the lifecycle context injected. ctx is cancelled on a
+// signal; stop restores the default signal handler so a second signal aborts a
+// stuck drain. A test drives a full boot and graceful shutdown by calling run
+// directly with a cancellable context.
+func run(ctx context.Context, stop func()) error {
 	// §13.10: an explicitly named --config / PODIUM_CONFIG_FILE that
 	// does not exist is a hard error — the operator named a config, so a missing
 	// one is not a cue to invent standalone defaults.
@@ -669,6 +682,12 @@ func Run() error {
 	st, err := openStore(cfg)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
+	}
+	// A graceful shutdown returns from run, so release the store's connection
+	// pool (and its background opener goroutine) rather than leaking it. The
+	// in-memory store is not an io.Closer and needs no release.
+	if closer, ok := st.(io.Closer); ok {
+		defer closer.Close()
 	}
 
 	// Standalone bootstrap: ensure the bootstrapped org exists so initial
@@ -739,6 +758,12 @@ func Run() error {
 		log.Printf("warning: vector search disabled: %v", verr)
 	} else {
 		vecProvider, embedProvider = v, e
+	}
+	// A graceful shutdown returns from run, so release a DB-backed vector backend
+	// (sqlite-vec, pgvector) and its connection-pool goroutine. The memory and
+	// managed backends close to a no-op.
+	if closer, ok := vecProvider.(io.Closer); ok {
+		defer closer.Close()
 	}
 	// §4.7: ingest-time embedding closures for a collocated backend. The zero
 	// value (managed/outbox backend, self-embedding backend, or no vector
@@ -1151,7 +1176,7 @@ func Run() error {
 	// pending rows to the backend, publishes the outbox-depth gauge, and emits
 	// vector.outbox_lagging when the backend falls behind.
 	if useVectorOutbox {
-		startVectorOutboxWorker(cfg, st, vecProvider, embedProvider, mreg, auditSink, tenantID)
+		startVectorOutboxWorker(ctx, cfg, st, vecProvider, embedProvider, mreg, auditSink, tenantID)
 	}
 
 	// §8.6 transparency anchoring: when the operator enables
@@ -1160,7 +1185,7 @@ func Run() error {
 	// Operators monitor audit.anchored / audit.anchor_failed events.
 	var reAnchor func()
 	if cfg.auditAnchorInterval > 0 {
-		if signer := startAnchorScheduler(cfg, auditFile); signer != nil {
+		if signer := startAnchorScheduler(ctx, cfg, auditFile); signer != nil {
 			// §8.6: after a retention pass drops events the chain
 			// head moves, invalidating the last anchor. Re-anchor the new
 			// head immediately so verifiers do not wait for the next tick.
@@ -1179,7 +1204,7 @@ func Run() error {
 	// (PODIUM_AUDIT_VERIFY_INTERVAL_SECONDS defaults to one hour); set the
 	// interval to 0 to disable.
 	if cfg.auditVerifyInterval > 0 {
-		startVerifyScheduler(cfg, auditFile)
+		startVerifyScheduler(ctx, cfg, auditFile)
 	}
 
 	// §8.4 audit-event retention: a goroutine truncates the audit log on
@@ -1188,7 +1213,7 @@ func Run() error {
 	// Enabled by default (PODIUM_AUDIT_RETENTION_INTERVAL_SECONDS defaults
 	// to one day); set the interval to 0 to disable.
 	if cfg.auditRetentionInterval > 0 {
-		startRetentionScheduler(cfg, auditFile, reAnchor)
+		startRetentionScheduler(ctx, cfg, auditFile, reAnchor)
 	}
 
 	// §8.4 store retention: when PODIUM_STORE_RETENTION_INTERVAL_SECONDS
@@ -1196,7 +1221,7 @@ func Run() error {
 	// 90-day window and hard-deletes soft-deleted layers past the 30-day
 	// recovery window.
 	if cfg.storeRetentionInterval > 0 {
-		startStoreRetentionScheduler(cfg, st)
+		startStoreRetentionScheduler(ctx, cfg, st)
 	}
 
 	// §13.2.1 read-only probe: ping the metadata store on a tick
@@ -1223,7 +1248,7 @@ func Run() error {
 			},
 		}
 		go func() {
-			if err := probe.Run(context.Background()); err != nil && err != context.Canceled {
+			if err := probe.Run(ctx); err != nil && err != context.Canceled {
 				log.Printf("read-only probe stopped: %v", err)
 			}
 		}()
@@ -1260,7 +1285,28 @@ func Run() error {
 	// --allow-public-bind.
 	emitStartupBanner(os.Stderr, cfg.publicMode)
 	log.Printf("podium-server listening on %s (mode=%s)", cfg.bind, cfg.modeBanner())
-	return httpServer.ListenAndServe()
+	return serveUntilShutdown(ctx, stop, httpServer)
+}
+
+// serveUntilShutdown runs srv until ctx is cancelled, then stops accepting
+// connections and drains the in-flight requests. The background daemons share
+// ctx and stop with it. stop() restores the default signal handler so a second
+// SIGINT or SIGTERM aborts a stuck drain and terminates the process. It returns
+// nil on a clean drain, srv.Shutdown's error if the drain times out, or
+// srv.ListenAndServe's error when the listener never comes up.
+func serveUntilShutdown(ctx context.Context, stop func(), srv *http.Server) error {
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.ListenAndServe() }()
+	select {
+	case err := <-serveErr:
+		return err
+	case <-ctx.Done():
+		stop()
+		log.Printf("podium-server shutting down")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		return srv.Shutdown(shutdownCtx)
+	}
 }
 
 // emitStartupBanner writes the §13.2.2 / §13.10 public-mode warning to w
