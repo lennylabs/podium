@@ -75,13 +75,8 @@ func TestEveryAdapter_ProducesDeterministicOutput(t *testing.T) {
 }
 
 // Spec: §6.7 — the rule-aware adapters write type: rule artifacts to
-// the adapter-native rules directory.
-// Matrix: §4.3 (always, claude-code)
-// Matrix: §4.3 (explicit, cursor)
-// Matrix: §4.3 (explicit, opencode)
-// Matrix: §4.3 (explicit, pi)
-// Matrix: §4.3 (explicit, hermes)
-// Matrix: §4.3 (always, codex)
+// the adapter-native rules directory. The §4.3 rule_mode × adapter
+// matrix cells are graded by the TestCapabilityMatrix_RuleMode* tests.
 func TestRuleAdapters_PlaceUnderNativeRulesDir(t *testing.T) {
 	t.Parallel()
 	src := Source{

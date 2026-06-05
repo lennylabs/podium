@@ -67,9 +67,7 @@ jobs:
       - run: make tools
       - run: make lint
       - run: make speccov-drift
-      # matrix-audit is advisory until the capability-matrix and rule-mode cells are
-      # annotated; the PR lane (spec-coverage.yml) runs the same audit the same way.
-      - run: make matrix-audit || true
+      - run: make matrix-audit
       - run: make test
       - run: make coverage-budget
 

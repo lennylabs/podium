@@ -22,6 +22,7 @@ func sandboxArtifact(profile string) string {
 // honored by the local host (PODIUM_HOST_SANDBOXES); the empty profile and
 // unrestricted are always enforceable. Off by default, sandbox_profile is
 // informational and never blocks ingest.
+// Matrix: §6.10 (ingest.sandbox_profile_unenforceable)
 func TestIngest_SandboxProfileGate(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

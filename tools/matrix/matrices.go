@@ -55,14 +55,18 @@ func KnownMatrices() []Matrix {
 					"cursor", "codex", "opencode",
 					"gemini", "pi", "hermes",
 				},
-				// Axis 2: matrix fields (§6.7.1 capability rows).
+				// Axis 2: the §6.7.1 capability rows that carry a
+				// non-native cell: the five frontmatter-field-fidelity
+				// rows, the four rule_mode rows, and the hook_event row.
+				// The five type-materialization rows (skill, agent,
+				// context, command, mcp-server) are graded by
+				// TestCapabilityMatrix_Types and are not audited here.
 				{
 					"description",
 					"mcpServers",
 					"delegates_to",
 					"requiresApproval",
 					"sandbox_profile",
-					"expose_as_mcp_prompt",
 					"rule_mode_always",
 					"rule_mode_glob",
 					"rule_mode_auto",
