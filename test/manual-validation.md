@@ -855,7 +855,14 @@ absent.
 **Steps.**
 
 1. Run the isolation block.
-2. Start services and load the environment.
+2. Start services and load the environment. The Postgres registry store keeps a
+   persistent volume across `make services-up` and `make services-down`, so a
+   prior run's `(artifact_id, version)` pairs survive into this one. A
+   re-ingested version with different bytes is rejected as
+   `ingest.immutable_violation` (§4.7.6 version immutability), which would leave
+   the prior run's resource-free `report` in place. Export a per-run artifact id
+   so each run authors and queries a fresh artifact and the large-resource path
+   is exercised against newly ingested bytes.
 
    ```bash
    cd ~/projects/podium && make services-up
@@ -865,22 +872,23 @@ absent.
    export PODIUM_VECTOR_BACKEND=pgvector
    export PODIUM_EMBEDDING_PROVIDER=openai
    export PODIUM_EMBEDDING_MODEL=text-embedding-3-small
+   export REPORT="report-$$"
    ```
 
 3. Author a registry that includes a large resource file, then serve in strict
    mode.
 
    ```bash
-   podium artifact scaffold --type skill --description "Generate a quarterly report" "$WORK/reg/report"
-   head -c 2000000 /dev/urandom | base64 > "$WORK/reg/report/big-template.txt"
+   podium artifact scaffold --type skill --description "Generate a quarterly report" "$WORK/reg/$REPORT"
+   head -c 2000000 /dev/urandom | base64 > "$WORK/reg/$REPORT/big-template.txt"
    podium serve --strict --layer-path "$WORK/reg" --bind 127.0.0.1:8110 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 60 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8110/healthz
    export PODIUM_REGISTRY=http://127.0.0.1:8110
    podium config show --server | grep -E 'store|object_store|vector'
    podium search --registry "$PODIUM_REGISTRY" "quarterly report"
-   podium artifact show --registry "$PODIUM_REGISTRY" report
-   curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=report" \
+   podium artifact show --registry "$PODIUM_REGISTRY" "$REPORT"
+   curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=$REPORT" \
      | python3 -c "import sys,json; d=json.load(sys.stdin); print('large_resources:', json.dumps(d.get('large_resources'), indent=2)); print('inline resources:', list((d.get('resources') or {}).keys()))"
    ```
 
@@ -889,7 +897,9 @@ absent.
 - `config show --server` reports the Postgres store, the S3 object store, and
   the pgvector backend.
 - The server boots and `healthz` returns 200.
-- Semantic search returns the `report` skill.
+- Semantic search returns the `$REPORT` skill (a name of the form
+  `report-<pid>`). Artifacts left in the persistent Postgres store by earlier
+  runs may also appear in the result list.
 - The large resource is stored in S3 and served through a presigned URL when
   loaded. The `load_artifact` response lists `big-template.txt` under
   `large_resources` with a presigned `http://localhost:9000/podium/...` URL and
