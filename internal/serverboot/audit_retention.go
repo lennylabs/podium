@@ -15,7 +15,7 @@ import (
 // per-event-type retention fork defaultRetentionPolicies.
 //
 // reAnchor, when non-nil, is invoked after a pass that drops events so
-// the moved chain head is re-anchored immediately (§8.6, F-8.4.8).
+// the moved chain head is re-anchored immediately (§8.6).
 //
 // The scheduler is best-effort: rewrite failures log a warning;
 // the next tick retries.
@@ -61,7 +61,7 @@ func runRetentionOnce(ctx context.Context, sink *audit.FileSink, policies []audi
 	}
 	if dropped > 0 {
 		log.Printf("audit retention dropped %d event(s)", dropped)
-		// §8.6/F-8.4.8: dropping events rebuilt the hash chain, so any
+		// §8.6: dropping events rebuilt the hash chain, so any
 		// prior anchor of the old head is stale. Re-anchor the new head.
 		if reAnchor != nil {
 			reAnchor()
@@ -89,7 +89,7 @@ var operationalEventTypes = []audit.EventType{
 	audit.EventVisibilityDenied,
 	// admin.visibility_override is a §4.7.2 access-control accountability
 	// event, retained on the same 1-year window as admin.granted and
-	// visibility.denied (F-8.4.3).
+	// visibility.denied.
 	audit.EventAdminVisibilityOverride,
 	audit.EventFreezeBreakGlass,
 	audit.EventReadOnlyEntered,
@@ -99,7 +99,7 @@ var operationalEventTypes = []audit.EventType{
 // retainedIndefinitelyEventTypes are the integrity and GDPR-accountability
 // events deliberately kept past the §8.4 metadata window. The §8.4 table
 // frames its rows as "Defaults, configurable per deployment"; these types
-// carry no default policy, so Enforce never drops them (F-8.4.3):
+// carry no default policy, so Enforce never drops them:
 //
 //   - The §8.6 transparency-anchor markers (audit.anchored / anchor_failed /
 //     gap_detected) and the §8.4/§8.6 audit.retention_enforced boundary

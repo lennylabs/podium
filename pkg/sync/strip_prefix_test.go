@@ -7,7 +7,7 @@ import (
 	"github.com/lennylabs/podium/pkg/adapter"
 )
 
-// spec: §7.5.3 / §14.11 (F-14.11.2) — when --target already names the harness
+// spec: §7.5.3 / §14.11 — when --target already names the harness
 // config directory (e.g. ./build/.claude/), the adapter's config-dir prefix is
 // stripped from each emitted path so the on-disk tree is not doubled
 // (.claude/.claude/…) and the lock records the spec's relative materialized_path

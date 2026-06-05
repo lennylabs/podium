@@ -17,7 +17,7 @@ type syncManifestBody struct {
 	Artifacts []core.EffectiveArtifact `json:"artifacts"`
 }
 
-// Spec: §2.2, §7.5 (F-2.2.2) — GET /v1/sync/manifest returns the caller's
+// Spec: §2.2, §7.5 — GET /v1/sync/manifest returns the caller's
 // effective view as a flat artifact list, visibility-filtered server-side,
 // so podium sync server-source can enumerate every artifact in one request.
 func TestSyncManifest_ListsEffectiveView(t *testing.T) {

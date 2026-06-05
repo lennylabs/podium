@@ -10,7 +10,7 @@ package e2e
 // flags, registry-backed lint). Where the documented behavior is simply
 // absent the test asserts the actual observable behavior and names the
 // divergence in a comment; where a feature is unimplemented per a
-// BUILD-GAPS finding the test is skipped with that finding id so the
+// implementation-gap finding the test is skipped with that finding id so the
 // suite stays green and the acceptance criterion is recorded.
 
 import (
@@ -194,7 +194,7 @@ func cliSeedAudit(t testing.TB, path, caller string) {
 	}
 }
 
-// ===== Top-level flags & subcommand help (T-D-cli-1..9) =================
+// ===== Top-level flags & subcommand help =================
 
 // spec: doc "Top-level flags" — podium --help lists the subcommands.
 func TestCLI_HelpListsCommands(t *testing.T) {
@@ -289,7 +289,7 @@ func TestCLI_GroupWithoutSubcommandExits2(t *testing.T) {
 	}
 }
 
-// ===== Setup and config — podium init (T-D-cli-10..20) ==================
+// ===== Setup and config — podium init ==================
 
 // spec: doc "Setup and config — podium init".
 func TestCLI_InitWritesSyncYAML(t *testing.T) {
@@ -336,7 +336,7 @@ func TestCLI_InitHarness(t *testing.T) {
 // spec: doc "podium init", `--harness` roster. The CLI does not validate
 // the harness name (an unknown name is written verbatim), so every
 // documented name is accepted; the doc's implied rejection of unknown
-// names is not enforced (see T-D-cli-15).
+// names is not enforced.
 func TestCLI_InitHarnessRoster(t *testing.T) {
 	names := []string{"none", "claude-code", "claude-desktop", "claude-cowork", "cursor", "codex", "gemini", "opencode", "pi", "hermes"}
 	for _, name := range names {
@@ -410,7 +410,7 @@ func TestCLI_InitTarget(t *testing.T) {
 	cliContains(t, readFile(t, filepath.Join(ws, ".podium/sync.yaml")), "/tmp/materialized", "target")
 }
 
-// spec: §7.7 workspace-mode step 1 (F-7.7.11) — init walks up from CWD to
+// spec: §7.7 workspace-mode step 1 — init walks up from CWD to
 // reuse an existing `.podium/` workspace; running it from a subdirectory
 // does not create a second workspace.
 func TestCLI_InitWalksUpToWorkspace(t *testing.T) {
@@ -428,7 +428,7 @@ func TestCLI_InitWalksUpToWorkspace(t *testing.T) {
 	mustExist(t, filepath.Join(ws, ".podium/sync.local.yaml"))
 }
 
-// spec: §7.7 workspace-mode step 4 (F-7.7.13) — init prints next-step hints
+// spec: §7.7 workspace-mode step 4 — init prints next-step hints
 // to commit the file and run `podium sync`.
 func TestCLI_InitNextStepHints(t *testing.T) {
 	ws := t.TempDir()
@@ -438,12 +438,12 @@ func TestCLI_InitNextStepHints(t *testing.T) {
 	cliContains(t, res.Stdout, "podium sync", "sync hint")
 }
 
-// ===== Setup and config — config / login (T-D-cli-21..25) ==============
+// ===== Setup and config — config / login ==============
 
 // spec: doc "Setup and config — podium config show". `config show`
 // prints the resolved *server* configuration with a per-key provenance
 // column; it does not surface the client PODIUM_REGISTRY value (a
-// doc-accuracy gap noted in BUILD-GAPS §7.7). This test asserts the
+// a §7.7 doc-accuracy gap). This test asserts the
 // provenance feature via PODIUM_BIND.
 func TestCLI_ConfigShowProvenance(t *testing.T) {
 	res := runPodium(t, "", []string{"HOME=" + t.TempDir(), "PODIUM_BIND=127.0.0.1:9999"}, "config", "show", "--server")
@@ -453,7 +453,7 @@ func TestCLI_ConfigShowProvenance(t *testing.T) {
 	cliContains(t, res.Stdout, "PODIUM_BIND", "provenance marker for env value")
 }
 
-// spec: §7.7 (F-7.7.2) — `config show --explain <key>` prints one key's
+// spec: §7.7 — `config show --explain <key>` prints one key's
 // full resolution chain across the sync.yaml scopes and which won.
 func TestCLI_ConfigShowExplain(t *testing.T) {
 	ws := t.TempDir()
@@ -465,7 +465,7 @@ func TestCLI_ConfigShowExplain(t *testing.T) {
 	cliContains(t, res.Stdout, "resolved", "explain prints the resolution chain")
 }
 
-// spec: §7.7 (F-7.7.5) — `--no-browser` is accepted and the flow runs
+// spec: §7.7 — `--no-browser` is accepted and the flow runs
 // without opening a browser. An unreachable issuer makes device
 // authorization fail (exit 1), proving the flag parsed and the flow ran.
 func TestCLI_LoginNoBrowser(t *testing.T) {
@@ -474,21 +474,21 @@ func TestCLI_LoginNoBrowser(t *testing.T) {
 	cliWantExit(t, res, 1, "login --no-browser")
 }
 
-// spec: §7.7 (F-7.7.5) — login is a no-op for a filesystem registry.
+// spec: §7.7 — login is a no-op for a filesystem registry.
 func TestCLI_LoginFilesystemNoOp(t *testing.T) {
 	res := runPodium(t, "", []string{"HOME=" + t.TempDir()}, "login", "--registry", t.TempDir())
 	cliWantExit(t, res, 0, "login filesystem no-op")
 	cliContains(t, res.Stderr, "no authentication", "filesystem no-op notice")
 }
 
-// spec: §7.7 (F-7.7.5) — login is a no-op for the standalone server.
+// spec: §7.7 — login is a no-op for the standalone server.
 func TestCLI_LoginStandaloneNoOp(t *testing.T) {
 	res := runPodium(t, "", []string{"HOME=" + t.TempDir()}, "login", "--registry", "http://127.0.0.1:8080")
 	cliWantExit(t, res, 0, "login standalone no-op")
 	cliContains(t, res.Stderr, "no authentication", "standalone no-op notice")
 }
 
-// ===== Server — podium serve / status (T-D-cli-26..35) =================
+// ===== Server — podium serve / status =================
 
 // spec: doc "Server — podium serve", `--standalone` flag.
 func TestCLI_ServeStandaloneHealthz(t *testing.T) {
@@ -505,7 +505,7 @@ func TestCLI_ServeStandaloneHealthz(t *testing.T) {
 
 // spec: doc "Server — podium serve", zero-flag auto-standalone. §13.10: serve
 // with no config auto-enters standalone mode and answers /healthz. A named-but-
-// missing --config is a separate hard error (F-13.10.2) and is not used here.
+// missing --config is a separate hard error and is not used here.
 func TestCLI_ZeroFlagAutoStandalone(t *testing.T) {
 	srv := startServerArgs(t, []string{"HOME=" + t.TempDir()}, "serve")
 	if getStatus(t, srv.BaseURL+"/healthz") != 200 {
@@ -585,7 +585,7 @@ func TestCLI_PublicModeBypassesAuth(t *testing.T) {
 	}
 }
 
-// spec: §13.10 (F-13.10.1) — public mode is "loud at every checkpoint",
+// spec: §13.10 — public mode is "loud at every checkpoint",
 // including the MCP `health` tool. Driving the real podium-mcp binary's
 // health tool against a real public-mode server must report mode public, so
 // downstream tooling can detect the unauthenticated deployment.
@@ -617,7 +617,7 @@ func TestCLI_PublicModeExcludesIdP(t *testing.T) {
 
 // spec: §13.10 / §13.2.2 — public mode refuses a non-loopback bind unless
 // --allow-public-bind is passed, failing fast at startup with
-// config.public_bind_refused and naming the address. F-13.2.1.
+// config.public_bind_refused and naming the address.
 func TestServe_PublicModeNonLoopbackRefused(t *testing.T) {
 	port := freePort(t)
 	bind := fmt.Sprintf("0.0.0.0:%d", port)
@@ -632,7 +632,7 @@ func TestServe_PublicModeNonLoopbackRefused(t *testing.T) {
 }
 
 // spec: §13.10 — --allow-public-bind composes with public mode without a
-// startup refusal; the server boots and serves. F-13.2.1.
+// startup refusal; the server boots and serves.
 func TestServe_PublicModeAllowPublicBind(t *testing.T) {
 	srv := startServerArgs(t,
 		[]string{"HOME=" + t.TempDir()},
@@ -659,11 +659,11 @@ func TestCLI_StatusUnreachable(t *testing.T) {
 	cliContains(t, res.Stdout, "UNREACHABLE", "unreachable marker")
 }
 
-// ===== Authoring & validation — podium lint (T-D-cli-36..40) ===========
+// ===== Authoring & validation — podium lint ===========
 
 // spec: doc "Authoring and validation — podium lint". The binary lints a
 // filesystem-source registry via `--registry`; the documented positional
-// `<path>` form is not accepted (BUILD-GAPS doc-accuracy: lint is
+// `<path>` form is not accepted (a doc-accuracy gap: lint is
 // registry-rooted). This test uses the registry form for a valid tree.
 func TestCLI_LintValid(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
@@ -697,7 +697,7 @@ func TestCLI_LintTreeRecurses(t *testing.T) {
 	cliWantExit(t, res, 0, "lint tree")
 }
 
-// spec: §4.5.5 (F-4.5.3) — "Body length is recommended <= 2000 tokens; lint
+// spec: §4.5.5 — "Body length is recommended <= 2000 tokens; lint
 // warns above." `podium lint` over a registry whose DOMAIN.md prose body
 // exceeds the recommendation emits a warning naming the lint.domain_body_size
 // rule, and exits 0 because the diagnostic is advisory.
@@ -714,7 +714,7 @@ func TestCLI_LintDomainBodyOverCapWarns(t *testing.T) {
 	cliContains(t, res.Stdout, "[warning]", "body-size diagnostic is a warning")
 }
 
-// spec: §4.5.5 (F-4.5.3) — a DOMAIN.md body within the recommendation draws
+// spec: §4.5.5 — a DOMAIN.md body within the recommendation draws
 // no body-size warning.
 func TestCLI_LintDomainBodyWithinCapClean(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
@@ -750,7 +750,7 @@ func TestCLI_LintSingleSkillFileGap(t *testing.T) {
 	cliContains(t, res.Stderr, "--registry is required", "lint registry-rooted gap")
 }
 
-// ===== Sync and materialization — podium sync (T-D-cli-41..58) =========
+// ===== Sync and materialization — podium sync =========
 
 // spec: doc "Sync and materialization — podium sync".
 func TestCLI_SyncMaterializes(t *testing.T) {
@@ -792,7 +792,7 @@ func TestCLI_SyncJSON(t *testing.T) {
 }
 
 // spec: §7.5.1 — `podium sync --include` narrows the materialized set to
-// canonical IDs matching the glob (F-7.5.1).
+// canonical IDs matching the glob.
 func TestCLI_SyncInclude(t *testing.T) {
 	reg := cliReg(t)
 	tgt := t.TempDir()
@@ -808,7 +808,7 @@ func TestCLI_SyncInclude(t *testing.T) {
 }
 
 // spec: §7.5.1 — `podium sync --exclude` drops matching IDs after the include
-// set (F-7.5.1).
+// set.
 func TestCLI_SyncExclude(t *testing.T) {
 	reg := cliReg(t)
 	tgt := t.TempDir()
@@ -824,7 +824,7 @@ func TestCLI_SyncExclude(t *testing.T) {
 	}
 }
 
-// spec: §7.5.1 — `podium sync --type` restricts to the listed types (F-7.5.1).
+// spec: §7.5.1 — `podium sync --type` restricts to the listed types.
 func TestCLI_SyncType(t *testing.T) {
 	reg := cliReg(t)
 	tgt := t.TempDir()
@@ -958,9 +958,9 @@ func TestCLI_SaveAsDryRun(t *testing.T) {
 	}
 }
 
-// ===== podium profile edit (T-D-cli-59..62) ============================
+// ===== podium profile edit ============================
 // The binary uses a `--profile` flag rather than the documented
-// positional name, and does not preserve comments (F-7.5.11). These
+// positional name, and does not preserve comments. These
 // tests exercise the working flag form and assert the pattern edits.
 
 func cliProfileWS(t testing.TB) string {
@@ -1007,7 +1007,7 @@ func TestCLI_ProfileEditDryRun(t *testing.T) {
 	cliNotContains(t, readFile(t, filepath.Join(ws, ".podium/sync.yaml")), "personal/*", "dry-run not persisted")
 }
 
-// ===== Read CLI — podium search (T-D-cli-63..68) =======================
+// ===== Read CLI — podium search =======================
 
 // spec: doc "Read CLI — podium search".
 func TestCLI_Search(t *testing.T) {
@@ -1077,7 +1077,7 @@ func TestCLI_SearchJSON(t *testing.T) {
 // against the server source, picking the registry up from PODIUM_REGISTRY like
 // Client.from_env()), and the on-disk set is exactly the curated ids. The
 // harness adapter is orthogonal to scoping; `none` is used so the canonical
-// layout makes the per-id assertion deterministic. (F-9.4.1, F-9.4.2, F-9.4.3)
+// layout makes the per-id assertion deterministic.
 func TestCLI_JSONPipeline(t *testing.T) {
 	srv := startServer(t, cliReg(t))
 	env := brEnv(srv.BaseURL)
@@ -1135,7 +1135,7 @@ func TestCLI_JSONPipeline(t *testing.T) {
 	}
 }
 
-// ===== Read CLI — domain (T-D-cli-69..73) ==============================
+// ===== Read CLI — domain ==============================
 
 // spec: doc "Read CLI — podium domain show" (root).
 func TestCLI_DomainShowRoot(t *testing.T) {
@@ -1167,7 +1167,7 @@ func TestCLI_DomainShowJSON(t *testing.T) {
 // spec: doc "Read CLI — podium domain search".
 func TestCLI_DomainSearch(t *testing.T) {
 	// search_domains ranks DOMAIN.md projections; a domain without a DOMAIN.md
-	// is excluded (§3.2, F-3.2.1), so stage one for the finance domain.
+	// is excluded (§3.2), so stage one for the finance domain.
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/DOMAIN.md":           "---\ndescription: \"Finance operations and vendor payments\"\ndiscovery:\n  keywords:\n    - finance\n---\n",
 		"finance/invoice/ARTIFACT.md": contextArtifact("Invoice variance for finance teams."),
@@ -1179,7 +1179,7 @@ func TestCLI_DomainSearch(t *testing.T) {
 
 // spec: §7.6.1 — `podium domain search --json` keys the ranked domains under
 // "results" (matching the artifact-search envelope), not the wire "domains"
-// key (F-7.6.1).
+// key.
 func TestCLI_DomainSearchJSON(t *testing.T) {
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/DOMAIN.md":           "---\ndescription: \"Finance operations and vendor payments\"\ndiscovery:\n  keywords:\n    - finance\n---\n",
@@ -1210,7 +1210,7 @@ func TestCLI_DomainAnalyze(t *testing.T) {
 	}
 }
 
-// ===== Read CLI — artifact show (T-D-cli-74..78) =======================
+// ===== Read CLI — artifact show =======================
 
 // spec: doc "Read CLI — podium artifact show".
 func TestCLI_ArtifactShow(t *testing.T) {
@@ -1219,8 +1219,7 @@ func TestCLI_ArtifactShow(t *testing.T) {
 	cliWantExit(t, res, 0, "artifact show --json")
 	m := cliJSON(t, res.Stdout)
 	// spec: §7.6.1 — the --json envelope keys the manifest text "body" (the
-	// wire calls it "manifest_body") and delivers frontmatter as an object
-	// (F-7.6.2).
+	// wire calls it "manifest_body") and delivers frontmatter as an object.
 	if body, _ := m["body"].(string); strings.TrimSpace(body) == "" {
 		t.Fatalf("artifact show missing body: %v", m)
 	}
@@ -1264,7 +1263,7 @@ func TestCLI_ArtifactShowJSON(t *testing.T) {
 	cliWantExit(t, res, 0, "artifact show --json")
 	m := cliJSON(t, res.Stdout)
 	// spec: §7.6.1 — the documented schema is {id, version, content_hash,
-	// frontmatter, body} (F-7.6.2).
+	// frontmatter, body}.
 	for _, k := range []string{"id", "version", "content_hash", "frontmatter", "body"} {
 		if _, ok := m[k]; !ok {
 			t.Fatalf("artifact show JSON missing %q: %v", k, m)
@@ -1284,7 +1283,7 @@ func TestCLI_ArtifactShowNoSideEffects(t *testing.T) {
 	}
 }
 
-// ===== Read CLI — artifact scaffold (T-D-cli-79..92) ===================
+// ===== Read CLI — artifact scaffold ===================
 
 // spec: doc "Read CLI — podium artifact scaffold", skill row.
 func TestCLI_ScaffoldSkill(t *testing.T) {
@@ -1421,7 +1420,7 @@ func TestCLI_ScaffoldInteractive(t *testing.T) {
 	cliContains(t, readFile(t, filepath.Join(dst, "SKILL.md")), "Greet the user.", "stdin description")
 }
 
-// ===== Layer management (T-D-cli-93..101) ==============================
+// ===== Layer management ==============================
 
 // spec: doc "Layer management — podium layer register" (local source).
 func TestCLI_LayerRegisterLocal(t *testing.T) {
@@ -1549,12 +1548,12 @@ func TestCLI_LayerWatchInterval(t *testing.T) {
 	}
 }
 
-// ===== Admin (T-D-cli-102..112) ========================================
+// ===== Admin ========================================
 
 // spec: doc "Admin — podium admin grant / revoke". The documented
 // `podium admin grant <user-id>` succeeds for a bootstrap admin and is
 // refused with HTTP 403 for a verified non-admin. The authenticated
-// harness (G-INFRA-5) supplies the admin identity the standalone server
+// harness supplies the admin identity the standalone server
 // alone cannot.
 func TestCLI_AdminGrant(t *testing.T) {
 	t.Parallel()
@@ -1719,7 +1718,7 @@ func TestCLI_AdminErase(t *testing.T) {
 	cliContains(t, body, "user.erased", "erasure audit event")
 }
 
-// spec: §8.5 (F-8.5.1/F-8.5.2) — erase removes the caller's attached email and
+// spec: §8.5 — erase removes the caller's attached email and
 // group membership, not just the sub-claim, and passing the email (the value a
 // GDPR request supplies) erases the attached sub-claim too.
 func TestCLI_AdminEraseRemovesEmailAndGroups(t *testing.T) {
@@ -1763,7 +1762,7 @@ func TestCLI_AdminEraseAudited(t *testing.T) {
 	cliContains(t, readFile(t, logPath), "user.erased", "user.erased event appended")
 }
 
-// ===== Signing (T-D-cli-113..115) ======================================
+// ===== Signing ======================================
 // `podium sign <artifact>` / `podium verify <artifact>` resolve the
 // artifact's canonical content hash (and stored signature) via the
 // registry; the lower-level `--content-hash` / `--signature` form
@@ -1780,7 +1779,7 @@ func TestCLI_Sign(t *testing.T) {
 }
 
 // spec: §4.7.9 — `podium sign <artifact>` resolves the artifact's
-// content hash from the registry and signs it (F-4.7.9). The documented
+// content hash from the registry and signs it. The documented
 // positional form must not be a usage error.
 func TestCLI_SignPositionalArtifact(t *testing.T) {
 	srv := startServer(t, cliReg(t))
@@ -1816,7 +1815,7 @@ func TestCLI_VerifyTampered(t *testing.T) {
 	cliWantNonZero(t, res, "verify tampered")
 }
 
-// ===== Cache and quota (T-D-cli-116..118) ==============================
+// ===== Cache and quota ==============================
 
 // spec: doc "Cache and quota — podium cache prune".
 func TestCLI_CachePrune(t *testing.T) {
@@ -1862,7 +1861,7 @@ func TestCLI_Quota(t *testing.T) {
 	}
 }
 
-// ===== Environment variables (T-D-cli-119..126) ========================
+// ===== Environment variables ========================
 
 // spec: doc "Environment variables", PODIUM_REGISTRY default source.
 func TestCLI_RegistryEnvDefault(t *testing.T) {
@@ -1932,7 +1931,7 @@ func TestCLI_NoAutoStandalone(t *testing.T) {
 	cliContains(t, res.Stderr, "requires explicit setup", "no-autostandalone refusal message")
 }
 
-// ===== Authorization & misc (T-D-cli-127..140) =========================
+// ===== Authorization & misc =========================
 
 // spec: doc "Admin", "Admin commands require the admin role on the tenant".
 func TestCLI_AdminGrantWithoutRights(t *testing.T) {
@@ -1976,9 +1975,9 @@ func TestCLI_SyncWatch(t *testing.T) {
 // user-global ~/.podium/sync.yaml by `podium init --global` (§14.5 step 4),
 // the workspace .podium/sync.yaml carries only a profile with include/exclude
 // scope (§14.1 step 4), and a bare `podium sync --profile finance` from the
-// workspace resolves the global registry (F-14.2.2 / F-14.5.2), parses the
-// --profile flag (F-14.1.1 / F-14.2.1 / F-14.11.2), and materializes only the
-// scoped subset (F-14.1.2).
+// workspace resolves the global registry, parses the
+// --profile flag, and materializes only the
+// scoped subset.
 func TestCLI_SyncProfile(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		// Included by finance/**.
@@ -2032,7 +2031,7 @@ func TestCLI_SyncProfile(t *testing.T) {
 }
 
 // spec: doc "podium sync", `--profile <name>` with an undefined profile name
-// is an error (§7.5.2 profile lookup). Corner case for F-14.1.1.
+// is an error (§7.5.2 profile lookup). Corner case for
 func TestCLI_SyncProfileUndefined(t *testing.T) {
 	reg := cliReg(t)
 	ws := t.TempDir()
@@ -2042,7 +2041,7 @@ func TestCLI_SyncProfileUndefined(t *testing.T) {
 }
 
 // spec: doc "Environment variables", PODIUM_REGISTRY honored by `podium sync`
-// (§7.5.2 precedence; §14.11 step 2). Corner case for F-14.11.3: a bare sync
+// (§7.5.2 precedence; §14.11 step 2). Corner case: a bare sync
 // with no --registry flag and no sync.yaml picks the registry up from the env.
 func TestCLI_SyncRegistryFromEnv(t *testing.T) {
 	reg := cliReg(t)

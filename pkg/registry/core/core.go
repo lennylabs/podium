@@ -211,7 +211,7 @@ func (r *Registry) WithUsageSignals(u UsageSignals) *Registry {
 // WithVectorSearch attaches the §4.7 hybrid-retrieval pieces.
 // SearchArtifacts RRF-fuses BM25 ranks with vector cosine ranks when the
 // vector path is active. The embedder may be nil when the vector backend
-// self-embeds (§13.12 F-13.12.6): the registry then sends raw text through
+// self-embeds (§13.12): the registry then sends raw text through
 // the backend's TextVectorizer methods. A nil vector store, or a nil
 // embedder against a backend that does not self-embed, disables the vector
 // path; search continues BM25-only and reports Degraded=true.
@@ -229,7 +229,7 @@ func (r *Registry) vectorSearchActive() bool {
 }
 
 // queryVector returns the top-K nearest matches for the query string. With a
-// self-embedding backend (§13.12 F-13.12.6) it sends the raw text via
+// self-embedding backend (§13.12) it sends the raw text via
 // QueryText; otherwise it embeds the query locally and queries by vector.
 func (r *Registry) queryVector(ctx context.Context, query string, topK int) ([]vector.Match, error) {
 	if r.embedder == nil && vector.SelfEmbeds(r.vector) {
@@ -251,7 +251,7 @@ func (r *Registry) queryVector(ctx context.Context, query string, topK int) ([]v
 // upsertVector persists the embedding for one (tenant, id, version) row from
 // its composed text. With a self-embedding backend it sends the text via
 // PutText; otherwise it embeds locally and upserts the vector. An empty text
-// is a no-op. spec: §4.7 / §13.12 (F-13.12.6).
+// is a no-op. spec: §4.7 / §13.12.
 func (r *Registry) upsertVector(ctx context.Context, tenantID, artifactID, version, text string) error {
 	if text == "" {
 		return nil
@@ -350,7 +350,7 @@ func (r *Registry) effectiveLayerComposition(ctx context.Context, id layer.Ident
 // registered layers — user-defined layers (§7.3.1) and admin-defined layers
 // added through the API after boot — are persisted as store.LayerConfig rows,
 // so resolving the list per request is what brings them into the effective
-// view; a static slice fixed at construction never sees them (F-4.6.1). The
+// view; a static slice fixed at construction never sees them. The
 // boot-time slice is the fallback when the store carries no layer configs (the
 // standalone filesystem path does not persist them and bypasses visibility in
 // public mode anyway).
@@ -595,7 +595,7 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 	resolveImports := func(include, exclude []string) []string {
 		return r.resolveImports(include, exclude, allIDs)
 	}
-	// §4.5.5 / F-4.5.13: domains that carry curated content (a DOMAIN.md
+	// §4.5.5: domains that carry curated content (a DOMAIN.md
 	// description/body/keywords or resolved include: members) are not bare
 	// pass-throughs and must not be collapsed away. Precomputed once and
 	// shared by the fold/collapse logic at every level.
@@ -635,7 +635,7 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 	// (§4.5.5 folding mechanics) and render the rest as the subdomain
 	// tree, dropping any unlisted subtree.
 	// foldedSubdomains counts how many sparse subdomains fold_below_artifacts
-	// collapses here, for the §4.5.5 / §8 domain.loaded fold summary (F-4.5.1).
+	// collapses here, for the §4.5.5 / §8 domain.loaded fold summary.
 	foldedSubdomains := 0
 	groups := groupByImmediateChild(under, path)
 	childNames := make([]string, 0, len(groups))
@@ -649,7 +649,7 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 			continue // §4.5.3 unlisted subtree removed from enumeration
 		}
 		// §4.5.5 visibility-aware count: canonical descendants plus any
-		// members a DOMAIN.md in the subtree pulls in via include: (F-4.5.13).
+		// members a DOMAIN.md in the subtree pulls in via include:.
 		recursiveCount := subtreeMemberCount(groups[name], childPath, merged, resolveImports)
 		if knobs.foldBelow > 0 && recursiveCount < knobs.foldBelow {
 			foldedSubdomains++
@@ -684,7 +684,7 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 		return res.Subdomains[i].Path < res.Subdomains[j].Path
 	})
 
-	// §4.5.5 / §8 (F-4.5.1): whether pass-through chain collapse fired, read
+	// §4.5.5 / §8: whether pass-through chain collapse fired, read
 	// off the rendered tree before the budget pass trims it. A rendered
 	// subdomain sitting more than one path segment below its parent is the
 	// signature of a collapsed single-child chain.
@@ -763,7 +763,7 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 	// caller-override capping), whether the requested depth was capped at the
 	// ceiling, the count of sparse subdomains folded into the leaf set, and
 	// whether pass-through chain collapse fired. The deferred emitter reads
-	// ev.Context, so set it before the success return (F-4.5.1).
+	// ev.Context, so set it before the success return.
 	ev.Context = map[string]string{
 		"depth":                 strconv.Itoa(renderDepth),
 		"depth_capped":          strconv.FormatBool(depthCapped),
@@ -776,7 +776,7 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 // passthroughFired reports whether any rendered subdomain sits more than one
 // path segment below its parent, the signature of a §4.5.5 pass-through chain
 // collapse. It walks the rendered tree so a collapse at any depth is detected.
-// Used for the domain.loaded audit fold summary (F-4.5.1).
+// Used for the domain.loaded audit fold summary.
 func passthroughFired(parent string, subs []DomainDescriptor) bool {
 	for _, s := range subs {
 		if segmentCount(s.Path)-segmentCount(parent) > 1 {
@@ -855,7 +855,7 @@ func directArtifactsOf(under []store.ManifestRecord, prefix string) []store.Mani
 // direct artifacts and no curated DOMAIN.md at the current level,
 // returning the deepest non-passthrough path. A level stops the collapse
 // when it has direct artifacts, is curated (a DOMAIN.md description,
-// body, keywords, or resolved include: members — F-4.5.13), or has more
+// body, keywords, or resolved include: members), or has more
 // than one immediate child. Used by §4.5.5 fold_passthrough_chains.
 func collapsePassthroughChain(under []store.ManifestRecord, path string, curated map[string]bool) string {
 	for {
@@ -878,7 +878,7 @@ func collapsePassthroughChain(under []store.ManifestRecord, path string, curated
 }
 
 // curatedDomainPaths returns the set of domain paths that must not be
-// collapsed away as bare pass-throughs (§4.5.5 / F-4.5.13). A path is
+// collapsed away as bare pass-throughs (§4.5.5). A path is
 // curated when its merged DOMAIN.md carries a description, a prose body,
 // or keywords, or when its include: (after exclude:) resolves at least
 // one imported member. Collapsing past such a domain would drop its
@@ -909,7 +909,7 @@ func curatedDomainPaths(merged map[string]*manifest.Domain, resolveImports func(
 // unioned with every artifact pulled in by a DOMAIN.md include: (after
 // exclude:) anywhere in the subtree. Imported members count toward the
 // fold_below_artifacts decision so a domain whose members arrive only
-// through include: is not treated as sparse (F-4.5.13).
+// through include: is not treated as sparse.
 func subtreeMemberCount(records []store.ManifestRecord, subtreePath string, merged map[string]*manifest.Domain, resolveImports func(include, exclude []string) []string) int {
 	seen := map[string]bool{}
 	for _, m := range records {
@@ -1185,7 +1185,7 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 	// Vector: when configured + non-empty query, compute query
 	// embedding, fetch top-K nearest by cosine, and RRF-fuse with the
 	// BM25 ranks. Failures degrade to BM25-only without erroring. The
-	// embedder may be nil when the backend self-embeds (§13.12 F-13.12.6).
+	// embedder may be nil when the backend self-embeds (§13.12).
 	degraded := !r.vectorSearchActive()
 	if !degraded && opts.Query != "" {
 		vecRanks, vecErr := r.vectorRanks(ctx, opts.Query, filtered, opts.TopK)
@@ -1333,7 +1333,7 @@ func idSet(ids []string) map[string]bool {
 // from the candidate set with score 0. Without this, the embeddings
 // half of hybrid retrieval could only reorder lexical hits and never
 // surface a new candidate, defeating the point of fusing vectors in
-// (§3.2 Layer 2 / F-3.2.3). candidates maps each visible artifact ID to
+// (§3.2 Layer 2). candidates maps each visible artifact ID to
 // its latest record.
 func reorderScored(scored []scoredRecord, candidates map[string]store.ManifestRecord, fused []string) []scoredRecord {
 	byID := map[string]scoredRecord{}
@@ -1936,7 +1936,7 @@ func (r *Registry) visibleManifests(ctx context.Context, id layer.Identity) ([]s
 	// but a presented scope still narrows the read surface.
 	scopes := layer.ParseScopes(id.Scopes)
 	// spec: §4.6 — resolve the caller's layer list (admin + runtime-registered)
-	// per request rather than from a static boot-time slice (F-4.6.1).
+	// per request rather than from a static boot-time slice.
 	resolved := r.resolveLayers(ctx)
 	if id.IsPublic || len(resolved) == 0 {
 		return applyReadScope(all, scopes), nil

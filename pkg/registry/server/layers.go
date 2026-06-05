@@ -62,7 +62,7 @@ type LayerEndpoint struct {
 	// auditSink records §8.1 layer.config_changed (admin-defined) and
 	// layer.user_registered (personal) events on register, unregister, and
 	// reorder. It is the §8.3 registry sink (a file sink or an EndpointSink
-	// when redirected to a SIEM, F-8.3.1). Nil is a no-op.
+	// when redirected to a SIEM). Nil is a no-op.
 	auditSink audit.Sink
 	// auditFile is the file-backed form of the §8.3 registry sink, set only
 	// when the sink writes a local log. The §8.5 erasure pass rewrites the
@@ -194,7 +194,7 @@ func (e *LayerEndpoint) WithMaxUserLayers(n int) *LayerEndpoint {
 
 // WithAudit installs the §8.3 audit sink the endpoint records layer
 // lifecycle events to (§8.1 layer.config_changed / layer.user_registered).
-// The sink may be a file sink or an EndpointSink (SIEM redirect, F-8.3.1).
+// The sink may be a file sink or an EndpointSink (SIEM redirect).
 func (e *LayerEndpoint) WithAudit(sink audit.Sink) *LayerEndpoint {
 	e.auditSink = sink
 	return e
@@ -204,7 +204,7 @@ func (e *LayerEndpoint) WithAudit(sink audit.Sink) *LayerEndpoint {
 // rewrites in place. Pass the same file sink given to WithAudit when the
 // registry writes a local log; pass nil when redirected to an external
 // endpoint, in which case the erase endpoint purges layers but performs no
-// local-log redaction (the aggregator owns the shipped stream). F-8.3.1.
+// local-log redaction (the aggregator owns the shipped stream).
 func (e *LayerEndpoint) WithEraseSink(file *audit.FileSink) *LayerEndpoint {
 	e.auditFile = file
 	return e
@@ -364,13 +364,13 @@ func (e *LayerEndpoint) erase(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "user_id is required")
 		return
 	}
-	// spec §8.5 (F-8.5.5): the tombstone is redacted-<sha256(user_id+salt)>;
+	// spec §8.5: the tombstone is redacted-<sha256(user_id+salt)>;
 	// an empty salt makes it guessable, so reject it.
 	if body.Salt == "" {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "salt is required")
 		return
 	}
-	// spec §8.5 (F-8.5.1): unregister and soft-delete every user-defined
+	// spec §8.5: unregister and soft-delete every user-defined
 	// layer the user owns. DeleteLayerConfig tombstones the layer and the
 	// artifacts ingested from it (recoverable within the §8.4 30-day window).
 	layers, err := e.store.ListLayerConfigs(r.Context(), e.tenantID)
@@ -390,12 +390,12 @@ func (e *LayerEndpoint) erase(w http.ResponseWriter, r *http.Request) {
 		e.emitLayerEvent(r, l, "erase")
 		purged = append(purged, l.ID)
 	}
-	// spec §8.5 (F-8.5.3): redact the user identity across the registry audit
+	// spec §8.5: redact the user identity across the registry audit
 	// stream and append the registry-sourced user.erased event naming the
-	// invoking admin (F-8.5.4). The registry's §8.3 file sink is the same log
+	// invoking admin. The registry's §8.3 file sink is the same log
 	// the retention and anchor schedulers operate on, so the redaction lands
 	// on the authoritative stream. When the registry is redirected to an
-	// external endpoint (no local file, F-8.3.1) there is no on-disk chain to
+	// external endpoint (no local file) there is no on-disk chain to
 	// rewrite: the layers are still purged and the aggregator owns redaction
 	// of the shipped stream.
 	admin := callerIdentityString(e.identify(r))
@@ -652,7 +652,7 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 				}
 				// spec: SS 6.10 — carry the machine-readable cap and the
 				// caller's current count in `details` so a client can render
-				// the limit without parsing the message (F-6.10.1).
+				// the limit without parsing the message.
 				writeErrorDetails(w, http.StatusTooManyRequests, "quota.layer_count_exceeded",
 					fmt.Sprintf("user-defined layer cap of %d reached for %s", capN, who),
 					map[string]any{"limit": capN, "current": owned})
@@ -980,7 +980,7 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 		arts = append(arts, map[string]string{"id": a.ArtifactID, "version": a.Version})
 	}
 	// spec: §4.6 / §3.3 — surface the non-blocking ingest advisories (e.g. the
-	// cross-layer license change, F-4.6.3) so a publisher reingesting at
+	// cross-layer license change) so a publisher reingesting at
 	// runtime sees the same flags the boot path logs.
 	advisories := make([]map[string]string, 0, len(res.Advisories))
 	for _, a := range res.Advisories {
@@ -996,7 +996,7 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 	// §7.3.1 error codes. Report each same-version content conflict as a
 	// per-artifact object carrying the named code and the conflicting
 	// (artifact_id, version) plus the old/new hashes so the author can tell
-	// which artifact collided and bump its version (F-7.3.2), rather than the
+	// which artifact collided and bump its version, rather than the
 	// opaque count this previously returned.
 	conflicts := make([]map[string]any, 0, len(res.Conflicts))
 	for _, c := range res.Conflicts {

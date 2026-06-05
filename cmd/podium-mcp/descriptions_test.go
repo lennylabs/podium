@@ -31,7 +31,7 @@ func toolsByName(t *testing.T) map[string]map[string]any {
 // spec: §5.1 — the strings under each tool heading "are the canonical tool
 // descriptions exposed to the LLM via MCP"; hosts "SHOULD use them verbatim."
 // The bridge must emit the full multi-sentence canonical string, not a
-// first-sentence truncation. F-5.1.1.
+// first-sentence truncation.
 func TestToolsList_DescriptionsAreCanonicalVerbatim(t *testing.T) {
 	t.Parallel()
 	tools := toolsByName(t)
@@ -68,7 +68,7 @@ func TestToolsList_DescriptionsAreCanonicalVerbatim(t *testing.T) {
 
 // spec: §5.1 / §5 — under MCP protocol 2024-11-05 each tools/list entry
 // carries an inputSchema describing its parameters. Every meta-tool must
-// declare the documented arguments. F-5.1.2.
+// declare the documented arguments.
 func TestToolsList_DeclaresInputSchemaForEveryMetaTool(t *testing.T) {
 	t.Parallel()
 	tools := toolsByName(t)
@@ -140,7 +140,7 @@ func TestToolsList_JSONRoundTripsInputSchema(t *testing.T) {
 
 // spec: §5.1 — the example system-prompt fragment must be obtainable by a
 // host programmatically. The bridge surfaces it through the MCP initialize
-// result's `instructions` field. F-5.1.3.
+// result's `instructions` field.
 func TestInitialize_SurfacesSystemPromptFragment(t *testing.T) {
 	t.Parallel()
 	srv := &mcpServer{cfg: &config{}}

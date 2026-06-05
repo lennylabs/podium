@@ -40,7 +40,7 @@ func lcaReingest(t *testing.T, base, id string) map[string]any {
 	return m
 }
 
-// Spec: §4.6 field-semantics table (F-4.6.3) — license is "Scalar; child wins
+// Spec: §4.6 field-semantics table — license is "Scalar; child wins
 // (lint warning if changed across layers)". A runtime reingest of an extends
 // child whose license differs from the resolved parent's surfaces the warning
 // advisory in the §7.3.1 reingest result so the publisher sees the change.

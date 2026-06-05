@@ -40,7 +40,7 @@ func resourcesFixture(t *testing.T, manifests map[string]map[string]any) *httpte
 
 // spec: §5.0 — resources/list mirrors the effective view, one resource
 // per artifact, and filters out mcp-server artifacts as the bridge's
-// tool results do (F-5.0.1).
+// tool results do.
 func TestResources_ListMirrorsEffectiveView(t *testing.T) {
 	t.Parallel()
 	ts := resourcesFixture(t, map[string]map[string]any{

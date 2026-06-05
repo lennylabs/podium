@@ -124,7 +124,7 @@ func istServer(t *testing.T) (*httptest.Server, *rsa.PrivateKey) {
 
 // Spec: §6.3.1 / §6.3.2 — over SQLite + HTTP, a "podium:read:finance/*" scope
 // narrows the discovery surface to the finance subtree while the runtime
-// token is verified on every call. F-6.3.1, F-6.3.5.
+// token is verified on every call.
 func TestInjectedSessionToken_ReadScopeNarrowsOverHTTP(t *testing.T) {
 	t.Parallel()
 	ts, priv := istServer(t)
@@ -143,7 +143,7 @@ func TestInjectedSessionToken_ReadScopeNarrowsOverHTTP(t *testing.T) {
 }
 
 // Spec: §6.3.1 — a load scope authorizes loading the granted subtree only;
-// an out-of-scope load is denied (404) end-to-end. F-6.3.5.
+// an out-of-scope load is denied (404) end-to-end.
 func TestInjectedSessionToken_LoadScopeOverHTTP(t *testing.T) {
 	t.Parallel()
 	ts, priv := istServer(t)
@@ -158,7 +158,7 @@ func TestInjectedSessionToken_LoadScopeOverHTTP(t *testing.T) {
 
 // Spec: §6.3.2 — aud ("registry endpoint") is a required claim verified on
 // every call. With the registry audience configured, a token that omits aud is
-// rejected end-to-end with auth.untrusted_runtime rather than served. F-6.3.1.
+// rejected end-to-end with auth.untrusted_runtime rather than served.
 func TestInjectedSessionToken_MissingAudRejectedOverHTTP(t *testing.T) {
 	t.Parallel()
 	ts, priv := istServer(t)
@@ -180,7 +180,7 @@ func TestInjectedSessionToken_MissingAudRejectedOverHTTP(t *testing.T) {
 }
 
 // Spec: §6.3.2 / §6.10 — a token from an unregistered runtime is rejected
-// with auth.untrusted_runtime and details.runtime_iss. F-6.3.2.
+// with auth.untrusted_runtime and details.runtime_iss.
 func TestInjectedSessionToken_UntrustedRejectedOverHTTP(t *testing.T) {
 	t.Parallel()
 	ts, priv := istServer(t)

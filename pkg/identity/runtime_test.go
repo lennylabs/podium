@@ -163,7 +163,7 @@ func TestJWTVerifier_RejectsWrongAudience(t *testing.T) {
 
 // Spec: §6.3.2 — aud ("registry endpoint") is a required claim. With the
 // registry audience configured, a token that omits aud is rejected rather than
-// accepted. F-6.3.1.
+// accepted.
 func TestJWTVerifier_RejectsMissingAud(t *testing.T) {
 	t.Parallel()
 	priv, pub := newRSAKeyPair(t)
@@ -188,7 +188,7 @@ func TestJWTVerifier_RejectsMissingAud(t *testing.T) {
 // Spec: §6.3.2 — the audience is the registry's own endpoint; aud cannot be
 // verified without it, so a verifier built with no configured audience fails
 // closed and rejects every token rather than accept one whose audience goes
-// unchecked. F-6.3.1.
+// unchecked.
 func TestJWTVerifier_FailsClosedWhenAudienceUnconfigured(t *testing.T) {
 	t.Parallel()
 	priv, pub := newRSAKeyPair(t)
@@ -282,7 +282,7 @@ func TestJWTVerifier_RejectsMissingExp(t *testing.T) {
 }
 
 // Spec: §6.3.2 — act is "actor (the runtime itself)"; an act that names a
-// different principal than the verified runtime (iss) is rejected. F-6.3.7.
+// different principal than the verified runtime (iss) is rejected.
 func TestJWTVerifier_RejectsActMismatch(t *testing.T) {
 	t.Parallel()
 	priv, pub := newRSAKeyPair(t)
@@ -303,7 +303,7 @@ func TestJWTVerifier_RejectsActMismatch(t *testing.T) {
 }
 
 // Spec: §6.3.2 — the RFC 8693 nested actor form, act: {"sub": <runtime>},
-// is accepted when the actor sub identifies the verified runtime. F-6.3.7.
+// is accepted when the actor sub identifies the verified runtime.
 func TestJWTVerifier_AcceptsActObjectForm(t *testing.T) {
 	t.Parallel()
 	priv, pub := newRSAKeyPair(t)
@@ -337,7 +337,7 @@ func TestJWTVerifier_AcceptsActObjectForm(t *testing.T) {
 
 // Spec: §6.10 — an unregistered issuer surfaces a typed
 // *UntrustedRuntimeError carrying the issuer so the HTTP boundary can
-// populate details.runtime_iss. F-6.3.2.
+// populate details.runtime_iss.
 func TestJWTVerifier_UntrustedErrorCarriesIssuer(t *testing.T) {
 	t.Parallel()
 	priv, _ := newRSAKeyPair(t)
@@ -363,7 +363,7 @@ func TestJWTVerifier_UntrustedErrorCarriesIssuer(t *testing.T) {
 
 // Spec: §6.3.1 — fine-grained OAuth scope claims flow onto the Identity.
 // Both the RFC 6749 space-delimited "scope" string and the array-valued
-// "scp" claim are read. F-6.3.5.
+// "scp" claim are read.
 func TestJWTVerifier_ParsesScopeClaims(t *testing.T) {
 	t.Parallel()
 	priv, pub := newRSAKeyPair(t)

@@ -7,7 +7,7 @@ package e2e
 //
 // Identity model: standalone resolves callers to system:public, which cannot
 // tell an admin from a non-admin. The admin grant/revoke/show-effective happy
-// paths run instead against the authenticated harness (G-INFRA-5): startAuthServer
+// paths run instead against the authenticated harness: startAuthServer
 // boots `serve --standalone` behind the injected-session-token verifier, seeds a
 // bootstrap admin, and mints caller tokens, so the documented CLI commands
 // exercise core.AdminAuthorize end to end and a verified non-admin is refused
@@ -16,11 +16,11 @@ package e2e
 // paths are real tests.
 //
 // Known gaps:
-//   - F-7.3.5: user-defined layer cap of 3 is not enforced (T-D-organization-60).
-//   - T-D-organization-1 live bring-up requires Docker (skipped); the
+//   - user-defined layer cap of 3 is not enforced.
+//   - live bring-up requires Docker (skipped); the
 //     compose file's §13.1.1 structure is asserted in
 //     docs_organization_compose_test.go without Docker.
-//   - T-D-organization-34, -35 need a registered runtime key and signed JWT
+//   - some entries need a registered runtime key and signed JWT
 //     (skipped with honest reason).
 
 import (
@@ -187,7 +187,7 @@ func orgOIDCStub(t *testing.T) *httptest.Server {
 
 // ---- tests ------------------------------------------------------------------
 
-// T-D-organization-1 -- docker-compose stack brings up the full §13.1.1
+// -- docker-compose stack brings up the full §13.1.1
 // evaluation topology. The structural conformance of the compose file (the
 // registry, postgres, minio, dex, and bootstrap services and their wiring)
 // is asserted without Docker in docs_organization_compose_test.go. The live
@@ -196,7 +196,7 @@ func TestStandardDeploy_DockerComposeStack(t *testing.T) {
 	t.Skip("live bring-up requires Docker and a registry image build; structural conformance is covered by TestOrg_1_ComposeStackServices and siblings")
 }
 
-// T-D-organization-2 -- standalone registry serves /healthz and /readyz after `podium serve`.
+// -- standalone registry serves /healthz and /readyz after `podium serve`.
 func TestStandardDeploy_ServeHealthzReadyz(t *testing.T) {
 	t.Parallel()
 	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_PUBLIC_MODE=true"},
@@ -209,10 +209,10 @@ func TestStandardDeploy_ServeHealthzReadyz(t *testing.T) {
 	}
 }
 
-// T-D-organization-3 -- `podium admin grant` happy path. A bootstrap admin
+// -- `podium admin grant` happy path. A bootstrap admin
 // grants the admin role through the documented CLI command and the grant takes
 // effect (the promoted user can run an admin-only command); a verified
-// non-admin is refused with HTTP 403. The authenticated harness (G-INFRA-5)
+// non-admin is refused with HTTP 403. The authenticated harness
 // supplies the admin identity standalone alone cannot.
 func TestStandardDeploy_AdminGrantHappyPath(t *testing.T) {
 	t.Parallel()
@@ -254,7 +254,7 @@ func TestStandardDeploy_AdminGrantHappyPath(t *testing.T) {
 	}
 }
 
-// T-D-organization-4 -- `podium admin grant` fails with exit 2 when --registry is missing.
+// -- `podium admin grant` fails with exit 2 when --registry is missing.
 func TestStandardDeploy_AdminGrantMissingRegistry(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY="}, "admin", "grant", "alice@acme.com")
@@ -266,7 +266,7 @@ func TestStandardDeploy_AdminGrantMissingRegistry(t *testing.T) {
 	}
 }
 
-// T-D-organization-5 -- `podium admin grant` fails with exit 2 when no user-id is given.
+// -- `podium admin grant` fails with exit 2 when no user-id is given.
 func TestStandardDeploy_AdminGrantNoUserID(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY="}, "admin", "grant")
@@ -278,7 +278,7 @@ func TestStandardDeploy_AdminGrantNoUserID(t *testing.T) {
 	}
 }
 
-// T-D-organization-6 -- `podium layer register` registers a git-source layer with organization-wide visibility.
+// -- `podium layer register` registers a git-source layer with organization-wide visibility.
 func TestStandardDeploy_LayerRegisterOrganization(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
@@ -311,7 +311,7 @@ func TestStandardDeploy_LayerRegisterOrganization(t *testing.T) {
 	}
 }
 
-// T-D-organization-7 -- `podium layer register` registers a group-visibility layer.
+// -- `podium layer register` registers a group-visibility layer.
 func TestStandardDeploy_LayerRegisterGroup(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
@@ -345,7 +345,7 @@ func TestStandardDeploy_LayerRegisterGroup(t *testing.T) {
 	}
 }
 
-// T-D-organization-8 -- `podium layer register` registers a group-and-user visibility layer.
+// -- `podium layer register` registers a group-and-user visibility layer.
 func TestStandardDeploy_LayerRegisterGroupAndUser(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
@@ -375,7 +375,7 @@ func TestStandardDeploy_LayerRegisterGroupAndUser(t *testing.T) {
 	}
 }
 
-// T-D-organization-9 -- `podium layer register` registers a public-visibility layer.
+// -- `podium layer register` registers a public-visibility layer.
 func TestStandardDeploy_LayerRegisterPublic(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
@@ -401,7 +401,7 @@ func TestStandardDeploy_LayerRegisterPublic(t *testing.T) {
 	}
 }
 
-// T-D-organization-10 -- `podium layer register` fails when neither --repo nor --local is given.
+// -- `podium layer register` fails when neither --repo nor --local is given.
 func TestStandardDeploy_LayerRegisterNoSource(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY=http://127.0.0.1:19999"},
@@ -414,7 +414,7 @@ func TestStandardDeploy_LayerRegisterNoSource(t *testing.T) {
 	}
 }
 
-// T-D-organization-11 -- `podium layer register` fails when --id is missing.
+// -- `podium layer register` fails when --id is missing.
 func TestStandardDeploy_LayerRegisterNoID(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY=http://127.0.0.1:19999"},
@@ -428,7 +428,7 @@ func TestStandardDeploy_LayerRegisterNoID(t *testing.T) {
 	}
 }
 
-// T-D-organization-12 -- `podium layer list` returns registered layers in order.
+// -- `podium layer list` returns registered layers in order.
 func TestStandardDeploy_LayerListOrder(t *testing.T) {
 	t.Parallel()
 	reg := orgLocalReg(t)
@@ -451,7 +451,7 @@ func TestStandardDeploy_LayerListOrder(t *testing.T) {
 	}
 }
 
-// T-D-organization-13 -- `podium layer reorder` re-sequences the layer list.
+// -- `podium layer reorder` re-sequences the layer list.
 func TestStandardDeploy_LayerReorder(t *testing.T) {
 	t.Parallel()
 	reg := orgLocalReg(t)
@@ -481,7 +481,7 @@ func TestStandardDeploy_LayerReorder(t *testing.T) {
 	}
 }
 
-// T-D-organization-14 -- `podium layer reorder` fails when no IDs are given.
+// -- `podium layer reorder` fails when no IDs are given.
 func TestStandardDeploy_LayerReorderNoIDs(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY=http://127.0.0.1:19999"},
@@ -494,7 +494,7 @@ func TestStandardDeploy_LayerReorderNoIDs(t *testing.T) {
 	}
 }
 
-// T-D-organization-15 -- `podium layer unregister` removes a layer.
+// -- `podium layer unregister` removes a layer.
 func TestStandardDeploy_LayerUnregister(t *testing.T) {
 	t.Parallel()
 	reg := orgLocalReg(t)
@@ -515,7 +515,7 @@ func TestStandardDeploy_LayerUnregister(t *testing.T) {
 	}
 }
 
-// T-D-organization-16 -- `podium layer reingest` triggers a fresh ingest for a local-source layer.
+// -- `podium layer reingest` triggers a fresh ingest for a local-source layer.
 func TestStandardDeploy_LayerReingestLocal(t *testing.T) {
 	t.Parallel()
 	reg := orgLocalReg(t)
@@ -535,7 +535,7 @@ func TestStandardDeploy_LayerReingestLocal(t *testing.T) {
 	orgDecodeBody(t, []byte(res.Stdout), &obj)
 }
 
-// T-D-organization-17 -- `podium layer reingest` fails when the layer does not exist.
+// -- `podium layer reingest` fails when the layer does not exist.
 func TestStandardDeploy_LayerReingestNonexistent(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
@@ -552,7 +552,7 @@ func TestStandardDeploy_LayerReingestNonexistent(t *testing.T) {
 	}
 }
 
-// T-D-organization-18 -- `podium layer update` patches a layer's ref field.
+// -- `podium layer update` patches a layer's ref field.
 func TestStandardDeploy_LayerUpdateRef(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
@@ -584,7 +584,7 @@ func TestStandardDeploy_LayerUpdateRef(t *testing.T) {
 	}
 }
 
-// T-D-organization-19 -- `podium layer update` fails when no mutable field is given.
+// -- `podium layer update` fails when no mutable field is given.
 func TestStandardDeploy_LayerUpdateNoField(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY=http://127.0.0.1:19999"},
@@ -597,7 +597,7 @@ func TestStandardDeploy_LayerUpdateNoField(t *testing.T) {
 	}
 }
 
-// T-D-organization-20 -- `podium admin show-effective` happy path. A bootstrap
+// -- `podium admin show-effective` happy path. A bootstrap
 // admin reads the per-layer visibility for a target through the documented CLI
 // command; a verified non-admin is refused with HTTP 403.
 func TestStandardDeploy_ShowEffectiveHappyPath(t *testing.T) {
@@ -637,7 +637,7 @@ func TestStandardDeploy_ShowEffectiveHappyPath(t *testing.T) {
 	}
 }
 
-// T-D-organization-21 -- `podium admin show-effective --group` happy path. The
+// -- `podium admin show-effective --group` happy path. The
 // repeatable --group flag injects the target's group claims so a group-gated
 // layer resolves: the layer is visible when the documented group is supplied
 // and hidden when it is not. A non-admin is refused with HTTP 403.
@@ -685,7 +685,7 @@ func TestStandardDeploy_ShowEffectiveWithGroups(t *testing.T) {
 	}
 }
 
-// T-D-organization-22 -- `podium admin show-effective` fails when --registry is missing.
+// -- `podium admin show-effective` fails when --registry is missing.
 func TestStandardDeploy_ShowEffectiveMissingRegistry(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY="}, "admin", "show-effective", "alice@acme.com")
@@ -697,7 +697,7 @@ func TestStandardDeploy_ShowEffectiveMissingRegistry(t *testing.T) {
 	}
 }
 
-// T-D-organization-23 -- `podium admin revoke` happy path. A bootstrap admin
+// -- `podium admin revoke` happy path. A bootstrap admin
 // revokes a prior grant through the documented CLI command and the revocation
 // takes effect (the demoted user is refused afterward); a verified non-admin is
 // refused with HTTP 403.
@@ -783,7 +783,7 @@ func orgAssertLayerVisible(t *testing.T, stdout, layerID string, want bool, why 
 	}
 }
 
-// T-D-organization-24 -- `podium admin revoke` fails when --registry is missing.
+// -- `podium admin revoke` fails when --registry is missing.
 func TestStandardDeploy_RevokeMissingRegistry(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY="}, "admin", "revoke", "alice@acme.com")
@@ -795,7 +795,7 @@ func TestStandardDeploy_RevokeMissingRegistry(t *testing.T) {
 	}
 }
 
-// T-D-organization-25 -- `podium admin erase` redacts a user's identity from the audit log.
+// -- `podium admin erase` redacts a user's identity from the audit log.
 func TestStandardDeploy_AdminErase(t *testing.T) {
 	t.Parallel()
 	auditPath := orgWriteAuditLog(t, "alice@acme.com")
@@ -828,7 +828,7 @@ func TestStandardDeploy_AdminErase(t *testing.T) {
 	_ = content
 }
 
-// spec: §8.5 (F-8.5.3) -- the default `podium admin erase` form drives the
+// spec: §8.5 -- the default `podium admin erase` form drives the
 // registry's /v1/admin/erase endpoint, which purges the user's owned layers
 // and redacts the registry audit stream. Exercises the route end-to-end
 // against a live standalone server.
@@ -850,7 +850,7 @@ func TestStandardDeploy_AdminEraseRegistry(t *testing.T) {
 	}
 }
 
-// T-D-organization-26 -- `podium admin erase` fails when no user-id is given.
+// -- `podium admin erase` fails when no user-id is given.
 func TestStandardDeploy_AdminEraseNoUserID(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "admin", "erase")
@@ -862,7 +862,7 @@ func TestStandardDeploy_AdminEraseNoUserID(t *testing.T) {
 	}
 }
 
-// T-D-organization-27 -- `podium admin erase` fails with a non-existent audit-path.
+// -- `podium admin erase` fails with a non-existent audit-path.
 func TestStandardDeploy_AdminEraseBadAuditPath(t *testing.T) {
 	t.Parallel()
 	// NewFileSink creates missing parent directories, so a merely-absent path
@@ -889,7 +889,7 @@ func TestStandardDeploy_AdminEraseBadAuditPath(t *testing.T) {
 	}
 }
 
-// T-D-organization-28 -- `podium lint` validates a layer's manifests as a required CI check.
+// -- `podium lint` validates a layer's manifests as a required CI check.
 func TestStandardDeploy_LintValid(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -905,7 +905,7 @@ func TestStandardDeploy_LintValid(t *testing.T) {
 	}
 }
 
-// T-D-organization-29 -- `podium lint` exits 1 and reports errors for invalid manifests.
+// -- `podium lint` exits 1 and reports errors for invalid manifests.
 func TestStandardDeploy_LintInvalid(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -917,7 +917,7 @@ func TestStandardDeploy_LintInvalid(t *testing.T) {
 	}
 }
 
-// T-D-organization-30 -- `podium login` emits verification URL and user code to stderr.
+// -- `podium login` emits verification URL and user code to stderr.
 func TestStandardDeploy_LoginDeviceCode(t *testing.T) {
 	t.Parallel()
 	stub := orgOIDCStub(t)
@@ -950,7 +950,7 @@ func TestStandardDeploy_LoginDeviceCode(t *testing.T) {
 	}
 }
 
-// T-D-organization-31 -- `podium login` fails with exit 2 when --registry is missing.
+// -- `podium login` fails with exit 2 when --registry is missing.
 func TestStandardDeploy_LoginMissingRegistry(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY="}, "login", "--issuer", "http://example.com/device")
@@ -962,7 +962,7 @@ func TestStandardDeploy_LoginMissingRegistry(t *testing.T) {
 	}
 }
 
-// T-D-organization-32 -- `podium login` fails with exit 2 when --issuer is missing.
+// -- `podium login` fails with exit 2 when --issuer is missing.
 func TestStandardDeploy_LoginMissingIssuer(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_OAUTH_AUTHORIZATION_ENDPOINT=", "PODIUM_REGISTRY="},
@@ -975,7 +975,7 @@ func TestStandardDeploy_LoginMissingIssuer(t *testing.T) {
 	}
 }
 
-// T-D-organization-33 -- MCP server initializes successfully; PODIUM_VERIFY_SIGNATURES defaults to medium-and-above.
+// -- MCP server initializes successfully; PODIUM_VERIFY_SIGNATURES defaults to medium-and-above.
 func TestStandardDeploy_MCPVerifySignaturesDefault(t *testing.T) {
 	t.Parallel()
 	reg := orgLocalReg(t)
@@ -997,9 +997,9 @@ func TestStandardDeploy_MCPVerifySignaturesDefault(t *testing.T) {
 	// should load fine under medium-and-above.
 }
 
-// T-D-organization-34 -- the MCP bridge reads PODIUM_SESSION_TOKEN and the
+// -- the MCP bridge reads PODIUM_SESSION_TOKEN and the
 // registry verifies it end-to-end: a meta-tool call carrying a JWT signed by
-// the registered runtime key returns the artifact. F-6.3.1, F-6.3.3.
+// the registered runtime key returns the artifact.
 func TestStandardDeploy_MCPSessionToken(t *testing.T) {
 	t.Parallel()
 	priv, pem := injKeyPair(t)
@@ -1035,8 +1035,8 @@ func TestStandardDeploy_MCPSessionToken(t *testing.T) {
 	}
 }
 
-// T-D-organization-35 -- the MCP bridge reads PODIUM_SESSION_TOKEN_FILE
-// (preferred over the env var) and the registry verifies it. F-6.3.3.
+// -- the MCP bridge reads PODIUM_SESSION_TOKEN_FILE
+// (preferred over the env var) and the registry verifies it.
 func TestStandardDeploy_MCPSessionTokenFile(t *testing.T) {
 	t.Parallel()
 	priv, pem := injKeyPair(t)
@@ -1063,7 +1063,7 @@ func TestStandardDeploy_MCPSessionTokenFile(t *testing.T) {
 	}
 }
 
-// T-D-organization-36 -- `podium admin migrate-to-standard` with --dry-run reports plan and exits 0.
+// -- `podium admin migrate-to-standard` with --dry-run reports plan and exits 0.
 func TestStandardDeploy_MigrateToStandardDryRun(t *testing.T) {
 	t.Parallel()
 	// Populate a source SQLite by running a standalone server with PODIUM_SQLITE_PATH set,
@@ -1099,7 +1099,7 @@ func TestStandardDeploy_MigrateToStandardDryRun(t *testing.T) {
 	}
 }
 
-// T-D-organization-37 -- `podium admin migrate-to-standard` requires --source-sqlite.
+// -- `podium admin migrate-to-standard` requires --source-sqlite.
 func TestStandardDeploy_MigrateRequiresSourceSQLite(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"HOME=" + t.TempDir()},
@@ -1114,7 +1114,7 @@ func TestStandardDeploy_MigrateRequiresSourceSQLite(t *testing.T) {
 	}
 }
 
-// T-D-organization-38 -- `podium admin migrate-to-standard` requires --target-postgres-dsn when target-store is postgres.
+// -- `podium admin migrate-to-standard` requires --target-postgres-dsn when target-store is postgres.
 func TestStandardDeploy_MigrateRequiresPostgresDSN(t *testing.T) {
 	t.Parallel()
 	// Create a placeholder source db file.
@@ -1134,7 +1134,7 @@ func TestStandardDeploy_MigrateRequiresPostgresDSN(t *testing.T) {
 	}
 }
 
-// T-D-organization-39 -- `podium admin migrate-to-standard` migrates metadata to a SQLite target.
+// -- `podium admin migrate-to-standard` migrates metadata to a SQLite target.
 func TestStandardDeploy_MigrateToSQLite(t *testing.T) {
 	t.Parallel()
 	srcDB := filepath.Join(t.TempDir(), "source.db")
@@ -1172,7 +1172,7 @@ func TestStandardDeploy_MigrateToSQLite(t *testing.T) {
 	}
 }
 
-// T-D-organization-40 -- `podium admin migrate-to-standard` copies audit log when paths are supplied.
+// -- `podium admin migrate-to-standard` copies audit log when paths are supplied.
 func TestStandardDeploy_MigrateAuditLog(t *testing.T) {
 	t.Parallel()
 	srcDB := filepath.Join(t.TempDir(), "source.db")
@@ -1215,7 +1215,7 @@ func TestStandardDeploy_MigrateAuditLog(t *testing.T) {
 	}
 }
 
-// T-D-organization-41 -- `podium admin reembed` triggers vector re-embedding and returns JSON.
+// -- `podium admin reembed` triggers vector re-embedding and returns JSON.
 func TestStandardDeploy_AdminReembed(t *testing.T) {
 	t.Parallel()
 	reg := orgLocalReg(t)
@@ -1237,7 +1237,7 @@ func TestStandardDeploy_AdminReembed(t *testing.T) {
 	}
 }
 
-// T-D-organization-42 -- `podium admin reembed --only-missing` posts to /v1/admin/reembed?only_missing=true.
+// -- `podium admin reembed --only-missing` posts to /v1/admin/reembed?only_missing=true.
 func TestStandardDeploy_AdminReembedOnlyMissing(t *testing.T) {
 	t.Parallel()
 	reg := orgLocalReg(t)
@@ -1248,7 +1248,7 @@ func TestStandardDeploy_AdminReembedOnlyMissing(t *testing.T) {
 		"--registry", srv.BaseURL,
 		"--only-missing",
 	)
-	// As in T-D-organization-41, reembed needs a vector backend; without one
+	// As elsewhere, reembed needs a vector backend; without one
 	// the --only-missing request returns the structured not-configured error.
 	if res.Exit == 0 {
 		return
@@ -1258,7 +1258,7 @@ func TestStandardDeploy_AdminReembedOnlyMissing(t *testing.T) {
 	}
 }
 
-// T-D-organization-43 -- `podium admin reembed --artifact` requires --version.
+// -- `podium admin reembed --artifact` requires --version.
 func TestStandardDeploy_AdminReembedArtifactNoVersion(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY=http://127.0.0.1:19999"},
@@ -1271,7 +1271,7 @@ func TestStandardDeploy_AdminReembedArtifactNoVersion(t *testing.T) {
 	}
 }
 
-// T-D-organization-44 -- `podium admin runtime register` registers a trusted runtime signing key.
+// -- `podium admin runtime register` registers a trusted runtime signing key.
 func TestStandardDeploy_RuntimeRegister(t *testing.T) {
 	t.Parallel()
 	reg := orgLocalReg(t)
@@ -1298,7 +1298,7 @@ func TestStandardDeploy_RuntimeRegister(t *testing.T) {
 	}
 }
 
-// T-D-organization-45 -- `podium admin runtime register` fails when required flags are missing.
+// -- `podium admin runtime register` fails when required flags are missing.
 func TestStandardDeploy_RuntimeRegisterMissingFlags(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY=http://127.0.0.1:19999"},
@@ -1311,7 +1311,7 @@ func TestStandardDeploy_RuntimeRegisterMissingFlags(t *testing.T) {
 	}
 }
 
-// T-D-organization-46 -- `podium admin runtime list` returns registered runtime keys.
+// -- `podium admin runtime list` returns registered runtime keys.
 func TestStandardDeploy_RuntimeList(t *testing.T) {
 	t.Parallel()
 	reg := orgLocalReg(t)
@@ -1339,7 +1339,7 @@ func TestStandardDeploy_RuntimeList(t *testing.T) {
 	}
 }
 
-// T-D-organization-47 -- `/v1/admin/grants` POST is admin-gated; non-admin caller receives 403.
+// -- `/v1/admin/grants` POST is admin-gated; non-admin caller receives 403.
 func TestStandardDeploy_AdminGrantsEndpoint403(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
@@ -1357,7 +1357,7 @@ func TestStandardDeploy_AdminGrantsEndpoint403(t *testing.T) {
 	}
 }
 
-// T-D-organization-48 -- `/v1/layers` POST registers a layer and returns webhook_url.
+// -- `/v1/layers` POST registers a layer and returns webhook_url.
 func TestStandardDeploy_LayersPostWebhookURL(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
@@ -1398,7 +1398,7 @@ func TestStandardDeploy_LayersPostWebhookURL(t *testing.T) {
 	}
 }
 
-// T-D-organization-49 -- `/v1/layers` GET returns the ordered layer list.
+// -- `/v1/layers` GET returns the ordered layer list.
 func TestStandardDeploy_LayersGetList(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
@@ -1424,7 +1424,7 @@ func TestStandardDeploy_LayersGetList(t *testing.T) {
 	}
 }
 
-// T-D-organization-50 -- `/v1/layers/reorder` re-sequences layers and is reflected by subsequent GET.
+// -- `/v1/layers/reorder` re-sequences layers and is reflected by subsequent GET.
 func TestStandardDeploy_LayersReorder(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
@@ -1463,7 +1463,7 @@ func TestStandardDeploy_LayersReorder(t *testing.T) {
 	}
 }
 
-// T-D-organization-51 -- `/v1/admin/reembed` POST returns HTTP 200.
+// -- `/v1/admin/reembed` POST returns HTTP 200.
 func TestStandardDeploy_AdminReembedEndpoint(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
@@ -1482,7 +1482,7 @@ func TestStandardDeploy_AdminReembedEndpoint(t *testing.T) {
 	}
 }
 
-// T-D-organization-52 -- `/v1/quota` GET returns tenant quota limits and usage.
+// -- `/v1/quota` GET returns tenant quota limits and usage.
 func TestStandardDeploy_QuotaEndpoint(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
@@ -1506,7 +1506,7 @@ func TestStandardDeploy_QuotaEndpoint(t *testing.T) {
 	}
 }
 
-// T-D-organization-53 -- `/scim/v2/Users` POST creates a user when SCIM is configured.
+// -- `/scim/v2/Users` POST creates a user when SCIM is configured.
 func TestStandardDeploy_SCIMCreateUser(t *testing.T) {
 	t.Parallel()
 	srv := startServerArgs(t, []string{
@@ -1526,7 +1526,7 @@ func TestStandardDeploy_SCIMCreateUser(t *testing.T) {
 	}
 }
 
-// T-D-organization-54 -- `/scim/v2/Users` POST is rejected without a valid bearer token.
+// -- `/scim/v2/Users` POST is rejected without a valid bearer token.
 func TestStandardDeploy_SCIMUnauthorized(t *testing.T) {
 	t.Parallel()
 	srv := startServerArgs(t, []string{
@@ -1543,7 +1543,7 @@ func TestStandardDeploy_SCIMUnauthorized(t *testing.T) {
 	}
 }
 
-// T-D-organization-55 -- `/healthz` returns HTTP 200 when the registry is ready.
+// -- `/healthz` returns HTTP 200 when the registry is ready.
 func TestStandardDeploy_Healthz(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
@@ -1554,7 +1554,7 @@ func TestStandardDeploy_Healthz(t *testing.T) {
 	var obj map[string]any
 	orgDecodeBody(t, body, &obj)
 	// §13.9: /healthz reports the mode; liveness is the 200 status and
-	// there is no readiness boolean (F-13.9.5).
+	// there is no readiness boolean.
 	if obj["mode"] == nil {
 		t.Errorf("/healthz body missing mode: %s", body)
 	}
@@ -1563,7 +1563,7 @@ func TestStandardDeploy_Healthz(t *testing.T) {
 	}
 }
 
-// T-D-organization-56 -- `/readyz` returns HTTP 200 when the registry is ready.
+// -- `/readyz` returns HTTP 200 when the registry is ready.
 func TestStandardDeploy_Readyz(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
@@ -1573,7 +1573,7 @@ func TestStandardDeploy_Readyz(t *testing.T) {
 	}
 }
 
-// T-D-organization-57 -- `GET /v1/admin/show-effective` returns 403 for non-admin caller.
+// -- `GET /v1/admin/show-effective` returns 403 for non-admin caller.
 func TestStandardDeploy_ShowEffectiveEndpoint403(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
@@ -1588,7 +1588,7 @@ func TestStandardDeploy_ShowEffectiveEndpoint403(t *testing.T) {
 	}
 }
 
-// T-D-organization-58 -- `podium layer watch` polls reingest on an interval until interrupted.
+// -- `podium layer watch` polls reingest on an interval until interrupted.
 func TestStandardDeploy_LayerWatchPolls(t *testing.T) {
 	t.Parallel()
 	reg := orgLocalReg(t)
@@ -1642,7 +1642,7 @@ func TestStandardDeploy_LayerWatchPolls(t *testing.T) {
 	}
 }
 
-// T-D-organization-59 -- `podium layer watch` fails with exit 2 when --id is missing.
+// -- `podium layer watch` fails with exit 2 when --id is missing.
 func TestStandardDeploy_LayerWatchMissingID(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY=http://127.0.0.1:19999"},
@@ -1655,8 +1655,8 @@ func TestStandardDeploy_LayerWatchMissingID(t *testing.T) {
 	}
 }
 
-// T-D-organization-60 -- user-defined layer cap of 3 is enforced per identity.
-// spec: §7.3.1 / §1.4 (F-7.3.5 / F-1.4.1) — "Default cap: 3 user-defined
+// -- user-defined layer cap of 3 is enforced per identity.
+// spec: §7.3.1 / §1.4 — "Default cap: 3 user-defined
 // layers per identity"; exceeding it returns a quota.* error.
 func TestStandardDeploy_UserDefinedLayerCap(t *testing.T) {
 	t.Parallel()
@@ -1703,7 +1703,7 @@ func TestStandardDeploy_UserDefinedLayerCap(t *testing.T) {
 	}
 }
 
-// T-D-organization-61 -- `podium quota` CLI prints tenant quotas via /v1/quota.
+// -- `podium quota` CLI prints tenant quotas via /v1/quota.
 func TestStandardDeploy_QuotaCLI(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
@@ -1720,7 +1720,7 @@ func TestStandardDeploy_QuotaCLI(t *testing.T) {
 	}
 }
 
-// T-D-organization-62 -- `podium admin` with no subcommand prints help and exits 2.
+// -- `podium admin` with no subcommand prints help and exits 2.
 func TestStandardDeploy_AdminNoSubcommand(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "admin")

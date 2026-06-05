@@ -34,7 +34,7 @@ class RegistryError(Exception):
         self.retryable = retryable
         # spec: §6.10 — the full envelope carries a machine-readable details map
         # (for example {"runtime_iss": ...}) and an operator remediation hint.
-        # Callers read both off the exception (F-6.10.1); they default to an
+        # Callers read both off the exception; they default to an
         # empty map and empty string when the registry omits them.
         self.details: dict[str, Any] = details or {}
         self.suggested_action = suggested_action
@@ -80,7 +80,7 @@ def _registry_error_from_envelope(envelope: dict) -> RegistryError:
     message = envelope.get("message", "")
     retryable = bool(envelope.get("retryable", False))
     # spec: §6.10 — preserve the machine-readable details map and the operator
-    # remediation hint so callers can read the full envelope (F-6.10.1).
+    # remediation hint so callers can read the full envelope.
     raw_details = envelope.get("details")
     details = raw_details if isinstance(raw_details, dict) else {}
     suggested_action = envelope.get("suggested_action") or ""
@@ -189,7 +189,7 @@ def _decode_inline_resources(
 ) -> dict[str, str | bytes]:
     """Decode inline bundled resources for materialization.
 
-    spec §4.1 / §7.2 (F-4.1.1): a binary resource at or below the inline
+    spec §4.1 / §7.2: a binary resource at or below the inline
     cutoff is base64-encoded on the wire and the response carries
     ``resources_base64: true`` so ``encoding/json`` does not replace its
     non-UTF-8 bytes with U+FFFD. The flag is response-wide, so when set
@@ -299,7 +299,7 @@ class BatchResult:
         # §7.6.2: a resource carries a presigned_url with an object store
         # configured. In the standalone-without-storage mode it carries the
         # bytes inline (base64-encoded when inline_base64 is set), so deliver
-        # those rather than fetching a URL that does not exist (F-7.6.4).
+        # those rather than fetching a URL that does not exist.
         inline: dict[str, str | bytes] = {}
         large: dict[str, dict[str, Any]] = {}
         for r in self.resources:
@@ -675,7 +675,7 @@ class Client:
         The SDK has no local cache, so an offline-only call is always a cache
         miss and raises the structured network.offline_cache_miss error (the
         §6.10 network.* namespace, matching the MCP server) before a request is
-        issued (F-7.4.3).
+        issued.
         """
         if self.cache_mode == "offline-only":
             raise RegistryError(
@@ -685,7 +685,7 @@ class Client:
 
     def _unreachable_error(self, exc: Exception) -> RegistryError:
         """Map a transport-level failure to the §7.4 network.registry_unreachable
-        structured error (F-7.4.1).
+        structured error.
 
         A connection refused, DNS failure, or connect timeout raises
         ``urllib.error.URLError`` rather than ``HTTPError``. The SDK keeps no
@@ -794,7 +794,7 @@ class Client:
     _DEFAULT_RENDER_DEPTH = 3
 
     def load_domain(self, path: str = "", depth: int | None = None) -> dict[str, Any]:
-        # spec: §4.5.5 / §5.1 (F-4.5.4) — depth is unset by default. The query
+        # spec: §4.5.5 / §5.1 — depth is unset by default. The query
         # parameter is omitted unless the caller supplies one, so the registry
         # applies its configured default max_depth (3) rather than the SDK
         # forcing a single rendered level.
@@ -804,7 +804,7 @@ class Client:
         if depth:
             params["depth"] = depth
 
-        # spec §4.5.4 / §6.4 (F-4.5.2/F-6.4.2) — when a workspace overlay is
+        # spec §4.5.4 / §6.4 — when a workspace overlay is
         # configured the SDK composes the overlay DOMAIN.md set and overlay
         # artifacts onto the registry result client-side, mirroring the MCP
         # bridge. With no overlay the behavior is the pre-merge proxy.
@@ -1241,7 +1241,7 @@ class Client:
             manifest_body=body.get("manifest_body", ""),
             frontmatter=body.get("frontmatter", ""),
             skill_raw=body.get("skill_raw", ""),
-            # §4.1/§7.2 (F-4.1.1): decode a base64-flagged inline set back to
+            # §4.1/§7.2: decode a base64-flagged inline set back to
             # raw bytes so a binary resource materializes uncorrupted.
             resources=_decode_inline_resources(
                 body.get("resources", {}) or {}, body.get("resources_base64", False)
@@ -1296,7 +1296,7 @@ class Client:
                 self._raise_from_http_error(exc)
             except urllib.error.URLError as exc:
                 # spec: §7.4 — an unreachable registry on the batch path also
-                # surfaces the structured no-cache error (F-7.4.1).
+                # surfaces the structured no-cache error.
                 raise self._unreachable_error(exc) from exc
             out.extend(_batch_result_from(env) for env in json.loads(raw))
         return out
@@ -1358,7 +1358,7 @@ class Client:
             self._raise_from_http_error(exc)
         except urllib.error.URLError as exc:
             # spec: §7.4 — an unreachable registry on the event stream surfaces
-            # the structured no-cache error (F-7.4.1).
+            # the structured no-cache error.
             raise self._unreachable_error(exc) from exc
         with resp:
             for raw in resp:
@@ -1384,7 +1384,7 @@ class Client:
             self._raise_from_http_error(exc)
         except urllib.error.URLError as exc:
             # spec: §7.4 — a transport failure (no HTTP response) is the
-            # always-revalidate no-cache case (F-7.4.1).
+            # always-revalidate no-cache case.
             raise self._unreachable_error(exc) from exc
         return json.loads(body)
 

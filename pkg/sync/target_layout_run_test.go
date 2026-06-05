@@ -43,7 +43,7 @@ func lockPathFor(t *testing.T, target, id string) string {
 	return ""
 }
 
-// spec: §7.5.3 / §14.11 (F-14.11.2) — a --target that already names the harness
+// spec: §7.5.3 / §14.11 — a --target that already names the harness
 // config directory (./build/.claude/) must not produce a doubled .claude/.claude/
 // tree, and the lock's materialized_path is recorded relative to the target
 // (agents/pay-invoice.md), matching the §7.5.3 lock example.

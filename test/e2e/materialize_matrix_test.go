@@ -1,7 +1,7 @@
 package e2e
 
-// End-to-end tests for the harness materialization matrix journeys
-// (TEST-GAPS §MATERIALIZE: G-MATERIALIZE-1 .. G-MATERIALIZE-9). Each test
+// End-to-end tests for the harness materialization matrix journeys.
+// Each test
 // drives the real `podium sync` CLI over a filesystem registry and asserts the
 // on-disk per-type outputs, the §6.7 config-merge reconciliation (OpMergeJSON
 // JSON files and OpInject markdown/TOML files), re-sync idempotency, the
@@ -83,9 +83,9 @@ func mzPollGone(path string, within time.Duration) bool {
 	return false
 }
 
-// ---- G-MATERIALIZE-1 --------------------------------------------------------
+// ------------------------------------------------------------------------
 
-// G-MATERIALIZE-1 — a single `podium sync --harness claude-code` over a registry
+// a single `podium sync --harness claude-code` over a registry
 // holding one artifact of each first-class type writes every per-type output
 // path together, including the .claude/settings.json hook config-merge and the
 // .mcp.json server entry derived from server_identifier, each carrying its
@@ -153,9 +153,9 @@ func TestMaterialize_AllFirstClassTypesClaudeCodeSinglePass(t *testing.T) {
 	}
 }
 
-// ---- G-MATERIALIZE-2 --------------------------------------------------------
+// ------------------------------------------------------------------------
 
-// G-MATERIALIZE-2 — running `podium sync --harness cursor` twice over a rule, a
+// running `podium sync --harness cursor` twice over a rule, a
 // hook, and an mcp-server is idempotent: a non-Podium entry the operator adds to
 // .cursor/hooks.json and .cursor/mcp.json between runs survives, the second run
 // leaves exactly one Podium entry per artifact, the lock content_hash values are
@@ -258,9 +258,9 @@ func assertLockHashesStable(t *testing.T, before, after string) {
 	}
 }
 
-// ---- G-MATERIALIZE-3 --------------------------------------------------------
+// ------------------------------------------------------------------------
 
-// G-MATERIALIZE-3 — `podium sync --watch` rematerializes on an in-place rule-body
+// `podium sync --watch` rematerializes on an in-place rule-body
 // edit and cleans a deleted artifact's standalone output within one watch
 // session, then exits 0 on SIGINT. spec: §7.5 (watch loop), §7.5 (stale
 // cleanup).
@@ -302,9 +302,9 @@ func TestMaterialize_WatchEditAndStaleCleanupInOneSession(t *testing.T) {
 	}
 }
 
-// ---- G-MATERIALIZE-4 --------------------------------------------------------
+// ------------------------------------------------------------------------
 
-// G-MATERIALIZE-4 — the §6.7.1 unsupported-type matrix is enforced through real
+// the §6.7.1 unsupported-type matrix is enforced through real
 // sync and lint for pi and claude-desktop: pi materializes a command to
 // .pi/prompts/<name>.md while emitting no agent output, claude-desktop writes
 // nothing project-level, and a declared-but-unsupported combination
@@ -358,9 +358,9 @@ func TestMaterialize_UnsupportedTypeMatrixPiAndClaudeDesktop(t *testing.T) {
 	}
 }
 
-// ---- G-MATERIALIZE-5 --------------------------------------------------------
+// ------------------------------------------------------------------------
 
-// G-MATERIALIZE-5 — changing a hook's hook_event and bumping its version, then
+// changing a hook's hook_event and bumping its version, then
 // re-syncing for gemini, reconciles the prior translated event entry before the
 // re-merge: the old native event entry is gone, the new translated event appears
 // exactly once, and any operator key in .gemini/settings.json survives. spec:
@@ -422,9 +422,9 @@ func TestMaterialize_GeminiHookEventChangeReconciles(t *testing.T) {
 	}
 }
 
-// ---- G-MATERIALIZE-6 --------------------------------------------------------
+// ------------------------------------------------------------------------
 
-// G-MATERIALIZE-6 — removing an agent and an mcp-server, then re-syncing for
+// removing an agent and an mcp-server, then re-syncing for
 // claude-code, deletes the agent's standalone file, cleans the now-empty
 // .claude/agents/ parent directory, strips the Podium mcp-server entry from
 // .mcp.json, and preserves an operator-authored .mcp.json entry. spec: §6.7,
@@ -494,9 +494,9 @@ func TestMaterialize_RemoveAgentAndMCPServerCleansAndReconciles(t *testing.T) {
 	}
 }
 
-// ---- G-MATERIALIZE-7 --------------------------------------------------------
+// ------------------------------------------------------------------------
 
-// G-MATERIALIZE-7 — re-syncing for codex over a rule and a hook reconciles the
+// re-syncing for codex over a rule and a hook reconciles the
 // OpInject markdown block in AGENTS.md and the OpInject TOML block in
 // .codex/config.toml in place: an operator line hand-edited into each file
 // survives, each prior Podium block is replaced exactly once when the rule body
@@ -570,9 +570,9 @@ func TestMaterialize_CodexResyncInjectAndTomlReconcile(t *testing.T) {
 	assertValidTOML(t, tomlPath)
 }
 
-// ---- G-MATERIALIZE-8 --------------------------------------------------------
+// ------------------------------------------------------------------------
 
-// G-MATERIALIZE-8 — `podium sync --harness opencode --type rule,context` over an
+// `podium sync --harness opencode --type rule,context` over an
 // all-types registry materializes only the selected types and stays idempotent:
 // AGENTS.md injected rules and .podium/context buckets exist while the excluded
 // .opencode/commands and opencode.json mcp outputs are absent, and a second run
@@ -648,9 +648,9 @@ func snapshotTree(t *testing.T, root string) string {
 	return b.String()
 }
 
-// ---- G-MATERIALIZE-9 --------------------------------------------------------
+// ------------------------------------------------------------------------
 
-// G-MATERIALIZE-9 — removing a skill, an mcp-server, and a hook from a
+// removing a skill, an mcp-server, and a hook from a
 // claude-cowork target, then re-syncing, strips the Podium marketplace.json and
 // plugins/<id>/.mcp.json entries, cleans the emptied plugins/<id> directories
 // (including nested skills/ and hooks/ subtrees), and preserves an operator

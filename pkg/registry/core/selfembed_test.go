@@ -10,7 +10,7 @@ import (
 	"github.com/lennylabs/podium/pkg/vector"
 )
 
-// selfEmbedVec is a fake §13.12 self-embedding backend (F-13.12.6). It stores
+// selfEmbedVec is a fake §13.12 self-embedding backend. It stores
 // raw text rather than vectors and answers QueryText, so a Registry wired with
 // a nil embedder still runs the vector path. The precomputed-vector Put/Query
 // methods panic so a test catches the registry taking the wrong path.
@@ -88,7 +88,7 @@ func seManifestStore(t *testing.T, ids ...string) store.Store {
 	return st
 }
 
-// Spec: §13.12 (F-13.12.6) — a self-embedding vector backend with no separate
+// Spec: §13.12 — a self-embedding vector backend with no separate
 // embedding provider runs the full vector path: Reembed upserts raw text via
 // PutText and SearchArtifacts queries via QueryText, so search is NOT degraded.
 func TestSelfEmbedding_ReembedAndSearch(t *testing.T) {
@@ -127,7 +127,7 @@ func TestSelfEmbedding_ReembedAndSearch(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.12.6) — the nil-embedder concession is scoped to
+// Spec: §13.12 — the nil-embedder concession is scoped to
 // self-embedding backends. A nil embedder against a backend that cannot
 // self-embed still degrades to BM25-only.
 func TestSelfEmbedding_NilEmbedderNonSelfEmbeddingDegrades(t *testing.T) {
@@ -146,7 +146,7 @@ func TestSelfEmbedding_NilEmbedderNonSelfEmbeddingDegrades(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.12.6) — Reembed refuses when neither an embedder nor a
+// Spec: §13.12 — Reembed refuses when neither an embedder nor a
 // self-embedding backend is configured.
 func TestSelfEmbedding_ReembedRequiresVectorPath(t *testing.T) {
 	t.Parallel()

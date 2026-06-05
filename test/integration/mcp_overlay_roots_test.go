@@ -15,7 +15,7 @@ import (
 // Spec: §2.1 / §6.4 step 2 — the MCP bridge binary asks a roots-capable host
 // for its workspace via roots/list and defaults the overlay to
 // <workspace>/.podium/overlay/, so a later load_artifact serves the draft
-// from the overlay without contacting the registry. F-2.1.2.
+// from the overlay without contacting the registry.
 func TestPodiumMCP_RootsListResolvesWorkspaceOverlay(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t)

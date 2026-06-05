@@ -8,7 +8,7 @@ import (
 )
 
 // spec: §6.5 — "Maps (id, "latest") to semver. TTL 30s by default." A latest
-// resolution older than the TTL is treated as a miss (F-6.5.1); a fresh one is
+// resolution older than the TTL is treated as a miss; a fresh one is
 // served. allowStale (offline-only / degraded fallback) serves a stale entry.
 func TestResolutionCache_LatestTTL(t *testing.T) {
 	t.Parallel()
@@ -48,7 +48,7 @@ func TestResolutionCache_PinnedNeverExpires(t *testing.T) {
 	}
 }
 
-// spec: §6.5 — the (id, "latest") key maps to the resolved semver (F-6.5.4);
+// spec: §6.5 — the (id, "latest") key maps to the resolved semver;
 // the content hash is recovered by chaining through the (id, semver) entry.
 func TestResolutionCache_LatestMapsToSemver(t *testing.T) {
 	t.Parallel()
@@ -98,7 +98,7 @@ func TestResolutionCache_RefreshLatest(t *testing.T) {
 	}
 }
 
-// spec: §6.5 — "Index DB: BoltDB or SQLite" (F-6.5.5). The index persists to a
+// spec: §6.5 — "Index DB: BoltDB or SQLite". The index persists to a
 // BoltDB file that survives a reopen.
 func TestResolutionCache_PersistsToBoltDB(t *testing.T) {
 	t.Parallel()
@@ -123,7 +123,7 @@ func TestResolutionCache_PersistsToBoltDB(t *testing.T) {
 	}
 }
 
-// spec: §6.5 (F-6.5.6) — a cache hit touches the bucket so a read counts as
+// spec: §6.5 — a cache hit touches the bucket so a read counts as
 // last access; otherwise `podium cache prune` (mtime-based) would evict a
 // frequently-read but never-rewritten bucket.
 func TestLoadArtifactFromCache_TouchesBucketOnRead(t *testing.T) {

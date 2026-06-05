@@ -24,7 +24,7 @@ func cursorMDCFor(t *testing.T, artifact string) string {
 }
 
 // Spec: §6.7 — the cursor adapter writes .cursor/rules/<name>.mdc with
-// alwaysApply / globs / description derived from rule_mode (F-6.7.4).
+// alwaysApply / globs / description derived from rule_mode.
 
 func TestCursor_RuleModeAlwaysAlwaysApply(t *testing.T) {
 	t.Parallel()

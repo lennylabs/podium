@@ -3,7 +3,7 @@ package e2e
 // Live Release-lane matrix that boots a standalone server for each reachable
 // (embedding provider, managed vector backend) pair and each self-embedding
 // backend, ingests one fixture set, and asserts semantic search returns the
-// expected artifact at rank 1 through the server, closing G-VEC-12 (TEST-GAPS.md).
+// expected artifact at rank 1 through the server.
 // TestVectorSemanticSearch_ManagedThroughServer iterates the managed backends
 // but only with a mock OpenAI-format embedder for storage-only vectors, and the
 // pkg/embedding live tests exercise each provider with no managed backend, so no
@@ -203,7 +203,7 @@ func runMatrixCell(t *testing.T, cellEnv []string, isPinecone bool) {
 	pollSemanticTopHit(t, srv.BaseURL, matrixQuery, matrixTarget, 120*time.Second)
 }
 
-// TestVectorMatrix_ProviderByBackendLive closes G-VEC-12. It runs one subtest
+// TestVectorMatrix_ProviderByBackendLive. It runs one subtest
 // per reachable (embedding provider, managed backend) storage-only cell and one
 // per reachable self-embedding backend, each booting a server, ingesting the
 // fixtures, and asserting the expected artifact ranks first through

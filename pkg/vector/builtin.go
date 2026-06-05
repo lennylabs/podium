@@ -22,8 +22,7 @@ type BackendConfig struct {
 	PineconeIndex string
 	PineconeNS    string
 	// PineconeControlPlane overrides the control-plane base used to resolve the
-	// data-plane host from the index name when PineconeHost is empty (§13.12,
-	// F-13.12.3). Empty uses the real control plane (PineconeControlPlane const).
+	// data-plane host from the index name when PineconeHost is empty (§13.12). Empty uses the real control plane (PineconeControlPlane const).
 	PineconeControlPlane string
 	// weaviate-cloud
 	WeaviateURL  string
@@ -70,7 +69,7 @@ func OpenBuiltin(id string, cfg BackendConfig, dim int) (Provider, error) {
 	case "pinecone":
 		host := cfg.PineconeHost
 		if host == "" && cfg.PineconeIndex != "" {
-			// §13.12 (F-13.12.3): PODIUM_PINECONE_HOST defaults to
+			// §13.12: PODIUM_PINECONE_HOST defaults to
 			// "auto-resolved from index name". Look the host up via the
 			// Pinecone control-plane describe-index endpoint. A bounded context
 			// keeps startup from hanging on an unreachable control plane; a

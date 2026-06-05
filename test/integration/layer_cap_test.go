@@ -14,7 +14,7 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// Spec: §7.3.1 / §1.4 (F-1.4.1) — the user-defined-layer cap is enforced
+// Spec: §7.3.1 / §1.4 — the user-defined-layer cap is enforced
 // against the file-backed SQLite store (the standalone backend), and the
 // per-tenant quota configures the limit. This drives the real
 // LayerEndpoint over HTTP against a persistent SQLite database so the

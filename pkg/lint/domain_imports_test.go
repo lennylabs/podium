@@ -115,7 +115,7 @@ include:
 	}
 }
 
-// Spec: §4.5.5 (F-4.5.11) — when the tenant disables per-domain
+// Spec: §4.5.5 — when the tenant disables per-domain
 // discovery overrides, a DOMAIN.md carrying a discovery: block is
 // warned (ingest still succeeds); the default rule set (overrides
 // allowed) draws no such diagnostic.

@@ -6,7 +6,7 @@ import (
 	"github.com/lennylabs/podium/pkg/objectstore"
 )
 
-// Spec: §13.12 (F-13.12.8) — PODIUM_S3_ENDPOINT is a URL; its scheme selects
+// Spec: §13.12 — PODIUM_S3_ENDPOINT is a URL; its scheme selects
 // TLS. https (and any non-http scheme) enables it, http disables it, a bare
 // host defaults to TLS on, and an empty value resolves to AWS S3 over TLS.
 func TestParseS3Endpoint(t *testing.T) {
@@ -32,7 +32,7 @@ func TestParseS3Endpoint(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.12.8) — NewS3 accepts the force-path-style flag and
+// Spec: §13.12 — NewS3 accepts the force-path-style flag and
 // constructs a client (the BucketLookup wiring is exercised here; the
 // behavioral effect needs a live DNS endpoint). Construction is lazy, so no
 // network call happens and the test never blocks.
@@ -55,7 +55,7 @@ func TestNewS3_ForcePathStyleConstructs(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.12.7) — NewS3 with no static credentials constructs
+// Spec: §13.12 — NewS3 with no static credentials constructs
 // successfully (the AWS credential chain is installed lazily); the constructor
 // must not block on credential resolution.
 func TestNewS3_NoCredentialsConstructs(t *testing.T) {

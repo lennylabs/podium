@@ -2,7 +2,7 @@ package manifest
 
 import "testing"
 
-// Spec: §4.3.5 (F-4.3.2) — the canonical hook event taxonomy has the 20
+// Spec: §4.3.5 — the canonical hook event taxonomy has the 20
 // names the spec table defines, every one is recognized, and the list is
 // returned as a defensive copy.
 func TestCanonicalHookEvents(t *testing.T) {
@@ -38,7 +38,7 @@ func TestCanonicalHookEvents(t *testing.T) {
 	}
 }
 
-// Spec: §4.3.5 (F-4.3.2) — names outside the taxonomy (misspellings,
+// Spec: §4.3.5 — names outside the taxonomy (misspellings,
 // empty, native harness names) are not canonical.
 func TestIsCanonicalHookEvent_Rejects(t *testing.T) {
 	t.Parallel()

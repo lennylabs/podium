@@ -3,10 +3,10 @@ package e2e
 // End-to-end tests for the §7.2 / §7.6.2 data plane in the
 // standalone-without-storage deployment (§13.11): a real `podium serve
 // --standalone` process with PODIUM_OBJECT_STORE=none, ingesting a filesystem
-// registry that bundles binary resources. Covers F-4.1.1 (binary inline
-// resources base64-encoded so JSON does not corrupt them), F-7.2.1 (a resource
+// registry that bundles binary resources. Covers binary inline
+// resources base64-encoded so JSON does not corrupt them, a resource
 // above the inline cutoff served inline rather than failing without an object
-// store), and F-7.6.4 (the batch path delivers inline resources instead of
+// store, and the batch path delivers inline resources instead of
 // dropping them).
 
 import (
@@ -38,7 +38,7 @@ func startNoStoreServer(t *testing.T, reg string) *serverProc {
 		"serve", "--standalone", "--layer-path", reg)
 }
 
-// Spec: §4.1/§7.2 (F-4.1.1, F-7.2.1) — with no object store, load_artifact
+// Spec: §4.1/§7.2 — with no object store, load_artifact
 // serves every bundled resource inline regardless of size, and base64-encodes
 // the inline set (resources_base64) when any member is binary so the bytes
 // survive JSON transport. Without the fixes a binary resource is corrupted by
@@ -86,7 +86,7 @@ func TestResourceDelivery_NoStoreLoadArtifactInlineBinary(t *testing.T) {
 	}
 }
 
-// Spec: §7.6.2 (F-7.6.4) — the batch path delivers inline resources when no
+// Spec: §7.6.2 — the batch path delivers inline resources when no
 // object store is configured, rather than dropping them. A binary resource
 // carries inline_base64 so its bytes survive transport. Without the fix the
 // batch consumer materializes a package missing files the single-load path

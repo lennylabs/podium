@@ -92,7 +92,7 @@ func TestIngest_IdempotentDoesNotRepublish(t *testing.T) {
 // spec: §7.3.2 — artifact.deprecated fires when "a manifest update
 // flipped deprecated: true", i.e. a new deprecated version supersedes a
 // prior non-deprecated version of the same artifact_id. The flip ingest
-// emits both artifact.published and artifact.deprecated (F-7.3.10).
+// emits both artifact.published and artifact.deprecated.
 func TestIngest_PublishesArtifactDeprecatedOnFlip(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()
@@ -146,8 +146,7 @@ func TestIngest_PublishesArtifactDeprecatedOnFlip(t *testing.T) {
 
 // spec: §7.3.2 — a version born deprecated on first publish is not a
 // "flip"; only artifact.published fires, never artifact.deprecated,
-// because no prior non-deprecated version of the artifact existed
-// (F-7.3.10).
+// because no prior non-deprecated version of the artifact existed.
 func TestIngest_BornDeprecatedDoesNotPublishDeprecated(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()

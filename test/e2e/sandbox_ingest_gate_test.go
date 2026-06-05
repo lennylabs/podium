@@ -2,7 +2,7 @@ package e2e
 
 import "testing"
 
-// spec: §13.10 (F-13.10.2) — a standalone registry booted with
+// spec: §13.10 — a standalone registry booted with
 // PODIUM_ENFORCE_SANDBOX_PROFILE=true refuses to ingest an artifact whose
 // sandbox_profile the local host cannot honor (the host advertises only the
 // default "unrestricted"), so that artifact is absent from the catalog while a
@@ -27,7 +27,7 @@ func TestStandalone_SandboxProfileIngestGateEnforced(t *testing.T) {
 	getJSON(t, srv.BaseURL+"/v1/load_artifact?id=eng/open", nil)
 }
 
-// spec: §13.10 (F-13.10.2) — without PODIUM_ENFORCE_SANDBOX_PROFILE the
+// spec: §13.10 — without PODIUM_ENFORCE_SANDBOX_PROFILE the
 // registry treats sandbox_profile as informational and ingests an artifact
 // whose profile the host cannot enforce locally.
 func TestStandalone_SandboxProfileInformationalByDefault(t *testing.T) {

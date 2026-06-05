@@ -15,7 +15,7 @@ package e2e
 // an unrelated deployment test.
 //
 // Spec: §13.10 (Standalone Deployment; PODIUM_NO_AUTOSTANDALONE makes a missing
-// server config a hard error rather than a cue to auto-bootstrap). Gap G-INFRA-2.
+// server config a hard error rather than a cue to auto-bootstrap).
 
 import (
 	"strings"

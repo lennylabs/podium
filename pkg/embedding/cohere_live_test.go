@@ -59,7 +59,7 @@ func TestCohere_Live_DimensionAndDeterminism(t *testing.T) {
 // (embed-v4 and newer). The provider type-switches over both. This test
 // drives the configured model's real response through that switch and
 // asserts per-item alignment, so a vendor wire-format change in either
-// form is caught (G-EMB-2). To cover the second form explicitly, set
+// form is caught. To cover the second form explicitly, set
 // PODIUM_COHERE_MODEL to a model that emits it.
 func TestCohere_Live_BatchAlignmentBothForms(t *testing.T) {
 	p := liveCohere(t)

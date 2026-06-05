@@ -11,7 +11,7 @@ import (
 	"github.com/lennylabs/podium/pkg/embedding"
 )
 
-// Spec: §13.12 (F-13.12.4) — "Server-side precedence: CLI flag > env var >
+// Spec: §13.12 — "Server-side precedence: CLI flag > env var >
 // config file." An explicit PODIUM_BIND that happens to equal the loopback
 // default 127.0.0.1:8080 is still an env value, so the registry.yaml bind must
 // not override it.
@@ -28,7 +28,7 @@ func TestLoadConfig_BindEnvBeatsYAMLEvenAtDefaultValue(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.12.4) — when PODIUM_BIND is unset, the registry.yaml bind
+// Spec: §13.12 — when PODIUM_BIND is unset, the registry.yaml bind
 // is used (config file fills an absent env var).
 func TestLoadConfig_BindFromYAMLWhenEnvUnset(t *testing.T) {
 	dir := t.TempDir()
@@ -43,7 +43,7 @@ func TestLoadConfig_BindFromYAMLWhenEnvUnset(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.12.1) — PODIUM_S3_ACCESS_KEY_ID / PODIUM_S3_SECRET_ACCESS_KEY
+// Spec: §13.12 — PODIUM_S3_ACCESS_KEY_ID / PODIUM_S3_SECRET_ACCESS_KEY
 // / PODIUM_PRESIGN_TTL_SECONDS are valid config-file keys under object_store.
 func TestApplyYAML_ObjectStoreCredentialsAndPresign(t *testing.T) {
 	t.Setenv("PODIUM_PRESIGN_TTL_SECONDS", "") // ensure the env guard sees unset
@@ -64,7 +64,7 @@ func TestApplyYAML_ObjectStoreCredentialsAndPresign(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.12.1) — PODIUM_PRESIGN_TTL_SECONDS env var keeps precedence
+// Spec: §13.12 — PODIUM_PRESIGN_TTL_SECONDS env var keeps precedence
 // over the config-file presign_ttl_seconds key.
 func TestLoadConfig_PresignTTLEnvBeatsYAML(t *testing.T) {
 	dir := t.TempDir()
@@ -79,7 +79,7 @@ func TestLoadConfig_PresignTTLEnvBeatsYAML(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.12.1) — vector_backend.host (Pinecone) and vector_backend.url
+// Spec: §13.12 — vector_backend.host (Pinecone) and vector_backend.url
 // (Weaviate / Qdrant) are valid config-file keys routed to the selected backend.
 func TestApplyVectorYAML_HostAndURLKeys(t *testing.T) {
 	cp := &Config{vectorBackend: "pinecone"}
@@ -101,7 +101,7 @@ func TestApplyVectorYAML_HostAndURLKeys(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.12.1) — embedding_provider.base_url / org (openai) and
+// Spec: §13.12 — embedding_provider.base_url / org (openai) and
 // embedding_provider.url (ollama) are valid config-file keys.
 func TestApplyEmbeddingYAML_BaseURLOrgAndOllamaURL(t *testing.T) {
 	t.Setenv("PODIUM_OLLAMA_URL", "") // ensure the env guard sees unset
@@ -119,7 +119,7 @@ func TestApplyEmbeddingYAML_BaseURLOrgAndOllamaURL(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.12.2) — the registry.yaml embedding_provider.model key
+// Spec: §13.12 — the registry.yaml embedding_provider.model key
 // (captured in c.embeddingModel) is applied to the built-in providers, not only
 // the per-provider PODIUM_*_MODEL env vars.
 func TestOpenEmbedder_ModelFromConfigFile(t *testing.T) {
@@ -147,7 +147,7 @@ func TestOpenEmbedder_ModelFromConfigFile(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.12.2) — the per-provider PODIUM_*_MODEL env var keeps
+// Spec: §13.12 — the per-provider PODIUM_*_MODEL env var keeps
 // precedence over the config-file model.
 func TestOpenEmbedder_PerProviderEnvBeatsConfigModel(t *testing.T) {
 	t.Setenv("PODIUM_EMBEDDING_MODEL", "")
@@ -162,7 +162,7 @@ func TestOpenEmbedder_PerProviderEnvBeatsConfigModel(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.12.1) — embedding_provider.base_url / org reach the openai
+// Spec: §13.12 — embedding_provider.base_url / org reach the openai
 // embedder via the Config fields rather than being read only from env vars.
 func TestOpenEmbedder_OpenAIBaseURLAndOrgFromConfig(t *testing.T) {
 	t.Setenv("PODIUM_OPENAI_MODEL", "")
@@ -183,7 +183,7 @@ func TestOpenEmbedder_OpenAIBaseURLAndOrgFromConfig(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.12.3) — the serverboot config path resolves an index-only
+// Spec: §13.12 — the serverboot config path resolves an index-only
 // Pinecone deployment's data-plane host from the control plane. openVectorBackend
 // flows the control-plane override (PODIUM_PINECONE_CONTROL_PLANE) through
 // backendConfig() into the shared OpenBuiltin factory.

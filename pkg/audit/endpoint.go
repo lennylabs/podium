@@ -18,7 +18,6 @@ import (
 // JSON. It backs the §9 LocalAuditSink "external endpoint" redirect for
 // PODIUM_AUDIT_SINK and the §8.3 statement that the local sink "can be
 // redirected to external SIEM / log aggregation". spec: §6.2, §8.3, §9.
-// F-8.3.2.
 //
 // Each event is hash-chained in-process per §8.6 before it is POSTed, so a
 // receiver sees the same tamper-evident hash / prev_hash fields the file

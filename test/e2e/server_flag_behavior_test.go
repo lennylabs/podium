@@ -1,10 +1,10 @@
 package e2e
 
 // End-to-end tests for the §13.10 standalone serve flags added in batch
-// fix-13.10-b: --web-ui (F-13.10.9), --no-embeddings (F-13.10.11), and
-// --sign registry-key (F-13.10.14). Each drives the real `podium` binary
+// fix-13.10-b: --web-ui, --no-embeddings, and
+// --sign registry-key. Each drives the real `podium` binary
 // through the shared standalone harness, which always binds a loopback
-// address; the non-loopback web-UI refusal (F-13.10.9) is covered by the
+// address; the non-loopback web-UI refusal is covered by the
 // serverboot/config unit tests, which do not need a bound listener.
 
 import (
@@ -14,7 +14,7 @@ import (
 	"testing"
 )
 
-// F-13.10.9 — `podium serve --web-ui` mounts the bundled SPA at /ui/.
+// `podium serve --web-ui` mounts the bundled SPA at /ui/.
 func TestServerFlags_WebUIFlagMountsUI(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -32,7 +32,7 @@ func TestServerFlags_WebUIFlagMountsUI(t *testing.T) {
 	}
 }
 
-// F-13.10.9 — without --web-ui the UI is not mounted; /ui/ is not served.
+// without --web-ui the UI is not mounted; /ui/ is not served.
 func TestServerFlags_NoWebUIByDefault(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -44,7 +44,7 @@ func TestServerFlags_NoWebUIByDefault(t *testing.T) {
 	}
 }
 
-// F-13.10.11 — `podium serve --no-embeddings` boots into BM25-only search and
+// `podium serve --no-embeddings` boots into BM25-only search and
 // search_artifacts still answers.
 func TestServerFlags_NoEmbeddingsSearchWorks(t *testing.T) {
 	t.Parallel()
@@ -59,7 +59,7 @@ func TestServerFlags_NoEmbeddingsSearchWorks(t *testing.T) {
 	}
 }
 
-// F-13.10.14 — `podium serve --sign registry-key` boots with ingest signing
+// `podium serve --sign registry-key` boots with ingest signing
 // enabled, logs the registry-managed-key line, and generates the signing key
 // under the standalone home.
 func TestServerFlags_SignRegistryKey(t *testing.T) {
@@ -80,7 +80,7 @@ func TestServerFlags_SignRegistryKey(t *testing.T) {
 	}
 }
 
-// F-14.3.2 / F-14.10.4 (spec: §13.10 lines 116, 223) — a first-run standalone
+// (spec: §13.10 lines 116, 223) — a first-run standalone
 // `podium serve` auto-bootstraps ~/.podium/sync.yaml with defaults.registry
 // pointing at the local server, so a consumer resolves the registry without an
 // extra env var. The bound address is a free loopback port chosen by the
@@ -111,7 +111,7 @@ func TestServerFlags_AutoBootstrapsSyncYAML(t *testing.T) {
 	}
 }
 
-// F-13.10.14 — an unrecognized --sign value is refused at startup; the process
+// an unrecognized --sign value is refused at startup; the process
 // exits non-zero before binding a listener.
 func TestServerFlags_SignRejectsUnknown(t *testing.T) {
 	t.Parallel()

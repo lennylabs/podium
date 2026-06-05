@@ -40,7 +40,7 @@ var (
 	// server-source registry. podium sync keeps no offline content cache, so
 	// offline-only ("never contact the registry; structured error if cache
 	// miss") has nothing local to materialize. The code lives in the §6.10
-	// network.* namespace, matching the MCP server (F-7.4.3, F-7.4.5).
+	// network.* namespace, matching the MCP server.
 	ErrOfflineCacheMiss = errors.New("network.offline_cache_miss: offline-only mode cannot reach a server-source registry and podium sync keeps no offline cache")
 	// ErrRegistryUnreachable signals a §7.4 always-revalidate sync (the
 	// default mode) against an unreachable server-source registry.
@@ -48,8 +48,7 @@ var (
 	// when there is no cache; podium sync keeps no offline content cache, so an
 	// unreachable server-source registry has nothing to serve and surfaces this
 	// namespaced §6.10 code rather than the raw transport message. offline-first
-	// is the silent no-op above; offline-only returns ErrOfflineCacheMiss
-	// (F-7.4.3).
+	// is the silent no-op above; offline-only returns ErrOfflineCacheMiss.
 	ErrRegistryUnreachable = errors.New("network.registry_unreachable: always-revalidate mode cannot reach the server-source registry and podium sync keeps no offline cache")
 )
 
@@ -203,7 +202,7 @@ func Run(opts Options) (*Result, error) {
 	if isServerSource(opts.RegistryPath) && opts.CacheMode == "offline-only" {
 		// §7.4: "never contact the registry; structured error if cache miss."
 		// podium sync keeps no offline content cache, so a server-source sync
-		// has nothing local to materialize (F-7.4.3).
+		// has nothing local to materialize.
 		return nil, ErrOfflineCacheMiss
 	}
 
@@ -217,7 +216,7 @@ func Run(opts Options) (*Result, error) {
 			// §7.4 offline-first: "no error; serve cached results silently."
 			// When the server-source registry is unreachable, leave the already
 			// materialized output untouched and report a no-op offline result
-			// rather than failing the sync (F-7.4.3).
+			// rather than failing the sync.
 			if opts.CacheMode == "offline-first" {
 				return offlineFirstNoop(opts, a.ID()), nil
 			}
@@ -225,7 +224,7 @@ func Run(opts Options) (*Result, error) {
 			// error network.registry_unreachable." podium sync keeps no offline
 			// content cache, so an unreachable server-source registry has
 			// nothing to serve and surfaces the namespaced code rather than the
-			// raw transport message (F-7.4.3). offline-only never reaches here:
+			// raw transport message. offline-only never reaches here:
 			// it returned ErrOfflineCacheMiss above without dialing.
 			return nil, fmt.Errorf("%w: %v", ErrRegistryUnreachable, unreachable.err)
 		}

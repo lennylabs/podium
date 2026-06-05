@@ -75,7 +75,7 @@ func rlvHas(ids []string, want string) bool {
 	return false
 }
 
-// Spec: §4.6 (F-4.6.1) — a runtime-registered (user-defined) layer registered
+// Spec: §4.6 — a runtime-registered (user-defined) layer registered
 // after boot via POST /v1/layers enters its owner's effective view on the read
 // path. The full server resolves the layer list per request from the SQLite
 // store rather than from the static boot-time slice, so the owner sees the
@@ -139,7 +139,7 @@ func TestRuntimeLayerVisibility_SQLiteReadPath(t *testing.T) {
 		t.Errorf("alice should see the admin org/x: %v", aliceIDs)
 	}
 	if !rlvHas(aliceIDs, "alice/y") {
-		t.Errorf("alice should see her runtime-registered alice/y (F-4.6.1): %v", aliceIDs)
+		t.Errorf("alice should see her runtime-registered alice/y: %v", aliceIDs)
 	}
 	if got := rlvStatus(t, aliceSrv.URL+"/v1/load_artifact?id=alice/y"); got != http.StatusOK {
 		t.Errorf("alice load alice/y = %d, want 200", got)

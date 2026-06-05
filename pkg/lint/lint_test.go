@@ -195,7 +195,7 @@ body
 	}
 }
 
-// Spec: §4.1 (F-4.1.3) — mcp-server is a built-in extension type
+// Spec: §4.1 — mcp-server is a built-in extension type
 // registered in the default TypeProvider registry, so it lints without a
 // lint.unknown_type warning even though IsFirstClassType is false for it.
 func TestLint_MCPServerDoesNotWarnUnknownType(t *testing.T) {
@@ -235,7 +235,7 @@ func (datasetProvider) Validate(context.Context, *manifest.Artifact) []typeprovi
 	}}
 }
 
-// Spec: §4.1 / §9 (F-4.1.1) — when a deployment registers a TypeProvider
+// Spec: §4.1 / §9 — when a deployment registers a TypeProvider
 // for an extension type, lint stops warning lint.unknown_type for it and
 // dispatches to the provider's Validate so the extension's lint rules run
 // at ingest.
@@ -273,7 +273,7 @@ body
 	}
 }
 
-// Spec: §4.1 / §9 (F-4.1.1) — an unregistered extension type still warns
+// Spec: §4.1 / §9 — an unregistered extension type still warns
 // lint.unknown_type, because the deployment may register a provider for
 // it; ingest is not rejected.
 func TestLint_UnregisteredExtensionTypeStillWarns(t *testing.T) {
@@ -308,7 +308,7 @@ body
 	}
 }
 
-// Spec: §4.3.5 (F-4.3.8) — a lone generic hook is valid ("Authors choose the
+// Spec: §4.3.5 — a lone generic hook is valid ("Authors choose the
 // level of specificity that matches the action's intent") and draws no
 // generic/subtype diagnostic. The pre-fix rule wrongly flagged every generic
 // hook at info severity.
@@ -336,7 +336,7 @@ body
 	}
 }
 
-// Spec: §4.3.5 (F-4.3.8) — "Authors should not declare both a generic hook and
+// Spec: §4.3.5 — "Authors should not declare both a generic hook and
 // the corresponding subtype hook ...; lint warns when this happens." Because
 // hook_event is a single scalar, the reachable form is a generic hook and a
 // corresponding subtype hook present together; the rule warns (not info) and
@@ -391,7 +391,7 @@ body
 	}
 }
 
-// Spec: §4.3.5 (F-4.3.2) — a type: hook artifact whose hook_event is not
+// Spec: §4.3.5 — a type: hook artifact whose hook_event is not
 // in the canonical taxonomy (here the misspelling on_stop) is rejected
 // with a lint.unknown_hook_event error. Without the rule the artifact
 // passes ingest.
@@ -431,7 +431,7 @@ body
 	}
 }
 
-// Spec: §4.3.5 (F-4.3.2) — every canonical event name passes the
+// Spec: §4.3.5 — every canonical event name passes the
 // hook_event check. Each event is its own single-artifact fixture, so no
 // generic/subtype overlap arises and no unknown-event error is raised.
 func TestLint_HookEventCanonicalAccepted(t *testing.T) {
@@ -464,7 +464,7 @@ body
 	}
 }
 
-// Spec: §4.3.5 (F-4.3.2) — the canonical-event rule applies only to
+// Spec: §4.3.5 — the canonical-event rule applies only to
 // type: hook. A non-hook artifact that happens to carry a hook_event
 // value is not the rule's concern (the field is type-specific to hooks),
 // so no unknown-event error is raised.

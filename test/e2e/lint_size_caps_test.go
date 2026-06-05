@@ -1,7 +1,7 @@
 package e2e
 
 // End-to-end coverage for the configurable bundled-resource size caps
-// (spec §12, F-12.0.2). The standalone server builds its ingest linter via
+// (spec §12). The standalone server builds its ingest linter via
 // NewIngestLinter, which reads the per-file and per-package soft caps from
 // PODIUM_LINT_PER_FILE_SOFT_CAP_BYTES / PODIUM_LINT_PER_PACKAGE_SOFT_CAP_BYTES.
 // A lowered per-package cap turns a package that is well under the 10 MB
@@ -13,7 +13,7 @@ import (
 	"testing"
 )
 
-// spec: §12 (F-12.0.2) — a per-package soft cap lowered via the environment
+// spec: §12 — a per-package soft cap lowered via the environment
 // rejects a bundled package over that cap at standalone-boot ingest, while a
 // clean sibling still loads. The default cap accepts the same package.
 func TestLintSizeCaps_ConfigurablePerPackageCapRejects(t *testing.T) {

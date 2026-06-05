@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// Spec: §8.1 (F-8.1.1) — "Both streams share trace IDs." The MCP bridge
+// Spec: §8.1 — "Both streams share trace IDs." The MCP bridge
 // injects its in-flight span as a W3C traceparent on the outbound registry
 // call (the registry derives its stream's trace id from that header), and now
 // stamps the same trace id on the local audit event. This drives the real

@@ -1,7 +1,6 @@
 package e2e
 
-// Large bundled-resource delivery across the two data-plane backends (gap
-// G-STACK-3).
+// Large bundled-resource delivery across the two data-plane backends.
 //
 // standard_stack_parity_test.go proves an above-cutoff resource externalizes to
 // S3 and comes back under large_resources with a non-empty presigned_url, but it
@@ -23,7 +22,7 @@ package e2e
 //     load_artifact (the refresh) and fetches the freshly presigned URL
 //     successfully. The below-cutoff resource stays inline throughout.
 //
-//   - Filesystem (no external infra, the G-INFRA-5 authserver harness): a
+//   - Filesystem (no external infra, the authserver harness): a
 //     standalone server ingests a group-restricted layer whose artifact bundles
 //     the same above-cutoff and below-cutoff resources. An authorized member
 //     loads the artifact and the above-cutoff resource comes back as a
@@ -37,7 +36,7 @@ package e2e
 // storage), §6.2 / §6.6 (presigned URL delivery and the 403/expired refresh
 // contract), §13.10 / §13.11 (filesystem backend serves the token-bound
 // /objects/{content_hash} route; the S3 backend returns Signature V4 presigned
-// URLs). Gap G-STACK-3.
+// URLs).
 
 import (
 	"encoding/json"
@@ -72,7 +71,7 @@ func lrFetch(t *testing.T, rawURL, token string) (int, []byte) {
 // 403, refreshes via a fresh load_artifact, and fetches the new URL. The
 // below-cutoff resource stays inline.
 //
-// Spec: §4.2, §7.2, §6.2 / §6.6, §13.12. Gap G-STACK-3.
+// Spec: §4.2, §7.2, §6.2 / §6.6, §13.12.
 func TestLargeResourceDataPlane_S3PresignRefresh(t *testing.T) {
 	// Not parallel: standard mode keys metadata by the shared "default" org
 	// schema (see standard_stack_parity_test.go's header), so the e2e package
@@ -199,7 +198,7 @@ func TestLargeResourceDataPlane_S3PresignRefresh(t *testing.T) {
 // stays inline.
 //
 // Spec: §4.2, §7.2, §13.10 / §13.11 (the filesystem backend's token-bound
-// /objects route, no embedded signature). Gap G-STACK-3.
+// /objects route, no embedded signature).
 func TestLargeResourceDataPlane_FilesystemObjectsRoute(t *testing.T) {
 	t.Parallel()
 

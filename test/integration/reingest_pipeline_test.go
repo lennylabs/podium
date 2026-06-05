@@ -55,7 +55,7 @@ func gitLayerRepo(t *testing.T, desc string) string {
 	return "file://" + dir
 }
 
-// Spec: §7.3.1 / §14.10 (F-14.10.1) — a manual reingest of a git-source layer
+// Spec: §7.3.1 / §14.10 — a manual reingest of a git-source layer
 // clones the repo and ingests its artifacts. §14.10 registers a public Git
 // repo as a layer on a developer machine without a public ingress and pulls it
 // with `podium layer reingest`; the endpoint must resolve the git source
@@ -136,7 +136,7 @@ func writeArtifact(t *testing.T, dir, desc string) {
 	}
 }
 
-// Spec: §7.3.1 (F-7.3.4, F-7.3.6) — a manual reingest over HTTP runs the
+// Spec: §7.3.1 — a manual reingest over HTTP runs the
 // pipeline against a file-backed SQLite store: a post-registration artifact is
 // ingested, the response carries the result summary, and last_ingested_at is
 // stamped on the layer.
@@ -184,7 +184,7 @@ func TestReingestPipeline_SQLiteLocalSource(t *testing.T) {
 	}
 }
 
-// Spec: §4.7.2 (F-7.3.9) — an active freeze window blocks reingest with
+// Spec: §4.7.2 — an active freeze window blocks reingest with
 // ingest.frozen; a valid break-glass grant bypasses it.
 func TestReingestPipeline_FreezeAndBreakGlass(t *testing.T) {
 	t.Parallel()

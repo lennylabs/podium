@@ -13,7 +13,7 @@ import (
 // notifications (notifications/initialized after initialize, and possibly
 // notifications/cancelled or notifications/roots/list_changed). A
 // notification carries no id and must not receive a response. The serve loop
-// must not answer it with a -32601 error frame (F-6.8.1).
+// must not answer it with a -32601 error frame.
 func TestServe_NotificationProducesNoResponse(t *testing.T) {
 	t.Parallel()
 	srv := &mcpServer{cfg: &config{}}
@@ -36,7 +36,7 @@ func TestServe_NotificationProducesNoResponse(t *testing.T) {
 }
 
 // spec: §6.8 / JSON-RPC 2.0 — a bare notification (no surrounding request)
-// produces no output at all (F-6.8.1).
+// produces no output at all.
 func TestServe_LoneNotificationsAreSilent(t *testing.T) {
 	t.Parallel()
 	srv := &mcpServer{cfg: &config{}}
@@ -53,7 +53,7 @@ func TestServe_LoneNotificationsAreSilent(t *testing.T) {
 }
 
 // spec: §6.8 — a request with an id is still answered even when its method is
-// unknown, distinguishing it from an id-less notification (F-6.8.1).
+// unknown, distinguishing it from an id-less notification.
 func TestDispatchLine_RequestWithIDStillAnswered(t *testing.T) {
 	t.Parallel()
 	srv := &mcpServer{cfg: &config{}}
@@ -69,7 +69,7 @@ func TestDispatchLine_RequestWithIDStillAnswered(t *testing.T) {
 
 // spec: §6.8 — the long-lived subprocess must survive a single oversized
 // inbound frame: that request fails with a structured error and subsequent
-// frames on the same stdio session are still served (F-6.8.2).
+// frames on the same stdio session are still served.
 func TestServe_OversizedFrameDoesNotTerminate(t *testing.T) {
 	srv := &mcpServer{cfg: &config{}}
 	oversized := append(bytes.Repeat([]byte("x"), maxFrameBytes+10), '\n')
@@ -96,7 +96,7 @@ func TestServe_OversizedFrameDoesNotTerminate(t *testing.T) {
 }
 
 // spec: §6.8 — the host owns the lifecycle; the serve loop ends cleanly when
-// stdin reaches EOF (the host closing the pipe), returning no error (F-6.8.3).
+// stdin reaches EOF (the host closing the pipe), returning no error.
 func TestServe_StopsCleanlyOnStdinEOF(t *testing.T) {
 	t.Parallel()
 	srv := &mcpServer{cfg: &config{}}
@@ -115,7 +115,7 @@ func TestServe_StopsCleanlyOnStdinEOF(t *testing.T) {
 
 // spec: §6.8 — the host owns signal handling and shutdown. The bridge installs
 // no lifecycle (SIGINT/SIGTERM) handlers; the only signal it consults is
-// SIGHUP for the §6.3.2.1 token re-read, which is out of §6.8 scope (F-6.8.3).
+// SIGHUP for the §6.3.2.1 token re-read, which is out of §6.8 scope.
 func TestHangupSignals_OnlyTokenReReadSignal(t *testing.T) {
 	t.Parallel()
 	for _, sig := range hangupSignals() {
@@ -128,7 +128,7 @@ func TestHangupSignals_OnlyTokenReReadSignal(t *testing.T) {
 
 // spec: §6.8 — readFrame bounds buffered memory and reports an oversized frame
 // instead of accumulating it, so the serve loop can fail one request and keep
-// going (F-6.8.2).
+// going.
 func TestReadFrame(t *testing.T) {
 	t.Parallel()
 	t.Run("normal frames", func(t *testing.T) {

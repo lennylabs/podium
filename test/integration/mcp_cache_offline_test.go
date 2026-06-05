@@ -43,7 +43,7 @@ func loadArtifactOver(t *testing.T, registry, cacheDir string, extraEnv ...strin
 	return resp.Result
 }
 
-// Spec: §6.5 (F-6.5.1, F-6.5.4, F-6.5.5) — a first load populates the content
+// Spec: §6.5 — a first load populates the content
 // cache and the BoltDB resolution index, so a later offline-first load serves
 // the artifact from the persisted index without contacting the registry. This
 // exercises the (id, "latest") → semver → content_hash chain end to end.
@@ -81,7 +81,7 @@ func TestPodiumMCP_OfflineFirstServesFromPersistedIndex(t *testing.T) {
 	}
 }
 
-// Spec: §6.5 (F-6.5.2) — the default always-revalidate mode HEAD-revalidates a
+// Spec: §6.5 — the default always-revalidate mode HEAD-revalidates a
 // cached resolution against the live registry. A second load through a fresh
 // bridge process reusing the same cache directory exercises the registry HEAD
 // route and still returns the artifact.
@@ -113,7 +113,7 @@ func TestPodiumMCP_AlwaysRevalidateHeadRoundTrip(t *testing.T) {
 // Spec: §6.5 / §7.4 — offline-only never contacts the registry and reports the
 // structured network.offline_cache_miss error for content that was never
 // cached (the code lives in the §6.10 network.* namespace; there is no cache.*
-// namespace — F-7.4.5).
+// namespace).
 func TestPodiumMCP_OfflineOnlyMissReportsOfflineMiss(t *testing.T) {
 	t.Parallel()
 

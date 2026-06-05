@@ -39,7 +39,7 @@ func setupRegistryWithRedactManifest(t *testing.T, redactKey string) (*core.Regi
 // spec: §8.2 — a manifest's audit_redact directive reaches the
 // artifact.loaded read event (not only the ingest publish event), and the
 // resolved version/content_hash/layer become the redaction-eligible
-// context keys. F-8.2.3.
+// context keys.
 func TestAudit_LoadArtifactCarriesRedactKeys(t *testing.T) {
 	t.Parallel()
 	reg, rec := setupRegistryWithRedactManifest(t, "version")

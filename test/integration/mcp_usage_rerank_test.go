@@ -24,7 +24,7 @@ func searchIDsOver(t *testing.T, registry, cacheDir, query string) []string {
 	return out
 }
 
-// Spec: §12 (F-12.0.9) — "learn-from-usage reranking surfaces signal-based
+// Spec: §12 — "learn-from-usage reranking surfaces signal-based
 // ordering." Two artifacts with identical descriptions tie on BM25 and order
 // alphabetically. After repeated load_artifact calls record an access signal
 // for the second one, a fresh search surfaces it first. The registry server

@@ -100,7 +100,7 @@ func TestSearchArtifacts_NoOverlayPassthrough(t *testing.T) {
 	}
 }
 
-// Spec: §6.4.1 / F-6.4.4 — when a draft on the overlay is also returned by
+// Spec: §6.4.1 — when a draft on the overlay is also returned by
 // the registry, the fused total_matched counts it once. The pre-fix code
 // summed registry.TotalMatched + len(local), so an overlapping hit inflated
 // the total above the deduplicated result count.
@@ -159,7 +159,7 @@ func TestSearchArtifacts_OverlapTotalNotDoubleCounted(t *testing.T) {
 	}
 }
 
-// Spec: §6.4.1 / F-6.4.4 — an overlay-only draft (absent from the registry's
+// Spec: §6.4.1 — an overlay-only draft (absent from the registry's
 // returned results) adds exactly one to the registry's pre-truncation total.
 func TestSearchArtifacts_OverlayOnlyAddsOne(t *testing.T) {
 	t.Parallel()
@@ -196,7 +196,7 @@ func TestSearchArtifacts_OverlayOnlyAddsOne(t *testing.T) {
 	}
 }
 
-// Spec: §6.4.1 / F-6.4.4 — direct coverage of the count helper: registry
+// Spec: §6.4.1 — direct coverage of the count helper: registry
 // total plus distinct overlay-only IDs, deduped across the local and
 // semantic streams, ignoring overlap and empty IDs.
 func TestFusedTotalMatched(t *testing.T) {

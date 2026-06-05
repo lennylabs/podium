@@ -14,7 +14,7 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// Spec: §4.4 (F-4.4.2) — the ingest-time linter validates prose URL
+// Spec: §4.4 — the ingest-time linter validates prose URL
 // references with an HTTP HEAD (200/3xx); "Drift between manifest text and
 // bundled files is an ingest error." Before the fix the URL check was gated
 // behind a nil HTTPClient in every production ingest path, so URL references
@@ -84,7 +84,7 @@ func TestIngest_ProseURLHeadValidated(t *testing.T) {
 	}
 }
 
-// Spec: §4.4 line 348 (F-4.4.1) — the ingest-time linter resolves a prose
+// Spec: §4.4 line 348 — the ingest-time linter resolves a prose
 // reference that names another artifact against the current visible catalog.
 // A reference to a sibling artifact ID ingests cleanly; a reference to an
 // artifact ID absent from the catalog is an ingest error (§4.4 line 350).
@@ -138,7 +138,7 @@ func TestIngest_ProseReferenceResolvesAgainstCatalog(t *testing.T) {
 	}
 }
 
-// Spec: §4.4 line 347 (F-4.4.3) — a URL reference is valid only on HEAD 200
+// Spec: §4.4 line 347 — a URL reference is valid only on HEAD 200
 // or 3xx. A 204 No Content does not confirm the named resource, so it blocks
 // the artifact at ingest even though it is a 2xx status.
 func TestIngest_ProseURLRejectsNonOK2xx(t *testing.T) {
@@ -194,7 +194,7 @@ func TestIngest_ProseURLRejectsNonOK2xx(t *testing.T) {
 	}
 }
 
-// Spec: §4.4 (F-4.4.2) — the offline opt-out (PODIUM_INGEST_OFFLINE /
+// Spec: §4.4 — the offline opt-out (PODIUM_INGEST_OFFLINE /
 // --offline, modeled here by NewIngestLinter(true)) skips the URL HEAD
 // probe so a dead URL no longer blocks ingest; the bundled-file existence
 // check still runs.

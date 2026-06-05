@@ -8,7 +8,7 @@ import (
 
 // End-to-end coverage for the §4.5.4 / §6.4 client-side overlay DOMAIN.md merge
 // in load_domain, driven through the real podium-mcp bridge against a real
-// standalone registry server (F-4.5.2, F-6.4.2). The bridge subprocess is
+// standalone registry server. The bridge subprocess is
 // bounded and torn down by mcpExec.
 
 // writeOverlayFile writes one file into a workspace overlay tree.
@@ -56,7 +56,7 @@ func subdomainHasPath(result map[string]any, path string) bool {
 	return false
 }
 
-// spec: §4.5.4 / §6.4 (F-4.5.2/F-6.4.2) — a workspace-overlay DOMAIN.md
+// spec: §4.5.4 / §6.4 — a workspace-overlay DOMAIN.md
 // description overrides the registry's for the requested domain, and an overlay
 // artifact that is a direct child of the domain joins the notable list.
 func TestOverlayDomainMerge_DescriptionAndDirectChild(t *testing.T) {
@@ -86,7 +86,7 @@ func TestOverlayDomainMerge_DescriptionAndDirectChild(t *testing.T) {
 	}
 }
 
-// spec: §4.5.3 / §4.5.5 (F-4.5.2/F-6.4.2) — an overlay artifact below an
+// spec: §4.5.3 / §4.5.5 — an overlay artifact below an
 // immediate child introduces that child as a subdomain, and an overlay
 // DOMAIN.md with unlisted: true removes a registry subdomain from enumeration.
 func TestOverlayDomainMerge_NewSubdomainAndUnlisted(t *testing.T) {

@@ -1,8 +1,8 @@
 package e2e
 
 // Expand-contract rolling upgrade across two server binaries over one Postgres
-// metadata store (gap G-LIFECYCLE-7), driving the upgrade procedure in
-// docs/deployment/operator-guide.md (T-D-operator-guide-45 and -46).
+// metadata store, driving the upgrade procedure in
+// docs/deployment/operator-guide.md.
 //
 // The operator guide states that schema migrations are bundled in the registry
 // binary and applied additively on startup: a new version creates tables and
@@ -50,7 +50,7 @@ package e2e
 // upgrade migrates an existing database forward without a separate migration
 // step and without downtime), §4.7.1 (schema-per-org isolation; org IDs are
 // UUIDs), §13.10 / §13.12 (standard deployment backend configuration), §7.2
-// (control plane metadata API). Gap G-LIFECYCLE-7.
+// (control plane metadata API).
 
 import (
 	"context"
@@ -343,7 +343,7 @@ func ruIngestLayer(t *testing.T, srv *serverProc, token, layerID, artifactID, bo
 //
 // Spec: §13.4 (additive forward migration in place, idempotent, without a
 // separate migration step and without downtime), §4.7.1 (schema-per-org), §7.2
-// (control plane). Gap G-LIFECYCLE-7. T-D-operator-guide-45.
+// (control plane).
 func TestServerOps_RollingUpgradeCoexistence(t *testing.T) {
 	// Not parallel: the default org schema is shared and is reset to the legacy
 	// state at the start of the run (ruStageLegacyDatabase).
@@ -469,7 +469,7 @@ func TestServerOps_RollingUpgradeCoexistence(t *testing.T) {
 //
 // Spec: §13.4 (the additive schema stays forward-compatible with the previous
 // binary, so an older binary continues to run against the migrated database),
-// §4.7.1 (schema-per-org). Gap G-LIFECYCLE-7. T-D-operator-guide-46.
+// §4.7.1 (schema-per-org).
 func TestServerOps_RollbackBeforeFinalize(t *testing.T) {
 	// Not parallel: shares and resets the default org schema.
 	dsn := ruSkipIfNoPostgres(t)

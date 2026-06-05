@@ -20,7 +20,7 @@ import (
 	"github.com/lennylabs/podium/pkg/version"
 )
 
-// Spec: §5 / §3.3 (F-3.3.3) — the bridge advertises sessionCorrelation and
+// Spec: §5 / §3.3 — the bridge advertises sessionCorrelation and
 // backs it: it threads one per-process session_id through every meta-tool
 // call to the registry. This drives the real binary against a recording
 // registry stub and checks the session_id the registry actually receives
@@ -90,7 +90,7 @@ func TestPodiumMCP_AdvertisesAndThreadsSession(t *testing.T) {
 	}
 }
 
-// Spec: §4.7.6 / §5 (F-3.3.3) — end to end through the real binary against
+// Spec: §4.7.6 / §5 — end to end through the real binary against
 // the real registry: a bridge process pins `latest` for its session, so a
 // version ingested mid-session does not change what that process loads,
 // while a fresh process sees the new latest. Proves the bridge-threaded
@@ -103,7 +103,7 @@ func TestPodiumMCP_SessionPinsLatestEndToEnd(t *testing.T) {
 	}
 	t0 := time.Now().UTC()
 	// ContentHash is the canonical hash of the served frontmatter so the
-	// bridge's §6.6 step 2 content-hash check (F-6.6.2) accepts the load.
+	// bridge's §6.6 step 2 content-hash check accepts the load.
 	put := func(ver string, at time.Time) {
 		fm := "---\ntype: context\nversion: " + ver +
 			"\ndescription: A reusable finance context for the team.\nsensitivity: low\n---\n"

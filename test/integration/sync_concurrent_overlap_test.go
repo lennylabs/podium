@@ -15,7 +15,7 @@ import (
 	podiumsync "github.com/lennylabs/podium/pkg/sync"
 )
 
-// G-SCALE-3: concurrent consumers sync overlapping catalog slices from one
+// concurrent consumers sync overlapping catalog slices from one
 // booted server to distinct targets, and the shared artifacts materialize
 // byte-identically across every target with no stray ".tmp" staging siblings.
 //

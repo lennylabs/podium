@@ -40,7 +40,7 @@ func mockIdP(t *testing.T) *httptest.Server {
 }
 
 // Spec: §6.2 / §6.3 — bearerToken selects the credential per
-// PODIUM_IDENTITY_PROVIDER. F-6.3.3.
+// PODIUM_IDENTITY_PROVIDER.
 func TestBearerToken_ProviderSelection(t *testing.T) {
 	t.Parallel()
 
@@ -90,7 +90,7 @@ func TestBearerToken_ProviderSelection(t *testing.T) {
 
 // Spec: §6.3 / §14 — with an IdP configured and no cached token, the bridge
 // runs the device flow, surfaces the URL + code via MCP elicitation, and
-// caches the resulting token in the keychain. F-6.3.3.
+// caches the resulting token in the keychain.
 func TestDeviceCodeToken_RunsFlowElicitsAndCaches(t *testing.T) {
 	t.Parallel()
 	idp := mockIdP(t)
@@ -140,7 +140,7 @@ func TestDeviceCodeToken_RunsFlowElicitsAndCaches(t *testing.T) {
 // Spec: §6.9 — accessTokenExpired drives the "Auth token expired
 // (oauth-device-code)" trigger. A JWT past its exp is expired; an opaque
 // (non-JWT) token, or one without a numeric exp, cannot be evaluated locally
-// and is treated as not-expired so it is used as-is. F-6.9.5.
+// and is treated as not-expired so it is used as-is.
 func TestAccessTokenExpired(t *testing.T) {
 	t.Parallel()
 	now := time.Unix(1_700_000_000, 0)
@@ -172,7 +172,7 @@ func TestAccessTokenExpired(t *testing.T) {
 // Spec: §6.9 "Auth token expired (oauth-device-code): Trigger refresh". A
 // cached access token past its exp is silently refreshed with the stored
 // refresh token; the renewed token is returned and persisted, and no
-// interactive device-flow elicitation is emitted. F-6.9.5.
+// interactive device-flow elicitation is emitted.
 func TestDeviceCodeToken_RefreshesExpiredAccessToken(t *testing.T) {
 	t.Parallel()
 	var sawRefreshGrant bool
@@ -232,7 +232,7 @@ func TestDeviceCodeToken_RefreshesExpiredAccessToken(t *testing.T) {
 // Spec: §6.9 — "if interactive refresh required, surface ... via MCP
 // elicitation". When the refresh token is rejected (revoked / expired), the
 // bridge falls back to the interactive device flow and elicits the
-// verification URL + code. F-6.9.5.
+// verification URL + code.
 func TestDeviceCodeToken_ReauthsWhenRefreshRejected(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()

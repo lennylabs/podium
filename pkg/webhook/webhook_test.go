@@ -84,7 +84,7 @@ func TestWorker_DeliversWithHMACSignature(t *testing.T) {
 // spec: §7.3.2 — the delivered body carries the full
 // {event, trace_id, timestamp, actor, data} schema. trace_id and actor
 // are threaded from the publisher; actor is always an object so the
-// schema stays stable for receivers that key on it (F-7.3.1).
+// schema stays stable for receivers that key on it.
 func TestWorker_BodyCarriesFullSchema(t *testing.T) {
 	t.Parallel()
 	rs := newReceiverServer(t, "secret-1")
@@ -117,7 +117,7 @@ func TestWorker_BodyCarriesFullSchema(t *testing.T) {
 }
 
 // spec: §7.3.2 — a delivery with no resolved caller still carries an
-// `actor` object (empty), keeping the wire schema stable (F-7.3.1).
+// `actor` object (empty), keeping the wire schema stable.
 func TestWorker_NilActorMarshalsAsEmptyObject(t *testing.T) {
 	t.Parallel()
 	rs := newReceiverServer(t, "secret-1")
@@ -145,7 +145,7 @@ func TestWorker_NilActorMarshalsAsEmptyObject(t *testing.T) {
 // spec: §7.3.2 — two events firing close together against the same
 // receiver must not lose a failure-count increment. The persisted
 // counter reflects both failures, so the 32-failure auto-disable
-// threshold is reached on time rather than late (F-7.3.8).
+// threshold is reached on time rather than late.
 func TestWorker_ConcurrentDeliveriesDoNotLoseFailureCount(t *testing.T) {
 	t.Parallel()
 	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

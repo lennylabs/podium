@@ -1,7 +1,7 @@
 package e2e
 
 // Token-bound object route refuses a blob after the caller loses layer
-// visibility (gap G-AUTH-13).
+// visibility.
 //
 // data_plane_test.go and http_api_test.go assert the happy-path /objects fetch
 // of an above-cutoff resource, and large_resource_data_plane_test.go asserts a
@@ -31,8 +31,7 @@ package e2e
 // Spec: §4.6 (the visibility evaluator; groups: resolves through the §6.3.1
 // SCIM directory), §6.9 (visibility denial without leaking the layer's
 // existence), §13.10 / §13.11 (the token-bound /objects route re-checks
-// visibility per fetch; the URL is bound to the session, not a clock). Gap
-// G-AUTH-13.
+// visibility per fetch; the URL is bound to the session, not a clock).
 
 import (
 	"strings"

@@ -10,7 +10,7 @@ import (
 	"github.com/lennylabs/podium/pkg/vector"
 )
 
-// Spec: §13.12 (F-13.12.3) — PODIUM_PINECONE_HOST defaults to "auto-resolved
+// Spec: §13.12 — PODIUM_PINECONE_HOST defaults to "auto-resolved
 // from index name". This drives the full index-only path: the shared
 // OpenBuiltin factory queries a mock Pinecone control plane to resolve the
 // data-plane host from the index name, then the constructed backend upserts and

@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// spec: §8.2 (F-8.2.2) — "the MCP server applies the same directives before
+// spec: §8.2 — "the MCP server applies the same directives before
 // writing to its local audit sink." A load_artifact for an artifact whose
 // manifest names a sensitive frontmatter field in audit_redact must record the
 // artifact.loaded event in the MCP local sink with that field masked, and the

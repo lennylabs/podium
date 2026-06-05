@@ -4,7 +4,7 @@ package e2e
 // for the build, hello-world, CLI-surface, server, MCP, and setup claims the
 // README makes. Tooling that the sandbox does not provision (Docker, Homebrew,
 // the Python/Node SDKs, a live Postgres) is skipped with a clear reason;
-// behaviors blocked by a known BUILD-GAPS finding are skipped citing that id.
+// behaviors blocked by a known implementation-gap finding are skipped citing that id.
 
 import (
 	"encoding/json"
@@ -23,7 +23,7 @@ func readmeGreet(t *testing.T) string {
 	})
 }
 
-// T-D-readme-1 — go build ./cmd/podium produces a working binary.
+// go build ./cmd/podium produces a working binary.
 func TestReadme_BuildCmdPodium(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "podium")
 	build, ok := runExternal(t, repoRoot(t), 180*time.Second, "go", "build", "-o", out, "./cmd/podium")
@@ -39,7 +39,7 @@ func TestReadme_BuildCmdPodium(t *testing.T) {
 	}
 }
 
-// T-D-readme-2 — go build ./... builds every binary.
+// go build ./... builds every binary.
 func TestReadme_BuildAll(t *testing.T) {
 	build, ok := runExternal(t, repoRoot(t), 240*time.Second, "go", "build", "./...")
 	if !ok {
@@ -50,12 +50,12 @@ func TestReadme_BuildAll(t *testing.T) {
 	}
 }
 
-// T-D-readme-3 — make test runs the full suite.
+// make test runs the full suite.
 func TestReadme_MakeTest(t *testing.T) {
 	t.Skip("running `make test` from within the test suite is recursive and unbounded; the suite itself is the coverage for this claim")
 }
 
-// T-D-readme-4 — make help lists the documented targets.
+// make help lists the documented targets.
 func TestReadme_MakeHelp(t *testing.T) {
 	res, ok := runExternal(t, repoRoot(t), 30*time.Second, "make", "help")
 	if !ok {
@@ -71,22 +71,22 @@ func TestReadme_MakeHelp(t *testing.T) {
 	}
 }
 
-// T-D-readme-5 — Python SDK installs and imports.
+// Python SDK installs and imports.
 func TestReadme_PythonSDKInstall(t *testing.T) {
 	t.Skip("requires a provisioned Python 3.10+ toolchain and pip install -e sdks/podium-py; not available in the test sandbox")
 }
 
-// T-D-readme-6 — Python SDK pytest suite passes.
+// Python SDK pytest suite passes.
 func TestReadme_PythonSDKPytest(t *testing.T) {
 	t.Skip("requires Python + pytest in sdks/podium-py; not available in the test sandbox")
 }
 
-// T-D-readme-7 — TypeScript SDK installs and tests.
+// TypeScript SDK installs and tests.
 func TestReadme_TypeScriptSDK(t *testing.T) {
 	t.Skip("requires Node.js 20+ and npm in sdks/podium-ts; not available in the test sandbox")
 }
 
-// T-D-readme-8 — hello world: create the documented skill files.
+// hello world: create the documented skill files.
 func TestReadme_HelloWorldFiles(t *testing.T) {
 	t.Parallel()
 	reg := readmeGreet(t)
@@ -100,7 +100,7 @@ func TestReadme_HelloWorldFiles(t *testing.T) {
 	}
 }
 
-// T-D-readme-9 — hello world: podium lint passes.
+// hello world: podium lint passes.
 func TestReadme_HelloWorldLint(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "lint", "--registry", readmeGreet(t))
@@ -109,7 +109,7 @@ func TestReadme_HelloWorldLint(t *testing.T) {
 	}
 }
 
-// T-D-readme-10 — hello world: podium init writes sync.yaml with registry and
+// hello world: podium init writes sync.yaml with registry and
 // harness plus gitignore entries.
 func TestReadme_HelloWorldInit(t *testing.T) {
 	t.Parallel()
@@ -129,7 +129,7 @@ func TestReadme_HelloWorldInit(t *testing.T) {
 	}
 }
 
-// T-D-readme-11 — init --registry without --harness omits the harness line.
+// init --registry without --harness omits the harness line.
 func TestReadme_InitNoHarness(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
@@ -144,7 +144,7 @@ func TestReadme_InitNoHarness(t *testing.T) {
 	}
 }
 
-// T-D-readme-12 — hello world: sync materializes the skill under .claude/skills/.
+// hello world: sync materializes the skill under .claude/skills/.
 func TestReadme_HelloWorldSyncClaudeCode(t *testing.T) {
 	t.Parallel()
 	reg := readmeGreet(t)
@@ -162,7 +162,7 @@ func TestReadme_HelloWorldSyncClaudeCode(t *testing.T) {
 	}
 }
 
-// T-D-readme-13 — hello world: sync --harness none writes the canonical layout.
+// hello world: sync --harness none writes the canonical layout.
 func TestReadme_HelloWorldSyncNone(t *testing.T) {
 	t.Parallel()
 	reg := readmeGreet(t)
@@ -172,7 +172,7 @@ func TestReadme_HelloWorldSyncNone(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, "personal/hello/greet/SKILL.md"))
 }
 
-// T-D-readme-14 — init --standalone points sync.yaml at http://127.0.0.1:8080.
+// init --standalone points sync.yaml at http://127.0.0.1:8080.
 func TestReadme_InitStandalone(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
@@ -182,7 +182,7 @@ func TestReadme_InitStandalone(t *testing.T) {
 	}
 }
 
-// T-D-readme-15 — init --global writes ~/.podium/sync.yaml.
+// init --global writes ~/.podium/sync.yaml.
 func TestReadme_InitGlobal(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
@@ -196,7 +196,7 @@ func TestReadme_InitGlobal(t *testing.T) {
 	}
 }
 
-// T-D-readme-16 — init refuses to overwrite without --force.
+// init refuses to overwrite without --force.
 func TestReadme_InitRefuseOverwrite(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
@@ -211,7 +211,7 @@ func TestReadme_InitRefuseOverwrite(t *testing.T) {
 	}
 }
 
-// T-D-readme-17 — init --force overwrites.
+// init --force overwrites.
 func TestReadme_InitForce(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
@@ -226,7 +226,7 @@ func TestReadme_InitForce(t *testing.T) {
 	}
 }
 
-// T-D-readme-18 — sync without --registry falls back to sync.yaml.
+// sync without --registry falls back to sync.yaml.
 func TestReadme_SyncConfigFallback(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
@@ -240,7 +240,7 @@ func TestReadme_SyncConfigFallback(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, "x/ARTIFACT.md"))
 }
 
-// T-D-readme-19 — sync --dry-run writes nothing.
+// sync --dry-run writes nothing.
 func TestReadme_SyncDryRun(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
@@ -254,7 +254,7 @@ func TestReadme_SyncDryRun(t *testing.T) {
 	}
 }
 
-// T-D-readme-20 — the sync --json envelope (spec §7.5) carries harness, target,
+// the sync --json envelope (spec §7.5) carries harness, target,
 // and artifacts:[{id, version, type, layer}]; the artifacts actually
 // materialize under the target.
 func TestReadme_SyncJSON(t *testing.T) {
@@ -283,7 +283,7 @@ func TestReadme_SyncJSON(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, "x", "ARTIFACT.md"))
 }
 
-// T-D-readme-21 — sync is idempotent.
+// sync is idempotent.
 func TestReadme_SyncIdempotent(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -303,7 +303,7 @@ func TestReadme_SyncIdempotent(t *testing.T) {
 	}
 }
 
-// T-D-readme-22 — sync with an unknown harness exits non-zero with
+// sync with an unknown harness exits non-zero with
 // config.unknown_harness.
 func TestReadme_SyncUnknownHarness(t *testing.T) {
 	t.Parallel()
@@ -314,7 +314,7 @@ func TestReadme_SyncUnknownHarness(t *testing.T) {
 	}
 }
 
-// T-D-readme-23 — version prints a version string.
+// version prints a version string.
 func TestReadme_Version(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "version")
@@ -323,7 +323,7 @@ func TestReadme_Version(t *testing.T) {
 	}
 }
 
-// T-D-readme-24 — help prints the full command list.
+// help prints the full command list.
 func TestReadme_HelpFullList(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "help")
@@ -341,7 +341,7 @@ func TestReadme_HelpFullList(t *testing.T) {
 	}
 }
 
-// T-D-readme-25 — running podium with no subcommand exits 2 with usage.
+// running podium with no subcommand exits 2 with usage.
 func TestReadme_NoSubcommand(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil)
@@ -353,7 +353,7 @@ func TestReadme_NoSubcommand(t *testing.T) {
 	}
 }
 
-// T-D-readme-26 — status prints the documented diagnostic labels.
+// status prints the documented diagnostic labels.
 func TestReadme_Status(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"HOME=" + t.TempDir(), "PODIUM_REGISTRY="}, "status")
@@ -373,7 +373,7 @@ func TestReadme_Status(t *testing.T) {
 	}
 }
 
-// T-D-readme-27 — status against a reachable registry shows OK and the mode.
+// status against a reachable registry shows OK and the mode.
 func TestReadme_StatusReachable(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
@@ -386,7 +386,7 @@ func TestReadme_StatusReachable(t *testing.T) {
 	}
 }
 
-// T-D-readme-28 — status against an unreachable registry shows UNREACHABLE and
+// status against an unreachable registry shows UNREACHABLE and
 // still exits 0.
 func TestReadme_StatusUnreachable(t *testing.T) {
 	t.Parallel()
@@ -399,7 +399,7 @@ func TestReadme_StatusUnreachable(t *testing.T) {
 	}
 }
 
-// T-D-readme-29 — lint with a missing registry path exits 1.
+// lint with a missing registry path exits 1.
 func TestReadme_LintMissingPath(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "lint", "--registry", filepath.Join(t.TempDir(), "nope"))
@@ -408,7 +408,7 @@ func TestReadme_LintMissingPath(t *testing.T) {
 	}
 }
 
-// T-D-readme-30 — lint reports errors for a malformed ARTIFACT.md (no type).
+// lint reports errors for a malformed ARTIFACT.md (no type).
 func TestReadme_LintMalformed(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -423,7 +423,7 @@ func TestReadme_LintMalformed(t *testing.T) {
 	}
 }
 
-// T-D-readme-31 — artifact scaffold creates a skill directory.
+// artifact scaffold creates a skill directory.
 func TestReadme_ScaffoldSkill(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "personal/hello/greet")
@@ -442,7 +442,7 @@ func TestReadme_ScaffoldSkill(t *testing.T) {
 	}
 }
 
-// T-D-readme-32 — scaffold with a non-first-class type warns but succeeds.
+// scaffold with a non-first-class type warns but succeeds.
 func TestReadme_ScaffoldExtensionType(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "my-artifact")
@@ -456,7 +456,7 @@ func TestReadme_ScaffoldExtensionType(t *testing.T) {
 	mustExist(t, filepath.Join(out, "ARTIFACT.md"))
 }
 
-// T-D-readme-33 — scaffold refuses to overwrite an existing directory.
+// scaffold refuses to overwrite an existing directory.
 func TestReadme_ScaffoldRefuseOverwrite(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "my-artifact")
@@ -472,7 +472,7 @@ func TestReadme_ScaffoldRefuseOverwrite(t *testing.T) {
 	}
 }
 
-// T-D-readme-34 — filesystem catalog: sync materializes without a server.
+// filesystem catalog: sync materializes without a server.
 func TestReadme_FilesystemCatalog(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -488,7 +488,7 @@ func TestReadme_FilesystemCatalog(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, "b/ARTIFACT.md"))
 }
 
-// T-D-readme-35 — /healthz returns 200 with a mode/status field.
+// /healthz returns 200 with a mode/status field.
 func TestReadme_Healthz(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
@@ -499,7 +499,7 @@ func TestReadme_Healthz(t *testing.T) {
 	}
 }
 
-// T-D-readme-36 — /readyz returns 200.
+// /readyz returns 200.
 func TestReadme_Readyz(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
@@ -508,7 +508,7 @@ func TestReadme_Readyz(t *testing.T) {
 	}
 }
 
-// T-D-readme-37 — MCP initialize returns capabilities with tools.
+// MCP initialize returns capabilities with tools.
 func TestReadme_MCPInitialize(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
@@ -519,7 +519,7 @@ func TestReadme_MCPInitialize(t *testing.T) {
 	}
 }
 
-// T-D-readme-38 — MCP tools/list returns the four meta-tools.
+// MCP tools/list returns the four meta-tools.
 func TestReadme_MCPToolsList(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
@@ -531,7 +531,7 @@ func TestReadme_MCPToolsList(t *testing.T) {
 	}
 }
 
-// T-D-readme-39 — MCP search_artifacts proxies to the registry.
+// MCP search_artifacts proxies to the registry.
 func TestReadme_MCPSearchArtifacts(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -545,7 +545,7 @@ func TestReadme_MCPSearchArtifacts(t *testing.T) {
 	}
 }
 
-// T-D-readme-40 — MCP load_artifact materializes a skill to disk.
+// MCP load_artifact materializes a skill to disk.
 func TestReadme_MCPLoadArtifact(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -566,8 +566,8 @@ func TestReadme_MCPLoadArtifact(t *testing.T) {
 	mustExist(t, filepath.Join(mat, ".claude/skills/hello/SKILL.md"))
 }
 
-// T-D-readme-41 — MCP load_domain returns the domain map. Doc-accuracy
-// (F-0.0.2): the wire keys are subdomains/notable, not domains/artifacts.
+// MCP load_domain returns the domain map. Doc-accuracy:
+// the wire keys are subdomains/notable, not domains/artifacts.
 func TestReadme_MCPLoadDomain(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -584,7 +584,7 @@ func TestReadme_MCPLoadDomain(t *testing.T) {
 	}
 }
 
-// T-D-readme-42 — /v1/search_artifacts returns total_matched and results.
+// /v1/search_artifacts returns total_matched and results.
 func TestReadme_HTTPSearch(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -600,7 +600,7 @@ func TestReadme_HTTPSearch(t *testing.T) {
 	}
 }
 
-// T-D-readme-43 — /v1/load_artifact returns the manifest.
+// /v1/load_artifact returns the manifest.
 func TestReadme_HTTPLoadArtifact(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"a/b/ARTIFACT.md": contextArtifact("ab")}))
@@ -617,7 +617,7 @@ func TestReadme_HTTPLoadArtifact(t *testing.T) {
 	}
 }
 
-// T-D-readme-44 — /v1/load_domain returns the domain map (subdomains/notable).
+// /v1/load_domain returns the domain map (subdomains/notable).
 func TestReadme_HTTPLoadDomain(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
@@ -630,7 +630,7 @@ func TestReadme_HTTPLoadDomain(t *testing.T) {
 	}
 }
 
-// T-D-readme-45 — /v1/layers lists registered layers, each with an ID field.
+// /v1/layers lists registered layers, each with an ID field.
 func TestReadme_HTTPLayers(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
@@ -646,7 +646,7 @@ func TestReadme_HTTPLayers(t *testing.T) {
 	}
 }
 
-// T-D-readme-46 — layer reingest triggers a fresh ingest.
+// layer reingest triggers a fresh ingest.
 func TestReadme_LayerReingest(t *testing.T) {
 	t.Parallel()
 	// §0 quickstart: `podium layer reingest <id>` prints a per-artifact
@@ -667,7 +667,7 @@ func TestReadme_LayerReingest(t *testing.T) {
 	}
 }
 
-// T-D-readme-47 — layer register registers a local layer; list shows it.
+// layer register registers a local layer; list shows it.
 func TestReadme_LayerRegister(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
@@ -682,7 +682,7 @@ func TestReadme_LayerRegister(t *testing.T) {
 	}
 }
 
-// T-D-readme-48 — podium search returns human-readable results.
+// podium search returns human-readable results.
 func TestReadme_SearchCLI(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"greet/ARTIFACT.md": contextArtifact("greet the user")}))
@@ -695,7 +695,7 @@ func TestReadme_SearchCLI(t *testing.T) {
 	}
 }
 
-// T-D-readme-49 — podium search --json emits a JSON envelope.
+// podium search --json emits a JSON envelope.
 func TestReadme_SearchJSON(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"greet/ARTIFACT.md": contextArtifact("greet the user")}))
@@ -709,7 +709,7 @@ func TestReadme_SearchJSON(t *testing.T) {
 	}
 }
 
-// T-D-readme-50 — podium search with no query exits 2.
+// podium search with no query exits 2.
 func TestReadme_SearchNoQuery(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY=http://127.0.0.1:8080"}, "search")
@@ -721,22 +721,22 @@ func TestReadme_SearchNoQuery(t *testing.T) {
 	}
 }
 
-// T-D-readme-51 — Python SDK search_artifacts.
+// Python SDK search_artifacts.
 func TestReadme_PythonSDKSearch(t *testing.T) {
 	t.Skip("requires the installed Python SDK and a Python runtime; not available in the test sandbox")
 }
 
-// T-D-readme-52 — TypeScript SDK searchArtifacts.
+// TypeScript SDK searchArtifacts.
 func TestReadme_TypeScriptSDKSearch(t *testing.T) {
 	t.Skip("requires the built TypeScript SDK and a Node runtime; not available in the test sandbox")
 }
 
-// T-D-readme-53 — Docker container image healthz.
+// Docker container image healthz.
 func TestReadme_DockerImage(t *testing.T) {
 	t.Skip("requires Docker and the published ghcr.io/lennylabs/podium-server image; not available in the test sandbox")
 }
 
-// T-D-readme-54 — multi-layer filesystem registry resolves the hierarchy.
+// multi-layer filesystem registry resolves the hierarchy.
 func TestReadme_MultiLayerFilesystem(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -755,7 +755,7 @@ func TestReadme_MultiLayerFilesystem(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, "my-stuff/note/ARTIFACT.md"))
 }
 
-// T-D-readme-55 — multi-layer with a top-level ARTIFACT.md is ambiguous.
+// multi-layer with a top-level ARTIFACT.md is ambiguous.
 func TestReadme_MultiLayerAmbiguous(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -768,12 +768,12 @@ func TestReadme_MultiLayerAmbiguous(t *testing.T) {
 	}
 }
 
-// T-D-readme-56 — make coverage.
+// make coverage.
 func TestReadme_MakeCoverage(t *testing.T) {
 	t.Skip("make coverage runs the full Go suite with -coverprofile; running it from within the suite is recursive and slow")
 }
 
-// T-D-readme-57 — cross-harness: skill materializes under .cursor/.
+// cross-harness: skill materializes under .cursor/.
 func TestReadme_CursorSkill(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -790,7 +790,7 @@ func TestReadme_CursorSkill(t *testing.T) {
 	}
 }
 
-// T-D-readme-58 — login with missing --registry exits 2.
+// login with missing --registry exits 2.
 func TestReadme_LoginNoRegistry(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY="}, "login")
@@ -799,7 +799,7 @@ func TestReadme_LoginNoRegistry(t *testing.T) {
 	}
 }
 
-// T-D-readme-59 — login with missing --issuer exits non-zero.
+// login with missing --issuer exits non-zero.
 func TestReadme_LoginNoIssuer(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_OAUTH_AUTHORIZATION_ENDPOINT="}, "login", "--registry", "https://registry.example.com/")
@@ -811,7 +811,7 @@ func TestReadme_LoginNoIssuer(t *testing.T) {
 	}
 }
 
-// T-D-readme-60 — logout with missing --registry exits 2.
+// logout with missing --registry exits 2.
 func TestReadme_LogoutNoRegistry(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY="}, "logout")
@@ -820,7 +820,7 @@ func TestReadme_LogoutNoRegistry(t *testing.T) {
 	}
 }
 
-// T-D-readme-61 — quota prints tenant quota information.
+// quota prints tenant quota information.
 func TestReadme_Quota(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
@@ -833,7 +833,7 @@ func TestReadme_Quota(t *testing.T) {
 	}
 }
 
-// T-D-readme-62 — domain show returns the domain map via HTTP.
+// domain show returns the domain map via HTTP.
 func TestReadme_DomainShow(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
@@ -846,7 +846,7 @@ func TestReadme_DomainShow(t *testing.T) {
 	}
 }
 
-// T-D-readme-63 — domain analyze returns discovery metrics.
+// domain analyze returns discovery metrics.
 func TestReadme_DomainAnalyze(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
@@ -863,7 +863,7 @@ func TestReadme_DomainAnalyze(t *testing.T) {
 	}
 }
 
-// T-D-readme-64 — impact lists dependents. A child extends a parent, so the
+// impact lists dependents. A child extends a parent, so the
 // reverse-dependency index records the edge and `podium impact` reports it.
 func TestReadme_Impact(t *testing.T) {
 	t.Parallel()
@@ -882,22 +882,22 @@ func TestReadme_Impact(t *testing.T) {
 	}
 }
 
-// T-D-readme-65 — sign signs a content hash.
+// sign signs a content hash.
 func TestReadme_Sign(t *testing.T) {
 	t.Skip("requires a configured signing provider (Sigstore or equivalent); not available in the test sandbox")
 }
 
-// T-D-readme-66 — admin erase removes audit entries.
+// admin erase removes audit entries.
 func TestReadme_AdminErase(t *testing.T) {
 	t.Skip("requires tenant admin credentials and a seeded audit log; the documented --subject flag is also not the implemented flag, so this is not exercisable in the standalone sandbox")
 }
 
-// T-D-readme-67 — admin grant / revoke.
+// admin grant / revoke.
 func TestReadme_AdminGrantRevoke(t *testing.T) {
 	t.Skip("requires tenant admin credentials; the documented --user flag is not the implemented flag, so grant/revoke is not exercisable in the standalone sandbox")
 }
 
-// T-D-readme-68 — serve --layer-path starts a standalone server.
+// serve --layer-path starts a standalone server.
 func TestReadme_ServeLayerPath(t *testing.T) {
 	t.Parallel()
 	srv := startServerArgs(t, []string{"HOME=" + t.TempDir()}, "serve", "--standalone", "--layer-path",
@@ -915,7 +915,7 @@ func TestReadme_ServeLayerPath(t *testing.T) {
 	}
 }
 
-// T-D-readme-69 — sync override --add reports the toggle.
+// sync override --add reports the toggle.
 func TestReadme_SyncOverrideAdd(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
@@ -930,9 +930,9 @@ func TestReadme_SyncOverrideAdd(t *testing.T) {
 	}
 }
 
-// T-D-readme-70 — sync save-as captures a named profile.
+// sync save-as captures a named profile.
 // §7.5.6: a real sync records the resolved scope in the target lock, and
-// save-as renders that scope into a sync.yaml profile (F-7.5.8, fixed: the
+// save-as renders that scope into a sync.yaml profile (fixed: the
 // lock's scope is populated, so the captured profile reproduces --include).
 func TestReadme_SyncSaveAs(t *testing.T) {
 	t.Parallel()
@@ -957,11 +957,11 @@ func TestReadme_SyncSaveAs(t *testing.T) {
 		t.Errorf("stdout missing `profile: dev-focus`:\n%s", res.Stdout)
 	}
 	if !strings.Contains(res.Stdout, "finance/**") {
-		t.Errorf("save-as did not reproduce the lock's include scope (F-7.5.8):\n%s", res.Stdout)
+		t.Errorf("save-as did not reproduce the lock's include scope:\n%s", res.Stdout)
 	}
 }
 
-// T-D-readme-71 — cache prune removes content-cache buckets older than N days.
+// cache prune removes content-cache buckets older than N days.
 // Doc-accuracy: --days 0 is the boundary "older than now" and is accepted (it
 // prunes every bucket last accessed in the past); only a negative --days is
 // rejected, so the documented capability is exercised with an aged bucket.
@@ -996,7 +996,7 @@ func TestReadme_CachePrune(t *testing.T) {
 	}
 }
 
-// T-D-readme-72 — import converts a skills tree into a Podium layer.
+// import converts a skills tree into a Podium layer.
 // Doc-accuracy: the implemented flag is --target (the README shows --output).
 func TestReadme_Import(t *testing.T) {
 	t.Parallel()
@@ -1020,7 +1020,7 @@ func TestReadme_Import(t *testing.T) {
 	}
 }
 
-// T-D-readme-73 — profile edit adds an include pattern.
+// profile edit adds an include pattern.
 func TestReadme_ProfileEdit(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
@@ -1035,9 +1035,9 @@ func TestReadme_ProfileEdit(t *testing.T) {
 	}
 }
 
-// T-D-readme-74 — layer watch polls a source and re-ingests.
+// layer watch polls a source and re-ingests.
 //
-// spec §7.3.1 / §14.10 (F-14.10.2): `podium layer watch` polls the reingest
+// spec §7.3.1 / §14.10: `podium layer watch` polls the reingest
 // endpoint on its interval, and that endpoint now runs the real ingest
 // pipeline (wired in 0f8db6f), so the watcher drives periodic ingestion. The
 // watcher loops forever, so the test backgrounds it and owns teardown.
@@ -1055,17 +1055,17 @@ func TestReadme_LayerWatch(t *testing.T) {
 	}
 }
 
-// T-D-readme-75 — admin migrate-to-standard into a live standard deployment.
+// admin migrate-to-standard into a live standard deployment.
 func TestReadme_MigrateToStandardLive(t *testing.T) {
 	t.Skip("requires both a standalone source and a live standard deployment (Postgres + S3) running simultaneously; the SQLite-target migration is covered by TestHIW_MigrateToStandard")
 }
 
-// T-D-readme-76 — Homebrew install ships all three binaries.
+// Homebrew install ships all three binaries.
 func TestReadme_Homebrew(t *testing.T) {
 	t.Skip("requires macOS Homebrew and the lennylabs/tap; not available in the test sandbox")
 }
 
-// T-D-readme-77 — Docker Compose starts Postgres and MinIO for live tests.
+// Docker Compose starts Postgres and MinIO for live tests.
 func TestReadme_DockerCompose(t *testing.T) {
 	t.Skip("requires Docker Compose (make services-up / make test-live against Postgres + MinIO); not available in the test sandbox")
 }

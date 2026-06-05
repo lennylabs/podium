@@ -16,7 +16,7 @@ import (
 
 // emptyServerConfig writes an empty registry.yaml in a fresh temp dir and
 // returns its path. A serve test names this as PODIUM_CONFIG_FILE so the
-// §13.10 explicit-config check (F-13.10.2: a named-but-missing config is a hard
+// §13.10 explicit-config check (a named-but-missing config is a hard
 // error) is satisfied while the server is still configured through the
 // PODIUM_* env vars the test sets. The empty document overlays nothing, so env
 // values win, and an explicit PODIUM_CONFIG_FILE suppresses the standalone

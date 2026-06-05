@@ -170,7 +170,7 @@ func TestMergeExtends_UnlistedChildOverrides(t *testing.T) {
 	}
 }
 
-// Spec: §4.4.2 (F-4.4.2) — the document-level `source:` provenance field
+// Spec: §4.4.2 — the document-level `source:` provenance field
 // parses into Artifact.Source instead of being silently dropped, and follows
 // the default-for-unlisted merge rule (child overrides when set).
 func TestSource_ParseAndMerge(t *testing.T) {

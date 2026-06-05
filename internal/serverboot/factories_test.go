@@ -201,7 +201,7 @@ func TestOpenVectorAndEmbedder_PropagatesEmbedderError(t *testing.T) {
 	}
 }
 
-// Spec: §9.1 / §4.7 (F-9.1.1) — an explicitly-configured EmbeddingProvider
+// Spec: §9.1 / §4.7 — an explicitly-configured EmbeddingProvider
 // overrides a self-embedding backend's hosted model. openVectorAndEmbedder
 // then builds the embedder and returns it (non-nil) so the core embeds locally
 // and writes vectors; a defaulted provider or an explicit none leaves the

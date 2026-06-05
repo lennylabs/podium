@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// spec: §13.10 / §14.3 step 1 (F-14.3.2) / §14.10 step 1 (F-14.10.4) — a
+// spec: §13.10 / §14.3 step 1 / §14.10 step 1 — a
 // first-run standalone server writes ~/.podium/sync.yaml pointing at the local
 // server, plus ~/.podium/registry.yaml and ~/podium-artifacts/.
 func TestBootstrapStandaloneFiles_WritesDefaults(t *testing.T) {

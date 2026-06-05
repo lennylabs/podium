@@ -10,7 +10,7 @@ import (
 // transport failure (the §7.4 degraded-network path).
 const unreachableServerSource = "http://127.0.0.1:1"
 
-// spec: §7.4 (F-7.4.4) — offline-first "serve cached results silently": the
+// spec: §7.4 — offline-first "serve cached results silently": the
 // discovery meta-tools must not emit an explicit "offline" status field in
 // offline-first mode. Driven through the real podium-mcp binary.
 func TestMCP_OfflineFirstServesSilently(t *testing.T) {
@@ -28,7 +28,7 @@ func TestMCP_OfflineFirstServesSilently(t *testing.T) {
 	}
 }
 
-// spec: §7.4 (F-7.4.4) — always-revalidate (the default) keeps the explicit
+// spec: §7.4 — always-revalidate (the default) keeps the explicit
 // "offline" status the offline-first mode drops, confirming the per-mode
 // distinction end-to-end.
 func TestMCP_AlwaysRevalidateKeepsOfflineStatus(t *testing.T) {
@@ -46,7 +46,7 @@ func TestMCP_AlwaysRevalidateKeepsOfflineStatus(t *testing.T) {
 	}
 }
 
-// spec: §6.9 (F-6.9.1) — "Binary version mismatch with host caller: refuse to
+// spec: §6.9 — "Binary version mismatch with host caller: refuse to
 // start." With a configured host-version floor, an initialize from a host below
 // the floor is refused with mcp.client_too_old so the host can prompt an update.
 func TestMCP_RefusesOldHostCaller(t *testing.T) {
@@ -71,7 +71,7 @@ func TestMCP_RefusesOldHostCaller(t *testing.T) {
 	}
 }
 
-// spec: §6.9 (F-6.9.1) — a host caller at or above the floor initializes
+// spec: §6.9 — a host caller at or above the floor initializes
 // normally, and with no floor configured (the default) the check is inert.
 func TestMCP_AcceptsHostCallerAtFloorAndWhenUnset(t *testing.T) {
 	t.Parallel()

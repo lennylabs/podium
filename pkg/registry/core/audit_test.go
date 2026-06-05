@@ -109,7 +109,7 @@ func TestAudit_LoadArtifact(t *testing.T) {
 }
 
 // Spec: §4.7.5 — every read event carries the resolved layer
-// composition and the result size (F-4.7.11).
+// composition and the result size.
 func TestAudit_RecordsResolvedLayersAndResultSize(t *testing.T) {
 	t.Parallel()
 	reg, rec := setupRegistryWithAudit(t)
@@ -191,7 +191,7 @@ func TestAudit_ResolvedLayersReflectEffectiveView(t *testing.T) {
 }
 
 // Spec: §4.5.5 line 540 — the domain.loaded event records the resolved
-// render depth and the fold decisions per call (F-4.5.1). A plain root
+// render depth and the fold decisions per call. A plain root
 // load reports the default depth, no cap, no folds, and no pass-through
 // collapse.
 func TestAudit_LoadDomainRecordsDepthAndFoldDecisions(t *testing.T) {
@@ -215,7 +215,7 @@ func TestAudit_LoadDomainRecordsDepthAndFoldDecisions(t *testing.T) {
 }
 
 // Spec: §4.5.5 / §8 — a caller depth above the resolved ceiling is recorded
-// as the capped depth with depth_capped=true (F-4.5.1).
+// as the capped depth with depth_capped=true.
 func TestAudit_LoadDomainRecordsDepthCap(t *testing.T) {
 	t.Parallel()
 	reg, rec := setupRegistryWithAudit(t)
@@ -232,7 +232,7 @@ func TestAudit_LoadDomainRecordsDepthCap(t *testing.T) {
 }
 
 // Spec: §4.5.5 / §8 — fold_below_artifacts collapses sparse subdomains and
-// the count is recorded in the fold summary (F-4.5.1). The nested registry
+// the count is recorded in the fold summary. The nested registry
 // has two sparse subdomains (risk, close-reporting) below the threshold.
 func TestAudit_LoadDomainRecordsFoldedSubdomainCount(t *testing.T) {
 	t.Parallel()
@@ -249,7 +249,7 @@ func TestAudit_LoadDomainRecordsFoldedSubdomainCount(t *testing.T) {
 }
 
 // Spec: §4.5.5 / §8 — a collapsed single-child pass-through chain sets
-// passthrough_collapsed=true in the fold summary (F-4.5.1).
+// passthrough_collapsed=true in the fold summary.
 func TestAudit_LoadDomainRecordsPassthroughCollapse(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()

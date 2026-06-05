@@ -54,7 +54,7 @@ func decodeEnvelope(t *testing.T, resp *http.Response) server.ErrorResponse {
 
 // Spec: §6.3.2 / §6.9 / §6.10 — an unregistered/unsigned runtime token is
 // rejected on a real meta-tool call with auth.untrusted_runtime, carrying
-// details.runtime_iss and the canonical remediation. F-6.3.1, F-6.3.2.
+// details.runtime_iss and the canonical remediation.
 func TestVerify_UntrustedRuntimeRejected(t *testing.T) {
 	t.Parallel()
 	ts := verifyFixture(t, func(*http.Request) (layer.Identity, error) {
@@ -102,7 +102,7 @@ func TestVerify_TokenExpiredRejected(t *testing.T) {
 }
 
 // Spec: §6.3.2 — a verified identity's claims drive visibility: the
-// "finance"-group caller sees the finance-only artifact. F-6.3.1.
+// "finance"-group caller sees the finance-only artifact.
 func TestVerify_VerifiedIdentityDrivesVisibility(t *testing.T) {
 	t.Parallel()
 	ts := verifyFixture(t, func(*http.Request) (layer.Identity, error) {
@@ -119,7 +119,7 @@ func TestVerify_VerifiedIdentityDrivesVisibility(t *testing.T) {
 }
 
 // Spec: §6.3.2 — a verified identity outside the layer's group cannot see
-// the artifact (verification succeeds, visibility still applies). F-6.3.1.
+// the artifact (verification succeeds, visibility still applies).
 func TestVerify_VerifiedIdentityVisibilityFiltered(t *testing.T) {
 	t.Parallel()
 	ts := verifyFixture(t, func(*http.Request) (layer.Identity, error) {

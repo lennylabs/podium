@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// Spec: §8.3 (F-8.3.1) — "Both the registry and local sinks can be
+// Spec: §8.3 — "Both the registry and local sinks can be
 // redirected to external SIEM / log aggregation independently." When
 // PODIUM_AUDIT_LOG_PATH is an http(s) URL the standalone registry forwards
 // each catalogue event (here domain.loaded) to that endpoint as JSON rather

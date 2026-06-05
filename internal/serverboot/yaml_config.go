@@ -15,7 +15,7 @@ import (
 // fileConfig is the top-level registry.yaml document. §13.12 nests every
 // server-side key under a single `registry:` mapping, so the parser reads
 // into this wrapper and hands callers the unwrapped Registry block.
-// spec: §13.12 (config file format example, F-13.12.2).
+// spec: §13.12 (config file format example).
 type fileConfig struct {
 	Registry yamlConfig `yaml:"registry"`
 }
@@ -78,7 +78,7 @@ type yamlTenant struct {
 
 // yamlIdentityCfg mirrors the §13.12 `identity_provider:` mapping. The spec
 // example models it as an object with type / audience / authorization_endpoint
-// (F-13.12.4), so a scalar would no longer unmarshal here.
+// , so a scalar would no longer unmarshal here.
 type yamlIdentityCfg struct {
 	Type                  string `yaml:"type,omitempty"`
 	Audience              string `yaml:"audience,omitempty"`
@@ -86,8 +86,7 @@ type yamlIdentityCfg struct {
 }
 
 // yamlStoreCfg mirrors the §13.12 `store:` block. The DSN key is `dsn`
-// (section-relative, per the config example) rather than `postgres_dsn`
-// (F-13.12.5).
+// (section-relative, per the config example) rather than `postgres_dsn`.
 type yamlStoreCfg struct {
 	Type       string `yaml:"type,omitempty"`
 	SQLitePath string `yaml:"sqlite_path,omitempty"`
@@ -96,7 +95,7 @@ type yamlStoreCfg struct {
 
 // yamlObjectCfg mirrors the §13.12 `object_store:` block. The keys are
 // section-relative (`bucket`, `region`, `endpoint`) per the config example
-// rather than the `s3_`-prefixed env-var forms (F-13.12.5).
+// rather than the `s3_`-prefixed env-var forms.
 type yamlObjectCfg struct {
 	Type           string `yaml:"type,omitempty"`
 	FilesystemRoot string `yaml:"filesystem_root,omitempty"`
@@ -107,18 +106,18 @@ type yamlObjectCfg struct {
 	// config-file key (snake-cased under the section per spec line 343).
 	ForcePathStyle bool `yaml:"force_path_style,omitempty"`
 	// AccessKeyID / SecretAccessKey mirror §13.12 PODIUM_S3_ACCESS_KEY_ID /
-	// PODIUM_S3_SECRET_ACCESS_KEY (F-13.12.1): static S3 credentials so an
+	// PODIUM_S3_SECRET_ACCESS_KEY: static S3 credentials so an
 	// operator can configure them entirely in registry.yaml (typically via
 	// ${ENV_VAR} interpolation) rather than only as env vars.
 	AccessKeyID     string `yaml:"access_key_id,omitempty"`
 	SecretAccessKey string `yaml:"secret_access_key,omitempty"`
-	// PresignTTLSeconds mirrors §13.12 PODIUM_PRESIGN_TTL_SECONDS (F-13.12.1).
+	// PresignTTLSeconds mirrors §13.12 PODIUM_PRESIGN_TTL_SECONDS.
 	PresignTTLSeconds int `yaml:"presign_ttl_seconds,omitempty"`
 }
 
 // yamlVectorCfg mirrors the §13.12 `vector_backend:` block. Beyond `type`,
 // the config example carries the per-backend sub-keys api_key / index /
-// namespace / inference_model (F-13.12.4); applyYAML routes them to the
+// namespace / inference_model; applyYAML routes them to the
 // selected backend's config fields.
 type yamlVectorCfg struct {
 	Type           string `yaml:"type,omitempty"`
@@ -127,10 +126,10 @@ type yamlVectorCfg struct {
 	Namespace      string `yaml:"namespace,omitempty"`
 	InferenceModel string `yaml:"inference_model,omitempty"`
 	// Collection is the §13.12 weaviate-cloud / qdrant-cloud collection name,
-	// required for those backends (F-13.12.12). Routed by applyVectorYAML.
+	// required for those backends. Routed by applyVectorYAML.
 	Collection string `yaml:"collection,omitempty"`
 	// Host mirrors §13.12 PODIUM_PINECONE_HOST and URL mirrors
-	// PODIUM_WEAVIATE_URL / PODIUM_QDRANT_URL (F-13.12.1), so a managed backend
+	// PODIUM_WEAVIATE_URL / PODIUM_QDRANT_URL, so a managed backend
 	// that marks the host/URL required can be configured entirely in
 	// registry.yaml. applyVectorYAML routes them to the selected backend.
 	Host string `yaml:"host,omitempty"`
@@ -139,13 +138,13 @@ type yamlVectorCfg struct {
 
 // yamlEmbedCfg mirrors the §13.12 `embedding_provider:` block. The selector
 // key is `type` (matching the config example) rather than `provider`, and the
-// block carries an `api_key` (F-13.12.4).
+// block carries an `api_key`.
 type yamlEmbedCfg struct {
 	Type   string `yaml:"type,omitempty"`
 	APIKey string `yaml:"api_key,omitempty"`
 	Model  string `yaml:"model,omitempty"`
 	// BaseURL mirrors §13.12 PODIUM_OPENAI_BASE_URL, Org mirrors
-	// PODIUM_OPENAI_ORG, and URL mirrors PODIUM_OLLAMA_URL (F-13.12.1).
+	// PODIUM_OPENAI_ORG, and URL mirrors PODIUM_OLLAMA_URL.
 	// applyEmbeddingYAML routes them to the selected provider.
 	BaseURL string `yaml:"base_url,omitempty"`
 	Org     string `yaml:"org,omitempty"`
@@ -215,7 +214,7 @@ var envInterpolationRE = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 // expands to the empty string, matching standard environment-substitution
 // tools; the resulting empty required value is then named by validate
 // (§13.12: "refuses to start when a backend is selected but its required
-// values are missing"). spec: §13.12 (F-13.12.1).
+// values are missing"). spec: §13.12.
 func expandEnvVars(data []byte) []byte {
 	return envInterpolationRE.ReplaceAllFunc(data, func(match []byte) []byte {
 		name := envInterpolationRE.FindSubmatch(match)[1]
@@ -244,7 +243,7 @@ func readYAMLConfig() (*yamlConfig, error) {
 	}
 	// §13.12: resolve ${ENV_VAR} interpolation before parsing so a config
 	// written with the documented secret-handling form connects with the
-	// resolved value rather than the literal placeholder (F-13.12.1).
+	// resolved value rather than the literal placeholder.
 	data = expandEnvVars(data)
 	var out fileConfig
 	if err := yaml.Unmarshal(data, &out); err != nil {
@@ -263,7 +262,7 @@ func applyYAML(c *Config, y *yamlConfig) {
 	// rather than comparing c.bind against the loopback default literal. An
 	// operator who sets PODIUM_BIND=127.0.0.1:8080 explicitly (a value that
 	// happens to equal the default) keeps it; the config-file bind only fills
-	// an unset env var (F-13.12.4). The --bind flag also routes through
+	// an unset env var. The --bind flag also routes through
 	// PODIUM_BIND (cmd/podium/serve.go), so the flag still wins over the file.
 	if os.Getenv("PODIUM_BIND") == "" && y.Bind != "" {
 		c.bind = y.Bind
@@ -313,7 +312,7 @@ func applyYAML(c *Config, y *yamlConfig) {
 	if !c.s3ForcePathStyle && y.ObjectStore.ForcePathStyle && os.Getenv("PODIUM_S3_FORCE_PATH_STYLE") == "" {
 		c.s3ForcePathStyle = true
 	}
-	// §13.12 (F-13.12.1): static S3 credentials. The env-derived fields are
+	// §13.12: static S3 credentials. The env-derived fields are
 	// empty when PODIUM_S3_ACCESS_KEY_ID / PODIUM_S3_SECRET_ACCESS_KEY are
 	// unset, so a non-empty target already encodes env precedence.
 	if c.s3AccessKey == "" && y.ObjectStore.AccessKeyID != "" {
@@ -322,7 +321,7 @@ func applyYAML(c *Config, y *yamlConfig) {
 	if c.s3SecretKey == "" && y.ObjectStore.SecretAccessKey != "" {
 		c.s3SecretKey = y.ObjectStore.SecretAccessKey
 	}
-	// §13.12 (F-13.12.1): presigned-URL TTL. LoadConfig reads the env var and
+	// §13.12: presigned-URL TTL. LoadConfig reads the env var and
 	// applies the package default after applyYAML, so set the duration here only
 	// when the env var is unset; the later env read still overrides a file value.
 	if os.Getenv("PODIUM_PRESIGN_TTL_SECONDS") == "" && y.ObjectStore.PresignTTLSeconds > 0 {
@@ -406,7 +405,7 @@ func freezeWindowsFromYAML(in []yamlFreezeWindow) []ingest.FreezeWindow {
 }
 
 // applyVectorYAML routes the §13.12 `vector_backend:` sub-keys to the selected
-// backend's config fields (F-13.12.4). api_key maps to the backend's key;
+// backend's config fields. api_key maps to the backend's key;
 // index / namespace / inference_model are the Pinecone-scoped keys the config
 // example documents. The inference-model value is captured for the §13.12.6
 // self-embedding path. Env values keep precedence.
@@ -422,7 +421,7 @@ func applyVectorYAML(c *Config, v yamlVectorCfg) {
 		if c.pineconeNS == "" && v.Namespace != "" {
 			c.pineconeNS = v.Namespace
 		}
-		// §13.12 (F-13.12.1): PODIUM_PINECONE_HOST as a config-file key.
+		// §13.12: PODIUM_PINECONE_HOST as a config-file key.
 		if c.pineconeHost == "" && v.Host != "" {
 			c.pineconeHost = v.Host
 		}
@@ -433,7 +432,7 @@ func applyVectorYAML(c *Config, v yamlVectorCfg) {
 		if c.weaviateColl == "" && v.Collection != "" {
 			c.weaviateColl = v.Collection
 		}
-		// §13.12 (F-13.12.1): PODIUM_WEAVIATE_URL as a config-file key, so a
+		// §13.12: PODIUM_WEAVIATE_URL as a config-file key, so a
 		// weaviate-cloud deployment can be configured entirely in registry.yaml.
 		if c.weaviateURL == "" && v.URL != "" {
 			c.weaviateURL = v.URL
@@ -445,7 +444,7 @@ func applyVectorYAML(c *Config, v yamlVectorCfg) {
 		if c.qdrantColl == "" && v.Collection != "" {
 			c.qdrantColl = v.Collection
 		}
-		// §13.12 (F-13.12.1): PODIUM_QDRANT_URL as a config-file key.
+		// §13.12: PODIUM_QDRANT_URL as a config-file key.
 		if c.qdrantURL == "" && v.URL != "" {
 			c.qdrantURL = v.URL
 		}
@@ -456,7 +455,7 @@ func applyVectorYAML(c *Config, v yamlVectorCfg) {
 }
 
 // applyEmbeddingYAML routes the §13.12 `embedding_provider` sub-keys to the
-// selected provider's config fields (F-13.12.4, F-13.12.1): api_key for every
+// selected provider's config fields: api_key for every
 // provider, plus base_url / org for openai and url for ollama. Env values keep
 // precedence (a non-empty target is left untouched; PODIUM_OLLAMA_URL is read
 // directly because it carries a non-empty env default).

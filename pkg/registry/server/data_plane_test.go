@@ -24,7 +24,7 @@ import (
 // both shipping binaries use, distinct from NewFromFilesystem) whose
 // store already holds a manifest with one small inline resource and one
 // large object-store resource. It proves the data plane serves from the
-// core load result rather than a construction-time cache (F-7.2.3).
+// core load result rather than a construction-time cache.
 func dataPlaneFixture(t *testing.T) (*httptest.Server, []byte, string) {
 	t.Helper()
 	small := []byte("print('inline')\n")
@@ -72,9 +72,9 @@ func dataPlaneFixture(t *testing.T) (*httptest.Server, []byte, string) {
 	return ts, large, keyOf(large)
 }
 
-// Spec: §7.2 (F-7.2.1/F-7.2.3) — a server.New registry serves bundled
+// Spec: §7.2 — a server.New registry serves bundled
 // resources from the core load result: small ones inline, large ones as
-// a presigned URL. The wire field is presigned_url (F-7.2.5, §7.6.2).
+// a presigned URL. The wire field is presigned_url (§7.6.2).
 func TestDataPlane_LoadArtifactServesResourcesFromCore(t *testing.T) {
 	t.Parallel()
 	ts, large, _ := dataPlaneFixture(t)
@@ -85,7 +85,7 @@ func TestDataPlane_LoadArtifactServesResourcesFromCore(t *testing.T) {
 	raw, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 
-	// F-7.2.5: the large-resource reference is named presigned_url.
+	// the large-resource reference is named presigned_url.
 	if !strings.Contains(string(raw), "\"presigned_url\"") {
 		t.Errorf("load_artifact large_resources should use presigned_url, got:\n%s", raw)
 	}
@@ -114,7 +114,7 @@ func TestDataPlane_LoadArtifactServesResourcesFromCore(t *testing.T) {
 
 // Spec: §7.6.2 — the batch endpoint returns bundled resources as a
 // presigned array {path, presigned_url, content_hash} so the response
-// stays small (F-7.2.3 previously returned no resources at all).
+// stays small (previously returned no resources at all).
 func TestDataPlane_BatchLoadReturnsPresignedResources(t *testing.T) {
 	t.Parallel()
 	ts, _, _ := dataPlaneFixture(t)
@@ -150,7 +150,7 @@ func TestDataPlane_BatchLoadReturnsPresignedResources(t *testing.T) {
 	}
 }
 
-// Spec: §7.2 (F-7.2.4) — the /objects HEAD path reports the size via
+// Spec: §7.2 — the /objects HEAD path reports the size via
 // Content-Length without returning a body; GET streams the bytes.
 func TestDataPlane_ObjectsHeadReportsSizeWithoutBody(t *testing.T) {
 	t.Parallel()

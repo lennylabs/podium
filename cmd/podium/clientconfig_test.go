@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// spec: §7.7 (F-7.7.1) — config show prints the merged sync.yaml with
+// spec: §7.7 — config show prints the merged sync.yaml with
 // per-key provenance: each defaults key annotated with the winning scope.
 func TestConfigClientShow_Provenance(t *testing.T) {
 	home := t.TempDir()
@@ -87,7 +87,7 @@ func TestConfigClientShow_EmptyProfileHeaderProvenance(t *testing.T) {
 	}
 }
 
-// spec: §7.7 (F-7.7.3), §7.5.2 — config show surfaces profile-name
+// spec: §7.7, §7.5.2 — config show surfaces profile-name
 // collisions across scopes for debugging.
 func TestConfigClientShow_ProfileCollision(t *testing.T) {
 	home := t.TempDir()
@@ -108,7 +108,7 @@ func TestConfigClientShow_ProfileCollision(t *testing.T) {
 	}
 }
 
-// spec: §7.7 (F-7.7.2) — --explain prints one key's full resolution
+// spec: §7.7 — --explain prints one key's full resolution
 // chain: the value at each scope and which won.
 func TestConfigClientShow_Explain(t *testing.T) {
 	home := t.TempDir()

@@ -50,7 +50,7 @@ func TestApplyYAML_FillsMissingDefaults(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 / §4.5.5 (F-4.5.11) — the registry.yaml discovery block
+// Spec: §13.12 / §4.5.5 — the registry.yaml discovery block
 // parses into the config and resolves to core.DiscoveryDefaults plus the
 // allow_per_domain_overrides gate.
 func TestApplyYAML_DiscoveryBlock(t *testing.T) {
@@ -88,7 +88,7 @@ func TestApplyYAML_DiscoveryBlock(t *testing.T) {
 	}
 }
 
-// Spec: §4.5.5 (F-4.5.11) — when registry.yaml omits the discovery
+// Spec: §4.5.5 — when registry.yaml omits the discovery
 // block, allow_per_domain_overrides defaults to true (per-domain
 // overrides allowed).
 func TestApplyYAML_DiscoveryDefaultsAllowOverrides(t *testing.T) {
@@ -109,7 +109,7 @@ func TestApplyYAML_DefaultLayerVisibilityFillsWhenEmpty(t *testing.T) {
 	}
 }
 
-// Spec: §3.5 (F-3.5.1) — registry.yaml's tenant.expose_scope_preview
+// Spec: §3.5 — registry.yaml's tenant.expose_scope_preview
 // parses as a tri-state and overlays into the config; an absent block
 // leaves it nil (default true).
 func TestApplyYAML_ExposeScopePreview(t *testing.T) {
@@ -137,7 +137,7 @@ func TestApplyYAML_ExposeScopePreview(t *testing.T) {
 	}
 }
 
-// Spec: §3.5 (F-3.5.1) — the env var PODIUM_EXPOSE_SCOPE_PREVIEW wins over
+// Spec: §3.5 — the env var PODIUM_EXPOSE_SCOPE_PREVIEW wins over
 // registry.yaml, matching the standard env-beats-yaml precedence.
 func TestApplyYAML_ExposeScopePreviewEnvWins(t *testing.T) {
 	c := &Config{exposeScopePreview: envBoolPtr("PODIUM_EXPOSE_SCOPE_PREVIEW")} // unset → nil

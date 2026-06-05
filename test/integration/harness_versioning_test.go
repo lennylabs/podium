@@ -10,7 +10,7 @@ import (
 	"github.com/lennylabs/podium/internal/testharness/cmdharness"
 )
 
-// TestPodiumSync_CodexSessionEndHook covers F-6.7.1.
+// TestPodiumSync_CodexSessionEndHook covers
 // Spec: §6.7.1 — the codex hook_event cell is graded ✓, which requires the
 // adapter to config-merge every common event including session_end. A
 // session_end hook synced for codex must inject a [[hooks.SessionEnd]] table
@@ -39,7 +39,7 @@ func TestPodiumSync_CodexSessionEndHook(t *testing.T) {
 	}
 }
 
-// TestPodiumSync_RefusesBelowMinServerVersion covers F-6.7.3.
+// TestPodiumSync_RefusesBelowMinServerVersion covers
 // Spec: §6.7 "Versioning" — a profile or harness combination that needs newer
 // adapter behavior pins a minimum binary version via min_server_version; an
 // older binary refuses to start. podium sync runs the versioned adapters, so a
@@ -66,7 +66,7 @@ func TestPodiumSync_RefusesBelowMinServerVersion(t *testing.T) {
 	}
 }
 
-// TestPodiumSync_AllowsAtOrAboveMinServerVersion covers F-6.7.3: a pin at or
+// TestPodiumSync_AllowsAtOrAboveMinServerVersion covers a pin at or
 // below the binary version does not block the run.
 func TestPodiumSync_AllowsAtOrAboveMinServerVersion(t *testing.T) {
 	t.Parallel()
@@ -87,7 +87,7 @@ func TestPodiumSync_AllowsAtOrAboveMinServerVersion(t *testing.T) {
 	}
 }
 
-// TestPodiumSync_ProfilePinRefusesOlderAdapter covers F-12.0.3.
+// TestPodiumSync_ProfilePinRefusesOlderAdapter covers
 // Spec: §12 "Harness adapter drift" — "Adapters are versioned with the MCP
 // server binary; profiles can pin a minimum version." §6.7 establishes that
 // adapter behavior versions alongside the binary, so a profile that needs newer

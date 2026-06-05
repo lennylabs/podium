@@ -57,7 +57,7 @@ func postErase(t *testing.T, url string, body any) *http.Response {
 	return resp
 }
 
-// Spec: §8.5 (F-8.5.1/F-8.5.3/F-8.5.4) — erase unregisters and soft-deletes
+// Spec: §8.5 — erase unregisters and soft-deletes
 // the user's owned layers and the artifacts ingested from them, redacts the
 // user identity across the registry audit stream, and appends a user.erased
 // event naming the invoking admin.
@@ -91,7 +91,7 @@ func TestErase_PurgesLayersAndRedactsRegistryStream(t *testing.T) {
 	}
 	// Seed an audit event whose caller is the erased identity, carrying the
 	// §8.1 attached email and group membership so the redaction pass has PII to
-	// remove (F-8.5.1).
+	// remove.
 	sink, _ := audit.NewFileSink(sinkPath)
 	_ = sink.Append(ctx, audit.Event{
 		Type: audit.EventArtifactsSearched, Caller: "alice@acme.com",
@@ -134,7 +134,7 @@ func TestErase_PurgesLayersAndRedactsRegistryStream(t *testing.T) {
 	if strings.Contains(string(data), "alice@acme.com") {
 		t.Errorf("erased identity still present in registry audit stream")
 	}
-	// F-8.5.1: the attached email and group membership are gone too.
+	// the attached email and group membership are gone too.
 	if strings.Contains(string(data), "acme-engineering") {
 		t.Errorf("erased user's group membership still present in registry audit stream")
 	}
@@ -150,7 +150,7 @@ func TestErase_PurgesLayersAndRedactsRegistryStream(t *testing.T) {
 	}
 }
 
-// Spec: §8.5 (F-8.5.5) — an empty salt is rejected with a 400 before any
+// Spec: §8.5 — an empty salt is rejected with a 400 before any
 // state mutates.
 func TestErase_EmptySaltRejected(t *testing.T) {
 	t.Parallel()

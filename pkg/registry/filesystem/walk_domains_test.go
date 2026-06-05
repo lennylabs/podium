@@ -13,7 +13,7 @@ description: %s
 %s
 `
 
-// Spec: §4.5.1 / §6.4 (F-4.5.2, F-6.4.2) — WalkDomains discovers every
+// Spec: §4.5.1 / §6.4 — WalkDomains discovers every
 // DOMAIN.md under a layer, keyed by canonical domain path, including the
 // root-level DOMAIN.md (path "") which the artifact walk would reject. The
 // artifact walk (Walk) continues to skip DOMAIN.md.

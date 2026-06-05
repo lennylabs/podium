@@ -25,7 +25,7 @@ func scopePreviewStub(t *testing.T, status int, body string) *httptest.Server {
 	return ts
 }
 
-// Spec: §3.5 (F-3.5.3) — the MCP bridge exposes the scope preview as a
+// Spec: §3.5 — the MCP bridge exposes the scope preview as a
 // transparency tool. tools/list advertises scope_preview and tools/call
 // proxies GET /v1/scope/preview, returning the aggregate counts verbatim.
 func TestScopePreviewTool_ListedAndProxies(t *testing.T) {
@@ -54,7 +54,7 @@ func TestScopePreviewTool_ListedAndProxies(t *testing.T) {
 	}
 }
 
-// Spec: §3.5 (F-3.5.1/F-3.5.3) — when the tenant gate is off the endpoint
+// Spec: §3.5 — when the tenant gate is off the endpoint
 // answers 403 config.scope_preview_disabled, and the MCP tool surfaces that
 // structured error rather than masking it as offline.
 func TestScopePreviewTool_DisabledSurfaces403(t *testing.T) {

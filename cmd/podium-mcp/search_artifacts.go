@@ -14,7 +14,7 @@ func (s *mcpServer) searchArtifacts(args map[string]any) any {
 	// §7.4 offline-only: "never contact the registry; structured error if
 	// cache miss." The workspace overlay is the only local source a search can
 	// serve, so an offline-only search returns overlay matches without dialing
-	// the registry, and an empty overlay is a structured cache miss (F-7.4.2).
+	// the registry, and an empty overlay is a structured cache miss.
 	if s.cfg.cacheMode == "offline-only" {
 		return s.offlineOnlySearchArtifacts(args)
 	}
@@ -23,7 +23,7 @@ func (s *mcpServer) searchArtifacts(args map[string]any) any {
 		// spec: §7.4 / §12 — when the registry is unreachable, return the
 		// offline envelope rather than an error. always-revalidate surfaces an
 		// explicit "offline" status the host can present; offline-first serves
-		// silently with no status field (F-7.4.4). The workspace overlay is
+		// silently with no status field. The workspace overlay is
 		// reachable without the registry, so a fresh search still returns the
 		// local matches either way.
 		if isRegistryUnreachable(err) {
@@ -90,7 +90,7 @@ func (s *mcpServer) searchArtifacts(args map[string]any) any {
 // only overlay artifacts absent from the registry's returned results add to
 // the total. This avoids both the double-count of overlapping hits and the
 // summing of a pre-truncation registry total with a post-truncation local
-// count. F-6.4.4.
+// count.
 func fusedTotalMatched(registryTotal int, registryResults []map[string]any, locals ...[]localSearchResult) int {
 	seen := make(map[string]bool, len(registryResults))
 	for _, r := range registryResults {
@@ -135,7 +135,7 @@ func stripSearchResultFrontmatter(decoded any) {
 // when the registry is unreachable. The workspace overlay (and its optional
 // §9.1 semantic index) is local, so any overlay matches are still returned.
 // Per §7.4, always-revalidate carries an explicit "offline" status; offline-first
-// serves silently with no status field (offlineEnvelope honors the mode). F-7.4.4.
+// serves silently with no status field (offlineEnvelope honors the mode).
 func (s *mcpServer) offlineSearchArtifacts(args map[string]any) any {
 	query, _ := args["query"].(string)
 	overlayRecords := s.overlaySnapshot()
@@ -171,8 +171,7 @@ func (s *mcpServer) offlineSearchArtifacts(args map[string]any) any {
 // search_artifacts: the registry is never contacted, so only workspace-overlay
 // matches are returned. With no local match the call is a structured cache miss
 // (network.offline_cache_miss) rather than an empty offline envelope, because
-// offline-only forbids reaching the registry that would otherwise fill the gap
-// (F-7.4.2).
+// offline-only forbids reaching the registry that would otherwise fill the gap.
 func (s *mcpServer) offlineOnlySearchArtifacts(args map[string]any) any {
 	res := s.offlineSearchArtifacts(args)
 	if m, ok := res.(map[string]any); ok {

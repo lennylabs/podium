@@ -54,7 +54,7 @@ func buildReingestRunner(
 			ResourcePut:   resourcePut,
 			CallerID:      caller,
 			FreezeWindows: applyBreakGlass(cfg.freezeWindows, bg, caller),
-			// §13.10/§13.2.2 (F-13.10.6): a public-mode deployment enforces the
+			// §13.10/§13.2.2: a public-mode deployment enforces the
 			// sensitivity floor on the §7.3.1 manual-reingest / inbound-webhook
 			// path too, matching the boot ingest paths, so a public reingest
 			// cannot smuggle in medium/high artifacts.

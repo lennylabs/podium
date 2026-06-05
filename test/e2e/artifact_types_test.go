@@ -8,7 +8,7 @@ package e2e
 // including the documented absence of MCP prompt projection for commands.
 // Tests drive the podium CLI, the standalone
 // server, and the podium-mcp bridge. Behaviors blocked by a known
-// BUILD-GAPS finding are encoded as skips so the acceptance criterion is
+// implementation-gap finding are encoded as skips so the acceptance criterion is
 // recorded without failing the suite.
 
 import (
@@ -20,7 +20,7 @@ import (
 
 // ---- skill -----------------------------------------------------------------
 
-// T-D-artifact-types-1 — scaffold skill splits name/description into
+// scaffold skill splits name/description into
 // SKILL.md and keeps the Podium frontmatter in ARTIFACT.md; lints clean.
 func TestArtifactTypes_ScaffoldSkillSplit(t *testing.T) {
 	t.Parallel()
@@ -53,7 +53,7 @@ func TestArtifactTypes_ScaffoldSkillSplit(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-2 — the doc's skill example (with runtime_requirements)
+// the doc's skill example (with runtime_requirements)
 // lints clean and the field round-trips.
 func TestArtifactTypes_SkillExampleLints(t *testing.T) {
 	t.Parallel()
@@ -78,7 +78,7 @@ func TestArtifactTypes_SkillExampleLints(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-3 — claude-code materializes a skill to
+// claude-code materializes a skill to
 // .claude/skills/<name>/SKILL.md, with no ARTIFACT.md.
 func TestArtifactTypes_SkillClaudeCodeLayout(t *testing.T) {
 	t.Parallel()
@@ -94,7 +94,7 @@ func TestArtifactTypes_SkillClaudeCodeLayout(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-4 — the none adapter writes the canonical skill layout.
+// the none adapter writes the canonical skill layout.
 func TestArtifactTypes_SkillNoneLayout(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -107,7 +107,7 @@ func TestArtifactTypes_SkillNoneLayout(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, "finance/close/run-variance-analysis/SKILL.md"))
 }
 
-// T-D-artifact-types-5 — a skill's runtime_requirements is returned by
+// a skill's runtime_requirements is returned by
 // load_artifact (in the frontmatter) so the host can decide.
 func TestArtifactTypes_SkillRuntimeInLoad(t *testing.T) {
 	t.Parallel()
@@ -124,7 +124,7 @@ func TestArtifactTypes_SkillRuntimeInLoad(t *testing.T) {
 
 // ---- agent -----------------------------------------------------------------
 
-// T-D-artifact-types-6 — scaffold agent writes input, output, and a
+// scaffold agent writes input, output, and a
 // delegates_to list; lints clean.
 func TestArtifactTypes_ScaffoldAgentFields(t *testing.T) {
 	t.Parallel()
@@ -154,7 +154,7 @@ func TestArtifactTypes_ScaffoldAgentFields(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-7 — claude-code materializes an agent to
+// claude-code materializes an agent to
 // .claude/agents/<name>.md, no SKILL.md.
 func TestArtifactTypes_AgentClaudeCodeLayout(t *testing.T) {
 	t.Parallel()
@@ -170,7 +170,7 @@ func TestArtifactTypes_AgentClaudeCodeLayout(t *testing.T) {
 
 // ---- context ---------------------------------------------------------------
 
-// T-D-artifact-types-8 — scaffold context produces no SKILL.md and lints clean.
+// scaffold context produces no SKILL.md and lints clean.
 func TestArtifactTypes_ScaffoldContext(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -196,7 +196,7 @@ func TestArtifactTypes_ScaffoldContext(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-9 — the doc's context example (version 1.4.0) lints clean.
+// the doc's context example (version 1.4.0) lints clean.
 func TestArtifactTypes_ContextExampleLints(t *testing.T) {
 	t.Parallel()
 	art := "---\ntype: context\nname: company-glossary\nversion: 1.4.0\n" +
@@ -209,7 +209,7 @@ func TestArtifactTypes_ContextExampleLints(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-10 — claude-code places a context in the harness-neutral
+// claude-code places a context in the harness-neutral
 // .podium/context/<id>/ bucket.
 func TestArtifactTypes_ContextClaudeCodeLayout(t *testing.T) {
 	t.Parallel()
@@ -223,7 +223,7 @@ func TestArtifactTypes_ContextClaudeCodeLayout(t *testing.T) {
 
 // ---- command ---------------------------------------------------------------
 
-// T-D-artifact-types-11 — scaffold command lints clean.
+// scaffold command lints clean.
 func TestArtifactTypes_ScaffoldCommand(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -246,7 +246,7 @@ func TestArtifactTypes_ScaffoldCommand(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-12 and T-D-artifact-types-13 were written against an
+// and earlier coverage was written against an
 // earlier draft in which a command opted into MCP prompt projection via an
 // `expose_as_mcp_prompt` frontmatter field: an opted-in command appeared in the
 // MCP `prompts/list` response (-12) and a non-opted-in command did not (-13).
@@ -256,7 +256,7 @@ func TestArtifactTypes_ScaffoldCommand(t *testing.T) {
 // commands through MCP" (docs/authoring/artifact-types.md § command). The spec
 // agrees (spec/05-meta-tools.md § command), the manifest schema carries no
 // `expose_as_mcp_prompt` field, and the MCP server advertises no `prompts`
-// capability and defines no `prompts/list` JSON-RPC method (BUILD-GAPS F-5.2
+// capability and defines no `prompts/list` JSON-RPC method (§5.2
 // reviewed §5.2 and recorded "No findings"). Both specs therefore collapse to a
 // single observable: `prompts/list` is an unknown method.
 //
@@ -284,7 +284,7 @@ func TestArtifactTypes_CommandNotProjectedThroughMCP(t *testing.T) {
 
 // ---- rule ------------------------------------------------------------------
 
-// T-D-artifact-types-14 — scaffold rule --rule-mode always produces a
+// scaffold rule --rule-mode always produces a
 // lint-clean rule.
 func TestArtifactTypes_ScaffoldRuleAlways(t *testing.T) {
 	t.Parallel()
@@ -308,7 +308,7 @@ func TestArtifactTypes_ScaffoldRuleAlways(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-15 — scaffold rule --rule-mode glob writes rule_globs.
+// scaffold rule --rule-mode glob writes rule_globs.
 func TestArtifactTypes_ScaffoldRuleGlob(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -332,7 +332,7 @@ func TestArtifactTypes_ScaffoldRuleGlob(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-16 — scaffold rule --rule-mode glob without --rule-globs
+// scaffold rule --rule-mode glob without --rule-globs
 // exits 2.
 func TestArtifactTypes_ScaffoldRuleGlobMissingGlobs(t *testing.T) {
 	t.Parallel()
@@ -346,7 +346,7 @@ func TestArtifactTypes_ScaffoldRuleGlobMissingGlobs(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-17 — scaffold rule --rule-mode auto without
+// scaffold rule --rule-mode auto without
 // --rule-description exits 2.
 func TestArtifactTypes_ScaffoldRuleAutoMissingDesc(t *testing.T) {
 	t.Parallel()
@@ -360,7 +360,7 @@ func TestArtifactTypes_ScaffoldRuleAutoMissingDesc(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-18 — claude-code materializes a rule to
+// claude-code materializes a rule to
 // .claude/rules/<name>.md.
 func TestArtifactTypes_RuleClaudeCodeLayout(t *testing.T) {
 	t.Parallel()
@@ -372,7 +372,7 @@ func TestArtifactTypes_RuleClaudeCodeLayout(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, ".claude/rules/payment-style.md"))
 }
 
-// T-D-artifact-types-19 — cursor materializes a rule to .cursor/rules/<name>.mdc.
+// cursor materializes a rule to .cursor/rules/<name>.mdc.
 func TestArtifactTypes_RuleCursorLayout(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -385,7 +385,7 @@ func TestArtifactTypes_RuleCursorLayout(t *testing.T) {
 
 // ---- hook ------------------------------------------------------------------
 
-// T-D-artifact-types-20 — scaffold hook --hook-event stop is lint-clean.
+// scaffold hook --hook-event stop is lint-clean.
 func TestArtifactTypes_ScaffoldHookStop(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -410,7 +410,7 @@ func TestArtifactTypes_ScaffoldHookStop(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-21 — scaffold hook without --hook-event exits 2.
+// scaffold hook without --hook-event exits 2.
 func TestArtifactTypes_ScaffoldHookMissingEvent(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "audit/h")
@@ -423,7 +423,7 @@ func TestArtifactTypes_ScaffoldHookMissingEvent(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-22 — claude-code config-merges a hook into
+// claude-code config-merges a hook into
 // .claude/settings.json under its native event key (stop -> Stop).
 func TestArtifactTypes_HookClaudeCodeLayout(t *testing.T) {
 	t.Parallel()
@@ -438,8 +438,8 @@ func TestArtifactTypes_HookClaudeCodeLayout(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-23 — declaring both a generic hook_event (pre_tool_use)
-// and a corresponding subtype hook warns (spec §4.3.5, F-4.3.8); lint stays
+// declaring both a generic hook_event (pre_tool_use)
+// and a corresponding subtype hook warns (spec §4.3.5); lint stays
 // green (warning, not error). A lone generic hook is valid and unflagged.
 func TestArtifactTypes_HookGenericAndSubtypeWarns(t *testing.T) {
 	t.Parallel()
@@ -456,7 +456,7 @@ func TestArtifactTypes_HookGenericAndSubtypeWarns(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-24 — every canonical hook event scaffolds and lints
+// every canonical hook event scaffolds and lints
 // clean (no error severity). Directory names are hyphenated because the
 // §4.2 name syntax forbids the underscores in the event identifiers.
 func TestArtifactTypes_AllCanonicalHookEvents(t *testing.T) {
@@ -487,7 +487,7 @@ func TestArtifactTypes_AllCanonicalHookEvents(t *testing.T) {
 
 // ---- mcp-server ------------------------------------------------------------
 
-// T-D-artifact-types-25 — scaffold mcp-server without --server-identifier
+// scaffold mcp-server without --server-identifier
 // exits 2.
 func TestArtifactTypes_ScaffoldMCPMissingIdentifier(t *testing.T) {
 	t.Parallel()
@@ -501,7 +501,7 @@ func TestArtifactTypes_ScaffoldMCPMissingIdentifier(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-26 — scaffold mcp-server with --server-identifier lints
+// scaffold mcp-server with --server-identifier lints
 // clean.
 func TestArtifactTypes_ScaffoldMCPServer(t *testing.T) {
 	t.Parallel()
@@ -528,7 +528,7 @@ func TestArtifactTypes_ScaffoldMCPServer(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-27 — the full mcp-server example with an mcpServers list
+// the full mcp-server example with an mcpServers list
 // lints clean.
 func TestArtifactTypes_MCPServerFullExample(t *testing.T) {
 	t.Parallel()
@@ -543,15 +543,15 @@ func TestArtifactTypes_MCPServerFullExample(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-28 — the doc claims mcp-server artifacts are filtered
+// the doc claims mcp-server artifacts are filtered
 // out of MCP-bridge search_artifacts results. The bridge passes the
-// registry response through unfiltered and no BUILD-GAPS finding records
+// registry response through unfiltered and no implementation-gap finding records
 // the gap; skip rather than assert non-compliant behavior.
 func TestArtifactTypes_MCPServerFilteredFromSearch(t *testing.T) {
-	t.Skip("spec §5: mcp-server artifacts should be filtered from MCP-bridge search_artifacts results; the bridge does not filter them (searchArtifacts passes the registry response through) and no BUILD-GAPS finding is filed for this gap")
+	t.Skip("spec §5: mcp-server artifacts should be filtered from MCP-bridge search_artifacts results; the bridge does not filter them (searchArtifacts passes the registry response through) and no implementation-gap finding is filed for this gap")
 }
 
-// T-D-artifact-types-29 — mcp-server artifacts materialize through podium sync.
+// mcp-server artifacts materialize through podium sync.
 func TestArtifactTypes_MCPServerVisibleViaSync(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -566,7 +566,7 @@ func TestArtifactTypes_MCPServerVisibleViaSync(t *testing.T) {
 
 // ---- extension types -------------------------------------------------------
 
-// T-D-artifact-types-30 — scaffolding an extension type warns but produces a
+// scaffolding an extension type warns but produces a
 // generic ARTIFACT.md.
 func TestArtifactTypes_ExtensionScaffoldWarns(t *testing.T) {
 	t.Parallel()
@@ -583,7 +583,7 @@ func TestArtifactTypes_ExtensionScaffoldWarns(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-31 — an extension type emits a lint.unknown_type warning.
+// an extension type emits a lint.unknown_type warning.
 func TestArtifactTypes_ExtensionLintWarning(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -600,7 +600,7 @@ func TestArtifactTypes_ExtensionLintWarning(t *testing.T) {
 
 // ---- agentskills.io name constraints ---------------------------------------
 
-// T-D-artifact-types-32 — a skill name over 64 characters is rejected.
+// a skill name over 64 characters is rejected.
 func TestArtifactTypes_SkillNameTooLong(t *testing.T) {
 	t.Parallel()
 	name := strings.Repeat("a", 65)
@@ -614,7 +614,7 @@ func TestArtifactTypes_SkillNameTooLong(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-33 — a skill name with a trailing hyphen is rejected.
+// a skill name with a trailing hyphen is rejected.
 func TestArtifactTypes_SkillNameTrailingHyphen(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "my-skill-")
@@ -627,7 +627,7 @@ func TestArtifactTypes_SkillNameTrailingHyphen(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-34 — a skill name with consecutive hyphens is rejected.
+// a skill name with consecutive hyphens is rejected.
 func TestArtifactTypes_SkillNameConsecutiveHyphens(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "my--skill")
@@ -640,7 +640,7 @@ func TestArtifactTypes_SkillNameConsecutiveHyphens(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-35 — a skill without SKILL.md fails lint. The registry
+// a skill without SKILL.md fails lint. The registry
 // walk rejects it before the lint rules run, so the error surfaces as
 // "<id>: type: skill missing SKILL.md" (exit 1) rather than a
 // lint.skill_md_compliance diagnostic.
@@ -659,7 +659,7 @@ func TestArtifactTypes_SkillMissingSkillMD(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-36 — a SKILL.md whose name mismatches the directory
+// a SKILL.md whose name mismatches the directory
 // fails lint.
 func TestArtifactTypes_SkillNameMismatch(t *testing.T) {
 	t.Parallel()
@@ -676,7 +676,7 @@ func TestArtifactTypes_SkillNameMismatch(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-37 — the doc says delegates_to is "constrained to
+// the doc says delegates_to is "constrained to
 // agent-type targets at lint time", but no filesystem lint rule enforces
 // it: an agent delegating to a skill lints without a delegates-type
 // diagnostic. Documents the gap (the type-combination check the doc
@@ -697,7 +697,7 @@ func TestArtifactTypes_DelegatesToTypeNotEnforcedAtLint(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-38 — rule_mode auto with rule_description lints clean.
+// rule_mode auto with rule_description lints clean.
 func TestArtifactTypes_RuleAutoLints(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -709,7 +709,7 @@ func TestArtifactTypes_RuleAutoLints(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-39 — rule_mode explicit lints clean with no extra fields.
+// rule_mode explicit lints clean with no extra fields.
 func TestArtifactTypes_RuleExplicitLints(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -733,7 +733,7 @@ func searchRegistry(t *testing.T) string {
 	})
 }
 
-// T-D-artifact-types-40 — search --type skill returns the skill.
+// search --type skill returns the skill.
 func TestArtifactTypes_SearchTypeSkill(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, searchRegistry(t))
@@ -746,7 +746,7 @@ func TestArtifactTypes_SearchTypeSkill(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-41 — search --type agent returns the agent and excludes
+// search --type agent returns the agent and excludes
 // the skill (type filter is exclusive).
 func TestArtifactTypes_SearchTypeAgent(t *testing.T) {
 	t.Parallel()
@@ -763,10 +763,10 @@ func TestArtifactTypes_SearchTypeAgent(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-42 — search_visibility: direct-only excludes an
+// search_visibility: direct-only excludes an
 // artifact from search results while leaving it reachable via
 // load_artifact by ID.
-// spec: §4.3 universal fields (search_visibility), §4.5.3 (F-4.3.3).
+// spec: §4.3 universal fields (search_visibility), §4.5.3.
 func TestArtifactTypes_SearchVisibilityDirectOnly(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -791,11 +791,11 @@ func TestArtifactTypes_SearchVisibilityDirectOnly(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-43 — a deprecated artifact is excluded from default
+// a deprecated artifact is excluded from default
 // search results and its load response carries the deprecation signal.
 // Observed: the registry surfaces deprecated:true and a deprecation
 // warning, but replaced_by does not round-trip into the load response
-// (no BUILD-GAPS finding is filed for that narrower gap), so this test
+// (no implementation-gap finding is filed for that narrower gap), so this test
 // asserts the deprecated flag and warning rather than the upgrade target.
 func TestArtifactTypes_DeprecatedLifecycle(t *testing.T) {
 	t.Parallel()
@@ -824,7 +824,7 @@ func TestArtifactTypes_DeprecatedLifecycle(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-44 — sensitivity is exposed in the load response.
+// sensitivity is exposed in the load response.
 func TestArtifactTypes_SensitivityInLoad(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -839,7 +839,7 @@ func TestArtifactTypes_SensitivityInLoad(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-45 — a hook with a bundled scripts/ directory syncs
+// a hook with a bundled scripts/ directory syncs
 // correctly through the none adapter.
 func TestArtifactTypes_HookBundledScript(t *testing.T) {
 	t.Parallel()
@@ -858,7 +858,7 @@ func TestArtifactTypes_HookBundledScript(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, "finance/audit/log-session-end/scripts/log.sh"))
 }
 
-// T-D-artifact-types-46 — a missing version field fails lint.
+// a missing version field fails lint.
 func TestArtifactTypes_MissingVersion(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -873,7 +873,7 @@ func TestArtifactTypes_MissingVersion(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-47 — an invalid semver version fails lint.
+// an invalid semver version fails lint.
 func TestArtifactTypes_InvalidVersion(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -888,7 +888,7 @@ func TestArtifactTypes_InvalidVersion(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-48 — effort_hint on a rule warns (hints apply only to
+// effort_hint on a rule warns (hints apply only to
 // agent / skill / command).
 func TestArtifactTypes_EffortHintOnRuleWarns(t *testing.T) {
 	t.Parallel()
@@ -904,7 +904,7 @@ func TestArtifactTypes_EffortHintOnRuleWarns(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-49 — the registry returns runtime_requirements in the
+// the registry returns runtime_requirements in the
 // load response so the host (not the registry) decides on materialization.
 func TestArtifactTypes_RuntimeRequirementsPassThrough(t *testing.T) {
 	t.Parallel()
@@ -922,7 +922,7 @@ func TestArtifactTypes_RuntimeRequirementsPassThrough(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-50 — target_harnesses restricts materialization to the
+// target_harnesses restricts materialization to the
 // listed harnesses: a sync for a listed harness materializes the artifact and a
 // sync for an unlisted one skips it. spec: §4.3.5 / §6.7.1.
 func TestArtifactTypes_TargetHarnessesRestrictsSync(t *testing.T) {
@@ -942,7 +942,7 @@ func TestArtifactTypes_TargetHarnessesRestrictsSync(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-51 — scaffold --extends writes the extends field.
+// scaffold --extends writes the extends field.
 func TestArtifactTypes_ScaffoldExtends(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "finance/procurement/extended-vendor-check")
@@ -958,7 +958,7 @@ func TestArtifactTypes_ScaffoldExtends(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-52 — an invalid sensitivity value exits 2.
+// an invalid sensitivity value exits 2.
 func TestArtifactTypes_InvalidSensitivity(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "tools/x")
@@ -971,7 +971,7 @@ func TestArtifactTypes_InvalidSensitivity(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-53 — scaffold with no positional path exits 2.
+// scaffold with no positional path exits 2.
 func TestArtifactTypes_ScaffoldNoPath(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "context", "--description", "x", "--yes")
@@ -983,7 +983,7 @@ func TestArtifactTypes_ScaffoldNoPath(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-54 — scaffold refuses to overwrite an existing directory
+// scaffold refuses to overwrite an existing directory
 // without --force (exit 1).
 func TestArtifactTypes_ScaffoldNoOverwrite(t *testing.T) {
 	t.Parallel()
@@ -1000,7 +1000,7 @@ func TestArtifactTypes_ScaffoldNoOverwrite(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-55 — scaffold --force overwrites an existing directory.
+// scaffold --force overwrites an existing directory.
 func TestArtifactTypes_ScaffoldForce(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "tools/existing")
@@ -1019,7 +1019,7 @@ func TestArtifactTypes_ScaffoldForce(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-56 — a consumer referencing an mcp-server through
+// a consumer referencing an mcp-server through
 // mcpServers links to it in the reverse-dependency index by the
 // canonical server_identifier, so /v1/dependents on the mcp-server
 // artifact lists the consumer.
@@ -1057,7 +1057,7 @@ func TestArtifactTypes_MCPServerReverseIndex(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-57 — scaffolding a nested artifact creates the full
+// scaffolding a nested artifact creates the full
 // domain hierarchy.
 func TestArtifactTypes_DomainHierarchy(t *testing.T) {
 	t.Parallel()
@@ -1075,7 +1075,7 @@ func TestArtifactTypes_DomainHierarchy(t *testing.T) {
 	mustExist(t, filepath.Join(out, "ARTIFACT.md"))
 }
 
-// T-D-artifact-types-58 — an agent is searchable via the HTTP
+// an agent is searchable via the HTTP
 // search_artifacts type filter; skills are excluded.
 func TestArtifactTypes_AgentSearchHTTP(t *testing.T) {
 	t.Parallel()
@@ -1089,7 +1089,7 @@ func TestArtifactTypes_AgentSearchHTTP(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-59 — a hook that targets a harness with no hook surface
+// a hook that targets a harness with no hook surface
 // (opencode is ✗ for hook_event) is an ingest error: the capability lint
 // reports the untranslatable field. spec: §6.7.1 hook_event row.
 func TestArtifactTypes_HookUnsupportedHarnessLint(t *testing.T) {
@@ -1109,8 +1109,8 @@ func TestArtifactTypes_HookUnsupportedHarnessLint(t *testing.T) {
 	}
 }
 
-// T-D-artifact-types-60 — a hook with target_harnesses set and a supported
-// event lints clean. With no capability-mismatch lint rule (F-6.7.1) the
+// a hook with target_harnesses set and a supported
+// event lints clean. With no capability-mismatch lint rule the
 // suppression is moot; lint is clean either way, which satisfies the
 // documented acceptance criterion.
 func TestArtifactTypes_HookTargetHarnessesClean(t *testing.T) {

@@ -59,7 +59,7 @@ func TestRuntimePolicy_AllowsSatisfiedPython(t *testing.T) {
 	}
 }
 
-// Spec: §4.4.1, F-4.4.4 — a system_packages requirement is checked against
+// Spec: §4.4.1 — a system_packages requirement is checked against
 // advertised packages once the host opts in.
 func TestRuntimePolicy_RefusesMissingPackage(t *testing.T) {
 	t.Parallel()

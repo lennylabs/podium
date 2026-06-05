@@ -12,7 +12,7 @@ import (
 	"github.com/lennylabs/podium/pkg/audit"
 )
 
-// Spec: §8.6 (F-8.6.1) — "Detection of gaps is automated and alerted."
+// Spec: §8.6 — "Detection of gaps is automated and alerted."
 // The VerifyScheduler re-verifies the persisted hash chain on a cadence;
 // an out-of-band edit that breaks the chain is detected at runtime,
 // recorded as an audit.gap_detected event for SIEM mirroring, and surfaced

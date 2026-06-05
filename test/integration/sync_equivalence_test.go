@@ -91,7 +91,7 @@ func TestSyncEquivalence_FilesystemVsServerByteIdentical(t *testing.T) {
 	}
 }
 
-// Spec: §6.4 (F-14.6.2) — the workspace overlay merges as the highest-precedence
+// Spec: §6.4 — the workspace overlay merges as the highest-precedence
 // layer for a server source. The consumer merges it client-side because the
 // developer's overlay directory is local to the machine running podium sync; the
 // server pointed at the reference fixture cannot see it. The overlay overrides an

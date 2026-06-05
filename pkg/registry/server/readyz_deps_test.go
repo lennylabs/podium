@@ -25,7 +25,7 @@ func readReadyz(t *testing.T, baseURL string) (int, server.ReadyResponse) {
 	return resp.StatusCode, body
 }
 
-// Spec: §13.9 (F-13.9.2, F-13.9.3) — a failing dependency probe makes
+// Spec: §13.9 — a failing dependency probe makes
 // /readyz report not_ready and answer 503 so a load balancer pulls the
 // registry out of rotation.
 func TestReadyz_DependencyDownReturnsNotReady(t *testing.T) {
@@ -42,7 +42,7 @@ func TestReadyz_DependencyDownReturnsNotReady(t *testing.T) {
 	}
 }
 
-// Spec: §13.9 (F-13.9.2) — when every dependency probe passes, /readyz
+// Spec: §13.9 — when every dependency probe passes, /readyz
 // reports ready and answers 200.
 func TestReadyz_DependencyUpReturnsReady(t *testing.T) {
 	t.Parallel()
@@ -58,7 +58,7 @@ func TestReadyz_DependencyUpReturnsReady(t *testing.T) {
 	}
 }
 
-// Spec: §13.9 (F-13.9.3) — not_ready (a hard dependency outage) takes
+// Spec: §13.9 — not_ready (a hard dependency outage) takes
 // precedence over the §13.2.1 read_only replication-fallback state: a
 // registry that is both flipped read-only and has a down dependency is
 // not_ready, not read_only.
@@ -77,7 +77,7 @@ func TestReadyz_NotReadyTakesPrecedenceOverReadOnly(t *testing.T) {
 	}
 }
 
-// Spec: §13.9 (F-13.9.3) — a read_only registry whose dependencies are
+// Spec: §13.9 — a read_only registry whose dependencies are
 // all reachable stays in rotation: /readyz reports read_only with 200.
 func TestReadyz_ReadOnlyWithHealthyDepsStaysInRotation(t *testing.T) {
 	t.Parallel()
@@ -112,7 +112,7 @@ func TestReadyz_ProbeContextIsBounded(t *testing.T) {
 	}
 }
 
-// Spec: §13.9 (F-13.9.4) — the /readyz body carries the observed
+// Spec: §13.9 — the /readyz body carries the observed
 // replication lag in seconds from the wired reporter.
 func TestReadyz_ReplicationLagInBody(t *testing.T) {
 	t.Parallel()
@@ -125,7 +125,7 @@ func TestReadyz_ReplicationLagInBody(t *testing.T) {
 	}
 }
 
-// Spec: §13.9 (F-13.9.4) — with no reporter wired (a standalone
+// Spec: §13.9 — with no reporter wired (a standalone
 // deployment with no replica), /readyz reports lag 0.
 func TestReadyz_DefaultLagIsZero(t *testing.T) {
 	t.Parallel()
@@ -136,7 +136,7 @@ func TestReadyz_DefaultLagIsZero(t *testing.T) {
 	}
 }
 
-// Spec: §13.2.1 (F-13.9.4) — the X-Podium-Read-Only-Lag-Seconds header on
+// Spec: §13.2.1 — the X-Podium-Read-Only-Lag-Seconds header on
 // read responses in read-only mode reports the observed lag, not a
 // hardcoded 0.
 func TestReadOnlyHeader_ReportsObservedLag(t *testing.T) {

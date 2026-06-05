@@ -16,7 +16,7 @@ import (
 // live test lives in its own file (pinecone_live_test.go, weaviate_live_test.go,
 // qdrant_live_test.go) and reuses these helpers.
 //
-// Gating contract (TEST-GAPS.md "Lane gating contract"): the whole suite is
+// Gating contract: the whole suite is
 // off unless PODIUM_LIVE_EXTERNAL == "1", and within that each backend skips
 // with a reason when its own credentials are absent. This mirrors the
 // skip-with-reason idiom in pkg/objectstore/s3_live_test.go and
@@ -46,7 +46,7 @@ func requireLiveExternal(t *testing.T) {
 const liveTenantPrefix = "podium_live"
 
 // runLiveSuite runs the shared §4.7 conformance contract against a live managed
-// backend (G-VEC-2). A remote store has no TRUNCATE affordance and persists
+// backend. A remote store has no TRUNCATE affordance and persists
 // across runs, so the conformance suite's fixed tenants (t1, t2) and fixed
 // artifact ids (a, b, c) would otherwise collide with rows a previous run or an
 // earlier sub-test left behind, surfacing as phantom matches and apparent tenant
@@ -134,7 +134,7 @@ func (n *nsProvider) Delete(ctx context.Context, tenantID, artifactID, version s
 }
 
 // charEmbedder is a deterministic storage-only embedder for the live
-// storage-only path (G-VEC-5). It mirrors the unexported fakeEmbedder bodies
+// storage-only path. It mirrors the unexported fakeEmbedder bodies
 // the in-process registry tests use (pkg/registry/core, hybrid_test.go): for a
 // text, v[j] = byte(text[j]) / 256 for j < len(text), else 0. It is copied here
 // rather than imported because every fake in the tree is an unexported,

@@ -26,7 +26,6 @@ import (
 // SIEM / log aggregator, mirroring the local sink's PODIUM_AUDIT_SINK
 // redirect so "both the registry and local sinks can be redirected to
 // external SIEM / log aggregation independently" (§8.3). spec: §8.3, §9.1.
-// F-8.3.1.
 //
 // It returns the emit sink (the audit.Sink every event flows through) plus
 // the *FileSink, which is non-nil only for the file case. The §8.6
@@ -72,7 +71,7 @@ func isAuditEndpoint(v string) bool {
 // runs in its own goroutine and never blocks startup.
 //
 // It returns the signer so the caller can re-anchor on demand (e.g.
-// immediately after a retention truncation, F-8.4.8); nil is returned
+// immediately after a retention truncation); nil is returned
 // when anchoring is disabled.
 func startAnchorScheduler(cfg *Config, sink *audit.FileSink) sign.Provider {
 	if sink == nil {

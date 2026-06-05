@@ -2,8 +2,8 @@ package e2e
 
 // End-to-end coverage through the real `podium` binary for the §13.12
 // storage/vector backend config conformance fixes: the S3 region requirement
-// (F-13.12.9), the force-path-style flag (F-13.12.8), and the Pinecone
-// namespace default (F-13.12.11). Self-embedding (F-13.12.6) is exercised by
+//, the force-path-style flag, and the Pinecone
+// namespace default. Self-embedding is exercised by
 // the vector-backends suite (tests 3, 10, 15).
 
 import (
@@ -12,7 +12,7 @@ import (
 )
 
 // rcShowSetting runs `podium config show --server --json` and returns the named
-// setting row. Backend settings live behind --server (F-7.7.2). It pins HOME so
+// setting row. Backend settings live behind --server. It pins HOME so
 // the resolution is hermetic.
 func rcShowSetting(t *testing.T, env []string, name string) (value, source string, found bool) {
 	t.Helper()
@@ -39,7 +39,7 @@ func rcShowSetting(t *testing.T, env []string, name string) (value, source strin
 	return "", "", false
 }
 
-// §13.12 (F-13.12.9): selecting the s3 object store without its required region
+// §13.12: selecting the s3 object store without its required region
 // refuses startup, naming the missing key. The bucket is supplied so the error
 // isolates the region.
 func TestRegistryConfig_S3MissingRegionRefusesStart(t *testing.T) {
@@ -52,7 +52,7 @@ func TestRegistryConfig_S3MissingRegionRefusesStart(t *testing.T) {
 	)
 }
 
-// §13.12 (F-13.12.12): selecting weaviate-cloud without its required collection
+// §13.12: selecting weaviate-cloud without its required collection
 // refuses startup, naming the missing key.
 func TestRegistryConfig_WeaviateMissingCollectionRefusesStart(t *testing.T) {
 	t.Parallel()
@@ -67,7 +67,7 @@ func TestRegistryConfig_WeaviateMissingCollectionRefusesStart(t *testing.T) {
 	)
 }
 
-// §13.12 (F-13.12.8): PODIUM_S3_FORCE_PATH_STYLE is surfaced in config show and
+// §13.12: PODIUM_S3_FORCE_PATH_STYLE is surfaced in config show and
 // reflects the env value.
 func TestRegistryConfig_S3ForcePathStyleConfigShow(t *testing.T) {
 	t.Parallel()
@@ -80,7 +80,7 @@ func TestRegistryConfig_S3ForcePathStyleConfigShow(t *testing.T) {
 	}
 }
 
-// §13.12 (F-13.12.11): the Pinecone namespace defaults to "default" when unset.
+// §13.12: the Pinecone namespace defaults to "default" when unset.
 func TestRegistryConfig_PineconeNamespaceDefaultConfigShow(t *testing.T) {
 	t.Parallel()
 	v, _, found := rcShowSetting(t, []string{"PODIUM_PINECONE_NAMESPACE="}, "vector_backend.namespace")

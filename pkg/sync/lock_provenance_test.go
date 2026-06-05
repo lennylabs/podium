@@ -72,7 +72,7 @@ func TestWatch_StampsWatchProvenance(t *testing.T) {
 }
 
 // Spec: §7.5.3 — Run persists the active profile and the resolved scope into
-// the lock so override / save-as / profile edit can default to them (F-7.5.8).
+// the lock so override / save-as / profile edit can default to them.
 // The per-artifact version is recorded too.
 func TestRun_PersistsProfileScopeAndVersion(t *testing.T) {
 	t.Parallel()
@@ -104,7 +104,7 @@ func TestRun_PersistsProfileScopeAndVersion(t *testing.T) {
 }
 
 // Spec: §7.5.6 — after a real sync, save-as renders the lock's populated scope
-// into the profile. Before F-7.5.8, the scope was empty so save-as emitted an
+// into the profile. Before the fix, the scope was empty so save-as emitted an
 // empty include block. This drives Run, then SaveAs, and asserts the include
 // carries over.
 func TestSaveAs_AfterRunCarriesScope(t *testing.T) {
@@ -124,6 +124,6 @@ func TestSaveAs_AfterRunCarriesScope(t *testing.T) {
 		t.Fatalf("SaveAs: %v", err)
 	}
 	if len(res.Profile.Include) != 1 || res.Profile.Include[0] != "finance/**" {
-		t.Errorf("save-as include = %v, want [finance/**] (F-7.5.8)", res.Profile.Include)
+		t.Errorf("save-as include = %v, want [finance/**]", res.Profile.Include)
 	}
 }

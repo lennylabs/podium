@@ -97,7 +97,7 @@ func TestPodiumMCP_ToolsListReturnsMetaTools(t *testing.T) {
 // server-source registry. A filesystem PODIUM_REGISTRY (no http:// or
 // https:// prefix) makes the real binary refuse to start with a non-zero
 // exit and the config.filesystem_registry_unsupported envelope on stderr,
-// rather than serving and failing opaquely on the first tool call (F-6.1.1).
+// rather than serving and failing opaquely on the first tool call.
 func TestPodiumMCP_RejectsFilesystemRegistry(t *testing.T) {
 	t.Parallel()
 	bin := buildMCP(t)
@@ -127,7 +127,7 @@ func TestPodiumMCP_RejectsFilesystemRegistry(t *testing.T) {
 // Spec: §6.9 "Unknown PODIUM_HARNESS value" — the real binary refuses to
 // start and lists the available adapter values, with a non-zero exit and the
 // config.unknown_harness envelope on stderr, rather than detecting the bad
-// harness lazily on the first load_artifact call (F-6.9.2).
+// harness lazily on the first load_artifact call.
 func TestPodiumMCP_RejectsUnknownHarness(t *testing.T) {
 	t.Parallel()
 	bin := buildMCP(t)
@@ -160,9 +160,9 @@ func TestPodiumMCP_RejectsUnknownHarness(t *testing.T) {
 }
 
 // Spec: §5.1 — tools/list returns the canonical multi-sentence
-// descriptions verbatim (F-5.1.1) and an inputSchema for every meta-tool
-// (F-5.1.2); initialize surfaces the example system-prompt fragment via
-// the MCP `instructions` field (F-5.1.3). Driven through the real bridge
+// descriptions verbatim and an inputSchema for every meta-tool
+// ; initialize surfaces the example system-prompt fragment via
+// the MCP `instructions` field. Driven through the real bridge
 // subprocess.
 func TestPodiumMCP_ToolsListDescriptionsSchemasAndInstructions(t *testing.T) {
 	t.Parallel()
@@ -189,7 +189,7 @@ func TestPodiumMCP_ToolsListDescriptionsSchemasAndInstructions(t *testing.T) {
 	if err := dec.Decode(&initResp); err != nil {
 		t.Fatalf("decode initialize: %v", err)
 	}
-	// F-5.1.3: the §5.1 example fragment is exposed programmatically.
+	// the §5.1 example fragment is exposed programmatically.
 	for _, want := range []string{
 		"You have access to a catalog of authored skills and agents through the Podium meta-tools",
 		"Sessions start empty",
@@ -221,7 +221,7 @@ func TestPodiumMCP_ToolsListDescriptionsSchemasAndInstructions(t *testing.T) {
 			schema json.RawMessage
 		}{tool.Description, tool.InputSchema}
 	}
-	// F-5.1.2: every meta-tool advertises an inputSchema.
+	// every meta-tool advertises an inputSchema.
 	for _, name := range []string{"load_domain", "search_domains", "search_artifacts", "load_artifact"} {
 		tool, ok := byName[name]
 		if !ok {
@@ -231,7 +231,7 @@ func TestPodiumMCP_ToolsListDescriptionsSchemasAndInstructions(t *testing.T) {
 			t.Errorf("%s missing inputSchema", name)
 		}
 	}
-	// F-5.1.1: descriptions are the full canonical strings, not the
+	// descriptions are the full canonical strings, not the
 	// first-sentence truncation. The cross-tool guidance lives past the
 	// first period.
 	if d := byName["load_domain"].desc; !strings.Contains(d, "call `load_artifact`") {
@@ -276,7 +276,7 @@ func TestPodiumMCP_ToolsCallProxiesSearchArtifacts(t *testing.T) {
 // Spec: §5.0 — the bridge advertises a `resources` capability and serves
 // the read-only mirror of load_artifact: resources/list enumerates the
 // effective view and resources/read returns an artifact body without
-// materializing anything (F-5.0.1). Driven through the real subprocess.
+// materializing anything. Driven through the real subprocess.
 func TestPodiumMCP_ResourcesMirror(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t,

@@ -183,7 +183,7 @@ def test_from_env_reads_registry(monkeypatch):
     assert client.overlay_path == "/tmp/overlay"
 
 
-# Spec: §7.6 — search_artifacts forwards the session_id filter (F-7.6.3).
+# Spec: §7.6 — search_artifacts forwards the session_id filter.
 def test_search_artifacts_forwards_session_id(stub_server):
     stub_server.next_response = {"query": "q", "total_matched": 0, "results": []}
     client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
@@ -192,7 +192,7 @@ def test_search_artifacts_forwards_session_id(stub_server):
 
 
 # Spec: §7.6.1 — load_artifact forwards --session-id for consistent latest
-# resolution within a session (F-7.6.5, F-7.6.6).
+# resolution within a session.
 def test_load_artifact_forwards_session_id(stub_server):
     stub_server.next_response = {
         "id": "finance/run", "type": "skill", "version": "1.0.0",
@@ -221,7 +221,7 @@ def test_dependents_of_decodes_edges(stub_server):
     assert deps[0].kind == "extends"
 
 
-# Spec: §3.5 (F-3.5.7) — preview_scope takes no arguments and sends no query
+# Spec: §3.5 — preview_scope takes no arguments and sends no query
 # constraints (the spec shows preview_scope() with no args and the server
 # reads no query parameters). It GETs /v1/scope/preview and passes the
 # aggregate-count response through unchanged.
@@ -241,7 +241,7 @@ def test_preview_scope_sends_no_constraints(stub_server):
     assert out["by_sensitivity"] == {"low": 12}
 
 
-# Spec: §4.5.5 / §5.1 (F-4.5.4) — load_domain omits the depth query parameter
+# Spec: §4.5.5 / §5.1 — load_domain omits the depth query parameter
 # by default so the registry applies its configured default max_depth (3)
 # instead of the SDK forcing a single rendered level.
 def test_load_domain_omits_depth_by_default(stub_server):
@@ -253,7 +253,7 @@ def test_load_domain_omits_depth_by_default(stub_server):
     assert "depth" not in stub_server.last_path
 
 
-# Spec: §4.5.5 / §5.1 (F-4.5.4) — an explicit depth is forwarded so a caller
+# Spec: §4.5.5 / §5.1 — an explicit depth is forwarded so a caller
 # can still override the configured default.
 def test_load_domain_forwards_explicit_depth(stub_server):
     stub_server.next_response = {"path": "finance", "subdomains": [], "notable": []}
@@ -290,7 +290,7 @@ def test_load_artifacts_empty_short_circuits(stub_server):
     assert stub_server.last_path == ""
 
 
-# Spec: §7.6 / §2.2 (F-2.2.1) — the loaded-artifact object exposes
+# Spec: §7.6 / §2.2 — the loaded-artifact object exposes
 # materialize(to=..., harness=...) and writes the canonical layout to disk.
 def test_materialize_context_writes_artifact_md(tmp_path):
     art = LoadedArtifact(
@@ -412,7 +412,7 @@ def test_batch_result_materialize_ok_and_error(tmp_path):
         bad.materialize(str(tmp_path))
 
 
-# Spec: §4.1/§7.2 (F-4.1.1) — load_artifact decodes a base64-flagged inline set
+# Spec: §4.1/§7.2 — load_artifact decodes a base64-flagged inline set
 # (resources_base64) back to raw bytes, so a binary resource materializes
 # uncorrupted instead of as a U+FFFD-mangled string.
 def test_load_artifact_decodes_base64_binary_resources(stub_server, tmp_path):
@@ -433,7 +433,7 @@ def test_load_artifact_decodes_base64_binary_resources(stub_server, tmp_path):
     assert (tmp_path / "a" / "b" / "data" / "blob.bin").read_bytes() == blob
 
 
-# Spec: §7.6.2 (F-7.6.4) — a batch item materializes inline resources delivered
+# Spec: §7.6.2 — a batch item materializes inline resources delivered
 # without an object store: a text resource as a literal string, a binary one
 # decoded from inline_base64. No presigned URL is fetched.
 def test_batch_result_materializes_inline_resources(tmp_path):
@@ -466,7 +466,7 @@ def test_materialize_empty_destination(tmp_path):
         art.materialize("")
 
 
-# Spec: §7.6 (F-7.6.8) — subscribe takes the event-type list positionally (the
+# Spec: §7.6 — subscribe takes the event-type list positionally (the
 # documented call form) and sends one repeated `type` query parameter per
 # event type, matching the server's /v1/events handler and the TypeScript SDK.
 # A comma-joined `types` parameter the server never reads must not be emitted.
@@ -482,7 +482,7 @@ def test_subscribe_sends_repeated_type_params(stub_server):
     assert "types=" not in path
 
 
-# Spec: §7.6 (F-7.6.13) — the client attaches its session/access token as the
+# Spec: §7.6 — the client attaches its session/access token as the
 # Bearer credential so it reaches the registry with the same identity as the
 # MCP path; visibility filtering then applies server-side.
 def test_requests_attach_bearer_token(stub_server):
@@ -493,7 +493,7 @@ def test_requests_attach_bearer_token(stub_server):
     assert getattr(stub_server, "last_auth", "") == "Bearer tok-7"
 
 
-# Spec: §7.6 (F-7.6.13) — with no token configured no Authorization header is
+# Spec: §7.6 — with no token configured no Authorization header is
 # sent, so an anonymous client still reaches an open registry.
 def test_no_token_sends_no_auth_header(stub_server):
     stub_server.next_response = {"query": "q", "total_matched": 0, "results": []}
@@ -515,7 +515,7 @@ def test_from_env_reads_session_token(monkeypatch):
 # Spec: §7.4 — "podium sync and the SDKs apply the same cache modes."
 # offline-only "never contact the registry": every meta-tool call raises the
 # structured network.offline_cache_miss error before a request is issued. The
-# registry points at the stub, but no request reaches it (F-7.4.3).
+# registry points at the stub, but no request reaches it.
 def test_offline_only_never_contacts_registry(stub_server):
     stub_server.last_path = "untouched"
     client = Client(
@@ -569,7 +569,7 @@ def test_rejects_unknown_cache_mode():
         Client(registry="http://127.0.0.1:9999", cache_mode="bogus")
 
 
-# Spec: §7.4 / §6.10 (F-7.4.1) — a transport-level failure (connection refused,
+# Spec: §7.4 / §6.10 — a transport-level failure (connection refused,
 # DNS, timeout) raises urllib.error.URLError, which the SDK converts to the
 # structured network.registry_unreachable error rather than leaking the raw
 # exception. The SDK keeps no cache, so this is the always-revalidate no-cache
@@ -588,7 +588,7 @@ def test_get_transport_error_maps_to_unreachable(monkeypatch):
 
 
 # Spec: §7.4 — offline-first keeps no cache either, so an unreachable registry
-# is the same no-cache miss (F-7.4.1).
+# is the same no-cache miss.
 def test_get_transport_error_offline_first_also_unreachable(monkeypatch):
     def boom(*_a, **_k):
         raise urllib.error.URLError("name resolution failed")
@@ -600,7 +600,7 @@ def test_get_transport_error_offline_first_also_unreachable(monkeypatch):
     assert exc.value.code == "network.registry_unreachable"
 
 
-# Spec: §7.4 — the batch path wraps transport errors too (F-7.4.1).
+# Spec: §7.4 — the batch path wraps transport errors too.
 def test_batch_transport_error_maps_to_unreachable(monkeypatch):
     def boom(*_a, **_k):
         raise urllib.error.URLError("Connection refused")
@@ -613,8 +613,7 @@ def test_batch_transport_error_maps_to_unreachable(monkeypatch):
 
 
 # Spec: §7.4 — the event stream wraps transport errors too. urlopen is opened
-# lazily on the first iteration, so the structured error surfaces from next()
-# (F-7.4.1).
+# lazily on the first iteration, so the structured error surfaces from next().
 def test_subscribe_transport_error_maps_to_unreachable(monkeypatch):
     def boom(*_a, **_k):
         raise urllib.error.URLError("Connection refused")
@@ -627,7 +626,7 @@ def test_subscribe_transport_error_maps_to_unreachable(monkeypatch):
     assert exc.value.code == "network.registry_unreachable"
 
 
-# Spec: §7.4 / §6.10 (F-7.4.1) — a reachable server returning a structured
+# Spec: §7.4 / §6.10 — a reachable server returning a structured
 # error envelope is NOT a transport failure; the envelope's code is preserved
 # rather than rewritten to network.registry_unreachable.
 def test_reachable_error_not_rewritten_to_unreachable(stub_server):
@@ -639,7 +638,7 @@ def test_reachable_error_not_rewritten_to_unreachable(stub_server):
     assert exc.value.code == "registry.not_found"
 
 
-# Spec: §6.10 (F-6.10.1) — the SDK surfaces the full envelope: a reachable
+# Spec: §6.10 — the SDK surfaces the full envelope: a reachable
 # server's structured error carries details and suggested_action through to the
 # RegistryError the caller catches.
 def test_error_envelope_carries_details_and_suggested_action(stub_server):

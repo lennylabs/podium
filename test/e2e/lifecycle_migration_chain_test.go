@@ -1,7 +1,7 @@
 package e2e
 
 // Migration chain from filesystem to standalone to standard, asserting byte
-// identity at each stage (gap G-LIFECYCLE-5).
+// identity at each stage.
 //
 // admin_migrate_test.go and schema_forward_migration_test.go exercise the
 // standalone-SQLite-to-standard pump, and standard_stack_parity_test.go proves
@@ -29,7 +29,7 @@ package e2e
 // Spec: §11 (filesystem ↔ server equivalence), §13.4 / §13.10 (admin
 // migrate-to-standard pumps standalone state into a standard deployment;
 // content-addressed bytes survive), §7.2 (control plane + data plane; large
-// resources externalize), §4.7.6 (immutable content hash). Gap G-LIFECYCLE-5.
+// resources externalize), §4.7.6 (immutable content hash).
 
 import (
 	"encoding/json"

@@ -7,7 +7,7 @@ package e2e
 // verbatim pass-through of both hint fields through the standalone server, the
 // MCP bridge, and filesystem sync. Tests drive the podium CLI, the standalone
 // server, and the podium-mcp bridge. Doc claims that the implementation does not
-// honor (with no BUILD-GAPS finding filed) are asserted against actual behavior
+// honor (with no implementation-gap finding filed) are asserted against actual behavior
 // with a note so a future change is detected.
 
 import (
@@ -41,7 +41,7 @@ func htLoadFrontmatter(t *testing.T, baseURL, id string) string {
 
 // ---- effort_hint accepted on supported types (agent/skill/command) ---------
 
-// T-D-hints-1 — effort_hint: low on a skill lints clean with no
+// effort_hint: low on a skill lints clean with no
 // hint_on_unsupported_type warning.
 // spec: docs/authoring/hints.md §effort_hint table.
 func TestHints_EffortLowOnSkill(t *testing.T) {
@@ -62,7 +62,7 @@ func TestHints_EffortLowOnSkill(t *testing.T) {
 	}
 }
 
-// T-D-hints-2 — effort_hint: medium on an agent lints clean.
+// effort_hint: medium on an agent lints clean.
 // spec: docs/authoring/hints.md §effort_hint table.
 func TestHints_EffortMediumOnAgent(t *testing.T) {
 	t.Parallel()
@@ -78,7 +78,7 @@ func TestHints_EffortMediumOnAgent(t *testing.T) {
 	}
 }
 
-// T-D-hints-3 — effort_hint: high on a command lints clean.
+// effort_hint: high on a command lints clean.
 // spec: docs/authoring/hints.md §effort_hint table.
 func TestHints_EffortHighOnCommand(t *testing.T) {
 	t.Parallel()
@@ -94,7 +94,7 @@ func TestHints_EffortHighOnCommand(t *testing.T) {
 	}
 }
 
-// T-D-hints-4 — effort_hint: max on an agent lints clean.
+// effort_hint: max on an agent lints clean.
 // spec: docs/authoring/hints.md §effort_hint table; "Use max for agents that do
 // open-ended investigation".
 func TestHints_EffortMaxOnAgent(t *testing.T) {
@@ -111,7 +111,7 @@ func TestHints_EffortMaxOnAgent(t *testing.T) {
 	}
 }
 
-// T-D-hints-5 — model_class_hint: nano on a skill lints clean.
+// model_class_hint: nano on a skill lints clean.
 // spec: docs/authoring/hints.md §model_class_hint table.
 func TestHints_ModelNanoOnSkill(t *testing.T) {
 	t.Parallel()
@@ -128,7 +128,7 @@ func TestHints_ModelNanoOnSkill(t *testing.T) {
 	}
 }
 
-// T-D-hints-6 — model_class_hint: frontier on an agent lints clean.
+// model_class_hint: frontier on an agent lints clean.
 // spec: docs/authoring/hints.md §model_class_hint table.
 func TestHints_ModelFrontierOnAgent(t *testing.T) {
 	t.Parallel()
@@ -144,7 +144,7 @@ func TestHints_ModelFrontierOnAgent(t *testing.T) {
 	}
 }
 
-// T-D-hints-7 — both effort_hint and model_class_hint set together on a skill
+// both effort_hint and model_class_hint set together on a skill
 // lint clean.
 // spec: docs/authoring/hints.md §Advisory framing.
 func TestHints_BothHintsOnSkill(t *testing.T) {
@@ -167,7 +167,7 @@ func TestHints_BothHintsOnSkill(t *testing.T) {
 
 // ---- effort_hint / model_class_hint on unsupported types -> warning ---------
 
-// T-D-hints-8 — effort_hint on a context warns (lint.hint_on_unsupported_type,
+// effort_hint on a context warns (lint.hint_on_unsupported_type,
 // severity warning) and the lint still exits 0.
 // spec: docs/authoring/hints.md §Lint behavior.
 func TestHints_EffortOnContextWarns(t *testing.T) {
@@ -187,7 +187,7 @@ func TestHints_EffortOnContextWarns(t *testing.T) {
 	}
 }
 
-// T-D-hints-9 — model_class_hint on a context warns.
+// model_class_hint on a context warns.
 // spec: docs/authoring/hints.md §Lint behavior.
 func TestHints_ModelOnContextWarns(t *testing.T) {
 	t.Parallel()
@@ -206,7 +206,7 @@ func TestHints_ModelOnContextWarns(t *testing.T) {
 	}
 }
 
-// T-D-hints-10 — effort_hint on a rule warns.
+// effort_hint on a rule warns.
 // spec: docs/authoring/hints.md §Lint behavior.
 func TestHints_EffortOnRuleWarns(t *testing.T) {
 	t.Parallel()
@@ -222,7 +222,7 @@ func TestHints_EffortOnRuleWarns(t *testing.T) {
 	}
 }
 
-// T-D-hints-11 — effort_hint on a hook warns.
+// effort_hint on a hook warns.
 // spec: docs/authoring/hints.md §Lint behavior.
 func TestHints_EffortOnHookWarns(t *testing.T) {
 	t.Parallel()
@@ -238,7 +238,7 @@ func TestHints_EffortOnHookWarns(t *testing.T) {
 	}
 }
 
-// T-D-hints-12 — effort_hint on an mcp-server warns.
+// effort_hint on an mcp-server warns.
 // spec: docs/authoring/hints.md §Lint behavior.
 func TestHints_EffortOnMcpServerWarns(t *testing.T) {
 	t.Parallel()
@@ -256,10 +256,10 @@ func TestHints_EffortOnMcpServerWarns(t *testing.T) {
 
 // ---- no enum-value validation (doc claims an ingest error; none exists) -----
 
-// T-D-hints-13 — an invalid effort_hint value (ultra) on an agent.
+// an invalid effort_hint value (ultra) on an agent.
 // The doc states an out-of-enum value is an ingest error, but EffortHint is a
 // plain string and no lint rule validates enum membership, so lint exits 0 with
-// no error diagnostic. No BUILD-GAPS finding is filed for this narrow gap; the
+// no error diagnostic. No implementation-gap finding is filed for this narrow gap; the
 // test asserts actual behavior so a future enum check is detected as a change.
 // spec: docs/authoring/hints.md §Lint behavior ("An invalid value ... ingest error").
 func TestHints_InvalidEffortValueNoError(t *testing.T) {
@@ -276,9 +276,9 @@ func TestHints_InvalidEffortValueNoError(t *testing.T) {
 	}
 }
 
-// T-D-hints-14 — an invalid model_class_hint value (gpt-4o) on an agent.
-// Same gap as T-D-hints-13: ModelClassHint is a plain string with no enum
-// validation, so lint exits 0 with no error diagnostic. No BUILD-GAPS finding;
+// an invalid model_class_hint value (gpt-4o) on an agent.
+// Same gap: ModelClassHint is a plain string with no enum
+// validation, so lint exits 0 with no error diagnostic. No implementation-gap finding;
 // asserts actual behavior as a change-detector.
 // spec: docs/authoring/hints.md §Lint behavior ("An invalid value ... ingest error").
 func TestHints_InvalidModelValueNoError(t *testing.T) {
@@ -295,7 +295,7 @@ func TestHints_InvalidModelValueNoError(t *testing.T) {
 	}
 }
 
-// T-D-hints-15 — a skill with no hint fields lints clean and emits no
+// a skill with no hint fields lints clean and emits no
 // hint_on_unsupported_type diagnostic.
 // spec: docs/authoring/hints.md §Lint behavior ("Both fields are optional.").
 func TestHints_NoHintFieldsNoWarning(t *testing.T) {
@@ -315,7 +315,7 @@ func TestHints_NoHintFieldsNoWarning(t *testing.T) {
 
 // ---- delivery-time pass-through (server, sync, MCP) -------------------------
 
-// T-D-hints-16 — both hints on an agent round-trip into the load_artifact
+// both hints on an agent round-trip into the load_artifact
 // `frontmatter` field verbatim.
 // spec: docs/authoring/hints.md §Advisory framing.
 func TestHints_LoadArtifactFrontmatterCarriesHints(t *testing.T) {
@@ -329,7 +329,7 @@ func TestHints_LoadArtifactFrontmatterCarriesHints(t *testing.T) {
 	}
 }
 
-// T-D-hints-17 — sync --harness none writes the canonical layout with both hints
+// sync --harness none writes the canonical layout with both hints
 // intact in the materialized ARTIFACT.md.
 // spec: docs/authoring/hints.md §Advisory framing.
 func TestHints_SyncNonePreservesHints(t *testing.T) {
@@ -347,7 +347,7 @@ func TestHints_SyncNonePreservesHints(t *testing.T) {
 	}
 }
 
-// T-D-hints-18 — sync --harness claude-code writes the agent manifest to
+// sync --harness claude-code writes the agent manifest to
 // .claude/agents/<leaf>.md with effort_hint carried through.
 // spec: docs/authoring/hints.md §Adapter support ("No built-in adapter currently
 // translates these fields").
@@ -366,7 +366,7 @@ func TestHints_SyncClaudeCodeAgentPreservesHint(t *testing.T) {
 	}
 }
 
-// T-D-hints-19 — sync --harness claude-code writes a skill's SKILL.md to
+// sync --harness claude-code writes a skill's SKILL.md to
 // .claude/skills/<leaf>/SKILL.md. effort_hint lives in ARTIFACT.md, which the
 // claude-code skill layout does not materialize, so this asserts the SKILL.md
 // body is present.
@@ -387,7 +387,7 @@ func TestHints_SyncClaudeCodeSkillMaterializes(t *testing.T) {
 	}
 }
 
-// T-D-hints-20 — model_class_hint: frontier does not cause a load failure when
+// model_class_hint: frontier does not cause a load failure when
 // no frontier-tier model is configured. load_artifact returns 200 with the hint
 // in the frontmatter.
 // spec: docs/authoring/hints.md §Advisory framing.
@@ -407,7 +407,7 @@ func TestHints_FrontierHintLoadsWithoutModel(t *testing.T) {
 
 // ---- scaffold interaction ---------------------------------------------------
 
-// T-D-hints-21 — a scaffolded skill with hints added to its ARTIFACT.md
+// a scaffolded skill with hints added to its ARTIFACT.md
 // frontmatter lints clean. The scaffold omits hints by default; inserting them
 // before the closing delimiter produces a lint-clean artifact.
 // spec: docs/authoring/hints.md §Advisory framing.
@@ -437,7 +437,7 @@ func TestHints_ScaffoldSkillWithAddedHintsLintsClean(t *testing.T) {
 	}
 }
 
-// T-D-hints-22 — a scaffolded agent omits both hint fields by default and lints
+// a scaffolded agent omits both hint fields by default and lints
 // clean.
 // spec: docs/authoring/hints.md §Advisory framing ("Both fields are optional.").
 func TestHints_ScaffoldAgentOmitsHints(t *testing.T) {
@@ -458,7 +458,7 @@ func TestHints_ScaffoldAgentOmitsHints(t *testing.T) {
 	}
 }
 
-// T-D-hints-23 — the MCP load_artifact path preserves both hints. The MCP result
+// the MCP load_artifact path preserves both hints. The MCP result
 // JSON has no frontmatter field, so the hints are checked in the materialized
 // ARTIFACT.md under PODIUM_MATERIALIZE_ROOT.
 // spec: docs/authoring/hints.md §Advisory framing.
@@ -481,7 +481,7 @@ func TestHints_MCPLoadArtifactPreservesHints(t *testing.T) {
 	}
 }
 
-// T-D-hints-24 — a context with effort_hint syncs successfully (the warning does
+// a context with effort_hint syncs successfully (the warning does
 // not block sync) and the hint passes through to the materialized file.
 // spec: docs/authoring/hints.md §Lint behavior (warning, not error).
 func TestHints_ContextHintDoesNotBlockSync(t *testing.T) {
@@ -499,7 +499,7 @@ func TestHints_ContextHintDoesNotBlockSync(t *testing.T) {
 	}
 }
 
-// T-D-hints-25 — model_class_hint values small and large are both accepted on a
+// model_class_hint values small and large are both accepted on a
 // command (two separate registries, each lint-clean).
 // spec: docs/authoring/hints.md §model_class_hint table.
 func TestHints_ModelSmallAndLargeOnCommand(t *testing.T) {
@@ -518,7 +518,7 @@ func TestHints_ModelSmallAndLargeOnCommand(t *testing.T) {
 	}
 }
 
-// T-D-hints-26 — model_class_hint: medium on a skill round-trips through sync
+// model_class_hint: medium on a skill round-trips through sync
 // --harness none into the materialized ARTIFACT.md.
 // spec: docs/authoring/hints.md §model_class_hint table.
 func TestHints_ModelMediumSkillRoundTrip(t *testing.T) {
@@ -537,7 +537,7 @@ func TestHints_ModelMediumSkillRoundTrip(t *testing.T) {
 	}
 }
 
-// T-D-hints-27 — an artifact with frontier/max hints loads and is searchable
+// an artifact with frontier/max hints loads and is searchable
 // with no model configured. load_artifact returns 200 with both hints, and
 // search_artifacts returns the artifact id.
 // spec: docs/authoring/hints.md §Advisory framing.
@@ -561,9 +561,9 @@ func TestHints_FrontierHintLoadsAndSearches(t *testing.T) {
 	}
 }
 
-// T-D-hints-28 — the registry surface an SDK consumer reads carries both hints.
+// the registry surface an SDK consumer reads carries both hints.
 // The doc references an SDK consumer; this Go e2e harness has no SDK harness and
-// no BUILD-GAPS finding applies, so it asserts the load_artifact frontmatter
+// no implementation-gap finding applies, so it asserts the load_artifact frontmatter
 // (the same response the SDK reads) over HTTP.
 // spec: docs/authoring/hints.md §Adapter support.
 func TestHints_SDKReadableHintsViaHTTP(t *testing.T) {
@@ -579,7 +579,7 @@ func TestHints_SDKReadableHintsViaHTTP(t *testing.T) {
 
 // ---- enumerate all enum values cleanly -------------------------------------
 
-// T-D-hints-29 — a registry with one agent per model_class_hint value lints
+// a registry with one agent per model_class_hint value lints
 // clean with no hint_on_unsupported_type or error diagnostics.
 // spec: docs/authoring/hints.md §model_class_hint table.
 func TestHints_AllModelClassValuesLintClean(t *testing.T) {
@@ -600,7 +600,7 @@ func TestHints_AllModelClassValuesLintClean(t *testing.T) {
 	}
 }
 
-// T-D-hints-30 — a registry with one skill per effort_hint value lints clean
+// a registry with one skill per effort_hint value lints clean
 // with no hint_on_unsupported_type warning.
 // spec: docs/authoring/hints.md §effort_hint table.
 func TestHints_AllEffortValuesLintClean(t *testing.T) {
@@ -620,7 +620,7 @@ func TestHints_AllEffortValuesLintClean(t *testing.T) {
 	}
 }
 
-// T-D-hints-31 — both hints on a rule emit exactly two separate
+// both hints on a rule emit exactly two separate
 // lint.hint_on_unsupported_type warnings (one per field), exit 0.
 // spec: docs/authoring/hints.md §Lint behavior.
 func TestHints_BothHintsOnRuleTwoWarnings(t *testing.T) {

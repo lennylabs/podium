@@ -271,7 +271,7 @@ type LayerConfig struct {
 	// LayerConfig (notably GET /v1/layers, which is not admin-gated) via the
 	// json:"-" tag, mirroring the outbound-receiver masking in webhooks.go;
 	// the secret reaches the caller only through the dedicated webhook_secret
-	// field on the one-time register and rotate-secret responses (F-7.3.1).
+	// field on the one-time register and rotate-secret responses.
 	// The SQL backends persist it through explicit columns, so the tag does
 	// not affect storage.
 	WebhookSecret string `json:"-"`
@@ -321,8 +321,7 @@ type LayerConfig struct {
 // the moment the flag was set, and anchoring DeprecatedAt to it matches the
 // spec. Were a post-ingest deprecation path ever added, it would need to
 // stamp DeprecatedAt at that transition instead of inheriting IngestedAt.
-// Every backend's PutManifest calls this before persisting. spec: §8.4
-// (F-8.4.2).
+// Every backend's PutManifest calls this before persisting. spec: §8.4.
 func stampDeprecation(rec *ManifestRecord) {
 	if rec.Deprecated && rec.DeprecatedAt == nil {
 		t := rec.IngestedAt

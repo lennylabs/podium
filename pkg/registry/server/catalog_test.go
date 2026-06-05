@@ -36,7 +36,7 @@ func catalogFixture(t *testing.T) *httptest.Server {
 	return ts
 }
 
-// spec: §4.5.2 (F-4.5.2/F-6.4.2) — GET /v1/catalog?scope= returns the visible
+// spec: §4.5.2 — GET /v1/catalog?scope= returns the visible
 // catalog under the scope prefix: a flat id list plus lean descriptors.
 func TestHandleCatalog_ScopeFilter(t *testing.T) {
 	t.Parallel()

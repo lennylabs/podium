@@ -1,4 +1,4 @@
-// SDK registry resolution, overlay merge, and login (F-14.4.*, F-14.8.*).
+// SDK registry resolution, overlay merge, and login.
 // Spec: §7.5.2 / §13.10 (registry resolution), §6.4 / §6.4.1 (overlay),
 // §6.3 / §7.7 / §14.8 (device-code login).
 
@@ -17,7 +17,7 @@ async function writeFileAt(path: string, body: string): Promise<void> {
   await writeFile(path, body);
 }
 
-describe("registry resolution (F-14.4.1, F-14.4.3)", () => {
+describe("registry resolution", () => {
   let dir: string;
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), "podium-cfg-"));
@@ -69,7 +69,7 @@ describe("registry resolution (F-14.4.1, F-14.4.3)", () => {
   });
 });
 
-describe("overlay merge (F-14.4.2)", () => {
+describe("overlay merge", () => {
   let dir: string;
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), "podium-ov-"));
@@ -123,7 +123,7 @@ describe("overlay merge (F-14.4.2)", () => {
     expect(hitNetwork).toBe(false);
   });
 
-  // F-6.4.4 — the overlay search honors the `scope` prefix filter so a scoped
+  // the overlay search honors the `scope` prefix filter so a scoped
   // query excludes out-of-scope overlay artifacts (spec §6.4).
   it("LocalOverlay.search excludes out-of-scope ids", async () => {
     const overlay = join(dir, "overlay");
@@ -165,7 +165,7 @@ describe("overlay merge (F-14.4.2)", () => {
   });
 });
 
-describe("login device-code flow (F-14.8.1, F-14.8.2)", () => {
+describe("login device-code flow", () => {
   function oauthFetcher(opts: { alwaysPending?: boolean }): typeof fetch {
     let polls = 0;
     return async (input, init) => {

@@ -11,7 +11,7 @@ import (
 )
 
 // spec: §8.2 — the MCP server scrubs the free-text search query before
-// writing the meta-tool event to its local audit sink. F-8.2.4.
+// writing the meta-tool event to its local audit sink.
 func TestMCPAuditSearch_ScrubsQuery(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.log")
@@ -39,7 +39,7 @@ func TestMCPAuditSearch_ScrubsQuery(t *testing.T) {
 
 // spec: §8.2 — callTool routes search_artifacts / search_domains through
 // the scrubbing path before dispatching, so the query is redacted even
-// when the downstream registry is unreachable. F-8.2.4.
+// when the downstream registry is unreachable.
 func TestMCPCallTool_SearchQueryScrubbed(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.log")

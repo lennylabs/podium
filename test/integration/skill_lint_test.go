@@ -8,7 +8,7 @@ import (
 	"github.com/lennylabs/podium/internal/testharness/cmdharness"
 )
 
-// TestPodiumLint_HookMissingEventErrors covers F-4.3.7.
+// TestPodiumLint_HookMissingEventErrors covers
 // Spec: §4.3 hook schema — hook_event is a required field of a type: hook
 // artifact; the real binary's lint pipeline rejects a hook that omits it.
 func TestPodiumLint_HookMissingEventErrors(t *testing.T) {
@@ -27,7 +27,7 @@ func TestPodiumLint_HookMissingEventErrors(t *testing.T) {
 	}
 }
 
-// TestPodiumLint_RuleGlobMissingGlobsErrors covers F-4.3.7.
+// TestPodiumLint_RuleGlobMissingGlobsErrors covers
 // Spec: §4.3 rule_mode table — rule_globs is required when rule_mode: glob.
 func TestPodiumLint_RuleGlobMissingGlobsErrors(t *testing.T) {
 	t.Parallel()
@@ -45,7 +45,7 @@ func TestPodiumLint_RuleGlobMissingGlobsErrors(t *testing.T) {
 	}
 }
 
-// TestPodiumLint_RuleModeOutOfEnumErrors covers F-4.3.2.
+// TestPodiumLint_RuleModeOutOfEnumErrors covers
 // Spec: 04-artifact-model.md §4.3 — rule_mode is the closed enumeration
 // always | glob | auto | explicit; the real binary's lint pipeline rejects
 // an out-of-enum value such as rule_mode: sometimes.
@@ -65,7 +65,7 @@ func TestPodiumLint_RuleModeOutOfEnumErrors(t *testing.T) {
 	}
 }
 
-// TestPodiumLint_MCPServersUntranslatableErrors covers F-6.7.2.
+// TestPodiumLint_MCPServersUntranslatableErrors covers
 // Spec: §6.7.1 — mcpServers is graded ✗ for codex (the TOML agent translation
 // drops it). An agent that declares mcpServers and targets codex is an ingest
 // error. Before the fix the lint never evaluated the mcpServers row, so the
@@ -88,7 +88,7 @@ func TestPodiumLint_MCPServersUntranslatableErrors(t *testing.T) {
 	}
 }
 
-// TestPodiumLint_SkillPodiumFieldErrors covers F-4.3.6.
+// TestPodiumLint_SkillPodiumFieldErrors covers
 // Spec: §4.3.4 — a Podium-only field in SKILL.md is an ingest error; the
 // field belongs in ARTIFACT.md. ParseSkill drops the key, so the lint
 // pipeline must scan the raw frontmatter to catch it.
@@ -114,7 +114,7 @@ func TestPodiumLint_SkillPodiumFieldErrors(t *testing.T) {
 	}
 }
 
-// TestPodiumLint_HookGenericSubtypeWarns covers F-4.3.8.
+// TestPodiumLint_HookGenericSubtypeWarns covers
 // Spec: §4.3.5 — a generic hook and a corresponding subtype hook declared
 // together warn (not error); lint still exits 0.
 func TestPodiumLint_HookGenericSubtypeWarns(t *testing.T) {
@@ -139,7 +139,7 @@ func TestPodiumLint_HookGenericSubtypeWarns(t *testing.T) {
 	}
 }
 
-// TestPodiumSync_DerivesSkillCompatibility covers F-4.3.9.
+// TestPodiumSync_DerivesSkillCompatibility covers
 // Spec: §4.3.4 — when SKILL.md omits compatibility, the claude-code adapter
 // (which consumes only the agentskills.io subset) derives it from
 // runtime_requirements/sandbox_profile and injects it into the materialized

@@ -9,7 +9,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 )
 
-// Spec: §12 (F-12.0.2) — "Per-package and per-file size lints at ingest
+// Spec: §12 — "Per-package and per-file size lints at ingest
 // time; soft cap is configurable." A Linter with a lowered per-file cap
 // warns on a resource that is below the default 1 MB cap but above the
 // configured value.
@@ -45,7 +45,7 @@ func TestBundledResourceSize_PerFileCapConfigurable(t *testing.T) {
 	}
 }
 
-// Spec: §12 (F-12.0.2) — the per-package soft cap is likewise configurable;
+// Spec: §12 — the per-package soft cap is likewise configurable;
 // a lowered cap turns a package below the 10 MB default into an error.
 func TestBundledResourceSize_PerPackageCapConfigurable(t *testing.T) {
 	t.Parallel()
@@ -71,7 +71,7 @@ func TestBundledResourceSize_PerPackageCapConfigurable(t *testing.T) {
 	}
 }
 
-// Spec: §12 (F-12.0.2) — NewIngestLinter reads the soft caps from
+// Spec: §12 — NewIngestLinter reads the soft caps from
 // PODIUM_LINT_PER_FILE_SOFT_CAP_BYTES / PODIUM_LINT_PER_PACKAGE_SOFT_CAP_BYTES
 // so an operator can tune them per deployment. t.Setenv precludes t.Parallel.
 func TestNewIngestLinter_ReadsCapEnv(t *testing.T) {

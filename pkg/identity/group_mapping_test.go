@@ -9,7 +9,7 @@ import (
 
 // Spec: §6.3.1 — the IdpGroupMapping adapter rewrites OIDC group-claim
 // values to layer group names; an unmapped value passes through unchanged
-// so direct-match deployments keep working. F-6.3.4.
+// so direct-match deployments keep working.
 func TestIdpGroupMapping_Map(t *testing.T) {
 	t.Parallel()
 	m := identity.NewIdpGroupMapping(map[string]string{

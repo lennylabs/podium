@@ -1,13 +1,13 @@
 package e2e
 
-// Admin RBAC through the CLI against an authenticated server (gap G-AUTH-14).
+// Admin RBAC through the CLI against an authenticated server.
 //
 // admin grant, revoke, show-effective, and the admin-defined layer distinction
 // were exercised only against the standalone server, which resolves callers to
 // system:public and so cannot tell an admin from a non-admin. The HTTP-level
 // gate is covered by auth_admin_rbac_test.go; this drives the same §4.7.2
 // operations through the real podium CLI binary against the authenticated
-// harness (G-INFRA-5), so the CLI's credential attachment (PODIUM_SESSION_TOKEN
+// harness, so the CLI's credential attachment (PODIUM_SESSION_TOKEN
 // -> Authorization: Bearer) and the server's AdminAuthorize check are exercised
 // end to end.
 //
@@ -27,7 +27,7 @@ package e2e
 // Spec: §4.7.2 (the admin role gates grant, revoke, show-effective, and
 // admin-defined layer mutation; the check runs through AdminAuthorize over the
 // verified identity), §7.6 / §7.6.1 (the CLI attaches the caller credential to
-// authenticated registry endpoints). Gap G-AUTH-14.
+// authenticated registry endpoints).
 
 import (
 	"encoding/json"

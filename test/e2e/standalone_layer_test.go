@@ -8,10 +8,10 @@ import (
 // layer). `podium serve --standalone` bootstraps ~/.podium/sync.yaml with
 // defaults.registry pointing at the local server, and the subsequent
 // `podium layer` commands resolve that registry with no explicit --registry
-// flag (F-14.10.1). `layer register` prints an absolute webhook URL on its own
-// labeled line (F-14.10.2).
+// flag. `layer register` prints an absolute webhook URL on its own
+// labeled line.
 
-// spec §14.10 steps 2-3 (F-14.10.1, F-14.10.2): register and reingest resolve
+// spec §14.10 steps 2-3: register and reingest resolve
 // the bootstrapped registry without --registry, and a git register prints the
 // absolute webhook URL.
 func TestStandaloneLayer_ResolvesBootstrappedRegistry(t *testing.T) {
@@ -49,7 +49,7 @@ func TestStandaloneLayer_ResolvesBootstrappedRegistry(t *testing.T) {
 	cliContains(t, git.Stderr, wantWebhook, "absolute webhook URL on labeled line")
 }
 
-// spec §14.10 (F-14.10.1): with no registry configured anywhere (clean HOME,
+// spec §14.10: with no registry configured anywhere (clean HOME,
 // empty PODIUM_REGISTRY, no --registry), layer register refuses with exit 2 and
 // names the resolution sources.
 func TestStandaloneLayer_NoRegistryAnywhereRefuses(t *testing.T) {

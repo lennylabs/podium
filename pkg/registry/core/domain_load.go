@@ -114,7 +114,7 @@ func (r *Registry) mergedDomains(ctx context.Context, id layer.Identity) (map[st
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	// spec: §4.6 — resolve the caller's layer list (admin + runtime-registered)
-	// per request so load_domain composes user-defined layers too (F-4.6.1).
+	// per request so load_domain composes user-defined layers too.
 	resolved := r.resolveLayers(ctx)
 	allowed := r.allowedLayers(resolved, id)
 	prec := map[string]int{}
@@ -152,7 +152,7 @@ func (r *Registry) mergedDomains(ctx context.Context, id layer.Identity) (map[st
 // or nil when every layer is visible (public mode, filesystem-source, or no
 // configured layer list). Mirrors visibleManifests so domain records and
 // manifest records share one visibility view. Callers pass the per-request
-// resolved layer list from resolveLayers (§4.6, F-4.6.1).
+// resolved layer list from resolveLayers (§4.6).
 func (r *Registry) allowedLayers(resolved []layer.Layer, id layer.Identity) map[string]bool {
 	if id.IsPublic || len(resolved) == 0 {
 		return nil
@@ -262,7 +262,7 @@ type CatalogEntry struct {
 // (registry ∪ overlay) per §4.5.2 and §6.4, and to render registry artifacts
 // a local include: pulls in without a load_artifact round-trip. Visibility is
 // filtered per caller through visibleManifests, so the catalog never widens
-// the caller's read surface (F-4.5.2, F-6.4.2).
+// the caller's read surface.
 func (r *Registry) Catalog(ctx context.Context, id layer.Identity, scope string) ([]CatalogEntry, error) {
 	visible, err := r.visibleManifests(ctx, id)
 	if err != nil {

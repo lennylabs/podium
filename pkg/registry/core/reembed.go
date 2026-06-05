@@ -91,7 +91,7 @@ func (r *Registry) Reembed(ctx context.Context, opts ReembedOptions) (*ReembedRe
 	// per manifest record (one row per (id, version)), so a query with
 	// topK == len(manifests) returns every stored vector for the tenant;
 	// the prior fixed topK=100 probe falsely reported existing vectors
-	// missing once a tenant held more than 100 artifacts (F-4.7.10). The
+	// missing once a tenant held more than 100 artifacts. The
 	// top-K also covers stored domain vectors so they cannot displace an
 	// artifact vector out of the probe result; domain rows are skipped.
 	// The probe builds a query vector from the local embedder's dimension. A
@@ -212,7 +212,7 @@ func (r *Registry) ReembedOne(ctx context.Context, artifactID, version string) e
 }
 
 // embedAndUpsert composes the embedding text and upserts the row, routing
-// through upsertVector so a self-embedding backend (§13.12 F-13.12.6)
+// through upsertVector so a self-embedding backend (§13.12)
 // receives raw text. Mirrors ingest's embedAndStore but operates on a
 // manifest fetched from the store rather than one mid-ingest.
 func (r *Registry) embedAndUpsert(ctx context.Context, mr store.ManifestRecord) error {

@@ -13,7 +13,7 @@ import (
 	"github.com/lennylabs/podium/pkg/identity"
 )
 
-// spec: §7.7 (F-7.7.4) — login resolves the registry from --registry,
+// spec: §7.7 — login resolves the registry from --registry,
 // then PODIUM_REGISTRY, then the merged sync.yaml's defaults.registry.
 func TestResolveClientRegistry_Precedence(t *testing.T) {
 	ws := t.TempDir()
@@ -39,7 +39,7 @@ func TestResolveClientRegistry_Precedence(t *testing.T) {
 	}
 }
 
-// spec: §7.7 (F-7.7.4) — with no registry anywhere, login errors and
+// spec: §7.7 — with no registry anywhere, login errors and
 // points the user at podium init.
 func TestResolveClientRegistry_Unset(t *testing.T) {
 	t.Setenv("PODIUM_REGISTRY", "")
@@ -54,7 +54,7 @@ func TestResolveClientRegistry_Unset(t *testing.T) {
 	}
 }
 
-// spec: §7.7 (F-7.7.5) — login is a no-op for filesystem paths and the
+// spec: §7.7 — login is a no-op for filesystem paths and the
 // standalone server; it runs for real remote registries.
 func TestIsNoAuthRegistry(t *testing.T) {
 	cases := map[string]bool{
@@ -73,7 +73,7 @@ func TestIsNoAuthRegistry(t *testing.T) {
 	}
 }
 
-// spec: §7.7 (F-7.7.5) — login discovers the IdP endpoints from the
+// spec: §7.7 — login discovers the IdP endpoints from the
 // registry's RFC 8414 metadata when --issuer is unset.
 func TestDiscoverIdP(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -106,7 +106,7 @@ func TestDiscoverIdP(t *testing.T) {
 	}
 }
 
-// spec: §7.7 (F-7.7.7) — login persists both the access token (under the
+// spec: §7.7 — login persists both the access token (under the
 // registry label, the form readers expect) and the refresh token (under
 // a derived label) so silent renewal is possible.
 func TestSaveTokens_PersistsAccessAndRefresh(t *testing.T) {
@@ -147,7 +147,7 @@ func TestDecodeIdentity(t *testing.T) {
 	}
 }
 
-// spec: §7.7 (F-7.7.14) — a bare `podium logout` resolves the registry
+// spec: §7.7 — a bare `podium logout` resolves the registry
 // from the merged sync.yaml (the same resolution as login) and clears both
 // the access and refresh keychain entries; it does not require --registry.
 func TestLogout_ResolvesRegistryFromConfig(t *testing.T) {

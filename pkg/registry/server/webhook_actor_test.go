@@ -48,7 +48,7 @@ func newServerWithReceiver(t *testing.T) (*Server, <-chan []byte) {
 // spec: §7.3.2 — PublishEvent threads the per-request trace id and an
 // authenticated caller's identity (the actor) from the request audit
 // metadata into the outbound webhook body so receivers can correlate
-// and attribute the event (F-7.3.1).
+// and attribute the event.
 func TestPublishEvent_WebhookCarriesTraceAndAuthenticatedActor(t *testing.T) {
 	srv, bodies := newServerWithReceiver(t)
 	ctx := withAuditMeta(context.Background(), AuditMeta{
@@ -82,7 +82,7 @@ func TestPublishEvent_WebhookCarriesTraceAndAuthenticatedActor(t *testing.T) {
 }
 
 // spec: §7.3.2 — a public-mode caller contributes a public actor with the
-// source network attributes rather than an email/groups identity (F-7.3.1).
+// source network attributes rather than an email/groups identity.
 func TestPublishEvent_WebhookCarriesPublicActor(t *testing.T) {
 	srv, bodies := newServerWithReceiver(t)
 	ctx := withAuditMeta(context.Background(), AuditMeta{
@@ -113,7 +113,7 @@ func TestPublishEvent_WebhookCarriesPublicActor(t *testing.T) {
 
 // spec: §7.3.2 — an event published with no request audit metadata still
 // carries a stable schema: an empty trace_id and an empty actor object,
-// never a missing key (F-7.3.1).
+// never a missing key.
 func TestPublishEvent_WebhookStableSchemaWithoutMeta(t *testing.T) {
 	srv, bodies := newServerWithReceiver(t)
 	srv.PublishEvent(context.Background(), "layer.ingested", map[string]any{"layer": "L"})

@@ -56,7 +56,7 @@ type DomainAnalysisChild struct {
 // `discovery:` block tunes load_domain rendering (max_depth, fold_below,
 // notable_count, target_response_tokens), not the analyze report; adding
 // analyze-threshold knobs would introduce configuration the spec does not
-// define (F-4.5.12).
+// define.
 func (r *Registry) AnalyzeDomain(ctx context.Context, id layer.Identity, path string) (*DomainAnalysis, error) {
 	visible, err := r.visibleManifests(ctx, id)
 	if err != nil {

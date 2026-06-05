@@ -28,7 +28,7 @@ type mcpResult struct {
 	} `json:"result"`
 }
 
-// Spec: §6.6 step 2 / §4.7.6 (F-6.6.2) — end to end through the real bridge:
+// Spec: §6.6 step 2 / §4.7.6 — end to end through the real bridge:
 // a registry response whose frontmatter does not reproduce the served
 // content_hash (a tamper or non-TLS MITM) is rejected with
 // materialize.content_hash_mismatch and nothing is written to disk.
@@ -204,7 +204,7 @@ func runMCPLoad(t *testing.T, regURL, target, id string) mcpResult {
 	return resp
 }
 
-// Spec: §6.6 step 1 / §13.11 (F-6.6.3) — end to end: the bridge fetches a
+// Spec: §6.6 step 1 / §13.11 — end to end: the bridge fetches a
 // large_resource with the same session token it used for load_artifact, so an
 // authenticated object route serves it; the decoded bytes materialize and the
 // artifact-level content hash (which covers the fetched resource) verifies.

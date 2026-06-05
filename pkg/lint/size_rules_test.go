@@ -151,7 +151,7 @@ func TestRuleManifestSize_SkillBodyErrorsAtHardCap(t *testing.T) {
 	}
 }
 
-// Spec: §4.1 (F-4.1.2) — for skills the 20K-token cap applies to the
+// Spec: §4.1 — for skills the 20K-token cap applies to the
 // SKILL.md body, not the ARTIFACT.md file or the SKILL.md frontmatter. A
 // skill whose whole files are large but whose parsed body is small
 // produces no size error. This fails under the pre-fix rule that summed
@@ -174,7 +174,7 @@ func TestRuleManifestSize_SkillCapMeasuresBodyNotFiles(t *testing.T) {
 	}
 }
 
-// Spec: §4.3.4 (F-4.1.2) — the SKILL.md body soft caps measure the parsed
+// Spec: §4.3.4 — the SKILL.md body soft caps measure the parsed
 // body, not the whole SKILL.md file. Large frontmatter that pushes the
 // file over 5K tokens does not warn when the body is small. This fails
 // under the pre-fix rule that measured SkillBytes.

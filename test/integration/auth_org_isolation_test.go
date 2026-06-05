@@ -122,7 +122,7 @@ func orgisoServer(t *testing.T, st store.Store, tenantID string, priv *rsa.Priva
 // schema, so a read scoped to one org cannot reach another org's rows. With the
 // caller's identity carried from the verified token (including org_id), the
 // acme-scoped registry serves only acme data and the globex-scoped registry
-// serves only globex data, end-to-end over HTTP. F-4.7.1.
+// serves only globex data, end-to-end over HTTP.
 func TestAuthOrgIsolation_OrgScopedReadsAreIsolated(t *testing.T) {
 	dsn := os.Getenv("PODIUM_POSTGRES_DSN")
 	if dsn == "" {

@@ -13,7 +13,7 @@ import (
 	"github.com/lennylabs/podium/pkg/sync"
 )
 
-// Spec: §14.11 / §7.5.3 (F-14.11.1) — a server-source `podium sync` pins the
+// Spec: §14.11 / §7.5.3 — a server-source `podium sync` pins the
 // registry's authoritative content_hash into the committed lock, not a digest
 // recomputed from the served bytes. The real registry runs in-process (the same
 // shared bootstrap the standalone server uses), the sync materializes against

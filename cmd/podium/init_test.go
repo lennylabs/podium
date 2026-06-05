@@ -124,7 +124,7 @@ func TestInit_AddsGitignoreEntries(t *testing.T) {
 	}
 }
 
-// Spec: §7.7 workspace-mode step 1 (F-7.7.11) — init walks up from CWD to
+// Spec: §7.7 workspace-mode step 1 — init walks up from CWD to
 // reuse an existing `.podium/` workspace instead of creating a second one
 // in a subdirectory.
 func TestInit_WalksUpToExistingWorkspace(t *testing.T) {
@@ -153,7 +153,7 @@ func TestInit_WalksUpToExistingWorkspace(t *testing.T) {
 	}
 }
 
-// Spec: §7.7 (F-7.7.12) — with no value flags and an interactive stdin,
+// Spec: §7.7 — with no value flags and an interactive stdin,
 // init prompts for the registry (and optional harness/target) and writes
 // the answers.
 func TestInit_InteractiveWizard(t *testing.T) {
@@ -180,7 +180,7 @@ func TestInit_InteractiveWizard(t *testing.T) {
 	}
 }
 
-// Spec: §7.7 (F-7.7.12) — a non-terminal stdin skips the wizard and the
+// Spec: §7.7 — a non-terminal stdin skips the wizard and the
 // command exits 2 with the required-flag error rather than blocking.
 func TestInit_NonTerminalSkipsWizard(t *testing.T) {
 	dir := t.TempDir()
@@ -194,7 +194,7 @@ func TestInit_NonTerminalSkipsWizard(t *testing.T) {
 	})
 }
 
-// Spec: §7.7 workspace-mode step 4 (F-7.7.13) — the committed default
+// Spec: §7.7 workspace-mode step 4 — the committed default
 // scope prints next-step hints to commit the file and run `podium sync`.
 func TestInit_PrintsNextStepHints(t *testing.T) {
 	dir := t.TempDir()
@@ -214,7 +214,7 @@ func TestInit_PrintsNextStepHints(t *testing.T) {
 	}
 }
 
-// Spec: §7.7 (F-7.7.12) — the wizard reader collects the registry and the
+// Spec: §7.7 — the wizard reader collects the registry and the
 // optional defaults; blank optional answers stay unset.
 func TestRunInitWizard(t *testing.T) {
 	res, err := runInitWizard(strings.NewReader("https://podium.acme.com\n\n\n"), io.Discard)

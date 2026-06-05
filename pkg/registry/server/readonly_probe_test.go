@@ -116,7 +116,7 @@ func (f *statefulStore) GetTenant(ctx context.Context, id string) (store.Tenant,
 // consecutive probe successes". An intermittently reachable primary
 // (alternating success/failure) never reaches the threshold, so the
 // registry stays in read_only rather than flapping; once the primary is
-// stably reachable it recovers. F-13.2.4.
+// stably reachable it recovers.
 func TestReadOnlyProbe_RecoveryRequiresConsecutiveSuccesses(t *testing.T) {
 	t.Parallel()
 	mem := store.NewMemory()

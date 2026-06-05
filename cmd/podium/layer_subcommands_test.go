@@ -34,7 +34,7 @@ func TestLayerSubcommands_HelpExitsZero(t *testing.T) {
 
 func TestLayerSubcommands_MissingRegistryExits2(t *testing.T) {
 	t.Setenv("PODIUM_REGISTRY", "")
-	// Isolate HOME and the working directory so the F-14.10.1 sync.yaml fallback
+	// Isolate HOME and the working directory so the sync.yaml fallback
 	// (register/reingest) finds no merged defaults.registry and the commands
 	// still refuse with exit 2.
 	t.Setenv("HOME", t.TempDir())
@@ -115,7 +115,7 @@ func TestLayerWatch_BadIntervalExits2(t *testing.T) {
 	})
 }
 
-// spec §7.3.1 / §14.10 (F-14.10.5): --interval takes a Go-style duration, so
+// spec §7.3.1 / §14.10: --interval takes a Go-style duration, so
 // the documented `--interval 1h` parses. A bare integer (the old
 // seconds-only form) is rejected by flag parsing with exit 2.
 func TestLayerWatch_IntervalIsDuration(t *testing.T) {
@@ -257,9 +257,9 @@ func TestLayerReingest_HappyPathPosts(t *testing.T) {
 	})
 }
 
-// --- F-14.10.1: standalone sync.yaml registry fallback ---------------------
+// --- standalone sync.yaml registry fallback ---------------------
 
-// spec §14.10 (F-14.10.1): an explicit --registry / PODIUM_REGISTRY value
+// spec §14.10: an explicit --registry / PODIUM_REGISTRY value
 // always wins; resolveLayerRegistry returns it unchanged.
 func TestResolveLayerRegistry_FlagValueWins(t *testing.T) {
 	t.Parallel()
@@ -268,7 +268,7 @@ func TestResolveLayerRegistry_FlagValueWins(t *testing.T) {
 	}
 }
 
-// spec §14.10 (F-14.10.1): with no flag/env registry, the layer commands fall
+// spec §14.10: with no flag/env registry, the layer commands fall
 // back to defaults.registry in the merged ~/.podium/sync.yaml that
 // `podium serve --standalone` bootstraps.
 func TestMergedRegistry_ReadsHomeSyncYAML(t *testing.T) {
@@ -288,7 +288,7 @@ func TestMergedRegistry_ReadsHomeSyncYAML(t *testing.T) {
 	}
 }
 
-// spec §14.10 (F-14.10.1): with no sync.yaml anywhere, mergedRegistry resolves
+// spec §14.10: with no sync.yaml anywhere, mergedRegistry resolves
 // to the empty string so the command refuses with the missing-registry error.
 func TestMergedRegistry_EmptyWhenNoConfig(t *testing.T) {
 	t.Parallel()
@@ -297,7 +297,7 @@ func TestMergedRegistry_EmptyWhenNoConfig(t *testing.T) {
 	}
 }
 
-// spec §14.10 (F-14.10.1): `podium layer register` with no --registry resolves
+// spec §14.10: `podium layer register` with no --registry resolves
 // the registry from the bootstrapped ~/.podium/sync.yaml and reaches the
 // server, end to end through the command.
 func TestLayerRegister_FallsBackToSyncYAMLRegistry(t *testing.T) {

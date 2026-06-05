@@ -5,7 +5,7 @@ import "testing"
 // spec: §8.2 — FrontmatterFields is the value source for manifest-declared
 // audit redaction. It surfaces the author-named sensitive frontmatter fields
 // (the spec's bank_account / ssn example) so the audit_redact directive has a
-// concrete target the registry can mask. F-8.2.1.
+// concrete target the registry can mask.
 func TestFrontmatterFields(t *testing.T) {
 	t.Parallel()
 	src := []byte("---\n" +
@@ -34,7 +34,7 @@ func TestFrontmatterFields(t *testing.T) {
 }
 
 // spec: §8.2 — corner cases: no names, no frontmatter, and all-absent names
-// each yield nil so callers add nothing to the audit context. F-8.2.1.
+// each yield nil so callers add nothing to the audit context.
 func TestFrontmatterFields_Empty(t *testing.T) {
 	t.Parallel()
 	const fm = "---\ntype: context\nversion: 1.0.0\n---\n\nbody\n"

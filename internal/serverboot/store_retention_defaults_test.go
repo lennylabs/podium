@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-// Spec: §8.4 (F-8.4.1) — the deprecated-version (90 days) and
+// Spec: §8.4 — the deprecated-version (90 days) and
 // owner-unregistered-layer (30 days) windows are enforced defaults, so the
 // store-retention scheduler runs out of the box. The interval defaults to
 // one day and the day windows to 90 / 30 when the env vars are unset.
@@ -25,7 +25,7 @@ func TestLoadConfig_StoreRetentionDefaultsOn(t *testing.T) {
 	}
 }
 
-// Spec: §8.4 (F-8.4.1) — an explicit interval of 0 disables the scheduler;
+// Spec: §8.4 — an explicit interval of 0 disables the scheduler;
 // the new default-on behavior must not silently re-enable it.
 func TestLoadConfig_StoreRetentionExplicitDisable(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
@@ -36,7 +36,7 @@ func TestLoadConfig_StoreRetentionExplicitDisable(t *testing.T) {
 	}
 }
 
-// Spec: §8.4 (F-8.4.1) — an explicit interval overrides the default.
+// Spec: §8.4 — an explicit interval overrides the default.
 func TestLoadConfig_StoreRetentionEnvOverride(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("PODIUM_STORE_RETENTION_INTERVAL_SECONDS", "3600")

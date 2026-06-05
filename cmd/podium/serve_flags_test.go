@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// Spec: §13.10 (F-13.10.9, F-13.10.11, F-13.10.14) — the standalone serve
+// Spec: §13.10 — the standalone serve
 // flags map onto the PODIUM_* env vars serverboot.Run() reads. Run is forced
 // to fail fast by selecting the postgres store with no DSN so validate()
 // returns before any listener binds; the flag-to-env mapping happens first,
@@ -36,7 +36,7 @@ func TestServeCmd_StandaloneFlagsSetEnv(t *testing.T) {
 	}
 }
 
-// Spec: §13.10 (F-13.10.14) — an unrecognized --sign value is named at startup
+// Spec: §13.10 — an unrecognized --sign value is named at startup
 // rather than silently leaving signing disabled.
 func TestServeCmd_SignRejectsUnknownValue(t *testing.T) {
 	t.Setenv("PODIUM_SIGN", "")

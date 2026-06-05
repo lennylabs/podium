@@ -1,6 +1,6 @@
 package e2e
 
-// Shared authenticated, visibility-capable server harness (G-INFRA-5).
+// Shared authenticated, visibility-capable server harness.
 //
 // The standalone e2e harness (startServer / startServerArgs with
 // --standalone) wires no identity provider and materializes every layer

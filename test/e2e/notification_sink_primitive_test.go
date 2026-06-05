@@ -1,6 +1,6 @@
 package e2e
 
-// Proves the G-INFRA-9 notification delivery sink and override seam.
+// Proves the notification delivery sink and override seam.
 //
 // Each test drives the real standalone binary and the reusable primitives in
 // notification_sink_helpers_test.go:
@@ -22,7 +22,7 @@ package e2e
 //     and the standalone server boots cleanly with
 //     PODIUM_NOTIFICATION_PROVIDER=webhook pointed at it.
 //
-// Spec: §7.3.2, §7.6, §9.1. Gap G-INFRA-9.
+// Spec: §7.3.2, §7.6, §9.1.
 
 import (
 	"context"

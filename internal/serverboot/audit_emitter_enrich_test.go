@@ -73,7 +73,6 @@ func (s sinkServer) drive(t *testing.T, traceparent, forwardedUser string) strin
 // network block. This exercises the full read path: the server identity
 // middleware attaches the §8.1 metadata to the request context, the core
 // emitter forwards it, and auditEmitterFor writes it to the sink.
-// F-8.1.1, F-8.1.6.
 func TestReadEvent_AuthenticatedCallerCarriesEmailGroupsAndTrace(t *testing.T) {
 	s := newReadEventServer(t, server.WithIdentityResolver(func(*http.Request) layer.Identity {
 		return layer.Identity{
@@ -102,7 +101,7 @@ func TestReadEvent_AuthenticatedCallerCarriesEmailGroupsAndTrace(t *testing.T) {
 // caller.identity=system:public, the caller.public_mode flag, and the source
 // IP and X-Forwarded-User under caller.network so a SIEM can filter without
 // parsing identity strings. A request without a traceparent still carries a
-// generated trace id. F-8.1.1, F-8.1.6, F-13.2.2, F-13.10.4.
+// generated trace id.
 func TestReadEvent_PublicCallerCarriesNetworkAndFlag(t *testing.T) {
 	s := newReadEventServer(t, server.WithPublicMode())
 	got := s.drive(t, "", "upstream-bob")

@@ -90,7 +90,7 @@ func TestAnchor_SurfacesRekorLogIndex(t *testing.T) {
 	}
 }
 
-// Spec: §8.6 (F-8.6.3) — Rekor log indices are zero-based, so a
+// Spec: §8.6 — Rekor log indices are zero-based, so a
 // genuine first entry has index 0. Anchor must preserve a present-and-zero
 // log_index as 0 rather than conflating it with the absent case (-1), so an
 // auditor can locate the index-0 entry in the transparency log.
@@ -120,7 +120,7 @@ func TestAnchor_PreservesRekorLogIndexZero(t *testing.T) {
 	}
 }
 
-// Spec: §8.6 (F-8.6.3) — an envelope with no log_index field (a signer
+// Spec: §8.6 — an envelope with no log_index field (a signer
 // with no Rekor configured) still maps to -1.
 func TestAnchor_AbsentRekorLogIndexIsMinusOne(t *testing.T) {
 	t.Parallel()

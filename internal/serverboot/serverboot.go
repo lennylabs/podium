@@ -298,8 +298,8 @@ func parseAuditSampleRates(raw string) map[audit.EventType]float64 {
 //
 // vis is the visibility stamped on every resolved layer. It is computed
 // by the caller from the deployment mode (§4.6 / §13.10): public for a
-// no-identity-provider standalone, otherwise the configured default
-// (F-4.6.9). The bootstrap path supplies no per-layer visibility input.
+// no-identity-provider standalone, otherwise the configured default.
+// The bootstrap path supplies no per-layer visibility input.
 // ingestLinter builds the ingest linter shared by the bootstrap paths:
 // §4.4 prose-URL validation (offline per PODIUM_INGEST_OFFLINE) plus the
 // §4.5.5 discovery-override warning when the tenant disabled per-domain
@@ -417,7 +417,7 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			Users:        vis.Users,
 			CreatedAt:    now,
 			// §7.3.1: the bootstrap ingest just completed, so stamp
-			// last_ingested_at for staleness monitoring (F-7.3.6).
+			// last_ingested_at for staleness monitoring.
 			LastIngestedAt: &now,
 		}
 		if err := st.PutLayerConfig(ctx, cfg); err != nil {
@@ -448,7 +448,7 @@ func publicSensitivityFloor(c *Config) manifest.Sensitivity {
 // carries no explicit visibility input (a §13.10 PODIUM_LAYER_PATH bootstrap
 // layer, or a declarative layer whose `visibility:` block is empty).
 //
-// spec: §4.6 / §13.10 / §13.12 (F-4.6.9, F-13.10.15). Public mode bypasses the
+// spec: §4.6 / §13.10 / §13.12. Public mode bypasses the
 // visibility model entirely, so its bootstrap layers are public. Otherwise the
 // bootstrap layer carries the resolved PODIUM_DEFAULT_LAYER_VISIBILITY: §13.12
 // documents that env var as the fallback "applied when a layer is registered
@@ -569,7 +569,7 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resou
 
 // layerConfigFromEntry validates one §4.6 declared layer entry and builds the
 // store.LayerConfig plus the resolved visibility. An empty `visibility:` block
-// falls back to the deployment default (§4.6 / F-4.6.9). Exactly one source
+// falls back to the deployment default (§4.6). Exactly one source
 // (git or local) must be set.
 // validForcePushPolicyYAML reports whether a registry.yaml
 // source.git.force_push_policy value is one of the §7.3.1 accepted forms.
@@ -640,7 +640,7 @@ func layerConfigFromEntry(tenantID string, entry yamlLayerEntry, order int, cfg 
 // http.Server's error (always non-nil — at minimum
 // http.ErrServerClosed when the listener exits cleanly).
 func Run() error {
-	// §13.10 (F-13.10.2): an explicitly named --config / PODIUM_CONFIG_FILE that
+	// §13.10: an explicitly named --config / PODIUM_CONFIG_FILE that
 	// does not exist is a hard error — the operator named a config, so a missing
 	// one is not a cue to invent standalone defaults.
 	if cf := os.Getenv("PODIUM_CONFIG_FILE"); cf != "" {
@@ -761,7 +761,7 @@ func Run() error {
 	// endpoints (GET /v1/layers, POST /v1/layers/reingest,
 	// DELETE /v1/layers) see the bootstrap layers. These layers carry no
 	// per-layer visibility input, so they take the deployment default
-	// (§4.6 / §13.10 / F-4.6.9). They append after the declared layers.
+	// (§4.6 / §13.10). They append after the declared layers.
 	pathLayers, err := bootstrapLayerPath(st, tenantID, cfg.layerPath, defaultBootstrapVisibility(cfg), len(declared), cfg.allowPerDomain(), resourcePut, publicSensitivityFloor(cfg), ingestSigner, useVectorOutbox, collocatedVec, cfg.enforceSandboxProfile, cfg.hostSandboxes)
 	if err != nil {
 		return err
@@ -794,7 +794,7 @@ func Run() error {
 		if embedProvider != nil {
 			log.Printf("hybrid search: vector=%s embedder=%s dim=%d", vecProvider.ID(), embedProvider.ID(), embedProvider.Dimensions())
 		} else {
-			// §13.12 (F-13.12.6): the backend embeds text server-side, so no
+			// §13.12: the backend embeds text server-side, so no
 			// separate embedding provider is wired.
 			log.Printf("hybrid search: vector=%s self-embedding=%s", vecProvider.ID(), cfg.vectorInferenceModel)
 		}
@@ -1076,7 +1076,7 @@ func Run() error {
 	// gracefully no-op).
 	// auditSink is the §8.3 registry sink every event is emitted through
 	// (a file sink, or an EndpointSink when PODIUM_AUDIT_LOG_PATH names a
-	// SIEM endpoint, F-8.3.1). auditFile is the same sink in its file form,
+	// SIEM endpoint). auditFile is the same sink in its file form,
 	// non-nil only for the file case; the §8.6 anchor/verify, §8.4 retention,
 	// and §8.5 erasure paths rewrite the on-disk chain and run only against
 	// it.
@@ -1093,7 +1093,7 @@ func Run() error {
 	// (e.g. domain.loaded at 10%). Built from PODIUM_AUDIT_SAMPLE_RATES;
 	// nil when unset, in which case every event is kept.
 	auditSampler := audit.NewSampler(cfg.auditSampleRates)
-	// §8.1/§8.3/F-8.4.7: when a sink is configured this FileSink is the
+	// §8.1/§8.3: when a sink is configured this FileSink is the
 	// registry's own sink for catalogue events (the metadata store persists no
 	// audit stream), so the §8.4 retention scheduler below, which enforces
 	// against this same sink, ages out registry-owned catalogue events.
@@ -1127,7 +1127,7 @@ func Run() error {
 		layers.WithAudit(auditSink)
 		// §8.5 erasure rewrites the on-disk chain in place, so the layer
 		// endpoint also needs the file form of the sink; nil when redirected
-		// to an endpoint (F-8.3.1).
+		// to an endpoint.
 		layers.WithEraseSink(auditFile)
 	}
 
@@ -1161,7 +1161,7 @@ func Run() error {
 	var reAnchor func()
 	if cfg.auditAnchorInterval > 0 {
 		if signer := startAnchorScheduler(cfg, auditFile); signer != nil {
-			// §8.6/F-8.4.8: after a retention pass drops events the chain
+			// §8.6: after a retention pass drops events the chain
 			// head moves, invalidating the last anchor. Re-anchor the new
 			// head immediately so verifiers do not wait for the next tick.
 			reAnchor = func() {
@@ -1329,14 +1329,14 @@ type Config struct {
 	embeddingProvider string
 	// embeddingProviderExplicit records whether the operator explicitly chose
 	// an EmbeddingProvider (PODIUM_EMBEDDING_PROVIDER set, or registry.yaml
-	// embedding.type) as opposed to inheriting the per-mode default. §9.1 / §4.7
-	// (F-9.1.1): a self-embedding backend honors an explicit provider as an
+	// embedding.type) as opposed to inheriting the per-mode default. §9.1 / §4.7:
+	// a self-embedding backend honors an explicit provider as an
 	// override of its hosted model, but a defaulted provider is not an override.
 	embeddingProviderExplicit bool
 	embeddingModel            string
 	openaiAPIKey              string
 	// openaiBaseURL / openaiOrg mirror §13.12 PODIUM_OPENAI_BASE_URL /
-	// PODIUM_OPENAI_ORG (F-13.12.1). Sourced from env or registry.yaml's
+	// PODIUM_OPENAI_ORG. Sourced from env or registry.yaml's
 	// embedding_provider.base_url / org and passed to the openai embedder.
 	openaiBaseURL string
 	openaiOrg     string
@@ -1349,8 +1349,7 @@ type Config struct {
 	pineconeIndex string
 	pineconeNS    string
 	// pineconeControlPlane overrides the Pinecone control-plane base URL used
-	// to auto-resolve PODIUM_PINECONE_HOST from the index name (§13.12,
-	// F-13.12.3). Empty uses the real control plane (https://api.pinecone.io);
+	// to auto-resolve PODIUM_PINECONE_HOST from the index name (§13.12). Empty uses the real control plane (https://api.pinecone.io);
 	// it exists for tests and private Pinecone deployments. Sourced from
 	// PODIUM_PINECONE_CONTROL_PLANE.
 	pineconeControlPlane string
@@ -1363,7 +1362,7 @@ type Config struct {
 	// vectorInferenceModel captures the §13.12 self-embedding model name
 	// (PODIUM_PINECONE_INFERENCE_MODEL / PODIUM_WEAVIATE_VECTORIZER /
 	// PODIUM_QDRANT_INFERENCE_MODEL, or vector_backend.inference_model). The
-	// self-embedding wiring itself is tracked separately (F-13.12.6); the
+	// self-embedding wiring itself is tracked separately; the
 	// value is parsed and surfaced so a config-file deployment is not silently
 	// dropped.
 	vectorInferenceModel string
@@ -1598,7 +1597,7 @@ func LoadConfig() *Config {
 		publicURL:                  os.Getenv("PODIUM_PUBLIC_URL"),
 		s3Endpoint:                 os.Getenv("PODIUM_S3_ENDPOINT"),
 		// §13.12 marks PODIUM_S3_REGION required for s3; no implicit default
-		// so a missing region is named by validate() (F-13.12.9) rather than
+		// so a missing region is named by validate() rather than
 		// silently replaced by us-east-1.
 		s3Region:         os.Getenv("PODIUM_S3_REGION"),
 		s3Bucket:         os.Getenv("PODIUM_S3_BUCKET"),
@@ -1619,23 +1618,23 @@ func LoadConfig() *Config {
 		pineconeKey:       os.Getenv("PODIUM_PINECONE_API_KEY"),
 		pineconeHost:      os.Getenv("PODIUM_PINECONE_HOST"),
 		pineconeIndex:     os.Getenv("PODIUM_PINECONE_INDEX"),
-		// §13.12 (F-13.12.3) Pinecone control-plane override (test/private use).
+		// §13.12 Pinecone control-plane override (test/private use).
 		pineconeControlPlane: os.Getenv("PODIUM_PINECONE_CONTROL_PLANE"),
-		// Read raw here; the §13.12 "default" namespace fallback (F-13.12.11)
+		// Read raw here; the §13.12 "default" namespace fallback
 		// is applied after applyYAML so env > registry.yaml > default holds.
 		pineconeNS:  os.Getenv("PODIUM_PINECONE_NAMESPACE"),
 		weaviateURL: os.Getenv("PODIUM_WEAVIATE_URL"),
 		weaviateKey: os.Getenv("PODIUM_WEAVIATE_API_KEY"),
 		// §13.12 marks the collection required for weaviate-cloud/qdrant-cloud;
-		// no implicit default so validate() names a missing one (F-13.12.12).
+		// no implicit default so validate() names a missing one.
 		weaviateColl: os.Getenv("PODIUM_WEAVIATE_COLLECTION"),
 		qdrantURL:    os.Getenv("PODIUM_QDRANT_URL"),
 		qdrantKey:    os.Getenv("PODIUM_QDRANT_API_KEY"),
 		qdrantColl:   os.Getenv("PODIUM_QDRANT_COLLECTION"),
-		// §13.12 self-embedding model (parsed/surfaced; wiring is F-13.12.6).
+		// §13.12 self-embedding model (parsed/surfaced).
 		vectorInferenceModel: envFirst("PODIUM_PINECONE_INFERENCE_MODEL", "PODIUM_WEAVIATE_VECTORIZER", "PODIUM_QDRANT_INFERENCE_MODEL"),
 		// §4.6 + §13.2.1. The default visibility is resolved after applyYAML
-		// (a standalone deployment defaults to public; see below, F-13.12.15).
+		// (a standalone deployment defaults to public; see below).
 		defaultLayerVisibility: os.Getenv("PODIUM_DEFAULT_LAYER_VISIBILITY"),
 		// §7.3.1 user-defined-layer cap (0 = default of 3).
 		maxUserLayers: envInt("PODIUM_MAX_USER_LAYERS", 0),
@@ -1697,12 +1696,12 @@ func LoadConfig() *Config {
 	} else {
 		applyYAML(c, y)
 	}
-	// §13.12 (F-13.12.11): the Pinecone namespace prefix defaults to "default"
+	// §13.12: the Pinecone namespace prefix defaults to "default"
 	// when neither the env var nor registry.yaml set it.
 	if c.pineconeNS == "" {
 		c.pineconeNS = "default"
 	}
-	// §13.2.1 (F-13.2.3): apply the spec defaults once env and registry.yaml
+	// §13.2.1: apply the spec defaults once env and registry.yaml
 	// have had their say. A negative failure threshold means neither set it,
 	// so the documented automatic fallback engages (probe every 5 s, flip
 	// after three consecutive failures). An explicit 0 from env or yaml keeps
@@ -1713,7 +1712,7 @@ func LoadConfig() *Config {
 	if c.readOnlyProbeInterval <= 0 {
 		c.readOnlyProbeInterval = 5
 	}
-	// §9.1 / §13.10 (F-9.1.5): realize the per-deployment-mode defaults for the
+	// §9.1 / §13.10: realize the per-deployment-mode defaults for the
 	// RegistrySearchProvider and EmbeddingProvider rows. A zero-config standard
 	// deployment defaults to pgvector + openai; a standalone deployment defaults
 	// to sqlite-vec + ollama, the same SQLite file holding manifests and
@@ -1737,7 +1736,7 @@ func LoadConfig() *Config {
 			}
 		}
 		_, embedSet := os.LookupEnv("PODIUM_EMBEDDING_PROVIDER")
-		// §9.1 / §4.7 (F-9.1.1): an explicit choice is the env var being set
+		// §9.1 / §4.7: an explicit choice is the env var being set
 		// (even to the empty string, which §13.12 reads as "disable embedding
 		// generation") or a registry.yaml value (already merged into
 		// c.embeddingProvider). Capture it before the per-mode default is
@@ -1752,7 +1751,7 @@ func LoadConfig() *Config {
 			}
 		}
 	}
-	// §13.10 / §13.12 (F-13.12.15): when no explicit default visibility was
+	// §13.10 / §13.12: when no explicit default visibility was
 	// supplied (env or registry.yaml), a standalone deployment (no identity
 	// provider) defaults endpoint-registered layers to `public`, matching the
 	// §13.10 standalone default; once an identity provider gates access, the
@@ -1833,7 +1832,7 @@ func (c *Config) validate() error {
 
 // missingBackendValues returns the env-var names that a selected backend
 // requires but that resolved empty. §13.12 makes a configured-but-incomplete
-// backend a hard startup error (F-13.12.10); the warn-and-disable path in Run
+// backend a hard startup error; the warn-and-disable path in Run
 // is reserved for the explicit none/unset selection, for an unknown backend
 // name, and for a fully-configured backend that is merely unreachable at
 // runtime (search then degrades to BM25 per §13.12). An embedding provider
@@ -1849,7 +1848,7 @@ func (c *Config) missingBackendValues() []string {
 	switch c.objectStore {
 	case "s3":
 		req(c.s3Bucket != "", "PODIUM_S3_BUCKET")
-		// §13.12 marks the region required for s3 (F-13.12.9).
+		// §13.12 marks the region required for s3.
 		req(c.s3Region != "", "PODIUM_S3_REGION")
 	}
 	switch c.vectorBackend {
@@ -1861,22 +1860,22 @@ func (c *Config) missingBackendValues() []string {
 	case "weaviate-cloud":
 		req(c.weaviateURL != "", "PODIUM_WEAVIATE_URL")
 		req(c.weaviateKey != "", "PODIUM_WEAVIATE_API_KEY")
-		// §13.12 marks the collection required for weaviate-cloud (F-13.12.12).
+		// §13.12 marks the collection required for weaviate-cloud.
 		req(c.weaviateColl != "", "PODIUM_WEAVIATE_COLLECTION")
 	case "qdrant-cloud":
 		req(c.qdrantURL != "", "PODIUM_QDRANT_URL")
 		req(c.qdrantKey != "", "PODIUM_QDRANT_API_KEY")
-		// §13.12 marks the collection required for qdrant-cloud (F-13.12.12).
+		// §13.12 marks the collection required for qdrant-cloud.
 		req(c.qdrantColl != "", "PODIUM_QDRANT_COLLECTION")
 	case "pgvector":
 		req(c.pgvectorDSN != "", "PODIUM_PGVECTOR_DSN")
 	}
-	// §9.1 / §13.12 (F-13.12.6, F-9.1.3): an embedder is built, and so its
+	// §9.1 / §13.12: an embedder is built, and so its
 	// per-provider API key is required, unless the selected backend genuinely
 	// self-embeds. A storage-only backend (pgvector, sqlite-vec) cannot
 	// self-embed even with a stray *_INFERENCE_MODEL set, so gate on
 	// vectorSelfEmbeds() rather than on the inference-model string alone.
-	// §9.1 / §4.7 (F-9.1.1): even on a self-embedding backend, an explicit
+	// §9.1 / §4.7: even on a self-embedding backend, an explicit
 	// EmbeddingProvider override is built and needs its key.
 	if !c.vectorSelfEmbeds() || c.embeddingProviderExplicit {
 		switch c.embeddingProvider {
@@ -1910,7 +1909,7 @@ func openStore(c *Config) (store.Store, error) {
 	case "memory":
 		// §13.12 lists only postgres | sqlite; `memory` is an undocumented
 		// test affordance. Warn so an operator who selects it in a real
-		// process knows it persists nothing (F-13.12.14).
+		// process knows it persists nothing.
 		log.Printf("warning: PODIUM_REGISTRY_STORE=memory is a non-durable test backend; it persists nothing across restarts")
 		return store.NewMemory(), nil
 	case "postgres":
@@ -1949,7 +1948,7 @@ func bootstrapOptions(c *Config, objStore objectstore.Provider) []server.Option 
 }
 
 // vectorSelfEmbeds reports whether the selected vector backend embeds text
-// server-side (§13.12 F-13.12.6): a cloud backend with an inference-model /
+// server-side (§13.12): a cloud backend with an inference-model /
 // vectorizer configured. The local backends (pgvector, sqlite-vec) cannot
 // self-embed, so a stray inference model with one of those is ignored and
 // the normal embedding-provider path applies.
@@ -2001,11 +2000,11 @@ func (c *Config) vectorSettings() map[string]string {
 // pieces. Returns (nil, nil, nil) when vector search is disabled
 // (operator left PODIUM_VECTOR_BACKEND unset / set to "none").
 //
-// §13.12 (F-13.12.6): when the selected backend self-embeds, the embedding
+// §13.12: when the selected backend self-embeds, the embedding
 // provider is optional; the backend is opened with no local dimension and a
 // nil embedder is returned so the registry sends raw text on Put/Query.
 //
-// §9.1 / §4.7 (F-9.1.1): an explicitly-configured EmbeddingProvider overrides
+// §9.1 / §4.7: an explicitly-configured EmbeddingProvider overrides
 // the backend's hosted model even when the backend self-embeds. The embedder
 // is built and the backend is opened at the embedder's dimension, so the
 // core's override path (queryVector / upsertVector prefer a present embedder)
@@ -2052,7 +2051,7 @@ func openVectorAndEmbedder(c *Config) (vector.Provider, embedding.Provider, erro
 // back to c.embeddingModel, which already carries the generic
 // PODIUM_EMBEDDING_MODEL env var or the registry.yaml embedding_provider.model
 // key. An empty result leaves the provider's hardcoded default model in force.
-// spec: §13.12 (F-13.12.2 — the config-file model: key takes effect for the
+// spec: §13.12 (the config-file model: key takes effect for the
 // built-in providers, not just the per-provider env vars).
 func (c *Config) embeddingModelFor(perProviderEnv string) string {
 	if v := os.Getenv(perProviderEnv); v != "" {
@@ -2066,7 +2065,7 @@ func (c *Config) embeddingModelFor(perProviderEnv string) string {
 // PODIUM_OLLAMA_MODEL). The generic PODIUM_EMBEDDING_MODEL and the
 // registry.yaml embedding_provider.model key (both captured in
 // c.embeddingModel) act as a cross-provider fallback when the per-provider
-// variable isn't set (F-13.12.2).
+// variable isn't set.
 func openEmbedder(c *Config) (embedding.Provider, error) {
 	// §9.1/§9.2: consult the process-global embedding.Default registry first
 	// so a custom EmbeddingProvider imported into a source build (via
@@ -2128,10 +2127,10 @@ func openVectorBackend(c *Config, dim int) (vector.Provider, error) {
 	if c.vectorBackend == "memory" {
 		// §13.12 lists pgvector | sqlite-vec | pinecone | weaviate-cloud |
 		// qdrant-cloud; `memory` is an undocumented test affordance. Warn so
-		// an operator who selects it knows it persists nothing (F-13.12.14).
+		// an operator who selects it knows it persists nothing.
 		log.Printf("warning: PODIUM_VECTOR_BACKEND=memory is a non-durable test backend; it persists nothing across restarts")
 	}
-	// §13.12 (F-13.12.6) self-embedding leaves InferenceModel empty for
+	// §13.12 self-embedding leaves InferenceModel empty for
 	// storage-only mode. The built-in backends are constructed by the shared
 	// vector.OpenBuiltin factory so the overlay path (§6.4.1) selects the
 	// same set the same way.

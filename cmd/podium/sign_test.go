@@ -30,7 +30,7 @@ func loadArtifactStub(t *testing.T, contentHash, signature string) (*httptest.Se
 }
 
 // spec: §4.7.9 — `podium sign <artifact>` resolves the artifact's
-// canonical content hash and signs it (F-4.7.9). The doc example
+// canonical content hash and signs it. The doc example
 // `podium sign finance/ap/pay-invoice` must not be a usage error.
 func TestSignCmd_PositionalArtifactResolvesAndSigns(t *testing.T) {
 	hash := "sha256:" + strings.Repeat("a", 64)

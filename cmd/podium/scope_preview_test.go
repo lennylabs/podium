@@ -24,7 +24,7 @@ func scopePreviewServer(t *testing.T, status int, body string) *httptest.Server 
 	return ts
 }
 
-// Spec: §3.5 (F-3.5.2/F-3.5.4) — fetchScopePreview GETs the endpoint and
+// Spec: §3.5 — fetchScopePreview GETs the endpoint and
 // decodes the aggregate-count envelope for the caller's effective view.
 func TestFetchScopePreview_Decodes(t *testing.T) {
 	ts := scopePreviewServer(t, http.StatusOK,
@@ -45,7 +45,7 @@ func TestFetchScopePreview_Decodes(t *testing.T) {
 	}
 }
 
-// Spec: §3.5 (F-3.5.1) — a tenant with expose_scope_preview false makes the
+// Spec: §3.5 — a tenant with expose_scope_preview false makes the
 // endpoint answer 403, which fetchScopePreview maps to the disabled sentinel.
 func TestFetchScopePreview_Disabled(t *testing.T) {
 	ts := scopePreviewServer(t, http.StatusForbidden, `{"code":"config.scope_preview_disabled"}`)
@@ -88,7 +88,7 @@ func TestPrintScopePreview_Deterministic(t *testing.T) {
 	}
 }
 
-// Spec: §3.5 (F-3.5.2) — `podium status` surfaces the scope-preview aggregate
+// Spec: §3.5 — `podium status` surfaces the scope-preview aggregate
 // counts for human inspection alongside the other client diagnostics.
 func TestStatus_SurfacesScopePreview(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -117,7 +117,7 @@ func TestStatus_SurfacesScopePreview(t *testing.T) {
 	}
 }
 
-// Spec: §3.5 (F-3.5.2) — a tenant gate refusal is surfaced as a disabled
+// Spec: §3.5 — a tenant gate refusal is surfaced as a disabled
 // notice rather than a hard error, so status still exits cleanly.
 func TestStatus_ScopePreviewDisabled(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -144,7 +144,7 @@ func TestStatus_ScopePreviewDisabled(t *testing.T) {
 	}
 }
 
-// Spec: §3.5 (F-3.5.4) — `podium sync --preview` against a server registry
+// Spec: §3.5 — `podium sync --preview` against a server registry
 // prints the aggregate counts and writes nothing.
 func TestSyncPreview_ServerRegistry(t *testing.T) {
 	ts := scopePreviewServer(t, http.StatusOK,
@@ -162,7 +162,7 @@ func TestSyncPreview_ServerRegistry(t *testing.T) {
 	}
 }
 
-// Spec: §3.5 (F-3.5.4) — the preview is served by GET /v1/scope/preview, so
+// Spec: §3.5 — the preview is served by GET /v1/scope/preview, so
 // --preview against a filesystem-source registry is rejected with exit 2
 // rather than silently doing nothing.
 func TestSyncPreview_FilesystemRejected(t *testing.T) {

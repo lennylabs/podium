@@ -73,8 +73,8 @@ func TestLoadArtifact_AlwaysRevalidateNetworkUnreachableErrors(t *testing.T) {
 // Spec: §6.9 — a reachable registry that answers and refuses (here a 403
 // auth.untrusted_runtime) must surface the registry's structured §6.10
 // envelope unchanged. In always-revalidate mode with no cache entry the
-// rejection must NOT be relabeled as the retryable network.registry_unreachable
-// (F-6.9.4): that conflates a registry that refused with one that could not
+// rejection must NOT be relabeled as the retryable network.registry_unreachable:
+// that conflates a registry that refused with one that could not
 // be reached.
 func TestLoadArtifact_ReachableRejectionPassesThroughNotRelabeled(t *testing.T) {
 	t.Parallel()
@@ -116,7 +116,7 @@ func TestLoadArtifact_ReachableRejectionPassesThroughNotRelabeled(t *testing.T) 
 // Spec: §7.4 — offline-first + unreachable + cache miss: "no error; serve
 // cached results silently." With nothing cached the bridge returns a silent
 // offline status rather than the network.registry_unreachable error the
-// always-revalidate mode would surface (F-7.4.4).
+// always-revalidate mode would surface.
 func TestLoadArtifact_OfflineFirstCacheMissUnreachableIsSilent(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

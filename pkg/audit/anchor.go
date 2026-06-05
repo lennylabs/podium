@@ -81,7 +81,7 @@ func chainHeadOf(sink *FileSink) (string, error) {
 // Rekor indices are zero-based, so the first entry recorded against
 // an instance has index 0. The decode uses a *int64 so a field that
 // is present and zero is preserved as 0 and only true absence (or a
-// decode failure) maps to -1 (F-8.6.3). spec: §8.6.
+// decode failure) maps to -1. spec: §8.6.
 func extractRekorLogIndex(envelope string) int64 {
 	type partial struct {
 		LogIndex *int64 `json:"log_index"`

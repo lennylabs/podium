@@ -1,6 +1,6 @@
 package e2e
 
-// Proof that the G-INFRA-5 authenticated, visibility-capable server harness
+// Proof that the authenticated, visibility-capable server harness
 // works: one server declares a layer in every §4.6 visibility mode (public,
 // organization, groups, users, and private), and tokens minted for distinct
 // identities resolve to the expected view. This is the primitive's own test;

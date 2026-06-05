@@ -1039,7 +1039,7 @@ func initCmd(args []string) int {
 		}
 		*registry = "http://127.0.0.1:8080"
 	}
-	// F-7.7.12 (spec: §7.7) — with no value flags and an interactive
+	// (spec: §7.7) — with no value flags and an interactive
 	// stdin, prompt for the registry (and optionally harness/target). A
 	// non-terminal stdin (CI, tests, pipes) skips the wizard and falls
 	// through to the required-flag error below, so init never blocks.
@@ -1078,7 +1078,7 @@ func initCmd(args []string) int {
 		}
 		dir = filepath.Join(home, ".podium")
 	} else {
-		// F-7.7.11 (spec: §7.7 workspace-mode step 1) — walk up from CWD to
+		// (spec: §7.7 workspace-mode step 1) — walk up from CWD to
 		// reuse an existing `.podium/` workspace so init from a subdirectory
 		// does not create a second workspace; create one in CWD when none is
 		// found. Both the committed default scope and the `--local` override
@@ -1130,7 +1130,7 @@ func initCmd(args []string) int {
 		})
 	}
 	fmt.Printf("Wrote %s\n", dest)
-	// F-7.7.13 (spec: §7.7 workspace-mode step 4) — print next-step hints.
+	// (spec: §7.7 workspace-mode step 4) — print next-step hints.
 	// The committed default scope suggests committing the file; every
 	// workspace scope suggests running `podium sync` to materialize.
 	if !*scopeGlobal {
@@ -1144,7 +1144,7 @@ func initCmd(args []string) int {
 }
 
 // initWizardResult holds the values gathered from the interactive
-// `podium init` wizard. spec: §7.7 (F-7.7.12).
+// `podium init` wizard. spec: §7.7.
 type initWizardResult struct {
 	registry string
 	harness  string
@@ -1167,7 +1167,7 @@ var (
 
 // runInitWizard prompts for the registry (required) and the optional
 // harness and target defaults, returning the collected values. Empty
-// answers leave the corresponding field unset. spec: §7.7 (F-7.7.12).
+// answers leave the corresponding field unset. spec: §7.7.
 func runInitWizard(in io.Reader, out io.Writer) (initWizardResult, error) {
 	r := bufio.NewReader(in)
 	ask := func(prompt string) (string, error) {
@@ -1434,7 +1434,7 @@ func printDomainSearchHuman(body []byte) {
 // type, layer}]}. A jq consumer reads .harness, .scope.include, or
 // .artifacts[].version directly. The per-artifact content_hash lets a pre-flight
 // check verify the full §14.11 (artifact_id, version, content_hash) triple
-// before the lock file is committed (spec: §7.5, §14.11; F-14.11.3).
+// before the lock file is committed (spec: §7.5, §14.11).
 func printJSON(res *sync.Result) {
 	type artOut struct {
 		ID          string `json:"id"`

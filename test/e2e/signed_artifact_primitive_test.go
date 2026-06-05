@@ -1,12 +1,12 @@
 package e2e
 
-// Proof that the signed-artifact ingest and tamper fixture (gap G-INFRA-8)
+// Proof that the signed-artifact ingest and tamper fixture
 // drives the real podium-mcp verifier path: a validly-signed medium-sensitivity
 // artifact materializes, a signed-then-tampered blob is refused with the
 // signature error, the content-hash integrity gate still fires for a tampered
 // body, and key pinning rejects a signature from a rotated key.
 //
-// Spec: §4.7.9, §6.2, §6.6 step 2. Gap G-INFRA-8.
+// Spec: §4.7.9, §6.2, §6.6 step 2.
 
 import (
 	"strings"

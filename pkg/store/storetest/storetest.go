@@ -57,7 +57,7 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("DomainPutReplacesPerLayer", func(t *testing.T) { domainPutReplacesPerLayer(t, factory(t)) })
 }
 
-// Spec: §4.5.1 / §4.5.4 (F-4.5.1) — DOMAIN.md is persisted per (tenant,
+// Spec: §4.5.1 / §4.5.4 — DOMAIN.md is persisted per (tenant,
 // layer, path) so LoadDomain can read it and merge candidates for the
 // same path across layers. ListDomains is tenant-scoped and stable.
 func domainRecordRoundTrip(t *testing.T, s store.Store) {
@@ -91,7 +91,7 @@ func domainRecordRoundTrip(t *testing.T, s store.Store) {
 	}
 }
 
-// Spec: §4.5.1 (F-4.5.1) — re-ingesting a layer replaces its DOMAIN.md
+// Spec: §4.5.1 — re-ingesting a layer replaces its DOMAIN.md
 // record for a path rather than accumulating duplicates.
 func domainPutReplacesPerLayer(t *testing.T, s store.Store) {
 	t.Helper()
@@ -119,7 +119,7 @@ func mustPutDomain(t *testing.T, s store.Store, rec store.DomainRecord) {
 	}
 }
 
-// Spec: §4.3 universal fields (F-4.3.3) — search_visibility persists on
+// Spec: §4.3 universal fields — search_visibility persists on
 // the manifest record and survives both GetManifest and ListManifests so
 // SearchArtifacts can exclude direct-only artifacts. Without a backing
 // column the SQLite and Postgres backends silently dropped the value.
@@ -228,7 +228,7 @@ func immutabilityIdempotent(t *testing.T, s store.Store) {
 	}
 }
 
-// Spec: §4.7 Version immutability invariant (F-1.3.1) — under concurrent
+// Spec: §4.7 Version immutability invariant — under concurrent
 // ingest of different content for the same (tenant, id, version), the
 // store accepts exactly one writer and reports every other writer as
 // ErrImmutableViolation. No writer may leak a raw driver error: the
@@ -467,7 +467,7 @@ func layerConfigCRUD(t *testing.T, s store.Store) {
 	ctx := context.Background()
 	mustCreateTenant(t, s, "t")
 	// spec: §7.3.1 — force_push_policy and last_ingested_at persist on the
-	// layer config (F-7.3.6, F-7.3.7).
+	// layer config.
 	ingestedAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	cfg := store.LayerConfig{
 		TenantID:        "t",
@@ -692,8 +692,8 @@ func getTenantNotFound(t *testing.T, s store.Store) {
 
 // Spec: §4.7.8 / §7.3.1 — the per-tenant Quota round-trips through
 // CreateTenant/GetTenant on every backend, including the §7.3.1
-// MaxUserLayers cap that the user-defined-layer enforcement reads
-// (F-1.4.1). A backend that drops a quota field would let the cap fall
+// MaxUserLayers cap that the user-defined-layer enforcement reads.
+// A backend that drops a quota field would let the cap fall
 // back to its default and silently ignore the tenant override.
 func quotaRoundTrips(t *testing.T, s store.Store) {
 	t.Helper()

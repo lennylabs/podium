@@ -4,7 +4,7 @@ package e2e
 // generating a runtime signing key, registering it with a running registry,
 // and minting signed JWTs. These let the standalone harness exercise the
 // runtime trust model that earlier required an OIDC standard-mode
-// deployment. F-6.3.1, F-6.3.2.
+// deployment.
 
 import (
 	"crypto/rand"

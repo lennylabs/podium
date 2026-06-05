@@ -1,7 +1,6 @@
 package e2e
 
-// End-to-end artifact and deployment lifecycle journeys
-// (gaps G-LIFECYCLE-1, G-LIFECYCLE-2, G-LIFECYCLE-4, G-LIFECYCLE-6).
+// End-to-end artifact and deployment lifecycle journeys.
 //
 // These tests drive the lifecycle behaviors the registry promises across a
 // version's life: a child that pins an extends parent keeps resolving the
@@ -13,8 +12,8 @@ package e2e
 // through the reingest endpoint, advancing the stored ref and emitting the
 // history-rewritten signal.
 //
-// They build on the runtime-republish primitive (republish_helpers_test.go,
-// gap G-INFRA-7) for the multi-version journeys, the git-source journey helpers
+// They build on the runtime-republish primitive (republish_helpers_test.go)
+//  for the multi-version journeys, the git-source journey helpers
 // (git_source_journey_test.go) for the force-push journey, and the store schema
 // migration path (pkg/store) for the in-place upgrade.
 //
@@ -44,7 +43,7 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// ---- G-LIFECYCLE-1: extends parent-pin stability and reingest re-resolution --
+// ---- extends parent-pin stability and reingest re-resolution --
 
 // TestLifecycle_ExtendsPinStabilityAndReingest drives the full §4.6 pin journey
 // end to end: a parent is ingested at 1.2.0 and a child (a different canonical
@@ -163,7 +162,7 @@ func TestLifecycle_ExtendsPinStabilityAndReingest(t *testing.T) {
 	}
 }
 
-// ---- G-LIFECYCLE-2: deprecation excludes from search, load surfaces target ---
+// ---- deprecation excludes from search, load surfaces target ---
 
 // TestLifecycle_DeprecationExcludesFromSearchLoadSurfacesTarget drives the
 // §4.7.4 / §4.7.6 deprecation journey: two versions of one id are published,
@@ -292,7 +291,7 @@ func lcSearchVersion(t testing.TB, srv *serverProc, query, id string) string {
 	return ""
 }
 
-// ---- G-LIFECYCLE-4: in-place legacy SQLite schema upgrade --------------------
+// ---- in-place legacy SQLite schema upgrade --------------------
 
 // lcDefaultOrgID derives the deterministic UUIDv5 tenant id the standalone
 // auto-bootstrap assigns the "default" org (§4.7.1: org IDs are UUIDs, names are
@@ -491,7 +490,7 @@ func lcWaitForAuditGrowth(t testing.TB, path string, minLen int) string {
 	return string(b)
 }
 
-// ---- G-LIFECYCLE-6: force-push history rewrite tolerated via PriorRef --------
+// ---- force-push history rewrite tolerated via PriorRef --------
 
 // TestLifecycle_ForcePushToleratedThroughReingest registers a git-source layer
 // and ingests it at commit A, then hard-resets the repo so A's history is

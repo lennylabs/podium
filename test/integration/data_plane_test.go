@@ -23,7 +23,7 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// Spec: §7.2 (F-7.2.1, F-7.2.2, F-7.2.3) — the full data plane over the
+// Spec: §7.2 — the full data plane over the
 // SQLite metadata store and a filesystem object store: ingest uploads
 // bundled resources keyed by content hash and persists refs that survive
 // the SQL column round-trip; load_artifact returns the small resource
@@ -114,7 +114,7 @@ func TestDataPlane_IngestToLoadArtifactRoundTrip(t *testing.T) {
 	}
 }
 
-// Spec: §7.2/§7.6.2 (F-4.1.1, F-7.2.1, F-7.6.4) — the standalone-without-storage
+// Spec: §7.2/§7.6.2 — the standalone-without-storage
 // deployment (§13.11). Ingest with no ResourcePut keeps every resource inline
 // regardless of size, so the SQLite store round-trips the bytes and both the
 // single-load and batch endpoints serve them: a binary resource base64-encoded

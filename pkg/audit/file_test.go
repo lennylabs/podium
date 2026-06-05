@@ -46,7 +46,7 @@ func TestFileSink_AppendPersistsAsJSONLines(t *testing.T) {
 
 // Spec: §4.7.5 — a read event's resolved layer composition and result
 // size persist to the JSON-Lines log and survive the hash-chain verify
-// (they participate in the tamper-evident chain) (F-4.7.11).
+// (they participate in the tamper-evident chain).
 func TestFileSink_ReadFieldsPersistAndVerify(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

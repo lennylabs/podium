@@ -69,7 +69,7 @@ func TestReadCLI_SearchJSONSchema(t *testing.T) {
 
 // spec: §7.6.1 — `podium domain search --json` keys the ranked domains under
 // "results", matching the artifact-search envelope. The wire response keys
-// them "domains" (F-7.6.1).
+// them "domains".
 func TestReadCLI_DomainSearchJSONUsesResultsKey(t *testing.T) {
 	ts := newRegistryStub(t, map[string]any{
 		"/v1/search_domains": map[string]any{
@@ -128,7 +128,7 @@ func TestReadCLI_DomainSearchJSONUsesResultsKey(t *testing.T) {
 
 // spec: §7.6.1 — `podium artifact show --json` emits {id, version,
 // content_hash, frontmatter, body}. The wire response keys the manifest text
-// "manifest_body" and delivers frontmatter as a string (F-7.6.2).
+// "manifest_body" and delivers frontmatter as a string.
 func TestReadCLI_ArtifactShowJSONSchema(t *testing.T) {
 	ts := newRegistryStub(t, map[string]any{
 		"/v1/load_artifact": map[string]any{

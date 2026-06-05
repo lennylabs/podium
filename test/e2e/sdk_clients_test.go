@@ -119,7 +119,7 @@ func csSkillReg(t *testing.T) string {
 
 // ---- install + import -------------------------------------------------------
 
-// T-D-custom-sdk-1 — Python SDK imports the documented names.
+// Python SDK imports the documented names.
 func TestSDK_PyImport(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -128,7 +128,7 @@ func TestSDK_PyImport(t *testing.T) {
 	csWantStdout(t, res, "IMPORT_OK")
 }
 
-// T-D-custom-sdk-2 — TypeScript SDK exports Client and RegistryError.
+// TypeScript SDK exports Client and RegistryError.
 func TestSDK_TSImport(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
@@ -137,7 +137,7 @@ func TestSDK_TSImport(t *testing.T) {
 	csWantStdout(t, res, "IMPORT_OK")
 }
 
-// T-D-custom-sdk-3 — Python Client.from_env reads PODIUM_REGISTRY.
+// Python Client.from_env reads PODIUM_REGISTRY.
 func TestSDK_PyFromEnv(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -147,7 +147,7 @@ func TestSDK_PyFromEnv(t *testing.T) {
 	csWantStdout(t, res, "REG "+srv.BaseURL)
 }
 
-// T-D-custom-sdk-4 — Python from_env raises when PODIUM_REGISTRY is absent.
+// Python from_env raises when PODIUM_REGISTRY is absent.
 func TestSDK_PyFromEnvMissing(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -157,7 +157,7 @@ func TestSDK_PyFromEnvMissing(t *testing.T) {
 	csWantStdout(t, res, "RUNTIMEERROR_OK True")
 }
 
-// T-D-custom-sdk-5 — TypeScript Client.fromEnv reads PODIUM_REGISTRY.
+// TypeScript Client.fromEnv reads PODIUM_REGISTRY.
 func TestSDK_TSFromEnv(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
@@ -167,7 +167,7 @@ func TestSDK_TSFromEnv(t *testing.T) {
 	csWantStdout(t, res, "REG "+srv.BaseURL)
 }
 
-// T-D-custom-sdk-6 — TypeScript fromEnv throws when PODIUM_REGISTRY is absent.
+// TypeScript fromEnv throws when PODIUM_REGISTRY is absent.
 func TestSDK_TSFromEnvMissing(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
@@ -177,7 +177,7 @@ func TestSDK_TSFromEnvMissing(t *testing.T) {
 	csWantStdout(t, res, "ERROR_OK true")
 }
 
-// T-D-custom-sdk-7 — Python Client constructor sets attributes; no network call.
+// Python Client constructor sets attributes; no network call.
 func TestSDK_PyConstructor(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -187,7 +187,7 @@ func TestSDK_PyConstructor(t *testing.T) {
 	csWantStdout(t, res, "CTOR_OK")
 }
 
-// T-D-custom-sdk-8 — Python login() is documented but absent (gap).
+// Python login() is documented but absent (gap).
 func TestSDK_PyLoginGap(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -196,7 +196,7 @@ func TestSDK_PyLoginGap(t *testing.T) {
 	csWantStdout(t, res, "HAS_LOGIN True")
 }
 
-// T-D-custom-sdk-9 — Python load_domain returns a descriptor for a valid path.
+// Python load_domain returns a descriptor for a valid path.
 func TestSDK_PyLoadDomain(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -206,7 +206,7 @@ func TestSDK_PyLoadDomain(t *testing.T) {
 	csWantStdout(t, res, "PATH finance/close-reporting")
 }
 
-// T-D-custom-sdk-10 — Python search_domains returns a SearchResult.
+// Python search_domains returns a SearchResult.
 func TestSDK_PySearchDomains(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -216,7 +216,7 @@ func TestSDK_PySearchDomains(t *testing.T) {
 	csWantStdout(t, res, "TM True")
 }
 
-// T-D-custom-sdk-11 — Python search_artifacts with query, type, tags, scope, top_k.
+// Python search_artifacts with query, type, tags, scope, top_k.
 func TestSDK_PySearchArtifactsAllParams(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -226,7 +226,7 @@ func TestSDK_PySearchArtifactsAllParams(t *testing.T) {
 	csWantStdout(t, res, "OK True")
 }
 
-// T-D-custom-sdk-12 — Python search_artifacts browse mode.
+// Python search_artifacts browse mode.
 func TestSDK_PyBrowse(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -236,7 +236,7 @@ func TestSDK_PyBrowse(t *testing.T) {
 	csWantStdout(t, res, "showing ")
 }
 
-// T-D-custom-sdk-13 — Python search_artifacts type=agent.
+// Python search_artifacts type=agent.
 func TestSDK_PyTypeAgent(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -248,7 +248,7 @@ func TestSDK_PyTypeAgent(t *testing.T) {
 	csWantStdout(t, res, "ALL_AGENT True")
 }
 
-// T-D-custom-sdk-14 — Python search_artifacts type=context.
+// Python search_artifacts type=context.
 func TestSDK_PyTypeContext(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -260,7 +260,7 @@ func TestSDK_PyTypeContext(t *testing.T) {
 	csWantStdout(t, res, "ALL_CTX True")
 }
 
-// T-D-custom-sdk-15 — Python search_artifacts type=mcp-server.
+// Python search_artifacts type=mcp-server.
 func TestSDK_PyTypeMcpServer(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -272,7 +272,7 @@ func TestSDK_PyTypeMcpServer(t *testing.T) {
 	csWantStdout(t, res, "TM True")
 }
 
-// T-D-custom-sdk-16 — Python load_artifact returns manifest_body and frontmatter.
+// Python load_artifact returns manifest_body and frontmatter.
 func TestSDK_PyLoadArtifact(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -282,7 +282,7 @@ func TestSDK_PyLoadArtifact(t *testing.T) {
 	csWantStdout(t, res, "ID finance/close-reporting/run-variance-analysis FM True")
 }
 
-// T-D-custom-sdk-17 — Python load_artifact for unknown id raises RegistryError.
+// Python load_artifact for unknown id raises RegistryError.
 func TestSDK_PyLoadArtifactNotFound(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -292,7 +292,7 @@ func TestSDK_PyLoadArtifactNotFound(t *testing.T) {
 	csWantStdout(t, res, "CODE registry.not_found RETRY False")
 }
 
-// T-D-custom-sdk-18 — Python materialize(harness=none) is documented but absent (gap).
+// Python materialize(harness=none) is documented but absent (gap).
 func TestSDK_PyMaterializeNoneGap(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -302,7 +302,7 @@ func TestSDK_PyMaterializeNoneGap(t *testing.T) {
 	csWantStdout(t, res, "HAS_MATERIALIZE True")
 }
 
-// T-D-custom-sdk-19 — Python materialize(harness=claude-code) is absent (gap).
+// Python materialize(harness=claude-code) is absent (gap).
 func TestSDK_PyMaterializeClaudeCodeGap(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -312,7 +312,7 @@ func TestSDK_PyMaterializeClaudeCodeGap(t *testing.T) {
 	csWantStdout(t, res, "HAS_MATERIALIZE True")
 }
 
-// T-D-custom-sdk-20 — Python load_artifacts bulk-fetches in one request.
+// Python load_artifacts bulk-fetches in one request.
 func TestSDK_PyBulkLoad(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -322,7 +322,7 @@ func TestSDK_PyBulkLoad(t *testing.T) {
 	csWantStdout(t, res, "N 2 OK 2")
 }
 
-// T-D-custom-sdk-21 — Python load_artifacts handles partial failure without raising.
+// Python load_artifacts handles partial failure without raising.
 func TestSDK_PyBulkPartialFailure(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -332,7 +332,7 @@ func TestSDK_PyBulkPartialFailure(t *testing.T) {
 	csWantStdout(t, res, "OK ok ERR error visibility.denied")
 }
 
-// T-D-custom-sdk-22 — server enforces the 50-item batch cap.
+// server enforces the 50-item batch cap.
 func TestSDK_BatchCap(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, csSkillReg(t))
@@ -350,7 +350,7 @@ func TestSDK_BatchCap(t *testing.T) {
 	}
 }
 
-// T-D-custom-sdk-23 — Python load_artifacts splits sets larger than 50.
+// Python load_artifacts splits sets larger than 50.
 func TestSDK_PyBulkSplit(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -360,7 +360,7 @@ func TestSDK_PyBulkSplit(t *testing.T) {
 	csWantStdout(t, res, "N 55")
 }
 
-// T-D-custom-sdk-24 — Python load_artifacts forwards session_id and harness.
+// Python load_artifacts forwards session_id and harness.
 func TestSDK_PyBulkForwardsParams(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -372,7 +372,7 @@ func TestSDK_PyBulkForwardsParams(t *testing.T) {
 	csWantStdout(t, res, "STATUS ok")
 }
 
-// T-D-custom-sdk-25 — Python bulk-load item materialize() is absent (gap).
+// Python bulk-load item materialize() is absent (gap).
 func TestSDK_PyBulkMaterializeGap(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -382,9 +382,9 @@ func TestSDK_PyBulkMaterializeGap(t *testing.T) {
 	csWantStdout(t, res, "IS_DICT False HAS_MATERIALIZE True")
 }
 
-// T-D-custom-sdk-26 — Python bulk-load surfaces visibility.denied for an item
+// Python bulk-load surfaces visibility.denied for an item
 // the caller cannot see. The authenticated, visibility-capable harness
-// (G-INFRA-5) places one artifact in a layer restricted to bob and one in a
+// places one artifact in a layer restricted to bob and one in a
 // public layer; the Python SDK runs as alice (her minted token forwarded via
 // PODIUM_SESSION_TOKEN, the same credential from_env reads for the §6.3.2
 // injected-session-token path). c.load_artifacts over both ids returns the
@@ -422,14 +422,14 @@ func TestSDK_PyBulkVisibilityDenied(t *testing.T) {
 	csWantStdout(t, res, "OK ok DEN error visibility.denied")
 }
 
-// T-D-custom-sdk-27 — Python subscribe yields events.
+// Python subscribe yields events.
 func TestSDK_PySubscribe(t *testing.T) {
 	t.Parallel()
 	t.Skip("subscription e2e requires a publish trigger and a bounded SSE read; not implemented as a stable gate")
 }
 
-// T-D-custom-sdk-28 — Python subscribe accepts the documented positional
-// event-type list (§7.6, F-7.6.8). The call form `c.subscribe([...])` must
+// Python subscribe accepts the documented positional
+// event-type list (§7.6). The call form `c.subscribe([...])` must
 // type-check; against an unreachable registry the connection raises a
 // non-TypeError, so the test asserts the positional call is accepted (it is
 // not rejected with TypeError).
@@ -441,7 +441,7 @@ func TestSDK_PySubscribePositional(t *testing.T) {
 	csWantStdout(t, res, "ACCEPTED")
 }
 
-// T-D-custom-sdk-29 — Python dependents_of returns descriptors.
+// Python dependents_of returns descriptors.
 func TestSDK_PyDependentsOf(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -454,7 +454,7 @@ func TestSDK_PyDependentsOf(t *testing.T) {
 	csWantStdout(t, res, "IS_LIST True")
 }
 
-// T-D-custom-sdk-30 — Python dependents_of empty for an artifact with none.
+// Python dependents_of empty for an artifact with none.
 func TestSDK_PyDependentsOfEmpty(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -466,13 +466,13 @@ func TestSDK_PyDependentsOfEmpty(t *testing.T) {
 	csWantStdout(t, res, "LEN 0")
 }
 
-// T-D-custom-sdk-31 — Python curation pattern (search then podium sync).
+// Python curation pattern (search then podium sync).
 func TestSDK_PyCuration(t *testing.T) {
 	t.Parallel()
-	t.Skip("blocked by F-7.5.1: `podium sync --include` is never applied, so programmatic curation cannot scope the materialized set")
+	t.Skip("blocked by a known gap: `podium sync --include` is never applied, so programmatic curation cannot scope the materialized set")
 }
 
-// T-D-custom-sdk-32 — Python curation with empty results skips the sync call.
+// Python curation with empty results skips the sync call.
 func TestSDK_PyCurationEmpty(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -482,7 +482,7 @@ func TestSDK_PyCurationEmpty(t *testing.T) {
 	csWantStdout(t, res, "SYNC_SKIPPED True")
 }
 
-// T-D-custom-sdk-33 — Python custom consumer reads frontmatter and body directly.
+// Python custom consumer reads frontmatter and body directly.
 func TestSDK_PyCustomConsumer(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -494,7 +494,7 @@ func TestSDK_PyCustomConsumer(t *testing.T) {
 	csWantStdout(t, res, "FM True BODY True")
 }
 
-// T-D-custom-sdk-34 — Python load_artifact harness parameter is absent (gap).
+// Python load_artifact harness parameter is absent (gap).
 func TestSDK_PyLoadArtifactHarnessGap(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -504,7 +504,7 @@ func TestSDK_PyLoadArtifactHarnessGap(t *testing.T) {
 	csWantStdout(t, res, "TYPEERROR_OK")
 }
 
-// T-D-custom-sdk-35 — Python eval pipeline: search by type, load each.
+// Python eval pipeline: search by type, load each.
 func TestSDK_PyEvalPipeline(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -516,7 +516,7 @@ func TestSDK_PyEvalPipeline(t *testing.T) {
 	csWantStdout(t, res, "PIPELINE_OK True")
 }
 
-// T-D-custom-sdk-36 — TypeScript searchArtifacts with query and topK.
+// TypeScript searchArtifacts with query and topK.
 func TestSDK_TSSearchArtifacts(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
@@ -526,7 +526,7 @@ func TestSDK_TSSearchArtifacts(t *testing.T) {
 	csWantStdout(t, res, "OK number true")
 }
 
-// T-D-custom-sdk-37 — TypeScript loadArtifact returns manifest_body.
+// TypeScript loadArtifact returns manifest_body.
 func TestSDK_TSLoadArtifact(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
@@ -536,7 +536,7 @@ func TestSDK_TSLoadArtifact(t *testing.T) {
 	csWantStdout(t, res, "ID finance/close-reporting/run-variance-analysis FM true")
 }
 
-// T-D-custom-sdk-38 — TypeScript loadArtifacts handles partial failure.
+// TypeScript loadArtifacts handles partial failure.
 func TestSDK_TSBulkPartial(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
@@ -546,7 +546,7 @@ func TestSDK_TSBulkPartial(t *testing.T) {
 	csWantStdout(t, res, "OK ok error registry.not_found")
 }
 
-// T-D-custom-sdk-39 — TypeScript dependentsOf returns dependency edges.
+// TypeScript dependentsOf returns dependency edges.
 func TestSDK_TSDependentsOf(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
@@ -559,13 +559,13 @@ func TestSDK_TSDependentsOf(t *testing.T) {
 	csWantStdout(t, res, "IS_ARRAY true")
 }
 
-// T-D-custom-sdk-40 — TypeScript subscribe yields NDJSON events.
+// TypeScript subscribe yields NDJSON events.
 func TestSDK_TSSubscribe(t *testing.T) {
 	t.Parallel()
 	t.Skip("subscription e2e requires a publish trigger and a bounded SSE read; not implemented as a stable gate")
 }
 
-// T-D-custom-sdk-41 — injected-session-token is accepted as a constructor param.
+// injected-session-token is accepted as a constructor param.
 func TestSDK_PyInjectedSessionToken(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -574,7 +574,7 @@ func TestSDK_PyInjectedSessionToken(t *testing.T) {
 	csWantStdout(t, res, "PROVIDER_OK")
 }
 
-// T-D-custom-sdk-42 — SDK does not work against a filesystem-source registry.
+// SDK does not work against a filesystem-source registry.
 func TestSDK_PyNoFilesystemRegistry(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -583,7 +583,7 @@ func TestSDK_PyNoFilesystemRegistry(t *testing.T) {
 	csWantStdout(t, res, "CONN_ERROR_OK")
 }
 
-// T-D-custom-sdk-43 — Python RegistryError carries code, message, retryable.
+// Python RegistryError carries code, message, retryable.
 func TestSDK_PyRegistryErrorFields(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -593,7 +593,7 @@ func TestSDK_PyRegistryErrorFields(t *testing.T) {
 	csWantStdout(t, res, "STR_OK True True")
 }
 
-// T-D-custom-sdk-44 — TypeScript RegistryError is an Error subclass with code/retryable.
+// TypeScript RegistryError is an Error subclass with code/retryable.
 func TestSDK_TSRegistryError(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
@@ -603,7 +603,7 @@ func TestSDK_TSRegistryError(t *testing.T) {
 	csWantStdout(t, res, "ERR true true RegistryError registry.not_found false")
 }
 
-// T-D-custom-sdk-45 — Python load_artifacts empty ids returns [] without HTTP.
+// Python load_artifacts empty ids returns [] without HTTP.
 func TestSDK_PyBulkEmpty(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -612,7 +612,7 @@ func TestSDK_PyBulkEmpty(t *testing.T) {
 	csWantStdout(t, res, "EMPTY True")
 }
 
-// T-D-custom-sdk-46 — TypeScript loadArtifacts empty ids returns [] without fetch.
+// TypeScript loadArtifacts empty ids returns [] without fetch.
 func TestSDK_TSBulkEmpty(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
@@ -621,7 +621,7 @@ func TestSDK_TSBulkEmpty(t *testing.T) {
 	csWantStdout(t, res, "EMPTY true")
 }
 
-// T-D-custom-sdk-47 — the bulk endpoint is not exposed as an MCP meta-tool.
+// the bulk endpoint is not exposed as an MCP meta-tool.
 func TestSDK_NoBulkMCPTool(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, csSkillReg(t))
@@ -641,7 +641,7 @@ func TestSDK_NoBulkMCPTool(t *testing.T) {
 	}
 }
 
-// T-D-custom-sdk-48 — Python search_artifacts session_id parameter is absent (gap).
+// Python search_artifacts session_id parameter is absent (gap).
 func TestSDK_PySearchAcceptsSessionID(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -653,7 +653,7 @@ func TestSDK_PySearchAcceptsSessionID(t *testing.T) {
 	csWantStdout(t, res, "SESSION_OK True")
 }
 
-// T-D-custom-sdk-49 — server enforces POST on /v1/artifacts:batchLoad.
+// server enforces POST on /v1/artifacts:batchLoad.
 func TestSDK_BatchMethod(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, csSkillReg(t))
@@ -666,7 +666,7 @@ func TestSDK_BatchMethod(t *testing.T) {
 	}
 }
 
-// T-D-custom-sdk-50 — server rejects an empty ids array.
+// server rejects an empty ids array.
 func TestSDK_BatchEmptyIds(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, csSkillReg(t))
@@ -679,7 +679,7 @@ func TestSDK_BatchEmptyIds(t *testing.T) {
 	}
 }
 
-// T-D-custom-sdk-51 — Python load_domain with empty path returns the root map.
+// Python load_domain with empty path returns the root map.
 func TestSDK_PyLoadDomainEmpty(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -689,7 +689,7 @@ func TestSDK_PyLoadDomainEmpty(t *testing.T) {
 	csWantStdout(t, res, "IS_DICT True")
 }
 
-// T-D-custom-sdk-52 — Python load_domain for a nonexistent path is deterministic.
+// Python load_domain for a nonexistent path is deterministic.
 func TestSDK_PyLoadDomainNonexistent(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -704,7 +704,7 @@ func TestSDK_PyLoadDomainNonexistent(t *testing.T) {
 	}
 }
 
-// T-D-custom-sdk-53 — Python ArtifactDescriptor exposes all documented fields.
+// Python ArtifactDescriptor exposes all documented fields.
 func TestSDK_PyDescriptorFields(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -714,7 +714,7 @@ func TestSDK_PyDescriptorFields(t *testing.T) {
 	csWantStdout(t, res, "FIELDS True True True True True")
 }
 
-// T-D-custom-sdk-54 — TypeScript loadArtifacts splits sets larger than 50.
+// TypeScript loadArtifacts splits sets larger than 50.
 func TestSDK_TSBulkSplit(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
@@ -724,10 +724,10 @@ func TestSDK_TSBulkSplit(t *testing.T) {
 	csWantStdout(t, res, "N 55")
 }
 
-// T-D-custom-sdk-55 — programmatic identity and visibility are unchanged from
+// programmatic identity and visibility are unchanged from
 // the MCP path: the same server, driven by the SDK as two distinct identities,
 // returns the per-caller surface each token's identity grants. The
-// authenticated harness (G-INFRA-5) restricts one layer to bob while a second
+// authenticated harness restricts one layer to bob while a second
 // layer is public. The Python SDK runs once as bob and once as alice, each
 // caller's minted token forwarded via PODIUM_SESSION_TOKEN (the §6.3.2
 // injected-session-token credential from_env reads). bob loads the restricted
@@ -790,9 +790,9 @@ func deadRegistry(t *testing.T) string {
 	return "http://127.0.0.1:" + strconv.Itoa(freePort(t))
 }
 
-// T-D-custom-sdk-56 — Python: an unreachable registry surfaces the structured
+// Python: an unreachable registry surfaces the structured
 // §7.4 network.registry_unreachable code, the §6.10 retryable flag, and a
-// remediation hint rather than leaking a raw transport exception (F-7.4.1).
+// remediation hint rather than leaking a raw transport exception.
 func TestSDK_PyUnreachableRegistry(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -807,8 +807,8 @@ func TestSDK_PyUnreachableRegistry(t *testing.T) {
 	csWantStdout(t, res, "CODE network.registry_unreachable RETRY True HINT True")
 }
 
-// T-D-custom-sdk-57 — Python: offline-first keeps no cache, so an unreachable
-// registry is the same structured no-cache miss (F-7.4.1).
+// Python: offline-first keeps no cache, so an unreachable
+// registry is the same structured no-cache miss.
 func TestSDK_PyUnreachableOfflineFirst(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -824,9 +824,9 @@ func TestSDK_PyUnreachableOfflineFirst(t *testing.T) {
 	csWantStdout(t, res, "CODE network.registry_unreachable")
 }
 
-// T-D-custom-sdk-58 — TypeScript: an unreachable registry surfaces the
+// TypeScript: an unreachable registry surfaces the
 // structured §7.4 network.registry_unreachable code with the retryable flag and
-// a remediation hint rather than a raw fetch rejection (F-7.4.2).
+// a remediation hint rather than a raw fetch rejection.
 func TestSDK_TSUnreachableRegistry(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
@@ -838,8 +838,8 @@ func TestSDK_TSUnreachableRegistry(t *testing.T) {
 	csWantStdout(t, res, "CODE network.registry_unreachable RETRY true HINT true")
 }
 
-// T-D-custom-sdk-59 — TypeScript: offline-first keeps no cache, so an
-// unreachable registry is the same structured no-cache miss (F-7.4.2).
+// TypeScript: offline-first keeps no cache, so an
+// unreachable registry is the same structured no-cache miss.
 func TestSDK_TSUnreachableOfflineFirst(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
@@ -851,9 +851,9 @@ func TestSDK_TSUnreachableOfflineFirst(t *testing.T) {
 	csWantStdout(t, res, "CODE network.registry_unreachable")
 }
 
-// T-D-custom-sdk-60 — Python: the SDK surfaces the full §6.10 envelope. A
+// Python: the SDK surfaces the full §6.10 envelope. A
 // reachable server's quota error carries a populated suggested_action and a
-// details map that the RegistryError exposes (F-6.10.1).
+// details map that the RegistryError exposes.
 func TestSDK_PyErrorEnvelopeFull(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
@@ -875,9 +875,9 @@ func TestSDK_PyErrorEnvelopeFull(t *testing.T) {
 	csWantStdout(t, res, "FULL_OK True")
 }
 
-// T-D-custom-sdk-61 — TypeScript: the SDK surfaces the full §6.10 envelope. A
+// TypeScript: the SDK surfaces the full §6.10 envelope. A
 // reachable server's quota error carries a populated suggestedAction and a
-// details map that the RegistryError exposes (F-6.10.1).
+// details map that the RegistryError exposes.
 func TestSDK_TSErrorEnvelopeFull(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)

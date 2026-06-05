@@ -14,7 +14,7 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// Spec: §4.7 Version immutability invariant (F-1.3.1) — concurrent ingest
+// Spec: §4.7 Version immutability invariant — concurrent ingest
 // of conflicting bytes for the same (id, version) against the file-backed
 // SQLite store (the standalone backend) must accept exactly one writer and
 // report the rest as per-artifact Conflicts, never failing the whole batch

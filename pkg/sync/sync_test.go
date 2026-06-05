@@ -75,7 +75,7 @@ func TestRun_SyncsArtifactsToTarget(t *testing.T) {
 	}
 }
 
-// Spec: §4.3 target_harnesses (F-4.3.4) — sync skips an artifact whose
+// Spec: §4.3 target_harnesses — sync skips an artifact whose
 // target_harnesses excludes the active adapter and materializes one that
 // includes it (or omits the field). The skipped ID is recorded in
 // Result.Skipped so the omission is reported rather than silent.

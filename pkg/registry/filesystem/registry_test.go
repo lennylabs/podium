@@ -163,7 +163,7 @@ func TestOpen_MultiLayer_AmbiguousFails(t *testing.T) {
 	if !errors.Is(err, ErrLayerPathAmbiguous) {
 		t.Fatalf("got %v, want ErrLayerPathAmbiguous", err)
 	}
-	// spec: §13.10 (F-13.10.3) — the surfaced error names the documented
+	// spec: §13.10 — the surfaced error names the documented
 	// config.layer_path_ambiguous code and the conflicting manifest path.
 	if got := err.Error(); !strings.Contains(got, "config.layer_path_ambiguous") {
 		t.Errorf("error %q missing config.layer_path_ambiguous code", got)

@@ -25,7 +25,7 @@ func signRuntimeJWT(t *testing.T, priv *rsa.PrivateKey, claims jwt.MapClaims) st
 
 // Spec: §6.3.1 / §6.3.2 — the boot-wired verifier maps verified claims to a
 // layer.Identity, applies the IdpGroupMapping to the token group claims, and
-// carries the OAuth scopes. F-6.3.1, F-6.3.4, F-6.3.5.
+// carries the OAuth scopes.
 func TestInjectedTokenVerifier_MapsClaims(t *testing.T) {
 	t.Parallel()
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -72,7 +72,7 @@ func TestInjectedTokenVerifier_MapsClaims(t *testing.T) {
 }
 
 // Spec: §6.3.2 — a token from an unregistered runtime is rejected with a
-// typed *UntrustedRuntimeError carrying the issuer. F-6.3.2.
+// typed *UntrustedRuntimeError carrying the issuer.
 func TestInjectedTokenVerifier_RejectsUnregistered(t *testing.T) {
 	t.Parallel()
 	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
@@ -92,7 +92,7 @@ func TestInjectedTokenVerifier_RejectsUnregistered(t *testing.T) {
 }
 
 // Spec: §6.3.2 — a request with no bearer token is rejected (no anonymous
-// fallback in injected-session-token mode). F-6.3.1.
+// fallback in injected-session-token mode).
 func TestInjectedTokenVerifier_RejectsMissingToken(t *testing.T) {
 	t.Parallel()
 	reg := identity.NewRuntimeKeyRegistry()
@@ -103,7 +103,7 @@ func TestInjectedTokenVerifier_RejectsMissingToken(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 / §7.3.1 (F-14.9.4, F-14.9.5) — the layer endpoint resolves the
+// Spec: §4.6 / §7.3.1 — the layer endpoint resolves the
 // caller from the same request-time verifier wired on the meta-tool server. A
 // verified token yields the authenticated identity used to attribute a
 // user-defined layer and gate admin operations; a missing/invalid token or a
@@ -147,7 +147,7 @@ func TestLayerIdentityResolver(t *testing.T) {
 // Spec: §6.3.2 — injected-session-token mode must refuse to start without a
 // configured audience: the verifier validates aud against this registry's
 // endpoint on every call, and an unset audience would leave aud unchecked (a
-// cross-registry token-confusion surface). Other providers are exempt. F-6.3.1.
+// cross-registry token-confusion surface). Other providers are exempt.
 func TestInjectedTokenAudienceGuard(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

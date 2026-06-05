@@ -8,27 +8,26 @@ package e2e
 //
 // Several tests are skipped because the underlying surface is not reachable
 // from a standalone e2e harness:
-//   - T-D-extending-14: requires an interactive device-code prompt.
-//   - T-D-extending-15,16,17: the hook chain runs (F-6.6.1) and the hook SPI
-//     is now a context-first wire-serializable interface (F-9.3.1), both
+//   - requires an interactive device-code prompt.
+//   - the hook chain runs and the hook SPI
+//     is now a context-first wire-serializable interface, both
 //     covered in-process. A standalone e2e cannot register a hook with the
 //     out-of-process bridge because §9.3 does not commit to an out-of-process
 //     plugin protocol; registration stays in-process.
-//   - T-D-extending-18,19,19b: outbound webhook delivery (artifact.published,
+//   - outbound webhook delivery (artifact.published,
 //     artifact.deprecated on a genuine flip, and domain.published) is driven
-//     in-process through the real ingest -> PublishEvent path (F-7.3.1, F-7.3.3,
-//     F-7.3.10).
-//   - T-D-extending-20,21,22: outbound webhook delivery not reachable
+//     in-process through the real ingest -> PublishEvent path.
+//   - outbound webhook delivery not reachable
 //     via the standalone HTTP surface.
-//   - T-D-extending-30: needs two authenticated users and visibility enforcement.
-//   - T-D-extending-31: structural static check over SPI interface decls.
-//   - T-D-extending-42: needs a signed-then-tampered artifact.
-//   - T-D-extending-43: SSE change-stream consumption with a bounded read.
-//   - T-D-extending-47: default overlay path fallback behavior is uncertain
+//   - needs two authenticated users and visibility enforcement.
+//   - structural static check over SPI interface decls.
+//   - needs a signed-then-tampered artifact.
+//   - SSE change-stream consumption with a bounded read.
+//   - default overlay path fallback behavior is uncertain
 //     without explicit PODIUM_OVERLAY_PATH; SKIP honest.
-//   - T-D-extending-48: LocalAuditSink MCP audit log path behavior uncertain.
-//   - T-D-extending-49: requires a configured notification provider.
-//   - T-D-extending-50: requires a live embedding provider and vector backend.
+//   - LocalAuditSink MCP audit log path behavior uncertain.
+//   - requires a configured notification provider.
+//   - requires a live embedding provider and vector backend.
 
 import (
 	"context"
@@ -111,9 +110,9 @@ func extPollContains(path, substr string, within time.Duration) bool {
 	return false
 }
 
-// ---- T-D-extending-1 through T-D-extending-50 ----------------------------
+// ------------------------------------------------------------
 
-// T-D-extending-1 — HarnessAdapter SPI: unknown adapter returns config.unknown_harness.
+// HarnessAdapter SPI: unknown adapter returns config.unknown_harness.
 func TestPluginSPI_UnknownHarness(t *testing.T) {
 	t.Parallel()
 	reg := extSkillReg(t)
@@ -147,7 +146,7 @@ func TestPluginSPI_UnknownHarness(t *testing.T) {
 	}
 }
 
-// T-D-extending-2 — HarnessAdapter SPI: DefaultRegistry contains documented adapters.
+// HarnessAdapter SPI: DefaultRegistry contains documented adapters.
 func TestPluginSPI_DefaultRegistryAdapters(t *testing.T) {
 	t.Parallel()
 	reg := extSkillReg(t)
@@ -184,7 +183,7 @@ func TestPluginSPI_DefaultRegistryAdapters(t *testing.T) {
 	}
 }
 
-// T-D-extending-3 — TypeProvider SPI: extension type artifact behavior without registered provider.
+// TypeProvider SPI: extension type artifact behavior without registered provider.
 func TestPluginSPI_EvalExtensionType(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -203,7 +202,7 @@ func TestPluginSPI_EvalExtensionType(t *testing.T) {
 	t.Logf("type:eval lint outcome (exit=%d): %s", res.Exit, combined)
 }
 
-// T-D-extending-4 — TypeProvider SPI: first-class type artifacts pass lint.
+// TypeProvider SPI: first-class type artifacts pass lint.
 func TestPluginSPI_FirstClassTypesPassLint(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -233,7 +232,7 @@ func TestPluginSPI_FirstClassTypesPassLint(t *testing.T) {
 	}
 }
 
-// T-D-extending-5 — IngestLinter SPI: manifest lint rejects artifact with missing required fields.
+// IngestLinter SPI: manifest lint rejects artifact with missing required fields.
 func TestPluginSPI_LintMissingRequired(t *testing.T) {
 	t.Parallel()
 	// version: is absent
@@ -253,7 +252,7 @@ func TestPluginSPI_LintMissingRequired(t *testing.T) {
 	}
 }
 
-// T-D-extending-6 — IngestLinter SPI: lint accepts a fully-valid artifact.
+// IngestLinter SPI: lint accepts a fully-valid artifact.
 func TestPluginSPI_LintValidArtifact(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -266,7 +265,7 @@ func TestPluginSPI_LintValidArtifact(t *testing.T) {
 	}
 }
 
-// T-D-extending-7 — LayerSourceProvider SPI: local source bridge — register, ingest, change pickup.
+// LayerSourceProvider SPI: local source bridge — register, ingest, change pickup.
 func TestPluginSPI_LocalLayerBridge(t *testing.T) {
 	t.Parallel()
 	layerDir := t.TempDir()
@@ -317,7 +316,7 @@ func TestPluginSPI_LocalLayerBridge(t *testing.T) {
 	t.Logf("load_artifact after version bump: HTTP %d body=%s", st2, body2)
 }
 
-// T-D-extending-8 — LayerSourceProvider SPI: local source reingest with no changes is idempotent.
+// LayerSourceProvider SPI: local source reingest with no changes is idempotent.
 func TestPluginSPI_ReingestIdempotent(t *testing.T) {
 	t.Parallel()
 	layerDir := t.TempDir()
@@ -341,7 +340,7 @@ func TestPluginSPI_ReingestIdempotent(t *testing.T) {
 	}
 }
 
-// T-D-extending-9 — LayerSourceProvider SPI: reingest of non-existent layer returns an error.
+// LayerSourceProvider SPI: reingest of non-existent layer returns an error.
 func TestPluginSPI_ReingestGhostLayer(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
@@ -351,7 +350,7 @@ func TestPluginSPI_ReingestGhostLayer(t *testing.T) {
 	}
 }
 
-// T-D-extending-10 — LayerSourceProvider SPI: reingest with missing id argument fails at CLI level.
+// LayerSourceProvider SPI: reingest with missing id argument fails at CLI level.
 func TestPluginSPI_ReingestMissingID(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
@@ -364,8 +363,8 @@ func TestPluginSPI_ReingestMissingID(t *testing.T) {
 	}
 }
 
-// T-D-extending-11 — IdentityProvider SPI: injected-session-token with an
-// unregistered runtime key returns auth.untrusted_runtime. F-6.3.2.
+// IdentityProvider SPI: injected-session-token with an
+// unregistered runtime key returns auth.untrusted_runtime.
 func TestPluginSPI_InjectedSessionTokenUntrusted(t *testing.T) {
 	t.Parallel()
 	priv, pem := injKeyPair(t)
@@ -384,7 +383,7 @@ func TestPluginSPI_InjectedSessionTokenUntrusted(t *testing.T) {
 	}
 }
 
-// T-D-extending-12 — IdentityProvider SPI: admin runtime register and list roundtrip.
+// IdentityProvider SPI: admin runtime register and list roundtrip.
 func TestPluginSPI_RuntimeRegisterList(t *testing.T) {
 	t.Parallel()
 	pubKeyFile := extGenRSAPubKeyFile(t)
@@ -418,7 +417,7 @@ func TestPluginSPI_RuntimeRegisterList(t *testing.T) {
 	}
 }
 
-// T-D-extending-13 — IdentityProvider SPI: admin runtime register requires all four flags.
+// IdentityProvider SPI: admin runtime register requires all four flags.
 func TestPluginSPI_RuntimeRegisterMissingFlags(t *testing.T) {
 	t.Parallel()
 	pubKeyFile := extGenRSAPubKeyFile(t)
@@ -459,24 +458,24 @@ func TestPluginSPI_RuntimeRegisterMissingFlags(t *testing.T) {
 	}
 }
 
-// T-D-extending-14 — IdentityProvider SPI: oauth-device-code triggers device prompt.
+// IdentityProvider SPI: oauth-device-code triggers device prompt.
 func TestPluginSPI_OAuthDeviceCodePrompt(t *testing.T) {
 	t.Skip("podium status does not initiate device flow; requires OIDC standard-mode registry with no cached token and an interactive device-code prompt")
 }
 
-// T-D-extending-15 — MaterializationHook SPI: hook chain runs in order.
+// MaterializationHook SPI: hook chain runs in order.
 func TestPluginSPI_HookChainOrder(t *testing.T) {
-	t.Skip("F-6.6.1 and F-9.3.1 fixed: the §6.6 step 4 hook chain runs in both bridge materialization paths (covered in-process by cmd/podium-mcp TestDeliver_HookChainRunsInOrder) and the hook SPI is now a context-first wire-serializable interface. A standalone e2e still cannot register a hook with the out-of-process bridge because §9.3 does not commit to an out-of-process plugin protocol (\"What's not committed\"); registration remains in-process via boot-time wiring")
+	t.Skip("The §6.6 step 4 hook chain runs in both bridge materialization paths (covered in-process by cmd/podium-mcp TestDeliver_HookChainRunsInOrder) and the hook SPI is now a context-first wire-serializable interface. A standalone e2e still cannot register a hook with the out-of-process bridge because §9.3 does not commit to an out-of-process plugin protocol (\"What's not committed\"); registration remains in-process via boot-time wiring")
 }
 
-// T-D-extending-16 — MaterializationHook SPI: hook that drops a file prevents write.
+// MaterializationHook SPI: hook that drops a file prevents write.
 func TestPluginSPI_HookDropsFile(t *testing.T) {
-	t.Skip("F-6.6.1 and F-9.3.1 fixed: the hook chain runs and a drop suppresses the write (covered in-process by cmd/podium-mcp TestDeliver_HookDropsFile) and the hook SPI is now context-first and wire-serializable. Registering a hook with the out-of-process bridge would need an out-of-process plugin protocol, which §9.3 does not commit to; registration remains in-process")
+	t.Skip("The hook chain runs and a drop suppresses the write (covered in-process by cmd/podium-mcp TestDeliver_HookDropsFile) and the hook SPI is now context-first and wire-serializable. Registering a hook with the out-of-process bridge would need an out-of-process plugin protocol, which §9.3 does not commit to; registration remains in-process")
 }
 
-// T-D-extending-17 — MaterializationHook SPI: hook error aborts write.
+// MaterializationHook SPI: hook error aborts write.
 func TestPluginSPI_HookErrorAborts(t *testing.T) {
-	t.Skip("F-6.6.1 and F-9.3.1 fixed: a hook error aborts the write with materialize.hook_failed (covered in-process by cmd/podium-mcp TestDeliver_HookErrorAbortsWrite) and the hook SPI is now context-first and wire-serializable. Registering a hook with the out-of-process bridge would need an out-of-process plugin protocol, which §9.3 does not commit to; registration remains in-process")
+	t.Skip("A hook error aborts the write with materialize.hook_failed (covered in-process by cmd/podium-mcp TestDeliver_HookErrorAbortsWrite) and the hook SPI is now context-first and wire-serializable. Registering a hook with the out-of-process bridge would need an out-of-process plugin protocol, which §9.3 does not commit to; registration remains in-process")
 }
 
 // extWebhookHarness wires an in-process registry server with an outbound
@@ -528,10 +527,10 @@ func extDeprecatedArtifact(version string, deprecated bool) []byte {
 		dep + "---\n\nBody.\n")
 }
 
-// T-D-extending-18 — Webhook outbound delivery: artifact.published event reaches receiver.
+// Webhook outbound delivery: artifact.published event reaches receiver.
 // spec: §7.3.2 — ingesting a new (artifact_id, version) fires artifact.published
 // to every matching receiver with the full {event, trace_id, timestamp, actor,
-// data} body (F-7.3.1, F-7.3.3 wiring).
+// data} body (wiring).
 func TestPluginSPI_WebhookArtifactPublished(t *testing.T) {
 	srv, st, bodies := extWebhookHarness(t, "artifact.published")
 	_, err := ingest.Ingest(context.Background(), st, ingest.Request{
@@ -562,11 +561,11 @@ func TestPluginSPI_WebhookArtifactPublished(t *testing.T) {
 	}
 }
 
-// T-D-extending-19 — Webhook outbound delivery: artifact.deprecated event reaches receiver.
+// Webhook outbound delivery: artifact.deprecated event reaches receiver.
 // spec: §7.3.2 — artifact.deprecated fires only when a manifest update flips
 // deprecated:true. A first non-deprecated version then a deprecated successor
 // delivers exactly one artifact.deprecated event; the receiver filtered to that
-// type sees nothing for the first publish (F-7.3.10, F-7.3.1).
+// type sees nothing for the first publish.
 func TestPluginSPI_WebhookArtifactDeprecated(t *testing.T) {
 	srv, st, bodies := extWebhookHarness(t, "artifact.deprecated")
 	// v1 is not deprecated: no artifact.deprecated delivery.
@@ -611,9 +610,9 @@ func TestPluginSPI_WebhookArtifactDeprecated(t *testing.T) {
 	}
 }
 
-// T-D-extending-19b — Webhook outbound delivery: domain.published reaches receiver.
+// Webhook outbound delivery: domain.published reaches receiver.
 // spec: §7.3.2 — adding or changing a DOMAIN.md fires domain.published to
-// matching receivers (F-7.3.3).
+// matching receivers.
 func TestPluginSPI_WebhookDomainPublished(t *testing.T) {
 	srv, st, bodies := extWebhookHarness(t, "domain.published")
 	_, err := ingest.Ingest(context.Background(), st, ingest.Request{
@@ -640,8 +639,8 @@ func TestPluginSPI_WebhookDomainPublished(t *testing.T) {
 	}
 }
 
-// T-D-extending-20 — Webhook outbound delivery: layer.ingested event reaches receiver
-// over the real standalone HTTP surface (gap G-OPS-2, via the G-INFRA-9 sink).
+// Webhook outbound delivery: layer.ingested event reaches receiver
+// over the real standalone HTTP surface (via the sink).
 // A §7.3.2 receiver filtered to layer.ingested records the event a runtime
 // reingest fires, with a verifying HMAC signature and the §7.3.2 body schema.
 func TestPluginSPI_WebhookLayerIngested(t *testing.T) {
@@ -672,9 +671,9 @@ func TestPluginSPI_WebhookLayerIngested(t *testing.T) {
 	}
 }
 
-// T-D-extending-21 — Webhook outbound delivery: a receiver whose filter matches
+// Webhook outbound delivery: a receiver whose filter matches
 // no fired event type records nothing while an all-events receiver on the same
-// server records the reingest (gap G-OPS-2, via the G-INFRA-9 sink). This
+// server records the reingest (via the sink). This
 // isolates the §7.3.2 event filter from "no delivery happened at all."
 func TestPluginSPI_WebhookNonMatchingFilter(t *testing.T) {
 	t.Parallel()
@@ -703,8 +702,8 @@ func TestPluginSPI_WebhookNonMatchingFilter(t *testing.T) {
 	}
 }
 
-// T-D-extending-22 — Webhook outbound delivery: a receiver auto-disables after
-// MaxFailures consecutive failures (gap G-OPS-2, via the G-INFRA-9 sink and the
+// Webhook outbound delivery: a receiver auto-disables after
+// MaxFailures consecutive failures (via the sink and the
 // PODIUM_WEBHOOK_MAX_FAILURES override). Filtering to layer.ingested makes
 // exactly one delivery fire per reingest, so two reingests are two consecutive
 // failures and reach the cap of 2.
@@ -742,7 +741,7 @@ func TestPluginSPI_WebhookAutoDisable(t *testing.T) {
 	}
 }
 
-// T-D-extending-23 — Webhook outbound delivery: HMAC VerifyBody rejects wrong secret.
+// Webhook outbound delivery: HMAC VerifyBody rejects wrong secret.
 func TestPluginSPI_WebhookHMACWrongSecret(t *testing.T) {
 	t.Parallel()
 	body := []byte(`{"event":"artifact.published","data":{"id":"finance/ap/pay-invoice"}}`)
@@ -764,7 +763,7 @@ func TestPluginSPI_WebhookHMACWrongSecret(t *testing.T) {
 	}
 }
 
-// T-D-extending-24 — Programmatic curation: podium sync with --include materializes only named artifacts.
+// Programmatic curation: podium sync with --include materializes only named artifacts.
 func TestPluginSPI_SyncIncludeOne(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -799,7 +798,7 @@ func TestPluginSPI_SyncIncludeOne(t *testing.T) {
 	}
 }
 
-// T-D-extending-25 — Programmatic curation: multiple --include flags materialize the union.
+// Programmatic curation: multiple --include flags materialize the union.
 func TestPluginSPI_SyncIncludeMultiple(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -842,7 +841,7 @@ func TestPluginSPI_SyncIncludeMultiple(t *testing.T) {
 	}
 }
 
-// T-D-extending-26 — Programmatic curation: on-disk result is reproducible from the include list.
+// Programmatic curation: on-disk result is reproducible from the include list.
 func TestPluginSPI_SyncIncludeReproducible(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -881,7 +880,7 @@ func TestPluginSPI_SyncIncludeReproducible(t *testing.T) {
 	}
 }
 
-// T-D-extending-27 — Custom CI check: podium lint exits non-zero for an artifact with lint errors.
+// Custom CI check: podium lint exits non-zero for an artifact with lint errors.
 func TestPluginSPI_LintStructuralError(t *testing.T) {
 	t.Parallel()
 	// A manifest missing the required version field is a lint error.
@@ -898,7 +897,7 @@ func TestPluginSPI_LintStructuralError(t *testing.T) {
 	}
 }
 
-// T-D-extending-28 — Custom CI check: podium lint exits 0 for a clean registry.
+// Custom CI check: podium lint exits 0 for a clean registry.
 func TestPluginSPI_LintClean(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -911,7 +910,7 @@ func TestPluginSPI_LintClean(t *testing.T) {
 	}
 }
 
-// T-D-extending-29 — Custom consumer via SDK (none harness): load_artifact returns canonical layout.
+// Custom consumer via SDK (none harness): load_artifact returns canonical layout.
 func TestPluginSPI_HarnessNoneCanonicalLayout(t *testing.T) {
 	t.Parallel()
 	id := "finance/ap/pay-invoice"
@@ -941,7 +940,7 @@ func TestPluginSPI_HarnessNoneCanonicalLayout(t *testing.T) {
 	}
 }
 
-// T-D-extending-30 — Custom consumer surfaces: HTTP API visibility filtering
+// Custom consumer surfaces: HTTP API visibility filtering
 // applies per identity. The authenticated harness places a public artifact and a
 // private artifact in a layer visible only to bob, then drives the identical
 // search and load surface as two callers: alice (who cannot see the private
@@ -995,12 +994,12 @@ func TestPluginSPI_VisibilityFilteringDirect(t *testing.T) {
 	}
 }
 
-// T-D-extending-31 — SPI forward compatibility: every blocking SPI method takes context as first parameter.
+// SPI forward compatibility: every blocking SPI method takes context as first parameter.
 func TestPluginSPI_SPIContextFirstParam(t *testing.T) {
 	t.Skip("structural static check over SPI interface declarations; covered by package-level review, not an e2e test")
 }
 
-// T-D-extending-32 — SPI forward compatibility: structured error envelope present in HTTP error responses.
+// SPI forward compatibility: structured error envelope present in HTTP error responses.
 func TestPluginSPI_StructuredErrorEnvelope(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, extSkillReg(t))
@@ -1048,7 +1047,7 @@ func TestPluginSPI_StructuredErrorEnvelope(t *testing.T) {
 	}
 }
 
-// T-D-extending-33 — Eval pipeline pattern: search_artifacts by type returns only matching type.
+// Eval pipeline pattern: search_artifacts by type returns only matching type.
 func TestPluginSPI_SearchByTypeFilter(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -1080,7 +1079,7 @@ func TestPluginSPI_SearchByTypeFilter(t *testing.T) {
 	}
 }
 
-// T-D-extending-34 — Bulk fetch: batchLoad returns correct per-item status.
+// Bulk fetch: batchLoad returns correct per-item status.
 func TestPluginSPI_BatchLoadPerItemStatus(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -1129,7 +1128,7 @@ func TestPluginSPI_BatchLoadPerItemStatus(t *testing.T) {
 	}
 }
 
-// T-D-extending-35 — Bulk fetch: batch exceeding 50 IDs is handled without server panic.
+// Bulk fetch: batch exceeding 50 IDs is handled without server panic.
 func TestPluginSPI_BatchLoadOver50(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, extSkillReg(t))
@@ -1147,7 +1146,7 @@ func TestPluginSPI_BatchLoadOver50(t *testing.T) {
 	t.Logf("batch >50: HTTP %d body=%s", st, body)
 }
 
-// T-D-extending-36 — Dependents endpoint: dependents_of returns artifacts that extend a given artifact.
+// Dependents endpoint: dependents_of returns artifacts that extend a given artifact.
 func TestPluginSPI_DependentsOfExtends(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -1181,7 +1180,7 @@ func TestPluginSPI_DependentsOfExtends(t *testing.T) {
 	t.Logf("dependents edges: %s", body)
 }
 
-// T-D-extending-37 — Dependents endpoint: artifact with no dependents returns an empty list.
+// Dependents endpoint: artifact with no dependents returns an empty list.
 func TestPluginSPI_DependentsOfEmpty(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -1204,7 +1203,7 @@ func TestPluginSPI_DependentsOfEmpty(t *testing.T) {
 	}
 }
 
-// T-D-extending-38 — Community plugin registry URL: doc mentions the registry but omits a URL.
+// Community plugin registry URL: doc mentions the registry but omits a URL.
 func TestPluginSPI_CommunityPluginRegistryDocGap(t *testing.T) {
 	t.Parallel()
 	docPath := filepath.Join(repoRoot(t), "docs", "deployment", "extending.md")
@@ -1219,7 +1218,7 @@ func TestPluginSPI_CommunityPluginRegistryDocGap(t *testing.T) {
 	t.Logf("community plugin registry mentioned without a specific URL (doc-accuracy gap)")
 }
 
-// T-D-extending-39 — Out-of-process plugin protocol: no transport surface exposed.
+// Out-of-process plugin protocol: no transport surface exposed.
 func TestPluginSPI_NoOutOfProcessTransport(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "--help")
@@ -1231,7 +1230,7 @@ func TestPluginSPI_NoOutOfProcessTransport(t *testing.T) {
 	}
 }
 
-// T-D-extending-40 — RegistryAuditSink SPI: layer.ingested event written to audit log after reingest.
+// RegistryAuditSink SPI: layer.ingested event written to audit log after reingest.
 func TestPluginSPI_AuditLayerIngested(t *testing.T) {
 	t.Parallel()
 	layerDir := t.TempDir()
@@ -1266,7 +1265,7 @@ func TestPluginSPI_AuditLayerIngested(t *testing.T) {
 	}
 }
 
-// T-D-extending-41 — RegistryAuditSink SPI: artifact.published event written to audit log after ingest.
+// RegistryAuditSink SPI: artifact.published event written to audit log after ingest.
 func TestPluginSPI_AuditArtifactPublished(t *testing.T) {
 	t.Parallel()
 	layerDir := t.TempDir()
@@ -1296,21 +1295,21 @@ func TestPluginSPI_AuditArtifactPublished(t *testing.T) {
 	}
 }
 
-// T-D-extending-42 — SignatureProvider SPI: materialize.signature_invalid for tampered artifact.
+// SignatureProvider SPI: materialize.signature_invalid for tampered artifact.
 func TestPluginSPI_SignatureInvalidTampered(t *testing.T) {
 	t.Skip("requires a signed-then-tampered artifact in the object store; not constructable via the filesystem-source standalone harness")
 }
 
-// T-D-extending-43 — Subscription: client receives artifact.published via SSE.
+// Subscription: client receives artifact.published via SSE.
 func TestPluginSPI_SSEArtifactPublished(t *testing.T) {
 	t.Skip("SSE change-stream consumption needs a streaming HTTP client with a bounded read and a reliable ingest trigger; not implemented as a stable e2e gate")
 }
 
-// T-D-extending-44 — Ingest immutability: same version with different content
+// Ingest immutability: same version with different content
 // returns ingest.immutable_violation. spec: §7.3.1 — "Same version, different
 // content_hash | Rejected as ingest.immutable_violation. The author bumps the
 // version." A pure-conflict snapshot surfaces the named §6.10 code through the
-// reingest response (HTTP 409), so the CLI exits non-zero (F-7.3.2).
+// reingest response (HTTP 409), so the CLI exits non-zero.
 func TestPluginSPI_IngestImmutableViolation(t *testing.T) {
 	t.Parallel()
 	layerDir := t.TempDir()
@@ -1348,7 +1347,7 @@ func TestPluginSPI_IngestImmutableViolation(t *testing.T) {
 	}
 }
 
-// T-D-extending-45 — Ingest sensitivity: public-mode rejects medium/high
+// Ingest sensitivity: public-mode rejects medium/high
 // sensitivity artifacts. spec: §13.10 — ingest.public_mode_rejects_sensitive.
 // The rejection is per-artifact (non-fatal), so the low artifact still ingests.
 func TestPluginSPI_PublicModeRejectsSensitive(t *testing.T) {
@@ -1371,7 +1370,7 @@ func TestPluginSPI_PublicModeRejectsSensitive(t *testing.T) {
 	}
 }
 
-// T-D-extending-46 — LocalSearchProvider SPI: search_artifacts includes results from local overlay.
+// LocalSearchProvider SPI: search_artifacts includes results from local overlay.
 func TestPluginSPI_LocalOverlaySearch(t *testing.T) {
 	t.Parallel()
 	// Build a server registry with one artifact
@@ -1418,12 +1417,12 @@ func TestPluginSPI_LocalOverlaySearch(t *testing.T) {
 	}
 }
 
-// T-D-extending-47 — LocalOverlayProvider SPI: default overlay path falls back to workspace .podium/overlay/.
+// LocalOverlayProvider SPI: default overlay path falls back to workspace .podium/overlay/.
 func TestPluginSPI_DefaultOverlayPath(t *testing.T) {
 	t.Skip("default overlay path fallback to .podium/overlay/ requires the MCP cwd to be the workspace root; the PODIUM_MATERIALIZE_ROOT-based setup does not place the overlay at the expected relative path without explicit PODIUM_OVERLAY_PATH")
 }
 
-// T-D-extending-48 — LocalAuditSink SPI: MCP meta-tool calls recorded in local audit log.
+// LocalAuditSink SPI: MCP meta-tool calls recorded in local audit log.
 func TestPluginSPI_LocalAuditSinkMCP(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -1456,12 +1455,12 @@ func TestPluginSPI_LocalAuditSinkMCP(t *testing.T) {
 	}
 }
 
-// T-D-extending-49 — NotificationProvider SPI: ingest failure triggers notification.
+// NotificationProvider SPI: ingest failure triggers notification.
 func TestPluginSPI_NotificationProviderIngestFailure(t *testing.T) {
 	t.Skip("requires a configured notification provider (email+webhook); not configurable in standalone e2e without a live notification endpoint")
 }
 
-// T-D-extending-50 — EmbeddingProvider SPI: search_artifacts with semantic query returns ranked results.
+// EmbeddingProvider SPI: search_artifacts with semantic query returns ranked results.
 func TestPluginSPI_EmbeddingProviderSemanticSearch(t *testing.T) {
-	t.Skip("requires a live EmbeddingProvider (openai, voyage, ollama, etc.) or a self-embedding cloud backend, plus a reachable vector backend; standalone has neither. Self-embedding wiring exists (F-13.12.6) but needs a live cloud index; the no-config standalone path is blocked by F-13.10.10 (sqlite-vec not default)")
+	t.Skip("requires a live EmbeddingProvider (openai, voyage, ollama, etc.) or a self-embedding cloud backend, plus a reachable vector backend; standalone has neither. Self-embedding wiring exists but needs a live cloud index; the no-config standalone path is blocked by a known gap (sqlite-vec not default)")
 }

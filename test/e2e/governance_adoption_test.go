@@ -4,16 +4,16 @@ package e2e
 // The page describes a staged on-ramp for governance features: identity,
 // sensitivity labels, signing, freeze windows, and sandbox profiles.
 //
-// Coverage: T-D-progressive-1 through T-D-progressive-45.
+// Coverage: the progressive-adoption journey.
 //
 // Known gaps:
-//   - T-D-progressive-9..11,13..17: require a configured OIDC identity provider
+//   - several entries require a configured OIDC identity provider
 //     with per-user tokens; not expressible in a no-auth standalone e2e.
-//   - T-D-progressive-32..37: blocked by F-7.3.9 (break-glass CLI flags absent;
+//   - the break-glass entries are blocked by a known gap (break-glass CLI flags absent;
 //     freeze window not reachable via e2e HTTP/CLI surface).
-//   - T-D-progressive-41: requires a standard deployment with OIDC.
+//   - requires a standard deployment with OIDC.
 //
-// T-D-progressive-30,40,42 (signing) now run against the G-INFRA-8
+// The signing entries now run against the
 // signedArtifactFixture for the signed half and the filesystem server for the
 // unsigned half. progressive-adoption.md's Month 3 step names
 // PODIUM_VERIFY_SIGNATURES=high-only, which the product rejects (the bridge
@@ -99,12 +99,11 @@ func progJSON(v any) string {
 	return string(b)
 }
 
-// ---- T-D-progressive-1 — standalone healthz ----------------------------------
+// ---- — standalone healthz ----------------------------------
 
 // TestProgressive_1_StandaloneHealthz verifies that `podium serve --standalone`
 // starts on a free port, answers /healthz with mode "ready", and creates the
 // SQLite database under HOME.
-// T-D-progressive-1
 func TestGovernance_StandaloneHealthz(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -112,7 +111,7 @@ func TestGovernance_StandaloneHealthz(t *testing.T) {
 		"serve", "--standalone")
 	// /healthz must be 200 with mode "ready" (startServerArgs already
 	// asserts 200). Liveness is the 200 status; §13.9 documents no
-	// readiness boolean on /healthz (F-13.9.5).
+	// readiness boolean on /healthz.
 	var hz struct {
 		Mode string `json:"mode"`
 	}
@@ -140,11 +139,10 @@ func TestGovernance_StandaloneHealthz(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-2 — unauthenticated search returns 200 ------------------
+// ---- — unauthenticated search returns 200 ------------------
 
 // TestProgressive_2_UnauthedSearch confirms the standalone server permits
 // unauthenticated GET /v1/search_artifacts requests.
-// T-D-progressive-2
 func TestGovernance_UnauthedSearch(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -169,11 +167,10 @@ func TestGovernance_UnauthedSearch(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-3 — public layer discoverable via search ----------------
+// ---- — public layer discoverable via search ----------------
 
 // TestProgressive_3_PublicLayerSearch registers a local layer with --public
 // and asserts the artifact is discoverable via `podium search`.
-// T-D-progressive-3
 func TestGovernance_PublicLayerSearch(t *testing.T) {
 	t.Parallel()
 	// The Day-0 catalog is ingested at startup via --layer-path. Standalone
@@ -194,11 +191,10 @@ func TestGovernance_PublicLayerSearch(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-4 — register without --repo/--local exits 2 ------------
+// ---- — register without --repo/--local exits 2 ------------
 
 // TestProgressive_4_RegisterMissingSource verifies that `podium layer register`
 // without --repo or --local exits with code 2.
-// T-D-progressive-4
 func TestGovernance_RegisterMissingSource(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{}))
@@ -214,12 +210,11 @@ func TestGovernance_RegisterMissingSource(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-5 — sensitivity defaults to low when omitted -----------
+// ---- — sensitivity defaults to low when omitted -----------
 
 // TestProgressive_5_SensitivityDefaultsLow confirms that an artifact whose
 // ARTIFACT.md omits the sensitivity field ingests successfully; the registry
 // reports it as sensitivity:low.
-// T-D-progressive-5
 func TestGovernance_SensitivityDefaultsLow(t *testing.T) {
 	t.Parallel()
 	// Artifact with no sensitivity field.
@@ -238,12 +233,11 @@ func TestGovernance_SensitivityDefaultsLow(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-6 — unset PODIUM_VERIFY_SIGNATURES loads low artifact --
+// ---- — unset PODIUM_VERIFY_SIGNATURES loads low artifact --
 
 // TestProgressive_6_UnsetVerifySignaturesLoadsLow confirms that when
 // PODIUM_VERIFY_SIGNATURES is not set, a low-sensitivity unsigned artifact
 // loads without a signature error.
-// T-D-progressive-6
 func TestGovernance_UnsetVerifySignaturesLoadsLow(t *testing.T) {
 	t.Parallel()
 	id := "eng/low-artifact"
@@ -268,12 +262,11 @@ func TestGovernance_UnsetVerifySignaturesLoadsLow(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-7 — serve --layer-path ingests at startup ---------------
+// ---- — serve --layer-path ingests at startup ---------------
 
 // TestProgressive_7_LayerPathIngestsAtStartup verifies that
 // `podium serve --standalone --layer-path <dir>` ingests the filesystem
 // registry at startup and makes artifacts searchable immediately.
-// T-D-progressive-7
 func TestGovernance_LayerPathIngestsAtStartup(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -290,15 +283,14 @@ func TestGovernance_LayerPathIngestsAtStartup(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-8 — config show reflects identity_provider env var -----
+// ---- — config show reflects identity_provider env var -----
 
 // TestProgressive_8_ConfigShowIdentityProvider asserts that
 // `podium config show` emits a row for identity_provider sourced from
 // PODIUM_IDENTITY_PROVIDER.
-// T-D-progressive-8
 func TestGovernance_ConfigShowIdentityProvider(t *testing.T) {
 	t.Parallel()
-	// spec §7.7 (F-7.7.2): identity_provider is a §13.12 server setting,
+	// spec §7.7: identity_provider is a §13.12 server setting,
 	// surfaced via `config show --server`.
 	res := runPodium(t, "", []string{"PODIUM_IDENTITY_PROVIDER=oauth-device-code"},
 		"config", "show", "--server")
@@ -317,13 +309,12 @@ func TestGovernance_ConfigShowIdentityProvider(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-9 — personal layer register works; visibility skip -----
+// ---- — personal layer register works; visibility skip -----
 
 // TestProgressive_9_PersonalLayerRegister registers a user-defined layer with
 // --user-defined --owner --user flags and asserts the layer appears in the
 // list with user_defined:true. Cross-user visibility requires OIDC tokens and
 // is skipped.
-// T-D-progressive-9
 func TestGovernance_PersonalLayerRegister(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -353,30 +344,27 @@ func TestGovernance_PersonalLayerRegister(t *testing.T) {
 	t.Log("cross-user visibility skip: requires a configured OIDC identity provider and per-user tokens; not expressible in no-auth standalone")
 }
 
-// ---- T-D-progressive-10 — personal layer not visible to different user ------
+// ---- — personal layer not visible to different user ------
 
 // TestProgressive_10_PersonalLayerOtherUserBlocked documents that cross-user
 // layer visibility requires OIDC.
-// T-D-progressive-10
 func TestGovernance_PersonalLayerOtherUserBlocked(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider and per-user tokens; not expressible in no-auth standalone")
 }
 
-// ---- T-D-progressive-11 — load_artifact audit carries sub claim (OIDC) ------
+// ---- — load_artifact audit carries sub claim (OIDC) ------
 
 // TestProgressive_11_AuditSubClaimOIDC documents that the sub-claim audit
 // assertion requires OIDC.
-// T-D-progressive-11
 func TestGovernance_AuditSubClaimOIDC(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider and per-user tokens; not expressible in no-auth standalone")
 }
 
-// ---- T-D-progressive-12 — unauthenticated call records system:public --------
+// ---- — unauthenticated call records system:public --------
 
 // TestProgressive_12_UnauthedAuditSystemPublic verifies that an unauthenticated
 // GET /v1/load_artifact call is recorded in the audit log with
 // caller:"system:public".
-// T-D-progressive-12
 func TestGovernance_UnauthedAuditSystemPublic(t *testing.T) {
 	t.Parallel()
 	id := "eng/audit-test"
@@ -392,57 +380,51 @@ func TestGovernance_UnauthedAuditSystemPublic(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-13 — search_artifacts audit carries sub claim (OIDC) ---
+// ---- — search_artifacts audit carries sub claim (OIDC) ---
 
 // TestProgressive_13_AuditSearchSubClaimOIDC documents that the sub-claim
 // assertion on search_artifacts requires OIDC.
-// T-D-progressive-13
 func TestGovernance_AuditSearchSubClaimOIDC(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider and per-user tokens; not expressible in no-auth standalone")
 }
 
-// ---- T-D-progressive-14 — layer update --organization (OIDC) ----------------
+// ---- — layer update --organization (OIDC) ----------------
 
 // TestProgressive_14_LayerUpdateOrganization documents that the org-only
 // restriction requires OIDC identity.
-// T-D-progressive-14
 func TestGovernance_LayerUpdateOrganization(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider and per-user tokens; not expressible in no-auth standalone")
 }
 
-// ---- T-D-progressive-15 — visibility.denied audit event (OIDC) --------------
+// ---- — visibility.denied audit event (OIDC) --------------
 
 // TestProgressive_15_VisibilityDeniedAudit documents that visibility.denied
 // events require OIDC.
-// T-D-progressive-15
 func TestGovernance_VisibilityDeniedAudit(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider and per-user tokens; not expressible in no-auth standalone")
 }
 
-// ---- T-D-progressive-16 — cross-org isolation (OIDC) -------------------------
+// ---- — cross-org isolation (OIDC) -------------------------
 
 // TestProgressive_16_CrossOrgIsolation documents that cross-org visibility
 // isolation requires OIDC.
-// T-D-progressive-16
 func TestGovernance_CrossOrgIsolation(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider and per-user tokens; not expressible in no-auth standalone")
 }
 
-// ---- T-D-progressive-17 — group-scoped layer (OIDC) -------------------------
+// ---- — group-scoped layer (OIDC) -------------------------
 
 // TestProgressive_17_GroupScopedLayer documents that group-based visibility
 // filtering requires OIDC group claims.
-// T-D-progressive-17
 func TestGovernance_GroupScopedLayer(t *testing.T) {
 	t.Skip("requires a configured OIDC identity provider and per-user tokens; not expressible in no-auth standalone")
 }
 
-// ---- T-D-progressive-18 — lint passes on artifact with explicit sensitivity --
+// ---- — lint passes on artifact with explicit sensitivity --
 
 // TestProgressive_18_LintPassesWithSensitivity verifies that `podium lint`
 // exits 0 on a registry containing an artifact with an explicit sensitivity
 // field.
-// T-D-progressive-18
 func TestGovernance_LintPassesWithSensitivity(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -459,13 +441,12 @@ func TestGovernance_LintPassesWithSensitivity(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-19 — lint does not warn on missing sensitivity (gap) ---
+// ---- — lint does not warn on missing sensitivity (gap) ---
 
 // TestProgressive_19_LintNoWarnOnMissingSensitivity confirms that `podium lint`
 // does not emit a sensitivity warning when the field is absent. This is a
 // doc-accuracy gap: the doc describes a sensitivity lint rule that does not
 // exist in the current implementation.
-// T-D-progressive-19
 func TestGovernance_LintNoWarnOnMissingSensitivity(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -483,12 +464,11 @@ func TestGovernance_LintNoWarnOnMissingSensitivity(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-20 — search --filter unknown flag exits 2 (gap) --------
+// ---- — search --filter unknown flag exits 2 (gap) --------
 
 // TestProgressive_20_SearchFilterFlagMissing asserts that `podium search`
 // rejects --filter with exit code 2. The doc documents this flag but it does
 // not exist.
-// T-D-progressive-20
 func TestGovernance_SearchFilterFlagMissing(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -501,12 +481,11 @@ func TestGovernance_SearchFilterFlagMissing(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-21 — HTTP search ignores sensitivity param (gap) --------
+// ---- — HTTP search ignores sensitivity param (gap) --------
 
 // TestProgressive_21_HTTPSearchIgnoresSensitivity verifies that the server
 // silently ignores the sensitivity query parameter and returns all visible
 // artifacts. This is a doc-accuracy gap.
-// T-D-progressive-21
 func TestGovernance_HTTPSearchIgnoresSensitivity(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -535,12 +514,11 @@ func TestGovernance_HTTPSearchIgnoresSensitivity(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-22 — audit records sensitivity per load_artifact --------
+// ---- — audit records sensitivity per load_artifact --------
 
 // TestProgressive_22_AuditSensitivityPerLoad loads a high-sensitivity artifact
 // and checks whether the audit log entry carries a sensitivity field. The doc
 // claims this; the implementation may or may not include it.
-// T-D-progressive-22
 func TestGovernance_AuditSensitivityPerLoad(t *testing.T) {
 	t.Parallel()
 	id := "eng/high-audit"
@@ -561,12 +539,11 @@ func TestGovernance_AuditSensitivityPerLoad(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-23 — medium-and-above blocks unsigned medium artifact --
+// ---- — medium-and-above blocks unsigned medium artifact --
 
 // TestProgressive_23_MediumAndAboveBlocksUnsignedMedium verifies that
 // PODIUM_VERIFY_SIGNATURES=medium-and-above causes load_artifact to return
 // a signature error for an unsigned medium-sensitivity artifact.
-// T-D-progressive-23
 func TestGovernance_MediumAndAboveBlocksUnsignedMedium(t *testing.T) {
 	t.Parallel()
 	id := "eng/medium-unsigned"
@@ -591,13 +568,12 @@ func TestGovernance_MediumAndAboveBlocksUnsignedMedium(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-24 — high-only is unknown, fails open (gap) -------------
+// ---- — high-only is unknown, fails open (gap) -------------
 
 // TestProgressive_24_HighOnlyFailsOpen verifies that
 // PODIUM_VERIFY_SIGNATURES=high-only is an unrecognized value and the
 // implementation fails open, allowing an unsigned high-sensitivity artifact
 // to load. This is a doc-accuracy gap.
-// T-D-progressive-24
 func TestGovernance_HighOnlyFailsOpen(t *testing.T) {
 	t.Parallel()
 	id := "eng/high-unsigned-failopen"
@@ -618,12 +594,11 @@ func TestGovernance_HighOnlyFailsOpen(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-25 — never policy allows unsigned high artifact ---------
+// ---- — never policy allows unsigned high artifact ---------
 
 // TestProgressive_25_NeverPolicyLoadsHighUnsigned confirms that
 // PODIUM_VERIFY_SIGNATURES=never allows an unsigned high-sensitivity artifact
 // to materialize.
-// T-D-progressive-25
 func TestGovernance_NeverPolicyLoadsHighUnsigned(t *testing.T) {
 	t.Parallel()
 	id := "eng/high-never"
@@ -643,12 +618,11 @@ func TestGovernance_NeverPolicyLoadsHighUnsigned(t *testing.T) {
 	mustExist(t, filepath.Join(mat, id, "ARTIFACT.md"))
 }
 
-// ---- T-D-progressive-26 — podium sign produces noop signature ----------------
+// ---- — podium sign produces noop signature ----------------
 
 // TestProgressive_26_SignNoop verifies that `podium sign --content-hash
 // sha256:<hex> --provider noop` exits 0 and stdout contains the expected
 // noop:<content-hash> envelope.
-// T-D-progressive-26
 func TestGovernance_SignNoop(t *testing.T) {
 	t.Parallel()
 	hash := "sha256:abc123def456"
@@ -661,11 +635,10 @@ func TestGovernance_SignNoop(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-27 — podium verify accepts noop signature ---------------
+// ---- — podium verify accepts noop signature ---------------
 
 // TestProgressive_27_VerifyRoundTrip signs a hash and then verifies the
 // resulting signature, asserting exit 0 and "verify ok" in stderr.
-// T-D-progressive-27
 func TestGovernance_VerifyRoundTrip(t *testing.T) {
 	t.Parallel()
 	hash := "sha256:abc123def456"
@@ -686,12 +659,11 @@ func TestGovernance_VerifyRoundTrip(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-28 — verify rejects mismatched signature ----------------
+// ---- — verify rejects mismatched signature ----------------
 
 // TestProgressive_28_VerifyMismatchedSignature confirms that `podium verify`
 // exits 1 and prints "verify failed" + "signature_invalid" when the signature
 // does not match the hash.
-// T-D-progressive-28
 func TestGovernance_VerifyMismatchedSignature(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "verify",
@@ -710,11 +682,10 @@ func TestGovernance_VerifyMismatchedSignature(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-29 — sign exits 2 without --content-hash ---------------
+// ---- — sign exits 2 without --content-hash ---------------
 
 // TestProgressive_29_SignMissingContentHash verifies that `podium sign`
 // exits 2 with a message referencing --content-hash when that flag is omitted.
-// T-D-progressive-29
 func TestGovernance_SignMissingContentHash(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "sign", "--provider", "noop")
@@ -727,12 +698,12 @@ func TestGovernance_SignMissingContentHash(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-30 — signed artifact materializes under policy ----------
+// ---- — signed artifact materializes under policy ----------
 
 // TestProgressive_30_SignedArtifactMaterializes exercises the Month 3 signing
 // exit criterion: a validly-signed high-sensitivity artifact materializes under
 // an enforcing verification policy, while the same artifact left unsigned cannot
-// be loaded. The signed half uses the G-INFRA-8 signedArtifactFixture, which
+// be loaded. The signed half uses the signedArtifactFixture, which
 // attaches a real registry-managed signature envelope at the registry boundary
 // (the standalone filesystem bootstrap attaches none). The unsigned half uses
 // the filesystem server, which serves the artifact without a signature, so the
@@ -745,7 +716,6 @@ func TestGovernance_SignMissingContentHash(t *testing.T) {
 // to materialize — is what medium-and-above enforces (it covers medium and high),
 // so the policy here is medium-and-above with high-sensitivity content. The
 // literal high-only string is a doc inaccuracy tracked separately.
-// T-D-progressive-30
 func TestGovernance_SignedArtifactMaterializes(t *testing.T) {
 	t.Parallel()
 
@@ -770,13 +740,12 @@ func TestGovernance_SignedArtifactMaterializes(t *testing.T) {
 	assertUnsignedHighRefused(t, "security/playbook/unsigned")
 }
 
-// ---- T-D-progressive-31 — lint missing sensitivity does not error (gap) -----
+// ---- — lint missing sensitivity does not error (gap) -----
 
 // TestProgressive_31_LintNoErrorOnMissingSensitivity confirms that
 // `podium lint` does not exit 1 or emit an error diagnostic for a missing
 // sensitivity field. This is a doc-accuracy gap: the Month 3 doc says the lint
 // check should be promoted to error, but no such rule exists.
-// T-D-progressive-31
 func TestGovernance_LintNoErrorOnMissingSensitivity(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -789,7 +758,7 @@ func TestGovernance_LintNoErrorOnMissingSensitivity(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-32..37 — freeze windows + break-glass (§4.7.2/§7.3.1) --
+// ---- — freeze windows + break-glass (§4.7.2/§7.3.1) --
 
 // progressiveFreezeBoot writes a registry.yaml declaring one local layer plus a
 // freeze window and boots a standalone server. When active is true the window
@@ -830,7 +799,6 @@ func progressiveFreezeBoot(t *testing.T, active bool) (*serverProc, string) {
 
 // TestProgressive_32_FreezeWindowBlocksIngest — a manual reingest inside an
 // active freeze window is rejected as ingest.frozen (§4.7.2).
-// T-D-progressive-32
 func TestGovernance_FreezeWindowBlocksIngest(t *testing.T) {
 	t.Parallel()
 	srv, layerID := progressiveFreezeBoot(t, true)
@@ -845,7 +813,6 @@ func TestGovernance_FreezeWindowBlocksIngest(t *testing.T) {
 
 // TestProgressive_33_IngestSucceedsOutsideFreezeWindow — a reingest with no
 // active window proceeds normally.
-// T-D-progressive-33
 func TestGovernance_IngestSucceedsOutsideFreezeWindow(t *testing.T) {
 	t.Parallel()
 	srv, layerID := progressiveFreezeBoot(t, false)
@@ -860,7 +827,6 @@ func TestGovernance_IngestSucceedsOutsideFreezeWindow(t *testing.T) {
 
 // TestProgressive_34_BreakGlassOverride — break-glass with a valid dual-signoff
 // grant (two distinct approvers + justification) bypasses an active window.
-// T-D-progressive-34
 func TestGovernance_BreakGlassOverride(t *testing.T) {
 	t.Parallel()
 	srv, layerID := progressiveFreezeBoot(t, true)
@@ -878,7 +844,6 @@ func TestGovernance_BreakGlassOverride(t *testing.T) {
 
 // TestProgressive_35_BreakGlassRequiresTwoApprovers — a grant with a single
 // approver fails the §4.7.2 dual-signoff, so the window stays in effect.
-// T-D-progressive-35
 func TestGovernance_BreakGlassRequiresTwoApprovers(t *testing.T) {
 	t.Parallel()
 	srv, layerID := progressiveFreezeBoot(t, true)
@@ -898,14 +863,12 @@ func TestGovernance_BreakGlassRequiresTwoApprovers(t *testing.T) {
 // (§4.7.2) is exercised at the pipeline level by
 // pkg/registry/ingest TestIngest_BreakGlassExpiresAfter24Hours; it cannot be
 // driven through the CLI, which stamps the grant timestamp at request time.
-// T-D-progressive-36
 func TestGovernance_BreakGlassExpiredGrant(t *testing.T) {
 	t.Skip("the manual reingest path stamps the break-glass grant at request time, so an expired (>24h) grant is not reachable via the CLI; covered by pkg/registry/ingest TestIngest_BreakGlassExpiresAfter24Hours")
 }
 
 // TestProgressive_37_BreakGlassEmptyJustification — break-glass without a
 // justification is rejected before any ingest (§4.7.2).
-// T-D-progressive-37
 func TestGovernance_BreakGlassEmptyJustification(t *testing.T) {
 	t.Parallel()
 	srv, layerID := progressiveFreezeBoot(t, true)
@@ -919,13 +882,12 @@ func TestGovernance_BreakGlassEmptyJustification(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-38 — sandbox enforcement blocks incompatible profile ---
+// ---- — sandbox enforcement blocks incompatible profile ---
 
 // TestProgressive_38_SandboxEnforcementBlocks verifies that
 // PODIUM_ENFORCE_SANDBOX_PROFILE=true + PODIUM_HOST_SANDBOXES=restricted
 // causes load_artifact to return a sandbox error for an artifact whose manifest
 // declares sandbox_profile:unrestricted.
-// T-D-progressive-38
 func TestGovernance_SandboxEnforcementBlocks(t *testing.T) {
 	t.Parallel()
 	// Author an artifact with sandbox_profile: unrestricted in frontmatter.
@@ -951,12 +913,11 @@ func TestGovernance_SandboxEnforcementBlocks(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-39 — sandbox unenforced; field is informational --------
+// ---- — sandbox unenforced; field is informational --------
 
 // TestProgressive_39_SandboxInformationalWithoutEnforcement verifies that
 // without PODIUM_ENFORCE_SANDBOX_PROFILE=true an artifact with a restrictive
 // sandbox_profile loads successfully.
-// T-D-progressive-39
 func TestGovernance_SandboxInformationalWithoutEnforcement(t *testing.T) {
 	t.Parallel()
 	// The artifact id ("eng/widget") avoids the substring "sandbox" so a
@@ -983,7 +944,7 @@ func TestGovernance_SandboxInformationalWithoutEnforcement(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-40 — compliance-driven signing -------------------------
+// ---- — compliance-driven signing -------------------------
 
 // assertUnsignedHighRefused boots a filesystem server holding one unsigned
 // high-sensitivity artifact, loads it through the real bridge under the
@@ -1010,12 +971,11 @@ func assertUnsignedHighRefused(t *testing.T, id string) {
 // alternate ordering: a team under SOC2/ISO/contract pressure jumps from Day 0
 // straight to Month 3's signing posture. The behavioral claim is that a signed
 // artifact loads and an unsigned one does not. The signed half uses the
-// G-INFRA-8 signedArtifactFixture (a real registry-managed envelope over an
+// signedArtifactFixture (a real registry-managed envelope over an
 // offline key); the unsigned half uses the filesystem server, which attaches no
 // signature. The same doc note as TestGovernance_SignedArtifactMaterializes
 // applies: the literal high-only env value is rejected by the product, so the
 // enforcing policy used here is medium-and-above over high-sensitivity content.
-// T-D-progressive-40
 func TestGovernance_ComplianceDrivenSigning(t *testing.T) {
 	t.Parallel()
 
@@ -1036,26 +996,24 @@ func TestGovernance_ComplianceDrivenSigning(t *testing.T) {
 	assertUnsignedHighRefused(t, "compliance/runbook/unsigned")
 }
 
-// ---- T-D-progressive-41 — standard deployment rejects unauthenticated (OIDC) -
+// ---- — standard deployment rejects unauthenticated (OIDC) -
 
 // TestProgressive_41_StandardDeploymentRejectsUnauth documents that testing
 // the standard deployment's authentication gate requires OIDC.
-// T-D-progressive-41
 func TestGovernance_StandardDeploymentRejectsUnauth(t *testing.T) {
 	t.Skip("requires a standard deployment with a configured OIDC identity provider; not expressible in standalone no-auth e2e")
 }
 
-// ---- T-D-progressive-42 — high-sensitivity domain signing -------------------
+// ---- — high-sensitivity domain signing -------------------
 
 // TestProgressive_42_HighSensitivityDomainSigning exercises the
 // high-sensitivity-domain alternate ordering: a catalog of only sensitivity:
 // high content (security playbooks, compliance runbooks) enables signing on day
 // 1. Every artifact in such a catalog is high-sensitivity, so the enforcing
 // policy must verify every load. The signed high-sensitivity artifact loads and
-// verifies through the G-INFRA-8 fixture; an unsigned high-sensitivity artifact
+// verifies through the fixture; an unsigned high-sensitivity artifact
 // is refused. The same doc note as TestGovernance_SignedArtifactMaterializes
 // applies regarding the high-only env value.
-// T-D-progressive-42
 func TestGovernance_HighSensitivityDomainSigning(t *testing.T) {
 	t.Parallel()
 
@@ -1080,12 +1038,11 @@ func TestGovernance_HighSensitivityDomainSigning(t *testing.T) {
 	assertUnsignedHighRefused(t, "security/playbook/unsigned")
 }
 
-// ---- T-D-progressive-43 — scaffold --sensitivity high embeds field ----------
+// ---- — scaffold --sensitivity high embeds field ----------
 
 // TestProgressive_43_ScaffoldSensitivityHigh verifies that
 // `podium artifact scaffold --type context --sensitivity high --yes <path>`
 // produces an ARTIFACT.md with sensitivity:high in the frontmatter.
-// T-D-progressive-43
 func TestGovernance_ScaffoldSensitivityHigh(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "my-skill")
@@ -1111,12 +1068,11 @@ func TestGovernance_ScaffoldSensitivityHigh(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-44 — scaffold rejects invalid sensitivity ---------------
+// ---- — scaffold rejects invalid sensitivity ---------------
 
 // TestProgressive_44_ScaffoldInvalidSensitivity verifies that
 // `podium artifact scaffold --sensitivity critical` exits non-zero with a
 // message referencing valid sensitivity values.
-// T-D-progressive-44
 func TestGovernance_ScaffoldInvalidSensitivity(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "my-skill")
@@ -1135,12 +1091,11 @@ func TestGovernance_ScaffoldInvalidSensitivity(t *testing.T) {
 	}
 }
 
-// ---- T-D-progressive-45 — always policy rejects unsigned low artifact -------
+// ---- — always policy rejects unsigned low artifact -------
 
 // TestProgressive_45_AlwaysPolicyRejectsLowUnsigned verifies that
 // PODIUM_VERIFY_SIGNATURES=always causes load_artifact to return a
 // signature_missing error even for a low-sensitivity unsigned artifact.
-// T-D-progressive-45
 func TestGovernance_AlwaysPolicyRejectsLowUnsigned(t *testing.T) {
 	t.Parallel()
 	id := "eng/low-always"

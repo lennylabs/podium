@@ -271,9 +271,8 @@ func oidcStartSCIMServer(t testing.TB, scimToken string, extraEnv ...string) *se
 	return startServerArgs(t, env, "serve", "--standalone", "--layer-path", reg)
 }
 
-// ---- T-D-oidc-1: public_mode + identity_provider=oidc => startup fails -----
+// ---- public_mode + identity_provider=oidc => startup fails -----
 
-// T-D-oidc-1
 func TestAuth_PublicModeWithIdPFails(t *testing.T) {
 	t.Parallel()
 	bin := cmdharness.Bin(t, "podium")
@@ -299,9 +298,9 @@ func TestAuth_PublicModeWithIdPFails(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-2: registry.yaml identity_provider.type is parsed -------------
+// ---- registry.yaml identity_provider.type is parsed -------------
 
-// T-D-oidc-2: §13.12 nests config under `registry:` and models
+// §13.12 nests config under `registry:` and models
 // identity_provider as an object with a `type:` selector.
 func TestAuth_RegistryYAMLIdentityProviderField(t *testing.T) {
 	t.Parallel()
@@ -310,7 +309,7 @@ func TestAuth_RegistryYAMLIdentityProviderField(t *testing.T) {
 	if err := os.WriteFile(cfgFile, []byte("registry:\n  identity_provider:\n    type: oidc\n"), 0o644); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)
 	}
-	// spec §7.7 (F-7.7.2): identity_provider is a §13.12 server setting,
+	// spec §7.7: identity_provider is a §13.12 server setting,
 	// surfaced by `config show --server` rather than the client view.
 	res := runPodium(t, "", []string{
 		"PODIUM_CONFIG_FILE=" + cfgFile,
@@ -324,9 +323,8 @@ func TestAuth_RegistryYAMLIdentityProviderField(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-3: podium login missing --registry => exit 2 ------------------
+// ---- podium login missing --registry => exit 2 ------------------
 
-// T-D-oidc-3
 func TestAuth_LoginMissingRegistry(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY="}, "login")
@@ -338,9 +336,8 @@ func TestAuth_LoginMissingRegistry(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-4: podium login missing issuer => exit 2 ----------------------
+// ---- podium login missing issuer => exit 2 ----------------------
 
-// T-D-oidc-4
 func TestAuth_LoginMissingIssuer(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{
@@ -355,9 +352,8 @@ func TestAuth_LoginMissingIssuer(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-5: login prints Visit/User code/Direct link -------------------
+// ---- login prints Visit/User code/Direct link -------------------
 
-// T-D-oidc-5
 func TestAuth_LoginPrintsVerificationURLAndCode(t *testing.T) {
 	t.Parallel()
 	// Stub token returns authorization_pending so login keeps polling (and
@@ -390,7 +386,7 @@ func TestAuth_LoginPrintsVerificationURLAndCode(t *testing.T) {
 
 // Spec: §6.3 — `podium login --json` suppresses the human prompt and replaces
 // it with a structured auth.device_code_pending event emitted on stderr,
-// carrying the verification URI and user code for a machine caller. F-6.3.3.
+// carrying the verification URI and user code for a machine caller.
 func TestAuth_LoginJSONEmitsDeviceCodePending(t *testing.T) {
 	t.Parallel()
 	// authorization_pending keeps login polling until the bounded context
@@ -435,23 +431,20 @@ func TestAuth_LoginJSONEmitsDeviceCodePending(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-6: login saves token to keychain on success ------------------
+// ---- login saves token to keychain on success ------------------
 
-// T-D-oidc-6
 func TestAuth_LoginSavesTokenToKeychain(t *testing.T) {
 	t.Skip("requires an isolated keychain that does not touch the system keychain; PODIUM_TOKEN_KEYCHAIN_NAME controls the keychain service name but does not prevent a system write on platforms that only have the OS keychain")
 }
 
-// ---- T-D-oidc-7: login polls through authorization_pending then succeeds ---
+// ---- login polls through authorization_pending then succeeds ---
 
-// T-D-oidc-7
 func TestAuth_LoginPollsThroughAuthorizationPending(t *testing.T) {
 	t.Skip("verifying Login successful via stderr requires the process to complete the keychain write; isolated keychain not available in the e2e environment")
 }
 
-// ---- T-D-oidc-8: expired_token => exit 1 ------------------------------------
+// ---- expired_token => exit 1 ------------------------------------
 
-// T-D-oidc-8
 func TestAuth_LoginExpiredToken(t *testing.T) {
 	t.Parallel()
 	stub := newOIDCStub(oidcStubConfig{
@@ -471,9 +464,8 @@ func TestAuth_LoginExpiredToken(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-9: access_denied => exit 1 ------------------------------------
+// ---- access_denied => exit 1 ------------------------------------
 
-// T-D-oidc-9
 func TestAuth_LoginAccessDenied(t *testing.T) {
 	t.Parallel()
 	stub := newOIDCStub(oidcStubConfig{
@@ -490,9 +482,8 @@ func TestAuth_LoginAccessDenied(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-10: PODIUM_OAUTH_AUDIENCE is sent in device-auth request ------
+// ---- PODIUM_OAUTH_AUDIENCE is sent in device-auth request ------
 
-// T-D-oidc-10
 func TestAuth_LoginSendsAudience(t *testing.T) {
 	t.Parallel()
 	// Stub token returns access_denied so the process exits promptly after the
@@ -514,9 +505,8 @@ func TestAuth_LoginSendsAudience(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-11: PODIUM_OAUTH_CLIENT_SECRET not sent (doc-accuracy gap) ---
+// ---- PODIUM_OAUTH_CLIENT_SECRET not sent (doc-accuracy gap) ---
 
-// T-D-oidc-11
 func TestAuth_LoginClientSecretGap(t *testing.T) {
 	t.Parallel()
 	// login.go does not read PODIUM_OAUTH_CLIENT_SECRET (doc-accuracy gap for
@@ -542,16 +532,14 @@ func TestAuth_LoginClientSecretGap(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-12: logout removes token + status shows not found -------------
+// ---- logout removes token + status shows not found -------------
 
-// T-D-oidc-12
 func TestAuth_LogoutRemovesToken(t *testing.T) {
 	t.Skip("requires an isolated keychain to seed a token then verify deletion; system keychain cannot be safely used in e2e")
 }
 
-// ---- T-D-oidc-13: logout missing --registry => exit 2 ----------------------
+// ---- logout missing --registry => exit 2 ----------------------
 
-// T-D-oidc-13
 func TestAuth_LogoutMissingRegistry(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY="}, "logout")
@@ -563,9 +551,8 @@ func TestAuth_LogoutMissingRegistry(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-14: status shows identity_provider from env ------------------
+// ---- status shows identity_provider from env ------------------
 
-// T-D-oidc-14
 func TestAuth_StatusShowsIdentityProvider(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{
@@ -580,9 +567,8 @@ func TestAuth_StatusShowsIdentityProvider(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-18: layer register with --group; visibility needs tokens ------
+// ---- layer register with --group; visibility needs tokens ------
 
-// T-D-oidc-18
 func TestAuth_LayerGroupVisibility(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
@@ -620,9 +606,8 @@ func TestAuth_LayerGroupVisibility(t *testing.T) {
 	t.Log("layer register with --group: exit 0 and the layer appears in list")
 }
 
-// ---- T-D-oidc-21: SCIM /scim/v2/Users 404 when PODIUM_SCIM_TOKENS unset ----
+// ---- SCIM /scim/v2/Users 404 when PODIUM_SCIM_TOKENS unset ----
 
-// T-D-oidc-21
 func TestAuth_SCIMNotMountedWithoutToken(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
@@ -636,9 +621,8 @@ func TestAuth_SCIMNotMountedWithoutToken(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-22: SCIM creates user when PODIUM_SCIM_TOKENS is set ----------
+// ---- SCIM creates user when PODIUM_SCIM_TOKENS is set ----------
 
-// T-D-oidc-22
 func TestAuth_SCIMCreateUser(t *testing.T) {
 	t.Parallel()
 	srv := oidcStartSCIMServer(t, "test-scim-token")
@@ -660,9 +644,8 @@ func TestAuth_SCIMCreateUser(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-23: SCIM rejects wrong bearer token => 401 -------------------
+// ---- SCIM rejects wrong bearer token => 401 -------------------
 
-// T-D-oidc-23
 func TestAuth_SCIMWrongToken(t *testing.T) {
 	t.Parallel()
 	srv := oidcStartSCIMServer(t, "correct-token")
@@ -674,9 +657,8 @@ func TestAuth_SCIMWrongToken(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-24: SCIM group creation; membership visibility needs tokens ---
+// ---- SCIM group creation; membership visibility needs tokens ---
 
-// T-D-oidc-24
 func TestAuth_SCIMGroupCreation(t *testing.T) {
 	t.Parallel()
 	srv := oidcStartSCIMServer(t, "test-scim-token")
@@ -706,9 +688,8 @@ func TestAuth_SCIMGroupCreation(t *testing.T) {
 	// TestAuth_IdpGroupMappingRemapsClaim).
 }
 
-// ---- T-D-oidc-25: podium admin scim-token issue => unknown subcommand -------
+// ---- podium admin scim-token issue => unknown subcommand -------
 
-// T-D-oidc-25
 func TestAuth_AdminSCIMTokenIssueNotImplemented(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "admin", "scim-token", "issue")
@@ -720,9 +701,8 @@ func TestAuth_AdminSCIMTokenIssueNotImplemented(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-26: podium admin scim configure => unknown subcommand ---------
+// ---- podium admin scim configure => unknown subcommand ---------
 
-// T-D-oidc-26
 func TestAuth_AdminSCIMConfigureNotImplemented(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "admin", "scim", "configure",
@@ -736,9 +716,8 @@ func TestAuth_AdminSCIMConfigureNotImplemented(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-27: podium admin claims-cache flush => unknown subcommand -----
+// ---- podium admin claims-cache flush => unknown subcommand -----
 
-// T-D-oidc-27
 func TestAuth_AdminClaimsCacheFlushNotImplemented(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "admin", "claims-cache", "flush",
@@ -751,9 +730,8 @@ func TestAuth_AdminClaimsCacheFlushNotImplemented(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-28: nested identity: block NOT supported (doc-accuracy gap) --
+// ---- nested identity: block NOT supported (doc-accuracy gap) --
 
-// T-D-oidc-28
 func TestAuth_NestedIdentityBlockNotParsed(t *testing.T) {
 	t.Parallel()
 	cfgDir := t.TempDir()
@@ -773,7 +751,7 @@ func TestAuth_NestedIdentityBlockNotParsed(t *testing.T) {
 	}
 
 	// config show --server runs server-free; identity_provider is a §13.12
-	// server setting (F-7.7.2).
+	// server setting.
 	res := runPodium(t, "", []string{
 		"PODIUM_CONFIG_FILE=" + cfgFile,
 	}, "config", "show", "--server")
@@ -787,14 +765,14 @@ func TestAuth_NestedIdentityBlockNotParsed(t *testing.T) {
 	lines := strings.Split(res.Stdout, "\n")
 	for _, line := range lines {
 		if strings.Contains(line, "identity_provider") && strings.Contains(line, "oidc") {
-			t.Errorf("doc-accuracy gap (T-D-oidc-28): top-level identity: block should NOT be parsed, but config show reports identity_provider=oidc:\n%s", res.Stdout)
+			t.Errorf("doc-accuracy gap: top-level identity: block should NOT be parsed, but config show reports identity_provider=oidc:\n%s", res.Stdout)
 			return
 		}
 	}
 	t.Log("confirmed: a top-level identity: block is not parsed; the supported form is registry.identity_provider.type (§13.12)")
 }
 
-// ---- T-D-oidc-grpmap: IdpGroupMapping remaps OIDC group claims end-to-end ----
+// ---- IdpGroupMapping remaps OIDC group claims end-to-end ----
 
 // TestAuth_IdpGroupMappingRemapsClaim drives the IdpGroupMapping adapter
 // through the verified injected-session-token path. PODIUM_IDP_GROUP_MAPPING
@@ -863,9 +841,8 @@ func TestAuth_IdpGroupMappingRemapsClaim(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-38: podium init --global writes registry URL ------------------
+// ---- podium init --global writes registry URL ------------------
 
-// T-D-oidc-38
 func TestAuth_InitGlobalWritesRegistryURL(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -893,9 +870,8 @@ func TestAuth_InitGlobalWritesRegistryURL(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-40: SCIM user deletion returns 204; visibility needs tokens ---
+// ---- SCIM user deletion returns 204; visibility needs tokens ---
 
-// T-D-oidc-40
 func TestAuth_SCIMUserDeletion(t *testing.T) {
 	t.Parallel()
 	srv := oidcStartSCIMServer(t, "test-scim-token")
@@ -925,9 +901,8 @@ func TestAuth_SCIMUserDeletion(t *testing.T) {
 	// TestAuth_IdpGroupMappingRemapsClaim).
 }
 
-// ---- T-D-oidc-41: SCIM group membership PUT returns 200 ---------------------
+// ---- SCIM group membership PUT returns 200 ---------------------
 
-// T-D-oidc-41
 func TestAuth_SCIMGroupMembershipUpdate(t *testing.T) {
 	t.Parallel()
 	srv := oidcStartSCIMServer(t, "test-scim-token")
@@ -967,9 +942,8 @@ func TestAuth_SCIMGroupMembershipUpdate(t *testing.T) {
 	// TestAuth_IdpGroupMappingRemapsClaim).
 }
 
-// ---- T-D-oidc-42: guessTokenURL derives /token from /device -----------------
+// ---- guessTokenURL derives /token from /device -----------------
 
-// T-D-oidc-42
 func TestAuth_GuessTokenURL(t *testing.T) {
 	t.Parallel()
 	// The stub serves both /oauth2/device and /oauth2/token.
@@ -1009,9 +983,8 @@ func TestAuth_GuessTokenURL(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-43: default scopes include "groups" ---------------------------
+// ---- default scopes include "groups" ---------------------------
 
-// T-D-oidc-43
 func TestAuth_DefaultScopesIncludeGroups(t *testing.T) {
 	t.Parallel()
 	stub := newOIDCStub(oidcStubConfig{
@@ -1030,16 +1003,14 @@ func TestAuth_DefaultScopesIncludeGroups(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-44: slow_down increases poll interval ------------------------
+// ---- slow_down increases poll interval ------------------------
 
-// T-D-oidc-44
 func TestAuth_SlowDownIncreasesInterval(t *testing.T) {
 	t.Skip("timing-sensitive; covered by pkg/identity DeviceCodeFlow.Poll unit test; not a reliable e2e signal")
 }
 
-// ---- T-D-oidc-45: /healthz reachable for OIDC-configured registry -----------
+// ---- /healthz reachable for OIDC-configured registry -----------
 
-// T-D-oidc-45
 func TestAuth_HealthzReachableWithOIDCMode(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
@@ -1070,9 +1041,8 @@ func TestAuth_HealthzReachableWithOIDCMode(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-46: --visibility flag does not exist => exit 2 ---------------
+// ---- --visibility flag does not exist => exit 2 ---------------
 
-// T-D-oidc-46
 func TestAuth_LayerRegisterVisibilityFlagNotExist(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
@@ -1091,9 +1061,8 @@ func TestAuth_LayerRegisterVisibilityFlagNotExist(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-47: SCIM store persists across restart ------------------------
+// ---- SCIM store persists across restart ------------------------
 
-// T-D-oidc-47
 func TestAuth_SCIMStorePersistsAcrossRestart(t *testing.T) {
 	t.Parallel()
 	storeDir := t.TempDir()
@@ -1142,23 +1111,20 @@ func TestAuth_SCIMStorePersistsAcrossRestart(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-48: token refresh retains old refresh token -------------------
+// ---- token refresh retains old refresh token -------------------
 
-// T-D-oidc-48
 func TestAuth_TokenRefreshRetainsOldToken(t *testing.T) {
 	t.Skip("DeviceCodeFlow.Refresh is a pkg/identity unit-level surface; not a CLI/e2e surface; covered by pkg/identity oauth_devicecode unit tests")
 }
 
-// ---- T-D-oidc-49: refresh revocation returns ErrAccessDenied ---------------
+// ---- refresh revocation returns ErrAccessDenied ---------------
 
-// T-D-oidc-49
 func TestAuth_RefreshRevocationErrAccessDenied(t *testing.T) {
 	t.Skip("DeviceCodeFlow.Refresh is a pkg/identity unit-level surface; not a CLI/e2e surface; covered by pkg/identity oauth_devicecode unit tests")
 }
 
-// ---- T-D-oidc-50: unreachable issuer => descriptive error -------------------
+// ---- unreachable issuer => descriptive error -------------------
 
-// T-D-oidc-50
 func TestAuth_UnreachableIssuer(t *testing.T) {
 	t.Parallel()
 	bin := cmdharness.Bin(t, "podium")
@@ -1187,9 +1153,8 @@ func TestAuth_UnreachableIssuer(t *testing.T) {
 	}
 }
 
-// ---- T-D-oidc-51: malformed device-auth response => descriptive error -------
+// ---- malformed device-auth response => descriptive error -------
 
-// T-D-oidc-51
 func TestAuth_MalformedDeviceAuthResponse(t *testing.T) {
 	t.Parallel()
 	// Stub returns 200 with a body missing device_code and verification_uri.

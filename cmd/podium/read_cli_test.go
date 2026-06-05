@@ -115,7 +115,7 @@ func TestReadCLI_ArtifactShow(t *testing.T) {
 		t.Errorf("missing manifest body in output: %s", out)
 	}
 	// spec: §7.6.1 — the default rendering prints the markdown body with
-	// frontmatter at the top (F-7.6.10), so the frontmatter is present.
+	// frontmatter at the top, so the frontmatter is present.
 	if !strings.Contains(out, "name: x") {
 		t.Errorf("missing frontmatter in output: %s", out)
 	}

@@ -233,14 +233,14 @@ func adminEraseCmd(args []string) int {
 		return 2
 	}
 	userID := fs.Arg(0)
-	// spec §8.5 (F-8.5.5): an empty salt yields a guessable tombstone.
+	// spec §8.5: an empty salt yields a guessable tombstone.
 	if *salt == "" {
 		fmt.Fprintln(os.Stderr, "error: --salt is required (an empty salt yields a guessable tombstone)")
 		return 2
 	}
 	// Local MCP-sink form: redact the local audit log directly.
 	if *local || *auditPath != "" {
-		// spec §8.5 (F-8.5.4): record the invoking admin for accountability.
+		// spec §8.5: record the invoking admin for accountability.
 		if *operator == "" {
 			fmt.Fprintln(os.Stderr, "error: --operator is required for the local-log erase")
 			return 2

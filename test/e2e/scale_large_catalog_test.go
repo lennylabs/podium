@@ -1,6 +1,6 @@
 package e2e
 
-// G-SCALE-1: a large generated catalog (400-plus artifacts across a deep
+// a large generated catalog (400-plus artifacts across a deep
 // domain tree with varied DOMAIN.md discovery knobs) is ingested by a standard
 // standalone server, then walked through load_domain and search_artifacts.
 //
@@ -180,7 +180,7 @@ func startScaleServer(t testing.TB, entries map[string]string) *serverProc {
 		"serve", "--standalone")
 }
 
-// TestScale_LargeCatalogIngestAndWalk is the G-SCALE-1 journey.
+// TestScale_LargeCatalogIngestAndWalk is the journey.
 func TestScale_LargeCatalogIngestAndWalk(t *testing.T) {
 	t.Parallel()
 	entries, total, topDomains := scaleCatalog()

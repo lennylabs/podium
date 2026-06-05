@@ -58,7 +58,7 @@ func columnExists(t *testing.T, path, table, col string) bool {
 	return false
 }
 
-// Spec: §13.4 Migrations (F-13.4.1) — a binary upgrade must add columns
+// Spec: §13.4 Migrations — a binary upgrade must add columns
 // that were introduced after a table first shipped. CREATE TABLE IF NOT
 // EXISTS is a no-op on an existing table, so a database initialized by an
 // earlier binary keeps its old column set. Here the legacy manifests table
@@ -135,7 +135,7 @@ func TestSQLite_AdditiveMigration_BackfillsManifestColumns(t *testing.T) {
 	}
 }
 
-// Spec: §13.4 Migrations (F-13.4.1) — the layer_configs table gained
+// Spec: §13.4 Migrations — the layer_configs table gained
 // webhook_secret, force_push_policy, git_provider, last_ingested_at, and
 // the soft-delete deleted_at column after it first shipped. A legacy
 // database missing them must be migrated forward so the layer reads that
@@ -214,7 +214,7 @@ func TestSQLite_AdditiveColumnsMatchSchema(t *testing.T) {
 	}
 }
 
-// Spec: §13.4 Migrations (F-13.4.1) — the Postgres metadata store must add
+// Spec: §13.4 Migrations — the Postgres metadata store must add
 // columns to a table created by an earlier binary. The test creates legacy
 // tables in an isolated schema, runs the additive migration, and asserts the
 // post-initial columns appear. Gated on PODIUM_POSTGRES_DSN like the rest of

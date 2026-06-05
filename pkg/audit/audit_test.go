@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// Spec: §8.3/§9.1 (F-8.3.2) — the SPI names LocalAuditSink and
+// Spec: §8.3/§9.1 — the SPI names LocalAuditSink and
 // RegistryAuditSink the spec references exist as Go types, aliased to the
 // audit.Sink seam. Every shipped backing satisfies all three.
 func TestAuditSinkAliases(t *testing.T) {
@@ -24,7 +24,7 @@ func TestAuditSinkAliases(t *testing.T) {
 	}
 }
 
-// Spec: §8.1/§8.4 (F-8.4.3) — AllEventTypes enumerates every defined event
+// Spec: §8.1/§8.4 — AllEventTypes enumerates every defined event
 // type with no duplicates, so the retention layer can assert each type is
 // classified.
 func TestAllEventTypes_NoDuplicates(t *testing.T) {

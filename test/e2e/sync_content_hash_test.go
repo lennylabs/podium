@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// spec: §7.4 (F-7.4.3) — always-revalidate (the default cache mode) surfaces the
+// spec: §7.4 — always-revalidate (the default cache mode) surfaces the
 // structured network.registry_unreachable code when the server-source registry
 // is unreachable and there is no cache, rather than the raw transport error.
 // podium sync keeps no offline content cache, so the no-cache branch always
@@ -25,7 +25,7 @@ func TestSyncServerSource_AlwaysRevalidateUnreachable(t *testing.T) {
 	cliNotContains(t, res.Stderr, "network.offline_cache_miss", "not the offline-only code")
 }
 
-// spec: §14.11 / §7.5.3 (F-14.11.1) — a server-source sync pins the registry's
+// spec: §14.11 / §7.5.3 — a server-source sync pins the registry's
 // authoritative content_hash into the committed lock, not a digest recomputed
 // from the served bytes. Drives the real podium binary against a standalone
 // server, then asserts the lock's content_hash for an artifact equals the value
@@ -49,7 +49,7 @@ func TestSyncServerSource_LockContentHashIsRegistryAuthoritative(t *testing.T) {
 		"lock pins the registry's authoritative content_hash")
 }
 
-// spec: §7.5 / §14.11 (F-14.11.3) — the --dry-run --json pre-flight envelope
+// spec: §7.5 / §14.11 — the --dry-run --json pre-flight envelope
 // carries content_hash per artifact so a pre-flight check can verify the full
 // §14.11 (artifact_id, version, content_hash) triple before the lock file is
 // committed. The dry-run hash must equal the hash the subsequent committed lock

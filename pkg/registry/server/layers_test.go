@@ -145,7 +145,7 @@ func TestLayerEndpoint_RegisterGitLayer(t *testing.T) {
 	}
 }
 
-// Spec: §14.10 (F-14.10.2) — with a configured public base URL, register
+// Spec: §14.10 — with a configured public base URL, register
 // advertises an absolute webhook URL a developer can paste into a Git host's
 // webhook configuration. A trailing slash on the base is collapsed.
 func TestLayerEndpoint_RegisterGitLayer_AbsoluteWebhookURL(t *testing.T) {
@@ -172,7 +172,7 @@ func TestLayerEndpoint_RegisterGitLayer_AbsoluteWebhookURL(t *testing.T) {
 	}
 }
 
-// Spec: §14.10 (F-14.10.2) — without a configured public base URL the webhook
+// Spec: §14.10 — without a configured public base URL the webhook
 // URL falls back to the relative path (e.g. an embedding harness that does not
 // know its own external address).
 func TestLayerEndpoint_RegisterGitLayer_RelativeWebhookURLWithoutBase(t *testing.T) {

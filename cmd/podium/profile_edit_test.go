@@ -77,7 +77,7 @@ func TestProfileEdit_MissingNameExits2(t *testing.T) {
 	})
 }
 
-// spec: §7.5.7 (F-7.5.1) — `podium profile edit <name>` with no batch flags
+// spec: §7.5.7 — `podium profile edit <name>` with no batch flags
 // opens the interactive editor; scripted commands write the same result the
 // --add-include flag would. The stdin indirection keeps the loop from reading a
 // real terminal so the test never blocks.

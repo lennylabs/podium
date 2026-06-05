@@ -10,7 +10,7 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// Spec: §13.4 Migrations (F-13.4.1) — "a binary upgrade migrates an
+// Spec: §13.4 Migrations — "a binary upgrade migrates an
 // existing database forward in place, without a separate migration step."
 // This exercises the contract end-to-end through the real podium binary:
 // `admin migrate-to-standard` opens the SQLite source via the same

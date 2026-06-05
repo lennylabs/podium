@@ -1,11 +1,11 @@
 package e2e
 
 // End-to-end tests for the §13.10 / §13.12 deployment-and-configuration
-// permutations: the zero-flag standalone bootstrap defaults (G-CONFIG-2), the
+// permutations: the zero-flag standalone bootstrap defaults, the
 // full config precedence chain resolved through `config show` plus a CLI-flag
-// override observed at the listen line (G-CONFIG-3), and the standard-mode
-// fail-fast that names a missing backend credential before binding
-// (G-CONFIG-4). All three run on the PR lane with no external infrastructure;
+// override observed at the listen line, and the standard-mode
+// fail-fast that names a missing backend credential before binding.
+// All three run on the PR lane with no external infrastructure;
 // the only network dependency is an in-test stub Ollama embedder for the
 // zero-flag search assertion.
 
@@ -81,7 +81,7 @@ func startStubOllama(t *testing.T) *httptest.Server {
 	return ts
 }
 
-// ---- G-CONFIG-2: zero-flag standalone bootstrap defaults -----------------
+// ---- zero-flag standalone bootstrap defaults -----------------
 
 // startZeroFlagServer boots `podium serve` with no flags at all under a clean
 // env and a temp HOME, so the §13.10 zero-flag auto-bootstrap path runs: it
@@ -148,7 +148,7 @@ func portFree(t *testing.T, addr string) bool {
 	return true
 }
 
-// TestConfigZeroFlag_BootstrapDefaults closes the bootstrap half of G-CONFIG-2.
+// TestConfigZeroFlag_BootstrapDefaults closes the bootstrap half.
 // It boots `podium serve` with no flags and an empty environment under a temp
 // HOME and asserts the §13.10 zero-flag policy: the first-run notice on stderr,
 // the loopback default bind 127.0.0.1:8080 on the listen line, the
@@ -231,7 +231,7 @@ func zeroFlagSearchRegistry(t *testing.T) string {
 }
 
 // TestConfigZeroFlag_SearchAgainstStubOllama closes the search half of
-// G-CONFIG-2. It boots the standalone server on the standalone defaults
+// It boots the standalone server on the standalone defaults
 // (sqlite-vec + ollama, neither overridden) but points the default ollama
 // embedder at an in-test stub through PODIUM_OLLAMA_URL, ingests a filesystem
 // layer, and asserts a semantic query returns the matching artifact at rank 1
@@ -276,7 +276,7 @@ func TestConfigZeroFlag_SearchAgainstStubOllama(t *testing.T) {
 	}
 }
 
-// ---- G-CONFIG-3: full config precedence chain ----------------------------
+// ---- full config precedence chain ----------------------------
 
 // configShowSettings runs `podium config show --server` under the given env and
 // returns the resolved settings table text. It fails the test on a non-zero
@@ -315,7 +315,7 @@ func settingRow(t *testing.T, table, name string) (value, source string) {
 }
 
 // TestConfigPrecedence_FullChainThroughConfigShow closes the env-over-yaml-over-
-// default half of G-CONFIG-3. In one `config show --server` run it stages a
+// default half. In one `config show --server` run it stages a
 // registry.yaml that sets the store, the bind, and a yaml-only field
 // (vector_backend), overrides the store and the bind with environment
 // variables, and leaves a fourth field (object_store.type) at its default. It
@@ -419,7 +419,7 @@ func startServerCLIBind(t *testing.T, env []string, cliBind string) *serverProc 
 }
 
 // TestConfigPrecedence_CLIFlagBeatsEnv closes the CLI-over-env half of
-// G-CONFIG-3. The serve command maps --bind onto PODIUM_BIND before config
+// The serve command maps --bind onto PODIUM_BIND before config
 // resolution, so a --bind flag wins over an already-set PODIUM_BIND. It boots a
 // standalone server with PODIUM_BIND pointed at one loopback port and --bind at
 // a distinct port, then asserts the listen line names the CLI port, /healthz
@@ -461,7 +461,7 @@ func TestConfigPrecedence_CLIFlagBeatsEnv(t *testing.T) {
 	}
 }
 
-// ---- G-CONFIG-4: standard-mode fail-fast names the missing credential -----
+// ---- standard-mode fail-fast names the missing credential -----
 
 // serveExpectStartupError runs `podium serve --bind <freeport>` with the given
 // env and a short deadline, expecting the process to exit non-zero before it
@@ -507,7 +507,7 @@ func serveNoBindExpectRefusal(t *testing.T, env []string, args ...string) (int, 
 	return res.Exit, res.Stderr + res.Stdout
 }
 
-// TestConfigStandardFailFast_NamesMissingCredential closes G-CONFIG-4. It boots
+// TestConfigStandardFailFast_NamesMissingCredential. It boots
 // the real `podium serve` twice with a backend explicitly selected and that
 // backend's required credential absent: PODIUM_REGISTRY_STORE=postgres with no
 // PODIUM_POSTGRES_DSN, and PODIUM_OBJECT_STORE=s3 with no PODIUM_S3_BUCKET. Each

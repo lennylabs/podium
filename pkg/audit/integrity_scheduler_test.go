@@ -23,7 +23,7 @@ func (alwaysFailSigner) Sign(_ context.Context, _ string) (string, error) {
 }
 func (alwaysFailSigner) Verify(_ context.Context, _, _ string) error { return nil }
 
-// Spec: §8.6 (F-8.6.2) — the anchor scheduler records an
+// Spec: §8.6 — the anchor scheduler records an
 // audit.anchor_failed event when Anchor fails, so the failure operators
 // are told to monitor lands in the audit log (and any SIEM mirror) rather
 // than only in process logs.
@@ -75,7 +75,7 @@ func TestScheduler_RecordsAnchorFailedEvent(t *testing.T) {
 	}
 }
 
-// Spec: §8.6 (F-8.6.1) — the verification scheduler re-verifies the hash
+// Spec: §8.6 — the verification scheduler re-verifies the hash
 // chain on a cadence. On a detected gap it records an audit.gap_detected
 // event (best-effort, for SIEM mirroring) and invokes OnGap so an
 // out-of-band edit that breaks the chain is detected and alerted at
@@ -138,7 +138,7 @@ func TestVerifyScheduler_DetectsGapAndAlerts(t *testing.T) {
 	}
 }
 
-// Spec: §8.6 (F-8.6.1) — a clean chain produces no gap event and no alert,
+// Spec: §8.6 — a clean chain produces no gap event and no alert,
 // so verification does not raise false positives on an intact log.
 func TestVerifyScheduler_CleanChainNoAlert(t *testing.T) {
 	t.Parallel()
@@ -172,7 +172,7 @@ func TestVerifyScheduler_CleanChainNoAlert(t *testing.T) {
 	}
 }
 
-// Spec: §8.6 (F-8.6.1) — nil sink disables verification; Run returns
+// Spec: §8.6 — nil sink disables verification; Run returns
 // immediately without panicking.
 func TestVerifyScheduler_NilSinkNoOp(t *testing.T) {
 	t.Parallel()

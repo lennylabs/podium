@@ -5,7 +5,7 @@ package e2e
 // enforcement, caller-interpreted fields (stored verbatim and surfaced in the
 // load_artifact frontmatter), type-specific fields, provenance rewriting, and
 // the cross-layer merge table. Tests drive the podium CLI, the standalone
-// server, and the podium-mcp bridge. Behaviors blocked by a known BUILD-GAPS
+// server, and the podium-mcp bridge. Behaviors blocked by a known implementation-gap
 // finding are recorded as skips; doc claims that the implementation does not
 // honor (with no finding filed) are asserted against actual behavior with a
 // note so a future change is detected.
@@ -27,7 +27,7 @@ func fmSkillMD(name, desc string) string {
 
 // ---- File allocation for skills (scaffold split) ---------------------------
 
-// T-D-frontmatter-1 — skill scaffold puts name/description in SKILL.md, keeps
+// skill scaffold puts name/description in SKILL.md, keeps
 // type/version in ARTIFACT.md, and writes an HTML-comment ARTIFACT.md body.
 func TestFrontmatter_SkillScaffoldSplit(t *testing.T) {
 	t.Parallel()
@@ -53,7 +53,7 @@ func TestFrontmatter_SkillScaffoldSplit(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-2 — a non-skill scaffold emits a single ARTIFACT.md with the
+// a non-skill scaffold emits a single ARTIFACT.md with the
 // universal fields and no SKILL.md.
 func TestFrontmatter_NonSkillScaffoldSingleFile(t *testing.T) {
 	t.Parallel()
@@ -74,7 +74,7 @@ func TestFrontmatter_NonSkillScaffoldSingleFile(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-3 — a valid skill (ARTIFACT.md + SKILL.md) lints cleanly.
+// a valid skill (ARTIFACT.md + SKILL.md) lints cleanly.
 func TestFrontmatter_ValidSkillLints(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -87,7 +87,7 @@ func TestFrontmatter_ValidSkillLints(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-4 — a skill missing SKILL.md fails lint. The registry walk
+// a skill missing SKILL.md fails lint. The registry walk
 // rejects it before the lint rules run, so the message is
 // "type: skill missing SKILL.md" (exit 1) rather than a lint.skill_md_compliance
 // diagnostic. spec: doc "File allocation for skills".
@@ -105,7 +105,7 @@ func TestFrontmatter_SkillMissingSkillMD(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-5 — a SKILL.md whose name mismatches the parent directory
+// a SKILL.md whose name mismatches the parent directory
 // fails lint with lint.skill_md_compliance.
 func TestFrontmatter_SkillNameMismatch(t *testing.T) {
 	t.Parallel()
@@ -122,7 +122,7 @@ func TestFrontmatter_SkillNameMismatch(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-6 — a skill name with a leading hyphen fails lint.invalid_name.
+// a skill name with a leading hyphen fails lint.invalid_name.
 func TestFrontmatter_SkillNameLeadingHyphen(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -138,7 +138,7 @@ func TestFrontmatter_SkillNameLeadingHyphen(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-7 — a skill name with consecutive hyphens fails lint.invalid_name.
+// a skill name with consecutive hyphens fails lint.invalid_name.
 func TestFrontmatter_SkillNameConsecutiveHyphens(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -154,7 +154,7 @@ func TestFrontmatter_SkillNameConsecutiveHyphens(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-8 — a missing type fails lint.required_field_missing.
+// a missing type fails lint.required_field_missing.
 func TestFrontmatter_MissingType(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -169,7 +169,7 @@ func TestFrontmatter_MissingType(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-9 — a missing version fails lint.required_field_missing.
+// a missing version fails lint.required_field_missing.
 func TestFrontmatter_MissingVersion(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -184,7 +184,7 @@ func TestFrontmatter_MissingVersion(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-10 — a non-semver version fails lint.invalid_version.
+// a non-semver version fails lint.invalid_version.
 func TestFrontmatter_NonSemverVersion(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -207,7 +207,7 @@ func fmDeprecationRegistry(t *testing.T) string {
 	})
 }
 
-// T-D-frontmatter-11 — a deprecated artifact is excluded from default search.
+// a deprecated artifact is excluded from default search.
 func TestFrontmatter_DeprecatedExcludedFromSearch(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, fmDeprecationRegistry(t))
@@ -220,7 +220,7 @@ func TestFrontmatter_DeprecatedExcludedFromSearch(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-12 — a deprecated artifact remains reachable via load_artifact
+// a deprecated artifact remains reachable via load_artifact
 // and carries the deprecation signal, including the replaced_by upgrade target
 // (§4.7.4). The load path recovers replaced_by from the stored frontmatter for
 // the SQL backends, so the upgrade target round-trips into the load response.
@@ -244,9 +244,9 @@ func TestFrontmatter_DeprecatedReachableWithWarning(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-13 — search_visibility: direct-only hides an artifact
+// search_visibility: direct-only hides an artifact
 // from search while an indexed sibling still appears.
-// spec: §4.3 universal fields (search_visibility), §4.5.3 (F-4.3.3).
+// spec: §4.3 universal fields (search_visibility), §4.5.3.
 func TestFrontmatter_DirectOnlyHiddenFromSearch(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -262,7 +262,7 @@ func TestFrontmatter_DirectOnlyHiddenFromSearch(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-14 — a direct-only artifact is reachable via load_artifact by
+// a direct-only artifact is reachable via load_artifact by
 // ID (visibility filtering happens on search, not load).
 func TestFrontmatter_DirectOnlyReachableByID(t *testing.T) {
 	t.Parallel()
@@ -278,7 +278,7 @@ func TestFrontmatter_DirectOnlyReachableByID(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-15 — the SKILL.md compatibility field is accepted by lint and
+// the SKILL.md compatibility field is accepted by lint and
 // the skill loads. The load response surfaces ARTIFACT.md frontmatter and the
 // SKILL.md body; SKILL.md-only frontmatter (compatibility) is not echoed in the
 // response, so the test asserts ingest acceptance and reachability.
@@ -298,7 +298,7 @@ func TestFrontmatter_SkillCompatibilityStored(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-16 — the SKILL.md metadata map is accepted by lint and the
+// the SKILL.md metadata map is accepted by lint and the
 // skill loads (same surfacing caveat as compatibility).
 func TestFrontmatter_SkillMetadataStored(t *testing.T) {
 	t.Parallel()
@@ -327,7 +327,7 @@ func fmLoadFrontmatter(t *testing.T, baseURL, id string) string {
 	return load.Frontmatter
 }
 
-// T-D-frontmatter-17 — mcpServers is stored verbatim and returned in the
+// mcpServers is stored verbatim and returned in the
 // load_artifact frontmatter.
 func TestFrontmatter_McpServersVerbatim(t *testing.T) {
 	t.Parallel()
@@ -344,7 +344,7 @@ func TestFrontmatter_McpServersVerbatim(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-18 — requiresApproval is stored verbatim and returned on load.
+// requiresApproval is stored verbatim and returned on load.
 func TestFrontmatter_RequiresApprovalVerbatim(t *testing.T) {
 	t.Parallel()
 	art := "---\ntype: agent\nname: pay-agent\nversion: 1.0.0\ndescription: Pay agent.\nrequiresApproval:\n  - tool: payment-submit\n    reason: irreversible\n---\n\nbody\n"
@@ -357,7 +357,7 @@ func TestFrontmatter_RequiresApprovalVerbatim(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-19 — sbom is stored verbatim; the registry does not fetch or
+// sbom is stored verbatim; the registry does not fetch or
 // parse the referenced file.
 func TestFrontmatter_SbomVerbatim(t *testing.T) {
 	t.Parallel()
@@ -371,7 +371,7 @@ func TestFrontmatter_SbomVerbatim(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-20 — effort_hint and model_class_hint are stored and returned
+// effort_hint and model_class_hint are stored and returned
 // for an agent.
 func TestFrontmatter_HintsVerbatim(t *testing.T) {
 	t.Parallel()
@@ -383,7 +383,7 @@ func TestFrontmatter_HintsVerbatim(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-21 — effort_hint on a non-agent/skill/command type warns.
+// effort_hint on a non-agent/skill/command type warns.
 func TestFrontmatter_HintOnUnsupportedTypeWarns(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -398,7 +398,7 @@ func TestFrontmatter_HintOnUnsupportedTypeWarns(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-22 — agent scaffold writes input/output schema fields.
+// agent scaffold writes input/output schema fields.
 func TestFrontmatter_AgentScaffoldSchemas(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "finance/pay-agent")
@@ -413,7 +413,7 @@ func TestFrontmatter_AgentScaffoldSchemas(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-23 — agent scaffold writes delegates_to.
+// agent scaffold writes delegates_to.
 func TestFrontmatter_AgentScaffoldDelegatesTo(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "finance/pay-agent")
@@ -428,7 +428,7 @@ func TestFrontmatter_AgentScaffoldDelegatesTo(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-24, T-D-frontmatter-25, and T-D-frontmatter-26 were written
+// Three earlier gap entries were written
 // against an earlier draft that defined a command-specific `expose_as_mcp_prompt`
 // field. Scaffolding with `--expose-as-mcp-prompt` would write the field (-24),
 // an opted-in command would appear in MCP `prompts/list` (-25), and a
@@ -436,11 +436,11 @@ func TestFrontmatter_AgentScaffoldDelegatesTo(t *testing.T) {
 // "Podium does not project commands through MCP" (docs/authoring/artifact-types.md
 // § command), the frontmatter reference lists no such type-specific field, the
 // manifest schema does not parse it, and the MCP server defines no `prompts/list`
-// method (BUILD-GAPS F-5.2 — "No findings"). The two tests below assert the
+// method (no §5.2 finding). The two tests below assert the
 // current observable behavior the doc claims.
 
 // TestFrontmatter_CommandScaffoldRejectsExposeFlag covers the realigned
-// T-D-frontmatter-24: `--expose-as-mcp-prompt` is not a defined scaffold flag,
+// `--expose-as-mcp-prompt` is not a defined scaffold flag,
 // so the flag parse fails with exit 2, and a valid command scaffold writes an
 // ARTIFACT.md that carries no `expose_as_mcp_prompt` field.
 func TestFrontmatter_CommandScaffoldRejectsExposeFlag(t *testing.T) {
@@ -464,7 +464,7 @@ func TestFrontmatter_CommandScaffoldRejectsExposeFlag(t *testing.T) {
 }
 
 // TestFrontmatter_CommandNotProjectedThroughMCP covers the realigned
-// T-D-frontmatter-25 and T-D-frontmatter-26, which both collapse to one
+// behavior, which collapses to one
 // observable now that the opt-in field is gone: the MCP server defines no
 // `prompts/list` method, so the request returns JSON-RPC -32601 ("method not
 // found") regardless of any command in the registry.
@@ -478,7 +478,7 @@ func TestFrontmatter_CommandNotProjectedThroughMCP(t *testing.T) {
 	assertMethodNotFound(t, res.Stdout, 1, "prompts/list")
 }
 
-// T-D-frontmatter-27 — rule scaffold (always) writes rule_mode: always.
+// rule scaffold (always) writes rule_mode: always.
 func TestFrontmatter_RuleScaffoldAlways(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "eng/always-rule")
@@ -492,7 +492,7 @@ func TestFrontmatter_RuleScaffoldAlways(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-28 — rule scaffold (glob) writes rule_mode and rule_globs.
+// rule scaffold (glob) writes rule_mode and rule_globs.
 func TestFrontmatter_RuleScaffoldGlob(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "eng/glob-rule")
@@ -507,7 +507,7 @@ func TestFrontmatter_RuleScaffoldGlob(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-29 — rule scaffold (auto) writes rule_mode and rule_description.
+// rule scaffold (auto) writes rule_mode and rule_description.
 func TestFrontmatter_RuleScaffoldAuto(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "eng/auto-rule")
@@ -522,7 +522,7 @@ func TestFrontmatter_RuleScaffoldAuto(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-30 — a glob-mode rule materializes under claude-code at
+// a glob-mode rule materializes under claude-code at
 // .claude/rules/<name>.md with the glob pattern carried in the Claude-native
 // `paths:` frontmatter. The Podium-internal fields (type, rule_mode,
 // rule_globs) are not leaked into the harness file.
@@ -545,7 +545,7 @@ func TestFrontmatter_RuleGlobClaudeCode(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-31 — hook scaffold writes hook_event and hook_action.
+// hook scaffold writes hook_event and hook_action.
 func TestFrontmatter_HookScaffoldFields(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "eng/stop-hook")
@@ -560,8 +560,8 @@ func TestFrontmatter_HookScaffoldFields(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-32 — declaring both a generic pre_tool_use hook and a
-// corresponding subtype hook warns (spec §4.3.5, F-4.3.8). A lone generic hook
+// declaring both a generic pre_tool_use hook and a
+// corresponding subtype hook warns (spec §4.3.5). A lone generic hook
 // alone is clean.
 func TestFrontmatter_HookGenericPreToolUse(t *testing.T) {
 	t.Parallel()
@@ -578,7 +578,7 @@ func TestFrontmatter_HookGenericPreToolUse(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-33 — a generic post_tool_use hook declared alongside a
+// a generic post_tool_use hook declared alongside a
 // corresponding post-subtype hook warns (spec §4.3.5).
 func TestFrontmatter_HookGenericPostToolUse(t *testing.T) {
 	t.Parallel()
@@ -595,7 +595,7 @@ func TestFrontmatter_HookGenericPostToolUse(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-34 — a specific subtype event does not trigger the generic
+// a specific subtype event does not trigger the generic
 // info diagnostic.
 func TestFrontmatter_HookSubtypeNoInfo(t *testing.T) {
 	t.Parallel()
@@ -611,7 +611,7 @@ func TestFrontmatter_HookSubtypeNoInfo(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-35 — mcp-server scaffold writes server_identifier.
+// mcp-server scaffold writes server_identifier.
 func TestFrontmatter_McpServerScaffold(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "servers/finance-warehouse")
@@ -625,7 +625,7 @@ func TestFrontmatter_McpServerScaffold(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-36 — scaffold --extends writes the extends field.
+// scaffold --extends writes the extends field.
 func TestFrontmatter_ScaffoldExtends(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "finance/ap/pay-invoice-extended")
@@ -639,7 +639,7 @@ func TestFrontmatter_ScaffoldExtends(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-37 — an artifact carrying target_harnesses lints cleanly.
+// an artifact carrying target_harnesses lints cleanly.
 func TestFrontmatter_TargetHarnessesLintsClean(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -651,8 +651,8 @@ func TestFrontmatter_TargetHarnessesLintsClean(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-38 — sync skips an artifact whose target_harnesses
-// excludes the active harness (§4.3 / §6.7.1, F-6.7.2).
+// sync skips an artifact whose target_harnesses
+// excludes the active harness (§4.3 / §6.7.1).
 func TestFrontmatter_TargetHarnessesExcludesSkips(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -672,7 +672,7 @@ func TestFrontmatter_TargetHarnessesExcludesSkips(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, ".podium/context/eng/open/ARTIFACT.md"))
 }
 
-// T-D-frontmatter-39 — sync materializes an artifact whose target_harnesses
+// sync materializes an artifact whose target_harnesses
 // includes the active harness. (target_harnesses is inert, so materialization
 // happens for every harness; this positive case holds regardless.)
 func TestFrontmatter_TargetHarnessesIncludesMaterializes(t *testing.T) {
@@ -687,7 +687,7 @@ func TestFrontmatter_TargetHarnessesIncludesMaterializes(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, ".podium/context/eng/my-context/ARTIFACT.md"))
 }
 
-// T-D-frontmatter-40 — external_resources metadata is stored verbatim and
+// external_resources metadata is stored verbatim and
 // returned on load; the binary object does not transit the registry.
 func TestFrontmatter_ExternalResourcesVerbatim(t *testing.T) {
 	t.Parallel()
@@ -710,7 +710,7 @@ func fmProvenanceSkill(t *testing.T, body string) string {
 	})
 }
 
-// T-D-frontmatter-41 — the claude-code adapter rewrites an imported provenance
+// the claude-code adapter rewrites an imported provenance
 // block into an <untrusted-data> region.
 func TestFrontmatter_ProvenanceRewriteClaudeCode(t *testing.T) {
 	t.Parallel()
@@ -729,7 +729,7 @@ func TestFrontmatter_ProvenanceRewriteClaudeCode(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-42 — a provenance block without a source attribute rewrites to
+// a provenance block without a source attribute rewrites to
 // a bare <untrusted-data> region.
 func TestFrontmatter_ProvenanceNoSource(t *testing.T) {
 	t.Parallel()
@@ -743,7 +743,7 @@ func TestFrontmatter_ProvenanceNoSource(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-43 — a SKILL.md body without provenance markers passes through
+// a SKILL.md body without provenance markers passes through
 // unchanged.
 func TestFrontmatter_ProvenancePassthrough(t *testing.T) {
 	t.Parallel()
@@ -760,13 +760,13 @@ func TestFrontmatter_ProvenancePassthrough(t *testing.T) {
 	}
 }
 
-// Cross-layer merge (T-D-frontmatter-44..49): a higher-precedence team-foo
+// Cross-layer merge: a higher-precedence team-foo
 // child declares extends: at the same canonical ID as the org-defaults parent,
 // is accepted as an overlay (§4.6 extends exception), and the field-semantics
 // table merges into the served frontmatter. The two-layer boot helpers live in
 // docs_extends_test.go (same package).
 
-// T-D-frontmatter-44 — child description wins over parent description.
+// child description wins over parent description.
 func TestFrontmatter_MergeChildDescriptionWins(t *testing.T) {
 	t.Parallel()
 	parent := "---\ntype: context\nversion: 1.0.0\ndescription: PARENT description\n---\n\nbody\n"
@@ -777,7 +777,7 @@ func TestFrontmatter_MergeChildDescriptionWins(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-45 — tags are unioned across parent and child.
+// tags are unioned across parent and child.
 func TestFrontmatter_MergeTagsUnion(t *testing.T) {
 	t.Parallel()
 	parent := "---\ntype: context\nversion: 1.0.0\ndescription: p\ntags: [parent-tag, shared]\n---\n\nbody\n"
@@ -790,7 +790,7 @@ func TestFrontmatter_MergeTagsUnion(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-46 — sensitivity takes the most-restrictive value.
+// sensitivity takes the most-restrictive value.
 func TestFrontmatter_MergeSensitivityMostRestrictive(t *testing.T) {
 	t.Parallel()
 	parent := "---\ntype: context\nversion: 1.0.0\ndescription: p\nsensitivity: high\n---\n\nbody\n"
@@ -800,7 +800,7 @@ func TestFrontmatter_MergeSensitivityMostRestrictive(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-47 — search_visibility takes the most-restrictive value.
+// search_visibility takes the most-restrictive value.
 func TestFrontmatter_MergeSearchVisibilityMostRestrictive(t *testing.T) {
 	t.Parallel()
 	parent := "---\ntype: context\nversion: 1.0.0\ndescription: p\nsearch_visibility: direct-only\n---\n\nbody\n"
@@ -811,7 +811,7 @@ func TestFrontmatter_MergeSearchVisibilityMostRestrictive(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-48 — the child type must match the parent type.
+// the child type must match the parent type.
 func TestFrontmatter_MergeTypeMustMatch(t *testing.T) {
 	t.Parallel()
 	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent agent\n---\n\nbody\n"
@@ -823,7 +823,7 @@ func TestFrontmatter_MergeTypeMustMatch(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-49 — a self-referencing extends is rejected at ingest (cycle
+// a self-referencing extends is rejected at ingest (cycle
 // detection); the artifact is dropped and a sibling keeps boot alive.
 func TestFrontmatter_ExtendsCycleDetected(t *testing.T) {
 	t.Parallel()
@@ -840,7 +840,7 @@ func TestFrontmatter_ExtendsCycleDetected(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-50 — a skill ARTIFACT.md body with non-comment prose warns.
+// a skill ARTIFACT.md body with non-comment prose warns.
 func TestFrontmatter_SkillArtifactBodyWarns(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -856,7 +856,7 @@ func TestFrontmatter_SkillArtifactBodyWarns(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-51 — a skill ARTIFACT.md body that is a single HTML comment
+// a skill ARTIFACT.md body that is a single HTML comment
 // passes lint.
 func TestFrontmatter_SkillArtifactBodyComment(t *testing.T) {
 	t.Parallel()
@@ -870,7 +870,7 @@ func TestFrontmatter_SkillArtifactBodyComment(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-52 — a SKILL.md body over the 5000-token soft cap warns.
+// a SKILL.md body over the 5000-token soft cap warns.
 func TestFrontmatter_SkillBodyOverSoftCapWarns(t *testing.T) {
 	t.Parallel()
 	body := strings.Repeat("word ", 5200) // ~26000 bytes => ~6500 tokens > 5000
@@ -887,7 +887,7 @@ func TestFrontmatter_SkillBodyOverSoftCapWarns(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-53 — a manifest over the 20000-token hard cap errors.
+// a manifest over the 20000-token hard cap errors.
 func TestFrontmatter_ManifestOverHardCapErrors(t *testing.T) {
 	t.Parallel()
 	body := strings.Repeat("word ", 21000) // ~105000 bytes => ~26000 tokens > 20000
@@ -904,7 +904,7 @@ func TestFrontmatter_ManifestOverHardCapErrors(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-54 — scaffold --sensitivity high writes sensitivity: high.
+// scaffold --sensitivity high writes sensitivity: high.
 func TestFrontmatter_ScaffoldSensitivityHigh(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "finance/sensitive-context")
@@ -918,7 +918,7 @@ func TestFrontmatter_ScaffoldSensitivityHigh(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-55 — scaffold --when-to-use parses a CSV into a list.
+// scaffold --when-to-use parses a CSV into a list.
 func TestFrontmatter_ScaffoldWhenToUseList(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "finance/close-context")
@@ -933,7 +933,7 @@ func TestFrontmatter_ScaffoldWhenToUseList(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-56 — scaffold --tags parses a CSV into a tags list.
+// scaffold --tags parses a CSV into a tags list.
 func TestFrontmatter_ScaffoldTagsList(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "finance/tagged-context")
@@ -947,7 +947,7 @@ func TestFrontmatter_ScaffoldTagsList(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-57 — search_artifacts respects the tags filter.
+// search_artifacts respects the tags filter.
 func TestFrontmatter_SearchTagsFilter(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -967,7 +967,7 @@ func TestFrontmatter_SearchTagsFilter(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-58 — load_artifact on a non-existent ID returns 404
+// load_artifact on a non-existent ID returns 404
 // registry.not_found.
 func TestFrontmatter_LoadNotFound(t *testing.T) {
 	t.Parallel()
@@ -983,7 +983,7 @@ func TestFrontmatter_LoadNotFound(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-59 — release_notes is stored verbatim and returned on load.
+// release_notes is stored verbatim and returned on load.
 func TestFrontmatter_ReleaseNotesVerbatim(t *testing.T) {
 	t.Parallel()
 	art := "---\ntype: context\nname: notes-ctx\nversion: 1.0.0\ndescription: Notes context.\nrelease_notes: \"Initial release.\"\n---\n\nbody\n"
@@ -994,7 +994,7 @@ func TestFrontmatter_ReleaseNotesVerbatim(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-60 — replaced_by surfaces in the load response and the
+// replaced_by surfaces in the load response and the
 // deprecation warning. Per §4.7.4 "if replaced_by: is set, the registry surfaces
 // the upgrade target alongside the warning." The SQL metadata stores do not
 // persist replaced_by as an indexed column, so the load path recovers it from
@@ -1022,7 +1022,7 @@ func TestFrontmatter_ReplacedBySurfaced(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-61 — a bundled resource over the 1 MB per-file soft cap warns.
+// a bundled resource over the 1 MB per-file soft cap warns.
 func TestFrontmatter_BundledPerFileSoftCapWarns(t *testing.T) {
 	t.Parallel()
 	big := strings.Repeat("a", 1024*1024+1)
@@ -1040,7 +1040,7 @@ func TestFrontmatter_BundledPerFileSoftCapWarns(t *testing.T) {
 	}
 }
 
-// T-D-frontmatter-62 — bundled resources over the 10 MB per-package cap error.
+// bundled resources over the 10 MB per-package cap error.
 func TestFrontmatter_BundledPerPackageCapErrors(t *testing.T) {
 	t.Parallel()
 	chunk := strings.Repeat("b", 6*1024*1024)

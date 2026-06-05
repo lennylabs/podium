@@ -423,7 +423,7 @@ func TestIngest_ErrLintFailedExposed(t *testing.T) {
 	}
 }
 
-// TestIngest_RootLevelArtifactRejected covers F-4.2.1.
+// TestIngest_RootLevelArtifactRejected covers
 // Spec: §4.2 — a root-level ARTIFACT.md has no canonical ID; Ingest rejects
 // it instead of silently storing an artifact with an empty, unaddressable ID.
 func TestIngest_RootLevelArtifactRejected(t *testing.T) {
@@ -445,7 +445,7 @@ func TestIngest_RootLevelArtifactRejected(t *testing.T) {
 	}
 }
 
-// TestIngest_AtSegmentRejected covers F-4.2.2.
+// TestIngest_AtSegmentRejected covers
 // Spec: §4.2 — "@" inside a directory name makes the canonical-ID-plus-suffix
 // reference grammar ambiguous, so Ingest rejects it.
 func TestIngest_AtSegmentRejected(t *testing.T) {
@@ -467,7 +467,7 @@ func TestIngest_AtSegmentRejected(t *testing.T) {
 	}
 }
 
-// TestIngest_NestedArtifactsIngestedSeparately covers F-4.2.3.
+// TestIngest_NestedArtifactsIngestedSeparately covers
 // Spec: §4.2 — a nested artifact is a separate leaf package. Both the parent
 // and the nested artifact are ingested as distinct records keyed by their own
 // canonical IDs.

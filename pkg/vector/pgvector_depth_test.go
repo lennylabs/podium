@@ -14,8 +14,7 @@ import (
 	"github.com/lennylabs/podium/pkg/vector"
 )
 
-// pgvector depth tests (G-PGV-1, G-PGV-2, G-PGV-3, and the pgvector portion of
-// G-VEC-4). All gate on PODIUM_POSTGRES_DSN[_VECTOR] via the existing
+// pgvector depth tests. All gate on PODIUM_POSTGRES_DSN[_VECTOR] via the existing
 // pgVectorDSN() helper (pgvector_test.go) so a run without Postgres skips
 // cleanly. These go beyond the conformance suite, which asserts only near-zero
 // self-distance and axis-aligned ordering at dim=8: they assert cosine-metric
@@ -128,8 +127,8 @@ func cosineDistance(a, b []float32) float64 {
 
 // TestPgVector_Depth_CosineCorrectness asserts the `<=>` operator returns the
 // cosine distance computed independently for non-trivial (non-axis-aligned)
-// vectors, and that ordering by `<=>` ranks the nearest vector first (G-PGV-1
-// metric correctness and recall). The conformance suite only checks near-zero
+// vectors, and that ordering by `<=>` ranks the nearest vector first
+// (metric correctness and recall). The conformance suite only checks near-zero
 // self-distance and axis-aligned ordering.
 //
 // Spec: §4.7 — hybrid retrieval's vector half (the metric is left to the
@@ -190,7 +189,7 @@ func TestPgVector_Depth_CosineCorrectness(t *testing.T) {
 
 // TestPgVector_Depth_ANNIndexRecall creates an HNSW index over the cosine
 // operator class and asserts the index path ranks the planted nearest neighbour
-// first (G-PGV-1 ANN path). enable_seqscan is disabled on the session so the
+// first (ANN path). enable_seqscan is disabled on the session so the
 // planner uses the index rather than an exact scan over the small table.
 //
 // Spec: §4.7 — vector retrieval (the ANN index is a backend implementation
@@ -344,8 +343,7 @@ func vecLiteralTest(vec []float32) string {
 
 // TestPgVector_Depth_ProductionDimensionRoundTrip round-trips a vector at the
 // reference production dimension (1536, the text-embedding-3-small size) to
-// catch encoding, schema, and large-row regressions that dims 4/8/16/32 do not
-// (G-PGV-2).
+// catch encoding, schema, and large-row regressions that dims 4/8/16/32 do not.
 //
 // Spec: §4.7 — the standard-deployment default embedder is text-embedding-3-small
 // (1536 dim).
@@ -385,7 +383,7 @@ func TestPgVector_Depth_ProductionDimensionRoundTrip(t *testing.T) {
 }
 
 // TestPgVector_Depth_ModelVersioning replays the §4.7 re-embed-on-model-change
-// scenario against real Postgres (G-PGV-3): PutModel tags rows, QueryModel
+// scenario against real Postgres: PutModel tags rows, QueryModel
 // restricts to the current model so a stale model never scores, PurgeModelExcept
 // drops the stale rows, and a legacy untagged row stays served. The
 // model-versioning suite otherwise covers only memory and sqlite-vec.
@@ -462,7 +460,7 @@ func TestPgVector_Depth_ModelVersioning(t *testing.T) {
 // scoped per tenant: purging one tenant's stale model never deletes another
 // tenant's rows. The pgvector SQL is WHERE tenant_id = $1 AND model_id <> $2
 // (pgvector.go), so this is the vec_artifacts cross-tenant isolation invariant
-// for the destructive path (pgvector portion of G-VEC-4).
+// for the destructive path (pgvector portion).
 //
 // Spec: §4.7.1 — the org is the tenant boundary; cross-org rows do not mix.
 func TestPgVector_Depth_PurgeModelExceptTenantScoped(t *testing.T) {
@@ -499,7 +497,7 @@ func TestPgVector_Depth_PurgeModelExceptTenantScoped(t *testing.T) {
 // TestPgVector_Depth_TenantIsolation writes the same (artifact_id, version)
 // under two tenants with different vectors and asserts a query scoped to one
 // tenant never returns the other's row, and a delete in one tenant leaves the
-// other intact (pgvector portion of G-VEC-4). The composite primary key
+// other intact (pgvector portion). The composite primary key
 // (tenant_id, artifact_id, version) lets the identical id coexist across
 // tenants, and every read filters WHERE tenant_id = $2 (pgvector.go).
 //

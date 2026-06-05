@@ -9,7 +9,7 @@ import (
 )
 
 // TestLoginCmd_PollBoundedByDeadline exercises the client-side 10-minute
-// login deadline. spec: §6.3 / §7.7 (F-14.5.3) — CLI commands "poll the
+// login deadline. spec: §6.3 / §7.7 — CLI commands "poll the
 // IdP's token endpoint until the user completes the flow or a 10-minute
 // timeout elapses". An IdP that keeps replying authorization_pending must
 // not leave `podium login` blocked indefinitely; loginCmd bounds the whole

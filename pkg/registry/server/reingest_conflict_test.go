@@ -11,7 +11,7 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// Spec: §7.3.1 (F-7.3.2) — "Same version, different content_hash | Rejected as
+// Spec: §7.3.1 — "Same version, different content_hash | Rejected as
 // ingest.immutable_violation", and ingest.immutable_violation is one of the
 // §7.3.1 error codes. A snapshot whose only outcome is a same-version content
 // conflict must surface the named code (not an opaque count) so the author can
@@ -67,7 +67,7 @@ func TestReingest_PureConflictReturnsImmutableViolation(t *testing.T) {
 	}
 }
 
-// Spec: §7.3.1 (F-7.3.2) — a mixed snapshot (some artifacts accepted alongside
+// Spec: §7.3.1 — a mixed snapshot (some artifacts accepted alongside
 // a conflict) stays a 200 partial success, mirroring the pipeline's lint
 // hard-error rule, but still reports each conflict per-artifact with the named
 // code so the caller can act on the rejection.

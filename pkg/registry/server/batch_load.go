@@ -46,7 +46,7 @@ type BatchLoadEnvelope struct {
 	// resources via URL; the SDK fetches them concurrently afterward.
 	// In the standalone-without-storage mode (§13.11) ingest keeps every
 	// resource inline, so the reference carries the bytes inline instead
-	// of a presigned_url (F-7.6.4).
+	// of a presigned_url.
 	Resources          []BatchResource `json:"resources,omitempty"`
 	Deprecated         bool            `json:"deprecated,omitempty"`
 	ReplacedBy         string          `json:"replaced_by,omitempty"`
@@ -59,7 +59,7 @@ type BatchLoadEnvelope struct {
 // presigned_url (the §7.6.2 wire example). In the standalone-without-storage
 // mode the bytes travel inline in Inline (base64-encoded, with InlineBase64
 // set, when the payload is not valid UTF-8) so a batch consumer materializes
-// the same complete package the single-load path delivers (F-7.6.4).
+// the same complete package the single-load path delivers.
 type BatchResource struct {
 	Path         string `json:"path"`
 	PresignedURL string `json:"presigned_url,omitempty"`
@@ -130,7 +130,7 @@ func (s *Server) loadOneForBatch(ctx context.Context, id layer.Identity, artifac
 	// response body stays small. In the standalone-without-storage mode
 	// (§13.11) ingest kept every resource inline regardless of size, so
 	// with no object store deliver those bytes inline rather than dropping
-	// them (F-7.6.4), mirroring attachResources on the single-load path.
+	// them, mirroring attachResources on the single-load path.
 	for _, ref := range res.Resources {
 		if s.objectStore != nil {
 			url, err := s.objectStore.Presign(ctx, resourceKey(ref), s.presignTTL)
@@ -157,7 +157,7 @@ func (s *Server) loadOneForBatch(ctx context.Context, id layer.Identity, artifac
 			}
 		}
 		br := BatchResource{Path: ref.Path, ContentHash: ref.ContentHash}
-		// §4.1/§7.2 (F-4.1.1): a binary resource is base64-encoded so
+		// §4.1/§7.2: a binary resource is base64-encoded so
 		// encoding/json does not replace its non-UTF-8 bytes with U+FFFD.
 		if utf8.Valid(body) {
 			br.Inline = string(body)
@@ -188,7 +188,7 @@ func batchLoadError(err error) *ErrorResponse {
 // errorEnvelopeFor maps a core error to the §6.10 envelope. The
 // retryable flag and suggested_action are assigned by enrichEnvelope from
 // the per-code registry so per-item batch errors carry the same envelope
-// fields as the top-level writeError path (F-6.10.4).
+// fields as the top-level writeError path.
 func errorEnvelopeFor(err error) *ErrorResponse {
 	var e *ErrorResponse
 	switch {

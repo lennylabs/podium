@@ -1,7 +1,7 @@
 package e2e
 
-// End-to-end coverage for the §4.6 declarative `layers:` registry-config list
-// (F-4.6.8). A registry.yaml that declares a local-source admin layer with a
+// End-to-end coverage for the §4.6 declarative `layers:` registry-config list.
+// A registry.yaml that declares a local-source admin layer with a
 // visibility block boots a standalone server that ingests the layer and
 // exposes it through the §7.3.1 layer-management API.
 
@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// Spec: §4.6 (F-4.6.8) — a declared local-source layer in registry.yaml is
+// Spec: §4.6 — a declared local-source layer in registry.yaml is
 // ingested at startup (its artifacts are searchable) and is registered so the
 // /v1/layers management surface reports it with the declared source and
 // visibility.

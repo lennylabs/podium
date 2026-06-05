@@ -1,7 +1,6 @@
 package integration
 
-// Store retention with object bytes and extends-pin protection
-// (gap G-LIFECYCLE-3).
+// Store retention with object bytes and extends-pin protection.
 //
 // internal/serverboot/store_retention_test.go backdates a deprecated version
 // and asserts its manifest record is purged while a live version survives, but

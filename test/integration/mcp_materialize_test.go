@@ -77,7 +77,7 @@ func TestPodiumMCP_LoadArtifactMaterializes(t *testing.T) {
 	}
 }
 
-// Spec: §4.3 target_harnesses (F-4.3.4) — load_artifact through the MCP
+// Spec: §4.3 target_harnesses — load_artifact through the MCP
 // bridge does not write harness-native files when the artifact opts out
 // of the active harness. The manifest content still returns; only the
 // on-disk materialization is suppressed (materialized_at is empty and the
@@ -137,7 +137,7 @@ func TestPodiumMCP_TargetHarnessesSuppressesMaterialize(t *testing.T) {
 	}
 }
 
-// Spec: §6.9 "Adapter cannot translate an artifact" (F-6.7.3) —
+// Spec: §6.9 "Adapter cannot translate an artifact" —
 // load_artifact under a harness whose §6.7.1 cell is ✗ for a field the
 // artifact uses fails with a structured error naming the field and
 // suggesting harness: none, and writes nothing to disk. Here a

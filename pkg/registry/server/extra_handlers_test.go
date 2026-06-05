@@ -117,7 +117,7 @@ func TestAdminReembed_TenantWidePostReachesHandler(t *testing.T) {
 
 // /v1/admin/reembed: a malformed `since` value is rejected with
 // registry.invalid_argument before the reembed runs (spec §4.7
-// `--since <timestamp>`; F-4.7.8).
+// `--since <timestamp>`).
 func TestAdminReembed_InvalidSinceReturns400(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t,

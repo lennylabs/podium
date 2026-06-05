@@ -1,14 +1,13 @@
 package integration
 
-// Cross-tenant search and quota non-interference over a shared Postgres (gap
-// G-AUTH-11).
+// Cross-tenant search and quota non-interference over a shared Postgres.
 //
 // auth_org_isolation_test.go proves load_artifact, shared-id content-hash, and
 // search isolation for two orgs over one shared Postgres, and
 // http_api_test.go's TestHTTPAPI_SearchQPSQuota throttles a single tenant, but
 // no test drives one org above its search QPS budget while a second org stays
 // served, and the dependency-edge, scope-preview, and audit surfaces were not
-// asserted cross-org. This refines G-AUTH-7 by adding the cross-tenant quota
+// asserted cross-org. This adds the cross-tenant quota
 // and resource-class isolation rather than re-listing org-scoped reads.
 //
 // Two registries are stood up over one shared Postgres database, one pinned to
@@ -97,7 +96,7 @@ func xtqAuditEmitter(sink *audit.FileSink) core.AuditEmitter {
 // quota.search_qps_exceeded; the limiter keys a bucket per tenant), §4.7.1
 // (the tenant boundary is the org; a read scoped to one org cannot reach
 // another org's rows), §3.5 (scope preview is the caller's effective view),
-// §8.1 (the audit stream records the caller's calls). Gap G-AUTH-11.
+// §8.1 (the audit stream records the caller's calls).
 func TestAuthCrossTenantQuota_NonInterferenceOverSharedPostgres(t *testing.T) {
 	dsn := os.Getenv("PODIUM_POSTGRES_DSN")
 	if dsn == "" {

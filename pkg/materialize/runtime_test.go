@@ -49,7 +49,7 @@ func TestCheckRuntimeRequirements_SystemPackages(t *testing.T) {
 // Spec: §4.4.1 — system_packages survives a generic YAML/JSON round-trip
 // that yields []any (not []string). The old bare []string assertion
 // silently skipped the check for round-tripped maps, so a missing
-// package was treated as satisfied (F-4.4.4). Both element types must be
+// package was treated as satisfied. Both element types must be
 // honored.
 func TestCheckRuntimeRequirements_SystemPackagesAnySlice(t *testing.T) {
 	t.Parallel()

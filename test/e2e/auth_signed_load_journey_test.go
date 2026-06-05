@@ -1,10 +1,9 @@
 package e2e
 
-// Signed artifact verifies on load and a tampered blob is refused (gap
-// G-AUTH-15).
+// Signed artifact verifies on load and a tampered blob is refused.
 //
 // The filesystem bootstrap attaches no signatures, so signature verification
-// and tamper detection skipped end to end. The G-INFRA-8 signedArtifactFixture
+// and tamper detection skipped end to end. The signedArtifactFixture
 // produces a real registry-managed signature envelope over an offline keypair
 // and drives the shipped podium-mcp verifier. This is the journey the gap
 // names: under the default-on verifier (no PODIUM_VERIFY_SIGNATURES set, which
@@ -25,7 +24,7 @@ package e2e
 // MCP server verifies on materialization for sensitivity >= medium; a signature
 // failure aborts with materialize.signature_invalid before anything is written
 // to disk), §6.2 (PODIUM_VERIFY_SIGNATURES defaults to medium-and-above), §6.6
-// step 2 (content-hash match over the delivered bytes). Gap G-AUTH-15.
+// step 2 (content-hash match over the delivered bytes).
 
 import (
 	"strings"

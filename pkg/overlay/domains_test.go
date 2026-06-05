@@ -8,7 +8,7 @@ import (
 	"github.com/lennylabs/podium/internal/testharness"
 )
 
-// Spec: §4.5.1 / §6.4 (F-4.5.2, F-6.4.2) — ResolveDomains surfaces the overlay
+// Spec: §4.5.1 / §6.4 — ResolveDomains surfaces the overlay
 // DOMAIN.md set keyed by canonical domain path so the consumer that exposes
 // load_domain can apply the §4.5.4 client-side merge.
 func TestResolveDomains_Populated(t *testing.T) {

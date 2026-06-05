@@ -9,7 +9,7 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// spec: §12 / §4.5.2 (F-12.0.5) — DOMAIN.md include: globs are expanded
+// spec: §12 / §4.5.2 — DOMAIN.md include: globs are expanded
 // into the load_domain cross-cutting view, and the server-side expansion
 // cache is invalidated when an ingest changes the artifact snapshot. After
 // a new matching artifact is ingested, the next load_domain surfaces it in

@@ -62,7 +62,7 @@ func TestVisible_FieldUnion(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 (F-4.6.4) — the visibility table calls `users:` entries "OIDC
+// Spec: §4.6 — the visibility table calls `users:` entries "OIDC
 // subject", but the section's own config example uses email-style identifiers
 // (users: [alice@acme.com]). The table and example contradict each other; the
 // evaluator follows the example and matches a configured entry against either

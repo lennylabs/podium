@@ -17,7 +17,7 @@ func catalogIDs(entries []core.CatalogEntry) []string {
 	return out
 }
 
-// Spec: §4.5.2 (F-4.5.2/F-6.4.2) — Catalog returns the visible artifacts under
+// Spec: §4.5.2 — Catalog returns the visible artifacts under
 // a scope prefix as lean descriptors (id, type, summary), and the whole visible
 // catalog when scope is empty.
 func TestCatalog_ScopeAndDescriptors(t *testing.T) {

@@ -13,7 +13,7 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// Spec: §13.9 (F-13.9.2, F-13.9.3) — /readyz runs a request-time
+// Spec: §13.9 — /readyz runs a request-time
 // metadata-store reachability probe and reports not_ready (503) when the
 // store is down. This drives the real /readyz handler over HTTP against a
 // file-backed SQLite store, then closes the store mid-flight to simulate

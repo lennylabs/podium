@@ -47,7 +47,7 @@ type wrapErr struct {
 func (w *wrapErr) Error() string { return "wrapped: " + w.err.Error() }
 func (w *wrapErr) Unwrap() error { return w.err }
 
-// spec: SS 6.10 (F-6.10.4) — codes for transient conditions report
+// spec: SS 6.10 — codes for transient conditions report
 // retryable=true; hard-cap and not-found codes report false.
 func TestEnrichEnvelope_RetryableByCode(t *testing.T) {
 	t.Parallel()
@@ -71,7 +71,7 @@ func TestEnrichEnvelope_RetryableByCode(t *testing.T) {
 	}
 }
 
-// spec: SS 6.10 (F-6.10.3) — auth.untrusted_runtime carries the verbatim
+// spec: SS 6.10 — auth.untrusted_runtime carries the verbatim
 // remediation hint from the spec example.
 func TestEnrichEnvelope_SuggestedActionSpecExample(t *testing.T) {
 	t.Parallel()
@@ -83,7 +83,7 @@ func TestEnrichEnvelope_SuggestedActionSpecExample(t *testing.T) {
 	}
 }
 
-// spec: SS 6.10 (F-6.10.3) — the quota and unavailable codes all carry a
+// spec: SS 6.10 — the quota and unavailable codes all carry a
 // non-empty operator remediation; an unmapped code carries none and is
 // left untouched.
 func TestEnrichEnvelope_SuggestedActionCoverage(t *testing.T) {
@@ -125,7 +125,7 @@ func TestEnrichEnvelope_PreservesCallerValues(t *testing.T) {
 	}
 }
 
-// spec: SS 6.10 (F-6.10.3) — the batch-load per-item envelope now also
+// spec: SS 6.10 — the batch-load per-item envelope now also
 // carries the remediation hint for retryable conditions.
 func TestErrorEnvelopeFor_AssignsSuggestedAction(t *testing.T) {
 	t.Parallel()
@@ -134,7 +134,7 @@ func TestErrorEnvelopeFor_AssignsSuggestedAction(t *testing.T) {
 	}
 }
 
-// spec: SS 6.10 (F-6.10.4) — writeCoreError's default branch maps an
+// spec: SS 6.10 — writeCoreError's default branch maps an
 // unclassified failure to registry.unavailable, which the envelope must
 // report as retryable. Before the fix this branch emitted retryable=false.
 func TestWriteCoreError_DefaultBranchRetryable(t *testing.T) {

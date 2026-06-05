@@ -12,7 +12,7 @@ import (
 	"github.com/lennylabs/podium/pkg/vector"
 )
 
-// Spec: §13.12 (F-13.12.6) — vector.SelfEmbeds reports server-side embedding
+// Spec: §13.12 — vector.SelfEmbeds reports server-side embedding
 // only for a backend configured with an inference model / vectorizer. Nil and
 // the non-self-embedding backends report false.
 func TestSelfEmbeds_Helper(t *testing.T) {
@@ -33,7 +33,7 @@ func TestSelfEmbeds_Helper(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.12.6) — with Integrated Inference / a vectorizer the
+// Spec: §13.12 — with Integrated Inference / a vectorizer the
 // hosted model fixes the dimension, so a self-embedding backend constructs
 // with Dimensions 0; a storage-only backend still requires a positive value.
 func TestSelfEmbedding_DimensionOptional(t *testing.T) {
@@ -58,7 +58,7 @@ func TestSelfEmbedding_DimensionOptional(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.12.6) — Pinecone Integrated Inference: PutText posts raw
+// Spec: §13.12 — Pinecone Integrated Inference: PutText posts raw
 // text (chunk_text, no vector) to the records upsert endpoint, and QueryText
 // posts a text query to the records search endpoint and unpacks the hits.
 func TestPinecone_PutTextAndQueryText(t *testing.T) {
@@ -116,7 +116,7 @@ func TestPinecone_PutTextAndQueryText(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.12.6) — Weaviate vectorizer: PutText writes an object
+// Spec: §13.12 — Weaviate vectorizer: PutText writes an object
 // with the text in the vectorized `content` property and no explicit vector;
 // QueryText runs a nearText GraphQL search.
 func TestWeaviate_PutTextAndQueryText(t *testing.T) {
@@ -180,7 +180,7 @@ func TestWeaviate_PutTextAndQueryText(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.12.6) — Qdrant Cloud Inference: PutText upserts a point
+// Spec: §13.12 — Qdrant Cloud Inference: PutText upserts a point
 // whose vector is a {text, model} document; QueryText posts a document query
 // to the Query API and unpacks result.points.
 func TestQdrant_PutTextAndQueryText(t *testing.T) {
@@ -233,7 +233,7 @@ func TestQdrant_PutTextAndQueryText(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.12.6) — a self-embedding backend rejects malformed input
+// Spec: §13.12 — a self-embedding backend rejects malformed input
 // (empty tenant / non-positive top_k) the same way the vector path does.
 func TestSelfEmbedding_InvalidArgument(t *testing.T) {
 	t.Parallel()

@@ -9,7 +9,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/server"
 )
 
-// Spec: §13.10 (F-13.10.9) — --web-ui / --web-ui-allow-public-bind map to
+// Spec: §13.10 — --web-ui / --web-ui-allow-public-bind map to
 // PODIUM_WEB_UI / PODIUM_WEB_UI_ALLOW_PUBLIC_BIND, which LoadConfig reads into
 // the resolved config.
 func TestLoadConfig_WebUIEnv(t *testing.T) {
@@ -21,7 +21,7 @@ func TestLoadConfig_WebUIEnv(t *testing.T) {
 	}
 }
 
-// Spec: §13.10 (F-13.10.9) — validate() refuses the web UI on a non-loopback
+// Spec: §13.10 — validate() refuses the web UI on a non-loopback
 // bind without both the escape hatch and an identity provider, surfacing
 // config.web_ui_public_bind_refused.
 func TestValidate_WebUINonLoopbackRefused(t *testing.T) {
@@ -38,7 +38,7 @@ func TestValidate_WebUINonLoopbackRefused(t *testing.T) {
 	}
 }
 
-// Spec: §13.10 (F-13.10.9) — the web UI binds a non-loopback address when both
+// Spec: §13.10 — the web UI binds a non-loopback address when both
 // the escape hatch and an identity provider are configured.
 func TestValidate_WebUINonLoopbackAllowed(t *testing.T) {
 	c := &Config{
@@ -54,7 +54,7 @@ func TestValidate_WebUINonLoopbackAllowed(t *testing.T) {
 	}
 }
 
-// Spec: §13.10 (F-13.10.14) — the only accepted --sign / PODIUM_SIGN value is
+// Spec: §13.10 — the only accepted --sign / PODIUM_SIGN value is
 // registry-key; any other value is named at startup rather than silently
 // leaving signing disabled.
 func TestValidate_SignModeRejectsUnknown(t *testing.T) {
@@ -65,7 +65,7 @@ func TestValidate_SignModeRejectsUnknown(t *testing.T) {
 	}
 }
 
-// Spec: §13.10 (F-13.10.14) — registry-key is accepted; an empty value (signing
+// Spec: §13.10 — registry-key is accepted; an empty value (signing
 // disabled) is accepted.
 func TestValidate_SignModeAccepts(t *testing.T) {
 	for _, mode := range []string{"", "registry-key"} {
@@ -76,7 +76,7 @@ func TestValidate_SignModeAccepts(t *testing.T) {
 	}
 }
 
-// Spec: §13.10 / §4.7.9 (F-13.10.14) — registrySignerFor returns a working
+// Spec: §13.10 / §4.7.9 — registrySignerFor returns a working
 // registry-managed signer for "registry-key" and nil when signing is disabled.
 func TestRegistrySignerFor(t *testing.T) {
 	t.Setenv("PODIUM_SIGN_KEY_PATH", t.TempDir()+"/registry-signing.key")

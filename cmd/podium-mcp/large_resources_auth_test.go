@@ -13,7 +13,7 @@ import (
 
 // Spec: §6.6 step 1 / §13.11 — the large-resource fetch sends the same session
 // token and tenant header load_artifact used, so the filesystem backend's
-// authenticated /objects/{content_hash} route accepts it (F-6.6.3). The token
+// authenticated /objects/{content_hash} route accepts it. The token
 // comes from a file to avoid racing process-wide env vars.
 func TestGetLargeResource_SendsSessionTokenAndTenant(t *testing.T) {
 	t.Parallel()
@@ -112,7 +112,7 @@ func TestGetLargeResource_NoCredentialOnSigV4PresignedURL(t *testing.T) {
 
 // Spec: §6.6 step 1 — on a 403 (expired presigned URL) the fetch requests a
 // fresh URL set and retries against the new URL rather than reusing the stale
-// one (F-6.6.6).
+// one.
 func TestFetchOneLargeResource_RefreshesURLOn403(t *testing.T) {
 	t.Parallel()
 	body := []byte("fresh bytes")

@@ -34,7 +34,7 @@ func readRepoFile(t testing.TB, rel string) string {
 
 // Spec: §1.6 Project Model — "Governance. Maintainer model + RFC process
 // for spec changes; see GOVERNANCE.md." The governance docs the spec points
-// to must describe an RFC process, matching the spec's terminology (F-1.6.1).
+// to must describe an RFC process, matching the spec's terminology.
 func TestGovernanceDocs_UseRFCProcessTerminology(t *testing.T) {
 	t.Parallel()
 
@@ -55,17 +55,17 @@ func TestGovernanceDocs_UseRFCProcessTerminology(t *testing.T) {
 		}
 		// The proposal mechanism must not point at the stale docs/adr/ path.
 		if strings.Contains(body, "docs/adr/") {
-			t.Errorf("%s still references docs/adr/; spec §1.6 RFC process lives in docs/rfc/ (F-1.6.2)", rel)
+			t.Errorf("%s still references docs/adr/; spec §1.6 RFC process lives in docs/rfc/", rel)
 		}
 		if strings.Contains(body, "draft ADRs") {
-			t.Errorf("%s still files proposals as ADRs; spec §1.6 requires the RFC process (F-1.6.1)", rel)
+			t.Errorf("%s still files proposals as ADRs; spec §1.6 requires the RFC process", rel)
 		}
 	}
 }
 
 // Spec: §1.6 Project Model — GOVERNANCE.md directs contributors to the RFC
 // directory. The referenced location must exist with an index, so the link
-// does not resolve to a missing directory (F-1.6.2).
+// does not resolve to a missing directory.
 func TestGovernanceDocs_RFCDirectoryExists(t *testing.T) {
 	t.Parallel()
 

@@ -72,8 +72,7 @@ func (f Filesystem) Resolve(_ context.Context) ([]filesystem.ArtifactRecord, err
 //
 // spec: §6.4 — overlay DOMAIN.md files merge as the highest-precedence layer
 // in the caller's effective view. The consumer that exposes load_domain
-// applies the §4.5.4 merge of this set onto the registry result client-side
-// (F-4.5.2, F-6.4.2).
+// applies the §4.5.4 merge of this set onto the registry result client-side.
 func (f Filesystem) ResolveDomains(_ context.Context) (map[string]*manifest.Domain, error) {
 	if f.Path == "" {
 		return nil, ErrNoOverlay

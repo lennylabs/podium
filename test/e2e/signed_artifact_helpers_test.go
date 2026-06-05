@@ -1,6 +1,6 @@
 package e2e
 
-// Signed-artifact ingest and tamper fixture (gap G-INFRA-8).
+// Signed-artifact ingest and tamper fixture.
 //
 // The standalone filesystem bootstrap attaches no signatures, so a signed
 // artifact whose stored bytes are then tampered was inexpressible end to end.
@@ -27,7 +27,7 @@ package e2e
 // the MCP server verifies on materialization for sensitivity >= medium;
 // signature failure aborts with materialize.signature_invalid), §6.2
 // (PODIUM_VERIFY_SIGNATURES: never | medium-and-above | always), §6.6 step 2
-// (content-hash match over the delivered bytes). Gap G-INFRA-8.
+// (content-hash match over the delivered bytes).
 
 import (
 	"context"

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// spec: §2.2, §6.3.1 (F-2.2.3) — a registry configured with an identity
+// spec: §2.2, §6.3.1 — a registry configured with an identity
 // provider must resolve callers to an Identity so it can compose the
 // per-OAuth-identity effective view and apply per-layer visibility. The
 // boot guard refuses to start when a provider is configured but no

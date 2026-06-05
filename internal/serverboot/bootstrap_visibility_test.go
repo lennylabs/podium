@@ -8,7 +8,7 @@ import (
 	"github.com/lennylabs/podium/pkg/layer"
 )
 
-// Spec: §4.6 / §13.10 (F-4.6.9) — defaultBootstrapVisibility returns public
+// Spec: §4.6 / §13.10 — defaultBootstrapVisibility returns public
 // only for a no-identity-provider standalone (or public mode); once an
 // identity provider is configured it honors PODIUM_DEFAULT_LAYER_VISIBILITY so
 // bootstrap layers are not exposed to every caller.
@@ -38,7 +38,7 @@ func TestDefaultBootstrapVisibility_ByMode(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 (F-4.6.9) — a PODIUM_LAYER_PATH bootstrap layer in a deployment
+// Spec: §4.6 — a PODIUM_LAYER_PATH bootstrap layer in a deployment
 // with an identity provider and the default private visibility is NOT marked
 // public, so it is not exposed to every caller. The pre-fix bootstrap
 // hardcoded Public:true regardless of the deployment auth mode.
@@ -91,7 +91,7 @@ func TestBootstrapLayerPath_ZeroConfigStandaloneStaysPublic(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.10.15) — PODIUM_DEFAULT_LAYER_VISIBILITY is the fallback
+// Spec: §13.12 — PODIUM_DEFAULT_LAYER_VISIBILITY is the fallback
 // "applied when a layer is registered without an explicit setting", and a
 // bootstrap layer is exactly that. An operator who sets it to
 // private|organization for a multi-user standalone must get the restricted

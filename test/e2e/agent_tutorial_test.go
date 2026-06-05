@@ -53,7 +53,7 @@ const cmwFullExtraFM = "runtime_requirements:\n" +
 	"delegates_to:\n" +
 	"  - personal/dev-loop/conventional-commits@1.x\n"
 
-// T-D-first-agent-1 — the minimal agent materializes to
+// the minimal agent materializes to
 // .claude/agents/<name>.md with the ARTIFACT.md bytes verbatim.
 func TestAgentTutorial_MinimalMaterializes(t *testing.T) {
 	t.Parallel()
@@ -78,7 +78,7 @@ func TestAgentTutorial_MinimalMaterializes(t *testing.T) {
 	}
 }
 
-// T-D-first-agent-2 — the minimal agent lints with no issues (no SKILL.md
+// the minimal agent lints with no issues (no SKILL.md
 // is required for type: agent).
 func TestAgentTutorial_MinimalLintsClean(t *testing.T) {
 	t.Parallel()
@@ -89,7 +89,7 @@ func TestAgentTutorial_MinimalLintsClean(t *testing.T) {
 	}
 }
 
-// T-D-first-agent-3 — an agent missing version fails lint.
+// an agent missing version fails lint.
 func TestAgentTutorial_MissingVersionFails(t *testing.T) {
 	t.Parallel()
 	art := "---\ntype: agent\nname: commit-message-writer\ndescription: x\n---\n\nbody\n"
@@ -103,7 +103,7 @@ func TestAgentTutorial_MissingVersionFails(t *testing.T) {
 	}
 }
 
-// T-D-first-agent-4 — an agent with a non-semver version fails lint.
+// an agent with a non-semver version fails lint.
 func TestAgentTutorial_NonSemverFails(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{cmwID + "/ARTIFACT.md": cmwAgent("not-a-version", "", cmwMinimalBody)})
@@ -116,7 +116,7 @@ func TestAgentTutorial_NonSemverFails(t *testing.T) {
 	}
 }
 
-// T-D-first-agent-5 — sync against a non-existent registry path exits non-zero.
+// sync against a non-existent registry path exits non-zero.
 func TestAgentTutorial_SyncMissingRegistry(t *testing.T) {
 	t.Parallel()
 	missing := filepath.Join(t.TempDir(), "nope")
@@ -129,7 +129,7 @@ func TestAgentTutorial_SyncMissingRegistry(t *testing.T) {
 	}
 }
 
-// T-D-first-agent-6 — an agent's bundled resources land under
+// an agent's bundled resources land under
 // .claude/podium/<artifact-id>/ for claude-code. spec: doc "Part 3".
 func TestAgentTutorial_BundledResourcePath(t *testing.T) {
 	t.Parallel()
@@ -150,7 +150,7 @@ func TestAgentTutorial_BundledResourcePath(t *testing.T) {
 	}
 }
 
-// T-D-first-agent-7 — a resolved markdown-link prose reference lints clean.
+// a resolved markdown-link prose reference lints clean.
 // spec: doc "Part 3" (broken paths fail lint).
 func TestAgentTutorial_ProseRefResolves(t *testing.T) {
 	t.Parallel()
@@ -165,7 +165,7 @@ func TestAgentTutorial_ProseRefResolves(t *testing.T) {
 	}
 }
 
-// T-D-first-agent-8 — a markdown-link reference to a missing bundled file
+// a markdown-link reference to a missing bundled file
 // fails lint. spec: doc "Part 3".
 func TestAgentTutorial_ProseRefBrokenFails(t *testing.T) {
 	t.Parallel()
@@ -180,7 +180,7 @@ func TestAgentTutorial_ProseRefBrokenFails(t *testing.T) {
 	}
 }
 
-// T-D-first-agent-9 — runtime_requirements (system_packages) round-trips
+// runtime_requirements (system_packages) round-trips
 // through ARTIFACT.md after a none sync. spec: doc "Part 2".
 func TestAgentTutorial_RuntimeRequirementsRoundTrip(t *testing.T) {
 	t.Parallel()
@@ -199,7 +199,7 @@ func TestAgentTutorial_RuntimeRequirementsRoundTrip(t *testing.T) {
 	}
 }
 
-// T-D-first-agent-10 — CheckRuntimeRequirements reports ErrRuntimeUnavailable
+// CheckRuntimeRequirements reports ErrRuntimeUnavailable
 // when a required system package is absent. spec: doc "Part 2",
 // materialize.CheckRuntimeRequirements.
 func TestAgentTutorial_RuntimeUnavailableWhenGitMissing(t *testing.T) {
@@ -219,7 +219,7 @@ func TestAgentTutorial_RuntimeUnavailableWhenGitMissing(t *testing.T) {
 	}
 }
 
-// T-D-first-agent-11 — CheckRuntimeRequirements returns nil when the host
+// CheckRuntimeRequirements returns nil when the host
 // provides the required package.
 func TestAgentTutorial_RuntimeAvailableWhenGitPresent(t *testing.T) {
 	t.Parallel()
@@ -232,7 +232,7 @@ func TestAgentTutorial_RuntimeAvailableWhenGitPresent(t *testing.T) {
 	}
 }
 
-// T-D-first-agent-12 — scaffold --delegates-to writes a delegates_to block.
+// scaffold --delegates-to writes a delegates_to block.
 // spec: doc "Part 4".
 func TestAgentTutorial_ScaffoldDelegatesTo(t *testing.T) {
 	t.Parallel()
@@ -251,7 +251,7 @@ func TestAgentTutorial_ScaffoldDelegatesTo(t *testing.T) {
 	}
 }
 
-// T-D-first-agent-13 — the delegates_to edge is indexed and surfaced by
+// the delegates_to edge is indexed and surfaced by
 // /v1/dependents on the standalone server. spec: doc "Part 4".
 func TestAgentTutorial_DelegatesEdgeIndexed(t *testing.T) {
 	t.Parallel()
@@ -278,7 +278,7 @@ func TestAgentTutorial_DelegatesEdgeIndexed(t *testing.T) {
 	}
 }
 
-// T-D-first-agent-14 — podium impact lists the agent as a dependent of the
+// podium impact lists the agent as a dependent of the
 // delegated artifact. spec: doc "Part 4".
 func TestAgentTutorial_ImpactListsDependent(t *testing.T) {
 	t.Parallel()
@@ -297,7 +297,7 @@ func TestAgentTutorial_ImpactListsDependent(t *testing.T) {
 	}
 }
 
-// T-D-first-agent-15 — the full agent (script + delegates_to) lints clean.
+// the full agent (script + delegates_to) lints clean.
 // spec: doc "The full agent".
 func TestAgentTutorial_FullLintsClean(t *testing.T) {
 	t.Parallel()
@@ -312,7 +312,7 @@ func TestAgentTutorial_FullLintsClean(t *testing.T) {
 	}
 }
 
-// T-D-first-agent-16 — the full agent materializes both the manifest under
+// the full agent materializes both the manifest under
 // .claude/agents/ and the script under .claude/podium/<id>/. spec: doc
 // "The full agent".
 func TestAgentTutorial_FullMaterializes(t *testing.T) {
@@ -335,7 +335,7 @@ func TestAgentTutorial_FullMaterializes(t *testing.T) {
 	}
 }
 
-// T-D-first-agent-17 — sync --dry-run reports the agent but writes nothing.
+// sync --dry-run reports the agent but writes nothing.
 func TestAgentTutorial_DryRun(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{cmwID + "/ARTIFACT.md": cmwAgent("1.0.0", "", cmwMinimalBody)})
@@ -349,7 +349,7 @@ func TestAgentTutorial_DryRun(t *testing.T) {
 	}
 }
 
-// T-D-first-agent-18 — sync --json emits an envelope naming the adapter and
+// sync --json emits an envelope naming the adapter and
 // the agent.
 func TestAgentTutorial_SyncJSON(t *testing.T) {
 	t.Parallel()
@@ -382,7 +382,7 @@ func TestAgentTutorial_SyncJSON(t *testing.T) {
 	}
 }
 
-// T-D-first-agent-19 — an agent missing the type field fails lint.
+// an agent missing the type field fails lint.
 func TestAgentTutorial_MissingType(t *testing.T) {
 	t.Parallel()
 	art := "---\nname: commit-message-writer\nversion: 1.0.0\n---\n\nbody\n"
@@ -396,7 +396,7 @@ func TestAgentTutorial_MissingType(t *testing.T) {
 	}
 }
 
-// T-D-first-agent-20 — an agent name containing an underscore fails lint
+// an agent name containing an underscore fails lint
 // with lint.invalid_name. spec: ruleNameSyntax.
 func TestAgentTutorial_InvalidNameUnderscore(t *testing.T) {
 	t.Parallel()
@@ -411,7 +411,7 @@ func TestAgentTutorial_InvalidNameUnderscore(t *testing.T) {
 	}
 }
 
-// T-D-first-agent-21 — scaffold produces a lint-clean agent ARTIFACT.md.
+// scaffold produces a lint-clean agent ARTIFACT.md.
 func TestAgentTutorial_ScaffoldLintsClean(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -435,7 +435,7 @@ func TestAgentTutorial_ScaffoldLintsClean(t *testing.T) {
 	}
 }
 
-// T-D-first-agent-22 — sync with an unknown harness exits non-zero.
+// sync with an unknown harness exits non-zero.
 func TestAgentTutorial_UnknownHarness(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{cmwID + "/ARTIFACT.md": cmwAgent("1.0.0", "", cmwMinimalBody)})
@@ -448,7 +448,7 @@ func TestAgentTutorial_UnknownHarness(t *testing.T) {
 	}
 }
 
-// T-D-first-agent-23 — a backtick (non-link) prose reference is NOT scanned
+// a backtick (non-link) prose reference is NOT scanned
 // by lint.prose_reference, so a missing target passes. Documents the gap
 // between the doc's backtick prose and the markdown-link lint rule.
 func TestAgentTutorial_BacktickRefNotScanned(t *testing.T) {
@@ -464,7 +464,7 @@ func TestAgentTutorial_BacktickRefNotScanned(t *testing.T) {
 	}
 }
 
-// T-D-first-agent-24 — sync removes a stale .claude/agents/<name>.md when
+// sync removes a stale .claude/agents/<name>.md when
 // the artifact is deleted from the registry. spec: §7.5 stale cleanup.
 func TestAgentTutorial_StaleCleanup(t *testing.T) {
 	t.Parallel()
@@ -486,7 +486,7 @@ func TestAgentTutorial_StaleCleanup(t *testing.T) {
 	}
 }
 
-// T-D-first-agent-25 — an unresolvable delegates_to target does not block a
+// an unresolvable delegates_to target does not block a
 // filesystem sync; no filesystem lint rule validates the edge. Documents
 // the doc-accuracy gap (the existence/type/version checks the doc
 // describes apply on server ingest, not filesystem lint/sync).
@@ -506,7 +506,7 @@ func TestAgentTutorial_UnresolvedDelegateDoesNotBlockSync(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, ".claude/agents/commit-message-writer.md"))
 }
 
-// T-D-first-agent-26 — the none harness writes the canonical agent layout.
+// the none harness writes the canonical agent layout.
 func TestAgentTutorial_NoneCanonical(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{cmwID + "/ARTIFACT.md": cmwAgent("1.0.0", "", cmwMinimalBody)})

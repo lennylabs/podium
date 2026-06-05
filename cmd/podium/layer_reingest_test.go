@@ -12,7 +12,7 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// Spec: §7.3.1 (F-7.3.7) — `podium layer register --force-push-policy strict`
+// Spec: §7.3.1 — `podium layer register --force-push-policy strict`
 // persists the policy on the layer config.
 func TestLayerRegisterCmd_ForcePushPolicy(t *testing.T) {
 	const tenantID = "default"
@@ -40,7 +40,7 @@ func TestLayerRegisterCmd_ForcePushPolicy(t *testing.T) {
 	}
 }
 
-// Spec: §4.7.2 (F-7.3.9) — `--break-glass` without `--justification` is a
+// Spec: §4.7.2 — `--break-glass` without `--justification` is a
 // client-side argument error (rc 2) and never contacts the registry.
 func TestLayerReingestCmd_BreakGlassRequiresJustification(t *testing.T) {
 	rc := layerReingest([]string{
@@ -51,7 +51,7 @@ func TestLayerReingestCmd_BreakGlassRequiresJustification(t *testing.T) {
 	}
 }
 
-// Spec: §4.7.2 (F-7.3.9) — the break-glass flags reach the server as a request
+// Spec: §4.7.2 — the break-glass flags reach the server as a request
 // body the reingest runner receives (justification + approvers).
 func TestLayerReingestCmd_BreakGlassBodySent(t *testing.T) {
 	const tenantID = "default"

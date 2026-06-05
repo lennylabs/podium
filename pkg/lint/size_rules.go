@@ -64,7 +64,7 @@ func countLines(b []byte) int {
 
 // ruleBundledResourceSize implements §4.1's per-file and
 // per-package soft caps for bundled resources. The caps are
-// configurable per §12 ("soft cap is configurable", F-12.0.2):
+// configurable per §12 ("soft cap is configurable"):
 // perFileCap and perPackageCap override the package-default
 // constants when non-zero, threaded from Linter.PerFileSoftCapBytes /
 // Linter.PerPackageSoftCapBytes.

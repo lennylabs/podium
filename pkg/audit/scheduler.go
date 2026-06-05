@@ -59,7 +59,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 // failure the operator is told to monitor lands in the audit log and any
 // SIEM mirror, then invokes the OnFailure seam. A sink write error here
 // must not mask the original anchor error, so the append result is
-// ignored deliberately. spec: §8.6 (F-8.6.2).
+// ignored deliberately. spec: §8.6.
 func (s *Scheduler) notifyFailure(ctx context.Context, err error) {
 	_ = s.Sink.Append(ctx, Event{
 		Type:    EventAuditAnchorFailed,
@@ -79,7 +79,7 @@ func (s *Scheduler) notifyFailure(ctx context.Context, err error) {
 // On a detected gap (Verify returns ErrChainBroken) the scheduler records
 // an audit.gap_detected event best-effort, so SIEM mirroring (the §8.6
 // operational backstop) surfaces the break even when OnGap is unconfigured,
-// then invokes OnGap for in-process alerting. spec: §8.6 (F-8.6.1).
+// then invokes OnGap for in-process alerting. spec: §8.6.
 type VerifyScheduler struct {
 	Sink     *FileSink
 	Interval time.Duration

@@ -23,7 +23,7 @@ func capDiags(t *testing.T, content string) []Diagnostic {
 // Spec: §6.7.1 / §4.3.5 — an artifact without target_harnesses declares no
 // harness set and draws no capability diagnostic, even when it uses fields
 // that are ✗ on some harness. The doc-derived suite lints such artifacts
-// clean (T-D-artifact-types-37/38, T-D-first-agent-2).
+// clean.
 func TestHarnessCapability_NoTargetHarnessesSilent(t *testing.T) {
 	t.Parallel()
 	cases := []string{

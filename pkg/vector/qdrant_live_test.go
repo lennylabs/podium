@@ -7,8 +7,7 @@ import (
 	"github.com/lennylabs/podium/pkg/vector"
 )
 
-// Qdrant Cloud live integration (G-VEC-1, G-VEC-2, G-VEC-4 managed portion,
-// G-VEC-5). Gated on PODIUM_LIVE_EXTERNAL=1 plus PODIUM_QDRANT_URL and
+// Qdrant Cloud live integration. Gated on PODIUM_LIVE_EXTERNAL=1 plus PODIUM_QDRANT_URL and
 // PODIUM_QDRANT_COLLECTION (PODIUM_QDRANT_API_KEY when the cluster requires
 // auth). Storage-only requires the collection created sized to liveQdrantDim
 // (8) with cosine distance; self-embedding requires PODIUM_QDRANT_INFERENCE_MODEL
@@ -77,7 +76,7 @@ func liveQdrantSelfEmbed(t *testing.T) *vector.Qdrant {
 }
 
 // TestQdrant_Live_Conformance runs the shared SPI contract against the live
-// collection (G-VEC-2).
+// collection.
 //
 // Spec: §4.7 — RegistrySearchProvider conformance.
 func TestQdrant_Live_Conformance(t *testing.T) {
@@ -86,8 +85,7 @@ func TestQdrant_Live_Conformance(t *testing.T) {
 	runLiveSuite(t, liveQdrantDim, q)
 }
 
-// TestQdrant_Live_StorageOnly covers the precomputed-vector path (G-VEC-1,
-// G-VEC-5): ingest, nearest-neighbour recall, upsert replace, delete remove.
+// TestQdrant_Live_StorageOnly covers the precomputed-vector path: ingest, nearest-neighbour recall, upsert replace, delete remove.
 // Qdrant writes carry ?wait=true, so reads are consistent immediately, but the
 // poll helpers tolerate that and any future async behaviour.
 //
@@ -139,8 +137,8 @@ func TestQdrant_Live_StorageOnly(t *testing.T) {
 }
 
 // TestQdrant_Live_TenantIsolation writes two tenants' vectors into the one
-// collection and asserts a query scoped to one tenant never returns the other's
-// (G-VEC-4). Qdrant isolates per tenant by the tenant_id payload filter.
+// collection and asserts a query scoped to one tenant never returns the other's.
+// Qdrant isolates per tenant by the tenant_id payload filter.
 //
 // Spec: §4.7.1 — the org is the tenant boundary.
 func TestQdrant_Live_TenantIsolation(t *testing.T) {
@@ -188,8 +186,8 @@ func TestQdrant_Live_TenantIsolation(t *testing.T) {
 	}
 }
 
-// TestQdrant_Live_SelfEmbedding covers the server-side embedding path
-// (G-VEC-5): drive PutText/QueryText against Cloud Inference.
+// TestQdrant_Live_SelfEmbedding covers the server-side embedding path:
+// drive PutText/QueryText against Cloud Inference.
 //
 // Spec: §13.12 — PODIUM_QDRANT_INFERENCE_MODEL self-embedding.
 func TestQdrant_Live_SelfEmbedding(t *testing.T) {

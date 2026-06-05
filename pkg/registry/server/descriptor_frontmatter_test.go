@@ -10,7 +10,7 @@ import (
 
 // spec: §7.6.1 — a search_artifacts result carries the artifact's frontmatter
 // (the documented {id, type, version, score, frontmatter} schema) and omits the
-// notable-only summary field (F-7.6.11).
+// notable-only summary field.
 func TestDescriptorOf_FrontmatterOnSearch(t *testing.T) {
 	w := descriptorOf(core.ArtifactDescriptor{
 		ID: "finance/run", Type: "skill", Version: "1.0.0",
@@ -33,7 +33,7 @@ func TestDescriptorOf_FrontmatterOnSearch(t *testing.T) {
 
 // spec: §7.6.1 — a load_domain notable entry carries summary, source, and
 // folded_from (the documented {id, type, summary, source, folded_from} schema)
-// and omits the search-only frontmatter field (F-7.6.11).
+// and omits the search-only frontmatter field.
 func TestDescriptorOf_SummarySourceFoldedOnNotable(t *testing.T) {
 	w := descriptorOf(core.ArtifactDescriptor{
 		ID: "finance/run", Type: "skill",

@@ -13,7 +13,7 @@ const ctxArtifactInternal = "---\n" +
 	"sensitivity: low\n" +
 	"---\n\nbody\n"
 
-// TestLoadOne_RootLevelRejected covers F-4.2.1.
+// TestLoadOne_RootLevelRejected covers
 // spec: §4.2 — loadOne rejects a root-level ARTIFACT.md (empty canonical ID)
 // the same way the filesystem-source registry does, so both ingest paths
 // share the invariant that an artifact has an addressable canonical home.
@@ -29,7 +29,7 @@ func TestLoadOne_RootLevelRejected(t *testing.T) {
 	}
 }
 
-// TestLoadOne_AtSegmentRejected covers F-4.2.2.
+// TestLoadOne_AtSegmentRejected covers
 // spec: §4.2 — "@" is reserved for the @version/@sha256 reference suffix, so a
 // directory name containing "@" is an invalid canonical-ID segment.
 func TestLoadOne_AtSegmentRejected(t *testing.T) {
@@ -44,7 +44,7 @@ func TestLoadOne_AtSegmentRejected(t *testing.T) {
 	}
 }
 
-// TestLoadOne_NestedArtifactNotCaptured covers F-4.2.3.
+// TestLoadOne_NestedArtifactNotCaptured covers
 // spec: §4.2/§4.4 — the ingest resource walk stops at a nested artifact
 // boundary, so a child artifact's files are not captured as the parent's
 // bundled resources.

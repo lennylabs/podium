@@ -10,7 +10,7 @@ import (
 
 // spec: §6.2 / §9 — newAuditSink routes PODIUM_AUDIT_SINK to a file sink
 // for a path and to the external-endpoint sink for an http(s) URL; an
-// unset var leaves auditing to the registry. F-8.3.1, F-8.3.2.
+// unset var leaves auditing to the registry.
 func TestNewAuditSink_Routing(t *testing.T) {
 	t.Run("unset is registry-only", func(t *testing.T) {
 		sink, err := newAuditSink(&config{})
@@ -54,8 +54,8 @@ func TestNewAuditSink_Routing(t *testing.T) {
 // spec: §8.3 / §14.13 — two MCP server processes share one user-wide
 // ~/.podium/audit.log. Each writes meta-tool events through its own
 // FileSink; a verifier of the shared log accepts the interleaved
-// per-writer chains. F-14.13.1 (events are written) + F-14.13.2 (the
-// shared chain verifies). The registry is unreachable so only the local
+// per-writer chains, where events are written and the
+// shared chain verifies. The registry is unreachable so only the local
 // audit path runs.
 func TestMCPSharedAuditLog_ConcurrentWritersVerify(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "audit.log")

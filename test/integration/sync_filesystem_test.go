@@ -83,7 +83,7 @@ func TestPodiumSync_FilesystemSourceWritesTarget(t *testing.T) {
 // extends: through the same merge the registry applies at load time, so the
 // materialized output carries the merged, extends-stripped frontmatter rather
 // than the child's authored bytes. This is the §13.11.6 equivalent-output
-// guarantee on the filesystem side (F-13.11.2).
+// guarantee on the filesystem side.
 func TestPodiumSync_FilesystemSourceResolvesExtends(t *testing.T) {
 	t.Parallel()
 	registry := t.TempDir()
@@ -123,7 +123,7 @@ func TestPodiumSync_FilesystemSourceResolvesExtends(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 (F-4.6.2) — "The child's type: must match the parent's; ingest
+// Spec: §4.6 — "The child's type: must match the parent's; ingest
 // rejects an extends: chain that crosses types." `podium sync` over a
 // filesystem source resolves extends through the same merge; a cross-type
 // chain must be rejected rather than silently materialized with the parent's
@@ -154,7 +154,7 @@ func TestPodiumSync_FilesystemSourceRejectsCrossTypeExtends(t *testing.T) {
 
 // Spec: §13.11.2 — when defaults.registry is unset across all scopes and no
 // --registry / PODIUM_REGISTRY is given, the CLI errors with config.no_registry
-// and points the user at podium init (F-13.11.3).
+// and points the user at podium init.
 func TestPodiumSync_UnsetRegistryEmitsNoRegistryCode(t *testing.T) {
 	t.Parallel()
 	// A workspace with a .podium/ dir but no defaults.registry in any scope.
@@ -224,7 +224,7 @@ func TestPodiumSync_LayerPathAmbiguousIsRejected(t *testing.T) {
 	if res.ExitCode == 0 {
 		t.Fatalf("expected non-zero exit, stdout:\n%s", res.Stdout)
 	}
-	// spec: §13.10 (F-13.10.3) — the operator sees the documented
+	// spec: §13.10 — the operator sees the documented
 	// config.layer_path_ambiguous code, not only an English phrase.
 	if !strings.Contains(res.Stderr, "config.layer_path_ambiguous") {
 		t.Errorf("stderr missing 'config.layer_path_ambiguous': %s", res.Stderr)
@@ -302,7 +302,7 @@ func TestPodiumSync_IsIdempotent(t *testing.T) {
 	}
 }
 
-// Spec: §7.5.3 / §14.11 (F-14.11.2) — when --target already names the harness
+// Spec: §7.5.3 / §14.11 — when --target already names the harness
 // config directory (./build/.claude/, as in the §14.11 pipeline step), the
 // claude-code adapter's .claude/ prefix must not be doubled on disk, and the
 // committed lock records each materialized_path relative to the target

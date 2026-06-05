@@ -14,7 +14,7 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// Spec: §12 (F-12.0.1) — "ingest-time lint flags newly-set unlisted: true for
+// Spec: §12 — "ingest-time lint flags newly-set unlisted: true for
 // review." End-to-end through the SQLite store and the HTTP reingest endpoint:
 // flipping a layer's DOMAIN.md from listed to unlisted surfaces the
 // lint.domain_newly_unlisted advisory in the §7.3.1 reingest result, while the
@@ -81,7 +81,7 @@ func hasReingestAdvisory(resp map[string]any, code string) bool {
 	return false
 }
 
-// Spec: §12 (F-12.0.2) — "soft cap is configurable." End-to-end through the
+// Spec: §12 — "soft cap is configurable." End-to-end through the
 // ingest orchestrator and the built-in local source: a per-package soft cap
 // lowered via PODIUM_LINT_PER_PACKAGE_SOFT_CAP_BYTES turns a bundled package
 // that is well under the 10 MB default into a gating lint failure. t.Setenv

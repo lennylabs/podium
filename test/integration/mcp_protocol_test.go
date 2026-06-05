@@ -84,7 +84,7 @@ func TestPodiumMCP_InitializeNegotiates(t *testing.T) {
 // Spec: §6.9 "MCP protocol version mismatch" — for a host whose requested
 // protocolVersion is within the supported window but below the binary's max,
 // initialize negotiates DOWN to the host's version (echoes min(host, server))
-// rather than forcing the server's own constant. F-6.9.7.
+// rather than forcing the server's own constant.
 func TestPodiumMCP_NegotiatesDownToHostVersion(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t)
@@ -126,7 +126,7 @@ func TestPodiumMCP_NegotiatesDownToHostVersion(t *testing.T) {
 // error. A transport-level failure (connection refused) is the offline
 // condition, so search_artifacts against an unreachable registry returns a
 // result carrying status "offline" and no error key, letting the host tell a
-// transient outage from a request rejection (F-6.9.1, F-6.9.4).
+// transient outage from a request rejection.
 func TestPodiumMCP_NetworkRegistryUnreachable(t *testing.T) {
 	t.Parallel()
 	bin := buildMCP(t)

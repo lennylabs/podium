@@ -11,7 +11,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/core"
 )
 
-// Spec: §8.1/§8.3/§8.4 (F-8.4.7) — registry-owned catalogue events are
+// Spec: §8.1/§8.3/§8.4 — registry-owned catalogue events are
 // written through the registry AuditEmitter into the registry's FileSink
 // (the metadata store persists no audit stream), and the §8.4 retention
 // scheduler enforces against that same FileSink. So the 1-year audit-event

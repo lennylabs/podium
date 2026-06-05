@@ -58,7 +58,7 @@ func newHealthServer(registry string) *mcpServer {
 	}
 }
 
-// Spec: §13.9 (F-13.9.1) — the health tool reports mode ready and marks
+// Spec: §13.9 — the health tool reports mode ready and marks
 // the registry connected when /readyz answers ready, and stamps the last
 // successful call timestamp.
 func TestHealthTool_ReadyRegistry(t *testing.T) {
@@ -87,7 +87,7 @@ func TestHealthTool_ReadyRegistry(t *testing.T) {
 	}
 }
 
-// Spec: §13.2.1 / §13.9 (F-13.9.1) — the health tool surfaces mode
+// Spec: §13.2.1 / §13.9 — the health tool surfaces mode
 // read_only when the registry has flipped to read-only.
 func TestHealthTool_ReadOnlyRegistry(t *testing.T) {
 	t.Parallel()
@@ -103,7 +103,7 @@ func TestHealthTool_ReadOnlyRegistry(t *testing.T) {
 	}
 }
 
-// Spec: §13.10 (F-13.10.1) — the health tool surfaces mode public when the
+// Spec: §13.10 — the health tool surfaces mode public when the
 // registry runs in public mode. Public is a /healthz-only signal (/readyz
 // reports ready), so the tool must probe /healthz to detect it; a consumer
 // reading the health tool can then tell the registry is unauthenticated.
@@ -121,7 +121,7 @@ func TestHealthTool_PublicMode(t *testing.T) {
 	}
 }
 
-// Spec: §13.10 (F-13.10.1) — public mode outranks read_only in the
+// Spec: §13.10 — public mode outranks read_only in the
 // registry's modeBanner, so a registry reporting read_only on /readyz but
 // public on /healthz surfaces public.
 func TestHealthTool_PublicOutranksReadOnly(t *testing.T) {
@@ -135,7 +135,7 @@ func TestHealthTool_PublicOutranksReadOnly(t *testing.T) {
 	}
 }
 
-// Spec: §13.9 / §13.10 (F-13.10.1) — a non-public /healthz leaves the
+// Spec: §13.9 / §13.10 — a non-public /healthz leaves the
 // /readyz readiness mode intact, so a plain ready registry still reports
 // ready after the public probe.
 func TestHealthTool_NonPublicKeepsReadyMode(t *testing.T) {
@@ -149,7 +149,7 @@ func TestHealthTool_NonPublicKeepsReadyMode(t *testing.T) {
 	}
 }
 
-// Spec: §13.9 (F-13.9.1) — a registry that answers not_ready (503) is
+// Spec: §13.9 — a registry that answers not_ready (503) is
 // reachable on the wire but unusable for fresh reads, so the tool reports
 // mode unreachable while connected stays true.
 func TestHealthTool_NotReadyRegistry(t *testing.T) {
@@ -166,7 +166,7 @@ func TestHealthTool_NotReadyRegistry(t *testing.T) {
 	}
 }
 
-// Spec: §13.9 (F-13.9.1) — when the registry does not answer at all, the
+// Spec: §13.9 — when the registry does not answer at all, the
 // tool reports mode unreachable, connected false, and no last successful
 // call.
 func TestHealthTool_UnreachableRegistry(t *testing.T) {
@@ -188,7 +188,7 @@ func TestHealthTool_UnreachableRegistry(t *testing.T) {
 	}
 }
 
-// Spec: §13.9 (F-13.9.1) — cache size reports the resolution-cache entry
+// Spec: §13.9 — cache size reports the resolution-cache entry
 // count.
 func TestHealthTool_CacheSize(t *testing.T) {
 	t.Parallel()
@@ -205,7 +205,7 @@ func TestHealthTool_CacheSize(t *testing.T) {
 	}
 }
 
-// Spec: §13.9 (F-13.9.1) — tools/call dispatches the health tool, and
+// Spec: §13.9 — tools/call dispatches the health tool, and
 // tools/list advertises it.
 func TestHealthTool_RegisteredAndDispatched(t *testing.T) {
 	t.Parallel()

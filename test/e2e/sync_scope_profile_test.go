@@ -22,7 +22,7 @@ func writeWorkspaceConfig(t *testing.T, ws, content string) string {
 }
 
 // spec: §7.5.2 — `podium sync --profile <name>` loads the named scope from
-// sync.yaml and applies its include/exclude/type (F-7.5.2).
+// sync.yaml and applies its include/exclude/type.
 func TestSync_ProfileResolvesScope(t *testing.T) {
 	reg := cliReg(t)
 	ws := t.TempDir()
@@ -44,7 +44,7 @@ func TestSync_ProfileResolvesScope(t *testing.T) {
 }
 
 // spec: §7.5.2 — registry is read from defaults.registry when --registry is
-// omitted, and a stale --profile that names nothing fails (F-7.5.2).
+// omitted, and a stale --profile that names nothing fails.
 func TestSync_UnknownProfileFails(t *testing.T) {
 	reg := cliReg(t)
 	ws := t.TempDir()
@@ -54,7 +54,7 @@ func TestSync_UnknownProfileFails(t *testing.T) {
 }
 
 // spec: §7.5.2 — `podium sync --config <path>` iterates targets: and runs one
-// sync per entry, each with its own scope and target (F-7.5.2).
+// sync per entry, each with its own scope and target.
 func TestSync_MultiTargetConfig(t *testing.T) {
 	reg := cliReg(t)
 	ws := t.TempDir()
@@ -88,7 +88,7 @@ func TestSync_MultiTargetConfig(t *testing.T) {
 
 // spec: §7.5.5 — `podium sync override --add <id>` writes the artifact through
 // the active adapter just like a full sync, bringing in an out-of-scope but
-// visible artifact (F-7.5.5).
+// visible artifact.
 func TestSyncOverride_AddMaterializes(t *testing.T) {
 	reg := cliReg(t)
 	tgt := t.TempDir()
@@ -107,7 +107,7 @@ func TestSyncOverride_AddMaterializes(t *testing.T) {
 }
 
 // spec: §7.5.5 — `podium sync override --remove <id>` deletes the artifact's
-// materialized files from the target (F-7.5.5).
+// materialized files from the target.
 func TestSyncOverride_RemoveDeletes(t *testing.T) {
 	reg := cliReg(t)
 	tgt := t.TempDir()
@@ -124,7 +124,7 @@ func TestSyncOverride_RemoveDeletes(t *testing.T) {
 }
 
 // spec: §7.5.2 — project-local sync.local.yaml overrides project-shared
-// sync.yaml per key (F-7.5.3). The project-local registry points at a registry
+// sync.yaml per key. The project-local registry points at a registry
 // holding only finance, so the sync materializes finance, proving the
 // higher-precedence scope file won.
 func TestSync_ProjectLocalOverridesShared(t *testing.T) {

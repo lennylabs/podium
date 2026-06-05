@@ -229,7 +229,7 @@ func mcpOverlayVectorBackend(id string, dim int) (vector.Provider, error) {
 		PineconeHost:  os.Getenv("PODIUM_PINECONE_HOST"),
 		PineconeIndex: os.Getenv("PODIUM_PINECONE_INDEX"),
 		PineconeNS:    envDefault("PODIUM_PINECONE_NAMESPACE", "default"),
-		// §13.12 (F-13.12.3): the same control-plane override applies on the MCP
+		// §13.12: the same control-plane override applies on the MCP
 		// server, so an index-only Pinecone overlay resolves its host the same way.
 		PineconeControlPlane: os.Getenv("PODIUM_PINECONE_CONTROL_PLANE"),
 		WeaviateURL:          os.Getenv("PODIUM_WEAVIATE_URL"),

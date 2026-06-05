@@ -85,7 +85,7 @@ func TestLayerRegister_ExplicitVisibilityWins(t *testing.T) {
 	}
 }
 
-// Spec: §13.10 line 175 (F-13.12.15) — PODIUM_DEFAULT_LAYER_VISIBILITY=users
+// Spec: §13.10 line 175 — PODIUM_DEFAULT_LAYER_VISIBILITY=users
 // scopes an admin-defined layer registered without explicit visibility to the
 // authenticated registrant (users: [<registrant>]).
 func TestLayerRegister_DefaultVisibilityUsers(t *testing.T) {
@@ -120,7 +120,7 @@ func TestLayerRegister_DefaultVisibilityUsers(t *testing.T) {
 	}
 }
 
-// Spec: §13.10 (F-13.12.15) — with the users default but no authenticated
+// Spec: §13.10 — with the users default but no authenticated
 // registrant (anonymous standalone), the layer falls back to private (no
 // visibility filters), the safe fallback for the users selection.
 func TestLayerRegister_DefaultVisibilityUsersAnonymousStaysPrivate(t *testing.T) {

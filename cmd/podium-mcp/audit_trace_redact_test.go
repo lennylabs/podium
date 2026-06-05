@@ -32,7 +32,7 @@ func ctxWithTraceID(t *testing.T, hexID string) context.Context {
 	return oteltrace.ContextWithSpanContext(context.Background(), sc)
 }
 
-// Spec: §8.1 (F-8.1.1) — the MCP local audit event carries the in-flight
+// Spec: §8.1 — the MCP local audit event carries the in-flight
 // call's trace id so the registry and local streams share one id per call.
 // auditMeta (load_domain / load_artifact target events) stamps it.
 func TestMCPAuditMeta_StampsTraceID(t *testing.T) {
@@ -55,7 +55,7 @@ func TestMCPAuditMeta_StampsTraceID(t *testing.T) {
 	}
 }
 
-// Spec: §8.1 (F-8.1.1) — the search meta-tool local event also carries the
+// Spec: §8.1 — the search meta-tool local event also carries the
 // trace id, alongside the §8.2 query scrub.
 func TestMCPAuditSearch_StampsTraceID(t *testing.T) {
 	t.Parallel()
@@ -77,7 +77,7 @@ func TestMCPAuditSearch_StampsTraceID(t *testing.T) {
 	}
 }
 
-// Spec: §8.1 (F-8.1.1) — with no active span (tracing off) no trace id is
+// Spec: §8.1 — with no active span (tracing off) no trace id is
 // written, so the local stream does not emit a placeholder id that would
 // not match the registry's freshly minted one.
 func TestMCPAudit_NoTraceIDWhenTracingOff(t *testing.T) {
@@ -96,7 +96,7 @@ func TestMCPAudit_NoTraceIDWhenTracingOff(t *testing.T) {
 	}
 }
 
-// Spec: §8.2 (F-8.2.2) — the MCP server applies the manifest audit_redact
+// Spec: §8.2 — the MCP server applies the manifest audit_redact
 // directive before writing the artifact.loaded event to its local sink: the
 // named sensitive frontmatter field is surfaced and masked, never leaking
 // its raw value.
@@ -134,7 +134,7 @@ func TestMCPAuditLoadArtifact_RedactsManifestFields(t *testing.T) {
 	}
 }
 
-// Spec: §8.2 (F-8.2.2) — an artifact with no audit_redact directive writes
+// Spec: §8.2 — an artifact with no audit_redact directive writes
 // only the structural source key; the directive is inert by design, not by
 // omission.
 func TestMCPAuditLoadArtifact_NoDirectiveNoRedaction(t *testing.T) {

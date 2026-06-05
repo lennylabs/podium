@@ -10,7 +10,7 @@ import (
 	"github.com/lennylabs/podium/internal/testharness"
 )
 
-// Spec: §6.4 / §6.4.1 / F-6.4.1 — reindexOverlay re-resolves the overlay so
+// Spec: §6.4 / §6.4.1 — reindexOverlay re-resolves the overlay so
 // an artifact added while the bridge runs becomes visible, and a removed
 // overlay clears the in-memory records (the §6.9 "warn once" path) instead of
 // leaving stale drafts. The pre-fix server loaded the overlay once at startup
@@ -53,7 +53,7 @@ func TestReindexOverlay_PicksUpAddedAndRemoved(t *testing.T) {
 	}
 }
 
-// Spec: §6.4.1 / F-6.4.1 — the poll loop fires reindex when the watched
+// Spec: §6.4.1 — the poll loop fires reindex when the watched
 // tree's content fingerprint changes.
 func TestOverlayWatchLoop_FiresOnContentChange(t *testing.T) {
 	t.Parallel()
@@ -81,7 +81,7 @@ func TestOverlayWatchLoop_FiresOnContentChange(t *testing.T) {
 	}
 }
 
-// Spec: §6.4 step 2 / F-6.4.1 — the loop consults pathOf every tick, so an
+// Spec: §6.4 step 2 — the loop consults pathOf every tick, so an
 // overlay path established after startup (the roots/list reply) triggers an
 // initial reindex.
 func TestOverlayWatchLoop_FiresOnPathChange(t *testing.T) {
@@ -108,7 +108,7 @@ func TestOverlayWatchLoop_FiresOnPathChange(t *testing.T) {
 	}
 }
 
-// Spec: §6.4 / §14.7 / F-6.4.3 / F-14.7.1 — the overlay watcher uses fsnotify,
+// Spec: §6.4 / §14.7 — the overlay watcher uses fsnotify,
 // not a poll loop, so a content change is picked up promptly even when the
 // path re-check interval is long. A long interval starves the polling
 // fallback: this test reindexes within the fsnotify debounce, which the
@@ -143,7 +143,7 @@ func TestOverlayWatchLoop_UsesFsnotifyNotPolling(t *testing.T) {
 	}
 }
 
-// Spec: §6.4 / F-6.4.3 — a newly created subdirectory under the overlay is
+// Spec: §6.4 — a newly created subdirectory under the overlay is
 // itself watched, so an artifact package added at runtime (a new directory
 // holding ARTIFACT.md) is observed even though fsnotify is not recursive.
 func TestOverlayWatchLoop_WatchesNewSubdirectory(t *testing.T) {
@@ -180,7 +180,7 @@ func TestOverlayWatchLoop_WatchesNewSubdirectory(t *testing.T) {
 	}
 }
 
-// Spec: §6.4 / F-6.4.3 — retarget opens a real fsnotify watch over an existing
+// Spec: §6.4 — retarget opens a real fsnotify watch over an existing
 // directory and reports it active; an empty path leaves the watch inactive so
 // the loop parks the event cases and (when applicable) polls instead.
 func TestOverlayContentWatch_Retarget(t *testing.T) {

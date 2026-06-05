@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// spec: §7.5.3 / §14.11 (F-14.11.2) — the §14.11 CI pipeline runs
+// spec: §7.5.3 / §14.11 — the §14.11 CI pipeline runs
 // `podium sync --harness claude-code … --target ./build/.claude/`, pointing
 // --target at the harness config directory itself. The claude-code adapter
 // prefixes .claude/ onto every emitted path, so without target normalization the

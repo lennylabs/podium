@@ -116,7 +116,7 @@ func TestServe_LayerPathBootstrap_E2E(t *testing.T) {
 	}
 }
 
-// Spec: §6.2 (F-6.2.1) — the presigned-URL TTL accepts a `--flag` form, not
+// Spec: §6.2 — the presigned-URL TTL accepts a `--flag` form, not
 // just the env var. `podium serve --presign-ttl-seconds <n>` sets
 // PODIUM_PRESIGN_TTL_SECONDS, the value serverboot reads. Run() is forced to
 // fail fast (postgres store, no DSN) so the flag-to-env mapping is the
@@ -136,7 +136,7 @@ func TestServeCmd_PresignTTLFlagSetsEnv(t *testing.T) {
 	}
 }
 
-// Spec: §6.2 (F-6.2.1) — when the flag is omitted, an existing
+// Spec: §6.2 — when the flag is omitted, an existing
 // PODIUM_PRESIGN_TTL_SECONDS is preserved (the empty-flag branch does not
 // clear it).
 func TestServeCmd_PresignTTLFlagOmittedPreservesEnv(t *testing.T) {

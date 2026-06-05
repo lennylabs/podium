@@ -1,7 +1,7 @@
 package e2e
 
 // Audit transparency-log signing, anchoring, verification, and PII redaction in
-// one journey (gap G-AUTH-10).
+// one journey.
 //
 // PII redaction is unit-tested in pkg/audit, anchoring and chain verification
 // are integration-tested in audit_retention_reanchor_test.go, and
@@ -28,7 +28,7 @@ package e2e
 // Spec: §8.2 (free-text query redaction before audit, default-on), §8.6
 // (transparency anchoring via the registry-managed key; periodic chain
 // verification with automated gap detection), §4.7.9 (the registry-managed
-// Ed25519 signing key). Gap G-AUTH-10.
+// Ed25519 signing key).
 
 import (
 	"context"

@@ -83,7 +83,7 @@ func (q *QueryRetention) apply(e *Event, now time.Time) bool {
 // the surviving events. When the rewrite changes the log it appends an
 // audit.retention_enforced marker recording the superseded chain head,
 // so an external anchor of the prior head can be reconciled and
-// re-anchored (§8.6, F-8.4.8).
+// re-anchored (§8.6).
 //
 // When two policies cover the same Type, the most-restrictive
 // (smallest MaxAge) wins — the §8.4 retention-by-default behavior.
@@ -130,7 +130,7 @@ func Enforce(_ context.Context, sink *FileSink, now time.Time, policies []Policy
 	// any external anchor of the prior chain head. Append a boundary marker
 	// recording the superseded head and the drop count so a verifier
 	// holding an older anchor can reconcile it with the truncated log and
-	// an anchor scheduler re-anchors the new head (F-8.4.8). Query-text
+	// an anchor scheduler re-anchors the new head. Query-text
 	// redaction also rewrites the chain, but it removes no events; the
 	// marker is reserved for drops so a redaction-only pass stays quiet.
 	if dropped > 0 {
@@ -173,11 +173,11 @@ func Enforce(_ context.Context, sink *FileSink, now time.Time, policies []Policy
 // it denotes. §8.1 records a read event's caller as the OAuth sub-claim
 // (Caller) with the email attached separately (CallerEmail), so the value a
 // human knows for a GDPR request is usually the email while the sub-claim is
-// what appears in the layer-owner context. EraseUser therefore (F-8.5.2)
+// what appears in the layer-owner context. EraseUser therefore
 // first discovers every alias of the user by scanning for events whose Caller
 // or CallerEmail matches the passed userID and collecting both fields, so
 // passing either the email or the sub-claim erases the complete identity. The
-// redaction pass then (F-8.5.1) removes the email and group membership, not
+// redaction pass then removes the email and group membership, not
 // just the sub-claim, so the persisted record no longer carries the user's
 // PII. Public-mode CallerNetwork attributes (source IP, X-Forwarded-User)
 // describe the request path of a system:public call rather than the erased
@@ -189,7 +189,7 @@ func Enforce(_ context.Context, sink *FileSink, now time.Time, policies []Policy
 // unique salt per tenant; the same userID with two salts produces two
 // unrelated tombstones, which is the desired property.
 //
-// salt must be non-empty (§8.5, F-8.5.5): an empty salt reduces the
+// salt must be non-empty (§8.5): an empty salt reduces the
 // tombstone to sha256(user_id), which is reversible by brute force or
 // dictionary over candidate user IDs and defeats de-identification.
 //
@@ -208,7 +208,7 @@ func EraseUser(_ context.Context, sink *FileSink, userID, salt, admin string) (i
 	if err != nil {
 		return 0, err
 	}
-	// Alias-discovery pass (§8.5, F-8.5.2): an event belongs to the erased
+	// Alias-discovery pass (§8.5): an event belongs to the erased
 	// user when the passed userID matches its sub-claim or its email. Collect
 	// both identifiers from every such event so passing one form (e.g. the
 	// email) also redacts records that carry the other (e.g. the sub-claim in
@@ -231,7 +231,7 @@ func EraseUser(_ context.Context, sink *FileSink, userID, salt, admin string) (i
 	for i := range events {
 		ev := &events[i]
 		mutated := false
-		// Redact the full caller identity (F-8.5.1) when either identity field
+		// Redact the full caller identity when either identity field
 		// is an alias of the erased user: the sub-claim, the attached email,
 		// and the group membership. Group names are quasi-identifiers, so the
 		// membership is cleared rather than tombstoned.
@@ -262,7 +262,7 @@ func EraseUser(_ context.Context, sink *FileSink, userID, salt, admin string) (i
 		}
 	}
 	// Append the user.erased record so the action is itself audited. §8.1/
-	// §8.5 (F-8.5.4): the invoking admin is recorded as the event Caller and
+	// §8.5: the invoking admin is recorded as the event Caller and
 	// in the admin context field for accountability; with no admin supplied
 	// (an internal call) it falls back to system:retention.
 	caller := admin

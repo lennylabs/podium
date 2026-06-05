@@ -10,7 +10,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/core"
 )
 
-// Spec: §8.4/F-8.4.6 — the 1-year audit-event default must apply out of
+// Spec: §8.4 — the 1-year audit-event default must apply out of
 // the box, so the enforcement interval defaults to a positive value
 // (one day) rather than 0 (disabled).
 func TestLoadConfig_RetentionEnabledByDefault(t *testing.T) {
@@ -25,7 +25,7 @@ func TestLoadConfig_RetentionEnabledByDefault(t *testing.T) {
 	}
 }
 
-// Spec: §8.4/F-8.4.6 — an operator can still disable retention by
+// Spec: §8.4 — an operator can still disable retention by
 // setting the interval to 0.
 func TestLoadConfig_RetentionDisableableByOperator(t *testing.T) {
 	t.Setenv("PODIUM_AUDIT_RETENTION_INTERVAL_SECONDS", "0")
@@ -34,7 +34,7 @@ func TestLoadConfig_RetentionDisableableByOperator(t *testing.T) {
 	}
 }
 
-// Spec: §8.6 (F-8.6.1) — gap detection must be "automated and alerted",
+// Spec: §8.6 — gap detection must be "automated and alerted",
 // so the verification scheduler defaults to a positive interval (one hour)
 // out of the box and an operator can disable it with 0.
 func TestLoadConfig_VerifyEnabledByDefault(t *testing.T) {
@@ -48,7 +48,7 @@ func TestLoadConfig_VerifyEnabledByDefault(t *testing.T) {
 	}
 }
 
-// Spec: §8.4/F-8.4.5 — parseAuditSampleRates parses the
+// Spec: §8.4 — parseAuditSampleRates parses the
 // "TYPE=RATE,TYPE=RATE" spec and skips malformed or out-of-range entries.
 func TestParseAuditSampleRates(t *testing.T) {
 	t.Parallel()
@@ -73,7 +73,7 @@ func TestParseAuditSampleRates(t *testing.T) {
 	}
 }
 
-// Spec: §8.4/F-8.4.5 — the registry audit emitter consults the sampler
+// Spec: §8.4 — the registry audit emitter consults the sampler
 // at write time and drops sampled-out events before they enter the
 // hash chain; unconfigured types are written unchanged.
 func TestAuditEmitter_SamplerDropsBeforeChain(t *testing.T) {

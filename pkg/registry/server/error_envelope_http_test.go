@@ -22,7 +22,7 @@ type envelope struct {
 	SuggestedAction string         `json:"suggested_action"`
 }
 
-// spec: SS 6.10 (F-6.10.4, F-6.10.3) — an over-rate search returns HTTP
+// spec: SS 6.10 — an over-rate search returns HTTP
 // 429 with quota.search_qps_exceeded marked retryable and carrying an
 // operator remediation hint. Before the fix the 429 envelope reported
 // retryable=false with no suggested_action.
@@ -71,7 +71,7 @@ func TestServer_SearchQPSEnvelope_RetryableWithHint(t *testing.T) {
 	}
 }
 
-// spec: SS 6.10 (F-6.10.1) — the layer-count quota envelope carries the
+// spec: SS 6.10 — the layer-count quota envelope carries the
 // machine-readable cap and current count in details. Before the fix the
 // envelope had no details object.
 func TestServer_LayerCountEnvelope_Details(t *testing.T) {

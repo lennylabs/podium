@@ -36,7 +36,7 @@ func countDomainPublished(emits []domainAuditEvent) int {
 
 // spec: §8.1 — "domain.published | When a DOMAIN.md was added or changed."
 // A first ingest of a layer with a DOMAIN.md emits domain.published with the
-// canonical domain path as target and the layer recorded in context. F-8.1.5.
+// canonical domain path as target and the layer recorded in context.
 func TestIngest_EmitsDomainPublished(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()
@@ -75,7 +75,7 @@ func TestIngest_EmitsDomainPublished(t *testing.T) {
 
 // spec: §8.1 — domain.published fires only on a genuine change. Re-ingesting
 // a layer whose DOMAIN.md bytes are identical stays quiet, so SIEM consumers
-// see one event per real change rather than one per ingest cycle. F-8.1.5.
+// see one event per real change rather than one per ingest cycle.
 func TestIngest_DomainPublishedSilentOnUnchangedReingest(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()
@@ -101,7 +101,7 @@ func TestIngest_DomainPublishedSilentOnUnchangedReingest(t *testing.T) {
 
 // spec: §8.1 — a DOMAIN.md whose source changed since the previous ingest
 // emits domain.published again, distinguishing a content change from an
-// idempotent re-ingest. F-8.1.5.
+// idempotent re-ingest.
 func TestIngest_DomainPublishedOnContentChange(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()
@@ -128,7 +128,7 @@ func TestIngest_DomainPublishedOnContentChange(t *testing.T) {
 }
 
 // spec: §4.5.5 / §8.1 — the registry root has no DOMAIN.md, so a root-level
-// DOMAIN.md is skipped by ingest and never emits domain.published. F-8.1.5.
+// DOMAIN.md is skipped by ingest and never emits domain.published.
 func TestIngest_RootDomainMDDoesNotPublish(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()

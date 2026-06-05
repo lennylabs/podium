@@ -13,7 +13,7 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// Spec: §4.7 Version immutability invariant (F-1.3.1) — "A (artifact_id,
+// Spec: §4.7 Version immutability invariant — "A (artifact_id,
 // version) pair, once ingested, is bit-for-bit immutable forever in the
 // registry's content store. Subsequent commits in a layer's source that change
 // the same version: with different content are rejected at ingest. Readers in

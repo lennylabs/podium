@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// Spec: §6.10 (F-6.10.2) — when the registry answers a meta-tool call
+// Spec: §6.10 — when the registry answers a meta-tool call
 // with a structured error envelope, the MCP bridge binary surfaces the
 // discrete code, details, retryable, and suggested_action fields in the
 // tool-call result rather than collapsing them into an opaque string.

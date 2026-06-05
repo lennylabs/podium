@@ -8,7 +8,7 @@ import (
 
 // Spec: §7.5.2 — harness resolves per key by precedence: CLI flag, then
 // PODIUM_HARNESS, then the active profile's harness, then defaults.harness,
-// then the built-in "none" adapter (F-7.5.13).
+// then the built-in "none" adapter.
 func TestResolve_HarnessPrecedence(t *testing.T) {
 	t.Parallel()
 	merged := &sync.MergedConfig{

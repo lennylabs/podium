@@ -145,7 +145,7 @@ func TestAdminEraseCmd_LocalHappyPath(t *testing.T) {
 	})
 }
 
-// spec: §8.5 (F-8.5.5) — the local-log erase rejects an empty salt.
+// spec: §8.5 — the local-log erase rejects an empty salt.
 func TestAdminEraseCmd_EmptySaltRejected(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
@@ -159,7 +159,7 @@ func TestAdminEraseCmd_EmptySaltRejected(t *testing.T) {
 	})
 }
 
-// spec: §8.5 (F-8.5.4) — the local-log erase requires --operator so the
+// spec: §8.5 — the local-log erase requires --operator so the
 // invoking admin is recorded on user.erased.
 func TestAdminEraseCmd_MissingOperatorRejected(t *testing.T) {
 	dir := t.TempDir()
@@ -174,7 +174,7 @@ func TestAdminEraseCmd_MissingOperatorRejected(t *testing.T) {
 	})
 }
 
-// spec: §8.5 (F-8.5.3) — the default erase form POSTs to the registry's
+// spec: §8.5 — the default erase form POSTs to the registry's
 // /v1/admin/erase with the user_id and salt.
 func TestAdminEraseCmd_RegistryPath(t *testing.T) {
 	var gotPath, gotMethod string

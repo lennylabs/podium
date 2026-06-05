@@ -13,7 +13,7 @@ package e2e
 // /v1/load_domain vs /v1/domains/{path}, flat vs nested layer bodies,
 // the /healthz body). Each test asserts what the server actually emits
 // and names the divergence; unimplemented surfaces are skipped with the
-// blocking BUILD-GAPS finding.
+// blocking implementation-gap finding.
 
 import (
 	"bufio"
@@ -125,11 +125,11 @@ func apiInProcCore(t testing.TB) *core.Registry {
 	})
 }
 
-// ===== Health (T-D-http-api-1..3) ======================================
+// ===== Health ======================================
 
 // spec: §13.9 — /healthz is a liveness signal that returns {mode} and
 // conveys liveness through the 200 status; it carries no readiness
-// boolean (F-13.9.5). The http-api.md doc shows {status:"ok",
+// boolean. The http-api.md doc shows {status:"ok",
 // mode:"standalone", read_only:false}, recorded as a doc/impl gap.
 func TestHTTPAPI_Healthz(t *testing.T) {
 	srv := startServer(t, apiReg(t))
@@ -175,8 +175,7 @@ func TestHTTPAPI_HealthzReadOnly(t *testing.T) {
 // spec: §13.9 — /readyz reports ready / read_only / not_ready. A
 // healthy standalone deployment (in-memory store, no object store
 // outage) reports ready→200; the not_ready→503 branch is exercised by
-// the server unit tests, which inject a failing dependency probe
-// (F-13.9.2, F-13.9.3).
+// the server unit tests, which inject a failing dependency probe.
 func TestHTTPAPI_Readyz(t *testing.T) {
 	srv := startServer(t, apiReg(t))
 	st, body := getRaw(t, srv.BaseURL+"/readyz")
@@ -187,7 +186,7 @@ func TestHTTPAPI_Readyz(t *testing.T) {
 	t.Log("note: /readyz never returns 503 — modeBanner emits no \"not_ready\" state")
 }
 
-// ===== Discovery / load_domain (T-D-http-api-4..8) =====================
+// ===== Discovery / load_domain =====================
 
 // spec: http-api.md § Discovery / load_domain (root). The server mounts
 // /v1/load_domain?path=, not /v1/domains/{path}.
@@ -270,7 +269,7 @@ func TestHTTPAPI_LoadDomainNoteAbsent(t *testing.T) {
 	}
 }
 
-// ===== Discovery / search_domains (T-D-http-api-9..11) =================
+// ===== Discovery / search_domains =================
 
 // spec: http-api.md § search_domains. Mounted at /v1/search_domains; the
 // server keys domain hits under "domains" (the doc shows "results").
@@ -327,7 +326,7 @@ func TestHTTPAPI_SearchDomainsScope(t *testing.T) {
 	}
 }
 
-// ===== Discovery / search_artifacts (T-D-http-api-12..16) =============
+// ===== Discovery / search_artifacts =============
 
 // spec: http-api.md § search_artifacts. Mounted at /v1/search_artifacts.
 func TestHTTPAPI_SearchArtifacts(t *testing.T) {
@@ -423,7 +422,7 @@ func TestHTTPAPI_SearchArtifactsTopKCap(t *testing.T) {
 	}
 }
 
-// ===== Materialization / load_artifact (T-D-http-api-17..22) ==========
+// ===== Materialization / load_artifact ==========
 
 // spec: http-api.md § load_artifact. The server registers a GET handler
 // at /v1/load_artifact?id= (the doc shows POST /v1/artifacts/load).
@@ -539,7 +538,7 @@ func TestHTTPAPI_LoadArtifactSession(t *testing.T) {
 	}
 }
 
-// ===== Materialization / batchLoad (T-D-http-api-23..27) ==============
+// ===== Materialization / batchLoad ==============
 
 // spec: http-api.md § load_artifacts (bulk) — per-item envelopes.
 func TestHTTPAPI_BatchLoad(t *testing.T) {
@@ -565,7 +564,7 @@ func TestHTTPAPI_BatchLoad(t *testing.T) {
 }
 
 // spec: http-api.md § load_artifacts (bulk) — restricted item per-item
-// error. The authenticated, visibility-capable harness (G-INFRA-5) places one
+// error. The authenticated, visibility-capable harness places one
 // artifact in a restricted (users:) layer and one in a public layer, then
 // issues a batchLoad as a caller who cannot see the restricted item. §7.6.2
 // requires the denied item to surface as a per-item visibility.denied envelope
@@ -673,7 +672,7 @@ func TestHTTPAPI_BatchLoadVersionPins(t *testing.T) {
 	}
 }
 
-// ===== Layer management (T-D-http-api-28..36) =========================
+// ===== Layer management =========================
 
 // spec: http-api.md § Register a layer. The body is flat
 // (source_type/repo/ref/root/groups), not the doc's nested
@@ -714,7 +713,7 @@ func TestHTTPAPI_RegisterAdminAuth(t *testing.T) {
 	t.Skip("requires a standard deployment with admin authorization; standalone wires a no-op admin authorizer so admin-defined layer registration returns 201")
 }
 
-// spec: http-api.md § List layers. F-7.3.1: GET /v1/layers must not leak the
+// spec: http-api.md § List layers. GET /v1/layers must not leak the
 // inbound webhook HMAC secret; the secret is a one-time registration credential
 // and the list endpoint is not admin-gated.
 func TestHTTPAPI_ListLayers(t *testing.T) {
@@ -734,10 +733,10 @@ func TestHTTPAPI_ListLayers(t *testing.T) {
 		t.Fatalf("layers list empty")
 	}
 	if strings.Contains(string(body), secret) {
-		t.Errorf("F-7.3.1: GET /v1/layers leaked the inbound webhook HMAC secret:\n%s", body)
+		t.Errorf("GET /v1/layers leaked the inbound webhook HMAC secret:\n%s", body)
 	}
 	if strings.Contains(string(body), "WebhookSecret") || strings.Contains(string(body), "webhook_secret") {
-		t.Errorf("F-7.3.1: GET /v1/layers emitted a webhook-secret field:\n%s", body)
+		t.Errorf("GET /v1/layers emitted a webhook-secret field:\n%s", body)
 	}
 }
 
@@ -818,7 +817,7 @@ func TestHTTPAPI_UnregisterNotFound(t *testing.T) {
 	}
 }
 
-// spec: §7.3.1 / §1.4 (F-1.4.1) — the default cap is 3 user-defined
+// spec: §7.3.1 / §1.4 — the default cap is 3 user-defined
 // layers per identity. Registering a 4th through the standalone binary
 // is rejected with quota.layer_count_exceeded at HTTP 429, and the
 // rejected layer never appears in the layer list.
@@ -845,7 +844,7 @@ func TestDocHTTPAPI_LayerCapDefaultThree(t *testing.T) {
 	}
 }
 
-// spec: §7.3.1 / §4.4 (F-1.4.1) — the cap is configurable per tenant.
+// spec: §7.3.1 / §4.4 — the cap is configurable per tenant.
 // PODIUM_MAX_USER_LAYERS=1 lowers the standalone deployment's cap, so the
 // second user-defined registration is rejected.
 func TestDocHTTPAPI_LayerCapConfigurable(t *testing.T) {
@@ -867,7 +866,7 @@ func TestDocHTTPAPI_LayerCapConfigurable(t *testing.T) {
 	}
 }
 
-// ===== Scope preview (T-D-http-api-37..38) ============================
+// ===== Scope preview ============================
 
 // spec: http-api.md § Scope preview.
 func TestHTTPAPI_ScopePreview(t *testing.T) {
@@ -885,7 +884,7 @@ func TestHTTPAPI_ScopePreview(t *testing.T) {
 	}
 }
 
-// spec: http-api.md § Scope preview — 403 when disabled. F-3.5.1: the
+// spec: http-api.md § Scope preview — 403 when disabled. the
 // standalone binary honors PODIUM_EXPOSE_SCOPE_PREVIEW=false and answers
 // 403 config.scope_preview_disabled.
 func TestHTTPAPI_ScopePreviewDisabled(t *testing.T) {
@@ -901,7 +900,7 @@ func TestHTTPAPI_ScopePreviewDisabled(t *testing.T) {
 	}
 }
 
-// ===== Ingest webhook (T-D-http-api-39) ==============================
+// ===== Ingest webhook ==============================
 
 // spec: http-api.md § Ingest webhook (§7.3.1). The inbound Git-provider
 // webhook endpoint is mounted at /v1/ingest/webhook/{id}: an invalid HMAC
@@ -925,7 +924,7 @@ func TestHTTPAPI_IngestWebhookInvalid(t *testing.T) {
 	if err := json.Unmarshal(body, &reg); err != nil {
 		t.Fatalf("decode register response: %v\n%s", err, body)
 	}
-	// spec §14.10 (F-14.10.2): register advertises an absolute webhook URL
+	// spec §14.10: register advertises an absolute webhook URL
 	// built from the server's public base URL, not the relative path.
 	wantWebhook := srv.BaseURL + "/v1/ingest/webhook/vendor-hooks"
 	if reg.WebhookURL != wantWebhook {
@@ -974,7 +973,7 @@ func TestHTTPAPI_IngestWebhookInvalid(t *testing.T) {
 	}
 }
 
-// ===== Subscriptions / events (T-D-http-api-40..41) ==================
+// ===== Subscriptions / events ==================
 
 // spec: http-api.md § Subscriptions (SDK). Driven in-process so the
 // heartbeat interval can be shortened (SetHeartbeatForTesting).
@@ -1069,12 +1068,12 @@ func TestHTTPAPI_EventsTypeFilter(t *testing.T) {
 	}
 }
 
-// ===== Outbound webhooks (T-D-http-api-42..43) =======================
+// ===== Outbound webhooks =======================
 
 // spec: http-api.md § Outbound webhooks. Driven in-process so an event
 // can be published to a configured receiver. The delivered body carries
 // the full §7.3.2 schema {event, trace_id, timestamp, actor, data} and an
-// X-Podium-Signature header (F-7.3.1).
+// X-Podium-Signature header.
 func TestHTTPAPI_OutboundWebhook(t *testing.T) {
 	received := make(chan []byte, 1)
 	sigHeader := make(chan string, 1)
@@ -1129,7 +1128,7 @@ func TestHTTPAPI_AllOutboundEvents(t *testing.T) {
 	t.Skip("requires a wired ingest orchestrator to emit artifact.published/deprecated, domain.published, layer.ingested, layer.history_rewritten end to end; not available against the standalone fixture")
 }
 
-// ===== Read-only mode (T-D-http-api-44..45) ==========================
+// ===== Read-only mode ==========================
 
 // spec: http-api.md § Read-only mode — write endpoints rejected. Driven
 // in-process against the layer endpoint (the write surface that consults
@@ -1148,7 +1147,7 @@ func TestHTTPAPI_ReadOnlyRejectsWrites(t *testing.T) {
 		"id": "team-finance", "source_type": "local", "local_path": t.TempDir(),
 	})
 	apiWantStatus(t, code, 503, "read-only register", body)
-	// spec: §13.2.1 (F-13.2.1) — every write endpoint rejects with the
+	// spec: §13.2.1 — every write endpoint rejects with the
 	// single registry.read_only code; the spec defines no config.read_only.
 	got := apiJSONObj(t, body)["code"]
 	if got != "registry.read_only" {
@@ -1179,7 +1178,7 @@ func TestHTTPAPI_ReadOnlyServesReads(t *testing.T) {
 	}
 }
 
-// ===== Cache modes (T-D-http-api-46..49) =============================
+// ===== Cache modes =============================
 // PODIUM_CACHE_MODE governs the MCP/SDK consumer cache path; these
 // offline behaviors are exercised by the D-handling-responses and
 // D-custom-sdk suites against the MCP server and SDKs.
@@ -1200,12 +1199,12 @@ func TestHTTPAPI_CacheOfflineOnly(t *testing.T) {
 	t.Skip("PODIUM_CACHE_MODE=offline-only is an MCP/SDK consumer-cache behavior; covered by the D-handling-responses / D-custom-sdk suites")
 }
 
-// ===== Authentication (T-D-http-api-50..52) ==========================
+// ===== Authentication ==========================
 
 // spec: http-api.md § Authentication — unauthenticated rejected. In
 // injected-session-token mode the registry verifies the bearer token on
 // every meta-tool call (§6.3.2), so a call with no Authorization header is
-// rejected rather than served anonymously. F-6.3.1.
+// rejected rather than served anonymously.
 func TestHTTPAPI_AuthRequired(t *testing.T) {
 	t.Parallel()
 	priv, pem := injKeyPair(t)
@@ -1222,7 +1221,7 @@ func TestHTTPAPI_AuthRequired(t *testing.T) {
 
 // spec: http-api.md § Authentication; error-codes.md § auth.untrusted_runtime.
 // A token whose issuer is not a registered runtime key is rejected with
-// auth.untrusted_runtime carrying details.runtime_iss. F-6.3.2.
+// auth.untrusted_runtime carrying details.runtime_iss.
 func TestHTTPAPI_UntrustedRuntime(t *testing.T) {
 	t.Parallel()
 	priv, pem := injKeyPair(t)
@@ -1246,7 +1245,7 @@ func TestHTTPAPI_UntrustedRuntime(t *testing.T) {
 }
 
 // spec: §6.3.2 — a token signed by the registered runtime key verifies and
-// the meta-tool call succeeds (the positive path for 50/51). F-6.3.1.
+// the meta-tool call succeeds (the positive path for 50/51).
 func TestHTTPAPI_RegisteredRuntimeAccepted(t *testing.T) {
 	t.Parallel()
 	priv, pem := injKeyPair(t)
@@ -1260,7 +1259,7 @@ func TestHTTPAPI_RegisteredRuntimeAccepted(t *testing.T) {
 
 // spec: §6.3.2 — aud ("registry endpoint") is a required claim. With the
 // registry audience configured, a runtime-signed token that omits aud is
-// rejected with auth.untrusted_runtime rather than accepted. F-6.3.1.
+// rejected with auth.untrusted_runtime rather than accepted.
 func TestHTTPAPI_MissingAudRejected(t *testing.T) {
 	t.Parallel()
 	priv, pem := injKeyPair(t)
@@ -1284,7 +1283,7 @@ func TestHTTPAPI_MissingAudRejected(t *testing.T) {
 // caller.public_mode flag, and the source IP and any X-Forwarded-User under
 // caller.network, plus a trace id (§8.1 "W3C Trace Context"). The caller
 // attributes nest under a single caller object so the spec's dotted keys
-// resolve. F-8.1.1, F-8.1.6, F-13.2.2, F-13.10.4.
+// resolve.
 func TestHTTPAPI_PublicModeAudit(t *testing.T) {
 	reg := apiReg(t)
 	auditPath := filepath.Join(t.TempDir(), "audit.log")
@@ -1338,7 +1337,7 @@ func readOrEmpty(path string) string {
 	return string(b)
 }
 
-// ===== Error envelope, objects, quota (T-D-http-api-53..57) ===========
+// ===== Error envelope, objects, quota ===========
 
 // spec: error-codes.md § Error envelope.
 func TestHTTPAPI_ErrorEnvelope(t *testing.T) {
@@ -1430,7 +1429,7 @@ func TestHTTPAPI_SearchQPSQuota(t *testing.T) {
 			env := apiJSONObj(t, body)
 			if env["code"] == "quota.search_qps_exceeded" {
 				exceeded = true
-				// spec: error-codes.md § Error envelope (F-6.10.3/.4) — a
+				// spec: error-codes.md § Error envelope — a
 				// rate-limit code is retryable and carries a remediation hint.
 				if env["retryable"] != true {
 					t.Errorf("retryable=%v, want true for quota.search_qps_exceeded", env["retryable"])
@@ -1465,7 +1464,7 @@ func TestHTTPAPI_MaterializeRateQuota(t *testing.T) {
 	}
 }
 
-// ===== Undocumented endpoints & SLOs (T-D-http-api-58..64) ============
+// ===== Undocumented endpoints & SLOs ============
 
 // spec: http-api.md (domain analyze not explicitly documented).
 func TestHTTPAPI_DomainAnalyze(t *testing.T) {
@@ -1481,7 +1480,7 @@ func TestHTTPAPI_DomainAnalyze(t *testing.T) {
 // spec: http-api.md / §4.7.2 — POST/DELETE /v1/admin/grants. An
 // authenticated admin grants (201) and revokes (204) the admin role; a
 // verified non-admin is refused with HTTP 403 (auth.forbidden). The
-// authenticated harness (G-INFRA-5) supplies the admin identity the
+// authenticated harness supplies the admin identity the
 // standalone server alone cannot.
 func TestHTTPAPI_AdminGrants(t *testing.T) {
 	t.Parallel()

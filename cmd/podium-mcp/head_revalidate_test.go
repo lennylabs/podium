@@ -12,7 +12,7 @@ import (
 	"github.com/lennylabs/podium/pkg/version"
 )
 
-// spec: §6.5 (F-6.5.2) — in always-revalidate mode a cached resolution is
+// spec: §6.5 — in always-revalidate mode a cached resolution is
 // revalidated via HEAD. When the registry confirms the content hash is
 // unchanged, the bridge serves the cached content and issues no full GET.
 func TestLoadArtifact_AlwaysRevalidate_HeadMatchServesCache(t *testing.T) {
@@ -66,7 +66,7 @@ func TestLoadArtifact_AlwaysRevalidate_HeadMatchServesCache(t *testing.T) {
 	}
 }
 
-// spec: §6.5 (F-6.5.2) — when HEAD reports a different content hash, the cached
+// spec: §6.5 — when HEAD reports a different content hash, the cached
 // content is stale and the bridge performs a full GET.
 func TestLoadArtifact_AlwaysRevalidate_HeadMismatchFullFetches(t *testing.T) {
 	t.Parallel()

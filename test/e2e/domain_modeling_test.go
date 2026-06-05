@@ -14,10 +14,10 @@ package e2e
 // unlisted suppression, cross-layer merge, and the discovery-rendering knobs
 // (max_depth, fold_*, notable_count, target_response_tokens, featured,
 // deprioritize). search_domains runs hybrid retrieval over those DOMAIN.md
-// projections (F-3.2.1): tests 9, 10, and 49 assert keyword retrieval through
+// projections: tests 9, 10, and 49 assert keyword retrieval through
 // the HTTP endpoint, the CLI, and the MCP tool.
 // Doc claims with no finding filed are asserted against actual behavior with a
-// note so a future change is detected (T-D-domains-53).
+// note so a future change is detected.
 
 import (
 	"encoding/json"
@@ -117,7 +117,7 @@ func dmNoDomainRegistry(t *testing.T) string {
 	})
 }
 
-// T-D-domains-1 — load_domain enumerates subdomains from a directory tree with
+// load_domain enumerates subdomains from a directory tree with
 // no DOMAIN.md.
 func TestDomainModel_LoadDomainSubdomainsNoDomainMD(t *testing.T) {
 	t.Parallel()
@@ -132,7 +132,7 @@ func TestDomainModel_LoadDomainSubdomainsNoDomainMD(t *testing.T) {
 	}
 }
 
-// T-D-domains-2 — load_domain("personal/hello") lists the greet artifact in its
+// load_domain("personal/hello") lists the greet artifact in its
 // notable list, with no DOMAIN.md required.
 func TestDomainModel_LoadDomainNotableNoDomainMD(t *testing.T) {
 	t.Parallel()
@@ -150,7 +150,7 @@ func TestDomainModel_LoadDomainNotableNoDomainMD(t *testing.T) {
 	}
 }
 
-// T-D-domains-3 — `podium domain show <path>` prints subdomain paths for a tree
+// `podium domain show <path>` prints subdomain paths for a tree
 // with no DOMAIN.md.
 func TestDomainModel_CLIShowNoDomainMD(t *testing.T) {
 	t.Parallel()
@@ -164,8 +164,8 @@ func TestDomainModel_CLIShowNoDomainMD(t *testing.T) {
 	}
 }
 
-// T-D-domains-4 — a child domain descriptor carries its DOMAIN.md
-// frontmatter description (§4.5.1, §4.5.5). spec: §4.5.5 (F-4.5.2)
+// a child domain descriptor carries its DOMAIN.md
+// frontmatter description (§4.5.1, §4.5.5). spec: §4.5.5
 func TestDomainModel_ChildDescriptionInLoadDomain(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -184,8 +184,8 @@ func TestDomainModel_ChildDescriptionInLoadDomain(t *testing.T) {
 	}
 }
 
-// T-D-domains-5 — load_domain on the domain itself returns the prose body
-// in the description slot (§4.5.5 description rendering). spec: §4.5.5 (F-4.5.2)
+// load_domain on the domain itself returns the prose body
+// in the description slot (§4.5.5 description rendering). spec: §4.5.5
 func TestDomainModel_ProseBodyForRequestedDomain(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -201,9 +201,9 @@ func TestDomainModel_ProseBodyForRequestedDomain(t *testing.T) {
 	}
 }
 
-// T-D-domains-6 — load_domain depth=2 returns child descriptions without
+// load_domain depth=2 returns child descriptions without
 // their prose bodies (§4.5.5: only the requested domain gets its body).
-// spec: §4.5.5 (F-4.5.7, F-4.5.2)
+// spec: §4.5.5
 func TestDomainModel_DepthTwoChildDescriptionsOnly(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -229,9 +229,9 @@ func TestDomainModel_DepthTwoChildDescriptionsOnly(t *testing.T) {
 	}
 }
 
-// T-D-domains-7 — a domain without DOMAIN.md returns a synthesized fallback
+// a domain without DOMAIN.md returns a synthesized fallback
 // description from the directory basename (title-cased, de-slugged).
-// spec: §4.5.5 (F-4.5.2)
+// spec: §4.5.5
 func TestDomainModel_SynthesizedFallbackDescription(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -249,8 +249,8 @@ func TestDomainModel_SynthesizedFallbackDescription(t *testing.T) {
 	}
 }
 
-// T-D-domains-8 — keywords are returned verbatim in load_domain output for
-// the domain (§4.5.5). spec: §4.5.5 (F-4.5.3)
+// keywords are returned verbatim in load_domain output for
+// the domain (§4.5.5). spec: §4.5.5
 func TestDomainModel_KeywordsInLoadDomain(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -268,9 +268,9 @@ func TestDomainModel_KeywordsInLoadDomain(t *testing.T) {
 	}
 }
 
-// T-D-domains-9 — search_domains finds a domain via a DOMAIN.md keyword
+// search_domains finds a domain via a DOMAIN.md keyword
 // absent from its path and description (hybrid retrieval over the domain
-// projection). spec: §3.2 / §4.7 (F-3.2.1)
+// projection). spec: §3.2 / §4.7
 func TestDomainModel_SearchDomainsByKeyword(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -285,8 +285,8 @@ func TestDomainModel_SearchDomainsByKeyword(t *testing.T) {
 	}
 }
 
-// T-D-domains-10 — `podium domain search` finds a domain via a keyword
-// (the CLI wraps search_domains). spec: §3.2 / §4.7 (F-3.2.1)
+// `podium domain search` finds a domain via a keyword
+// (the CLI wraps search_domains). spec: §3.2 / §4.7
 func TestDomainModel_CLISearchByKeyword(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -316,8 +316,8 @@ func dmFeaturedRegistry(t *testing.T, domainMD string, children ...string) strin
 	return writeRegistry(t, files)
 }
 
-// T-D-domains-11 — featured artifacts surface first in the notable list, in
-// author-supplied order (§4.5.5 notable selection). spec: §4.5.5 (F-4.5.7)
+// featured artifacts surface first in the notable list, in
+// author-supplied order (§4.5.5 notable selection). spec: §4.5.5
 func TestDomainModel_FeaturedFirstInNotable(t *testing.T) {
 	t.Parallel()
 	md := "---\ndescription: AP\ndiscovery:\n  featured:\n    - finance/ap/zebra\n---\n\n# AP\n"
@@ -330,8 +330,8 @@ func TestDomainModel_FeaturedFirstInNotable(t *testing.T) {
 	}
 }
 
-// T-D-domains-12 — a featured list exceeding notable_count is truncated in
-// author order (§4.5.5 cap). spec: §4.5.5 (F-4.5.7)
+// a featured list exceeding notable_count is truncated in
+// author order (§4.5.5 cap). spec: §4.5.5
 func TestDomainModel_FeaturedTruncatedAtNotableCount(t *testing.T) {
 	t.Parallel()
 	md := "---\ndescription: AP\ndiscovery:\n  notable_count: 2\n  featured:\n    - finance/ap/a\n    - finance/ap/b\n    - finance/ap/c\n---\n\n# AP\n"
@@ -345,8 +345,8 @@ func TestDomainModel_FeaturedTruncatedAtNotableCount(t *testing.T) {
 	}
 }
 
-// T-D-domains-13 — a deprioritize entry ranks a matching child last and
-// excludes it when the notable cap leaves no room (§4.5.5). spec: §4.5.5 (F-4.5.7)
+// a deprioritize entry ranks a matching child last and
+// excludes it when the notable cap leaves no room (§4.5.5). spec: §4.5.5
 func TestDomainModel_DeprioritizeExcludesFromNotable(t *testing.T) {
 	t.Parallel()
 	md := "---\ndescription: AP\ndiscovery:\n  notable_count: 1\n  deprioritize:\n    - finance/ap/old-invoice\n---\n\n# AP\n"
@@ -385,8 +385,8 @@ func lastSeg(p string) string {
 	return p
 }
 
-// T-D-domains-14 — an exact-match include imports an artifact from another
-// domain (§4.5.2). spec: §4.5.2 (F-4.5.6)
+// an exact-match include imports an artifact from another
+// domain (§4.5.2). spec: §4.5.2
 func TestDomainModel_IncludeExactMatch(t *testing.T) {
 	t.Parallel()
 	md := "---\ndescription: AP\ninclude:\n  - _shared/payment-helpers/routing-validator\n---\n\n# AP\n"
@@ -398,8 +398,8 @@ func TestDomainModel_IncludeExactMatch(t *testing.T) {
 	}
 }
 
-// T-D-domains-15 — a one-level wildcard include imports matching artifacts and
-// not deeper ones (§4.5.2). spec: §4.5.2 (F-4.5.6)
+// a one-level wildcard include imports matching artifacts and
+// not deeper ones (§4.5.2). spec: §4.5.2
 func TestDomainModel_IncludeOneLevelWildcard(t *testing.T) {
 	t.Parallel()
 	md := "---\ndescription: AP\ninclude:\n  - finance/payments/*\n---\n\n# AP\n"
@@ -416,8 +416,8 @@ func TestDomainModel_IncludeOneLevelWildcard(t *testing.T) {
 	}
 }
 
-// T-D-domains-16 — a recursive wildcard include imports all matching artifacts
-// at any depth (§4.5.2). spec: §4.5.2 (F-4.5.6)
+// a recursive wildcard include imports all matching artifacts
+// at any depth (§4.5.2). spec: §4.5.2
 func TestDomainModel_IncludeRecursiveWildcard(t *testing.T) {
 	t.Parallel()
 	md := "---\ndescription: AP\ninclude:\n  - finance/refunds/**\n---\n\n# AP\n"
@@ -433,8 +433,8 @@ func TestDomainModel_IncludeRecursiveWildcard(t *testing.T) {
 	}
 }
 
-// T-D-domains-17 — an alternation include imports the matching artifact IDs
-// (§4.5.2). spec: §4.5.2 (F-4.5.6)
+// an alternation include imports the matching artifact IDs
+// (§4.5.2). spec: §4.5.2
 func TestDomainModel_IncludeAlternation(t *testing.T) {
 	t.Parallel()
 	md := "---\ndescription: AP\ninclude:\n  - _shared/regex/{ssn,iban,routing-number}\n---\n\n# AP\n"
@@ -453,9 +453,9 @@ func TestDomainModel_IncludeAlternation(t *testing.T) {
 	}
 }
 
-// T-D-domains-18 — imported artifacts keep their canonical IDs in the
+// imported artifacts keep their canonical IDs in the
 // load_domain response (§4.5.2 imports do not change canonical paths).
-// spec: §4.5.2 (F-4.5.6)
+// spec: §4.5.2
 func TestDomainModel_ImportsKeepCanonicalIDs(t *testing.T) {
 	t.Parallel()
 	md := "---\ndescription: AP\ninclude:\n  - _shared/payment-helpers/routing-validator\n---\n\n# AP\n"
@@ -477,7 +477,7 @@ func dmRoutingValidatorRegistry(t *testing.T) string {
 	})
 }
 
-// T-D-domains-19 — search_artifacts returns an imported artifact once, under its
+// search_artifacts returns an imported artifact once, under its
 // canonical path. The artifact has exactly one canonical home, so its ID
 // appears a single time in the search payload regardless of imports.
 func TestDomainModel_SearchReturnsImportedOnce(t *testing.T) {
@@ -489,8 +489,8 @@ func TestDomainModel_SearchReturnsImportedOnce(t *testing.T) {
 	}
 }
 
-// T-D-domains-20 — exclude removes paths from the include set (§4.5.2,
-// applied after include). spec: §4.5.2 (F-4.5.6)
+// exclude removes paths from the include set (§4.5.2,
+// applied after include). spec: §4.5.2
 func TestDomainModel_ExcludeRemovesFromInclude(t *testing.T) {
 	t.Parallel()
 	md := "---\ndescription: AP\ninclude:\n  - _shared/regex/**\nexclude:\n  - _shared/regex/iban\n---\n\n# AP\n"
@@ -506,9 +506,9 @@ func TestDomainModel_ExcludeRemovesFromInclude(t *testing.T) {
 	}
 }
 
-// T-D-domains-21 — unlisted: true removes a folder and its subtree from
+// unlisted: true removes a folder and its subtree from
 // load_domain enumeration (§4.5.3) while a sibling stays visible.
-// spec: §4.5.3 / §4.5.5 (F-4.5.5)
+// spec: §4.5.3 / §4.5.5
 func TestDomainModel_UnlistedRemovedFromEnumeration(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -542,7 +542,7 @@ func dmUnlistedSharedRegistry(t *testing.T) string {
 	})
 }
 
-// T-D-domains-22 — an artifact inside an unlisted domain stays reachable via
+// an artifact inside an unlisted domain stays reachable via
 // load_artifact. The DOMAIN.md unlisted flag is not read over HTTP, but the
 // load path is independent of enumeration either way.
 func TestDomainModel_UnlistedArtifactReachableByLoad(t *testing.T) {
@@ -554,7 +554,7 @@ func TestDomainModel_UnlistedArtifactReachableByLoad(t *testing.T) {
 	}
 }
 
-// T-D-domains-23 — an artifact inside an unlisted domain appears in
+// an artifact inside an unlisted domain appears in
 // search_artifacts.
 func TestDomainModel_UnlistedArtifactInSearch(t *testing.T) {
 	t.Parallel()
@@ -565,8 +565,8 @@ func TestDomainModel_UnlistedArtifactInSearch(t *testing.T) {
 	}
 }
 
-// T-D-domains-24 — an artifact inside an unlisted domain is importable into
-// another domain via include (§4.5.3). spec: §4.5.3 (F-4.5.5, F-4.5.6)
+// an artifact inside an unlisted domain is importable into
+// another domain via include (§4.5.3). spec: §4.5.3
 func TestDomainModel_UnlistedArtifactImportable(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -584,9 +584,9 @@ func TestDomainModel_UnlistedArtifactImportable(t *testing.T) {
 	}
 }
 
-// T-D-domains-25 — unlisted: true propagates to the whole subtree, so a path
+// unlisted: true propagates to the whole subtree, so a path
 // below an unlisted folder also returns domain.not_found (§4.5.3).
-// spec: §4.5.3 / §4.5.5 (F-4.5.5)
+// spec: §4.5.3 / §4.5.5
 func TestDomainModel_UnlistedPropagatesToSubtree(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, dmUnlistedSharedRegistry(t))
@@ -596,8 +596,8 @@ func TestDomainModel_UnlistedPropagatesToSubtree(t *testing.T) {
 	}
 }
 
-// T-D-domains-26 — cross-layer DOMAIN.md description uses last-layer-wins; the
-// higher-precedence "team" layer wins over "org" (§4.5.4). spec: §4.5.4 (F-4.5.2)
+// cross-layer DOMAIN.md description uses last-layer-wins; the
+// higher-precedence "team" layer wins over "org" (§4.5.4). spec: §4.5.4
 func TestDomainModel_LayerMergeDescriptionLastWins(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, dmMultiLayer(t, map[string]string{
@@ -615,8 +615,8 @@ func TestDomainModel_LayerMergeDescriptionLastWins(t *testing.T) {
 	}
 }
 
-// T-D-domains-27 — cross-layer DOMAIN.md include is additive across layers
-// (§4.5.4). spec: §4.5.4 (F-4.5.6)
+// cross-layer DOMAIN.md include is additive across layers
+// (§4.5.4). spec: §4.5.4
 func TestDomainModel_LayerMergeIncludeAdditive(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, dmMultiLayer(t, map[string]string{
@@ -639,8 +639,8 @@ func TestDomainModel_LayerMergeIncludeAdditive(t *testing.T) {
 	}
 }
 
-// T-D-domains-28 — cross-layer unlisted uses most-restrictive-wins: one layer
-// setting unlisted: true hides the subtree (§4.5.4). spec: §4.5.4 (F-4.5.5)
+// cross-layer unlisted uses most-restrictive-wins: one layer
+// setting unlisted: true hides the subtree (§4.5.4). spec: §4.5.4
 func TestDomainModel_LayerMergeUnlistedMostRestrictive(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, dmMultiLayer(t, map[string]string{
@@ -655,8 +655,8 @@ func TestDomainModel_LayerMergeUnlistedMostRestrictive(t *testing.T) {
 	}
 }
 
-// T-D-domains-29 — cross-layer max_depth uses the lowest value; a caller depth
-// above the merged ceiling is capped and noted (§4.5.4). spec: §4.5.4 (F-4.5.7)
+// cross-layer max_depth uses the lowest value; a caller depth
+// above the merged ceiling is capped and noted (§4.5.4). spec: §4.5.4
 func TestDomainModel_LayerMergeMaxDepthLowest(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, dmMultiLayer(t, map[string]string{
@@ -672,8 +672,8 @@ func TestDomainModel_LayerMergeMaxDepthLowest(t *testing.T) {
 	}
 }
 
-// T-D-domains-30 — cross-layer fold_below_artifacts uses the highest value, so
-// a sparse subdomain folds into the parent (§4.5.4). spec: §4.5.4 (F-4.5.7)
+// cross-layer fold_below_artifacts uses the highest value, so
+// a sparse subdomain folds into the parent (§4.5.4). spec: §4.5.4
 func TestDomainModel_LayerMergeFoldBelowHighest(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, dmMultiLayer(t, map[string]string{
@@ -696,8 +696,8 @@ func TestDomainModel_LayerMergeFoldBelowHighest(t *testing.T) {
 	}
 }
 
-// T-D-domains-31 — cross-layer keywords are append-unique (§4.5.4).
-// spec: §4.5.4 (F-4.5.3)
+// cross-layer keywords are append-unique (§4.5.4).
+// spec: §4.5.4
 func TestDomainModel_LayerMergeKeywordsAppendUnique(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, dmMultiLayer(t, map[string]string{
@@ -725,9 +725,9 @@ func TestDomainModel_LayerMergeKeywordsAppendUnique(t *testing.T) {
 	}
 }
 
-// T-D-domains-32 — the max_depth knob caps the rendered subtree depth: at
+// the max_depth knob caps the rendered subtree depth: at
 // max_depth 1, an immediate child carries no nested subdomains (§4.5.5).
-// spec: §4.5.5 (F-4.5.7)
+// spec: §4.5.5
 func TestDomainModel_MaxDepthCapsSubtree(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -748,8 +748,8 @@ func TestDomainModel_MaxDepthCapsSubtree(t *testing.T) {
 	}
 }
 
-// T-D-domains-33 — fold_below_artifacts collapses a sparse subdomain into the
-// parent notable list with a folded_from annotation (§4.5.5). spec: §4.5.5 (F-4.5.7)
+// fold_below_artifacts collapses a sparse subdomain into the
+// parent notable list with a folded_from annotation (§4.5.5). spec: §4.5.5
 func TestDomainModel_FoldBelowArtifactsCollapses(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -780,8 +780,8 @@ func TestDomainModel_FoldBelowArtifactsCollapses(t *testing.T) {
 	}
 }
 
-// T-D-domains-34 — fold_passthrough_chains collapses single-child intermediate
-// domains into the deepest non-passthrough descendant (§4.5.5). spec: §4.5.5 (F-4.5.7)
+// fold_passthrough_chains collapses single-child intermediate
+// domains into the deepest non-passthrough descendant (§4.5.5). spec: §4.5.5
 func TestDomainModel_FoldPassthroughChains(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -800,8 +800,8 @@ func TestDomainModel_FoldPassthroughChains(t *testing.T) {
 	}
 }
 
-// T-D-domains-35 — the notable_count knob caps the notable list size (§4.5.5).
-// spec: §4.5.5 (F-4.5.7)
+// the notable_count knob caps the notable list size (§4.5.5).
+// spec: §4.5.5
 func TestDomainModel_NotableCountCap(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, dmFeaturedRegistry(t,
@@ -814,8 +814,8 @@ func TestDomainModel_NotableCountCap(t *testing.T) {
 	}
 }
 
-// T-D-domains-36 — target_response_tokens tightens the notable list to fit the
-// soft budget and surfaces a rendering note (§4.5.5). spec: §4.5.5 (F-4.5.7)
+// target_response_tokens tightens the notable list to fit the
+// soft budget and surfaces a rendering note (§4.5.5). spec: §4.5.5
 func TestDomainModel_TargetResponseTokensTightens(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, dmFeaturedRegistry(t,
@@ -832,9 +832,9 @@ func TestDomainModel_TargetResponseTokensTightens(t *testing.T) {
 	}
 }
 
-// T-D-domains-37 — `podium domain show <path>` surfaces the DOMAIN.md
+// `podium domain show <path>` surfaces the DOMAIN.md
 // description and keywords (it prints the load_domain payload).
-// spec: §4.5.5 (F-4.5.2, F-4.5.3)
+// spec: §4.5.5
 func TestDomainModel_CLIShowSurfacesDomainMD(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -851,7 +851,7 @@ func TestDomainModel_CLIShowSurfacesDomainMD(t *testing.T) {
 	}
 }
 
-// T-D-domains-38 — `podium domain show --json` emits valid JSON.
+// `podium domain show --json` emits valid JSON.
 func TestDomainModel_CLIShowJSON(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
@@ -875,7 +875,7 @@ func dmFinanceOpsRegistry(t *testing.T) string {
 	})
 }
 
-// T-D-domains-39 — `podium domain search --scope finance <query>` constrains
+// `podium domain search --scope finance <query>` constrains
 // results to the finance prefix and excludes ops.
 func TestDomainModel_CLISearchScope(t *testing.T) {
 	t.Parallel()
@@ -889,7 +889,7 @@ func TestDomainModel_CLISearchScope(t *testing.T) {
 	}
 }
 
-// T-D-domains-40 — `podium domain analyze --path <path>` reports metrics for the
+// `podium domain analyze --path <path>` reports metrics for the
 // subtree.
 func TestDomainModel_CLIAnalyzeSubtree(t *testing.T) {
 	t.Parallel()
@@ -903,7 +903,7 @@ func TestDomainModel_CLIAnalyzeSubtree(t *testing.T) {
 	}
 }
 
-// T-D-domains-41 — `podium domain analyze` with no --path analyzes the root and
+// `podium domain analyze` with no --path analyzes the root and
 // returns a non-empty report.
 func TestDomainModel_CLIAnalyzeRoot(t *testing.T) {
 	t.Parallel()
@@ -917,7 +917,7 @@ func TestDomainModel_CLIAnalyzeRoot(t *testing.T) {
 	}
 }
 
-// T-D-domains-42 — `podium domain show` without a registry errors (exit 2).
+// `podium domain show` without a registry errors (exit 2).
 func TestDomainModel_CLIShowMissingRegistry(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY="}, "domain", "show", "finance")
@@ -929,7 +929,7 @@ func TestDomainModel_CLIShowMissingRegistry(t *testing.T) {
 	}
 }
 
-// T-D-domains-43 — `podium domain search` without a query argument errors with
+// `podium domain search` without a query argument errors with
 // usage guidance (exit 2).
 func TestDomainModel_CLISearchMissingQuery(t *testing.T) {
 	t.Parallel()
@@ -943,7 +943,7 @@ func TestDomainModel_CLISearchMissingQuery(t *testing.T) {
 	}
 }
 
-// T-D-domains-44 — lint warns (exit 0) on a DOMAIN.md include pattern that
+// lint warns (exit 0) on a DOMAIN.md include pattern that
 // matches no artifact, naming the unresolved pattern.
 func TestDomainModel_LintImportUnresolved(t *testing.T) {
 	t.Parallel()
@@ -961,7 +961,7 @@ func TestDomainModel_LintImportUnresolved(t *testing.T) {
 	}
 }
 
-// T-D-domains-45 — lint warns (exit 0) on a DOMAIN.md import cycle between two
+// lint warns (exit 0) on a DOMAIN.md import cycle between two
 // domains, naming both participants.
 func TestDomainModel_LintImportCycle(t *testing.T) {
 	t.Parallel()
@@ -1023,7 +1023,7 @@ vendors.
 For inbound payments and AR, see ` + "`finance/ar/`" + `.
 `
 
-// T-D-domains-46 — the full DOMAIN.md schema example lints cleanly when every
+// the full DOMAIN.md schema example lints cleanly when every
 // include and featured pattern resolves to an existing artifact.
 func TestDomainModel_FullSchemaLintsClean(t *testing.T) {
 	t.Parallel()
@@ -1063,7 +1063,7 @@ func TestDomainModel_FullSchemaLintsClean(t *testing.T) {
 	}
 }
 
-// T-D-domains-47 — the MCP load_domain tool navigates the domain hierarchy and
+// the MCP load_domain tool navigates the domain hierarchy and
 // reports the subdomains.
 func TestDomainModel_MCPLoadDomain(t *testing.T) {
 	t.Parallel()
@@ -1075,8 +1075,8 @@ func TestDomainModel_MCPLoadDomain(t *testing.T) {
 	}
 }
 
-// T-D-domains-48 — the MCP load_domain tool returns the DOMAIN.md description
-// and keywords for the requested domain (§4.5.5). spec: §4.5.5 (F-4.5.2, F-4.5.3)
+// the MCP load_domain tool returns the DOMAIN.md description
+// and keywords for the requested domain (§4.5.5). spec: §4.5.5
 func TestDomainModel_MCPLoadDomainMetadata(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -1091,8 +1091,8 @@ func TestDomainModel_MCPLoadDomainMetadata(t *testing.T) {
 	}
 }
 
-// T-D-domains-49 — the MCP search_domains tool returns a domain matched by
-// a DOMAIN.md keyword routed through the bridge. spec: §3.2 / §4.7 (F-3.2.1)
+// the MCP search_domains tool returns a domain matched by
+// a DOMAIN.md keyword routed through the bridge. spec: §3.2 / §4.7
 func TestDomainModel_MCPSearchDomains(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -1107,7 +1107,7 @@ func TestDomainModel_MCPSearchDomains(t *testing.T) {
 	}
 }
 
-// T-D-domains-50 — load_domain on an unknown path returns 404 domain.not_found.
+// load_domain on an unknown path returns 404 domain.not_found.
 func TestDomainModel_LoadDomainNotFound(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
@@ -1120,7 +1120,7 @@ func TestDomainModel_LoadDomainNotFound(t *testing.T) {
 	}
 }
 
-// T-D-domains-51 — POST /v1/domain/analyze returns 405 (GET only).
+// POST /v1/domain/analyze returns 405 (GET only).
 func TestDomainModel_AnalyzePostNotAllowed(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
@@ -1130,9 +1130,9 @@ func TestDomainModel_AnalyzePostNotAllowed(t *testing.T) {
 	}
 }
 
-// T-D-domains-52 — a frontmatter-only DOMAIN.md (no prose body) resolves the
+// a frontmatter-only DOMAIN.md (no prose body) resolves the
 // requested domain's description to its frontmatter value (§4.5.5).
-// spec: §4.5.5 (F-4.5.2)
+// spec: §4.5.5
 func TestDomainModel_FrontmatterOnlyDescriptionFallback(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -1147,8 +1147,8 @@ func TestDomainModel_FrontmatterOnlyDescriptionFallback(t *testing.T) {
 	}
 }
 
-// T-D-domains-53 — the doc states lint warns when a DOMAIN.md prose body exceeds
-// 2000 tokens, but no such rule exists (no BUILD-GAPS finding is filed for this
+// the doc states lint warns when a DOMAIN.md prose body exceeds
+// 2000 tokens, but no such rule exists (no implementation-gap finding is filed for this
 // gap). This change-detector asserts the actual behavior: a long DOMAIN.md body
 // lints cleanly with no manifest_size diagnostic and no error. If a
 // DOMAIN.md body-length lint is later added, this test flags the change.
@@ -1172,8 +1172,8 @@ func TestDomainModel_DomainBodyLengthNoLintWarning(t *testing.T) {
 	}
 }
 
-// T-D-domains-54 — exclude is applied after include, removing the specified
-// paths from the imported set (§4.5.2). spec: §4.5.2 (F-4.5.6)
+// exclude is applied after include, removing the specified
+// paths from the imported set (§4.5.2). spec: §4.5.2
 func TestDomainModel_ExcludeAfterIncludePipeline(t *testing.T) {
 	t.Parallel()
 	md := "---\ndescription: AP\ninclude:\n  - _shared/**\nexclude:\n  - _shared/regex/iban\n---\n\n# AP\n"
@@ -1192,9 +1192,9 @@ func TestDomainModel_ExcludeAfterIncludePipeline(t *testing.T) {
 	}
 }
 
-// T-D-domains-56 — load_domain tags each notable entry with its §4.5.5
+// load_domain tags each notable entry with its §4.5.5
 // selection source: "featured" for an author-curated entry, "signal"
-// otherwise. spec: §4.5.5 (F-4.5.9)
+// otherwise. spec: §4.5.5
 func TestDomainModel_NotableSourceTag(t *testing.T) {
 	t.Parallel()
 	md := "---\ndescription: AP\ndiscovery:\n  featured:\n    - finance/ap/zebra\n---\n\n# AP\n"
@@ -1217,9 +1217,9 @@ func entrySource(e map[string]any) any {
 	return e["source"]
 }
 
-// T-D-domains-57 — target_response_tokens tightens the rendered subtree
+// target_response_tokens tightens the rendered subtree
 // depth and the note reports it ("Subtree depth reduced from X to Y ...").
-// spec: §4.5.5 (F-4.5.10)
+// spec: §4.5.5
 func TestDomainModel_BudgetReducesSubtreeDepthNote(t *testing.T) {
 	t.Parallel()
 	// finance has no direct artifacts (so the notable list is empty and
@@ -1239,9 +1239,9 @@ func TestDomainModel_BudgetReducesSubtreeDepthNote(t *testing.T) {
 	}
 }
 
-// T-D-domains-58 — a single-child intermediate domain whose only members
+// a single-child intermediate domain whose only members
 // arrive through DOMAIN.md include: is not collapsed away as a bare
-// pass-through (§4.5.5). spec: §4.5.5 (F-4.5.13)
+// pass-through (§4.5.5). spec: §4.5.5
 func TestDomainModel_ImportedMembersPreventCollapse(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -1259,9 +1259,9 @@ func TestDomainModel_ImportedMembersPreventCollapse(t *testing.T) {
 	}
 }
 
-// T-D-domains-55 — a cross-domain import from an unlisted _shared into
+// a cross-domain import from an unlisted _shared into
 // finance/ap surfaces the helpers under finance/ap while _shared stays hidden
-// from enumeration (§4.5.2, §4.5.3). spec: §4.5.2 / §4.5.3 (F-4.5.5, F-4.5.6)
+// from enumeration (§4.5.2, §4.5.3). spec: §4.5.2 / §4.5.3
 func TestDomainModel_CrossDomainImportFromUnlisted(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{

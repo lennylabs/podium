@@ -307,7 +307,7 @@ func (s *mcpServer) loadArtifactFromCache(contentHash, idHint string) (*loadArti
 		resp.Resources[filepath.ToSlash(rel)] = string(data)
 		return nil
 	})
-	// §6.5 last-access accounting (F-6.5.6): a content bucket is written once
+	// §6.5 last-access accounting: a content bucket is written once
 	// and only read afterward, so `podium cache prune` (mtime-based) would
 	// evict a frequently-read but never-rewritten bucket. Touch the bucket on
 	// every cache hit so a read counts as access.
@@ -330,7 +330,7 @@ func touchBucket(bucket string) {
 // namespace list (auth.*, config.*, ingest.*, materialize.*, quota.*, mcp.*,
 // network.*, registry.*, domain.*) has no cache.* namespace, so the code lives
 // under network.* — the same namespace as network.registry_unreachable, which
-// is the other degraded-network code (F-7.4.5).
+// is the other degraded-network code.
 var errOfflineCacheMiss = errors.New("network.offline_cache_miss: requested content not in offline cache")
 
 // argsIDAndVersion converts a generic argument map's `id` and `version` fields

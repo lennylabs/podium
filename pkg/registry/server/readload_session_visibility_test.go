@@ -43,7 +43,7 @@ func newSessionFixture(t *testing.T) *httptest.Server {
 
 // spec: §7.6.2 — an item the caller cannot resolve comes back as
 // visibility.denied, never registry.not_found, so the batch response does not
-// reveal whether the artifact exists in some hidden layer (F-7.6.7). A missing
+// reveal whether the artifact exists in some hidden layer. A missing
 // id and a visibility-filtered id both reduce to core.ErrNotFound, so they
 // share this one wire code.
 func TestBatchLoad_UnresolvableReturnsVisibilityDenied(t *testing.T) {
@@ -72,7 +72,7 @@ func TestBatchLoad_UnresolvableReturnsVisibilityDenied(t *testing.T) {
 	}
 }
 
-// spec: §7.6 — search_artifacts accepts a session_id filter (F-7.6.3); the
+// spec: §7.6 — search_artifacts accepts a session_id filter; the
 // server threads it into the core options without rejecting the request.
 func TestSearchArtifacts_AcceptsSessionID(t *testing.T) {
 	t.Parallel()

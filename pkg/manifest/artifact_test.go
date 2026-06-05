@@ -133,7 +133,7 @@ Apply when working with TypeScript files.
 	}
 }
 
-// Spec: §4.3 type-specific fields (F-4.3.1) — for type: agent the
+// Spec: §4.3 type-specific fields — for type: agent the
 // documented input/output mapping form ({ $ref: ./schemas/input.json })
 // decodes into SchemaRef.Ref. Before Input/Output were typed as
 // *SchemaRef this manifest failed to parse with ErrInvalidYAML ("cannot
@@ -162,7 +162,7 @@ agent body
 	}
 }
 
-// Spec: §4.3 type-specific fields (F-4.3.1) — a bare scalar path is also
+// Spec: §4.3 type-specific fields — a bare scalar path is also
 // accepted for input/output and populates Ref, so authors who omit the
 // $ref wrapper are not rejected at parse time.
 func TestParseArtifact_InputOutputRefScalarForm(t *testing.T) {
@@ -188,7 +188,7 @@ body
 	}
 }
 
-// Spec: §4.3 type-specific fields (F-4.3.1) — a malformed schema ref (a
+// Spec: §4.3 type-specific fields — a malformed schema ref (a
 // sequence rather than a scalar or { $ref: ... } mapping) is rejected with
 // ErrInvalidYAML rather than silently accepted.
 func TestParseArtifact_InputRefInvalidKind(t *testing.T) {
@@ -229,7 +229,7 @@ extends parent.
 	}
 }
 
-// Spec: §4.3 target_harnesses (F-4.3.4) — an empty or absent list targets
+// Spec: §4.3 target_harnesses — an empty or absent list targets
 // every harness; a non-empty list restricts materialization to the named
 // harnesses (exact adapter-ID match).
 func TestTargetsHarness(t *testing.T) {

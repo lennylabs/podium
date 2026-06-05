@@ -15,7 +15,7 @@ import (
 
 // spec: §6.2 / §8.3 / §9 — PODIUM_AUDIT_SINK can name an external endpoint;
 // the EndpointSink forwards each meta-tool event to it as JSON, carrying
-// the §8.6 hash-chain fields. F-8.3.2.
+// the §8.6 hash-chain fields.
 func TestEndpointSink_ForwardsJSON(t *testing.T) {
 	t.Parallel()
 	var (

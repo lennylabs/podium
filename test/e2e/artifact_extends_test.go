@@ -2,7 +2,7 @@ package e2e
 
 // End-to-end tests for docs/authoring/extends.md (D-extends).
 //
-// extends works end to end after the §4.6 remediation (F-4.6.1/2/3): a
+// extends works end to end after the §4.6 remediation: a
 // higher-precedence child that declares extends: at the same canonical ID is
 // accepted as an overlay at boot, the full field-semantics table merges into
 // the served frontmatter, a same-ID collision without extends is rejected, and
@@ -15,7 +15,7 @@ package e2e
 // those are covered by package-level tests. Bundled-file (resource) merge stays
 // skipped because the shared resolver (core.mergeChain) serves the child's
 // resources only; that resource-union behavior is unimplemented on the server
-// and on filesystem sync alike, independent of the F-13.11.2 frontmatter
+// and on filesystem sync alike, independent of the frontmatter
 // extends resolution now applied to the filesystem path.
 
 import (
@@ -78,7 +78,7 @@ func exLoad(t testing.TB, srv *serverProc, id string) exLoadResp {
 	return r
 }
 
-// ---- Pinning (T-D-extends-1..7): ExtendsPin is not exposed by any API -------
+// ---- Pinning: ExtendsPin is not exposed by any API -------
 
 // extParentWithTag is a lower-precedence parent carrying a distinctive
 // tag the child does not declare; the tag's presence on the merged result
@@ -87,7 +87,7 @@ func extParentWithTag(version string) string {
 	return "---\ntype: context\nversion: " + version + "\ndescription: org parent\ntags: [from-parent]\n---\n\nparent body\n"
 }
 
-// T-D-extends-1 — extends pin resolved to an exact version at child ingest time
+// extends pin resolved to an exact version at child ingest time
 // using a semver range. The merged result carries the parent's tag, which is
 // observable only if the @1.x range resolved to the ingested parent.
 // spec: docs/authoring/extends.md § "Pinning" table.
@@ -104,7 +104,7 @@ func TestExtends_PinSemverRange(t *testing.T) {
 	}
 }
 
-// T-D-extends-2 — extends with an exact semver pin ingests successfully and
+// extends with an exact semver pin ingests successfully and
 // merges. spec: docs/authoring/extends.md § "Pinning" table, <id>@<semver> row.
 func TestExtends_PinExactSemver(t *testing.T) {
 	t.Parallel()
@@ -116,16 +116,16 @@ func TestExtends_PinExactSemver(t *testing.T) {
 	}
 }
 
-// T-D-extends-3 — content-hash pinning resolves to an exact version. The
+// content-hash pinning resolves to an exact version. The
 // parent's hash is not knowable before the boot fixtures are written, so the
 // resolution is asserted in the core unit test TestExtends_ContentHashPin; here
-// only the failure path (T-D-extends-4) is reachable end to end.
+// only the failure path is reachable end to end.
 func TestExtends_PinContentHash(t *testing.T) {
 	t.Parallel()
 	t.Skip("content-hash pin resolution requires the parent's hash before boot, which the e2e fixtures cannot know; covered by pkg/registry/core TestExtends_ContentHashPin")
 }
 
-// T-D-extends-4 — extends with an unresolvable content hash fails ingest; the
+// extends with an unresolvable content hash fails ingest; the
 // child is dropped and only the lower-precedence parent serves at the shared id.
 // spec: docs/authoring/extends.md § "Pinning" table, <id>@sha256:<hash> row.
 func TestExtends_PinUnresolvableHash(t *testing.T) {
@@ -142,7 +142,7 @@ func TestExtends_PinUnresolvableHash(t *testing.T) {
 	}
 }
 
-// T-D-extends-5 — extends with a bare ID resolves to latest at ingest time and
+// extends with a bare ID resolves to latest at ingest time and
 // merges. spec: docs/authoring/extends.md § "Pinning" table, bare <id> row.
 func TestExtends_PinBareID(t *testing.T) {
 	t.Parallel()
@@ -154,23 +154,23 @@ func TestExtends_PinBareID(t *testing.T) {
 	}
 }
 
-// T-D-extends-6 — parent updates do not silently propagate to an ingested child.
+// parent updates do not silently propagate to an ingested child.
 // spec: docs/authoring/extends.md § "Pinning", last paragraph.
 func TestExtends_PinNoSilentPropagation(t *testing.T) {
 	t.Parallel()
-	t.Skip("pin non-propagation is exercised end to end in multilayer_journeys_test.go TestMultiLayer_PerCallerWinnerAndPinnedParentStable (G-MULTILAYER-3): an org layer publishes a newer base patch and reingests, and the team/personal overlays loaded at their explicit versions still fold the pinned parent version, never the newly published one. Pin stability is also covered at unit scale by pkg/registry/ingest TestIngest_CrossLayerExtendsOverlayAllowed (ExtendsPin is fixed at ingest)")
+	t.Skip("pin non-propagation is exercised end to end in multilayer_journeys_test.go TestMultiLayer_PerCallerWinnerAndPinnedParentStable: an org layer publishes a newer base patch and reingests, and the team/personal overlays loaded at their explicit versions still fold the pinned parent version, never the newly published one. Pin stability is also covered at unit scale by pkg/registry/ingest TestIngest_CrossLayerExtendsOverlayAllowed (ExtendsPin is fixed at ingest)")
 }
 
-// T-D-extends-7 — re-ingesting the child after a version bump picks up the newer
+// re-ingesting the child after a version bump picks up the newer
 // parent version. spec: docs/authoring/extends.md § "Pinning", last paragraph.
 func TestExtends_PinReingestPicksNewerParent(t *testing.T) {
 	t.Parallel()
-	t.Skip("the post-boot reingest path now ingests (F-7.3.4 resolved), but driving a newer-parent pin-propagation scenario end to end needs a multi-version layer fixture this harness does not build; pin stability is covered by pkg/registry/ingest TestIngest_CrossLayerExtendsOverlayAllowed")
+	t.Skip("the post-boot reingest path now ingests (resolved), but driving a newer-parent pin-propagation scenario end to end needs a multi-version layer fixture this harness does not build; pin stability is covered by pkg/registry/ingest TestIngest_CrossLayerExtendsOverlayAllowed")
 }
 
-// ---- Scalar / list / map field merge (T-D-extends-8..15) --------------------
+// ---- Scalar / list / map field merge --------------------
 
-// T-D-extends-8 — child description and version win on load.
+// child description and version win on load.
 // spec: docs/authoring/extends.md § "Field merge semantics".
 func TestExtends_ScalarChildWins(t *testing.T) {
 	t.Parallel()
@@ -189,7 +189,7 @@ func TestExtends_ScalarChildWins(t *testing.T) {
 	}
 }
 
-// T-D-extends-9 — tags are unioned (append unique) across parent and child.
+// tags are unioned (append unique) across parent and child.
 // spec: docs/authoring/extends.md § "Field merge semantics", tags row.
 func TestExtends_TagsUnion(t *testing.T) {
 	t.Parallel()
@@ -204,7 +204,7 @@ func TestExtends_TagsUnion(t *testing.T) {
 	}
 }
 
-// T-D-extends-10 — sensitivity takes the most-restrictive value; the child
+// sensitivity takes the most-restrictive value; the child
 // cannot relax the parent. spec: docs/authoring/extends.md § "Field merge
 // semantics", sensitivity row.
 func TestExtends_SensitivityMostRestrictive(t *testing.T) {
@@ -217,7 +217,7 @@ func TestExtends_SensitivityMostRestrictive(t *testing.T) {
 	}
 }
 
-// T-D-extends-11 — sensitivity: the child can tighten medium to high.
+// sensitivity: the child can tighten medium to high.
 // spec: docs/authoring/extends.md § "Field merge semantics", sensitivity row.
 func TestExtends_SensitivityChildTightens(t *testing.T) {
 	t.Parallel()
@@ -229,7 +229,7 @@ func TestExtends_SensitivityChildTightens(t *testing.T) {
 	}
 }
 
-// T-D-extends-12 — sandbox_profile: most-restrictive wins; the child tightens
+// sandbox_profile: most-restrictive wins; the child tightens
 // the parent. spec: docs/authoring/extends.md § "Tightening sandbox profile".
 func TestExtends_SandboxChildTightens(t *testing.T) {
 	t.Parallel()
@@ -241,7 +241,7 @@ func TestExtends_SandboxChildTightens(t *testing.T) {
 	}
 }
 
-// T-D-extends-13 — sandbox_profile: the child cannot widen the parent
+// sandbox_profile: the child cannot widen the parent
 // restriction. spec: docs/authoring/extends.md § "The most-restrictive rules".
 func TestExtends_SandboxChildCannotWiden(t *testing.T) {
 	t.Parallel()
@@ -257,7 +257,7 @@ func TestExtends_SandboxChildCannotWiden(t *testing.T) {
 	}
 }
 
-// T-D-extends-14 — mcpServers: deep-merged by name; the child's entry overrides
+// mcpServers: deep-merged by name; the child's entry overrides
 // the parent's on a name match. spec: docs/authoring/extends.md § "Field merge
 // semantics", mcpServers row.
 func TestExtends_McpServersOverrideByName(t *testing.T) {
@@ -271,7 +271,7 @@ func TestExtends_McpServersOverrideByName(t *testing.T) {
 	}
 }
 
-// T-D-extends-15 — mcpServers: a parent-only server is inherited when the child
+// mcpServers: a parent-only server is inherited when the child
 // declares a differently named server. spec: docs/authoring/extends.md § "Field
 // merge semantics", mcpServers row.
 func TestExtends_McpServersParentOnlyInherited(t *testing.T) {
@@ -285,7 +285,7 @@ func TestExtends_McpServersParentOnlyInherited(t *testing.T) {
 	}
 }
 
-// ---- Hidden parents (T-D-extends-16..17) ------------------------------------
+// ---- Hidden parents ------------------------------------
 
 // exHiddenParentServer boots the authenticated, visibility-capable harness with
 // a restricted parent layer and a public child layer that extends it. The parent
@@ -338,7 +338,7 @@ func exLoadAs(t *testing.T, srv *authServer, id, token string) exLoadResp {
 	return r
 }
 
-// T-D-extends-16 — a caller without access to the parent layer sees the merged
+// a caller without access to the parent layer sees the merged
 // result. The parent lives in a layer restricted to bob; alice cannot see it,
 // yet loading the public child folds the hidden parent's inherited tag and the
 // most-restrictive sensitivity into the served manifest.
@@ -367,7 +367,7 @@ func TestExtends_HiddenParentMergedResult(t *testing.T) {
 	}
 }
 
-// T-D-extends-17 — the parent does not appear in search results for an
+// the parent does not appear in search results for an
 // unauthorized caller. alice loads the merged child but the hidden parent
 // shared/parent is neither loadable nor discoverable through her search, while
 // bob (the parent's grantee) can load it.
@@ -396,39 +396,39 @@ func TestExtends_HiddenParentNotInSearch(t *testing.T) {
 	assertHas(t, srv.searchIDs(bob), "shared/parent", "bob search includes the parent he owns")
 }
 
-// ---- Bundled-file merge (T-D-extends-18..21) --------------------------------
+// ---- Bundled-file merge --------------------------------
 
-// T-D-extends-18 — a child file at the same path overrides the parent file.
+// a child file at the same path overrides the parent file.
 // spec: docs/authoring/extends.md § "Bundled-file merge semantics".
 func TestExtends_BundledChildOverrides(t *testing.T) {
 	t.Parallel()
-	t.Skip("bundled-file (resource) merge across extends is not implemented in the shared resolver: core.mergeChain serves the child's resources only (child-only for §4.6 hidden-parent privacy), so neither the server nor the now-extends-resolving filesystem sync (F-13.11.2) unions parent and child files. This is a §4.4/§4.6 resource-merge gap, not the frontmatter-resolution gap F-13.11.2 closed")
+	t.Skip("bundled-file (resource) merge across extends is not implemented in the shared resolver: core.mergeChain serves the child's resources only (child-only for §4.6 hidden-parent privacy), so neither the server nor the now-extends-resolving filesystem sync unions parent and child files. This is a §4.4/§4.6 resource-merge gap, not the frontmatter-resolution gap that was closed")
 }
 
-// T-D-extends-19 — a parent-only bundled file is inherited unchanged.
+// a parent-only bundled file is inherited unchanged.
 // spec: docs/authoring/extends.md § "Bundled-file merge semantics".
 func TestExtends_BundledParentOnlyInherited(t *testing.T) {
 	t.Parallel()
-	t.Skip("bundled-file (resource) merge across extends is not implemented in the shared resolver: core.mergeChain serves the child's resources only, so a parent-only bundled file is not inherited on either the server or the now-extends-resolving filesystem sync (F-13.11.2). This is a §4.4/§4.6 resource-merge gap, not the frontmatter-resolution gap F-13.11.2 closed")
+	t.Skip("bundled-file (resource) merge across extends is not implemented in the shared resolver: core.mergeChain serves the child's resources only, so a parent-only bundled file is not inherited on either the server or the now-extends-resolving filesystem sync. This is a §4.4/§4.6 resource-merge gap, not the frontmatter-resolution gap that was closed")
 }
 
-// T-D-extends-20 — a child-only bundled file is added to the merged output.
+// a child-only bundled file is added to the merged output.
 // spec: docs/authoring/extends.md § "Bundled-file merge semantics".
 func TestExtends_BundledChildOnlyAdded(t *testing.T) {
 	t.Parallel()
-	t.Skip("bundled-file (resource) merge across extends is not implemented in the shared resolver: core.mergeChain serves the child's resources only, with no parent/child file union, on either the server or the now-extends-resolving filesystem sync (F-13.11.2). This is a §4.4/§4.6 resource-merge gap, not the frontmatter-resolution gap F-13.11.2 closed")
+	t.Skip("bundled-file (resource) merge across extends is not implemented in the shared resolver: core.mergeChain serves the child's resources only, with no parent/child file union, on either the server or the now-extends-resolving filesystem sync. This is a §4.4/§4.6 resource-merge gap, not the frontmatter-resolution gap that was closed")
 }
 
-// T-D-extends-21 — the child cannot delete a parent file; it is inherited.
+// the child cannot delete a parent file; it is inherited.
 // spec: docs/authoring/extends.md § "Bundled-file merge semantics".
 func TestExtends_BundledChildCannotDelete(t *testing.T) {
 	t.Parallel()
-	t.Skip("bundled-file (resource) merge across extends is not implemented in the shared resolver: core.mergeChain serves the child's resources only, so the parent file is never composed into the child's output and the delete-shadow semantics are not exercisable on either the server or the now-extends-resolving filesystem sync (F-13.11.2). This is a §4.4/§4.6 resource-merge gap, not the frontmatter-resolution gap F-13.11.2 closed")
+	t.Skip("bundled-file (resource) merge across extends is not implemented in the shared resolver: core.mergeChain serves the child's resources only, so the parent file is never composed into the child's output and the delete-shadow semantics are not exercisable on either the server or the now-extends-resolving filesystem sync. This is a §4.4/§4.6 resource-merge gap, not the frontmatter-resolution gap that was closed")
 }
 
-// ---- SKILL.md override (T-D-extends-22) -------------------------------------
+// ---- SKILL.md override -------------------------------------
 
-// T-D-extends-22 — the child SKILL.md overrides the parent SKILL.md.
+// the child SKILL.md overrides the parent SKILL.md.
 // spec: docs/authoring/extends.md § "Bundled-file merge semantics".
 func TestExtends_SkillBodyChildOverrides(t *testing.T) {
 	t.Parallel()
@@ -450,9 +450,9 @@ func TestExtends_SkillBodyChildOverrides(t *testing.T) {
 	}
 }
 
-// ---- Ingest rejections observable via load 404 (T-D-extends-23..24) ---------
+// ---- Ingest rejections observable via load 404 ---------
 
-// T-D-extends-23 — an extends reference to an unknown parent fails ingest. The
+// an extends reference to an unknown parent fails ingest. The
 // child is dropped at ingest and a valid sibling keeps boot alive, so the
 // rejection is observable as a 404 on the child id. The doc says an unresolved
 // parent is a lint warning rather than an error; the implementation rejects the
@@ -479,7 +479,7 @@ func TestExtends_UnknownParentRejected(t *testing.T) {
 	}
 }
 
-// T-D-extends-24 — a self-referencing extends is rejected as a cycle at ingest.
+// a self-referencing extends is rejected as a cycle at ingest.
 // The artifact is dropped and a valid sibling keeps boot alive, so the rejection
 // is observable as a 404. spec: docs/authoring/extends.md § "Constraints", cycle
 // detection; § "Lint behavior".
@@ -502,16 +502,16 @@ func TestExtends_SelfReferenceRejected(t *testing.T) {
 	}
 }
 
-// ---- Cycle defense / collision policy (T-D-extends-25..29) ------------------
+// ---- Cycle defense / collision policy ------------------
 
-// T-D-extends-25 — a multi-hop cycle is detected at load time as defense in
+// a multi-hop cycle is detected at load time as defense in
 // depth. spec: docs/authoring/extends.md § "Constraints", cycle detection.
 func TestExtends_MultiHopCycleAtLoad(t *testing.T) {
 	t.Parallel()
 	t.Skip("ingest pins each parent at child-ingest time and rejects self/forward references, so a cyclic chain cannot be persisted through the running ingest path to reach the load-time cycle defense; the defense is unit-covered in pkg/registry/core (resolveExtendsChain seen-set)")
 }
 
-// T-D-extends-26 — a same-canonical-ID collision without extends is rejected at
+// a same-canonical-ID collision without extends is rejected at
 // boot ingest, so the higher-precedence shadow is dropped and only the
 // lower-precedence artifact serves. spec: docs/authoring/extends.md §
 // "Replacing instead of extending".
@@ -529,7 +529,7 @@ func TestExtends_CollisionWithoutExtendsRejected(t *testing.T) {
 	}
 }
 
-// T-D-extends-27 — extends allows a same-ID artifact in a higher-precedence
+// extends allows a same-ID artifact in a higher-precedence
 // layer without a collision error, and the merged child serves.
 // spec: docs/authoring/extends.md § intro.
 func TestExtends_AllowsSameIDWithExtends(t *testing.T) {
@@ -546,7 +546,7 @@ func TestExtends_AllowsSameIDWithExtends(t *testing.T) {
 	}
 }
 
-// T-D-extends-28 — a cross-type extends is rejected (child type must match the
+// a cross-type extends is rejected (child type must match the
 // parent type), so the child is dropped and the parent serves.
 // spec: docs/authoring/extends.md § "Default for unlisted fields".
 func TestExtends_CrossTypeRejected(t *testing.T) {
@@ -563,7 +563,7 @@ func TestExtends_CrossTypeRejected(t *testing.T) {
 	}
 }
 
-// T-D-extends-29 — chained inheritance (A extends B extends C) resolves the full
+// chained inheritance (A extends B extends C) resolves the full
 // chain across three layers at one canonical ID. spec: docs/authoring/extends.md
 // § "Constraints".
 func TestExtends_ChainedInheritance(t *testing.T) {
@@ -586,11 +586,11 @@ func TestExtends_ChainedInheritance(t *testing.T) {
 	}
 }
 
-// ---- Same-canonical-ID constraint not enforced (T-D-extends-30) -------------
+// ---- Same-canonical-ID constraint not enforced -------------
 
-// T-D-extends-30 — the same-canonical-ID constraint is not enforced. The doc
+// the same-canonical-ID constraint is not enforced. The doc
 // states a child uses extends only when its canonical ID matches the parent's;
-// the implementation does not check this (no BUILD-GAPS finding), so a child at
+// the implementation does not check this (no implementation-gap finding), so a child at
 // a different id extending a parent ingests. Change-detector. spec:
 // docs/authoring/extends.md § "Constraints", same canonical ID.
 func TestExtends_DifferentCanonicalIDIngests(t *testing.T) {
@@ -607,9 +607,9 @@ func TestExtends_DifferentCanonicalIDIngests(t *testing.T) {
 	}
 }
 
-// ---- More list / map merges (T-D-extends-31..39) ----------------------------
+// ---- More list / map merges ----------------------------
 
-// T-D-extends-31 — requiresApproval is unioned across parent and child.
+// requiresApproval is unioned across parent and child.
 // spec: docs/authoring/extends.md § "Field merge semantics", requiresApproval.
 func TestExtends_RequiresApprovalUnion(t *testing.T) {
 	t.Parallel()
@@ -622,7 +622,7 @@ func TestExtends_RequiresApprovalUnion(t *testing.T) {
 	}
 }
 
-// T-D-extends-32 — when_to_use is appended across parent and child.
+// when_to_use is appended across parent and child.
 // spec: docs/authoring/extends.md § "Field merge semantics", when_to_use.
 func TestExtends_WhenToUseAppend(t *testing.T) {
 	t.Parallel()
@@ -635,7 +635,7 @@ func TestExtends_WhenToUseAppend(t *testing.T) {
 	}
 }
 
-// T-D-extends-33 — delegates_to is appended across parent and child.
+// delegates_to is appended across parent and child.
 // spec: docs/authoring/extends.md § "Field merge semantics", delegates_to.
 func TestExtends_DelegatesToAppend(t *testing.T) {
 	t.Parallel()
@@ -648,7 +648,7 @@ func TestExtends_DelegatesToAppend(t *testing.T) {
 	}
 }
 
-// T-D-extends-34 — external_resources is appended across parent and child.
+// external_resources is appended across parent and child.
 // spec: docs/authoring/extends.md § "Field merge semantics", external_resources.
 func TestExtends_ExternalResourcesAppend(t *testing.T) {
 	t.Parallel()
@@ -661,7 +661,7 @@ func TestExtends_ExternalResourcesAppend(t *testing.T) {
 	}
 }
 
-// T-D-extends-35 — license: child wins. The documented lint warning on a
+// license: child wins. The documented lint warning on a
 // license change across layers is a separate, unimplemented rule; this asserts
 // only the merge that §4.6 mandates. spec: docs/authoring/extends.md § "Field
 // merge semantics", license.
@@ -676,7 +676,7 @@ func TestExtends_LicenseChildWinsLintWarns(t *testing.T) {
 	}
 }
 
-// T-D-extends-36 — search_visibility takes the most-restrictive value
+// search_visibility takes the most-restrictive value
 // (direct-only > indexed); the child cannot relax the parent.
 // spec: docs/authoring/extends.md § "Field merge semantics", search_visibility.
 func TestExtends_SearchVisibilityMostRestrictive(t *testing.T) {
@@ -690,7 +690,7 @@ func TestExtends_SearchVisibilityMostRestrictive(t *testing.T) {
 	}
 }
 
-// T-D-extends-37 — a child omitting a parent field inherits the parent's value.
+// a child omitting a parent field inherits the parent's value.
 // spec: docs/authoring/extends.md § "Default for unlisted fields".
 func TestExtends_UnlistedFieldInherited(t *testing.T) {
 	t.Parallel()
@@ -703,7 +703,7 @@ func TestExtends_UnlistedFieldInherited(t *testing.T) {
 	}
 }
 
-// T-D-extends-38 — a child can override an inherited unlisted field by setting
+// a child can override an inherited unlisted field by setting
 // it (deprecated). spec: docs/authoring/extends.md § "Default for unlisted
 // fields", deprecated.
 func TestExtends_ChildOverridesDeprecated(t *testing.T) {
@@ -720,7 +720,7 @@ func TestExtends_ChildOverridesDeprecated(t *testing.T) {
 	}
 }
 
-// T-D-extends-39 — runtime_requirements is deep-merged with the child winning
+// runtime_requirements is deep-merged with the child winning
 // per key. spec: docs/authoring/extends.md § "Field merge semantics",
 // runtime_requirements.
 func TestExtends_RuntimeRequirementsDeepMerge(t *testing.T) {
@@ -737,9 +737,9 @@ func TestExtends_RuntimeRequirementsDeepMerge(t *testing.T) {
 	}
 }
 
-// ---- scaffold --extends (T-D-extends-40) ------------------------------------
+// ---- scaffold --extends ------------------------------------
 
-// T-D-extends-40 — artifact scaffold --extends writes the extends field.
+// artifact scaffold --extends writes the extends field.
 // spec: docs/authoring/extends.md opening YAML example; scaffold flag --extends.
 func TestExtends_ScaffoldExtendsField(t *testing.T) {
 	t.Parallel()
@@ -758,9 +758,9 @@ func TestExtends_ScaffoldExtendsField(t *testing.T) {
 	}
 }
 
-// ---- Impact / dependents (T-D-extends-41..42) -------------------------------
+// ---- Impact / dependents -------------------------------
 
-// T-D-extends-41 — GET /v1/dependents returns the extends edge for the parent.
+// GET /v1/dependents returns the extends edge for the parent.
 // A higher-layer child extends a lower-layer parent (distinct canonical IDs);
 // the reverse-dependency index records the edge. spec:
 // docs/authoring/extends.md § "Constraints".
@@ -781,7 +781,7 @@ func TestExtends_DependentsEdge(t *testing.T) {
 	}
 }
 
-// T-D-extends-42 — the impact CLI lists the extending children of a parent.
+// the impact CLI lists the extending children of a parent.
 // spec: docs/authoring/extends.md § "Constraints"; impact analysis.
 func TestExtends_ImpactCLIListsChildren(t *testing.T) {
 	t.Parallel()
@@ -800,9 +800,9 @@ func TestExtends_ImpactCLIListsChildren(t *testing.T) {
 	}
 }
 
-// ---- Worked example (T-D-extends-43) ----------------------------------------
+// ---- Worked example ----------------------------------------
 
-// T-D-extends-43 — the org-wide skill example: a team layer overlays the
+// the org-wide skill example: a team layer overlays the
 // org-defaults skill at the same canonical ID via extends, and the merged
 // manifest (unioned tags, child body, child version) serves. spec:
 // docs/authoring/extends.md § "Examples".
@@ -827,9 +827,9 @@ func TestExtends_OrgWideSkillExample(t *testing.T) {
 	}
 }
 
-// ---- MCP load (T-D-extends-44) ----------------------------------------------
+// ---- MCP load ----------------------------------------------
 
-// T-D-extends-44 — the MCP load_artifact tool returns the extends-merged
+// the MCP load_artifact tool returns the extends-merged
 // manifest. The overlay child (resolved + merged server-side) is what the
 // bridge serves, observable as the child version and body. spec:
 // docs/authoring/extends.md § "Field merge semantics".
@@ -856,9 +856,9 @@ func TestExtends_McpLoadMergedBody(t *testing.T) {
 	}
 }
 
-// ---- Lint behavior (T-D-extends-45..46) -------------------------------------
+// ---- Lint behavior -------------------------------------
 
-// T-D-extends-45 — lint does not error on an extends reference. No
+// lint does not error on an extends reference. No
 // extends-resolution lint rule exists, so an extends reference never produces an
 // error-severity diagnostic, even when the parent is absent. spec:
 // docs/authoring/extends.md § "Lint behavior".
@@ -877,7 +877,7 @@ func TestExtends_LintNoErrorOnReference(t *testing.T) {
 	}
 }
 
-// T-D-extends-46 — lint does not warn on an unresolved parent. The doc says lint
+// lint does not warn on an unresolved parent. The doc says lint
 // warns when the extends parent is absent, but there is no extends-resolution
 // lint rule, so no diagnostic of any severity is emitted. Change-detector.
 // spec: docs/authoring/extends.md § "Lint behavior".
@@ -901,11 +901,11 @@ func TestExtends_LintNoWarnOnUnresolvedParent(t *testing.T) {
 	}
 }
 
-// ---- Filesystem sync (T-D-extends-47) ---------------------------------------
+// ---- Filesystem sync ---------------------------------------
 
-// T-D-extends-47 — podium sync over a filesystem registry does not resolve
+// podium sync over a filesystem registry does not resolve
 // extends. The higher-precedence child wins where present (highest-wins, not
-// merged) and the parent-only bundled file is absent. Documents F-13.11.2.
+// merged) and the parent-only bundled file is absent. Documents
 // spec: docs/authoring/extends.md § "Bundled-file merge semantics".
 func TestExtends_SyncFilesystemNotMerged(t *testing.T) {
 	t.Parallel()
@@ -934,14 +934,14 @@ func TestExtends_SyncFilesystemNotMerged(t *testing.T) {
 	}
 	// No extends merge: the parent-only bundled file is not composed in.
 	if _, err := os.Stat(filepath.Join(tgt, "finance/ap/pay-invoice/scripts/validate.py")); err == nil {
-		t.Errorf("parent-only scripts/validate.py should be absent (filesystem sync does not resolve extends, F-13.11.2)")
+		t.Errorf("parent-only scripts/validate.py should be absent (filesystem sync does not resolve extends)")
 	}
 }
 
-// T-D-extends-47b — podium sync over a filesystem registry rejects a
+// podium sync over a filesystem registry rejects a
 // cross-type extends chain. The child's type: must match the parent's; the
 // filesystem-source materialization path enforces the same rejection the
-// server ingest path applies (F-4.6.2). spec: docs/authoring/extends.md §
+// server ingest path applies. spec: docs/authoring/extends.md §
 // "Default for unlisted fields"; §4.6.
 func TestExtends_SyncFilesystemCrossTypeRejected(t *testing.T) {
 	t.Parallel()
@@ -960,11 +960,11 @@ func TestExtends_SyncFilesystemCrossTypeRejected(t *testing.T) {
 	}
 }
 
-// ---- search sensitivity / cross-layer visibility (T-D-extends-48..49) -------
+// ---- search sensitivity / cross-layer visibility -------
 
-// T-D-extends-48 — search_artifacts reflects the most-restrictive sensitivity
+// search_artifacts reflects the most-restrictive sensitivity
 // across the extends chain. spec: docs/authoring/extends.md § "Field merge
-// semantics", sensitivity. (F-4.6.7)
+// semantics", sensitivity.
 func TestExtends_SearchSensitivityMostRestrictive(t *testing.T) {
 	t.Parallel()
 	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\nsensitivity: high\n---\n\nbody\n"
@@ -1000,7 +1000,7 @@ func TestExtends_SearchSensitivityMostRestrictive(t *testing.T) {
 	}
 }
 
-// T-D-extends-49 — the child is not visible to a caller without access to the
+// the child is not visible to a caller without access to the
 // child layer. The extends child finance/child lives in a layer restricted to
 // the finance group; carol (not in finance) cannot load or discover it, while a
 // finance-group member can. The parent shared/parent is public so the only thing

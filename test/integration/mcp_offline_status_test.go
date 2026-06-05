@@ -40,7 +40,7 @@ func callToolOver(t *testing.T, registry, cacheDir, tool string, args map[string
 	return resp.Result
 }
 
-// Spec: §12 (F-12.0.3) — "Fresh load_domain / search_domains / search_artifacts
+// Spec: §12 — "Fresh load_domain / search_domains / search_artifacts
 // returns an explicit 'offline' status that hosts can surface." With the
 // registry unreachable, each discovery/search meta-tool returns status
 // "offline" rather than an error envelope so the host can tell a transient
@@ -72,7 +72,7 @@ func TestPodiumMCP_DiscoveryToolsReportOfflineWhenRegistryDown(t *testing.T) {
 	}
 }
 
-// Spec: §7.4 (F-7.4.2) — offline-only "never contact the registry; structured
+// Spec: §7.4 — offline-only "never contact the registry; structured
 // error if cache miss." Through the real bridge, an offline-only discovery /
 // search call against a down registry returns the structured
 // network.offline_cache_miss error rather than the offline status the

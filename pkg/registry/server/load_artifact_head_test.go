@@ -13,7 +13,7 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// spec: §6.5 (F-6.5.2) — HEAD /v1/load_artifact revalidates a cached
+// spec: §6.5 — HEAD /v1/load_artifact revalidates a cached
 // resolution. It returns the resolved content hash (and version) in headers
 // and no body, so the MCP cache can confirm an unchanged artifact without
 // downloading the manifest.

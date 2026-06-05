@@ -18,7 +18,7 @@ import (
 // merge as the highest-precedence layer in the caller's effective view. The
 // artifact walk (Walk) deliberately skips DOMAIN.md; this walk surfaces them
 // so a consumer that exposes load_domain can apply the §4.5.4 client-side
-// merge (F-4.5.2, F-6.4.2).
+// merge.
 type DomainRecord struct {
 	Path   string
 	Layer  Layer

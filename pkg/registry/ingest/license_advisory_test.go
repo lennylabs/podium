@@ -19,7 +19,7 @@ func contextArtifactLicense(version, license, extends string) string {
 // Spec: §4.6 field-semantics table — license is "Scalar; child wins (lint
 // warning if changed across layers)". When an extends child carries a license
 // that differs from the resolved parent's, ingest emits a warning advisory so
-// the publisher sees the cross-layer change (F-4.6.3).
+// the publisher sees the cross-layer change.
 func TestExtends_LicenseChangedEmitsAdvisory(t *testing.T) {
 	t.Parallel()
 	st := newStore(t)

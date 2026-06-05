@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// spec: §13.2.1 (F-13.2.1) — rejectIfReadOnly is the single choke point
+// spec: §13.2.1 — rejectIfReadOnly is the single choke point
 // for the write-rejection code. It emits HTTP 503 with the registry.read_only
 // envelope (the spec defines no config.read_only) and reports the rejection
 // so the handler returns. The §6.10 retryable flag is true because read-only

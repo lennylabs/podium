@@ -22,7 +22,7 @@ const descLoadArtifact = "Load a specific artifact by ID. Returns the manifest b
 // systemPromptFragment is the §5.1 "Example system-prompt fragment",
 // verbatim. The bridge surfaces it through the MCP `initialize` result's
 // optional `instructions` field so a host can add it to the model's
-// system prompt without hardcoding the text. F-5.1.3.
+// system prompt without hardcoding the text.
 const systemPromptFragment = `You have access to a catalog of authored skills and agents through the Podium meta-tools:
   - load_domain: explore the catalog hierarchically (browse).
   - search_domains: find candidate domain neighborhoods by query.
@@ -37,9 +37,9 @@ your context.`
 
 // metaToolDescriptors returns the `tools/list` entries for the four §5
 // meta-tools plus the §13.9 health tool. Each meta-tool carries its
-// verbatim §5.1 description (F-5.1.1) and an `inputSchema` declaring the
+// verbatim §5.1 description and an `inputSchema` declaring the
 // documented parameters so a compliant MCP client and the LLM have
-// machine-readable parameter information (F-5.1.2). The parameter names
+// machine-readable parameter information. The parameter names
 // and required fields mirror the arguments the per-tool handlers parse in
 // callTool and §5/§5.1.
 func metaToolDescriptors() []map[string]any {

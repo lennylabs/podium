@@ -10,7 +10,7 @@ import (
 
 // spec: §12 — "learn-from-usage reranking surfaces signal-based ordering."
 // The usage-signal store records meta-tool access frequency and feeds
-// search_artifacts and load_domain ordering (F-12.0.9).
+// search_artifacts and load_domain ordering.
 
 func TestMemoryUsageSignals_RecordRanking(t *testing.T) {
 	t.Parallel()

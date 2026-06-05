@@ -90,7 +90,7 @@ func TestReembed_OnlyMissingSkipsExisting(t *testing.T) {
 // spec: §4.7 — Reembed(OnlyIfMissing) must skip every artifact that
 // already has a vector, even when the tenant holds more than the old
 // fixed 100-item probe window. The prior probe queried topK=100 and
-// reported existing vectors as missing past that boundary (F-4.7.10).
+// reported existing vectors as missing past that boundary.
 func TestReembed_OnlyMissingScalesPast100Artifacts(t *testing.T) {
 	t.Parallel()
 	const n = 150
@@ -131,7 +131,7 @@ func TestReembed_OnlyMissingScalesPast100Artifacts(t *testing.T) {
 }
 
 // spec: §4.7 — Reembed(Since) covers only artifacts ingested at or after
-// the cutoff; the boundary is inclusive (F-4.7.8 `--since`).
+// the cutoff; the boundary is inclusive (`--since`).
 func TestReembed_SinceFiltersByIngestedAt(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()

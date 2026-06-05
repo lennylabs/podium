@@ -83,7 +83,7 @@ func TestMemory_AdminGrants(t *testing.T) {
 	}
 }
 
-// Spec: §8.4 (F-8.4.2) — the deprecated-version retention window is
+// Spec: §8.4 — the deprecated-version retention window is
 // anchored to the moment "the deprecation flag is set". Deprecation is a
 // per-version manifest field set at ingest, so stampDeprecation anchors
 // DeprecatedAt to each deprecated version's own IngestedAt. A later

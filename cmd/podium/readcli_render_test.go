@@ -8,8 +8,7 @@ import (
 )
 
 // Spec: §7.6.1 Output formats — the default for `domain show` is a
-// human-readable nested-bullet rendering; --json is the structured envelope
-// (F-7.6.10).
+// human-readable nested-bullet rendering; --json is the structured envelope.
 func TestReadCLI_DomainShowHumanAndJSON(t *testing.T) {
 	ts := newRegistryStub(t, map[string]any{
 		"/v1/load_domain": map[string]any{
@@ -40,7 +39,7 @@ func TestReadCLI_DomainShowHumanAndJSON(t *testing.T) {
 }
 
 // Spec: §7.6.1 — `domain search` gains a --json flag; the default is a
-// human-readable ranked list (F-7.6.10).
+// human-readable ranked list.
 func TestReadCLI_DomainSearchHumanAndJSON(t *testing.T) {
 	ts := newRegistryStub(t, map[string]any{
 		"/v1/search_domains": map[string]any{
@@ -62,7 +61,7 @@ func TestReadCLI_DomainSearchHumanAndJSON(t *testing.T) {
 }
 
 // Spec: §7.6.1 — `artifact show` default prints the markdown body with
-// frontmatter at the top; --json emits the structured envelope (F-7.6.10).
+// frontmatter at the top; --json emits the structured envelope.
 func TestReadCLI_ArtifactShowHumanAndJSON(t *testing.T) {
 	ts := newRegistryStub(t, map[string]any{
 		"/v1/load_artifact": map[string]any{
@@ -82,8 +81,7 @@ func TestReadCLI_ArtifactShowHumanAndJSON(t *testing.T) {
 		t.Errorf("default output should be human-readable, got JSON:\n%s", human)
 	}
 	// spec: §7.6.1 — the --json envelope keys the manifest text "body" (the
-	// wire calls it "manifest_body") and delivers frontmatter as an object
-	// (F-7.6.2).
+	// wire calls it "manifest_body") and delivers frontmatter as an object.
 	js := captureStdout(t, func() { _ = artifactShow([]string{"--registry", ts.URL, "--json", "finance/run"}) })
 	if !strings.Contains(js, "\"body\"") {
 		t.Errorf("--json output should key the manifest text \"body\":\n%s", js)
@@ -94,8 +92,7 @@ func TestReadCLI_ArtifactShowHumanAndJSON(t *testing.T) {
 }
 
 // Spec: §7.6 / §7.6.1 — the read CLI reaches the registry with the caller's
-// identity: a configured session token is attached as the Bearer credential
-// (F-7.6.13).
+// identity: a configured session token is attached as the Bearer credential.
 func TestReadCLI_AttachesSessionToken(t *testing.T) {
 	var gotAuth string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -115,7 +112,7 @@ func TestReadCLI_AttachesSessionToken(t *testing.T) {
 
 // Spec: §7.6 / §7.6.1 — the doJSON helper (layer, admin, and quota commands)
 // attaches the same caller credential as the read commands, so authenticated
-// registry endpoints receive the Bearer token (F-14.15.1). The keychain key is
+// registry endpoints receive the Bearer token. The keychain key is
 // the registry base, so a full request URL with a path still resolves it.
 func TestDoJSON_AttachesSessionToken(t *testing.T) {
 	var gotAuth string

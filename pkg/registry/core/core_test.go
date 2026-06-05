@@ -163,7 +163,7 @@ func TestSearchArtifacts_TypeFilter(t *testing.T) {
 	}
 }
 
-// Spec: §4.3 / §4.5.3 (F-4.3.3) — an artifact with
+// Spec: §4.3 / §4.5.3 — an artifact with
 // search_visibility: direct-only is excluded from search_artifacts
 // results, while an indexed (default) artifact appears. The value is
 // carried from the frontmatter through ingest into the store record and

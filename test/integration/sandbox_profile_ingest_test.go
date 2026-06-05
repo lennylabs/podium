@@ -11,7 +11,7 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// spec: §13.10 (F-13.10.2) — the sandbox-profile ingest gate threads from the
+// spec: §13.10 — the sandbox-profile ingest gate threads from the
 // orchestrator options through to the ingest pipeline. With enforcement on, an
 // artifact whose sandbox_profile the local host cannot honor is rejected with
 // ingest.sandbox_profile_unenforceable; with enforcement off the same artifact

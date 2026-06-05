@@ -1,4 +1,4 @@
-"""Client.load_domain workspace-overlay merge (F-4.5.2 / F-6.4.2).
+"""Client.load_domain workspace-overlay merge.
 
 The SDK composes the §4.5.4 overlay DOMAIN.md set and overlay artifacts onto
 the registry load_domain result client-side, mirroring the Go MCP bridge in
@@ -117,7 +117,7 @@ def _subdomain_by_path(result, path):
     return None
 
 
-# spec: §4.5.2/§4.5.4/§6.4 (F-4.5.2/F-6.4.2) — with no workspace overlay the
+# spec: §4.5.2/§4.5.4/§6.4 — with no workspace overlay the
 # load_domain result passes through the registry untouched.
 def test_load_domain_no_overlay_passthrough(domain_server, tmp_path, monkeypatch):
     monkeypatch.delenv("PODIUM_OVERLAY_PATH", raising=False)

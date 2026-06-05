@@ -20,7 +20,7 @@ import (
 // workspace overlay while the bridge is running becomes searchable without
 // restarting the subprocess. The pre-fix bridge loaded the overlay once at
 // startup and never refreshed it, so a draft created after launch stayed
-// invisible. Findings F-6.4.3 / F-14.7.1 (watcher mechanism).
+// invisible. The watcher mechanism is covered.
 //
 // The test owns the subprocess lifecycle: it drives stdin over a pipe with
 // timed writes, bounds the run with a context deadline, and always closes

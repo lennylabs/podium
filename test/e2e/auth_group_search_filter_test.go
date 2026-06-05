@@ -1,7 +1,7 @@
 package e2e
 
 // Per-caller visibility filtering of search across a group-restricted layer and
-// a public layer (gap G-AUTH-12).
+// a public layer.
 //
 // runtime_layer_visibility_test.go asserts search returns the admin layer plus
 // the caller's own user-defined layer, and server_operations_test.go asserts
@@ -22,8 +22,7 @@ package e2e
 //
 // Spec: §4.6 (the visibility evaluator filters the discovery surface to the
 // caller's effective view; groups: resolves through the JWT group claim and the
-// §6.3.1 SCIM directory), §7.6 (search is visibility-filtered server-side). Gap
-// G-AUTH-12.
+// §6.3.1 SCIM directory), §7.6 (search is visibility-filtered server-side).
 
 import (
 	"sort"

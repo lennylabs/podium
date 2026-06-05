@@ -1,7 +1,6 @@
 package e2e
 
-// Operational notifications through the wired §9.1 NotificationProvider (gap
-// G-OPS-1).
+// Operational notifications through the wired §9.1 NotificationProvider.
 //
 // The §9.1 NotificationProvider delivers operational notifications (ingest
 // failure, embedding-provider outage, transparency-anchor failure, layer
@@ -23,7 +22,7 @@ package e2e
 // Spec: §9 / §9.1 (the NotificationProvider delivers ingest-failure and
 // operational notifications; the webhook provider POSTs a signed JSON body with
 // severity, title, body, and tags), §7.3.1 (a reingest whose snapshot fails
-// lint returns ingest.lint_failed). Gap G-OPS-1.
+// lint returns ingest.lint_failed).
 
 import (
 	"os"

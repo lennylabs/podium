@@ -112,7 +112,7 @@ func TestRuleProseReference_RejectsPathEscape(t *testing.T) {
 	}
 }
 
-// Spec: §4.4 line 348 (F-4.4.1) — a prose reference that names another
+// Spec: §4.4 line 348 — a prose reference that names another
 // artifact resolves against the current visible catalog rather than being
 // reported as a missing bundled file. The catalog is the linted record set.
 func TestRuleProseReference_ResolvesAgainstCatalog(t *testing.T) {
@@ -136,7 +136,7 @@ func TestRuleProseReference_ResolvesAgainstCatalog(t *testing.T) {
 	}
 }
 
-// Spec: §4.4 line 348 (F-4.4.1) — an artifact reference carrying a §4.7.6
+// Spec: §4.4 line 348 — an artifact reference carrying a §4.7.6
 // version pin resolves against the catalog after the pin is stripped.
 func TestRuleProseReference_ResolvesPinnedArtifact(t *testing.T) {
 	t.Parallel()
@@ -159,7 +159,7 @@ func TestRuleProseReference_ResolvesPinnedArtifact(t *testing.T) {
 	}
 }
 
-// Spec: §4.4 lines 348-350 (F-4.4.1) — a reference that matches neither a
+// Spec: §4.4 lines 348-350 — a reference that matches neither a
 // bundled file nor any artifact in the catalog is an ingest error.
 func TestRuleProseReference_UnknownArtifactErrors(t *testing.T) {
 	t.Parallel()
@@ -183,7 +183,7 @@ func TestRuleProseReference_UnknownArtifactErrors(t *testing.T) {
 	}
 }
 
-// Spec: §4.4 line 347 (F-4.4.3) — a URL reference is valid only when HEAD
+// Spec: §4.4 line 347 — a URL reference is valid only when HEAD
 // returns 200 or a 3xx redirect. Other 2xx codes (201/204/206) do not
 // confirm the named resource and are rejected.
 func TestRuleProseReference_URLStatusRange(t *testing.T) {

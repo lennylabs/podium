@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// T-D-oidc-browser — the device-code login flow must never launch the system
+// The device-code login flow must never launch the system
 // browser during tests. The test harness pins PODIUM_NO_BROWSER=1 (see
 // mergeEnv); this test proves it end-to-end by putting a fake `open` /
 // `xdg-open` launcher on PATH that records any invocation, running a login that

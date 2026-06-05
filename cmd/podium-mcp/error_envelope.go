@@ -12,7 +12,7 @@ import (
 // structured envelope carrying the namespaced code, message, optional
 // machine-readable details, retryable flag, and suggested_action. The
 // human-readable summary stays on the `error` key so existing host
-// tooling keeps a single string to display (F-6.10.2).
+// tooling keeps a single string to display.
 
 // registryError is a §6.10 envelope decoded from a registry HTTP error
 // response. It implements error so it flows through the existing

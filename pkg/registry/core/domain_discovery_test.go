@@ -19,7 +19,7 @@ func dlNotableSource(res *core.LoadDomainResult, id string) string {
 	return ""
 }
 
-// spec: §4.5.5 (F-4.5.9) — each notable entry carries its selection
+// spec: §4.5.5 — each notable entry carries its selection
 // source: "featured" for an author-curated entry, "signal" otherwise.
 func TestLoadDomain_NotableSourceTagging(t *testing.T) {
 	t.Parallel()
@@ -39,7 +39,7 @@ func TestLoadDomain_NotableSourceTagging(t *testing.T) {
 	}
 }
 
-// spec: §4.5.5 "Root domain" (F-4.5.9) — at root there is no featured
+// spec: §4.5.5 "Root domain" — at root there is no featured
 // source, so every notable entry is tagged "signal".
 func TestLoadDomain_RootNotableSourceSignalOnly(t *testing.T) {
 	t.Parallel()
@@ -78,7 +78,7 @@ func dlDeepRegistry(t *testing.T) *core.Registry {
 	return dlRegistry(t, ids, nil)
 }
 
-// spec: §4.5.5 "Rendering note" (F-4.5.10) — when target_response_tokens
+// spec: §4.5.5 "Rendering note" — when target_response_tokens
 // forces the renderer to drop nested levels and there is nothing else to
 // tighten, the note reports the depth reduction in the standalone form
 // ("Subtree depth reduced from X to Y to fit the response budget.").
@@ -110,7 +110,7 @@ func TestLoadDomain_BudgetReducesDepthNote(t *testing.T) {
 	}
 }
 
-// spec: §4.5.5 "Rendering note" (F-4.5.10) — a budget tight enough to
+// spec: §4.5.5 "Rendering note" — a budget tight enough to
 // force both reductions produces the combined sentence form.
 func TestLoadDomain_BudgetReducesDepthAndNotableNote(t *testing.T) {
 	t.Parallel()
@@ -146,7 +146,7 @@ func renderedDepthOf(subs []core.DomainDescriptor) int {
 	return max
 }
 
-// spec: §13.12 / §4.5.5 (F-4.5.11) — the tenant registry.yaml discovery
+// spec: §13.12 / §4.5.5 — the tenant registry.yaml discovery
 // block overrides the package defaults when no per-domain DOMAIN.md sets
 // the knob.
 func TestLoadDomain_TenantDiscoveryDefaultsApplied(t *testing.T) {
@@ -165,7 +165,7 @@ func TestLoadDomain_TenantDiscoveryDefaultsApplied(t *testing.T) {
 	}
 }
 
-// spec: §4.5.5 (F-4.5.11) — a per-domain DOMAIN.md discovery block
+// spec: §4.5.5 — a per-domain DOMAIN.md discovery block
 // overrides the tenant default when allow_per_domain_overrides is true,
 // and is ignored when it is false.
 func TestLoadDomain_AllowPerDomainOverridesGate(t *testing.T) {
@@ -200,7 +200,7 @@ func TestLoadDomain_AllowPerDomainOverridesGate(t *testing.T) {
 	}
 }
 
-// spec: §4.5.4 (F-4.5.8) — last-layer-wins for description means the last
+// spec: §4.5.4 — last-layer-wins for description means the last
 // layer that *supplies* a value wins; a higher-precedence DOMAIN.md that
 // omits description does not clear a lower layer's value.
 func TestLoadDomain_CrossLayerDescriptionNotClearedByOmission(t *testing.T) {
@@ -225,7 +225,7 @@ func TestLoadDomain_CrossLayerDescriptionNotClearedByOmission(t *testing.T) {
 	}
 }
 
-// spec: §4.5.5 (F-4.5.13) — a single-child intermediate domain whose only
+// spec: §4.5.5 — a single-child intermediate domain whose only
 // members arrive through DOMAIN.md include: is not a bare pass-through and
 // must not be collapsed away.
 func TestLoadDomain_ImportedMembersPreventPassthroughCollapse(t *testing.T) {
@@ -253,7 +253,7 @@ func TestLoadDomain_ImportedMembersPreventPassthroughCollapse(t *testing.T) {
 	}
 }
 
-// spec: §4.5.5 "Visibility-aware counts" (F-4.5.13) — imported members
+// spec: §4.5.5 "Visibility-aware counts" — imported members
 // count toward the fold_below_artifacts recursive count, so a domain that
 // is sparse in canonical children but rich in imports is not folded.
 func TestLoadDomain_ImportedMembersCountTowardFold(t *testing.T) {

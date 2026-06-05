@@ -1,7 +1,7 @@
 package e2e
 
 // End-to-end semantic-search tests that wire a real vector backend through
-// the standalone server's HTTP surface, closing G-VEC-3 (TEST-GAPS.md). The
+// the standalone server's HTTP surface. The
 // existing discovery_search e2e runs against in-memory BM25, and the
 // vector_backend_config e2e skips every storage happy-path; neither boots a
 // server with a live vector backend, ingests artifacts, and asserts that a
@@ -151,7 +151,7 @@ func queryEscape(q string) string {
 	return strings.ReplaceAll(q, " ", "+")
 }
 
-// TestVectorSemanticSearch_PgVectorThroughServer is the G-VEC-3 PR-lane form
+// TestVectorSemanticSearch_PgVectorThroughServer is the PR-lane form
 // (pgvector). It boots the standalone server with PODIUM_VECTOR_BACKEND=pgvector
 // against the CI Postgres container, ingests three context artifacts, and
 // asserts a semantic query returns the matching artifact at rank 1 through the
@@ -262,7 +262,7 @@ func managedBackends() []managedBackend {
 	}
 }
 
-// TestVectorSemanticSearch_ManagedThroughServer is the G-VEC-3 Release-lane form
+// TestVectorSemanticSearch_ManagedThroughServer is the Release-lane form
 // (managed backends). It iterates Pinecone, Weaviate Cloud, and Qdrant Cloud and
 // runs one subtest per backend: each boots the standalone server wired to that
 // backend, ingests the same artifacts, and asserts the same end-to-end semantic

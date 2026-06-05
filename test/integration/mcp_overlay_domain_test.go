@@ -12,7 +12,7 @@ import (
 	"github.com/lennylabs/podium/internal/testharness/registryharness"
 )
 
-// Spec: §4.5.2 / §4.5.4 / §6.4 (F-4.5.2, F-6.4.2) — the MCP bridge applies the
+// Spec: §4.5.2 / §4.5.4 / §6.4 — the MCP bridge applies the
 // workspace-overlay DOMAIN.md merge to load_domain client-side. A
 // workspace-local DOMAIN.md include: resolves over the merged view (registry
 // catalog ∪ overlay), so this exercises the new GET /v1/catalog endpoint

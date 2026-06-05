@@ -56,8 +56,7 @@ func TestVoyage_Live_DimensionAndDeterminism(t *testing.T) {
 
 // Spec: §4.7 — Voyage shares OpenAI's {data:[{embedding,index}]} wire
 // format; a real batched response must preserve per-item alignment so the
-// index-scatter parser is exercised against the live vendor response
-// (G-EMB-2).
+// index-scatter parser is exercised against the live vendor response.
 func TestVoyage_Live_BatchAlignment(t *testing.T) {
 	p := liveVoyage(t)
 	ctx, cancel := liveContext(t)

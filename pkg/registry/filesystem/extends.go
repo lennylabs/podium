@@ -113,7 +113,7 @@ func mergeRecord(rec ArtifactRecord, layerIdx int, deduped []ArtifactRecord, eff
 	// spec: §4.6 — "The child's type: must match the parent's; ingest rejects
 	// an extends: chain that crosses types." The server ingest path enforces
 	// this; the filesystem-source materialization path must reject it too
-	// rather than silently merge an incompatible parent (F-4.6.2).
+	// rather than silently merge an incompatible parent.
 	if parentMerged.Type != rec.Artifact.Type {
 		return nil, fmt.Errorf("extends.type_mismatch: %q (type %q) extends %q (type %q); a child's type must match the parent's",
 			rec.ID, rec.Artifact.Type, parentID, parentMerged.Type)

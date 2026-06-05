@@ -1,7 +1,7 @@
 package e2e
 
-// End-to-end admin-reembed journey after a configured embedding-model switch,
-// closing G-VEC-10 (TEST-GAPS.md). pgvector_depth_test.go exercises PutModel /
+// End-to-end admin-reembed journey after a configured embedding-model switch.
+// pgvector_depth_test.go exercises PutModel /
 // QueryModel / PurgeModelExcept directly, and extra_handlers_test.go drives the
 // /v1/admin/reembed handler past validation, but no test drives the full flow:
 // ingest at model A on pgvector, switch the configured model to B, POST
@@ -93,7 +93,7 @@ func loadContentHash(t *testing.T, baseURL, id string) string {
 	return resp.ContentHash
 }
 
-// TestVectorReembed_ModelSwitchRetagsAndPurges closes G-VEC-10. It ingests a
+// TestVectorReembed_ModelSwitchRetagsAndPurges. It ingests a
 // corpus on pgvector with embedder model A, asserts the rows are model-A-tagged,
 // reboots the server with model B over the same schema, POSTs
 // /v1/admin/reembed, and asserts every artifact vector now carries model B, no

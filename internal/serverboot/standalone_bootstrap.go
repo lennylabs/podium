@@ -85,8 +85,7 @@ func registryYAMLExists() bool {
 // standalone (SQLite) deployment bootstraps these files; a standard (Postgres)
 // deployment leaves client config to the operator.
 //
-// spec: §13.10 (lines 116, 223), §14.3 step 1 (F-14.3.2), §14.10 step 1
-// (F-14.10.4).
+// spec: §13.10 (lines 116, 223), §14.3 step 1, §14.10 step 1.
 func bootstrapStandaloneFiles(cfg *Config) {
 	if isTrue(os.Getenv("PODIUM_NO_AUTOSTANDALONE")) {
 		return

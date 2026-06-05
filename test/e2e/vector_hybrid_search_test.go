@@ -1,9 +1,9 @@
 package e2e
 
 // End-to-end hybrid-search journeys that isolate the semantic (vector)
-// contribution through the standalone server's HTTP surface, closing G-VEC-7
-// (query-time embedder failure degrades to BM25 and recovers) and G-VEC-8
-// (RRF ranks a paraphrased query whose words are absent from the target).
+// contribution through the standalone server's HTTP surface. They cover a
+// query-time embedder failure that degrades to BM25 and recovers, and RRF
+// ranking a paraphrased query whose words are absent from the target.
 //
 // The existing vector_semantic_search_test.go proves a lexically-matching
 // artifact ranks first whether the vector path contributes or silently
@@ -82,7 +82,7 @@ func topicVector(text string) []float64 {
 
 // controllableEmbedder is a topic-routed mock OpenAI embedder whose responses can
 // be flipped to HTTP 429 at runtime via an atomic flag, modeling a transient
-// provider outage during live queries (G-VEC-7). When healthy it returns one
+// provider outage during live queries. When healthy it returns one
 // topicVector per input text in input order.
 type controllableEmbedder struct {
 	srv  *httptest.Server
@@ -207,7 +207,7 @@ func startHybridPgVector(t *testing.T, scopedDSN, embURL, reg string) *serverPro
 	return srv
 }
 
-// TestVectorHybrid_DegradesToBM25AndRecovers closes G-VEC-7. It boots pgvector
+// TestVectorHybrid_DegradesToBM25AndRecovers. It boots pgvector
 // with a controllable topic-routed embedder, runs a baseline query whose only
 // lexical match is a distractor and whose semantic target shares no query word
 // so only the vector half can rank it first, flips the embedder to 429 and
@@ -282,7 +282,7 @@ func TestVectorHybrid_DegradesToBM25AndRecovers(t *testing.T) {
 	}
 }
 
-// TestVectorHybrid_RRFRanksParaphraseThenChangesWithoutEmbedder closes G-VEC-8.
+// TestVectorHybrid_RRFRanksParaphraseThenChangesWithoutEmbedder.
 // It ingests a corpus whose semantic target shares no word with the query,
 // asserts the semantically-correct artifact ranks first with the topic-routed
 // embedder live, then re-runs against a second server booted with no embedding

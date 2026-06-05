@@ -50,7 +50,7 @@ func TestEnforce_DropsExpiredEventsAndRebuildsChain(t *testing.T) {
 	}
 }
 
-// Spec: §8.4/§8.6/F-8.4.8 — when a retention pass rewrites the chain it
+// Spec: §8.4/§8.6 — when a retention pass rewrites the chain it
 // appends an audit.retention_enforced marker recording the superseded
 // chain head, so a verifier holding an older anchor can reconcile it.
 func TestEnforce_AppendsRetentionMarkerRecordingSupersededHead(t *testing.T) {
@@ -95,7 +95,7 @@ func TestEnforce_AppendsRetentionMarkerRecordingSupersededHead(t *testing.T) {
 	}
 }
 
-// Spec: §8.4/F-8.4.8 — a pass that drops nothing leaves the log
+// Spec: §8.4 — a pass that drops nothing leaves the log
 // untouched and appends no marker, so a stable chain is not perturbed.
 func TestEnforce_NoMarkerWhenNothingChanges(t *testing.T) {
 	t.Parallel()
@@ -200,7 +200,7 @@ func TestEraseUser_ReplacesIdentifiersAndAppendsTombstone(t *testing.T) {
 	}
 }
 
-// Spec: §8.5 (F-8.5.1) — erasure removes the caller's directly-identifying
+// Spec: §8.5 — erasure removes the caller's directly-identifying
 // email and group membership, not only the sub-claim, so the persisted audit
 // record no longer carries the erased user's PII.
 func TestEraseUser_RedactsEmailAndGroups(t *testing.T) {
@@ -260,7 +260,7 @@ func TestEraseUser_RedactsEmailAndGroups(t *testing.T) {
 	}
 }
 
-// Spec: §8.5 (F-8.5.2) — §8.5 takes a single <user_id> and §8.1 records the
+// Spec: §8.5 — §8.5 takes a single <user_id> and §8.1 records the
 // sub-claim with the email attached separately. Passing the email (the value a
 // human knows for a GDPR request) erases the sub-claim too, including the
 // sub-claim stored in the layer-owner context, while an unrelated user
@@ -418,7 +418,7 @@ func parseEvents(t *testing.T, path string) []parsedEvent {
 	return out
 }
 
-// Spec: §8.5 (F-8.5.2) — the redaction value is
+// Spec: §8.5 — the redaction value is
 // redacted-<sha256(user_id+salt)>: the redacted- prefix, the full 32-byte
 // (64 hex char) SHA-256 digest, and no delimiter inserted between user_id
 // and salt.
@@ -457,7 +457,7 @@ func TestEraseUser_TombstoneFormatMatchesSpec(t *testing.T) {
 	}
 }
 
-// Spec: §8.5 (F-8.5.5) — an empty salt is rejected so the tombstone cannot
+// Spec: §8.5 — an empty salt is rejected so the tombstone cannot
 // degrade to a guessable sha256(user_id).
 func TestEraseUser_EmptySaltRejected(t *testing.T) {
 	t.Parallel()
@@ -480,7 +480,7 @@ func TestEraseUser_EmptySaltRejected(t *testing.T) {
 	}
 }
 
-// Spec: §8.5 / §8.1 (F-8.5.4) — the appended user.erased event records the
+// Spec: §8.5 / §8.1 — the appended user.erased event records the
 // invoking admin as the Caller and in the admin context field.
 func TestEraseUser_RecordsInvokingAdmin(t *testing.T) {
 	t.Parallel()

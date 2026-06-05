@@ -1,6 +1,6 @@
 package e2e
 
-// Notification delivery sink and override seam (gap G-INFRA-9).
+// Notification delivery sink and override seam.
 //
 // The standalone harness boots an outbound webhook worker (§7.3.2) and a
 // §7.6 /v1/events change stream, but three capabilities were missing from the
@@ -39,7 +39,7 @@ package e2e
 // §7.6 (the registry streams change events as NDJSON over /v1/events?type=...,
 // with a periodic {"event":"_heartbeat"} keepalive), §9.1 (the
 // NotificationProvider delivers operational notifications; the webhook provider
-// posts a signed JSON body). Gap G-INFRA-9.
+// posts a signed JSON body).
 
 import (
 	"bufio"

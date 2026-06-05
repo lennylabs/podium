@@ -1,11 +1,11 @@
 package e2e
 
 // End-to-end coverage for the §13.12 server-side config-file format through the
-// real `podium` binary: the top-level `registry:` block (F-13.12.2), ${ENV_VAR}
-// interpolation (F-13.12.1), the section-relative store/object keys and the
-// vector/identity sub-keys (F-13.12.4, F-13.12.5), the refuse-to-start contract
-// for a selected backend missing required values (F-13.12.10), and the
-// standalone public default for endpoint-registered layers (F-13.12.15).
+// real `podium` binary: the top-level `registry:` block, ${ENV_VAR}
+// interpolation, the section-relative store/object keys and the
+// vector/identity sub-keys, the refuse-to-start contract
+// for a selected backend missing required values, and the
+// standalone public default for endpoint-registered layers.
 
 import (
 	"fmt"
@@ -15,7 +15,7 @@ import (
 	"testing"
 )
 
-// §13.12 (F-13.12.1, F-13.12.2, F-13.12.4, F-13.12.5): a registry.yaml written
+// §13.12: a registry.yaml written
 // as the documented config-file example resolves end-to-end. `config show`
 // reflects the nested keys, the interpolated value, and registry.yaml as the
 // source. If the registry: nesting failed to parse, none of these would
@@ -57,7 +57,7 @@ func TestRegistryConfig_SpecExampleNestedInterpolation(t *testing.T) {
 		"PODIUM_S3_BUCKET=", "PODIUM_S3_REGION=", "PODIUM_PINECONE_INDEX=",
 		"PODIUM_PINECONE_NAMESPACE=", "PODIUM_IDENTITY_PROVIDER=", "PODIUM_OAUTH_AUDIENCE=",
 	}
-	// spec §7.7 (F-7.7.2): the backend selectors are §13.12 server settings,
+	// spec §7.7: the backend selectors are §13.12 server settings,
 	// surfaced by `config show --server`.
 	res := runPodium(t, "", env, "config", "show", "--server")
 	if res.Exit != 0 {
@@ -66,12 +66,12 @@ func TestRegistryConfig_SpecExampleNestedInterpolation(t *testing.T) {
 	out := res.Stdout
 	for _, want := range []string{
 		"postgres",                // store.type
-		"acme-podium",             // object_store.bucket (F-13.12.5)
+		"acme-podium",             // object_store.bucket
 		"us-west-2",               // object_store.region
 		"pinecone",                // vector_backend.type
-		"acme-prod",               // vector_backend.index (F-13.12.4)
-		"tenant-acme",             // namespace, ${PODIUM_TEST_NS} interpolated (F-13.12.1)
-		"oauth-device-code",       // identity_provider.type (F-13.12.4)
+		"acme-prod",               // vector_backend.index
+		"tenant-acme",             // namespace, ${PODIUM_TEST_NS} interpolated
+		"oauth-device-code",       // identity_provider.type
 		"https://podium.acme.com", // identity_provider.audience
 		"registry.yaml",           // source attribution
 	} {
@@ -85,7 +85,7 @@ func TestRegistryConfig_SpecExampleNestedInterpolation(t *testing.T) {
 	}
 }
 
-// §13.12 line 347 (F-13.12.10): selecting the s3 object store without its
+// §13.12 line 347: selecting the s3 object store without its
 // required bucket refuses startup, naming the missing key.
 func TestRegistryConfig_S3MissingBucketRefusesStart(t *testing.T) {
 	t.Parallel()
@@ -104,7 +104,7 @@ func TestRegistryConfig_S3MissingBucketRefusesStart(t *testing.T) {
 	}
 }
 
-// §13.10 / §13.12 (F-13.12.15): a standalone deployment (no identity provider)
+// §13.10 / §13.12: a standalone deployment (no identity provider)
 // defaults an endpoint-registered admin layer to public when no explicit
 // visibility is supplied.
 func TestRegistryConfig_StandalonePublicDefault(t *testing.T) {

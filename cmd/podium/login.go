@@ -44,7 +44,7 @@ func loginCmd(args []string) int {
 		return parseExit(err)
 	}
 
-	// F-7.7.4: resolve the registry from --registry, PODIUM_REGISTRY,
+	// resolve the registry from --registry, PODIUM_REGISTRY,
 	// then the merged sync.yaml.
 	reg, err := resolveClientRegistry(*registry)
 	if err != nil {
@@ -52,7 +52,7 @@ func loginCmd(args []string) int {
 		return 2
 	}
 
-	// F-7.7.5: login is a no-op when the registry needs no auth (a
+	// login is a no-op when the registry needs no auth (a
 	// filesystem path or the standalone server). Print a notice and exit.
 	if isNoAuthRegistry(reg) {
 		fmt.Fprintf(os.Stderr, "%s requires no authentication; nothing to do.\n", reg)
@@ -61,7 +61,7 @@ func loginCmd(args []string) int {
 
 	client := &http.Client{Timeout: 30 * time.Second}
 
-	// F-7.7.5: discover the IdP from the registry when --issuer is unset.
+	// discover the IdP from the registry when --issuer is unset.
 	deviceURL := *issuer
 	tokURL := *tokenURL
 	if deviceURL == "" {
@@ -88,7 +88,7 @@ func loginCmd(args []string) int {
 		Client:        client,
 	}
 
-	// F-7.7.6: bound the whole flow to the 10-minute deadline.
+	// bound the whole flow to the 10-minute deadline.
 	ctx, cancel := context.WithTimeout(context.Background(), loginTimeout)
 	defer cancel()
 
@@ -147,7 +147,7 @@ func loginCmd(args []string) int {
 
 // resolveClientRegistry resolves the registry for login from --registry,
 // then PODIUM_REGISTRY, then the merged sync.yaml's defaults.registry.
-// spec: §7.7 (F-7.7.4).
+// spec: §7.7.
 func resolveClientRegistry(flagVal string) (string, error) {
 	cwd, _ := os.Getwd()
 	home, _ := os.UserHomeDir()
@@ -173,7 +173,7 @@ func resolveClientRegistryAt(flagVal, cwd, home string) (string, error) {
 
 // isNoAuthRegistry reports whether the resolved registry needs no
 // authentication: a filesystem path (no http/https scheme) or the
-// standalone server. spec: §7.7 (F-7.7.5).
+// standalone server. spec: §7.7.
 func isNoAuthRegistry(reg string) bool {
 	if !strings.HasPrefix(reg, "http://") && !strings.HasPrefix(reg, "https://") {
 		return true
@@ -183,7 +183,7 @@ func isNoAuthRegistry(reg string) bool {
 
 // discoverIdP fetches the registry's RFC 8414 authorization-server
 // metadata and returns its device-authorization and token endpoints.
-// spec: §7.7 (F-7.7.5) — the issuer flags become optional overrides.
+// spec: §7.7 — the issuer flags become optional overrides.
 func discoverIdP(registry string, client *http.Client) (deviceURL, tokenURL string, err error) {
 	u := strings.TrimRight(registry, "/") + "/.well-known/oauth-authorization-server"
 	resp, err := client.Get(u)
@@ -288,7 +288,7 @@ func browserCommand(goos, url string) *exec.Cmd {
 
 // saveTokens persists the access token (under the registry label) and,
 // when present, the refresh token (under identity.RefreshLabel). spec: §7.7
-// (F-7.7.7) — cache the access + refresh tokens for silent renewal.
+// — cache the access + refresh tokens for silent renewal.
 func saveTokens(store identity.TokenStore, registry string, tokens *identity.Tokens) error {
 	if err := store.Save(registry, tokens.AccessToken); err != nil {
 		return err
@@ -353,7 +353,7 @@ func decodeIdentity(idToken string) string {
 // keychain. No remote revocation is performed; the IdP retains authority
 // over token lifecycle. The registry resolves from --registry, then
 // PODIUM_REGISTRY, then the merged sync.yaml, mirroring `podium login` so a
-// bare `podium logout` works after `podium init`. spec: §7.7 (F-7.7.14).
+// bare `podium logout` works after `podium init`. spec: §7.7.
 //
 //	podium logout [--registry URL]
 func logoutCmd(args []string) int {

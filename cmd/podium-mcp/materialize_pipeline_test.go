@@ -14,7 +14,7 @@ import (
 	"github.com/lennylabs/podium/pkg/version"
 )
 
-// ----- test hooks (in-process; F-9.3.1 owns the wire-serializable loading) --
+// ----- test hooks (in-process; the SPI owns the wire-serializable loading) --
 
 // tagHook appends "|<tag>" to each file and records run order.
 type tagHook struct {
@@ -407,9 +407,9 @@ func TestAbsMaterializeRoot(t *testing.T) {
 	}
 }
 
-// ----- F-6.6.8 resources_base64 -------------------------------------------
+// ----- resources_base64 -------------------------------------------
 
-// Spec: §6.6 / F-6.6.8 — when the registry flags inline resources base64, the
+// Spec: §6.6 — when the registry flags inline resources base64, the
 // MCP decodes them to raw bytes before the hash check and materialization.
 func TestDeliver_Base64InlineResourceDecoded(t *testing.T) {
 	t.Parallel()
@@ -439,7 +439,7 @@ func TestDeliver_Base64InlineResourceDecoded(t *testing.T) {
 	}
 }
 
-// Spec: §6.6 / F-6.6.8 — an inline value that does not base64-decode fails the
+// Spec: §6.6 — an inline value that does not base64-decode fails the
 // call rather than writing the base64 text to disk.
 func TestDeliver_InvalidBase64Rejected(t *testing.T) {
 	t.Parallel()

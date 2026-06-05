@@ -7,8 +7,8 @@ package e2e
 // (registry, postgres, minio, dex, bootstrap) and wires the registry
 // against the local services.
 //
-// spec: §13.1.1 — covers F-13.1.1 (registry service), F-13.1.2 (dex
-// service), F-13.1.3 (bootstrap responsibilities), and F-13.1.4 (the
+// spec: §13.1.1 — covers the registry service, the dex
+// service, bootstrap responsibilities, and the
 // one-command full-stack evaluation topology).
 
 import (
@@ -87,7 +87,7 @@ func TestDeployCompose_ComposeStackServices(t *testing.T) {
 }
 
 // TestOrg_1_RegistryServiceWiring asserts the registry service is built and
-// configured against the local Postgres, MinIO, and Dex services (F-13.1.1).
+// configured against the local Postgres, MinIO, and Dex services.
 func TestDeployCompose_RegistryServiceWiring(t *testing.T) {
 	t.Parallel()
 	cf := loadComposeFile(t)
@@ -135,7 +135,7 @@ func TestDeployCompose_RegistryServiceWiring(t *testing.T) {
 
 // TestOrg_1_DexService asserts the Dex IdP service exists, mounts the
 // bundled config, and that the config defines a device-code client and a
-// static user (F-13.1.2).
+// static user.
 func TestDeployCompose_DexService(t *testing.T) {
 	t.Parallel()
 	cf := loadComposeFile(t)
@@ -170,7 +170,7 @@ func TestDeployCompose_DexService(t *testing.T) {
 }
 
 // TestOrg_1_BootstrapService asserts the one-shot bootstrap container creates
-// the MinIO bucket and runs after MinIO is healthy (F-13.1.3).
+// the MinIO bucket and runs after MinIO is healthy.
 func TestDeployCompose_BootstrapService(t *testing.T) {
 	t.Parallel()
 	cf := loadComposeFile(t)

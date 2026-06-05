@@ -1,11 +1,11 @@
 package e2e
 
 // End-to-end tests for §13.12 registry.yaml backend-configuration keys:
-//   - F-13.12.4: env var beats the config-file `bind` even when the env value
+//   - env var beats the config-file `bind` even when the env value
 //     equals the loopback default.
-//   - F-13.12.2: a config-file embedding_provider.model is applied to a built-in
+//   - a config-file embedding_provider.model is applied to a built-in
 //     provider (observable as the embedder dimension in the startup log).
-//   - F-13.12.1: previously env-only keys (here embedding_provider.url) are valid
+//   - previously env-only keys (here embedding_provider.url) are valid
 //     config-file keys.
 //
 // These drive the real `podium` binary: `config show --server` for resolved
@@ -18,7 +18,7 @@ import (
 	"testing"
 )
 
-// T-registry-config-1 (F-13.12.4): PODIUM_BIND set to the loopback default is
+// T-registry-config-1: PODIUM_BIND set to the loopback default is
 // still an explicit env value, so the config-file bind must not override it.
 func TestRegistryConfig_BindEnvBeatsConfigFile(t *testing.T) {
 	t.Parallel()
@@ -43,7 +43,7 @@ func TestRegistryConfig_BindEnvBeatsConfigFile(t *testing.T) {
 	}
 }
 
-// T-registry-config-2 (F-13.12.4): with PODIUM_BIND unset, the config-file bind
+// T-registry-config-2: with PODIUM_BIND unset, the config-file bind
 // is used (config file fills an absent env var).
 func TestRegistryConfig_BindFromConfigFileWhenEnvUnset(t *testing.T) {
 	t.Parallel()
@@ -65,7 +65,7 @@ func TestRegistryConfig_BindFromConfigFileWhenEnvUnset(t *testing.T) {
 	}
 }
 
-// T-registry-config-3 (F-13.12.1): embedding_provider.url is a valid config-file
+// T-registry-config-3: embedding_provider.url is a valid config-file
 // key for ollama (the env var is PODIUM_OLLAMA_URL). It reaches the resolved
 // ollama_url setting even though the embedding_provider block has no api_key.
 func TestRegistryConfig_OllamaURLFromConfigFile(t *testing.T) {
@@ -90,7 +90,7 @@ func TestRegistryConfig_OllamaURLFromConfigFile(t *testing.T) {
 	}
 }
 
-// T-registry-config-4 (F-13.12.2): a config-file embedding_provider.model for a
+// T-registry-config-4: a config-file embedding_provider.model for a
 // built-in provider takes effect. text-embedding-3-large fixes the embedder
 // dimension at 3072, which the startup hybrid-search log reports; the bug left
 // the provider on its default model (1536). The server runs standalone with an

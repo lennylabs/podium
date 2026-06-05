@@ -8,7 +8,7 @@ import (
 	"github.com/lennylabs/podium/internal/testharness/registryharness"
 )
 
-// Spec: §12 (F-12.0.8) — "ETag caching of immutable artifact versions." The
+// Spec: §12 — "ETag caching of immutable artifact versions." The
 // standalone registry server publishes the content hash as the load_artifact
 // ETag and answers a matching If-None-Match with 304 Not Modified, end to end.
 func TestRegistry_LoadArtifactETagRoundTrip(t *testing.T) {

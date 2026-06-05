@@ -1,4 +1,4 @@
-// Client.loadDomain workspace-overlay merge (F-4.5.2 / F-6.4.2). The merge
+// Client.loadDomain workspace-overlay merge. The merge
 // mirrors the Go MCP bridge (cmd/podium-mcp/load_domain.go): the overlay is the
 // highest-precedence layer in the caller's effective view (§6.4), composed onto
 // the registry's rendered load_domain result client-side (§4.5.4, §4.5.5).
@@ -70,7 +70,7 @@ function registryFetcher(
   };
 }
 
-describe("loadDomain overlay merge (F-4.5.2/F-6.4.2)", () => {
+describe("loadDomain overlay merge", () => {
   let dir: string;
   let overlay: string;
   beforeEach(async () => {

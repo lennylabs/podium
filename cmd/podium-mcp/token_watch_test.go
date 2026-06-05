@@ -12,7 +12,7 @@ import (
 
 // Spec: §6.3.2.1 — the session-token file is watched via fsnotify and re-read
 // on change. watchLoop is the testable core: an fsnotify event whose target
-// matches the watched file triggers a reload. F-6.3.2.
+// matches the watched file triggers a reload.
 func TestWatchLoop_FSNotifyEventTriggersReload(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -37,7 +37,7 @@ func TestWatchLoop_FSNotifyEventTriggersReload(t *testing.T) {
 }
 
 // Spec: §6.3.2.1 — an event for an unrelated file in the watched directory is
-// ignored; only the configured token path triggers a re-read. F-6.3.2.
+// ignored; only the configured token path triggers a re-read.
 func TestWatchLoop_IgnoresUnrelatedFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -71,7 +71,7 @@ func TestWatchLoop_IgnoresUnrelatedFile(t *testing.T) {
 
 // Spec: §6.3.2.1 — SIGHUP triggers a forced re-read. The watcher's signal path
 // is exercised with a controlled channel so the test does not signal the real
-// process. F-6.3.2.
+// process.
 func TestWatchLoop_SIGHUPTriggersReload(t *testing.T) {
 	t.Parallel()
 	reasons := make(chan string, 4)
@@ -95,7 +95,6 @@ func TestWatchLoop_SIGHUPTriggersReload(t *testing.T) {
 // Spec: §6.3.2.1 — startTokenWatch installs a real fsnotify watch on the token
 // file's directory; a write to the file re-reads the token end-to-end (the
 // watcher genuinely observes the filesystem rather than a synthetic channel).
-// F-6.3.2.
 func TestStartTokenWatch_RealFSNotifyReload(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -124,7 +123,7 @@ func TestStartTokenWatch_RealFSNotifyReload(t *testing.T) {
 
 // Spec: §6.3.2.1 — startTokenWatch installs and cleanly stops the watcher (no
 // goroutine leak, no lingering signal registration, no leaked fsnotify
-// watcher) even with no file configured. F-6.3.2.
+// watcher) even with no file configured.
 func TestStartTokenWatch_StartStop(t *testing.T) {
 	t.Parallel()
 	stop := startTokenWatch("", func(string) {})

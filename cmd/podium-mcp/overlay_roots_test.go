@@ -12,7 +12,7 @@ import (
 
 // Spec: §2.1 / §6.4 step 2 — workspaceFromURI maps an MCP root URI to a
 // filesystem path. Roots are file:// URIs; a bare absolute path is
-// tolerated, and anything else yields no workspace. F-2.1.2.
+// tolerated, and anything else yields no workspace.
 func TestWorkspaceFromURI(t *testing.T) {
 	t.Parallel()
 	cases := []struct{ in, want string }{
@@ -32,7 +32,7 @@ func TestWorkspaceFromURI(t *testing.T) {
 
 // Spec: §6.4 step 2 — the bridge asks for roots/list only when no
 // PODIUM_OVERLAY_PATH is set (step 1 wins) and the host advertised the
-// roots capability, and it asks at most once. F-2.1.2.
+// roots capability, and it asks at most once.
 func TestRequestRootsIfNeeded(t *testing.T) {
 	t.Parallel()
 
@@ -79,7 +79,7 @@ func TestRequestRootsIfNeeded(t *testing.T) {
 }
 
 // Spec: §6.4 step 2 — applyRootsResponse resolves <workspace>/.podium/overlay
-// from the host's roots/list reply and loads its records. F-2.1.2.
+// from the host's roots/list reply and loads its records.
 func TestApplyRootsResponse_ResolvesOverlay(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
@@ -111,7 +111,7 @@ func TestApplyRootsResponse_ResolvesOverlay(t *testing.T) {
 
 // Spec: §6.4 step 2 — only the bridge's own roots/list reply is consumed;
 // requests, unrelated responses, and malformed lines pass through and leave
-// the overlay untouched. F-2.1.2.
+// the overlay untouched.
 func TestApplyRootsResponse_IgnoresOtherMessages(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &config{})
@@ -134,7 +134,6 @@ func TestApplyRootsResponse_IgnoresOtherMessages(t *testing.T) {
 
 // Spec: §6.4 step 2 — a root without a .podium/overlay directory consumes
 // the reply (so it is not re-dispatched) but leaves the overlay disabled.
-// F-2.1.2.
 func TestApplyRootsResponse_NoOverlayDir(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir() // no .podium/overlay underneath
@@ -154,7 +153,7 @@ func TestApplyRootsResponse_NoOverlayDir(t *testing.T) {
 
 // Spec: §2.1 / §6.4 step 2 — end to end across the serve loop: a roots-capable
 // host triggers a roots/list request, and the host's reply resolves the
-// workspace overlay so a later read finds the draft. F-2.1.2.
+// workspace overlay so a later read finds the draft.
 func TestServe_RootsListResolvesWorkspaceOverlay(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
@@ -192,7 +191,7 @@ func TestServe_RootsListResolvesWorkspaceOverlay(t *testing.T) {
 }
 
 // Spec: §6.4 step 2 — when no host roots capability is advertised, the serve
-// loop sends no roots/list request and the overlay stays disabled. F-2.1.2.
+// loop sends no roots/list request and the overlay stays disabled.
 func TestServe_NoRootsCapabilityNoRequest(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &config{})

@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// spec: SS 6.10 (F-6.10.2) — a message prefixed with a namespaced code is
+// spec: SS 6.10 — a message prefixed with a namespaced code is
 // split into the structured envelope: discrete code/message fields plus
 // the human-readable summary on `error`. Bridge-originated codes also get
 // their retryable flag and remediation hint filled in.
@@ -45,7 +45,7 @@ func TestErrorResult_NonNamespacedStaysBare(t *testing.T) {
 	}
 }
 
-// spec: SS 6.10 (F-6.10.2, F-6.10.1) — errorResultFrom propagates a
+// spec: SS 6.10 — errorResultFrom propagates a
 // decoded registry envelope verbatim, including the details object the
 // spec example carries (runtime_iss for auth.untrusted_runtime).
 func TestErrorResultFrom_PropagatesRegistryEnvelope(t *testing.T) {
@@ -84,7 +84,7 @@ type errPlain string
 
 func (e errPlain) Error() string { return string(e) }
 
-// spec: SS 6.10 (F-6.10.2) — parseRegistryError decodes a structured
+// spec: SS 6.10 — parseRegistryError decodes a structured
 // envelope and falls back to an HTTP status string for non-envelope
 // bodies.
 func TestParseRegistryError(t *testing.T) {
@@ -135,7 +135,7 @@ func TestSplitNamespacedCode(t *testing.T) {
 	}
 }
 
-// spec: SS 6.10 (F-6.10.2) — end to end: when the registry returns a 4xx
+// spec: SS 6.10 — end to end: when the registry returns a 4xx
 // with a structured envelope, the bridge's tool-call result carries the
 // discrete code, details, retryable, and suggested_action fields rather
 // than collapsing them into an opaque "HTTP <status>: <body>" string.

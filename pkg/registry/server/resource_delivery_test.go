@@ -89,7 +89,7 @@ func getLoadArtifact(t *testing.T, ts *httptest.Server) (server.LoadArtifactResp
 	return parsed, raw
 }
 
-// Spec: §4.1/§7.2 (F-4.1.1) — a binary bundled resource at or below the
+// Spec: §4.1/§7.2 — a binary bundled resource at or below the
 // inline cutoff is base64-encoded on the wire (resources_base64) so
 // encoding/json does not replace its non-UTF-8 bytes with U+FFFD. Without
 // the fix the value is a corrupted UTF-8 string that no longer decodes to
@@ -142,7 +142,7 @@ func TestLoadArtifact_TextInlineResourcesStayPlain(t *testing.T) {
 	}
 }
 
-// Spec: §7.2 (F-7.2.1) — a resource above the inline cutoff that ingest kept
+// Spec: §7.2 — a resource above the inline cutoff that ingest kept
 // inline (no object store configured) serves inline rather than failing with
 // registry.unavailable. Without the fix attachResources routes it to
 // presignResource on size alone and returns HTTP 500.
@@ -169,7 +169,7 @@ func TestLoadArtifact_LargeInlineResourceServedWithoutObjectStore(t *testing.T) 
 	}
 }
 
-// Spec: §7.6.2 (F-7.6.4) — the batch path delivers inline resources when no
+// Spec: §7.6.2 — the batch path delivers inline resources when no
 // object store is configured, rather than silently dropping them. A binary
 // resource carries inline_base64 so the bytes survive JSON transport; a text
 // resource carries the literal string.

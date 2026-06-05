@@ -42,7 +42,7 @@ func (e bagEmbedder) Embed(_ context.Context, texts []string) ([][]float32, erro
 	return out, nil
 }
 
-// Spec: §3.2 Layer 1 / §4.7 (F-3.2.1) — search_domains hybrid retrieval
+// Spec: §3.2 Layer 1 / §4.7 — search_domains hybrid retrieval
 // through the real ingest walk, the metadata + vector stores, and
 // core.SearchDomains. A DOMAIN.md is walked, its projection embedded at
 // ingest, and a keyword-only query (the term appears in keywords, not in

@@ -14,7 +14,7 @@ import (
 
 // loadArtifactJSON builds a /v1/load_artifact response body whose content_hash
 // is the canonical hash of frontmatter plus resources, so the §6.6 step 2
-// consumer-side check (verifyContentHash, F-6.6.2) accepts it. Compute it in
+// consumer-side check (verifyContentHash) accepts it. Compute it in
 // the test goroutine and write the returned string from the stub handler.
 func loadArtifactJSON(t *testing.T, fields map[string]any) string {
 	t.Helper()

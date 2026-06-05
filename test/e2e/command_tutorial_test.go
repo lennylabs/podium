@@ -35,7 +35,7 @@ func mcpServerEnv(t *testing.T, baseURL string) []string {
 	return []string{"PODIUM_REGISTRY=" + baseURL, "PODIUM_CACHE_DIR=" + t.TempDir()}
 }
 
-// T-D-first-command-1 — the command directory and ARTIFACT.md exist at the
+// the command directory and ARTIFACT.md exist at the
 // documented path with a $ARGUMENTS body and no SKILL.md.
 func TestCommandTutorial_ArtifactLayout(t *testing.T) {
 	t.Parallel()
@@ -52,7 +52,7 @@ func TestCommandTutorial_ArtifactLayout(t *testing.T) {
 	}
 }
 
-// T-D-first-command-2 — scaffold produces a lint-clean command (no SKILL.md).
+// scaffold produces a lint-clean command (no SKILL.md).
 func TestCommandTutorial_ScaffoldLintsClean(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -81,7 +81,7 @@ func TestCommandTutorial_ScaffoldLintsClean(t *testing.T) {
 	}
 }
 
-// T-D-first-command-3 — lint passes on the tutorial standup manifest.
+// lint passes on the tutorial standup manifest.
 func TestCommandTutorial_LintClean(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})
@@ -91,7 +91,7 @@ func TestCommandTutorial_LintClean(t *testing.T) {
 	}
 }
 
-// T-D-first-command-4 — a positional `podium lint <path>` is rejected;
+// a positional `podium lint <path>` is rejected;
 // --registry is required, exit 2. The doc now uses `podium lint --registry`.
 func TestCommandTutorial_LintPositionalRejected(t *testing.T) {
 	t.Parallel()
@@ -105,7 +105,7 @@ func TestCommandTutorial_LintPositionalRejected(t *testing.T) {
 	}
 }
 
-// T-D-first-command-5 — missing version fails lint.
+// missing version fails lint.
 func TestCommandTutorial_MissingVersion(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"standup/ARTIFACT.md": "---\ntype: command\ndescription: A standup command.\n---\n\n$ARGUMENTS\n"})
@@ -118,7 +118,7 @@ func TestCommandTutorial_MissingVersion(t *testing.T) {
 	}
 }
 
-// T-D-first-command-6 — missing type fails lint.
+// missing type fails lint.
 func TestCommandTutorial_MissingType(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"standup/ARTIFACT.md": "---\nname: standup\nversion: 1.0.0\n---\n\n$ARGUMENTS\n"})
@@ -131,7 +131,7 @@ func TestCommandTutorial_MissingType(t *testing.T) {
 	}
 }
 
-// T-D-first-command-7 — a non-semver version fails lint.
+// a non-semver version fails lint.
 func TestCommandTutorial_NonSemver(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"standup/ARTIFACT.md": "---\ntype: command\nversion: v1\ndescription: x\n---\n\n$ARGUMENTS\n"})
@@ -144,7 +144,7 @@ func TestCommandTutorial_NonSemver(t *testing.T) {
 	}
 }
 
-// T-D-first-command-8 — lint with no --registry exits 2.
+// lint with no --registry exits 2.
 func TestCommandTutorial_LintNoRegistry(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "lint")
@@ -153,7 +153,7 @@ func TestCommandTutorial_LintNoRegistry(t *testing.T) {
 	}
 }
 
-// T-D-first-command-9 — lint on a non-existent registry exits 1.
+// lint on a non-existent registry exits 1.
 func TestCommandTutorial_LintBadPath(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "lint", "--registry", filepath.Join(t.TempDir(), "nope"))
@@ -165,7 +165,7 @@ func TestCommandTutorial_LintBadPath(t *testing.T) {
 	}
 }
 
-// T-D-first-command-10 — the none harness materializes the canonical layout.
+// the none harness materializes the canonical layout.
 func TestCommandTutorial_NoneCanonical(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})
@@ -183,7 +183,7 @@ func TestCommandTutorial_NoneCanonical(t *testing.T) {
 	}
 }
 
-// T-D-first-command-11 — claude-code places a command at .claude/commands/<n>.md
+// claude-code places a command at .claude/commands/<n>.md
 // (§6.7 type-target table), not under the .claude/podium/ extension bucket.
 func TestCommandTutorial_ClaudeCodePodiumNotCommands(t *testing.T) {
 	t.Parallel()
@@ -199,7 +199,7 @@ func TestCommandTutorial_ClaudeCodePodiumNotCommands(t *testing.T) {
 	}
 }
 
-// T-D-first-command-12 — sync reads the registry from .podium/sync.yaml.
+// sync reads the registry from .podium/sync.yaml.
 func TestCommandTutorial_SyncReadsConfig(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
@@ -213,7 +213,7 @@ func TestCommandTutorial_SyncReadsConfig(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, standupID, "ARTIFACT.md"))
 }
 
-// T-D-first-command-13 — sync with no registry and no sync.yaml exits 2.
+// sync with no registry and no sync.yaml exits 2.
 func TestCommandTutorial_SyncNoRegistry(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, t.TempDir(), []string{"HOME=" + t.TempDir(), "PODIUM_REGISTRY="}, "sync", "--target", t.TempDir())
@@ -222,7 +222,7 @@ func TestCommandTutorial_SyncNoRegistry(t *testing.T) {
 	}
 }
 
-// T-D-first-command-14 — sync against a missing registry directory exits 1.
+// sync against a missing registry directory exits 1.
 func TestCommandTutorial_SyncMissingRegistry(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "sync", "--registry", filepath.Join(t.TempDir(), "nope"), "--target", t.TempDir(), "--harness", "none")
@@ -234,7 +234,7 @@ func TestCommandTutorial_SyncMissingRegistry(t *testing.T) {
 	}
 }
 
-// T-D-first-command-15 — sync with an unknown harness fails and writes nothing.
+// sync with an unknown harness fails and writes nothing.
 func TestCommandTutorial_UnknownHarness(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})
@@ -251,7 +251,7 @@ func TestCommandTutorial_UnknownHarness(t *testing.T) {
 	}
 }
 
-// T-D-first-command-16 — sync --dry-run writes nothing.
+// sync --dry-run writes nothing.
 func TestCommandTutorial_DryRun(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})
@@ -265,7 +265,7 @@ func TestCommandTutorial_DryRun(t *testing.T) {
 	}
 }
 
-// T-D-first-command-17 — sync --json emits valid JSON with the command.
+// sync --json emits valid JSON with the command.
 func TestCommandTutorial_SyncJSON(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})
@@ -294,7 +294,7 @@ func TestCommandTutorial_SyncJSON(t *testing.T) {
 	}
 }
 
-// T-D-first-command-18 — human sync output lists adapter, target, and the
+// human sync output lists adapter, target, and the
 // artifact id.
 func TestCommandTutorial_SyncHumanOutput(t *testing.T) {
 	t.Parallel()
@@ -312,7 +312,7 @@ func TestCommandTutorial_SyncHumanOutput(t *testing.T) {
 	}
 }
 
-// T-D-first-command-19 — $ARGUMENTS is preserved verbatim through sync.
+// $ARGUMENTS is preserved verbatim through sync.
 func TestCommandTutorial_ArgumentsPreserved(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact})
@@ -324,7 +324,7 @@ func TestCommandTutorial_ArgumentsPreserved(t *testing.T) {
 	}
 }
 
-// T-D-first-command-28 — init writes sync.yaml with registry + harness so a
+// init writes sync.yaml with registry + harness so a
 // later `podium sync` needs no flags.
 func TestCommandTutorial_InitWritesSyncYAML(t *testing.T) {
 	t.Parallel()
@@ -340,7 +340,7 @@ func TestCommandTutorial_InitWritesSyncYAML(t *testing.T) {
 	}
 }
 
-// T-D-first-command-29 — init refuses to overwrite an existing sync.yaml.
+// init refuses to overwrite an existing sync.yaml.
 func TestCommandTutorial_InitRefusesOverwrite(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
@@ -355,7 +355,7 @@ func TestCommandTutorial_InitRefusesOverwrite(t *testing.T) {
 	}
 }
 
-// T-D-first-command-30 — a command declaring variables: with defaults lints
+// a command declaring variables: with defaults lints
 // clean. spec: doc "What's next".
 func TestCommandTutorial_VariablesAccepted(t *testing.T) {
 	t.Parallel()
@@ -376,7 +376,7 @@ func TestCommandTutorial_VariablesAccepted(t *testing.T) {
 	}
 }
 
-// T-D-first-command-31 — the full tutorial sequence on the none harness:
+// the full tutorial sequence on the none harness:
 // write, lint, sync, verify the file with the $ARGUMENTS body preserved.
 func TestCommandTutorial_FullSequenceNone(t *testing.T) {
 	t.Parallel()
@@ -394,7 +394,7 @@ func TestCommandTutorial_FullSequenceNone(t *testing.T) {
 	}
 }
 
-// T-D-first-command-32 — the full sequence on the claude-code harness: lint is
+// the full sequence on the claude-code harness: lint is
 // clean and the command lands at .claude/commands/standup.md, matching the
 // tutorial's verify step (§6.7 type-target table).
 func TestCommandTutorial_FullSequenceClaudeCode(t *testing.T) {
@@ -416,8 +416,7 @@ func TestCommandTutorial_FullSequenceClaudeCode(t *testing.T) {
 	}
 }
 
-// The following tests cover T-D-first-command-20 through T-D-first-command-27.
-// Those gap entries were written against an earlier draft that projected
+// The following tests cover gap entries that were written against an earlier draft that projected
 // commands through MCP via an `expose_as_mcp_prompt` field and `prompts/list`
 // / `prompts/get` endpoints. That feature was removed. The spec now states the
 // canonical behavior directly: "A `type: command` artifact ... Podium does not
@@ -432,7 +431,7 @@ func TestCommandTutorial_FullSequenceClaudeCode(t *testing.T) {
 // TestCommandTutorial_MaterializedBodyVerbatim asserts that the none adapter
 // writes the command manifest to disk byte-for-byte, so every frontmatter
 // field and the prose body survive intact for a harness that reads the file
-// directly. This is the surviving intent of T-D-first-command-20 after the
+// directly. This is the surviving intent after the
 // MCP-projection field was removed: delivery is the canonical layout on disk.
 // spec: §6.7 (none adapter writes ArtifactBytes verbatim); doc "Materialize".
 func TestCommandTutorial_MaterializedBodyVerbatim(t *testing.T) {
@@ -452,11 +451,9 @@ func TestCommandTutorial_MaterializedBodyVerbatim(t *testing.T) {
 // that commands are not projected through MCP. The prompt-projection methods
 // the removed feature defined (`prompts/list`, `prompts/get`) are absent, so
 // every former argument and error branch collapses to a single JSON-RPC
-// "method not found" (-32601): T-D-first-command-21 (the prompts/list entry),
-// T-D-first-command-22 (the false/absent exclusion), T-D-first-command-23 (the
-// user-message body), T-D-first-command-24 (not_exposed), T-D-first-command-25
-// (not_a_command), T-D-first-command-26 (invalid_argument), and
-// T-D-first-command-27 (not_found). The
+// "method not found" (-32601): the prompts/list entry, the false/absent exclusion, the
+// user-message body, not_exposed, not_a_command, invalid_argument, and
+// not_found. The
 // companion TestMCPInitialize_AdvertisesNoPromptsCapability asserts the
 // matching absence of a `prompts` capability on initialize.
 // spec: §command (no MCP projection); cmd/podium-mcp/main.go default case.

@@ -14,7 +14,7 @@ package e2e
 //   - The HTTP /v1/load_artifact response does include `frontmatter` (the raw
 //     child YAML), which carries hook_event/hook_action.
 //
-// Behaviors blocked by a known BUILD-GAPS finding are recorded as skips. Doc
+// Behaviors blocked by a known implementation-gap finding are recorded as skips. Doc
 // claims the implementation does not honor (with no finding filed) are
 // asserted against actual behavior with a note so a future change is detected.
 
@@ -93,7 +93,7 @@ func hkClaudeSettings(t *testing.T, root string) string {
 
 // ---- Scaffold ---------------------------------------------------------------
 
-// T-D-hooks-1 — scaffold a hook with a canonical event writes type: hook,
+// scaffold a hook with a canonical event writes type: hook,
 // hook_event, a pipe-literal hook_action, a semver version, the description,
 // and no SKILL.md.
 func TestHooks_ScaffoldStopFields(t *testing.T) {
@@ -121,7 +121,7 @@ func TestHooks_ScaffoldStopFields(t *testing.T) {
 	}
 }
 
-// T-D-hooks-2 — scaffold hook without --hook-event under --yes fails exit 2.
+// scaffold hook without --hook-event under --yes fails exit 2.
 func TestHooks_ScaffoldMissingEventFails(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "my-hook")
@@ -137,7 +137,7 @@ func TestHooks_ScaffoldMissingEventFails(t *testing.T) {
 	}
 }
 
-// T-D-hooks-3 — scaffold with --hook-action produces a lint-clean artifact.
+// scaffold with --hook-action produces a lint-clean artifact.
 func TestHooks_ScaffoldLintClean(t *testing.T) {
 	t.Parallel()
 	reg := filepath.Join(t.TempDir(), "reg")
@@ -157,7 +157,7 @@ func TestHooks_ScaffoldLintClean(t *testing.T) {
 	}
 }
 
-// T-D-hooks-4 — every canonical event name round-trips through scaffold and
+// every canonical event name round-trips through scaffold and
 // the resulting registry lints without error.
 func TestHooks_ScaffoldAllCanonicalEvents(t *testing.T) {
 	t.Parallel()
@@ -181,7 +181,7 @@ func TestHooks_ScaffoldAllCanonicalEvents(t *testing.T) {
 
 // ---- Sync (filesystem) ------------------------------------------------------
 
-// T-D-hooks-5 — a hook config-merges into .claude/settings.json for claude-code
+// a hook config-merges into .claude/settings.json for claude-code
 // under the native event key (stop -> Stop), carrying the hook_action command,
 // and is not routed to .claude/rules or .claude/agents.
 func TestHooks_SyncClaudeCodePodiumLayout(t *testing.T) {
@@ -204,7 +204,7 @@ func TestHooks_SyncClaudeCodePodiumLayout(t *testing.T) {
 	}
 }
 
-// T-D-hooks-6 — a hook materializes at the canonical <id>/ARTIFACT.md path for
+// a hook materializes at the canonical <id>/ARTIFACT.md path for
 // the none harness, carrying hook_event.
 func TestHooks_SyncNoneCanonicalLayout(t *testing.T) {
 	t.Parallel()
@@ -221,7 +221,7 @@ func TestHooks_SyncNoneCanonicalLayout(t *testing.T) {
 	}
 }
 
-// T-D-hooks-7 — a bundled-script hook materializes ARTIFACT.md and
+// a bundled-script hook materializes ARTIFACT.md and
 // scripts/log.sh alongside it for the none harness, with the script content
 // preserved.
 func TestHooks_SyncNoneBundledScript(t *testing.T) {
@@ -241,7 +241,7 @@ func TestHooks_SyncNoneBundledScript(t *testing.T) {
 	}
 }
 
-// T-D-hooks-8 — a bundled-script hook config-merges its registration into
+// a bundled-script hook config-merges its registration into
 // .claude/settings.json and materializes the bundled script to the
 // harness-neutral .podium/resources/<id>/ bucket (a config-merge has no native
 // home for the script).
@@ -266,7 +266,7 @@ func TestHooks_SyncClaudeCodeBundledScript(t *testing.T) {
 
 // ---- Lint -------------------------------------------------------------------
 
-// T-D-hooks-9 — runtime_requirements system_packages [jq] is accepted by lint;
+// runtime_requirements system_packages [jq] is accepted by lint;
 // the field is not flagged as unknown on a hook.
 func TestHooks_LintRuntimeRequirementsAccepted(t *testing.T) {
 	t.Parallel()
@@ -282,9 +282,9 @@ func TestHooks_LintRuntimeRequirementsAccepted(t *testing.T) {
 	}
 }
 
-// T-D-hooks-10 — a hook whose runtime_requirements names a missing system
+// a hook whose runtime_requirements names a missing system
 // package fails materialization with materialize.runtime_unavailable when the
-// host advertises its packages (§4.4.1, F-4.4.1).
+// host advertises its packages (§4.4.1).
 func TestHooks_RuntimeUnavailableRefusesMaterialize(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -301,9 +301,9 @@ func TestHooks_RuntimeUnavailableRefusesMaterialize(t *testing.T) {
 	}
 }
 
-// T-D-hooks-11 — declaring both a generic pre_tool_use hook and a
+// declaring both a generic pre_tool_use hook and a
 // corresponding subtype hook (pre_shell_execution) warns; the warning names
-// the overlapping subtype (spec §4.3.5, F-4.3.8).
+// the overlapping subtype (spec §4.3.5).
 func TestHooks_LintGenericPreToolUse(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -322,7 +322,7 @@ func TestHooks_LintGenericPreToolUse(t *testing.T) {
 	}
 }
 
-// T-D-hooks-12 — declaring both a generic post_tool_use hook and a
+// declaring both a generic post_tool_use hook and a
 // corresponding post-subtype hook (post_file_edit) warns (spec §4.3.5).
 func TestHooks_LintGenericPostToolUse(t *testing.T) {
 	t.Parallel()
@@ -339,8 +339,8 @@ func TestHooks_LintGenericPostToolUse(t *testing.T) {
 	}
 }
 
-// T-D-hooks-11b — a lone generic hook is valid and draws no generic/subtype
-// diagnostic (spec §4.3.5: "Authors choose the level of specificity"; F-4.3.8).
+// a lone generic hook is valid and draws no generic/subtype
+// diagnostic (spec §4.3.5: "Authors choose the level of specificity").
 func TestHooks_LintLoneGenericClean(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -355,7 +355,7 @@ func TestHooks_LintLoneGenericClean(t *testing.T) {
 	}
 }
 
-// T-D-hooks-13 — a specific subtype event does not trigger the generic info
+// a specific subtype event does not trigger the generic info
 // diagnostic.
 func TestHooks_LintSubtypeNoGenericInfo(t *testing.T) {
 	t.Parallel()
@@ -371,7 +371,7 @@ func TestHooks_LintSubtypeNoGenericInfo(t *testing.T) {
 	}
 }
 
-// T-D-hooks-14 — a stop hook is lint-clean with no generic/subtype diagnostic.
+// a stop hook is lint-clean with no generic/subtype diagnostic.
 func TestHooks_LintStopNoGenericInfo(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -388,7 +388,7 @@ func TestHooks_LintStopNoGenericInfo(t *testing.T) {
 
 // ---- MCP bridge -------------------------------------------------------------
 
-// T-D-hooks-15 — full ingest round-trip: a hook served by the standalone
+// full ingest round-trip: a hook served by the standalone
 // server loads via the MCP bridge (none harness) and materializes to disk; the
 // materialized ARTIFACT.md carries hook_event: stop.
 func TestHooks_MCPLoadArtifactRoundTrip(t *testing.T) {
@@ -415,7 +415,7 @@ func TestHooks_MCPLoadArtifactRoundTrip(t *testing.T) {
 	}
 }
 
-// T-D-hooks-16 — a bundled-script hook is discoverable via the MCP
+// a bundled-script hook is discoverable via the MCP
 // search_artifacts tool by its description keywords.
 func TestHooks_MCPSearchArtifacts(t *testing.T) {
 	t.Parallel()
@@ -432,7 +432,7 @@ func TestHooks_MCPSearchArtifacts(t *testing.T) {
 
 // ---- Payload handling round-trips ------------------------------------------
 
-// T-D-hooks-17 — the simple cat-based hook_action round-trips through sync; the
+// the simple cat-based hook_action round-trips through sync; the
 // materialized ARTIFACT.md preserves INPUT=$(cat).
 func TestHooks_SyncSimpleCatAction(t *testing.T) {
 	t.Parallel()
@@ -449,7 +449,7 @@ func TestHooks_SyncSimpleCatAction(t *testing.T) {
 	}
 }
 
-// T-D-hooks-18 — the jq-based hook_action round-trips through sync; the
+// the jq-based hook_action round-trips through sync; the
 // materialized ARTIFACT.md preserves the jq extraction snippet verbatim.
 func TestHooks_SyncJqAction(t *testing.T) {
 	t.Parallel()
@@ -467,7 +467,7 @@ func TestHooks_SyncJqAction(t *testing.T) {
 	}
 }
 
-// T-D-hooks-19 — scaffold with no --hook-action emits a default pipe-literal
+// scaffold with no --hook-action emits a default pipe-literal
 // action with an echo stub, and the artifact passes lint.
 func TestHooks_ScaffoldDefaultAction(t *testing.T) {
 	t.Parallel()
@@ -487,7 +487,7 @@ func TestHooks_ScaffoldDefaultAction(t *testing.T) {
 	}
 }
 
-// T-D-hooks-20 — a session_end hook config-merges into claude-code's
+// a session_end hook config-merges into claude-code's
 // settings.json under the translated native event name (session_end ->
 // SessionEnd).
 func TestHooks_SyncClaudeCodeSessionEnd(t *testing.T) {
@@ -507,7 +507,7 @@ func TestHooks_SyncClaudeCodeSessionEnd(t *testing.T) {
 
 // ---- Required-field lint ----------------------------------------------------
 
-// T-D-hooks-21 — a hook missing type fails lint.required_field_missing.
+// a hook missing type fails lint.required_field_missing.
 func TestHooks_LintMissingType(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -522,7 +522,7 @@ func TestHooks_LintMissingType(t *testing.T) {
 	}
 }
 
-// T-D-hooks-22 — a hook missing version fails lint.required_field_missing and
+// a hook missing version fails lint.required_field_missing and
 // the diagnostic names version.
 func TestHooks_LintMissingVersion(t *testing.T) {
 	t.Parallel()
@@ -538,7 +538,7 @@ func TestHooks_LintMissingVersion(t *testing.T) {
 	}
 }
 
-// T-D-hooks-23 — a non-semver hook version fails lint.invalid_version.
+// a non-semver hook version fails lint.invalid_version.
 func TestHooks_LintInvalidVersion(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -553,7 +553,7 @@ func TestHooks_LintInvalidVersion(t *testing.T) {
 	}
 }
 
-// T-D-hooks-24 — scaffold rejects an underscore in the artifact name (exit 2).
+// scaffold rejects an underscore in the artifact name (exit 2).
 func TestHooks_ScaffoldRejectsUnderscore(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "my_hook")
@@ -567,7 +567,7 @@ func TestHooks_ScaffoldRejectsUnderscore(t *testing.T) {
 	}
 }
 
-// T-D-hooks-25 — a hook with target_harnesses [claude-code] and event
+// a hook with target_harnesses [claude-code] and event
 // pre_compact lints without error.
 func TestHooks_LintTargetHarnessesScoped(t *testing.T) {
 	t.Parallel()
@@ -580,7 +580,7 @@ func TestHooks_LintTargetHarnessesScoped(t *testing.T) {
 	}
 }
 
-// T-D-hooks-26 — an MCP load_artifact under claude-code config-merges the hook
+// an MCP load_artifact under claude-code config-merges the hook
 // into .claude/settings.json and not into skills/rules/agents subtrees.
 func TestHooks_MCPClaudeCodeLayout(t *testing.T) {
 	t.Parallel()
@@ -601,7 +601,7 @@ func TestHooks_MCPClaudeCodeLayout(t *testing.T) {
 	}
 }
 
-// T-D-hooks-27 — the full bundled-script hook ARTIFACT.md (with all doc fields)
+// the full bundled-script hook ARTIFACT.md (with all doc fields)
 // plus scripts/log.sh lints without error.
 func TestHooks_LintBundledScriptClean(t *testing.T) {
 	t.Parallel()
@@ -618,7 +618,7 @@ func TestHooks_LintBundledScriptClean(t *testing.T) {
 	}
 }
 
-// T-D-hooks-28 — the bundled-script hook config-merges its handler (whose
+// the bundled-script hook config-merges its handler (whose
 // command is the pipe-literal action referencing scripts/log.sh) into
 // settings.json and materializes the script under .podium/resources/<id>/.
 func TestHooks_SyncClaudeCodeBundledFull(t *testing.T) {
@@ -641,10 +641,10 @@ func TestHooks_SyncClaudeCodeBundledFull(t *testing.T) {
 	}
 }
 
-// T-D-hooks-29 — the doc says the bundled script is "testable in isolation",
+// the doc says the bundled script is "testable in isolation",
 // implying an executable bit. The materialize path writes via writeAtomic,
 // which defaults to mode 0o644, so the materialized script is not executable.
-// No BUILD-GAPS finding is filed for this; the test asserts the actual
+// No implementation-gap finding is filed for this; the test asserts the actual
 // (non-executable) mode as a change-detector.
 func TestHooks_BundledScriptNotExecutable(t *testing.T) {
 	t.Parallel()
@@ -665,7 +665,7 @@ func TestHooks_BundledScriptNotExecutable(t *testing.T) {
 	}
 }
 
-// T-D-hooks-30 — one hook per canonical event config-merges into claude-code's
+// one hook per canonical event config-merges into claude-code's
 // settings.json. The canonical events collapse onto Claude Code's native event
 // names (several map to PreToolUse/PostToolUse), so the test asserts that every
 // distinct native event key the adapter targets is present after the merge.
@@ -695,7 +695,7 @@ func TestHooks_SyncClaudeCodeAllEvents(t *testing.T) {
 	}
 }
 
-// T-D-hooks-31 — a hook config-merges into .claude/settings.json (under the
+// a hook config-merges into .claude/settings.json (under the
 // Stop event) and not under .claude/rules or .claude/agents for claude-code.
 func TestHooks_SyncClaudeCodeNotRulesOrAgents(t *testing.T) {
 	t.Parallel()
@@ -717,7 +717,7 @@ func TestHooks_SyncClaudeCodeNotRulesOrAgents(t *testing.T) {
 	}
 }
 
-// T-D-hooks-32 — a hook with a jq action config-merges into settings.json with
+// a hook with a jq action config-merges into settings.json with
 // the jq pipeline preserved verbatim in the handler command. The Podium-side
 // runtime_requirements field gates materialization (§4.4.1) but is not a Claude
 // Code config key, so it is not carried into settings.json.
@@ -742,7 +742,7 @@ func TestHooks_SyncClaudeCodeRuntimeAndAction(t *testing.T) {
 	}
 }
 
-// T-D-hooks-33 — interactive scaffold (no --yes) prompts for hook_event and the
+// interactive scaffold (no --yes) prompts for hook_event and the
 // supplied value lands in ARTIFACT.md.
 func TestHooks_ScaffoldInteractiveEvent(t *testing.T) {
 	t.Parallel()
@@ -757,7 +757,7 @@ func TestHooks_ScaffoldInteractiveEvent(t *testing.T) {
 	}
 }
 
-// T-D-hooks-34 — an MCP load_artifact under claude-code for a hook materializes
+// an MCP load_artifact under claude-code for a hook materializes
 // the ARTIFACT.md carrying hook_event and hook_action; the result has no error.
 func TestHooks_MCPLoadArtifactFields(t *testing.T) {
 	t.Parallel()
@@ -773,7 +773,7 @@ func TestHooks_MCPLoadArtifactFields(t *testing.T) {
 	}
 }
 
-// T-D-hooks-35 — an MCP load_artifact materializes a hook's bundled script
+// an MCP load_artifact materializes a hook's bundled script
 // under PODIUM_MATERIALIZE_ROOT. spec: §7.2.
 func TestHooks_MCPBundledScriptMaterialize(t *testing.T) {
 	t.Parallel()
@@ -798,7 +798,7 @@ func TestHooks_MCPBundledScriptMaterialize(t *testing.T) {
 	}
 }
 
-// T-D-hooks-36 — a hook that targets a harness with no project-level hook
+// a hook that targets a harness with no project-level hook
 // surface (pi is ✗ for hook_event) is rejected at ingest by the capability
 // lint. spec: §6.7.1 hook_event row, pi = ✗.
 func TestHooks_LintUnsupportedEventRejected(t *testing.T) {
@@ -815,7 +815,7 @@ func TestHooks_LintUnsupportedEventRejected(t *testing.T) {
 	}
 }
 
-// T-D-hooks-37 — target_harnesses filters materialization to the listed
+// target_harnesses filters materialization to the listed
 // harnesses: a hook targeting only claude-code config-merges into
 // .claude/settings.json on a claude-code sync and is skipped on a codex sync.
 // spec: §4.3.5 / §6.7.1.
@@ -841,7 +841,7 @@ func TestHooks_TargetHarnessesFiltersMaterialize(t *testing.T) {
 	}
 }
 
-// T-D-hooks-38 — effort_hint on a hook produces a hint_on_unsupported_type
+// effort_hint on a hook produces a hint_on_unsupported_type
 // warning.
 func TestHooks_LintEffortHintWarns(t *testing.T) {
 	t.Parallel()
@@ -857,7 +857,7 @@ func TestHooks_LintEffortHintWarns(t *testing.T) {
 	}
 }
 
-// T-D-hooks-39 — model_class_hint on a hook produces a hint_on_unsupported_type
+// model_class_hint on a hook produces a hint_on_unsupported_type
 // warning.
 func TestHooks_LintModelClassHintWarns(t *testing.T) {
 	t.Parallel()
@@ -873,10 +873,10 @@ func TestHooks_LintModelClassHintWarns(t *testing.T) {
 	}
 }
 
-// T-D-hooks-40 — the doc says lint requires sandbox_profile for hooks at
+// the doc says lint requires sandbox_profile for hooks at
 // sensitivity ≥ medium. No such rule exists, so a medium-sensitivity hook with
 // no sandbox_profile lints clean and emits no sandbox diagnostic. No
-// BUILD-GAPS finding is filed; this asserts the actual behavior as a
+// implementation-gap finding is filed; this asserts the actual behavior as a
 // change-detector.
 func TestHooks_LintMediumNoSandboxClean(t *testing.T) {
 	t.Parallel()
@@ -892,7 +892,7 @@ func TestHooks_LintMediumNoSandboxClean(t *testing.T) {
 	}
 }
 
-// T-D-hooks-41 — the same gap at sensitivity high: no sandbox_profile rule
+// the same gap at sensitivity high: no sandbox_profile rule
 // fires. Asserted against actual behavior (no finding filed).
 func TestHooks_LintHighNoSandboxClean(t *testing.T) {
 	t.Parallel()
@@ -908,7 +908,7 @@ func TestHooks_LintHighNoSandboxClean(t *testing.T) {
 	}
 }
 
-// T-D-hooks-42 — a medium-sensitivity hook that sets sandbox_profile lints
+// a medium-sensitivity hook that sets sandbox_profile lints
 // without error.
 func TestHooks_LintMediumWithSandboxClean(t *testing.T) {
 	t.Parallel()
@@ -921,7 +921,7 @@ func TestHooks_LintMediumWithSandboxClean(t *testing.T) {
 	}
 }
 
-// T-D-hooks-43 — a low-sensitivity hook with no sandbox_profile lints without
+// a low-sensitivity hook with no sandbox_profile lints without
 // error.
 func TestHooks_LintLowNoSandboxClean(t *testing.T) {
 	t.Parallel()
@@ -934,8 +934,8 @@ func TestHooks_LintLowNoSandboxClean(t *testing.T) {
 	}
 }
 
-// T-D-hooks-44 — hook_event is a required field of a type: hook artifact
-// (spec §4.3 hook schema, F-4.3.7); a hook missing it is an ingest error.
+// hook_event is a required field of a type: hook artifact
+// (spec §4.3 hook schema); a hook missing it is an ingest error.
 func TestHooks_LintMissingEventErrors(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -950,7 +950,7 @@ func TestHooks_LintMissingEventErrors(t *testing.T) {
 	}
 }
 
-// T-D-hooks-45 — scaffold produces a placeholder body after the closing
+// scaffold produces a placeholder body after the closing
 // frontmatter delimiter.
 func TestHooks_ScaffoldBodyPlaceholder(t *testing.T) {
 	t.Parallel()
@@ -971,7 +971,7 @@ func TestHooks_ScaffoldBodyPlaceholder(t *testing.T) {
 	}
 }
 
-// T-D-hooks-46 — a hook materializes at the canonical <id>/ARTIFACT.md path for
+// a hook materializes at the canonical <id>/ARTIFACT.md path for
 // the none harness, carrying type: hook and hook_event: stop.
 func TestHooks_SyncNoneStopLogger(t *testing.T) {
 	t.Parallel()
@@ -988,7 +988,7 @@ func TestHooks_SyncNoneStopLogger(t *testing.T) {
 	}
 }
 
-// T-D-hooks-47 — tags and sensitivity are Podium-side catalog metadata. The
+// tags and sensitivity are Podium-side catalog metadata. The
 // claude-code config-merge projects only the hook registration into
 // settings.json, so tags and sensitivity are not carried into the harness
 // config. The hook still registers under its native event.
@@ -1010,7 +1010,7 @@ func TestHooks_SyncClaudeCodeTagsSensitivity(t *testing.T) {
 	}
 }
 
-// T-D-hooks-48 — scaffold rejects an uppercase artifact name (exit 2).
+// scaffold rejects an uppercase artifact name (exit 2).
 func TestHooks_ScaffoldRejectsUppercase(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "My-Hook")
@@ -1024,7 +1024,7 @@ func TestHooks_ScaffoldRejectsUppercase(t *testing.T) {
 	}
 }
 
-// T-D-hooks-49 — a hook with a specific description is searchable over HTTP by
+// a hook with a specific description is searchable over HTTP by
 // its description keywords, and the result names type hook.
 func TestHooks_HTTPSearchByDescription(t *testing.T) {
 	t.Parallel()
@@ -1037,7 +1037,7 @@ func TestHooks_HTTPSearchByDescription(t *testing.T) {
 	}
 }
 
-// T-D-hooks-50 — the HTTP load_artifact endpoint returns a frontmatter string
+// the HTTP load_artifact endpoint returns a frontmatter string
 // carrying hook_event and hook_action.
 func TestHooks_HTTPLoadArtifactFrontmatter(t *testing.T) {
 	t.Parallel()
@@ -1056,7 +1056,7 @@ func TestHooks_HTTPLoadArtifactFrontmatter(t *testing.T) {
 	}
 }
 
-// T-D-hooks-51 — a hook with a non-canonical event value does not panic during
+// a hook with a non-canonical event value does not panic during
 // sync. Claude Code has no native mapping for the event, so the config-merge
 // emits no fragment and the hook produces no settings.json entry. Sync still
 // exits 0.
@@ -1078,7 +1078,7 @@ func TestHooks_SyncUnknownEventNoPanic(t *testing.T) {
 	}
 }
 
-// T-D-hooks-52 — a hook in a domain hierarchy is discoverable via domain show;
+// a hook in a domain hierarchy is discoverable via domain show;
 // the listing names the artifact and type hook.
 func TestHooks_DomainShowListsHook(t *testing.T) {
 	t.Parallel()
@@ -1093,9 +1093,9 @@ func TestHooks_DomainShowListsHook(t *testing.T) {
 	}
 }
 
-// T-D-hooks-53 — a direct-only hook is hidden from default search while an
+// a direct-only hook is hidden from default search while an
 // indexed hook still appears.
-// spec: §4.3 universal fields (search_visibility), §4.5.3 (F-4.3.3).
+// spec: §4.3 universal fields (search_visibility), §4.5.3.
 func TestHooks_DirectOnlyHiddenFromSearch(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -1111,7 +1111,7 @@ func TestHooks_DirectOnlyHiddenFromSearch(t *testing.T) {
 	}
 }
 
-// T-D-hooks-54 — a second sync over the same state is idempotent: both runs
+// a second sync over the same state is idempotent: both runs
 // exit 0, the materialized ARTIFACT.md content is identical, and no .tmp files
 // remain in the target.
 func TestHooks_SyncIdempotent(t *testing.T) {
@@ -1138,7 +1138,7 @@ func TestHooks_SyncIdempotent(t *testing.T) {
 	}
 }
 
-// T-D-hooks-55 — scaffold with --tags, --sensitivity, and --hook-event writes
+// scaffold with --tags, --sensitivity, and --hook-event writes
 // the tags list, sensitivity, and hook_event into ARTIFACT.md.
 func TestHooks_ScaffoldTagsSensitivityEvent(t *testing.T) {
 	t.Parallel()

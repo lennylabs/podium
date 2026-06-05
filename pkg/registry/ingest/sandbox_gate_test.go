@@ -21,7 +21,7 @@ func sandboxArtifact(profile string) string {
 // the registry refuses to ingest an artifact whose sandbox_profile cannot be
 // honored by the local host (PODIUM_HOST_SANDBOXES); the empty profile and
 // unrestricted are always enforceable. Off by default, sandbox_profile is
-// informational and never blocks ingest. F-13.10.2.
+// informational and never blocks ingest.
 func TestIngest_SandboxProfileGate(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

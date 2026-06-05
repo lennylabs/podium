@@ -261,7 +261,7 @@ func TestBootstrapLayerPath_AmbiguousMultiLayerErrors(t *testing.T) {
 	if !errors.Is(err, filesystem.ErrLayerPathAmbiguous) {
 		t.Errorf("err = %v, want wrap of filesystem.ErrLayerPathAmbiguous", err)
 	}
-	// spec: §13.10 (F-13.10.3) — the refusal surfaces the documented
+	// spec: §13.10 — the refusal surfaces the documented
 	// config.layer_path_ambiguous code and names the conflicting manifest.
 	if got := err.Error(); !strings.Contains(got, "config.layer_path_ambiguous") {
 		t.Errorf("err %q missing config.layer_path_ambiguous code", got)

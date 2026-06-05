@@ -1,6 +1,6 @@
 package e2e
 
-// End-to-end coverage for the §5.0 resource mirror (F-5.0.1) and the
+// End-to-end coverage for the §5.0 resource mirror and the
 // MCP server's initialize capability set. The resource mirror exposes
 // artifact bodies through MCP's resources/list + resources/read as a
 // read-only mirror of load_artifact. Command artifacts are delivered
@@ -14,7 +14,7 @@ import (
 )
 
 // spec: §5.0 — resources/list mirrors the effective view and
-// resources/read returns the artifact manifest body. F-5.0.1.
+// resources/read returns the artifact manifest body.
 func TestMCPResources_MirrorListAndRead(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{

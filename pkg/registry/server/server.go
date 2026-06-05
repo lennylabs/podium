@@ -86,7 +86,7 @@ type Server struct {
 	// (admin.granted). Read events flow through the core emitter; sharing
 	// the same sink keeps both on one §8.6 hash chain. It is the §8.3
 	// registry sink, which is a file sink or an EndpointSink when redirected
-	// to a SIEM (§8.3, F-8.3.1). Nil is a no-op.
+	// to a SIEM (§8.3). Nil is a no-op.
 	auditSink audit.Sink
 	// latency, when set, receives one §7.1 timing observation per served
 	// request (operation name, status, elapsed) so a deployment can compare
@@ -652,7 +652,7 @@ func (s *Server) handleLoadDomain(w http.ResponseWriter, r *http.Request) {
 }
 
 // CatalogResponse is GET /v1/catalog output (§4.5.2 merged-view glob
-// resolution for the client-side load_domain merge, F-4.5.2). ids carries the
+// resolution for the client-side load_domain merge). ids carries the
 // flat visible-ID list; artifacts carries the lean per-artifact descriptor a
 // consumer needs to render a registry artifact pulled in by a workspace-local
 // DOMAIN.md include: without a load_artifact round-trip. No manifest body
@@ -672,8 +672,7 @@ type CatalogEntry struct {
 // handleCatalog serves §4.5.2 GET /v1/catalog?scope=<path>, returning the
 // visible artifact catalog under the scope prefix (IDs plus lean descriptors),
 // visibility-filtered per caller. The client-side load_domain merge resolves a
-// workspace-local DOMAIN.md's globs over this set unioned with the overlay
-// (F-4.5.2, F-6.4.2).
+// workspace-local DOMAIN.md's globs over this set unioned with the overlay.
 func (s *Server) handleCatalog(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "registry.invalid_argument",
@@ -851,9 +850,9 @@ func (s *Server) handleDomainAnalyze(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleScopePreview serves §3.5 GET /v1/scope/preview. It rejects
-// non-GET methods like the sibling read endpoints (F-3.5.9) and maps the
+// non-GET methods like the sibling read endpoints and maps the
 // §3.5 tenant gate (expose_scope_preview: false) to 403
-// config.scope_preview_disabled (F-3.5.1).
+// config.scope_preview_disabled.
 func (s *Server) handleScopePreview(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "registry.invalid_argument",
@@ -1018,7 +1017,7 @@ func ifNoneMatchHit(ifNoneMatch, etag string) bool {
 // A large resource presigns only when an object store is configured. In
 // the standalone-without-storage mode (§13.11) ingest keeps every
 // resource inline regardless of size, so when no object store is present
-// those bytes serve inline rather than failing the load (F-7.2.1, §7.2).
+// those bytes serve inline rather than failing the load (§7.2).
 func (s *Server) attachResources(ctx context.Context, resp *LoadArtifactResponse, refs []store.ResourceRef) error {
 	for _, ref := range refs {
 		if ref.Size > objectstore.InlineCutoff && s.objectStore != nil {
@@ -1047,7 +1046,7 @@ func (s *Server) attachResources(ctx context.Context, resp *LoadArtifactResponse
 
 // encodeBinaryInlineResources base64-encodes the inline resource set and
 // sets resources_base64 when any inline payload is not valid UTF-8
-// (F-4.1.1, §4.1). encoding/json replaces invalid UTF-8 bytes in a Go
+// (§4.1). encoding/json replaces invalid UTF-8 bytes in a Go
 // string with the U+FFFD replacement character, which silently corrupts a
 // binary bundled resource on the wire. The resources_base64 flag is
 // response-wide, so one binary resource forces the whole inline set to
@@ -1209,7 +1208,7 @@ func (s *Server) handleObjectsRoute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// GET streams the bytes straight to the client instead of buffering
-	// the whole resource in memory (§7.2 / F-7.2.4).
+	// the whole resource in memory (§7.2).
 	reader, info, err := s.objectStore.GetStream(r.Context(), key)
 	if err != nil {
 		s.writeObjectStoreError(w, err)

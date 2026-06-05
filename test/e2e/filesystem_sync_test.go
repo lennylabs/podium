@@ -6,10 +6,10 @@ package e2e
 // override/save-as, and migration to a standalone server.
 //
 // Known gaps and skips:
-//   - T-D-solo-fs-6, -7, -42: layer-order assertions via filesystem.Open are
+//   - layer-order assertions via filesystem.Open are
 //     covered by e2e collision/precedence variants instead; the pure Go API
 //     import is also feasible and used for -6 and -7.
-//   - T-D-solo-fs-53: server-source materialization is wired (F-2.2.2), so
+//   - server-source materialization is wired, so
 //     the bit-identical filesystem-vs-server sync comparison runs.
 
 import (
@@ -70,7 +70,6 @@ func solofsWriteSyncYAML(t *testing.T, ws, body string) {
 
 // ---- tests ------------------------------------------------------------------
 
-// T-D-solo-fs-1
 func TestFilesystemSync_InitWritesSyncYAML(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
@@ -91,7 +90,6 @@ func TestFilesystemSync_InitWritesSyncYAML(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-2
 func TestFilesystemSync_InitWritesGitignore(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
@@ -107,7 +105,6 @@ func TestFilesystemSync_InitWritesGitignore(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-3
 func TestFilesystemSync_InitGlobalWritesHomeConfig(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -121,7 +118,6 @@ func TestFilesystemSync_InitGlobalWritesHomeConfig(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-4
 func TestFilesystemSync_InitRefusesOverwriteWithoutForce(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
@@ -149,7 +145,6 @@ func TestFilesystemSync_InitRefusesOverwriteWithoutForce(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-5
 func TestFilesystemSync_MultiLayerEachSubdirIsLayer(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -168,7 +163,6 @@ func TestFilesystemSync_MultiLayerEachSubdirIsLayer(t *testing.T) {
 	mustExist(t, filepath.Join(target, "notes", "ARTIFACT.md"))
 }
 
-// T-D-solo-fs-6
 // Layer order defaults to alphabetical when layer_order is absent.
 // Verified via filesystem.Open directly, asserting Layers slice order.
 func TestFilesystemSync_LayerOrderDefaultsAlphabetical(t *testing.T) {
@@ -193,7 +187,6 @@ func TestFilesystemSync_LayerOrderDefaultsAlphabetical(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-7
 // layer_order in .registry-config overrides alphabetical ordering.
 // Verified via filesystem.Open directly.
 func TestFilesystemSync_LayerOrderExplicitOverridesAlphabetical(t *testing.T) {
@@ -218,7 +211,6 @@ func TestFilesystemSync_LayerOrderExplicitOverridesAlphabetical(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-8
 func TestFilesystemSync_AbsentRegistryConfigSingleLayer(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -232,7 +224,6 @@ func TestFilesystemSync_AbsentRegistryConfigSingleLayer(t *testing.T) {
 	mustExist(t, filepath.Join(target, "finance", "report", "ARTIFACT.md"))
 }
 
-// T-D-solo-fs-9
 func TestFilesystemSync_MultiLayerFalseSingleLayer(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -247,7 +238,6 @@ func TestFilesystemSync_MultiLayerFalseSingleLayer(t *testing.T) {
 	mustExist(t, filepath.Join(target, "notes", "my-note", "ARTIFACT.md"))
 }
 
-// T-D-solo-fs-10
 func TestFilesystemSync_TopLevelArtifactAmbiguous(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -264,7 +254,6 @@ func TestFilesystemSync_TopLevelArtifactAmbiguous(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-11
 func TestFilesystemSync_DotDirectoriesSkippedAsLayers(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -280,7 +269,6 @@ func TestFilesystemSync_DotDirectoriesSkippedAsLayers(t *testing.T) {
 	mustExist(t, filepath.Join(target, "note", "ARTIFACT.md"))
 }
 
-// T-D-solo-fs-12
 func TestFilesystemSync_InvalidRegistryConfigNonZero(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -298,7 +286,6 @@ func TestFilesystemSync_InvalidRegistryConfigNonZero(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-13
 func TestFilesystemSync_NonExistentRegistryNonZero(t *testing.T) {
 	t.Parallel()
 	target := t.TempDir()
@@ -312,7 +299,6 @@ func TestFilesystemSync_NonExistentRegistryNonZero(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-14
 func TestFilesystemSync_SyncSkillViaClaudeCode(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -328,7 +314,6 @@ func TestFilesystemSync_SyncSkillViaClaudeCode(t *testing.T) {
 	mustExist(t, filepath.Join(target, ".claude", "skills", "run-variance-analysis", "SKILL.md"))
 }
 
-// T-D-solo-fs-15
 func TestFilesystemSync_SyncRuleViaClaudeCode(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -342,7 +327,6 @@ func TestFilesystemSync_SyncRuleViaClaudeCode(t *testing.T) {
 	mustExist(t, filepath.Join(target, ".claude", "rules", "ts-style.md"))
 }
 
-// T-D-solo-fs-16
 func TestFilesystemSync_SyncAgentViaClaudeCode(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -356,7 +340,6 @@ func TestFilesystemSync_SyncAgentViaClaudeCode(t *testing.T) {
 	mustExist(t, filepath.Join(target, ".claude", "agents", "pay-invoice.md"))
 }
 
-// T-D-solo-fs-17
 func TestFilesystemSync_SyncContextViaClaudeCode(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -371,7 +354,6 @@ func TestFilesystemSync_SyncContextViaClaudeCode(t *testing.T) {
 	mustExist(t, filepath.Join(target, ".podium", "context", "shared", "company-glossary", "ARTIFACT.md"))
 }
 
-// T-D-solo-fs-18
 func TestFilesystemSync_SyncProducesLockFile(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -397,7 +379,6 @@ func TestFilesystemSync_SyncProducesLockFile(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-19
 func TestFilesystemSync_SyncIdempotent(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -426,7 +407,6 @@ func TestFilesystemSync_SyncIdempotent(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-20
 func TestFilesystemSync_StaleFilesRemovedOnDelete(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -456,7 +436,6 @@ func TestFilesystemSync_StaleFilesRemovedOnDelete(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-21
 func TestFilesystemSync_SyncDryRunWritesNothing(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -480,7 +459,6 @@ func TestFilesystemSync_SyncDryRunWritesNothing(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-22
 func TestFilesystemSync_SyncReadsRegistryFromSyncYAML(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -496,7 +474,6 @@ func TestFilesystemSync_SyncReadsRegistryFromSyncYAML(t *testing.T) {
 	mustExist(t, filepath.Join(target, "shared", "note", "ARTIFACT.md"))
 }
 
-// T-D-solo-fs-23
 func TestFilesystemSync_SyncNoRegistryNoConfigFails(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
@@ -510,7 +487,6 @@ func TestFilesystemSync_SyncNoRegistryNoConfigFails(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-24
 func TestFilesystemSync_SyncUnknownHarnessFails(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -526,7 +502,6 @@ func TestFilesystemSync_SyncUnknownHarnessFails(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-25
 func TestFilesystemSync_LintCleanRegistryExits0(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -542,7 +517,6 @@ func TestFilesystemSync_LintCleanRegistryExits0(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-26
 func TestFilesystemSync_LintMissingRegistryExits1(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "lint", "--registry", "/tmp/no-such-podium-registry-solo")
@@ -551,7 +525,6 @@ func TestFilesystemSync_LintMissingRegistryExits1(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-27
 func TestFilesystemSync_LintNoRegistryFlagExits2(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "lint")
@@ -563,7 +536,6 @@ func TestFilesystemSync_LintNoRegistryFlagExits2(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-28
 func TestFilesystemSync_WatchRematerializesOnChange(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -582,7 +554,6 @@ func TestFilesystemSync_WatchRematerializesOnChange(t *testing.T) {
 	w.stop(t)
 }
 
-// T-D-solo-fs-29
 func TestFilesystemSync_WatchExits0OnSIGINT(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -598,7 +569,6 @@ func TestFilesystemSync_WatchExits0OnSIGINT(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-30
 func TestFilesystemSync_OverlayOverridesRegistry(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -618,7 +588,6 @@ func TestFilesystemSync_OverlayOverridesRegistry(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-31
 func TestFilesystemSync_OverrideAddRecordsInLock(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -646,7 +615,6 @@ func TestFilesystemSync_OverrideAddRecordsInLock(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-32
 func TestFilesystemSync_OverrideRemoveRecordsInLock(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -670,7 +638,6 @@ func TestFilesystemSync_OverrideRemoveRecordsInLock(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-33
 func TestFilesystemSync_OverrideResetClearsToggles(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -694,7 +661,6 @@ func TestFilesystemSync_OverrideResetClearsToggles(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-34
 func TestFilesystemSync_SaveAsCreatesProfile(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -713,7 +679,6 @@ func TestFilesystemSync_SaveAsCreatesProfile(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-35
 func TestFilesystemSync_SaveAsNoProfileExits2(t *testing.T) {
 	t.Parallel()
 	target := t.TempDir()
@@ -726,7 +691,6 @@ func TestFilesystemSync_SaveAsNoProfileExits2(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-36
 func TestFilesystemSync_MultipleWorkspacesIndependentLocks(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -759,7 +723,6 @@ func TestFilesystemSync_MultipleWorkspacesIndependentLocks(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-37
 // podium serve --standalone --layer-path accepts the same filesystem registry.
 func TestFilesystemSync_ServeStandaloneLayerPath(t *testing.T) {
 	t.Parallel()
@@ -786,7 +749,6 @@ func TestFilesystemSync_ServeStandaloneLayerPath(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-38
 // --layer-path flag maps to PODIUM_LAYER_PATH; confirmed via e2e: start server with
 // --layer-path and verify /v1/layers reflects it (same as -37 effectively).
 func TestFilesystemSync_LayerPathFlagEnvMapping(t *testing.T) {
@@ -815,7 +777,6 @@ func TestFilesystemSync_LayerPathFlagEnvMapping(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-39
 func TestFilesystemSync_SearchFailsAgainstFilesystemRegistry(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -827,8 +788,8 @@ func TestFilesystemSync_SearchFailsAgainstFilesystemRegistry(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-40 — login against a filesystem-path registry is a no-op: a
-// filesystem source needs no authentication (§7.7, F-7.7.5), so login exits 0
+// login against a filesystem-path registry is a no-op: a
+// filesystem source needs no authentication (§7.7), so login exits 0
 // with a "nothing to do" notice rather than attempting a device-code flow.
 func TestFilesystemSync_LoginNoAuthNoOp(t *testing.T) {
 	t.Parallel()
@@ -841,7 +802,6 @@ func TestFilesystemSync_LoginNoAuthNoOp(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-41
 func TestFilesystemSync_LayerOrderGhostLayerIgnored(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -856,7 +816,6 @@ func TestFilesystemSync_LayerOrderGhostLayerIgnored(t *testing.T) {
 	mustExist(t, filepath.Join(target, "note", "ARTIFACT.md"))
 }
 
-// T-D-solo-fs-42
 // layer_order extra layers not in explicit list are appended alphabetically.
 // Verified via filesystem.Open directly.
 func TestFilesystemSync_LayerOrderExtraLayersAppendedAlphabetically(t *testing.T) {
@@ -885,7 +844,6 @@ func TestFilesystemSync_LayerOrderExtraLayersAppendedAlphabetically(t *testing.T
 	}
 }
 
-// T-D-solo-fs-43
 // Same artifact ID in two layers raises ingest.collision via lint
 // (lint uses CollisionPolicyDefault; sync uses CollisionPolicyHighestWins).
 func TestFilesystemSync_CollisionRaisedByLint(t *testing.T) {
@@ -905,7 +863,6 @@ func TestFilesystemSync_CollisionRaisedByLint(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-44
 // sync with CollisionPolicyHighestWins: later layer in layer_order wins.
 func TestFilesystemSync_CollisionHighestWinsLaterLayerWins(t *testing.T) {
 	t.Parallel()
@@ -925,7 +882,6 @@ func TestFilesystemSync_CollisionHighestWinsLaterLayerWins(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-45
 // DOMAIN.md files at layer root are not treated as artifacts.
 func TestFilesystemSync_DomainMDInLayerNotTreatedAsArtifact(t *testing.T) {
 	t.Parallel()
@@ -946,7 +902,6 @@ func TestFilesystemSync_DomainMDInLayerNotTreatedAsArtifact(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-46
 // DOMAIN.md at multi_layer root top level triggers ErrLayerPathAmbiguous.
 func TestFilesystemSync_TopLevelDomainMDAmbiguous(t *testing.T) {
 	t.Parallel()
@@ -959,7 +914,7 @@ func TestFilesystemSync_TopLevelDomainMDAmbiguous(t *testing.T) {
 	if res.Exit == 0 {
 		t.Fatalf("expected non-zero exit for DOMAIN.md at multi_layer root, got 0")
 	}
-	// spec: §13.10 (F-13.10.3) — the surfaced startup/sync error names the
+	// spec: §13.10 — the surfaced startup/sync error names the
 	// documented config.layer_path_ambiguous code and the conflicting file.
 	if !strings.Contains(res.Stderr, "config.layer_path_ambiguous") {
 		t.Errorf("stderr missing 'config.layer_path_ambiguous': %q", res.Stderr)
@@ -969,7 +924,6 @@ func TestFilesystemSync_TopLevelDomainMDAmbiguous(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-47
 func TestFilesystemSync_SyncDryRunJSONStructured(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -989,7 +943,6 @@ func TestFilesystemSync_SyncDryRunJSONStructured(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-48
 // Visibility declarations are recorded but not enforced in filesystem mode.
 func TestFilesystemSync_VisibilityNotEnforced(t *testing.T) {
 	t.Parallel()
@@ -1004,7 +957,6 @@ func TestFilesystemSync_VisibilityNotEnforced(t *testing.T) {
 	mustExist(t, filepath.Join(target, "shared", "private-note", "ARTIFACT.md"))
 }
 
-// T-D-solo-fs-49
 // sync.yaml relative registry path resolves against the workspace directory.
 func TestFilesystemSync_RelativeRegistryPathResolved(t *testing.T) {
 	t.Parallel()
@@ -1027,7 +979,6 @@ func TestFilesystemSync_RelativeRegistryPathResolved(t *testing.T) {
 	mustExist(t, filepath.Join(target, "shared", "note", "ARTIFACT.md"))
 }
 
-// T-D-solo-fs-50
 // Git history serves as the audit trail; no Podium-side audit stream in filesystem mode.
 func TestFilesystemSync_NoAuditLogInFilesystemMode(t *testing.T) {
 	t.Parallel()
@@ -1075,7 +1026,6 @@ func TestFilesystemSync_NoAuditLogInFilesystemMode(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-51
 // Freeze windows and signing enforcement are unavailable in filesystem mode:
 // podium sync succeeds without requiring a signature or checking a freeze window.
 func TestFilesystemSync_NoFreezeOrSigningEnforcement(t *testing.T) {
@@ -1104,7 +1054,6 @@ func TestFilesystemSync_NoFreezeOrSigningEnforcement(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-52
 // podium-mcp cannot be used against a filesystem registry path.
 func TestFilesystemSync_MCPFailsAgainstFilesystemRegistry(t *testing.T) {
 	t.Parallel()
@@ -1132,7 +1081,6 @@ func TestFilesystemSync_MCPFailsAgainstFilesystemRegistry(t *testing.T) {
 	}
 }
 
-// T-D-solo-fs-53 (F-2.2.2)
 // podium sync output is bit-identical between a filesystem source and a
 // standalone server pointed at the same registry. The server-source path
 // reads the effective view over HTTP and runs the same harness adapter and
@@ -1186,7 +1134,7 @@ func TestFilesystemSync_BitIdenticalFilesystemVsServer(t *testing.T) {
 }
 
 // podium sync dispatches on the §7.5.2 registry source: a URL routes to a
-// Podium server (server-source materialization, F-2.2.2), a filesystem path
+// Podium server (server-source materialization), a filesystem path
 // routes to local filesystem. A server URL must not be collapsed into a bogus
 // filesystem path; pointed at a live server it materializes the effective
 // view.

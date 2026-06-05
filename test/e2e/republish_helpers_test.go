@@ -1,6 +1,6 @@
 package e2e
 
-// Runtime layer republish and multi-version fixtures (gap G-INFRA-7).
+// Runtime layer republish and multi-version fixtures.
 //
 // The standalone harness ingests each layer once at boot from a static
 // filesystem fixture, so staging a second version of an artifact, a deprecated
@@ -34,7 +34,7 @@ package e2e
 // non-deprecated version), §7.3.2 (a manifest that sets deprecated: true
 // supersedes a prior non-deprecated version), §4.6/§13.10 (a standalone
 // deployment has no identity provider, so the local operator is the de facto
-// admin and may register and reingest layers). Gap G-INFRA-7.
+// admin and may register and reingest layers).
 
 import (
 	"encoding/json"

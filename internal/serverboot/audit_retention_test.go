@@ -37,13 +37,13 @@ func TestRunRetentionOnce_DropsOldEvents(t *testing.T) {
 	if err := sink.Verify(context.Background()); err != nil {
 		t.Errorf("Verify after retention: %v", err)
 	}
-	// spec: §8.6/F-8.4.8 — dropping events must trigger a re-anchor.
+	// spec: §8.6 — dropping events must trigger a re-anchor.
 	if anchored != 1 {
 		t.Errorf("reAnchor invoked %d times, want 1 after a drop", anchored)
 	}
 }
 
-// Spec: §8.6/F-8.4.8 — a retention pass that drops nothing must not
+// Spec: §8.6 — a retention pass that drops nothing must not
 // re-anchor (the chain head is unchanged, so the prior anchor still
 // holds).
 func TestRunRetentionOnce_NoReAnchorWhenNothingDropped(t *testing.T) {

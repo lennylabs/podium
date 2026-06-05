@@ -12,7 +12,7 @@ import (
 // spec: §4.7 "Domain embeddings" — ingest composes each DOMAIN.md's
 // projection and upserts its embedding into the domain index so
 // search_domains has a semantic ranker. A DOMAIN.md with no projectable
-// text (include-only) is not embedded. F-3.2.1.
+// text (include-only) is not embedded.
 func TestIngest_EmbedsDomainProjection(t *testing.T) {
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
@@ -44,7 +44,7 @@ func TestIngest_EmbedsDomainProjection(t *testing.T) {
 	}
 }
 
-// spec: §4.5.1 (F-4.5.1) — ingest persists each DOMAIN.md as a
+// spec: §4.5.1 — ingest persists each DOMAIN.md as a
 // store.DomainRecord keyed by the canonical domain path, so load_domain
 // can read domain composition. A root-level DOMAIN.md is skipped (the
 // registry root has no DOMAIN.md per §4.5.5).
@@ -80,7 +80,7 @@ func TestIngest_PersistsDomainMD(t *testing.T) {
 	}
 }
 
-// spec: §4.5.1 (F-4.5.1) — re-ingesting a layer replaces its DOMAIN.md
+// spec: §4.5.1 — re-ingesting a layer replaces its DOMAIN.md
 // record rather than accumulating duplicates, even though the manifest
 // content is immutable.
 func TestIngest_DomainMDReingestReplaces(t *testing.T) {

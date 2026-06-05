@@ -1,7 +1,7 @@
 package serverboot
 
 // White-box integration test for the §4.7.2 transactional vector outbox under a
-// bulk-ingest burst, closing G-VEC-9 (TEST-GAPS.md). The unit tests in
+// bulk-ingest burst. The unit tests in
 // vector_outbox_test.go assert the publishStats lagging transition fires once on
 // a single queued row with lagDepth=1, and test/integration/
 // vector_outbox_consistency_test.go drives the SPI to a consistent state with no
@@ -140,7 +140,7 @@ func readAuditEventTypes(t *testing.T, path string) (string, int) {
 	return body, count
 }
 
-// TestVectorOutbox_LagSignalUnderBurstThenDrains closes G-VEC-9. It ingests a
+// TestVectorOutbox_LagSignalUnderBurstThenDrains. It ingests a
 // burst of 320 artifacts through the §4.7.2 outbox, fails the first drain pass so
 // the depth stays above the configured lag threshold and the real
 // vector.outbox_lagging audit event is recorded, then recovers the backend and

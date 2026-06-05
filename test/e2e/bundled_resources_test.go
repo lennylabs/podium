@@ -9,7 +9,7 @@ package e2e
 // the SKILL.md manifest-size caps, the documented authoring patterns, atomic
 // (.tmp + rename) materialization, podium import, and the /objects/ route
 // contract. Tests drive the podium CLI, the standalone server, and the
-// podium-mcp bridge. Behaviors blocked by a known BUILD-GAPS finding are
+// podium-mcp bridge. Behaviors blocked by a known implementation-gap finding are
 // recorded as skips; doc claims the implementation does not honor (with no
 // finding filed) are asserted against actual behavior with a note.
 
@@ -62,7 +62,7 @@ func brNoTmp(t *testing.T, tree map[string]string) {
 
 // ---- Implicit bundling: directory layout materializes -----------------------
 
-// T-D-bundled-resources-1 — a skill with scripts/, references/, and assets/
+// a skill with scripts/, references/, and assets/
 // subfolders materializes every bundled file under the none-adapter
 // <artifact-id>/ layout, with no resources: list in frontmatter.
 func TestBundled_NoneAdapterFullLayout(t *testing.T) {
@@ -93,7 +93,7 @@ func TestBundled_NoneAdapterFullLayout(t *testing.T) {
 	brNoTmp(t, readTreeAll(t, tgt))
 }
 
-// T-D-bundled-resources-2 — a skill's bundled resources materialize under the
+// a skill's bundled resources materialize under the
 // claude-code adapter at .claude/skills/<name>/, preserving subdirectories,
 // with ARTIFACT.md omitted.
 func TestBundled_ClaudeCodeSkillLayout(t *testing.T) {
@@ -119,7 +119,7 @@ func TestBundled_ClaudeCodeSkillLayout(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-3 — a context artifact ships a bundled file with no
+// a context artifact ships a bundled file with no
 // resources: key; lint emits no missing-resources error and sync places the
 // file alongside ARTIFACT.md.
 func TestBundled_NoResourcesKeyRequired(t *testing.T) {
@@ -145,7 +145,7 @@ func TestBundled_NoResourcesKeyRequired(t *testing.T) {
 
 // ---- Prose-reference existence check (Markdown links only) ------------------
 
-// T-D-bundled-resources-4 — a Markdown-link prose reference to an existing
+// a Markdown-link prose reference to an existing
 // bundled file passes lint with no lint.prose_reference diagnostic.
 func TestBundled_ProseReferenceResolves(t *testing.T) {
 	t.Parallel()
@@ -164,7 +164,7 @@ func TestBundled_ProseReferenceResolves(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-5 — a Markdown-link prose reference to a missing bundled
+// a Markdown-link prose reference to a missing bundled
 // file errors with lint.prose_reference naming the missing path.
 func TestBundled_ProseReferenceMissing(t *testing.T) {
 	t.Parallel()
@@ -185,8 +185,8 @@ func TestBundled_ProseReferenceMissing(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-5b — a prose reference to a URL that returns 404 to a
-// HEAD is an ingest error (§4.4, F-4.4.2). The real `podium lint` enables the
+// a prose reference to a URL that returns 404 to a
+// HEAD is an ingest error (§4.4). The real `podium lint` enables the
 // URL HEAD check by default; the probe targets a localhost test server.
 func TestBundled_ProseURLReferenceValidated(t *testing.T) {
 	t.Parallel()
@@ -213,8 +213,8 @@ func TestBundled_ProseURLReferenceValidated(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-5c — --offline skips the §4.4 URL HEAD check, so a dead
-// URL no longer blocks lint (F-4.4.2 offline opt-out).
+// --offline skips the §4.4 URL HEAD check, so a dead
+// URL no longer blocks lint (offline opt-out).
 func TestBundled_ProseURLOfflineSkips(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -236,7 +236,7 @@ func TestBundled_ProseURLOfflineSkips(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-6 — a Markdown-link prose reference that escapes the
+// a Markdown-link prose reference that escapes the
 // artifact package (../) errors with lint.prose_reference.
 func TestBundled_ProseReferenceEscapes(t *testing.T) {
 	t.Parallel()
@@ -254,7 +254,7 @@ func TestBundled_ProseReferenceEscapes(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-6b (F-4.4.1) — a Markdown-link prose reference that
+// a Markdown-link prose reference that
 // names another artifact by its canonical ID resolves against the visible
 // catalog, so lint passes with no lint.prose_reference diagnostic. spec: §4.4
 // line 348.
@@ -277,7 +277,7 @@ func TestBundled_ProseReferenceResolvesArtifact(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-6c (F-4.4.1) — a Markdown-link prose reference that
+// a Markdown-link prose reference that
 // matches neither a bundled file nor any artifact in the catalog is an ingest
 // error naming the unresolved reference. spec: §4.4 lines 348-350.
 func TestBundled_ProseReferenceUnknownArtifactErrors(t *testing.T) {
@@ -297,7 +297,7 @@ func TestBundled_ProseReferenceUnknownArtifactErrors(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-5d (F-4.4.3) — a URL reference whose HEAD returns a
+// a URL reference whose HEAD returns a
 // non-200 2xx code (204 No Content) does not confirm the named resource, so
 // lint rejects it; a sibling 200 reference still passes. spec: §4.4 line 347.
 func TestBundled_ProseURLRejectsNonOK2xx(t *testing.T) {
@@ -328,7 +328,7 @@ func TestBundled_ProseURLRejectsNonOK2xx(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-24d (F-4.4.2) — a document-level `source: imported`
+// a document-level `source: imported`
 // declaration wraps the manifest's authored prose in a Claude Code
 // <untrusted-data> region at materialization, so a host can apply differential
 // trust to a body whose default provenance is external. spec: §4.4.2.
@@ -353,7 +353,7 @@ func TestBundled_DocumentSourceImportedWrapsProse(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-7 — a bundled resource below the 256 KB inline cutoff is
+// a bundled resource below the 256 KB inline cutoff is
 // returned inline in the load_artifact response. spec: §7.2.
 func TestBundled_InlineResourceBelowCutoff(t *testing.T) {
 	t.Parallel()
@@ -378,7 +378,7 @@ func TestBundled_InlineResourceBelowCutoff(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-8 — a bundled resource above the 256 KB inline cutoff is
+// a bundled resource above the 256 KB inline cutoff is
 // returned as a presigned URL in the load_artifact response, and the URL serves
 // the bytes from the data plane. spec: §7.2.
 func TestBundled_LargeResourceAboveCutoff(t *testing.T) {
@@ -424,7 +424,7 @@ func TestBundled_LargeResourceAboveCutoff(t *testing.T) {
 
 // ---- Size caps --------------------------------------------------------------
 
-// T-D-bundled-resources-9 — a bundled file over the 1 MB per-file soft cap
+// a bundled file over the 1 MB per-file soft cap
 // warns at ingest (exit 0).
 func TestBundled_PerFileSoftCapWarns(t *testing.T) {
 	t.Parallel()
@@ -445,7 +445,7 @@ func TestBundled_PerFileSoftCapWarns(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-10 — bundled files totaling over the 10 MB per-package
+// bundled files totaling over the 10 MB per-package
 // cap error at ingest (exit 1).
 func TestBundled_PerPackageCapErrors(t *testing.T) {
 	t.Parallel()
@@ -467,7 +467,7 @@ func TestBundled_PerPackageCapErrors(t *testing.T) {
 
 // ---- External resources -----------------------------------------------------
 
-// T-D-bundled-resources-11 — an external_resources block parses without error
+// an external_resources block parses without error
 // when the referenced file is absent from disk.
 func TestBundled_ExternalResourcesParse(t *testing.T) {
 	t.Parallel()
@@ -484,7 +484,7 @@ func TestBundled_ExternalResourcesParse(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-12 — declared external resource size does not trigger a
+// declared external resource size does not trigger a
 // bundled-resource size cap.
 func TestBundled_ExternalResourcesSizeIgnored(t *testing.T) {
 	t.Parallel()
@@ -501,7 +501,7 @@ func TestBundled_ExternalResourcesSizeIgnored(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-13 — external resource bytes need not be present
+// external resource bytes need not be present
 // locally; the linter does not treat external_resources.path as a prose
 // reference or a missing bundled file.
 func TestBundled_ExternalResourcesBytesAbsent(t *testing.T) {
@@ -524,7 +524,7 @@ func TestBundled_ExternalResourcesBytesAbsent(t *testing.T) {
 
 // ---- runtime_requirements ---------------------------------------------------
 
-// T-D-bundled-resources-14 — runtime_requirements with python, node, and
+// runtime_requirements with python, node, and
 // system_packages parses cleanly for a skill.
 func TestBundled_RuntimeRequirementsParse(t *testing.T) {
 	t.Parallel()
@@ -543,10 +543,10 @@ func TestBundled_RuntimeRequirementsParse(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-15 — a host that advertises no capabilities does not
+// a host that advertises no capabilities does not
 // gate on runtime_requirements: it surfaces the requirement to the caller and
 // materializes (§4.4.1 "Adapters surface these requirements to the host where
-// supported"). The runtime gate (F-4.4.1) activates only once the host
+// supported"). The runtime gate activates only once the host
 // advertises a capability; see tests 16 and 17 for the refusal path.
 func TestBundled_RuntimeRequirementsSurfacedNotGated(t *testing.T) {
 	t.Parallel()
@@ -567,7 +567,7 @@ func TestBundled_RuntimeRequirementsSurfacedNotGated(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-15b — once the host advertises a satisfying capability,
+// once the host advertises a satisfying capability,
 // the artifact materializes (§4.4.1). The positive complement to tests 16/17.
 func TestBundled_RuntimeSatisfiedMaterializes(t *testing.T) {
 	t.Parallel()
@@ -589,8 +589,8 @@ func TestBundled_RuntimeSatisfiedMaterializes(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-16 — a host that does not satisfy a python requirement
-// refuses with materialize.runtime_unavailable (§4.4.1, F-4.4.1).
+// a host that does not satisfy a python requirement
+// refuses with materialize.runtime_unavailable (§4.4.1).
 func TestBundled_RuntimeUnavailablePython(t *testing.T) {
 	t.Parallel()
 	id := "finance/close-reporting/run-variance-analysis"
@@ -613,8 +613,8 @@ func TestBundled_RuntimeUnavailablePython(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-17 — a host missing a required system package refuses
-// with materialize.runtime_unavailable naming the package (§4.4.1, F-4.4.1).
+// a host missing a required system package refuses
+// with materialize.runtime_unavailable naming the package (§4.4.1).
 func TestBundled_RuntimeUnavailableSystemPackage(t *testing.T) {
 	t.Parallel()
 	id := "finance/close-reporting/run-variance-analysis"
@@ -637,7 +637,7 @@ func TestBundled_RuntimeUnavailableSystemPackage(t *testing.T) {
 
 // ---- sandbox_profile --------------------------------------------------------
 
-// T-D-bundled-resources-18 — a sandbox_profile: unrestricted artifact
+// a sandbox_profile: unrestricted artifact
 // materializes through MCP with no refusal.
 func TestBundled_SandboxUnrestrictedMaterializes(t *testing.T) {
 	t.Parallel()
@@ -657,7 +657,7 @@ func TestBundled_SandboxUnrestrictedMaterializes(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-19 — a non-unrestricted sandbox_profile is refused on a
+// a non-unrestricted sandbox_profile is refused on a
 // host without that capability. The refusal is returned in the result.error
 // string (not as a JSON-RPC envelope error).
 func TestBundled_SandboxRefusedWithoutCapability(t *testing.T) {
@@ -676,7 +676,7 @@ func TestBundled_SandboxRefusedWithoutCapability(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-20 — PODIUM_IGNORE_SANDBOX=true overrides the sandbox
+// PODIUM_IGNORE_SANDBOX=true overrides the sandbox
 // refusal and materializes, emitting a loud warning to stderr.
 func TestBundled_SandboxIgnoreOverride(t *testing.T) {
 	t.Parallel()
@@ -696,7 +696,7 @@ func TestBundled_SandboxIgnoreOverride(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-21 — an artifact with no sandbox_profile is treated as
+// an artifact with no sandbox_profile is treated as
 // unrestricted and materializes without refusal.
 func TestBundled_SandboxAbsentDefaultsUnrestricted(t *testing.T) {
 	t.Parallel()
@@ -713,9 +713,9 @@ func TestBundled_SandboxAbsentDefaultsUnrestricted(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-21b — when a host honors sandbox_profile: seccomp-strict,
+// when a host honors sandbox_profile: seccomp-strict,
 // the materialization layer delivers the baseline syscall-allowlist profile
-// Podium ships (§4.4.1, F-4.4.5) under .podium/seccomp-strict.json so the host
+// Podium ships (§4.4.1) under .podium/seccomp-strict.json so the host
 // can apply it.
 func TestBundled_SeccompBaselineDelivered(t *testing.T) {
 	t.Parallel()
@@ -745,7 +745,7 @@ func TestBundled_SeccompBaselineDelivered(t *testing.T) {
 // brProvenanceBody is a SKILL.md body carrying one imported provenance block.
 const brProvenanceBody = "Authored prose.\n\n<!-- begin imported source=\"https://wiki.example.com/policy/payments\" -->\nImported policy text.\n<!-- end imported -->\n"
 
-// T-D-bundled-resources-22 — the none adapter passes imported provenance markers
+// the none adapter passes imported provenance markers
 // through verbatim.
 func TestBundled_ProvenanceNonePassthrough(t *testing.T) {
 	t.Parallel()
@@ -764,7 +764,7 @@ func TestBundled_ProvenanceNonePassthrough(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-23 — the claude-code adapter rewrites an imported
+// the claude-code adapter rewrites an imported
 // provenance block into an <untrusted-data source="..."> region and drops the
 // begin/end markers.
 func TestBundled_ProvenanceClaudeCodeRewrite(t *testing.T) {
@@ -787,7 +787,7 @@ func TestBundled_ProvenanceClaudeCodeRewrite(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-24 — a plain SKILL.md with no provenance markers passes
+// a plain SKILL.md with no provenance markers passes
 // through the claude-code adapter without gaining untrusted-data tags.
 func TestBundled_ProvenanceAuthoredOnlyPassthrough(t *testing.T) {
 	t.Parallel()
@@ -806,9 +806,9 @@ func TestBundled_ProvenanceAuthoredOnlyPassthrough(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-24b — the claude-code adapter rewrites imported
+// the claude-code adapter rewrites imported
 // provenance in a claude-native non-skill body (command), not just skills
-// (§4.4.2, F-4.4.3). The materialized .claude/commands/<n>.md carries the
+// (§4.4.2). The materialized .claude/commands/<n>.md carries the
 // <untrusted-data> region. A `type: context` body is excluded here because it
 // materializes to the harness-neutral .podium/context/ bucket, which keeps the
 // canonical markers rather than the Claude rewrite (see the context case below).
@@ -830,7 +830,7 @@ func TestBundled_ProvenanceClaudeCodeNonSkill(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-24c — a `type: context` body materializes to the
+// a `type: context` body materializes to the
 // harness-neutral .podium/context/<id>/ bucket and keeps the canonical
 // provenance markers. The bucket is identical across every adapter, so it does
 // not receive the Claude-specific <untrusted-data> rewrite (§6.7).
@@ -852,7 +852,7 @@ func TestBundled_ProvenanceContextNeutralBucket(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-25 — two imported provenance blocks with distinct
+// two imported provenance blocks with distinct
 // sources are each rewritten to a separate <untrusted-data> region.
 func TestBundled_ProvenanceMultipleBlocks(t *testing.T) {
 	t.Parallel()
@@ -880,7 +880,7 @@ func TestBundled_ProvenanceMultipleBlocks(t *testing.T) {
 
 // ---- Manifest-size lint -----------------------------------------------------
 
-// T-D-bundled-resources-26 — a SKILL.md body over the ~5K-token soft cap warns
+// a SKILL.md body over the ~5K-token soft cap warns
 // (exit 0).
 func TestBundled_SkillBodyOverTokenSoftCapWarns(t *testing.T) {
 	t.Parallel()
@@ -899,7 +899,7 @@ func TestBundled_SkillBodyOverTokenSoftCapWarns(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-27 — a SKILL.md body over the 500-line soft cap warns
+// a SKILL.md body over the 500-line soft cap warns
 // (exit 0).
 func TestBundled_SkillBodyOverLineSoftCapWarns(t *testing.T) {
 	t.Parallel()
@@ -918,7 +918,7 @@ func TestBundled_SkillBodyOverLineSoftCapWarns(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-28 — a SKILL.md body over the ~20K-token hard cap errors
+// a SKILL.md body over the ~20K-token hard cap errors
 // (exit 1).
 func TestBundled_ManifestOverHardCapErrors(t *testing.T) {
 	t.Parallel()
@@ -939,7 +939,7 @@ func TestBundled_ManifestOverHardCapErrors(t *testing.T) {
 
 // ---- Documented patterns ----------------------------------------------------
 
-// T-D-bundled-resources-29 — the "skill with a script" pattern (HTML-comment
+// the "skill with a script" pattern (HTML-comment
 // ARTIFACT.md body, SKILL.md with name/description/license, scripts/) lints
 // clean and materializes its files.
 func TestBundled_PatternSkillWithScript(t *testing.T) {
@@ -963,7 +963,7 @@ func TestBundled_PatternSkillWithScript(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-30 — the "skill with a template" pattern materializes
+// the "skill with a template" pattern materializes
 // the assets/ template and the prose reference resolves.
 func TestBundled_PatternSkillWithTemplate(t *testing.T) {
 	t.Parallel()
@@ -984,7 +984,7 @@ func TestBundled_PatternSkillWithTemplate(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, id, "assets/summary.md.j2"))
 }
 
-// T-D-bundled-resources-31 — the "skill with a JSON schema" pattern materializes
+// the "skill with a JSON schema" pattern materializes
 // the assets/ schema and the prose reference resolves.
 func TestBundled_PatternSkillWithJSONSchema(t *testing.T) {
 	t.Parallel()
@@ -1008,7 +1008,7 @@ func TestBundled_PatternSkillWithJSONSchema(t *testing.T) {
 // brHookArtifact is the "hook with a bundled action script" pattern ARTIFACT.md.
 const brHookArtifact = "---\ntype: hook\nversion: 1.0.0\nhook_event: stop\nhook_action: |\n  scripts/log.sh\nruntime_requirements:\n  system_packages: [jq]\n---\n\nHook body. Document the side effect the hook_action performs.\n"
 
-// T-D-bundled-resources-32 — the "hook with a bundled action script" pattern
+// the "hook with a bundled action script" pattern
 // lints clean and materializes ARTIFACT.md plus the action script via none.
 func TestBundled_PatternHookNoneAdapter(t *testing.T) {
 	t.Parallel()
@@ -1028,7 +1028,7 @@ func TestBundled_PatternHookNoneAdapter(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, id, "scripts/log.sh"))
 }
 
-// T-D-bundled-resources-33 — the hook pattern under claude-code config-merges
+// the hook pattern under claude-code config-merges
 // its registration into .claude/settings.json and materializes its bundled
 // script to the harness-neutral .podium/resources/<id>/ bucket.
 func TestBundled_PatternHookClaudeCode(t *testing.T) {
@@ -1046,7 +1046,7 @@ func TestBundled_PatternHookClaudeCode(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, ".podium/resources", id, "scripts/log.sh"))
 }
 
-// T-D-bundled-resources-34 — a skill missing SKILL.md is rejected before the
+// a skill missing SKILL.md is rejected before the
 // lint rules run (registry walk), both lint and sync exit non-zero, and nothing
 // is materialized.
 func TestBundled_SkillMissingSkillMDRejected(t *testing.T) {
@@ -1072,7 +1072,7 @@ func TestBundled_SkillMissingSkillMDRejected(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-35 — a skill ARTIFACT.md body with non-comment prose
+// a skill ARTIFACT.md body with non-comment prose
 // warns with lint.skill_artifact_body (exit 0).
 func TestBundled_SkillArtifactBodyProseWarns(t *testing.T) {
 	t.Parallel()
@@ -1090,7 +1090,7 @@ func TestBundled_SkillArtifactBodyProseWarns(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-36 — a skill ARTIFACT.md body that is a single HTML
+// a skill ARTIFACT.md body that is a single HTML
 // comment passes lint with no skill_artifact_body warning.
 func TestBundled_SkillArtifactBodyComment(t *testing.T) {
 	t.Parallel()
@@ -1105,7 +1105,7 @@ func TestBundled_SkillArtifactBodyComment(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-37 — a successful sync leaves no .tmp files; all final
+// a successful sync leaves no .tmp files; all final
 // bundled resource files are present (atomic .tmp + rename materialization).
 func TestBundled_AtomicNoTmpFiles(t *testing.T) {
 	t.Parallel()
@@ -1126,7 +1126,7 @@ func TestBundled_AtomicNoTmpFiles(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-38 — MCP load_artifact via the none adapter materializes
+// MCP load_artifact via the none adapter materializes
 // the skill's bundled resources. spec: §7.2.
 func TestBundled_MCPMaterializeNone(t *testing.T) {
 	t.Parallel()
@@ -1144,7 +1144,7 @@ func TestBundled_MCPMaterializeNone(t *testing.T) {
 	mustExist(t, filepath.Join(mat, id, "scripts/variance.py"))
 }
 
-// T-D-bundled-resources-39 — MCP load_artifact via the claude-code adapter
+// MCP load_artifact via the claude-code adapter
 // materializes the skill's bundled resources. spec: §7.2.
 func TestBundled_MCPMaterializeClaudeCode(t *testing.T) {
 	t.Parallel()
@@ -1163,7 +1163,7 @@ func TestBundled_MCPMaterializeClaudeCode(t *testing.T) {
 	mustExist(t, filepath.Join(base, "scripts/variance.py"))
 }
 
-// T-D-bundled-resources-40 — a references/ file is bundled and materialized, and
+// a references/ file is bundled and materialized, and
 // its prose reference resolves.
 func TestBundled_ReferencesSubdir(t *testing.T) {
 	t.Parallel()
@@ -1184,7 +1184,7 @@ func TestBundled_ReferencesSubdir(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, id, "references/variance-explained.md"))
 }
 
-// T-D-bundled-resources-41 — a custom (non-standard) subdirectory is bundled and
+// a custom (non-standard) subdirectory is bundled and
 // materialized with no lint error.
 func TestBundled_CustomSubdir(t *testing.T) {
 	t.Parallel()
@@ -1205,7 +1205,7 @@ func TestBundled_CustomSubdir(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-42 — an SBOM bundled as an ordinary resource with an
+// an SBOM bundled as an ordinary resource with an
 // informational sbom: frontmatter field lints clean and materializes.
 func TestBundled_SbomBundledResource(t *testing.T) {
 	t.Parallel()
@@ -1224,7 +1224,7 @@ func TestBundled_SbomBundledResource(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, id, "bom.json"))
 }
 
-// T-D-bundled-resources-43 — an sbom: frontmatter ref without a bundled file
+// an sbom: frontmatter ref without a bundled file
 // does not cause a lint error (the YAML value is not a prose reference).
 func TestBundled_SbomRefNoFile(t *testing.T) {
 	t.Parallel()
@@ -1241,7 +1241,7 @@ func TestBundled_SbomRefNoFile(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-44 — a high-sensitivity skill with a bundled script is
+// a high-sensitivity skill with a bundled script is
 // accepted by default (non-public-mode) ingest; sensitivity does not block.
 func TestBundled_HighSensitivityAccepted(t *testing.T) {
 	t.Parallel()
@@ -1261,10 +1261,9 @@ func TestBundled_HighSensitivityAccepted(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, id, "scripts/run.py"))
 }
 
-// T-D-bundled-resources-45 — public-mode ingest rejects a high-sensitivity
+// public-mode ingest rejects a high-sensitivity
 // artifact (§13.10/§13.2.2), so it is not served, while a low-sensitivity
 // artifact in the same registry is. The boot log records the rejection.
-// F-13.2.2.
 func TestBundled_PublicModeRejectsSensitive(t *testing.T) {
 	t.Parallel()
 	hi := "finance/close/run-variance-analysis"
@@ -1294,7 +1293,7 @@ func TestBundled_PublicModeRejectsSensitive(t *testing.T) {
 
 // ---- podium import ----------------------------------------------------------
 
-// T-D-bundled-resources-46 — podium import wraps a SKILL.md tree into a Podium
+// podium import wraps a SKILL.md tree into a Podium
 // layer: it writes ARTIFACT.md (type + version) and copies SKILL.md plus
 // bundled scripts.
 func TestBundled_ImportCreatesLayer(t *testing.T) {
@@ -1324,7 +1323,7 @@ func TestBundled_ImportCreatesLayer(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, "run-variance-analysis", "scripts", "variance.py"))
 }
 
-// T-D-bundled-resources-47 — podium import --dry-run reports the plan ("would
+// podium import --dry-run reports the plan ("would
 // write") and writes no files.
 func TestBundled_ImportDryRun(t *testing.T) {
 	t.Parallel()
@@ -1355,7 +1354,7 @@ func TestBundled_ImportDryRun(t *testing.T) {
 
 // ---- /objects/ route --------------------------------------------------------
 
-// T-D-bundled-resources-48 — the objects route returns 404 for an unknown
+// the objects route returns 404 for an unknown
 // content-hash key, leaking no stored bytes.
 func TestBundled_ObjectsUnknownHash(t *testing.T) {
 	t.Parallel()
@@ -1367,7 +1366,7 @@ func TestBundled_ObjectsUnknownHash(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-49 — the objects route rejects a path-traversal key with
+// the objects route rejects a path-traversal key with
 // 400.
 func TestBundled_ObjectsPathTraversal(t *testing.T) {
 	t.Parallel()
@@ -1379,7 +1378,7 @@ func TestBundled_ObjectsPathTraversal(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-50 — an unknown object key returns 404 whether or not
+// an unknown object key returns 404 whether or not
 // the object store route is registered.
 func TestBundled_ObjectsUnknownReturns404(t *testing.T) {
 	t.Parallel()
@@ -1391,7 +1390,7 @@ func TestBundled_ObjectsUnknownReturns404(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-51 — content-addressed deduplication stores identical
+// content-addressed deduplication stores identical
 // files once. spec: §4.4, §7.2.
 func TestBundled_ContentDedup(t *testing.T) {
 	t.Parallel()
@@ -1433,7 +1432,7 @@ func TestBundled_ContentDedup(t *testing.T) {
 	}
 }
 
-// T-D-bundled-resources-52 — sync with an unknown harness fails with
+// sync with an unknown harness fails with
 // config.unknown_harness.
 func TestBundled_SyncUnknownHarness(t *testing.T) {
 	t.Parallel()

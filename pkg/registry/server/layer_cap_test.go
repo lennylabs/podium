@@ -41,7 +41,7 @@ func countUserLayers(t *testing.T, st store.Store, owner string) int {
 	return n
 }
 
-// Spec: §7.3.1 / §1.4 (F-1.4.1) — the default cap is 3 user-defined
+// Spec: §7.3.1 / §1.4 — the default cap is 3 user-defined
 // layers per identity; the 4th registration is rejected with a
 // quota.layer_count_exceeded error at HTTP 429, and the rejected layer
 // is not persisted.

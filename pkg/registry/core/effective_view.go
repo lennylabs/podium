@@ -30,7 +30,7 @@ type EffectiveArtifact struct {
 // spec: §2.2 — the registry "composes the caller's effective view from the
 // configured layer list per OAuth identity, applies per-layer visibility";
 // §7.5 — `podium sync` "reads the user's effective view from the registry."
-// This is the server-source enumeration `podium sync` walks (F-2.2.2).
+// This is the server-source enumeration `podium sync` walks.
 func (r *Registry) EffectiveView(ctx context.Context, id layer.Identity) ([]EffectiveArtifact, error) {
 	visible, err := r.visibleManifests(ctx, id)
 	if err != nil {

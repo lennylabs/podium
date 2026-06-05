@@ -1,7 +1,7 @@
 package integration
 
 // Transactional-outbox consistency under a transient backend failure, closing
-// G-VEC-6 (TEST-GAPS.md). For a non-collocated vector backend the registry
+// For a non-collocated vector backend the registry
 // commits the manifest and a vector_pending row in one transaction, and a
 // background worker drives the vector write with exponential-backoff retry.
 // This test exercises that path in-process with a deterministic fault-injecting

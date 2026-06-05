@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// spec: §8.2 (F-8.2.1) — a manifest that names a sensitive frontmatter field
+// spec: §8.2 — a manifest that names a sensitive frontmatter field
 // (bank_account) in audit_redact has that field surfaced into the audit context
 // and masked to [redacted] before any event reaches a sink. The standalone
 // registry forwards each catalogue event to an in-test SIEM recorder; the

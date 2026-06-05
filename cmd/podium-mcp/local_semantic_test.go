@@ -126,7 +126,7 @@ func TestLocalSemantic_NilAndEmptyQuery(t *testing.T) {
 
 // Spec: §9.1 — buildLocalSemantic returns no index when no overlay backend
 // or embedding provider is configured, leaving the overlay BM25-only.
-// spec: §6.4.1 / F-6.4.1 — the overlay vector backend reaches the same set
+// spec: §6.4.1 — the overlay vector backend reaches the same set
 // the registry bootstrap does: sqlite-vec, a local pgvector, or a managed
 // service (Pinecone, Weaviate Cloud, Qdrant Cloud). Before the fix the
 // overlay switch handled only memory and sqlite-vec and returned

@@ -44,7 +44,7 @@ describe("registry error surface (§6.10 / §13.2.1)", () => {
     );
   });
 
-  // spec: §6.10 (F-6.10.1) — the envelope parser captures the machine-readable
+  // spec: §6.10 — the envelope parser captures the machine-readable
   // details map and the operator remediation hint so callers can read the full
   // envelope, not only code/message/retryable.
   it("captures details and suggested_action from the envelope", () => {

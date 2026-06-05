@@ -15,7 +15,7 @@ import (
 // spec: §12 — "ETag caching of immutable artifact versions." The MCP client
 // sends the cached content-hash ETag as If-None-Match on load_artifact; a 304
 // is served from the content-addressed cache without re-downloading the
-// manifest body (F-12.0.8). When HEAD revalidation (§6.5) is unavailable, the
+// manifest body. When HEAD revalidation (§6.5) is unavailable, the
 // conditional GET is the revalidation round-trip.
 func TestLoadArtifact_SendsIfNoneMatchAndServes304FromCache(t *testing.T) {
 	t.Parallel()

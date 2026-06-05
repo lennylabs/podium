@@ -8,7 +8,7 @@ import (
 	"github.com/lennylabs/podium/internal/testharness/cmdharness"
 )
 
-// TestPodiumSync_AtSegmentRejected covers F-4.2.2.
+// TestPodiumSync_AtSegmentRejected covers
 // Spec: §4.2 — a directory name containing "@" is an invalid canonical-ID
 // segment ("@" is the reference version/hash delimiter). podium sync rejects
 // it through the real filesystem walk.
@@ -31,7 +31,7 @@ func TestPodiumSync_AtSegmentRejected(t *testing.T) {
 	}
 }
 
-// TestPodiumSync_RootLevelArtifactRejected covers F-4.2.1.
+// TestPodiumSync_RootLevelArtifactRejected covers
 // Spec: §4.2 — a root-level ARTIFACT.md in single-layer mode has no canonical
 // ID; podium sync rejects it. A non-multi_layer registry exercises the
 // canonical-ID guard rather than the layer-path ambiguity guard.
@@ -54,7 +54,7 @@ func TestPodiumSync_RootLevelArtifactRejected(t *testing.T) {
 	}
 }
 
-// TestPodiumSync_NestedArtifactsMaterializeSeparately covers F-4.2.3.
+// TestPodiumSync_NestedArtifactsMaterializeSeparately covers
 // Spec: §4.2/§4.4 — nested artifacts are separate leaf packages. podium sync
 // materializes both without error; the nested artifact lands at its own
 // canonical path rather than only as the parent's bundled resource.

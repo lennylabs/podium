@@ -21,7 +21,7 @@ func TestDefaultRegistry_HasAllBuiltinTypes(t *testing.T) {
 	}
 }
 
-// Spec: §4.1 (F-4.1.4) — Require reports an unregistered type with an
+// Spec: §4.1 — Require reports an unregistered type with an
 // error wrapping manifest.ErrUnknownType and returns nil for a registered
 // type.
 func TestRegistry_Require(t *testing.T) {
@@ -39,7 +39,7 @@ func TestRegistry_Require(t *testing.T) {
 	}
 }
 
-// Spec: §4.1 (F-4.1.4) — the default registry recognizes every built-in
+// Spec: §4.1 — the default registry recognizes every built-in
 // type via Require and reports an unregistered extension type with
 // manifest.ErrUnknownType.
 func TestDefaultRegistry_RequireBuiltins(t *testing.T) {

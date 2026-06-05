@@ -10,7 +10,7 @@ import "net/http"
 // so a sync of more than 50 artifacts enumerates in one request.
 //
 // spec: §2.2 (the registry "composes the caller's effective view ... applies
-// per-layer visibility"), §7.5 (server-source sync). F-2.2.2.
+// per-layer visibility"), §7.5 (server-source sync).
 func (s *Server) handleSyncManifest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "registry.invalid_argument",

@@ -7,7 +7,7 @@ import (
 )
 
 // Spec: §6.3.1 — an inactive scope set (no "podium:*" scopes) narrows
-// nothing; the caller keeps full layer visibility. F-6.3.5.
+// nothing; the caller keeps full layer visibility.
 func TestScopeSet_InactiveAllowsAll(t *testing.T) {
 	t.Parallel()
 	set := layer.ParseScopes([]string{"openid", "profile", "email"})
@@ -23,7 +23,7 @@ func TestScopeSet_InactiveAllowsAll(t *testing.T) {
 }
 
 // Spec: §6.3.1 — "podium:read:finance/*" covers the finance subtree and
-// nothing outside it; the smaller surface wins. F-6.3.5.
+// nothing outside it; the smaller surface wins.
 func TestScopeSet_ReadWildcard(t *testing.T) {
 	t.Parallel()
 	set := layer.ParseScopes([]string{"podium:read:finance/*"})
@@ -47,7 +47,7 @@ func TestScopeSet_ReadWildcard(t *testing.T) {
 }
 
 // Spec: §6.3.1 — a load grant implies read visibility for the same
-// resource (you can see what you may load). F-6.3.5.
+// resource (you can see what you may load).
 func TestScopeSet_LoadImpliesRead(t *testing.T) {
 	t.Parallel()
 	set := layer.ParseScopes([]string{"podium:load:finance/ap/pay-invoice@1.x"})
@@ -61,7 +61,7 @@ func TestScopeSet_LoadImpliesRead(t *testing.T) {
 }
 
 // Spec: §6.3.1 — "podium:load:.../pay-invoice@1.x" permits loading only
-// versions matching the pin; the smaller surface wins. F-6.3.5.
+// versions matching the pin; the smaller surface wins.
 func TestScopeSet_LoadVersionPin(t *testing.T) {
 	t.Parallel()
 	set := layer.ParseScopes([]string{"podium:load:finance/ap/pay-invoice@1.x"})

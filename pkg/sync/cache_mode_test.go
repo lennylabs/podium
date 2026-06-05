@@ -40,7 +40,7 @@ func writeFilesystemRegistry(t *testing.T) string {
 // server-source registry has nothing local to materialize and returns the
 // structured network.offline_cache_miss error without dialing the server. The
 // server URL points at an unbound port, so a dial would surface a transport
-// error instead of ErrOfflineCacheMiss (F-7.4.3).
+// error instead of ErrOfflineCacheMiss.
 func TestRun_OfflineOnlyServerSourceMisses(t *testing.T) {
 	t.Parallel()
 	_, err := Run(Options{
@@ -80,7 +80,7 @@ func TestRun_OfflineOnlyFilesystemSourceMaterializes(t *testing.T) {
 // the server-source registry is unreachable, the prior run's materialized
 // output stays in place and the sync reports a no-op offline result rather than
 // failing. The Result echoes the prior lock so the caller sees the served
-// state (F-7.4.3).
+// state.
 func TestRun_OfflineFirstServerUnreachableIsNoop(t *testing.T) {
 	t.Parallel()
 	srv := newStubRegistry(t, map[string]stubArtifact{
@@ -131,7 +131,7 @@ func TestRun_OfflineFirstServerUnreachableIsNoop(t *testing.T) {
 // no offline content cache, so an always-revalidate sync against an unreachable
 // server-source registry surfaces ErrRegistryUnreachable rather than the raw
 // transport message, and never ErrOfflineCacheMiss (which is the offline-only
-// code). An empty CacheMode behaves as always-revalidate (F-7.4.3).
+// code). An empty CacheMode behaves as always-revalidate.
 func TestRun_AlwaysRevalidateServerUnreachable(t *testing.T) {
 	t.Parallel()
 	for _, mode := range []struct{ name, value string }{
@@ -161,8 +161,7 @@ func TestRun_AlwaysRevalidateServerUnreachable(t *testing.T) {
 // spec: §7.4 — a structured registry rejection is not the unreachable
 // condition: a reachable server returning a 5xx envelope in always-revalidate
 // mode surfaces its own error, not network.registry_unreachable. Only a
-// transport-level failure (dial/DNS/timeout) maps to the namespaced code
-// (F-7.4.3).
+// transport-level failure (dial/DNS/timeout) maps to the namespaced code.
 func TestRun_AlwaysRevalidateStructuredErrorNotUnreachable(t *testing.T) {
 	t.Parallel()
 	srv := newErrorRegistry(t, http.StatusInternalServerError, `{"code":"registry.unavailable","message":"boom"}`)

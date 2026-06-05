@@ -15,7 +15,7 @@ import (
 // search_artifacts returns an explicit 'offline' status that hosts can
 // surface." When the registry is unreachable (transport-level failure), each
 // discovery/search meta-tool returns status "offline" rather than an error
-// envelope (F-12.0.3).
+// envelope.
 
 const unreachableRegistry = "http://127.0.0.1:1" // unbound port → connect refused
 
@@ -109,7 +109,7 @@ func TestSearchArtifacts_OfflineStatusServesOverlay(t *testing.T) {
 	}
 }
 
-// Spec: §7.4 (F-7.4.4) — offline-first "serve cached results silently": the
+// Spec: §7.4 — offline-first "serve cached results silently": the
 // discovery meta-tools must NOT carry an explicit "offline" status field in
 // offline-first mode, distinguishing it from always-revalidate, which does.
 func TestProxyGet_OfflineFirstServesSilently(t *testing.T) {
@@ -131,7 +131,7 @@ func TestProxyGet_OfflineFirstServesSilently(t *testing.T) {
 	}
 }
 
-// Spec: §7.4 (F-7.4.4) — search_artifacts also serves silently in
+// Spec: §7.4 — search_artifacts also serves silently in
 // offline-first mode: overlay matches return with no "offline" status field.
 func TestSearchArtifacts_OfflineFirstServesSilently(t *testing.T) {
 	t.Parallel()
@@ -149,7 +149,7 @@ func TestSearchArtifacts_OfflineFirstServesSilently(t *testing.T) {
 	}
 }
 
-// Spec: §7.4 (F-7.4.4) — always-revalidate (the default mode) keeps the
+// Spec: §7.4 — always-revalidate (the default mode) keeps the
 // explicit "offline" status, the contrast offline-first drops.
 func TestProxyGet_AlwaysRevalidateKeepsOfflineStatus(t *testing.T) {
 	t.Parallel()
@@ -169,7 +169,7 @@ func TestProxyGet_AlwaysRevalidateKeepsOfflineStatus(t *testing.T) {
 // offline-only load_domain / search_domains returns the structured
 // network.offline_cache_miss error without dialing the registry. Pointing at
 // an unbound port proves no connection is attempted: a dial would surface a
-// connect/refused transport error instead of the offline-miss code (F-7.4.2).
+// connect/refused transport error instead of the offline-miss code.
 func TestProxyGet_OfflineOnlyNeverContactsRegistry(t *testing.T) {
 	t.Parallel()
 	for _, path := range []string{"/v1/load_domain", "/v1/search_domains", "/v1/scope/preview"} {
@@ -191,7 +191,7 @@ func TestProxyGet_OfflineOnlyNeverContactsRegistry(t *testing.T) {
 
 // Spec: §7.4 — offline-only search_artifacts serves only the workspace overlay
 // and never contacts the registry. With overlay matches it returns them; an
-// empty overlay is a structured cache miss (F-7.4.2).
+// empty overlay is a structured cache miss.
 func TestSearchArtifacts_OfflineOnlyServesOverlayOnly(t *testing.T) {
 	t.Parallel()
 	srv := &mcpServer{

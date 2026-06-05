@@ -132,7 +132,7 @@ func nonSkillProvenanceArtifact(ty string) []byte {
 		"<!-- end imported -->\n")
 }
 
-// Spec: §4.4.2 (F-4.4.3) — provenance rewriting must cover every type the
+// Spec: §4.4.2 — provenance rewriting must cover every type the
 // Claude Code adapter materializes, not just skills. A context, agent, or
 // rule body that aggregates external content carries imported blocks that
 // must become <untrusted-data> regions so the host can apply differential
@@ -190,7 +190,7 @@ func TestClaudeCode_RewritesProvenanceForNonSkillTypes(t *testing.T) {
 	}
 }
 
-// Spec: §4.4.2 (F-4.4.2) — a document-level `source:` that declares a
+// Spec: §4.4.2 — a document-level `source:` that declares a
 // non-authored default provenance wraps the manifest's authored prose in an
 // <untrusted-data> region. The agent body keeps its frontmatter and gains the
 // region around the prose.
@@ -228,7 +228,7 @@ func TestClaudeCode_DocumentSourceImportedWrapsProse(t *testing.T) {
 	}
 }
 
-// Spec: §4.4.2 (F-4.4.2) — `source: authored` (the documented value) is the
+// Spec: §4.4.2 — `source: authored` (the documented value) is the
 // trusted default, so the body is not wrapped. Only inline imported blocks, if
 // any, become <untrusted-data> regions.
 func TestClaudeCode_DocumentSourceAuthoredLeavesProseTrusted(t *testing.T) {
@@ -250,7 +250,7 @@ func TestClaudeCode_DocumentSourceAuthoredLeavesProseTrusted(t *testing.T) {
 	}
 }
 
-// Spec: §4.4.2 (F-4.4.2) — for a skill the `source:` lives in ARTIFACT.md
+// Spec: §4.4.2 — for a skill the `source:` lives in ARTIFACT.md
 // while the prose lives in SKILL.md. An imported document source wraps the
 // SKILL.md prose, leaving its own frontmatter intact.
 func TestClaudeCode_DocumentSourceImportedWrapsSkillProse(t *testing.T) {

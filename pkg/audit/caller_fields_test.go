@@ -31,7 +31,7 @@ func TestCanonicalBody_IncludesCallerFields(t *testing.T) {
 	}
 }
 
-// spec §8.1 / §13.2.2 / §13.10 (F-8.1.2, F-13.2.2, F-13.10.4): the caller
+// spec §8.1 / §13.2.2 / §13.10: the caller
 // identity attributes serialize under a nested "caller" object whose keys
 // are the dotted names the spec illustrates (caller.identity, caller.email,
 // caller.groups, caller.network, caller.public_mode), and the chain
@@ -89,7 +89,7 @@ func TestFileSink_CallerFieldsRoundTrip(t *testing.T) {
 	}
 }
 
-// spec §8.1 / §13.2.2 / §13.10 (F-8.1.2, F-13.2.2, F-13.10.4): the nested
+// spec §8.1 / §13.2.2 / §13.10: the nested
 // caller object decodes through dotted-path field access, which is how a
 // SIEM consumer queries caller.identity and caller.public_mode. Asserting
 // against a typed decode pins the exact key names the spec names.

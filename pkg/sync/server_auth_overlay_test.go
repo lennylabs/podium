@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// spec: §6.3.2, §14.11 (F-14.11.5) — a server-source sync attaches the caller
+// spec: §6.3.2, §14.11 — a server-source sync attaches the caller
 // credential as Authorization: Bearer on every registry API request so CI's
 // runtime-issued JWT authenticates the materialization. A filesystem source
 // has no request and ignores the token.
@@ -45,7 +45,7 @@ func TestRun_ServerSource_ForwardsBearerToken(t *testing.T) {
 	}
 }
 
-// spec: §14.11 (F-14.11.5) — an empty Token reaches the registry anonymously;
+// spec: §14.11 — an empty Token reaches the registry anonymously;
 // no Authorization header is sent.
 func TestRun_ServerSource_NoTokenSendsNoAuth(t *testing.T) {
 	t.Parallel()
@@ -69,7 +69,7 @@ func TestRun_ServerSource_NoTokenSendsNoAuth(t *testing.T) {
 	}
 }
 
-// spec: §6.4 (F-14.6.2) — the workspace overlay merges as the highest-precedence
+// spec: §6.4 — the workspace overlay merges as the highest-precedence
 // layer for a server source too. The consumer merges it client-side because the
 // developer's overlay directory is local and the server cannot see it.
 func TestRun_ServerSource_OverlayOverridesServer(t *testing.T) {

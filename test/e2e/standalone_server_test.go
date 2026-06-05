@@ -6,14 +6,14 @@ package e2e
 // discovery, lint, impact analysis, audit, and admin migrate-to-standard.
 //
 // The §13.10 public-mode guards are implemented and exercised end-to-end:
-//   - F-13.10.5: --allow-public-bind flag and the loopback-bind refusal
+//   - --allow-public-bind flag and the loopback-bind refusal
 //     (config.public_bind_refused) are wired (cmd/podium/serve.go,
 //     pkg/registry/server/config_validate.go).
-//   - F-13.10.6: the public-mode sensitivity ceiling rejects medium/high at
+//   - the public-mode sensitivity ceiling rejects medium/high at
 //     ingest (ingest.public_mode_rejects_sensitive; serverboot publicSensitivityFloor).
-//   - F-13.10.8: the public-mode startup warning banner is emitted (serverboot
+//   - the public-mode startup warning banner is emitted (serverboot
 //     emitStartupBanner).
-//   - F-13.10.11: --no-embeddings flag exists; see TestStandaloneFlags_NoEmbeddingsSearchWorks.
+//   - --no-embeddings flag exists; see TestStandaloneFlags_NoEmbeddingsSearchWorks.
 
 import (
 	"bytes"
@@ -142,7 +142,7 @@ func startServerExplicitBind(t *testing.T, bind string, probePort int, env []str
 
 // ---- tests -----------------------------------------------------------------
 
-// T-D-small-team-1 — standalone server starts, answers /healthz, startup log
+// standalone server starts, answers /healthz, startup log
 // contains an "ingested layer" line.
 func TestStandaloneServer_StandaloneStartHealthz(t *testing.T) {
 	t.Parallel()
@@ -164,7 +164,7 @@ func TestStandaloneServer_StandaloneStartHealthz(t *testing.T) {
 	}
 }
 
-// T-D-small-team-2 — startup banner includes bind address and mode.
+// startup banner includes bind address and mode.
 func TestStandaloneServer_StartupBannerBind(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -185,7 +185,7 @@ func TestStandaloneServer_StartupBannerBind(t *testing.T) {
 	}
 }
 
-// T-D-small-team-3 — PODIUM_LAYER_PATH env var produces the same layer set as --layer-path.
+// PODIUM_LAYER_PATH env var produces the same layer set as --layer-path.
 func TestStandaloneServer_LayerPathEnvEquivalent(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -221,7 +221,7 @@ func TestStandaloneServer_LayerPathEnvEquivalent(t *testing.T) {
 	}
 }
 
-// T-D-small-team-4 — layer_path key in registry.yaml is respected.
+// layer_path key in registry.yaml is respected.
 func TestStandaloneServer_RegistryYAMLLayersPath(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -253,7 +253,7 @@ func TestStandaloneServer_RegistryYAMLLayersPath(t *testing.T) {
 	}
 }
 
-// T-D-small-team-5 — config show reflects layer_path source (registry.yaml vs env).
+// config show reflects layer_path source (registry.yaml vs env).
 func TestStandaloneServer_ConfigShowLayersPathSource(t *testing.T) {
 	t.Parallel()
 	cfgDir := t.TempDir()
@@ -290,7 +290,7 @@ func TestStandaloneServer_ConfigShowLayersPathSource(t *testing.T) {
 	}
 }
 
-// T-D-small-team-6 — bind key in registry.yaml changes listen address.
+// bind key in registry.yaml changes listen address.
 func TestStandaloneServer_RegistryYAMLBind(t *testing.T) {
 	t.Parallel()
 	port := freePort(t)
@@ -357,7 +357,7 @@ func TestStandaloneServer_RegistryYAMLBind(t *testing.T) {
 	}
 }
 
-// T-D-small-team-7 — public mode + identity provider fails at startup with config.public_mode_with_idp.
+// public mode + identity provider fails at startup with config.public_mode_with_idp.
 func TestStandaloneServer_PublicModeWithIdPFails(t *testing.T) {
 	t.Parallel()
 	out := smallteamRawExecFail(t,
@@ -368,7 +368,7 @@ func TestStandaloneServer_PublicModeWithIdPFails(t *testing.T) {
 	}
 }
 
-// spec: §2.2, §6.3.1 (F-2.2.3) — a registry configured with
+// spec: §2.2, §6.3.1 — a registry configured with
 // oauth-device-code (and public mode off) has no request-time verifier
 // wired, so it would resolve every caller as anonymous-public and never
 // apply per-layer visibility. The boot guard refuses to start with
@@ -389,7 +389,6 @@ func TestSmallTeam_IdentityProviderUnverifiedFailsStartup(t *testing.T) {
 // endpoint on every call. Booting without it refuses to start with
 // config.injected_token_audience_unset rather than accept tokens whose
 // audience would go unchecked (a cross-registry token-confusion surface).
-// F-6.3.1.
 func TestInjectedToken_AudienceUnsetFailsStartup(t *testing.T) {
 	t.Parallel()
 	out := smallteamRawExecFail(t,
@@ -400,7 +399,7 @@ func TestInjectedToken_AudienceUnsetFailsStartup(t *testing.T) {
 	}
 }
 
-// T-D-small-team-8 — public mode reports mode:public in /healthz.
+// public mode reports mode:public in /healthz.
 func TestStandaloneServer_PublicModeHealthz(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"a/ARTIFACT.md": smallteamLowArtifact("a")})
@@ -417,7 +416,7 @@ func TestStandaloneServer_PublicModeHealthz(t *testing.T) {
 	}
 }
 
-// T-D-small-team-9 — public mode refuses a non-loopback bind unless
+// public mode refuses a non-loopback bind unless
 // --allow-public-bind is set. spec: §13.10 / §13.2.2 — the loopback-bind
 // default surfaces config.public_bind_refused at startup, naming the address.
 func TestStandaloneServer_PublicModeLoopbackEnforce(t *testing.T) {
@@ -435,7 +434,7 @@ func TestStandaloneServer_PublicModeLoopbackEnforce(t *testing.T) {
 	}
 }
 
-// T-D-small-team-10 — --allow-public-bind permits a non-loopback bind in
+// --allow-public-bind permits a non-loopback bind in
 // public mode. spec: §13.10 / §13.2.2 — the explicit opt-in lets the registry
 // bind a non-loopback address (typically behind an authenticated proxy).
 func TestStandaloneServer_AllowPublicBindFlag(t *testing.T) {
@@ -454,7 +453,7 @@ func TestStandaloneServer_AllowPublicBindFlag(t *testing.T) {
 	}
 }
 
-// T-D-small-team-11 — public mode rejects sensitivity:medium at ingest.
+// public mode rejects sensitivity:medium at ingest.
 // spec: §13.10 / §13.2.2 — ingest.public_mode_rejects_sensitive. The medium
 // artifact is dropped per-artifact (non-fatal) so the server still boots.
 func TestStandaloneServer_PublicModeRejectsMedium(t *testing.T) {
@@ -480,8 +479,8 @@ func TestStandaloneServer_PublicModeRejectsMedium(t *testing.T) {
 	}
 }
 
-// T-D-small-team-12 — public mode audit log records the anonymous caller as
-// system:public. spec §8.1 / §13.2.2 / §13.10 (F-8.1.2, F-13.10.4): the §8.3
+// public mode audit log records the anonymous caller as
+// system:public. spec §8.1 / §13.2.2 / §13.10: the §8.3
 // file sink serializes the caller-identity attributes under a nested "caller"
 // object whose dotted keys are caller.identity, caller.network, and
 // caller.public_mode. An anonymous public-mode read therefore records
@@ -526,7 +525,7 @@ func TestStandaloneServer_PublicModeAuditCaller(t *testing.T) {
 	}
 }
 
-// T-D-small-team-13 — public mode emits the §13.2.2 startup warning banner.
+// public mode emits the §13.2.2 startup warning banner.
 // The banner is written to stderr during boot, before /healthz reports ready.
 func TestStandaloneServer_PublicModeStartupBanner(t *testing.T) {
 	t.Parallel()
@@ -539,7 +538,7 @@ func TestStandaloneServer_PublicModeStartupBanner(t *testing.T) {
 	}
 }
 
-// T-D-small-team-14 — podium init writes .podium/sync.yaml with registry URL and harness.
+// podium init writes .podium/sync.yaml with registry URL and harness.
 func TestStandaloneServer_PodiumInit(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
@@ -579,7 +578,7 @@ func TestStandaloneServer_PodiumInit(t *testing.T) {
 	}
 }
 
-// T-D-small-team-15 — client-side podium sync against a server registry
+// client-side podium sync against a server registry
 // materializes the claude-code layout. spec: §2.2 / §7.5.2 — a URL source
 // reads the effective view over HTTP and runs the same harness adapter as the
 // filesystem source. A rule is single-file (body in ARTIFACT.md) and
@@ -600,7 +599,7 @@ func TestStandaloneServer_PodiumSyncServerRegistry(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, ".claude", "rules", "ts-style.md"))
 }
 
-// T-D-small-team-16 — local source: podium layer reingest updates the layer.
+// local source: podium layer reingest updates the layer.
 func TestStandaloneServer_LayerReingest(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -630,7 +629,7 @@ func TestStandaloneServer_LayerReingest(t *testing.T) {
 	}
 }
 
-// T-D-small-team-17 — podium layer watch polls the source and reingests.
+// podium layer watch polls the source and reingests.
 func TestStandaloneServer_LayerWatch(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -677,7 +676,7 @@ func TestStandaloneServer_LayerWatch(t *testing.T) {
 	}
 }
 
-// T-D-small-team-18 — git source: layer register with --repo exits 0 and lists the layer.
+// git source: layer register with --repo exits 0 and lists the layer.
 func TestStandaloneServer_GitSourceLayerRegister(t *testing.T) {
 	t.Parallel()
 	// Create a minimal local git repo.
@@ -725,7 +724,7 @@ func TestStandaloneServer_GitSourceLayerRegister(t *testing.T) {
 	}
 }
 
-// T-D-small-team-19 — migrating from filesystem: podium init --force overwrites sync.yaml.
+// migrating from filesystem: podium init --force overwrites sync.yaml.
 func TestStandaloneServer_MigrateInitForce(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
@@ -766,7 +765,7 @@ func TestStandaloneServer_MigrateInitForce(t *testing.T) {
 	}
 }
 
-// T-D-small-team-20 — filesystem→server migration: podium sync output is
+// filesystem→server migration: podium sync output is
 // bit-identical for the same target and profile, so end-user behavior is
 // preserved across the cut-over. spec: §2.2 / §7.5 — the shared library does
 // the same parsing, composition, and adapter work in both modes.
@@ -777,7 +776,7 @@ func TestStandaloneServer_MigrateInitForce(t *testing.T) {
 // TestFilesystemSync_BitIdenticalFilesystemVsServer.
 func TestStandaloneServer_MigrateOutputBitIdentical(t *testing.T) {
 	t.Parallel()
-	t.Skip("deferred gap (no BUILD-GAPS finding yet): server-source sync omits the SKILL.md secondary file for multi-file artifacts (skills/agents), so the §2.2 bit-identical claim fails for a skill — the filesystem source writes ARTIFACT.md + SKILL.md while the server source writes ARTIFACT.md only and the claude-code adapter then emits nothing for the skill. Single-file (context/rule) parity passes in TestFilesystemSync_BitIdenticalFilesystemVsServer")
+	t.Skip("deferred gap (no implementation-gap finding yet): server-source sync omits the SKILL.md secondary file for multi-file artifacts (skills/agents), so the §2.2 bit-identical claim fails for a skill — the filesystem source writes ARTIFACT.md + SKILL.md while the server source writes ARTIFACT.md only and the claude-code adapter then emits nothing for the skill. Single-file (context/rule) parity passes in TestFilesystemSync_BitIdenticalFilesystemVsServer")
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":                     "multi_layer: true\n",
 		"team/glossary/ARTIFACT.md":            contextArtifact("glossary"),
@@ -822,7 +821,7 @@ func TestStandaloneServer_MigrateOutputBitIdentical(t *testing.T) {
 	}
 }
 
-// T-D-small-team-21 — runtime discovery via MCP: load_artifact returns artifact.
+// runtime discovery via MCP: load_artifact returns artifact.
 func TestStandaloneServer_MCPLoadArtifact(t *testing.T) {
 	t.Parallel()
 	id := "ops/runbook"
@@ -851,7 +850,7 @@ func TestStandaloneServer_MCPLoadArtifact(t *testing.T) {
 	mustExist(t, filepath.Join(mat, id, "ARTIFACT.md"))
 }
 
-// T-D-small-team-22 — runtime discovery via MCP: search_artifacts returns results.
+// runtime discovery via MCP: search_artifacts returns results.
 func TestStandaloneServer_MCPSearchArtifacts(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -873,7 +872,7 @@ func TestStandaloneServer_MCPSearchArtifacts(t *testing.T) {
 	}
 }
 
-// T-D-small-team-23 — BM25-only search works with no embedding provider.
+// BM25-only search works with no embedding provider.
 func TestStandaloneServer_BM25SearchNoEmbeddings(t *testing.T) {
 	t.Parallel()
 	// No PODIUM_EMBEDDING_PROVIDER, no PODIUM_VECTOR_BACKEND → BM25-only.
@@ -897,7 +896,7 @@ func TestStandaloneServer_BM25SearchNoEmbeddings(t *testing.T) {
 	}
 }
 
-// T-D-small-team-24 — GET /v1/layers lists bootstrap layers after --layer-path startup.
+// GET /v1/layers lists bootstrap layers after --layer-path startup.
 func TestStandaloneServer_GetLayersAfterStartup(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -930,7 +929,7 @@ func TestStandaloneServer_GetLayersAfterStartup(t *testing.T) {
 	}
 }
 
-// T-D-small-team-25 — POST /v1/layers/reingest triggers re-scan of local source.
+// POST /v1/layers/reingest triggers re-scan of local source.
 func TestStandaloneServer_HTTPReingestRescan(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -965,7 +964,7 @@ func TestStandaloneServer_HTTPReingestRescan(t *testing.T) {
 	}
 }
 
-// T-D-small-team-26 — GET /metrics returns Prometheus data. spec §13.8.
+// GET /metrics returns Prometheus data. spec §13.8.
 func TestStandaloneServer_MetricsEndpoint(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -984,7 +983,7 @@ func TestStandaloneServer_MetricsEndpoint(t *testing.T) {
 	}
 }
 
-// T-D-small-team-27 — GET /healthz and GET /readyz both answer 200 in standalone mode.
+// GET /healthz and GET /readyz both answer 200 in standalone mode.
 func TestStandaloneServer_HealthzReadyz(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -1008,7 +1007,7 @@ func TestStandaloneServer_HealthzReadyz(t *testing.T) {
 	}
 }
 
-// T-D-small-team-28 — schema migration runs on restart of same SQLite db.
+// schema migration runs on restart of same SQLite db.
 func TestStandaloneServer_SchemaRestartIdempotent(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -1043,7 +1042,7 @@ func TestStandaloneServer_SchemaRestartIdempotent(t *testing.T) {
 	}
 }
 
-// T-D-small-team-29 — podium admin migrate-to-standard with sqlite target.
+// podium admin migrate-to-standard with sqlite target.
 func TestStandaloneServer_MigrateToStandardSQLite(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -1077,7 +1076,7 @@ func TestStandaloneServer_MigrateToStandardSQLite(t *testing.T) {
 	mustExist(t, dstDB)
 }
 
-// T-D-small-team-30 — podium admin migrate-to-standard --dry-run writes nothing.
+// podium admin migrate-to-standard --dry-run writes nothing.
 func TestStandaloneServer_MigrateToStandardDryRun(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -1113,7 +1112,7 @@ func TestStandaloneServer_MigrateToStandardDryRun(t *testing.T) {
 	}
 }
 
-// T-D-small-team-31 — podium admin migrate-to-standard without --source-sqlite fails.
+// podium admin migrate-to-standard without --source-sqlite fails.
 func TestStandaloneServer_MigrateToStandardMissingFlag(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"HOME=" + t.TempDir()},
@@ -1127,7 +1126,7 @@ func TestStandaloneServer_MigrateToStandardMissingFlag(t *testing.T) {
 	}
 }
 
-// T-D-small-team-32 — multi-layer: .registry-config with multi_layer:true registers multiple layers.
+// multi-layer: .registry-config with multi_layer:true registers multiple layers.
 func TestStandaloneServer_MultiLayerRegistryConfig(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -1164,7 +1163,7 @@ func TestStandaloneServer_MultiLayerRegistryConfig(t *testing.T) {
 	}
 }
 
-// T-D-small-team-33 — layer_order in .registry-config overrides alphabetical order.
+// layer_order in .registry-config overrides alphabetical order.
 func TestStandaloneServer_RegistryConfigLayerOrder(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -1193,7 +1192,7 @@ func TestStandaloneServer_RegistryConfigLayerOrder(t *testing.T) {
 	}
 }
 
-// T-D-small-team-34 — --layer-path with missing directory errors at startup.
+// --layer-path with missing directory errors at startup.
 func TestStandaloneServer_MissingLayerPathFails(t *testing.T) {
 	t.Parallel()
 	out := smallteamRawExecFail(t,
@@ -1204,7 +1203,7 @@ func TestStandaloneServer_MissingLayerPathFails(t *testing.T) {
 	}
 }
 
-// T-D-small-team-35 — registry.yaml identity_provider key configures oauth-device-code via config show.
+// registry.yaml identity_provider key configures oauth-device-code via config show.
 func TestStandaloneServer_RegistryYAMLIdentityProvider(t *testing.T) {
 	t.Parallel()
 	cfgDir := t.TempDir()
@@ -1223,7 +1222,7 @@ func TestStandaloneServer_RegistryYAMLIdentityProvider(t *testing.T) {
 	}
 }
 
-// T-D-small-team-36 — public mode + identity provider via registry.yaml fails at startup.
+// public mode + identity provider via registry.yaml fails at startup.
 func TestStandaloneServer_RegistryYAMLPublicModeWithIdP(t *testing.T) {
 	t.Parallel()
 	cfgDir := t.TempDir()
@@ -1240,7 +1239,7 @@ func TestStandaloneServer_RegistryYAMLPublicModeWithIdP(t *testing.T) {
 	}
 }
 
-// T-D-small-team-37 — podium lint validates artifacts and reports errors.
+// podium lint validates artifacts and reports errors.
 func TestStandaloneServer_LintValidInvalid(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -1260,7 +1259,7 @@ func TestStandaloneServer_LintValidInvalid(t *testing.T) {
 	}
 }
 
-// T-D-small-team-38 — cross-type dependency graph: podium impact shows dependents.
+// cross-type dependency graph: podium impact shows dependents.
 func TestStandaloneServer_ImpactAnalysis(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -1283,7 +1282,7 @@ func TestStandaloneServer_ImpactAnalysis(t *testing.T) {
 	}
 }
 
-// T-D-small-team-39 — single audit log captures every load.
+// single audit log captures every load.
 func TestStandaloneServer_AuditLogLoad(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -1307,7 +1306,7 @@ func TestStandaloneServer_AuditLogLoad(t *testing.T) {
 	}
 }
 
-// T-D-small-team-40 — standalone is single-tenant: all requests served under default tenant.
+// standalone is single-tenant: all requests served under default tenant.
 func TestStandaloneServer_SingleTenant(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -1328,13 +1327,13 @@ func TestStandaloneServer_SingleTenant(t *testing.T) {
 	}
 }
 
-// T-D-small-team-41 — default bind 127.0.0.1:8080 (skip to avoid port conflicts in CI).
+// default bind 127.0.0.1:8080 (skip to avoid port conflicts in CI).
 func TestStandaloneServer_DefaultBind8080(t *testing.T) {
 	t.Parallel()
 	t.Skip("fixed port 8080 not safe in parallel CI; default-bind behavior is covered by startServerArgs free-port path in other tests")
 }
 
-// T-D-small-team-42 — config show reveals layers.path from PODIUM_LAYER_PATH.
+// config show reveals layers.path from PODIUM_LAYER_PATH.
 func TestStandaloneServer_ConfigShowLayerPathEnv(t *testing.T) {
 	t.Parallel()
 	testPath := "/tmp/podium-test-layers-42"
@@ -1352,7 +1351,7 @@ func TestStandaloneServer_ConfigShowLayerPathEnv(t *testing.T) {
 	}
 }
 
-// T-D-small-team-43 — podium init --standalone sets registry to http://127.0.0.1:8080.
+// podium init --standalone sets registry to http://127.0.0.1:8080.
 func TestStandaloneServer_InitStandaloneFlag(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
@@ -1379,7 +1378,7 @@ func TestStandaloneServer_InitStandaloneFlag(t *testing.T) {
 	}
 }
 
-// T-D-small-team-44 — missing --layer-path directory prints a clear error.
+// missing --layer-path directory prints a clear error.
 func TestStandaloneServer_MissingLayerPathClearError(t *testing.T) {
 	t.Parallel()
 	out := smallteamRawExecFail(t,
@@ -1391,7 +1390,7 @@ func TestStandaloneServer_MissingLayerPathClearError(t *testing.T) {
 	}
 }
 
-// T-D-small-team-45 — public mode with only low-sensitivity artifacts ingests fine.
+// public mode with only low-sensitivity artifacts ingests fine.
 func TestStandaloneServer_PublicModeLowSensitivityIngests(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{

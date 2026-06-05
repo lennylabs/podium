@@ -32,7 +32,7 @@ func TestServe_RuntimeKeysPersistAcrossRestart(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	// §13.10 (F-13.10.2): a named-but-missing --config is now a hard error, so
+	// §13.10: a named-but-missing --config is now a hard error, so
 	// the test names an existing (empty) config and configures the server via
 	// the PODIUM_* env vars below. The empty document overlays nothing.
 	configFile := filepath.Join(tmp, "registry.yaml")

@@ -11,7 +11,7 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// Spec: §13.9 (F-13.9.2) — the metadata-store readiness check passes when
+// Spec: §13.9 — the metadata-store readiness check passes when
 // GetTenant answers and fails when it errors (the store is unreachable or
 // the tenant is missing), which is what makes /readyz report not_ready.
 func TestStoreReadinessCheck(t *testing.T) {
@@ -48,7 +48,7 @@ func (b brokenObjectStore) Presign(context.Context, string, time.Duration) (stri
 }
 func (b brokenObjectStore) Delete(context.Context, string) error { return b.err }
 
-// Spec: §13.9 (F-13.9.2) — the object-store readiness check treats
+// Spec: §13.9 — the object-store readiness check treats
 // ErrNotFound as reachable (the backend answered) and any other error as
 // an outage.
 func TestObjectStoreReadinessCheck(t *testing.T) {
@@ -77,7 +77,7 @@ func TestObjectStoreReadinessCheck(t *testing.T) {
 	}
 }
 
-// Spec: §13.2.1 (F-13.9.4) — only the Postgres backend reports
+// Spec: §13.2.1 — only the Postgres backend reports
 // replication lag; other backends report no reporter (nil), so /readyz
 // reports lag 0.
 func TestStoreLagReporter_NilForNonPostgres(t *testing.T) {

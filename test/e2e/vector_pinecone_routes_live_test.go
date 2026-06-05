@@ -1,7 +1,7 @@
 package e2e
 
 // Live end-to-end comparison of the two Pinecone embedding routes through the
-// standalone server, closing G-VEC-11 (TEST-GAPS.md). TestVectorBackend_*
+// standalone server. TestVectorBackend_*
 // SelfEmbedding asserts only the chosen route from the startup log against a
 // refused host, and TestVectorSemanticSearch_ManagedThroughServer runs a live
 // managed backend storage-only with a mock embedder. No test ingests and queries
@@ -66,7 +66,7 @@ func pollSemanticTopHit(t *testing.T, baseURL, query, wantID string, timeout tim
 	t.Fatalf("search_artifacts(%q) never ranked %q first within %s; last results: %+v", query, wantID, timeout, last.Results)
 }
 
-// TestVectorPineconeRoutes_SelfEmbedVsExternalLive closes G-VEC-11. It boots the
+// TestVectorPineconeRoutes_SelfEmbedVsExternalLive. It boots the
 // server against live Pinecone twice over the same fixtures, once self-embedding
 // and once with an external OpenAI embedder, and asserts both rank the same
 // artifact first while each startup log records the chosen route.

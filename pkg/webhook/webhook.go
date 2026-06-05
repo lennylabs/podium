@@ -105,7 +105,7 @@ type Worker struct {
 	MaxConcurrent int
 
 	// mu serializes the per-receiver failure-counter read-modify-write
-	// so two concurrent events never lose an increment (F-7.3.8).
+	// so two concurrent events never lose an increment.
 	mu sync.Mutex
 	// sem bounds concurrent deliveries; lazily sized from MaxConcurrent
 	// on first use via semOnce.
@@ -139,7 +139,7 @@ func (w *Worker) semaphore() chan struct{} {
 // auto-disabled and recorded back to the store with Disabled=true.
 // Concurrent deliveries are bounded by MaxConcurrent, and the
 // per-receiver failure-counter update is serialized so two events
-// firing close together never lose an increment (F-7.3.8).
+// firing close together never lose an increment.
 func (w *Worker) Deliver(ctx context.Context, tenantID, eventType, traceID string, actor, body map[string]any) error {
 	receivers, err := w.Store.List(ctx, tenantID)
 	if err != nil {
@@ -190,7 +190,7 @@ func (w *Worker) Deliver(ctx context.Context, tenantID, eventType, traceID strin
 // recordResult applies one delivery outcome to the receiver's
 // persisted failure state. It re-reads the receiver from the store
 // under w.mu so concurrent deliveries serialize their read-modify-write
-// and no increment is lost (F-7.3.8). The HTTP delivery itself runs
+// and no increment is lost. The HTTP delivery itself runs
 // outside the lock so a slow receiver never blocks another's update.
 func (w *Worker) recordResult(ctx context.Context, tenantID string, r Receiver, deliverErr error, now func() time.Time, maxFailures int) {
 	w.mu.Lock()

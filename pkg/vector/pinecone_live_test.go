@@ -9,8 +9,7 @@ import (
 	"github.com/lennylabs/podium/pkg/vector"
 )
 
-// Pinecone live integration (G-VEC-1, G-VEC-2, G-VEC-4 managed portion,
-// G-VEC-5). Gated on PODIUM_LIVE_EXTERNAL=1 plus a Pinecone API key and a
+// Pinecone live integration. Gated on PODIUM_LIVE_EXTERNAL=1 plus a Pinecone API key and a
 // reachable index. The index is supplied either as a ready data-plane host
 // (PODIUM_PINECONE_HOST) or as an index name (PODIUM_PINECONE_INDEX) that the
 // control plane resolves to a host, matching OpenBuiltin's auto-resolution
@@ -117,7 +116,7 @@ func livePineconeSelfEmbed(t *testing.T) *vector.Pinecone {
 }
 
 // TestPinecone_Live_Conformance runs the shared SPI contract against the live
-// index (G-VEC-2). Sub-test isolation comes from the tenant boundary the suite
+// index. Sub-test isolation comes from the tenant boundary the suite
 // already enforces.
 //
 // Spec: §4.7 — RegistrySearchProvider conformance.
@@ -127,8 +126,7 @@ func TestPinecone_Live_Conformance(t *testing.T) {
 	runLiveSuite(t, livePineconeDim, p)
 }
 
-// TestPinecone_Live_StorageOnly covers the precomputed-vector path (G-VEC-1,
-// G-VEC-5): ingest the fixed corpus with the deterministic char embedder, query
+// TestPinecone_Live_StorageOnly covers the precomputed-vector path: ingest the fixed corpus with the deterministic char embedder, query
 // nearest-neighbour, assert recall, then assert upsert replaces and delete
 // removes.
 //
@@ -181,8 +179,8 @@ func TestPinecone_Live_StorageOnly(t *testing.T) {
 }
 
 // TestPinecone_Live_TenantIsolation writes two tenants' vectors into the one
-// index and asserts a query scoped to one namespace never returns the other's
-// (G-VEC-4). Pinecone isolates per tenant by namespace.
+// index and asserts a query scoped to one namespace never returns the other's.
+// Pinecone isolates per tenant by namespace.
 //
 // Spec: §4.7.1 — the org is the tenant boundary.
 func TestPinecone_Live_TenantIsolation(t *testing.T) {
@@ -230,8 +228,8 @@ func TestPinecone_Live_TenantIsolation(t *testing.T) {
 	}
 }
 
-// TestPinecone_Live_SelfEmbedding covers the server-side embedding path
-// (G-VEC-5): drive PutText/QueryText against Integrated Inference and assert
+// TestPinecone_Live_SelfEmbedding covers the server-side embedding path:
+// drive PutText/QueryText against Integrated Inference and assert
 // recall on the nearest text.
 //
 // Spec: §13.12 — PODIUM_PINECONE_INFERENCE_MODEL self-embedding.

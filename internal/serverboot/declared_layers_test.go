@@ -21,7 +21,7 @@ func declaredLocalTree(t *testing.T, name string) string {
 	return dir
 }
 
-// Spec: §4.6 (F-4.6.8) — the declarative `layers:` list seeds a LayerConfig
+// Spec: §4.6 — the declarative `layers:` list seeds a LayerConfig
 // per entry, ingests local sources at startup, and feeds the in-memory layer
 // list with the declared visibility.
 func TestBootstrapDeclaredLayers_LocalIngestsAndSeeds(t *testing.T) {
@@ -69,7 +69,7 @@ func TestBootstrapDeclaredLayers_LocalIngestsAndSeeds(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 / §13.10 (F-4.6.8) — a git source is seeded as a config row but
+// Spec: §4.6 / §13.10 — a git source is seeded as a config row but
 // not cloned at startup (a clone is unbounded network I/O that must not block
 // boot); the §7.3.1 reingest/webhook path pulls it later.
 func TestBootstrapDeclaredLayers_GitSeedsWithoutClone(t *testing.T) {
@@ -107,7 +107,7 @@ func TestBootstrapDeclaredLayers_GitSeedsWithoutClone(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 (F-4.6.8) — a declared layer with an empty visibility block falls
+// Spec: §4.6 — a declared layer with an empty visibility block falls
 // back to the deployment default (IdP + private → no public grant).
 func TestBootstrapDeclaredLayers_EmptyVisibilityUsesDefault(t *testing.T) {
 	st := newMemoryStoreWithTenant(t)
@@ -129,7 +129,7 @@ func TestBootstrapDeclaredLayers_EmptyVisibilityUsesDefault(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 (F-4.6.8) — multiple entries take orders 1..N in config order
+// Spec: §4.6 — multiple entries take orders 1..N in config order
 // (lowest precedence first).
 func TestBootstrapDeclaredLayers_OrdersByListPosition(t *testing.T) {
 	st := newMemoryStoreWithTenant(t)
@@ -150,7 +150,7 @@ func TestBootstrapDeclaredLayers_OrdersByListPosition(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 (F-4.6.8) — invalid declared entries abort startup so the
+// Spec: §4.6 — invalid declared entries abort startup so the
 // operator notices the misconfiguration.
 func TestBootstrapDeclaredLayers_ValidationErrors(t *testing.T) {
 	cases := []struct {
@@ -175,7 +175,7 @@ func TestBootstrapDeclaredLayers_ValidationErrors(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 (F-4.6.8) — readYAMLConfig parses the full layers: list with
+// Spec: §4.6 — readYAMLConfig parses the full layers: list with
 // source (git/local) and visibility blocks per the §4.6 config schema.
 func TestReadYAMLConfig_ParsesLayersList(t *testing.T) {
 	dir := t.TempDir()
@@ -223,7 +223,7 @@ func TestReadYAMLConfig_ParsesLayersList(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 (F-4.6.8) — applyYAML carries the parsed layers: list onto Config
+// Spec: §4.6 — applyYAML carries the parsed layers: list onto Config
 // so Run() can seed them.
 func TestApplyYAML_CarriesDeclaredLayers(t *testing.T) {
 	c := &Config{}

@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// spec: §13.12 (F-13.12.3) — PODIUM_PINECONE_HOST defaults to "auto-resolved
+// spec: §13.12 — PODIUM_PINECONE_HOST defaults to "auto-resolved
 // from index name". ResolvePineconeHost queries the control-plane describe-index
 // endpoint (GET /indexes/{name}, Api-Key header) and returns the `host` field.
 func TestResolvePineconeHost_Success(t *testing.T) {
@@ -91,7 +91,7 @@ func TestResolvePineconeHost_RequiredInputs(t *testing.T) {
 	}
 }
 
-// spec: §6.4.1 / §13.12 (F-13.12.3) — OpenBuiltin resolves the data-plane host
+// spec: §6.4.1 / §13.12 — OpenBuiltin resolves the data-plane host
 // from the index name when PineconeHost is empty, so an index-only deployment
 // is functional as the spec advertises.
 func TestOpenBuiltin_PineconeResolvesHostFromIndex(t *testing.T) {
@@ -119,7 +119,7 @@ func TestOpenBuiltin_PineconeResolvesHostFromIndex(t *testing.T) {
 	}
 }
 
-// spec: §13.12 (F-13.12.3) — when the control plane cannot resolve the index,
+// spec: §13.12 — when the control plane cannot resolve the index,
 // OpenBuiltin returns an error naming PODIUM_PINECONE_HOST so Run degrades to
 // BM25 rather than starting with a half-configured backend.
 func TestOpenBuiltin_PineconeIndexResolveFailureErrors(t *testing.T) {

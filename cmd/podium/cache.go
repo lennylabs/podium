@@ -82,7 +82,7 @@ func cachePrune(args []string) int {
 		if !e.IsDir() {
 			continue
 		}
-		// §6.5 (F-6.5.3): the resolution index (`.resolutions`) and any other
+		// §6.5: the resolution index (`.resolutions`) and any other
 		// dot-prefixed bookkeeping directory are not content buckets; never
 		// prune them, or offline resolution loses its (id, version) index.
 		if strings.HasPrefix(e.Name(), ".") {
@@ -119,7 +119,7 @@ func cachePrune(args []string) int {
 // bucketAccessTime returns the most recent mtime of any file
 // inside the bucket directory. Falls back to the bucket dir's
 // own mtime when empty. The MCP server touches bucket files on every
-// cache hit (§6.5, F-6.5.6), so the newest mtime reflects last access
+// cache hit (§6.5), so the newest mtime reflects last access
 // (read or write), not just the original write time.
 func bucketAccessTime(bucket string) (time.Time, int64) {
 	info, err := os.Stat(bucket)

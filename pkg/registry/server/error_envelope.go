@@ -5,7 +5,7 @@ package server
 // per-code source of truth for both so every emission path (writeError,
 // writeErrorDetails, writeQuotaError, writeCoreError, and the batch-load
 // errorEnvelopeFor) reports them consistently rather than leaving them
-// unset (F-6.10.3, F-6.10.4).
+// unset.
 type errorCodeMeta struct {
 	// retryable reports whether the condition clears on its own so the
 	// caller may retry the same request without operator action.

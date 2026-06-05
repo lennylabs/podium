@@ -35,8 +35,8 @@ func runMCPSession(t *testing.T, registryURL string, stdin []byte) string {
 // Spec: §6.8 — the host drives the lifecycle handshake by sending a
 // notifications/initialized notification after initialize, plus other
 // id-less notifications. A notification must draw no response, in particular
-// not a -32601 error frame that strict hosts treat as a protocol error
-// (F-6.8.1). End-to-end through the real binary.
+// not a -32601 error frame that strict hosts treat as a protocol error.
+// End-to-end through the real binary.
 func TestPodiumMCP_NotificationDrawsNoResponse(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t)
@@ -72,7 +72,7 @@ func TestPodiumMCP_NotificationDrawsNoResponse(t *testing.T) {
 
 // Spec: §6.8 — the long-lived stdio subprocess must not be torn down by a
 // single oversized inbound frame; that request fails with a structured error
-// and the session keeps serving subsequent frames (F-6.8.2). End-to-end.
+// and the session keeps serving subsequent frames. End-to-end.
 func TestPodiumMCP_OversizedFrameKeepsServing(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t)

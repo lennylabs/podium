@@ -49,7 +49,7 @@ func loadVersion(t *testing.T, base, query string) (int, string) {
 // the first `latest` lookup pins, so a later same-id lookup resolves to
 // the same version even after a newer ingest, while a session-less (or
 // different-session) lookup sees the new latest. This exercises the GET
-// /v1/load_artifact path the MCP bridge drives (F-3.3.3), which previously
+// /v1/load_artifact path the MCP bridge drives, which previously
 // ignored session_id.
 func TestLoadArtifact_SessionPinsLatest(t *testing.T) {
 	t.Parallel()

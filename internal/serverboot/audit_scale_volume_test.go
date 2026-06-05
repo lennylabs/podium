@@ -17,7 +17,7 @@ import (
 	"github.com/lennylabs/podium/pkg/sign"
 )
 
-// G-SCALE-4: audit sampling and retention purging under high event volume with
+// audit sampling and retention purging under high event volume with
 // signature integrity. This drives the real serverboot audit wiring — the
 // PODIUM_AUDIT_SAMPLE_RATES sampler, the §4.7.8 audit-volume meter, the §8.3
 // file sink, the §8.6 anchor signer, and the §8.4 retention sweep — through the
@@ -61,7 +61,7 @@ func countEventsByType(t *testing.T, path string) auditScaleCounts {
 	return counts
 }
 
-// TestAuditScale_SamplingAlwaysRecordedRetentionAndVolume is the G-SCALE-4
+// TestAuditScale_SamplingAlwaysRecordedRetentionAndVolume is the
 // journey over the real serverboot audit emitter composition.
 func TestAuditScale_SamplingAlwaysRecordedRetentionAndVolume(t *testing.T) {
 	t.Parallel()

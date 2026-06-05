@@ -47,7 +47,7 @@ func runHealthTool(t *testing.T, registry string) healthToolResult {
 	return resp.Result
 }
 
-// Spec: §13.9 (F-13.9.1) — the health tool reports the registry as
+// Spec: §13.9 — the health tool reports the registry as
 // connected and in ready mode when it answers /readyz, and stamps the
 // last successful call timestamp.
 func TestPodiumMCP_HealthToolReportsReady(t *testing.T) {
@@ -68,7 +68,7 @@ func TestPodiumMCP_HealthToolReportsReady(t *testing.T) {
 	}
 }
 
-// Spec: §13.9 (F-13.9.1) — the health tool reports mode unreachable and
+// Spec: §13.9 — the health tool reports mode unreachable and
 // connected false when nothing answers at the registry address.
 func TestPodiumMCP_HealthToolReportsUnreachable(t *testing.T) {
 	t.Parallel()
@@ -81,7 +81,7 @@ func TestPodiumMCP_HealthToolReportsUnreachable(t *testing.T) {
 	}
 }
 
-// Spec: §13.10 (F-13.10.1) — the MCP health tool surfaces mode public when
+// Spec: §13.10 — the MCP health tool surfaces mode public when
 // the registry runs in public mode. The real binary probes /healthz (the
 // public-mode signal) in addition to /readyz, so a consumer reading the tool
 // can detect the unauthenticated deployment without inspecting startup config.

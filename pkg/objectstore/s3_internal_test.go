@@ -2,7 +2,7 @@ package objectstore
 
 import "testing"
 
-// Spec: §13.12 (F-13.12.7) — when both static keys are set the client signs
+// Spec: §13.12 — when both static keys are set the client signs
 // with them and ignores the ambient AWS_* environment; when both are unset it
 // falls back to the AWS credential chain, whose first provider (EnvAWS) reads
 // AWS_ACCESS_KEY_ID. Setting the AWS_* env lets the test prove the chain is

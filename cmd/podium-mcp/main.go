@@ -444,7 +444,7 @@ type mcpServer struct {
 	// overlayDomains is the §6.4 workspace-overlay DOMAIN.md set merged
 	// across the overlay's layers, keyed by canonical domain path. The
 	// load_domain merge composes it onto the registry result client-side
-	// (§4.5.4, F-4.5.2/F-6.4.2). Swapped together with overlay by the
+	// (§4.5.4). Swapped together with overlay by the
 	// watcher and the roots/list reply.
 	overlayDomains map[string]*manifest.Domain
 	// overlayMu guards overlay, overlayDomains, and cfg.overlayPath. The
@@ -502,7 +502,7 @@ type mcpServer struct {
 	// adapter output before the atomic write on every materialization path.
 	// Empty by default (step 4 is a no-op when no hooks are configured); the
 	// boot-time loading of configured hook plugins is the wire-serializable
-	// SPI work tracked by F-9.3.1. Tests inject hooks directly.
+	// SPI work is tracked separately. Tests inject hooks directly.
 	hooks []hook.Hook
 	// metrics is the §13.8 bridge metric set, non-nil only when an operator
 	// configured the opt-in listener (PODIUM_MCP_METRICS_ADDR). When nil the
@@ -654,7 +654,7 @@ func newAuditSink(cfg *config) (audit.LocalAuditSink, error) {
 	// §6.2 / §9: PODIUM_AUDIT_SINK may name an external endpoint instead of
 	// a filesystem path ("Local audit destination (path or external
 	// endpoint)"). An http(s) URL forwards meta-tool events to a SIEM / log
-	// aggregator; any other value is a local JSON-Lines file. F-8.3.2.
+	// aggregator; any other value is a local JSON-Lines file.
 	if isAuditEndpoint(path) {
 		return audit.NewEndpointSink(path)
 	}
@@ -874,14 +874,14 @@ type rpcError struct {
 // process model is a long-lived stdio subprocess, so a single oversized frame
 // must fail only that request rather than tearing the process down: when a
 // frame exceeds this cap the serve loop emits a structured error response and
-// keeps serving (F-6.8.2). The cap is generous enough for a tools/call whose
+// keeps serving. The cap is generous enough for a tools/call whose
 // arguments carry large inline data while still bounding memory.
 const maxFrameBytes = 16 * 1024 * 1024
 
 func (s *mcpServer) serve(r io.Reader, w io.Writer) error {
 	// Read line-delimited frames with a bounded reader. A frame longer than
 	// maxFrameBytes is reported (tooLong) and drained rather than buffered in
-	// full, so memory stays bounded by the bufio buffer (F-6.8.2).
+	// full, so memory stays bounded by the bufio buffer.
 	reader := bufio.NewReaderSize(r, 64*1024)
 	s.outMu.Lock()
 	s.out = json.NewEncoder(w)
@@ -902,11 +902,11 @@ func (s *mcpServer) serve(r io.Reader, w io.Writer) error {
 	defer stopMetrics()
 	// §6.8: the host owns the lifecycle. The loop ends only when stdin
 	// reaches EOF (the host closing the pipe); there is no signal-driven
-	// shutdown here (F-6.8.3). A read error other than EOF propagates.
+	// shutdown here. A read error other than EOF propagates.
 	for {
 		line, tooLong, err := readFrame(reader, maxFrameBytes)
 		if tooLong {
-			// F-6.8.2: fail only this request, keep serving. The frame's id
+			// fail only this request, keep serving. The frame's id
 			// is unrecoverable, so the error carries a null id per JSON-RPC.
 			if sendErr := s.send(rpcResponse{
 				JSONRPC: "2.0",
@@ -951,7 +951,7 @@ func (s *mcpServer) dispatchLine(line []byte) error {
 	// as notifications/cancelled and notifications/roots/list_changed.
 	// Dispatching them through handle would fall to the default branch and
 	// emit a spurious -32601 error frame, which strict hosts treat as a
-	// protocol error mid-handshake (F-6.8.1). An absent id leaves req.ID nil;
+	// protocol error mid-handshake. An absent id leaves req.ID nil;
 	// an explicit null id (a malformed request, not a notification) decodes
 	// to the bytes "null" and is still answered.
 	if req.ID == nil {
@@ -1160,7 +1160,7 @@ func (s *mcpServer) handle(req rpcRequest) rpcResponse {
 		// objects ({} = present, no listChanged/subscribe sub-features);
 		// sessionCorrelation is a Podium extension carried as a boolean. The
 		// `resources` capability backs the §5.0 read-only mirror of
-		// load_artifact (F-5.0.1). Command artifacts are delivered through
+		// load_artifact. Command artifacts are delivered through
 		// harness-native materialization (§6.7), not an MCP prompt
 		// projection, so no `prompts` capability is advertised.
 		caps := map[string]any{
@@ -1176,13 +1176,13 @@ func (s *mcpServer) handle(req rpcRequest) rpcResponse {
 			"serverInfo":      map[string]any{"name": "podium-mcp", "version": buildinfo.Version},
 			// §5.1 example system-prompt fragment, surfaced through the MCP
 			// `instructions` field so a host can add it to the model's
-			// system prompt verbatim. F-5.1.3.
+			// system prompt verbatim.
 			"instructions": systemPromptFragment,
 		}
 	case "tools/list":
 		resp.Result = map[string]any{
-			// §5.1 canonical descriptions emitted verbatim (F-5.1.1) with an
-			// inputSchema per meta-tool (F-5.1.2). See descriptions.go.
+			// §5.1 canonical descriptions emitted verbatim with an
+			// inputSchema per meta-tool. See descriptions.go.
 			"tools": metaToolDescriptors(),
 		}
 	case "tools/call":
@@ -1250,7 +1250,7 @@ func (s *mcpServer) dispatchTool(p toolCallParams) any {
 	case "load_domain":
 		// §4.5.4 / §6.4: the workspace overlay merges client-side. loadDomain
 		// proxies the registry result and composes the overlay DOMAIN.md set
-		// and overlay artifacts onto it (F-4.5.2/F-6.4.2). The audit event is
+		// and overlay artifacts onto it. The audit event is
 		// emitted inside loadDomain so it fires once on every path.
 		return s.loadDomain(p.Arguments)
 	case "search_domains":
@@ -1372,7 +1372,7 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 		// "Registry offline" row: fall back to cache and, on a miss, surface
 		// network.registry_unreachable. A reachable-but-rejected response
 		// carries the registry's structured §6.10 envelope, which must pass
-		// through unchanged rather than being relabeled retryable (F-6.9.4).
+		// through unchanged rather than being relabeled retryable.
 		if isRegistryUnreachable(err) {
 			// §7.4 degraded-network fallback: in always-revalidate mode, if a
 			// fresh fetch fails, try to serve from cache before surfacing the
@@ -1394,7 +1394,7 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 			// The content cache was already consulted above and missed, so
 			// there is nothing to serve. Return a silent offline status with no
 			// artifact rather than the registry-unreachable error, matching the
-			// "no error" contract for this mode (F-7.4.4). offline-only never
+			// "no error" contract for this mode. offline-only never
 			// reaches here: it short-circuits to errOfflineCacheMiss on the
 			// earlier cache miss without calling the registry.
 			if s.cfg.cacheMode == "offline-first" {
@@ -1563,7 +1563,7 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 		return errorResult(err.Error())
 	}
 	// §6.6 step 1 — normalize inline resources. When the registry flags them
-	// base64 (F-6.6.8), decode to raw bytes before the content-hash check and
+	// base64, decode to raw bytes before the content-hash check and
 	// materialization so the host receives the payload rather than base64 text.
 	if err := decodeInlineResources(&resp); err != nil {
 		return errorResult(err.Error())
@@ -1576,7 +1576,7 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 	}
 	// §6.6 step 2 — content-hash match. Recompute the canonical hash over the
 	// delivered manifest bytes and bundled resources and reject a mismatch
-	// before anything is cached or written (F-6.6.2).
+	// before anything is cached or written.
 	if err := s.verifyContentHash(resp); err != nil {
 		return errorResult(err.Error())
 	}
@@ -1584,7 +1584,7 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 	// Cache the canonical bytes (content cache is forever-immutable
 	// per §6.5). Persist skill_raw / raw_frontmatter alongside so a
 	// cache-served skill or extends-merged manifest reproduces the exact
-	// bytes the §6.6 step 2 content hash was computed over (F-6.5).
+	// bytes the §6.6 step 2 content hash was computed over.
 	if err := s.cache.put(resp.ContentHash, resp.Frontmatter, resp.ManifestBody, resp.Resources); err != nil {
 		return errorResult("cache: " + err.Error())
 	}
@@ -1699,7 +1699,7 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 }
 
 // decodeInlineResources decodes base64-encoded inline resources in place when
-// the registry set resources_base64 (F-6.6.8). Large resources are fetched
+// the registry set resources_base64. Large resources are fetched
 // raw and are unaffected. A value that does not decode fails the call with a
 // structured error rather than writing the base64 text to disk.
 func decodeInlineResources(resp *loadArtifactResponse) error {
@@ -1943,7 +1943,7 @@ type loadArtifactResponse struct {
 	Resources   map[string]string `json:"resources,omitempty"`
 	// ResourcesB64 mirrors the registry's resources_base64 flag: when true,
 	// the inline Resources values are base64-encoded and must be decoded to
-	// raw bytes before the content-hash check and materialization (F-6.6.8).
+	// raw bytes before the content-hash check and materialization.
 	ResourcesB64   bool                         `json:"resources_base64,omitempty"`
 	LargeResources map[string]largeResourceLink `json:"large_resources,omitempty"`
 	// ManifestBodyURL delivers the canonical manifest document via a
@@ -2107,7 +2107,7 @@ func (s *mcpServer) runtimeGateActive() bool {
 // runtimeRequirementsMap converts the typed manifest requirements into
 // the map[string]any CheckRuntimeRequirements consumes. system_packages
 // is carried as []string, which the check handles directly (and now also
-// when it arrives as []any, per F-4.4.4).
+// when it arrives as []any).
 func runtimeRequirementsMap(r *manifest.RuntimeRequirements) map[string]any {
 	if r == nil {
 		return nil
@@ -2342,7 +2342,7 @@ func (s *mcpServer) fetchJSON(path string, args map[string]any) ([]byte, error) 
 		// §6.10: decode the registry's structured envelope so the
 		// namespaced code, details, retryable, and suggested_action
 		// survive to the MCP client instead of collapsing into an
-		// opaque "HTTP <status>: <body>" string (F-6.10.2).
+		// opaque "HTTP <status>: <body>" string.
 		return body, parseRegistryError(resp.StatusCode, body)
 	}
 	// §13.9: a 2xx response is a successful registry call; stamp it so
@@ -2492,8 +2492,7 @@ func (s *mcpServer) proxyGet(path string, args, offline map[string]any) any {
 	// cache miss." The discovery meta-tools keep no content cache (§6.5 caches
 	// canonical artifact bytes for load_artifact, not domain trees or search
 	// results), so an offline-only call has nothing local to serve and returns
-	// the structured offline cache-miss error without opening a connection
-	// (F-7.4.2).
+	// the structured offline cache-miss error without opening a connection.
 	if s.cfg.cacheMode == "offline-only" {
 		return errorResult(errOfflineCacheMiss.Error())
 	}
@@ -2507,7 +2506,7 @@ func (s *mcpServer) proxyGet(path string, args, offline map[string]any) any {
 		// The discovery tools have no content cache to fall back to, so the
 		// envelope carries no served_from_cache results. A structured >=400
 		// response means the registry answered and refused; it passes through as
-		// a §6.10 error (F-7.4.1).
+		// a §6.10 error.
 		if isRegistryUnreachable(err) {
 			return s.offlineEnvelope(offline)
 		}
@@ -2546,7 +2545,7 @@ func offlineResult(extra map[string]any) map[string]any {
 // serves cached results "silently" with no status field. The tool-specific
 // keys in extra (for example an empty results list) are always carried.
 // offline-only never reaches this path; it returns a structured cache-miss
-// error before dialing the registry. F-7.4.4.
+// error before dialing the registry.
 func (s *mcpServer) offlineEnvelope(extra map[string]any) map[string]any {
 	if s.cfg.cacheMode == "offline-first" {
 		m := map[string]any{}
@@ -2699,8 +2698,7 @@ func (c *contentCache) has(hash string) bool {
 
 // sanitizeHash maps a content hash to its on-disk content-bucket name. The
 // §6.5 disk-cache layout is `${PODIUM_CACHE_DIR}/<sha256>/`, so the bucket name
-// is the bare hex digest with the `sha256:` algorithm prefix stripped
-// (F-6.5.7).
+// is the bare hex digest with the `sha256:` algorithm prefix stripped.
 func sanitizeHash(h string) string {
 	out := strings.TrimPrefix(h, "sha256:")
 	// Defense-in-depth: never let a separator escape the cache root for a

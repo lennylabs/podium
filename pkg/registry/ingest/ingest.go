@@ -472,7 +472,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			// §7.3.2 outbound webhook + §8.1 audit: a DOMAIN.md that was
 			// added or whose source changed emits domain.published. Both
 			// the change-event seam and the audit sink fire so receivers
-			// and SIEM pipelines see one event per real change (F-7.3.3).
+			// and SIEM pipelines see one event per real change.
 			if req.PublishEvent != nil {
 				req.PublishEvent(ctx, string(audit.EventDomainPublished), map[string]any{
 					"domain": dr.Path,
@@ -486,7 +486,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			}
 		}
 		// spec: §12 — "ingest-time lint flags newly-set unlisted: true for
-		// review" (F-12.0.1). An unlisted: true DOMAIN.md hides its whole
+		// review". An unlisted: true DOMAIN.md hides its whole
 		// subtree from enumeration (§4.5.3), so a freshly-set value is
 		// surfaced as an advisory. A domain that was already unlisted in the
 		// prior ingest draws no advisory (the flag is not newly-set), so a
@@ -515,7 +515,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 	// author-facing `podium lint` shares) over the ingested record set;
 	// the colliding-summary check needs that set to spot a cluster.
 	res.Advisories = (&lint.Linter{Rules: lint.DescriptionAdvisoryRules()}).Lint(ctx, nil, records)
-	// §12 (F-12.0.1): carry the newly-set unlisted: true advisories
+	// §12: carry the newly-set unlisted: true advisories
 	// collected while persisting DOMAIN.md records. DOMAIN.md is not an
 	// artifact, so the check runs in the domain loop above rather than as
 	// an artifact lint rule.
@@ -666,7 +666,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			// wins (lint warning if changed across layers)". The merge already
 			// gives the child its license; emit the advisory the table mandates
 			// when the child's license differs from the resolved parent's so the
-			// publisher sees the cross-layer change (F-4.6.3).
+			// publisher sees the cross-layer change.
 			if rec.Artifact.License != "" && parentLicense != "" && rec.Artifact.License != parentLicense {
 				res.Advisories = append(res.Advisories, lint.Diagnostic{
 					ArtifactID: rec.ID,
@@ -779,7 +779,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		// born deprecated on first publish is not a flip and emits only
 		// artifact.published. The just-committed deprecated version is
 		// excluded by the !Deprecated filter, so this reads the prior
-		// state correctly (F-7.3.10).
+		// state correctly.
 		deprecatedFlip := mr.Deprecated && req.tenantHasNonDeprecatedVersion(ctx, st, mr.ArtifactID)
 
 		// §7.6 change events. Fire after the manifest commits so
@@ -1041,7 +1041,7 @@ func walkDomains(fsys fs.FS, tenantID, layerID string) []store.DomainRecord {
 }
 
 // newlyUnlistedAdvisory implements the §12 mitigation "ingest-time lint
-// flags newly-set unlisted: true for review" (F-12.0.1). It returns a
+// flags newly-set unlisted: true for review". It returns a
 // warning advisory when dr sets unlisted: true and the value is newly set:
 // either the DOMAIN.md is new to this layer (no prior record), or the prior
 // record did not set unlisted. A domain that was already unlisted before
@@ -1384,7 +1384,7 @@ func resolveExtendsPin(ctx context.Context, st store.Store, tenantID, ref, child
 	typeByVersion := map[string]string{}
 	// frontmatterByVersion lets the resolver recover the parent's license
 	// (not an indexed column) so ingest can flag a cross-layer license
-	// change per the §4.6 field-semantics table (F-4.6.3).
+	// change per the §4.6 field-semantics table.
 	frontmatterByVersion := map[string][]byte{}
 	for _, m := range all {
 		if m.ArtifactID != id {

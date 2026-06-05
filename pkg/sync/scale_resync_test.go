@@ -11,7 +11,7 @@ import (
 	"github.com/lennylabs/podium/pkg/sync"
 )
 
-// G-SCALE-2: a several-hundred-artifact catalog is materialized for claude-code,
+// a several-hundred-artifact catalog is materialized for claude-code,
 // then dozens of artifacts spanning standalone files, hooks, and mcp-server
 // entries are dropped and the catalog re-synced. The test asserts the §7.5
 // stale-cleanup and §6.7 config-merge reconciliation contracts at scale:

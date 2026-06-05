@@ -18,7 +18,7 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// Spec: §8.3 (F-8.3.1) — when the registry sink is redirected to an external
+// Spec: §8.3 — when the registry sink is redirected to an external
 // endpoint, the §8.5 erase endpoint still purges the user's layers and
 // forwards the lifecycle events to the endpoint. The on-disk redaction pass
 // is skipped because there is no local log to rewrite; the receiving

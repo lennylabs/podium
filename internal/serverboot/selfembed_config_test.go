@@ -15,7 +15,7 @@ func hermeticEnv(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 }
 
-// Spec: §13.12 (F-13.12.11) — PODIUM_PINECONE_NAMESPACE defaults to "default";
+// Spec: §13.12 — PODIUM_PINECONE_NAMESPACE defaults to "default";
 // an explicit env value wins.
 func TestLoadConfig_PineconeNamespaceDefault(t *testing.T) {
 	hermeticEnv(t)
@@ -29,7 +29,7 @@ func TestLoadConfig_PineconeNamespaceDefault(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.12.9) — PODIUM_S3_REGION has no implicit default, so an
+// Spec: §13.12 — PODIUM_S3_REGION has no implicit default, so an
 // unset region resolves empty and is later named by validate() for s3.
 func TestLoadConfig_S3RegionNoImplicitDefault(t *testing.T) {
 	hermeticEnv(t)
@@ -43,7 +43,7 @@ func TestLoadConfig_S3RegionNoImplicitDefault(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.12.8) — PODIUM_S3_FORCE_PATH_STYLE flows into the config.
+// Spec: §13.12 — PODIUM_S3_FORCE_PATH_STYLE flows into the config.
 func TestLoadConfig_S3ForcePathStyle(t *testing.T) {
 	hermeticEnv(t)
 	t.Setenv("PODIUM_S3_FORCE_PATH_STYLE", "")
@@ -56,7 +56,7 @@ func TestLoadConfig_S3ForcePathStyle(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.12.12) — the vector collection has no implicit default, so
+// Spec: §13.12 — the vector collection has no implicit default, so
 // an unset weaviate/qdrant collection resolves empty (named by validate()).
 func TestLoadConfig_VectorCollectionNoDefault(t *testing.T) {
 	hermeticEnv(t)
@@ -71,7 +71,7 @@ func TestLoadConfig_VectorCollectionNoDefault(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.12.6) — vectorSelfEmbeds is true only for a cloud backend
+// Spec: §13.12 — vectorSelfEmbeds is true only for a cloud backend
 // configured with an inference model / vectorizer.
 func TestVectorSelfEmbeds(t *testing.T) {
 	t.Parallel()
@@ -94,7 +94,7 @@ func TestVectorSelfEmbeds(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.12.6) — openVectorAndEmbedder returns a configured vector
+// Spec: §13.12 — openVectorAndEmbedder returns a configured vector
 // backend with a nil embedder when the backend self-embeds, so vector search
 // is wired without a separate embedding provider.
 func TestOpenVectorAndEmbedder_SelfEmbedding(t *testing.T) {

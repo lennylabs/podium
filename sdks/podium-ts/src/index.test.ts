@@ -58,7 +58,7 @@ describe("Client", () => {
     expect(out.results?.[0].frontmatter).toBe("---\ntype: skill\nname: run-variance\n---\n");
   });
 
-  // Spec: §4.5.5 / §5.1 (F-4.5.4) — loadDomain omits the depth query parameter
+  // Spec: §4.5.5 / §5.1 — loadDomain omits the depth query parameter
   // by default so the registry applies its configured default max_depth (3)
   // instead of the SDK forcing a single rendered level.
   it("loadDomain omits depth by default", async () => {
@@ -76,7 +76,7 @@ describe("Client", () => {
     expect(observedURL).not.toContain("depth");
   });
 
-  // Spec: §4.5.5 / §5.1 (F-4.5.4) — an explicit depth is forwarded so a caller
+  // Spec: §4.5.5 / §5.1 — an explicit depth is forwarded so a caller
   // can still override the configured default.
   it("loadDomain forwards an explicit depth", async () => {
     let observedURL = "";
@@ -208,7 +208,7 @@ describe("Client", () => {
     expect(called).toBe(false);
   });
 
-  // Spec: §7.6 (F-7.6.8) — subscribe sends one repeated `type` query
+  // Spec: §7.6 — subscribe sends one repeated `type` query
   // parameter per event type (matching the server and the Python SDK), never a
   // comma-joined `types` parameter the server does not read.
   it("subscribe sends repeated type params", async () => {
@@ -231,7 +231,7 @@ describe("Client", () => {
     expect(observedURL).not.toContain("types=");
   });
 
-  // Spec: §7.6 (F-7.6.13) — the client attaches its token as the Bearer
+  // Spec: §7.6 — the client attaches its token as the Bearer
   // credential so it reaches the registry with the caller's identity.
   it("attaches the Bearer token on requests", async () => {
     let gotAuth: string | null = "unset";
@@ -247,7 +247,7 @@ describe("Client", () => {
     expect(gotAuth).toBe("Bearer tok-7");
   });
 
-  // Spec: §7.6 (F-7.6.13) — with no token configured no Authorization header
+  // Spec: §7.6 — with no token configured no Authorization header
   // is sent.
   it("sends no Authorization header without a token", async () => {
     let gotAuth: string | null = "unset";
@@ -264,7 +264,7 @@ describe("Client", () => {
   });
 });
 
-// Spec: §7.6 / §2.2 (F-2.2.1) — the loaded-artifact object exposes
+// Spec: §7.6 / §2.2 — the loaded-artifact object exposes
 // materialize(to, { harness }) and writes the canonical layout to disk.
 describe("LoadedArtifact.materialize", () => {
   async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
@@ -412,7 +412,7 @@ describe("LoadedArtifact.materialize", () => {
     });
   });
 
-  // Spec: §4.1/§7.2 (F-4.1.1) — materialize decodes a base64-flagged inline set
+  // Spec: §4.1/§7.2 — materialize decodes a base64-flagged inline set
   // (resources_base64) back to raw bytes so a binary resource is uncorrupted.
   it("decodes base64 inline resources back to raw bytes", async () => {
     await withTempDir(async (dir) => {
@@ -432,7 +432,7 @@ describe("LoadedArtifact.materialize", () => {
     });
   });
 
-  // Spec: §7.6.2 (F-7.6.4) — a batch item materializes inline resources
+  // Spec: §7.6.2 — a batch item materializes inline resources
   // delivered without an object store: a text resource as a literal string, a
   // binary one decoded from inline_base64. No presigned URL is fetched.
   it("BatchResult materializes inline resources without fetching", async () => {
@@ -512,7 +512,7 @@ describe("Client cache modes (§7.4)", () => {
     ).toThrow();
   });
 
-  // Spec: §7.4 / §6.10 (F-7.4.2) — a transport-level fetch rejection
+  // Spec: §7.4 / §6.10 — a transport-level fetch rejection
   // (connection refused, DNS failure) becomes the structured
   // network.registry_unreachable error rather than leaking the raw TypeError.
   // The SDK keeps no cache, so this is the always-revalidate no-cache miss.
@@ -531,7 +531,7 @@ describe("Client cache modes (§7.4)", () => {
   });
 
   // Spec: §7.4 — offline-first keeps no cache either, so an unreachable
-  // registry is the same no-cache miss (F-7.4.2).
+  // registry is the same no-cache miss.
   it("maps a rejected fetch to unreachable in offline-first", async () => {
     const fetcher: typeof fetch = async () => {
       throw new TypeError("getaddrinfo ENOTFOUND reg");
@@ -542,7 +542,7 @@ describe("Client cache modes (§7.4)", () => {
     });
   });
 
-  // Spec: §7.4 — the batch path wraps fetch rejections too (F-7.4.2).
+  // Spec: §7.4 — the batch path wraps fetch rejections too.
   it("maps a rejected fetch to unreachable on the batch path", async () => {
     const fetcher: typeof fetch = async () => {
       throw new TypeError("fetch failed");
@@ -555,7 +555,7 @@ describe("Client cache modes (§7.4)", () => {
 
   // Spec: §7.4 / §6.10 — a reachable server returning a structured error is NOT
   // rewritten to unreachable; the envelope code is preserved and the full
-  // envelope (details + suggested_action) reaches the caller (F-6.10.1).
+  // envelope (details + suggested_action) reaches the caller.
   it("preserves a reachable server's structured error and full envelope", async () => {
     const fetcher: typeof fetch = async () =>
       new Response(

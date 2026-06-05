@@ -11,7 +11,7 @@ import (
 
 // Spec: §7.5.7 — `podium profile edit` round-trips sync.yaml through a
 // comment-preserving YAML parser, so comments and formatting around the edited
-// keys survive. Before F-7.5.11 a plain yaml.Marshal stripped them.
+// keys survive. Before the fix a plain yaml.Marshal stripped them.
 func TestProfileEdit_PreservesComments(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

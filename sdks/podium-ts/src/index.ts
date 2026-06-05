@@ -437,7 +437,7 @@ async function materializeCanonical(args: {
 }
 
 // decodeInlineForMaterialize decodes a base64-flagged inline resource set
-// (spec §4.1 / §7.2 resources_base64, F-4.1.1) back to raw bytes so a binary
+// (spec §4.1 / §7.2 resources_base64) back to raw bytes so a binary
 // resource materializes uncorrupted. encoding/json replaces invalid UTF-8 in
 // a string with U+FFFD, so the registry base64-encodes the whole inline set
 // when any member is binary; the flag is response-wide. Runs only inside
@@ -467,7 +467,7 @@ export class LoadedArtifact {
   // materialized file is byte-identical to the authored source.
   skill_raw?: string;
   resources?: Record<string, string>;
-  // §4.1/§7.2 (F-4.1.1): when true, every resources value is base64-encoded
+  // §4.1/§7.2: when true, every resources value is base64-encoded
   // so a binary bundled resource survives JSON transport. materialize decodes.
   resources_base64?: boolean;
   large_resources?: Record<string, LargeResourceLink>;
@@ -521,7 +521,7 @@ export class BatchResult {
   skill_raw?: string;
   // A resource carries presigned_url with an object store configured, or the
   // bytes inline (base64-encoded when inline_base64 is set) in the
-  // standalone-without-storage mode (§7.6.2, F-7.6.4).
+  // standalone-without-storage mode (§7.6.2).
   resources?: {
     path: string;
     presigned_url?: string;
@@ -536,7 +536,7 @@ export class BatchResult {
     code: string;
     message: string;
     retryable?: boolean;
-    // spec: §6.10 — a batch error item carries the full envelope (F-6.10.1).
+    // spec: §6.10 — a batch error item carries the full envelope.
     details?: Record<string, unknown>;
     suggested_action?: string;
   };
@@ -572,7 +572,7 @@ export class BatchResult {
     // §7.6.2: a resource carries a presigned_url with an object store
     // configured. In the standalone-without-storage mode it carries the bytes
     // inline (base64-encoded when inline_base64 is set), so deliver those
-    // rather than fetching a URL that does not exist (F-7.6.4).
+    // rather than fetching a URL that does not exist.
     const large: Record<string, LargeResourceLink> = {};
     const inline: Record<string, string | Uint8Array> = {};
     for (const r of this.resources ?? []) {
@@ -625,7 +625,7 @@ export class RegistryError extends Error {
     public readonly retryable: boolean = false,
     // spec: §6.10 — the full envelope carries a machine-readable details map
     // (for example {runtime_iss: ...}) and an operator remediation hint.
-    // Callers read both off the error (F-6.10.1); they default to an empty map
+    // Callers read both off the error; they default to an empty map
     // and empty string when the registry omits them.
     public readonly details: Record<string, unknown> = {},
     public readonly suggestedAction: string = "",
@@ -667,7 +667,7 @@ export function registryErrorFromEnvelope(env: {
   const message = (env.message as string) ?? "";
   const retryable = Boolean(env.retryable);
   // spec: §6.10 — preserve the machine-readable details map and the operator
-  // remediation hint so callers can read the full envelope (F-6.10.1).
+  // remediation hint so callers can read the full envelope.
   const details =
     env.details && typeof env.details === "object"
       ? (env.details as Record<string, unknown>)
@@ -781,7 +781,7 @@ export class Client {
   // guardOffline enforces §7.4 offline-only: the SDK has no local cache, so an
   // offline-only call is always a cache miss and throws the structured
   // network.offline_cache_miss error (the §6.10 network.* namespace, matching
-  // the MCP server) before a request is issued (F-7.4.3).
+  // the MCP server) before a request is issued.
   private guardOffline(): void {
     if (this.cacheMode === "offline-only") {
       throw new RegistryError(
@@ -792,7 +792,7 @@ export class Client {
   }
 
   // unreachableError maps a transport-level fetch rejection to the §7.4
-  // network.registry_unreachable structured error (F-7.4.2). A connection
+  // network.registry_unreachable structured error. A connection
   // refused or DNS failure rejects the fetch promise (a TypeError) before any
   // Response exists. The SDK keeps no content cache, so an unreachable registry
   // in any mode that contacts it (always-revalidate and offline-first;
@@ -879,7 +879,7 @@ export class Client {
     return tokens;
   }
 
-  // spec: §4.5.4 / §4.5.5 / §5.1 (F-4.5.2/F-6.4.2) — load_domain proxies the
+  // spec: §4.5.4 / §4.5.5 / §5.1 — load_domain proxies the
   // registry's rendered result and, when a workspace overlay is configured,
   // composes the overlay DOMAIN.md set and overlay artifacts onto it
   // client-side. The overlay is the highest-precedence layer in the caller's
@@ -1253,7 +1253,7 @@ export class Client {
         });
       } catch (e) {
         // spec: §7.4 — an unreachable registry on the batch path also surfaces
-        // the structured no-cache error (F-7.4.2).
+        // the structured no-cache error.
         throw this.unreachableError(e);
       }
       if (!resp.ok) {
@@ -1309,7 +1309,7 @@ export class Client {
       resp = await this.fetcher(url.toString(), { headers: this.headers() });
     } catch (e) {
       // spec: §7.4 — an unreachable registry on the event stream surfaces the
-      // structured no-cache error (F-7.4.2).
+      // structured no-cache error.
       throw this.unreachableError(e);
     }
     if (!resp.ok || !resp.body) {
@@ -1350,7 +1350,7 @@ export class Client {
       resp = await this.fetcher(url.toString(), { headers: this.headers() });
     } catch (e) {
       // spec: §7.4 — a rejected fetch (no Response) is the always-revalidate
-      // no-cache case (F-7.4.2).
+      // no-cache case.
       throw this.unreachableError(e);
     }
     if (!resp.ok) {

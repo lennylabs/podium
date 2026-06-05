@@ -1,6 +1,6 @@
 package e2e
 
-// End-to-end git-source reingest journeys (gaps G-JOURNEY-1, G-JOURNEY-2).
+// End-to-end git-source reingest journeys.
 //
 // These tests drive the full author-to-consumer path for a git-source layer
 // against a real standalone `podium serve` process: an author merges a commit
@@ -20,7 +20,7 @@ package e2e
 // `podium layer watch <id>` poll a git ref without a configured webhook at a
 // configurable interval. §4.7.6 (immutable versions; latest resolves to the
 // most recent non-deprecated version). §14.10 (register a public git repo as a
-// layer and pull it). Gaps G-JOURNEY-1 and G-JOURNEY-2.
+// layer and pull it).
 
 import (
 	"bytes"
@@ -185,7 +185,7 @@ func assertIngestAccepted(t testing.TB, summary map[string]any, id, version stri
 	t.Errorf("ingest summary did not report %s@%s\nartifacts: %v", id, version, summary["artifacts"])
 }
 
-// TestGitJourney_WebhookReingestNewVersionSearchable runs the G-JOURNEY-1 path:
+// TestGitJourney_WebhookReingestNewVersionSearchable runs the path:
 // register a git layer over a seeded file:// repo, deliver a valid-HMAC webhook
 // for the initial commit, assert the artifact ingests and is searchable and
 // loadable, push a new-version commit, deliver the webhook again, and assert
@@ -240,7 +240,7 @@ func TestGitJourney_WebhookReingestNewVersionSearchable(t *testing.T) {
 	}
 }
 
-// TestGitJourney_PollReingestDetectsNewCommit runs the G-JOURNEY-2 path:
+// TestGitJourney_PollReingestDetectsNewCommit runs the path:
 // register a git layer with no webhook over a seeded file:// repo, run a poll
 // cycle to ingest the initial commit, commit a new version, run the poll cycle
 // again, and assert the registry detects the changed ref, load_artifact returns

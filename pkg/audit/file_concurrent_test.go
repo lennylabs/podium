@@ -13,7 +13,6 @@ import (
 // ~/.podium/audit.log. Each chains off its own in-process head, so the log
 // is a forest of per-writer chains. Verify must accept it instead of
 // reporting a spurious ErrChainBroken on the first interleaved event.
-// F-14.13.2.
 func TestFileSink_ConcurrentWritersVerify(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.log")
@@ -55,7 +54,7 @@ func TestFileSink_ConcurrentWritersVerify(t *testing.T) {
 
 // spec: §8.6 — deleting an interior event leaves a later event's PrevHash
 // dangling, which Verify reports as ErrChainBroken even under the
-// forest-tolerant check (gap detection survives F-14.13.2).
+// forest-tolerant check (gap detection survives a retention drop).
 func TestFileSink_InteriorDeletionDetected(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.log")

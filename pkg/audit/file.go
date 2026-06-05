@@ -17,7 +17,7 @@ import (
 // appends are safe under typical event sizes per §8.3:
 // "POSIX PIPE_BUF-bounded atomic writes." A single shared log written by
 // multiple processes is a forest of per-writer hash chains; Verify
-// validates it accordingly (see Verify, F-14.13.2).
+// validates it accordingly (see Verify).
 type FileSink struct {
 	mu       sync.Mutex
 	path     string
@@ -114,8 +114,8 @@ func (f *FileSink) Append(_ context.Context, e Event) error {
 // ~/.podium/audit.log concurrently (§14.13). Each process chains off its
 // own in-process lastHash, so the file is a forest of per-writer chains
 // rather than one linear chain. Verifying it as a single linear chain
-// reported a spurious ErrChainBroken the moment two writers interleaved
-// (F-14.13.2). Verification therefore checks, per §8.6, that every event's
+// reported a spurious ErrChainBroken the moment two writers interleaved.
+// Verification therefore checks, per §8.6, that every event's
 // own hash satisfies event_hash = sha256(body || prev_hash), and that a
 // non-empty PrevHash references the Hash of some earlier event in the log.
 // A single-writer log is the degenerate one-chain case and still verifies.

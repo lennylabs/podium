@@ -90,7 +90,7 @@ func TestPreviewScope_Aggregates(t *testing.T) {
 // Spec: §3.5 — counts are per distinct artifact, not per (artifact,
 // version) pair. An artifact with three ingested versions counts once,
 // and its type / sensitivity reflect the §4.7.6 `latest` version.
-// spec: F-3.5.5
+// spec:
 func TestPreviewScope_CountsDistinctArtifactsNotVersions(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()
@@ -148,7 +148,7 @@ func TestPreviewScope_CountsDistinctArtifactsNotVersions(t *testing.T) {
 // precedence first) of every layer the identity sees, including a visible
 // layer that currently holds no artifacts. The order is deterministic
 // across calls.
-// spec: F-3.5.6
+// spec:
 func TestPreviewScope_LayersOrderedIncludingEmpty(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()
@@ -190,7 +190,7 @@ func TestPreviewScope_LayersOrderedIncludingEmpty(t *testing.T) {
 // Spec: §3.5 — an artifact that omits the optional sensitivity field falls
 // into the documented `low` bucket; the response never carries an
 // empty-string key.
-// spec: F-3.5.8
+// spec:
 func TestPreviewScope_EmptySensitivityBucketsAsLow(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()
@@ -224,7 +224,7 @@ func TestPreviewScope_EmptySensitivityBucketsAsLow(t *testing.T) {
 // (default true). A tenant with the flag set false yields
 // ErrScopePreviewDisabled; an unset flag and a missing tenant both stay
 // enabled.
-// spec: F-3.5.1
+// spec:
 func TestPreviewScope_TenantGate(t *testing.T) {
 	t.Parallel()
 	ptr := func(b bool) *bool { return &b }

@@ -17,7 +17,7 @@ import (
 // target the audit emitter masks. Before this change the named field was never
 // emitted, so the directive matched nothing. The recorder captures the
 // pre-redaction event; the emitter-side masking is covered in pkg/audit and
-// internal/serverboot. F-8.2.1.
+// internal/serverboot.
 func TestAudit_LoadArtifactSurfacesRedactTarget(t *testing.T) {
 	t.Parallel()
 	const body = "---\n" +

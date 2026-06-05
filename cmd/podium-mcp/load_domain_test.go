@@ -74,7 +74,7 @@ func subdomainByPath(resp ldResponse, path string) (ldSubdomain, bool) {
 	return ldSubdomain{}, false
 }
 
-// spec: §4.5.2/§4.5.4/§6.4 (F-4.5.2/F-6.4.2) — with no workspace overlay the
+// spec: §4.5.2/§4.5.4/§6.4 — with no workspace overlay the
 // load_domain result passes through the registry untouched.
 func TestLoadDomain_NoOverlayPassthrough(t *testing.T) {
 	t.Parallel()

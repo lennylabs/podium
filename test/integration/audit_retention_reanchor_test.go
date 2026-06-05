@@ -15,7 +15,7 @@ import (
 	"github.com/lennylabs/podium/pkg/sign"
 )
 
-// Spec: §8.4/§8.6 (F-8.4.8) — a retention pass that drops events rebuilds
+// Spec: §8.4/§8.6 — a retention pass that drops events rebuilds
 // the hash chain, which would otherwise leave a previously anchored head
 // stale. Enforce records an audit.retention_enforced marker naming the
 // superseded head, and an immediate re-anchor pins the new head. This

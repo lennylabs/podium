@@ -38,7 +38,7 @@ func readAuditLog(t *testing.T, sink *audit.FileSink) string {
 // spec: §8.1 — "admin.granted | When an admin grant was added or revoked."
 // The grants handler records admin.granted on both POST (grant) and DELETE
 // (revoke) with the acting admin as caller, the affected user as target, and
-// the add-versus-revoke action in context. F-8.1.2.
+// the add-versus-revoke action in context.
 func TestAdminGrants_EmitsAdminGranted(t *testing.T) {
 	t.Parallel()
 	sink := newAuditSink(t)
@@ -100,7 +100,7 @@ func layerAuditHarness(t *testing.T, sink *audit.FileSink, id layer.Identity) st
 // spec: §8.1 — "layer.user_registered | When a user registered or
 // unregistered a personal layer." A user-defined layer register and the
 // matching unregister both emit layer.user_registered, naming the owner and
-// the register-versus-unregister action. F-8.1.4.
+// the register-versus-unregister action.
 func TestLayerEndpoint_EmitsUserRegistered(t *testing.T) {
 	t.Parallel()
 	sink := newAuditSink(t)
@@ -133,7 +133,7 @@ func TestLayerEndpoint_EmitsUserRegistered(t *testing.T) {
 // spec: §8.1 — "layer.config_changed | When an admin added, removed, or
 // reordered admin-defined layers." Registering and reordering admin-defined
 // layers emits layer.config_changed with the add and reorder actions; a
-// personal-layer event type must not appear. F-8.1.3.
+// personal-layer event type must not appear.
 func TestLayerEndpoint_EmitsConfigChanged(t *testing.T) {
 	t.Parallel()
 	sink := newAuditSink(t)
@@ -170,7 +170,7 @@ func TestLayerEndpoint_EmitsConfigChanged(t *testing.T) {
 
 // spec: §8.1 — a nil audit sink (no §8.3 sink configured) leaves the layer
 // handlers as a no-op rather than panicking, so an unconfigured deployment
-// still serves registrations. F-8.1.3 / F-8.1.4.
+// still serves registrations.
 func TestLayerEndpoint_NoAuditSinkIsNoop(t *testing.T) {
 	t.Parallel()
 	base, _, cleanup := newLayerHarness(t)

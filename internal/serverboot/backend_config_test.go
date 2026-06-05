@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// Spec: §13.12 (F-13.12.1) — `${ENV_VAR}` interpolation resolves the brace
+// Spec: §13.12 — `${ENV_VAR}` interpolation resolves the brace
 // form only; an unset variable expands to empty; a bare `$` survives.
 func TestExpandEnvVars(t *testing.T) {
 	t.Setenv("PODIUM_TEST_DSN", "postgres://u:p@h/db")
@@ -26,7 +26,7 @@ func TestExpandEnvVars(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 (F-13.12.1, F-13.12.2, F-13.12.4, F-13.12.5) — a registry.yaml
+// Spec: §13.12 — a registry.yaml
 // written as the documented config-file example parses: the top-level
 // `registry:` block, ${ENV_VAR} interpolation, section-relative store/object
 // keys (`dsn` / `bucket` / `region` / `endpoint`), the vector_backend
@@ -83,14 +83,14 @@ func TestReadYAMLConfig_SpecExampleNestedBlock(t *testing.T) {
 	c := &Config{bind: "127.0.0.1:8080", storeType: "sqlite", objectStore: "filesystem"}
 	applyYAML(c, y)
 
-	// F-13.12.1: ${ENV_VAR} interpolation.
+	// ${ENV_VAR} interpolation.
 	if c.postgresDSN != "postgres://alice:pw@db/podium" {
 		t.Errorf("postgresDSN = %q, want interpolated DSN", c.postgresDSN)
 	}
 	if c.pineconeKey != "pcn-secret" {
 		t.Errorf("pineconeKey = %q, want interpolated PINECONE_API_KEY", c.pineconeKey)
 	}
-	// F-13.12.2 / F-13.12.5: section-relative store/object keys under registry:.
+	// section-relative store/object keys under registry:.
 	if c.publicURL != "https://podium.acme.com" {
 		t.Errorf("publicURL = %q, want endpoint value", c.publicURL)
 	}
@@ -101,7 +101,7 @@ func TestReadYAMLConfig_SpecExampleNestedBlock(t *testing.T) {
 		t.Errorf("object store = {%q %q %q %q}, want s3/acme-podium/us-west-2/https://minio.acme.com",
 			c.objectStore, c.s3Bucket, c.s3Region, c.s3Endpoint)
 	}
-	// F-13.12.4: vector + identity sub-keys.
+	// vector + identity sub-keys.
 	if c.vectorBackend != "pinecone" || c.pineconeIndex != "acme-prod" || c.pineconeNS != "tenant-acme" {
 		t.Errorf("vector = {%q index=%q ns=%q}, want pinecone/acme-prod/tenant-acme", c.vectorBackend, c.pineconeIndex, c.pineconeNS)
 	}
@@ -112,13 +112,13 @@ func TestReadYAMLConfig_SpecExampleNestedBlock(t *testing.T) {
 		c.oauthAuthorizationEndpoint != "https://acme.okta.com/oauth2/default" {
 		t.Errorf("identity = {%q aud=%q authz=%q}", c.identityProvider, c.oauthAudience, c.oauthAuthorizationEndpoint)
 	}
-	// F-13.12.3: the discovery block under registry: still reaches the defaults.
+	// the discovery block under registry: still reaches the defaults.
 	if c.discoveryDefaults().NotableCount != 9 {
 		t.Errorf("discovery NotableCount = %d, want 9", c.discoveryDefaults().NotableCount)
 	}
 }
 
-// Spec: §13.12 (F-13.12.4) — embedding_provider.api_key routes to the selected
+// Spec: §13.12 — embedding_provider.api_key routes to the selected
 // provider's key field.
 func TestApplyEmbeddingYAML_RoutesAPIKey(t *testing.T) {
 	c := &Config{embeddingProvider: "openai"}
@@ -134,7 +134,7 @@ func TestApplyEmbeddingYAML_RoutesAPIKey(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 line 347 (F-13.12.10) — a selected backend missing required
+// Spec: §13.12 line 347 — a selected backend missing required
 // values is a hard startup error naming the missing keys; an unset/none/empty
 // selection, an unknown backend, and a fully-supplied backend are not.
 func TestValidate_MissingBackendValues(t *testing.T) {
@@ -145,7 +145,7 @@ func TestValidate_MissingBackendValues(t *testing.T) {
 		wantKey string
 	}{
 		{"s3 without bucket", Config{objectStore: "s3", s3Region: "r"}, true, "PODIUM_S3_BUCKET"},
-		// §13.12 marks the region required for s3 (F-13.12.9).
+		// §13.12 marks the region required for s3.
 		{"s3 without region", Config{objectStore: "s3", s3Bucket: "b"}, true, "PODIUM_S3_REGION"},
 		{"s3 with bucket+region ok", Config{objectStore: "s3", s3Bucket: "b", s3Region: "us-east-1"}, false, ""},
 		{"pinecone without key", Config{vectorBackend: "pinecone", pineconeHost: "h"}, true, "PODIUM_PINECONE_API_KEY"},
@@ -153,25 +153,25 @@ func TestValidate_MissingBackendValues(t *testing.T) {
 		{"pinecone key+index ok", Config{vectorBackend: "pinecone", pineconeKey: "k", pineconeIndex: "i"}, false, ""},
 		{"pinecone key but no host/index", Config{vectorBackend: "pinecone", pineconeKey: "k"}, true, "PODIUM_PINECONE_INDEX"},
 		{"weaviate without url", Config{vectorBackend: "weaviate-cloud", weaviateKey: "k", weaviateColl: "c"}, true, "PODIUM_WEAVIATE_URL"},
-		// §13.12 marks the collection required for weaviate-cloud (F-13.12.12).
+		// §13.12 marks the collection required for weaviate-cloud.
 		{"weaviate without collection", Config{vectorBackend: "weaviate-cloud", weaviateURL: "u", weaviateKey: "k"}, true, "PODIUM_WEAVIATE_COLLECTION"},
 		{"weaviate ok", Config{vectorBackend: "weaviate-cloud", weaviateURL: "u", weaviateKey: "k", weaviateColl: "c"}, false, ""},
 		{"qdrant without key", Config{vectorBackend: "qdrant-cloud", qdrantURL: "u", qdrantColl: "c"}, true, "PODIUM_QDRANT_API_KEY"},
-		// §13.12 marks the collection required for qdrant-cloud (F-13.12.12).
+		// §13.12 marks the collection required for qdrant-cloud.
 		{"qdrant without collection", Config{vectorBackend: "qdrant-cloud", qdrantURL: "u", qdrantKey: "k"}, true, "PODIUM_QDRANT_COLLECTION"},
 		{"qdrant ok", Config{vectorBackend: "qdrant-cloud", qdrantURL: "u", qdrantKey: "k", qdrantColl: "c"}, false, ""},
 		{"openai without key", Config{embeddingProvider: "openai"}, true, "OPENAI_API_KEY"},
 		{"openai ok", Config{embeddingProvider: "openai", openaiAPIKey: "sk"}, false, ""},
-		// §13.12 (F-13.12.6): a self-embedding backend makes the embedding
+		// §13.12: a self-embedding backend makes the embedding
 		// provider optional, so a missing embedder key is not an error (the
 		// provider here is the inherited default, not an explicit override).
 		{"self-embedding makes embedder optional", Config{vectorBackend: "pinecone", pineconeKey: "k", pineconeHost: "h", vectorInferenceModel: "m", embeddingProvider: "openai"}, false, ""},
-		// §9.1 / §4.7 (F-9.1.1): an explicit EmbeddingProvider override on a
+		// §9.1 / §4.7: an explicit EmbeddingProvider override on a
 		// self-embedding backend is built, so its missing key is a hard error.
 		{"self-embedding explicit override needs key", Config{vectorBackend: "pinecone", pineconeKey: "k", pineconeHost: "h", vectorInferenceModel: "m", embeddingProvider: "openai", embeddingProviderExplicit: true}, true, "OPENAI_API_KEY"},
-		// §9.1 / §4.7 (F-9.1.1): the override with its key present starts.
+		// §9.1 / §4.7: the override with its key present starts.
 		{"self-embedding explicit override with key ok", Config{vectorBackend: "pinecone", pineconeKey: "k", pineconeHost: "h", vectorInferenceModel: "m", embeddingProvider: "openai", openaiAPIKey: "sk", embeddingProviderExplicit: true}, false, ""},
-		// §9.1 / §13.12 (F-9.1.3): a storage-only backend cannot self-embed even
+		// §9.1 / §13.12: a storage-only backend cannot self-embed even
 		// with a stray *_INFERENCE_MODEL set, so the embedder key stays required
 		// and a missing key is named even though an inference model is present.
 		{"storage-only with stray inference model still needs key", Config{vectorBackend: "pgvector", pgvectorDSN: "dsn", vectorInferenceModel: "stray", embeddingProvider: "openai"}, true, "OPENAI_API_KEY"},
@@ -195,7 +195,7 @@ func TestValidate_MissingBackendValues(t *testing.T) {
 	}
 }
 
-// Spec: §13.10 / §13.12 (F-13.12.15) — endpoint-registered layers default to
+// Spec: §13.10 / §13.12 — endpoint-registered layers default to
 // `public` in a standalone deployment (no identity provider) and `private`
 // once an identity provider gates access; an explicit value wins.
 func TestLoadConfig_StandaloneDefaultVisibility(t *testing.T) {
@@ -224,7 +224,7 @@ func TestLoadConfig_StandaloneDefaultVisibility(t *testing.T) {
 	})
 }
 
-// Spec: §13.12 (F-13.12.14) — the undocumented `memory` store/vector backends
+// Spec: §13.12 — the undocumented `memory` store/vector backends
 // stay accepted but log a non-durable warning so an operator is not surprised.
 func TestOpenStore_MemoryWarns(t *testing.T) {
 	var buf bytes.Buffer

@@ -60,7 +60,7 @@ func mustGet(t testing.TB, base, path string) []byte {
 // Spec: §5 / §13.9 — /healthz reports mode: ready when the registry is
 // reachable; clients use this to confirm a server-source registry is up.
 // Liveness is conveyed by the 200 status; §13.9 documents no readiness
-// boolean on /healthz (F-13.9.5).
+// boolean on /healthz.
 func TestHealth_ReturnsReady(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t)

@@ -1,6 +1,6 @@
 package integration
 
-// G-CONFIG-1: probe-driven read-only flip on a Postgres-backed registry.
+// probe-driven read-only flip on a Postgres-backed registry.
 //
 // The §13.2.1 read-only mode is driven by ReadOnlyProbe pinging the metadata
 // store (GetTenant) on a tick and flipping a shared ModeTracker after a run of
@@ -25,7 +25,7 @@ package integration
 // read_only_exited event lands.
 //
 // Gated on PODIUM_POSTGRES_DSN. The FaultStore is the documented severable-
-// Postgres inducement for G-INFRA-6 (the in-process Memory proof lives in
+// Postgres inducement (the in-process Memory proof lives in
 // pkg/registry/server/readonly_faultstore_test.go); this realizes it against the
 // real Postgres data plane so reads are proven to keep serving stored rows during
 // the read-only window and writes against Postgres are refused.
@@ -62,7 +62,7 @@ var roflipAdmin = layer.Identity{
 	IsAuthenticated: true,
 }
 
-// TestConfigReadOnlyFlip_PostgresPrimaryOutage closes G-CONFIG-1.
+// TestConfigReadOnlyFlip_PostgresPrimaryOutage.
 func TestConfigReadOnlyFlip_PostgresPrimaryOutage(t *testing.T) {
 	// Not parallel: drives a global read-only transition on a server wired to the
 	// shared Postgres database, and resets the tenant's schema at start.

@@ -81,7 +81,7 @@ func TestSQLite_SchemaIsIdempotent(t *testing.T) {
 	}
 }
 
-// Spec: §4.7 Version immutability invariant (F-1.3.1) — the standalone
+// Spec: §4.7 Version immutability invariant — the standalone
 // backend is a file-backed SQLite database (WAL plus a busy timeout)
 // served through a pooled *sql.DB, so writers run on separate
 // connections rather than the serialized single connection the in-memory

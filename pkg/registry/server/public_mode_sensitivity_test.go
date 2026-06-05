@@ -46,7 +46,6 @@ func loadStatus(t *testing.T, baseURL, id string) (int, string) {
 // Spec: §13.10 / §13.2.2 — a public-mode bootstrap rejects medium and high
 // sensitivity artifacts at ingest with ingest.public_mode_rejects_sensitive,
 // so the high-sensitivity artifact is not served while the low one is.
-// F-13.2.2.
 func TestNewFromFilesystem_PublicModeRejectsSensitive(t *testing.T) {
 	t.Parallel()
 	dir := publicSensitivityRegistry(t)
@@ -67,7 +66,7 @@ func TestNewFromFilesystem_PublicModeRejectsSensitive(t *testing.T) {
 
 // Spec: §13.10 — a non-public bootstrap imposes no sensitivity floor, so the
 // high-sensitivity artifact is ingested and served normally. This is the
-// control for F-13.2.2.
+// control for
 func TestNewFromFilesystem_NonPublicAcceptsSensitive(t *testing.T) {
 	t.Parallel()
 	dir := publicSensitivityRegistry(t)

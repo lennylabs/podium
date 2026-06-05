@@ -11,7 +11,7 @@ import (
 
 // emitDeviceCodePending writes a §6.10 auth.device_code_pending envelope
 // carrying the verification URL and user code, the structured replacement for
-// the human prompt under `podium login --json`. F-6.3.3.
+// the human prompt under `podium login --json`.
 func TestEmitDeviceCodePending(t *testing.T) {
 	var buf bytes.Buffer
 	emitDeviceCodePending(&buf, &identity.DeviceAuth{
@@ -69,7 +69,6 @@ func TestEmitDeviceCodePending(t *testing.T) {
 // xdg-open (Linux), and start (Windows). The Windows path invokes the start
 // cmd builtin as `cmd /c start "" <url>` rather than rundll32, with the empty
 // title placeholder so a URL with & or spaces is not read as the window title.
-// F-6.3.4.
 func TestBrowserCommand_PerOS(t *testing.T) {
 	const url = "https://idp.example.com/device?code=ABCD-EFGH"
 	cases := []struct {

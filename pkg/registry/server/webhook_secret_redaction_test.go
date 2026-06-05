@@ -10,7 +10,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/server"
 )
 
-// Spec: §7.3.1 (F-7.3.1) — the git webhook HMAC secret is a credential
+// Spec: §7.3.1 — the git webhook HMAC secret is a credential
 // returned once at registration ("podium layer register returns the webhook
 // URL and HMAC secret"). It must not leak through GET /v1/layers, which is not
 // admin-gated; any caller who could list layers would otherwise read every

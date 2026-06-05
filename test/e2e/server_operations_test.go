@@ -8,17 +8,17 @@ package e2e
 //
 // Known gaps and skip rationale:
 //   - Read-only fallback (§13.2.1) flips on a metadata-store/primary outage.
-//     The probe is enabled by default (F-13.2.3, resolved), but a standalone
+//     The probe is enabled by default (resolved), but a standalone
 //     SQLite/memory store cannot be made to fail after boot (the open handle
 //     keeps serving reads), and the in-process storetest.FaultStore health-sever
 //     decorator cannot reach into a subprocess, so the probe-driven read_only
 //     transition is not inducible against these standalone subprocess tests.
 //     Tests 5, 6, 7, 8, 9, 33 honest-skip and point to the coverage that does
 //     induce the flip: TestConfigReadOnlyFlip_PostgresPrimaryOutage over a
-//     severable live Postgres primary (G-CONFIG-1) and TestHTTPAPI_ReadOnly*
+//     severable live Postgres primary and TestHTTPAPI_ReadOnly*
 //     in-process. The Postgres PITR + S3 test 47 honest-skips similarly.
-//   - F-13.2.8: X-Podium-Read-Only-Lag-Seconds is always "0".
-//   - F-7.3.7: force_push_policy not settable via API/CLI/config. Tests 29, 30.
+//   - X-Podium-Read-Only-Lag-Seconds is always "0".
+//   - force_push_policy not settable via API/CLI/config. Tests 29, 30.
 //   - podium admin verify: not implemented. Tests 11, 12, 22, 40.
 //   - podium admin migrate --finalize/--revert: not implemented. Tests 13, 14.
 //   - podium admin scim-sync: not implemented. Test 31.
@@ -27,17 +27,17 @@ package e2e
 //   - Test 20: default policy assertion; mcp starts fine, signing assertion
 //     requires a signed medium artifact.
 //   - Test 21: private layer visibility.denied audit event — converted to the
-//     authenticated, visibility-capable harness (startAuthServer, G-INFRA-5): a
+//     authenticated, visibility-capable harness (startAuthServer): a
 //     users:-restricted layer plus a caller outside the user set drives a denied
 //     load that records visibility.denied in the audit stream.
 //   - Test 23: webhook ingest invalid HMAC — REAL. The inbound route is
-//     mounted at /v1/ingest/webhook/{id} and advertised at register (F-12.0.1).
+//     mounted at /v1/ingest/webhook/{id} and advertised at register.
 //   - Tests 43, 44: need OIDC IdP or runtime-verified JWT.
 //   - Tests 25: sandbox enforcement via MCP — REAL (feasible).
 //   - Tests 33: /readyz in read_only — probe not triggerable.
 //   - Tests 35, 36, 37: promtool checks — REAL when promtool installed.
 //   - Tests 45, 46: two binary versions + Postgres; implemented over a live
-//     Postgres metadata store (G-LIFECYCLE-7) in
+//     Postgres metadata store in
 //     server_ops_rolling_upgrade_test.go, gated on PODIUM_POSTGRES_DSN.
 //   - Test 47: Postgres PITR + S3; honest skip.
 
@@ -80,9 +80,8 @@ func opguideHealthz(t *testing.T, baseURL string) map[string]any {
 	return m
 }
 
-// ---- T-D-operator-guide-1: /healthz mode:ready + log mode=standalone --------
+// ---- /healthz mode:ready + log mode=standalone --------
 
-// T-D-operator-guide-1
 func TestServerOps_HealthzModeReady(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"ctx/ARTIFACT.md": opguideSimpleArtifact()})
@@ -92,8 +91,7 @@ func TestServerOps_HealthzModeReady(t *testing.T) {
 	if h["mode"] != "ready" {
 		t.Errorf("/healthz mode=%v, want ready", h["mode"])
 	}
-	// §13.9: /healthz reports the mode only; no readiness boolean
-	// (F-13.9.5).
+	// §13.9: /healthz reports the mode only; no readiness boolean.
 	if _, present := h["ready"]; present {
 		t.Errorf("/healthz carries undocumented `ready` field: %v", h)
 	}
@@ -102,9 +100,8 @@ func TestServerOps_HealthzModeReady(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-2: /healthz mode:public + log mode=public -----------
+// ---- /healthz mode:public + log mode=public -----------
 
-// T-D-operator-guide-2
 func TestServerOps_HealthzModePublic(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"ctx/ARTIFACT.md": opguideSimpleArtifact()})
@@ -121,9 +118,8 @@ func TestServerOps_HealthzModePublic(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-3: podium status surfaces registry mode:public ------
+// ---- podium status surfaces registry mode:public ------
 
-// T-D-operator-guide-3
 func TestServerOps_StatusSurfacesPublicMode(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"ctx/ARTIFACT.md": opguideSimpleArtifact()})
@@ -146,9 +142,8 @@ func TestServerOps_StatusSurfacesPublicMode(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-4: /readyz 200 in ready mode -----------------------
+// ---- /readyz 200 in ready mode -----------------------
 
-// T-D-operator-guide-4
 func TestServerOps_ReadyzReturns200(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
@@ -166,10 +161,8 @@ func TestServerOps_ReadyzReturns200(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-5: write endpoints return registry.read_only --------
+// ---- write endpoints return registry.read_only --------
 
-// T-D-operator-guide-5
-//
 // This case asserts that write endpoints return registry.read_only once the
 // §13.2.1 probe flips the registry to read_only. The flip is driven by
 // ReadOnlyProbe pinging the metadata store (GetTenant) and tripping after a run
@@ -180,24 +173,21 @@ func TestServerOps_ReadyzReturns200(t *testing.T) {
 // inducible here. The full journey (writes refused with registry.read_only,
 // reads keep serving, /readyz stays 200, then recovery) is covered against a
 // severable live Postgres primary by TestConfigReadOnlyFlip_PostgresPrimaryOutage
-// in test/integration/readonly_postgres_flip_test.go (gap G-CONFIG-1), and the
+// in test/integration/readonly_postgres_flip_test.go, and the
 // read-only write rejection is unit-covered in-process by
 // TestHTTPAPI_ReadOnlyRejectsWrites.
 func TestServerOps_ReadOnlyWriteEndpoints(t *testing.T) {
-	t.Skip("probe-driven read_only flip is not inducible against this standalone subprocess (in-process FaultStore cannot sever a subprocess SQLite store); covered over live Postgres by TestConfigReadOnlyFlip_PostgresPrimaryOutage (G-CONFIG-1) and in-process by TestHTTPAPI_ReadOnlyRejectsWrites")
+	t.Skip("probe-driven read_only flip is not inducible against this standalone subprocess (in-process FaultStore cannot sever a subprocess SQLite store); covered over live Postgres by TestConfigReadOnlyFlip_PostgresPrimaryOutage and in-process by TestHTTPAPI_ReadOnlyRejectsWrites")
 }
 
-// ---- T-D-operator-guide-6: read endpoints serve with X-Podium-Read-Only headers
+// ---- read endpoints serve with X-Podium-Read-Only headers
 
-// T-D-operator-guide-6
 func TestServerOps_ReadOnlyHeaders(t *testing.T) {
-	t.Skip("read_only requires a metadata-store/primary outage not inducible against standalone SQLite; lag header is also a placeholder (F-13.2.8)")
+	t.Skip("read_only requires a metadata-store/primary outage not inducible against standalone SQLite; lag header is also a placeholder")
 }
 
-// ---- T-D-operator-guide-7: auto-exit read-only mode -------------------------
+// ---- auto-exit read-only mode -------------------------
 
-// T-D-operator-guide-7
-//
 // This case asserts auto-exit: the registry enters read_only on a metadata-store
 // outage and recovers to ready once the store is reachable again. Both edges are
 // driven by ReadOnlyProbe's run-of-failures / run-of-recoveries against GetTenant.
@@ -207,28 +197,25 @@ func TestServerOps_ReadOnlyHeaders(t *testing.T) {
 // entry-then-recovery journey, including the read_only_entered / read_only_exited
 // audit events and writes resuming after recovery, is covered against a severable
 // live Postgres primary by TestConfigReadOnlyFlip_PostgresPrimaryOutage in
-// test/integration/readonly_postgres_flip_test.go (gap G-CONFIG-1).
+// test/integration/readonly_postgres_flip_test.go.
 func TestServerOps_ReadOnlyAutoExit(t *testing.T) {
-	t.Skip("probe-driven read_only entry/recovery is not inducible against this standalone subprocess (in-process FaultStore cannot sever a subprocess SQLite store); the entry-and-recovery journey is covered over live Postgres by TestConfigReadOnlyFlip_PostgresPrimaryOutage (G-CONFIG-1)")
+	t.Skip("probe-driven read_only entry/recovery is not inducible against this standalone subprocess (in-process FaultStore cannot sever a subprocess SQLite store); the entry-and-recovery journey is covered over live Postgres by TestConfigReadOnlyFlip_PostgresPrimaryOutage")
 }
 
-// ---- T-D-operator-guide-8: read_only_entered / read_only_exited audit events
+// ---- read_only_entered / read_only_exited audit events
 
-// T-D-operator-guide-8
 func TestServerOps_ReadOnlyAuditEvents(t *testing.T) {
 	t.Skip("read_only state transitions require a metadata-store outage not inducible against standalone SQLite")
 }
 
-// ---- T-D-operator-guide-9: probe tuning via env vars -----------------------
+// ---- probe tuning via env vars -----------------------
 
-// T-D-operator-guide-9
 func TestServerOps_ReadOnlyProbeTuning(t *testing.T) {
 	t.Skip("probe tuning is observable via config show (test 10); the read_only flip itself requires a Postgres primary outage not inducible against standalone SQLite")
 }
 
-// ---- T-D-operator-guide-10: podium config show read_only probe settings -----
+// ---- podium config show read_only probe settings -----
 
-// T-D-operator-guide-10
 func TestServerOps_ConfigShowReadOnlyProbeSettings(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "",
@@ -253,9 +240,8 @@ func TestServerOps_ConfigShowReadOnlyProbeSettings(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-11: podium admin verify --check is not implemented --
+// ---- podium admin verify --check is not implemented --
 
-// T-D-operator-guide-11
 func TestServerOps_AdminVerifyNotImplemented(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil,
@@ -269,9 +255,8 @@ func TestServerOps_AdminVerifyNotImplemented(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-12: podium admin verify --check schema is not implemented
+// ---- podium admin verify --check schema is not implemented
 
-// T-D-operator-guide-12
 func TestServerOps_AdminVerifyCheckSchemaNotImplemented(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil,
@@ -285,9 +270,8 @@ func TestServerOps_AdminVerifyCheckSchemaNotImplemented(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-13: podium admin migrate --finalize is not implemented
+// ---- podium admin migrate --finalize is not implemented
 
-// T-D-operator-guide-13
 func TestServerOps_AdminMigrateFinalizeNotImplemented(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil,
@@ -300,9 +284,8 @@ func TestServerOps_AdminMigrateFinalizeNotImplemented(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-14: podium admin migrate --revert is not implemented
+// ---- podium admin migrate --revert is not implemented
 
-// T-D-operator-guide-14
 func TestServerOps_AdminMigrateRevertNotImplemented(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil,
@@ -346,9 +329,8 @@ func opguidePopulateSourceSQLite(t *testing.T, home, sqlitePath string) {
 	time.Sleep(200 * time.Millisecond)
 }
 
-// ---- T-D-operator-guide-15: migrate-to-standard dry-run ---------------------
+// ---- migrate-to-standard dry-run ---------------------
 
-// T-D-operator-guide-15
 func TestServerOps_MigrateToStandardDryRun(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -377,9 +359,8 @@ func TestServerOps_MigrateToStandardDryRun(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-16: migrate-to-standard copies metadata SQLite→SQLite
+// ---- migrate-to-standard copies metadata SQLite→SQLite
 
-// T-D-operator-guide-16
 func TestServerOps_MigrateToStandardSQLiteToSQLite(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -404,10 +385,8 @@ func TestServerOps_MigrateToStandardSQLiteToSQLite(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-17: migrate-to-standard defaults the source --------
+// ---- migrate-to-standard defaults the source --------
 
-// T-D-operator-guide-17
-//
 // spec: §13.4 / §13.10 — the documented short form omits the source
 // flags, so an unset --source-sqlite resolves to the standalone layout
 // (~/.podium/standalone/podium.db). When that default does not exist the
@@ -430,9 +409,8 @@ func TestServerOps_MigrateRequiresSourceWhenDefaultAbsent(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-18: migrate-to-standard copies objects filesystem→filesystem
+// ---- migrate-to-standard copies objects filesystem→filesystem
 
-// T-D-operator-guide-18
 func TestServerOps_MigrateToStandardObjectsCopy(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -469,16 +447,14 @@ func TestServerOps_MigrateToStandardObjectsCopy(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-18b: migrate-to-standard §13.4 short form ----------
+// ---- migrate-to-standard §13.4 short form ----------
 
-// T-D-operator-guide-18b
-//
 // spec: §13.4 / §13.10 — the documented short form
 // `podium admin migrate-to-standard --postgres <dsn> --object-store <url>`
-// is accepted (F-13.4.1). --object-store=file://... selects the
+// is accepted. --object-store=file://... selects the
 // filesystem backend; --target-store=sqlite stands in for --postgres so
 // the test needs no live Postgres. The run reports admin-grant
-// preservation (F-13.4.2).
+// preservation.
 func TestServerOps_MigrateToStandardShortForm(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -516,29 +492,27 @@ func TestServerOps_MigrateToStandardShortForm(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-19: signature invalid on tampered medium artifact ---
+// ---- signature invalid on tampered medium artifact ---
 
-// T-D-operator-guide-19
 func TestServerOps_SignatureInvalidTamperedArtifact(t *testing.T) {
 	t.Skip("requires a signed artifact whose stored bytes are then tampered; not expressible from filesystem bootstrap")
 }
 
-// ---- T-D-operator-guide-20: PODIUM_VERIFY_SIGNATURES default medium-and-above
+// ---- PODIUM_VERIFY_SIGNATURES default medium-and-above
 
-// T-D-operator-guide-20
 func TestServerOps_VerifySignaturesDefault(t *testing.T) {
 	t.Skip("verifying the default blocks a tampered medium artifact requires a signed-then-tampered artifact; not expressible from filesystem bootstrap")
 }
 
-// ---- T-D-operator-guide-21: visibility.denied audit event ------------------
+// ---- visibility.denied audit event ------------------
 
-// T-D-operator-guide-21 — operator-guide security review: a read that §4.6
+// operator-guide security review: a read that §4.6
 // visibility filtering rejects is recorded in the registry audit stream as
 // visibility.denied, naming the target, so an operator can attribute the
 // refusal. The wire body withholds the layer's existence (the load returns
 // registry.not_found, not 403), so the audit event is where the denial is
 // named (§6.9, §8.1, §8.2). The default standalone harness serves every layer
-// public; this uses the authenticated, visibility-capable harness (G-INFRA-5)
+// public; this uses the authenticated, visibility-capable harness
 // to place an artifact in a users:-restricted layer and drive a denied load as
 // a caller outside that user set.
 func TestServerOps_VisibilityDeniedAuditEvent(t *testing.T) {
@@ -588,9 +562,8 @@ func TestServerOps_VisibilityDeniedAuditEvent(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-22: admin verify --check audit-chain not implemented
+// ---- admin verify --check audit-chain not implemented
 
-// T-D-operator-guide-22
 func TestServerOps_AdminVerifyAuditChain(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil,
@@ -604,13 +577,13 @@ func TestServerOps_AdminVerifyAuditChain(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-23: webhook invalid HMAC => ingest.webhook_invalid --
+// ---- webhook invalid HMAC => ingest.webhook_invalid --
 
-// T-D-operator-guide-23 — operator-guide security-review checklist: a Git
+// operator-guide security-review checklist: a Git
 // provider webhook delivery carrying an invalid HMAC signature is rejected
 // as ingest.webhook_invalid and never reaches the content store. The
 // inbound webhook is mounted at /v1/ingest/webhook/{id} and advertised at
-// register time (spec §7.3.1, §6.10, §12). F-12.0.1.
+// register time (spec §7.3.1, §6.10, §12).
 func TestServerOps_WebhookInvalidHMAC(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
@@ -631,7 +604,7 @@ func TestServerOps_WebhookInvalidHMAC(t *testing.T) {
 	if reg.WebhookURL == "" || reg.WebhookSecret == "" {
 		t.Fatalf("register did not advertise webhook url/secret: %s", body)
 	}
-	// spec §14.10 (F-14.10.2): the advertised webhook URL is absolute, built
+	// spec §14.10: the advertised webhook URL is absolute, built
 	// from the server's public base URL.
 	if want := srv.BaseURL + "/v1/ingest/webhook/vendor-hooks"; reg.WebhookURL != want {
 		t.Fatalf("webhook_url = %q, want absolute %q", reg.WebhookURL, want)
@@ -656,10 +629,10 @@ func TestServerOps_WebhookInvalidHMAC(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-24: per-layer visibility via injected-session-token -
+// ---- per-layer visibility via injected-session-token -
 
-// T-D-operator-guide-24 — per-layer visibility via injected-session-token: a
-// JWT's group claim drives which layers the verified caller sees. F-6.3.1.
+// per-layer visibility via injected-session-token: a
+// JWT's group claim drives which layers the verified caller sees.
 func TestServerOps_PerLayerVisibilityInjectedToken(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -709,9 +682,8 @@ func TestServerOps_PerLayerVisibilityInjectedToken(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-25: sandbox read-only-fs via MCP PODIUM_HARNESS=none
+// ---- sandbox read-only-fs via MCP PODIUM_HARNESS=none
 
-// T-D-operator-guide-25
 func TestServerOps_SandboxReadOnlyFsMCP(t *testing.T) {
 	t.Parallel()
 	// Author an artifact with sandbox_profile: read-only-fs.
@@ -753,9 +725,8 @@ func TestServerOps_SandboxReadOnlyFsMCP(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-26: remove --public-mode and restart clears mode ----
+// ---- remove --public-mode and restart clears mode ----
 
-// T-D-operator-guide-26
 func TestServerOps_RestartClearsPublicMode(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"ctx/ARTIFACT.md": opguideSimpleArtifact()})
@@ -783,9 +754,8 @@ func TestServerOps_RestartClearsPublicMode(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-27: PODIUM_PUBLIC_MODE overrides registry.yaml ------
+// ---- PODIUM_PUBLIC_MODE overrides registry.yaml ------
 
-// T-D-operator-guide-27
 func TestServerOps_EnvOverridesYAMLPublicMode(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -811,7 +781,7 @@ func TestServerOps_EnvOverridesYAMLPublicMode(t *testing.T) {
 	}
 
 	// Also verify config show --server reports the env var as the source
-	// (public_mode is a §13.10 server setting; F-7.7.2).
+	// (public_mode is a §13.10 server setting).
 	res := runPodium(t, "",
 		[]string{"PODIUM_CONFIG_FILE=" + cfgFile, "PODIUM_PUBLIC_MODE=true"},
 		"config", "show", "--server")
@@ -823,9 +793,8 @@ func TestServerOps_EnvOverridesYAMLPublicMode(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-28: layer reingest triggers fresh ingest ------------
+// ---- layer reingest triggers fresh ingest ------------
 
-// T-D-operator-guide-28
 func TestServerOps_LayerReingest(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"ctx/ARTIFACT.md": opguideSimpleArtifact()})
@@ -849,9 +818,8 @@ func TestServerOps_LayerReingest(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-29: force_push_policy strict settable ---------------
+// ---- force_push_policy strict settable ---------------
 
-// T-D-operator-guide-29
 // spec: §7.3.1 — force_push_policy: strict is settable per layer via the
 // register CLI/API and persists on the layer config.
 func TestServerOps_ForcePushPolicyStrict(t *testing.T) {
@@ -898,9 +866,8 @@ func TestServerOps_ForcePushPolicyStrict(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-30: force-push default tolerant policy --------------
+// ---- force-push default tolerant policy --------------
 
-// T-D-operator-guide-30
 // spec: §7.3.1 — force-push handling is "Tolerant by default": a layer
 // registered without a force_push_policy carries the empty (tolerant) value,
 // and strict can be set later via update.
@@ -944,9 +911,8 @@ func TestServerOps_ForcePushDefaultTolerant(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-31: admin scim-sync not implemented -----------------
+// ---- admin scim-sync not implemented -----------------
 
-// T-D-operator-guide-31
 func TestServerOps_AdminScimSyncNotImplemented(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil,
@@ -961,9 +927,8 @@ func TestServerOps_AdminScimSyncNotImplemented(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-32: /healthz always HTTP 200 -----------------------
+// ---- /healthz always HTTP 200 -----------------------
 
-// T-D-operator-guide-32
 func TestServerOps_HealthzAlways200(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
@@ -977,7 +942,7 @@ func TestServerOps_HealthzAlways200(t *testing.T) {
 		t.Fatalf("decode /healthz: %v\nbody: %s", err, body)
 	}
 	// §13.9: liveness is the 200 status; the body carries the mode and
-	// no readiness boolean (F-13.9.5).
+	// no readiness boolean.
 	if m["mode"] == nil {
 		t.Errorf("/healthz body missing mode: %s", body)
 	}
@@ -986,16 +951,15 @@ func TestServerOps_HealthzAlways200(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-33: /readyz 200 in read_only mode ------------------
+// ---- /readyz 200 in read_only mode ------------------
 
-// T-D-operator-guide-33
 func TestServerOps_ReadyzInReadOnlyMode(t *testing.T) {
 	t.Skip("verifying /readyz stays 200 in read_only requires inducing a Postgres primary outage; not inducible against standalone SQLite")
 }
 
-// ---- T-D-operator-guide-34: /metrics serves Prometheus output --------------
+// ---- /metrics serves Prometheus output --------------
 
-// T-D-operator-guide-34. spec §13.8.
+// spec §13.8.
 func TestServerOps_MetricsExposed(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"ctx/ARTIFACT.md": opguideSimpleArtifact()})
@@ -1030,9 +994,8 @@ const opguideAlertsYAML = `groups:
     expr: podium_lint_thin_descriptions_total > 50
 `
 
-// ---- T-D-operator-guide-35: alerting YAML is syntactically valid ------------
+// ---- alerting YAML is syntactically valid ------------
 
-// T-D-operator-guide-35
 func TestServerOps_AlertingYAMLValid(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -1049,9 +1012,8 @@ func TestServerOps_AlertingYAMLValid(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-36: PodiumDown alert fires at up==0 ----------------
+// ---- PodiumDown alert fires at up==0 ----------------
 
-// T-D-operator-guide-36
 func TestServerOps_PodiumDownAlertFires(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -1087,9 +1049,8 @@ tests:
 	}
 }
 
-// ---- T-D-operator-guide-37: PodiumLoadArtifactSLOBreached fires at p99 > 500ms
+// ---- PodiumLoadArtifactSLOBreached fires at p99 > 500ms
 
-// T-D-operator-guide-37
 func TestServerOps_SLOBreachedAlertFires(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -1131,14 +1092,14 @@ tests:
 	}
 }
 
-// ---- §7.1 latency SLO surface: per-request access log (F-7.1.2) -------------
+// ---- §7.1 latency SLO surface: per-request access log -------------
 
 // The running standalone server times each meta-tool request and emits a
 // structured access-log line keyed by operation name, so an operator has a
 // timing surface to compare against the §7.1 SLO budgets. The liveness probe
 // carries no SLO budget and is excluded.
 //
-// spec: §7.1 Latency budgets (SLO targets, server source) — F-7.1.2
+// spec: §7.1 Latency budgets (SLO targets, server source) —
 func TestOpGuide_AccessLogLatencySurface(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -1181,7 +1142,7 @@ func TestOpGuide_AccessLogLatencySurface(t *testing.T) {
 // rest of the server, for an operator who routes latency through a different
 // sink.
 //
-// spec: §7.1 — F-7.1.2
+// spec: §7.1 —
 func TestOpGuide_AccessLogDisabled(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"ctx/ARTIFACT.md": opguideSimpleArtifact()})
@@ -1201,11 +1162,11 @@ func TestOpGuide_AccessLogDisabled(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-38: scope preview gating ---------------------------
+// ---- scope preview gating ---------------------------
 
-// T-D-operator-guide-38: an operator disables the §3.5 scope-preview
+// an operator disables the §3.5 scope-preview
 // surface per tenant via registry.yaml's tenant.expose_scope_preview, and
-// the endpoint then answers 403 config.scope_preview_disabled. F-3.5.1.
+// the endpoint then answers 403 config.scope_preview_disabled.
 func TestServerOps_ScopePreviewGating(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -1228,7 +1189,7 @@ func TestServerOps_ScopePreviewGating(t *testing.T) {
 	}
 
 	// The operator can confirm the resolved setting through config show
-	// --server (tenant.expose_scope_preview is a §13.12 server setting; F-7.7.2).
+	// --server (tenant.expose_scope_preview is a §13.12 server setting).
 	res := runPodium(t, "", []string{"HOME=" + home}, "config", "show", "--server")
 	if res.Exit != 0 {
 		t.Fatalf("config show exit=%d stderr=%s", res.Exit, res.Stderr)
@@ -1238,9 +1199,8 @@ func TestServerOps_ScopePreviewGating(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-39: PODIUM_CACHE_DIR defaults to ~/.podium/cache/ ---
+// ---- PODIUM_CACHE_DIR defaults to ~/.podium/cache/ ---
 
-// T-D-operator-guide-39
 func TestServerOps_CacheDirDefault(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -1260,9 +1220,8 @@ func TestServerOps_CacheDirDefault(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-40: admin verify audit chain not implemented --------
+// ---- admin verify audit chain not implemented --------
 
-// T-D-operator-guide-40
 func TestServerOps_AdminVerifyAuditChainGap(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil,
@@ -1276,16 +1235,14 @@ func TestServerOps_AdminVerifyAuditChainGap(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-41: repeated signature_invalid investigation --------
+// ---- repeated signature_invalid investigation --------
 
-// T-D-operator-guide-41
 func TestServerOps_RepeatedSignatureInvalid(t *testing.T) {
 	t.Skip("requires a signed artifact whose stored bytes are then tampered; not expressible from filesystem bootstrap")
 }
 
-// ---- T-D-operator-guide-42: config show embedding provider and model --------
+// ---- config show embedding provider and model --------
 
-// T-D-operator-guide-42
 func TestServerOps_ConfigShowEmbeddingProviderModel(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "",
@@ -1310,42 +1267,38 @@ func TestServerOps_ConfigShowEmbeddingProviderModel(t *testing.T) {
 	}
 }
 
-// ---- T-D-operator-guide-43: OIDC group claim mapping via audit log ----------
+// ---- OIDC group claim mapping via audit log ----------
 
-// T-D-operator-guide-43
 func TestServerOps_OIDCGroupClaimMapping(t *testing.T) {
 	t.Skip("requires a standard deployment with OIDC configured and a JWT with specific group claims; not available in standalone e2e")
 }
 
-// ---- T-D-operator-guide-44: clock skew causes auth.token_expired -----------
+// ---- clock skew causes auth.token_expired -----------
 
-// T-D-operator-guide-44
 func TestServerOps_ClockSkewTokenExpired(t *testing.T) {
 	t.Skip("requires OIDC identity configured and a JWT with exp shifted beyond 60s tolerance; needs real IdP JWKS setup not available in standalone e2e")
 }
 
-// ---- T-D-operator-guide-45: rolling upgrade coexistence ---------------------
-// ---- T-D-operator-guide-46: rollback before finalize is safe ----------------
+// ---- rolling upgrade coexistence ---------------------
+// ---- rollback before finalize is safe ----------------
 //
-// TestServerOps_RollingUpgradeCoexistence (T-D-operator-guide-45) and
-// TestServerOps_RollbackBeforeFinalize (T-D-operator-guide-46) live in
+// TestServerOps_RollingUpgradeCoexistence and
+// TestServerOps_RollbackBeforeFinalize live in
 // server_ops_rolling_upgrade_test.go. They drive the §13.4 additive upgrade
-// over a live Postgres metadata store (gap G-LIFECYCLE-7): a database written
+// over a live Postgres metadata store: a database written
 // by an earlier binary's schema is migrated forward in place by the current
 // binary, two server processes coexist against the one Postgres during the
 // overlap, and reverting to the earlier binary's column set still reads and
 // writes the migrated database.
 
-// ---- T-D-operator-guide-47: restore verification content_hash matches ------
+// ---- restore verification content_hash matches ------
 
-// T-D-operator-guide-47
 func TestServerOps_RestoreVerificationContentHash(t *testing.T) {
 	t.Skip("requires Postgres PITR + S3 bucket restore; not available in standalone e2e")
 }
 
-// ---- T-D-operator-guide-48: PODIUM_NO_AUTOSTANDALONE in test harness --------
+// ---- PODIUM_NO_AUTOSTANDALONE in test harness --------
 
-// T-D-operator-guide-48
 func TestServerOps_NoAutostandaloneInHarness(t *testing.T) {
 	t.Parallel()
 	root := repoRoot(t)

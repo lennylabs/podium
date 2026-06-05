@@ -28,7 +28,7 @@ func captureSession(t *testing.T) (*mcpServer, *string, *httptest.Server) {
 
 // Spec: §5 / §3.3 — the bridge threads its per-process session_id through
 // every registry call so the advertised sessionCorrelation capability is
-// backed (F-3.3.3). A host that did not pass session_id gets the bridge's.
+// backed. A host that did not pass session_id gets the bridge's.
 func TestFetchJSON_ThreadsBridgeSession(t *testing.T) {
 	t.Parallel()
 	s, got, _ := captureSession(t)

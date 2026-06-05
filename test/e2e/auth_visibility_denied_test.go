@@ -1,11 +1,11 @@
 package e2e
 
-// Per-caller visibility denial across the read surface (gap G-AUTH-16).
+// Per-caller visibility denial across the read surface.
 //
 // The standalone e2e harness serves every layer public and resolves every
 // caller to system:public, so the visibility-denial path on search_artifacts,
 // load_artifact, and the /objects route could not be triggered. The
-// authenticated, visibility-capable harness (G-INFRA-5) places a
+// authenticated, visibility-capable harness places a
 // query-matching artifact in a restricted (users:) layer and a matching
 // artifact in a public layer, then drives the identical read surface as an
 // unauthorized caller and as the owner.
@@ -25,7 +25,7 @@ package e2e
 // surface), §6.9 (visibility denial returns a structured error without leaking
 // the layer's existence; logged as visibility.denied), §8.1 / §8.2 (the
 // visibility.denied audit event), §13.10 / §13.11 (the token-bound /objects
-// route re-checks visibility per fetch). Gap G-AUTH-16.
+// route re-checks visibility per fetch).
 
 import (
 	"encoding/json"

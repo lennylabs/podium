@@ -36,7 +36,7 @@ func scopePreviewServer(t *testing.T, flag *bool) *httptest.Server {
 	return ts
 }
 
-// Spec: §3.5 (F-3.5.9) — the endpoint is GET /v1/scope/preview; sibling
+// Spec: §3.5 — the endpoint is GET /v1/scope/preview; sibling
 // read endpoints reject other methods with 405, and this one must too.
 func TestScopePreview_RejectsNonGET(t *testing.T) {
 	t.Parallel()
@@ -57,7 +57,7 @@ func TestScopePreview_RejectsNonGET(t *testing.T) {
 	}
 }
 
-// Spec: §3.5 (F-3.5.1) — when tenant config expose_scope_preview is false,
+// Spec: §3.5 — when tenant config expose_scope_preview is false,
 // GET /v1/scope/preview returns 403 with error code config.scope_preview_disabled.
 func TestScopePreview_DisabledReturns403(t *testing.T) {
 	t.Parallel()
@@ -83,7 +83,7 @@ func TestScopePreview_DisabledReturns403(t *testing.T) {
 	}
 }
 
-// Spec: §3.5 (F-3.5.1) — with the gate enabled (explicit true), the
+// Spec: §3.5 — with the gate enabled (explicit true), the
 // endpoint serves the aggregate counts with a 200.
 func TestScopePreview_EnabledReturns200(t *testing.T) {
 	t.Parallel()

@@ -7,8 +7,7 @@ import (
 	"github.com/lennylabs/podium/pkg/vector"
 )
 
-// Weaviate Cloud live integration (G-VEC-1, G-VEC-2, G-VEC-4 managed portion,
-// G-VEC-5). Gated on PODIUM_LIVE_EXTERNAL=1 plus PODIUM_WEAVIATE_URL and
+// Weaviate Cloud live integration. Gated on PODIUM_LIVE_EXTERNAL=1 plus PODIUM_WEAVIATE_URL and
 // PODIUM_WEAVIATE_COLLECTION (PODIUM_WEAVIATE_API_KEY when the cluster requires
 // auth). The collection must already exist with the properties the backend
 // writes: tenantId, artifactId, version (and content for the self-embedding
@@ -79,7 +78,7 @@ func liveWeaviateSelfEmbed(t *testing.T) *vector.Weaviate {
 }
 
 // TestWeaviate_Live_Conformance runs the shared SPI contract against the live
-// collection (G-VEC-2).
+// collection.
 //
 // Spec: §4.7 — RegistrySearchProvider conformance.
 func TestWeaviate_Live_Conformance(t *testing.T) {
@@ -88,8 +87,7 @@ func TestWeaviate_Live_Conformance(t *testing.T) {
 	runLiveSuite(t, liveWeaviateDim, w)
 }
 
-// TestWeaviate_Live_StorageOnly covers the precomputed-vector path (G-VEC-1,
-// G-VEC-5): ingest, nearest-neighbour recall, upsert replace, delete remove.
+// TestWeaviate_Live_StorageOnly covers the precomputed-vector path: ingest, nearest-neighbour recall, upsert replace, delete remove.
 //
 // Spec: §4.7 — storage-only backend (registry computes the vector).
 func TestWeaviate_Live_StorageOnly(t *testing.T) {
@@ -139,8 +137,8 @@ func TestWeaviate_Live_StorageOnly(t *testing.T) {
 }
 
 // TestWeaviate_Live_TenantIsolation writes two tenants' vectors into the one
-// collection and asserts a query scoped to one tenant never returns the other's
-// (G-VEC-4). Weaviate isolates per tenant by the tenantId property filter.
+// collection and asserts a query scoped to one tenant never returns the other's.
+// Weaviate isolates per tenant by the tenantId property filter.
 //
 // Spec: §4.7.1 — the org is the tenant boundary.
 func TestWeaviate_Live_TenantIsolation(t *testing.T) {
@@ -188,8 +186,8 @@ func TestWeaviate_Live_TenantIsolation(t *testing.T) {
 	}
 }
 
-// TestWeaviate_Live_SelfEmbedding covers the server-side embedding path
-// (G-VEC-5): drive PutText/QueryText against the vectorizer module.
+// TestWeaviate_Live_SelfEmbedding covers the server-side embedding path:
+// drive PutText/QueryText against the vectorizer module.
 //
 // Spec: §13.12 — PODIUM_WEAVIATE_VECTORIZER self-embedding.
 func TestWeaviate_Live_SelfEmbedding(t *testing.T) {

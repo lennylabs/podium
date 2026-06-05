@@ -87,7 +87,7 @@ func TestEnforceSandboxPolicy_HostSupportsProfile(t *testing.T) {
 	}
 }
 
-// spec: §6.5 (F-6.5.7) — the content-bucket name is the bare hex digest, so
+// spec: §6.5 — the content-bucket name is the bare hex digest, so
 // the on-disk layout matches the spec's `${PODIUM_CACHE_DIR}/<sha256>/`.
 func TestSanitizeHash(t *testing.T) {
 	t.Parallel()

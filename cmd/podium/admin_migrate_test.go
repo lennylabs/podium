@@ -411,7 +411,7 @@ func TestAdminMigrateToStandard_PreservesAdminGrants(t *testing.T) {
 
 // Spec: §13.10 — audit history is preserved. When a source audit log is
 // named but no target sink is given, the command must warn rather than
-// silently completing with the history left behind (F-13.4.3).
+// silently completing with the history left behind.
 func TestAdminMigrateToStandard_AuditWarnsWithoutTarget(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

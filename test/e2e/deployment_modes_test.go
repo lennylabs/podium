@@ -4,7 +4,7 @@ package e2e
 // These drive the real podium, podium serve, and podium-mcp surfaces across
 // the filesystem and standalone deployment modes. Behaviors that the doc
 // claims but the implementation does not yet provide are skipped with the
-// blocking BUILD-GAPS finding so the suite stays green while still encoding
+// blocking implementation-gap finding so the suite stays green while still encoding
 // the acceptance criterion.
 
 import (
@@ -25,7 +25,7 @@ func hiwSkillRegistry(t *testing.T) string {
 	})
 }
 
-// T-D-how-it-works-1 — filesystem registry: sync reads the directory directly
+// filesystem registry: sync reads the directory directly
 // with harness=none, no server required.
 func TestDeployment_FilesystemSyncNone(t *testing.T) {
 	t.Parallel()
@@ -46,7 +46,7 @@ func TestDeployment_FilesystemSyncNone(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-2 — filesystem registry: claude-code adapter layout, with a
+// filesystem registry: claude-code adapter layout, with a
 // cursor negative variant.
 func TestDeployment_FilesystemSyncClaudeCodeLayout(t *testing.T) {
 	t.Parallel()
@@ -68,7 +68,7 @@ func TestDeployment_FilesystemSyncClaudeCodeLayout(t *testing.T) {
 	mustExist(t, filepath.Join(curTgt, ".cursor/rules/ts-style.mdc"))
 }
 
-// T-D-how-it-works-3 — filesystem path is not a valid source for the MCP
+// filesystem path is not a valid source for the MCP
 // server: a tool call surfaces an error.
 func TestDeployment_MCPRejectsFilesystemPath(t *testing.T) {
 	t.Parallel()
@@ -85,8 +85,8 @@ func TestDeployment_MCPRejectsFilesystemPath(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-4 — zero-flag auto-bootstrap banner and ~/.podium files.
-// F-13.10.1 is closed: a flag-free serve emits the first-run notice and writes
+// zero-flag auto-bootstrap banner and ~/.podium files.
+// is closed: a flag-free serve emits the first-run notice and writes
 // the standalone bootstrap files. The backend-default and bind assertions are
 // the sibling TestConfigZeroFlag_BootstrapDefaults; this test asserts the
 // doc-named artifacts: the banner, ~/.podium/registry.yaml, ~/.podium/sync.yaml,
@@ -118,7 +118,7 @@ func TestDeployment_ZeroFlagAutoBootstrap(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-5 — explicit --standalone --layer-path serves the API.
+// explicit --standalone --layer-path serves the API.
 func TestDeployment_StandaloneExplicit(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -140,7 +140,7 @@ func TestDeployment_StandaloneExplicit(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-6 — standalone state lives under ~/.podium/standalone/.
+// standalone state lives under ~/.podium/standalone/.
 func TestDeployment_StandaloneStateFiles(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
@@ -154,14 +154,14 @@ func TestDeployment_StandaloneStateFiles(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-7 — /healthz and /readyz return the documented JSON.
+// /healthz and /readyz return the documented JSON.
 func TestDeployment_HealthReadyJSON(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
 	var health map[string]any
 	getJSON(t, srv.BaseURL+"/healthz", &health)
 	// §13.9: /healthz reports the mode; liveness is the 200 status, and
-	// there is no readiness boolean on /healthz (F-13.9.5).
+	// there is no readiness boolean on /healthz.
 	if health["mode"] != "ready" {
 		t.Errorf("/healthz = %v, want mode=ready", health)
 	}
@@ -178,7 +178,7 @@ func TestDeployment_HealthReadyJSON(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-8 — MCP exposes the four meta-tools and declares
+// MCP exposes the four meta-tools and declares
 // capabilities.tools and capabilities.sessionCorrelation.
 func TestDeployment_MCPMetaToolsAndCapabilities(t *testing.T) {
 	t.Parallel()
@@ -203,7 +203,7 @@ func TestDeployment_MCPMetaToolsAndCapabilities(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-9 — MCP load_domain (root) returns the root domain map.
+// MCP load_domain (root) returns the root domain map.
 func TestDeployment_MCPLoadDomainRoot(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -219,7 +219,7 @@ func TestDeployment_MCPLoadDomainRoot(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-10 — MCP load_artifact materializes via the claude-code
+// MCP load_artifact materializes via the claude-code
 // adapter to PODIUM_MATERIALIZE_ROOT, atomically.
 func TestDeployment_MCPLoadArtifactMaterializes(t *testing.T) {
 	t.Parallel()
@@ -252,7 +252,7 @@ func TestDeployment_MCPLoadArtifactMaterializes(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-11 — load_artifact on a missing id aborts with a
+// load_artifact on a missing id aborts with a
 // structured error and writes nothing; the bridge stays usable.
 func TestDeployment_MCPLoadArtifactNotFound(t *testing.T) {
 	t.Parallel()
@@ -280,12 +280,12 @@ func TestDeployment_MCPLoadArtifactNotFound(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-12 — sync in server-source mode.
+// sync in server-source mode.
 func TestDeployment_SyncServerSource(t *testing.T) {
-	t.Skip("blocked by F-2.2.2: podium sync has no server-source HTTP path; a URL registry is treated as a filesystem path")
+	t.Skip("blocked by a known gap: podium sync has no server-source HTTP path; a URL registry is treated as a filesystem path")
 }
 
-// T-D-how-it-works-13 — sync writes an independent .podium/sync.lock per target.
+// sync writes an independent .podium/sync.lock per target.
 func TestDeployment_SyncLockPerTarget(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
@@ -296,7 +296,7 @@ func TestDeployment_SyncLockPerTarget(t *testing.T) {
 	mustExist(t, filepath.Join(t2, ".podium", "sync.lock"))
 }
 
-// T-D-how-it-works-14 — load_artifact populates the content cache under the
+// load_artifact populates the content cache under the
 // configured cache dir, shared across processes.
 func TestDeployment_ContentCacheShared(t *testing.T) {
 	t.Parallel()
@@ -328,7 +328,7 @@ func TestDeployment_ContentCacheShared(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-15 — workspace overlay (PODIUM_OVERLAY_PATH) has the
+// workspace overlay (PODIUM_OVERLAY_PATH) has the
 // highest precedence in the effective view.
 func TestDeployment_OverlayHighestPrecedence(t *testing.T) {
 	t.Parallel()
@@ -352,7 +352,7 @@ func TestDeployment_OverlayHighestPrecedence(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-16 — exact-semver version pinning via ?version=.
+// exact-semver version pinning via ?version=.
 func TestDeployment_VersionPinning(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -369,27 +369,27 @@ func TestDeployment_VersionPinning(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-17 — version immutability on re-ingest.
+// version immutability on re-ingest.
 func TestDeployment_VersionImmutability(t *testing.T) {
-	t.Skip("blocked by F-7.3.4: the manual reingest endpoint records intent but never runs the ingest pipeline, so re-ingest rejection cannot be exercised")
+	t.Skip("blocked by a known gap: the manual reingest endpoint records intent but never runs the ingest pipeline, so re-ingest rejection cannot be exercised")
 }
 
-// T-D-how-it-works-18 — session_id version snapshot.
+// session_id version snapshot.
 func TestDeployment_SessionSnapshot(t *testing.T) {
-	t.Skip("blocked by F-7.3.4: a new version cannot be ingested into a running standalone server (reingest is a no-op), so session snapshot consistency is untestable end-to-end")
+	t.Skip("blocked by a known gap: a new version cannot be ingested into a running standalone server (reingest is a no-op), so session snapshot consistency is untestable end-to-end")
 }
 
-// T-D-how-it-works-19 — standard deployment health (Docker Compose).
+// standard deployment health (Docker Compose).
 func TestDeployment_StandardDeploymentHealth(t *testing.T) {
 	t.Skip("requires the Docker Compose standard stack (Postgres + pgvector + S3 + OIDC); not available in the test sandbox")
 }
 
-// T-D-how-it-works-20 — standard deployment device-code login.
+// standard deployment device-code login.
 func TestDeployment_StandardDeviceCodeLogin(t *testing.T) {
 	t.Skip("requires a running standard deployment with a Dex IdP container; not available in the test sandbox")
 }
 
-// T-D-how-it-works-21 — filesystem-source registries apply no visibility
+// filesystem-source registries apply no visibility
 // filter: a sensitivity:high artifact still materializes.
 func TestDeployment_FilesystemNoVisibilityFilter(t *testing.T) {
 	t.Parallel()
@@ -404,12 +404,12 @@ func TestDeployment_FilesystemNoVisibilityFilter(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, "secret/tool/ARTIFACT.md"))
 }
 
-// T-D-how-it-works-22 — injected-session-token identity provider.
+// injected-session-token identity provider.
 func TestDeployment_InjectedSessionToken(t *testing.T) {
 	t.Skip("requires a registered runtime signing key (podium admin runtime register) and a self-signed JWT; standard-deployment identity scenario not wired in the sandbox")
 }
 
-// T-D-how-it-works-23 — migrate-to-standard into a SQLite target.
+// migrate-to-standard into a SQLite target.
 func TestDeployment_MigrateToStandard(t *testing.T) {
 	t.Parallel()
 	src := makeStandaloneDB(t)
@@ -436,7 +436,7 @@ func TestDeployment_MigrateToStandard(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-24 — migrate-to-standard --dry-run writes nothing.
+// migrate-to-standard --dry-run writes nothing.
 func TestDeployment_MigrateDryRun(t *testing.T) {
 	t.Parallel()
 	src := makeStandaloneDB(t)
@@ -454,8 +454,8 @@ func TestDeployment_MigrateDryRun(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-25 — /v1/load_domain returns the subdomain structure.
-// Doc-accuracy (F-0.0.2): the wire keys are subdomains/notable, not the
+// /v1/load_domain returns the subdomain structure.
+// Doc-accuracy: the wire keys are subdomains/notable, not the
 // quickstart's domains/artifacts.
 func TestDeployment_LoadDomainStructure(t *testing.T) {
 	t.Parallel()
@@ -487,7 +487,7 @@ func TestDeployment_LoadDomainStructure(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-26 — /v1/search_artifacts returns ranked descriptors with
+// /v1/search_artifacts returns ranked descriptors with
 // no manifest bodies.
 func TestDeployment_SearchArtifactsDescriptors(t *testing.T) {
 	t.Parallel()
@@ -521,7 +521,7 @@ func TestDeployment_SearchArtifactsDescriptors(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-27 — /v1/load_artifact returns the manifest body and a
+// /v1/load_artifact returns the manifest body and a
 // content hash.
 func TestDeployment_LoadArtifactFields(t *testing.T) {
 	t.Parallel()
@@ -553,7 +553,7 @@ func TestDeployment_LoadArtifactFields(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-28 — /v1/artifacts:batchLoad returns multiple artifacts.
+// /v1/artifacts:batchLoad returns multiple artifacts.
 func TestDeployment_BatchLoad(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -574,7 +574,7 @@ func TestDeployment_BatchLoad(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-29 — /v1/dependents returns extends-based edges.
+// /v1/dependents returns extends-based edges.
 func TestDeployment_Dependents(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -592,7 +592,7 @@ func TestDeployment_Dependents(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-30 — /v1/scope/preview returns aggregate visibility counts.
+// /v1/scope/preview returns aggregate visibility counts.
 func TestDeployment_ScopePreview(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -613,7 +613,7 @@ func TestDeployment_ScopePreview(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-31 — sync --dry-run resolves and writes nothing.
+// sync --dry-run resolves and writes nothing.
 func TestDeployment_SyncDryRun(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
@@ -627,8 +627,7 @@ func TestDeployment_SyncDryRun(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-32 — serve --strict refuses without config. F-13.10.1 is
-// closed: --strict maps onto the §13.10 no-autostandalone gate, so a serve with
+// serve --strict refuses without config. --strict maps onto the §13.10 no-autostandalone gate, so a serve with
 // no explicit config (no registry.yaml, no PODIUM_* server settings, no --bind)
 // exits non-zero naming the missing setup rather than auto-bootstrapping.
 func TestDeployment_ServeStrict(t *testing.T) {
@@ -642,8 +641,8 @@ func TestDeployment_ServeStrict(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-33 — PODIUM_NO_AUTOSTANDALONE=1 refuses the zero-flag
-// bootstrap. F-13.10.1 is closed: the env var has the same effect as --strict,
+// PODIUM_NO_AUTOSTANDALONE=1 refuses the zero-flag
+// bootstrap. The env var has the same effect as --strict,
 // so a serve with no explicit config and no --bind exits non-zero rather than
 // auto-bootstrapping a standalone deployment.
 func TestDeployment_NoAutostandalone(t *testing.T) {
@@ -658,7 +657,7 @@ func TestDeployment_NoAutostandalone(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-34 — public mode: all artifacts visible without auth.
+// public mode: all artifacts visible without auth.
 // Doc-accuracy: the banner text differs (mode=public on the listen line),
 // but /healthz reports mode=public and reads need no token.
 func TestDeployment_PublicMode(t *testing.T) {
@@ -675,12 +674,12 @@ func TestDeployment_PublicMode(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-35 — read-only mode response headers.
+// read-only mode response headers.
 func TestDeployment_ReadOnlyHeaders(t *testing.T) {
 	t.Skip("read-only mode has no external CLI toggle; flipping the ModeTracker requires an in-process server option (covered by pkg/registry/server unit tests)")
 }
 
-// T-D-how-it-works-36 — cache prune removes old buckets.
+// cache prune removes old buckets.
 func TestDeployment_CachePrune(t *testing.T) {
 	t.Parallel()
 	cache := t.TempDir()
@@ -709,24 +708,24 @@ func TestDeployment_CachePrune(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-37 — shared library: filesystem and server modes byte-equal.
+// shared library: filesystem and server modes byte-equal.
 func TestDeployment_SharedLibraryEquivalence(t *testing.T) {
-	t.Skip("blocked by F-2.2.2: the server-source sync path is unimplemented, so the filesystem-vs-server adapter-output comparison cannot run")
+	t.Skip("blocked by a known gap: the server-source sync path is unimplemented, so the filesystem-vs-server adapter-output comparison cannot run")
 }
 
-// T-D-how-it-works-38 — Python SDK requires a server.
+// Python SDK requires a server.
 func TestDeployment_PythonSDKRequiresServer(t *testing.T) {
 	t.Skip("requires the installed Python SDK (sdks/podium-py via pip); Python toolchain not provisioned in the test sandbox")
 }
 
-// T-D-how-it-works-39 — TypeScript SDK requires a server.
+// TypeScript SDK requires a server.
 func TestDeployment_TypeScriptSDKRequiresServer(t *testing.T) {
 	t.Skip("requires the built TypeScript SDK (sdks/podium-ts via npm); Node toolchain not provisioned in the test sandbox")
 }
 
-// T-D-how-it-works-40 — config show reflects the active deployment mode.
+// config show reflects the active deployment mode.
 func TestDeployment_ConfigShowDeploymentMode(t *testing.T) {
-	// spec §7.7 (F-7.7.1): config show prints the merged sync.yaml, so the
+	// spec §7.7: config show prints the merged sync.yaml, so the
 	// active deployment's registry surfaces as defaults.registry.
 	ws := t.TempDir()
 	reg := t.TempDir()
@@ -742,7 +741,7 @@ func TestDeployment_ConfigShowDeploymentMode(t *testing.T) {
 	cliContains(t, res.Stdout, reg, "active registry value")
 }
 
-// T-D-how-it-works-41 — /metrics endpoint serves Prometheus data. spec §13.8.
+// /metrics endpoint serves Prometheus data. spec §13.8.
 func TestDeployment_MetricsEndpoint(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
@@ -751,7 +750,7 @@ func TestDeployment_MetricsEndpoint(t *testing.T) {
 	assertMetricsScrape(t, srv.BaseURL)
 }
 
-// T-D-how-it-works-42 — cursor harness writes rules with the .mdc extension.
+// cursor harness writes rules with the .mdc extension.
 func TestDeployment_CursorRuleLayout(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -765,12 +764,12 @@ func TestDeployment_CursorRuleLayout(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-43 — mcp-server artifacts filtered from MCP bridge results.
+// mcp-server artifacts filtered from MCP bridge results.
 func TestDeployment_MCPServerFiltered(t *testing.T) {
-	t.Skip("spec §5: mcp-server artifacts should be filtered from MCP bridge results; the bridge does not filter them and no BUILD-GAPS finding is filed for this gap")
+	t.Skip("spec §5: mcp-server artifacts should be filtered from MCP bridge results; the bridge does not filter them and no implementation-gap finding is filed for this gap")
 }
 
-// T-D-how-it-works-44 — version command prints a version string.
+// version command prints a version string.
 func TestDeployment_Version(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "version")
@@ -779,7 +778,7 @@ func TestDeployment_Version(t *testing.T) {
 	}
 }
 
-// T-D-how-it-works-45 — /objects/ serves content-addressed blobs.
+// /objects/ serves content-addressed blobs.
 func TestDeployment_ObjectsRoute(t *testing.T) {
 	t.Skip("bundled large-resource externalization (>256 KB) is not populated at standalone boot ingest, so load_artifact returns no large_resources link to fetch from /objects/")
 }

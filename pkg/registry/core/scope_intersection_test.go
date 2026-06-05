@@ -41,7 +41,7 @@ func scopeRegistry(t *testing.T) (*core.Registry, *recorder) {
 
 // Spec: §6.3.1 — a "podium:read:finance/*" scope narrows the discovery
 // surface to the finance subtree; hr is excluded even though the layer is
-// visible. The smaller surface wins. F-6.3.5.
+// visible. The smaller surface wins.
 func TestSearchArtifacts_ReadScopeNarrows(t *testing.T) {
 	t.Parallel()
 	reg, _ := scopeRegistry(t)
@@ -69,7 +69,7 @@ func TestSearchArtifacts_ReadScopeNarrows(t *testing.T) {
 
 // Spec: §6.3.1 — a read scope does not authorize a load; loading a
 // finance artifact with only "podium:read:finance/*" is denied and emits
-// visibility.denied (no leak). F-6.3.5.
+// visibility.denied (no leak).
 func TestLoadArtifact_ReadScopeDoesNotAuthorizeLoad(t *testing.T) {
 	t.Parallel()
 	reg, rec := scopeRegistry(t)
@@ -90,7 +90,7 @@ func TestLoadArtifact_ReadScopeDoesNotAuthorizeLoad(t *testing.T) {
 }
 
 // Spec: §6.3.1 — a "podium:load:finance/*" scope authorizes loading any
-// finance artifact, and the load implies read visibility. F-6.3.5.
+// finance artifact, and the load implies read visibility.
 func TestLoadArtifact_LoadScopeAllowsSubtree(t *testing.T) {
 	t.Parallel()
 	reg, _ := scopeRegistry(t)
@@ -109,7 +109,7 @@ func TestLoadArtifact_LoadScopeAllowsSubtree(t *testing.T) {
 }
 
 // Spec: §6.3.1 — a version-pinned load scope ("@1.x") permits matching
-// versions and denies non-matching ones; the smaller surface wins. F-6.3.5.
+// versions and denies non-matching ones; the smaller surface wins.
 func TestLoadArtifact_LoadScopeVersionPin(t *testing.T) {
 	t.Parallel()
 	reg, _ := scopeRegistry(t)
@@ -123,7 +123,7 @@ func TestLoadArtifact_LoadScopeVersionPin(t *testing.T) {
 }
 
 // Spec: §6.3.1 — a caller with no "podium:*" scope keeps full layer
-// visibility (no narrowing). F-6.3.5.
+// visibility (no narrowing).
 func TestLoadArtifact_NoScopeFullAccess(t *testing.T) {
 	t.Parallel()
 	reg, _ := scopeRegistry(t)

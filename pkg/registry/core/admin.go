@@ -60,7 +60,7 @@ type EffectiveLayer struct {
 // view.
 func (r *Registry) ShowEffective(ctx context.Context, target layer.Identity) ([]EffectiveLayer, error) {
 	// spec: §4.6 / §4.7.2 — resolve the layer list per request so the admin
-	// diagnostic reflects runtime-registered layers too (F-4.6.1).
+	// diagnostic reflects runtime-registered layers too.
 	resolved := r.resolveLayers(ctx)
 	out := make([]EffectiveLayer, 0, len(resolved))
 	for _, l := range resolved {

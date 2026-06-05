@@ -127,16 +127,16 @@ func (r *Registry) PreviewScope(ctx context.Context, id layer.Identity) (*ScopeP
 		preview.ByType[m.Type]++
 		// spec: §3.5 — by_sensitivity keys are the documented buckets;
 		// an artifact that omits the optional sensitivity field falls into
-		// the `low` floor rather than an empty-string bucket (F-3.5.8).
+		// the `low` floor rather than an empty-string bucket.
 		preview.BySensitivity[sensitivityBucket(m.Sensitivity)]++
 	}
 
 	// spec: §3.5 / §4.6 — `layers` is the ordered composition (lowest
 	// precedence first) of every layer the identity is entitled to see,
 	// including layers with zero visible artifacts. Derive it from the
-	// per-request resolved layer list (admin + runtime-registered, F-4.6.1)
+	// per-request resolved layer list (admin + runtime-registered)
 	// so the order is deterministic and an empty-but-visible layer is not
-	// dropped (F-3.5.6).
+	// dropped.
 	resolved := r.resolveLayers(ctx)
 	if len(resolved) > 0 {
 		for _, l := range layer.EffectiveLayersWith(resolved, id, r.resolveGroup) {

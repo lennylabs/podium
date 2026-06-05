@@ -1,23 +1,22 @@
 package e2e
 
-// Focused proof that the G-INFRA-7 runtime-republish primitive stages multiple
+// Focused proof that the runtime-republish primitive stages multiple
 // versions of an artifact against the standalone harness. These tests assert
 // the capabilities the downstream journeys depend on:
 //
 //   - Two coexisting versions of one canonical id, each addressable by an
-//     explicit version parameter (feeds version-selection, G-LIFECYCLE-1).
+//     explicit version parameter (feeds version-selection).
 //   - Default resolution returns the latest non-deprecated version, and a
 //     deprecated successor is skipped by latest while staying addressable by
-//     explicit version (feeds deprecation, G-LIFECYCLE-2).
+//     explicit version (feeds deprecation).
 //   - A session that pins `latest` keeps serving the pinned version across a
 //     mid-session republish while a fresh session sees the new version (feeds
-//     the session-snapshot journey, G-JOURNEY-3).
+//     the session-snapshot journey).
 //
 // Spec: §7.3.1 (manual reingest runs the ingest pipeline), §4.7.6 (immutable
 // versions; latest resolves to the most recent non-deprecated version; a
 // session pins its first latest lookup), §7.3.2 (a deprecated manifest
-// supersedes a prior non-deprecated version on the deprecation transition). Gap
-// G-INFRA-7.
+// supersedes a prior non-deprecated version on the deprecation transition).
 
 import (
 	"encoding/json"

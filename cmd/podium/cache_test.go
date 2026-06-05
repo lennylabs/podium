@@ -99,7 +99,7 @@ func TestCachePrune_MissingDirIsNoop(t *testing.T) {
 	}
 }
 
-// Spec: §6.5 (F-6.5.3) — prune never deletes the `.resolutions` index nor any
+// Spec: §6.5 — prune never deletes the `.resolutions` index nor any
 // directory that is not a content bucket, even when their mtimes are stale.
 func TestCachePrune_PreservesResolutionIndexAndNonBuckets(t *testing.T) {
 	dir := t.TempDir()

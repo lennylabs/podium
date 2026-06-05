@@ -25,7 +25,7 @@ type stubArtifact struct {
 	largeResource map[string]string // path -> bytes served from a side endpoint
 	// contentHash, when set, is served as the §6.6 authoritative content_hash
 	// in the /v1/load_artifact response, so a test can assert the lock pins the
-	// registry's value rather than a locally recomputed digest (F-14.11.1).
+	// registry's value rather than a locally recomputed digest.
 	contentHash string
 }
 
@@ -109,7 +109,7 @@ func writeJSONTest(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// spec: §2.2, §7.5 (F-2.2.2) — podium sync server-source reads the caller's
+// spec: §2.2, §7.5 — podium sync server-source reads the caller's
 // effective view over HTTP and materializes each artifact through the
 // harness adapter, mirroring the MCP server's server-source delivery.
 func TestRun_ServerSource_MaterializesEffectiveView(t *testing.T) {
@@ -212,7 +212,7 @@ func TestRun_ServerSource_PropagatesError(t *testing.T) {
 	}
 }
 
-// spec: §7.5.1, §9.4 (F-9.4.3) — programmatic curation against a server
+// spec: §7.5.1, §9.4 — programmatic curation against a server
 // source: the include scope narrows the effective view fetched over HTTP, so
 // only the curated ids are materialized. This is the server-source half of the
 // §9.4 "search then podium sync --include" workflow.
@@ -259,7 +259,7 @@ func TestRun_FilesystemSourceStillMaterializes(t *testing.T) {
 	}
 }
 
-// spec: §7.5.4 (F-2.2.2) — a server-source --watch subscribes to the
+// spec: §7.5.4 — a server-source --watch subscribes to the
 // registry change-event stream and reruns the sync on every event, rather
 // than polling the filesystem.
 func TestWatch_ServerSource_RerunsOnEvent(t *testing.T) {

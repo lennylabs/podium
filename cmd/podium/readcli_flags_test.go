@@ -8,7 +8,7 @@ import (
 )
 
 // spec: §7.6.1 — podium search forwards the --tags flag to the registry as
-// the tags query parameter (F-7.6.4).
+// the tags query parameter.
 func TestSearchCmd_ForwardsTags(t *testing.T) {
 	var gotTags string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -28,7 +28,7 @@ func TestSearchCmd_ForwardsTags(t *testing.T) {
 }
 
 // spec: §7.6.1 — podium artifact show forwards --version and --session-id to
-// the registry's load_artifact endpoint (F-7.6.5, F-7.6.6).
+// the registry's load_artifact endpoint.
 func TestArtifactShow_ForwardsVersionAndSessionID(t *testing.T) {
 	var gotVersion, gotSession string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

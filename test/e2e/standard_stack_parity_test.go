@@ -1,6 +1,6 @@
 package e2e
 
-// Managed-stack author-to-consumer parity end-to-end (gap G-STACK-1).
+// Managed-stack author-to-consumer parity end-to-end.
 //
 // standard_deployment_test.go documents docs/deployment/organization.md, but
 // every server it boots is `serve --standalone` over SQLite metadata plus a
@@ -44,7 +44,7 @@ package e2e
 // / PODIUM_S3_* backend configuration; PODIUM_S3_REGION required), §7.2 (control
 // plane HTTP/JSON metadata API and data plane object storage), §4.7 / §4.7.1
 // (Registry as a Service; per-tenant isolation), §6.3.2 (injected-session-token
-// runtime trust model). Gap G-STACK-1.
+// runtime trust model).
 
 import (
 	"encoding/json"
@@ -58,7 +58,7 @@ import (
 
 // msSkipIfNoStack skips the test unless a live Postgres DSN and the S3 bucket
 // are configured. It returns the resolved DSN, bucket, and region. serverboot
-// requires a region for the s3 backend (§13.12, F-13.12.9), but no CI lane
+// requires a region for the s3 backend (§13.12), but no CI lane
 // exports PODIUM_S3_REGION, so it defaults to us-east-1 to match the sibling
 // pkg/objectstore/s3_live_test.go and run wherever the bucket and DSN are set.
 // The remaining S3 connection vars (endpoint, credentials, path-style, ssl) are
@@ -98,8 +98,8 @@ func msStartStandardServer(t *testing.T, dsn, bucket, region string) *serverProc
 }
 
 // msStartStandardServerEnv is msStartStandardServer with extra environment
-// appended after the standard-mode backend config (last write wins). G-STACK-3
-// uses it to set PODIUM_PRESIGN_TTL_SECONDS so an S3 presigned URL expires
+// appended after the standard-mode backend config (last write wins).
+// It is used to set PODIUM_PRESIGN_TTL_SECONDS so an S3 presigned URL expires
 // inside the test and the 403-driven refresh can be exercised against the live
 // data plane (§6.2 / §6.6).
 func msStartStandardServerEnv(t *testing.T, dsn, bucket, region string, extraEnv ...string) *serverProc {
@@ -145,7 +145,7 @@ func msStartStandardServerEnv(t *testing.T, dsn, bucket, region string, extraEnv
 // msS3PathStyle resolves the path-style flag for the object store. MinIO needs
 // path-style addressing; the live lane sets PODIUM_S3_FORCE_PATH_STYLE, and an
 // unset value defaults to "true" so a MinIO-backed run works out of the box
-// (§13.12, F-13.12.8). A real AWS S3 endpoint set to "false" overrides it.
+// (§13.12). A real AWS S3 endpoint set to "false" overrides it.
 func msS3PathStyle() string {
 	if v := os.Getenv("PODIUM_S3_FORCE_PATH_STYLE"); v != "" {
 		return v
@@ -246,7 +246,7 @@ type msLoadResponse struct {
 //
 // Spec: §13.10 / §13.12 (standard deployment backends), §7.2 (control plane +
 // data plane), §4.7 / §4.7.1 (Registry as a Service; tenancy), §6.3.2
-// (injected-session-token runtime trust). Gap G-STACK-1.
+// (injected-session-token runtime trust).
 func TestStandardStackParity_AuthorToConsumer(t *testing.T) {
 	// Not parallel: standard mode keys metadata by the fixed "default" org
 	// schema, which is shared and cannot be isolated per test (see the file

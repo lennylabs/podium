@@ -6,8 +6,7 @@ import (
 )
 
 // spec: §7.5.3 — the lock's `profile:` field is "null when no profile was
-// used". A sync with no active profile records the explicit `profile: null`
-// (F-7.5.4).
+// used". A sync with no active profile records the explicit `profile: null`.
 func TestSync_NoProfileLockRendersNull(t *testing.T) {
 	reg := cliReg(t)
 	tgt := t.TempDir()
@@ -19,7 +18,7 @@ func TestSync_NoProfileLockRendersNull(t *testing.T) {
 
 // spec: §7.5.5 — "running --add on something already materialized is a no-op
 // with a warning." A redundant override --add warns on stderr and records no
-// toggle (F-7.5.3).
+// toggle.
 func TestSyncOverride_RedundantAddWarns(t *testing.T) {
 	reg := cliReg(t)
 	tgt := t.TempDir()
@@ -37,8 +36,8 @@ func TestSyncOverride_RedundantAddWarns(t *testing.T) {
 }
 
 // spec: §7.5.6 / §11 "Save-as test" — save-as on a fresh sync.yaml creates it
-// with the new profile and an empty defaults: block (F-7.5.2), and the saved
-// profile becomes the target's active profile (F-11.0.1).
+// with the new profile and an empty defaults: block, and the saved
+// profile becomes the target's active profile.
 func TestSyncSaveAs_FreshFileDefaultsAndActivation(t *testing.T) {
 	reg := cliReg(t)
 	tgt := t.TempDir()

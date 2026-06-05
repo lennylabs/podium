@@ -145,7 +145,7 @@ func TestErrorResultWithStatus(t *testing.T) {
 
 // spec: §6.10 / §7.5.2 / §13.10 — registry unset across env, flags, and every
 // sync.yaml scope surfaces the canonical config.no_registry code and points the
-// user at `podium init` (F-6.11.1), not a bare "required" message.
+// user at `podium init`, not a bare "required" message.
 func TestLoadConfig_MissingRegistryErrors(t *testing.T) {
 	// hermetic isolates HOME + cwd so the §7.5.2 sync.yaml fallback
 	// cannot resolve a registry from a real ~/.podium/sync.yaml.
@@ -450,7 +450,7 @@ func TestServe_SkipsMalformedRequests(t *testing.T) {
 // spec: §12 — "Fresh load_domain / search_domains / search_artifacts returns
 // an explicit 'offline' status that hosts can surface." An unreachable
 // registry yields an offline status rather than an error so the host can tell
-// a transient outage from a request rejection (F-12.0.3).
+// a transient outage from a request rejection.
 func TestProxyGet_UnreachableRegistryReturnsOfflineStatus(t *testing.T) {
 	t.Parallel()
 	srv := &mcpServer{

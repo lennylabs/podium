@@ -1,7 +1,6 @@
 package e2e
 
-// End-to-end tests for the §4.6 multi-layer composition and overlay journeys
-// (TEST-GAPS §MULTILAYER: G-MULTILAYER-1 .. G-MULTILAYER-4).
+// End-to-end tests for the §4.6 multi-layer composition and overlay journeys.
 //
 // These exercise layer composition over a running server with two or more
 // layers: a winner change driving re-sync cleanup, a hidden-parent extends
@@ -19,9 +18,9 @@ import (
 	"testing"
 )
 
-// ---- G-MULTILAYER-1 ---------------------------------------------------------
+// ------------------------------------------------------------------------
 
-// G-MULTILAYER-1 — a winning-artifact change across two layers drives a re-sync
+// a winning-artifact change across two layers drives a re-sync
 // that cleans the prior winner's outputs.
 //
 // Two local-source layers carry a shared context artifact ctx/notes: layer-base
@@ -263,9 +262,9 @@ func mlGetJSON(t *testing.T, url, token string, dst any) int {
 	return st
 }
 
-// ---- G-MULTILAYER-2 ---------------------------------------------------------
+// ------------------------------------------------------------------------
 
-// G-MULTILAYER-2 — a child extends a parent in a layer the caller cannot see:
+// a child extends a parent in a layer the caller cannot see:
 // the registry resolves and merges the parent server-side and serves the merged
 // manifest, but the parent's ID stays unloadable and unenumerable for that
 // caller (§4.6 hidden parents).
@@ -380,7 +379,7 @@ func TestMultiLayer_HiddenParentMergedButUndiscoverable(t *testing.T) {
 	}
 }
 
-// ---- G-MULTILAYER-3 ---------------------------------------------------------
+// ------------------------------------------------------------------------
 
 // mlWriteArtifact writes a single-file context ARTIFACT.md under dir at the
 // slash id with the given version, a distinctive tag, and an optional extends
@@ -406,7 +405,7 @@ func mlWriteArtifact(t *testing.T, dir, id, version, tag, extends string) {
 	}
 }
 
-// G-MULTILAYER-3 — org, team, and personal layers carry one artifact with
+// org, team, and personal layers carry one artifact with
 // extends up the chain; the per-caller winner differs by which layers each
 // caller can see, and a pinned parent stays fixed when the org publishes a newer
 // patch.
@@ -552,9 +551,9 @@ func mlLoadVersion(t *testing.T, srv *serverProc, token, id, version string) exL
 	return r
 }
 
-// ---- G-MULTILAYER-4 ---------------------------------------------------------
+// ------------------------------------------------------------------------
 
-// G-MULTILAYER-4 — two layers contribute conflicting DOMAIN.md featured and
+// two layers contribute conflicting DOMAIN.md featured and
 // deprioritize lists for one domain, and a workspace overlay adds an artifact
 // surfaced by a distinctive keyword.
 //

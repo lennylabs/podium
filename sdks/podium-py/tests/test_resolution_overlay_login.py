@@ -1,4 +1,4 @@
-"""SDK registry resolution, overlay merge, and login (F-14.4.*, F-14.8.*)."""
+"""SDK registry resolution, overlay merge, and login."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from podium import _config, _overlay
 
 
 # ---------------------------------------------------------------------------
-# F-14.4.1 / F-14.4.3 — from_env resolves the registry from sync.yaml scopes
+# from_env resolves the registry from sync.yaml scopes
 # and reports config.no_registry when unset everywhere (spec §7.5.2, §13.10).
 # ---------------------------------------------------------------------------
 
@@ -86,7 +86,7 @@ def test_from_env_no_registry_raises_config_no_registry(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# F-14.4.2 — workspace overlay merge in search_artifacts / load_artifact
+# workspace overlay merge in search_artifacts / load_artifact
 # (spec §6.4, §6.4.1).
 # ---------------------------------------------------------------------------
 
@@ -144,7 +144,7 @@ def test_search_artifacts_fuses_overlay(artifacts_server, tmp_path):
     assert res.total_matched == 2  # overlay-only id enlarges the count
 
 
-# F-6.4.4 — the SDK overlay search honors the `scope` prefix filter so a
+# the SDK overlay search honors the `scope` prefix filter so a
 # scoped query excludes out-of-scope overlay artifacts (spec §6.4).
 def test_overlay_search_scope_filters_out_of_scope(tmp_path):
     overlay = tmp_path / "overlay"
@@ -217,7 +217,7 @@ def test_rrf_fuse_orders_by_reciprocal_rank():
 
 
 # ---------------------------------------------------------------------------
-# F-14.8.1 / F-14.8.2 — Client.login() runs the device-code flow and the
+# Client.login() runs the device-code flow and the
 # resulting token authenticates requests (spec §6.3, §7.7, §14.8).
 # ---------------------------------------------------------------------------
 
@@ -295,7 +295,7 @@ def test_login_runs_device_flow_and_authenticates(oauth_server):
     tokens = client.login(timeout=10.0)
     assert tokens.access_token == "tok-abc"
     assert client.token == "tok-abc"
-    # F-14.8.2 — the token authenticates subsequent catalog calls.
+    # the token authenticates subsequent catalog calls.
     client.search_artifacts("anything")
     assert oauth_server.last_auth == "Bearer tok-abc"
 

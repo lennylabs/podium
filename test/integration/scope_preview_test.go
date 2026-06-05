@@ -25,7 +25,7 @@ type scopePreview struct {
 	BySensitivity map[string]int `json:"by_sensitivity"`
 }
 
-// Spec: §3.5 (F-3.5.5, F-3.5.6, F-3.5.8) — the scope preview over the
+// Spec: §3.5 — the scope preview over the
 // SQLite metadata store and the HTTP endpoint: counts are per distinct
 // artifact (a multi-version artifact counts once, its sensitivity from the
 // §4.7.6 latest version), `layers` is the precedence-ordered composition
@@ -104,7 +104,7 @@ func TestScopePreview_SQLiteAggregation(t *testing.T) {
 	}
 }
 
-// Spec: §3.5 (F-3.5.1) — the expose_scope_preview tenant gate survives the
+// Spec: §3.5 — the expose_scope_preview tenant gate survives the
 // SQLite column round-trip: a tenant persisted with the flag false makes
 // GET /v1/scope/preview answer 403 config.scope_preview_disabled.
 func TestScopePreview_SQLiteTenantGateDisabled(t *testing.T) {

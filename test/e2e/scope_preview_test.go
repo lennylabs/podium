@@ -15,7 +15,7 @@ func scopePreviewRegistry(t *testing.T) string {
 	})
 }
 
-// Spec: §3.5 (F-3.5.2) — `podium status` surfaces the scope-preview aggregate
+// Spec: §3.5 — `podium status` surfaces the scope-preview aggregate
 // counts for human inspection. End to end against a running standalone server.
 func TestScopePreview_StatusSurfaces(t *testing.T) {
 	t.Parallel()
@@ -39,7 +39,7 @@ func TestScopePreview_StatusSurfaces(t *testing.T) {
 	}
 }
 
-// Spec: §3.5 (F-3.5.4) — `podium sync --preview` prints the aggregate counts
+// Spec: §3.5 — `podium sync --preview` prints the aggregate counts
 // and writes nothing. End to end against a running standalone server.
 func TestScopePreview_SyncPreview(t *testing.T) {
 	t.Parallel()
@@ -59,7 +59,7 @@ func TestScopePreview_SyncPreview(t *testing.T) {
 	}
 }
 
-// Spec: §3.5 (F-3.5.4) — the preview is served by GET /v1/scope/preview, so
+// Spec: §3.5 — the preview is served by GET /v1/scope/preview, so
 // `podium sync --preview` against a filesystem-source registry is rejected.
 func TestScopePreview_SyncPreviewFilesystemRejected(t *testing.T) {
 	t.Parallel()

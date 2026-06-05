@@ -17,7 +17,7 @@ import (
 // latency mitigations. GET /v1/load_artifact publishes the content hash as the
 // ETag and honors a matching If-None-Match with 304 Not Modified and no body,
 // so the MCP client serves its content-addressed cache instead of
-// re-downloading (F-12.0.8).
+// re-downloading.
 
 func newETagServer(t *testing.T) *httptest.Server {
 	t.Helper()

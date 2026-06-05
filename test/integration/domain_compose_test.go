@@ -13,7 +13,7 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// Spec: §4.5 (F-4.5.1..7) — DOMAIN.md composition end to end through the
+// Spec: §4.5 — DOMAIN.md composition end to end through the
 // real ingest walk, the metadata store, and core.LoadDomain. This covers
 // the path the unit tests bypass (they PutDomain directly): a DOMAIN.md on
 // disk is walked, persisted, and applied at load_domain time for
@@ -95,7 +95,7 @@ func TestDomainComposition_IngestToLoadDomain(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 / §4.5.5 (F-4.5.11) — through the real ingest walk, a
+// Spec: §13.12 / §4.5.5 — through the real ingest walk, a
 // per-domain DOMAIN.md discovery override is applied when
 // allow_per_domain_overrides is true and ignored when false, while the
 // tenant registry.yaml discovery default governs the rest.
@@ -145,7 +145,7 @@ func TestDomainComposition_AllowPerDomainOverridesGate(t *testing.T) {
 	}
 }
 
-// Spec: §4.5.5 (F-4.5.13) — through the real ingest walk, a domain whose
+// Spec: §4.5.5 — through the real ingest walk, a domain whose
 // only members arrive via DOMAIN.md include: counts them toward the
 // fold_below threshold and is preserved as a pass-through stop, rather
 // than being folded or collapsed away.
@@ -157,7 +157,7 @@ func TestDomainComposition_ImportedMembersPreserveDomain(t *testing.T) {
 		// are imported. A single canonical descendant makes it a one-child
 		// chain that the count-only logic would collapse.
 		// No description/keywords: curation comes purely from the resolved
-		// include: members, isolating the F-4.5.13 import path.
+		// include: members, isolating the import path.
 		testharness.WriteTreeOption{
 			Path:    "finance/hub/DOMAIN.md",
 			Content: "---\ninclude:\n  - _shared/lib/**\n---\n",

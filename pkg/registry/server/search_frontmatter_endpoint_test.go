@@ -13,7 +13,7 @@ import (
 // frontmatter (the documented {id, type, version, score, frontmatter}
 // read-CLI/SDK schema). Only the manifest body stays at the registry until
 // load_artifact; the descriptor has no body field, so the frontmatter metadata
-// rides along while the prose body does not. Regression for F-7.6.3, where the
+// rides along while the prose body does not. Regression test, where the
 // handler cleared the frontmatter on every result.
 func TestSearchArtifacts_ResultCarriesFrontmatter(t *testing.T) {
 	t.Parallel()
@@ -30,7 +30,7 @@ func TestSearchArtifacts_ResultCarriesFrontmatter(t *testing.T) {
 	}
 	r := resp.Results[0]
 	if r.Frontmatter == "" {
-		t.Fatalf("search result dropped frontmatter (F-7.6.3 regression): %+v", r)
+		t.Fatalf("search result dropped frontmatter (regression): %+v", r)
 	}
 	// The descriptive fields the §7.6.1 schema surfaces inside frontmatter.
 	if !strings.Contains(r.Frontmatter, "type: context") ||

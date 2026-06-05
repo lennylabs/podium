@@ -51,7 +51,7 @@ func TestPostgres_ConformanceSuite(t *testing.T) {
 	})
 }
 
-// Spec: §13.2.1 / §13.9 (F-13.9.4) — the Postgres backend computes
+// Spec: §13.2.1 / §13.9 — the Postgres backend computes
 // observed replication lag from pg_last_xact_replay_timestamp(). On a
 // primary (the usual DSN target) the function is NULL and the query
 // reports 0; on a replica it reports the trailing lag. The query path

@@ -78,7 +78,7 @@ func CheckRuntimeRequirements(req map[string]any, host HostCapabilities) error {
 // systemPackages coerces the system_packages requirement to a string
 // slice. The value is []string when the map is built directly from a
 // typed manifest.RuntimeRequirements, but a generic YAML or JSON
-// round-trip yields []any (F-4.4.4); the bare []string assertion used to
+// round-trip yields []any; the bare []string assertion used to
 // silently skip the check for the round-tripped form, treating an unmet
 // requirement as satisfied. Both element types are accepted here.
 func systemPackages(v any) []string {

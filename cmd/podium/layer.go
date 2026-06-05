@@ -452,8 +452,8 @@ func layerReingest(args []string) int {
 		}
 		// §7.3.1: a same-version content conflict is rejected as
 		// ingest.immutable_violation even when sibling artifacts ingested. Print
-		// each so the author sees which artifact must have its version bumped
-		// (F-7.3.2). A snapshot with only conflicts surfaces as a 409 above.
+		// each so the author sees which artifact must have its version bumped.
+		// A snapshot with only conflicts surfaces as a 409 above.
 		for _, c := range parsed.Conflicts {
 			fmt.Fprintf(os.Stderr, "conflict: %s@%s rejected (%s); bump the version\n", c.ArtifactID, c.Version, c.Code)
 		}
@@ -531,7 +531,7 @@ func doJSON(url, method string, body any) ([]byte, int) {
 	// authenticated registry endpoints with the caller's identity. Attach the
 	// resolved credential (injected session token, then the keychain access
 	// token keyed by the registry URL) so the same omission flagged for the
-	// read commands does not recur here (F-14.15.1).
+	// read commands does not recur here.
 	if tok := readCLIToken(requestBase(url)); tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}

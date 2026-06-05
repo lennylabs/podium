@@ -11,7 +11,7 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// Spec: §13.4 Migrations (F-13.4.1) — "a binary upgrade migrates an
+// Spec: §13.4 Migrations — "a binary upgrade migrates an
 // existing database forward in place, without a separate migration step."
 // This drives the real ingest pipeline and the §8.4 soft-delete path
 // against a SQLite database created by an earlier binary whose manifests

@@ -55,7 +55,7 @@ const PineconeControlPlane = "https://api.pinecone.io"
 // controlPlane falls back to PineconeControlPlane and a nil client to
 // http.DefaultClient. A transport failure or non-2xx response is wrapped with
 // ErrUnreachable so the caller can degrade to BM25 rather than fail hard.
-// spec: §13.12 (F-13.12.3, PODIUM_PINECONE_HOST auto-resolution).
+// spec: §13.12 (PODIUM_PINECONE_HOST auto-resolution).
 func ResolvePineconeHost(ctx context.Context, controlPlane, apiKey, index string, client *http.Client) (string, error) {
 	if apiKey == "" {
 		return "", fmt.Errorf("vector.pinecone: APIKey is required to resolve the index host")

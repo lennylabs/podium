@@ -9,8 +9,8 @@ import (
 )
 
 // spec: §7.5 — the --dry-run --json envelope is
-// {profile, target, harness, scope, artifacts: [{id, version, type, layer}]}
-// (F-7.5.9). A jq consumer reads .harness, .scope.include, and
+// {profile, target, harness, scope, artifacts: [{id, version, type, layer}]}.
+// A jq consumer reads .harness, .scope.include, and
 // .artifacts[].version directly.
 func TestSync_DryRunJSONEnvelope(t *testing.T) {
 	reg := cliReg(t)
@@ -56,7 +56,7 @@ func TestSync_DryRunJSONEnvelope(t *testing.T) {
 	if a.ID != "finance/invoice" || a.Version != "1.0.0" || a.Type != "context" {
 		t.Errorf("artifact = %+v, want finance/invoice 1.0.0 context", a)
 	}
-	// spec: §7.5 / §14.11 (F-14.11.3) — each artifact carries content_hash so a
+	// spec: §7.5 / §14.11 — each artifact carries content_hash so a
 	// pre-flight check can verify the full (id, version, content_hash) triple.
 	if !strings.HasPrefix(a.ContentHash, "sha256:") {
 		t.Errorf("artifact content_hash = %q, want sha256: prefix", a.ContentHash)
@@ -64,7 +64,7 @@ func TestSync_DryRunJSONEnvelope(t *testing.T) {
 }
 
 // spec: §7.5.3 — last_synced_by is "full" for a manual one-shot sync and
-// "override" after `podium sync override` re-materializes (F-7.5.7).
+// "override" after `podium sync override` re-materializes.
 func TestSync_LastSyncedByProvenance(t *testing.T) {
 	reg := cliReg(t)
 	ws := t.TempDir()
@@ -85,8 +85,7 @@ func TestSync_LastSyncedByProvenance(t *testing.T) {
 }
 
 // spec: §7.5.2 — `podium sync --check` validates the merged config and reports
-// warnings (unresolved profiles, malformed globs, collisions) without erroring
-// (F-7.5.10).
+// warnings (unresolved profiles, malformed globs, collisions) without erroring.
 func TestSync_CheckReportsWarnings(t *testing.T) {
 	ws := t.TempDir()
 	// defaults.profile references a missing profile, and a profile has a
@@ -101,7 +100,7 @@ func TestSync_CheckReportsWarnings(t *testing.T) {
 	cliContains(t, res.Stderr, "malformed glob", "malformed glob warning")
 }
 
-// spec: §7.5.5 / §7.5.7 (F-7.5.1) — the no-flag interactive (TUI) forms of
+// spec: §7.5.5 / §7.5.7 — the no-flag interactive (TUI) forms of
 // `podium sync override` and `podium profile edit` launch a checklist / editor
 // driven from stdin. Scripted commands write the same result the batch flags
 // produce. `podium profile edit` with no name still errors asking for a name.

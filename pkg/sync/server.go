@@ -24,7 +24,7 @@ const defaultServerTimeout = 30 * time.Second
 // a structured >=400 response which means the registry answered and refused.
 // It drives the §7.4 offline-first degraded-network behavior in Run: an
 // unreachable server in offline-first mode is tolerated, while a structured
-// rejection still fails the sync (F-7.4.3).
+// rejection still fails the sync.
 type serverUnreachableError struct{ err error }
 
 func (e *serverUnreachableError) Error() string { return e.err.Error() }
@@ -50,7 +50,7 @@ type serverLoadResponse struct {
 	// resolved (id, version) pair. podium sync pins it into the lock verbatim
 	// so the committed (id, version, content_hash) triple is the registry's
 	// system-of-record value rather than a digest recomputed from the served
-	// bytes (§14.11, F-14.11.1).
+	// bytes (§14.11).
 	ContentHash    string            `json:"content_hash"`
 	Layer          string            `json:"layer"`
 	ManifestBody   string            `json:"manifest_body"`
@@ -151,7 +151,7 @@ func fetchServerRecord(ctx context.Context, client *http.Client, base, token, id
 }
 
 // decodeInlineResources copies the inline resource map to bytes, decoding
-// base64 when the registry flagged resources_base64 (F-6.6.8). Sorted-key
+// base64 when the registry flagged resources_base64. Sorted-key
 // iteration keeps the result deterministic.
 func decodeInlineResources(in map[string]string, b64 bool) (map[string][]byte, error) {
 	out := map[string][]byte{}

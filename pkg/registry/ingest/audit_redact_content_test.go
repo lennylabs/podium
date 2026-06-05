@@ -14,7 +14,7 @@ import (
 // artifact.published audit context. The raw value is merged into the context
 // and then redacted inside the emission closure, so it never reaches the sink.
 // Before this change the named field was never emitted, so the directive had
-// no effect. F-8.2.1.
+// no effect.
 func TestIngest_AuditRedactMasksContentField(t *testing.T) {
 	t.Parallel()
 	const secret = "AC-1234-5678"

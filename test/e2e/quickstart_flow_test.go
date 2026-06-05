@@ -24,7 +24,7 @@ func greetRegistry(t *testing.T) string {
 	})
 }
 
-// T-D-quickstart-1 — podium version exits zero and prints a version string.
+// podium version exits zero and prints a version string.
 // Doc: quickstart § 1. Install the CLI.
 func TestQuickstart_Version(t *testing.T) {
 	t.Parallel()
@@ -42,7 +42,7 @@ func TestQuickstart_Version(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-2 — podium init writes .podium/sync.yaml with registry and
+// podium init writes .podium/sync.yaml with registry and
 // harness defaults plus gitignore entries. Doc: quickstart § 2.
 func TestQuickstart_InitWritesSyncYAML(t *testing.T) {
 	t.Parallel()
@@ -72,7 +72,7 @@ func TestQuickstart_InitWritesSyncYAML(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-3 — podium config show prints the merged sync.yaml with
+// podium config show prints the merged sync.yaml with
 // per-key provenance. Doc: quickstart § 2 ("Verify: podium config show").
 // spec §7.7: the bare view shows the client config (the registry and harness
 // from `init`), each annotated with the scope it came from.
@@ -86,7 +86,7 @@ func TestQuickstart_ConfigShowTable(t *testing.T) {
 	if res.Exit != 0 {
 		t.Fatalf("config show exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	// spec §7.7 (F-7.7.1): config show prints the merged sync.yaml with
+	// spec §7.7: config show prints the merged sync.yaml with
 	// per-key provenance, so the registry and harness from `init` appear
 	// alongside the file scope each came from.
 	cliContains(t, res.Stdout, reg, "merged registry value")
@@ -94,7 +94,7 @@ func TestQuickstart_ConfigShowTable(t *testing.T) {
 	cliContains(t, res.Stdout, "from", "per-key provenance")
 }
 
-// T-D-quickstart-4 — podium init --global writes ~/.podium/sync.yaml and
+// podium init --global writes ~/.podium/sync.yaml and
 // leaves the workspace untouched. Doc: quickstart § 2.
 func TestQuickstart_InitGlobal(t *testing.T) {
 	t.Parallel()
@@ -117,7 +117,7 @@ func TestQuickstart_InitGlobal(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-5 — podium init refuses to overwrite sync.yaml without
+// podium init refuses to overwrite sync.yaml without
 // --force. Doc: quickstart § 2.
 func TestQuickstart_InitRefusesOverwrite(t *testing.T) {
 	t.Parallel()
@@ -136,7 +136,7 @@ func TestQuickstart_InitRefusesOverwrite(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-6 / T-D-quickstart-22 — the documented skill (ARTIFACT.md +
+// The documented skill (ARTIFACT.md +
 // SKILL.md) lints cleanly. Doc: quickstart § 3.
 func TestQuickstart_LintCleanSkill(t *testing.T) {
 	t.Parallel()
@@ -149,7 +149,7 @@ func TestQuickstart_LintCleanSkill(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-7 — a type:skill artifact missing SKILL.md fails lint with
+// a type:skill artifact missing SKILL.md fails lint with
 // an error diagnostic. Doc: quickstart § Troubleshooting.
 func TestQuickstart_LintMissingSkillBody(t *testing.T) {
 	t.Parallel()
@@ -171,7 +171,7 @@ func TestQuickstart_LintMissingSkillBody(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-8 / T-D-quickstart-30 — sync with claude-code materializes a
+// Sync with claude-code materializes a
 // type:skill to .claude/skills/<name>/SKILL.md. The quickstart § 4 / § 5 now
 // document this path; .claude/agents/greet.md is asserted absent.
 func TestQuickstart_SyncClaudeCodeSkillLayout(t *testing.T) {
@@ -200,7 +200,7 @@ func TestQuickstart_SyncClaudeCodeSkillLayout(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-9 — sync output uses adapter/target/artifacts with an
+// sync output uses adapter/target/artifacts with an
 // indented file list. The quickstart output block now matches this format
 // and the .claude/skills/greet/SKILL.md path; the doc's earlier
 // "Materialized N artifact" / arrow notation is gone.
@@ -226,7 +226,7 @@ func TestQuickstart_SyncOutputFormat(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-10 — sync with no --registry reads defaults.registry from
+// sync with no --registry reads defaults.registry from
 // .podium/sync.yaml. Doc: quickstart § 4.
 func TestQuickstart_SyncReadsConfigRegistry(t *testing.T) {
 	t.Parallel()
@@ -243,7 +243,7 @@ func TestQuickstart_SyncReadsConfigRegistry(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-11 / T-D-quickstart-24 ish — sync with no registry and no
+// Sync with no registry and no
 // sync.yaml exits 2. Doc: quickstart § Troubleshooting (config.no_registry).
 func TestQuickstart_SyncNoRegistryExits2(t *testing.T) {
 	t.Parallel()
@@ -256,7 +256,7 @@ func TestQuickstart_SyncNoRegistryExits2(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-12 — sync --harness none writes the canonical layout.
+// sync --harness none writes the canonical layout.
 // Doc: quickstart § 4.
 func TestQuickstart_SyncNoneCanonical(t *testing.T) {
 	t.Parallel()
@@ -273,7 +273,7 @@ func TestQuickstart_SyncNoneCanonical(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-13 — sync --dry-run resolves artifacts and writes nothing.
+// sync --dry-run resolves artifacts and writes nothing.
 // Doc: quickstart § 4.
 func TestQuickstart_SyncDryRun(t *testing.T) {
 	t.Parallel()
@@ -291,7 +291,7 @@ func TestQuickstart_SyncDryRun(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-14 — sync claude-code maps type:agent to
+// sync claude-code maps type:agent to
 // .claude/agents/<name>.md. Doc: quickstart § What's next.
 func TestQuickstart_SyncClaudeCodeAgent(t *testing.T) {
 	t.Parallel()
@@ -306,7 +306,7 @@ func TestQuickstart_SyncClaudeCodeAgent(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-15 — sync claude-code maps type:rule to .claude/rules/<name>.md.
+// sync claude-code maps type:rule to .claude/rules/<name>.md.
 func TestQuickstart_SyncClaudeCodeRule(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -317,7 +317,7 @@ func TestQuickstart_SyncClaudeCodeRule(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, ".claude/rules/code-style.md"))
 }
 
-// T-D-quickstart-16 — sync claude-code places a context artifact in the
+// sync claude-code places a context artifact in the
 // harness-neutral .podium/context/<id>/ bucket. Doc: quickstart § What's next.
 func TestQuickstart_SyncClaudeCodeFallbackPath(t *testing.T) {
 	t.Parallel()
@@ -329,7 +329,7 @@ func TestQuickstart_SyncClaudeCodeFallbackPath(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, ".podium/context/personal/hello/ctx-demo/ARTIFACT.md"))
 }
 
-// T-D-quickstart-17 — sync --watch performs an initial sync and exits 0 on
+// sync --watch performs an initial sync and exits 0 on
 // SIGINT. Doc: quickstart § Watch mode.
 func TestQuickstart_WatchInitialSyncThenSIGINT(t *testing.T) {
 	t.Parallel()
@@ -347,7 +347,7 @@ func TestQuickstart_WatchInitialSyncThenSIGINT(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-18 — sync --watch re-materializes after a registry edit.
+// sync --watch re-materializes after a registry edit.
 // Doc: quickstart § Watch mode.
 func TestQuickstart_WatchRematerializesOnEdit(t *testing.T) {
 	t.Parallel()
@@ -376,7 +376,7 @@ func TestQuickstart_WatchRematerializesOnEdit(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-19 — sync is idempotent across two runs. Doc: quickstart § 4.
+// sync is idempotent across two runs. Doc: quickstart § 4.
 func TestQuickstart_SyncIdempotent(t *testing.T) {
 	t.Parallel()
 	reg := greetRegistry(t)
@@ -393,7 +393,7 @@ func TestQuickstart_SyncIdempotent(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-20 — sync with an unknown harness exits non-zero. Doc:
+// sync with an unknown harness exits non-zero. Doc:
 // quickstart § 4 (negative).
 func TestQuickstart_SyncUnknownHarness(t *testing.T) {
 	t.Parallel()
@@ -407,7 +407,7 @@ func TestQuickstart_SyncUnknownHarness(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-21 — intermediate domain directories without ARTIFACT.md are
+// intermediate domain directories without ARTIFACT.md are
 // not treated as artifacts. Doc: quickstart § 3.
 func TestQuickstart_IntermediateDirsNotArtifacts(t *testing.T) {
 	t.Parallel()
@@ -426,7 +426,7 @@ func TestQuickstart_IntermediateDirsNotArtifacts(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, "personal/hello/greet/ARTIFACT.md"))
 }
 
-// T-D-quickstart-23 — lint on a non-existent registry path exits 1. Doc:
+// lint on a non-existent registry path exits 1. Doc:
 // quickstart § Troubleshooting.
 func TestQuickstart_LintBadRegistryPath(t *testing.T) {
 	t.Parallel()
@@ -440,7 +440,7 @@ func TestQuickstart_LintBadRegistryPath(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-24 — lint without --registry exits 2. Doc: quickstart § 3.
+// lint without --registry exits 2. Doc: quickstart § 3.
 func TestQuickstart_LintNoRegistry(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "lint")
@@ -452,7 +452,7 @@ func TestQuickstart_LintNoRegistry(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-25 — sync.yaml written by init carries no credentials.
+// sync.yaml written by init carries no credentials.
 // Doc: quickstart § 2 ("commit .podium/sync.yaml").
 func TestQuickstart_SyncYAMLNoCredentials(t *testing.T) {
 	t.Parallel()
@@ -479,7 +479,7 @@ func TestQuickstart_SyncYAMLNoCredentials(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-26 — init --standalone sets registry to http://127.0.0.1:8080.
+// init --standalone sets registry to http://127.0.0.1:8080.
 func TestQuickstart_InitStandalone(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
@@ -492,7 +492,7 @@ func TestQuickstart_InitStandalone(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-27 — init without --registry or --standalone exits 2.
+// init without --registry or --standalone exits 2.
 func TestQuickstart_InitNoFlags(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, t.TempDir(), []string{"HOME=" + t.TempDir()}, "init")
@@ -504,7 +504,7 @@ func TestQuickstart_InitNoFlags(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-28 — init --global and --local are mutually exclusive.
+// init --global and --local are mutually exclusive.
 func TestQuickstart_InitGlobalLocalMutuallyExclusive(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, t.TempDir(), []string{"HOME=" + t.TempDir()}, "init", "--global", "--local", "--registry", "r")
@@ -516,7 +516,7 @@ func TestQuickstart_InitGlobalLocalMutuallyExclusive(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-29 — init --local writes .podium/sync.local.yaml.
+// init --local writes .podium/sync.local.yaml.
 func TestQuickstart_InitLocal(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
@@ -533,7 +533,7 @@ func TestQuickstart_InitLocal(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-31 — the materialized SKILL.md has valid frontmatter and a
+// the materialized SKILL.md has valid frontmatter and a
 // non-empty body. Doc: quickstart § 5.
 func TestQuickstart_MaterializedSkillContent(t *testing.T) {
 	t.Parallel()
@@ -553,7 +553,7 @@ func TestQuickstart_MaterializedSkillContent(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-32 — sync against an empty registry exits 0 with zero
+// sync against an empty registry exits 0 with zero
 // artifacts and writes nothing. Doc: quickstart § Troubleshooting.
 func TestQuickstart_SyncEmptyRegistry(t *testing.T) {
 	t.Parallel()
@@ -574,7 +574,7 @@ func TestQuickstart_SyncEmptyRegistry(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-33 — sync --json emits structured output with adapter,
+// sync --json emits structured output with adapter,
 // target, and artifacts keys. Doc: quickstart § 4.
 func TestQuickstart_SyncJSON(t *testing.T) {
 	t.Parallel()
@@ -608,7 +608,7 @@ func TestQuickstart_SyncJSON(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-34 — multi-layer registry strips the layer prefix from
+// multi-layer registry strips the layer prefix from
 // artifact IDs. Doc: quickstart § What's next.
 func TestQuickstart_MultiLayerStripsPrefix(t *testing.T) {
 	t.Parallel()
@@ -630,7 +630,7 @@ func TestQuickstart_MultiLayerStripsPrefix(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, "notes/ctx/ARTIFACT.md"))
 }
 
-// T-D-quickstart-35 — a manifest at the top level of a multi-layer registry
+// a manifest at the top level of a multi-layer registry
 // is rejected as ambiguous. Doc: quickstart § What's next (negative).
 func TestQuickstart_MultiLayerTopLevelManifestRejected(t *testing.T) {
 	t.Parallel()
@@ -647,7 +647,7 @@ func TestQuickstart_MultiLayerTopLevelManifestRejected(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-36 — podium serve --standalone serves /healthz and /readyz.
+// podium serve --standalone serves /healthz and /readyz.
 // Doc: quickstart § What's next.
 func TestQuickstart_ServeStandaloneHealth(t *testing.T) {
 	t.Parallel()
@@ -661,7 +661,7 @@ func TestQuickstart_ServeStandaloneHealth(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-37 — podium help lists the core subcommands. Doc: § 1.
+// podium help lists the core subcommands. Doc: § 1.
 func TestQuickstart_Help(t *testing.T) {
 	t.Parallel()
 	for _, arg := range []string{"help", "-h", "--help"} {
@@ -677,7 +677,7 @@ func TestQuickstart_Help(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-38 — the binary built from source via go build is
+// the binary built from source via go build is
 // functional. Doc: quickstart § 1 ("From source"). cmdharness compiles
 // ./cmd/podium with `go build`; this asserts that binary runs `version`.
 func TestQuickstart_BuildFromSource(t *testing.T) {
@@ -688,7 +688,7 @@ func TestQuickstart_BuildFromSource(t *testing.T) {
 	}
 }
 
-// T-D-quickstart-39 — watch mode uses fsnotify with a poll fallback, matching
+// watch mode uses fsnotify with a poll fallback, matching
 // the quickstart and spec §13.11.4. An earlier version of this test asserted
 // poll-only, which was wrong: the fsnotify import lives in the sibling
 // watch_fsnotify.go, and runWatch tries the fsnotify TreeWatcher before falling

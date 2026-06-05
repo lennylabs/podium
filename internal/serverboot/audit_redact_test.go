@@ -12,7 +12,6 @@ import (
 
 // spec: §8.2 — the audit adapter scrubs the free-text search query before
 // the event reaches the sink (default-on), so PII never lands on disk.
-// F-8.2.1.
 func TestAuditEmitterFor_ScrubsQuery(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.log")
@@ -66,7 +65,7 @@ func TestAuditEmitterFor_ScrubDisabled(t *testing.T) {
 }
 
 // spec: §8.2 — manifest-declared redaction: the adapter masks the context
-// keys named in RedactKeys before the event reaches the sink. F-8.2.3.
+// keys named in RedactKeys before the event reaches the sink.
 func TestAuditEmitterFor_RedactsManifestFields(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.log")
@@ -95,7 +94,7 @@ func TestAuditEmitterFor_RedactsManifestFields(t *testing.T) {
 }
 
 // spec: §8.2 — PIIRedactionConfig resolution: env PODIUM_PII_REDACTION
-// wins over registry.yaml; absent config is default-on. F-8.2.2.
+// wins over registry.yaml; absent config is default-on.
 func TestPIIRedactionConfig_Resolution(t *testing.T) {
 	t.Run("default on when unset", func(t *testing.T) {
 		c := &Config{}

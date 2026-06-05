@@ -40,14 +40,14 @@ func TestStartRetentionScheduler_NilSink(t *testing.T) {
 	startRetentionScheduler(&Config{}, nil, nil)
 }
 
-// Spec: §8.6 (F-8.6.1) — startVerifyScheduler tolerates a nil sink by
+// Spec: §8.6 — startVerifyScheduler tolerates a nil sink by
 // logging and returning without launching a goroutine.
 func TestStartVerifyScheduler_NilSink(t *testing.T) {
 	t.Parallel()
 	startVerifyScheduler(&Config{auditVerifyInterval: 1}, nil)
 }
 
-// Spec: §8.6 (F-8.6.1) — with a sink and a short interval the verify
+// Spec: §8.6 — with a sink and a short interval the verify
 // scheduler runs its immediate pass without panicking. A clean chain
 // raises no alert.
 func TestStartVerifyScheduler_Runs(t *testing.T) {
@@ -100,7 +100,7 @@ func TestDefaultRetentionPolicies_NonEmpty(t *testing.T) {
 	}
 }
 
-// Spec: §8.4 (F-8.4.3) — every audit.EventType is classified as either
+// Spec: §8.4 — every audit.EventType is classified as either
 // operational (subject to the 1-year metadata default) or retained
 // indefinitely (integrity / GDPR-erasure accountability), with no type in
 // both and none left unclassified. This guards against a newly added event
@@ -147,7 +147,7 @@ func TestRetentionClassification_CoversEveryEventType(t *testing.T) {
 	}
 }
 
-// Spec: §8.4 (F-8.4.3) — the retained-indefinitely integrity and erasure
+// Spec: §8.4 — the retained-indefinitely integrity and erasure
 // events carry no default policy, so audit.Enforce never drops them even
 // when they are older than the metadata window.
 func TestRetentionPolicy_OmitsIntegrityAndErasureTypes(t *testing.T) {
@@ -206,7 +206,7 @@ func TestOpenAuditSink_WithExplicitPath(t *testing.T) {
 	}
 }
 
-// Spec: §8.3 (F-8.3.1) — an http(s) PODIUM_AUDIT_LOG_PATH redirects the
+// Spec: §8.3 — an http(s) PODIUM_AUDIT_LOG_PATH redirects the
 // registry sink to an external endpoint, mirroring the local sink. The emit
 // sink is the EndpointSink; the file form is nil so the file-only schedulers
 // (anchor/verify/retention) and the §8.5 erasure pass stay disabled.
@@ -227,7 +227,7 @@ func TestOpenAuditSink_EndpointRedirect(t *testing.T) {
 	}
 }
 
-// Spec: §8.3 (F-8.3.1) — a malformed endpoint value disables the sink
+// Spec: §8.3 — a malformed endpoint value disables the sink
 // (both returns nil) rather than falling back to a file named like a URL.
 func TestOpenAuditSink_BadEndpointDisables(t *testing.T) {
 	t.Parallel()

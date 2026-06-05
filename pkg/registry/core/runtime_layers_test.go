@@ -14,7 +14,7 @@ import (
 // one user-defined layer (owned by alice) registered at runtime. The
 // user-defined layer is persisted only as a store.LayerConfig; it is never
 // added to the boot-time slice handed to core.New, mirroring a POST /v1/layers
-// registration that happens after the registry is constructed (F-4.6.1).
+// registration that happens after the registry is constructed.
 func seedRuntimeLayers(t *testing.T) *core.Registry {
 	t.Helper()
 	st := store.NewMemory()
@@ -74,7 +74,7 @@ func searchIDs(t *testing.T, reg *core.Registry, id layer.Identity) []string {
 // users via the CLI/API (§7.3.1)" and "Resolution of layers 1 and 2 happens at
 // the registry on every load_domain, search_domains, search_artifacts, and
 // load_artifact call." A runtime-registered layer persisted after boot must
-// enter its owner's effective view (F-4.6.1). Fails before the fix because the
+// enter its owner's effective view. Fails before the fix because the
 // read path filtered against a static boot-time slice that never saw it.
 func TestRuntimeLayer_UserDefinedEntersOwnersView(t *testing.T) {
 	t.Parallel()
@@ -86,7 +86,7 @@ func TestRuntimeLayer_UserDefinedEntersOwnersView(t *testing.T) {
 		t.Errorf("alice should see the admin org artifact: %v", ids)
 	}
 	if !contains(ids, "alice-y") {
-		t.Errorf("alice should see her runtime-registered layer's artifact (F-4.6.1): %v", ids)
+		t.Errorf("alice should see her runtime-registered layer's artifact: %v", ids)
 	}
 	if _, err := reg.LoadArtifact(context.Background(), alice, "alice-y", core.LoadArtifactOptions{}); err != nil {
 		t.Errorf("LoadArtifact alice-y as owner: %v", err)

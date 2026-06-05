@@ -116,7 +116,7 @@ func TestOpenAI_Live_DimensionAndDeterminism(t *testing.T) {
 // alignment. OpenAI returns one {embedding,index} per input and the
 // provider scatters by index; a repeated phrase must embed to the same
 // vector as when sent alone, and a distinct phrase must differ
-// (G-EMB-2: exercises index reordering against a real response).
+// (exercises index reordering against a real response).
 func TestOpenAI_Live_BatchAlignment(t *testing.T) {
 	p := liveOpenAI(t)
 	ctx, cancel := liveContext(t)

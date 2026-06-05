@@ -62,7 +62,7 @@ func TestContentHashFor_DistinctAndStable(t *testing.T) {
 	}
 }
 
-// spec: §14.11, §7.5.3 (F-14.11.1) — for a server source, lockContentHash pins
+// spec: §14.11, §7.5.3 — for a server source, lockContentHash pins
 // the registry's authoritative content_hash verbatim. The registry value wins
 // even when it diverges from a digest recomputed over the served bytes, which
 // is the §4.6 extends-merge case the registry itself flags ("served bytes no
@@ -88,7 +88,7 @@ func TestLockContentHash_FallsBackToComputed(t *testing.T) {
 	}
 }
 
-// spec: §14.11, §7.5.3 (F-14.11.1) — a server-source sync pins the registry's
+// spec: §14.11, §7.5.3 — a server-source sync pins the registry's
 // authoritative content_hash (from /v1/load_artifact) into the committed lock
 // rather than recomputing one from the served bytes. The stub serves a hash
 // that deliberately diverges from contentHashFor(served frontmatter), so the

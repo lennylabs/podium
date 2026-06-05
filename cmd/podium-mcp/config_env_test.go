@@ -59,7 +59,7 @@ func captureStderr(t *testing.T, fn func()) string {
 }
 
 // spec: §6.2 — PODIUM_VERIFY_SIGNATURES must be a recognized policy.
-// An unknown value is refused at startup (F-6.2.1) instead of silently
+// An unknown value is refused at startup instead of silently
 // disabling signature verification.
 func TestLoadConfig_RejectsUnknownVerifyPolicy(t *testing.T) {
 	hermetic(t)
@@ -84,7 +84,7 @@ func TestLoadConfig_AcceptsKnownVerifyPolicies(t *testing.T) {
 }
 
 // spec: §6.2 — PODIUM_IDENTITY_PROVIDER selects a built-in provider; an
-// unrecognized value is refused at startup (F-6.2.3).
+// unrecognized value is refused at startup.
 func TestLoadConfig_RejectsUnknownIdentityProvider(t *testing.T) {
 	hermetic(t)
 	t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:1")
@@ -113,7 +113,7 @@ func TestLoadConfig_AcceptsKnownIdentityProviders(t *testing.T) {
 
 // spec: §6.9 "Unknown PODIUM_HARNESS value" — the bridge refuses to start
 // and the error lists the available adapter values, instead of detecting the
-// unknown harness lazily on the first load_artifact materialization (F-6.9.2).
+// unknown harness lazily on the first load_artifact materialization.
 func TestLoadConfig_RejectsUnknownHarness(t *testing.T) {
 	hermetic(t)
 	t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:1")
@@ -133,7 +133,7 @@ func TestLoadConfig_RejectsUnknownHarness(t *testing.T) {
 }
 
 // spec: §6.9 — a registered PODIUM_HARNESS (including the default "none")
-// starts cleanly (F-6.9.2).
+// starts cleanly.
 func TestLoadConfig_AcceptsKnownHarness(t *testing.T) {
 	for _, h := range []string{"none", "claude-code", "cursor"} {
 		t.Run(h, func(t *testing.T) {
@@ -154,7 +154,7 @@ func TestLoadConfig_AcceptsKnownHarness(t *testing.T) {
 // spec: §6.1 / §7.5.2 — the MCP server requires a server-source registry.
 // A PODIUM_REGISTRY value that is not an http:// or https:// URL is a
 // filesystem source under the §7.5.2 dispatch rule and the bridge refuses
-// to start rather than failing opaquely on the first tool call (F-6.1.1).
+// to start rather than failing opaquely on the first tool call.
 func TestLoadConfig_RejectsFilesystemRegistry(t *testing.T) {
 	for _, reg := range []string{
 		"/srv/registry",        // absolute filesystem path
@@ -198,7 +198,7 @@ func TestLoadConfig_AcceptsServerRegistry(t *testing.T) {
 }
 
 // spec: §6.2 / §7.5.2 / §6.11 — when PODIUM_REGISTRY is unset the bridge
-// falls back to defaults.registry from the workspace sync.yaml (F-6.2.2).
+// falls back to defaults.registry from the workspace sync.yaml.
 func TestLoadConfig_RegistryFromWorkspaceSyncYAML(t *testing.T) {
 	hermetic(t)
 	t.Setenv("PODIUM_REGISTRY", "")
@@ -243,7 +243,7 @@ func TestLoadConfig_RegistryFromHomeSyncYAML(t *testing.T) {
 
 // spec: §4.7.9 / §13.10 — a standalone deployment writes
 // defaults.verify_signatures: never into ~/.podium/sync.yaml; the bridge
-// honors it when PODIUM_VERIFY_SIGNATURES is unset (F-13.10.12).
+// honors it when PODIUM_VERIFY_SIGNATURES is unset.
 func TestLoadConfig_VerifySignaturesFromSyncYAML(t *testing.T) {
 	hermetic(t)
 	t.Setenv("PODIUM_REGISTRY", "")
@@ -305,7 +305,7 @@ func TestLoadConfig_VerifySignaturesDefaultsToMediumAndAbove(t *testing.T) {
 
 // spec: §6.2 / §6.5 — when PODIUM_CACHE_DIR is unset and the home
 // directory cannot be resolved, the cache is disabled with a warning
-// rather than silently (F-6.2.8). Startup still succeeds.
+// rather than silently. Startup still succeeds.
 func TestLoadConfig_CacheDirWarnsWhenHomeUnresolvable(t *testing.T) {
 	hermetic(t)
 	t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:1")
@@ -329,7 +329,7 @@ func TestLoadConfig_CacheDirWarnsWhenHomeUnresolvable(t *testing.T) {
 }
 
 // spec: §6.1 / §6.2 — command-line flags are accepted and override env
-// vars (F-6.2.6).
+// vars.
 func TestApplyFlagsAndConfig_FlagOverridesEnv(t *testing.T) {
 	t.Parallel()
 	c := &config{harness: "none", registry: "http://env"}
@@ -345,7 +345,7 @@ func TestApplyFlagsAndConfig_FlagOverridesEnv(t *testing.T) {
 }
 
 // spec: §6.1 / §6.2 — a config file is accepted; explicit flags override
-// the config file, which overrides env (F-6.2.6).
+// the config file, which overrides env.
 func TestApplyFlagsAndConfig_ConfigFilePrecedence(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -392,7 +392,7 @@ func TestParseFlags_IgnoresUnknown(t *testing.T) {
 
 // spec: §6.2 — PODIUM_AUDIT_SINK: unset leaves auditing to the registry;
 // "default" (or empty) selects ~/.podium/audit.log; a path selects that
-// file (F-6.2.4).
+// file.
 func TestNewAuditSink(t *testing.T) {
 	t.Run("unset is nil", func(t *testing.T) {
 		sink, err := newAuditSink(&config{auditSinkSet: false})
@@ -434,7 +434,7 @@ func TestNewAuditSink(t *testing.T) {
 }
 
 // spec: §6.2 — a configured sink records a local audit event for a
-// meta-tool call; an unset sink is a silent no-op (F-6.2.4).
+// meta-tool call; an unset sink is a silent no-op.
 func TestAuditMeta_AppendsEvent(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -458,7 +458,7 @@ func TestAuditMeta_AppendsEvent(t *testing.T) {
 
 // spec: §6.2 — callTool records the per-tool audit event before
 // dispatching, so a local audit captures the call even when the
-// downstream registry is unreachable (F-6.2.4).
+// downstream registry is unreachable.
 func TestCallTool_EmitsAuditEvent(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -481,8 +481,7 @@ func TestCallTool_EmitsAuditEvent(t *testing.T) {
 }
 
 // spec: §6.2 / §6.6 — the per-call destination is read from the
-// load_artifact arguments under destination/materialize_root/path
-// (F-6.2.5).
+// load_artifact arguments under destination/materialize_root/path.
 func TestDestFromArgs(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -506,7 +505,7 @@ func TestDestFromArgs(t *testing.T) {
 
 // spec: §6.2 — PODIUM_PRESIGN_TTL_SECONDS is a registry-side parameter;
 // the MCP bridge neither requires nor consumes it. Setting it does not
-// affect bridge startup (F-6.2.7).
+// affect bridge startup.
 func TestLoadConfig_IgnoresPresignTTL(t *testing.T) {
 	hermetic(t)
 	t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:1")
@@ -518,7 +517,7 @@ func TestLoadConfig_IgnoresPresignTTL(t *testing.T) {
 
 // spec: §6.2 / §6.6 — when PODIUM_MATERIALIZE_ROOT is unset, a per-call
 // `destination` argument drives materialization, so the host can supply
-// the destination per load_artifact call (F-6.2.5). Without either, the
+// the destination per load_artifact call. Without either, the
 // artifact is returned but nothing is written to disk.
 func TestLoadArtifact_PerCallDestinationMaterializes(t *testing.T) {
 	t.Parallel()

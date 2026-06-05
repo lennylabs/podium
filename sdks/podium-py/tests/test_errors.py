@@ -51,7 +51,7 @@ class RegistryReadOnlyTest(unittest.TestCase):
         with self.assertRaises(RegistryReadOnly):
             result.materialize("/tmp/should-not-write")
 
-    # spec: §6.10 (F-6.10.1) — the envelope parser captures the machine-readable
+    # spec: §6.10 — the envelope parser captures the machine-readable
     # details map and the operator remediation hint so callers can read the full
     # envelope, not only code/message/retryable.
     def test_envelope_captures_details_and_suggested_action(self):

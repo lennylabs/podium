@@ -337,7 +337,7 @@ func TestExtends_ContentHashPin(t *testing.T) {
 	}
 }
 
-// Spec: §4.7.4 + §4.6 (F-4.6.7) — search_artifacts surfaces the sensitivity
+// Spec: §4.7.4 + §4.6 — search_artifacts surfaces the sensitivity
 // label, and for an extends: child it reflects the most-restrictive value
 // across the chain so search and load_artifact agree. A child that declares
 // `low` while its pinned parent is `high` searches as `high`.

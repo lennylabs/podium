@@ -33,7 +33,7 @@ func newRunnerHarness(t *testing.T, runner server.ReingestRunner) (string, func(
 	return ts.URL, ts.Close
 }
 
-// spec: §7.3.1 (F-7.3.4) — with a runner wired, reingest runs the pipeline and
+// spec: §7.3.1 — with a runner wired, reingest runs the pipeline and
 // returns the result summary (accepted/idempotent counts).
 func TestReingest_RunsPipelineAndReturnsSummary(t *testing.T) {
 	t.Parallel()
@@ -61,7 +61,7 @@ func TestReingest_RunsPipelineAndReturnsSummary(t *testing.T) {
 	}
 }
 
-// spec: §4.7.2 (F-7.3.9) — a break-glass body is parsed and threaded to the
+// spec: §4.7.2 — a break-glass body is parsed and threaded to the
 // runner with its justification and approvers.
 func TestReingest_BreakGlassThreadedToRunner(t *testing.T) {
 	t.Parallel()
@@ -158,7 +158,7 @@ func TestReingest_ErrorMapping(t *testing.T) {
 	}
 }
 
-// spec: §7.3.1 (F-7.3.7) — force_push_policy must be one of "", tolerant, or
+// spec: §7.3.1 — force_push_policy must be one of "", tolerant, or
 // strict; an unknown value is rejected, a valid one persists.
 func TestRegister_ForcePushPolicyValidation(t *testing.T) {
 	t.Parallel()

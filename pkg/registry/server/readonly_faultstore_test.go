@@ -18,7 +18,7 @@ import (
 	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
-// Spec: §13.2.1 / §8.1 — this is the G-INFRA-6 proof that the
+// Spec: §13.2.1 / §8.1 — this is the proof that the
 // fault-injectable store decorator drives the real read-only journey
 // end to end. A storetest.FaultStore wraps a Memory store and is wired
 // into an in-process server alongside the real server.ReadOnlyProbe and

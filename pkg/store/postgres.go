@@ -520,7 +520,7 @@ func (p *Postgres) GetTenant(ctx context.Context, id string) (Tenant, error) {
 // spec: §4.7 — the invariant must hold under concurrent ingest. A
 // SELECT-then-INSERT pair lets two writers both observe no row under
 // READ COMMITTED and then collide on the primary key, leaking the raw
-// unique-violation error (F-1.3.1). A single atomic
+// unique-violation error. A single atomic
 // INSERT ... ON CONFLICT DO NOTHING is the immutability anchor instead:
 // at most one writer inserts the row, and the loser reads the stored
 // hash back to classify the outcome deterministically — a differing hash

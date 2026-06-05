@@ -60,7 +60,7 @@ func dlContains(ss []string, want string) bool {
 	return false
 }
 
-// spec: §4.5.5 (F-4.5.2) — the requested domain's description resolves
+// spec: §4.5.5 — the requested domain's description resolves
 // to the prose body, then frontmatter description, then the basename
 // fallback.
 func TestLoadDomain_RequestedDescriptionResolution(t *testing.T) {
@@ -96,7 +96,7 @@ func TestLoadDomain_RequestedDescriptionResolution(t *testing.T) {
 	}
 }
 
-// spec: §4.5.5 (F-4.5.3) — keywords are returned verbatim for the
+// spec: §4.5.5 — keywords are returned verbatim for the
 // requested domain; the root returns an empty list.
 func TestLoadDomain_Keywords(t *testing.T) {
 	t.Parallel()
@@ -117,7 +117,7 @@ func TestLoadDomain_Keywords(t *testing.T) {
 	}
 }
 
-// spec: §4.5.3 / §4.5.5 (F-4.5.5) — an unlisted folder and its subtree
+// spec: §4.5.3 / §4.5.5 — an unlisted folder and its subtree
 // are removed from enumeration and return domain.not_found, while a
 // sibling stays enumerable.
 func TestLoadDomain_Unlisted(t *testing.T) {
@@ -143,7 +143,7 @@ func TestLoadDomain_Unlisted(t *testing.T) {
 	}
 }
 
-// spec: §4.5.2 (F-4.5.6) — include globs pull artifacts from other
+// spec: §4.5.2 — include globs pull artifacts from other
 // prefixes into the notable list; exclude is applied after.
 func TestLoadDomain_Imports(t *testing.T) {
 	t.Parallel()
@@ -172,7 +172,7 @@ func TestLoadDomain_Imports(t *testing.T) {
 	}
 }
 
-// spec: §4.5.5 (F-4.5.7) — depth expands the rendered subtree; the
+// spec: §4.5.5 — depth expands the rendered subtree; the
 // resolved max_depth ceiling caps it and the cap is noted.
 func TestLoadDomain_DepthAndMaxDepth(t *testing.T) {
 	t.Parallel()
@@ -208,7 +208,7 @@ func TestLoadDomain_DepthAndMaxDepth(t *testing.T) {
 	}
 }
 
-// spec: §4.5.4 (F-4.5.2..7) — DOMAIN.md candidates merge across layers:
+// spec: §4.5.4 — DOMAIN.md candidates merge across layers:
 // description last-layer-wins, keywords append-unique, unlisted
 // most-restrictive.
 func TestLoadDomain_CrossLayerMerge(t *testing.T) {
@@ -239,7 +239,7 @@ func TestLoadDomain_CrossLayerMerge(t *testing.T) {
 	}
 }
 
-// spec: §4.5.5 (F-4.5.7) — deprioritize ranks matching children last and
+// spec: §4.5.5 — deprioritize ranks matching children last and
 // excludes them when the notable cap leaves no room.
 func TestLoadDomain_Deprioritize(t *testing.T) {
 	t.Parallel()

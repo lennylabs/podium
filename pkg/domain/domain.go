@@ -21,7 +21,7 @@ import (
 // Domain ready for rendering.
 //
 // "Last-layer-wins" for description and body is read as "the last layer
-// that supplies a value wins" (F-4.5.8): a higher-precedence layer whose
+// that supplies a value wins": a higher-precedence layer whose
 // DOMAIN.md omits description/body does not clear a lower layer's value.
 // YAML parses an omitted `description:` and an explicit `description: ""`
 // to the same empty string, so the two cannot be distinguished after

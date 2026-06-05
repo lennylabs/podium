@@ -100,7 +100,7 @@ func TestErase_SQLitePurgesLayersAndRedactsAudit(t *testing.T) {
 	if strings.Contains(string(data), "alice@acme.com") {
 		t.Errorf("erased identity still present in audit stream")
 	}
-	// F-8.5.1: the attached email and group membership are redacted too.
+	// the attached email and group membership are redacted too.
 	if strings.Contains(string(data), "acme-engineering") {
 		t.Errorf("erased user's group membership still present in audit stream")
 	}

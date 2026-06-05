@@ -1,6 +1,6 @@
 package e2e
 
-// Description-quality ingest advisory, end to end (gap G-DOC-8).
+// Description-quality ingest advisory, end to end.
 //
 // Spec §3.3 ("The registry lints for thin descriptions and flags clusters of
 // artifacts whose summaries collide") and §12 ("Ingest-time lint flags thin
@@ -13,7 +13,7 @@ package e2e
 // which the boot path logs.
 //
 // These tests drive the real `podium` CLI against a standalone server: register
-// a local-source layer (the G-INFRA-7 runtime-republish foundation), stage a
+// a local-source layer (the runtime-republish foundation), stage a
 // vague, a precise, and a borderline-acceptable artifact, reingest, and assert
 // the thin-description advisory fires on the vague artifact only with no false
 // positive on the borderline one that sits exactly at the §3.3 bound. Ingest
@@ -52,7 +52,7 @@ func reingestArtifacts(t testing.TB, l *republishLayer, files map[string]string)
 	return ri
 }
 
-// G-DOC-8 — the §3.3 / §12 thin-description advisory fires through the real
+// the §3.3 / §12 thin-description advisory fires through the real
 // ingest path on a vague description only, draws no false positive on a
 // borderline-acceptable description at the §3.3 bound, and never gates ingest:
 // the standalone server accepts and serves all three artifacts.
@@ -92,7 +92,7 @@ func TestDescriptionQuality_ThinAdvisoryEndToEnd(t *testing.T) {
 	}
 }
 
-// G-DOC-8 (colliding-summary half) — the §3.3 cross-artifact colliding-summary
+// (colliding-summary half) — the §3.3 cross-artifact colliding-summary
 // advisory fires through the real ingest path on every member of a normalized
 // collision, naming each colliding peer, while a distinct summary draws no flag
 // and ingest accepts all three.

@@ -166,7 +166,7 @@ func TestResolveExtends_SameIDWithoutLowerLayerErrors(t *testing.T) {
 // Spec: §4.6 — "The child's type: must match the parent's; ingest rejects an
 // extends: chain that crosses types." The filesystem-source materialization
 // path must reject a cross-type chain rather than silently merge the parent's
-// fields into a differently-typed child (F-4.6.2). Mirrors the server ingest
+// fields into a differently-typed child. Mirrors the server ingest
 // rejection.
 func TestResolveExtends_CrossTypeRejected(t *testing.T) {
 	t.Parallel()

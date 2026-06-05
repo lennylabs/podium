@@ -77,7 +77,7 @@ type Linter struct {
 	AllowPerDomainOverrides *bool
 	// PerFileSoftCapBytes overrides the §4.1 per-file bundled-resource
 	// soft cap (the warning threshold) so an operator can tune it per §12
-	// ("soft cap is configurable", F-12.0.2). Zero uses the default
+	// ("soft cap is configurable"). Zero uses the default
 	// PerFileSoftCapBytes constant. Ignored when Rules is set explicitly.
 	PerFileSoftCapBytes int64
 	// PerPackageSoftCapBytes overrides the §4.1 per-package bundled-resource
@@ -150,7 +150,7 @@ func DefaultHTTPClient() *http.Client {
 //
 // The §4.1 bundled-resource soft caps are configurable per §12 via
 // PODIUM_LINT_PER_FILE_SOFT_CAP_BYTES and
-// PODIUM_LINT_PER_PACKAGE_SOFT_CAP_BYTES (F-12.0.2); an unset or
+// PODIUM_LINT_PER_PACKAGE_SOFT_CAP_BYTES; an unset or
 // non-positive value leaves the default constant in force.
 func NewIngestLinter(offline bool) *Linter {
 	l := &Linter{
@@ -185,7 +185,7 @@ func (l *Linter) Lint(ctx context.Context, reg *filesystem.Registry, records []f
 	rules := l.Rules
 	if len(rules) == 0 {
 		rules = AllRulesWithClient(l.HTTPClient)
-		// §12 (F-12.0.2): apply the configured bundled-resource soft caps.
+		// §12: apply the configured bundled-resource soft caps.
 		// Zero values fall back to the §4.1 defaults inside the rule.
 		if l.PerFileSoftCapBytes > 0 || l.PerPackageSoftCapBytes > 0 {
 			for i := range rules {

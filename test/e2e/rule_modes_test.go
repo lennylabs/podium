@@ -6,7 +6,7 @@ package e2e
 // rule materialization layouts (claude-code, cursor, hermes, opencode, pi), and
 // MCP materialization through the claude-code harness. Tests drive the podium
 // CLI, the standalone server, and the podium-mcp bridge. Behaviors blocked by a
-// known BUILD-GAPS finding are recorded as skips; doc claims the implementation
+// known implementation-gap finding are recorded as skips; doc claims the implementation
 // does not honor (with no finding filed, or filed but unobservable) are asserted
 // against actual behavior with a note so a future change is detected.
 
@@ -39,7 +39,7 @@ func rmRuleArtifact(name, mode string, extra []string, body string) string {
 
 // ---- Scaffold: field emission and required-companion validation ------------
 
-// T-D-rule-modes-1 — scaffold always-mode rule writes rule_mode: always to
+// scaffold always-mode rule writes rule_mode: always to
 // ARTIFACT.md and injects no companion fields.
 // spec: docs/authoring/rule-modes.md § "When to use each mode", always block.
 func TestRuleModes_ScaffoldAlways(t *testing.T) {
@@ -62,7 +62,7 @@ func TestRuleModes_ScaffoldAlways(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-2 — scaffold with no --rule-mode defaults to rule_mode: always.
+// scaffold with no --rule-mode defaults to rule_mode: always.
 // spec: docs/authoring/rule-modes.md § "Default is always if you don't set the field".
 func TestRuleModes_ScaffoldDefaultMode(t *testing.T) {
 	t.Parallel()
@@ -77,7 +77,7 @@ func TestRuleModes_ScaffoldDefaultMode(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-3 — scaffold glob-mode rule writes rule_mode: glob and
+// scaffold glob-mode rule writes rule_mode: glob and
 // rule_globs carrying both patterns.
 // spec: docs/authoring/rule-modes.md § "When to use each mode", glob block.
 func TestRuleModes_ScaffoldGlob(t *testing.T) {
@@ -98,7 +98,7 @@ func TestRuleModes_ScaffoldGlob(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-4 — scaffold glob-mode without --rule-globs is a usage error.
+// scaffold glob-mode without --rule-globs is a usage error.
 // spec: docs/authoring/rule-modes.md § "Lint behavior"; glob requires rule_globs.
 func TestRuleModes_ScaffoldGlobMissingGlobs(t *testing.T) {
 	t.Parallel()
@@ -113,7 +113,7 @@ func TestRuleModes_ScaffoldGlobMissingGlobs(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-5 — scaffold auto-mode rule writes rule_mode: auto and the
+// scaffold auto-mode rule writes rule_mode: auto and the
 // rule_description text.
 // spec: docs/authoring/rule-modes.md § "When to use each mode", auto block.
 func TestRuleModes_ScaffoldAuto(t *testing.T) {
@@ -132,7 +132,7 @@ func TestRuleModes_ScaffoldAuto(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-6 — scaffold auto-mode without --rule-description is a usage
+// scaffold auto-mode without --rule-description is a usage
 // error.
 // spec: docs/authoring/rule-modes.md § "Lint behavior"; auto requires rule_description.
 func TestRuleModes_ScaffoldAutoMissingDescription(t *testing.T) {
@@ -148,7 +148,7 @@ func TestRuleModes_ScaffoldAutoMissingDescription(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-7 — scaffold explicit-mode rule writes rule_mode: explicit and
+// scaffold explicit-mode rule writes rule_mode: explicit and
 // injects no companion fields.
 // spec: docs/authoring/rule-modes.md § "When to use each mode", explicit block.
 func TestRuleModes_ScaffoldExplicit(t *testing.T) {
@@ -168,7 +168,7 @@ func TestRuleModes_ScaffoldExplicit(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-8 — scaffold with an invalid --rule-mode value is a usage error
+// scaffold with an invalid --rule-mode value is a usage error
 // naming the accepted values.
 // spec: docs/authoring/rule-modes.md § mode table (always, glob, auto, explicit).
 func TestRuleModes_ScaffoldInvalidMode(t *testing.T) {
@@ -186,7 +186,7 @@ func TestRuleModes_ScaffoldInvalidMode(t *testing.T) {
 
 // ---- Lint -----------------------------------------------------------------
 
-// T-D-rule-modes-9 — an always-mode rule with no companion fields lints clean.
+// an always-mode rule with no companion fields lints clean.
 // spec: docs/authoring/rule-modes.md § "Lint behavior".
 func TestRuleModes_LintAlwaysClean(t *testing.T) {
 	t.Parallel()
@@ -199,7 +199,7 @@ func TestRuleModes_LintAlwaysClean(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-10 — lint errors for a glob-mode rule missing rule_globs.
+// lint errors for a glob-mode rule missing rule_globs.
 // spec: docs/authoring/rule-modes.md § "Lint behavior"; glob requires rule_globs.
 func TestRuleModes_LintGlobMissingGlobs(t *testing.T) {
 	t.Parallel()
@@ -215,7 +215,7 @@ func TestRuleModes_LintGlobMissingGlobs(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-11 — lint errors for an auto-mode rule missing
+// lint errors for an auto-mode rule missing
 // rule_description.
 // spec: docs/authoring/rule-modes.md § "Lint behavior"; auto requires rule_description.
 func TestRuleModes_LintAutoMissingDescription(t *testing.T) {
@@ -232,7 +232,7 @@ func TestRuleModes_LintAutoMissingDescription(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-12 — lint warns for a glob-mode rule that also sets
+// lint warns for a glob-mode rule that also sets
 // rule_description (ignored field).
 // spec: docs/authoring/rule-modes.md § "Lint behavior"; glob + rule_description warns.
 func TestRuleModes_LintGlobWithDescriptionWarns(t *testing.T) {
@@ -250,7 +250,7 @@ func TestRuleModes_LintGlobWithDescriptionWarns(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-13 — lint warns for an auto-mode rule that also sets
+// lint warns for an auto-mode rule that also sets
 // rule_globs (ignored field).
 // spec: docs/authoring/rule-modes.md § "Lint behavior"; auto + rule_globs warns.
 func TestRuleModes_LintAutoWithGlobsWarns(t *testing.T) {
@@ -268,7 +268,7 @@ func TestRuleModes_LintAutoWithGlobsWarns(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-14 — lint warns for a non-rule artifact that sets rule_mode.
+// lint warns for a non-rule artifact that sets rule_mode.
 // spec: docs/authoring/rule-modes.md § "Lint behavior"; rule_mode on non-rule warns.
 func TestRuleModes_LintRuleModeOnNonRuleWarns(t *testing.T) {
 	t.Parallel()
@@ -286,7 +286,7 @@ func TestRuleModes_LintRuleModeOnNonRuleWarns(t *testing.T) {
 
 // ---- Sync: per-adapter rule layouts ---------------------------------------
 
-// T-D-rule-modes-15 — claude-code materializes an always-mode rule to
+// claude-code materializes an always-mode rule to
 // .claude/rules/<name>.md carrying the artifact content, and writes nothing
 // under .claude/podium for it.
 // spec: docs/authoring/rule-modes.md § "What each adapter writes", claude-code always.
@@ -308,7 +308,7 @@ func TestRuleModes_SyncClaudeCodeAlways(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-16 — claude-code materializes an explicit-mode rule to
+// claude-code materializes an explicit-mode rule to
 // .claude/rules/<name>.md (same path as always).
 // spec: docs/authoring/rule-modes.md § "What each adapter writes", claude-code explicit.
 func TestRuleModes_SyncClaudeCodeExplicit(t *testing.T) {
@@ -323,9 +323,9 @@ func TestRuleModes_SyncClaudeCodeExplicit(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, ".claude/rules/incident-response.md"))
 }
 
-// T-D-rule-modes-17 — claude-code materializes a glob-mode rule to
+// claude-code materializes a glob-mode rule to
 // .claude/rules/<name>.md and the sync succeeds. The doc promises a glob
-// fallback lint warning; that warning is not emitted (F-6.7.1), so no warning is
+// fallback lint warning; that warning is not emitted, so no warning is
 // asserted here.
 // spec: docs/authoring/rule-modes.md § "What each adapter writes", claude-code glob.
 func TestRuleModes_SyncClaudeCodeGlob(t *testing.T) {
@@ -341,7 +341,7 @@ func TestRuleModes_SyncClaudeCodeGlob(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, ".claude/rules/react-style.md"))
 }
 
-// T-D-rule-modes-18 — claude-code materializes an auto-mode rule to
+// claude-code materializes an auto-mode rule to
 // .claude/rules/<name>.md. Claude Code has no description-attach for rules, so
 // auto falls back to a load-always file: the prose is preserved with no scoping
 // frontmatter, and the Podium-internal fields (including rule_description) are
@@ -366,7 +366,7 @@ func TestRuleModes_SyncClaudeCodeAuto(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-19 — cursor materializes an always-mode rule to
+// cursor materializes an always-mode rule to
 // .cursor/rules/<name>.mdc with non-empty content.
 // spec: docs/authoring/rule-modes.md § "What each adapter writes", cursor all modes.
 func TestRuleModes_SyncCursorAlways(t *testing.T) {
@@ -384,10 +384,10 @@ func TestRuleModes_SyncCursorAlways(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-20 — cursor materializes a glob-mode rule to
+// cursor materializes a glob-mode rule to
 // .cursor/rules/<name>.mdc carrying rule_globs verbatim. The doc promises
 // translation into a native cursor globs field; that translation is absent
-// (F-6.7.4), so the test asserts the raw rule_globs value carries through.
+// , so the test asserts the raw rule_globs value carries through.
 // spec: docs/authoring/rule-modes.md § "What each adapter writes", cursor all modes.
 func TestRuleModes_SyncCursorGlob(t *testing.T) {
 	t.Parallel()
@@ -405,7 +405,7 @@ func TestRuleModes_SyncCursorGlob(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-21 — hermes reuses the Cursor .mdc format and materializes an
+// hermes reuses the Cursor .mdc format and materializes an
 // always-mode rule to .cursor/rules/<name>.mdc.
 // spec: §6.7 type-target table, hermes rule = .cursor/rules/<n>.mdc.
 func TestRuleModes_SyncHermesAlways(t *testing.T) {
@@ -420,7 +420,7 @@ func TestRuleModes_SyncHermesAlways(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, ".cursor/rules/house-style.mdc"))
 }
 
-// T-D-rule-modes-22 — opencode injects an always-mode rule into root AGENTS.md
+// opencode injects an always-mode rule into root AGENTS.md
 // (§6.7 inject mechanism).
 // spec: §6.7 type-target table, opencode rule = AGENTS.md (inject).
 func TestRuleModes_SyncOpencodeAlways(t *testing.T) {
@@ -437,7 +437,7 @@ func TestRuleModes_SyncOpencodeAlways(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-23 — pi injects an explicit-mode rule into root AGENTS.md
+// pi injects an explicit-mode rule into root AGENTS.md
 // (§6.7 inject mechanism).
 // spec: §6.7 type-target table, pi rule = AGENTS.md (inject).
 func TestRuleModes_SyncPiExplicit(t *testing.T) {
@@ -471,7 +471,7 @@ func rmExpectWarn(t *testing.T, reg, harness string) {
 	}
 }
 
-// T-D-rule-modes-24 — codex/auto falls back (the AGENTS.md inject loses the
+// codex/auto falls back (the AGENTS.md inject loses the
 // auto-attach trigger), so targeting codex draws a capability warning.
 // spec: docs/authoring/rule-modes.md § capability matrix, codex/auto = ⚠.
 func TestRuleModes_CodexAutoFallbackWarning(t *testing.T) {
@@ -483,7 +483,7 @@ func TestRuleModes_CodexAutoFallbackWarning(t *testing.T) {
 	rmExpectWarn(t, reg, "codex")
 }
 
-// T-D-rule-modes-25 — opencode/auto falls back, so targeting opencode warns.
+// opencode/auto falls back, so targeting opencode warns.
 // spec: docs/authoring/rule-modes.md § "What each adapter writes", opencode auto = ⚠.
 func TestRuleModes_OpencodeAutoFallbackWarning(t *testing.T) {
 	t.Parallel()
@@ -494,7 +494,7 @@ func TestRuleModes_OpencodeAutoFallbackWarning(t *testing.T) {
 	rmExpectWarn(t, reg, "opencode")
 }
 
-// T-D-rule-modes-26 — pi/auto falls back, so targeting pi warns.
+// pi/auto falls back, so targeting pi warns.
 // spec: docs/authoring/rule-modes.md § "What each adapter writes", pi auto = ⚠.
 func TestRuleModes_PiAutoFallbackWarning(t *testing.T) {
 	t.Parallel()
@@ -505,7 +505,7 @@ func TestRuleModes_PiAutoFallbackWarning(t *testing.T) {
 	rmExpectWarn(t, reg, "pi")
 }
 
-// T-D-rule-modes-27 — target_harnesses scopes the capability lint and the
+// target_harnesses scopes the capability lint and the
 // materialization set: a rule targeting only cursor (native for every rule
 // mode) lints clean even though claude-desktop is ✗ for rules, and a sync for a
 // harness not in the list skips the artifact entirely.
@@ -538,7 +538,7 @@ func TestRuleModes_TargetHarnessesOptOut(t *testing.T) {
 	mustExist(t, filepath.Join(included, ".cursor/rules/incident.mdc"))
 }
 
-// T-D-rule-modes-28 — gemini/always maps natively to GEMINI.md, so targeting
+// gemini/always maps natively to GEMINI.md, so targeting
 // gemini for an always-mode rule lints clean with no fallback warning.
 // spec: docs/authoring/rule-modes.md § capability matrix, gemini/always = ✓.
 func TestRuleModes_GeminiAlwaysNativeClean(t *testing.T) {
@@ -556,7 +556,7 @@ func TestRuleModes_GeminiAlwaysNativeClean(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-29 — gemini/glob falls back (the GEMINI.md inject loses glob
+// gemini/glob falls back (the GEMINI.md inject loses glob
 // scoping), so targeting gemini for a glob rule warns rather than errors.
 // spec: docs/authoring/rule-modes.md § capability matrix, gemini/glob = ⚠.
 func TestRuleModes_GeminiGlobFallbackWarning(t *testing.T) {
@@ -570,7 +570,7 @@ func TestRuleModes_GeminiGlobFallbackWarning(t *testing.T) {
 
 // ---- MCP materialization (claude-code harness) ----------------------------
 
-// T-D-rule-modes-30 — MCP load_artifact for an always-mode rule under the
+// MCP load_artifact for an always-mode rule under the
 // claude-code harness materializes .claude/rules/<name>.md.
 // spec: docs/authoring/rule-modes.md § "What each adapter writes", claude-code always (MCP path).
 func TestRuleModes_McpAlwaysMaterializes(t *testing.T) {
@@ -585,7 +585,7 @@ func TestRuleModes_McpAlwaysMaterializes(t *testing.T) {
 	mustExist(t, filepath.Join(mat, ".claude/rules/house-style.md"))
 }
 
-// T-D-rule-modes-31 — MCP load_artifact for an explicit-mode rule materializes
+// MCP load_artifact for an explicit-mode rule materializes
 // .claude/rules/<name>.md and does not inject a CLAUDE.md.
 // spec: docs/authoring/rule-modes.md § "What each adapter writes", claude-code explicit (MCP path).
 func TestRuleModes_McpExplicitMaterializes(t *testing.T) {
@@ -605,7 +605,7 @@ func TestRuleModes_McpExplicitMaterializes(t *testing.T) {
 
 // ---- Lint: well-formed companion fields ------------------------------------
 
-// T-D-rule-modes-32 — a glob-mode rule with rule_globs present lints clean.
+// a glob-mode rule with rule_globs present lints clean.
 // spec: docs/authoring/rule-modes.md § "Lint behavior".
 func TestRuleModes_LintGlobClean(t *testing.T) {
 	t.Parallel()
@@ -619,7 +619,7 @@ func TestRuleModes_LintGlobClean(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-33 — an auto-mode rule with rule_description present lints clean.
+// an auto-mode rule with rule_description present lints clean.
 // spec: docs/authoring/rule-modes.md § "Lint behavior".
 func TestRuleModes_LintAutoClean(t *testing.T) {
 	t.Parallel()
@@ -633,7 +633,7 @@ func TestRuleModes_LintAutoClean(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-34 — an explicit-mode rule with no companion fields lints clean.
+// an explicit-mode rule with no companion fields lints clean.
 // spec: docs/authoring/rule-modes.md § "Lint behavior"; explicit requires none.
 func TestRuleModes_LintExplicitClean(t *testing.T) {
 	t.Parallel()
@@ -648,7 +648,7 @@ func TestRuleModes_LintExplicitClean(t *testing.T) {
 
 // ---- Scaffold + lint round-trip; sync invariants --------------------------
 
-// T-D-rule-modes-35 — scaffolding one rule per mode into a single registry root
+// scaffolding one rule per mode into a single registry root
 // and linting it produces no error-severity diagnostics.
 // spec: docs/authoring/rule-modes.md § all four mode examples.
 func TestRuleModes_ScaffoldAllModesLintClean(t *testing.T) {
@@ -674,7 +674,7 @@ func TestRuleModes_ScaffoldAllModesLintClean(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-36 — claude-code sync of a registry holding one rule per mode
+// claude-code sync of a registry holding one rule per mode
 // writes exactly one file per rule under .claude/rules/.
 // spec: docs/authoring/rule-modes.md § "What each adapter writes".
 func TestRuleModes_SyncOneFilePerRule(t *testing.T) {
@@ -702,7 +702,7 @@ func TestRuleModes_SyncOneFilePerRule(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-37 — a claude-code-synced rule appears only at
+// a claude-code-synced rule appears only at
 // .claude/rules/<name>.md and never under .claude/podium.
 // spec: docs/authoring/rule-modes.md § "What each adapter writes", claude-code rows.
 func TestRuleModes_SyncNotUnderPodium(t *testing.T) {
@@ -722,7 +722,7 @@ func TestRuleModes_SyncNotUnderPodium(t *testing.T) {
 
 // ---- Interactive scaffold prompts -----------------------------------------
 
-// T-D-rule-modes-38 — interactive glob scaffold (no --rule-globs) prompts and
+// interactive glob scaffold (no --rule-globs) prompts and
 // writes the typed patterns into rule_globs.
 // spec: docs/authoring/rule-modes.md § "When to use each mode", glob block (interactive).
 func TestRuleModes_InteractiveGlobPrompt(t *testing.T) {
@@ -740,7 +740,7 @@ func TestRuleModes_InteractiveGlobPrompt(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-39 — interactive auto scaffold (no --rule-description) prompts
+// interactive auto scaffold (no --rule-description) prompts
 // and writes the typed text into rule_description.
 // spec: docs/authoring/rule-modes.md § "When to use each mode", auto block (interactive).
 func TestRuleModes_InteractiveAutoPrompt(t *testing.T) {
@@ -758,7 +758,7 @@ func TestRuleModes_InteractiveAutoPrompt(t *testing.T) {
 	}
 }
 
-// T-D-rule-modes-40 — a rule with no rule_mode field lints clean and
+// a rule with no rule_mode field lints clean and
 // materializes under claude-code at .claude/rules/<name>.md (the absent field
 // defaults to always behavior).
 // spec: docs/authoring/rule-modes.md § "Default is always if you don't set the field".
@@ -777,7 +777,7 @@ func TestRuleModes_AbsentModeDefaultsAlways(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, ".claude/rules/implicit-always.md"))
 }
 
-// F-4.3.1 — a rule that omits rule_mode defaults to `always`
+// a rule that omits rule_mode defaults to `always`
 // (spec/04-artifact-model.md §4.3: "rule_mode: ... # default: always"), so
 // the Cursor adapter must emit alwaysApply: true. Without the default an
 // unset rule materialized on Cursor with empty frontmatter, which Cursor
@@ -800,7 +800,7 @@ func TestRuleModes_AbsentModeCursorAlwaysApply(t *testing.T) {
 	}
 }
 
-// F-4.3.2 — rule_mode is the closed enumeration always | glob | auto |
+// rule_mode is the closed enumeration always | glob | auto |
 // explicit (spec/04-artifact-model.md §4.3). An out-of-enum value on a
 // type: rule artifact is an ingest error surfaced by `podium lint`.
 func TestRuleModes_LintRejectsOutOfEnumMode(t *testing.T) {

@@ -9,7 +9,7 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// Spec: §2.2, §7.5 (F-2.2.2) — EffectiveView enumerates the caller's whole
+// Spec: §2.2, §7.5 — EffectiveView enumerates the caller's whole
 // effective view (every visible artifact, latest version per id, sorted by
 // id) so podium sync server-source can materialize it. Unlike
 // SearchArtifacts it applies no top-K cap.

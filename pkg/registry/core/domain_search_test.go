@@ -114,7 +114,7 @@ var pubLayer = []layer.Layer{{ID: "pub", Visibility: layer.Visibility{Public: tr
 // each domain's projection (description + keywords + body), not a
 // substring match on the path. A domain matched only by a DOMAIN.md
 // keyword absent from its path and description surfaces, ranked, with its
-// description populated. F-3.2.1.
+// description populated.
 func TestSearchDomains_RanksByProjectionKeyword(t *testing.T) {
 	t.Parallel()
 	reg := sdRegistry(t, pubLayer,
@@ -133,7 +133,7 @@ func TestSearchDomains_RanksByProjectionKeyword(t *testing.T) {
 		t.Fatalf("top domain = %v, want finance/ap matched by keyword", sdPaths(res))
 	}
 	if got := sdDescription(res, "finance/ap"); got == "" {
-		t.Errorf("finance/ap descriptor has no description; descriptors must carry it (F-3.2.1)")
+		t.Errorf("finance/ap descriptor has no description; descriptors must carry it")
 	}
 	if !res.Degraded {
 		t.Errorf("Degraded = false; expected BM25-only (no vector store configured)")
@@ -142,7 +142,7 @@ func TestSearchDomains_RanksByProjectionKeyword(t *testing.T) {
 
 // spec: §4.5.1 / §4.7 — a domain without a DOMAIN.md has no projection to
 // embed and does not appear in search_domains; an empty query returns
-// every visible domain that does have one. F-3.2.1.
+// every visible domain that does have one.
 func TestSearchDomains_EmptyQueryAllWithDomainMDOnly(t *testing.T) {
 	t.Parallel()
 	reg := sdRegistry(t, pubLayer,
@@ -261,7 +261,7 @@ func TestSearchDomains_UnlistedExcluded(t *testing.T) {
 // spec: §3.2 Layer 1 / §4.7 — with a vector store and embedder configured,
 // search_domains fuses BM25 and vector ranks via RRF; a domain the vector
 // ranker finds but BM25 misses (no lexical overlap with the query) still
-// surfaces. Mirrors the artifact hybrid path. F-3.2.1.
+// surfaces. Mirrors the artifact hybrid path.
 func TestSearchDomains_HybridSurfacesVectorOnlyDomain(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -317,7 +317,7 @@ func TestSearchDomains_DegradesOnEmbedderFailure(t *testing.T) {
 }
 
 // spec: §4.7 — Reembed re-embeds every DOMAIN.md projection into the
-// domain index so search_domains has a semantic ranker. F-3.2.1.
+// domain index so search_domains has a semantic ranker.
 func TestReembed_EmbedsDomains(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -350,12 +350,12 @@ func TestReembed_EmbedsDomains(t *testing.T) {
 	}
 }
 
-// ---- search_artifacts: vector-only matches (F-3.2.3) -----------------------
+// ---- search_artifacts: vector-only matches -----------------------
 
 // spec: §3.2 Layer 2 / §4.7 — hybrid search_artifacts must surface an
 // artifact the vector ranker finds but BM25 misses (semantically related,
 // no query-term overlap). Before the fix the RRF reorder rebuilt results
-// from the BM25 set only and silently dropped vector-only matches. F-3.2.3.
+// from the BM25 set only and silently dropped vector-only matches.
 func TestSearchArtifacts_VectorOnlyMatchSurfaces(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -401,6 +401,6 @@ func TestSearchArtifacts_VectorOnlyMatchSurfaces(t *testing.T) {
 		for _, r := range res.Results {
 			ids = append(ids, r.ID)
 		}
-		t.Errorf("vector-only match gamma absent from results %v; RRF dropped it (F-3.2.3)", ids)
+		t.Errorf("vector-only match gamma absent from results %v; RRF dropped it", ids)
 	}
 }

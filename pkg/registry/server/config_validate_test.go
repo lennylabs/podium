@@ -44,7 +44,7 @@ func TestStartupConfig_IdentityProviderAlone(t *testing.T) {
 
 // Spec: §13.10 ("Loopback bind by default") / §13.2.2 — public mode with a
 // non-loopback bind and no --allow-public-bind fails startup with
-// config.public_bind_refused, naming the address. F-13.2.1.
+// config.public_bind_refused, naming the address.
 func TestStartupConfig_PublicModeNonLoopbackRefused(t *testing.T) {
 	t.Parallel()
 	for _, bind := range []string{"0.0.0.0:8080", "192.168.1.10:8080", "[::]:8080", ":8080", "registry.acme.com:8080"} {
@@ -60,7 +60,7 @@ func TestStartupConfig_PublicModeNonLoopbackRefused(t *testing.T) {
 }
 
 // Spec: §13.10 — the --allow-public-bind escape hatch permits a non-loopback
-// public-mode bind. F-13.2.1.
+// public-mode bind.
 func TestStartupConfig_PublicModeNonLoopbackAllowed(t *testing.T) {
 	t.Parallel()
 	cfg := server.StartupConfig{PublicMode: true, Bind: "0.0.0.0:8080", AllowPublicBind: true}
@@ -70,7 +70,7 @@ func TestStartupConfig_PublicModeNonLoopbackAllowed(t *testing.T) {
 }
 
 // Spec: §13.10 — public mode binds a loopback address by default without the
-// escape hatch. F-13.2.1.
+// escape hatch.
 func TestStartupConfig_PublicModeLoopbackDefault(t *testing.T) {
 	t.Parallel()
 	for _, bind := range []string{"127.0.0.1:8080", "localhost:8080", "[::1]:8080", "127.0.0.5:9000"} {
@@ -82,7 +82,7 @@ func TestStartupConfig_PublicModeLoopbackDefault(t *testing.T) {
 }
 
 // Spec: §13.10 — the loopback guard only applies in public mode; a standard
-// deployment binds any address. F-13.2.1.
+// deployment binds any address.
 func TestStartupConfig_NonPublicNonLoopbackAllowed(t *testing.T) {
 	t.Parallel()
 	cfg := server.StartupConfig{Bind: "0.0.0.0:8080"}
@@ -91,7 +91,7 @@ func TestStartupConfig_NonPublicNonLoopbackAllowed(t *testing.T) {
 	}
 }
 
-// Spec: §13.10 (F-13.10.9) — the web UI on a non-loopback bind is refused
+// Spec: §13.10 — the web UI on a non-loopback bind is refused
 // unless --web-ui-allow-public-bind is set AND an identity provider is
 // configured. Each missing condition on a non-loopback bind fails startup with
 // config.web_ui_public_bind_refused.
@@ -116,7 +116,7 @@ func TestStartupConfig_WebUINonLoopbackRefused(t *testing.T) {
 	}
 }
 
-// Spec: §13.10 (F-13.10.9) — the web UI binds a non-loopback address when both
+// Spec: §13.10 — the web UI binds a non-loopback address when both
 // the escape hatch and an identity provider are present, and binds a loopback
 // address (the standalone default) with no opt-in at all.
 func TestStartupConfig_WebUIAllowed(t *testing.T) {
