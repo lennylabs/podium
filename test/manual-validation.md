@@ -1764,8 +1764,10 @@ endpoint, HMAC verification.
 
 1. Run the isolation block.
 2. Create a Git repository with one artifact, serve, and register it as a layer.
-   Capture the layer's HMAC webhook secret from the register output (the secret
-   prints alongside the webhook URL).
+   Capture the layer's HMAC webhook secret from the register output. `podium
+   layer register` writes the registration JSON to stdout with `webhook_url` and
+   `webhook_secret` fields, and repeats the webhook URL on a labeled line on
+   stderr.
 
    ```bash
    mkdir -p "$WORK/repo" && cd "$WORK/repo" && git init -q
@@ -1776,7 +1778,7 @@ endpoint, HMAC verification.
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8121/healthz
    export PODIUM_REGISTRY=http://127.0.0.1:8121
    podium layer register --registry "$PODIUM_REGISTRY" --id team --repo "$WORK/repo" --ref main --public > "$WORK/reg.out" 2> "$WORK/reg.err"
-   SECRET=$(grep -oiE 'secret[:= ]+[A-Za-z0-9._-]+' "$WORK/reg.out" "$WORK/reg.err" | grep -oE '[A-Za-z0-9._-]+$' | head -1)
+   SECRET=$(grep -hoiE 'webhook_secret"?[: =]+"?[A-Za-z0-9._-]{16,}' "$WORK/reg.out" "$WORK/reg.err" | grep -oE '[A-Za-z0-9._-]{16,}$' | head -1)
    echo "secret: ${SECRET:0:6}…"
    podium layer reingest --registry "$PODIUM_REGISTRY" team   # first ingest at commit 1
    ```
