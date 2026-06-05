@@ -61,6 +61,36 @@ func TestCachePrune_DryRun(t *testing.T) {
 	}
 }
 
+// Spec: §6.5 — `--days 0` is the boundary "older than now": a freshly-written
+// bucket is prunable because its last access is already in the past. `--dry-run`
+// lists it without removing it.
+func TestCachePrune_DaysZeroListsFreshBucketDryRun(t *testing.T) {
+	dir := t.TempDir()
+	bucket := filepath.Join(dir, "sha256-fresh")
+	if err := os.MkdirAll(bucket, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	// Written just now, with no backdating: --days 30 would keep it, --days 0
+	// must select it.
+	if err := os.WriteFile(filepath.Join(bucket, "frontmatter"), []byte("fm"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if rc := cachePrune([]string{"--dir", dir, "--days", "0", "--dry-run"}); rc != 0 {
+		t.Fatalf("rc = %d, want 0 (--days 0 is valid)", rc)
+	}
+	if _, err := os.Stat(bucket); err != nil {
+		t.Errorf("dry-run removed the fresh bucket: %v", err)
+	}
+}
+
+// Spec: §6.5 — a negative `--days` is rejected; it would push the cutoff into
+// the future and evict buckets newer than now.
+func TestCachePrune_NegativeDaysRejected(t *testing.T) {
+	if rc := cachePrune([]string{"--dir", t.TempDir(), "--days", "-1"}); rc != 2 {
+		t.Errorf("rc = %d, want 2 for negative --days", rc)
+	}
+}
+
 // Spec: §6.5 — pruning a missing cache dir is a no-op success.
 func TestCachePrune_MissingDirIsNoop(t *testing.T) {
 	rc := cachePrune([]string{"--dir", filepath.Join(t.TempDir(), "absent"), "--days", "30"})
