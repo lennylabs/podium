@@ -1038,10 +1038,11 @@ store created for the run.
 ## S17: Public mode and the sensitivity floor
 
 **Goal.** Validate public mode: anonymous callers read the catalog, and the
-configured sensitivity floor blocks artifacts above the threshold.
+public-mode sensitivity ceiling rejects `medium` and `high` artifacts at ingest
+so they never enter the catalog.
 
 **Covers.** Standalone deployment, public mode, anonymous access, the
-sensitivity floor.
+ingest-time sensitivity ceiling.
 
 **Steps.**
 
@@ -1069,10 +1070,19 @@ sensitivity floor.
 
 **Expected.**
 
-- `podium status` reports `registry mode: public`.
-- The anonymous search and `artifact show faq` succeed.
-- `artifact show incident` is refused by the public-mode sensitivity floor,
-  because a `high`-sensitivity artifact is not served to an anonymous caller.
+- `podium status` reports `registry mode: public`. The scope preview lists one
+  artifact (`faq`, `context`, `low`), confirming the `high` artifact never
+  entered the catalog.
+- The anonymous search and `artifact show faq` succeed. Public mode bypasses the
+  visibility model (§4.6), so the anonymous caller reads the catalog without
+  credentials.
+- The `high`-sensitivity `incident` is rejected at ingest by the public-mode
+  sensitivity ceiling (§13.10). The startup log line in `$WORK/srv.log` for the
+  layer load reports `rejected=1`; the rejection carries the structured code
+  `ingest.public_mode_rejects_sensitive`. The artifact never enters the catalog,
+  so `artifact show incident` returns HTTP 404 with `registry.not_found`. Public
+  mode does not filter sensitivity per caller at read time; the ingest ceiling is
+  what keeps `incident` out.
 
 **Cleanup.** Stop the server and `rm -rf "$WORK"`.
 
