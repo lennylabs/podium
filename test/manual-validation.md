@@ -934,6 +934,16 @@ selection.
    `default`. The shared `podium-test` index is reused across runs, so export a
    unique namespace per run to keep one run's vectors out of another's.
 
+   The Postgres registry store keeps a persistent volume across `make
+   services-up` and `make services-down`, and the org schema is keyed by a
+   deterministic tenant ID, so a prior run's artifacts survive into this one
+   under the same schema. Those artifacts stay in the result list and can
+   outrank the two skills this run authors, because other scenarios leave
+   finance and close-reporting artifacts that match the paraphrased query.
+   Create a fresh throwaway database for this run so the ingest and the query
+   see only the two skills below. The server requires the database to exist; it
+   creates the per-org schema inside it but does not create the database itself.
+
    ```bash
    cd ~/projects/podium && make services-up
    set -a; source ~/projects/podium/test.env; set +a
@@ -943,6 +953,9 @@ selection.
    export PODIUM_EMBEDDING_PROVIDER=openai
    export PODIUM_EMBEDDING_MODEL=text-embedding-3-small
    export PODIUM_PINECONE_NAMESPACE="manual-s15-$$-$(date +%s)"
+   export PGDB="podium_s15_$$"
+   docker exec podium-postgres createdb -U podium "$PGDB"
+   export PODIUM_POSTGRES_DSN="postgres://podium:podium@localhost:5432/$PGDB?sslmode=disable"
    ```
 
    The same scenario runs against Weaviate (`PODIUM_VECTOR_BACKEND=weaviate-cloud`,
@@ -962,18 +975,30 @@ selection.
    curl -s --retry 60 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8111/healthz
    export PODIUM_REGISTRY=http://127.0.0.1:8111
    podium config show --server | grep -E 'store|object_store|vector|embedding'
+   sleep 8   # let the vector outbox drain worker upsert the two vectors
+   curl -s http://127.0.0.1:8111/metrics | grep '^podium_vector_outbox_depth'
    podium search --registry "$PODIUM_REGISTRY" "close the books for the month"
    ```
 
 **Expected.**
 
-- `config show --server` reports the Pinecone backend.
-- The server log shows vectors upserted into the managed index during ingest,
-  namespaced per run so a shared index is not polluted across runs.
-- The paraphrased query returns the `reconcile` skill as the top result.
+- `config show --server` reports the Pinecone backend, the per-run
+  `vector_backend.namespace`, and the OpenAI embedding provider and model.
+- The boot log records `hybrid search: vector=pinecone embedder=openai
+  dim=1536` and the drain worker line `vector outbox: drain worker running
+  (... backend=pinecone ...)`. The drain worker upserts the two vectors into
+  the managed index under the per-run namespace and does not log a line for an
+  individual upsert; the `podium_vector_outbox_depth` gauge returns to `0` once
+  the batch is sent. To confirm the vectors landed in the per-run namespace,
+  POST `{}` to the backend's `describe_index_stats` endpoint and read the count
+  under `manual-s15-<pid>-<timestamp>_<tenant>`, which is `2`.
+- The paraphrased query returns the `reconcile` skill as the top result. The
+  fresh database holds only the two skills this run authored, so the result list
+  is `Showing 2 of 2 results` with `finance/reconcile` first.
 - Repeating the scenario against Weaviate or Qdrant produces the same ranking.
 
-**Cleanup.** Stop the server and `rm -rf "$WORK"`.
+**Cleanup.** Stop the server, `rm -rf "$WORK"`, and drop the throwaway database
+with `docker exec podium-postgres dropdb -U podium "$PGDB"`.
 
 ---
 
@@ -1012,11 +1037,24 @@ if absent.
    export PODIUM_PINECONE_INDEX="$PODIUM_PINECONE_SELFEMBED_INDEX"
    export PODIUM_PINECONE_NAMESPACE="manual-s16-$$-$(date +%s)"
    unset PODIUM_EMBEDDING_PROVIDER PODIUM_EMBEDDING_MODEL
+   export PGDB="podium_s16_$$"
+   docker exec podium-postgres createdb -U podium "$PGDB"
+   export PODIUM_POSTGRES_DSN="postgres://podium:podium@localhost:5432/$PGDB?sslmode=disable"
    ```
 
-2. Author the S07 registry, serve in strict mode on `127.0.0.1:8112`, and query.
+2. Author the S07 registry (the `reconcile` and `rotate-oncall` skills), serve
+   in strict mode on `127.0.0.1:8112`, and run a paraphrased query.
 
    ```bash
+   podium artifact scaffold --type skill --description "Reconcile the general ledger at period end" "$WORK/reg/finance/reconcile"
+   podium artifact scaffold --type skill --description "Rotate the on-call schedule" "$WORK/reg/ops/rotate-oncall"
+   podium serve --strict --layer-path "$WORK/reg" --bind 127.0.0.1:8112 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 60 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8112/healthz
+   export PODIUM_REGISTRY=http://127.0.0.1:8112
+   podium config show --server | grep -E 'store|object_store|vector|inference'
+   sleep 8   # let the vector outbox drain worker send the two artifacts' text to the backend
+   curl -s http://127.0.0.1:8112/metrics | grep '^podium_vector_outbox_depth'
    podium search --registry "$PODIUM_REGISTRY" "close the books for the month"
    ```
 
@@ -1030,8 +1068,8 @@ if absent.
   integrated inference is answering the search.
 - The paraphrased query returns the `reconcile` skill as the top result.
 
-**Cleanup.** Stop the server, `rm -rf "$WORK"`, and drop the throwaway registry
-store created for the run.
+**Cleanup.** Stop the server, `rm -rf "$WORK"`, and drop the throwaway database
+with `docker exec podium-postgres dropdb -U podium "$PGDB"`.
 
 ---
 
@@ -1470,11 +1508,20 @@ the single-Postgres stack.
 
 - `domain show` renders the `finance`, `finance/close`, and `eng` domains, with
   the `DOMAIN.md` descriptions attached to `finance` and `eng`.
-- `domain search "accounting close"` returns the `finance` domain ahead of `eng`,
-  matching on the `DOMAIN.md` description and keywords.
+- `domain search "accounting close"` returns the `finance` domain and reports
+  `total_matched: 1`. The `finance` projection (its `DOMAIN.md` description plus
+  the `finance, accounting, close` keywords) overlaps the query. With
+  `--no-embeddings` the registry runs BM25 alone, so `eng` scores zero against
+  this query and does not appear; the empty-query browse-all form
+  (`domain search ""`) lists both domains.
 - `domain analyze --path finance` prints domain-discovery metrics for the
-  subtree (the artifact count and the fold or split candidates relative to the
-  `fold_below_artifacts` and `max_depth` settings).
+  subtree: `artifact_count`, `recursive_count`, `child_count`,
+  `passthrough_chain_length`, `tag_cluster_entropy`, and a per-child summary.
+  The fold and split candidate lists apply the analyzer's own sparsity and
+  tag-entropy heuristics (§4.5.5), independent of the `fold_below_artifacts` and
+  `max_depth` rendering settings. This tree yields no candidates because
+  `finance/close` holds two artifacts, which is above the fold threshold and
+  below the split threshold.
 
 **Cleanup.** Stop the server and `rm -rf "$WORK"`.
 
