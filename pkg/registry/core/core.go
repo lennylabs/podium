@@ -2136,7 +2136,7 @@ type scoredIndex struct {
 // ascending tiebreak (the caller's stable identifier, e.g. artifact ID or
 // domain path). An empty query or empty corpus returns nil.
 func bm25Rank(docs [][]string, tiebreak []string, query string) []scoredIndex {
-	queryTerms := tokenize(strings.ToLower(query))
+	queryTerms := filterStopwords(tokenize(strings.ToLower(query)))
 	if len(docs) == 0 || len(queryTerms) == 0 {
 		return nil
 	}
@@ -2194,15 +2194,27 @@ func bm25Rank(docs [][]string, tiebreak []string, query string) []scoredIndex {
 }
 
 // tokensFor lowercases and tokenizes the searchable text of a manifest.
+// The lexical projection mirrors the §4.7 embedding projection
+// (composeEmbeddingText): the artifact id path segments plus the
+// frontmatter fields name, description, when_to_use, and tags. The prose
+// body is deliberately excluded. §4.7 states "The prose body is not
+// embedded ... it is noisy for retrieval"; including it in the lexical
+// half let boilerplate body text (for example the scaffold template) seed
+// spurious BM25 matches on common words, manufacturing lexical ties that
+// override the vector ranking. Keeping both halves of hybrid retrieval on
+// the same projection makes BM25 and vector recall agree on what an
+// artifact's searchable text is.
 func tokensFor(r store.ManifestRecord) []string {
 	var b strings.Builder
 	b.WriteString(r.ArtifactID)
 	b.WriteByte(' ')
+	b.WriteString(r.Name)
+	b.WriteByte(' ')
 	b.WriteString(r.Description)
 	b.WriteByte(' ')
-	b.WriteString(strings.Join(r.Tags, " "))
+	b.WriteString(strings.Join(r.WhenToUse, " "))
 	b.WriteByte(' ')
-	b.Write(r.Body)
+	b.WriteString(strings.Join(r.Tags, " "))
 	return tokenize(strings.ToLower(b.String()))
 }
 
@@ -2231,6 +2243,40 @@ func termFreqs(tokens []string) map[string]int {
 		m[t]++
 	}
 	return m
+}
+
+// bm25Stopwords is the set of high-frequency English function words the
+// lexical ranker ignores when scoring a query. Without it, a paraphrased
+// query that shares only a function word with an artifact (for example the
+// "the" common to "close the books for the month" and "Reconcile the
+// general ledger at period end") produces a spurious BM25 match. That
+// match then competes with, and under RRF can override, the vector
+// ranking that §4.7 hybrid retrieval relies on to surface the
+// semantically-closest artifact for a query with no salient keyword
+// overlap. Salient content terms are unaffected; only ubiquitous
+// connectives are dropped.
+var bm25Stopwords = map[string]bool{
+	"a": true, "an": true, "and": true, "are": true, "as": true, "at": true,
+	"be": true, "but": true, "by": true, "do": true, "for": true, "from": true,
+	"how": true, "i": true, "in": true, "into": true, "is": true, "it": true,
+	"its": true, "of": true, "on": true, "or": true, "that": true, "the": true,
+	"their": true, "then": true, "there": true, "these": true, "they": true,
+	"this": true, "to": true, "was": true, "what": true, "when": true,
+	"where": true, "which": true, "who": true, "will": true, "with": true,
+	"you": true, "your": true,
+}
+
+// filterStopwords drops bm25Stopwords from a token slice. It returns the
+// input slice filtered in place to avoid an allocation on the common path.
+func filterStopwords(tokens []string) []string {
+	out := tokens[:0]
+	for _, t := range tokens {
+		if bm25Stopwords[t] {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
 }
 
 func max1(n int) int {
