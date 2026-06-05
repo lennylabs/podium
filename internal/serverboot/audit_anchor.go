@@ -73,7 +73,7 @@ func isAuditEndpoint(v string) bool {
 // It returns the signer so the caller can re-anchor on demand (e.g.
 // immediately after a retention truncation); nil is returned
 // when anchoring is disabled.
-func startAnchorScheduler(cfg *Config, sink *audit.FileSink) sign.Provider {
+func startAnchorScheduler(ctx context.Context, cfg *Config, sink *audit.FileSink) sign.Provider {
 	if sink == nil {
 		log.Printf("warning: audit anchor disabled (no sink)")
 		return nil
@@ -92,7 +92,7 @@ func startAnchorScheduler(cfg *Config, sink *audit.FileSink) sign.Provider {
 		},
 	}
 	go func() {
-		if err := sched.Run(context.Background()); err != nil && !errors.Is(err, context.Canceled) {
+		if err := sched.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			log.Printf("audit anchor scheduler stopped: %v", err)
 		}
 	}()
@@ -108,7 +108,7 @@ func startAnchorScheduler(cfg *Config, sink *audit.FileSink) sign.Provider {
 //
 // Nil sink disables verification. The verification pass needs no signer,
 // so it runs independently of whether anchoring is enabled.
-func startVerifyScheduler(cfg *Config, sink *audit.FileSink) {
+func startVerifyScheduler(ctx context.Context, cfg *Config, sink *audit.FileSink) {
 	if sink == nil {
 		log.Printf("warning: audit verify disabled (no sink)")
 		return
@@ -121,7 +121,7 @@ func startVerifyScheduler(cfg *Config, sink *audit.FileSink) {
 		},
 	}
 	go func() {
-		if err := sched.Run(context.Background()); err != nil && !errors.Is(err, context.Canceled) {
+		if err := sched.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			log.Printf("audit verify scheduler stopped: %v", err)
 		}
 	}()

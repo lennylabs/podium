@@ -18,9 +18,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/lennylabs/podium/pkg/audit"
@@ -1146,12 +1148,19 @@ func Run() error {
 		layers.WithNotifier(server.NotificationFunc(adaptNotifier(notifier)))
 	}
 
+	// One process-lifetime context drives every background daemon started below
+	// and the graceful shutdown. SIGINT or SIGTERM cancels it, so the daemons
+	// stop and the HTTP server drains in-flight requests instead of being killed
+	// mid-request.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	// §4.7.2: when ingest routes embedding through the transactional outbox
 	// (external vector backend), start the drain worker that embeds and writes
 	// pending rows to the backend, publishes the outbox-depth gauge, and emits
 	// vector.outbox_lagging when the backend falls behind.
 	if useVectorOutbox {
-		startVectorOutboxWorker(cfg, st, vecProvider, embedProvider, mreg, auditSink, tenantID)
+		startVectorOutboxWorker(ctx, cfg, st, vecProvider, embedProvider, mreg, auditSink, tenantID)
 	}
 
 	// §8.6 transparency anchoring: when the operator enables
@@ -1160,7 +1169,7 @@ func Run() error {
 	// Operators monitor audit.anchored / audit.anchor_failed events.
 	var reAnchor func()
 	if cfg.auditAnchorInterval > 0 {
-		if signer := startAnchorScheduler(cfg, auditFile); signer != nil {
+		if signer := startAnchorScheduler(ctx, cfg, auditFile); signer != nil {
 			// §8.6: after a retention pass drops events the chain
 			// head moves, invalidating the last anchor. Re-anchor the new
 			// head immediately so verifiers do not wait for the next tick.
@@ -1179,7 +1188,7 @@ func Run() error {
 	// (PODIUM_AUDIT_VERIFY_INTERVAL_SECONDS defaults to one hour); set the
 	// interval to 0 to disable.
 	if cfg.auditVerifyInterval > 0 {
-		startVerifyScheduler(cfg, auditFile)
+		startVerifyScheduler(ctx, cfg, auditFile)
 	}
 
 	// §8.4 audit-event retention: a goroutine truncates the audit log on
@@ -1188,7 +1197,7 @@ func Run() error {
 	// Enabled by default (PODIUM_AUDIT_RETENTION_INTERVAL_SECONDS defaults
 	// to one day); set the interval to 0 to disable.
 	if cfg.auditRetentionInterval > 0 {
-		startRetentionScheduler(cfg, auditFile, reAnchor)
+		startRetentionScheduler(ctx, cfg, auditFile, reAnchor)
 	}
 
 	// §8.4 store retention: when PODIUM_STORE_RETENTION_INTERVAL_SECONDS
@@ -1196,7 +1205,7 @@ func Run() error {
 	// 90-day window and hard-deletes soft-deleted layers past the 30-day
 	// recovery window.
 	if cfg.storeRetentionInterval > 0 {
-		startStoreRetentionScheduler(cfg, st)
+		startStoreRetentionScheduler(ctx, cfg, st)
 	}
 
 	// §13.2.1 read-only probe: ping the metadata store on a tick
@@ -1223,7 +1232,7 @@ func Run() error {
 			},
 		}
 		go func() {
-			if err := probe.Run(context.Background()); err != nil && err != context.Canceled {
+			if err := probe.Run(ctx); err != nil && err != context.Canceled {
 				log.Printf("read-only probe stopped: %v", err)
 			}
 		}()
@@ -1260,7 +1269,23 @@ func Run() error {
 	// --allow-public-bind.
 	emitStartupBanner(os.Stderr, cfg.publicMode)
 	log.Printf("podium-server listening on %s (mode=%s)", cfg.bind, cfg.modeBanner())
-	return httpServer.ListenAndServe()
+
+	// Serve until a signal cancels ctx, then stop accepting connections and drain
+	// the in-flight requests. The daemons above share ctx and stop with it. A
+	// second signal aborts a stuck drain: stop() restores the default handler so
+	// the next SIGINT or SIGTERM terminates the process.
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- httpServer.ListenAndServe() }()
+	select {
+	case err := <-serveErr:
+		return err
+	case <-ctx.Done():
+		stop()
+		log.Printf("podium-server shutting down")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		return httpServer.Shutdown(shutdownCtx)
+	}
 }
 
 // emitStartupBanner writes the §13.2.2 / §13.10 public-mode warning to w

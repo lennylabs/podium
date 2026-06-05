@@ -57,7 +57,7 @@ func TestStartVectorOutboxWorker_DrainsQueuedRow(t *testing.T) {
 	enqueue(t, st, "a/x", "1.0.0", now)
 
 	cfg := &Config{vectorOutboxInterval: 1, vectorOutboxBatch: 50}
-	startVectorOutboxWorker(cfg, st, vector.NewMemory(8), fakeEmbedder{dim: 8}, metrics.New(), nil, "default")
+	startVectorOutboxWorker(t.Context(), cfg, st, vector.NewMemory(8), fakeEmbedder{dim: 8}, metrics.New(), nil, "default")
 
 	// The immediate runOnce pass drains the row; poll the depth until it reaches
 	// zero rather than sleeping a fixed wall-clock interval.
@@ -71,7 +71,7 @@ func TestStartVectorOutboxWorker_DrainsQueuedRow(t *testing.T) {
 // outbox) disables the worker; the call returns without spawning a goroutine.
 func TestStartVectorOutboxWorker_NonOutboxStoreNoop(t *testing.T) {
 	// A bare Store that does not satisfy VectorOutbox.
-	startVectorOutboxWorker(&Config{}, nonOutboxStore{}, vector.NewMemory(8), fakeEmbedder{dim: 8}, nil, nil, "default")
+	startVectorOutboxWorker(t.Context(), &Config{}, nonOutboxStore{}, vector.NewMemory(8), fakeEmbedder{dim: 8}, nil, nil, "default")
 	// No panic and no goroutine is the assertion; the type assertion guard returns
 	// before any worker construction.
 }
@@ -84,7 +84,7 @@ func TestStartVectorOutboxWorker_NilBackendNoop(t *testing.T) {
 	now := time.Now().UTC()
 	enqueue(t, st, "a/x", "1.0.0", now)
 
-	startVectorOutboxWorker(&Config{vectorOutboxInterval: 1}, st, nil, fakeEmbedder{dim: 8}, nil, nil, "default")
+	startVectorOutboxWorker(t.Context(), &Config{vectorOutboxInterval: 1}, st, nil, fakeEmbedder{dim: 8}, nil, nil, "default")
 
 	// The row must remain queued because no worker ran.
 	if depth, _, _ := st.VectorOutboxStats(ctx); depth != 1 {
@@ -100,7 +100,7 @@ func TestStartVectorOutboxWorker_NonPositiveIntervalDefaults(t *testing.T) {
 	enqueue(t, st, "a/x", "1.0.0", now)
 
 	// interval 0 exercises the `interval <= 0` fallback to 5s.
-	startVectorOutboxWorker(&Config{vectorOutboxInterval: 0, vectorOutboxBatch: 50}, st, vector.NewMemory(8), fakeEmbedder{dim: 8}, nil, nil, "default")
+	startVectorOutboxWorker(t.Context(), &Config{vectorOutboxInterval: 0, vectorOutboxBatch: 50}, st, vector.NewMemory(8), fakeEmbedder{dim: 8}, nil, nil, "default")
 
 	if !waitForDepth(t, st, 0, time.Second) {
 		depth, _, _ := st.VectorOutboxStats(context.Background())
