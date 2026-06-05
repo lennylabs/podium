@@ -40,7 +40,17 @@ func Run(t testing.TB, binary, cwd string, args ...string) Result {
 	// PODIUM_NO_BROWSER suppresses the login command's verification-URL
 	// browser auto-open so a device-code test never launches the system
 	// browser; PODIUM_NO_AUTOSTANDALONE keeps a CLI path from spawning a daemon.
-	cmd.Env = append(os.Environ(), "PODIUM_NO_AUTOSTANDALONE=1", "PODIUM_NO_BROWSER=1")
+	// HOME (and USERPROFILE on Windows) point at a per-test temp dir so the
+	// subprocess resolves the §7.5.2 user-global config scope from an empty
+	// directory instead of the developer's real ~/.podium, which would
+	// otherwise leak a registry or other defaults into a test that assumes
+	// none. The dir is stable across Run calls in one test, so global config a
+	// test writes in one call is still visible to the next.
+	home := isolatedHome(t)
+	cmd.Env = append(os.Environ(),
+		"PODIUM_NO_AUTOSTANDALONE=1", "PODIUM_NO_BROWSER=1",
+		"HOME="+home, "USERPROFILE="+home,
+	)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -69,7 +79,21 @@ func Bin(t testing.TB, binary string) string {
 var (
 	buildOnce sync.Map // map[string]*sync.Once
 	buildPath sync.Map // map[string]string
+	testHome  sync.Map // map[string]string: test name -> per-test temp HOME
 )
+
+// isolatedHome returns a temporary HOME for the calling test, stable across the
+// test's Run calls and isolated from the developer's real ~/.podium and from
+// other tests. This keeps the §7.5.2 user-global config scope empty for the
+// subprocess unless the test itself populates it under this HOME.
+func isolatedHome(t testing.TB) string {
+	if v, ok := testHome.Load(t.Name()); ok {
+		return v.(string)
+	}
+	h := t.TempDir()
+	actual, _ := testHome.LoadOrStore(t.Name(), h)
+	return actual.(string)
+}
 
 func buildBinary(t testing.TB, binary string) string {
 	t.Helper()
