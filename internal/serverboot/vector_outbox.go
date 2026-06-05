@@ -140,13 +140,13 @@ func startVectorOutboxWorker(ctx context.Context, cfg *Config, st store.Store, v
 	go func() {
 		t := time.NewTicker(interval)
 		defer t.Stop()
-		w.runOnce(ctx, time.Now().UTC())
+		// An immediate pass, then one per tick, until ctx is cancelled.
 		for {
+			w.runOnce(ctx, time.Now().UTC())
 			select {
 			case <-ctx.Done():
 				return
-			case now := <-t.C:
-				w.runOnce(ctx, now.UTC())
+			case <-t.C:
 			}
 		}
 	}()

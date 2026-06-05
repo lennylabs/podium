@@ -37,16 +37,15 @@ func startRetentionScheduler(ctx context.Context, cfg *Config, sink *audit.FileS
 	go func() {
 		t := time.NewTicker(interval)
 		defer t.Stop()
-		// One immediate pass so a long-running operator doesn't
-		// have to wait for the first tick after bumping the env
-		// var to see retention applied.
-		runRetentionOnce(ctx, sink, policies, reAnchor)
+		// One immediate pass so a long-running operator doesn't have to wait for
+		// the first tick after bumping the env var, then one pass per tick until
+		// ctx is cancelled.
 		for {
+			runRetentionOnce(ctx, sink, policies, reAnchor)
 			select {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				runRetentionOnce(ctx, sink, policies, reAnchor)
 			}
 		}
 	}()

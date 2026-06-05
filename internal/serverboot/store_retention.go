@@ -31,13 +31,13 @@ func startStoreRetentionScheduler(ctx context.Context, cfg *Config, st store.Sto
 	go func() {
 		t := time.NewTicker(interval)
 		defer t.Stop()
-		runStoreRetentionOnce(ctx, st, deprecatedWindow, layerWindow)
+		// An immediate pass, then one per tick, until ctx is cancelled.
 		for {
+			runStoreRetentionOnce(ctx, st, deprecatedWindow, layerWindow)
 			select {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				runStoreRetentionOnce(ctx, st, deprecatedWindow, layerWindow)
 			}
 		}
 	}()
