@@ -367,6 +367,17 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 	layers := make([]layer.Layer, 0, len(fsReg.Layers))
 	for i, l := range fsReg.Layers {
 		order := startOrder + i + 1
+		// §4.6: honor per-layer visibility declared in the layer's
+		// .layer-config. filesystem.Open parses it into l.Visibility and
+		// sets l.HasVisibility. A layer without the file keeps
+		// HasVisibility=false and falls back to the bootstrap default vis,
+		// as the filesystem.Layer doc comment specifies ("when false a
+		// server bootstrap applies its default"). The two Visibility types
+		// carry identical fields, so the conversion is a direct copy.
+		effVis := vis
+		if l.HasVisibility {
+			effVis = layer.Visibility(l.Visibility)
+		}
 		res, err := ingest.Ingest(ctx, st, ingest.Request{
 			TenantID: tenantID,
 			LayerID:  l.ID,
@@ -413,10 +424,10 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			SourceType:   "local",
 			LocalPath:    l.Path,
 			Order:        order,
-			Public:       vis.Public,
-			Organization: vis.Organization,
-			Groups:       vis.Groups,
-			Users:        vis.Users,
+			Public:       effVis.Public,
+			Organization: effVis.Organization,
+			Groups:       effVis.Groups,
+			Users:        effVis.Users,
 			CreatedAt:    now,
 			// §7.3.1: the bootstrap ingest just completed, so stamp
 			// last_ingested_at for staleness monitoring.
@@ -428,7 +439,7 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 		layers = append(layers, layer.Layer{
 			ID:         l.ID,
 			Precedence: order,
-			Visibility: vis,
+			Visibility: effVis,
 		})
 		log.Printf("ingested layer %s from %s (accepted=%d, idempotent=%d, rejected=%d, advisories=%d)",
 			l.ID, l.Path, res.Accepted, res.Idempotent, len(res.Rejected), len(res.Advisories))
