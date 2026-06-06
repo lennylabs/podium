@@ -201,35 +201,42 @@ func (r *RuntimeKeyRegistry) JWTVerifier(audience string, clock func() jwt.Numer
 		if err := validateActor(claims["act"], issuer); err != nil {
 			return Identity{}, untrusted(issuer, err.Error())
 		}
-		sub, _ := claims["sub"].(string)
-		if sub == "" {
-			return Identity{}, untrusted(issuer, "sub claim missing")
+		id, err := claimIdentity(claims)
+		if err != nil {
+			return Identity{}, untrusted(issuer, err.Error())
 		}
-
-		id := Identity{
-			Sub:             sub,
-			IsAuthenticated: true,
-		}
-		if email, ok := claims["email"].(string); ok {
-			id.Email = email
-		}
-		if org, ok := claims["org_id"].(string); ok {
-			id.OrgID = org
-		}
-		if groups, ok := claims["groups"].([]any); ok {
-			for _, g := range groups {
-				if s, ok := g.(string); ok {
-					id.Groups = append(id.Groups, s)
-				}
-			}
-		}
-		// §6.3.1 fine-grained OAuth scopes: a token may carry "podium:*"
-		// scope claims that narrow the caller's surface. Both the OAuth
-		// "scope" (RFC 6749, space-delimited) and the Azure-style "scp"
-		// claim are read, in either string or array form.
-		id.Scopes = scopesFromClaims(claims)
 		return id, nil
 	}
+}
+
+// claimIdentity builds the §6.3.1 caller Identity from the standard claim set
+// shared by the runtime-key verifier (§6.3.2) and the oidc-jwt verifier
+// (§6.3.3): the required sub, plus email, org_id, groups, and the fine-grained
+// "podium:*" scope claims (both the RFC 6749 space-delimited "scope" and the
+// Azure-style "scp", in string or array form). It returns an error naming the
+// missing claim so each verifier wraps it in its provider-specific untrusted
+// error (auth.untrusted_runtime or auth.untrusted_token).
+func claimIdentity(claims jwt.MapClaims) (Identity, error) {
+	sub, _ := claims["sub"].(string)
+	if sub == "" {
+		return Identity{}, errors.New("sub claim missing")
+	}
+	id := Identity{Sub: sub, IsAuthenticated: true}
+	if email, ok := claims["email"].(string); ok {
+		id.Email = email
+	}
+	if org, ok := claims["org_id"].(string); ok {
+		id.OrgID = org
+	}
+	if groups, ok := claims["groups"].([]any); ok {
+		for _, g := range groups {
+			if s, ok := g.(string); ok {
+				id.Groups = append(id.Groups, s)
+			}
+		}
+	}
+	id.Scopes = scopesFromClaims(claims)
+	return id, nil
 }
 
 // validateActor checks that the act claim identifies the runtime named by

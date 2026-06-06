@@ -63,6 +63,13 @@ var errorCodeRegistry = map[string]errorCodeMeta{
 	"auth.untrusted_runtime": {
 		suggestedAction: "Register the runtime's signing key via 'podium admin runtime register'.",
 	},
+	// §6.3.3 / §6.10: the gateway-delegated oidc-jwt provider's codes.
+	"auth.token_expired": {
+		suggestedAction: "Refresh the token. For 'injected-session-token' the runtime reissues it; for 'oidc-jwt' the gateway forwards a new token.",
+	},
+	"auth.untrusted_token": {
+		suggestedAction: "Verify the gateway forwards a token from the issuer and audience configured for 'oidc-jwt' (PODIUM_OAUTH_ISSUER, PODIUM_OAUTH_AUDIENCE).",
+	},
 }
 
 // enrichEnvelope fills the retryable flag and suggested_action from the

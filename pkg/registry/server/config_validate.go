@@ -29,6 +29,15 @@ var (
 	// configured, preventing accidental exposure of an unauthenticated UI.
 	// Maps to config.web_ui_public_bind_refused.
 	ErrWebUIPublicBindRefused = errors.New("config.web_ui_public_bind_refused")
+
+	// ErrTrustedHeadersPublicBind signals that the §6.3.3 trusted-headers
+	// provider was selected on a non-loopback bind without a proxy secret or
+	// --allow-public-bind. Because trusted-headers reads identity from
+	// unverified headers, the identity it trusts is exactly the set of clients
+	// that can reach the bind address; a non-loopback bind must be backed by a
+	// request-level proxy secret or an operator-declared upstream control.
+	// Maps to config.trusted_headers_public_bind.
+	ErrTrustedHeadersPublicBind = errors.New("config.trusted_headers_public_bind")
 )
 
 // StartupConfig captures the pieces of the server config that need
@@ -52,6 +61,10 @@ type StartupConfig struct {
 	// may bind a non-loopback address only when this is set and an identity
 	// provider is configured.
 	WebUIAllowPublicBind bool
+	// TrustedProxySecret is the §6.3.3 PODIUM_TRUSTED_PROXY_SECRET. When set, a
+	// non-loopback trusted-headers bind is permitted because the secret gates
+	// header trust at the request level.
+	TrustedProxySecret string
 }
 
 // Validate enforces the §13.10 startup invariants:
@@ -80,6 +93,18 @@ func (c StartupConfig) Validate() error {
 			return fmt.Errorf("%w: the web UI on a non-loopback bind (%q) requires --web-ui-allow-public-bind and a configured identity provider",
 				ErrWebUIPublicBindRefused, c.Bind)
 		}
+	}
+	// §6.3.3 / §13.10 "Bind restriction under trusted-headers": the provider
+	// trusts unverified identity headers, so the identity it trusts is exactly
+	// the set of clients that can reach the bind address. A loopback bind is
+	// always allowed (only a co-located process can connect); a non-loopback
+	// bind must be backed by a request-level proxy secret or the operator's
+	// explicit --allow-public-bind declaration that an upstream control keeps
+	// the registry reachable only through the gateway.
+	if c.IdentityProvider == "trusted-headers" && !isLoopbackBind(c.Bind) &&
+		c.TrustedProxySecret == "" && !c.AllowPublicBind {
+		return fmt.Errorf("%w: trusted-headers reads unverified identity headers, so a non-loopback bind (%q) requires PODIUM_TRUSTED_PROXY_SECRET or --allow-public-bind",
+			ErrTrustedHeadersPublicBind, c.Bind)
 	}
 	return nil
 }

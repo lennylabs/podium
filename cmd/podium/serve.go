@@ -21,7 +21,7 @@ func serveCmd(args []string) int {
 	setUsage(fs, "Run the standalone registry server in-process.")
 	bind := fs.String("bind", "", "address to listen on (overrides PODIUM_BIND)")
 	publicMode := fs.Bool("public-mode", false, "run in public mode (overrides PODIUM_PUBLIC_MODE)")
-	allowPublicBind := fs.Bool("allow-public-bind", false, "allow public mode to bind a non-loopback address (overrides PODIUM_ALLOW_PUBLIC_BIND)")
+	allowPublicBind := fs.Bool("allow-public-bind", false, "allow public mode or trusted-headers to bind a non-loopback address (overrides PODIUM_ALLOW_PUBLIC_BIND)")
 	standalone := fs.Bool("standalone", false, "alias for the zero-flag standalone bootstrap")
 	// §13.10: --strict refuses to start without explicit configuration instead
 	// of auto-entering standalone mode (the same effect as PODIUM_NO_AUTOSTANDALONE).

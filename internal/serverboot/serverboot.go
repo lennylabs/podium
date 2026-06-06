@@ -1025,6 +1025,36 @@ func run(ctx context.Context, stop func()) error {
 			verifierInstalled = true
 			log.Printf("identity provider: injected-session-token (verifying runtime-signed JWTs)")
 		}
+		if cfg.identityProvider == "oidc-jwt" {
+			// §6.3.3: verify the gateway-forwarded token against the issuer JWKS.
+			// Refuse to start without an https issuer and a configured audience.
+			if err := oidcJWTConfigGuard(cfg.identityProvider, cfg.oauthIssuer, cfg.oauthAudience); err != nil {
+				return err
+			}
+			verifier := identity.NewOIDCVerifier(cfg.oauthIssuer, cfg.oauthAudience, time.Duration(cfg.oauthJWKSCacheTTLSeconds)*time.Second)
+			// §6.3.3: fail to start if the IdP discovery document or JWKS is
+			// unreachable at boot, rather than serve an unverifiable registry.
+			if err := verifier.Prime(); err != nil {
+				return fmt.Errorf("oidc-jwt: issuer %q is unreachable at startup, refusing to start (§6.3.3): %w", cfg.oauthIssuer, err)
+			}
+			layerVerify = oidcJWTVerifier(verifier, cfg.oauthTokenHeader, cfg.idpGroupMapping)
+			bootOpts = append(bootOpts, server.WithIdentityVerifier(layerVerify))
+			verifierInstalled = true
+			log.Printf("identity provider: oidc-jwt (verifying forwarded tokens against issuer %s)", cfg.oauthIssuer)
+		}
+		if cfg.identityProvider == "trusted-headers" {
+			// §6.3.3: trust gateway-injected identity headers. The bind
+			// constraint (config.trusted_headers_public_bind) is enforced in
+			// StartupConfig.Validate before the store opens.
+			layerVerify = trustedHeadersVerifier(cfg.trustedProxySecret)
+			bootOpts = append(bootOpts, server.WithIdentityVerifier(layerVerify))
+			verifierInstalled = true
+			if cfg.trustedProxySecret != "" {
+				log.Printf("identity provider: trusted-headers (proxy secret required on every request)")
+			} else {
+				log.Printf("identity provider: trusted-headers (no proxy secret; identity headers honored on every request)")
+			}
+		}
 	}
 
 	if err := identityVisibilityGuard(cfg.identityProvider, providerSelected, cfg.publicMode, verifierInstalled); err != nil {
@@ -1354,18 +1384,38 @@ type Config struct {
 	// for IdPs without SCIM. Nil or empty passes groups through unchanged.
 	// Sourced from PODIUM_IDP_GROUP_MAPPING.
 	idpGroupMapping *identity.IdpGroupMapping
-	storeType       string
-	sqlitePath      string
-	postgresDSN     string
-	objectStore     string
-	filesystemRoot  string
-	publicURL       string
-	presignTTL      time.Duration
-	s3Endpoint      string
-	s3Region        string
-	s3Bucket        string
-	s3AccessKey     string
-	s3SecretKey     string
+	// oauthIssuer is the §6.3.3 / §13.12 OIDC issuer URL for the oidc-jwt
+	// provider (PODIUM_OAUTH_ISSUER or identity_provider.issuer). The registry
+	// derives the JWKS from ${issuer}/.well-known/openid-configuration and
+	// validates the forwarded token's iss against it. Must use https.
+	oauthIssuer string
+	// oauthTokenHeader is the §6.3.3 / §13.12 header the oidc-jwt provider reads
+	// the forwarded JWT from (PODIUM_OAUTH_TOKEN_HEADER or
+	// identity_provider.token_header). Default Authorization; the value is parsed
+	// as "Bearer <token>" regardless of header name.
+	oauthTokenHeader string
+	// oauthJWKSCacheTTLSeconds is the §13.12 max age in seconds of the cached
+	// issuer JWKS for oidc-jwt (PODIUM_OAUTH_JWKS_CACHE_TTL_SECONDS or
+	// identity_provider.jwks_cache_ttl_seconds). Non-positive means the §13.12
+	// default of 300.
+	oauthJWKSCacheTTLSeconds int
+	// trustedProxySecret is the §6.3.3 / §13.12 shared secret the trusted-headers
+	// provider matches against the X-Podium-Proxy-Secret request header
+	// (PODIUM_TRUSTED_PROXY_SECRET, environment only). Empty honors the identity
+	// headers on every request.
+	trustedProxySecret string
+	storeType          string
+	sqlitePath         string
+	postgresDSN        string
+	objectStore        string
+	filesystemRoot     string
+	publicURL          string
+	presignTTL         time.Duration
+	s3Endpoint         string
+	s3Region           string
+	s3Bucket           string
+	s3AccessKey        string
+	s3SecretKey        string
 	// s3ForcePathStyle maps to §13.12 PODIUM_S3_FORCE_PATH_STYLE. TLS is
 	// derived from the PODIUM_S3_ENDPOINT URL scheme (§13.12 documents the
 	// endpoint as a URL), so there is no separate use-SSL knob.
@@ -1571,6 +1621,10 @@ func (c *Config) Settings() []Setting {
 		{"identity_provider", c.identityProvider, envOrSrc("PODIUM_IDENTITY_PROVIDER", yamlSrc)},
 		{"oauth_audience", c.oauthAudience, envOrSrc("PODIUM_OAUTH_AUDIENCE", defaultSrc)},
 		{"identity_provider.authorization_endpoint", c.oauthAuthorizationEndpoint, envOrSrc("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT", yamlSrc)},
+		{"identity_provider.issuer", c.oauthIssuer, envOrSrc("PODIUM_OAUTH_ISSUER", yamlSrc)},
+		{"identity_provider.token_header", c.oauthTokenHeader, envOrSrc("PODIUM_OAUTH_TOKEN_HEADER", yamlSrc)},
+		{"identity_provider.jwks_cache_ttl_seconds", intStr(c.oauthJWKSCacheTTLSeconds), envOrSrc("PODIUM_OAUTH_JWKS_CACHE_TTL_SECONDS", yamlSrc)},
+		{"trusted_proxy_secret", redact(c.trustedProxySecret), envOrSrc("PODIUM_TRUSTED_PROXY_SECRET", "")},
 		{"idp_group_mapping", idpGroupMappingStr(c.idpGroupMapping), envOrSrc("PODIUM_IDP_GROUP_MAPPING", defaultSrc)},
 		{"store.type", c.storeType, envOrSrc("PODIUM_REGISTRY_STORE", defaultSrc)},
 		{"store.sqlite_path", c.sqlitePath, envOrSrc("PODIUM_SQLITE_PATH", defaultSrc)},
@@ -1635,6 +1689,10 @@ func LoadConfig() *Config {
 		identityProvider:           os.Getenv("PODIUM_IDENTITY_PROVIDER"),
 		oauthAudience:              os.Getenv("PODIUM_OAUTH_AUDIENCE"),
 		oauthAuthorizationEndpoint: os.Getenv("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT"),
+		oauthIssuer:                os.Getenv("PODIUM_OAUTH_ISSUER"),
+		oauthTokenHeader:           os.Getenv("PODIUM_OAUTH_TOKEN_HEADER"),
+		oauthJWKSCacheTTLSeconds:   envInt("PODIUM_OAUTH_JWKS_CACHE_TTL_SECONDS", 0),
+		trustedProxySecret:         os.Getenv("PODIUM_TRUSTED_PROXY_SECRET"),
 		storeType:                  envDefault("PODIUM_REGISTRY_STORE", "sqlite"),
 		sqlitePath:                 os.Getenv("PODIUM_SQLITE_PATH"),
 		postgresDSN:                os.Getenv("PODIUM_POSTGRES_DSN"),
@@ -1854,6 +1912,7 @@ func (c *Config) validate() error {
 		AllowPublicBind:      c.allowPublicBind,
 		WebUI:                c.webUI,
 		WebUIAllowPublicBind: c.webUIAllowPublicBind,
+		TrustedProxySecret:   c.trustedProxySecret,
 	}
 	if err := startup.Validate(); err != nil {
 		return err

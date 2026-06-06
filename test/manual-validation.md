@@ -113,6 +113,8 @@ rm -rf "$WORK"
 | S29 | Workspace overlay merges local artifacts | standalone | none | none | none |
 | S30 | Offline-first cache resilience | standalone | none | none | none |
 | S31 | Import an existing skill tree into a layer | solo | none | none | none |
+| S32 | Gateway-delegated identity with trusted-headers | standalone | none | none | none |
+| S33 | Gateway-delegated providers fail closed on misconfig | standalone | none | none | none |
 
 ---
 
@@ -2018,3 +2020,135 @@ imported layer.
 - The standalone server ingests the imported skills and search returns `greet`.
 
 **Cleanup.** Stop the server and `rm -rf "$WORK"`.
+
+---
+
+## S32: Gateway-delegated identity with trusted-headers
+
+**Goal.** Validate that a standalone server fronted by a gateway trusts the
+gateway-injected `X-Podium-User-*` identity headers, applies per-layer
+visibility (§4.6) from them, and honors the headers only on a request carrying
+the matching proxy secret.
+
+**Covers.** Standalone deployment, the `trusted-headers` identity provider
+(§6.3.3), gateway-injected identity headers, per-layer visibility, the
+`PODIUM_TRUSTED_PROXY_SECRET` request-level gate.
+
+**Steps.**
+
+1. Run the isolation block.
+2. Write a registry config with a public layer and a group-restricted layer.
+
+   ```bash
+   mkdir -p "$WORK/pub/handbook" "$WORK/eng/deploy"
+   podium artifact scaffold --type context --description "Company handbook" --force "$WORK/pub/handbook"
+   podium artifact scaffold --type skill --description "Engineering deploy" --force "$WORK/eng/deploy"
+   cat > "$WORK/registry.yaml" <<YAML
+   registry:
+     layers:
+       - id: public-handbook
+         source: { local: { path: $WORK/pub } }
+         visibility: { public: true }
+       - id: eng-internal
+         source: { local: { path: $WORK/eng } }
+         visibility: { groups: [engineering] }
+   YAML
+   ```
+
+3. Boot the server in `trusted-headers` mode with a proxy secret. The bind is
+   loopback, so no `--allow-public-bind` is needed.
+
+   ```bash
+   export PODIUM_IDENTITY_PROVIDER=trusted-headers
+   export PODIUM_TRUSTED_PROXY_SECRET=gateway-secret
+   podium serve --standalone --no-embeddings --config "$WORK/registry.yaml" --bind 127.0.0.1:8132 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8132/healthz
+   export URL=http://127.0.0.1:8132
+   ```
+
+4. Issue requests as the gateway would, injecting identity headers plus the
+   proxy secret. The `code` helper prints the HTTP status of a load.
+
+   ```bash
+   code() { curl -s -o /dev/null -w "%{http_code}\n" "$@"; }
+   SEC="X-Podium-Proxy-Secret: gateway-secret"
+   echo "alice handbook:   $(code -H "X-Podium-User-Sub: alice@acme.com" -H "X-Podium-User-Groups: engineering" -H "$SEC" "$URL/v1/load_artifact?id=handbook")"
+   echo "alice deploy:     $(code -H "X-Podium-User-Sub: alice@acme.com" -H "X-Podium-User-Groups: engineering" -H "$SEC" "$URL/v1/load_artifact?id=deploy")"
+   echo "bob deploy:       $(code -H "X-Podium-User-Sub: bob@acme.com" -H "$SEC" "$URL/v1/load_artifact?id=deploy")"
+   echo "anon deploy:      $(code "$URL/v1/load_artifact?id=deploy")"
+   echo "anon handbook:    $(code "$URL/v1/load_artifact?id=handbook")"
+   echo "no-secret deploy: $(code -H "X-Podium-User-Sub: alice@acme.com" -H "X-Podium-User-Groups: engineering" "$URL/v1/load_artifact?id=deploy")"
+   ```
+
+**Expected.**
+
+- `alice handbook` and `alice deploy` return `200`: the engineering caller sees
+  the public layer and the engineering layer.
+- `bob deploy` and `anon deploy` return `404`: a non-member and an anonymous
+  caller do not see the engineering layer.
+- `anon handbook` returns `200`: the public layer is visible without identity.
+- `no-secret deploy` returns `404`: identity headers without the matching
+  `X-Podium-Proxy-Secret` are discarded, so the caller is anonymous.
+
+**Cleanup.** Stop the server and `rm -rf "$WORK"`.
+
+---
+
+## S33: Gateway-delegated providers fail closed on misconfiguration
+
+**Goal.** Validate that the gateway-delegated providers refuse to start on the
+misconfigurations the startup guards cover, naming the config error code rather
+than serving an unverifiable or forgeable registry.
+
+**Covers.** The `config.invalid_issuer_scheme`, `config.oidc_jwt_audience_unset`,
+and `config.trusted_headers_public_bind` startup guards (§6.3.3, §13.10, §13.12).
+
+**Steps.**
+
+1. Run the isolation block, then scaffold a one-artifact layer the server can
+   load.
+
+   ```bash
+   mkdir -p "$WORK/reg/seed"
+   podium artifact scaffold --type context --description "seed" --force "$WORK/reg/seed"
+   ```
+
+2. `oidc-jwt` with a non-`https` issuer is refused. This runs in the foreground
+   and exits immediately.
+
+   ```bash
+   PODIUM_IDENTITY_PROVIDER=oidc-jwt \
+     PODIUM_OAUTH_ISSUER=http://acme.okta.example/oauth2/default \
+     PODIUM_OAUTH_AUDIENCE=https://podium.acme.example \
+     podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8133
+   echo "exit=$?"
+   ```
+
+3. `oidc-jwt` without `PODIUM_OAUTH_AUDIENCE` is refused.
+
+   ```bash
+   PODIUM_IDENTITY_PROVIDER=oidc-jwt \
+     PODIUM_OAUTH_ISSUER=https://acme.okta.example/oauth2/default \
+     podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8133
+   echo "exit=$?"
+   ```
+
+4. `trusted-headers` on a non-loopback bind without a proxy secret or
+   `--allow-public-bind` is refused.
+
+   ```bash
+   PODIUM_IDENTITY_PROVIDER=trusted-headers \
+     podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 0.0.0.0:8133
+   echo "exit=$?"
+   ```
+
+**Expected.**
+
+- Step 2 exits non-zero and prints `config.invalid_issuer_scheme`.
+- Step 3 exits non-zero and prints `config.oidc_jwt_audience_unset`.
+- Step 4 exits non-zero and prints `config.trusted_headers_public_bind`, naming
+  the non-loopback bind address.
+- Each server refuses to start, so no background process is left to stop.
+
+**Cleanup.** `rm -rf "$WORK"`.
