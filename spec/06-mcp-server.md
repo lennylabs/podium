@@ -51,6 +51,8 @@ Tested IdPs: Okta, Entra ID, Auth0, Google Workspace, Keycloak. SAML supported v
 
 Fine-grained narrowing via OAuth scope claims (e.g., `podium:read:finance/*`, `podium:load:finance/ap/pay-invoice@1.x`); narrow scopes intersect with the caller's layer visibility, and the smaller surface wins.
 
+**Per-request tenant selection.** On a multi-tenant registry, the registry selects each request's tenant (§4.7.1) from the organization value carried by the authenticated identity: the verified `org_id` claim under `oidc-jwt` (§6.3.3), or the `X-Podium-User-Org` header under `trusted-headers`. The value is an org ID or an org-name alias (§4.7.1); the registry resolves an alias to its org ID and selects that org's layer list (§4.6) and audit stream for the request. Under `oidc-jwt`, a value that resolves to no provisioned tenant is rejected with `auth.tenant_unknown` (§6.10); under `trusted-headers`, the request is treated as anonymous and sees public visibility only. A single-tenant registry, whether a standalone backend (§13.10) or a standard backend with only the default tenant, resolves every authenticated request against its sole tenant and does not consult the organization value.
+
 ### 6.3.2 Runtime Trust Model (`injected-session-token`)
 
 The injected token is a JWT signed by a runtime-specific signing key registered with the registry one-time at runtime onboarding. The registry verifies the signature on every call. Required claims:
@@ -70,6 +72,26 @@ Without a registered signing key, the registry rejects with `auth.untrusted_runt
 - `PODIUM_SESSION_TOKEN_FILE` is watched via fsnotify and re-read on change.
 
 Token rotation is the runtime's responsibility; the MCP server's only obligation is to read fresh on every call. Recommended TTLs: ≤15 min. Prefer `PODIUM_SESSION_TOKEN_FILE` over env var when the runtime can write to a file with restrictive permissions.
+
+### 6.3.3 Server-Side Request Authentication
+
+`oidc-jwt` and `trusted-headers` are registry-process identity providers for a deployment that runs the registry behind a gateway that has already authenticated the caller (an OIDC ingress, an OAuth2 proxy, an identity-verifying sidecar, or a non-OIDC corporate SSO). Both are selected by the registry's `PODIUM_IDENTITY_PROVIDER`. They are not client-side providers: the MCP server's `PODIUM_IDENTITY_PROVIDER` admits only `oauth-device-code` and `injected-session-token`, and rejects these two values at startup. A Podium client behind such a gateway sends no credential of its own, because identity is supplied by the gateway. Both apply on a standalone (§13.10) or a standard (§13.1) backend, and both are mutually exclusive with public mode: setting either alongside `PODIUM_PUBLIC_MODE` fails at startup with `config.public_mode_with_idp` (§13.10).
+
+Both record the caller's `sub` and `email` and match them against `users:` layer visibility (§4.6). They derive the caller's organization (the §4.7.1 tenant) from the authenticated identity rather than a client-supplied value: `oidc-jwt` from the verified `org_id` claim, and `trusted-headers` from the `X-Podium-User-Org` header. On a single-tenant registry (a standalone backend, or a standard backend with only the default tenant), the registry resolves every authenticated caller to its sole tenant and does not consult the organization value. On a multi-tenant registry, the organization value selects the tenant per §6.3.1. Each value resolves groups differently, as described below.
+
+**`oidc-jwt` (verified).** The gateway forwards the caller's IdP-signed JWT in the header named by `token_header` (default `Authorization`). The registry parses the named header's value as the standard HTTP Bearer credential regardless of the header name: the value must be `Bearer <token>`, the prefix is matched case-insensitively, and surrounding whitespace is trimmed from the token. A header value without the prefix carries no token, so the request is anonymous and sees public visibility only (§4.6).
+
+The registry verifies the token on every request. It selects the signing key by `kid` from the issuer's JWKS, resolved from the OIDC discovery document at `<issuer>/.well-known/openid-configuration` and refreshed when the cached key set is older than `jwks_cache_ttl_seconds` (default 300) or when a token presents a `kid` absent from the cached set. It checks the signature against an asymmetric algorithm (RSA, ECDSA, or EdDSA; symmetric algorithms are rejected, so a public key cannot be replayed as an HMAC secret), and validates `iss` against the configured `issuer`, `aud` against `PODIUM_OAUTH_AUDIENCE`, and the `exp`/`nbf` window. On success it records `sub` and `email`, derives the organization from the verified `org_id` claim, and resolves groups through SCIM or the `IdpGroupMapping` adapter (§6.3.1) applied to the token's group claim. A token that fails signature, `iss`, or `aud` validation is rejected with `auth.untrusted_token`, and an expired token with `auth.token_expired`. While the issuer JWKS is unreachable at runtime, verification fails closed and the request is anonymous rather than rejected.
+
+The `issuer` must use the `https` scheme: the registry fetches the discovery document and JWKS over it, and an `http` endpoint would let a man-in-the-middle substitute a signing key. The registry rejects a non-`https` issuer at startup with `config.invalid_issuer_scheme`. `PODIUM_OAUTH_AUDIENCE` is required under `oidc-jwt`, so the required `aud` claim is always verified and a token issued for a different relying party that shares the issuer cannot be accepted; an unset audience fails startup with `config.oidc_jwt_audience_unset`. If the discovery document or JWKS is unreachable at startup, the registry fails to start. This mode trusts the issuer's signing key alone and no element of the network path, so the registry may be directly reachable without an authentication bypass.
+
+**`trusted-headers` (delegated).** The gateway authenticates the caller by any means and injects the resolved identity as request headers: `X-Podium-User-Sub`, `X-Podium-User-Email`, `X-Podium-User-Groups` (comma-separated), and `X-Podium-User-Org`. The registry records `sub` and `email` from these headers and performs no verification of their contents. Groups come from `X-Podium-User-Groups` directly; SCIM and the `IdpGroupMapping` adapter are not consulted, because there is no token to read and the gateway is the source of truth. A request without identity headers is anonymous and sees public visibility only. `trusted-headers` raises no authentication error: a missing or distrusted identity yields anonymous, public-only visibility rather than a rejection.
+
+This mode rests on the operational assumption, which the registry cannot verify, that every request arrived through the gateway and that the gateway removed any client-supplied `X-Podium-User-*` headers before setting its own. When `PODIUM_TRUSTED_PROXY_SECRET` is set, the registry honors the identity headers only on a request whose `X-Podium-Proxy-Secret` header matches the configured value under a constant-time comparison, and treats any other request as anonymous; when the secret is unset, the secret header is ignored and the identity headers are honored on every request.
+
+Because `trusted-headers` reads identity from headers it cannot verify, the identity it trusts is exactly the set of clients that can reach the bind address, so the provider constrains the bind at startup. (`oidc-jwt`, which verifies every token regardless of the network path, carries no bind restriction.) On a single-tenant registry, a loopback bind (`127.0.0.0/8`, `::1`) is always allowed; a non-loopback bind fails to start with `config.trusted_headers_public_bind` unless `PODIUM_TRUSTED_PROXY_SECRET` or `--allow-public-bind` is set. On a multi-tenant registry, where `X-Podium-User-Org` selects among tenants and a co-resident process can reach a loopback bind, co-residency does not authenticate the gateway, so the proxy secret is required regardless of bind address, including loopback; an unset secret fails to start with `config.trusted_headers_multitenant_no_secret`. The proxy secret is the registry's only request-level control over header trust, because the registry serves HTTP and TLS terminates upstream. The `--allow-public-bind` flag records the operator's assumption that an upstream control the registry cannot verify, such as mutual TLS, a firewall, or a network policy, keeps the registry reachable only through the gateway.
+
+The `X-Podium-User-*` and `X-Podium-Proxy-Secret` headers are request inputs read only in `trusted-headers` mode. They are unrelated to the §13.2.1 read-only response headers, and `trusted-headers` does not consult the `X-Forwarded-User` audit annotation (§8.1) as an authorization input.
 
 ## 6.4 Workspace Local Overlay
 
@@ -261,8 +283,10 @@ The MCP server is a stdio subprocess spawned by its host. The host is responsibl
 | Registry offline                              | Serve from cache; return explicit "offline" status on fresh `load_domain` / `search_domains` / `search_artifacts`.                                                             |
 | Workspace overlay path missing                | Skip the workspace local overlay; warn once.                                                                                                                |
 | Auth token expired (`oauth-device-code`)      | Trigger refresh; if interactive refresh required, surface in tool response with reauth instructions via MCP elicitation.                                    |
-| Auth token expired (`injected-session-token`) | Surface "token expired"; the host's runtime is responsible for refresh.                                                                                     |
+| Auth token expired (`injected-session-token`, `oidc-jwt`) | Reject with `auth.token_expired`. The host's runtime is responsible for refresh; for `oidc-jwt` the gateway forwards a new token. |
 | Untrusted runtime (`injected-session-token`)  | Reject with `auth.untrusted_runtime`. Runtime must register signing key with registry.                                                                      |
+| Untrusted forwarded token (`oidc-jwt`)        | Reject with `auth.untrusted_token`. The token failed signature, `iss`, or `aud` validation against the configured issuer and audience.                       |
+| Verified token names no tenant (`oidc-jwt`)   | Reject with `auth.tenant_unknown`. The token verified, but its `org_id` names no provisioned tenant on a multi-tenant registry.                              |
 | Visibility denial on a call                   | Return a structured error naming the unreachable resource (without leaking the layer's existence); log to the registry audit stream as `visibility.denied`. |
 | Materialization destination unwritable        | Fail the `load_artifact` call with a structured error; nothing partial is left on disk.                                                                     |
 | Signature verification failure                | Fail with `materialize.signature_invalid`; do not write to disk.                                                                                            |
@@ -284,6 +308,41 @@ All errors use a structured envelope:
   "details": { "runtime_iss": "managed-runtime-x" },
   "retryable": false,
   "suggested_action": "Register the runtime's signing key via 'podium admin runtime register'."
+}
+```
+
+The gateway-delegated providers (§6.3.3) add three `auth.*` codes. `auth.token_expired` reports an expired `injected-session-token` or `oidc-jwt` token; it carries no `details`, because the expiry is reported without an issuer field:
+
+```json
+{
+  "code": "auth.token_expired",
+  "message": "The authenticated token has expired.",
+  "retryable": false,
+  "suggested_action": "Refresh the token. For 'injected-session-token' the runtime reissues it; for 'oidc-jwt' the gateway forwards a new token."
+}
+```
+
+`auth.untrusted_token` reports a forwarded `oidc-jwt` token that failed signature, `iss`, or `aud` verification. `details.token_iss` carries the rejected token's issuer, distinct from the runtime code's `details.runtime_iss`:
+
+```json
+{
+  "code": "auth.untrusted_token",
+  "message": "Forwarded token from issuer 'https://acme.okta.com/oauth2/default' failed verification.",
+  "details": { "token_iss": "https://acme.okta.com/oauth2/default" },
+  "retryable": false,
+  "suggested_action": "Verify the gateway forwards a token from the issuer and audience configured for 'oidc-jwt' (PODIUM_OAUTH_ISSUER, PODIUM_OAUTH_AUDIENCE)."
+}
+```
+
+`auth.tenant_unknown` reports a verified `oidc-jwt` token whose `org_id` names no provisioned tenant on a multi-tenant registry. The token verified, so the failure is tenancy rather than authentication: `details.token_org_id` carries the unresolved organization value:
+
+```json
+{
+  "code": "auth.tenant_unknown",
+  "message": "Verified token names organization 'globex' which is not a provisioned tenant.",
+  "details": { "token_org_id": "globex" },
+  "retryable": false,
+  "suggested_action": "Provision the organization as a tenant, or forward a token whose org_id claim names an existing tenant."
 }
 ```
 

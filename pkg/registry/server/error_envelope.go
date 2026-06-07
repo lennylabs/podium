@@ -70,6 +70,9 @@ var errorCodeRegistry = map[string]errorCodeMeta{
 	"auth.untrusted_token": {
 		suggestedAction: "Verify the gateway forwards a token from the issuer and audience configured for 'oidc-jwt' (PODIUM_OAUTH_ISSUER, PODIUM_OAUTH_AUDIENCE).",
 	},
+	"auth.tenant_unknown": {
+		suggestedAction: "Provision the organization as a tenant, or forward a token whose org_id claim names an existing tenant.",
+	},
 }
 
 // enrichEnvelope fills the retryable flag and suggested_action from the

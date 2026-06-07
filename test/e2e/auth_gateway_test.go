@@ -187,6 +187,16 @@ func TestGateway_OIDCJWTMissingAudienceRefused(t *testing.T) {
 	)
 }
 
+// Spec: §6.3.3 — trusted-headers on a multi-tenant registry requires a proxy
+// secret regardless of bind; an unset secret fails startup with
+// config.trusted_headers_multitenant_no_secret.
+func TestGateway_TrustedHeadersMultitenantNoSecretRefused(t *testing.T) {
+	gwExpectStartupFailure(t, "config.trusted_headers_multitenant_no_secret",
+		"PODIUM_IDENTITY_PROVIDER=trusted-headers",
+		"PODIUM_MULTI_TENANT=true",
+	)
+}
+
 // Spec: §6.3.3 / §13.10 — trusted-headers on a non-loopback bind without a
 // proxy secret or --allow-public-bind fails startup with
 // config.trusted_headers_public_bind.

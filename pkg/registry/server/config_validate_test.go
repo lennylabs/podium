@@ -111,6 +111,29 @@ func TestStartupConfig_OIDCJWTNoBindRestriction(t *testing.T) {
 	}
 }
 
+// Spec: §6.3.3 — trusted-headers on a multi-tenant registry requires a proxy
+// secret on every request regardless of bind address, because X-Podium-User-Org
+// selects among tenants and co-residency does not authenticate the gateway.
+// Matrix: §6.10 (config.trusted_headers_multitenant_no_secret)
+func TestStartupConfig_TrustedHeadersMultitenantRequiresSecret(t *testing.T) {
+	t.Parallel()
+	// No secret fails regardless of bind, including loopback.
+	for _, bind := range []string{"127.0.0.1:8080", "0.0.0.0:8080"} {
+		cfg := server.StartupConfig{IdentityProvider: "trusted-headers", MultiTenant: true, Bind: bind}
+		if err := cfg.Validate(); !errors.Is(err, server.ErrTrustedHeadersMultitenantNoSecret) {
+			t.Errorf("bind %q: got %v, want ErrTrustedHeadersMultitenantNoSecret", bind, err)
+		}
+	}
+	// With a secret it is allowed even on a non-loopback bind.
+	if err := (server.StartupConfig{IdentityProvider: "trusted-headers", MultiTenant: true, Bind: "0.0.0.0:8080", TrustedProxySecret: "s"}).Validate(); err != nil {
+		t.Errorf("multi-tenant with secret: %v", err)
+	}
+	// --allow-public-bind does not substitute for the secret in multi-tenant mode.
+	if err := (server.StartupConfig{IdentityProvider: "trusted-headers", MultiTenant: true, Bind: "0.0.0.0:8080", AllowPublicBind: true}).Validate(); !errors.Is(err, server.ErrTrustedHeadersMultitenantNoSecret) {
+		t.Errorf("--allow-public-bind must not substitute for the secret in multi-tenant mode: got %v", err)
+	}
+}
+
 // Spec: §13.10 — the --allow-public-bind escape hatch permits a non-loopback
 // public-mode bind.
 func TestStartupConfig_PublicModeNonLoopbackAllowed(t *testing.T) {

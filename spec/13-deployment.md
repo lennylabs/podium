@@ -140,7 +140,7 @@ podium serve --strict
 | Vector store            | pgvector                                        | `sqlite-vec` extension loaded into the same SQLite file                                                                                                                                                                                                                                        |
 | Embedding provider      | `openai` (default)                              | `ollama` pointed at a local model server, or any cloud provider; `--no-embeddings` falls back to BM25-only                                                                                                                                                                                     |
 | Object storage          | S3-compatible                                   | Filesystem (`~/.podium/standalone/objects/`)                                                                                                                                                                                                                                                   |
-| Identity provider       | OIDC IdP                                        | None. No auth; `127.0.0.1`-only HTTP by default                                                                                                                                                                                                                                                |
+| Identity provider       | OIDC IdP                                        | None by default. No auth; `127.0.0.1`-only HTTP. A standalone server fronted by a gateway can set `PODIUM_IDENTITY_PROVIDER=oidc-jwt` or `trusted-headers` to filter by gateway-delegated identity (§6.3.3); `trusted-headers` on a non-loopback bind fails to start with `config.trusted_headers_public_bind` unless a proxy secret or `--allow-public-bind` is set.                                                                                                                                                                                                                                                |
 | Layers                  | Configured admin layers + user-defined layers   | `--layer-path` is polymorphic (see "**`--layer-path` modes**" below): single-layer mode produces one `local`-source layer rooted at the path; filesystem-registry mode treats each subdirectory as a `local`-source layer per §13.11.1. Additional `local` and `git` layers can be registered via `podium layer register` in either mode.                                                                                                                                                   |
 | Git provider / webhooks | Required for `git`-source layers                | `git` source layers work without webhooks; webhooks are optional. Without a webhook (typical for a developer machine without a public ingress), `podium layer reingest <id>` pulls the current state on demand, and `podium layer watch <id>` polls the source at a configured interval.        |
 | Signing                 | Sigstore-keyless or registry-managed key        | Disabled by default; opt in via `--sign registry-key`                                                                                                                                                                                                                                          |
@@ -166,7 +166,7 @@ If `multi_layer: true` is set but the safety check fails (manifest files are pre
 - **Artifact viewer**: manifest body rendered as markdown, frontmatter as a property table, links to extending or dependent artifacts.
 - **Layer panel**: list registered layers with their source, visibility, and `last_ingested_at`. Admins can register, reingest, and unregister layers from the UI; users can manage their own user-defined layers (cap per §7.3.1). The UI is a thin client over the same `podium layer …` HTTP endpoints.
 
-Authentication: in standalone deployments without an identity provider, the UI is open on the bind address (default `127.0.0.1`, which is not network-exposed). In standard deployments the UI uses the same OAuth device-code flow as the CLI, with the verification URL handoff handled in-browser.
+Authentication: in standalone deployments without an identity provider, the UI is open on the bind address (default `127.0.0.1`, which is not network-exposed). In standard deployments the UI uses the same OAuth device-code flow as the CLI, with the verification URL handoff handled in-browser. Under `oidc-jwt` or `trusted-headers` (§6.3.3) the UI is served by the same registry process behind the same gateway and carries no device-code flow of its own: the gateway authenticates the request and the registry resolves the caller's identity from the forwarded token or the injected headers, exactly as for any other API request, so the UI inherits the request's resolved identity. A non-loopback web-UI bind under `trusted-headers` is also subject to the provider's bind restriction, so it requires `PODIUM_TRUSTED_PROXY_SECRET` or `--allow-public-bind` in addition to `--web-ui-allow-public-bind`.
 
 Behind a flag: opt-in via `--web-ui` so headless deployments (CI runners, managed runtimes) don't pay the binary-size or attack-surface cost when they don't need it. The binary refuses to bind the UI to a non-loopback address unless `--web-ui-allow-public-bind` is also passed _and_ an identity provider is configured, preventing accidental exposure of an unauthenticated UI.
 
@@ -174,12 +174,14 @@ The UI is the recommended consumption path for non-developer users (analysts, pr
 
 **Sensible defaults for permissive deployments.** Standalone deployments shift several defaults toward low-friction rather than secure-by-default, appropriate for the solo and small-team contexts standalone targets:
 
-- **Layer visibility.** New layers registered via `podium layer register` default to `visibility: public` (instead of `users: [<registrant>]` as in standard mode for user-defined layers). Override with `PODIUM_DEFAULT_LAYER_VISIBILITY=users` for multi-user standalone deployments that want the standard behavior.
+- **Layer visibility.** New layers registered via `podium layer register` default to `visibility: public` on a standalone server without an identity provider (instead of `users: [<registrant>]` as in standard mode for user-defined layers). Once an identity provider is enabled (§6.3), the unset default resolves to `private` instead, so admin layers are not public to every caller once the registry filters by identity. Override with `PODIUM_DEFAULT_LAYER_VISIBILITY`, which the registry applies verbatim regardless of the identity provider.
 - **Signature verification.** The consumer-side signature-verification default relaxes to `never` (instead of `medium-and-above`). Verification runs in the consumer (the MCP server) rather than the registry, so the standalone server writes `defaults.verify_signatures: never` into the `~/.podium/sync.yaml` it creates on first run, and the MCP server honors that value when `PODIUM_VERIFY_SIGNATURES` is unset. Set `PODIUM_VERIFY_SIGNATURES` (or `defaults.verify_signatures` in `sync.yaml`) to `medium-and-above` or `always` to enforce.
 - **Sandbox profile.** `sandbox_profile:` is informational in standalone. Hosts honor it as in standard mode, but the registry does not refuse to ingest artifacts whose profiles can't be enforced locally. Override with `PODIUM_ENFORCE_SANDBOX_PROFILE=true` in multi-user setups.
 - **Sensitivity.** Artifacts without an explicit `sensitivity:` field default to `low`. The lint check that flags missing sensitivity is downgraded from a warning to a hint.
 
 Any of these defaults can be flipped to standard-mode behavior via the named env var without otherwise changing the deployment; the same single binary continues to serve.
+
+**Gateway-delegated identity (`oidc-jwt`, `trusted-headers`).** A standalone server fronted by a gateway authenticates callers by setting `PODIUM_IDENTITY_PROVIDER=oidc-jwt`, which verifies a forwarded token, or `trusted-headers`, which trusts gateway-injected identity headers (§6.3.3). Either filters layer visibility (§4.6) by the gateway-delegated identity. Neither adds multi-tenancy, which stays out of scope for standalone, so the registry resolves every caller to its sole tenant. `trusted-headers` reads identity from unverified headers, so it constrains the bind: a loopback bind is always allowed, and a non-loopback bind fails to start with `config.trusted_headers_public_bind` unless `PODIUM_TRUSTED_PROXY_SECRET` or `--allow-public-bind` is set. `oidc-jwt` verifies every token regardless of the network path and carries no bind restriction. Both are mutually exclusive with public mode.
 
 **Public mode (`--public-mode` / `PODIUM_PUBLIC_MODE`).** A registry-level switch that bypasses both authentication and the visibility model in one step. Replaces "progressively disable each governance feature" with a single explicit decision, appropriate for solo demos, evaluation pilots without team context, and intentionally open internal-knowledge-base deployments.
 
@@ -302,8 +304,9 @@ What's **not available** in filesystem source:
 Features that require **specifically a remote server** (not just any server):
 
 - Centralized audit independent of clones.
-- OIDC identity-based visibility filtering.
-- Multi-tenancy, SCIM, transparency-log anchoring.
+- Multi-tenancy, SCIM, and transparency-log anchoring.
+
+Identity-based visibility filtering requires a server but not specifically a remote one: a standalone server fronted by a gateway provides it through `oidc-jwt` or `trusted-headers` (§6.3.3), and a remote standard deployment runs its own OIDC IdP.
 
 ### 13.11.4 Watch Mode
 
@@ -324,11 +327,11 @@ The filesystem source covers the small-team eager-only path. Migration to a serv
 **Migrate to any server (local `podium serve --standalone` or remote standard deployment):**
 
 - Progressive disclosure required (agents call MCP meta-tools at runtime to load capabilities incrementally instead of materializing everything ahead of time).
+- Identity-based visibility filtering. A standalone server fronted by a gateway sets `PODIUM_IDENTITY_PROVIDER=oidc-jwt` or `trusted-headers` and filters by the gateway-delegated identity (§6.3.3). A remote standard deployment runs its own OIDC IdP instead.
 
 **Migrate specifically to a remote server:**
 
 - Centralized audit independent of clones.
-- OIDC identity-based visibility filtering.
 
 Migration is mechanical:
 
@@ -450,7 +453,18 @@ Selected via `PODIUM_EMBEDDING_PROVIDER` (`openai` | `voyage` | `cohere` | `olla
 
 ### Identity provider
 
-Identity-provider selection and per-provider config are documented in §6.3 (`PODIUM_IDENTITY_PROVIDER`, `PODIUM_OAUTH_AUDIENCE`, `PODIUM_SESSION_TOKEN_*`, etc.). The same values apply on both the registry and the MCP server.
+Identity-provider selection and per-provider config are documented in §6.3 (`PODIUM_IDENTITY_PROVIDER`, `PODIUM_OAUTH_AUDIENCE`, `PODIUM_SESSION_TOKEN_*`, etc.). `oauth-device-code` and `injected-session-token` apply on both the registry and the MCP server. `oidc-jwt` and `trusted-headers` are registry-process values that the MCP server's `PODIUM_IDENTITY_PROVIDER` does not admit (§6.3, §6.3.3).
+
+The gateway-delegated providers (§6.3.3) introduce the following registry variables. `oidc-jwt` also reuses `PODIUM_OAUTH_AUDIENCE` (§6.3) for the `aud` claim, which it requires.
+
+| Var | Description | Default |
+| --- | --- | --- |
+| `PODIUM_OAUTH_ISSUER` | OIDC issuer URL of the IdP that signs the token forwarded under `oidc-jwt`. Must use the `https` scheme; a non-`https` value fails startup with `config.invalid_issuer_scheme`. The registry validates the token `iss` against this value and fetches the JWKS from the issuer's discovery document at `<issuer>/.well-known/openid-configuration`. Config-file key `identity_provider.issuer`. Read only under `oidc-jwt`. | (unset; required for `oidc-jwt`) |
+| `PODIUM_OAUTH_TOKEN_HEADER` | Header carrying the forwarded JWT, parsed as `Bearer <token>` regardless of header name. Config-file key `identity_provider.token_header`. Read only under `oidc-jwt`. | `Authorization` |
+| `PODIUM_OAUTH_JWKS_CACHE_TTL_SECONDS` | Maximum age in seconds of the cached issuer JWKS before refresh; a `kid` absent from the cached set forces an earlier refresh. Config-file key `identity_provider.jwks_cache_ttl_seconds`. Read only under `oidc-jwt`. | 300 |
+| `PODIUM_TRUSTED_PROXY_SECRET` | Shared secret the gateway sends in `X-Podium-Proxy-Secret`. When set, identity headers are honored only on a request whose secret matches under a constant-time comparison. Required on a multi-tenant `trusted-headers` registry regardless of bind, otherwise startup fails with `config.trusted_headers_multitenant_no_secret`; on a single-tenant registry a non-loopback bind requires it or `--allow-public-bind`, otherwise `config.trusted_headers_public_bind`. Environment only; no config-file key. Read only under `trusted-headers`. | (unset) |
+
+The `identity_provider:` object holds `type`, `audience`, `authorization_endpoint`, `issuer`, `token_header`, and `jwks_cache_ttl_seconds`. The `identity_provider.issuer` key is distinct from the top-level domain-discovery `discovery:` block (§4.5.5), which configures domain-tree rendering and has no bearing on identity.
 
 For server deployments that intentionally run without an identity provider, `PODIUM_PUBLIC_MODE=true` (or `--public-mode`) bypasses authentication and the visibility model entirely; see §13.10. Public mode is mutually exclusive with `PODIUM_IDENTITY_PROVIDER`; setting both fails at startup with `config.public_mode_with_idp`.
 
@@ -463,9 +477,9 @@ Layer-list bootstrap and visibility default for the §13.10 standalone deploymen
 | Var                              | Description                                                                                                                                                              | Default                                                                |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
 | `PODIUM_LAYER_PATH`              | Filesystem registry root opened at startup. Maps to the `--layer-path` flag. Dispatches between single-layer and filesystem-registry modes per `.registry-config` (§13.10). | (unset disables the bootstrap and starts with an empty registry)        |
-| `PODIUM_DEFAULT_LAYER_VISIBILITY`| Fallback `visibility:` applied when a layer is registered without an explicit setting. One of `public`, `organization`, or `private`.                                    | `private` (§13.10 specifies `public` for standalone deployments)        |
+| `PODIUM_DEFAULT_LAYER_VISIBILITY`| Fallback `visibility:` applied when a layer is registered without an explicit setting. One of `public`, `organization`, or `private`.                                    | `private` (§13.10 specifies `public` for a standalone deployment without an identity provider; an enabled identity provider leaves the unset default `private`)        |
 
-When `PODIUM_LAYER_PATH` is set, the standalone server ingests every resolved layer at startup and persists a `local`-source `LayerConfig` per layer so the §7.3.1 layer-management endpoints (`GET /v1/layers`, `POST /v1/layers/reingest`, `DELETE /v1/layers`) see them. Bootstrap layers carry `visibility: public` per the §13.10 standalone default. Additional `local` and `git` layers can be registered via `podium layer register` after startup.
+When `PODIUM_LAYER_PATH` is set, the standalone server ingests every resolved layer at startup and persists a `local`-source `LayerConfig` per layer so the §7.3.1 layer-management endpoints (`GET /v1/layers`, `POST /v1/layers/reingest`, `DELETE /v1/layers`) see them. Without an identity provider, bootstrap layers carry `visibility: public` per the §13.10 standalone default; once an identity provider is enabled and `PODIUM_DEFAULT_LAYER_VISIBILITY` is unset, the resolved default is `private` and a bootstrap layer that carried no explicit `visibility:` is re-stamped private on the next boot. Additional `local` and `git` layers can be registered via `podium layer register` after startup.
 
 ### Config file format
 

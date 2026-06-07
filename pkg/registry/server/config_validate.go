@@ -38,6 +38,15 @@ var (
 	// request-level proxy secret or an operator-declared upstream control.
 	// Maps to config.trusted_headers_public_bind.
 	ErrTrustedHeadersPublicBind = errors.New("config.trusted_headers_public_bind")
+
+	// ErrTrustedHeadersMultitenantNoSecret signals that the §6.3.3
+	// trusted-headers provider was selected on a multi-tenant registry without
+	// a proxy secret. Because X-Podium-User-Org selects among tenants and a
+	// co-resident process can reach a loopback bind, co-residency does not
+	// authenticate the gateway, so the proxy secret is required on every
+	// request regardless of bind address. Maps to
+	// config.trusted_headers_multitenant_no_secret.
+	ErrTrustedHeadersMultitenantNoSecret = errors.New("config.trusted_headers_multitenant_no_secret")
 )
 
 // StartupConfig captures the pieces of the server config that need
@@ -65,6 +74,10 @@ type StartupConfig struct {
 	// non-loopback trusted-headers bind is permitted because the secret gates
 	// header trust at the request level.
 	TrustedProxySecret string
+	// MultiTenant reports whether the registry runs in §6.3.1 multi-tenant mode
+	// (PODIUM_MULTI_TENANT). Under trusted-headers, multi-tenant mode requires a
+	// proxy secret on every request regardless of bind address.
+	MultiTenant bool
 }
 
 // Validate enforces the §13.10 startup invariants:
@@ -101,10 +114,19 @@ func (c StartupConfig) Validate() error {
 	// bind must be backed by a request-level proxy secret or the operator's
 	// explicit --allow-public-bind declaration that an upstream control keeps
 	// the registry reachable only through the gateway.
-	if c.IdentityProvider == "trusted-headers" && !isLoopbackBind(c.Bind) &&
-		c.TrustedProxySecret == "" && !c.AllowPublicBind {
-		return fmt.Errorf("%w: trusted-headers reads unverified identity headers, so a non-loopback bind (%q) requires PODIUM_TRUSTED_PROXY_SECRET or --allow-public-bind",
-			ErrTrustedHeadersPublicBind, c.Bind)
+	if c.IdentityProvider == "trusted-headers" {
+		if c.MultiTenant {
+			// §6.3.3: on a multi-tenant registry X-Podium-User-Org selects among
+			// tenants, and a co-resident process can reach a loopback bind, so the
+			// proxy secret is required on every request regardless of bind address.
+			if c.TrustedProxySecret == "" {
+				return fmt.Errorf("%w: trusted-headers on a multi-tenant registry requires PODIUM_TRUSTED_PROXY_SECRET on every request, because X-Podium-User-Org selects among tenants and co-residency does not authenticate the gateway",
+					ErrTrustedHeadersMultitenantNoSecret)
+			}
+		} else if !isLoopbackBind(c.Bind) && c.TrustedProxySecret == "" && !c.AllowPublicBind {
+			return fmt.Errorf("%w: trusted-headers reads unverified identity headers, so a non-loopback bind (%q) requires PODIUM_TRUSTED_PROXY_SECRET or --allow-public-bind",
+				ErrTrustedHeadersPublicBind, c.Bind)
+		}
 	}
 	return nil
 }

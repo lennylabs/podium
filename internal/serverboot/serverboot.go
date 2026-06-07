@@ -698,6 +698,11 @@ func run(ctx context.Context, stop func()) error {
 	// below threads this tenantID as the org. CreateTenant is idempotent, so
 	// a store fault is tolerated (the ID is still returned).
 	tenantID, _ := bootstrapDefaultTenant(context.Background(), st, cfg.exposeScopePreview)
+	if cfg.multiTenant {
+		// §6.3.1 multi-tenant mode: provision the named orgs so the per-request
+		// tenant router can resolve a caller's organization to a tenant.
+		provisionTenants(context.Background(), st, cfg.tenants, cfg.exposeScopePreview)
+	}
 
 	// §13.1.1 evaluation-stack bootstrap: seed the configured admin users
 	// for the default tenant so the documented `docker compose up` →
@@ -792,7 +797,15 @@ func run(ctx context.Context, stop func()) error {
 		return err
 	}
 	bootLayers := append(declared, pathLayers...)
-	registry := core.New(st, tenantID, bootLayers)
+	// §6.3.1: a multi-tenant registry binds to a no-data tenant; every request
+	// resolves its tenant from the caller's organization, and an unrouted request
+	// falls back to the bound tenant and sees an empty view. A single-tenant
+	// registry binds to the default tenant.
+	boundTenant := tenantID
+	if cfg.multiTenant {
+		boundTenant = multiTenantUnrouted
+	}
+	registry := core.New(st, boundTenant, bootLayers)
 	// §13.12 / §4.5.5: apply the tenant registry.yaml discovery defaults
 	// and the allow_per_domain_overrides gate to load_domain rendering.
 	registry = registry.WithDiscoveryDefaults(cfg.discoveryDefaults(), cfg.allowPerDomain())
@@ -1055,6 +1068,15 @@ func run(ctx context.Context, stop func()) error {
 				log.Printf("identity provider: trusted-headers (no proxy secret; identity headers honored on every request)")
 			}
 		}
+	}
+
+	if cfg.multiTenant && verifierInstalled {
+		// §6.3.1: route each request to the tenant its organization names. A
+		// verified provider rejects an unknown org with auth.tenant_unknown;
+		// trusted-headers leaves it in no tenant (an empty view).
+		rejectUnknownTenant := cfg.identityProvider != "trusted-headers"
+		bootOpts = append(bootOpts, server.WithTenantRouter(tenantResolver(st), rejectUnknownTenant))
+		log.Printf("multi-tenant mode: routing requests by organization")
 	}
 
 	if err := identityVisibilityGuard(cfg.identityProvider, providerSelected, cfg.publicMode, verifierInstalled); err != nil {
@@ -1404,18 +1426,26 @@ type Config struct {
 	// (PODIUM_TRUSTED_PROXY_SECRET, environment only). Empty honors the identity
 	// headers on every request.
 	trustedProxySecret string
-	storeType          string
-	sqlitePath         string
-	postgresDSN        string
-	objectStore        string
-	filesystemRoot     string
-	publicURL          string
-	presignTTL         time.Duration
-	s3Endpoint         string
-	s3Region           string
-	s3Bucket           string
-	s3AccessKey        string
-	s3SecretKey        string
+	// multiTenant enables §6.3.1 per-request tenant routing (PODIUM_MULTI_TENANT):
+	// the registry binds to a no-data tenant and resolves each request's tenant
+	// from the caller's organization.
+	multiTenant bool
+	// tenants is the §6.3.1 list of org names to provision at boot for a
+	// multi-tenant deployment (PODIUM_TENANTS, comma-separated). The default org
+	// is always provisioned.
+	tenants        []string
+	storeType      string
+	sqlitePath     string
+	postgresDSN    string
+	objectStore    string
+	filesystemRoot string
+	publicURL      string
+	presignTTL     time.Duration
+	s3Endpoint     string
+	s3Region       string
+	s3Bucket       string
+	s3AccessKey    string
+	s3SecretKey    string
 	// s3ForcePathStyle maps to §13.12 PODIUM_S3_FORCE_PATH_STYLE. TLS is
 	// derived from the PODIUM_S3_ENDPOINT URL scheme (§13.12 documents the
 	// endpoint as a URL), so there is no separate use-SSL knob.
@@ -1625,6 +1655,8 @@ func (c *Config) Settings() []Setting {
 		{"identity_provider.token_header", c.oauthTokenHeader, envOrSrc("PODIUM_OAUTH_TOKEN_HEADER", yamlSrc)},
 		{"identity_provider.jwks_cache_ttl_seconds", intStr(c.oauthJWKSCacheTTLSeconds), envOrSrc("PODIUM_OAUTH_JWKS_CACHE_TTL_SECONDS", yamlSrc)},
 		{"trusted_proxy_secret", redact(c.trustedProxySecret), envOrSrc("PODIUM_TRUSTED_PROXY_SECRET", "")},
+		{"multi_tenant", boolStr(c.multiTenant), envOrSrc("PODIUM_MULTI_TENANT", defaultSrc)},
+		{"tenants", strings.Join(c.tenants, ","), envOrSrc("PODIUM_TENANTS", defaultSrc)},
 		{"idp_group_mapping", idpGroupMappingStr(c.idpGroupMapping), envOrSrc("PODIUM_IDP_GROUP_MAPPING", defaultSrc)},
 		{"store.type", c.storeType, envOrSrc("PODIUM_REGISTRY_STORE", defaultSrc)},
 		{"store.sqlite_path", c.sqlitePath, envOrSrc("PODIUM_SQLITE_PATH", defaultSrc)},
@@ -1693,6 +1725,8 @@ func LoadConfig() *Config {
 		oauthTokenHeader:           os.Getenv("PODIUM_OAUTH_TOKEN_HEADER"),
 		oauthJWKSCacheTTLSeconds:   envInt("PODIUM_OAUTH_JWKS_CACHE_TTL_SECONDS", 0),
 		trustedProxySecret:         os.Getenv("PODIUM_TRUSTED_PROXY_SECRET"),
+		multiTenant:                isTrue(os.Getenv("PODIUM_MULTI_TENANT")),
+		tenants:                    splitCSVTrim(os.Getenv("PODIUM_TENANTS")),
 		storeType:                  envDefault("PODIUM_REGISTRY_STORE", "sqlite"),
 		sqlitePath:                 os.Getenv("PODIUM_SQLITE_PATH"),
 		postgresDSN:                os.Getenv("PODIUM_POSTGRES_DSN"),
@@ -1913,6 +1947,7 @@ func (c *Config) validate() error {
 		WebUI:                c.webUI,
 		WebUIAllowPublicBind: c.webUIAllowPublicBind,
 		TrustedProxySecret:   c.trustedProxySecret,
+		MultiTenant:          c.multiTenant,
 	}
 	if err := startup.Validate(); err != nil {
 		return err

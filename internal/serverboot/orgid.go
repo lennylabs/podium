@@ -2,11 +2,60 @@ package serverboot
 
 import (
 	"context"
+	"log"
+	"strings"
 
 	"github.com/google/uuid"
 
 	"github.com/lennylabs/podium/pkg/store"
 )
+
+// multiTenantUnrouted is the reserved tenant a §6.3.1 multi-tenant registry
+// binds to. It is never provisioned, so it holds no data: a request that
+// resolves to no tenant falls back to it and sees an empty view. It is not a
+// UUID, so no org-name alias (which resolves through orgIDForName to a UUID)
+// can route to it.
+const multiTenantUnrouted = "podium:unrouted"
+
+// provisionTenants idempotently creates a tenant for each org name in names,
+// for a §6.3.1 multi-tenant deployment. The default org is created separately
+// by bootstrapDefaultTenant; a name equal to it or empty is skipped.
+func provisionTenants(ctx context.Context, st store.Store, names []string, exposeScopePreview *bool) {
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" || name == defaultOrgName {
+			continue
+		}
+		if err := st.CreateTenant(ctx, store.Tenant{
+			ID:                 orgIDForName(name),
+			Name:               name,
+			ExposeScopePreview: exposeScopePreview,
+		}); err != nil {
+			log.Printf("multi-tenant: provision org %q: %v", name, err)
+		}
+	}
+}
+
+// tenantResolver maps a caller's organization value (an org ID or an org-name
+// alias, §4.7.1) to a provisioned tenant ID, reporting false when no tenant
+// exists for it. It tries the value as a direct org ID first, then as an alias
+// resolved through orgIDForName.
+func tenantResolver(st store.Store) func(context.Context, string) (string, bool) {
+	return func(ctx context.Context, orgValue string) (string, bool) {
+		orgValue = strings.TrimSpace(orgValue)
+		if orgValue == "" {
+			return "", false
+		}
+		if _, err := st.GetTenant(ctx, orgValue); err == nil {
+			return orgValue, true
+		}
+		id := orgIDForName(orgValue)
+		if _, err := st.GetTenant(ctx, id); err == nil {
+			return id, true
+		}
+		return "", false
+	}
+}
 
 // defaultOrgName is the human-readable alias for the org the standalone /
 // auto-bootstrap deployment creates. spec: §4.7.1 — "org names are

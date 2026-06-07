@@ -24,12 +24,12 @@ type QuotaInfo struct {
 // for larger catalogs, this should be replaced with an incremental
 // counter (deferred until the bottleneck materializes).
 func (r *Registry) Quota(ctx context.Context) (*QuotaInfo, error) {
-	t, err := r.store.GetTenant(ctx, r.tenantID)
+	t, err := r.store.GetTenant(ctx, r.tenantFor(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("quota: %w", err)
 	}
 	out := &QuotaInfo{TenantID: t.ID, Limits: t.Quota}
-	manifests, err := r.store.ListManifests(ctx, r.tenantID)
+	manifests, err := r.store.ListManifests(ctx, r.tenantFor(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("quota: list manifests: %w", err)
 	}

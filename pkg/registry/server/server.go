@@ -44,6 +44,17 @@ type Server struct {
 	// context. Nil leaves the server on the resolveID path (anonymous
 	// public by default), preserving standalone / public-mode behavior.
 	idVerifier func(*http.Request) (layer.Identity, error)
+	// tenantRouter resolves a multi-tenant request's tenant from the caller's
+	// organization value (§6.3.1). When set, the registry runs in multi-tenant
+	// mode: it is bound to a no-data tenant, and every request resolves its
+	// tenant from the authenticated identity. Nil leaves the server
+	// single-tenant, so every request resolves against the bound tenant.
+	tenantRouter func(ctx context.Context, orgValue string) (string, bool)
+	// rejectUnknownTenant selects the response when the organization resolves
+	// to no provisioned tenant: true (verified providers) rejects with
+	// auth.tenant_unknown; false (trusted-headers) leaves the caller in no
+	// tenant, which yields an empty view.
+	rejectUnknownTenant bool
 	// events is the §7.6 in-process pub/sub for /v1/events.
 	events *eventBus
 	// objectStore is the §7.2 data-plane backend. load_artifact reads
@@ -165,6 +176,20 @@ func WithIdentityResolver(fn func(*http.Request) layer.Identity) Option {
 // without it the server stays on the anonymous resolveID path.
 func WithIdentityVerifier(fn func(*http.Request) (layer.Identity, error)) Option {
 	return func(s *Server) { s.idVerifier = fn }
+}
+
+// WithTenantRouter puts the registry in §6.3.1 multi-tenant mode. Per request,
+// resolve maps the caller's organization value to a provisioned tenant, and the
+// registry scopes the request to it. rejectUnknown selects the response when
+// the organization resolves to no tenant: true rejects a verified caller with
+// auth.tenant_unknown; false (trusted-headers) leaves the caller in no tenant.
+// The registry must be bound to a no-data tenant (so an unrouted request sees an
+// empty view), which the server-boot path does in multi-tenant mode.
+func WithTenantRouter(resolve func(ctx context.Context, orgValue string) (string, bool), rejectUnknown bool) Option {
+	return func(s *Server) {
+		s.tenantRouter = resolve
+		s.rejectUnknownTenant = rejectUnknown
+	}
 }
 
 // WithObjectStore configures the §4.1 large-resource path. Resources
@@ -361,7 +386,42 @@ func (s *Server) Handler() http.Handler {
 	// attach per-request audit metadata (trace id + structured caller
 	// identity) to every request context so read events emitted by the core
 	// and the HTTP write handlers carry it.
-	return s.withLatencyObserver(s.withIdentityVerification(s.withAuditMetaMiddleware(s.withReadOnlyHeaders(mux))))
+	return s.withLatencyObserver(s.withIdentityVerification(s.withTenantRouting(s.withAuditMetaMiddleware(s.withReadOnlyHeaders(mux)))))
+}
+
+// withTenantRouting resolves a multi-tenant request's tenant from the caller's
+// organization (§6.3.1) and scopes the downstream handlers to it. It runs after
+// withIdentityVerification, so the verified identity is on the context. An
+// authenticated caller whose organization resolves to a provisioned tenant is
+// scoped to that tenant; an organization that resolves to none is rejected with
+// auth.tenant_unknown under a verified provider, or left in no tenant under
+// trusted-headers (an empty view via the registry's bound no-data tenant). When
+// no tenant router is installed the registry is single-tenant and this is a
+// pass-through.
+func (s *Server) withTenantRouting(next http.Handler) http.Handler {
+	if s.tenantRouter == nil {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !pathRequiresIdentity(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		id := s.identity(r)
+		if id.IsAuthenticated && id.OrgID != "" {
+			if tenantID, ok := s.tenantRouter(r.Context(), id.OrgID); ok {
+				next.ServeHTTP(w, r.WithContext(core.ContextWithTenant(r.Context(), tenantID)))
+				return
+			}
+			if s.rejectUnknownTenant {
+				writeErrorDetails(w, http.StatusUnauthorized, "auth.tenant_unknown",
+					"Verified token names organization '"+id.OrgID+"' which is not a provisioned tenant.",
+					map[string]any{"token_org_id": id.OrgID})
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // withReadOnlyHeaders wraps the route mux so every response
