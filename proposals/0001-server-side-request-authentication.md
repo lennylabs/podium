@@ -1,7 +1,7 @@
 # Proposal 0001: Server-Side Request Authentication (proxy-delegated identity)
 
 - Issue: #19
-- Status: Proposed
+- Status: Implemented
 - Date: 2026-06-05
 
 ## Summary
