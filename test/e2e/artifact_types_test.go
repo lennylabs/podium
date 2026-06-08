@@ -438,24 +438,6 @@ func TestArtifactTypes_HookClaudeCodeLayout(t *testing.T) {
 	}
 }
 
-// declaring both a generic hook_event (pre_tool_use)
-// and a corresponding subtype hook warns (spec §4.3.5); lint stays
-// green (warning, not error). A lone generic hook is valid and unflagged.
-func TestArtifactTypes_HookGenericAndSubtypeWarns(t *testing.T) {
-	t.Parallel()
-	reg := writeRegistry(t, map[string]string{
-		"audit/generic-tool-hook/ARTIFACT.md": "---\ntype: hook\nname: generic-tool-hook\nversion: 1.0.0\ndescription: Generic hook.\nhook_event: pre_tool_use\nhook_action: |\n  echo done\n---\n\nbody\n",
-		"audit/shell-hook/ARTIFACT.md":        "---\ntype: hook\nname: shell-hook\nversion: 1.0.0\ndescription: Shell hook.\nhook_event: pre_shell_execution\nhook_action: |\n  echo done\n---\n\nbody\n",
-	})
-	res := runPodium(t, "", nil, "lint", "--registry", reg)
-	if res.Exit != 0 {
-		t.Fatalf("lint exit=%d, want 0 (warning only)\nstdout=%s", res.Exit, res.Stdout)
-	}
-	if !strings.Contains(res.Stdout, "[warning]") || !strings.Contains(res.Stdout, "pre_shell_execution") || !strings.Contains(res.Stdout, "lint.hook_generic_and_subtype") {
-		t.Errorf("missing generic/subtype warning naming the subtype:\n%s", res.Stdout)
-	}
-}
-
 // every canonical hook event scaffolds and lints
 // clean (no error severity). Directory names are hyphenated because the
 // §4.2 name syntax forbids the underscores in the event identifiers.

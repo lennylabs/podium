@@ -68,8 +68,6 @@ Subtype events target a specific kind of tool call. Use them when the action onl
 | `pre_read_file` | Before the agent reads a file. |
 | `post_file_edit` | After the agent edits a file. |
 
-Don't declare both a generic hook (`pre_tool_use`) and the corresponding subtype hook (`pre_shell_execution`) across two hook artifacts in the same registry; lint warns when this happens. Pick one level of specificity.
-
 **Permission**
 
 | `hook_event` | Fires when |

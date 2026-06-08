@@ -560,57 +560,6 @@ func TestFrontmatter_HookScaffoldFields(t *testing.T) {
 	}
 }
 
-// declaring both a generic pre_tool_use hook and a
-// corresponding subtype hook warns (spec §4.3.5). A lone generic hook
-// alone is clean.
-func TestFrontmatter_HookGenericPreToolUse(t *testing.T) {
-	t.Parallel()
-	reg := writeRegistry(t, map[string]string{
-		"hooks/generic/ARTIFACT.md":  "---\ntype: hook\nname: generic\nversion: 1.0.0\ndescription: Generic hook.\nhook_event: pre_tool_use\nhook_action: |\n  echo hi\n---\n\nbody\n",
-		"hooks/specific/ARTIFACT.md": "---\ntype: hook\nname: specific\nversion: 1.0.0\ndescription: Specific hook.\nhook_event: pre_shell_execution\nhook_action: |\n  echo hi\n---\n\nbody\n",
-	})
-	res := runPodium(t, "", nil, "lint", "--registry", reg)
-	if res.Exit != 0 {
-		t.Fatalf("lint exit=%d, want 0 (warning)\nstdout=%s", res.Exit, res.Stdout)
-	}
-	if !strings.Contains(res.Stdout, "lint.hook_generic_and_subtype") || !strings.Contains(res.Stdout, "pre_shell_execution") {
-		t.Errorf("missing generic/subtype warning naming pre_shell_execution:\n%s", res.Stdout)
-	}
-}
-
-// a generic post_tool_use hook declared alongside a
-// corresponding post-subtype hook warns (spec §4.3.5).
-func TestFrontmatter_HookGenericPostToolUse(t *testing.T) {
-	t.Parallel()
-	reg := writeRegistry(t, map[string]string{
-		"hooks/generic-post/ARTIFACT.md": "---\ntype: hook\nname: generic-post\nversion: 1.0.0\ndescription: Generic post hook.\nhook_event: post_tool_use\nhook_action: |\n  echo hi\n---\n\nbody\n",
-		"hooks/edit-hook/ARTIFACT.md":    "---\ntype: hook\nname: edit-hook\nversion: 1.0.0\ndescription: Edit hook.\nhook_event: post_file_edit\nhook_action: |\n  echo hi\n---\n\nbody\n",
-	})
-	res := runPodium(t, "", nil, "lint", "--registry", reg)
-	if res.Exit != 0 {
-		t.Fatalf("lint exit=%d, want 0 (warning)\nstdout=%s", res.Exit, res.Stdout)
-	}
-	if !strings.Contains(res.Stdout, "lint.hook_generic_and_subtype") || !strings.Contains(res.Stdout, "post_file_edit") {
-		t.Errorf("missing generic/subtype warning naming post_file_edit:\n%s", res.Stdout)
-	}
-}
-
-// a specific subtype event does not trigger the generic
-// info diagnostic.
-func TestFrontmatter_HookSubtypeNoInfo(t *testing.T) {
-	t.Parallel()
-	reg := writeRegistry(t, map[string]string{
-		"hooks/specific/ARTIFACT.md": "---\ntype: hook\nname: specific\nversion: 1.0.0\ndescription: Specific hook.\nhook_event: pre_shell_execution\nhook_action: |\n  echo hi\n---\n\nbody\n",
-	})
-	res := runPodium(t, "", nil, "lint", "--registry", reg)
-	if res.Exit != 0 {
-		t.Fatalf("lint exit=%d, want 0\nstdout=%s", res.Exit, res.Stdout)
-	}
-	if strings.Contains(res.Stdout, "lint.hook_generic_and_subtype") {
-		t.Errorf("subtype event wrongly flagged:\n%s", res.Stdout)
-	}
-}
-
 // mcp-server scaffold writes server_identifier.
 func TestFrontmatter_McpServerScaffold(t *testing.T) {
 	t.Parallel()
