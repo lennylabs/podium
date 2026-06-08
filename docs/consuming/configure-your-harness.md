@@ -68,10 +68,10 @@ ASCII fallback for the diagram above (podium sync watch mode, server-source regi
                                                 .claude/agents/, .cursor/rules/, ...
 
   After step 4 the watcher returns to step 1 (await next event).
-  Event types: artifact_added, artifact_updated, artifact_removed,
-  layer_changed. Removals delete from the target. A change to a
-  parent re-emits events for every dependent child the caller
-  can see.
+  Event types: artifact.published, artifact.deprecated, and
+  layer.config_changed. A deprecation deletes from the target. A
+  change to a parent re-emits events for every dependent child the
+  caller can see.
 -->
 
 **Filesystem-source registry.** The catalog is a directory on disk. The watcher uses OS filesystem notifications (`fsnotify` on Linux and macOS, `ReadDirectoryChangesW` on Windows) and reads the changed manifests directly. Identity and visibility do not apply because the directory is canonical.
@@ -177,7 +177,8 @@ podium sync
 | `hook` | Merged into `.claude/settings.json` under the `hooks` key, keyed by the artifact ID so a re-sync reconciles only Podium's entries. A hook's bundled scripts materialize to `.podium/resources/<artifact-id>/`, and the merged command references them there. |
 | `context` | No native Claude Code concept. A `context` artifact lands at `.podium/context/<artifact-id>/`; reference material that belongs to a skill ships in that skill's `references/`. |
 | `mcp-server` | Merged into `.mcp.json` (project root) under `mcpServers`, keyed by the artifact ID. |
-| Bundled resources | Inside the skill folder (`scripts/`, `references/`, `assets/`). |
+| Bundled resources (skill) | Inside the skill folder (`scripts/`, `references/`, `assets/`). |
+| Bundled resources (non-skill) | An `agent` or extension-type artifact writes its resources under `.claude/podium/<artifact-id>/`. A `command` artifact writes its resources under `.podium/resources/<artifact-id>/`, and the materialized command references them there. |
 
 **Notes:**
 
