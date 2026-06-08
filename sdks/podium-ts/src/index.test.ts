@@ -153,6 +153,149 @@ describe("Client", () => {
     expect(out.resources?.["scripts/run.py"]).toBe("print('run')\n");
   });
 
+  // Spec: §6.6 — a manifest above the 256 KB inline cutoff arrives as a presigned
+  // manifest_body_url; loadArtifact fetches it and restores the inline fields. For
+  // a context the canonical document is the full ARTIFACT.md (frontmatter).
+  it("loadArtifact resolves manifest_body_url for a context", async () => {
+    const fetcher: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          id: "big/ctx",
+          type: "context",
+          version: "1.0.0",
+          manifest_body: "",
+          frontmatter: "",
+          manifest_body_url: { presigned_url: "http://store/mb", content_hash: "sha256:abc" },
+        }),
+        { status: 200 },
+      );
+    const doc = "---\ntype: context\n---\n\nThe big body.\n";
+    const objectStore: typeof fetch = async () => new Response(doc, { status: 200 });
+    const c = new Client({ registry: "http://reg", fetcher });
+    const out = await c.loadArtifact("big/ctx", undefined, { fetcher: objectStore });
+    expect(out.frontmatter).toBe(doc);
+    expect(out.manifest_body).toBe("The big body.\n");
+  });
+
+  // Spec: §6.6 — for a skill the manifest_body_url delivers the verbatim SKILL.md
+  // (skill_raw); the small inline ARTIFACT.md frontmatter is preserved.
+  it("loadArtifact resolves manifest_body_url for a skill", async () => {
+    const fetcher: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          id: "eng/big-skill",
+          type: "skill",
+          version: "1.0.0",
+          manifest_body: "",
+          skill_raw: "",
+          frontmatter: "---\ntype: skill\n---\n",
+          manifest_body_url: { presigned_url: "http://store/skill" },
+        }),
+        { status: 200 },
+      );
+    const skillMd = "---\nname: big-skill\n---\n\nBig skill body.\n";
+    const objectStore: typeof fetch = async () => new Response(skillMd, { status: 200 });
+    const c = new Client({ registry: "http://reg", fetcher });
+    const out = await c.loadArtifact("eng/big-skill", undefined, { fetcher: objectStore });
+    expect(out.skill_raw).toBe(skillMd);
+    expect(out.manifest_body).toBe("Big skill body.\n");
+    expect(out.frontmatter).toBe("---\ntype: skill\n---\n");
+  });
+
+  // Spec: §7.2 — a single-load large resource (>256 KB) arrives with its URL under
+  // `presigned_url`; loadArtifact normalizes it to `url` so materialize() resolves
+  // it instead of throwing on an undefined URL.
+  it("loadArtifact normalizes a single-load large resource presigned_url", async () => {
+    const fetcher: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          id: "big/res",
+          type: "context",
+          version: "1.0.0",
+          manifest_body: "B",
+          frontmatter: "---\ntype: context\n---\nB",
+          large_resources: {
+            "data/big.bin": { presigned_url: "http://store/big", content_hash: "sha256:x" },
+          },
+        }),
+        { status: 200 },
+      );
+    const c = new Client({ registry: "http://reg", fetcher });
+    const out = await c.loadArtifact("big/res");
+    expect(out.large_resources?.["data/big.bin"]?.url).toBe("http://store/big");
+    const dir = await mkdtemp(join(tmpdir(), "podium-mbu-"));
+    try {
+      const objectStore: typeof fetch = async () => new Response("BIGDATA", { status: 200 });
+      await out.materialize(dir, { fetcher: objectStore });
+      expect(await readFile(join(dir, "big", "res", "data", "big.bin"), "utf8")).toBe("BIGDATA");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // Spec: §6.6 — a manifest_body_url without a URL is a malformed response;
+  // loadArtifact throws rather than returning an empty manifest.
+  it("loadArtifact throws when manifest_body_url has no URL", async () => {
+    const fetcher: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          id: "x",
+          type: "context",
+          version: "1.0.0",
+          manifest_body: "",
+          frontmatter: "",
+          manifest_body_url: { content_hash: "sha256:abc" },
+        }),
+        { status: 200 },
+      );
+    const c = new Client({ registry: "http://reg", fetcher });
+    await expect(c.loadArtifact("x")).rejects.toBeInstanceOf(RegistryError);
+  });
+
+  // Spec: §6.6 — a failed manifest-body fetch surfaces as an error rather than a
+  // silently empty manifest.
+  it("loadArtifact throws when the manifest body fetch fails", async () => {
+    const fetcher: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          id: "x",
+          type: "context",
+          version: "1.0.0",
+          manifest_body: "",
+          frontmatter: "",
+          manifest_body_url: { presigned_url: "http://store/mb" },
+        }),
+        { status: 200 },
+      );
+    const objectStore: typeof fetch = async () => new Response("nope", { status: 503 });
+    const c = new Client({ registry: "http://reg", fetcher });
+    await expect(
+      c.loadArtifact("x", undefined, { fetcher: objectStore }),
+    ).rejects.toBeInstanceOf(RegistryError);
+  });
+
+  // Spec: §6.6 — a canonical document without frontmatter yields an empty
+  // manifest_body, matching the registry's own fallback.
+  it("loadArtifact manifest_body_url without frontmatter yields an empty body", async () => {
+    const fetcher: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          id: "x",
+          type: "context",
+          version: "1.0.0",
+          manifest_body: "",
+          frontmatter: "",
+          manifest_body_url: { presigned_url: "http://store/mb" },
+        }),
+        { status: 200 },
+      );
+    const objectStore: typeof fetch = async () => new Response("no frontmatter here", { status: 200 });
+    const c = new Client({ registry: "http://reg", fetcher });
+    const out = await c.loadArtifact("x", undefined, { fetcher: objectStore });
+    expect(out.frontmatter).toBe("no frontmatter here");
+    expect(out.manifest_body).toBe("");
+  });
+
   // Spec: §6.10 — error envelopes translate to RegistryError.
   it("error envelopes throw RegistryError", async () => {
     const fetcher: typeof fetch = async () =>
