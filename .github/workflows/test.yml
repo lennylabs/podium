@@ -130,7 +130,7 @@ jobs:
           echo "--- coverage-e2e.txt (subprocess) ---"
           echo "lines: $(wc -l < coverage-e2e.txt)"
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           # Codecov merges the two profiles: coverage.out carries the in-process
           # coverage, coverage-e2e.txt adds the spawned-binary lines.
