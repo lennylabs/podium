@@ -130,6 +130,108 @@ def test_load_artifact_returns_manifest_and_resources(stub_server):
     assert art.resources == {"scripts/run.py": "print('run')\n"}
 
 
+# Spec: §6.6 — a manifest above the 256 KB inline cutoff arrives as a presigned
+# manifest_body_url; load_artifact fetches it and restores the inline fields. For
+# a context the canonical document is the full ARTIFACT.md (frontmatter).
+def test_load_artifact_resolves_manifest_body_url_context(stub_server):
+    stub_server.next_response = {
+        "id": "big/ctx",
+        "type": "context",
+        "version": "1.0.0",
+        "manifest_body": "",
+        "frontmatter": "",
+        "manifest_body_url": {"presigned_url": "http://store/mb", "content_hash": "sha256:abc"},
+    }
+    doc = b"---\ntype: context\n---\n\nThe big body.\n"
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    art = client.load_artifact("big/ctx", fetch=lambda url: doc)
+
+    assert art.frontmatter == doc.decode()
+    assert art.manifest_body == "The big body.\n"
+
+
+# Spec: §6.6 — for a skill the manifest_body_url delivers the verbatim SKILL.md
+# (skill_raw); the small inline ARTIFACT.md frontmatter is preserved, and
+# materialize writes both files.
+def test_load_artifact_resolves_manifest_body_url_skill(stub_server, tmp_path):
+    stub_server.next_response = {
+        "id": "eng/big-skill",
+        "type": "skill",
+        "version": "1.0.0",
+        "manifest_body": "",
+        "skill_raw": "",
+        "frontmatter": "---\ntype: skill\n---\n",
+        "manifest_body_url": {"presigned_url": "http://store/skill"},
+    }
+    skill_md = b"---\nname: big-skill\n---\n\nBig skill body.\n"
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    art = client.load_artifact("eng/big-skill", fetch=lambda url: skill_md)
+
+    assert art.skill_raw == skill_md.decode()
+    assert art.manifest_body == "Big skill body.\n"
+    assert art.frontmatter == "---\ntype: skill\n---\n"
+
+    written = art.materialize(str(tmp_path))
+    root = tmp_path / "eng" / "big-skill"
+    assert (root / "SKILL.md").read_text() == skill_md.decode()
+    assert (root / "ARTIFACT.md").read_text() == "---\ntype: skill\n---\n"
+    assert str(root / "SKILL.md") in written
+
+
+# Spec: §7.2 — a single-load large resource arrives with its URL under
+# presigned_url; materialize resolves it (the SDK reads url or presigned_url)
+# and writes the fetched bytes.
+def test_load_artifact_large_resource_presigned_materializes(stub_server, tmp_path):
+    stub_server.next_response = {
+        "id": "big/res",
+        "type": "context",
+        "version": "1.0.0",
+        "manifest_body": "B",
+        "frontmatter": "---\ntype: context\n---\nB",
+        "large_resources": {
+            "data/big.bin": {"presigned_url": "http://store/big", "content_hash": "sha256:x"},
+        },
+    }
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    art = client.load_artifact("big/res")
+
+    art.materialize(str(tmp_path), fetch=lambda url: b"BIGDATA")
+    assert (tmp_path / "big" / "res" / "data" / "big.bin").read_bytes() == b"BIGDATA"
+
+
+# Spec: §6.6 — a manifest_body_url without a presigned URL is a malformed
+# response; load_artifact raises rather than returning an empty manifest.
+def test_load_artifact_manifest_body_url_without_url_raises(stub_server):
+    stub_server.next_response = {
+        "id": "big/ctx",
+        "type": "context",
+        "version": "1.0.0",
+        "manifest_body": "",
+        "frontmatter": "",
+        "manifest_body_url": {"content_hash": "sha256:abc"},
+    }
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    with pytest.raises(RegistryError):
+        client.load_artifact("big/ctx")
+
+
+# Spec: §6.6 — a canonical document the registry could not split (no frontmatter)
+# yields an empty manifest_body, matching the registry's own fallback.
+def test_manifest_body_from_without_frontmatter_is_empty(stub_server):
+    stub_server.next_response = {
+        "id": "big/ctx",
+        "type": "context",
+        "version": "1.0.0",
+        "manifest_body": "",
+        "frontmatter": "",
+        "manifest_body_url": {"presigned_url": "http://store/mb"},
+    }
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    art = client.load_artifact("big/ctx", fetch=lambda url: b"no frontmatter here")
+    assert art.frontmatter == "no frontmatter here"
+    assert art.manifest_body == ""
+
+
 # Spec: §11 (Search browse mode test) — top_k > 50 is rejected client-side with
 # a structured registry.invalid_argument error before any request is sent.
 def test_search_artifacts_rejects_top_k_over_50(stub_server):

@@ -342,6 +342,33 @@ export interface LargeResourceLink {
   content_type?: string;
 }
 
+// normalizeLink maps a wire large-resource / manifest-body link onto the `url`
+// field the rest of the client reads. The single-load response delivers the URL
+// under `presigned_url`; the batch path performs the same mapping inline.
+// Without this a single-load large resource (>256 KB) carries an undefined url
+// and materialize() throws "has no presigned URL".
+function normalizeLink(raw: unknown): LargeResourceLink {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  return {
+    url: ((r.url as string) || (r.presigned_url as string)) ?? "",
+    content_hash: r.content_hash as string | undefined,
+    size: r.size as number | undefined,
+    content_type: r.content_type as string | undefined,
+  };
+}
+
+// spec §4.3 / §6.6: split a canonical manifest document into its prose body the
+// same way the registry does (pkg/manifest SplitFrontmatter), so a manifest
+// delivered above the 256 KB inline cutoff via manifest_body_url reconstitutes a
+// byte-identical manifest_body. A document without frontmatter yields an empty
+// body, matching the registry, which leaves manifest_body unset when the
+// document does not parse.
+const FRONTMATTER_RE = /^---\r?\n[\s\S]*?\r?\n---\r?\n?([\s\S]*)$/;
+function manifestBodyFrom(doc: string): string {
+  const m = FRONTMATTER_RE.exec(doc);
+  return m ? m[1].replace(/^[\r\n]+/, "") : "";
+}
+
 export interface MaterializeOptions {
   // Accepted per §2.2 ("The SDKs accept a harness parameter on
   // materialize()"). Harness-specific adaptation is the registry's shared
@@ -484,7 +511,14 @@ export class LoadedArtifact {
     this.skill_raw = data.skill_raw;
     this.resources = data.resources;
     this.resources_base64 = data.resources_base64;
-    this.large_resources = data.large_resources;
+    // Normalize the single-load wire's `presigned_url` to the `url` field
+    // materialize() reads, so a single-load large resource (>256 KB) resolves
+    // instead of throwing on an undefined url.
+    this.large_resources = data.large_resources
+      ? Object.fromEntries(
+          Object.entries(data.large_resources).map(([k, v]) => [k, normalizeLink(v)]),
+        )
+      : undefined;
     this.deprecated = data.deprecated;
     this.replaced_by = data.replaced_by;
     this.deprecation_warning = data.deprecation_warning;
@@ -1185,7 +1219,7 @@ export class Client {
   async loadArtifact(
     id: string,
     version?: string,
-    opts: { sessionID?: string } = {},
+    opts: { sessionID?: string; fetcher?: typeof fetch } = {},
   ): Promise<LoadedArtifact> {
     // spec §6.4 — the overlay is the highest-precedence layer, so an
     // in-progress overlay artifact resolves ahead of the registry. A pinned
@@ -1210,7 +1244,31 @@ export class Client {
     const params: Record<string, unknown> = { id };
     if (version) params.version = version;
     if (opts.sessionID) params.session_id = opts.sessionID;
-    const data = (await this.get("/v1/load_artifact", params)) as Partial<LoadedArtifact>;
+    const data = (await this.get("/v1/load_artifact", params)) as Partial<LoadedArtifact> & {
+      manifest_body_url?: unknown;
+    };
+    // spec §6.6 — a canonical manifest above the 256 KB inline cutoff arrives as
+    // a presigned manifest_body_url with the inline fields cleared. Resolve it so
+    // the returned artifact carries the manifest fields regardless of size,
+    // matching the inline path and the MCP server. For a skill the small inline
+    // ARTIFACT.md frontmatter is left untouched.
+    if (data.manifest_body_url) {
+      const link = normalizeLink(data.manifest_body_url);
+      if (!link.url) {
+        throw new RegistryError("registry.unknown", "manifest_body_url has no presigned URL");
+      }
+      const resp = await (opts.fetcher ?? fetch)(link.url);
+      if (!resp.ok) {
+        throw new RegistryError("registry.unknown", `fetch manifest body: HTTP ${resp.status}`);
+      }
+      const doc = new TextDecoder().decode(new Uint8Array(await resp.arrayBuffer()));
+      data.manifest_body = manifestBodyFrom(doc);
+      if ((data.type ?? "") === "skill") {
+        data.skill_raw = doc;
+      } else {
+        data.frontmatter = doc;
+      }
+    }
     return new LoadedArtifact(data);
   }
 
