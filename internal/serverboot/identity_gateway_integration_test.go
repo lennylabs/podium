@@ -210,6 +210,21 @@ func TestGatewayIntegration_OIDCJWTVerificationErrors(t *testing.T) {
 	if env.Code != "auth.token_expired" {
 		t.Errorf("code = %q, want auth.token_expired", env.Code)
 	}
+
+	// A malformed token (the issuer cannot be read) -> 401 auth.untrusted_token
+	// with no token_iss detail, exercising writeIdentityError's no-issuer branch.
+	st, body = loadArtifact(t, ts.URL, "pub/welcome", bearer("not.a.jwt"))
+	if st != 401 {
+		t.Fatalf("malformed token = %d, want 401\nbody: %s", st, body)
+	}
+	env.Details = nil
+	_ = json.Unmarshal(body, &env)
+	if env.Code != "auth.untrusted_token" {
+		t.Errorf("code = %q, want auth.untrusted_token", env.Code)
+	}
+	if _, ok := env.Details["token_iss"]; ok {
+		t.Errorf("malformed token should carry no token_iss, got %v", env.Details["token_iss"])
+	}
 }
 
 func TestGatewayIntegration_OIDCJWTGroupMapping(t *testing.T) {
