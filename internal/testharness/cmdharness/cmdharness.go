@@ -125,7 +125,19 @@ func compileBinary(binary string) (string, error) {
 	}
 	out := filepath.Join(tmp, binary)
 	pkg := "./cmd/" + binary
-	cmd := exec.Command("go", "build", "-o", out, pkg)
+	args := []string{"build"}
+	// When the test run requests subprocess coverage (GOCOVERDIR is set), build
+	// the binary instrumented so its execution writes coverage data into that
+	// directory. This lets end-to-end tests that drive the real binary (the
+	// server boot path and the identity-provider wiring among them) contribute
+	// to coverage, which a single-process `go test` profile cannot capture across
+	// the process boundary. A plain run leaves GOCOVERDIR unset and builds an
+	// uninstrumented binary, so local test runs are not slowed.
+	if os.Getenv("GOCOVERDIR") != "" {
+		args = append(args, "-cover", "-coverpkg=./...")
+	}
+	args = append(args, "-o", out, pkg)
+	cmd := exec.Command("go", args...)
 	cmd.Dir = root
 	if buf, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("go build %s: %v\n%s", binary, err, buf)
