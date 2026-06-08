@@ -867,6 +867,12 @@ func domainAnalyze(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
+	// Accept a positional <path> (consistent with `domain show` and
+	// `domain search`, and the §4.5 CLI form `podium domain analyze [<path>]`).
+	// The --path flag stays accepted for back-compat; an explicit flag wins.
+	if *path == "" && fs.NArg() > 0 {
+		*path = fs.Arg(0)
+	}
 	if *registry == "" {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")
 		return 2

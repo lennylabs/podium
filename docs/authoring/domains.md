@@ -270,4 +270,4 @@ These commands call registry HTTP endpoints. Each requires a running registry se
 
 - **`podium domain show <path>`** prints the `load_domain` output for a path. Useful for verifying your `DOMAIN.md` ingested correctly.
 - **`podium domain search <query>`** runs `search_domains` from the CLI. Useful for verifying that your `keywords` and `description` make the domain findable for the queries you care about.
-- **`podium domain analyze [--path <path>]`** is operator-facing. It reports sparsity per node, pass-through chains, and candidates for split or fold. The command is useful at operational scale and is not part of the day-to-day authoring loop.
+- **`podium domain analyze [<path>]`** is operator-facing. It reports sparsity per node, pass-through chains, and candidates for split or fold. The command is useful at operational scale and is not part of the day-to-day authoring loop.
