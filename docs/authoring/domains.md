@@ -266,6 +266,8 @@ The rendering of `load_domain` output is governed by configurable rules. Tenant 
 
 ## Tooling
 
+These commands call registry HTTP endpoints. Each requires a running registry server, passed with `--registry <url>` or the `PODIUM_REGISTRY` environment variable. The filesystem-only solo path the tutorials use does not serve them; ingest the catalog into a registry server first.
+
 - **`podium domain show <path>`** prints the `load_domain` output for a path. Useful for verifying your `DOMAIN.md` ingested correctly.
 - **`podium domain search <query>`** runs `search_domains` from the CLI. Useful for verifying that your `keywords` and `description` make the domain findable for the queries you care about.
-- **`podium domain analyze [<path>]`** is operator-facing. It reports sparsity per node, pass-through chains, and candidates for split or fold. The command is useful at operational scale and is not part of the day-to-day authoring loop.
+- **`podium domain analyze [--path <path>]`** is operator-facing. It reports sparsity per node, pass-through chains, and candidates for split or fold. The command is useful at operational scale and is not part of the day-to-day authoring loop.
