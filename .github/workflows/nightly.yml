@@ -197,6 +197,16 @@ jobs:
         # PODIUM_LIVE_DEX marks the opt-in for parity with the other live lanes;
         # the test gates on Dex reachability regardless and self-skips when it is
         # absent, so this step never fails on missing infrastructure.
+        #
+        # `podium login` persists the acquired token to the OS keychain. The
+        # ubuntu-latest runner no longer provides a running Secret Service
+        # (org.freedesktop.secrets), so the keychain write fails and login exits
+        # non-zero after an otherwise-successful device-code acquisition. Start an
+        # ephemeral gnome-keyring on a private D-Bus session, unlocked with a
+        # throwaway password, so the token write succeeds for the test.
         env:
           PODIUM_LIVE_DEX: "1"
-        run: go test ./test/e2e/... -count=1 -run TestDexLogin -v
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gnome-keyring
+          dbus-run-session -- sh -c 'echo -n ci-keyring | gnome-keyring-daemon --unlock >/dev/null 2>&1; go test ./test/e2e/... -count=1 -run TestDexLogin -v'
