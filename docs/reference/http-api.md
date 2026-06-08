@@ -3,7 +3,7 @@ layout: default
 title: HTTP API
 parent: Reference
 nav_order: 2
-description: "The Podium registry's wire surface: discovery endpoints, materialization, ingest webhooks, scope preview, health."
+description: "The Podium registry's HTTP/JSON API: discovery, materialization, layer management, ingest webhooks, scope preview, and health."
 ---
 
 # HTTP API
@@ -46,10 +46,10 @@ In public-mode deployments, the OAuth flow is skipped; the registry serves anony
 ### `load_domain`
 
 ```
-GET /v1/domains/{path}?depth={n}&session_id={uuid}
+GET /v1/load_domain?path={path}&depth={n}&session_id={uuid}
 ```
 
-Returns the map for a path. Empty path returns the registry root.
+Returns the map for a path. An empty `path` returns the registry root.
 
 Response:
 
@@ -81,10 +81,12 @@ Output rendering (depth, folding, notable count, response budget) is governed by
 ### `search_domains`
 
 ```
-GET /v1/domains/search?query={q}&scope={path}&top_k={n}&session_id={uuid}
+GET /v1/search_domains?query={q}&scope={path}&top_k={n}&session_id={uuid}
 ```
 
-Hybrid retrieval over each domain's projection (frontmatter `description` + `keywords` + truncated body). `top_k` defaults to 10, max 50.
+Hybrid retrieval over each domain's projection (frontmatter `description`, `keywords`, and truncated body). `top_k` defaults to 10.
+
+Ranked domains are returned under the `domains` key.
 
 Response:
 
@@ -92,7 +94,7 @@ Response:
 {
   "query": "vendor payments",
   "total_matched": 8,
-  "results": [
+  "domains": [
     {
       "path": "finance/ap",
       "name": "ap",
@@ -107,10 +109,12 @@ Response:
 ### `search_artifacts`
 
 ```
-GET /v1/artifacts/search?query={q}&type={type}&tags={tag1},{tag2}&scope={path}&top_k={n}&session_id={uuid}
+GET /v1/search_artifacts?query={q}&type={type}&tags={tag1},{tag2}&scope={path}&top_k={n}&session_id={uuid}
 ```
 
-Hybrid retrieval over artifact frontmatter. All args optional. When `query` is omitted, returns artifacts matching the filters in default order: the canonical "browse" call.
+Hybrid retrieval over artifact frontmatter. Every argument is optional. When `query` is omitted, the endpoint returns artifacts matching the filters in default order, the browse call. `top_k` defaults to 10.
+
+Each result's `frontmatter` is the artifact's verbatim YAML frontmatter as a string.
 
 Response:
 
@@ -124,7 +128,7 @@ Response:
       "type": "skill",
       "version": "1.2.0",
       "score": 0.83,
-      "frontmatter": { "...": "..." }
+      "frontmatter": "name: run-variance-analysis\ntype: skill\nversion: 1.2.0\n..."
     }
   ]
 }
@@ -137,21 +141,12 @@ Response:
 ### `load_artifact`
 
 ```
-POST /v1/artifacts/load
-```
-
-Body:
-
-```json
-{
-  "id": "finance/close-reporting/run-variance-analysis",
-  "version": "1.2.0",
-  "session_id": "...",
-  "harness": "claude-code"
-}
+GET /v1/load_artifact?id={id}&version={v}&session_id={uuid}
 ```
 
 `version` is optional (default `latest`). `session_id` is optional; the first `latest` lookup within a session is recorded and reused for subsequent same-id lookups in the session, so the host sees a consistent snapshot.
+
+A `HEAD` request revalidates the consumer's resolution cache: the registry returns the resolved content hash in the `X-Podium-Content-Hash` header (and the version in `X-Podium-Version`) with no body. A `GET` that carries a matching `If-None-Match` is answered `304 Not Modified`.
 
 Response:
 
@@ -219,6 +214,51 @@ Not exposed as an MCP meta-tool; bulk loading is a programmatic-runtime concern.
 
 ---
 
+## Catalog and sync
+
+### `catalog`
+
+```
+GET /v1/catalog?scope={path}
+```
+
+Returns the caller's visible artifact catalog under the `scope` prefix as a flat ID list plus a lean per-artifact descriptor (`id`, `type`, and a short `summary`), visibility-filtered server-side. No manifest body rides along. The client-side `load_domain` merge resolves a workspace-local `DOMAIN.md`'s globs over this set.
+
+```json
+{
+  "ids": ["finance/ap/pay-invoice", "..."],
+  "artifacts": [
+    { "id": "finance/ap/pay-invoice", "type": "skill", "summary": "..." }
+  ]
+}
+```
+
+### `sync/manifest`
+
+```
+GET /v1/sync/manifest
+```
+
+Returns the caller's full effective view as a flat artifact list under the `artifacts` key, visibility-filtered server-side. `podium sync` in server-source mode walks this to discover which artifacts to load, then materializes each via `load_artifact`. It carries no relevance ranking and no `top_k` cap, so a sync of more than 50 artifacts enumerates in one request.
+
+### `dependents`
+
+```
+GET /v1/dependents?id={id}
+```
+
+Returns the cross-artifact dependency edges that point at the artifact, under the `edges` key. Each edge carries `from`, `to`, and `kind`.
+
+### `domain/analyze`
+
+```
+GET /v1/domain/analyze?path={path}
+```
+
+Returns the per-subtree domain analysis report for the path (the same report `podium domain analyze` prints).
+
+---
+
 ## Layer management
 
 ### Register a layer
@@ -232,18 +272,23 @@ Body:
 ```json
 {
   "id": "team-finance",
-  "source": {
-    "git": {
-      "repo": "git@github.com:acme/podium-finance.git",
-      "ref": "main",
-      "root": "artifacts/"
-    }
-  },
-  "visibility": { "groups": ["acme-finance"] }
+  "source_type": "git",
+  "repo": "git@github.com:acme/podium-finance.git",
+  "ref": "main",
+  "root": "artifacts/",
+  "groups": ["acme-finance"]
 }
 ```
 
-Response includes the webhook URL and HMAC secret to register on the source repo.
+`id` and `source_type` are required. Visibility is set with the top-level `public`, `organization`, `groups`, and `users` fields. The response is `201 Created` with the stored layer and, for a `git` source, the webhook URL and HMAC secret to register on the source repo:
+
+```json
+{
+  "layer": { "id": "team-finance", "source_type": "git", "...": "..." },
+  "webhook_url": "https://registry.acme.com/v1/ingest/webhook/team-finance",
+  "webhook_secret": "..."
+}
+```
 
 ### List layers
 
@@ -254,28 +299,48 @@ GET /v1/layers
 ### Reingest
 
 ```
-POST /v1/layers/{id}:reingest
+POST /v1/layers/reingest?id={id}
 ```
 
-Optional body for break-glass during a freeze window:
+Forces a fresh snapshot of the layer regardless of the trigger model. The body is optional and carries a break-glass override during a freeze window:
 
 ```json
-{ "break_glass": true, "justification": "..." }
+{ "break_glass": true, "justification": "...", "approvers": ["...", "..."] }
 ```
 
-### Reorder user-defined layers
+### Reorder layers
 
 ```
-POST /v1/layers/user:reorder
+POST /v1/layers/reorder
 ```
 
-Body: `{ "ids": ["layer-a", "layer-b", "layer-c"] }`.
+Body: `{ "order": ["layer-a", "layer-b", "layer-c"] }`. The `order` array re-sequences the named layers. Reordering an admin-defined layer requires admin authorization.
+
+### Update a layer
+
+```
+POST /v1/layers/update?id={id}
+PUT  /v1/layers/update?id={id}
+```
+
+Patches the layer. A non-zero body field replaces the corresponding value; a zero field leaves it unchanged. The patchable fields are visibility (`public`, `organization`, `groups`, `users`), `ref`, `root`, `local_path`, `owner`, `force_push_policy`, and a webhook-secret rotation (`rotate_webhook_secret`). The identifying fields (`id`, `source_type`) are immutable.
 
 ### Unregister
 
 ```
-DELETE /v1/layers/{id}
+DELETE /v1/layers?id={id}
 ```
+
+Soft-deletes the layer and the artifacts ingested from it, recoverable within the retention window.
+
+### List soft-deleted layers and restore
+
+```
+GET  /v1/layers?deleted=true
+POST /v1/layers/restore?id={id}
+```
+
+`GET /v1/layers?deleted=true` lists the soft-deleted layers still inside the recovery window. `POST /v1/layers/restore?id={id}` clears the tombstone and recovers the layer and its artifacts.
 
 ---
 
@@ -318,6 +383,93 @@ Gated by tenant config (`tenant.expose_scope_preview`). When `false`, returns `4
 
 ---
 
+## Quota
+
+```
+GET /v1/quota
+```
+
+Returns the calling tenant's configured limits and current usage. Read-only and not admin-gated, since quota visibility is informational.
+
+```json
+{
+  "tenant_id": "acme",
+  "limits": { "...": "..." },
+  "usage": { "storage_bytes": 1234567 }
+}
+```
+
+---
+
+## Events stream
+
+```
+GET /v1/events?type={event}&type={event}
+```
+
+Streams change events as NDJSON (`Content-Type: application/x-ndjson`). The connection stays open until the client disconnects. Repeat `type` to filter by event name; omit it to receive every event. The handler emits a `{"event":"_heartbeat"}` line every 30 seconds so a proxy-buffered consumer sees the connection stay alive. This is the wire surface the SDK `client.subscribe(events)` helper wraps.
+
+---
+
+## Object bytes
+
+```
+GET  /objects/{key}
+HEAD /objects/{key}
+```
+
+Serves a large resource's bytes for the filesystem object-store backend. The `presigned_url` a `load_artifact` response returns for the filesystem backend points here. The `key` is the resource's content hash. Visibility is re-checked on every fetch, so a caller who has lost access to the artifact can no longer follow a previously-issued URL. `HEAD` reports the size without streaming the body. The S3 backend returns its own presigned URLs instead and does not use this route.
+
+---
+
+## Admin and operations
+
+These routes require an authenticated admin caller (resolved through the admin-grant table) and are rejected in read-only mode with `registry.read_only`.
+
+### Admin grants
+
+```
+POST   /v1/admin/grants    body: { "user_id": "alice@acme.com" }
+DELETE /v1/admin/grants?user_id={id}
+```
+
+`POST` grants the admin role to the named user and returns `201 Created`. `DELETE` revokes it and returns `204 No Content`.
+
+### Show effective visibility
+
+```
+GET /v1/admin/show-effective?user_id={id}&group={g}
+```
+
+Returns the per-layer visibility resolved for the named target identity, under the `layers` key. Repeat `group` to evaluate the target with additional group memberships. Admin-only because the visibility configuration is itself sensitive.
+
+### Reembed
+
+```
+POST /v1/admin/reembed?artifact={id}&version={v}&only_missing={bool}&since={rfc3339}
+```
+
+Recomputes embeddings over the tenant. With no query parameters it reembeds every artifact. `artifact` (with a required `version`) scopes the run to one artifact; `only_missing=true` limits it to artifacts without a current embedding; `since` limits it to artifacts ingested at or after an RFC 3339 timestamp.
+
+### Runtime signing keys
+
+```
+POST /v1/admin/runtime    body: { "issuer": "...", "algorithm": "...", "public_key_pem": "..." }
+GET  /v1/admin/runtime
+```
+
+Registers and lists the trusted runtime signing keys the `injected-session-token` verifier consults. `POST` returns `201 Created`. `GET` returns the registered runtimes under the `runtimes` key without echoing the key material.
+
+### Erase a user (GDPR)
+
+```
+POST /v1/admin/erase    body: { "user_id": "...", "salt": "..." }
+```
+
+Performs the right-to-erasure operation for the named user: it unregisters and soft-deletes every user-defined layer the user owns, redacts the user identity across the registry audit stream, and appends a `user.erased` event naming the invoking admin. Both `user_id` and `salt` are required.
+
+---
+
 ## Outbound webhooks
 
 The registry emits outbound webhooks for change events. Configure receivers per org (URL + HMAC secret).
@@ -342,15 +494,47 @@ Schema:
 }
 ```
 
-Receivers are configured per org. The registry signs webhook deliveries with the configured HMAC secret.
+The registry signs webhook deliveries with the receiver's configured HMAC secret.
+
+### Receiver CRUD
+
+```
+GET    /v1/webhooks            list receivers
+POST   /v1/webhooks            create a receiver
+GET    /v1/webhooks/{id}       read one receiver
+PUT    /v1/webhooks/{id}       update one receiver
+DELETE /v1/webhooks/{id}       remove one receiver
+```
+
+`POST` accepts `{ "url": "...", "secret": "...", "event_filter": ["..."], "disabled": false }` and returns `201 Created` with the receiver including its secret, so the operator can record it. The registry generates a secret when the body omits one. `url` is required. `PUT` accepts the same fields and applies the ones present; re-enabling a receiver (`disabled: false`) clears its failure counter. `GET` and `DELETE` of a single receiver address it by `id`. List and single-read responses mask the secret as `***`. `DELETE` returns `204 No Content`. These routes are mounted only when the deployment configures an outbound webhook worker.
 
 ---
 
 ## Subscriptions (SDK)
 
-The SDKs expose `client.subscribe(events)` for in-process consumers that don't want to run their own webhook receiver. The wire surface is a streaming HTTP endpoint; the SDK abstracts the connection and reconnection logic.
+The SDKs expose `client.subscribe(events)` for in-process consumers that don't want to run their own webhook receiver. The wire surface is the `/v1/events` streaming endpoint; the SDK abstracts the connection and reconnection logic.
 
-Useful for sync watchers, downstream rebuild triggers, eval pipelines reacting to new artifact versions.
+Useful for sync watchers, downstream rebuild triggers, and eval pipelines reacting to new artifact versions.
+
+---
+
+## SCIM provisioning
+
+```
+/scim/v2/
+```
+
+A SCIM 2.0 receiver the configured identity provider pushes Users and Groups to. The visibility evaluator resolves `groups:` filters against the membership this endpoint records. The route is mounted only when the deployment configures a SCIM receiver.
+
+---
+
+## Metrics
+
+```
+GET /metrics
+```
+
+A Prometheus scrape endpoint. Mounted only when the deployment configures a metrics registry.
 
 ---
 
@@ -360,9 +544,13 @@ Useful for sync watchers, downstream rebuild triggers, eval pipelines reacting t
 GET /healthz
 ```
 
-Returns `{ "status": "ok", "mode": "standalone" | "standard" | "public", "read_only": false }`.
+Returns `{ "mode": "ready" | "read_only" | "public" }`. The endpoint is a liveness signal: a `200` status conveys liveness, and `mode` reports the serving state (`ready` by default, `read_only` when the registry has fallen back to a read replica, `public` in public mode). The body carries no readiness boolean and no `read_only` field; read-only is signaled by the `X-Podium-Read-Only` response header.
 
-Used for liveness/readiness probes. In read-only mode, returns `read_only: true` and the response carries the `X-Podium-Read-Only` header on every read endpoint.
+```
+GET /readyz
+```
+
+Reports readiness for load-balancer rotation. The body is `{ "mode": "ready" | "read_only" | "not_ready", "replication_lag_seconds": <n> }`. A `ready` or `read_only` mode returns `200` so the registry stays in rotation; `not_ready` (a failing dependency probe) returns `503`.
 
 ---
 

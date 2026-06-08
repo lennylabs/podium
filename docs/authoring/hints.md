@@ -82,5 +82,4 @@ Recording author intent without enforcement keeps the artifact portable across d
 ## Lint behavior
 
 - `effort_hint` or `model_class_hint` on a `context`, `rule`, `hook`, or `mcp-server` artifact: lint warning ("hints apply to types: agent, skill, command").
-- An invalid value (outside the enum): ingest error.
 - Both fields are optional. Missing fields produce no warnings.

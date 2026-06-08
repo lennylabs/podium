@@ -129,7 +129,8 @@ These fields tell the consumer what the artifact needs in order to run.
 
 **`delegates_to`** (list of canonical artifact IDs)
 
-- Walk the dependency: load each delegate and apply the same response-handling pipeline to it. SDK helpers like `Client.walk_dependencies(id)` automate the traversal.
+- Walk the dependency: loop over the delegate IDs, call `load_artifact` on each, and apply the same response-handling pipeline to the result. The SDK does not provide a forward-walk helper; the caller implements the loop and decides the traversal depth.
+- The only dependency helper on the client is `dependents_of(id)`, which returns the reverse edges (the artifacts that depend on a given artifact) for impact analysis. It does not walk forward.
 - Visibility filtering applies: delegates the caller cannot see are silently excluded, the same as on the registry-side discovery surface.
 
 **`hook_event`** and **`hook_action`** (for `type: hook` artifacts)
@@ -207,36 +208,41 @@ When the host prefers per-artifact routing (different artifacts answered by diff
 
 ## End-to-end SDK example
 
-A minimal consumer pulls the relevant fields off the response and feeds them to the runtime:
+A consumer reads the manifest fields off the response and feeds them to the runtime. The SDK `LoadedArtifact` exposes the prose body as `manifest_body` and the raw frontmatter as the `frontmatter` string; the consumer parses the frontmatter to read the advisory and constraint fields.
 
 ```python
+import yaml
 from podium import Client
 
 client = Client.from_env()
 result = client.load_artifact("finance/ap/pay-invoice")
-m = result.manifest
+
+# The advisory and constraint fields live in the raw frontmatter YAML.
+fm = yaml.safe_load(result.frontmatter) or {}
 
 # Routing
-model = pick_model_for_tier(m.model_class_hint or "medium")
-thinking_budget = budget_for_effort(m.effort_hint or "low")
+model = pick_model_for_tier(fm.get("model_class_hint", "medium"))
+thinking_budget = budget_for_effort(fm.get("effort_hint", "low"))
 
 # Safety
-if m.sensitivity == "high":
-    audit.log_high_sensitivity_load(m)
-sandbox = compile_sandbox_profile(m.sandbox_profile)
-approval_tools = set(m.requiresApproval or [])
+if fm.get("sensitivity") == "high":
+    audit.log_high_sensitivity_load(result.id)
+sandbox = compile_sandbox_profile(fm.get("sandbox_profile"))
+approval_tools = set(fm.get("requiresApproval", []))
 
 # Capability
-verify_runtime(m.runtime_requirements)
-for server in (m.mcpServers or []):
+verify_runtime(fm.get("runtime_requirements", {}))
+for server in fm.get("mcpServers", []):
     host.register_mcp_server(server)
 
-# Walk dependencies (one level shown; SDK helpers traverse the full graph)
-for dep_id in (m.delegates_to or []):
+# Walk delegates: load_artifact returns the delegate IDs in the
+# frontmatter; the caller loops over them and loads each one. The SDK
+# does not provide a forward-walk helper.
+for dep_id in fm.get("delegates_to", []):
     handle_response(client.load_artifact(dep_id))
 ```
 
-The TypeScript SDK exposes the same fields under the same names on `result.manifest`.
+The TypeScript SDK `LoadedArtifact` exposes the same two fields, `manifest_body` and `frontmatter`.
 
 ---
 
@@ -250,8 +256,8 @@ The TypeScript SDK exposes the same fields under the same names on `result.manif
 | `materialize.runtime_unavailable` | Surface the missing runtime requirement. Offer to install or pick a different artifact. |
 | `materialize.hook_failed` | Skip the hook; continue when other artifacts load successfully. Log the failure. |
 | `config.unknown_harness` | Configuration error on the consumer side. Refuse and surface. |
-| `auth.scope_denied` | The caller lacks visibility for the artifact. Refuse and surface. |
-| `quota.materialization_exceeded` | Back off and retry. Surface the quota state to the user. |
+| `visibility.denied` | The caller lacks visibility for the artifact. Refuse and surface. |
+| `quota.materialize_rate_exceeded` | Back off and retry. Surface the quota state to the user. |
 | `registry.read_only` | The registry is degraded. Continue serving cached content; mark subsequent loads as cache-only. |
 
 ---

@@ -68,8 +68,6 @@ Subtype events target a specific kind of tool call. Use them when the action onl
 | `pre_read_file` | Before the agent reads a file. |
 | `post_file_edit` | After the agent edits a file. |
 
-Don't declare both a generic hook (`pre_tool_use`) and the corresponding subtype hook (`pre_shell_execution`) for the same artifact; lint warns when this happens. Pick one level of specificity.
-
 **Permission**
 
 | `hook_event` | Fires when |
@@ -148,7 +146,7 @@ The harness refuses to materialize when a system package isn't available.
 
 ## Authoring guidance
 
-- **Hooks ship code.** A hook's `hook_action` runs on the host with the user's privileges. Treat hooks like any other script the catalog ships: review, sign, and consider sandboxing. The `sandbox_profile:` field applies; lint requires it for hooks at sensitivity ≥ medium.
+- **Hooks ship code.** A hook's `hook_action` runs on the host with the user's privileges. Treat hooks like any other script the catalog ships: review, sign, and consider sandboxing. Set `sandbox_profile:` for sensitive hooks so a host with sandbox capability can constrain the action.
 - **Keep actions short.** A long shell action embedded in YAML gets ugly. Move complex logic into a bundled script (in `scripts/`) and have the action invoke it. The script lives alongside `ARTIFACT.md` and ships with the hook.
 - **Make the description specific.** "Log session-end events to a local audit file." is fine. "Lifecycle observer." is too vague to surface in search.
 - **Don't depend on payload fields.** Harnesses change their payload schema over time. Use `jq` defaults (`jq -r '.field // empty'`) or guard against missing fields in shell.

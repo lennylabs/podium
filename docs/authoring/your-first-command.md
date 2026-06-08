@@ -103,12 +103,11 @@ Claude Code substitutes the trailing text into `$ARGUMENTS`, sends the resulting
 podium lint --registry ~/podium-artifacts/
 ```
 
-Lint validates frontmatter against the `command` schema, checks the prose body for unresolved placeholders, and flags vague descriptions. CI runs the same checks on PRs.
+Lint validates frontmatter against the `command` schema and resolves prose references in the body (markdown links to bundled files or other artifacts). CI runs the same checks on PRs.
 
 ---
 
 ## What's next
 
-- **Add named template variables.** Beyond `$ARGUMENTS`, commands can declare `variables:` with defaults; the harness exposes them as parameters in the slash menu. See the `command` section in [Artifact types](artifact-types).
 - **Move on to agents.** Commands are static prompts with a slot for user input. When the task needs to call tools, run scripts, or chain reasoning, write an `agent` instead. See [Your first agent](your-first-agent).
 - **Promote the command to a domain.** Commands shared across a team typically live in a tracked domain such as `engineering/dev-loop/` with a `DOMAIN.md` describing the set. See [Domains](domains).

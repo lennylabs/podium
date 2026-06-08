@@ -24,7 +24,7 @@ Baseline (10K artifacts, 100 QPS, 1 GB Postgres, 500 GB object storage on a 3-re
 | QPS | 1K | Scale registry replicas horizontally; put a CDN in front of object storage for resource bytes. |
 | QPS | 10K | Review search query patterns; consider dedicated Elasticsearch for BM25 with pgvector (or Pinecone/Weaviate/Qdrant) for vector. |
 | Tenants | 50 | Confirm `RegistryStore` connection pool is sized appropriately; increase pgbouncer pool if used. |
-| Audit volume | 1M events/day | Set retention explicitly; consider streaming to an external sink via `LocalAuditSink` config. |
+| Audit volume | 1M events/day | Set retention explicitly; ship the registry audit stream to an external SIEM by setting `PODIUM_AUDIT_LOG_PATH` to an `http(s)://` endpoint, which selects the registry endpoint sink instead of the on-disk hash-chained file. |
 
 Embeddings dominate Postgres growth at scale. Each artifact's text projection becomes a float vector whose dimension depends on the configured provider (768 for `nomic-embed-text` via Ollama, 1024 for `voyage-3` or `embed-v4`, 1536 for `text-embedding-3-small`). At ~6 KB per row including metadata at 1536 dim, 100K artifacts is ~600 MB of embeddings.
 
@@ -38,18 +38,17 @@ Both the registry and the MCP server expose Prometheus metrics. The reference Gr
 
 **Registry:**
 
-- `podium_request_duration_seconds{handler}`: histograms per endpoint. Watch `load_domain`, `search_domains`, `search_artifacts`, `load_artifact`, `load_artifacts` against the SLOs (p99 < 200ms / 200ms / 200ms / 500ms manifest / 2s with resources).
-- `podium_request_total{handler, code}`: error rate. Visibility-denial rate (`code=403, error=visibility.denied`) is informational; a sudden spike usually means a layer config error rather than a real authorization issue.
-- `podium_cache_hit_ratio{layer}`: content-cache hit rate at the registry edge. Low values often indicate a CDN misconfig.
-- `podium_ingest_total{layer, status}`: ingest success / failure / lint-failed counts per layer. Flag a layer with a recent uptick in `lint_failed`.
-- `podium_audit_lag_seconds`: time between event creation and audit-stream commit. Watch for backpressure.
-- `podium_postgres_replica_lag_seconds`: triggers read-only mode transitions.
+- `podium_request_duration_seconds{endpoint}`: per-endpoint latency histogram. Watch `load_domain`, `search_domains`, `search_artifacts`, `load_artifact`, and `load_artifacts` against the SLOs (p99 < 200ms / 200ms / 200ms / 500ms manifest / 2s with resources).
+- `podium_request_total{endpoint}` and `podium_request_errors_total{endpoint}`: request volume and error count per endpoint. The error counter increments for any response status at or above 400, so the per-endpoint error rate is `rate(podium_request_errors_total) / rate(podium_request_total)`.
+- `podium_visibility_denied_total`: reads rejected by visibility filtering. This signal is informational; a sudden spike usually means a layer config error rather than an authorization issue.
+- `podium_cache_hits_total` and `podium_cache_misses_total`: server-side cache hits and misses. A low hit ratio often indicates a CDN or import-glob misconfiguration.
+- `podium_ingest_success_total` and `podium_ingest_failure_total`: ingest attempts that succeeded or failed. Flag a recent uptick in the failure counter.
+- `podium_vector_outbox_depth`: pending rows in the external-vector-backend outbox. A rising depth indicates the drain worker is falling behind. The gauge reads 0 on a collocated backend that uses no outbox.
 
 **MCP server:**
 
-- `podium_mcp_session_count`: active sessions per workspace.
-- `podium_mcp_metaool_duration_seconds{tool}`: per-tool latency at the bridge layer.
-- `podium_mcp_offline_total`: count of calls that returned `served_from_cache: true` in `always-revalidate` mode.
+- `podium_mcp_requests_total{tool}` and `podium_mcp_request_errors_total{tool}`: per-tool call volume and error count at the bridge.
+- `podium_mcp_request_duration_seconds{tool}`: per-tool call latency at the bridge.
 
 ---
 
@@ -58,35 +57,31 @@ Both the registry and the MCP server expose Prometheus metrics. The reference Gr
 A reasonable starting set, tuned for the baseline deployment:
 
 ```yaml
-# Critical — page on-call
+# Critical: page on-call
 - alert: PodiumDown
   expr: up{job="podium-registry"} == 0
   for: 2m
 
-- alert: PodiumPostgresUnreachable
-  expr: podium_postgres_up == 0
-  for: 1m
-
 - alert: PodiumLoadArtifactSLOBreached
-  expr: histogram_quantile(0.99, rate(podium_request_duration_seconds_bucket{handler="load_artifact"}[5m])) > 0.5
+  expr: histogram_quantile(0.99, rate(podium_request_duration_seconds_bucket{endpoint="load_artifact"}[5m])) > 0.5
   for: 5m
 
-# Warning — investigate within hours
-- alert: PodiumIngestFailingForLayer
-  expr: increase(podium_ingest_total{status="failed"}[1h]) > 5
+- alert: PodiumHighErrorRate
+  expr: sum(rate(podium_request_errors_total[5m])) / sum(rate(podium_request_total[5m])) > 0.05
+  for: 5m
+
+# Warning: investigate within hours
+- alert: PodiumIngestFailing
+  expr: increase(podium_ingest_failure_total[1h]) > 5
   for: 15m
 
-- alert: PodiumReadOnlyMode
-  expr: podium_registry_mode{mode="read_only"} == 1
-  for: 5m
-
-- alert: PodiumAuditLag
-  expr: podium_audit_lag_seconds > 60
+- alert: PodiumVectorOutboxBacklog
+  expr: podium_vector_outbox_depth > 1000
   for: 10m
 
-# Informational — review weekly
-- alert: PodiumLowDescribeQuality
-  expr: podium_lint_thin_descriptions_total > 50
+# Informational: review weekly
+- alert: PodiumLowCacheHitRatio
+  expr: sum(rate(podium_cache_hits_total[1h])) / (sum(rate(podium_cache_hits_total[1h])) + sum(rate(podium_cache_misses_total[1h]))) < 0.5
 ```
 
 The Helm chart ships these as a starter; tune thresholds to your SLOs.

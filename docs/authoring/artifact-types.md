@@ -74,7 +74,7 @@ delegates_to:
 You are a vendor compliance reviewer. Given a vendor record...
 ```
 
-`input` and `output` declare JSON Schemas the agent expects and produces. `delegates_to` lists other agents this one can call (constrained to `agent`-type targets at lint time). The cross-type dependency graph uses these edges for impact analysis.
+`input` and `output` declare JSON Schemas the agent expects and produces. `delegates_to` lists other agents this one can call. The field is advisory; the target may be any artifact type and is not enforced at ingest. The cross-type dependency graph uses these edges for impact analysis.
 
 ---
 
@@ -115,9 +115,6 @@ version: 1.0.0
 description: Guided module refactoring with configurable focus areas.
 tags: [command, refactoring]
 sensitivity: low
-variables:
-  FOCUS: all
-  PRESERVE_API: "true"
 ---
 
 # Refactor Module
@@ -126,7 +123,7 @@ variables:
 $ARGUMENTS
 
 ## Instructions
-Analyze the specified module and refactor with focus on: **{{FOCUS}}**.
+Analyze the specified module and refactor according to the user's input.
 
 ...
 ```
