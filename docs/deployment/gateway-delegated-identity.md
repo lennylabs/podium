@@ -84,6 +84,8 @@ On a single-tenant registry (a standalone backend, or a standard backend with on
 
 A multi-tenant registry routes each request to the tenant its organization names: the verified `org_id` claim under `oidc-jwt`, or the `X-Podium-User-Org` header under `trusted-headers`. Enable it with `PODIUM_MULTI_TENANT=true` and provision the orgs with `PODIUM_TENANTS=acme,globex` (the default org is always provisioned). The organization value is an org ID or an org-name alias, which the registry resolves to a tenant. Under `oidc-jwt`, a value that resolves to no provisioned tenant is rejected with `auth.tenant_unknown`; under `trusted-headers`, the request is left in no tenant and sees an empty view.
 
+Tenants are provisioned at registry boot. The registry reads `PODIUM_TENANTS`, creates a tenant row for each named org in the store's `tenants` table, and persists it. The registry has no runtime tenant-provisioning API or CLI. Adding or removing a tenant requires editing `PODIUM_TENANTS` and restarting the registry. Provisioning is idempotent, so a restart with an unchanged list creates no duplicates, and removing a name from the list stops new requests from routing to that org without deleting its existing rows.
+
 ## Layer visibility default
 
 Enabling either provider changes the resolved default layer visibility. On a standalone server without an identity provider, new layers default to `visibility: public`. Once a provider is enabled and `PODIUM_DEFAULT_LAYER_VISIBILITY` is unset, the resolved default is `private`, so admin layers are not public to every caller once the registry filters by identity. An explicit `PODIUM_DEFAULT_LAYER_VISIBILITY=public` is applied unchanged.
