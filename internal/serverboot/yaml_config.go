@@ -83,6 +83,10 @@ type yamlIdentityCfg struct {
 	Type                  string `yaml:"type,omitempty"`
 	Audience              string `yaml:"audience,omitempty"`
 	AuthorizationEndpoint string `yaml:"authorization_endpoint,omitempty"`
+	// §6.3.3 / §13.12 oidc-jwt keys.
+	Issuer              string `yaml:"issuer,omitempty"`
+	TokenHeader         string `yaml:"token_header,omitempty"`
+	JWKSCacheTTLSeconds int    `yaml:"jwks_cache_ttl_seconds,omitempty"`
 }
 
 // yamlStoreCfg mirrors the §13.12 `store:` block. The DSN key is `dsn`
@@ -284,6 +288,17 @@ func applyYAML(c *Config, y *yamlConfig) {
 	}
 	if c.oauthAuthorizationEndpoint == "" && y.Identity.AuthorizationEndpoint != "" {
 		c.oauthAuthorizationEndpoint = y.Identity.AuthorizationEndpoint
+	}
+	// §6.3.3 / §13.12 oidc-jwt keys (env wins; PODIUM_TRUSTED_PROXY_SECRET has no
+	// config-file equivalent and is read from the environment only).
+	if c.oauthIssuer == "" && y.Identity.Issuer != "" {
+		c.oauthIssuer = y.Identity.Issuer
+	}
+	if c.oauthTokenHeader == "" && y.Identity.TokenHeader != "" {
+		c.oauthTokenHeader = y.Identity.TokenHeader
+	}
+	if c.oauthJWKSCacheTTLSeconds == 0 && y.Identity.JWKSCacheTTLSeconds != 0 {
+		c.oauthJWKSCacheTTLSeconds = y.Identity.JWKSCacheTTLSeconds
 	}
 	if c.storeType == "sqlite" && y.Store.Type != "" && os.Getenv("PODIUM_REGISTRY_STORE") == "" {
 		c.storeType = y.Store.Type

@@ -86,8 +86,26 @@ func pathRequiresIdentity(p string) bool {
 // issuer when the token carried one (matching the §6.10 canonical example).
 func (s *Server) writeIdentityError(w http.ResponseWriter, err error) {
 	if errors.Is(err, identity.ErrTokenExpired) {
+		// §6.10 amendment: provider-neutral message (an expired oidc-jwt token
+		// is refreshed by the gateway, not the runtime); the per-provider
+		// refresher is carried in the registry's suggested_action.
 		writeError(w, http.StatusUnauthorized, "auth.token_expired",
-			"the session token has expired; the runtime is responsible for refresh")
+			"The authenticated token has expired.")
+		return
+	}
+	// §6.3.3: a gateway-forwarded oidc-jwt token that fails signature, iss, or
+	// aud verification. Distinct from auth.untrusted_runtime: details.token_iss
+	// names the forwarded token's issuer (not a registered runtime).
+	var ult *identity.UntrustedTokenError
+	if errors.As(err, &ult) {
+		if ult.Issuer != "" {
+			writeErrorDetails(w, http.StatusUnauthorized, "auth.untrusted_token",
+				"Forwarded token from issuer '"+ult.Issuer+"' failed verification.",
+				map[string]any{"token_iss": ult.Issuer})
+		} else {
+			writeError(w, http.StatusUnauthorized, "auth.untrusted_token",
+				"The forwarded token could not be verified.")
+		}
 		return
 	}
 	var ute *identity.UntrustedRuntimeError

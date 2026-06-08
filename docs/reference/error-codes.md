@@ -55,7 +55,9 @@ Codes map to MCP error payloads per the MCP spec for harnesses that consume Podi
 | Code | When |
 |:--|:--|
 | `auth.untrusted_runtime` | An `injected-session-token` JWT was signed by a runtime whose signing key isn't registered with the registry. |
-| `auth.token_expired` | The OAuth access token (or injected JWT) has passed its `exp`. The MCP server triggers refresh on `oauth-device-code`; the runtime is responsible for refresh on `injected-session-token`. |
+| `auth.untrusted_token` | A gateway-forwarded `oidc-jwt` token failed signature, `iss`, or `aud` validation against the configured issuer JWKS. `details.token_iss` carries the rejected token's issuer. |
+| `auth.tenant_unknown` | A verified `oidc-jwt` token's `org_id` names no provisioned tenant on a multi-tenant registry. `details.token_org_id` carries the unresolved organization. |
+| `auth.token_expired` | The OAuth access token (or injected/forwarded JWT) has passed its `exp`. The MCP server triggers refresh on `oauth-device-code`; the runtime refreshes on `injected-session-token`; the gateway forwards a new token on `oidc-jwt`. |
 | `auth.forbidden` | An admin-only operation attempted by a non-admin caller. |
 
 ### config.*
@@ -64,6 +66,11 @@ Codes map to MCP error payloads per the MCP spec for harnesses that consume Podi
 |:--|:--|
 | `config.no_registry` | `defaults.registry` is unset across every config scope, and no `--registry` flag or `PODIUM_REGISTRY` env var is set. |
 | `config.public_mode_with_idp` | Both `--public-mode` (or `PODIUM_PUBLIC_MODE`) and `PODIUM_IDENTITY_PROVIDER` are set; they're mutually exclusive. |
+| `config.invalid_issuer_scheme` | `PODIUM_IDENTITY_PROVIDER=oidc-jwt` was given a non-`https` `PODIUM_OAUTH_ISSUER`. The registry fetches the discovery document and JWKS over this URL, so it must be `https`. |
+| `config.oidc_jwt_audience_unset` | `PODIUM_IDENTITY_PROVIDER=oidc-jwt` without `PODIUM_OAUTH_AUDIENCE`. The required `aud` claim cannot be verified. |
+| `config.trusted_headers_public_bind` | `trusted-headers` on a single-tenant registry bound to a non-loopback address without `PODIUM_TRUSTED_PROXY_SECRET` or `--allow-public-bind`. |
+| `config.trusted_headers_multitenant_no_secret` | `trusted-headers` on a multi-tenant registry without `PODIUM_TRUSTED_PROXY_SECRET`, which is required on every request regardless of bind. |
+| `config.identity_provider_unverified` | A registered identity provider was selected without a request-time verifier wired, which would resolve every caller as anonymous-public. |
 
 ### domain.*
 

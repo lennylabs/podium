@@ -109,7 +109,7 @@ func resolveKnobs(opts LoadDomainOptions, dom *manifest.Domain, td DiscoveryDefa
 // first). Malformed DOMAIN.md frontmatter is skipped here; the linter
 // reports it at ingest. Returns a map keyed by canonical domain path.
 func (r *Registry) mergedDomains(ctx context.Context, id layer.Identity) (map[string]*manifest.Domain, error) {
-	recs, err := r.store.ListDomains(ctx, r.tenantID)
+	recs, err := r.store.ListDomains(ctx, r.tenantFor(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}

@@ -1,0 +1,45 @@
+name: docs
+
+# The Jekyll documentation site (docs/, just-the-docs) is regenerated only on a
+# new release tag, not on every push to main. The repository's Pages source is
+# set to "GitHub Actions" so the legacy per-commit branch build is disabled and
+# this workflow is the only deploy path. workflow_dispatch allows a manual
+# rebuild between releases, for example a docs-only correction.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Serialize Pages deployments; let an in-progress deploy finish rather than
+# cancelling it, so a release publish is never left half-deployed.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./docs
+          destination: ./_site
+      - uses: actions/upload-pages-artifact@v3
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

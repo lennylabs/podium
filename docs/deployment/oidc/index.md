@@ -44,6 +44,8 @@ These guides configure the `oauth-device-code` provider for human callers on dev
 
 Managed runtimes (for example Bedrock Agents or custom orchestrators) use the `injected-session-token` provider instead. The runtime issues a JWT signed by a key registered with the registry, and the registry verifies that signature on every call. That path is configured at the runtime and the registry rather than at the IdP, so it falls outside these per-IdP guides; see the [operator guide](../operator-guide) for the runtime-trust setup.
 
+When the registry runs behind a gateway that has already authenticated the caller, the `oidc-jwt` and `trusted-headers` providers let the registry consume the gateway-supplied identity (a verifiable forwarded token or trusted headers) and filter layer visibility by it. See [gateway-delegated identity](../gateway-delegated-identity).
+
 ## What every guide does not cover
 
 - **TLS termination**: handled by the load balancer or reverse proxy in front of the registry.

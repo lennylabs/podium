@@ -83,7 +83,7 @@ func (r *Registry) recordUsage(ctx context.Context, artifactID, sessionID string
 	if r.usage == nil {
 		return
 	}
-	r.usage.Record(ctx, r.tenantID, artifactID, sessionID)
+	r.usage.Record(ctx, r.tenantFor(ctx), artifactID, sessionID)
 }
 
 // usageRanking returns the tenant's learn-from-usage ranking restricted to the
@@ -94,7 +94,7 @@ func (r *Registry) usageRanking(ctx context.Context, allowed map[string]bool) []
 	if r.usage == nil {
 		return nil
 	}
-	ranked := r.usage.Ranking(ctx, r.tenantID)
+	ranked := r.usage.Ranking(ctx, r.tenantFor(ctx))
 	if len(ranked) == 0 {
 		return nil
 	}
