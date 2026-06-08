@@ -158,16 +158,20 @@ Response:
 ```json
 {
   "id": "...",
+  "type": "skill",
   "version": "1.2.0",
   "content_hash": "sha256:...",
   "manifest_body": "...",
-  "resources": [
-    { "path": "scripts/variance.py", "presigned_url": "...", "content_hash": "..." }
-  ]
+  "resources": {
+    "scripts/variance.py": "...inline bytes..."
+  },
+  "large_resources": {
+    "assets/model.bin": { "presigned_url": "...", "content_hash": "sha256:...", "size": 5242880 }
+  }
 }
 ```
 
-Bytes below the inline cutoff (256 KB) are returned in the response body. Above, presigned URLs deliver them. The MCP server fetches resources directly from object storage.
+A resource at or below the inline cutoff (256 KB) is returned in `resources`, a map of package-relative path to inline bytes. A larger resource is returned in `large_resources`, a map of path to a presigned URL into object storage that the consumer fetches directly; the registry does not proxy the bytes. When any inline resource is binary, the whole `resources` map is base64-encoded and `resources_base64` is `true`. A canonical manifest above the cutoff is delivered the same way, as `manifest_body_url` with the inline `manifest_body` cleared. The `load_artifacts` batch endpoint below returns each artifact's resources as an array of objects rather than these maps.
 
 ### `load_artifacts` (bulk)
 
