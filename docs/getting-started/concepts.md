@@ -232,6 +232,14 @@ steps:
 `podium sync` does the same thing in batch for the caller's whole
 effective view.
 
+The `load_artifact` response delivers the manifest body and the bundled
+resources below the inline cutoff directly. A larger resource, and a
+manifest above the cutoff, arrive as a presigned URL into object storage.
+Materialization is the write step that lands all of it on disk. Through the
+MCP server these steps run during the call, so the agent receives the
+manifest body and the file paths. The SDKs split them, returning the
+manifest in memory and writing on a later `materialize()` call.
+
 ---
 
 ## Meta-tools

@@ -90,6 +90,8 @@ artifact.materialize(to="./artifacts/", harness="claude-code")
 
 `materialize()` runs the configured `HarnessAdapter` over the canonical artifact and writes the result to the destination path. Pass `harness="none"` to write the canonical layout as-is, which is useful when the consuming runtime reads `ARTIFACT.md` (and `SKILL.md` for skills) directly.
 
+The SDK separates loading from writing. The MCP server writes every resource to disk during `load_artifact`; the SDK holds the result in memory and writes only when `materialize()` is called. `load_artifact` returns the manifest body and the bundled resources small enough to travel inline; a resource above the 256 KB inline cutoff arrives as a presigned reference. `materialize(to=...)` writes the canonical layout under `<to>/<id>/` and fetches each referenced resource. A manifest above the cutoff is fetched during `load_artifact`, so `artifact.manifest_body` is populated whatever the manifest's size. [Inline content and materialized files](handling-artifact-responses#inline-content-and-materialized-files) covers the model both consumer paths share.
+
 The response carries manifest fields beyond the prose body (hints, sandbox profile, runtime requirements, MCP server registrations, dependency edges). [Handling artifact responses](handling-artifact-responses) walks through each field and what the consumer should do with it.
 
 ---
