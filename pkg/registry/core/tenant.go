@@ -86,9 +86,3 @@ func (r *Registry) UpdateTenant(ctx context.Context, t store.Tenant) error {
 func (r *Registry) DeactivateTenant(ctx context.Context, id string) error {
 	return r.store.DeactivateTenant(ctx, id)
 }
-
-// GrantOperator records an instance operator grant (§4.7.1 Operator role).
-// Boot seeds PODIUM_OPERATOR_ADMINS through this path.
-func (r *Registry) GrantOperator(ctx context.Context, identity string) error {
-	return r.store.GrantOperator(ctx, identity)
-}

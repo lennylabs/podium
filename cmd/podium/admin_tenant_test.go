@@ -108,3 +108,45 @@ func TestAdminTenantCmd_Dispatch(t *testing.T) {
 		t.Errorf("--help rc = %d, want 0", rc)
 	}
 }
+
+// A server error surfaces as exit 1: a single-tenant registry returns 404
+// (registry.tenant_management_unavailable) for every tenant command.
+func TestAdminTenantCLI_ServerErrors(t *testing.T) {
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "default", Name: "default"}); err != nil {
+		t.Fatalf("seed default: %v", err)
+	}
+	op := layer.Identity{Sub: "operator@acme.com", OrgID: "acme.com", IsAuthenticated: true}
+	_ = st.GrantOperator(context.Background(), op.Sub)
+	// No tenant router: single-tenant mode, so every /v1/admin/tenants request
+	// is rejected with 404.
+	srv := server.New(core.New(st, "default", nil),
+		server.WithIdentityResolver(func(*http.Request) layer.Identity { return op }))
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	cmds := []int{
+		adminTenantCreate([]string{"acme.com", "--registry", ts.URL}),
+		adminTenantList([]string{"--registry", ts.URL}),
+		adminTenantUpdate([]string{"some-id", "--active", "false", "--registry", ts.URL}),
+		adminTenantDeactivate([]string{"some-id", "--registry", ts.URL}),
+	}
+	for i, rc := range cmds {
+		if rc != 1 {
+			t.Errorf("command %d against single-tenant rc = %d, want 1", i, rc)
+		}
+	}
+}
+
+// Bool flags accept true/false and reject any other value with exit 2.
+func TestAdminTenantCLI_BoolFlags(t *testing.T) {
+	ts, _ := bootTenantCLIServer(t)
+	if rc := adminTenantCreate([]string{"acme.com", "--expose-scope-preview", "false", "--registry", ts.URL}); rc != 0 {
+		t.Errorf("create --expose-scope-preview false rc = %d, want 0", rc)
+	}
+	if rc := adminTenantCreate([]string{"globex.com", "--expose-scope-preview", "maybe", "--registry", ts.URL}); rc != 2 {
+		t.Errorf("create --expose-scope-preview maybe rc = %d, want 2", rc)
+	}
+	if rc := adminTenantUpdate([]string{"some-id", "--active", "perhaps", "--registry", ts.URL}); rc != 2 {
+		t.Errorf("update --active perhaps rc = %d, want 2", rc)
+	}
+}

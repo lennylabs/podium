@@ -250,3 +250,77 @@ func TestTenants_UnknownIDNotFound(t *testing.T) {
 		}
 	}
 }
+
+// Spec: §7.3.3 — create accepts every quota sub-field and the scope-preview
+// gate; PATCH sets the gate; a malformed body is rejected with 400.
+func TestTenants_FieldsAndMalformedBody(t *testing.T) {
+	t.Parallel()
+	ts, st := bootTenantServer(t, operatorCaller, true)
+	_ = st.GrantOperator(context.Background(), operatorCaller.Sub)
+	tenantsURL := ts.URL + "/v1/admin/tenants"
+
+	code, body := tenantHTTP(t, http.MethodPost, tenantsURL,
+		`{"name":"acme.com","quota":{"storage_bytes":1,"search_qps":2,"materialize_rate":3,"audit_volume_per_day":4,"max_user_layers":5},"expose_scope_preview":false}`)
+	if code != http.StatusCreated {
+		t.Fatalf("create status = %d (%s)", code, body)
+	}
+	var created tenantWire
+	_ = json.Unmarshal(body, &created)
+	if created.Quota.SearchQPS != 2 || created.Quota.MaterializeRate != 3 || created.Quota.AuditVolumePerDay != 4 {
+		t.Errorf("create dropped quota sub-fields: %+v", created.Quota)
+	}
+	if created.ExposeScopePreview == nil || *created.ExposeScopePreview {
+		t.Errorf("create did not set expose_scope_preview false: %v", created.ExposeScopePreview)
+	}
+
+	code, body = tenantHTTP(t, http.MethodPatch, tenantsURL+"/"+created.ID, `{"expose_scope_preview":true}`)
+	if code != http.StatusOK {
+		t.Fatalf("patch expose status = %d (%s)", code, body)
+	}
+	var patched tenantWire
+	_ = json.Unmarshal(body, &patched)
+	if patched.ExposeScopePreview == nil || !*patched.ExposeScopePreview {
+		t.Errorf("patch did not set expose_scope_preview true: %v", patched.ExposeScopePreview)
+	}
+
+	if code, _ := tenantHTTP(t, http.MethodPost, tenantsURL, `{not json`); code != http.StatusBadRequest {
+		t.Errorf("malformed create status = %d, want 400", code)
+	}
+	if code, _ := tenantHTTP(t, http.MethodPatch, tenantsURL+"/"+created.ID, `{not json`); code != http.StatusBadRequest {
+		t.Errorf("malformed patch status = %d, want 400", code)
+	}
+}
+
+// Spec: §4.7.1 / §6.10 — an unauthenticated (public) caller is rejected with
+// auth.forbidden, covering the public-caller branch of operator authorization.
+func TestTenants_UnauthenticatedForbidden(t *testing.T) {
+	t.Parallel()
+	ts, _ := bootTenantServer(t, layer.Identity{IsPublic: true}, true)
+	code, body := tenantHTTP(t, http.MethodGet, ts.URL+"/v1/admin/tenants", "")
+	if code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", code)
+	}
+	if c := tenantErrCode(t, body); c != "auth.forbidden" {
+		t.Errorf("code = %q, want auth.forbidden", c)
+	}
+}
+
+// Spec: §7.3.3 — a PATCH whose field carries the wrong JSON type is rejected
+// with 400, covering the per-field unmarshal-error branches.
+func TestTenants_InvalidPatchFields(t *testing.T) {
+	t.Parallel()
+	ts, st := bootTenantServer(t, operatorCaller, true)
+	_ = st.GrantOperator(context.Background(), operatorCaller.Sub)
+	code, body := tenantHTTP(t, http.MethodPost, ts.URL+"/v1/admin/tenants", `{"name":"acme.com"}`)
+	if code != http.StatusCreated {
+		t.Fatalf("create status = %d (%s)", code, body)
+	}
+	var created tenantWire
+	_ = json.Unmarshal(body, &created)
+	target := ts.URL + "/v1/admin/tenants/" + created.ID
+	for _, bad := range []string{`{"quota":123}`, `{"active":"x"}`, `{"expose_scope_preview":"x"}`} {
+		if code, _ := tenantHTTP(t, http.MethodPatch, target, bad); code != http.StatusBadRequest {
+			t.Errorf("PATCH %s status = %d, want 400", bad, code)
+		}
+	}
+}
