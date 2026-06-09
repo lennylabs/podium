@@ -39,10 +39,16 @@ func mkey(tenantID, artifactID, version string) string {
 	return tenantID + "/" + artifactID + "@" + version
 }
 
-// CreateTenant inserts a new tenant.
+// CreateTenant inserts a new tenant. It is idempotent: creating an
+// already-present ID is a no-op that leaves the stored tenant unchanged,
+// matching the SQLite INSERT OR IGNORE and Postgres ON CONFLICT (id) DO
+// NOTHING backends.
 func (s *Memory) CreateTenant(_ context.Context, t Tenant) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, exists := s.tenants[t.ID]; exists {
+		return nil
+	}
 	s.tenants[t.ID] = t
 	return nil
 }
