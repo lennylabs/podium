@@ -14,7 +14,10 @@ type Memory struct {
 	tenants   map[string]Tenant
 	manifests map[string]ManifestRecord
 	deps      map[string][]DependencyEdge
-	admins    map[string]AdminGrant   // key: userID + "/" + orgID
+	admins    map[string]AdminGrant // key: userID + "/" + orgID
+	// operators holds instance-level operator grants (§4.7.1 Operator
+	// role), keyed by identity with no org scope.
+	operators map[string]bool
 	layers    map[string]LayerConfig  // key: tenantID + "/" + id
 	domains   map[string]DomainRecord // key: tenantID + "/" + layer + "/" + path
 	// vectorPending is the §4.7.2 transactional vector outbox, keyed like
@@ -29,6 +32,7 @@ func NewMemory() *Memory {
 		manifests:     map[string]ManifestRecord{},
 		deps:          map[string][]DependencyEdge{},
 		admins:        map[string]AdminGrant{},
+		operators:     map[string]bool{},
 		layers:        map[string]LayerConfig{},
 		domains:       map[string]DomainRecord{},
 		vectorPending: map[string]VectorPending{},
@@ -49,6 +53,10 @@ func (s *Memory) CreateTenant(_ context.Context, t Tenant) error {
 	if _, exists := s.tenants[t.ID]; exists {
 		return nil
 	}
+	// A created tenant is active. The SQL backends achieve this through the
+	// active-column default; Memory sets it explicitly because the zero
+	// value of Active is false (§4.7.1).
+	t.Active = true
 	s.tenants[t.ID] = t
 	return nil
 }
@@ -62,6 +70,49 @@ func (s *Memory) GetTenant(_ context.Context, id string) (Tenant, error) {
 		return Tenant{}, ErrTenantNotFound
 	}
 	return t, nil
+}
+
+// ListTenants returns every provisioned tenant, ordered by ID.
+func (s *Memory) ListTenants(_ context.Context) ([]Tenant, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]Tenant, 0, len(s.tenants))
+	for _, t := range s.tenants {
+		out = append(out, t)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+// UpdateTenant writes a tenant's mutable configuration (Quota,
+// ExposeScopePreview, Active) and preserves the ID and name. An unknown ID
+// returns ErrTenantNotFound.
+func (s *Memory) UpdateTenant(_ context.Context, t Tenant) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.tenants[t.ID]
+	if !ok {
+		return ErrTenantNotFound
+	}
+	cur.Quota = t.Quota
+	cur.ExposeScopePreview = t.ExposeScopePreview
+	cur.Active = t.Active
+	s.tenants[t.ID] = cur
+	return nil
+}
+
+// DeactivateTenant sets a tenant's Active flag false without deleting its
+// data. An unknown ID returns ErrTenantNotFound.
+func (s *Memory) DeactivateTenant(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.tenants[id]
+	if !ok {
+		return ErrTenantNotFound
+	}
+	cur.Active = false
+	s.tenants[id] = cur
+	return nil
 }
 
 // PutManifest enforces the immutability invariant: the same
@@ -332,6 +383,22 @@ func (s *Memory) ListAdminGrants(_ context.Context, orgID string) ([]AdminGrant,
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].UserID < out[j].UserID })
 	return out, nil
+}
+
+// GrantOperator records an instance-level operator grant (§4.7.1 Operator
+// role). The key is an identity with no org scope.
+func (s *Memory) GrantOperator(_ context.Context, identity string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.operators[identity] = true
+	return nil
+}
+
+// IsOperator reports whether the identity holds an operator grant.
+func (s *Memory) IsOperator(_ context.Context, identity string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.operators[identity], nil
 }
 
 func layerKey(tenantID, id string) string { return tenantID + "/" + id }

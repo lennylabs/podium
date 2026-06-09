@@ -164,7 +164,8 @@ var sharedTableStmts = []string{
 		materialize_rate_quota BIGINT NOT NULL DEFAULT 0,
 		audit_volume_quota BIGINT NOT NULL DEFAULT 0,
 		max_user_layers BIGINT NOT NULL DEFAULT 0,
-		expose_scope_preview BOOLEAN
+		expose_scope_preview BOOLEAN,
+		active BOOLEAN NOT NULL DEFAULT TRUE
 	)`,
 	`CREATE TABLE IF NOT EXISTS public.vector_pending (
 		tenant_id TEXT NOT NULL,
@@ -176,6 +177,10 @@ var sharedTableStmts = []string{
 		next_retry_at TIMESTAMPTZ NOT NULL,
 		last_error TEXT NOT NULL DEFAULT '',
 		PRIMARY KEY (tenant_id, artifact_id, version)
+	)`,
+	`CREATE TABLE IF NOT EXISTS public.operator_grants (
+		identity TEXT PRIMARY KEY,
+		granted_at TIMESTAMPTZ NOT NULL
 	)`,
 }
 
@@ -192,22 +197,45 @@ var sharedIndexStmts = []string{
 // to the policy, and the store sets podium.org_id to the target org id around
 // every tenants read and write (set_config(..., is_local := true)), so a
 // session scoped to one org cannot read or write another org's registry row.
+// ListTenants performs the one cross-org read by setting podium.org_id to the
+// operatorListSentinel value, which the policy's USING clause admits, returning
+// every row on the owner connection without a BYPASSRLS role; the WITH CHECK
+// never admits the sentinel, so every write stays confined to a real org.
 //
 // vector_pending is the cross-org outbox: the policy is the same org_id check,
 // but it is not FORCE'd so the trusted registry process (the table owner) drains
 // every org's queued embeddings in one scan, while any non-owner role is still
 // confined to its own org's rows.
+
+// operatorListSentinel is the podium.org_id value ListTenants sets to read every
+// tenant row past the FORCE'd policy. It is not a valid org id (orgIDPattern
+// admits only UUIDs), so no tenant row carries it. The literal in the
+// tenants_org_isolation policy below must match this value.
+const operatorListSentinel = "*operator-list*"
+
 var rlsStmts = []string{
 	`ALTER TABLE public.tenants ENABLE ROW LEVEL SECURITY`,
 	`ALTER TABLE public.tenants FORCE ROW LEVEL SECURITY`,
+	// The USING clause admits the per-request org id and the operator-list
+	// sentinel so ListTenants reads every row on the owner connection; the
+	// WITH CHECK admits only a real org id so writes stay confined. The policy
+	// is updated in place on an already-provisioned database (ALTER POLICY,
+	// inside an atomic DO block) so a binary upgrade picks up the sentinel
+	// without a manual step; Postgres has no CREATE OR REPLACE POLICY.
 	`DO $$ BEGIN
-		IF NOT EXISTS (
+		IF EXISTS (
 			SELECT 1 FROM pg_policies
 			WHERE schemaname = 'public' AND tablename = 'tenants'
 			  AND policyname = 'tenants_org_isolation'
 		) THEN
+			ALTER POLICY tenants_org_isolation ON public.tenants
+				USING (id = current_setting('podium.org_id', true)
+					OR current_setting('podium.org_id', true) = '*operator-list*')
+				WITH CHECK (id = current_setting('podium.org_id', true));
+		ELSE
 			CREATE POLICY tenants_org_isolation ON public.tenants
-				USING (id = current_setting('podium.org_id', true))
+				USING (id = current_setting('podium.org_id', true)
+					OR current_setting('podium.org_id', true) = '*operator-list*')
 				WITH CHECK (id = current_setting('podium.org_id', true));
 		END IF;
 	END $$`,
@@ -492,14 +520,14 @@ func (p *Postgres) GetTenant(ctx context.Context, id string) (Tenant, error) {
 		return Tenant{}, err
 	}
 	row := tx.QueryRowContext(ctx, `
-		SELECT id, name, storage_quota, search_qps_quota, materialize_rate_quota, audit_volume_quota, max_user_layers, expose_scope_preview
+		SELECT id, name, storage_quota, search_qps_quota, materialize_rate_quota, audit_volume_quota, max_user_layers, expose_scope_preview, active
 		FROM public.tenants WHERE id = $1`, id)
 	var t Tenant
 	var exposeScopePreview sql.NullBool
 	err = row.Scan(&t.ID, &t.Name,
 		&t.Quota.StorageBytes, &t.Quota.SearchQPS,
 		&t.Quota.MaterializeRate, &t.Quota.AuditVolumePerDay, &t.Quota.MaxUserLayers,
-		&exposeScopePreview)
+		&exposeScopePreview, &t.Active)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Tenant{}, ErrTenantNotFound
 	}
@@ -511,6 +539,135 @@ func (p *Postgres) GetTenant(ctx context.Context, id string) (Tenant, error) {
 		return Tenant{}, err
 	}
 	return t, nil
+}
+
+// ListTenants returns every provisioned tenant, ordered by ID. It is the only
+// cross-org tenant read: public.tenants is FORCE'd, so the read runs on the
+// owner connection with podium.org_id set to operatorListSentinel, which the
+// policy's USING clause admits, returning every row without a BYPASSRLS role
+// (§7.3.3).
+func (p *Postgres) ListTenants(ctx context.Context) ([]Tenant, error) {
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('podium.org_id', $1, true)`, operatorListSentinel); err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, name, storage_quota, search_qps_quota, materialize_rate_quota, audit_volume_quota, max_user_layers, expose_scope_preview, active
+		FROM public.tenants ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Tenant
+	for rows.Next() {
+		var t Tenant
+		var exposeScopePreview sql.NullBool
+		if err := rows.Scan(&t.ID, &t.Name,
+			&t.Quota.StorageBytes, &t.Quota.SearchQPS,
+			&t.Quota.MaterializeRate, &t.Quota.AuditVolumePerDay, &t.Quota.MaxUserLayers,
+			&exposeScopePreview, &t.Active); err != nil {
+			return nil, err
+		}
+		t.ExposeScopePreview = ptrFromNullBool(exposeScopePreview)
+		out = append(out, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// UpdateTenant writes a tenant's mutable configuration (Quota,
+// ExposeScopePreview, active), preserving the ID and name. It runs under the
+// per-request podium.org_id so the row-level-security WITH CHECK passes. An
+// unknown ID returns ErrTenantNotFound.
+func (p *Postgres) UpdateTenant(ctx context.Context, t Tenant) error {
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('podium.org_id', $1, true)`, t.ID); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `
+		UPDATE public.tenants SET
+			storage_quota = $2, search_qps_quota = $3, materialize_rate_quota = $4,
+			audit_volume_quota = $5, max_user_layers = $6, expose_scope_preview = $7, active = $8
+		WHERE id = $1`,
+		t.ID,
+		t.Quota.StorageBytes, t.Quota.SearchQPS, t.Quota.MaterializeRate,
+		t.Quota.AuditVolumePerDay, t.Quota.MaxUserLayers, nullBoolFromPtr(t.ExposeScopePreview), t.Active)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrTenantNotFound
+	}
+	return tx.Commit()
+}
+
+// DeactivateTenant sets a tenant's active flag false without deleting its data.
+// An unknown ID returns ErrTenantNotFound.
+func (p *Postgres) DeactivateTenant(ctx context.Context, id string) error {
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('podium.org_id', $1, true)`, id); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE public.tenants SET active = FALSE WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrTenantNotFound
+	}
+	return tx.Commit()
+}
+
+// GrantOperator records an instance-level operator grant (§4.7.1 Operator role)
+// in the cross-org public.operator_grants table. That table carries no org_id
+// and no row-level-security policy; the registry reads and writes it on the
+// owner connection. Inserting an existing identity is a no-op.
+func (p *Postgres) GrantOperator(ctx context.Context, identity string) error {
+	_, err := p.db.ExecContext(ctx, `
+		INSERT INTO public.operator_grants (identity, granted_at)
+		VALUES ($1, $2)
+		ON CONFLICT (identity) DO NOTHING`,
+		identity, time.Now().UTC())
+	return err
+}
+
+// IsOperator reports whether the identity holds an operator grant.
+func (p *Postgres) IsOperator(ctx context.Context, identity string) (bool, error) {
+	row := p.db.QueryRowContext(ctx, `SELECT 1 FROM public.operator_grants WHERE identity = $1`, identity)
+	var dummy int
+	err := row.Scan(&dummy)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // PutManifest enforces the §4.7 immutability invariant: the same

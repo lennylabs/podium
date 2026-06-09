@@ -52,6 +52,7 @@ var additiveColumns = []additiveColumn{
 	{"tenants", "audit_volume_quota INTEGER NOT NULL DEFAULT 0", "audit_volume_quota BIGINT NOT NULL DEFAULT 0"},
 	{"tenants", "max_user_layers INTEGER NOT NULL DEFAULT 0", "max_user_layers BIGINT NOT NULL DEFAULT 0"},
 	{"tenants", "expose_scope_preview INTEGER", "expose_scope_preview BOOLEAN"},
+	{"tenants", "active INTEGER NOT NULL DEFAULT 1", "active BOOLEAN NOT NULL DEFAULT TRUE"},
 
 	// manifests
 	{"manifests", "description TEXT NOT NULL DEFAULT ''", "description TEXT NOT NULL DEFAULT ''"},

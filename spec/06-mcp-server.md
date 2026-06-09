@@ -51,7 +51,7 @@ Tested IdPs: Okta, Entra ID, Auth0, Google Workspace, Keycloak. SAML supported v
 
 Fine-grained narrowing via OAuth scope claims (e.g., `podium:read:finance/*`, `podium:load:finance/ap/pay-invoice@1.x`); narrow scopes intersect with the caller's layer visibility, and the smaller surface wins.
 
-**Per-request tenant selection.** On a multi-tenant registry, the registry selects each request's tenant (§4.7.1) from the organization value carried by the authenticated identity: the verified `org_id` claim under `oidc-jwt` (§6.3.3), or the `X-Podium-User-Org` header under `trusted-headers`. The value is an org ID or an org-name alias (§4.7.1); the registry resolves an alias to its org ID and selects that org's layer list (§4.6) and audit stream for the request. Under `oidc-jwt`, a value that resolves to no provisioned tenant is rejected with `auth.tenant_unknown` (§6.10); under `trusted-headers`, the request is treated as anonymous and sees public visibility only. A single-tenant registry, whether a standalone backend (§13.10) or a standard backend with only the default tenant, resolves every authenticated request against its sole tenant and does not consult the organization value.
+**Per-request tenant selection.** On a multi-tenant registry, the registry selects each request's tenant (§4.7.1) from the organization value carried by the authenticated identity: the verified `org_id` claim under `oidc-jwt` (§6.3.3), or the `X-Podium-User-Org` header under `trusted-headers`. The value is an org ID or an org-name alias (§4.7.1); the registry resolves an alias to its org ID and selects that org's layer list (§4.6) and audit stream for the request. Under `oidc-jwt`, a value that resolves to no provisioned tenant is rejected with `auth.tenant_unknown` (§6.10); under `trusted-headers`, the request is treated as anonymous and sees public visibility only. A single-tenant registry, whether a standalone backend (§13.10) or a standard backend started without `PODIUM_MULTI_TENANT`, resolves every authenticated request against its sole tenant and does not consult the organization value; provisioning additional tenants on such a registry does not enable per-request routing.
 
 ### 6.3.2 Runtime Trust Model (`injected-session-token`)
 
@@ -77,7 +77,7 @@ Token rotation is the runtime's responsibility; the MCP server's only obligation
 
 `oidc-jwt` and `trusted-headers` are registry-process identity providers for a deployment that runs the registry behind a gateway that has already authenticated the caller (an OIDC ingress, an OAuth2 proxy, an identity-verifying sidecar, or a non-OIDC corporate SSO). Both are selected by the registry's `PODIUM_IDENTITY_PROVIDER`. They are not client-side providers: the MCP server's `PODIUM_IDENTITY_PROVIDER` admits only `oauth-device-code` and `injected-session-token`, and rejects these two values at startup. A Podium client behind such a gateway sends no credential of its own, because identity is supplied by the gateway. Both apply on a standalone (§13.10) or a standard (§13.1) backend, and both are mutually exclusive with public mode: setting either alongside `PODIUM_PUBLIC_MODE` fails at startup with `config.public_mode_with_idp` (§13.10).
 
-Both record the caller's `sub` and `email` and match them against `users:` layer visibility (§4.6). They derive the caller's organization (the §4.7.1 tenant) from the authenticated identity rather than a client-supplied value: `oidc-jwt` from the verified `org_id` claim, and `trusted-headers` from the `X-Podium-User-Org` header. On a single-tenant registry (a standalone backend, or a standard backend with only the default tenant), the registry resolves every authenticated caller to its sole tenant and does not consult the organization value. On a multi-tenant registry, the organization value selects the tenant per §6.3.1. Each value resolves groups differently, as described below.
+Both record the caller's `sub` and `email` and match them against `users:` layer visibility (§4.6). They derive the caller's organization (the §4.7.1 tenant) from the authenticated identity rather than a client-supplied value: `oidc-jwt` from the verified `org_id` claim, and `trusted-headers` from the `X-Podium-User-Org` header. On a single-tenant registry, whether a standalone backend (§13.10) or a standard backend started without `PODIUM_MULTI_TENANT`, the registry resolves every authenticated caller to its sole tenant and does not consult the organization value; provisioning additional tenants on such a registry does not enable per-request routing. On a multi-tenant registry, the organization value selects the tenant per §6.3.1. Each value resolves groups differently, as described below.
 
 **`oidc-jwt` (verified).** The gateway forwards the caller's IdP-signed JWT in the header named by `token_header` (default `Authorization`). The registry parses the named header's value as the standard HTTP Bearer credential regardless of the header name: the value must be `Bearer <token>`, the prefix is matched case-insensitively, and surrounding whitespace is trimmed from the token. A header value without the prefix carries no token, so the request is anonymous and sees public visibility only (§4.6).
 
@@ -343,6 +343,17 @@ The gateway-delegated providers (§6.3.3) add three `auth.*` codes. `auth.token_
   "details": { "token_org_id": "globex" },
   "retryable": false,
   "suggested_action": "Provision the organization as a tenant, or forward a token whose org_id claim names an existing tenant."
+}
+```
+
+The tenant-management endpoints (§7.3.3) reuse existing codes for authorization and lookup and add one code in the `registry.*` namespace. A request without operator authorization is rejected with `auth.forbidden`, the code the per-tenant admin endpoints already return. A `PATCH` or `DELETE` naming an unknown tenant is rejected with `registry.tenant_not_found`, the code `GetTenant` already surfaces. A `POST`, `PATCH`, or `DELETE /v1/admin/tenants` request on a read-only registry (§13.2.1) is rejected with `registry.read_only`, the code every other write endpoint returns; the registry checks this after operator authorization and before mutating the store. `registry.tenant_management_unavailable` reports a `/v1/admin/tenants` request on a single-tenant or standalone backend (§13.10), where multi-tenancy is out of scope; it joins the existing `registry.*` namespace and introduces no new namespace:
+
+```json
+{
+  "code": "registry.tenant_management_unavailable",
+  "message": "Tenant management requires a multi-tenant registry started with PODIUM_MULTI_TENANT.",
+  "retryable": false,
+  "suggested_action": "Start the registry in multi-tenant mode (PODIUM_MULTI_TENANT) on a standard backend to manage tenants."
 }
 ```
 

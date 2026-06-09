@@ -495,9 +495,33 @@ podium layer watch <id> [--interval <duration>]
 
 Admin commands require the `admin` role on the tenant. Admin grants are recorded as `(identity, org_id, "admin")` rows; manage them via `podium admin grant` / `podium admin revoke`.
 
-### Provisioning a tenant
+### `podium admin tenant`
 
-There is no runtime tenant-provisioning command. Tenants are provisioned from the `PODIUM_TENANTS` env var at boot and persisted in the store's `tenants` table. Adding a tenant requires editing `PODIUM_TENANTS` and restarting the registry.
+Manages tenants at runtime on a multi-tenant registry. The group is authorized by the instance-operator role, which is distinct from the per-tenant `admin` role: an operator is seeded at boot through `PODIUM_OPERATOR_ADMINS` (see [CLI environment variables](#environment-variables)) and the operator authenticates as any caller does. The commands are available only when the registry runs in multi-tenant mode (`PODIUM_MULTI_TENANT`); a single-tenant or standalone registry rejects them with `registry.tenant_management_unavailable`. `--registry` is required on each command (defaults to `PODIUM_REGISTRY`).
+
+```
+podium admin tenant create <name> [--storage-bytes N] [--search-qps N] [--materialize-rate N] [--audit-volume-per-day N] [--max-user-layers N] [--expose-scope-preview true|false] --registry <url>
+podium admin tenant list [--json] --registry <url>
+podium admin tenant update <id> [--storage-bytes N] [--search-qps N] [--materialize-rate N] [--audit-volume-per-day N] [--max-user-layers N] [--expose-scope-preview true|false] [--active true|false] --registry <url>
+podium admin tenant deactivate <id> --registry <url>
+```
+
+| Command | Effect |
+|:--|:--|
+| `create <name>` | Provisions a tenant, deriving the org ID from the name. Create is idempotent: re-creating an existing name returns that tenant unchanged. The quota and scope-preview flags set the tenant's initial values; an omitted flag takes the deployment default. |
+| `list` | Lists every tenant. `--json` emits the wire array for scripting. |
+| `update <id>` | Sends only the flags passed, so an omitted flag leaves that field unchanged. `--active true` reactivates a deactivated tenant; `--active false` deactivates it. The command cannot change the name, which is fixed at create. |
+| `deactivate <id>` | Soft-deactivates the tenant. A deactivated tenant stops resolving while its data persists; `update <id> --active true` reactivates it. |
+
+| Flag | Effect |
+|:--|:--|
+| `--storage-bytes N` | Per-tenant storage budget in bytes. `0` disables the budget. |
+| `--search-qps N` | Per-tenant search QPS budget. `0` disables the budget. |
+| `--materialize-rate N` | Per-tenant materialization rate budget. `0` disables the budget. |
+| `--audit-volume-per-day N` | Per-tenant audit-volume budget per day. `0` disables the budget. |
+| `--max-user-layers N` | Per-identity cap on user-defined layers. `0` selects the deployment default; a negative value disables the cap. |
+| `--expose-scope-preview true\|false` | Whether the tenant exposes aggregate scope-preview counts. |
+| `--active true\|false` | `update` only. Sets the tenant's active state. |
 
 ### `podium admin grant` / `podium admin revoke`
 
@@ -677,5 +701,7 @@ podium search "month-end close OR variance" --type skill --top-k 15 --json \
 | `PODIUM_SESSION_TOKEN_ENV`, `PODIUM_SESSION_TOKEN_FILE` | Injected-token sources. |
 | `PODIUM_PUBLIC_MODE` | Equivalent of `--public-mode`. |
 | `PODIUM_NO_AUTOSTANDALONE` | Disable zero-flag standalone fallback. |
+| `PODIUM_MULTI_TENANT` | Registry-process boot setting. When `true`, the registry runs in multi-tenant mode and routes each request to the tenant its organization names; the `podium admin tenant` commands and the `/v1/admin/tenants` endpoints are available. When unset, every request binds to the single `default` org and tenant management is rejected. |
+| `PODIUM_OPERATOR_ADMINS` | Registry-process boot setting. Comma-separated identities granted the instance-operator role at boot. The operator role authorizes the `podium admin tenant` commands and the `/v1/admin/tenants` endpoints; it confers no per-tenant `admin` rights. Distinct from `PODIUM_BOOTSTRAP_ADMINS`, which seeds per-tenant `admin` grants. |
 
 Server-side backend selection variables (`PODIUM_VECTOR_BACKEND`, `PODIUM_EMBEDDING_PROVIDER`, etc.) are documented alongside the corresponding backend in [Extending](../deployment/extending).

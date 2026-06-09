@@ -366,6 +366,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/admin/reembed", s.handleReembed)
 	mux.HandleFunc("/v1/admin/grants", s.handleAdminGrants)
 	mux.HandleFunc("/v1/admin/show-effective", s.handleAdminShowEffective)
+	mux.HandleFunc("GET /v1/admin/tenants", s.handleTenantList)
+	mux.HandleFunc("POST /v1/admin/tenants", s.handleTenantCreate)
+	mux.HandleFunc("PATCH /v1/admin/tenants/{id}", s.handleTenantUpdate)
+	mux.HandleFunc("DELETE /v1/admin/tenants/{id}", s.handleTenantDeactivate)
 	mux.HandleFunc("/v1/quota", s.handleQuota)
 	mux.HandleFunc("/v1/events", s.handleEvents)
 	if s.webhooks != nil {
@@ -404,6 +408,14 @@ func (s *Server) withTenantRouting(next http.Handler) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !pathRequiresIdentity(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// Tenant-management endpoints (§4.7.1 Operator role) are operator-
+		// authorized and cross-org, so they bypass per-request tenant routing:
+		// a fresh registry's operator reaches requireOperator even when the
+		// caller's org_id names no provisioned tenant.
+		if strings.HasPrefix(r.URL.Path, "/v1/admin/tenants") {
 			next.ServeHTTP(w, r)
 			return
 		}

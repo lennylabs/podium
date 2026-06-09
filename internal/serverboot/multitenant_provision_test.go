@@ -6,21 +6,25 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-func TestProvisionTenants(t *testing.T) {
+func TestSeedOperatorAdmins(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()
-	// The default org and an empty name are skipped; the rest are provisioned,
-	// with surrounding whitespace trimmed.
-	provisionTenants(t.Context(), st, []string{"acme", "globex", "", defaultOrgName, "  spaced  "}, nil)
-
-	for _, name := range []string{"acme", "globex", "spaced"} {
-		if _, err := st.GetTenant(t.Context(), orgIDForName(name)); err != nil {
-			t.Errorf("org %q not provisioned: %v", name, err)
+	// PODIUM_OPERATOR_ADMINS seeds the instance operator role at boot.
+	n, err := seedOperatorAdmins(t.Context(), st, []string{"alice@acme.com", "bob@acme.com"})
+	if err != nil {
+		t.Fatalf("seedOperatorAdmins: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("seeded %d operators, want 2", n)
+	}
+	for _, id := range []string{"alice@acme.com", "bob@acme.com"} {
+		if ok, _ := st.IsOperator(t.Context(), id); !ok {
+			t.Errorf("operator %q not granted", id)
 		}
 	}
-	// provisionTenants does not create the default org; bootstrapDefaultTenant owns it.
-	if _, err := st.GetTenant(t.Context(), orgIDForName(defaultOrgName)); err == nil {
-		t.Error("provisionTenants must skip the default org")
+	// A non-seeded identity is not an operator.
+	if ok, _ := st.IsOperator(t.Context(), "carol@acme.com"); ok {
+		t.Error("carol must not be an operator")
 	}
 }
 
@@ -51,6 +55,13 @@ func TestTenantResolver(t *testing.T) {
 	}
 	if _, ok := resolve(t.Context(), ""); ok {
 		t.Error("resolve(\"\") = true, want false")
+	}
+	// A deactivated tenant is treated as unprovisioned (§4.7.1).
+	if err := st.DeactivateTenant(t.Context(), acme); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := resolve(t.Context(), "acme"); ok {
+		t.Error("resolve must treat a deactivated tenant as unprovisioned")
 	}
 }
 

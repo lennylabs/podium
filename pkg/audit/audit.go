@@ -41,7 +41,12 @@ const (
 	EventLayerConfigChanged    EventType = "layer.config_changed"
 	EventLayerUserRegistered   EventType = "layer.user_registered"
 	EventAdminGranted          EventType = "admin.granted"
-	EventVisibilityDenied      EventType = "visibility.denied"
+	// EventTenantManaged records a §7.3.3 tenant-management operation (create,
+	// update, or deactivate) by an operator. The §8.1 table is non-exhaustive;
+	// this makes runtime tenant provisioning auditable. Caller is the operator,
+	// Target is the tenant's org ID, and the action is recorded in context.
+	EventTenantManaged    EventType = "tenant.managed"
+	EventVisibilityDenied EventType = "visibility.denied"
 	// EventAdminVisibilityOverride records a §4.7.2 admin diagnostic read
 	// that overrode per-layer visibility ("View any layer's contents for
 	// diagnostic purposes (override visibility; the override is itself
@@ -93,6 +98,7 @@ func AllEventTypes() []EventType {
 		EventLayerConfigChanged,
 		EventLayerUserRegistered,
 		EventAdminGranted,
+		EventTenantManaged,
 		EventVisibilityDenied,
 		EventAdminVisibilityOverride,
 		EventFreezeBreakGlass,

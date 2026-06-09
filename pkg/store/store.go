@@ -62,6 +62,13 @@ type Tenant struct {
 	// answers 403 config.scope_preview_disabled. The tri-state distinguishes
 	// "operator left it unset" from "operator set it false".
 	ExposeScopePreview *bool
+	// Active reports whether the tenant resolves. A deactivated tenant
+	// (Active false) stops resolving and is treated as unprovisioned
+	// (§4.7.1) while its data persists. A newly created tenant is active;
+	// DeactivateTenant is the only path that sets it false. On the SQL
+	// backends an `active` column defaulting to true backs the value, so a
+	// tenant created without writing the column is active.
+	Active bool
 }
 
 // ScopePreviewEnabled resolves the §3.5 expose_scope_preview gate,
@@ -339,6 +346,31 @@ type Store interface {
 	// Tenants
 	CreateTenant(ctx context.Context, t Tenant) error
 	GetTenant(ctx context.Context, id string) (Tenant, error)
+	// ListTenants returns every provisioned tenant. It is the only
+	// cross-org tenant read (§7.3.3); on Postgres it re-scopes the FORCE'd
+	// row-level-security policy on public.tenants through the
+	// "*operator-list*" sentinel rather than a per-org org_id.
+	ListTenants(ctx context.Context) ([]Tenant, error)
+	// UpdateTenant writes a tenant's mutable configuration (Quota,
+	// ExposeScopePreview, and Active) and returns ErrTenantNotFound for an
+	// unknown ID. It changes neither the ID nor the name; any Name on the
+	// passed Tenant is ignored. It writes the whole mutable record, so the
+	// PATCH handler overlays the supplied fields onto the current row
+	// before calling it.
+	UpdateTenant(ctx context.Context, t Tenant) error
+	// DeactivateTenant sets a tenant's Active flag false without deleting
+	// its data (§4.7.1 soft deactivation) and returns ErrTenantNotFound for
+	// an unknown ID.
+	DeactivateTenant(ctx context.Context, id string) error
+
+	// Operator grants (§4.7.1 Operator role). An operator is an
+	// instance-level identity authorized to manage tenants across the
+	// instance. The grant carries no org id and lives outside any per-org
+	// schema (a cross-org table on the SQL backends), read and written
+	// through a privileged path rather than the per-org row-level-security
+	// predicate.
+	GrantOperator(ctx context.Context, identity string) error
+	IsOperator(ctx context.Context, identity string) (bool, error)
 
 	// Manifests
 	PutManifest(ctx context.Context, rec ManifestRecord) error
