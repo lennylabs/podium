@@ -44,6 +44,7 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("GetTenantNotFound", func(t *testing.T) { getTenantNotFound(t, factory(t)) })
 	t.Run("QuotaRoundTrip", func(t *testing.T) { quotaRoundTrips(t, factory(t)) })
 	t.Run("ScopePreviewFlagRoundTrip", func(t *testing.T) { scopePreviewFlagRoundTrips(t, factory(t)) })
+	t.Run("CreateTenantIdempotentNoOverwrite", func(t *testing.T) { createTenantIdempotentNoOverwrite(t, factory(t)) })
 	t.Run("GetManifestNotFound", func(t *testing.T) { getManifestNotFound(t, factory(t)) })
 	t.Run("LayerConfigCRUD", func(t *testing.T) { layerConfigCRUD(t, factory(t)) })
 	t.Run("LayerConfigDelete", func(t *testing.T) { layerConfigDelete(t, factory(t)) })
@@ -754,6 +755,57 @@ func scopePreviewFlagRoundTrips(t *testing.T, s store.Store) {
 		if got.ScopePreviewEnabled() != c.wantEnab {
 			t.Errorf("%s: ScopePreviewEnabled() = %v, want %v", c.id, got.ScopePreviewEnabled(), c.wantEnab)
 		}
+	}
+}
+
+// Spec: §4.7.1 — CreateTenant is idempotent. Re-creating an existing
+// tenant ID is a no-op that preserves the stored row; it does not
+// overwrite the name, quota, or scope-preview gate, and it is not an
+// error. SQLite (INSERT OR IGNORE) and Postgres (ON CONFLICT (id) DO
+// NOTHING) enforce this, and Memory must match. A backend that overwrote
+// on re-create would let a duplicate create reset a tenant's quota or
+// re-enable a gate the operator disabled.
+func createTenantIdempotentNoOverwrite(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	ptr := func(b bool) *bool { return &b }
+	original := store.Tenant{
+		ID:   "acme",
+		Name: "Acme Corp",
+		Quota: store.Quota{
+			StorageBytes:      1 << 30,
+			SearchQPS:         50,
+			MaterializeRate:   25,
+			AuditVolumePerDay: 100000,
+			MaxUserLayers:     7,
+		},
+		ExposeScopePreview: ptr(false),
+	}
+	must(t, s.CreateTenant(ctx, original))
+	// A second create with the same ID and different values must be an
+	// idempotent no-op: no error and no overwrite.
+	must(t, s.CreateTenant(ctx, store.Tenant{
+		ID:   "acme",
+		Name: "Globex",
+		Quota: store.Quota{
+			StorageBytes:      1,
+			SearchQPS:         1,
+			MaterializeRate:   1,
+			AuditVolumePerDay: 1,
+			MaxUserLayers:     99,
+		},
+		ExposeScopePreview: ptr(true),
+	}))
+	got, err := s.GetTenant(ctx, "acme")
+	must(t, err)
+	// One comparison over the mutable fields keeps a single failure
+	// branch; the message prints every field so a regression still names
+	// what was overwritten.
+	gotPreview := got.ExposeScopePreview != nil && *got.ExposeScopePreview
+	wantPreview := original.ExposeScopePreview != nil && *original.ExposeScopePreview
+	if got.Name != original.Name || got.Quota != original.Quota || gotPreview != wantPreview {
+		t.Errorf("re-create overwrote tenant: got {name=%q quota=%+v preview=%v}, want {name=%q quota=%+v preview=%v}",
+			got.Name, got.Quota, gotPreview, original.Name, original.Quota, wantPreview)
 	}
 }
 
