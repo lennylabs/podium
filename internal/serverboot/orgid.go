@@ -2,11 +2,9 @@ package serverboot
 
 import (
 	"context"
-	"log"
 	"strings"
 
-	"github.com/google/uuid"
-
+	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
 )
 
@@ -17,40 +15,22 @@ import (
 // can route to it.
 const multiTenantUnrouted = "podium:unrouted"
 
-// provisionTenants idempotently creates a tenant for each org name in names,
-// for a §6.3.1 multi-tenant deployment. The default org is created separately
-// by bootstrapDefaultTenant; a name equal to it or empty is skipped.
-func provisionTenants(ctx context.Context, st store.Store, names []string, exposeScopePreview *bool) {
-	for _, name := range names {
-		name = strings.TrimSpace(name)
-		if name == "" || name == defaultOrgName {
-			continue
-		}
-		if err := st.CreateTenant(ctx, store.Tenant{
-			ID:                 orgIDForName(name),
-			Name:               name,
-			ExposeScopePreview: exposeScopePreview,
-		}); err != nil {
-			log.Printf("multi-tenant: provision org %q: %v", name, err)
-		}
-	}
-}
-
 // tenantResolver maps a caller's organization value (an org ID or an org-name
-// alias, §4.7.1) to a provisioned tenant ID, reporting false when no tenant
-// exists for it. It tries the value as a direct org ID first, then as an alias
-// resolved through orgIDForName.
+// alias, §4.7.1) to a provisioned tenant ID, reporting false when no active
+// tenant exists for it. A deactivated tenant (§4.7.1) is treated as
+// unprovisioned, so a request naming it no longer resolves. It tries the value
+// as a direct org ID first, then as an alias resolved through orgIDForName.
 func tenantResolver(st store.Store) func(context.Context, string) (string, bool) {
 	return func(ctx context.Context, orgValue string) (string, bool) {
 		orgValue = strings.TrimSpace(orgValue)
 		if orgValue == "" {
 			return "", false
 		}
-		if _, err := st.GetTenant(ctx, orgValue); err == nil {
+		if t, err := st.GetTenant(ctx, orgValue); err == nil && t.Active {
 			return orgValue, true
 		}
 		id := orgIDForName(orgValue)
-		if _, err := st.GetTenant(ctx, id); err == nil {
+		if t, err := st.GetTenant(ctx, id); err == nil && t.Active {
 			return id, true
 		}
 		return "", false
@@ -70,7 +50,7 @@ const defaultOrgName = "default"
 // row by org ID, so a fresh random ID on each boot would orphan all
 // previously ingested artifacts, layer configs, and admin grants.
 func orgIDForName(name string) string {
-	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("podium:org:"+name)).String()
+	return core.OrgIDForName(name)
 }
 
 // bootstrapDefaultTenant idempotently creates the single bootstrapped org and

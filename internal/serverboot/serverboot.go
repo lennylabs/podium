@@ -355,6 +355,20 @@ func seedBootstrapAdmins(ctx context.Context, st store.Store, tenantID string, a
 	return seeded, nil
 }
 
+// seedOperatorAdmins grants the §4.7.1 instance operator role to each identity
+// in operators. The grant is cross-org, so it is not scoped to a tenant.
+// Idempotent: re-seeding an existing grant is a no-op.
+func seedOperatorAdmins(ctx context.Context, st store.Store, operators []string) (int, error) {
+	seeded := 0
+	for _, identity := range operators {
+		if err := st.GrantOperator(ctx, identity); err != nil {
+			return seeded, fmt.Errorf("grant operator %q: %w", identity, err)
+		}
+		seeded++
+	}
+	return seeded, nil
+}
+
 func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Visibility, startOrder int, allowPerDomain bool, resourcePut ingest.ResourcePutFunc, rejectAtOrAbove manifest.Sensitivity, signer ingest.SignerFunc, useVectorOutbox bool, collocatedVec collocatedVectorIngest, enforceSandbox bool, hostSandboxes []string) ([]layer.Layer, error) {
 	if layerPath == "" {
 		return []layer.Layer{}, nil
@@ -698,11 +712,6 @@ func run(ctx context.Context, stop func()) error {
 	// below threads this tenantID as the org. CreateTenant is idempotent, so
 	// a store fault is tolerated (the ID is still returned).
 	tenantID, _ := bootstrapDefaultTenant(context.Background(), st, cfg.exposeScopePreview)
-	if cfg.multiTenant {
-		// §6.3.1 multi-tenant mode: provision the named orgs so the per-request
-		// tenant router can resolve a caller's organization to a tenant.
-		provisionTenants(context.Background(), st, cfg.tenants, cfg.exposeScopePreview)
-	}
 
 	// §13.1.1 evaluation-stack bootstrap: seed the configured admin users
 	// for the default tenant so the documented `docker compose up` →
@@ -714,6 +723,16 @@ func run(ctx context.Context, stop func()) error {
 		log.Printf("warning: bootstrap admin seeding failed: %v", err)
 	} else if n > 0 {
 		log.Printf("bootstrap: seeded %d admin grant(s) for tenant %q", n, tenantID)
+	}
+
+	// §4.7.1 Operator role: seed the instance operators named by
+	// PODIUM_OPERATOR_ADMINS so the first operator can provision tenants over
+	// the /v1/admin/tenants API on a fresh multi-tenant registry. The operator
+	// grant is cross-org and distinct from the per-tenant admin grant above.
+	if n, err := seedOperatorAdmins(context.Background(), st, cfg.operatorAdmins); err != nil {
+		log.Printf("warning: operator seeding failed: %v", err)
+	} else if n > 0 {
+		log.Printf("bootstrap: seeded %d operator grant(s)", n)
 	}
 
 	// §7.2 data plane: open the object store before any ingest so bundled
@@ -1430,10 +1449,11 @@ type Config struct {
 	// the registry binds to a no-data tenant and resolves each request's tenant
 	// from the caller's organization.
 	multiTenant bool
-	// tenants is the §6.3.1 list of org names to provision at boot for a
-	// multi-tenant deployment (PODIUM_TENANTS, comma-separated). The default org
-	// is always provisioned.
-	tenants        []string
+	// operatorAdmins is the §4.7.1 list of identities granted the instance
+	// operator role at boot (PODIUM_OPERATOR_ADMINS). An operator provisions
+	// tenants at runtime over the /v1/admin/tenants API; the registry no longer
+	// provisions tenants from configuration beyond the default org.
+	operatorAdmins []string
 	storeType      string
 	sqlitePath     string
 	postgresDSN    string
@@ -1656,7 +1676,7 @@ func (c *Config) Settings() []Setting {
 		{"identity_provider.jwks_cache_ttl_seconds", intStr(c.oauthJWKSCacheTTLSeconds), envOrSrc("PODIUM_OAUTH_JWKS_CACHE_TTL_SECONDS", yamlSrc)},
 		{"trusted_proxy_secret", redact(c.trustedProxySecret), envOrSrc("PODIUM_TRUSTED_PROXY_SECRET", "")},
 		{"multi_tenant", boolStr(c.multiTenant), envOrSrc("PODIUM_MULTI_TENANT", defaultSrc)},
-		{"tenants", strings.Join(c.tenants, ","), envOrSrc("PODIUM_TENANTS", defaultSrc)},
+		{"operator_admins", strings.Join(c.operatorAdmins, ","), envOrSrc("PODIUM_OPERATOR_ADMINS", defaultSrc)},
 		{"idp_group_mapping", idpGroupMappingStr(c.idpGroupMapping), envOrSrc("PODIUM_IDP_GROUP_MAPPING", defaultSrc)},
 		{"store.type", c.storeType, envOrSrc("PODIUM_REGISTRY_STORE", defaultSrc)},
 		{"store.sqlite_path", c.sqlitePath, envOrSrc("PODIUM_SQLITE_PATH", defaultSrc)},
@@ -1726,7 +1746,7 @@ func LoadConfig() *Config {
 		oauthJWKSCacheTTLSeconds:   envInt("PODIUM_OAUTH_JWKS_CACHE_TTL_SECONDS", 0),
 		trustedProxySecret:         os.Getenv("PODIUM_TRUSTED_PROXY_SECRET"),
 		multiTenant:                isTrue(os.Getenv("PODIUM_MULTI_TENANT")),
-		tenants:                    splitCSVTrim(os.Getenv("PODIUM_TENANTS")),
+		operatorAdmins:             parseBootstrapAdmins(os.Getenv("PODIUM_OPERATOR_ADMINS")),
 		storeType:                  envDefault("PODIUM_REGISTRY_STORE", "sqlite"),
 		sqlitePath:                 os.Getenv("PODIUM_SQLITE_PATH"),
 		postgresDSN:                os.Getenv("PODIUM_POSTGRES_DSN"),
