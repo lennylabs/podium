@@ -37,7 +37,7 @@ Coverage for: Postgres failover, object-storage outage, IdP outage, full-disk on
 
 ### 13.2.1 Read-Only Mode
 
-When the Postgres primary becomes unreachable but a read replica is up, the registry falls back to **read-only mode**: read endpoints (`load_domain`, `search_domains`, `search_artifacts`, `load_artifact`, `load_artifacts`) continue to serve from the replica; write endpoints (ingest webhooks, layer admin operations, freeze toggles, admin grants, `podium login`-driven token issuance against the local IdP-mediated session table) are rejected with the structured error `registry.read_only`.
+When the Postgres primary becomes unreachable but a read replica is up, the registry falls back to **read-only mode**: read endpoints (`load_domain`, `search_domains`, `search_artifacts`, `load_artifact`, `load_artifacts`) continue to serve from the replica; write endpoints (ingest webhooks, layer admin operations, freeze toggles, admin grants, tenant management, `podium login`-driven token issuance against the local IdP-mediated session table) are rejected with the structured error `registry.read_only`.
 
 A health-state machine governs the transition. The registry probes the primary every 5 s and flips to read-only after three consecutive failures (tunable via `PODIUM_READONLY_PROBE_INTERVAL` and `PODIUM_READONLY_PROBE_FAILURES`). It flips back automatically after three consecutive probe successes once the primary is reachable again.
 
@@ -480,6 +480,26 @@ Layer-list bootstrap and visibility default for the §13.10 standalone deploymen
 | `PODIUM_DEFAULT_LAYER_VISIBILITY`| Fallback `visibility:` applied when a layer is registered without an explicit setting. One of `public`, `organization`, or `private`.                                    | `private` (§13.10 specifies `public` for a standalone deployment without an identity provider; an enabled identity provider leaves the unset default `private`)        |
 
 When `PODIUM_LAYER_PATH` is set, the standalone server ingests every resolved layer at startup and persists a `local`-source `LayerConfig` per layer so the §7.3.1 layer-management endpoints (`GET /v1/layers`, `POST /v1/layers/reingest`, `DELETE /v1/layers`) see them. Without an identity provider, bootstrap layers carry `visibility: public` per the §13.10 standalone default; once an identity provider is enabled and `PODIUM_DEFAULT_LAYER_VISIBILITY` is unset, the resolved default is `private` and a bootstrap layer that carried no explicit `visibility:` is re-stamped private on the next boot. Additional `local` and `git` layers can be registered via `podium layer register` after startup.
+
+### Tenancy
+
+| Var | Description | Default |
+| --- | --- | --- |
+| `PODIUM_OPERATOR_ADMINS` | Comma-separated identities granted the instance-operator role at boot. The operator role authorizes the `/v1/admin/tenants` tenant-management endpoints (§7.3.3) and the `podium admin tenant` CLI; it confers no per-tenant admin rights. Distinct from `PODIUM_BOOTSTRAP_ADMINS`, which seeds per-tenant admin grants for the bootstrapped tenant. | (unset) |
+| `PODIUM_MULTI_TENANT` | When `true`, the registry runs in multi-tenant mode: it binds to a no-data tenant and resolves each request's tenant from the caller's organization (§6.3.1), rejecting an `oidc-jwt` token whose `org_id` names no provisioned tenant with `auth.tenant_unknown`. When unset, the registry binds every request to the single `default` org and does not consult the organization value, and the §7.3.3 tenant-management endpoints are rejected. | (unset → single-tenant) |
+
+**Multi-tenant operator tenant-list (Postgres).** On a multi-tenant Postgres backend, the cross-org `GET /v1/admin/tenants` read (§7.3.3) runs on the registry's existing `PODIUM_POSTGRES_DSN` table-owner connection, with `podium.org_id` set to the `*operator-list*` sentinel that the FORCE'd policy on `public.tenants` admits. The deployment provisions no role or function for this read: extending the FORCE'd policy to admit the sentinel and forcing row-level security require only ownership of `public.tenants`, which the `PODIUM_POSTGRES_DSN` role holds, so the registry's schema setup applies the sentinel policy from the binary with the rest of the row-level-security setup and the list needs no manual step. The registry's `PODIUM_POSTGRES_DSN` role must be the non-superuser owner of `public.tenants`: a superuser DSN role bypasses row-level security entirely, which voids the per-org confinement of every other tenant read.
+
+**Operator CLI.** The `podium admin tenant` group manages tenants at runtime on a multi-tenant registry, authorized as the operator role (§4.7.1, §7.3.3). The operator authenticates as any caller does through the normal client login, and the registry checks the operator grant.
+
+```
+podium admin tenant create <name> [--storage-bytes N] [--search-qps N] [--materialize-rate N] [--audit-volume-per-day N] [--max-user-layers N] [--expose-scope-preview true|false] --registry <url>
+podium admin tenant list [--json] --registry <url>
+podium admin tenant update <id> [--storage-bytes N] [--search-qps N] [--materialize-rate N] [--audit-volume-per-day N] [--max-user-layers N] [--expose-scope-preview true|false] [--active true|false] --registry <url>
+podium admin tenant deactivate <id> --registry <url>
+```
+
+`podium admin tenant create` derives the org ID from the name and provisions the tenant; repeating the call for an already-provisioned name is a no-op that returns the existing tenant. `podium admin tenant update` sends only the flags the operator passes, so an omitted flag leaves the corresponding field unchanged server-side; it cannot change the tenant name, which is fixed at create. `update --active true` reactivates a deactivated tenant, and `update --active false` deactivates it, the same soft operation as `deactivate`. `list --json` emits the wire array for scripting.
 
 ### Config file format
 
