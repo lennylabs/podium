@@ -89,6 +89,7 @@ var operationalEventTypes = []audit.EventType{
 	audit.EventLayerConfigChanged,
 	audit.EventLayerUserRegistered,
 	audit.EventAdminGranted,
+	audit.EventTenantManaged,
 	audit.EventVisibilityDenied,
 	// admin.visibility_override is a §4.7.2 access-control accountability
 	// event, retained on the same 1-year window as admin.granted and
