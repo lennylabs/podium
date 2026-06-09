@@ -1,7 +1,7 @@
 # Proposal 0002: Runtime Tenant Provisioning
 
 - Issue: (to be filed)
-- Status: Proposed
+- Status: Implemented
 - Date: 2026-06-08
 
 ## Summary
