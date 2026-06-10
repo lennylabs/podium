@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 462" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <style>
+      .b-bg { fill: #ffffff; }
+      .card { stroke: #1f2933; stroke-width: 2.2; }
+      .cream { fill: #fffaf0; }
+      .sage { fill: #d6e9d2; }
+      .title { fill: #1f2933; font-size: 22px; font-weight: bold; }
+      .label { fill: #b56b1f; font-size: 13px; letter-spacing: 0.04em; font-weight: bold; }
+      .ctitle { fill: #1f2933; font-size: 16px; font-weight: bold; }
+      .sub { fill: #54616e; font-size: 14px; }
+      .mono { fill: #1f2933; font-size: 13px; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
+      .foot { fill: #8a7755; font-size: 13px; }
+      .divider { stroke: #d3c8b0; stroke-width: 1.3; stroke-dasharray: 4 4; }
+    </style>
+  </defs>
+  <rect class="b-bg" width="900" height="462"/>
+
+  <text class="title" x="40" y="42">load_artifact: what the consumer holds</text>
+
+  <!-- MCP column -->
+  <rect class="card cream" x="50" y="64" width="380" height="320" rx="10"/>
+  <text class="label" x="72" y="94">MCP SERVER, INTO THE AGENT</text>
+  <text class="ctitle" x="72" y="120">Tool result (in the model's context)</text>
+  <text class="mono" x="76" y="150">{</text>
+  <text class="mono" x="76" y="172">  manifest_body: "Run variance",</text>
+  <text class="mono" x="76" y="194">  materialized_at: [</text>
+  <text class="mono" x="76" y="216">    out/SKILL.md,</text>
+  <text class="mono" x="76" y="238">    out/scripts/run.py</text>
+  <text class="mono" x="76" y="260">  ]</text>
+  <text class="mono" x="76" y="282">}</text>
+  <line class="divider" x1="72" y1="302" x2="408" y2="302"/>
+  <text class="sub" x="72" y="326">Every bundled resource is written to</text>
+  <text class="sub" x="72" y="344">disk. The agent opens files, so the 256 KB</text>
+  <text class="sub" x="72" y="362">cutoff never enters the context window.</text>
+
+  <!-- SDK column -->
+  <rect class="card sage" x="470" y="64" width="380" height="320" rx="10"/>
+  <text class="label" x="492" y="94">SDK, INTO YOUR PROGRAM</text>
+  <text class="ctitle" x="492" y="120">load_artifact() returns, in memory</text>
+  <text class="mono" x="496" y="150">manifest_body</text>
+  <text class="mono" x="496" y="172">resources{}        inline bytes</text>
+  <text class="mono" x="496" y="194">large_resources{}  references</text>
+  <line class="divider" x1="492" y1="214" x2="828" y2="214"/>
+  <text class="ctitle" x="492" y="240">materialize(to="out/") writes to disk</text>
+  <text class="sub" x="492" y="266">It writes the canonical layout and</text>
+  <text class="sub" x="492" y="284">fetches each referenced resource.</text>
+  <line class="divider" x1="492" y1="304" x2="828" y2="304"/>
+  <text class="sub" x="492" y="328">A program reads the manifest first and</text>
+  <text class="sub" x="492" y="346">writes the files when it chooses.</text>
+
+  <text class="foot" x="50" y="416">Bytes at or below 256 KB ride inline in the response. A larger resource, and a manifest above the cutoff,</text>
+  <text class="foot" x="50" y="434">arrive as a presigned URL the consumer fetches from content-addressed object storage.</text>
+</svg>

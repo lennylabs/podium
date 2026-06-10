@@ -170,9 +170,13 @@ destination.
 
 ### Standalone server
 
-A single binary running on one machine. SQLite + sqlite-vec +
-filesystem object storage + a bundled embedding model, all
-embedded. Bind to localhost or behind your VPN.
+A single binary running on one machine. SQLite, sqlite-vec, and
+filesystem object storage are embedded. Semantic search uses a
+configured embedding provider selected by `PODIUM_EMBEDDING_PROVIDER`:
+`ollama` pointed at a local model server for offline or air-gapped
+use, or a cloud provider (`openai`, `voyage`, `cohere`). Without a
+configured provider, search falls back to BM25-only. Bind to
+localhost or behind your VPN.
 
 - **Who it's for.** Anyone of any team size who specifically wants
   runtime discovery (agents calling MCP meta-tools mid-session) or
@@ -182,7 +186,8 @@ embedded. Bind to localhost or behind your VPN.
 - **What you run.** `podium serve --standalone --layer-path
 /path/to/dir` plus the CLI.
 - **What you get.** Runtime discovery via the MCP server. A single
-  audit log capturing every load. Semantic search.
+  audit log capturing every load. Semantic search when an embedding
+  provider is configured, with BM25-only retrieval otherwise.
 - **Migration path.** Point `podium serve --standalone` at the same
   directory your filesystem catalog uses; flip
   `defaults.registry` from a path to a URL. Authoring loop
@@ -261,6 +266,15 @@ ASCII fallback for the diagram above (materialization pipeline: load_artifact())
 The remaining steps are fixed. Hooks share the adapter sandbox:
 they cannot make network calls, spawn subprocesses, or write
 outside the destination.
+
+The registry returns metadata and the resource bytes below the inline
+cutoff; it does not proxy larger bytes. A resource above the cutoff, and a
+manifest above it, live in content-addressed object storage and reach the
+consumer through a presigned URL the consumer fetches directly. The MCP
+server resolves those URLs and writes every resource to disk, so the agent's
+result holds the manifest body and the file paths. The SDKs return the
+manifest in memory and resolve the references on a later `materialize()`
+call.
 
 ---
 

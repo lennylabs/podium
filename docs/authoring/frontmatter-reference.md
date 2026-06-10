@@ -34,7 +34,7 @@ Skills split their frontmatter between `SKILL.md` and `ARTIFACT.md` so that `SKI
 | `metadata` | Optional (string-to-string map) | — | — |
 | `allowed-tools` | Optional (experimental) | — | — |
 | `type` | — | Yes (`type: skill`) | Yes |
-| `version`, `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes` | — | Yes | Yes |
+| `version`, `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes`, `audit_redact`, `lint_suppress` | — | Yes | Yes |
 | `mcpServers`, `requiresApproval`, `runtime_requirements`, `sandbox_profile`, `effort_hint`, `model_class_hint`, `sbom`, `external_resources`, `extends`, `target_harnesses` | — | Yes | Yes |
 | Type-specific fields (`input`, `output`, `delegates_to`, `rule_*`, `hook_*`, `server_identifier`) | — | Yes (when applicable) | Yes (when applicable) |
 
@@ -75,6 +75,8 @@ search_visibility: indexed | direct-only   # default: indexed
 deprecated: false                  # set to true to mark this version deprecated
 replaced_by: finance/close-reporting/run-variance-analysis-v2
 release_notes: "Initial release."
+audit_redact: [bank_account, ssn]  # frontmatter field names to mask in audit log entries
+lint_suppress: [lint.skill_ref_validate]   # advisory lint rule codes to silence for this artifact
 ```
 
 | Field | Required | Description |
@@ -91,6 +93,8 @@ release_notes: "Initial release."
 | `deprecated` | Optional | Boolean. When `true`, `load_artifact` returns a warning, and the artifact is excluded from default search results. |
 | `replaced_by` | Optional | Suggested upgrade target. Surfaced when `load_artifact` returns the deprecation warning. |
 | `release_notes` | Optional | Free text. |
+| `audit_redact` | Optional | List of frontmatter field names whose values the registry replaces with `[redacted]` in audit log entries that reference this artifact. |
+| `lint_suppress` | Optional | List of lint rule codes to silence for this artifact. Only advisory (non-error) rules honor the list; hard-error rules still fire. |
 
 ---
 
@@ -169,7 +173,7 @@ These fields live in `ARTIFACT.md` and apply to specific types only.
 input: { $ref: ./schemas/input.json }
 output: { $ref: ./schemas/output.json }
 
-# For type: agent — well-known delegation targets (constrained to agent-type)
+# For type: agent — well-known delegation targets (advisory)
 delegates_to:
   - finance/procurement/vendor-compliance-check@1.x
 
@@ -208,7 +212,7 @@ target_harnesses: [claude-code, opencode]
 | Field | Applies to | Description |
 |:--|:--|:--|
 | `input` / `output` | `agent` | JSON Schemas the agent expects (input) and produces (output). |
-| `delegates_to` | `agent` | List of agent IDs this agent can delegate to. Constrained to `agent`-type targets at lint time. |
+| `delegates_to` | `agent` | List of agent IDs this agent can delegate to. Advisory; the target may be any artifact type and is not enforced at ingest. |
 | `rule_mode` | `rule` | One of `always`, `glob`, `auto`, `explicit`. See [Rule modes](rule-modes). |
 | `rule_globs` | `rule` | Required when `rule_mode: glob`. Comma-separated glob patterns. |
 | `rule_description` | `rule` | Required when `rule_mode: auto`. Drives the harness's autoload heuristic. |

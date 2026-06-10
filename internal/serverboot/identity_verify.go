@@ -1,8 +1,10 @@
 package serverboot
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/lennylabs/podium/pkg/identity"
@@ -135,10 +137,112 @@ func selectIdentityProvider(cfg *Config) (identity.Provider, error) {
 // (auth.untrusted_runtime), so an unauthenticated call in
 // injected-session-token mode is rejected rather than served anonymously.
 func bearerToken(r *http.Request) string {
+	return bearerTokenFromHeader(r, "Authorization")
+}
+
+// bearerTokenFromHeader returns the bearer credential from the named header,
+// or "" when the header is absent or not a bearer credential. The registry
+// parses the named header's value as "Bearer <token>" regardless of the header
+// name (§6.3.3 oidc-jwt token_header): the prefix is matched case-insensitively
+// and surrounding whitespace is trimmed. An empty headerName defaults to
+// Authorization.
+func bearerTokenFromHeader(r *http.Request, headerName string) string {
+	if headerName == "" {
+		headerName = "Authorization"
+	}
 	const prefix = "Bearer "
-	h := r.Header.Get("Authorization")
+	h := r.Header.Get(headerName)
 	if len(h) >= len(prefix) && strings.EqualFold(h[:len(prefix)], prefix) {
 		return strings.TrimSpace(h[len(prefix):])
 	}
 	return ""
+}
+
+// oidcJWTVerifier builds the §6.3.3 request-time verifier for the oidc-jwt
+// provider. It extracts the forwarded JWT from the configured token header,
+// verifies it against the issuer's JWKS, applies the §6.3.1 IdpGroupMapping,
+// and returns the caller layer.Identity. A request carrying no token is
+// anonymous and sees public visibility only (it is not rejected); a token that
+// fails verification is returned as an error so the server maps
+// identity.ErrTokenExpired / *identity.UntrustedTokenError to the §6.10
+// envelope (auth.token_expired / auth.untrusted_token).
+func oidcJWTVerifier(verifier *identity.OIDCVerifier, tokenHeader string, groups *identity.IdpGroupMapping) func(*http.Request) (layer.Identity, error) {
+	return func(r *http.Request) (layer.Identity, error) {
+		raw := bearerTokenFromHeader(r, tokenHeader)
+		if raw == "" {
+			return layer.Identity{}, nil
+		}
+		id, err := verifier.Verify(raw)
+		if err != nil {
+			if errors.Is(err, identity.ErrKeySetUnavailable) {
+				// §6.3.3: while the key set is unavailable at runtime,
+				// verification fails closed and the request is anonymous (it sees
+				// public visibility only) rather than being rejected.
+				return layer.Identity{}, nil
+			}
+			return layer.Identity{}, err
+		}
+		mapped := id.Groups
+		if groups != nil && !groups.Empty() {
+			mapped = groups.Map(id.Groups)
+		}
+		return layer.Identity{
+			Sub:             id.Sub,
+			Email:           id.Email,
+			OrgID:           id.OrgID,
+			Groups:          mapped,
+			Scopes:          id.Scopes,
+			IsAuthenticated: true,
+		}, nil
+	}
+}
+
+// trustedHeadersVerifier builds the §6.3.3 request-time verifier for the
+// trusted-headers provider. It reads the gateway-injected identity headers,
+// gated by the proxy secret when configured, and never returns an error: a
+// missing or distrusted identity yields the anonymous, public-only caller
+// rather than a rejection (§6.3.3). Groups come from X-Podium-User-Groups
+// directly; SCIM and the IdpGroupMapping adapter are not consulted.
+func trustedHeadersVerifier(proxySecret string) func(*http.Request) (layer.Identity, error) {
+	return func(r *http.Request) (layer.Identity, error) {
+		id := identity.IdentityFromTrustedHeaders(
+			r.Header.Get(identity.HeaderUserSub),
+			r.Header.Get(identity.HeaderUserEmail),
+			r.Header.Get(identity.HeaderUserGroups),
+			r.Header.Get(identity.HeaderUserOrg),
+			proxySecret,
+			r.Header.Get(identity.HeaderProxySecret),
+		)
+		return layer.Identity{
+			Sub:             id.Sub,
+			Email:           id.Email,
+			OrgID:           id.OrgID,
+			Groups:          id.Groups,
+			IsAuthenticated: id.IsAuthenticated,
+		}, nil
+	}
+}
+
+// oidcJWTConfigGuard refuses startup when the oidc-jwt provider is selected
+// without a usable issuer and audience.
+//
+// spec: §6.3.3, §13.12 — oidc-jwt verifies the forwarded token's aud against
+// PODIUM_OAUTH_AUDIENCE (so an unverifiable aud cannot accept a token issued
+// for any relying party that shares the issuer) and fetches the OIDC discovery
+// document and JWKS from PODIUM_OAUTH_ISSUER over https (so a man-in-the-middle
+// cannot substitute a signing key over an http endpoint). A loopback issuer
+// (https://127.0.0.1, https://localhost) is permitted for local IdP testing and
+// still requires https. Other providers are exempt.
+func oidcJWTConfigGuard(identityProvider, issuer, audience string) error {
+	if identityProvider != "oidc-jwt" {
+		return nil
+	}
+	u, err := url.Parse(strings.TrimSpace(issuer))
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return fmt.Errorf("config.invalid_issuer_scheme: PODIUM_IDENTITY_PROVIDER=oidc-jwt requires PODIUM_OAUTH_ISSUER to be an https URL (got %q); the registry fetches the OIDC discovery document and JWKS over this URL and an http endpoint lets a man-in-the-middle substitute a signing key (§6.3.3, §13.12)", issuer)
+	}
+	if strings.TrimSpace(audience) == "" {
+		return fmt.Errorf("config.oidc_jwt_audience_unset: PODIUM_IDENTITY_PROVIDER=oidc-jwt requires PODIUM_OAUTH_AUDIENCE set to this registry's endpoint so the required aud claim is verified on every forwarded token (§6.3.3, §13.12)")
+	}
+	return nil
 }

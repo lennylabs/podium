@@ -114,31 +114,6 @@ func TestPodiumLint_SkillPodiumFieldErrors(t *testing.T) {
 	}
 }
 
-// TestPodiumLint_HookGenericSubtypeWarns covers
-// Spec: §4.3.5 — a generic hook and a corresponding subtype hook declared
-// together warn (not error); lint still exits 0.
-func TestPodiumLint_HookGenericSubtypeWarns(t *testing.T) {
-	t.Parallel()
-	registry := t.TempDir()
-	testharness.WriteTree(t, registry,
-		testharness.WriteTreeOption{
-			Path:    "hooks/broad/ARTIFACT.md",
-			Content: "---\ntype: hook\nversion: 1.0.0\ndescription: broad\nhook_event: pre_tool_use\nhook_action: |\n  echo hi\n---\n\nbody\n",
-		},
-		testharness.WriteTreeOption{
-			Path:    "hooks/narrow/ARTIFACT.md",
-			Content: "---\ntype: hook\nversion: 1.0.0\ndescription: narrow\nhook_event: pre_shell_execution\nhook_action: |\n  echo hi\n---\n\nbody\n",
-		},
-	)
-	res := cmdharness.Run(t, "podium", "", "lint", "--registry", registry)
-	if res.ExitCode != 0 {
-		t.Fatalf("lint exit=%d, want 0 (warning)\nstdout:\n%s", res.ExitCode, res.Stdout)
-	}
-	if !strings.Contains(res.Stdout, "[warning]") || !strings.Contains(res.Stdout, "lint.hook_generic_and_subtype") {
-		t.Errorf("expected a hook_generic_and_subtype warning:\n%s", res.Stdout)
-	}
-}
-
 // TestPodiumSync_DerivesSkillCompatibility covers
 // Spec: §4.3.4 — when SKILL.md omits compatibility, the claude-code adapter
 // (which consumes only the agentskills.io subset) derives it from

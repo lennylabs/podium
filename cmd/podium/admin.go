@@ -32,6 +32,7 @@ func adminCmd(args []string) int {
 			{"retention", "Apply audit retention policies to the local audit log."},
 			{"reembed", "Re-run vector embeddings against the configured registry."},
 			{"runtime", "Manage trusted runtime signing keys."},
+			{"tenant", "Manage tenants (operator role)."},
 			{"migrate-to-standard", "Pump standalone state into a standard deployment."},
 		})
 		if len(args) == 0 {
@@ -54,6 +55,8 @@ func adminCmd(args []string) int {
 		return adminShowEffectiveCmd(args[1:])
 	case "runtime":
 		return adminRuntimeCmd(args[1:])
+	case "tenant":
+		return adminTenantCmd(args[1:])
 	case "migrate-to-standard":
 		return adminMigrateToStandard(args[1:])
 	default:

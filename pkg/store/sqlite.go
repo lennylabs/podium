@@ -74,7 +74,8 @@ func (s *SQLite) applySchema() error {
 			materialize_rate_quota INTEGER NOT NULL DEFAULT 0,
 			audit_volume_quota INTEGER NOT NULL DEFAULT 0,
 			max_user_layers INTEGER NOT NULL DEFAULT 0,
-			expose_scope_preview INTEGER
+			expose_scope_preview INTEGER,
+			active INTEGER NOT NULL DEFAULT 1
 		)`,
 		`CREATE TABLE IF NOT EXISTS manifests (
 			tenant_id TEXT NOT NULL,
@@ -117,6 +118,10 @@ func (s *SQLite) applySchema() error {
 			org_id TEXT NOT NULL,
 			granted_at TEXT NOT NULL,
 			PRIMARY KEY (user_id, org_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS operator_grants (
+			identity TEXT PRIMARY KEY,
+			granted_at TEXT NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS layer_configs (
 			tenant_id TEXT NOT NULL,
@@ -206,19 +211,86 @@ func (s *SQLite) CreateTenant(ctx context.Context, t Tenant) error {
 // GetTenant returns the tenant or ErrTenantNotFound.
 func (s *SQLite) GetTenant(ctx context.Context, id string) (Tenant, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, name, storage_quota, search_qps_quota, materialize_rate_quota, audit_volume_quota, max_user_layers, expose_scope_preview
+		SELECT id, name, storage_quota, search_qps_quota, materialize_rate_quota, audit_volume_quota, max_user_layers, expose_scope_preview, active
 		FROM tenants WHERE id = ?`, id)
 	var t Tenant
 	var exposeScopePreview sql.NullBool
 	err := row.Scan(&t.ID, &t.Name,
 		&t.Quota.StorageBytes, &t.Quota.SearchQPS,
 		&t.Quota.MaterializeRate, &t.Quota.AuditVolumePerDay, &t.Quota.MaxUserLayers,
-		&exposeScopePreview)
+		&exposeScopePreview, &t.Active)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Tenant{}, ErrTenantNotFound
 	}
 	t.ExposeScopePreview = ptrFromNullBool(exposeScopePreview)
 	return t, err
+}
+
+// ListTenants returns every provisioned tenant, ordered by ID.
+func (s *SQLite) ListTenants(ctx context.Context) ([]Tenant, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, name, storage_quota, search_qps_quota, materialize_rate_quota, audit_volume_quota, max_user_layers, expose_scope_preview, active
+		FROM tenants ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Tenant
+	for rows.Next() {
+		var t Tenant
+		var exposeScopePreview sql.NullBool
+		if err := rows.Scan(&t.ID, &t.Name,
+			&t.Quota.StorageBytes, &t.Quota.SearchQPS,
+			&t.Quota.MaterializeRate, &t.Quota.AuditVolumePerDay, &t.Quota.MaxUserLayers,
+			&exposeScopePreview, &t.Active); err != nil {
+			return nil, err
+		}
+		t.ExposeScopePreview = ptrFromNullBool(exposeScopePreview)
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// UpdateTenant writes a tenant's mutable configuration (Quota,
+// ExposeScopePreview, active), preserving the ID and name. An unknown ID
+// returns ErrTenantNotFound.
+func (s *SQLite) UpdateTenant(ctx context.Context, t Tenant) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE tenants SET
+			storage_quota = ?, search_qps_quota = ?, materialize_rate_quota = ?,
+			audit_volume_quota = ?, max_user_layers = ?, expose_scope_preview = ?, active = ?
+		WHERE id = ?`,
+		t.Quota.StorageBytes, t.Quota.SearchQPS, t.Quota.MaterializeRate,
+		t.Quota.AuditVolumePerDay, t.Quota.MaxUserLayers, nullBoolFromPtr(t.ExposeScopePreview), t.Active,
+		t.ID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrTenantNotFound
+	}
+	return nil
+}
+
+// DeactivateTenant sets a tenant's active flag false without deleting its
+// data. An unknown ID returns ErrTenantNotFound.
+func (s *SQLite) DeactivateTenant(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE tenants SET active = 0 WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrTenantNotFound
+	}
+	return nil
 }
 
 // PutManifest enforces the §4.7 immutability invariant: the same
@@ -642,6 +714,30 @@ func (s *SQLite) RevokeAdmin(ctx context.Context, userID, orgID string) error {
 		DELETE FROM admin_grants WHERE user_id = ? AND org_id = ?`,
 		userID, orgID)
 	return err
+}
+
+// GrantOperator records an instance-level operator grant (§4.7.1 Operator
+// role). Inserting an existing identity is a no-op.
+func (s *SQLite) GrantOperator(ctx context.Context, identity string) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT OR IGNORE INTO operator_grants (identity, granted_at)
+		VALUES (?, ?)`,
+		identity, time.Now().UTC().Format(time.RFC3339Nano))
+	return err
+}
+
+// IsOperator reports whether the identity holds an operator grant.
+func (s *SQLite) IsOperator(ctx context.Context, identity string) (bool, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT 1 FROM operator_grants WHERE identity = ?`, identity)
+	var dummy int
+	err := row.Scan(&dummy)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // PutLayerConfig inserts or replaces a layer config.

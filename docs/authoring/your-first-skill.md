@@ -70,7 +70,7 @@ sensitivity: low
 
 Notes on these fields:
 
-- **`description`** (in `SKILL.md`) decides whether the harness reaches for this skill. A vague description like "Helper skill" gets ignored; a specific one like "Greet the user by name and tell them today's date" matches against actual user prompts. The lint rule on description quality flags the vague ones.
+- **`description`** (in `SKILL.md`) decides whether the harness reaches for this skill. A vague description like "Helper skill" gets ignored; a specific one like "Greet the user by name and tell them today's date" matches against actual user prompts. The registry flags thin descriptions at ingest time; local `podium lint` does not run that check.
 - **`when_to_use`** (in `ARTIFACT.md`) is a list of explicit situations. Hybrid retrieval uses these as additional signal. Be concrete: "After month-end close" beats "When working on finance stuff."
 
 The full frontmatter reference is in [Frontmatter reference](frontmatter-reference).
@@ -166,7 +166,7 @@ Before committing or pushing, run lint:
 podium lint --registry ~/podium-artifacts/
 ```
 
-Lint checks the frontmatter against the type's schema in both files, validates that prose references in `SKILL.md` resolve to bundled files, runs the agentskills.io compliance checks on `SKILL.md` (name format, description constraints, parent-directory match), runs type-specific rules, and flags weak descriptions. CI runs the same checks on PRs to a Git-source layer.
+Lint checks the frontmatter against the type's schema in both files, validates that prose references in `SKILL.md` resolve to bundled files, runs the agentskills.io compliance checks on `SKILL.md` (name format, description constraints, parent-directory match), and runs type-specific rules. The thin-description check runs at registry ingest rather than in local `podium lint`. CI runs the same checks on PRs to a Git-source layer.
 
 If lint passes, commit the artifact. If lint warns or fails, the messages name the field and the file location.
 

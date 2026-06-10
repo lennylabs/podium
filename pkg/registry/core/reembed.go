@@ -62,14 +62,14 @@ func (r *Registry) Reembed(ctx context.Context, opts ReembedOptions) (*ReembedRe
 	if !r.vectorSearchActive() {
 		return nil, fmt.Errorf("reembed: vector search not configured")
 	}
-	manifests, err := r.store.ListManifests(ctx, r.tenantID)
+	manifests, err := r.store.ListManifests(ctx, r.tenantFor(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("reembed: list manifests: %w", err)
 	}
 	// §4.7 "Domain embeddings": domains are re-embedded on a full pass
 	// alongside artifacts. Fetched up front so the --only-missing probe
 	// can size its top-K to cover stored domain vectors too.
-	domainRecs, err := r.store.ListDomains(ctx, r.tenantID)
+	domainRecs, err := r.store.ListDomains(ctx, r.tenantFor(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("reembed: list domains: %w", err)
 	}
@@ -101,7 +101,7 @@ func (r *Registry) Reembed(ctx context.Context, opts ReembedOptions) (*ReembedRe
 	if opts.OnlyIfMissing && len(manifests) > 0 && r.embedder != nil {
 		probe := make([]float32, r.embedder.Dimensions())
 		probe[0] = 1
-		matches, _ := r.vector.Query(ctx, r.tenantID, probe, len(manifests)+len(domainRecs))
+		matches, _ := r.vector.Query(ctx, r.tenantFor(ctx), probe, len(manifests)+len(domainRecs))
 		for _, m := range matches {
 			if m.Version == DomainVectorVersion {
 				continue
@@ -168,11 +168,11 @@ func (r *Registry) Reembed(ctx context.Context, opts ReembedOptions) (*ReembedRe
 	// catalogue.
 	if modelID != "" && !opts.OnlyIfMissing && opts.Since.IsZero() {
 		if mv, ok := vector.ModelVersionedOf(r.vector); ok {
-			if purged, err := mv.PurgeModelExcept(ctx, r.tenantID, modelID); err == nil && purged > 0 {
+			if purged, err := mv.PurgeModelExcept(ctx, r.tenantFor(ctx), modelID); err == nil && purged > 0 {
 				r.emit(ctx, AuditEvent{
 					Type:    "embedding.reembed_purged",
 					Caller:  "system",
-					Target:  r.tenantID,
+					Target:  r.tenantFor(ctx),
 					Context: map[string]string{"purged": strconv.Itoa(purged), "model": modelID},
 				})
 			}
@@ -189,7 +189,7 @@ func (r *Registry) emitReembedProgress(ctx context.Context, done, total int, mod
 	r.emit(ctx, AuditEvent{
 		Type:   "embedding.reembed_in_progress",
 		Caller: "system",
-		Target: r.tenantID,
+		Target: r.tenantFor(ctx),
 		Context: map[string]string{
 			"done":  strconv.Itoa(done),
 			"total": strconv.Itoa(total),
@@ -204,7 +204,7 @@ func (r *Registry) ReembedOne(ctx context.Context, artifactID, version string) e
 	if !r.vectorSearchActive() {
 		return fmt.Errorf("reembed: vector search not configured")
 	}
-	m, err := r.store.GetManifest(ctx, r.tenantID, artifactID, version)
+	m, err := r.store.GetManifest(ctx, r.tenantFor(ctx), artifactID, version)
 	if err != nil {
 		return fmt.Errorf("reembed: get manifest: %w", err)
 	}

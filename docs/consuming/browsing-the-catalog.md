@@ -142,7 +142,7 @@ load_artifact("finance/close-reporting/run-variance-analysis")
 load_artifact("finance/ap/pay-invoice", version="1.2.0")
 ```
 
-Loads a specific artifact by ID. Returns the manifest body inline; bundled resources are materialized atomically on the host's filesystem at a host-configured destination path. Large blobs are delivered via presigned URLs that the MCP server fetches.
+Loads a specific artifact by ID. The tool result carries the manifest body inline and the paths of the materialized files. Every bundled resource is written atomically to the host's filesystem at a host-configured destination path, so the agent reads a resource from its file rather than from the response. The MCP server fetches each resource from the registry, inline below the 256 KB cutoff and through a presigned URL above it; the cutoff is a transport detail the agent does not see. [Inline content and materialized files](handling-artifact-responses#inline-content-and-materialized-files) covers the consumer-side model.
 
 This is the expensive operation in the discovery flow. The agent calls it only when it has decided to use the artifact. Materialization runs through the configured harness adapter, so the on-disk layout matches what the harness expects.
 

@@ -124,10 +124,14 @@ Each cookbook covers: client registration, scopes and audience, group claim mapp
 
 ### 4. Create the first tenant and admin
 
+Run the registry in multi-tenant mode with `PODIUM_MULTI_TENANT=true`, and seed the first instance operator with `PODIUM_OPERATOR_ADMINS` (comma-separated identities). The operator role authorizes tenant management; it is distinct from the per-tenant `admin` role and from `PODIUM_BOOTSTRAP_ADMINS`. With the registry running, the operator provisions a tenant at runtime and grants the first per-tenant admin:
+
 ```bash
-podium admin tenant create acme --display-name "Acme Corp"
-podium admin grant --tenant acme --user alice@acme.com --role admin
+podium admin tenant create acme --registry https://podium.acme.com
+podium admin grant alice@acme.com --registry https://podium.acme.com
 ```
+
+`podium admin tenant create` derives the org ID from the name and is idempotent. Use `podium admin tenant list`, `podium admin tenant update <id>`, and `podium admin tenant deactivate <id>` to list, adjust, and deactivate tenants. See the [CLI reference](../reference/cli#podium-admin-tenant) for the full flag set.
 
 ### 5. Configure the tenant's layer list
 

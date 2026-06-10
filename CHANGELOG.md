@@ -6,7 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-[Unreleased]: https://github.com/lennylabs/podium/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/lennylabs/podium/compare/v0.1.4...HEAD
+
+## [0.1.4] - 2026-06-08
+
+Multi-tenancy and gateway-delegated authentication. Two design proposals land: server-side request authentication for a registry behind an identity-aware gateway (proposal 0001), and runtime tenant provisioning through an operator-authorized API and CLI (proposal 0002). The boot-time `PODIUM_TENANTS` environment variable is replaced by the runtime provisioning path.
+
+### Added
+
+- **Server-side request authentication** (§6.3.3, proposal 0001): the `oidc-jwt` and `trusted-headers` identity providers authenticate each caller from a gateway-forwarded token or trusted request headers, selected by `PODIUM_IDENTITY_PROVIDER`. The caller's organization comes from the verified `org_id` claim or the `X-Podium-User-Org` header.
+- **Per-request multi-tenant routing** (§6.3.1): a registry started with `PODIUM_MULTI_TENANT` resolves each request to the tenant its organization names, and rejects an organization that names no provisioned tenant with `auth.tenant_unknown`. A single-tenant registry binds every request to its sole tenant and does not consult the organization value.
+- **Runtime tenant provisioning** (§7.3.3, proposal 0002): the operator-authorized `/v1/admin/tenants` API and the `podium admin tenant` CLI create, list, update, and deactivate tenants on a live multi-tenant registry. The instance-operator role is seeded with `PODIUM_OPERATOR_ADMINS` and is distinct from the per-tenant `admin` role. Per-tenant quotas and the §3.5 scope-preview gate are set at create or update, and create is idempotent. Deactivation is soft: a deactivated tenant stops resolving while its data persists, and reactivation restores it.
+
+### Changed
+
+- `podium domain analyze` takes the path as a positional argument (`podium domain analyze <path>`), matching `podium domain show` and `podium domain search`.
+
+### Removed
+
+- The boot-time `PODIUM_TENANTS` environment variable and the boot-time tenant-provisioning path. A multi-tenant deployment seeds its first operator with `PODIUM_OPERATOR_ADMINS` and provisions tenants at runtime through the API or CLI.
+- The `lint.hook_generic_and_subtype` lint rule, which rejected a hook that declared both a generic tool-call event and a subtype event. The rule could not be enforced across independently authored layers, and declaring both events is a legitimate pattern.
+
+### Fixed
+
+- **SDKs** (§7.2): `load_artifact` content above the 256 KB inline cutoff on a single load is fetched from the presigned manifest-body URL instead of failing (`podium-py`, `podium-ts`).
+- **Store** (§4.7.1): `Memory.CreateTenant` is idempotent, matching the SQLite and Postgres backends, so re-creating an existing tenant leaves the stored row unchanged.
+- **Registry**: graceful shutdown runs through a single server lifecycle context.
+
+### Documentation
+
+- Clarified what `load_artifact` returns inline versus what materializes to disk, for the MCP server and the SDKs (§6.6, §6.7).
+- Corrected the CLI, HTTP API, error-code, and authoring references against the implementation.
+
+[0.1.4]: https://github.com/lennylabs/podium/releases/tag/v0.1.4
 
 ## [0.1.3] - 2026-06-04
 

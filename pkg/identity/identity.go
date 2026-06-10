@@ -18,6 +18,10 @@ var (
 	ErrUntrustedRuntime = errors.New("identity: untrusted_runtime")
 	// ErrTokenExpired maps to auth.token_expired in §6.10.
 	ErrTokenExpired = errors.New("identity: token_expired")
+	// ErrUntrustedToken maps to auth.untrusted_token in §6.10. A
+	// gateway-forwarded oidc-jwt token failed signature, iss, or aud
+	// verification against the configured issuer JWKS (§6.3.3).
+	ErrUntrustedToken = errors.New("identity: untrusted_token")
 	// ErrDeviceCodeRequired surfaces the device-code flow URL and code
 	// to the caller; the caller is responsible for displaying both.
 	ErrDeviceCodeRequired = errors.New("identity: device_code_required")

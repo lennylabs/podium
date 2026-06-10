@@ -96,7 +96,7 @@ The registry's wire protocol is **HTTP/JSON**. Every consumer speaks the same HT
 
 Pluggable interfaces shared across the consumers:
 
-- **IdentityProvider**: supplies the OAuth-attested identity attached to every registry call. Built-ins: `oauth-device-code` and `injected-session-token`. Additional implementations register through the interface.
+- **IdentityProvider**: supplies the OAuth-attested identity attached to every registry call. Client-side built-ins: `oauth-device-code` and `injected-session-token`. Registry-process built-ins for a gateway-fronted deployment: `oidc-jwt` and `trusted-headers` (§6.3.3). Additional implementations register through the interface.
 - **LocalOverlayProvider**: optional. When configured, reads artifact packages (`ARTIFACT.md` for every type, plus `SKILL.md` for skills) from a workspace filesystem path and merges them as the workspace local overlay (§6.4). Available across every consumer.
 - **HarnessAdapter**: translates canonical artifacts into harness-native format at delivery time (MCP materialization or `podium sync` write). Built-ins cover Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, Gemini CLI, OpenCode, Pi, Hermes; `none` (default) writes the canonical layout as-is. See §6.7 for the full roster with documentation links. The SDKs accept a harness parameter on `materialize()`.
 

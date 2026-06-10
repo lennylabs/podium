@@ -863,6 +863,24 @@ func TestReadme_DomainAnalyze(t *testing.T) {
 	}
 }
 
+// domain analyze accepts a positional <path> (the §4.5 CLI form), matching its
+// sibling commands `domain show <path>` and `domain search <query>`.
+func TestReadme_DomainAnalyzePositional(t *testing.T) {
+	t.Parallel()
+	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
+	res := runPodium(t, "", nil, "domain", "analyze", "--registry", srv.BaseURL, "finance")
+	if res.Exit != 0 {
+		t.Fatalf("domain analyze <path> exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	var metrics map[string]any
+	if err := json.Unmarshal([]byte(res.Stdout), &metrics); err != nil {
+		t.Fatalf("domain analyze <path> output not JSON: %v\n%s", err, res.Stdout)
+	}
+	if _, ok := metrics["artifact_count"]; !ok {
+		t.Errorf("metrics missing artifact_count: %v", metrics)
+	}
+}
+
 // impact lists dependents. A child extends a parent, so the
 // reverse-dependency index records the edge and `podium impact` reports it.
 func TestReadme_Impact(t *testing.T) {

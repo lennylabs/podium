@@ -44,6 +44,12 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("GetTenantNotFound", func(t *testing.T) { getTenantNotFound(t, factory(t)) })
 	t.Run("QuotaRoundTrip", func(t *testing.T) { quotaRoundTrips(t, factory(t)) })
 	t.Run("ScopePreviewFlagRoundTrip", func(t *testing.T) { scopePreviewFlagRoundTrips(t, factory(t)) })
+	t.Run("CreateTenantIdempotentNoOverwrite", func(t *testing.T) { createTenantIdempotentNoOverwrite(t, factory(t)) })
+	t.Run("TenantCreatedActiveByDefault", func(t *testing.T) { tenantCreatedActiveByDefault(t, factory(t)) })
+	t.Run("TenantListIncludesCreated", func(t *testing.T) { tenantListIncludesCreated(t, factory(t)) })
+	t.Run("TenantUpdateWritesMutableFields", func(t *testing.T) { tenantUpdateWritesMutableFields(t, factory(t)) })
+	t.Run("TenantDeactivateIsSoft", func(t *testing.T) { tenantDeactivateIsSoft(t, factory(t)) })
+	t.Run("OperatorGrantsRoundTrip", func(t *testing.T) { operatorGrantsRoundTrip(t, factory(t)) })
 	t.Run("GetManifestNotFound", func(t *testing.T) { getManifestNotFound(t, factory(t)) })
 	t.Run("LayerConfigCRUD", func(t *testing.T) { layerConfigCRUD(t, factory(t)) })
 	t.Run("LayerConfigDelete", func(t *testing.T) { layerConfigDelete(t, factory(t)) })
@@ -754,6 +760,168 @@ func scopePreviewFlagRoundTrips(t *testing.T, s store.Store) {
 		if got.ScopePreviewEnabled() != c.wantEnab {
 			t.Errorf("%s: ScopePreviewEnabled() = %v, want %v", c.id, got.ScopePreviewEnabled(), c.wantEnab)
 		}
+	}
+}
+
+// Spec: §4.7.1 — CreateTenant is idempotent. Re-creating an existing
+// tenant ID is a no-op that preserves the stored row; it does not
+// overwrite the name, quota, or scope-preview gate, and it is not an
+// error. SQLite (INSERT OR IGNORE) and Postgres (ON CONFLICT (id) DO
+// NOTHING) enforce this, and Memory must match. A backend that overwrote
+// on re-create would let a duplicate create reset a tenant's quota or
+// re-enable a gate the operator disabled.
+func createTenantIdempotentNoOverwrite(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	ptr := func(b bool) *bool { return &b }
+	original := store.Tenant{
+		ID:   "acme",
+		Name: "Acme Corp",
+		Quota: store.Quota{
+			StorageBytes:      1 << 30,
+			SearchQPS:         50,
+			MaterializeRate:   25,
+			AuditVolumePerDay: 100000,
+			MaxUserLayers:     7,
+		},
+		ExposeScopePreview: ptr(false),
+	}
+	must(t, s.CreateTenant(ctx, original))
+	// A second create with the same ID and different values must be an
+	// idempotent no-op: no error and no overwrite.
+	must(t, s.CreateTenant(ctx, store.Tenant{
+		ID:   "acme",
+		Name: "Globex",
+		Quota: store.Quota{
+			StorageBytes:      1,
+			SearchQPS:         1,
+			MaterializeRate:   1,
+			AuditVolumePerDay: 1,
+			MaxUserLayers:     99,
+		},
+		ExposeScopePreview: ptr(true),
+	}))
+	got, err := s.GetTenant(ctx, "acme")
+	must(t, err)
+	// One comparison over the mutable fields keeps a single failure
+	// branch; the message prints every field so a regression still names
+	// what was overwritten.
+	gotPreview := got.ExposeScopePreview != nil && *got.ExposeScopePreview
+	wantPreview := original.ExposeScopePreview != nil && *original.ExposeScopePreview
+	if got.Name != original.Name || got.Quota != original.Quota || gotPreview != wantPreview {
+		t.Errorf("re-create overwrote tenant: got {name=%q quota=%+v preview=%v}, want {name=%q quota=%+v preview=%v}",
+			got.Name, got.Quota, gotPreview, original.Name, original.Quota, wantPreview)
+	}
+}
+
+// Spec: §4.7.1 — a newly created tenant is active on every backend. The SQL
+// backends rely on the active-column default; Memory sets Active explicitly
+// because its zero value is false. A backend that created an inactive tenant
+// would leave the default org and every provisioned tenant unresolvable.
+func tenantCreatedActiveByDefault(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	must(t, s.CreateTenant(ctx, store.Tenant{ID: "active-org", Name: "Active"}))
+	got, err := s.GetTenant(ctx, "active-org")
+	must(t, err)
+	if !got.Active {
+		t.Errorf("a newly created tenant is not Active; GetTenant returned %+v", got)
+	}
+}
+
+// Spec: §7.3.3 — ListTenants returns every provisioned tenant with its fields
+// and active flag. The assertion locates the created tenants rather than
+// asserting an exact count so it is robust to a shared backend.
+func tenantListIncludesCreated(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	must(t, s.CreateTenant(ctx, store.Tenant{ID: "list-org-a", Name: "List A", Quota: store.Quota{StorageBytes: 100}}))
+	must(t, s.CreateTenant(ctx, store.Tenant{ID: "list-org-b", Name: "List B"}))
+	got, err := s.ListTenants(ctx)
+	must(t, err)
+	byID := make(map[string]store.Tenant, len(got))
+	for _, tn := range got {
+		byID[tn.ID] = tn
+	}
+	a, okA := byID["list-org-a"]
+	b, okB := byID["list-org-b"]
+	if !okA || !okB {
+		t.Fatalf("ListTenants missing created tenants (a=%v b=%v) among %d listed", okA, okB, len(got))
+	}
+	if !a.Active || !b.Active || a.Name != "List A" || a.Quota.StorageBytes != 100 {
+		t.Errorf("ListTenants returned wrong fields: a=%+v, b.Active=%v", a, b.Active)
+	}
+}
+
+// Spec: §7.3.3 — UpdateTenant writes the whole mutable record (Quota,
+// ExposeScopePreview, Active), preserves the ID and name, ignores any Name on
+// the argument, and returns ErrTenantNotFound for an unknown ID.
+func tenantUpdateWritesMutableFields(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	must(t, s.CreateTenant(ctx, store.Tenant{ID: "update-org", Name: "Original", Quota: store.Quota{StorageBytes: 1, SearchQPS: 2}}))
+	off := false
+	must(t, s.UpdateTenant(ctx, store.Tenant{
+		ID:                 "update-org",
+		Name:               "Ignored",
+		Quota:              store.Quota{StorageBytes: 999, SearchQPS: 50, MaxUserLayers: 7},
+		ExposeScopePreview: &off,
+		Active:             true,
+	}))
+	got, err := s.GetTenant(ctx, "update-org")
+	must(t, err)
+	espOff := got.ExposeScopePreview != nil && !*got.ExposeScopePreview
+	if got.Name != "Original" || got.Quota.StorageBytes != 999 || got.Quota.SearchQPS != 50 || got.Quota.MaxUserLayers != 7 || !espOff {
+		t.Errorf("UpdateTenant wrote the wrong record: got %+v (expose-off=%v), want name preserved, quota {999,50,_,_,7}, expose false", got, espOff)
+	}
+	if err := s.UpdateTenant(ctx, store.Tenant{ID: "update-missing"}); !errors.Is(err, store.ErrTenantNotFound) {
+		t.Errorf("UpdateTenant(unknown) = %v, want ErrTenantNotFound", err)
+	}
+}
+
+// Spec: §4.7.1 — DeactivateTenant is soft: it flips Active false, keeps the
+// tenant's data, and returns ErrTenantNotFound for an unknown ID. UpdateTenant
+// with Active true reactivates it.
+func tenantDeactivateIsSoft(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	must(t, s.CreateTenant(ctx, store.Tenant{ID: "deactivate-org", Name: "Deact", Quota: store.Quota{StorageBytes: 42}}))
+	must(t, s.DeactivateTenant(ctx, "deactivate-org"))
+	got, err := s.GetTenant(ctx, "deactivate-org")
+	must(t, err) // soft: the row still exists
+	if got.Active || got.Name != "Deact" || got.Quota.StorageBytes != 42 {
+		t.Errorf("DeactivateTenant: got %+v, want inactive with data preserved", got)
+	}
+	must(t, s.UpdateTenant(ctx, store.Tenant{ID: "deactivate-org", Quota: got.Quota, ExposeScopePreview: got.ExposeScopePreview, Active: true}))
+	got2, err := s.GetTenant(ctx, "deactivate-org")
+	must(t, err)
+	if !got2.Active {
+		t.Errorf("UpdateTenant Active:true did not reactivate the tenant")
+	}
+	if err := s.DeactivateTenant(ctx, "deactivate-missing"); !errors.Is(err, store.ErrTenantNotFound) {
+		t.Errorf("DeactivateTenant(unknown) = %v, want ErrTenantNotFound", err)
+	}
+}
+
+// Spec: §4.7.1 Operator role — GrantOperator records an instance-level grant
+// keyed by identity (idempotent), IsOperator reports it, and a grant does not
+// leak to another identity.
+func operatorGrantsRoundTrip(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	ok, err := s.IsOperator(ctx, "alice@acme.com")
+	must(t, err)
+	if ok {
+		t.Errorf("IsOperator(ungranted) = true, want false")
+	}
+	must(t, s.GrantOperator(ctx, "alice@acme.com"))
+	must(t, s.GrantOperator(ctx, "alice@acme.com")) // idempotent
+	gotAlice, err := s.IsOperator(ctx, "alice@acme.com")
+	must(t, err)
+	gotBob, err := s.IsOperator(ctx, "bob@acme.com")
+	must(t, err)
+	if !gotAlice || gotBob {
+		t.Errorf("after grant: IsOperator(alice)=%v (want true), IsOperator(bob)=%v (want false; grants must not leak)", gotAlice, gotBob)
 	}
 }
 

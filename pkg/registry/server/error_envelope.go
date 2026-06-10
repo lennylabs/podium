@@ -63,6 +63,22 @@ var errorCodeRegistry = map[string]errorCodeMeta{
 	"auth.untrusted_runtime": {
 		suggestedAction: "Register the runtime's signing key via 'podium admin runtime register'.",
 	},
+	// §6.3.3 / §6.10: the gateway-delegated oidc-jwt provider's codes.
+	"auth.token_expired": {
+		suggestedAction: "Refresh the token. For 'injected-session-token' the runtime reissues it; for 'oidc-jwt' the gateway forwards a new token.",
+	},
+	"auth.untrusted_token": {
+		suggestedAction: "Verify the gateway forwards a token from the issuer and audience configured for 'oidc-jwt' (PODIUM_OAUTH_ISSUER, PODIUM_OAUTH_AUDIENCE).",
+	},
+	"auth.tenant_unknown": {
+		suggestedAction: "Provision the organization as a tenant, or forward a token whose org_id claim names an existing tenant.",
+	},
+	// §7.3.3: tenant management is a multi-tenant-only capability. A
+	// single-tenant or standalone registry has no additional tenant to manage,
+	// so the operation never succeeds without changing the deployment mode.
+	"registry.tenant_management_unavailable": {
+		suggestedAction: "Start the registry in multi-tenant mode (PODIUM_MULTI_TENANT) on a standard backend to manage tenants.",
+	},
 }
 
 // enrichEnvelope fills the retryable flag and suggested_action from the

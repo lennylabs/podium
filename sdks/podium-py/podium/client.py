@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -199,6 +200,50 @@ def _decode_inline_resources(
     if not b64:
         return dict(resources)
     return {k: base64.b64decode(v) for k, v in resources.items()}
+
+
+# spec §4.3 / §6.6: split a canonical manifest document into its prose body the
+# same way the registry does (pkg/manifest SplitFrontmatter), so a manifest
+# delivered above the 256 KB inline cutoff via manifest_body_url reconstitutes a
+# byte-identical manifest_body. The opening ``---`` begins the YAML frontmatter
+# and the next ``---`` line closes it; the body is everything after, with leading
+# newlines trimmed. A document without frontmatter yields an empty body, matching
+# the registry, which leaves manifest_body unset when the document does not parse.
+_FRONTMATTER_RE = re.compile(r"\A---\r?\n.*?\r?\n---\r?\n?(.*)\Z", re.DOTALL)
+
+
+def _manifest_body_from(doc: str) -> str:
+    m = _FRONTMATTER_RE.match(doc)
+    return m.group(1).lstrip("\r\n") if m else ""
+
+
+def _apply_manifest_body_url(
+    link: dict[str, Any],
+    artifact_type: str,
+    manifest_body: str,
+    frontmatter: str,
+    skill_raw: str,
+    fetch: Callable[[str], bytes],
+) -> tuple[str, str, str]:
+    """Resolve a presigned ``manifest_body_url`` (spec §6.6) into the inline
+    manifest fields, returning ``(manifest_body, frontmatter, skill_raw)``.
+
+    A canonical manifest above the 256 KB inline cutoff is delivered as a
+    presigned URL with the inline ``manifest_body``, ``skill_raw``, and
+    canonical-document field cleared. Mirror the MCP server (cmd/podium-mcp
+    ``fetchManifestBody``): download the canonical document, set the canonical
+    field (``skill_raw`` for a skill, ``frontmatter`` otherwise), and re-derive
+    the prose body. For a skill the small ARTIFACT.md frontmatter still arrives
+    inline, so the caller's ``frontmatter`` is preserved.
+    """
+    url = link.get("url") or link.get("presigned_url")
+    if not url:
+        raise RegistryError("registry.unknown", "manifest_body_url has no presigned URL")
+    doc = fetch(url).decode("utf-8")
+    body = _manifest_body_from(doc)
+    if artifact_type == "skill":
+        return body, frontmatter, doc
+    return body, doc, skill_raw
 
 
 @dataclass
@@ -1205,7 +1250,12 @@ class Client:
         return merged, total
 
     def load_artifact(
-        self, artifact_id: str, *, version: str = "", session_id: str = ""
+        self,
+        artifact_id: str,
+        *,
+        version: str = "",
+        session_id: str = "",
+        fetch: Callable[[str], bytes] | None = None,
     ) -> LoadedArtifact:
         # spec §6.4 — the overlay is the highest-precedence layer, so an
         # in-progress overlay artifact resolves ahead of the registry. A
@@ -1234,13 +1284,30 @@ class Client:
         if session_id:
             params["session_id"] = session_id
         body = self._get("/v1/load_artifact", params)
+        manifest_body = body.get("manifest_body", "")
+        frontmatter = body.get("frontmatter", "")
+        skill_raw = body.get("skill_raw", "")
+        # spec §6.6 — a canonical manifest above the 256 KB inline cutoff arrives
+        # as a presigned manifest_body_url with the inline fields cleared. Resolve
+        # it here so the returned artifact carries the manifest fields regardless
+        # of the manifest's size, matching the inline path and the MCP server.
+        mbu = body.get("manifest_body_url")
+        if mbu:
+            manifest_body, frontmatter, skill_raw = _apply_manifest_body_url(
+                mbu,
+                body.get("type", ""),
+                manifest_body,
+                frontmatter,
+                skill_raw,
+                fetch or _fetch_bytes,
+            )
         return LoadedArtifact(
             id=body.get("id", artifact_id),
             type=body.get("type", ""),
             version=body.get("version", ""),
-            manifest_body=body.get("manifest_body", ""),
-            frontmatter=body.get("frontmatter", ""),
-            skill_raw=body.get("skill_raw", ""),
+            manifest_body=manifest_body,
+            frontmatter=frontmatter,
+            skill_raw=skill_raw,
             # §4.1/§7.2: decode a base64-flagged inline set back to
             # raw bytes so a binary resource materializes uncorrupted.
             resources=_decode_inline_resources(

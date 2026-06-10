@@ -14,6 +14,48 @@ The [Frontmatter reference](../authoring/frontmatter-reference) defines the sche
 
 ---
 
+## Inline content and materialized files
+
+`load_artifact` returns the manifest separately from the bundled resources, and the consumer path determines what arrives in the response and what is written to the filesystem.
+
+![Two columns compare what load_artifact yields to each consumer. Through the MCP server, the agent's tool result holds the manifest body and the paths of the materialized files, with every resource written to disk. Through the SDK, load_artifact returns the manifest body with inline resources and references in memory, and a later materialize call writes the files. Bytes at or below 256 KB ride inline, while larger bytes and large manifests arrive as presigned URLs from object storage.](../assets/diagrams/materialization-consumer-views.svg)
+
+<!--
+ASCII fallback for the diagram above (load_artifact: what the consumer holds):
+
+  MCP server, into the agent
+    Tool result (in the model's context):
+      {
+        manifest_body: "Run variance",
+        materialized_at: [ out/SKILL.md, out/scripts/run.py ]
+      }
+    Every bundled resource is written to disk; the agent opens files, so the
+    256 KB cutoff never enters the context window.
+
+  SDK, into your program
+    load_artifact() returns, in memory:
+      manifest_body
+      resources{}        inline bytes
+      large_resources{}  references
+    materialize(to="out/") writes to disk: it writes the canonical layout and
+    fetches each referenced resource. A program reads the manifest first and
+    writes the files when it chooses.
+
+  Bytes at or below 256 KB ride inline in the response. A larger resource, and
+  a manifest above the cutoff, arrive as a presigned URL the consumer fetches
+  from content-addressed object storage.
+-->
+
+**Through the MCP server.** The tool result carries the manifest body inline together with the paths of the files the server wrote. The server fetches every bundled resource, runs the harness adapter, and writes the resources to the host filesystem before returning. The agent opens a resource from its file path, so the resource bytes stay out of the model's context window. An individual resource's size does not change this: the agent receives the manifest body and the file paths whatever the resources contain.
+
+**Through the SDK.** `load_artifact` returns an in-memory object that holds the manifest body and the bundled resources small enough to travel inline. A resource above the inline cutoff arrives as a reference rather than bytes. Nothing reaches the filesystem until a separate `materialize(to=...)` call, which writes the canonical layout and fetches each referenced resource. A programmatic consumer can therefore inspect the manifest and write the resources only when it chooses.
+
+**The inline cutoff.** The boundary between an inline byte payload and an out-of-band reference is a fixed threshold of 256 KB. A resource at or below the threshold travels in the response body. A larger resource travels as a presigned URL into content-addressed object storage, which the consumer fetches directly; the registry does not proxy the bytes. The same rule covers the manifest document when it exceeds the threshold. [The HTTP API reference](../reference/http-api) lists the response fields, and [Bundled resources](../authoring/bundled-resources#size-thresholds) covers the size limits an author works within.
+
+This arrangement keeps the registry response small and large content out of the model's context window. A small fixture rides inline, so a load does not pay a second round-trip for it. Large bytes live in object storage, content-addressed and cacheable, and reach the consumer through a presigned URL. Materialization writes each file atomically (`.tmp` + rename), so a destination is consistent once the write completes.
+
+---
+
 ## Routing and model selection
 
 The manifest carries advisory hints about the model tier and reasoning budget the artifact assumes. Consumers should route accordingly when the runtime exposes the relevant knob and ignore the hint when it does not. Hints never fail a load.
@@ -87,7 +129,8 @@ These fields tell the consumer what the artifact needs in order to run.
 
 **`delegates_to`** (list of canonical artifact IDs)
 
-- Walk the dependency: load each delegate and apply the same response-handling pipeline to it. SDK helpers like `Client.walk_dependencies(id)` automate the traversal.
+- Walk the dependency: loop over the delegate IDs, call `load_artifact` on each, and apply the same response-handling pipeline to the result. The SDK does not provide a forward-walk helper; the caller implements the loop and decides the traversal depth.
+- The only dependency helper on the client is `dependents_of(id)`, which returns the reverse edges (the artifacts that depend on a given artifact) for impact analysis. It does not walk forward.
 - Visibility filtering applies: delegates the caller cannot see are silently excluded, the same as on the registry-side discovery surface.
 
 **`hook_event`** and **`hook_action`** (for `type: hook` artifacts)
@@ -106,7 +149,7 @@ These fields tell the consumer what the artifact needs in order to run.
 
 ## Bundled files and external resources
 
-The materialized file tree lands at the destination path the consumer chose. The manifest references the files inline in prose; there is no separate manifest list.
+The materialized file tree lands at the configured destination path; [Inline content and materialized files](#inline-content-and-materialized-files) covers which bytes arrive in the response and which are written to disk. The manifest references the files inline in prose; there is no separate manifest list.
 
 **Bundled files**
 
@@ -165,36 +208,41 @@ When the host prefers per-artifact routing (different artifacts answered by diff
 
 ## End-to-end SDK example
 
-A minimal consumer pulls the relevant fields off the response and feeds them to the runtime:
+A consumer reads the manifest fields off the response and feeds them to the runtime. The SDK `LoadedArtifact` exposes the prose body as `manifest_body` and the raw frontmatter as the `frontmatter` string; the consumer parses the frontmatter to read the advisory and constraint fields.
 
 ```python
+import yaml
 from podium import Client
 
 client = Client.from_env()
 result = client.load_artifact("finance/ap/pay-invoice")
-m = result.manifest
+
+# The advisory and constraint fields live in the raw frontmatter YAML.
+fm = yaml.safe_load(result.frontmatter) or {}
 
 # Routing
-model = pick_model_for_tier(m.model_class_hint or "medium")
-thinking_budget = budget_for_effort(m.effort_hint or "low")
+model = pick_model_for_tier(fm.get("model_class_hint", "medium"))
+thinking_budget = budget_for_effort(fm.get("effort_hint", "low"))
 
 # Safety
-if m.sensitivity == "high":
-    audit.log_high_sensitivity_load(m)
-sandbox = compile_sandbox_profile(m.sandbox_profile)
-approval_tools = set(m.requiresApproval or [])
+if fm.get("sensitivity") == "high":
+    audit.log_high_sensitivity_load(result.id)
+sandbox = compile_sandbox_profile(fm.get("sandbox_profile"))
+approval_tools = set(fm.get("requiresApproval", []))
 
 # Capability
-verify_runtime(m.runtime_requirements)
-for server in (m.mcpServers or []):
+verify_runtime(fm.get("runtime_requirements", {}))
+for server in fm.get("mcpServers", []):
     host.register_mcp_server(server)
 
-# Walk dependencies (one level shown; SDK helpers traverse the full graph)
-for dep_id in (m.delegates_to or []):
+# Walk delegates: load_artifact returns the delegate IDs in the
+# frontmatter; the caller loops over them and loads each one. The SDK
+# does not provide a forward-walk helper.
+for dep_id in fm.get("delegates_to", []):
     handle_response(client.load_artifact(dep_id))
 ```
 
-The TypeScript SDK exposes the same fields under the same names on `result.manifest`.
+The TypeScript SDK `LoadedArtifact` exposes the same two fields, `manifest_body` and `frontmatter`.
 
 ---
 
@@ -208,8 +256,8 @@ The TypeScript SDK exposes the same fields under the same names on `result.manif
 | `materialize.runtime_unavailable` | Surface the missing runtime requirement. Offer to install or pick a different artifact. |
 | `materialize.hook_failed` | Skip the hook; continue when other artifacts load successfully. Log the failure. |
 | `config.unknown_harness` | Configuration error on the consumer side. Refuse and surface. |
-| `auth.scope_denied` | The caller lacks visibility for the artifact. Refuse and surface. |
-| `quota.materialization_exceeded` | Back off and retry. Surface the quota state to the user. |
+| `visibility.denied` | The caller lacks visibility for the artifact. Refuse and surface. |
+| `quota.materialize_rate_exceeded` | Back off and retry. Surface the quota state to the user. |
 | `registry.read_only` | The registry is degraded. Continue serving cached content; mark subsequent loads as cache-only. |
 
 ---
