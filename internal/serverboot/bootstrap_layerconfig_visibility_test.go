@@ -74,3 +74,39 @@ func TestBootstrapLayerPath_HonorsLayerConfigVisibility(t *testing.T) {
 		t.Errorf("persisted open config = %+v, want public=true", got)
 	}
 }
+
+// Spec: §4.6 — a .layer-config that is present but declares an empty
+// visibility block carries no filters, so the bootstrap treats it like a
+// layer that declares nothing: it falls back to the deployment default
+// rather than booting visible to no one. This keeps the filesystem bootstrap
+// consistent with the declarative `visibility:` path (layerConfigFromEntry),
+// which also defaults an empty block.
+func TestBootstrapLayerPath_EmptyLayerConfigFallsBackToDefault(t *testing.T) {
+	st := newMemoryStoreWithTenant(t)
+	root := t.TempDir()
+	testharness.WriteTree(t, root,
+		testharness.WriteTreeOption{Path: ".registry-config", Content: "multi_layer: true\n"},
+		testharness.WriteTreeOption{Path: "lyr/a/ARTIFACT.md", Content: artifactBody},
+		// File present, visibility block empty (no filters declared).
+		testharness.WriteTreeOption{Path: "lyr/.layer-config", Content: "visibility:\n"},
+	)
+
+	layers, err := bootstrapLayerPath(st, "default", root, layer.Visibility{Public: true}, 0, true, nil, "", nil, false, collocatedVectorIngest{}, false, nil)
+	if err != nil {
+		t.Fatalf("bootstrapLayerPath: %v", err)
+	}
+	if len(layers) != 1 {
+		t.Fatalf("layers = %v, want 1", layers)
+	}
+	if !layers[0].Visibility.Public {
+		t.Errorf("in-memory visibility = %+v, want public (bootstrap default for an empty .layer-config)", layers[0].Visibility)
+	}
+
+	cfgs, err := st.ListLayerConfigs(context.Background(), "default")
+	if err != nil {
+		t.Fatalf("ListLayerConfigs: %v", err)
+	}
+	if len(cfgs) != 1 || !cfgs[0].Public {
+		t.Errorf("persisted config = %+v, want public=true", cfgs)
+	}
+}

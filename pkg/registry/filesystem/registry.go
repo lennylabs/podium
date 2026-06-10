@@ -74,7 +74,9 @@ type Layer struct {
 	Path string
 	// Visibility is the §4.6 visibility declared in the layer's optional
 	// .layer-config file. HasVisibility reports whether such a file was
-	// present; when false a server bootstrap applies its default.
+	// present. A server bootstrap applies its own default when the layer
+	// declares no visibility, meaning either no file or a present file
+	// whose visibility block is empty.
 	Visibility    Visibility
 	HasVisibility bool
 }

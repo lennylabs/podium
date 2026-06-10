@@ -306,21 +306,25 @@ func NewFromFilesystem(path string, opts ...Option) (*Server, error) {
 }
 
 // bootstrapVisibility resolves the runtime visibility of a filesystem-source
-// layer. A layer that declares visibility via its .layer-config file (§4.6)
-// uses that declaration; a layer without one defaults to public, the §13.10
-// standalone bootstrap default. This lets a fixture or migrated directory
-// express every visibility mode through the filesystem load path while
-// preserving the all-public default for layers that say nothing.
+// layer. A layer that declares a non-empty visibility via its .layer-config
+// file (§4.6) uses that declaration; a layer that declares nothing (no file,
+// or a present file whose visibility block is empty) defaults to public, the
+// §13.10 standalone bootstrap default. This lets a fixture or migrated
+// directory express every visibility mode through the filesystem load path
+// while preserving the all-public default for layers that say nothing. The
+// empty-block fallback matches bootstrapLayerPath, so the server-source and
+// store-backed bootstrap paths agree.
 func bootstrapVisibility(l filesystem.Layer) layer.Visibility {
-	if !l.HasVisibility {
-		return layer.Visibility{Public: true}
-	}
-	return layer.Visibility{
+	v := layer.Visibility{
 		Public:       l.Visibility.Public,
 		Organization: l.Visibility.Organization,
 		Groups:       l.Visibility.Groups,
 		Users:        l.Visibility.Users,
 	}
+	if v.Public || v.Organization || len(v.Groups) > 0 || len(v.Users) > 0 {
+		return v
+	}
+	return layer.Visibility{Public: true}
 }
 
 // Handler returns an http.Handler with every meta-tool route registered.
