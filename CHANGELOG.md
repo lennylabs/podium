@@ -6,7 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-[Unreleased]: https://github.com/lennylabs/podium/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/lennylabs/podium/compare/v0.1.5...HEAD
+
+## [0.1.5] - 2026-06-10
+
+A standalone server pointed at a filesystem registry now honors per-layer `.layer-config` visibility at boot, instead of stamping one deployment default on every layer.
+
+### Fixed
+
+- **Standalone bootstrap** (§4.6, §13.11.1): a `PODIUM_LAYER_PATH` filesystem registry served by a standalone server applies each layer's declared `.layer-config` visibility. A layer that declares a non-empty visibility boots with it; a layer with no `.layer-config`, or one whose `visibility:` block is empty, falls back to the deployment default (`PODIUM_DEFAULT_LAYER_VISIBILITY`), matching how a declarative `layers:` entry resolves an empty block.
+
+### Documentation
+
+- Documented the optional per-layer `.layer-config` file and its `visibility:` schema in the filesystem-registry directory layout (§13.11.1) and the solo/filesystem deployment guide.
+
+[0.1.5]: https://github.com/lennylabs/podium/releases/tag/v0.1.5
 
 ## [0.1.4] - 2026-06-08
 
