@@ -240,6 +240,7 @@ A filesystem registry rooted at `<registry-path>` is a directory of layer direct
 <registry-path>/
 ├── .registry-config            # required; opts the directory into filesystem-registry mode
 ├── team-shared/                # one layer
+│   ├── .layer-config           # optional; per-layer visibility
 │   ├── DOMAIN.md
 │   ├── finance/
 │   │   └── close-reporting/
@@ -263,6 +264,16 @@ layer_order:             # optional. When omitted, layer order is alphabetical b
 ```
 
 `multi_layer: true` is the opt-in that distinguishes a filesystem-registry root from a single-layer directory. When `.registry-config` is absent, or when it sets `multi_layer: false`, the directory is interpreted as a single-layer setup (one `local`-source layer rooted at `<registry-path>`, per §13.10). The same dispatch applies to `podium sync` against a filesystem path (§7.5.2) and to the standalone server's `--layer-path` (§13.10).
+
+Each layer directory may contain an optional `.layer-config` file that declares the layer's §4.6 visibility:
+
+```yaml
+# <registry-path>/team-shared/.layer-config
+visibility:
+  groups: [acme-finance]   # one or more of public, organization, groups, or users (§4.6)
+```
+
+In single-layer mode the file sits at `<registry-path>/.layer-config`. `podium sync` (filesystem source) does not read it, because the filesystem-registry bypass (§4.6) short-circuits visibility to `true` for every layer. A server pointed at the same directory through `--layer-path` (§13.10) reads it and applies the declared visibility to the bootstrap layer when the `visibility:` block is non-empty. A layer with no `.layer-config`, or one whose `visibility:` block is empty, takes the deployment default (`PODIUM_DEFAULT_LAYER_VISIBILITY`, §13.12), which resolves to `public` for a no-identity standalone and to `private` once an identity provider gates access (§13.10).
 
 The workspace local overlay (`<workspace>/.podium/overlay/`, §6.4) sits on top of the filesystem-registry layers, exactly as in server source.
 

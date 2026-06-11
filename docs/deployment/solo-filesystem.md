@@ -68,6 +68,7 @@ A filesystem registry rooted at `<registry-path>` is a directory of layer direct
 <registry-path>/
 ├── .registry-config            # required; opts the directory into filesystem-registry mode
 ├── team-shared/                # one layer
+│   ├── .layer-config           # optional; per-layer visibility
 │   ├── DOMAIN.md
 │   ├── finance/
 │   │   └── close-reporting/
@@ -91,6 +92,16 @@ layer_order:             # optional; lowest-precedence first
 ```
 
 When `.registry-config` is absent (or sets `multi_layer: false`), the directory is treated as a single-layer setup instead: one `local`-source layer rooted at the path. The same dispatch applies whether the consumer is `podium sync` (filesystem source) or `podium serve --standalone --layer-path` (standalone server pointed at the same directory).
+
+A layer directory may also hold an optional `.layer-config` file declaring that layer's visibility (`public`, `organization`, `groups`, or `users`):
+
+```yaml
+# <registry-path>/team-shared/.layer-config
+visibility:
+  groups: [acme-finance]
+```
+
+`podium sync` ignores it, because filesystem-source visibility is bypassed. It takes effect once a server serves the same directory through `podium serve --standalone --layer-path`: a layer with a non-empty `visibility:` block boots with that visibility, and a layer with no `.layer-config` or an empty block takes the deployment default (`PODIUM_DEFAULT_LAYER_VISIBILITY`).
 
 The workspace local overlay (`<workspace>/.podium/overlay/`) sits on top of the filesystem-registry layers, exactly as in server mode.
 

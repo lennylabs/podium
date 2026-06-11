@@ -282,26 +282,6 @@ func parseAuditSampleRates(raw string) map[audit.EventType]float64 {
 	return out
 }
 
-// bootstrapLayerPath ingests the filesystem registry at layerPath
-// (when non-empty), persists a store.LayerConfig per resolved layer,
-// and returns the in-memory []layer.Layer the core registry uses for
-// visibility filtering. Returns an empty slice when layerPath is
-// empty so the caller can pass the result straight into core.New.
-//
-// Ingest runs against context.Background: a bootstrap failure
-// returns an error and aborts startup before any HTTP listener is
-// bound, so there is no in-flight request context to thread through.
-//
-// Layer ordering follows filesystem.Open's resolution
-// (alphabetical, or layer_order: when .registry-config sets it),
-// with Order/Precedence assigned startOrder+1..startOrder+N
-// (lowest-precedence first per §4.6). startOrder lets a caller append
-// these layers after a declarative `layers:` list.
-//
-// vis is the visibility stamped on every resolved layer. It is computed
-// by the caller from the deployment mode (§4.6 / §13.10): public for a
-// no-identity-provider standalone, otherwise the configured default.
-// The bootstrap path supplies no per-layer visibility input.
 // ingestLinter builds the ingest linter shared by the bootstrap paths:
 // §4.4 prose-URL validation (offline per PODIUM_INGEST_OFFLINE) plus the
 // §4.5.5 discovery-override warning when the tenant disabled per-domain
@@ -369,6 +349,27 @@ func seedOperatorAdmins(ctx context.Context, st store.Store, operators []string)
 	return seeded, nil
 }
 
+// bootstrapLayerPath ingests the filesystem registry at layerPath
+// (when non-empty), persists a store.LayerConfig per resolved layer,
+// and returns the in-memory []layer.Layer the core registry uses for
+// visibility filtering. Returns an empty slice when layerPath is
+// empty so the caller can pass the result straight into core.New.
+//
+// Ingest runs against context.Background: a bootstrap failure
+// returns an error and aborts startup before any HTTP listener is
+// bound, so there is no in-flight request context to thread through.
+//
+// Layer ordering follows filesystem.Open's resolution
+// (alphabetical, or layer_order: when .registry-config sets it),
+// with Order/Precedence assigned startOrder+1..startOrder+N
+// (lowest-precedence first per §4.6). startOrder lets a caller append
+// these layers after a declarative `layers:` list.
+//
+// vis is the deployment default visibility (§4.6 / §13.10): public for
+// a no-identity-provider standalone, otherwise the configured default.
+// It applies to a layer that declares no visibility of its own. A layer
+// that declares a non-empty visibility in its .layer-config (§4.6)
+// overrides vis with the declared value.
 func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Visibility, startOrder int, allowPerDomain bool, resourcePut ingest.ResourcePutFunc, rejectAtOrAbove manifest.Sensitivity, signer ingest.SignerFunc, useVectorOutbox bool, collocatedVec collocatedVectorIngest, enforceSandbox bool, hostSandboxes []string) ([]layer.Layer, error) {
 	if layerPath == "" {
 		return []layer.Layer{}, nil
@@ -381,6 +382,18 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 	layers := make([]layer.Layer, 0, len(fsReg.Layers))
 	for i, l := range fsReg.Layers {
 		order := startOrder + i + 1
+		// §4.6: honor per-layer visibility declared in the layer's
+		// .layer-config. filesystem.Open parses it into l.Visibility (the
+		// two Visibility types carry identical fields, so the conversion is
+		// a direct copy). A non-empty declaration overrides the bootstrap
+		// default; a layer that declares nothing (no .layer-config, or a
+		// present file whose visibility block is empty) falls back to vis.
+		// This mirrors how layerConfigFromEntry resolves an empty
+		// declarative `visibility:` block, so both bootstrap paths agree.
+		effVis := layer.Visibility(l.Visibility)
+		if visibilityIsEmpty(effVis) {
+			effVis = vis
+		}
 		res, err := ingest.Ingest(ctx, st, ingest.Request{
 			TenantID: tenantID,
 			LayerID:  l.ID,
@@ -427,10 +440,10 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			SourceType:   "local",
 			LocalPath:    l.Path,
 			Order:        order,
-			Public:       vis.Public,
-			Organization: vis.Organization,
-			Groups:       vis.Groups,
-			Users:        vis.Users,
+			Public:       effVis.Public,
+			Organization: effVis.Organization,
+			Groups:       effVis.Groups,
+			Users:        effVis.Users,
 			CreatedAt:    now,
 			// §7.3.1: the bootstrap ingest just completed, so stamp
 			// last_ingested_at for staleness monitoring.
@@ -442,7 +455,7 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 		layers = append(layers, layer.Layer{
 			ID:         l.ID,
 			Precedence: order,
-			Visibility: vis,
+			Visibility: effVis,
 		})
 		log.Printf("ingested layer %s from %s (accepted=%d, idempotent=%d, rejected=%d, advisories=%d)",
 			l.ID, l.Path, res.Accepted, res.Idempotent, len(res.Rejected), len(res.Advisories))
@@ -808,9 +821,10 @@ func run(ctx context.Context, stop func()) error {
 	// for search and load_artifact, and additionally persists a
 	// store.LayerConfig per layer so the §7.3.1 layer-management
 	// endpoints (GET /v1/layers, POST /v1/layers/reingest,
-	// DELETE /v1/layers) see the bootstrap layers. These layers carry no
-	// per-layer visibility input, so they take the deployment default
-	// (§4.6 / §13.10). They append after the declared layers.
+	// DELETE /v1/layers) see the bootstrap layers. Each layer takes the
+	// visibility declared in its .layer-config (§4.6) when present, and the
+	// deployment default (§4.6 / §13.10) otherwise. They append after the
+	// declared layers.
 	pathLayers, err := bootstrapLayerPath(st, tenantID, cfg.layerPath, defaultBootstrapVisibility(cfg), len(declared), cfg.allowPerDomain(), resourcePut, publicSensitivityFloor(cfg), ingestSigner, useVectorOutbox, collocatedVec, cfg.enforceSandboxProfile, cfg.hostSandboxes)
 	if err != nil {
 		return err
