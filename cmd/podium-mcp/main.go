@@ -1186,7 +1186,7 @@ func (s *mcpServer) handle(req rpcRequest) rpcResponse {
 			"tools": metaToolDescriptors(),
 		}
 	case "tools/call":
-		resp.Result = s.callTool(req.Params)
+		resp.Result = toolCallResult(s.callTool(req.Params))
 	case "resources/list":
 		// §5.0 — read-only mirror of load_artifact: artifact bodies are
 		// also exposed through MCP's resource protocol.
@@ -1232,6 +1232,44 @@ func (s *mcpServer) callTool(raw json.RawMessage) any {
 	result := s.dispatchTool(p)
 	s.metrics.ObserveCall(p.Name, isErrorResult(result), time.Since(start))
 	return result
+}
+
+// toolCallResult turns a meta-tool's domain result into an MCP CallToolResult
+// (§ MCP tools/call). The change is PURELY ADDITIVE: the domain object's own
+// fields are preserved at the result top level (so existing consumers that
+// read result.<field> keep working), and we add
+//
+//   - a `content` array carrying the JSON as a text block, so MCP hosts that
+//     render `result.content` (Claude Code, Claude Desktop, Cursor, VS Code)
+//     show the output — without it the host renders an empty tool result and
+//     the model never sees search/load output;
+//   - `structuredContent` mirroring the object for hosts that consume the
+//     typed result directly;
+//   - `isError`, set from the §6.10 error envelope so the host marks failures.
+//
+// Keeping the domain fields in place (rather than relocating them under
+// structuredContent) means no existing caller or test breaks while hosts gain
+// a renderable result.
+func toolCallResult(domain any) any {
+	text, err := json.MarshalIndent(domain, "", "  ")
+	if err != nil {
+		text = []byte(fmt.Sprintf("%v", domain))
+	}
+	// Preserve the domain object's own fields at the top level. A meta-tool
+	// result is always a JSON object (map or struct); decoding the marshaled
+	// form yields those fields uniformly. Non-objects (none today) fall back
+	// to an envelope-only result.
+	out := map[string]any{}
+	var obj map[string]any
+	if json.Unmarshal(text, &obj) == nil && obj != nil {
+		out = obj
+	}
+	out["content"] = []map[string]any{{"type": "text", "text": string(text)}}
+	out["structuredContent"] = domain
+	if isErrorResult(domain) {
+		out["isError"] = true
+	}
+	return out
 }
 
 // isErrorResult reports whether a meta-tool result is a §6.10 error envelope,
