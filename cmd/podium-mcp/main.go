@@ -1235,37 +1235,26 @@ func (s *mcpServer) callTool(raw json.RawMessage) any {
 }
 
 // toolCallResult turns a meta-tool's domain result into an MCP CallToolResult
-// (§ MCP tools/call). The change is PURELY ADDITIVE: the domain object's own
-// fields are preserved at the result top level (so existing consumers that
-// read result.<field> keep working), and we add
-//
-//   - a `content` array carrying the JSON as a text block, so MCP hosts that
-//     render `result.content` (Claude Code, Claude Desktop, Cursor, VS Code)
-//     show the output — without it the host renders an empty tool result and
-//     the model never sees search/load output;
-//   - `structuredContent` mirroring the object for hosts that consume the
-//     typed result directly;
-//   - `isError`, set from the §6.10 error envelope so the host marks failures.
-//
-// Keeping the domain fields in place (rather than relocating them under
-// structuredContent) means no existing caller or test breaks while hosts gain
-// a renderable result.
+// (§6.1.1). The domain object is carried twice, as the MCP result format
+// intends: `structuredContent` holds the typed object for programmatic
+// consumers, and `content` holds the same JSON as a text block so MCP hosts
+// (Claude Code, Claude Desktop, Cursor, VS Code) render the output. Without a
+// `content` block the host renders an empty tool result and the model never
+// sees the search or load output. `isError` is set for a §6.10 error envelope
+// so the host marks the failure. The domain fields live under
+// `structuredContent`; the result top level carries only the MCP envelope keys.
 func toolCallResult(domain any) any {
 	text, err := json.MarshalIndent(domain, "", "  ")
 	if err != nil {
+		// Unreachable for the map[string]any envelopes every meta-tool
+		// returns; the fallback keeps a renderable block instead of panicking
+		// if a future result carries a value json cannot marshal.
 		text = []byte(fmt.Sprintf("%v", domain))
 	}
-	// Preserve the domain object's own fields at the top level. A meta-tool
-	// result is always a JSON object (map or struct); decoding the marshaled
-	// form yields those fields uniformly. Non-objects (none today) fall back
-	// to an envelope-only result.
-	out := map[string]any{}
-	var obj map[string]any
-	if json.Unmarshal(text, &obj) == nil && obj != nil {
-		out = obj
+	out := map[string]any{
+		"content":           []map[string]any{{"type": "text", "text": string(text)}},
+		"structuredContent": domain,
 	}
-	out["content"] = []map[string]any{{"type": "text", "text": string(text)}}
-	out["structuredContent"] = domain
 	if isErrorResult(domain) {
 		out["isError"] = true
 	}

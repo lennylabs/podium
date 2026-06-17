@@ -38,13 +38,17 @@ func runHealthTool(t *testing.T, registry string) healthToolResult {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("run: %v\n%s", err, stdout.String())
 	}
+	// The health payload is the meta-tool domain object, carried under
+	// structuredContent in the §6.1.1 CallToolResult envelope.
 	var resp struct {
-		Result healthToolResult `json:"result"`
+		Result struct {
+			StructuredContent healthToolResult `json:"structuredContent"`
+		} `json:"result"`
 	}
 	if err := json.NewDecoder(&stdout).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v\n%s", err, stdout.String())
 	}
-	return resp.Result
+	return resp.Result.StructuredContent
 }
 
 // Spec: §13.9 — the health tool reports the registry as

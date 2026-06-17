@@ -8,6 +8,14 @@ A single Go binary serves every deployment context. The host configures it via e
 
 **Requires a server-source registry.** The MCP server speaks HTTP and does not work against a filesystem-source registry (§13.11).
 
+### 6.1.1 Tool Result Format
+
+A `tools/call` response is an MCP `CallToolResult`. The bridge carries the meta-tool's result in two fields. `structuredContent` holds the typed domain object, the fields documented in §5 (such as `results` and `total_matched` for `search_artifacts`, or `id`, `manifest_body`, and `materialized_at` for `load_artifact`). `content` holds the same object serialized as a single JSON text block, so a host that renders `result.content` (Claude Code, Claude Desktop, Cursor, VS Code) displays the output to the model. A `CallToolResult` with no `content` block renders as empty, and the model receives no tool output.
+
+`isError` is set to `true` when the domain object is a §6.10 error envelope, so the host marks the call as failed. A tool-level failure is reported as a `CallToolResult` with `isError: true`. A JSON-RPC `error` is reserved for protocol faults such as an unknown method or malformed parameters.
+
+The meta-tool fields are reachable under `structuredContent`. The result top level carries the MCP envelope keys (`content`, `structuredContent`, and `isError`), so a consumer reads `result.structuredContent.<field>` for the meta-tool output.
+
 ## 6.2 Configuration
 
 Top-level configuration parameters (env-var form shown; `--flag` and config-file equivalents are accepted):
@@ -357,7 +365,7 @@ The tenant-management endpoints (§7.3.3) reuse existing codes for authorization
 }
 ```
 
-Codes are namespaced (`auth.*`, `config.*`, `ingest.*`, `materialize.*`, `quota.*`, `mcp.*`, `network.*`, `registry.*`, `domain.*`). Mapped to MCP error payloads per the MCP spec.
+Codes are namespaced (`auth.*`, `config.*`, `ingest.*`, `materialize.*`, `quota.*`, `mcp.*`, `network.*`, `registry.*`, `domain.*`). Mapped to MCP error payloads per the MCP spec. A meta-tool error envelope is returned from `tools/call` as the `CallToolResult` carrying `isError: true`, with the envelope under `structuredContent` (§6.1.1).
 
 ## 6.11 Host Configuration Recipes
 

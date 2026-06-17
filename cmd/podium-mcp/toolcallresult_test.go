@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 )
 
@@ -44,19 +45,25 @@ func TestToolCallResult_Success(t *testing.T) {
 		t.Fatalf("content text lost data: %v", back["query"])
 	}
 
-	// structuredContent must be the original domain object.
-	if out["structuredContent"] == nil {
-		t.Fatal("structuredContent missing")
+	// structuredContent must be the original domain object, with its fields
+	// intact.
+	sc, ok := out["structuredContent"].(map[string]any)
+	if !ok {
+		t.Fatalf("structuredContent missing or not an object: %#v", out["structuredContent"])
+	}
+	if sc["query"] != "what went wrong in this output" || sc["total_matched"] != 1 {
+		t.Fatalf("structuredContent lost data: %#v", sc)
 	}
 
-	// Non-breaking contract: the domain object's own fields stay at the result
-	// top level so existing consumers that read result.<field> keep working.
-	if out["query"] != "what went wrong in this output" {
-		t.Fatalf("top-level domain field not preserved: query=%v", out["query"])
+	// The domain fields live under structuredContent, not at the result top
+	// level. The top level carries only the MCP envelope keys.
+	if _, present := out["query"]; present {
+		t.Errorf("domain field query must not appear at the result top level: %#v", out)
 	}
-	if out["total_matched"] == nil {
-		t.Fatal("top-level domain field total_matched not preserved")
+	if _, present := out["total_matched"]; present {
+		t.Errorf("domain field total_matched must not appear at the result top level: %#v", out)
 	}
+	assertEnvelopeKeysOnly(t, out, false)
 
 	// A successful result must NOT be flagged isError.
 	if _, present := out["isError"]; present {
@@ -66,8 +73,9 @@ func TestToolCallResult_Success(t *testing.T) {
 
 // TestToolCallResult_Error proves a §6.10 error envelope ({"error": ...}) is
 // still wrapped with content AND flagged isError:true so the host marks it.
+// The error envelope itself stays under structuredContent.
 func TestToolCallResult_Error(t *testing.T) {
-	domain := map[string]any{"error": "registry unauthorized"}
+	domain := map[string]any{"error": "registry unauthorized", "code": "auth.forbidden"}
 
 	out := toolCallResult(domain).(map[string]any)
 
@@ -79,16 +87,22 @@ func TestToolCallResult_Error(t *testing.T) {
 	if !present || isErr != true {
 		t.Fatalf("isError must be true for an error envelope; got present=%v val=%v", present, isErr)
 	}
-	// The error key stays at the top level (consumers and the integration
-	// suite read result["error"] directly).
-	if out["error"] != "registry unauthorized" {
-		t.Fatalf("top-level error not preserved: %v", out["error"])
+
+	// The error envelope is reachable under structuredContent, not at the top
+	// level.
+	if _, present := out["error"]; present {
+		t.Errorf("error must not appear at the result top level: %#v", out)
 	}
+	sc, ok := out["structuredContent"].(map[string]any)
+	if !ok || sc["error"] != "registry unauthorized" {
+		t.Fatalf("structuredContent did not carry the error envelope: %#v", out["structuredContent"])
+	}
+	assertEnvelopeKeysOnly(t, out, true)
 }
 
 // TestToolCallResult_IsValidMCPWire serializes the wrapped result exactly as
 // the server writes it to stdout and asserts the on-the-wire JSON-RPC result
-// has the fields an MCP host requires (content[].type/text).
+// has the fields an MCP host requires (content[].type/text + structuredContent).
 func TestToolCallResult_IsValidMCPWire(t *testing.T) {
 	domain := map[string]any{"results": []any{}, "total_matched": 0}
 	wire, err := json.Marshal(toolCallResult(domain))
@@ -110,5 +124,49 @@ func TestToolCallResult_IsValidMCPWire(t *testing.T) {
 	}
 	if parsed.StructuredContent == nil {
 		t.Fatalf("wire result lacks structuredContent: %s", wire)
+	}
+	if _, present := parsed.StructuredContent["total_matched"]; !present {
+		t.Fatalf("structuredContent lost the domain fields on the wire: %s", wire)
+	}
+}
+
+// TestToolCallResult_MarshalFallback covers the branch where json.MarshalIndent
+// fails (a value json cannot marshal). The wrapper falls back to a fmt rendering
+// for the content text instead of panicking, and still carries
+// structuredContent. No meta-tool produces such a result; the test exercises
+// the guard directly.
+func TestToolCallResult_MarshalFallback(t *testing.T) {
+	domain := map[string]any{"bad": make(chan int)} // channels are not JSON-marshalable
+
+	out, ok := toolCallResult(domain).(map[string]any)
+	if !ok {
+		t.Fatalf("toolCallResult did not return a map; got %T", toolCallResult(domain))
+	}
+	content, ok := out["content"].([]map[string]any)
+	if !ok || len(content) == 0 {
+		t.Fatalf("missing content block on marshal fallback: %#v", out)
+	}
+	text, _ := content[0]["text"].(string)
+	if text != fmt.Sprintf("%v", domain) {
+		t.Fatalf("content text = %q, want the fmt fallback rendering", text)
+	}
+	if out["structuredContent"] == nil {
+		t.Fatal("structuredContent missing on marshal fallback")
+	}
+}
+
+// assertEnvelopeKeysOnly asserts the wrapped result's top level carries only
+// the MCP CallToolResult envelope keys (content, structuredContent, and
+// isError when wantIsError), so no domain field leaks to the top level.
+func assertEnvelopeKeysOnly(t *testing.T, out map[string]any, wantIsError bool) {
+	t.Helper()
+	allowed := map[string]bool{"content": true, "structuredContent": true}
+	if wantIsError {
+		allowed["isError"] = true
+	}
+	for k := range out {
+		if !allowed[k] {
+			t.Errorf("unexpected top-level key %q on the CallToolResult envelope: %#v", k, out)
+		}
 	}
 }

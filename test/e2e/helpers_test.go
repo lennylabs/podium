@@ -478,7 +478,11 @@ func rpcEnvelope(t testing.TB, stdout string, id int) map[string]any {
 }
 
 // rpcResult returns the `result` object of the response with the given id,
-// failing if the envelope carried an `error`.
+// failing if the envelope carried an `error`. A tools/call response is an MCP
+// CallToolResult (§6.1.1); this returns the meta-tool domain object carried in
+// structuredContent so callers read the domain fields directly. Other methods
+// (initialize, tools/list, resources/*) carry no structuredContent and pass
+// through unchanged.
 func rpcResult(t testing.TB, stdout string, id int) map[string]any {
 	t.Helper()
 	env := rpcEnvelope(t, stdout, id)
@@ -486,6 +490,9 @@ func rpcResult(t testing.TB, stdout string, id int) map[string]any {
 		t.Fatalf("JSON-RPC id=%d returned error: %v", id, e)
 	}
 	res, _ := env["result"].(map[string]any)
+	if sc, ok := res["structuredContent"].(map[string]any); ok {
+		return sc
+	}
 	return res
 }
 

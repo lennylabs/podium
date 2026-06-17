@@ -85,9 +85,13 @@ func progToolErr(t *testing.T, stdout string, id int) string {
 	if e, ok := env["error"]; ok && e != nil {
 		return fmt.Sprintf("%v", e)
 	}
+	// A tool-level error is carried in the CallToolResult's structuredContent
+	// (§6.1.1), with isError set on the envelope.
 	if res, ok := env["result"].(map[string]any); ok {
-		if e, ok := res["error"].(string); ok {
-			return e
+		if sc, ok := res["structuredContent"].(map[string]any); ok {
+			if e, ok := sc["error"].(string); ok {
+				return e
+			}
 		}
 	}
 	return ""
@@ -1113,7 +1117,11 @@ func TestGovernance_AlwaysPolicyRejectsLowUnsigned(t *testing.T) {
 	if e, ok := envelope["error"]; ok && e != nil {
 		errStr = fmt.Sprintf("%v", e)
 	} else if result, ok := envelope["result"].(map[string]any); ok {
-		errStr, _ = result["error"].(string)
+		// The tool-level error lives in the CallToolResult's structuredContent
+		// (§6.1.1).
+		if sc, ok := result["structuredContent"].(map[string]any); ok {
+			errStr, _ = sc["error"].(string)
+		}
 	}
 	if !strings.Contains(errStr, "signature") {
 		t.Errorf("expected signature_missing error under always policy, got: %q\nstdout: %s", errStr, res.Stdout)

@@ -144,16 +144,26 @@ func TestPodiumMCP_NetworkRegistryUnreachable(t *testing.T) {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
+	// The domain object lives under structuredContent in the §6.1.1
+	// CallToolResult envelope; offline is a success result, so isError is
+	// absent.
 	var resp struct {
-		Result map[string]any `json:"result"`
+		Result struct {
+			StructuredContent map[string]any `json:"structuredContent"`
+			IsError           bool           `json:"isError"`
+		} `json:"result"`
 	}
 	if err := json.NewDecoder(&stdout).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v\nstdout: %s", err, stdout.String())
 	}
-	if resp.Result["status"] != "offline" {
-		t.Errorf("status = %v, want offline (result=%v)", resp.Result["status"], resp.Result)
+	sc := resp.Result.StructuredContent
+	if sc["status"] != "offline" {
+		t.Errorf("status = %v, want offline (result=%v)", sc["status"], sc)
 	}
-	if _, hasErr := resp.Result["error"]; hasErr {
-		t.Errorf("offline result must not carry an error key: %v", resp.Result)
+	if _, hasErr := sc["error"]; hasErr {
+		t.Errorf("offline result must not carry an error key: %v", sc)
+	}
+	if resp.Result.IsError {
+		t.Errorf("offline status is a success result; isError must be absent or false: %v", resp.Result)
 	}
 }

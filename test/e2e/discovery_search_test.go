@@ -56,9 +56,13 @@ func brToolErr(t *testing.T, stdout string, id int) string {
 	if e, ok := env["error"]; ok && e != nil {
 		return fmt.Sprintf("%v", e)
 	}
+	// A tool-level error is carried in the CallToolResult's structuredContent
+	// (§6.1.1), with isError set on the envelope.
 	if res, ok := env["result"].(map[string]any); ok {
-		if e, ok := res["error"].(string); ok {
-			return e
+		if sc, ok := res["structuredContent"].(map[string]any); ok {
+			if e, ok := sc["error"].(string); ok {
+				return e
+			}
 		}
 	}
 	return ""

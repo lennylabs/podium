@@ -9,7 +9,9 @@ import (
 )
 
 // callToolOver runs one meta-tool call through a freshly spawned MCP bridge
-// process against the given registry URL, returning the decoded result map.
+// process against the given registry URL, returning the decoded domain object.
+// The domain object is the structuredContent of the MCP CallToolResult
+// envelope (§6.1.1); the meta-tool fields (status, error, ...) live there.
 func callToolOver(t *testing.T, registry, cacheDir, tool string, args map[string]any, extraEnv ...string) map[string]any {
 	t.Helper()
 	bin := buildMCP(t)
@@ -32,12 +34,14 @@ func callToolOver(t *testing.T, registry, cacheDir, tool string, args map[string
 		t.Fatalf("run mcp: %v\nstdout:\n%s", err, stdout.String())
 	}
 	var resp struct {
-		Result map[string]any `json:"result"`
+		Result struct {
+			StructuredContent map[string]any `json:"structuredContent"`
+		} `json:"result"`
 	}
 	if err := json.NewDecoder(&stdout).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v\nstdout: %s", err, stdout.String())
 	}
-	return resp.Result
+	return resp.Result.StructuredContent
 }
 
 // Spec: §12 — "Fresh load_domain / search_domains / search_artifacts

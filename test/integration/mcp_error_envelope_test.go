@@ -46,13 +46,21 @@ func TestPodiumMCP_StructuredErrorEnvelopeReachesClient(t *testing.T) {
 		t.Fatalf("run: %v\nstdout: %s", err, stdout.String())
 	}
 
+	// The §6.10 error envelope is carried under structuredContent in the
+	// §6.1.1 CallToolResult, with isError set on the envelope.
 	var resp struct {
-		Result map[string]any `json:"result"`
+		Result struct {
+			IsError           bool           `json:"isError"`
+			StructuredContent map[string]any `json:"structuredContent"`
+		} `json:"result"`
 	}
 	if err := json.NewDecoder(&stdout).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v\nstdout: %s", err, stdout.String())
 	}
-	r := resp.Result
+	if !resp.Result.IsError {
+		t.Errorf("error envelope must set isError on the CallToolResult: %+v", resp.Result)
+	}
+	r := resp.Result.StructuredContent
 	if r == nil {
 		t.Fatalf("nil result: %s", stdout.String())
 	}

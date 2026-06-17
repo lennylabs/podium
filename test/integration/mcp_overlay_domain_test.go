@@ -83,18 +83,22 @@ func decodeLoadDomainNotableIDs(t *testing.T, stdout string, id int) map[string]
 		if line == "" {
 			continue
 		}
+		// load_domain's domain object lives under structuredContent in the
+		// §6.1.1 CallToolResult envelope.
 		var env struct {
 			ID     int `json:"id"`
 			Result struct {
-				Notable []struct {
-					ID string `json:"id"`
-				} `json:"notable"`
+				StructuredContent struct {
+					Notable []struct {
+						ID string `json:"id"`
+					} `json:"notable"`
+				} `json:"structuredContent"`
 			} `json:"result"`
 		}
 		if json.Unmarshal([]byte(line), &env) != nil || env.ID != id {
 			continue
 		}
-		for _, n := range env.Result.Notable {
+		for _, n := range env.Result.StructuredContent.Notable {
 			ids[n.ID] = true
 		}
 		return ids
