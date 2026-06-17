@@ -200,13 +200,17 @@ func (p *bridgeProc) loadVersion(t *testing.T, id string) string {
 		if l == "" {
 			t.Fatalf("no response from bridge (id=%d)", p.id)
 		}
+		// load_artifact's domain object lives under structuredContent in the
+		// §6.1.1 CallToolResult envelope.
 		var resp struct {
-			Result map[string]any `json:"result"`
+			Result struct {
+				StructuredContent map[string]any `json:"structuredContent"`
+			} `json:"result"`
 		}
 		if err := json.Unmarshal([]byte(l), &resp); err != nil {
 			t.Fatalf("decode response %q: %v", l, err)
 		}
-		v, _ := resp.Result["version"].(string)
+		v, _ := resp.Result.StructuredContent["version"].(string)
 		return v
 	case <-time.After(15 * time.Second):
 		t.Fatalf("timed out waiting for bridge response (id=%d)", p.id)

@@ -52,20 +52,24 @@ func TestPodiumMCP_LoadArtifactMaterializes(t *testing.T) {
 		t.Fatalf("run mcp: %v\nstdout:\n%s", err, stdout.String())
 	}
 
-	// The response contains materialized_at paths.
+	// The response contains materialized_at paths. The domain object lives
+	// under structuredContent in the §6.1.1 CallToolResult envelope.
 	var resp struct {
 		Result struct {
-			ID             string   `json:"id"`
-			MaterializedAt []string `json:"materialized_at"`
+			StructuredContent struct {
+				ID             string   `json:"id"`
+				MaterializedAt []string `json:"materialized_at"`
+			} `json:"structuredContent"`
 		} `json:"result"`
 	}
 	if err := json.NewDecoder(&stdout).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v\nstdout: %s", err, stdout.String())
 	}
-	if resp.Result.ID != "company-glossary" {
-		t.Errorf("ID = %q, want company-glossary", resp.Result.ID)
+	sc := resp.Result.StructuredContent
+	if sc.ID != "company-glossary" {
+		t.Errorf("ID = %q, want company-glossary", sc.ID)
 	}
-	if len(resp.Result.MaterializedAt) == 0 {
+	if len(sc.MaterializedAt) == 0 {
 		t.Errorf("expected at least one materialized_at path")
 	}
 
@@ -119,18 +123,21 @@ func TestPodiumMCP_TargetHarnessesSuppressesMaterialize(t *testing.T) {
 
 	var resp struct {
 		Result struct {
-			ID             string   `json:"id"`
-			MaterializedAt []string `json:"materialized_at"`
+			StructuredContent struct {
+				ID             string   `json:"id"`
+				MaterializedAt []string `json:"materialized_at"`
+			} `json:"structuredContent"`
 		} `json:"result"`
 	}
 	if err := json.NewDecoder(&stdout).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v\nstdout: %s", err, stdout.String())
 	}
-	if resp.Result.ID != "tools/cc-only" {
-		t.Errorf("ID = %q, want tools/cc-only (load still succeeds)", resp.Result.ID)
+	sc := resp.Result.StructuredContent
+	if sc.ID != "tools/cc-only" {
+		t.Errorf("ID = %q, want tools/cc-only (load still succeeds)", sc.ID)
 	}
-	if len(resp.Result.MaterializedAt) != 0 {
-		t.Errorf("materialized_at = %v, want empty (artifact opted out of the none harness)", resp.Result.MaterializedAt)
+	if len(sc.MaterializedAt) != 0 {
+		t.Errorf("materialized_at = %v, want empty (artifact opted out of the none harness)", sc.MaterializedAt)
 	}
 	if files := testharness.ReadTree(t, target); len(files) != 0 {
 		t.Errorf("target should be empty for an opted-out artifact, got: %v", keysOf(files))
@@ -176,17 +183,25 @@ func TestPodiumMCP_UntranslatableFieldFailsMaterialize(t *testing.T) {
 		t.Fatalf("run mcp: %v\nstdout:\n%s", err, stdout.String())
 	}
 
+	// The error envelope lives under structuredContent, and the CallToolResult
+	// is flagged isError (§6.1.1) so the host marks the failure.
 	var resp struct {
 		Result struct {
-			Error string `json:"error"`
+			IsError           bool `json:"isError"`
+			StructuredContent struct {
+				Error string `json:"error"`
+			} `json:"structuredContent"`
 		} `json:"result"`
 	}
 	if err := json.NewDecoder(&stdout).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v\nstdout: %s", err, stdout.String())
 	}
-	if !strings.Contains(resp.Result.Error, "materialize.untranslatable") ||
-		!strings.Contains(resp.Result.Error, "rule_mode: glob") {
-		t.Errorf("error = %q, want a materialize.untranslatable error naming rule_mode: glob", resp.Result.Error)
+	if !resp.Result.IsError {
+		t.Errorf("untranslatable load must set isError on the CallToolResult: %v", resp.Result)
+	}
+	if !strings.Contains(resp.Result.StructuredContent.Error, "materialize.untranslatable") ||
+		!strings.Contains(resp.Result.StructuredContent.Error, "rule_mode: glob") {
+		t.Errorf("error = %q, want a materialize.untranslatable error naming rule_mode: glob", resp.Result.StructuredContent.Error)
 	}
 	if files := testharness.ReadTree(t, target); len(files) != 0 {
 		t.Errorf("an untranslatable load must write nothing, got: %v", keysOf(files))

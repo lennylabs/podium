@@ -713,8 +713,10 @@ func TestServerOps_SandboxReadOnlyFsMCP(t *testing.T) {
 
 	env2 := rpcEnvelope(t, res.Stdout, 2)
 	result, _ := env2["result"].(map[string]any)
-	// The result should carry an error about sandbox_profile.
-	errStr, _ := result["error"].(string)
+	// The tool-level error is carried in the CallToolResult's structuredContent
+	// (§6.1.1).
+	sc, _ := result["structuredContent"].(map[string]any)
+	errStr, _ := sc["error"].(string)
 	if !strings.Contains(errStr, "sandbox") {
 		t.Errorf("expected sandbox error in result; got result=%v stderr=%s", result, res.Stderr)
 	}

@@ -34,13 +34,18 @@ func loadArtifactOver(t *testing.T, registry, cacheDir string, extraEnv ...strin
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("run mcp: %v\nstdout:\n%s", err, stdout.String())
 	}
+	// The domain object lives under structuredContent in the §6.1.1
+	// CallToolResult envelope; meta-tool fields (id, manifest_body, error)
+	// live there.
 	var resp struct {
-		Result map[string]any `json:"result"`
+		Result struct {
+			StructuredContent map[string]any `json:"structuredContent"`
+		} `json:"result"`
 	}
 	if err := json.NewDecoder(&stdout).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v\nstdout: %s", err, stdout.String())
 	}
-	return resp.Result
+	return resp.Result.StructuredContent
 }
 
 // Spec: §6.5 — a first load populates the content

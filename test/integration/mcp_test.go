@@ -242,8 +242,10 @@ func TestPodiumMCP_ToolsListDescriptionsSchemasAndInstructions(t *testing.T) {
 	}
 }
 
-// Spec: §5 — tools/call for search_artifacts forwards to the registry's
-// HTTP API and returns the decoded response.
+// Spec: §5 / §6.1.1 — tools/call for search_artifacts forwards to the
+// registry's HTTP API and returns an MCP CallToolResult: a renderable
+// content[] text block (what stdio hosts display) plus structuredContent
+// carrying the typed domain object. A success result is not flagged isError.
 func TestPodiumMCP_ToolsCallProxiesSearchArtifacts(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t,
@@ -268,8 +270,45 @@ func TestPodiumMCP_ToolsCallProxiesSearchArtifacts(t *testing.T) {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("run: %v\n%s", err, stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "finance/run") {
-		t.Errorf("expected finance/run in output, got: %s", stdout.String())
+
+	var resp struct {
+		Result struct {
+			IsError bool `json:"isError"`
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+			StructuredContent struct {
+				Results []struct {
+					ID string `json:"id"`
+				} `json:"results"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(&stdout).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v\nstdout: %s", err, stdout.String())
+	}
+	// The content text block is what an MCP stdio host renders; it must be
+	// present and carry the search output.
+	if len(resp.Result.Content) == 0 || resp.Result.Content[0].Type != "text" || resp.Result.Content[0].Text == "" {
+		t.Fatalf("result lacks a renderable content text block: %s", stdout.String())
+	}
+	if !strings.Contains(resp.Result.Content[0].Text, "finance/run") {
+		t.Errorf("content text missing finance/run: %s", resp.Result.Content[0].Text)
+	}
+	// structuredContent carries the typed search result for programmatic
+	// consumers.
+	foundInStructured := false
+	for _, r := range resp.Result.StructuredContent.Results {
+		if r.ID == "finance/run" {
+			foundInStructured = true
+		}
+	}
+	if !foundInStructured {
+		t.Errorf("structuredContent.results missing finance/run: %+v", resp.Result.StructuredContent)
+	}
+	if resp.Result.IsError {
+		t.Errorf("a successful search must not set isError: %+v", resp.Result)
 	}
 }
 

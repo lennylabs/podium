@@ -18,14 +18,22 @@ import (
 	"github.com/lennylabs/podium/pkg/version"
 )
 
-// mcpResult decodes one tools/call response's result envelope.
+// mcpResult decodes one tools/call response: the §6.1.1 CallToolResult
+// envelope plus the meta-tool domain object it carries in structuredContent.
 type mcpResult struct {
 	Result struct {
-		ID             string   `json:"id"`
-		Error          string   `json:"error"`
-		Code           string   `json:"code"`
-		MaterializedAt []string `json:"materialized_at"`
+		IsError           bool      `json:"isError"`
+		StructuredContent mcpDomain `json:"structuredContent"`
 	} `json:"result"`
+}
+
+// mcpDomain is the meta-tool domain object (the load_artifact result fields)
+// carried in the CallToolResult's structuredContent.
+type mcpDomain struct {
+	ID             string   `json:"id"`
+	Error          string   `json:"error"`
+	Code           string   `json:"code"`
+	MaterializedAt []string `json:"materialized_at"`
 }
 
 // Spec: §6.6 step 2 / §4.7.6 — end to end through the real bridge:
@@ -68,8 +76,11 @@ func TestPodiumMCP_ContentHashMismatchRejected(t *testing.T) {
 	if err := json.NewDecoder(&stdout).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v\nstdout: %s", err, stdout.String())
 	}
-	if !strings.Contains(resp.Result.Error, "materialize.content_hash_mismatch") {
-		t.Errorf("error = %q, want materialize.content_hash_mismatch", resp.Result.Error)
+	if !resp.Result.IsError {
+		t.Errorf("rejected load must set isError on the CallToolResult: %+v", resp.Result)
+	}
+	if !strings.Contains(resp.Result.StructuredContent.Error, "materialize.content_hash_mismatch") {
+		t.Errorf("error = %q, want materialize.content_hash_mismatch", resp.Result.StructuredContent.Error)
 	}
 	if files := testharness.ReadTree(t, target); len(files) != 0 {
 		t.Errorf("tampered artifact was materialized: %v", keysOf(files))
@@ -101,8 +112,8 @@ func TestPodiumMCP_SkillContentHashVerifies(t *testing.T) {
 
 	target := t.TempDir()
 	resp := runMCPLoad(t, reg.URL, target, "team/demo")
-	if resp.Result.Error != "" {
-		t.Fatalf("valid skill load failed: %s", resp.Result.Error)
+	if resp.Result.StructuredContent.Error != "" {
+		t.Fatalf("valid skill load failed: %s", resp.Result.StructuredContent.Error)
 	}
 	if files := testharness.ReadTree(t, target); files["team/demo/SKILL.md"] != skillRaw {
 		t.Errorf("SKILL.md not materialized verbatim; tree: %v", keysOf(files))
@@ -134,8 +145,8 @@ func TestPodiumMCP_SkillTamperedSkillRawRejected(t *testing.T) {
 
 	target := t.TempDir()
 	resp := runMCPLoad(t, reg.URL, target, "team/demo")
-	if !strings.Contains(resp.Result.Error, "materialize.content_hash_mismatch") {
-		t.Errorf("error = %q, want materialize.content_hash_mismatch", resp.Result.Error)
+	if !strings.Contains(resp.Result.StructuredContent.Error, "materialize.content_hash_mismatch") {
+		t.Errorf("error = %q, want materialize.content_hash_mismatch", resp.Result.StructuredContent.Error)
 	}
 	if files := testharness.ReadTree(t, target); len(files) != 0 {
 		t.Errorf("tampered skill was materialized: %v", keysOf(files))
@@ -167,8 +178,8 @@ func TestPodiumMCP_MergedManifestContentHashVerifies(t *testing.T) {
 
 	target := t.TempDir()
 	resp := runMCPLoad(t, reg.URL, target, "team/x")
-	if resp.Result.Error != "" {
-		t.Fatalf("valid merged manifest load failed: %s", resp.Result.Error)
+	if resp.Result.StructuredContent.Error != "" {
+		t.Fatalf("valid merged manifest load failed: %s", resp.Result.StructuredContent.Error)
 	}
 	if files := testharness.ReadTree(t, target); files["team/x/ARTIFACT.md"] != served {
 		t.Errorf("merged ARTIFACT.md not materialized; tree: %v", keysOf(files))
@@ -278,8 +289,8 @@ func TestPodiumMCP_LargeResourceFetchSendsToken(t *testing.T) {
 	if err := json.NewDecoder(&stdout).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v\nstdout: %s", err, stdout.String())
 	}
-	if resp.Result.Error != "" {
-		t.Fatalf("load failed: %s", resp.Result.Error)
+	if resp.Result.StructuredContent.Error != "" {
+		t.Fatalf("load failed: %s", resp.Result.StructuredContent.Error)
 	}
 	mu.Lock()
 	auth := gotAuth

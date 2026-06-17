@@ -1186,7 +1186,7 @@ func (s *mcpServer) handle(req rpcRequest) rpcResponse {
 			"tools": metaToolDescriptors(),
 		}
 	case "tools/call":
-		resp.Result = s.callTool(req.Params)
+		resp.Result = toolCallResult(s.callTool(req.Params))
 	case "resources/list":
 		// §5.0 — read-only mirror of load_artifact: artifact bodies are
 		// also exposed through MCP's resource protocol.
@@ -1232,6 +1232,33 @@ func (s *mcpServer) callTool(raw json.RawMessage) any {
 	result := s.dispatchTool(p)
 	s.metrics.ObserveCall(p.Name, isErrorResult(result), time.Since(start))
 	return result
+}
+
+// toolCallResult turns a meta-tool's domain result into an MCP CallToolResult
+// (§6.1.1). The domain object is carried twice, as the MCP result format
+// intends: `structuredContent` holds the typed object for programmatic
+// consumers, and `content` holds the same JSON as a text block so MCP hosts
+// (Claude Code, Claude Desktop, Cursor, VS Code) render the output. Without a
+// `content` block the host renders an empty tool result and the model never
+// sees the search or load output. `isError` is set for a §6.10 error envelope
+// so the host marks the failure. The domain fields live under
+// `structuredContent`; the result top level carries only the MCP envelope keys.
+func toolCallResult(domain any) any {
+	text, err := json.MarshalIndent(domain, "", "  ")
+	if err != nil {
+		// Unreachable for the map[string]any envelopes every meta-tool
+		// returns; the fallback keeps a renderable block instead of panicking
+		// if a future result carries a value json cannot marshal.
+		text = []byte(fmt.Sprintf("%v", domain))
+	}
+	out := map[string]any{
+		"content":           []map[string]any{{"type": "text", "text": string(text)}},
+		"structuredContent": domain,
+	}
+	if isErrorResult(domain) {
+		out["isError"] = true
+	}
+	return out
 }
 
 // isErrorResult reports whether a meta-tool result is a §6.10 error envelope,
