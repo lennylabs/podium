@@ -3,7 +3,6 @@ package integration
 import (
 	"bytes"
 	"encoding/json"
-	"net"
 	"net/http/httptest"
 	"os/exec"
 	"testing"
@@ -118,16 +117,14 @@ func TestPodiumMCP_HealthToolReportsPublicMode(t *testing.T) {
 	}
 }
 
-// deadRegistryURL returns an http URL whose port has no listener: it
-// binds an ephemeral port, captures the address, and closes the
-// listener so a later dial is refused.
+// deadRegistryURL returns an http URL whose port has no listener, so a dial is
+// refused. 127.0.0.1:1 is a reserved port nothing listens on. An earlier
+// approach bound an ephemeral port and closed it, but the OS could reassign
+// that port to a parallel test's httptest server before the health probe ran,
+// making the "dead" registry answer and the health tool report
+// connected=true. This package's offline tests use 127.0.0.1:1 for the same
+// reason.
 func deadRegistryURL(t *testing.T) string {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	addr := ln.Addr().String()
-	_ = ln.Close()
-	return "http://" + addr
+	return "http://127.0.0.1:1"
 }
