@@ -6,7 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-[Unreleased]: https://github.com/lennylabs/podium/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/lennylabs/podium/compare/v0.1.6...HEAD
+
+## [0.1.6] - 2026-06-17
+
+The `podium-mcp` stdio server returns a spec-compliant MCP `CallToolResult`, so hosts that render `result.content` show meta-tool output instead of an empty result.
+
+### Fixed
+
+- **MCP `tools/call` result format** (§6.1.1): `podium-mcp` returns each meta-tool result as an MCP `CallToolResult`. The domain object is carried in `structuredContent` and mirrored as a `content[]` text block, and a §6.10 error envelope sets `isError`. Hosts that render `result.content` (Claude Code, Claude Desktop, Cursor, and VS Code) previously received no content and showed an empty result for `search_artifacts`; they now display the output. The meta-tool fields move from the result top level to `structuredContent`.
+
+### Documentation
+
+- Documented the `tools/call` result format in §6.1.1, and corrected the §5 `load_artifact` description so it states materialization writes the adapted body as a harness-native file in addition to any bundled resources.
+
+[0.1.6]: https://github.com/lennylabs/podium/releases/tag/v0.1.6
 
 ## [0.1.5] - 2026-06-10
 
