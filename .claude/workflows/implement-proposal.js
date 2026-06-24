@@ -1,0 +1,457 @@
+// Implement an approved spec proposal end to end: apply its staged spec
+// amendments to spec/ and verify them, then (optionally) implement the spec
+// change in code.
+//
+//   Workflow({ name: "implement-proposal", args: {
+//     proposalPath: "proposals/NNNN-*.md",   // required, repo-relative
+//     date: "YYYY-MM-DD",                     // required (scripts cannot call Date)
+//     repoRoot: ".",                          // optional; the repo root, defaults to the working directory
+//     implementCode: true,                    // optional, default true; false = land + verify spec only
+//     maxApplyRounds: 5,                       // optional; spec apply-verify-fix rounds
+//   }})
+//
+// Spec always comes first: the staged spec amendments are applied and
+// verified before any code. With implementCode false the run stops after
+// the spec is landed and committed. The code phase is the
+// implement-proposal-build subworkflow (blast radius + ordered build
+// sequence + step-by-step implementation with tests).
+//
+// The spec is the source of truth and the proposal is the unit of work. The
+// §6.7.1 capability matrix, the harness adapters, and the rest of the
+// surface are kept consistent by `make coverage-gate` (lint, speccov-drift,
+// matrix-audit, doccov-check, coverage-budget), which the build subworkflow
+// runs.
+//
+// Preconditions (the skill checks them before invoking): the proposal
+// Status is "Approved" (or already "Applied to spec" for a re-run), and
+// spec/ is clean in git so the apply verification can diff against a clean
+// baseline.
+//
+// MAINTENANCE: the implement-proposal skill documents this workflow and its
+// subworkflow; keep them in sync.
+
+export const meta = {
+  name: "implement-proposal",
+  description:
+    "Apply an approved proposal's spec amendments and verify them, then optionally implement the spec change in code",
+  phases: [
+    { title: "Plan", detail: "read the proposal, gate on approval, extract its staged spec amendments" },
+    { title: "Apply spec", detail: "land the staged spec amendments and verify exact alignment until clean" },
+  ],
+};
+
+let input = args;
+if (typeof input === "string") input = JSON.parse(input);
+if (!input || !input.proposalPath || !input.date) {
+  throw new Error("args.proposalPath and args.date are required");
+}
+const repo = input.repoRoot || ".";
+const date = input.date;
+const implementCode = input.implementCode !== false; // default true
+const maxApplyRounds = input.maxApplyRounds || 5;
+const proposal = input.proposalPath.startsWith("/")
+  ? input.proposalPath
+  : repo + "/" + input.proposalPath;
+const relProposal = input.proposalPath.startsWith("/")
+  ? input.proposalPath.replace(repo + "/", "")
+  : input.proposalPath;
+
+const SPEC_RULES =
+  "Spec content rules (these take precedence over verbatim application; record every deviation they force):\n" +
+  "- The spec never references source code files or implementation paths (pkg/, cmd/, internal/, sdks/, test/, tools/, .go or other source files). Rephrase staged text carrying such a reference into behavioral spec language, or drop the reference.\n" +
+  "- The spec cross-references other spec content by section number only: §X.Y or a relative markdown link to a section anchor. Replace a line-number cross-reference in staged text with the containing section's number.\n" +
+  "- Line numbers in the proposal's ANCHOR INSTRUCTIONS are location hints for you and never become spec content. Locate anchors by the quoted text and section headings; line numbers drift.\n" +
+  "- A staged edit that introduces a brand-new section or subsection is appended at the end of its level, after the last existing sibling at that level, and numbered as the next ordinal. Never insert a new section or subsection between existing ones: inserting in the middle forces every following section to be renumbered and breaks existing cross-references. When a staged anchor instruction would place a new section or subsection between existing ones, append it at the end of that level instead, renumber it to the next ordinal, and record the deviation. Editing the body of an existing section in place is unaffected by this rule; it applies only to introducing a new numbered section or subsection.\n" +
+  "- Apply staged prose as written otherwise; do not restyle it.";
+
+const PLAN = {
+  type: "object",
+  required: ["approved", "alreadyApplied", "statusLine", "specEdits", "nonSpecStaged"],
+  properties: {
+    approved: { type: "boolean", description: 'Status bullet begins "Approved"' },
+    alreadyApplied: { type: "boolean", description: 'Status bullet begins "Applied to spec"' },
+    statusLine: { type: "string" },
+    specEdits: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["id", "targetFile", "subsection", "summary"],
+        properties: {
+          id: { type: "string", description: 'The §X.Y the amendment targets, e.g. "6.7.1"' },
+          targetFile: { type: "string", description: "Path under spec/, relative to the repo root" },
+          subsection: { type: "string", description: 'The proposal "## Spec amendment: §X.Y ..." heading that stages this edit' },
+          summary: { type: "string" },
+        },
+      },
+    },
+    nonSpecStaged: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["subsection", "target", "summary"],
+        properties: {
+          subsection: { type: "string" },
+          target: { type: "string" },
+          summary: { type: "string" },
+        },
+      },
+    },
+  },
+};
+
+const APPLY_RESULT = {
+  type: "object",
+  required: ["applied", "unappliable", "deviations"],
+  properties: {
+    applied: { type: "array", items: { type: "string" } },
+    unappliable: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["id", "reason"],
+        properties: { id: { type: "string" }, reason: { type: "string" } },
+      },
+    },
+    deviations: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["id", "rule", "original", "replacement"],
+        properties: {
+          id: { type: "string" },
+          rule: { type: "string" },
+          original: { type: "string" },
+          replacement: { type: "string" },
+        },
+      },
+    },
+  },
+};
+
+const DISCREPANCIES = {
+  type: "object",
+  required: ["discrepancies"],
+  properties: {
+    discrepancies: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["title", "file", "where", "expected", "observed", "fix"],
+        properties: {
+          title: { type: "string" },
+          file: { type: "string" },
+          where: { type: "string" },
+          expected: { type: "string", description: "What the proposal stages, quoted exactly" },
+          observed: { type: "string", description: "What the spec now says, quoted exactly" },
+          fix: { type: "string" },
+        },
+      },
+    },
+  },
+};
+
+const ALIGNMENT = {
+  type: "object",
+  required: ["aligned", "missing"],
+  properties: {
+    aligned: { type: "boolean", description: "every staged spec edit is present at its anchor in spec/" },
+    missing: { type: "array", items: { type: "string" } },
+  },
+};
+
+// ---- Plan: read the proposal, gate, extract its staged spec amendments ----
+
+phase("Plan");
+const plan = await agent(
+  "Read the proposal at " +
+    proposal +
+    ' in full and extract its staged changes.\n\nYou are a read-only investigator; do not edit any file. Work in the repository root.\n\nReturn:\n- approved: true when the Status bullet begins "Approved" (approved for implementation).\n- alreadyApplied: true when the Status bullet begins "Applied to spec" (the spec amendments were already landed by a prior run). A "Draft" or "Verified" status is neither.\n- statusLine: the Status bullet verbatim.\n- specEdits: one entry per staged amendment whose target is a spec/ file, drawn from the proposal\'s "## Spec amendment: §X.Y <topic>" sections: id (the §X.Y the amendment targets, e.g. "6.7.1"), targetFile (the spec/ file that owns that section, e.g. spec/06-mcp-server.md), subsection (the amendment heading verbatim), summary. A single amendment section that edits more than one spec file becomes one entry per file.\n- nonSpecStaged: one entry per staged change whose target is outside spec/ (code under pkg/, cmd/, internal/, sdks/; tests; docs/). These are implemented in the code phase or reported, never hand-applied here.',
+  { schema: PLAN, label: "plan", phase: "Plan" },
+);
+
+if (!plan.approved && !plan.alreadyApplied) {
+  return {
+    status: "not-approved",
+    statusLine: plan.statusLine,
+    reason:
+      "the proposal is not approved for implementation (Status: " +
+      plan.statusLine +
+      "). Approve it before implementing.",
+  };
+}
+
+const files = [...new Set(plan.specEdits.map((e) => e.targetFile))];
+
+// ---- Apply spec (or, on a re-run, confirm it is already aligned) ----
+
+let specStatus = "applied"; // applied | applied-with-blockers | not-clean | aligned | no-spec-edits
+let unappliable = [];
+let deviations = [];
+let appliedIds = new Set();
+let applyHistory = [];
+
+if (plan.specEdits.length === 0) {
+  specStatus = "no-spec-edits";
+  log("Proposal stages no spec edits; nothing to land");
+} else if (plan.alreadyApplied) {
+  // Idempotent re-run: the spec was already landed and committed, so a
+  // diff-based check would be empty. Confirm by presence instead.
+  phase("Apply spec");
+  log("Status is Applied to spec; verifying the staged edits are present");
+  const align = await agent(
+    "Confirm an already-applied proposal's staged spec edits are present in spec/.\n\n" +
+      "You are a read-only verifier; do not edit any file. Work in the repository root.\n\nProposal: " +
+      proposal +
+      ". For each staged amendment in its '## Spec amendment: §X.Y ...' sections, read the named spec/ file and confirm the staged block is present at its anchor. Set aligned true only when every staged amendment is present; list any missing ones.",
+    { schema: ALIGNMENT, label: "verify-aligned", phase: "Apply spec" },
+  );
+  if (!align || !align.aligned) {
+    return {
+      status: "not-aligned",
+      statusLine: plan.statusLine,
+      reason:
+        "the proposal reads Applied to spec but its staged edits are not all present in spec/: " +
+        ((align && align.missing) || []).join("; ") +
+        ". The spec drifted from the proposal; re-land it before implementing.",
+    };
+  }
+  specStatus = "aligned";
+} else {
+  // Fresh apply: the proposal is Approved and spec/ is a clean baseline.
+  phase("Apply spec");
+  log(
+    plan.specEdits.length +
+      " staged spec edits across " +
+      files.length +
+      " files; applying",
+  );
+  const applyResults = (
+    await parallel(
+      files.map((f) => () => {
+        const edits = plan.specEdits.filter((e) => e.targetFile === f);
+        return agent(
+          "Apply staged spec amendments from an approved proposal to one spec file.\n\n" +
+            "HARD CONSTRAINT: the only file you may edit is " +
+            repo +
+            "/" +
+            f +
+            ". Never modify the proposal or any other file.\n\n" +
+            "Proposal: " +
+            proposal +
+            " (read its '## Spec amendment: §X.Y ...' sections first for context).\n" +
+            "Edits to apply to this file, in order:\n" +
+            JSON.stringify(edits, null, 2) +
+            "\n\nFor each edit: read the proposal amendment section, locate the anchor in the target file by its quoted text and section heading, and apply the staged text exactly as written (the amendment quotes the exact spec text in a blockquote, which lands as plain spec prose without the leading `> `; replacement instructions replace exactly the text they name). " +
+            SPEC_RULES +
+            "\n\nIf an anchor cannot be located with certainty, skip that edit and record it as unappliable with the reason; never guess a location. Return the applied edit ids, the unappliable edits, and every rule-forced deviation.",
+          { schema: APPLY_RESULT, label: "apply:" + f.split("/").pop(), phase: "Apply spec" },
+        );
+      }),
+    )
+  ).filter(Boolean);
+
+  unappliable = applyResults.flatMap((r) => r.unappliable);
+  deviations = applyResults.flatMap((r) => r.deviations);
+  appliedIds = new Set(applyResults.flatMap((r) => r.applied));
+  if (deviations.length > 0) log(deviations.length + " rule-forced deviations recorded");
+  if (unappliable.length > 0) log(unappliable.length + " edits unappliable (drifted anchors)");
+
+  const verifiableEdits = plan.specEdits.filter((e) => appliedIds.has(e.id));
+  const DEVIATION_NOTE =
+    deviations.length > 0
+      ? "\n\nRecorded rule-forced deviations (EXPECTED differences from the staged text; do not report them as discrepancies):\n" +
+        JSON.stringify(deviations, null, 2)
+      : "";
+
+  const verifyFilePrompt = (f, edits, round) =>
+    "You verify that applied spec edits align exactly with the proposal that staged them. Round " +
+    round +
+    ".\n\nYou are a read-only verifier; do not edit any file. Work in the repository root.\n\nProposal: " +
+    proposal +
+    ". Target file: " +
+    f +
+    ". Edits expected in this file:\n" +
+    JSON.stringify(edits, null, 2) +
+    "\n\nMethod: read each proposal subsection; read the current target file; run `git diff -- " +
+    f +
+    "` to see exactly what changed against the clean baseline. Verify all of:\n" +
+    "1. Every staged block appears at its anchored location, character-exact (modulo the recorded deviations below).\n" +
+    "2. Text the proposal replaces or removes is gone, and nothing it keeps was altered.\n" +
+    "3. The diff for this file contains nothing beyond the staged edits: no stray edits, no duplicate insertions, no truncated surroundings.\n" +
+    "4. Every cross-reference the applied text adds resolves: a §X.Y number names an existing section, and a relative markdown link's anchor exists in its target file.\n" +
+    "5. No added line references source code files or implementation paths, and no added cross-reference uses line numbers (flag cross-references only; incidental prose containing the word 'line' is fine).\n" +
+    DEVIATION_NOTE +
+    "\n\nReport each discrepancy with exact expected and observed quotes and a concrete fix. An empty list means the file aligns.";
+
+  const sweepPrompt = (round) =>
+    "You are a mechanical rules sweep over the applied spec diff. Round " +
+    round +
+    ".\n\nYou are a read-only verifier; do not edit any file. Work in the repository root.\n\nRun `git diff -- spec/`. Inspect the added lines (lines starting with '+') for the first two checks below, and compare added against removed lines (lines starting with '-') for the renumbering check. Flag as a discrepancy:\n" +
+    "- any reference to source code files or implementation paths: pkg/, cmd/, internal/, sdks/, test/, tools/, or a source file extension such as .go (added lines only);\n" +
+    "- any cross-reference by line number ('line 123', 'lines 45-48') to spec or any other file. Cross-references only; incidental prose is fine (added lines only);\n" +
+    "- any sign that a new section or subsection was inserted between existing ones instead of appended at the end of its level: an existing heading whose number changed (the diff removes a heading at one number and adds the same titled heading at a higher number), or a new heading inserted ahead of an existing sibling so the following siblings are renumbered. Renumbering an existing section breaks its cross-references; a new section or subsection belongs at the end of its level. Quote the renumbered headings, name the file, and give the fix (append the new section or subsection at the end of its level and restore the original numbering of the rest).\n" +
+    "Pre-existing text that the diff leaves unchanged is out of scope. Quote each offending line exactly, name its file, and give the rule-conformant replacement." +
+    DEVIATION_NOTE;
+
+  const fixPrompt = (f, found, round) =>
+    "You fix verified discrepancies between applied spec edits and the proposal that staged them. Round " +
+    round +
+    ".\n\nHARD CONSTRAINT: the only file you may edit is " +
+    repo +
+    "/" +
+    f +
+    ". Never modify the proposal or any other file.\n\nProposal: " +
+    proposal +
+    ".\n" +
+    SPEC_RULES +
+    "\n\nDiscrepancies to fix (the expected text is authoritative except where a content rule forces a deviation, which you record in your reply):\n" +
+    JSON.stringify(found, null, 2) +
+    "\n\nMake the smallest edits that resolve each discrepancy. Return a short summary of each fix.";
+
+  let round = 0;
+  let clean = false;
+  while (round < maxApplyRounds && !clean) {
+    round++;
+    log("Spec verification round " + round);
+    const checks = files.map((f) => () =>
+      agent(verifyFilePrompt(f, verifiableEdits.filter((e) => e.targetFile === f), round), {
+        schema: DISCREPANCIES,
+        label: "verify:" + f.split("/").pop() + ":r" + round,
+        phase: "Apply spec",
+      }),
+    );
+    checks.push(() =>
+      agent(sweepPrompt(round), { schema: DISCREPANCIES, label: "verify:rules-sweep:r" + round, phase: "Apply spec" }),
+    );
+    const results = (await parallel(checks)).filter(Boolean);
+    if (results.length === 0) {
+      applyHistory.push({ round, discrepancies: -1, note: "verifiers failed" });
+      break;
+    }
+    const found = results.flatMap((r) => r.discrepancies);
+    applyHistory.push({ round, discrepancies: found.length, titles: found.map((d) => d.title) });
+    log("Round " + round + ": " + found.length + " discrepancies");
+    if (found.length === 0) {
+      clean = true;
+      break;
+    }
+    const fixFiles = [...new Set(found.map((d) => d.file))];
+    await parallel(
+      fixFiles.map((f) => () =>
+        agent(fixPrompt(f, found.filter((d) => d.file === f), round), {
+          label: "fix:" + f.split("/").pop() + ":r" + round,
+          phase: "Apply spec",
+        }),
+      ),
+    );
+  }
+
+  specStatus = clean ? (unappliable.length > 0 ? "applied-with-blockers" : "applied") : "not-clean";
+
+  if (specStatus === "not-clean") {
+    return {
+      status: "spec-not-clean",
+      reason: "the spec apply verification did not converge within " + maxApplyRounds + " rounds; the staged edits are partially applied in the working tree for inspection.",
+      applyHistory,
+      unappliable,
+    };
+  }
+  if (specStatus === "applied-with-blockers") {
+    return {
+      status: "spec-applied-with-blockers",
+      reason: "some staged spec edits could not be located (drifted anchors); resolve them before implementing code.",
+      unappliable,
+      appliedEdits: [...appliedIds],
+      applyHistory,
+    };
+  }
+
+  // Clean apply: record the status on the proposal and commit the spec edits.
+  await agent(
+    "Record application on a proposal's Status bullet, then commit the applied spec edits.\n\n" +
+      "Work in the repository root. Edit only " +
+      proposal +
+      " (the Status bullet) and commit the applied spec/ files alongside it. Do not edit code or other files.\n\n" +
+      '1. In ' +
+      proposal +
+      ', replace the Status bullet\'s leading state (for example "Approved for implementation as written (...).") with: "Applied to spec (' +
+      date +
+      ')." Preserve later clauses that remain true; follow ' +
+      repo +
+      "/.claude/rules/doc-style.md.\n" +
+      "2. Commit the changed spec/ files together with " +
+      relProposal +
+      " on the current branch, message in the repository's convention (read `git log --oneline -5`), e.g. 'spec: apply " +
+      relProposal +
+      "'. Spec lands as its own commit before any code.",
+    { label: "mark-and-commit-spec", phase: "Apply spec" },
+  );
+  log("Spec applied, status recorded, and committed");
+}
+
+// ---- Implement code (optional) via the build subworkflow ----
+
+if (!implementCode) {
+  return {
+    status: "spec-only",
+    specStatus,
+    statusLine: plan.statusLine,
+    files,
+    appliedEdits: [...appliedIds],
+    deviations,
+    nonSpecStaged: plan.nonSpecStaged,
+    applyHistory,
+  };
+}
+
+// The implement-proposal-build subworkflow IS the implement stage: it runs
+// inline and brings its own phase group (Plan, Build, Verify, Review) under a
+// "▸ implement-proposal-build" heading, so no redundant parent "Implement"
+// phase wraps it.
+log("Implementing the spec change via the implement-proposal-build subworkflow");
+let build;
+try {
+  build = await workflow("implement-proposal-build", {
+    proposalPath: input.proposalPath,
+    date,
+    repoRoot: repo,
+  });
+} catch (e) {
+  return {
+    status: "aborted",
+    abortReason: "implement-proposal-build subworkflow failed: " + (e && e.message),
+    specStatus,
+    nonSpecStaged: plan.nonSpecStaged,
+  };
+}
+log(
+  "Implementation done: " +
+    (build.steps ? build.steps.length : 0) +
+    " steps, green=" +
+    !!build.green +
+    ", reviewClean=" +
+    !!build.reviewClean +
+    (build.status === "step-stuck" ? ", stuck at step " + build.stuckStep : ""),
+);
+
+return {
+  status:
+    build.status === "step-stuck"
+      ? "build-step-stuck"
+      : build.green && build.reviewClean
+        ? "implemented"
+        : "implemented-not-green",
+  proposal: relProposal,
+  specStatus,
+  blastRadius: build.blastRadius,
+  steps: build.steps,
+  commits: build.commits,
+  green: !!build.green,
+  reviewClean: !!build.reviewClean,
+  reviewFindings: build.reviewFindings || [],
+  stuckStep: build.stuckStep,
+  changedLineCoverage: build.changedLineCoverage,
+  failures: build.failures || [],
+  resumeNote: build.resumeNote,
+  nonSpecStaged: plan.nonSpecStaged,
+};
