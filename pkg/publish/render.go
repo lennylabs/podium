@@ -5,8 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/lennylabs/podium/pkg/adapter"
@@ -42,11 +45,12 @@ type RenderOptions struct {
 	HTTPClient *http.Client
 }
 
-// RenderResult describes one render. Changed reports whether the render wrote a
-// tree that differs from the prior render (the §7.8 $PODIUM_CHANGED signal).
-// ChangedArtifacts lists the canonical IDs whose materialized output changed or
-// was removed since the prior render, the body of the $PODIUM_CHANGE_SUMMARY
-// JSON file. Files is the full set of relative paths the render wrote, sorted.
+// RenderResult describes one render. Changed reports whether the render produced
+// a diff against the checkout content already present in the working directory
+// (the §7.8 $PODIUM_CHANGED signal). ChangedArtifacts lists the canonical IDs
+// whose materialized output differs from the checkout, the body of the
+// $PODIUM_CHANGE_SUMMARY JSON file. Files is the full set of relative paths the
+// render wrote, sorted.
 type RenderResult struct {
 	OutputID         string
 	Changed          bool
@@ -129,8 +133,9 @@ type renderedFile struct {
 // which no single artifact owns.
 const manifestOwner = "(manifest)"
 
-// removedOwner is the change-set owner attributed to a path a prior render wrote
-// that this render did not, so a pure removal still reports a non-empty change.
+// removedOwner is the change-set owner attributed to a path present in the
+// checkout before the render but absent after it (a stale file the cleanup
+// removed), so a pure removal still reports a non-empty change.
 const removedOwner = "(removed)"
 
 // assignPlugins intersects the effective view with the plugin scope filters and
@@ -264,85 +269,120 @@ func pluginsInOrder(assignments []assigned) []PluginFilter {
 
 // reconcile writes the rendered file set into workdir, removes the files a prior
 // render wrote that this render did not, and persists the new lock for the next
-// run. It computes the change set by comparing the per-path content digests of
-// this render against the prior lock, so $PODIUM_CHANGED is true when any path's
-// content differs, a path was added, or a prior path is gone (§7.8).
+// run. It computes the change set by diffing the render against the checkout
+// content already on disk in workdir: the per-path content digest is read from
+// the bytes on disk before the write and compared against the bytes on disk
+// after the write and the stale-file cleanup, so $PODIUM_CHANGED is true exactly
+// when the render altered the working tree (§7.8 "the render produced a diff
+// against the checkout"). This holds for a fresh actions/checkout that carries no
+// prior-render lock: an unchanged tree reports Changed=false even though no lock
+// is present, which the lock-based comparison could not do.
 func reconcile(workdir, outputID string, rendered []renderedFile) (*RenderResult, error) {
 	prior, _ := sync.ReadLock(workdir)
-	priorDigests := lockDigests(prior)
+	priorMerge := sync.PriorMergeKinds(prior)
 
 	files := make([]adapter.File, len(rendered))
+	currentPaths := map[string]bool{}
+	merge := map[string]string{}
+	owner := map[string]string{}
 	for i, rf := range rendered {
-		files[i] = rf.file
+		f := rf.file
+		files[i] = f
+		currentPaths[f.Path] = true
+		merge[f.Path] = sync.MergeKindForOp(f.Op)
+		owner[f.Path] = rf.ownerID
+	}
+
+	// The change set diffs against the checkout, so capture the on-disk digest
+	// of every path the render touches (the rendered paths plus the prior-render
+	// paths that the cleanup may remove) before any write mutates the tree.
+	diffPaths := unionPaths(currentPaths, priorMerge)
+	beforeDigests, err := onDiskDigests(workdir, diffPaths)
+	if err != nil {
+		return nil, fmt.Errorf("publish %q: read checkout before render: %w", outputID, err)
 	}
 
 	if err := materialize.Write(workdir, files); err != nil {
 		return nil, fmt.Errorf("publish %q: write render: %w", outputID, err)
 	}
 
-	currentPaths := map[string]bool{}
-	currentDigests := map[string]string{}
-	merge := map[string]string{}
-	owner := map[string]string{}
-	for _, rf := range rendered {
-		f := rf.file
-		currentPaths[f.Path] = true
-		// Several fragments may target one config-merge path (a hook event's
-		// handler list, a manifest's plugin array); fold their digests so the
-		// path's fingerprint accounts for every contribution.
-		currentDigests[f.Path] = digest([]byte(currentDigests[f.Path] + digest(f.Content)))
-		merge[f.Path] = sync.MergeKindForOp(f.Op)
-		owner[f.Path] = rf.ownerID
-	}
+	sync.Reconcile(workdir, priorMerge, currentPaths)
 
-	sync.Reconcile(workdir, sync.PriorMergeKinds(prior), currentPaths)
-
-	if err := writeLock(workdir, currentDigests, merge); err != nil {
+	if err := writeLock(workdir, currentPaths, merge); err != nil {
 		return nil, err
 	}
 
+	// The pre-write read of the same paths succeeded and materialize.Write left
+	// every rendered path a readable regular file, so this read fails only on a
+	// concurrent filesystem mutation; the guard surfaces that rather than
+	// reporting a change set against unobservable state.
+	afterDigests, err := onDiskDigests(workdir, diffPaths)
+	if err != nil {
+		return nil, fmt.Errorf("publish %q: read checkout after render: %w", outputID, err)
+	}
+
 	res := &RenderResult{OutputID: outputID, Files: sortedKeys(currentPaths)}
-	res.Changed, res.ChangedArtifacts = changeSet(priorDigests, currentDigests, owner)
+	res.Changed, res.ChangedArtifacts = changeSet(beforeDigests, afterDigests, owner)
 	return res, nil
 }
 
-// digest returns the hex SHA-256 of content, the per-path content fingerprint
-// the change set compares. A config-merge file's on-disk content is the merged
-// result rather than the fragment bytes, so the digest of the emitted fragment
-// is a stable proxy: the same fragment merges to the same result against the
-// same prior, and a changed fragment changes the digest.
+// onDiskDigests reads each path's bytes from workdir and returns its hex SHA-256,
+// keyed by the relative path. A path absent from disk is omitted, so a path that
+// did not exist before the render or was removed by the cleanup contributes no
+// entry, and the change-set comparison treats it as added or removed. A read
+// error other than "not present" is returned, because it means the checkout
+// state could not be observed.
+func onDiskDigests(workdir string, paths map[string]bool) (map[string]string, error) {
+	out := make(map[string]string, len(paths))
+	for p := range paths {
+		data, err := os.ReadFile(filepath.Join(workdir, filepath.FromSlash(p)))
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("read %s: %w", p, err)
+		}
+		out[p] = digest(data)
+	}
+	return out, nil
+}
+
+// digest returns the hex SHA-256 of content, the per-path content fingerprint the
+// change set compares. It is computed over the bytes on disk in the checkout,
+// including the merged result for a config-merge path, so a config-merge write
+// that leaves the file byte-identical reports no change.
 func digest(content []byte) string {
 	sum := sha256.Sum256(content)
 	return hex.EncodeToString(sum[:])
 }
 
-// lockDigests reads the per-path content digests a prior render stored in the
-// lock (in the ContentHash field of each LockArtifact, keyed by MaterializedPath).
-// A nil lock returns an empty map, so the first render reports every path as
-// added and Changed is true.
-func lockDigests(lock *sync.LockFile) map[string]string {
-	out := map[string]string{}
-	if lock == nil {
-		return out
+// unionPaths returns the set of relative paths to diff for change detection: the
+// paths this render wrote, plus the prior-render paths the cleanup may remove, so
+// a pure removal is observed as a change against the checkout.
+func unionPaths(current map[string]bool, priorMerge map[string]string) map[string]bool {
+	out := make(map[string]bool, len(current)+len(priorMerge))
+	for p := range current {
+		out[p] = true
 	}
-	for _, a := range lock.Artifacts {
-		if a.MaterializedPath != "" {
-			out[a.MaterializedPath] = a.ContentHash
-		}
+	for p := range priorMerge {
+		out[p] = true
 	}
 	return out
 }
 
-// writeLock persists the render's lock: one LockArtifact per written path,
-// recording the path's content digest in ContentHash and its config-merge kind
-// in Merge. The next render reads it back through sync.ReadLock for
-// reconciliation and change detection.
-func writeLock(workdir string, digests, merge map[string]string) error {
+// writeLock persists the render's lock for the next run's reconciliation: one
+// LockArtifact per written path recording its config-merge kind in Merge. The
+// next render reads it back through sync.PriorMergeKinds so the cleanup treats a
+// config-merge path (reconcile Podium's entries) differently from a standalone
+// path (remove). Change detection reads the checkout content directly rather than
+// the lock, so the lock carries no per-file content fingerprint and leaves the
+// ContentHash field, which holds the sha256:<hex> artifact content hash
+// everywhere else in pkg/sync, unset.
+func writeLock(workdir string, paths map[string]bool, merge map[string]string) error {
 	lock := &sync.LockFile{Target: workdir}
-	for _, p := range sortedKeys(mapKeys(digests)) {
+	for _, p := range sortedKeys(paths) {
 		lock.Artifacts = append(lock.Artifacts, sync.LockArtifact{
 			MaterializedPath: p,
-			ContentHash:      digests[p],
 			Merge:            merge[p],
 		})
 	}
@@ -352,21 +392,23 @@ func writeLock(workdir string, digests, merge map[string]string) error {
 	return nil
 }
 
-// changeSet compares the prior and current per-path digests and returns whether
-// the render changed and the sorted canonical IDs of the changed artifacts. An
-// artifact is changed when any of its files was added, removed, or has a
-// different digest. The owner map carries each current path's owning artifact ID
-// (or the manifest marker for a shared manifest); a path the prior render wrote
-// that this render did not is attributed to the removed marker.
-func changeSet(prior, current, owner map[string]string) (bool, []string) {
+// changeSet diffs the checkout digests captured before and after the render and
+// returns whether the working tree changed and the sorted canonical IDs of the
+// changed artifacts. A path is changed when its on-disk content differs, when it
+// is newly present (absent before, present after), or when it is gone (present
+// before, absent after). The owner map carries each rendered path's owning
+// artifact ID (or the manifest marker for a shared manifest); a path that
+// disappeared is attributed to the removed marker, because no rendered file owns
+// it.
+func changeSet(before, after, owner map[string]string) (bool, []string) {
 	ids := map[string]bool{}
-	for p, d := range current {
-		if prior[p] != d {
+	for p, d := range after {
+		if before[p] != d {
 			ids[owner[p]] = true
 		}
 	}
-	for p := range prior {
-		if _, ok := current[p]; !ok {
+	for p := range before {
+		if _, ok := after[p]; !ok {
 			ids[removedOwner] = true
 		}
 	}
@@ -407,12 +449,4 @@ func sortedKeys(m map[string]bool) []string {
 
 func sortedSet(m map[string]bool) []string {
 	return sortedKeys(m)
-}
-
-func mapKeys(m map[string]string) map[string]bool {
-	out := make(map[string]bool, len(m))
-	for k := range m {
-		out[k] = true
-	}
-	return out
 }

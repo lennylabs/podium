@@ -271,6 +271,107 @@ func TestRender_IdempotentReRender(t *testing.T) {
 	assertTreeEqual(t, tree1, tree2)
 }
 
+// Spec: §7.8 — $PODIUM_CHANGED is "whether the render produced a diff against
+// the checkout" (line 190). A fresh actions/checkout (Pattern A) carries the
+// committed marketplace content but no .podium/sync.lock, because the lock is
+// sync-local state and not committed into the marketplace repository. Re-render
+// into such a checkout must report Changed=false when the rendered tree is
+// byte-identical to the committed content, rather than treating every path as
+// added because no prior lock is present.
+func TestRender_ChangedFalseOnFreshCheckoutNoLock(t *testing.T) {
+	t.Parallel()
+	reg := fixtureRegistry(t)
+	source := t.TempDir()
+	opts := renderOpts(t, reg, source, []string{"claude-code", "codex"})
+
+	// Render once to produce the committed content.
+	if _, err := Render(context.Background(), opts); err != nil {
+		t.Fatalf("first Render: %v", err)
+	}
+
+	// Simulate a fresh actions/checkout: copy the rendered content into a new
+	// workdir but drop the sync-local .podium/ directory, which the marketplace
+	// repository does not commit.
+	checkout := t.TempDir()
+	for p, c := range materializedTreeNoLock(t, source) {
+		dst := filepath.Join(checkout, filepath.FromSlash(p))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			t.Fatalf("mkdir for %q: %v", p, err)
+		}
+		if err := os.WriteFile(dst, []byte(c), 0o644); err != nil {
+			t.Fatalf("write %q: %v", p, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(checkout, ".podium", "sync.lock")); !os.IsNotExist(err) {
+		t.Fatalf("fresh checkout must carry no sync.lock: stat err=%v", err)
+	}
+
+	res, err := Render(context.Background(), RenderOptions{
+		OutputID:  opts.OutputID,
+		Registry:  reg,
+		Workdir:   checkout,
+		Harnesses: opts.Harnesses,
+		Plugins:   opts.Plugins,
+	})
+	if err != nil {
+		t.Fatalf("re-render into fresh checkout: %v", err)
+	}
+	if res.Changed {
+		t.Errorf("re-render into a byte-identical checkout with no lock must report Changed=false, got change set %v", res.ChangedArtifacts)
+	}
+	if len(res.ChangedArtifacts) != 0 {
+		t.Errorf("change set must be empty for an identical fresh checkout, got %v", res.ChangedArtifacts)
+	}
+}
+
+// Spec: §7.8 — change detection diffs against the checkout content (line 190), so
+// a hand-edit to a committed file that the render rewrites back is detected as a
+// change against disk even when no prior-render lock is present.
+func TestRender_ChangedTrueWhenCheckoutDiffersNoLock(t *testing.T) {
+	t.Parallel()
+	reg := fixtureRegistry(t)
+	source := t.TempDir()
+	opts := renderOpts(t, reg, source, []string{"claude-code"})
+
+	if _, err := Render(context.Background(), opts); err != nil {
+		t.Fatalf("first Render: %v", err)
+	}
+
+	// Copy the rendered content into a fresh checkout (no lock), then hand-edit
+	// one committed skill so the render rewrites it back.
+	checkout := t.TempDir()
+	for p, c := range materializedTreeNoLock(t, source) {
+		dst := filepath.Join(checkout, filepath.FromSlash(p))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			t.Fatalf("mkdir for %q: %v", p, err)
+		}
+		if err := os.WriteFile(dst, []byte(c), 0o644); err != nil {
+			t.Fatalf("write %q: %v", p, err)
+		}
+	}
+	edited := filepath.Join(checkout, "claude", "finance-pack", "skills", "pay-invoice", "SKILL.md")
+	if err := os.WriteFile(edited, []byte("hand edit\n"), 0o644); err != nil {
+		t.Fatalf("hand-edit checkout file: %v", err)
+	}
+
+	res, err := Render(context.Background(), RenderOptions{
+		OutputID:  opts.OutputID,
+		Registry:  reg,
+		Workdir:   checkout,
+		Harnesses: opts.Harnesses,
+		Plugins:   opts.Plugins,
+	})
+	if err != nil {
+		t.Fatalf("re-render into edited checkout: %v", err)
+	}
+	if !res.Changed {
+		t.Fatalf("a render that rewrites a hand-edited committed file must report Changed=true")
+	}
+	if !containsStr(res.ChangedArtifacts, "finance/ap/pay-invoice") {
+		t.Errorf("change set %v must name the rewritten finance/ap/pay-invoice", res.ChangedArtifacts)
+	}
+}
+
 // Spec: §7.8 — when an artifact leaves the view, the next render removes its
 // files (stale-file cleanup) and the change set reports the change.
 func TestRender_StaleFileCleanup(t *testing.T) {
@@ -407,6 +508,33 @@ func TestRender_WriteError(t *testing.T) {
 	}
 }
 
+// Spec: §7.8 — change detection reads the checkout content. When a path the
+// render will write is occupied by a directory on disk, the pre-write checkout
+// read fails (a non-ErrNotExist error), and Render surfaces a structured error
+// naming the output rather than reporting a render against unobservable state.
+func TestRender_CheckoutReadError(t *testing.T) {
+	t.Parallel()
+	reg := fixtureRegistry(t)
+	workdir := t.TempDir()
+	// Occupy a rendered manifest path with a directory so os.ReadFile fails with
+	// "is a directory" rather than "not present".
+	blocker := filepath.Join(workdir, ".claude-plugin", "marketplace.json")
+	if err := os.MkdirAll(blocker, 0o755); err != nil {
+		t.Fatalf("create blocking directory: %v", err)
+	}
+
+	_, err := Render(context.Background(), renderOpts(t, reg, workdir, []string{"claude-code"}))
+	if err == nil {
+		t.Fatalf("Render must error when the checkout content cannot be read")
+	}
+	if !strings.Contains(err.Error(), "acme-agents") {
+		t.Errorf("checkout-read error must name the output id: %v", err)
+	}
+	if !strings.Contains(err.Error(), "read checkout") {
+		t.Errorf("error must name the checkout read failure: %v", err)
+	}
+}
+
 // writeLock wraps a lock-write failure with a structured error. A regular file
 // at <workdir>/.podium blocks the lock directory creation inside sync.WriteLock.
 func TestWriteLock_Error(t *testing.T) {
@@ -415,7 +543,7 @@ func TestWriteLock_Error(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workdir, ".podium"), []byte("x"), 0o644); err != nil {
 		t.Fatalf("write blocker: %v", err)
 	}
-	err := writeLock(workdir, map[string]string{"a.md": "d"}, map[string]string{"a.md": ""})
+	err := writeLock(workdir, map[string]bool{"a.md": true}, map[string]string{"a.md": ""})
 	if err == nil {
 		t.Fatalf("writeLock must error when the lock directory cannot be created")
 	}

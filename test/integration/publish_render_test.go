@@ -67,8 +67,8 @@ func TestPublishRender_ServerSourceMultiHarness(t *testing.T) {
 		".cursor-plugin/marketplace.json",
 		// finance-pack content per harness.
 		"claude/finance-pack/.claude-plugin/plugin.json",
-		"claude/finance-pack/agents/pay-invoice.md",          // the agent
-		"claude/finance-pack/skills/run-variance/SKILL.md",   // the skill
+		"claude/finance-pack/agents/pay-invoice.md",        // the agent
+		"claude/finance-pack/skills/run-variance/SKILL.md", // the skill
 		"codex/finance-pack/.codex-plugin/plugin.json",
 		"codex/finance-pack/skills/run-variance/SKILL.md",
 		"cursor/finance-pack/.cursor-plugin/plugin.json",
@@ -95,6 +95,66 @@ func TestPublishRender_ServerSourceMultiHarness(t *testing.T) {
 	}
 	tree2 := readTreeNoLock(t, workdir)
 	assertTreesEqual(t, tree, tree2)
+}
+
+// Spec: §7.8 — $PODIUM_CHANGED is "whether the render produced a diff against
+// the checkout" (line 190). The Pattern A CI flow points --workdir at a fresh
+// actions/checkout, which carries the committed marketplace content but no
+// sync-local .podium/sync.lock (the marketplace repository does not commit the
+// lock). Re-rendering the unchanged effective view into that checkout must report
+// Changed=false, so skip_if_no_changes suppresses an empty commit. This drives
+// the case through the real HTTP record-fetch path.
+func TestPublishRender_ChangedFalseOnFreshCheckout(t *testing.T) {
+	t.Parallel()
+	dir := referenceRegistryPath(t)
+	srv, err := server.NewFromFilesystem(dir)
+	if err != nil {
+		t.Fatalf("NewFromFilesystem: %v", err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	plugins := []publish.PluginFilter{{Name: "finance-pack", Include: []string{"finance/**"}}}
+	source := t.TempDir()
+	opts := publish.RenderOptions{
+		OutputID:  "acme-agents",
+		Registry:  ts.URL,
+		Workdir:   source,
+		Harnesses: []string{"claude-code", "codex"},
+		Plugins:   plugins,
+	}
+	if _, err := publish.Render(context.Background(), opts); err != nil {
+		t.Fatalf("first Render: %v", err)
+	}
+
+	// Simulate the fresh checkout: copy the committed content, drop .podium/.
+	checkout := t.TempDir()
+	for p, c := range readTreeNoLock(t, source) {
+		dst := filepath.Join(checkout, filepath.FromSlash(p))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			t.Fatalf("mkdir for %q: %v", p, err)
+		}
+		if err := os.WriteFile(dst, []byte(c), 0o644); err != nil {
+			t.Fatalf("write %q: %v", p, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(checkout, ".podium", "sync.lock")); !os.IsNotExist(err) {
+		t.Fatalf("fresh checkout must carry no sync.lock: stat err=%v", err)
+	}
+
+	res, err := publish.Render(context.Background(), publish.RenderOptions{
+		OutputID:  opts.OutputID,
+		Registry:  ts.URL,
+		Workdir:   checkout,
+		Harnesses: opts.Harnesses,
+		Plugins:   opts.Plugins,
+	})
+	if err != nil {
+		t.Fatalf("re-render into fresh checkout: %v", err)
+	}
+	if res.Changed {
+		t.Errorf("re-render of an identical fresh checkout must report Changed=false, got %v", res.ChangedArtifacts)
+	}
 }
 
 // Spec: §7.8 — when an artifact leaves the effective view, the next render
