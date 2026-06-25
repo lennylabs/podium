@@ -3,6 +3,7 @@ package adapter
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -542,17 +543,307 @@ func TestClaudeMarketplace_RuleSkillBodyDefaultDescription(t *testing.T) {
 }
 
 // Spec: §7.8 — the emitter IDs map to the harness families: the shared Claude
-// marketplace, Codex, and Cursor.
+// marketplace, Codex, Cursor, the Gemini extension, the Pi package, and the
+// Hermes tap.
 func TestMarketplaceEmitter_IDs(t *testing.T) {
 	t.Parallel()
 	want := map[MarketplaceEmitter]string{
 		ClaudeMarketplace{}: "claude",
 		CodexMarketplace{}:  "codex",
 		CursorMarketplace{}: "cursor",
+		GeminiExtension{}:   "gemini",
+		PiPackage{}:         "pi",
+		HermesTap{}:         "hermes",
 	}
 	for e, id := range want {
 		if e.ID() != id {
 			t.Errorf("%T.ID() = %q, want %q", e, e.ID(), id)
 		}
+	}
+}
+
+// Spec: §6.7, §7.8 — the Gemini emitter collapses the output's plugin set into
+// one extension. The Manifest writes a single root gemini-extension.json naming
+// the extension and its contextFileName, with no per-plugin subtree, regardless
+// of which plugin the call carries.
+func TestGeminiExtension_ManifestIsRootExtension(t *testing.T) {
+	t.Parallel()
+	out, err := GeminiExtension{}.Manifest("acme-gemini", finPlugin("gemini"))
+	if err != nil {
+		t.Fatalf("Manifest: %v", err)
+	}
+	ext := fileByPath(t, out, "gemini-extension.json")
+	if ext.Op != OpMergeJSON {
+		t.Errorf("gemini-extension.json must be OpMergeJSON so the mcpServers merge does not clobber it, got %v", ext.Op)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(ext.Content, &m); err != nil {
+		t.Fatalf("gemini-extension.json is not valid JSON: %v\n%s", err, ext.Content)
+	}
+	if m["name"] != "acme-gemini" {
+		t.Errorf("extension name = %v, want the output name acme-gemini", m["name"])
+	}
+	if m["contextFileName"] != "GEMINI.md" {
+		t.Errorf("extension contextFileName = %v, want GEMINI.md", m["contextFileName"])
+	}
+	// One extension per repository: no per-plugin subtree manifest.
+	for _, f := range out {
+		if strings.Contains(f.Path, "gemini/finance-pack") {
+			t.Errorf("Gemini collapses to one extension; no per-plugin subtree expected, got %q", f.Path)
+		}
+	}
+}
+
+// Spec: §6.7, §7.8 — the Gemini extension manifest is identical for every plugin
+// call, so collapsing several plugins into one extension yields one stable
+// gemini-extension.json under the idempotent-scalar merge rather than a
+// per-plugin variant.
+func TestGeminiExtension_ManifestIdempotentAcrossPlugins(t *testing.T) {
+	t.Parallel()
+	a, err := GeminiExtension{}.Manifest("acme-gemini", PluginDescriptor{Name: "house-rules", Prefix: "gemini"})
+	if err != nil {
+		t.Fatalf("Manifest(house-rules): %v", err)
+	}
+	b, err := GeminiExtension{}.Manifest("acme-gemini", PluginDescriptor{Name: "finance-pack", Prefix: "gemini"})
+	if err != nil {
+		t.Fatalf("Manifest(finance-pack): %v", err)
+	}
+	if string(fileByPath(t, a, "gemini-extension.json").Content) != string(fileByPath(t, b, "gemini-extension.json").Content) {
+		t.Errorf("Gemini extension manifest must be identical across plugins (one extension per repository)")
+	}
+}
+
+// Spec: §6.7, §7.8 — the Gemini extension component set is commands, the context
+// file, and mcpServers. A command writes a root commands/<name>.toml, a rule
+// injects into the root context file, and an mcp-server merges into the
+// extension manifest's mcpServers, all at the repository root with no plugin
+// subtree.
+func TestGeminiExtension_ComponentRouting(t *testing.T) {
+	t.Parallel()
+	plugin := finPlugin("gemini")
+	cmd := Source{
+		ArtifactID:    "finance/review",
+		ArtifactBytes: []byte("---\ntype: command\nversion: 1.0.0\ndescription: Review.\n---\n\nDo the review.\n"),
+		Plugin:        plugin,
+	}
+	out, err := GeminiExtension{}.Component(context.Background(), cmd)
+	if err != nil {
+		t.Fatalf("Component(command): %v", err)
+	}
+	toml := fileByPath(t, out, "commands/review.toml")
+	if !strings.Contains(string(toml.Content), "prompt =") {
+		t.Errorf("Gemini command .toml must carry a prompt:\n%s", toml.Content)
+	}
+
+	rule := Source{
+		ArtifactID:    "finance/house-rule",
+		ArtifactBytes: []byte("---\ntype: rule\nversion: 1.0.0\nrule_mode: always\ndescription: d\n---\n\nRule prose.\n"),
+		Plugin:        plugin,
+	}
+	out, err = GeminiExtension{}.Component(context.Background(), rule)
+	if err != nil {
+		t.Fatalf("Component(rule): %v", err)
+	}
+	ctxFile := fileByPath(t, out, "GEMINI.md")
+	if ctxFile.Op != OpInject {
+		t.Errorf("Gemini rule must inject into the context file, got Op %v", ctxFile.Op)
+	}
+
+	mcp := Source{
+		ArtifactID:    "finance/pay-mcp",
+		ArtifactBytes: []byte("---\ntype: mcp-server\nversion: 1.0.0\nserver_identifier: https://mcp.acme.com\n---\n\nbody\n"),
+		Plugin:        plugin,
+	}
+	out, err = GeminiExtension{}.Component(context.Background(), mcp)
+	if err != nil {
+		t.Fatalf("Component(mcp): %v", err)
+	}
+	ext := fileByPath(t, out, "gemini-extension.json")
+	if ext.Op != OpMergeJSON || !strings.Contains(string(ext.Content), "mcpServers") {
+		t.Errorf("Gemini mcp-server must merge mcpServers into gemini-extension.json:\n%s", ext.Content)
+	}
+}
+
+// Spec: §6.7, §7.8 — a skill, agent, or hook has no Gemini extension component
+// (the extension surfaces commands, the context file, and mcpServers), so the
+// component returns no files.
+func TestGeminiExtension_UnsupportedTypeEmitsNothing(t *testing.T) {
+	t.Parallel()
+	skill := Source{
+		ArtifactID:    "finance/sk",
+		SkillBytes:    []byte("---\nname: sk\ndescription: d\n---\n\nbody\n"),
+		ArtifactBytes: []byte("---\ntype: skill\nversion: 1.0.0\n---\n\nbody\n"),
+		Plugin:        finPlugin("gemini"),
+	}
+	out, err := GeminiExtension{}.Component(context.Background(), skill)
+	if err != nil || len(out) != 0 {
+		t.Errorf("Gemini skill component = %v, %v; want no files", paths(out), err)
+	}
+}
+
+// Spec: §6.7, §7.8 — the Pi emitter writes a root package.json carrying the
+// pi-package keyword and a pi.skills array pointing at the skills subtree.
+func TestPiPackage_ManifestPackageJSON(t *testing.T) {
+	t.Parallel()
+	out, err := PiPackage{}.Manifest("acme-pi", finPlugin("pi"))
+	if err != nil {
+		t.Fatalf("Manifest: %v", err)
+	}
+	pkg := fileByPath(t, out, "package.json")
+	var m map[string]any
+	if err := json.Unmarshal(pkg.Content, &m); err != nil {
+		t.Fatalf("package.json is not valid JSON: %v\n%s", err, pkg.Content)
+	}
+	if m["name"] != "acme-pi" {
+		t.Errorf("package.json name = %v, want the output name acme-pi", m["name"])
+	}
+	kw, ok := m["keywords"].([]any)
+	if !ok || len(kw) != 1 || kw[0] != "pi-package" {
+		t.Errorf("package.json keywords = %v, want the pi-package keyword", m["keywords"])
+	}
+	pi, ok := m["pi"].(map[string]any)
+	if !ok {
+		t.Fatalf("package.json has no pi object: %s", pkg.Content)
+	}
+	skills, ok := pi["skills"].([]any)
+	if !ok || len(skills) != 1 || skills[0] != "skills" {
+		t.Errorf("pi.skills = %v, want an array pointing at the skills subtree", pi["skills"])
+	}
+}
+
+// Spec: §6.7, §7.8 — the Pi emitter writes skills/<name>/SKILL.md per skill in
+// the skills subtree the pi.skills array points at, and the install unit is the
+// skill, so a non-skill type produces no component.
+func TestPiPackage_ComponentSkillLayout(t *testing.T) {
+	t.Parallel()
+	skill := Source{
+		ArtifactID:    "finance/sk",
+		SkillBytes:    []byte("---\nname: sk\ndescription: d\n---\n\nbody\n"),
+		ArtifactBytes: []byte("---\ntype: skill\nversion: 1.0.0\n---\n\nbody\n"),
+		Resources:     map[string][]byte{"references/notes.md": []byte("notes\n")},
+		Plugin:        finPlugin("pi"),
+	}
+	out, err := PiPackage{}.Component(context.Background(), skill)
+	if err != nil {
+		t.Fatalf("Component(skill): %v", err)
+	}
+	fileByPath(t, out, "skills/sk/SKILL.md")
+	fileByPath(t, out, "skills/sk/references/notes.md")
+
+	rule := Source{
+		ArtifactID:    "finance/rl",
+		ArtifactBytes: []byte("---\ntype: rule\nversion: 1.0.0\n---\n\nbody\n"),
+		Plugin:        finPlugin("pi"),
+	}
+	out, err = PiPackage{}.Component(context.Background(), rule)
+	if err != nil || len(out) != 0 {
+		t.Errorf("Pi rule component = %v, %v; want no files (skills are the install unit)", paths(out), err)
+	}
+}
+
+// Spec: §6.7, §7.8 — the Hermes tap writes skills/<name>/SKILL.md per skill with
+// its references/, scripts/, and assets/ resources, and has no root manifest.
+func TestHermesTap_ComponentSkillLayout(t *testing.T) {
+	t.Parallel()
+	skill := Source{
+		ArtifactID:    "finance/sk",
+		SkillBytes:    []byte("---\nname: sk\ndescription: d\n---\n\nbody\n"),
+		ArtifactBytes: []byte("---\ntype: skill\nversion: 1.0.0\n---\n\nbody\n"),
+		Resources: map[string][]byte{
+			"references/notes.md": []byte("notes\n"),
+			"scripts/run.sh":      []byte("#!/bin/sh\n"),
+			"assets/logo.png":     []byte("png"),
+		},
+		Plugin: finPlugin("hermes"),
+	}
+	out, err := HermesTap{}.Component(context.Background(), skill)
+	if err != nil {
+		t.Fatalf("Component(skill): %v", err)
+	}
+	fileByPath(t, out, "skills/sk/SKILL.md")
+	fileByPath(t, out, "skills/sk/references/notes.md")
+	fileByPath(t, out, "skills/sk/scripts/run.sh")
+	fileByPath(t, out, "skills/sk/assets/logo.png")
+}
+
+// Spec: §6.7, §7.8 — a Hermes tap has no root manifest, so Manifest returns no
+// files and the skills subtree reconciles through the sync lock file.
+func TestHermesTap_ManifestEmpty(t *testing.T) {
+	t.Parallel()
+	out, err := HermesTap{}.Manifest("acme-hermes", finPlugin("hermes"))
+	if err != nil {
+		t.Fatalf("Manifest: %v", err)
+	}
+	if len(out) != 0 {
+		t.Errorf("Hermes tap has no root manifest, got %v", paths(out))
+	}
+}
+
+// Spec: §6.7, §7.8 — a non-skill type has no Hermes tap component (the install
+// unit is the skill), so the component returns no files.
+func TestHermesTap_UnsupportedTypeEmitsNothing(t *testing.T) {
+	t.Parallel()
+	rule := Source{
+		ArtifactID:    "finance/rl",
+		ArtifactBytes: []byte("---\ntype: rule\nversion: 1.0.0\n---\n\nbody\n"),
+		Plugin:        finPlugin("hermes"),
+	}
+	out, err := HermesTap{}.Component(context.Background(), rule)
+	if err != nil || len(out) != 0 {
+		t.Errorf("Hermes rule component = %v, %v; want no files", paths(out), err)
+	}
+}
+
+// Spec: §7.8 — the publish-target selector maps each harness ID to its emitter.
+// The three Claude surfaces resolve to the one shared Claude marketplace, and
+// codex, cursor, gemini, pi, and hermes each resolve to their own emitter.
+func TestEmitterForHarness_Mapping(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		"claude-code":    "claude",
+		"claude-desktop": "claude",
+		"claude-cowork":  "claude",
+		"codex":          "codex",
+		"cursor":         "cursor",
+		"gemini":         "gemini",
+		"pi":             "pi",
+		"hermes":         "hermes",
+	}
+	for harness, wantID := range cases {
+		harness, wantID := harness, wantID
+		t.Run(harness, func(t *testing.T) {
+			t.Parallel()
+			e, err := EmitterForHarness(harness)
+			if err != nil {
+				t.Fatalf("EmitterForHarness(%q): %v", harness, err)
+			}
+			if e.ID() != wantID {
+				t.Errorf("EmitterForHarness(%q).ID() = %q, want %q", harness, e.ID(), wantID)
+			}
+		})
+	}
+}
+
+// Spec: §7.8 — OpenCode (npm only), none (raw output), and an unknown harness
+// have no git-repo distribution, so they are not publish targets and the
+// selector rejects them with ErrNotPublishTarget, the error config validation
+// reports for a harness set naming an excluded harness.
+func TestEmitterForHarness_RejectsNonPublishTargets(t *testing.T) {
+	t.Parallel()
+	for _, harness := range []string{"opencode", "none", "", "not-a-harness"} {
+		harness := harness
+		t.Run(harness, func(t *testing.T) {
+			t.Parallel()
+			e, err := EmitterForHarness(harness)
+			if err == nil {
+				t.Fatalf("EmitterForHarness(%q) = %v, nil; want an error", harness, e)
+			}
+			if !errors.Is(err, ErrNotPublishTarget) {
+				t.Errorf("EmitterForHarness(%q) error = %v, want ErrNotPublishTarget", harness, err)
+			}
+			if e != nil {
+				t.Errorf("EmitterForHarness(%q) emitter = %v, want nil on rejection", harness, e)
+			}
+		})
 	}
 }

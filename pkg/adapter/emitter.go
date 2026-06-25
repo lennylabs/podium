@@ -3,6 +3,8 @@ package adapter
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"path"
 )
 
@@ -280,9 +282,179 @@ func (CursorMarketplace) Manifest(marketplaceName string, plugin PluginDescripto
 	return out, nil
 }
 
-// compile-time guard: the plugin-marketplace emitters satisfy the interface.
+// --- Gemini extension emitter ------------------------------------------------
+
+// geminiContextFile is the context file a Gemini extension loads. The extension
+// manifest names it through contextFileName, and a rule injects into it.
+const geminiContextFile = "GEMINI.md"
+
+// GeminiExtension is the marketplace emitter for the Gemini extension format
+// (§7.8). A Gemini repository holds one extension, so the emitter collapses the
+// output's plugin set into one extension: it writes a single root
+// gemini-extension.json, root commands/*.toml, the root context file, and merges
+// mcp-server entries into the manifest's mcpServers, with no per-plugin subtree.
+// The plugin descriptor groups the selection but does not split the repository.
+type GeminiExtension struct{}
+
+// ID returns "gemini".
+func (GeminiExtension) ID() string { return "gemini" }
+
+// Component renders one artifact into the root extension layout, ignoring the
+// plugin subtree because a Gemini repository holds one extension. A command
+// writes commands/<name>.toml; a rule injects into the context file; an
+// mcp-server merges into the manifest's mcpServers. The extension component set
+// is commands, the context file, and mcpServers, so skill, agent, and hook have
+// no Gemini extension component and return no files.
+func (GeminiExtension) Component(ctx context.Context, src Source) ([]File, error) {
+	name := lastSeg(src.ArtifactID)
+	switch frontmatterType(src.ArtifactBytes) {
+	case "command":
+		return []File{{Path: path.Join("commands", name+".toml"), Content: geminiCommandTOML(src)}}, nil
+	case "rule":
+		return []File{injectRule(geminiContextFile, src)}, nil
+	case "mcp-server":
+		return []File{{Path: "gemini-extension.json", Op: OpMergeJSON, Content: mcpFragmentJSON(src)}}, nil
+	}
+	return nil, nil
+}
+
+// Manifest writes the root gemini-extension.json. The plugin set collapses into
+// one extension, so the manifest carries the output's operator-chosen name once
+// and is identical for every plugin call (the merge replaces the idempotent
+// scalars). The manifest is an OpMergeJSON fragment so an mcp-server Component
+// merging mcpServers into the same file does not clobber the scalars.
+func (GeminiExtension) Manifest(marketplaceName string, plugin PluginDescriptor) ([]File, error) {
+	frag := map[string]any{
+		"name":            marketplaceName,
+		"contextFileName": geminiContextFile,
+	}
+	b, _ := json.Marshal(frag)
+	return []File{{Path: "gemini-extension.json", Op: OpMergeJSON, Content: b}}, nil
+}
+
+// --- Pi package emitter ------------------------------------------------------
+
+// piSkillsDir is the subtree a Pi package's skills live under. The root
+// package.json pi.skills array points at it, and each skill renders to
+// <piSkillsDir>/<name>/SKILL.md.
+const piSkillsDir = "skills"
+
+// PiPackage is the marketplace emitter for the Pi git-package format (§7.8). It
+// writes a root package.json carrying the pi-package keyword and a pi.skills
+// array pointing at the skills subtree, with skills/<name>/SKILL.md per skill.
+// The install unit is the individual skill, so the plugin descriptor groups
+// skills into the subtree without changing the install unit, and the package
+// manifest is one per output rather than one per plugin.
+type PiPackage struct{}
+
+// ID returns "pi".
+func (PiPackage) ID() string { return "pi" }
+
+// Component renders one skill into the package's skills subtree. The install
+// unit is the skill, so only type: skill contributes a component; the other
+// types have no Pi package component and return no files.
+func (PiPackage) Component(ctx context.Context, src Source) ([]File, error) {
+	if frontmatterType(src.ArtifactBytes) == "skill" {
+		return skillOut(path.Join(piSkillsDir, lastSeg(src.ArtifactID)), src), nil
+	}
+	return nil, nil
+}
+
+// Manifest writes the root package.json. The package is one per output, so the
+// manifest is identical for every plugin call: it carries the output's
+// operator-chosen name, the pi-package keyword, and a pi.skills array pointing
+// at the skills subtree. The skills subtree carries no merged manifest and
+// reconciles through the sync lock file, so the package.json is a plain write of
+// stable, idempotent content rather than a per-skill merge fragment.
+func (PiPackage) Manifest(marketplaceName string, plugin PluginDescriptor) ([]File, error) {
+	pkg := map[string]any{
+		"name":     marketplaceName,
+		"keywords": []any{"pi-package"},
+		"pi":       map[string]any{"skills": []any{piSkillsDir}},
+	}
+	// json.MarshalIndent cannot fail on this static map of strings and arrays,
+	// matching the other manifest emitters that ignore the marshal error.
+	b, _ := json.MarshalIndent(pkg, "", "  ")
+	return []File{{Path: "package.json", Content: append(b, '\n')}}, nil
+}
+
+// --- Hermes tap emitter ------------------------------------------------------
+
+// hermesSkillsDir is the root directory a Hermes tap discovers skills under.
+const hermesSkillsDir = "skills"
+
+// HermesTap is the marketplace emitter for the Hermes skills-tap format (§7.8).
+// A tap has no root manifest; the harness discovers skills under the root
+// skills/ directory. The emitter writes skills/<name>/SKILL.md per skill with
+// its references/, scripts/, and assets/ resources, and contributes no manifest.
+// The install unit is the individual skill, so the plugin descriptor groups
+// skills without changing the install unit, and the tap reconciles through the
+// sync lock file.
+type HermesTap struct{}
+
+// ID returns "hermes".
+func (HermesTap) ID() string { return "hermes" }
+
+// Component renders one skill into the tap's skills directory with its bundled
+// resources. The install unit is the skill, so only type: skill contributes a
+// component; the other types have no Hermes tap component and return no files.
+func (HermesTap) Component(ctx context.Context, src Source) ([]File, error) {
+	if frontmatterType(src.ArtifactBytes) == "skill" {
+		return skillOut(path.Join(hermesSkillsDir, lastSeg(src.ArtifactID)), src), nil
+	}
+	return nil, nil
+}
+
+// Manifest returns no files: a Hermes tap has no root manifest, and the skills
+// subtree reconciles through the sync lock file.
+func (HermesTap) Manifest(marketplaceName string, plugin PluginDescriptor) ([]File, error) {
+	return nil, nil
+}
+
+// --- publish-target selector -------------------------------------------------
+
+// marketplaceEmitters maps each publish-target harness ID to its emitter. The
+// three Claude surfaces share one emitter, so claude-code, claude-desktop, and
+// claude-cowork all resolve to the shared Claude marketplace (§7.8). OpenCode
+// (npm only) and none (raw canonical output) are not publish targets, so they
+// are absent and EmitterForHarness rejects them.
+var marketplaceEmitters = map[string]MarketplaceEmitter{
+	"claude-code":    ClaudeMarketplace{},
+	"claude-desktop": ClaudeMarketplace{},
+	"claude-cowork":  ClaudeMarketplace{},
+	"codex":          CodexMarketplace{},
+	"cursor":         CursorMarketplace{},
+	"gemini":         GeminiExtension{},
+	"pi":             PiPackage{},
+	"hermes":         HermesTap{},
+}
+
+// EmitterForHarness returns the marketplace emitter for a publish-target harness
+// ID (§7.8). The three Claude surfaces resolve to the one shared Claude
+// marketplace, so a harness set naming more than one of them yields one Claude
+// marketplace rather than a collision. A harness without a git-repo distribution
+// (opencode, none) or an unknown ID is not a publish target and returns an
+// error, so a publish output whose harness set names an excluded harness is
+// rejected at config validation.
+func EmitterForHarness(harnessID string) (MarketplaceEmitter, error) {
+	e, ok := marketplaceEmitters[harnessID]
+	if !ok {
+		return nil, fmt.Errorf("adapter: harness %q is not a publish target (no git-repo distribution): %w", harnessID, ErrNotPublishTarget)
+	}
+	return e, nil
+}
+
+// ErrNotPublishTarget reports that a harness has no git-repo distribution, so it
+// cannot be a marketplace publish target (§7.8). EmitterForHarness wraps it for
+// opencode, none, and any unknown harness ID.
+var ErrNotPublishTarget = errors.New("harness is not a publish target")
+
+// compile-time guard: the marketplace emitters satisfy the interface.
 var (
 	_ MarketplaceEmitter = ClaudeMarketplace{}
 	_ MarketplaceEmitter = CodexMarketplace{}
 	_ MarketplaceEmitter = CursorMarketplace{}
+	_ MarketplaceEmitter = GeminiExtension{}
+	_ MarketplaceEmitter = PiPackage{}
+	_ MarketplaceEmitter = HermesTap{}
 )
