@@ -1,0 +1,312 @@
+// Package publish parses and resolves the operator-authored publish.yaml that
+// drives `podium publish` (§7.8). It loads the same three config scopes
+// sync.yaml uses (§7.5.2), resolves each marketplace output against the shared
+// defaults, and validates the result against the publish-target roster and the
+// §7.5.1 glob syntax.
+package publish
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/lennylabs/podium/pkg/adapter"
+	"github.com/lennylabs/podium/pkg/sync"
+	"gopkg.in/yaml.v3"
+)
+
+// ErrConfigInvalid signals a publish.yaml that fails validation: a harness set
+// naming a non-publish-target harness, or a malformed plugin glob. It maps to
+// config.invalid in §6.10. Callers assert against it via errors.Is.
+var ErrConfigInvalid = errors.New("config.invalid")
+
+// PublishConfig is the in-memory representation of `.podium/publish.yaml`
+// (§7.8). Its top-level keys are `defaults` and `marketplaces`. The same schema
+// is read from up to three file scopes and merged by per-key precedence,
+// mirroring sync.yaml (§7.5.2).
+type PublishConfig struct {
+	Defaults     Defaults            `yaml:"defaults,omitempty"`
+	Marketplaces []MarketplaceOutput `yaml:"marketplaces,omitempty"`
+}
+
+// Defaults is the `defaults:` block. It holds the registry, the publishing
+// identity (the §4.6 effective-view principal the render runs as), and a
+// default workflow each marketplace inherits unless it declares its own.
+type Defaults struct {
+	Registry string   `yaml:"registry,omitempty"`
+	Identity string   `yaml:"identity,omitempty"`
+	Workflow Workflow `yaml:"workflow,omitempty"`
+}
+
+// MarketplaceOutput is one entry under `marketplaces:`: a named publishing
+// destination with a git repository, a harness set, a plugin list, and a
+// workflow. An output that declares `workflow` replaces the default workflow
+// for that output in full (§7.8).
+type MarketplaceOutput struct {
+	ID            string         `yaml:"id"`
+	Git           GitRemote      `yaml:"git,omitempty"`
+	Harnesses     []string       `yaml:"harnesses,omitempty"`
+	CommitMessage string         `yaml:"commit_message,omitempty"`
+	Plugins       []PluginFilter `yaml:"plugins,omitempty"`
+	Workflow      Workflow       `yaml:"workflow,omitempty"`
+}
+
+// GitRemote is the `git:` block of a marketplace output: the remote URL the
+// workflow clones and pushes, and the branch it writes (§7.8).
+type GitRemote struct {
+	Remote string `yaml:"remote,omitempty"`
+	Branch string `yaml:"branch,omitempty"`
+}
+
+// PluginFilter is one entry under `plugins:`: a named bundle of selected
+// artifacts defined by a §7.5.1 scope filter (include, exclude, type). The
+// publishing pipeline assigns each selected artifact to its plugin by
+// evaluating the filters in declaration order (§7.8).
+type PluginFilter struct {
+	Name    string   `yaml:"name"`
+	Include []string `yaml:"include,omitempty"`
+	Exclude []string `yaml:"exclude,omitempty"`
+	Type    []string `yaml:"type,omitempty"`
+}
+
+// ScopeFilter returns the §7.5.1 selection this plugin filter expresses,
+// reusing the sync scope-filter machinery so plugin selection and sync
+// selection apply identical glob semantics (§7.8).
+func (p PluginFilter) ScopeFilter() sync.ScopeFilter {
+	return sync.ScopeFilter{Include: p.Include, Exclude: p.Exclude, Types: p.Type}
+}
+
+// Workflow groups the `prepare` and `publish` command lists `podium publish`
+// runs around the render phase (§7.8). prepare places a checkout of the
+// destination repository at the working directory, and publish takes the
+// rendered tree to the remote.
+type Workflow struct {
+	Prepare []Command `yaml:"prepare,omitempty"`
+	Publish []Command `yaml:"publish,omitempty"`
+}
+
+// IsZero reports whether the workflow declares no commands. A marketplace whose
+// workflow is zero inherits the default workflow; a non-zero workflow replaces
+// it in full (§7.8).
+func (w Workflow) IsZero() bool {
+	return len(w.Prepare) == 0 && len(w.Publish) == 0
+}
+
+// Command is one step of a workflow phase (§7.8). It is an argv list under
+// `run:` executed directly without a shell, or a string under `sh:` executed
+// through `sh -c`. The per-command flags control failure handling:
+// SkipIfNoChanges skips the command when the render produced no diff,
+// ContinueOnError lets the pipeline proceed past a non-zero exit, and Timeout
+// bounds the command's wall-clock duration.
+type Command struct {
+	Run             []string `yaml:"run,omitempty"`
+	Sh              string   `yaml:"sh,omitempty"`
+	SkipIfNoChanges bool     `yaml:"skip_if_no_changes,omitempty"`
+	ContinueOnError bool     `yaml:"continue_on_error,omitempty"`
+	Timeout         Duration `yaml:"timeout,omitempty"`
+}
+
+// Duration is a time.Duration that unmarshals from a Go duration string such as
+// "30s" or "5m". A bare YAML integer is rejected so a unit is always explicit,
+// because an ambiguous "timeout: 30" reads as nanoseconds under the default
+// yaml decoding and surprises an operator who meant seconds.
+type Duration time.Duration
+
+// Duration returns the timeout as a time.Duration.
+func (d Duration) Duration() time.Duration { return time.Duration(d) }
+
+// UnmarshalYAML parses a duration string into d.
+func (d *Duration) UnmarshalYAML(node *yaml.Node) error {
+	var s string
+	if err := node.Decode(&s); err != nil {
+		return fmt.Errorf("timeout: expected a duration string such as \"30s\": %w", err)
+	}
+	parsed, err := time.ParseDuration(s)
+	if err != nil {
+		return fmt.Errorf("timeout: invalid duration %q: %w", s, err)
+	}
+	*d = Duration(parsed)
+	return nil
+}
+
+// configFileName is the publish config file name in each scope, matching the
+// sync.yaml convention (§7.5.2). The project-local scope uses publish.local.yaml.
+const (
+	configFileName      = "publish.yaml"
+	localConfigFileName = "publish.local.yaml"
+)
+
+// ConfigPath returns the canonical path to a workspace's publish.yaml.
+func ConfigPath(workspace string) string {
+	return filepath.Join(workspace, ".podium", configFileName)
+}
+
+// readConfigFile reads a PublishConfig from an explicit path. A missing file
+// returns (nil, nil) so callers can treat an absent scope as empty, matching
+// sync.ReadConfigFile.
+func readConfigFile(path string) (*PublishConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	cfg := &PublishConfig{}
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return cfg, nil
+}
+
+// LoadMergedConfig discovers the workspace by walking up from startDir, loads
+// the three §7.5.2 file scopes (`<homeDir>/.podium/publish.yaml`,
+// `<workspace>/.podium/publish.yaml`, `<workspace>/.podium/publish.local.yaml`),
+// and merges them by per-key precedence (project-local > project-shared >
+// user-global). homeDir locates the user-global file; tests pass an explicit
+// directory. An absent scope file contributes nothing. The returned workspace
+// is "" when no `.podium/` is found; only the user-global scope then applies.
+//
+// spec: §7.8 — publish.yaml "with the same three-scope resolution and the same
+// precedence rules as sync.yaml (§7.5.2)".
+func LoadMergedConfig(startDir, homeDir string) (*PublishConfig, string, error) {
+	workspace, _ := sync.DiscoverWorkspace(startDir)
+
+	var scopes []*PublishConfig
+	if homeDir != "" {
+		cfg, err := readConfigFile(filepath.Join(homeDir, ".podium", configFileName))
+		if err != nil {
+			return nil, workspace, err
+		}
+		scopes = append(scopes, cfg)
+	}
+	if workspace != "" {
+		shared, err := readConfigFile(filepath.Join(workspace, ".podium", configFileName))
+		if err != nil {
+			return nil, workspace, err
+		}
+		local, err := readConfigFile(filepath.Join(workspace, ".podium", localConfigFileName))
+		if err != nil {
+			return nil, workspace, err
+		}
+		scopes = append(scopes, shared, local)
+	}
+
+	return mergeScopes(scopes), workspace, nil
+}
+
+// mergeScopes folds the scopes (ordered low to high precedence) into one
+// PublishConfig. Defaults merge per key: a higher-precedence non-empty value
+// wins. Marketplaces are an additive union by output id; a higher-precedence
+// scope that redeclares an id overwrites the whole output, mirroring the
+// whole-profile overwrite sync.yaml applies on a name collision (§7.5.2).
+func mergeScopes(scopes []*PublishConfig) *PublishConfig {
+	merged := &PublishConfig{}
+	byID := map[string]int{}
+	for _, cfg := range scopes {
+		if cfg == nil {
+			continue
+		}
+		mergeDefaults(&merged.Defaults, cfg.Defaults)
+		for _, out := range cfg.Marketplaces {
+			if idx, ok := byID[out.ID]; ok {
+				merged.Marketplaces[idx] = out
+				continue
+			}
+			byID[out.ID] = len(merged.Marketplaces)
+			merged.Marketplaces = append(merged.Marketplaces, out)
+		}
+	}
+	return merged
+}
+
+// mergeDefaults overlays src onto dst, keeping a non-empty src field. A non-zero
+// src workflow replaces dst's workflow in full, because a workflow is overridden
+// as a unit (§7.8) rather than field by field.
+func mergeDefaults(dst *Defaults, src Defaults) {
+	if src.Registry != "" {
+		dst.Registry = src.Registry
+	}
+	if src.Identity != "" {
+		dst.Identity = src.Identity
+	}
+	if !src.Workflow.IsZero() {
+		dst.Workflow = src.Workflow
+	}
+}
+
+// ResolvedOutput is one marketplace output with its defaults applied: the
+// registry, the publishing identity, and the effective workflow (the output's
+// own workflow when it declares one, else the default workflow). The git
+// destination, harness set, plugins, and commit message come from the output.
+type ResolvedOutput struct {
+	ID            string
+	Registry      string
+	Identity      string
+	Git           GitRemote
+	Harnesses     []string
+	CommitMessage string
+	Plugins       []PluginFilter
+	Workflow      Workflow
+}
+
+// Resolve applies the merged defaults to each marketplace output and validates
+// the result. Each output inherits the registry and identity from defaults, and
+// its effective workflow is its own workflow when it declares one, else the
+// default workflow in full (§7.8). Validation rejects an output whose harness
+// set names a non-publish-target harness and an output with a malformed plugin
+// glob, both with config.invalid (§6.10).
+func (cfg *PublishConfig) Resolve() ([]ResolvedOutput, error) {
+	if cfg == nil {
+		return nil, nil
+	}
+	out := make([]ResolvedOutput, 0, len(cfg.Marketplaces))
+	for _, m := range cfg.Marketplaces {
+		workflow := m.Workflow
+		if workflow.IsZero() {
+			workflow = cfg.Defaults.Workflow
+		}
+		resolved := ResolvedOutput{
+			ID:            m.ID,
+			Registry:      cfg.Defaults.Registry,
+			Identity:      cfg.Defaults.Identity,
+			Git:           m.Git,
+			Harnesses:     m.Harnesses,
+			CommitMessage: m.CommitMessage,
+			Plugins:       m.Plugins,
+			Workflow:      workflow,
+		}
+		if err := validateOutput(resolved); err != nil {
+			return nil, err
+		}
+		out = append(out, resolved)
+	}
+	return out, nil
+}
+
+// validateOutput rejects an output whose harness set names a non-publish-target
+// harness (opencode, none, or an unknown id) and an output with a malformed
+// plugin glob. Both map to config.invalid (§6.10). The harness check reuses the
+// §7.8 publish-target selector (adapter.EmitterForHarness), and the glob check
+// reuses the §7.5.1 sync glob validator (sync.ValidateGlob), so config
+// validation and the render path agree on which harnesses publish and which
+// globs are well-formed.
+func validateOutput(out ResolvedOutput) error {
+	for _, h := range out.Harnesses {
+		if _, err := adapter.EmitterForHarness(h); err != nil {
+			return fmt.Errorf("%w: marketplace %q harness %q is not a publish target (opencode and none have no git-repo distribution): %w",
+				ErrConfigInvalid, out.ID, h, err)
+		}
+	}
+	for _, p := range out.Plugins {
+		for _, g := range append(append([]string(nil), p.Include...), p.Exclude...) {
+			if err := sync.ValidateGlob(g); err != nil {
+				return fmt.Errorf("%w: marketplace %q plugin %q has a malformed glob %q: %w",
+					ErrConfigInvalid, out.ID, p.Name, g, err)
+			}
+		}
+	}
+	return nil
+}

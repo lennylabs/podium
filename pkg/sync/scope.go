@@ -11,6 +11,12 @@ import (
 // ErrUnbalancedBraces signals a glob pattern with mismatched "{" / "}".
 var ErrUnbalancedBraces = errors.New("unbalanced braces")
 
+// ValidateGlob reports whether pattern is a well-formed §7.5.1 glob. It is the
+// exported form of validateGlob for callers outside the package; `podium
+// publish` reuses it to validate plugin scope-filter globs in publish.yaml
+// (§7.8) against the same rules `podium sync --check` applies.
+func ValidateGlob(pattern string) error { return validateGlob(pattern) }
+
 // validateGlob reports whether pattern is a well-formed §7.5.1 glob. It
 // rejects unbalanced brace alternation and any segment that filepath.Match
 // considers malformed (for example an unterminated "[" class). Used by the
