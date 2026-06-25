@@ -40,10 +40,11 @@ import (
 // registry credential, forwarded to the render's effective-view fetch and exposed
 // to commands. Workdir, when set, points the render at an existing checkout (the
 // --workdir flag); when empty, Run allocates a per-output working directory and
-// the prepare phase clones into it. DryRun renders into a temporary directory and
-// prints each prepare and publish command with its variables substituted without
-// running the publish phase. Check validates the config only and runs neither the
-// render nor any command. HTTPClient and Now are injected by tests; a nil client
+// the prepare phase clones into it. DryRun runs the prepare commands into a
+// temporary directory, renders against that checkout, and prints each prepare and
+// publish command with its variables substituted without running the publish
+// phase. Check validates the config only and runs neither the render nor any
+// command. HTTPClient and Now are injected by tests; a nil client
 // uses the pkg/sync default, and a nil Now uses time.Now.
 type RunOptions struct {
 	Output     ResolvedOutput
@@ -78,9 +79,12 @@ type RunResult struct {
 //     running any command.
 //   - The default path allocates a working directory unless --workdir set one,
 //     runs the prepare commands, renders, then runs the publish commands.
-//   - --dry-run (DryRun) renders into a temporary directory, prints each prepare
-//     and publish command with its PODIUM_* variables substituted, and does not
-//     run the publish phase.
+//   - --dry-run (DryRun) clones into a temporary directory by running the prepare
+//     commands, renders against that checkout, prints each prepare and publish
+//     command with its PODIUM_* variables substituted, and does not run the
+//     publish phase. Running prepare lets the render reconcile against real
+//     repository content, so the printed $PODIUM_CHANGED and skip_if_no_changes
+//     markers match a live run.
 //
 // Run fails fast on the first command that exits non-zero, unless that command
 // declares continue_on_error. On a failure it runs the failing phase's own
@@ -125,13 +129,12 @@ func Run(ctx context.Context, opts RunOptions) (*RunResult, error) {
 func runPipeline(ctx context.Context, opts RunOptions, out ResolvedOutput, workdir string, res *RunResult) (*RunResult, error) {
 	vars := baseVars(out, workdir)
 
-	// prepare. A live run executes it so the checkout precedes the render; a
-	// dry-run defers printing it until after the render so the printed
-	// $PODIUM_CHANGED reflects the render result.
-	if !opts.DryRun {
-		if err := runPhase(ctx, opts, "prepare", out.Workflow.Prepare, vars, out.Workflow.PrepareOnError); err != nil {
-			return nil, err
-		}
+	// prepare runs in both modes so the checkout precedes the render and the
+	// render reconciles against existing repository content. A dry run clones
+	// into its temporary working directory, so the dry-run change detection and
+	// the printed skip_if_no_changes markers reflect what a live run would do.
+	if err := runPhase(ctx, opts, "prepare", out.Workflow.Prepare, vars, out.Workflow.PrepareOnError); err != nil {
+		return nil, err
 	}
 
 	render, err := Render(ctx, RenderOptions{

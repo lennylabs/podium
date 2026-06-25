@@ -319,14 +319,29 @@ func TestRun_PrepareOnErrorCleanup(t *testing.T) {
 
 // Spec: §7.8 — --dry-run renders into a temporary directory and prints each
 // prepare and publish command with variables substituted, without running the
-// publish phase. The operator's checkout is untouched.
+// publish phase. The prepare phase still runs (into the dry-run temp directory)
+// so the render reconciles against existing repository content. The operator's
+// --workdir checkout is untouched, and the publish phase does not run.
 func TestRun_DryRun(t *testing.T) {
 	t.Parallel()
 	reg := fixtureRegistry(t)
 	workdir := t.TempDir()
 
+	// A prepare command writes a marker into $PODIUM_WORKDIR so the test can
+	// assert prepare ran during the dry run, and that it ran into the temp
+	// directory rather than the operator's --workdir.
+	// The first prepare command stands in for a clone; it echoes the
+	// substituted "git clone <remote> <workdir>" without touching the network,
+	// so the dry-run test does not depend on a reachable remote. The second
+	// records the $PODIUM_WORKDIR it saw to a marker outside the temp directory
+	// (which cleanup removes after the run) to prove prepare executed and ran
+	// into the dry-run temp directory rather than the operator's --workdir.
+	prepMarker := filepath.Join(t.TempDir(), "prepare-workdir")
 	out := runOutput(reg, []string{"claude-code"}, Workflow{
-		Prepare: []Command{{Run: []string{"git", "clone", "$PODIUM_GIT_REMOTE", "$PODIUM_WORKDIR"}}},
+		Prepare: []Command{
+			{Run: []string{"echo", "git", "clone", "$PODIUM_GIT_REMOTE", "$PODIUM_WORKDIR"}},
+			{Sh: "printf '%s' \"$PODIUM_WORKDIR\" > " + prepMarker},
+		},
 		Publish: []Command{
 			touch("must-not-run", "ran"),
 			{Run: []string{"git", "commit", "-m", "$PODIUM_COMMIT_MESSAGE"}, SkipIfNoChanges: true},
@@ -343,6 +358,19 @@ func TestRun_DryRun(t *testing.T) {
 	}
 	if res.Workdir == workdir {
 		t.Errorf("a dry run must render into a temporary directory, not the operator's --workdir")
+	}
+
+	// The prepare phase ran, and it ran against the dry-run temp directory, not
+	// the operator's --workdir.
+	prepWorkdir, statErr := os.ReadFile(prepMarker)
+	if statErr != nil {
+		t.Fatalf("a dry run must run the prepare phase: read prepare marker: %v", statErr)
+	}
+	if string(prepWorkdir) == workdir {
+		t.Errorf("a dry run must run prepare against the temp directory, not the operator's --workdir %q", workdir)
+	}
+	if string(prepWorkdir) != res.Workdir {
+		t.Errorf("the prepare phase saw workdir %q, want the dry-run temp directory %q", string(prepWorkdir), res.Workdir)
 	}
 
 	// The publish command must not have run against the operator's checkout.
@@ -363,6 +391,55 @@ func TestRun_DryRun(t *testing.T) {
 	// Both phases are printed.
 	if !strings.Contains(printed, "# prepare") || !strings.Contains(printed, "# publish") {
 		t.Errorf("dry-run output must print both phases:\n%s", printed)
+	}
+}
+
+// Spec: §7.8 — because the dry-run prepare clones into the temp directory, the
+// render reconciles against real repository content, so $PODIUM_CHANGED and the
+// printed skip_if_no_changes markers match what a live run against the same
+// checkout would do. A dry run whose prepare populates the temp directory with
+// the already-published tree produces no diff, so the skip_if_no_changes publish
+// command prints as skipped rather than as un-skipped.
+func TestRun_DryRunChangePreviewMatchesCheckout(t *testing.T) {
+	t.Parallel()
+	reg := fixtureRegistry(t)
+
+	// First, a live run produces the published tree in a real checkout. The
+	// dry-run prepare then clones that tree into its temp directory.
+	checkout := t.TempDir()
+	if _, err := Run(context.Background(), RunOptions{
+		Output:  runOutput(reg, []string{"claude-code"}, Workflow{}),
+		Workdir: checkout,
+		Now:     fixedNow(),
+		Stdout:  io_Discard(),
+		Stderr:  io_Discard(),
+	}); err != nil {
+		t.Fatalf("seed live run: %v", err)
+	}
+
+	out := runOutput(reg, []string{"claude-code"}, Workflow{
+		// prepare copies the already-published checkout into the dry-run temp
+		// working directory, standing in for a clone of the destination repo.
+		Prepare: []Command{{Sh: "cp -R " + checkout + "/. \"$PODIUM_WORKDIR/\""}},
+		Publish: []Command{
+			{Run: []string{"git", "commit", "-m", "$PODIUM_COMMIT_MESSAGE"}, SkipIfNoChanges: true},
+		},
+	})
+
+	var stdout bytes.Buffer
+	res, err := Run(context.Background(), RunOptions{Output: out, DryRun: true, Now: fixedNow(), Stdout: &stdout, Stderr: io_Discard()})
+	if err != nil {
+		t.Fatalf("dry-run: %v", err)
+	}
+	if res.Render.Changed {
+		t.Fatalf("a dry run against the already-published checkout must report Changed=false")
+	}
+
+	// Because the render saw no diff, the dry-run preview marks the
+	// skip_if_no_changes publish command as skipped, matching a live run.
+	printed := stdout.String()
+	if !strings.Contains(printed, "skipped (no changes)") {
+		t.Errorf("dry-run preview must mark a skip_if_no_changes command as skipped on a no-change render:\n%s", printed)
 	}
 }
 
