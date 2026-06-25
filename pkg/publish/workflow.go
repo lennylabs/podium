@@ -40,12 +40,11 @@ import (
 // registry credential, forwarded to the render's effective-view fetch and exposed
 // to commands. Workdir, when set, points the render at an existing checkout (the
 // --workdir flag); when empty, Run allocates a per-output working directory and
-// the prepare phase clones into it. DryRun runs the prepare commands into a
-// temporary directory, renders against that checkout, and prints each prepare and
-// publish command with its variables substituted without running the publish
-// phase. Check validates the config only and runs neither the render nor any
-// command. HTTPClient and Now are injected by tests; a nil client
-// uses the pkg/sync default, and a nil Now uses time.Now.
+// the prepare phase clones into it. DryRun renders into a temporary directory and
+// prints each prepare and publish command with its variables substituted, running
+// no operator command and no publish phase. Check validates the config only and
+// runs neither the render nor any command. HTTPClient and Now are injected by
+// tests; a nil client uses the pkg/sync default, and a nil Now uses time.Now.
 type RunOptions struct {
 	Output     ResolvedOutput
 	Token      string
@@ -79,12 +78,12 @@ type RunResult struct {
 //     running any command.
 //   - The default path allocates a working directory unless --workdir set one,
 //     runs the prepare commands, renders, then runs the publish commands.
-//   - --dry-run (DryRun) clones into a temporary directory by running the prepare
-//     commands, renders against that checkout, prints each prepare and publish
-//     command with its PODIUM_* variables substituted, and does not run the
-//     publish phase. Running prepare lets the render reconcile against real
-//     repository content, so the printed $PODIUM_CHANGED and skip_if_no_changes
-//     markers match a live run.
+//   - --dry-run (DryRun) is a preview. It renders into a temporary directory and
+//     prints each prepare and publish command with its PODIUM_* variables
+//     substituted, running no operator command and no publish phase. Because no
+//     prepare clone populates the temporary directory, the render reconciles
+//     against an empty tree, so a dry run reports the whole rendered tree as
+//     changed.
 //
 // Run fails fast on the first command that exits non-zero, unless that command
 // declares continue_on_error. On a failure it runs the failing phase's own
@@ -125,16 +124,22 @@ func Run(ctx context.Context, opts RunOptions) (*RunResult, error) {
 
 // runPipeline sequences prepare, render, and publish for a resolved output. It is
 // split from Run so the workdir allocation and the --check short-circuit stay in
-// one place and the phase ordering stays in another.
+// one place and the phase ordering stays in another. A dry run prints both phases
+// instead of executing them, so it runs no operator command and performs no
+// network clone or push; only the render runs, into a temporary directory.
 func runPipeline(ctx context.Context, opts RunOptions, out ResolvedOutput, workdir string, res *RunResult) (*RunResult, error) {
 	vars := baseVars(out, workdir)
 
-	// prepare runs in both modes so the checkout precedes the render and the
-	// render reconciles against existing repository content. A dry run clones
-	// into its temporary working directory, so the dry-run change detection and
-	// the printed skip_if_no_changes markers reflect what a live run would do.
-	if err := runPhase(ctx, opts, "prepare", out.Workflow.Prepare, vars, out.Workflow.PrepareOnError); err != nil {
-		return nil, err
+	// A live run executes the prepare commands so the checkout precedes the
+	// render and the render reconciles against existing repository content. A dry
+	// run prints them instead: it is a preview that renders into a temporary
+	// directory and runs no operator command (§7.8 "prints each command with
+	// variables substituted"). The render then reconciles against the empty temp
+	// directory, so a dry run reports the whole rendered tree as changed.
+	if !opts.DryRun {
+		if err := runPhase(ctx, opts, "prepare", out.Workflow.Prepare, vars, out.Workflow.PrepareOnError); err != nil {
+			return nil, err
+		}
 	}
 
 	render, err := Render(ctx, RenderOptions{
