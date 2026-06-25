@@ -100,6 +100,77 @@ func TestRun_VariableInjection(t *testing.T) {
 	}
 }
 
+// Spec: §7.8 — an sh: command is handed to sh -c verbatim, and the pipeline
+// inherits the ambient environment, so an ambient credential reference such as
+// $GH_TOKEN that Podium does not inject is expanded by the shell rather than
+// blanked by a Go-side pre-expansion. This is the credential pass-through the
+// spec calls out (git authentication relies on SSH_AUTH_SOCK and GH_TOKEN). The
+// command writes the shell-expanded value of an ambient variable to a marker
+// file, alongside an injected PODIUM_* variable, so the test asserts the shell
+// expands both.
+func TestRun_ShAmbientEnvSurvives(t *testing.T) {
+	// t.Setenv forbids t.Parallel, so this test runs serially.
+	reg := fixtureRegistry(t)
+	workdir := t.TempDir()
+	t.Setenv("GH_TOKEN", "ghp-secret-value")
+
+	// The sh: string references an ambient $GH_TOKEN and the injected
+	// $PODIUM_OUTPUT_ID. A correct pipeline runs it verbatim under sh -c, so the
+	// shell expands both. A pipeline that pre-expands in Go blanks $GH_TOKEN,
+	// because GH_TOKEN is not in the injected PODIUM_* set.
+	out := runOutput(reg, []string{"claude-code"}, Workflow{
+		Publish: []Command{
+			{Sh: `printf 'token=%s id=%s\n' "$GH_TOKEN" "$PODIUM_OUTPUT_ID" >> "$PODIUM_WORKDIR/ambient"`},
+		},
+	})
+
+	if _, err := Run(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: io_Discard(), Stderr: io_Discard()}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got := readMarker(t, workdir, "ambient")
+	if !strings.Contains(got, "token=ghp-secret-value") {
+		t.Errorf("sh: command must expand the ambient $GH_TOKEN through the shell, got:\n%s", got)
+	}
+	if !strings.Contains(got, "id=acme-agents") {
+		t.Errorf("sh: command must expand the injected $PODIUM_OUTPUT_ID through the shell, got:\n%s", got)
+	}
+}
+
+// Spec: §7.8 — the --dry-run preview prints each command with variables
+// substituted. The injected PODIUM_* variables are expanded in the preview, and a
+// reference Podium does not inject (an ambient $GH_TOKEN) is left as its literal
+// $name so the printed command shows the ambient credential reference the live
+// shell will expand rather than blanking it.
+func TestRun_DryRunPreservesAmbientReference(t *testing.T) {
+	t.Parallel()
+	reg := fixtureRegistry(t)
+
+	// The credential reference sits in the publish phase, which a dry run prints
+	// but does not execute, so the test asserts the printed preview without a
+	// reachable remote.
+	out := runOutput(reg, []string{"claude-code"}, Workflow{
+		Publish: []Command{
+			{Sh: `git -C "$PODIUM_WORKDIR" push https://$GH_TOKEN@github.com/acme/agents.git`},
+		},
+	})
+
+	var stdout bytes.Buffer
+	if _, err := Run(context.Background(), RunOptions{Output: out, DryRun: true, Now: fixedNow(), Stdout: &stdout, Stderr: io_Discard()}); err != nil {
+		t.Fatalf("dry-run: %v", err)
+	}
+
+	printed := stdout.String()
+	// The injected $PODIUM_WORKDIR is expanded; the ambient $GH_TOKEN is left
+	// literal so the credential reference survives into the printed command.
+	if !strings.Contains(printed, "https://$GH_TOKEN@github.com/acme/agents.git") {
+		t.Errorf("dry-run preview must preserve the literal $GH_TOKEN reference, got:\n%s", printed)
+	}
+	if strings.Contains(printed, "https://@github.com/acme/agents.git") {
+		t.Errorf("dry-run preview must not blank the ambient $GH_TOKEN reference, got:\n%s", printed)
+	}
+}
+
 // Spec: §7.8 — the commit_message template is rendered with the change count and
 // a timestamp into $PODIUM_COMMIT_MESSAGE.
 func TestRun_CommitMessageTemplate(t *testing.T) {
@@ -616,6 +687,26 @@ func TestRunCleanup_BestEffort(t *testing.T) {
 	}, map[string]string{"PODIUM_WORKDIR": workdir2})
 	if _, err := os.Stat(filepath.Join(workdir2, "second")); !os.IsNotExist(err) {
 		t.Errorf("a non-continue cleanup failure must stop the remaining cleanup: stat err=%v", err)
+	}
+}
+
+// substitute expands an injected variable and leaves an uninjected reference as
+// its literal $name, so the dry-run preview keeps an ambient credential reference
+// rather than blanking it.
+func TestSubstitute(t *testing.T) {
+	t.Parallel()
+	vars := map[string]string{"PODIUM_WORKDIR": "/w", "PODIUM_EMPTY": ""}
+	for _, tc := range []struct{ in, want string }{
+		{"$PODIUM_WORKDIR/x", "/w/x"},
+		{"${PODIUM_WORKDIR}/x", "/w/x"},
+		{"$GH_TOKEN", "$GH_TOKEN"},                         // uninjected: left literal
+		{"https://$GH_TOKEN@h/r", "https://$GH_TOKEN@h/r"}, // ambient credential survives
+		{"$PODIUM_EMPTY", ""},                              // injected-but-empty expands to empty
+		{"$PODIUM_WORKDIR and $SSH_AUTH_SOCK", "/w and $SSH_AUTH_SOCK"},
+	} {
+		if got := substitute(tc.in, vars); got != tc.want {
+			t.Errorf("substitute(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }
 

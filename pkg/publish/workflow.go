@@ -252,10 +252,14 @@ func runCleanup(ctx context.Context, opts RunOptions, phase string, cmds []Comma
 }
 
 // runCommand executes one command with the injected variables. A run: argv list
-// is executed directly without a shell; an sh: string is executed through
-// sh -c. The command inherits the ambient environment plus the PODIUM_*
-// variables. A non-zero timeout bounds the command's wall clock; a timeout
-// expiry surfaces as a context.DeadlineExceeded-wrapped error.
+// is executed directly without a shell; an sh: string is handed to sh -c
+// verbatim, so the shell performs all variable expansion. The command inherits
+// the ambient environment plus the PODIUM_* variables, so the shell expands
+// $PODIUM_WORKDIR and an ambient $GH_TOKEN or $SSH_AUTH_SOCK alike; pre-expanding
+// the string in Go would blank every ambient credential reference the §7.8
+// pipeline relies on for git authentication. A non-zero timeout bounds the
+// command's wall clock; a timeout expiry surfaces as a
+// context.DeadlineExceeded-wrapped error.
 func runCommand(ctx context.Context, opts RunOptions, c Command, vars map[string]string) error {
 	if err := c.validate(); err != nil {
 		return err
@@ -270,7 +274,7 @@ func runCommand(ctx context.Context, opts RunOptions, c Command, vars map[string
 
 	var cmd *exec.Cmd
 	if c.Sh != "" {
-		cmd = exec.CommandContext(cmdCtx, "sh", "-c", substitute(c.Sh, vars))
+		cmd = exec.CommandContext(cmdCtx, "sh", "-c", c.Sh)
 	} else {
 		argv := substituteArgs(c.Run, vars)
 		cmd = exec.CommandContext(cmdCtx, argv[0], argv[1:]...)
@@ -376,15 +380,28 @@ func printPhase(w io.Writer, phase string, cmds []Command, vars map[string]strin
 	}
 }
 
-// substitute expands $PODIUM_* references in s against vars. It uses
-// os.Expand so $VAR and ${VAR} both resolve, and an unknown variable expands to
-// the empty string, matching shell semantics for an unset variable.
+// substitute expands the injected variables in s for the --dry-run preview. It
+// uses os.Expand so $VAR and ${VAR} both resolve against vars, and a reference
+// that names no injected variable is left as its literal $name. Preserving the
+// literal keeps an ambient credential reference such as $GH_TOKEN or
+// $SSH_AUTH_SOCK in the printed command, so the preview shows what the live shell
+// will expand rather than blanking the reference. This is a preview-only helper:
+// an sh: command is run verbatim by sh -c (runCommand), and a run: argv list is
+// expanded against the injected variables only (substituteArgs).
 func substitute(s string, vars map[string]string) string {
-	return os.Expand(s, func(key string) string { return vars[key] })
+	return os.Expand(s, func(key string) string {
+		if v, ok := vars[key]; ok {
+			return v
+		}
+		return "$" + key
+	})
 }
 
-// substituteArgs expands each argv element against vars, so an argv command's
-// $PODIUM_WORKDIR resolves the same way an sh: string's does.
+// substituteArgs expands each argv element against the injected variables, so an
+// argv command's $PODIUM_WORKDIR resolves the same way the live exec does. An
+// argv element runs with no shell, so a reference Podium does not inject (an
+// ambient $GH_TOKEN) is left as its literal $name rather than blanked, matching
+// substitute.
 func substituteArgs(args []string, vars map[string]string) []string {
 	out := make([]string, len(args))
 	for i, a := range args {
