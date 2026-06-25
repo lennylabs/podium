@@ -46,6 +46,8 @@ func main() {
 		os.Exit(importCmd(os.Args[2:]))
 	case "sync":
 		os.Exit(syncCmd(os.Args[2:]))
+	case "publish":
+		os.Exit(publishCmd(os.Args[2:]))
 	case "lint":
 		os.Exit(lintCmd(os.Args[2:]))
 	case "search":
@@ -142,6 +144,7 @@ Commands:
   sync                Materialize the caller's effective view through a HarnessAdapter.
   sync override       Add or remove ephemeral artifact toggles.
   sync save-as        Capture the current target state as a sync.yaml profile.
+  publish             Render the catalog into marketplace repositories and push them to git remotes.
   lint                Validate manifests in a filesystem-source registry.
   search              Hybrid search over artifacts (registry HTTP API).
   domain show         Show a domain map.

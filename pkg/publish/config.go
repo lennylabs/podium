@@ -162,10 +162,11 @@ func ConfigPath(workspace string) string {
 	return filepath.Join(workspace, ".podium", configFileName)
 }
 
-// readConfigFile reads a PublishConfig from an explicit path. A missing file
+// ReadConfigFile reads a PublishConfig from an explicit path. A missing file
 // returns (nil, nil) so callers can treat an absent scope as empty, matching
-// sync.ReadConfigFile.
-func readConfigFile(path string) (*PublishConfig, error) {
+// sync.ReadConfigFile. `podium publish --config <path>` reads one file directly
+// through this, and LoadMergedConfig reads each scope file through it.
+func ReadConfigFile(path string) (*PublishConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -195,18 +196,18 @@ func LoadMergedConfig(startDir, homeDir string) (*PublishConfig, string, error) 
 
 	var scopes []*PublishConfig
 	if homeDir != "" {
-		cfg, err := readConfigFile(filepath.Join(homeDir, ".podium", configFileName))
+		cfg, err := ReadConfigFile(filepath.Join(homeDir, ".podium", configFileName))
 		if err != nil {
 			return nil, workspace, err
 		}
 		scopes = append(scopes, cfg)
 	}
 	if workspace != "" {
-		shared, err := readConfigFile(filepath.Join(workspace, ".podium", configFileName))
+		shared, err := ReadConfigFile(filepath.Join(workspace, ".podium", configFileName))
 		if err != nil {
 			return nil, workspace, err
 		}
-		local, err := readConfigFile(filepath.Join(workspace, ".podium", localConfigFileName))
+		local, err := ReadConfigFile(filepath.Join(workspace, ".podium", localConfigFileName))
 		if err != nil {
 			return nil, workspace, err
 		}
