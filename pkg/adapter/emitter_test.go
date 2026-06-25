@@ -10,11 +10,13 @@ import (
 // Spec: §7.8 marketplace emitters. These tests pin each plugin-marketplace
 // emitter's manifest path, per-plugin manifest path, the once-per-plugin entry
 // count, the PodiumOwnedKey-on-plugin-name reconciliation, and the Codex
-// component set the §7.8 emitter description and the proposal 0003 emitter
-// bullet (line 166) enumerate (skills/, hooks/hooks.json, .mcp.json). The §6.7
-// distribution table additionally lists .app.json; the two normative tables
-// disagree, the emitter follows §7.8, and the inconsistency is flagged for spec
-// reconciliation.
+// component set the §6.7 distribution table (spec/06-mcp-server.md:219) and the
+// proposal 0003 distribution table (line 36) enumerate (skills/,
+// hooks/hooks.json, .app.json, .mcp.json), which are the authoritative
+// component set. The §7.8 emitter prose and the proposal 0003 emitter bullet
+// (line 166) omit .app.json; the prose and the distribution tables disagree,
+// the emitter renders the full distribution-table set including .app.json, and
+// the inconsistency is flagged for spec reconciliation.
 
 // finPlugin is the descriptor used across the emitter tests: a finance-pack
 // plugin under the harness subtree.
@@ -94,23 +96,29 @@ func TestCursorMarketplace_ManifestPaths(t *testing.T) {
 	fileByPath(t, out, "cursor/finance-pack/.cursor-plugin/plugin.json")
 }
 
-// Spec: §7.8 — the Codex emitter's Manifest writes only the root marketplace
-// entry and the per-plugin .codex-plugin/plugin.json. The §7.8 emitter
-// description and the proposal 0003 Codex bullet (line 166) omit .app.json,
-// while the §6.7 distribution table lists it. The two normative tables disagree;
-// the emitter follows §7.8, so the Codex Manifest writes no .app.json. This test
-// pins the §7.8 component set and flags the §6.7/§7.8 inconsistency for spec
-// reconciliation.
-func TestCodexMarketplace_ManifestOmitsAppJSON(t *testing.T) {
+// Spec: §6.7 — the Codex distribution table (spec/06-mcp-server.md:219) and the
+// proposal 0003 distribution table (line 36) list .app.json as a Codex
+// component, so the Codex emitter renders a per-plugin .app.json under the
+// plugin subtree alongside the .codex-plugin/plugin.json and the .mcp.json. The
+// §7.8 emitter prose and the proposal 0003 Codex bullet (line 166) omit
+// .app.json, so the prose and the distribution tables disagree; the emitter
+// follows the authoritative distribution tables and renders .app.json. This
+// test pins the .app.json component and flags the prose/table inconsistency for
+// spec reconciliation. The .app.json carries the same verified plugin name and
+// description the plugin.json carries.
+func TestCodexMarketplace_ManifestWritesAppJSON(t *testing.T) {
 	t.Parallel()
 	out, err := CodexMarketplace{}.Manifest("acme-agents", finPlugin("codex"))
 	if err != nil {
 		t.Fatalf("Manifest: %v", err)
 	}
-	for _, f := range out {
-		if f.Path == "codex/finance-pack/.app.json" {
-			t.Fatalf("Codex Manifest must omit .app.json per the §7.8 emitter set; got %v", paths(out))
-		}
+	app := fileByPath(t, out, "codex/finance-pack/.app.json")
+	var m map[string]any
+	if err := json.Unmarshal(app.Content, &m); err != nil {
+		t.Fatalf(".app.json is not valid JSON: %v\n%s", err, app.Content)
+	}
+	if m["name"] != "finance-pack" {
+		t.Errorf(".app.json name = %v, want the plugin name finance-pack", m["name"])
 	}
 }
 
@@ -129,6 +137,31 @@ func TestCodexMarketplace_MCPComponentUnderSubtree(t *testing.T) {
 	if !strings.Contains(string(mcp.Content), "mcpServers") {
 		t.Errorf(".mcp.json must carry mcpServers:\n%s", mcp.Content)
 	}
+}
+
+// Spec: §6.7 — rendering a Codex plugin (its mcp-server Component plus its
+// once-per-plugin Manifest) populates the plugin subtree with both the
+// distribution table's .app.json and .mcp.json components, so the published
+// Codex plugin subtree carries the full authoritative component set.
+func TestCodexMarketplace_SubtreeHasAppAndMCP(t *testing.T) {
+	t.Parallel()
+	plugin := finPlugin("codex")
+	mcpSrc := Source{
+		ArtifactID:    "finance/pay-mcp",
+		ArtifactBytes: []byte("---\ntype: mcp-server\nversion: 1.0.0\nserver_identifier: https://mcp.acme.com\n---\n\nbody\n"),
+		Plugin:        plugin,
+	}
+	comp, err := CodexMarketplace{}.Component(context.Background(), mcpSrc)
+	if err != nil {
+		t.Fatalf("Component: %v", err)
+	}
+	man, err := CodexMarketplace{}.Manifest("acme-agents", plugin)
+	if err != nil {
+		t.Fatalf("Manifest: %v", err)
+	}
+	subtree := append(append([]File{}, comp...), man...)
+	fileByPath(t, subtree, "codex/finance-pack/.app.json")
+	fileByPath(t, subtree, "codex/finance-pack/.mcp.json")
 }
 
 // Spec: §7.8 — the marketplace entry is contributed once per plugin keyed by

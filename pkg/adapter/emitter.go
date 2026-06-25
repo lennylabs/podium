@@ -185,19 +185,22 @@ func ruleSkillBody(src Source) []byte {
 
 // CodexMarketplace is the marketplace emitter for Codex (§7.8). It writes the
 // root .agents/plugins/marketplace.json and a per-plugin .codex-plugin/
-// plugin.json, with skills/, hooks/hooks.json, and .mcp.json components,
-// matching the §7.8 "Marketplace emitters" description (spec/07-external-
-// integration.md:789) and the §7.8 repository layout (spec/07-external-
-// integration.md:775), and the proposal's Codex emitter bullet (proposal 0003
-// line 166).
+// plugin.json, with skills/, hooks/hooks.json, .app.json, and .mcp.json
+// components, matching the §6.7 distribution table (spec/06-mcp-server.md:219)
+// and the proposal distribution table (proposal 0003 line 36), which are the
+// authoritative component set for the Codex marketplace layout.
 //
-// The §6.7 distribution table (spec/06-mcp-server.md:219) additionally lists
-// .app.json in the Codex component set, so the two normative tables disagree.
-// This emitter follows the §7.8 emitter description and the proposal emitter
-// prose, which both omit .app.json, because §7.8 is the section that describes
-// what the emitter writes. The .app.json schema is also unverified against the
-// Codex marketplace format. The §6.7/§7.8 inconsistency is flagged for spec
-// reconciliation; the spec is read-only in this phase.
+// The two normative distribution tables agree that the Codex component set
+// includes .app.json. The §7.8 "Marketplace emitters" prose
+// (spec/07-external-integration.md:789) and the proposal's Codex emitter bullet
+// (proposal 0003 line 166) omit .app.json, so the prose and the distribution
+// tables disagree. This emitter renders the full distribution-table set,
+// including .app.json, and the .app.json/§7.8-prose inconsistency is flagged
+// for spec reconciliation; the spec is read-only in this phase. The .app.json
+// schema is unverified against the Codex marketplace format, which is part of
+// that open reconciliation item; the emitter writes a minimal manifest carrying
+// the plugin name and, when set, its description, the same fields the verified
+// per-plugin plugin.json carries.
 type CodexMarketplace struct{}
 
 // ID returns "codex".
@@ -222,11 +225,17 @@ func (CodexMarketplace) Component(ctx context.Context, src Source) ([]File, erro
 }
 
 // Manifest renders the root .agents/plugins/marketplace.json entry and the
-// per-plugin .codex-plugin/plugin.json for one plugin.
+// per-plugin .codex-plugin/plugin.json and .app.json for one plugin. The
+// distribution table (§6.7, proposal line 36) lists .app.json as a Codex
+// component; it is per-plugin like plugin.json, so it is rendered here once per
+// plugin rather than once per artifact. It carries the verified plugin name and
+// description; its full schema is part of the §6.7-vs-§7.8 reconciliation item.
 func (CodexMarketplace) Manifest(marketplaceName string, plugin PluginDescriptor) ([]File, error) {
+	root := pluginSubtree(plugin)
 	out := []File{
 		{Path: path.Join(".agents", "plugins", "marketplace.json"), Op: OpMergeJSON, Content: marketplaceEntryFragment(marketplaceName, plugin)},
-		{Path: path.Join(pluginSubtree(plugin), ".codex-plugin", "plugin.json"), Content: pluginJSON(plugin)},
+		{Path: path.Join(root, ".codex-plugin", "plugin.json"), Content: pluginJSON(plugin)},
+		{Path: path.Join(root, ".app.json"), Content: pluginJSON(plugin)},
 	}
 	sortFiles(out)
 	return out, nil
