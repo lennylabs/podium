@@ -306,27 +306,42 @@ func TestMaterialize_WatchEditAndStaleCleanupInOneSession(t *testing.T) {
 
 // the §6.7.1 unsupported-type matrix is enforced through real
 // sync and lint for pi and claude-desktop: pi materializes a command to
-// .pi/prompts/<name>.md while emitting no agent output, claude-desktop writes
-// nothing project-level, and a declared-but-unsupported combination
-// (agent target_harnesses:[pi]) surfaces a lint.harness_capability diagnostic.
-// spec: §6.7 (pi type routing), §6.7.1 (capability matrix), §4.3.5.
+// .pi/prompts/<name>.md, an agent targeting pi (a ✗ cell) fails sync with the
+// §6.9 untranslatable guard, claude-desktop writes nothing project-level, and a
+// declared-but-unsupported combination (agent target_harnesses:[pi]) surfaces a
+// lint.harness_capability diagnostic.
+// spec: §6.7 (pi type routing), §6.7.1 (capability matrix), §6.9, §4.3.5.
 func TestMaterialize_UnsupportedTypeMatrixPiAndClaudeDesktop(t *testing.T) {
 	t.Parallel()
-	// pi: an agent declares target_harnesses:[pi] (✗ cell) alongside a command.
-	piReg := writeRegistry(t, map[string]string{
-		"agents/planner/ARTIFACT.md":  "---\ntype: agent\nname: planner\nversion: 1.0.0\ndescription: An agent.\ntarget_harnesses: [pi]\n---\n\nAgent body.\n",
+	// pi materializes a command to .pi/prompts/<name>.md.
+	piCmdReg := writeRegistry(t, map[string]string{
 		"commands/deploy/ARTIFACT.md": "---\ntype: command\nname: deploy\nversion: 1.0.0\ndescription: Deploy.\n---\n\n$ARGUMENTS\n",
 	})
-	piTarget := t.TempDir()
-	chSync(t, piReg, piTarget, "pi")
-	// pi writes only the command prompt; no agent output exists.
-	mustExist(t, filepath.Join(piTarget, ".pi", "prompts", "deploy.md"))
-	mustNotExist(t, filepath.Join(piTarget, ".pi", "agents"))
-	mustNotExist(t, filepath.Join(piTarget, ".pi", "prompts", "planner.md"))
+	piCmdTarget := t.TempDir()
+	chSync(t, piCmdReg, piCmdTarget, "pi")
+	mustExist(t, filepath.Join(piCmdTarget, ".pi", "prompts", "deploy.md"))
+
+	// An agent declares target_harnesses:[pi], which is a ✗ cell. The §6.9
+	// untranslatable guard in podium sync fails it with
+	// materialize.untranslatable rather than writing nothing silently, matching
+	// the MCP server load_artifact path (§2.2).
+	piAgentReg := writeRegistry(t, map[string]string{
+		"agents/planner/ARTIFACT.md": "---\ntype: agent\nname: planner\nversion: 1.0.0\ndescription: An agent.\ntarget_harnesses: [pi]\n---\n\nAgent body.\n",
+	})
+	piAgentTarget := t.TempDir()
+	piSync := runPodium(t, "", nil, "sync", "--registry", piAgentReg, "--target", piAgentTarget, "--harness", "pi")
+	if piSync.Exit == 0 {
+		t.Errorf("sync(pi) exit=0, want non-zero for the agent/pi ✗ cell\nstdout=%s", piSync.Stdout)
+	}
+	if !strings.Contains(piSync.Stderr+piSync.Stdout, "materialize.untranslatable") {
+		t.Errorf("sync(pi) missing materialize.untranslatable:\nstderr=%s\nstdout=%s", piSync.Stderr, piSync.Stdout)
+	}
+	mustNotExist(t, filepath.Join(piAgentTarget, ".pi", "agents"))
+	mustNotExist(t, filepath.Join(piAgentTarget, ".pi", "prompts", "planner.md"))
 
 	// The declared-but-unsupported agent/pi combination surfaces a diagnostic
 	// through podium lint (the §6.7.1 capability lint over target_harnesses).
-	lint := runPodium(t, "", nil, "lint", "--registry", piReg)
+	lint := runPodium(t, "", nil, "lint", "--registry", piAgentReg)
 	if lint.Exit == 0 {
 		t.Errorf("lint exit=0, want non-zero for the agent/pi ✗ cell\nstdout=%s", lint.Stdout)
 	}
@@ -335,27 +350,23 @@ func TestMaterialize_UnsupportedTypeMatrixPiAndClaudeDesktop(t *testing.T) {
 		t.Errorf("lint missing the agent/pi capability diagnostic:\n%s", lint.Stdout)
 	}
 
-	// claude-desktop has no project-level surface: sync writes nothing for an
-	// agent or a command (only the lock under .podium/).
+	// claude-desktop has no project-level surface, so every artifact type is a
+	// ✗ cell. The §6.9 guard fails the sync with materialize.untranslatable
+	// rather than writing nothing silently, matching load_artifact (§2.2).
 	cdReg := writeRegistry(t, map[string]string{
-		"agents/planner/ARTIFACT.md":  "---\ntype: agent\nname: planner\nversion: 1.0.0\ndescription: An agent.\n---\n\nAgent body.\n",
-		"commands/deploy/ARTIFACT.md": "---\ntype: command\nname: deploy\nversion: 1.0.0\ndescription: Deploy.\n---\n\n$ARGUMENTS\n",
+		"agents/planner/ARTIFACT.md": "---\ntype: agent\nname: planner\nversion: 1.0.0\ndescription: An agent.\n---\n\nAgent body.\n",
 	})
 	cdTarget := t.TempDir()
-	chSync(t, cdReg, cdTarget, "claude-desktop")
+	cdSync := runPodium(t, "", nil, "sync", "--registry", cdReg, "--target", cdTarget, "--harness", "claude-desktop")
+	if cdSync.Exit == 0 {
+		t.Errorf("sync(claude-desktop) exit=0, want non-zero for an agent ✗ cell\nstdout=%s", cdSync.Stdout)
+	}
+	if !strings.Contains(cdSync.Stderr+cdSync.Stdout, "materialize.untranslatable") {
+		t.Errorf("sync(claude-desktop) missing materialize.untranslatable:\nstderr=%s\nstdout=%s", cdSync.Stderr, cdSync.Stdout)
+	}
 	mustNotExist(t, filepath.Join(cdTarget, ".claude"))
 	mustNotExist(t, filepath.Join(cdTarget, ".claude-desktop"))
 	mustNotExist(t, filepath.Join(cdTarget, "AGENTS.md"))
-	// Only .podium/ (the lock) is written project-level.
-	entries, err := os.ReadDir(cdTarget)
-	if err != nil {
-		t.Fatalf("readdir target: %v", err)
-	}
-	for _, e := range entries {
-		if e.Name() != ".podium" {
-			t.Errorf("claude-desktop wrote an unexpected project-level entry: %s", e.Name())
-		}
-	}
 }
 
 // ------------------------------------------------------------------------

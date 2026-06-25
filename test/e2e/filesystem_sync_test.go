@@ -354,6 +354,68 @@ func TestFilesystemSync_SyncContextViaClaudeCode(t *testing.T) {
 	mustExist(t, filepath.Join(target, ".podium", "context", "shared", "company-glossary", "ARTIFACT.md"))
 }
 
+// A plugin-layout type (skill/agent/command/rule/hook/mcp-server) on
+// claude-cowork is a §6.7.1 ✗ cell: the cowork adapter ships those types
+// through the published Claude marketplace, not through project-files
+// materialization. podium sync runs the §6.9 untranslatable guard before
+// adapting, so it fails with materialize.untranslatable rather than silently
+// writing nothing, matching the MCP server load_artifact path (§2.2).
+func TestFilesystemSync_CoworkPluginLayoutTypeFailsUntranslatable(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"shared/run-variance-analysis/ARTIFACT.md": solofsSkillArtifact,
+		"shared/run-variance-analysis/SKILL.md":    skillBody("run-variance-analysis"),
+	})
+	target := t.TempDir()
+	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "claude-cowork")
+	if res.Exit == 0 {
+		t.Fatalf("expected non-zero exit for a plugin-layout type on claude-cowork, got 0 (stdout=%s)", res.Stdout)
+	}
+	combined := res.Stderr + res.Stdout
+	if !strings.Contains(combined, "materialize.untranslatable") {
+		t.Errorf("output missing 'materialize.untranslatable': stderr=%q stdout=%q", res.Stderr, res.Stdout)
+	}
+	// The guard fails before writing, so the skill file is absent.
+	if _, err := os.Stat(filepath.Join(target, ".claude", "skills", "run-variance-analysis", "SKILL.md")); err == nil {
+		t.Errorf("a skill file materialized for claude-cowork despite the §6.9 guard")
+	}
+}
+
+// A default-mode rule (no rule_mode set) defaults to rule_mode: always (§4.3),
+// which is also a ✗ cell for claude-cowork, so podium sync fails it per §6.9
+// rather than dropping it silently.
+func TestFilesystemSync_CoworkDefaultModeRuleFailsUntranslatable(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"shared/ts-style/ARTIFACT.md": "---\ntype: rule\nversion: 1.0.0\n---\n\nRule body.\n",
+	})
+	target := t.TempDir()
+	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "claude-cowork")
+	if res.Exit == 0 {
+		t.Fatalf("expected non-zero exit for a default-mode rule on claude-cowork, got 0 (stdout=%s)", res.Stdout)
+	}
+	combined := res.Stderr + res.Stdout
+	if !strings.Contains(combined, "materialize.untranslatable") {
+		t.Errorf("output missing 'materialize.untranslatable': stderr=%q stdout=%q", res.Stderr, res.Stdout)
+	}
+}
+
+// The cowork context cell stays ✓, so a type: context artifact still
+// materializes onto claude-cowork (into the harness-neutral context bucket)
+// while the plugin-layout types fail per §6.9.
+func TestFilesystemSync_CoworkContextStillSyncs(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"shared/company-glossary/ARTIFACT.md": contextArtifact("company glossary"),
+	})
+	target := t.TempDir()
+	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "claude-cowork")
+	if res.Exit != 0 {
+		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	mustExist(t, filepath.Join(target, ".podium", "context", "shared", "company-glossary", "ARTIFACT.md"))
+}
+
 func TestFilesystemSync_SyncProducesLockFile(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{

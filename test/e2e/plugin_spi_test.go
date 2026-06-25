@@ -176,6 +176,17 @@ func TestPluginSPI_DefaultRegistryAdapters(t *testing.T) {
 				}
 				return
 			}
+			// A registered adapter that grades skill a §6.7.1 ✗ cell
+			// (claude-desktop, claude-cowork, hermes) fails the §6.9 guard with
+			// materialize.untranslatable. That outcome confirms the adapter is
+			// registered just as a clean sync does; only the three skill-capable
+			// adapters in alwaysSucceed must materialize the skill.
+			if strings.Contains(res.Stderr, "materialize.untranslatable") {
+				if isRequired {
+					t.Errorf("required adapter %q failed to materialize a skill: stderr=%s", id, res.Stderr)
+				}
+				return
+			}
 			if res.Exit != 0 {
 				t.Errorf("adapter %q: exit=%d stderr=%s", id, res.Exit, res.Stderr)
 			}

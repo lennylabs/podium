@@ -254,6 +254,16 @@ func Run(opts Options) (*Result, error) {
 			res.Skipped = append(res.Skipped, rec.ID)
 			continue
 		}
+		// §6.9 "Adapter cannot translate an artifact": refuse to
+		// materialize a field the selected harness has no §6.7.1
+		// equivalent for (a ✗ cell). The MCP server load_artifact path
+		// runs the same guard before adapting (cmd/podium-mcp/main.go),
+		// so both canonical-Adapt consumers fail an untranslatable
+		// artifact identically (§2.2) instead of one writing a verbatim
+		// copy and the other silently producing no output.
+		if terr := adapter.TranslationError(a.ID(), rec.Artifact); terr != nil {
+			return nil, fmt.Errorf("adapter %q cannot translate %s: %w", a.ID(), rec.ID, terr)
+		}
 		out, err := a.Adapt(context.Background(), adapter.Source{
 			ArtifactID:    rec.ID,
 			ArtifactBytes: rec.ArtifactBytes,

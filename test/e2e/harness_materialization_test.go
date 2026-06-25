@@ -458,8 +458,9 @@ func TestHarness_ClaudeCodeInitSync(t *testing.T) {
 
 // ---- Claude Desktop ---------------------------------------------------------
 
-// claude-desktop has no project-level surface, so
-// sync materializes nothing for it (§6.7).
+// claude-desktop has no project-level surface, so a skill is a §6.7.1 ✗ cell.
+// The §6.9 untranslatable guard fails the sync with materialize.untranslatable
+// rather than writing nothing silently, matching load_artifact (§2.2).
 func TestHarness_ClaudeDesktopExtensionLayout(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -467,7 +468,13 @@ func TestHarness_ClaudeDesktopExtensionLayout(t *testing.T) {
 		"greet/SKILL.md":    skillBody("greet"),
 	})
 	target := t.TempDir()
-	chSync(t, reg, target, "claude-desktop")
+	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "claude-desktop")
+	if res.Exit == 0 {
+		t.Fatalf("sync(claude-desktop) exit=0, want non-zero for a skill ✗ cell\nstdout=%s", res.Stdout)
+	}
+	if !strings.Contains(res.Stderr+res.Stdout, "materialize.untranslatable") {
+		t.Errorf("sync(claude-desktop) missing materialize.untranslatable:\nstderr=%s\nstdout=%s", res.Stderr, res.Stdout)
+	}
 	mustNotExist(t, filepath.Join(target, ".claude-desktop"))
 	mustNotExist(t, filepath.Join(target, ".claude", "skills", "greet", "SKILL.md"))
 }
@@ -867,8 +874,10 @@ func TestHarness_HermesRule(t *testing.T) {
 	}
 }
 
-// hermes does not materialize skills at project
-// scope (its skill surface is user-scope ~/.hermes/), so sync writes nothing.
+// hermes does not materialize skills at project scope (its skill surface is
+// user-scope ~/.hermes/), so a skill is a §6.7.1 ✗ cell. The §6.9 guard fails
+// the sync with materialize.untranslatable rather than writing nothing
+// silently, matching load_artifact (§2.2).
 func TestHarness_HermesNonRuleDefaultCase(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -876,7 +885,13 @@ func TestHarness_HermesNonRuleDefaultCase(t *testing.T) {
 		"tools/greet/SKILL.md":    skillBody("greet"),
 	})
 	target := t.TempDir()
-	chSync(t, reg, target, "hermes")
+	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "hermes")
+	if res.Exit == 0 {
+		t.Fatalf("sync(hermes) exit=0, want non-zero for a skill ✗ cell\nstdout=%s", res.Stdout)
+	}
+	if !strings.Contains(res.Stderr+res.Stdout, "materialize.untranslatable") {
+		t.Errorf("sync(hermes) missing materialize.untranslatable:\nstderr=%s\nstdout=%s", res.Stderr, res.Stdout)
+	}
 	mustNotExist(t, filepath.Join(target, ".hermes"))
 	mustNotExist(t, filepath.Join(target, ".cursor", "skills", "greet", "SKILL.md"))
 }
