@@ -81,19 +81,36 @@ func (p PluginFilter) ScopeFilter() sync.ScopeFilter {
 // Workflow groups the `prepare` and `publish` command lists `podium publish`
 // runs around the render phase (§7.8). prepare places a checkout of the
 // destination repository at the working directory, and publish takes the
-// rendered tree to the remote. OnError is an optional cleanup list run when a
-// phase command fails, before the failure propagates.
+// rendered tree to the remote. PrepareOnError and PublishOnError are optional
+// per-phase cleanup lists: a failure in the prepare phase runs PrepareOnError,
+// and a failure in the publish phase runs PublishOnError, before the failure
+// propagates. The cleanup is scoped to the phase that failed, so a prepare
+// failure does not run cleanup authored for a publish-phase checkout.
 type Workflow struct {
-	Prepare []Command `yaml:"prepare,omitempty"`
-	Publish []Command `yaml:"publish,omitempty"`
-	OnError []Command `yaml:"on_error,omitempty"`
+	Prepare        []Command `yaml:"prepare,omitempty"`
+	Publish        []Command `yaml:"publish,omitempty"`
+	PrepareOnError []Command `yaml:"prepare_on_error,omitempty"`
+	PublishOnError []Command `yaml:"publish_on_error,omitempty"`
 }
 
 // IsZero reports whether the workflow declares no commands. A marketplace whose
 // workflow is zero inherits the default workflow; a non-zero workflow replaces
 // it in full (§7.8).
 func (w Workflow) IsZero() bool {
-	return len(w.Prepare) == 0 && len(w.Publish) == 0 && len(w.OnError) == 0
+	return len(w.Prepare) == 0 && len(w.Publish) == 0 &&
+		len(w.PrepareOnError) == 0 && len(w.PublishOnError) == 0
+}
+
+// commands returns every command the workflow declares across its phases and
+// per-phase cleanup lists, so config validation (§7.8 --check) can check each
+// for well-formedness before any side effect.
+func (w Workflow) commands() []Command {
+	all := make([]Command, 0, len(w.Prepare)+len(w.Publish)+len(w.PrepareOnError)+len(w.PublishOnError))
+	all = append(all, w.Prepare...)
+	all = append(all, w.Publish...)
+	all = append(all, w.PrepareOnError...)
+	all = append(all, w.PublishOnError...)
+	return all
 }
 
 // Command is one step of a workflow phase (§7.8). It is an argv list under
@@ -309,12 +326,17 @@ func firstNonEmpty(vals ...string) string {
 }
 
 // validateOutput rejects an output whose harness set names a non-publish-target
-// harness (opencode, none, or an unknown id) and an output with a malformed
-// plugin glob. Both map to config.invalid (§6.10). The harness check reuses the
-// §7.8 publish-target selector (adapter.EmitterForHarness), and the glob check
-// reuses the §7.5.1 sync glob validator (sync.ValidateGlob), so config
-// validation and the render path agree on which harnesses publish and which
-// globs are well-formed.
+// harness (opencode, none, or an unknown id), an output with a malformed plugin
+// glob, and an output with a malformed workflow command. All map to
+// config.invalid (§6.10). The harness check reuses the §7.8 publish-target
+// selector (adapter.EmitterForHarness), the glob check reuses the §7.5.1 sync
+// glob validator (sync.ValidateGlob), and the command check reuses the per-step
+// validation (Command.validate), so config validation and the render path agree
+// on which harnesses publish, which globs are well-formed, and which commands
+// are well-formed. Validating the workflow commands here makes --check
+// fail-closed: a command that declares neither run: nor sh:, or both, is
+// rejected before the prepare clone or the render runs (§7.8 "--check validates
+// the config only").
 func validateOutput(out ResolvedOutput) error {
 	for _, h := range out.Harnesses {
 		if _, err := adapter.EmitterForHarness(h); err != nil {
@@ -328,6 +350,12 @@ func validateOutput(out ResolvedOutput) error {
 				return fmt.Errorf("%w: marketplace %q plugin %q has a malformed glob %q: %w",
 					ErrConfigInvalid, out.ID, p.Name, g, err)
 			}
+		}
+	}
+	for _, c := range out.Workflow.commands() {
+		if err := c.validate(); err != nil {
+			return fmt.Errorf("%w: marketplace %q command %q: %w",
+				ErrConfigInvalid, out.ID, c.display(), err)
 		}
 	}
 	return nil

@@ -494,6 +494,70 @@ func TestResolve_RejectsMalformedGlob(t *testing.T) {
 	}
 }
 
+// TestResolve_RejectsMalformedCommand asserts that a workflow command declaring
+// neither run: nor sh:, or both, is rejected at config resolution with
+// config.invalid (§6.10), so a malformed command does not survive to a live run.
+// The per-phase cleanup lists are validated too, not only prepare and publish.
+func TestResolve_RejectsMalformedCommand(t *testing.T) {
+	for name, wf := range map[string]Workflow{
+		"prepare neither run nor sh": {Prepare: []Command{{}}},
+		"publish both run and sh":    {Publish: []Command{{Run: []string{"true"}, Sh: "true"}}},
+		"prepare_on_error empty":     {Publish: []Command{{Run: []string{"git", "push"}}}, PrepareOnError: []Command{{}}},
+		"publish_on_error empty":     {Publish: []Command{{Run: []string{"git", "push"}}}, PublishOnError: []Command{{}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := &PublishConfig{
+				Marketplaces: []MarketplaceOutput{
+					{ID: "bad-cmd", Harnesses: []string{"claude-code"}, Workflow: wf},
+				},
+			}
+			_, err := cfg.Resolve(nil)
+			if err == nil {
+				t.Fatalf("Resolve with %s = nil error, want config.invalid", name)
+			}
+			if !errors.Is(err, ErrConfigInvalid) {
+				t.Errorf("Resolve error = %v, want errors.Is ErrConfigInvalid", err)
+			}
+		})
+	}
+}
+
+// TestLoadMergedConfig_PerPhaseOnError asserts the per-phase cleanup keys
+// (prepare_on_error, publish_on_error) parse into the workflow's separate
+// cleanup lists, so an operator can scope cleanup to the phase that failed.
+func TestLoadMergedConfig_PerPhaseOnError(t *testing.T) {
+	ws := t.TempDir()
+	writeScope(t, ws, configFileName, `marketplaces:
+  - id: with-cleanup
+    harnesses: [claude-code]
+    workflow:
+      prepare:
+        - run: ["git", "clone", "$PODIUM_GIT_REMOTE", "$PODIUM_WORKDIR"]
+      prepare_on_error:
+        - run: ["rm", "-rf", "$PODIUM_WORKDIR"]
+      publish:
+        - run: ["git", "push"]
+      publish_on_error:
+        - run: ["git", "-C", "$PODIUM_WORKDIR", "reset", "--hard"]
+`)
+	cfg, _, err := LoadMergedConfig(ws, "")
+	if err != nil {
+		t.Fatalf("LoadMergedConfig: %v", err)
+	}
+	wf := cfg.Marketplaces[0].Workflow
+	if len(wf.PrepareOnError) != 1 || wf.PrepareOnError[0].Run[0] != "rm" {
+		t.Errorf("prepare_on_error = %+v, want the rm cleanup", wf.PrepareOnError)
+	}
+	if len(wf.PublishOnError) != 1 || wf.PublishOnError[0].Run[3] != "reset" {
+		t.Errorf("publish_on_error = %+v, want the git reset cleanup", wf.PublishOnError)
+	}
+	// A workflow that declares only a cleanup list is non-zero, so a marketplace
+	// declaring its own cleanup does not silently inherit the default workflow.
+	if (Workflow{PublishOnError: []Command{{Sh: "true"}}}).IsZero() {
+		t.Error("a workflow with only a publish_on_error list must not be zero")
+	}
+}
+
 // TestCommand_TimeoutParsing asserts the per-command timeout decodes a Go
 // duration string and rejects a value without a unit.
 func TestCommand_TimeoutParsing(t *testing.T) {

@@ -3,6 +3,7 @@ package publish
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,8 +16,8 @@ import (
 // the filesystem-source fixture registry (no live server) with stub commands that
 // touch marker files: variable injection, skip_if_no_changes suppression,
 // fail-fast on the first non-zero exit, continue_on_error, the per-command
-// timeout, the on_error cleanup, --dry-run, --check, and the --workdir versus
-// allocated-workdir paths.
+// timeout, the per-phase on_error cleanup, --dry-run, --check, and the --workdir
+// versus allocated-workdir paths.
 
 // runOutput returns a resolved output for the fixture registry with the standard
 // finance plugins and the given harness set and workflow.
@@ -254,24 +255,65 @@ func TestRun_Timeout(t *testing.T) {
 	}
 }
 
-// Spec: §7.8 — the on_error cleanup list runs when a phase command fails, before
-// the failure propagates.
-func TestRun_OnErrorCleanup(t *testing.T) {
+// Spec: §7.8 — the per-phase on_error cleanup list runs when a command in its
+// phase fails, before the failure propagates. A publish-phase failure runs
+// publish_on_error and leaves prepare_on_error untouched.
+func TestRun_PublishOnErrorCleanup(t *testing.T) {
 	t.Parallel()
 	reg := fixtureRegistry(t)
 	workdir := t.TempDir()
 
 	out := runOutput(reg, []string{"claude-code"}, Workflow{
-		Publish: []Command{{Run: []string{"false"}}},
-		OnError: []Command{touch("cleanup", "cleanup-ran")},
+		Publish:        []Command{{Run: []string{"false"}}},
+		PrepareOnError: []Command{touch("prepare-cleanup", "prepare-cleanup-ran")},
+		PublishOnError: []Command{touch("publish-cleanup", "publish-cleanup-ran")},
 	})
 
 	_, err := Run(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: io_Discard(), Stderr: io_Discard()})
 	if err == nil {
 		t.Fatalf("the failing publish command must fail the run")
 	}
-	if got := readMarker(t, workdir, "cleanup"); !strings.Contains(got, "cleanup-ran") {
-		t.Errorf("on_error cleanup must run on a phase failure: %q", got)
+	if got := readMarker(t, workdir, "publish-cleanup"); !strings.Contains(got, "publish-cleanup-ran") {
+		t.Errorf("publish_on_error cleanup must run on a publish-phase failure: %q", got)
+	}
+	if _, statErr := os.Stat(filepath.Join(workdir, "prepare-cleanup")); !os.IsNotExist(statErr) {
+		t.Errorf("a publish-phase failure must not run the prepare_on_error cleanup: stat err=%v", statErr)
+	}
+}
+
+// Spec: §7.8 — a prepare-phase failure runs prepare_on_error, scoped to the
+// phase that failed, and leaves publish_on_error untouched. The render and the
+// publish phase do not run after a prepare failure.
+func TestRun_PrepareOnErrorCleanup(t *testing.T) {
+	t.Parallel()
+	reg := fixtureRegistry(t)
+	workdir := t.TempDir()
+
+	out := runOutput(reg, []string{"claude-code"}, Workflow{
+		Prepare:        []Command{{Run: []string{"false"}}},
+		Publish:        []Command{touch("published", "should-not-run")},
+		PrepareOnError: []Command{touch("prepare-cleanup", "prepare-cleanup-ran")},
+		PublishOnError: []Command{touch("publish-cleanup", "publish-cleanup-ran")},
+	})
+
+	res, err := Run(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: io_Discard(), Stderr: io_Discard()})
+	if err == nil {
+		t.Fatalf("the failing prepare command must fail the run")
+	}
+	if !strings.Contains(err.Error(), "prepare") {
+		t.Errorf("a prepare-phase failure must name the prepare phase: %v", err)
+	}
+	if res != nil {
+		t.Errorf("a failed run returns a nil result, got %+v", res)
+	}
+	if got := readMarker(t, workdir, "prepare-cleanup"); !strings.Contains(got, "prepare-cleanup-ran") {
+		t.Errorf("prepare_on_error cleanup must run on a prepare-phase failure: %q", got)
+	}
+	if _, statErr := os.Stat(filepath.Join(workdir, "publish-cleanup")); !os.IsNotExist(statErr) {
+		t.Errorf("a prepare-phase failure must not run the publish_on_error cleanup: stat err=%v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(workdir, "published")); !os.IsNotExist(statErr) {
+		t.Errorf("a prepare-phase failure must stop before the publish phase: stat err=%v", statErr)
 	}
 }
 
@@ -350,6 +392,47 @@ func TestRun_Check(t *testing.T) {
 	bad := runOutput(reg, []string{"opencode"}, Workflow{})
 	if _, err := Run(context.Background(), RunOptions{Output: bad, Check: true, Stdout: io_Discard(), Stderr: io_Discard()}); err == nil {
 		t.Errorf("--check must reject a non-publish harness")
+	}
+
+	// --check rejects a malformed workflow command (neither run: nor sh:) before
+	// any side effect, so a config.invalid command does not slip past the
+	// fail-closed gate and fail mid-pipeline after the prepare clone and render.
+	neither := runOutput(reg, []string{"claude-code"}, Workflow{
+		Publish: []Command{touch("must-not-run", "ran"), {}},
+	})
+	checkRejectsMalformed(t, "a publish command with neither run: nor sh:", neither, workdir)
+
+	// --check rejects a command that declares both run: and sh:.
+	both := runOutput(reg, []string{"claude-code"}, Workflow{
+		Prepare: []Command{{Run: []string{"true"}, Sh: "true"}},
+	})
+	checkRejectsMalformed(t, "a prepare command with both run: and sh:", both, workdir)
+
+	// --check inspects the per-phase cleanup lists too, not only prepare/publish.
+	badCleanup := runOutput(reg, []string{"claude-code"}, Workflow{
+		Publish:        []Command{{Run: []string{"git", "push"}}},
+		PublishOnError: []Command{{}},
+	})
+	checkRejectsMalformed(t, "a publish_on_error command with neither run: nor sh:", badCleanup, workdir)
+}
+
+// checkRejectsMalformed asserts --check rejects out with a config.invalid error
+// and runs no command, so the malformed command does not reach a live pipeline.
+func checkRejectsMalformed(t *testing.T, label string, out ResolvedOutput, workdir string) {
+	t.Helper()
+	res, err := Run(context.Background(), RunOptions{Output: out, Workdir: workdir, Check: true, Stdout: io_Discard(), Stderr: io_Discard()})
+	if err == nil {
+		t.Errorf("--check must reject %s", label)
+		return
+	}
+	if !errors.Is(err, ErrConfigInvalid) {
+		t.Errorf("--check rejection of %s must be config.invalid: %v", label, err)
+	}
+	if res != nil {
+		t.Errorf("--check rejection of %s must return a nil result, got %+v", label, res)
+	}
+	if _, statErr := os.Stat(filepath.Join(workdir, "must-not-run")); !os.IsNotExist(statErr) {
+		t.Errorf("--check rejection of %s must run no command: stat err=%v", label, statErr)
 	}
 }
 
@@ -439,7 +522,7 @@ func TestRunCleanup_BestEffort(t *testing.T) {
 	// continue_on_error: the failing first cleanup command is logged and the
 	// second still runs.
 	workdir := t.TempDir()
-	runCleanup(context.Background(), opts, []Command{
+	runCleanup(context.Background(), opts, "publish", []Command{
 		{Run: []string{"false"}, ContinueOnError: true},
 		touch("second", "second-ran"),
 	}, map[string]string{"PODIUM_WORKDIR": workdir})
@@ -450,7 +533,7 @@ func TestRunCleanup_BestEffort(t *testing.T) {
 	// Without continue_on_error: a failing cleanup command stops the remaining
 	// cleanup, so the second command does not run.
 	workdir2 := t.TempDir()
-	runCleanup(context.Background(), opts, []Command{
+	runCleanup(context.Background(), opts, "prepare", []Command{
 		{Run: []string{"false"}},
 		touch("second", "should-not-run"),
 	}, map[string]string{"PODIUM_WORKDIR": workdir2})

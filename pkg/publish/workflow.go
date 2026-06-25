@@ -23,12 +23,12 @@ import (
 // operator's prepare and publish commands own getting the destination repository
 // to the working directory and taking the rendered tree to the remote.
 //
-// Trust boundary. The prepare, publish, and on_error commands run as
-// subprocesses with the operator's privileges and ambient credentials, inheriting
-// the publish process environment plus the injected PODIUM_* variables, because
-// git authentication relies on SSH_AUTH_SOCK, GH_TOKEN, and similar. They come
-// from operator-authored publish.yaml, the same trust boundary as a Makefile or a
-// CI script, so a catalog author cannot inject a command. They are unrelated to
+// Trust boundary. The prepare, publish, and per-phase on_error cleanup commands
+// run as subprocesses with the operator's privileges and ambient credentials,
+// inheriting the publish process environment plus the injected PODIUM_* variables,
+// because git authentication relies on SSH_AUTH_SOCK, GH_TOKEN, and similar. They
+// come from operator-authored publish.yaml, the same trust boundary as a Makefile
+// or a CI script, so a catalog author cannot inject a command. They are unrelated to
 // the sandboxed MaterializationHook SPI (§6.6) and to the hook artifact type. A
 // command is either an argv list under run:, executed directly without a shell
 // (no shell metacharacter interpretation, no injection through artifact content),
@@ -83,8 +83,10 @@ type RunResult struct {
 //     run the publish phase.
 //
 // Run fails fast on the first command that exits non-zero, unless that command
-// declares continue_on_error. On a failure it runs the workflow's on_error
-// cleanup commands (best effort) before returning the original error.
+// declares continue_on_error. On a failure it runs the failing phase's own
+// on_error cleanup commands (best effort) before returning the original error: a
+// prepare failure runs prepare_on_error, and a publish failure runs
+// publish_on_error.
 func Run(ctx context.Context, opts RunOptions) (*RunResult, error) {
 	if opts.Stdout == nil {
 		opts.Stdout = os.Stdout
@@ -127,7 +129,7 @@ func runPipeline(ctx context.Context, opts RunOptions, out ResolvedOutput, workd
 	// dry-run defers printing it until after the render so the printed
 	// $PODIUM_CHANGED reflects the render result.
 	if !opts.DryRun {
-		if err := runPhase(ctx, opts, "prepare", out.Workflow.Prepare, vars, out.Workflow.OnError); err != nil {
+		if err := runPhase(ctx, opts, "prepare", out.Workflow.Prepare, vars, out.Workflow.PrepareOnError); err != nil {
 			return nil, err
 		}
 	}
@@ -166,7 +168,7 @@ func runPipeline(ctx context.Context, opts RunOptions, out ResolvedOutput, workd
 		return res, nil
 	}
 
-	if err := runPhase(ctx, opts, "publish", out.Workflow.Publish, vars, out.Workflow.OnError); err != nil {
+	if err := runPhase(ctx, opts, "publish", out.Workflow.Publish, vars, out.Workflow.PublishOnError); err != nil {
 		return nil, err
 	}
 	res.Published = true
@@ -206,8 +208,9 @@ func sanitizeID(id string) string {
 
 // runPhase runs the commands of one phase in order, failing fast on the first
 // non-zero exit unless the command declares continue_on_error. On a failure it
-// runs the on_error cleanup commands (best effort, errors logged not returned)
-// before returning the original failure, so a half-applied checkout can be reset.
+// runs that phase's own on_error cleanup commands (best effort, errors logged
+// not returned) before returning the original failure, so a half-applied
+// checkout can be reset by cleanup scoped to the phase that failed.
 func runPhase(ctx context.Context, opts RunOptions, phase string, cmds []Command, vars map[string]string, onError []Command) error {
 	for i, c := range cmds {
 		if c.SkipIfNoChanges && vars["PODIUM_CHANGED"] == "false" {
@@ -222,20 +225,22 @@ func runPhase(ctx context.Context, opts RunOptions, phase string, cmds []Command
 			fmt.Fprintf(opts.Stderr, "publish %s[%d]: %v (continue_on_error)\n", phase, i, err)
 			continue
 		}
-		runCleanup(ctx, opts, onError, vars)
+		runCleanup(ctx, opts, phase, onError, vars)
 		return fmt.Errorf("publish %q %s[%d] (%s): %w", opts.Output.ID, phase, i, c.display(), err)
 	}
 	return nil
 }
 
-// runCleanup runs the on_error cleanup commands best effort: a cleanup failure is
-// logged and does not mask the original phase failure, and continue_on_error is
-// honored so a benign cleanup non-zero (a "nothing to reset" git exit) does not
-// abort the rest of the cleanup.
-func runCleanup(ctx context.Context, opts RunOptions, cmds []Command, vars map[string]string) {
+// runCleanup runs a phase's on_error cleanup commands best effort: a cleanup
+// failure is logged under the failing phase and does not mask the original phase
+// failure, and continue_on_error is honored so a benign cleanup non-zero (a
+// "nothing to reset" git exit) does not abort the rest of the cleanup. phase
+// names the failing phase so the log distinguishes prepare cleanup from publish
+// cleanup.
+func runCleanup(ctx context.Context, opts RunOptions, phase string, cmds []Command, vars map[string]string) {
 	for i, c := range cmds {
 		if err := runCommand(ctx, opts, c, vars); err != nil {
-			fmt.Fprintf(opts.Stderr, "publish on_error[%d]: %v\n", i, err)
+			fmt.Fprintf(opts.Stderr, "publish %s_on_error[%d]: %v\n", phase, i, err)
 			if !c.ContinueOnError {
 				return
 			}
