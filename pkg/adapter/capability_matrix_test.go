@@ -48,20 +48,6 @@ func adaptSrc(t *testing.T, adapterID string, src Source) []File {
 	return out
 }
 
-// coworkDispatchPending reports a cowork ✗ cell whose live-adapter conformance
-// the matrix regrade (§6.7.1, proposal 0003 decision 2) does not yet enforce.
-// The regrade drops claude-cowork from ✓ to ✗ for the plugin-layout types and
-// the fields and modes that layout produced, ahead of the cowork dispatch
-// change that stops the adapter emitting that layout. Between the regrade and
-// the dispatch change the matrix grades the cell ✗ while the adapter still
-// emits plugin output, so the live-adapter cross-check below defers to the
-// dispatch step. The cowork context cell stays ✓ and is asserted: the dispatch
-// change retains the type: context branch. Re-arm this cell when the cowork
-// adapter no longer emits the plugin layout.
-func coworkDispatchPending(adapterID string, grade Support) bool {
-	return adapterID == "claude-cowork" && grade == SupportUnsupported
-}
-
 // assertFieldCell checks a frontmatter-field cell: the marker (field value)
 // survives the adapter's output for an N or F grade, and is absent for an X
 // grade (dropped in translation, or the carrier type did not materialize).
@@ -71,10 +57,6 @@ func assertFieldCell(t *testing.T, adapterID string, cap Capability, frontmatter
 	grade, ok := Cell(cap, adapterID)
 	if !ok {
 		t.Fatalf("%s: %v not graded", adapterID, cap)
-	}
-	if coworkDispatchPending(adapterID, grade) {
-		t.Logf("%s %v: ✗ grade not yet enforced by the cowork dispatch change; cross-check deferred", adapterID, cap)
-		return
 	}
 	present := outputContains(out, marker)
 	if grade == SupportUnsupported {
@@ -96,10 +78,6 @@ func assertTypeCell(t *testing.T, adapterID string, cap Capability, src Source) 
 	grade, ok := Cell(cap, adapterID)
 	if !ok {
 		t.Fatalf("%s: %v not graded", adapterID, cap)
-	}
-	if coworkDispatchPending(adapterID, grade) {
-		t.Logf("%s %v: ✗ grade not yet enforced by the cowork dispatch change; cross-check deferred", adapterID, cap)
-		return
 	}
 	if grade == SupportUnsupported {
 		if len(out) > 0 {

@@ -28,21 +28,27 @@ func (ClaudeDesktop) Adapt(ctx context.Context, src Source) ([]File, error) {
 	return nil, nil
 }
 
-// ClaudeCowork is the adapter for Anthropic Claude Cowork. It materializes the
-// artifact into the Claude Code plugin layout under plugins/<id>/ (§6.7).
+// ClaudeCowork is the adapter for Anthropic Claude Cowork. At project scope it
+// materializes only a type: context artifact into the harness-neutral
+// .podium/context/<id>/ bucket; the plugin and marketplace layout for the other
+// types ships through marketplace publishing (§6.7, §7.8) rather than through
+// the project-files materialization that podium sync and load_artifact run.
 type ClaudeCowork struct{}
 
 // ID returns "claude-cowork".
 func (ClaudeCowork) ID() string { return "claude-cowork" }
 
-// Adapt writes the plugin layout for the artifact. A type: context artifact
-// goes to the harness-neutral .podium/context/<id>/ bucket like every other
-// adapter (§6.7), not into a plugin.
+// Adapt writes the harness-neutral context bucket for a type: context artifact
+// (§6.7), identical to every other adapter. For skill, agent, command, rule,
+// hook, and mcp-server it emits nothing: those types are ✗ cells in the §6.7.1
+// matrix for claude-cowork, so the §6.9 untranslatable guard fails them on both
+// canonical-Adapt paths, and a cowork user obtains them by importing the
+// published Claude marketplace.
 func (ClaudeCowork) Adapt(ctx context.Context, src Source) ([]File, error) {
 	if frontmatterType(src.ArtifactBytes) == "context" {
 		return contextOut(src), nil
 	}
-	return coworkPlugin(src), nil
+	return nil, nil
 }
 
 // Cursor is the adapter for Cursor IDE (§6.7).

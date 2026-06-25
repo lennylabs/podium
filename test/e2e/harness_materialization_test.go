@@ -481,50 +481,24 @@ func TestHarness_MCPClaudeDesktop(t *testing.T) {
 
 // ---- Claude Cowork ----------------------------------------------------------
 
-// claude-cowork writes .claude-cowork/plugins/<id>/.
-func TestHarness_ClaudeCoworkPluginLayout(t *testing.T) {
+// claude-cowork materializes a type: context artifact into the harness-neutral
+// .podium/context/<id>/ bucket. The plugin and marketplace layout for the other
+// types ships through marketplace publishing (§6.7, §7.8), not through podium
+// sync, so a non-context artifact produces no project-scope output.
+func TestHarness_ClaudeCoworkContextOnly(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"greet/ARTIFACT.md": greetSkillArtifact,
-		"greet/SKILL.md":    skillBody("greet"),
+		"glossary/ARTIFACT.md": contextArtifact("glossary"),
 	})
 	cowork := t.TempDir()
 	chSync(t, reg, cowork, "claude-cowork")
-	mustExist(t, filepath.Join(cowork, "plugins", "greet", "skills", "greet", "SKILL.md"))
-	mustExist(t, filepath.Join(cowork, "plugins", "greet", ".claude-plugin", "plugin.json"))
-	// The repository-root marketplace.json lists the plugin so a Cowork admin
-	// can import the synced repo as a private marketplace.
-	market := filepath.Join(cowork, ".claude-plugin", "marketplace.json")
-	mustExist(t, market)
-	if b, err := os.ReadFile(market); err != nil {
-		t.Fatalf("read marketplace.json: %v", err)
-	} else if !strings.Contains(string(b), `"./plugins/greet"`) {
-		t.Errorf("marketplace.json does not list the greet plugin source:\n%s", b)
+	mustExist(t, filepath.Join(cowork, ".podium", "context", "glossary", "ARTIFACT.md"))
+	// No plugin or marketplace layout: the dispatch change routes only context.
+	if _, err := os.Stat(filepath.Join(cowork, "plugins")); !os.IsNotExist(err) {
+		t.Errorf("claude-cowork emitted a plugins/ tree; stat err=%v", err)
 	}
-}
-
-// claude-cowork sync, git add, git commit sequence.
-func TestHarness_ClaudeCoworkGitCommit(t *testing.T) {
-	t.Parallel()
-	reg := writeRegistry(t, map[string]string{
-		"greet/ARTIFACT.md": greetSkillArtifact,
-		"greet/SKILL.md":    skillBody("greet"),
-	})
-	cowork := t.TempDir()
-	if _, ok := runExternal(t, cowork, 30*time.Second, "git", "init"); !ok {
-		t.Skip("git not installed")
-	}
-	chSync(t, reg, cowork, "claude-cowork")
-	if r, _ := runExternal(t, cowork, 30*time.Second, "git", "add", "."); r.Exit != 0 {
-		t.Fatalf("git add exit=%d stderr=%s", r.Exit, r.Stderr)
-	}
-	if r, _ := runExternal(t, cowork, 30*time.Second, "git",
-		"-c", "user.email=alice@acme.com", "-c", "user.name=alice",
-		"commit", "-m", "Sync from Podium"); r.Exit != 0 {
-		t.Fatalf("git commit exit=%d stderr=%s stdout=%s", r.Exit, r.Stderr, r.Stdout)
-	}
-	if r, _ := runExternal(t, cowork, 30*time.Second, "git", "show", "--stat", "HEAD"); !strings.Contains(r.Stdout, "plugins/greet") {
-		t.Errorf("commit does not include the plugin layout:\n%s", r.Stdout)
+	if _, err := os.Stat(filepath.Join(cowork, ".claude-plugin", "marketplace.json")); !os.IsNotExist(err) {
+		t.Errorf("claude-cowork emitted a marketplace.json; stat err=%v", err)
 	}
 }
 

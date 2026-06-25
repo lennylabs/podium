@@ -635,10 +635,10 @@ func removeStalePaths(target string, prior map[string]string, current map[string
 			continue
 		}
 		// Prune the now-empty parent directories up the chain, stopping at the
-		// target root. A nested layout (claude-cowork's plugins/<id>/skills/<name>/,
-		// a hook's plugins/<id>/hooks/) leaves several empty ancestors when its
-		// only file is removed; pruning a single level would strip the leaf
-		// directory but orphan plugins/<id>/. os.Remove fails on a non-empty
+		// target root. A nested layout (a skill's .claude/skills/<name>/, the
+		// harness-neutral .podium/context/<id>/) leaves several empty ancestors
+		// when its only file is removed; pruning a single level would strip the
+		// leaf directory but orphan its parent. os.Remove fails on a non-empty
 		// directory naturally, so the walk halts at the first ancestor that still
 		// holds an operator file or a sibling artifact's output.
 		pruneEmptyParents(target, filepath.Dir(full))
