@@ -81,17 +81,19 @@ func (p PluginFilter) ScopeFilter() sync.ScopeFilter {
 // Workflow groups the `prepare` and `publish` command lists `podium publish`
 // runs around the render phase (§7.8). prepare places a checkout of the
 // destination repository at the working directory, and publish takes the
-// rendered tree to the remote.
+// rendered tree to the remote. OnError is an optional cleanup list run when a
+// phase command fails, before the failure propagates.
 type Workflow struct {
 	Prepare []Command `yaml:"prepare,omitempty"`
 	Publish []Command `yaml:"publish,omitempty"`
+	OnError []Command `yaml:"on_error,omitempty"`
 }
 
 // IsZero reports whether the workflow declares no commands. A marketplace whose
 // workflow is zero inherits the default workflow; a non-zero workflow replaces
 // it in full (§7.8).
 func (w Workflow) IsZero() bool {
-	return len(w.Prepare) == 0 && len(w.Publish) == 0
+	return len(w.Prepare) == 0 && len(w.Publish) == 0 && len(w.OnError) == 0
 }
 
 // Command is one step of a workflow phase (§7.8). It is an argv list under
