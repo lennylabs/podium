@@ -20,10 +20,16 @@ import (
 //
 //	--output <id>    publish only the named marketplace output (default: all)
 //	--config <path>  read this publish.yaml instead of the merged config scopes
-//	--workdir <dir>  render into an existing checkout (default: allocate per output)
+//	--workdir <dir>  render into an existing checkout (single output only; default: allocate per output)
 //	--dry-run        render into a temp dir and print each command; run no command
 //	--check          validate the config only; render and run nothing
 //	--json           emit a structured JSON envelope on stdout
+//
+// $PODIUM_WORKDIR is the per-output working and checkout directory, so --workdir
+// names a single checkout and requires a single-output selection: pass it with
+// --output, or against a config that resolves one output. A --workdir shared
+// across multiple outputs would render them into one checkout where each output
+// reconciles against the previous output's files, so the combination exits 2.
 //
 // Exit codes mirror syncCmd: 2 for a flag error or a config error (config.invalid,
 // an unknown --output, a missing --config path, or a missing registry
@@ -35,7 +41,7 @@ func publishCmd(args []string) int {
 	setUsage(fs, "Render the catalog into harness-native marketplace repositories and push them to git remotes.")
 	output := fs.String("output", "", "publish only the named marketplace output (default: every output)")
 	configPath := fs.String("config", "", "read this publish.yaml instead of the merged config scopes")
-	workdir := fs.String("workdir", "", "render into an existing checkout (default: allocate a working directory per output)")
+	workdir := fs.String("workdir", "", "render into an existing checkout; single output only, pair with --output (default: allocate a working directory per output)")
 	dryRun := fs.Bool("dry-run", false, "render into a temp dir and print each command; run no operator command and no publish phase")
 	check := fs.Bool("check", false, "validate the config only; render and run nothing")
 	asJSON := fs.Bool("json", false, "emit a structured JSON envelope on stdout")
@@ -61,6 +67,19 @@ func publishCmd(args []string) int {
 	}
 	if len(outputs) == 0 {
 		fmt.Fprintln(os.Stderr, "error: no marketplace outputs configured — add a marketplaces: entry to publish.yaml")
+		return 2
+	}
+	// §7.8 names $PODIUM_WORKDIR as the per-output working and checkout directory,
+	// and the only --workdir example pairs it with --output (a single output). A
+	// --workdir shared across multiple outputs renders each output into the same
+	// checkout, so output N reconciles against output N-1's freshly-written files
+	// and the outputs clobber each other. Reject the combination as a config error
+	// (exit 2): --workdir requires a single-output selection. With --output set the
+	// selection above already narrowed outputs to one, so this only fires when the
+	// operator passes --workdir against a config that resolves more than one output
+	// without naming which.
+	if *workdir != "" && len(outputs) > 1 {
+		fmt.Fprintf(os.Stderr, "error: --workdir names a single per-output checkout but %d outputs resolved — pass --output <id> to select one\n", len(outputs))
 		return 2
 	}
 	// spec: §7.8 publish.yaml resolves the registry by the same §7.5.2 rules as

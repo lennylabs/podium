@@ -325,6 +325,78 @@ func TestPublishCmd_MergedConfigFromWorkspace(t *testing.T) {
 	}
 }
 
+// Spec: §7.8 — $PODIUM_WORKDIR is the per-output checkout directory, so --workdir
+// names a single checkout. Passing it against a config that resolves more than one
+// output without --output would render every output into the same checkout, where
+// each output reconciles against the previous output's files, so the combination
+// is a config error and exits 2.
+func TestPublishCmd_WorkdirMultiOutputExits2(t *testing.T) {
+	reg := writePublishFixtureRegistry(t)
+	body := validMarketplace + `  - id: acme-other
+    git:
+      remote: git@github.com:acme/other.git
+      branch: main
+    harnesses: [codex]
+    plugins:
+      - name: finance-pack
+        include: ["finance/**"]
+`
+	cfg := writePublishConfig(t, reg, body)
+	workdir := t.TempDir()
+	withStderr(t, func() {
+		if code := publishCmd([]string{"--config", cfg, "--workdir", workdir}); code != 2 {
+			t.Errorf("publishCmd(--workdir, multi-output) = %d, want 2", code)
+		}
+	})
+}
+
+// Spec: §7.8 — --workdir against a multi-output config is allowed when --output
+// narrows the run to a single output: the selection happens before the
+// single-checkout guard, so --workdir names that one output's checkout.
+func TestPublishCmd_WorkdirWithOutputSelectsOne(t *testing.T) {
+	reg := writePublishFixtureRegistry(t)
+	body := validMarketplace + `  - id: acme-other
+    git:
+      remote: git@github.com:acme/other.git
+      branch: main
+    harnesses: [codex]
+    plugins:
+      - name: finance-pack
+        include: ["finance/**"]
+`
+	cfg := writePublishConfig(t, reg, body)
+	workdir := t.TempDir()
+	out := captureStdout(t, func() {
+		withStderr(t, func() {
+			if code := publishCmd([]string{"--config", cfg, "--output", "acme-other", "--workdir", workdir, "--dry-run"}); code != 0 {
+				t.Errorf("publishCmd(--workdir --output, multi-output) = %d, want 0", code)
+			}
+		})
+	})
+	if !strings.Contains(out, "== output acme-other ==") {
+		t.Errorf("selected output not reported:\n%s", out)
+	}
+}
+
+// Spec: §7.8 — --workdir is allowed without --output when the config resolves a
+// single output, because the per-output invariant still holds: there is exactly
+// one checkout.
+func TestPublishCmd_WorkdirSingleOutputNoSelection(t *testing.T) {
+	reg := writePublishFixtureRegistry(t)
+	cfg := writePublishConfig(t, reg, validMarketplace)
+	workdir := t.TempDir()
+	out := captureStdout(t, func() {
+		withStderr(t, func() {
+			if code := publishCmd([]string{"--config", cfg, "--workdir", workdir, "--dry-run"}); code != 0 {
+				t.Errorf("publishCmd(--workdir, single output) = %d, want 0", code)
+			}
+		})
+	})
+	if !strings.Contains(out, "== output acme-agents ==") {
+		t.Errorf("single output not reported:\n%s", out)
+	}
+}
+
 // Spec: §7.8 — a workflow command that exits non-zero is a runtime failure: the
 // pipeline fails fast and publish exits 1 (not 2, which is reserved for config
 // errors). This drives a live (non-dry) render against the filesystem registry,
