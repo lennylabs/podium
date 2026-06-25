@@ -171,9 +171,12 @@ func TestLoadMergedConfig_ParsesSpecExample(t *testing.T) {
 }
 
 // TestLoadMergedConfig_ScopePrecedence asserts the §7.5.2 precedence the publish
-// loader mirrors: project-local overrides project-shared overrides user-global
-// for a defaults key, and a higher-precedence scope that redeclares an output id
-// overwrites the whole output while a new id is added to the union.
+// loader mirrors. Defaults resolve per key: a higher-precedence non-empty value
+// wins, and a key absent from the higher scopes keeps the lower-scope value. The
+// marketplaces list is the structural analog of the sync.yaml `targets:` list,
+// which §7.5.2 resolves by whole-list replacement, so the highest-precedence
+// scope that declares a non-empty `marketplaces:` replaces the entire list and a
+// lower-scope output does not survive alongside it.
 func TestLoadMergedConfig_ScopePrecedence(t *testing.T) {
 	home := t.TempDir()
 	ws := t.TempDir()
@@ -196,7 +199,7 @@ marketplaces:
 	writeScope(t, ws, localConfigFileName, `defaults:
   registry: https://project-local.example.com
 marketplaces:
-  - id: shared-output
+  - id: local-output
     harnesses: [cursor]
     git:
       remote: local-remote
@@ -216,25 +219,90 @@ marketplaces:
 		t.Errorf("identity = %q, want user-global value to survive", got)
 	}
 
-	// The union carries the user-global-only output and the shared-output, and
-	// the shared-output is the project-local definition (cursor, local-remote),
-	// not the project-shared one.
-	byID := map[string]MarketplaceOutput{}
-	for _, m := range cfg.Marketplaces {
-		byID[m.ID] = m
+	// Whole-list replacement: the project-local scope declares a non-empty
+	// marketplaces list, so it replaces the lists from the lower scopes entirely.
+	// Neither the user-global output nor the project-shared output survives.
+	if got := len(cfg.Marketplaces); got != 1 {
+		t.Fatalf("marketplaces len = %d, want 1 (project-local list replaces the lower scopes)", got)
 	}
-	if _, ok := byID["from-user-global"]; !ok {
-		t.Error("from-user-global missing from the merged union")
+	only := cfg.Marketplaces[0]
+	if only.ID != "local-output" {
+		t.Errorf("marketplaces[0].id = %q, want local-output", only.ID)
 	}
-	shared, ok := byID["shared-output"]
-	if !ok {
-		t.Fatal("shared-output missing from the merged union")
+	if !equalStrings(only.Harnesses, []string{"cursor"}) {
+		t.Errorf("local-output harnesses = %v, want [cursor]", only.Harnesses)
 	}
-	if !equalStrings(shared.Harnesses, []string{"cursor"}) {
-		t.Errorf("shared-output harnesses = %v, want [cursor] (project-local override)", shared.Harnesses)
+	if only.Git.Remote != "local-remote" {
+		t.Errorf("local-output git.remote = %q, want local-remote", only.Git.Remote)
 	}
-	if shared.Git.Remote != "local-remote" {
-		t.Errorf("shared-output git.remote = %q, want local-remote", shared.Git.Remote)
+}
+
+// TestLoadMergedConfig_MarketplacesWholeListReplace asserts that a
+// higher-precedence scope's marketplaces list replaces a lower scope's list as a
+// unit even when the higher scope omits an id the lower scope declared. This is
+// the §7.5.2 `targets:` whole-list-replace rule: the project-shared list wins
+// over the user-global list when no project-local list is present, and the
+// user-global-only output does not survive.
+func TestLoadMergedConfig_MarketplacesWholeListReplace(t *testing.T) {
+	home := t.TempDir()
+	ws := t.TempDir()
+
+	writeScope(t, home, configFileName, `marketplaces:
+  - id: user-only
+    harnesses: [claude-code]
+  - id: shared-id
+    harnesses: [claude-code]
+`)
+	writeScope(t, ws, configFileName, `marketplaces:
+  - id: shared-id
+    harnesses: [cursor]
+`)
+
+	cfg, _, err := LoadMergedConfig(ws, home)
+	if err != nil {
+		t.Fatalf("LoadMergedConfig: %v", err)
+	}
+
+	if got := len(cfg.Marketplaces); got != 1 {
+		t.Fatalf("marketplaces len = %d, want 1 (project-shared list replaces user-global)", got)
+	}
+	if got := cfg.Marketplaces[0].ID; got != "shared-id" {
+		t.Errorf("marketplaces[0].id = %q, want shared-id", got)
+	}
+	if !equalStrings(cfg.Marketplaces[0].Harnesses, []string{"cursor"}) {
+		t.Errorf("shared-id harnesses = %v, want [cursor] (project-shared definition)", cfg.Marketplaces[0].Harnesses)
+	}
+}
+
+// TestLoadMergedConfig_LowerScopeListSurvivesWhenHigherOmits asserts that a
+// lower-precedence marketplaces list survives when no higher scope declares one,
+// because whole-list replacement only fires for a non-empty higher-scope list.
+func TestLoadMergedConfig_LowerScopeListSurvivesWhenHigherOmits(t *testing.T) {
+	home := t.TempDir()
+	ws := t.TempDir()
+
+	writeScope(t, home, configFileName, `marketplaces:
+  - id: user-output
+    harnesses: [claude-code]
+`)
+	// The project-shared scope sets only a default; it declares no marketplaces.
+	writeScope(t, ws, configFileName, `defaults:
+  registry: https://project-shared.example.com
+`)
+
+	cfg, _, err := LoadMergedConfig(ws, home)
+	if err != nil {
+		t.Fatalf("LoadMergedConfig: %v", err)
+	}
+
+	if got := cfg.Defaults.Registry; got != "https://project-shared.example.com" {
+		t.Errorf("registry = %q, want project-shared value", got)
+	}
+	if got := len(cfg.Marketplaces); got != 1 {
+		t.Fatalf("marketplaces len = %d, want 1 (user-global list survives)", got)
+	}
+	if got := cfg.Marketplaces[0].ID; got != "user-output" {
+		t.Errorf("marketplaces[0].id = %q, want user-output", got)
 	}
 }
 

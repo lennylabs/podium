@@ -199,24 +199,21 @@ func LoadMergedConfig(startDir, homeDir string) (*PublishConfig, string, error) 
 
 // mergeScopes folds the scopes (ordered low to high precedence) into one
 // PublishConfig. Defaults merge per key: a higher-precedence non-empty value
-// wins. Marketplaces are an additive union by output id; a higher-precedence
-// scope that redeclares an id overwrites the whole output, mirroring the
-// whole-profile overwrite sync.yaml applies on a name collision (§7.5.2).
+// wins. The marketplaces list is the structural analog of the sync.yaml
+// `targets:` list, which §7.5.2 resolves by whole-list replacement: the
+// highest-precedence scope that declares a non-empty `marketplaces:` replaces
+// the entire list, mirroring sync's `if len(f.cfg.Targets) > 0` rule
+// (pkg/sync/resolve.go). A lower-precedence list does not survive into the
+// merged config once a higher scope declares its own.
 func mergeScopes(scopes []*PublishConfig) *PublishConfig {
 	merged := &PublishConfig{}
-	byID := map[string]int{}
 	for _, cfg := range scopes {
 		if cfg == nil {
 			continue
 		}
 		mergeDefaults(&merged.Defaults, cfg.Defaults)
-		for _, out := range cfg.Marketplaces {
-			if idx, ok := byID[out.ID]; ok {
-				merged.Marketplaces[idx] = out
-				continue
-			}
-			byID[out.ID] = len(merged.Marketplaces)
-			merged.Marketplaces = append(merged.Marketplaces, out)
+		if len(cfg.Marketplaces) > 0 {
+			merged.Marketplaces = cfg.Marketplaces
 		}
 	}
 	return merged
