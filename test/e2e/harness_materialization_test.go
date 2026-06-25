@@ -516,6 +516,54 @@ func TestHarness_MCPClaudeCowork(t *testing.T) {
 	chAssertInitOK(t, chMCPEnv(t, reg, "PODIUM_HARNESS=claude-cowork"))
 }
 
+// claude-cowork is a §6.7.1 ✗ cell for the plugin-layout types (skill, agent,
+// command, rule, hook, mcp-server): the plugin and marketplace layout ships
+// through marketplace publishing (§6.7, §7.8), not the project-files path. Both
+// canonical-Adapt consumers (§2.2) run the one cowork Adapt, so both must fail a
+// plugin-layout type identically. This test drives a type: skill artifact
+// through `podium sync` and through the MCP server `load_artifact` against the
+// same registry and asserts each fails with materialize.untranslatable (§6.9),
+// locking the two consumers at parity through the compiled binaries.
+func TestHarness_ClaudeCoworkPluginLayoutTypeUntranslatableParity(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"greet/ARTIFACT.md": greetSkillArtifact,
+		"greet/SKILL.md":    skillBody("greet"),
+	})
+
+	// Consumer 1: podium sync calls the cowork Adapt directly (§7.5), guarded by
+	// the §6.9 untranslatable check added for the plugin-layout types.
+	target := t.TempDir()
+	sync := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "claude-cowork")
+	if sync.Exit == 0 {
+		t.Fatalf("sync(claude-cowork) exit=0, want non-zero for a skill ✗ cell\nstdout=%s", sync.Stdout)
+	}
+	if !strings.Contains(sync.Stderr+sync.Stdout, "materialize.untranslatable") {
+		t.Errorf("sync(claude-cowork) missing materialize.untranslatable:\nstderr=%s\nstdout=%s", sync.Stderr, sync.Stdout)
+	}
+	mustNotExist(t, filepath.Join(target, ".claude", "skills", "greet", "SKILL.md"))
+	if _, err := os.Stat(filepath.Join(target, "plugins")); !os.IsNotExist(err) {
+		t.Errorf("claude-cowork sync emitted a plugins/ tree; stat err=%v", err)
+	}
+
+	// Consumer 2: the MCP server load_artifact runs the same cowork Adapt when a
+	// materialization root is configured, and the same §6.9 guard fires before
+	// adapting (cmd/podium-mcp/main.go), so the tool call returns the identical
+	// materialize.untranslatable error envelope.
+	mat := t.TempDir()
+	env := append(chMCPEnv(t, reg, "PODIUM_HARNESS=claude-cowork"), "PODIUM_MATERIALIZE_ROOT="+mat)
+	res := mcpExec(t, env, toolCall(1, "load_artifact", map[string]any{"id": "greet"}))
+	result := rpcResult(t, res.Stdout, 1)
+	gotCode, _ := result["error"].(string)
+	if !strings.Contains(gotCode, "materialize.untranslatable") {
+		t.Errorf("load_artifact(claude-cowork) error=%q, want materialize.untranslatable (stderr=%s)", gotCode, res.Stderr)
+	}
+	if code, _ := result["code"].(string); code != "materialize.untranslatable" {
+		t.Errorf("load_artifact(claude-cowork) code=%q, want materialize.untranslatable", code)
+	}
+	mustNotExist(t, filepath.Join(mat, ".claude", "skills", "greet", "SKILL.md"))
+}
+
 // ---- Cursor -----------------------------------------------------------------
 
 // cursor rule writes .cursor/rules/<name>.mdc.
