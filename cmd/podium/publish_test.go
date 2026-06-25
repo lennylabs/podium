@@ -256,16 +256,38 @@ func TestPublishCmd_MissingConfigExits2(t *testing.T) {
 	})
 }
 
-// Spec: §7.8 — a malformed publish.yaml is a config error and exits 2.
-func TestPublishCmd_MalformedConfigExits2(t *testing.T) {
+// Spec: §7.8 — a malformed publish.yaml is a config-load failure and exits 1,
+// matching syncCmd's runMultiTargetSync, which returns 1 for the analogous
+// sync.ReadConfigFile parse error. Exit 2 is reserved for a structurally-invalid
+// config (config.invalid) and a missing config or registry.
+func TestPublishCmd_MalformedConfigExits1(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "publish.yaml")
 	if err := os.WriteFile(path, []byte("defaults:\n  registry: [not, a, string]\n"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	withStderr(t, func() {
+		if code := publishCmd([]string{"--config", path, "--check"}); code != 1 {
+			t.Errorf("publishCmd(malformed) = %d, want 1", code)
+		}
+	})
+}
+
+// Spec: §7.8 — publish.yaml resolves the registry by the same §7.5.2 rules as
+// sync.yaml, so an unset registry across all scopes is config.no_registry and
+// exits 2, matching syncCmd. The config is otherwise valid (a publish-target
+// harness), so the registry guard is what rejects it.
+func TestPublishCmd_NoRegistryExits2(t *testing.T) {
+	t.Setenv("PODIUM_REGISTRY", "")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "publish.yaml")
+	body := "marketplaces:\n  - id: acme-agents\n    git:\n      remote: r\n      branch: main\n    harnesses: [claude-code]\n    plugins:\n      - name: finance-pack\n        include: [\"finance/**\"]\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	withStderr(t, func() {
 		if code := publishCmd([]string{"--config", path, "--check"}); code != 2 {
-			t.Errorf("publishCmd(malformed) = %d, want 2", code)
+			t.Errorf("publishCmd(no registry) = %d, want 2", code)
 		}
 	})
 }

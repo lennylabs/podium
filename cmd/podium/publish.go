@@ -25,9 +25,11 @@ import (
 //	--check          validate the config only; render and run nothing
 //	--json           emit a structured JSON envelope on stdout
 //
-// Exit codes mirror syncCmd: 2 for a config or flag error (config.invalid, an
-// unknown --output, a missing registry), 1 for a runtime failure (a fetch error,
-// a render error, a non-zero workflow command), 0 on success.
+// Exit codes mirror syncCmd: 2 for a flag error or a config error (config.invalid,
+// an unknown --output, a missing --config path, or a missing registry
+// config.no_registry), 1 for a config-load failure (a malformed or unreadable
+// config file) and for a runtime failure (a fetch error, a render error, a
+// non-zero workflow command), 0 on success.
 func publishCmd(args []string) int {
 	fs := flag.NewFlagSet("publish", flag.ContinueOnError)
 	setUsage(fs, "Render the catalog into harness-native marketplace repositories and push them to git remotes.")
@@ -60,6 +62,17 @@ func publishCmd(args []string) int {
 	if len(outputs) == 0 {
 		fmt.Fprintln(os.Stderr, "error: no marketplace outputs configured — add a marketplaces: entry to publish.yaml")
 		return 2
+	}
+	// spec: §7.8 publish.yaml resolves the registry by the same §7.5.2 rules as
+	// sync.yaml, so an unset registry across all scopes is config.no_registry.
+	// syncCmd maps that to exit 2 (main.go), and a --check run resolves the same
+	// config, so guard it here for every output rather than letting the render's
+	// sync.FetchRecords surface it as a runtime fetch failure (exit 1).
+	for _, out := range outputs {
+		if out.Registry == "" {
+			fmt.Fprintf(os.Stderr, "error: config.no_registry: no registry configured for output %q — set defaults.registry in publish.yaml or pass PODIUM_REGISTRY\n", out.ID)
+			return 2
+		}
 	}
 
 	// Interrupting publish (SIGINT / SIGTERM) cancels the in-flight workflow
@@ -97,7 +110,7 @@ func publishCmd(args []string) int {
 		if rerr != nil {
 			fmt.Fprintf(os.Stderr, "publish %s: %v\n", out.ID, rerr)
 			failures++
-			if errors.Is(rerr, publish.ErrConfigInvalid) {
+			if errors.Is(rerr, publish.ErrConfigInvalid) || errors.Is(rerr, sync.ErrNoRegistry) {
 				// A config error short-circuits the run: every output shares the
 				// config, so the rest would fail the same way.
 				return publishExitCode(rerr)
@@ -122,16 +135,27 @@ func publishCmd(args []string) int {
 // each marketplace output (§7.8). An explicit --config path reads that file
 // directly; otherwise the three §7.5.2 scopes merge by precedence. The registry
 // resolves per the §7.5.2 ladder (PODIUM_REGISTRY over defaults.registry).
+//
+// The error classes match syncCmd's multi-output --config path
+// (runMultiTargetSync). A parse or I/O failure reading the config file is a
+// load failure that exits 1, mirroring sync.ReadConfigFile (main.go
+// runMultiTargetSync); an explicit --config path that does not exist exits 2,
+// mirroring the cfg == nil branch there; a structurally-invalid config from
+// Resolve (a non-publish harness, a malformed glob or command) carries
+// publish.ErrConfigInvalid and exits 2.
 func resolvePublishOutputs(configPath string) ([]publish.ResolvedOutput, error) {
 	var cfg *publish.PublishConfig
 	if configPath != "" {
 		c, err := publish.ReadConfigFile(configPath)
 		if err != nil {
-			// A malformed publish.yaml is a config error, so it exits 2 like a
-			// flag error rather than a runtime failure.
-			return nil, fmt.Errorf("%w: %v", publish.ErrConfigInvalid, err)
+			// A parse or I/O failure is a config-load failure, not a validation
+			// failure: syncCmd's runMultiTargetSync returns 1 for the analogous
+			// sync.ReadConfigFile error, so leave it unwrapped for exit 1.
+			return nil, err
 		}
 		if c == nil {
+			// An explicit --config path that does not exist exits 2, mirroring
+			// runMultiTargetSync's missing-file branch.
 			return nil, fmt.Errorf("%w: config not found: %s", publish.ErrConfigInvalid, configPath)
 		}
 		cfg = c
@@ -140,7 +164,9 @@ func resolvePublishOutputs(configPath string) ([]publish.ResolvedOutput, error) 
 		home, _ := os.UserHomeDir()
 		merged, _, err := publish.LoadMergedConfig(ws, home)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", publish.ErrConfigInvalid, err)
+			// A LoadMergedConfig failure is a config-load failure, matching
+			// syncCmd's LoadMergedConfig branch, which returns 1.
+			return nil, err
 		}
 		cfg = merged
 	}
@@ -157,11 +183,15 @@ func selectOutput(outputs []publish.ResolvedOutput, name string) (publish.Resolv
 	return publish.ResolvedOutput{}, false
 }
 
-// publishExitCode maps a publish error to an exit code consistent with syncCmd:
-// a config error (config.invalid, a missing or malformed config) exits 2, every
-// other failure exits 1.
+// publishExitCode maps a publish error to an exit code consistent with syncCmd.
+// A config error exits 2: a structurally-invalid config (config.invalid) and an
+// unset registry (config.no_registry) both exit 2, matching syncCmd, which
+// returns 2 for a Resolve failure and for an unconfigured registry (main.go).
+// A config-load failure (a malformed or unreadable config file) and every
+// runtime failure exit 1, matching syncCmd's runMultiTargetSync, which returns
+// 1 for a sync.ReadConfigFile error and for a per-target run failure.
 func publishExitCode(err error) int {
-	if errors.Is(err, publish.ErrConfigInvalid) {
+	if errors.Is(err, publish.ErrConfigInvalid) || errors.Is(err, sync.ErrNoRegistry) {
 		return 2
 	}
 	return 1
