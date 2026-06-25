@@ -185,8 +185,19 @@ func ruleSkillBody(src Source) []byte {
 
 // CodexMarketplace is the marketplace emitter for Codex (§7.8). It writes the
 // root .agents/plugins/marketplace.json and a per-plugin .codex-plugin/
-// plugin.json, with skills/, hooks/hooks.json, .app.json, and .mcp.json
-// components, matching the §6.7 distribution table.
+// plugin.json, with skills/, hooks/hooks.json, and .mcp.json components,
+// matching the §7.8 "Marketplace emitters" description (spec/07-external-
+// integration.md:789) and the §7.8 repository layout (spec/07-external-
+// integration.md:775), and the proposal's Codex emitter bullet (proposal 0003
+// line 166).
+//
+// The §6.7 distribution table (spec/06-mcp-server.md:219) additionally lists
+// .app.json in the Codex component set, so the two normative tables disagree.
+// This emitter follows the §7.8 emitter description and the proposal emitter
+// prose, which both omit .app.json, because §7.8 is the section that describes
+// what the emitter writes. The .app.json schema is also unverified against the
+// Codex marketplace format. The §6.7/§7.8 inconsistency is flagged for spec
+// reconciliation; the spec is read-only in this phase.
 type CodexMarketplace struct{}
 
 // ID returns "codex".
@@ -210,16 +221,12 @@ func (CodexMarketplace) Component(ctx context.Context, src Source) ([]File, erro
 	return nil, nil
 }
 
-// Manifest renders the root .agents/plugins/marketplace.json entry, the
-// per-plugin .codex-plugin/plugin.json, and the plugin's .app.json. The Codex
-// distribution table (§6.7) lists .app.json in the component set, so the
-// per-plugin .app.json is written from the plugin descriptor once per plugin.
+// Manifest renders the root .agents/plugins/marketplace.json entry and the
+// per-plugin .codex-plugin/plugin.json for one plugin.
 func (CodexMarketplace) Manifest(marketplaceName string, plugin PluginDescriptor) ([]File, error) {
-	root := pluginSubtree(plugin)
 	out := []File{
 		{Path: path.Join(".agents", "plugins", "marketplace.json"), Op: OpMergeJSON, Content: marketplaceEntryFragment(marketplaceName, plugin)},
-		{Path: path.Join(root, ".codex-plugin", "plugin.json"), Content: pluginJSON(plugin)},
-		{Path: path.Join(root, ".app.json"), Content: pluginJSON(plugin)},
+		{Path: path.Join(pluginSubtree(plugin), ".codex-plugin", "plugin.json"), Content: pluginJSON(plugin)},
 	}
 	sortFiles(out)
 	return out, nil

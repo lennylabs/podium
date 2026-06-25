@@ -10,7 +10,11 @@ import (
 // Spec: §7.8 marketplace emitters. These tests pin each plugin-marketplace
 // emitter's manifest path, per-plugin manifest path, the once-per-plugin entry
 // count, the PodiumOwnedKey-on-plugin-name reconciliation, and the Codex
-// .app.json component the §6.7 distribution table mandates.
+// component set the §7.8 emitter description and the proposal 0003 emitter
+// bullet (line 166) enumerate (skills/, hooks/hooks.json, .mcp.json). The §6.7
+// distribution table additionally lists .app.json; the two normative tables
+// disagree, the emitter follows §7.8, and the inconsistency is flagged for spec
+// reconciliation.
 
 // finPlugin is the descriptor used across the emitter tests: a finance-pack
 // plugin under the harness subtree.
@@ -90,22 +94,23 @@ func TestCursorMarketplace_ManifestPaths(t *testing.T) {
 	fileByPath(t, out, "cursor/finance-pack/.cursor-plugin/plugin.json")
 }
 
-// Spec: §6.7, §7.8 — the Codex distribution table lists .app.json and .mcp.json
-// in the component set. The per-plugin .app.json is part of the manifest, and a
-// mcp-server artifact contributes .mcp.json under the plugin subtree.
-func TestCodexMarketplace_AppJSONComponentPresent(t *testing.T) {
+// Spec: §7.8 — the Codex emitter's Manifest writes only the root marketplace
+// entry and the per-plugin .codex-plugin/plugin.json. The §7.8 emitter
+// description and the proposal 0003 Codex bullet (line 166) omit .app.json,
+// while the §6.7 distribution table lists it. The two normative tables disagree;
+// the emitter follows §7.8, so the Codex Manifest writes no .app.json. This test
+// pins the §7.8 component set and flags the §6.7/§7.8 inconsistency for spec
+// reconciliation.
+func TestCodexMarketplace_ManifestOmitsAppJSON(t *testing.T) {
 	t.Parallel()
 	out, err := CodexMarketplace{}.Manifest("acme-agents", finPlugin("codex"))
 	if err != nil {
 		t.Fatalf("Manifest: %v", err)
 	}
-	app := fileByPath(t, out, "codex/finance-pack/.app.json")
-	var m map[string]any
-	if err := json.Unmarshal(app.Content, &m); err != nil {
-		t.Fatalf(".app.json is not valid JSON: %v\n%s", err, app.Content)
-	}
-	if m["name"] != "finance-pack" {
-		t.Errorf(".app.json name = %v, want finance-pack", m["name"])
+	for _, f := range out {
+		if f.Path == "codex/finance-pack/.app.json" {
+			t.Fatalf("Codex Manifest must omit .app.json per the §7.8 emitter set; got %v", paths(out))
+		}
 	}
 }
 
