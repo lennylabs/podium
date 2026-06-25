@@ -250,15 +250,26 @@ type ResolvedOutput struct {
 }
 
 // Resolve applies the merged defaults to each marketplace output and validates
-// the result. Each output inherits the registry and identity from defaults, and
-// its effective workflow is its own workflow when it declares one, else the
-// default workflow in full (§7.8). Validation rejects an output whose harness
-// set names a non-publish-target harness and an output with a malformed plugin
-// glob, both with config.invalid (§6.10).
-func (cfg *PublishConfig) Resolve() ([]ResolvedOutput, error) {
+// the result. The registry resolves per key by the §7.5.2 precedence ladder:
+// the PODIUM_REGISTRY env var wins over the merged defaults.registry, mirroring
+// sync's Resolve (pkg/sync/resolve.go). env is os.Getenv or a test stub; a nil
+// env reads no environment. The §7.8 Pattern A CI run depends on this: it sets
+// PODIUM_REGISTRY as an env var with no defaults.registry in publish.yaml.
+// Identity has no recognized PODIUM_* env var, so it comes from defaults alone.
+// Each output's effective workflow is its own workflow when it declares one,
+// else the default workflow in full (§7.8). Validation rejects an output whose
+// harness set names a non-publish-target harness and an output with a malformed
+// plugin glob, both with config.invalid (§6.10).
+//
+// spec: §7.5.2 (precedence ladder, env vars above the file scopes), §7.8.
+func (cfg *PublishConfig) Resolve(env func(string) string) ([]ResolvedOutput, error) {
 	if cfg == nil {
 		return nil, nil
 	}
+	if env == nil {
+		env = func(string) string { return "" }
+	}
+	registry := firstNonEmpty(env("PODIUM_REGISTRY"), cfg.Defaults.Registry)
 	out := make([]ResolvedOutput, 0, len(cfg.Marketplaces))
 	for _, m := range cfg.Marketplaces {
 		workflow := m.Workflow
@@ -267,7 +278,7 @@ func (cfg *PublishConfig) Resolve() ([]ResolvedOutput, error) {
 		}
 		resolved := ResolvedOutput{
 			ID:            m.ID,
-			Registry:      cfg.Defaults.Registry,
+			Registry:      registry,
 			Identity:      cfg.Defaults.Identity,
 			Git:           m.Git,
 			Harnesses:     m.Harnesses,
@@ -281,6 +292,18 @@ func (cfg *PublishConfig) Resolve() ([]ResolvedOutput, error) {
 		out = append(out, resolved)
 	}
 	return out, nil
+}
+
+// firstNonEmpty returns the first non-empty argument, or "". It mirrors the
+// precedence picker sync uses (pkg/sync/resolve.go) so publish and sync resolve
+// the registry by the same §7.5.2 rule.
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // validateOutput rejects an output whose harness set names a non-publish-target

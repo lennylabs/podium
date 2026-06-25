@@ -331,7 +331,7 @@ func TestResolve_WorkflowOverride(t *testing.T) {
 		},
 	}
 
-	outputs, err := cfg.Resolve()
+	outputs, err := cfg.Resolve(nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -361,6 +361,81 @@ func TestResolve_WorkflowOverride(t *testing.T) {
 	}
 }
 
+// TestResolve_RegistryEnvPrecedence asserts the §7.5.2 precedence level the
+// publish loader had been missing: PODIUM_REGISTRY (level 2) wins over the
+// merged defaults.registry (a lower file scope), and applies even when no
+// defaults.registry is set. The §7.8 Pattern A CI run depends on this, because
+// it sets PODIUM_REGISTRY as an env var with no defaults.registry in
+// publish.yaml.
+func TestResolve_RegistryEnvPrecedence(t *testing.T) {
+	t.Run("env overrides defaults.registry", func(t *testing.T) {
+		cfg := &PublishConfig{
+			Defaults:     Defaults{Registry: "https://from-defaults.example.com"},
+			Marketplaces: []MarketplaceOutput{{ID: "out", Harnesses: []string{"claude-code"}}},
+		}
+		env := func(k string) string {
+			if k == "PODIUM_REGISTRY" {
+				return "https://from-env.example.com"
+			}
+			return ""
+		}
+		outputs, err := cfg.Resolve(env)
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if got := outputs[0].Registry; got != "https://from-env.example.com" {
+			t.Errorf("registry = %q, want the PODIUM_REGISTRY value", got)
+		}
+	})
+
+	t.Run("env applies with no defaults.registry", func(t *testing.T) {
+		cfg := &PublishConfig{
+			Marketplaces: []MarketplaceOutput{{ID: "out", Harnesses: []string{"claude-code"}}},
+		}
+		env := func(k string) string {
+			if k == "PODIUM_REGISTRY" {
+				return "https://from-env.example.com"
+			}
+			return ""
+		}
+		outputs, err := cfg.Resolve(env)
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if got := outputs[0].Registry; got != "https://from-env.example.com" {
+			t.Errorf("registry = %q, want the PODIUM_REGISTRY value", got)
+		}
+	})
+
+	t.Run("defaults.registry survives an unset env var", func(t *testing.T) {
+		cfg := &PublishConfig{
+			Defaults:     Defaults{Registry: "https://from-defaults.example.com"},
+			Marketplaces: []MarketplaceOutput{{ID: "out", Harnesses: []string{"claude-code"}}},
+		}
+		outputs, err := cfg.Resolve(func(string) string { return "" })
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if got := outputs[0].Registry; got != "https://from-defaults.example.com" {
+			t.Errorf("registry = %q, want the defaults value when the env var is unset", got)
+		}
+	})
+}
+
+// TestResolve_NilConfig confirms Resolve on a nil config returns no outputs and
+// no error, so a caller that loaded an absent config does not have to nil-check
+// before resolving.
+func TestResolve_NilConfig(t *testing.T) {
+	var cfg *PublishConfig
+	outputs, err := cfg.Resolve(nil)
+	if err != nil {
+		t.Fatalf("Resolve on nil config: %v", err)
+	}
+	if outputs != nil {
+		t.Errorf("outputs = %v, want nil", outputs)
+	}
+}
+
 // TestResolve_RejectsNonPublishHarness asserts that an output whose harness set
 // names a non-publish-target harness (opencode or none) is rejected with
 // config.invalid (§6.10), reusing the §7.8 publish-target selector.
@@ -372,7 +447,7 @@ func TestResolve_RejectsNonPublishHarness(t *testing.T) {
 					{ID: "bad", Harnesses: []string{"claude-code", h}},
 				},
 			}
-			_, err := cfg.Resolve()
+			_, err := cfg.Resolve(nil)
 			if err == nil {
 				t.Fatalf("Resolve with harness %q = nil error, want config.invalid", h)
 			}
@@ -391,7 +466,7 @@ func TestResolve_AcceptsPublishHarnesses(t *testing.T) {
 			{ID: "ok", Harnesses: []string{"claude-code", "claude-desktop", "claude-cowork", "codex", "cursor", "gemini", "pi", "hermes"}},
 		},
 	}
-	if _, err := cfg.Resolve(); err != nil {
+	if _, err := cfg.Resolve(nil); err != nil {
 		t.Errorf("Resolve with publish-target harnesses = %v, want nil", err)
 	}
 }
@@ -410,7 +485,7 @@ func TestResolve_RejectsMalformedGlob(t *testing.T) {
 			},
 		},
 	}
-	_, err := cfg.Resolve()
+	_, err := cfg.Resolve(nil)
 	if err == nil {
 		t.Fatal("Resolve with malformed glob = nil error, want config.invalid")
 	}
