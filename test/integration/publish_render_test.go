@@ -1,0 +1,258 @@
+package integration
+
+import (
+	"context"
+	"encoding/json"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/lennylabs/podium/pkg/publish"
+	"github.com/lennylabs/podium/pkg/registry/server"
+)
+
+// Spec: §7.8 — `podium publish` renders the publishing identity's effective view
+// (read over the same HTTP API podium sync uses) into a multi-harness marketplace
+// repository. This integration test runs a real registry in-process (the shared
+// bootstrap the standalone server uses), points the §7.8 render at it as a
+// server source, and asserts the multi-harness layout, the once-per-plugin
+// manifest entry for a multi-artifact plugin, idempotent re-render, and the
+// change set on a dropped artifact.
+//
+// The render reaches the registry over HTTP through pkg/sync.FetchRecords, so the
+// test exercises the server-source record-fetch path publish reuses, not the
+// filesystem shortcut the pkg/publish unit tests use.
+func TestPublishRender_ServerSourceMultiHarness(t *testing.T) {
+	t.Parallel()
+	dir := referenceRegistryPath(t)
+	srv, err := server.NewFromFilesystem(dir)
+	if err != nil {
+		t.Fatalf("NewFromFilesystem: %v", err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	workdir := t.TempDir()
+	opts := publish.RenderOptions{
+		OutputID:  "acme-agents",
+		Registry:  ts.URL,
+		Workdir:   workdir,
+		Harnesses: []string{"claude-code", "codex", "cursor"},
+		Plugins: []publish.PluginFilter{
+			// finance-pack bundles two artifacts: finance/ap/pay-invoice (agent)
+			// and finance/close/run-variance (skill).
+			{Name: "finance-pack", Include: []string{"finance/**"}},
+			// helpers holds the shared skill.
+			{Name: "helpers", Include: []string{"payment-helpers/**"}},
+		},
+	}
+
+	res, err := publish.Render(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !res.Changed {
+		t.Errorf("first render must report Changed=true")
+	}
+
+	tree := readTreeNoLock(t, workdir)
+
+	// Multi-harness layout: each format's manifest at its fixed root location
+	// and per-harness, per-plugin content under <harness>/<plugin>/....
+	for _, want := range []string{
+		".claude-plugin/marketplace.json",
+		".agents/plugins/marketplace.json",
+		".cursor-plugin/marketplace.json",
+		// finance-pack content per harness.
+		"claude/finance-pack/.claude-plugin/plugin.json",
+		"claude/finance-pack/agents/pay-invoice.md",          // the agent
+		"claude/finance-pack/skills/run-variance/SKILL.md",   // the skill
+		"codex/finance-pack/.codex-plugin/plugin.json",
+		"codex/finance-pack/skills/run-variance/SKILL.md",
+		"cursor/finance-pack/.cursor-plugin/plugin.json",
+		// helpers content.
+		"claude/helpers/skills/routing-validator/SKILL.md",
+	} {
+		if _, ok := tree[want]; !ok {
+			t.Errorf("missing %q in render tree; got:\n%s", want, treeKeys(tree))
+		}
+	}
+
+	// Once-per-plugin manifest entry: finance-pack carries two artifacts but is
+	// listed once in the Claude marketplace manifest.
+	assertPluginListedOnce(t, filepath.Join(workdir, ".claude-plugin", "marketplace.json"), "acme-agents", "finance-pack")
+
+	// Idempotent re-render: a second render against the unchanged registry
+	// produces the identical tree and reports no change.
+	second, err := publish.Render(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("second Render: %v", err)
+	}
+	if second.Changed {
+		t.Errorf("re-render of an unchanged registry must report Changed=false, got %v", second.ChangedArtifacts)
+	}
+	tree2 := readTreeNoLock(t, workdir)
+	assertTreesEqual(t, tree, tree2)
+}
+
+// Spec: §7.8 — when an artifact leaves the effective view, the next render
+// removes its files and the change set reports the change. This drives the
+// removal through the registry by serving a narrower fixture on the second
+// render via a fresh filesystem copy with one artifact dropped.
+func TestPublishRender_StaleCleanupAndChangeSet(t *testing.T) {
+	t.Parallel()
+
+	// Copy the reference fixture so the test can mutate it.
+	src := referenceRegistryPath(t)
+	reg := t.TempDir()
+	copyTree(t, src, reg)
+
+	workdir := t.TempDir()
+	plugins := []publish.PluginFilter{{Name: "finance-pack", Include: []string{"finance/**"}}}
+
+	render := func() *publish.RenderResult {
+		srv, err := server.NewFromFilesystem(reg)
+		if err != nil {
+			t.Fatalf("NewFromFilesystem: %v", err)
+		}
+		ts := httptest.NewServer(srv.Handler())
+		defer ts.Close()
+		res, err := publish.Render(context.Background(), publish.RenderOptions{
+			OutputID:  "acme-agents",
+			Registry:  ts.URL,
+			Workdir:   workdir,
+			Harnesses: []string{"claude-code"},
+			Plugins:   plugins,
+		})
+		if err != nil {
+			t.Fatalf("Render: %v", err)
+		}
+		return res
+	}
+
+	render()
+	stale := filepath.Join(workdir, "claude", "finance-pack", "skills", "run-variance", "SKILL.md")
+	if _, err := os.Stat(stale); err != nil {
+		t.Fatalf("run-variance skill missing after first render: %v", err)
+	}
+
+	// Drop finance/close/run-variance from the served registry.
+	if err := os.RemoveAll(filepath.Join(reg, "team-finance", "finance", "close", "run-variance")); err != nil {
+		t.Fatalf("remove run-variance: %v", err)
+	}
+
+	second := render()
+	if !second.Changed {
+		t.Errorf("dropping an artifact must report Changed=true")
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("stale run-variance skill was not cleaned up: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workdir, "claude", "finance-pack", "agents", "pay-invoice.md")); err != nil {
+		t.Errorf("pay-invoice agent should survive: %v", err)
+	}
+}
+
+// --- helpers -----------------------------------------------------------------
+
+func readTreeNoLock(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	err := filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		rel, _ := filepath.Rel(dir, p)
+		rel = filepath.ToSlash(rel)
+		if strings.HasPrefix(rel, ".podium/") {
+			return nil
+		}
+		b, rerr := os.ReadFile(p)
+		if rerr != nil {
+			return rerr
+		}
+		out[rel] = string(b)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", dir, err)
+	}
+	return out
+}
+
+func treeKeys(m map[string]string) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sortStrings(keys)
+	var b strings.Builder
+	for _, k := range keys {
+		b.WriteString("  " + k + "\n")
+	}
+	return b.String()
+}
+
+func assertPluginListedOnce(t *testing.T, manifestPath, wantMarket, wantPlugin string) {
+	t.Helper()
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest %s: %v", manifestPath, err)
+	}
+	var m struct {
+		Name    string `json:"name"`
+		Plugins []struct {
+			Name string `json:"name"`
+		} `json:"plugins"`
+	}
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("manifest not valid JSON: %v\n%s", err, data)
+	}
+	if m.Name != wantMarket {
+		t.Errorf("marketplace name = %q, want %q", m.Name, wantMarket)
+	}
+	count := 0
+	for _, p := range m.Plugins {
+		if p.Name == wantPlugin {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("plugin %q listed %d times, want exactly 1:\n%s", wantPlugin, count, data)
+	}
+}
+
+func copyTree(t *testing.T, src, dst string) {
+	t.Helper()
+	err := filepath.Walk(src, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, p)
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		b, rerr := os.ReadFile(p)
+		if rerr != nil {
+			return rerr
+		}
+		return os.WriteFile(target, b, 0o644)
+	})
+	if err != nil {
+		t.Fatalf("copy %s -> %s: %v", src, dst, err)
+	}
+}
+
+func sortStrings(s []string) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j-1] > s[j]; j-- {
+			s[j-1], s[j] = s[j], s[j-1]
+		}
+	}
+}
