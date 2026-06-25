@@ -94,22 +94,6 @@ func marketplaceEntryFragment(marketplaceName string, p PluginDescriptor) []byte
 	return b
 }
 
-// pretty re-indents a compact JSON fragment for a standalone file. The callers
-// pass bytes produced by json.Marshal, so the unmarshal and re-marshal error
-// arms below are defensive against a future malformed caller and are not
-// exercised by a contrived test; pretty returns the input unchanged then.
-func pretty(b []byte) []byte {
-	var v any
-	if err := json.Unmarshal(b, &v); err != nil {
-		return b
-	}
-	out, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return b
-	}
-	return append(out, '\n')
-}
-
 // --- Claude marketplace emitter ----------------------------------------------
 
 // ClaudeMarketplace is the shared marketplace emitter for Claude Code, Claude
@@ -135,15 +119,9 @@ func (ClaudeMarketplace) Component(ctx context.Context, src Source) ([]File, err
 	case "command":
 		return []File{{Path: path.Join(root, "commands", lastSeg(src.ArtifactID)+".md"), Content: src.ArtifactBytes}}, nil
 	case "hook":
-		if frag := hookFragmentJSON(claudeHookEvents, src); frag != nil {
-			out := []File{{Path: path.Join(root, "hooks", "hooks.json"), Content: pretty(frag)}}
-			out = appendResources(out, path.Join(root, "hooks"), src.Resources)
-			sortFiles(out)
-			return out, nil
-		}
-		return nil, nil
+		return hookConfigOut(path.Join(root, "hooks", "hooks.json"), hookFragmentJSON(claudeHookEvents, src), src), nil
 	case "mcp-server":
-		return []File{{Path: path.Join(root, ".mcp.json"), Content: pretty(mcpFragmentJSON(src))}}, nil
+		return []File{{Path: path.Join(root, ".mcp.json"), Op: OpMergeJSON, Content: mcpFragmentJSON(src)}}, nil
 	}
 	return nil, nil
 }
@@ -225,15 +203,9 @@ func (CodexMarketplace) Component(ctx context.Context, src Source) ([]File, erro
 	case "skill":
 		return skillOut(path.Join(root, "skills", lastSeg(src.ArtifactID)), src), nil
 	case "hook":
-		if frag := hookFragmentJSON(claudeHookEvents, src); frag != nil {
-			out := []File{{Path: path.Join(root, "hooks", "hooks.json"), Content: pretty(frag)}}
-			out = appendResources(out, path.Join(root, "hooks"), src.Resources)
-			sortFiles(out)
-			return out, nil
-		}
-		return nil, nil
+		return hookConfigOut(path.Join(root, "hooks", "hooks.json"), hookFragmentJSON(codexHookEvents, src), src), nil
 	case "mcp-server":
-		return []File{{Path: path.Join(root, ".mcp.json"), Content: pretty(mcpFragmentJSON(src))}}, nil
+		return []File{{Path: path.Join(root, ".mcp.json"), Op: OpMergeJSON, Content: mcpFragmentJSON(src)}}, nil
 	}
 	return nil, nil
 }
@@ -276,7 +248,7 @@ func (CursorMarketplace) Component(ctx context.Context, src Source) ([]File, err
 	case "rule":
 		return []File{{Path: path.Join(root, "rules", name+".mdc"), Content: cursorRuleBody(src)}}, nil
 	case "mcp-server":
-		return []File{{Path: path.Join(root, "mcp.json"), Content: pretty(mcpFragmentJSON(src))}}, nil
+		return []File{{Path: path.Join(root, "mcp.json"), Op: OpMergeJSON, Content: mcpFragmentJSON(src)}}, nil
 	}
 	return nil, nil
 }

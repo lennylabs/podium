@@ -115,6 +115,71 @@ func TestWrite_InjectAndMergeIntegration(t *testing.T) {
 	}
 }
 
+// §7.8 marketplace emitter contract: a plugin that bundles two mcp-servers (and
+// two hooks on the same native event) writes the emitter's per-plugin Component
+// output through the materialize layer, and both servers and both hooks survive
+// in the single per-plugin .mcp.json / hooks.json. The emitter emits OpMergeJSON
+// fragments, so the merge accumulates the entries rather than the last write
+// winning, and a re-render reconciles through the same path the project-files
+// mode uses.
+func TestWrite_MarketplacePluginAccumulatesMultipleArtifacts(t *testing.T) {
+	dest := t.TempDir()
+	plugin := adapter.PluginDescriptor{Name: "finance-pack", Prefix: "claude"}
+	emitter := adapter.ClaudeMarketplace{}
+
+	srcs := []adapter.Source{
+		{
+			ArtifactID:    "finance/pay-mcp",
+			ArtifactBytes: []byte("---\ntype: mcp-server\nversion: 1.0.0\nserver_identifier: https://pay.acme.com\n---\n\nbody\n"),
+			Plugin:        plugin,
+		},
+		{
+			ArtifactID:    "finance/bill-mcp",
+			ArtifactBytes: []byte("---\ntype: mcp-server\nversion: 1.0.0\nserver_identifier: https://bill.acme.com\n---\n\nbody\n"),
+			Plugin:        plugin,
+		},
+		{
+			ArtifactID:    "finance/start-a",
+			ArtifactBytes: []byte("---\ntype: hook\nversion: 1.0.0\nhook_event: session_start\nhook_action: echo a\n---\n\nbody\n"),
+			Plugin:        plugin,
+		},
+		{
+			ArtifactID:    "finance/start-b",
+			ArtifactBytes: []byte("---\ntype: hook\nversion: 1.0.0\nhook_event: session_start\nhook_action: echo b\n---\n\nbody\n"),
+			Plugin:        plugin,
+		},
+	}
+	var files []adapter.File
+	for _, s := range srcs {
+		comp, err := emitter.Component(t.Context(), s)
+		if err != nil {
+			t.Fatalf("Component(%s): %v", s.ArtifactID, err)
+		}
+		files = append(files, comp...)
+	}
+	if err := Write(dest, files); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	// Both mcp-servers accumulate into one .mcp.json. Under the broken OpWrite
+	// path the second server's file would clobber the first, leaving only one.
+	mcp := readString(t, filepath.Join(dest, "claude", "finance-pack", ".mcp.json"))
+	for _, want := range []string{"pay-mcp", "bill-mcp"} {
+		if !strings.Contains(mcp, want) {
+			t.Errorf("both mcp-servers must survive in one .mcp.json, missing %q:\n%s", want, mcp)
+		}
+	}
+
+	// Both hooks on the same native event accumulate into one event array in
+	// hooks.json; OpWrite would have dropped the first.
+	hooks := readString(t, filepath.Join(dest, "claude", "finance-pack", "hooks", "hooks.json"))
+	for _, want := range []string{"echo a", "echo b"} {
+		if !strings.Contains(hooks, want) {
+			t.Errorf("both hooks on the same event must survive in one hooks.json, missing %q:\n%s", want, hooks)
+		}
+	}
+}
+
 // taggedHook builds a Podium-owned hook fragment for native event ev keyed by
 // id, mirroring what adapter.hookFragmentJSON emits.
 func taggedHook(ev, id, cmd string) []byte {

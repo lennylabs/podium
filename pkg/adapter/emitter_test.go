@@ -341,7 +341,9 @@ func hookSource(prefix string) Source {
 }
 
 // Spec: §7.8 — the Claude emitter config-merges a hook into the plugin's
-// hooks/hooks.json and lands the bundled script under the plugin subtree.
+// hooks/hooks.json as an OpMergeJSON fragment, lands the bundled script in the
+// harness-neutral .podium/resources/<id>/ bucket, and the merged command points
+// at that same script path so the rendered hook resolves.
 func TestClaudeMarketplace_HookComponent(t *testing.T) {
 	t.Parallel()
 	out, err := ClaudeMarketplace{}.Component(context.Background(), hookSource("claude"))
@@ -349,10 +351,27 @@ func TestClaudeMarketplace_HookComponent(t *testing.T) {
 		t.Fatalf("Component: %v", err)
 	}
 	hooks := fileByPath(t, out, "claude/finance-pack/hooks/hooks.json")
+	if hooks.Op != OpMergeJSON {
+		t.Errorf("hooks.json must be an OpMergeJSON fragment so the merge layer reconciles it, got %v", hooks.Op)
+	}
 	if !strings.Contains(string(hooks.Content), "SessionStart") {
 		t.Errorf("hooks.json must carry the native SessionStart event:\n%s", hooks.Content)
 	}
-	fileByPath(t, out, "claude/finance-pack/hooks/scripts/notify.sh")
+	// The bundled script lands at the .podium/resources/<id>/ bucket, the same
+	// path hookActionFor rewrites the command to, so the command and the
+	// materialized script agree.
+	script := fileByPath(t, out, ".podium/resources/finance/notify/scripts/notify.sh")
+	assertHookCommandResolves(t, hooks.Content, script.Path)
+}
+
+// assertHookCommandResolves checks that the command embedded in a hooks.json
+// merge fragment points at the path where the bundled script is materialized, so
+// the published hook does not reference a file that the plugin never writes.
+func assertHookCommandResolves(t *testing.T, hooksJSON []byte, scriptPath string) {
+	t.Helper()
+	if !strings.Contains(string(hooksJSON), scriptPath) {
+		t.Errorf("hooks.json command must reference the materialized script path %q:\n%s", scriptPath, hooksJSON)
+	}
 }
 
 // Spec: §6.7.1, §7.8 — a hook whose canonical event has no Claude-native
@@ -394,8 +413,38 @@ func TestCodexMarketplace_SkillAndHookComponents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Component(hook): %v", err)
 	}
-	fileByPath(t, out, "codex/finance-pack/hooks/hooks.json")
-	fileByPath(t, out, "codex/finance-pack/hooks/scripts/notify.sh")
+	hooks := fileByPath(t, out, "codex/finance-pack/hooks/hooks.json")
+	if hooks.Op != OpMergeJSON {
+		t.Errorf("hooks.json must be an OpMergeJSON fragment, got %v", hooks.Op)
+	}
+	script := fileByPath(t, out, ".podium/resources/finance/notify/scripts/notify.sh")
+	assertHookCommandResolves(t, hooks.Content, script.Path)
+}
+
+// Spec: §6.7.1, §7.8 — the Codex emitter translates a hook through the
+// Codex-native event map, not the Claude map. A canonical event Codex has its
+// own name for (permission_request -> PermissionRequest) must render to the
+// Codex name, matching how the project-files Codex adapter translates it.
+func TestCodexMarketplace_HookUsesCodexEventMap(t *testing.T) {
+	t.Parallel()
+	src := Source{
+		ArtifactID:    "finance/perm",
+		ArtifactBytes: []byte("---\ntype: hook\nversion: 1.0.0\nhook_event: permission_request\nhook_action: scripts/check.sh\n---\n\nbody\n"),
+		Resources:     map[string][]byte{"scripts/check.sh": []byte("#!/bin/sh\nexit 0\n")},
+		Plugin:        finPlugin("codex"),
+	}
+	out, err := CodexMarketplace{}.Component(context.Background(), src)
+	if err != nil {
+		t.Fatalf("Component: %v", err)
+	}
+	hooks := fileByPath(t, out, "codex/finance-pack/hooks/hooks.json")
+	body := string(hooks.Content)
+	if !strings.Contains(body, "PermissionRequest") {
+		t.Errorf("Codex hook must use the Codex-native PermissionRequest event:\n%s", body)
+	}
+	if strings.Contains(body, "PreToolUse") {
+		t.Errorf("Codex hook must not use the Claude PreToolUse mapping for permission_request:\n%s", body)
+	}
 }
 
 // Spec: §7.8 — the Cursor emitter ships a skill under skills/<name>/.
