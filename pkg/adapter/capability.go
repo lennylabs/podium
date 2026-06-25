@@ -81,38 +81,40 @@ func (c Capability) String() string {
 var capabilityMatrix = map[Capability][]Support{
 	// Type materialization (§6.7): can the harness materialize this artifact
 	// type at project scope? rule and hook are graded by their dedicated rows.
-	{Field: "type", Value: "skill"}:      row("NXNNNNNNX"),
-	{Field: "type", Value: "agent"}:      row("NXNNNNNXX"),
+	{Field: "type", Value: "skill"}:      row("NXXNNNNNX"),
+	{Field: "type", Value: "agent"}:      row("NXXNNNNXX"),
 	{Field: "type", Value: "context"}:    row("NXNNNNNNN"),
-	{Field: "type", Value: "command"}:    row("NXNNXNNNX"),
-	{Field: "type", Value: "mcp-server"}: row("NXNNNNNXX"),
+	{Field: "type", Value: "command"}:    row("NXXNXNNNX"),
+	{Field: "type", Value: "mcp-server"}: row("NXXNNNNXX"),
 	// Frontmatter-field fidelity, exercised on a type: agent carrier: does the
 	// field survive the harness's agent output? Pass-through .md preserves
 	// everything; the Codex TOML translation keeps only name/description; a
 	// harness with no agent surface drops the field.
-	{Field: "description"}:      row("NXNNNNNXX"),
-	{Field: "mcpServers"}:       row("NXNNXNNXX"),
-	{Field: "delegates_to"}:     row("NXNNXNNXX"),
-	{Field: "requiresApproval"}: row("NXNNXNNXX"),
-	{Field: "sandbox_profile"}:  row("NXNNXNNXX"),
+	{Field: "description"}:      row("NXXNNNNXX"),
+	{Field: "mcpServers"}:       row("NXXNXNNXX"),
+	{Field: "delegates_to"}:     row("NXXNXNNXX"),
+	{Field: "requiresApproval"}: row("NXXNXNNXX"),
+	{Field: "sandbox_profile"}:  row("NXXNXNNXX"),
 	// rule_mode (type: rule). Native per-file scoping is the discriminator.
 	// Cursor and Hermes write .mdc and support every mode natively. Claude Code
 	// writes .claude/rules/ files: always is native (load-at-launch), glob is
 	// native via the `paths:` list, and auto/explicit fall back to load-always
 	// (Claude Code has no description-attach or mention-only rule mode). The
 	// AGENTS.md/GEMINI.md inject harnesses support always natively and degrade
-	// glob/auto/explicit to the always-loaded block. Cowork ships rules as
-	// skills (fallback for every mode).
-	{Field: "rule_mode", Value: "always"}:   row("NXFNNNNNN"),
-	{Field: "rule_mode", Value: "glob"}:     row("NXFNFFFFN"),
-	{Field: "rule_mode", Value: "auto"}:     row("FXFNFFFFN"),
-	{Field: "rule_mode", Value: "explicit"}: row("FXFNFFFFN"),
+	// glob/auto/explicit to the always-loaded block. Cowork has no project-scope
+	// rule surface (it consumes rules through the published Claude marketplace),
+	// so every mode is ✗.
+	{Field: "rule_mode", Value: "always"}:   row("NXXNNNNNN"),
+	{Field: "rule_mode", Value: "glob"}:     row("NXXNFFFFN"),
+	{Field: "rule_mode", Value: "auto"}:     row("FXXNFFFFN"),
+	{Field: "rule_mode", Value: "explicit"}: row("FXXNFFFFN"),
 	// hook_event (type: hook). Config-merge harnesses translate the §4.3.5
-	// event to a native event: claude-code, cowork, codex, and gemini cover the
-	// common events (✓); Cursor exposes only per-category subtype events, so it
-	// covers a subset (⚠). The no-hook harnesses (claude-desktop, opencode, pi,
-	// hermes) are unsupported (✗).
-	{Field: "hook_event"}: row("NXNFNXNXX"),
+	// event to a native event: claude-code, codex, and gemini cover the common
+	// events (✓); Cursor exposes only per-category subtype events, so it covers a
+	// subset (⚠). The no-hook harnesses (claude-desktop, opencode, pi, hermes)
+	// are unsupported (✗), as is cowork, whose hooks ship through the published
+	// Claude marketplace rather than a project-scope surface.
+	{Field: "hook_event"}: row("NXXFNXNXX"),
 }
 
 // row decodes a 9-rune capability string into per-harness Support values.
@@ -193,8 +195,17 @@ func UsedCapabilities(art *manifest.Artifact) []Capability {
 	if art.SandboxProfile != "" {
 		out = append(out, Capability{Field: "sandbox_profile"})
 	}
-	if art.Type == manifest.TypeRule && art.RuleMode != "" {
-		out = append(out, Capability{Field: "rule_mode", Value: string(art.RuleMode)})
+	if art.Type == manifest.TypeRule {
+		// spec: §6.7.1 / §4.3 — an unset rule_mode is a valid ingest; the §4.3
+		// default is always, and the adapter defaults it to always only later,
+		// after the §6.9 guard runs (pkg/adapter/builtins.go). Emit the default
+		// always cell so an unset-mode rule presents the same rule_mode: always
+		// capability as an explicit one and TranslationError evaluates it.
+		mode := string(art.RuleMode)
+		if mode == "" {
+			mode = string(manifest.RuleModeAlways)
+		}
+		out = append(out, Capability{Field: "rule_mode", Value: mode})
 	}
 	if art.Type == manifest.TypeHook && art.HookEvent != "" {
 		out = append(out, Capability{Field: "hook_event"})

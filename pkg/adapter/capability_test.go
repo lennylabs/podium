@@ -15,21 +15,21 @@ import (
 //
 // spec: §6.7.1 capability matrix
 var wantGrid = map[Capability]string{
-	{Field: "type", Value: "skill"}:         "NXNNNNNNX",
-	{Field: "type", Value: "agent"}:         "NXNNNNNXX",
+	{Field: "type", Value: "skill"}:         "NXXNNNNNX",
+	{Field: "type", Value: "agent"}:         "NXXNNNNXX",
 	{Field: "type", Value: "context"}:       "NXNNNNNNN",
-	{Field: "type", Value: "command"}:       "NXNNXNNNX",
-	{Field: "type", Value: "mcp-server"}:    "NXNNNNNXX",
-	{Field: "description"}:                  "NXNNNNNXX",
-	{Field: "mcpServers"}:                   "NXNNXNNXX",
-	{Field: "delegates_to"}:                 "NXNNXNNXX",
-	{Field: "requiresApproval"}:             "NXNNXNNXX",
-	{Field: "sandbox_profile"}:              "NXNNXNNXX",
-	{Field: "rule_mode", Value: "always"}:   "NXFNNNNNN",
-	{Field: "rule_mode", Value: "glob"}:     "NXFNFFFFN",
-	{Field: "rule_mode", Value: "auto"}:     "FXFNFFFFN",
-	{Field: "rule_mode", Value: "explicit"}: "FXFNFFFFN",
-	{Field: "hook_event"}:                   "NXNFNXNXX",
+	{Field: "type", Value: "command"}:       "NXXNXNNNX",
+	{Field: "type", Value: "mcp-server"}:    "NXXNNNNXX",
+	{Field: "description"}:                  "NXXNNNNXX",
+	{Field: "mcpServers"}:                   "NXXNXNNXX",
+	{Field: "delegates_to"}:                 "NXXNXNNXX",
+	{Field: "requiresApproval"}:             "NXXNXNNXX",
+	{Field: "sandbox_profile"}:              "NXXNXNNXX",
+	{Field: "rule_mode", Value: "always"}:   "NXXNNNNNN",
+	{Field: "rule_mode", Value: "glob"}:     "NXXNFFFFN",
+	{Field: "rule_mode", Value: "auto"}:     "FXXNFFFFN",
+	{Field: "rule_mode", Value: "explicit"}: "FXXNFFFFN",
+	{Field: "hook_event"}:                   "NXXFNXNXX",
 }
 
 func wantSupport(r byte) Support {
@@ -107,6 +107,14 @@ func TestCapability_UsedCapabilities(t *testing.T) {
 	rule := &manifest.Artifact{Type: manifest.TypeRule, RuleMode: manifest.RuleModeGlob, RuleGlobs: "src/**"}
 	if got := UsedCapabilities(rule); len(got) != 1 || got[0] != (Capability{Field: "rule_mode", Value: "glob"}) {
 		t.Errorf("UsedCapabilities(rule glob) = %v", got)
+	}
+	// spec: §6.7.1 / §4.3 — a type: rule with no rule_mode defaults to always.
+	// UsedCapabilities emits the default always cell so the §6.9 guard fires for
+	// the common (unset) case rather than dropping the rule silently.
+	defaultRule := &manifest.Artifact{Type: manifest.TypeRule}
+	if got := UsedCapabilities(defaultRule); len(got) != 1 ||
+		got[0] != (Capability{Field: "rule_mode", Value: "always"}) {
+		t.Errorf("UsedCapabilities(rule, no rule_mode) = %v, want [rule_mode: always]", got)
 	}
 	hook := &manifest.Artifact{Type: manifest.TypeHook, HookEvent: "stop"}
 	if got := UsedCapabilities(hook); len(got) != 1 || got[0] != (Capability{Field: "hook_event"}) {
