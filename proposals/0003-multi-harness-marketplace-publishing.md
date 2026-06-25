@@ -1,7 +1,7 @@
 # Proposal 0003: Multi-Harness Marketplace Publishing
 
 - Issue: (to be filed)
-- Status: Approved (2026-06-25). Converged after 9 adversarial review rounds (14 findings fixed).
+- Status: Applied to spec (2026-06-25). Converged after 9 adversarial review rounds (14 findings fixed).
 - Date: 2026-06-24
 
 ## Summary
