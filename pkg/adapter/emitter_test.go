@@ -56,7 +56,7 @@ func pluginEntries(t *testing.T, frag []byte) []any {
 // under the plugin subtree.
 func TestClaudeMarketplace_ManifestPaths(t *testing.T) {
 	t.Parallel()
-	out, err := ClaudeMarketplace{}.Manifest("acme-agents", finPlugin("claude"))
+	out, err := ClaudeMarketplace{}.Manifest(context.Background(), "acme-agents", finPlugin("claude"))
 	if err != nil {
 		t.Fatalf("Manifest: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestClaudeMarketplace_ManifestPaths(t *testing.T) {
 // per-plugin .codex-plugin/plugin.json under the plugin subtree.
 func TestCodexMarketplace_ManifestPaths(t *testing.T) {
 	t.Parallel()
-	out, err := CodexMarketplace{}.Manifest("acme-agents", finPlugin("codex"))
+	out, err := CodexMarketplace{}.Manifest(context.Background(), "acme-agents", finPlugin("codex"))
 	if err != nil {
 		t.Fatalf("Manifest: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestCodexMarketplace_ManifestPaths(t *testing.T) {
 // per-plugin .cursor-plugin/plugin.json under the plugin subtree.
 func TestCursorMarketplace_ManifestPaths(t *testing.T) {
 	t.Parallel()
-	out, err := CursorMarketplace{}.Manifest("acme-agents", finPlugin("cursor"))
+	out, err := CursorMarketplace{}.Manifest(context.Background(), "acme-agents", finPlugin("cursor"))
 	if err != nil {
 		t.Fatalf("Manifest: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestCursorMarketplace_ManifestPaths(t *testing.T) {
 // description the plugin.json carries.
 func TestCodexMarketplace_ManifestWritesAppJSON(t *testing.T) {
 	t.Parallel()
-	out, err := CodexMarketplace{}.Manifest("acme-agents", finPlugin("codex"))
+	out, err := CodexMarketplace{}.Manifest(context.Background(), "acme-agents", finPlugin("codex"))
 	if err != nil {
 		t.Fatalf("Manifest: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestCodexMarketplace_SubtreeHasAppAndMCP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Component: %v", err)
 	}
-	man, err := CodexMarketplace{}.Manifest("acme-agents", plugin)
+	man, err := CodexMarketplace{}.Manifest(context.Background(), "acme-agents", plugin)
 	if err != nil {
 		t.Fatalf("Manifest: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestMarketplace_OncePerPluginEntryAndPodiumOwnedKey(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			out, err := tc.emitter.Manifest("acme-agents", finPlugin(tc.prefix))
+			out, err := tc.emitter.Manifest(context.Background(), "acme-agents", finPlugin(tc.prefix))
 			if err != nil {
 				t.Fatalf("Manifest: %v", err)
 			}
@@ -238,7 +238,7 @@ func TestMarketplace_NArtifactPluginYieldsOneEntry(t *testing.T) {
 	}
 
 	// The manifest is contributed once for the whole plugin.
-	out, err := emitter.Manifest("acme-agents", plugin)
+	out, err := emitter.Manifest(context.Background(), "acme-agents", plugin)
 	if err != nil {
 		t.Fatalf("Manifest: %v", err)
 	}
@@ -354,7 +354,7 @@ func TestCursorMarketplace_ComponentRouting(t *testing.T) {
 // rather than emitting a null, so a strict harness schema accepts the object.
 func TestMarketplace_EmptyDescriptionOmitsKey(t *testing.T) {
 	t.Parallel()
-	out, err := ClaudeMarketplace{}.Manifest("acme-agents", PluginDescriptor{Name: "p", Prefix: "claude"})
+	out, err := ClaudeMarketplace{}.Manifest(context.Background(), "acme-agents", PluginDescriptor{Name: "p", Prefix: "claude"})
 	if err != nil {
 		t.Fatalf("Manifest: %v", err)
 	}
@@ -568,7 +568,7 @@ func TestMarketplaceEmitter_IDs(t *testing.T) {
 // of which plugin the call carries.
 func TestGeminiExtension_ManifestIsRootExtension(t *testing.T) {
 	t.Parallel()
-	out, err := GeminiExtension{}.Manifest("acme-gemini", finPlugin("gemini"))
+	out, err := GeminiExtension{}.Manifest(context.Background(), "acme-gemini", finPlugin("gemini"))
 	if err != nil {
 		t.Fatalf("Manifest: %v", err)
 	}
@@ -600,11 +600,11 @@ func TestGeminiExtension_ManifestIsRootExtension(t *testing.T) {
 // per-plugin variant.
 func TestGeminiExtension_ManifestIdempotentAcrossPlugins(t *testing.T) {
 	t.Parallel()
-	a, err := GeminiExtension{}.Manifest("acme-gemini", PluginDescriptor{Name: "house-rules", Prefix: "gemini"})
+	a, err := GeminiExtension{}.Manifest(context.Background(), "acme-gemini", PluginDescriptor{Name: "house-rules", Prefix: "gemini"})
 	if err != nil {
 		t.Fatalf("Manifest(house-rules): %v", err)
 	}
-	b, err := GeminiExtension{}.Manifest("acme-gemini", PluginDescriptor{Name: "finance-pack", Prefix: "gemini"})
+	b, err := GeminiExtension{}.Manifest(context.Background(), "acme-gemini", PluginDescriptor{Name: "finance-pack", Prefix: "gemini"})
 	if err != nil {
 		t.Fatalf("Manifest(finance-pack): %v", err)
 	}
@@ -685,7 +685,7 @@ func TestGeminiExtension_UnsupportedTypeEmitsNothing(t *testing.T) {
 // pi-package keyword and a pi.skills array pointing at the skills subtree.
 func TestPiPackage_ManifestPackageJSON(t *testing.T) {
 	t.Parallel()
-	out, err := PiPackage{}.Manifest("acme-pi", finPlugin("pi"))
+	out, err := PiPackage{}.Manifest(context.Background(), "acme-pi", finPlugin("pi"))
 	if err != nil {
 		t.Fatalf("Manifest: %v", err)
 	}
@@ -770,7 +770,7 @@ func TestHermesTap_ComponentSkillLayout(t *testing.T) {
 // files and the skills subtree reconciles through the sync lock file.
 func TestHermesTap_ManifestEmpty(t *testing.T) {
 	t.Parallel()
-	out, err := HermesTap{}.Manifest("acme-hermes", finPlugin("hermes"))
+	out, err := HermesTap{}.Manifest(context.Background(), "acme-hermes", finPlugin("hermes"))
 	if err != nil {
 		t.Fatalf("Manifest: %v", err)
 	}

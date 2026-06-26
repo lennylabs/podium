@@ -239,7 +239,7 @@ func renderEmitter(ctx context.Context, emitter adapter.MarketplaceEmitter, assi
 			continue
 		}
 		desc := adapter.PluginDescriptor{Name: p.Name, Prefix: emitter.ID()}
-		out, err := emitter.Manifest(marketplaceName, desc)
+		out, err := emitter.Manifest(ctx, marketplaceName, desc)
 		if err != nil {
 			return nil, fmt.Errorf("publish: emitter %q manifest for plugin %q: %w", emitter.ID(), p.Name, err)
 		}

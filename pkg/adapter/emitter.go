@@ -50,7 +50,7 @@ type MarketplaceEmitter interface {
 	// for plugin. marketplaceName is the output's operator-chosen identifier.
 	// The marketplace entry is an OpMergeJSON fragment keyed by the plugin name
 	// and tagged with PodiumOwnedKey on the plugin name.
-	Manifest(marketplaceName string, plugin PluginDescriptor) ([]File, error)
+	Manifest(ctx context.Context, marketplaceName string, plugin PluginDescriptor) ([]File, error)
 }
 
 // pluginSubtree is the directory a plugin's content lives under within a
@@ -130,7 +130,7 @@ func (ClaudeMarketplace) Component(ctx context.Context, src Source) ([]File, err
 
 // Manifest renders the root .claude-plugin/marketplace.json entry and the
 // per-plugin .claude-plugin/plugin.json for one plugin.
-func (ClaudeMarketplace) Manifest(marketplaceName string, plugin PluginDescriptor) ([]File, error) {
+func (ClaudeMarketplace) Manifest(ctx context.Context, marketplaceName string, plugin PluginDescriptor) ([]File, error) {
 	out := []File{
 		{Path: path.Join(".claude-plugin", "marketplace.json"), Op: OpMergeJSON, Content: marketplaceEntryFragment(marketplaceName, plugin)},
 		{Path: path.Join(pluginSubtree(plugin), ".claude-plugin", "plugin.json"), Content: pluginJSON(plugin)},
@@ -232,7 +232,7 @@ func (CodexMarketplace) Component(ctx context.Context, src Source) ([]File, erro
 // component; it is per-plugin like plugin.json, so it is rendered here once per
 // plugin rather than once per artifact. It carries the verified plugin name and
 // description; its full schema is part of the §6.7-vs-§7.8 reconciliation item.
-func (CodexMarketplace) Manifest(marketplaceName string, plugin PluginDescriptor) ([]File, error) {
+func (CodexMarketplace) Manifest(ctx context.Context, marketplaceName string, plugin PluginDescriptor) ([]File, error) {
 	root := pluginSubtree(plugin)
 	out := []File{
 		{Path: path.Join(".agents", "plugins", "marketplace.json"), Op: OpMergeJSON, Content: marketplaceEntryFragment(marketplaceName, plugin)},
@@ -273,7 +273,7 @@ func (CursorMarketplace) Component(ctx context.Context, src Source) ([]File, err
 
 // Manifest renders the root .cursor-plugin/marketplace.json entry and the
 // per-plugin .cursor-plugin/plugin.json for one plugin.
-func (CursorMarketplace) Manifest(marketplaceName string, plugin PluginDescriptor) ([]File, error) {
+func (CursorMarketplace) Manifest(ctx context.Context, marketplaceName string, plugin PluginDescriptor) ([]File, error) {
 	out := []File{
 		{Path: path.Join(".cursor-plugin", "marketplace.json"), Op: OpMergeJSON, Content: marketplaceEntryFragment(marketplaceName, plugin)},
 		{Path: path.Join(pluginSubtree(plugin), ".cursor-plugin", "plugin.json"), Content: pluginJSON(plugin)},
@@ -323,7 +323,7 @@ func (GeminiExtension) Component(ctx context.Context, src Source) ([]File, error
 // and is identical for every plugin call (the merge replaces the idempotent
 // scalars). The manifest is an OpMergeJSON fragment so an mcp-server Component
 // merging mcpServers into the same file does not clobber the scalars.
-func (GeminiExtension) Manifest(marketplaceName string, plugin PluginDescriptor) ([]File, error) {
+func (GeminiExtension) Manifest(ctx context.Context, marketplaceName string, plugin PluginDescriptor) ([]File, error) {
 	frag := map[string]any{
 		"name":            marketplaceName,
 		"contextFileName": geminiContextFile,
@@ -366,7 +366,7 @@ func (PiPackage) Component(ctx context.Context, src Source) ([]File, error) {
 // at the skills subtree. The skills subtree carries no merged manifest and
 // reconciles through the sync lock file, so the package.json is a plain write of
 // stable, idempotent content rather than a per-skill merge fragment.
-func (PiPackage) Manifest(marketplaceName string, plugin PluginDescriptor) ([]File, error) {
+func (PiPackage) Manifest(ctx context.Context, marketplaceName string, plugin PluginDescriptor) ([]File, error) {
 	pkg := map[string]any{
 		"name":     marketplaceName,
 		"keywords": []any{"pi-package"},
@@ -407,7 +407,7 @@ func (HermesTap) Component(ctx context.Context, src Source) ([]File, error) {
 
 // Manifest returns no files: a Hermes tap has no root manifest, and the skills
 // subtree reconciles through the sync lock file.
-func (HermesTap) Manifest(marketplaceName string, plugin PluginDescriptor) ([]File, error) {
+func (HermesTap) Manifest(ctx context.Context, marketplaceName string, plugin PluginDescriptor) ([]File, error) {
 	return nil, nil
 }
 
