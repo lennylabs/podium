@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 620" font-family="Helvetica, Arial, sans-serif">
+  <!--
+    Publish flow.
+    Used by docs/getting-started/how-it-works.md and
+    docs/consuming/publishing.md.
+
+    A source change ingests into the registry, which emits one
+    layer.ingested event per cycle. One of two triggers runs
+    podium publish: Pattern A is a scheduled CI job, Pattern B is a
+    receiver that posts to a relay which verifies the HMAC and calls
+    GitHub repository_dispatch. podium publish renders the marketplace
+    tree and pushes it to a git remote the harness imports.
+  -->
+  <defs>
+    <marker id="b-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M 0 0 L 11 6 L 0 12 z" fill="#1f2933"/>
+    </marker>
+    <marker id="b-arrow-coral" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M 0 0 L 11 6 L 0 12 z" fill="#c84a1d"/>
+    </marker>
+    <style>
+      .b-bg { fill: #ffffff; }
+      .b-card { fill: #fffaf0; stroke: #1f2933; stroke-width: 2.2; }
+      .b-card-primary { fill: #ffe9c7; stroke: #1f2933; stroke-width: 2.4; }
+      .b-card-accent { fill: #d6e9d2; stroke: #1f2933; stroke-width: 2.2; }
+      .b-card-event { fill: #fde2d6; stroke: #c84a1d; stroke-width: 2.2; }
+      .b-title { font-size: 22px; fill: #1f2933; }
+      .b-label { font-size: 14px; fill: #b56b1f; letter-spacing: 0.04em; }
+      .b-name { font-size: 18px; fill: #1f2933; }
+      .b-sub { font-size: 14px; fill: #54616e; }
+      .b-mono { font-size: 13px; fill: #1f2933; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
+      .b-line { fill: none; stroke: #1f2933; stroke-width: 2.4; stroke-linecap: round; }
+      .b-line-coral { fill: none; stroke: #c84a1d; stroke-width: 2.2; stroke-linecap: round; stroke-dasharray: 6 5; }
+      .b-foot { font-size: 13px; fill: #8a7755; }
+    </style>
+  </defs>
+
+  <rect class="b-bg" width="1080" height="620"/>
+
+  <text class="b-title" x="30" y="40">Publish flow</text>
+
+  <!-- Row 1: source change -> registry -> event -->
+  <rect class="b-card" x="30" y="64" width="220" height="80" rx="8"/>
+  <text class="b-label" x="48" y="90">SOURCE</text>
+  <text class="b-name" x="48" y="114">Source change</text>
+  <text class="b-sub" x="48" y="134">git push to a layer source</text>
+
+  <path class="b-line" d="M 250 104 L 304 104" marker-end="url(#b-arrow)"/>
+
+  <rect class="b-card-primary" x="308" y="64" width="220" height="80" rx="8"/>
+  <text class="b-label" x="326" y="90">REGISTRY</text>
+  <text class="b-name" x="326" y="114">Ingest cycle</text>
+  <text class="b-sub" x="326" y="134">emits one event per cycle</text>
+
+  <path class="b-line-coral" d="M 528 104 L 596 104" marker-end="url(#b-arrow-coral)"/>
+
+  <rect class="b-card-event" x="600" y="64" width="220" height="80" rx="8"/>
+  <text class="b-mono" x="618" y="100">layer.ingested</text>
+  <text class="b-sub" x="618" y="124">one source commit</text>
+  <text class="b-sub" x="618" y="142">yields one publish</text>
+
+  <!-- T-junction from event down to the two triggers -->
+  <path class="b-line" d="M 710 144 L 710 178"/>
+  <path class="b-line" d="M 200 178 L 710 178"/>
+  <path class="b-line" d="M 200 178 L 200 218" marker-end="url(#b-arrow)"/>
+  <path class="b-line" d="M 700 178 L 700 218" marker-end="url(#b-arrow)"/>
+
+  <!-- Pattern A: scheduled -->
+  <rect class="b-card" x="60" y="222" width="280" height="86" rx="8"/>
+  <text class="b-label" x="78" y="248">PATTERN A</text>
+  <text class="b-name" x="78" y="272">Scheduled CI job</text>
+  <text class="b-sub" x="78" y="294">GitHub Actions cron; no receiver</text>
+
+  <!-- Pattern B: receiver -> relay -> dispatch -->
+  <rect class="b-card" x="560" y="222" width="280" height="86" rx="8"/>
+  <text class="b-label" x="578" y="248">PATTERN B</text>
+  <text class="b-name" x="578" y="272">Receiver</text>
+  <text class="b-sub" x="578" y="294">filtered to layer.ingested</text>
+
+  <path class="b-line-coral" d="M 700 308 L 700 338" marker-end="url(#b-arrow-coral)"/>
+
+  <rect class="b-card" x="560" y="342" width="280" height="86" rx="8"/>
+  <text class="b-name" x="578" y="372">Relay</text>
+  <text class="b-sub" x="578" y="394">verifies HMAC, then calls</text>
+  <text class="b-mono" x="578" y="414">POST /repos/&lt;owner&gt;/&lt;repo&gt;/dispatches</text>
+
+  <!-- Both triggers converge on podium publish -->
+  <path class="b-line" d="M 200 308 L 200 470 L 416 470" marker-end="url(#b-arrow)"/>
+  <path class="b-line" d="M 700 428 L 700 470 L 664 470" marker-end="url(#b-arrow)"/>
+
+  <rect class="b-card-primary" x="420" y="438" width="240" height="120" rx="10"/>
+  <text class="b-label" x="438" y="464">podium publish</text>
+  <text class="b-name" x="438" y="490">prepare (clone)</text>
+  <text class="b-name" x="438" y="514">render (Podium)</text>
+  <text class="b-name" x="438" y="538">publish (push)</text>
+
+  <path class="b-line" d="M 660 498 L 724 498" marker-end="url(#b-arrow)"/>
+
+  <rect class="b-card-accent" x="728" y="438" width="240" height="120" rx="10"/>
+  <text class="b-label" x="746" y="464">GIT REMOTE</text>
+  <text class="b-name" x="746" y="492">Marketplace repo</text>
+  <text class="b-sub" x="746" y="516">the harness imports it</text>
+  <text class="b-sub" x="746" y="536">through its install path</text>
+
+  <text class="b-foot" x="30" y="592">The receiver cannot call GitHub's dispatch endpoint directly because the HMAC-signed receiver body differs, so a relay verifies the HMAC and issues the dispatch.</text>
+  <text class="b-foot" x="30" y="610">Pattern A polls on a cron, and Pattern B relays the event. Both run the same podium publish pipeline.</text>
+</svg>

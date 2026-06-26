@@ -13,7 +13,9 @@ Podium has two main parts:
 - A **registry**: the system of record for artifacts.
 - **Consumers**: components that read from the registry. Built-in
   consumers include language SDKs, the MCP server, and `podium sync`.
-  Custom consumers can build against the HTTP API.
+  `podium publish` is a derived, served output that renders
+  marketplace repositories from the same effective view. Custom
+  consumers can build against the HTTP API.
 
 The registry can be reached as a Podium server (single binary or
 multi-tenant deployment) or as a local filesystem path. Most
@@ -126,6 +128,7 @@ For server-source deployments:
 | Vector backend   | Hybrid retrieval                                                                                                               | `pgvector` and `sqlite-vec` collocate with the metadata store; managed alternatives include Pinecone, Weaviate Cloud, Qdrant Cloud |
 | MCP server       | In-process bridge for MCP-speaking hosts; runs the harness adapter at materialization time                                     | Spawned as a stdio subprocess by the host (Claude Code, Cursor, etc.), one per workspace                                           |
 | `podium sync`    | Eager filesystem materialization; one-shot or watcher                                                                          | Developer machines, CI runners, build pipelines                                                                                    |
+| `podium publish` | Renders marketplace repositories and runs an operator-configured git workflow to push them                                     | Operator machines and CI runners                                                                                                   |
 | Language SDKs    | Programmatic HTTP clients                                                                                                      | Wherever your code runs: LangChain, Bedrock, OpenAI Assistants, custom orchestrators, eval harnesses                               |
 
 The MCP server, `podium sync`, and the language SDKs share the same
@@ -275,6 +278,65 @@ server resolves those URLs and writes every resource to disk, so the agent's
 result holds the manifest body and the file paths. The SDKs return the
 manifest in memory and resolve the references on a later `materialize()`
 call.
+
+---
+
+## Marketplace publishing
+
+`podium publish` is a further output path. It reads the publishing
+identity's effective view over the same HTTP API, renders each
+harness's git-repo distribution (a plugin marketplace, extension,
+package, or tap), and runs an operator-configured workflow that
+clones, commits, and pushes the result to a git remote. A harness
+then imports the published repository through its own install path.
+The CI trigger is the `layer.ingested` webhook event, so one source
+commit yields one publish.
+
+![Publish flow: a source change ingests into the registry, which emits layer.ingested; a CI job (scheduled, or relayed through a receiver and repository_dispatch) runs podium publish, which renders the marketplace tree and pushes it to a git remote that the harness imports.](../assets/diagrams/publish-flow.svg)
+
+<!--
+ASCII fallback for the diagram above (publish flow):
+
+  source change                registry
+    git push to a    ====>      ingest cycle      ===(layer.ingested)==>  trigger
+    layer source                emits one event                           (one of two)
+                                                                              |
+       +----------------------------------------------------------------------+
+       |                                                                      |
+  Pattern A (scheduled)                                Pattern B (event relay)
+  +---------------------+                              +---------------------------+
+  | GitHub Actions cron |                              | receiver (layer.ingested) |
+  +----------+----------+                              +-------------+-------------+
+             |                                                       |
+             |                                          verify HMAC, POST dispatches
+             |                                                       v
+             |                                          +---------------------------+
+             |                                          | relay ===> repository_    |
+             |                                          | dispatch ===> CI job      |
+             |                                          +-------------+-------------+
+             |                                                       |
+             +-----------------------------+-------------------------+
+                                           v
+                                +---------------------+
+                                | podium publish      |
+                                |  prepare (clone)    |
+                                |  render (Podium)    |
+                                |  publish (push)     |
+                                +----------+----------+
+                                           v
+                                +---------------------+        +-------------------+
+                                | git remote          | =====> | harness imports   |
+                                | marketplace repo    | import | the marketplace   |
+                                +---------------------+        +-------------------+
+
+  The receiver cannot call GitHub's dispatch endpoint directly because the
+  HMAC-signed receiver body differs, so a relay verifies the HMAC and issues
+  POST /repos/<owner>/<repo>/dispatches.
+-->
+
+See [Consuming → Marketplace publishing](../consuming/publishing) for
+the model, the `publish.yaml` schema, and the worked GitHub Actions
+patterns.
 
 ---
 
