@@ -250,7 +250,7 @@ func TestPlanMultiTarget_PerEntryScope(t *testing.T) {
 			{ID: "codex", Harness: "codex", Target: "/out/codex", Include: []string{"shared/runbooks/**"}},
 		},
 	}
-	plans, err := sync.PlanMultiTarget(cfg, "", "/ws")
+	plans, err := sync.PlanMultiTarget(cfg, sync.PlanInput{Workspace: "/ws"})
 	if err != nil {
 		t.Fatalf("PlanMultiTarget: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestPlanMultiTarget_UnknownProfileErrors(t *testing.T) {
 		Defaults: sync.Defaults{Registry: "https://reg"},
 		Targets:  []sync.TargetEntry{{ID: "x", Target: "/out", Profile: "ghost"}},
 	}
-	_, err := sync.PlanMultiTarget(cfg, "", "/ws")
+	_, err := sync.PlanMultiTarget(cfg, sync.PlanInput{Workspace: "/ws"})
 	if !errors.Is(err, sync.ErrProfileNotFound) {
 		t.Fatalf("got %v, want ErrProfileNotFound", err)
 	}

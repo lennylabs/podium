@@ -418,7 +418,10 @@ func runMultiTargetSync(configPath, registryOverride string, dryRun, asJSON bool
 		return 2
 	}
 	workspace := filepath.Dir(filepath.Dir(configPath))
-	plans, err := sync.PlanMultiTarget(cfg, registryOverride, workspace)
+	plans, err := sync.PlanMultiTarget(cfg, sync.PlanInput{
+		RegistryOverride: registryOverride,
+		Workspace:        workspace,
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 2
