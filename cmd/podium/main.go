@@ -522,7 +522,11 @@ func runWorkspaceTarget(ctx context.Context, p sync.MultiTargetPlan, cacheMode s
 		printHuman(res, dryRun)
 	}
 	if runWorkflow {
-		vars["PODIUM_CHANGED"] = strconv.FormatBool(len(res.Artifacts) > 0)
+		// $PODIUM_CHANGED reflects whether the sync altered the target tree
+		// (§7.5.2, Decision 3), so a skip_if_no_changes publish command skips a
+		// re-sync that wrote no delta. res.Changed is the on-disk diff against the
+		// prior lock, the workspace analog of the marketplace render's Changed.
+		vars["PODIUM_CHANGED"] = strconv.FormatBool(res.Changed)
 		if err := runner.Phase(ctx, "publish", p.Workflow.Publish, vars, p.Workflow.PublishOnError); err != nil {
 			return err
 		}
@@ -550,6 +554,15 @@ func runMarketplaceTarget(ctx context.Context, p sync.MultiTargetPlan, dryRun, c
 		Plugins:       p.Plugins,
 		Workflow:      p.Workflow,
 	}
+	// Decision 4 / §7.5.2: the target: directory is the working directory the
+	// prepare phase checks out into and the publish phase pushes from, so a live
+	// render and its workflow operate there rather than in an allocated temp
+	// directory. A --dry-run still renders into a temp directory (resolveWorkdir
+	// ignores Workdir when DryRun is set) so the preview never touches it.
+	workdir, err := filepath.Abs(p.Target)
+	if err != nil {
+		return err
+	}
 	// §7.8: a live render fetches the publishing identity's effective view from a
 	// server-source registry, so it carries that identity's registry credential.
 	// --check renders nothing, so it needs no token.
@@ -558,12 +571,13 @@ func runMarketplaceTarget(ctx context.Context, p sync.MultiTargetPlan, dryRun, c
 		token = readPublishToken(out.Registry)
 	}
 	res, err := sync.RunMarketplace(ctx, sync.RunOptions{
-		Output: out,
-		Token:  token,
-		DryRun: dryRun,
-		Check:  check,
-		Stdout: marketplaceStdout(asJSON),
-		Stderr: os.Stderr,
+		Output:  out,
+		Token:   token,
+		Workdir: workdir,
+		DryRun:  dryRun,
+		Check:   check,
+		Stdout:  marketplaceStdout(asJSON),
+		Stderr:  os.Stderr,
 	})
 	if err != nil {
 		return err

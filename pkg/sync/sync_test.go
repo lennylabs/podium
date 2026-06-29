@@ -152,6 +152,67 @@ func TestRun_DryRunWritesNothing(t *testing.T) {
 	}
 }
 
+// §7.5.2 $PODIUM_CHANGED: Result.Changed reports whether a sync altered the
+// target tree relative to the prior lock. A first sync into an empty target
+// changes the tree, a re-sync of the unchanged registry does not, and editing an
+// artifact changes it again. A DryRun run writes nothing, so it leaves Changed
+// false. The workspace workflow reads this so a skip_if_no_changes command skips
+// a re-sync that wrote no delta.
+func TestRun_ChangedTracksOnDiskDelta(t *testing.T) {
+	t.Parallel()
+	registry := t.TempDir()
+	target := t.TempDir()
+	testharness.WriteTree(t, registry,
+		testharness.WriteTreeOption{Path: "company-glossary/ARTIFACT.md", Content: contextArtifactSrc},
+	)
+
+	first, err := Run(Options{RegistryPath: registry, Target: target, AdapterID: "none"})
+	if err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	if !first.Changed {
+		t.Errorf("first sync into an empty target must report Changed=true")
+	}
+
+	second, err := Run(Options{RegistryPath: registry, Target: target, AdapterID: "none"})
+	if err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	if second.Changed {
+		t.Errorf("re-sync of an unchanged registry must report Changed=false")
+	}
+
+	// A DryRun resolves the artifact set without writing, so it reports no change.
+	dry, err := Run(Options{RegistryPath: registry, Target: target, AdapterID: "none", DryRun: true})
+	if err != nil {
+		t.Fatalf("dry Run: %v", err)
+	}
+	if dry.Changed {
+		t.Errorf("a dry run writes nothing, so it must report Changed=false")
+	}
+
+	// Editing the artifact changes the materialized content, so the next sync
+	// reports Changed=true again.
+	edited := `---
+type: context
+version: 1.0.1
+description: glossary edited
+---
+
+Glossary body edited.
+`
+	testharness.WriteTree(t, registry,
+		testharness.WriteTreeOption{Path: "company-glossary/ARTIFACT.md", Content: edited},
+	)
+	third, err := Run(Options{RegistryPath: registry, Target: target, AdapterID: "none"})
+	if err != nil {
+		t.Fatalf("third Run: %v", err)
+	}
+	if !third.Changed {
+		t.Errorf("re-sync after editing an artifact must report Changed=true")
+	}
+}
+
 // Spec: §6.7 — Run uses the "none" adapter by default when AdapterID is
 // empty.
 func TestRun_DefaultAdapterIsNone(t *testing.T) {

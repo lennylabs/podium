@@ -33,6 +33,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -163,9 +164,13 @@ func gitEnv() []string {
 // writeSyncConfigMarketplace writes a sync.yaml under <workspace>/.podium/ that
 // declares one `kind: marketplace` target. registry is a filesystem path or a
 // server URL, and remote is the bare repo the workflow clones, commits to, and
-// pushes. The workflow uses real git argv commands: prepare clones the branch
-// into $PODIUM_WORKDIR, and publish adds, commits (skipped when the render
-// produced no diff), and pushes. The function returns the config path.
+// pushes. The render and the workflow operate in the configured target:
+// directory (Decision 4 / §7.5.2), which persists across runs, so the prepare
+// phase clones it on a first run and refreshes it on a re-run: it clones into
+// $PODIUM_WORKDIR when the directory holds no git checkout, otherwise it fetches
+// and hard-resets to the remote branch. The publish phase adds, commits (skipped
+// when the render produced no diff), and pushes. The function returns the config
+// path.
 func writeSyncConfigMarketplace(t *testing.T, workspace, registry, remote, harnesses string) string {
 	t.Helper()
 	dir := filepath.Join(workspace, ".podium")
@@ -174,6 +179,15 @@ func writeSyncConfigMarketplace(t *testing.T, workspace, registry, remote, harne
 	}
 	path := filepath.Join(dir, "sync.yaml")
 	workdir := filepath.Join(workspace, "build", "acme-agents")
+	// An idempotent prepare for a persistent target: clone on a first run, fetch
+	// and reset on a re-run. Written as one sh: command so the conditional stays
+	// in the operator's shell rather than in Podium.
+	prepare := `if [ -d "$PODIUM_WORKDIR/.git" ]; then ` +
+		`git -C "$PODIUM_WORKDIR" fetch origin "$PODIUM_GIT_BRANCH" && ` +
+		`git -C "$PODIUM_WORKDIR" reset --hard "origin/$PODIUM_GIT_BRANCH"; ` +
+		`else ` +
+		`git clone --branch "$PODIUM_GIT_BRANCH" "$PODIUM_GIT_REMOTE" "$PODIUM_WORKDIR"; ` +
+		`fi`
 	body := "" +
 		"defaults:\n" +
 		"  registry: " + registry + "\n" +
@@ -194,7 +208,7 @@ func writeSyncConfigMarketplace(t *testing.T, workspace, registry, remote, harne
 		"        include: [\"payment-helpers/**\"]\n" +
 		"    workflow:\n" +
 		"      prepare:\n" +
-		"        - run: [\"git\", \"clone\", \"--branch\", \"$PODIUM_GIT_BRANCH\", \"$PODIUM_GIT_REMOTE\", \"$PODIUM_WORKDIR\"]\n" +
+		"        - sh: " + strconv.Quote(prepare) + "\n" +
 		"      publish:\n" +
 		"        - run: [\"git\", \"-C\", \"$PODIUM_WORKDIR\", \"add\", \"-A\"]\n" +
 		"        - run: [\"git\", \"-C\", \"$PODIUM_WORKDIR\", \"commit\", \"-m\", \"$PODIUM_COMMIT_MESSAGE\"]\n" +
@@ -311,6 +325,15 @@ func TestPublishing_MarketplaceTargetRendersAndPushes(t *testing.T) {
 
 	if n := remoteCommitCount(t, remote); n != base+1 {
 		t.Fatalf("remote commit count = %d, want %d (one publish commit) after first sync", n, base+1)
+	}
+
+	// Decision 4 / §7.5.2: the render and the workflow checkout land in the
+	// configured target: directory (<ws>/build/acme-agents) rather than an
+	// allocated temp directory. The directory survives the run (the operator owns
+	// it), and it carries the rendered marketplace manifest the workflow committed.
+	targetDir := filepath.Join(ws, "build", "acme-agents")
+	if _, err := os.Stat(filepath.Join(targetDir, ".claude-plugin", "marketplace.json")); err != nil {
+		t.Errorf("rendered tree did not land in the configured target: dir %s: %v", targetDir, err)
 	}
 
 	tree := remoteTree(t, remote)
@@ -433,6 +456,12 @@ func TestPublishing_DryRunPrintsCommandsWritesNothing(t *testing.T) {
 	if n := remoteCommitCount(t, remote); n != base {
 		t.Errorf("dry-run pushed to the remote: commit count = %d, want %d (unchanged)", n, base)
 	}
+	// A --dry-run renders into a temp directory and never touches the configured
+	// target: directory, so the target directory is not created.
+	targetDir := filepath.Join(ws, "build", "acme-agents")
+	if _, err := os.Stat(targetDir); !os.IsNotExist(err) {
+		t.Errorf("dry-run wrote the configured target: dir %s (stat err=%v); a dry run renders into a temp dir", targetDir, err)
+	}
 
 	// --dry-run --json emits the structured envelope on stdout (the command
 	// preview goes to stderr): one entry per target with the changed flag, the
@@ -532,6 +561,40 @@ func TestPublishing_WorkspaceTargetRunsWorkflow(t *testing.T) {
 	pubMarker := filepath.Join(ws, "publish-ran")
 	if _, err := os.Stat(pubMarker); err != nil {
 		t.Errorf("publish workflow command did not run (no marker): %v", err)
+	}
+}
+
+// A kind: workspace target whose publish command declares skip_if_no_changes
+// skips the command on a re-sync that wrote no delta (Decision 3, §7.5.2
+// $PODIUM_CHANGED). The first sync into an empty target changes the tree, so the
+// publish command runs; the second sync against the unchanged catalog writes no
+// file, so $PODIUM_CHANGED is false and the command is skipped. The publish
+// command appends a line to a counter file, so the file carries one line after
+// two syncs and the second run reports "skipped (no changes)".
+func TestPublishing_WorkspaceTargetSkipIfNoChanges(t *testing.T) {
+	t.Parallel()
+	reg := writePublishRegistry(t)
+	ws := t.TempDir()
+	target := filepath.Join(ws, "out", "claude")
+	counter := filepath.Join(ws, "publish-count")
+	cfg := writeSyncConfigWorkspaceSkipWorkflow(t, ws, reg, target, counter)
+
+	if r := runPodium(t, "", nil, "sync", "--config", cfg); r.Exit != 0 {
+		t.Fatalf("first sync exit=%d\nstdout=%s\nstderr=%s", r.Exit, r.Stdout, r.Stderr)
+	}
+	if n := countLines(t, counter); n != 1 {
+		t.Fatalf("after first sync publish-count = %d, want 1 (the publish command ran)", n)
+	}
+
+	r2 := runPodium(t, "", nil, "sync", "--config", cfg)
+	if r2.Exit != 0 {
+		t.Fatalf("second sync exit=%d\nstdout=%s\nstderr=%s", r2.Exit, r2.Stdout, r2.Stderr)
+	}
+	if n := countLines(t, counter); n != 1 {
+		t.Errorf("after re-sync of an unchanged catalog publish-count = %d, want 1 (skip_if_no_changes suppressed the publish command)", n)
+	}
+	if !strings.Contains(r2.Stderr, "skipped (no changes)") {
+		t.Errorf("second sync stderr missing 'skipped (no changes)':\n%s", r2.Stderr)
 	}
 }
 
@@ -848,6 +911,49 @@ func writeSyncConfigWorkspaceWorkflow(t *testing.T, workspace, registry, target 
 		t.Fatalf("write sync.yaml: %v", err)
 	}
 	return path
+}
+
+// writeSyncConfigWorkspaceSkipWorkflow writes a sync.yaml whose kind: workspace
+// target carries a publish command that appends a line to counter and declares
+// skip_if_no_changes. The command therefore runs only when the sync altered the
+// target tree, so the counter records one append per changed sync.
+func writeSyncConfigWorkspaceSkipWorkflow(t *testing.T, workspace, registry, target, counter string) string {
+	t.Helper()
+	dir := filepath.Join(workspace, ".podium")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir .podium: %v", err)
+	}
+	path := filepath.Join(dir, "sync.yaml")
+	body := "" +
+		"defaults:\n" +
+		"  registry: " + registry + "\n" +
+		"targets:\n" +
+		"  - id: claude-workspace\n" +
+		"    kind: workspace\n" +
+		"    harness: claude-code\n" +
+		"    target: " + target + "\n" +
+		"    workflow:\n" +
+		"      publish:\n" +
+		"        - sh: \"echo changed >> " + counter + "\"\n" +
+		"          skip_if_no_changes: true\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write sync.yaml: %v", err)
+	}
+	return path
+}
+
+// countLines returns the number of newline-terminated lines in the file at path,
+// or 0 when the file does not exist.
+func countLines(t *testing.T, path string) int {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return 0
+	}
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return strings.Count(string(b), "\n")
 }
 
 // newEffectiveViewStub returns an httptest server that serves the §7.5 sync HTTP

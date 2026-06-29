@@ -154,6 +154,15 @@ type Result struct {
 	// server-source registry and left the existing materialized output in
 	// place. Callers surface it as the offline status hosts can present.
 	Offline bool
+	// Changed reports whether this run altered the materialized tree relative
+	// to the prior lock: a path written with a different content hash, an added
+	// path, or a removed (stale-cleaned) path. It is the workspace analog of the
+	// marketplace render's RenderResult.Changed and feeds the $PODIUM_CHANGED
+	// variable a kind: workspace target's workflow reads (§7.5.2, Decision 3), so
+	// a skip_if_no_changes publish command skips a re-sync that wrote no delta. A
+	// DryRun run reports the artifact set without writing, so it leaves Changed
+	// false.
+	Changed bool
 }
 
 // ArtifactResult is one artifact's contribution to the materialized output.
@@ -357,6 +366,11 @@ func Run(opts Options) (*Result, error) {
 			})
 		}
 	}
+	// §7.5.2 $PODIUM_CHANGED: a workspace workflow reads whether the sync altered
+	// the target tree, so compare the new materialized path->hash set against the
+	// prior lock's. A skip_if_no_changes publish command then skips a re-sync that
+	// rewrote no file.
+	res.Changed = lockChanged(priorLock, lock)
 	if err := WriteLock(opts.Target, lock); err != nil {
 		// Lock write failure is non-fatal; the sync already
 		// completed. Operators see the warning via the returned
@@ -561,6 +575,41 @@ func lockMergeKinds(lock *LockFile) map[string]string {
 	for _, a := range lock.Artifacts {
 		if a.MaterializedPath != "" {
 			out[a.MaterializedPath] = a.Merge
+		}
+	}
+	return out
+}
+
+// lockChanged reports whether the new lock's materialized set differs from the
+// prior lock's: a path present in one and absent from the other, or a path whose
+// recorded content hash changed. It feeds Result.Changed and the workspace
+// workflow's $PODIUM_CHANGED. A nil prior lock (a first sync into an empty
+// target) is treated as changed whenever the new lock materialized anything, and
+// as unchanged when both are empty.
+func lockChanged(prior, next *LockFile) bool {
+	priorHashes := lockPathHashes(prior)
+	nextHashes := lockPathHashes(next)
+	if len(priorHashes) != len(nextHashes) {
+		return true
+	}
+	for path, hash := range nextHashes {
+		if priorHashes[path] != hash {
+			return true
+		}
+	}
+	return false
+}
+
+// lockPathHashes returns the materialized paths recorded in a lock, each mapped
+// to its content hash. A nil lock returns an empty map.
+func lockPathHashes(lock *LockFile) map[string]string {
+	out := map[string]string{}
+	if lock == nil {
+		return out
+	}
+	for _, a := range lock.Artifacts {
+		if a.MaterializedPath != "" {
+			out[a.MaterializedPath] = a.ContentHash
 		}
 	}
 	return out
