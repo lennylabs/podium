@@ -34,6 +34,12 @@ type Defaults struct {
 	Harness  string `yaml:"harness,omitempty"`
 	Target   string `yaml:"target,omitempty"`
 	Profile  string `yaml:"profile,omitempty"`
+	// Identity is the §4.6 effective-view principal a `kind: marketplace`
+	// target inherits when it declares none of its own (§7.5.2). It is the
+	// publishing identity whose visibility defines what reaches a public
+	// marketplace; a `kind: workspace` target renders under the caller's own
+	// identity and ignores it.
+	Identity string `yaml:"identity,omitempty"`
 	// VerifySignatures is the consumer-side §4.7.9 signature-verification
 	// policy (never | medium-and-above | always). A standalone deployment
 	// writes `never` here on first run so consumers relax the default without
@@ -61,15 +67,34 @@ type Profile struct {
 	MinServerVersion string `yaml:"min_server_version,omitempty"`
 }
 
-// TargetEntry is one entry under `targets:` (multi-target mode).
+// TargetEntry is one entry under `targets:` (multi-target mode). Kind selects
+// the output format (§7.5.2): "workspace" (the default, an empty value)
+// materializes the project-files layout the harness reads, and "marketplace"
+// renders the git-repo distribution layout (§7.8). A `kind: workspace` entry
+// carries the harness, the target directory, and the scope fields (Profile,
+// Include, Exclude, Type). A `kind: marketplace` entry carries the harness set
+// (Harnesses), the git remote and branch (Git), the commit message, the plugin
+// list, and the publishing identity. Both kinds may carry a Workflow.
 type TargetEntry struct {
 	ID      string   `yaml:"id"`
+	Kind    string   `yaml:"kind,omitempty"`
 	Harness string   `yaml:"harness,omitempty"`
 	Target  string   `yaml:"target,omitempty"`
 	Profile string   `yaml:"profile,omitempty"`
 	Include []string `yaml:"include,omitempty"`
 	Exclude []string `yaml:"exclude,omitempty"`
 	Type    []string `yaml:"type,omitempty"`
+
+	// Marketplace fields (valid only on a `kind: marketplace` entry, §7.5.2).
+	Harnesses     []string       `yaml:"harnesses,omitempty"`
+	Git           GitRemote      `yaml:"git,omitempty"`
+	CommitMessage string         `yaml:"commit_message,omitempty"`
+	Identity      string         `yaml:"identity,omitempty"`
+	Plugins       []PluginFilter `yaml:"plugins,omitempty"`
+
+	// Workflow is the per-target prepare/publish command lists, available to
+	// either kind (§7.5.2).
+	Workflow Workflow `yaml:"workflow,omitempty"`
 }
 
 // ConfigPath returns the canonical path to a workspace's sync.yaml.
