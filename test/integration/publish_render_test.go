@@ -3,27 +3,28 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/lennylabs/podium/pkg/publish"
 	"github.com/lennylabs/podium/pkg/registry/server"
+	"github.com/lennylabs/podium/pkg/sync"
 )
 
-// Spec: §7.8 — `podium publish` renders the publishing identity's effective view
-// (read over the same HTTP API podium sync uses) into a multi-harness marketplace
-// repository. This integration test runs a real registry in-process (the shared
-// bootstrap the standalone server uses), points the §7.8 render at it as a
-// server source, and asserts the multi-harness layout, the once-per-plugin
-// manifest entry for a multi-artifact plugin, idempotent re-render, and the
-// change set on a dropped artifact.
+// Spec: §7.8 — a kind: marketplace target renders the publishing identity's
+// effective view (read over the same HTTP API podium sync uses) into a
+// multi-harness marketplace repository. This integration test runs a real
+// registry in-process (the shared bootstrap the standalone server uses), points
+// the §7.8 render at it as a server source, and asserts the multi-harness
+// layout, the once-per-plugin manifest entry for a multi-artifact plugin,
+// idempotent re-render, and the change set on a dropped artifact.
 //
-// The render reaches the registry over HTTP through pkg/sync.FetchRecords, so the
-// test exercises the server-source record-fetch path publish reuses, not the
-// filesystem shortcut the pkg/publish unit tests use.
+// The render reaches the registry over HTTP through sync.FetchRecords, so the
+// test exercises the server-source record-fetch path the marketplace render
+// reuses, not the filesystem shortcut the pkg/sync unit tests use.
 func TestPublishRender_ServerSourceMultiHarness(t *testing.T) {
 	t.Parallel()
 	dir := referenceRegistryPath(t)
@@ -35,12 +36,12 @@ func TestPublishRender_ServerSourceMultiHarness(t *testing.T) {
 	t.Cleanup(ts.Close)
 
 	workdir := t.TempDir()
-	opts := publish.RenderOptions{
+	opts := sync.RenderOptions{
 		OutputID:  "acme-agents",
 		Registry:  ts.URL,
 		Workdir:   workdir,
 		Harnesses: []string{"claude-code", "codex", "cursor"},
-		Plugins: []publish.PluginFilter{
+		Plugins: []sync.PluginFilter{
 			// finance-pack bundles two artifacts: finance/ap/pay-invoice (agent)
 			// and finance/close/run-variance (skill).
 			{Name: "finance-pack", Include: []string{"finance/**"}},
@@ -49,7 +50,7 @@ func TestPublishRender_ServerSourceMultiHarness(t *testing.T) {
 		},
 	}
 
-	res, err := publish.Render(context.Background(), opts)
+	res, err := sync.Render(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -86,7 +87,7 @@ func TestPublishRender_ServerSourceMultiHarness(t *testing.T) {
 
 	// Idempotent re-render: a second render against the unchanged registry
 	// produces the identical tree and reports no change.
-	second, err := publish.Render(context.Background(), opts)
+	second, err := sync.Render(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("second Render: %v", err)
 	}
@@ -114,16 +115,16 @@ func TestPublishRender_ChangedFalseOnFreshCheckout(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
-	plugins := []publish.PluginFilter{{Name: "finance-pack", Include: []string{"finance/**"}}}
+	plugins := []sync.PluginFilter{{Name: "finance-pack", Include: []string{"finance/**"}}}
 	source := t.TempDir()
-	opts := publish.RenderOptions{
+	opts := sync.RenderOptions{
 		OutputID:  "acme-agents",
 		Registry:  ts.URL,
 		Workdir:   source,
 		Harnesses: []string{"claude-code", "codex"},
 		Plugins:   plugins,
 	}
-	if _, err := publish.Render(context.Background(), opts); err != nil {
+	if _, err := sync.Render(context.Background(), opts); err != nil {
 		t.Fatalf("first Render: %v", err)
 	}
 
@@ -142,7 +143,7 @@ func TestPublishRender_ChangedFalseOnFreshCheckout(t *testing.T) {
 		t.Fatalf("fresh checkout must carry no sync.lock: stat err=%v", err)
 	}
 
-	res, err := publish.Render(context.Background(), publish.RenderOptions{
+	res, err := sync.Render(context.Background(), sync.RenderOptions{
 		OutputID:  opts.OutputID,
 		Registry:  ts.URL,
 		Workdir:   checkout,
@@ -170,16 +171,16 @@ func TestPublishRender_StaleCleanupAndChangeSet(t *testing.T) {
 	copyTree(t, src, reg)
 
 	workdir := t.TempDir()
-	plugins := []publish.PluginFilter{{Name: "finance-pack", Include: []string{"finance/**"}}}
+	plugins := []sync.PluginFilter{{Name: "finance-pack", Include: []string{"finance/**"}}}
 
-	render := func() *publish.RenderResult {
+	render := func() *sync.RenderResult {
 		srv, err := server.NewFromFilesystem(reg)
 		if err != nil {
 			t.Fatalf("NewFromFilesystem: %v", err)
 		}
 		ts := httptest.NewServer(srv.Handler())
 		defer ts.Close()
-		res, err := publish.Render(context.Background(), publish.RenderOptions{
+		res, err := sync.Render(context.Background(), sync.RenderOptions{
 			OutputID:  "acme-agents",
 			Registry:  ts.URL,
 			Workdir:   workdir,
@@ -212,6 +213,66 @@ func TestPublishRender_StaleCleanupAndChangeSet(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(workdir, "claude", "finance-pack", "agents", "pay-invoice.md")); err != nil {
 		t.Errorf("pay-invoice agent should survive: %v", err)
+	}
+}
+
+// Spec: §7.8 — sync.RunMarketplace drives the prepare->render->publish pipeline
+// for a kind: marketplace target against a server-source registry. This
+// integration test runs the runner against the in-process registry with operator
+// commands that touch marker files, asserting the render populated the supplied
+// working directory, the operator publish phase ran, and the change-driven
+// $PODIUM_CHANGED variable reached the workflow.
+func TestPublishRunMarketplace_ServerSourceWorkflow(t *testing.T) {
+	t.Parallel()
+	dir := referenceRegistryPath(t)
+	srv, err := server.NewFromFilesystem(dir)
+	if err != nil {
+		t.Fatalf("NewFromFilesystem: %v", err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	workdir := t.TempDir()
+	out := sync.ResolvedOutput{
+		ID:        "acme-agents",
+		Registry:  ts.URL,
+		Identity:  "publisher@acme.com",
+		Git:       sync.GitRemote{Remote: "git@example.com:acme/agents.git", Branch: "main"},
+		Harnesses: []string{"claude-code"},
+		Plugins:   []sync.PluginFilter{{Name: "finance-pack", Include: []string{"finance/**"}}},
+		Workflow: sync.Workflow{
+			Publish: []sync.Command{
+				{Sh: `printf 'changed=%s\n' "$PODIUM_CHANGED" >> "$PODIUM_WORKDIR/published"`},
+			},
+		},
+	}
+
+	res, err := sync.RunMarketplace(context.Background(), sync.RunOptions{
+		Output:  out,
+		Workdir: workdir,
+		Stdout:  io.Discard,
+		Stderr:  io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("RunMarketplace: %v", err)
+	}
+	if !res.Published {
+		t.Errorf("a live run must report Published=true")
+	}
+	if res.Render == nil || !res.Render.Changed {
+		t.Errorf("the first render against a server source must report Changed=true: %+v", res.Render)
+	}
+	// The render populated the supplied working directory.
+	if _, err := os.Stat(filepath.Join(workdir, ".claude-plugin", "marketplace.json")); err != nil {
+		t.Errorf("the render must populate the supplied working directory: %v", err)
+	}
+	// The operator publish command ran and saw the change-driven variable.
+	body, err := os.ReadFile(filepath.Join(workdir, "published"))
+	if err != nil {
+		t.Fatalf("the operator publish command must run: %v", err)
+	}
+	if !strings.Contains(string(body), "changed=true") {
+		t.Errorf("the publish command must see $PODIUM_CHANGED=true, got %q", body)
 	}
 }
 

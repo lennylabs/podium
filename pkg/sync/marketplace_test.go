@@ -170,9 +170,9 @@ func TestValidateOutput_RejectsNonPublishHarness(t *testing.T) {
 	for _, h := range []string{"opencode", "none", "unknown-harness"} {
 		t.Run(h, func(t *testing.T) {
 			out := ResolvedOutput{ID: "bad", Harnesses: []string{"claude-code", h}}
-			err := validateOutput(out)
+			err := ValidateOutput(out)
 			if err == nil {
-				t.Fatalf("validateOutput with harness %q = nil error, want config.invalid", h)
+				t.Fatalf("ValidateOutput with harness %q = nil error, want config.invalid", h)
 			}
 			if !errors.Is(err, ErrConfigInvalid) {
 				t.Errorf("validateOutput error = %v, want errors.Is ErrConfigInvalid", err)
@@ -189,8 +189,8 @@ func TestValidateOutput_AcceptsPublishHarnesses(t *testing.T) {
 		ID:        "ok",
 		Harnesses: []string{"claude-code", "codex", "cursor", "gemini"},
 	}
-	if err := validateOutput(out); err != nil {
-		t.Errorf("validateOutput with publish-target harnesses = %v, want nil", err)
+	if err := ValidateOutput(out); err != nil {
+		t.Errorf("ValidateOutput with publish-target harnesses = %v, want nil", err)
 	}
 }
 
@@ -205,9 +205,9 @@ func TestValidateOutput_RejectsMalformedGlob(t *testing.T) {
 			{Name: "broken", Include: []string{"finance/{a,b"}},
 		},
 	}
-	err := validateOutput(out)
+	err := ValidateOutput(out)
 	if err == nil {
-		t.Fatal("validateOutput with malformed glob = nil error, want config.invalid")
+		t.Fatal("ValidateOutput with malformed glob = nil error, want config.invalid")
 	}
 	if !errors.Is(err, ErrConfigInvalid) {
 		t.Errorf("validateOutput error = %v, want errors.Is ErrConfigInvalid", err)
@@ -226,9 +226,9 @@ func TestValidateOutput_RejectsMalformedCommand(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			out := ResolvedOutput{ID: "bad-cmd", Harnesses: []string{"claude-code"}, Workflow: wf}
-			err := validateOutput(out)
+			err := ValidateOutput(out)
 			if err == nil {
-				t.Fatalf("validateOutput with %s = nil error, want config.invalid", name)
+				t.Fatalf("ValidateOutput with %s = nil error, want config.invalid", name)
 			}
 			if !errors.Is(err, ErrConfigInvalid) {
 				t.Errorf("validateOutput error = %v, want errors.Is ErrConfigInvalid", err)
@@ -250,8 +250,8 @@ func TestValidateOutput_AcceptsWellFormed(t *testing.T) {
 			Publish: []Command{{Sh: "git -C $PODIUM_WORKDIR push"}},
 		},
 	}
-	if err := validateOutput(out); err != nil {
-		t.Errorf("validateOutput with a well-formed target = %v, want nil", err)
+	if err := ValidateOutput(out); err != nil {
+		t.Errorf("ValidateOutput with a well-formed target = %v, want nil", err)
 	}
 }
 

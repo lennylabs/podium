@@ -108,7 +108,7 @@ func publishCmd(args []string) int {
 		pipeStdout = os.Stderr
 	}
 
-	results := make([]*publish.RunResult, 0, len(outputs))
+	results := make([]*sync.RunResult, 0, len(outputs))
 	failures := 0
 	for _, out := range outputs {
 		// §7.8: a live render fetches the publishing identity's effective view
@@ -118,7 +118,7 @@ func publishCmd(args []string) int {
 		if !*check && sync.IsServerSource(out.Registry) {
 			token = readPublishToken(out.Registry)
 		}
-		res, rerr := publish.Run(ctx, publish.RunOptions{
+		res, rerr := sync.RunMarketplace(ctx, sync.RunOptions{
 			Output:  out,
 			Token:   token,
 			Workdir: *workdir,
@@ -236,7 +236,7 @@ func publishExitCode(err error) int {
 // printPublishHuman renders one block per output mirroring syncCmd's printHuman:
 // the output id, the resolved working directory, whether the render changed and
 // the changed artifacts, and whether the publish phase ran.
-func printPublishHuman(results []*publish.RunResult, check, dryRun bool) {
+func printPublishHuman(results []*sync.RunResult, check, dryRun bool) {
 	if check {
 		fmt.Fprintln(os.Stdout, "publish.yaml: ok")
 	}
@@ -265,7 +265,7 @@ func printPublishHuman(results []*publish.RunResult, check, dryRun bool) {
 // printJSON: {outputs: [{output, workdir, changed, changed_artifacts,
 // published}]}. A jq consumer reads .outputs[].changed or
 // .outputs[].changed_artifacts directly.
-func printPublishJSON(results []*publish.RunResult) {
+func printPublishJSON(results []*sync.RunResult) {
 	type outEnv struct {
 		Output           string   `json:"output"`
 		Workdir          string   `json:"workdir"`

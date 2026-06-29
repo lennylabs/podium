@@ -1,4 +1,4 @@
-package publish
+package sync
 
 import (
 	"bytes"
@@ -12,12 +12,12 @@ import (
 	"time"
 )
 
-// These tests exercise the §7.8 prepare->render->publish workflow runner against
-// the filesystem-source fixture registry (no live server) with stub commands that
-// touch marker files: variable injection, skip_if_no_changes suppression,
-// fail-fast on the first non-zero exit, continue_on_error, the per-command
-// timeout, the per-phase on_error cleanup, --dry-run, --check, and the --workdir
-// versus allocated-workdir paths.
+// These tests exercise the §7.8 prepare->render->publish marketplace runner
+// against the filesystem-source fixture registry (no live server) with stub
+// commands that touch marker files: variable injection, skip_if_no_changes
+// suppression, fail-fast on the first non-zero exit, continue_on_error, the
+// per-command timeout, the per-phase on_error cleanup, --dry-run, --check, and
+// the supplied-workdir versus allocated-workdir paths.
 
 // runOutput returns a resolved output for the fixture registry with the standard
 // finance plugins and the given harness set and workflow.
@@ -34,7 +34,7 @@ func runOutput(reg string, harnesses []string, wf Workflow) ResolvedOutput {
 	}
 }
 
-// touch returns a run: command that writes its variable-expanded marker line to a
+// touch returns an sh: command that writes its variable-expanded marker line to a
 // marker file in $PODIUM_WORKDIR, so a test can assert the command ran and inspect
 // the injected variables it saw. It appends so a sequence of commands records its
 // order.
@@ -59,9 +59,9 @@ func fixedNow() func() time.Time {
 // $PODIUM_GIT_REMOTE, $PODIUM_GIT_BRANCH, $PODIUM_REGISTRY, the harness set, plus
 // the change-driven $PODIUM_CHANGED, $PODIUM_COMMIT_MESSAGE, and
 // $PODIUM_CHANGE_SUMMARY, into every command's environment.
-func TestRun_VariableInjection(t *testing.T) {
+func TestRunMarketplace_VariableInjection(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	workdir := t.TempDir()
 
 	out := runOutput(reg, []string{"claude-code"}, Workflow{
@@ -71,9 +71,9 @@ func TestRun_VariableInjection(t *testing.T) {
 				"msg=$PODIUM_COMMIT_MESSAGE summary=$PODIUM_CHANGE_SUMMARY identity=$PODIUM_IDENTITY")},
 	})
 
-	res, err := Run(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: io_Discard(), Stderr: io_Discard()})
+	res, err := RunMarketplace(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: discardBuf(), Stderr: discardBuf()})
 	if err != nil {
-		t.Fatalf("Run: %v", err)
+		t.Fatalf("RunMarketplace: %v", err)
 	}
 	if !res.Published {
 		t.Errorf("a live run must report Published=true")
@@ -108,9 +108,9 @@ func TestRun_VariableInjection(t *testing.T) {
 // command writes the shell-expanded value of an ambient variable to a marker
 // file, alongside an injected PODIUM_* variable, so the test asserts the shell
 // expands both.
-func TestRun_ShAmbientEnvSurvives(t *testing.T) {
+func TestRunMarketplace_ShAmbientEnvSurvives(t *testing.T) {
 	// t.Setenv forbids t.Parallel, so this test runs serially.
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	workdir := t.TempDir()
 	t.Setenv("GH_TOKEN", "ghp-secret-value")
 
@@ -124,8 +124,8 @@ func TestRun_ShAmbientEnvSurvives(t *testing.T) {
 		},
 	})
 
-	if _, err := Run(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: io_Discard(), Stderr: io_Discard()}); err != nil {
-		t.Fatalf("Run: %v", err)
+	if _, err := RunMarketplace(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: discardBuf(), Stderr: discardBuf()}); err != nil {
+		t.Fatalf("RunMarketplace: %v", err)
 	}
 
 	got := readMarker(t, workdir, "ambient")
@@ -142,9 +142,9 @@ func TestRun_ShAmbientEnvSurvives(t *testing.T) {
 // reference Podium does not inject (an ambient $GH_TOKEN) is left as its literal
 // $name so the printed command shows the ambient credential reference the live
 // shell will expand rather than blanking it.
-func TestRun_DryRunPreservesAmbientReference(t *testing.T) {
+func TestRunMarketplace_DryRunPreservesAmbientReference(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 
 	// The credential reference sits in the publish phase, which a dry run prints
 	// but does not execute, so the test asserts the printed preview without a
@@ -156,7 +156,7 @@ func TestRun_DryRunPreservesAmbientReference(t *testing.T) {
 	})
 
 	var stdout bytes.Buffer
-	if _, err := Run(context.Background(), RunOptions{Output: out, DryRun: true, Now: fixedNow(), Stdout: &stdout, Stderr: io_Discard()}); err != nil {
+	if _, err := RunMarketplace(context.Background(), RunOptions{Output: out, DryRun: true, Now: fixedNow(), Stdout: &stdout, Stderr: discardBuf()}); err != nil {
 		t.Fatalf("dry-run: %v", err)
 	}
 
@@ -173,7 +173,7 @@ func TestRun_DryRunPreservesAmbientReference(t *testing.T) {
 
 // Spec: §7.8 — the commit_message template is rendered with the change count and
 // a timestamp into $PODIUM_COMMIT_MESSAGE.
-func TestRun_CommitMessageTemplate(t *testing.T) {
+func TestRunMarketplace_CommitMessageTemplate(t *testing.T) {
 	t.Parallel()
 	out := runOutput("x", []string{"claude-code"}, Workflow{})
 	out.CommitMessage = "msg {{.ChangedCount}} at {{.Timestamp}} for {{.OutputID}}"
@@ -206,9 +206,9 @@ func TestRun_CommitMessageTemplate(t *testing.T) {
 // Spec: §7.8 — a command that declares skip_if_no_changes is skipped when the
 // render produced no diff. The first render changes the tree; a second run into
 // the same checkout produces no diff, so the marked command does not run.
-func TestRun_SkipIfNoChanges(t *testing.T) {
+func TestRunMarketplace_SkipIfNoChanges(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	workdir := t.TempDir()
 
 	out := runOutput(reg, []string{"claude-code"}, Workflow{
@@ -218,9 +218,9 @@ func TestRun_SkipIfNoChanges(t *testing.T) {
 	})
 
 	// First run: the render changes the tree, so the command runs.
-	first, err := Run(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: io_Discard(), Stderr: io_Discard()})
+	first, err := RunMarketplace(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: discardBuf(), Stderr: discardBuf()})
 	if err != nil {
-		t.Fatalf("first Run: %v", err)
+		t.Fatalf("first RunMarketplace: %v", err)
 	}
 	if !first.Render.Changed {
 		t.Fatalf("first run must report Changed=true")
@@ -233,9 +233,9 @@ func TestRun_SkipIfNoChanges(t *testing.T) {
 	}
 
 	// Second run into the same checkout: no diff, so the command is skipped.
-	second, err := Run(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: io_Discard(), Stderr: io_Discard()})
+	second, err := RunMarketplace(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: discardBuf(), Stderr: discardBuf()})
 	if err != nil {
-		t.Fatalf("second Run: %v", err)
+		t.Fatalf("second RunMarketplace: %v", err)
 	}
 	if second.Render.Changed {
 		t.Fatalf("second run into an unchanged checkout must report Changed=false")
@@ -248,9 +248,9 @@ func TestRun_SkipIfNoChanges(t *testing.T) {
 // Spec: §7.8 — the pipeline fails fast on the first non-zero exit. A failing
 // command stops the phase, so a later command does not run, and the error names
 // the output and the phase.
-func TestRun_FailFast(t *testing.T) {
+func TestRunMarketplace_FailFast(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	workdir := t.TempDir()
 
 	out := runOutput(reg, []string{"claude-code"}, Workflow{
@@ -260,7 +260,7 @@ func TestRun_FailFast(t *testing.T) {
 		},
 	})
 
-	_, err := Run(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: io_Discard(), Stderr: io_Discard()})
+	_, err := RunMarketplace(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: discardBuf(), Stderr: discardBuf()})
 	if err == nil {
 		t.Fatalf("a non-zero command must fail the run")
 	}
@@ -275,9 +275,9 @@ func TestRun_FailFast(t *testing.T) {
 // Spec: §7.8 — a command that declares continue_on_error lets the pipeline
 // proceed past its non-zero exit, so a later command still runs and the run
 // succeeds.
-func TestRun_ContinueOnError(t *testing.T) {
+func TestRunMarketplace_ContinueOnError(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	workdir := t.TempDir()
 
 	out := runOutput(reg, []string{"claude-code"}, Workflow{
@@ -287,7 +287,7 @@ func TestRun_ContinueOnError(t *testing.T) {
 		},
 	})
 
-	res, err := Run(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: io_Discard(), Stderr: io_Discard()})
+	res, err := RunMarketplace(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: discardBuf(), Stderr: discardBuf()})
 	if err != nil {
 		t.Fatalf("continue_on_error must let the run succeed: %v", err)
 	}
@@ -301,9 +301,9 @@ func TestRun_ContinueOnError(t *testing.T) {
 
 // Spec: §7.8 — a per-command timeout bounds its wall clock. A command that sleeps
 // past its timeout is killed and the run fails with a deadline-exceeded error.
-func TestRun_Timeout(t *testing.T) {
+func TestRunMarketplace_Timeout(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	workdir := t.TempDir()
 
 	out := runOutput(reg, []string{"claude-code"}, Workflow{
@@ -313,7 +313,7 @@ func TestRun_Timeout(t *testing.T) {
 	})
 
 	start := time.Now()
-	_, err := Run(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: io_Discard(), Stderr: io_Discard()})
+	_, err := RunMarketplace(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: discardBuf(), Stderr: discardBuf()})
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatalf("a command past its timeout must fail the run")
@@ -329,9 +329,9 @@ func TestRun_Timeout(t *testing.T) {
 // Spec: §7.8 — the per-phase on_error cleanup list runs when a command in its
 // phase fails, before the failure propagates. A publish-phase failure runs
 // publish_on_error and leaves prepare_on_error untouched.
-func TestRun_PublishOnErrorCleanup(t *testing.T) {
+func TestRunMarketplace_PublishOnErrorCleanup(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	workdir := t.TempDir()
 
 	out := runOutput(reg, []string{"claude-code"}, Workflow{
@@ -340,7 +340,7 @@ func TestRun_PublishOnErrorCleanup(t *testing.T) {
 		PublishOnError: []Command{touch("publish-cleanup", "publish-cleanup-ran")},
 	})
 
-	_, err := Run(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: io_Discard(), Stderr: io_Discard()})
+	_, err := RunMarketplace(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: discardBuf(), Stderr: discardBuf()})
 	if err == nil {
 		t.Fatalf("the failing publish command must fail the run")
 	}
@@ -355,9 +355,9 @@ func TestRun_PublishOnErrorCleanup(t *testing.T) {
 // Spec: §7.8 — a prepare-phase failure runs prepare_on_error, scoped to the
 // phase that failed, and leaves publish_on_error untouched. The render and the
 // publish phase do not run after a prepare failure.
-func TestRun_PrepareOnErrorCleanup(t *testing.T) {
+func TestRunMarketplace_PrepareOnErrorCleanup(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	workdir := t.TempDir()
 
 	out := runOutput(reg, []string{"claude-code"}, Workflow{
@@ -367,7 +367,7 @@ func TestRun_PrepareOnErrorCleanup(t *testing.T) {
 		PublishOnError: []Command{touch("publish-cleanup", "publish-cleanup-ran")},
 	})
 
-	res, err := Run(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: io_Discard(), Stderr: io_Discard()})
+	res, err := RunMarketplace(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: discardBuf(), Stderr: discardBuf()})
 	if err == nil {
 		t.Fatalf("the failing prepare command must fail the run")
 	}
@@ -392,10 +392,10 @@ func TestRun_PrepareOnErrorCleanup(t *testing.T) {
 // prepare and publish command with variables substituted, without running any
 // operator command. A dry run is a preview: it runs neither the prepare phase
 // (no network clone) nor the publish phase (no commit or push). The operator's
-// --workdir checkout is untouched.
-func TestRun_DryRun(t *testing.T) {
+// supplied checkout is untouched.
+func TestRunMarketplace_DryRun(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	workdir := t.TempDir()
 
 	// The prepare command stands in for a clone. A dry run must print it with its
@@ -413,7 +413,7 @@ func TestRun_DryRun(t *testing.T) {
 	})
 
 	var stdout bytes.Buffer
-	res, err := Run(context.Background(), RunOptions{Output: out, Workdir: workdir, DryRun: true, Now: fixedNow(), Stdout: &stdout, Stderr: io_Discard()})
+	res, err := RunMarketplace(context.Background(), RunOptions{Output: out, Workdir: workdir, DryRun: true, Now: fixedNow(), Stdout: &stdout, Stderr: discardBuf()})
 	if err != nil {
 		t.Fatalf("dry-run: %v", err)
 	}
@@ -421,7 +421,7 @@ func TestRun_DryRun(t *testing.T) {
 		t.Errorf("a dry run must not publish")
 	}
 	if res.Workdir == workdir {
-		t.Errorf("a dry run must render into a temporary directory, not the operator's --workdir")
+		t.Errorf("a dry run must render into a temporary directory, not the operator's supplied workdir")
 	}
 
 	// No operator command ran. The prepare sentinel did not execute, so the dry
@@ -434,9 +434,9 @@ func TestRun_DryRun(t *testing.T) {
 	if _, statErr := os.Stat(filepath.Join(res.Workdir, "publish-ran")); !os.IsNotExist(statErr) {
 		t.Errorf("a dry run must not run a publish command: stat err=%v", statErr)
 	}
-	// The operator's --workdir checkout is untouched by the dry run.
+	// The operator's supplied workdir is untouched by the dry run.
 	if _, statErr := os.Stat(filepath.Join(workdir, "prepare-ran")); !os.IsNotExist(statErr) {
-		t.Errorf("a dry run must not touch the operator's --workdir: stat err=%v", statErr)
+		t.Errorf("a dry run must not touch the operator's supplied workdir: stat err=%v", statErr)
 	}
 
 	printed := stdout.String()
@@ -460,9 +460,9 @@ func TestRun_DryRun(t *testing.T) {
 // rendered set as changed. A skip_if_no_changes publish command therefore prints
 // un-skipped in a dry run, because the preview cannot observe an already-published
 // remote without executing the operator's clone.
-func TestRun_DryRunReportsRenderedTreeChanged(t *testing.T) {
+func TestRunMarketplace_DryRunReportsRenderedTreeChanged(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 
 	out := runOutput(reg, []string{"claude-code"}, Workflow{
 		Prepare: []Command{{Run: []string{"git", "clone", "$PODIUM_GIT_REMOTE", "$PODIUM_WORKDIR"}}},
@@ -472,7 +472,7 @@ func TestRun_DryRunReportsRenderedTreeChanged(t *testing.T) {
 	})
 
 	var stdout bytes.Buffer
-	res, err := Run(context.Background(), RunOptions{Output: out, DryRun: true, Now: fixedNow(), Stdout: &stdout, Stderr: io_Discard()})
+	res, err := RunMarketplace(context.Background(), RunOptions{Output: out, DryRun: true, Now: fixedNow(), Stdout: &stdout, Stderr: discardBuf()})
 	if err != nil {
 		t.Fatalf("dry-run: %v", err)
 	}
@@ -490,16 +490,16 @@ func TestRun_DryRunReportsRenderedTreeChanged(t *testing.T) {
 
 // Spec: §7.8 — --check validates the config only and runs neither the render nor
 // any command.
-func TestRun_Check(t *testing.T) {
+func TestRunMarketplace_Check(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	workdir := t.TempDir()
 
 	out := runOutput(reg, []string{"claude-code"}, Workflow{
 		Publish: []Command{touch("must-not-run", "ran")},
 	})
 
-	res, err := Run(context.Background(), RunOptions{Output: out, Workdir: workdir, Check: true, Stdout: io_Discard(), Stderr: io_Discard()})
+	res, err := RunMarketplace(context.Background(), RunOptions{Output: out, Workdir: workdir, Check: true, Stdout: discardBuf(), Stderr: discardBuf()})
 	if err != nil {
 		t.Fatalf("--check on a valid config must succeed: %v", err)
 	}
@@ -512,7 +512,7 @@ func TestRun_Check(t *testing.T) {
 
 	// --check rejects an output naming a non-publish harness.
 	bad := runOutput(reg, []string{"opencode"}, Workflow{})
-	if _, err := Run(context.Background(), RunOptions{Output: bad, Check: true, Stdout: io_Discard(), Stderr: io_Discard()}); err == nil {
+	if _, err := RunMarketplace(context.Background(), RunOptions{Output: bad, Check: true, Stdout: discardBuf(), Stderr: discardBuf()}); err == nil {
 		t.Errorf("--check must reject a non-publish harness")
 	}
 
@@ -542,7 +542,7 @@ func TestRun_Check(t *testing.T) {
 // and runs no command, so the malformed command does not reach a live pipeline.
 func checkRejectsMalformed(t *testing.T, label string, out ResolvedOutput, workdir string) {
 	t.Helper()
-	res, err := Run(context.Background(), RunOptions{Output: out, Workdir: workdir, Check: true, Stdout: io_Discard(), Stderr: io_Discard()})
+	res, err := RunMarketplace(context.Background(), RunOptions{Output: out, Workdir: workdir, Check: true, Stdout: discardBuf(), Stderr: discardBuf()})
 	if err == nil {
 		t.Errorf("--check must reject %s", label)
 		return
@@ -558,26 +558,26 @@ func checkRejectsMalformed(t *testing.T, label string, out ResolvedOutput, workd
 	}
 }
 
-// Spec: §7.8 — --workdir points the render at an existing checkout, while the
-// default allocates and cleans up a per-output working directory.
-func TestRun_WorkdirVsAllocated(t *testing.T) {
+// Spec: §7.8 — a supplied workdir points the render at an existing checkout,
+// while the default allocates and cleans up a per-output working directory.
+func TestRunMarketplace_WorkdirVsAllocated(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 
-	// --workdir path: the render writes into the supplied directory.
+	// Supplied-workdir path: the render writes into the supplied directory.
 	workdir := t.TempDir()
 	out := runOutput(reg, []string{"claude-code"}, Workflow{
 		Publish: []Command{touch("done", "done")},
 	})
-	res, err := Run(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: io_Discard(), Stderr: io_Discard()})
+	res, err := RunMarketplace(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: discardBuf(), Stderr: discardBuf()})
 	if err != nil {
-		t.Fatalf("Run with --workdir: %v", err)
+		t.Fatalf("RunMarketplace with a supplied workdir: %v", err)
 	}
 	if res.Workdir != workdir {
-		t.Errorf("--workdir must render into the supplied directory: got %q want %q", res.Workdir, workdir)
+		t.Errorf("a supplied workdir must render into the supplied directory: got %q want %q", res.Workdir, workdir)
 	}
 	if _, err := os.Stat(filepath.Join(workdir, ".claude-plugin", "marketplace.json")); err != nil {
-		t.Errorf("the render must populate the --workdir checkout: %v", err)
+		t.Errorf("the render must populate the supplied checkout: %v", err)
 	}
 
 	// Allocated path: the prepare phase runs against the allocated directory, and
@@ -590,9 +590,9 @@ func TestRun_WorkdirVsAllocated(t *testing.T) {
 		Prepare: []Command{{Sh: "test -d \"$PODIUM_WORKDIR\" && printf prepared > \"$PODIUM_WORKDIR/.prep\""}},
 		Publish: []Command{{Sh: "printf '%s' \"$PODIUM_WORKDIR\" > " + marker}},
 	})
-	allocRes, err := Run(context.Background(), RunOptions{Output: allocOut, Now: fixedNow(), Stdout: io_Discard(), Stderr: io_Discard()})
+	allocRes, err := RunMarketplace(context.Background(), RunOptions{Output: allocOut, Now: fixedNow(), Stdout: discardBuf(), Stderr: discardBuf()})
 	if err != nil {
-		t.Fatalf("Run with allocated workdir: %v", err)
+		t.Fatalf("RunMarketplace with an allocated workdir: %v", err)
 	}
 	if allocRes.Workdir == "" || allocRes.Workdir == workdir {
 		t.Errorf("an allocated run must use its own temp directory, got %q", allocRes.Workdir)
@@ -613,22 +613,22 @@ func TestRun_WorkdirVsAllocated(t *testing.T) {
 
 // Spec: §7.8 — a command that declares neither run: nor sh: is rejected at
 // execution rather than running an empty command.
-func TestRun_RejectsMalformedCommand(t *testing.T) {
+func TestRunMarketplace_RejectsMalformedCommand(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	workdir := t.TempDir()
 
 	out := runOutput(reg, []string{"claude-code"}, Workflow{
 		Publish: []Command{{}}, // neither run: nor sh:
 	})
-	if _, err := Run(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: io_Discard(), Stderr: io_Discard()}); err == nil {
+	if _, err := RunMarketplace(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: discardBuf(), Stderr: discardBuf()}); err == nil {
 		t.Errorf("a command with neither run: nor sh: must error")
 	}
 
 	both := runOutput(reg, []string{"claude-code"}, Workflow{
 		Publish: []Command{{Run: []string{"true"}, Sh: "true"}},
 	})
-	if _, err := Run(context.Background(), RunOptions{Output: both, Workdir: workdir, Now: fixedNow(), Stdout: io_Discard(), Stderr: io_Discard()}); err == nil {
+	if _, err := RunMarketplace(context.Background(), RunOptions{Output: both, Workdir: workdir, Now: fixedNow(), Stdout: discardBuf(), Stderr: discardBuf()}); err == nil {
 		t.Errorf("a command with both run: and sh: must error")
 	}
 }
@@ -639,7 +639,7 @@ func TestRun_RejectsMalformedCommand(t *testing.T) {
 // stops the remaining cleanup.
 func TestRunCleanup_BestEffort(t *testing.T) {
 	t.Parallel()
-	opts := RunOptions{Output: ResolvedOutput{ID: "x"}, Stderr: io_Discard()}
+	opts := RunOptions{Output: ResolvedOutput{ID: "x"}, Stderr: discardBuf()}
 
 	// continue_on_error: the failing first cleanup command is logged and the
 	// second still runs.
@@ -717,13 +717,13 @@ func TestWriteChangeSummary_Error(t *testing.T) {
 	}
 }
 
-// Run defaults Stdout, Stderr, and Now when the caller leaves them nil. A --check
-// run with all three nil exercises the default-init branches without producing
-// output, because --check returns before any command or render.
-func TestRun_NilDefaults(t *testing.T) {
+// RunMarketplace defaults Stdout, Stderr, and Now when the caller leaves them
+// nil. A --check run with all three nil exercises the default-init branches
+// without producing output, because --check returns before any command or render.
+func TestRunMarketplace_NilDefaults(t *testing.T) {
 	t.Parallel()
 	out := runOutput("unused", []string{"claude-code"}, Workflow{})
-	res, err := Run(context.Background(), RunOptions{Output: out, Check: true})
+	res, err := RunMarketplace(context.Background(), RunOptions{Output: out, Check: true})
 	if err != nil {
 		t.Fatalf("--check with nil writers must succeed: %v", err)
 	}
@@ -734,15 +734,15 @@ func TestRun_NilDefaults(t *testing.T) {
 
 // runPipeline surfaces a malformed commit_message template as a run error, so a
 // bad template fails the publish rather than committing an unrendered message.
-func TestRun_MalformedCommitMessage(t *testing.T) {
+func TestRunMarketplace_MalformedCommitMessage(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	workdir := t.TempDir()
 	out := runOutput(reg, []string{"claude-code"}, Workflow{
 		Publish: []Command{touch("done", "done")},
 	})
 	out.CommitMessage = "{{.Nope" // unterminated action
-	if _, err := Run(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: io_Discard(), Stderr: io_Discard()}); err == nil {
+	if _, err := RunMarketplace(context.Background(), RunOptions{Output: out, Workdir: workdir, Now: fixedNow(), Stdout: discardBuf(), Stderr: discardBuf()}); err == nil {
 		t.Errorf("a malformed commit_message must fail the run")
 	}
 }
@@ -767,6 +767,6 @@ func TestPrintPhase_SkipMarker(t *testing.T) {
 	}
 }
 
-// io_Discard returns a writer that drops output, so test runs do not print
+// discardBuf returns a writer that drops output, so test runs do not print
 // subprocess stdout and stderr.
-func io_Discard() *bytes.Buffer { return &bytes.Buffer{} }
+func discardBuf() *bytes.Buffer { return &bytes.Buffer{} }

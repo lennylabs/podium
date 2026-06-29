@@ -1,4 +1,4 @@
-package publish
+package sync
 
 import (
 	"bytes"
@@ -17,34 +17,35 @@ import (
 )
 
 // This file implements the §7.8 prepare->render->publish pipeline that
-// `podium publish` runs per marketplace output. Podium owns config resolution,
-// the effective view, plugin assignment, rendering, reconciliation, change
-// detection, variable injection, command sequencing, logging, and dry-run; the
-// operator's prepare and publish commands own getting the destination repository
-// to the working directory and taking the rendered tree to the remote.
+// `podium sync` runs per kind: marketplace target. Podium owns config
+// resolution, the effective view, plugin assignment, rendering, reconciliation,
+// change detection, variable injection, command sequencing, logging, and
+// dry-run; the operator's prepare and publish commands own getting the
+// destination repository to the working directory and taking the rendered tree
+// to the remote.
 //
 // Trust boundary. The prepare, publish, and per-phase on_error cleanup commands
 // run as subprocesses with the operator's privileges and ambient credentials,
-// inheriting the publish process environment plus the injected PODIUM_* variables,
-// because git authentication relies on SSH_AUTH_SOCK, GH_TOKEN, and similar. They
-// come from operator-authored publish.yaml, the same trust boundary as a Makefile
-// or a CI script, so a catalog author cannot inject a command. They are unrelated to
-// the sandboxed MaterializationHook SPI (§6.6) and to the hook artifact type. A
-// command is either an argv list under run:, executed directly without a shell
-// (no shell metacharacter interpretation, no injection through artifact content),
-// or a string under sh:, executed through sh -c. This is why publishing runs in
-// an operator CLI rather than a multi-tenant server process.
+// inheriting the podium sync process environment plus the injected PODIUM_*
+// variables, because git authentication relies on SSH_AUTH_SOCK, GH_TOKEN, and
+// similar. A workflow executes only on the podium sync CLI path and never inside
+// the registry server or the MCP server (§7.5.2 workflow-execution boundary).
+// The commands are unrelated to the sandboxed MaterializationHook SPI (§6.6) and
+// to the hook artifact type. A command is either an argv list under run:,
+// executed directly without a shell (no shell metacharacter interpretation, no
+// injection through artifact content), or a string under sh:, executed through
+// sh -c.
 
-// RunOptions configures one Run of a single resolved marketplace output through
-// the prepare->render->publish pipeline. Token is the publishing identity's
-// registry credential, forwarded to the render's effective-view fetch and exposed
-// to commands. Workdir, when set, points the render at an existing checkout (the
-// --workdir flag); when empty, Run allocates a per-output working directory and
-// the prepare phase clones into it. DryRun renders into a temporary directory and
-// prints each prepare and publish command with its variables substituted, running
-// no operator command and no publish phase. Check validates the config only and
-// runs neither the render nor any command. HTTPClient and Now are injected by
-// tests; a nil client uses the pkg/sync default, and a nil Now uses time.Now.
+// RunOptions configures one RunMarketplace of a single resolved marketplace
+// output through the prepare->render->publish pipeline. Token is the publishing
+// identity's registry credential, forwarded to the render's effective-view fetch
+// and exposed to commands. Workdir, when set, points the render at an existing
+// checkout; when empty, RunMarketplace allocates a per-output working directory
+// and the prepare phase clones into it. DryRun renders into a temporary directory
+// and prints each prepare and publish command with its variables substituted,
+// running no operator command and no publish phase. Check validates the config
+// only and runs neither the render nor any command. HTTPClient and Now are
+// injected by tests; a nil client uses the default, and a nil Now uses time.Now.
 type RunOptions struct {
 	Output     ResolvedOutput
 	Token      string
@@ -57,11 +58,11 @@ type RunOptions struct {
 	Now        func() time.Time
 }
 
-// RunResult reports the outcome of one Run. Workdir is the working directory the
-// render wrote into (the allocated directory, the --workdir checkout, or the
-// dry-run temp directory). Render is the §7.8 render result; it is nil for a
-// --check run, which does not render. Published reports whether the publish phase
-// ran, which is false for a --dry-run or --check run.
+// RunResult reports the outcome of one RunMarketplace. Workdir is the working
+// directory the render wrote into (the allocated directory, the supplied
+// checkout, or the dry-run temp directory). Render is the §7.8 render result; it
+// is nil for a --check run, which does not render. Published reports whether the
+// publish phase ran, which is false for a --dry-run or --check run.
 type RunResult struct {
 	OutputID  string
 	Workdir   string
@@ -69,14 +70,14 @@ type RunResult struct {
 	Published bool
 }
 
-// Run executes the prepare->render->publish pipeline for one resolved output
-// (§7.8). The phases exist for their ordering: the prepare checkout must precede
-// the render so the render reconciles against existing repository content, and the
-// publish commit must follow it.
+// RunMarketplace executes the prepare->render->publish pipeline for one resolved
+// marketplace output (§7.8). The phases exist for their ordering: the prepare
+// checkout must precede the render so the render reconciles against existing
+// repository content, and the publish commit must follow it.
 //
 //   - --check (Check) validates the config only and returns before rendering or
 //     running any command.
-//   - The default path allocates a working directory unless --workdir set one,
+//   - The default path allocates a working directory unless Workdir set one,
 //     runs the prepare commands, renders, then runs the publish commands.
 //   - --dry-run (DryRun) is a preview. It renders into a temporary directory and
 //     prints each prepare and publish command with its PODIUM_* variables
@@ -85,12 +86,12 @@ type RunResult struct {
 //     against an empty tree, so a dry run reports the whole rendered tree as
 //     changed.
 //
-// Run fails fast on the first command that exits non-zero, unless that command
-// declares continue_on_error. On a failure it runs the failing phase's own
-// on_error cleanup commands (best effort) before returning the original error: a
-// prepare failure runs prepare_on_error, and a publish failure runs
+// RunMarketplace fails fast on the first command that exits non-zero, unless that
+// command declares continue_on_error. On a failure it runs the failing phase's
+// own on_error cleanup commands (best effort) before returning the original
+// error: a prepare failure runs prepare_on_error, and a publish failure runs
 // publish_on_error.
-func Run(ctx context.Context, opts RunOptions) (*RunResult, error) {
+func RunMarketplace(ctx context.Context, opts RunOptions) (*RunResult, error) {
 	if opts.Stdout == nil {
 		opts.Stdout = os.Stdout
 	}
@@ -106,7 +107,7 @@ func Run(ctx context.Context, opts RunOptions) (*RunResult, error) {
 
 	// --check validates the resolved config and stops before any side effect.
 	if opts.Check {
-		if err := validateOutput(out); err != nil {
+		if err := ValidateOutput(out); err != nil {
 			return nil, err
 		}
 		return res, nil
@@ -123,10 +124,11 @@ func Run(ctx context.Context, opts RunOptions) (*RunResult, error) {
 }
 
 // runPipeline sequences prepare, render, and publish for a resolved output. It is
-// split from Run so the workdir allocation and the --check short-circuit stay in
-// one place and the phase ordering stays in another. A dry run prints both phases
-// instead of executing them, so it runs no operator command and performs no
-// network clone or push; only the render runs, into a temporary directory.
+// split from RunMarketplace so the workdir allocation and the --check
+// short-circuit stay in one place and the phase ordering stays in another. A dry
+// run prints both phases instead of executing them, so it runs no operator
+// command and performs no network clone or push; only the render runs, into a
+// temporary directory.
 func runPipeline(ctx context.Context, opts RunOptions, out ResolvedOutput, workdir string, res *RunResult) (*RunResult, error) {
 	vars := baseVars(out, workdir)
 
@@ -185,12 +187,12 @@ func runPipeline(ctx context.Context, opts RunOptions, out ResolvedOutput, workd
 
 // resolveWorkdir returns the working directory the render writes into and a
 // cleanup function. --dry-run always renders into a temporary directory cleanup
-// removes, ignoring --workdir so a dry run never touches the operator's checkout
-// (§7.8 "renders into a temporary directory"). Otherwise, with --workdir set it
-// points at that existing checkout and cleanup is a no-op (the operator owns the
-// directory). With neither, it allocates a per-output working directory the
-// prepare clone populates and cleanup removes, so a live run does not leave a
-// checkout behind.
+// removes, ignoring the supplied Workdir so a dry run never touches the
+// operator's checkout (§7.8 "renders into a temporary directory"). Otherwise,
+// with Workdir set it points at that existing checkout and cleanup is a no-op
+// (the operator owns the directory). With neither, it allocates a per-output
+// working directory the prepare clone populates and cleanup removes, so a live
+// run does not leave a checkout behind.
 func resolveWorkdir(opts RunOptions) (string, func(), error) {
 	if !opts.DryRun && opts.Workdir != "" {
 		return opts.Workdir, func() {}, nil
@@ -424,28 +426,6 @@ func sortedVarKeys(vars map[string]string) []string {
 	}
 	sort.Strings(keys)
 	return keys
-}
-
-// validate rejects a command that declares neither run: nor sh:, or both, so a
-// malformed step surfaces at execution rather than running an empty command.
-func (c Command) validate() error {
-	switch {
-	case len(c.Run) == 0 && c.Sh == "":
-		return fmt.Errorf("%w: command declares neither run: nor sh:", ErrConfigInvalid)
-	case len(c.Run) > 0 && c.Sh != "":
-		return fmt.Errorf("%w: command declares both run: and sh:", ErrConfigInvalid)
-	}
-	return nil
-}
-
-// display returns a short human label for a command, used in error messages and
-// skip logs. It does not substitute variables, so the label names the command as
-// the operator wrote it.
-func (c Command) display() string {
-	if c.Sh != "" {
-		return "sh -c " + strconv.Quote(c.Sh)
-	}
-	return strings.Join(c.Run, " ")
 }
 
 // substituted returns the command rendered with variables expanded, the dry-run

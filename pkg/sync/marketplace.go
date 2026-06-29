@@ -163,7 +163,7 @@ type ResolvedOutput struct {
 	Workflow      Workflow
 }
 
-// validateOutput rejects a marketplace target whose harness set names a
+// ValidateOutput rejects a marketplace target whose harness set names a
 // non-publish-target harness (opencode, none, or an unknown id), a target with a
 // malformed plugin glob, and a target with a malformed workflow command. All map
 // to config.invalid (§6.10). The harness check reuses the §7.8 publish-target
@@ -174,7 +174,7 @@ type ResolvedOutput struct {
 // well-formed. Validating the workflow commands here makes --check fail-closed: a
 // command that declares neither run: nor sh:, or both, is rejected before the
 // prepare clone or the render runs (§7.5.2 "--check validates the config only").
-func validateOutput(out ResolvedOutput) error {
+func ValidateOutput(out ResolvedOutput) error {
 	for _, h := range out.Harnesses {
 		if _, err := adapter.EmitterForHarness(h); err != nil {
 			return fmt.Errorf("%w: marketplace %q harness %q is not a publish target (opencode and none have no git-repo distribution): %w",

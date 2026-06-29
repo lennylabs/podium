@@ -1,4 +1,4 @@
-package publish
+package sync
 
 import (
 	"context"
@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/lennylabs/podium/internal/testharness"
-	"github.com/lennylabs/podium/pkg/sync"
 )
 
 // These tests exercise the §7.8 render pipeline against a filesystem-source
@@ -21,46 +20,47 @@ import (
 // entry for a multi-artifact plugin, the multi-harness repository layout, and
 // idempotent re-render with stale-file cleanup and the change set.
 
-const skillArtifact = `---
+const renderSkillArtifact = `---
 type: skill
 version: 1.0.0
 ---
 `
 
-// fixtureRegistry writes a small multi-layer filesystem registry with finance
-// and security artifacts and returns its path. The canonical ID strips the
-// leading layer directory, so team-finance/finance/ap/pay-invoice has the
+// renderFixtureRegistry writes a small multi-layer filesystem registry with
+// finance and security artifacts and returns its path. The canonical ID strips
+// the leading layer directory, so team-finance/finance/ap/pay-invoice has the
 // canonical ID finance/ap/pay-invoice.
-func fixtureRegistry(t *testing.T) string {
+func renderFixtureRegistry(t *testing.T) string {
 	t.Helper()
 	reg := t.TempDir()
-	testharness.WriteTree(t, reg,
+	testharness.WriteTree(
+		t, reg,
 		testharness.WriteTreeOption{Path: ".registry-config", Content: "multi_layer: true\n"},
 
 		// finance/ap/pay-invoice (skill)
-		testharness.WriteTreeOption{Path: "team-finance/finance/ap/pay-invoice/ARTIFACT.md", Content: skillArtifact},
-		testharness.WriteTreeOption{Path: "team-finance/finance/ap/pay-invoice/SKILL.md", Content: skillSrc("pay-invoice")},
+		testharness.WriteTreeOption{Path: "team-finance/finance/ap/pay-invoice/ARTIFACT.md", Content: renderSkillArtifact},
+		testharness.WriteTreeOption{Path: "team-finance/finance/ap/pay-invoice/SKILL.md", Content: renderSkillSrc("pay-invoice")},
 
 		// finance/close/run-variance (skill) — second artifact in finance-pack
-		testharness.WriteTreeOption{Path: "team-finance/finance/close/run-variance/ARTIFACT.md", Content: skillArtifact},
-		testharness.WriteTreeOption{Path: "team-finance/finance/close/run-variance/SKILL.md", Content: skillSrc("run-variance")},
+		testharness.WriteTreeOption{Path: "team-finance/finance/close/run-variance/ARTIFACT.md", Content: renderSkillArtifact},
+		testharness.WriteTreeOption{Path: "team-finance/finance/close/run-variance/SKILL.md", Content: renderSkillSrc("run-variance")},
 
 		// finance/experimental/draft (skill) — excluded by finance-pack exclude
-		testharness.WriteTreeOption{Path: "team-finance/finance/experimental/draft/ARTIFACT.md", Content: skillArtifact},
-		testharness.WriteTreeOption{Path: "team-finance/finance/experimental/draft/SKILL.md", Content: skillSrc("draft")},
+		testharness.WriteTreeOption{Path: "team-finance/finance/experimental/draft/ARTIFACT.md", Content: renderSkillArtifact},
+		testharness.WriteTreeOption{Path: "team-finance/finance/experimental/draft/SKILL.md", Content: renderSkillSrc("draft")},
 
 		// security/baseline/lockdown (skill) — security-baseline plugin
-		testharness.WriteTreeOption{Path: "team-security/security/baseline/lockdown/ARTIFACT.md", Content: skillArtifact},
-		testharness.WriteTreeOption{Path: "team-security/security/baseline/lockdown/SKILL.md", Content: skillSrc("lockdown")},
+		testharness.WriteTreeOption{Path: "team-security/security/baseline/lockdown/ARTIFACT.md", Content: renderSkillArtifact},
+		testharness.WriteTreeOption{Path: "team-security/security/baseline/lockdown/SKILL.md", Content: renderSkillSrc("lockdown")},
 
 		// notes/journal (skill) — selected by no plugin, must be dropped
-		testharness.WriteTreeOption{Path: "personal/notes/journal/ARTIFACT.md", Content: skillArtifact},
-		testharness.WriteTreeOption{Path: "personal/notes/journal/SKILL.md", Content: skillSrc("journal")},
+		testharness.WriteTreeOption{Path: "personal/notes/journal/ARTIFACT.md", Content: renderSkillArtifact},
+		testharness.WriteTreeOption{Path: "personal/notes/journal/SKILL.md", Content: renderSkillSrc("journal")},
 	)
 	return reg
 }
 
-func skillSrc(name string) string {
+func renderSkillSrc(name string) string {
 	return "---\nname: " + name + "\ndescription: A " + name + " skill.\n---\n\nBody for " + name + ".\n"
 }
 
@@ -89,7 +89,7 @@ func renderOpts(t *testing.T, reg, workdir string, harnesses []string) RenderOpt
 // <harness>/<plugin>/....
 func TestRender_MultiHarnessLayout(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	workdir := t.TempDir()
 
 	res, err := Render(context.Background(), renderOpts(t, reg, workdir, []string{"claude-code", "codex", "cursor"}))
@@ -139,7 +139,7 @@ func TestRender_MultiHarnessLayout(t *testing.T) {
 // OpMergeJSON merge concatenates same-key arrays without deduplication.
 func TestRender_OncePerPluginManifestEntry(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	workdir := t.TempDir()
 
 	if _, err := Render(context.Background(), renderOpts(t, reg, workdir, []string{"claude-code"})); err != nil {
@@ -181,9 +181,9 @@ func TestRender_OncePerPluginManifestEntry(t *testing.T) {
 // later one. Two overlapping plugins must claim an artifact only for the first.
 func TestRender_AssignmentByDeclarationOrder(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 
-	records, err := sync.FetchRecords(sync.Options{RegistryPath: reg})
+	records, err := FetchRecords(Options{RegistryPath: reg})
 	if err != nil {
 		t.Fatalf("fetch records: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestRender_AssignmentByDeclarationOrder(t *testing.T) {
 // codex/finance-pack/skills/<name>/.
 func TestRender_DescriptorWiring(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	workdir := t.TempDir()
 
 	if _, err := Render(context.Background(), renderOpts(t, reg, workdir, []string{"codex"})); err != nil {
@@ -240,13 +240,13 @@ func TestRender_DescriptorWiring(t *testing.T) {
 	}
 }
 
-// Spec: §6.7 "Plugin descriptor", open question 8 — a plugin's optional
-// description from publish.yaml propagates through the render into the per-plugin
-// manifest and the root marketplace entry. A plugin that omits the description
-// produces neither key, so a strict manifest schema does not see a null.
+// Spec: §6.7 "Plugin descriptor" — a plugin's optional description from the
+// marketplace target propagates through the render into the per-plugin manifest
+// and the root marketplace entry. A plugin that omits the description produces
+// neither key, so a strict manifest schema does not see a null.
 func TestRender_PluginDescriptionPropagates(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	workdir := t.TempDir()
 
 	opts := renderOpts(t, reg, workdir, []string{"claude-code"})
@@ -316,7 +316,7 @@ func readJSONObject(t *testing.T, path string) map[string]any {
 // Changed=false with an empty change set.
 func TestRender_IdempotentReRender(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	workdir := t.TempDir()
 	opts := renderOpts(t, reg, workdir, []string{"claude-code", "codex"})
 
@@ -344,15 +344,15 @@ func TestRender_IdempotentReRender(t *testing.T) {
 }
 
 // Spec: §7.8 — $PODIUM_CHANGED is "whether the render produced a diff against
-// the checkout" (line 190). A fresh actions/checkout (Pattern A) carries the
-// committed marketplace content but no .podium/sync.lock, because the lock is
-// sync-local state and not committed into the marketplace repository. Re-render
-// into such a checkout must report Changed=false when the rendered tree is
-// byte-identical to the committed content, rather than treating every path as
-// added because no prior lock is present.
+// the checkout". A fresh actions/checkout (Pattern A) carries the committed
+// marketplace content but no .podium/sync.lock, because the lock is sync-local
+// state and not committed into the marketplace repository. Re-render into such a
+// checkout must report Changed=false when the rendered tree is byte-identical to
+// the committed content, rather than treating every path as added because no
+// prior lock is present.
 func TestRender_ChangedFalseOnFreshCheckoutNoLock(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	source := t.TempDir()
 	opts := renderOpts(t, reg, source, []string{"claude-code", "codex"})
 
@@ -396,12 +396,12 @@ func TestRender_ChangedFalseOnFreshCheckoutNoLock(t *testing.T) {
 	}
 }
 
-// Spec: §7.8 — change detection diffs against the checkout content (line 190), so
-// a hand-edit to a committed file that the render rewrites back is detected as a
+// Spec: §7.8 — change detection diffs against the checkout content, so a
+// hand-edit to a committed file that the render rewrites back is detected as a
 // change against disk even when no prior-render lock is present.
 func TestRender_ChangedTrueWhenCheckoutDiffersNoLock(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	source := t.TempDir()
 	opts := renderOpts(t, reg, source, []string{"claude-code"})
 
@@ -448,7 +448,7 @@ func TestRender_ChangedTrueWhenCheckoutDiffersNoLock(t *testing.T) {
 // files (stale-file cleanup) and the change set reports the change.
 func TestRender_StaleFileCleanup(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	workdir := t.TempDir()
 	opts := renderOpts(t, reg, workdir, []string{"claude-code"})
 
@@ -486,7 +486,7 @@ func TestRender_StaleFileCleanup(t *testing.T) {
 // manifest marker), not the unchanged ones.
 func TestRender_ChangeSetNamesChangedArtifact(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	workdir := t.TempDir()
 	opts := renderOpts(t, reg, workdir, []string{"claude-code"})
 
@@ -564,7 +564,7 @@ func TestRender_FetchError(t *testing.T) {
 // than reporting a successful render against an unwritable destination.
 func TestRender_WriteError(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	// Point the workdir at a path whose parent is a regular file, so
 	// materialize.Write cannot create the destination tree.
 	parent := t.TempDir()
@@ -586,7 +586,7 @@ func TestRender_WriteError(t *testing.T) {
 // naming the output rather than reporting a render against unobservable state.
 func TestRender_CheckoutReadError(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	workdir := t.TempDir()
 	// Occupy a rendered manifest path with a directory so os.ReadFile fails with
 	// "is a directory" rather than "not present".
@@ -608,7 +608,7 @@ func TestRender_CheckoutReadError(t *testing.T) {
 }
 
 // writeLock wraps a lock-write failure with a structured error. A regular file
-// at <workdir>/.podium blocks the lock directory creation inside sync.WriteLock.
+// at <workdir>/.podium blocks the lock directory creation inside WriteLock.
 func TestWriteLock_Error(t *testing.T) {
 	t.Parallel()
 	workdir := t.TempDir()
@@ -629,7 +629,7 @@ func TestWriteLock_Error(t *testing.T) {
 // single claude/ subtree rather than a collision.
 func TestRender_SharedClaudeMarketplace(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	workdir := t.TempDir()
 
 	if _, err := Render(context.Background(), renderOpts(t, reg, workdir, []string{"claude-code", "claude-desktop", "claude-cowork"})); err != nil {
@@ -651,7 +651,7 @@ func TestRender_SharedClaudeMarketplace(t *testing.T) {
 // publish target; Render rejects an output that names one.
 func TestRender_RejectsNonPublishHarness(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 	workdir := t.TempDir()
 
 	_, err := Render(context.Background(), renderOpts(t, reg, workdir, []string{"opencode"}))
@@ -681,7 +681,7 @@ func TestRender_RejectsNonPublishHarness(t *testing.T) {
 // proceeds and emits the same tree as a render with no identity declared.
 func TestRender_IdentityIsDocumentary(t *testing.T) {
 	t.Parallel()
-	reg := fixtureRegistry(t)
+	reg := renderFixtureRegistry(t)
 
 	declared := renderOpts(t, reg, t.TempDir(), []string{"claude-code"})
 	declared.Identity = "someone-else@acme.com"

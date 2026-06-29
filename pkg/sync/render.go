@@ -1,4 +1,4 @@
-package publish
+package sync
 
 import (
 	"context"
@@ -14,14 +14,13 @@ import (
 
 	"github.com/lennylabs/podium/pkg/adapter"
 	"github.com/lennylabs/podium/pkg/materialize"
-	"github.com/lennylabs/podium/pkg/sync"
 )
 
-// This file implements the §7.8 render phase of `podium publish`: it resolves
-// the publishing identity's effective view by reusing the pkg/sync record-fetch
-// path, intersects it with each plugin's scope filter, assigns each selected
-// artifact to its plugin in declaration order, selects the per-harness §7.8
-// emitter, renders each harness's marketplace tree, and writes it into the
+// This file implements the §7.8 render phase of a kind: marketplace target: it
+// resolves the publishing identity's effective view by reusing the FetchRecords
+// record-fetch path, intersects it with each plugin's scope filter, assigns each
+// selected artifact to its plugin in declaration order, selects the per-harness
+// §7.8 emitter, renders each harness's marketplace tree, and writes it into the
 // output working directory through materialize.Write. Reconciliation reuses the
 // sync lock file plus the PodiumOwnedKey/inject stale-file cleanup so a
 // re-render is idempotent and drops files for artifacts that left the view.
@@ -35,7 +34,7 @@ import (
 // harness set and plugin list. Token is the publishing identity's registry
 // credential, attached on every server-source request so the render reflects
 // that identity's effective view (§4.6). HTTPClient is injected by tests; a nil
-// client uses the pkg/sync default.
+// client uses the default.
 type RenderOptions struct {
 	OutputID   string
 	Registry   string
@@ -61,7 +60,7 @@ type RenderResult struct {
 }
 
 // ErrNoEmitter signals that a harness in the output's harness set has no §7.8
-// marketplace emitter. Resolve already rejects such a harness at config
+// marketplace emitter. ValidateOutput already rejects such a harness at config
 // validation, so Render returning it indicates a caller bypassed validation.
 type ErrNoEmitter struct {
 	Harness string
@@ -79,7 +78,7 @@ func (e *ErrNoEmitter) Unwrap() error { return e.Err }
 // it), so the publishing pipeline renders an artifact into exactly one plugin
 // per harness (§7.8 "evaluating the plugin filters in declaration order").
 type assigned struct {
-	record sync.Record
+	record Record
 	plugin PluginFilter
 }
 
@@ -101,7 +100,7 @@ type assigned struct {
 //
 // spec: §7.8 (render pipeline), §4.6 (effective view), §7.5.1 (scope filters).
 func Render(ctx context.Context, opts RenderOptions) (*RenderResult, error) {
-	records, err := sync.FetchRecords(sync.Options{
+	records, err := FetchRecords(Options{
 		RegistryPath: opts.Registry,
 		Token:        opts.Token,
 		HTTPClient:   opts.HTTPClient,
@@ -151,7 +150,7 @@ const removedOwner = "(removed)"
 // filter selects it (§7.8). A record selected by no plugin is dropped. The
 // result preserves the input record order within each plugin so the render is
 // deterministic.
-func assignPlugins(records []sync.Record, plugins []PluginFilter) []assigned {
+func assignPlugins(records []Record, plugins []PluginFilter) []assigned {
 	out := make([]assigned, 0, len(records))
 	for _, rec := range records {
 		for _, p := range plugins {
@@ -168,8 +167,8 @@ func assignPlugins(records []sync.Record, plugins []PluginFilter) []assigned {
 // the sync scope-filter machinery (PluginFilter.ScopeFilter) so plugin selection
 // and sync selection apply identical §7.5.1 glob semantics. An empty filter
 // selects every record, matching ScopeFilter.IsEmpty.
-func pluginSelects(p PluginFilter, rec sync.Record) bool {
-	return len(p.ScopeFilter().Select([]sync.Record{rec})) == 1
+func pluginSelects(p PluginFilter, rec Record) bool {
+	return len(p.ScopeFilter().Select([]Record{rec})) == 1
 }
 
 // resolveEmitters maps the harness set to its distinct emitters, keyed by the
@@ -286,8 +285,8 @@ func pluginsInOrder(assignments []assigned) []PluginFilter {
 // prior-render lock: an unchanged tree reports Changed=false even though no lock
 // is present, which the lock-based comparison could not do.
 func reconcile(workdir, outputID string, rendered []renderedFile) (*RenderResult, error) {
-	prior, _ := sync.ReadLock(workdir)
-	priorMerge := sync.PriorMergeKinds(prior)
+	prior, _ := ReadLock(workdir)
+	priorMerge := PriorMergeKinds(prior)
 
 	files := make([]adapter.File, len(rendered))
 	currentPaths := map[string]bool{}
@@ -297,7 +296,7 @@ func reconcile(workdir, outputID string, rendered []renderedFile) (*RenderResult
 		f := rf.file
 		files[i] = f
 		currentPaths[f.Path] = true
-		merge[f.Path] = sync.MergeKindForOp(f.Op)
+		merge[f.Path] = MergeKindForOp(f.Op)
 		owner[f.Path] = rf.ownerID
 	}
 
@@ -314,7 +313,7 @@ func reconcile(workdir, outputID string, rendered []renderedFile) (*RenderResult
 		return nil, fmt.Errorf("publish %q: write render: %w", outputID, err)
 	}
 
-	sync.Reconcile(workdir, priorMerge, currentPaths)
+	Reconcile(workdir, priorMerge, currentPaths)
 
 	if err := writeLock(workdir, currentPaths, merge); err != nil {
 		return nil, err
@@ -380,21 +379,21 @@ func unionPaths(current map[string]bool, priorMerge map[string]string) map[strin
 
 // writeLock persists the render's lock for the next run's reconciliation: one
 // LockArtifact per written path recording its config-merge kind in Merge. The
-// next render reads it back through sync.PriorMergeKinds so the cleanup treats a
+// next render reads it back through PriorMergeKinds so the cleanup treats a
 // config-merge path (reconcile Podium's entries) differently from a standalone
 // path (remove). Change detection reads the checkout content directly rather than
 // the lock, so the lock carries no per-file content fingerprint and leaves the
 // ContentHash field, which holds the sha256:<hex> artifact content hash
 // everywhere else in pkg/sync, unset.
 func writeLock(workdir string, paths map[string]bool, merge map[string]string) error {
-	lock := &sync.LockFile{Target: workdir}
+	lock := &LockFile{Target: workdir}
 	for _, p := range sortedKeys(paths) {
-		lock.Artifacts = append(lock.Artifacts, sync.LockArtifact{
+		lock.Artifacts = append(lock.Artifacts, LockArtifact{
 			MaterializedPath: p,
 			Merge:            merge[p],
 		})
 	}
-	if err := sync.WriteLock(workdir, lock); err != nil {
+	if err := WriteLock(workdir, lock); err != nil {
 		return fmt.Errorf("publish: write lock: %w", err)
 	}
 	return nil
@@ -428,8 +427,8 @@ func changeSet(before, after, owner map[string]string) (bool, []string) {
 
 // ChangeSummaryJSON renders the change set as the $PODIUM_CHANGE_SUMMARY file
 // body (§7.8): a JSON object with the output ID, whether the render changed, the
-// count, and the changed artifact identifiers. The publish CLI writes this to a
-// temp file and passes its path to the workflow commands.
+// count, and the changed artifact identifiers. The marketplace runner writes this
+// to a temp file and passes its path to the workflow commands.
 func (r *RenderResult) ChangeSummaryJSON() []byte {
 	body := map[string]any{
 		"output":  r.OutputID,

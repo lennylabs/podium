@@ -7,10 +7,11 @@ import (
 
 // Record is one source-neutral artifact ready for a HarnessAdapter or a §7.8
 // marketplace emitter. It is the exported projection of the internal
-// materialRecord: `podium publish` (pkg/publish) reads the same effective view
-// as `podium sync` by calling FetchRecords, so a published marketplace reflects
-// the publishing identity's effective view (§4.6) exactly as a workspace sync
-// would. The fields mirror the adapter.Source inputs an emitter consumes.
+// materialRecord: the marketplace render (Render) reads the same effective view
+// as a workspace sync by calling FetchRecords, so a published marketplace
+// reflects the publishing identity's effective view (§4.6) exactly as a
+// workspace sync would. The fields mirror the adapter.Source inputs an emitter
+// consumes.
 type Record struct {
 	// ID is the canonical artifact path under the registry root.
 	ID string
@@ -36,9 +37,9 @@ type Record struct {
 // Select returns the records the scope filter selects, applying the §7.5.1
 // include, exclude, and type globs over the canonical artifact IDs. An empty
 // filter selects every record (ScopeFilter.IsEmpty). It is the Record-typed form
-// of the internal filterMaterial used by Run, so `podium publish` intersects a
-// plugin's scope filter with the effective view through the same glob semantics
-// `podium sync` applies to a target scope.
+// of the internal filterMaterial used by Run, so the marketplace render
+// intersects a plugin's scope filter with the effective view through the same
+// glob semantics `podium sync` applies to a target scope.
 func (f ScopeFilter) Select(records []Record) []Record {
 	if f.IsEmpty() {
 		return records
@@ -68,16 +69,18 @@ func (f ScopeFilter) Select(records []Record) []Record {
 // FetchRecords resolves the caller's effective view from the registry source in
 // opts and returns the source-neutral records, dispatching on the §7.5.2 source
 // rule: an http(s):// RegistryPath reads the effective view over HTTP with
-// opts.Token, every other value reads the local filesystem registry. It is the
-// exported entry point `podium publish` uses to read the same view `podium sync`
-// materializes, so the two consumers stay byte-equivalent for the same identity.
+// opts.Token, every other value reads the local filesystem registry. The
+// marketplace render and the workspace materialization both read the same view
+// through it, so the two output kinds stay byte-equivalent for the same identity.
 //
 // The §6.4 workspace overlay in opts.OverlayPath applies identically to both
 // sources. Scope and toggles are not applied here: FetchRecords returns the full
-// effective view, and the caller narrows it (publish intersects each plugin's
-// scope filter; sync applies its target scope).
+// effective view, and the caller narrows it (the marketplace render intersects
+// each plugin's scope filter; the workspace materialization applies its target
+// scope).
 //
-// spec: §7.5.2 (source dispatch), §7.8 (publish reads the same view as sync).
+// spec: §7.5.2 (source dispatch), §7.8 (the marketplace render reads the same
+// view as a workspace sync).
 func FetchRecords(opts Options) ([]Record, error) {
 	if opts.RegistryPath == "" {
 		return nil, ErrNoRegistry
@@ -106,9 +109,10 @@ func FetchRecords(opts Options) ([]Record, error) {
 // standalone path is deleted and its empty parents pruned, and a §6.7
 // config-merge path (the PodiumOwnedKey JSON manifests, the inject blocks) is
 // reconciled in place so the operator's other entries survive. It is the
-// exported form of the internal sync cleanup so `podium publish` reconciles a
-// marketplace tree on re-render through the same code path `podium sync` uses,
-// giving an idempotent re-render and stale-file removal (§7.8 reconciliation).
+// exported form of the internal sync cleanup so the marketplace render
+// reconciles a marketplace tree on re-render through the same code path
+// `podium sync` uses, giving an idempotent re-render and stale-file removal
+// (§7.8 reconciliation).
 //
 // prior maps each prior materialized path to its config-merge kind ("json",
 // "inject", or "" for a standalone file), as PriorMergeKinds returns from a
@@ -125,9 +129,9 @@ func PriorMergeKinds(lock *LockFile) map[string]string {
 }
 
 // MergeKindForOp maps an adapter.FileOp to the lock's config-merge kind string
-// ("json", "inject", or "" for a standalone write), so a publish caller records
-// the same Merge value in its lock that sync does and Reconcile treats the path
-// identically on the next render.
+// ("json", "inject", or "" for a standalone write), so the marketplace render
+// records the same Merge value in its lock that sync does and Reconcile treats
+// the path identically on the next render.
 func MergeKindForOp(op adapter.FileOp) string {
 	return mergeKind(op)
 }

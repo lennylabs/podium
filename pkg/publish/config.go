@@ -2,25 +2,41 @@
 // drives `podium publish` (§7.8). It loads the same three config scopes
 // sync.yaml uses (§7.5.2), resolves each marketplace output against the shared
 // defaults, and validates the result against the publish-target roster and the
-// §7.5.1 glob syntax.
+// §7.5.1 glob syntax. The marketplace component types and the render pipeline
+// live in pkg/sync; this package carries only the publish.yaml loader.
 package publish
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
-	"github.com/lennylabs/podium/pkg/adapter"
 	"github.com/lennylabs/podium/pkg/sync"
 	"gopkg.in/yaml.v3"
 )
 
-// ErrConfigInvalid signals a publish.yaml that fails validation: a harness set
-// naming a non-publish-target harness, or a malformed plugin glob. It maps to
-// config.invalid in §6.10. Callers assert against it via errors.Is.
-var ErrConfigInvalid = errors.New("config.invalid")
+// ErrConfigInvalid is the config.invalid error class for a publish.yaml that
+// fails validation. It aliases sync.ErrConfigInvalid so a caller asserting
+// against either var with errors.Is matches a validation failure from the loader
+// or from the pkg/sync marketplace runner.
+var ErrConfigInvalid = sync.ErrConfigInvalid
+
+// The publish.yaml component types reuse the pkg/sync marketplace types so the
+// loader, the render pipeline, and the runner share one schema definition.
+type (
+	// GitRemote is the `git:` block of a marketplace output (§7.8).
+	GitRemote = sync.GitRemote
+	// PluginFilter is one `plugins:` entry: a named scope filter (§7.8).
+	PluginFilter = sync.PluginFilter
+	// Workflow groups the prepare and publish command lists (§7.8).
+	Workflow = sync.Workflow
+	// Command is one step of a workflow phase (§7.8).
+	Command = sync.Command
+	// Duration is a per-command timeout parsed from a Go duration string.
+	Duration = sync.Duration
+	// ResolvedOutput is one marketplace output with its defaults applied.
+	ResolvedOutput = sync.ResolvedOutput
+)
 
 // PublishConfig is the in-memory representation of `.podium/publish.yaml`
 // (§7.8). Its top-level keys are `defaults` and `marketplaces`. The same schema
@@ -55,107 +71,6 @@ type MarketplaceOutput struct {
 	CommitMessage string         `yaml:"commit_message,omitempty"`
 	Plugins       []PluginFilter `yaml:"plugins,omitempty"`
 	Workflow      Workflow       `yaml:"workflow,omitempty"`
-}
-
-// GitRemote is the `git:` block of a marketplace output: the remote URL the
-// workflow clones and pushes, and the branch it writes (§7.8).
-type GitRemote struct {
-	Remote string `yaml:"remote,omitempty"`
-	Branch string `yaml:"branch,omitempty"`
-}
-
-// PluginFilter is one entry under `plugins:`: a named bundle of selected
-// artifacts defined by a §7.5.1 scope filter (include, exclude, type). The
-// publishing pipeline assigns each selected artifact to its plugin by
-// evaluating the filters in declaration order (§7.8). Description is the
-// optional human-readable plugin description the marketplace emitter carries
-// into the per-plugin manifest (§6.7 "Plugin descriptor", open question 8); it
-// is empty when the operator omits it.
-type PluginFilter struct {
-	Name        string   `yaml:"name"`
-	Description string   `yaml:"description,omitempty"`
-	Include     []string `yaml:"include,omitempty"`
-	Exclude     []string `yaml:"exclude,omitempty"`
-	Type        []string `yaml:"type,omitempty"`
-}
-
-// ScopeFilter returns the §7.5.1 selection this plugin filter expresses,
-// reusing the sync scope-filter machinery so plugin selection and sync
-// selection apply identical glob semantics (§7.8).
-func (p PluginFilter) ScopeFilter() sync.ScopeFilter {
-	return sync.ScopeFilter{Include: p.Include, Exclude: p.Exclude, Types: p.Type}
-}
-
-// Workflow groups the `prepare` and `publish` command lists `podium publish`
-// runs around the render phase (§7.8). prepare places a checkout of the
-// destination repository at the working directory, and publish takes the
-// rendered tree to the remote. PrepareOnError and PublishOnError are optional
-// per-phase cleanup lists: a failure in the prepare phase runs PrepareOnError,
-// and a failure in the publish phase runs PublishOnError, before the failure
-// propagates. The cleanup is scoped to the phase that failed, so a prepare
-// failure does not run cleanup authored for a publish-phase checkout.
-type Workflow struct {
-	Prepare        []Command `yaml:"prepare,omitempty"`
-	Publish        []Command `yaml:"publish,omitempty"`
-	PrepareOnError []Command `yaml:"prepare_on_error,omitempty"`
-	PublishOnError []Command `yaml:"publish_on_error,omitempty"`
-}
-
-// IsZero reports whether the workflow declares no commands. A marketplace whose
-// workflow is zero inherits the default workflow; a non-zero workflow replaces
-// it in full (§7.8).
-func (w Workflow) IsZero() bool {
-	return len(w.Prepare) == 0 && len(w.Publish) == 0 &&
-		len(w.PrepareOnError) == 0 && len(w.PublishOnError) == 0
-}
-
-// commands returns every command the workflow declares across its phases and
-// per-phase cleanup lists, so config validation (§7.8 --check) can check each
-// for well-formedness before any side effect.
-func (w Workflow) commands() []Command {
-	all := make([]Command, 0, len(w.Prepare)+len(w.Publish)+len(w.PrepareOnError)+len(w.PublishOnError))
-	all = append(all, w.Prepare...)
-	all = append(all, w.Publish...)
-	all = append(all, w.PrepareOnError...)
-	all = append(all, w.PublishOnError...)
-	return all
-}
-
-// Command is one step of a workflow phase (§7.8). It is an argv list under
-// `run:` executed directly without a shell, or a string under `sh:` executed
-// through `sh -c`. The per-command flags control failure handling:
-// SkipIfNoChanges skips the command when the render produced no diff,
-// ContinueOnError lets the pipeline proceed past a non-zero exit, and Timeout
-// bounds the command's wall-clock duration.
-type Command struct {
-	Run             []string `yaml:"run,omitempty"`
-	Sh              string   `yaml:"sh,omitempty"`
-	SkipIfNoChanges bool     `yaml:"skip_if_no_changes,omitempty"`
-	ContinueOnError bool     `yaml:"continue_on_error,omitempty"`
-	Timeout         Duration `yaml:"timeout,omitempty"`
-}
-
-// Duration is a time.Duration that unmarshals from a Go duration string such as
-// "30s" or "5m". A bare YAML integer is rejected so a unit is always explicit,
-// because an ambiguous "timeout: 30" reads as nanoseconds under the default
-// yaml decoding and surprises an operator who meant seconds.
-type Duration time.Duration
-
-// Duration returns the timeout as a time.Duration.
-func (d Duration) Duration() time.Duration { return time.Duration(d) }
-
-// UnmarshalYAML parses a duration string into d.
-func (d *Duration) UnmarshalYAML(node *yaml.Node) error {
-	var s string
-	if err := node.Decode(&s); err != nil {
-		return fmt.Errorf("timeout: expected a duration string such as \"30s\": %w", err)
-	}
-	parsed, err := time.ParseDuration(s)
-	if err != nil {
-		return fmt.Errorf("timeout: invalid duration %q: %w", s, err)
-	}
-	*d = Duration(parsed)
-	return nil
 }
 
 // configFileName is the publish config file name in each scope, matching the
@@ -262,21 +177,6 @@ func mergeDefaults(dst *Defaults, src Defaults) {
 	}
 }
 
-// ResolvedOutput is one marketplace output with its defaults applied: the
-// registry, the publishing identity, and the effective workflow (the output's
-// own workflow when it declares one, else the default workflow). The git
-// destination, harness set, plugins, and commit message come from the output.
-type ResolvedOutput struct {
-	ID            string
-	Registry      string
-	Identity      string
-	Git           GitRemote
-	Harnesses     []string
-	CommitMessage string
-	Plugins       []PluginFilter
-	Workflow      Workflow
-}
-
 // Resolve applies the merged defaults to each marketplace output and validates
 // the result. Each marketplace inherits the defaults and may override them
 // (§7.8). The registry resolves per key by the §7.5.2 precedence ladder: the
@@ -289,7 +189,8 @@ type ResolvedOutput struct {
 // over the default identity. Each output's effective workflow is its own
 // workflow when it declares one, else the default workflow in full. Validation
 // rejects an output whose harness set names a non-publish-target harness and an
-// output with a malformed plugin glob, both with config.invalid (§6.10).
+// output with a malformed plugin glob, both with config.invalid (§6.10), through
+// the shared sync.ValidateOutput.
 //
 // spec: §7.5.2 (precedence ladder, env vars above the file scopes), §7.8.
 func (cfg *PublishConfig) Resolve(env func(string) string) ([]ResolvedOutput, error) {
@@ -315,7 +216,7 @@ func (cfg *PublishConfig) Resolve(env func(string) string) ([]ResolvedOutput, er
 			Plugins:       m.Plugins,
 			Workflow:      workflow,
 		}
-		if err := validateOutput(resolved); err != nil {
+		if err := sync.ValidateOutput(resolved); err != nil {
 			return nil, err
 		}
 		out = append(out, resolved)
@@ -333,40 +234,4 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
-}
-
-// validateOutput rejects an output whose harness set names a non-publish-target
-// harness (opencode, none, or an unknown id), an output with a malformed plugin
-// glob, and an output with a malformed workflow command. All map to
-// config.invalid (§6.10). The harness check reuses the §7.8 publish-target
-// selector (adapter.EmitterForHarness), the glob check reuses the §7.5.1 sync
-// glob validator (sync.ValidateGlob), and the command check reuses the per-step
-// validation (Command.validate), so config validation and the render path agree
-// on which harnesses publish, which globs are well-formed, and which commands
-// are well-formed. Validating the workflow commands here makes --check
-// fail-closed: a command that declares neither run: nor sh:, or both, is
-// rejected before the prepare clone or the render runs (§7.8 "--check validates
-// the config only").
-func validateOutput(out ResolvedOutput) error {
-	for _, h := range out.Harnesses {
-		if _, err := adapter.EmitterForHarness(h); err != nil {
-			return fmt.Errorf("%w: marketplace %q harness %q is not a publish target (opencode and none have no git-repo distribution): %w",
-				ErrConfigInvalid, out.ID, h, err)
-		}
-	}
-	for _, p := range out.Plugins {
-		for _, g := range append(append([]string(nil), p.Include...), p.Exclude...) {
-			if err := sync.ValidateGlob(g); err != nil {
-				return fmt.Errorf("%w: marketplace %q plugin %q has a malformed glob %q: %w",
-					ErrConfigInvalid, out.ID, p.Name, g, err)
-			}
-		}
-	}
-	for _, c := range out.Workflow.commands() {
-		if err := c.validate(); err != nil {
-			return fmt.Errorf("%w: marketplace %q command %q: %w",
-				ErrConfigInvalid, out.ID, c.display(), err)
-		}
-	}
-	return nil
 }
