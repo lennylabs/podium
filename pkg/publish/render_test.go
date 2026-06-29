@@ -240,6 +240,77 @@ func TestRender_DescriptorWiring(t *testing.T) {
 	}
 }
 
+// Spec: §6.7 "Plugin descriptor", open question 8 — a plugin's optional
+// description from publish.yaml propagates through the render into the per-plugin
+// manifest and the root marketplace entry. A plugin that omits the description
+// produces neither key, so a strict manifest schema does not see a null.
+func TestRender_PluginDescriptionPropagates(t *testing.T) {
+	t.Parallel()
+	reg := fixtureRegistry(t)
+	workdir := t.TempDir()
+
+	opts := renderOpts(t, reg, workdir, []string{"claude-code"})
+	// finance-pack carries a description; security-baseline omits it.
+	opts.Plugins = []PluginFilter{
+		{Name: "finance-pack", Description: "Accounts-payable skills.", Include: []string{"finance/**"}, Exclude: []string{"finance/experimental/**"}},
+		{Name: "security-baseline", Include: []string{"security/baseline/**"}},
+	}
+	if _, err := Render(context.Background(), opts); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	// The per-plugin manifest carries the description for finance-pack and omits
+	// the key for security-baseline.
+	financePlugin := readJSONObject(t, filepath.Join(workdir, "claude", "finance-pack", ".claude-plugin", "plugin.json"))
+	if financePlugin["description"] != "Accounts-payable skills." {
+		t.Errorf("finance-pack plugin.json description = %v, want %q", financePlugin["description"], "Accounts-payable skills.")
+	}
+	securityPlugin := readJSONObject(t, filepath.Join(workdir, "claude", "security-baseline", ".claude-plugin", "plugin.json"))
+	if _, ok := securityPlugin["description"]; ok {
+		t.Errorf("security-baseline plugin.json must omit description when unset: %v", securityPlugin)
+	}
+
+	// The root marketplace entry carries the description for finance-pack.
+	data, err := os.ReadFile(filepath.Join(workdir, ".claude-plugin", "marketplace.json"))
+	if err != nil {
+		t.Fatalf("read marketplace.json: %v", err)
+	}
+	var manifest struct {
+		Plugins []struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+		} `json:"plugins"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatalf("marketplace.json invalid: %v\n%s", err, data)
+	}
+	byName := map[string]string{}
+	for _, p := range manifest.Plugins {
+		byName[p.Name] = p.Description
+	}
+	if byName["finance-pack"] != "Accounts-payable skills." {
+		t.Errorf("marketplace.json finance-pack description = %q, want %q", byName["finance-pack"], "Accounts-payable skills.")
+	}
+	if byName["security-baseline"] != "" {
+		t.Errorf("marketplace.json security-baseline description = %q, want empty when unset", byName["security-baseline"])
+	}
+}
+
+// readJSONObject reads a JSON file and decodes it into a generic map so a test
+// can assert presence and absence of optional keys.
+func readJSONObject(t *testing.T, path string) map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(data, &obj); err != nil {
+		t.Fatalf("%s is not valid JSON: %v\n%s", path, err, data)
+	}
+	return obj
+}
+
 // Spec: §7.8 — re-rendering an output against an unchanged registry is
 // idempotent: the second render produces the identical tree and reports
 // Changed=false with an empty change set.

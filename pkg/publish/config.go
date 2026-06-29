@@ -67,12 +67,16 @@ type GitRemote struct {
 // PluginFilter is one entry under `plugins:`: a named bundle of selected
 // artifacts defined by a §7.5.1 scope filter (include, exclude, type). The
 // publishing pipeline assigns each selected artifact to its plugin by
-// evaluating the filters in declaration order (§7.8).
+// evaluating the filters in declaration order (§7.8). Description is the
+// optional human-readable plugin description the marketplace emitter carries
+// into the per-plugin manifest (§6.7 "Plugin descriptor", open question 8); it
+// is empty when the operator omits it.
 type PluginFilter struct {
-	Name    string   `yaml:"name"`
-	Include []string `yaml:"include,omitempty"`
-	Exclude []string `yaml:"exclude,omitempty"`
-	Type    []string `yaml:"type,omitempty"`
+	Name        string   `yaml:"name"`
+	Description string   `yaml:"description,omitempty"`
+	Include     []string `yaml:"include,omitempty"`
+	Exclude     []string `yaml:"exclude,omitempty"`
+	Type        []string `yaml:"type,omitempty"`
 }
 
 // ScopeFilter returns the §7.5.1 selection this plugin filter expresses,

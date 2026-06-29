@@ -60,6 +60,7 @@ A plugin is a named bundle of selected artifacts. The scope filter reuses the `s
 | Key | Type | Meaning |
 |:--|:--|:--|
 | `name` | string | The plugin name. The vendor manifest keys the plugin entry by this name, contributed once per plugin. |
+| `description` | string | Optional human-readable plugin description. The vendor manifest carries it into the per-plugin entry when set. |
 | `include` | list of glob | Artifact IDs to include. |
 | `exclude` | list of glob | Artifact IDs to exclude. Applied after `include`. |
 | `type` | list of string | Restrict the plugin to these artifact types. |
@@ -128,6 +129,7 @@ marketplaces:
     commit_message: "Sync Podium catalog ({{.ChangedCount}} changes) {{.Timestamp}}"
     plugins:
       - name: finance-pack
+        description: Accounts-payable skills and commands.
         include: ["finance/**"]
         exclude: ["finance/experimental/**"]
         type: [skill, command, rule]

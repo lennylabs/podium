@@ -33,6 +33,7 @@ marketplaces:
     commit_message: "Sync Podium catalog ({{.ChangedCount}} changes) {{.Timestamp}}"
     plugins:
       - name: finance-pack
+        description: Accounts-payable skills and commands.
         include: ["finance/**"]
         exclude: ["finance/experimental/**"]
         type: [skill, command, rule]
@@ -137,6 +138,13 @@ func TestLoadMergedConfig_ParsesSpecExample(t *testing.T) {
 	finance := agents.Plugins[0]
 	if finance.Name != "finance-pack" {
 		t.Errorf("plugin[0].name = %q", finance.Name)
+	}
+	if finance.Description != "Accounts-payable skills and commands." {
+		t.Errorf("plugin[0].description = %q", finance.Description)
+	}
+	// The security-baseline plugin omits description, so it decodes to empty.
+	if got := agents.Plugins[1].Description; got != "" {
+		t.Errorf("plugin[1].description = %q, want empty when omitted", got)
 	}
 	if !equalStrings(finance.Include, []string{"finance/**"}) {
 		t.Errorf("finance include = %v", finance.Include)

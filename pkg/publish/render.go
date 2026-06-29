@@ -224,7 +224,7 @@ func renderEmitter(ctx context.Context, emitter adapter.MarketplaceEmitter, assi
 	seenPlugin := map[string]bool{}
 	// Components, one render per assigned artifact.
 	for _, a := range assignments {
-		desc := adapter.PluginDescriptor{Name: a.plugin.Name, Prefix: emitter.ID()}
+		desc := adapter.PluginDescriptor{Name: a.plugin.Name, Description: a.plugin.Description, Prefix: emitter.ID()}
 		out, err := emitter.Component(ctx, adapter.Source{
 			ArtifactID:    a.record.ID,
 			ArtifactBytes: a.record.ArtifactBytes,
@@ -246,7 +246,7 @@ func renderEmitter(ctx context.Context, emitter adapter.MarketplaceEmitter, assi
 		if !seenPlugin[p.Name] {
 			continue
 		}
-		desc := adapter.PluginDescriptor{Name: p.Name, Prefix: emitter.ID()}
+		desc := adapter.PluginDescriptor{Name: p.Name, Description: p.Description, Prefix: emitter.ID()}
 		out, err := emitter.Manifest(ctx, marketplaceName, desc)
 		if err != nil {
 			return nil, fmt.Errorf("publish: emitter %q manifest for plugin %q: %w", emitter.ID(), p.Name, err)
