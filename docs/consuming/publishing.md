@@ -204,7 +204,7 @@ acme-agents/
   .agents/plugins/marketplace.json       # Codex; references ./codex/<plugin>
   .cursor-plugin/marketplace.json        # Cursor; references ./cursor/<plugin>
   claude/finance-pack/.claude-plugin/plugin.json + skills/ agents/ commands/ hooks/ .mcp.json
-  codex/finance-pack/.codex-plugin/plugin.json   + skills/ hooks/ .app.json .mcp.json
+  codex/finance-pack/.codex-plugin/plugin.json   + skills/ hooks/ .mcp.json
   cursor/finance-pack/.cursor-plugin/plugin.json + skills/ rules/ mcp.json
   claude/security-baseline/...  codex/security-baseline/...  cursor/security-baseline/...
 ```
@@ -214,19 +214,21 @@ Each vendor manifest lists the same plugin set and points its entries at that ve
 | Format | Root manifest | Per-plugin manifest | Components |
 |:--|:--|:--|:--|
 | Claude (Code, Desktop, Cowork) | `.claude-plugin/marketplace.json` | `.claude-plugin/plugin.json` | `skills/`, `agents/`, `commands/`, `hooks/hooks.json`, `.mcp.json` |
-| Codex | `.agents/plugins/marketplace.json` | `.codex-plugin/plugin.json` | `skills/`, `hooks/hooks.json`, `.app.json`, `.mcp.json` |
+| Codex | `.agents/plugins/marketplace.json` | `.codex-plugin/plugin.json` | `skills/`, `hooks/hooks.json`, `.mcp.json` |
 | Cursor | `.cursor-plugin/marketplace.json` | `.cursor-plugin/plugin.json` | `skills/`, `rules/*.mdc`, `mcp.json` |
 | Gemini | `gemini-extension.json` (one per repository) | n/a | `commands/*.toml`, context file, `mcpServers` |
 | Pi | root `package.json` (`pi-package` keyword, `pi.skills` array) | n/a | `skills/<name>/SKILL.md` |
 | Hermes | none (skills discovered under root `skills/`) | n/a | `skills/<name>/SKILL.md` with `references/`, `scripts/`, `assets/` |
 
-The Codex per-plugin subtree carries an `.app.json` component alongside its `plugin.json`. The Claude, Codex, and Cursor manifests sit at distinct fixed locations and coexist in one repository, each read only by its own harness. A Gemini output occupies the whole repository (one extension per repository) and a Hermes tap defaults to a root `skills/` directory, so those two take their own output. The Claude, Codex, and Cursor JSON manifests merge with the Podium-owned merge tag, so a stale plugin entry drops out on re-render. The Hermes tap and the Pi skills subtree carry no merged manifest and reconcile through the sync lock file.
+The Claude, Codex, and Cursor manifests sit at distinct fixed locations and coexist in one repository, each read only by its own harness. A Gemini output occupies the whole repository (one extension per repository) and a Hermes tap defaults to a root `skills/` directory, so those two take their own output. The Claude, Codex, and Cursor JSON manifests merge with the Podium-owned merge tag, so a stale plugin entry drops out on re-render. The Hermes tap and the Pi skills subtree carry no merged manifest and reconcile through the sync lock file.
 
 ---
 
 ## Publishing identity and the effective view
 
 The published marketplace reflects the publishing identity's effective view intersected with the plugin scope filters. `publish.yaml` carries `identity` so the operator selects the principal whose visibility defines what reaches the marketplace. A principal that can see restricted layers would render them into the output, so the publishing identity is a security-relevant setting. Publish a public marketplace under an identity scoped to the artifacts intended for it.
+
+Against a server-source registry, `podium publish` binds the declared `identity` to the resolved credential before reading the effective view. It decodes the credential's `sub` and `email` claims and requires one to equal `identity`; a credential that authenticates as a different principal fails closed with `publish.identity_mismatch` and renders nothing. The credential is `PODIUM_TOKEN` when set, otherwise the read-CLI session token or the `podium login` keychain token. A declared `identity` with no resolved credential also fails closed, because the render would otherwise reach the registry anonymously. A filesystem-source registry has no authenticated principal, so a declared `identity` is documentary there and the render reads the local view directly.
 
 ---
 

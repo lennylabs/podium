@@ -422,6 +422,65 @@ func TestResolve_RegistryEnvPrecedence(t *testing.T) {
 	})
 }
 
+// TestResolve_PerOutputRegistryAndIdentityOverride asserts the §7.8 rule that a
+// marketplace inherits the defaults and may override them: an output's own
+// registry and identity replace the defaults for that output, while a sibling
+// output that declares neither inherits the defaults. The PODIUM_REGISTRY env
+// var still wins over a per-output registry, matching the §7.5.2 ladder.
+func TestResolve_PerOutputRegistryAndIdentityOverride(t *testing.T) {
+	cfg := &PublishConfig{
+		Defaults: Defaults{
+			Registry: "https://default.example.com",
+			Identity: "default@acme.com",
+		},
+		Marketplaces: []MarketplaceOutput{
+			{ID: "inherits", Harnesses: []string{"claude-code"}},
+			{
+				ID:        "overrides",
+				Registry:  "https://override.example.com",
+				Identity:  "override@acme.com",
+				Harnesses: []string{"cursor"},
+			},
+		},
+	}
+
+	outputs, err := cfg.Resolve(func(string) string { return "" })
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(outputs) != 2 {
+		t.Fatalf("outputs len = %d, want 2", len(outputs))
+	}
+
+	inherits := outputs[0]
+	if inherits.Registry != "https://default.example.com" || inherits.Identity != "default@acme.com" {
+		t.Errorf("inherits did not inherit defaults: registry=%q identity=%q", inherits.Registry, inherits.Identity)
+	}
+
+	overrides := outputs[1]
+	if overrides.Registry != "https://override.example.com" {
+		t.Errorf("overrides registry = %q, want the per-output value", overrides.Registry)
+	}
+	if overrides.Identity != "override@acme.com" {
+		t.Errorf("overrides identity = %q, want the per-output value", overrides.Identity)
+	}
+
+	// PODIUM_REGISTRY wins over a per-output registry (the §7.5.2 ladder).
+	env := func(k string) string {
+		if k == "PODIUM_REGISTRY" {
+			return "https://from-env.example.com"
+		}
+		return ""
+	}
+	envOutputs, err := cfg.Resolve(env)
+	if err != nil {
+		t.Fatalf("Resolve with env: %v", err)
+	}
+	if got := envOutputs[1].Registry; got != "https://from-env.example.com" {
+		t.Errorf("env registry = %q, want PODIUM_REGISTRY to win over the per-output registry", got)
+	}
+}
+
 // TestResolve_NilConfig confirms Resolve on a nil config returns no outputs and
 // no error, so a caller that loaded an absent config does not have to nil-check
 // before resolving.

@@ -33,7 +33,7 @@ The table records each harness's git-repo distribution path, verified against ve
 | Harness | Git-repo distribution | Manifest (fixed location) | Per-plugin manifest | Components | Publish target |
 | --- | --- | --- | --- | --- | --- |
 | `claude-code`, `claude-desktop`, `claude-cowork` | marketplace, shared format | `.claude-plugin/marketplace.json` (root) | `.claude-plugin/plugin.json` | `skills/`, `agents/`, `commands/`, `hooks/`, `.mcp.json` | yes (one Claude marketplace) |
-| `codex` | marketplace | `.agents/plugins/marketplace.json` (root) | `.codex-plugin/plugin.json` | `skills/`, `hooks/hooks.json`, `.app.json`, `.mcp.json` | yes |
+| `codex` | marketplace | `.agents/plugins/marketplace.json` (root) | `.codex-plugin/plugin.json` | `skills/`, `hooks/hooks.json`, `.mcp.json` | yes |
 | `cursor` | team marketplace | `.cursor-plugin/marketplace.json` (root) | `.cursor-plugin/plugin.json` | `skills/`, `rules/*.mdc`, `mcp.json` | yes |
 | `gemini` | extension | `gemini-extension.json` (root); one extension per repo | n/a | `commands/*.toml`, `GEMINI.md` or `contextFileName`, `mcpServers` | yes |
 | `pi` | git package | root `package.json` with a `pi.skills` array and a `pi-package` keyword | n/a | `skills/<name>/SKILL.md` | yes |

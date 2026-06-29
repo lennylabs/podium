@@ -20,7 +20,7 @@ description: The publish.yaml config schema that drives podium publish: defaults
 | Project-shared | `<workspace>/.podium/publish.yaml` (committed) |
 | Project-local | `<workspace>/.podium/publish.local.yaml` (gitignored) |
 
-The `defaults` block merges per key: a higher-precedence non-empty value wins. The `marketplaces` list is replaced as a whole: the highest-precedence scope that declares a non-empty `marketplaces:` replaces the entire list. `podium publish --config <path>` reads one file directly and skips the scope merge. The registry resolves by the same ladder `sync.yaml` uses: `PODIUM_REGISTRY` wins over `defaults.registry`.
+The `defaults` block merges per key: a higher-precedence non-empty value wins. The `marketplaces` list is replaced as a whole: the highest-precedence scope that declares a non-empty `marketplaces:` replaces the entire list. `podium publish --config <path>` reads one file directly and skips the scope merge. Each marketplace inherits the defaults and may override the registry and the identity. The registry resolves by the same ladder `sync.yaml` uses: `PODIUM_REGISTRY` wins over a per-output `registry`, which wins over `defaults.registry`.
 
 ## Top-level keys
 
@@ -44,6 +44,8 @@ Each entry is one output.
 | Key | Type | Meaning |
 |:--|:--|:--|
 | `id` | string | The output identifier, selected by `--output <id>`. |
+| `registry` | string | Optional. Overrides `defaults.registry` for this output. `PODIUM_REGISTRY` still wins over it. |
+| `identity` | string | Optional. Overrides `defaults.identity` for this output. |
 | `git.remote` | string | The remote URL the workflow clones and pushes. Injected as `$PODIUM_GIT_REMOTE`. |
 | `git.branch` | string | The branch the output writes. Injected as `$PODIUM_GIT_BRANCH`. |
 | `harnesses` | list of string | The harness set. Each must be a publish target (Claude surfaces, `codex`, `cursor`, `gemini`, `pi`, `hermes`). Naming `opencode` or `none` fails validation with `config.invalid`. |

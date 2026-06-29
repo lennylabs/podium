@@ -152,6 +152,44 @@ func TestDoJSON_NoTokenSendsNoAuthHeader(t *testing.T) {
 	}
 }
 
+// Spec: §7.8 — `podium publish` resolves the registry credential through
+// PODIUM_TOKEN, the credential the §7.8 GitHub Actions example exports as "the
+// publishing identity's registry credential". A set PODIUM_TOKEN wins over the
+// shared read-CLI sources so a CI run following the documented pattern resolves
+// the publishing identity's view.
+func TestReadPublishToken_PrefersPodiumToken(t *testing.T) {
+	t.Setenv("PODIUM_TOKEN", "publish-token")
+	// A session token is also present; PODIUM_TOKEN must still win.
+	t.Setenv("PODIUM_SESSION_TOKEN", "session-token")
+	if got := readPublishToken("https://podium.acme.com"); got != "publish-token" {
+		t.Errorf("readPublishToken = %q, want PODIUM_TOKEN to win (%q)", got, "publish-token")
+	}
+}
+
+// Spec: §7.8 — with PODIUM_TOKEN unset, `podium publish` falls back to the
+// read-CLI resolution (the §6.3.2 session token, then the keychain token), so an
+// interactive operator who ran `podium login` need not also export PODIUM_TOKEN.
+func TestReadPublishToken_FallsBackToReadCLIToken(t *testing.T) {
+	t.Setenv("PODIUM_TOKEN", "")
+	t.Setenv("PODIUM_SESSION_TOKEN", "session-token")
+	if got := readPublishToken("https://podium.acme.com"); got != "session-token" {
+		t.Errorf("readPublishToken = %q, want the read-CLI session token (%q)", got, "session-token")
+	}
+}
+
+// With no credential at all, readPublishToken resolves to the empty string so
+// the publish render reaches a server source anonymously, which the §7.8
+// identity check then rejects when an identity is declared.
+func TestReadPublishToken_EmptyWhenNoCredential(t *testing.T) {
+	t.Setenv("PODIUM_TOKEN", "")
+	t.Setenv("PODIUM_SESSION_TOKEN", "")
+	t.Setenv("PODIUM_SESSION_TOKEN_FILE", "")
+	t.Setenv("PODIUM_TOKEN_KEYCHAIN_NAME", "podium-nonexistent-test-service")
+	if got := readPublishToken("https://podium.acme.com"); got != "" {
+		t.Errorf("readPublishToken = %q, want empty with no credential configured", got)
+	}
+}
+
 // Spec: §7.6.1 — with no credential configured the read CLI reaches the
 // registry anonymously (no Authorization header), matching the prior behavior.
 func TestReadCLI_NoTokenSendsNoAuthHeader(t *testing.T) {

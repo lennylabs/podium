@@ -358,7 +358,7 @@ Codex consumes `AGENTS.md` for rules and now has native skill, subagent, and hoo
 - `rule_mode: auto` is not supported; ingest fails with a lint error.
 - Codex reads hooks from the `[hooks]` table in `.codex/config.toml`, so `hook` artifacts materialize rather than failing ingest. Codex runs these hooks in its interactive mode; `codex exec` does not fire lifecycle hooks in codex-cli 0.136.0.
 - Skills live at `.agents/skills/`, not `.codex/skills/`. Subagents are TOML at `.codex/agents/<name>.toml`.
-- Codex also has a git-repo marketplace. `podium publish` writes `.agents/plugins/marketplace.json` at the repository root and a per-plugin `.codex-plugin/plugin.json` with `skills/`, `hooks/hooks.json`, `.app.json`, and `.mcp.json` components. Install with `codex plugin marketplace add owner/repo`. See [Publishing](publishing).
+- Codex also has a git-repo marketplace. `podium publish` writes `.agents/plugins/marketplace.json` at the repository root and a per-plugin `.codex-plugin/plugin.json` with `skills/`, `hooks/hooks.json`, and `.mcp.json` components. Install with `codex plugin marketplace add owner/repo`. See [Publishing](publishing).
 
 ---
 

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/lennylabs/podium/pkg/publish"
@@ -111,11 +112,11 @@ func publishCmd(args []string) int {
 	failures := 0
 	for _, out := range outputs {
 		// §7.8: a live render fetches the publishing identity's effective view
-		// from a server-source registry, so it carries the caller credential the
-		// read + sync paths use. --check renders nothing, so it needs no token.
+		// from a server-source registry, so it carries that identity's registry
+		// credential. --check renders nothing, so it needs no token.
 		token := ""
 		if !*check && sync.IsServerSource(out.Registry) {
-			token = readCLIToken(out.Registry)
+			token = readPublishToken(out.Registry)
 		}
 		res, rerr := publish.Run(ctx, publish.RunOptions{
 			Output:  out,
@@ -190,6 +191,22 @@ func resolvePublishOutputs(configPath string) ([]publish.ResolvedOutput, error) 
 		cfg = merged
 	}
 	return cfg.Resolve(os.Getenv)
+}
+
+// readPublishToken resolves the §7.8 registry credential for `podium publish`.
+// PODIUM_TOKEN is the documented credential: the §7.8 GitHub Actions example
+// exports it as "the publishing identity's registry credential", and the
+// rendering-identity rule states the registry credential PODIUM_TOKEN carries
+// the publishing identity. It takes precedence over the shared read-CLI sources
+// so a CI run following the documented pattern resolves the publishing
+// identity's view. When PODIUM_TOKEN is unset it falls back to the read-CLI
+// resolution (the §6.3.2 session token, then the `podium login` keychain token),
+// so an interactive operator who ran `podium login` need not also export it.
+func readPublishToken(registry string) string {
+	if tok := strings.TrimSpace(os.Getenv("PODIUM_TOKEN")); tok != "" {
+		return tok
+	}
+	return readCLIToken(registry)
 }
 
 // selectOutput returns the resolved output whose id matches name (§7.8 --output).

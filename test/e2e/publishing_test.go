@@ -8,8 +8,8 @@ package e2e
 // whose prepare and publish commands run real git. They assert the rendered
 // repository layout (the vendor manifests at their fixed root locations, the
 // per-harness <subtree>/<plugin>/ content, and the Codex plugin subtree carrying
-// .app.json and .mcp.json per the §6.7 distribution table), the once-per-plugin
-// manifest entry for a multi-artifact plugin, idempotent re-render (a second run
+// the .codex-plugin/plugin.json and .mcp.json per the §7.8 emitter prose), the
+// once-per-plugin manifest entry for a multi-artifact plugin, idempotent re-render (a second run
 // against the unchanged catalog yields no second commit), --dry-run printing the
 // substituted commands while writing nothing to the remote, --check validating
 // the config, and a harness set naming opencode or none exiting non-zero with
@@ -278,7 +278,7 @@ func atoiTrim(t *testing.T, s string) int {
 // bare remote: prepare clones it, Podium renders the tree, publish adds, commits,
 // and pushes. The pushed repository carries each format's manifest at its fixed
 // root location and the per-harness, per-plugin content, including the Codex
-// plugin subtree's .app.json and .mcp.json (§6.7 distribution table).
+// plugin subtree's .codex-plugin/plugin.json and .mcp.json (§7.8 emitter prose).
 func TestPublishing_FullRunRendersAndPushes(t *testing.T) {
 	t.Parallel()
 	requireGit(t)
@@ -310,8 +310,6 @@ func TestPublishing_FullRunRendersAndPushes(t *testing.T) {
 		"codex/finance-pack/.codex-plugin/plugin.json",
 		"codex/finance-pack/skills/run-variance/SKILL.md",
 		"codex/finance-pack/.mcp.json",
-		// The Codex plugin subtree carries .app.json per the §6.7 table.
-		"codex/finance-pack/.app.json",
 		"cursor/finance-pack/.cursor-plugin/plugin.json",
 		"cursor/finance-pack/skills/run-variance/SKILL.md",
 		// helpers (single-artifact plugin) content.
@@ -322,8 +320,15 @@ func TestPublishing_FullRunRendersAndPushes(t *testing.T) {
 		}
 	}
 
-	// The Codex .app.json is valid JSON carrying the plugin name.
-	assertJSONField(t, tree["codex/finance-pack/.app.json"], "name", "finance-pack")
+	// The Codex per-plugin manifest is valid JSON carrying the plugin name, and
+	// the §7.8 emitter component set omits .app.json, so the subtree must not
+	// carry one.
+	assertJSONField(t, tree["codex/finance-pack/.codex-plugin/plugin.json"], "name", "finance-pack")
+	for p := range tree {
+		if strings.HasSuffix(p, ".app.json") {
+			t.Errorf("pushed tree must not carry a Codex .app.json (omitted from the §7.8 component set), got %q", p)
+		}
+	}
 }
 
 // A multi-artifact plugin (finance-pack carries an agent, a skill, and an
@@ -455,6 +460,44 @@ func TestPublishing_NonPublishHarnessRejected(t *testing.T) {
 		})
 	}
 }
+
+// Spec: §7.8 — the publishing identity is a security-relevant setting binding the
+// render to a principal's effective view (§4.6). Against a server source, a
+// PODIUM_TOKEN whose principal differs from the declared identity fails closed
+// before any fetch, so a token that can see restricted layers cannot silently
+// publish that principal's view. The render reaches a server source, so it uses
+// PODIUM_TOKEN as the credential (the §7.8 documented credential), and the check
+// rejects it because its principal is not the declared identity.
+func TestPublishing_IdentityMismatchFailsClosed(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+	remote := bareRemote(t)
+	// A server-source registry: the render binds the declared identity to the
+	// PODIUM_TOKEN principal. The URL is never contacted because the check
+	// short-circuits before the fetch.
+	cfg := writePublishYAML(t, "https://podium.invalid", remote, "claude-code")
+	// publish.yaml declares identity publisher@acme.com; the token authenticates
+	// as a different principal.
+	env := append(gitEnv(), "PODIUM_TOKEN="+mismatchJWT)
+	res := runPodium(t, "", env, "publish", "--config", cfg, "--output", "acme-agents")
+	if res.Exit != 1 {
+		t.Fatalf("publish with a mismatched identity exit=%d, want 1\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "identity_mismatch") {
+		t.Errorf("stderr missing 'identity_mismatch':\n%s", res.Stderr)
+	}
+	if n := remoteCommitCount(t, remote); n != 1 {
+		t.Errorf("a failed identity check must push nothing: commit count = %d, want 1 (the seed)", n)
+	}
+}
+
+// mismatchJWT is a signature-less JWT whose principal (sub/email is bob) differs
+// from the publisher@acme.com identity writePublishYAML declares. The publish
+// identity check decodes the claims without verifying the signature, so the fixed
+// .sig segment is never read. The payload is
+// {"sub":"bob","email":"bob@acme.com"} base64url-encoded.
+const mismatchJWT = "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0." +
+	"eyJzdWIiOiJib2IiLCJlbWFpbCI6ImJvYkBhY21lLmNvbSJ9.sig"
 
 // ---- assertion helpers ------------------------------------------------------
 

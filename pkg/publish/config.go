@@ -42,10 +42,14 @@ type Defaults struct {
 
 // MarketplaceOutput is one entry under `marketplaces:`: a named publishing
 // destination with a git repository, a harness set, a plugin list, and a
-// workflow. An output that declares `workflow` replaces the default workflow
-// for that output in full (§7.8).
+// workflow. Each marketplace inherits the defaults and may override them (§7.8):
+// Registry and Identity, when set, replace the corresponding default for that
+// output, and an output that declares `workflow` replaces the default workflow
+// for that output in full.
 type MarketplaceOutput struct {
 	ID            string         `yaml:"id"`
+	Registry      string         `yaml:"registry,omitempty"`
+	Identity      string         `yaml:"identity,omitempty"`
 	Git           GitRemote      `yaml:"git,omitempty"`
 	Harnesses     []string       `yaml:"harnesses,omitempty"`
 	CommitMessage string         `yaml:"commit_message,omitempty"`
@@ -270,16 +274,18 @@ type ResolvedOutput struct {
 }
 
 // Resolve applies the merged defaults to each marketplace output and validates
-// the result. The registry resolves per key by the §7.5.2 precedence ladder:
-// the PODIUM_REGISTRY env var wins over the merged defaults.registry, mirroring
-// sync's Resolve (pkg/sync/resolve.go). env is os.Getenv or a test stub; a nil
-// env reads no environment. The §7.8 Pattern A CI run depends on this: it sets
+// the result. Each marketplace inherits the defaults and may override them
+// (§7.8). The registry resolves per key by the §7.5.2 precedence ladder: the
+// PODIUM_REGISTRY env var wins over the output's own registry, which in turn
+// wins over the merged defaults.registry, mirroring sync's Resolve
+// (pkg/sync/resolve.go). env is os.Getenv or a test stub; a nil env reads no
+// environment. The §7.8 Pattern A CI run depends on the env level: it sets
 // PODIUM_REGISTRY as an env var with no defaults.registry in publish.yaml.
-// Identity has no recognized PODIUM_* env var, so it comes from defaults alone.
-// Each output's effective workflow is its own workflow when it declares one,
-// else the default workflow in full (§7.8). Validation rejects an output whose
-// harness set names a non-publish-target harness and an output with a malformed
-// plugin glob, both with config.invalid (§6.10).
+// Identity has no recognized PODIUM_* env var, so the output's own identity wins
+// over the default identity. Each output's effective workflow is its own
+// workflow when it declares one, else the default workflow in full. Validation
+// rejects an output whose harness set names a non-publish-target harness and an
+// output with a malformed plugin glob, both with config.invalid (§6.10).
 //
 // spec: §7.5.2 (precedence ladder, env vars above the file scopes), §7.8.
 func (cfg *PublishConfig) Resolve(env func(string) string) ([]ResolvedOutput, error) {
@@ -289,7 +295,6 @@ func (cfg *PublishConfig) Resolve(env func(string) string) ([]ResolvedOutput, er
 	if env == nil {
 		env = func(string) string { return "" }
 	}
-	registry := firstNonEmpty(env("PODIUM_REGISTRY"), cfg.Defaults.Registry)
 	out := make([]ResolvedOutput, 0, len(cfg.Marketplaces))
 	for _, m := range cfg.Marketplaces {
 		workflow := m.Workflow
@@ -298,8 +303,8 @@ func (cfg *PublishConfig) Resolve(env func(string) string) ([]ResolvedOutput, er
 		}
 		resolved := ResolvedOutput{
 			ID:            m.ID,
-			Registry:      registry,
-			Identity:      cfg.Defaults.Identity,
+			Registry:      firstNonEmpty(env("PODIUM_REGISTRY"), m.Registry, cfg.Defaults.Registry),
+			Identity:      firstNonEmpty(m.Identity, cfg.Defaults.Identity),
 			Git:           m.Git,
 			Harnesses:     m.Harnesses,
 			CommitMessage: m.CommitMessage,
