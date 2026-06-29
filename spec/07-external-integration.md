@@ -262,6 +262,7 @@ profiles:
 # Each entry runs as a separate sync with its own scope and target.
 targets:
   - id: claude-code
+    kind: workspace # the default; materializes the project-files layout
     harness: claude-code
     target: ~/.claude/
     profile: project-default
@@ -269,6 +270,27 @@ targets:
     harness: codex
     target: ~/.codex/
     include: ["shared/runbooks/**"]
+
+  - id: acme-agents
+    kind: marketplace # renders the marketplace emitters (§7.8)
+    harnesses: [claude-code, codex, cursor]
+    target: ./build/acme-agents # the working directory the checkout lands in
+    git:
+      remote: git@github.com:acme/agent-marketplace.git
+      branch: main
+    commit_message: "Sync Podium catalog ({{.ChangedCount}}) {{.Timestamp}}"
+    identity: publisher@acme.com # or inherited from defaults.identity
+    plugins:
+      - name: finance-pack
+        include: ["finance/**"]
+    workflow:
+      prepare:
+        - run: ["git", "clone", "$PODIUM_GIT_REMOTE", "$PODIUM_WORKDIR"]
+      publish:
+        - run: ["git", "-C", "$PODIUM_WORKDIR", "add", "-A"]
+        - run: ["git", "-C", "$PODIUM_WORKDIR", "commit", "-m", "$PODIUM_COMMIT_MESSAGE"]
+          skip_if_no_changes: true
+        - run: ["git", "-C", "$PODIUM_WORKDIR", "push", "origin", "$PODIUM_GIT_BRANCH"]
 ```
 
 **Registry source.** `defaults.registry` accepts either a URL or a filesystem path; the client adapts:
@@ -286,6 +308,10 @@ Override an inherited URL with a filesystem path by setting `defaults.registry` 
 - **Multi-target mode.** `podium sync --config <path>` (without `--profile`) iterates `targets:` and runs one sync per entry. Each entry can name a `profile:` (resolved as above) or specify `include`/`exclude`/`type` inline. Each target writes its own `<target>/.podium/sync.lock`; the multi-target invocation does not introduce shared state across targets.
 - **Profile composition.** Profiles do not reference other profiles; nesting is intentionally absent. A team that wants an "extended" profile defines a new entry with the combined include/exclude lists.
 - **Validation.** `podium sync --check` validates the merged config against the schema and reports unresolved profile references, malformed globs, target collisions, and profile-name collisions across scopes (warning, not error).
+
+A `targets:` entry carries a `kind:` field that selects its output format. `kind: workspace` is the default and materializes the project-files layout into the target directory, the layout the harness reads directly. `kind: marketplace` renders the harness's git-repo distribution layout (§7.8) into the target directory as a working checkout. A `kind: workspace` entry carries the harness, the target directory, and the scope fields (`profile`, `include`, `exclude`, and `type`). A `kind: marketplace` entry carries a harness set (`harnesses`), a git remote and branch, a commit message, a plugin list, and a publishing identity. Both kinds may carry a `workflow:` of `prepare` and `publish` command lists. The marketplace fields are rejected on a `kind: workspace` entry, and the workspace scope fields, the watch mode (§7.5.4), and the ephemeral overrides (§7.5.5) are rejected on a `kind: marketplace` entry. The publishing identity is the §4.6 effective-view principal whose visibility defines what reaches the marketplace, and a marketplace target inherits it from an optional `defaults.identity` when it sets none of its own. A configuration that declares only `kind: workspace` targets, or omits `kind` entirely, behaves exactly as before, because `kind` defaults to `workspace`.
+
+A `workflow:` runs only when `podium sync` materializes a target. The MCP server and the in-process bridge read `sync.yaml` for the registry, the profiles, and the version pin, and they never execute a target's `workflow`. A `workflow` command therefore runs with the privileges of the `podium sync` process and never inside the registry server.
 
 ### 7.5.3 Lock File (`.podium/sync.lock`)
 
@@ -677,13 +703,11 @@ Behavior: resolves the registry from the merged config (or `--registry` flag), p
 
 ## 7.8 Marketplace Publishing
 
-`podium publish` renders the catalog into harness-native marketplace repositories and pushes them to git remotes. It is a derived, served output downstream of the registry, consistent with the §1.3 direction in which the registry is the served source of truth. Publishing a repository does not make that repository an authoring source: the catalog continues to enter the registry through the §7.3.1 ingest path, and the published repository is a rendered consequence of the effective view rather than an input to it.
-
-`podium sync` (§7.5) writes the effective view into a local workspace directory. Marketplace publishing renders the same effective view into the git-repo distribution layout each harness imports (the marketplace, extension, package, or tap layout described in §6.7), then runs an operator-configured workflow of shell commands to take the rendered tree to a git remote.
+A `podium sync` target of `kind: marketplace` (§7.5.2) renders the catalog into a harness-native marketplace repository and runs an operator-configured workflow that pushes it to a git remote. It is a derived, served output downstream of the registry, consistent with the §1.3 direction in which the registry is the served source of truth. Publishing a repository does not make that repository an authoring source: the catalog continues to enter the registry through the §7.3.1 ingest path, and the published repository is a rendered consequence of the effective view. A `kind: workspace` target writes the effective view into a local workspace directory the harness reads; a `kind: marketplace` target renders the same effective view into the git-repo distribution layout the harness imports (the marketplace, extension, package, or tap layout in §6.7), then runs the target's `workflow` to take the rendered tree to the remote.
 
 ### Concepts
 
-- **Marketplace output.** A named publishing destination: a git repository, a set of harnesses, a list of plugins, and a workflow. Declared as one entry under `marketplaces:` in `publish.yaml`.
+- **Marketplace output.** A `kind: marketplace` target declared in `sync.yaml` (§7.5.2): a git repository, a harness set, a plugin list, and a workflow.
 - **Plugin.** A named bundle of selected artifacts, defined by a scope filter (`include`, `exclude`, `type`), reusing the §7.5.1 selection. A plugin is the cross-harness unit: it renders into each harness's plugin layout in that harness's subtree. Plugin membership is a packaging decision the operator controls. It is not authored or versioned in the catalog.
 - **Harness set.** The harnesses an output publishes for. Each listed harness contributes its format's manifest and its content subtree to the output repository, and harnesses that share a format contribute one shared manifest.
 
@@ -693,70 +717,9 @@ A publish target is a harness with a git-repo distribution: the marketplace, ext
 
 Claude Code, Claude Desktop, and Claude Cowork read the same `.claude-plugin/marketplace.json`, so one Claude marketplace emitter serves all three, and a harness set that names more than one of them yields one Claude marketplace rather than a collision. The Claude, Codex, and Cursor manifests sit at distinct fixed locations, so they coexist in one repository, each read only by its own harness. The Gemini extension occupies the whole repository, and the Hermes tap defaults to a root `skills/` directory, so those two formats resist sharing a repository and an operator may give each its own output.
 
-### `publish.yaml`
+### Marketplace target schema
 
-`publish.yaml` is an operator-authored client config that lives beside `sync.yaml` under `.podium/`, with the same three-scope resolution (`~/.podium/`, `<workspace>/.podium/`, `<workspace>/.podium/publish.local.yaml`) and the same precedence rules as `sync.yaml` (§7.5.2). Its top-level keys are `defaults` and `marketplaces`. The `defaults` block holds the registry, the publishing identity, and a default `workflow`; each marketplace inherits the defaults and may override them. The `prepare` and `publish` command lists are grouped under a `workflow` key, and a marketplace that declares `workflow` replaces the default workflow for that output.
-
-```yaml
-# .podium/publish.yaml
-defaults:
-  registry: https://podium.acme.com
-  identity: publisher@acme.com          # the effective-view principal the render runs as
-  workflow:
-    prepare:
-      - run: ["git", "clone", "--branch", "$PODIUM_GIT_BRANCH", "$PODIUM_GIT_REMOTE", "$PODIUM_WORKDIR"]
-    publish:
-      - run: ["git", "-C", "$PODIUM_WORKDIR", "add", "-A"]
-      - run: ["git", "-C", "$PODIUM_WORKDIR", "commit", "-m", "$PODIUM_COMMIT_MESSAGE"]
-        skip_if_no_changes: true
-      - run: ["git", "-C", "$PODIUM_WORKDIR", "push", "origin", "$PODIUM_GIT_BRANCH"]
-
-marketplaces:
-  - id: acme-agents
-    git:
-      remote: git@github.com:acme/agent-marketplace.git
-      branch: main
-    harnesses: [claude-code, codex, cursor]   # three formats that coexist at distinct root paths
-    commit_message: "Sync Podium catalog ({{.ChangedCount}} changes) {{.Timestamp}}"
-    plugins:
-      - name: finance-pack
-        include: ["finance/**"]
-        exclude: ["finance/experimental/**"]
-        type: [skill, command, rule]
-      - name: security-baseline
-        include: ["security/baseline/**"]
-
-  - id: acme-gemini
-    git:
-      remote: git@github.com:acme/gemini-extension.git
-      branch: main
-    harnesses: [gemini]                        # one extension per repo, so its own output
-    plugins:
-      - name: house-rules
-        include: ["rules/**"]
-
-  - id: acme-editors-pr
-    git:
-      remote: git@github.com:acme/editor-config.git
-      branch: podium-sync
-    harnesses: [cursor]
-    plugins:
-      - name: house-rules
-        include: ["rules/**"]
-    workflow:                                  # replaces the default workflow for this output
-      prepare:
-        - run: ["git", "clone", "$PODIUM_GIT_REMOTE", "$PODIUM_WORKDIR"]
-        - run: ["git", "-C", "$PODIUM_WORKDIR", "checkout", "-B", "$PODIUM_GIT_BRANCH"]
-      publish:
-        - run: ["git", "-C", "$PODIUM_WORKDIR", "add", "-A"]
-        - run: ["git", "-C", "$PODIUM_WORKDIR", "commit", "-m", "$PODIUM_COMMIT_MESSAGE"]
-          skip_if_no_changes: true
-        - run: ["git", "-C", "$PODIUM_WORKDIR", "push", "origin", "$PODIUM_GIT_BRANCH"]
-        - run: ["gh", "pr", "create", "--fill", "--base", "main", "--head", "$PODIUM_GIT_BRANCH"]
-          continue_on_error: true
-```
-
-Per output the operator sets the destination (`git.remote`, `git.branch`), the harness set, and the plugin list. The git commands are inherited from `defaults.workflow` and reference injected variables, so the common case carries no per-output commands. The third output above overrides the default workflow to push a branch and open a pull request.
+The marketplace-output schema (the git remote and branch, the harness set, the commit message, the plugins, and the workflow) is part of the §7.5.2 `sync.yaml` schema, declared on a `kind: marketplace` target entry. The publishing identity is a marketplace target field inherited from `defaults.identity` when the target sets none of its own. Per target the operator sets the destination (`git.remote`, `git.branch`), the harness set, and the plugin list. The git commands live in the target's `workflow` and reference injected variables.
 
 ### Plugin composition
 
@@ -794,15 +757,15 @@ The publishing pipeline selects a marketplace emitter per harness rather than th
 
 Each emitter that carries a JSON manifest (Claude, Codex, Cursor) writes it through the Podium-owned merge so stale entries drop out on re-render, and contributes one marketplace entry per plugin keyed by the plugin name, contributed once per plugin rather than once per artifact. The Hermes tap and the Pi skills subtree carry no merged manifest and reconcile through the sync lock file.
 
-### `podium publish` and the configurable workflow
+### `podium sync` and the configurable workflow
 
-`podium publish [--output <id>] [--config <path>] [--workdir <dir>] [--dry-run] [--check] [--json]` resolves the marketplace outputs and runs a fixed pipeline per output:
+The multi-target `podium sync --config <path>` run renders each `kind: marketplace` target through a fixed pipeline:
 
 ```
 prepare (operator commands)  ->  render (Podium)  ->  publish (operator commands)
 ```
 
-`prepare` is expected to place a checkout of the destination repository at the working directory. `render` materializes each harness's marketplace tree into that working directory through the marketplace emitters above. `publish` is expected to take the rendered tree to the remote. Podium owns config resolution, the effective view, plugin assignment, rendering, reconciliation, change detection, variable injection, command sequencing, logging, and dry-run. The operator's commands own getting the repository to the working directory and taking the result to the remote. The ordering is the reason the phases exist: the checkout must precede the render so the render reconciles against existing repository content, and the commit must follow it. By default Podium allocates the working directory and `prepare` clones into it. `--workdir <dir>` points the render at an existing checkout, for example a CI checkout step, in which case `prepare` configures git or pulls rather than clones.
+`prepare` is expected to place a checkout of the destination repository at the working directory. `render` materializes each harness's marketplace tree into that working directory through the marketplace emitters above. `publish` is expected to take the rendered tree to the remote. Podium owns config resolution, the effective view, plugin assignment, rendering, reconciliation, change detection, variable injection, command sequencing, logging, and dry-run. The operator's commands own getting the repository to the working directory and taking the result to the remote. The ordering is the reason the phases exist: the checkout must precede the render so the render reconciles against existing repository content, and the commit must follow it. By default Podium allocates the working directory and `prepare` clones into it; a `prepare` phase may instead configure git against an existing checkout, for example a CI checkout step, in which case it configures git or pulls rather than clones. `--dry-run` and `--check` retain their §7.5 meaning. The marketplace fields have no single-target CLI-flag analog, so a marketplace target is reached through the `--config` path (Open questions).
 
 **Injected variables.** Podium passes context to the commands through environment variables rather than by interpreting git state:
 
@@ -814,13 +777,13 @@ prepare (operator commands)  ->  render (Podium)  ->  publish (operator commands
 - `$PODIUM_CHANGE_SUMMARY`: a path to a JSON file describing the changed artifacts.
 - The registry URL, the publishing identity, and the harness set.
 
-**Execution semantics.** A command is an argv list under `run:`, executed directly without a shell, or a string under `sh:`, executed through `sh -c`. The pipeline inherits the ambient environment of the `podium publish` process and adds the injected variables, because git authentication relies on `SSH_AUTH_SOCK`, `GH_TOKEN`, and similar. The pipeline fails fast on the first non-zero exit, with per-command `continue_on_error`, `timeout`, and `skip_if_no_changes`, and an optional per-phase `on_error` cleanup list. `--dry-run` renders into a temporary directory and prints each command with variables substituted without running the `publish` phase. `--check` validates the config only.
+**Execution semantics.** A command is an argv list under `run:`, executed directly without a shell, or a string under `sh:`, executed through `sh -c`. The pipeline inherits the ambient environment of the `podium sync` process and adds the injected variables, because git authentication relies on `SSH_AUTH_SOCK`, `GH_TOKEN`, and similar. The pipeline fails fast on the first non-zero exit, with per-command `continue_on_error`, `timeout`, and `skip_if_no_changes`, and an optional per-phase `on_error` cleanup list. `--dry-run` renders into a temporary directory and prints each command with variables substituted without running the `publish` phase. `--check` validates the config only.
 
-**Trust boundary.** These commands run as subprocesses with the operator's privileges and ambient credentials. They are unrelated to the `MaterializationHook` SPI (§6.6), which is sandboxed to forbid subprocesses, network, and writes outside the destination, and they are unrelated to the `hook` artifact type. The commands come from operator-authored `publish.yaml`, the same trust boundary as a Makefile or a CI script, so a catalog author cannot inject a command. This is why publishing runs in an operator CLI and a server-side publisher is out of scope.
+**Trust boundary.** These commands run as subprocesses with the operator's privileges and ambient credentials. They are unrelated to the `MaterializationHook` SPI (§6.6), which is sandboxed to forbid subprocesses, network, and writes outside the destination, and they are unrelated to the `hook` artifact type. A `workflow` executes only on the `podium sync` CLI path and never inside the registry server or the MCP server (the §7.5.2 workflow-execution boundary). The commands live on `sync.yaml` target entries whose project-shared scope is committed to git (§7.5.2). Whether a project-shared `sync.yaml` workflow needs a trust gate is an open decision (Open question 1). A server-side publisher is out of scope.
 
 ### Rendering identity and effective view
 
-The published marketplace reflects the publishing identity's effective view (§4.6) intersected with the plugin scope filters. `publish.yaml` carries `identity` so the operator selects the principal whose visibility defines what reaches the marketplace. A principal that can see restricted layers would render them into the output, so the publishing identity is a security-relevant setting, and a public marketplace is published under an identity scoped to the artifacts intended for it.
+The published marketplace reflects the publishing identity's effective view (§4.6) intersected with the plugin scope filters. A `kind: marketplace` target carries `identity` so the operator selects the principal whose visibility defines what reaches the marketplace. A principal that can see restricted layers would render them into the output, so the publishing identity is a security-relevant setting, and a public marketplace is published under an identity scoped to the artifacts intended for it.
 
 ### Reconciliation
 
@@ -828,7 +791,7 @@ Re-rendering an output is idempotent. The materialization writer and the sync lo
 
 ### Triggers
 
-The trigger is the `layer.ingested` event (§7.3.2). The ingest orchestrator emits it once per completed layer cycle, so a single source commit that changes many artifacts yields one event rather than one `artifact.published` per artifact. A CI job subscribes a webhook receiver to `layer.ingested` and runs `podium publish`, so one source commit triggers one publish across the artifacts it changed. No new event is required, and `podium publish` has no watch mode.
+The trigger is the `layer.ingested` event (§7.3.2). The ingest orchestrator emits it once per completed layer cycle, so a single source commit that changes many artifacts yields one event rather than one `artifact.published` per artifact. A CI job subscribes a webhook receiver to `layer.ingested` and runs `podium sync --config <path>`, so one source commit triggers one publish across the artifacts it changed. No new event is required, and a marketplace target has no watch mode.
 
 A `layer.ingested` event for a layer that contributes no artifacts to an output produces a render with no diff, which `skip_if_no_changes` suppresses, so an unrelated layer update does not produce an empty commit.
 
@@ -840,7 +803,7 @@ A server-side publisher inside the registry process is out of scope, because it 
 
 A GitHub Actions deployment uses one of two patterns, because GitHub starts a workflow from an external system only through the authenticated REST API (`repository_dispatch` or `workflow_dispatch`), and a Podium webhook receiver posts an HMAC-signed event body that GitHub's dispatch endpoint does not accept.
 
-**Pattern A, scheduled (no bridge).** A workflow in the marketplace repository runs `podium publish` on a cron. `skip_if_no_changes` makes an empty run a no-op, so a 5-to-15-minute poll is inexpensive. No webhook receiver is involved, and the debounce window is not used.
+**Pattern A, scheduled (no bridge).** A workflow in the marketplace repository runs `podium sync --config <path>` on a cron. `skip_if_no_changes` makes an empty run a no-op, so a 5-to-15-minute poll is inexpensive. No webhook receiver is involved, and the debounce window is not used.
 
 ```yaml
 # .github/workflows/publish.yml in acme/agent-marketplace
@@ -858,13 +821,13 @@ jobs:
       - env:
           PODIUM_REGISTRY: ${{ secrets.PODIUM_REGISTRY }}
           PODIUM_TOKEN:    ${{ secrets.PODIUM_TOKEN }}   # the publishing identity's registry credential
-        run: podium publish --config .podium/publish.yaml --output acme-agents --workdir "$GITHUB_WORKSPACE"
+        run: podium sync --config .podium/sync.yaml
 ```
 
-The output's `workflow` overrides the default clone, because the checkout step already placed the repository and authenticated `origin`:
+The marketplace target's `workflow` configures git against the existing checkout, because the checkout step already placed the repository and authenticated `origin`:
 
 ```yaml
-# .podium/publish.yaml, acme-agents output
+# .podium/sync.yaml, acme-agents target
 workflow:
   prepare:
     - run: ["git", "-C", "$PODIUM_WORKDIR", "config", "user.name",  "podium-bot"]

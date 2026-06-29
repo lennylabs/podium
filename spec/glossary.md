@@ -10,7 +10,7 @@
 - **Workspace local overlay**: the workspace-scoped layer sourced from `${PODIUM_OVERLAY_PATH}` by the MCP server's `LocalOverlayProvider`. Highest precedence in the caller's effective view.
 - **Manifest**: the `ARTIFACT.md` file specifically. Skills additionally have a `SKILL.md` (§4.3.4) carrying the agentskills.io-spec frontmatter and the agent-facing prose body; for skills the term "manifest" without qualification refers to `ARTIFACT.md`, and "skill manifest" refers to `SKILL.md`.
 - **Marketplace**: a git repository a harness imports to install plugins, holding a vendor manifest at a fixed location and per-plugin content. The extension, package, and tap formats are the analogous repository distributions for Gemini, Pi, and Hermes.
-- **Marketplace output**: a named publishing destination declared in `publish.yaml`: a git repository, a harness set, a plugin list, and a workflow.
+- **Marketplace output**: a `podium sync` target of `kind: marketplace` (§7.5.2): a git repository, a harness set, a plugin list, and a workflow.
 - **Materialization**: atomic write of a loaded artifact's content (manifest and bundled resources, after harness adapter translation) onto the host's filesystem.
 - **MCP server (Podium MCP server)**: the in-process bridge binary the host runs.
 - **Package**: the on-disk directory containing an artifact's `ARTIFACT.md` (plus `SKILL.md` for skills) and bundled resources.

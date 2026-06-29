@@ -1,7 +1,7 @@
 # Proposal 0005: Marketplace publishing as a `podium sync` target kind
 
 - Issue: (to be filed)
-- Status: Approved (2026-06-25). Converged after 11 adversarial review rounds (15 findings fixed).
+- Status: Applied to spec (2026-06-29). Converged after 11 adversarial review rounds (15 findings fixed).
 - Date: 2026-06-25
 
 ## Summary
