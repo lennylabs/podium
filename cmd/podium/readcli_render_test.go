@@ -152,11 +152,11 @@ func TestDoJSON_NoTokenSendsNoAuthHeader(t *testing.T) {
 	}
 }
 
-// Spec: §7.8 — `podium publish` resolves the registry credential through
-// PODIUM_TOKEN, the credential the §7.8 GitHub Actions example exports as "the
-// publishing identity's registry credential". A set PODIUM_TOKEN wins over the
-// shared read-CLI sources so a CI run following the documented pattern resolves
-// the publishing identity's view.
+// Spec: §7.8 — a `kind: marketplace` target resolves the registry credential
+// through PODIUM_TOKEN, the credential the §7.8 GitHub Actions example exports as
+// "the publishing identity's registry credential". A set PODIUM_TOKEN wins over
+// the shared read-CLI sources so a CI run following the documented pattern
+// resolves the publishing identity's restricted effective view.
 func TestReadPublishToken_PrefersPodiumToken(t *testing.T) {
 	t.Setenv("PODIUM_TOKEN", "publish-token")
 	// A session token is also present; PODIUM_TOKEN must still win.
@@ -166,9 +166,10 @@ func TestReadPublishToken_PrefersPodiumToken(t *testing.T) {
 	}
 }
 
-// Spec: §7.8 — with PODIUM_TOKEN unset, `podium publish` falls back to the
-// read-CLI resolution (the §6.3.2 session token, then the keychain token), so an
-// interactive operator who ran `podium login` need not also export PODIUM_TOKEN.
+// Spec: §7.8 — with PODIUM_TOKEN unset, the marketplace dispatch falls back to
+// the read-CLI resolution (the §6.3.2 session token, then the keychain token), so
+// an interactive operator who ran `podium login` need not also export
+// PODIUM_TOKEN.
 func TestReadPublishToken_FallsBackToReadCLIToken(t *testing.T) {
 	t.Setenv("PODIUM_TOKEN", "")
 	t.Setenv("PODIUM_SESSION_TOKEN", "session-token")
@@ -178,8 +179,8 @@ func TestReadPublishToken_FallsBackToReadCLIToken(t *testing.T) {
 }
 
 // With no credential at all, readPublishToken resolves to the empty string so
-// the publish render reaches a server source anonymously, which the §7.8
-// identity check then rejects when an identity is declared.
+// the marketplace render reaches a server source anonymously and renders the
+// anonymous public effective view (§4.6).
 func TestReadPublishToken_EmptyWhenNoCredential(t *testing.T) {
 	t.Setenv("PODIUM_TOKEN", "")
 	t.Setenv("PODIUM_SESSION_TOKEN", "")

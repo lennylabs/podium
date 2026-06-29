@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -216,98 +215,12 @@ func sanitizeID(id string) string {
 	}, id)
 }
 
-// runPhase runs the commands of one phase in order, failing fast on the first
-// non-zero exit unless the command declares continue_on_error. On a failure it
-// runs that phase's own on_error cleanup commands (best effort, errors logged
-// not returned) before returning the original failure, so a half-applied
-// checkout can be reset by cleanup scoped to the phase that failed.
+// runPhase runs one marketplace workflow phase through the shared WorkflowRunner,
+// labeling failures and skips with the marketplace output id so a multi-output
+// publish names the failing output.
 func runPhase(ctx context.Context, opts RunOptions, phase string, cmds []Command, vars map[string]string, onError []Command) error {
-	for i, c := range cmds {
-		if c.SkipIfNoChanges && vars["PODIUM_CHANGED"] == "false" {
-			fmt.Fprintf(opts.Stderr, "publish %s[%d]: skipped (no changes): %s\n", phase, i, c.display())
-			continue
-		}
-		err := runCommand(ctx, opts, c, vars)
-		if err == nil {
-			continue
-		}
-		if c.ContinueOnError {
-			fmt.Fprintf(opts.Stderr, "publish %s[%d]: %v (continue_on_error)\n", phase, i, err)
-			continue
-		}
-		runCleanup(ctx, opts, phase, onError, vars)
-		return fmt.Errorf("publish %q %s[%d] (%s): %w", opts.Output.ID, phase, i, c.display(), err)
-	}
-	return nil
-}
-
-// runCleanup runs a phase's on_error cleanup commands best effort: a cleanup
-// failure is logged under the failing phase and does not mask the original phase
-// failure, and continue_on_error is honored so a benign cleanup non-zero (a
-// "nothing to reset" git exit) does not abort the rest of the cleanup. phase
-// names the failing phase so the log distinguishes prepare cleanup from publish
-// cleanup.
-func runCleanup(ctx context.Context, opts RunOptions, phase string, cmds []Command, vars map[string]string) {
-	for i, c := range cmds {
-		if err := runCommand(ctx, opts, c, vars); err != nil {
-			fmt.Fprintf(opts.Stderr, "publish %s_on_error[%d]: %v\n", phase, i, err)
-			if !c.ContinueOnError {
-				return
-			}
-		}
-	}
-}
-
-// runCommand executes one command with the injected variables. A run: argv list
-// is executed directly without a shell; an sh: string is handed to sh -c
-// verbatim, so the shell performs all variable expansion. The command inherits
-// the ambient environment plus the PODIUM_* variables, so the shell expands
-// $PODIUM_WORKDIR and an ambient $GH_TOKEN or $SSH_AUTH_SOCK alike; pre-expanding
-// the string in Go would blank every ambient credential reference the §7.8
-// pipeline relies on for git authentication. A non-zero timeout bounds the
-// command's wall clock; a timeout expiry surfaces as a
-// context.DeadlineExceeded-wrapped error.
-func runCommand(ctx context.Context, opts RunOptions, c Command, vars map[string]string) error {
-	if err := c.validate(); err != nil {
-		return err
-	}
-
-	cmdCtx := ctx
-	var cancel context.CancelFunc
-	if c.Timeout > 0 {
-		cmdCtx, cancel = context.WithTimeout(ctx, c.Timeout.Duration())
-		defer cancel()
-	}
-
-	var cmd *exec.Cmd
-	if c.Sh != "" {
-		cmd = exec.CommandContext(cmdCtx, "sh", "-c", c.Sh)
-	} else {
-		argv := substituteArgs(c.Run, vars)
-		cmd = exec.CommandContext(cmdCtx, argv[0], argv[1:]...)
-	}
-	cmd.Env = commandEnv(vars)
-	cmd.Stdout = opts.Stdout
-	cmd.Stderr = opts.Stderr
-
-	err := cmd.Run()
-	if cmdCtx.Err() == context.DeadlineExceeded {
-		return fmt.Errorf("timed out after %s: %w", c.Timeout.Duration(), cmdCtx.Err())
-	}
-	return err
-}
-
-// commandEnv returns the ambient process environment with the injected PODIUM_*
-// variables appended, so a command sees both the credentials in the ambient
-// environment (SSH_AUTH_SOCK, GH_TOKEN) and the publish context. A later
-// assignment for the same key wins under exec, so the injected variables override
-// any same-named ambient value.
-func commandEnv(vars map[string]string) []string {
-	env := os.Environ()
-	for _, k := range sortedVarKeys(vars) {
-		env = append(env, k+"="+vars[k])
-	}
-	return env
+	r := WorkflowRunner{Label: "publish " + strconv.Quote(opts.Output.ID), Stdout: opts.Stdout, Stderr: opts.Stderr}
+	return r.Phase(ctx, phase, cmds, vars, onError)
 }
 
 // baseVars builds the injected variables available before the render: the working

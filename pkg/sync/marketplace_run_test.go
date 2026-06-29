@@ -639,12 +639,12 @@ func TestRunMarketplace_RejectsMalformedCommand(t *testing.T) {
 // stops the remaining cleanup.
 func TestRunCleanup_BestEffort(t *testing.T) {
 	t.Parallel()
-	opts := RunOptions{Output: ResolvedOutput{ID: "x"}, Stderr: discardBuf()}
+	r := WorkflowRunner{Label: "publish \"x\"", Stderr: discardBuf()}
 
 	// continue_on_error: the failing first cleanup command is logged and the
 	// second still runs.
 	workdir := t.TempDir()
-	runCleanup(context.Background(), opts, "publish", []Command{
+	r.cleanup(context.Background(), "publish", []Command{
 		{Run: []string{"false"}, ContinueOnError: true},
 		touch("second", "second-ran"),
 	}, map[string]string{"PODIUM_WORKDIR": workdir})
@@ -655,7 +655,7 @@ func TestRunCleanup_BestEffort(t *testing.T) {
 	// Without continue_on_error: a failing cleanup command stops the remaining
 	// cleanup, so the second command does not run.
 	workdir2 := t.TempDir()
-	runCleanup(context.Background(), opts, "prepare", []Command{
+	r.cleanup(context.Background(), "prepare", []Command{
 		{Run: []string{"false"}},
 		touch("second", "should-not-run"),
 	}, map[string]string{"PODIUM_WORKDIR": workdir2})
