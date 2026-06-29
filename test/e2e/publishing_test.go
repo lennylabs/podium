@@ -461,44 +461,6 @@ func TestPublishing_NonPublishHarnessRejected(t *testing.T) {
 	}
 }
 
-// Spec: §7.8 — the publishing identity is a security-relevant setting binding the
-// render to a principal's effective view (§4.6). Against a server source, a
-// PODIUM_TOKEN whose principal differs from the declared identity fails closed
-// before any fetch, so a token that can see restricted layers cannot silently
-// publish that principal's view. The render reaches a server source, so it uses
-// PODIUM_TOKEN as the credential (the §7.8 documented credential), and the check
-// rejects it because its principal is not the declared identity.
-func TestPublishing_IdentityMismatchFailsClosed(t *testing.T) {
-	t.Parallel()
-	requireGit(t)
-	remote := bareRemote(t)
-	// A server-source registry: the render binds the declared identity to the
-	// PODIUM_TOKEN principal. The URL is never contacted because the check
-	// short-circuits before the fetch.
-	cfg := writePublishYAML(t, "https://podium.invalid", remote, "claude-code")
-	// publish.yaml declares identity publisher@acme.com; the token authenticates
-	// as a different principal.
-	env := append(gitEnv(), "PODIUM_TOKEN="+mismatchJWT)
-	res := runPodium(t, "", env, "publish", "--config", cfg, "--output", "acme-agents")
-	if res.Exit != 1 {
-		t.Fatalf("publish with a mismatched identity exit=%d, want 1\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
-	}
-	if !strings.Contains(res.Stderr, "identity_mismatch") {
-		t.Errorf("stderr missing 'identity_mismatch':\n%s", res.Stderr)
-	}
-	if n := remoteCommitCount(t, remote); n != 1 {
-		t.Errorf("a failed identity check must push nothing: commit count = %d, want 1 (the seed)", n)
-	}
-}
-
-// mismatchJWT is a signature-less JWT whose principal (sub/email is bob) differs
-// from the publisher@acme.com identity writePublishYAML declares. The publish
-// identity check decodes the claims without verifying the signature, so the fixed
-// .sig segment is never read. The payload is
-// {"sub":"bob","email":"bob@acme.com"} base64url-encoded.
-const mismatchJWT = "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0." +
-	"eyJzdWIiOiJib2IiLCJlbWFpbCI6ImJvYkBhY21lLmNvbSJ9.sig"
-
 // ---- assertion helpers ------------------------------------------------------
 
 func pubTreeKeys(m map[string]string) string {

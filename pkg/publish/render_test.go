@@ -2,11 +2,11 @@ package publish
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -602,114 +602,36 @@ func TestRender_RejectsNonPublishHarness(t *testing.T) {
 	}
 }
 
-// Spec: §7.8 — the publishing identity is a security-relevant setting binding the
-// render to a principal's effective view (§4.6). Against a server source the
-// render must authenticate as the declared identity; a token whose principal
-// differs fails closed before any fetch, so a token that can see restricted
-// layers cannot silently publish that principal's view.
-func TestRender_IdentityMismatchFailsClosed(t *testing.T) {
-	t.Parallel()
-	// A server URL with a token whose principal is bob, but the output declares
-	// alice. The check runs before the fetch, so no live server is needed.
-	_, err := Render(context.Background(), RenderOptions{
-		OutputID:  "acme-agents",
-		Registry:  "https://podium.acme.com",
-		Identity:  "alice@acme.com",
-		Token:     jwt(t, map[string]any{"sub": "bob", "email": "bob@acme.com"}),
-		Workdir:   t.TempDir(),
-		Harnesses: []string{"claude-code"},
-		Plugins:   financePlugins(),
-	})
-	if !errors.Is(err, ErrIdentityMismatch) {
-		t.Fatalf("a credential principal that differs from the declared identity must fail with ErrIdentityMismatch, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "acme-agents") {
-		t.Errorf("identity-mismatch error must name the output id: %v", err)
-	}
-}
-
-// Spec: §7.8 — a filesystem source has no authenticated principal, so a declared
-// identity is documentary and the render proceeds against the local view rather
-// than failing the identity check.
-func TestRender_IdentityIgnoredForFilesystemSource(t *testing.T) {
+// Spec: §7.8 — `identity` records the principal the output publishes as. The
+// render reflects the token's effective view (§4.6), so it does not read the
+// declared identity and does not gate on it: a declared identity that names no
+// principal the render can resolve still produces the token's view. This test
+// sets a declared identity unrelated to the fixture and confirms the render
+// proceeds and emits the same tree as a render with no identity declared.
+func TestRender_IdentityIsDocumentary(t *testing.T) {
 	t.Parallel()
 	reg := fixtureRegistry(t)
-	workdir := t.TempDir()
-	opts := renderOpts(t, reg, workdir, []string{"claude-code"})
-	opts.Identity = "alice@acme.com" // declared, but the filesystem source has no principal
-	if _, err := Render(context.Background(), opts); err != nil {
-		t.Fatalf("a filesystem source must ignore the declared identity, got %v", err)
-	}
-}
 
-// verifyPublishIdentity is the §7.8 fail-closed binding of the declared identity
-// to the resolved credential. The table covers every branch: the no-op cases (no
-// identity, filesystem source), the fail-closed cases (server source with no
-// token, a non-JWT token, a token carrying neither claim, a principal mismatch),
-// and the pass cases (the sub or the email claim equals the identity).
-func TestVerifyPublishIdentity(t *testing.T) {
-	t.Parallel()
-	const server = "https://podium.acme.com"
-	matchSub := jwt(t, map[string]any{"sub": "alice@acme.com"})
-	matchEmail := jwt(t, map[string]any{"sub": "auth0|123", "email": "alice@acme.com"})
-	wrongPrincipal := jwt(t, map[string]any{"sub": "bob", "email": "bob@acme.com"})
-	noClaims := jwt(t, map[string]any{"aud": "podium"})
-
-	cases := []struct {
-		name     string
-		registry string
-		identity string
-		token    string
-		wantErr  bool
-	}{
-		{name: "no identity declared", registry: server, identity: "", token: wrongPrincipal, wantErr: false},
-		{name: "filesystem source ignores identity", registry: "/srv/registry", identity: "alice@acme.com", token: "", wantErr: false},
-		{name: "server source no token fails closed", registry: server, identity: "alice@acme.com", token: "", wantErr: true},
-		{name: "server source non-JWT token fails closed", registry: server, identity: "alice@acme.com", token: "opaque-token", wantErr: true},
-		// A JWT-shaped token whose payload segment is not valid base64.
-		{name: "server source undecodable payload fails closed", registry: server, identity: "alice@acme.com", token: "header.!!!notbase64!!!.sig", wantErr: true},
-		// A JWT-shaped token whose payload base64-decodes but is not JSON ("eHg"
-		// is the base64url of "xx").
-		{name: "server source non-JSON payload fails closed", registry: server, identity: "alice@acme.com", token: "header.eHg.sig", wantErr: true},
-		{name: "server source token without claims fails closed", registry: server, identity: "alice@acme.com", token: noClaims, wantErr: true},
-		{name: "principal mismatch fails closed", registry: server, identity: "alice@acme.com", token: wrongPrincipal, wantErr: true},
-		{name: "sub claim matches", registry: server, identity: "alice@acme.com", token: matchSub, wantErr: false},
-		{name: "email claim matches", registry: server, identity: "alice@acme.com", token: matchEmail, wantErr: false},
+	declared := renderOpts(t, reg, t.TempDir(), []string{"claude-code"})
+	declared.Identity = "someone-else@acme.com"
+	withIdentity, err := Render(context.Background(), declared)
+	if err != nil {
+		t.Fatalf("a declared identity must not gate the render: %v", err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := verifyPublishIdentity(tc.registry, tc.identity, tc.token)
-			if tc.wantErr {
-				if !errors.Is(err, ErrIdentityMismatch) {
-					t.Fatalf("verifyPublishIdentity(%q, %q, ...) = %v, want ErrIdentityMismatch", tc.registry, tc.identity, err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("verifyPublishIdentity(%q, %q, ...) = %v, want nil", tc.registry, tc.identity, err)
-			}
-		})
+
+	none := renderOpts(t, reg, t.TempDir(), []string{"claude-code"})
+	withoutIdentity, err := Render(context.Background(), none)
+	if err != nil {
+		t.Fatalf("render without a declared identity: %v", err)
+	}
+
+	if !reflect.DeepEqual(withIdentity.Files, withoutIdentity.Files) {
+		t.Errorf("the declared identity changed the rendered file set:\nwith=%v\nwithout=%v",
+			withIdentity.Files, withoutIdentity.Files)
 	}
 }
 
 // --- helpers -----------------------------------------------------------------
-
-// jwt builds a signature-less JWT (header.payload.signature) whose payload
-// carries the given claims, for the publish-side identity check, which decodes
-// the claims without verifying the signature. The signature segment is a fixed
-// placeholder because tokenPrincipal never reads it.
-func jwt(t *testing.T, claims map[string]any) string {
-	t.Helper()
-	enc := func(v any) string {
-		b, err := json.Marshal(v)
-		if err != nil {
-			t.Fatalf("marshal jwt segment: %v", err)
-		}
-		return base64.RawURLEncoding.EncodeToString(b)
-	}
-	header := enc(map[string]any{"alg": "none", "typ": "JWT"})
-	return header + "." + enc(claims) + ".sig"
-}
 
 func materializedTreeNoLock(t *testing.T, dir string) map[string]string {
 	t.Helper()

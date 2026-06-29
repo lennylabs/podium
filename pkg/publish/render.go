@@ -3,7 +3,6 @@ package publish
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -12,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/lennylabs/podium/pkg/adapter"
 	"github.com/lennylabs/podium/pkg/materialize"
@@ -28,14 +26,16 @@ import (
 // sync lock file plus the PodiumOwnedKey/inject stale-file cleanup so a
 // re-render is idempotent and drops files for artifacts that left the view.
 
-// RenderOptions are the inputs to Render. Registry and Identity come from the
-// resolved marketplace output (the §7.8 publishing identity whose effective view
-// the render reflects); Workdir is the per-output checkout the render writes into
-// (the directory the prepare phase placed a clone at). Harnesses and Plugins are
-// the output's harness set and plugin list. Token is the publishing identity's
-// registry credential, attached on every server-source request so the render
-// reflects that identity's effective view (§4.6). HTTPClient is injected by
-// tests; a nil client uses the pkg/sync default.
+// RenderOptions are the inputs to Render. Registry comes from the resolved
+// marketplace output. Identity is the documentary record of the principal the
+// output publishes as (§7.8 "the effective-view principal the render runs as");
+// the render does not read it, because the token carries the publishing identity.
+// Workdir is the per-output checkout the render writes into (the directory the
+// prepare phase placed a clone at). Harnesses and Plugins are the output's
+// harness set and plugin list. Token is the publishing identity's registry
+// credential, attached on every server-source request so the render reflects
+// that identity's effective view (§4.6). HTTPClient is injected by tests; a nil
+// client uses the pkg/sync default.
 type RenderOptions struct {
 	OutputID   string
 	Registry   string
@@ -74,87 +74,6 @@ func (e *ErrNoEmitter) Error() string {
 
 func (e *ErrNoEmitter) Unwrap() error { return e.Err }
 
-// ErrIdentityMismatch signals that the resolved registry credential does not
-// authenticate as the output's declared publishing identity (§7.8). Publishing
-// fails closed on a mismatch, because the published marketplace reflects the
-// authenticated principal's effective view (§4.6): a token whose principal can
-// see restricted layers would render them into the output under an identity the
-// operator did not intend. Callers assert against it via errors.Is.
-var ErrIdentityMismatch = errors.New("publish.identity_mismatch")
-
-// verifyPublishIdentity binds the output's declared publishing identity to the
-// resolved registry credential before the render reads the effective view
-// (§7.8). The published marketplace reflects the authenticated principal's
-// effective view (§4.6), so the principal the token authenticates as must equal
-// the declared identity; a public marketplace is published under an identity
-// scoped to the artifacts intended for it. The check is fail-closed.
-//
-// It applies only when both an identity is declared and the source is a server,
-// because the principal is the token's subject:
-//
-//   - An empty identity declares no principal to bind, so the check is a no-op
-//     and the token alone governs visibility.
-//   - A filesystem source has no authenticated principal: it resolves the local
-//     view directly with no token, so a declared identity is purely documentary
-//     and the check is a no-op.
-//   - A server source with no token would reach the registry anonymously, so a
-//     declared identity cannot be honored; the render must not silently publish
-//     the anonymous (public) view under the declared identity, so it fails
-//     closed.
-//   - A server source with a token must authenticate as the declared identity:
-//     the token's sub or email claim equals identity, else it fails closed.
-func verifyPublishIdentity(registry, identity, token string) error {
-	if identity == "" || !sync.IsServerSource(registry) {
-		return nil
-	}
-	if token == "" {
-		return fmt.Errorf("%w: identity %q is declared but no registry credential resolved; set PODIUM_TOKEN to the credential for that principal",
-			ErrIdentityMismatch, identity)
-	}
-	sub, email, err := tokenPrincipal(token)
-	if err != nil {
-		return fmt.Errorf("%w: identity %q is declared but the registry credential is not a decodable token: %v",
-			ErrIdentityMismatch, identity, err)
-	}
-	if identity == sub || identity == email {
-		return nil
-	}
-	return fmt.Errorf("%w: identity %q does not match the credential principal (sub=%q email=%q); the token would publish that principal's effective view",
-		ErrIdentityMismatch, identity, sub, email)
-}
-
-// tokenPrincipal decodes the sub and email claims from a JWT credential's
-// payload without verifying its signature: the registry verifies the token on
-// every call (§6.3.2), so the publish-side check binds the declared identity to
-// the claims the verified token carries rather than re-validating the signature
-// client-side. It mirrors the claim decode `podium login` prints the resolved
-// identity with (cmd/podium/login.go decodeIdentity). A token that is not a JWT,
-// or one carrying neither claim, returns an error so the caller fails closed.
-func tokenPrincipal(token string) (sub, email string, err error) {
-	parts := strings.Split(token, ".")
-	if len(parts) < 2 {
-		return "", "", errors.New("not a JWT (expected a header.payload.signature triple)")
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		payload, err = base64.StdEncoding.DecodeString(parts[1])
-		if err != nil {
-			return "", "", fmt.Errorf("decode payload: %w", err)
-		}
-	}
-	var claims struct {
-		Sub   string `json:"sub"`
-		Email string `json:"email"`
-	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return "", "", fmt.Errorf("parse claims: %w", err)
-	}
-	if claims.Sub == "" && claims.Email == "" {
-		return "", "", errors.New("token carries neither a sub nor an email claim")
-	}
-	return claims.Sub, claims.Email, nil
-}
-
 // assigned pairs a record with the plugin it was assigned to. A record matches
 // at most one plugin (the first in declaration order whose scope filter selects
 // it), so the publishing pipeline renders an artifact into exactly one plugin
@@ -165,9 +84,15 @@ type assigned struct {
 }
 
 // Render runs the §7.8 render phase for one marketplace output. It fetches the
-// publishing identity's effective view, assigns each selected artifact to its
-// plugin, renders every harness in the harness set into opts.Workdir, and
-// reconciles the result against the prior render through the sync lock file.
+// effective view the registry credential authenticates (§4.6), assigns each
+// selected artifact to its plugin, renders every harness in the harness set into
+// opts.Workdir, and reconciles the result against the prior render through the
+// sync lock file.
+//
+// The render reflects the authenticated token's effective view. opts.Identity is
+// the documentary record of the principal the operator publishes as (§7.8
+// "the effective-view principal the render runs as"); the token carries the
+// publishing identity, so Render does not read opts.Identity.
 //
 // The harness set may name several Claude surfaces; they share one emitter
 // (adapter.EmitterForHarness), so the rendered tree carries one Claude
@@ -176,12 +101,6 @@ type assigned struct {
 //
 // spec: §7.8 (render pipeline), §4.6 (effective view), §7.5.1 (scope filters).
 func Render(ctx context.Context, opts RenderOptions) (*RenderResult, error) {
-	// Bind the configured publishing identity to the resolved credential before
-	// any fetch, so a mismatch fails closed without reading the effective view.
-	if err := verifyPublishIdentity(opts.Registry, opts.Identity, opts.Token); err != nil {
-		return nil, fmt.Errorf("publish %q: %w", opts.OutputID, err)
-	}
-
 	records, err := sync.FetchRecords(sync.Options{
 		RegistryPath: opts.Registry,
 		Token:        opts.Token,
