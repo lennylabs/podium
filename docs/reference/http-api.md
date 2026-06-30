@@ -482,7 +482,7 @@ The registry emits outbound webhooks for change events. Configure receivers per 
 | `layer.ingested` | A layer completed an ingest cycle. Fires once per cycle, so a CI job that runs `podium sync --config` against a `kind: marketplace` target subscribes to it (see [Marketplace publishing](../consuming/publishing)). |
 | `layer.history_rewritten` | Force-push detected on a `git`-source layer. |
 
-Schema:
+Single-event schema:
 
 ```json
 {
@@ -506,11 +506,38 @@ PUT    /v1/webhooks/{id}       update one receiver
 DELETE /v1/webhooks/{id}       remove one receiver
 ```
 
-`POST` accepts `{ "url": "...", "secret": "...", "event_filter": ["..."], "disabled": false }` and returns `201 Created` with the receiver including its secret, so the operator can record it. The registry generates a secret when the body omits one. `url` is required. `PUT` accepts the same fields and applies the ones present; re-enabling a receiver (`disabled: false`) clears its failure counter. `GET` and `DELETE` of a single receiver address it by `id`. List and single-read responses mask the secret as `***`. `DELETE` returns `204 No Content`. These routes are mounted only when the deployment configures an outbound webhook worker.
+Every method on these routes requires the per-tenant admin role and returns `auth.forbidden` for a non-admin caller, because a receiver is an org-level configuration. The mutating methods are also rejected in read-only mode with `registry.read_only`. A standalone or no-auth deployment follows the same authorization path as the admin-grant endpoints: receiver registration requires an admin grant plus a token rather than remaining open.
+
+`POST` accepts `{ "url": "...", "secret": "...", "event_filter": ["..."], "debounce": "30s", "disabled": false }` and returns `201 Created` with the receiver including its secret, so the operator can record it. The registry generates a secret when the body omits one. `url` is required. `PUT` accepts the same fields and applies the ones present; re-enabling a receiver (`disabled: false`) clears its failure counter. `GET` and `DELETE` of a single receiver address it by `id`. List and single-read responses mask the secret as `***`. `DELETE` returns `204 No Content`. These routes are mounted only when the deployment configures an outbound webhook worker.
+
+#### Receiver URL policy (SSRF)
+
+The registry originates the delivery request, so it validates `url` at registration and re-checks it at delivery. By default the registry requires the `https` scheme and rejects a URL that resolves to a loopback, link-local, or private address (for example `127.0.0.0/8`, `::1`, `169.254.0.0/16`, and the RFC 1918 ranges), and it does not follow a redirect to such a target. A rejected target returns `registry.invalid_argument` with a message naming the disallowed host. A deployment whose receiver is legitimately internal, such as an in-cluster relay, sets an allowlist of permitted hosts or CIDRs through the `PODIUM_WEBHOOK_ALLOWED_TARGETS` registry config, which the validation consults.
+
+#### Debounce and batch delivery
+
+The optional `debounce` field is a duration string (for example `"30s"`). A receiver with `debounce` unset receives one delivery per matched event. A receiver with `debounce` set holds the events it matches in a trailing window that opens on the first matched event, deduplicates them by event type and key, and on window expiry delivers them as one batch. The key is the artifact ID for `artifact.published` and `artifact.deprecated`, the layer ID for `layer.ingested` and `layer.history_rewritten`, and the domain path for `domain.published`. The registry delivers the batch directly to that one buffered receiver and signs it with the receiver's HMAC secret, so the batch inherits the same retry, backoff, concurrency limit, and signing as a single-event delivery. The debounce buffer is in-process, and a registry restart mid-window may drop a buffered batch, consistent with the best-effort delivery the subsystem provides through retries.
+
+The batch delivery body is an envelope:
+
+```json
+{
+  "event": "batch",
+  "trace_id": "...",
+  "timestamp": "...",
+  "window": { "start": "...", "end": "..." },
+  "count": 12,
+  "events": [
+    { "event": "layer.ingested", "trace_id": "...", "timestamp": "...", "actor": {}, "data": { "layer": "team-shared" } }
+  ]
+}
+```
+
+Each element of `events` is the complete single-event body, carrying the same `event`, `trace_id`, `timestamp`, `actor`, and `data` fields as the single-event schema above. The top-level `trace_id` identifies the batch delivery, and each element's `trace_id` identifies its coalesced event. The batch body is additive and scoped to receivers that set `debounce`; the single-event body is unchanged for a receiver without a debounce window.
 
 #### Triggering GitHub CI from a receiver (repository_dispatch relay)
 
-A receiver cannot call GitHub's `repository_dispatch` endpoint directly: the registry signs each delivery with the receiver's HMAC secret (the `secret` above), and that signed body differs from the body the GitHub dispatch endpoint accepts. So an operator relay bridges the two. Register a receiver filtered to `layer.ingested` whose `url` points at the relay; the relay verifies the HMAC against the receiver secret and then issues `POST https://api.github.com/repos/<owner>/<repo>/dispatches` with a GitHub token and `{"event_type":"podium-layer-ingested"}`. The CI workflow listens on `repository_dispatch` and runs `podium sync --config`. The receiver `debounce` field that coalesces a burst into one batch delivery, and the receiver authorization on these CRUD endpoints, are specified in [proposal 0004 (webhook hardening)](https://github.com/lennylabs/podium/blob/main/proposals/0004-webhook-hardening.md). The relay functions without them, with the CI system's concurrency control collapsing a burst. See [Marketplace publishing](../consuming/publishing) for the worked patterns.
+A receiver cannot call GitHub's `repository_dispatch` endpoint directly: the registry signs each delivery with the receiver's HMAC secret (the `secret` above), and that signed body differs from the body the GitHub dispatch endpoint accepts. So an operator relay bridges the two. Register a receiver filtered to `layer.ingested` whose `url` points at the relay; the relay verifies the HMAC against the receiver secret and then issues `POST https://api.github.com/repos/<owner>/<repo>/dispatches` with a GitHub token and `{"event_type":"podium-layer-ingested"}`. The CI workflow listens on `repository_dispatch` and runs `podium sync --config`. Set the receiver's `debounce` field to coalesce a burst of `layer.ingested` events into one batch delivery and one CI dispatch; with `debounce` unset the relay fires per event, and the CI system's concurrency control collapses the burst. Registering the receiver requires the admin role on these CRUD endpoints. See [Marketplace publishing](../consuming/publishing) for the worked patterns.
 
 ---
 

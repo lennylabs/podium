@@ -82,7 +82,10 @@ func newReadOnlyWebhookServer(t *testing.T) (*httptest.Server, string) {
 	worker := &webhook.Worker{Store: wstore, HTTPClient: http.DefaultClient}
 	mode := server.NewModeTracker()
 	mode.Set(server.ModeReadOnly)
-	_, ts := bootRegistry(t, server.WithWebhooks(worker), server.WithMode(mode))
+	// §7.3.2 — receiver CRUD is admin-gated, so the read-only checks below
+	// run as an admin caller; the read-only rejection is the behavior under
+	// test, not the admin gate.
+	_, ts := bootWebhookRegistry(t, server.WithWebhooks(worker), server.WithMode(mode))
 	return ts, id
 }
 

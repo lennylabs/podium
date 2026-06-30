@@ -271,10 +271,14 @@ workflow:
 A Podium webhook receiver filtered to `layer.ingested` posts to a small relay. The relay verifies the HMAC and calls GitHub `repository_dispatch`, which the workflow listens for. The receiver cannot call GitHub's dispatch endpoint directly, because the HMAC-signed receiver body differs from the body the dispatch endpoint accepts, so the relay is the bridge.
 
 ```bash
-# register the receiver; the response carries the HMAC secret for the relay
+# register the receiver; the response carries the HMAC secret for the relay.
+# $PODIUM_TOKEN must carry the per-tenant admin role; the receiver CRUD
+# endpoints reject a non-admin caller with auth.forbidden.
 curl -X POST https://podium.acme.com/v1/webhooks -H "Authorization: Bearer $PODIUM_TOKEN" \
-  -d '{"url":"https://relay.acme.com/podium","event_filter":["layer.ingested"]}'
+  -d '{"url":"https://relay.acme.com/podium","event_filter":["layer.ingested"],"debounce":"30s"}'
 ```
+
+The receiver `url` must be `https` and must resolve to a public address. The registry rejects a loopback, link-local, or private target with `registry.invalid_argument` unless the host or CIDR is listed in the registry's `PODIUM_WEBHOOK_ALLOWED_TARGETS` allowlist, which an in-cluster relay needs. The `debounce` field above sets a trailing window: a burst of `layer.ingested` events coalesces into one batch delivery and one CI dispatch. See [HTTP API → Outbound webhooks](../reference/http-api#outbound-webhooks) for the receiver fields and the batch envelope.
 
 ```yaml
 # add to the workflow triggers
@@ -283,7 +287,7 @@ on:
   workflow_dispatch: {}
 ```
 
-The relay verifies the HMAC against the receiver secret, then calls `POST https://api.github.com/repos/acme/agent-marketplace/dispatches` with `Authorization: Bearer <token>` and `{"event_type":"podium-layer-ingested"}`. On dispatch, the workflow runs `podium sync --config <path>`. A burst of `layer.ingested` events fires the relay per event, and the workflow's own concurrency control collapses the redundant runs. Receiver authorization and a per-receiver debounce window that coalesces a burst into one batch delivery are specified in [proposal 0004](https://github.com/lennylabs/podium/blob/main/proposals/0004-webhook-hardening.md); both publishing patterns function without them. The relay pattern is also documented in [Extending → Webhook-driven integrations](../deployment/extending#webhook-driven-integrations) and [HTTP API → Outbound webhooks](../reference/http-api#outbound-webhooks).
+The relay verifies the HMAC against the receiver secret, then calls `POST https://api.github.com/repos/acme/agent-marketplace/dispatches` with `Authorization: Bearer <token>` and `{"event_type":"podium-layer-ingested"}`. On dispatch, the workflow runs `podium sync --config <path>`. With `debounce` set on the receiver, a burst of `layer.ingested` events coalesces into one batch delivery and one dispatch; with `debounce` unset the relay fires per event and the workflow's own concurrency control collapses the redundant runs. The relay pattern is also documented in [Extending → Webhook-driven integrations](../deployment/extending#webhook-driven-integrations) and [HTTP API → Outbound webhooks](../reference/http-api#outbound-webhooks).
 
 In both patterns the registry credential `PODIUM_TOKEN` carries the publishing identity, and the git push credential is GitHub's: `GITHUB_TOKEN` in Pattern A, or a deploy key the `prepare` clone uses when the workflow runs outside the marketplace repository. Podium never holds the git push credential.
 

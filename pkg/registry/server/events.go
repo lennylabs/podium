@@ -198,7 +198,12 @@ func (s *Server) PublishEvent(ctx context.Context, eventType string, data map[st
 	actor := actorFromMeta(meta, ok)
 	if s.webhooks != nil {
 		// Fire outbound deliveries asynchronously so a slow receiver
-		// never blocks the publisher.
+		// never blocks the publisher. Worker.Deliver fans the event out
+		// to every matching receiver in the tenant, delivering the
+		// single-event body to a windowless receiver and routing a
+		// debounced receiver into its trailing window for one batch
+		// delivery (§7.3.2). A background context detaches the delivery
+		// from the request's cancellation.
 		go func() {
 			_ = s.webhooks.Deliver(context.Background(), s.tenant, eventType, traceID, actor, data)
 		}()

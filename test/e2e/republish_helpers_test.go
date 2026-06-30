@@ -92,12 +92,40 @@ type versionSpec struct {
 func newRepublishLayer(t testing.TB, srv *serverProc, layerID string) *republishLayer {
 	t.Helper()
 	dir := t.TempDir()
-	rr := runPodium(t, "", nil, "layer", "register", "--registry", srv.BaseURL,
+	rr := runPodium(t, "", srv.cliEnv(), "layer", "register", "--registry", srv.BaseURL,
 		"--id", layerID, "--local", dir)
 	if rr.Exit != 0 {
 		t.Fatalf("layer register %q exit=%d stderr=%s stdout=%s", layerID, rr.Exit, rr.Stderr, rr.Stdout)
 	}
 	return &republishLayer{srv: srv, layerID: layerID, dir: dir}
+}
+
+// newRepublishLayerMulti registers a local-source layer and stages several
+// artifacts under it at one version, then reingests once. The single ingest
+// cycle fires one artifact.published per artifact, which a debounced receiver
+// coalesces into one batch (§7.3.2). It returns the handle so a caller can stage
+// further versions; the artifacts are addressed by the ids slice.
+func newRepublishLayerMulti(t testing.TB, srv *serverProc, layerID string, ids []string, version string) *republishLayer {
+	t.Helper()
+	l := newRepublishLayer(t, srv, layerID)
+	for i, id := range ids {
+		l.writeArtifact(t, versionSpec{
+			ID:          id,
+			Version:     version,
+			Description: fmt.Sprintf("debounce burst probe %d for vendor payments here today", i),
+		})
+	}
+	ri := runPodium(t, "", srv.cliEnv(), "layer", "reingest", "--registry", srv.BaseURL, layerID)
+	if ri.Exit != 0 {
+		t.Fatalf("layer reingest %q exit=%d stderr=%s stdout=%s", layerID, ri.Exit, ri.Stderr, ri.Stdout)
+	}
+	for _, id := range ids {
+		if !l.waitForVersion(t, id, version, 15*time.Second) {
+			t.Fatalf("artifact %s@%s not resolvable after multi-artifact reingest of %q\nreingest stdout: %s\nserver log:\n%s",
+				id, version, layerID, ri.Stdout, srv.log())
+		}
+	}
+	return l
 }
 
 // publishVersion writes spec's artifact into the layer directory at the
@@ -119,7 +147,7 @@ func (l *republishLayer) publishVersion(t testing.TB, spec versionSpec) cliResul
 		t.Fatalf("publishVersion requires ID and Version (got %+v)", spec)
 	}
 	l.writeArtifact(t, spec)
-	ri := runPodium(t, "", nil, "layer", "reingest", "--registry", l.srv.BaseURL, l.layerID)
+	ri := runPodium(t, "", l.srv.cliEnv(), "layer", "reingest", "--registry", l.srv.BaseURL, l.layerID)
 	if ri.Exit != 0 {
 		t.Fatalf("layer reingest %q (id=%s version=%s) exit=%d stderr=%s stdout=%s",
 			l.layerID, spec.ID, spec.Version, ri.Exit, ri.Stderr, ri.Stdout)
@@ -168,7 +196,7 @@ func (l *republishLayer) loadVersion(t testing.TB, id, version string) (int, exL
 	if version != "" {
 		url += "&version=" + version
 	}
-	st, body := getRaw(t, url)
+	st, body := l.srv.getMaybeAuth(t, url)
 	var r exLoadResp
 	if st == 200 {
 		if err := json.Unmarshal(body, &r); err != nil {
@@ -187,7 +215,7 @@ func (l *republishLayer) waitForVersion(t testing.TB, id, version string, within
 	url := l.srv.BaseURL + "/v1/load_artifact?id=" + id + "&version=" + version
 	deadline := time.Now().Add(within)
 	for time.Now().Before(deadline) {
-		if st, _ := getRaw(t, url); st == 200 {
+		if st, _ := l.srv.getMaybeAuth(t, url); st == 200 {
 			return true
 		}
 		time.Sleep(200 * time.Millisecond)

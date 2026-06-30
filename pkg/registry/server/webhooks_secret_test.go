@@ -17,12 +17,12 @@ func TestWebhooksList_PostAutoGeneratesSecret(t *testing.T) {
 	t.Parallel()
 	wstore := webhook.NewMemoryStore()
 	worker := &webhook.Worker{Store: wstore, HTTPClient: http.DefaultClient}
-	srv, ts := bootRegistry(t, server.WithWebhooks(worker))
+	srv, ts := bootWebhookRegistry(t, server.WithWebhooks(worker))
 	_ = srv
 	t.Cleanup(ts.Close)
 
 	body, _ := json.Marshal(map[string]any{
-		"url":          "http://example/receiver",
+		"url":          "https://example.test/receiver",
 		"event_filter": []string{"artifact.published"},
 	})
 	resp, err := http.Post(ts.URL+"/v1/webhooks", "application/json", strReader(string(body)))
@@ -50,7 +50,7 @@ func TestWebhooksList_PostMissingURLReturns400(t *testing.T) {
 	t.Parallel()
 	wstore := webhook.NewMemoryStore()
 	worker := &webhook.Worker{Store: wstore}
-	_, ts := bootRegistry(t, server.WithWebhooks(worker))
+	_, ts := bootWebhookRegistry(t, server.WithWebhooks(worker))
 	t.Cleanup(ts.Close)
 	resp, err := http.Post(ts.URL+"/v1/webhooks", "application/json",
 		strReader(`{"event_filter":["artifact.published"]}`))
@@ -67,7 +67,7 @@ func TestWebhooksList_BadJSONReturns400(t *testing.T) {
 	t.Parallel()
 	wstore := webhook.NewMemoryStore()
 	worker := &webhook.Worker{Store: wstore}
-	_, ts := bootRegistry(t, server.WithWebhooks(worker))
+	_, ts := bootWebhookRegistry(t, server.WithWebhooks(worker))
 	t.Cleanup(ts.Close)
 	resp, err := http.Post(ts.URL+"/v1/webhooks", "application/json", strReader("not json"))
 	if err != nil {
@@ -83,7 +83,7 @@ func TestWebhooksList_MethodNotAllowed(t *testing.T) {
 	t.Parallel()
 	wstore := webhook.NewMemoryStore()
 	worker := &webhook.Worker{Store: wstore}
-	_, ts := bootRegistry(t, server.WithWebhooks(worker))
+	_, ts := bootWebhookRegistry(t, server.WithWebhooks(worker))
 	t.Cleanup(ts.Close)
 	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/v1/webhooks", nil)
 	resp, err := http.DefaultClient.Do(req)

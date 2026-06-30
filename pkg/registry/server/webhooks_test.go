@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
@@ -44,7 +45,7 @@ func TestWebhooks_EndToEndDelivery(t *testing.T) {
 		Backoff:    []time.Duration{},
 	}
 
-	srv, ts := bootRegistry(t, server.WithWebhooks(worker))
+	srv, ts := bootWebhookRegistry(t, server.WithWebhooks(worker))
 	t.Cleanup(ts.Close)
 
 	// Register a receiver via the HTTP API.
@@ -89,10 +90,10 @@ func TestWebhooks_ListMasksSecret(t *testing.T) {
 	t.Parallel()
 	wstore := webhook.NewMemoryStore()
 	_ = wstore.Put(context.Background(), webhook.Receiver{
-		ID: "wh-1", TenantID: "default", URL: "http://x", Secret: "real-secret",
+		ID: "wh-1", TenantID: "default", URL: "https://example.test/x", Secret: "real-secret",
 	})
 	worker := &webhook.Worker{Store: wstore}
-	_, ts := bootRegistry(t, server.WithWebhooks(worker))
+	_, ts := bootWebhookRegistry(t, server.WithWebhooks(worker))
 	t.Cleanup(ts.Close)
 
 	resp, err := http.Get(ts.URL + "/v1/webhooks")
@@ -127,7 +128,7 @@ func TestWebhooks_DeleteStopsDeliveries(t *testing.T) {
 		ID: "wh-1", TenantID: "default", URL: receiver.URL, Secret: "k",
 	})
 	worker := &webhook.Worker{Store: wstore, HTTPClient: receiver.Client()}
-	srv, ts := bootRegistry(t, server.WithWebhooks(worker))
+	srv, ts := bootWebhookRegistry(t, server.WithWebhooks(worker))
 	t.Cleanup(ts.Close)
 
 	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/v1/webhooks/wh-1", nil)
@@ -154,6 +155,33 @@ func bootRegistry(t *testing.T, opts ...server.Option) (*server.Server, *httptes
 		t.Fatalf("CreateTenant: %v", err)
 	}
 	srv := server.New(core.New(st, "default", nil), opts...)
+	ts := httptest.NewServer(srv.Handler())
+	return srv, ts
+}
+
+// bootWebhookRegistry boots a registry whose caller holds the per-tenant
+// admin role, so the §7.3.2 admin-gated receiver CRUD endpoints accept the
+// request. The webhook CRUD handlers call requireAdmin, so a plain
+// bootRegistry caller is now refused with auth.forbidden; the webhook
+// tests boot through this helper to exercise the post-gate behavior.
+func bootWebhookRegistry(t *testing.T, opts ...server.Option) (*server.Server, *httptest.Server) {
+	t.Helper()
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	const admin = "alice@acme.com"
+	if err := st.GrantAdmin(context.Background(), store.AdminGrant{
+		UserID: admin, OrgID: "default",
+	}); err != nil {
+		t.Fatalf("GrantAdmin: %v", err)
+	}
+	all := append([]server.Option{
+		server.WithIdentityResolver(func(*http.Request) layer.Identity {
+			return layer.Identity{Sub: admin, IsAuthenticated: true}
+		}),
+	}, opts...)
+	srv := server.New(core.New(st, "default", nil), all...)
 	ts := httptest.NewServer(srv.Handler())
 	return srv, ts
 }

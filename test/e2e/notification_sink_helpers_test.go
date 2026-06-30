@@ -19,10 +19,18 @@ package e2e
 // records deliveries, optionally verifies X-Podium-Signature against a
 // configured secret, and can be told to fail every delivery (for the
 // auto-disable path) or to fail a fixed number of times then recover (for the
-// retry path). registerWebhook / getWebhook drive the §7.3.2 receiver CRUD
-// over the standalone HTTP surface. startServerWebhooks boots the standalone
-// server with the PODIUM_WEBHOOK_MAX_FAILURES override (the new operator
-// tunable) so a low threshold makes auto-disable reachable. sseClient opens a
+// retry path). A §7.3.2 sink serves over https (withSinkTLS) because the SSRF
+// policy requires the https scheme on a receiver URL; a §9.1 notification sink
+// stays on plain http because the §9.1 provider applies no SSRF policy.
+// registerWebhook / getWebhook drive the §7.3.2 receiver CRUD over the
+// standalone HTTP surface; the CRUD is admin-gated, so they carry the minted
+// admin Bearer token the boot helper sets on the serverProc.
+// startWebhookAdminServer boots the standalone server with the
+// injected-session-token identity provider, a bootstrap admin grant, an optional
+// PODIUM_WEBHOOK_MAX_FAILURES override so a low threshold makes auto-disable
+// reachable, the PODIUM_WEBHOOK_ALLOWED_TARGETS allowlist so the loopback
+// httptest sink passes the SSRF address rejection, and SSL_CERT_FILE pointing at
+// the TLS sink certificate so the worker's delivery verifies. sseClient opens a
 // bounded read of /v1/events, filters heartbeats, and yields decoded events.
 //
 // This lifts the receiverServer recorder from pkg/webhook/webhook_test.go and
@@ -43,10 +51,18 @@ package e2e
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"crypto/rsa"
 	"encoding/json"
+	"encoding/pem"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -78,6 +94,7 @@ type recordedDelivery struct {
 type notificationSink struct {
 	srv    *httptest.Server
 	secret string
+	tls    bool
 
 	mu         sync.Mutex
 	deliveries []recordedDelivery
@@ -103,15 +120,26 @@ func withSinkFailEvery() sinkOption {
 	return func(s *notificationSink) { s.failEvery.Store(true) }
 }
 
+// withSinkTLS serves the sink over https with the httptest self-signed cert.
+// The §7.3.2 SSRF policy requires the https scheme on a receiver URL, so a sink
+// that backs a §7.3.2 webhook receiver must be a TLS server; the boot helpers
+// add the sink's cert to the subprocess trust through SSL_CERT_FILE so delivery
+// verifies. The §9.1 notification provider applies no SSRF policy, so a §9.1
+// sink stays on plain http (the default).
+func withSinkTLS() sinkOption {
+	return func(s *notificationSink) { s.tls = true }
+}
+
 // newNotificationSink starts a recording receiver and registers teardown. The
-// returned sink is reachable from a standalone subprocess at sink.URL().
+// returned sink is reachable from a standalone subprocess at sink.URL(). It
+// serves plain http by default and https under withSinkTLS.
 func newNotificationSink(t testing.TB, opts ...sinkOption) *notificationSink {
 	t.Helper()
 	s := &notificationSink{}
 	for _, opt := range opts {
 		opt(s)
 	}
-	s.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw := make([]byte, 0, 1024)
 		buf := make([]byte, 4096)
 		for {
@@ -141,7 +169,12 @@ func newNotificationSink(t testing.TB, opts ...sinkOption) *notificationSink {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-	}))
+	})
+	if s.tls {
+		s.srv = httptest.NewTLSServer(handler)
+	} else {
+		s.srv = httptest.NewServer(handler)
+	}
 	t.Cleanup(s.srv.Close)
 	return s
 }
@@ -149,6 +182,16 @@ func newNotificationSink(t testing.TB, opts ...sinkOption) *notificationSink {
 // URL is the receiver endpoint the registry POSTs to. It is reachable from a
 // standalone subprocess because httptest binds a loopback port.
 func (s *notificationSink) URL() string { return s.srv.URL }
+
+// caPEM returns the PEM-encoded certificate a subprocess must trust to deliver
+// to a TLS sink. The httptest TLS server is self-signed, so the certificate is
+// its own trust anchor. It is empty for a plain-http sink.
+func (s *notificationSink) caPEM() []byte {
+	if s.srv == nil || s.srv.Certificate() == nil {
+		return nil
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: s.srv.Certificate().Raw})
+}
 
 // count returns how many deliveries the sink has recorded so far.
 func (s *notificationSink) count() int {
@@ -193,32 +236,190 @@ func (s *notificationSink) firstMatching(eventType string) (recordedDelivery, bo
 	return recordedDelivery{}, false
 }
 
-// ---- standalone server with the §7.3.2 MaxFailures override ----------------
+// ---- admin-gated standalone server for the §7.3.2 receiver CRUD ------------
 
-// startServerWebhooks boots a standalone server over the given filesystem
-// registry with the §7.3.2 auto-disable threshold set to maxFailures (0 leaves
-// the worker default of 32) and a fast retry backoff so an induced delivery
-// failure is recorded promptly rather than after the full default schedule
-// (1s..60s). The outbound webhook worker and the /v1/events change stream are
-// always mounted; this only tunes the failure cap and retry cadence so the
-// auto-disable path is reachable in a bounded test.
-func startServerWebhooks(t testing.TB, registry string, maxFailures int) *serverProc {
+// sinkHost returns the bare host of a notificationSink URL, which is the value
+// PODIUM_WEBHOOK_ALLOWED_TARGETS needs to permit the loopback receiver. httptest
+// binds 127.0.0.1, whose address the default SSRF policy rejects, so the boot
+// helpers pass the sink host as an allowlist override; the allowlist overrides
+// the address rejection, not the https requirement, so the sink also serves over
+// TLS.
+func sinkHost(t testing.TB, rawURL string) string {
 	t.Helper()
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatalf("parse sink URL %q: %v", rawURL, err)
+	}
+	return u.Hostname()
+}
+
+// webhookBoot collects the per-test webhook boot inputs the helpers thread into
+// the subprocess: the §7.3.2 SSRF allowlist hosts and the TLS sink certificates
+// the worker must trust to deliver.
+type webhookBoot struct {
+	maxFailures int
+	allowHosts  []string
+	caPEMs      [][]byte
+}
+
+// bootOption configures a webhookBoot.
+type bootOption func(*webhookBoot)
+
+// withMaxFailures sets PODIUM_WEBHOOK_MAX_FAILURES so a low cap makes the
+// auto-disable path reachable in a bounded test.
+func withMaxFailures(n int) bootOption {
+	return func(b *webhookBoot) { b.maxFailures = n }
+}
+
+// withAllowedHost adds a bare host or CIDR to PODIUM_WEBHOOK_ALLOWED_TARGETS,
+// for a test that allowlists a host name directly rather than a sink.
+func withAllowedHost(host string) bootOption {
+	return func(b *webhookBoot) { b.allowHosts = append(b.allowHosts, host) }
+}
+
+// withSink allowlists a TLS sink's loopback host and adds its certificate to the
+// subprocess trust, so a §7.3.2 receiver pointed at the sink passes the SSRF
+// policy (allowlist over the address rejection, https satisfied by the TLS sink)
+// and the worker's delivery verifies the certificate.
+func withSink(t testing.TB, s *notificationSink) bootOption {
+	t.Helper()
+	host := sinkHost(t, s.URL())
+	ca := s.caPEM()
+	return func(b *webhookBoot) {
+		b.allowHosts = append(b.allowHosts, host)
+		if len(ca) > 0 {
+			b.caPEMs = append(b.caPEMs, ca)
+		}
+	}
+}
+
+// startWebhookAdminServer boots a standalone server whose §7.3.2 receiver CRUD
+// is reachable by a minted admin Bearer token, ingesting registry. The receiver
+// CRUD is admin-gated (s.requireAdmin -> core.AdminAuthorize), so the server
+// boots with the injected-session-token identity provider, a bootstrap admin
+// grant for alice@acme.com, and the runtime signing key registered, then mints
+// an admin token onto the returned serverProc.
+func startWebhookAdminServer(t *testing.T, registry string, opts ...bootOption) *serverProc {
+	t.Helper()
+	srv, _ := bootWebhookAdminServer(t, registry, opts...)
+	return srv
+}
+
+// bootWebhookAdminServer is the shared core: it boots an admin-gated webhook
+// server and returns the running server plus the runtime private key so a caller
+// that needs to mint a second (non-admin) token has the key.
+// startWebhookAdminServer is the common form that discards the key.
+//
+// The SSRF policy requires https and rejects the loopback httptest sinks by
+// default, so a sink-backed test serves the sink over TLS (withSink) and the
+// helper allowlists the sink host (over the address rejection, not the https
+// requirement) and writes the sink certificate to a CA bundle pointed at by
+// SSL_CERT_FILE so the subprocess worker's delivery verifies. A 1ms retry
+// backoff records an induced failure promptly when a max-failures cap is set.
+func bootWebhookAdminServer(t *testing.T, registry string, opts ...bootOption) (*serverProc, *rsa.PrivateKey) {
+	t.Helper()
+	var b webhookBoot
+	for _, opt := range opts {
+		opt(&b)
+	}
+	priv, pemPath := injKeyPair(t)
 	env := []string{
 		"HOME=" + t.TempDir(),
+		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
+		"PODIUM_OAUTH_AUDIENCE=" + injAudience,
+		"PODIUM_BOOTSTRAP_ADMINS=alice@acme.com",
+		// An admin-defined layer (the republish helpers register one with the
+		// admin token) defaults to private; make it public so the admin's
+		// authenticated load_artifact poll in waitForVersion resolves. Webhook
+		// delivery fires on ingest independent of read visibility.
+		"PODIUM_DEFAULT_LAYER_VISIBILITY=public",
+	}
+	if b.maxFailures > 0 {
+		env = append(env, "PODIUM_WEBHOOK_MAX_FAILURES="+strconv.Itoa(b.maxFailures))
 		// A single 1ms retry: a 5xx delivery fails over once and records the
 		// failure immediately, so the consecutive-failure counter advances per
-		// event without waiting on the production backoff.
-		"PODIUM_WEBHOOK_RETRY_BACKOFF=1ms",
+		// event without waiting on the production backoff. The fast backoff is
+		// only meaningful when the auto-disable cap is exercised.
+		env = append(env, "PODIUM_WEBHOOK_RETRY_BACKOFF=1ms")
 	}
-	if maxFailures > 0 {
-		env = append(env, "PODIUM_WEBHOOK_MAX_FAILURES="+strconv.Itoa(maxFailures))
+	if hosts := dedupeHosts(b.allowHosts); len(hosts) > 0 {
+		env = append(env, "PODIUM_WEBHOOK_ALLOWED_TARGETS="+joinComma(hosts))
+	}
+	if path := writeCABundle(t, b.caPEMs); path != "" {
+		env = append(env, "SSL_CERT_FILE="+path)
 	}
 	args := []string{"serve", "--standalone"}
 	if registry != "" {
 		args = append(args, "--layer-path", registry)
 	}
-	return startServerArgs(t, env, args...)
+	srv := startServerArgs(t, env, args...)
+	injRegisterRuntime(t, srv, pemPath)
+	srv.adminToken = injSignJWT(t, priv, injClaims("alice@acme.com"))
+	return srv, priv
+}
+
+// writeCABundle writes the test sink certificates to one PEM bundle file and
+// returns its path, or "" when there are no certificates. The subprocess trusts
+// it through SSL_CERT_FILE, which the Go default HTTP client honors on Linux
+// (the CI platform). The httptest certificate already covers 127.0.0.1, so a
+// loopback TLS sink verifies once the subprocess trusts the bundle.
+func writeCABundle(t testing.TB, pems [][]byte) string {
+	t.Helper()
+	if len(pems) == 0 {
+		return ""
+	}
+	var bundle bytes.Buffer
+	for _, p := range pems {
+		bundle.Write(p)
+		if len(p) > 0 && p[len(p)-1] != '\n' {
+			bundle.WriteByte('\n')
+		}
+	}
+	path := filepath.Join(t.TempDir(), "webhook-ca-bundle.pem")
+	if err := os.WriteFile(path, bundle.Bytes(), 0o600); err != nil {
+		t.Fatalf("write CA bundle: %v", err)
+	}
+	return path
+}
+
+// requireSubprocessTLSTrust skips a test whose assertion needs the subprocess
+// worker to deliver to a TLS sink. The subprocess trusts the test certificate
+// through SSL_CERT_FILE, which Go's default HTTP client honors on Linux (the CI
+// platform) but not on darwin, where the platform verifier ignores
+// SSL_CERT_FILE and there is no env-only way to add a trust anchor. Registration
+// and the SSRF/admin-gate rejections do not open a TLS connection and run on
+// every platform; only the successful-delivery assertions are guarded.
+func requireSubprocessTLSTrust(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "darwin" {
+		t.Skip("subprocess delivery to a TLS sink needs SSL_CERT_FILE trust, which the darwin platform verifier ignores; covered on Linux CI and by the in-process pkg/webhook delivery tests")
+	}
+}
+
+// dedupeHosts drops empty and duplicate allowlist hosts, preserving order.
+func dedupeHosts(in []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, h := range in {
+		if h != "" && !seen[h] {
+			seen[h] = true
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// joinComma joins the allowlist hosts into the comma-separated form
+// PODIUM_WEBHOOK_ALLOWED_TARGETS expects.
+func joinComma(parts []string) string {
+	out := ""
+	for i, p := range parts {
+		if i > 0 {
+			out += ","
+		}
+		out += p
+	}
+	return out
 }
 
 // webhookReceiver is the §7.3.2 receiver record the CRUD surface returns. The
@@ -236,12 +437,45 @@ type webhookReceiver struct {
 	FailureCount int      `json:"FailureCount"`
 }
 
+// webhookBearer issues an HTTP request to the running server's webhook CRUD
+// surface with the server's minted admin token and an optional JSON body,
+// returning the status and body. The receiver CRUD is admin-gated (§7.3.2), so
+// the helpers below send Authorization: Bearer <admin token> rather than the
+// header-less postJSON/getJSON, mirroring rbacBearer in auth_admin_rbac_test.go.
+func webhookBearer(t testing.TB, method, url, token string, body []byte) (int, []byte) {
+	t.Helper()
+	var reqBody io.Reader
+	if body != nil {
+		reqBody = bytes.NewReader(body)
+	}
+	req, err := http.NewRequest(method, url, reqBody)
+	if err != nil {
+		t.Fatalf("build request %s %s: %v", method, url, err)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, url, err)
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, out
+}
+
 // registerWebhook creates a §7.3.2 receiver over POST /v1/webhooks pointing at
 // url, with the supplied HMAC secret and event filter (empty filter = all
 // events). Supplying the secret (rather than letting the server generate one)
 // lets a notificationSink verify the delivery signature against the same value.
-// A standalone server resolves the anonymous caller to the de facto admin, so
-// the create is accepted with no token.
+// Receiver CRUD is admin-gated (§7.3.2), so the request carries the server's
+// minted admin Bearer token (srv.adminToken, set by startWebhookAdminServer);
+// the boot helper allowlists the loopback sink host so the SSRF policy permits
+// the httptest target over the address rejection while the https requirement is
+// satisfied by the TLS sink.
 func registerWebhook(t testing.TB, srv *serverProc, url, secret string, eventFilter ...string) webhookReceiver {
 	t.Helper()
 	req := map[string]any{"url": url}
@@ -251,7 +485,8 @@ func registerWebhook(t testing.TB, srv *serverProc, url, secret string, eventFil
 	if len(eventFilter) > 0 {
 		req["event_filter"] = eventFilter
 	}
-	st, body := postJSON(t, srv.BaseURL+"/v1/webhooks", req)
+	b, _ := json.Marshal(req)
+	st, body := webhookBearer(t, http.MethodPost, srv.BaseURL+"/v1/webhooks", srv.adminToken, b)
 	if st != http.StatusCreated {
 		t.Fatalf("POST /v1/webhooks = HTTP %d, want 201\nbody: %s", st, body)
 	}
@@ -265,13 +500,48 @@ func registerWebhook(t testing.TB, srv *serverProc, url, secret string, eventFil
 	return rec
 }
 
+// registerWebhookDebounced creates a §7.3.2 receiver with a debounce window so a
+// burst of matched events coalesces into one batch delivery. It mirrors
+// registerWebhook and adds the debounce field, carrying the same admin Bearer
+// token.
+func registerWebhookDebounced(t testing.TB, srv *serverProc, url, secret, debounce string, eventFilter ...string) webhookReceiver {
+	t.Helper()
+	req := map[string]any{"url": url, "debounce": debounce}
+	if secret != "" {
+		req["secret"] = secret
+	}
+	if len(eventFilter) > 0 {
+		req["event_filter"] = eventFilter
+	}
+	b, _ := json.Marshal(req)
+	st, body := webhookBearer(t, http.MethodPost, srv.BaseURL+"/v1/webhooks", srv.adminToken, b)
+	if st != http.StatusCreated {
+		t.Fatalf("POST /v1/webhooks (debounced) = HTTP %d, want 201\nbody: %s", st, body)
+	}
+	var rec webhookReceiver
+	if err := json.Unmarshal(body, &rec); err != nil {
+		t.Fatalf("decode webhook create response: %v\nbody: %s", err, body)
+	}
+	if rec.ID == "" {
+		t.Fatalf("webhook create returned empty id: %s", body)
+	}
+	return rec
+}
+
 // getWebhook reads the current §7.3.2 receiver record over GET
 // /v1/webhooks/{id}. The returned Disabled and FailureCount reflect the
-// worker's persisted delivery state, so a test can assert auto-disable.
+// worker's persisted delivery state, so a test can assert auto-disable. The
+// read endpoint is admin-gated, so the request carries srv.adminToken.
 func getWebhook(t testing.TB, srv *serverProc, id string) webhookReceiver {
 	t.Helper()
+	st, body := webhookBearer(t, http.MethodGet, srv.BaseURL+"/v1/webhooks/"+id, srv.adminToken, nil)
+	if st != http.StatusOK {
+		t.Fatalf("GET /v1/webhooks/%s = HTTP %d, want 200\nbody: %s", id, st, body)
+	}
 	var rec webhookReceiver
-	getJSON(t, srv.BaseURL+"/v1/webhooks/"+id, &rec)
+	if err := json.Unmarshal(body, &rec); err != nil {
+		t.Fatalf("decode webhook get response: %v\nbody: %s", err, body)
+	}
 	return rec
 }
 

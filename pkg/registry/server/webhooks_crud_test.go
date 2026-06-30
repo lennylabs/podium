@@ -17,11 +17,11 @@ func setupWebhook(t *testing.T, id string) (*server.Server, string, func()) {
 	wstore := webhook.NewMemoryStore()
 	_ = wstore.Put(context.Background(), webhook.Receiver{
 		ID: id, TenantID: "default",
-		URL: "http://example/" + id, Secret: "shh",
+		URL: "https://example.test/" + id, Secret: "shh",
 		EventFilter: []string{"artifact.published"},
 	})
 	worker := &webhook.Worker{Store: wstore, HTTPClient: http.DefaultClient}
-	srv, ts := bootRegistry(t, server.WithWebhooks(worker))
+	srv, ts := bootWebhookRegistry(t, server.WithWebhooks(worker))
 	return srv, ts.URL, ts.Close
 }
 
@@ -62,7 +62,7 @@ func TestWebhookOne_PutPatchesFields(t *testing.T) {
 	_, base, cleanup := setupWebhook(t, "wh-put")
 	defer cleanup()
 	patch, _ := json.Marshal(map[string]any{
-		"url":          "http://example/updated",
+		"url":          "https://example.test/updated",
 		"event_filter": []string{"artifact.deprecated"},
 		"disabled":     false,
 	})
