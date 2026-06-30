@@ -109,8 +109,7 @@ func requireJSONStringField(t *testing.T, rel string, content []byte, key string
 }
 
 // requireMCPServersJSON checks the {"mcpServers": {name: {command|url}}} shape
-// used by .mcp.json (claude-code), .cursor/mcp.json, and the cowork per-plugin
-// .mcp.json.
+// used by .mcp.json (claude-code) and .cursor/mcp.json.
 func requireMCPServersJSON(t *testing.T, rel string, content []byte) {
 	t.Helper()
 	obj := parseJSONObject(t, rel, content)
@@ -190,8 +189,8 @@ func requireSettingsJSON(t *testing.T, rel string, content []byte) {
 }
 
 // requireClaudeStyleHooksJSON validates the nested
-// {"hooks": {Event: [{"hooks": [{type, command}]}]}} structure (claude-code,
-// codex, claude-cowork).
+// {"hooks": {Event: [{"hooks": [{type, command}]}]}} structure (claude-code and
+// codex).
 func requireClaudeStyleHooksJSON(t *testing.T, rel string, content []byte) {
 	t.Helper()
 	requireClaudeStyleHooks(t, rel, parseJSONObject(t, rel, content))

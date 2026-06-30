@@ -746,24 +746,23 @@ func TestCoreConcept_ClaudeDesktopExtension(t *testing.T) {
 	mustNotExist(t, filepath.Join(tgt, ".claude-desktop"))
 }
 
-// claude-cowork materializes one plugin per artifact under
-// plugins/<id>/ with a .claude-plugin/plugin.json manifest. A skill ships as a
-// plugin; a context artifact goes to the harness-neutral .podium/context/
-// bucket instead (§6.7, identical across every adapter).
-func TestCoreConcept_ClaudeCoworkPlugin(t *testing.T) {
+// claude-cowork materializes a context artifact into the harness-neutral
+// .podium/context/ bucket (§6.7, identical across every adapter). The plugin and
+// marketplace layout for the other types ships through marketplace publishing
+// (§6.7, §7.8) rather than podium sync, so the adapter emits no project-scope
+// plugin or marketplace tree.
+func TestCoreConcept_ClaudeCoworkContextOnly(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"tools/greet/ARTIFACT.md":  greetSkillArtifact,
-		"tools/greet/SKILL.md":     skillBody("greet"),
 		"tools/helper/ARTIFACT.md": contextArtifact("helper"),
 	})
 	tgt := t.TempDir()
 	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-cowork")
-	mustExist(t, filepath.Join(tgt, "plugins/tools/greet/.claude-plugin/plugin.json"))
-	mustExist(t, filepath.Join(tgt, "plugins/tools/greet/skills/greet/SKILL.md"))
-	// Standalone context is harness-neutral, not a plugin.
+	// Context is harness-neutral and still materializes.
 	mustExist(t, filepath.Join(tgt, ".podium/context/tools/helper/ARTIFACT.md"))
-	mustNotExist(t, filepath.Join(tgt, "plugins/tools/helper"))
+	// No plugin or marketplace layout is produced.
+	mustNotExist(t, filepath.Join(tgt, "plugins"))
+	mustNotExist(t, filepath.Join(tgt, ".claude-plugin"))
 }
 
 // podium-mcp fails at startup when PODIUM_REGISTRY is unset.

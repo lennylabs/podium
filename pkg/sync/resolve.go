@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/lennylabs/podium/pkg/adapter"
 	"gopkg.in/yaml.v3"
 )
 
@@ -307,56 +308,178 @@ func Check(merged *MergedConfig) []string {
 }
 
 // MultiTargetPlan is one resolved entry from a §7.5.2 `targets:` list. Each
-// plan runs as an independent sync with its own target, scope, and lock.
+// plan runs as an independent sync with its own target, scope, and lock. Kind
+// selects the output format: "workspace" materializes the project-files layout
+// (the Profile and Scope fields apply), and "marketplace" renders the git-repo
+// distribution layout (§7.8) (the Harnesses, Git, CommitMessage, Plugins, and
+// Identity fields apply). Workflow is the per-target prepare/publish command
+// lists, carried for either kind (§7.5.2).
 type MultiTargetPlan struct {
 	ID       string
+	Kind     string
 	Registry string
 	Target   string
-	Harness  string
-	Profile  string
-	Scope    ScopeFilter
+
+	// Workspace-kind fields. Harness and Scope drive the project-files
+	// materialization; Profile records the named profile for the run summary.
+	Harness string
+	Profile string
+	Scope   ScopeFilter
+
+	// Marketplace-kind fields. Identity is the §4.6 effective-view principal
+	// resolved against defaults.identity, the documentary publishing identity
+	// whose visibility defines what reaches the marketplace.
+	Harnesses     []string
+	Git           GitRemote
+	CommitMessage string
+	Plugins       []PluginFilter
+	Identity      string
+
+	// Workflow is the per-target prepare/publish command lists, available to
+	// either kind (§7.5.2).
+	Workflow Workflow
+}
+
+// Target kinds (§7.5.2). The empty value defaults to KindWorkspace.
+const (
+	KindWorkspace   = "workspace"
+	KindMarketplace = "marketplace"
+)
+
+// PlanInput carries the CLI-level inputs the multi-target plan needs beyond the
+// config file: the registry override (the --registry flag), the workspace the
+// --config file lives in (for relative registry resolution), and whether the run
+// requested the watch mode (§7.5.4). A `kind: marketplace` target rejects the
+// watch mode, so PlanMultiTarget needs to see it to enforce the §7.5.2 rule.
+//
+// The ephemeral overrides (§7.5.5) reach the multi-target path through no field:
+// `podium sync override` operates on a single target directory's lock file and
+// never reads a `targets:` list, so it cannot carry a marketplace target, and the
+// §7.5.2 rejection of an override on a marketplace entry is satisfied by the
+// absence of a config surface that pairs the two.
+type PlanInput struct {
+	RegistryOverride string
+	Workspace        string
+	Watch            bool
 }
 
 // PlanMultiTarget resolves every entry in cfg.Targets into a runnable plan
-// (§7.5.2 multi-target). Per entry the registry is the --config-shared
-// registry (registryOverride or defaults.registry, resolved against
-// workspace), the harness is the entry's harness then defaults.harness then
-// "none", and the scope comes from the named profile (merged with any inline
-// lists) or the inline lists directly. A target with no resolvable directory
-// or an unresolved profile reference is an error.
+// (§7.5.2 multi-target). Per entry the registry is the --config-shared registry
+// (in.RegistryOverride or defaults.registry, resolved against in.Workspace), and
+// the entry's kind selects the rest of the resolution.
+//
+// A `kind: workspace` entry (the default for an empty kind) resolves the harness
+// (the entry's harness then defaults.harness then "none") and the scope (the
+// named profile merged with any inline lists, or the inline lists directly).
+//
+// A `kind: marketplace` entry resolves the marketplace payload (the harness set,
+// the git remote and branch, the commit message, the plugins, and the publishing
+// identity inherited from defaults.identity) and skips the workspace scope
+// resolution, so it does not become an empty-scope "none" workspace plan.
+//
+// PlanMultiTarget validates each entry against its kind before resolving it: a
+// `kind: workspace` entry rejects the marketplace fields, and a `kind:
+// marketplace` entry rejects the workspace scope fields and the watch mode
+// (in.Watch). A marketplace harness set naming a non-publish harness (opencode
+// or none) is rejected. A target with no resolvable directory, an unresolved
+// profile reference, or a kind violation is an error.
 //
 // spec: §7.5.2 — "podium sync --config <path> iterates targets: and runs one
 // sync per entry; each target writes its own lock".
-func PlanMultiTarget(cfg *SyncConfig, registryOverride, workspace string) ([]MultiTargetPlan, error) {
+func PlanMultiTarget(cfg *SyncConfig, in PlanInput) ([]MultiTargetPlan, error) {
 	if cfg == nil || len(cfg.Targets) == 0 {
 		return nil, fmt.Errorf("sync --config: no targets: defined")
 	}
-	registry := firstNonEmpty(registryOverride, cfg.Defaults.Registry)
+	registry := firstNonEmpty(in.RegistryOverride, cfg.Defaults.Registry)
 	if registry == "" {
 		return nil, ErrNoRegistry
 	}
-	registry = ResolveRegistryPath(workspace, registry)
+	registry = ResolveRegistryPath(in.Workspace, registry)
 
 	plans := make([]MultiTargetPlan, 0, len(cfg.Targets))
 	for _, entry := range cfg.Targets {
+		kind := entry.Kind
+		if kind == "" {
+			kind = KindWorkspace
+		}
+		if err := validateTargetKind(kind, entry, in); err != nil {
+			return nil, err
+		}
 		target := firstNonEmpty(entry.Target, cfg.Defaults.Target)
 		if target == "" {
 			return nil, fmt.Errorf("sync --config: target %q has no target directory", entry.ID)
 		}
-		scope, err := targetScope(entry, cfg)
-		if err != nil {
-			return nil, err
-		}
-		plans = append(plans, MultiTargetPlan{
+
+		plan := MultiTargetPlan{
 			ID:       entry.ID,
+			Kind:     kind,
 			Registry: registry,
 			Target:   target,
-			Harness:  firstNonEmpty(entry.Harness, cfg.Defaults.Harness, "none"),
-			Profile:  entry.Profile,
-			Scope:    scope,
-		})
+			Workflow: entry.Workflow,
+		}
+		switch kind {
+		case KindMarketplace:
+			// A marketplace entry skips the workspace targetScope resolution so it
+			// does not become an empty-scope "none" workspace plan (§7.5.2).
+			plan.Harnesses = entry.Harnesses
+			plan.Git = entry.Git
+			plan.CommitMessage = entry.CommitMessage
+			plan.Plugins = entry.Plugins
+			plan.Identity = firstNonEmpty(entry.Identity, cfg.Defaults.Identity)
+		default:
+			scope, err := targetScope(entry, cfg)
+			if err != nil {
+				return nil, err
+			}
+			plan.Harness = firstNonEmpty(entry.Harness, cfg.Defaults.Harness, "none")
+			plan.Profile = entry.Profile
+			plan.Scope = scope
+		}
+		plans = append(plans, plan)
 	}
 	return plans, nil
+}
+
+// validateTargetKind enforces the §7.5.2 per-kind field rules: a kind: workspace
+// entry rejects the marketplace fields, and a kind: marketplace entry rejects the
+// workspace scope fields and the watch mode. A marketplace harness set naming a
+// non-publish harness (opencode or none) is rejected via
+// adapter.EmitterForHarness. workflow is accepted on both kinds. Every rejection
+// maps to config.invalid (§6.10).
+//
+// The §7.5.2 rejection of an ephemeral override (§7.5.5) on a marketplace entry
+// needs no check here: `podium sync override` operates on a single target
+// directory and never routes through this path, so no config surface pairs an
+// override with a marketplace target.
+func validateTargetKind(kind string, entry TargetEntry, in PlanInput) error {
+	switch kind {
+	case KindWorkspace:
+		if len(entry.Harnesses) > 0 || entry.Git != (GitRemote{}) ||
+			entry.CommitMessage != "" || entry.Identity != "" || len(entry.Plugins) > 0 {
+			return fmt.Errorf("%w: target %q is kind: workspace but sets marketplace fields (harnesses, git, commit_message, identity, or plugins)",
+				ErrConfigInvalid, entry.ID)
+		}
+	case KindMarketplace:
+		if entry.Profile != "" || len(entry.Include) > 0 || len(entry.Exclude) > 0 ||
+			len(entry.Type) > 0 || entry.Harness != "" {
+			return fmt.Errorf("%w: target %q is kind: marketplace but sets workspace scope fields (harness, profile, include, exclude, or type)",
+				ErrConfigInvalid, entry.ID)
+		}
+		if in.Watch {
+			return fmt.Errorf("%w: target %q is kind: marketplace and cannot run under --watch (§7.5.4)",
+				ErrConfigInvalid, entry.ID)
+		}
+		for _, h := range entry.Harnesses {
+			if _, err := adapter.EmitterForHarness(h); err != nil {
+				return fmt.Errorf("%w: target %q harness %q is not a publish target (opencode and none have no git-repo distribution): %w",
+					ErrConfigInvalid, entry.ID, h, err)
+			}
+		}
+	default:
+		return fmt.Errorf("%w: target %q has unknown kind %q (want workspace or marketplace)",
+			ErrConfigInvalid, entry.ID, kind)
+	}
+	return nil
 }
 
 // targetScope resolves one TargetEntry's scope: the named profile's lists

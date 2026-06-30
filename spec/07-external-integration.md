@@ -120,6 +120,8 @@ Schema:
 
 Receivers are configured per org (URL + HMAC secret).
 
+`layer.ingested` fires once per completed layer ingest cycle. A CI marketplace-publish job subscribes a receiver to `layer.ingested` (§7.8), so one source commit triggers one publish across the artifacts it changed. `artifact.published` is not used for this purpose, because it fires once per ingested `(artifact_id, version)` and would trigger one publish per changed artifact rather than one per source commit. Receiver authorization and the per-receiver debounce window with its batch delivery body are specified in proposal 0004 (webhook hardening).
+
 ### 7.3.3 Tenant Management
 
 These are operator-level HTTP endpoints, parallel to the §7.3.1 layer-management endpoints (`GET /v1/layers`, `POST /v1/layers/reingest`, `DELETE /v1/layers`). Operator authorization is distinct from the per-tenant `admin` role defined in §4.7.2; the operator role is established per §4.7.1 (Operator role). The four endpoints are operator-only and audited (§8.1). The mutating endpoints (`POST`, `PATCH`, and `DELETE`) are write endpoints under §13.2.1, so a read-only registry rejects them with `registry.read_only`, consistent with the layer-admin and admin-grant endpoints; `GET /v1/admin/tenants` is a read and stays available in read-only mode. The registry checks this after operator authorization, mirroring the admin-grant handler.
@@ -260,6 +262,7 @@ profiles:
 # Each entry runs as a separate sync with its own scope and target.
 targets:
   - id: claude-code
+    kind: workspace # the default; materializes the project-files layout
     harness: claude-code
     target: ~/.claude/
     profile: project-default
@@ -267,6 +270,27 @@ targets:
     harness: codex
     target: ~/.codex/
     include: ["shared/runbooks/**"]
+
+  - id: acme-agents
+    kind: marketplace # renders the marketplace emitters (§7.8)
+    harnesses: [claude-code, codex, cursor]
+    target: ./build/acme-agents # the working directory the checkout lands in
+    git:
+      remote: git@github.com:acme/agent-marketplace.git
+      branch: main
+    commit_message: "Sync Podium catalog ({{.ChangedCount}}) {{.Timestamp}}"
+    identity: publisher@acme.com # or inherited from defaults.identity
+    plugins:
+      - name: finance-pack
+        include: ["finance/**"]
+    workflow:
+      prepare:
+        - run: ["git", "clone", "$PODIUM_GIT_REMOTE", "$PODIUM_WORKDIR"]
+      publish:
+        - run: ["git", "-C", "$PODIUM_WORKDIR", "add", "-A"]
+        - run: ["git", "-C", "$PODIUM_WORKDIR", "commit", "-m", "$PODIUM_COMMIT_MESSAGE"]
+          skip_if_no_changes: true
+        - run: ["git", "-C", "$PODIUM_WORKDIR", "push", "origin", "$PODIUM_GIT_BRANCH"]
 ```
 
 **Registry source.** `defaults.registry` accepts either a URL or a filesystem path; the client adapts:
@@ -284,6 +308,10 @@ Override an inherited URL with a filesystem path by setting `defaults.registry` 
 - **Multi-target mode.** `podium sync --config <path>` (without `--profile`) iterates `targets:` and runs one sync per entry. Each entry can name a `profile:` (resolved as above) or specify `include`/`exclude`/`type` inline. Each target writes its own `<target>/.podium/sync.lock`; the multi-target invocation does not introduce shared state across targets.
 - **Profile composition.** Profiles do not reference other profiles; nesting is intentionally absent. A team that wants an "extended" profile defines a new entry with the combined include/exclude lists.
 - **Validation.** `podium sync --check` validates the merged config against the schema and reports unresolved profile references, malformed globs, target collisions, and profile-name collisions across scopes (warning, not error).
+
+A `targets:` entry carries a `kind:` field that selects its output format. `kind: workspace` is the default and materializes the project-files layout into the target directory, the layout the harness reads directly. `kind: marketplace` renders the harness's git-repo distribution layout (§7.8) into the target directory as a working checkout. A `kind: workspace` entry carries the harness, the target directory, and the scope fields (`profile`, `include`, `exclude`, and `type`). A `kind: marketplace` entry carries a harness set (`harnesses`), a git remote and branch, a commit message, a plugin list, and a publishing identity. Both kinds may carry a `workflow:` of `prepare` and `publish` command lists. The marketplace fields are rejected on a `kind: workspace` entry, and the workspace scope fields, the watch mode (§7.5.4), and the ephemeral overrides (§7.5.5) are rejected on a `kind: marketplace` entry. The publishing identity is the §4.6 effective-view principal whose visibility defines what reaches the marketplace, and a marketplace target inherits it from an optional `defaults.identity` when it sets none of its own. A configuration that declares only `kind: workspace` targets, or omits `kind` entirely, behaves exactly as before, because `kind` defaults to `workspace`.
+
+A `workflow:` runs only when `podium sync` materializes a target. The MCP server and the in-process bridge read `sync.yaml` for the registry, the profiles, and the version pin, and they never execute a target's `workflow`. A `workflow` command therefore runs with the privileges of the `podium sync` process and never inside the registry server.
 
 ### 7.5.3 Lock File (`.podium/sync.lock`)
 
@@ -672,3 +700,160 @@ Behavior: resolves the registry from the merged config (or `--registry` flag), p
 **Multi-endpoint behavior.** Tokens cache in the OS keychain keyed by registry URL. A developer logged into both `https://podium.acme.com` and `https://podium-finance.acme.com` keeps both tokens simultaneously; switching projects (or running `podium login` in any context) authenticates against whichever registry the merged config resolves to. No `podium logout` between project switches required.
 
 `podium login` is a no-op when the resolved registry is a filesystem path (no auth) or points at a `--standalone` server (no auth). In both cases it prints a notice and exits.
+
+## 7.8 Marketplace Publishing
+
+A `podium sync` target of `kind: marketplace` (§7.5.2) renders the catalog into a harness-native marketplace repository and runs an operator-configured workflow that pushes it to a git remote. It is a derived, served output downstream of the registry, consistent with the §1.3 direction in which the registry is the served source of truth. Publishing a repository does not make that repository an authoring source: the catalog continues to enter the registry through the §7.3.1 ingest path, and the published repository is a rendered consequence of the effective view. A `kind: workspace` target writes the effective view into a local workspace directory the harness reads; a `kind: marketplace` target renders the same effective view into the git-repo distribution layout the harness imports (the marketplace, extension, package, or tap layout in §6.7), then runs the target's `workflow` to take the rendered tree to the remote.
+
+### Concepts
+
+- **Marketplace output.** A `kind: marketplace` target declared in `sync.yaml` (§7.5.2): a git repository, a harness set, a plugin list, and a workflow.
+- **Plugin.** A named bundle of selected artifacts, defined by a scope filter (`include`, `exclude`, `type`), reusing the §7.5.1 selection. A plugin is the cross-harness unit: it renders into each harness's plugin layout in that harness's subtree. Plugin membership is a packaging decision the operator controls. It is not authored or versioned in the catalog.
+- **Harness set.** The harnesses an output publishes for. Each listed harness contributes its format's manifest and its content subtree to the output repository, and harnesses that share a format contribute one shared manifest.
+
+### Publish targets
+
+A publish target is a harness with a git-repo distribution: the marketplace, extension, package, and tap formats described in §6.7. The targets are Claude (Code, Desktop, and Cowork), Codex, Cursor, Gemini, Pi, and Hermes. A harness without a git-repo distribution is not a publish target: OpenCode distributes through npm packages, and `none` writes raw canonical output, so both are excluded. A marketplace output whose harness set names an excluded harness is rejected at config validation.
+
+Claude Code, Claude Desktop, and Claude Cowork read the same `.claude-plugin/marketplace.json`, so one Claude marketplace emitter serves all three, and a harness set that names more than one of them yields one Claude marketplace rather than a collision. The Claude, Codex, and Cursor manifests sit at distinct fixed locations, so they coexist in one repository, each read only by its own harness. The Gemini extension occupies the whole repository, and the Hermes tap defaults to a root `skills/` directory, so those two formats resist sharing a repository and an operator may give each its own output.
+
+### Marketplace target schema
+
+The marketplace-output schema (the git remote and branch, the harness set, the commit message, the plugins, and the workflow) is part of the §7.5.2 `sync.yaml` schema, declared on a `kind: marketplace` target entry. The publishing identity is a marketplace target field inherited from `defaults.identity` when the target sets none of its own. Per target the operator sets the destination (`git.remote`, `git.branch`), the harness set, and the plugin list. The git commands live in the target's `workflow` and reference injected variables.
+
+### Plugin composition
+
+A plugin is a named scope filter. The publishing pipeline assigns each selected artifact to its plugin by evaluating the plugin scope filters in declaration order, then renders the artifact's component files into that plugin under the harness subtree. The per-plugin manifest entry is contributed once per plugin keyed by the plugin name rather than once per artifact, so a plugin that bundles several artifacts yields one plugin entry rather than one per artifact. For the tap and package formats (Hermes, Pi), where the install unit is the individual skill, the plugin groups skills into subtrees without changing the install unit.
+
+### Repository layout
+
+A marketplace output renders into one repository. Each format's manifest lives at its fixed location, and per-harness plugin content lives in per-harness subtrees the manifests reference. For the `acme-agents` output above, with the harness set `[claude-code, codex, cursor]`:
+
+```
+acme-agents/
+  .claude-plugin/marketplace.json        # Claude Code, Desktop, Cowork; references ./claude/<plugin>
+  .agents/plugins/marketplace.json       # Codex; references ./codex/<plugin>
+  .cursor-plugin/marketplace.json        # Cursor; references ./cursor/<plugin>
+  claude/finance-pack/.claude-plugin/plugin.json + skills/ agents/ commands/ hooks/ .mcp.json
+  codex/finance-pack/.codex-plugin/plugin.json   + skills/ hooks/ .mcp.json
+  cursor/finance-pack/.cursor-plugin/plugin.json + skills/ rules/ mcp.json
+  claude/security-baseline/...  codex/security-baseline/...  cursor/security-baseline/...
+```
+
+Each vendor manifest lists the same plugin set and points its entries at that vendor's subtree through the relative-path or subdirectory plugin source the harness supports. The plugin content is per-harness because the per-plugin manifest filenames and the rule and MCP conventions differ across vendors. A Gemini output writes `gemini-extension.json`, `commands/`, and the context file at the repository root and collapses the plugin set into one extension, so it takes its own output. A Pi output writes a root `package.json` whose `pi.skills` array points at a skills subtree, and a Hermes output writes the skills under the tap's `skills/` directory; both render the `SKILL.md` the harnesses consume. OpenCode and `none` are not publish targets and continue to use `podium sync` for workspace files.
+
+The harness set is the grouping lever: an operator who cannot or does not want to share one repository across two formats declares two outputs. Gemini (one extension per repository) and Hermes (root `skills/`) often take their own output, because each occupies a fixed repository-level location.
+
+### Marketplace emitters
+
+The publishing pipeline selects a marketplace emitter per harness rather than the project-files materialization:
+
+- **Claude (Code, Desktop, Cowork).** One emitter writes `.claude-plugin/marketplace.json` at the repository root and `<subtree>/<plugin>/.claude-plugin/plugin.json` per plugin, with `skills/`, `agents/`, `commands/`, `hooks/`, and `.mcp.json` components. The three Claude surfaces consume the one emitted manifest.
+- **Codex.** An emitter writes `.agents/plugins/marketplace.json` at the repository root and `<subtree>/<plugin>/.codex-plugin/plugin.json` per plugin, with `skills/`, `hooks/hooks.json`, and `.mcp.json` components.
+- **Cursor.** An emitter writes `.cursor-plugin/marketplace.json` at the repository root and `<subtree>/<plugin>/.cursor-plugin/plugin.json` per plugin, with `skills/`, `rules/*.mdc`, and `mcp.json` components.
+- **Gemini.** An emitter writes `gemini-extension.json` at the repository root, `commands/*.toml`, and the context file, treating the output's plugin set as one extension.
+- **Pi.** An emitter writes a root `package.json` carrying the `pi-package` keyword and a `pi.skills` array pointing at a skills subtree, with `skills/<name>/SKILL.md` per skill.
+- **Hermes.** An emitter writes the tap layout: `skills/<name>/SKILL.md` per skill with its `references/`, `scripts/`, and `assets/`, and no root manifest, matching the tap discovery rule.
+
+Each emitter that carries a JSON manifest (Claude, Codex, Cursor) writes it through the Podium-owned merge so stale entries drop out on re-render, and contributes one marketplace entry per plugin keyed by the plugin name, contributed once per plugin rather than once per artifact. The Hermes tap and the Pi skills subtree carry no merged manifest and reconcile through the sync lock file.
+
+### `podium sync` and the configurable workflow
+
+The multi-target `podium sync --config <path>` run renders each `kind: marketplace` target through a fixed pipeline:
+
+```
+prepare (operator commands)  ->  render (Podium)  ->  publish (operator commands)
+```
+
+`prepare` is expected to place a checkout of the destination repository at the working directory. `render` materializes each harness's marketplace tree into that working directory through the marketplace emitters above. `publish` is expected to take the rendered tree to the remote. Podium owns config resolution, the effective view, plugin assignment, rendering, reconciliation, change detection, variable injection, command sequencing, logging, and dry-run. The operator's commands own getting the repository to the working directory and taking the result to the remote. The ordering is the reason the phases exist: the checkout must precede the render so the render reconciles against existing repository content, and the commit must follow it. By default Podium allocates the working directory and `prepare` clones into it; a `prepare` phase may instead configure git against an existing checkout, for example a CI checkout step, in which case it configures git or pulls rather than clones. `--dry-run` and `--check` retain their §7.5 meaning. The marketplace fields have no single-target CLI-flag analog, so a marketplace target is reached through the `--config` path (Open questions).
+
+**Injected variables.** Podium passes context to the commands through environment variables rather than by interpreting git state:
+
+- `$PODIUM_WORKDIR`: the per-output working and checkout directory.
+- `$PODIUM_OUTPUT_ID`: the marketplace output identifier.
+- `$PODIUM_GIT_REMOTE`, `$PODIUM_GIT_BRANCH`: from the output's `git:` block.
+- `$PODIUM_COMMIT_MESSAGE`: rendered from `commit_message` with the change count and timestamp.
+- `$PODIUM_CHANGED`: whether the render produced a diff against the checkout.
+- `$PODIUM_CHANGE_SUMMARY`: a path to a JSON file describing the changed artifacts.
+- The registry URL, the publishing identity, and the harness set.
+
+**Execution semantics.** A command is an argv list under `run:`, executed directly without a shell, or a string under `sh:`, executed through `sh -c`. The pipeline inherits the ambient environment of the `podium sync` process and adds the injected variables, because git authentication relies on `SSH_AUTH_SOCK`, `GH_TOKEN`, and similar. The pipeline fails fast on the first non-zero exit, with per-command `continue_on_error`, `timeout`, and `skip_if_no_changes`, and an optional per-phase `on_error` cleanup list. `--dry-run` renders into a temporary directory and prints each command with variables substituted without running the `publish` phase. `--check` validates the config only.
+
+**Trust boundary.** These commands run as subprocesses with the operator's privileges and ambient credentials. They are unrelated to the `MaterializationHook` SPI (§6.6), which is sandboxed to forbid subprocesses, network, and writes outside the destination, and they are unrelated to the `hook` artifact type. A `workflow` executes only on the `podium sync` CLI path and never inside the registry server or the MCP server (the §7.5.2 workflow-execution boundary). The commands live on `sync.yaml` target entries whose project-shared scope is committed to git (§7.5.2). Whether a project-shared `sync.yaml` workflow needs a trust gate is an open decision (Open question 1). A server-side publisher is out of scope.
+
+### Rendering identity and effective view
+
+The published marketplace reflects the publishing identity's effective view (§4.6) intersected with the plugin scope filters. A `kind: marketplace` target carries `identity` so the operator selects the principal whose visibility defines what reaches the marketplace. A principal that can see restricted layers would render them into the output, so the publishing identity is a security-relevant setting, and a public marketplace is published under an identity scoped to the artifacts intended for it.
+
+### Reconciliation
+
+Re-rendering an output is idempotent. The materialization writer and the sync lock file remove files for artifacts that left the view, and the JSON manifests merge with the Podium-owned tag so stale entries drop out. The git diff after a render is the catalog delta, so `skip_if_no_changes` suppresses an empty commit when the delta is empty.
+
+### Triggers
+
+The trigger is the `layer.ingested` event (§7.3.2). The ingest orchestrator emits it once per completed layer cycle, so a single source commit that changes many artifacts yields one event rather than one `artifact.published` per artifact. A CI job subscribes a webhook receiver to `layer.ingested` and runs `podium sync --config <path>`, so one source commit triggers one publish across the artifacts it changed. No new event is required, and a marketplace target has no watch mode.
+
+A `layer.ingested` event for a layer that contributes no artifacts to an output produces a render with no diff, which `skip_if_no_changes` suppresses, so an unrelated layer update does not produce an empty commit.
+
+A burst of `layer.ingested` events is coalesced by the registry's per-receiver webhook debounce window, specified in proposal 0004 (webhook hardening), rather than by a publishing config. Both publishing patterns below function without proposal 0004: the scheduled pattern uses no receiver, and the event-driven pattern works on the existing per-event delivery, where the CI system's own concurrency control collapses redundant runs.
+
+A server-side publisher inside the registry process is out of scope, because it would require storing per-repository push credentials and running operator-supplied commands inside a multi-tenant process.
+
+### GitHub Actions example
+
+A GitHub Actions deployment uses one of two patterns, because GitHub starts a workflow from an external system only through the authenticated REST API (`repository_dispatch` or `workflow_dispatch`), and a Podium webhook receiver posts an HMAC-signed event body that GitHub's dispatch endpoint does not accept.
+
+**Pattern A, scheduled (no bridge).** A workflow in the marketplace repository runs `podium sync --config <path>` on a cron. `skip_if_no_changes` makes an empty run a no-op, so a 5-to-15-minute poll is inexpensive. No webhook receiver is involved, and the debounce window is not used.
+
+```yaml
+# .github/workflows/publish.yml in acme/agent-marketplace
+on:
+  schedule: [{ cron: "*/15 * * * *" }]
+  workflow_dispatch: {}
+permissions:
+  contents: write                # GITHUB_TOKEN pushes to this repo; no deploy key needed
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: curl -fsSL https://podium.acme.com/install.sh | sh
+      - env:
+          PODIUM_REGISTRY: ${{ secrets.PODIUM_REGISTRY }}
+          PODIUM_TOKEN:    ${{ secrets.PODIUM_TOKEN }}   # the publishing identity's registry credential
+        run: podium sync --config .podium/sync.yaml
+```
+
+The marketplace target's `workflow` configures git against the existing checkout, because the checkout step already placed the repository and authenticated `origin`:
+
+```yaml
+# .podium/sync.yaml, acme-agents target
+workflow:
+  prepare:
+    - run: ["git", "-C", "$PODIUM_WORKDIR", "config", "user.name",  "podium-bot"]
+    - run: ["git", "-C", "$PODIUM_WORKDIR", "config", "user.email", "podium-bot@acme.com"]
+  publish:
+    - run: ["git", "-C", "$PODIUM_WORKDIR", "add", "-A"]
+    - run: ["git", "-C", "$PODIUM_WORKDIR", "commit", "-m", "$PODIUM_COMMIT_MESSAGE"]
+      skip_if_no_changes: true
+    - run: ["git", "-C", "$PODIUM_WORKDIR", "push"]
+```
+
+**Pattern B, event-driven (relay).** A Podium webhook receiver filtered to `layer.ingested`, with an optional debounce window (proposal 0004), posts to a small relay. The relay verifies the HMAC and calls GitHub `repository_dispatch`, which the workflow listens for.
+
+```bash
+# register the receiver; the response carries the HMAC secret for the relay
+curl -X POST https://podium.acme.com/v1/webhooks -H "Authorization: Bearer $PODIUM_TOKEN" \
+  -d '{"url":"https://relay.acme.com/podium","event_filter":["layer.ingested"],"debounce":"60s"}'
+```
+
+```yaml
+# add to the workflow triggers
+on:
+  repository_dispatch: { types: [podium-layer-ingested] }
+  workflow_dispatch: {}
+```
+
+The relay calls `POST https://api.github.com/repos/acme/agent-marketplace/dispatches` with `Authorization: Bearer <token>` and `{"event_type":"podium-layer-ingested"}`. With the proposal 0004 debounce window a burst of `layer.ingested` collapses into one batch delivery, so the relay fires one dispatch; without it the relay fires per event and the workflow's concurrency control collapses the redundant runs. The relay is the accepted bridge for Pattern B. A Podium receiver cannot call `repository_dispatch` directly because the auth and body differ, and teaching the registry a native dispatch mode is out of scope, because it would place a GitHub credential and host-specific egress in the registry.
+
+In both patterns the registry credential `PODIUM_TOKEN` carries the publishing identity, and the git push credential is GitHub's: `GITHUB_TOKEN` in Pattern A, or a deploy key the `prepare` clone uses when the workflow runs outside the marketplace repository. Podium never holds the git push credential.

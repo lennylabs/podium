@@ -154,6 +154,15 @@ type Result struct {
 	// server-source registry and left the existing materialized output in
 	// place. Callers surface it as the offline status hosts can present.
 	Offline bool
+	// Changed reports whether this run altered the materialized tree relative
+	// to the prior lock: a path written with a different content hash, an added
+	// path, or a removed (stale-cleaned) path. It is the workspace analog of the
+	// marketplace render's RenderResult.Changed and feeds the $PODIUM_CHANGED
+	// variable a kind: workspace target's workflow reads (§7.5.2, Decision 3), so
+	// a skip_if_no_changes publish command skips a re-sync that wrote no delta. A
+	// DryRun run reports the artifact set without writing, so it leaves Changed
+	// false.
+	Changed bool
 }
 
 // ArtifactResult is one artifact's contribution to the materialized output.
@@ -254,6 +263,16 @@ func Run(opts Options) (*Result, error) {
 			res.Skipped = append(res.Skipped, rec.ID)
 			continue
 		}
+		// §6.9 "Adapter cannot translate an artifact": refuse to
+		// materialize a field the selected harness has no §6.7.1
+		// equivalent for (a ✗ cell). The MCP server load_artifact path
+		// runs the same guard before adapting (cmd/podium-mcp/main.go),
+		// so both canonical-Adapt consumers fail an untranslatable
+		// artifact identically (§2.2) instead of one writing a verbatim
+		// copy and the other silently producing no output.
+		if terr := adapter.TranslationError(a.ID(), rec.Artifact); terr != nil {
+			return nil, fmt.Errorf("adapter %q cannot translate %s: %w", a.ID(), rec.ID, terr)
+		}
 		out, err := a.Adapt(context.Background(), adapter.Source{
 			ArtifactID:    rec.ID,
 			ArtifactBytes: rec.ArtifactBytes,
@@ -347,6 +366,11 @@ func Run(opts Options) (*Result, error) {
 			})
 		}
 	}
+	// §7.5.2 $PODIUM_CHANGED: a workspace workflow reads whether the sync altered
+	// the target tree, so compare the new materialized path->hash set against the
+	// prior lock's. A skip_if_no_changes publish command then skips a re-sync that
+	// rewrote no file.
+	res.Changed = lockChanged(priorLock, lock)
 	if err := WriteLock(opts.Target, lock); err != nil {
 		// Lock write failure is non-fatal; the sync already
 		// completed. Operators see the warning via the returned
@@ -556,6 +580,41 @@ func lockMergeKinds(lock *LockFile) map[string]string {
 	return out
 }
 
+// lockChanged reports whether the new lock's materialized set differs from the
+// prior lock's: a path present in one and absent from the other, or a path whose
+// recorded content hash changed. It feeds Result.Changed and the workspace
+// workflow's $PODIUM_CHANGED. A nil prior lock (a first sync into an empty
+// target) is treated as changed whenever the new lock materialized anything, and
+// as unchanged when both are empty.
+func lockChanged(prior, next *LockFile) bool {
+	priorHashes := lockPathHashes(prior)
+	nextHashes := lockPathHashes(next)
+	if len(priorHashes) != len(nextHashes) {
+		return true
+	}
+	for path, hash := range nextHashes {
+		if priorHashes[path] != hash {
+			return true
+		}
+	}
+	return false
+}
+
+// lockPathHashes returns the materialized paths recorded in a lock, each mapped
+// to its content hash. A nil lock returns an empty map.
+func lockPathHashes(lock *LockFile) map[string]string {
+	out := map[string]string{}
+	if lock == nil {
+		return out
+	}
+	for _, a := range lock.Artifacts {
+		if a.MaterializedPath != "" {
+			out[a.MaterializedPath] = a.ContentHash
+		}
+	}
+	return out
+}
+
 // mergeKind maps an adapter.FileOp to the lock's config-merge kind string.
 func mergeKind(op adapter.FileOp) string {
 	switch op {
@@ -635,10 +694,10 @@ func removeStalePaths(target string, prior map[string]string, current map[string
 			continue
 		}
 		// Prune the now-empty parent directories up the chain, stopping at the
-		// target root. A nested layout (claude-cowork's plugins/<id>/skills/<name>/,
-		// a hook's plugins/<id>/hooks/) leaves several empty ancestors when its
-		// only file is removed; pruning a single level would strip the leaf
-		// directory but orphan plugins/<id>/. os.Remove fails on a non-empty
+		// target root. A nested layout (a skill's .claude/skills/<name>/, the
+		// harness-neutral .podium/context/<id>/) leaves several empty ancestors
+		// when its only file is removed; pruning a single level would strip the
+		// leaf directory but orphan its parent. os.Remove fails on a non-empty
 		// directory naturally, so the walk halts at the first ancestor that still
 		// holds an operator file or a sibling artifact's output.
 		pruneEmptyParents(target, filepath.Dir(full))

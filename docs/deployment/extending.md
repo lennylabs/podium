@@ -37,10 +37,12 @@ The registry's pluggable interfaces:
 | `IdentityProvider` | Attaches OAuth-attested identity to every registry call. Built-ins: `oauth-device-code`, `injected-session-token`. |
 | `LocalOverlayProvider` | Source for the workspace-scoped local overlay layer. Default: workspace filesystem (`.podium/overlay/`). |
 | `LocalAuditSink` | Local audit log for meta-tool calls (when configured). Default: JSON Lines file at `~/.podium/audit.log`. |
-| `HarnessAdapter` | Translates canonical artifacts to the harness's native format at materialization time. |
+| `HarnessAdapter` | Translates canonical artifacts to the harness's native format at materialization time. The adapter `Source` carries a plugin descriptor (name, optional description, harness subtree prefix) so a marketplace emitter can render an artifact into a named plugin when `podium sync` renders a `kind: marketplace` target. |
 | `MaterializationHook` | Per-file pre-write transformation of materialized output. Use cases: redact secrets, rewrite paths, inject team-specific headers, enforce content policy. |
 | `NotificationProvider` | Delivery for ingest-failure and operational notifications. Default: email + webhook. |
 | `SignatureProvider` | Artifact signing and verification. Default: Sigstore-keyless. |
+
+Marketplace publishing adds no new SPI. The git workflow a `kind: marketplace` sync target runs is operator-configured shell commands rather than a pluggable interface, so there is no write-side git provider. The only SPI surface publishing touches is the `HarnessAdapter` `Source` plugin descriptor noted above. See [Consuming → Marketplace publishing](../consuming/publishing).
 
 ---
 
@@ -93,6 +95,12 @@ Common targets:
 - Notify owners on `artifact.deprecated`.
 - Page on-call on `layer.history_rewritten`.
 - Kick off a downstream rebuild on `artifact.published` matching certain paths.
+
+#### Triggering CI from a webhook (repository_dispatch relay)
+
+A common receiver triggers a CI job from a registry event. The marketplace-publish trigger is one case: a receiver filtered to `layer.ingested` triggers a CI job that runs `podium sync --config` against a `kind: marketplace` target (see [Consuming → Marketplace publishing](../consuming/publishing)). GitHub starts a workflow from an external system only through the authenticated REST API (`repository_dispatch` or `workflow_dispatch`), and a Podium receiver posts an HMAC-signed event body that GitHub's dispatch endpoint does not accept. So a small operator relay bridges the two: the receiver posts the signed event to the relay, the relay verifies the HMAC against the receiver secret, and the relay calls `POST https://api.github.com/repos/<owner>/<repo>/dispatches` with `{"event_type":"podium-layer-ingested"}` and a GitHub token. The workflow listens on `repository_dispatch`.
+
+A burst of `layer.ingested` events fires the relay per event, and the CI system's own concurrency control collapses the redundant runs. The receiver `debounce` field that coalesces a burst into one batch delivery, and the receiver authorization that protects the receiver CRUD endpoints, are specified in [proposal 0004 (webhook hardening)](https://github.com/lennylabs/podium/blob/main/proposals/0004-webhook-hardening.md). The relay pattern functions without them.
 
 ### Custom pre-merge CI
 

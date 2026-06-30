@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -212,15 +213,23 @@ func syncCmd(args []string) int {
 		return parseExit(err)
 	}
 
-	// §7.5.2 validation: --check loads the merged config and reports warnings
-	// (unresolved profiles, malformed globs, target/profile collisions).
-	if *check {
+	// §7.5.2 validation: a single-scope --check (no --config) loads the merged
+	// config and reports warnings (unresolved profiles, malformed globs,
+	// target/profile collisions). A --check that carries --config validates the
+	// named file through the multi-target path instead, so a kind: marketplace
+	// target's hard rejections (a non-publish harness, the marketplace fields on
+	// a workspace target) surface and neither the target tree nor its sync.lock
+	// is written.
+	if *check && *configPath == "" {
 		return runSyncCheck()
 	}
 
-	// §7.5.2 multi-target: --config iterates a targets: list, one sync each.
+	// §7.5.2 multi-target: --config iterates a targets: list, one sync each. A
+	// --check --config run validates every target and materializes none. --watch
+	// is threaded through so PlanMultiTarget rejects a kind: marketplace target
+	// under watch mode (§7.5.4).
 	if *configPath != "" {
-		return runMultiTargetSync(*configPath, *registry, *dryRun, *asJSON)
+		return runMultiTargetSync(*configPath, *registry, *dryRun, *check, *watch, *asJSON)
 	}
 
 	// §7.5.2 resolution: merge the three sync.yaml scopes by per-key
@@ -401,10 +410,25 @@ func runWatchLoop(opts sync.Options, overlay string, asJSON bool) int {
 	return 0
 }
 
-// runMultiTargetSync implements `podium sync --config <path>` (§7.5.2): it
-// reads the config file's targets: list, resolves each entry's scope, target,
-// and harness, and runs one sync per entry. Each target writes its own lock.
-func runMultiTargetSync(configPath, registryOverride string, dryRun, asJSON bool) int {
+// runMultiTargetSync implements `podium sync --config <path>` (§7.5.2): it reads
+// the config file's targets: list, resolves each entry into a plan, and renders
+// one target per plan. A kind: workspace plan materializes the project-files
+// layout through sync.Run; a kind: marketplace plan renders the git-repo
+// distribution layout (§7.8) through sync.RunMarketplace. Either kind may carry a
+// workflow of operator prepare/publish commands. Each target writes its own lock.
+//
+// check routes every plan through its no-side-effect path: a workspace plan runs
+// sync.Run with DryRun set (resolving the artifact set and returning before any
+// file or lock write), and a marketplace plan runs sync.RunMarketplace with Check
+// set (validating the resolved output and returning before the prepare clone or
+// the render). Neither runs its workflow under check, so a --check --config run
+// validates every target and writes neither the target tree nor its sync.lock.
+//
+// watch is threaded into PlanInput so a kind: marketplace target under --watch is
+// rejected with config.invalid before any target renders (§7.5.2, §7.5.4). The
+// multi-target path itself runs one sync per target rather than a watch loop, so
+// a watch over a workspace-only config is a single pass.
+func runMultiTargetSync(configPath, registryOverride string, dryRun, check, watch, asJSON bool) int {
 	cfg, err := sync.ReadConfigFile(configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -415,7 +439,11 @@ func runMultiTargetSync(configPath, registryOverride string, dryRun, asJSON bool
 		return 2
 	}
 	workspace := filepath.Dir(filepath.Dir(configPath))
-	plans, err := sync.PlanMultiTarget(cfg, registryOverride, workspace)
+	plans, err := sync.PlanMultiTarget(cfg, sync.PlanInput{
+		RegistryOverride: registryOverride,
+		Workspace:        workspace,
+		Watch:            watch,
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 2
@@ -425,39 +453,204 @@ func runMultiTargetSync(configPath, registryOverride string, dryRun, asJSON bool
 		fmt.Fprintf(os.Stderr, "error: %v\n", cmErr)
 		return 2
 	}
+	// Interrupting sync (SIGINT / SIGTERM) cancels the in-flight workflow command
+	// so a long-running clone or push stops cleanly.
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	if check {
+		fmt.Fprintln(os.Stdout, "sync.yaml: ok")
+	}
 	failures := 0
 	for _, p := range plans {
-		abs, aerr := filepath.Abs(p.Target)
-		if aerr != nil {
-			fmt.Fprintf(os.Stderr, "target %s: %v\n", p.ID, aerr)
-			failures++
-			continue
+		fmt.Printf("== target %s ==\n", p.ID)
+		var rerr error
+		switch p.Kind {
+		case sync.KindMarketplace:
+			rerr = runMarketplaceTarget(ctx, p, dryRun, check, asJSON)
+		default:
+			rerr = runWorkspaceTarget(ctx, p, cacheMode, dryRun, check, asJSON)
 		}
-		res, rerr := sync.Run(sync.Options{
-			RegistryPath: p.Registry,
-			Target:       abs,
-			AdapterID:    p.Harness,
-			DryRun:       dryRun,
-			Profile:      p.Profile,
-			Scope:        p.Scope,
-			CacheMode:    cacheMode,
-		})
 		if rerr != nil {
 			fmt.Fprintf(os.Stderr, "target %s: %v\n", p.ID, rerr)
 			failures++
-			continue
-		}
-		fmt.Printf("== target %s ==\n", p.ID)
-		if asJSON {
-			printJSON(res)
-		} else {
-			printHuman(res, dryRun)
 		}
 	}
 	if failures > 0 {
 		return 1
 	}
 	return 0
+}
+
+// runWorkspaceTarget materializes a kind: workspace plan through sync.Run,
+// wrapped by the operator prepare/publish workflow phases when the plan carries
+// one (Decision 3). Under check it runs sync.Run with DryRun set so no tree or
+// lock is written, and skips the workflow phases. Under dryRun it resolves and
+// reports without writing, and skips the workflow phases.
+func runWorkspaceTarget(ctx context.Context, p sync.MultiTargetPlan, cacheMode string, dryRun, check, asJSON bool) error {
+	abs, err := filepath.Abs(p.Target)
+	if err != nil {
+		return err
+	}
+	runner := sync.WorkflowRunner{Label: "sync target " + p.ID, Stdout: os.Stdout, Stderr: os.Stderr}
+	runWorkflow := !check && !dryRun && !p.Workflow.IsZero()
+	vars := map[string]string{
+		"PODIUM_WORKDIR":   abs,
+		"PODIUM_TARGET_ID": p.ID,
+		"PODIUM_REGISTRY":  p.Registry,
+	}
+	if runWorkflow {
+		if err := runner.Phase(ctx, "prepare", p.Workflow.Prepare, vars, p.Workflow.PrepareOnError); err != nil {
+			return err
+		}
+	}
+	res, err := sync.Run(sync.Options{
+		RegistryPath: p.Registry,
+		Target:       abs,
+		AdapterID:    p.Harness,
+		DryRun:       dryRun || check,
+		Profile:      p.Profile,
+		Scope:        p.Scope,
+		CacheMode:    cacheMode,
+	})
+	if err != nil {
+		return err
+	}
+	if check {
+		// A --check run resolves the artifact set without materializing; do not
+		// print the per-artifact materialization summary.
+		return nil
+	}
+	if asJSON {
+		printJSON(res)
+	} else {
+		printHuman(res, dryRun)
+	}
+	if runWorkflow {
+		// $PODIUM_CHANGED reflects whether the sync altered the target tree
+		// (§7.5.2, Decision 3), so a skip_if_no_changes publish command skips a
+		// re-sync that wrote no delta. res.Changed is the on-disk diff against the
+		// prior lock, the workspace analog of the marketplace render's Changed.
+		vars["PODIUM_CHANGED"] = strconv.FormatBool(res.Changed)
+		if err := runner.Phase(ctx, "publish", p.Workflow.Publish, vars, p.Workflow.PublishOnError); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// runMarketplaceTarget renders a kind: marketplace plan through the §7.8
+// prepare->render->publish pipeline. The render fetches the publishing identity's
+// effective view (§4.6) under the resolved registry credential, so the branch
+// resolves that credential (readPublishToken, gated on a server-source registry)
+// and passes it as RunOptions.Token. A resolved credential yields that
+// principal's restricted effective view; an unresolved credential against a
+// server source renders the anonymous public view. Under check the runner
+// validates the resolved output and returns before the prepare clone or the
+// render, so no tree is written.
+func runMarketplaceTarget(ctx context.Context, p sync.MultiTargetPlan, dryRun, check, asJSON bool) error {
+	out := sync.ResolvedOutput{
+		ID:            p.ID,
+		Registry:      p.Registry,
+		Identity:      p.Identity,
+		Git:           p.Git,
+		Harnesses:     p.Harnesses,
+		CommitMessage: p.CommitMessage,
+		Plugins:       p.Plugins,
+		Workflow:      p.Workflow,
+	}
+	// Decision 4 / §7.5.2: the target: directory is the working directory the
+	// prepare phase checks out into and the publish phase pushes from, so a live
+	// render and its workflow operate there rather than in an allocated temp
+	// directory. A --dry-run still renders into a temp directory (resolveWorkdir
+	// ignores Workdir when DryRun is set) so the preview never touches it.
+	workdir, err := filepath.Abs(p.Target)
+	if err != nil {
+		return err
+	}
+	// §7.8: a live render fetches the publishing identity's effective view from a
+	// server-source registry, so it carries that identity's registry credential.
+	// --check renders nothing, so it needs no token.
+	token := ""
+	if !check && sync.IsServerSource(out.Registry) {
+		token = readPublishToken(out.Registry)
+	}
+	res, err := sync.RunMarketplace(ctx, sync.RunOptions{
+		Output:  out,
+		Token:   token,
+		Workdir: workdir,
+		DryRun:  dryRun,
+		Check:   check,
+		Stdout:  marketplaceStdout(asJSON),
+		Stderr:  os.Stderr,
+	})
+	if err != nil {
+		return err
+	}
+	if asJSON {
+		printMarketplaceJSON(res)
+	} else {
+		printMarketplaceHuman(res, dryRun)
+	}
+	return nil
+}
+
+// marketplaceStdout selects the stream the marketplace pipeline's diagnostic
+// output (the dry-run command preview, the streamed workflow command output) goes
+// to. Under --json the structured envelope is the stdout contract, so the
+// diagnostic output goes to stderr to keep stdout valid; otherwise it goes to
+// stdout.
+func marketplaceStdout(asJSON bool) *os.File {
+	if asJSON {
+		return os.Stderr
+	}
+	return os.Stdout
+}
+
+// printMarketplaceHuman reports one marketplace target's outcome: whether the
+// render changed and the changed artifacts, and whether the publish phase ran. A
+// --check run renders nothing, so it prints nothing.
+func printMarketplaceHuman(r *sync.RunResult, dryRun bool) {
+	if r.Render == nil {
+		return
+	}
+	if dryRun {
+		fmt.Fprintln(os.Stdout, "(dry-run; nothing pushed)")
+	}
+	fmt.Fprintf(os.Stdout, "workdir:  %s\n", r.Workdir)
+	fmt.Fprintf(os.Stdout, "changed:  %t\n", r.Render.Changed)
+	if len(r.Render.ChangedArtifacts) > 0 {
+		fmt.Fprintln(os.Stdout, "artifacts:")
+		for _, id := range r.Render.ChangedArtifacts {
+			fmt.Fprintf(os.Stdout, "  - %s\n", id)
+		}
+	}
+	fmt.Fprintf(os.Stdout, "published: %t\n", r.Published)
+}
+
+// printMarketplaceJSON emits the structured envelope for one marketplace target:
+// {target, workdir, changed, changed_artifacts, published}. A jq consumer reads
+// .changed or .changed_artifacts directly. A --check run renders nothing, so the
+// render-derived fields stay at their zero values.
+func printMarketplaceJSON(r *sync.RunResult) {
+	env := struct {
+		Target           string   `json:"target"`
+		Workdir          string   `json:"workdir"`
+		Changed          bool     `json:"changed"`
+		ChangedArtifacts []string `json:"changed_artifacts"`
+		Published        bool     `json:"published"`
+	}{Target: r.OutputID, Workdir: r.Workdir, ChangedArtifacts: []string{}}
+	if r.Render != nil {
+		env.Changed = r.Render.Changed
+		env.Published = r.Published
+		env.ChangedArtifacts = emptyIfNil(r.Render.ChangedArtifacts)
+	}
+	b, err := json.MarshalIndent(env, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: encode json: %v\n", err)
+		return
+	}
+	fmt.Fprintln(os.Stdout, string(b))
 }
 
 // runSyncCheck implements `podium sync --check` (§7.5.2): it loads the merged
@@ -1244,6 +1437,24 @@ func readCLIToken(registry string) string {
 		}
 	}
 	return ""
+}
+
+// readPublishToken resolves the registry credential a `kind: marketplace` target
+// renders under (§4.6, §7.8). PODIUM_TOKEN is the documented credential: the
+// §7.8 GitHub Actions example exports it as "the publishing identity's registry
+// credential", and the rendering-identity rule states the registry credential
+// PODIUM_TOKEN carries the publishing identity. It takes precedence over the
+// shared read-CLI sources so a CI run following the documented pattern resolves
+// the publishing identity's restricted effective view. When PODIUM_TOKEN is unset
+// it falls back to the read-CLI resolution (the §6.3.2 session token, then the
+// `podium login` keychain token), so an interactive operator who ran `podium
+// login` need not also export it. When neither resolves, the marketplace render
+// reaches a server source anonymously and renders the public effective view.
+func readPublishToken(registry string) string {
+	if tok := strings.TrimSpace(os.Getenv("PODIUM_TOKEN")); tok != "" {
+		return tok
+	}
+	return readCLIToken(registry)
 }
 
 func mustGetJSON(base, path string, params map[string]string) []byte {

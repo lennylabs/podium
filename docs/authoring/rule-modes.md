@@ -65,12 +65,12 @@ The harness adapter does the translation at materialization time. Each adapter w
 
 | Mode | claude-code | claude-desktop | claude-cowork | cursor | codex | opencode | gemini | pi | hermes |
 |:--|:--|:--|:--|:--|:--|:--|:--|:--|:--|
-| `always` | ✓ | ✗ | ⚠ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `glob` | ✓ | ✗ | ⚠ | ✓ | ⚠ | ⚠ | ⚠ | ⚠ | ✓ |
-| `auto` | ⚠ | ✗ | ⚠ | ✓ | ⚠ | ⚠ | ⚠ | ⚠ | ✓ |
-| `explicit` | ⚠ | ✗ | ⚠ | ✓ | ⚠ | ⚠ | ⚠ | ⚠ | ✓ |
+| `always` | ✓ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `glob` | ✓ | ✗ | ✗ | ✓ | ⚠ | ⚠ | ⚠ | ⚠ | ✓ |
+| `auto` | ⚠ | ✗ | ✗ | ✓ | ⚠ | ⚠ | ⚠ | ⚠ | ✓ |
+| `explicit` | ⚠ | ✗ | ✗ | ✓ | ⚠ | ⚠ | ⚠ | ⚠ | ✓ |
 
-Legend: ✓ supported natively, ⚠ supported via fallback (ingest lint warns when a declared `target_harnesses:` names the harness, and materialization emits the degraded fallback), ✗ not supported (ingest lint errors when a declared `target_harnesses:` names the harness, and materialization onto that harness otherwise fails per §6.9). This table mirrors the `rule_mode` rows of the §6.7.1 capability matrix.
+Legend: ✓ supported natively, ⚠ supported via fallback (ingest lint warns when a declared `target_harnesses:` names the harness, and materialization emits the degraded fallback), ✗ not supported (ingest lint errors when a declared `target_harnesses:` names the harness, and materialization onto that harness otherwise fails per §6.9). This table mirrors the `rule_mode` rows of the §6.7.1 capability matrix. The `claude-cowork` cells are ✗ for every mode because Cowork has no project-scope rule surface; a cowork user obtains a rule through the published Claude marketplace ([Publishing](../consuming/publishing)).
 
 ---
 
@@ -83,7 +83,7 @@ Legend: ✓ supported natively, ⚠ supported via fallback (ingest lint warns wh
 | **hermes** | `.cursor/rules/<name>.mdc` in the Cursor `.mdc` format for every mode. Hermes natively reads `.cursor/rules/*.mdc`, root `AGENTS.md`, and `.cursorrules`; it does not read `.claude/rules/`. |
 | **codex, opencode, pi** | The rule body injects into root `AGENTS.md` between Podium-managed markers. `always` maps natively; `glob`, `auto`, and `explicit` fall back to always-loaded with a lint warning, because an injected block carries no per-file scoping. |
 | **gemini** | The rule body injects into root `GEMINI.md` between Podium-managed markers, with the same `always`-native, non-`always`-fallback behavior as the `AGENTS.md` harnesses. |
-| **claude-cowork** | A Cowork plugin has no native rule component, so the rule ships as a skill (`plugins/<id>/skills/<name>/SKILL.md`). Every mode is a fallback. |
+| **claude-cowork** | No project-scope rule surface. A `type: rule` artifact on `claude-cowork` is a ✗ cell that fails materialization with `materialize.untranslatable` per §6.9, on both `podium sync` and `load_artifact`, including the default `always` mode. A cowork user obtains the rule through the published Claude marketplace ([Publishing](../consuming/publishing)). |
 | **claude-desktop** | No project-level surface, so a rule produces no Claude Desktop output. |
 
 ---

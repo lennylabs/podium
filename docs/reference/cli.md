@@ -223,18 +223,20 @@ podium sync [--registry <url-or-path>] [--target <path>] [--harness <name>]
 | `--target <path>` | Destination directory. Default: CWD. |
 | `--harness <name>` | Override the configured harness. |
 | `--profile <name>` | Use a named profile from `sync.yaml`. |
-| `--config <path>` | Run one sync per entry in a `sync.yaml` `targets:` list. |
+| `--config <path>` | Run one sync per entry in a `sync.yaml` `targets:` list. Each entry is `kind: workspace` (the default, a project-files layout) or `kind: marketplace` (a git-repo distribution Podium renders, with the target's `workflow` supplying the operator commands that clone and push). |
 | `--include <pattern>` | Glob to include (canonical artifact IDs). Repeatable. |
 | `--exclude <pattern>` | Glob to exclude. Applied after include. Repeatable. |
 | `--type <t1,t2,...>` | Restrict to a comma-separated list of artifact types. |
 | `--overlay <path>` | Workspace overlay path watched alongside the registry. |
-| `--watch` | Long-running. Re-materialize on registry change events or fsnotify in filesystem mode. |
+| `--watch` | Long-running. Re-materialize on registry change events or fsnotify in filesystem mode. A `--config` run that includes a `kind: marketplace` target rejects `--watch` with `config.invalid`. |
 | `--dry-run` | Print the resolved set; write nothing. |
 | `--preview` | Print the scope-preview aggregate counts and exit; write nothing. |
 | `--check` | Validate the merged `sync.yaml` and report warnings (unresolved profiles, malformed globs, target/profile collisions). |
 | `--json` | Structured envelope output (pipe to `jq`). |
 
 Lock file at `<target>/.podium/sync.lock`.
+
+A `kind: marketplace` target renders the harness-native git-repo distribution into its `target` directory through the fixed `prepare`, `render`, `publish` pipeline. Podium owns the `render` phase, and the target's `workflow` supplies the `prepare` and `publish` commands that clone the repository into the working directory and push the rendered result to the remote. The marketplace fields (the git remote and branch, the harness set, the commit message, the plugins, and the publishing identity) are reached only through the `--config` path. See [Marketplace publishing](../consuming/publishing) for the model and the worked examples.
 
 ### `podium sync override`
 

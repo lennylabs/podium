@@ -73,6 +73,7 @@ Codes map to MCP error payloads per the MCP spec for harnesses that consume Podi
 | `config.oidc_jwt_audience_unset` | `PODIUM_IDENTITY_PROVIDER=oidc-jwt` without `PODIUM_OAUTH_AUDIENCE`. The required `aud` claim cannot be verified. |
 | `config.injected_token_audience_unset` | `PODIUM_IDENTITY_PROVIDER=injected-session-token` without `PODIUM_OAUTH_AUDIENCE` set to this registry's endpoint. The required `aud` claim cannot be verified on every token. |
 | `config.unknown_harness` | `PODIUM_HARNESS` (or `--harness`) names a harness with no registered adapter. |
+| `config.invalid` | A `sync.yaml` `kind: marketplace` target is malformed: its harness set names a non-publish-target harness (`opencode` or `none` have no git-repo distribution), a plugin glob is malformed, or a workflow command declares neither `run:` nor `sh:` (or both). It also covers a marketplace field on a `kind: workspace` target, a workspace scope field on a `kind: marketplace` target, and a `kind: marketplace` target combined with `--watch`. `podium sync --config` rejects it at config validation. |
 | `config.trusted_headers_public_bind` | `trusted-headers` on a single-tenant registry bound to a non-loopback address without `PODIUM_TRUSTED_PROXY_SECRET` or `--allow-public-bind`. |
 | `config.trusted_headers_multitenant_no_secret` | `trusted-headers` on a multi-tenant registry without `PODIUM_TRUSTED_PROXY_SECRET`, which is required on every request regardless of bind. |
 | `config.identity_provider_unverified` | A registered identity provider was selected without a request-time verifier wired, which would resolve every caller as anonymous-public. |
@@ -103,7 +104,7 @@ Codes map to MCP error payloads per the MCP spec for harnesses that consume Podi
 | `materialize.signature_invalid` | Signature verification failed at materialization (tampered content, expired signature, unknown signer). |
 | `materialize.signature_missing` | The artifact requires a signature (sensitivity `medium` or higher under the default policy) but none was provided. |
 | `materialize.runtime_unavailable` | The host can't satisfy the artifact's `runtime_requirements:` (Python version, Node version, system package). |
-| `materialize.untranslatable` | The selected harness adapter cannot translate one or more of the artifact's fields. Use `harness: none` for raw output. |
+| `materialize.untranslatable` | The selected harness adapter cannot translate the artifact's type, mode, or one or more of its fields onto that harness (a §6.7.1 ✗ cell). For example, a plugin-layout type (`skill`, `agent`, `command`, `rule`, `hook`, `mcp-server`) on `claude-cowork` fails on both `podium sync` and `load_artifact`, because Cowork has no project-scope surface and the artifact ships through the published Claude marketplace instead. Use `harness: none` for raw output, or `target_harnesses:` to opt the artifact out of that harness. |
 
 ### mcp.*
 

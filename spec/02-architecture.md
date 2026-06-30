@@ -4,7 +4,7 @@
 
 The registry is the system of record for artifacts. It can be reached two ways: as an external Podium server (§13.10) or as a local filesystem path (§13.11). The diagram below shows the server deployment. See §7.1 for the dispatch and what each mode covers.
 
-The consumers read from the registry over HTTP: the Podium MCP server (in-process bridge for MCP-speaking hosts), `podium sync` (filesystem delivery for harnesses that load artifacts directly from disk), and the language SDKs (programmatic access for non-MCP runtimes). All speak the same registry HTTP API, share identity providers, and apply the same layer composition and visibility filtering.
+The consumers read from the registry over HTTP: the Podium MCP server (in-process bridge for MCP-speaking hosts), `podium sync` (filesystem delivery for harnesses that load artifacts directly from disk), and the language SDKs (programmatic access for non-MCP runtimes). All speak the same registry HTTP API, share identity providers, and apply the same layer composition and visibility filtering. `podium sync` renders a target either as a workspace tree the harness reads directly or, for a `kind: marketplace` target, as the git-repo distribution layout a harness imports, then runs the target's workflow to push it to a git remote (§7.5, §7.8).
 
 `podium sync` is also the only consumer that works against a filesystem-source registry (eager materialization, no HTTP).
 
@@ -46,6 +46,8 @@ The consumers read from the registry over HTTP: the Podium MCP server (in-proces
    │                     │ │                     │ │  eval/build pipelines)  │
    └─────────────────────┘ └─────────────────────┘ └─────────────────────────┘
 ```
+
+The diagram shows the runtime consumers. `podium sync` renders both workspace targets and marketplace targets; the marketplace target kind and its git-repo output are defined in §7.8.
 
 Sequence for `load_artifact` (MCP path):
 
@@ -90,7 +92,7 @@ The registry's wire protocol is **HTTP/JSON**. Every consumer speaks the same HT
 
 **Podium MCP server** _(in-process bridge for MCP-speaking hosts)_. Single binary. Exposes the meta-tools. Holds no per-session server-side state; local state is limited to a content-addressed disk cache, OS-keychain-stored credentials (in `oauth-device-code` mode), an in-memory local-overlay index, and the materialized working set on disk. No state is shared across MCP server processes.
 
-**`podium sync`** _(filesystem delivery for harnesses that read artifacts directly from disk)_. CLI command (and library) that reads the user's effective view from the registry and writes it to a host-configured layout via the configured `HarnessAdapter`. One-shot or `--watch` mode (subscribes to registry change events). Reuses the same identity providers and content cache as the MCP server. See §7.5.
+**`podium sync`** _(filesystem delivery for harnesses that read artifacts directly from disk)_. CLI command (and library) that reads the user's effective view from the registry and writes it to a host-configured layout via the configured `HarnessAdapter`. One-shot or `--watch` mode (subscribes to registry change events). It renders a target as a workspace tree the harness reads directly or, for a `kind: marketplace` target, as a git-repo distribution that a harness imports, running the target's operator-configured workflow to commit and push the rendered tree to a git remote. Reuses the same identity providers, content cache, and harness adapters across both kinds. See §7.5 and §7.8.
 
 **Language SDKs (`podium-py`, `podium-ts`)** _(programmatic access for non-MCP runtimes)_. Thin clients over the registry HTTP API. Used by LangChain, Bedrock, OpenAI Assistants, custom orchestrators, eval harnesses, build pipelines, notebooks. See §7.6.
 

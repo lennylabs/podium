@@ -115,6 +115,7 @@ rm -rf "$WORK"
 | S31 | Import an existing skill tree into a layer | solo | none | none | none |
 | S32 | Gateway-delegated identity with trusted-headers | standalone | none | none | none |
 | S33 | Gateway-delegated providers fail closed on misconfig | standalone | none | none | none |
+| S34 | Marketplace publishing through a `kind: marketplace` sync target | solo | none | none | local git |
 
 ---
 
@@ -2150,5 +2151,141 @@ and `config.trusted_headers_public_bind` startup guards (§6.3.3, §13.10, §13.
 - Step 4 exits non-zero and prints `config.trusted_headers_public_bind`, naming
   the non-loopback bind address.
 - Each server refuses to start, so no background process is left to stop.
+
+**Cleanup.** `rm -rf "$WORK"`.
+
+---
+
+## S34: Marketplace publishing through a `kind: marketplace` sync target
+
+**Goal.** Validate that `podium sync` renders the catalog into a harness-native
+marketplace repository and runs the target's operator-configured workflow to push
+it to a git remote, that `--check` and `--dry-run` write nothing, and that a
+re-run against an unchanged catalog produces no new commit (§7.5.2, §7.8).
+
+**Covers.** The `kind: marketplace` target, `podium sync --config`, the Claude,
+Codex, and Cursor marketplace emitters, plugin grouping by scope filter, the
+per-target `workflow` (`prepare`/`publish`), `--check` and `--dry-run`, and
+reconciliation (`skip_if_no_changes`).
+
+**Prerequisites.** `git` on `PATH`. No server and no live infrastructure: the
+remote is a local bare repository, so nothing is pushed off the machine. Set a
+deterministic git identity for the workflow's commits.
+
+```bash
+export GIT_AUTHOR_NAME="podium-bot" GIT_AUTHOR_EMAIL="bot@acme.com"
+export GIT_COMMITTER_NAME="podium-bot" GIT_COMMITTER_EMAIL="bot@acme.com"
+```
+
+**Steps.**
+
+1. Run the isolation block.
+2. Create a filesystem registry whose artifacts fall under two plugin paths.
+
+   ```bash
+   podium artifact scaffold --type skill --description "Quarterly close" "$WORK/reg/finance/close"
+   podium artifact scaffold --type skill --description "Budget review"   "$WORK/reg/finance/budget"
+   podium artifact scaffold --type skill --description "Refund helper"   "$WORK/reg/payment-helpers/refund"
+   ```
+
+3. Create a local bare repository and seed its `main` branch with one commit, so
+   the workflow's `git clone --branch main` resolves.
+
+   ```bash
+   export REMOTE="$WORK/remote.git"
+   git init --bare -b main "$REMOTE"
+   seed="$(mktemp -d)"; git -C "$seed" init -b main
+   git -C "$seed" commit --allow-empty -m init
+   git -C "$seed" remote add origin "$REMOTE"; git -C "$seed" push origin main
+   ```
+
+4. Write a `sync.yaml` with one `kind: marketplace` target. Its `target:` is the
+   working directory the `prepare` phase clones into, `harnesses:` is the harness
+   set whose marketplace manifests coexist in one repository, and `plugins:`
+   groups the artifacts by scope filter.
+
+   ```bash
+   mkdir -p "$WORK/proj/.podium"
+   cat > "$WORK/proj/.podium/sync.yaml" <<YAML
+   defaults:
+     registry: $WORK/reg
+     identity: publisher@acme.com
+   targets:
+     - id: acme-agents
+       kind: marketplace
+       target: $WORK/proj/build/acme-agents
+       git:
+         remote: $REMOTE
+         branch: main
+       harnesses: [claude-code, codex, cursor]
+       commit_message: "Sync Podium catalog ({{.ChangedCount}} changes)"
+       plugins:
+         - name: finance-pack
+           include: ["finance/**"]
+         - name: helpers
+           include: ["payment-helpers/**"]
+       workflow:
+         prepare:
+           - sh: 'if [ -d "\$PODIUM_WORKDIR/.git" ]; then git -C "\$PODIUM_WORKDIR" fetch origin "\$PODIUM_GIT_BRANCH" && git -C "\$PODIUM_WORKDIR" reset --hard "origin/\$PODIUM_GIT_BRANCH"; else git clone --branch "\$PODIUM_GIT_BRANCH" "\$PODIUM_GIT_REMOTE" "\$PODIUM_WORKDIR"; fi'
+         publish:
+           - run: ["git", "-C", "\$PODIUM_WORKDIR", "add", "-A"]
+           - run: ["git", "-C", "\$PODIUM_WORKDIR", "commit", "-m", "\$PODIUM_COMMIT_MESSAGE"]
+             skip_if_no_changes: true
+           - run: ["git", "-C", "\$PODIUM_WORKDIR", "push", "origin", "\$PODIUM_GIT_BRANCH"]
+   YAML
+   ```
+
+5. Validate the config without materializing.
+
+   ```bash
+   podium sync --config "$WORK/proj/.podium/sync.yaml" --check
+   echo "exit=$?"
+   ```
+
+6. Render to a temporary directory and print the substituted commands without
+   pushing.
+
+   ```bash
+   podium sync --config "$WORK/proj/.podium/sync.yaml" --dry-run
+   ```
+
+7. Render and publish.
+
+   ```bash
+   podium sync --config "$WORK/proj/.podium/sync.yaml"
+   ```
+
+8. Inspect the pushed repository by cloning the remote.
+
+   ```bash
+   clone="$(mktemp -d)"; git clone -q "$REMOTE" "$clone"
+   find "$clone" -name marketplace.json -o -name plugin.json | grep -v '/.git/' | sort
+   ls -1 "$clone" | grep -v '^.git$'
+   ```
+
+9. Re-run the sync against the unchanged catalog.
+
+   ```bash
+   before="$(git ls-remote "$REMOTE" main | cut -f1)"
+   podium sync --config "$WORK/proj/.podium/sync.yaml"
+   after="$(git ls-remote "$REMOTE" main | cut -f1)"
+   [ "$before" = "$after" ] && echo "idempotent: no new commit" || echo "ERROR: new commit"
+   ```
+
+**Expected.**
+
+- Step 5 exits 0 and writes no target tree (`$WORK/proj/build/acme-agents` holds
+  no `.claude-plugin/`).
+- Step 6 prints each `prepare` and `publish` command with its `PODIUM_*`
+  variables substituted, and the remote's commit count is unchanged.
+- Step 7 reports `changed: true`, lists the three `finance/` and
+  `payment-helpers/` artifacts, and reports `published: true`. The remote gains
+  one commit.
+- Step 8 lists `.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json`,
+  and `.cursor-plugin/marketplace.json` (the three vendor manifests coexisting at
+  their fixed locations) plus the per-harness `claude/`, `codex/`, and `cursor/`
+  plugin subtrees.
+- Step 9 prints `idempotent: no new commit`: the render produced no diff, so
+  `skip_if_no_changes` suppressed the commit and the remote `main` is unchanged.
 
 **Cleanup.** `rm -rf "$WORK"`.

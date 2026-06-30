@@ -47,8 +47,11 @@ const (
 // is gone.
 //
 // This in-entry tag is used for entries inside a JSON array (a hook event's
-// handler list, the Cowork marketplace plugin list), where the array has no
-// stable key to reference the entry by. Entries inside a keyed JSON object (an
+// handler list, a marketplace emitter's plugin entry keyed by the plugin name),
+// where the array has no stable key to reference the entry by. A marketplace
+// emitter (§7.8) tags its per-plugin manifest entry with the plugin name from
+// the Source PluginDescriptor, so an N-artifact plugin reconciles to a single
+// entry rather than once per artifact. Entries inside a keyed JSON object (an
 // mcpServers map, the OpenCode mcp map) are tracked by PodiumIndexKey instead,
 // because some harness schemas (Gemini's mcpServers) reject an unrecognized key
 // inside the entry object.
@@ -75,6 +78,30 @@ type File struct {
 	Key     string
 }
 
+// PluginDescriptor names the marketplace plugin an artifact renders into and
+// the harness subtree the plugin's content lives under (§6.7 "Plugin
+// descriptor", §9.1). A marketplace emitter (§7.8) reads it to write an
+// artifact's component files under <Prefix>/<Name>/... and to contribute the
+// per-plugin manifest entry keyed by Name, so several artifacts selected into
+// one plugin reconcile to a single plugin entry.
+//
+// The descriptor is set only for marketplace publishing. The project-files
+// mode (podium sync and load_artifact) leaves it at its zero value, which the
+// project-files adapters ignore, so their output is unchanged.
+type PluginDescriptor struct {
+	// Name is the operator-chosen plugin name from a kind: marketplace target's
+	// plugins: entry in sync.yaml (§7.5.2). It keys the per-plugin manifest entry
+	// and names the plugin's subtree.
+	Name string
+	// Description is an optional human-readable plugin description carried into
+	// the per-plugin manifest. It is empty when the operator omits it.
+	Description string
+	// Prefix is the harness subtree the plugin's content lives under within the
+	// marketplace repository (e.g., "claude" or "codex"). The emitter writes an
+	// artifact's files under <Prefix>/<Name>/....
+	Prefix string
+}
+
 // Source is the canonical input given to an adapter. It bundles the
 // artifact identity, manifest sources, and bundled-resource bytes.
 type Source struct {
@@ -88,6 +115,11 @@ type Source struct {
 	// Resources are bundled non-manifest files keyed by relative path
 	// inside the artifact directory (e.g., "scripts/x.py").
 	Resources map[string][]byte
+	// Plugin carries the marketplace plugin a marketplace emitter (§7.8)
+	// renders this artifact into. It is the zero PluginDescriptor in the
+	// project-files mode, where the project-files adapters ignore it and their
+	// output is unchanged.
+	Plugin PluginDescriptor
 }
 
 // HarnessAdapter is the SPI implementations satisfy.

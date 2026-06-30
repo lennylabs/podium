@@ -152,6 +152,67 @@ func TestRun_DryRunWritesNothing(t *testing.T) {
 	}
 }
 
+// §7.5.2 $PODIUM_CHANGED: Result.Changed reports whether a sync altered the
+// target tree relative to the prior lock. A first sync into an empty target
+// changes the tree, a re-sync of the unchanged registry does not, and editing an
+// artifact changes it again. A DryRun run writes nothing, so it leaves Changed
+// false. The workspace workflow reads this so a skip_if_no_changes command skips
+// a re-sync that wrote no delta.
+func TestRun_ChangedTracksOnDiskDelta(t *testing.T) {
+	t.Parallel()
+	registry := t.TempDir()
+	target := t.TempDir()
+	testharness.WriteTree(t, registry,
+		testharness.WriteTreeOption{Path: "company-glossary/ARTIFACT.md", Content: contextArtifactSrc},
+	)
+
+	first, err := Run(Options{RegistryPath: registry, Target: target, AdapterID: "none"})
+	if err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	if !first.Changed {
+		t.Errorf("first sync into an empty target must report Changed=true")
+	}
+
+	second, err := Run(Options{RegistryPath: registry, Target: target, AdapterID: "none"})
+	if err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	if second.Changed {
+		t.Errorf("re-sync of an unchanged registry must report Changed=false")
+	}
+
+	// A DryRun resolves the artifact set without writing, so it reports no change.
+	dry, err := Run(Options{RegistryPath: registry, Target: target, AdapterID: "none", DryRun: true})
+	if err != nil {
+		t.Fatalf("dry Run: %v", err)
+	}
+	if dry.Changed {
+		t.Errorf("a dry run writes nothing, so it must report Changed=false")
+	}
+
+	// Editing the artifact changes the materialized content, so the next sync
+	// reports Changed=true again.
+	edited := `---
+type: context
+version: 1.0.1
+description: glossary edited
+---
+
+Glossary body edited.
+`
+	testharness.WriteTree(t, registry,
+		testharness.WriteTreeOption{Path: "company-glossary/ARTIFACT.md", Content: edited},
+	)
+	third, err := Run(Options{RegistryPath: registry, Target: target, AdapterID: "none"})
+	if err != nil {
+		t.Fatalf("third Run: %v", err)
+	}
+	if !third.Changed {
+		t.Errorf("re-sync after editing an artifact must report Changed=true")
+	}
+}
+
 // Spec: §6.7 — Run uses the "none" adapter by default when AdapterID is
 // empty.
 func TestRun_DefaultAdapterIsNone(t *testing.T) {
@@ -233,6 +294,80 @@ layer_order:
 	got := testharness.ReadTree(t, target)
 	if !contains(got["x/ARTIFACT.md"], "personal") {
 		t.Errorf("expected personal layer's content, got: %s", got["x/ARTIFACT.md"])
+	}
+}
+
+// Spec: §6.9 / §6.7 — Run enforces the §6.7.1 ✗-cell contract before
+// adapting, so a plugin-layout type on claude-cowork fails with
+// materialize.untranslatable instead of silently producing no output. This
+// matches the MCP server load_artifact guard (cmd/podium-mcp/main.go), keeping
+// the two canonical-Adapt consumers at parity (§2.2).
+func TestRun_CoworkPluginLayoutTypeFailsUntranslatable(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		artifact string
+	}{
+		{
+			name:     "skill",
+			artifact: skillArtifactSrc,
+		},
+		{
+			// An unset rule_mode defaults to always (§4.3), which is a ✗
+			// cell for cowork; the guard must fire for the default mode too.
+			name:     "rule-default-mode",
+			artifact: "---\ntype: rule\nversion: 1.0.0\n---\n\nRule body.\n",
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			registry := t.TempDir()
+			target := t.TempDir()
+			opts := []testharness.WriteTreeOption{
+				{Path: "team/plugin-type/ARTIFACT.md", Content: tc.artifact},
+			}
+			if tc.name == "skill" {
+				opts = append(opts, testharness.WriteTreeOption{
+					Path: "team/plugin-type/SKILL.md", Content: skillBodySrc,
+				})
+			}
+			testharness.WriteTree(t, registry, opts...)
+			_, err := Run(Options{RegistryPath: registry, Target: target, AdapterID: "claude-cowork"})
+			if err == nil {
+				t.Fatalf("Run on claude-cowork over a %s artifact: want error, got nil", tc.name)
+			}
+			if !contains(err.Error(), "materialize.untranslatable") {
+				t.Errorf("error = %v, want materialize.untranslatable", err)
+			}
+			// The guard fails before writing, so the target stays empty.
+			if got := testharness.ReadTree(t, target); len(got) != 0 {
+				t.Errorf("target had %d files after a failed sync, want 0: %v", len(got), keys(got))
+			}
+		})
+	}
+}
+
+// Spec: §6.7 / §6.7.1 — the cowork context cell stays ✓, so a type: context
+// artifact still materializes onto claude-cowork through the §6.9 guard.
+func TestRun_CoworkContextStillMaterializes(t *testing.T) {
+	t.Parallel()
+	registry := t.TempDir()
+	target := t.TempDir()
+	testharness.WriteTree(t, registry,
+		testharness.WriteTreeOption{Path: "team/glossary/ARTIFACT.md", Content: contextArtifactSrc},
+	)
+	res, err := Run(Options{RegistryPath: registry, Target: target, AdapterID: "claude-cowork"})
+	if err != nil {
+		t.Fatalf("Run on claude-cowork over a context artifact: %v", err)
+	}
+	if len(res.Artifacts) != 1 {
+		t.Fatalf("got %d artifacts, want 1", len(res.Artifacts))
+	}
+	got := testharness.ReadTree(t, target)
+	if _, ok := got[".podium/context/team/glossary/ARTIFACT.md"]; !ok {
+		t.Errorf("cowork context did not materialize to .podium/context/, got: %v", keys(got))
 	}
 }
 

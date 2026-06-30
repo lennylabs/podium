@@ -10,8 +10,8 @@ package e2e
 //
 // These journeys span every config-merge surface (.claude/settings.json,
 // .mcp.json, .cursor/hooks.json, .cursor/mcp.json, .gemini/settings.json,
-// opencode.json, .codex/config.toml, AGENTS.md, and the claude-cowork
-// marketplace.json) and the harnesses that own them.
+// opencode.json, .codex/config.toml, and AGENTS.md) and the harnesses that own
+// them.
 
 import (
 	"encoding/json"
@@ -306,27 +306,42 @@ func TestMaterialize_WatchEditAndStaleCleanupInOneSession(t *testing.T) {
 
 // the §6.7.1 unsupported-type matrix is enforced through real
 // sync and lint for pi and claude-desktop: pi materializes a command to
-// .pi/prompts/<name>.md while emitting no agent output, claude-desktop writes
-// nothing project-level, and a declared-but-unsupported combination
-// (agent target_harnesses:[pi]) surfaces a lint.harness_capability diagnostic.
-// spec: §6.7 (pi type routing), §6.7.1 (capability matrix), §4.3.5.
+// .pi/prompts/<name>.md, an agent targeting pi (a ✗ cell) fails sync with the
+// §6.9 untranslatable guard, claude-desktop writes nothing project-level, and a
+// declared-but-unsupported combination (agent target_harnesses:[pi]) surfaces a
+// lint.harness_capability diagnostic.
+// spec: §6.7 (pi type routing), §6.7.1 (capability matrix), §6.9, §4.3.5.
 func TestMaterialize_UnsupportedTypeMatrixPiAndClaudeDesktop(t *testing.T) {
 	t.Parallel()
-	// pi: an agent declares target_harnesses:[pi] (✗ cell) alongside a command.
-	piReg := writeRegistry(t, map[string]string{
-		"agents/planner/ARTIFACT.md":  "---\ntype: agent\nname: planner\nversion: 1.0.0\ndescription: An agent.\ntarget_harnesses: [pi]\n---\n\nAgent body.\n",
+	// pi materializes a command to .pi/prompts/<name>.md.
+	piCmdReg := writeRegistry(t, map[string]string{
 		"commands/deploy/ARTIFACT.md": "---\ntype: command\nname: deploy\nversion: 1.0.0\ndescription: Deploy.\n---\n\n$ARGUMENTS\n",
 	})
-	piTarget := t.TempDir()
-	chSync(t, piReg, piTarget, "pi")
-	// pi writes only the command prompt; no agent output exists.
-	mustExist(t, filepath.Join(piTarget, ".pi", "prompts", "deploy.md"))
-	mustNotExist(t, filepath.Join(piTarget, ".pi", "agents"))
-	mustNotExist(t, filepath.Join(piTarget, ".pi", "prompts", "planner.md"))
+	piCmdTarget := t.TempDir()
+	chSync(t, piCmdReg, piCmdTarget, "pi")
+	mustExist(t, filepath.Join(piCmdTarget, ".pi", "prompts", "deploy.md"))
+
+	// An agent declares target_harnesses:[pi], which is a ✗ cell. The §6.9
+	// untranslatable guard in podium sync fails it with
+	// materialize.untranslatable rather than writing nothing silently, matching
+	// the MCP server load_artifact path (§2.2).
+	piAgentReg := writeRegistry(t, map[string]string{
+		"agents/planner/ARTIFACT.md": "---\ntype: agent\nname: planner\nversion: 1.0.0\ndescription: An agent.\ntarget_harnesses: [pi]\n---\n\nAgent body.\n",
+	})
+	piAgentTarget := t.TempDir()
+	piSync := runPodium(t, "", nil, "sync", "--registry", piAgentReg, "--target", piAgentTarget, "--harness", "pi")
+	if piSync.Exit == 0 {
+		t.Errorf("sync(pi) exit=0, want non-zero for the agent/pi ✗ cell\nstdout=%s", piSync.Stdout)
+	}
+	if !strings.Contains(piSync.Stderr+piSync.Stdout, "materialize.untranslatable") {
+		t.Errorf("sync(pi) missing materialize.untranslatable:\nstderr=%s\nstdout=%s", piSync.Stderr, piSync.Stdout)
+	}
+	mustNotExist(t, filepath.Join(piAgentTarget, ".pi", "agents"))
+	mustNotExist(t, filepath.Join(piAgentTarget, ".pi", "prompts", "planner.md"))
 
 	// The declared-but-unsupported agent/pi combination surfaces a diagnostic
 	// through podium lint (the §6.7.1 capability lint over target_harnesses).
-	lint := runPodium(t, "", nil, "lint", "--registry", piReg)
+	lint := runPodium(t, "", nil, "lint", "--registry", piAgentReg)
 	if lint.Exit == 0 {
 		t.Errorf("lint exit=0, want non-zero for the agent/pi ✗ cell\nstdout=%s", lint.Stdout)
 	}
@@ -335,27 +350,23 @@ func TestMaterialize_UnsupportedTypeMatrixPiAndClaudeDesktop(t *testing.T) {
 		t.Errorf("lint missing the agent/pi capability diagnostic:\n%s", lint.Stdout)
 	}
 
-	// claude-desktop has no project-level surface: sync writes nothing for an
-	// agent or a command (only the lock under .podium/).
+	// claude-desktop has no project-level surface, so every artifact type is a
+	// ✗ cell. The §6.9 guard fails the sync with materialize.untranslatable
+	// rather than writing nothing silently, matching load_artifact (§2.2).
 	cdReg := writeRegistry(t, map[string]string{
-		"agents/planner/ARTIFACT.md":  "---\ntype: agent\nname: planner\nversion: 1.0.0\ndescription: An agent.\n---\n\nAgent body.\n",
-		"commands/deploy/ARTIFACT.md": "---\ntype: command\nname: deploy\nversion: 1.0.0\ndescription: Deploy.\n---\n\n$ARGUMENTS\n",
+		"agents/planner/ARTIFACT.md": "---\ntype: agent\nname: planner\nversion: 1.0.0\ndescription: An agent.\n---\n\nAgent body.\n",
 	})
 	cdTarget := t.TempDir()
-	chSync(t, cdReg, cdTarget, "claude-desktop")
+	cdSync := runPodium(t, "", nil, "sync", "--registry", cdReg, "--target", cdTarget, "--harness", "claude-desktop")
+	if cdSync.Exit == 0 {
+		t.Errorf("sync(claude-desktop) exit=0, want non-zero for an agent ✗ cell\nstdout=%s", cdSync.Stdout)
+	}
+	if !strings.Contains(cdSync.Stderr+cdSync.Stdout, "materialize.untranslatable") {
+		t.Errorf("sync(claude-desktop) missing materialize.untranslatable:\nstderr=%s\nstdout=%s", cdSync.Stderr, cdSync.Stdout)
+	}
 	mustNotExist(t, filepath.Join(cdTarget, ".claude"))
 	mustNotExist(t, filepath.Join(cdTarget, ".claude-desktop"))
 	mustNotExist(t, filepath.Join(cdTarget, "AGENTS.md"))
-	// Only .podium/ (the lock) is written project-level.
-	entries, err := os.ReadDir(cdTarget)
-	if err != nil {
-		t.Fatalf("readdir target: %v", err)
-	}
-	for _, e := range entries {
-		if e.Name() != ".podium" {
-			t.Errorf("claude-desktop wrote an unexpected project-level entry: %s", e.Name())
-		}
-	}
 }
 
 // ------------------------------------------------------------------------
@@ -649,94 +660,6 @@ func snapshotTree(t *testing.T, root string) string {
 }
 
 // ------------------------------------------------------------------------
-
-// removing a skill, an mcp-server, and a hook from a
-// claude-cowork target, then re-syncing, strips the Podium marketplace.json and
-// plugins/<id>/.mcp.json entries, cleans the emptied plugins/<id> directories
-// (including nested skills/ and hooks/ subtrees), and preserves an operator
-// marketplace entry. spec: §6.7 (cowork plugin layout), §7.5 (stale cleanup),
-// §6.7.1 (config-merge reconciliation).
-func TestMaterialize_ClaudeCoworkRemovePluginReconcilesAndCleans(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	reg := filepath.Join(dir, "registry")
-	skillDir := filepath.Join(reg, "tools", "greet")
-	srvDir := filepath.Join(reg, "tools", "finance")
-	hookDir := filepath.Join(reg, "audit", "guard")
-	for _, d := range []string{skillDir, srvDir, hookDir} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			t.Fatalf("mkdir %s: %v", d, err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(skillDir, "ARTIFACT.md"),
-		[]byte("---\ntype: skill\nversion: 1.0.0\ndescription: A skill.\n---\n\nbody\n"), 0o644); err != nil {
-		t.Fatalf("write skill artifact: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillBody("greet")), 0o644); err != nil {
-		t.Fatalf("write SKILL.md: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(srvDir, "ARTIFACT.md"),
-		[]byte("---\ntype: mcp-server\nname: finance-warehouse\nversion: 1.0.0\ndescription: MCP.\nserver_identifier: npx:@company/finance-mcp\n---\n\nbody\n"), 0o644); err != nil {
-		t.Fatalf("write server: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(hookDir, "ARTIFACT.md"),
-		[]byte("---\ntype: hook\nname: guard\nversion: 1.0.0\ndescription: Guard.\nhook_event: stop\nhook_action: echo guard\n---\n\nbody\n"), 0o644); err != nil {
-		t.Fatalf("write hook: %v", err)
-	}
-	target := t.TempDir()
-	chSync(t, reg, target, "claude-cowork")
-
-	marketPath := filepath.Join(target, ".claude-plugin", "marketplace.json")
-	// Verify the initial plugin trees exist.
-	mustExist(t, filepath.Join(target, "plugins", "tools/greet", "skills", "greet", "SKILL.md"))
-	mustExist(t, filepath.Join(target, "plugins", "tools/finance", ".mcp.json"))
-	mustExist(t, filepath.Join(target, "plugins", "audit/guard", "hooks", "hooks.json"))
-
-	// Operator appends their own marketplace entry.
-	market := mzReadJSON(t, marketPath)
-	plugins := market["plugins"].([]any)
-	market["plugins"] = append(plugins, map[string]any{"name": "operator-plugin", "source": "./plugins/operator"})
-	mzWriteJSON(t, marketPath, market)
-
-	// Remove every artifact and re-sync.
-	for _, d := range []string{skillDir, srvDir, hookDir} {
-		if err := os.RemoveAll(d); err != nil {
-			t.Fatalf("remove %s: %v", d, err)
-		}
-	}
-	chSync(t, reg, target, "claude-cowork")
-
-	// The plugin trees are cleaned, including nested subtrees and the per-id
-	// parent directories.
-	for _, leftover := range []string{
-		filepath.Join(target, "plugins", "tools/greet"),
-		filepath.Join(target, "plugins", "tools/finance"),
-		filepath.Join(target, "plugins", "audit/guard"),
-	} {
-		if _, err := os.Stat(leftover); !os.IsNotExist(err) {
-			t.Errorf("plugin directory not cleaned: %s (stat err=%v)", leftover, err)
-		}
-	}
-
-	// The marketplace.json Podium entries are stripped; the operator entry
-	// survives.
-	after := mzReadJSON(t, marketPath)
-	afterRaw := readFile(t, marketPath)
-	afterPlugins, ok := after["plugins"].([]any)
-	if !ok {
-		t.Fatalf("marketplace.json missing plugins array after reconcile:\n%s", afterRaw)
-	}
-	if len(afterPlugins) != 1 {
-		t.Errorf("marketplace.json has %d plugins after reconcile, want exactly 1 (the operator's):\n%s", len(afterPlugins), afterRaw)
-	}
-	operatorEntry, ok := afterPlugins[0].(map[string]any)
-	if !ok || operatorEntry["name"] != "operator-plugin" {
-		t.Errorf("marketplace.json lost the operator-plugin entry:\n%s", afterRaw)
-	}
-	if strings.Contains(afterRaw, "x-podium-id") {
-		t.Errorf("marketplace.json still carries a Podium-owned plugin entry:\n%s", afterRaw)
-	}
-}
 
 // assertValidTOML parses the file at path with the same TOML library the codex
 // adapter relies on, failing the test on a parse error.
