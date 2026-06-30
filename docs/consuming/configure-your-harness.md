@@ -12,7 +12,7 @@ A harness can consume Podium artifacts in three ways. Pick the ones that fit per
 
 - **Filesystem materialization** via `podium sync`. Writes harness-native files into a workspace; the harness's own filesystem discovery picks them up. Works against either a filesystem-source registry or a running Podium server. No runtime calls.
 - **Runtime discovery** via the Podium MCP server. The agent calls `load_domain`, `search_domains`, `search_artifacts`, and `load_artifact` mid-session and materializes only what it needs. Requires a Podium server.
-- **Marketplace publishing** via `podium publish`. Renders the catalog into a git-repo plugin marketplace, extension, package, or tap that the harness imports. Available for the harnesses with a git-repo distribution: Claude Code, Claude Desktop, Claude Cowork, Codex, Cursor, Gemini, Pi, and Hermes. See [Publishing](publishing).
+- **Marketplace publishing** via a `podium sync` target of `kind: marketplace`. Renders the catalog into a git-repo plugin marketplace, extension, package, or tap that the harness imports. Available for the harnesses with a git-repo distribution: Claude Code, Claude Desktop, Claude Cowork, Codex, Cursor, Gemini, Pi, and Hermes. See [Publishing](publishing).
 
 Most harnesses support filesystem materialization and runtime discovery. Use the per-harness section below.
 
@@ -123,7 +123,7 @@ ASCII fallback for the diagram above (podium sync watch mode, filesystem-source 
 
 The harnesses below ship with a built-in adapter. For per-harness specifics about skills, hooks, plugins, and other harness-native concepts, refer to the harness's own documentation; the harness's documentation is the source of truth.
 
-| Adapter value    | Harness | Git-repo distribution (`podium publish`) | Documentation |
+| Adapter value    | Harness | Git-repo distribution (`kind: marketplace`) | Documentation |
 |:-----------------|:--------|:--|:--------------|
 | `none`           | Generic / raw output. No harness-specific translation. | none (raw canonical output) | n/a |
 | `claude-code`    | Anthropic Claude Code (CLI). | Claude marketplace (`.claude-plugin/marketplace.json`) | [code.claude.com/docs](https://code.claude.com/docs/) |
@@ -136,7 +136,7 @@ The harnesses below ship with a built-in adapter. For per-harness specifics abou
 | `pi`             | Pi (pi-mono coding agent). | Pi git package (root `package.json` with a `pi.skills` array) | [github.com/badlogic/pi-mono](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) |
 | `hermes`         | Hermes Agent (Nous Research). | Hermes skills tap (skills discovered under root `skills/`) | [hermes-agent.nousresearch.com/docs](https://hermes-agent.nousresearch.com/docs/) |
 
-Claude Code, Claude Desktop, and Claude Cowork read the same `.claude-plugin/marketplace.json`, so one Claude marketplace serves all three. The Claude, Codex, and Cursor manifests sit at distinct fixed locations and coexist in one repository. `podium publish` produces these distributions; [Publishing](publishing) covers the model and the workflow. OpenCode and `none` have no git-repo distribution and are not publish targets.
+Claude Code, Claude Desktop, and Claude Cowork read the same `.claude-plugin/marketplace.json`, so one Claude marketplace serves all three. The Claude, Codex, and Cursor manifests sit at distinct fixed locations and coexist in one repository. A `kind: marketplace` sync target produces these distributions; [Publishing](publishing) covers the model and the workflow. OpenCode and `none` have no git-repo distribution and are not publish targets.
 
 The adapter set grows as new harnesses appear. Custom adapters register through the `HarnessAdapter` SPI; see [Extending](../deployment/extending).
 
@@ -220,11 +220,11 @@ podium sync
 
 Cowork is Anthropic's web product for organizations (claude.ai). Plugin distribution to Cowork uses a Git-hosted plugin marketplace that an org admin imports.
 
-**Marketplace publishing** is the path for Cowork. `podium publish` renders the Claude marketplace, which Cowork imports along with Claude Code and Claude Desktop, because the three Claude surfaces read the same `.claude-plugin/marketplace.json`. Declare a marketplace output whose harness set names a Claude surface and run `podium publish`; the workflow commits and pushes the rendered repository, and the org admin imports the repository URL via [Manage Cowork plugins](https://support.claude.com/en/articles/13837433-manage-claude-cowork-plugins-for-your-organization). See [Publishing](publishing) for the model, the `publish.yaml` schema, and the workflow.
+**Marketplace publishing** is the path for Cowork. A `kind: marketplace` sync target renders the Claude marketplace, which Cowork imports along with Claude Code and Claude Desktop, because the three Claude surfaces read the same `.claude-plugin/marketplace.json`. Declare a marketplace target whose harness set names a Claude surface and run `podium sync --config`; the workflow commits and pushes the rendered repository, and the org admin imports the repository URL via [Manage Cowork plugins](https://support.claude.com/en/articles/13837433-manage-claude-cowork-plugins-for-your-organization). See [Publishing](publishing) for the model, the marketplace target schema, and the workflow.
 
-**`podium sync`** materializes the harness-neutral `type: context` artifact for `claude-cowork` to `.podium/context/<artifact-id>/`. It does not emit the plugin and marketplace layout. `podium sync` onto `claude-cowork` for a plugin-layout type (`skill`, `agent`, `command`, `rule`, `hook`, or `mcp-server`) fails with `materialize.untranslatable` per §6.9, the same outcome `load_artifact` returns. A cowork user obtains those artifacts by importing the published Claude marketplace.
+**`podium sync`** for a `kind: workspace` target materializes the harness-neutral `type: context` artifact for `claude-cowork` to `.podium/context/<artifact-id>/`. It does not emit the plugin and marketplace layout. A workspace sync onto `claude-cowork` for a plugin-layout type (`skill`, `agent`, `command`, `rule`, `hook`, or `mcp-server`) fails with `materialize.untranslatable` per §6.9, the same outcome `load_artifact` returns. A cowork user obtains those artifacts by importing the published Claude marketplace.
 
-**MCP server** is not applicable: Cowork ingests plugins via its marketplace import flow rather than spawning local MCP servers per session. Use `podium publish` to render the marketplace, and Cowork's own admin tools to deploy.
+**MCP server** is not applicable: Cowork ingests plugins via its marketplace import flow rather than spawning local MCP servers per session. Use a `kind: marketplace` sync target to render the marketplace, and Cowork's own admin tools to deploy.
 
 **Notes:**
 
@@ -275,7 +275,7 @@ podium sync
 
 - Cursor has the most complete `rule_mode` support: all four values map natively to the `.mdc` frontmatter.
 - Native hook system available.
-- Cursor also has a team marketplace. `podium publish` writes `.cursor-plugin/marketplace.json` at the repository root and a per-plugin `.cursor-plugin/plugin.json` with `skills/`, `rules/*.mdc`, and `mcp.json` components. Import a GitHub, GitLab, or Bitbucket repository from the Cursor dashboard. See [Publishing](publishing).
+- Cursor also has a team marketplace. A `kind: marketplace` sync target writes `.cursor-plugin/marketplace.json` at the repository root and a per-plugin `.cursor-plugin/plugin.json` with `skills/`, `rules/*.mdc`, and `mcp.json` components. Import a GitHub, GitLab, or Bitbucket repository from the Cursor dashboard. See [Publishing](publishing).
 
 ---
 
@@ -358,7 +358,7 @@ Codex consumes `AGENTS.md` for rules and now has native skill, subagent, and hoo
 - `rule_mode: auto` is not supported; ingest fails with a lint error.
 - Codex reads hooks from the `[hooks]` table in `.codex/config.toml`, so `hook` artifacts materialize rather than failing ingest. Codex runs these hooks in its interactive mode; `codex exec` does not fire lifecycle hooks in codex-cli 0.136.0.
 - Skills live at `.agents/skills/`, not `.codex/skills/`. Subagents are TOML at `.codex/agents/<name>.toml`.
-- Codex also has a git-repo marketplace. `podium publish` writes `.agents/plugins/marketplace.json` at the repository root and a per-plugin `.codex-plugin/plugin.json` with `skills/`, `hooks/hooks.json`, and `.mcp.json` components. Install with `codex plugin marketplace add owner/repo`. See [Publishing](publishing).
+- Codex also has a git-repo marketplace. A `kind: marketplace` sync target writes `.agents/plugins/marketplace.json` at the repository root and a per-plugin `.codex-plugin/plugin.json` with `skills/`, `hooks/hooks.json`, and `.mcp.json` components. Install with `codex plugin marketplace add owner/repo`. See [Publishing](publishing).
 
 ---
 
@@ -391,7 +391,7 @@ podium sync
 - `rule_mode: always` maps to `GEMINI.md`. Other rule modes fall back with a lint warning per the per-harness capability matrix.
 - Gemini commands are TOML and use the `{{args}}` placeholder; positional arguments are not supported.
 - See [Rule modes](../authoring/rule-modes) for the per-harness mapping.
-- Gemini distributes through an extension. `podium publish` writes `gemini-extension.json`, `commands/*.toml`, and the context file at the repository root, collapsing the output's plugin set into one extension. A Gemini repository holds one extension, so a Gemini output takes its own repository. Install with `gemini extensions install owner/repo`. See [Publishing](publishing).
+- Gemini distributes through an extension. A `kind: marketplace` sync target writes `gemini-extension.json`, `commands/*.toml`, and the context file at the repository root, collapsing the target's plugin set into one extension. A Gemini repository holds one extension, so a Gemini target takes its own repository. Install with `gemini extensions install owner/repo`. See [Publishing](publishing).
 
 ---
 
@@ -423,7 +423,7 @@ Pi loads `AGENTS.md` from the project tree (and `~/.pi/agent/AGENTS.md` globally
 
 - `rule_mode: auto` is not supported.
 - Pi also reads `SYSTEM.md` and `APPEND_SYSTEM.md` for system-prompt customization; Podium does not write to these by default.
-- Pi distributes through a git package. `podium publish` writes a root `package.json` carrying the `pi-package` keyword and a `pi.skills` array pointing at a skills subtree, with `skills/<name>/SKILL.md` per skill. Install with `pi install git:github.com/owner/repo`. See [Publishing](publishing).
+- Pi distributes through a git package. A `kind: marketplace` sync target writes a root `package.json` carrying the `pi-package` keyword and a `pi.skills` array pointing at a skills subtree, with `skills/<name>/SKILL.md` per skill. Install with `pi install git:github.com/owner/repo`. See [Publishing](publishing).
 
 ---
 
@@ -462,7 +462,7 @@ Hermes natively reads project-level `.cursor/rules/*.mdc`, root `AGENTS.md`, and
 **Notes:**
 
 - Hermes has the broadest rule-format compatibility of any harness Podium supports; all `rule_mode` values map cleanly via the cursor-style `.mdc` format.
-- Hermes distributes through a skills tap. `podium publish` writes `skills/<name>/SKILL.md` per skill with its `references/`, `scripts/`, and `assets/`, under the tap's root `skills/` directory, and writes no root manifest. The tap defaults to a root `skills/` directory, so a Hermes output takes its own repository. Add it with `hermes skills tap add owner/repo`. See [Publishing](publishing).
+- Hermes distributes through a skills tap. A `kind: marketplace` sync target writes `skills/<name>/SKILL.md` per skill with its `references/`, `scripts/`, and `assets/`, under the tap's root `skills/` directory, and writes no root manifest. The tap defaults to a root `skills/` directory, so a Hermes target takes its own repository. Add it with `hermes skills tap add owner/repo`. See [Publishing](publishing).
 
 ---
 

@@ -39,7 +39,7 @@ pages:
   - path: docs/consuming/configure-your-harness.md
     slug: D-configure-harness
   - path: docs/consuming/publishing.md
-    slug: D-publishing
+    slug: D-marketplace-sync
   - path: docs/deployment/solo-filesystem.md
     slug: D-solo-fs
   - path: docs/deployment/small-team.md

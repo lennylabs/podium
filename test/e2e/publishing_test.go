@@ -1,6 +1,6 @@
 package e2e
 
-// End-to-end tests for docs/consuming/publishing.md (D-publishing).
+// End-to-end tests for docs/consuming/publishing.md (D-marketplace-sync).
 //
 // These tests drive the compiled podium binary through `podium sync --config`
 // (§7.5.2, §7.8) against a sync.yaml carrying a `kind: marketplace` target. A

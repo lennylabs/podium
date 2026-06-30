@@ -3,7 +3,7 @@ layout: default
 title: CLI
 parent: Reference
 nav_order: 1
-description: "Every podium subcommand: setup, server, sync, publish, layer management, search, admin, signing."
+description: "Every podium subcommand: setup, server, sync, layer management, search, admin, signing."
 ---
 
 # CLI
@@ -223,7 +223,7 @@ podium sync [--registry <url-or-path>] [--target <path>] [--harness <name>]
 | `--target <path>` | Destination directory. Default: CWD. |
 | `--harness <name>` | Override the configured harness. |
 | `--profile <name>` | Use a named profile from `sync.yaml`. |
-| `--config <path>` | Run one sync per entry in a `sync.yaml` `targets:` list. |
+| `--config <path>` | Run one sync per entry in a `sync.yaml` `targets:` list. Each entry is `kind: workspace` (the default, a project-files layout) or `kind: marketplace` (a git-repo distribution rendered and pushed through the target's workflow). |
 | `--include <pattern>` | Glob to include (canonical artifact IDs). Repeatable. |
 | `--exclude <pattern>` | Glob to exclude. Applied after include. Repeatable. |
 | `--type <t1,t2,...>` | Restrict to a comma-separated list of artifact types. |
@@ -235,6 +235,8 @@ podium sync [--registry <url-or-path>] [--target <path>] [--harness <name>]
 | `--json` | Structured envelope output (pipe to `jq`). |
 
 Lock file at `<target>/.podium/sync.lock`.
+
+A `kind: marketplace` target renders the harness-native git-repo distribution into its `target` directory and runs the target's `prepare`, `render`, `publish` workflow to commit and push it. The marketplace fields (the git remote and branch, the harness set, the commit message, the plugins, and the publishing identity) are reached only through the `--config` path. See [Marketplace publishing](../consuming/publishing) for the model and the worked examples.
 
 ### `podium sync override`
 
@@ -257,26 +259,6 @@ podium sync save-as --profile <name> [--update] [--dry-run]
 ```
 
 `--update` overwrites an existing profile. After `save-as` succeeds, the lock file's toggles are cleared.
-
-### `podium publish`
-
-Renders the catalog into harness-native git-repo marketplaces and runs an operator-configured workflow to push them. Reads `publish.yaml`. See [Marketplace publishing](../consuming/publishing) for the model and the worked examples, and [publish.yaml](publish-yaml) for the config schema.
-
-```
-podium publish [--output <id>] [--config <path>] [--workdir <dir>]
-               [--dry-run] [--check] [--json]
-```
-
-| Flag | Effect |
-|:--|:--|
-| `--output <id>` | Publish only the named marketplace output. Default: every output declared in `publish.yaml`. |
-| `--config <path>` | Read this `publish.yaml` instead of the merged config scopes. |
-| `--workdir <dir>` | Render into an existing checkout (for example a CI `actions/checkout`). Single output only; pair with `--output`. |
-| `--dry-run` | Render into a temporary directory and print each command with its `$PODIUM_*` variables substituted; run no publish phase. |
-| `--check` | Validate the config only; render and run nothing. |
-| `--json` | Structured envelope output (pipe to `jq`). |
-
-For each output, Podium runs the `prepare`, `render`, `publish` pipeline: the `prepare` commands place a checkout at the working directory, Podium renders the marketplace tree into it, and the `publish` commands take the rendered tree to the remote. A flag or config error exits 2 (a `config.invalid` config, an unknown `--output`, a missing `--config` path, or an unset registry `config.no_registry`); a config-load or runtime failure exits 1; success exits 0.
 
 ### `podium profile edit`
 

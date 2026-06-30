@@ -98,11 +98,11 @@ Podium can run from a filesystem catalog or from a registry server:
   organized in folders and subfolders, where each folder defines a domain.
 - **Selective materialization.** Sync a subset of the catalog into a
   workspace. Define profiles to quickly switch between scopes.
-- **Marketplace publishing.** `podium publish` renders the catalog
-  into harness-native git-repo distributions (the Claude, Codex, and
-  Cursor plugin marketplaces, the Gemini extension, the Pi package,
-  and the Hermes tap) and runs an operator-configured git workflow to
-  push them. See
+- **Marketplace publishing.** A `podium sync` target of
+  `kind: marketplace` renders the catalog into harness-native git-repo
+  distributions (the Claude, Codex, and Cursor plugin marketplaces, the
+  Gemini extension, the Pi package, and the Hermes tap) and runs an
+  operator-configured git workflow to push them. See
   [Marketplace publishing](https://lennylabs.github.io/podium/consuming/publishing/).
 - **Layered composition.** Compose the catalog from multiple sources
   with deterministic merge and explicit
@@ -181,10 +181,11 @@ Podium consists of:
   `LayerSourceProvider` SPI lets deployments add custom sources
   (S3 buckets, OCI registries, HTTP archives).
 - **Consumers**: built-in consumers are `podium sync`, the MCP
-  server, and the language SDKs. `podium publish` is a derived,
-  served output that renders harness-native marketplace
-  repositories. Custom consumers can build against the HTTP API
-  directly.
+  server, and the language SDKs. `podium sync` renders a target as a
+  workspace tree the harness reads directly or, for a
+  `kind: marketplace` target, as a harness-native git-repo
+  distribution a harness imports. Custom consumers can build against
+  the HTTP API directly.
 
 In server mode, the server holds the catalog; consumers reach it
 over HTTP and identity-aware composition runs server-side:

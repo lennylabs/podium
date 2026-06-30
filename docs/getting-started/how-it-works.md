@@ -13,9 +13,10 @@ Podium has two main parts:
 - A **registry**: the system of record for artifacts.
 - **Consumers**: components that read from the registry. Built-in
   consumers include language SDKs, the MCP server, and `podium sync`.
-  `podium publish` is a derived, served output that renders
-  marketplace repositories from the same effective view. Custom
-  consumers can build against the HTTP API.
+  `podium sync` renders a target as a workspace tree the harness reads
+  directly or, for a `kind: marketplace` target, as a git-repo
+  distribution a harness imports. Custom consumers can build against
+  the HTTP API.
 
 The registry can be reached as a Podium server (single binary or
 multi-tenant deployment) or as a local filesystem path. Most
@@ -127,8 +128,7 @@ For server-source deployments:
 | Object storage   | Bundled resource bytes, content-addressed                                                                                      | S3 / GCS / MinIO / R2 (filesystem in standalone mode)                                                                              |
 | Vector backend   | Hybrid retrieval                                                                                                               | `pgvector` and `sqlite-vec` collocate with the metadata store; managed alternatives include Pinecone, Weaviate Cloud, Qdrant Cloud |
 | MCP server       | In-process bridge for MCP-speaking hosts; runs the harness adapter at materialization time                                     | Spawned as a stdio subprocess by the host (Claude Code, Cursor, etc.), one per workspace                                           |
-| `podium sync`    | Eager filesystem materialization; one-shot or watcher                                                                          | Developer machines, CI runners, build pipelines                                                                                    |
-| `podium publish` | Renders marketplace repositories and runs an operator-configured git workflow to push them                                     | Operator machines and CI runners                                                                                                   |
+| `podium sync`    | Eager filesystem materialization; one-shot or watcher. A `kind: marketplace` target renders a git-repo distribution and runs an operator-configured workflow to push it | Developer machines, CI runners, build pipelines                                                                                    |
 | Language SDKs    | Programmatic HTTP clients                                                                                                      | Wherever your code runs: LangChain, Bedrock, OpenAI Assistants, custom orchestrators, eval harnesses                               |
 
 The MCP server, `podium sync`, and the language SDKs share the same
@@ -283,16 +283,17 @@ call.
 
 ## Marketplace publishing
 
-`podium publish` is a further output path. It reads the publishing
-identity's effective view over the same HTTP API, renders each
-harness's git-repo distribution (a plugin marketplace, extension,
-package, or tap), and runs an operator-configured workflow that
-clones, commits, and pushes the result to a git remote. A harness
-then imports the published repository through its own install path.
-The CI trigger is the `layer.ingested` webhook event, so one source
-commit yields one publish.
+A `podium sync` target of `kind: marketplace` is a further output
+path. It reads the publishing identity's effective view over the same
+HTTP API, renders each harness's git-repo distribution (a plugin
+marketplace, extension, package, or tap), and runs an
+operator-configured workflow that clones, commits, and pushes the
+result to a git remote. A harness then imports the published
+repository through its own install path. The CI trigger is the
+`layer.ingested` webhook event, so one source commit yields one
+publish.
 
-![Publish flow: a source change ingests into the registry, which emits layer.ingested; a CI job (scheduled, or relayed through a receiver and repository_dispatch) runs podium publish, which renders the marketplace tree and pushes it to a git remote that the harness imports.](../assets/diagrams/publish-flow.svg)
+![Publish flow: a source change ingests into the registry, which emits layer.ingested; a CI job (scheduled, or relayed through a receiver and repository_dispatch) runs podium sync --config, which renders the marketplace tree and pushes it to a git remote that the harness imports.](../assets/diagrams/publish-flow.svg)
 
 <!--
 ASCII fallback for the diagram above (publish flow):
@@ -318,7 +319,7 @@ ASCII fallback for the diagram above (publish flow):
              +-----------------------------+-------------------------+
                                            v
                                 +---------------------+
-                                | podium publish      |
+                                | podium sync (config)|
                                 |  prepare (clone)    |
                                 |  render (Podium)    |
                                 |  publish (push)     |
@@ -335,8 +336,8 @@ ASCII fallback for the diagram above (publish flow):
 -->
 
 See [Consuming → Marketplace publishing](../consuming/publishing) for
-the model, the `publish.yaml` schema, and the worked GitHub Actions
-patterns.
+the model, the marketplace target schema, and the worked GitHub
+Actions patterns.
 
 ---
 

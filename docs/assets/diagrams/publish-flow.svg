@@ -1,15 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 620" font-family="Helvetica, Arial, sans-serif">
   <!--
     Publish flow.
-    Used by docs/getting-started/how-it-works.md and
-    docs/consuming/publishing.md.
+    Used by docs/getting-started/how-it-works.md.
 
     A source change ingests into the registry, which emits one
-    layer.ingested event per cycle. One of two triggers runs
-    podium publish: Pattern A is a scheduled CI job, Pattern B is a
-    receiver that posts to a relay which verifies the HMAC and calls
-    GitHub repository_dispatch. podium publish renders the marketplace
-    tree and pushes it to a git remote the harness imports.
+    layer.ingested event per cycle. One of two triggers runs the
+    multi-target podium sync: Pattern A is a scheduled CI job, Pattern
+    B is a receiver that posts to a relay which verifies the HMAC and
+    calls GitHub repository_dispatch. The kind: marketplace target
+    renders the marketplace tree and pushes it to a git remote the
+    harness imports.
   -->
   <defs>
     <marker id="b-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
@@ -84,12 +84,12 @@
   <text class="b-sub" x="578" y="394">verifies HMAC, then calls</text>
   <text class="b-mono" x="578" y="414">POST /repos/&lt;owner&gt;/&lt;repo&gt;/dispatches</text>
 
-  <!-- Both triggers converge on podium publish -->
+  <!-- Both triggers converge on the podium sync run -->
   <path class="b-line" d="M 200 308 L 200 470 L 416 470" marker-end="url(#b-arrow)"/>
   <path class="b-line" d="M 700 428 L 700 470 L 664 470" marker-end="url(#b-arrow)"/>
 
   <rect class="b-card-primary" x="420" y="438" width="240" height="120" rx="10"/>
-  <text class="b-label" x="438" y="464">podium publish</text>
+  <text class="b-label" x="438" y="464">podium sync --config</text>
   <text class="b-name" x="438" y="490">prepare (clone)</text>
   <text class="b-name" x="438" y="514">render (Podium)</text>
   <text class="b-name" x="438" y="538">publish (push)</text>
@@ -103,5 +103,5 @@
   <text class="b-sub" x="746" y="536">through its install path</text>
 
   <text class="b-foot" x="30" y="592">The receiver cannot call GitHub's dispatch endpoint directly because the HMAC-signed receiver body differs, so a relay verifies the HMAC and issues the dispatch.</text>
-  <text class="b-foot" x="30" y="610">Pattern A polls on a cron, and Pattern B relays the event. Both run the same podium publish pipeline.</text>
+  <text class="b-foot" x="30" y="610">Pattern A polls on a cron, and Pattern B relays the event. Both run the same podium sync --config pipeline.</text>
 </svg>
