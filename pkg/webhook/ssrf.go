@@ -245,3 +245,16 @@ func blockedAddress(ip net.IP) (bool, string) {
 func NoRedirect(_ *http.Request, _ []*http.Request) error {
 	return http.ErrUseLastResponse
 }
+
+// CheckRedirect is the http.Client.CheckRedirect hook that follows a
+// redirect only when its target passes the SSRF policy (§7.3.2). A
+// receiver that 30x-redirects to a loopback, link-local, or private
+// address is refused so the redirect cannot reach a target the policy
+// blocks, while a redirect to an allowed target is followed. Wire it as
+// client.CheckRedirect = policy.CheckRedirect.
+func (p *URLPolicy) CheckRedirect(req *http.Request, _ []*http.Request) error {
+	if err := p.Validate(req.Context(), req.URL.String()); err != nil {
+		return err
+	}
+	return nil
+}

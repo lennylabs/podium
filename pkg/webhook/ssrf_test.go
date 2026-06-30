@@ -296,3 +296,35 @@ func TestNoRedirect_StopsAtFirstResponse(t *testing.T) {
 		t.Fatalf("NoRedirect should return http.ErrUseLastResponse, got %v", err)
 	}
 }
+
+// Spec: §7.3.2 — the policy-aware CheckRedirect refuses a redirect whose
+// target the SSRF policy disallows, so a 30x to an internal address is not
+// followed.
+func TestURLPolicy_CheckRedirectRejectsDisallowedTarget(t *testing.T) {
+	t.Parallel()
+	p := newPolicy(t)
+	webhook.SetResolver(p, staticResolver("internal.acme.com", "10.1.2.3"))
+	req, err := http.NewRequest(http.MethodGet, "https://internal.acme.com/secret", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	err = p.CheckRedirect(req, nil)
+	if !errors.Is(err, webhook.ErrDisallowedTarget) {
+		t.Fatalf("CheckRedirect should refuse a private target, got %v", err)
+	}
+}
+
+// Spec: §7.3.2 — the policy-aware CheckRedirect follows a redirect to an
+// allowed (public) target.
+func TestURLPolicy_CheckRedirectAllowsPublicTarget(t *testing.T) {
+	t.Parallel()
+	p := newPolicy(t)
+	webhook.SetResolver(p, staticResolver("hooks.acme.com", "93.184.216.34"))
+	req, err := http.NewRequest(http.MethodGet, "https://hooks.acme.com/ci", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if err := p.CheckRedirect(req, nil); err != nil {
+		t.Fatalf("CheckRedirect should allow a public target, got %v", err)
+	}
+}

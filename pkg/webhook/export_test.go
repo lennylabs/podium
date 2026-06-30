@@ -3,7 +3,15 @@ package webhook
 import (
 	"context"
 	"net"
+	"net/http"
 )
+
+// WorkerCheckRedirect exposes the worker's selected CheckRedirect hook to
+// the external test package so the policy-aware-versus-NoRedirect selection
+// is covered without driving a live TLS redirect.
+func WorkerCheckRedirect(w *Worker) func(*http.Request, []*http.Request) error {
+	return w.checkRedirect()
+}
 
 // SetResolver injects a host resolver into a URLPolicy for tests so the
 // SSRF policy can be exercised without DNS. It is exported only to the
