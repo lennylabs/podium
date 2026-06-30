@@ -119,6 +119,12 @@ type Worker struct {
 	// policy the worker enforces.
 	URLPolicy *URLPolicy
 
+	// newTimer overrides the debounce window timer for tests. A test
+	// injects a manual timer that never fires on the wall clock and drives
+	// the trailing window through Worker.Flush, so the batch delivery is
+	// deterministic. Nil uses time.AfterFunc (§7.3.2).
+	newTimer func(d time.Duration, fn func()) stopper
+
 	// mu serializes the per-receiver failure-counter read-modify-write
 	// so two concurrent events never lose an increment.
 	mu sync.Mutex
@@ -126,6 +132,12 @@ type Worker struct {
 	// on first use via semOnce.
 	sem     chan struct{}
 	semOnce sync.Once
+
+	// debounceBuf is the in-process per-receiver debounce buffer, built on
+	// first Enqueue. It carries its own lock for the window map and timers,
+	// independent of mu (§7.3.2).
+	debounceBuf  *debounceBuffer
+	debounceOnce sync.Once
 }
 
 // semaphore lazily builds and returns the delivery concurrency limiter,
