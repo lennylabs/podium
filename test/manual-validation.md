@@ -116,6 +116,7 @@ rm -rf "$WORK"
 | S32 | Gateway-delegated identity with trusted-headers | standalone | none | none | none |
 | S33 | Gateway-delegated providers fail closed on misconfig | standalone | none | none | none |
 | S34 | Marketplace publishing through a `kind: marketplace` sync target | solo | none | none | local git |
+| S35 | Webhook receiver hardening: admin gate and SSRF policy | standalone | none | none | none |
 
 ---
 
@@ -2289,3 +2290,79 @@ export GIT_COMMITTER_NAME="podium-bot" GIT_COMMITTER_EMAIL="bot@acme.com"
   `skip_if_no_changes` suppressed the commit and the remote `main` is unchanged.
 
 **Cleanup.** `rm -rf "$WORK"`.
+
+---
+
+## S35: Webhook receiver hardening: admin gate and SSRF policy
+
+**Goal.** Validate that the webhook receiver CRUD endpoints (`/v1/webhooks`, §7.3.2)
+require the per-tenant admin role, that the SSRF policy rejects a non-`https` or
+private-address receiver URL by default, and that `PODIUM_WEBHOOK_ALLOWED_TARGETS`
+overrides the address rejection.
+
+**Covers.** Standalone deployment, injected-session-token identity, the receiver
+authorization gate, the receiver-URL SSRF policy, the `PODIUM_WEBHOOK_ALLOWED_TARGETS`
+allowlist, and the per-receiver `debounce` field.
+
+**Steps.**
+
+1. Run the isolation block.
+2. Generate a runtime key (`go run ./tools/minttoken --keys "$WORK/keys"`), boot an
+   injected-session-token standalone server with `alice@acme.com` as a bootstrap
+   admin over a one-artifact registry, and register the runtime key (as in S12 and
+   S13, with `PODIUM_BOOTSTRAP_ADMINS=alice@acme.com`, `PODIUM_OAUTH_AUDIENCE=https://podium.manual`,
+   and `--bind 127.0.0.1:8134`). Export `PODIUM_REGISTRY=http://127.0.0.1:8134`.
+3. Mint an admin and a non-admin token, and exercise the receiver CRUD over HTTP.
+   The token is sent as `Authorization: Bearer`. The addresses use the
+   documentation range `203.0.113.0/24` (a public, non-private block) so a public
+   `https` URL is accepted without a live receiver, since registration validates
+   the URL but does not connect.
+
+   ```bash
+   ALICE=$(go run ./tools/minttoken --keys "$WORK/keys" --sub alice@acme.com --email alice@acme.com)
+   BOB=$(go run ./tools/minttoken --keys "$WORK/keys" --sub bob@acme.com --email bob@acme.com)
+   post() { curl -s -w '\n%{http_code}\n' -X POST "$PODIUM_REGISTRY/v1/webhooks" \
+     ${1:+-H "Authorization: Bearer $1"} -H 'Content-Type: application/json' -d "$2"; }
+
+   echo "--- anonymous (no token): rejected ---"
+   post "" '{"url":"https://203.0.113.10/h","event_filter":["layer.ingested"]}'
+   echo "--- bob (non-admin): auth.forbidden ---"
+   post "$BOB" '{"url":"https://203.0.113.10/h","event_filter":["layer.ingested"]}'
+   echo "--- alice (admin) public https: created ---"
+   post "$ALICE" '{"url":"https://203.0.113.10/h","event_filter":["layer.ingested"]}'
+   echo "--- alice loopback https: SSRF address rejection ---"
+   post "$ALICE" '{"url":"https://127.0.0.1:9443/h","event_filter":["layer.ingested"]}'
+   echo "--- alice public http (not https): SSRF scheme rejection ---"
+   post "$ALICE" '{"url":"http://203.0.113.10/h","event_filter":["layer.ingested"]}'
+   echo "--- alice debounce field accepted ---"
+   post "$ALICE" '{"url":"https://203.0.113.11/h","event_filter":["layer.ingested"],"debounce":"60s"}'
+   ```
+
+4. Stop the server, then boot a second one identically but with
+   `PODIUM_WEBHOOK_ALLOWED_TARGETS=127.0.0.1` and `--bind 127.0.0.1:8135`
+   (`PODIUM_REGISTRY=http://127.0.0.1:8135`), and register a loopback receiver.
+
+   ```bash
+   echo "--- alice loopback https with the host allowlisted: created ---"
+   post "$ALICE" '{"url":"https://127.0.0.1:9443/h","event_filter":["layer.ingested"]}'
+   ```
+
+**Expected.**
+
+- The anonymous POST is rejected (HTTP 401, `auth.untrusted_runtime`): injected-session-token
+  mode rejects an unverified caller before the handler runs.
+- bob's POST returns HTTP 403 with `auth.forbidden`, naming bob as not an admin: the
+  receiver CRUD is admin-gated.
+- alice's public `https` POST returns HTTP 201 and the created receiver (id, masked
+  secret, event filter).
+- alice's loopback `https` POST returns `registry.invalid_argument` naming the
+  disallowed host: the SSRF policy rejects a private address.
+- alice's public `http` POST returns `registry.invalid_argument`: the SSRF policy
+  requires `https`.
+- alice's POST with `"debounce":"60s"` returns HTTP 201: the per-receiver debounce
+  window is accepted.
+- On the allowlist server, the loopback `https` POST returns HTTP 201: an
+  allowlisted host overrides the address rejection (the `https` requirement still
+  applies).
+
+**Cleanup.** Stop both servers and `rm -rf "$WORK"`.
