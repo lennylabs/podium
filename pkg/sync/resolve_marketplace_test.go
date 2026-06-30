@@ -184,21 +184,6 @@ func TestPlanMultiTarget_MarketplaceRejectsWatch(t *testing.T) {
 	}
 }
 
-// TestPlanMultiTarget_MarketplaceRejectsOverride asserts that a kind:
-// marketplace target run with an ephemeral override is rejected with
-// ErrConfigInvalid (§7.5.2, §7.5.5).
-func TestPlanMultiTarget_MarketplaceRejectsOverride(t *testing.T) {
-	t.Parallel()
-	cfg := &sync.SyncConfig{
-		Defaults: sync.Defaults{Registry: "https://reg"},
-		Targets:  []sync.TargetEntry{{ID: "mp", Kind: "marketplace", Target: "/o", Harnesses: []string{"claude-code"}}},
-	}
-	_, err := sync.PlanMultiTarget(cfg, sync.PlanInput{Workspace: "/ws", Override: true})
-	if !errors.Is(err, sync.ErrConfigInvalid) {
-		t.Fatalf("got %v, want ErrConfigInvalid", err)
-	}
-}
-
 // TestPlanMultiTarget_MarketplaceRejectsNonPublishHarness asserts that a
 // marketplace harness set naming opencode or none is rejected with
 // ErrConfigInvalid via adapter.EmitterForHarness (§7.8).

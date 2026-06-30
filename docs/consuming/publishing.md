@@ -40,7 +40,7 @@ The phases exist because the checkout must precede the render so the render reco
 
 ## The `kind: marketplace` target
 
-A marketplace target is one entry under `targets:` in `sync.yaml`, alongside the `kind: workspace` targets the harness reads directly. The `kind:` field selects the output format: `workspace` (the default) materializes the project-files layout, and `marketplace` renders the git-repo distribution layout. The marketplace fields are valid only on a `kind: marketplace` entry, and the workspace scope fields (`profile`, `include`, `exclude`, `type`), the watch mode, and the ephemeral overrides are rejected on a marketplace entry.
+A marketplace target is one entry under `targets:` in `sync.yaml`, alongside the `kind: workspace` targets the harness reads directly. The `kind:` field selects the output format: `workspace` (the default) materializes the project-files layout, and `marketplace` renders the git-repo distribution layout. The marketplace fields are valid only on a `kind: marketplace` entry, and the workspace scope fields (`profile`, `include`, `exclude`, `type`) and the watch mode are rejected on a marketplace entry. The ephemeral overrides (`podium sync override`) do not apply to a marketplace target: that command operates on a single target directory's lock file and renders the project-files layout, so it does not reach a marketplace entry.
 
 ```yaml
 # .podium/sync.yaml

@@ -349,14 +349,18 @@ const (
 // PlanInput carries the CLI-level inputs the multi-target plan needs beyond the
 // config file: the registry override (the --registry flag), the workspace the
 // --config file lives in (for relative registry resolution), and whether the run
-// requested the watch mode (§7.5.4) or carries an ephemeral override (§7.5.5). A
-// `kind: marketplace` target rejects watch and override, so PlanMultiTarget needs
-// to see them to enforce the §7.5.2 rule.
+// requested the watch mode (§7.5.4). A `kind: marketplace` target rejects the
+// watch mode, so PlanMultiTarget needs to see it to enforce the §7.5.2 rule.
+//
+// The ephemeral overrides (§7.5.5) reach the multi-target path through no field:
+// `podium sync override` operates on a single target directory's lock file and
+// never reads a `targets:` list, so it cannot carry a marketplace target, and the
+// §7.5.2 rejection of an override on a marketplace entry is satisfied by the
+// absence of a config surface that pairs the two.
 type PlanInput struct {
 	RegistryOverride string
 	Workspace        string
 	Watch            bool
-	Override         bool
 }
 
 // PlanMultiTarget resolves every entry in cfg.Targets into a runnable plan
@@ -375,11 +379,10 @@ type PlanInput struct {
 //
 // PlanMultiTarget validates each entry against its kind before resolving it: a
 // `kind: workspace` entry rejects the marketplace fields, and a `kind:
-// marketplace` entry rejects the workspace scope fields, the watch mode
-// (in.Watch), and the ephemeral overrides (in.Override). A marketplace harness
-// set naming a non-publish harness (opencode or none) is rejected. A target with
-// no resolvable directory, an unresolved profile reference, or a kind violation
-// is an error.
+// marketplace` entry rejects the workspace scope fields and the watch mode
+// (in.Watch). A marketplace harness set naming a non-publish harness (opencode
+// or none) is rejected. A target with no resolvable directory, an unresolved
+// profile reference, or a kind violation is an error.
 //
 // spec: §7.5.2 — "podium sync --config <path> iterates targets: and runs one
 // sync per entry; each target writes its own lock".
@@ -439,10 +442,15 @@ func PlanMultiTarget(cfg *SyncConfig, in PlanInput) ([]MultiTargetPlan, error) {
 
 // validateTargetKind enforces the §7.5.2 per-kind field rules: a kind: workspace
 // entry rejects the marketplace fields, and a kind: marketplace entry rejects the
-// workspace scope fields, the watch mode, and the ephemeral overrides. A
-// marketplace harness set naming a non-publish harness (opencode or none) is
-// rejected via adapter.EmitterForHarness. workflow is accepted on both kinds.
-// Every rejection maps to config.invalid (§6.10).
+// workspace scope fields and the watch mode. A marketplace harness set naming a
+// non-publish harness (opencode or none) is rejected via
+// adapter.EmitterForHarness. workflow is accepted on both kinds. Every rejection
+// maps to config.invalid (§6.10).
+//
+// The §7.5.2 rejection of an ephemeral override (§7.5.5) on a marketplace entry
+// needs no check here: `podium sync override` operates on a single target
+// directory and never routes through this path, so no config surface pairs an
+// override with a marketplace target.
 func validateTargetKind(kind string, entry TargetEntry, in PlanInput) error {
 	switch kind {
 	case KindWorkspace:
@@ -459,10 +467,6 @@ func validateTargetKind(kind string, entry TargetEntry, in PlanInput) error {
 		}
 		if in.Watch {
 			return fmt.Errorf("%w: target %q is kind: marketplace and cannot run under --watch (§7.5.4)",
-				ErrConfigInvalid, entry.ID)
-		}
-		if in.Override {
-			return fmt.Errorf("%w: target %q is kind: marketplace and cannot run with an ephemeral override (§7.5.5)",
 				ErrConfigInvalid, entry.ID)
 		}
 		for _, h := range entry.Harnesses {
