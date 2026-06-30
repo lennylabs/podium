@@ -6,7 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-[Unreleased]: https://github.com/lennylabs/podium/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/lennylabs/podium/compare/v0.2.0...HEAD
+
+## [0.2.0] - 2026-06-29
+
+Marketplace publishing: a `podium sync` target of `kind: marketplace` renders the catalog into a harness-native git-repo marketplace and runs an operator-configured workflow to push it to a remote.
+
+### Added
+
+- **Marketplace publishing** (§7.5.2, §7.8): a `podium sync` target of `kind: marketplace` renders the effective view into a harness-native git-repo distribution and runs an operator-configured `workflow` of shell commands to clone, commit, and push it to a git remote. One repository carries the Claude (Code, Desktop, Cowork), Codex, and Cursor plugin-marketplace manifests at their fixed locations, while Gemini (extension), Pi (package), and Hermes (tap) take their own repository. The `plugins:` list groups artifacts by scope filter, and the publishing `identity:` governs the visibility-filtered effective view that reaches the marketplace. Podium renders to a folder and never holds a git push credential. `podium sync --config` runs the prepare, render, and publish pipeline per target, and `--check` and `--dry-run` write nothing.
+- The `HarnessAdapter` `Source` carries a plugin descriptor, so an adapter can render an artifact into a named plugin (§6.7, §9.1).
+
+### Changed
+
+- **`claude-cowork` is publish-only** (§6.7, §6.7.1): the cowork adapter no longer materializes the plugin-layout artifact types (skill, agent, command, rule, hook, and mcp-server) through `podium sync`; they reach Claude Cowork through a `kind: marketplace` marketplace instead. A `type: context` artifact still materializes to `.podium/context/` under `podium sync`. The §6.7.1 capability cells for `claude-cowork` are regraded to unsupported for the affected rows.
+- `podium sync` enforces the §6.9 untranslatable rule: a target whose harness cannot represent a selected artifact fails rather than silently skipping it, matching `load_artifact`.
+
+### Documentation
+
+- Added a marketplace-publishing guide and a publish-flow diagram, and reframed the harness, CLI, and error-code references onto the `kind: marketplace` sync target.
+
+[0.2.0]: https://github.com/lennylabs/podium/releases/tag/v0.2.0
 
 ## [0.1.6] - 2026-06-17
 
