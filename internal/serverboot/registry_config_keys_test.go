@@ -1,6 +1,8 @@
 package serverboot
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/pkg/embedding"
+	"github.com/lennylabs/podium/pkg/webhook"
 )
 
 // Spec: §13.12 — "Server-side precedence: CLI flag > env var >
@@ -208,5 +211,54 @@ func TestOpenVectorBackend_PineconeResolvesHostFromIndex(t *testing.T) {
 	}
 	if v == nil || v.ID() != "pinecone" {
 		t.Fatalf("backend = %v, want pinecone", v)
+	}
+}
+
+// Spec: §13.12, §7.3.2 — PODIUM_WEBHOOK_ALLOWED_TARGETS populates the
+// receiver-URL SSRF policy with the comma-separated hosts and CIDRs, which
+// the policy then permits in addition to public addresses. The boot wires
+// this policy onto the webhook worker.
+func TestWebhookURLPolicy_AllowedTargetsPopulatesPolicy(t *testing.T) {
+	p, err := webhookURLPolicy("relay.internal, 10.0.0.0/8")
+	if err != nil {
+		t.Fatalf("webhookURLPolicy: %v", err)
+	}
+	if got := p.AllowedTargets(); len(got) != 2 || got[0] != "relay.internal" || got[1] != "10.0.0.0/8" {
+		t.Fatalf("AllowedTargets() = %v, want [relay.internal 10.0.0.0/8]", got)
+	}
+	// The allowlisted bare host short-circuits resolution, so the policy
+	// permits a target that the strict default would reject.
+	if err := p.Validate(context.Background(), "https://relay.internal/ci"); err != nil {
+		t.Errorf("allowlisted host should pass, got %v", err)
+	}
+}
+
+// Spec: §13.12, §7.3.2 — an empty PODIUM_WEBHOOK_ALLOWED_TARGETS leaves
+// the strict default: no allowlist overrides, https required, and private
+// targets rejected.
+func TestWebhookURLPolicy_EmptyKeepsStrictDefault(t *testing.T) {
+	p, err := webhookURLPolicy("")
+	if err != nil {
+		t.Fatalf("webhookURLPolicy: %v", err)
+	}
+	if got := p.AllowedTargets(); len(got) != 0 {
+		t.Fatalf("AllowedTargets() = %v, want empty (strict default)", got)
+	}
+	// A plain-http target fails the scheme check the strict default enforces.
+	if err := p.Validate(context.Background(), "http://hooks.acme.com/ci"); !errors.Is(err, webhook.ErrDisallowedTarget) {
+		t.Errorf("plain http should be rejected by the strict default, got %v", err)
+	}
+	// A private literal target is rejected without an allowlist override.
+	if err := p.Validate(context.Background(), "https://127.0.0.1/ci"); !errors.Is(err, webhook.ErrDisallowedTarget) {
+		t.Errorf("loopback target should be rejected by the strict default, got %v", err)
+	}
+}
+
+// Spec: §13.12 — a malformed PODIUM_WEBHOOK_ALLOWED_TARGETS entry aborts
+// boot rather than silently widening the policy.
+func TestWebhookURLPolicy_MalformedEntryFailsBoot(t *testing.T) {
+	_, err := webhookURLPolicy("relay.internal, 10.0.0.0/bad")
+	if err == nil {
+		t.Fatal("webhookURLPolicy(malformed CIDR) = nil, want a boot error")
 	}
 }

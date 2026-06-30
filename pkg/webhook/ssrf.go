@@ -92,6 +92,27 @@ func NewURLPolicy(allowedTargets []string) (*URLPolicy, error) {
 	return p, nil
 }
 
+// AllowedTargets returns the parsed allowlist entries as their canonical
+// strings: a bare host is returned lowercased, and a CIDR is returned in
+// its normalized network form. The order matches the parse order. Boot
+// logs the result to report the policy it wired, and a caller confirms an
+// empty slice means the strict default (https plus private-target
+// rejection with no overrides).
+func (p *URLPolicy) AllowedTargets() []string {
+	if len(p.allowed) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(p.allowed))
+	for _, e := range p.allowed {
+		if e.cidr != nil {
+			out = append(out, e.cidr.String())
+			continue
+		}
+		out = append(out, e.host)
+	}
+	return out
+}
+
 // parseAllowEntry classifies one allowlist token as a CIDR or a bare
 // host. A token containing "/" is a CIDR and must parse; otherwise it is
 // a bare host and must not be empty or contain a scheme, port, or path,

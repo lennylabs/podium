@@ -190,6 +190,22 @@ func parseDurationList(raw string) []time.Duration {
 	return out
 }
 
+// webhookURLPolicy builds the §7.3.2 receiver-URL SSRF policy from the
+// §13.12 PODIUM_WEBHOOK_ALLOWED_TARGETS env value, a comma-separated list
+// of hosts or CIDRs the policy permits in addition to public addresses.
+// An empty value yields the strict default that requires https and
+// rejects loopback, link-local, and private targets with no allowlist
+// overrides. NewURLPolicy validates every entry, so a malformed allowlist
+// returns an error that aborts startup before any listener binds rather
+// than silently widening the policy.
+func webhookURLPolicy(raw string) (*webhook.URLPolicy, error) {
+	p, err := webhook.NewURLPolicy(splitCSVTrim(raw))
+	if err != nil {
+		return nil, fmt.Errorf("PODIUM_WEBHOOK_ALLOWED_TARGETS: %w", err)
+	}
+	return p, nil
+}
+
 // adaptNotifier turns a notification.Provider into the
 // core.NotificationFunc shape, swallowing errors (the registry
 // keeps running on outage; the audit log records what happened).
@@ -952,6 +968,16 @@ func run(ctx context.Context, stop func()) error {
 	if bo := parseDurationList(os.Getenv("PODIUM_WEBHOOK_RETRY_BACKOFF")); len(bo) > 0 {
 		webhookWorker.Backoff = bo
 		log.Printf("webhook retry backoff: %v", bo)
+	}
+	urlPolicy, err := webhookURLPolicy(os.Getenv("PODIUM_WEBHOOK_ALLOWED_TARGETS"))
+	if err != nil {
+		return err
+	}
+	webhookWorker.URLPolicy = urlPolicy
+	if allowed := urlPolicy.AllowedTargets(); len(allowed) > 0 {
+		log.Printf("webhook SSRF policy: https required, private targets rejected, allowlist %v", allowed)
+	} else {
+		log.Printf("webhook SSRF policy: https required, private targets rejected, no allowlist overrides")
 	}
 
 	bootOpts := bootstrapOptions(cfg, objStore)
