@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/lennylabs/podium/pkg/webhook"
 )
@@ -43,6 +44,40 @@ func TestFileStore_RoundTrip(t *testing.T) {
 	}
 	if len(list) != 1 || list[0].ID != "alpha" {
 		t.Errorf("list = %+v, want [alpha]", list)
+	}
+}
+
+// Spec: §7.3.2 — the per-receiver debounce window round-trips
+// through the JSON file. FileStore serializes the whole Receiver, so
+// Debounce is additive: a debounced receiver written to disk reloads
+// with its window intact.
+func TestFileStore_DebouncePersists(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "webhooks.json")
+	s, err := webhook.LoadFileStore(path)
+	if err != nil {
+		t.Fatalf("LoadFileStore: %v", err)
+	}
+	rec := webhook.Receiver{
+		ID: "ci", TenantID: "default", URL: "https://example/hook",
+		Secret: "shh", EventFilter: []string{"layer.ingested"},
+		Debounce: 90 * time.Second,
+	}
+	if err := s.Put(context.Background(), rec); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	s2, err := webhook.LoadFileStore(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	got, err := s2.Get(context.Background(), "default", "ci")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Debounce != rec.Debounce {
+		t.Errorf("Debounce = %v, want %v", got.Debounce, rec.Debounce)
 	}
 }
 

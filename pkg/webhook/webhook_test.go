@@ -704,3 +704,26 @@ func TestWorker_ContextCancelAbortsRetry(t *testing.T) {
 		t.Fatal("Deliver did not return after ctx cancel")
 	}
 }
+
+// Spec: §7.3.2 — MemoryStore preserves the per-receiver debounce
+// window across Put and Get. The store holds the Receiver by value,
+// so Debounce is additive.
+func TestMemoryStore_DebouncePersists(t *testing.T) {
+	t.Parallel()
+	store := webhook.NewMemoryStore()
+	rec := webhook.Receiver{
+		ID: "ci", TenantID: "t", URL: "https://example/hook", Secret: "k",
+		EventFilter: []string{"layer.ingested"},
+		Debounce:    90 * time.Second,
+	}
+	if err := store.Put(context.Background(), rec); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	got, err := store.Get(context.Background(), "t", "ci")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Debounce != rec.Debounce {
+		t.Errorf("Debounce = %v, want %v", got.Debounce, rec.Debounce)
+	}
+}
