@@ -300,8 +300,8 @@ func (s *serverProc) cliEnv() []string {
 // getMaybeAuth GETs url, attaching the server's minted admin token as a Bearer
 // header when one is set. A server with an identity provider verifies every
 // non-exempt route (§6.3.2), so a read against it must carry a token; a
-// no-identity standalone server has no token and the request is anonymous, which
-// the de facto admin path accepts.
+// no-identity standalone server has no token and the request is anonymous, and
+// /v1/load_artifact is an ungated read route, so the anonymous read is served.
 func (s *serverProc) getMaybeAuth(t testing.TB, url string) (int, []byte) {
 	t.Helper()
 	if s.adminToken == "" {
