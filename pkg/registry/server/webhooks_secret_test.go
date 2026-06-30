@@ -22,7 +22,7 @@ func TestWebhooksList_PostAutoGeneratesSecret(t *testing.T) {
 	t.Cleanup(ts.Close)
 
 	body, _ := json.Marshal(map[string]any{
-		"url":          "http://example/receiver",
+		"url":          "https://example.test/receiver",
 		"event_filter": []string{"artifact.published"},
 	})
 	resp, err := http.Post(ts.URL+"/v1/webhooks", "application/json", strReader(string(body)))

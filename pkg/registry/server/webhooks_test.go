@@ -90,7 +90,7 @@ func TestWebhooks_ListMasksSecret(t *testing.T) {
 	t.Parallel()
 	wstore := webhook.NewMemoryStore()
 	_ = wstore.Put(context.Background(), webhook.Receiver{
-		ID: "wh-1", TenantID: "default", URL: "http://x", Secret: "real-secret",
+		ID: "wh-1", TenantID: "default", URL: "https://example.test/x", Secret: "real-secret",
 	})
 	worker := &webhook.Worker{Store: wstore}
 	_, ts := bootWebhookRegistry(t, server.WithWebhooks(worker))
