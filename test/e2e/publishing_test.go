@@ -765,6 +765,21 @@ func TestPublishing_MalformedConfigExits1(t *testing.T) {
 	}
 }
 
+// `podium publish` is removed: marketplace publishing is a `kind: marketplace`
+// target rendered by `podium sync --config` (§7.5.2, §7.8). The binary no longer
+// registers `publish`, so the top-level dispatch reports it as an unknown command
+// and exits 2.
+func TestPublishing_PublishCommandRemoved(t *testing.T) {
+	t.Parallel()
+	res := runPodium(t, "", nil, "publish")
+	if res.Exit != 2 {
+		t.Fatalf("publish exit=%d, want 2\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "unknown command: publish") {
+		t.Fatalf("publish stderr=%q, want \"unknown command: publish\"", res.Stderr)
+	}
+}
+
 // ---- config + stub helpers --------------------------------------------------
 
 // writeSyncConfigFailingMarketplace writes a sync.yaml whose marketplace target

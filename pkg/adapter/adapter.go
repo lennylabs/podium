@@ -89,8 +89,9 @@ type File struct {
 // mode (podium sync and load_artifact) leaves it at its zero value, which the
 // project-files adapters ignore, so their output is unchanged.
 type PluginDescriptor struct {
-	// Name is the operator-chosen plugin name from publish.yaml. It keys the
-	// per-plugin manifest entry and names the plugin's subtree.
+	// Name is the operator-chosen plugin name from a kind: marketplace target's
+	// plugins: entry in sync.yaml (§7.5.2). It keys the per-plugin manifest entry
+	// and names the plugin's subtree.
 	Name string
 	// Description is an optional human-readable plugin description carried into
 	// the per-plugin manifest. It is empty when the operator omits it.
