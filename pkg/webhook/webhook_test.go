@@ -463,6 +463,175 @@ func TestWorker_DeliverBatchEnvelope(t *testing.T) {
 	}
 }
 
+// Spec: §7.3.2 — Worker.DeliverOne POSTs the single-event body to one
+// windowless receiver, carrying the identical {event, trace_id, timestamp,
+// actor, data} schema Worker.Deliver marshals and no batch keys.
+func TestWorker_DeliverOneSingleEventBody(t *testing.T) {
+	t.Parallel()
+	rs := newReceiverServer(t, "secret-1")
+	recv := webhook.Receiver{ID: "r1", TenantID: "t", URL: rs.srv.URL, Secret: "secret-1"}
+	store := webhook.NewMemoryStore()
+	_ = store.Put(context.Background(), recv)
+	w := &webhook.Worker{Store: store, HTTPClient: rs.srv.Client(), Backoff: []time.Duration{}}
+	actor := map[string]any{"email": "alice@acme.com"}
+	if err := w.DeliverOne(context.Background(), recv, "artifact.published", "trace-abc", actor,
+		map[string]any{"id": "x"}); err != nil {
+		t.Fatalf("DeliverOne: %v", err)
+	}
+	if rs.deliveries.Load() != 1 {
+		t.Fatalf("deliveries = %d, want 1", rs.deliveries.Load())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rs.bodies[0], &body); err != nil {
+		t.Fatalf("body parse: %v", err)
+	}
+	for _, k := range []string{"event", "trace_id", "timestamp", "actor", "data"} {
+		if _, ok := body[k]; !ok {
+			t.Errorf("body missing %q key: %v", k, body)
+		}
+	}
+	if body["event"] != "artifact.published" {
+		t.Errorf("event = %v, want artifact.published", body["event"])
+	}
+	if body["trace_id"] != "trace-abc" {
+		t.Errorf("trace_id = %v, want trace-abc", body["trace_id"])
+	}
+	gotActor, _ := body["actor"].(map[string]any)
+	if gotActor["email"] != "alice@acme.com" {
+		t.Errorf("actor.email = %v, want alice@acme.com", gotActor["email"])
+	}
+	for _, k := range []string{"window", "count", "events"} {
+		if _, ok := body[k]; ok {
+			t.Errorf("single-event body should not carry %q: %v", k, body)
+		}
+	}
+}
+
+// Spec: §7.3.2 — DeliverOne and the tenant-wide Worker.Deliver marshal the
+// byte-identical single-event body for the same receiver and event, so a
+// windowless receiver sees the same body whether it is delivered through the
+// fan-out or the per-receiver path. The clock is pinned so the timestamp is
+// stable across both calls.
+func TestWorker_DeliverOneMatchesDeliverBody(t *testing.T) {
+	t.Parallel()
+	rs := newReceiverServer(t, "secret-1")
+	recv := webhook.Receiver{ID: "r1", TenantID: "t", URL: rs.srv.URL, Secret: "secret-1"}
+	store := webhook.NewMemoryStore()
+	_ = store.Put(context.Background(), recv)
+	fixed := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	w := &webhook.Worker{
+		Store: store, HTTPClient: rs.srv.Client(), Backoff: []time.Duration{},
+		Now: func() time.Time { return fixed },
+	}
+	actor := map[string]any{"email": "bob@acme.com"}
+	data := map[string]any{"id": "finance/run", "version": "1.0.0"}
+	if err := w.Deliver(context.Background(), "t", "artifact.published", "trace-1", actor, data); err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	if err := w.DeliverOne(context.Background(), recv, "artifact.published", "trace-1", actor, data); err != nil {
+		t.Fatalf("DeliverOne: %v", err)
+	}
+	if len(rs.bodies) != 2 {
+		t.Fatalf("bodies = %d, want 2", len(rs.bodies))
+	}
+	if string(rs.bodies[0]) != string(rs.bodies[1]) {
+		t.Errorf("DeliverOne body differs from Deliver body:\n  Deliver:    %s\n  DeliverOne: %s",
+			rs.bodies[0], rs.bodies[1])
+	}
+}
+
+// Spec: §7.3.2 — DeliverOne skips a disabled receiver, so no POST is sent.
+func TestWorker_DeliverOneSkipsDisabled(t *testing.T) {
+	t.Parallel()
+	rs := newReceiverServer(t, "secret-1")
+	store := webhook.NewMemoryStore()
+	w := &webhook.Worker{Store: store, HTTPClient: rs.srv.Client(), Backoff: []time.Duration{}}
+	disabled := webhook.Receiver{ID: "r1", TenantID: "t", URL: rs.srv.URL, Secret: "secret-1", Disabled: true}
+	if err := w.DeliverOne(context.Background(), disabled, "artifact.published", "", nil, nil); err != nil {
+		t.Fatalf("DeliverOne(disabled): %v", err)
+	}
+	if rs.deliveries.Load() != 0 {
+		t.Errorf("deliveries = %d, want 0 (receiver disabled)", rs.deliveries.Load())
+	}
+}
+
+// Spec: §7.3.2 — DeliverOne honors the receiver's EventFilter, so an event the
+// filter rejects sends no POST.
+func TestWorker_DeliverOneHonorsEventFilter(t *testing.T) {
+	t.Parallel()
+	rs := newReceiverServer(t, "secret-1")
+	store := webhook.NewMemoryStore()
+	w := &webhook.Worker{Store: store, HTTPClient: rs.srv.Client(), Backoff: []time.Duration{}}
+	recv := webhook.Receiver{
+		ID: "r1", TenantID: "t", URL: rs.srv.URL, Secret: "secret-1",
+		EventFilter: []string{"artifact.deprecated"},
+	}
+	if err := w.DeliverOne(context.Background(), recv, "artifact.published", "", nil, nil); err != nil {
+		t.Fatalf("DeliverOne: %v", err)
+	}
+	if rs.deliveries.Load() != 0 {
+		t.Errorf("deliveries = %d, want 0 (filter mismatch)", rs.deliveries.Load())
+	}
+}
+
+// Spec: §7.3.2 — DeliverOne shares the single-event failure machinery: a
+// transient 5xx is retried per the backoff schedule, and a delivery that
+// reaches the threshold auto-disables the receiver and records back to the
+// store.
+func TestWorker_DeliverOneRetriesAndAutoDisables(t *testing.T) {
+	t.Parallel()
+	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "always 503", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(dead.Close)
+	recv := webhook.Receiver{ID: "r1", TenantID: "t", URL: dead.URL, Secret: "k", FailureCount: 31}
+	store := webhook.NewMemoryStore()
+	_ = store.Put(context.Background(), recv)
+	w := &webhook.Worker{
+		Store: store, HTTPClient: dead.Client(),
+		MaxFailures: 32, Backoff: []time.Duration{time.Microsecond, time.Microsecond},
+	}
+	if err := w.DeliverOne(context.Background(), recv, "artifact.published", "", nil, nil); err != nil {
+		t.Fatalf("DeliverOne: %v", err)
+	}
+	got, _ := store.Get(context.Background(), "t", "r1")
+	if !got.Disabled {
+		t.Errorf("receiver should auto-disable after a failing delivery reaches the threshold")
+	}
+}
+
+// Spec: §7.3.2 — DeliverOne re-validates the receiver URL against the worker's
+// URLPolicy before each POST, so a target that resolves to a private address
+// after registration is rejected without a POST and records a failure.
+func TestWorker_DeliverOneRevalidatesURLPolicy(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	policy := newPolicy(t)
+	webhook.SetResolver(policy, staticResolver("relay.acme.com", "10.0.0.5"))
+	recv := webhook.Receiver{ID: "r1", TenantID: "t", URL: "https://relay.acme.com/ci", Secret: "k"}
+	store := webhook.NewMemoryStore()
+	_ = store.Put(context.Background(), recv)
+	w := &webhook.Worker{
+		Store: store, HTTPClient: srv.Client(),
+		URLPolicy: policy, Backoff: []time.Duration{time.Microsecond},
+	}
+	if err := w.DeliverOne(context.Background(), recv, "artifact.published", "", nil, nil); err != nil {
+		t.Fatalf("DeliverOne: %v", err)
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("a disallowed target was contacted %d times, want 0", hits.Load())
+	}
+	got, _ := store.Get(context.Background(), "t", "r1")
+	if got.FailureCount == 0 {
+		t.Errorf("a policy rejection at delivery should record a failure")
+	}
+}
+
 // Spec: §7.3.2 — a successful batch delivery resets the receiver's
 // failure counter through the shared recordResult path.
 func TestWorker_DeliverBatchRecordsSuccess(t *testing.T) {
