@@ -81,11 +81,12 @@ func (w *Worker) debounce() *debounceBuffer {
 // deduplicated by (event type, key) and held. On window expiry the buffer
 // delivers the coalesced events through DeliverBatch.
 //
-// A receiver with a zero Debounce has no window; Enqueue delivers the single
-// event through DeliverBatch immediately so the publish path can route every
-// matched delivery for a receiver through one entry point. The caller decides
-// whether to call Enqueue (debounced receiver) or Deliver (per-event
-// fan-out).
+// Enqueue serves only receivers with a window. A receiver with a zero Debounce
+// has no window, and Enqueue is a no-op for it: the publish path routes a
+// windowless receiver through Worker.Deliver, which preserves the unchanged
+// single-event body. The caller selects Deliver (windowless receiver) or
+// Enqueue (debounced receiver) by receiver.Debounce, so the batch body stays
+// additive and scoped to receivers that opt in.
 //
 // data is the event-type-specific payload; the buffer reads the dedup key from
 // it without copying, so the caller must not mutate data after the call.
@@ -93,8 +94,12 @@ func (w *Worker) Enqueue(ctx context.Context, receiver Receiver, eventType, trac
 	w.debounce().enqueue(ctx, receiver, eventType, traceID, actor, data)
 }
 
-func (b *debounceBuffer) enqueue(ctx context.Context, receiver Receiver, eventType, traceID string, actor, data map[string]any) {
-	if receiver.Disabled {
+func (b *debounceBuffer) enqueue(_ context.Context, receiver Receiver, eventType, traceID string, actor, data map[string]any) {
+	if receiver.Disabled || receiver.Debounce <= 0 {
+		// A disabled receiver matches no event, and a windowless receiver
+		// (zero Debounce) is delivered through Worker.Deliver by the publish
+		// path, which preserves the unchanged single-event body. Enqueue opens
+		// no window for either.
 		return
 	}
 	ev := BatchEvent{
@@ -103,12 +108,6 @@ func (b *debounceBuffer) enqueue(ctx context.Context, receiver Receiver, eventTy
 		Timestamp: b.now(),
 		Actor:     actor,
 		Data:      data,
-	}
-	if receiver.Debounce <= 0 {
-		// No window: deliver the single event as a one-element batch
-		// immediately so a non-zero and zero Debounce share the entry point.
-		_ = b.worker.DeliverBatch(ctx, receiver, traceID, ev.Timestamp, []BatchEvent{ev})
-		return
 	}
 	dk := dedupKey{eventType: eventType, key: dedupValue(eventType, data)}
 

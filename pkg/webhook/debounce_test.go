@@ -237,25 +237,25 @@ func TestDebounce_PerReceiverWindows(t *testing.T) {
 	}
 }
 
-// Spec: §7.3.2 — a receiver with a zero Debounce has no window. Enqueue
-// delivers the single event immediately as a one-element batch, so the publish
-// path can route every matched delivery for a receiver through one entry point.
-func TestDebounce_ZeroDebounceDeliversImmediately(t *testing.T) {
+// Spec: §7.3.2 — a receiver with a zero Debounce has no window, and Enqueue is
+// a no-op for it. The publish path routes a windowless receiver through
+// Worker.Deliver, which preserves the unchanged single-event body, so Enqueue
+// opens no window and emits no batch envelope.
+func TestDebounce_ZeroDebounceEnqueueIsNoOp(t *testing.T) {
 	t.Parallel()
 	rs := newReceiverServer(t, "k")
 	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
 	w, rec := debounceWorker(t, rs, now)
 	recv := webhook.Receiver{ID: "r1", TenantID: "t", URL: rs.srv.URL, Secret: "k"}
 	w.Enqueue(context.Background(), recv, "layer.ingested", "tr-1", nil, map[string]any{"layer": "x"})
-	if rs.deliveries.Load() != 1 {
-		t.Fatalf("deliveries = %d, want 1 (zero Debounce delivers immediately)", rs.deliveries.Load())
+	if rs.deliveries.Load() != 0 {
+		t.Fatalf("deliveries = %d, want 0 (Enqueue is a no-op for zero Debounce)", rs.deliveries.Load())
 	}
 	if armed := rec.armed(); len(armed) != 0 {
 		t.Fatalf("armed %d windows, want 0 (no window for zero Debounce)", len(armed))
 	}
-	body := parseBatch(t, rs.bodies[0])
-	if body["count"] != float64(1) {
-		t.Errorf("count = %v, want 1", body["count"])
+	if w.Flush("r1") {
+		t.Fatal("Flush reported an open window for a zero-Debounce receiver, want false")
 	}
 }
 
