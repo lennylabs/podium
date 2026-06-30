@@ -1,7 +1,7 @@
 # Proposal 0004: Webhook Hardening
 
 - Issue: (to be filed)
-- Status: Approved (2026-06-30). Converged after 4 adversarial review rounds (4 findings fixed).
+- Status: Applied to spec (2026-06-30). Converged after 4 adversarial review rounds (4 findings fixed).
 - Date: 2026-06-24
 
 ## Summary

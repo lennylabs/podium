@@ -558,3 +558,11 @@ registry:
 ```
 
 Env vars and CLI flags override file values. Secret values should use `${ENV_VAR}` interpolation rather than being committed in plaintext.
+
+### Webhooks
+
+Server-side controls for the outbound webhook receivers (§7.3.2).
+
+| Var | Description | Default |
+| --- | --- | --- |
+| `PODIUM_WEBHOOK_ALLOWED_TARGETS` | Comma-separated allowlist of hosts or CIDRs that the receiver-URL SSRF policy permits in addition to public addresses. | (empty) |
