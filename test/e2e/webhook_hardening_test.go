@@ -25,12 +25,13 @@ import (
 
 // webhookHardeningServer boots an admin-gated webhook server with no seed
 // registry, returning the server and the runtime private key so a test mints
-// both the admin and a non-admin token. allowedHosts populates
-// PODIUM_WEBHOOK_ALLOWED_TARGETS so a loopback or otherwise-blocked receiver
-// passes the SSRF policy; an empty list leaves the strict default in effect.
-func webhookHardeningServer(t *testing.T, allowedHosts ...string) (*serverProc, *rsa.PrivateKey) {
+// both the admin and a non-admin token. The boot options populate
+// PODIUM_WEBHOOK_ALLOWED_TARGETS (withAllowedHost / withSink) and the TLS sink
+// trust (withSink) so an otherwise-blocked internal receiver passes the SSRF
+// policy; no options leaves the strict default in effect.
+func webhookHardeningServer(t *testing.T, opts ...bootOption) (*serverProc, *rsa.PrivateKey) {
 	t.Helper()
-	return bootWebhookAdminServer(t, "", 0, allowedHosts...)
+	return bootWebhookAdminServer(t, "", opts...)
 }
 
 // Spec: §7.3.2 — receiver CRUD is gated on the per-tenant admin role. A verified
@@ -39,10 +40,11 @@ func webhookHardeningServer(t *testing.T, allowedHosts ...string) (*serverProc, 
 // register a receiver.
 func TestWebhookHardening_AdminGate(t *testing.T) {
 	t.Parallel()
-	// Allowlist the receiver host so the admin's create passes the SSRF policy
-	// without a DNS lookup; the gate, not the SSRF check, is under test here.
+	// Allowlist the receiver host so the admin's create passes the SSRF address
+	// check without a DNS lookup; the gate, rather than the SSRF check, is under
+	// test here. The host's https URL satisfies the scheme requirement.
 	const receiverHost = "receiver.acme.com"
-	srv, priv := webhookHardeningServer(t, receiverHost)
+	srv, priv := webhookHardeningServer(t, withAllowedHost(receiverHost))
 	carolToken := injSignJWT(t, priv, injClaims("carol@acme.com")) // verified non-admin
 
 	body, _ := json.Marshal(map[string]any{"url": "https://" + receiverHost + "/hook"})
@@ -120,12 +122,14 @@ func TestWebhookHardening_SSRFRejectsAtRegistration(t *testing.T) {
 // reingest fires.
 func TestWebhookHardening_AllowlistPermitsInternalTarget(t *testing.T) {
 	t.Parallel()
+	requireSubprocessTLSTrust(t)
 	const secret = "wh-allowlist-secret"
-	sink := newNotificationSink(t, withSinkSecret(secret))
+	sink := newNotificationSink(t, withSinkTLS(), withSinkSecret(secret))
 
-	// Without the allowlist the loopback target is rejected; with it the
-	// registration succeeds and the worker delivers to it.
-	srv, _ := webhookHardeningServer(t, sinkHost(t, sink.URL()))
+	// Without the allowlist the loopback address is rejected; with it the
+	// registration succeeds (https satisfied by the TLS sink) and the worker
+	// delivers to the loopback target.
+	srv, _ := webhookHardeningServer(t, withSink(t, sink))
 	registerWebhook(t, srv, sink.URL(), secret, "artifact.published")
 
 	rl := newRepublishLayer(t, srv, "allowlist-layer")
@@ -155,10 +159,11 @@ func TestWebhookHardening_AllowlistPermitsInternalTarget(t *testing.T) {
 // deterministic without racing the trailing timer.
 func TestWebhookHardening_DebouncedBurstBatches(t *testing.T) {
 	t.Parallel()
+	requireSubprocessTLSTrust(t)
 	const secret = "wh-debounce-secret"
-	sink := newNotificationSink(t, withSinkSecret(secret))
+	sink := newNotificationSink(t, withSinkTLS(), withSinkSecret(secret))
 
-	srv, _ := webhookHardeningServer(t, sinkHost(t, sink.URL()))
+	srv, _ := webhookHardeningServer(t, withSink(t, sink))
 	// A 3s window outlasts the single synchronous reingest below, so every
 	// artifact.published in the burst lands in one window and one batch delivers
 	// when the trailing timer expires.

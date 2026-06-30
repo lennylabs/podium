@@ -146,30 +146,26 @@ func TestURLPolicy_AllowlistHostOverrides(t *testing.T) {
 	}
 }
 
-// Spec: §7.3.2 — an allowlisted host is exempt from the default policy,
-// including the https requirement, because the operator has explicitly opted
-// that host out. An in-cluster relay reached over plain http inside a trusted
-// network is the case this serves, so an allowlisted host on an http URL passes
-// while a non-allowlisted http host is still rejected.
-func TestURLPolicy_AllowlistHostBypassesScheme(t *testing.T) {
+// Spec: §7.3.2 — the allowlist overrides only the loopback/link-local/private
+// address rejection, not the https requirement. An allowlisted host on a plain
+// http URL is still rejected on the scheme, and the same host over https
+// passes.
+func TestURLPolicy_AllowlistDoesNotWaiveHTTPS(t *testing.T) {
 	t.Parallel()
 	p := newPolicy(t, "relay.internal", "127.0.0.1")
-	// An allowlisted DNS host over plain http passes.
-	if err := p.Validate(context.Background(), "http://relay.internal:8080/ci"); err != nil {
-		t.Fatalf("allowlisted http host should pass, got %v", err)
-	}
-	// An allowlisted IP literal (a loopback) over plain http passes; this is the
-	// loopback httptest receiver the standalone e2e webhook tests deliver to.
-	if err := p.Validate(context.Background(), "http://127.0.0.1:9000/hook"); err != nil {
-		t.Fatalf("allowlisted loopback http literal should pass, got %v", err)
-	}
-	// A host that is NOT allowlisted is still rejected over plain http.
-	err := p.Validate(context.Background(), "http://hooks.acme.com/ci")
+	// An allowlisted host over plain http is rejected: the allowlist overrides
+	// the address rejection, never the https requirement.
+	err := p.Validate(context.Background(), "http://relay.internal:8080/ci")
 	if !errors.Is(err, webhook.ErrDisallowedTarget) {
-		t.Fatalf("non-allowlisted http host should be rejected, got %v", err)
+		t.Fatalf("allowlisted http host should be rejected on scheme, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "https") {
 		t.Fatalf("rejection should name the scheme requirement, got %q", err)
+	}
+	// The same allowlisted host over https passes without a DNS lookup, because
+	// the bare-host allowlist entry short-circuits address resolution.
+	if err := p.Validate(context.Background(), "https://relay.internal:8080/ci"); err != nil {
+		t.Fatalf("allowlisted https host should pass, got %v", err)
 	}
 }
 

@@ -56,11 +56,12 @@ func publishProbe(t *testing.T, srv *serverProc, layerID, version string) *repub
 // the §7.3.2 body schema.
 func TestNotificationSink_WebhookDeliversSignedEvent(t *testing.T) {
 	t.Parallel()
+	requireSubprocessTLSTrust(t)
 	const secret = "wh-secret-signed"
-	sink := newNotificationSink(t, withSinkSecret(secret))
+	sink := newNotificationSink(t, withSinkTLS(), withSinkSecret(secret))
 	srv := startWebhookAdminServer(t, writeRegistry(t, map[string]string{
 		"seed/ARTIFACT.md": smallteamLowArtifact("seed"),
-	}), 0, sinkHost(t, sink.URL()))
+	}), withSink(t, sink))
 	registerWebhook(t, srv, sink.URL(), secret, "artifact.published")
 
 	publishProbe(t, srv, "notify-layer", "1.0.0")
@@ -98,15 +99,16 @@ func TestNotificationSink_WebhookDeliversSignedEvent(t *testing.T) {
 // nothing, while an all-events receiver on the same server sees the reingest.
 func TestNotificationSink_FilterOmitsNonMatchingEvents(t *testing.T) {
 	t.Parallel()
+	requireSubprocessTLSTrust(t)
 	// One receiver filtered to layer.history_rewritten, which a clean local-source
 	// reingest never fires; one receiver with no filter (all events).
 	const filteredSecret = "wh-secret-filtered"
 	const allSecret = "wh-secret-all"
-	filtered := newNotificationSink(t, withSinkSecret(filteredSecret))
-	all := newNotificationSink(t, withSinkSecret(allSecret))
+	filtered := newNotificationSink(t, withSinkTLS(), withSinkSecret(filteredSecret))
+	all := newNotificationSink(t, withSinkTLS(), withSinkSecret(allSecret))
 	srv := startWebhookAdminServer(t, writeRegistry(t, map[string]string{
 		"seed/ARTIFACT.md": smallteamLowArtifact("seed"),
-	}), 0, sinkHost(t, filtered.URL()), sinkHost(t, all.URL()))
+	}), withSink(t, filtered), withSink(t, all))
 	registerWebhook(t, srv, filtered.URL(), filteredSecret, "layer.history_rewritten")
 	registerWebhook(t, srv, all.URL(), allSecret) // no filter
 
@@ -135,11 +137,12 @@ func TestNotificationSink_FilterOmitsNonMatchingEvents(t *testing.T) {
 // reingest, so two reingests are exactly two consecutive failures.
 func TestNotificationSink_AutoDisablesAfterMaxFailures(t *testing.T) {
 	t.Parallel()
+	requireSubprocessTLSTrust(t)
 	const secret = "wh-secret-autodisable"
-	sink := newNotificationSink(t, withSinkSecret(secret), withSinkFailEvery())
+	sink := newNotificationSink(t, withSinkTLS(), withSinkSecret(secret), withSinkFailEvery())
 	srv := startWebhookAdminServer(t, writeRegistry(t, map[string]string{
 		"seed/ARTIFACT.md": smallteamLowArtifact("seed"),
-	}), 2, sinkHost(t, sink.URL()))
+	}), withMaxFailures(2), withSink(t, sink))
 	rec := registerWebhook(t, srv, sink.URL(), secret, "layer.ingested")
 
 	rl := publishProbe(t, srv, "autodisable-layer", "1.0.0")

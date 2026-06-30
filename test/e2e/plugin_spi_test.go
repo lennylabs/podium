@@ -656,11 +656,12 @@ func TestPluginSPI_WebhookDomainPublished(t *testing.T) {
 // reingest fires, with a verifying HMAC signature and the §7.3.2 body schema.
 func TestPluginSPI_WebhookLayerIngested(t *testing.T) {
 	t.Parallel()
+	requireSubprocessTLSTrust(t)
 	const secret = "spi-layer-ingested-secret"
-	sink := newNotificationSink(t, withSinkSecret(secret))
+	sink := newNotificationSink(t, withSinkTLS(), withSinkSecret(secret))
 	srv := startWebhookAdminServer(t, writeRegistry(t, map[string]string{
 		"seed/ARTIFACT.md": smallteamLowArtifact("seed"),
-	}), 0, sinkHost(t, sink.URL()))
+	}), withSink(t, sink))
 	registerWebhook(t, srv, sink.URL(), secret, "layer.ingested")
 
 	publishProbe(t, srv, "spi-ingested-layer", "1.0.0")
@@ -688,14 +689,15 @@ func TestPluginSPI_WebhookLayerIngested(t *testing.T) {
 // isolates the §7.3.2 event filter from "no delivery happened at all."
 func TestPluginSPI_WebhookNonMatchingFilter(t *testing.T) {
 	t.Parallel()
+	requireSubprocessTLSTrust(t)
 	// layer.history_rewritten is never fired by a clean local-source reingest.
 	const filteredSecret = "spi-filter-none-secret"
 	const allSecret = "spi-filter-all-secret"
-	filtered := newNotificationSink(t, withSinkSecret(filteredSecret))
-	all := newNotificationSink(t, withSinkSecret(allSecret))
+	filtered := newNotificationSink(t, withSinkTLS(), withSinkSecret(filteredSecret))
+	all := newNotificationSink(t, withSinkTLS(), withSinkSecret(allSecret))
 	srv := startWebhookAdminServer(t, writeRegistry(t, map[string]string{
 		"seed/ARTIFACT.md": smallteamLowArtifact("seed"),
-	}), 0, sinkHost(t, filtered.URL()), sinkHost(t, all.URL()))
+	}), withSink(t, filtered), withSink(t, all))
 	registerWebhook(t, srv, filtered.URL(), filteredSecret, "layer.history_rewritten")
 	registerWebhook(t, srv, all.URL(), allSecret) // no filter: all events
 
@@ -720,11 +722,12 @@ func TestPluginSPI_WebhookNonMatchingFilter(t *testing.T) {
 // failures and reach the cap of 2.
 func TestPluginSPI_WebhookAutoDisable(t *testing.T) {
 	t.Parallel()
+	requireSubprocessTLSTrust(t)
 	const secret = "spi-autodisable-secret"
-	sink := newNotificationSink(t, withSinkSecret(secret), withSinkFailEvery())
+	sink := newNotificationSink(t, withSinkTLS(), withSinkSecret(secret), withSinkFailEvery())
 	srv := startWebhookAdminServer(t, writeRegistry(t, map[string]string{
 		"seed/ARTIFACT.md": smallteamLowArtifact("seed"),
-	}), 2, sinkHost(t, sink.URL()))
+	}), withMaxFailures(2), withSink(t, sink))
 	rec := registerWebhook(t, srv, sink.URL(), secret, "layer.ingested")
 
 	rl := publishProbe(t, srv, "spi-autodisable-layer", "1.0.0")
