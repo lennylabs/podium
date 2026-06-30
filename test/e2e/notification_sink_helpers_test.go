@@ -240,8 +240,10 @@ type webhookReceiver struct {
 // url, with the supplied HMAC secret and event filter (empty filter = all
 // events). Supplying the secret (rather than letting the server generate one)
 // lets a notificationSink verify the delivery signature against the same value.
-// A standalone server resolves the anonymous caller to the de facto admin, so
-// the create is accepted with no token.
+// Receiver CRUD is admin-gated (§7.3.2): the callers that drive it run against a
+// server whose caller holds the admin role. The standalone de facto admin
+// bypass for the webhook route is restored in the serverboot step, so the
+// callers of this helper are skipped until then.
 func registerWebhook(t testing.TB, srv *serverProc, url, secret string, eventFilter ...string) webhookReceiver {
 	t.Helper()
 	req := map[string]any{"url": url}

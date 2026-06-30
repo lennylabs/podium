@@ -21,7 +21,7 @@ func setupWebhook(t *testing.T, id string) (*server.Server, string, func()) {
 		EventFilter: []string{"artifact.published"},
 	})
 	worker := &webhook.Worker{Store: wstore, HTTPClient: http.DefaultClient}
-	srv, ts := bootRegistry(t, server.WithWebhooks(worker))
+	srv, ts := bootWebhookRegistry(t, server.WithWebhooks(worker))
 	return srv, ts.URL, ts.Close
 }
 
