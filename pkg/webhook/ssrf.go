@@ -134,11 +134,14 @@ func parseAllowEntry(entry string) (allowEntry, error) {
 	return allowEntry{host: strings.ToLower(entry)}, nil
 }
 
-// Validate reports whether rawURL is an allowed delivery target. It
-// requires the https scheme, resolves the host, and rejects the URL when
-// any resolved address falls in a loopback, link-local, or private
-// range, unless the host or one of its addresses matches an allowlist
-// entry. A rejection is a *DisallowedTargetError wrapping
+// Validate reports whether rawURL is an allowed delivery target. By
+// default it requires the https scheme, resolves the host, and rejects
+// the URL when any resolved address falls in a loopback, link-local, or
+// private range. A host on the allowlist is exempt from the default
+// policy: the operator has explicitly opted that host out, so it is
+// permitted without resolving it and without the https requirement, which
+// is what an in-cluster relay reached over plain http inside a trusted
+// network needs. A rejection is a *DisallowedTargetError wrapping
 // ErrDisallowedTarget. Registration and delivery both call Validate so
 // the two agree.
 func (p *URLPolicy) Validate(ctx context.Context, rawURL string) error {
@@ -146,20 +149,25 @@ func (p *URLPolicy) Validate(ctx context.Context, rawURL string) error {
 	if err != nil {
 		return &DisallowedTargetError{Reason: fmt.Sprintf("malformed URL: %v", err)}
 	}
+	host := u.Hostname()
+
+	// A host on the allowlist is permitted without resolving it. The check
+	// runs before the scheme requirement so an explicitly allowlisted
+	// internal target reached over plain http is permitted; the default
+	// policy (https plus private-range rejection) applies only to hosts the
+	// operator did not allowlist.
+	if host != "" && p.hostAllowed(host) {
+		return nil
+	}
+
 	if u.Scheme != "https" {
 		return &DisallowedTargetError{
-			Host:   u.Hostname(),
+			Host:   host,
 			Reason: fmt.Sprintf("scheme %q is not https", u.Scheme),
 		}
 	}
-	host := u.Hostname()
 	if host == "" {
 		return &DisallowedTargetError{Reason: "URL has no host"}
-	}
-
-	// A host on the allowlist is permitted without resolving it.
-	if p.hostAllowed(host) {
-		return nil
 	}
 
 	ips, err := p.resolve(ctx, host)

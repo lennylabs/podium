@@ -655,13 +655,12 @@ func TestPluginSPI_WebhookDomainPublished(t *testing.T) {
 // A §7.3.2 receiver filtered to layer.ingested records the event a runtime
 // reingest fires, with a verifying HMAC signature and the §7.3.2 body schema.
 func TestPluginSPI_WebhookLayerIngested(t *testing.T) {
-	t.Skip("§7.3.2 receiver CRUD is now admin-gated; the standalone de facto admin bypass for the webhook route is wired in the serverboot step. Re-enable once the standalone webhook CRUD posture is restored.")
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{
-		"seed/ARTIFACT.md": smallteamLowArtifact("seed"),
-	}))
 	const secret = "spi-layer-ingested-secret"
 	sink := newNotificationSink(t, withSinkSecret(secret))
+	srv := startWebhookAdminServer(t, writeRegistry(t, map[string]string{
+		"seed/ARTIFACT.md": smallteamLowArtifact("seed"),
+	}), 0, sinkHost(t, sink.URL()))
 	registerWebhook(t, srv, sink.URL(), secret, "layer.ingested")
 
 	publishProbe(t, srv, "spi-ingested-layer", "1.0.0")
@@ -688,16 +687,15 @@ func TestPluginSPI_WebhookLayerIngested(t *testing.T) {
 // server records the reingest (via the sink). This
 // isolates the §7.3.2 event filter from "no delivery happened at all."
 func TestPluginSPI_WebhookNonMatchingFilter(t *testing.T) {
-	t.Skip("§7.3.2 receiver CRUD is now admin-gated; the standalone de facto admin bypass for the webhook route is wired in the serverboot step. Re-enable once the standalone webhook CRUD posture is restored.")
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{
-		"seed/ARTIFACT.md": smallteamLowArtifact("seed"),
-	}))
 	// layer.history_rewritten is never fired by a clean local-source reingest.
 	const filteredSecret = "spi-filter-none-secret"
 	const allSecret = "spi-filter-all-secret"
 	filtered := newNotificationSink(t, withSinkSecret(filteredSecret))
 	all := newNotificationSink(t, withSinkSecret(allSecret))
+	srv := startWebhookAdminServer(t, writeRegistry(t, map[string]string{
+		"seed/ARTIFACT.md": smallteamLowArtifact("seed"),
+	}), 0, sinkHost(t, filtered.URL()), sinkHost(t, all.URL()))
 	registerWebhook(t, srv, filtered.URL(), filteredSecret, "layer.history_rewritten")
 	registerWebhook(t, srv, all.URL(), allSecret) // no filter: all events
 
@@ -721,13 +719,12 @@ func TestPluginSPI_WebhookNonMatchingFilter(t *testing.T) {
 // exactly one delivery fire per reingest, so two reingests are two consecutive
 // failures and reach the cap of 2.
 func TestPluginSPI_WebhookAutoDisable(t *testing.T) {
-	t.Skip("§7.3.2 receiver CRUD is now admin-gated; the standalone de facto admin bypass for the webhook route is wired in the serverboot step. Re-enable once the standalone webhook CRUD posture is restored.")
 	t.Parallel()
-	srv := startServerWebhooks(t, writeRegistry(t, map[string]string{
-		"seed/ARTIFACT.md": smallteamLowArtifact("seed"),
-	}), 2)
 	const secret = "spi-autodisable-secret"
 	sink := newNotificationSink(t, withSinkSecret(secret), withSinkFailEvery())
+	srv := startWebhookAdminServer(t, writeRegistry(t, map[string]string{
+		"seed/ARTIFACT.md": smallteamLowArtifact("seed"),
+	}), 2, sinkHost(t, sink.URL()))
 	rec := registerWebhook(t, srv, sink.URL(), secret, "layer.ingested")
 
 	rl := publishProbe(t, srv, "spi-autodisable-layer", "1.0.0")

@@ -273,11 +273,53 @@ type serverProc struct {
 	Home    string
 	logPath string
 	cmd     *exec.Cmd
+	// adminToken is a minted admin Bearer token for the server, set by the
+	// webhook-admin boot helpers so the admin-gated receiver CRUD helpers can
+	// authenticate. Empty when the server boots without an identity provider.
+	adminToken string
 }
 
 func (s *serverProc) log() string {
 	b, _ := os.ReadFile(s.logPath)
 	return string(b)
+}
+
+// cliEnv returns the env a CLI subprocess needs to authenticate against this
+// server. When the server boots an identity provider and the helper minted an
+// admin token, the CLI attaches it through PODIUM_SESSION_TOKEN (the §6.3.2
+// injected session token the CLI reads in readCLIToken) so admin-gated commands
+// such as layer register and reingest authenticate as the admin. A server with
+// no minted token returns nil so the anonymous standalone path is unchanged.
+func (s *serverProc) cliEnv() []string {
+	if s.adminToken == "" {
+		return nil
+	}
+	return []string{"PODIUM_SESSION_TOKEN=" + s.adminToken}
+}
+
+// getMaybeAuth GETs url, attaching the server's minted admin token as a Bearer
+// header when one is set. A server with an identity provider verifies every
+// non-exempt route (§6.3.2), so a read against it must carry a token; a
+// no-identity standalone server has no token and the request is anonymous, which
+// the de facto admin path accepts.
+func (s *serverProc) getMaybeAuth(t testing.TB, url string) (int, []byte) {
+	t.Helper()
+	if s.adminToken == "" {
+		return getRaw(t, url)
+	}
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("build request %s: %v", url, err)
+	}
+	req.Header.Set("Authorization", "Bearer "+s.adminToken)
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+	body := new(bytes.Buffer)
+	_, _ = body.ReadFrom(resp.Body)
+	return resp.StatusCode, body.Bytes()
 }
 
 func freePort(t testing.TB) int {

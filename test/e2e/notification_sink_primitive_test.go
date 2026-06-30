@@ -55,13 +55,12 @@ func publishProbe(t *testing.T, srv *serverProc, layerID, version string) *repub
 // registry event produces a delivered, signature-valid notification carrying
 // the §7.3.2 body schema.
 func TestNotificationSink_WebhookDeliversSignedEvent(t *testing.T) {
-	t.Skip("§7.3.2 receiver CRUD is now admin-gated; the standalone de facto admin bypass for the webhook route is wired in the serverboot step. Re-enable once the standalone webhook CRUD posture is restored.")
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{
-		"seed/ARTIFACT.md": smallteamLowArtifact("seed"),
-	}))
 	const secret = "wh-secret-signed"
 	sink := newNotificationSink(t, withSinkSecret(secret))
+	srv := startWebhookAdminServer(t, writeRegistry(t, map[string]string{
+		"seed/ARTIFACT.md": smallteamLowArtifact("seed"),
+	}), 0, sinkHost(t, sink.URL()))
 	registerWebhook(t, srv, sink.URL(), secret, "artifact.published")
 
 	publishProbe(t, srv, "notify-layer", "1.0.0")
@@ -98,17 +97,16 @@ func TestNotificationSink_WebhookDeliversSignedEvent(t *testing.T) {
 // filter: a receiver filtered to an event type the reingest never emits sees
 // nothing, while an all-events receiver on the same server sees the reingest.
 func TestNotificationSink_FilterOmitsNonMatchingEvents(t *testing.T) {
-	t.Skip("§7.3.2 receiver CRUD is now admin-gated; the standalone de facto admin bypass for the webhook route is wired in the serverboot step. Re-enable once the standalone webhook CRUD posture is restored.")
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{
-		"seed/ARTIFACT.md": smallteamLowArtifact("seed"),
-	}))
 	// One receiver filtered to layer.history_rewritten, which a clean local-source
 	// reingest never fires; one receiver with no filter (all events).
 	const filteredSecret = "wh-secret-filtered"
 	const allSecret = "wh-secret-all"
 	filtered := newNotificationSink(t, withSinkSecret(filteredSecret))
 	all := newNotificationSink(t, withSinkSecret(allSecret))
+	srv := startWebhookAdminServer(t, writeRegistry(t, map[string]string{
+		"seed/ARTIFACT.md": smallteamLowArtifact("seed"),
+	}), 0, sinkHost(t, filtered.URL()), sinkHost(t, all.URL()))
 	registerWebhook(t, srv, filtered.URL(), filteredSecret, "layer.history_rewritten")
 	registerWebhook(t, srv, all.URL(), allSecret) // no filter
 
@@ -136,13 +134,12 @@ func TestNotificationSink_FilterOmitsNonMatchingEvents(t *testing.T) {
 // failures. Filtering to layer.ingested makes exactly one delivery fire per
 // reingest, so two reingests are exactly two consecutive failures.
 func TestNotificationSink_AutoDisablesAfterMaxFailures(t *testing.T) {
-	t.Skip("§7.3.2 receiver CRUD is now admin-gated; the standalone de facto admin bypass for the webhook route is wired in the serverboot step. Re-enable once the standalone webhook CRUD posture is restored.")
 	t.Parallel()
-	srv := startServerWebhooks(t, writeRegistry(t, map[string]string{
-		"seed/ARTIFACT.md": smallteamLowArtifact("seed"),
-	}), 2)
 	const secret = "wh-secret-autodisable"
 	sink := newNotificationSink(t, withSinkSecret(secret), withSinkFailEvery())
+	srv := startWebhookAdminServer(t, writeRegistry(t, map[string]string{
+		"seed/ARTIFACT.md": smallteamLowArtifact("seed"),
+	}), 2, sinkHost(t, sink.URL()))
 	rec := registerWebhook(t, srv, sink.URL(), secret, "layer.ingested")
 
 	rl := publishProbe(t, srv, "autodisable-layer", "1.0.0")

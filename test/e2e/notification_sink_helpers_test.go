@@ -19,11 +19,15 @@ package e2e
 // records deliveries, optionally verifies X-Podium-Signature against a
 // configured secret, and can be told to fail every delivery (for the
 // auto-disable path) or to fail a fixed number of times then recover (for the
-// retry path). registerWebhook / getWebhook drive the §7.3.2 receiver CRUD
-// over the standalone HTTP surface. startServerWebhooks boots the standalone
-// server with the PODIUM_WEBHOOK_MAX_FAILURES override (the new operator
-// tunable) so a low threshold makes auto-disable reachable. sseClient opens a
-// bounded read of /v1/events, filters heartbeats, and yields decoded events.
+// retry path). registerWebhook / getWebhook drive the §7.3.2 receiver CRUD over
+// the standalone HTTP surface; the CRUD is admin-gated, so they carry the
+// minted admin Bearer token the boot helper sets on the serverProc.
+// startWebhookAdminServer boots the standalone server with the
+// injected-session-token identity provider, a bootstrap admin grant, the
+// PODIUM_WEBHOOK_MAX_FAILURES override so a low threshold makes auto-disable
+// reachable, and the PODIUM_WEBHOOK_ALLOWED_TARGETS allowlist so the loopback
+// httptest sink passes the SSRF policy. sseClient opens a bounded read of
+// /v1/events, filters heartbeats, and yields decoded events.
 //
 // This lifts the receiverServer recorder from pkg/webhook/webhook_test.go and
 // the extWebhookHarness capture channel from plugin_spi_test.go into one
@@ -43,10 +47,14 @@ package e2e
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"crypto/rsa"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -193,32 +201,101 @@ func (s *notificationSink) firstMatching(eventType string) (recordedDelivery, bo
 	return recordedDelivery{}, false
 }
 
-// ---- standalone server with the §7.3.2 MaxFailures override ----------------
+// ---- admin-gated standalone server for the §7.3.2 receiver CRUD ------------
 
-// startServerWebhooks boots a standalone server over the given filesystem
-// registry with the §7.3.2 auto-disable threshold set to maxFailures (0 leaves
-// the worker default of 32) and a fast retry backoff so an induced delivery
-// failure is recorded promptly rather than after the full default schedule
-// (1s..60s). The outbound webhook worker and the /v1/events change stream are
-// always mounted; this only tunes the failure cap and retry cadence so the
-// auto-disable path is reachable in a bounded test.
-func startServerWebhooks(t testing.TB, registry string, maxFailures int) *serverProc {
+// sinkHost returns the bare host of a notificationSink URL, which is the value
+// PODIUM_WEBHOOK_ALLOWED_TARGETS needs to permit the loopback receiver. httptest
+// binds 127.0.0.1, which the default SSRF policy rejects, so the boot helpers
+// pass the sink hosts as an allowlist override.
+func sinkHost(t testing.TB, rawURL string) string {
 	t.Helper()
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatalf("parse sink URL %q: %v", rawURL, err)
+	}
+	return u.Hostname()
+}
+
+// startWebhookAdminServer boots a standalone server whose §7.3.2 receiver CRUD
+// is reachable by a minted admin Bearer token. The receiver CRUD is admin-gated
+// (s.requireAdmin -> core.AdminAuthorize), so the server boots with the
+// injected-session-token identity provider, a bootstrap admin grant for
+// alice@acme.com, and the runtime signing key registered, then mints an admin
+// token onto the returned serverProc. The SSRF policy rejects the loopback
+// httptest sinks by default, so allowedHosts (the sink hosts) populate
+// PODIUM_WEBHOOK_ALLOWED_TARGETS to permit them. maxFailures (0 leaves the
+// worker default of 32) tunes the auto-disable cap, and a 1ms retry backoff
+// records an induced failure promptly so the auto-disable path is reachable in a
+// bounded test.
+func startWebhookAdminServer(t *testing.T, registry string, maxFailures int, allowedHosts ...string) *serverProc {
+	t.Helper()
+	srv, _ := bootWebhookAdminServer(t, registry, maxFailures, allowedHosts...)
+	return srv
+}
+
+// bootWebhookAdminServer is the shared core: it boots an admin-gated webhook
+// server and returns the running server plus the runtime private key so a caller
+// that needs to mint a second (non-admin) token has the key. startWebhookAdminServer
+// is the common form that discards the key.
+func bootWebhookAdminServer(t *testing.T, registry string, maxFailures int, allowedHosts ...string) (*serverProc, *rsa.PrivateKey) {
+	t.Helper()
+	priv, pemPath := injKeyPair(t)
 	env := []string{
 		"HOME=" + t.TempDir(),
-		// A single 1ms retry: a 5xx delivery fails over once and records the
-		// failure immediately, so the consecutive-failure counter advances per
-		// event without waiting on the production backoff.
-		"PODIUM_WEBHOOK_RETRY_BACKOFF=1ms",
+		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
+		"PODIUM_OAUTH_AUDIENCE=" + injAudience,
+		"PODIUM_BOOTSTRAP_ADMINS=alice@acme.com",
+		// An admin-defined layer (the republish helpers register one with the
+		// admin token) defaults to private; make it public so the admin's
+		// authenticated load_artifact poll in waitForVersion resolves. Webhook
+		// delivery fires on ingest independent of read visibility.
+		"PODIUM_DEFAULT_LAYER_VISIBILITY=public",
 	}
 	if maxFailures > 0 {
 		env = append(env, "PODIUM_WEBHOOK_MAX_FAILURES="+strconv.Itoa(maxFailures))
+		// A single 1ms retry: a 5xx delivery fails over once and records the
+		// failure immediately, so the consecutive-failure counter advances per
+		// event without waiting on the production backoff. The fast backoff is
+		// only meaningful when the auto-disable cap is exercised.
+		env = append(env, "PODIUM_WEBHOOK_RETRY_BACKOFF=1ms")
+	}
+	if hosts := dedupeHosts(allowedHosts); len(hosts) > 0 {
+		env = append(env, "PODIUM_WEBHOOK_ALLOWED_TARGETS="+joinComma(hosts))
 	}
 	args := []string{"serve", "--standalone"}
 	if registry != "" {
 		args = append(args, "--layer-path", registry)
 	}
-	return startServerArgs(t, env, args...)
+	srv := startServerArgs(t, env, args...)
+	injRegisterRuntime(t, srv, pemPath)
+	srv.adminToken = injSignJWT(t, priv, injClaims("alice@acme.com"))
+	return srv, priv
+}
+
+// dedupeHosts drops empty and duplicate allowlist hosts, preserving order.
+func dedupeHosts(in []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, h := range in {
+		if h != "" && !seen[h] {
+			seen[h] = true
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// joinComma joins the allowlist hosts into the comma-separated form
+// PODIUM_WEBHOOK_ALLOWED_TARGETS expects.
+func joinComma(parts []string) string {
+	out := ""
+	for i, p := range parts {
+		if i > 0 {
+			out += ","
+		}
+		out += p
+	}
+	return out
 }
 
 // webhookReceiver is the §7.3.2 receiver record the CRUD surface returns. The
@@ -236,14 +313,44 @@ type webhookReceiver struct {
 	FailureCount int      `json:"FailureCount"`
 }
 
+// webhookBearer issues an HTTP request to the running server's webhook CRUD
+// surface with the server's minted admin token and an optional JSON body,
+// returning the status and body. The receiver CRUD is admin-gated (§7.3.2), so
+// the helpers below send Authorization: Bearer <admin token> rather than the
+// header-less postJSON/getJSON, mirroring rbacBearer in auth_admin_rbac_test.go.
+func webhookBearer(t testing.TB, method, url, token string, body []byte) (int, []byte) {
+	t.Helper()
+	var reqBody io.Reader
+	if body != nil {
+		reqBody = bytes.NewReader(body)
+	}
+	req, err := http.NewRequest(method, url, reqBody)
+	if err != nil {
+		t.Fatalf("build request %s %s: %v", method, url, err)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, url, err)
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, out
+}
+
 // registerWebhook creates a §7.3.2 receiver over POST /v1/webhooks pointing at
 // url, with the supplied HMAC secret and event filter (empty filter = all
 // events). Supplying the secret (rather than letting the server generate one)
 // lets a notificationSink verify the delivery signature against the same value.
-// Receiver CRUD is admin-gated (§7.3.2): the callers that drive it run against a
-// server whose caller holds the admin role. The standalone de facto admin
-// bypass for the webhook route is restored in the serverboot step, so the
-// callers of this helper are skipped until then.
+// Receiver CRUD is admin-gated (§7.3.2), so the request carries the server's
+// minted admin Bearer token (srv.adminToken, set by startWebhookAdminServer);
+// the boot helper allowlists the loopback sink host so the SSRF policy permits
+// the httptest target.
 func registerWebhook(t testing.TB, srv *serverProc, url, secret string, eventFilter ...string) webhookReceiver {
 	t.Helper()
 	req := map[string]any{"url": url}
@@ -253,7 +360,8 @@ func registerWebhook(t testing.TB, srv *serverProc, url, secret string, eventFil
 	if len(eventFilter) > 0 {
 		req["event_filter"] = eventFilter
 	}
-	st, body := postJSON(t, srv.BaseURL+"/v1/webhooks", req)
+	b, _ := json.Marshal(req)
+	st, body := webhookBearer(t, http.MethodPost, srv.BaseURL+"/v1/webhooks", srv.adminToken, b)
 	if st != http.StatusCreated {
 		t.Fatalf("POST /v1/webhooks = HTTP %d, want 201\nbody: %s", st, body)
 	}
@@ -267,13 +375,48 @@ func registerWebhook(t testing.TB, srv *serverProc, url, secret string, eventFil
 	return rec
 }
 
+// registerWebhookDebounced creates a §7.3.2 receiver with a debounce window so a
+// burst of matched events coalesces into one batch delivery. It mirrors
+// registerWebhook and adds the debounce field, carrying the same admin Bearer
+// token.
+func registerWebhookDebounced(t testing.TB, srv *serverProc, url, secret, debounce string, eventFilter ...string) webhookReceiver {
+	t.Helper()
+	req := map[string]any{"url": url, "debounce": debounce}
+	if secret != "" {
+		req["secret"] = secret
+	}
+	if len(eventFilter) > 0 {
+		req["event_filter"] = eventFilter
+	}
+	b, _ := json.Marshal(req)
+	st, body := webhookBearer(t, http.MethodPost, srv.BaseURL+"/v1/webhooks", srv.adminToken, b)
+	if st != http.StatusCreated {
+		t.Fatalf("POST /v1/webhooks (debounced) = HTTP %d, want 201\nbody: %s", st, body)
+	}
+	var rec webhookReceiver
+	if err := json.Unmarshal(body, &rec); err != nil {
+		t.Fatalf("decode webhook create response: %v\nbody: %s", err, body)
+	}
+	if rec.ID == "" {
+		t.Fatalf("webhook create returned empty id: %s", body)
+	}
+	return rec
+}
+
 // getWebhook reads the current §7.3.2 receiver record over GET
 // /v1/webhooks/{id}. The returned Disabled and FailureCount reflect the
-// worker's persisted delivery state, so a test can assert auto-disable.
+// worker's persisted delivery state, so a test can assert auto-disable. The
+// read endpoint is admin-gated, so the request carries srv.adminToken.
 func getWebhook(t testing.TB, srv *serverProc, id string) webhookReceiver {
 	t.Helper()
+	st, body := webhookBearer(t, http.MethodGet, srv.BaseURL+"/v1/webhooks/"+id, srv.adminToken, nil)
+	if st != http.StatusOK {
+		t.Fatalf("GET /v1/webhooks/%s = HTTP %d, want 200\nbody: %s", id, st, body)
+	}
 	var rec webhookReceiver
-	getJSON(t, srv.BaseURL+"/v1/webhooks/"+id, &rec)
+	if err := json.Unmarshal(body, &rec); err != nil {
+		t.Fatalf("decode webhook get response: %v\nbody: %s", err, body)
+	}
 	return rec
 }
 
