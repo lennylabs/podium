@@ -228,7 +228,7 @@ podium sync [--registry <url-or-path>] [--target <path>] [--harness <name>]
 | `--exclude <pattern>` | Glob to exclude. Applied after include. Repeatable. |
 | `--type <t1,t2,...>` | Restrict to a comma-separated list of artifact types. |
 | `--overlay <path>` | Workspace overlay path watched alongside the registry. |
-| `--watch` | Long-running. Re-materialize on registry change events or fsnotify in filesystem mode. |
+| `--watch` | Long-running. Re-materialize on registry change events or fsnotify in filesystem mode. A `--config` run that includes a `kind: marketplace` target rejects `--watch` with `config.invalid`. |
 | `--dry-run` | Print the resolved set; write nothing. |
 | `--preview` | Print the scope-preview aggregate counts and exit; write nothing. |
 | `--check` | Validate the merged `sync.yaml` and report warnings (unresolved profiles, malformed globs, target/profile collisions). |

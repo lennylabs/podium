@@ -678,6 +678,40 @@ func TestPublishing_NonPublishHarnessRejected(t *testing.T) {
 	}
 }
 
+// A kind: marketplace target run under --watch is rejected at config validation
+// with config.invalid and exit 2 (§7.5.2, §7.5.4). The --watch flag is parsed on
+// the --config path and threaded into the plan, so the rejection surfaces through
+// the binary rather than the flag being silently dropped. The remote is never
+// touched.
+func TestPublishing_WatchRejectedOnMarketplaceTarget(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+	reg := writePublishRegistry(t)
+	remote := bareRemote(t)
+	base := remoteCommitCount(t, remote)
+	ws := t.TempDir()
+	cfg := writeSyncConfigMarketplace(t, ws, reg, remote, "claude-code")
+
+	res := runPodium(t, "", gitEnv(), "sync", "--config", cfg, "--watch")
+	if res.Exit != 2 {
+		t.Fatalf("sync --config --watch (marketplace) exit=%d, want 2\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "config.invalid") {
+		t.Errorf("stderr missing 'config.invalid':\n%s", res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "watch") {
+		t.Errorf("stderr missing 'watch' (the rejected mode):\n%s", res.Stderr)
+	}
+	// The rejection fires before any target renders, so the marketplace working
+	// directory is never created and the remote is unchanged.
+	if _, err := os.Stat(filepath.Join(ws, "build", "acme-agents")); !os.IsNotExist(err) {
+		t.Errorf("--watch rejection rendered the marketplace target dir (stat err=%v)", err)
+	}
+	if n := remoteCommitCount(t, remote); n != base {
+		t.Errorf("--watch rejection pushed to the remote: commit count = %d, want %d (unchanged)", n, base)
+	}
+}
+
 // A workflow command that exits non-zero is a runtime failure: the pipeline
 // fails fast and the multi-target sync exits 1 (not 2, which is reserved for
 // config errors). This drives a live marketplace render against the filesystem

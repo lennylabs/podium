@@ -225,9 +225,11 @@ func syncCmd(args []string) int {
 	}
 
 	// §7.5.2 multi-target: --config iterates a targets: list, one sync each. A
-	// --check --config run validates every target and materializes none.
+	// --check --config run validates every target and materializes none. --watch
+	// is threaded through so PlanMultiTarget rejects a kind: marketplace target
+	// under watch mode (§7.5.4).
 	if *configPath != "" {
-		return runMultiTargetSync(*configPath, *registry, *dryRun, *check, *asJSON)
+		return runMultiTargetSync(*configPath, *registry, *dryRun, *check, *watch, *asJSON)
 	}
 
 	// §7.5.2 resolution: merge the three sync.yaml scopes by per-key
@@ -421,7 +423,12 @@ func runWatchLoop(opts sync.Options, overlay string, asJSON bool) int {
 // set (validating the resolved output and returning before the prepare clone or
 // the render). Neither runs its workflow under check, so a --check --config run
 // validates every target and writes neither the target tree nor its sync.lock.
-func runMultiTargetSync(configPath, registryOverride string, dryRun, check, asJSON bool) int {
+//
+// watch is threaded into PlanInput so a kind: marketplace target under --watch is
+// rejected with config.invalid before any target renders (§7.5.2, §7.5.4). The
+// multi-target path itself runs one sync per target rather than a watch loop, so
+// a watch over a workspace-only config is a single pass.
+func runMultiTargetSync(configPath, registryOverride string, dryRun, check, watch, asJSON bool) int {
 	cfg, err := sync.ReadConfigFile(configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -435,6 +442,7 @@ func runMultiTargetSync(configPath, registryOverride string, dryRun, check, asJS
 	plans, err := sync.PlanMultiTarget(cfg, sync.PlanInput{
 		RegistryOverride: registryOverride,
 		Workspace:        workspace,
+		Watch:            watch,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
