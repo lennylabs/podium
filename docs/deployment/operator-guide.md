@@ -137,6 +137,18 @@ Audit events for state transitions (`registry.read_only_entered`, `registry.read
 
 ---
 
+## Outbound webhook receivers
+
+The registry emits outbound webhooks for change events to receivers an admin registers per tenant through the receiver CRUD endpoints (`/v1/webhooks`). The registry originates the delivery request, so a receiver URL is an outbound target the registry reaches on a caller's behalf. Two operational settings govern this.
+
+**Receiver URL policy (SSRF).** The registry validates a receiver URL at registration and re-checks it at delivery. By default it requires the `https` scheme and rejects a URL that resolves to a loopback, link-local, or private address (for example `127.0.0.0/8`, `::1`, `169.254.0.0/16`, and the RFC 1918 ranges), and it does not follow a redirect to such a target. A rejected target returns `registry.invalid_argument` naming the disallowed host. This prevents a caller who can register a receiver from pointing the registry at an internal endpoint it would not otherwise reach.
+
+**`PODIUM_WEBHOOK_ALLOWED_TARGETS`.** A deployment whose receiver is legitimately internal, such as an in-cluster relay, sets this comma-separated allowlist of hosts or CIDRs that the policy permits in addition to public addresses. An entry is either a bare host matched against the URL host or a CIDR matched against the resolved addresses. The variable is empty by default, which keeps the strict policy. A malformed entry aborts boot, so the registry fails closed rather than silently widening the policy. The startup log reports the wired allowlist.
+
+**Receiver registration on standalone and no-auth deployments.** The receiver CRUD endpoints require the per-tenant admin role and return `auth.forbidden` for a non-admin caller, the same authorization posture as the admin-grant endpoints. On a standalone or no-auth bind, anonymous receiver registration is no longer open: it requires an admin grant plus a token. Grant the role with `POST /v1/admin/grants` before a caller registers a receiver on such a deployment.
+
+---
+
 ## Security review checklist
 
 Walk through these before launching to a tenant that handles sensitive content.
@@ -149,6 +161,7 @@ Walk through these before launching to a tenant that handles sensitive content.
 | Sensitivity enforcement | `PODIUM_VERIFY_SIGNATURES` is `medium-and-above` (or stricter). Test that a tampered artifact fails materialization with `materialize.signature_invalid`. |
 | Audit hash chain | Run `podium admin verify --check audit-chain` weekly via cron. Detect gaps automatically. |
 | Webhook signing | Git provider webhook HMAC secret is unique per layer. Test with an invalid signature; expect `ingest.webhook_invalid`. |
+| Outbound receiver URL policy | Receiver CRUD is admin-gated. `PODIUM_WEBHOOK_ALLOWED_TARGETS` lists only the internal receivers a deployment intends. Test by registering an `http` or private-address receiver; expect `registry.invalid_argument`. |
 | Sandbox profile honoring | The hosts in production honor `sandbox_profile` for non-`unrestricted` artifacts. Test with a `read-only-fs` artifact and confirm the host enforces. |
 | Object-storage credentials | IAM roles or short-lived credentials, never static keys. Bucket policy denies public access. |
 | Backup encryption | Postgres backups + S3 object versioning encrypted at rest. PITR window matches your RTO. |

@@ -59,7 +59,7 @@ Codes map to MCP error payloads per the MCP spec for harnesses that consume Podi
 | `auth.untrusted_token` | A gateway-forwarded `oidc-jwt` token failed signature, `iss`, or `aud` validation against the configured issuer JWKS. `details.token_iss` carries the rejected token's issuer. |
 | `auth.tenant_unknown` | A verified `oidc-jwt` token's `org_id` names no provisioned tenant on a multi-tenant registry. `details.token_org_id` carries the unresolved organization. |
 | `auth.token_expired` | The OAuth access token (or injected/forwarded JWT) has passed its `exp`. The MCP server triggers refresh on `oauth-device-code`; the runtime refreshes on `injected-session-token`; the gateway forwards a new token on `oidc-jwt`. |
-| `auth.forbidden` | An admin-only operation attempted by a non-admin caller. |
+| `auth.forbidden` | An admin-only operation attempted by a non-admin caller, including a receiver CRUD call (`/v1/webhooks`) by a caller without the per-tenant admin role. |
 
 ### config.*
 
@@ -136,7 +136,7 @@ Codes map to MCP error payloads per the MCP spec for harnesses that consume Podi
 |:--|:--|
 | `registry.read_only` | Postgres primary unreachable; the registry has fallen back to read-only mode. Write endpoints (ingest, layer admin, freeze toggles, admin grants, tenant management) are rejected. Read endpoints continue to serve from the replica. |
 | `registry.tenant_management_unavailable` | A `/v1/admin/tenants` request (or a `podium admin tenant` command) reached a single-tenant or standalone registry, where multi-tenancy is out of scope. Start the registry in multi-tenant mode with `PODIUM_MULTI_TENANT` on a standard backend to manage tenants. |
-| `registry.invalid_argument` | A request argument failed validation (e.g., `top_k > 50`). Both the SDK (client-side) and the registry (server-side) enforce. |
+| `registry.invalid_argument` | A request argument failed validation (e.g., `top_k > 50`, or an outbound webhook receiver URL that is non-`https` or resolves to a loopback, link-local, or private target outside `PODIUM_WEBHOOK_ALLOWED_TARGETS`). Both the SDK (client-side) and the registry (server-side) enforce. |
 
 ### visibility.*
 
