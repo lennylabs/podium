@@ -6,7 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-[Unreleased]: https://github.com/lennylabs/podium/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/lennylabs/podium/compare/v0.2.1...HEAD
+
+## [0.2.1] - 2026-06-30
+
+Webhook hardening: the outbound webhook receiver endpoints are admin-gated, receiver URLs are validated against an SSRF policy, and a receiver can coalesce a burst of events into one batched delivery.
+
+### Added
+
+- **Receiver SSRF policy** (§7.3.2): the registry validates a webhook receiver URL at registration and re-checks it at delivery. By default it requires the `https` scheme and rejects a URL that resolves to a loopback, link-local, or private address, and it does not follow a redirect to such a target. `PODIUM_WEBHOOK_ALLOWED_TARGETS` (§13.12) allowlists hosts or CIDRs for a legitimately-internal receiver and overrides the address rejection, not the `https` requirement. A rejected target returns `registry.invalid_argument` naming the disallowed host.
+- **Per-receiver debounce window** (§7.3.2): a receiver with `debounce` set coalesces the events it matches in a trailing window into one batch delivery, deduplicated by event type and key, sent with the same retry, backoff, concurrency limit, and HMAC signing as a single-event delivery. The batch envelope is additive; the single-event body is unchanged for a receiver without a window.
+
+### Changed
+
+- **Receiver authorization** (§7.3.2): the `/v1/webhooks` receiver CRUD endpoints (`GET`, `POST`, `PUT`, and `DELETE`) require the per-tenant admin role and return `auth.forbidden` for a non-admin caller, alongside the existing read-only rejection for the mutating methods. This closes the gap where any authenticated caller, or an unauthenticated standalone bind, could register a receiver and point the registry at an internal endpoint.
+
+[0.2.1]: https://github.com/lennylabs/podium/releases/tag/v0.2.1
 
 ## [0.2.0] - 2026-06-29
 
