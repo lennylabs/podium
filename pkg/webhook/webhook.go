@@ -169,15 +169,20 @@ func (w *Worker) checkRedirect() func(*http.Request, []*http.Request) error {
 }
 
 // Deliver fans the event out to every matching receiver in tenantID.
-// Returns once every receiver has either acknowledged (2xx) or
+// Returns once every windowless receiver has either acknowledged (2xx) or
 // exhausted its retry budget; failures don't abort the fan-out.
 //
-// The marshaled body carries the full §7.3.2 schema
-// {event, trace_id, timestamp, actor, data}. actor is always emitted
-// as an object (an empty object when no caller is resolved) so the
-// wire schema stays stable for receivers that key on it.
+// Deliver routes each matching, non-disabled receiver by its Debounce.
+// A receiver with a zero Debounce takes the immediate single-event path:
+// Deliver POSTs the §7.3.2 single-event body {event, trace_id, timestamp,
+// actor, data}, where actor is always emitted as an object (an empty object
+// when no caller is resolved) so the wire schema stays stable for receivers
+// that key on it. A receiver with a non-zero Debounce is enqueued into its
+// trailing window instead of receiving an immediate POST; the window coalesces
+// the burst and delivers one batch through DeliverBatch on expiry, so Deliver
+// keeps a debounced receiver out of the single-event fan-out.
 //
-// Receivers that exceed MaxFailures consecutive failures are
+// Windowless receivers that exceed MaxFailures consecutive failures are
 // auto-disabled and recorded back to the store with Disabled=true.
 // Concurrent deliveries are bounded by MaxConcurrent, and the
 // per-receiver failure-counter update is serialized so two events
@@ -205,6 +210,12 @@ func (w *Worker) Deliver(ctx context.Context, tenantID, eventType, traceID strin
 		if r.Disabled || !r.Matches(eventType) {
 			continue
 		}
+		if r.Debounce > 0 {
+			// A debounced receiver opens a trailing window instead of taking
+			// the immediate POST, so a burst yields exactly one batch (§7.3.2).
+			w.Enqueue(ctx, r, eventType, traceID, actor, body)
+			continue
+		}
 		r := r
 		wg.Add(1)
 		go func() {
@@ -217,49 +228,6 @@ func (w *Worker) Deliver(ctx context.Context, tenantID, eventType, traceID strin
 		}()
 	}
 	wg.Wait()
-	return nil
-}
-
-// DeliverOne POSTs the single-event body to one windowless receiver
-// (§7.3.2). It is the per-receiver counterpart to Worker.Deliver's tenant-wide
-// fan-out: the publish path routes each receiver by its Debounce, sending a
-// receiver with a zero Debounce through DeliverOne and a receiver with a
-// non-zero Debounce through Enqueue. Routing per receiver keeps a debounced
-// receiver out of the immediate single-event delivery, so a debounced burst
-// yields exactly one batch and never a single-event POST.
-//
-// DeliverOne builds the same singleEventBody Worker.Deliver marshals, so a
-// windowless receiver sees the identical body whether it is the only receiver
-// or one of many. It reuses the semaphore, deliverWithRetry, recordResult, and
-// postOnce, so the single-event delivery inherits the same retry, backoff,
-// MaxConcurrent bound, failure counter, SSRF re-check, and HMAC signing as the
-// fan-out and the batch path, mirroring DeliverBatch.
-//
-// A disabled receiver is skipped, and a receiver whose EventFilter rejects
-// eventType is skipped, so the caller may route every receiver through
-// DeliverOne without pre-filtering, the same way Worker.Deliver filters inside
-// the fan-out.
-func (w *Worker) DeliverOne(ctx context.Context, receiver Receiver, eventType, traceID string, actor, data map[string]any) error {
-	if receiver.Disabled || !receiver.Matches(eventType) {
-		return nil
-	}
-	maxFailures := w.MaxFailures
-	if maxFailures == 0 {
-		maxFailures = 32
-	}
-	now := w.Now
-	if now == nil {
-		now = time.Now
-	}
-	payload, err := json.Marshal(singleEventBody(eventType, traceID, now().UTC(), actor, data))
-	if err != nil {
-		return fmt.Errorf("webhook.DeliverOne: marshal: %w", err)
-	}
-	sem := w.semaphore()
-	sem <- struct{}{}
-	deliverErr := w.deliverWithRetry(ctx, receiver, payload)
-	<-sem
-	w.recordResult(ctx, receiver.TenantID, receiver, deliverErr, now, maxFailures)
 	return nil
 }
 

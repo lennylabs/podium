@@ -198,13 +198,15 @@ func (s *Server) PublishEvent(ctx context.Context, eventType string, data map[st
 	actor := actorFromMeta(meta, ok)
 	if s.webhooks != nil {
 		// Fire outbound deliveries asynchronously so a slow receiver
-		// never blocks the publisher. Route per receiver by Debounce:
-		// a windowless receiver (zero Debounce) takes the immediate
-		// single-event path, and a debounced receiver enqueues into its
-		// trailing window for one batch delivery (§7.3.2). Routing per
-		// receiver keeps a debounced receiver out of the single-event
-		// delivery so a burst yields exactly one batch.
-		go s.fanOutWebhooks(eventType, traceID, actor, data)
+		// never blocks the publisher. Worker.Deliver fans the event out
+		// to every matching receiver in the tenant, delivering the
+		// single-event body to a windowless receiver and routing a
+		// debounced receiver into its trailing window for one batch
+		// delivery (§7.3.2). A background context detaches the delivery
+		// from the request's cancellation.
+		go func() {
+			_ = s.webhooks.Deliver(context.Background(), s.tenant, eventType, traceID, actor, data)
+		}()
 	}
 	s.events.publish(registryEvent{
 		Event:     eventType,
@@ -213,49 +215,6 @@ func (s *Server) PublishEvent(ctx context.Context, eventType string, data map[st
 		Actor:     actor,
 		Data:      data,
 	})
-}
-
-// fanOutWebhooks routes one published event to every matching, non-disabled
-// receiver in the tenant by its debounce window (§7.3.2). It lists the
-// receivers once, then for each one sends a windowless receiver (zero Debounce)
-// through the worker's single-event path and a debounced receiver (non-zero
-// Debounce) through its trailing window. The single-event path and the window
-// each re-apply the receiver's event filter, so this routing does not
-// pre-filter. On a list error it falls back to skipping outbound delivery for
-// this event so a transient store failure never blocks the bus publish.
-//
-// Each windowless delivery runs in its own goroutine, bounded by the worker's
-// MaxConcurrent semaphore inside DeliverOne, so a slow receiver does not delay
-// another receiver's delivery for the same event. Enqueue holds the buffer lock
-// only to extend the window and returns immediately, so a debounced receiver is
-// routed inline.
-//
-// fanOutWebhooks runs on its own goroutine off PublishEvent and uses a
-// background context so a slow receiver never blocks the publisher or rides the
-// request's cancellation.
-func (s *Server) fanOutWebhooks(eventType, traceID string, actor, data map[string]any) {
-	ctx := context.Background()
-	receivers, err := s.webhooks.Store.List(ctx, s.tenant)
-	if err != nil {
-		return
-	}
-	var wg sync.WaitGroup
-	for _, r := range receivers {
-		if r.Disabled || !r.Matches(eventType) {
-			continue
-		}
-		if r.Debounce > 0 {
-			s.webhooks.Enqueue(ctx, r, eventType, traceID, actor, data)
-			continue
-		}
-		r := r
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			_ = s.webhooks.DeliverOne(ctx, r, eventType, traceID, actor, data)
-		}()
-	}
-	wg.Wait()
 }
 
 // actorFromMeta renders the §7.3.2 webhook `actor` object from the
