@@ -259,6 +259,53 @@ func TestDebounce_ZeroDebounceEnqueueIsNoOp(t *testing.T) {
 	}
 }
 
+// Spec: §7.3.2 — the window applies only to event types the receiver matches
+// through its EventFilter. Enqueue owns the Matches check symmetrically with
+// Worker.Deliver, so an event type the filter rejects opens no window and is
+// held in no batch. A matched event type for the same receiver still opens a
+// window and delivers.
+func TestDebounce_SkipsNonMatchingEventType(t *testing.T) {
+	t.Parallel()
+	rs := newReceiverServer(t, "k")
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	w, rec := debounceWorker(t, rs, now)
+	recv := webhook.Receiver{
+		ID: "r1", TenantID: "t", URL: rs.srv.URL, Secret: "k",
+		EventFilter: []string{"layer.ingested"}, Debounce: time.Second,
+	}
+	ctx := context.Background()
+	// An event type outside the receiver's EventFilter opens no window.
+	w.Enqueue(ctx, recv, "artifact.published", "tr-1", nil, map[string]any{"id": "finance/run"})
+	if armed := rec.armed(); len(armed) != 0 {
+		t.Fatalf("armed %d windows, want 0 (non-matching event type opens none)", len(armed))
+	}
+	if w.Flush("r1") {
+		t.Fatal("Flush reported an open window for a non-matching event type, want false")
+	}
+	if rs.deliveries.Load() != 0 {
+		t.Fatalf("deliveries = %d, want 0 (non-matching event type held in no batch)", rs.deliveries.Load())
+	}
+
+	// A matched event type for the same receiver still opens a window and the
+	// non-matching event does not leak into its batch.
+	w.Enqueue(ctx, recv, "layer.ingested", "tr-2", nil, map[string]any{"layer": "team-shared"})
+	if armed := rec.armed(); len(armed) != 1 {
+		t.Fatalf("armed %d windows, want 1 (matched event opens one)", len(armed))
+	}
+	if !w.Flush("r1") {
+		t.Fatal("Flush reported no open window for a matched event type, want true")
+	}
+	body := parseBatch(t, rs.bodies[0])
+	if body["count"] != float64(1) {
+		t.Fatalf("count = %v, want 1 (only the matched event)", body["count"])
+	}
+	events, _ := body["events"].([]any)
+	first, _ := events[0].(map[string]any)
+	if first["event"] != "layer.ingested" {
+		t.Errorf("events[0].event = %v, want layer.ingested (non-matching event excluded)", first["event"])
+	}
+}
+
 // Spec: §7.3.2 — Enqueue drops an event for a disabled receiver and opens no
 // window, mirroring the single-event fan-out that skips disabled receivers.
 func TestDebounce_SkipsDisabledReceiver(t *testing.T) {

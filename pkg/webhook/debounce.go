@@ -88,6 +88,13 @@ func (w *Worker) debounce() *debounceBuffer {
 // Enqueue (debounced receiver) by receiver.Debounce, so the batch body stays
 // additive and scoped to receivers that opt in.
 //
+// Enqueue owns the receiver.Matches(eventType) filter the same way
+// Worker.Deliver owns it inside the fan-out: the window applies only to the
+// event types the receiver matches through its EventFilter (§7.3.2). An event
+// the filter rejects opens no window and is held in no batch, so the publish
+// path may call Enqueue for every event without pre-filtering, mirroring the
+// windowless path where the caller does not pre-filter either.
+//
 // data is the event-type-specific payload; the buffer reads the dedup key from
 // it without copying, so the caller must not mutate data after the call.
 func (w *Worker) Enqueue(ctx context.Context, receiver Receiver, eventType, traceID string, actor, data map[string]any) {
@@ -95,11 +102,15 @@ func (w *Worker) Enqueue(ctx context.Context, receiver Receiver, eventType, trac
 }
 
 func (b *debounceBuffer) enqueue(_ context.Context, receiver Receiver, eventType, traceID string, actor, data map[string]any) {
-	if receiver.Disabled || receiver.Debounce <= 0 {
+	if receiver.Disabled || receiver.Debounce <= 0 || !receiver.Matches(eventType) {
 		// A disabled receiver matches no event, and a windowless receiver
 		// (zero Debounce) is delivered through Worker.Deliver by the publish
-		// path, which preserves the unchanged single-event body. Enqueue opens
-		// no window for either.
+		// path, which preserves the unchanged single-event body. An event the
+		// receiver's EventFilter rejects is held by neither path: Worker.Deliver
+		// skips it inside the fan-out (webhook.go), and the debounce window
+		// applies only to event types the receiver matches through its filter
+		// (§7.3.2), so enqueue owns the Matches check symmetrically. Enqueue
+		// opens no window in any of these cases.
 		return
 	}
 	ev := BatchEvent{
