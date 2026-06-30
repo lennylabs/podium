@@ -81,6 +81,50 @@ func TestWorker_DeliversWithHMACSignature(t *testing.T) {
 	}
 }
 
+// spec: §7.3.2 — the worker's default delivery client does not follow a
+// redirect, so a receiver that 30x-redirects to an internal target
+// cannot bypass the registration-time SSRF check. With no injected
+// HTTPClient the worker builds its own client with CheckRedirect set to
+// NoRedirect; the 30x response then reads as a non-retryable failure and
+// the redirect target is never contacted.
+func TestWorker_DoesNotFollowRedirect(t *testing.T) {
+	t.Parallel()
+	var internalHits atomic.Int64
+	internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		internalHits.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(internal.Close)
+
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Redirect(w, &http.Request{}, internal.URL, http.StatusFound)
+	}))
+	t.Cleanup(redirector.Close)
+
+	store := webhook.NewMemoryStore()
+	_ = store.Put(context.Background(), webhook.Receiver{
+		ID: "r1", TenantID: "t", URL: redirector.URL, Secret: "secret-1",
+	})
+	// No HTTPClient: the worker builds its default client with NoRedirect.
+	w := &webhook.Worker{Store: store, Backoff: []time.Duration{}}
+	if err := w.Deliver(context.Background(), "t", "artifact.published", "", nil,
+		map[string]any{"id": "x"}); err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	if internalHits.Load() != 0 {
+		t.Fatalf("redirect target was contacted %d times, want 0", internalHits.Load())
+	}
+	// The redirect counts as a failure, so the receiver's failure counter
+	// advances rather than resetting on a 2xx.
+	got, err := store.Get(context.Background(), "t", "r1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.FailureCount == 0 {
+		t.Fatalf("a non-followed redirect should record a delivery failure")
+	}
+}
+
 // spec: §7.3.2 — the delivered body carries the full
 // {event, trace_id, timestamp, actor, data} schema. trace_id and actor
 // are threaded from the publisher; actor is always an object so the

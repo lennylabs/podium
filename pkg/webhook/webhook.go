@@ -255,7 +255,10 @@ func (w *Worker) postOnce(ctx context.Context, r Receiver, payload []byte) error
 
 	client := w.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		// Disable redirect following so a receiver that 30x-redirects to
+		// an internal target cannot bypass the registration-time SSRF
+		// check (§7.3.2).
+		client = &http.Client{Timeout: 30 * time.Second, CheckRedirect: NoRedirect}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
