@@ -103,3 +103,18 @@ func TestKeychainStore_DeleteMissingIsNil(t *testing.T) {
 		t.Errorf("Delete of a missing entry = %v, want nil", err)
 	}
 }
+
+func TestKeychainStore_ChunkSaveErrorSurfaces(t *testing.T) {
+	keyring.MockInitWithError(errors.New("backend unavailable"))
+	t.Cleanup(keyring.MockInit)
+	k := KeychainStore{Service: "podium-test"}
+	if err := k.Save("big", strings.Repeat("r", 2*keychainChunkSize)); err == nil {
+		t.Errorf("Save with a failing backend succeeded, want error")
+	}
+	if err := k.Save("small", "tok"); err == nil {
+		t.Errorf("small Save with a failing backend succeeded, want error")
+	}
+	if _, err := k.Load("big"); err == nil {
+		t.Errorf("Load with a failing backend succeeded, want error")
+	}
+}
