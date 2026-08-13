@@ -74,11 +74,17 @@ func pluginJSON(p PluginDescriptor) []byte {
 }
 
 // marketplaceEntryFragment builds the OpMergeJSON fragment that adds one plugin
-// to a root marketplace manifest. The marketplace `name` scalar is idempotent
-// across fragments, and the single plugin entry is tagged Podium-owned on the
-// plugin name so a re-render reconciles the listing (stale plugins drop out).
-// The plugin `source` is the project-relative plugin subtree the manifest
-// references. description carries the plugin description when set.
+// to a root marketplace manifest. The marketplace `name` and `owner` scalars
+// are idempotent across fragments, and the single plugin entry is tagged
+// Podium-owned on the plugin name so a re-render reconciles the listing (stale
+// plugins drop out). The plugin `source` is the project-relative plugin
+// subtree the manifest references. description carries the plugin description
+// when set.
+//
+// The Claude Code marketplace schema requires `owner.name` at the root;
+// Claude Desktop refuses to import a marketplace without it. The marketplace
+// name is emitted as the owner name, which keeps the manifest valid without
+// further configuration.
 func marketplaceEntryFragment(marketplaceName string, p PluginDescriptor) []byte {
 	entry := map[string]any{
 		"name":         p.Name,
@@ -90,6 +96,7 @@ func marketplaceEntryFragment(marketplaceName string, p PluginDescriptor) []byte
 	}
 	frag := map[string]any{
 		"name":    marketplaceName,
+		"owner":   map[string]any{"name": marketplaceName},
 		"plugins": []any{entry},
 	}
 	b, _ := json.Marshal(frag)
