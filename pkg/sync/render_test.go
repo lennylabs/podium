@@ -296,6 +296,50 @@ func TestRender_PluginDescriptionPropagates(t *testing.T) {
 	}
 }
 
+// Spec: §7.8 / issue #58 — the merged root manifest carries the owner the
+// harness format requires. The Claude and Cursor marketplace schemas require
+// `owner.name`, and Claude Desktop refuses to import a marketplace without it.
+// The Codex format documents no root owner, so its manifest carries none.
+//
+// The assertion runs on the merged file rather than on one emitter fragment,
+// because the failure #58 reported is a property of the merged document: the
+// render contributes one fragment per plugin, and the owner must converge to a
+// single object naming the marketplace rather than accumulating or flipping.
+func TestRender_MarketplaceOwnerPerHarnessSchema(t *testing.T) {
+	t.Parallel()
+	reg := renderFixtureRegistry(t)
+	workdir := t.TempDir()
+
+	// financePlugins() renders two plugins, so each root manifest folds two
+	// fragments and the owner has to reconcile across them.
+	if _, err := Render(context.Background(), renderOpts(t, reg, workdir, []string{"claude-code", "codex", "cursor"})); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	for _, tc := range []struct {
+		harness  string
+		manifest string
+	}{
+		{"claude", filepath.Join(".claude-plugin", "marketplace.json")},
+		{"cursor", filepath.Join(".cursor-plugin", "marketplace.json")},
+	} {
+		manifest := readJSONObject(t, filepath.Join(workdir, tc.manifest))
+		owner, ok := manifest["owner"].(map[string]any)
+		if !ok {
+			t.Errorf("%s marketplace.json owner = %v, want an object carrying the schema-required name", tc.harness, manifest["owner"])
+			continue
+		}
+		if owner["name"] != "acme-agents" {
+			t.Errorf("%s marketplace.json owner.name = %v, want the output ID acme-agents", tc.harness, owner["name"])
+		}
+	}
+
+	codex := readJSONObject(t, filepath.Join(workdir, ".agents", "plugins", "marketplace.json"))
+	if owner, ok := codex["owner"]; ok {
+		t.Errorf("codex marketplace.json must carry no root owner (undocumented in the Codex format), got %v", owner)
+	}
+}
+
 // readJSONObject reads a JSON file and decodes it into a generic map so a test
 // can assert presence and absence of optional keys.
 func readJSONObject(t *testing.T, path string) map[string]any {

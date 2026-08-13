@@ -6,32 +6,59 @@ import (
 	"testing"
 )
 
-// Spec: §7.8 / issue #58 — the Claude Code marketplace schema requires
-// `name`, `owner`, and `plugins` at the root, with `owner.name` set; Claude
-// Desktop refuses to import a marketplace manifest without them. The
-// fragment carries owner.name so every merged marketplace.json validates.
-func TestMarketplaceFragment_CarriesRequiredOwner(t *testing.T) {
+// Spec: §7.8 / issue #58 — the Claude and Cursor marketplace schemas both
+// require `name`, `owner`, and `plugins` at the root, with `owner.name` set;
+// Claude Desktop refuses to import a marketplace manifest without them. The
+// Codex format documents `name`, `interface`, and `plugins` at the root and no
+// `owner`, so its fragment omits the key rather than adding one its schema does
+// not describe.
+func TestMarketplaceFragment_OwnerPerHarnessSchema(t *testing.T) {
 	t.Parallel()
-	out, err := ClaudeMarketplace{}.Manifest(context.Background(), "acme-agents", finPlugin("claude"))
-	if err != nil {
-		t.Fatalf("Manifest: %v", err)
+	cases := []struct {
+		name      string
+		emitter   MarketplaceEmitter
+		prefix    string
+		manifest  string
+		wantOwner bool
+	}{
+		{"claude", ClaudeMarketplace{}, "claude", ".claude-plugin/marketplace.json", true},
+		{"cursor", CursorMarketplace{}, "cursor", ".cursor-plugin/marketplace.json", true},
+		{"codex", CodexMarketplace{}, "codex", ".agents/plugins/marketplace.json", false},
 	}
-	mkt := fileByPath(t, out, ".claude-plugin/marketplace.json")
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out, err := tc.emitter.Manifest(context.Background(), "acme-agents", finPlugin(tc.prefix))
+			if err != nil {
+				t.Fatalf("Manifest: %v", err)
+			}
+			frag := fileByPath(t, out, tc.manifest)
 
-	var m map[string]any
-	if err := json.Unmarshal(mkt.Content, &m); err != nil {
-		t.Fatalf("fragment is not valid JSON: %v\n%s", err, mkt.Content)
-	}
-	for _, key := range []string{"name", "owner", "plugins"} {
-		if _, ok := m[key]; !ok {
-			t.Errorf("fragment missing schema-required root key %q", key)
-		}
-	}
-	owner, ok := m["owner"].(map[string]any)
-	if !ok {
-		t.Fatalf("owner is %T, want an object", m["owner"])
-	}
-	if name, _ := owner["name"].(string); name != "acme-agents" {
-		t.Errorf("owner.name = %q, want the marketplace name", name)
+			var m map[string]any
+			if err := json.Unmarshal(frag.Content, &m); err != nil {
+				t.Fatalf("fragment is not valid JSON: %v\n%s", err, frag.Content)
+			}
+			for _, key := range []string{"name", "plugins"} {
+				if _, ok := m[key]; !ok {
+					t.Errorf("fragment missing required root key %q", key)
+				}
+			}
+
+			owner, present := m["owner"]
+			if !tc.wantOwner {
+				if present {
+					t.Errorf("%s fragment must not carry a root owner (undocumented in its format), got %v", tc.name, owner)
+				}
+				return
+			}
+			obj, ok := owner.(map[string]any)
+			if !ok {
+				t.Fatalf("owner is %T, want an object carrying the schema-required name", owner)
+			}
+			if name, _ := obj["name"].(string); name != "acme-agents" {
+				t.Errorf("owner.name = %q, want the marketplace name acme-agents", name)
+			}
+		})
 	}
 }

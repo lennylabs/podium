@@ -74,18 +74,22 @@ func pluginJSON(p PluginDescriptor) []byte {
 }
 
 // marketplaceEntryFragment builds the OpMergeJSON fragment that adds one plugin
-// to a root marketplace manifest. The marketplace `name` and `owner` scalars
-// are idempotent across fragments, and the single plugin entry is tagged
-// Podium-owned on the plugin name so a re-render reconciles the listing (stale
-// plugins drop out). The plugin `source` is the project-relative plugin
-// subtree the manifest references. description carries the plugin description
-// when set.
+// to a root marketplace manifest. The marketplace `name` scalar is idempotent
+// across fragments, and the single plugin entry is tagged Podium-owned on the
+// plugin name so a re-render reconciles the listing (stale plugins drop out).
+// The plugin `source` is the project-relative plugin subtree the manifest
+// references. description carries the plugin description when set.
 //
-// The Claude Code marketplace schema requires `owner.name` at the root;
-// Claude Desktop refuses to import a marketplace without it. The marketplace
-// name is emitted as the owner name, which keeps the manifest valid without
-// further configuration.
-func marketplaceEntryFragment(marketplaceName string, p PluginDescriptor) []byte {
+// withOwner adds a root `owner` object naming the marketplace. The Claude and
+// Cursor marketplace schemas both require `owner.name`, and Claude Desktop
+// refuses to import a marketplace without it. Emitting the marketplace name as
+// the owner name keeps those manifests valid without further configuration.
+// The `owner` object is idempotent across per-plugin fragments the same way the
+// `name` scalar is, because deepMerge recurses into same-key objects.
+//
+// The Codex marketplace format documents no root `owner`, so its emitter passes
+// omitOwner rather than adding a key its format does not describe.
+func marketplaceEntryFragment(marketplaceName string, p PluginDescriptor, withOwner bool) []byte {
 	entry := map[string]any{
 		"name":         p.Name,
 		"source":       "./" + pluginSubtree(p),
@@ -96,12 +100,22 @@ func marketplaceEntryFragment(marketplaceName string, p PluginDescriptor) []byte
 	}
 	frag := map[string]any{
 		"name":    marketplaceName,
-		"owner":   map[string]any{"name": marketplaceName},
 		"plugins": []any{entry},
+	}
+	if withOwner {
+		frag["owner"] = map[string]any{"name": marketplaceName}
 	}
 	b, _ := json.Marshal(frag)
 	return b
 }
+
+// emitOwner and omitOwner name the marketplaceEntryFragment owner argument at
+// the call sites, where a bare true or false would not say which manifest
+// format the emitter renders for.
+const (
+	emitOwner = true
+	omitOwner = false
+)
 
 // --- Claude marketplace emitter ----------------------------------------------
 
@@ -139,7 +153,7 @@ func (ClaudeMarketplace) Component(ctx context.Context, src Source) ([]File, err
 // per-plugin .claude-plugin/plugin.json for one plugin.
 func (ClaudeMarketplace) Manifest(ctx context.Context, marketplaceName string, plugin PluginDescriptor) ([]File, error) {
 	out := []File{
-		{Path: path.Join(".claude-plugin", "marketplace.json"), Op: OpMergeJSON, Content: marketplaceEntryFragment(marketplaceName, plugin)},
+		{Path: path.Join(".claude-plugin", "marketplace.json"), Op: OpMergeJSON, Content: marketplaceEntryFragment(marketplaceName, plugin, emitOwner)},
 		{Path: path.Join(pluginSubtree(plugin), ".claude-plugin", "plugin.json"), Content: pluginJSON(plugin)},
 	}
 	sortFiles(out)
@@ -224,7 +238,7 @@ func (CodexMarketplace) Component(ctx context.Context, src Source) ([]File, erro
 // per-plugin .codex-plugin/plugin.json for one plugin.
 func (CodexMarketplace) Manifest(ctx context.Context, marketplaceName string, plugin PluginDescriptor) ([]File, error) {
 	out := []File{
-		{Path: path.Join(".agents", "plugins", "marketplace.json"), Op: OpMergeJSON, Content: marketplaceEntryFragment(marketplaceName, plugin)},
+		{Path: path.Join(".agents", "plugins", "marketplace.json"), Op: OpMergeJSON, Content: marketplaceEntryFragment(marketplaceName, plugin, omitOwner)},
 		{Path: path.Join(pluginSubtree(plugin), ".codex-plugin", "plugin.json"), Content: pluginJSON(plugin)},
 	}
 	sortFiles(out)
@@ -263,7 +277,7 @@ func (CursorMarketplace) Component(ctx context.Context, src Source) ([]File, err
 // per-plugin .cursor-plugin/plugin.json for one plugin.
 func (CursorMarketplace) Manifest(ctx context.Context, marketplaceName string, plugin PluginDescriptor) ([]File, error) {
 	out := []File{
-		{Path: path.Join(".cursor-plugin", "marketplace.json"), Op: OpMergeJSON, Content: marketplaceEntryFragment(marketplaceName, plugin)},
+		{Path: path.Join(".cursor-plugin", "marketplace.json"), Op: OpMergeJSON, Content: marketplaceEntryFragment(marketplaceName, plugin, emitOwner)},
 		{Path: path.Join(pluginSubtree(plugin), ".cursor-plugin", "plugin.json"), Content: pluginJSON(plugin)},
 	}
 	sortFiles(out)
