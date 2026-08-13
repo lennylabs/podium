@@ -3,9 +3,11 @@ package serverboot
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/layer"
@@ -245,4 +247,23 @@ func oidcJWTConfigGuard(identityProvider, issuer, audience string) error {
 		return fmt.Errorf("config.oidc_jwt_audience_unset: PODIUM_IDENTITY_PROVIDER=oidc-jwt requires PODIUM_OAUTH_AUDIENCE set to this registry's endpoint so the required aud claim is verified on every forwarded token (§6.3.3, §13.12)")
 	}
 	return nil
+}
+
+// newOIDCVerifierFromConfig builds the §6.3.3 oidc-jwt verifier from the
+// resolved configuration, applying the optional subject-claim and
+// groups-claim overrides (PODIUM_OAUTH_SUBJECT_CLAIM /
+// PODIUM_OAUTH_GROUPS_CLAIM). AD FS deployments use these because access
+// tokens carry idsub rather than sub and emit group membership under the
+// full claim-type URI.
+func newOIDCVerifierFromConfig(cfg *Config) *identity.OIDCVerifier {
+	verifier := identity.NewOIDCVerifier(cfg.oauthIssuer, cfg.oauthAudience, time.Duration(cfg.oauthJWKSCacheTTLSeconds)*time.Second)
+	if cfg.oauthSubjectClaim != "" {
+		verifier.SetSubjectClaim(cfg.oauthSubjectClaim)
+		log.Printf("oidc-jwt: subject claim: %s (sub is the fallback)", cfg.oauthSubjectClaim)
+	}
+	if cfg.oauthGroupsClaim != "" {
+		verifier.SetGroupsClaim(cfg.oauthGroupsClaim)
+		log.Printf("oidc-jwt: groups claim: %s", cfg.oauthGroupsClaim)
+	}
+	return verifier
 }

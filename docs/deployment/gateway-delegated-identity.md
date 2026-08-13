@@ -39,10 +39,14 @@ identity_provider:
 | `identity_provider.audience` | `PODIUM_OAUTH_AUDIENCE` | required | The registry validates the token's `aud` against this value. |
 | `identity_provider.token_header` | `PODIUM_OAUTH_TOKEN_HEADER` | `Authorization` | Header carrying the forwarded JWT, parsed as `Bearer <token>` for any header name. |
 | `identity_provider.jwks_cache_ttl_seconds` | `PODIUM_OAUTH_JWKS_CACHE_TTL_SECONDS` | `300` | A `kid` absent from the cached set forces an earlier refresh. |
+| `identity_provider.subject_claim` | `PODIUM_OAUTH_SUBJECT_CLAIM` | unset | Claim read as the caller's subject. The configured claim takes precedence and `sub` remains the fallback. AD FS access tokens carry `idsub` and no `sub`. |
+| `identity_provider.groups_claim` | `PODIUM_OAUTH_GROUPS_CLAIM` | `groups` | Claim read for group membership. AD FS issuance rules emit the full claim-type URI (`http://schemas.microsoft.com/ws/2008/06/identity/claims/groups`) unless authored with a short name. Single-value and multi-value forms are both accepted. |
 
 The gateway's job: forward the caller's IdP-signed JWT in the configured header as `Bearer <token>`, whether the header is the default `Authorization` or a custom one such as `X-Forwarded-Access-Token`. Stripping client-supplied tokens is unnecessary, because a forged token fails verification.
 
 Group resolution follows the same registry-side mechanisms as the device-code flow: SCIM 2.0 push or the `IdpGroupMapping` adapter (see the [OIDC cookbooks](oidc/)). SCIM is available on a standard backend; a standalone server resolves groups through `IdpGroupMapping` alone.
+
+The token's `iss` is accepted when it matches the configured issuer or the discovery document's `access_token_issuer`. AD FS publishes both values: `issuer` is `https://<host>/adfs` while access tokens carry the federation-service identifier (`http://<host>/adfs/services/trust`) as `iss`. Both values come from the same https discovery document, so the trust root is unchanged.
 
 A token that fails signature, `iss`, or `aud` validation is rejected with `auth.untrusted_token`, and an expired token with `auth.token_expired`. A request carrying no token is anonymous and sees public visibility only. While the issuer's JWKS is unreachable, verification fails closed and the request is anonymous rather than rejected.
 

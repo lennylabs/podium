@@ -22,6 +22,18 @@ type testIdP struct {
 	srv  *httptest.Server
 	mu   sync.Mutex
 	keys map[string]*rsa.PrivateKey // kid -> signing key
+	// accessTokenIssuer, when set, is published in the discovery document
+	// under access_token_issuer (the AD FS extension where access tokens
+	// carry the federation-service identifier as iss).
+	accessTokenIssuer string
+}
+
+// setAccessTokenIssuer publishes v as the discovery document's
+// access_token_issuer for subsequent fetches.
+func (i *testIdP) setAccessTokenIssuer(v string) {
+	i.mu.Lock()
+	i.accessTokenIssuer = v
+	i.mu.Unlock()
 }
 
 func newTestIdP(t *testing.T) *testIdP {
@@ -31,10 +43,16 @@ func newTestIdP(t *testing.T) *testIdP {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		base := "http://" + r.Host
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		doc := map[string]any{
 			"issuer":   base,
 			"jwks_uri": base + "/jwks",
-		})
+		}
+		idp.mu.Lock()
+		if idp.accessTokenIssuer != "" {
+			doc["access_token_issuer"] = idp.accessTokenIssuer
+		}
+		idp.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(doc)
 	})
 	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(idp.jwksJSON()))

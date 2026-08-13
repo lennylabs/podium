@@ -93,14 +93,30 @@ type OIDCVerifier struct {
 	audience string
 	cacheTTL time.Duration
 
+	// subjectClaim optionally names the claim read as the caller's subject
+	// when the token carries no `sub` (AD FS access tokens carry `idsub`
+	// and no `sub`). Empty keeps the standard `sub` requirement.
+	subjectClaim string
+	// groupsClaim optionally names the claim read for group membership.
+	// Empty reads the standard `groups` claim. AD FS issuance rules emit
+	// the full claim-type URI unless the rule is authored with a short
+	// name.
+	groupsClaim string
+
 	// httpc and clock are overridable by tests in-package.
 	httpc *http.Client
 	clock func() time.Time
 
-	mu        sync.Mutex
-	jwksURI   string
-	keys      map[string]any // kid -> *rsa.PublicKey | *ecdsa.PublicKey | ed25519.PublicKey
-	fetchedAt time.Time
+	mu      sync.Mutex
+	jwksURI string
+	// accessTokenIssuer is the discovery document's access_token_issuer, an
+	// AD FS extension: AD FS access tokens carry the federation-service
+	// identifier as iss, which differs from the discovery `issuer`. A token
+	// iss matching either value is accepted; both come from the https
+	// discovery document, so the trust root is unchanged.
+	accessTokenIssuer string
+	keys              map[string]any // kid -> *rsa.PublicKey | *ecdsa.PublicKey | ed25519.PublicKey
+	fetchedAt         time.Time
 }
 
 // NewOIDCVerifier returns a verifier for issuer that validates the aud claim
@@ -120,6 +136,26 @@ func NewOIDCVerifier(issuer, audience string, cacheTTL time.Duration) *OIDCVerif
 		httpc:    &http.Client{Timeout: 10 * time.Second},
 		clock:    time.Now,
 	}
+}
+
+// SetSubjectClaim names the claim read as the subject when the token has no
+// `sub` claim. An empty name keeps the standard `sub` requirement.
+func (v *OIDCVerifier) SetSubjectClaim(name string) { v.subjectClaim = name }
+
+// SetGroupsClaim names the claim read for group membership instead of the
+// standard `groups` claim. An empty name keeps the default.
+func (v *OIDCVerifier) SetGroupsClaim(name string) { v.groupsClaim = name }
+
+// issuerAccepted reports whether iss matches the configured issuer or the
+// discovery document's access_token_issuer (AD FS emits the latter on access
+// tokens).
+func (v *OIDCVerifier) issuerAccepted(iss string) bool {
+	if iss == v.issuer {
+		return true
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.accessTokenIssuer != "" && iss == v.accessTokenIssuer
 }
 
 // Prime fetches the issuer's discovery document and JWKS once, so a boot-time
@@ -154,8 +190,8 @@ func (v *OIDCVerifier) Verify(raw string) (Identity, error) {
 	if issuer == "" {
 		return Identity{}, untrustedToken("", "iss claim missing")
 	}
-	if issuer != v.issuer {
-		return Identity{}, untrustedToken(issuer, fmt.Sprintf("iss %q does not match the configured issuer %q", issuer, v.issuer))
+	if !v.issuerAccepted(issuer) {
+		return Identity{}, untrustedToken(issuer, fmt.Sprintf("iss %q matches neither the configured issuer %q nor the discovery document's access_token_issuer", issuer, v.issuer))
 	}
 	if v.audience == "" {
 		// Defense in depth: the §13.12 config.oidc_jwt_audience_unset startup
@@ -176,8 +212,9 @@ func (v *OIDCVerifier) Verify(raw string) (Identity, error) {
 		return Identity{}, untrustedToken(issuer, err.Error())
 	}
 
+	// The issuer was checked above (configured issuer or access_token_issuer),
+	// so the parser does not re-check it with jwt.WithIssuer.
 	opts := []jwt.ParserOption{
-		jwt.WithIssuer(v.issuer),
 		jwt.WithAudience(v.audience),
 		jwt.WithExpirationRequired(),
 		jwt.WithValidMethods(oidcAllowedAlgs),
@@ -194,10 +231,56 @@ func (v *OIDCVerifier) Verify(raw string) (Identity, error) {
 		return Identity{}, untrustedToken(issuer, err.Error())
 	}
 
-	id, err := claimIdentity(claims)
+	id, err := v.oidcClaimIdentity(claims)
 	if err != nil {
 		return Identity{}, untrustedToken(issuer, err.Error())
 	}
+	return id, nil
+}
+
+// oidcClaimIdentity builds the caller Identity from an IdP-signed token,
+// honoring the verifier's subject-claim and groups-claim overrides. Group
+// values are accepted in array and single-string form: an IdP with exactly
+// one group for the user (AD FS, Auth0) serializes the claim as a plain
+// string.
+func (v *OIDCVerifier) oidcClaimIdentity(claims jwt.MapClaims) (Identity, error) {
+	var sub string
+	if v.subjectClaim != "" {
+		sub, _ = claims[v.subjectClaim].(string)
+	}
+	if sub == "" {
+		sub, _ = claims["sub"].(string)
+	}
+	if sub == "" {
+		if v.subjectClaim != "" {
+			return Identity{}, fmt.Errorf("subject claim %q and sub claim both missing", v.subjectClaim)
+		}
+		return Identity{}, errors.New("sub claim missing")
+	}
+	id := Identity{Sub: sub, IsAuthenticated: true}
+	if email, ok := claims["email"].(string); ok {
+		id.Email = email
+	}
+	if org, ok := claims["org_id"].(string); ok {
+		id.OrgID = org
+	}
+	groupsKey := "groups"
+	if v.groupsClaim != "" {
+		groupsKey = v.groupsClaim
+	}
+	switch g := claims[groupsKey].(type) {
+	case []any:
+		for _, one := range g {
+			if s, ok := one.(string); ok {
+				id.Groups = append(id.Groups, s)
+			}
+		}
+	case string:
+		if g != "" {
+			id.Groups = []string{g}
+		}
+	}
+	id.Scopes = scopesFromClaims(claims)
 	return id, nil
 }
 
@@ -266,6 +349,8 @@ func (v *OIDCVerifier) refreshLocked() error {
 }
 
 // discoverJWKSURI reads jwks_uri from the issuer's OIDC discovery document.
+// It also captures the document's access_token_issuer (an AD FS extension)
+// so Verify accepts access tokens carrying that iss. Caller holds v.mu.
 func (v *OIDCVerifier) discoverJWKSURI() (string, error) {
 	url := v.issuer + "/.well-known/openid-configuration"
 	body, err := v.getJSON(url)
@@ -273,7 +358,8 @@ func (v *OIDCVerifier) discoverJWKSURI() (string, error) {
 		return "", fmt.Errorf("fetch discovery document %s: %w", url, err)
 	}
 	var doc struct {
-		JWKSURI string `json:"jwks_uri"`
+		JWKSURI           string `json:"jwks_uri"`
+		AccessTokenIssuer string `json:"access_token_issuer"`
 	}
 	if err := json.Unmarshal(body, &doc); err != nil {
 		return "", fmt.Errorf("parse discovery document %s: %w", url, err)
@@ -281,6 +367,7 @@ func (v *OIDCVerifier) discoverJWKSURI() (string, error) {
 	if doc.JWKSURI == "" {
 		return "", fmt.Errorf("discovery document %s has no jwks_uri", url)
 	}
+	v.accessTokenIssuer = doc.AccessTokenIssuer
 	return doc.JWKSURI, nil
 }
 

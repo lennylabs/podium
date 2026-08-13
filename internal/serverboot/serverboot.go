@@ -1103,7 +1103,7 @@ func run(ctx context.Context, stop func()) error {
 			if err := oidcJWTConfigGuard(cfg.identityProvider, cfg.oauthIssuer, cfg.oauthAudience); err != nil {
 				return err
 			}
-			verifier := identity.NewOIDCVerifier(cfg.oauthIssuer, cfg.oauthAudience, time.Duration(cfg.oauthJWKSCacheTTLSeconds)*time.Second)
+			verifier := newOIDCVerifierFromConfig(cfg)
 			// §6.3.3: fail to start if the IdP discovery document or JWKS is
 			// unreachable at boot, rather than serve an unverifiable registry.
 			if err := verifier.Prime(); err != nil {
@@ -1470,6 +1470,16 @@ type Config struct {
 	// derives the JWKS from ${issuer}/.well-known/openid-configuration and
 	// validates the forwarded token's iss against it. Must use https.
 	oauthIssuer string
+	// oauthSubjectClaim optionally names the claim the oidc-jwt verifier
+	// reads as the subject (PODIUM_OAUTH_SUBJECT_CLAIM). The configured
+	// claim takes precedence and `sub` remains the fallback. AD FS access
+	// tokens carry `idsub` and no `sub`.
+	oauthSubjectClaim string
+	// oauthGroupsClaim optionally names the claim the oidc-jwt verifier
+	// reads for group membership instead of `groups`
+	// (PODIUM_OAUTH_GROUPS_CLAIM). AD FS issuance rules emit the full
+	// claim-type URI unless authored with a short name.
+	oauthGroupsClaim string
 	// oauthTokenHeader is the §6.3.3 / §13.12 header the oidc-jwt provider reads
 	// the forwarded JWT from (PODIUM_OAUTH_TOKEN_HEADER or
 	// identity_provider.token_header). Default Authorization; the value is parsed
@@ -1713,6 +1723,8 @@ func (c *Config) Settings() []Setting {
 		{"identity_provider.authorization_endpoint", c.oauthAuthorizationEndpoint, envOrSrc("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT", yamlSrc)},
 		{"identity_provider.issuer", c.oauthIssuer, envOrSrc("PODIUM_OAUTH_ISSUER", yamlSrc)},
 		{"identity_provider.token_header", c.oauthTokenHeader, envOrSrc("PODIUM_OAUTH_TOKEN_HEADER", yamlSrc)},
+		{"identity_provider.subject_claim", c.oauthSubjectClaim, envOrSrc("PODIUM_OAUTH_SUBJECT_CLAIM", defaultSrc)},
+		{"identity_provider.groups_claim", c.oauthGroupsClaim, envOrSrc("PODIUM_OAUTH_GROUPS_CLAIM", defaultSrc)},
 		{"identity_provider.jwks_cache_ttl_seconds", intStr(c.oauthJWKSCacheTTLSeconds), envOrSrc("PODIUM_OAUTH_JWKS_CACHE_TTL_SECONDS", yamlSrc)},
 		{"trusted_proxy_secret", redact(c.trustedProxySecret), envOrSrc("PODIUM_TRUSTED_PROXY_SECRET", "")},
 		{"multi_tenant", boolStr(c.multiTenant), envOrSrc("PODIUM_MULTI_TENANT", defaultSrc)},
@@ -1782,6 +1794,8 @@ func LoadConfig() *Config {
 		oauthAudience:              os.Getenv("PODIUM_OAUTH_AUDIENCE"),
 		oauthAuthorizationEndpoint: os.Getenv("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT"),
 		oauthIssuer:                os.Getenv("PODIUM_OAUTH_ISSUER"),
+		oauthSubjectClaim:          os.Getenv("PODIUM_OAUTH_SUBJECT_CLAIM"),
+		oauthGroupsClaim:           os.Getenv("PODIUM_OAUTH_GROUPS_CLAIM"),
 		oauthTokenHeader:           os.Getenv("PODIUM_OAUTH_TOKEN_HEADER"),
 		oauthJWKSCacheTTLSeconds:   envInt("PODIUM_OAUTH_JWKS_CACHE_TTL_SECONDS", 0),
 		trustedProxySecret:         os.Getenv("PODIUM_TRUSTED_PROXY_SECRET"),
