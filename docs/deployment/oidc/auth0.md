@@ -80,7 +80,7 @@ identity_provider:
   authorization_endpoint: https://<your-tenant>.auth0.com
 ```
 
-Restart the registry. The Action emits group membership under the namespaced claim path `https://podium.acme.com/groups`. The `IdpGroupMapping` adapter maps group values to group names registry-side and names no claim. A registry that verifies the forwarded token itself runs the `oidc-jwt` provider, and it reads the namespaced path when `identity_provider.groups_claim` (`PODIUM_OAUTH_GROUPS_CLAIM`) names it. See [gateway-delegated identity](../gateway-delegated-identity).
+Restart the registry. The Action emits group membership under the namespaced claim path `https://podium.acme.com/groups`. A registry that verifies the forwarded token itself runs the `oidc-jwt` provider: it reads that path when `identity_provider.groups_claim` (`PODIUM_OAUTH_GROUPS_CLAIM`) names it, and the `IdpGroupMapping` adapter then maps the values the claim carries to group names registry-side. The `oauth-device-code` configuration above installs no request-time verifier, so neither the claim name nor the adapter applies to it. See [gateway-delegated identity](../gateway-delegated-identity).
 
 Developer side:
 
