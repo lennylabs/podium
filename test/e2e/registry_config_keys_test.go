@@ -7,6 +7,8 @@ package e2e
 //     provider (observable as the embedder dimension in the startup log).
 //   - previously env-only keys (here embedding_provider.url) are valid
 //     config-file keys.
+//   - the oidc-jwt claim names resolve from their env vars and from their
+//     registry.yaml keys.
 //
 // These drive the real `podium` binary: `config show --server` for resolved
 // values and a standalone `serve` for the startup dimension log.
@@ -167,6 +169,45 @@ func TestRegistryConfig_OAuthClaimNamesUnsetByDefault(t *testing.T) {
 		}
 		if value != "" {
 			t.Errorf("%s value = %q, want empty", name, value)
+		}
+	}
+}
+
+// T-registry-config-7: registry.identity_provider.subject_claim and
+// registry.identity_provider.groups_claim are config-file keys, so an operator
+// who configures the registry from registry.yaml never has to set the env vars.
+// With both env vars unset, each row reports the configured value with
+// registry.yaml as its source (§13.12).
+func TestRegistryConfig_OAuthClaimNamesFromConfigFile(t *testing.T) {
+	t.Parallel()
+	const (
+		subjectClaim = "upn"
+		groupsClaim  = "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups"
+	)
+	cfgFile := filepath.Join(t.TempDir(), "registry.yaml")
+	body := "registry:\n  identity_provider:\n    type: oidc-jwt\n" +
+		"    subject_claim: " + subjectClaim + "\n" +
+		"    groups_claim: " + groupsClaim + "\n"
+	if err := os.WriteFile(cfgFile, []byte(body), 0o644); err != nil {
+		t.Fatalf("write registry.yaml: %v", err)
+	}
+	env := []string{
+		"PODIUM_CONFIG_FILE=" + cfgFile,
+		"PODIUM_OAUTH_SUBJECT_CLAIM=",
+		"PODIUM_OAUTH_GROUPS_CLAIM=",
+		"PODIUM_REGISTRY=",
+	}
+	for _, tc := range []struct{ name, wantValue string }{
+		{"identity_provider.subject_claim", subjectClaim},
+		{"identity_provider.groups_claim", groupsClaim},
+	} {
+		value, source, found := rcShowSetting(t, env, tc.name)
+		if !found {
+			t.Errorf("config show --server has no %s row", tc.name)
+			continue
+		}
+		if value != tc.wantValue || source != "registry.yaml" {
+			t.Errorf("%s = (%q, %q), want (%q, %q)", tc.name, value, source, tc.wantValue, "registry.yaml")
 		}
 	}
 }
