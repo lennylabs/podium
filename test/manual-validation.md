@@ -2394,11 +2394,13 @@ through verification to resolved visibility.
 - An OIDC IdP whose discovery document is reachable from the registry host over
   `https` at `<issuer>/.well-known/openid-configuration`. A free Okta or Entra
   ID developer tenant is enough for the baseline part.
-- A client registered on that IdP and enabled for the device authorization
-  grant, on a tenant whose discovery document publishes
-  `device_authorization_endpoint`. Every step below reads the token through that
-  grant. When the tenant cannot enable it, skip the scenario and record the skip
-  and the reason.
+- A client registered on that IdP that can complete an authorization-code grant
+  or a device-code grant, and whose access token the runner can read. Steps 2 to
+  4 implement the device-code exchange, which needs a tenant whose discovery
+  document publishes `device_authorization_endpoint`. A tenant that publishes no
+  such endpoint completes an authorization-code exchange instead and exports the
+  resulting access token as `TOKEN` before step 5. When neither grant is
+  available, skip the scenario and record the skip and the reason.
 - An `aud` value the issued access token carries, for `PODIUM_OAUTH_AUDIENCE`.
 - An access token that is a JWT the registry can verify, carrying that `aud` and
   a group claim for the test user. Okta issues a JWT from a custom authorization
@@ -2415,8 +2417,8 @@ through verification to resolved visibility.
   record the skip and the reason.
 
 A Podium client behind an `oidc-jwt` registry sends no credential of its own
-(§6.3.3), so both parts obtain the access token from the IdP directly through a
-raw device-code exchange with `curl`.
+(§6.3.3), so both parts obtain the access token from the IdP directly. The steps
+implement a raw device-code exchange with `curl`.
 
 **Steps (baseline part).**
 
@@ -2431,19 +2433,21 @@ raw device-code exchange with `curl`.
 
 2. Read the discovery document and take the device-code and token endpoints from
    it, so the step does not depend on one vendor's URL layout. A discovery
-   document that publishes no `device_authorization_endpoint` fails this step
-   with a named message, and the run is skipped against the device-grant
-   prerequisite.
+   document that publishes no `device_authorization_endpoint` fails the `DEV_EP`
+   assignment with a named message. That tenant takes the authorization-code
+   path named under Prerequisites, exports the resulting access token as
+   `TOKEN`, and resumes at step 5.
 
    ```bash
    curl -sf "$ISSUER/.well-known/openid-configuration" > "$WORK/discovery.json"
    ep() { python3 -c "import json,sys;d=json.load(open(sys.argv[1]));k=sys.argv[2];print(d[k]) if k in d else sys.exit('discovery document publishes no '+k)" "$WORK/discovery.json" "$1"; }
-   DEV_EP=$(ep device_authorization_endpoint) || echo "skip: the tenant publishes no device authorization endpoint"
+   DEV_EP=$(ep device_authorization_endpoint) || echo "no device authorization endpoint; take the authorization-code path and resume at step 5"
    TOK_EP=$(ep token_endpoint)
    ```
 
 3. Request a device code and open the printed `verification_uri_complete` in a
-   browser. Approve as the test user before running step 4. The `scope` value
+   browser. Approve as the test user before running step 4. A run on the
+   authorization-code path skips this step and step 4. The `scope` value
    carries whatever the tenant needs to put a group claim on the access token:
    an Okta authorization-server scope such as `groups`, an Entra ID app-role or
    optional-claim configuration, or an Auth0 action that adds a namespaced
@@ -2565,7 +2569,9 @@ raw device-code exchange with `curl`.
 **Expected (baseline part).**
 
 - Step 4 prints a token response carrying `access_token`, and `TOKEN` is
-  non-empty. An empty `TOKEN` fails the run at that step.
+  non-empty. An empty `TOKEN` fails the run at that step. A run on the
+  authorization-code path exports `TOKEN` from that exchange and reaches the
+  same state before step 5.
 - Step 5 prints a decoded payload whose `aud` matches `PODIUM_OAUTH_AUDIENCE`
   and whose group claim carries the test user's membership. When that claim
   carries a name other than `groups`, the name is the value step 7 exports in
@@ -2666,9 +2672,15 @@ FS farm is available.
    ```
 
 6. Load one artifact from each layer with the AD FS token, reusing the `code`
-   helper from the baseline part.
+   helper from the baseline part. The first line asserts the precondition the
+   rest of this part rests on: `TOKEN` holds the AD FS access token from step 3.
+   An empty bearer reaches the registry as an anonymous request, and every load
+   below would then report the anonymous result for an unrelated reason. Step 7
+   asserts the issuer the token carries, which is what separates the AD FS token
+   from a baseline token left in the shell.
 
    ```bash
+   [ -n "$TOKEN" ] || echo "no AD FS access token; re-run the exchange at step 3"
    AUTH="Authorization: Bearer $TOKEN"
    echo "adfs handbook: $(code -H "$AUTH" "$URL/v1/load_artifact?id=handbook")"
    echo "adfs deploy:   $(code -H "$AUTH" "$URL/v1/load_artifact?id=deploy")"
@@ -2678,7 +2690,7 @@ FS farm is available.
 7. Confirm that the same token is rejected without the subject setting. Stop the
    server, unset `PODIUM_OAUTH_SUBJECT_CLAIM`, boot again on another port, and
    replay the token. The `code` helper prints the status, and the second `curl`
-   prints the error body.
+   prints the error body, which carries `details.token_iss`.
 
    ```bash
    kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
@@ -2706,9 +2718,13 @@ FS farm is available.
   `https` discovery document, the claim-type-URI group claim resolves the
   group-scoped layer, and the configured subject claim resolves the `users:`
   layer.
-- Step 7 prints `nosub handbook: 401` and an `auth.untrusted_token` body: the AD
-  FS access token carries no `sub`, so the default subject claim rejects it and
-  the deployment requires `PODIUM_OAUTH_SUBJECT_CLAIM`.
+- Step 7 prints `nosub handbook: 401` and an `auth.untrusted_token` body whose
+  `details.token_iss` names the federation-service issuer recorded at step 3:
+  the AD FS access token carries no `sub`, so the default subject claim rejects
+  it and the deployment requires `PODIUM_OAUTH_SUBJECT_CLAIM`. The registry
+  returns the same envelope for an unaccepted `iss` and for a bad signature, so
+  the `token_iss` value is what attributes this rejection to the missing subject
+  claim rather than to a token from the baseline IdP.
 
 **Cleanup.** Stop any server still running and `rm -rf "$WORK"`. Keep
 `test/fixtures/adfs-openid-configuration.redacted.json`, which lives in the
