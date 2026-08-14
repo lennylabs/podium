@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **Second accepted token issuer under `oidc-jwt`** (§6.3.3): the registry accepts a forwarded token whose `iss` matches the configured `identity_provider.issuer` or the `access_token_issuer` the same discovery document publishes. The second value is read once, when that document resolves, and it is compared as a string and never dereferenced, so the signing keys still come from the `jwks_uri` in the configured issuer's `https` document. A document that publishes no `access_token_issuer` leaves the configured issuer as the sole accepted value. When the two values differ, the startup log names both. AD FS is the deployment this rule covers: it serves discovery under `https://<host>/adfs` and stamps the federation-service identifier `http://<host>/adfs/services/trust` on the access token.
+- **`PODIUM_OAUTH_SUBJECT_CLAIM` and `PODIUM_OAUTH_GROUPS_CLAIM`** (§6.3.3, §13.12): the config-file keys `identity_provider.subject_claim` and `identity_provider.groups_claim` name the claim the registry reads as the caller's subject and the claim it reads for group membership. When `subject_claim` is set the registry reads that claim alone and rejects a token that does not carry it with `auth.untrusted_token`, with no fallback to `sub`. Both settings are unset by default and are read only under `oidc-jwt`. The recorded subject keys `users:` layer visibility, user-defined layer ownership, per-tenant admin grants, and the instance-operator grant, so a deployment that sets `subject_claim` lists values of the named claim in `PODIUM_OPERATOR_ADMINS` and `PODIUM_BOOTSTRAP_ADMINS`.
+
+### Changed
+
+- **Group-claim encoding** (§6.3.1): the `oidc-jwt` and `injected-session-token` verifiers both read a group claim in the multi-value form and in the single-string form an IdP emits for a caller in exactly one group. The single-string form yields one group whose name is the whole claim value, and it is not split on any separator. A deployment whose IdP emits that form previously resolved to an empty group list without an authentication error, so group-scoped layers that were invisible to such a caller become visible on upgrade.
+
 [Unreleased]: https://github.com/lennylabs/podium/compare/v0.2.1...HEAD
 
 ## [0.2.1] - 2026-06-30
