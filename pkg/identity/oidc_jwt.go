@@ -96,6 +96,14 @@ type OIDCVerifier struct {
 	audience string
 	cacheTTL time.Duration
 
+	// subjectClaim and groupsClaim name the claims the caller's subject and
+	// group membership are read from (§6.3.3). An empty value selects the
+	// default key ("sub" and "groups"). Both are written once, at
+	// construction, and are read without holding v.mu, because nothing writes
+	// them after the verifier serves its first request.
+	subjectClaim string
+	groupsClaim  string
+
 	// httpc and clock are overridable by tests in-package.
 	httpc *http.Client
 	clock func() time.Time
@@ -111,23 +119,50 @@ type OIDCVerifier struct {
 	fetchedAt         time.Time
 }
 
+// OIDCOption configures an OIDCVerifier during construction.
+type OIDCOption func(*OIDCVerifier)
+
+// WithSubjectClaim names the claim the verifier reads as the caller's subject
+// in place of "sub" (§6.3.3 PODIUM_OAUTH_SUBJECT_CLAIM). The named claim is
+// read alone: a token that does not carry it is rejected with
+// auth.untrusted_token, and there is no fallback to "sub". An empty name
+// leaves the default in place.
+func WithSubjectClaim(name string) OIDCOption {
+	return func(v *OIDCVerifier) { v.subjectClaim = name }
+}
+
+// WithGroupsClaim names the claim the verifier reads for group membership in
+// place of "groups" (§6.3.3 PODIUM_OAUTH_GROUPS_CLAIM). An empty name leaves
+// the default in place.
+func WithGroupsClaim(name string) OIDCOption {
+	return func(v *OIDCVerifier) { v.groupsClaim = name }
+}
+
 // NewOIDCVerifier returns a verifier for issuer that validates the aud claim
 // against audience and caches the issuer JWKS for cacheTTL. A non-positive
-// cacheTTL falls back to the §13.12 default of 300 seconds. The caller is
+// cacheTTL falls back to the §13.12 default of 300 seconds. WithSubjectClaim
+// and WithGroupsClaim name the claims the caller's subject and group
+// membership are read from; without them the verifier reads "sub" and
+// "groups". The subject claim is read exactly, so under WithSubjectClaim a
+// token that carries "sub" and not the named claim is rejected. The caller is
 // responsible for the §13.12 config.invalid_issuer_scheme (https) and
 // config.oidc_jwt_audience_unset startup checks; the verifier itself fails
 // closed on an empty audience at request time as a defense in depth.
-func NewOIDCVerifier(issuer, audience string, cacheTTL time.Duration) *OIDCVerifier {
+func NewOIDCVerifier(issuer, audience string, cacheTTL time.Duration, opts ...OIDCOption) *OIDCVerifier {
 	if cacheTTL <= 0 {
 		cacheTTL = 300 * time.Second
 	}
-	return &OIDCVerifier{
+	v := &OIDCVerifier{
 		issuer:   strings.TrimRight(issuer, "/"),
 		audience: audience,
 		cacheTTL: cacheTTL,
 		httpc:    &http.Client{Timeout: 10 * time.Second},
 		clock:    time.Now,
 	}
+	for _, opt := range opts {
+		opt(v)
+	}
+	return v
 }
 
 // Prime fetches the issuer's discovery document and JWKS once, so a boot-time
@@ -143,7 +178,8 @@ func (v *OIDCVerifier) Prime() error {
 // Verify checks raw against the issuer's JWKS and returns the attested
 // Identity. It returns ErrTokenExpired for an expired token and an
 // *UntrustedTokenError for any other verification failure (bad signature, an
-// iss outside the accepted issuers, wrong/missing aud, malformed token).
+// iss outside the accepted issuers, wrong/missing aud, a missing subject
+// claim, malformed token).
 func (v *OIDCVerifier) Verify(raw string) (Identity, error) {
 	if raw == "" {
 		return Identity{}, untrustedToken("", "empty token")
@@ -210,7 +246,7 @@ func (v *OIDCVerifier) Verify(raw string) (Identity, error) {
 		return Identity{}, untrustedToken(issuer, err.Error())
 	}
 
-	id, err := claimIdentity(claims, claimNames{})
+	id, err := claimIdentity(claims, claimNames{Subject: v.subjectClaim, Groups: v.groupsClaim})
 	if err != nil {
 		return Identity{}, untrustedToken(issuer, err.Error())
 	}
