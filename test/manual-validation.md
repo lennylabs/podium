@@ -117,6 +117,7 @@ rm -rf "$WORK"
 | S33 | Gateway-delegated providers fail closed on misconfig | standalone | none | none | none |
 | S34 | Marketplace publishing through a `kind: marketplace` sync target | solo | none | none | local git |
 | S35 | Webhook receiver hardening: admin gate and SSRF policy | standalone | none | none | none |
+| S36 | Successful oidc-jwt verification against a live IdP | standalone | none | none | OIDC IdP (AD FS for the split-issuer steps) |
 
 ---
 
@@ -2366,3 +2367,282 @@ allowlist, and the per-receiver `debounce` field.
   applies).
 
 **Cleanup.** Stop both servers and `rm -rf "$WORK"`.
+
+---
+
+## S36: Successful oidc-jwt verification against a live IdP
+
+**Goal.** Validate that an access token issued by a live OIDC IdP authenticates
+against a directly-reachable `oidc-jwt` registry (§6.3.3) and resolves
+group-scoped layer visibility (§4.6). The scenario has a baseline part that runs
+against any IdP in the §6.3.1 tested list and an AD FS profile part that covers
+the split issuer, `PODIUM_OAUTH_SUBJECT_CLAIM`, and the claim-type-URI group
+claim against a live farm.
+
+**Covers.** The split issuer, both claim names, and the single-string group
+encoding are asserted against a synthetic IdP by the unit tests in
+`pkg/identity` and the integration tests in `internal/serverboot`. This scenario
+covers what a live IdP establishes on its own: a discovery document the IdP
+publishes, an access token the IdP signed, and the path from the bearer header
+through verification to resolved visibility.
+
+**Prerequisites.**
+
+- An OIDC IdP whose discovery document is reachable from the registry host over
+  `https` at `<issuer>/.well-known/openid-configuration`. A free Okta or Entra
+  ID developer tenant is enough for the baseline part.
+- A client registered on that IdP that can complete an authorization-code or a
+  device-code grant, and whose access token the runner can read.
+- An `aud` value the issued access token carries, for `PODIUM_OAUTH_AUDIENCE`.
+- For the AD FS profile part, an AD FS farm whose issuance rules emit a group
+  claim on the access token. When no farm is available, skip that part and
+  record the skip and the reason.
+
+A Podium client behind an `oidc-jwt` registry sends no credential of its own
+(§6.3.3), so both parts obtain the access token from the IdP directly through a
+raw device-code exchange with `curl`.
+
+**Steps (baseline part).**
+
+1. Run the isolation block, then export the IdP coordinates. The issuer is the
+   discovery base, without the `/.well-known/openid-configuration` suffix.
+
+   ```bash
+   export ISSUER=https://<tenant>.okta.example/oauth2/default
+   export CLIENT_ID=<device-code client id>
+   export AUD=<audience the IdP stamps on the access token>
+   ```
+
+2. Read the discovery document and take the device-code and token endpoints from
+   it, so the step does not depend on one vendor's URL layout.
+
+   ```bash
+   curl -sf "$ISSUER/.well-known/openid-configuration" > "$WORK/discovery.json"
+   ep() { python3 -c "import json,sys;print(json.load(open(sys.argv[1]))[sys.argv[2]])" "$WORK/discovery.json" "$1"; }
+   DEV_EP=$(ep device_authorization_endpoint)
+   TOK_EP=$(ep token_endpoint)
+   ```
+
+3. Run the device-code grant. Open the printed `verification_uri_complete` in a
+   browser, approve as the test user, then exchange the device code.
+
+   ```bash
+   curl -s -X POST "$DEV_EP" -d "client_id=$CLIENT_ID" -d "scope=openid email groups" > "$WORK/device.json"
+   python3 -m json.tool "$WORK/device.json"
+   DEVICE_CODE=$(python3 -c "import json;print(json.load(open('$WORK/device.json'))['device_code'])")
+   curl -s -X POST "$TOK_EP" \
+     -d grant_type=urn:ietf:params:oauth:grant-type:device_code \
+     -d "client_id=$CLIENT_ID" -d "device_code=$DEVICE_CODE" > "$WORK/token.json"
+   export TOKEN=$(python3 -c "import json;print(json.load(open('$WORK/token.json'))['access_token'])")
+   ```
+
+4. Decode the access-token payload and record `iss`, `aud`, the subject claim,
+   and the group claim with its values.
+
+   ```bash
+   claims() {
+     python3 - "$1" <<'PY'
+   import base64, json, sys
+   seg = sys.argv[1].split(".")[1]
+   seg += "=" * (-len(seg) % 4)
+   print(json.dumps(json.loads(base64.urlsafe_b64decode(seg)), indent=2, sort_keys=True))
+   PY
+   }
+   claims "$TOKEN"
+   ```
+
+5. Put the raw group value from step 4 in the layer's `groups:` list. With
+   `PODIUM_IDP_GROUP_MAPPING` unset the claim values pass through unmapped, so
+   `groups:` lists the value the token carries (an Entra ID group object ID, an
+   Okta group name, or whatever the IdP emits). A run that prefers a readable
+   layer config instead sets `PODIUM_IDP_GROUP_MAPPING="<raw value>=engineering"`
+   at step 6 and lists `engineering`. Record which form the run used. The
+   YAML values are single-quoted, because a group value that contains a
+   backslash (`ACME\Engineering`) fails to parse inside YAML double quotes and
+   the server logs `warning: ignored registry.yaml` and serves no layers.
+
+   ```bash
+   export GROUP='<raw group value from step 4>'
+   mkdir -p "$WORK/pub/handbook" "$WORK/eng/deploy"
+   podium artifact scaffold --type context --description "Company handbook" --force "$WORK/pub/handbook"
+   podium artifact scaffold --type skill --description "Engineering deploy" --force "$WORK/eng/deploy"
+   cat > "$WORK/registry.yaml" <<YAML
+   registry:
+     layers:
+       - id: public-handbook
+         source: { local: { path: $WORK/pub } }
+         visibility: { public: true }
+       - id: eng-internal
+         source: { local: { path: $WORK/eng } }
+         visibility: { groups: ['$GROUP'] }
+   YAML
+   ```
+
+6. Boot the standalone server under `oidc-jwt` and read the provider line from
+   the startup log. The registry fetches the discovery document and the JWKS at
+   startup, so this step fails closed when the IdP is unreachable.
+
+   ```bash
+   export PODIUM_IDENTITY_PROVIDER=oidc-jwt
+   export PODIUM_OAUTH_ISSUER="$ISSUER"
+   export PODIUM_OAUTH_AUDIENCE="$AUD"
+   podium serve --standalone --no-embeddings --config "$WORK/registry.yaml" --bind 127.0.0.1:8136 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8136/healthz
+   export URL=http://127.0.0.1:8136
+   grep "identity provider:" "$WORK/srv.log"
+   ```
+
+7. Load one artifact from each layer with the token, without it, and with a
+   tampered signature.
+
+   ```bash
+   code() { curl -s -o /dev/null -w "%{http_code}\n" "$@"; }
+   AUTH="Authorization: Bearer $TOKEN"
+   echo "token handbook: $(code -H "$AUTH" "$URL/v1/load_artifact?id=handbook")"
+   echo "token deploy:   $(code -H "$AUTH" "$URL/v1/load_artifact?id=deploy")"
+   echo "anon handbook:  $(code "$URL/v1/load_artifact?id=handbook")"
+   echo "anon deploy:    $(code "$URL/v1/load_artifact?id=deploy")"
+   echo "tampered:       $(code -H "Authorization: Bearer ${TOKEN}AA" "$URL/v1/load_artifact?id=handbook")"
+   curl -s -H "Authorization: Bearer ${TOKEN}AA" "$URL/v1/load_artifact?id=handbook"
+   ```
+
+**Expected (baseline part).**
+
+- The startup log carries `identity provider: oidc-jwt (verifying forwarded
+  tokens against accepted issuers ...)` naming the configured issuer. An IdP
+  whose discovery document publishes no `access_token_issuer` leaves the
+  configured issuer as the sole accepted value, so the line names one value.
+- The startup log carries no `warning: ignored registry.yaml` line. That warning
+  means the layer config was dropped and every load below would return `404`
+  for an unrelated reason.
+- `token handbook` and `token deploy` return `200`: the verified token resolves
+  the caller's group and the group-scoped layer is visible.
+- `anon handbook` returns `200` and `anon deploy` returns `404`: a request
+  carrying no token is anonymous and sees public visibility only.
+- The tampered request returns `401` with `auth.untrusted_token` and
+  `details.token_iss` naming the token's issuer.
+
+**Steps (AD FS profile part).** Skip these steps and record the skip when no AD
+FS farm is available.
+
+1. Stop the baseline server, then export the farm coordinates. `ADFS_HOST` is
+   the federation service hostname.
+
+   ```bash
+   kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
+   export ADFS_HOST=<farm hostname>
+   export ISSUER="https://$ADFS_HOST/adfs"
+   export CLIENT_ID=<device-code client id>
+   export AUD=<relying-party identifier the token carries in aud>
+   ```
+
+2. Capture the farm's discovery document as repository evidence. Redact the
+   hostname, write the document under `test/fixtures/`, and record the observed
+   `issuer`, `access_token_issuer`, and `jwks_uri`. The repository holds no other
+   AD FS discovery document and the automated tests write their own, so this
+   capture is what records an observed document behind the split-issuer rule.
+
+   ```bash
+   mkdir -p ~/projects/podium/test/fixtures
+   curl -sf "$ISSUER/.well-known/openid-configuration" | python3 -m json.tool \
+     | sed "s/$ADFS_HOST/adfs.acme.example/g" \
+     > ~/projects/podium/test/fixtures/adfs-openid-configuration.redacted.json
+   python3 -c "import json;d=json.load(open('$HOME/projects/podium/test/fixtures/adfs-openid-configuration.redacted.json'));print(d['issuer']);print(d.get('access_token_issuer'));print(d['jwks_uri'])"
+   ```
+
+3. Acquire an AD FS access token through steps 2 to 4 of the baseline part,
+   which read the device-code and token endpoints from this discovery document.
+   Record the token's `iss`, the value of the subject claim, and the value of
+   the group claim `http://schemas.microsoft.com/ws/2008/06/identity/claims/groups`.
+
+4. Write a registry config with a public layer, a group-scoped layer, and a
+   layer scoped to the caller's subject. The `users:` entry carries the value of
+   the claim named by `PODIUM_OAUTH_SUBJECT_CLAIM`, because that value is the
+   recorded subject (§6.3.3).
+
+   ```bash
+   export GROUP='<group value from step 3>'
+   export SUBJECT='<subject-claim value from step 3>'
+   mkdir -p "$WORK/pub/handbook" "$WORK/eng/deploy" "$WORK/own/notes"
+   podium artifact scaffold --type context --description "Company handbook" --force "$WORK/pub/handbook"
+   podium artifact scaffold --type skill --description "Engineering deploy" --force "$WORK/eng/deploy"
+   podium artifact scaffold --type context --description "Personal notes" --force "$WORK/own/notes"
+   cat > "$WORK/adfs.yaml" <<YAML
+   registry:
+     layers:
+       - id: public-handbook
+         source: { local: { path: $WORK/pub } }
+         visibility: { public: true }
+       - id: eng-internal
+         source: { local: { path: $WORK/eng } }
+         visibility: { groups: ['$GROUP'] }
+       - id: alice-notes
+         source: { local: { path: $WORK/own } }
+         visibility: { users: ['$SUBJECT'] }
+   YAML
+   ```
+
+5. Boot the server with the AD FS profile and read the provider lines from the
+   startup log. The subject claim name is the one observed at step 3; the
+   reported farm emits `idsub`.
+
+   ```bash
+   export PODIUM_IDENTITY_PROVIDER=oidc-jwt
+   export PODIUM_OAUTH_ISSUER="$ISSUER"
+   export PODIUM_OAUTH_AUDIENCE="$AUD"
+   export PODIUM_OAUTH_SUBJECT_CLAIM=idsub
+   export PODIUM_OAUTH_GROUPS_CLAIM=http://schemas.microsoft.com/ws/2008/06/identity/claims/groups
+   podium serve --standalone --no-embeddings --config "$WORK/adfs.yaml" --bind 127.0.0.1:8137 > "$WORK/adfs.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8137/healthz
+   export URL=http://127.0.0.1:8137
+   grep "identity provider:" "$WORK/adfs.log"
+   ```
+
+6. Load one artifact from each layer with the AD FS token, reusing the `code`
+   helper from the baseline part.
+
+   ```bash
+   AUTH="Authorization: Bearer $TOKEN"
+   echo "adfs handbook: $(code -H "$AUTH" "$URL/v1/load_artifact?id=handbook")"
+   echo "adfs deploy:   $(code -H "$AUTH" "$URL/v1/load_artifact?id=deploy")"
+   echo "adfs notes:    $(code -H "$AUTH" "$URL/v1/load_artifact?id=notes")"
+   ```
+
+7. Confirm that the same token is rejected without the subject setting. Stop the
+   server, unset `PODIUM_OAUTH_SUBJECT_CLAIM`, boot again on another port, and
+   replay the token.
+
+   ```bash
+   kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
+   unset PODIUM_OAUTH_SUBJECT_CLAIM
+   podium serve --standalone --no-embeddings --config "$WORK/adfs.yaml" --bind 127.0.0.1:8138 > "$WORK/adfs-nosub.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8138/healthz
+   curl -s -H "$AUTH" "http://127.0.0.1:8138/v1/load_artifact?id=handbook"
+   ```
+
+**Expected (AD FS profile part).**
+
+- The captured document reports an `issuer` of `https://adfs.acme.example/adfs`,
+  an `access_token_issuer` of `http://adfs.acme.example/adfs/services/trust`,
+  and a `jwks_uri` under the `https` issuer. The redacted file is committed with
+  the run.
+- The token's `iss` equals the `access_token_issuer` value and differs from the
+  configured issuer.
+- The startup log names both accepted issuers on the provider line, and it
+  carries one line naming the configured subject claim and one naming the
+  configured group claim.
+- `adfs handbook`, `adfs deploy`, and `adfs notes` all return `200`: the token
+  stamped with the federation-service issuer verifies against the JWKS from the
+  `https` discovery document, the claim-type-URI group claim resolves the
+  group-scoped layer, and the configured subject claim resolves the `users:`
+  layer.
+- Step 7 returns `401` with `auth.untrusted_token`: the AD FS access token
+  carries no `sub`, so the default subject claim rejects it and the deployment
+  requires `PODIUM_OAUTH_SUBJECT_CLAIM`.
+
+**Cleanup.** Stop any server still running and `rm -rf "$WORK"`. Keep
+`test/fixtures/adfs-openid-configuration.redacted.json`, which lives in the
+repository rather than in `$WORK`.
