@@ -8,7 +8,9 @@ package e2e
 // the server maps it to the friendly group name before evaluating §4.6
 // visibility, so the caller sees a groups-restricted layer. A token whose
 // group has no mapping entry passes through unchanged and stays out of the
-// restricted layer.
+// restricted layer. A caller whose group claim arrives as a plain string,
+// which an IdP emits for a caller in exactly one group (§6.3.1), reaches the
+// same layer.
 //
 // No existing test drives PODIUM_IDP_GROUP_MAPPING through the verifier; the
 // mapping's unit behavior is covered in pkg/identity but the wired path was a
@@ -103,5 +105,16 @@ func TestAuthIdpGroupMapping_RawClaimMapsToLayerGroup(t *testing.T) {
 	if status, body := injGet(t, srv.BaseURL+artifactURL, directToken); status != http.StatusOK {
 		t.Errorf("friendly-name caller load = %d, want 200 (pass-through preserves %q)\nbody: %s",
 			status, idpmapLayerName, body)
+	}
+
+	// §6.3.1: an IdP emits the group claim as a plain string for a caller in
+	// exactly one group. The whole value is one group name, so it reaches the
+	// mapping and the finance layer the same way the array form does.
+	singleClaims := injClaims("dave@acme.com")
+	singleClaims["groups"] = idpmapRawGroup
+	singleToken := injSignJWT(t, priv, singleClaims)
+	if status, body := injGet(t, srv.BaseURL+artifactURL, singleToken); status != http.StatusOK {
+		t.Errorf("single-string-group caller load = %d, want 200 (string claim is one group)\nbody: %s",
+			status, body)
 	}
 }

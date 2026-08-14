@@ -194,7 +194,7 @@ func (v *OIDCVerifier) Verify(raw string) (Identity, error) {
 		return Identity{}, untrustedToken(issuer, err.Error())
 	}
 
-	id, err := claimIdentity(claims)
+	id, err := claimIdentity(claims, claimNames{})
 	if err != nil {
 		return Identity{}, untrustedToken(issuer, err.Error())
 	}

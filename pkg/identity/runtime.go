@@ -201,7 +201,7 @@ func (r *RuntimeKeyRegistry) JWTVerifier(audience string, clock func() jwt.Numer
 		if err := validateActor(claims["act"], issuer); err != nil {
 			return Identity{}, untrusted(issuer, err.Error())
 		}
-		id, err := claimIdentity(claims)
+		id, err := claimIdentity(claims, claimNames{})
 		if err != nil {
 			return Identity{}, untrusted(issuer, err.Error())
 		}
@@ -209,17 +209,38 @@ func (r *RuntimeKeyRegistry) JWTVerifier(audience string, clock func() jwt.Numer
 	}
 }
 
+// claimNames names the claims the caller's subject and group membership are
+// read from (§6.3.1). An empty field selects the default key: "sub" for the
+// subject and "groups" for group membership. The oidc-jwt verifier fills both
+// from configuration (§6.3.3); the §6.3.2 runtime verifier passes the zero
+// value, so it reads the default keys.
+type claimNames struct {
+	Subject string
+	Groups  string
+}
+
 // claimIdentity builds the §6.3.1 caller Identity from the standard claim set
 // shared by the runtime-key verifier (§6.3.2) and the oidc-jwt verifier
-// (§6.3.3): the required sub, plus email, org_id, groups, and the fine-grained
-// "podium:*" scope claims (both the RFC 6749 space-delimited "scope" and the
-// Azure-style "scp", in string or array form). It returns an error naming the
-// missing claim so each verifier wraps it in its provider-specific untrusted
-// error (auth.untrusted_runtime or auth.untrusted_token).
-func claimIdentity(claims jwt.MapClaims) (Identity, error) {
-	sub, _ := claims["sub"].(string)
+// (§6.3.3): the required subject claim named by names.Subject (default "sub"),
+// plus email, org_id, the group claim named by names.Groups (default "groups"),
+// and the fine-grained "podium:*" scope claims (both the RFC 6749
+// space-delimited "scope" and the Azure-style "scp", in string or array form).
+// The subject claim is read exactly, with no fallback to another key, so a
+// token that does not carry the named claim is rejected. The group claim is
+// read in the array form, where each string element is one group, and in the
+// single-string form an IdP emits for a caller in exactly one group, where the
+// whole value is one group name and is not split on any separator.
+// claimIdentity returns an error naming the missing claim so each verifier
+// wraps it in its provider-specific untrusted error (auth.untrusted_runtime or
+// auth.untrusted_token).
+func claimIdentity(claims jwt.MapClaims, names claimNames) (Identity, error) {
+	subKey := "sub"
+	if names.Subject != "" {
+		subKey = names.Subject
+	}
+	sub, _ := claims[subKey].(string)
 	if sub == "" {
-		return Identity{}, errors.New("sub claim missing")
+		return Identity{}, fmt.Errorf("%s claim missing", subKey)
 	}
 	id := Identity{Sub: sub, IsAuthenticated: true}
 	if email, ok := claims["email"].(string); ok {
@@ -228,9 +249,18 @@ func claimIdentity(claims jwt.MapClaims) (Identity, error) {
 	if org, ok := claims["org_id"].(string); ok {
 		id.OrgID = org
 	}
-	if groups, ok := claims["groups"].([]any); ok {
+	groupsKey := "groups"
+	if names.Groups != "" {
+		groupsKey = names.Groups
+	}
+	switch groups := claims[groupsKey].(type) {
+	case string:
+		if groups != "" {
+			id.Groups = append(id.Groups, groups)
+		}
+	case []any:
 		for _, g := range groups {
-			if s, ok := g.(string); ok {
+			if s, ok := g.(string); ok && s != "" {
 				id.Groups = append(id.Groups, s)
 			}
 		}
