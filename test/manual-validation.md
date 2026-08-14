@@ -2375,9 +2375,12 @@ allowlist, and the per-receiver `debounce` field.
 **Goal.** Validate that an access token issued by a live OIDC IdP authenticates
 against a directly-reachable `oidc-jwt` registry (§6.3.3) and resolves
 group-scoped layer visibility (§4.6). The scenario has a baseline part that runs
-against any IdP in the §6.3.1 tested list and an AD FS profile part that covers
-the split issuer, `PODIUM_OAUTH_SUBJECT_CLAIM`, and the claim-type-URI group
-claim against a live farm.
+against any IdP in the §6.3.1 tested list whose tenant emits a group claim on
+the access token, and an AD FS profile part that covers the split issuer,
+`PODIUM_OAUTH_SUBJECT_CLAIM`, and the claim-type-URI group claim against a live
+farm. The baseline part reads the group claim under the name the tenant emits,
+so a namespaced or vendor-specific claim name is configuration rather than a
+blocker.
 
 **Covers.** The split issuer, both claim names, and the single-string group
 encoding are asserted against a synthetic IdP by the unit tests in
@@ -2391,9 +2394,22 @@ through verification to resolved visibility.
 - An OIDC IdP whose discovery document is reachable from the registry host over
   `https` at `<issuer>/.well-known/openid-configuration`. A free Okta or Entra
   ID developer tenant is enough for the baseline part.
-- A client registered on that IdP that can complete an authorization-code or a
-  device-code grant, and whose access token the runner can read.
+- A client registered on that IdP and enabled for the device authorization
+  grant, on a tenant whose discovery document publishes
+  `device_authorization_endpoint`. Every step below reads the token through that
+  grant. When the tenant cannot enable it, skip the scenario and record the skip
+  and the reason.
 - An `aud` value the issued access token carries, for `PODIUM_OAUTH_AUDIENCE`.
+- An access token that is a JWT the registry can verify, carrying that `aud` and
+  a group claim for the test user. Okta issues a JWT from a custom authorization
+  server such as `/oauth2/default` and an opaque token from the org server.
+  Okta, Entra ID, and Auth0 each require tenant-side claim or scope
+  configuration before a group claim reaches the access token, and Auth0 admits
+  a namespaced claim name only (`docs/deployment/oidc/auth0.md`). Step 7 sets
+  `PODIUM_OAUTH_GROUPS_CLAIM` when the emitted claim carries a name other than
+  `groups`. When the tenant cannot be configured to emit a group claim, run the
+  baseline part without the group-scoped layer and record the skip and the
+  reason against this prerequisite.
 - For the AD FS profile part, an AD FS farm whose issuance rules emit a group
   claim on the access token. When no farm is available, skip that part and
   record the skip and the reason.
@@ -2414,30 +2430,60 @@ raw device-code exchange with `curl`.
    ```
 
 2. Read the discovery document and take the device-code and token endpoints from
-   it, so the step does not depend on one vendor's URL layout.
+   it, so the step does not depend on one vendor's URL layout. A discovery
+   document that publishes no `device_authorization_endpoint` fails this step
+   with a named message, and the run is skipped against the device-grant
+   prerequisite.
 
    ```bash
    curl -sf "$ISSUER/.well-known/openid-configuration" > "$WORK/discovery.json"
-   ep() { python3 -c "import json,sys;print(json.load(open(sys.argv[1]))[sys.argv[2]])" "$WORK/discovery.json" "$1"; }
-   DEV_EP=$(ep device_authorization_endpoint)
+   ep() { python3 -c "import json,sys;d=json.load(open(sys.argv[1]));k=sys.argv[2];print(d[k]) if k in d else sys.exit('discovery document publishes no '+k)" "$WORK/discovery.json" "$1"; }
+   DEV_EP=$(ep device_authorization_endpoint) || echo "skip: the tenant publishes no device authorization endpoint"
    TOK_EP=$(ep token_endpoint)
    ```
 
-3. Run the device-code grant. Open the printed `verification_uri_complete` in a
-   browser, approve as the test user, then exchange the device code.
+3. Request a device code and open the printed `verification_uri_complete` in a
+   browser. Approve as the test user before running step 4. The `scope` value
+   carries whatever the tenant needs to put a group claim on the access token:
+   an Okta authorization-server scope such as `groups`, an Entra ID app-role or
+   optional-claim configuration, or an Auth0 action that adds a namespaced
+   claim.
 
    ```bash
-   curl -s -X POST "$DEV_EP" -d "client_id=$CLIENT_ID" -d "scope=openid email groups" > "$WORK/device.json"
+   export SCOPE="openid email groups"
+   curl -s -X POST "$DEV_EP" -d "client_id=$CLIENT_ID" -d "scope=$SCOPE" > "$WORK/device.json"
    python3 -m json.tool "$WORK/device.json"
    DEVICE_CODE=$(python3 -c "import json;print(json.load(open('$WORK/device.json'))['device_code'])")
-   curl -s -X POST "$TOK_EP" \
-     -d grant_type=urn:ietf:params:oauth:grant-type:device_code \
-     -d "client_id=$CLIENT_ID" -d "device_code=$DEVICE_CODE" > "$WORK/token.json"
-   export TOKEN=$(python3 -c "import json;print(json.load(open('$WORK/token.json'))['access_token'])")
    ```
 
-4. Decode the access-token payload and record `iss`, `aud`, the subject claim,
-   and the group claim with its values.
+4. Exchange the approved device code. The loop retries while the token endpoint
+   answers `authorization_pending`, and it stops on any other response. The
+   final `python3 -m json.tool` prints the response body, which names the error
+   when the exchange did not produce an `access_token`.
+
+   ```bash
+   for _ in $(seq 1 30); do
+     curl -s -X POST "$TOK_EP" \
+       -d grant_type=urn:ietf:params:oauth:grant-type:device_code \
+       -d "client_id=$CLIENT_ID" -d "device_code=$DEVICE_CODE" > "$WORK/token.json"
+     grep -q '"access_token"' "$WORK/token.json" && break
+     grep -q 'authorization_pending' "$WORK/token.json" || break
+     sleep 5
+   done
+   python3 -m json.tool "$WORK/token.json"
+   export TOKEN=$(python3 -c "import json;print(json.load(open('$WORK/token.json')).get('access_token',''))")
+   [ -n "$TOKEN" ] || echo "no access token; approve the device code and re-run this step"
+   ```
+
+   Stop here when `TOKEN` is empty. An empty bearer reaches the registry as an
+   anonymous request, and every load below would then report the anonymous
+   result for an unrelated reason.
+
+5. Decode the access-token payload and record `iss`, `aud`, the subject claim,
+   and the group claim with its values. The decode fails when the IdP issued an
+   opaque access token, which the JWT prerequisite excludes. A payload that
+   carries no group claim means the tenant is not configured to emit one, and
+   the group-scoped steps are skipped against that prerequisite.
 
    ```bash
    claims() {
@@ -2451,18 +2497,20 @@ raw device-code exchange with `curl`.
    claims "$TOKEN"
    ```
 
-5. Put the raw group value from step 4 in the layer's `groups:` list. With
+6. Put the raw group value from step 5 in the layer's `groups:` list. With
    `PODIUM_IDP_GROUP_MAPPING` unset the claim values pass through unmapped, so
    `groups:` lists the value the token carries (an Entra ID group object ID, an
    Okta group name, or whatever the IdP emits). A run that prefers a readable
    layer config instead sets `PODIUM_IDP_GROUP_MAPPING="<raw value>=engineering"`
-   at step 6 and lists `engineering`. Record which form the run used. The
+   at step 7 and lists `engineering`. Record which form the run used. The
    YAML values are single-quoted, because a group value that contains a
    backslash (`ACME\Engineering`) fails to parse inside YAML double quotes and
-   the server logs `warning: ignored registry.yaml` and serves no layers.
+   the server logs `warning: ignored registry.yaml` and serves no layers. A run
+   skipping the group-scoped layer per the Prerequisites writes the
+   `public-handbook` layer alone.
 
    ```bash
-   export GROUP='<raw group value from step 4>'
+   export GROUP='<raw group value from step 5>'
    mkdir -p "$WORK/pub/handbook" "$WORK/eng/deploy"
    podium artifact scaffold --type context --description "Company handbook" --force "$WORK/pub/handbook"
    podium artifact scaffold --type skill --description "Engineering deploy" --force "$WORK/eng/deploy"
@@ -2478,14 +2526,19 @@ raw device-code exchange with `curl`.
    YAML
    ```
 
-6. Boot the standalone server under `oidc-jwt` and read the provider line from
+7. Boot the standalone server under `oidc-jwt` and read the provider line from
    the startup log. The registry fetches the discovery document and the JWKS at
-   startup, so this step fails closed when the IdP is unreachable.
+   startup, so this step fails closed when the IdP is unreachable. Export
+   `PODIUM_OAUTH_GROUPS_CLAIM` when the group claim observed at step 5 carries a
+   name other than `groups`. Auth0 is that case, because it admits a namespaced
+   claim name only. Leave the variable unset when the token carries a claim
+   named `groups`.
 
    ```bash
    export PODIUM_IDENTITY_PROVIDER=oidc-jwt
    export PODIUM_OAUTH_ISSUER="$ISSUER"
    export PODIUM_OAUTH_AUDIENCE="$AUD"
+   # export PODIUM_OAUTH_GROUPS_CLAIM='<group claim name from step 5>'
    podium serve --standalone --no-embeddings --config "$WORK/registry.yaml" --bind 127.0.0.1:8136 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8136/healthz
@@ -2493,10 +2546,12 @@ raw device-code exchange with `curl`.
    grep "identity provider:" "$WORK/srv.log"
    ```
 
-7. Load one artifact from each layer with the token, without it, and with a
-   tampered signature.
+8. Load one artifact from each layer with the token, without it, and with a
+   tampered signature. The first line asserts the precondition the rest of the
+   step rests on.
 
    ```bash
+   [ -n "$TOKEN" ] || echo "no access token; re-run the exchange at step 4 after approving"
    code() { curl -s -o /dev/null -w "%{http_code}\n" "$@"; }
    AUTH="Authorization: Bearer $TOKEN"
    echo "token handbook: $(code -H "$AUTH" "$URL/v1/load_artifact?id=handbook")"
@@ -2509,6 +2564,12 @@ raw device-code exchange with `curl`.
 
 **Expected (baseline part).**
 
+- Step 4 prints a token response carrying `access_token`, and `TOKEN` is
+  non-empty. An empty `TOKEN` fails the run at that step.
+- Step 5 prints a decoded payload whose `aud` matches `PODIUM_OAUTH_AUDIENCE`
+  and whose group claim carries the test user's membership. When that claim
+  carries a name other than `groups`, the name is the value step 7 exports in
+  `PODIUM_OAUTH_GROUPS_CLAIM`.
 - The startup log carries `identity provider: oidc-jwt (verifying forwarded
   tokens against accepted issuers ...)` naming the configured issuer. An IdP
   whose discovery document publishes no `access_token_issuer` leaves the
@@ -2516,8 +2577,12 @@ raw device-code exchange with `curl`.
 - The startup log carries no `warning: ignored registry.yaml` line. That warning
   means the layer config was dropped and every load below would return `404`
   for an unrelated reason.
-- `token handbook` and `token deploy` return `200`: the verified token resolves
-  the caller's group and the group-scoped layer is visible.
+- `token handbook` returns `200`: the IdP-signed token verifies against the JWKS
+  from the published discovery document and the caller sees the public layer.
+- `token deploy` returns `200`: the verified token resolves the caller's group
+  and the group-scoped layer is visible. A run that skipped the group claim per
+  the Prerequisites has no `eng-internal` layer and records the skip in place of
+  this line.
 - `anon handbook` returns `200` and `anon deploy` returns `404`: a request
   carrying no token is anonymous and sees public visibility only.
 - The tampered request returns `401` with `auth.untrusted_token` and
@@ -2551,7 +2616,7 @@ FS farm is available.
    python3 -c "import json;d=json.load(open('$HOME/projects/podium/test/fixtures/adfs-openid-configuration.redacted.json'));print(d['issuer']);print(d.get('access_token_issuer'));print(d['jwks_uri'])"
    ```
 
-3. Acquire an AD FS access token through steps 2 to 4 of the baseline part,
+3. Acquire an AD FS access token through steps 2 to 5 of the baseline part,
    which read the device-code and token endpoints from this discovery document.
    Record the token's `iss`, the value of the subject claim, and the value of
    the group claim `http://schemas.microsoft.com/ws/2008/06/identity/claims/groups`.
@@ -2612,7 +2677,8 @@ FS farm is available.
 
 7. Confirm that the same token is rejected without the subject setting. Stop the
    server, unset `PODIUM_OAUTH_SUBJECT_CLAIM`, boot again on another port, and
-   replay the token.
+   replay the token. The `code` helper prints the status, and the second `curl`
+   prints the error body.
 
    ```bash
    kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
@@ -2620,6 +2686,7 @@ FS farm is available.
    podium serve --standalone --no-embeddings --config "$WORK/adfs.yaml" --bind 127.0.0.1:8138 > "$WORK/adfs-nosub.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8138/healthz
+   echo "nosub handbook: $(code -H "$AUTH" "http://127.0.0.1:8138/v1/load_artifact?id=handbook")"
    curl -s -H "$AUTH" "http://127.0.0.1:8138/v1/load_artifact?id=handbook"
    ```
 
@@ -2639,9 +2706,9 @@ FS farm is available.
   `https` discovery document, the claim-type-URI group claim resolves the
   group-scoped layer, and the configured subject claim resolves the `users:`
   layer.
-- Step 7 returns `401` with `auth.untrusted_token`: the AD FS access token
-  carries no `sub`, so the default subject claim rejects it and the deployment
-  requires `PODIUM_OAUTH_SUBJECT_CLAIM`.
+- Step 7 prints `nosub handbook: 401` and an `auth.untrusted_token` body: the AD
+  FS access token carries no `sub`, so the default subject claim rejects it and
+  the deployment requires `PODIUM_OAUTH_SUBJECT_CLAIM`.
 
 **Cleanup.** Stop any server still running and `rm -rf "$WORK"`. Keep
 `test/fixtures/adfs-openid-configuration.redacted.json`, which lives in the
