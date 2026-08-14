@@ -169,7 +169,6 @@ func bearer(tok string) map[string]string {
 // and an array `groups` claim, so this is the profile a deployment gets with
 // neither claim-name setting configured.
 func TestOIDCJWT_DefaultClaimsVisibility(t *testing.T) {
-	t.Parallel()
 	requireCustomTrustStore(t)
 	idp := startOIDCTestIdP(t, "")
 	srv := gwOIDCServer(t, idp)
@@ -211,7 +210,6 @@ func TestOIDCJWT_DefaultClaimsVisibility(t *testing.T) {
 // membership comes from the claim PODIUM_OAUTH_GROUPS_CLAIM names in the
 // single-string form an IdP emits for a caller in exactly one group.
 func TestOIDCJWT_ADFSProfileVisibility(t *testing.T) {
-	t.Parallel()
 	requireCustomTrustStore(t)
 	idp := startOIDCTestIdP(t, adfsTokenIssuer)
 	srv := gwOIDCServer(t, idp,
@@ -291,7 +289,6 @@ func TestOIDCJWT_ADFSProfileVisibility(t *testing.T) {
 // document is unreachable, rather than serving a registry whose tokens it
 // cannot verify. This drives the Prime failure branch through the binary.
 func TestOIDCJWT_UnreachableIssuerRefusesBoot(t *testing.T) {
-	t.Parallel()
 	idp := startOIDCTestIdP(t, "")
 	unreachable := idp.srv.URL
 	idp.srv.Close() // the URL still parses as https and now refuses connections
