@@ -1,8 +1,11 @@
 package serverboot
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -168,6 +171,80 @@ func TestEnvBoolPtr_TriState(t *testing.T) {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+// identityKeyGuard is one key of the §13.12 `identity_provider:` object: the
+// config-file key name, the value the guard writes under it, and a reader for
+// the Config field the overlay must land in.
+type identityKeyGuard struct {
+	key   string
+	value string
+	got   func(*Config) string
+}
+
+// Spec: §13.12 — every key the `identity_provider:` object holds
+// reaches its resolved Config field. readYAMLConfig decodes non-strictly, so a
+// key that §13.12 documents but yamlIdentityCfg does not declare is dropped
+// without an error; the per-key assertion below is what reports that drift.
+func TestReadYAMLConfig_IdentityProviderKeysRoundTrip(t *testing.T) {
+	guards := []identityKeyGuard{
+		{"type", "oidc-jwt", func(c *Config) string { return c.identityProvider }},
+		{"audience", "https://podium.acme.com", func(c *Config) string { return c.oauthAudience }},
+		{"authorization_endpoint", "https://acme.okta.com/oauth2/default", func(c *Config) string {
+			return c.oauthAuthorizationEndpoint
+		}},
+		{"issuer", "https://idp.acme.com/adfs", func(c *Config) string { return c.oauthIssuer }},
+		{"token_header", "X-Podium-Token", func(c *Config) string { return c.oauthTokenHeader }},
+		{"subject_claim", "upn", func(c *Config) string { return c.oauthSubjectClaim }},
+		{"groups_claim", "roles", func(c *Config) string { return c.oauthGroupsClaim }},
+		{"jwks_cache_ttl_seconds", "900", func(c *Config) string {
+			return strconv.Itoa(c.oauthJWKSCacheTTLSeconds)
+		}},
+	}
+	var body strings.Builder
+	body.WriteString("registry:\n  identity_provider:\n")
+	for _, g := range guards {
+		fmt.Fprintf(&body, "    %s: %s\n", g.key, g.value)
+	}
+	path := filepath.Join(t.TempDir(), "registry.yaml")
+	if err := os.WriteFile(path, []byte(body.String()), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	t.Setenv("PODIUM_CONFIG_FILE", path)
+	y, err := readYAMLConfig()
+	if err != nil {
+		t.Fatalf("readYAMLConfig: %v", err)
+	}
+	if y == nil {
+		t.Fatal("yamlConfig nil; the registry: block did not parse")
+	}
+	c := &Config{}
+	applyYAML(c, y)
+	for _, g := range guards {
+		t.Run(g.key, func(t *testing.T) {
+			if got := g.got(c); got != g.value {
+				t.Errorf("identity_provider.%s resolved to %q, want %q", g.key, got, g.value)
+			}
+		})
+	}
+}
+
+// Spec: §13.12 — PODIUM_OAUTH_SUBJECT_CLAIM and
+// PODIUM_OAUTH_GROUPS_CLAIM beat the registry.yaml keys, matching the standard
+// env-beats-yaml precedence. loadConfig fills both fields from the environment
+// before applyYAML runs, so a non-empty field already carries the env value.
+func TestApplyYAML_IdentityClaimNamesEnvWins(t *testing.T) {
+	c := &Config{oauthSubjectClaim: "upn", oauthGroupsClaim: "roles"}
+	applyYAML(c, &yamlConfig{Identity: yamlIdentityCfg{
+		SubjectClaim: "email",
+		GroupsClaim:  "wids",
+	}})
+	if c.oauthSubjectClaim != "upn" {
+		t.Errorf("oauthSubjectClaim = %q, want upn (env beats yaml)", c.oauthSubjectClaim)
+	}
+	if c.oauthGroupsClaim != "roles" {
+		t.Errorf("oauthGroupsClaim = %q, want roles (env beats yaml)", c.oauthGroupsClaim)
+	}
+}
 
 // Spec: §13.10 — readYAMLConfig returns (nil, nil) when the file is
 // absent, so loadConfig falls through to env defaults.
