@@ -1,7 +1,7 @@
 # Proposal 0006: AD FS compatibility for the `oidc-jwt` identity provider
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-08-13). Converged after 3 adversarial review rounds (4 findings fixed). Open question 1 is resolved in favor of unconditional acceptance.
+- Status: Implemented (2026-08-14). Converged after 3 adversarial review rounds (4 findings fixed). Open question 1 is resolved in favor of unconditional acceptance.
 - Date: 2026-08-13
 
 ## Summary
