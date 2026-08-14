@@ -1103,7 +1103,16 @@ func run(ctx context.Context, stop func()) error {
 			if err := oidcJWTConfigGuard(cfg.identityProvider, cfg.oauthIssuer, cfg.oauthAudience); err != nil {
 				return err
 			}
-			verifier := identity.NewOIDCVerifier(cfg.oauthIssuer, cfg.oauthAudience, time.Duration(cfg.oauthJWKSCacheTTLSeconds)*time.Second)
+			// §6.3.3: an empty claim name leaves the default in place, so the
+			// verifier reads "sub" and "groups" unless the deployment names
+			// other claims.
+			verifier := identity.NewOIDCVerifier(
+				cfg.oauthIssuer,
+				cfg.oauthAudience,
+				time.Duration(cfg.oauthJWKSCacheTTLSeconds)*time.Second,
+				identity.WithSubjectClaim(cfg.oauthSubjectClaim),
+				identity.WithGroupsClaim(cfg.oauthGroupsClaim),
+			)
 			// §6.3.3: fail to start if the IdP discovery document or JWKS is
 			// unreachable at boot, rather than serve an unverifiable registry.
 			if err := verifier.Prime(); err != nil {
@@ -1112,7 +1121,17 @@ func run(ctx context.Context, stop func()) error {
 			layerVerify = oidcJWTVerifier(verifier, cfg.oauthTokenHeader, cfg.idpGroupMapping)
 			bootOpts = append(bootOpts, server.WithIdentityVerifier(layerVerify))
 			verifierInstalled = true
-			log.Printf("identity provider: oidc-jwt (verifying forwarded tokens against issuer %s)", cfg.oauthIssuer)
+			// §6.3.3: the accepted set is the configured issuer plus the
+			// access_token_issuer the discovery document published, which is
+			// known only after Prime and never reaches Settings(). This line is
+			// the operator-visible record of the widened set.
+			log.Printf("identity provider: oidc-jwt (verifying forwarded tokens against accepted issuers %s)", strings.Join(verifier.AcceptedIssuers(), ", "))
+			if cfg.oauthSubjectClaim != "" {
+				log.Printf("identity provider: oidc-jwt reads the caller subject from claim %q", cfg.oauthSubjectClaim)
+			}
+			if cfg.oauthGroupsClaim != "" {
+				log.Printf("identity provider: oidc-jwt reads group membership from claim %q", cfg.oauthGroupsClaim)
+			}
 		}
 		if cfg.identityProvider == "trusted-headers" {
 			// §6.3.3: trust gateway-injected identity headers. The bind
@@ -1468,13 +1487,25 @@ type Config struct {
 	// oauthIssuer is the §6.3.3 / §13.12 OIDC issuer URL for the oidc-jwt
 	// provider (PODIUM_OAUTH_ISSUER or identity_provider.issuer). The registry
 	// derives the JWKS from ${issuer}/.well-known/openid-configuration and
-	// validates the forwarded token's iss against it. Must use https.
+	// validates the forwarded token's iss against this value or against the
+	// access_token_issuer that same document publishes. Must use https.
 	oauthIssuer string
 	// oauthTokenHeader is the §6.3.3 / §13.12 header the oidc-jwt provider reads
 	// the forwarded JWT from (PODIUM_OAUTH_TOKEN_HEADER or
 	// identity_provider.token_header). Default Authorization; the value is parsed
 	// as "Bearer <token>" regardless of header name.
 	oauthTokenHeader string
+	// oauthSubjectClaim is the §6.3.3 / §13.12 claim the oidc-jwt provider reads
+	// as the caller's subject (PODIUM_OAUTH_SUBJECT_CLAIM or
+	// identity_provider.subject_claim). When set, the registry reads that claim
+	// alone and rejects a token that does not carry it; empty reads "sub".
+	oauthSubjectClaim string
+	// oauthGroupsClaim is the §6.3.3 / §13.12 claim the oidc-jwt provider reads
+	// for group membership (PODIUM_OAUTH_GROUPS_CLAIM or
+	// identity_provider.groups_claim). Empty reads "groups". The values are
+	// rewritten by the §6.3.1 IdpGroupMapping adapter before they are matched
+	// against a layer's groups: filter.
+	oauthGroupsClaim string
 	// oauthJWKSCacheTTLSeconds is the §13.12 max age in seconds of the cached
 	// issuer JWKS for oidc-jwt (PODIUM_OAUTH_JWKS_CACHE_TTL_SECONDS or
 	// identity_provider.jwks_cache_ttl_seconds). Non-positive means the §13.12
@@ -1713,6 +1744,8 @@ func (c *Config) Settings() []Setting {
 		{"identity_provider.authorization_endpoint", c.oauthAuthorizationEndpoint, envOrSrc("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT", yamlSrc)},
 		{"identity_provider.issuer", c.oauthIssuer, envOrSrc("PODIUM_OAUTH_ISSUER", yamlSrc)},
 		{"identity_provider.token_header", c.oauthTokenHeader, envOrSrc("PODIUM_OAUTH_TOKEN_HEADER", yamlSrc)},
+		{"identity_provider.subject_claim", c.oauthSubjectClaim, envOrSrc("PODIUM_OAUTH_SUBJECT_CLAIM", yamlSrc)},
+		{"identity_provider.groups_claim", c.oauthGroupsClaim, envOrSrc("PODIUM_OAUTH_GROUPS_CLAIM", yamlSrc)},
 		{"identity_provider.jwks_cache_ttl_seconds", intStr(c.oauthJWKSCacheTTLSeconds), envOrSrc("PODIUM_OAUTH_JWKS_CACHE_TTL_SECONDS", yamlSrc)},
 		{"trusted_proxy_secret", redact(c.trustedProxySecret), envOrSrc("PODIUM_TRUSTED_PROXY_SECRET", "")},
 		{"multi_tenant", boolStr(c.multiTenant), envOrSrc("PODIUM_MULTI_TENANT", defaultSrc)},
@@ -1783,6 +1816,8 @@ func LoadConfig() *Config {
 		oauthAuthorizationEndpoint: os.Getenv("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT"),
 		oauthIssuer:                os.Getenv("PODIUM_OAUTH_ISSUER"),
 		oauthTokenHeader:           os.Getenv("PODIUM_OAUTH_TOKEN_HEADER"),
+		oauthSubjectClaim:          os.Getenv("PODIUM_OAUTH_SUBJECT_CLAIM"),
+		oauthGroupsClaim:           os.Getenv("PODIUM_OAUTH_GROUPS_CLAIM"),
 		oauthJWKSCacheTTLSeconds:   envInt("PODIUM_OAUTH_JWKS_CACHE_TTL_SECONDS", 0),
 		trustedProxySecret:         os.Getenv("PODIUM_TRUSTED_PROXY_SECRET"),
 		multiTenant:                isTrue(os.Getenv("PODIUM_MULTI_TENANT")),

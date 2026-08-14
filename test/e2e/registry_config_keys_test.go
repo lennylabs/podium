@@ -121,3 +121,52 @@ func TestRegistryConfig_EmbeddingModelFromConfigFile(t *testing.T) {
 		t.Errorf("expected dim=3072 from the config-file model text-embedding-3-large:\n%s", log)
 	}
 }
+
+// T-registry-config-5: PODIUM_OAUTH_SUBJECT_CLAIM and PODIUM_OAUTH_GROUPS_CLAIM
+// name the claims the oidc-jwt verifier reads as the caller's subject and group
+// membership (§6.3.3). `config show --server` reports each under its
+// config-file key with the env var as the source.
+func TestRegistryConfig_OAuthClaimNamesFromEnv(t *testing.T) {
+	t.Parallel()
+	const groupsClaim = "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups"
+	env := []string{
+		"PODIUM_OAUTH_SUBJECT_CLAIM=idsub",
+		"PODIUM_OAUTH_GROUPS_CLAIM=" + groupsClaim,
+		"PODIUM_REGISTRY=",
+	}
+	for _, tc := range []struct{ name, wantValue, wantSource string }{
+		{"identity_provider.subject_claim", "idsub", "PODIUM_OAUTH_SUBJECT_CLAIM"},
+		{"identity_provider.groups_claim", groupsClaim, "PODIUM_OAUTH_GROUPS_CLAIM"},
+	} {
+		value, source, found := rcShowSetting(t, env, tc.name)
+		if !found {
+			t.Errorf("config show --server has no %s row", tc.name)
+			continue
+		}
+		if value != tc.wantValue || source != tc.wantSource {
+			t.Errorf("%s = (%q, %q), want (%q, %q)", tc.name, value, source, tc.wantValue, tc.wantSource)
+		}
+	}
+}
+
+// T-registry-config-6: with both env vars unset, the rows report an empty
+// value, which is the §13.12 default that leaves the verifier on sub and
+// groups.
+func TestRegistryConfig_OAuthClaimNamesUnsetByDefault(t *testing.T) {
+	t.Parallel()
+	env := []string{
+		"PODIUM_OAUTH_SUBJECT_CLAIM=",
+		"PODIUM_OAUTH_GROUPS_CLAIM=",
+		"PODIUM_REGISTRY=",
+	}
+	for _, name := range []string{"identity_provider.subject_claim", "identity_provider.groups_claim"} {
+		value, _, found := rcShowSetting(t, env, name)
+		if !found {
+			t.Errorf("config show --server has no %s row", name)
+			continue
+		}
+		if value != "" {
+			t.Errorf("%s value = %q, want empty", name, value)
+		}
+	}
+}
