@@ -87,7 +87,10 @@ var oidcAllowedAlgs = []string{"RS256", "RS384", "RS512", "ES256", "ES384", "ES5
 // (§6.3.3 oidc-jwt). It resolves the JWKS URI from the issuer's OIDC discovery
 // document at ${issuer}/.well-known/openid-configuration and caches the key set
 // for cacheTTL, refreshing when the cache is older than cacheTTL or when a
-// token presents a kid absent from the cached set (key rotation).
+// token presents a kid absent from the cached set (key rotation). It accepts a
+// token whose iss is the configured issuer or the access_token_issuer that same
+// discovery document publishes; the signing keys come from the configured
+// issuer's jwks_uri under either accepted value.
 type OIDCVerifier struct {
 	issuer   string
 	audience string
@@ -97,10 +100,15 @@ type OIDCVerifier struct {
 	httpc *http.Client
 	clock func() time.Time
 
-	mu        sync.Mutex
-	jwksURI   string
-	keys      map[string]any // kid -> *rsa.PublicKey | *ecdsa.PublicKey | ed25519.PublicKey
-	fetchedAt time.Time
+	mu      sync.Mutex
+	jwksURI string
+	// accessTokenIssuer is the access_token_issuer the configured issuer's
+	// discovery document publishes, trailing-slash-trimmed like issuer, and
+	// empty when the document names none (§6.3.3). It is a second accepted
+	// value for a token's iss claim and is never dereferenced.
+	accessTokenIssuer string
+	keys              map[string]any // kid -> *rsa.PublicKey | *ecdsa.PublicKey | ed25519.PublicKey
+	fetchedAt         time.Time
 }
 
 // NewOIDCVerifier returns a verifier for issuer that validates the aud claim
@@ -134,14 +142,17 @@ func (v *OIDCVerifier) Prime() error {
 
 // Verify checks raw against the issuer's JWKS and returns the attested
 // Identity. It returns ErrTokenExpired for an expired token and an
-// *UntrustedTokenError for any other verification failure (bad signature,
-// wrong iss, wrong/missing aud, malformed token).
+// *UntrustedTokenError for any other verification failure (bad signature, an
+// iss outside the accepted issuers, wrong/missing aud, malformed token).
 func (v *OIDCVerifier) Verify(raw string) (Identity, error) {
 	if raw == "" {
 		return Identity{}, untrustedToken("", "empty token")
 	}
 	// Parse without verification to read iss and select the issuer before
-	// trusting any signature, mirroring the §6.3.2 runtime verifier.
+	// trusting any signature, mirroring the §6.3.2 runtime verifier. The
+	// verifying parse below re-decodes and verifies this same payload segment,
+	// so once it returns without error this claim map is the signature-verified
+	// payload and the identity is derived from it directly.
 	parsed, _, err := jwt.NewParser().ParseUnverified(raw, jwt.MapClaims{})
 	if err != nil {
 		return Identity{}, untrustedToken("", err.Error())
@@ -154,8 +165,8 @@ func (v *OIDCVerifier) Verify(raw string) (Identity, error) {
 	if issuer == "" {
 		return Identity{}, untrustedToken("", "iss claim missing")
 	}
-	if issuer != v.issuer {
-		return Identity{}, untrustedToken(issuer, fmt.Sprintf("iss %q does not match the configured issuer %q", issuer, v.issuer))
+	if !v.issuerAccepted(issuer) {
+		return Identity{}, untrustedToken(issuer, fmt.Sprintf("iss %q does not match the accepted issuers %q", issuer, v.AcceptedIssuers()))
 	}
 	if v.audience == "" {
 		// Defense in depth: the §13.12 config.oidc_jwt_audience_unset startup
@@ -176,8 +187,13 @@ func (v *OIDCVerifier) Verify(raw string) (Identity, error) {
 		return Identity{}, untrustedToken(issuer, err.Error())
 	}
 
+	// The options carry no issuer check. A token's iss is checked above against
+	// the configured issuer and the discovery document's access_token_issuer
+	// (§6.3.3), and jwt.WithIssuer admits a single expected value, so it cannot
+	// carry that rule. jwt.Parser.Parse re-decodes and then verifies the same
+	// payload segment ParseUnverified read above, so the claim map the identity
+	// is derived from is the signature-verified payload once Parse returns.
 	opts := []jwt.ParserOption{
-		jwt.WithIssuer(v.issuer),
 		jwt.WithAudience(v.audience),
 		jwt.WithExpirationRequired(),
 		jwt.WithValidMethods(oidcAllowedAlgs),
@@ -199,6 +215,35 @@ func (v *OIDCVerifier) Verify(raw string) (Identity, error) {
 		return Identity{}, untrustedToken(issuer, err.Error())
 	}
 	return id, nil
+}
+
+// issuerAccepted reports whether iss is the configured issuer or the
+// access_token_issuer the configured issuer's discovery document published
+// (§6.3.3). Both accepted values and iss are trailing-slash-trimmed under the
+// same rule, so the two comparisons cannot diverge. The second value is set
+// when the discovery document is resolved, which Prime does at boot.
+func (v *OIDCVerifier) issuerAccepted(iss string) bool {
+	iss = strings.TrimRight(iss, "/")
+	if iss == v.issuer {
+		return true
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.accessTokenIssuer != "" && iss == v.accessTokenIssuer
+}
+
+// AcceptedIssuers returns the issuer values a token's iss claim is accepted
+// under (§6.3.3): the configured issuer, followed by the access_token_issuer
+// the discovery document published when it names one. The registry logs these
+// values at startup, and the rejection message for an unaccepted iss names
+// them.
+func (v *OIDCVerifier) AcceptedIssuers() []string {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.accessTokenIssuer == "" {
+		return []string{v.issuer}
+	}
+	return []string{v.issuer, v.accessTokenIssuer}
 }
 
 // keyForKID returns the verification key for kid, refreshing the JWKS once on a
@@ -246,15 +291,18 @@ func (v *OIDCVerifier) selectKey(kid string) any {
 	return nil
 }
 
-// refreshLocked re-resolves the JWKS URI (when unknown) and re-fetches the key
-// set. Caller holds v.mu.
+// refreshLocked re-resolves the discovery document (when the JWKS URI is
+// unknown) and re-fetches the key set. Both discovery-derived values are
+// resolved on that single call, so a later JWKS refresh on TTL expiry or on a
+// kid miss leaves the second accepted issuer in place. Caller holds v.mu.
 func (v *OIDCVerifier) refreshLocked() error {
 	if v.jwksURI == "" {
-		uri, err := v.discoverJWKSURI()
+		uri, accessTokenIssuer, err := v.discoverJWKSURI()
 		if err != nil {
 			return err
 		}
 		v.jwksURI = uri
+		v.accessTokenIssuer = strings.TrimRight(accessTokenIssuer, "/")
 	}
 	keys, err := v.fetchJWKS(v.jwksURI)
 	if err != nil {
@@ -265,23 +313,28 @@ func (v *OIDCVerifier) refreshLocked() error {
 	return nil
 }
 
-// discoverJWKSURI reads jwks_uri from the issuer's OIDC discovery document.
-func (v *OIDCVerifier) discoverJWKSURI() (string, error) {
+// discoverJWKSURI reads jwks_uri and access_token_issuer from the issuer's OIDC
+// discovery document. A document that names no access_token_issuer yields an
+// empty second value, which leaves the configured issuer as the sole accepted
+// issuer (§6.3.3). A missing jwks_uri is an error, because the key set cannot
+// be resolved without it.
+func (v *OIDCVerifier) discoverJWKSURI() (jwksURI, accessTokenIssuer string, err error) {
 	url := v.issuer + "/.well-known/openid-configuration"
 	body, err := v.getJSON(url)
 	if err != nil {
-		return "", fmt.Errorf("fetch discovery document %s: %w", url, err)
+		return "", "", fmt.Errorf("fetch discovery document %s: %w", url, err)
 	}
 	var doc struct {
-		JWKSURI string `json:"jwks_uri"`
+		JWKSURI           string `json:"jwks_uri"`
+		AccessTokenIssuer string `json:"access_token_issuer"`
 	}
 	if err := json.Unmarshal(body, &doc); err != nil {
-		return "", fmt.Errorf("parse discovery document %s: %w", url, err)
+		return "", "", fmt.Errorf("parse discovery document %s: %w", url, err)
 	}
 	if doc.JWKSURI == "" {
-		return "", fmt.Errorf("discovery document %s has no jwks_uri", url)
+		return "", "", fmt.Errorf("discovery document %s has no jwks_uri", url)
 	}
-	return doc.JWKSURI, nil
+	return doc.JWKSURI, doc.AccessTokenIssuer, nil
 }
 
 // jwk is one JSON Web Key from a JWKS (RFC 7517). Only the fields needed to
