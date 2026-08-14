@@ -243,8 +243,11 @@ func TestOIDCJWT_ADFSProfileVisibility(t *testing.T) {
 		t.Errorf("token under the configured issuer = %d, want 200\nbody: %s\nlog:\n%s", st, body, srv.log())
 	}
 
-	// A token from neither accepted issuer is rejected, so the widened set is
-	// two values rather than any value.
+	// A token from neither accepted issuer is rejected with
+	// auth.untrusted_token, so the widened set is two values rather than any
+	// value. §6.3.3 rejects a token that fails iss validation rather than
+	// treating the request as anonymous, which is what a request carrying no
+	// token gets.
 	foreign := idp.token(t, jwt.MapClaims{
 		"iss":          "https://evil.example/adfs",
 		"aud":          "https://podium.acme.example",
@@ -252,8 +255,9 @@ func TestOIDCJWT_ADFSProfileVisibility(t *testing.T) {
 		adfsGroupClaim: "engineering",
 		"exp":          time.Now().Add(time.Hour).Unix(),
 	})
-	if st, _ := gwHeaderGet(t, srv.BaseURL+"/v1/load_artifact?id=secret", bearer(foreign)); st != 404 {
-		t.Errorf("token from an unaccepted issuer = %d, want 404 (anonymous)", st)
+	st, body := gwHeaderGet(t, srv.BaseURL+"/v1/load_artifact?id=secret", bearer(foreign))
+	if st != 401 || !strings.Contains(string(body), "auth.untrusted_token") {
+		t.Errorf("token from an unaccepted issuer = %d %s, want 401 auth.untrusted_token", st, body)
 	}
 
 	// A token carrying only `sub` is rejected once a subject claim is
@@ -265,8 +269,9 @@ func TestOIDCJWT_ADFSProfileVisibility(t *testing.T) {
 		adfsGroupClaim: "engineering",
 		"exp":          time.Now().Add(time.Hour).Unix(),
 	})
-	if st, _ := gwHeaderGet(t, srv.BaseURL+"/v1/load_artifact?id=secret", bearer(subOnly)); st != 404 {
-		t.Errorf("token carrying only sub under a configured subject claim = %d, want 404 (anonymous)", st)
+	st, body = gwHeaderGet(t, srv.BaseURL+"/v1/load_artifact?id=secret", bearer(subOnly))
+	if st != 401 || !strings.Contains(string(body), "auth.untrusted_token") {
+		t.Errorf("token carrying only sub under a configured subject claim = %d %s, want 401 auth.untrusted_token", st, body)
 	}
 
 	log := srv.log()
