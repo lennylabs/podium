@@ -123,7 +123,7 @@ layers:
       groups: [engineering]
 ```
 
-A user with `engineering` in `app_metadata.groups` sees the layer; a user without it does not.
+Group-scoped visibility resolves on a registry running `oidc-jwt` with `identity_provider.groups_claim` (`PODIUM_OAUTH_GROUPS_CLAIM`) set to the namespaced path the Action emits, and with `IdpGroupMapping` configured when those claim values have to be rewritten to registry-side group names. On such a registry a user with `engineering` in `app_metadata.groups` sees the layer, and a user without it does not. See [gateway-delegated identity](../gateway-delegated-identity) for that configuration.
 
 ## Troubleshooting
 
