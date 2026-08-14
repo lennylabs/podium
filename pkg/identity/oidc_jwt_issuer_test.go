@@ -178,6 +178,68 @@ func TestOIDCVerifier_AcceptedIssuers(t *testing.T) {
 	})
 }
 
+// Spec: §6.3.3 — both accepted values are named only when the published
+// access_token_issuer differs from the configured issuer. A document that
+// publishes the configured issuer itself leaves one accepted value, so the
+// startup log and the rejection message name it once rather than reporting a
+// widened accepted set.
+func TestOIDCVerifier_AccessTokenIssuerEqualsConfiguredIssuer(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		// configured is the issuer passed to NewOIDCVerifier, and published is
+		// the access_token_issuer the discovery document names. Both are built
+		// from the stub IdP's base URL.
+		configured func(base string) string
+		published  func(base string) string
+	}{
+		{
+			name:       "identical to the configured issuer",
+			configured: func(base string) string { return base },
+			published:  func(base string) string { return base },
+		},
+		{
+			name:       "published with a trailing slash",
+			configured: func(base string) string { return base },
+			published:  func(base string) string { return base + "/" },
+		},
+		{
+			name:       "configured with a trailing slash",
+			configured: func(base string) string { return base + "/" },
+			published:  func(base string) string { return base },
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			idp := newTestIdP(t)
+			idp.setAccessTokenIssuer(tc.published(idp.issuer()))
+			v := NewOIDCVerifier(tc.configured(idp.issuer()), testAudience, 300*time.Second)
+			if err := v.Prime(); err != nil {
+				t.Fatalf("Prime: %v", err)
+			}
+
+			if got, want := v.AcceptedIssuers(), []string{idp.issuer()}; !slices.Equal(got, want) {
+				t.Errorf("AcceptedIssuers() = %v, want %v", got, want)
+			}
+			if _, err := v.Verify(idp.sign(t, "key-1", validClaims(idp.issuer(), testAudience))); err != nil {
+				t.Fatalf("Verify with the configured issuer: %v", err)
+			}
+
+			// The rejection names the sole accepted value once.
+			_, err := v.Verify(idp.sign(t, "key-1", validClaims("https://evil.example", testAudience)))
+			var ute *UntrustedTokenError
+			if !errors.As(err, &ute) {
+				t.Fatalf("err = %v, want *UntrustedTokenError", err)
+			}
+			if got := strings.Count(ute.Reason, idp.issuer()); got != 1 {
+				t.Errorf("reason %q names the accepted issuer %d times, want 1", ute.Reason, got)
+			}
+		})
+	}
+}
+
 // Spec: §6.3.3 — the discovery document is read once, so the JWKS refresh a kid
 // miss forces leaves the second accepted issuer in place for the process
 // lifetime.

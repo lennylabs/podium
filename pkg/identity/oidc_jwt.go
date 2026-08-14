@@ -270,13 +270,16 @@ func (v *OIDCVerifier) issuerAccepted(iss string) bool {
 
 // AcceptedIssuers returns the issuer values a token's iss claim is accepted
 // under (§6.3.3): the configured issuer, followed by the access_token_issuer
-// the discovery document published when it names one. The registry logs these
-// values at startup, and the rejection message for an unaccepted iss names
-// them.
+// the discovery document published when that value differs from the configured
+// issuer. A document that publishes no access_token_issuer, or one that equals
+// the configured issuer after the trailing-slash trim, leaves a single accepted
+// value. The registry logs these values at startup, and the rejection message
+// for an unaccepted iss names them, so reporting one value twice would record a
+// widened accepted set that does not exist.
 func (v *OIDCVerifier) AcceptedIssuers() []string {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	if v.accessTokenIssuer == "" {
+	if v.accessTokenIssuer == "" || v.accessTokenIssuer == v.issuer {
 		return []string{v.issuer}
 	}
 	return []string{v.issuer, v.accessTokenIssuer}

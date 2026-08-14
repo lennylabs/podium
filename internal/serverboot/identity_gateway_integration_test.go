@@ -40,6 +40,10 @@ type jwksIdP struct {
 	// §6.3.3 second accepted issuer. It is written by an option before the
 	// stub starts serving, so no request observes it changing.
 	accessTokenIssuer string
+	// selfAccessTokenIssuer publishes the stub's own issuer as the
+	// access_token_issuer. The stub's base URL is known only inside the
+	// handler, so this flag stands in for a value the option cannot name.
+	selfAccessTokenIssuer bool
 }
 
 // withAccessTokenIssuer publishes iss as the stub's access_token_issuer, the
@@ -47,6 +51,13 @@ type jwksIdP struct {
 // the access token is stamped with the federation-service identifier.
 func withAccessTokenIssuer(iss string) func(*jwksIdP) {
 	return func(i *jwksIdP) { i.accessTokenIssuer = iss }
+}
+
+// withAccessTokenIssuerEqualToIssuer publishes the stub's own issuer, with a
+// trailing slash, as the access_token_issuer. The published value trims to the
+// configured issuer, so the accepted set stays one value.
+func withAccessTokenIssuerEqualToIssuer() func(*jwksIdP) {
+	return func(i *jwksIdP) { i.selfAccessTokenIssuer = true }
 }
 
 func newJWKSIdP(t *testing.T, opts ...func(*jwksIdP)) *jwksIdP {
@@ -63,7 +74,10 @@ func newJWKSIdP(t *testing.T, opts ...func(*jwksIdP)) *jwksIdP {
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		base := "http://" + r.Host
 		doc := map[string]any{"issuer": base, "jwks_uri": base + "/jwks"}
-		if idp.accessTokenIssuer != "" {
+		switch {
+		case idp.selfAccessTokenIssuer:
+			doc["access_token_issuer"] = base + "/"
+		case idp.accessTokenIssuer != "":
 			doc["access_token_issuer"] = idp.accessTokenIssuer
 		}
 		_ = json.NewEncoder(w).Encode(doc)
@@ -393,6 +407,28 @@ func TestGatewayIntegration_OIDCJWTEmptyClaimNamesKeepDefaults(t *testing.T) {
 	bob := idp.sign(t, gwClaims(idp.issuer(), "bob@acme.com", nil))
 	if st, _ := loadArtifact(t, ts.URL, "eng/secret", bearer(bob)); st != 404 {
 		t.Errorf("bob (no group) load eng/secret = %d, want 404", st)
+	}
+}
+
+// Spec: §6.3.3 — the boot line reports the accepted set the registry applies.
+// A discovery document that publishes an access_token_issuer equal to the
+// configured issuer widens nothing, so the reported set stays one value and
+// verification against the configured issuer is unchanged.
+func TestGatewayIntegration_OIDCJWTAccessTokenIssuerEqualsIssuer(t *testing.T) {
+	t.Parallel()
+	idp := newJWKSIdP(t, withAccessTokenIssuerEqualToIssuer())
+	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0)
+	if err := verifier.Prime(); err != nil {
+		t.Fatalf("Prime: %v", err)
+	}
+	if got, want := verifier.AcceptedIssuers(), []string{idp.issuer()}; !slices.Equal(got, want) {
+		t.Fatalf("AcceptedIssuers() = %v, want %v", got, want)
+	}
+	ts := gatewayServer(t, oidcJWTVerifier(verifier, "", nil))
+
+	alice := idp.sign(t, gwClaims(idp.issuer(), "alice@acme.com", []string{"engineering"}))
+	if st, _ := loadArtifact(t, ts.URL, "eng/secret", bearer(alice)); st != 200 {
+		t.Errorf("alice (engineering) load eng/secret = %d, want 200", st)
 	}
 }
 

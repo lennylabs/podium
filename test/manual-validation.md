@@ -2578,8 +2578,9 @@ implement a raw device-code exchange with `curl`.
   `PODIUM_OAUTH_GROUPS_CLAIM`.
 - The startup log carries `identity provider: oidc-jwt (verifying forwarded
   tokens against accepted issuers ...)` naming the configured issuer. An IdP
-  whose discovery document publishes no `access_token_issuer` leaves the
-  configured issuer as the sole accepted value, so the line names one value.
+  whose discovery document publishes no `access_token_issuer`, or publishes one
+  equal to the configured issuer, leaves the configured issuer as the sole
+  accepted value, so the line names one value.
 - The startup log carries no `warning: ignored registry.yaml` line. That warning
   means the layer config was dropped and every load below would return `404`
   for an unrelated reason.
