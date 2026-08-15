@@ -12,6 +12,14 @@ import (
 // captureToolStdout swaps os.Stdout, runs fn, then returns whatever
 // fn wrote. Used to assert listMatrices/scaffold prints expected
 // content.
+//
+// The caller must not be a parallel test. os.Stdout is process-wide, so the
+// swap is visible to every goroutine, and Go releases parallel tests only once
+// the sequential ones have finished. A sequential capture therefore runs while
+// nothing else does, while a capture from a parallel test runs alongside every
+// other parallel test and races with any that writes to the same stream. That
+// combination produced intermittent CI failures in cmd/podium, in whichever
+// test lost the interleaving rather than in the one that captured.
 func captureToolStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	r, w, err := os.Pipe()

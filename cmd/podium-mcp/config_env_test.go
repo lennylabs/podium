@@ -42,6 +42,16 @@ func hermetic(t *testing.T) {
 	chdirTemp(t)
 }
 
+// captureStderr redirects os.Stderr for the duration of fn and returns what fn
+// wrote.
+//
+// The caller must not be a parallel test. os.Stderr is process-wide, so the
+// swap is visible to every goroutine, and Go releases parallel tests only once
+// the sequential ones have finished. A sequential capture therefore runs while
+// nothing else does, while a capture from a parallel test runs alongside every
+// other parallel test and races with any that writes to the same stream. That
+// combination produced intermittent CI failures in cmd/podium, in whichever
+// test lost the interleaving rather than in the one that captured.
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
 	old := os.Stderr

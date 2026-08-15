@@ -8,7 +8,6 @@ import (
 )
 
 func TestMaskedToken(t *testing.T) {
-	t.Parallel()
 	cases := map[string]string{
 		"":                        "(unset)",
 		"   ":                     "(unset)",
@@ -37,7 +36,6 @@ func TestEnvOr(t *testing.T) {
 }
 
 func TestOrMissing(t *testing.T) {
-	t.Parallel()
 	if got := orMissing(""); !strings.Contains(got, "unset") {
 		t.Errorf("empty: %q", got)
 	}
@@ -110,7 +108,6 @@ func TestStatusCmd_RegistryNon200(t *testing.T) {
 }
 
 func TestDecodeHealthMode(t *testing.T) {
-	t.Parallel()
 	// Construct a real response with a JSON body.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"mode":"ready","ready":true}`))
@@ -127,7 +124,6 @@ func TestDecodeHealthMode(t *testing.T) {
 }
 
 func TestDecodeHealthMode_InvalidBodyReturnsEmpty(t *testing.T) {
-	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("not json"))
 	}))
