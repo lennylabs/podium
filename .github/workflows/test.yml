@@ -48,7 +48,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Cache go build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cache/go-build
@@ -130,7 +130,7 @@ jobs:
           echo "--- coverage-e2e.txt (subprocess) ---"
           echo "lines: $(wc -l < coverage-e2e.txt)"
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           # Codecov merges the two profiles: coverage.out carries the in-process
           # coverage, coverage-e2e.txt adds the spawned-binary lines.
@@ -173,7 +173,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: npm

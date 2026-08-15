@@ -11,7 +11,6 @@ import (
 
 // openTargetStore: unknown kind errors.
 func TestOpenTargetStore_UnknownKindErrors(t *testing.T) {
-	t.Parallel()
 	_, _, err := openTargetStore("bogus", "", "")
 	if err == nil || !strings.Contains(err.Error(), "unknown") {
 		t.Errorf("err = %v", err)
@@ -20,7 +19,6 @@ func TestOpenTargetStore_UnknownKindErrors(t *testing.T) {
 
 // openTargetStore sqlite happy path.
 func TestOpenTargetStore_SQLite(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	st, closeFn, err := openTargetStore("sqlite", "", filepath.Join(dir, "x.db"))
 	if err != nil {
@@ -34,7 +32,6 @@ func TestOpenTargetStore_SQLite(t *testing.T) {
 
 // openTargetObjectStore unknown errors.
 func TestOpenTargetObjectStore_UnknownErrors(t *testing.T) {
-	t.Parallel()
 	_, err := openTargetObjectStore("bogus", "", objectstore.S3Config{})
 	if err == nil || !strings.Contains(err.Error(), "unknown") {
 		t.Errorf("err = %v", err)
@@ -43,7 +40,6 @@ func TestOpenTargetObjectStore_UnknownErrors(t *testing.T) {
 
 // openTargetObjectStore filesystem happy.
 func TestOpenTargetObjectStore_Filesystem(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	got, err := openTargetObjectStore("filesystem", filepath.Join(dir, "objects"), objectstore.S3Config{})
 	if err != nil {
@@ -56,7 +52,6 @@ func TestOpenTargetObjectStore_Filesystem(t *testing.T) {
 
 // copyFile round-trips bytes.
 func TestCopyFile_RoundTrip(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src.txt")
 	dst := filepath.Join(dir, "sub", "dst.txt")
@@ -77,7 +72,6 @@ func TestCopyFile_RoundTrip(t *testing.T) {
 
 // copyFile with a missing src returns an error.
 func TestCopyFile_MissingSourceErrors(t *testing.T) {
-	t.Parallel()
 	if err := copyFile(filepath.Join(t.TempDir(), "missing.txt"),
 		filepath.Join(t.TempDir(), "dst.txt")); err == nil {
 		t.Errorf("expected error")

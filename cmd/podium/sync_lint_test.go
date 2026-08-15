@@ -41,7 +41,6 @@ func TestLintCmd_NoIssues(t *testing.T) {
 }
 
 func TestLintCmd_BadRegistryPathReturns1(t *testing.T) {
-	t.Parallel()
 	withStderr(t, func() {
 		rc := lintCmd([]string{"--registry", filepath.Join(t.TempDir(), "missing")})
 		if rc != 1 {

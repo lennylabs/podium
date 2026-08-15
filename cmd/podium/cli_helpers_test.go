@@ -13,7 +13,6 @@ import (
 )
 
 func TestParsePolicies_AcceptsGoDurationAndDaySuffix(t *testing.T) {
-	t.Parallel()
 	policies, err := parsePolicies([]string{
 		"artifacts.searched=720h",
 		"artifacts.viewed=30d",
@@ -33,7 +32,6 @@ func TestParsePolicies_AcceptsGoDurationAndDaySuffix(t *testing.T) {
 }
 
 func TestParsePolicies_RejectsBadInput(t *testing.T) {
-	t.Parallel()
 	for _, in := range []string{
 		"missing-equals",
 		"bad=notaduration",
@@ -46,7 +44,6 @@ func TestParsePolicies_RejectsBadInput(t *testing.T) {
 }
 
 func TestGuessTokenURL(t *testing.T) {
-	t.Parallel()
 	cases := map[string]string{
 		"https://issuer.example/oauth2/device":   "https://issuer.example/oauth2/token",
 		"https://issuer.example/v1/oauth/device": "https://issuer.example/v1/oauth/token",
@@ -61,7 +58,6 @@ func TestGuessTokenURL(t *testing.T) {
 }
 
 func TestReplaceSuffix(t *testing.T) {
-	t.Parallel()
 	if got := replaceSuffix("path/device", "/device", "/token"); got != "path/token" {
 		t.Errorf("replaceSuffix swap: got %q", got)
 	}
@@ -74,7 +70,6 @@ func TestReplaceSuffix(t *testing.T) {
 }
 
 func TestSplitOn(t *testing.T) {
-	t.Parallel()
 	cases := map[string][]string{
 		"":                      {},
 		"a":                     {"a"},
@@ -107,7 +102,6 @@ func TestEnvDefault(t *testing.T) {
 }
 
 func TestLoadSignatureProvider(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name    string
 		wantErr bool
@@ -141,7 +135,6 @@ func TestLoadSignatureProvider(t *testing.T) {
 }
 
 func TestStringSliceFlag_Set(t *testing.T) {
-	t.Parallel()
 	var s stringSliceFlag
 	if err := s.Set("a"); err != nil {
 		t.Fatalf("Set: %v", err)
@@ -157,7 +150,6 @@ func TestStringSliceFlag_Set(t *testing.T) {
 }
 
 func TestFormatToggles_EmptyAndPopulated(t *testing.T) {
-	t.Parallel()
 	if got := formatToggles(nil); got != "(none)" {
 		t.Errorf("empty = %q", got)
 	}
@@ -168,7 +160,6 @@ func TestFormatToggles_EmptyAndPopulated(t *testing.T) {
 }
 
 func TestFormatList_EmptyAndPopulated(t *testing.T) {
-	t.Parallel()
 	if got := formatList(nil); got != "(none)" {
 		t.Errorf("empty = %q", got)
 	}
@@ -262,7 +253,6 @@ func TestPrintHuman_IncludesAdapterAndArtifacts(t *testing.T) {
 // --- subcommand --help and missing-arg exit-code tests --- //
 
 func TestSubcommands_HelpExitsZero(t *testing.T) {
-	t.Parallel()
 	for name, cmd := range map[string]func([]string) int{
 		"loginCmd":              loginCmd,
 		"logoutCmd":             logoutCmd,
@@ -293,7 +283,6 @@ func TestSubcommands_HelpExitsZero(t *testing.T) {
 }
 
 func TestDispatchers_NoArgsExit2_HelpExit0(t *testing.T) {
-	t.Parallel()
 	for name, cmd := range map[string]func([]string) int{
 		"cacheCmd":        cacheCmd,
 		"configCmd":       configCmd,

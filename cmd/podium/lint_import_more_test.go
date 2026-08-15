@@ -62,7 +62,6 @@ func TestImportCmd_HappyPath(t *testing.T) {
 }
 
 func TestImportCmd_MissingSourceErrors(t *testing.T) {
-	t.Parallel()
 	withStderr(t, func() {
 		if rc := importCmd(nil); rc == 0 {
 			t.Errorf("expected non-zero")
@@ -72,7 +71,6 @@ func TestImportCmd_MissingSourceErrors(t *testing.T) {
 
 // mustGetJSON success path: real JSON response.
 func TestMustGetJSON_OK(t *testing.T) {
-	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("q") != "test" {
 			t.Errorf("query = %s", r.URL.Query().Get("q"))

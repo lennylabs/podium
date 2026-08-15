@@ -189,6 +189,8 @@ acme-agents/
 
 Each vendor manifest lists the same plugin set and points its entries at that vendor's subtree. The plugin content is per-harness because the per-plugin manifest filenames and the rule and MCP conventions differ across vendors. Each vendor manifest carries one entry per plugin keyed by the plugin name, contributed once per plugin rather than once per artifact, so an N-artifact plugin yields one plugin entry.
 
+The Claude and Cursor manifests also carry the root `owner` object those formats require. Both formats describe `owner.name` as the maintainer display name the harness shows, and both vendors publish their own marketplaces with an organization name in that field. Podium sets `owner.name` from the target `id` on every render, so the identifier `acme-agents` appears where the vendor examples carry an organization name. A hand-edited `owner.name` in the repository is replaced on the next publish, and an `owner.email` or `owner.url` added by hand survives the merge. The Codex manifest carries no `owner`, because the Codex format defines none.
+
 | Format | Root manifest | Per-plugin manifest | Components |
 |:--|:--|:--|:--|
 | Claude (Code, Desktop, Cowork) | `.claude-plugin/marketplace.json` | `.claude-plugin/plugin.json` | `skills/`, `agents/`, `commands/`, `hooks/hooks.json`, `.mcp.json` |
