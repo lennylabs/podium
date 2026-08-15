@@ -2165,9 +2165,10 @@ it to a git remote, that `--check` and `--dry-run` write nothing, and that a
 re-run against an unchanged catalog produces no new commit (§7.5.2, §7.8).
 
 **Covers.** The `kind: marketplace` target, `podium sync --config`, the Claude,
-Codex, and Cursor marketplace emitters, plugin grouping by scope filter, the
-per-target `workflow` (`prepare`/`publish`), `--check` and `--dry-run`, and
-reconciliation (`skip_if_no_changes`).
+Codex, and Cursor marketplace emitters, the root manifest keys each vendor
+format requires, plugin grouping by scope filter, the per-target `workflow`
+(`prepare`/`publish`), `--check` and `--dry-run`, and reconciliation
+(`skip_if_no_changes`).
 
 **Prerequisites.** `git` on `PATH`. No server and no live infrastructure: the
 remote is a local bare repository, so nothing is pushed off the machine. Set a
@@ -2264,14 +2265,38 @@ export GIT_COMMITTER_NAME="podium-bot" GIT_COMMITTER_EMAIL="bot@acme.com"
    ls -1 "$clone" | grep -v '^.git$'
    ```
 
-9. Re-run the sync against the unchanged catalog.
+9. Read the root keys of each vendor manifest. The Claude and Cursor formats
+   require a root `owner` object carrying a `name`, and Claude Desktop refuses
+   to import a marketplace repository whose manifest omits it. The Codex format
+   defines no `owner`.
 
    ```bash
-   before="$(git ls-remote "$REMOTE" main | cut -f1)"
-   podium sync --config "$WORK/proj/.podium/sync.yaml"
-   after="$(git ls-remote "$REMOTE" main | cut -f1)"
-   [ "$before" = "$after" ] && echo "idempotent: no new commit" || echo "ERROR: new commit"
+   python3 - "$clone" <<'PY'
+   import json, pathlib, sys
+   clone = pathlib.Path(sys.argv[1])
+   for rel in [".claude-plugin/marketplace.json",
+               ".cursor-plugin/marketplace.json",
+               ".agents/plugins/marketplace.json"]:
+       m = json.loads((clone / rel).read_text())
+       if "owner" not in m:
+           owner = "absent"
+       elif isinstance(m["owner"], dict):
+           owner = m["owner"].get("name", "object without a name")
+       else:
+           owner = f"not an object: {m['owner']!r}"
+       plugins = sorted(p["name"] for p in m["plugins"])
+       print(f"{rel}: name={m.get('name')} owner={owner} plugins={plugins}")
+   PY
    ```
+
+10. Re-run the sync against the unchanged catalog.
+
+    ```bash
+    before="$(git ls-remote "$REMOTE" main | cut -f1)"
+    podium sync --config "$WORK/proj/.podium/sync.yaml"
+    after="$(git ls-remote "$REMOTE" main | cut -f1)"
+    [ "$before" = "$after" ] && echo "idempotent: no new commit" || echo "ERROR: new commit"
+    ```
 
 **Expected.**
 
@@ -2286,7 +2311,13 @@ export GIT_COMMITTER_NAME="podium-bot" GIT_COMMITTER_EMAIL="bot@acme.com"
   and `.cursor-plugin/marketplace.json` (the three vendor manifests coexisting at
   their fixed locations) plus the per-harness `claude/`, `codex/`, and `cursor/`
   plugin subtrees.
-- Step 9 prints `idempotent: no new commit`: the render produced no diff, so
+- Step 9 prints `name=acme-agents` and `plugins=['finance-pack', 'helpers']` for
+  all three manifests. The Claude and Cursor manifests print
+  `owner=acme-agents`, taken from the target `id`. The Codex manifest prints
+  `owner=absent`, because the Codex format defines no root `owner`. A Claude or
+  Cursor manifest that prints `owner=absent` or `owner=object without a name`
+  fails its vendor schema and does not import.
+- Step 10 prints `idempotent: no new commit`: the render produced no diff, so
   `skip_if_no_changes` suppressed the commit and the remote `main` is unchanged.
 
 **Cleanup.** `rm -rf "$WORK"`.
