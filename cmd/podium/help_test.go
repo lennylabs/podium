@@ -10,7 +10,6 @@ import (
 
 // Spec: n/a — internal CLI help-output wiring.
 func TestSetUsage_PrintsDescriptionAndFlags(t *testing.T) {
-	t.Parallel()
 	fs := flag.NewFlagSet("widget make", flag.ContinueOnError)
 	setUsage(fs, "Construct a widget.")
 	fs.String("color", "blue", "widget color")
@@ -32,7 +31,6 @@ func TestSetUsage_PrintsDescriptionAndFlags(t *testing.T) {
 
 // Spec: n/a — internal CLI help-output wiring.
 func TestFprintGroupHelp_AlignsSubcommandColumn(t *testing.T) {
-	t.Parallel()
 	var buf bytes.Buffer
 	fprintGroupHelp(&buf, "layer", "Manage layers.", [][2]string{
 		{"register", "Register a layer."},
@@ -57,7 +55,6 @@ func TestFprintGroupHelp_AlignsSubcommandColumn(t *testing.T) {
 
 // Spec: n/a — internal CLI help-output wiring.
 func TestIsHelpArg(t *testing.T) {
-	t.Parallel()
 	for _, s := range []string{"help", "-h", "--help"} {
 		if !isHelpArg(s) {
 			t.Errorf("isHelpArg(%q) = false, want true", s)
@@ -73,7 +70,6 @@ func TestIsHelpArg(t *testing.T) {
 // Spec: n/a — parseExit gives --help an exit code of 0 and other parse
 // failures exit code of 2; nil never reaches it.
 func TestParseExit(t *testing.T) {
-	t.Parallel()
 	if got := parseExit(flag.ErrHelp); got != 0 {
 		t.Errorf("parseExit(ErrHelp) = %d, want 0", got)
 	}
@@ -85,7 +81,6 @@ func TestParseExit(t *testing.T) {
 // Spec: n/a — subcommand --help routes through parseExit and exits 0
 // rather than 2. End-to-end check that wires fs.Parse + parseExit.
 func TestSubcommandHelp_ExitsZero(t *testing.T) {
-	t.Parallel()
 	// serveCmd is representative: any subcommand whose flag.Parse
 	// receives --help should exit 0 via parseExit.
 	if code := serveCmd([]string{"--help"}); code != 0 {
@@ -102,7 +97,6 @@ func TestSubcommandHelp_ExitsZero(t *testing.T) {
 // Spec: n/a — dispatcher groups respond to --help with their subcommand
 // list and exit 0 (no missing-args treatment).
 func TestAdminCmd_HelpExitsCleanly(t *testing.T) {
-	t.Parallel()
 	// adminCmd writes to os.Stdout for the help branch; we only
 	// assert the exit code here. Stdout-content tests live in the
 	// fprintGroupHelp test above.

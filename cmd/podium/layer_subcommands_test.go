@@ -13,7 +13,6 @@ import (
 // --- --help and validation paths -------------------------------------------
 
 func TestLayerSubcommands_HelpExitsZero(t *testing.T) {
-	t.Parallel()
 	for name, cmd := range map[string]func([]string) int{
 		"layerRegister":   layerRegister,
 		"layerList":       layerList,
@@ -262,7 +261,6 @@ func TestLayerReingest_HappyPathPosts(t *testing.T) {
 // spec §14.10: an explicit --registry / PODIUM_REGISTRY value
 // always wins; resolveLayerRegistry returns it unchanged.
 func TestResolveLayerRegistry_FlagValueWins(t *testing.T) {
-	t.Parallel()
 	if got := resolveLayerRegistry("http://flag.example"); got != "http://flag.example" {
 		t.Errorf("resolveLayerRegistry(flag) = %q, want the flag value", got)
 	}
@@ -272,7 +270,6 @@ func TestResolveLayerRegistry_FlagValueWins(t *testing.T) {
 // back to defaults.registry in the merged ~/.podium/sync.yaml that
 // `podium serve --standalone` bootstraps.
 func TestMergedRegistry_ReadsHomeSyncYAML(t *testing.T) {
-	t.Parallel()
 	home := t.TempDir()
 	podiumDir := filepath.Join(home, ".podium")
 	if err := os.MkdirAll(podiumDir, 0o755); err != nil {
@@ -291,7 +288,6 @@ func TestMergedRegistry_ReadsHomeSyncYAML(t *testing.T) {
 // spec §14.10: with no sync.yaml anywhere, mergedRegistry resolves
 // to the empty string so the command refuses with the missing-registry error.
 func TestMergedRegistry_EmptyWhenNoConfig(t *testing.T) {
-	t.Parallel()
 	if got := mergedRegistry(t.TempDir(), t.TempDir()); got != "" {
 		t.Errorf("mergedRegistry(no config) = %q, want empty", got)
 	}

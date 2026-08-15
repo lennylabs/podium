@@ -15,6 +15,16 @@ import (
 
 // captureStderr redirects os.Stderr for the duration of fn and returns
 // the captured bytes.
+//
+// os.Stderr is a process-wide variable, so this swap is visible to every
+// goroutine. The commands under test write their diagnostics straight to it,
+// which is why capturing requires the swap rather than an injected writer.
+// Nothing in this package may therefore run in parallel: a test running
+// alongside a capture either loses its output into the capturing test's pipe
+// or reads os.Stderr while the swap writes it, which the race detector
+// reports as a data race and which surfaces in CI as an intermittent failure
+// in whichever test loses the interleaving. TestNoParallelTests guards the
+// rule.
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
 	r, w, err := os.Pipe()
@@ -41,7 +51,6 @@ func captureStderr(t *testing.T, fn func()) string {
 // Spec: §13.4 — parseObjectStoreURL maps the short-form URL onto a
 // target object-store kind and config.
 func TestParseObjectStoreURL(t *testing.T) {
-	t.Parallel()
 	t.Run("filesystem file scheme", func(t *testing.T) {
 		kind, root, _, err := parseObjectStoreURL("file:///srv/objects", "us-east-1", "", "", true)
 		if err != nil || kind != "filesystem" || root != "/srv/objects" {
@@ -93,7 +102,6 @@ func TestParseObjectStoreURL(t *testing.T) {
 // Postgres / S3 are not required for CI; the pump path is
 // identical regardless of backend.
 func TestAdminMigrateToStandard_PumpsMetadataAndObjects(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	srcDB := filepath.Join(dir, "source.db")
 	dstDB := filepath.Join(dir, "dest.db")
@@ -199,7 +207,6 @@ func TestAdminMigrateToStandard_PumpsMetadataAndObjects(t *testing.T) {
 // The migration must resolve that tenant id and pump its manifests; probing only
 // the literal id silently migrates zero metadata (blobs copy, manifests do not).
 func TestAdminMigrateToStandard_MigratesStandaloneUUIDTenant(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	srcDB := filepath.Join(dir, "source.db")
 	dstDB := filepath.Join(dir, "dest.db")
@@ -252,7 +259,6 @@ func TestAdminMigrateToStandard_MigratesStandaloneUUIDTenant(t *testing.T) {
 
 // Spec: §13.10 — --dry-run reports the plan and writes nothing.
 func TestAdminMigrateToStandard_DryRunWritesNothing(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	srcDB := filepath.Join(dir, "source.db")
 	dstDB := filepath.Join(dir, "dest.db")
@@ -275,7 +281,6 @@ func TestAdminMigrateToStandard_DryRunWritesNothing(t *testing.T) {
 
 // Spec: §6.10 — missing required args surface as argument errors.
 func TestAdminMigrateToStandard_MissingArgs(t *testing.T) {
-	t.Parallel()
 	// No target DSN: the postgres-target default leaves --postgres unset.
 	if rc := adminMigrateToStandard([]string{}); rc != 2 {
 		t.Errorf("rc = %d, want 2 (missing --postgres)", rc)
@@ -299,7 +304,6 @@ func TestAdminMigrateToStandard_MissingArgs(t *testing.T) {
 // --object-store; --object-store=file://... selects the filesystem
 // backend, and --postgres folds into the postgres target DSN.
 func TestAdminMigrateToStandard_SpecShortFormFlags(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	srcDB := filepath.Join(dir, "source.db")
 	dstDB := filepath.Join(dir, "dest.db")
@@ -360,7 +364,6 @@ func TestAdminMigrateToStandard_SpecShortFormFlags(t *testing.T) {
 // Spec: §13.10 — "admin grants ... are preserved". The pump path must
 // carry every source grant to the target deployment.
 func TestAdminMigrateToStandard_PreservesAdminGrants(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	srcDB := filepath.Join(dir, "source.db")
 	dstDB := filepath.Join(dir, "dest.db")
@@ -413,7 +416,6 @@ func TestAdminMigrateToStandard_PreservesAdminGrants(t *testing.T) {
 // named but no target sink is given, the command must warn rather than
 // silently completing with the history left behind.
 func TestAdminMigrateToStandard_AuditWarnsWithoutTarget(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	srcDB := filepath.Join(dir, "source.db")
 	dstDB := filepath.Join(dir, "dest.db")
