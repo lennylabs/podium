@@ -86,6 +86,8 @@ type yamlIdentityCfg struct {
 	// §6.3.3 / §13.12 oidc-jwt keys.
 	Issuer              string `yaml:"issuer,omitempty"`
 	TokenHeader         string `yaml:"token_header,omitempty"`
+	SubjectClaim        string `yaml:"subject_claim,omitempty"`
+	GroupsClaim         string `yaml:"groups_claim,omitempty"`
 	JWKSCacheTTLSeconds int    `yaml:"jwks_cache_ttl_seconds,omitempty"`
 }
 
@@ -296,6 +298,12 @@ func applyYAML(c *Config, y *yamlConfig) {
 	}
 	if c.oauthTokenHeader == "" && y.Identity.TokenHeader != "" {
 		c.oauthTokenHeader = y.Identity.TokenHeader
+	}
+	if c.oauthSubjectClaim == "" && y.Identity.SubjectClaim != "" {
+		c.oauthSubjectClaim = y.Identity.SubjectClaim
+	}
+	if c.oauthGroupsClaim == "" && y.Identity.GroupsClaim != "" {
+		c.oauthGroupsClaim = y.Identity.GroupsClaim
 	}
 	if c.oauthJWKSCacheTTLSeconds == 0 && y.Identity.JWKSCacheTTLSeconds != 0 {
 		c.oauthJWKSCacheTTLSeconds = y.Identity.JWKSCacheTTLSeconds

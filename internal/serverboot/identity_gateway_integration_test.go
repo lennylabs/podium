@@ -17,6 +17,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 
@@ -35,19 +36,51 @@ const gwAudience = "https://podium.gateway.test"
 type jwksIdP struct {
 	srv  *httptest.Server
 	priv *rsa.PrivateKey
+	// accessTokenIssuer is published in the discovery document when set, the
+	// §6.3.3 second accepted issuer. It is written by an option before the
+	// stub starts serving, so no request observes it changing.
+	accessTokenIssuer string
+	// selfAccessTokenIssuer publishes the stub's own issuer as the
+	// access_token_issuer. The stub's base URL is known only inside the
+	// handler, so this flag stands in for a value the option cannot name.
+	selfAccessTokenIssuer bool
 }
 
-func newJWKSIdP(t *testing.T) *jwksIdP {
+// withAccessTokenIssuer publishes iss as the stub's access_token_issuer, the
+// AD FS arrangement §6.3.3 covers: discovery is served under one value while
+// the access token is stamped with the federation-service identifier.
+func withAccessTokenIssuer(iss string) func(*jwksIdP) {
+	return func(i *jwksIdP) { i.accessTokenIssuer = iss }
+}
+
+// withAccessTokenIssuerEqualToIssuer publishes the stub's own issuer, with a
+// trailing slash, as the access_token_issuer. The published value trims to the
+// configured issuer, so the accepted set stays one value.
+func withAccessTokenIssuerEqualToIssuer() func(*jwksIdP) {
+	return func(i *jwksIdP) { i.selfAccessTokenIssuer = true }
+}
+
+func newJWKSIdP(t *testing.T, opts ...func(*jwksIdP)) *jwksIdP {
 	t.Helper()
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
 	idp := &jwksIdP{priv: priv}
+	for _, opt := range opts {
+		opt(idp)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		base := "http://" + r.Host
-		_ = json.NewEncoder(w).Encode(map[string]any{"issuer": base, "jwks_uri": base + "/jwks"})
+		doc := map[string]any{"issuer": base, "jwks_uri": base + "/jwks"}
+		switch {
+		case idp.selfAccessTokenIssuer:
+			doc["access_token_issuer"] = base + "/"
+		case idp.accessTokenIssuer != "":
+			doc["access_token_issuer"] = idp.accessTokenIssuer
+		}
+		_ = json.NewEncoder(w).Encode(doc)
 	})
 	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
 		pub := &idp.priv.PublicKey
@@ -245,6 +278,17 @@ func TestGatewayIntegration_OIDCJWTGroupMapping(t *testing.T) {
 	if st, _ := loadArtifact(t, ts.URL, "eng/secret", bearer(unmapped)); st != 404 {
 		t.Errorf("unmapped group caller load eng/secret = %d, want 404", st)
 	}
+
+	// The adapter maps group values and names no claim (§6.3.1), so it composes
+	// with a named group claim: the same raw value arriving as a single string
+	// under the configured claim name maps to engineering too.
+	named := identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0, identity.WithGroupsClaim(adfsGroupsClaimURI))
+	namedTS := gatewayServer(t, oidcJWTVerifier(named, "", mapping))
+	claims := gwClaims(idp.issuer(), "carol@acme.com", nil)
+	claims[adfsGroupsClaimURI] = "00g1engOID"
+	if st, _ := loadArtifact(t, namedTS.URL, "eng/secret", bearer(idp.sign(t, claims))); st != 200 {
+		t.Errorf("mapped single-string group under a named claim load eng/secret = %d, want 200", st)
+	}
 }
 
 func TestGatewayIntegration_OIDCJWTCustomTokenHeader(t *testing.T) {
@@ -263,6 +307,128 @@ func TestGatewayIntegration_OIDCJWTCustomTokenHeader(t *testing.T) {
 	// custom token_header, so the caller is anonymous.
 	if st, _ := loadArtifact(t, ts.URL, "eng/secret", bearer(alice)); st != 404 {
 		t.Errorf("token in wrong header should be anonymous, load eng/secret = %d, want 404", st)
+	}
+}
+
+// Spec: §6.3.3 / §4.6 — the arrangement the boot path wires for an AD FS
+// deployment: the discovery document publishes a second accepted issuer, the
+// access token is stamped with that value, the subject arrives under
+// PODIUM_OAUTH_SUBJECT_CLAIM, and group membership arrives as a single string
+// under PODIUM_OAUTH_GROUPS_CLAIM. The verifier is constructed the way
+// runRegistry constructs it, and the assertion is the observable §4.6 result.
+// runRegistry's own oidc-jwt branch refuses a non-https issuer, which no
+// in-process stub can present, so the construction is mirrored here and the
+// startup log line is checked by the manual-validation scenario.
+func TestGatewayIntegration_OIDCJWTSplitIssuerAndClaimNames(t *testing.T) {
+	t.Parallel()
+	const fedIssuer = "http://adfs.acme.test/adfs/services/trust"
+	const subjectClaim = "idsub"
+	idp := newJWKSIdP(t, withAccessTokenIssuer(fedIssuer))
+	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0,
+		identity.WithSubjectClaim(subjectClaim),
+		identity.WithGroupsClaim(adfsGroupsClaimURI))
+	if err := verifier.Prime(); err != nil {
+		t.Fatalf("Prime: %v", err)
+	}
+	// The boot line names every accepted value; both are reported once the
+	// discovery document is resolved.
+	if got, want := verifier.AcceptedIssuers(), []string{idp.issuer(), fedIssuer}; !slices.Equal(got, want) {
+		t.Fatalf("AcceptedIssuers() = %v, want %v", got, want)
+	}
+	ts := gatewayServer(t, oidcJWTVerifier(verifier, "", nil))
+
+	adfsToken := func(sub, group string) string {
+		t.Helper()
+		c := jwt.MapClaims{
+			"iss": fedIssuer, "aud": gwAudience,
+			"exp": time.Now().Add(10 * time.Minute).Unix(),
+		}
+		if sub != "" {
+			c[subjectClaim] = sub
+		}
+		if group != "" {
+			c[adfsGroupsClaimURI] = group
+		}
+		return idp.sign(t, c)
+	}
+
+	// A caller in the engineering group sees the engineering layer, so the
+	// second issuer, the named subject claim, and the single-string group
+	// encoding all resolve.
+	if st, body := loadArtifact(t, ts.URL, "eng/secret", bearer(adfsToken("alice-pairwise", "engineering"))); st != 200 {
+		t.Errorf("alice load eng/secret = %d, want 200\nbody: %s", st, body)
+	}
+	// A caller in no group is authenticated and sees the public layer alone.
+	bob := adfsToken("bob-pairwise", "")
+	if st, _ := loadArtifact(t, ts.URL, "eng/secret", bearer(bob)); st != 404 {
+		t.Errorf("bob (no group) load eng/secret = %d, want 404", st)
+	}
+	if st, _ := loadArtifact(t, ts.URL, "pub/welcome", bearer(bob)); st != 200 {
+		t.Errorf("bob load pub/welcome = %d, want 200", st)
+	}
+	// The named subject claim has no fallback: a token carrying sub alone is
+	// rejected with auth.untrusted_token rather than authenticating as sub.
+	noSubject := gwClaims(fedIssuer, "carol@acme.com", []string{"engineering"})
+	st, body := loadArtifact(t, ts.URL, "eng/secret", bearer(idp.sign(t, noSubject)))
+	if st != 401 {
+		t.Fatalf("token without the named subject claim = %d, want 401\nbody: %s", st, body)
+	}
+	var env struct {
+		Code string `json:"code"`
+	}
+	_ = json.Unmarshal(body, &env)
+	if env.Code != "auth.untrusted_token" {
+		t.Errorf("code = %q, want auth.untrusted_token", env.Code)
+	}
+}
+
+// Spec: §6.3.3 — runRegistry passes both claim-name options on every oidc-jwt
+// boot, so the unset pair has to reproduce the default derivation: the subject
+// comes from sub and group membership from groups, and the configured issuer is
+// the sole accepted value.
+func TestGatewayIntegration_OIDCJWTEmptyClaimNamesKeepDefaults(t *testing.T) {
+	t.Parallel()
+	idp := newJWKSIdP(t)
+	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0,
+		identity.WithSubjectClaim(""),
+		identity.WithGroupsClaim(""))
+	if err := verifier.Prime(); err != nil {
+		t.Fatalf("Prime: %v", err)
+	}
+	if got, want := verifier.AcceptedIssuers(), []string{idp.issuer()}; !slices.Equal(got, want) {
+		t.Fatalf("AcceptedIssuers() = %v, want %v", got, want)
+	}
+	ts := gatewayServer(t, oidcJWTVerifier(verifier, "", nil))
+
+	alice := idp.sign(t, gwClaims(idp.issuer(), "alice@acme.com", []string{"engineering"}))
+	if st, _ := loadArtifact(t, ts.URL, "eng/secret", bearer(alice)); st != 200 {
+		t.Errorf("alice (engineering) load eng/secret = %d, want 200", st)
+	}
+	bob := idp.sign(t, gwClaims(idp.issuer(), "bob@acme.com", nil))
+	if st, _ := loadArtifact(t, ts.URL, "eng/secret", bearer(bob)); st != 404 {
+		t.Errorf("bob (no group) load eng/secret = %d, want 404", st)
+	}
+}
+
+// Spec: §6.3.3 — the boot line reports the accepted set the registry applies.
+// A discovery document that publishes an access_token_issuer equal to the
+// configured issuer widens nothing, so the reported set stays one value and
+// verification against the configured issuer is unchanged.
+func TestGatewayIntegration_OIDCJWTAccessTokenIssuerEqualsIssuer(t *testing.T) {
+	t.Parallel()
+	idp := newJWKSIdP(t, withAccessTokenIssuerEqualToIssuer())
+	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0)
+	if err := verifier.Prime(); err != nil {
+		t.Fatalf("Prime: %v", err)
+	}
+	if got, want := verifier.AcceptedIssuers(), []string{idp.issuer()}; !slices.Equal(got, want) {
+		t.Fatalf("AcceptedIssuers() = %v, want %v", got, want)
+	}
+	ts := gatewayServer(t, oidcJWTVerifier(verifier, "", nil))
+
+	alice := idp.sign(t, gwClaims(idp.issuer(), "alice@acme.com", []string{"engineering"}))
+	if st, _ := loadArtifact(t, ts.URL, "eng/secret", bearer(alice)); st != 200 {
+		t.Errorf("alice (engineering) load eng/secret = %d, want 200", st)
 	}
 }
 

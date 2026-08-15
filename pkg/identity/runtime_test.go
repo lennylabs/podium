@@ -238,6 +238,36 @@ func TestJWTVerifier_RejectsMissingSub(t *testing.T) {
 	}
 }
 
+// Spec: §6.3.1 — an IdP that emits the group claim as a plain string for a
+// caller in exactly one group resolves to a single group whose name is the
+// whole claim value, on the §6.3.2 runtime verifier as on the oidc-jwt one.
+func TestJWTVerifier_AcceptsSingleStringGroupsClaim(t *testing.T) {
+	t.Parallel()
+	priv, pub := newRSAKeyPair(t)
+	reg := identity.NewRuntimeKeyRegistry()
+	if err := reg.Register(identity.RuntimeKey{
+		Issuer: "rt", Algorithm: "RS256", Key: pub,
+	}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	verify := reg.JWTVerifier("https://podium.acme.com", nil)
+	signed := signJWT(t, priv, jwt.SigningMethodRS256, jwt.MapClaims{
+		"iss": "rt", "aud": "https://podium.acme.com",
+		"sub": "alice", "act": "rt",
+		// The value carries a comma and a space to confirm that the string
+		// form is not split the way the trusted-headers group header is.
+		"groups": "finance, engineering",
+		"exp":    time.Now().Add(5 * time.Minute).Unix(),
+	})
+	id, err := verify(signed)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if len(id.Groups) != 1 || id.Groups[0] != "finance, engineering" {
+		t.Errorf("Groups = %v, want the whole claim value as one group", id.Groups)
+	}
+}
+
 // Spec: §6.3.2 — act claim is required.
 func TestJWTVerifier_RejectsMissingAct(t *testing.T) {
 	t.Parallel()

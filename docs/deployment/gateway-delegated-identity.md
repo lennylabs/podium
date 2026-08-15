@@ -31,6 +31,8 @@ identity_provider:
   audience: https://podium.acme.com
   token_header: Authorization   # default; value parsed as "Bearer <token>" for any header name
   jwks_cache_ttl_seconds: 300   # default
+  # subject_claim: idsub                       # AD FS; default: sub
+  # groups_claim: http://schemas.microsoft.com/ws/2008/06/identity/claims/groups   # AD FS; default: groups
 ```
 
 | Setting | Environment override | Default | Notes |
@@ -39,10 +41,16 @@ identity_provider:
 | `identity_provider.audience` | `PODIUM_OAUTH_AUDIENCE` | required | The registry validates the token's `aud` against this value. |
 | `identity_provider.token_header` | `PODIUM_OAUTH_TOKEN_HEADER` | `Authorization` | Header carrying the forwarded JWT, parsed as `Bearer <token>` for any header name. |
 | `identity_provider.jwks_cache_ttl_seconds` | `PODIUM_OAUTH_JWKS_CACHE_TTL_SECONDS` | `300` | A `kid` absent from the cached set forces an earlier refresh. |
+| `identity_provider.subject_claim` | `PODIUM_OAUTH_SUBJECT_CLAIM` | `(unset; sub)` | Claim read as the caller's subject. When it is set the registry reads that claim alone and rejects a token that does not carry it with `auth.untrusted_token`. AD FS access tokens carry `idsub` and no `sub`. |
+| `identity_provider.groups_claim` | `PODIUM_OAUTH_GROUPS_CLAIM` | `(unset; groups)` | Claim read for group membership. AD FS issuance rules emit the full claim-type URI (`http://schemas.microsoft.com/ws/2008/06/identity/claims/groups`) unless authored with a short name. Single-value and multi-value forms are both accepted. |
 
 The gateway's job: forward the caller's IdP-signed JWT in the configured header as `Bearer <token>`, whether the header is the default `Authorization` or a custom one such as `X-Forwarded-Access-Token`. Stripping client-supplied tokens is unnecessary, because a forged token fails verification.
 
-Group resolution follows the same registry-side mechanisms as the device-code flow: SCIM 2.0 push or the `IdpGroupMapping` adapter (see the [OIDC cookbooks](oidc/)). SCIM is available on a standard backend; a standalone server resolves groups through `IdpGroupMapping` alone.
+The registry reads group membership from the token's `groups` claim on every verified token, or from the claim named by `identity_provider.groups_claim` (`PODIUM_OAUTH_GROUPS_CLAIM`) when a deployment's IdP emits membership under another claim name. The `IdpGroupMapping` adapter rewrites the values that claim carries to registry-side group names, and it names no claim itself. A registry that also resolves membership through SCIM 2.0 push matches SCIM-resolved membership in addition to the claim-derived groups. SCIM is available on a standard backend, and a standalone server resolves groups through the token claim and `IdpGroupMapping` alone.
+
+The token's `iss` is accepted when it matches the configured issuer or the `access_token_issuer` published by the discovery document that issuer resolves. AD FS serves discovery under `https://<host>/adfs` and stamps the federation-service identifier `http://<host>/adfs/services/trust` on the access token, so no single configured value covers both roles. The signing keys still come from the `jwks_uri` in that same `https` document, so the set of trusted keys is unchanged. When the document publishes an `access_token_issuer` that differs from the configured issuer, the registry logs both accepted values at startup.
+
+A deployment that sets `identity_provider.subject_claim` lists values of the named claim in its `users:` entries, in `PODIUM_OPERATOR_ADMINS`, and in `PODIUM_BOOTSTRAP_ADMINS`. The instance-operator grant and the per-tenant admin grants match the recorded subject and have no email fallback, so a `sub` value left in either variable grants nothing once the registry records another claim as the subject. The named claim must also identify one principal for the life of the deployment.
 
 A token that fails signature, `iss`, or `aud` validation is rejected with `auth.untrusted_token`, and an expired token with `auth.token_expired`. A request carrying no token is anonymous and sees public visibility only. While the issuer's JWKS is unreachable, verification fails closed and the request is anonymous rather than rejected.
 

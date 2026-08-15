@@ -17,11 +17,15 @@ import (
 )
 
 // testIdP is a stub OIDC issuer that serves an OIDC discovery document and a
-// JWKS built from one or more RSA keys, supporting key rotation.
+// JWKS built from one or more RSA keys, supporting key rotation. When
+// accessTokenIssuer is set, the discovery document publishes it under
+// access_token_issuer, which is how AD FS advertises the federation-service
+// identifier it stamps on access tokens (§6.3.3).
 type testIdP struct {
-	srv  *httptest.Server
-	mu   sync.Mutex
-	keys map[string]*rsa.PrivateKey // kid -> signing key
+	srv               *httptest.Server
+	mu                sync.Mutex
+	keys              map[string]*rsa.PrivateKey // kid -> signing key
+	accessTokenIssuer string
 }
 
 func newTestIdP(t *testing.T) *testIdP {
@@ -31,10 +35,14 @@ func newTestIdP(t *testing.T) *testIdP {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		base := "http://" + r.Host
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		doc := map[string]any{
 			"issuer":   base,
 			"jwks_uri": base + "/jwks",
-		})
+		}
+		if ati := idp.publishedAccessTokenIssuer(); ati != "" {
+			doc["access_token_issuer"] = ati
+		}
+		_ = json.NewEncoder(w).Encode(doc)
 	})
 	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(idp.jwksJSON()))
@@ -89,6 +97,20 @@ func (i *testIdP) jwksJSON() string {
 }
 
 func (i *testIdP) issuer() string { return i.srv.URL }
+
+// setAccessTokenIssuer makes the discovery document publish iss under
+// access_token_issuer. An empty value omits the field.
+func (i *testIdP) setAccessTokenIssuer(iss string) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.accessTokenIssuer = iss
+}
+
+func (i *testIdP) publishedAccessTokenIssuer() string {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.accessTokenIssuer
+}
 
 func (i *testIdP) sign(t *testing.T, kid string, claims jwt.MapClaims) string {
 	t.Helper()

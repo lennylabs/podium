@@ -80,7 +80,7 @@ identity_provider:
   authorization_endpoint: https://<your-tenant>.auth0.com
 ```
 
-The registry reads the namespaced group claim (`https://podium.acme.com/groups`) and maps its values to group names through the `IdpGroupMapping` adapter configured registry-side. Configure the adapter to read the namespaced claim path that the Action emits. Restart the registry.
+Restart the registry. The Action emits group membership under the namespaced claim path `https://podium.acme.com/groups`. A registry that verifies the forwarded token itself runs the `oidc-jwt` provider: it reads that path when `identity_provider.groups_claim` (`PODIUM_OAUTH_GROUPS_CLAIM`) names it, and the `IdpGroupMapping` adapter then maps the values the claim carries to group names registry-side. The `oauth-device-code` configuration above installs no request-time verifier, so neither the claim name nor the adapter applies to it. See [gateway-delegated identity](../gateway-delegated-identity).
 
 Developer side:
 
@@ -123,10 +123,10 @@ layers:
       groups: [engineering]
 ```
 
-A user with `engineering` in `app_metadata.groups` sees the layer; a user without it does not.
+Group-scoped visibility resolves on a registry running `oidc-jwt` with `identity_provider.groups_claim` (`PODIUM_OAUTH_GROUPS_CLAIM`) set to the namespaced path the Action emits, and with `IdpGroupMapping` configured when those claim values have to be rewritten to registry-side group names. On such a registry a user with `engineering` in `app_metadata.groups` sees the layer, and a user without it does not. See [gateway-delegated identity](../gateway-delegated-identity) for that configuration.
 
 ## Troubleshooting
 
 - **Groups claim is missing from the token.** The Action was not attached to the post-login trigger, or the user has no `groups` in `app_metadata`. Check the Action's logs: **Actions → Library → \[Action\] → Logs**.
 - **Token rejected.** The token's `aud` must match the registry's `audience:`. Confirm the API identifier and `audience:` match exactly.
-- **Custom claim namespace error.** Auth0 rejects non-namespaced custom claims. The claim must look like `https://your-namespace/groups`. A bare `groups` is rejected. Configure `IdpGroupMapping` to read the namespaced claim path.
+- **Custom claim namespace error.** Auth0 rejects non-namespaced custom claims. The claim must look like `https://your-namespace/groups`. A bare `groups` is rejected. On a registry running `oidc-jwt`, set `identity_provider.groups_claim` (`PODIUM_OAUTH_GROUPS_CLAIM`) to the namespaced path the Action emits.
