@@ -225,6 +225,28 @@ func (s *notificationSink) waitForDelivery(want int, within time.Duration) bool 
 	return s.count() >= want
 }
 
+// waitForEvent polls until a delivery whose body event field equals eventType
+// has been recorded or the deadline elapses, returning that delivery and
+// whether one arrived.
+//
+// A receiver registered with no filter records every event type the trigger
+// fires, and the deliveries arrive in a nondeterministic order because each POST
+// is fired from its own background goroutine. waitForDelivery returns as soon as
+// any one of them lands, so a test that asserts on one specific event type must
+// wait for that type rather than for a count.
+func (s *notificationSink) waitForEvent(eventType string, within time.Duration) (recordedDelivery, bool) {
+	deadline := time.Now().Add(within)
+	for {
+		if d, ok := s.firstMatching(eventType); ok {
+			return d, true
+		}
+		if !time.Now().Before(deadline) {
+			return recordedDelivery{}, false
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 // firstMatching returns the first recorded delivery whose body event field
 // equals eventType, plus whether one was found.
 func (s *notificationSink) firstMatching(eventType string) (recordedDelivery, bool) {
