@@ -119,7 +119,7 @@ func TestNotificationSink_FilterOmitsNonMatchingEvents(t *testing.T) {
 	if !all.waitForDelivery(1, 5*time.Second) {
 		t.Fatalf("all-events receiver recorded nothing for the reingest\nserver log:\n%s", srv.log())
 	}
-	if _, ok := all.firstMatching("artifact.published"); !ok {
+	if _, ok := all.waitForEvent("artifact.published", 5*time.Second); !ok {
 		t.Errorf("all-events receiver missing artifact.published; got: %+v", all.all())
 	}
 	// Give any stray delivery to the filtered receiver time to arrive, then
