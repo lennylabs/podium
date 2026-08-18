@@ -24,6 +24,11 @@
   overflow: hidden;
 }
 
+.search-panel:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .search-field {
   width: 100%;
   border: none;
@@ -36,8 +41,7 @@
 }
 
 .search-field:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
+  outline: none;
 }
 
 .search-results {

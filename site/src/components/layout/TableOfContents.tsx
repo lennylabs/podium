@@ -14,6 +14,9 @@ const MAX_DEPTH = 3;
  * the heading currently in view by adding the is-active class, which the
  * stylesheet renders as a heavier weight plus an accent inset. Without
  * JavaScript the list is a plain set of in-page anchors.
+ *
+ * The rail carries data-doc-toc, so the client router replaces it together with
+ * the article it describes.
  */
 export function TableOfContents(props: {
   headings: Heading[];
@@ -26,7 +29,7 @@ export function TableOfContents(props: {
   );
 
   return (
-    <aside className="d-toc">
+    <aside className="d-toc" data-doc-toc="">
       {items.length > 0 && (
         <nav className="d-toc-nav" aria-labelledby="d-toc-title">
           <p className="d-toc-title" id="d-toc-title">

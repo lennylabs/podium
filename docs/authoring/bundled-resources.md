@@ -28,10 +28,10 @@ There is no `resources:` list in frontmatter. What's in the folder ships. Refere
 
 ```markdown
 Run `scripts/variance.py` against the closed period. Format the
-output using `templates/variance-report.md.j2`.
+output using [the report template](assets/variance-report.md.j2).
 ```
 
-The ingest-time linter validates that prose references resolve to bundled files (existence check) and emits errors for broken paths.
+The ingest-time linter resolves every markdown link in the prose body (`[text](path)`). A relative link must name a bundled file, one of the artifact's own manifest files, or the canonical ID of another artifact in the catalog. An `http` or `https` link is validated with an HTTP HEAD that must return 200 or a 3xx redirect, a probe `podium lint --offline` skips. A link that resolves to none of these is an ingest error. A path written as inline code rather than as a markdown link is not checked.
 
 ---
 
@@ -39,7 +39,9 @@ The ingest-time linter validates that prose references resolve to bundled files 
 
 The registry stores bundled resources content-addressed by SHA-256 in object storage. Bytes are deduplicated across all artifact versions within an org's storage namespace; when two artifacts ship the same file (a shared schema, a vendored library), only one copy is stored.
 
-At materialization, presigned URLs deliver the bytes. The consumer (`podium sync`, the MCP server, or an SDK `materialize()` call) downloads each resource and writes it atomically (`.tmp` + rename) so partial downloads cannot corrupt a working set. The materialization pipeline is the same across all three; it runs in the consumer process, not on the registry.
+At materialization, presigned URLs deliver the bytes. The consumer (`podium sync`, the MCP server, or an SDK `materialize()` call) downloads each resource and writes it atomically (`.tmp` + rename) so partial downloads cannot corrupt a working set. The materialization pipeline is the same across all three; it runs in the consumer process rather than on the registry.
+
+An adapter writes an artifact's bundled files alongside its translated output: inside the skill folder for a skill, under `.podium/context/<artifact-id>/` for a context artifact, and in the harness-neutral `.podium/resources/<artifact-id>/` bucket for an agent, a command, or a hook (Claude Code places an agent's files under `.claude/podium/<artifact-id>/`). A `type: rule` artifact materializes into a workspace as a translated rule file and a `type: mcp-server` artifact as a merged config entry, and the adapters write no bundled files for either. Ship those bytes as a separate artifact, or materialize with `harness: none`, which writes the canonical layout including bundled files.
 
 ---
 
@@ -70,7 +72,7 @@ external_resources:
     signature: "sigstore:..."
 ```
 
-The registry stores the URL, hash, size, and signature. Bytes don't transit the registry. At materialization the consumer fetches from the URL, verifies the SHA-256 and signature, and writes locally.
+The registry stores the URL, hash, size, and signature. Bytes don't transit the registry, and no built-in consumer fetches them: `podium sync`, the MCP server, and the SDKs materialize bundled resources only. A host that needs the external bytes reads the `external_resources` entries from the served manifest and fetches and verifies them itself.
 
 Caps don't apply to external resources. They're the right answer for model files, large datasets, vendored binaries.
 
@@ -114,13 +116,19 @@ Hosts with sandbox capability honor the profile. Hosts without it refuse to mate
 
 ## Content provenance
 
-Prose in the manifest body (`SKILL.md` for skills, `ARTIFACT.md` for non-skills) can declare its provenance to enable differential trust at the host:
+An artifact declares the provenance of its prose so the host can apply differential trust. The `source:` frontmatter field sets the document-level default and lives in `ARTIFACT.md` for every type, skills included:
 
 ```markdown
 ---
+type: context
+version: 1.0.0
 source: authored
 ---
+```
 
+Inline markers in the prose body (`SKILL.md` for skills, `ARTIFACT.md` for non-skills) mark one region and override that default for the region they wrap:
+
+```markdown
 <authored prose>
 
 <!-- begin imported source="https://wiki.example.com/policy/payments" -->
@@ -136,7 +144,7 @@ Adapters propagate provenance markers to harnesses that support trust regions (C
 
 A reasonable cap on manifest content is around 20K tokens. For skills, the cap applies to the `SKILL.md` body; the agentskills.io spec recommends keeping that body under 5K tokens and ≤ 500 lines, with longer reference material moved into `references/`. Larger reference content can also be factored out as a separate `type: context` artifact and referenced from the prose body.
 
-Lint warns on manifests above the size cap. Authors who hit it should ask whether the prose is genuinely manifest-level (instructions, when_to_use details) or whether it's reference material that wants its own artifact.
+Lint fails ingest with an error (`lint.manifest_size`) above the 20K-token cap. The 5K-token and 500-line SKILL.md thresholds are warnings. Authors who hit either should ask whether the prose is genuinely manifest-level (instructions, when_to_use details) or whether it's reference material that wants its own artifact.
 
 ---
 
@@ -154,7 +162,7 @@ finance/close-reporting/run-variance-analysis/
 
 `SKILL.md`:
 
-```yaml
+```markdown
 ---
 name: run-variance-analysis
 description: Flag unusual variance vs. forecast after month-end close. Use after the close period when reviewing financial performance.
@@ -167,7 +175,7 @@ expects FORECAST_FILE and ACTUALS_FILE environment variables...
 
 `ARTIFACT.md`:
 
-```yaml
+```markdown
 ---
 type: skill
 version: 1.0.0

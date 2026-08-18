@@ -61,6 +61,10 @@ function SearchGlyph(): ReactElement {
  * the search overlay, the theme switch, and the small-screen sidebar drawer.
  * The theme toggle names the theme it switches to, and both labels ship in the
  * markup so the correct one shows without JavaScript.
+ *
+ * The bar itself stays in the document across a client navigation. Only the tab
+ * strip changes, which is what data-topbar-tabs marks, so the controls beside it
+ * keep the listeners they were given on first load.
  */
 export function Header(props: {
   config: SiteConfig;
@@ -90,7 +94,7 @@ export function Header(props: {
           <Lockup className="d-lockup" />
         </a>
 
-        <nav className="d-tabs" aria-label="Documentation sections">
+        <nav className="d-tabs" aria-label="Documentation sections" data-topbar-tabs="">
           {TABS.map((tab) => {
             // Every documentation page sits under Docs except the changelog,
             // which is its own destination.

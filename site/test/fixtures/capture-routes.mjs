@@ -1,9 +1,10 @@
-// Enumerates the route set the Jekyll build published, so route parity can be
-// asserted after the corpus moves to the new generator.
+// Enumerates the route set the corpus publishes, so an unintended route change
+// fails a test instead of shipping.
 //
 // This is deliberately a standalone script rather than a call into the
 // generator: a fixture produced by the code it guards would assert nothing.
-// It applies Jekyll's documented output rules directly.
+// It derives each route from the corpus independently, which cross-checks the
+// generator's own mapping.
 //
 //   - a markdown file carrying frontmatter is a page, written to its source
 //     path with an .html extension
@@ -11,8 +12,9 @@
 //   - a markdown file with no frontmatter is a static file, copied verbatim
 //   - everything under assets/ is copied verbatim
 //
-// Run against the pre-migration corpus:
-//   node site/test/fixtures/capture-jekyll-routes.mjs docs > routes.json
+// Regenerate after a deliberate rename:
+//   node site/test/fixtures/capture-routes.mjs docs > \
+//     site/test/fixtures/published-routes.json
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
@@ -25,8 +27,8 @@ const EXCLUDED_FILES = new Set([
   ".gitignore",
 ]);
 
-// Jekyll excludes dotfiles and underscore-prefixed entries from the output by
-// default, so .DS_Store and .gitkeep never became routes.
+// Dotfiles and underscore-prefixed entries are not published, so .DS_Store and
+// .gitkeep never become routes.
 function isExcluded(entry) {
   return entry.startsWith(".") || entry.startsWith("_") || EXCLUDED_FILES.has(entry);
 }

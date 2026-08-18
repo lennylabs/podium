@@ -6,7 +6,7 @@ description: "The Podium registry's HTTP/JSON API: discovery, materialization, l
 
 # HTTP API
 
-The Podium registry exposes an HTTP/JSON API. Every consumer (the MCP server, language SDKs, `podium sync` in server mode, the read CLI) speaks this API. Direct MCP access to the registry is not supported; the MCP server is a consumer surface that translates HTTP responses into MCP messages.
+The Podium registry exposes an HTTP/JSON API. Every consumer speaks this API: the MCP server, the language SDKs, `podium sync` against a server, and the read CLI. Direct MCP access to the registry is not supported; the MCP server is a consumer surface that translates HTTP responses into MCP messages.
 
 ---
 
@@ -18,10 +18,13 @@ Every call carries an OAuth-attested identity. The registry validates the JWT si
 |:--|:--|
 | `Authorization` | `Bearer <jwt>` |
 
-The JWT comes from the configured identity provider:
+The registry resolves the caller through the provider named by its `PODIUM_IDENTITY_PROVIDER`. The registry-process values are `injected-session-token`, `oidc-jwt`, and `trusted-headers`.
 
-- `oauth-device-code`: interactive device-code flow on first use; tokens cached in the OS keychain. Refresh transparent.
 - `injected-session-token`: runtime-issued signed JWT. The runtime registers its signing key with the registry one-time at runtime onboarding.
+- `oidc-jwt`: a gateway forwards the caller's token. The registry verifies the signature, `iss`, and `aud` against the issuer's JWKS.
+- `trusted-headers`: an authenticating reverse proxy asserts the identity in `X-Podium-User-Sub`, `X-Podium-User-Email`, `X-Podium-User-Groups`, and `X-Podium-User-Org`, optionally authenticated with `X-Podium-Proxy-Secret`.
+
+`oauth-device-code` is the consumer-side provider. The MCP server and the SDKs acquire the token through an interactive device-code flow on first use, cache it in the OS keychain, and refresh it transparently. The registry ships no request-time verifier for it, so setting it on the registry process aborts startup with `config.identity_provider_unverified`.
 
 In public-mode deployments, the OAuth flow is skipped; the registry serves anonymously. The audit log records `caller.identity = "system:public"`.
 
@@ -44,7 +47,7 @@ In public-mode deployments, the OAuth flow is skipped; the registry serves anony
 ### `load_domain`
 
 ```
-GET /v1/load_domain?path={path}&depth={n}&session_id={uuid}
+GET /v1/load_domain?path={path}&depth={n}
 ```
 
 Returns the map for a path. An empty `path` returns the registry root.
@@ -79,7 +82,7 @@ Output rendering (depth, folding, notable count, response budget) is governed by
 ### `search_domains`
 
 ```
-GET /v1/search_domains?query={q}&scope={path}&top_k={n}&session_id={uuid}
+GET /v1/search_domains?query={q}&scope={path}&top_k={n}
 ```
 
 Hybrid retrieval over each domain's projection (frontmatter `description`, `keywords`, and truncated body). `top_k` defaults to 10.
@@ -107,10 +110,12 @@ Response:
 ### `search_artifacts`
 
 ```
-GET /v1/search_artifacts?query={q}&type={type}&tags={tag1},{tag2}&scope={path}&top_k={n}&session_id={uuid}
+GET /v1/search_artifacts?query={q}&type={type}&tags={tag1},{tag2}&scope={path}&top_k={n}&session_id={uuid}&as_admin={bool}
 ```
 
 Hybrid retrieval over artifact frontmatter. Every argument is optional. When `query` is omitted, the endpoint returns artifacts matching the filters in default order, the browse call. `top_k` defaults to 10.
+
+`as_admin=1` (or `as_admin=true`) requests the admin diagnostic visibility override, which searches across every layer regardless of the caller's visibility. A caller without the admin role is rejected with `403 auth.forbidden`.
 
 Each result's `frontmatter` is the artifact's verbatim YAML frontmatter as a string.
 
@@ -139,10 +144,10 @@ Response:
 ### `load_artifact`
 
 ```
-GET /v1/load_artifact?id={id}&version={v}&session_id={uuid}
+GET /v1/load_artifact?id={id}&version={v}&session_id={uuid}&as_admin={bool}
 ```
 
-`version` is optional (default `latest`). `session_id` is optional; the first `latest` lookup within a session is recorded and reused for subsequent same-id lookups in the session, so the host sees a consistent snapshot.
+`version` is optional (default `latest`). `session_id` is optional; the first `latest` lookup within a session is recorded and reused for subsequent same-id lookups in the session, so the host sees a consistent snapshot. `as_admin=1` (or `as_admin=true`) requests the admin diagnostic visibility override; a caller without the admin role is rejected with `403 auth.forbidden`.
 
 A `HEAD` request revalidates the consumer's resolution cache: the registry returns the resolved content hash in the `X-Podium-Content-Hash` header (and the version in `X-Podium-Version`) with no body. A `GET` that carries a matching `If-None-Match` is answered `304 Not Modified`.
 
@@ -321,7 +326,7 @@ POST /v1/layers/update?id={id}
 PUT  /v1/layers/update?id={id}
 ```
 
-Patches the layer. A non-zero body field replaces the corresponding value; a zero field leaves it unchanged. The patchable fields are visibility (`public`, `organization`, `groups`, `users`), `ref`, `root`, `local_path`, `owner`, `force_push_policy`, and a webhook-secret rotation (`rotate_webhook_secret`). The identifying fields (`id`, `source_type`) are immutable.
+Patches the layer. A non-zero body field replaces the corresponding value; a zero field leaves it unchanged. The patchable fields are visibility (`public`, `organization`, `groups`, `users`), `ref`, `root`, `local_path`, `owner`, `force_push_policy`, and a webhook-secret rotation (`rotate_webhook_secret`). On a user-defined layer the registry ignores the `owner` and visibility fields and still answers `200 OK`, because that layer's owner and its implicit `users: [<owner>]` visibility are fixed at registration; the remaining fields apply as described. The identifying fields (`id`, `source_type`) are immutable.
 
 ### Unregister
 
@@ -422,7 +427,7 @@ Serves a large resource's bytes for the filesystem object-store backend. The `pr
 
 ## Admin and operations
 
-These routes require an authenticated admin caller (resolved through the admin-grant table) and are rejected in read-only mode with `registry.read_only`.
+These routes require an authenticated admin caller, resolved through the admin-grant table. The tenant-management routes are the exception: they take the instance-operator role instead. The mutating routes are rejected in read-only mode with `registry.read_only`; the read routes continue to serve.
 
 ### Admin grants
 
@@ -466,6 +471,39 @@ POST /v1/admin/erase    body: { "user_id": "...", "salt": "..." }
 
 Performs the right-to-erasure operation for the named user: it unregisters and soft-deletes every user-defined layer the user owns, redacts the user identity across the registry audit stream, and appends a `user.erased` event naming the invoking admin. Both `user_id` and `salt` are required.
 
+### Tenant management
+
+```
+GET    /v1/admin/tenants
+POST   /v1/admin/tenants        body: { "name": "...", "quota": {...}, "expose_scope_preview": true }
+PATCH  /v1/admin/tenants/{id}   body: { "quota": {...}, "expose_scope_preview": true, "active": false }
+DELETE /v1/admin/tenants/{id}
+```
+
+These routes are authorized by the instance-operator role rather than the per-tenant admin-grant table, and they are available only on a multi-tenant registry. A request on a single-tenant or standalone registry is rejected with `404 registry.tenant_management_unavailable`, before operator authorization. A caller without the operator role is rejected with `403 auth.forbidden`. `GET` serves in read-only mode; `POST`, `PATCH`, and `DELETE` are rejected with `registry.read_only`.
+
+`GET` returns the tenants under the `tenants` key. Every other method returns one tenant object:
+
+```json
+{
+  "id": "acme",
+  "name": "Acme Corp",
+  "quota": {
+    "storage_bytes": 0,
+    "search_qps": 0,
+    "materialize_rate": 0,
+    "audit_volume_per_day": 0,
+    "max_user_layers": 3
+  },
+  "expose_scope_preview": true,
+  "active": true
+}
+```
+
+`POST` requires `name` and derives the tenant ID from it. Creation is idempotent: a new tenant returns `201 Created`, and re-creating an already-provisioned name returns `200 OK` with the existing tenant unchanged.
+
+`PATCH` overlays only the keys present in the body, so an omitted key keeps its current value. A present `expose_scope_preview: null` clears the gate. `active` reactivates (`true`) or deactivates (`false`) the tenant. The name is fixed at creation and cannot be patched. `DELETE` deactivates the tenant and returns `204 No Content`; the data persists while the tenant stops resolving. A `PATCH` or `DELETE` naming an unknown tenant returns `404 registry.tenant_not_found`.
+
 ---
 
 ## Outbound webhooks
@@ -506,7 +544,7 @@ DELETE /v1/webhooks/{id}       remove one receiver
 
 Every method on these routes requires the per-tenant admin role and returns `auth.forbidden` for a non-admin caller, because a receiver is an org-level configuration. The mutating methods are also rejected in read-only mode with `registry.read_only`. A standalone or no-auth deployment follows the same authorization path as the admin-grant endpoints: receiver registration requires an admin grant plus a token rather than remaining open.
 
-`POST` accepts `{ "url": "...", "secret": "...", "event_filter": ["..."], "debounce": "30s", "disabled": false }` and returns `201 Created` with the receiver including its secret, so the operator can record it. The registry generates a secret when the body omits one. `url` is required. `PUT` accepts the same fields and applies the ones present; re-enabling a receiver (`disabled: false`) clears its failure counter. `GET` and `DELETE` of a single receiver address it by `id`. List and single-read responses mask the secret as `***`. `DELETE` returns `204 No Content`. These routes are mounted only when the deployment configures an outbound webhook worker.
+`POST` accepts `{ "url": "...", "secret": "...", "event_filter": ["..."], "debounce": "30s", "disabled": false }` and returns `201 Created` with the receiver including its secret, so the operator can record it. The registry generates a secret when the body omits one. `url` is required. `PUT` accepts the same fields and applies the ones present; re-enabling a receiver (`disabled: false`) clears its failure counter. `GET` and `DELETE` of a single receiver address it by `id`. The list response returns the receivers under the `receivers` key. List, single-read, and `PUT` responses mask the secret as `***`. `DELETE` returns `204 No Content`. The registry wires the outbound webhook worker at startup, so these routes are mounted on every deployment. Receivers are held in memory unless `PODIUM_WEBHOOK_STORE_PATH` names a file, in which case the store reloads them on restart.
 
 #### Receiver URL policy (SSRF)
 
@@ -563,7 +601,7 @@ A SCIM 2.0 receiver the configured identity provider pushes Users and Groups to.
 GET /metrics
 ```
 
-A Prometheus scrape endpoint. Mounted only when the deployment configures a metrics registry.
+A Prometheus scrape endpoint. Mounted by default; `PODIUM_METRICS=false` removes the endpoint and the per-request recording.
 
 ---
 

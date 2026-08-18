@@ -2,65 +2,100 @@
 title: Podium
 nav_title: Overview
 nav_order: 0
-description: A catalog for reusable AI agent artifacts, with tools that translate those artifacts into harness-specific formats.
+description: The documentation home. One catalog, every harness, and where each feature, tier, and guide is documented.
 actions:
   - label: Quickstart
     href: getting-started/quickstart
   - label: Concepts
     href: getting-started/concepts
-  - label: Fit and comparisons
+  - label: Why Podium
     href: getting-started/why-podium
-  - label: Compare deployment setups
+  - label: Deployment tiers
     href: deployment/
 ---
 
 # Podium
 
-**A catalog for reusable AI agent artifacts, with tools that translate those artifacts into harness-specific formats.**
+Podium holds reusable AI agent artifacts in one catalog and translates them into
+the file layout each runtime expects. An author writes an artifact once in the
+canonical format, and a harness adapter produces the Claude Code layout, the
+Cursor layout, or a published marketplace repository from it.
 
-Podium stores skills, agents, commands, rules, hooks, contexts, and MCP
-server registrations as portable artifacts. A developer can keep a local
-filesystem catalog and run `podium sync` to write harness-native files into
-a workspace. A team can put the same artifacts behind a registry server for
-runtime discovery, identity-aware visibility, audit, and shared governance.
-In server mode, teams usually keep the catalog in one or more Git
-repositories; the registry ingests those tracked refs and builds the
-effective catalog it serves.
+An artifact is a directory, and the directory carries its dependencies. A script
+bundled beside a `SKILL.md` reaches every layout the manifest reaches.
+
+This page is the documentation home. It names the pages that cover each feature,
+each deployment tier, and each task.
 
 > [!NOTE]
-> **Status: 0.1.x, early release.** The CLI, server, MCP bridge, and SDKs
+> **Status: 0.3.x, early release.** The CLI, server, MCP bridge, and SDKs
 > are published. Install with `brew tap lennylabs/tap && brew install podium`
 > (macOS / Linux) or `scoop bucket add lennylabs https://github.com/lennylabs/scoop-bucket && scoop install podium` (Windows).
 > See [Implementation status](about/status) for what's shipped and what's
 > still on the roadmap to 1.0.
 
-Podium can run from a filesystem catalog or from a registry server:
+---
 
-- **Filesystem catalog**: file-based artifacts plus the Podium CLI. This
-  mode fits any team or individual whose catalog does not require access
-  control or progressive disclosure: solo work, prototypes, CI, and
-  Git-shared catalogs.
-- **Registry server**: artifacts in one or more Git repositories, plus the
-  Podium server, CLI, MCP server, and SDKs. Git stores catalog history and
-  review flow; the registry ingests the configured refs and composes the
-  effective catalog. This mode adds runtime discovery, identity-aware
-  visibility, audit, and server-side composition.
+## Start here
 
-Highlights:
+| Page | What it covers |
+|:--|:--|
+| [Why Podium](getting-started/why-podium) | What "one catalog, every harness" means feature by feature, when Podium applies, when a simpler alternative is enough, and how it compares to adjacent products. |
+| [Quickstart](getting-started/quickstart) | Install the CLI, write one skill, materialize it into Claude Code, and see it load. |
+| [Concepts](getting-started/concepts) | The vocabulary the rest of the docs link to: artifact, type, domain, registry, layer, visibility, harness, profile, materialization, and meta-tools. |
+| [How it works](getting-started/how-it-works) | The components, where each feature runs, the deployment tiers, and where state lives. |
 
-- **Cross-harness delivery.** Pluggable harness adapters translate canonical artifacts into Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, Gemini CLI, OpenCode, Pi, Hermes, or a custom runtime. The adapter roster with documentation links is in [Configure your harness](consuming/configure-your-harness#supported-harnesses).
-- **Artifact organization based on domains and subdomains.** Keep artifacts organized in folders and subfolders, where each folder defines a domain.
-- **Selective materialization.** Sync a subset of the catalog into a workspace. Define profiles to quickly switch between scopes.
-- **Layered composition.** Compose the catalog from multiple sources with deterministic merge and explicit precedence. (Requires the Podium registry server.)
-- **Per-layer visibility.** Declare who can see what: each layer can be `public`, organization-wide, scoped to OIDC `groups`, or restricted to specific `users`. (Requires the Podium registry server.)
-- **Agent-driven progressive discovery.** Discovery tools for traversing domains and searching artifacts. (Requires the Podium MCP server or SDK.)
-- **Lazy artifact loading.** Materialize artifact files into the workspace as they are loaded. (Requires the Podium MCP server or SDK.)
+---
+
+## Features
+
+| Feature | What it does | Covered in |
+|:--|:--|:--|
+| Cross-harness delivery | A harness adapter translates a canonical artifact into the layout one runtime expects, for a workspace tree or a published marketplace repository. | [Configure your harness](consuming/configure-your-harness), [Marketplace publishing](consuming/publishing) |
+| Domains and subdomains | The directory layout defines the domain hierarchy, and `DOMAIN.md` adds descriptions, keywords, and featured artifacts. | [Domains](authoring/domains) |
+| Selective materialization | `podium sync` materializes the subset named by include globs, exclude globs, and types, and a named profile replays that subset. | [Selective materialization](consuming/selective-materialization) |
+| Progressive discovery | An agent traverses domains and searches the catalog through the meta-tools, and materializes an artifact and its bundled files only when it loads one. | [Browsing the catalog](consuming/browsing-the-catalog) |
+| Layered composition | Several independent sources compose into one catalog with deterministic merge, explicit precedence, and `extends:`. | [Layered composition](deployment/layers) |
+| Access control | Each layer declares who can see it, and the registry composes the caller's effective view from the layers that pass. | [Access control](deployment/access-control) |
+
+---
+
+## Deployment tiers
+
+Each tier keeps everything the tier below it does and adds server-side
+capability. The artifacts are the same in every tier.
+
+| Tier | Server-side deployment | What the tier adds |
+|:--|:--|:--|
+| [Local](deployment/local) | None | Authoring, lint, sync, domains, profiles, and ordered layers from disk |
+| [Single node](deployment/single-node) | One binary | Discovery through MCP or the SDKs, hybrid search, registered and remote layers with visibility, and one audit log |
+| [Clustered](deployment/clustered) | Replicas, Postgres, and object storage | Multi-tenancy, SCIM group sync, signing with a transparency log, and high availability |
+
+[Server-side integrations](deployment/integrations) names the backing service
+behind each server-side concern: the metadata store, object storage, the vector
+index, embeddings, identity, and layer sources. Each row states what ships by
+default and what can replace it.
+
+---
+
+## Guides
+
+| Guide | What it covers |
+|:--|:--|
+| [Getting Started](getting-started/) | Positioning, the quickstart, the vocabulary, and the architecture. |
+| [Authoring](authoring/) | Writing artifacts: types, frontmatter, domains, bundled resources, `extends:`, rule modes, hooks, and hints. |
+| [Consuming](consuming/) | Delivering artifacts into a harness, narrowing what a workspace receives, runtime discovery, the SDKs, and marketplace publishing. |
+| [Deployment](deployment/) | Running each tier, the server-side integrations, layers, access control, day-two operations, and the OIDC cookbooks. |
+| [Reference](reference/) | CLI, HTTP API, frontmatter schema, error codes, and glossary. |
+| [Testing](testing/) | Setting up and running the integration and live-backend suites. |
+| [About](about/) | Implementation status, contributing, governance, and the changelog. |
 
 ---
 
 ## 'Hello world' example
 
-The commands below describe the target v1 CLI flow.
+The [full quickstart](getting-started/quickstart) covers the same flow with
+prerequisites and verification steps.
 
 Create a skill directory with a `SKILL.md` file for agent-facing
 instructions and an `ARTIFACT.md` file for Podium metadata:
@@ -97,28 +132,8 @@ podium sync
 ```
 
 Open Claude Code in the project. Claude Code can discover the materialized
-skill in its native location.
+skill in its native location. Changing the harness and running `podium sync`
+again writes the same artifact into another runtime's layout.
 
-The [full quickstart](getting-started/quickstart) covers the same flow with
-prerequisites and verification steps.
-
----
-
-## Pick your entry point
-
-- [Authoring guide](authoring/): author skills, commands, rules, and agents.
-- [Consuming guide](consuming/): configure Claude Code, Cursor, OpenCode, or
-  another harness to consume Podium artifacts.
-- [Deployment guide](deployment/): select a deployment mode and migrate as the
-  catalog grows.
-- [Reference](reference/): build a runtime, an eval pipeline, or custom tooling
-  against Podium directly.
-
----
-
-## Quick links
-
-- [Quickstart](getting-started/quickstart)
-- [Concepts](getting-started/concepts)
-- [How it works](getting-started/how-it-works)
-- [Podium on GitHub](https://github.com/lennylabs/podium)
+The source, the issue tracker, and the release history live at
+[lennylabs/podium](https://github.com/lennylabs/podium).

@@ -13,7 +13,11 @@ import { validateRegistry } from "../src/components/islands/props";
 import { registry } from "../src/components/islands/registry";
 import type { NavNode, SiteConfig } from "../src/build/types";
 
-/** Every route the previous Jekyll build published. */
+/**
+ * Every route the corpus publishes. Regenerate with
+ * test/fixtures/capture-routes.mjs after a deliberate rename, so an
+ * unintended one fails here instead of shipping.
+ */
 const PUBLISHED: string[] = JSON.parse(
   readFileSync(resolve(SITE_DIR, "test/fixtures/published-routes.json"), "utf8"),
 ) as string[];

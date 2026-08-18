@@ -38,15 +38,14 @@ Skills split their frontmatter between `SKILL.md` and `ARTIFACT.md` so that `SKI
 
 For non-skill types (`agent`, `context`, `command`, `rule`, `hook`, `mcp-server`, extension types), `ARTIFACT.md` carries every field. There is no `SKILL.md`.
 
-The agentskills.io `name` field has stricter constraints than Podium's:
+The `name` field carries the agentskills.io syntax constraints:
 
 - 1–64 characters.
 - Lowercase Unicode alphanumeric (`a-z`, `0-9`) and hyphens.
 - No leading or trailing hyphen.
 - No consecutive hyphens.
-- Matches the parent directory name.
 
-Lint enforces all of the above for skills.
+Lint applies these constraints to any `name:` an artifact declares, whatever its type. The further agentskills.io requirement that `name` match the parent directory name is checked for skills, against `SKILL.md`.
 
 ---
 
@@ -100,7 +99,7 @@ lint_suppress: [lint.skill_ref_validate]   # advisory lint rule codes to silence
 
 These fields appear only in `SKILL.md` and only for skills. They come from the agentskills.io specification.
 
-```yaml
+```markdown
 ---
 name: run-variance-analysis
 description: Flag unusual variance vs. forecast after month-end close. Use after the close period when reviewing financial performance.
@@ -108,7 +107,9 @@ license: MIT
 compatibility: Requires Python 3.10+ and pandas. Designed for Claude Code or similar.
 metadata:
   author: example-org
-allowed-tools: Bash(python:*) Read
+allowed-tools:
+  - Bash(python:*)
+  - Read
 ---
 ```
 
@@ -116,7 +117,7 @@ allowed-tools: Bash(python:*) Read
 |:--|:--|
 | `compatibility` | Free-form environment notes (≤ 500 chars). Read by SKILL.md-aware tools to surface preconditions to a reader. If omitted, the Podium adapter derives a compatibility string from `runtime_requirements` and `sandbox_profile` at materialization time for harnesses that consume only the agentskills.io subset. |
 | `metadata` | Open-ended string-to-string map. Use for client-specific properties not defined by the agentskills.io spec. |
-| `allowed-tools` | Experimental. Space-separated list of tools the skill is pre-approved to call. Adapter support varies by harness. |
+| `allowed-tools` | Experimental. YAML list of tools the skill is pre-approved to call. Podium's parser rejects a bare string here, so write one list entry per tool. Adapter support varies by harness. |
 
 ---
 
@@ -214,8 +215,8 @@ target_harnesses: [claude-code, opencode]
 | `rule_mode` | `rule` | One of `always`, `glob`, `auto`, `explicit`. See [Rule modes](rule-modes). |
 | `rule_globs` | `rule` | Required when `rule_mode: glob`. Comma-separated glob patterns. |
 | `rule_description` | `rule` | Required when `rule_mode: auto`. Drives the harness's autoload heuristic. |
-| `hook_event` | `hook` | One of the canonical event names. Session: `session_start`, `session_end`. Prompt: `user_prompt_submit`. Generic tool: `pre_tool_use`, `post_tool_use`, `post_tool_use_failure`. Tool subtypes: `pre_shell_execution`, `post_shell_execution`, `pre_mcp_execution`, `post_mcp_execution`, `pre_read_file`, `post_file_edit`. Permission: `permission_request`, `permission_denied`. Subagent: `subagent_start`, `subagent_stop`. Turn: `stop`. Compaction: `pre_compact`, `post_compact`. Notification: `notification`. The adapter translates to the harness's native event. See [Hooks](hooks). |
-| `hook_action` | `hook` | Shell snippet executed when the event fires; receives event payload on stdin. |
+| `hook_event` | `hook` | Required for `type: hook`; a missing value is an ingest error. One of the canonical event names. Session: `session_start`, `session_end`. Prompt: `user_prompt_submit`. Generic tool: `pre_tool_use`, `post_tool_use`, `post_tool_use_failure`. Tool subtypes: `pre_shell_execution`, `post_shell_execution`, `pre_mcp_execution`, `post_mcp_execution`, `pre_read_file`, `post_file_edit`. Permission: `permission_request`, `permission_denied`. Subagent: `subagent_start`, `subagent_stop`. Turn: `stop`. Compaction: `pre_compact`, `post_compact`. Notification: `notification`. A value outside this list is an ingest error. The adapter translates to the harness's native event. See [Hooks](hooks). |
+| `hook_action` | `hook` | Required for `type: hook`; a missing value is an ingest error. Shell snippet executed when the event fires; receives event payload on stdin. |
 | `server_identifier` | `mcp-server` | Canonical server identifier. Drives the reverse index that links `skill` artifacts referencing the server via `mcpServers:`. |
 | `extends` | Any | Inherit and refine another artifact's manifest. Single scalar (no multiple inheritance). See [Extends](extends). |
 | `target_harnesses` | Any | Opt out of cross-harness materialization. Set to a list of harness names; the artifact only materializes for harnesses on the list. |
@@ -241,13 +242,23 @@ The registry stores the URL, hash, size, and signature; bytes don't transit the 
 
 ## Provenance markers
 
-Prose in the manifest body (`SKILL.md` for skills, `ARTIFACT.md` for non-skills) can declare provenance to enable differential trust at the host:
+An artifact declares the provenance of its prose so the host can apply differential trust. Two markers carry it.
+
+The `source:` frontmatter field sets the document-level default. It lives in `ARTIFACT.md` for every type, skills included, and adapters read it from there:
 
 ```markdown
 ---
+type: context
+version: 1.0.0
 source: authored
 ---
+```
 
+`authored` (and an omitted field) leaves the prose trusted. Any other value, `imported` for example, marks the whole body untrusted.
+
+Inline markers in the prose body (`SKILL.md` for skills, `ARTIFACT.md` for non-skills) mark one region and override the document-level default for that region:
+
+```markdown
 <authored prose>
 
 <!-- begin imported source="https://wiki.example.com/policy/payments" -->
@@ -278,7 +289,7 @@ When two layers contribute artifacts with the same canonical ID, the higher-prec
 | `license` | Scalar; child wins (lint warning if changed across layers). |
 | `search_visibility` | Scalar; most-restrictive (`direct-only` > `indexed`). |
 
-For skills, the merge applies to fields in their canonical files: `name`, `description`, and `license` merge across `SKILL.md` files; everything else merges across `ARTIFACT.md` files.
+For skills, the merge applies to the `ARTIFACT.md` frontmatter. The registry serves the child's `SKILL.md` verbatim, so `name`, `description`, `license`, and the other agentskills.io fields come from the child's `SKILL.md` and are not inherited from the parent's.
 
 Fields not in this table merge as "child wins": if the child sets the field its value replaces the parent's, otherwise the parent's value is inherited. The child's `type:` must match the parent's, and the child's `version:` is independent of the parent's.
 

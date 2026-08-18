@@ -1,54 +1,129 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 462" font-family="Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 462" class="dg">
+  <!--
+    What each consumer holds after load_artifact: the MCP tool result on the
+    left, and the SDK return value on the right.
+  -->
   <defs>
     <style>
-      .b-bg { fill: #ffffff; }
-      .card { stroke: #1f2933; stroke-width: 2.2; }
-      .cream { fill: #fffaf0; }
-      .sage { fill: #d6e9d2; }
-      .title { fill: #1f2933; font-size: 22px; font-weight: bold; }
-      .label { fill: #b56b1f; font-size: 13px; letter-spacing: 0.04em; font-weight: bold; }
-      .ctitle { fill: #1f2933; font-size: 16px; font-weight: bold; }
-      .sub { fill: #54616e; font-size: 14px; }
-      .mono { fill: #1f2933; font-size: 13px; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
-      .foot { fill: #8a7755; font-size: 13px; }
-      .divider { stroke: #d3c8b0; stroke-width: 1.3; stroke-dasharray: 4 4; }
+      /*
+        Colour comes from the site's design tokens. Inlined in the documentation
+        site the site's own variables win, so the theme toggle drives the
+        diagram. Standing alone (raw markdown on github.com, or the file opened
+        directly) the fallbacks apply and follow the operating system setting.
+        The block below is identical in every diagram; edit all of them together.
+      */
+      :root {
+        --dg-ground: var(--surface, #ffffff);
+        --dg-panel-fill: var(--surface-2, #fdfdf8);
+        --dg-fill: var(--surface-3, #f5f3e9);
+        --dg-fill-2: var(--chip, #eae7d9);
+        --dg-accent-fill: var(--accent-wash, #fff3e2);
+        --dg-accent-soft: var(--accent-strip, #ffeeda);
+        --dg-ink: var(--ink, #14130f);
+        --dg-meta: var(--meta, #63604f);
+        --dg-faint: var(--faint, #6f6c5e);
+        --dg-border: var(--border, #d9d5c6);
+        --dg-accent: var(--accent-deep, #f2861a);
+        --dg-accent-text: var(--link, #a8480a);
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --dg-ground: var(--surface, #171b28);
+          --dg-panel-fill: var(--surface-2, #1e2434);
+          --dg-fill: var(--surface-3, #1b2030);
+          --dg-fill-2: var(--chip, #212739);
+          --dg-accent-fill: var(--accent-wash, rgba(255, 164, 36, 0.12));
+          --dg-accent-soft: var(--accent-strip, rgba(255, 164, 36, 0.08));
+          --dg-ink: var(--ink, #eaeef7);
+          --dg-meta: var(--meta, #9aa3ba);
+          --dg-faint: var(--faint, #7a8399);
+          --dg-border: var(--border, #2b3145);
+          --dg-accent: var(--accent-deep, #f2861a);
+          --dg-accent-text: var(--link, #ffa424);
+        }
+      }
+
+      .dg {
+        font-family: var(--font-ui, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+      }
+
+      .dg-bg { fill: var(--dg-ground); }
+
+      .dg-panel { fill: var(--dg-panel-fill); stroke: var(--dg-border); stroke-width: 1.6; }
+      .dg-card { fill: var(--dg-fill); stroke: var(--dg-ink); stroke-width: 1.8; }
+      .dg-card-primary { fill: var(--dg-accent-fill); stroke: var(--dg-accent); stroke-width: 2.2; }
+      .dg-card-strong { fill: var(--dg-fill-2); stroke: var(--dg-accent); stroke-width: 2.2; }
+      .dg-card-quiet { fill: var(--dg-ground); stroke: var(--dg-meta); stroke-width: 1.4; }
+      .dg-card-event { fill: var(--dg-accent-soft); stroke: var(--dg-accent); stroke-width: 1.8; stroke-dasharray: 6 5; }
+      .dg-chip { fill: var(--dg-accent-soft); stroke: var(--dg-border); stroke-width: 1.2; }
+      .dg-outline { fill: none; stroke: var(--dg-accent); stroke-width: 1.6; stroke-dasharray: 6 5; }
+
+      .dg-title { font-size: 22px; fill: var(--dg-ink); }
+      .dg-name { font-size: 17px; fill: var(--dg-ink); }
+      .dg-lead { font-size: 15px; fill: var(--dg-meta); }
+      .dg-sub { font-size: 14px; fill: var(--dg-meta); }
+      .dg-label { font-size: 13px; fill: var(--dg-accent-text); letter-spacing: 0.06em; }
+      .dg-label-quiet { font-size: 13px; fill: var(--dg-meta); letter-spacing: 0.06em; }
+      .dg-note { font-size: 13px; fill: var(--dg-meta); font-style: italic; }
+      .dg-foot { font-size: 13px; fill: var(--dg-faint); }
+      .dg-mono { font-size: 13px; fill: var(--dg-ink); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+      .dg-mono-accent { font-size: 13px; fill: var(--dg-accent-text); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+      .dg-mono-quiet { font-size: 13px; fill: var(--dg-meta); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+
+      .dg-line { fill: none; stroke: var(--dg-ink); stroke-width: 2; stroke-linecap: round; }
+      .dg-line-accent { fill: none; stroke: var(--dg-accent); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 6 5; }
+      .dg-line-quiet { fill: none; stroke: var(--dg-meta); stroke-width: 1.6; stroke-linecap: round; }
+      .dg-guide { fill: none; stroke: var(--dg-border); stroke-width: 1.2; }
+      .dg-divider { fill: none; stroke: var(--dg-border); stroke-width: 1.2; stroke-dasharray: 4 4; }
+
+      .dg-arrow-head { fill: var(--dg-ink); }
+      .dg-arrow-head-accent { fill: var(--dg-accent); }
+
+      .dg-t-xs { font-size: 12px; }
+      .dg-t-s { font-size: 13px; }
+      .dg-t-m { font-size: 15px; }
+      .dg-t-l { font-size: 18px; }
+      .dg-t-xl { font-size: 21px; }
+      .dg-t-2xl { font-size: 24px; }
+      .dg-t-3xl { font-size: 28px; }
     </style>
   </defs>
-  <rect class="b-bg" width="900" height="462"/>
+  <rect class="dg-bg" width="900" height="462"/>
 
-  <text class="title" x="40" y="42">load_artifact: what the consumer holds</text>
+  <text class="dg-title" x="40" y="42">load_artifact: what the consumer holds</text>
 
   <!-- MCP column -->
-  <rect class="card cream" x="50" y="64" width="380" height="320" rx="10"/>
-  <text class="label" x="72" y="94">MCP SERVER, INTO THE AGENT</text>
-  <text class="ctitle" x="72" y="120">Tool result (in the model's context)</text>
-  <text class="mono" x="76" y="150">{</text>
-  <text class="mono" x="76" y="172">  manifest_body: "Run variance",</text>
-  <text class="mono" x="76" y="194">  materialized_at: [</text>
-  <text class="mono" x="76" y="216">    out/SKILL.md,</text>
-  <text class="mono" x="76" y="238">    out/scripts/run.py</text>
-  <text class="mono" x="76" y="260">  ]</text>
-  <text class="mono" x="76" y="282">}</text>
-  <line class="divider" x1="72" y1="302" x2="408" y2="302"/>
-  <text class="sub" x="72" y="326">Every bundled resource is written to</text>
-  <text class="sub" x="72" y="344">disk. The agent opens files, so the 256 KB</text>
-  <text class="sub" x="72" y="362">cutoff never enters the context window.</text>
+  <rect class="dg-card" x="50" y="64" width="380" height="320" rx="10"/>
+  <text class="dg-label" x="72" y="94">MCP SERVER, INTO THE AGENT</text>
+  <text class="dg-name dg-t-m" x="72" y="120">Tool result (in the model's context)</text>
+  <text class="dg-mono" x="76" y="150">{</text>
+  <text class="dg-mono" x="76" y="172">  manifest_body: "Run variance",</text>
+  <text class="dg-mono" x="76" y="194">  materialized_at: [</text>
+  <text class="dg-mono" x="76" y="216">    out/SKILL.md,</text>
+  <text class="dg-mono" x="76" y="238">    out/scripts/run.py</text>
+  <text class="dg-mono" x="76" y="260">  ]</text>
+  <text class="dg-mono" x="76" y="282">}</text>
+  <line class="dg-divider" x1="72" y1="302" x2="408" y2="302"/>
+  <text class="dg-sub" x="72" y="326">Every bundled resource is written to</text>
+  <text class="dg-sub" x="72" y="344">disk. The agent opens files, so the 256 KB</text>
+  <text class="dg-sub" x="72" y="362">cutoff never enters the context window.</text>
 
   <!-- SDK column -->
-  <rect class="card sage" x="470" y="64" width="380" height="320" rx="10"/>
-  <text class="label" x="492" y="94">SDK, INTO YOUR PROGRAM</text>
-  <text class="ctitle" x="492" y="120">load_artifact() returns, in memory</text>
-  <text class="mono" x="496" y="150">manifest_body</text>
-  <text class="mono" x="496" y="172">resources{}        inline bytes</text>
-  <text class="mono" x="496" y="194">large_resources{}  references</text>
-  <line class="divider" x1="492" y1="214" x2="828" y2="214"/>
-  <text class="ctitle" x="492" y="240">materialize(to="out/") writes to disk</text>
-  <text class="sub" x="492" y="266">It writes the canonical layout and</text>
-  <text class="sub" x="492" y="284">fetches each referenced resource.</text>
-  <line class="divider" x1="492" y1="304" x2="828" y2="304"/>
-  <text class="sub" x="492" y="328">A program reads the manifest first and</text>
-  <text class="sub" x="492" y="346">writes the files when it chooses.</text>
+  <rect class="dg-card-strong" x="470" y="64" width="380" height="320" rx="10"/>
+  <text class="dg-label" x="492" y="94">SDK, INTO YOUR PROGRAM</text>
+  <text class="dg-name dg-t-m" x="492" y="120">load_artifact() returns, in memory</text>
+  <text class="dg-mono" x="496" y="150">manifest_body</text>
+  <text class="dg-mono" x="496" y="172">resources{}        inline bytes</text>
+  <text class="dg-mono" x="496" y="194">large_resources{}  references</text>
+  <line class="dg-divider" x1="492" y1="214" x2="828" y2="214"/>
+  <text class="dg-name dg-t-m" x="492" y="240">materialize(to="out/") writes to disk</text>
+  <text class="dg-sub" x="492" y="266">It writes the canonical layout and</text>
+  <text class="dg-sub" x="492" y="284">fetches each referenced resource.</text>
+  <line class="dg-divider" x1="492" y1="304" x2="828" y2="304"/>
+  <text class="dg-sub" x="492" y="328">A program reads the manifest first and</text>
+  <text class="dg-sub" x="492" y="346">writes the files when it chooses.</text>
 
-  <text class="foot" x="50" y="416">Bytes at or below 256 KB ride inline in the response. A larger resource, and a manifest above the cutoff,</text>
-  <text class="foot" x="50" y="434">arrive as a presigned URL the consumer fetches from content-addressed object storage.</text>
+  <text class="dg-foot" x="50" y="416">Bytes at or below 256 KB ride inline in the response. A larger resource, and a manifest above the cutoff,</text>
+  <text class="dg-foot" x="50" y="434">arrive as a presigned URL the consumer fetches from content-addressed object storage.</text>
 </svg>

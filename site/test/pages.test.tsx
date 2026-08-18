@@ -154,6 +154,10 @@ describe("Header", () => {
     expect(html).toContain("data-theme-toggle");
     expect(html).toContain("data-sidebar-toggle");
   });
+
+  it("names the tab strip the client router updates in place", () => {
+    expect(markup(<Header config={CONFIG} activeRoute="" />)).toContain("data-topbar-tabs");
+  });
 });
 
 describe("Sidebar", () => {
@@ -358,6 +362,19 @@ describe("Doc", () => {
 
     expect(html).toContain('<a class="skip-link" href="#main">Skip to content</a>');
     expect(html).toContain('id="main"');
+  });
+
+  it("marks the article as the region the client router replaces and focuses", () => {
+    const html = markup(
+      <Doc config={CONFIG} page={page} nav={NAV} prev={null} next={null}>
+        <p>Body.</p>
+      </Doc>,
+    );
+
+    expect(html).toContain('id="doc-article"');
+    expect(html).toContain("data-doc-article");
+    expect(html).toContain('tabindex="-1"');
+    expect(html).toContain("data-doc-toc");
   });
 
   it("renders the whole trail for a page nested two sections deep", () => {

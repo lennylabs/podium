@@ -8,7 +8,7 @@ description: Lifecycle observers with a canonical hook_event taxonomy and a shel
 
 A `hook` artifact wires a shell action into a harness lifecycle event. Use it to log, notify, run a check, inject context, or otherwise observe and influence the agent loop.
 
-```yaml
+```markdown
 ---
 type: hook
 version: 1.0.0
@@ -103,7 +103,7 @@ Subtype events target a specific kind of tool call. Use them when the action onl
 
 ## Coverage varies by harness
 
-Not every harness implements every event in the canonical list. When an artifact declares `target_harnesses:`, lint rejects ingest if a named harness does not support the chosen event. When `target_harnesses:` is absent, ingest stays permissive and the unsupported event is caught at materialization: a `load_artifact` onto a harness that cannot translate the event fails with `materialize.untranslatable` (§6.9).
+Not every harness implements every event in the canonical list. Coverage is graded per harness rather than per event. When an artifact declares `target_harnesses:`, ingest lint errors for a named harness whose `hook_event` grade is ✗ (`claude-desktop`, `claude-cowork`, `opencode`, `pi`, and `hermes`) and warns for the ⚠ grade (`cursor`). When `target_harnesses:` is absent, ingest stays permissive and a ✗ harness is caught at materialization: a `load_artifact` onto it fails with `materialize.untranslatable` (§6.9). A harness graded ✓ or ⚠ that has no native mapping for the specific canonical event writes no hook and reports no error, so confirm the event against the harness's own hook documentation before relying on a less common one.
 
 For the events a specific harness emits, refer to that harness's hook documentation. The harness's own docs are the source of truth, since each vendor's surface evolves independently. The full roster of supported harnesses (with adapter values and documentation links) is in [Configure your harness](../consuming/configure-your-harness#supported-harnesses).
 
@@ -163,7 +163,7 @@ finance/audit/log-session-end/
 
 `ARTIFACT.md`:
 
-```yaml
+```markdown
 ---
 type: hook
 name: log-session-end

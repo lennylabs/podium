@@ -30,7 +30,7 @@ src/
   components/     React components, grouped by role
     islands/      the island registry and its prop validator
   pages/          Landing, Doc, and NotFound
-  client/         the browser bundle
+  client/         the browser bundle: theme, copy, search, islands, and the router
   styles/         design tokens and stylesheets
 design/           the design handoff: tokens, screens, and four mockups
 test/             fixtures and the test suite
@@ -182,6 +182,62 @@ over it rather than hydrating.
 Runnable commands stay in the markdown body. `tools/doccov` classifies pages by
 their fenced blocks and the end-to-end suite executes them, so a component
 accompanies the commands rather than replacing them.
+
+## Client navigation
+
+Every page is complete HTML, and the browser bundle adds a navigation layer over
+it. A click on a link to another documentation page is intercepted, the target
+page is fetched, and its article region and on-this-page rail replace the ones on
+screen. The top bar and the navigation tree stay in the document, so a navigation
+keeps the tree's scroll position, its collapsed groups, and the listeners bound
+on first load.
+
+`src/client/router.ts` holds the layer. The build side is a set of attributes:
+`data-doc-article` on the article element in `src/pages/Doc.tsx`, `data-doc-toc`
+on the rail in `TableOfContents`, and `data-topbar-tabs` on the section tabs in
+`Header`. Rendering stays on the server, and the router moves markup the build
+already produced.
+
+Alongside the swap the router updates the address bar through `pushState`, the
+document title, the canonical link, the Open Graph fields, the current marker in
+the navigation tree, and the section tab in the top bar. The breadcrumb and the
+pager arrive with the article. `popstate` drives back and forward, and each
+entry's scroll position is recorded in its history state.
+
+### Links the router leaves alone
+
+A link is handed back to the browser when it points outside the site, carries a
+`download` attribute, opens in another frame, is a bare fragment, carries a query
+string, or is clicked with a modifier key or a middle click. The landing page and
+the 404 page carry a different layout, so they are reached by a full navigation
+as well.
+
+A fetch that fails, answers anything other than 200, or returns a document with
+no article region ends in `location.assign`, which loads the target the ordinary
+way.
+
+Without JavaScript nothing is intercepted, and every link is an ordinary
+navigation to a page that already exists in the output.
+
+### After a swap
+
+The per-page initialisers run again over the incoming article. The copy buttons
+are bound, the on-this-page observer is disconnected and built again over the new
+headings, and any island the new content declares is mounted. The roots of the
+outgoing article are released first, through `unmountIslands` in
+`src/client/islands.ts`, because React holds the DOM it rendered.
+
+Focus moves to the article, which is why it carries `tabindex="-1"`, and a polite
+live region names the page that loaded. Scrolling is instant in both the
+top-of-page and the fragment case, so a swap lands the way a page load does. A
+bar appears at the top of the viewport when a fetch runs longer than 200ms. Its
+sweep runs only for a reader who has not asked for reduced motion, and the bar
+itself is visible either way.
+
+The router dispatches `podium:navigate` on `document` when it takes a click and
+`podium:navigated` once the new article is in place. The search overlay listens
+for the first one and closes; anything else that holds page-level state can use
+the same pair.
 
 ## Checks
 

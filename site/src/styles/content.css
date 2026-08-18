@@ -170,6 +170,44 @@
   display: none;
 }
 
+/* -------------------------------------------------------------- diagrams */
+
+/*
+ * A diagram is the SVG written into the page, wrapped in a labelled plate.
+ *
+ * The drawing reads the same tokens the page does, so the plate only has to
+ * supply the surface it sits on and the inset that keeps the drawing off the
+ * border. Both themes are handled by the tokens themselves.
+ *
+ * The img rule covers a diagram that is still an image: the fallback a leaf
+ * island shows before it mounts, and any other picture in the prose.
+ */
+.diagram {
+  margin: 0 0 20px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  background: var(--surface);
+  overflow-x: auto;
+}
+
+.diagram > svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.prose img {
+  display: block;
+  height: auto;
+  max-width: 100%;
+  margin: 0 0 20px;
+}
+
+img.diagram {
+  padding: 14px;
+}
+
 /* --------------------------------------------------------------- islands */
 
 .island {

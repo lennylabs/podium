@@ -1,19 +1,19 @@
 ---
 title: Custom consumers via the SDK
-nav_order: 3
+nav_order: 4
 description: Build programmatic consumers (LangChain, Bedrock, OpenAI Assistants, custom orchestrators, eval harnesses) with podium-py or podium-ts.
 ---
 
 # Custom consumers via the SDK
 
-Programmatic consumers (LangChain, Bedrock, OpenAI Assistants, custom orchestrators, eval harnesses, build pipelines, notebooks) talk to the registry directly via thin language SDKs. The SDKs are HTTP clients backed by the same registry API the MCP server uses. They share identity providers, the content cache, layer composition, visibility filtering, and audit.
+Programmatic consumers (LangChain, Bedrock, OpenAI Assistants, custom orchestrators, eval harnesses, build pipelines, notebooks) talk to the registry directly via thin language SDKs. The SDKs are HTTP clients backed by the same registry API the MCP server uses. They reach the registry with the same identity, and the registry applies the same layer composition, visibility filtering, and audit it applies to the MCP path. The SDKs keep no content cache of their own: `always-revalidate` and `offline-first` both fetch on every call, and `offline-only` raises `network.offline_cache_miss` because there is nothing cached to serve.
 
 | SDK | Install | Import | Use for |
 |:--|:--|:--|:--|
 | `podium-py` | `pip install podium-sdk` | `from podium import …` | Python orchestrators, LangChain consumers, OpenAI Assistants integrations, build/eval pipelines, notebooks. |
 | `podium-ts` | `npm install @lennylabs/podium-sdk` | `import { Client } from "@lennylabs/podium-sdk"` | TypeScript / Node orchestrators, Bedrock Agents, custom Node-based agent runtimes, Edge runtime integrations. |
 
-**The SDKs require a Podium server.** They speak HTTP and don't work against a filesystem-source registry. For filesystem-mode consumers, use `podium sync` directly.
+**The SDKs require a Podium server.** They speak HTTP and don't work against a filesystem-source registry. A consumer reading a filesystem-source registry uses `podium sync` directly.
 
 ---
 
@@ -22,8 +22,12 @@ Programmatic consumers (LangChain, Bedrock, OpenAI Assistants, custom orchestrat
 ```python
 from podium import Client
 
-# from_env reads PODIUM_REGISTRY, PODIUM_IDENTITY_PROVIDER,
-# PODIUM_OVERLAY_PATH, etc. Constructor params override env values.
+# from_env reads PODIUM_REGISTRY (falling back to defaults.registry in the
+# workspace .podium/sync.local.yaml, the workspace .podium/sync.yaml, then
+# ~/.podium/sync.yaml), PODIUM_IDENTITY_PROVIDER, PODIUM_OVERLAY_PATH,
+# PODIUM_SESSION_TOKEN, and PODIUM_CACHE_MODE. The direct constructor below
+# reads no environment variable except PODIUM_OVERLAY_PATH, which an explicit
+# overlay_path argument overrides.
 client = Client.from_env()
 
 # Or pass explicitly:
@@ -33,12 +37,13 @@ client = Client(
     overlay_path="./.podium/overlay/",   # workspace local overlay
 )
 
-# Authenticate (oauth-device-code path; the SDK raises DeviceCodeRequired
-# with the URL and code if interaction is needed).
+# Authenticate (oauth-device-code path). login() prints the verification URL
+# and the user code to stderr, then blocks until the flow completes or the
+# timeout (10 minutes by default) expires.
 client.login()
 ```
 
-For managed runtimes that issue their own session tokens, swap `identity_provider` to `injected-session-token` and configure `PODIUM_SESSION_TOKEN_FILE` or `PODIUM_SESSION_TOKEN_ENV`.
+For managed runtimes that issue their own session tokens, pass the token to the client (`Client(registry="https://podium.acme.com", token=...)`), or export `PODIUM_SESSION_TOKEN` and construct the client with `Client.from_env()`. The SDK attaches it as the `Authorization: Bearer` credential on every request. `PODIUM_SESSION_TOKEN_FILE` and `PODIUM_SESSION_TOKEN_ENV` are read by the MCP server and the CLI, and the SDKs do not read them.
 
 ---
 
@@ -71,7 +76,7 @@ contexts = client.search_artifacts("style guide", type="context")
 mcp_servers = client.search_artifacts(type="mcp-server")
 ```
 
-The same operations are exposed as read-only CLI commands (`podium search`, `podium domain show`, `podium domain search`, `podium artifact show`) for shell pipelines. See [Reference → CLI](../reference/cli) when that page lands.
+The same operations are exposed as read-only CLI commands (`podium search`, `podium domain show`, `podium domain search`, and `podium artifact show`) for shell pipelines. See [Reference → CLI](../reference/cli).
 
 ---
 
@@ -82,11 +87,11 @@ The same operations are exposed as read-only CLI commands (`podium search`, `pod
 artifact = client.load_artifact("finance/close-reporting/run-variance-analysis")
 print(artifact.manifest_body)
 
-# Materialize bundled resources to disk via the harness adapter
-artifact.materialize(to="./artifacts/", harness="claude-code")
+# Write the artifact to disk in the canonical layout
+artifact.materialize(to="./artifacts/")
 ```
 
-`materialize()` runs the configured `HarnessAdapter` over the canonical artifact and writes the result to the destination path. Pass `harness="none"` to write the canonical layout as-is, which is useful when the consuming runtime reads `ARTIFACT.md` (and `SKILL.md` for skills) directly.
+`materialize()` writes the canonical layout under `<to>/<id>/`: `ARTIFACT.md` for every type, `SKILL.md` for a skill, and each bundled resource at its package-relative path. The SDK is an independent HTTP client that does not embed the harness adapters, so `materialize()` accepts a `harness` argument for forward compatibility and writes the canonical layout whatever its value. Run `podium sync --harness <name>` when the consumer needs harness-native files.
 
 The SDK separates loading from writing. The MCP server writes every resource to disk during `load_artifact`; the SDK holds the result in memory and writes only when `materialize()` is called. `load_artifact` returns the manifest body and the bundled resources small enough to travel inline; a resource above the 256 KB inline cutoff arrives as a presigned reference. `materialize(to=...)` writes the canonical layout under `<to>/<id>/` and fetches each referenced resource. A manifest above the cutoff is fetched during `load_artifact`, so `artifact.manifest_body` is populated whatever the manifest's size. [Inline content and materialized files](handling-artifact-responses#inline-content-and-materialized-files) covers the model both consumer paths share.
 
@@ -106,7 +111,7 @@ artifacts = client.load_artifacts(
         "finance/ap/pay-invoice",
     ],
     session_id=session_id,        # honors the same `latest`-resolution semantics
-    harness="claude-code",        # optional per-call adapter override
+    harness="claude-code",        # recorded on the request; the response and materialize() are canonical
 )
 
 for result in artifacts:
@@ -140,10 +145,10 @@ The same events fire outbound webhooks; the subscription is the in-process equiv
 For impact analysis and custom tooling:
 
 ```python
-deps = client.dependents_of("finance/ap/pay-invoice@1.2")
+deps = client.dependents_of("finance/ap/pay-invoice")
 ```
 
-Returns the set of artifacts that depend on the given one via `extends:`, `delegates_to:`, or `mcpServers:` references. Useful before deprecating, when assessing blast radius, or when building a "what breaks if I change this?" check.
+Returns the set of artifacts that depend on the given one via `extends:`, `delegates_to:`, or `mcpServers:` references. Dependency edges key on the unpinned canonical ID, so a query carrying an `@version` suffix matches no edge. Useful before deprecating, when assessing blast radius, or when building a "what breaks if I change this?" check.
 
 ---
 
@@ -165,7 +170,7 @@ results = client.search_artifacts(
     type="skill",
     top_k=15,
 )
-ids = [r.id for r in results if r.score > 0.5]
+ids = [r.id for r in results.results if r.score > 0.5]
 
 # Materialization: hand the chosen ids to `podium sync` so the on-disk view is
 # auditable and reproducible from the include list.
@@ -190,11 +195,15 @@ When a runtime doesn't fit any built-in harness (a specialized agent framework, 
 
 ```python
 client = Client.from_env()
-artifact = client.load_artifact("evals/regression-suite/run-week-42", harness="none")
+artifact = client.load_artifact("evals/regression-suite/run-week-42")
 
-# `none` writes the canonical layout — read ARTIFACT.md (and SKILL.md for skills) directly
+# Read the manifest in memory; nothing is written until materialize().
 manifest = artifact.frontmatter
 body = artifact.manifest_body
+
+# Write the canonical layout when the runtime wants files on disk:
+# ARTIFACT.md (and SKILL.md for skills) plus bundled resources.
+artifact.materialize(to="./artifacts/", harness="none")
 ```
 
 Identity, visibility, layer composition, and audit are unchanged. The custom consumer is responsible for caching and any runtime-native translation it needs.
@@ -217,7 +226,7 @@ for descriptor in suite.results:
 
 The SDKs deliberately don't implement the MCP meta-tool semantics (the agent-driven lazy materialization). Programmatic consumers know what they want; they don't need an LLM-mediated browse interface. If a programmatic consumer wants lazy semantics, it can call `load_artifact` lazily in its own code.
 
-Identity providers, the cache, visibility filtering, layer composition, and audit are all the same as in the MCP path. The SDK uses a different transport.
+Visibility filtering, layer composition, and audit are the same as in the MCP path, because the registry applies them. The SDK uses a different transport and keeps no content cache.
 
 ---
 
@@ -225,7 +234,7 @@ Identity providers, the cache, visibility filtering, layer composition, and audi
 
 Custom providers register through the same interface as the MCP server's. For most consumers, the built-in providers are enough:
 
-- **`oauth-device-code`**: interactive device-code flow on first use; tokens cached in the OS keychain. The default for developer-machine consumers.
-- **`injected-session-token`**: runtime-issued signed JWT, configured via `PODIUM_SESSION_TOKEN_ENV` or `PODIUM_SESSION_TOKEN_FILE`. The right choice for managed agent runtimes (Bedrock Agents, OpenAI Assistants, custom orchestrators) where the runtime issues credentials per session.
+- **`oauth-device-code`**: `Client.login()` runs the device-code flow, prints the verification URL and the user code to stderr, and keeps the returned access token on the client instance for the life of the process. The SDK does not persist it; `podium login` stores a token in the OS keychain.
+- **`injected-session-token`**: a runtime-issued signed JWT. Pass it as `Client(registry=..., token=...)`, or export `PODIUM_SESSION_TOKEN` and construct the client with `Client.from_env()`. The right choice for managed agent runtimes (Bedrock Agents, OpenAI Assistants, custom orchestrators) where the runtime issues credentials per session.
 
 The runtime registers its signing key with the registry one-time at runtime onboarding. The registry verifies signatures on every call.

@@ -205,7 +205,7 @@ export const landing: LandingContent = {
   },
   hero: {
     status: {
-      text: "0.1.x — early release",
+      text: "0.3.x — early release",
     },
     headline: [
       { text: "One catalog.", marked: false },
@@ -275,6 +275,7 @@ export const landing: LandingContent = {
     names: [
       "Claude Code",
       "Claude Desktop",
+      "Claude Cowork",
       "Cursor",
       "Codex",
       "Gemini CLI",
@@ -337,7 +338,7 @@ export const landing: LandingContent = {
           { label: "Materialization", value: "User-driven sync" },
         ],
         plusLabel: null,
-        plus: ["Author, lint, sync", "Domains and profiles"],
+        plus: ["Author, lint, sync", "Domains and profiles", "Ordered layers from disk"],
       },
       {
         icon: "database",
@@ -357,7 +358,7 @@ export const landing: LandingContent = {
         plus: [
           "Discovery via MCP or SDK",
           "Hybrid search",
-          "Layers and visibility",
+          "Registered and remote layers, with visibility",
           "One audit log",
         ],
       },
@@ -423,14 +424,14 @@ export const landing: LandingContent = {
         name: "Embeddings",
         builtIn: "BM25 only",
         alternatives: ["OpenAI", "Voyage", "Cohere", "Ollama"],
-        note: "Or let Pinecone, Weaviate, or Qdrant embed on ingest. Vectors are fused with BM25 hits via reciprocal rank fusion.",
+        note: "A provider is configured by default (ollama, or openai on Postgres) but ships in no binary, so hybrid search needs it reachable. Or let Pinecone, Weaviate, or Qdrant embed on ingest. Vectors are fused with BM25 hits via reciprocal rank fusion.",
       },
       {
         icon: "padlock",
         name: "Identity",
         builtIn: "None",
-        alternatives: ["OIDC device code", "Gateway-forwarded JWT", "SCIM"],
-        note: null,
+        alternatives: ["oidc-jwt", "trusted-headers", "injected-session-token"],
+        note: "SCIM provisions groups alongside a provider rather than replacing one.",
       },
       {
         icon: "branch",

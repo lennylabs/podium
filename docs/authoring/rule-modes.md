@@ -104,5 +104,6 @@ Lint enforces the field requirements per mode:
 - `rule_mode: glob` with `rule_description` set: lint warning ("rule-mode 'glob' uses globs only; rule-description is ignored").
 - `rule_mode: auto` with `rule_globs` set: lint warning ("rule-mode 'auto' uses description only; rule-globs is ignored").
 - A type other than `rule` with `rule_mode` set: lint warning ("rule-mode is only applicable to type: rule").
+- A `rule_mode` value outside `always`, `glob`, `auto`, and `explicit` on a `type: rule` artifact: ingest error (`lint.unknown_rule_mode`).
 
 When an artifact declares `target_harnesses:`, ingest lint surfaces a mismatch for any named harness whose cell for the chosen mode is ⚠ (warning) or ✗ (error). When `target_harnesses:` is absent, ingest stays permissive and an unsupported mode is caught at materialization onto that harness (§6.9). Authors who must use a non-portable mode can declare `target_harnesses:` in frontmatter to opt out of cross-harness materialization for that artifact.

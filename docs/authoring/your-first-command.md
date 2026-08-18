@@ -21,7 +21,7 @@ mkdir -p ~/podium-artifacts/personal/dev-loop/standup
 $EDITOR ~/podium-artifacts/personal/dev-loop/standup/ARTIFACT.md
 ```
 
-```yaml
+```markdown
 ---
 type: command
 name: standup

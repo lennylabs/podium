@@ -1,14 +1,18 @@
 ---
 title: Browsing the catalog
-nav_order: 2
-description: How an agent navigates the catalog at runtime via load_domain, search_domains, search_artifacts, and load_artifact, and what each call costs.
+nav_order: 3
+description: Progressive discovery. How an agent traverses domains and finds artifacts at runtime via load_domain, search_domains, search_artifacts, and load_artifact, and what each call costs.
 ---
 
 # Browsing the catalog
 
-The Podium MCP server exposes a small set of meta-tools to harnesses that speak MCP. The agent uses them mid-session to discover and load capabilities incrementally, rather than starting with the full catalog in its context window.
+This page documents progressive discovery. The Podium MCP server exposes a small set of meta-tools to harnesses that speak MCP. The agent uses them mid-session to traverse domains, find artifacts, and load them one at a time, so the session starts with an empty context window instead of the full catalog.
+
+An artifact is a directory, and loading one materializes its bundled files along with its manifest. Discovery is therefore lazy in both directions: the agent pays for a domain map or a search before it pays for an artifact, and it pays for an artifact's scripts and references only when it loads that artifact.
 
 The same operations are available to programmatic consumers via the SDK; this page focuses on the agent-mediated MCP path. SDK callers see the same wire format.
+
+The eager counterpart is `podium sync`, which declares a subset of the catalog up front and writes it to disk before the session starts. [Selective materialization](selective-materialization) covers that path.
 
 | Tool | Purpose |
 |:--|:--|
@@ -140,11 +144,11 @@ load_artifact("finance/close-reporting/run-variance-analysis")
 load_artifact("finance/ap/pay-invoice", version="1.2.0")
 ```
 
-Loads a specific artifact by ID. The tool result carries the manifest body inline and the paths of the materialized files. Every bundled resource is written atomically to the host's filesystem at a host-configured destination path, so the agent reads a resource from its file rather than from the response. The MCP server fetches each resource from the registry, inline below the 256 KB cutoff and through a presigned URL above it; the cutoff is a transport detail the agent does not see. [Inline content and materialized files](handling-artifact-responses#inline-content-and-materialized-files) covers the consumer-side model.
+Loads a specific artifact by ID. The tool result carries the manifest body inline and the paths of the materialized files. Every [bundled resource](../authoring/bundled-resources) in the artifact's directory is written atomically to the host's filesystem at a host-configured destination path, so the agent reads a resource from its file rather than from the response. The MCP server fetches each resource from the registry, inline below the 256 KB cutoff and through a presigned URL above it; the cutoff is a transport detail the agent does not see. [Inline content and materialized files](handling-artifact-responses#inline-content-and-materialized-files) covers the consumer-side model.
 
 This is the expensive operation in the discovery flow. The agent calls it only when it has decided to use the artifact. Materialization runs through the configured harness adapter, so the on-disk layout matches what the harness expects.
 
-Manifest fields beyond the prose body (hints, sandbox profile, runtime requirements, MCP server registrations, dependency edges) shape what the consumer does with the artifact next. [Handling artifact responses](handling-artifact-responses) covers the consumer-side action per field.
+Manifest fields beyond the prose body (hints, sandbox profile, runtime requirements, MCP server registrations, dependency edges) determine what the consumer does with the artifact next. [Handling artifact responses](handling-artifact-responses) covers the consumer-side action per field.
 
 Args:
 
@@ -152,8 +156,9 @@ Args:
 - `version` (optional). Default is `latest`, resolved to the most recently ingested non-deprecated version visible to the caller.
 - `session_id` (optional). The first `latest` lookup within a session is recorded and reused for all subsequent same-id lookups, so the host sees a consistent snapshot across the session.
 - `harness` (optional). Per-call adapter override. Pass `none` to get the canonical layout regardless of the server's default `PODIUM_HARNESS`.
+- `destination` (optional). Materialization root for this call, overriding the server's `PODIUM_MATERIALIZE_ROOT`.
 
-`mcp-server` artifacts are filtered out of MCP-bridge results by default: harnesses that consume Podium through the MCP bridge fix their MCP server list at startup, so a discovered `mcp-server` registration mid-session would only add planning noise. They remain visible through the SDK and through `podium sync`.
+`mcp-server` artifacts are excluded from the MCP server's read-only `resources/list` mirror: a harness that consumes Podium through the MCP bridge fixes its MCP server list at startup, so a registration discovered mid-session would only add planning noise. They still appear in `search_artifacts` results, still load through `load_artifact`, and reach a harness's own configuration through `podium sync`.
 
 ---
 

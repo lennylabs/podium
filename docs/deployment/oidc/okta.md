@@ -46,14 +46,19 @@ This makes the user's group memberships available in the JWT under the `groups` 
 
 ## 3. Configure Podium
 
-On the registry host, edit `registry.yaml` (`/etc/podium/registry.yaml`, or `~/.podium/registry.yaml` in standalone):
+On the registry host, edit `registry.yaml`. The registry reads `~/.podium/registry.yaml` unless `PODIUM_CONFIG_FILE` names another path, and `podium serve --config <path>` sets that variable. A file at `/etc/podium/registry.yaml` is read only when the server is started with `--config /etc/podium/registry.yaml` or with `PODIUM_CONFIG_FILE` set to it:
 
 ```yaml
-identity_provider:
-  type: oauth-device-code
-  audience: podium
-  authorization_endpoint: https://<your-okta-domain>/oauth2/default
+registry:
+  identity_provider:
+    type: oidc-jwt
+    issuer: https://<your-okta-domain>/oauth2/default   # must be https
+    audience: podium
 ```
+
+Every server-side key nests under the top-level `registry:` mapping. A document that starts at `identity_provider:` parses to an empty config and the registry ignores it without reporting an error.
+
+`oidc-jwt` is the registry's side of the flow: it verifies each presented token against the issuer's JWKS and validates the `aud` claim against `audience:`. Developers obtain that token by completing the device-code flow from the CLI, which the next step configures. Setting `oauth-device-code` as the registry's own provider stops startup with `config.identity_provider_unverified`.
 
 The registry reads group membership from the token's `groups` claim, mapped to group names by the `IdpGroupMapping` adapter, or from the SCIM directory when SCIM is configured (see below). Restart the registry.
 
@@ -63,24 +68,28 @@ On developer machines, set up the client:
 podium init --global --registry https://podium.acme.com
 export PODIUM_OAUTH_CLIENT_ID=<client-id-from-step-1>
 export PODIUM_OAUTH_AUTHORIZATION_ENDPOINT=https://<your-okta-domain>/oauth2/default/v1/device/authorize
-podium login
+export PODIUM_OAUTH_TOKEN_URL=https://<your-okta-domain>/oauth2/default/v1/token
+podium login --scopes "openid profile email"
 ```
+
+Set `PODIUM_OAUTH_TOKEN_URL` explicitly. With it unset, `podium login` derives the token endpoint by appending `/token` to the device-authorization URL, which produces `https://<your-okta-domain>/oauth2/default/v1/device/authorize/token` and the token exchange fails. The default scope set is `openid profile email groups` and the `default` authorization server defines no `groups` scope, while the claim added in step 2 is emitted under any scope, so `openid profile email` is sufficient.
 
 The device verification URL and code appear, and after the in-browser flow completes, `podium login` prints the resolved `sub`, `email`, and `groups`.
 
 ## 4. Test group-based visibility
 
-Configure an admin layer scoped to a specific Okta group in the tenant's layer config. Group-scoped visibility is set in the registry layer config, or with `podium layer register --group <name>` (also `--public`, `--organization`, and `--user`). Layers registered with `--user-defined` are private to the registrant and cannot be widened.
+Configure an admin layer scoped to a specific Okta group in `registry.yaml`. Group-scoped visibility is set in the registry layer config, or with `podium layer register --group <name>` (also `--public`, `--organization`, and `--user`). Layers registered with `--user-defined` are private to the registrant and cannot be widened.
 
 ```yaml
-layers:
-  - id: engineering-only
-    source:
-      git:
-        repo: git@github.com:acme/podium-engineering.git
-        ref: main
-    visibility:
-      groups: [engineering]
+registry:
+  layers:
+    - id: engineering-only
+      source:
+        git:
+          repo: git@github.com:acme/podium-engineering.git
+          ref: main
+      visibility:
+        groups: [engineering]
 ```
 
 The `groups:` entry matches the group names resolved from the token claim or the SCIM directory. Confirm:
@@ -94,7 +103,7 @@ SCIM 2.0 push applies group-membership changes without waiting for the user's ne
 
 1. In Okta: **Applications → \[your Podium app\] → Provisioning → To App → Enable SCIM**.
 2. SCIM Connector base URL: the registry's SCIM endpoint, `https://podium.acme.com/scim/v2`.
-3. Authentication: **HTTP Header**, with a bearer credential the registry accepts at its SCIM endpoint.
+3. Authentication: **HTTP Header**, with one of the bearer tokens listed in the registry's `PODIUM_SCIM_TOKENS` environment variable. The registry mounts `/scim/v2/` only when that variable is set to a comma-separated list of accepted tokens, and returns 404 for every SCIM request otherwise. Set `PODIUM_SCIM_STORE_PATH` to a writable file path so the pushed directory survives a restart.
 4. Test the connection. Enable **Push Groups** and **Update User Attributes**.
 
 Group changes now propagate within seconds.

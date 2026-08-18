@@ -1,6 +1,6 @@
 ---
 title: Handling artifact responses
-nav_order: 4
+nav_order: 5
 description: "What a consumer does with the manifest and materialized files returned by load_artifact: route by hints, honor safety constraints, verify requirements, register MCP servers, walk dependencies, fetch external resources."
 ---
 
@@ -91,7 +91,7 @@ The fields below constrain what the consumer is allowed to do with the artifact.
 - `network-isolated` blocks outbound network from the script.
 - `seccomp-strict` applies the strict syscall allowlist that ships with Podium.
 
-**`requiresApproval`** (list of tool names)
+**`requiresApproval`** (list of `{tool, reason}` entries; `reason` is optional)
 
 - Prompt the user before invoking each named tool from within the artifact's execution. This is independent of any approval prompts the harness applies by default.
 - Common uses: irreversible actions (payment submission, data deletion, outbound notifications).
@@ -122,7 +122,7 @@ These fields tell the consumer what the artifact needs in order to run.
 **`mcpServers`** (list of MCP server registration objects)
 
 - Register the named servers with the host's MCP plugin layer so the agent can reach them.
-- Server names key into the cross-type dependency graph. A separate `mcp-server`-type artifact carries the canonical registration when the host wants the full record.
+- The registry resolves each entry to an `mcp-server`-type artifact by deriving a `server_identifier` from it and matching that identifier against the `server_identifier` of the ingested `mcp-server` artifacts. The derived identifier is `<command>:<first non-flag argument>` (for example `npx:@acme/finance-warehouse-mcp`), the bare command when every argument is a flag, or the entry's `transport` value when it declares no command. A match records the cross-type dependency edge, and an entry that resolves to nothing records none. The matched `mcp-server` artifact carries the canonical registration when the host wants the full record.
 - Long-running agent sessions restart when a registered server's record changes.
 
 **`delegates_to`** (list of canonical artifact IDs)
@@ -158,8 +158,8 @@ The materialized file tree lands at the configured destination path; [Inline con
 **`external_resources`** (list of pointer objects)
 
 - Each entry has `path`, `url`, `sha256`, `size`, and optionally `signature`.
-- The materialization pipeline already fetches, verifies, and writes the bytes locally; the consumer does not re-fetch by default.
-- When the consumer opts out of materializing external resources (a flag on `materialize()`), the consumer fetches on demand from `url` and verifies the bytes against `sha256` (and `signature` when present).
+- The registry stores the pointer record rather than the bytes, and the bytes never transit the registry. Materialization writes the bundled resources in the artifact directory and does not fetch the external ones.
+- The consumer fetches each entry from `url`, verifies the bytes against `sha256`, and verifies `signature` when the entry carries one.
 
 ---
 
@@ -226,7 +226,7 @@ thinking_budget = budget_for_effort(fm.get("effort_hint", "low"))
 if fm.get("sensitivity") == "high":
     audit.log_high_sensitivity_load(result.id)
 sandbox = compile_sandbox_profile(fm.get("sandbox_profile"))
-approval_tools = set(fm.get("requiresApproval", []))
+approval_tools = {entry["tool"] for entry in fm.get("requiresApproval", [])}
 
 # Capability
 verify_runtime(fm.get("runtime_requirements", {}))
@@ -275,7 +275,7 @@ The TypeScript SDK `LoadedArtifact` exposes the same two fields, `manifest_body`
 | `delegates_to` | Walk the dependency. Apply the same handling to each. |
 | `hook_event` / `hook_action` | Wire into the agent loop at the canonical event. |
 | `rule_mode` | Load via the rule discipline (always, glob, auto, explicit). |
-| `external_resources` | Already fetched by materialization. Verify hash and signature when re-fetching. |
+| `external_resources` | Fetch from `url` and verify against `sha256` and `signature`. |
 | `description` / `when_to_use` | Surface to the user or agent for selection. |
 | `tags` | Filter and group views. |
 | `deprecated` / `replaced_by` | Warn or offer the replacement. |

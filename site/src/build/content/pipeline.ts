@@ -24,6 +24,7 @@ import type {
   StaticFile,
 } from "../types";
 import { remarkAlerts } from "./alerts";
+import { inlineDiagrams } from "./diagrams";
 import { remarkDirectives } from "./directives";
 import { checkHeadingOrder, checkImageAlt, collectHeadings, collectText } from "./headings";
 import { highlightTree, remarkCodeMeta } from "./highlight";
@@ -107,6 +108,8 @@ export async function buildCorpus(
     const headings = collectHeadings(entry.tree);
     checkHeadingOrder(headings, entry.page.file, diagnostics);
     checkImageAlt(entry.tree, entry.page.file, offset, diagnostics);
+    // After the alt check, because inlining removes the img the check reads.
+    inlineDiagrams(entry.tree, config, entry.page.file, diagnostics);
 
     models.push({
       route: entry.page.route,

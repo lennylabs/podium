@@ -1,6 +1,6 @@
 ---
 title: Extending
-nav_order: 6
+nav_order: 9
 description: Plugin SPIs, the forward-compatibility constraints that keep out-of-process plugins on the table, and external-extension patterns built on the HTTP API.
 ---
 
@@ -21,8 +21,8 @@ The registry's pluggable interfaces:
 
 | Interface | Purpose |
 |:--|:--|
-| `RegistryStore` | Manifest metadata, dependency edges, layer config, admin grants, registry-side audit. Postgres (standard) / SQLite (standalone) by default. |
-| `RegistryObjectStore` | Bundled resource bytes, presigned URLs. S3-compatible (filesystem in standalone). |
+| `RegistryStore` | Manifest metadata, dependency edges, layer config, admin grants, and registry-side audit. Built-ins: `sqlite` and `postgres`. |
+| `RegistryObjectStore` | Bundled resource bytes and presigned URLs. Built-ins: the local filesystem and S3-compatible storage. |
 | `RegistrySearchProvider` | Hybrid retrieval for `search_artifacts`. Built-ins: `pgvector`, `sqlite-vec`, `pinecone`, `weaviate-cloud`, `qdrant-cloud`. See [Vector backends](vector-backends) for the per-backend recipes. |
 | `EmbeddingProvider` | Generates embeddings for ingest text and query text. Built-ins: `openai`, `voyage`, `cohere`, `ollama`. |
 | `LocalSearchProvider` | Optional semantic backing for the local-overlay index. Same SPI as `RegistrySearchProvider`. |
@@ -32,7 +32,7 @@ The registry's pluggable interfaces:
 | `GitProvider` | Webhook signature verification and Git fetch semantics, used by the built-in `git` `LayerSourceProvider`. Built-in support for GitHub, GitLab, Bitbucket. |
 | `TypeProvider` | Type definitions: frontmatter JSON Schema + lint rules + adapter hints + field-merge semantics. |
 | `IngestLinter` | Manifest validation, resource-reference checks, type-specific rules; runs pre-merge in CI and again at registry ingest. |
-| `IdentityProvider` | Attaches OAuth-attested identity to every registry call. Built-ins: `oauth-device-code`, `injected-session-token`. |
+| `IdentityProvider` | Attaches the caller's attested identity to every registry call. Client-side built-ins acquire the token at the consumer: `oauth-device-code` and `injected-session-token`. Registry-process built-ins resolve identity from the request at the registry: `oidc-jwt` and `trusted-headers`, covered in [Gateway-delegated identity](gateway-delegated-identity). |
 | `LocalOverlayProvider` | Source for the workspace-scoped local overlay layer. Default: workspace filesystem (`.podium/overlay/`). |
 | `LocalAuditSink` | Local audit log for meta-tool calls (when configured). Default: JSON Lines file at `~/.podium/audit.log`. |
 | `HarnessAdapter` | Translates canonical artifacts to the harness's native format at materialization time. The adapter `Source` carries a plugin descriptor (name, optional description, harness subtree prefix) so a marketplace emitter can render an artifact into a named plugin when `podium sync` renders a `kind: marketplace` target. |
@@ -86,7 +86,7 @@ See [Custom consumers via the SDK → Programmatic curation](../consuming/custom
 
 ### Webhook-driven integrations
 
-Receivers for the outbound webhooks (`artifact.published`, `artifact.deprecated`, `domain.published`, `layer.ingested`, `layer.history_rewritten`, `domains.searched` audit-stream consumers, etc.) feed Slack channels, ticket trackers, deployment pipelines, internal dashboards. The registry emits the events; the receiver decides what to do.
+Receivers for the outbound webhooks feed Slack channels, ticket trackers, deployment pipelines, and internal dashboards. The registry delivers `artifact.published`, `artifact.deprecated`, `domain.published`, `layer.ingested`, and `layer.history_rewritten` to a receiver. Read events such as `domains.searched` are recorded in the audit log and are never delivered to a receiver. The registry emits the events; the receiver decides what to do.
 
 Common targets:
 

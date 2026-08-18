@@ -63,6 +63,10 @@ function Pager(props: {
  * The article body arrives as children, already rendered from the markdown, and
  * sits inside the prose container. The headings on the page model feed the
  * right rail only.
+ *
+ * The article carries data-doc-article, which is the region the client router
+ * replaces on a navigation. The top bar and the navigation tree sit outside it
+ * and stay in the document across one.
  */
 export function Doc(props: {
   config: SiteConfig;
@@ -84,7 +88,15 @@ export function Doc(props: {
       <div className="d-shell">
         <Sidebar nav={nav} activeRoute={page.route} basePath={config.basePath} />
         <main className="d-main" id="main">
-          <article className="d-article" data-toc-root="">
+          {/* The client router replaces this element and focuses the
+              replacement, which is why it carries an id and a tab index. */}
+          <article
+            className="d-article"
+            id="doc-article"
+            data-doc-article=""
+            data-toc-root=""
+            tabIndex={-1}
+          >
             <nav className="d-crumbs" aria-label="Breadcrumb">
               <ol className="d-crumb-list">
                 {trail?.map((node) => (

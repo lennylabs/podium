@@ -1,3 +1,4 @@
+import { startRouter } from "./router";
 import { mountSearch } from "./search";
 
 const THEME_KEY = "podium-theme";
@@ -38,8 +39,13 @@ function initTheme(): void {
 
 /* ------------------------------------------------------------------- copy */
 
-function initCopy(): void {
-  const buttons = document.querySelectorAll<HTMLButtonElement>(
+/**
+ * Binds the copy buttons inside a region. The router swaps the article on a
+ * navigation, so the buttons that arrive with it are bound against the region
+ * they came in rather than against the whole document.
+ */
+function initCopy(root: ParentNode): void {
+  const buttons = root.querySelectorAll<HTMLButtonElement>(
     "[data-copy], [data-copy-target]",
   );
 
@@ -69,6 +75,10 @@ function initCopy(): void {
 
 /* ---------------------------------------------------------------- sidebar */
 
+/**
+ * The navigation tree and the top bar stay in the document across a client
+ * navigation, so these listeners are bound once and never rebound.
+ */
 function initSidebar(): void {
   for (const header of document.querySelectorAll<HTMLElement>("[data-nav-group]")) {
     header.addEventListener("click", () => {
@@ -92,7 +102,17 @@ function initSidebar(): void {
 
 /* ---------------------------------------------------------- on this page */
 
+/**
+ * The observer watching the current article's headings. A navigation replaces
+ * both the article and the rail, so the observer is disconnected and built
+ * again against the headings that are now in the document.
+ */
+let spy: IntersectionObserver | null = null;
+
 function initScrollSpy(): void {
+  spy?.disconnect();
+  spy = null;
+
   const links = new Map<string, HTMLElement>();
   for (const link of document.querySelectorAll<HTMLElement>("[data-toc-link]")) {
     const id = link.getAttribute("data-toc-link");
@@ -127,6 +147,7 @@ function initScrollSpy(): void {
   );
 
   for (const heading of headings) observer.observe(heading);
+  spy = observer;
 }
 
 /* ---------------------------------------------------------------- islands */
@@ -135,19 +156,40 @@ function initScrollSpy(): void {
  * Loads the island runtime only when the page has something to mount.
  *
  * React is the largest thing the browser could be asked to download, and a page
- * that declares no island needs none of it.
+ * that declares no island needs none of it. The promise is kept so a later
+ * navigation reuses the module it already fetched, and so an article leaving
+ * the document can release the roots the module created.
  */
-function initIslands(): void {
-  const nodes = document.querySelectorAll<HTMLElement>("[data-island]");
+let islandRuntime: Promise<typeof import("./islands")> | null = null;
+
+function mountIslandsIn(root: ParentNode): void {
+  const nodes = root.querySelectorAll<HTMLElement>("[data-island]");
   if (nodes.length === 0) return;
-  void import("./islands").then((module) => module.mountIslands(nodes));
+  islandRuntime ??= import("./islands");
+  void islandRuntime.then((module) => module.mountIslands(nodes));
+}
+
+async function unmountIslandsIn(root: Node): Promise<void> {
+  if (islandRuntime === null) return;
+  const module = await islandRuntime;
+  module.unmountIslands(root);
 }
 
 /* ------------------------------------------------------------------- boot */
 
 initTheme();
-initCopy();
+initCopy(document);
 initSidebar();
 initScrollSpy();
 mountSearch(basePath);
-initIslands();
+mountIslandsIn(document);
+
+startRouter({
+  basePath,
+  teardown: unmountIslandsIn,
+  activate: (article) => {
+    initCopy(article);
+    initScrollSpy();
+    mountIslandsIn(article);
+  },
+});

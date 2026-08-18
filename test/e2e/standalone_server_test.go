@@ -1,6 +1,6 @@
 package e2e
 
-// End-to-end tests for docs/deployment/small-team.md (D-small-team).
+// End-to-end tests for docs/deployment/single-node.md (D-single-node).
 // The page documents the standalone server: startup, layer ingestion,
 // config precedence, public mode, client init, layer management, MCP
 // discovery, lint, impact analysis, audit, and admin migrate-to-standard.
@@ -30,7 +30,7 @@ import (
 	"github.com/lennylabs/podium/internal/testharness/cmdharness"
 )
 
-// ---- package-level helpers for small-team tests ----------------------------
+// ---- package-level helpers for single-node tests ----------------------------
 
 // smallteamLowArtifact returns a valid low-sensitivity context ARTIFACT.md.
 func smallteamLowArtifact(desc string) string {

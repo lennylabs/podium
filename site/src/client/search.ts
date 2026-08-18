@@ -1,5 +1,7 @@
 import type MiniSearchType from "minisearch";
 
+import { NAVIGATE_EVENT } from "./router";
+
 type Stored = {
   route: string;
   page: string;
@@ -79,7 +81,16 @@ function open(overlay: HTMLElement, input: HTMLInputElement): void {
   input.select();
 }
 
-function render(results: HTMLElement, hits: Array<Stored & { score: number }>): void {
+/**
+ * The index stores each route as the site publishes it, without the path prefix
+ * the site is served under, so every result href is joined with the base path
+ * the page carries.
+ */
+function render(
+  results: HTMLElement,
+  basePath: string,
+  hits: Array<Stored & { score: number }>,
+): void {
   if (hits.length === 0) {
     results.innerHTML = `<li class="search-empty">No matches.</li>`;
     return;
@@ -89,7 +100,8 @@ function render(results: HTMLElement, hits: Array<Stored & { score: number }>): 
     .map((hit) => {
       const context = [hit.section, hit.page].filter((part) => part !== "").join(" · ");
       const label = hit.heading === "" ? hit.page : hit.heading;
-      return `<li class="search-result"><a href="${hit.route}"><span class="search-result-title">${escape(label)}</span><span class="search-result-context">${escape(context)}</span></a></li>`;
+      const href = escape(`${basePath}${hit.route}`);
+      return `<li class="search-result"><a href="${href}"><span class="search-result-title">${escape(label)}</span><span class="search-result-context">${escape(context)}</span></a></li>`;
     })
     .join("");
 }
@@ -132,7 +144,11 @@ export function mountSearch(basePath: string): void {
       results.innerHTML = "";
       return;
     }
-    render(results, index.search(query) as unknown as Array<Stored & { score: number }>);
+    render(
+      results,
+      basePath,
+      index.search(query) as unknown as Array<Stored & { score: number }>,
+    );
   };
 
   for (const field of fields) {
@@ -141,6 +157,10 @@ export function mountSearch(basePath: string): void {
   }
 
   input.addEventListener("input", run);
+
+  // A result the router takes over never reloads the page, so the overlay is
+  // closed here rather than by the navigation.
+  document.addEventListener(NAVIGATE_EVENT, () => close(overlay));
 
   document.addEventListener("keydown", (event) => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {

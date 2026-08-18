@@ -46,39 +46,51 @@ For most teams, Option A is enough to start. Move to Option B or C when differen
 Registry side (`registry.yaml`):
 
 ```yaml
-identity_provider:
-  type: oauth-device-code
-  audience: <client-id>.apps.googleusercontent.com
-  authorization_endpoint: https://accounts.google.com
+registry:
+  identity_provider:
+    type: oidc-jwt
+    issuer: https://accounts.google.com
+    audience: <client-id>.apps.googleusercontent.com
 ```
 
-For Option C, configure the `IdpGroupMapping` adapter registry-side to map the token's group values to group names. To restrict access to the Workspace domain, place the registry behind an upstream identity-aware proxy that authenticates the human caller and admits only accounts in the domain. Restart the registry.
+Every server-side key nests under the top-level `registry:` mapping. A document that starts at `identity_provider:` parses to an empty config and the registry ignores it without reporting an error.
+
+`oidc-jwt` is the registry's side of the flow: it verifies each presented token against Google's JWKS and validates the `aud` claim against `audience:`. Developers obtain that token by completing the device-code flow from the CLI, which the next step configures. Setting `oauth-device-code` as the registry's own provider stops startup with `config.identity_provider_unverified`.
+
+For Option C, set `PODIUM_IDP_GROUP_MAPPING` on the registry to a comma-separated list of `<token-value>=<group-name>` pairs, for example `PODIUM_IDP_GROUP_MAPPING=engineering@acme.com=engineering,platform@acme.com=platform`. A raw value with no entry passes through unchanged, the registry reads the token's top-level `groups` claim only, and the mapping has no `registry.yaml` key. A malformed entry is logged and the whole mapping is dropped, so every group value then passes through unmapped. To restrict access to the Workspace domain, place the registry behind an upstream identity-aware proxy that authenticates the human caller and admits only accounts in the domain. Restart the registry.
 
 Developer side:
 
 ```bash
 podium init --global --registry https://podium.acme.com
 export PODIUM_OAUTH_CLIENT_ID=<client-id>.apps.googleusercontent.com
-export PODIUM_OAUTH_CLIENT_SECRET=<client-secret>
 export PODIUM_OAUTH_AUTHORIZATION_ENDPOINT=https://oauth2.googleapis.com/device/code
-podium login
+export PODIUM_OAUTH_TOKEN_URL=https://oauth2.googleapis.com/token
+podium login --scopes "openid email profile"
 ```
+
+Set `PODIUM_OAUTH_TOKEN_URL` explicitly. With it unset, `podium login` derives the token endpoint by appending `/token` to the device-authorization URL, which produces `https://oauth2.googleapis.com/device/code/token` and the token exchange fails. Pass `--scopes` as shown so the request matches the scopes configured on the consent screen; the default set adds `groups`, which Google does not define.
 
 The verification URL is `https://www.google.com/device`. After the flow completes, `podium login` prints the `sub` and `email`.
 
+`podium login` caches the OAuth access token and later calls present that cached value as `Authorization: Bearer <token>`. The `oidc-jwt` verifier parses the presented credential as a JWT signed by the issuer, and Google issues opaque access tokens, so the cached credential fails to parse and the registry answers `auth.untrusted_token`. The Google credential the registry can verify is the ID token, whose `iss` is `https://accounts.google.com` and whose `aud` is the client ID configured as `audience:` above, and `podium login` does not cache it. Run the registry under [gateway-delegated identity](../gateway-delegated-identity) and have the proxy authenticate the caller against Google. Where a client presents the credential itself, supply the ID token through `PODIUM_SESSION_TOKEN` or `PODIUM_SESSION_TOKEN_FILE` and leave `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` unset, because the MCP bridge reads the keychain token instead of the injected one whenever that endpoint is configured.
+
+`podium login` sends no client secret on the device-authorization or token request, and it reads no client-secret environment variable. A Google OAuth client that requires the secret rejects the token exchange, so the developer-side flow above works only against a client configured to accept a public-client device grant. Where Google requires the secret, terminate the browser flow at an upstream identity-aware proxy and run the registry under [gateway-delegated identity](../gateway-delegated-identity) instead.
+
 ## 4. Test
 
-Configure an admin layer visible to the whole organization in the tenant's layer config. Organization-scoped visibility is set in the registry layer config, or with `podium layer register --organization` (also `--public`, `--group`, and `--user`). Layers registered with `--user-defined` are private to the registrant and cannot be widened.
+Configure an admin layer visible to the whole organization in `registry.yaml`. Organization-scoped visibility is set in the registry layer config, or with `podium layer register --organization` (also `--public`, `--group`, and `--user`). Layers registered with `--user-defined` are private to the registrant and cannot be widened.
 
 ```yaml
-layers:
-  - id: team-shared
-    source:
-      git:
-        repo: git@github.com:acme/podium-artifacts.git
-        ref: main
-    visibility:
-      organization: true
+registry:
+  layers:
+    - id: team-shared
+      source:
+        git:
+          repo: git@github.com:acme/podium-artifacts.git
+          ref: main
+      visibility:
+        organization: true
 ```
 
 A user from the Workspace domain sees the layer. To keep accounts outside the domain from reaching the registry at all, the upstream identity-aware proxy admits only Workspace-domain accounts.

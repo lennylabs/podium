@@ -41,7 +41,7 @@ vi.mock("../src/components/islands/registry", async () => {
   };
 });
 
-const { mountIslands } = await import("../src/client/islands");
+const { mountIslands, unmountIslands } = await import("../src/client/islands");
 
 const PANELS = [
   { label: "npm", html: "<p>Install with <strong>npm</strong>.</p>" },
@@ -237,6 +237,74 @@ describe("mountIslands", () => {
     await mount();
 
     expect(document.body.innerHTML).toBe("<p>Prose only.</p>");
+  });
+
+  it("mounts an island once, so a second pass over it changes nothing", async () => {
+    document.body.innerHTML = leafMarkup();
+    await mount();
+    const mounted = document.querySelector(".sparkle");
+
+    await mount();
+
+    expect(document.querySelector(".sparkle")).toBe(mounted);
+  });
+});
+
+describe("unmountIslands", () => {
+  /**
+   * The client router replaces the article on a navigation, so the roots
+   * rendering inside it are released first.
+   */
+  it("releases the roots inside a region and leaves the markup empty", async () => {
+    document.body.innerHTML =
+      '<article id="doc-article"><div class="island" data-island="sparkle" ' +
+      `data-island-mount="replace" data-island-props='{"label":"the catalog"}'></div></article>`;
+    await act(async () => {
+      await mountIslands(document.querySelectorAll<HTMLElement>("[data-island]"));
+    });
+    expect(document.querySelector(".sparkle")).not.toBeNull();
+
+    const article = document.querySelector("#doc-article") as HTMLElement;
+    await act(async () => {
+      unmountIslands(article);
+    });
+
+    expect(document.querySelector(".sparkle")).toBeNull();
+  });
+
+  it("leaves a root outside the region alone", async () => {
+    document.body.innerHTML =
+      '<article id="doc-article"></article><div class="island" data-island="sparkle" ' +
+      `data-island-mount="replace" data-island-props='{"label":"the catalog"}'></div>`;
+    await act(async () => {
+      await mountIslands(document.querySelectorAll<HTMLElement>("[data-island]"));
+    });
+
+    const article = document.querySelector("#doc-article") as HTMLElement;
+    await act(async () => {
+      unmountIslands(article);
+    });
+
+    expect(document.querySelector(".sparkle")).not.toBeNull();
+  });
+
+  it("mounts a region again after its roots were released", async () => {
+    document.body.innerHTML =
+      '<article id="doc-article"><div class="island" data-island="sparkle" ' +
+      `data-island-mount="replace" data-island-props='{"label":"the catalog"}'></div></article>`;
+    const article = document.querySelector("#doc-article") as HTMLElement;
+    await act(async () => {
+      await mountIslands(document.querySelectorAll<HTMLElement>("[data-island]"));
+    });
+    await act(async () => {
+      unmountIslands(article);
+    });
+
+    await act(async () => {
+      await mountIslands(document.querySelectorAll<HTMLElement>("[data-island]"));
+    });
+
+    expect(document.querySelector(".sparkle")?.textContent).toBe("mounted the catalog");
   });
 });
 

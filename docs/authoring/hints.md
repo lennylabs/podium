@@ -79,5 +79,5 @@ Recording author intent without enforcement keeps the artifact portable across d
 
 ## Lint behavior
 
-- `effort_hint` or `model_class_hint` on a `context`, `rule`, `hook`, or `mcp-server` artifact: lint warning ("hints apply to types: agent, skill, command").
+- `effort_hint` or `model_class_hint` on a `context`, `rule`, `hook`, or `mcp-server` artifact: lint warning ("hints apply only to agent / skill / command").
 - Both fields are optional. Missing fields produce no warnings.

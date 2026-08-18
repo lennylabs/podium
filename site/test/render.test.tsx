@@ -413,13 +413,14 @@ describe("renderBody over the fixture corpus", () => {
     expect(components.size).toBe(0);
   });
 
-  it("renders a callout, a code block, and an image from one page", async () => {
+  it("renders a callout, a code block, and a diagram from one page", async () => {
     const page = pageAt("/guide/install.html");
     const html = markup(renderBody(page, new Map()) as never);
 
     expect(html).toContain('class="callout callout-note"');
     expect(html).toContain('<div class="code-block" data-language="bash">');
-    expect(html).toContain('src="/base/assets/diagrams/sample.svg"');
+    expect(html).toContain('<div class="diagram" role="img" aria-label="The fixture layout">');
+    expect(html).toContain("<svg");
   });
 
   it("renders a tabs island as a mount point wrapping the rendered panels", async () => {

@@ -23,7 +23,7 @@ mkdir -p ~/podium-artifacts/personal/dev-loop/commit-message-writer
 $EDITOR ~/podium-artifacts/personal/dev-loop/commit-message-writer/ARTIFACT.md
 ```
 
-```yaml
+```markdown
 ---
 type: agent
 name: commit-message-writer
@@ -84,7 +84,7 @@ runtime_requirements:
   system_packages: [git]
 ```
 
-Add the line to the frontmatter. The next `podium sync` re-materializes; on a host without `git`, the registry surfaces `materialize.runtime_unavailable` and the consumer reports which package was missing.
+Add the line to the frontmatter and re-run `podium sync`. The requirement ships with the artifact. A host that advertises its runtime capabilities to the Podium MCP server refuses a `load_artifact` it cannot satisfy with `materialize.runtime_unavailable`, naming the missing package. A host that advertises no capabilities receives the requirement and proceeds.
 
 ---
 
@@ -107,10 +107,10 @@ chmod +x ~/podium-artifacts/personal/dev-loop/commit-message-writer/scripts/stag
 Reference it from the prose body:
 
 ```markdown
-Read the staged diff by running `scripts/staged-diff.sh`.
+Read the staged diff by running [scripts/staged-diff.sh](scripts/staged-diff.sh).
 ```
 
-Lint resolves the prose reference against the artifact's bundled files at ingest. Broken paths fail the lint check.
+Lint resolves markdown links in the body against the artifact's bundled files at ingest, so a link to a path the package does not contain fails the check. A path written as inline code is not checked.
 
 The script materializes under `.claude/podium/personal/dev-loop/commit-message-writer/scripts/staged-diff.sh` and the agent invokes it from there. See [Bundled resources](bundled-resources) for the file-layout conventions.
 
@@ -125,13 +125,13 @@ delegates_to:
   - personal/dev-loop/conventional-commits@1.x
 ```
 
-The registry validates that the target exists, that the version range resolves, and that the type combination is sensible at ingest. The dependency graph picks up the edge; impact analysis flags this agent when the reference is updated. At runtime the harness fetches the delegated artifact through the same `load_artifact` path the host uses for top-level loads.
+`delegates_to` is advisory. The target may be any artifact type, and ingest does not check that the reference resolves. The registry still records the dependency edge, so impact analysis flags this agent when the reference is updated. The host decides whether to follow the reference; Podium resolves nothing automatically at load time. A host that follows it loads the target with the same `load_artifact` call it uses for a top-level load.
 
 ---
 
 ## The full agent
 
-```yaml
+```markdown
 ---
 type: agent
 name: commit-message-writer
@@ -149,7 +149,7 @@ delegates_to:
 
 You write conventional-commit messages.
 
-Read the staged diff by running `scripts/staged-diff.sh`. Identify the dominant change type and the affected area or module. Consult the `conventional-commits` reference for type meanings and scope conventions.
+Read the staged diff by running [scripts/staged-diff.sh](scripts/staged-diff.sh). Identify the dominant change type and the affected area or module. Consult the `conventional-commits` reference for type meanings and scope conventions.
 
 Output one commit message in the form:
 

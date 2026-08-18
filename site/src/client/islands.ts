@@ -1,8 +1,15 @@
 import { createElement } from "react";
-import { createRoot, hydrateRoot } from "react-dom/client";
+import { createRoot, hydrateRoot, type Root } from "react-dom/client";
 
 import { readPanels } from "../components/content/tab-data";
 import { registry } from "../components/islands/registry";
+
+/**
+ * Every root this module created, keyed by the element it owns. The client
+ * router replaces the article on a navigation, so a root has to be released
+ * before the element it renders into leaves the document.
+ */
+const roots = new Map<HTMLElement, Root>();
 
 /**
  * Attaches every island the page declares.
@@ -17,10 +24,11 @@ import { registry } from "../components/islands/registry";
  * shows a static fallback whose markup is deliberately not the component's, so
  * it mounts a fresh root over it instead.
  */
-export async function mountIslands(nodes: NodeListOf<HTMLElement>): Promise<void> {
+export async function mountIslands(nodes: Iterable<HTMLElement>): Promise<void> {
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   for (const node of nodes) {
+    if (roots.has(node)) continue;
     const name = node.getAttribute("data-island") ?? "";
     const mount = node.getAttribute("data-island-mount") ?? "replace";
     const entry = registry[name];
@@ -34,9 +42,12 @@ export async function mountIslands(nodes: NodeListOf<HTMLElement>): Promise<void
     // DOM, so both renders work from identical input.
     if (name === "tabs") {
       const module = await entry.load();
-      hydrateRoot(
+      roots.set(
         node,
-        createElement(module.default as never, { panels: readPanels(node) } as never),
+        hydrateRoot(
+          node,
+          createElement(module.default as never, { panels: readPanels(node) } as never),
+        ),
       );
       continue;
     }
@@ -53,7 +64,26 @@ export async function mountIslands(nodes: NodeListOf<HTMLElement>): Promise<void
 
     const module = await entry.load();
     const element = createElement(module.default as never, props as never);
-    if (mount === "hydrate") hydrateRoot(node, element);
-    else createRoot(node).render(element);
+    if (mount === "hydrate") {
+      roots.set(node, hydrateRoot(node, element));
+    } else {
+      const root = createRoot(node);
+      roots.set(node, root);
+      root.render(element);
+    }
+  }
+}
+
+/**
+ * Releases the roots rendering inside a region before that region leaves the
+ * document. React holds the DOM it rendered, so detaching the markup without
+ * unmounting leaves the component tree scheduled against nodes nothing points
+ * at.
+ */
+export function unmountIslands(within: Node): void {
+  for (const [node, root] of [...roots]) {
+    if (!within.contains(node)) continue;
+    roots.delete(node);
+    root.unmount();
   }
 }

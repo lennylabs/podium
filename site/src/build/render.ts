@@ -102,10 +102,34 @@ export function renderBody(
     jsxs: jsxs as never,
     components: {
       "podium-callout": Callout as never,
+      "podium-diagram": Diagram as never,
       "podium-island": Island as never,
       pre: CodeBlock as never,
     },
     passKeys: true,
+  });
+}
+
+type DiagramProps = { "data-markup"?: string; "data-alt"?: string };
+
+/**
+ * Writes a diagram's SVG into the page.
+ *
+ * The markup is a checked-in file the build read off disk, which is why it is
+ * written directly. Placing it in the document is what lets the design tokens
+ * and the webfonts reach it; an img tag renders the same file in an isolated
+ * document where neither applies.
+ *
+ * The wrapper carries the alt text as an image label, and role="img" keeps the
+ * drawing's own text out of the accessibility tree so the label is what a
+ * screen reader announces.
+ */
+function Diagram(props: DiagramProps): ReactNode {
+  return createElement("div", {
+    className: "diagram",
+    role: "img",
+    "aria-label": props["data-alt"] ?? "",
+    dangerouslySetInnerHTML: { __html: props["data-markup"] ?? "" },
   });
 }
 

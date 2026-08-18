@@ -218,17 +218,23 @@ describe("buildCorpus over the fixture corpus", () => {
     });
   });
 
-  it("renders a diagram with no animated variant as the checked-in SVG", () => {
-    const images = elements(pageAt(corpus, "/guide/install.html").body).filter(
-      (node) => node.tagName === "img",
+  it("inlines a diagram's markup and keeps its alt text as the label", () => {
+    const page = pageAt(corpus, "/guide/install.html");
+    const diagrams = elements(page.body).filter(
+      (node) => node.tagName === "podium-diagram",
     );
 
-    expect(images.map((node) => node.properties?.["src"])).toEqual([
-      "/base/assets/diagrams/sample.svg",
-      "/base/assets/diagrams/sample.svg",
+    expect(diagrams).toHaveLength(2);
+    expect(diagrams.map((node) => node.properties?.["data-alt"])).toEqual([
+      "The fixture layout",
+      "A sample fixture diagram",
     ]);
-    expect(images[1]?.properties?.["alt"]).toBe("A sample fixture diagram");
-    expect(pageAt(corpus, "/guide/install.html").islands).toEqual([]);
+    for (const diagram of diagrams) {
+      expect(String(diagram.properties?.["data-markup"])).toContain("<svg");
+    }
+    // Nothing is left pointing at the file, so the page carries no diagram img.
+    expect(elements(page.body).filter((node) => node.tagName === "img")).toEqual([]);
+    expect(page.islands).toEqual([]);
   });
 
   it("declares one hydrating island for a tabs container", () => {

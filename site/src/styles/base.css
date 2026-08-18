@@ -2,14 +2,12 @@
  * Document-level styles for the Podium site: the reset, the page ground, the
  * shared focus ring, the skip link, and the prose rules that render markdown.
  *
- * Every colour comes from a token in tokens.css. The variables declared here
- * cover values the token file does not carry: a diagram ground that stays white
- * in both themes, and a brand bar that darkens the accent on light paper.
+ * Every colour comes from a token in tokens.css. The variable declared here
+ * covers a value the token file does not carry: a brand bar that darkens the
+ * accent on light paper.
  */
 
 :root {
-  /* Diagrams are authored on white, so they keep a white ground in dark mode. */
-  --diagram-bg: #ffffff;
   /* Vertical accent bar: the logo centre column and the callout rule. */
   --brand-bar: var(--accent-deep);
 }
@@ -154,6 +152,41 @@ hr {
 .skip-link:focus {
   top: 12px;
   color: var(--ink);
+}
+
+/* The client router shows this bar while a page it fetched is still on its way.
+   It is created by the script, so a page read without JavaScript never carries
+   it. The sweep runs only when the reader has not asked for reduced motion; the
+   bar itself is visible either way. */
+.route-progress {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 70;
+  height: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.route-progress[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .route-progress {
+    animation: route-progress 1.4s ease-out infinite;
+  }
+}
+
+@keyframes route-progress {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+
+  to {
+    clip-path: inset(0 0 0 0);
+  }
 }
 
 /* ----------------------------------------------------------------- prose - */
@@ -373,18 +406,6 @@ hr {
   font-weight: 600;
 }
 
-/* Diagrams are white-background SVGs, so they get their own ground and inset
-   to stay legible on the dark page. */
-.prose img {
-  display: block;
-  height: auto;
-  margin: 0 0 20px;
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-panel);
-  background: var(--diagram-bg);
-}
-
 .prose figure {
   margin: 0 0 20px;
 }
@@ -397,6 +418,14 @@ hr {
 
 .prose hr {
   margin: 28px 0;
+}
+
+/* A separator immediately before a heading would draw a second rule, because
+   the heading carries its own. Keep one line and the heading's spacing. */
+.prose hr + h2 {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
 }
 
 

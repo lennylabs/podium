@@ -45,13 +45,14 @@ The Go suite runs in a single lane:
 make test
 ```
 
-The full suite completes in roughly 10 seconds on a recent laptop. The Tier 2 lane exercises real external services (Postgres, S3-compatible object stores, Sigstore, embedding providers) and is opt-in:
+The full suite completes in one to two minutes on a recent laptop. Two opt-in lanes exercise real external services:
 
 ```bash
-make test-live
+make test-live           # Postgres and MinIO, started by `make services-up`.
+make test-live-external  # Managed vector backends and embedding providers.
 ```
 
-Tier 2 tests inspect `PODIUM_LIVE_*` environment variables and self-skip when the corresponding service is not configured.
+`make test-live` points the suite at the local `docker-compose` services and sets `PODIUM_POSTGRES_DSN` and the `PODIUM_S3_*` variables. `make test-live-external` sets `PODIUM_LIVE_EXTERNAL=1` and forwards the per-service credentials from the environment. Each live test self-skips with a reason when its service is not configured. The Sigstore live checks stay manual; `RELEASING.md` records the variables to set before a signing-path release.
 
 The SDK suites run independently:
 
