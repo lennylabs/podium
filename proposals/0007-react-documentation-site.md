@@ -1,7 +1,7 @@
 # Proposal 0007: React Documentation Site and Content Generator
 
 - Issue: (to be filed)
-- Status: Draft (2026-08-15). Reviewed across six lenses with skeptic verification on 2026-08-15; 41 findings applied.
+- Status: Implemented (2026-08-18). Reviewed across six lenses with skeptic verification on 2026-08-15; 41 findings applied.
 - Date: 2026-08-15
 - Spec amendment: none. This proposal changes documentation delivery and repository tooling. It does not change Podium's product surface, and `spec/` is untouched.
 - Design: `proposals/0007-design/`, containing the handoff `README.md` and `podium-design-reference.html`, which holds four mockups covering the landing page and the documentation page in a light and a dark theme.
