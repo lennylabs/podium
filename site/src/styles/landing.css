@@ -1013,13 +1013,71 @@
 
 /* ------------------------------------------------------------ responsive */
 
+/* -------------------------------------------------------- mobile menu -- */
+
+/*
+ * A disclosure rather than a scripted panel, so the links open before the
+ * bundle loads and the open state needs nothing to track it. Hidden above the
+ * mobile breakpoint, where the bar shows the links directly.
+ */
+.l-menu {
+  position: relative;
+  display: none;
+  margin-right: -12px;
+}
+
+.l-menu-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  color: var(--ink);
+  cursor: pointer;
+  list-style: none;
+}
+
+.l-menu-button::-webkit-details-marker {
+  display: none;
+}
+
+.l-menu-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: flex;
+  min-width: 168px;
+  flex-direction: column;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  background: var(--surface);
+  box-shadow: var(--terminal-shadow);
+}
+
+.l-menu-link {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: var(--r-kbd);
+  color: var(--ink);
+  font-size: 15px;
+  text-decoration: none;
+}
+
+.l-menu-link:hover {
+  background: var(--chip);
+}
+
 @media (max-width: 1100px) {
   .l-grid {
     grid-template-columns: 1fr;
   }
 }
 
-@media (max-width: 860px) {
+@media (max-width: 1099px) {
   .l-hero-inner {
     grid-template-columns: minmax(0, 1fr);
     gap: 40px;
@@ -1031,20 +1089,9 @@
     gap: 16px;
   }
 
-  .l-nav {
-    gap: 18px;
-  }
-
   .l-features {
     padding-top: 52px;
     padding-bottom: 56px;
-  }
-
-  /* The diagram sits above its text once the card is this narrow. */
-  .l-card {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 18px;
   }
 
   .l-deploy-grid {
@@ -1057,48 +1104,282 @@
   }
 }
 
-@media (max-width: 700px) {
-  .l-adapters-inner {
-    gap: 16px;
-  }
-
-  .l-nav {
-    gap: 14px;
-    font-size: 13px;
-  }
-}
-
-/* The bar runs out of room for one row of links, so it wraps to two. */
-@media (max-width: 640px) {
-  .l-topbar-inner {
-    height: auto;
-    flex-wrap: wrap;
-    gap: 12px 16px;
-    padding-top: 14px;
-    padding-bottom: 14px;
-  }
-
-  .l-brand {
-    margin-right: 0;
-  }
-
-  .l-version {
-    margin-left: auto;
-  }
-
-  /* The version pill is not focusable, so moving the nav after it is safe. */
-  .l-nav {
-    order: 1;
-    flex-basis: 100%;
-  }
-}
-
-@media (max-width: 560px) {
+/*
+ * Mobile, from the 390pt mockups: one column inside 18px gutters, and the
+ * pieces that were side by side stack. Every tap target clears 44px.
+ */
+@media (max-width: 720px) {
   :root {
-    --gutter-landing: 22px;
+    --gutter-landing: 18px;
+    --nav-h-landing: 56px;
+  }
+
+  .l-topbar-inner {
+    gap: 12px;
+    height: var(--nav-h-landing);
+  }
+
+  /* The links move behind the menu button, which the bar has room for. */
+  .l-nav {
+    display: none;
+  }
+
+  .l-menu {
+    display: inline-flex;
+  }
+
+  .l-hero {
+    background: var(--hero-wash-mobile), var(--hero-base);
+  }
+
+  .l-hero-inner {
+    gap: 32px;
+    padding-top: 36px;
+    padding-bottom: 34px;
+  }
+
+  .l-headline {
+    font-size: 40px;
+    line-height: 1.03;
+    letter-spacing: -0.035em;
+    margin-bottom: 16px;
+  }
+
+  .l-subtitle {
+    margin-bottom: 24px;
+    font-size: 16.5px;
+  }
+
+  /* Full width, with the command clipped and copy held at the right edge. */
+  .l-install {
+    display: flex;
+    width: 100%;
+    margin-bottom: 12px;
+    overflow: hidden;
+  }
+
+  .l-install-command {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .l-install-divider,
+  .l-copy {
+    flex: none;
+  }
+
+  /* Quickstart takes the row, the other two split the next one. */
+  .l-actions {
+    flex-wrap: wrap;
+    gap: 9px;
+  }
+
+  .l-btn {
+    padding: 14px;
+    font-size: 15px;
+    text-align: center;
+  }
+
+  .l-actions > .l-btn:first-child {
+    flex: 1 0 100%;
+  }
+
+  .l-actions > .l-btn:not(:first-child) {
+    flex: 1 1 0;
+  }
+
+  /*
+   * Full-bleed band. The card's radius, glow, and shadow all read as noise at
+   * this width, so the hairlines carry the edges instead.
+   */
+  .l-terminal {
+    margin-left: calc(var(--gutter-landing) * -1);
+    margin-right: calc(var(--gutter-landing) * -1);
+  }
+
+  .l-terminal-card {
+    border-left: 0;
+    border-right: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .l-term {
+    padding: 16px;
+    font-size: 11px;
+    line-height: 1.6;
+    white-space: nowrap;
+    overflow-x: auto;
+  }
+
+  .l-terminal-bar::after {
+    content: "SWIPE →";
+    margin-left: auto;
+    color: var(--faint);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+  }
+
+  /*
+   * The strip cannot hold one row, so the names wrap as pills under the label.
+   * The band's gradient turns vertical, since a horizontal fade across 390pt
+   * reads as a colour cast rather than a sweep.
+   */
+  .l-adapters {
+    background: linear-gradient(180deg, var(--accent-strip), var(--page));
+  }
+
+  .l-adapters-inner {
+    gap: 6px;
+    padding: 16px var(--gutter-landing);
+  }
+
+  .l-adapters-label {
+    flex: 1 0 100%;
+    margin-bottom: 4px;
+  }
+
+  .l-adapter {
+    padding: 4px 9px;
+    border: 1px solid var(--border-2);
+    border-radius: 100px;
+  }
+
+  /*
+   * One card per row, hairline-separated and running edge to edge. The
+   * enclosing radius belongs to a card sitting inside a margin; at this width
+   * the band is the full page, so only the top and bottom rules remain.
+   */
+  .l-grid {
+    margin-left: calc(var(--gutter-landing) * -1);
+    margin-right: calc(var(--gutter-landing) * -1);
+    border-left: 0;
+    border-right: 0;
+    border-radius: 0;
+  }
+
+  .l-card {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+    border: 0;
+    border-radius: 0;
+    padding: 24px 18px 26px;
+  }
+
+  .l-card-art {
+    width: 232px;
+    max-width: 100%;
+    margin: 0 auto;
+  }
+
+  .l-card-title {
+    font-size: 17px;
+  }
+
+  .l-card-text {
+    font-size: 14.5px;
+  }
+
+  .l-heading {
+    margin-bottom: 20px;
+    font-size: 26px;
+  }
+
+  .l-deploy-grid {
+    gap: 12px;
+  }
+
+  .l-deploy-card {
+    border-radius: 13px;
+  }
+
+  /*
+   * The table stops being a table. Each row becomes a block, and each value
+   * carries the column header it lost in a 96px mono label column.
+   */
+  .l-int-scroll {
+    overflow-x: visible;
+  }
+
+  .l-int-table,
+  .l-int-table tbody,
+  .l-int-row,
+  .l-int-name,
+  .l-int-builtin,
+  .l-int-alts {
+    display: block;
+    width: auto;
+    min-width: 0;
+  }
+
+  .l-int-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .l-int-row {
+    padding: 16px 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .l-int-name {
+    padding: 0 0 10px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .l-int-builtin,
+  .l-int-alts {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 4px 0;
+  }
+
+  .l-int-builtin::before,
+  .l-int-alts::before {
+    content: attr(data-label);
+    flex: none;
+    width: 96px;
+    color: var(--faint);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    line-height: 1.9;
+    text-transform: uppercase;
+  }
+
+  .l-int-alts {
+    flex-wrap: wrap;
+  }
+
+  .l-int-note {
+    flex-basis: 100%;
+    margin-left: 106px;
+  }
+
+  .l-footer-inner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  .l-footer-sep {
+    display: none;
   }
 
   .l-footer-links {
+    flex-wrap: wrap;
+    gap: 14px;
     margin-left: 0;
   }
 }

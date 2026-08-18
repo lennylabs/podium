@@ -210,6 +210,34 @@ Runnable commands stay in the markdown body. `tools/doccov` classifies pages by
 their fenced blocks and the end-to-end suite executes them, so a component
 accompanies the commands rather than replacing them.
 
+## Responsive layout
+
+Three layouts, from the design's breakpoints.
+
+| Width | Documentation | Landing |
+| --- | --- | --- |
+| ≥ 1240px | Tree, article, and the on-this-page rail | Full layout |
+| 1100–1239px | Tree and article; the rail is dropped | Full layout |
+| 721–1099px | Article alone; the tree becomes a slide-over | Single column |
+| ≤ 720px | Article alone; the tree becomes a full-width drawer | Mobile layout |
+
+At mobile widths the documentation bar keeps the menu button, the brand, the
+version, and a search icon. The search field, the section tabs, and the theme
+toggle move into the drawer, which is the only place they fit; both copies are
+in the markup and the breakpoint decides which one shows, so neither is
+duplicated on screen. Touch targets are 44px, pulled back by the difference to
+the gutter so a glyph still lines up with the text below it.
+
+`src/client/sidebar.ts` records whether the reader has asked for the drawer, as
+`data-open` on the tree and `data-drawer-open` on the body. Whether the tree is
+a drawer at all is the stylesheet's decision: at a width where it is part of the
+layout those attributes select nothing, so one set of markup serves every width.
+The module closes the drawer when a link inside it is followed, on Escape, and
+when the viewport reaches the width at which the tree rejoins the layout.
+
+The landing page's nav links move behind a `<details>` disclosure rather than a
+scripted panel, so the menu opens before the bundle loads.
+
 ## Client navigation
 
 Every page is complete HTML, and the browser bundle adds a navigation layer over

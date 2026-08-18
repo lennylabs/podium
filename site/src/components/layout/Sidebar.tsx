@@ -1,7 +1,55 @@
 import type { ReactElement } from "react";
 
 import type { NavNode } from "../../build/types";
-import { withBase } from "./Header";
+import { CHANGELOG_ROUTE, SearchGlyph, TABS, withBase } from "./Header";
+
+/**
+ * The controls the top bar surrenders at mobile widths.
+ *
+ * The bar keeps the menu button, the brand, the version, and the search icon,
+ * which is all that fits across 390pt. The search field, the section tabs, and
+ * the theme toggle move in here, where the drawer has room for them. The whole
+ * block is hidden above the drawer breakpoint, so a wide viewport still reads
+ * them from the bar alone and neither copy is duplicated on screen.
+ */
+function DrawerHead(props: { activeRoute: string; basePath: string }): ReactElement {
+  const { activeRoute, basePath } = props;
+
+  return (
+    <div className="d-drawer-head">
+      <button type="button" className="d-drawer-search" data-search-input="">
+        <SearchGlyph />
+        <span>Search artifacts, pages, CLI flags</span>
+      </button>
+
+      <div className="d-drawer-tabs">
+        {TABS.map((tab) => {
+          const current =
+            tab.route === CHANGELOG_ROUTE
+              ? activeRoute === CHANGELOG_ROUTE
+              : activeRoute !== "" && activeRoute !== CHANGELOG_ROUTE;
+          return (
+            <a
+              key={tab.route}
+              className={current ? "d-drawer-tab is-active" : "d-drawer-tab"}
+              href={withBase(basePath, tab.route)}
+              aria-current={current ? "page" : undefined}
+            >
+              {tab.label}
+            </a>
+          );
+        })}
+
+        <button type="button" className="d-drawer-theme" data-theme-toggle="">
+          <span className="d-theme-dot" aria-hidden="true" />
+          <span className="sr-only">Switch theme to </span>
+          <span className="d-theme-label d-theme-label--dark">Dark</span>
+          <span className="d-theme-label d-theme-label--light">Light</span>
+        </button>
+      </div>
+    </div>
+  );
+}
 
 /** Turns a route into a DOM id fragment: "/authoring/index.html" -> "authoring-index-html". */
 function routeId(route: string): string {
@@ -112,8 +160,15 @@ export function Sidebar(props: {
   const { nav, activeRoute, basePath } = props;
 
   return (
-    <nav id="d-sidebar" className="d-sidebar" aria-label="Documentation">
+    <nav
+      id="d-sidebar"
+      className="d-sidebar"
+      aria-label="Documentation"
+      data-sidebar=""
+      data-open="false"
+    >
       <div className="d-sidebar-inner">
+        <DrawerHead activeRoute={activeRoute} basePath={basePath} />
         {nav.map((group) => (
           <NavGroup
             key={group.route}

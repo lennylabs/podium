@@ -63,6 +63,34 @@ export function Landing(props: { config: SiteConfig }): React.ReactElement {
             {nav.versionPrefix}
             {config.version}
           </span>
+
+          {/* The bar has no room for the links at mobile widths, so they move
+              behind this. A disclosure carries the open state itself, which
+              keeps the menu working before any script runs. */}
+          <details className="l-menu">
+            <summary className="l-menu-button">
+              <svg width="20" height="14" viewBox="0 0 20 14" aria-hidden="true" focusable="false">
+                <g stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                  <path d="M1 1h18" />
+                  <path d="M1 7h18" />
+                  <path d="M1 13h18" />
+                </g>
+              </svg>
+              <span className="l-sr-only">{nav.menuLabel}</span>
+            </summary>
+            <nav className="l-menu-panel" aria-label={nav.menuLabel}>
+              {nav.links.map((link: NavLink) => (
+                <a
+                  key={link.label}
+                  className="l-menu-link"
+                  href={resolve(config, link.target)}
+                  {...externalAttrs(link.target)}
+                >
+                  {link.label}
+                </a>
+              ))}
+            </nav>
+          </details>
         </div>
       </header>
 
@@ -266,8 +294,13 @@ export function Landing(props: { config: SiteConfig }): React.ReactElement {
                         {row.name}
                       </span>
                     </th>
-                    <td className="l-int-builtin">{row.builtIn}</td>
-                    <td className="l-int-alts">
+                    {/* The labels ride along as data so the mobile layout can
+                        write them beside each value, where the column headers
+                        no longer reach. */}
+                    <td className="l-int-builtin" data-label={integrations.columns.builtIn}>
+                      {row.builtIn}
+                    </td>
+                    <td className="l-int-alts" data-label={integrations.columns.alternatives}>
                       <ul className="l-int-pills">
                         {row.alternatives.map((alternative) => (
                           <li className="l-int-pill" key={alternative}>

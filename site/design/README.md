@@ -4,7 +4,7 @@
 
 A marketing landing page and a documentation page template for **Podium**, an open source catalog for reusable AI agent artifacts (skills, agents, commands, rules, hooks, contexts, MCP server registrations) with tools that translate them into harness-specific formats. The current site is a stock Jekyll/Just-the-Docs theme; this design replaces it with an original identity covering both the marketing entry point and the docs reading experience, in light and dark themes.
 
-Two page types, two themes, four mockups.
+Two page types, two themes, at two breakpoints: four desktop mockups and five mobile mockups (390pt).
 
 ## About the design files
 
@@ -184,14 +184,41 @@ The orange is a **surface** color carrying dark text, or **text on the dark grou
 
 ---
 
+## Mobile — 390pt (`13a`–`13e`)
+
+Same tokens, same content, same diagrams. Only structure changes. Design width 390pt; everything below is a **single column with 18px side gutters**. All tap targets are at least 44 × 44pt (icon buttons use a 44pt box with negative margin so the glyph still aligns to the gutter).
+
+### Landing (light `13a`, dark `13b`)
+
+- **Top bar** 56pt: Beat mark (24px) + wordmark, version pill, hamburger. Desktop's inline nav links are gone — they live behind the menu.
+- **Hero**: h1 drops to **40px / 1.03 / −0.035em**, subtitle to 16.5px. The same two highlighter treatments apply. The install field is full-width with the command `text-overflow: ellipsis`-clipped and `copy` pinned right. Buttons stack: `Quickstart` full width, then `Concepts` and `Comparisons` (shortened from "Fit & comparisons") side by side at 50%. Each is 14px vertical padding ⇒ ~47pt tall. Hero radial wash shrinks to `520px 300px at 88% 2%`.
+- **Terminal**: full-bleed band (no card radius, no glow, no drop shadow — those read as noise at this width), hairline above and below. Type drops to **11px / 1.6**, the strip is `white-space: nowrap; overflow-x: auto`, and the title bar carries a mono `SWIPE →` affordance at its right. Same three-sync transcript, same blinking cursor. One line was dropped per block (the second and third `scripts/` paths) to keep the block from dominating the fold.
+- **Adapters**: the horizontal strip becomes a wrapping set of pills (4px 9px, 100px radius, `border-2`), under a mono `ADAPTERS` label, on a vertical accent-tint gradient.
+- **Features**: single column, hairline-separated (no outer card radius). Each card stacks **diagram above text**, diagram centered at 232px wide, 16px gap. Titles 17px, body 14.5px.
+- **Run it three ways**: three separate rounded cards (13px radius, 1px border) at 12px vertical spacing inside the gutters, each keeping the icon+title row, hairline, label/value pairs and bulleted "plus" list. The arrow callout follows as its own tinted card.
+- **Server-side integrations**: the table becomes one hairline-separated block per row — bold row name, then two label/value rows using a 96px mono label column (`OUT OF BOX`, `ALTERNATIVES`), pills wrapping in place, and the note beneath. The closing paragraph is reworded to "Nothing above is required to start…" since there is no right column on mobile.
+- **Footer**: stacked — licence line, then links wrapping in a 14px-gap row.
+
+### Docs (light `13c`, dark `13d`, drawer open `13e`)
+
+- **Top bar** 56pt: hamburger (becomes an X when the drawer is open), mark + wordmark, version pill, search icon. The inline search field and the desktop theme toggle move into the drawer / overflow menu.
+- **Article**: the three-pane grid collapses to the article alone. h1 32px, lede 15.5px, body 15px. The right rail (on-this-page) is dropped at this width — reinstate it as a collapsible "On this page" disclosure directly under the h1 if you want it back. Code blocks and the install tab strip both scroll horizontally rather than wrapping; the tab strip keeps its 2px accent inset on the active tab. Prev/next cards stack.
+- **Nav drawer** (`13e`): full-width panel pushed under the top bar. Contains, in order — a 40pt search field, the section tabs as pills (`Docs` filled accent, `Changelog` outlined), then the full five-group tree with 44pt-tall rows. The active item keeps the desktop treatment: pulled left, 3px accent left border, accent wash fading right, 600 weight. Implement as an overlay panel (with a scrim over the page) or as a push panel; the mockup shows the push variant.
+
+### Breakpoints
+
+Two mockups, three states: mobile ≤ 720px, tablet 721–1099px (not mocked — use the mobile structure with the feature diagrams back to the left of their text, and the docs sidebar as a slide-over), desktop ≥ 1100px. The docs right rail appears at ≥ 1240px.
+
+---
+
 ## Feature diagrams
 
-Six inline SVGs, one per feature card, on a 240-unit-wide viewBox (96 tall, except #5 at 116) rendered at 200px wide. Two palettes only: `ink`/`text` for primary shapes, `meta`/`muted` for connectors and de-emphasized shapes, `accent` for "selected/visible" states. Rules they follow — keep these if you redraw anything:
+Six inline SVGs, one per feature card, on a 240-unit-wide viewBox (96 tall, except #5 at 116) rendered at 200px wide on desktop and 232px on mobile. Two palettes only: `ink`/`text` for primary shapes, `meta`/`muted` for connectors and de-emphasized shapes, `accent` for "selected/visible" states. Rules they follow — keep these if you redraw anything:
 
 - Every connector starts and ends **at a node's edge**, never inside it.
 - Dashed strokes mean *not loaded* / *not permitted*; solid means *walked* / *permitted*.
 - Accent appears only in 03 and 06, where it marks the selected artifacts.
-- Diagram 05 uses one `<mask>` per circle (unique ids per theme — `lm0..2` light, `dm0..2` dark) so the overlapping arcs draw dotted and the outer arcs solid. Namespace these ids if both themes ever render on one page.
+- Diagram 05 uses one `<mask>` per circle (unique ids per theme — `lm0..2` light, `dm0..2` dark; the mobile copies in the reference are namespaced `moblm0..2` / `mobdm0..2`) so the overlapping arcs draw dotted and the outer arcs solid. **Mask ids must be unique per rendered instance** — generate them per component instance rather than hard-coding.
 
 ## Interactions & behavior
 
@@ -206,7 +233,8 @@ Not built in the reference:
 - **Hover** (undefined in the reference — define consistently): nav and sidebar items to full ink/text; bordered buttons darken one step; the primary button lifts ~4%; feature cards raise to pure white (light) / `#1b2030` (dark). 120–160ms `ease-out`.
 - **Focus**: visible ring on every interactive element — 2px accent outline, 2px offset, works on both themes.
 - **Motion**: the terminal cursor blink is the only ambient animation; freeze it under `prefers-reduced-motion`.
-- **Responsive** (not mocked): below ~1100px drop the docs right rail; below ~860px collapse the sidebar behind a menu button, stack the landing hero to one column with the terminal below the copy, and stack each feature card's diagram above its text.
+- **Responsive**: the mobile layout is mocked — see *Mobile — 390pt* above. The menu button opens the nav drawer (`13e`); the search icon opens the same search overlay as `⌘K`.
+- **Horizontal scroll regions** (mobile terminal, code blocks, install tabs) need momentum scrolling and hidden scrollbars, but must stay keyboard-reachable — give each a `tabindex="0"` and an accessible name.
 
 ## State
 
@@ -241,5 +269,5 @@ No other imagery: no photography, illustration, or icon fonts. The nav search gl
 
 ## Files
 
-- `podium-design-reference.html` — the four mockups, stacked and labelled. Source of truth for anything not listed above.
+- `podium-design-reference.html` — all nine mockups: the four desktop pages stacked, then the five mobile screens side by side. Source of truth for anything not listed above.
 - `logo/` — production SVGs.

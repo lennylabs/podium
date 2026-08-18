@@ -16,20 +16,20 @@ export function withBase(basePath: string, route: string): string {
   return `${basePath}${suffix}`;
 }
 
-const CHANGELOG_ROUTE = "/about/changelog.html";
+export const CHANGELOG_ROUTE = "/about/changelog.html";
 
 /**
  * The two destinations the top bar offers. The sidebar carries the section
  * tree, so listing every section here as well would repeat it and grow the bar
  * every time the corpus gains a directory.
  */
-const TABS: Array<{ label: string; route: string }> = [
+export const TABS: Array<{ label: string; route: string }> = [
   { label: "Docs", route: "/overview.html" },
   { label: "Changelog", route: CHANGELOG_ROUTE },
 ];
 
 
-function SearchGlyph(): ReactElement {
+export function SearchGlyph(): ReactElement {
   return (
     <svg
       className="d-search-glyph"
@@ -80,12 +80,37 @@ export function Header(props: {
           className="d-menu"
           data-sidebar-toggle=""
           aria-controls="d-sidebar"
-          aria-expanded="true"
+          aria-expanded="false"
         >
-          <svg width="16" height="12" viewBox="0 0 16 12" aria-hidden="true" focusable="false">
-            <rect x="0" y="0" width="16" height="2" rx="1" />
-            <rect x="0" y="5" width="16" height="2" rx="1" />
-            <rect x="0" y="10" width="16" height="2" rx="1" />
+          {/* The bars and the cross are both in the markup, and the open state
+              on the button decides which one paints. */}
+          <svg
+            className="d-menu-bars"
+            width="20"
+            height="14"
+            viewBox="0 0 20 14"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <rect x="0" y="0" width="20" height="2" rx="1" />
+            <rect x="0" y="6" width="20" height="2" rx="1" />
+            <rect x="0" y="12" width="20" height="2" rx="1" />
+          </svg>
+          <svg
+            className="d-menu-cross"
+            width="17"
+            height="17"
+            viewBox="0 0 16 16"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path
+              d="M2 2l12 12M14 2L2 14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.9"
+              strokeLinecap="round"
+            />
           </svg>
           <span className="sr-only">Menu</span>
         </button>
@@ -128,6 +153,14 @@ export function Header(props: {
           />
           <kbd className="d-kbd">⌘K</kbd>
         </label>
+
+        {/* The field has no room at mobile widths, so the same overlay is
+            reached through an icon. Carrying data-search-input is what binds
+            it, exactly as the field is bound. */}
+        <button type="button" className="d-search-button" data-search-input="">
+          <SearchGlyph />
+          <span className="sr-only">Search the documentation</span>
+        </button>
 
         <span className="d-version">v{config.version}</span>
 

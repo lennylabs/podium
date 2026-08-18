@@ -75,6 +75,20 @@
   fill: currentColor;
 }
 
+/*
+ * One glyph at a time. The button appears as soon as the tree becomes a
+ * drawer, so the pair is switched here rather than inside a width query.
+ */
+.d-menu-bars,
+.d-menu-cross {
+  display: none;
+}
+
+.d-menu[aria-expanded="false"] .d-menu-bars,
+.d-menu[aria-expanded="true"] .d-menu-cross {
+  display: block;
+}
+
 .d-brand {
   display: flex;
   align-items: center;
@@ -250,6 +264,109 @@
   max-width: var(--docs-width);
   min-height: 760px;
   margin: 0 auto;
+}
+
+/*
+ * The mobile search affordance and the drawer head. Both are laid out here and
+ * revealed by the mobile breakpoint below, so the wide layout never shows two
+ * copies of the same control.
+ */
+.d-search-button {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin-right: -12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.d-search-button .d-search-glyph {
+  width: 15px;
+  height: 15px;
+}
+
+.d-drawer-head {
+  display: none;
+  margin-bottom: 22px;
+}
+
+.d-drawer-search {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 40px;
+  margin-bottom: 18px;
+  padding: 0 12px;
+  border: 1px solid var(--control-border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--faint);
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.d-drawer-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.d-drawer-tab {
+  padding: 7px 12px;
+  border: 1px solid var(--control-border);
+  border-radius: 100px;
+  color: var(--meta);
+  text-decoration: none;
+}
+
+.d-drawer-tab.is-active {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.d-drawer-theme {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 7px 10px;
+  border: 1px solid var(--control-border);
+  border-radius: 100px;
+  background: transparent;
+  color: var(--meta);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+/* Rows reach the 44px touch target the design asks for. */
+@media (max-width: 720px) {
+  .d-nav-link {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    font-size: 14.5px;
+  }
+
+  .d-nav-group-label {
+    font-size: 10px;
+  }
 }
 
 /* --------------------------------------------------------------- sidebar - */
@@ -644,7 +761,13 @@
 /* ------------------------------------------------------------ responsive - */
 
 /* The right rail is dropped first, and the hairline it sat against goes with it. */
-@media (max-width: 1100px) {
+/*
+ * Three layouts, from the design's breakpoints: the article alone at mobile
+ * widths, article plus tree on a tablet, and the full three-pane grid on a
+ * desktop. The right rail needs its own column and 214px of it, so it waits
+ * for the widest step.
+ */
+@media (max-width: 1239px) {
   .d-shell {
     grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
   }
@@ -658,10 +781,8 @@
   }
 }
 
-/* Below this width the panes stack. The navigation tree renders above the
-   article and stays reachable without a script; the menu button lets the client
-   script turn it into a drawer, and the skip link jumps a reader past it. */
-@media (max-width: 860px) {
+/* Tablet: the tree becomes a slide-over so the article keeps the full width. */
+@media (max-width: 1099px) {
   .d-shell {
     grid-template-columns: minmax(0, 1fr);
     min-height: 0;
@@ -671,40 +792,158 @@
     display: inline-flex;
   }
 
-  .d-tabs,
-  .d-version {
-    display: none;
+  .d-article {
+    padding: 30px 26px 56px;
   }
 
-  .d-topbar-inner {
-    gap: 12px;
-  }
-
-  .d-search {
-    flex: 1 1 auto;
-  }
-
+  /*
+   * Out of the grid and over the article. The tree keeps its own scrolling,
+   * and the transform is what animates, so opening does not lay out the page
+   * again.
+   */
   .d-sidebar {
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
+    position: fixed;
+    top: var(--nav-h-docs);
+    left: 0;
+    z-index: 25;
+    width: min(320px, 86vw);
+    height: calc(100vh - var(--nav-h-docs));
+    height: calc(100dvh - var(--nav-h-docs));
+    border-right: 1px solid var(--border);
+    transform: translateX(-100%);
+    visibility: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    /*
+     * visibility keeps the closed drawer out of the tab order and the
+     * accessibility tree. It is stepped rather than interpolated: held until
+     * the slide out finishes, and applied immediately on the way in. Giving it
+     * a duration instead leaves the computed value ambiguous while the
+     * transition runs, which reads as an empty drawer.
+     */
+    transition: transform 160ms ease-out, visibility 0s linear 160ms;
+  }
+
+  .d-sidebar[data-open="true"] {
+    transform: translateX(0);
+    visibility: visible;
+    transition: transform 160ms ease-out, visibility 0s;
   }
 
   .d-sidebar-inner {
     position: static;
-    max-height: 52vh;
+    max-height: none;
+    padding-bottom: 40px;
+  }
+
+  /* Dims the article behind the drawer and takes the tap that closes it. */
+  .d-shell::before {
+    content: "";
+    position: fixed;
+    inset: var(--nav-h-docs) 0 0;
+    z-index: 24;
+    background: rgba(20, 19, 15, 0.42);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 160ms ease-out, visibility 0s linear 160ms;
+  }
+
+  body[data-drawer-open] .d-shell::before {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 160ms ease-out, visibility 0s;
+  }
+
+  /* The drawer is the scrolling surface while it is open. */
+  body[data-drawer-open] {
+    overflow: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .d-sidebar,
+  .d-shell::before {
+    transition: none;
+  }
+}
+
+/*
+ * Mobile: 56px bar, single column, 18px gutters. The bar keeps the menu, the
+ * brand, the version, and the search icon; the field, the tabs, and the theme
+ * toggle move into the drawer, which is the only place they fit.
+ */
+@media (max-width: 720px) {
+  :root {
+    --nav-h-docs: 56px;
+    --gutter-docs-bar: 18px;
+  }
+
+  .d-topbar-inner {
+    gap: 10px;
+  }
+
+  .d-tabs,
+  .d-search,
+  .d-theme {
+    display: none;
+  }
+
+  .d-search-button {
+    display: inline-flex;
+  }
+
+  .d-version {
+    display: inline-block;
+  }
+
+  /*
+   * 44px of touch target, pulled back by the difference to the gutter so the
+   * glyph still lines up with the text below it.
+   */
+  .d-menu {
+    width: 44px;
+    height: 44px;
+    margin-left: -12px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .d-sidebar {
+    width: 100%;
+    max-width: none;
+    border-right: 0;
+  }
+
+  .d-sidebar-inner {
+    padding: 16px 18px 32px;
+  }
+
+  .d-drawer-head {
+    display: block;
   }
 
   .d-article {
-    padding: 26px 20px 48px;
+    padding: 24px 18px 44px;
   }
 
   .d-title,
   .d-notfound-title {
-    font-size: 34px;
+    font-size: 32px;
+    line-height: 1.06;
+    letter-spacing: -0.03em;
+  }
+
+  .d-lede {
+    font-size: 15.5px;
+  }
+
+  .d-article .prose {
+    font-size: 15px;
   }
 
   .d-notfound {
-    padding: 56px 20px 80px;
+    padding: 56px 18px 80px;
   }
 
   .d-pager {
@@ -714,18 +953,17 @@
   .d-pager-card--next {
     margin-left: 0;
   }
-}
-
-@media (max-width: 620px) {
-  .d-kbd {
-    display: none;
-  }
 
   .d-footer-inner {
-    padding: 20px;
+    padding: 20px 18px;
   }
 
   .d-footer-nav {
     margin-left: 0;
   }
+
+  .d-kbd {
+    display: none;
+  }
 }
+

@@ -140,6 +140,8 @@ export type LandingContent = {
     links: NavLink[];
     /** Prefix read out before the version, hidden visually. */
     versionLabel: string;
+    /** Accessible name for the mobile menu that holds the nav links. */
+    menuLabel: string;
     /** Prefix printed in front of the version number. */
     versionPrefix: string;
   };
@@ -206,6 +208,7 @@ export const landing: LandingContent = {
       },
     ],
     versionLabel: "Podium version",
+    menuLabel: "Menu",
     versionPrefix: "v",
   },
   hero: {

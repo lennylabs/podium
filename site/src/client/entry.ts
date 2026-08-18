@@ -1,5 +1,6 @@
 import { startRouter } from "./router";
 import { mountSearch } from "./search";
+import { startSidebar } from "./sidebar";
 
 const THEME_KEY = "podium-theme";
 const basePath = document.body.dataset["basePath"] ?? "";
@@ -71,33 +72,6 @@ function initCopy(root: ParentNode): void {
       });
     });
   }
-}
-
-/* ---------------------------------------------------------------- sidebar */
-
-/**
- * The navigation tree and the top bar stay in the document across a client
- * navigation, so these listeners are bound once and never rebound.
- */
-function initSidebar(): void {
-  for (const header of document.querySelectorAll<HTMLElement>("[data-nav-group]")) {
-    header.addEventListener("click", () => {
-      const group = header.closest("[data-nav-section]");
-      if (group === null) return;
-      const collapsed = group.getAttribute("data-collapsed") === "true";
-      group.setAttribute("data-collapsed", collapsed ? "false" : "true");
-      header.setAttribute("aria-expanded", collapsed ? "true" : "false");
-    });
-  }
-
-  const toggle = document.querySelector<HTMLElement>("[data-sidebar-toggle]");
-  const sidebar = document.querySelector<HTMLElement>("[data-sidebar]");
-  if (toggle === null || sidebar === null) return;
-  toggle.addEventListener("click", () => {
-    const open = sidebar.getAttribute("data-open") === "true";
-    sidebar.setAttribute("data-open", open ? "false" : "true");
-    toggle.setAttribute("aria-expanded", open ? "false" : "true");
-  });
 }
 
 /* ---------------------------------------------------------- on this page */
@@ -179,7 +153,7 @@ async function unmountIslandsIn(root: Node): Promise<void> {
 
 initTheme();
 initCopy(document);
-initSidebar();
+startSidebar();
 initScrollSpy();
 mountSearch(basePath);
 mountIslandsIn(document);
