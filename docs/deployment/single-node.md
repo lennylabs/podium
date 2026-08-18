@@ -153,7 +153,6 @@ The shared library does the same parsing, composition, and adapter work in both 
 Single node omits the capabilities that need external services or a multi-tenant model:
 
 - **Multi-tenancy.** A single-node deployment is single-tenant.
-- **OIDC group claims through SCIM.** Group membership comes from OIDC claims directly. SCIM push is a clustered-tier capability.
 - **Transparency-log anchoring.** Sigstore-keyless signing requires public OIDC infrastructure.
 
 When any of these starts mattering, see [Clustered](clustered).

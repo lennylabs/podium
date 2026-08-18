@@ -39,7 +39,7 @@ The ingest-time linter resolves every markdown link in the prose body (`[text](p
 
 The registry stores bundled resources content-addressed by SHA-256 in object storage. Bytes are deduplicated across all artifact versions within an org's storage namespace; when two artifacts ship the same file (a shared schema, a vendored library), only one copy is stored.
 
-At materialization, presigned URLs deliver the bytes. The consumer (`podium sync`, the MCP server, or an SDK `materialize()` call) downloads each resource and writes it atomically (`.tmp` + rename) so partial downloads cannot corrupt a working set. The materialization pipeline is the same across all three; it runs in the consumer process rather than on the registry.
+At materialization, the registry hands out a URL per resource. The S3 backend presigns it, and the filesystem backend serves the bytes from its own `/objects/<content-hash>` route, which requires the caller's token. The consumer (`podium sync`, the MCP server, or an SDK `materialize()` call) downloads each resource and writes it atomically (`.tmp` + rename) so partial downloads cannot corrupt a working set. The materialization pipeline is the same across all three; it runs in the consumer process rather than on the registry.
 
 An adapter writes an artifact's bundled files alongside its translated output: inside the skill folder for a skill, under `.podium/context/<artifact-id>/` for a context artifact, and in the harness-neutral `.podium/resources/<artifact-id>/` bucket for an agent, a command, or a hook (Claude Code places an agent's files under `.claude/podium/<artifact-id>/`). A `type: rule` artifact materializes into a workspace as a translated rule file or as a block injected into `AGENTS.md` or `GEMINI.md`, depending on the harness, and a `type: mcp-server` artifact as a merged config entry; the adapters write no bundled files for either. Ship those bytes as a separate artifact, or materialize with `harness: none`, which writes the canonical layout including bundled files.
 
@@ -51,7 +51,7 @@ Size thresholds:
 
 | Threshold | Limit | Behavior |
 |:--|:--|:--|
-| Inline cutoff | 256 KB | Below this, resource bytes are returned in the `load_artifact` response body. Above, presigned URL. |
+| Inline cutoff | 256 KB | At or below this, resource bytes are returned in the `load_artifact` response body. Above it, the response carries a URL to fetch them from. |
 | Per-file soft cap | 1 MB | Ingest-time warning above this. |
 | Per-package soft cap | 10 MB | Ingest-time error above this. |
 

@@ -32,9 +32,9 @@ Goal: get artifacts flowing without governance gates.
 
 Goal: get OAuth identity working so audit and visibility have an identity subject. Enforcement remains permissive.
 
-- Stand up an OIDC IdP (or hook into your existing one: Okta, Entra ID, Google Workspace, Auth0, Keycloak). The [OIDC cookbooks](oidc/) have per-IdP setup steps.
+- Stand up an OIDC IdP, or hook into an existing one. Okta, Entra ID, and Keycloak issue a token the registry's `oidc-jwt` verifier accepts. Auth0 and Google Workspace do not, and route callers through a gateway under `trusted-headers` instead. The [OIDC cookbooks](oidc/) have per-IdP setup steps and cover both paths.
 - Configure `PODIUM_IDENTITY_PROVIDER=oidc-jwt` on the registry, with `PODIUM_OAUTH_ISSUER` set to the IdP issuer and `PODIUM_OAUTH_AUDIENCE` set to the registry endpoint. The registry then verifies each presented token against the issuer's JWKS. This works on either tier; moving to the clustered tier at the same time is optional. See [Access control](access-control).
-- Have each developer run `podium login` once. The CLI completes the device-code flow against the same IdP and caches the resulting token in the OS keychain.
+- Have each developer run `podium login` once. The CLI completes the device-code flow against the same IdP and caches the resulting token in the OS keychain. On the gateway path the gateway authenticates the caller, so this step does not apply.
 - Existing `team-shared` layer keeps `visibility: public` for now; every authenticated user can still see everything.
 - A user-defined layer per author, for example `alice-personal`. A user-defined layer carries implicit `users: [<registrant>]` visibility.
 

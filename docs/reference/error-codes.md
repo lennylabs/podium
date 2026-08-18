@@ -130,7 +130,7 @@ Codes map to MCP error payloads per the MCP spec for harnesses that consume Podi
 
 | Code | When |
 |:--|:--|
-| `network.registry_unreachable` | The MCP server (or SDK) can't reach the registry. In `always-revalidate` cache mode, fresh calls return this on miss; `offline-first` returns cached results without raising. |
+| `network.registry_unreachable` | The MCP server or an SDK cannot reach the registry. The MCP server holds a content cache, so its `always-revalidate` mode returns this on a fresh-call miss while `offline-first` serves cached results without raising. The SDKs hold no cache, so both modes raise. |
 | `network.offline_cache_miss` | `offline-only` cache mode was asked for something the local cache does not hold, and the mode forbids contacting the registry. |
 
 ### quota.*

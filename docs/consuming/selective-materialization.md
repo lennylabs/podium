@@ -32,7 +32,9 @@ three parts, applied in this order:
 
 Patterns match the canonical artifact ID, which is the artifact's directory path
 under the registry root (`finance/close-reporting/run-variance-analysis`). The
-glob syntax is the same one `DOMAIN.md` uses for its `include:` lists:
+glob syntax is the following. A `DOMAIN.md` `include:` list uses a separate
+matcher that reads a trailing `**` as matching the bare prefix as well, which is
+the one difference between them.
 
 | Pattern | Matches |
 |:--|:--|

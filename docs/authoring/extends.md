@@ -56,8 +56,8 @@ ASCII fallback for the diagram above (inheritance with extends:):
   Manifest fields:
 
   parent (lower precedence)         child (higher precedence)         merged manifest
-  finance/ap/pay-invoice@1.2        finance/ap/pay-invoice (overlay)  what the caller sees
-  type: skill                       extends: finance/ap/...@1.2       type: skill           (parent)
+  finance/ap/pay-invoice@1.2.x        finance/ap/pay-invoice (overlay)  what the caller sees
+  type: skill                       extends: finance/ap/...@1.2.x       type: skill           (parent)
   version: 1.2.0                    version: 1.3.0                    version: 1.3.0        (child)
   description: Pay an invoice.      description: Pay an invoice (EU). description: ...(EU). (child)
   tags: [finance, ap]               tags: [eu, vat]                   tags: [finance, ap,   (union)

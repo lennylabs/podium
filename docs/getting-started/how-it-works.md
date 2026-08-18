@@ -227,9 +227,9 @@ supporting services are managed or self-run alongside.
   constraints or identity-based visibility requirements.
 - **What runs.** Registry replicas behind a load balancer,
   Postgres (managed or self-run), object storage, and an OIDC IdP.
-- **What it adds.** Multi-tenancy, SCIM group sync, signing with a
-  transparency log, freeze windows, hash-chained audit, and high
-  availability.
+- **What it adds.** Multi-tenancy, signing with a transparency log, and high
+  availability. SCIM group push, freeze windows, and the hash-chained audit
+  log run on a single node as well.
 - **Migration path.** `podium admin migrate-to-standard` exports
   a single-node deployment into the clustered stack. The same artifact
   directory becomes a `local`-source layer until the cut-over to

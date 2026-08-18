@@ -73,7 +73,7 @@ However the vectors are produced, the registry fuses vector hits with BM25 hits 
 
 The default is no identity provider. A registry that boots without one treats every caller as anonymous, and the visibility evaluator admits every layer.
 
-Identity is off by default, because every provider points at an external identity provider that the deployment supplies. Enabling it means registering a client with an IdP first.
+Identity is off by default, because each verifier needs configuration the deployment supplies: an issuer and an audience for `oidc-jwt`, a fronting gateway for `trusted-headers`, or a registered runtime key for `injected-session-token`. Only `oidc-jwt` requires registering a client with an external IdP.
 
 The registry verifies `injected-session-token`, `oidc-jwt`, and `trusted-headers` at request time. `oauth-device-code` names the interactive flow a person completes from the CLI; setting it as the registry's provider stops startup with `config.identity_provider_unverified`, because this build ships no request-time verifier for it.
 

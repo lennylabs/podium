@@ -250,8 +250,10 @@ steps:
    per-file rewrites.
 5. **Write**: atomic `.tmp + rename` write to the destination.
 
-`podium sync` runs the same steps in batch, over the caller's effective
-view or over the subset an active scope selects.
+`podium sync` runs the fetch, adapt, hook, and write steps in batch, over the
+caller's effective view or over the subset an active scope selects. It performs
+no signature or content-hash verification. That check belongs to the
+`load_artifact` path above, which is where `PODIUM_VERIFY_SIGNATURES` applies.
 
 The `load_artifact` response delivers the manifest body and the bundled
 resources below the inline cutoff directly. A larger resource, and a
