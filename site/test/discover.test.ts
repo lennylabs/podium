@@ -162,7 +162,88 @@ describe("the include frontmatter key", () => {
 
     const { diagnostics } = discover(corpus.config);
 
-    expect(diagnostics.some((entry) => entry.message.includes('"include"'))).toBe(true);
+    expect(diagnostics.some((entry) => entry.message.includes('"include.file"'))).toBe(true);
+    corpus.dispose();
+  });
+});
+
+describe("include options", () => {
+  const pageWith = (options: string): string =>
+    ["---", "title: Changelog", "description: Release history.", options, "---", "", "# Changelog", "", "## Releases", ""].join(
+      "\n",
+    );
+
+  const CHANGELOG = [
+    "# Changelog",
+    "",
+    "Preamble.",
+    "",
+    "## [Unreleased]",
+    "",
+    "[Unreleased]: https://example.test/compare",
+    "",
+    "### Added",
+    "",
+    "- Something not yet released.",
+    "",
+    "## [0.2.1] - 2026-06-30",
+    "",
+    "### Added",
+    "",
+    "- A released thing.",
+    "",
+  ].join("\n");
+
+  function bodyFor(options: string): string {
+    const corpus = makeCorpus({ "about/changelog.md": pageWith(options) });
+    writeFileSync(join(corpus.repoRoot, "CHANGELOG.md"), CHANGELOG);
+    const { pages, diagnostics } = discover(corpus.config);
+    expect(diagnostics).toEqual([]);
+    const body = pages.find((entry) => entry.source === "about/changelog.md")?.body ?? "";
+    corpus.dispose();
+    return body;
+  }
+
+  it("drops a skipped section and everything under it", () => {
+    const body = bodyFor("include:\n  file: CHANGELOG.md\n  skip_sections: [Unreleased]");
+
+    expect(body).not.toContain("Unreleased");
+    expect(body).not.toContain("Something not yet released.");
+    expect(body).toContain("## [0.2.1] - 2026-06-30");
+    expect(body).toContain("A released thing.");
+  });
+
+  it("pushes every included heading down by the demotion", () => {
+    const body = bodyFor("include:\n  file: CHANGELOG.md\n  demote: 1");
+
+    expect(body).toContain("### [0.2.1] - 2026-06-30");
+    expect(body).toContain("#### Added");
+    expect(body).not.toMatch(/^## \[0\.2\.1\]/m);
+  });
+
+  it("leaves the file alone when neither option is given", () => {
+    const body = bodyFor("include: CHANGELOG.md");
+
+    expect(body).toContain("## [Unreleased]");
+    expect(body).toContain("## [0.2.1] - 2026-06-30");
+    expect(body).toContain("### Added");
+  });
+
+  it("does not read a hash inside a fenced block as a heading", () => {
+    const corpus = makeCorpus({
+      "about/changelog.md": pageWith("include:\n  file: NOTES.md\n  demote: 1"),
+    });
+    writeFileSync(
+      join(corpus.repoRoot, "NOTES.md"),
+      ["# Notes", "", "## Usage", "", "```bash", "# not a heading", "podium sync", "```", ""].join("\n"),
+    );
+
+    const { pages } = discover(corpus.config);
+    const body = pages.find((entry) => entry.source === "about/changelog.md")?.body ?? "";
+
+    expect(body).toContain("### Usage");
+    expect(body).toContain("# not a heading");
+    expect(body).not.toContain("## not a heading");
     corpus.dispose();
   });
 });

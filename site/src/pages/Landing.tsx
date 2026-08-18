@@ -71,7 +71,7 @@ export function Landing(props: { config: SiteConfig }): React.ReactElement {
           <div className="l-hero-copy">
             <p className="l-status">
               <span className="l-status-dot" aria-hidden="true" />
-              {hero.status.text}
+              {`${series(config.version)} — ${hero.status.qualifier}`}
             </p>
 
             <h1 className="l-headline" id="l-headline">
@@ -326,6 +326,17 @@ export function Landing(props: { config: SiteConfig }): React.ReactElement {
 }
 
 /** Turns a content link target into an href for this build. */
+/**
+ * The release series a reader pins against, from the build's own version.
+ *
+ * "0.2.1" becomes "0.2.x". A version carrying a prerelease suffix keeps the
+ * same series, since the suffix sits on the patch element.
+ */
+function series(version: string): string {
+  const [major, minor] = version.split(".");
+  return major === undefined || minor === undefined ? version : `${major}.${minor}.x`;
+}
+
 function resolve(config: SiteConfig, target: LinkTarget): string {
   switch (target.kind) {
     case "doc":

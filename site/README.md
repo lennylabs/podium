@@ -76,6 +76,25 @@ markdown runs through the rest of the pipeline like any other body, so its
 headings, links, and fenced blocks are checked. An included file's opening h1 is
 dropped, because the including page already carries a title.
 
+A file that needs adjusting before it sits inside a page takes the options form:
+
+```yaml
+include:
+  file: CHANGELOG.md
+  skip_sections: [Unreleased]
+  demote: 1
+```
+
+`skip_sections` drops a heading and everything under it, matched on the
+heading's text with any link brackets removed. `demote` pushes every included
+heading down that many levels, which is how a standalone file's outline nests
+under the including page's own headings. It also decides how much of the file
+reaches the rail on the right, which lists h2 and h3: the changelog demotes by
+one so its version headings land at h3 and their `Added` and `Changed`
+subheadings at h4, leaving the rail one entry per release. The page supplies the
+h2 those versions sit under, since a body that jumps from h1 to h3 fails the
+heading-order check.
+
 Navigation comes from the directory tree. A directory is a section, its
 `index.md` is that section's page, and `nav_order` orders siblings. No page
 names its parent.

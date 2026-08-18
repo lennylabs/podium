@@ -6,6 +6,7 @@ import {
   parseFrontmatter,
   splitFrontmatter,
   type Frontmatter,
+  type Include,
 } from "./content/frontmatter";
 import type { BuildDiagnostic, SiteConfig, StaticFile } from "./types";
 
@@ -167,25 +168,76 @@ export function lastModified(config: SiteConfig): Map<string, string> {
  */
 function appendInclude(
   body: string,
-  include: string | null,
+  include: Include | null,
   config: SiteConfig,
   file: string,
   diagnostics: BuildDiagnostic[],
 ): string {
   if (include === null) return body;
 
-  const source = join(config.repoRoot, include);
+  const source = join(config.repoRoot, include.file);
   if (!existsSync(source)) {
     diagnostics.push({
       file,
       line: null,
       column: null,
-      message: `"include" names ${include}, which does not exist`,
+      message: `"include" names ${include.file}, which does not exist`,
     });
     return body;
   }
 
-  return `${body.trimEnd()}\n\n${stripLeadingTitle(readFileSync(source, "utf8"))}`;
+  const contents = transformInclude(readFileSync(source, "utf8"), include);
+  return `${body.trimEnd()}\n\n${contents}`;
+}
+
+/**
+ * Drops the sections an include excludes and pushes the rest down.
+ *
+ * A standalone file opens at h1 and runs its own outline from there. Inside a
+ * page that outline has to nest under the page's own headings, which is what
+ * demote does, and it also decides how much of the file reaches the rail on the
+ * right, since that rail lists a fixed depth range.
+ *
+ * Fenced blocks are tracked so a comment opening with a hash is not read as a
+ * heading.
+ */
+function transformInclude(contents: string, include: Include): string {
+  const lines = stripLeadingTitle(contents).split("\n");
+  const kept: string[] = [];
+  let fenced = false;
+  let skippingBelow: number | null = null;
+
+  for (const line of lines) {
+    if (/^\s{0,3}(```|~~~)/.test(line)) fenced = !fenced;
+
+    const heading = fenced ? null : /^(#{1,6})(\s+)(.*)$/.exec(line);
+    if (heading === null) {
+      if (skippingBelow === null) kept.push(line);
+      continue;
+    }
+
+    const depth = heading[1]?.length ?? 0;
+    // A section ends at the next heading that is no deeper than its own.
+    if (skippingBelow !== null && depth <= skippingBelow) skippingBelow = null;
+    if (skippingBelow === null && include.skipSections.includes(headingTitle(heading[3] ?? ""))) {
+      skippingBelow = depth;
+      continue;
+    }
+    if (skippingBelow !== null) continue;
+
+    const level = Math.min(6, depth + include.demote);
+    kept.push(`${"#".repeat(level)}${heading[2] ?? " "}${heading[3] ?? ""}`);
+  }
+
+  return kept.join("\n").trim();
+}
+
+/** A heading's text with link brackets removed, which is what a skip matches. */
+function headingTitle(text: string): string {
+  return text
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]*)\]/g, "$1")
+    .trim();
 }
 
 /**

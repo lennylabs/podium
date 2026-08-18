@@ -222,7 +222,7 @@ describe("parseFrontmatter", () => {
     const { result, diagnostics } = parse("title: A\ndescription: B\ninclude: CHANGELOG.md\n");
 
     expect(diagnostics).toEqual([]);
-    expect(result?.include).toBe("CHANGELOG.md");
+    expect(result?.include).toEqual({ file: "CHANGELOG.md", skipSections: [], demote: 0 });
   });
 
   it("rejects an include that is absolute or climbs out of the repository", () => {
@@ -230,7 +230,44 @@ describe("parseFrontmatter", () => {
       const { diagnostics } = parse(`title: A\ndescription: B\ninclude: ${value}\n`);
 
       expect(diagnostics).toHaveLength(1);
-      expect(diagnostics[0]?.message).toContain('"include" must be a repo-root-relative path');
+      expect(diagnostics[0]?.message).toContain('"include.file" must be a repo-root-relative path');
+    }
+  });
+
+  it("reads the options form, with the sections to skip and the demotion", () => {
+    const { result, diagnostics } = parse(
+      [
+        "title: A",
+        "description: B",
+        "include:",
+        "  file: CHANGELOG.md",
+        "  skip_sections: [Unreleased]",
+        "  demote: 1",
+      ].join("\n"),
+    );
+
+    expect(diagnostics).toEqual([]);
+    expect(result?.include).toEqual({
+      file: "CHANGELOG.md",
+      skipSections: ["Unreleased"],
+      demote: 1,
+    });
+  });
+
+  it("rejects an unknown include key, a bad skip list, and a demotion out of range", () => {
+    const cases: Array<[string, string]> = [
+      ["include:\n  file: A.md\n  strip: yes\n", 'unknown "include" key "strip"'],
+      ["include:\n  file: A.md\n  skip_sections: Unreleased\n", '"include.skip_sections"'],
+      ["include:\n  file: A.md\n  demote: 9\n", '"include.demote"'],
+      ["include:\n  demote: 1\n", '"include.file"'],
+      ["include: [A.md]\n", '"include" must be a path or a block'],
+    ];
+
+    for (const [block, expected] of cases) {
+      const { diagnostics } = parse(`title: A\ndescription: B\n${block}`);
+
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0]?.message).toContain(expected);
     }
   });
 });

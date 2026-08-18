@@ -16,6 +16,16 @@ const ALLOWED_KEYS = new Set([
 
 export type RawAction = { label: string; href: string };
 
+/** A repo-root file published as part of a page body. */
+export type Include = {
+  /** Repo-root-relative path, such as "CHANGELOG.md". */
+  file: string;
+  /** Sections dropped before inclusion, matched on heading text. */
+  skipSections: string[];
+  /** Levels every included heading is pushed down by. */
+  demote: number;
+};
+
 export type Frontmatter = {
   title: string;
   description: string;
@@ -24,8 +34,8 @@ export type Frontmatter = {
   permalink: string | null;
   actions: RawAction[];
   hidden: boolean;
-  /** Repo-root-relative file whose markdown is appended to the page body. */
-  include: string | null;
+  /** File whose markdown is appended to the page body. */
+  include: Include | null;
 };
 
 export type SplitSource = {
@@ -158,20 +168,7 @@ export function parseFrontmatter(
     }
   }
 
-  const includeRaw = parsed["include"];
-  let include: string | null = null;
-  if (includeRaw !== undefined) {
-    if (typeof includeRaw !== "string" || includeRaw.startsWith("/") || includeRaw.includes("..")) {
-      diagnostics.push({
-        file,
-        line: null,
-        column: null,
-        message: '"include" must be a repo-root-relative path, such as "CHANGELOG.md"',
-      });
-    } else {
-      include = includeRaw;
-    }
-  }
+  const include = parseInclude(parsed["include"], file, diagnostics);
 
   const permalinkRaw = parsed["permalink"];
   let permalink: string | null = null;
@@ -279,4 +276,62 @@ function parseActions(
     actions.push({ label, href });
   });
   return actions;
+}
+
+/**
+ * Reads the include, in either the plain-path form or the options form.
+ *
+ * A page that only needs the file names it directly. The options form is for a
+ * file whose own structure has to be adjusted before it sits inside a page: a
+ * section that does not belong on the site, or headings that have to nest under
+ * the including page's own.
+ */
+function parseInclude(
+  raw: unknown,
+  file: string,
+  diagnostics: BuildDiagnostic[],
+): Include | null {
+  if (raw === undefined) return null;
+
+  const reject = (message: string): null => {
+    diagnostics.push({ file, line: null, column: null, message });
+    return null;
+  };
+
+  const source = typeof raw === "string" ? { file: raw } : raw;
+  if (typeof source !== "object" || source === null || Array.isArray(source)) {
+    return reject('"include" must be a path or a block naming "file"');
+  }
+
+  const record = source as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (!["file", "skip_sections", "demote"].includes(key)) {
+      return reject(`unknown "include" key "${key}". Accepted: demote, file, skip_sections`);
+    }
+  }
+
+  const path = record["file"];
+  if (typeof path !== "string" || path === "" || path.startsWith("/") || path.includes("..")) {
+    return reject('"include.file" must be a repo-root-relative path, such as "CHANGELOG.md"');
+  }
+
+  const skipRaw = record["skip_sections"];
+  let skipSections: string[] = [];
+  if (skipRaw !== undefined) {
+    if (!Array.isArray(skipRaw) || skipRaw.some((entry) => typeof entry !== "string")) {
+      return reject('"include.skip_sections" must be a list of heading titles');
+    }
+    skipSections = skipRaw as string[];
+  }
+
+  const demoteRaw = record["demote"];
+  let demote = 0;
+  if (demoteRaw !== undefined) {
+    if (typeof demoteRaw !== "number" || !Number.isInteger(demoteRaw) || demoteRaw < 0 || demoteRaw > 4) {
+      return reject('"include.demote" must be a whole number between 0 and 4');
+    }
+    demote = demoteRaw;
+  }
+
+  return { file: path, skipSections, demote };
 }

@@ -34,7 +34,12 @@ export type MarkedText = {
 };
 
 export type StatusPill = {
-  text: string;
+  /**
+   * Follows the release series, which the page derives from the version the
+   * build read out of the Go source. Naming the series here as well would put
+   * a second number in the page that has to be remembered on every bump.
+   */
+  qualifier: string;
 };
 
 export type InstallCommand = {
@@ -205,7 +210,7 @@ export const landing: LandingContent = {
   },
   hero: {
     status: {
-      text: "0.3.x — early release",
+      qualifier: "early release",
     },
     headline: [
       { text: "One catalog.", marked: false },
