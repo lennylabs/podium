@@ -159,7 +159,7 @@ The orange is a **surface** color carrying dark text, or **text on the dark grou
 
    Below the grid, a tinted callout with an accent `→`: *The artifacts never change. They are independent of Podium's deployment model.*
 
-6. **Server-side integrations** — h2, then a three-column table (`210px / 190px / 1fr`) with mono column headers `Out of the box` and `Compatible alternatives`, hairline row separators, and alternating row backgrounds. Alternatives are accent-tinted pills; some rows carry a muted note beneath.
+6. **Server-side integrations** — h2, then a three-column table (`210px / 190px / 1fr`) with mono column headers `Out of the box` and `Compatible alternatives`, hairline row separators, and alternating row backgrounds. Alternatives are accent-tinted pills; some rows carry a muted note beneath. **All three cells in a row are vertically centered** against each other (the tallest cell, usually the pills-plus-note one, sets the row height). Row padding is `18px 16px` — the first column carries the same 16px left inset as the others, so the row name is not flush to the section gutter.
 
    | Row | Icon | Out of the box | Alternatives | Note |
    | --- | --- | --- | --- | --- |

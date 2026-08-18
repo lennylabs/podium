@@ -915,7 +915,12 @@
   padding: 18px 16px 18px 0;
 }
 
+/*
+ * The row name takes the same 16px inset as the cells beside it, so it starts
+ * inside the row rather than flush against the section gutter.
+ */
 .l-int-name {
+  padding-left: 16px;
   vertical-align: middle;
   font-weight: 600;
   color: var(--ink);
@@ -927,14 +932,19 @@
   gap: 10px;
 }
 
+/*
+ * Every cell in a row is centred against the others. The tallest one, usually
+ * the pills with a note under them, sets the row height, and a short value
+ * sitting at the top of a tall row reads as belonging to the row above it.
+ */
 .l-int-builtin {
-  vertical-align: top;
+  vertical-align: middle;
   color: var(--secondary);
 }
 
 .l-int-alts {
   padding-right: 0;
-  vertical-align: top;
+  vertical-align: middle;
 }
 
 .l-int-pills {
