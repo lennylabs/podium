@@ -6,7 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-[Unreleased]: https://github.com/lennylabs/podium/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/lennylabs/podium/compare/v0.3.1...HEAD
+
+## [0.3.1] - 2026-08-18
+
+The documentation site is now built by a generator in this repository rather
+than by Jekyll, and the documentation it publishes was corrected against the
+code and the specification.
+
+### Changed
+
+- **Documentation site**: the published site is generated from the markdown under `docs/` by the package in `site/`, replacing the Jekyll and Just-the-Docs build. Frontmatter is a closed key set, and the build gate rejects an unresolvable link, a link to a missing anchor, an unknown code-fence language, an image with no alt text, a heading outline that skips a level, and a text token that misses the WCAG AA contrast ratio on the surface it renders on. Every page is complete HTML, and the browser bundle adds client navigation over it.
+- **Changelog page**: the site publishes this file directly, through an `include:` key in the page's frontmatter, so the page follows the file the release process edits.
+
+### Fixed
+
+- **Evaluation stack startup**: `docker-compose.yml` selected the Postgres store and left the embedding configuration unset. A Postgres-backed registry defaults its embedding provider to `openai`, which then requires `OPENAI_API_KEY`, so the registry exited at boot with `missing required configuration for the selected backend(s): OPENAI_API_KEY`. The stack now sets `PODIUM_NO_EMBEDDINGS` and comes up with `docker compose up -d` alone, serving keyword search. Remove that variable and supply a provider with its key to exercise hybrid search.
+
+### Documentation
+
+- Corrected the documentation against the code across two audits, each finding independently confirmed before it was applied. Among them: the default `SignatureProvider` is `noop` rather than Sigstore-keyless; no notification provider is wired unless the operator names one; `registry.yaml` is read from `PODIUM_CONFIG_FILE` or `$HOME/.podium/`, never from `/etc/podium/`; model-versioned vector rows and the stale-row purge are a capability only the collocated backends implement; a resource exactly at the inline cutoff travels inline; and an `extends` pin takes `major.minor.patch` or `major.minor.x`, so the `@1.2` examples could not resolve.
+- Resolved contradictions between pages in different sections: SCIM push, freeze windows, and the hash-chained audit log are available on a single node; `podium login` is a no-op only for a filesystem registry or a loopback default; `podium sync` performs no signature or content-hash verification; `mcp-server` is the built-in extension type rather than a first-class type; and public mode enforces a sensitivity floor at ingest.
+- Redrew the `podium sync --watch` diagrams. Both described a per-event incremental pipeline that does not exist: the watcher reads only the event type from a newline-delimited JSON stream, holds one debounce timer, and reruns the whole sync.
+- Added the mobile layout for the site, at the breakpoints the design defines.
+
+[0.3.1]: https://github.com/lennylabs/podium/releases/tag/v0.3.1
 
 ## [0.3.0] - 2026-08-15
 
