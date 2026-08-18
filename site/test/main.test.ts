@@ -11,15 +11,24 @@ describe("the command-line entry point", () => {
     process.exitCode = 0;
   });
 
-  it("checks the repository corpus and reports what it read", () => {
-    const output = execFileSync(
-      "npx",
-      ["tsx", "src/build/main.ts", "check"],
-      { cwd: SITE_DIR, encoding: "utf8", timeout: 120_000 },
-    );
+  // Spawns npx and checks the whole corpus, so it runs for seconds rather than
+  // milliseconds and grows with the corpus. The runner's own limit is given the
+  // same budget as the subprocess: leaving it at the default means the two
+  // disagree, and the test fails on a slow machine while the command it runs is
+  // still working.
+  it(
+    "checks the repository corpus and reports what it read",
+    () => {
+      const output = execFileSync(
+        "npx",
+        ["tsx", "src/build/main.ts", "check"],
+        { cwd: SITE_DIR, encoding: "utf8", timeout: 120_000 },
+      );
 
-    expect(output).toMatch(/^checked \d+ pages, \d+ routes, no problems\n$/);
-  });
+      expect(output).toMatch(/^checked \d+ pages, \d+ routes, no problems\n$/);
+    },
+    120_000,
+  );
 
   it("rejects a command it does not implement", async () => {
     const argv = process.argv;
