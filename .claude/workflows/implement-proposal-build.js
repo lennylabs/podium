@@ -85,6 +85,12 @@ const STEP_ITEM = {
       description:
         "test levels this step must create and run (e.g. unit package tests, integration in test/integration, conformance in test/conformance, materialization golden+validity in test/materialization, e2e in test/e2e)",
     },
+    status: {
+      type: "string",
+      enum: ["planned", "alreadyDone", "needsIntent", "blocked"],
+      description:
+        "planned unless the checklist disagreed with the tree: alreadyDone when the surface is already present (kept so dependents resolve), needsIntent when the step could not be built as written and was planned from the proposal's stated intent, blocked when neither could be recovered (its dependents are skipped, the rest of the sequence continues)",
+    },
     specRefs: { type: "array", items: { type: "string" } },
   },
 };
@@ -105,6 +111,17 @@ const PLAN = {
       items: STEP_ITEM,
     },
     risks: { type: "array", items: { type: "string" } },
+    checklistDeviations: {
+      type: "array",
+      description:
+        "one entry per place the proposal's implementation checklist did not match the tree, each as 'step id — what the checklist said, what the tree shows, how it was recovered'. Empty when the checklist matched, or when the proposal carried none.",
+      items: { type: "string" },
+    },
+    usedChecklist: {
+      type: "boolean",
+      description:
+        "true when the sequence was carried across from the proposal's checklist, false when it was derived here because the proposal had none",
+    },
   },
 };
 
@@ -220,6 +237,8 @@ let plan = await agent(
     "Then map the full blast radius: grep spec/, pkg/, cmd/, internal/, sdks/, test/, tools/, and deploy/ for every existing surface the change touches (call sites, the registry core and HTTP handlers, the MCP server, the CLI commands, the harness adapters in pkg/adapter and the materialization pipeline in pkg/materialize, the §6.7.1 capability matrix in pkg/adapter/capability.go, the SPI implementations, the language SDKs, the spec-matrix definitions in tools/matrix/matrices.go, the doccov manifest, the golden files in test/materialization/testdata/golden, and the Helm chart and deployment manifests under deploy/) and every new surface it adds. " +
     "The blast radius and the build sequence MUST include the surfaces the proposal REMOVES, not only those it adds or changes: for every mode, field, function, env var, error code, meta-tool, adapter value, or whole file the proposal eliminates, include an explicit removal step that deletes it plus the code paths, tests, fixtures, golden files, and doc references orphaned by its removal, sequenced so the removal lands without breaking the build (remove consumers before the surface, or in the same step). A surface the proposal eliminates that has no removal step is a planning gap. " +
     "When the change touches a harness, an artifact type, a frontmatter field, a rule mode, a hook event, or a target path, the blast radius MUST keep every parallel representation consistent: the §6.7 path table is in spec/06, but the code-side surfaces are the adapter in pkg/adapter (adapter.go, none.go, claudecode.go, builtins.go, layout.go), the §6.7.1 matrix mirror in pkg/adapter/capability.go, the golden files and validity checks in test/materialization, the matrix-audit cells in tools/matrix/matrices.go, and the per-harness docs in docs/consuming. " +
+    "THE PROPOSAL'S IMPLEMENTATION CHECKLIST IS THE SEQUENCE, WHEN IT HAS ONE. A converged proposal carries a `## Implementation checklist` section: an ordered list of steps, each naming its deliverables, its lane, its test levels, and what it depends on. That order was written while the proposal was reviewed and encodes decisions you cannot see from the tree, so carry it across rather than deriving a fresh order. Keep each step's id, deliverables, levels, and dependencies, and use the blast radius you mapped as a CHECK on it rather than as the source of the order. A proposal with no checklist falls back to deriving the sequence yourself, which is what every proposal needed before checklists existed.\n" +
+    "A checklist that does not match the tree does NOT stop the plan; it was written before the tree reached its current state, so expect mismatches and recover each one. A step whose surface is already present is kept in the sequence, marked alreadyDone, so the steps that depend on it still resolve. A step whose prerequisite turns out to live elsewhere is re-sequenced locally. A step that cannot be built as written is marked needsIntent and planned from the proposal's stated intent instead. Only a step whose intent cannot be recovered either is marked blocked, and a blocked step does not stop the steps that do not depend on it. Record every mismatch in checklistDeviations, naming the step and what disagreed, because that list is how the proposal gets corrected afterwards; a run that silently recovered has hidden a defect in the proposal.\n" +
     "Produce blastRadius (one entry per surface) and an ORDERED build sequence of steps where each step is independently implementable once its dependencies are done. For each step give the work, the target files or packages, dependsOn (earlier step ids), the test levels it must create and run (per " +
     repo +
     "/.claude/rules/test-coverage.md), and the spec sections it implements. Sequence so foundational changes (shared types, schemas, the capability matrix) come before the code that consumes them, and tests for each step land within that step.\n\n" +
@@ -684,6 +703,7 @@ let verify = await agent(
     "%; if coverage is below " +
     coverageFloor +
     "%, set green=false and add a failure entry naming the under-covered new or changed files and lines so the fix loop adds tests for them (per the test-coverage rule, the floor is on new code; a pure behavior-preserving refactor is exempt — note it instead of failing). Run a DEAD-CODE SWEEP: grep the whole tree for every identifier, mode value, field, function, env var, error code, adapter value, and §6.7.1 capability cell the proposal removes, and confirm none survives as a live reference; the `unused` linter catches unused package-level symbols, but also check for orphaned exported symbols, whole unreferenced files, stale test fixtures or golden files, and dangling matrix or doccov entries. Treat a surviving removed surface or an orphaned caller as a failure (list it precisely so the fix loop deletes it). List any failures precisely.",
+    "REGRESSION-TEST GATE. Line coverage is not evidence that a fix is pinned. For every behavioral FIX in the cumulative diff, confirm a test exists that asserts the CORRECTED outcome and would FAIL against the pre-fix code. A behavioral fix is a corrected error code, a visibility or tenancy gate, a state transition, a retry, recovery, or fail-open/fail-closed path, an ingest-idempotency, webhook-dedup, config-merge, or re-sync reconciliation path, or a client-facing field. A pre-existing happy-path test that merely executes the changed lines does NOT satisfy this, so a fix can sit at 100% line coverage and still fail the gate. Check each one by reading the test and asking what it would do against the old behavior: if it would still pass, it does not pin the fix. Where a fix has no such test, set green=false and add a failure entry naming the fix and the level that owns its test, so the fix loop writes it: identity, visibility, or CLI behavior at end-to-end under test/e2e; reconciliation, idempotency, and dedup at integration; harness output paths and layouts at test/materialization; store and SPI contracts at test/conformance; pure logic and error mapping at unit.\n" +
   { schema: VERIFY, label: "verify", phase: "Verify" },
 );
 
@@ -822,6 +842,14 @@ if (green) {
         proposal +
         ".\n\nWork in the repository root. The proposal's spec edits are applied; do not edit spec/. Apply each finding so the code matches the proposal's design, add or correct tests for the corrected behavior, run `go build ./...`, `go vet`, the linter, and the test levels the change reaches to green, and commit. " +
         RULES +
+        "\n\nEVERY FIX CARRIES A REGRESSION TEST. A design-conformance finding is by construction a defect the " +
+        "automated tests passed over, because the build was green when the review ran. Fixing only the code therefore " +
+        "leaves the same class of defect free to recur. For each finding you close, add or extend a test that asserts " +
+        "the corrected behavior and would FAIL against the code as it stood before your fix, at the level that owns it: " +
+        "identity, visibility, or CLI behavior at end-to-end under test/e2e; reconciliation, idempotency, and dedup at " +
+        "integration; harness output paths and layouts at test/materialization; store and SPI contracts at " +
+        "test/conformance; pure logic and error mapping at unit. A fix that lands without one is not done, and the " +
+        "verification pass that follows this round checks those tests exist.\n" +
         "\n\nFindings to fix:\n" +
         JSON.stringify(findings, null, 2),
       { label: "review-fix:r" + reviewRound, phase: "Review" },
@@ -849,7 +877,8 @@ if (green && reviewFixApplied) {
       (tierSet.join(", ") || "from the diff") +
       ". Run each level in the FOREGROUND, scoped to the changed packages, one at a time (no `run_in_background` for tests; stream output, no `| tail`); for any level that needs live services, run `make services-up` then `make test-live`. Re-run `make coverage-gate`. Apply the coverage gate (changed-line coverage at least " +
       coverageFloor +
-      "% via `go test -coverpkg=./... -coverprofile=cover.out ./...` then `go tool cover -func=cover.out`, refactors exempt). Report green, the levels run, the coverage, and any remaining failures.",
+      "% via `go test -coverpkg=./... -coverprofile=cover.out ./...` then `go tool cover -func=cover.out`, refactors exempt). Report green, the levels run, the coverage, and any remaining failures." +
+      "Then gate on the regression tests the review fixes owed: for every design-conformance finding the review round fixed, confirm a test exists that asserts the corrected behavior and would FAIL against the pre-fix code. Read the test and ask what it would do against the old behavior; a test that would still pass does not pin the fix. A fix that landed without one sets green=false with a failure entry naming it, because the finding was a defect the tests had already passed over once.",
     { schema: VERIFY, label: "verify-postreview", phase: "Review" },
   );
   finalGreen = !!(recheck && recheck.green);
@@ -876,6 +905,12 @@ if (green && reviewFixApplied) {
 return {
   status: finalGreen && reviewClean ? "implemented" : "implemented-not-green",
   blastRadius: plan.blastRadius,
+  // Where the proposal's checklist disagreed with the tree. Reported whatever
+  // the status, because a run that recovered silently has hidden a defect in
+  // the proposal rather than fixed one.
+  checklistDeviations: plan.checklistDeviations || [],
+  usedChecklist: !!plan.usedChecklist,
+  skippedSteps: (plan.steps || []).filter((s) => s.status === "blocked").map((s) => s.id),
   steps: stepResults,
   commits: stepResults.map((s) => s.commit).filter(Boolean),
   green: finalGreen,
