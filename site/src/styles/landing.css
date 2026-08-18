@@ -1290,17 +1290,31 @@
     font-size: 26px;
   }
 
+  /*
+   * Three separate cards rather than one panel. The desktop grid paints its
+   * own background so the 1px gaps read as hairlines between abutting cards;
+   * once the cards are 12px apart that background is a band behind them, so
+   * the frame is dropped and each card carries its own border.
+   */
   .l-deploy-grid {
     gap: 12px;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
   }
 
   .l-deploy-card {
+    border: 1px solid var(--border);
     border-radius: 13px;
   }
 
   /*
-   * The table stops being a table. Each row becomes a block, and each value
-   * carries the column header it lost in a 96px mono label column.
+   * The table stops being a table and becomes one block per row, separated the
+   * way the feature band is: a 1px gap over the container's own background,
+   * with a rule above the first block and below the last. The cells carry the
+   * desktop row separator, which would otherwise draw a second line under each
+   * row name and a third between its two values.
    */
   .l-int-scroll {
     overflow-x: visible;
@@ -1317,6 +1331,20 @@
     min-width: 0;
   }
 
+  .l-int-table {
+    margin-left: calc(var(--gutter-landing) * -1);
+    margin-right: calc(var(--gutter-landing) * -1);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    background: var(--border);
+  }
+
+  .l-int-table tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
   .l-int-table thead {
     position: absolute;
     width: 1px;
@@ -1325,23 +1353,35 @@
     clip-path: inset(50%);
   }
 
-  .l-int-row {
-    padding: 16px 0;
-    border-top: 1px solid var(--border);
+  /*
+   * Every block takes the same surface. The desktop table stripes alternate
+   * rows to track a line across three columns, which a stack of blocks with a
+   * hairline between them does not need.
+   */
+  .l-int-row,
+  .l-int-row:nth-child(even) {
+    padding: 18px var(--gutter-landing);
+    background: var(--l-card-bg);
   }
 
   .l-int-name {
-    padding: 0 0 10px;
-    font-size: 15px;
+    padding: 0 0 12px;
+    border-top: 0;
+    font-size: 15.5px;
     font-weight: 600;
   }
 
   .l-int-builtin,
   .l-int-alts {
     display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 4px 0;
+    align-items: baseline;
+    gap: 8px;
+    padding: 0;
+    border-top: 0;
+  }
+
+  .l-int-builtin {
+    padding-bottom: 10px;
   }
 
   .l-int-builtin::before,
@@ -1351,10 +1391,9 @@
     width: 96px;
     color: var(--faint);
     font-family: var(--font-mono);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    line-height: 1.9;
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
   }
 
@@ -1362,9 +1401,19 @@
     flex-wrap: wrap;
   }
 
+  /*
+   * The pills take the rest of the row and wrap inside it. Left to size
+   * themselves they overflow the line and drop to the next one, which starts
+   * at the label's edge and puts them under it rather than beside it.
+   */
+  .l-int-pills {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
   .l-int-note {
     flex-basis: 100%;
-    margin-left: 106px;
+    margin-left: 104px;
   }
 
   .l-footer-inner {
