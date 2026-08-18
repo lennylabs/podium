@@ -69,7 +69,7 @@ registry:
 | `X-Podium-User-Org` | The caller's organization (a multi-tenant registry routes by this value). |
 | `X-Podium-Proxy-Secret` | The shared secret matched against `PODIUM_TRUSTED_PROXY_SECRET`. |
 
-Groups come from `X-Podium-User-Groups` directly. SCIM and `IdpGroupMapping` are not consulted, because there is no token to read and the gateway is the source of truth. Provision groups at the gateway for a `trusted-headers` deployment.
+Groups come from `X-Podium-User-Groups` directly, and `IdpGroupMapping` is not consulted, because there is no token to read and the gateway is the source of truth. Provision groups at the gateway for a `trusted-headers` deployment. When the registry also mounts the SCIM receiver, a layer's `groups:` filter still expands against the pushed directory: the registry grants visibility when the named group holds a member whose SCIM `userName` equals the caller's `X-Podium-User-Sub` or `X-Podium-User-Email` value. Leave `PODIUM_SCIM_TOKENS` unset under `trusted-headers` when the gateway is meant to be the only source of group membership.
 
 The gateway's job: authenticate the caller, remove any client-supplied `X-Podium-User-*` headers, set the identity headers from the authenticated session, and, when a secret is configured, attach `X-Podium-Proxy-Secret`. A request without identity headers is anonymous and sees public visibility only; `trusted-headers` raises no authentication error.
 

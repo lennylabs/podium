@@ -97,7 +97,7 @@ The registry strips trailing slashes from the configured `issuer:` and compares 
 
 Authenticate Auth0 callers through a gateway that completes the Auth0 login and injects `X-Podium-User-Sub`, `X-Podium-User-Email`, `X-Podium-User-Groups`, and `X-Podium-User-Org`, with the registry's identity provider set to `trusted-headers`; see [gateway-delegated identity](../gateway-delegated-identity). Under `trusted-headers` the gateway supplies the caller's groups, so the Action in step 3 and the developer-side device-code commands below do not apply.
 
-The registry reads the top-level `groups` claim and maps its values to the names layer visibility uses through `PODIUM_IDP_GROUP_MAPPING`, a comma-separated list of `<token-value>=<group-name>` pairs. A value with no entry passes through unchanged, so a token that already carries the layer group names needs no mapping. Restart the registry.
+Under `trusted-headers` the registry takes the caller's groups from `X-Podium-User-Groups` and consults neither the token's `groups` claim nor `PODIUM_IDP_GROUP_MAPPING`, so the gateway supplies the group names the layer's `groups:` filter declares. `PODIUM_IDP_GROUP_MAPPING` applies only where the registry verifies the token itself, which an Auth0 token cannot pass. Restart the registry.
 
 Developer side:
 

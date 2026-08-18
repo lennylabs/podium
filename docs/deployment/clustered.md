@@ -29,12 +29,12 @@ For day-two operations covering capacity, monitoring, alerts, backup, and upgrad
 ## What the tier adds over single node
 
 - **Multi-tenancy.** Per-tenant layer lists, admin grants, audit streams, and quotas. The tenant boundary is the org. Each org has its own Postgres schema, and cross-org tables use row-level security.
-- **Per-layer visibility.** `public`, `organization`, OIDC `groups`, or specific `users`, enforced at the registry on every call. Authoring rights stay in the Git provider's branch protection. See [Access control](access-control).
-- **Hash-chained audit.** Every read, ingest, and admin action is recorded with hash-chain integrity. The stream mirrors to a SIEM, and anchoring to a public transparency log is optional.
-- **Freeze windows.** A `freeze_windows:` list under `registry:` in `registry.yaml` rejects ingest with `ingest.frozen` during critical periods such as year-end close and release cuts. `podium layer reingest <id> --break-glass --justification <text> --approver <id>` overrides an active window. The override needs a justification and two distinct approvers, and the authenticated caller counts as one of them.
+- **Visibility evaluated against a verified identity.** A clustered deployment sets the registry's own identity provider to `oidc-jwt` or `trusted-headers`, so `public`, `organization`, OIDC `groups`, and `users` are evaluated against a verified caller on every call. A single-node deployment runs the same evaluator once it configures one of those providers. Authoring rights stay in the Git provider's branch protection. See [Access control](access-control).
+- **Audit across replicas.** Every read, ingest, and admin action carries the same hash-chain integrity a single-node deployment writes, and each replica maintains its own chain, which is why the topology above centralizes the stream on one SIEM endpoint. Anchoring a chain head to a public transparency log applies to a replica that keeps the on-disk sink, because the anchor and verify passes walk the file.
+- **Freeze windows.** A `freeze_windows:` list under `registry:` in `registry.yaml` rejects ingest with `ingest.frozen` during critical periods such as year-end close and release cuts. `podium layer reingest --break-glass --justification <text> --approver <approver-id> <layer-id>` overrides an active window. The override needs a justification and two distinct approvers, and the authenticated caller counts as one of them.
 - **Signing.** Sigstore-keyless (preferred) or a registry-managed key (fallback). Signature verification on materialization is configurable per deployment, and `PODIUM_VERIFY_SIGNATURES=medium-and-above` is the typical setting.
 - **SCIM 2.0.** Group membership push from OIDC IdPs that support it. Layer visibility references group claims directly.
-- **GDPR erasure.** `podium admin erase <user-id> --salt <tenant-salt>` unregisters the user's user-defined layers, redacts their identity across the registry audit stream behind a `redacted-<sha256(user_id+salt)>` tombstone, and returns the purged layer ids plus the count of redacted audit events.
+- **GDPR erasure.** `podium admin erase --salt <tenant-salt> <user-id>` unregisters the user's user-defined layers, redacts their identity across the registry audit stream behind a `redacted-<sha256(user_id+salt)>` tombstone, and returns the purged layer ids plus the count of redacted audit events.
 - **Quotas.** Per-org limits on storage, search QPS, materialization rate, and audit volume.
 
 ---
@@ -142,7 +142,7 @@ Run the registry in multi-tenant mode with `PODIUM_MULTI_TENANT=true`, and seed 
 
 ```bash
 podium admin tenant create acme --registry https://podium.acme.com
-podium admin grant alice@acme.com --registry https://podium.acme.com
+podium admin grant --registry https://podium.acme.com alice@acme.com
 ```
 
 `podium admin tenant create` derives the org ID from the name and is idempotent. Use `podium admin tenant list`, `podium admin tenant update <id>`, and `podium admin tenant deactivate <id>` to list, adjust, and deactivate tenants. See the [CLI reference](../reference/cli#podium-admin-tenant) for the full flag set.

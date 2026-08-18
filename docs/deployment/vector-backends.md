@@ -29,6 +29,8 @@ Each managed backend supports two modes, selected by whether an inference-model 
 - **Self-embedding.** The backend computes the embedding from the text projection the registry submits. Pinecone Integrated Inference, Weaviate Cloud vectorizers, and Qdrant Cloud Inference all support this. No external embedding provider is required.
 - **Storage-only.** The backend stores vectors that the registry computes through a configured `EmbeddingProvider`. The provider is selected via `PODIUM_EMBEDDING_PROVIDER` (`openai`, `voyage`, `cohere`, or `ollama`) and is required in this mode.
 
+An explicitly configured embedding provider overrides this selection. When `PODIUM_EMBEDDING_PROVIDER` names a provider, or `registry.yaml` carries an `embedding_provider:` block, the registry builds that embedder, opens the backend at the embedder's dimension, and writes vectors it computed itself even though the inference-model variable is set. The managed index is sized for the hosted model, so it rejects vectors of a different dimension. Leave `PODIUM_EMBEDDING_PROVIDER` unset, or set it to `none`, on a self-embedding deployment. The per-mode default (`ollama` on a single node, `openai` on a clustered deployment) applies only while the variable is unset and no `embedding_provider:` block is present, so the default is not an override.
+
 Setting `PODIUM_EMBEDDING_PROVIDER` to the empty string, or to `none`, disables the registry-side embedder. On a storage-only backend, search then degrades to BM25 over manifest text. On a self-embedding backend (`pinecone`, `weaviate-cloud`, or `qdrant-cloud` with its inference-model or vectorizer variable set) the backend keeps embedding server-side, so hybrid search continues. Set `PODIUM_NO_EMBEDDINGS=true`, or pass `--no-embeddings` to `podium serve`, to force BM25-only regardless of the configured backend.
 
 ---
@@ -68,7 +70,7 @@ export OPENAI_API_KEY=sk-...
 
 ### Clustered with Pinecone
 
-In `/etc/podium/registry.yaml`:
+In the registry's config file. The registry reads `~/.podium/registry.yaml` unless `PODIUM_CONFIG_FILE` names another path. The `podium-server` binary parses no flags, so a clustered deployment that keeps the file at `/etc/podium/registry.yaml` sets `PODIUM_CONFIG_FILE=/etc/podium/registry.yaml` in the registry's environment. `podium serve --config <path>` sets the same variable:
 
 ```yaml
 registry:
@@ -191,7 +193,7 @@ podium serve --standalone --layer-path ~/podium-artifacts/
 
 ## Switching backends on a running deployment
 
-The vector store records `(model_id, dimensions)` per artifact. When the configured backend or embedding model changes, run `podium admin reembed` to repopulate:
+When the configured backend or embedding model changes, run `podium admin reembed` to repopulate:
 
 ```bash
 podium admin reembed --registry https://podium.acme.com
@@ -201,7 +203,7 @@ podium admin reembed --since 2026-01-01T00:00:00Z --registry https://podium.acme
 
 With no `--artifact`, the command runs a tenant-wide pass, and `--only-missing` and `--since` compose to scope it. `--artifact` re-embeds a single artifact and requires `--version` alongside it.
 
-During re-embedding, the store may transiently hold mixed dimensions. Query time restricts results to vectors matching the currently-configured model. The registry emits `embedding.reembed_in_progress` events for progress monitoring. Stale-dimension rows are purged when re-embedding completes.
+The registry emits `embedding.reembed_in_progress` events for progress monitoring. Model versioning applies to the collocated backends only. `pgvector` and `sqlite-vec` tag each row with the embedding model, restrict a query to the current model while a re-embed is in flight, and drop the previous model's rows once a full pass completes; a pass scoped with `--only-missing` or `--since` purges nothing. Pinecone, Weaviate Cloud, and Qdrant Cloud carry no model tag, so a model change that alters the vector dimension needs a new index or collection sized to the new model rather than an in-place re-embed.
 
 For non-collocated backends (every managed service falls in this category), ingest writes are coordinated through a transactional outbox: the manifest commit and a `vector_pending` row land in the same metadata-store transaction, and a background worker drives the write to the vector backend. This keeps the metadata commit and the vector write consistent under failure.
 

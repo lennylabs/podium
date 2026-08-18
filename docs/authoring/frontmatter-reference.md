@@ -28,7 +28,7 @@ Skills split their frontmatter between `SKILL.md` and `ARTIFACT.md` so that `SKI
 | `name` | Yes (matches parent directory) | — | Yes |
 | `description` | Yes (≤ 1024 chars) | — | Yes |
 | `license` | Yes (SPDX) | — | Yes |
-| `compatibility` | Optional (≤ 500 chars; human-readable) | — | — (Podium derives from `runtime_requirements` and `sandbox_profile`) |
+| `compatibility` | Optional (≤ 500 chars; human-readable) | — | — (the Claude Code adapter derives from `runtime_requirements` and `sandbox_profile`) |
 | `metadata` | Optional (string-to-string map) | — | — |
 | `allowed-tools` | Optional (experimental) | — | — |
 | `type` | — | Yes (`type: skill`) | Yes |
@@ -115,7 +115,7 @@ allowed-tools:
 
 | Field | Description |
 |:--|:--|
-| `compatibility` | Free-form environment notes (≤ 500 chars). Read by SKILL.md-aware tools to surface preconditions to a reader. If omitted, the Podium adapter derives a compatibility string from `runtime_requirements` and `sandbox_profile` at materialization time for harnesses that consume only the agentskills.io subset. |
+| `compatibility` | Free-form environment notes (≤ 500 chars). Read by SKILL.md-aware tools to surface preconditions to a reader. When it is omitted, the Claude Code adapter derives a compatibility string from `runtime_requirements` and `sandbox_profile` and injects it into the materialized `SKILL.md`. The other adapters copy `SKILL.md` unchanged, so the derived value reaches Claude Code output only. |
 | `metadata` | Open-ended string-to-string map. Use for client-specific properties not defined by the agentskills.io spec. |
 | `allowed-tools` | Experimental. YAML list of tools the skill is pre-approved to call. Podium's parser rejects a bare string here, so write one list entry per tool. Adapter support varies by harness. |
 
@@ -202,7 +202,7 @@ hook_action: |                    # shell snippet executed when the event fires
 server_identifier: npx:@company/finance-warehouse-mcp
 
 # Inheritance: explicitly extend another artifact's manifest (cross-layer merge)
-extends: finance/ap/pay-invoice@1.2
+extends: finance/ap/pay-invoice@1.2.x
 
 # Adapter targeting: opt out of cross-harness materialization for this artifact
 target_harnesses: [claude-code, opencode]

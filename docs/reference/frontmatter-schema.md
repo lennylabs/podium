@@ -60,7 +60,7 @@ Every artifact directory contains an `ARTIFACT.md`. Skill artifacts (`type: skil
 | `rule_description` | `rule` | Required when `rule_mode: auto`. Drives the harness's autoload heuristic. |
 | `hook_event` | `hook` | Canonical lifecycle event name. Session: `session_start`, `session_end`. Prompt: `user_prompt_submit`. Generic tool: `pre_tool_use`, `post_tool_use`, `post_tool_use_failure`. Tool subtypes: `pre_shell_execution`, `post_shell_execution`, `pre_mcp_execution`, `post_mcp_execution`, `pre_read_file`, `post_file_edit`. Permission: `permission_request`, `permission_denied`. Subagent: `subagent_start`, `subagent_stop`. Turn: `stop`. Compaction: `pre_compact`, `post_compact`. Notification: `notification`. The adapter translates to the harness's native event; coverage varies. |
 | `hook_action` | `hook` | Shell snippet executed when the event fires. |
-| `server_identifier` | `mcp-server` | Canonical server identifier. Drives the reverse index that links `skill` artifacts referencing the server via `mcpServers:`. |
+| `server_identifier` | `mcp-server` | Canonical server identifier. Drives the reverse index: any artifact whose `mcpServers:` entry resolves to this identifier gets a dependency edge to the registration, regardless of the referencing artifact's type. |
 
 ### Cross-cutting fields
 

@@ -12,7 +12,7 @@ A `hook` artifact wires a shell action into a harness lifecycle event. Use it to
 ---
 type: hook
 version: 1.0.0
-hook_event: stop
+hook_event: session_end
 hook_action: |
   INPUT=$(cat)
   echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] session end: $INPUT" \
@@ -55,7 +55,7 @@ These cover every tool call regardless of the underlying tool.
 
 **Tool calls (subtypes)**
 
-Subtype events target a specific kind of tool call. Use them when the action only applies to that category (e.g., a formatter on file edits, a secrets scanner on shell commands). The adapter wires the subtype to the harness's native subtype event when one exists, or installs a generic hook with a tool-name matcher otherwise.
+Subtype events target a specific kind of tool call. Use them when the action only applies to that category (e.g., a formatter on file edits, a secrets scanner on shell commands). When a harness exposes a native subtype event, the adapter wires the subtype straight onto it: Cursor maps `pre_shell_execution`, `pre_mcp_execution`, `pre_read_file`, and `post_file_edit` onto `beforeShellExecution`, `beforeMCPExecution`, `beforeReadFile`, and `afterFileEdit`. When a harness exposes only the generic tool events, the adapter maps the subtype onto the generic native event and installs no tool-name matcher, so the action fires on every tool call at that phase. Claude Code receives every tool subtype as a plain `PreToolUse` or `PostToolUse` entry, and Codex and Gemini receive the shell and MCP subtypes as plain generic tool entries the same way. Inspect the tool name in the payload inside the `hook_action` when the action must apply to one category only.
 
 | `hook_event` | Fires when |
 |:--|:--|
@@ -144,7 +144,7 @@ The harness refuses to materialize when a system package isn't available.
 
 ## Authoring guidance
 
-- **Hooks ship code.** A hook's `hook_action` runs on the host with the user's privileges. Treat hooks like any other script the catalog ships: review, sign, and consider sandboxing. Set `sandbox_profile:` for sensitive hooks so a host with sandbox capability can constrain the action.
+- **Hooks ship code.** A hook's `hook_action` runs on the host with the user's privileges. Treat hooks like any other script the catalog ships: review, sign, and consider sandboxing. Set `sandbox_profile:` for sensitive hooks so a host with sandbox capability can constrain the action. The `sandbox_profile` row of the §6.7.1 capability matrix is ✗ for `codex`, so a hook that sets the field fails materialization onto Codex with `materialize.untranslatable` even though Codex translates the `hook_event` itself.
 - **Keep actions short.** A long shell action embedded in YAML gets ugly. Move complex logic into a bundled script (in `scripts/`) and have the action invoke it. The script lives alongside `ARTIFACT.md` and ships with the hook.
 - **Make the description specific.** "Log session-end events to a local audit file." is fine. "Lifecycle observer." is too vague to surface in search.
 - **Don't depend on payload fields.** Harnesses change their payload schema over time. Use `jq` defaults (`jq -r '.field // empty'`) or guard against missing fields in shell.
@@ -171,9 +171,9 @@ version: 1.0.0
 description: Log session-end events to a local audit file.
 tags: [hook, audit]
 sensitivity: low
-hook_event: stop
+hook_event: session_end
 hook_action: |
-  scripts/log.sh
+  bash scripts/log.sh
 runtime_requirements:
   system_packages: [jq]
 ---
@@ -194,4 +194,4 @@ TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 echo "[${TIMESTAMP}] session end: ${CONV_ID}" >> "${LOG_FILE}"
 ```
 
-The hook is now testable in isolation (`scripts/log.sh < payload.json`), the logic is in one place, and the YAML stays readable.
+The hook is now testable in isolation (`bash scripts/log.sh < payload.json`), the logic is in one place, and the YAML stays readable. Bundled resources materialize with mode 0644, so the action invokes the interpreter explicitly rather than executing the script path directly.

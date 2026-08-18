@@ -108,9 +108,10 @@ Layer visibility references OIDC group names. They reach the registry through ei
 `podium admin show-effective` surfaces the per-layer decision for any identity, which is the direct answer to "why can this person not see that artifact":
 
 ```bash
-podium admin show-effective alice@acme.com \
+podium admin show-effective \
   --group acme-engineering \
-  --registry https://podium.acme.com
+  --registry https://podium.acme.com \
+  alice@acme.com
 ```
 
 `--group` is repeatable and supplies the group claims to evaluate against.

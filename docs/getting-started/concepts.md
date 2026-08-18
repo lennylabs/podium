@@ -124,8 +124,8 @@ A typical setup might have:
 2. **User-defined layers**: personal layers an authenticated user
    registers for themselves, capped at three by default.
 3. **Workspace local overlay**: a per-workspace `.podium/overlay/`
-   directory the MCP server merges client-side, always at highest
-   precedence.
+   directory the consumer merges client-side (the MCP server, `podium
+   sync`, or an SDK), always at highest precedence.
 
 When a caller asks for an artifact, Podium composes the caller's
 **effective view** from every visible layer, in
@@ -255,11 +255,14 @@ view or over the subset an active scope selects.
 
 The `load_artifact` response delivers the manifest body and the bundled
 resources below the inline cutoff directly. A larger resource, and a
-manifest above the cutoff, arrive as a presigned URL into object storage.
-Materialization is the write step that lands all of it on disk. Through the
-MCP server these steps run during the call, so the agent receives the
-manifest body and the file paths. The SDKs split them, returning the
-manifest in memory and writing on a later `materialize()` call.
+manifest above the cutoff, arrive as a URL into object storage: presigned
+and time-limited with the S3 backend, and the registry's own
+`/objects/<content-hash>` route, authorized by the caller's session token,
+with the filesystem backend a single node uses by default. Materialization
+is the write step that lands all of it on disk. Through the MCP server these
+steps run during the call, so the agent receives the manifest body and the
+file paths. The SDKs split them, returning the manifest in memory and
+writing on a later `materialize()` call.
 
 ---
 
@@ -293,8 +296,14 @@ The MCP server exposes these tools to harnesses that speak MCP:
 | `search_artifacts(query?, scope?, type?, tags?)` | Hybrid retrieval over artifact frontmatter. With a query, ranks by relevance; without, browses by filter (the canonical "list all artifacts in this domain" move). |
 | `load_artifact(id)` | Loads a specific artifact by ID, runs the harness adapter, materializes bundled resources to disk. This is the expensive operation; call it after the artifact has been selected. |
 
-These are the tools Podium contributes to a session. Hosts add
-their own runtime tools alongside.
+These are the meta-tools. The MCP server advertises further entries in
+`tools/list` alongside them. `health` reports registry connectivity, the
+observed mode, cache size, and the last successful call. `scope_preview`
+reports aggregate counts for the caller's effective view (total artifacts,
+counts by type, and counts by sensitivity) for operators and reviewers, and
+it returns `config.scope_preview_disabled` on a tenant whose
+`expose_scope_preview` gate is off. Hosts add their own runtime tools
+alongside all of them.
 
 The SDK consumers (`podium-py`, `podium-ts`) and the read CLI
 (`podium domain show`, `podium domain search`, `podium search`, and

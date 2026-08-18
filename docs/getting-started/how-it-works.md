@@ -297,13 +297,18 @@ they cannot make network calls, spawn subprocesses, or write
 outside the destination.
 
 The registry returns metadata and the resource bytes below the inline
-cutoff; it does not proxy larger bytes. A resource above the cutoff, and a
-manifest above it, live in content-addressed object storage and reach the
-consumer through a presigned URL the consumer fetches directly. The MCP
-server resolves those URLs and writes every resource to disk, so the agent's
-result holds the manifest body and the file paths. The SDKs return the
-manifest in memory and resolve the references on a later `materialize()`
-call.
+cutoff. A resource above the cutoff, and a manifest above it, live in
+content-addressed object storage and reach the consumer as a URL the
+consumer fetches. With the S3 backend the URL is presigned, it expires
+after the configured TTL, and the fetch goes to object storage without
+passing through the registry. With the filesystem backend, which a single
+node uses by default, the URL is the registry's own `/objects/<content-hash>`
+route: it carries no signature and no expiry, the consumer sends the session
+token it used for `load_artifact`, and the registry re-checks visibility
+before streaming the bytes. The MCP server resolves those URLs and writes
+every resource to disk, so the agent's result holds the manifest body and the
+file paths. The SDKs return the manifest in memory and resolve the references
+on a later `materialize()` call.
 
 ---
 

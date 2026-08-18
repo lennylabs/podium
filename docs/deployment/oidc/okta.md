@@ -104,9 +104,9 @@ SCIM 2.0 push applies group-membership changes without waiting for the user's ne
 1. In Okta: **Applications → \[your Podium app\] → Provisioning → To App → Enable SCIM**.
 2. SCIM Connector base URL: the registry's SCIM endpoint, `https://podium.acme.com/scim/v2`.
 3. Authentication: **HTTP Header**, with one of the bearer tokens listed in the registry's `PODIUM_SCIM_TOKENS` environment variable. The registry mounts `/scim/v2/` only when that variable is set to a comma-separated list of accepted tokens, and returns 404 for every SCIM request otherwise. Set `PODIUM_SCIM_STORE_PATH` to a writable file path so the pushed directory survives a restart.
-4. Test the connection. Enable **Push Groups** and **Update User Attributes**.
+4. Test the connection. Enable **Push Groups** and **Update User Attributes**. Map each provisioned user's SCIM `userName` to the `sub` or `email` claim its token carries, and each pushed group's `displayName` to the name the layer's `groups:` filter declares. The registry expands a `groups:` filter to the group's member `userName` values and compares them against the caller's `sub` and `email`, so a `userName` that matches neither claim resolves to no group visibility and reports no error.
 
-Group changes now propagate within seconds.
+The registry's SCIM receiver serves `GET`, `POST`, `PUT`, and `DELETE` on `/Users` and `/Groups`, and answers every other method with HTTP 405. Okta sends group-membership changes and user deactivations as `PATCH`, so those requests are rejected and the pushed directory keeps the state the create requests established. Confirm that a membership change reaches the registry before relying on SCIM for group visibility. The token's `groups` claim resolves membership as of each login.
 
 ## Troubleshooting
 

@@ -36,7 +36,7 @@ Every server-side key nests under the top-level `registry:` mapping. A document 
 
 Group resolution is configured registry-side. Use SCIM 2.0 push from the IdP, or the `IdpGroupMapping` adapter that reads OIDC group claims from the token and maps them to group names.
 
-The Okta, Entra ID, and Keycloak guides also confirm that `podium login` against the registry from a developer machine completes the device-code flow and prints the resolved identity (`sub`, `email`, and groups). The Auth0 and Google Workspace guides do not. The registry compares a token's `iss` against the configured issuer after stripping trailing slashes from the configured value alone, so every Auth0 token fails that comparison. The credential `podium login` caches for Google is an opaque access token that the verifier cannot parse. Both guides route callers through a gateway instead.
+Each guide includes a `podium login` run from a developer machine. Where the flow completes, the command prints the identity it decodes from the ID token: the `sub`, the `email`, and the groups the token carries. Only the Okta, Entra ID, and Keycloak guides end with a credential the registry then accepts. The registry compares a token's `iss` against the configured issuer after stripping trailing slashes from the configured value alone, so every Auth0 token fails that comparison. The credential `podium login` caches for Google is an opaque access token that the verifier cannot parse. Both guides route callers through a gateway instead.
 
 ## Human callers and managed runtimes
 

@@ -166,11 +166,14 @@ default once the metadata store is Postgres. A single node defaults the provider
 deployment to `openai`, but neither ships in the binary. Hybrid search needs
 that provider reachable from the registry, or a managed vector backend that
 embeds on ingest; with neither, `search_artifacts` runs BM25 keyword search
-over manifest text. Enabling identity means registering a client with an external
-IdP first, because every provider points at one. SCIM provisions groups
-alongside a provider rather than replacing one. At cluster scale,
-Postgres and object storage become requirements, because registry replicas need
-shared state. See
+over manifest text. `oidc-jwt` verifies tokens an external IdP issued, so it
+needs that IdP's issuer URL and an audience the IdP mints tokens for.
+`trusted-headers` reads the identity headers a fronting gateway injects and
+contacts no IdP. `injected-session-token` verifies tokens signed by a runtime
+key registered with `podium admin runtime register`, against the audience
+configured for the registry. SCIM provisions groups alongside a provider rather
+than replacing one. At cluster scale, Postgres and object storage become
+requirements, because registry replicas need shared state. See
 [Server-side integrations](https://lennylabs.github.io/podium/deployment/integrations).
 
 ---

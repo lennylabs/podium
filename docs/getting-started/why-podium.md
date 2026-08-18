@@ -173,7 +173,7 @@ These tools translate one source SKILL.md into many harness-native locations on 
 
 ### MCP server registries and gateways
 
-These overlap with Podium's `mcp-server` registered extension type and with the governance plane around MCP. Their scope is restricted to MCP server registrations.
+These overlap with Podium's `mcp-server` built-in extension type and with the governance plane around MCP. Their scope is restricted to MCP server registrations.
 
 | Product | License | Coverage |
 |:--|:--|:--|
@@ -199,6 +199,5 @@ A Git monorepo with per-harness directories is the original baseline.
 - **License.** MIT.
 - **Governance.** Maintainer model with an RFC process for spec changes. See [Governance](../about/governance).
 - **Distribution.** OSS-first development, with an optional commercial managed offering by the sponsoring entity (separate doc).
-- **Public registry.** A reference registry with curated example artifacts is hosted at the project's public URL.
 - **Multi-vendor neutrality.** The project does not adopt contributions, governance changes, or roadmap pressure that would bind it to a single harness vendor's surface.
 - **Standards engagement.** Where adjacent open standards (MCP, AAIF-governed standards) overlap with Podium's concerns, the project participates upstream and harmonizes wherever doing so does not compromise the broader scope across artifact types.

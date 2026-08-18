@@ -14,7 +14,7 @@ The local tier has no server-side deployment. The catalog is a directory tree on
 
 The only running component is the `podium` CLI. There is no server process, no database, and no identity provider.
 
-`podium sync` runs the same shared Go library functions the server would run behind its HTTP API: parsers, glob resolver, layer composer, `extends:` resolver, harness adapters, lint rules, and atomic materialization. The library is the single behavioral surface across the tiers, so moving to a server preserves output.
+`podium sync` runs the same shared Go library functions the server would run behind its HTTP API: parsers, glob resolver, layer composer, `extends:` resolver, harness adapters, and atomic materialization. `podium lint` runs the same ingest lint rules the server applies. The library is the single behavioral surface across the tiers, so moving to a server preserves output.
 
 ---
 
@@ -92,7 +92,7 @@ layer_order:             # optional; lowest-precedence first
 
 When `.registry-config` is absent (or sets `multi_layer: false`), the directory is treated as a single-layer setup instead: one `local`-source layer rooted at the path. The same dispatch applies whether the consumer is `podium sync` reading the filesystem source or `podium serve --standalone --layer-path` pointed at the same directory.
 
-A layer directory may also hold an optional `.layer-config` file declaring that layer's visibility (`public`, `organization`, `groups`, or `users`):
+A layer directory may also hold an optional `.layer-config` file declaring that layer's visibility (`public`, `organization`, `groups`, or `users`). In multi-layer mode the file sits inside each layer subdirectory; in single-layer mode it sits at `<registry-path>/.layer-config`:
 
 ```yaml
 # <registry-path>/team-shared/.layer-config
@@ -149,7 +149,7 @@ When the catalog is shared via git, CI on the registry repo runs `podium lint` a
 
 ## Migration paths
 
-**To single node.** When the local tier no longer fits, typically because runtime discovery via the MCP server or a single audit log for the team is needed, point a server at the same directory:
+**To single node.** When the local tier no longer fits, typically because runtime discovery via the MCP server, identity-based visibility filtering, or a single audit log for the team is needed, point a server at the same directory:
 
 ```bash
 podium serve --standalone --layer-path ~/podium-artifacts/
@@ -159,7 +159,7 @@ Each developer's `<workspace>/.podium/sync.yaml` switches `defaults.registry` fr
 
 The shared library does the same parsing, composition, and adapter work in both tiers, so output is bit-identical for the same target and profile.
 
-**To clustered.** When OIDC identity-based visibility, multi-tenancy, or production availability is required, follow [Clustered](clustered) and use `podium admin migrate-to-standard` to export the single-node state.
+**To clustered.** When multi-tenancy, SCIM group sync, signing with a transparency log, or production availability is required, follow [Clustered](clustered) and use `podium admin migrate-to-standard` to export the single-node state.
 
 ---
 

@@ -223,7 +223,7 @@ podium sync [--registry <url-or-path>] [--target <path>] [--harness <name>]
 | `--exclude <pattern>` | Glob to exclude. Applied after include. Repeatable. |
 | `--type <t1,t2,...>` | Restrict to a comma-separated list of artifact types. |
 | `--overlay <path>` | Workspace overlay path watched alongside the registry. |
-| `--watch` | Long-running. Re-materialize on registry change events, or on fsnotify against a filesystem source. A `--config` run that includes a `kind: marketplace` target rejects `--watch` with `config.invalid`. |
+| `--watch` | Long-running. Re-materialize on registry change events, or on fsnotify against a filesystem source. Combined with `--config` it starts no watch loop: each `kind: workspace` target syncs once and the command exits. A `kind: marketplace` target under `--watch` fails the run with `config.invalid` before any target renders. |
 | `--dry-run` | Print the resolved set; write nothing. |
 | `--preview` | Print the scope-preview aggregate counts and exit; write nothing. Requires a server-source registry, because the counts come from `GET /v1/scope/preview`. |
 | `--check` | Validate the merged `sync.yaml` and report warnings (unresolved profiles, malformed globs, target/profile collisions). Combined with `--config`, it validates every target in the named file and materializes none. |
@@ -745,7 +745,8 @@ podium search "month-end close OR variance" --type skill --top-k 15 --json \
 | `PODIUM_VERIFY_SIGNATURES` | `never`, `medium-and-above` (default), `always`. |
 | `PODIUM_IDENTITY_PROVIDER` | Consumer side (MCP server and SDKs): `oauth-device-code` (default) or `injected-session-token`. Registry process: `injected-session-token`, `oidc-jwt`, or `trusted-headers`. `oauth-device-code` has no server-side verifier, so setting it on the registry aborts startup with `config.identity_provider_unverified`. |
 | `PODIUM_OAUTH_AUDIENCE`, `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` | OAuth provider config. |
-| `PODIUM_SESSION_TOKEN_ENV`, `PODIUM_SESSION_TOKEN_FILE` | Injected-token sources. |
+| `PODIUM_SESSION_TOKEN`, `PODIUM_SESSION_TOKEN_ENV`, `PODIUM_SESSION_TOKEN_FILE` | Injected-token sources. `PODIUM_SESSION_TOKEN` is the default variable the CLI, the MCP server, and the SDKs read; `PODIUM_SESSION_TOKEN_ENV` names a different variable to read it from, and `PODIUM_SESSION_TOKEN_FILE` names a file to read it from. |
+| `PODIUM_TOKEN` | Registry credential a `kind: marketplace` sync target renders under. When set it takes precedence over the session token and the `podium login` keychain token for that render. |
 | `PODIUM_PUBLIC_MODE` | Equivalent of `--public-mode`. |
 | `PODIUM_NO_AUTOSTANDALONE` | Disable zero-flag standalone fallback. |
 | `PODIUM_MULTI_TENANT` | Registry-process boot setting. When `true`, the registry runs in multi-tenant mode and routes each request to the tenant its organization names; the `podium admin tenant` commands and the `/v1/admin/tenants` endpoints are available. When unset, every request binds to the single `default` org and tenant management is rejected. |

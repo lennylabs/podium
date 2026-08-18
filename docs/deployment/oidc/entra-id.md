@@ -145,6 +145,8 @@ Entra pushes user and group records to the registry's SCIM endpoint via the **Pr
 5. **Test connection**, then save and enable.
 6. Configure attribute mappings so each provisioned user's SCIM `userName` matches the `sub` or `email` claim its token carries, and each group's `displayName` matches the name used in the layer's `groups:` filter. The registry expands a `groups:` filter to the group's member `userName` values and compares them against the caller's `sub` and `email`.
 
+The registry's SCIM receiver serves `GET`, `POST`, `PUT`, and `DELETE` on `/Users` and `/Groups`, and answers every other method with HTTP 405. Entra's provisioning service sends updates, including group-membership changes, as `PATCH`, so the pushed directory records what the create requests established and later updates are rejected. Confirm that a membership change reaches the registry before relying on SCIM for group visibility.
+
 ## Troubleshooting
 
 - **Tokens don't include the groups claim.** The user belongs to more groups than Entra emits in a token, so the token carries a `_claim_names` overage reference instead of the claim. The registry reads groups from the token's `groups` claim and makes no Microsoft Graph call, so a caller in overage resolves to no groups. Narrow the emitted set by selecting **Groups assigned to the application** in the groups-claim configuration, or resolve membership through SCIM.

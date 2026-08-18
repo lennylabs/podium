@@ -155,7 +155,6 @@ Single node omits the capabilities that need external services or a multi-tenant
 - **Multi-tenancy.** A single-node deployment is single-tenant.
 - **OIDC group claims through SCIM.** Group membership comes from OIDC claims directly. SCIM push is a clustered-tier capability.
 - **Transparency-log anchoring.** Sigstore-keyless signing requires public OIDC infrastructure.
-- **Outbound webhooks.** They are configurable and rarely used at this scale.
 
 When any of these starts mattering, see [Clustered](clustered).
 

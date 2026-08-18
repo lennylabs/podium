@@ -8,7 +8,7 @@ description: What's built today, what's published, and where to track progress.
 
 Podium is at **0.3.x**, an early release. The v1 surface is implemented and published. The surface and its behavior may still change before 1.0, so pin a specific version in production and watch the [changelog](changelog) for breaking changes.
 
-Install via Homebrew, Scoop, container, or direct binary download. [Quickstart](../getting-started/quickstart#1-install-the-cli) has the commands.
+Install the CLI via Homebrew, Scoop, a direct binary download, or a build from source. [Quickstart](../getting-started/quickstart#1-install-the-cli) has the commands. The published container image carries the `podium-server` registry binary only.
 
 ---
 
@@ -31,7 +31,7 @@ The implementation covers:
 |:--|:--|
 | Binaries for Linux amd64/arm64, macOS arm64, Windows amd64 | [GitHub Releases](https://github.com/lennylabs/podium/releases/latest) |
 | Homebrew formula (`brew tap lennylabs/tap && brew install podium`) | [github.com/lennylabs/homebrew-tap](https://github.com/lennylabs/homebrew-tap) |
-| Scoop manifest (`scoop install podium`) | [github.com/lennylabs/scoop-bucket](https://github.com/lennylabs/scoop-bucket) |
+| Scoop manifest (`scoop bucket add lennylabs https://github.com/lennylabs/scoop-bucket`, then `scoop install podium`) | [github.com/lennylabs/scoop-bucket](https://github.com/lennylabs/scoop-bucket) |
 | Container image | `ghcr.io/lennylabs/podium-server` |
 | Python SDK | [`podium-sdk` on PyPI](https://pypi.org/project/podium-sdk/), imported as `from podium import …` |
 | TypeScript SDK | [`@lennylabs/podium-sdk` on npm](https://www.npmjs.com/package/@lennylabs/podium-sdk) |

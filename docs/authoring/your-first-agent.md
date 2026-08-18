@@ -90,7 +90,7 @@ Add the line to the frontmatter and re-run `podium sync`. The requirement ships 
 
 ## Part 3: ship a helper script
 
-Reading the staged diff is the same shell snippet every time the agent runs. Move it into a bundled script the agent can invoke verbatim. The script lands alongside the materialized agent and is referenced by path from the prose body.
+Reading the staged diff is the same shell snippet every time the agent runs. Move it into a bundled script the agent can invoke. The script materializes into the harness's bundled-resource location rather than next to the agent file, and the prose body references it by its package-relative path.
 
 Create the script:
 
@@ -112,7 +112,7 @@ Read the staged diff by running [scripts/staged-diff.sh](scripts/staged-diff.sh)
 
 Lint resolves markdown links in the body against the artifact's bundled files at ingest, so a link to a path the package does not contain fails the check. A path written as inline code is not checked.
 
-The script materializes under `.claude/podium/personal/dev-loop/commit-message-writer/scripts/staged-diff.sh` and the agent invokes it from there. See [Bundled resources](bundled-resources) for the file-layout conventions.
+The script materializes under `.claude/podium/personal/dev-loop/commit-message-writer/scripts/staged-diff.sh`. Materialization writes every bundled file with mode 0644, so the executable bit set on the registry copy does not carry over, and the agent runs the script through an interpreter: `bash .claude/podium/personal/dev-loop/commit-message-writer/scripts/staged-diff.sh`. See [Bundled resources](bundled-resources) for the file-layout conventions.
 
 ---
 

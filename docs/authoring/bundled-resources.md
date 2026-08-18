@@ -41,7 +41,7 @@ The registry stores bundled resources content-addressed by SHA-256 in object sto
 
 At materialization, presigned URLs deliver the bytes. The consumer (`podium sync`, the MCP server, or an SDK `materialize()` call) downloads each resource and writes it atomically (`.tmp` + rename) so partial downloads cannot corrupt a working set. The materialization pipeline is the same across all three; it runs in the consumer process rather than on the registry.
 
-An adapter writes an artifact's bundled files alongside its translated output: inside the skill folder for a skill, under `.podium/context/<artifact-id>/` for a context artifact, and in the harness-neutral `.podium/resources/<artifact-id>/` bucket for an agent, a command, or a hook (Claude Code places an agent's files under `.claude/podium/<artifact-id>/`). A `type: rule` artifact materializes into a workspace as a translated rule file and a `type: mcp-server` artifact as a merged config entry, and the adapters write no bundled files for either. Ship those bytes as a separate artifact, or materialize with `harness: none`, which writes the canonical layout including bundled files.
+An adapter writes an artifact's bundled files alongside its translated output: inside the skill folder for a skill, under `.podium/context/<artifact-id>/` for a context artifact, and in the harness-neutral `.podium/resources/<artifact-id>/` bucket for an agent, a command, or a hook (Claude Code places an agent's files under `.claude/podium/<artifact-id>/`). A `type: rule` artifact materializes into a workspace as a translated rule file or as a block injected into `AGENTS.md` or `GEMINI.md`, depending on the harness, and a `type: mcp-server` artifact as a merged config entry; the adapters write no bundled files for either. Ship those bytes as a separate artifact, or materialize with `harness: none`, which writes the canonical layout including bundled files.
 
 ---
 
@@ -99,7 +99,7 @@ runtime_requirements:
   system_packages: ["jq", "curl"]
 ```
 
-Adapters surface these requirements to the host. Hosts that cannot satisfy a requirement reject the artifact at load time with `materialize.runtime_unavailable`.
+Adapters surface these requirements to the host where the harness's format carries them; a format that keeps only a fixed field set, such as the Codex agent TOML, drops them. A host that advertises its runtime capabilities to the Podium MCP server refuses a `load_artifact` it cannot satisfy with `materialize.runtime_unavailable`. A host that advertises no capabilities receives the requirement and proceeds, and `podium sync` materializes the artifact without checking it.
 
 The `sandbox_profile:` field declares execution constraints:
 
@@ -235,9 +235,9 @@ The hook's `hook_action` invokes the script:
 type: hook
 hook_event: stop
 hook_action: |
-  scripts/log.sh
+  bash scripts/log.sh
 runtime_requirements:
   system_packages: [jq]
 ```
 
-Keeps the YAML readable; makes the action testable in isolation.
+Materialization writes every bundled file with mode 0644, so the action runs the script through an interpreter rather than executing it directly. Moving the body into a script keeps the YAML readable and makes the action testable in isolation.

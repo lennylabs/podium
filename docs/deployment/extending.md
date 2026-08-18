@@ -37,8 +37,8 @@ The registry's pluggable interfaces:
 | `LocalAuditSink` | Local audit log for meta-tool calls (when configured). Default: JSON Lines file at `~/.podium/audit.log`. |
 | `HarnessAdapter` | Translates canonical artifacts to the harness's native format at materialization time. The adapter `Source` carries a plugin descriptor (name, optional description, harness subtree prefix) so a marketplace emitter can render an artifact into a named plugin when `podium sync` renders a `kind: marketplace` target. |
 | `MaterializationHook` | Per-file pre-write transformation of materialized output. Use cases: redact secrets, rewrite paths, inject team-specific headers, enforce content policy. |
-| `NotificationProvider` | Delivery for ingest-failure and operational notifications. Default: email + webhook. |
-| `SignatureProvider` | Artifact signing and verification. Default: Sigstore-keyless. |
+| `NotificationProvider` | Delivery for ingest-failure and operational notifications. Built-ins: `log`, `webhook`, `email` (over SMTP, also accepted as `smtp`), and `multi`, which combines the log provider with whichever of webhook and email is configured. `PODIUM_NOTIFICATION_PROVIDER` selects one; an unset variable and `noop` both wire no notifier. |
+| `SignatureProvider` | Artifact signing and verification. Built-ins: `noop`, `registry-managed`, and `sigstore-keyless`. `podium sign` and `podium verify` read `PODIUM_SIGNATURE_PROVIDER` and fall back to `noop`. Registry-side ingest signing is off unless the registry starts with `--sign registry-key`, which signs each accepted manifest with a registry-managed key. |
 
 Marketplace publishing adds no new SPI. The git workflow a `kind: marketplace` sync target runs is operator-configured shell commands rather than a pluggable interface, so there is no write-side git provider. The only SPI surface publishing touches is the `HarnessAdapter` `Source` plugin descriptor noted above. See [Consuming → Marketplace publishing](../consuming/publishing).
 

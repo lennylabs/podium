@@ -26,7 +26,7 @@ The Podium MCP server is a stdio binary the harness spawns alongside its other M
 
 | Variable | Purpose |
 |:--|:--|
-| `PODIUM_REGISTRY` | Registry source: URL (server) or filesystem path. |
+| `PODIUM_REGISTRY` | Registry source. The MCP server requires a server URL (`http://` or `https://`) and aborts startup with `config.filesystem_registry_unsupported` when given a filesystem path. `podium sync` accepts a URL or a filesystem path. |
 | `PODIUM_HARNESS` | Harness adapter to use. Pass `none` for canonical raw output. |
 | `PODIUM_OVERLAY_PATH` | Optional. Workspace local-overlay path; falls back to `<workspace>/.podium/overlay/` when MCP roots resolve. |
 | `PODIUM_IDENTITY_PROVIDER` | `oauth-device-code` (developer hosts, default) or `injected-session-token` (managed runtimes). |
@@ -178,7 +178,7 @@ podium sync
 | `context` | No native Claude Code concept. A `context` artifact lands at `.podium/context/<artifact-id>/`; reference material that belongs to a skill ships in that skill's `references/`. |
 | `mcp-server` | Merged into `.mcp.json` (project root) under `mcpServers`, keyed by the artifact's `name` field, falling back to the last segment of the artifact ID when `name` is unset. A top-level `x-podium` object records which entry each artifact ID owns, so a re-sync reconciles only Podium's entries. |
 | Bundled resources (skill) | Inside the skill folder (`scripts/`, `references/`, `assets/`). |
-| Bundled resources (non-skill) | An `agent` or extension-type artifact writes its resources under `.claude/podium/<artifact-id>/`. A `command` artifact writes its resources under `.podium/resources/<artifact-id>/`, and the materialized command references them there. |
+| Bundled resources (non-skill) | An `agent` or extension-type artifact writes its resources under `.claude/podium/<artifact-id>/`. A `command` artifact writes its resources under `.podium/resources/<artifact-id>/`. The adapter does not rewrite resource paths inside an `agent` or `command` file, so a path the artifact's prose references keeps the registry-relative form the author wrote; only a `hook`'s `hook_action` is rewritten to the materialized location. |
 
 **Notes:**
 
@@ -267,7 +267,7 @@ podium sync
 | `hook` | Merged into `.cursor/hooks.json` under the `hooks` key. A hook's bundled scripts materialize to `.podium/resources/<artifact-id>/`, and the merged command references them there. |
 | `mcp-server` | Merged into `.cursor/mcp.json` under `mcpServers`. |
 | `context` | No native Cursor concept (`@Docs` is URL-indexed). A `context` artifact lands at `.podium/context/<artifact-id>/`. |
-| Bundled resources | Inside the skill folder for a `skill` (`scripts/`, `references/`, `assets/`). For an `agent`, `command`, or `hook`, under `.podium/resources/<artifact-id>/`, with the materialized file referencing them there. |
+| Bundled resources | Inside the skill folder for a `skill` (`scripts/`, `references/`, `assets/`). For an `agent`, `command`, or `hook`, under `.podium/resources/<artifact-id>/`. The adapter rewrites the reference only for a `hook`, whose `hook_action` points at that bucket; an `agent` and a `command` are written verbatim. |
 
 **Notes:**
 
@@ -495,7 +495,7 @@ This is also the right harness for build pipelines and evaluation harnesses that
 
 ## Standalone (no env override)
 
-When `podium serve` has auto-bootstrapped `~/.podium/sync.yaml` with `defaults.registry: http://127.0.0.1:8080`, or `podium init --global --standalone` has written it explicitly, the MCP server resolves the registry from there and the `PODIUM_REGISTRY` env var can be omitted. The harness still needs `PODIUM_HARNESS` set (or `--harness <name>` on the sync command).
+When `podium serve` has auto-bootstrapped `~/.podium/sync.yaml` with `defaults.registry: http://127.0.0.1:8080`, or `podium init --global --standalone` has written it explicitly, the MCP server resolves the registry from there and the `PODIUM_REGISTRY` env var can be omitted. The harness resolves separately. The MCP server reads `PODIUM_HARNESS` and falls back to the `none` adapter, and it does not read `defaults.harness` from `sync.yaml`, so a harness-native layout over the MCP path requires the variable. `podium sync` resolves `--harness`, then `PODIUM_HARNESS`, then the active profile's `harness`, then `defaults.harness`, then `none`, so a workspace initialized with `podium init --harness <name>` needs neither the flag nor the variable.
 
 ---
 

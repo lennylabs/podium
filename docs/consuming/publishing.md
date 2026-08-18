@@ -38,7 +38,7 @@ The phases exist because the checkout must precede the render so the render reco
 
 ## The `kind: marketplace` target
 
-A marketplace target is one entry under `targets:` in `sync.yaml`, alongside the `kind: workspace` targets the harness reads directly. The `kind:` field selects the output format: `workspace` (the default) materializes the project-files layout, and `marketplace` renders the git-repo distribution layout. The marketplace fields are valid only on a `kind: marketplace` entry. A marketplace entry rejects the workspace target's `harness` key, the workspace scope fields (`profile`, `include`, `exclude`, and `type`), and the watch mode; each of these fails the target with `config.invalid`. The ephemeral overrides (`podium sync override`) do not apply to a marketplace target: that command operates on a single target directory's lock file and renders the project-files layout, so it does not reach a marketplace entry.
+A marketplace target is one entry under `targets:` in `sync.yaml`, alongside the `kind: workspace` targets the harness reads directly. The `kind:` field selects the output format: `workspace` (the default) materializes the project-files layout, and `marketplace` renders the git-repo distribution layout. The marketplace fields (`harnesses`, `git`, `commit_message`, `identity`, and `plugins`) are valid only on a `kind: marketplace` entry, and `workflow` is valid on either kind. A marketplace entry rejects the workspace target's `harness` key, the workspace scope fields (`profile`, `include`, `exclude`, and `type`), and the watch mode; each of these fails the target with `config.invalid`. The ephemeral overrides (`podium sync override`) do not apply to a marketplace target: that command operates on a single target directory's lock file and renders the project-files layout, so it does not reach a marketplace entry.
 
 ```yaml
 # .podium/sync.yaml
@@ -103,7 +103,7 @@ targets:
 | `commit_message` | A Go template rendered with the change count and timestamp into `$PODIUM_COMMIT_MESSAGE`. |
 | `identity` | The §4.6 effective-view principal the render runs as. Inherited from `defaults.identity` when unset. See [Publishing identity](#publishing-identity-and-the-effective-view). |
 | `plugins` | The plugin list: a `name`, an optional `description` carried into the per-plugin manifest and the root marketplace entry, and a scope filter (`include`, `exclude`, and `type`). |
-| `workflow` | The `prepare` and `publish` command lists Podium runs around the render. |
+| `workflow` | The `prepare` and `publish` command lists Podium runs around the render. A `kind: workspace` target accepts `workflow` too: `podium sync --config` runs its `prepare` phase before materialization and its `publish` phase after, injecting `$PODIUM_WORKDIR`, `$PODIUM_REGISTRY`, and `$PODIUM_TARGET_ID` (the workspace counterpart of `$PODIUM_OUTPUT_ID`), plus `$PODIUM_CHANGED` for the `publish` phase. |
 
 ### The publishing identity default
 

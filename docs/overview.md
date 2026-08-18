@@ -126,14 +126,16 @@ tags: [demo, hello-world]
 Point Podium at the directory and set the harness:
 
 ```bash
-cd workspace
+cd ~/projects/your-project
 podium init --registry ~/podium-artifacts/ --harness claude-code
 podium sync
 ```
 
 Open Claude Code in the project. Claude Code can discover the materialized
 skill in its native location. Changing the harness and running `podium sync`
-again writes the same artifact into another runtime's layout.
+again writes the same artifact into another runtime's layout, and it removes the
+files the previous harness's run wrote, because each run reconciles the whole
+target against the lock file.
 
 The source, the issue tracker, and the release history live at
 [lennylabs/podium](https://github.com/lennylabs/podium).

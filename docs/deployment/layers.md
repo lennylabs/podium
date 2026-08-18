@@ -138,7 +138,7 @@ The full flag set for each command is in the [CLI reference](../reference/cli#la
 
 `podium sync --dry-run` prints the artifact set the current identity would materialize, without writing anything. `podium sync --preview` prints the aggregate counts instead.
 
-On a server-backed deployment, `podium admin show-effective <user-id> [--group <g>]...` surfaces the per-layer result for any identity, which answers questions about why a given artifact did or did not appear. See [Access control](access-control#debugging-an-effective-view).
+On a server-backed deployment, `podium admin show-effective [--group <g>]... <user-id>` surfaces the per-layer result for any identity, which answers questions about why a given artifact did or did not appear. See [Access control](access-control#debugging-an-effective-view).
 
 ---
 
