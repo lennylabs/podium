@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Gateway-delegated identity
-parent: Deployment
 nav_order: 8
 description: Run the registry behind a gateway that authenticates the caller, using the oidc-jwt and trusted-headers identity providers.
 ---

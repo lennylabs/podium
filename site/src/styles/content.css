@@ -1,0 +1,213 @@
+/* Components the markdown pipeline renders: callouts, code blocks, tabs,
+ * diagrams, and action links. */
+
+/* ------------------------------------------------------------- callouts */
+
+.callout {
+  margin: 22px 0;
+  padding: 14px 18px 14px 16px;
+  border: 1px solid var(--callout-border);
+  border-left: var(--rail) solid var(--accent);
+  border-radius: var(--r-panel);
+  background: var(--accent-wash);
+}
+
+.callout-label {
+  margin: 0 0 6px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--meta);
+}
+
+.callout-body > :first-child {
+  margin-top: 0;
+}
+
+.callout-body > :last-child {
+  margin-bottom: 0;
+}
+
+/* ----------------------------------------------------------- code blocks */
+
+.code-block {
+  margin: 22px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.code-block-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 12px 7px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--tab-strip);
+}
+
+.code-block-language,
+.code-block-copy {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.code-block-language {
+  color: var(--meta);
+  font-weight: 600;
+}
+
+.code-block-copy {
+  border: 1px solid var(--border-3);
+  border-radius: var(--r-kbd);
+  padding: 3px 9px;
+  background: transparent;
+  color: var(--meta);
+  cursor: pointer;
+  transition: color var(--transition), border-color var(--transition);
+}
+
+.code-block-copy:hover {
+  color: var(--ink);
+  border-color: var(--meta);
+}
+
+.code-block-copy[data-copied="true"] {
+  color: var(--link);
+  border-color: var(--accent);
+}
+
+.code-block pre {
+  margin: 0;
+  padding: 15px 18px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  line-height: 1.8;
+  background: var(--surface);
+  color: var(--code-text);
+}
+
+/* Shiki writes both themes as CSS variables in one pass, so switching the
+ * theme repaints without re-highlighting and no highlighter is shipped. */
+.code-block pre code span {
+  color: var(--shiki-light);
+}
+
+:root[data-theme="dark"] .code-block pre code span {
+  color: var(--shiki-dark);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .code-block pre code span {
+    color: var(--shiki-dark);
+  }
+}
+
+.code-block pre code {
+  display: block;
+}
+
+.code-block .line {
+  display: inline-block;
+  width: 100%;
+}
+
+.code-block .line-highlighted {
+  background: var(--accent-wash);
+  box-shadow: inset var(--rail) 0 0 0 var(--accent);
+}
+
+/* ------------------------------------------------------------------ tabs */
+
+.tabs {
+  margin: 22px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  overflow: hidden;
+}
+
+.tabs-strip {
+  display: flex;
+  gap: 2px;
+  padding: 6px 6px 0;
+  background: var(--tab-strip);
+  border-bottom: 1px solid var(--border);
+}
+
+.tabs-tab {
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--r-kbd) var(--r-kbd) 0 0;
+  padding: 7px 14px;
+  background: transparent;
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  color: var(--meta);
+  cursor: pointer;
+}
+
+.tabs-tab-active {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: inset 0 2px 0 0 var(--accent);
+}
+
+.tabs-panel {
+  padding: 4px 16px;
+}
+
+/* Before the strip becomes interactive every panel is visible, which is what a
+ * reader without JavaScript is left with. */
+.tabs[data-mounted="false"] .tabs-strip {
+  display: none;
+}
+
+/* --------------------------------------------------------------- islands */
+
+.island {
+  margin: 22px 0;
+}
+
+/* --------------------------------------------------------- action links */
+
+.action-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 26px 0;
+}
+
+.action-link {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--r-control);
+  padding: 10px 18px;
+  font-size: 14.5px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.action-link-primary {
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  box-shadow: var(--btn-primary-shadow);
+}
+
+.action-link-outline {
+  border: 1px solid var(--border);
+  color: var(--ink);
+  background: var(--surface);
+}
+
+.action-link-outline:hover {
+  border-color: var(--meta);
+}

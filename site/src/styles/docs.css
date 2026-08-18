@@ -1,0 +1,730 @@
+/*
+ * The documentation shell: top bar, navigation tree, article column, the
+ * on-this-page rail, the footer, and the 404 page. Class names are prefixed
+ * `d-`; the rendered markdown body is styled by the `.prose` rules in base.css.
+ *
+ * Colours come from tokens.css. The variables below cover pairs the token file
+ * does not carry as a single name, where the light and the dark mockup pick
+ * different tokens for the same element.
+ */
+
+:root {
+  --sidebar-bg: var(--surface);
+  --nav-hairline: var(--border-2);
+  --nav-text: var(--secondary);
+  --control-border: var(--border);
+  --chip-border: var(--border-3);
+  --toggle-dot: var(--ink);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --sidebar-bg: var(--nav-bg);
+    --nav-hairline: var(--border);
+    --nav-text: var(--meta);
+    --control-border: var(--border-2);
+    --chip-border: var(--border-2);
+    --toggle-dot: var(--accent);
+  }
+}
+
+:root[data-theme="dark"] {
+  --sidebar-bg: var(--nav-bg);
+  --nav-hairline: var(--border);
+  --nav-text: var(--meta);
+  --control-border: var(--border-2);
+  --chip-border: var(--border-2);
+  --toggle-dot: var(--accent);
+}
+
+/* --------------------------------------------------------------- top bar - */
+
+.d-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  border-bottom: 1px solid var(--border);
+  background: var(--nav-bg);
+}
+
+.d-topbar-inner {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  height: var(--nav-h-docs);
+  max-width: var(--docs-width);
+  margin: 0 auto;
+  padding: 0 var(--gutter-docs-bar);
+}
+
+.d-menu {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--control-border);
+  border-radius: var(--r-kbd);
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.d-menu svg {
+  fill: currentColor;
+}
+
+.d-brand {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+/* Sized by height; the width follows the lockup's own aspect ratio. */
+.d-lockup {
+  height: 22px;
+}
+
+.d-tabs {
+  display: flex;
+  gap: 18px;
+  margin-left: 8px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--nav-text);
+}
+
+.d-tab {
+  color: inherit;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color var(--transition);
+}
+
+.d-tab:hover {
+  color: var(--ink);
+}
+
+.d-tab.is-active {
+  color: var(--ink);
+  font-weight: 500;
+  box-shadow: inset 0 -3px var(--accent);
+}
+
+.d-topbar-spacer {
+  flex: 1 1 auto;
+}
+
+.d-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 1 300px;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--meta);
+  font-size: 12.5px;
+  cursor: text;
+}
+
+.d-search:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.d-search-glyph {
+  flex: none;
+}
+
+.d-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+}
+
+.d-search-input::placeholder {
+  color: var(--meta);
+  opacity: 1;
+}
+
+.d-search-input:focus {
+  outline: none;
+}
+
+.d-search-input::-webkit-search-decoration,
+.d-search-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+
+.d-kbd {
+  flex: none;
+  padding: 2px 5px;
+  border: 1px solid var(--chip-border);
+  border-radius: var(--r-kbd);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.d-version {
+  flex: none;
+  padding: 4px 8px;
+  border-radius: var(--r-chip);
+  background: var(--chip);
+  color: var(--nav-text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.d-theme {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 7px;
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  background: none;
+  color: var(--nav-text);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color var(--transition);
+}
+
+.d-theme:hover {
+  color: var(--ink);
+}
+
+.d-theme-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--toggle-dot);
+}
+
+/* The toggle names the theme it switches to. Both labels ship in the markup and
+   the stylesheet reveals the one matching the theme in force, so the control
+   reads correctly before any script runs. */
+.d-theme-label--light {
+  display: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .d-theme-label--dark {
+    display: none;
+  }
+
+  :root:not([data-theme="light"]) .d-theme-label--light {
+    display: inline;
+  }
+}
+
+:root[data-theme="dark"] .d-theme-label--dark {
+  display: none;
+}
+
+:root[data-theme="dark"] .d-theme-label--light {
+  display: inline;
+}
+
+/* ----------------------------------------------------------------- shell - */
+
+.d-shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--toc-w);
+  max-width: var(--docs-width);
+  min-height: 760px;
+  margin: 0 auto;
+}
+
+/* --------------------------------------------------------------- sidebar - */
+
+.d-sidebar {
+  border-right: 1px solid var(--border);
+  background: var(--sidebar-bg);
+}
+
+.d-sidebar-inner {
+  position: sticky;
+  top: var(--nav-h-docs);
+  max-height: calc(100vh - var(--nav-h-docs));
+  padding: 22px 16px;
+  overflow-y: auto;
+}
+
+.d-nav-group + .d-nav-group {
+  margin-top: 18px;
+}
+
+.d-nav-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.d-nav-group-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-decoration: none;
+  transition: color var(--transition);
+}
+
+.d-nav-group-label:hover {
+  color: var(--ink);
+}
+
+.d-nav-group-label.is-active {
+  color: var(--ink);
+  font-weight: 700;
+  box-shadow: inset 0 -2px var(--accent);
+}
+
+.d-nav-group-toggle {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-kbd);
+  background: none;
+  color: var(--faint);
+  cursor: pointer;
+  transition: color var(--transition), transform var(--transition);
+}
+
+.d-nav-group-toggle:hover {
+  color: var(--ink);
+}
+
+.d-nav-group-toggle[aria-expanded="false"] {
+  transform: rotate(-90deg);
+}
+
+/* Collapsing follows the aria state the client script sets, so the tree stays
+   open when no script runs. */
+.d-nav-group-head:has(.d-nav-group-toggle[aria-expanded="false"]) + .d-nav-list {
+  display: none;
+}
+
+.d-nav-list {
+  padding-left: 10px;
+  border-left: 1px solid var(--nav-hairline);
+  list-style: none;
+  font-size: 13px;
+  line-height: 1.95;
+  color: var(--nav-text);
+}
+
+.d-nav-sublist {
+  padding-left: 12px;
+  list-style: none;
+}
+
+.d-nav-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  transition: color var(--transition);
+}
+
+.d-nav-link:hover {
+  color: var(--ink);
+}
+
+/* The active item carries the rail, the wash, and a heavier weight, so the
+   accent never marks it alone. */
+.d-nav-link.is-active {
+  margin-left: -11px;
+  padding-left: 10px;
+  border-left: var(--rail) solid var(--accent);
+  background: linear-gradient(90deg, var(--accent-wash), transparent);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* --------------------------------------------------------------- article - */
+
+.d-main {
+  min-width: 0;
+  border-right: 1px solid var(--border);
+}
+
+.d-article {
+  max-width: var(--measure);
+  padding: 34px var(--gutter-article) 60px;
+}
+
+.d-crumbs {
+  margin-bottom: 14px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--meta);
+}
+
+.d-crumb-list {
+  display: flex;
+  flex-wrap: wrap;
+  list-style: none;
+}
+
+.d-crumb + .d-crumb::before {
+  content: "/";
+  margin: 0 8px;
+  color: var(--faint);
+}
+
+.d-crumb-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.d-crumb-link:hover {
+  color: var(--ink);
+}
+
+.d-title {
+  margin-bottom: 12px;
+  font-size: 42px;
+  line-height: 1.03;
+  letter-spacing: -0.035em;
+  font-weight: 700;
+  color: var(--ink);
+  text-wrap: balance;
+}
+
+.d-lede {
+  margin-bottom: 24px;
+  font-size: 16.5px;
+  line-height: 1.6;
+  color: var(--body);
+  text-wrap: pretty;
+}
+
+.d-pager {
+  display: flex;
+  gap: 12px;
+  margin-top: 34px;
+  padding-top: 22px;
+  border-top: 1px solid var(--border);
+}
+
+.d-pager-card {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  background: var(--surface);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color var(--transition);
+}
+
+.d-pager-card:hover {
+  border-color: var(--accent);
+  color: inherit;
+}
+
+.d-pager-card--next {
+  margin-left: auto;
+  text-align: right;
+}
+
+.d-pager-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--meta);
+}
+
+.d-pager-title {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* ---------------------------------------------------------- on this page - */
+
+.d-toc {
+  position: sticky;
+  top: var(--nav-h-docs);
+  align-self: start;
+  max-height: calc(100vh - var(--nav-h-docs));
+  padding: 34px 20px;
+  overflow-y: auto;
+  font-size: 12.5px;
+  line-height: 2.05;
+  color: var(--nav-text);
+}
+
+.d-toc-title {
+  margin-bottom: 8px;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.d-toc-list {
+  list-style: none;
+}
+
+.d-toc-item--3 {
+  padding-left: 12px;
+}
+
+.d-toc-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  transition: color var(--transition);
+}
+
+.d-toc-link:hover {
+  color: var(--ink);
+}
+
+.d-toc-link.is-active,
+.d-toc-link[aria-current="true"] {
+  margin-left: -9px;
+  padding-left: 9px;
+  box-shadow: inset var(--rail) 0 var(--accent);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.d-toc-actions {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  line-height: 1.9;
+}
+
+.d-toc-action {
+  display: block;
+  color: var(--link);
+  text-decoration: none;
+}
+
+.d-toc-action:hover {
+  color: var(--link-hover);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------- footer - */
+
+.d-footer {
+  border-top: 1px solid var(--border);
+  color: var(--meta);
+  font-size: 13px;
+}
+
+.d-footer-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 20px;
+  max-width: var(--landing-width);
+  margin: 0 auto;
+  padding: 22px var(--gutter-landing);
+}
+
+.d-footer-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-left: auto;
+}
+
+.d-footer-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.d-footer-link:hover {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ------------------------------------------------------------- not found - */
+
+.d-notfound {
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 90px var(--gutter-article) 120px;
+}
+
+.d-notfound-code {
+  display: inline-block;
+  margin-bottom: 18px;
+  padding: 3px 7px;
+  border-radius: var(--r-chip);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.d-notfound-title {
+  margin-bottom: 12px;
+  font-size: 42px;
+  line-height: 1.03;
+  letter-spacing: -0.035em;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.d-notfound-text {
+  margin-bottom: 26px;
+  font-size: 16.5px;
+  line-height: 1.6;
+  color: var(--body);
+  text-wrap: pretty;
+}
+
+.d-notfound-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  list-style: none;
+}
+
+.d-notfound-link {
+  display: block;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 14px;
+  text-decoration: none;
+  transition: border-color var(--transition);
+}
+
+.d-notfound-link:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+/* ------------------------------------------------------------ responsive - */
+
+/* The right rail is dropped first, and the hairline it sat against goes with it. */
+@media (max-width: 1100px) {
+  .d-shell {
+    grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  }
+
+  .d-toc {
+    display: none;
+  }
+
+  .d-main {
+    border-right: 0;
+  }
+}
+
+/* Below this width the panes stack. The navigation tree renders above the
+   article and stays reachable without a script; the menu button lets the client
+   script turn it into a drawer, and the skip link jumps a reader past it. */
+@media (max-width: 860px) {
+  .d-shell {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+  }
+
+  .d-menu {
+    display: inline-flex;
+  }
+
+  .d-tabs,
+  .d-version {
+    display: none;
+  }
+
+  .d-topbar-inner {
+    gap: 12px;
+  }
+
+  .d-search {
+    flex: 1 1 auto;
+  }
+
+  .d-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .d-sidebar-inner {
+    position: static;
+    max-height: 52vh;
+  }
+
+  .d-article {
+    padding: 26px 20px 48px;
+  }
+
+  .d-title,
+  .d-notfound-title {
+    font-size: 34px;
+  }
+
+  .d-notfound {
+    padding: 56px 20px 80px;
+  }
+
+  .d-pager {
+    flex-direction: column;
+  }
+
+  .d-pager-card--next {
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 620px) {
+  .d-kbd {
+    display: none;
+  }
+
+  .d-footer-inner {
+    padding: 20px;
+  }
+
+  .d-footer-nav {
+    margin-left: 0;
+  }
+}

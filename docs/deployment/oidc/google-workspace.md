@@ -1,8 +1,5 @@
 ---
-layout: default
 title: Google Workspace
-parent: OIDC cookbooks
-grand_parent: Deployment
 nav_order: 3
 description: Configure Podium to authenticate against Google Workspace via OIDC device-code flow.
 ---

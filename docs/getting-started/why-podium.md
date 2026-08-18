@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Why Podium
-parent: Getting Started
 nav_order: 1
 description: "What Podium does, when it applies, when a simpler alternative is enough, and how it compares to adjacent products."
 ---
@@ -127,7 +125,7 @@ A Git monorepo with per-harness directories is the original baseline.
 ## Project model
 
 - **License.** MIT.
-- **Governance.** Maintainer model with an RFC process for spec changes. See [Governance](governance).
+- **Governance.** Maintainer model with an RFC process for spec changes. See [Governance](../about/governance).
 - **Distribution.** OSS-first development, with an optional commercial managed offering by the sponsoring entity (separate doc).
 - **Public registry.** A reference registry with curated example artifacts is hosted at the project's public URL.
 - **Multi-vendor neutrality.** The project does not adopt contributions, governance changes, or roadmap pressure that would bind it to a single harness vendor's surface.

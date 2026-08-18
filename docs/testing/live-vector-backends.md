@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Live vector backends
-parent: Testing
 nav_order: 1
 description: Set up Pinecone, Weaviate Cloud, and Qdrant Cloud for Podium's live integration tests, with storage-only and self-embedding collections.
 ---

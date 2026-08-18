@@ -1,8 +1,5 @@
 ---
-layout: default
 title: Keycloak
-parent: OIDC cookbooks
-grand_parent: Deployment
 nav_order: 5
 description: Configure Podium to authenticate against self-hosted Keycloak via OIDC device-code flow.
 ---

@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Configure your harness
-parent: Consuming
 nav_order: 1
 description: Per-harness setup. Configure podium sync for filesystem materialization or the Podium MCP server for runtime discovery.
 ---

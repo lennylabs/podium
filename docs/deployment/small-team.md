@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Small team
-parent: Deployment
 nav_order: 2
 description: Standalone server on a single VM. Fits anyone who needs runtime discovery or a single audit log without the full standard stack.
 ---

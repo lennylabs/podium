@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Vector backends
-parent: Deployment
 nav_order: 7
 description: Configure Pinecone, Weaviate Cloud, or Qdrant Cloud as the registry's vector backend, in standalone or standard mode.
 ---

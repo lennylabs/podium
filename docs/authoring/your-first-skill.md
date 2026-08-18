@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Your first skill
-parent: Authoring
 nav_order: 1
 description: "From the quickstart's two-file skill to a richer artifact with a bundled script, runtime requirements, and a lint check before commit."
 ---

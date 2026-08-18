@@ -1,8 +1,6 @@
 ---
-layout: default
 title: Reference
 nav_order: 5
-has_children: true
 description: CLI commands, HTTP API endpoints, frontmatter schema, error codes, and glossary.
 ---
 

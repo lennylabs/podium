@@ -1,8 +1,6 @@
 ---
-layout: default
 title: Authoring
 nav_order: 2
-has_children: true
 description: Reference for writing artifacts. Field schema, type list, domain organization, and cross-cutting features.
 ---
 

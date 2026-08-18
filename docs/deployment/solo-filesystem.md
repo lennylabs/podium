@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Solo / filesystem
-parent: Deployment
 nav_order: 1
 description: The lightest Podium setup. A folder of artifacts, the podium CLI, no daemon. Fits any team or individual whose catalog does not require access control or progressive disclosure.
 ---

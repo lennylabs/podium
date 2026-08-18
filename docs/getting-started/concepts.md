@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Concepts
-parent: Getting Started
 nav_order: 3
 description: "Vocabulary used throughout the docs: artifacts, domains, layers, harnesses, materialization, and meta-tools."
 ---

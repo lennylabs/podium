@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Marketplace publishing
-parent: Consuming
 nav_order: 5
 description: Render the catalog into harness-native marketplace repositories with a kind marketplace sync target and push them to git remotes with podium sync.
 ---

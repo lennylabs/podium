@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Frontmatter schema
-parent: Reference
 nav_order: 3
 description: Concise field-by-field schema for ARTIFACT.md, SKILL.md (for skills), and DOMAIN.md.
 ---

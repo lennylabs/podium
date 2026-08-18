@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Handling artifact responses
-parent: Consuming
 nav_order: 4
 description: "What a consumer does with the manifest and materialized files returned by load_artifact: route by hints, honor safety constraints, verify requirements, register MCP servers, walk dependencies, fetch external resources."
 ---

@@ -1,8 +1,5 @@
 ---
-layout: default
 title: Entra ID
-parent: OIDC cookbooks
-grand_parent: Deployment
 nav_order: 2
 description: Configure Podium to authenticate against Microsoft Entra ID (formerly Azure AD) via OIDC device-code flow.
 ---

@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Governance
-parent: About
 nav_order: 3
 description: "How decisions are made: the maintainer model, transition criteria, and the proposal process."
 ---

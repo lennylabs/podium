@@ -1,8 +1,5 @@
 ---
-layout: default
 title: Auth0
-parent: OIDC cookbooks
-grand_parent: Deployment
 nav_order: 4
 description: Configure Podium to authenticate against Auth0 via OIDC device-code flow.
 ---

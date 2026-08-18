@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Progressive adoption
-parent: Deployment
 nav_order: 4
 description: A staged on-ramp for adopting governance features (identity, sensitivity labels, signing, freeze windows) without forcing the whole feature set on day one.
 ---

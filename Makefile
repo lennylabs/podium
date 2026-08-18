@@ -29,6 +29,7 @@ LDFLAGS := -X 'github.com/lennylabs/podium/internal/buildinfo.Version=$(VERSION)
         matrix matrix-list matrix-audit matrix-scaffold \
         services-up services-down services-logs services-status \
         dex-up dex-down \
+        docs-build docs-dev docs-check \
         tools clean
 
 help:
@@ -294,6 +295,23 @@ lint:
 
 update-golden:
 	UPDATE_GOLDEN=1 $(GO) test $(GOFLAGS) -count=1 ./...
+
+# ---- documentation site ----------------------------------------------------
+# The site generator reads the markdown under docs/ and writes site/dist. It
+# needs Node 20 or later; npm ci is run on demand so a first build works from a
+# clean checkout.
+
+site/node_modules:
+	cd site && npm ci
+
+docs-build: site/node_modules
+	cd site && npm run build
+
+docs-dev: site/node_modules
+	cd site && npm run dev
+
+docs-check: site/node_modules
+	cd site && npm run check && npm test
 
 build:
 	@mkdir -p bin

@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Quickstart
-parent: Getting Started
 nav_order: 2
 description: Install Podium, write one skill, and see it load in Claude Code. The filesystem setup uses the CLI without a daemon or authentication.
 ---
@@ -14,8 +12,7 @@ fits any team or individual whose catalog does not require access
 control or progressive disclosure, including solo work, prototypes,
 first evaluation, and Git-shared team catalogs.
 
-{: .note }
-
+> [!NOTE]
 > Podium is at 0.1.x, an early release. Surface and behavior may still
 > shift before 1.0; see [Implementation status](../about/status) for
 > what's shipped and what's still on the roadmap.

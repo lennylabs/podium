@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Custom consumers via the SDK
-parent: Consuming
 nav_order: 3
 description: Build programmatic consumers (LangChain, Bedrock, OpenAI Assistants, custom orchestrators, eval harnesses) with podium-py or podium-ts.
 ---

@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Changelog
-parent: About
 nav_order: 4
 description: Release history.
 ---

@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Organization
-parent: Deployment
 nav_order: 3
 description: Standard deployment for larger teams and governed environments. Postgres + object storage + OIDC + replicated registry. Multi-tenancy, freeze windows, signing, hash-chained audit, SCIM.
 ---

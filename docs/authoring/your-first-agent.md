@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Your first agent
-parent: Authoring
 nav_order: 3
 description: "Start with a minimal agent that runs end to end against Claude Code, then add a runtime requirement, a bundled script, and a delegated artifact."
 ---

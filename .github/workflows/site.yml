@@ -1,0 +1,47 @@
+name: site
+
+# Validates the documentation site on any pull request that touches its inputs,
+# so a broken link or a bad frontmatter key is caught before a release rather
+# than after it is published.
+#
+# This lives in its own workflow file because Actions filters paths at the
+# trigger. Adding a paths filter to the main test workflow would stop its Go and
+# SDK jobs running on pull requests that do not touch documentation.
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'site/**'
+      - 'README.md'
+      - '.github/workflows/site.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - run: npm ci
+        working-directory: site
+      - run: npm run typecheck
+        working-directory: site
+      - run: npm run check
+        working-directory: site
+      - run: npm test
+        working-directory: site
+      - run: npm run build
+        working-directory: site

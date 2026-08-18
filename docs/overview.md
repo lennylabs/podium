@@ -1,9 +1,17 @@
 ---
-layout: default
-title: Home
+title: Podium
+nav_title: Overview
 nav_order: 0
-permalink: /
 description: A catalog for reusable AI agent artifacts, with tools that translate those artifacts into harness-specific formats.
+actions:
+  - label: Quickstart
+    href: getting-started/quickstart
+  - label: Concepts
+    href: getting-started/concepts
+  - label: Fit and comparisons
+    href: getting-started/why-podium
+  - label: Compare deployment setups
+    href: deployment/
 ---
 
 # Podium
@@ -19,17 +27,12 @@ In server mode, teams usually keep the catalog in one or more Git
 repositories; the registry ingests those tracked refs and builds the
 effective catalog it serves.
 
-{: .note }
-
+> [!NOTE]
 > **Status: 0.1.x, early release.** The CLI, server, MCP bridge, and SDKs
 > are published. Install with `brew tap lennylabs/tap && brew install podium`
 > (macOS / Linux) or `scoop bucket add lennylabs https://github.com/lennylabs/scoop-bucket && scoop install podium` (Windows).
 > See [Implementation status](about/status) for what's shipped and what's
 > still on the roadmap to 1.0.
-
-[Quickstart](getting-started/quickstart){: .btn .btn-purple }
-[Concepts](getting-started/concepts){: .btn .btn-outline }
-[Fit and comparisons](getting-started/why-podium){: .btn .btn-outline }
 
 Podium can run from a filesystem catalog or from a registry server:
 
@@ -42,8 +45,6 @@ Podium can run from a filesystem catalog or from a registry server:
   review flow; the registry ingests the configured refs and composes the
   effective catalog. This mode adds runtime discovery, identity-aware
   visibility, audit, and server-side composition.
-
-[Compare deployment setups](deployment/){: .btn .btn-outline }
 
 Highlights:
 
@@ -98,77 +99,26 @@ podium sync
 Open Claude Code in the project. Claude Code can discover the materialized
 skill in its native location.
 
-[Full quickstart](getting-started/quickstart){: .btn .btn-purple }
+The [full quickstart](getting-started/quickstart) covers the same flow with
+prerequisites and verification steps.
 
 ---
 
 ## Pick your entry point
 
-<div class="grid-cards" markdown="1">
-
-<div class="card" markdown="1">
-
-### Author artifacts
-
-Author skills, commands, rules, and agents.
-
-[Authoring guide](authoring/){: .btn .btn-purple }
-
-</div>
-
-<div class="card" markdown="1">
-
-### Consume artifacts in a harness
-
-Configure Claude Code, Cursor, OpenCode, or another harness to consume
-Podium artifacts.
-
-[Consuming guide](consuming/){: .btn .btn-purple }
-
-</div>
-
-<div class="card" markdown="1">
-
-### Set up Podium for a team
-
-Select a deployment mode and migrate as the catalog grows.
-
-[Deployment guide](deployment/){: .btn .btn-purple }
-
-</div>
-
-<div class="card" markdown="1">
-
-### Call the API
-
-Build a runtime, an eval pipeline, or custom tooling against Podium
-directly.
-
-[Reference](reference/){: .btn .btn-purple }
-
-</div>
-
-</div>
+- [Authoring guide](authoring/): author skills, commands, rules, and agents.
+- [Consuming guide](consuming/): configure Claude Code, Cursor, OpenCode, or
+  another harness to consume Podium artifacts.
+- [Deployment guide](deployment/): select a deployment mode and migrate as the
+  catalog grows.
+- [Reference](reference/): build a runtime, an eval pipeline, or custom tooling
+  against Podium directly.
 
 ---
 
 ## Quick links
 
-- [Quickstart](getting-started/quickstart){: .btn .btn-outline }
-- [Concepts](getting-started/concepts){: .btn .btn-outline }
-- [How it works](getting-started/how-it-works){: .btn .btn-outline }
-- [GitHub](https://github.com/lennylabs/podium){: .btn .btn-outline }
-
-<style>
-.grid-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 1rem;
-  margin-top: 1rem;
-}
-.card {
-  border: 1px solid var(--border-color, #e1e4e8);
-  border-radius: 6px;
-  padding: 1.25rem;
-}
-</style>
+- [Quickstart](getting-started/quickstart)
+- [Concepts](getting-started/concepts)
+- [How it works](getting-started/how-it-works)
+- [Podium on GitHub](https://github.com/lennylabs/podium)

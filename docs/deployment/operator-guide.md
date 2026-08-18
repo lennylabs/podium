@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Operator guide
-parent: Deployment
 nav_order: 5
 description: "Day-two operations for a standard Podium deployment: capacity, monitoring, alerts, backup, upgrades, security review, common pitfalls."
 ---

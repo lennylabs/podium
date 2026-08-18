@@ -64,8 +64,8 @@ pages:
     slug: D-oidc
 
   # ----- Waived (runnable content, no independent behavioral e2e) -----------
-  - path: docs/index.md
-    waiver: Landing page; the hello-world init/sync recap duplicates the quickstart and README, which are covered by D-quickstart and D-readme.
+  - path: docs/overview.md
+    waiver: Documentation overview; the hello-world init/sync recap duplicates the quickstart and README, which are covered by D-quickstart and D-readme.
   - path: docs/about/contributing.md
     waiver: Contributor workflow page; the commands are dev/CI tasks (go build, make test, SDK installs) exercised by the build and CI gates rather than a behavioral e2e.
   - path: docs/testing/live-vector-backends.md

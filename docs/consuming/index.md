@@ -1,8 +1,6 @@
 ---
-layout: default
 title: Consuming
 nav_order: 3
-has_children: true
 description: Configure a harness to consume Podium artifacts, operate Podium from custom code, and understand how the catalog is browsed at runtime.
 ---
 

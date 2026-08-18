@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Your first command
-parent: Authoring
 nav_order: 2
 description: "Author a parameterized slash command that materializes into Claude Code's commands directory and accepts free-text arguments."
 ---

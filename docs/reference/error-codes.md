@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Error codes
-parent: Reference
 nav_order: 4
 description: The structured error envelope and the full namespace catalog.
 ---

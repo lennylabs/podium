@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Extending
-parent: Deployment
 nav_order: 6
 description: Plugin SPIs, the forward-compatibility constraints that keep out-of-process plugins on the table, and external-extension patterns built on the HTTP API.
 ---

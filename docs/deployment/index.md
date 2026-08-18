@@ -1,8 +1,6 @@
 ---
-layout: default
 title: Deployment
 nav_order: 4
-has_children: true
 description: Pick a deployment mode, run it, and migrate as the catalog grows. Filesystem for catalogs without access control or progressive disclosure needs, standalone for runtime discovery on a single binary, and standard for multi-tenant governance.
 ---
 

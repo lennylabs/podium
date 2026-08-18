@@ -156,6 +156,53 @@ Do not use the names of real people, including the project author, maintainers, 
 
 For example tenants and organizations, use `acme` (`acme.com`, `Acme Corp`) unless the example needs to distinguish between multiple tenants, in which case extend with `acme`, `globex`, `initech`.
 
+## Authoring syntax
+
+Pages under `docs/` are plain markdown. Three conventions carry structure that
+plain markdown does not, and each renders correctly both on github.com and on
+the published site. `site/README.md` is the full reference.
+
+### Callouts
+
+Use GitHub's alert syntax. A blockquote with no marker stays a blockquote.
+
+```markdown
+> [!NOTE]
+> Podium is at 0.1.x, an early release.
+```
+
+`NOTE`, `TIP`, `IMPORTANT`, `WARNING`, and `CAUTION` are recognized. Do not use
+kramdown inline attributes such as `{: .note }`.
+
+### Call-to-action links
+
+A page's prominent links belong in frontmatter rather than in the body, where
+they validate at build time and stay invisible in GitHub's rendering. The first
+entry renders as the primary action.
+
+```yaml
+actions:
+  - label: Quickstart
+    href: getting-started/quickstart
+```
+
+Do not use `{: .btn }` attributes.
+
+### Components
+
+A component occupies a block and is written as a directive. A leaf names a
+component and its props, and a container wraps content the component arranges,
+with the outer container carrying more colons than the inner one.
+
+```markdown
+::diagram{name="sync-watch" alt="How the watch loop materializes files"}
+```
+
+There is no inline form. Every component names a fallback that renders in the
+static HTML, so a reader without JavaScript sees the content. Runnable commands
+stay in the markdown body, because `tools/doccov` classifies pages by their
+fenced blocks and the end-to-end suite executes them.
+
 ## Where these rules apply
 
 - Documentation site (`docs/`).

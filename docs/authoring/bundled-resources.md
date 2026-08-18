@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Bundled resources
-parent: Authoring
 nav_order: 10
 description: "Files that ship alongside ARTIFACT.md (and SKILL.md, for skills): scripts, references, assets, schemas, datasets, plus how to handle large files via external resources."
 ---

@@ -1,9 +1,6 @@
 ---
-layout: default
 title: OIDC cookbooks
-parent: Deployment
 nav_order: 7
-has_children: true
 description: Per-IdP setup recipes for Okta, Entra ID, Google Workspace, Auth0, and Keycloak.
 ---
 

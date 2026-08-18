@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Browsing the catalog
-parent: Consuming
 nav_order: 2
 description: How an agent navigates the catalog at runtime via load_domain, search_domains, search_artifacts, and load_artifact, and what each call costs.
 ---

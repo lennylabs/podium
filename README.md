@@ -93,7 +93,7 @@ Podium can run from a filesystem catalog or from a registry server:
   artifacts into Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex,
   Gemini CLI, OpenCode, Pi, Hermes, or a custom runtime. The adapter roster
   with documentation links is in
-  [Configure your harness](https://lennylabs.github.io/podium/consuming/configure-your-harness/#supported-harnesses).
+  [Configure your harness](https://lennylabs.github.io/podium/consuming/configure-your-harness.html#supported-harnesses).
 - **Artifact organization based on domains and subdomains.** Keep artifacts
   organized in folders and subfolders, where each folder defines a domain.
 - **Selective materialization.** Sync a subset of the catalog into a
@@ -103,7 +103,7 @@ Podium can run from a filesystem catalog or from a registry server:
   distributions (the Claude, Codex, and Cursor plugin marketplaces, the
   Gemini extension, the Pi package, and the Hermes tap) and runs an
   operator-configured git workflow to push them. See
-  [Marketplace publishing](https://lennylabs.github.io/podium/consuming/publishing/).
+  [Marketplace publishing](https://lennylabs.github.io/podium/consuming/publishing.html).
 - **Layered composition.** Compose the catalog from multiple sources
   with deterministic merge and explicit
   precedence. (Requires the Podium registry server.)

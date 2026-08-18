@@ -1,8 +1,5 @@
 ---
-layout: default
 title: Okta
-parent: OIDC cookbooks
-grand_parent: Deployment
 nav_order: 1
 description: Configure Podium to authenticate against Okta via OIDC device-code flow.
 ---

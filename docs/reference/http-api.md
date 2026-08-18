@@ -1,7 +1,5 @@
 ---
-layout: default
 title: HTTP API
-parent: Reference
 nav_order: 2
 description: "The Podium registry's HTTP/JSON API: discovery, materialization, layer management, ingest webhooks, scope preview, and health."
 ---

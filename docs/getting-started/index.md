@@ -1,8 +1,6 @@
 ---
-layout: default
 title: Getting Started
 nav_order: 1
-has_children: true
 description: Quickstart, concepts, and a high-level look at how Podium works.
 ---
 
