@@ -695,15 +695,11 @@ if (mode === "new") {
 // a guess at a sequence dressed as a decision, while one created here is
 // validated by every round that follows it.
 if (mode !== "new") {
-  let needsBootstrap = false;
-  try {
-    const text = require("fs").readFileSync(path, "utf8");
-    needsBootstrap =
-      !/^## Summary\s*$/m.test(text) ||
-      !/^## Implementation checklist\s*$/m.test(text);
-  } catch (e) {
-    needsBootstrap = false;
-  }
+  // A workflow script cannot read the proposal, so whether the two sections are
+  // already present cannot be decided here. The pass runs unconditionally and its
+  // agent no-ops when they exist: deciding "not needed" without looking would
+  // silently disable the bootstrap for every proposal that predates the format.
+  const needsBootstrap = true;
   if (needsBootstrap) {
     phase("Bootstrap");
     log("Proposal predates the Summary and checklist sections; creating them");
@@ -712,7 +708,7 @@ if (mode !== "new") {
         "document already says rather than inventing anything new.\n\n" +
         "HARD CONSTRAINT: the only file you may edit is " +
         path +
-        ". Never modify anything under spec/, docs/, pkg/, cmd/, internal/, or sdks/. Add the two sections and " +
+        ". Never modify anything under spec/, docs/, pkg/, cmd/, internal/, or sdks/. FIRST CHECK WHETHER THEY ARE ALREADY THERE: read the proposal, and if it already carries both a `## Summary` and a `## Implementation checklist`, change nothing and say so. Otherwise add the missing one or both. Add the two sections and " +
         "change nothing else: no decision is reopened here, no staged change is edited, and no wording " +
         "elsewhere is improved. This is a structural addition.\n\n" +
         "Read the whole proposal first. Then insert both sections, unnumbered, after the staging boilerplate " +
@@ -1453,6 +1449,12 @@ function sectionSizes() {
     out.set(cur, (out.get(cur) || 0) + n);
     return out;
   } catch (e) {
+    // No filesystem access from a workflow script. The introspection pass loses
+    // its growth signal and works from the finding history alone; say so rather
+    // than letting it read an empty measurement as "nothing grew".
+    try {
+      log("  section growth unavailable (no filesystem access); introspection runs without it");
+    } catch (_) {}
     return new Map();
   }
 }

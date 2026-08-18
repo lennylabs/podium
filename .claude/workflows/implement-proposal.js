@@ -69,21 +69,10 @@ const SPEC_RULES =
 // The proposal's Summary orients the spec-apply agents the same way it orients the
 // build agents: what changes, which decisions are closed, and the traps. An
 // applier that knows a decision is closed does not relitigate it in a sub-step.
-let proposalSummary = "";
-try {
-  const m = require("fs")
-    .readFileSync(proposal, "utf8")
-    .match(/\n## Summary\n([\s\S]*?)(?=\n## )/);
-  if (m) proposalSummary = m[1].trim();
-} catch (e) {
-  proposalSummary = "";
-}
-const SUMMARY_BLOCK = proposalSummary
-  ? "\n\nTHE PROPOSAL'S SUMMARY. It states the top-level changes, the decisions that are closed and must not " +
-    "be reopened, and the traps this change has already fallen into.\n\n" +
-    proposalSummary +
-    "\n"
-  : "";
+// A workflow script has no filesystem access, so the Summary cannot be read here.
+// The planner reads the proposal in full anyway and returns it, and SUMMARY_BLOCK is
+// assigned once the plan is in hand, before any agent that needs it runs.
+let SUMMARY_BLOCK = "";
 const BLANKS_BLOCK =
   "\n\nA proposal may delegate a detail with an explicit **IMPLEMENTOR'S CHOICE:** marker naming what is open " +
   "and the constraint any answer must satisfy. That is a delegation rather than an unappliable edit: make the " +
@@ -123,6 +112,11 @@ const PLAN = {
           },
         },
       },
+    },
+    summary: {
+      type: "string",
+      description:
+        "the proposal's `## Summary` section, verbatim, so the apply and build agents can be given it. Empty string when the proposal has none.",
     },
     nonSpecStaged: {
       type: "array",
@@ -208,9 +202,17 @@ const plan = await agent(
     proposal +
     ' in full and extract its staged changes and the findings that reference it.\n\nYou are a read-only investigator; do not edit any file. Work in ' +
     repo +
-    '.\n\nReturn:\n- approved: true when the Status bullet begins "Approved" (approved for implementation).\n- alreadyApplied: true when the Status bullet begins "Applied to spec" (the spec edits were already landed by a prior run). A "Draft" or "Verified" status is neither.\n- statusLine: the Status bullet verbatim.\n- specEdits: one entry per staged change whose target file is under spec/, from the "Proposed spec changes" section: id (the subsection number, e.g. "7.1"), targetFile (the spec/ path), subsection (the heading), summary. A subsection targeting multiple spec files becomes one entry per file. Classify each entry\'s method. Use "mechanical" when the proposal stages the edit as a run of a script, pass, or generator over a register or map rather than as literal text to write, which a proposal signals by enumerating no edit sites, by naming a command, or by stating that completeness is proven by a gate rather than by review; put the exact command in command, including its dry-run form when the proposal states one. Use "authored" when the proposal stages the literal text together with an anchor for it. When one subsection stages both, split it into one mechanical entry and one authored entry. Defaulting to "authored" for an edit the proposal means a script to make is a defect: it sets an agent guessing at sites the proposal deliberately does not list.\n- nonSpecStaged: one entry per staged change whose target is outside spec/ (code, docs, tests). These are implemented in the code phase or reported, never hand-applied here.',
+    '.\n\nReturn:\n- approved: true when the Status bullet begins "Approved" (approved for implementation).\n- alreadyApplied: true when the Status bullet begins "Applied to spec" (the spec edits were already landed by a prior run). A "Draft" or "Verified" status is neither.\n- statusLine: the Status bullet verbatim.\n- specEdits: one entry per staged change whose target file is under spec/, from the "Proposed spec changes" section: id (the subsection number, e.g. "7.1"), targetFile (the spec/ path), subsection (the heading), summary. A subsection targeting multiple spec files becomes one entry per file. Classify each entry\'s method. Use "mechanical" when the proposal stages the edit as a run of a script, pass, or generator over a register or map rather than as literal text to write, which a proposal signals by enumerating no edit sites, by naming a command, or by stating that completeness is proven by a gate rather than by review; put the exact command in command, including its dry-run form when the proposal states one. Use "authored" when the proposal stages the literal text together with an anchor for it. When one subsection stages both, split it into one mechanical entry and one authored entry. Defaulting to "authored" for an edit the proposal means a script to make is a defect: it sets an agent guessing at sites the proposal deliberately does not list.\n- summary: the proposal\'s `## Summary` section verbatim, so the agents that apply and build can be given it; this script cannot read the file itself. Empty string when the proposal has none.\n- nonSpecStaged: one entry per staged change whose target is outside spec/ (code, docs, tests). These are implemented in the code phase or reported, never hand-applied here.',
   { schema: PLAN, label: "plan", phase: "Plan" },
 );
+
+if (plan && plan.summary) {
+  SUMMARY_BLOCK =
+    "\n\nTHE PROPOSAL'S SUMMARY. It states the top-level changes, the decisions that are closed and must not " +
+    "be reopened, and the traps this change has already fallen into.\n\n" +
+    plan.summary +
+    "\n";
+}
 
 if (!plan.approved && !plan.alreadyApplied) {
   return {
