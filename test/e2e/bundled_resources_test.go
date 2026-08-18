@@ -1006,7 +1006,7 @@ func TestBundled_PatternSkillWithJSONSchema(t *testing.T) {
 }
 
 // brHookArtifact is the "hook with a bundled action script" pattern ARTIFACT.md.
-const brHookArtifact = "---\ntype: hook\nversion: 1.0.0\nhook_event: stop\nhook_action: |\n  scripts/log.sh\nruntime_requirements:\n  system_packages: [jq]\n---\n\nHook body. Document the side effect the hook_action performs.\n"
+const brHookArtifact = "---\ntype: hook\nversion: 1.0.0\nhook_event: stop\nhook_action: |\n  bash scripts/log.sh\nruntime_requirements:\n  system_packages: [jq]\n---\n\nHook body. Document the side effect the hook_action performs.\n"
 
 // the "hook with a bundled action script" pattern
 // lints clean and materializes ARTIFACT.md plus the action script via none.
