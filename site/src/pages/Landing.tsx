@@ -1,11 +1,18 @@
 import { Fragment } from "react";
 import type * as React from "react";
 
+import {
+  deploymentIcons,
+  featureDiagrams,
+  integrationIcons,
+} from "../components/content/FeatureDiagrams";
 import { Lockup } from "../components/layout/Lockup";
 import type { SiteConfig } from "../build/types";
 import type {
   Action,
+  DeploymentCard,
   FeatureCard,
+  IntegrationRow,
   LinkTarget,
   NavLink,
   TerminalLine,
@@ -13,9 +20,9 @@ import type {
 import { landing } from "../content/landing";
 
 /**
- * The landing page body: top bar, hero, adapter strip, feature grid, call to
- * action band, and footer. The document shell is written elsewhere, so this
- * component renders a fragment and no html, head, or body element.
+ * The landing page body: top bar, hero, adapter strip, feature grid, deployment
+ * grid, integrations table, and footer. The document shell is written elsewhere,
+ * so this component renders a fragment and no html, head, or body element.
  *
  * The page carries no client-side state. The copy control is plain markup
  * annotated with data attributes, and the hydration script binds the clipboard
@@ -23,7 +30,7 @@ import { landing } from "../content/landing";
  */
 export function Landing(props: { config: SiteConfig }): React.ReactElement {
   const { config } = props;
-  const { nav, hero, adapters, features, cta, footer } = landing;
+  const { nav, hero, adapters, features, deployment, integrations, footer } = landing;
 
   return (
     <>
@@ -53,6 +60,7 @@ export function Landing(props: { config: SiteConfig }): React.ReactElement {
           </nav>
           <span className="l-version">
             <span className="l-sr-only">{nav.versionLabel}: </span>
+            {nav.versionPrefix}
             {config.version}
           </span>
         </div>
@@ -132,16 +140,11 @@ export function Landing(props: { config: SiteConfig }): React.ReactElement {
                 <span className="l-terminal-dot" aria-hidden="true" />
                 <span className="l-terminal-dir">{hero.terminal.directory}</span>
               </div>
-              <pre className="l-term">
-                <code>
-                  {hero.terminal.lines.map((line, index) => (
-                    <Fragment key={index}>
-                      {index > 0 ? "\n" : null}
-                      {renderTerminalLine(line, hero.terminal.prompt)}
-                    </Fragment>
-                  ))}
-                </code>
-              </pre>
+              <div className="l-term">
+                {hero.terminal.lines.map((line, index) => (
+                  <TranscriptLine key={index} line={line} prompt={hero.terminal.prompt} />
+                ))}
+              </div>
             </div>
             <figcaption className="l-sr-only">{hero.terminal.caption}</figcaption>
           </figure>
@@ -161,47 +164,128 @@ export function Landing(props: { config: SiteConfig }): React.ReactElement {
       </section>
 
       <section className="l-features" aria-labelledby="l-features-heading">
-        <div className="l-features-head">
-          <h2 className="l-features-heading" id="l-features-heading">
-            {features.heading}
-          </h2>
-          <span className="l-features-note">{features.note}</span>
-        </div>
+        <h2 className="l-heading" id="l-features-heading">
+          {features.heading}
+        </h2>
         <div className="l-grid">
-          {features.cards.map((card: FeatureCard) => (
-            <article
-              className={card.accent ? "l-card l-card--accent" : "l-card"}
-              key={card.number}
-            >
-              <div className="l-card-meta">
-                <span className="l-card-number">{card.number}</span>
-                {card.badge === null ? null : (
-                  <span className="l-badge">{card.badge}</span>
-                )}
-              </div>
-              <h3 className="l-card-title">{card.title}</h3>
-              <p className="l-card-body">{card.body}</p>
-            </article>
-          ))}
+          {features.cards.map((card: FeatureCard) => {
+            const Diagram = featureDiagrams[card.diagram];
+
+            return (
+              <article className="l-card" key={card.number}>
+                <div className="l-card-art">
+                  <Diagram />
+                </div>
+                <div className="l-card-text">
+                  <p className="l-card-number">{card.number}</p>
+                  <h3 className="l-card-title">{card.title}</h3>
+                  <p className="l-card-body">{card.body}</p>
+                </div>
+              </article>
+            );
+          })}
         </div>
       </section>
 
-      <section className="l-cta" aria-labelledby="l-cta-heading">
-        <div className="l-cta-inner">
-          <div className="l-cta-copy">
-            <h2 className="l-cta-heading" id="l-cta-heading">
-              {cta.heading}
-            </h2>
-            <p className="l-cta-body">{cta.body}</p>
-          </div>
-          <a
-            className={`l-btn l-btn--${cta.action.variant}`}
-            href={resolve(config, cta.action.target)}
-            {...externalAttrs(cta.action.target)}
-          >
-            {cta.action.label}
-          </a>
+      <section className="l-deploy" aria-labelledby="l-deploy-heading">
+        <h2 className="l-heading" id="l-deploy-heading">
+          {deployment.heading}
+        </h2>
+        <div className="l-deploy-grid">
+          {deployment.cards.map((card: DeploymentCard) => {
+            const Icon = deploymentIcons[card.icon];
+
+            return (
+              <article className="l-deploy-card" key={card.title}>
+                <div className="l-deploy-head">
+                  <Icon />
+                  <h3 className="l-deploy-title">{card.title}</h3>
+                </div>
+                <div className="l-deploy-rule" />
+                <dl className="l-deploy-facts">
+                  {card.facts.map((fact) => (
+                    <div className="l-deploy-fact" key={fact.label}>
+                      <dt className="l-deploy-label">{fact.label}</dt>
+                      <dd className="l-deploy-value">{fact.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <div className="l-deploy-plus">
+                  {card.plusLabel === null ? null : (
+                    <p className="l-deploy-plus-label">{card.plusLabel}</p>
+                  )}
+                  <ul className="l-deploy-list">
+                    {card.plus.map((item) => (
+                      <li className="l-deploy-item" key={item}>
+                        <span className="l-deploy-dot" aria-hidden="true" />
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </article>
+            );
+          })}
         </div>
+        <p className="l-callout">
+          <span className="l-callout-glyph" aria-hidden="true">
+            {deployment.callout.glyph}
+          </span>
+          <span className="l-callout-text">{deployment.callout.text}</span>
+        </p>
+      </section>
+
+      <section className="l-int" aria-labelledby="l-int-heading">
+        <h2 className="l-heading" id="l-int-heading">
+          {integrations.heading}
+        </h2>
+        <div className="l-int-scroll">
+          <table className="l-int-table">
+            <thead>
+              <tr>
+                <th className="l-int-head" scope="col">
+                  <span className="l-sr-only">{integrations.columns.subject}</span>
+                </th>
+                <th className="l-int-head" scope="col">
+                  {integrations.columns.builtIn}
+                </th>
+                <th className="l-int-head" scope="col">
+                  {integrations.columns.alternatives}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {integrations.rows.map((row: IntegrationRow) => {
+                const Icon = integrationIcons[row.icon];
+
+                return (
+                  <tr className="l-int-row" key={row.name}>
+                    <th className="l-int-name" scope="row">
+                      <span className="l-int-cell">
+                        <Icon />
+                        {row.name}
+                      </span>
+                    </th>
+                    <td className="l-int-builtin">{row.builtIn}</td>
+                    <td className="l-int-alts">
+                      <ul className="l-int-pills">
+                        {row.alternatives.map((alternative) => (
+                          <li className="l-int-pill" key={alternative}>
+                            {alternative}
+                          </li>
+                        ))}
+                      </ul>
+                      {row.note === null ? null : (
+                        <p className="l-int-note">{row.note}</p>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <p className="l-int-foot">{integrations.note}</p>
       </section>
 
       <footer className="l-footer">
@@ -259,49 +343,37 @@ function externalAttrs(target: LinkTarget): { rel?: string; target?: string } {
   return {};
 }
 
-/** Renders one transcript line. Callers insert the newline between lines. */
-function renderTerminalLine(line: TerminalLine, prompt: string): React.ReactNode {
+/**
+ * One transcript line, as its own block element. The two spaces in front of a
+ * materialized path are the indent the design calls for, and the line preserves
+ * them because .l-term-line sets white-space: pre.
+ */
+function TranscriptLine(props: { line: TerminalLine; prompt: string }): React.ReactElement {
+  const { line, prompt } = props;
+
   switch (line.kind) {
     case "command":
       return (
-        <>
-          <span className="l-term-prompt">{prompt}</span>
-          {" "}
-          {line.text}
-        </>
+        <div className="l-term-line">
+          <span className="l-term-prompt">{prompt}</span> {line.command}{" "}
+          <span className="l-term-flag">{line.flag}</span>
+        </div>
       );
-    case "continuation":
-      return line.text;
-    case "output":
+    case "path":
       return (
-        <>
-          {line.segments.map((segment, index) =>
-            segment.tone === "muted" ? (
-              <span className="l-term-muted" key={index}>
-                {segment.text}
-              </span>
-            ) : (
-              <Fragment key={index}>{segment.text}</Fragment>
-            ),
-          )}
-        </>
+        <div className="l-term-line">
+          {"  "}
+          <span className="l-term-out">{line.text}</span>
+        </div>
       );
-    case "path-highlight":
-      return (
-        <>
-          {" ".repeat(line.indent)}
-          <span className="l-term-path">{line.text}</span>
-        </>
-      );
-    case "blank":
-      return null;
+    case "gap":
+      return <div className="l-term-gap" />;
     case "cursor":
       return (
-        <>
-          <span className="l-term-prompt">{prompt}</span>
-          {" "}
+        <div className="l-term-line">
+          <span className="l-term-prompt">{prompt}</span>{" "}
           <span className="l-term-cursor" aria-hidden="true" />
-        </>
+        </div>
       );
   }
 }

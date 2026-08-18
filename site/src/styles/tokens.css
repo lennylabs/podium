@@ -58,8 +58,6 @@
   --btn-primary-bg: linear-gradient(180deg, #232219, #14130f);
   --btn-primary-text: #fbf9f5;
   --btn-primary-shadow: 0 6px 16px -8px rgba(20, 19, 15, 0.6);
-  --cta-band: linear-gradient(120deg, #14130f 0%, #231a12 55%, #3a2110 100%);
-  --feature-accent-card: linear-gradient(160deg, #ffa424, #f2861a);
   --terminal-shadow: 0 24px 50px -30px rgba(20, 19, 15, 0.5);
   --tab-strip: linear-gradient(180deg, #ffffff, #f5f3e9);
 
@@ -134,7 +132,6 @@
     --btn-primary-bg: linear-gradient(180deg, #ffb84d, #f59410);
     --btn-primary-text: #14130f;
     --btn-primary-shadow: 0 8px 22px -12px rgba(255, 164, 36, 0.6);
-    --cta-band: linear-gradient(120deg, #1b2030 0%, #181c28 55%, #3a2410 100%);
     --terminal-shadow: 0 26px 54px -32px rgba(0, 0, 0, 0.9);
     --tab-strip: linear-gradient(180deg, #1e2434, #1b2030);
 
@@ -181,7 +178,6 @@
   --btn-primary-bg: linear-gradient(180deg, #ffb84d, #f59410);
   --btn-primary-text: #14130f;
   --btn-primary-shadow: 0 8px 22px -12px rgba(255, 164, 36, 0.6);
-  --cta-band: linear-gradient(120deg, #1b2030 0%, #181c28 55%, #3a2410 100%);
   --terminal-shadow: 0 26px 54px -32px rgba(0, 0, 0, 0.9);
   --tab-strip: linear-gradient(180deg, #1e2434, #1b2030);
 

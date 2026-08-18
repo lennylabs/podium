@@ -112,38 +112,43 @@ describe("withBase", () => {
 });
 
 describe("Header", () => {
-  it("renders one tab per top-level section and marks the current one", () => {
-    const html = markup(
-      <Header config={CONFIG} nav={NAV} activeRoute="/guide/install.html" />,
-    );
+  it("offers the two top-bar destinations", () => {
+    const html = markup(<Header config={CONFIG} activeRoute="/guide/install.html" />);
 
-    expect(html).toContain('href="/base/guide/index.html" aria-current="page"');
-    expect(html).toContain(">Overview</a>");
-    expect(html).toContain('class="d-tab is-active"');
+    expect(html).toContain('href="/base/overview.html"');
+    expect(html).toContain(">Docs</a>");
+    expect(html).toContain('href="/base/about/changelog.html"');
+    expect(html).toContain(">Changelog</a>");
   });
 
-  it("marks a section current when the page is the section index itself", () => {
-    const html = markup(
-      <Header config={CONFIG} nav={NAV} activeRoute="/guide/index.html" />,
-    );
+  it("marks Docs current on a documentation page", () => {
+    const html = markup(<Header config={CONFIG} activeRoute="/guide/install.html" />);
 
-    expect(html).toContain('class="d-tab is-active"');
+    expect(html).toContain('href="/base/overview.html" aria-current="page"');
+    expect(html).not.toContain('href="/base/about/changelog.html" aria-current="page"');
   });
 
-  it("marks no section current on a page outside the tree", () => {
-    const html = markup(<Header config={CONFIG} nav={NAV} activeRoute="" />);
+  it("marks Changelog current on the changelog page, and Docs not", () => {
+    const html = markup(<Header config={CONFIG} activeRoute="/about/changelog.html" />);
+
+    expect(html).toContain('href="/base/about/changelog.html" aria-current="page"');
+    expect(html).not.toContain('href="/base/overview.html" aria-current="page"');
+  });
+
+  it("marks no tab current when there is no active route", () => {
+    const html = markup(<Header config={CONFIG} activeRoute="" />);
 
     expect(html).not.toContain("is-active");
   });
 
   it("shows the version the config carries", () => {
-    expect(markup(<Header config={CONFIG} nav={NAV} activeRoute="" />)).toContain(
+    expect(markup(<Header config={CONFIG} activeRoute="" />)).toContain(
       '<span class="d-version">v1.2.3</span>',
     );
   });
 
   it("carries the search, theme, and sidebar hooks the client script binds", () => {
-    const html = markup(<Header config={CONFIG} nav={NAV} activeRoute="" />);
+    const html = markup(<Header config={CONFIG} activeRoute="" />);
 
     expect(html).toContain("data-search-input");
     expect(html).toContain("data-theme-toggle");

@@ -13,7 +13,7 @@
   /* Accent that stays solid: light uses the deep tone, dark uses the accent. */
   --l-accent-solid: var(--accent-deep);
 
-  /* Secondary UI text: nav links, version pill, feature card body. */
+  /* Secondary UI text: nav links, version pill, ghost button. */
   --l-text-muted: var(--secondary);
 
   /* Status pill */
@@ -36,7 +36,7 @@
   --l-install-bg: linear-gradient(180deg, #ffffff, #faf9f3);
   --l-install-border: var(--border);
   --l-install-shadow: 0 1px 2px rgba(20, 19, 15, 0.05);
-  --l-copy-color: var(--secondary);
+  --l-copy-color: var(--link);
 
   /* Buttons */
   --l-outline-border: #d7d4c8;
@@ -45,28 +45,22 @@
   /* Terminal card */
   --l-term-border: var(--border);
   --l-term-bar-border: #eceadf;
-  --l-term-text: var(--ink);
   --l-term-dot: var(--border-3);
-  --l-path-bg: var(--accent-tint);
-  --l-path-color: var(--ink);
-  --l-path-pad: 0 3px;
   --l-cursor: var(--ink);
 
   /* Adapter strip */
   --l-strip-label: var(--ink);
 
-  /* Feature grid */
+  /* Cards, and the hairline drawn inside one */
   --l-card-bg: linear-gradient(180deg, #ffffff, #fcfbf6);
   --l-card-hover-bg: #ffffff;
-  --l-badge-border: var(--border);
+  --l-hairline: var(--border-2);
 
-  /* Call to action band, dark ground in both themes */
-  --l-cta-text: #fbf9f5;
-  --l-cta-body: rgba(250, 249, 246, 0.72);
+  /* Panel colour behind a primary diagram shape */
+  --l-diagram-fill: var(--surface-2);
 
-  /* Text and hairlines that sit on the accent fill, both themes */
-  --l-on-accent-soft: rgba(20, 19, 15, 0.72);
-  --l-on-accent-line: rgba(20, 19, 15, 0.3);
+  /* Fill behind an integrations pill */
+  --l-pill-fill: var(--accent-strip);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -101,21 +95,18 @@
 
     --l-term-border: var(--border-3);
     --l-term-bar-border: var(--border);
-    --l-term-text: var(--code-text);
     --l-term-dot: var(--border-2);
-    --l-path-bg: transparent;
-    --l-path-color: var(--accent);
-    --l-path-pad: 0;
     --l-cursor: var(--accent);
 
     --l-strip-label: var(--accent);
 
-    --l-card-bg: linear-gradient(180deg, #1a1e2b, #141824);
+    --l-card-bg: linear-gradient(180deg, #171b28, #141824);
     --l-card-hover-bg: #1b2030;
-    --l-badge-border: var(--border-2);
+    --l-hairline: var(--border);
 
-    --l-cta-text: var(--ink);
-    --l-cta-body: var(--meta);
+    --l-diagram-fill: var(--raised);
+
+    --l-pill-fill: var(--accent-wash);
   }
 }
 
@@ -150,27 +141,40 @@
 
   --l-term-border: var(--border-3);
   --l-term-bar-border: var(--border);
-  --l-term-text: var(--code-text);
   --l-term-dot: var(--border-2);
-  --l-path-bg: transparent;
-  --l-path-color: var(--accent);
-  --l-path-pad: 0;
   --l-cursor: var(--accent);
 
   --l-strip-label: var(--accent);
 
-  --l-card-bg: linear-gradient(180deg, #1a1e2b, #141824);
+  --l-card-bg: linear-gradient(180deg, #171b28, #141824);
   --l-card-hover-bg: #1b2030;
-  --l-badge-border: var(--border-2);
+  --l-hairline: var(--border);
 
-  --l-cta-text: var(--ink);
-  --l-cta-body: var(--meta);
+  --l-diagram-fill: var(--raised);
+
+  --l-pill-fill: var(--accent-wash);
 }
 
 /* Landing elements size from the border box. */
 [class^="l-"],
 [class*=" l-"] {
   box-sizing: border-box;
+}
+
+/*
+ * The design names a line height for running prose and leaves every other
+ * element at the browser default, where the font's own metrics set the leading.
+ * base.css sets 1.6 on the body for documentation pages, so each landing
+ * section resets it and the rules below restate the values the design names.
+ */
+.l-topbar,
+.l-hero,
+.l-adapters,
+.l-features,
+.l-deploy,
+.l-int,
+.l-footer {
+  line-height: normal;
 }
 
 .l-sr-only {
@@ -220,9 +224,10 @@
   text-decoration: none;
 }
 
-/* Sized by height; the width follows the lockup's own aspect ratio. */
+/* The lockup's height is the mark's height, which the design renders at 20px
+ * in this bar. The width follows the lockup's own aspect ratio. */
 .l-lockup {
-  height: 26px;
+  height: 20px;
 }
 
 .l-nav {
@@ -447,17 +452,6 @@
   color: var(--ink);
 }
 
-.l-btn--accent {
-  padding: 11px 22px;
-  background: var(--accent);
-  color: var(--on-accent);
-  font-weight: 600;
-}
-
-.l-btn--accent:hover {
-  filter: brightness(1.06);
-}
-
 /* --------------------------------------------------------- terminal card */
 
 .l-terminal {
@@ -512,35 +506,39 @@
 }
 
 .l-term {
-  margin: 0;
-  padding: 22px;
+  padding: 20px;
   overflow-x: auto;
   font-family: var(--font-mono);
-  font-size: 13.5px;
-  line-height: 1.85;
-  color: var(--l-term-text);
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--ink);
 }
 
-.l-term code {
-  font: inherit;
-  color: inherit;
+/* Each transcript line is its own block, and keeps the spaces it carries. */
+.l-term-line {
+  white-space: pre;
 }
 
-.l-term-prompt,
-.l-term-muted {
+.l-term-gap {
+  height: 1.7em;
+}
+
+.l-term-prompt {
   color: var(--faint);
 }
 
-.l-term-path {
-  padding: var(--l-path-pad);
-  background: var(--l-path-bg);
-  color: var(--l-path-color);
+.l-term-flag {
+  color: var(--link);
+}
+
+.l-term-out {
+  color: var(--body);
 }
 
 .l-term-cursor {
   display: inline-block;
   width: 8px;
-  height: 16px;
+  height: 14px;
   vertical-align: -3px;
   background: var(--l-cursor);
 }
@@ -597,6 +595,16 @@
   color: var(--faint);
 }
 
+/* ------------------------------------------------------- section headings */
+
+.l-heading {
+  margin: 0 0 32px;
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  color: var(--ink);
+}
+
 /* --------------------------------------------------------- feature grid */
 
 .l-features {
@@ -606,32 +614,9 @@
   font-family: var(--font-ui);
 }
 
-.l-features-head {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 14px;
-  margin-bottom: 32px;
-}
-
-.l-features-heading {
-  margin: 0;
-  font-size: 30px;
-  font-weight: 600;
-  letter-spacing: -0.025em;
-  color: var(--ink);
-}
-
-.l-features-note {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  color: var(--faint);
-}
-
 .l-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 1px;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -640,7 +625,10 @@
 }
 
 .l-card {
-  padding: 26px 24px 30px;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding: 26px 26px 30px;
   background: var(--l-card-bg);
   transition: background var(--transition);
 }
@@ -649,34 +637,26 @@
   background: var(--l-card-hover-bg);
 }
 
-.l-card--accent,
-.l-card--accent:hover {
-  background: var(--feature-accent-card);
-  color: var(--on-accent);
+/* The diagram holds its drawn width, so the text takes the rest of the row. */
+.l-card-art {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 200px;
 }
 
-.l-card-meta {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin-bottom: 14px;
+.l-card-text {
+  flex: 1;
+  min-width: 0;
 }
 
 .l-card-number {
+  margin: 0 0 10px;
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.1em;
-  color: var(--faint);
-}
-
-.l-badge {
-  padding: 2px 6px;
-  border: 1px solid var(--l-badge-border);
-  border-radius: var(--r-kbd);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 500;
   color: var(--faint);
 }
 
@@ -691,65 +671,312 @@
   margin: 0;
   font-size: 14.5px;
   line-height: 1.55;
-  color: var(--l-text-muted);
+  color: var(--secondary);
 }
 
-.l-card--accent .l-card-number,
-.l-card--accent .l-badge,
-.l-card--accent .l-card-title {
-  color: inherit;
+/* ------------------------------------------------------- feature diagrams */
+
+.l-dg {
+  display: block;
 }
 
-.l-card--accent .l-badge {
-  border-color: var(--l-on-accent-line);
+.l-dg-mono {
+  font-family: var(--font-mono);
 }
 
-.l-card--accent .l-card-body {
-  color: var(--l-on-accent-soft);
+.l-dg-ink {
+  stroke: var(--ink);
 }
 
-/* ------------------------------------------------------- call to action */
+.l-dg-ink-fill {
+  fill: var(--ink);
+}
 
-.l-cta {
-  border-top: 1px solid var(--border);
-  background: var(--cta-band);
-  color: var(--l-cta-text);
+.l-dg-meta {
+  stroke: var(--meta);
+}
+
+.l-dg-meta-fill {
+  fill: var(--meta);
+}
+
+.l-dg-accent {
+  stroke: var(--accent);
+}
+
+.l-dg-accent-fill {
+  fill: var(--accent);
+}
+
+/* A glyph drawn on top of an accent fill, so it takes the on-accent tone. */
+.l-dg-tick {
+  stroke: var(--on-accent);
+}
+
+.l-dg-paper {
+  fill: var(--l-diagram-fill);
+}
+
+/* ------------------------------------------------------- deployment grid */
+
+.l-deploy {
+  max-width: var(--landing-width);
+  margin: 0 auto;
+  padding: 0 var(--gutter-landing) 72px;
   font-family: var(--font-ui);
 }
 
-.l-cta-inner {
+.l-deploy .l-heading {
+  margin-bottom: 28px;
+}
+
+.l-deploy-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--border);
+}
+
+.l-deploy-card {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 26px 26px 32px;
+  background: var(--l-card-bg);
+}
+
+.l-deploy-head {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 30px;
+  gap: 10px;
+}
+
+.l-deploy-title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+
+.l-deploy-rule {
+  height: 1px;
+  background: var(--l-hairline);
+}
+
+.l-deploy-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+}
+
+.l-deploy-label {
+  margin: 0 0 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--faint);
+}
+
+.l-deploy-value {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.l-deploy-plus {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-top: 2px;
+}
+
+.l-deploy-plus-label {
+  margin: 0 0 1px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--faint);
+}
+
+.l-deploy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.l-deploy-item {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.l-deploy-dot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  transform: translateY(-3px);
+}
+
+.l-callout {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0 0;
+  padding: 13px 16px;
+  border: 1px solid var(--callout-border);
+  border-radius: 10px;
+  background: var(--accent-wash);
+}
+
+.l-callout-glyph {
+  color: var(--link);
+  font-size: 15px;
+}
+
+.l-callout-text {
+  font-size: 15px;
+  color: var(--secondary);
+}
+
+/* --------------------------------------------------------- integrations */
+
+.l-int {
   max-width: var(--landing-width);
   margin: 0 auto;
-  padding: 46px var(--gutter-landing);
+  padding: 0 var(--gutter-landing) 72px;
+  font-family: var(--font-ui);
 }
 
-.l-cta-copy {
-  flex: 1;
-  min-width: min(260px, 100%);
+.l-int .l-heading {
+  margin-bottom: 24px;
 }
 
-.l-cta-heading {
-  margin: 0 0 6px;
-  font-size: 23px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  color: inherit;
+/* The table keeps its column widths on a narrow screen and scrolls instead. */
+.l-int-scroll {
+  overflow-x: auto;
 }
 
-.l-cta-body {
-  margin: 0;
-  max-width: 540px;
+.l-int-table {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+  table-layout: fixed;
   font-size: 15px;
-  color: var(--l-cta-body);
+  text-align: left;
+}
+
+.l-int-table th,
+.l-int-table td {
+  text-align: left;
+}
+
+.l-int-head {
+  padding: 0 0 10px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--faint);
+  vertical-align: bottom;
+}
+
+.l-int-table th:first-child {
+  width: 210px;
+}
+
+.l-int-table th:nth-child(2) {
+  width: 190px;
+}
+
+/* The second row of every pair takes the raised surface. */
+.l-int-row:nth-child(even) {
+  background: var(--surface);
+}
+
+.l-int-name,
+.l-int-builtin,
+.l-int-alts {
+  border-top: 1px solid var(--l-hairline);
+  padding: 18px 16px 18px 0;
+}
+
+.l-int-name {
+  vertical-align: middle;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.l-int-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.l-int-builtin {
+  vertical-align: top;
+  color: var(--secondary);
+}
+
+.l-int-alts {
+  padding-right: 0;
+  vertical-align: top;
+}
+
+.l-int-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.l-int-pill {
+  padding: 4px 10px;
+  border: 1px solid var(--callout-border);
+  border-radius: var(--r-pill);
+  background: var(--l-pill-fill);
+  color: var(--link);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.l-int-note {
+  max-width: 640px;
+  margin: 9px 0 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--faint);
+}
+
+.l-int-foot {
+  max-width: 820px;
+  margin: 16px 0 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--faint);
+  text-wrap: pretty;
 }
 
 /* ----------------------------------------------------------------- footer */
 
 .l-footer {
+  border-top: 1px solid var(--border);
   font-family: var(--font-ui);
 }
 
@@ -788,7 +1015,7 @@
 
 @media (max-width: 1100px) {
   .l-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: 1fr;
   }
 }
 
@@ -813,17 +1040,24 @@
     padding-bottom: 56px;
   }
 
-  .l-cta-inner {
-    padding-top: 38px;
-    padding-bottom: 38px;
+  /* The diagram sits above its text once the card is this narrow. */
+  .l-card {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 18px;
+  }
+
+  .l-deploy-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .l-deploy,
+  .l-int {
+    padding-bottom: 56px;
   }
 }
 
 @media (max-width: 700px) {
-  .l-grid {
-    grid-template-columns: 1fr;
-  }
-
   .l-adapters-inner {
     gap: 16px;
   }

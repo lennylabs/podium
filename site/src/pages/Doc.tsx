@@ -80,7 +80,7 @@ export function Doc(props: {
       <a className="skip-link" href="#main">
         Skip to content
       </a>
-      <Header config={config} nav={nav} activeRoute={page.route} />
+      <Header config={config} activeRoute={page.route} />
       <div className="d-shell">
         <Sidebar nav={nav} activeRoute={page.route} basePath={config.basePath} />
         <main className="d-main" id="main">

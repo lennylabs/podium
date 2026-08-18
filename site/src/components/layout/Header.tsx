@@ -2,7 +2,7 @@ import type { ReactElement } from "react";
 
 import { Lockup } from "./Lockup";
 
-import type { NavNode, SiteConfig } from "../../build/types";
+import type { SiteConfig } from "../../build/types";
 
 /**
  * Joins the site base path with a page route. Absolute URLs and fragments pass
@@ -16,21 +16,17 @@ export function withBase(basePath: string, route: string): string {
   return `${basePath}${suffix}`;
 }
 
-/** Directory prefix of a section route, used to match descendant pages. */
-function sectionPrefix(route: string): string {
-  return route.replace(/index\.html$/, "");
-}
+const CHANGELOG_ROUTE = "/about/changelog.html";
 
-function isCurrentSection(route: string, activeRoute: string): boolean {
-  if (activeRoute === "") {
-    return false;
-  }
-  if (route === activeRoute) {
-    return true;
-  }
-  const prefix = sectionPrefix(route);
-  return prefix.endsWith("/") && activeRoute.startsWith(prefix);
-}
+/**
+ * The two destinations the top bar offers. The sidebar carries the section
+ * tree, so listing every section here as well would repeat it and grow the bar
+ * every time the corpus gains a directory.
+ */
+const TABS: Array<{ label: string; route: string }> = [
+  { label: "Docs", route: "/overview.html" },
+  { label: "Changelog", route: CHANGELOG_ROUTE },
+];
 
 
 function SearchGlyph(): ReactElement {
@@ -68,10 +64,9 @@ function SearchGlyph(): ReactElement {
  */
 export function Header(props: {
   config: SiteConfig;
-  nav: NavNode[];
   activeRoute: string;
 }): ReactElement {
-  const { config, nav, activeRoute } = props;
+  const { config, activeRoute } = props;
 
   return (
     <header className="d-topbar">
@@ -96,16 +91,21 @@ export function Header(props: {
         </a>
 
         <nav className="d-tabs" aria-label="Documentation sections">
-          {nav.map((section) => {
-            const current = isCurrentSection(section.route, activeRoute);
+          {TABS.map((tab) => {
+            // Every documentation page sits under Docs except the changelog,
+            // which is its own destination.
+            const current =
+              tab.route === CHANGELOG_ROUTE
+                ? activeRoute === CHANGELOG_ROUTE
+                : activeRoute !== "" && activeRoute !== CHANGELOG_ROUTE;
             return (
               <a
-                key={section.route}
+                key={tab.route}
                 className={current ? "d-tab is-active" : "d-tab"}
-                href={withBase(config.basePath, section.route)}
+                href={withBase(config.basePath, tab.route)}
                 aria-current={current ? "page" : undefined}
               >
-                {section.title}
+                {tab.label}
               </a>
             );
           })}

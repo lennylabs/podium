@@ -81,9 +81,10 @@
   text-decoration: none;
 }
 
-/* Sized by height; the width follows the lockup's own aspect ratio. */
+/* The lockup's height is the mark's height, which the design renders at 18px
+ * in this bar. The width follows the lockup's own aspect ratio. */
 .d-lockup {
-  height: 22px;
+  height: 18px;
 }
 
 .d-tabs {

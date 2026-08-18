@@ -16,7 +16,7 @@ export function NotFound(props: { config: SiteConfig; nav: NavNode[] }): ReactEl
       <a className="skip-link" href="#main">
         Skip to content
       </a>
-      <Header config={config} nav={nav} activeRoute="" />
+      <Header config={config} activeRoute="" />
       <main className="d-notfound" id="main">
         <p className="d-notfound-code">404</p>
         <h1 className="d-notfound-title">Page not found</h1>

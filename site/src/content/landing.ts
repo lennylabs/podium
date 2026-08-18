@@ -7,6 +7,12 @@
  * against SiteConfig.repoUrl, so a base path change lands in one place.
  */
 
+import type {
+  DeploymentIconKey,
+  FeatureDiagramKey,
+  IntegrationIconKey,
+} from "../components/content/FeatureDiagrams";
+
 /** Where a landing link points, before the site config resolves it. */
 export type LinkTarget =
   /** A published documentation route, leading slash included. */
@@ -41,7 +47,7 @@ export type InstallCommand = {
   copiedLabel: string;
 };
 
-export type ActionVariant = "primary" | "outline" | "ghost" | "accent";
+export type ActionVariant = "primary" | "outline" | "ghost";
 
 export type Action = {
   label: string;
@@ -49,26 +55,19 @@ export type Action = {
   variant: ActionVariant;
 };
 
-/** A run inside an output line. Muted runs carry annotations such as `[team]`. */
-export type TerminalSegment = {
-  text: string;
-  tone: "plain" | "muted";
-};
-
 /**
- * One line of the hero transcript.
+ * One line of the hero transcript. Each line renders as its own block element,
+ * so the transcript never depends on newlines inside a preformatted block.
  *
- * A "command" line renders behind a prompt glyph. A "continuation" line carries
- * its own leading whitespace and renders without a prompt. A "path-highlight"
- * line is a materialized file path, tinted with the accent. A "cursor" line is
- * the trailing prompt and the blinking block.
+ * A "command" line renders behind a prompt glyph, with its flag run in the link
+ * tone. A "path" line is a materialized file path, indented under the command
+ * that wrote it. A "gap" line is the blank line between two invocations, and a
+ * "cursor" line is the trailing prompt and its blinking block.
  */
 export type TerminalLine =
-  | { kind: "command"; text: string }
-  | { kind: "continuation"; text: string }
-  | { kind: "output"; segments: TerminalSegment[] }
-  | { kind: "path-highlight"; indent: number; text: string }
-  | { kind: "blank" }
+  | { kind: "command"; command: string; flag: string }
+  | { kind: "path"; text: string }
+  | { kind: "gap" }
   | { kind: "cursor" };
 
 export type Terminal = {
@@ -85,10 +84,42 @@ export type FeatureCard = {
   number: string;
   title: string;
   body: string;
-  /** Mono badge naming the component the feature requires, or null. */
-  badge: string | null;
-  /** True for the single accent-filled card. */
-  accent: boolean;
+  /** The decorative diagram drawn to the left of the text. */
+  diagram: FeatureDiagramKey;
+};
+
+/** One label and value pair inside a deployment card. */
+export type DeploymentFact = {
+  label: string;
+  value: string;
+};
+
+export type DeploymentCard = {
+  icon: DeploymentIconKey;
+  title: string;
+  facts: DeploymentFact[];
+  /** Heading over the bullet list, null on the card that inherits nothing. */
+  plusLabel: string | null;
+  /** Capabilities the card adds, each behind an accent bullet. */
+  plus: string[];
+};
+
+export type Callout = {
+  /** The leading glyph, drawn in the link tone. */
+  glyph: string;
+  text: string;
+};
+
+/** One row of the server-side integrations table. */
+export type IntegrationRow = {
+  icon: IntegrationIconKey;
+  name: string;
+  /** What Podium ships with for this concern. */
+  builtIn: string;
+  /** Backends that can replace it, each rendered as a tinted pill. */
+  alternatives: string[];
+  /** A qualification shown under the pills, or null. */
+  note: string | null;
 };
 
 export type FooterLink = {
@@ -104,6 +135,8 @@ export type LandingContent = {
     links: NavLink[];
     /** Prefix read out before the version, hidden visually. */
     versionLabel: string;
+    /** Prefix printed in front of the version number. */
+    versionPrefix: string;
   };
   hero: {
     status: StatusPill;
@@ -123,14 +156,24 @@ export type LandingContent = {
   };
   features: {
     heading: string;
-    /** Mono note beside the heading. */
-    note: string;
     cards: FeatureCard[];
   };
-  cta: {
+  deployment: {
     heading: string;
-    body: string;
-    action: Action;
+    cards: DeploymentCard[];
+    callout: Callout;
+  };
+  integrations: {
+    heading: string;
+    /** Column headings. The first is read out but not drawn. */
+    columns: {
+      subject: string;
+      builtIn: string;
+      alternatives: string;
+    };
+    rows: IntegrationRow[];
+    /** The muted line that closes the section. */
+    note: string;
   };
   footer: {
     license: string;
@@ -152,29 +195,13 @@ export const landing: LandingContent = {
         emphasized: true,
       },
       {
-        label: "Reference",
-        target: { kind: "doc", route: "/reference/index.html" },
-        emphasized: false,
-      },
-      {
-        label: "Deployment",
-        target: { kind: "doc", route: "/deployment/index.html" },
-        emphasized: false,
-      },
-      {
-        // The RFC tree is published as raw markdown with no index page, so the
-        // link goes to the directory in the repository, where each file renders.
-        label: "RFCs",
-        target: { kind: "repo", path: "/tree/main/docs/rfc" },
-        emphasized: false,
-      },
-      {
         label: "GitHub",
         target: { kind: "repo", path: "" },
         emphasized: false,
       },
     ],
     versionLabel: "Podium version",
+    versionPrefix: "v",
   },
   hero: {
     status: {
@@ -216,62 +243,29 @@ export const landing: LandingContent = {
       },
     ],
     terminal: {
-      directory: "~/projects/checkout-svc",
+      directory: "~/projects/foo",
       prompt: "$",
       caption:
-        "Terminal transcript. The podium init command points a workspace at a catalog and a harness, and podium sync materializes three artifacts into the workspace.",
+        "Terminal transcript. Three podium sync runs materialize the same artifacts three ways: into the Claude Code layout, into the Cursor layout, and into the marketplace layout a shared configuration file describes.",
       lines: [
-        { kind: "command", text: "podium init --registry ~/podium-artifacts/ \\" },
-        { kind: "continuation", text: "    --harness claude-code" },
-        { kind: "command", text: "podium sync" },
-        { kind: "blank" },
-        { kind: "output", segments: [{ text: "adapter: claude-code", tone: "plain" }] },
-        {
-          kind: "output",
-          segments: [{ text: "target:  /Users/alice/checkout-svc", tone: "plain" }],
-        },
-        { kind: "output", segments: [{ text: "artifacts:", tone: "plain" }] },
-        {
-          kind: "output",
-          segments: [
-            { text: "  - platform/deploy/rollback     ", tone: "plain" },
-            { text: "[team]", tone: "muted" },
-          ],
-        },
-        {
-          kind: "path-highlight",
-          indent: 6,
-          text: ".claude/skills/rollback/SKILL.md",
-        },
-        {
-          kind: "output",
-          segments: [
-            { text: "  - platform/pg/query-review     ", tone: "plain" },
-            { text: "[team]", tone: "muted" },
-          ],
-        },
-        {
-          kind: "path-highlight",
-          indent: 6,
-          text: ".claude/skills/query-review/SKILL.md",
-        },
-        {
-          kind: "output",
-          segments: [
-            { text: "  - personal/hello/greet         ", tone: "plain" },
-            { text: "[personal]", tone: "muted" },
-          ],
-        },
-        {
-          kind: "path-highlight",
-          indent: 6,
-          text: ".claude/skills/greet/SKILL.md",
-        },
-        { kind: "blank" },
-        {
-          kind: "output",
-          segments: [{ text: "3 artifacts materialized in 41ms", tone: "plain" }],
-        },
+        { kind: "command", command: "podium sync", flag: "--harness claude-code" },
+        { kind: "path", text: ".claude/skills/rollback/SKILL.md" },
+        { kind: "path", text: ".claude/skills/rollback/scripts/verify_revision.py" },
+        { kind: "path", text: ".claude/commands/query-review.md" },
+        { kind: "path", text: ".mcp.json" },
+        { kind: "gap" },
+        { kind: "command", command: "podium sync", flag: "--harness cursor" },
+        { kind: "path", text: ".cursor/skills/rollback/SKILL.md" },
+        { kind: "path", text: ".cursor/skills/rollback/scripts/verify_revision.py" },
+        { kind: "path", text: ".cursor/commands/query-review.md" },
+        { kind: "path", text: ".cursor/mcp.json" },
+        { kind: "gap" },
+        { kind: "command", command: "podium sync", flag: "--config marketplace.yaml" },
+        { kind: "path", text: ".claude-plugin/marketplace.json" },
+        { kind: "path", text: "claude/acme/skills/rollback/SKILL.md" },
+        { kind: "path", text: "claude/acme/skills/rollback/scripts/verify_revision.py" },
+        { kind: "path", text: "cursor/acme/skills/rollback/SKILL.md" },
+        { kind: "gap" },
         { kind: "cursor" },
       ],
     },
@@ -291,61 +285,162 @@ export const landing: LandingContent = {
     custom: "+ custom",
   },
   features: {
-    heading: "What you get",
-    note: "SERVER-ONLY FEATURES MARKED",
+    heading: "Features",
     cards: [
       {
         number: "01",
         title: "Cross-harness delivery",
-        body: "Pluggable adapters translate canonical artifacts into whichever runtime the developer actually uses.",
-        badge: null,
-        accent: false,
+        body: "Write canonical artifacts once. Automatically translate into the format your runtime expects.",
+        diagram: "delivery",
       },
       {
         number: "02",
         title: "Domains and subdomains",
-        body: "Keep artifacts in folders and subfolders, where each folder defines a domain.",
-        badge: null,
-        accent: false,
+        body: "Easy artifact maintenance and discoverability through the use of domains and sub-domains.",
+        diagram: "domains",
       },
       {
         number: "03",
         title: "Selective materialization",
-        body: "Sync a subset of the catalog into a workspace. Define profiles to switch between scopes.",
-        badge: null,
-        accent: false,
+        body: "Sync a subset of the catalog into a workspace. Define profiles to quickly and seamlessly switch between scopes.",
+        diagram: "materialization",
       },
       {
         number: "04",
-        title: "Layered composition",
-        body: "Compose the catalog from multiple sources with deterministic merge and explicit precedence.",
-        badge: "SERVER",
-        accent: true,
+        title: "Progressive discovery",
+        body: "Minimalistic set of tools for agents to traverse domains and find artifacts, materializing artifacts (including bundled files) lazily as they are needed.",
+        diagram: "discovery",
       },
       {
         number: "05",
-        title: "Per-layer visibility",
-        body: "Declare who can see what: public, org-wide, scoped to OIDC groups, or specific users.",
-        badge: "SERVER",
-        accent: false,
+        title: "Layered composition",
+        body: "Compose the catalog from multiple independent sources with deterministic merge and explicit precedence.",
+        diagram: "layers",
       },
       {
         number: "06",
-        title: "Progressive discovery",
-        body: "Agents traverse domains and search artifacts, materializing files lazily as they load.",
-        badge: "MCP / SDK",
-        accent: false,
+        title: "Access control",
+        body: "Declare who can see what: public, org-wide, scoped to OIDC groups, or specific users.",
+        diagram: "access",
       },
     ],
   },
-  cta: {
-    heading: "Two ways to run it",
-    body: "Filesystem catalog for solo work, prototypes, CI, and Git-shared catalogs. Registry server when you need runtime discovery, identity-aware visibility, and audit.",
-    action: {
-      label: "Compare deployment setups",
-      target: { kind: "doc", route: "/deployment/index.html" },
-      variant: "accent",
+  deployment: {
+    heading: "Run it three ways",
+    cards: [
+      {
+        icon: "folder",
+        title: "Local",
+        facts: [
+          { label: "Server-side deployment", value: "None" },
+          { label: "Catalog source", value: "A folder, read from disk" },
+          { label: "Materialization", value: "User-driven sync" },
+        ],
+        plusLabel: null,
+        plus: ["Author, lint, sync", "Domains and profiles"],
+      },
+      {
+        icon: "database",
+        title: "Single node",
+        facts: [
+          { label: "Server-side deployment", value: "One binary" },
+          {
+            label: "Catalog source",
+            value: "One or more folders or remote Git repos",
+          },
+          {
+            label: "Materialization",
+            value: "User-driven sync, or agent-driven on demand",
+          },
+        ],
+        plusLabel: "Everything in local, plus",
+        plus: [
+          "Discovery via MCP or SDK",
+          "Hybrid search",
+          "Layers and visibility",
+          "One audit log",
+        ],
+      },
+      {
+        icon: "asterisk",
+        title: "Clustered",
+        facts: [
+          { label: "Server-side deployment", value: "Replicas, Postgres, storage" },
+          {
+            label: "Catalog source",
+            value: "One or more folders or remote Git repos",
+          },
+          {
+            label: "Materialization",
+            value: "User-driven sync, or agent-driven on demand",
+          },
+        ],
+        plusLabel: "Everything in single node, plus",
+        plus: [
+          "Multi-tenancy",
+          "SCIM group sync",
+          "Signing and transparency log",
+          "High availability",
+        ],
+      },
+    ],
+    callout: {
+      glyph: "→",
+      text: "The artifacts never change. They are independent of Podium's deployment model.",
     },
+  },
+  integrations: {
+    heading: "Server-side integrations",
+    columns: {
+      subject: "Integration",
+      builtIn: "Out of the box",
+      alternatives: "Compatible alternatives",
+    },
+    rows: [
+      {
+        icon: "cylinder",
+        name: "Metadata store",
+        builtIn: "SQLite",
+        alternatives: ["Postgres"],
+        note: null,
+      },
+      {
+        icon: "cube",
+        name: "Object storage",
+        builtIn: "Local filesystem",
+        alternatives: ["S3 or S3-compatible storage"],
+        note: null,
+      },
+      {
+        icon: "nodes",
+        name: "Vector index",
+        builtIn: "sqlite-vec",
+        alternatives: ["pgvector", "Pinecone", "Weaviate Cloud", "Qdrant Cloud"],
+        note: "pgvector is the default when you already run Postgres.",
+      },
+      {
+        icon: "sparkle",
+        name: "Embeddings",
+        builtIn: "BM25 only",
+        alternatives: ["OpenAI", "Voyage", "Cohere", "Ollama"],
+        note: "Or let Pinecone, Weaviate, or Qdrant embed on ingest. Vectors are fused with BM25 hits via reciprocal rank fusion.",
+      },
+      {
+        icon: "padlock",
+        name: "Identity",
+        builtIn: "None",
+        alternatives: ["OIDC device code", "Gateway-forwarded JWT", "SCIM"],
+        note: null,
+      },
+      {
+        icon: "branch",
+        name: "Layer sources",
+        builtIn: "Git and local paths",
+        alternatives: ["Custom via SPI"],
+        note: "S3 buckets, OCI registries, HTTP archives.",
+      },
+    ],
+    note: "Nothing in the right column is required to start. At cluster scale, Postgres and object storage become requirements. Easily re-embed during vector backend migrations.",
   },
   footer: {
     license: "MIT licensed",
