@@ -1,83 +1,151 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 520" font-family="Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 520" class="dg">
   <!--
-    Layer composition and precedence.
-    The left column shows the ordered layer list (bottom = lowest
-    precedence). The right column shows the effective view produced
-    by composing layers for one caller's identity.
+    Layer composition and precedence. The left column shows the ordered layer
+    list (bottom is lowest precedence). The right column shows the effective
+    view produced by composing layers for one caller's identity.
   -->
   <defs>
-    <marker id="b-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
-      <path d="M 0 0 L 11 6 L 0 12 z" fill="#1f2933"/>
+    <marker id="dg-arrow-layer-composition" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path class="dg-arrow-head" d="M 0 0 L 11 6 L 0 12 z"/>
     </marker>
     <style>
-      .b-bg { fill: #ffffff; }
-      .b-layer-overlay { fill: #d6e9d2; stroke: #1f2933; stroke-width: 2.4; }
-      .b-layer-user { fill: #ffe9c7; stroke: #1f2933; stroke-width: 2.4; }
-      .b-layer-admin { fill: #fffaf0; stroke: #1f2933; stroke-width: 2.2; }
-      .b-effective { fill: #fffaf0; stroke: #1f2933; stroke-width: 2.4; }
-      .b-title { font-size: 22px; fill: #1f2933; }
-      .b-section { font-size: 14px; fill: #b56b1f; letter-spacing: 0.04em; }
-      .b-name { font-size: 18px; fill: #1f2933; }
-      .b-mono { font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; font-size: 14px; fill: #1f2933; }
-      .b-sub { font-size: 14px; fill: #54616e; }
-      .b-line { fill: none; stroke: #1f2933; stroke-width: 2.4; stroke-linecap: round; }
-      .b-foot { font-size: 13px; fill: #8a7755; }
-      .b-annot { font-size: 13px; fill: #54616e; font-style: italic; }
+      /*
+        Colour comes from the site's design tokens. Inlined in the documentation
+        site the site's own variables win, so the theme toggle drives the
+        diagram. Standing alone (raw markdown on github.com, or the file opened
+        directly) the fallbacks apply and follow the operating system setting.
+        The block below is identical in every diagram; edit all of them together.
+      */
+      :root {
+        --dg-ground: var(--surface, #ffffff);
+        --dg-panel-fill: var(--surface-2, #fdfdf8);
+        --dg-fill: var(--surface-3, #f5f3e9);
+        --dg-fill-2: var(--chip, #eae7d9);
+        --dg-accent-fill: var(--accent-wash, #fff3e2);
+        --dg-accent-soft: var(--accent-strip, #ffeeda);
+        --dg-ink: var(--ink, #14130f);
+        --dg-meta: var(--meta, #63604f);
+        --dg-faint: var(--faint, #6f6c5e);
+        --dg-border: var(--border, #d9d5c6);
+        --dg-accent: var(--accent-deep, #f2861a);
+        --dg-accent-text: var(--link, #a8480a);
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --dg-ground: var(--surface, #171b28);
+          --dg-panel-fill: var(--surface-2, #1e2434);
+          --dg-fill: var(--surface-3, #1b2030);
+          --dg-fill-2: var(--chip, #212739);
+          --dg-accent-fill: var(--accent-wash, rgba(255, 164, 36, 0.12));
+          --dg-accent-soft: var(--accent-strip, rgba(255, 164, 36, 0.08));
+          --dg-ink: var(--ink, #eaeef7);
+          --dg-meta: var(--meta, #9aa3ba);
+          --dg-faint: var(--faint, #7a8399);
+          --dg-border: var(--border, #2b3145);
+          --dg-accent: var(--accent-deep, #f2861a);
+          --dg-accent-text: var(--link, #ffa424);
+        }
+      }
+
+      .dg {
+        font-family: var(--font-ui, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+      }
+
+      .dg-bg { fill: var(--dg-ground); }
+
+      .dg-panel { fill: var(--dg-panel-fill); stroke: var(--dg-border); stroke-width: 1.6; }
+      .dg-card { fill: var(--dg-fill); stroke: var(--dg-ink); stroke-width: 1.8; }
+      .dg-card-primary { fill: var(--dg-accent-fill); stroke: var(--dg-accent); stroke-width: 2.2; }
+      .dg-card-strong { fill: var(--dg-fill-2); stroke: var(--dg-accent); stroke-width: 2.2; }
+      .dg-card-quiet { fill: var(--dg-ground); stroke: var(--dg-meta); stroke-width: 1.4; }
+      .dg-card-event { fill: var(--dg-accent-soft); stroke: var(--dg-accent); stroke-width: 1.8; stroke-dasharray: 6 5; }
+      .dg-chip { fill: var(--dg-accent-soft); stroke: var(--dg-border); stroke-width: 1.2; }
+      .dg-outline { fill: none; stroke: var(--dg-accent); stroke-width: 1.6; stroke-dasharray: 6 5; }
+
+      .dg-title { font-size: 22px; fill: var(--dg-ink); }
+      .dg-name { font-size: 17px; fill: var(--dg-ink); }
+      .dg-lead { font-size: 15px; fill: var(--dg-meta); }
+      .dg-sub { font-size: 14px; fill: var(--dg-meta); }
+      .dg-label { font-size: 13px; fill: var(--dg-accent-text); letter-spacing: 0.06em; }
+      .dg-label-quiet { font-size: 13px; fill: var(--dg-meta); letter-spacing: 0.06em; }
+      .dg-note { font-size: 13px; fill: var(--dg-meta); font-style: italic; }
+      .dg-foot { font-size: 13px; fill: var(--dg-faint); }
+      .dg-mono { font-size: 13px; fill: var(--dg-ink); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+      .dg-mono-accent { font-size: 13px; fill: var(--dg-accent-text); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+      .dg-mono-quiet { font-size: 13px; fill: var(--dg-meta); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+
+      .dg-line { fill: none; stroke: var(--dg-ink); stroke-width: 2; stroke-linecap: round; }
+      .dg-line-accent { fill: none; stroke: var(--dg-accent); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 6 5; }
+      .dg-line-quiet { fill: none; stroke: var(--dg-meta); stroke-width: 1.6; stroke-linecap: round; }
+      .dg-guide { fill: none; stroke: var(--dg-border); stroke-width: 1.2; }
+      .dg-divider { fill: none; stroke: var(--dg-border); stroke-width: 1.2; stroke-dasharray: 4 4; }
+
+      .dg-arrow-head { fill: var(--dg-ink); }
+      .dg-arrow-head-accent { fill: var(--dg-accent); }
+
+      .dg-t-xs { font-size: 12px; }
+      .dg-t-s { font-size: 13px; }
+      .dg-t-m { font-size: 15px; }
+      .dg-t-l { font-size: 18px; }
+      .dg-t-xl { font-size: 21px; }
+      .dg-t-2xl { font-size: 24px; }
+      .dg-t-3xl { font-size: 28px; }
     </style>
   </defs>
 
-  <rect class="b-bg" width="1080" height="520"/>
+  <rect class="dg-bg" width="1080" height="520"/>
 
-  <text class="b-title" x="40" y="42">Layer composition and precedence</text>
-  <text class="b-sub" x="40" y="64">Each layer contributes artifacts. The registry composes them per caller identity in precedence order.</text>
+  <text class="dg-title" x="40" y="42">Layer composition and precedence</text>
+  <text class="dg-sub" x="40" y="64">Each layer contributes artifacts. The registry composes them per caller identity in precedence order.</text>
 
   <!-- Left column: layer stack -->
-  <text class="b-section" x="80" y="100">layer list (bottom = lowest precedence)</text>
+  <text class="dg-label" x="80" y="100">layer list (bottom = lowest precedence)</text>
 
   <!-- Layer 4 (top): workspace overlay -->
-  <rect class="b-layer-overlay" x="80" y="120" width="380" height="60" rx="6"/>
-  <text class="b-name" x="100" y="146">4. workspace-overlay</text>
-  <text class="b-mono" x="100" y="168">.podium/overlay/ · always highest</text>
+  <rect class="dg-card-strong" x="80" y="120" width="380" height="60" rx="6"/>
+  <text class="dg-name dg-t-l" x="100" y="146">4. workspace-overlay</text>
+  <text class="dg-mono" x="100" y="168">.podium/overlay/ · always highest</text>
 
   <!-- Layer 3: user -->
-  <rect class="b-layer-user" x="80" y="190" width="380" height="60" rx="6"/>
-  <text class="b-name" x="100" y="216">3. alice-personal</text>
-  <text class="b-mono" x="100" y="238">user-defined · visible to alice@ only</text>
+  <rect class="dg-card-primary" x="80" y="190" width="380" height="60" rx="6"/>
+  <text class="dg-name dg-t-l" x="100" y="216">3. alice-personal</text>
+  <text class="dg-mono" x="100" y="238">user-defined · visible to alice@ only</text>
 
   <!-- Layer 2: admin -->
-  <rect class="b-layer-admin" x="80" y="260" width="380" height="60" rx="6"/>
-  <text class="b-name" x="100" y="286">2. team-finance</text>
-  <text class="b-mono" x="100" y="308">admin · groups: [finance]</text>
+  <rect class="dg-card" x="80" y="260" width="380" height="60" rx="6"/>
+  <text class="dg-name dg-t-l" x="100" y="286">2. team-finance</text>
+  <text class="dg-mono" x="100" y="308">admin · groups: [finance]</text>
 
   <!-- Layer 1: admin (bottom) -->
-  <rect class="b-layer-admin" x="80" y="330" width="380" height="60" rx="6"/>
-  <text class="b-name" x="100" y="356">1. org-defaults</text>
-  <text class="b-mono" x="100" y="378">admin · organization: true</text>
+  <rect class="dg-card" x="80" y="330" width="380" height="60" rx="6"/>
+  <text class="dg-name dg-t-l" x="100" y="356">1. org-defaults</text>
+  <text class="dg-mono" x="100" y="378">admin · organization: true</text>
 
   <!-- Precedence arrow (up the left side) -->
-  <path class="b-line" d="M 56 376 L 56 144" marker-end="url(#b-arrow)"/>
-  <text class="b-annot" x="48" y="260" transform="rotate(-90 48 260)">higher precedence</text>
+  <path class="dg-line" d="M 56 376 L 56 144" marker-end="url(#dg-arrow-layer-composition)"/>
+  <text class="dg-note" x="48" y="260" transform="rotate(-90 48 260)">higher precedence</text>
 
   <!-- Composition arrow (right) -->
-  <path class="b-line" d="M 480 250 L 596 250" marker-end="url(#b-arrow)"/>
-  <text class="b-annot" x="490" y="240">compose per identity</text>
+  <path class="dg-line" d="M 480 250 L 596 250" marker-end="url(#dg-arrow-layer-composition)"/>
+  <text class="dg-note dg-t-xs" x="468" y="240">compose per identity</text>
 
   <!-- Right column: effective view -->
-  <rect class="b-effective" x="610" y="120" width="430" height="270" rx="10"/>
-  <text class="b-section" x="630" y="146">effective view for alice@acme.com</text>
+  <rect class="dg-panel" x="610" y="120" width="430" height="270" rx="10"/>
+  <text class="dg-label" x="630" y="146">effective view for alice@acme.com</text>
 
-  <text class="b-name" x="630" y="178">Higher layers override on collision.</text>
+  <text class="dg-name dg-t-l" x="630" y="178">Higher layers override on collision.</text>
 
-  <text class="b-mono" x="630" y="214">overlay  → wins</text>
-  <text class="b-mono" x="630" y="238">alice     → if no overlay match</text>
-  <text class="b-mono" x="630" y="262">finance  → if alice is a member</text>
-  <text class="b-mono" x="630" y="286">org      → fallback for anyone</text>
+  <text class="dg-mono" x="630" y="214">overlay  → wins</text>
+  <text class="dg-mono" x="630" y="238">alice     → if no overlay match</text>
+  <text class="dg-mono" x="630" y="262">finance  → if alice is a member</text>
+  <text class="dg-mono" x="630" y="286">org      → fallback for anyone</text>
 
-  <text class="b-sub" x="630" y="324">Layers the caller cannot see are silently</text>
-  <text class="b-sub" x="630" y="344">excluded. Hidden parents merge server-side</text>
-  <text class="b-sub" x="630" y="364">when a child declares extends:.</text>
+  <text class="dg-sub" x="630" y="324">Layers the caller cannot see are silently</text>
+  <text class="dg-sub" x="630" y="344">excluded. Hidden parents merge server-side</text>
+  <text class="dg-sub" x="630" y="364">when a child declares extends:.</text>
 
-  <text class="b-foot" x="40" y="450">Collisions are rejected at ingest unless the higher-precedence artifact declares extends: &lt;lower&gt;.</text>
-  <text class="b-foot" x="40" y="470">Field-level merge semantics decide which value wins per frontmatter field.</text>
-  <text class="b-foot" x="40" y="490">Resolution runs on every registry call; the workspace overlay is merged in by the MCP server.</text>
+  <text class="dg-foot" x="40" y="450">Collisions are rejected at ingest unless the higher-precedence artifact declares extends: &lt;lower&gt;.</text>
+  <text class="dg-foot" x="40" y="470">Field-level merge semantics decide which value wins per frontmatter field.</text>
+  <text class="dg-foot" x="40" y="490">Resolution runs on every registry call; the workspace overlay is merged in by the MCP server.</text>
 </svg>

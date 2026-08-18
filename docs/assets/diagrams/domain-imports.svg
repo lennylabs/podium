@@ -1,80 +1,146 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 500" font-family="Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 520" class="dg">
   <!--
-    DOMAIN.md imports.
-    A DOMAIN.md can pull artifacts from elsewhere via imports + glob
-    patterns. The imported artifacts retain their canonical IDs but
-    appear under the importing domain at discovery time.
+    DOMAIN.md include:. A DOMAIN.md can pull artifacts from elsewhere via
+    include: glob patterns. The imported artifacts retain their canonical IDs
+    but appear under the importing domain at discovery time.
   -->
   <defs>
-    <marker id="b-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
-      <path d="M 0 0 L 11 6 L 0 12 z" fill="#1f2933"/>
+    <marker id="dg-arrow-domain-imports" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path class="dg-arrow-head" d="M 0 0 L 11 6 L 0 12 z"/>
     </marker>
     <style>
-      .b-bg { fill: #ffffff; }
-      .b-domain { fill: #fffaf0; stroke: #1f2933; stroke-width: 2.2; }
-      .b-domain-mark { fill: #ffe9c7; stroke: #1f2933; stroke-width: 2.4; }
-      .b-source { fill: #d6e9d2; stroke: #1f2933; stroke-width: 2; }
-      .b-imported { fill: #d6e9d2; stroke: #547a3a; stroke-width: 1.8; stroke-dasharray: 5 4; }
-      .b-config { fill: #fffaf0; stroke: #1f2933; stroke-width: 2; }
-      .b-title { font-size: 22px; fill: #1f2933; }
-      .b-section { font-size: 14px; fill: #b56b1f; letter-spacing: 0.04em; }
-      .b-name { font-size: 16px; fill: #1f2933; }
-      .b-mono { font-size: 13px; fill: #1f2933; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
-      .b-mono-import { font-size: 13px; fill: #547a3a; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
-      .b-sub { font-size: 14px; fill: #54616e; }
-      .b-line { fill: none; stroke: #1f2933; stroke-width: 2.4; stroke-linecap: round; }
-      .b-line-import { fill: none; stroke: #547a3a; stroke-width: 2; stroke-linecap: round; stroke-dasharray: 5 4; }
-      .b-foot { font-size: 13px; fill: #8a7755; }
-      .b-annot { font-size: 13px; fill: #54616e; font-style: italic; }
+      /*
+        Colour comes from the site's design tokens. Inlined in the documentation
+        site the site's own variables win, so the theme toggle drives the
+        diagram. Standing alone (raw markdown on github.com, or the file opened
+        directly) the fallbacks apply and follow the operating system setting.
+        The block below is identical in every diagram; edit all of them together.
+      */
+      :root {
+        --dg-ground: var(--surface, #ffffff);
+        --dg-panel-fill: var(--surface-2, #fdfdf8);
+        --dg-fill: var(--surface-3, #f5f3e9);
+        --dg-fill-2: var(--chip, #eae7d9);
+        --dg-accent-fill: var(--accent-wash, #fff3e2);
+        --dg-accent-soft: var(--accent-strip, #ffeeda);
+        --dg-ink: var(--ink, #14130f);
+        --dg-meta: var(--meta, #63604f);
+        --dg-faint: var(--faint, #6f6c5e);
+        --dg-border: var(--border, #d9d5c6);
+        --dg-accent: var(--accent-deep, #f2861a);
+        --dg-accent-text: var(--link, #a8480a);
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --dg-ground: var(--surface, #171b28);
+          --dg-panel-fill: var(--surface-2, #1e2434);
+          --dg-fill: var(--surface-3, #1b2030);
+          --dg-fill-2: var(--chip, #212739);
+          --dg-accent-fill: var(--accent-wash, rgba(255, 164, 36, 0.12));
+          --dg-accent-soft: var(--accent-strip, rgba(255, 164, 36, 0.08));
+          --dg-ink: var(--ink, #eaeef7);
+          --dg-meta: var(--meta, #9aa3ba);
+          --dg-faint: var(--faint, #7a8399);
+          --dg-border: var(--border, #2b3145);
+          --dg-accent: var(--accent-deep, #f2861a);
+          --dg-accent-text: var(--link, #ffa424);
+        }
+      }
+
+      .dg {
+        font-family: var(--font-ui, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+      }
+
+      .dg-bg { fill: var(--dg-ground); }
+
+      .dg-panel { fill: var(--dg-panel-fill); stroke: var(--dg-border); stroke-width: 1.6; }
+      .dg-card { fill: var(--dg-fill); stroke: var(--dg-ink); stroke-width: 1.8; }
+      .dg-card-primary { fill: var(--dg-accent-fill); stroke: var(--dg-accent); stroke-width: 2.2; }
+      .dg-card-strong { fill: var(--dg-fill-2); stroke: var(--dg-accent); stroke-width: 2.2; }
+      .dg-card-quiet { fill: var(--dg-ground); stroke: var(--dg-meta); stroke-width: 1.4; }
+      .dg-card-event { fill: var(--dg-accent-soft); stroke: var(--dg-accent); stroke-width: 1.8; stroke-dasharray: 6 5; }
+      .dg-chip { fill: var(--dg-accent-soft); stroke: var(--dg-border); stroke-width: 1.2; }
+      .dg-outline { fill: none; stroke: var(--dg-accent); stroke-width: 1.6; stroke-dasharray: 6 5; }
+
+      .dg-title { font-size: 22px; fill: var(--dg-ink); }
+      .dg-name { font-size: 17px; fill: var(--dg-ink); }
+      .dg-lead { font-size: 15px; fill: var(--dg-meta); }
+      .dg-sub { font-size: 14px; fill: var(--dg-meta); }
+      .dg-label { font-size: 13px; fill: var(--dg-accent-text); letter-spacing: 0.06em; }
+      .dg-label-quiet { font-size: 13px; fill: var(--dg-meta); letter-spacing: 0.06em; }
+      .dg-note { font-size: 13px; fill: var(--dg-meta); font-style: italic; }
+      .dg-foot { font-size: 13px; fill: var(--dg-faint); }
+      .dg-mono { font-size: 13px; fill: var(--dg-ink); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+      .dg-mono-accent { font-size: 13px; fill: var(--dg-accent-text); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+      .dg-mono-quiet { font-size: 13px; fill: var(--dg-meta); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+
+      .dg-line { fill: none; stroke: var(--dg-ink); stroke-width: 2; stroke-linecap: round; }
+      .dg-line-accent { fill: none; stroke: var(--dg-accent); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 6 5; }
+      .dg-line-quiet { fill: none; stroke: var(--dg-meta); stroke-width: 1.6; stroke-linecap: round; }
+      .dg-guide { fill: none; stroke: var(--dg-border); stroke-width: 1.2; }
+      .dg-divider { fill: none; stroke: var(--dg-border); stroke-width: 1.2; stroke-dasharray: 4 4; }
+
+      .dg-arrow-head { fill: var(--dg-ink); }
+      .dg-arrow-head-accent { fill: var(--dg-accent); }
+
+      .dg-t-xs { font-size: 12px; }
+      .dg-t-s { font-size: 13px; }
+      .dg-t-m { font-size: 15px; }
+      .dg-t-l { font-size: 18px; }
+      .dg-t-xl { font-size: 21px; }
+      .dg-t-2xl { font-size: 24px; }
+      .dg-t-3xl { font-size: 28px; }
     </style>
   </defs>
 
-  <rect class="b-bg" width="1080" height="500"/>
+  <rect class="dg-bg" width="1080" height="520"/>
 
-  <text class="b-title" x="40" y="42">DOMAIN.md imports</text>
-  <text class="b-sub" x="40" y="64">A DOMAIN.md can pull artifacts from elsewhere via glob patterns. Canonical IDs do not change.</text>
+  <text class="dg-title" x="40" y="42">DOMAIN.md include:</text>
+  <text class="dg-sub" x="40" y="64">A DOMAIN.md can pull artifacts from elsewhere via glob patterns. Canonical IDs do not change.</text>
 
   <!-- DOMAIN.md config card (top left) -->
-  <rect class="b-config" x="40" y="100" width="380" height="160" rx="8"/>
-  <text class="b-section" x="60" y="124">finance/DOMAIN.md</text>
-  <text class="b-mono" x="60" y="154">description: Finance team artifacts.</text>
-  <text class="b-mono" x="60" y="174">keywords: [ap, ar, treasury]</text>
-  <text class="b-mono-import" x="60" y="204">imports:</text>
-  <text class="b-mono-import" x="60" y="224">  - _shared/payment-helpers/**</text>
-  <text class="b-mono-import" x="60" y="244">  - treasury/risk-models@1.x</text>
+  <rect class="dg-card" x="40" y="100" width="380" height="180" rx="8"/>
+  <text class="dg-label" x="60" y="124">finance/DOMAIN.md</text>
+  <text class="dg-mono" x="60" y="154">description: Finance team artifacts.</text>
+  <text class="dg-mono" x="60" y="174">discovery:</text>
+  <text class="dg-mono" x="60" y="194">  keywords: [ap, ar, treasury]</text>
+  <text class="dg-mono-accent" x="60" y="224">include:</text>
+  <text class="dg-mono-accent" x="60" y="244">  - _shared/payment-helpers/**</text>
+  <text class="dg-mono-accent" x="60" y="264">  - treasury/risk-models/**</text>
 
   <!-- Source: _shared (top right) -->
-  <rect class="b-source" x="500" y="100" width="540" height="160" rx="8"/>
-  <text class="b-section" x="520" y="124">source layer: _shared/</text>
+  <rect class="dg-card-strong" x="500" y="100" width="540" height="160" rx="8"/>
+  <text class="dg-label" x="520" y="124">source layer: _shared/</text>
 
-  <rect class="b-domain" x="520" y="138" width="500" height="40" rx="6"/>
-  <text class="b-mono" x="540" y="162">_shared/payment-helpers/routing-validator/</text>
+  <rect class="dg-card" x="520" y="138" width="500" height="40" rx="6"/>
+  <text class="dg-mono" x="540" y="162">_shared/payment-helpers/routing-validator/</text>
 
-  <rect class="b-domain" x="520" y="186" width="500" height="40" rx="6"/>
-  <text class="b-mono" x="540" y="210">_shared/payment-helpers/swift-bic-parser/</text>
+  <rect class="dg-card" x="520" y="186" width="500" height="40" rx="6"/>
+  <text class="dg-mono" x="540" y="210">_shared/payment-helpers/swift-bic-parser/</text>
 
-  <text class="b-sub" x="520" y="248">canonical IDs stay rooted in _shared/</text>
+  <text class="dg-sub" x="520" y="248">canonical IDs stay rooted in _shared/</text>
 
   <!-- Arrow: config -> resolution -->
-  <path class="b-line" d="M 230 260 L 230 300" marker-end="url(#b-arrow)"/>
-  <text class="b-annot" x="244" y="288">resolved at request time</text>
+  <path class="dg-line" d="M 230 288 L 230 312" marker-end="url(#dg-arrow-domain-imports)"/>
+  <text class="dg-note" x="246" y="304">resolved at request time</text>
 
   <!-- Result: composed view of finance/ -->
-  <rect class="b-domain-mark" x="40" y="316" width="1000" height="124" rx="8"/>
-  <text class="b-section" x="60" y="340">effective view of finance/ for the caller</text>
+  <rect class="dg-card-primary" x="40" y="316" width="1000" height="140" rx="8"/>
+  <text class="dg-label" x="60" y="340">effective view of finance/ for the caller</text>
 
-  <text class="b-mono" x="60" y="370">finance/ap/pay-invoice            </text>
-  <text class="b-sub" x="340" y="370">native</text>
+  <text class="dg-mono" x="60" y="370">finance/ap/pay-invoice            </text>
+  <text class="dg-sub" x="340" y="370">native</text>
 
-  <text class="b-mono" x="60" y="392">finance/close-reporting/run-variance-analysis            </text>
-  <text class="b-sub" x="420" y="392">native</text>
+  <text class="dg-mono" x="60" y="392">finance/close-reporting/run-variance-analysis            </text>
+  <text class="dg-sub" x="420" y="392">native</text>
 
-  <text class="b-mono-import" x="60" y="414">_shared/payment-helpers/routing-validator            </text>
-  <text class="b-sub" x="420" y="414">imported · appears under finance/</text>
+  <text class="dg-mono-accent" x="60" y="414">_shared/payment-helpers/routing-validator            </text>
+  <text class="dg-sub" x="420" y="414">imported · appears under finance/</text>
 
-  <text class="b-mono-import" x="60" y="436">_shared/payment-helpers/swift-bic-parser            </text>
-  <text class="b-sub" x="420" y="436">imported · appears under finance/</text>
+  <text class="dg-mono-accent" x="60" y="436">_shared/payment-helpers/swift-bic-parser            </text>
+  <text class="dg-sub" x="420" y="436">imported · appears under finance/</text>
 
-  <text class="b-foot" x="40" y="470">Imported artifacts can show under multiple domains; the canonical ID is what they keep.</text>
-  <text class="b-foot" x="40" y="488">Glob patterns expand against the visible layer set; imports the caller cannot see are silently dropped.</text>
+  <text class="dg-foot" x="40" y="486">Imported artifacts can show under multiple domains; the canonical ID is what they keep.</text>
+  <text class="dg-foot" x="40" y="504">Glob patterns expand against the visible layer set; included artifacts the caller cannot see are silently dropped.</text>
 </svg>

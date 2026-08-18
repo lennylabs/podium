@@ -1,142 +1,203 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 700" font-family="Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 764" class="dg">
   <!--
-    extends: inheritance.
-    A higher-precedence layer's artifact may declare extends: pointing
-    at a lower-precedence ID. Both the manifest fields and the bundled
-    files merge: scalars take the child's value, set-typed lists union,
-    same-path files in the child override the parent's, and parent-only
-    files are inherited. The parent version is pinned at the child's
-    ingest time.
+    extends: inheritance. A higher-precedence layer's artifact may declare
+    extends: pointing at a lower-precedence ID. The manifest fields merge:
+    scalars take the child's value, set-typed lists union, and security-relevant
+    fields take the most restrictive value. Bundled files do not merge; the
+    materialized package carries the child's own files. The parent version is
+    pinned at the child's ingest time.
   -->
   <defs>
-    <marker id="b-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
-      <path d="M 0 0 L 11 6 L 0 12 z" fill="#1f2933"/>
+    <marker id="dg-arrow-extends-inheritance" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path class="dg-arrow-head" d="M 0 0 L 11 6 L 0 12 z"/>
     </marker>
     <style>
-      .b-bg { fill: #ffffff; }
-      .b-parent { fill: #fffaf0; stroke: #1f2933; stroke-width: 2.2; }
-      .b-child { fill: #ffe9c7; stroke: #1f2933; stroke-width: 2.4; }
-      .b-merged { fill: #d6e9d2; stroke: #1f2933; stroke-width: 2.4; }
-      .b-title { font-size: 22px; fill: #1f2933; }
-      .b-section { font-size: 14px; fill: #b56b1f; letter-spacing: 0.04em; }
-      .b-section-heading { font-size: 16px; fill: #1f2933; }
-      .b-card-title { font-size: 16px; fill: #1f2933; }
-      .b-mono { font-size: 13px; fill: #1f2933; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
-      .b-mono-parent { font-size: 13px; fill: #8a7755; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
-      .b-mono-child { font-size: 13px; fill: #b56b1f; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
-      .b-sub { font-size: 13px; fill: #54616e; }
-      .b-line { fill: none; stroke: #1f2933; stroke-width: 2.4; stroke-linecap: round; }
-      .b-foot { font-size: 13px; fill: #8a7755; }
-      .b-key { font-size: 12px; fill: #54616e; }
-      .b-annot { font-size: 12px; fill: #547a3a; }
+      /*
+        Colour comes from the site's design tokens. Inlined in the documentation
+        site the site's own variables win, so the theme toggle drives the
+        diagram. Standing alone (raw markdown on github.com, or the file opened
+        directly) the fallbacks apply and follow the operating system setting.
+        The block below is identical in every diagram; edit all of them together.
+      */
+      :root {
+        --dg-ground: var(--surface, #ffffff);
+        --dg-panel-fill: var(--surface-2, #fdfdf8);
+        --dg-fill: var(--surface-3, #f5f3e9);
+        --dg-fill-2: var(--chip, #eae7d9);
+        --dg-accent-fill: var(--accent-wash, #fff3e2);
+        --dg-accent-soft: var(--accent-strip, #ffeeda);
+        --dg-ink: var(--ink, #14130f);
+        --dg-meta: var(--meta, #63604f);
+        --dg-faint: var(--faint, #6f6c5e);
+        --dg-border: var(--border, #d9d5c6);
+        --dg-accent: var(--accent-deep, #f2861a);
+        --dg-accent-text: var(--link, #a8480a);
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --dg-ground: var(--surface, #171b28);
+          --dg-panel-fill: var(--surface-2, #1e2434);
+          --dg-fill: var(--surface-3, #1b2030);
+          --dg-fill-2: var(--chip, #212739);
+          --dg-accent-fill: var(--accent-wash, rgba(255, 164, 36, 0.12));
+          --dg-accent-soft: var(--accent-strip, rgba(255, 164, 36, 0.08));
+          --dg-ink: var(--ink, #eaeef7);
+          --dg-meta: var(--meta, #9aa3ba);
+          --dg-faint: var(--faint, #7a8399);
+          --dg-border: var(--border, #2b3145);
+          --dg-accent: var(--accent-deep, #f2861a);
+          --dg-accent-text: var(--link, #ffa424);
+        }
+      }
+
+      .dg {
+        font-family: var(--font-ui, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+      }
+
+      .dg-bg { fill: var(--dg-ground); }
+
+      .dg-panel { fill: var(--dg-panel-fill); stroke: var(--dg-border); stroke-width: 1.6; }
+      .dg-card { fill: var(--dg-fill); stroke: var(--dg-ink); stroke-width: 1.8; }
+      .dg-card-primary { fill: var(--dg-accent-fill); stroke: var(--dg-accent); stroke-width: 2.2; }
+      .dg-card-strong { fill: var(--dg-fill-2); stroke: var(--dg-accent); stroke-width: 2.2; }
+      .dg-card-quiet { fill: var(--dg-ground); stroke: var(--dg-meta); stroke-width: 1.4; }
+      .dg-card-event { fill: var(--dg-accent-soft); stroke: var(--dg-accent); stroke-width: 1.8; stroke-dasharray: 6 5; }
+      .dg-chip { fill: var(--dg-accent-soft); stroke: var(--dg-border); stroke-width: 1.2; }
+      .dg-outline { fill: none; stroke: var(--dg-accent); stroke-width: 1.6; stroke-dasharray: 6 5; }
+
+      .dg-title { font-size: 22px; fill: var(--dg-ink); }
+      .dg-name { font-size: 17px; fill: var(--dg-ink); }
+      .dg-lead { font-size: 15px; fill: var(--dg-meta); }
+      .dg-sub { font-size: 14px; fill: var(--dg-meta); }
+      .dg-label { font-size: 13px; fill: var(--dg-accent-text); letter-spacing: 0.06em; }
+      .dg-label-quiet { font-size: 13px; fill: var(--dg-meta); letter-spacing: 0.06em; }
+      .dg-note { font-size: 13px; fill: var(--dg-meta); font-style: italic; }
+      .dg-foot { font-size: 13px; fill: var(--dg-faint); }
+      .dg-mono { font-size: 13px; fill: var(--dg-ink); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+      .dg-mono-accent { font-size: 13px; fill: var(--dg-accent-text); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+      .dg-mono-quiet { font-size: 13px; fill: var(--dg-meta); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+
+      .dg-line { fill: none; stroke: var(--dg-ink); stroke-width: 2; stroke-linecap: round; }
+      .dg-line-accent { fill: none; stroke: var(--dg-accent); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 6 5; }
+      .dg-line-quiet { fill: none; stroke: var(--dg-meta); stroke-width: 1.6; stroke-linecap: round; }
+      .dg-guide { fill: none; stroke: var(--dg-border); stroke-width: 1.2; }
+      .dg-divider { fill: none; stroke: var(--dg-border); stroke-width: 1.2; stroke-dasharray: 4 4; }
+
+      .dg-arrow-head { fill: var(--dg-ink); }
+      .dg-arrow-head-accent { fill: var(--dg-accent); }
+
+      .dg-t-xs { font-size: 12px; }
+      .dg-t-s { font-size: 13px; }
+      .dg-t-m { font-size: 15px; }
+      .dg-t-l { font-size: 18px; }
+      .dg-t-xl { font-size: 21px; }
+      .dg-t-2xl { font-size: 24px; }
+      .dg-t-3xl { font-size: 28px; }
     </style>
   </defs>
 
-  <rect class="b-bg" width="1080" height="700"/>
+  <rect class="dg-bg" width="1080" height="764"/>
 
-  <text class="b-title" x="40" y="42">Inheritance with extends:</text>
-  <text class="b-sub" x="40" y="64">A higher-precedence artifact extends a lower one. Manifest fields and bundled files both merge.</text>
+  <text class="dg-title" x="40" y="42">Inheritance with extends:</text>
+  <text class="dg-sub dg-t-s" x="40" y="64">A higher-precedence artifact extends a lower one. The manifest fields merge; the bundled files do not.</text>
 
   <!-- ====== Manifest section ====== -->
-  <text class="b-section-heading" x="40" y="98">Manifest fields</text>
+  <text class="dg-name dg-t-m" x="40" y="98">Manifest fields</text>
 
   <!-- Parent manifest -->
-  <rect class="b-parent" x="40" y="110" width="320" height="200" rx="8"/>
-  <text class="b-section" x="56" y="132">parent (lower precedence)</text>
-  <text class="b-card-title" x="56" y="156">finance/ap/pay-invoice@1.2</text>
+  <rect class="dg-card" x="40" y="110" width="320" height="200" rx="8"/>
+  <text class="dg-label" x="56" y="132">parent (lower precedence)</text>
+  <text class="dg-name dg-t-m" x="56" y="156">finance/ap/pay-invoice@1.2.x</text>
 
-  <text class="b-mono" x="56" y="186">type: skill</text>
-  <text class="b-mono" x="56" y="206">version: 1.2.0</text>
-  <text class="b-mono" x="56" y="226">description: Pay an invoice.</text>
-  <text class="b-mono" x="56" y="246">tags: [finance, ap]</text>
-  <text class="b-mono" x="56" y="266">sensitivity: medium</text>
-  <text class="b-mono" x="56" y="286">requiresApproval: payment-submit</text>
+  <text class="dg-mono" x="56" y="186">type: skill</text>
+  <text class="dg-mono" x="56" y="206">version: 1.2.0</text>
+  <text class="dg-mono" x="56" y="226">description: Pay an invoice.</text>
+  <text class="dg-mono" x="56" y="246">tags: [finance, ap]</text>
+  <text class="dg-mono" x="56" y="266">sensitivity: medium</text>
+  <text class="dg-mono" x="56" y="286">requiresApproval: payment-submit</text>
 
   <!-- Child manifest -->
-  <rect class="b-child" x="380" y="110" width="320" height="200" rx="8"/>
-  <text class="b-section" x="396" y="132">child (higher precedence)</text>
-  <text class="b-card-title" x="396" y="156">finance/ap/pay-invoice (overlay)</text>
+  <rect class="dg-card-primary" x="380" y="110" width="320" height="200" rx="8"/>
+  <text class="dg-label" x="396" y="132">child (higher precedence)</text>
+  <text class="dg-name dg-t-m" x="396" y="156">finance/ap/pay-invoice (overlay)</text>
 
-  <text class="b-mono-child" x="396" y="186">extends: finance/ap/pay-invoice@1.2</text>
-  <text class="b-mono-child" x="396" y="206">version: 1.3.0</text>
-  <text class="b-mono-child" x="396" y="226">description: Pay an invoice (EU).</text>
-  <text class="b-mono-child" x="396" y="246">tags: [eu, vat]</text>
-  <text class="b-mono-child" x="396" y="266">requiresApproval: vat-lookup</text>
+  <text class="dg-mono-accent" x="396" y="186">extends: finance/ap/pay-invoice@1.2.x</text>
+  <text class="dg-mono-accent" x="396" y="206">version: 1.3.0</text>
+  <text class="dg-mono-accent" x="396" y="226">description: Pay an invoice (EU).</text>
+  <text class="dg-mono-accent" x="396" y="246">tags: [eu, vat]</text>
+  <text class="dg-mono-accent" x="396" y="266">requiresApproval: vat-lookup</text>
 
   <!-- Arrow child -> merged -->
-  <path class="b-line" d="M 700 210 L 716 210" marker-end="url(#b-arrow)"/>
+  <path class="dg-line" d="M 700 210 L 716 210" marker-end="url(#dg-arrow-extends-inheritance)"/>
 
   <!-- Merged manifest -->
-  <rect class="b-merged" x="720" y="110" width="320" height="200" rx="8"/>
-  <text class="b-section" x="736" y="132">merged manifest</text>
-  <text class="b-card-title" x="736" y="156">what the caller sees</text>
+  <rect class="dg-card-strong" x="720" y="110" width="320" height="200" rx="8"/>
+  <text class="dg-label" x="736" y="132">merged manifest</text>
+  <text class="dg-name dg-t-m" x="736" y="156">what the caller sees</text>
 
-  <text class="b-mono-parent" x="736" y="186">type: skill</text>
-  <text class="b-mono-child" x="736" y="206">version: 1.3.0</text>
-  <text class="b-mono-child" x="736" y="226">description: Pay an invoice (EU).</text>
-  <text class="b-mono-child" x="736" y="246">tags: [finance, ap, eu, vat]</text>
-  <text class="b-mono-parent" x="736" y="266">sensitivity: medium</text>
-  <text class="b-mono-child" x="736" y="286">requiresApproval: payment-submit,</text>
-  <text class="b-mono-child" x="752" y="302">vat-lookup</text>
+  <text class="dg-mono-quiet" x="736" y="186">type: skill</text>
+  <text class="dg-mono-accent" x="736" y="206">version: 1.3.0</text>
+  <text class="dg-mono-accent" x="736" y="226">description: Pay an invoice (EU).</text>
+  <text class="dg-mono-accent" x="736" y="246">tags: [finance, ap, eu, vat]</text>
+  <text class="dg-mono-quiet" x="736" y="266">sensitivity: medium</text>
+  <text class="dg-mono-accent" x="736" y="286">requiresApproval: payment-submit,</text>
+  <text class="dg-mono-accent" x="752" y="302">vat-lookup</text>
 
   <!-- ====== Bundled files section ====== -->
-  <text class="b-section-heading" x="40" y="358">Bundled files (scripts, references, assets, and so on)</text>
+  <text class="dg-name dg-t-m" x="40" y="358">Bundled files (scripts, references, assets, and so on)</text>
 
   <!-- Parent files -->
-  <rect class="b-parent" x="40" y="370" width="320" height="180" rx="8"/>
-  <text class="b-section" x="56" y="392">parent files</text>
+  <rect class="dg-card" x="40" y="370" width="320" height="180" rx="8"/>
+  <text class="dg-label" x="56" y="392">parent files</text>
 
-  <text class="b-mono" x="56" y="420">ARTIFACT.md</text>
-  <text class="b-mono" x="56" y="440">SKILL.md</text>
-  <text class="b-mono" x="56" y="460">scripts/validate.py</text>
-  <text class="b-mono" x="56" y="480">scripts/submit.py</text>
-  <text class="b-mono" x="56" y="500">references/process.md</text>
+  <text class="dg-mono" x="56" y="420">ARTIFACT.md</text>
+  <text class="dg-mono" x="56" y="440">SKILL.md</text>
+  <text class="dg-mono" x="56" y="460">scripts/validate.py</text>
+  <text class="dg-mono" x="56" y="480">scripts/submit.py</text>
+  <text class="dg-mono" x="56" y="500">references/process.md</text>
 
   <!-- Child files -->
-  <rect class="b-child" x="380" y="370" width="320" height="180" rx="8"/>
-  <text class="b-section" x="396" y="392">child files</text>
+  <rect class="dg-card-primary" x="380" y="370" width="320" height="180" rx="8"/>
+  <text class="dg-label" x="396" y="392">child files</text>
 
-  <text class="b-mono-child" x="396" y="420">SKILL.md</text>
-  <text class="b-annot" x="588" y="420">(overrides)</text>
-  <text class="b-mono-child" x="396" y="440">scripts/submit.py</text>
-  <text class="b-annot" x="588" y="440">(overrides)</text>
-  <text class="b-mono-child" x="396" y="460">scripts/vat-lookup.py</text>
-  <text class="b-annot" x="588" y="460">(new)</text>
-  <text class="b-mono-child" x="396" y="480">assets/eu-template.j2</text>
-  <text class="b-annot" x="588" y="480">(new)</text>
+  <text class="dg-mono-accent" x="396" y="420">ARTIFACT.md</text>
+  <text class="dg-mono-accent" x="396" y="440">SKILL.md</text>
+  <text class="dg-mono-accent" x="396" y="460">scripts/submit.py</text>
+  <text class="dg-mono-accent" x="396" y="480">scripts/vat-lookup.py</text>
+  <text class="dg-mono-accent" x="396" y="500">assets/eu-template.j2</text>
 
   <!-- Arrow child -> merged -->
-  <path class="b-line" d="M 700 460 L 716 460" marker-end="url(#b-arrow)"/>
+  <path class="dg-line" d="M 700 460 L 716 460" marker-end="url(#dg-arrow-extends-inheritance)"/>
 
   <!-- Merged files -->
-  <rect class="b-merged" x="720" y="370" width="320" height="200" rx="8"/>
-  <text class="b-section" x="736" y="392">materialized file tree</text>
+  <rect class="dg-card-strong" x="720" y="370" width="320" height="180" rx="8"/>
+  <text class="dg-label" x="736" y="392">materialized file tree</text>
 
-  <text class="b-mono-parent" x="736" y="420">ARTIFACT.md</text>
-  <text class="b-key" x="936" y="420">from parent</text>
-  <text class="b-mono-child" x="736" y="440">SKILL.md</text>
-  <text class="b-key" x="936" y="440">child wins</text>
-  <text class="b-mono-parent" x="736" y="460">scripts/validate.py</text>
-  <text class="b-key" x="936" y="460">from parent</text>
-  <text class="b-mono-child" x="736" y="480">scripts/submit.py</text>
-  <text class="b-key" x="936" y="480">child wins</text>
-  <text class="b-mono-child" x="736" y="500">scripts/vat-lookup.py</text>
-  <text class="b-key" x="936" y="500">child only</text>
-  <text class="b-mono-parent" x="736" y="520">references/process.md</text>
-  <text class="b-key" x="936" y="520">from parent</text>
-  <text class="b-mono-child" x="736" y="540">assets/eu-template.j2</text>
-  <text class="b-key" x="936" y="540">child only</text>
+  <text class="dg-mono" x="736" y="420">ARTIFACT.md</text>
+  <text class="dg-sub dg-t-xs" x="925" y="420">merged manifest</text>
+  <text class="dg-mono-accent" x="736" y="440">SKILL.md</text>
+  <text class="dg-sub dg-t-xs" x="925" y="440">child</text>
+  <text class="dg-mono-accent" x="736" y="460">scripts/submit.py</text>
+  <text class="dg-sub dg-t-xs" x="925" y="460">child</text>
+  <text class="dg-mono-accent" x="736" y="480">scripts/vat-lookup.py</text>
+  <text class="dg-sub dg-t-xs" x="925" y="480">child</text>
+  <text class="dg-mono-accent" x="736" y="500">assets/eu-template.j2</text>
+  <text class="dg-sub dg-t-xs" x="925" y="500">child</text>
 
   <!-- Color key -->
-  <text class="b-key" x="40" y="620">colors:</text>
-  <rect class="b-parent" x="100" y="608" width="14" height="14" rx="2"/>
-  <text class="b-key" x="120" y="620">from parent</text>
-  <rect class="b-child" x="220" y="608" width="14" height="14" rx="2"/>
-  <text class="b-key" x="240" y="620">from child</text>
-  <rect class="b-merged" x="340" y="608" width="14" height="14" rx="2"/>
-  <text class="b-key" x="360" y="620">merged result</text>
+  <text class="dg-sub dg-t-xs" x="40" y="620">colors:</text>
+  <rect class="dg-card" x="100" y="608" width="14" height="14" rx="2"/>
+  <text class="dg-sub dg-t-xs" x="120" y="620">from parent</text>
+  <rect class="dg-card-primary" x="220" y="608" width="14" height="14" rx="2"/>
+  <text class="dg-sub dg-t-xs" x="240" y="620">from child</text>
+  <rect class="dg-card-strong" x="340" y="608" width="14" height="14" rx="2"/>
+  <text class="dg-sub dg-t-xs" x="360" y="620">merged result</text>
 
-  <text class="b-foot" x="40" y="654">Manifest scalars (version, description) take the child's value; set-typed lists (tags, requiresApproval) union; security-relevant fields take the most restrictive value.</text>
-  <text class="b-foot" x="40" y="672">Files merge by relative path: same-path file in the child overrides the parent; parent-only files are inherited; child-only files are added. The child cannot delete a parent file.</text>
-  <text class="b-foot" x="40" y="690">Cycle detection runs at ingest. extends: is single-inheritance; the parent version is pinned at child ingest time. Hidden parents merge server-side without surfacing the parent ID.</text>
+  <text class="dg-foot" x="40" y="646">Manifest scalars (version, description) take the child's value; set-typed lists (tags, requiresApproval) union;</text>
+  <text class="dg-foot" x="40" y="664">security-relevant fields take the most restrictive value.</text>
+  <text class="dg-foot" x="40" y="688">Bundled files do not merge: the materialized package carries the child's own files, and the parent contributes</text>
+  <text class="dg-foot" x="40" y="706">frontmatter only.</text>
+  <text class="dg-foot" x="40" y="730">Cycle detection runs at ingest. extends: is single-inheritance; the parent version is pinned at child ingest time.</text>
+  <text class="dg-foot" x="40" y="748">Hidden parents merge server-side without surfacing the parent ID.</text>
 </svg>

@@ -1,98 +1,178 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 480" font-family="Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 630" class="dg">
   <!--
-    podium sync watch mode (the long-running form invoked with the
-    watch flag). The client subscribes to registry change events
-    and re-materializes affected artifacts incrementally.
+    podium sync watch mode against a server-source registry (the long-running
+    form invoked with the watch flag). The watcher subscribes to the registry
+    change-event stream, debounces the triggers it receives, and reruns the
+    whole sync on each debounced trigger. Nothing is materialized per event.
+
+    Layout: 40px outer margin. Left column (x=40..460) carries the trigger
+    source, the debounce, and the loop back. Right panel (x=520..1040) carries
+    the five steps of one run. The target tree spans the bottom.
   -->
   <defs>
-    <marker id="b-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
-      <path d="M 0 0 L 11 6 L 0 12 z" fill="#1f2933"/>
+    <marker id="dg-arrow-sync-watch" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path class="dg-arrow-head" d="M 0 0 L 11 6 L 0 12 z"/>
     </marker>
-    <marker id="b-arrow-event" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
-      <path d="M 0 0 L 11 6 L 0 12 z" fill="#c84a1d"/>
+    <marker id="dg-arrow-accent-sync-watch" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path class="dg-arrow-head-accent" d="M 0 0 L 11 6 L 0 12 z"/>
     </marker>
     <style>
-      .b-bg { fill: #ffffff; }
-      .b-registry { fill: #ffe9c7; stroke: #1f2933; stroke-width: 2.4; }
-      .b-watcher { fill: #fffaf0; stroke: #1f2933; stroke-width: 2.2; }
-      .b-stage { fill: #fffaf0; stroke: #1f2933; stroke-width: 2; }
-      .b-target { fill: #d6e9d2; stroke: #1f2933; stroke-width: 2.2; }
-      .b-event { fill: #fde2d6; stroke: #c84a1d; stroke-width: 1.6; }
-      .b-title { font-size: 22px; fill: #1f2933; }
-      .b-section { font-size: 14px; fill: #b56b1f; letter-spacing: 0.04em; }
-      .b-name { font-size: 17px; fill: #1f2933; }
-      .b-sub { font-size: 14px; fill: #54616e; }
-      .b-mono { font-size: 13px; fill: #1f2933; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
-      .b-line { fill: none; stroke: #1f2933; stroke-width: 2.4; stroke-linecap: round; }
-      .b-line-event { fill: none; stroke: #c84a1d; stroke-width: 2.2; stroke-linecap: round; stroke-dasharray: 6 5; }
-      .b-annot { font-size: 13px; fill: #54616e; font-style: italic; }
-      .b-foot { font-size: 13px; fill: #8a7755; }
+      /*
+        Colour comes from the site's design tokens. Inlined in the documentation
+        site the site's own variables win, so the theme toggle drives the
+        diagram. Standing alone (raw markdown on github.com, or the file opened
+        directly) the fallbacks apply and follow the operating system setting.
+        The block below is identical in every diagram; edit all of them together.
+      */
+      :root {
+        --dg-ground: var(--surface, #ffffff);
+        --dg-panel-fill: var(--surface-2, #fdfdf8);
+        --dg-fill: var(--surface-3, #f5f3e9);
+        --dg-fill-2: var(--chip, #eae7d9);
+        --dg-accent-fill: var(--accent-wash, #fff3e2);
+        --dg-accent-soft: var(--accent-strip, #ffeeda);
+        --dg-ink: var(--ink, #14130f);
+        --dg-meta: var(--meta, #63604f);
+        --dg-faint: var(--faint, #6f6c5e);
+        --dg-border: var(--border, #d9d5c6);
+        --dg-accent: var(--accent-deep, #f2861a);
+        --dg-accent-text: var(--link, #a8480a);
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --dg-ground: var(--surface, #171b28);
+          --dg-panel-fill: var(--surface-2, #1e2434);
+          --dg-fill: var(--surface-3, #1b2030);
+          --dg-fill-2: var(--chip, #212739);
+          --dg-accent-fill: var(--accent-wash, rgba(255, 164, 36, 0.12));
+          --dg-accent-soft: var(--accent-strip, rgba(255, 164, 36, 0.08));
+          --dg-ink: var(--ink, #eaeef7);
+          --dg-meta: var(--meta, #9aa3ba);
+          --dg-faint: var(--faint, #7a8399);
+          --dg-border: var(--border, #2b3145);
+          --dg-accent: var(--accent-deep, #f2861a);
+          --dg-accent-text: var(--link, #ffa424);
+        }
+      }
+
+      .dg {
+        font-family: var(--font-ui, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+      }
+
+      .dg-bg { fill: var(--dg-ground); }
+
+      .dg-panel { fill: var(--dg-panel-fill); stroke: var(--dg-border); stroke-width: 1.6; }
+      .dg-card { fill: var(--dg-fill); stroke: var(--dg-ink); stroke-width: 1.8; }
+      .dg-card-primary { fill: var(--dg-accent-fill); stroke: var(--dg-accent); stroke-width: 2.2; }
+      .dg-card-strong { fill: var(--dg-fill-2); stroke: var(--dg-accent); stroke-width: 2.2; }
+      .dg-card-quiet { fill: var(--dg-ground); stroke: var(--dg-meta); stroke-width: 1.4; }
+      .dg-card-event { fill: var(--dg-accent-soft); stroke: var(--dg-accent); stroke-width: 1.8; stroke-dasharray: 6 5; }
+      .dg-chip { fill: var(--dg-accent-soft); stroke: var(--dg-border); stroke-width: 1.2; }
+      .dg-outline { fill: none; stroke: var(--dg-accent); stroke-width: 1.6; stroke-dasharray: 6 5; }
+
+      .dg-title { font-size: 22px; fill: var(--dg-ink); }
+      .dg-name { font-size: 17px; fill: var(--dg-ink); }
+      .dg-lead { font-size: 15px; fill: var(--dg-meta); }
+      .dg-sub { font-size: 14px; fill: var(--dg-meta); }
+      .dg-label { font-size: 13px; fill: var(--dg-accent-text); letter-spacing: 0.06em; }
+      .dg-label-quiet { font-size: 13px; fill: var(--dg-meta); letter-spacing: 0.06em; }
+      .dg-note { font-size: 13px; fill: var(--dg-meta); font-style: italic; }
+      .dg-foot { font-size: 13px; fill: var(--dg-faint); }
+      .dg-mono { font-size: 13px; fill: var(--dg-ink); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+      .dg-mono-accent { font-size: 13px; fill: var(--dg-accent-text); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+      .dg-mono-quiet { font-size: 13px; fill: var(--dg-meta); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+
+      .dg-line { fill: none; stroke: var(--dg-ink); stroke-width: 2; stroke-linecap: round; }
+      .dg-line-accent { fill: none; stroke: var(--dg-accent); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 6 5; }
+      .dg-line-quiet { fill: none; stroke: var(--dg-meta); stroke-width: 1.6; stroke-linecap: round; }
+      .dg-guide { fill: none; stroke: var(--dg-border); stroke-width: 1.2; }
+      .dg-divider { fill: none; stroke: var(--dg-border); stroke-width: 1.2; stroke-dasharray: 4 4; }
+
+      .dg-arrow-head { fill: var(--dg-ink); }
+      .dg-arrow-head-accent { fill: var(--dg-accent); }
+
+      .dg-t-xs { font-size: 12px; }
+      .dg-t-s { font-size: 13px; }
+      .dg-t-m { font-size: 15px; }
+      .dg-t-l { font-size: 18px; }
+      .dg-t-xl { font-size: 21px; }
+      .dg-t-2xl { font-size: 24px; }
+      .dg-t-3xl { font-size: 28px; }
     </style>
   </defs>
 
-  <rect class="b-bg" width="1080" height="480"/>
+  <rect class="dg-bg" width="1080" height="630"/>
 
-  <text class="b-title" x="40" y="42">podium sync watch mode (server-source registry)</text>
-  <text class="b-sub" x="40" y="64">The watcher subscribes to registry events and re-materializes the changed artifacts incrementally.</text>
+  <text class="dg-title" x="40" y="44">podium sync watch mode (server-source registry)</text>
+  <text class="dg-sub" x="40" y="68">A trigger reruns the whole sync. The run rewrites every selected artifact and deletes the paths that left the view.</text>
 
-  <!-- Registry on left -->
-  <rect class="b-registry" x="40" y="120" width="220" height="100" rx="8"/>
-  <text class="b-section" x="60" y="146">podium server</text>
-  <text class="b-name" x="60" y="170">change events</text>
-  <text class="b-sub" x="60" y="192">SSE stream over HTTP,</text>
-  <text class="b-sub" x="60" y="210">filtered to caller's view</text>
+  <!-- Trigger source: the registry change-event stream -->
+  <rect class="dg-panel" x="40" y="96" width="420" height="198" rx="10"/>
+  <text class="dg-label" x="62" y="124">podium server</text>
 
-  <!-- Arrow registry -> watcher step 1, with the event payload labelled below the arrow. -->
-  <path class="b-line-event" d="M 260 170 L 516 170" marker-end="url(#b-arrow-event)"/>
+  <rect class="dg-card-primary" x="60" y="136" width="380" height="72" rx="8"/>
+  <text class="dg-mono" x="78" y="166">GET /v1/events</text>
+  <text class="dg-sub" x="78" y="192">newline-delimited JSON, one line per event</text>
 
-  <!-- Event payload label (positioned beneath the arrow) -->
-  <rect class="b-event" x="306" y="184" width="168" height="44" rx="6"/>
-  <text class="b-mono" x="320" y="204">{artifact_id,</text>
-  <text class="b-mono" x="320" y="220">version, change}</text>
+  <rect class="dg-card-quiet" x="60" y="218" width="380" height="60" rx="6"/>
+  <text class="dg-sub dg-t-s" x="78" y="242">the watcher reconnects 500 ms</text>
+  <text class="dg-sub dg-t-s" x="78" y="262">after a dropped stream</text>
 
-  <!-- Watcher loop on right -->
-  <rect class="b-watcher" x="500" y="100" width="540" height="240" rx="10"/>
-  <text class="b-section" x="520" y="124">podium sync (watching)</text>
+  <!-- Trigger into the debounce -->
+  <path class="dg-line-accent" d="M 150 294 L 150 324" marker-end="url(#dg-arrow-accent-sync-watch)"/>
+  <text class="dg-note" x="170" y="314">only the event type is read</text>
 
-  <!-- Stage 1: receive -->
-  <rect class="b-stage" x="520" y="140" width="160" height="64" rx="6"/>
-  <text class="b-name" x="536" y="164">1. Receive event</text>
-  <text class="b-sub" x="536" y="186">debounce same id</text>
+  <!-- Debounce -->
+  <rect class="dg-card" x="40" y="328" width="420" height="96" rx="8"/>
+  <text class="dg-name" x="62" y="358">Debounce</text>
+  <text class="dg-sub" x="62" y="382">one timer for the whole stream</text>
+  <text class="dg-sub" x="62" y="404">a burst of events becomes one run</text>
 
-  <path class="b-line" d="M 680 172 L 712 172" marker-end="url(#b-arrow)"/>
+  <!-- Debounced trigger enters the run at step 1. -->
+  <path class="dg-line" d="M 460 376 L 490 376 L 490 164 L 512 164" marker-end="url(#dg-arrow-sync-watch)"/>
 
-  <!-- Stage 2: fetch -->
-  <rect class="b-stage" x="716" y="140" width="160" height="64" rx="6"/>
-  <text class="b-name" x="732" y="164">2. Fetch manifest</text>
-  <text class="b-sub" x="732" y="186">load_artifact</text>
+  <!-- One full sync run -->
+  <rect class="dg-panel" x="520" y="96" width="520" height="344" rx="10"/>
+  <text class="dg-label" x="542" y="124">one full sync run</text>
 
-  <path class="b-line" d="M 876 172 L 908 172" marker-end="url(#b-arrow)"/>
+  <rect class="dg-card" x="540" y="140" width="480" height="48" rx="6"/>
+  <text class="dg-label" x="558" y="170">1</text>
+  <text class="dg-name dg-t-m" x="578" y="170">Resolve</text>
+  <text class="dg-sub" x="676" y="170">the caller's effective view over HTTP</text>
 
-  <!-- Stage 3: adapt -->
-  <rect class="b-stage" x="912" y="140" width="116" height="64" rx="6"/>
-  <text class="b-name" x="928" y="164">3. Adapt</text>
-  <text class="b-sub" x="928" y="186">harness</text>
+  <rect class="dg-card" x="540" y="198" width="480" height="48" rx="6"/>
+  <text class="dg-label" x="558" y="228">2</text>
+  <text class="dg-name dg-t-m" x="578" y="228">Adapt</text>
+  <text class="dg-sub" x="676" y="228">each selected artifact, harness writer</text>
 
-  <!-- Down arrow to stage 4 -->
-  <path class="b-line" d="M 970 204 L 970 240 L 802 240 L 802 252" marker-end="url(#b-arrow)"/>
+  <rect class="dg-card" x="540" y="256" width="480" height="48" rx="6"/>
+  <text class="dg-label" x="558" y="286">3</text>
+  <text class="dg-name dg-t-m" x="578" y="286">Write</text>
+  <text class="dg-sub" x="676" y="286">every file staged .tmp, then renamed</text>
 
-  <!-- Stage 4: write -->
-  <rect class="b-stage" x="716" y="256" width="160" height="64" rx="6"/>
-  <text class="b-name" x="732" y="280">4. Atomic write</text>
-  <text class="b-sub" x="732" y="302">.tmp + rename</text>
+  <rect class="dg-card" x="540" y="314" width="480" height="48" rx="6"/>
+  <text class="dg-label" x="558" y="344">4</text>
+  <text class="dg-name dg-t-m" x="578" y="344">Delete</text>
+  <text class="dg-sub" x="676" y="344">every prior path this run did not write</text>
 
-  <!-- Loop arrow back to stage 1 -->
-  <path class="b-line" d="M 716 288 L 600 288 L 600 204" marker-end="url(#b-arrow)"/>
-  <text class="b-annot" x="540" y="280">await next event</text>
+  <rect class="dg-card" x="540" y="372" width="480" height="48" rx="6"/>
+  <text class="dg-label" x="558" y="402">5</text>
+  <text class="dg-name dg-t-m" x="578" y="402">Lock</text>
+  <text class="dg-sub" x="676" y="402">one .podium/sync.lock entry per path</text>
 
-  <!-- Output: target tree -->
-  <rect class="b-target" x="500" y="370" width="540" height="60" rx="8"/>
-  <text class="b-section" x="520" y="394">target tree</text>
-  <text class="b-mono" x="520" y="418">.claude/agents/, .cursor/rules/, …</text>
+  <path class="dg-line" d="M 780 440 L 780 466" marker-end="url(#dg-arrow-sync-watch)"/>
 
-  <!-- Arrow from write to target -->
-  <path class="b-line" d="M 796 320 L 796 366" marker-end="url(#b-arrow)"/>
+  <!-- Target tree -->
+  <rect class="dg-card-strong" x="40" y="470" width="1000" height="72" rx="8"/>
+  <text class="dg-label" x="62" y="500">target tree</text>
+  <text class="dg-mono" x="62" y="526">.claude/agents/, .cursor/rules/, etc.</text>
 
-  <text class="b-foot" x="40" y="450">Event types: artifact_added, artifact_updated, artifact_removed, layer_changed. Removals delete from the target.</text>
-  <text class="b-foot" x="40" y="468">A change to a parent (via extends:) re-emits events for every dependent child the caller can see.</text>
+  <!-- Loop back to the next trigger -->
+  <path class="dg-line" d="M 250 466 L 250 428" marker-end="url(#dg-arrow-sync-watch)"/>
+  <text class="dg-note" x="266" y="452">await the next trigger</text>
+
+  <text class="dg-foot" x="40" y="572">The subscription requests the artifact.published, artifact.deprecated, and layer.config_changed event types.</text>
+  <text class="dg-foot" x="40" y="590">Every run applies the active profile's scope and re-reads the lock file's toggles.</text>
+  <text class="dg-foot" x="40" y="608">A deprecated artifact keeps materializing. A file leaves the target when its artifact leaves the effective view.</text>
 </svg>

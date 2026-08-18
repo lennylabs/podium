@@ -1,33 +1,103 @@
 ---
-layout: default
 title: Why Podium
-parent: Getting Started
 nav_order: 1
-description: "What Podium does, when it applies, when a simpler alternative is enough, and how it compares to adjacent products."
+description: "One catalog, every harness: what that claim means feature by feature, when Podium applies, when a simpler alternative is enough, and how it compares to adjacent products."
 ---
 
 # Why Podium
 
-## What Podium does
+## One catalog, every harness
 
-Podium catalogs authored AI agent know-how and delivers it into the
-harnesses people use. Authored content includes skills (repeatable
-procedures), agents (delegated workers), contexts (reference material),
-commands (parameterized prompts), rules (policy), hooks (lifecycle
-observers), and MCP server registrations. Harnesses include
-developer-facing tools such as Claude Code, Cursor, Codex, Gemini CLI,
-and OpenCode; chat clients such as Claude Desktop; and any host with a
-published adapter.
+Podium holds reusable AI agent artifacts in one catalog and translates them into
+the layout each runtime expects. An author writes an artifact once in the
+canonical format. A Claude Code workspace, a Cursor workspace, and a published
+plugin marketplace each receive their own translation of that same artifact,
+with no per-harness copy in the catalog.
 
-Podium differs from adjacent products in these areas:
+An artifact is a directory, and the directory carries its dependencies. A skill
+that ships `scripts/verify_revision.py` alongside its `SKILL.md` delivers that
+script into every layout it reaches, workspace and marketplace alike. Selecting
+the artifact selects its files. See
+[Bundled resources](../authoring/bundled-resources) for what an artifact
+directory may hold.
 
-- **Cross-harness delivery.** A pluggable harness adapter translates the canonical artifact format into Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, Gemini CLI, OpenCode, Pi, Hermes, or a custom runtime. The full roster with documentation links is in [Configure your harness](../consuming/configure-your-harness#supported-harnesses).
-- **Domain-organized catalog.** Folders and subfolders define the domain hierarchy under one canonical tree.
-- **Selective materialization.** `podium sync` materializes the subset of the catalog declared by a profile, instead of the whole tree.
-- **Layered composition.** Multiple sources compose into one effective view with deterministic merge, explicit precedence, and `extends:`-based inheritance. Requires the registry server.
-- **Per-layer visibility.** Each layer is `public`, organization-wide, scoped to OIDC `groups`, or restricted to specific `users`. Requires the registry server.
-- **Progressive discovery.** Meta-tools traverse domains, search artifacts, and load artifacts on demand. Requires the MCP server or SDK.
-- **Lazy materialization.** Bundled resource bytes land on disk when the artifact is loaded, instead of at session start. Requires the MCP server or SDK.
+Authored content includes skills (repeatable procedures), agents (delegated
+workers), contexts (reference material), commands (parameterized prompts), rules
+(policy), hooks (lifecycle observers), and MCP server registrations. Harnesses
+include developer-facing tools such as Claude Code, Cursor, Codex, Gemini CLI,
+and OpenCode, chat clients such as Claude Desktop, and any host with a published
+adapter.
+
+---
+
+## The features behind the claim
+
+Each feature below has one page that covers it in operational detail.
+
+### Cross-harness delivery
+
+Write canonical artifacts once and let Podium translate them into the format the
+runtime expects. A harness adapter maps the canonical artifact onto Claude Code,
+Claude Desktop, Claude Cowork, Cursor, Codex, Gemini CLI, OpenCode, Pi, Hermes,
+or a custom runtime, and decides the on-disk destination for each artifact type.
+Adding a harness to a team means adding an adapter to a sync configuration.
+
+Covered in [Configure your harness](../consuming/configure-your-harness#supported-harnesses).
+
+### Domains and subdomains
+
+The directory layout defines the domain hierarchy. `finance` is a domain,
+`finance/ap` is a subdomain, and `finance/ap/pay-invoice` is the canonical ID of
+an artifact under it. A domain folder can carry a `DOMAIN.md` that adds a
+description, keywords, and featured artifacts. Authors get a place to put a new
+artifact, and agents get a tree to walk.
+
+Covered in [Domains](../authoring/domains).
+
+### Selective materialization
+
+A workspace rarely needs the whole catalog. `podium sync` materializes the
+subset named by include globs, exclude globs, and artifact types, and a named
+profile stores that subset in `sync.yaml` so one command switches between
+scopes. A narrowed scope also removes the files a wider previous run wrote.
+
+Covered in [Selective materialization](../consuming/selective-materialization).
+
+### Progressive discovery
+
+An agent that speaks MCP starts with an empty context window and a small set of
+meta-tools. It traverses domains with `load_domain`, finds candidates with
+`search_domains` and `search_artifacts`, and calls `load_artifact` on the one it
+picked. Only that last call materializes anything, and it materializes the
+artifact's bundled files at the same time. A catalog larger than any system
+prompt stays usable because the agent pays per artifact it actually loads. This
+path requires a registry server, reached through the MCP server or an SDK.
+
+Covered in [Browsing the catalog](../consuming/browsing-the-catalog).
+
+### Layered composition
+
+One catalog can be assembled from several independent sources. The layers
+compose in a declared order with deterministic merge. A higher layer overrides a
+lower one on a collision, and `extends:` lets an artifact inherit and refine a
+lower one without forking it. A catalog on disk composes its subdirectories as
+ordered layers through a `.registry-config` file. A registry server adds
+registered layers, remote Git sources, custom sources through the
+`LayerSourceProvider` SPI, and per-layer visibility.
+
+Covered in [Layered composition](../deployment/layers).
+
+### Access control
+
+Each layer declares who can see it: everyone, every authenticated user in the
+organization, the members of named OIDC groups, or named users. The registry
+evaluates visibility on every call and composes the caller's effective view from
+the layers that pass. This requires a registry server with an identity provider
+configured.
+
+Covered in [Access control](../deployment/access-control).
+
+---
 
 ## Boundaries
 
@@ -42,10 +112,10 @@ different problems.
 
 Podium becomes valuable as any of these dimensions grow:
 
-- **Catalog size.** Lazy discovery and per-domain navigation handle catalogs that exceed what fits in a system prompt.
+- **Catalog size.** Progressive discovery and per-domain navigation handle catalogs that exceed what fits in a system prompt.
 - **Cross-harness delivery.** A canonical artifact format pays off as soon as a team targets more than one harness.
 - **Multiple artifact types.** A dependency graph across skills, agents, contexts, commands, rules, hooks, and MCP server registrations covers cross-type edges (`extends:`, `delegates_to:`, `mcpServers:`) that type-specific stores do not model.
-- **Multiple contributors and audiences.** Per-layer visibility, classification, and audit address contributor and audience diversity.
+- **Multiple contributors and audiences.** Per-layer access control, classification, and audit address contributor and audience diversity.
 - **Audiences beyond engineering.** The same catalog feeds developers in coding harnesses and non-developers in desktop chat clients.
 
 ## When a simpler alternative is enough
@@ -74,7 +144,7 @@ The products in this section are the closest direct comparisons. All ship regist
 
 **Where each applies.** skills.sh fits public-content discovery. SkillHub fits an on-prem-only shop wanting a SKILL.md-only registry. SkillReg fits a SaaS-acceptable shop wanting registry-side approval workflows. Tessl fits a shop that wants registry-side evaluation of skills against agent task outcomes. Continue Hub fits a shop standardized on the Continue extension.
 
-**Where Podium applies.** Podium applies when the catalog needs type heterogeneity beyond what each product holds, ordered-layer composition with `extends:`, per-OIDC-group visibility composed across multiple sources at request time, cross-type dependency edges, or MIT-licensed self-hosted deployment alongside filesystem and standalone modes.
+**Where Podium applies.** Podium applies when the catalog needs type heterogeneity beyond what each product holds, ordered-layer composition with `extends:`, per-OIDC-group visibility composed across multiple sources at request time, cross-type dependency edges, or MIT-licensed self-hosted deployment across the local, single-node, and clustered tiers.
 
 ### Single-vendor private marketplaces and team-rule systems
 
@@ -103,7 +173,7 @@ These tools translate one source SKILL.md into many harness-native locations on 
 
 ### MCP server registries and gateways
 
-These overlap with Podium's `mcp-server` registered extension type and with the governance plane around MCP. Their scope is restricted to MCP server registrations.
+These overlap with Podium's `mcp-server` built-in extension type and with the governance plane around MCP. Their scope is restricted to MCP server registrations.
 
 | Product | License | Coverage |
 |:--|:--|:--|
@@ -127,8 +197,7 @@ A Git monorepo with per-harness directories is the original baseline.
 ## Project model
 
 - **License.** MIT.
-- **Governance.** Maintainer model with an RFC process for spec changes. See [Governance](governance).
+- **Governance.** Maintainer model with an RFC process for spec changes. See [Governance](../about/governance).
 - **Distribution.** OSS-first development, with an optional commercial managed offering by the sponsoring entity (separate doc).
-- **Public registry.** A reference registry with curated example artifacts is hosted at the project's public URL.
 - **Multi-vendor neutrality.** The project does not adopt contributions, governance changes, or roadmap pressure that would bind it to a single harness vendor's surface.
 - **Standards engagement.** Where adjacent open standards (MCP, AAIF-governed standards) overlap with Podium's concerns, the project participates upstream and harmonizes wherever doing so does not compromise the broader scope across artifact types.

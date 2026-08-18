@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Frontmatter schema
-parent: Reference
 nav_order: 3
 description: Concise field-by-field schema for ARTIFACT.md, SKILL.md (for skills), and DOMAIN.md.
 ---
@@ -34,6 +32,9 @@ Every artifact directory contains an `ARTIFACT.md`. Skill artifacts (`type: skil
 | `deprecated` | bool | no | When `true`, `load_artifact` returns a deprecation warning. | In `ARTIFACT.md` |
 | `replaced_by` | string | no | Suggested upgrade target (canonical artifact ID). | In `ARTIFACT.md` |
 | `release_notes` | string | no | Free text. | In `ARTIFACT.md` |
+| `audit_redact` | list of strings | no | Frontmatter field names whose values the registry replaces with `[redacted]` in audit log entries referencing this artifact. | In `ARTIFACT.md` |
+| `lint_suppress` | list of strings | no | Lint rule codes to silence for this artifact. Only advisory rules honor the list. | In `ARTIFACT.md` |
+| `source` | string | no | Document-level provenance of the prose body. `authored` is the documented value; any other value marks the body's default trust region as untrusted. Inline `<!-- begin imported ... -->` blocks override it per region. | In `ARTIFACT.md` |
 
 ### Caller-interpreted fields
 
@@ -51,15 +52,15 @@ Every artifact directory contains an `ARTIFACT.md`. Skill artifacts (`type: skil
 
 | Field | Applies to | Description |
 |:--|:--|:--|
-| `input` | `agent` | JSON Schema for the agent's input. |
-| `output` | `agent` | JSON Schema for the agent's output. |
-| `delegates_to` | `agent` | List of agent IDs this agent can call. Constrained to `agent`-type targets. |
+| `input` | `agent` | Reference to the agent's input JSON Schema document, written as `{ $ref: ./schemas/input.json }`. A bare path scalar also parses. |
+| `output` | `agent` | Reference to the agent's output JSON Schema document, in the same form as `input`. |
+| `delegates_to` | `agent` | List of artifact IDs this agent delegates to. Advisory; ingest records the edges and does not constrain the target's type. |
 | `rule_mode` | `rule` | `always` (default), `glob`, `auto`, `explicit`. |
 | `rule_globs` | `rule` | Required when `rule_mode: glob`. Comma-separated glob patterns. |
 | `rule_description` | `rule` | Required when `rule_mode: auto`. Drives the harness's autoload heuristic. |
 | `hook_event` | `hook` | Canonical lifecycle event name. Session: `session_start`, `session_end`. Prompt: `user_prompt_submit`. Generic tool: `pre_tool_use`, `post_tool_use`, `post_tool_use_failure`. Tool subtypes: `pre_shell_execution`, `post_shell_execution`, `pre_mcp_execution`, `post_mcp_execution`, `pre_read_file`, `post_file_edit`. Permission: `permission_request`, `permission_denied`. Subagent: `subagent_start`, `subagent_stop`. Turn: `stop`. Compaction: `pre_compact`, `post_compact`. Notification: `notification`. The adapter translates to the harness's native event; coverage varies. |
 | `hook_action` | `hook` | Shell snippet executed when the event fires. |
-| `server_identifier` | `mcp-server` | Canonical server identifier. Drives the reverse index that links `skill` artifacts referencing the server via `mcpServers:`. |
+| `server_identifier` | `mcp-server` | Canonical server identifier. Drives the reverse index: any artifact whose `mcpServers:` entry resolves to this identifier gets a dependency edge to the registration, regardless of the referencing artifact's type. |
 
 ### Cross-cutting fields
 
@@ -105,9 +106,9 @@ A `SKILL.md` carries the [agentskills.io](https://agentskills.io/specification) 
 | `name` | string | yes | 1–64 chars, lowercase Unicode alphanumeric and hyphens, no leading/trailing/consecutive hyphens, must match the parent directory name. |
 | `description` | string | yes | 1–1024 chars. Describes what the skill does and when to use it. |
 | `license` | string | no | License name or reference to a bundled license file. |
-| `compatibility` | string | no | ≤ 500 chars. Free-form environment notes. If omitted, the Podium adapter derives a string from `runtime_requirements` and `sandbox_profile` at materialization time. |
+| `compatibility` | string | no | ≤ 500 chars. Free-form environment notes. When it is omitted, the Claude Code adapter derives a string from `runtime_requirements` and `sandbox_profile` at materialization time; the other adapters copy `SKILL.md` unchanged and leave the field absent. |
 | `metadata` | map (string → string) | no | Open-ended map for client-specific extension. |
-| `allowed-tools` | string | no | Experimental. Space-separated list of pre-approved tools. |
+| `allowed-tools` | list of strings | no | Experimental. Pre-approved tools, one per entry. A scalar fails to parse. |
 
 ### Body
 
@@ -120,7 +121,7 @@ Lint enforces (errors unless noted):
 - Both `SKILL.md` and `ARTIFACT.md` exist for `type: skill`.
 - `SKILL.md` `name` matches the parent directory.
 - `SKILL.md` `name` syntax follows the agentskills.io constraints.
-- `SKILL.md` `description` is non-empty and ≤ 1024 chars.
+- `SKILL.md` `description` is non-empty. The ≤ 1024-char cap is checked by the `skills-ref validate` rule below and reported as a warning.
 - `SKILL.md` does not contain Podium-only fields (`type`, `version`, `when_to_use`, etc.).
 - `ARTIFACT.md` does not contain `name`, `description`, or `license` (warning); when present, values must match `SKILL.md` exactly (error on mismatch).
 - `ARTIFACT.md` body is empty or a single HTML comment (warning).
@@ -187,6 +188,8 @@ When two layers contribute artifacts with the same canonical ID and the higher-p
 | `external_resources` | List; append. |
 | `license` | Scalar; child wins (lint warning if changed across layers). |
 | `search_visibility` | Scalar; most-restrictive (`direct-only` > `indexed`). |
+
+A field absent from the table follows the default rule: the child's value overrides when it is set, and otherwise the parent's value is inherited unchanged. `version` is independent, so the child keeps its own, and `type` must match on both sides because ingest rejects an `extends:` chain that crosses types.
 
 Extension types register their own merge semantics via `TypeProvider`.
 

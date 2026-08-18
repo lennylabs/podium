@@ -1,15 +1,25 @@
 ---
-layout: default
 title: Concepts
-parent: Getting Started
 nav_order: 3
-description: "Vocabulary used throughout the docs: artifacts, domains, layers, harnesses, materialization, and meta-tools."
+description: "Vocabulary used throughout the docs: artifacts, domains, layers, harnesses, profiles, materialization, and meta-tools."
 ---
 
 # Concepts
 
-The terms below appear throughout the docs. Each term has a specific
-meaning in Podium.
+Definitions live on this page. The terms below appear throughout the docs, and
+other sections link here for them rather than restating them.
+
+One catalog serves every harness. The table below maps each Podium feature to
+the terms it is built from and to the page that covers it in operational detail.
+
+| Feature | Terms | Covered in |
+|:--|:--|:--|
+| Cross-harness delivery | [Harness](#harness), [Materialization](#materialization) | [Configure your harness](../consuming/configure-your-harness) |
+| Domains and subdomains | [Domain](#domain) | [Domains](../authoring/domains) |
+| Selective materialization | [Profile](#profile) | [Selective materialization](../consuming/selective-materialization) |
+| Progressive discovery | [Meta-tools](#meta-tools) | [Browsing the catalog](../consuming/browsing-the-catalog) |
+| Layered composition | [Layer](#layer) | [Layered composition](../deployment/layers) |
+| Access control | [Visibility](#visibility) | [Access control](../deployment/access-control) |
 
 ---
 
@@ -31,6 +41,8 @@ Each manifest is markdown with YAML frontmatter. For skills, `SKILL.md` carries 
 
 The directory path is the artifact's **canonical ID**: `finance/close-reporting/run-variance-analysis` above. Other artifacts reference it by that ID, optionally with `@<semver>` or `@sha256:<hash>` for version pinning.
 
+The unit is the directory rather than the manifest file. Everything beside the manifest is a **bundled resource**. A skill carries its resources inside the skill folder in every destination that ships the skill: a workspace tree written by `podium sync`, a lazily loaded artifact written by `load_artifact`, and a published marketplace repository. Workspace materialization of an `agent`, `command`, `context`, or `hook` artifact writes the resources to a bucket beside the native file, such as `.podium/resources/<id>/` or `.podium/context/<id>/`. Workspace materialization of a `type: rule` or `type: mcp-server` artifact writes only the rule file or the config-file entry, so those two types drop their bundled resources. [Bundled resources](../authoring/bundled-resources) covers the conventional subfolders, the size limits, and the handling of large files.
+
 ---
 
 ## Type
@@ -45,7 +57,7 @@ Every artifact declares a `type:`. Built-in artifact types include:
 | `command` | Parameterized prompt templates a human invokes (typically as a slash command). |
 | `rule` | Passive context the harness loads based on a `rule_mode` (`always`, `glob`, `auto`, `explicit`). |
 | `hook` | A lifecycle observer with a declared `hook_event` and a shell `hook_action`. |
-| `mcp-server` | An MCP server registration: name, endpoint, auth profile, description. |
+| `mcp-server` | An MCP server registration: the universal `name` and `description`, plus a `server_identifier` that resolves to the server's command or URL. |
 
 Extension types register through the `TypeProvider` SPI. The type
 determines indexing, lint rules, and how the harness adapter
@@ -67,35 +79,42 @@ works. The directory remains navigable without a manifest.
 
 The rendering of a domain in `load_domain` output is governed by
 configurable rules: `max_depth`, folding of sparse subdomains,
-`notable_count`, a soft response-token budget. Tenant-level defaults
-live in `registry.yaml`; per-domain overrides live in `DOMAIN.md`.
+`notable_count`, and a soft response-token budget. Tenant-level defaults
+live in `registry.yaml`, and per-domain overrides live in `DOMAIN.md`.
+
+[Domains](../authoring/domains) covers the `DOMAIN.md` schema and how to
+structure a hierarchy.
 
 ---
 
 ## Registry
 
-The **registry** is the system of record for artifacts. It can be:
+The **registry** is the system of record for artifacts. It runs in one of
+three tiers:
 
-- A **directory tree on disk** (filesystem mode, with no daemon, no
-  server, no auth).
-- A **standalone single-binary server** running on one machine.
-- A **standard deployment** with Postgres, S3, OIDC, multi-tenancy,
-  and the full governance feature set.
+- **Local**: a directory tree on disk, read by the CLI. There is no server
+  process, no database, and no identity provider.
+- **Single node**: one binary on one machine, with SQLite, sqlite-vec, and
+  filesystem object storage embedded.
+- **Clustered**: registry replicas behind a load balancer, with Postgres,
+  S3-compatible object storage, OIDC, and multi-tenancy.
 
-All modes apply the same layer composition and serve the same
-artifacts. Migration between modes is mechanical: the same shared
+All three tiers apply the same layer composition and serve the same
+artifacts. Migration between tiers is mechanical, because the same shared
 Go library does the parsing, composition, and adapter work in every
-case.
+case. [Deployment](../deployment/) covers the tiers and the migration steps.
 
 ---
 
 ## Layer
 
 A **layer** is a unit of composition with a single source (a Git
-repo, a local filesystem path, or a custom source via the
+repository, a local filesystem path, or a custom source via the
 `LayerSourceProvider` SPI) and a visibility declaration. Layers
-compose in a defined order. There's no fixed `org / team / user`
+compose in a defined order. There is no fixed `org / team / user`
 hierarchy. The ordering is whatever the registry config says.
+[Layered composition](../deployment/layers) covers registering layers and
+reading the composed result.
 
 A typical setup might have:
 
@@ -105,8 +124,8 @@ A typical setup might have:
 2. **User-defined layers**: personal layers an authenticated user
    registers for themselves, capped at three by default.
 3. **Workspace local overlay**: a per-workspace `.podium/overlay/`
-   directory the MCP server merges client-side, always at highest
-   precedence.
+   directory the consumer merges client-side (the MCP server, `podium
+   sync`, or an SDK), always at highest precedence.
 
 When a caller asks for an artifact, Podium composes the caller's
 **effective view** from every visible layer, in
@@ -151,6 +170,8 @@ Each layer declares its visibility independently:
 Multiple fields combine as a union. Visibility is enforced at the
 registry on every call. Git permissions and other source-side
 controls are not consulted at request time.
+[Access control](../deployment/access-control) covers the enforcement
+boundary and how to debug an effective view.
 
 ![Identity and visibility flow: every registry call carries an OAuth token; the registry verifies it, resolves claims, then evaluates each layer against the caller's identity to produce the effective view.](../assets/diagrams/identity-visibility-flow.svg)
 
@@ -160,7 +181,7 @@ ASCII fallback for the diagram above (identity and visibility flow):
   caller (Alice + OAuth token)
        |
        v
-  podium server:
+  podium-server:
     1. Verify token (signature, expiry, audience)
        |
        v
@@ -229,16 +250,40 @@ steps:
    per-file rewrites.
 5. **Write**: atomic `.tmp + rename` write to the destination.
 
-`podium sync` does the same thing in batch for the caller's whole
-effective view.
+`podium sync` runs the fetch, adapt, hook, and write steps in batch, over the
+caller's effective view or over the subset an active scope selects. It performs
+no signature or content-hash verification. That check belongs to the
+`load_artifact` path above, which is where `PODIUM_VERIFY_SIGNATURES` applies.
 
 The `load_artifact` response delivers the manifest body and the bundled
 resources below the inline cutoff directly. A larger resource, and a
-manifest above the cutoff, arrive as a presigned URL into object storage.
-Materialization is the write step that lands all of it on disk. Through the
-MCP server these steps run during the call, so the agent receives the
-manifest body and the file paths. The SDKs split them, returning the
-manifest in memory and writing on a later `materialize()` call.
+manifest above the cutoff, arrive as a URL into object storage: presigned
+and time-limited with the S3 backend, and the registry's own
+`/objects/<content-hash>` route, authorized by the caller's session token,
+with the filesystem backend a single node uses by default. Materialization
+is the write step that lands all of it on disk. Through the MCP server these
+steps run during the call, so the agent receives the manifest body and the
+file paths. The SDKs split them, returning the manifest in memory and
+writing on a later `materialize()` call.
+
+---
+
+## Profile
+
+A **profile** is a named scope stored in `sync.yaml`. A scope is a set of
+include globs, exclude globs, and artifact types, evaluated against canonical
+artifact IDs to select the subset of the catalog a target receives. `podium sync
+--profile finance-team` materializes that subset, and `defaults.profile` makes
+one profile the standing choice for a workspace. A profile may also pin the
+target directory and the harness for runs that use it.
+
+The same scope can be passed directly as `--include`, `--exclude`, and `--type`
+flags for a one-off run. The profile exists so a scope a workspace uses
+repeatedly has a name and can be shared through a committed `sync.yaml`.
+
+[Selective materialization](../consuming/selective-materialization) covers the
+glob syntax, the file scopes profiles are merged from, and the commands that
+capture and edit them.
 
 ---
 
@@ -253,31 +298,39 @@ The MCP server exposes these tools to harnesses that speak MCP:
 | `search_artifacts(query?, scope?, type?, tags?)` | Hybrid retrieval over artifact frontmatter. With a query, ranks by relevance; without, browses by filter (the canonical "list all artifacts in this domain" move). |
 | `load_artifact(id)` | Loads a specific artifact by ID, runs the harness adapter, materializes bundled resources to disk. This is the expensive operation; call it after the artifact has been selected. |
 
-These are the only tools Podium contributes to a session. Hosts add
-their own runtime tools alongside.
+These are the meta-tools. The MCP server advertises further entries in
+`tools/list` alongside them. `health` reports registry connectivity, the
+observed mode, cache size, and the last successful call. `scope_preview`
+reports aggregate counts for the caller's effective view (total artifacts,
+counts by type, and counts by sensitivity) for operators and reviewers, and
+it returns `config.scope_preview_disabled` on a tenant whose
+`expose_scope_preview` gate is off. Hosts add their own runtime tools
+alongside all of them.
 
 The SDK consumers (`podium-py`, `podium-ts`) and the read CLI
-(`podium domain show`, `podium domain search`, `podium search`,
+(`podium domain show`, `podium domain search`, `podium search`, and
 `podium artifact show`) hit the same registry HTTP API and apply
 the same identity, layer composition, and visibility filtering.
+[Browsing the catalog](../consuming/browsing-the-catalog) covers each call,
+what it returns, and what it costs.
 
 ---
 
-## Lazy versus eager loading
+## Progressive discovery and up-front sync
 
-**Lazy** (MCP / SDK path): the session starts empty. The agent calls
-`load_domain` and `search_domains` to navigate, `search_artifacts` to
-query, and `load_artifact` to materialize one specific artifact after
-selection. This keeps the
-agent's context window small even when the catalog has thousands
-of entries. Requires a server.
+Artifacts reach a host along one of two paths.
 
-**Eager** (`podium sync` path): one-shot or `--watch` materialization
-of the user's effective view (or a scope-filtered subset) onto disk.
-The harness then uses its own native discovery: `.cursor/rules/`,
-`.claude/agents/`, etc. This path is useful for pre-materialized
-artifacts on disk when runtime discovery is unnecessary. It works against
-either a server or a filesystem-source registry.
+**Progressive discovery** (the MCP and SDK path): the session starts empty. The
+agent calls `load_domain` and `search_domains` to traverse the catalog,
+`search_artifacts` to query it, and `load_artifact` to materialize one selected
+artifact together with its bundled files. The agent's context window stays small
+even when the catalog holds thousands of entries. This path requires a server.
+
+**Up-front sync** (the `podium sync` path): one-shot or watch-mode
+materialization of the caller's effective view, or of the subset an active
+profile selects, onto disk before the session starts. The harness then uses its
+own native discovery under `.cursor/rules/`, `.claude/agents/`, and the other
+directories it reads. This path works against a server or a local directory.
 
 Both paths share the same registry, identity providers, layer
 composition, and harness adapters.
@@ -298,5 +351,5 @@ that make that transition source-compatible.
 ## What's next
 
 The next page, [How it works](how-it-works), shows how these pieces
-fit together: the architecture, the deployment modes, where state
-lives, and what's running on your machine versus on a server.
+fit together: the architecture, the deployment tiers, where state
+lives, and what runs on a developer machine versus on a server.

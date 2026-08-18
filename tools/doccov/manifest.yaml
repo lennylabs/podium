@@ -40,12 +40,18 @@ pages:
     slug: D-configure-harness
   - path: docs/consuming/publishing.md
     slug: D-marketplace-sync
-  - path: docs/deployment/solo-filesystem.md
-    slug: D-solo-fs
-  - path: docs/deployment/small-team.md
-    slug: D-small-team
-  - path: docs/deployment/organization.md
-    slug: D-organization
+  - path: docs/consuming/selective-materialization.md
+    slug: D-cli
+  - path: docs/deployment/local.md
+    slug: D-local
+  - path: docs/deployment/single-node.md
+    slug: D-single-node
+  - path: docs/deployment/clustered.md
+    slug: D-clustered
+  - path: docs/deployment/layers.md
+    slug: D-cli
+  - path: docs/deployment/access-control.md
+    slug: D-cli
   - path: docs/deployment/vector-backends.md
     slug: D-vector-backends
 
@@ -64,8 +70,8 @@ pages:
     slug: D-oidc
 
   # ----- Waived (runnable content, no independent behavioral e2e) -----------
-  - path: docs/index.md
-    waiver: Landing page; the hello-world init/sync recap duplicates the quickstart and README, which are covered by D-quickstart and D-readme.
+  - path: docs/overview.md
+    waiver: Documentation overview; the hello-world init/sync recap duplicates the quickstart and README, which are covered by D-quickstart and D-readme.
   - path: docs/about/contributing.md
     waiver: Contributor workflow page; the commands are dev/CI tasks (go build, make test, SDK installs) exercised by the build and CI gates rather than a behavioral e2e.
   - path: docs/testing/live-vector-backends.md

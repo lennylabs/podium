@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Frontmatter reference
-parent: Authoring
 nav_order: 5
 description: "Every field in Podium artifact frontmatter (ARTIFACT.md and, for skills, SKILL.md): universal fields, caller-interpreted fields, and type-specific fields."
 ---
@@ -30,7 +28,7 @@ Skills split their frontmatter between `SKILL.md` and `ARTIFACT.md` so that `SKI
 | `name` | Yes (matches parent directory) | — | Yes |
 | `description` | Yes (≤ 1024 chars) | — | Yes |
 | `license` | Yes (SPDX) | — | Yes |
-| `compatibility` | Optional (≤ 500 chars; human-readable) | — | — (Podium derives from `runtime_requirements` and `sandbox_profile`) |
+| `compatibility` | Optional (≤ 500 chars; human-readable) | — | — (the Claude Code adapter derives from `runtime_requirements` and `sandbox_profile`) |
 | `metadata` | Optional (string-to-string map) | — | — |
 | `allowed-tools` | Optional (experimental) | — | — |
 | `type` | — | Yes (`type: skill`) | Yes |
@@ -40,15 +38,14 @@ Skills split their frontmatter between `SKILL.md` and `ARTIFACT.md` so that `SKI
 
 For non-skill types (`agent`, `context`, `command`, `rule`, `hook`, `mcp-server`, extension types), `ARTIFACT.md` carries every field. There is no `SKILL.md`.
 
-The agentskills.io `name` field has stricter constraints than Podium's:
+The `name` field carries the agentskills.io syntax constraints:
 
 - 1–64 characters.
 - Lowercase Unicode alphanumeric (`a-z`, `0-9`) and hyphens.
 - No leading or trailing hyphen.
 - No consecutive hyphens.
-- Matches the parent directory name.
 
-Lint enforces all of the above for skills.
+Lint applies these constraints to any `name:` an artifact declares, whatever its type. The further agentskills.io requirement that `name` match the parent directory name is checked for skills, against `SKILL.md`.
 
 ---
 
@@ -70,7 +67,7 @@ version: 1.0.0                     # semver, author-chosen
 when_to_use:
   - "After month-end close, to flag unusual variance vs. forecast"
 tags: [finance, close, variance]
-sensitivity: low | medium | high   # informational; not enforced by the registry
+sensitivity: low | medium | high   # public mode rejects ingest above a floor
 search_visibility: indexed | direct-only   # default: indexed
 deprecated: false                  # set to true to mark this version deprecated
 replaced_by: finance/close-reporting/run-variance-analysis-v2
@@ -87,7 +84,7 @@ lint_suppress: [lint.skill_ref_validate]   # advisory lint rule codes to silence
 | `description` | Yes | "When should I use this?" The harness uses this to decide whether the artifact matches a prompt. Vague descriptions get ignored. ≤ 1024 chars for skills (per agentskills.io). |
 | `when_to_use` | Optional | List of explicit situations. Additional retrieval signal. |
 | `tags` | Optional | List of strings. Used for filtering in `search_artifacts`. |
-| `sensitivity` | Optional | `low` (default), `medium`, `high`. Informational metadata exposed in search and load responses. Reviewer requirements based on sensitivity are enforced in the Git provider's branch protection rather than by the registry. |
+| `sensitivity` | Optional | `low` (default), `medium`, `high`. Exposed in search and load responses. A registry in public mode rejects ingest of an artifact at or above its configured floor; a private deployment treats the field as metadata. Reviewer requirements based on sensitivity are enforced in the Git provider's branch protection. |
 | `license` | Optional | SPDX identifier. |
 | `search_visibility` | Optional | `indexed` (default) or `direct-only`. `direct-only` artifacts don't appear in `search_artifacts` results; they're reachable via `load_artifact` if the caller knows the ID. |
 | `deprecated` | Optional | Boolean. When `true`, `load_artifact` returns a warning, and the artifact is excluded from default search results. |
@@ -102,7 +99,7 @@ lint_suppress: [lint.skill_ref_validate]   # advisory lint rule codes to silence
 
 These fields appear only in `SKILL.md` and only for skills. They come from the agentskills.io specification.
 
-```yaml
+```markdown
 ---
 name: run-variance-analysis
 description: Flag unusual variance vs. forecast after month-end close. Use after the close period when reviewing financial performance.
@@ -110,15 +107,17 @@ license: MIT
 compatibility: Requires Python 3.10+ and pandas. Designed for Claude Code or similar.
 metadata:
   author: example-org
-allowed-tools: Bash(python:*) Read
+allowed-tools:
+  - Bash(python:*)
+  - Read
 ---
 ```
 
 | Field | Description |
 |:--|:--|
-| `compatibility` | Free-form environment notes (≤ 500 chars). Read by SKILL.md-aware tools to surface preconditions to a reader. If omitted, the Podium adapter derives a compatibility string from `runtime_requirements` and `sandbox_profile` at materialization time for harnesses that consume only the agentskills.io subset. |
+| `compatibility` | Free-form environment notes (≤ 500 chars). Read by SKILL.md-aware tools to surface preconditions to a reader. When it is omitted, the Claude Code adapter derives a compatibility string from `runtime_requirements` and `sandbox_profile` and injects it into the materialized `SKILL.md`. The other adapters copy `SKILL.md` unchanged, so the derived value reaches Claude Code output only. |
 | `metadata` | Open-ended string-to-string map. Use for client-specific properties not defined by the agentskills.io spec. |
-| `allowed-tools` | Experimental. Space-separated list of tools the skill is pre-approved to call. Adapter support varies by harness. |
+| `allowed-tools` | Experimental. YAML list of tools the skill is pre-approved to call. Podium's parser rejects a bare string here, so write one list entry per tool. Adapter support varies by harness. |
 
 ---
 
@@ -203,7 +202,7 @@ hook_action: |                    # shell snippet executed when the event fires
 server_identifier: npx:@company/finance-warehouse-mcp
 
 # Inheritance: explicitly extend another artifact's manifest (cross-layer merge)
-extends: finance/ap/pay-invoice@1.2
+extends: finance/ap/pay-invoice@1.2.x
 
 # Adapter targeting: opt out of cross-harness materialization for this artifact
 target_harnesses: [claude-code, opencode]
@@ -216,8 +215,8 @@ target_harnesses: [claude-code, opencode]
 | `rule_mode` | `rule` | One of `always`, `glob`, `auto`, `explicit`. See [Rule modes](rule-modes). |
 | `rule_globs` | `rule` | Required when `rule_mode: glob`. Comma-separated glob patterns. |
 | `rule_description` | `rule` | Required when `rule_mode: auto`. Drives the harness's autoload heuristic. |
-| `hook_event` | `hook` | One of the canonical event names. Session: `session_start`, `session_end`. Prompt: `user_prompt_submit`. Generic tool: `pre_tool_use`, `post_tool_use`, `post_tool_use_failure`. Tool subtypes: `pre_shell_execution`, `post_shell_execution`, `pre_mcp_execution`, `post_mcp_execution`, `pre_read_file`, `post_file_edit`. Permission: `permission_request`, `permission_denied`. Subagent: `subagent_start`, `subagent_stop`. Turn: `stop`. Compaction: `pre_compact`, `post_compact`. Notification: `notification`. The adapter translates to the harness's native event. See [Hooks](hooks). |
-| `hook_action` | `hook` | Shell snippet executed when the event fires; receives event payload on stdin. |
+| `hook_event` | `hook` | Required for `type: hook`; a missing value is an ingest error. One of the canonical event names. Session: `session_start`, `session_end`. Prompt: `user_prompt_submit`. Generic tool: `pre_tool_use`, `post_tool_use`, `post_tool_use_failure`. Tool subtypes: `pre_shell_execution`, `post_shell_execution`, `pre_mcp_execution`, `post_mcp_execution`, `pre_read_file`, `post_file_edit`. Permission: `permission_request`, `permission_denied`. Subagent: `subagent_start`, `subagent_stop`. Turn: `stop`. Compaction: `pre_compact`, `post_compact`. Notification: `notification`. A value outside this list is an ingest error. The adapter translates to the harness's native event. See [Hooks](hooks). |
+| `hook_action` | `hook` | Required for `type: hook`; a missing value is an ingest error. Shell snippet executed when the event fires; receives event payload on stdin. |
 | `server_identifier` | `mcp-server` | Canonical server identifier. Drives the reverse index that links `skill` artifacts referencing the server via `mcpServers:`. |
 | `extends` | Any | Inherit and refine another artifact's manifest. Single scalar (no multiple inheritance). See [Extends](extends). |
 | `target_harnesses` | Any | Opt out of cross-harness materialization. Set to a list of harness names; the artifact only materializes for harnesses on the list. |
@@ -243,13 +242,23 @@ The registry stores the URL, hash, size, and signature; bytes don't transit the 
 
 ## Provenance markers
 
-Prose in the manifest body (`SKILL.md` for skills, `ARTIFACT.md` for non-skills) can declare provenance to enable differential trust at the host:
+An artifact declares the provenance of its prose so the host can apply differential trust. Two markers carry it.
+
+The `source:` frontmatter field sets the document-level default. It lives in `ARTIFACT.md` for every type, skills included, and adapters read it from there:
 
 ```markdown
 ---
+type: context
+version: 1.0.0
 source: authored
 ---
+```
 
+`authored` (and an omitted field) leaves the prose trusted. Any other value, `imported` for example, marks the whole body untrusted.
+
+Inline markers in the prose body (`SKILL.md` for skills, `ARTIFACT.md` for non-skills) mark one region and override the document-level default for that region:
+
+```markdown
 <authored prose>
 
 <!-- begin imported source="https://wiki.example.com/policy/payments" -->
@@ -280,7 +289,7 @@ When two layers contribute artifacts with the same canonical ID, the higher-prec
 | `license` | Scalar; child wins (lint warning if changed across layers). |
 | `search_visibility` | Scalar; most-restrictive (`direct-only` > `indexed`). |
 
-For skills, the merge applies to fields in their canonical files: `name`, `description`, and `license` merge across `SKILL.md` files; everything else merges across `ARTIFACT.md` files.
+For skills, the merge applies to the `ARTIFACT.md` frontmatter. The registry serves the child's `SKILL.md` verbatim, so `name`, `description`, `license`, and the other agentskills.io fields come from the child's `SKILL.md` and are not inherited from the parent's.
 
 Fields not in this table merge as "child wins": if the child sets the field its value replaces the parent's, otherwise the parent's value is inherited. The child's `type:` must match the parent's, and the child's `version:` is independent of the parent's.
 

@@ -1,0 +1,189 @@
+/*
+ * Design tokens for the Podium site.
+ *
+ * Values come from site/design/README.md. Components reference these variables
+ * and never inline a hex value, so a token change lands in one place.
+ *
+ * Theme resolution order:
+ *   1. the light values below are the default
+ *   2. prefers-color-scheme: dark switches an unconfigured visitor to dark
+ *   3. a data-theme attribute on the root element wins over both, which is what
+ *      the toggle sets and persists
+ *
+ * The accent rule: --accent is a surface colour carrying dark text, or text on
+ * the dark ground. It never sets small text on a light background, which is why
+ * the light theme carries a separate --link tone.
+ */
+
+:root {
+  /* Surfaces */
+  --page: #fbf9f5;
+  --surface: #ffffff;
+  --surface-2: #fdfdf8;
+  --surface-3: #f5f3e9;
+  --raised: var(--surface);
+
+  /* Text */
+  --ink: #14130f;
+  --body: #33322a;
+  --secondary: #43413a;
+  --meta: #63604f;
+  --faint: #6f6c5e;
+  --code-text: #33322a;
+
+  /* Lines */
+  --border: #d9d5c6;
+  --border-2: #e4e0d2;
+  --border-3: #ddd9c9;
+  --chip: #eae7d9;
+
+  /* Accent */
+  --accent: #ffa424;
+  --accent-deep: #f2861a;
+  --accent-tint: #ffe0b8;
+  --accent-wash: #fff3e2;
+  --accent-strip: #ffeeda;
+  --callout-border: #f5cd9b;
+  --link: #a8480a;
+  --link-hover: #7d3507;
+  --on-accent: #14130f;
+
+  /* Composites */
+  --nav-bg: linear-gradient(180deg, #ffffff, #fdfdf8);
+  --hero-wash: radial-gradient(900px 420px at 88% 8%, rgba(255, 164, 36, 0.15), transparent 62%);
+  /* The same wash, sized for a 390pt viewport. */
+  --hero-wash-mobile: radial-gradient(520px 300px at 88% 2%, rgba(255, 164, 36, 0.16), transparent 62%);
+  --hero-base: linear-gradient(180deg, #fdfdf8, #fbf9f5 70%);
+  --terminal-glow: linear-gradient(140deg, rgba(255, 164, 36, 0.5), rgba(255, 164, 36, 0) 58%);
+  --terminal-glow-blur: 10px;
+  --terminal-glow-inset: -14px;
+  --btn-primary-bg: linear-gradient(180deg, #232219, #14130f);
+  --btn-primary-text: #fbf9f5;
+  --btn-primary-shadow: 0 6px 16px -8px rgba(20, 19, 15, 0.6);
+  --terminal-shadow: 0 24px 50px -30px rgba(20, 19, 15, 0.5);
+  --tab-strip: linear-gradient(180deg, #ffffff, #f5f3e9);
+
+  /* Type */
+  --font-ui: "Space Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-wordmark: Anton, "Space Grotesk", system-ui, sans-serif;
+
+  /* Radii */
+  --r-card: 13px;
+  --r-panel: 11px;
+  --r-control: 9px;
+  --r-chip: 5px;
+  --r-kbd: 4px;
+  --r-pill: 100px;
+  --rail: 3px;
+
+  /* Layout */
+  --landing-width: 1280px;
+  --docs-width: 1340px;
+  --measure: 780px;
+  --gutter-landing: 40px;
+  --gutter-docs-bar: 22px;
+  --gutter-article: 46px;
+  --nav-h-landing: 66px;
+  --nav-h-docs: 58px;
+  --sidebar-w: 252px;
+  --toc-w: 214px;
+
+  --transition: 140ms ease-out;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #10131c;
+    --surface: #171b28;
+    --surface-2: #1e2434;
+    --surface-3: #1b2030;
+    --raised: #1b2030;
+
+    --ink: #eaeef7;
+    --body: #c4cbdb;
+    --secondary: #c4cbdb;
+    --meta: #9aa3ba;
+    --faint: #7a8399;
+    --code-text: #d9dfec;
+
+    --border: #2b3145;
+    --border-2: #3a4159;
+    --border-3: #333a50;
+    --chip: #212739;
+
+    --accent: #ffa424;
+    --accent-deep: #f2861a;
+    --accent-soft: #ffcf7a;
+    --accent-tint: #ffa424;
+    --accent-wash: rgba(255, 164, 36, 0.12);
+    --accent-strip: rgba(255, 164, 36, 0.08);
+    --callout-border: #4a3a22;
+    --link: #ffa424;
+    --link-hover: #ffcf7a;
+    --on-accent: #14130f;
+
+    --nav-bg: #141824;
+    --hero-wash: radial-gradient(820px 400px at 86% 4%, rgba(255, 164, 36, 0.07), transparent 60%);
+    --hero-wash-mobile: radial-gradient(520px 300px at 88% 2%, rgba(255, 164, 36, 0.08), transparent 60%);
+    --hero-base: linear-gradient(180deg, #141824, #10131c 65%);
+    --terminal-glow: linear-gradient(140deg, rgba(255, 164, 36, 0.2), rgba(255, 164, 36, 0) 60%);
+    --terminal-glow-blur: 14px;
+    --terminal-glow-inset: -16px;
+    --btn-primary-bg: linear-gradient(180deg, #ffb84d, #f59410);
+    --btn-primary-text: #14130f;
+    --btn-primary-shadow: 0 8px 22px -12px rgba(255, 164, 36, 0.6);
+    --terminal-shadow: 0 26px 54px -32px rgba(0, 0, 0, 0.9);
+    --tab-strip: linear-gradient(180deg, #1e2434, #1b2030);
+
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --page: #10131c;
+  --surface: #171b28;
+  --surface-2: #1e2434;
+  --surface-3: #1b2030;
+  --raised: #1b2030;
+
+  --ink: #eaeef7;
+  --body: #c4cbdb;
+  --secondary: #c4cbdb;
+  --meta: #9aa3ba;
+  --faint: #7a8399;
+  --code-text: #d9dfec;
+
+  --border: #2b3145;
+  --border-2: #3a4159;
+  --border-3: #333a50;
+  --chip: #212739;
+
+  --accent: #ffa424;
+  --accent-deep: #f2861a;
+  --accent-soft: #ffcf7a;
+  --accent-tint: #ffa424;
+  --accent-wash: rgba(255, 164, 36, 0.12);
+  --accent-strip: rgba(255, 164, 36, 0.08);
+  --callout-border: #4a3a22;
+  --link: #ffa424;
+  --link-hover: #ffcf7a;
+  --on-accent: #14130f;
+
+  --nav-bg: #141824;
+  --hero-wash: radial-gradient(820px 400px at 86% 4%, rgba(255, 164, 36, 0.07), transparent 60%);
+  --hero-wash-mobile: radial-gradient(520px 300px at 88% 2%, rgba(255, 164, 36, 0.08), transparent 60%);
+  --hero-base: linear-gradient(180deg, #141824, #10131c 65%);
+  --terminal-glow: linear-gradient(140deg, rgba(255, 164, 36, 0.2), rgba(255, 164, 36, 0) 60%);
+  --terminal-glow-blur: 14px;
+  --terminal-glow-inset: -16px;
+  --btn-primary-bg: linear-gradient(180deg, #ffb84d, #f59410);
+  --btn-primary-text: #14130f;
+  --btn-primary-shadow: 0 8px 22px -12px rgba(255, 164, 36, 0.6);
+  --terminal-shadow: 0 26px 54px -32px rgba(0, 0, 0, 0.9);
+  --tab-strip: linear-gradient(180deg, #1e2434, #1b2030);
+
+  color-scheme: dark;
+}

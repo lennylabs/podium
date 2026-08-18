@@ -1,6 +1,6 @@
 package e2e
 
-// End-to-end tests for docs/deployment/organization.md (D-organization).
+// End-to-end tests for docs/deployment/clustered.md (D-clustered).
 // The page documents the standard deployment topology: Postgres + object
 // storage + OIDC + replicated registry, with layer management, SCIM,
 // admin grants, GDPR erasure, runtime key registration, and migration.

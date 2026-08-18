@@ -1,129 +1,197 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 660" font-family="Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 660" class="dg">
   <!--
-    Registry layout on disk.
-    Directories form the domain hierarchy. Leaves are artifact
-    packages. Type tags annotate each artifact directory. The
-    canonical artifact ID equals the directory path under the
-    registry root.
+    Registry layout on disk. Directories form the domain hierarchy. Leaves are
+    artifact packages. Type tags annotate each artifact directory. The canonical
+    artifact ID equals the directory path under the registry root.
 
-    Layout: rows at y = 116 + i*26. Indent x-positions per depth:
-      depth 0 = 60, depth 1 = 100, depth 2 = 140, depth 3 = 180,
-      depth 4 = 220. Tree connectors are drawn as faint guide lines
-      so monospace box-drawing characters are not required.
+    Layout: rows at y = 116 + i*26. Indent x-positions per depth: depth 0 = 60,
+    depth 1 = 100, depth 2 = 140, depth 3 = 180, depth 4 = 220. Tree connectors
+    are drawn as faint guide lines so monospace box-drawing characters are not
+    required.
   -->
   <defs>
     <style>
-      .b-bg { fill: #ffffff; }
-      .b-frame { fill: #fffaf0; stroke: #1f2933; stroke-width: 2.2; }
-      .b-title { font-size: 22px; fill: #1f2933; }
-      .b-mono { font-size: 14px; fill: #1f2933; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
-      .b-mono-root { font-size: 16px; fill: #1f2933; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
-      .b-tag-skill { font-size: 12px; fill: #b56b1f; letter-spacing: 0.04em; }
-      .b-tag-context { font-size: 12px; fill: #547a3a; letter-spacing: 0.04em; }
-      .b-tag-command { font-size: 12px; fill: #1f6f8b; letter-spacing: 0.04em; }
-      .b-tag-meta { font-size: 12px; fill: #8a7755; letter-spacing: 0.04em; font-style: italic; }
-      .b-sub { font-size: 14px; fill: #54616e; }
-      .b-foot { font-size: 13px; fill: #8a7755; }
-      .b-guide { fill: none; stroke: #c0b290; stroke-width: 1.1; }
+      /*
+        Colour comes from the site's design tokens. Inlined in the documentation
+        site the site's own variables win, so the theme toggle drives the
+        diagram. Standing alone (raw markdown on github.com, or the file opened
+        directly) the fallbacks apply and follow the operating system setting.
+        The block below is identical in every diagram; edit all of them together.
+      */
+      :root {
+        --dg-ground: var(--surface, #ffffff);
+        --dg-panel-fill: var(--surface-2, #fdfdf8);
+        --dg-fill: var(--surface-3, #f5f3e9);
+        --dg-fill-2: var(--chip, #eae7d9);
+        --dg-accent-fill: var(--accent-wash, #fff3e2);
+        --dg-accent-soft: var(--accent-strip, #ffeeda);
+        --dg-ink: var(--ink, #14130f);
+        --dg-meta: var(--meta, #63604f);
+        --dg-faint: var(--faint, #6f6c5e);
+        --dg-border: var(--border, #d9d5c6);
+        --dg-accent: var(--accent-deep, #f2861a);
+        --dg-accent-text: var(--link, #a8480a);
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --dg-ground: var(--surface, #171b28);
+          --dg-panel-fill: var(--surface-2, #1e2434);
+          --dg-fill: var(--surface-3, #1b2030);
+          --dg-fill-2: var(--chip, #212739);
+          --dg-accent-fill: var(--accent-wash, rgba(255, 164, 36, 0.12));
+          --dg-accent-soft: var(--accent-strip, rgba(255, 164, 36, 0.08));
+          --dg-ink: var(--ink, #eaeef7);
+          --dg-meta: var(--meta, #9aa3ba);
+          --dg-faint: var(--faint, #7a8399);
+          --dg-border: var(--border, #2b3145);
+          --dg-accent: var(--accent-deep, #f2861a);
+          --dg-accent-text: var(--link, #ffa424);
+        }
+      }
+
+      .dg {
+        font-family: var(--font-ui, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+      }
+
+      .dg-bg { fill: var(--dg-ground); }
+
+      .dg-panel { fill: var(--dg-panel-fill); stroke: var(--dg-border); stroke-width: 1.6; }
+      .dg-card { fill: var(--dg-fill); stroke: var(--dg-ink); stroke-width: 1.8; }
+      .dg-card-primary { fill: var(--dg-accent-fill); stroke: var(--dg-accent); stroke-width: 2.2; }
+      .dg-card-strong { fill: var(--dg-fill-2); stroke: var(--dg-accent); stroke-width: 2.2; }
+      .dg-card-quiet { fill: var(--dg-ground); stroke: var(--dg-meta); stroke-width: 1.4; }
+      .dg-card-event { fill: var(--dg-accent-soft); stroke: var(--dg-accent); stroke-width: 1.8; stroke-dasharray: 6 5; }
+      .dg-chip { fill: var(--dg-accent-soft); stroke: var(--dg-border); stroke-width: 1.2; }
+      .dg-outline { fill: none; stroke: var(--dg-accent); stroke-width: 1.6; stroke-dasharray: 6 5; }
+
+      .dg-title { font-size: 22px; fill: var(--dg-ink); }
+      .dg-name { font-size: 17px; fill: var(--dg-ink); }
+      .dg-lead { font-size: 15px; fill: var(--dg-meta); }
+      .dg-sub { font-size: 14px; fill: var(--dg-meta); }
+      .dg-label { font-size: 13px; fill: var(--dg-accent-text); letter-spacing: 0.06em; }
+      .dg-label-quiet { font-size: 13px; fill: var(--dg-meta); letter-spacing: 0.06em; }
+      .dg-note { font-size: 13px; fill: var(--dg-meta); font-style: italic; }
+      .dg-foot { font-size: 13px; fill: var(--dg-faint); }
+      .dg-mono { font-size: 13px; fill: var(--dg-ink); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+      .dg-mono-accent { font-size: 13px; fill: var(--dg-accent-text); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+      .dg-mono-quiet { font-size: 13px; fill: var(--dg-meta); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+
+      .dg-line { fill: none; stroke: var(--dg-ink); stroke-width: 2; stroke-linecap: round; }
+      .dg-line-accent { fill: none; stroke: var(--dg-accent); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 6 5; }
+      .dg-line-quiet { fill: none; stroke: var(--dg-meta); stroke-width: 1.6; stroke-linecap: round; }
+      .dg-guide { fill: none; stroke: var(--dg-border); stroke-width: 1.2; }
+      .dg-divider { fill: none; stroke: var(--dg-border); stroke-width: 1.2; stroke-dasharray: 4 4; }
+
+      .dg-arrow-head { fill: var(--dg-ink); }
+      .dg-arrow-head-accent { fill: var(--dg-accent); }
+
+      .dg-t-xs { font-size: 12px; }
+      .dg-t-s { font-size: 13px; }
+      .dg-t-m { font-size: 15px; }
+      .dg-t-l { font-size: 18px; }
+      .dg-t-xl { font-size: 21px; }
+      .dg-t-2xl { font-size: 24px; }
+      .dg-t-3xl { font-size: 28px; }
     </style>
   </defs>
 
-  <rect class="b-bg" width="1080" height="660"/>
+  <rect class="dg-bg" width="1080" height="660"/>
 
-  <text class="b-title" x="40" y="42">Registry layout on disk</text>
-  <text class="b-sub" x="40" y="64">Directories form the domain hierarchy. Leaves are artifact packages.</text>
+  <text class="dg-title" x="40" y="42">Registry layout on disk</text>
+  <text class="dg-lead" x="40" y="64">Directories form the domain hierarchy. Leaves are artifact packages.</text>
 
-  <rect class="b-frame" x="40" y="84" width="1000" height="492" rx="10"/>
+  <rect class="dg-panel" x="40" y="84" width="1000" height="492" rx="10"/>
 
   <!-- Root -->
-  <text class="b-mono-root" x="60" y="116">registry/</text>
+  <text class="dg-mono dg-t-m" x="60" y="116">registry/</text>
 
   <!-- Vertical guide lines for each open depth.
        depth 1 (under registry/): runs from y=120 down to last sibling at y=544 -->
-  <path class="b-guide" d="M 76 120 L 76 552"/>
+  <path class="dg-guide" d="M 76 120 L 76 552"/>
   <!-- depth 2 under finance/: from y=204 (finance) to y=386 (close-reporting last child) -->
-  <path class="b-guide" d="M 116 204 L 116 412"/>
+  <path class="dg-guide" d="M 116 204 L 116 412"/>
   <!-- depth 3 under finance/ap/: from y=256 (ap row) to y=360 (reconcile-invoice) -->
-  <path class="b-guide" d="M 156 256 L 156 360"/>
+  <path class="dg-guide" d="M 156 256 L 156 360"/>
   <!-- depth 4 under finance/ap/pay-invoice/: from y=308 to y=334 -->
-  <path class="b-guide" d="M 196 308 L 196 334"/>
+  <path class="dg-guide" d="M 196 308 L 196 334"/>
   <!-- depth 3 under finance/close-reporting/: from y=386 to y=412 -->
-  <path class="b-guide" d="M 156 386 L 156 412"/>
+  <path class="dg-guide" d="M 156 386 L 156 412"/>
   <!-- depth 2 under _shared/: from y=438 to y=516 -->
-  <path class="b-guide" d="M 116 438 L 116 516"/>
+  <path class="dg-guide" d="M 116 438 L 116 516"/>
   <!-- depth 3 under _shared/payment-helpers/: from y=464 to y=516 -->
-  <path class="b-guide" d="M 156 464 L 156 516"/>
+  <path class="dg-guide" d="M 156 464 L 156 516"/>
 
   <!-- Branch ticks (horizontal stubs into each row) -->
   <!-- depth-1 children of registry/ -->
-  <path class="b-guide" d="M 76 142 L 96 142"/>   <!-- company-glossary -->
-  <path class="b-guide" d="M 76 204 L 96 204"/>   <!-- finance -->
-  <path class="b-guide" d="M 76 438 L 96 438"/>   <!-- _shared -->
-  <path class="b-guide" d="M 76 552 L 96 552"/>   <!-- engineering -->
+  <path class="dg-guide" d="M 76 142 L 96 142"/>   <!-- company-glossary -->
+  <path class="dg-guide" d="M 76 204 L 96 204"/>   <!-- finance -->
+  <path class="dg-guide" d="M 76 438 L 96 438"/>   <!-- _shared -->
+  <path class="dg-guide" d="M 76 552 L 96 552"/>   <!-- engineering -->
 
   <!-- depth-2 children under finance/ -->
-  <path class="b-guide" d="M 116 230 L 136 230"/> <!-- DOMAIN.md -->
-  <path class="b-guide" d="M 116 256 L 136 256"/> <!-- ap/ -->
-  <path class="b-guide" d="M 116 386 L 136 386"/> <!-- close-reporting/ -->
+  <path class="dg-guide" d="M 116 230 L 136 230"/> <!-- DOMAIN.md -->
+  <path class="dg-guide" d="M 116 256 L 136 256"/> <!-- ap/ -->
+  <path class="dg-guide" d="M 116 386 L 136 386"/> <!-- close-reporting/ -->
 
   <!-- depth-3 children under finance/ap/ -->
-  <path class="b-guide" d="M 156 282 L 176 282"/> <!-- DOMAIN.md -->
-  <path class="b-guide" d="M 156 308 L 176 308"/> <!-- pay-invoice/ -->
-  <path class="b-guide" d="M 156 360 L 176 360"/> <!-- reconcile-invoice/ -->
+  <path class="dg-guide" d="M 156 282 L 176 282"/> <!-- DOMAIN.md -->
+  <path class="dg-guide" d="M 156 308 L 176 308"/> <!-- pay-invoice/ -->
+  <path class="dg-guide" d="M 156 360 L 176 360"/> <!-- reconcile-invoice/ -->
 
   <!-- depth-4 children under pay-invoice/ -->
-  <path class="b-guide" d="M 196 334 L 216 334"/> <!-- SKILL.md / ARTIFACT.md combined row -->
+  <path class="dg-guide" d="M 196 334 L 216 334"/> <!-- SKILL.md / ARTIFACT.md combined row -->
 
   <!-- depth-3 children under finance/close-reporting/ -->
-  <path class="b-guide" d="M 156 412 L 176 412"/>
+  <path class="dg-guide" d="M 156 412 L 176 412"/>
 
   <!-- depth-1 child of _shared/ (depth 2) -->
-  <path class="b-guide" d="M 116 464 L 136 464"/>
+  <path class="dg-guide" d="M 116 464 L 136 464"/>
 
   <!-- depth-3 children of payment-helpers/ -->
-  <path class="b-guide" d="M 156 490 L 176 490"/>
-  <path class="b-guide" d="M 156 516 L 176 516"/>
+  <path class="dg-guide" d="M 156 490 L 176 490"/>
+  <path class="dg-guide" d="M 156 516 L 176 516"/>
 
   <!-- Folder lines: name at the right indent. y values match the branch ticks. -->
 
   <!-- depth 1 -->
-  <text class="b-mono" x="104" y="146">company-glossary/</text>
-  <text class="b-tag-context" x="540" y="146">type: context</text>
+  <text class="dg-mono" x="104" y="146">company-glossary/</text>
+  <text class="dg-label dg-t-xs" x="540" y="146">type: context</text>
 
   <!-- depth 2 (under company-glossary) -->
-  <path class="b-guide" d="M 116 168 L 136 168"/>
-  <text class="b-mono" x="144" y="172">ARTIFACT.md</text>
+  <path class="dg-guide" d="M 116 168 L 136 168"/>
+  <text class="dg-mono" x="144" y="172">ARTIFACT.md</text>
 
-  <text class="b-mono" x="104" y="208">finance/</text>
+  <text class="dg-mono" x="104" y="208">finance/</text>
 
-  <text class="b-mono" x="144" y="234">DOMAIN.md</text>
+  <text class="dg-mono" x="144" y="234">DOMAIN.md</text>
 
-  <text class="b-mono" x="144" y="260">ap/</text>
-  <text class="b-mono" x="184" y="286">DOMAIN.md</text>
-  <text class="b-mono" x="184" y="312">pay-invoice/</text>
-  <text class="b-tag-skill" x="540" y="312">type: skill</text>
+  <text class="dg-mono" x="144" y="260">ap/</text>
+  <text class="dg-mono" x="184" y="286">DOMAIN.md</text>
+  <text class="dg-mono" x="184" y="312">pay-invoice/</text>
+  <text class="dg-label dg-t-xs" x="540" y="312">type: skill</text>
 
   <!-- pay-invoice children -->
-  <text class="b-mono" x="224" y="338">SKILL.md  ·  ARTIFACT.md</text>
+  <text class="dg-mono" x="224" y="338">SKILL.md  ·  ARTIFACT.md</text>
 
-  <text class="b-mono" x="184" y="364">reconcile-invoice/</text>
-  <text class="b-tag-skill" x="540" y="364">type: skill</text>
+  <text class="dg-mono" x="184" y="364">reconcile-invoice/</text>
+  <text class="dg-label dg-t-xs" x="540" y="364">type: skill</text>
 
-  <text class="b-mono" x="144" y="390">close-reporting/</text>
-  <text class="b-mono" x="184" y="416">run-variance-analysis/</text>
-  <text class="b-tag-skill" x="540" y="416">type: skill</text>
+  <text class="dg-mono" x="144" y="390">close-reporting/</text>
+  <text class="dg-mono" x="184" y="416">run-variance-analysis/</text>
+  <text class="dg-label dg-t-xs" x="540" y="416">type: skill</text>
 
-  <text class="b-mono" x="104" y="442">_shared/</text>
-  <text class="b-mono" x="144" y="468">payment-helpers/</text>
-  <text class="b-tag-meta" x="540" y="468">unlisted: imports and search only</text>
-  <text class="b-mono" x="184" y="494">routing-validator/</text>
-  <text class="b-tag-skill" x="540" y="494">type: skill</text>
-  <text class="b-mono" x="184" y="520">swift-bic-parser/</text>
-  <text class="b-tag-skill" x="540" y="520">type: skill</text>
+  <text class="dg-mono" x="104" y="442">_shared/</text>
+  <text class="dg-mono" x="144" y="468">payment-helpers/</text>
+  <text class="dg-note dg-t-xs" x="540" y="468">unlisted: imports and search only</text>
+  <text class="dg-mono" x="184" y="494">routing-validator/</text>
+  <text class="dg-label dg-t-xs" x="540" y="494">type: skill</text>
+  <text class="dg-mono" x="184" y="520">swift-bic-parser/</text>
+  <text class="dg-label dg-t-xs" x="540" y="520">type: skill</text>
 
-  <text class="b-mono" x="104" y="556">engineering/platform/code-change-pr/</text>
-  <text class="b-tag-command" x="540" y="556">type: command</text>
+  <text class="dg-mono" x="104" y="556">engineering/platform/code-change-pr/</text>
+  <text class="dg-label dg-t-xs" x="540" y="556">type: command</text>
 
-  <text class="b-foot" x="40" y="616">The canonical artifact ID is the directory path under the registry root, for example finance/ap/pay-invoice.</text>
-  <text class="b-foot" x="40" y="636">References (extends:, delegates_to:, glob patterns) use this ID, optionally suffixed with @version or @sha256:hash.</text>
+  <text class="dg-foot" x="40" y="616">The canonical artifact ID is the directory path under the registry root, for example finance/ap/pay-invoice.</text>
+  <text class="dg-foot" x="40" y="636">References (extends:, delegates_to:, glob patterns) use this ID, optionally suffixed with @version or @sha256:hash.</text>
 </svg>

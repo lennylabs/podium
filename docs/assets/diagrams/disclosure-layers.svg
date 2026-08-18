@@ -1,59 +1,128 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 580" font-family="Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 580" class="dg">
   <!--
-    Discovery layers (Map -> Search -> Load).
-    Three staged calls, each returning less material than the one
-    before. The host advances when it has enough information to
-    choose the next narrower scope.
+    Discovery layers (map, then search, then load). Three staged calls, each
+    returning less material than the one before. The host advances when it has
+    enough information to choose the next narrower scope.
   -->
   <defs>
-    <marker id="b-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
-      <path d="M 0 0 L 11 6 L 0 12 z" fill="#1f2933"/>
+    <marker id="dg-arrow-disclosure-layers" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path class="dg-arrow-head" d="M 0 0 L 11 6 L 0 12 z"/>
     </marker>
     <style>
-      .b-bg { fill: #ffffff; }
-      .b-l1 { fill: #ffe9c7; stroke: #1f2933; stroke-width: 2.4; }
-      .b-l2 { fill: #fffaf0; stroke: #1f2933; stroke-width: 2.2; }
-      .b-l3 { fill: #d6e9d2; stroke: #1f2933; stroke-width: 2.4; }
-      .b-title { font-size: 22px; fill: #1f2933; }
-      .b-section { font-size: 14px; fill: #b56b1f; letter-spacing: 0.04em; }
-      .b-layer-name { font-size: 20px; fill: #1f2933; }
-      .b-tool { font-size: 16px; fill: #1f2933; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
-      .b-sub { font-size: 15px; fill: #54616e; }
-      .b-line { fill: none; stroke: #1f2933; stroke-width: 2.4; stroke-linecap: round; }
-      .b-foot { font-size: 13px; fill: #8a7755; }
-      .b-annot { font-size: 14px; fill: #54616e; font-style: italic; }
+      /*
+        Colour comes from the site's design tokens. Inlined in the documentation
+        site the site's own variables win, so the theme toggle drives the
+        diagram. Standing alone (raw markdown on github.com, or the file opened
+        directly) the fallbacks apply and follow the operating system setting.
+        The block below is identical in every diagram; edit all of them together.
+      */
+      :root {
+        --dg-ground: var(--surface, #ffffff);
+        --dg-panel-fill: var(--surface-2, #fdfdf8);
+        --dg-fill: var(--surface-3, #f5f3e9);
+        --dg-fill-2: var(--chip, #eae7d9);
+        --dg-accent-fill: var(--accent-wash, #fff3e2);
+        --dg-accent-soft: var(--accent-strip, #ffeeda);
+        --dg-ink: var(--ink, #14130f);
+        --dg-meta: var(--meta, #63604f);
+        --dg-faint: var(--faint, #6f6c5e);
+        --dg-border: var(--border, #d9d5c6);
+        --dg-accent: var(--accent-deep, #f2861a);
+        --dg-accent-text: var(--link, #a8480a);
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --dg-ground: var(--surface, #171b28);
+          --dg-panel-fill: var(--surface-2, #1e2434);
+          --dg-fill: var(--surface-3, #1b2030);
+          --dg-fill-2: var(--chip, #212739);
+          --dg-accent-fill: var(--accent-wash, rgba(255, 164, 36, 0.12));
+          --dg-accent-soft: var(--accent-strip, rgba(255, 164, 36, 0.08));
+          --dg-ink: var(--ink, #eaeef7);
+          --dg-meta: var(--meta, #9aa3ba);
+          --dg-faint: var(--faint, #7a8399);
+          --dg-border: var(--border, #2b3145);
+          --dg-accent: var(--accent-deep, #f2861a);
+          --dg-accent-text: var(--link, #ffa424);
+        }
+      }
+
+      .dg {
+        font-family: var(--font-ui, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+      }
+
+      .dg-bg { fill: var(--dg-ground); }
+
+      .dg-panel { fill: var(--dg-panel-fill); stroke: var(--dg-border); stroke-width: 1.6; }
+      .dg-card { fill: var(--dg-fill); stroke: var(--dg-ink); stroke-width: 1.8; }
+      .dg-card-primary { fill: var(--dg-accent-fill); stroke: var(--dg-accent); stroke-width: 2.2; }
+      .dg-card-strong { fill: var(--dg-fill-2); stroke: var(--dg-accent); stroke-width: 2.2; }
+      .dg-card-quiet { fill: var(--dg-ground); stroke: var(--dg-meta); stroke-width: 1.4; }
+      .dg-card-event { fill: var(--dg-accent-soft); stroke: var(--dg-accent); stroke-width: 1.8; stroke-dasharray: 6 5; }
+      .dg-chip { fill: var(--dg-accent-soft); stroke: var(--dg-border); stroke-width: 1.2; }
+      .dg-outline { fill: none; stroke: var(--dg-accent); stroke-width: 1.6; stroke-dasharray: 6 5; }
+
+      .dg-title { font-size: 22px; fill: var(--dg-ink); }
+      .dg-name { font-size: 17px; fill: var(--dg-ink); }
+      .dg-lead { font-size: 15px; fill: var(--dg-meta); }
+      .dg-sub { font-size: 14px; fill: var(--dg-meta); }
+      .dg-label { font-size: 13px; fill: var(--dg-accent-text); letter-spacing: 0.06em; }
+      .dg-label-quiet { font-size: 13px; fill: var(--dg-meta); letter-spacing: 0.06em; }
+      .dg-note { font-size: 13px; fill: var(--dg-meta); font-style: italic; }
+      .dg-foot { font-size: 13px; fill: var(--dg-faint); }
+      .dg-mono { font-size: 13px; fill: var(--dg-ink); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+      .dg-mono-accent { font-size: 13px; fill: var(--dg-accent-text); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+      .dg-mono-quiet { font-size: 13px; fill: var(--dg-meta); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+
+      .dg-line { fill: none; stroke: var(--dg-ink); stroke-width: 2; stroke-linecap: round; }
+      .dg-line-accent { fill: none; stroke: var(--dg-accent); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 6 5; }
+      .dg-line-quiet { fill: none; stroke: var(--dg-meta); stroke-width: 1.6; stroke-linecap: round; }
+      .dg-guide { fill: none; stroke: var(--dg-border); stroke-width: 1.2; }
+      .dg-divider { fill: none; stroke: var(--dg-border); stroke-width: 1.2; stroke-dasharray: 4 4; }
+
+      .dg-arrow-head { fill: var(--dg-ink); }
+      .dg-arrow-head-accent { fill: var(--dg-accent); }
+
+      .dg-t-xs { font-size: 12px; }
+      .dg-t-s { font-size: 13px; }
+      .dg-t-m { font-size: 15px; }
+      .dg-t-l { font-size: 18px; }
+      .dg-t-xl { font-size: 21px; }
+      .dg-t-2xl { font-size: 24px; }
+      .dg-t-3xl { font-size: 28px; }
     </style>
   </defs>
 
-  <rect class="b-bg" width="1000" height="580"/>
+  <rect class="dg-bg" width="1000" height="580"/>
 
-  <text class="b-title" x="40" y="42">Discovery layers</text>
-  <text class="b-sub" x="40" y="64">Each call returns less material than the one before.</text>
+  <text class="dg-title" x="40" y="42">Discovery layers</text>
+  <text class="dg-lead" x="40" y="64">Each call returns less material than the one before.</text>
 
   <!-- Layer 1: Map -->
-  <rect class="b-l1" x="100" y="92" width="800" height="100" rx="10"/>
-  <text class="b-section" x="120" y="118">layer 1 — map</text>
-  <text class="b-tool" x="120" y="148">load_domain · search_domains</text>
-  <text class="b-sub" x="120" y="172">Returns the catalog map: domains and notable artifacts. No artifact bodies, no resource bytes.</text>
+  <rect class="dg-card-primary" x="100" y="92" width="800" height="100" rx="10"/>
+  <text class="dg-label" x="120" y="118">layer 1 — map</text>
+  <text class="dg-mono dg-t-m" x="120" y="148">load_domain · search_domains</text>
+  <text class="dg-lead" x="120" y="172">Returns the catalog map: domains and notable artifacts. No artifact bodies, no resource bytes.</text>
 
-  <path class="b-line" d="M 500 192 L 500 230" marker-end="url(#b-arrow)"/>
-  <text class="b-annot" x="515" y="220">host picks a domain</text>
+  <path class="dg-line" d="M 500 192 L 500 230" marker-end="url(#dg-arrow-disclosure-layers)"/>
+  <text class="dg-note" x="515" y="220">host picks a domain</text>
 
   <!-- Layer 2: Search -->
-  <rect class="b-l2" x="200" y="244" width="600" height="100" rx="10"/>
-  <text class="b-section" x="220" y="270">layer 2 — search</text>
-  <text class="b-tool" x="220" y="300">search_artifacts</text>
-  <text class="b-sub" x="220" y="324">Returns ranked (id, summary, score) within the chosen scope.</text>
+  <rect class="dg-card" x="200" y="244" width="600" height="100" rx="10"/>
+  <text class="dg-label" x="220" y="270">layer 2 — search</text>
+  <text class="dg-mono dg-t-m" x="220" y="300">search_artifacts</text>
+  <text class="dg-lead" x="220" y="324">Returns ranked (id, summary, score) within the chosen scope.</text>
 
-  <path class="b-line" d="M 500 344 L 500 382" marker-end="url(#b-arrow)"/>
-  <text class="b-annot" x="515" y="372">host picks an artifact</text>
+  <path class="dg-line" d="M 500 344 L 500 382" marker-end="url(#dg-arrow-disclosure-layers)"/>
+  <text class="dg-note" x="515" y="372">host picks an artifact</text>
 
   <!-- Layer 3: Load -->
-  <rect class="b-l3" x="300" y="396" width="400" height="100" rx="10"/>
-  <text class="b-section" x="320" y="422">layer 3 — load</text>
-  <text class="b-tool" x="320" y="452">load_artifact</text>
-  <text class="b-sub" x="320" y="476">Manifest inline + materialized resources on the host.</text>
+  <rect class="dg-card-strong" x="280" y="396" width="440" height="100" rx="10"/>
+  <text class="dg-label" x="300" y="422">layer 3 — load</text>
+  <text class="dg-mono dg-t-m" x="300" y="452">load_artifact</text>
+  <text class="dg-lead" x="300" y="476">Manifest inline + materialized resources on the host.</text>
 
-  <text class="b-foot" x="40" y="538">Visibility filtering bounds what each layer can reveal. The map and search layers are useful only when artifact</text>
-  <text class="b-foot" x="40" y="556">descriptions and domain metadata are well-written; the registry lints for thin descriptions.</text>
+  <text class="dg-foot" x="40" y="538">Visibility filtering bounds what each layer can reveal. The map and search layers are useful only when artifact</text>
+  <text class="dg-foot" x="40" y="556">descriptions and domain metadata are well-written; the registry lints for thin descriptions.</text>
 </svg>

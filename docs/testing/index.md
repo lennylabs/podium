@@ -1,8 +1,6 @@
 ---
-layout: default
 title: Testing
 nav_order: 7
-has_children: true
 description: Set up and run Podium's integration and live-backend tests.
 ---
 

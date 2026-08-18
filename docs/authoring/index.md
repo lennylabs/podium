@@ -1,8 +1,6 @@
 ---
-layout: default
 title: Authoring
 nav_order: 2
-has_children: true
 description: Reference for writing artifacts. Field schema, type list, domain organization, and cross-cutting features.
 ---
 
@@ -12,7 +10,7 @@ Reference for writing artifacts. Each page below covers one topic.
 
 | Page | What it covers |
 |:--|:--|
-| [Your first skill](your-first-skill) | Step-by-step from blank directory to a materialized skill. Picks up from the [quickstart](../getting-started/quickstart): bundled scripts, runtime requirements, watch mode, lint. |
+| [Your first skill](your-first-skill) | Continues the [quickstart](../getting-started/quickstart)'s `greet` skill: fuller frontmatter, a body reference to the bundled script, runtime requirements, watch mode, and lint. |
 | [Your first command](your-first-command) | A parameterized slash command the user invokes by name. Argument substitution and how the command lands in the harness's slash menu. |
 | [Your first agent](your-first-agent) | A complete agent definition: minimal end-to-end version first, then runtime requirements, a bundled script, and a delegated artifact. |
 | [Artifact types](artifact-types) | Built-in types: `skill`, `agent`, `context`, `command`, `rule`, `hook`, `mcp-server`. |

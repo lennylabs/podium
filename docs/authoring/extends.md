@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Extends
-parent: Authoring
 nav_order: 9
 description: Cross-layer artifact inheritance via the extends field.
 ---
@@ -10,7 +8,7 @@ description: Cross-layer artifact inheritance via the extends field.
 
 When two layers contribute artifacts with the same canonical ID, ingest rejects the collision by default. The higher-precedence artifact can declare `extends:` in its frontmatter to inherit from the lower-precedence one and refine specific fields instead of forking.
 
-```yaml
+```markdown
 ---
 type: skill
 name: pay-invoice
@@ -27,7 +25,7 @@ mcpServers:
 Team-specific addendum on top of the org-wide skill...
 ```
 
-The merged artifact at request time has the parent's frontmatter and prose body composed with the child's; the merge rules are field-specific.
+At request time the registry folds the parent's frontmatter into the child's per the field-specific rules below. The child's prose body replaces the parent's; bodies are never concatenated.
 
 ---
 
@@ -58,8 +56,8 @@ ASCII fallback for the diagram above (inheritance with extends:):
   Manifest fields:
 
   parent (lower precedence)         child (higher precedence)         merged manifest
-  finance/ap/pay-invoice@1.2        finance/ap/pay-invoice (overlay)  what the caller sees
-  type: skill                       extends: finance/ap/...@1.2       type: skill           (parent)
+  finance/ap/pay-invoice@1.2.x        finance/ap/pay-invoice (overlay)  what the caller sees
+  type: skill                       extends: finance/ap/...@1.2.x       type: skill           (parent)
   version: 1.2.0                    version: 1.3.0                    version: 1.3.0        (child)
   description: Pay an invoice.      description: Pay an invoice (EU). description: ...(EU). (child)
   tags: [finance, ap]               tags: [eu, vat]                   tags: [finance, ap,   (union)
@@ -71,21 +69,18 @@ ASCII fallback for the diagram above (inheritance with extends:):
   Bundled files (scripts/, references/, assets/, etc.):
 
   parent files                      child files                       materialized file tree
-  ARTIFACT.md                       SKILL.md         (overrides)      ARTIFACT.md            (from parent)
-  SKILL.md                          scripts/submit.py (overrides)     SKILL.md               (child wins)
-  scripts/validate.py               scripts/vat-lookup.py (new)       scripts/validate.py    (from parent)
-  scripts/submit.py                 assets/eu-template.j2 (new)       scripts/submit.py      (child wins)
-  references/process.md                                               scripts/vat-lookup.py  (child only)
-                                                                      references/process.md  (from parent)
-                                                                      assets/eu-template.j2  (child only)
+  ARTIFACT.md                       ARTIFACT.md                       ARTIFACT.md            (merged manifest)
+  SKILL.md                          SKILL.md                          SKILL.md               (child)
+  scripts/validate.py               scripts/submit.py                 scripts/submit.py      (child)
+  scripts/submit.py                 scripts/vat-lookup.py             scripts/vat-lookup.py  (child)
+  references/process.md             assets/eu-template.j2             assets/eu-template.j2  (child)
 
   Manifest scalars (version, description) take the child's value;
   set-typed lists (tags, requiresApproval) union; security-relevant
-  fields take the most restrictive value. Files merge by relative
-  path: same-path file in the child overrides the parent; parent-only
-  files inherit; child-only files are added. The child cannot delete
-  a parent file. Hidden parents merge server-side without surfacing
-  the parent ID.
+  fields take the most restrictive value. Bundled files do not merge:
+  the materialized package carries the child's own files and the
+  parent contributes frontmatter only. Hidden parents merge
+  server-side without surfacing the parent ID.
 -->
 
 
@@ -112,17 +107,15 @@ The "most-restrictive" rules apply to security-relevant fields. A parent at `sen
 
 ---
 
-## Bundled-file merge semantics
+## Bundled files under extends
 
-Bundled files (everything under the artifact root other than the manifest, including `scripts/`, `references/`, `assets/`, schemas, templates, and any other content) merge by relative path:
+`extends:` merges frontmatter fields. Bundled files (everything under the artifact root other than the manifest, including `scripts/`, `references/`, `assets/`, schemas, and templates) do not merge:
 
-- A file at the same relative path in both parent and child resolves to the child's content. This applies to `SKILL.md` as well as bundled scripts and resources.
-- A file only in the parent is inherited unchanged.
-- A file only in the child is added.
+- The materialized package carries the child's own bundled files. A file the parent ships is not inherited.
+- `SKILL.md` follows the same rule. The registry serves the child's authored `SKILL.md` verbatim.
+- A child that needs a file the parent ships copies that file into its own package.
 
-The child cannot delete a parent file. To remove a file the parent contributes, the child must replace it with an empty file or shadow it at the same path with intentional content. The materialized package the caller receives is the merged union.
-
-The content hash recorded for the merged artifact reflects the combined tree, so reproducibility holds across re-materialization as long as both parent and child versions are pinned.
+The content hash the registry records covers the child's own package: its `ARTIFACT.md`, its `SKILL.md`, and its bundled files. The parent contributes no bytes to it.
 
 ---
 
@@ -130,7 +123,7 @@ The content hash recorded for the merged artifact reflects the combined tree, so
 
 - **Single inheritance.** `extends:` is a single scalar; no multiple inheritance. To compose from multiple parents, restructure the parents to chain (`A extends B; B extends C`).
 - **Cycle detection.** Cycles in the `extends:` graph are detected at ingest time and rejected.
-- **Same canonical ID.** A child uses `extends:` only when its canonical ID matches the parent's. The use case is a higher-precedence layer refining a lower-precedence layer's artifact at the same path. To override an artifact at a different path, write a new artifact at the new path and point references at it.
+- **Parent reference.** A child may extend a different canonical ID, inheriting from a separate artifact pinned to the version resolved at the child's ingest time. A child may also extend its own canonical ID, which overlays the artifact contributed by the next-lower-precedence layer; that form is what a cross-layer collision requires. In both forms the child's `type:` must match the parent's.
 - **Re-ingest required for parent updates.** Parent version is pinned at the child's ingest time. Bumping the parent does not retroactively update the child's resolved manifest until the child is re-ingested.
 
 ---
@@ -240,7 +233,7 @@ The parent's `sandbox_profile: unrestricted` is overridden by the child's `read-
 
 ## Lint behavior
 
-- Unresolved parent at ingest time: lint warning rather than error. The child ingests with the `extends:` reference recorded; resolution happens at request time. (This handles "expected to be defined later" cases.)
+- Unresolved parent at ingest time: ingest error (`ingest.invalid_artifact`). The registry pins the parent version when the child is ingested, so the parent must already be ingested under the tenant. Ingest the parent's layer first.
 - Cycle detected: ingest error.
 - Child declaring `extends:` against a parent in a layer the child's layer cannot see: ingest succeeds; the parent resolves at request time per the visibility rules above.
 - Child declaring `extends:` with a parent type that doesn't match the child's type: ingest error.

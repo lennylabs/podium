@@ -826,7 +826,7 @@ func TestArtifactTypes_SensitivityInLoad(t *testing.T) {
 func TestArtifactTypes_HookBundledScript(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"finance/audit/log-session-end/ARTIFACT.md":    "---\ntype: hook\nname: log-session-end\nversion: 1.0.0\ndescription: Log session-end events.\nhook_event: stop\nhook_action: |\n  scripts/log.sh\nruntime_requirements:\n  system_packages: [jq]\n---\n\nbody\n",
+		"finance/audit/log-session-end/ARTIFACT.md":    "---\ntype: hook\nname: log-session-end\nversion: 1.0.0\ndescription: Log session-end events.\nhook_event: stop\nhook_action: |\n  bash scripts/log.sh\nruntime_requirements:\n  system_packages: [jq]\n---\n\nbody\n",
 		"finance/audit/log-session-end/scripts/log.sh": "#!/usr/bin/env bash\necho session end | jq -R .\n",
 	})
 	if l := runPodium(t, "", nil, "lint", "--registry", reg); l.Exit != 0 {

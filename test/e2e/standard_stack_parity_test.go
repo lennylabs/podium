@@ -2,7 +2,7 @@ package e2e
 
 // Managed-stack author-to-consumer parity end-to-end.
 //
-// standard_deployment_test.go documents docs/deployment/organization.md, but
+// standard_deployment_test.go documents docs/deployment/clustered.md, but
 // every server it boots is `serve --standalone` over SQLite metadata plus a
 // filesystem object store, and its identity coverage is MCP-only. None boots
 // the registry in standard mode (Postgres metadata + S3 object store) with the

@@ -1,7 +1,5 @@
 ---
-layout: default
 title: CLI
-parent: Reference
 nav_order: 1
 description: "Every podium subcommand: setup, server, sync, layer management, search, admin, signing."
 ---
@@ -19,26 +17,20 @@ The `podium` CLI is a single binary.
 
 ## Subcommand help
 
-Every subcommand and subcommand group accepts `--help` (and the short forms `-h` and `help`). Leaf subcommands print a one-line description followed by their flag list:
+Every subcommand and subcommand group accepts `--help` and the short form `-h`; a subcommand group additionally accepts the bare `help` token. Leaf subcommands print a one-line description followed by their flag list:
 
 ```
-$ podium serve --help
-podium serve - Run the standalone registry server in-process.
+$ podium lint --help
+podium lint - Validate manifests in a filesystem-source registry.
 
 Flags:
-  -bind string
-        address to listen on (overrides PODIUM_BIND)
-  -config string
-        path to registry.yaml (overrides PODIUM_CONFIG_FILE)
-  -layer-path string
-        filesystem registry root to ingest at startup (§13.10; overrides PODIUM_LAYER_PATH)
-  -public-mode
-        run in public mode (overrides PODIUM_PUBLIC_MODE)
-  -standalone
-        alias for the zero-flag standalone bootstrap
+  -offline
+        skip the §4.4 URL HEAD check (validate bundled files only)
+  -registry string
+        filesystem registry path (required)
 ```
 
-Dispatcher groups (`admin`, `cache`, `config`, `domain`, `artifact`, `layer`, `profile`, `admin runtime`) print their subcommand list. `sync` also dispatches the `override` and `save-as` subcommands when one is the first argument, and otherwise runs materialization directly:
+Dispatcher groups (`admin`, `cache`, `config`, `domain`, `artifact`, `layer`, `profile`, `admin runtime`, `admin tenant`) print their subcommand list. `sync` also dispatches the `override` and `save-as` subcommands when one is the first argument, and otherwise runs materialization directly:
 
 ```
 $ podium admin --help
@@ -48,10 +40,11 @@ Subcommands:
   grant                Grant tenant admin role to a user.
   revoke               Revoke tenant admin role from a user.
   show-effective       Print the per-layer visibility for a user identity.
-  erase                GDPR right-to-be-forgotten on the local audit log.
+  erase                GDPR right-to-erasure: purge a user's layers and redact their audit identity.
   retention            Apply audit retention policies to the local audit log.
   reembed              Re-run vector embeddings against the configured registry.
   runtime              Manage trusted runtime signing keys.
+  tenant               Manage tenants (operator role).
   migrate-to-standard  Pump standalone state into a standard deployment.
 ```
 
@@ -122,9 +115,9 @@ podium logout [--registry <url>]
 | `--audience <aud>` | Audience claim for the issued token. Defaults to `PODIUM_OAUTH_AUDIENCE`. |
 | `--scopes <list>` | Space-separated OAuth scopes. Default: `openid profile email groups`. |
 
-When `--issuer` is unset, `podium login` discovers the device-authorization and token endpoints from the registry's RFC 8414 metadata at `/.well-known/oauth-authorization-server`. Setting `PODIUM_NO_BROWSER` to a truthy value (`1`, `true`, `yes`, or `on`) has the same effect as `--no-browser` for headless and CI environments. Tokens cache in the OS keychain keyed by registry URL; multiple registries can be authenticated simultaneously.
+When `--issuer` is unset, `podium login` probes the resolved registry URL for RFC 8414 authorization-server metadata at `/.well-known/oauth-authorization-server` and reads the device-authorization and token endpoints from it. The registry process does not serve that document itself, so discovery succeeds only when a fronting proxy or gateway publishes it; otherwise pass `--issuer` (or set `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT`). Setting `PODIUM_NO_BROWSER` to a truthy value (`1`, `true`, `yes`, or `on`) has the same effect as `--no-browser` for headless and CI environments. Tokens cache in the OS keychain keyed by registry URL; multiple registries can be authenticated simultaneously.
 
-`podium login` is a no-op when the resolved registry is a filesystem path or a `--standalone` server (no auth in either).
+`podium login` is a no-op when the resolved registry is a filesystem path or one of the loopback defaults, `http://127.0.0.1:8080` or `http://localhost:8080`. It reports that the registry needs no authentication and exits. A single-node server published at any other URL runs the full device-code flow, so a deployment that configures `oidc-jwt` authenticates through this command.
 
 ---
 
@@ -148,11 +141,11 @@ Each flag overrides the matching `PODIUM_*` env var for the duration of the proc
 
 | Flag | Effect |
 |:--|:--|
-| `--standalone` | Single-binary mode with embedded SQLite + sqlite-vec + bundled embedding model. Defaults to bind `127.0.0.1:8080`. |
+| `--standalone` | Single-binary configuration with embedded SQLite and sqlite-vec. The embedding provider defaults to `ollama` at `http://localhost:11434`; no model ships in the binary, so search runs BM25 over manifest text whenever that endpoint is unreachable. Defaults to bind `127.0.0.1:8080`. |
 | `--strict` | Refuse to start without an explicit config (no auto-standalone fallback). Same effect as `PODIUM_NO_AUTOSTANDALONE`. |
 | `--config <path>` | Override the default config file location. Overrides `PODIUM_CONFIG_FILE`. |
 | `--bind <addr>` | Bind address. Overrides `PODIUM_BIND`. |
-| `--layer-path <path>` | For standalone: register layers rooted at this path. The path is polymorphic. When `<path>/.registry-config` exists with `multi_layer: true` (and no top-level manifest files are present), each subdirectory becomes a `local`-source layer per the filesystem-registry layout. Otherwise the path is registered as a single `local`-source layer. Equivalent to `PODIUM_LAYER_PATH` or the `layers.path` key in `registry.yaml`; precedence is CLI flag > env var > config file. |
+| `--layer-path <path>` | For standalone: register layers rooted at this path. The path is polymorphic. When `<path>/.registry-config` exists with `multi_layer: true` (and no top-level manifest files are present), each subdirectory becomes a `local`-source layer per the filesystem-registry layout. Otherwise the path is registered as a single `local`-source layer. Equivalent to `PODIUM_LAYER_PATH` or the `layer_path` key under the top-level `registry:` mapping in `registry.yaml`; precedence is CLI flag > env var > config file. |
 | `--public-mode` | Bypass authentication and visibility filtering. Mutually exclusive with an identity provider. Overrides `PODIUM_PUBLIC_MODE`. |
 | `--allow-public-bind` | Allow non-loopback bind in public mode or with trusted headers (typically behind an authenticated reverse proxy). Overrides `PODIUM_ALLOW_PUBLIC_BIND`. |
 | `--no-embeddings` | Disable embeddings and fall back to BM25-only search. Overrides `PODIUM_NO_EMBEDDINGS`. |
@@ -161,15 +154,17 @@ Each flag overrides the matching `PODIUM_*` env var for the duration of the proc
 | `--web-ui` | Mount the bundled web UI at `/ui/`. Overrides `PODIUM_WEB_UI`. |
 | `--web-ui-allow-public-bind` | Allow the web UI on a non-loopback bind when an identity provider is configured. Overrides `PODIUM_WEB_UI_ALLOW_PUBLIC_BIND`. |
 
-Zero-flag (`podium serve` alone) auto-enters standalone mode when no config is found at `~/.podium/registry.yaml`. Disable with `PODIUM_NO_AUTOSTANDALONE=1` or `--strict`.
+Zero-flag (`podium serve` alone) auto-enters the standalone configuration when no config is found at `~/.podium/registry.yaml`. Disable with `PODIUM_NO_AUTOSTANDALONE=1` or `--strict`.
 
 ### `podium status`
 
-Prints registry status: bind address, mode (standalone / standard / public / read-only), connected layer sources.
+Prints a diagnostic summary of the client setup: the resolved registry, harness, cache directory, cache mode, overlay path, identity provider, masked session token, and tenant. For a server-source registry it also probes `/healthz` and prints reachability, the registry mode the health response reports, the scope-preview aggregate counts, and whether a keychain token is present.
 
 ```
-podium status
+podium status [--registry <url>]
 ```
+
+`--registry` overrides the resolved registry for this run. Without it, the registry resolves from `PODIUM_REGISTRY` and then the merged `sync.yaml`.
 
 ---
 
@@ -228,10 +223,10 @@ podium sync [--registry <url-or-path>] [--target <path>] [--harness <name>]
 | `--exclude <pattern>` | Glob to exclude. Applied after include. Repeatable. |
 | `--type <t1,t2,...>` | Restrict to a comma-separated list of artifact types. |
 | `--overlay <path>` | Workspace overlay path watched alongside the registry. |
-| `--watch` | Long-running. Re-materialize on registry change events or fsnotify in filesystem mode. A `--config` run that includes a `kind: marketplace` target rejects `--watch` with `config.invalid`. |
+| `--watch` | Long-running. Re-materialize on registry change events, or on fsnotify against a filesystem source. Combined with `--config` it starts no watch loop: each `kind: workspace` target syncs once and the command exits. A `kind: marketplace` target under `--watch` fails the run with `config.invalid` before any target renders. |
 | `--dry-run` | Print the resolved set; write nothing. |
-| `--preview` | Print the scope-preview aggregate counts and exit; write nothing. |
-| `--check` | Validate the merged `sync.yaml` and report warnings (unresolved profiles, malformed globs, target/profile collisions). |
+| `--preview` | Print the scope-preview aggregate counts and exit; write nothing. Requires a server-source registry, because the counts come from `GET /v1/scope/preview`. |
+| `--check` | Validate the merged `sync.yaml` and report warnings (unresolved profiles, malformed globs, target/profile collisions). Combined with `--config`, it validates every target in the named file and materializes none. |
 | `--json` | Structured envelope output (pipe to `jq`). |
 
 Lock file at `<target>/.podium/sync.lock`.
@@ -250,29 +245,33 @@ podium sync override --reset                      # clear all toggles
 podium sync override --add <id> --dry-run
 ```
 
+`--target <path>` selects the materialized directory and defaults to the current directory. `--registry <url-or-path>` and `--harness <name>` override the resolved registry and adapter for the toggle's materialization. An unset `--registry` resolves from `PODIUM_REGISTRY`, then the merged `sync.yaml`. An unset `--harness` resolves from `PODIUM_HARNESS`, then the harness recorded in the target's lock file, then the merged `sync.yaml`, then the built-in `none` adapter.
+
 ### `podium sync save-as`
 
 Captures the current materialized set as a YAML profile in `sync.yaml`.
 
 ```
-podium sync save-as --profile <name> [--update] [--dry-run]
+podium sync save-as --profile <name> [--target <path>] [--update] [--dry-run]
 ```
 
-`--update` overwrites an existing profile. After `save-as` succeeds, the lock file's toggles are cleared.
+`--profile` is required. `--target <path>` selects the materialized directory and defaults to the current directory. `--update` overwrites an existing profile. After `save-as` succeeds, the lock file's toggles are cleared.
 
 ### `podium profile edit`
 
 Permanent edits to entries in `sync.yaml`. Distinct from `podium sync override`, which is ephemeral.
 
 ```
-podium profile edit                                       # TUI for the active profile
 podium profile edit <name>                                # TUI for the named profile
 podium profile edit <name> --add-include <pattern>
 podium profile edit <name> --remove-include <pattern>
 podium profile edit <name> --add-exclude <pattern>
 podium profile edit <name> --remove-exclude <pattern>
 podium profile edit <name> --add-include <pattern> --dry-run
+podium profile edit <name> --target <path> --add-include <pattern>
 ```
+
+The profile name is a required positional argument; `podium profile edit` with no name exits 2 and asks for one. `--target <path>` selects the directory holding `.podium/sync.yaml` and defaults to the current directory. The add and remove flags are repeatable, and passing none of them opens the interactive editor.
 
 Modifies `sync.yaml` in place, preserving formatting and comments around untouched keys.
 
@@ -281,6 +280,8 @@ Modifies `sync.yaml` in place, preserving formatting and comments around untouch
 ## Read CLI
 
 The read CLI maps 1:1 to the SDK's read operations and uses the same identity, cache, layer composition, and visibility filtering server-side.
+
+Each command that queries the registry (`search`, `domain show`, `domain search`, `domain analyze`, `artifact show`, and `impact`) takes `--registry <url>`, which defaults to `PODIUM_REGISTRY` and is required. `artifact scaffold` is filesystem-only and takes no `--registry`.
 
 ### `podium search`
 
@@ -313,8 +314,10 @@ podium domain search <query> [--scope <path>] [--top-k <n>] [--json]
 Operator command. Renders a quality report: sparsity per node, pass-through chains, candidates for split (high artifact count + tag-cluster entropy) or fold (low artifact count).
 
 ```
-podium domain analyze [<path>]
+podium domain analyze [<path>] [--path <path>]
 ```
+
+The subtree is given positionally. The `--path` flag is accepted as an alternative and wins over the positional argument. An empty path analyzes the root.
 
 ### `podium artifact show`
 
@@ -345,7 +348,7 @@ podium artifact scaffold --type <type> --description <text>
                          <path>
 ```
 
-`--type` is required; it accepts any of the spec §4.3 first-class types:
+`--sensitivity` defaults to `low` and `--version` defaults to `0.1.0`. `--type` is required. It accepts the first-class artifact types and `mcp-server`, the extension type Podium ships built-in:
 
 | Type | Files written | Type-specific flags |
 |---|---|---|
@@ -397,6 +400,8 @@ podium impact <artifact-id> [--registry <url>]
 
 ## Layer management
 
+Every `podium layer` subcommand takes `--registry <url>`, which defaults to `PODIUM_REGISTRY` and is required. `register`, `reingest`, and `watch` additionally fall back to `defaults.registry` in the merged `sync.yaml`.
+
 ### `podium layer register`
 
 Registers a new layer.
@@ -413,9 +418,9 @@ For Git sources, the registry returns the webhook URL and HMAC secret to configu
 
 `--force-push-policy` sets the per-layer force-push handling for a Git source. The default (`tolerant`) preserves previously-ingested commits and emits a `layer.history_rewritten` event; `strict` rejects an ingest whose history was rewritten. The policy is also settable with `podium layer update --force-push-policy` and through the registry.yaml `source.git.force_push_policy` key.
 
-Visibility flags set who can see the layer:
+Visibility flags set who can see the layer. They apply to an admin-defined layer; a user-defined layer takes the fixed visibility `users: [<owner>]` instead.
 
-- `--user-defined` registers a personal layer; pair it with `--owner` to name the owning OIDC subject.
+- `--user-defined` registers a personal layer. The registry derives its owner from the authenticated caller and sets its visibility to that owner alone, so `--public`, `--organization`, `--group`, and `--user` are ignored on this form and `--owner` is honored only when no authenticated identity resolves. `podium layer update` also ignores owner and visibility patches on a user-defined layer.
 - `--public` sets public visibility; `--organization` sets organization-wide visibility.
 - `--group` grants visibility to an OIDC group (repeatable).
 - `--user` grants visibility to an OIDC subject or email (repeatable).
@@ -432,7 +437,7 @@ podium layer list [--deleted]
 
 ### `podium layer reorder`
 
-Reorders user-defined layers. Admin layers are reordered through admin tooling; this command applies only to the caller's user-defined layers.
+Re-sequences the layer list. Reordering a user-defined layer requires no admin role. Reordering an admin-defined layer requires the per-tenant `admin` role, and a caller without it is rejected with `auth.forbidden`. An id that names no configured layer returns `registry.not_found`.
 
 ```
 podium layer reorder <id> [<id> ...]
@@ -483,13 +488,13 @@ podium layer update --id <id>
 
 ### `podium layer watch`
 
-Polls a layer's source for changes at a configured interval. Works against `local`-source layers and against `git`-source layers that do not have a webhook configured (for example, on a developer machine without a public ingress).
+Polls a layer's source for changes at a configured interval. Works against `local`-source layers and against `git`-source layers that do not have a webhook configured (for example, on a developer machine without a public ingress). Each tick posts to `/v1/layers/reingest`; the command runs until interrupted.
 
 ```
-podium layer watch <id> [--interval <duration>]
+podium layer watch --id <id> [--interval <duration>]
 ```
 
-`--interval` defaults to a sensible value per source type.
+`--interval` takes a Go duration string (`30s`, `1h`) and defaults to `1m`. A non-positive value is rejected.
 
 ---
 
@@ -511,7 +516,7 @@ podium admin tenant deactivate <id> --registry <url>
 | Command | Effect |
 |:--|:--|
 | `create <name>` | Provisions a tenant, deriving the org ID from the name. Create is idempotent: re-creating an existing name returns that tenant unchanged. The quota and scope-preview flags set the tenant's initial values; an omitted flag takes the deployment default. |
-| `list` | Lists every tenant. `--json` emits the wire array for scripting. |
+| `list` | Lists every tenant. `--json` prints the registry response verbatim: an object whose `tenants` key holds the array. |
 | `update <id>` | Sends only the flags passed, so an omitted flag leaves that field unchanged. `--active true` reactivates a deactivated tenant; `--active false` deactivates it. The command cannot change the name, which is fixed at create. |
 | `deactivate <id>` | Soft-deactivates the tenant. A deactivated tenant stops resolving while its data persists; `update <id> --active true` reactivates it. |
 
@@ -561,6 +566,23 @@ podium admin reembed [--artifact <id> --version <semver>]
 
 With no `--artifact`, the command runs a tenant-wide pass; `--only-missing` and `--since` compose to scope it.
 
+### `podium admin runtime`
+
+Manages the trusted runtime signing keys the `injected-session-token` verifier consults. `--registry` is required on both subcommands (defaults to `PODIUM_REGISTRY`).
+
+```
+podium admin runtime register --issuer <name> --algorithm <alg> --public-key-file <path> --registry <url>
+podium admin runtime list --registry <url>
+```
+
+| Flag | Effect |
+|:--|:--|
+| `--issuer <name>` | Issuer name the runtime puts in the token's `iss` claim. Required. |
+| `--algorithm <alg>` | JWS algorithm the runtime signs with (`RS256`, `ES256`, `EdDSA`, and so on). Required. |
+| `--public-key-file <path>` | Path to the PEM-encoded public key. Required; the command reads the file and sends its contents. |
+
+`list` prints the registered runtimes without echoing the key material.
+
 ### `podium admin migrate-to-standard`
 
 Pumps a standalone deployment's state (SQLite metadata plus the filesystem object store) into a standard deployment (Postgres plus S3). The source flags default to the standalone layout under `~/.podium`, so the short form runs verbatim on a standalone host. The granular `--target-*` flags remain available for advanced S3 configuration.
@@ -607,6 +629,21 @@ podium admin erase <user-id> --salt <salt> --local --operator <admin-id> [--audi
 | Local (`--local` or `--audit-path`) | Redacts the local MCP audit log directly (default `~/.podium/audit.log`). Requires `--operator` to record the invoking admin. |
 
 Redaction replaces `sub` with `redacted-<sha256(sub+salt)>` and preserves audit event sequencing. Erasure is itself logged as a `user.erased` event.
+
+### `podium admin retention`
+
+Applies per-event-type retention policies to the local audit log, dropping events older than the policy's window. The command operates on the local log file; the registry-wide retention pass runs server-side.
+
+```
+podium admin retention --policy <type>=<duration> [--policy <type>=<duration>]... [--audit-path <path>]
+```
+
+| Flag | Effect |
+|:--|:--|
+| `--policy <type>=<duration>` | Maximum age for one event type, for example `artifacts.searched=720h`. Repeatable, and at least one is required. The duration is a Go duration string; an `Nd` form such as `30d` is also accepted. |
+| `--audit-path <path>` | Audit log path. Default: `~/.podium/audit.log`. |
+
+The command prints the number of audit events dropped.
 
 ---
 
@@ -656,8 +693,14 @@ The MCP server verifies signatures automatically on materialization for sensitiv
 Cleans up the content-addressed cache.
 
 ```
-podium cache prune
+podium cache prune [--dir <path>] [--days <n>] [--dry-run]
 ```
+
+| Flag | Effect |
+|:--|:--|
+| `--dir <path>` | Cache directory. Defaults to `PODIUM_CACHE_DIR`, then `~/.podium/cache`. |
+| `--days <n>` | Remove buckets last accessed more than `n` days ago. Default: `30`. `0` removes every bucket older than now. |
+| `--dry-run` | Report what would be removed; remove nothing. |
 
 The cache lives at `~/.podium/cache/` by default (override with `PODIUM_CACHE_DIR`). Content cache entries are immutable; safe to prune by age.
 
@@ -666,8 +709,10 @@ The cache lives at `~/.podium/cache/` by default (override with `PODIUM_CACHE_DI
 Shows current usage and limits per quota type.
 
 ```
-podium quota
+podium quota [--registry <url>]
 ```
+
+`--registry` defaults to `PODIUM_REGISTRY` and is required.
 
 Quotas: storage, search QPS, materialization rate, audit volume, user-defined-layer cap.
 
@@ -675,7 +720,7 @@ Quotas: storage, search QPS, materialization rate, audit volume, user-defined-la
 
 ## JSON output
 
-Most read commands accept `--json` for piping into other tools. Schemas are stable and documented per command in [HTTP API](http-api).
+Most read commands accept `--json` for piping into other tools. The read CLI's envelopes are not the raw wire responses documented in [HTTP API](http-api): `podium domain search --json` keys the ranked domains under `results` where the wire response uses `domains`, `podium search --json` and `podium artifact show --json` deliver `frontmatter` as a parsed object where the wire response delivers a raw string, and `podium artifact show --json` renames the wire's `manifest_body` to `body`.
 
 ```bash
 podium search "month-end close OR variance" --type skill --top-k 15 --json \
@@ -698,9 +743,10 @@ podium search "month-end close OR variance" --type skill --top-k 15 --json \
 | `PODIUM_MATERIALIZE_ROOT` | Default destination for `load_artifact` materialization. |
 | `PODIUM_PRESIGN_TTL_SECONDS` | Override for presigned URL TTL. |
 | `PODIUM_VERIFY_SIGNATURES` | `never`, `medium-and-above` (default), `always`. |
-| `PODIUM_IDENTITY_PROVIDER` | `oauth-device-code` (default), `injected-session-token`. |
+| `PODIUM_IDENTITY_PROVIDER` | Consumer side (MCP server and SDKs): `oauth-device-code` (default) or `injected-session-token`. Registry process: `injected-session-token`, `oidc-jwt`, or `trusted-headers`. `oauth-device-code` has no server-side verifier, so setting it on the registry aborts startup with `config.identity_provider_unverified`. |
 | `PODIUM_OAUTH_AUDIENCE`, `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` | OAuth provider config. |
-| `PODIUM_SESSION_TOKEN_ENV`, `PODIUM_SESSION_TOKEN_FILE` | Injected-token sources. |
+| `PODIUM_SESSION_TOKEN`, `PODIUM_SESSION_TOKEN_ENV`, `PODIUM_SESSION_TOKEN_FILE` | Injected-token sources. `PODIUM_SESSION_TOKEN` is the default variable the CLI, the MCP server, and the SDKs read; `PODIUM_SESSION_TOKEN_ENV` names a different variable to read it from, and `PODIUM_SESSION_TOKEN_FILE` names a file to read it from. |
+| `PODIUM_TOKEN` | Registry credential a `kind: marketplace` sync target renders under. When set it takes precedence over the session token and the `podium login` keychain token for that render. |
 | `PODIUM_PUBLIC_MODE` | Equivalent of `--public-mode`. |
 | `PODIUM_NO_AUTOSTANDALONE` | Disable zero-flag standalone fallback. |
 | `PODIUM_MULTI_TENANT` | Registry-process boot setting. When `true`, the registry runs in multi-tenant mode and routes each request to the tenant its organization names; the `podium admin tenant` commands and the `/v1/admin/tenants` endpoints are available. When unset, every request binds to the single `default` org and tenant management is rejected. |

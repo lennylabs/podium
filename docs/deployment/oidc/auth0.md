@@ -1,8 +1,5 @@
 ---
-layout: default
 title: Auth0
-parent: OIDC cookbooks
-grand_parent: Deployment
 nav_order: 4
 description: Configure Podium to authenticate against Auth0 via OIDC device-code flow.
 ---
@@ -67,18 +64,34 @@ exports.onExecutePostLogin = async (event, api) => {
 
 Save and deploy. Then attach the Action: **Actions → Triggers → post-login → drag the new Action into the flow → Apply**.
 
-This reads the user's groups from `app_metadata`. Populate `app_metadata` through your provisioning process: manually for small teams, or via SCIM for larger setups. The claim emitted is namespaced (`https://podium.acme.com/groups`) because Auth0 disallows non-namespaced custom claims.
+This reads the user's groups from `app_metadata`. Populate `app_metadata` through your provisioning process: manually for small teams, or via SCIM for larger setups.
+
+The registry reads group membership from the top-level `groups` claim only. The claim path is not configurable, and `IdpGroupMapping` rewrites group values rather than redirecting the registry to another claim. A namespaced claim such as `https://podium.acme.com/groups` therefore never reaches the visibility evaluator. Emit the claim as a top-level `groups` array on the access token:
+
+```javascript
+exports.onExecutePostLogin = async (event, api) => {
+  const groups = (event.user.app_metadata && event.user.app_metadata.groups) || [];
+  api.accessToken.setCustomClaim("groups", groups);
+};
+```
+
+Auth0 restricts non-namespaced custom claims, so the Action emits membership under a namespaced path rather than a top-level `groups` array. Point `identity_provider.groups_claim` at that path so the verifier reads it. A deployment that would rather not name the claim can use `users:` visibility, or resolve membership through SCIM instead of the token claim.
 
 ## 4. Configure Podium
 
 Registry side (`registry.yaml`):
 
 ```yaml
-identity_provider:
-  type: oauth-device-code
-  audience: https://podium.acme.com
-  authorization_endpoint: https://<your-tenant>.auth0.com
+registry:
+  identity_provider:
+    type: oidc-jwt
+    issuer: https://<your-tenant>.auth0.com/   # must be https; Auth0 issuers end in a slash
+    audience: https://podium.acme.com
 ```
+
+Every server-side key nests under the top-level `registry:` mapping. A document that starts at `identity_provider:` parses to an empty config and the registry ignores it without reporting an error.
+
+`oidc-jwt` is the registry's side of the flow: it verifies each presented token against the issuer's JWKS and validates the `aud` claim against `audience:`. Setting `oauth-device-code` as the registry's own provider stops startup with `config.identity_provider_unverified`.
 
 Restart the registry. The Action emits group membership under the namespaced claim path `https://podium.acme.com/groups`. A registry that verifies the forwarded token itself runs the `oidc-jwt` provider: it reads that path when `identity_provider.groups_claim` (`PODIUM_OAUTH_GROUPS_CLAIM`) names it, and the `IdpGroupMapping` adapter then maps the values the claim carries to group names registry-side. The `oauth-device-code` configuration above installs no request-time verifier, so neither the claim name nor the adapter applies to it. See [gateway-delegated identity](../gateway-delegated-identity).
 
@@ -89,8 +102,11 @@ podium init --global --registry https://podium.acme.com
 export PODIUM_OAUTH_CLIENT_ID=<client-id>
 export PODIUM_OAUTH_AUDIENCE=https://podium.acme.com
 export PODIUM_OAUTH_AUTHORIZATION_ENDPOINT=https://<your-tenant>.auth0.com/oauth/device/code
+export PODIUM_OAUTH_TOKEN_URL=https://<your-tenant>.auth0.com/oauth/token
 podium login
 ```
+
+Set `PODIUM_OAUTH_TOKEN_URL` explicitly. With it unset, `podium login` derives the token endpoint by appending `/token` to the device-authorization URL, which produces `https://<your-tenant>.auth0.com/oauth/device/code/token` and the token exchange fails.
 
 The device-flow verification URL is `https://<your-tenant>.auth0.com/activate`. After completion, `podium login` prints the resolved identity.
 
@@ -110,17 +126,18 @@ For larger setups, populate via SCIM (Auth0 Enterprise) or via a directory sync 
 
 ## 6. Test
 
-Configure an admin layer scoped to a group in the tenant's layer config. Group-scoped visibility is set in the registry layer config, or with `podium layer register --group <name>` (also `--public`, `--organization`, and `--user`). Layers registered with `--user-defined` are private to the registrant and cannot be widened.
+Configure an admin layer scoped to a group in `registry.yaml`. Group-scoped visibility is set in the registry layer config, or with `podium layer register --group <name>` (also `--public`, `--organization`, and `--user`). Layers registered with `--user-defined` are private to the registrant and cannot be widened.
 
 ```yaml
-layers:
-  - id: engineering-only
-    source:
-      git:
-        repo: git@github.com:acme/podium-engineering.git
-        ref: main
-    visibility:
-      groups: [engineering]
+registry:
+  layers:
+    - id: engineering-only
+      source:
+        git:
+          repo: git@github.com:acme/podium-engineering.git
+          ref: main
+      visibility:
+        groups: [engineering]
 ```
 
 Group-scoped visibility resolves on a registry running `oidc-jwt` with `identity_provider.groups_claim` (`PODIUM_OAUTH_GROUPS_CLAIM`) set to the namespaced path the Action emits, and with `IdpGroupMapping` configured when those claim values have to be rewritten to registry-side group names. On such a registry a user with `engineering` in `app_metadata.groups` sees the layer, and a user without it does not. See [gateway-delegated identity](../gateway-delegated-identity) for that configuration.

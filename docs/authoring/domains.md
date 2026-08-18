@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Domains
-parent: Authoring
 nav_order: 6
 description: Folders and subfolders as the catalog structure. DOMAIN.md, keywords, featured artifacts, the prose body, and discovery rendering knobs.
 ---
@@ -10,7 +8,7 @@ description: Folders and subfolders as the catalog structure. DOMAIN.md, keyword
 
 A **domain** is a directory in the registry. It groups related artifacts and gives them shared context. `finance` is a top-level domain; `finance/ap` is a subdomain; `finance/ap/pay-invoice` is the canonical path of an artifact under it.
 
-Domains exist whether or not you do anything special. Any subdirectory in your registry path is a domain by default. The optional `DOMAIN.md` file at the directory root adds metadata: a description, keywords, featured artifacts, the prose body that an agent reads when it navigates here, imports from elsewhere, and discovery-rendering knobs.
+Domains exist whether or not you do anything special. Any subdirectory in your registry path is a domain by default. The optional `DOMAIN.md` file at the directory root adds metadata: a description, keywords, featured artifacts, the prose body that an agent reads when it navigates here, `include:` patterns that pull in artifacts from elsewhere, and discovery-rendering knobs.
 
 ---
 
@@ -30,7 +28,7 @@ For a small or in-progress catalog, nest folders. The directory tree is the doma
             └── ARTIFACT.md
 ```
 
-`load_domain("personal")` returns the two subdomains; `load_domain("personal/hello")` returns the `greet` artifact. No `DOMAIN.md` needed.
+`load_domain("personal")` returns the two subdomains; `load_domain("personal/hello")` returns the `greet` artifact. No `DOMAIN.md` needed. A domain without a `DOMAIN.md` has no projection to embed, so it never appears in `search_domains` results; it stays reachable through `load_domain` enumeration.
 
 ---
 
@@ -178,17 +176,18 @@ Important properties:
 
 `exclude:` removes paths after the include set is computed.
 
-![DOMAIN.md imports: a DOMAIN.md declares imports via glob patterns; at request time, artifacts from elsewhere appear under the importing domain while keeping their canonical IDs.](../assets/diagrams/domain-imports.svg)
+![DOMAIN.md include: a DOMAIN.md declares `include:` glob patterns; at request time, artifacts from elsewhere appear under the including domain while keeping their canonical IDs.](../assets/diagrams/domain-imports.svg)
 
 <!--
-ASCII fallback for the diagram above (DOMAIN.md imports):
+ASCII fallback for the diagram above (DOMAIN.md include:):
 
   finance/DOMAIN.md                            source layer: _shared/
     description: Finance team artifacts.         _shared/payment-helpers/routing-validator/
-    keywords: [ap, ar, treasury]                 _shared/payment-helpers/swift-bic-parser/
-    imports:                                   (canonical IDs stay rooted in _shared/)
+    discovery:                                   _shared/payment-helpers/swift-bic-parser/
+      keywords: [ap, ar, treasury]             (canonical IDs stay rooted in _shared/)
+    include:
       - _shared/payment-helpers/**
-      - treasury/risk-models@1.x
+      - treasury/risk-models/**
 
                               |
                               v  (resolved at request time)
@@ -201,7 +200,7 @@ ASCII fallback for the diagram above (DOMAIN.md imports):
 
   Imported artifacts can show under multiple domains; their
   canonical ID is what they keep. Glob patterns expand against
-  the visible layer set; imports the caller cannot see are
+  the visible layer set; included artifacts the caller cannot see are
   silently dropped.
 -->
 
@@ -243,7 +242,7 @@ If multiple layers contribute a `DOMAIN.md` for the same path, the registry merg
 | `discovery.fold_passthrough_chains` | Most-restrictive-wins (`true` over `false`). |
 | `discovery.featured`, `discovery.deprioritize`, `discovery.keywords` | Append-unique. |
 
-When a workspace-local-overlay `DOMAIN.md` is involved, the MCP server applies the merge client-side after the registry returns its result for the registry-side layers.
+When a workspace-local-overlay `DOMAIN.md` is involved, the consumers that expose `load_domain` apply the merge client-side after the registry returns its result for the registry-side layers: the MCP server and the language SDKs. `podium sync` materializes by the `sync.yaml` scope rather than by domain enumeration, so it does not apply this merge.
 
 ---
 
@@ -266,7 +265,7 @@ The rendering of `load_domain` output is governed by configurable rules. Tenant 
 
 ## Tooling
 
-These commands call registry HTTP endpoints. Each requires a running registry server, passed with `--registry <url>` or the `PODIUM_REGISTRY` environment variable. The filesystem-only solo path the tutorials use does not serve them; ingest the catalog into a registry server first.
+These commands call registry HTTP endpoints. Each requires a running registry server, passed with `--registry <url>` or the `PODIUM_REGISTRY` environment variable. A [Local](../deployment/local) deployment reads the catalog from disk and runs no server, so these commands need a [Single node](../deployment/single-node) or [Clustered](../deployment/clustered) deployment; `podium serve --standalone --layer-path <dir>` starts one against the same catalog directory.
 
 - **`podium domain show <path>`** prints the `load_domain` output for a path. Useful for verifying your `DOMAIN.md` ingested correctly.
 - **`podium domain search <query>`** runs `search_domains` from the CLI. Useful for verifying that your `keywords` and `description` make the domain findable for the queries you care about.

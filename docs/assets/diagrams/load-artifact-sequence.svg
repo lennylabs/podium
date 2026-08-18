@@ -1,85 +1,156 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 560" font-family="Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 560" class="dg">
   <!--
-    load_artifact request sequence across four participants:
-    host, MCP server, registry, object storage.
-    Arrows are time-ordered top to bottom. Self-action boxes show
-    work that happens inside a single participant.
+    load_artifact request sequence across four participants: host, MCP server,
+    registry, and object storage. Arrows are time-ordered top to bottom.
+    Self-action boxes show work that happens inside a single participant.
   -->
   <defs>
-    <marker id="b-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
-      <path d="M 0 0 L 11 6 L 0 12 z" fill="#1f2933"/>
+    <marker id="dg-arrow-load-artifact-sequence" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path class="dg-arrow-head" d="M 0 0 L 11 6 L 0 12 z"/>
     </marker>
     <style>
-      .b-bg { fill: #ffffff; }
-      .b-lane-head { fill: #ffe9c7; stroke: #1f2933; stroke-width: 2.2; }
-      .b-self { fill: #fffaf0; stroke: #1f2933; stroke-width: 2; }
-      .b-title { font-size: 22px; fill: #1f2933; }
-      .b-lane-label { font-size: 17px; fill: #1f2933; }
-      .b-lifeline { fill: none; stroke: #b8a079; stroke-width: 1.4; stroke-dasharray: 5 5; }
-      .b-line { fill: none; stroke: #1f2933; stroke-width: 2.2; stroke-linecap: round; }
-      .b-msg { font-size: 14px; fill: #1f2933; }
-      .b-msg-mono { font-size: 14px; fill: #1f2933; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
-      .b-foot { font-size: 13px; fill: #8a7755; }
+      /*
+        Colour comes from the site's design tokens. Inlined in the documentation
+        site the site's own variables win, so the theme toggle drives the
+        diagram. Standing alone (raw markdown on github.com, or the file opened
+        directly) the fallbacks apply and follow the operating system setting.
+        The block below is identical in every diagram; edit all of them together.
+      */
+      :root {
+        --dg-ground: var(--surface, #ffffff);
+        --dg-panel-fill: var(--surface-2, #fdfdf8);
+        --dg-fill: var(--surface-3, #f5f3e9);
+        --dg-fill-2: var(--chip, #eae7d9);
+        --dg-accent-fill: var(--accent-wash, #fff3e2);
+        --dg-accent-soft: var(--accent-strip, #ffeeda);
+        --dg-ink: var(--ink, #14130f);
+        --dg-meta: var(--meta, #63604f);
+        --dg-faint: var(--faint, #6f6c5e);
+        --dg-border: var(--border, #d9d5c6);
+        --dg-accent: var(--accent-deep, #f2861a);
+        --dg-accent-text: var(--link, #a8480a);
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --dg-ground: var(--surface, #171b28);
+          --dg-panel-fill: var(--surface-2, #1e2434);
+          --dg-fill: var(--surface-3, #1b2030);
+          --dg-fill-2: var(--chip, #212739);
+          --dg-accent-fill: var(--accent-wash, rgba(255, 164, 36, 0.12));
+          --dg-accent-soft: var(--accent-strip, rgba(255, 164, 36, 0.08));
+          --dg-ink: var(--ink, #eaeef7);
+          --dg-meta: var(--meta, #9aa3ba);
+          --dg-faint: var(--faint, #7a8399);
+          --dg-border: var(--border, #2b3145);
+          --dg-accent: var(--accent-deep, #f2861a);
+          --dg-accent-text: var(--link, #ffa424);
+        }
+      }
+
+      .dg {
+        font-family: var(--font-ui, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+      }
+
+      .dg-bg { fill: var(--dg-ground); }
+
+      .dg-panel { fill: var(--dg-panel-fill); stroke: var(--dg-border); stroke-width: 1.6; }
+      .dg-card { fill: var(--dg-fill); stroke: var(--dg-ink); stroke-width: 1.8; }
+      .dg-card-primary { fill: var(--dg-accent-fill); stroke: var(--dg-accent); stroke-width: 2.2; }
+      .dg-card-strong { fill: var(--dg-fill-2); stroke: var(--dg-accent); stroke-width: 2.2; }
+      .dg-card-quiet { fill: var(--dg-ground); stroke: var(--dg-meta); stroke-width: 1.4; }
+      .dg-card-event { fill: var(--dg-accent-soft); stroke: var(--dg-accent); stroke-width: 1.8; stroke-dasharray: 6 5; }
+      .dg-chip { fill: var(--dg-accent-soft); stroke: var(--dg-border); stroke-width: 1.2; }
+      .dg-outline { fill: none; stroke: var(--dg-accent); stroke-width: 1.6; stroke-dasharray: 6 5; }
+
+      .dg-title { font-size: 22px; fill: var(--dg-ink); }
+      .dg-name { font-size: 17px; fill: var(--dg-ink); }
+      .dg-lead { font-size: 15px; fill: var(--dg-meta); }
+      .dg-sub { font-size: 14px; fill: var(--dg-meta); }
+      .dg-label { font-size: 13px; fill: var(--dg-accent-text); letter-spacing: 0.06em; }
+      .dg-label-quiet { font-size: 13px; fill: var(--dg-meta); letter-spacing: 0.06em; }
+      .dg-note { font-size: 13px; fill: var(--dg-meta); font-style: italic; }
+      .dg-foot { font-size: 13px; fill: var(--dg-faint); }
+      .dg-mono { font-size: 13px; fill: var(--dg-ink); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+      .dg-mono-accent { font-size: 13px; fill: var(--dg-accent-text); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+      .dg-mono-quiet { font-size: 13px; fill: var(--dg-meta); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+
+      .dg-line { fill: none; stroke: var(--dg-ink); stroke-width: 2; stroke-linecap: round; }
+      .dg-line-accent { fill: none; stroke: var(--dg-accent); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 6 5; }
+      .dg-line-quiet { fill: none; stroke: var(--dg-meta); stroke-width: 1.6; stroke-linecap: round; }
+      .dg-guide { fill: none; stroke: var(--dg-border); stroke-width: 1.2; }
+      .dg-divider { fill: none; stroke: var(--dg-border); stroke-width: 1.2; stroke-dasharray: 4 4; }
+
+      .dg-arrow-head { fill: var(--dg-ink); }
+      .dg-arrow-head-accent { fill: var(--dg-accent); }
+
+      .dg-t-xs { font-size: 12px; }
+      .dg-t-s { font-size: 13px; }
+      .dg-t-m { font-size: 15px; }
+      .dg-t-l { font-size: 18px; }
+      .dg-t-xl { font-size: 21px; }
+      .dg-t-2xl { font-size: 24px; }
+      .dg-t-3xl { font-size: 28px; }
     </style>
   </defs>
 
-  <rect class="b-bg" width="1080" height="560"/>
+  <rect class="dg-bg" width="1080" height="560"/>
 
-  <text class="b-title" x="40" y="42">load_artifact request sequence</text>
+  <text class="dg-title" x="40" y="42">load_artifact request sequence</text>
 
   <!-- Lane headers -->
-  <rect class="b-lane-head" x="40" y="68" width="180" height="42" rx="6"/>
-  <text class="b-lane-label" x="98" y="95">host</text>
+  <rect class="dg-card-primary" x="40" y="68" width="180" height="42" rx="6"/>
+  <text class="dg-name" x="98" y="95">host</text>
 
-  <rect class="b-lane-head" x="280" y="68" width="180" height="42" rx="6"/>
-  <text class="b-lane-label" x="320" y="95">MCP server</text>
+  <rect class="dg-card-primary" x="280" y="68" width="180" height="42" rx="6"/>
+  <text class="dg-name" x="320" y="95">MCP server</text>
 
-  <rect class="b-lane-head" x="520" y="68" width="180" height="42" rx="6"/>
-  <text class="b-lane-label" x="580" y="95">registry</text>
+  <rect class="dg-card-primary" x="520" y="68" width="180" height="42" rx="6"/>
+  <text class="dg-name" x="580" y="95">registry</text>
 
-  <rect class="b-lane-head" x="800" y="68" width="220" height="42" rx="6"/>
-  <text class="b-lane-label" x="855" y="95">object storage</text>
+  <rect class="dg-card-primary" x="800" y="68" width="220" height="42" rx="6"/>
+  <text class="dg-name" x="855" y="95">object storage</text>
 
   <!-- Lifelines -->
-  <line class="b-lifeline" x1="130" y1="112" x2="130" y2="520"/>
-  <line class="b-lifeline" x1="370" y1="112" x2="370" y2="520"/>
-  <line class="b-lifeline" x1="610" y1="112" x2="610" y2="520"/>
-  <line class="b-lifeline" x1="910" y1="112" x2="910" y2="520"/>
+  <line class="dg-divider" x1="130" y1="112" x2="130" y2="520"/>
+  <line class="dg-divider" x1="370" y1="112" x2="370" y2="520"/>
+  <line class="dg-divider" x1="610" y1="112" x2="610" y2="520"/>
+  <line class="dg-divider" x1="910" y1="112" x2="910" y2="520"/>
 
   <!-- 1. host -> MCP: load_artifact(id) -->
-  <text class="b-msg-mono" x="142" y="138">load_artifact(id)</text>
-  <path class="b-line" d="M 130 146 L 366 146" marker-end="url(#b-arrow)"/>
+  <text class="dg-mono" x="142" y="138">load_artifact(id)</text>
+  <path class="dg-line" d="M 130 146 L 366 146" marker-end="url(#dg-arrow-load-artifact-sequence)"/>
 
   <!-- 2. MCP -> registry: GET /v1/load_artifact -->
-  <text class="b-msg-mono" x="382" y="178">GET /v1/load_artifact?id=&lt;id&gt;</text>
-  <path class="b-line" d="M 370 186 L 606 186" marker-end="url(#b-arrow)"/>
+  <text class="dg-mono" x="382" y="178">GET /v1/load_artifact?id=&lt;id&gt;</text>
+  <path class="dg-line" d="M 370 186 L 606 186" marker-end="url(#dg-arrow-load-artifact-sequence)"/>
 
   <!-- 3. Registry self-action -->
-  <rect class="b-self" x="538" y="206" width="144" height="48" rx="6"/>
-  <text class="b-msg" x="556" y="226">visibility +</text>
-  <text class="b-msg" x="556" y="244">layer compose</text>
+  <rect class="dg-card" x="538" y="206" width="144" height="48" rx="6"/>
+  <text class="dg-sub" x="556" y="226">visibility +</text>
+  <text class="dg-sub" x="556" y="244">layer compose</text>
 
   <!-- 4. Registry -> MCP -->
-  <text class="b-msg" x="382" y="274">{manifest, presigned URLs}</text>
-  <path class="b-line" d="M 610 282 L 374 282" marker-end="url(#b-arrow)"/>
+  <text class="dg-sub" x="382" y="274">{manifest, presigned URLs}</text>
+  <path class="dg-line" d="M 610 282 L 374 282" marker-end="url(#dg-arrow-load-artifact-sequence)"/>
 
   <!-- 5. MCP -> object storage -->
-  <text class="b-msg-mono" x="382" y="314">GET &lt;presigned&gt;</text>
-  <path class="b-line" d="M 370 322 L 906 322" marker-end="url(#b-arrow)"/>
+  <text class="dg-mono" x="382" y="314">GET &lt;presigned&gt;</text>
+  <path class="dg-line" d="M 370 322 L 906 322" marker-end="url(#dg-arrow-load-artifact-sequence)"/>
 
   <!-- 6. Object storage -> MCP -->
-  <text class="b-msg" x="382" y="354">resource bytes</text>
-  <path class="b-line" d="M 910 362 L 374 362" marker-end="url(#b-arrow)"/>
+  <text class="dg-sub" x="382" y="354">resource bytes</text>
+  <path class="dg-line" d="M 910 362 L 374 362" marker-end="url(#dg-arrow-load-artifact-sequence)"/>
 
   <!-- 7. MCP self-action -->
-  <rect class="b-self" x="298" y="382" width="180" height="48" rx="6"/>
-  <text class="b-msg" x="316" y="402">verify + adapt +</text>
-  <text class="b-msg" x="316" y="420">atomic write to host</text>
+  <rect class="dg-card" x="298" y="382" width="180" height="48" rx="6"/>
+  <text class="dg-sub" x="316" y="402">verify + adapt +</text>
+  <text class="dg-sub" x="316" y="420">atomic write to host</text>
 
   <!-- 8. MCP -> host -->
-  <text class="b-msg" x="142" y="452">{manifest, materialized}</text>
-  <path class="b-line" d="M 370 460 L 134 460" marker-end="url(#b-arrow)"/>
+  <text class="dg-sub" x="142" y="452">{manifest, materialized}</text>
+  <path class="dg-line" d="M 370 460 L 134 460" marker-end="url(#dg-arrow-load-artifact-sequence)"/>
 
-  <text class="b-foot" x="40" y="510">The MCP server holds no per-session state; identity flows through the registry on every call.</text>
-  <text class="b-foot" x="40" y="528">Object storage receives presigned-URL GETs only; the registry never proxies resource bytes.</text>
+  <text class="dg-foot" x="40" y="510">The MCP server holds no per-session state; identity flows through the registry on every call.</text>
+  <text class="dg-foot" x="40" y="528">Object storage receives presigned-URL GETs only; the registry never proxies resource bytes.</text>
 </svg>

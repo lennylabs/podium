@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Your first command
-parent: Authoring
 nav_order: 2
 description: "Author a parameterized slash command that materializes into Claude Code's commands directory and accepts free-text arguments."
 ---
@@ -23,7 +21,7 @@ mkdir -p ~/podium-artifacts/personal/dev-loop/standup
 $EDITOR ~/podium-artifacts/personal/dev-loop/standup/ARTIFACT.md
 ```
 
-```yaml
+```markdown
 ---
 type: command
 name: standup

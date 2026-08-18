@@ -8,7 +8,7 @@ description: |
   This chart deploys the standard topology described in spec §13.1:
   stateless registry replicas, Postgres for metadata, S3-compatible
   object storage for resource bytes, and an OIDC IdP. For evaluation
-  pilots and small-team installations, prefer the standalone single
+  pilots and single-node installations, prefer the standalone single
   binary deployment described in §13.10.
 type: application
 version: 0.0.0-dev

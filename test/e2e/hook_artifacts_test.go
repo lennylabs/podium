@@ -53,7 +53,9 @@ echo "[${TIMESTAMP}] session end: ${CONV_ID}" >> "${LOG_FILE}"
 
 // hkBundledArtifact is the full bundled-script hook ARTIFACT.md from the doc
 // (type, name, version, description, tags, sensitivity, hook_event,
-// hook_action -> scripts/log.sh, runtime_requirements system_packages [jq]).
+// hook_action -> bash scripts/log.sh, runtime_requirements system_packages
+// [jq]). The action names the interpreter because a bundled file materializes
+// without an executable bit, which TestHooks_BundledScriptNotExecutable asserts.
 const hkBundledArtifact = "---\n" +
 	"type: hook\n" +
 	"name: log-session-end\n" +
@@ -63,7 +65,7 @@ const hkBundledArtifact = "---\n" +
 	"sensitivity: low\n" +
 	"hook_event: stop\n" +
 	"hook_action: |\n" +
-	"  scripts/log.sh\n" +
+	"  bash scripts/log.sh\n" +
 	"runtime_requirements:\n" +
 	"  system_packages: [jq]\n" +
 	"---\n\n" +

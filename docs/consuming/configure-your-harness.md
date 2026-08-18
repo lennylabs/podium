@@ -1,12 +1,12 @@
 ---
-layout: default
 title: Configure your harness
-parent: Consuming
 nav_order: 1
-description: Per-harness setup. Configure podium sync for filesystem materialization or the Podium MCP server for runtime discovery.
+description: Cross-harness delivery. The harness roster, where each artifact type lands on disk, and the podium sync and MCP server setup per harness.
 ---
 
 # Configure your harness
+
+This page documents cross-harness delivery. Artifacts are authored once in the canonical format, and a harness adapter translates each one into the layout its runtime expects. The same `finance/close-reporting/run-variance-analysis` directory becomes `.claude/skills/run-variance-analysis/SKILL.md` for Claude Code and `.cursor/skills/run-variance-analysis/SKILL.md` for Cursor, and the scripts and references bundled in that directory ride along into both. Nothing in the catalog changes when a workspace switches harness; the adapter changes.
 
 A harness can consume Podium artifacts in three ways. Pick the ones that fit per harness:
 
@@ -14,7 +14,9 @@ A harness can consume Podium artifacts in three ways. Pick the ones that fit per
 - **Runtime discovery** via the Podium MCP server. The agent calls `load_domain`, `search_domains`, `search_artifacts`, and `load_artifact` mid-session and materializes only what it needs. Requires a Podium server.
 - **Marketplace publishing** via a `podium sync` target of `kind: marketplace`. Renders the catalog into a git-repo plugin marketplace, extension, package, or tap that the harness imports. Available for the harnesses with a git-repo distribution: Claude Code, Claude Desktop, Claude Cowork, Codex, Cursor, Gemini, Pi, and Hermes. See [Publishing](publishing).
 
-Most harnesses support filesystem materialization and runtime discovery. Use the per-harness section below.
+Most harnesses handle both filesystem materialization and runtime discovery. Use the per-harness section below.
+
+Materialization delivers an artifact's bundled files wherever the target layout has a place for them. A skill's `scripts/`, `references/`, and `assets/` ride inside the skill folder, and the files bundled with an `agent`, `command`, `hook`, or `context` artifact land in the bucket the per-harness table names. A harness adapter renders a `rule` artifact as a single file or an injected block and an `mcp-server` artifact as a config-merge fragment, so files bundled in those two directories are dropped; `--harness none` writes them under `<destination>/<artifact-id>/` along with every other type. A marketplace rendering carries bundled files for its `skill` and `hook` components, and for a `rule` on the Claude marketplace, where a rule ships as a plugin skill. Every other marketplace component carries none. The per-harness tables below name the destination for each artifact type and for its bundled files. [Bundled resources](../authoring/bundled-resources) covers what an artifact directory may contain. To deliver a subset of the catalog into a workspace instead of the whole effective view, see [Selective materialization](selective-materialization).
 
 ---
 
@@ -24,96 +26,91 @@ The Podium MCP server is a stdio binary the harness spawns alongside its other M
 
 | Variable | Purpose |
 |:--|:--|
-| `PODIUM_REGISTRY` | Registry source: URL (server) or filesystem path. |
+| `PODIUM_REGISTRY` | Registry source. The MCP server requires a server URL (`http://` or `https://`) and aborts startup with `config.filesystem_registry_unsupported` when given a filesystem path. `podium sync` accepts a URL or a filesystem path. |
 | `PODIUM_HARNESS` | Harness adapter to use. Pass `none` for canonical raw output. |
 | `PODIUM_OVERLAY_PATH` | Optional. Workspace local-overlay path; falls back to `<workspace>/.podium/overlay/` when MCP roots resolve. |
 | `PODIUM_IDENTITY_PROVIDER` | `oauth-device-code` (developer hosts, default) or `injected-session-token` (managed runtimes). |
 
 For `podium sync`, the same configuration lives in `<workspace>/.podium/sync.yaml` (or `~/.podium/sync.yaml` for per-developer defaults). See the per-harness sections for examples.
 
-`podium sync` runs in one-shot mode by default and in long-running watch mode when invoked with the watch flag. Watch mode subscribes to change events and re-materializes affected artifacts incrementally. The event source differs between server-source and filesystem-source registries; the downstream pipeline is identical.
+`podium sync` runs in one-shot mode by default and in long-running watch mode when invoked with the watch flag. Watch mode runs one sync at startup and then waits for change triggers. A burst of triggers coalesces into a single run through a debounce window, and that run reruns the whole sync: it re-reads the effective view, applies the active profile's scope and the toggles recorded in the lock file, writes every selected artifact, deletes the paths the prior run wrote that this run did not, and rewrites the lock file. No artifact is materialized per event. The trigger source differs between server-source and filesystem-source registries, and the run itself is identical.
 
-**Server-source registry.** The watcher subscribes to a registry change-event stream (SSE over HTTP), filtered to the caller's effective view. The registry emits an event when an artifact in any visible layer is added, updated, or removed, or when a parent of a visible child changes.
+**Server-source registry.** The watcher subscribes to the registry change-event stream, a long-lived `GET /v1/events` that requests the `artifact.published`, `artifact.deprecated`, and `layer.config_changed` event types and returns newline-delimited JSON (`application/x-ndjson`), one event per line. The watcher reads each line's `event` field, skips the `_heartbeat` keepalive, and treats every other line as one trigger. The rest of the payload is not inspected, and a dropped stream is reopened after 500 ms. The stream itself applies no per-caller filtering; layer visibility applies when the triggered run re-reads the caller's effective view.
 
-![podium sync watch mode against a server-source registry: the watcher subscribes to the registry change-event stream and runs each event through receive, fetch, adapt, and atomic write before awaiting the next event.](../assets/diagrams/sync-watch.svg)
+![podium sync watch mode against a server-source registry: the watcher subscribes to the registry change-event stream, debounces the triggers it receives, and reruns the whole sync, which resolves the caller's effective view, adapts each artifact, writes atomically, deletes stale paths, and rewrites the lock file.](../assets/diagrams/sync-watch.svg)
 
 <!--
 ASCII fallback for the diagram above (podium sync watch mode, server-source registry):
 
-  podium server                              podium sync (watching)
-    change events       {artifact_id,         +-------------------+
-    SSE stream over     version, change}      | 1. Receive event  |
-    HTTP, filtered to   ===(event)===>        |    debounce by id |
-    caller's view                             +---------+---------+
-                                                        |
-                                                        v
-                                              +-------------------+
-                                              | 2. Fetch manifest |
-                                              |    load_artifact  |
-                                              +---------+---------+
-                                                        |
-                                                        v
-                                              +-------------------+
-                                              | 3. Adapt          |
-                                              |    harness writer |
-                                              +---------+---------+
-                                                        |
-                                                        v
-                                              +-------------------+
-                                              | 4. Atomic write   |
-                                              |    .tmp + rename  |
-                                              +---------+---------+
-                                                        |
-                                                        v
-                                              target tree:
-                                                .claude/agents/, .cursor/rules/, ...
+  podium server
+    GET /v1/events                      the watcher reconnects 500 ms
+    newline-delimited JSON,             after a dropped stream
+    one line per event
+             |
+             |  only the event type is read
+             v
+  +----------------------------+
+  | Debounce                   |   one timer for the whole stream;
+  | a burst of events          |   a burst becomes one run
+  +-------------+--------------+
+                |
+                v
+  +---------------------------------------------------------+
+  | one full sync run                                        |
+  |   1 Resolve   the caller's effective view over HTTP      |
+  |   2 Adapt     each selected artifact, harness writer     |
+  |   3 Write     every file staged .tmp, then renamed       |
+  |   4 Delete    every prior path this run did not write    |
+  |   5 Lock      one .podium/sync.lock entry per path       |
+  +----------------------------+----------------------------+
+                               |
+                               v
+  target tree:
+    .claude/agents/, .cursor/rules/, etc.
 
-  After step 4 the watcher returns to step 1 (await next event).
-  Event types: artifact.published, artifact.deprecated, and
-  layer.config_changed. A deprecation deletes from the target. A
-  change to a parent re-emits events for every dependent child the
-  caller can see.
+  The run then awaits the next trigger, which re-arms the debounce.
+  Every run applies the active profile's scope and re-reads the lock
+  file's toggles. A deprecated artifact keeps materializing; a file
+  leaves the target when its artifact leaves the effective view.
 -->
 
-**Filesystem-source registry.** The catalog is a directory on disk. The watcher uses OS filesystem notifications (`fsnotify` on Linux and macOS, `ReadDirectoryChangesW` on Windows) and reads the changed manifests directly. Identity and visibility do not apply because the directory is canonical.
+**Filesystem-source registry.** The catalog is a directory on disk. The watcher registers an `fsnotify` watch on the registry path, the workspace overlay path, and every subdirectory beneath them, adding new subdirectories as they appear. Any event under either tree is one trigger, and the changed path is not inspected. When `fsnotify` cannot initialize, the watcher polls instead: it fingerprints both trees every 500 ms from each entry's path, modification time, and size, and reruns when the fingerprint moves. Identity and visibility are not evaluated because the directory is canonical.
 
-![podium sync watch mode against a filesystem-source registry: the watcher receives OS filesystem notifications, parses the changed manifest from disk, adapts it, and writes atomically to the target tree.](../assets/diagrams/sync-watch-filesystem.svg)
+![podium sync watch mode against a filesystem-source registry: fsnotify over the registry path and the workspace overlay path, with a fingerprint-poll fallback, feeds a debounce that triggers one full sync run, which resolves the local layers and the overlay, adapts each artifact, writes atomically, deletes stale paths, and rewrites the lock file.](../assets/diagrams/sync-watch-filesystem.svg)
 
 <!--
 ASCII fallback for the diagram above (podium sync watch mode, filesystem-source registry):
 
-  filesystem catalog                         podium sync (watching)
-    ~/podium-artifacts/   {path, op           +-------------------+
-    OS file notifications  (write, create,    | 1. Receive event  |
-    (fsnotify / fsevents   remove)}           |    debounce path  |
-     / ReadDirChanges)   ===(event)===>       +---------+---------+
-                                                        |
-                                                        v
-                                              +-------------------+
-                                              | 2. Parse manifest |
-                                              |    read from disk |
-                                              +---------+---------+
-                                                        |
-                                                        v
-                                              +-------------------+
-                                              | 3. Adapt          |
-                                              |    harness writer |
-                                              +---------+---------+
-                                                        |
-                                                        v
-                                              +-------------------+
-                                              | 4. Atomic write   |
-                                              |    .tmp + rename  |
-                                              +---------+---------+
-                                                        |
-                                                        v
-                                              target tree:
-                                                .claude/agents/, .cursor/rules/, ...
+  filesystem catalog
+    ~/podium-artifacts/ + .podium/overlay/    poll fallback when fsnotify
+    fsnotify over both trees, recursively     cannot start: it fingerprints
+                                              both trees every 500 ms
+             |
+             |  the changed path is not inspected
+             v
+  +----------------------------+
+  | Debounce                   |   one timer for both trees;
+  | a burst of edits           |   a burst becomes one run
+  +-------------+--------------+
+                |
+                v
+  +---------------------------------------------------------+
+  | one full sync run                                        |
+  |   1 Resolve   the local layers, then the overlay         |
+  |   2 Adapt     each selected artifact, harness writer     |
+  |   3 Write     every file staged .tmp, then renamed       |
+  |   4 Delete    every prior path this run did not write    |
+  |   5 Lock      one .podium/sync.lock entry per path       |
+  +----------------------------+----------------------------+
+                               |
+                               v
+  target tree:
+    .claude/agents/, .cursor/rules/, etc.
 
-  Removals translate directly to target deletions. Renames in the
-  catalog produce a remove and create event pair. Identity and
-  visibility are not evaluated: filesystem-source registries have
-  no caller identity.
+  The run then awaits the next trigger, which re-arms the debounce.
+  Every run applies the active profile's scope and re-reads the lock
+  file's toggles. The directory is canonical, so the run evaluates no
+  caller identity and no layer visibility.
 -->
 
 
@@ -179,9 +176,9 @@ podium sync
 | `command` | `.claude/commands/<name>.md` |
 | `hook` | Merged into `.claude/settings.json` under the `hooks` key, keyed by the artifact ID so a re-sync reconciles only Podium's entries. A hook's bundled scripts materialize to `.podium/resources/<artifact-id>/`, and the merged command references them there. |
 | `context` | No native Claude Code concept. A `context` artifact lands at `.podium/context/<artifact-id>/`; reference material that belongs to a skill ships in that skill's `references/`. |
-| `mcp-server` | Merged into `.mcp.json` (project root) under `mcpServers`, keyed by the artifact ID. |
+| `mcp-server` | Merged into `.mcp.json` (project root) under `mcpServers`, keyed by the artifact's `name` field, falling back to the last segment of the artifact ID when `name` is unset. A top-level `x-podium` object records which entry each artifact ID owns, so a re-sync reconciles only Podium's entries. |
 | Bundled resources (skill) | Inside the skill folder (`scripts/`, `references/`, `assets/`). |
-| Bundled resources (non-skill) | An `agent` or extension-type artifact writes its resources under `.claude/podium/<artifact-id>/`. A `command` artifact writes its resources under `.podium/resources/<artifact-id>/`, and the materialized command references them there. |
+| Bundled resources (non-skill) | An `agent` or extension-type artifact writes its resources under `.claude/podium/<artifact-id>/`. A `command` artifact writes its resources under `.podium/resources/<artifact-id>/`. The adapter does not rewrite resource paths inside an `agent` or `command` file, so a path the artifact's prose references keeps the registry-relative form the author wrote; only a `hook`'s `hook_action` is rewritten to the materialized location. |
 
 **Notes:**
 
@@ -212,7 +209,7 @@ podium sync
 
 **Notes:**
 
-- Only `mcp-server` has a Claude Desktop home, and it is user/OS-scope. Other artifact types are `✗` for this harness; exclude it with `target_harnesses:` or use a coding harness for materialization.
+- Every artifact type is `✗` for claude-desktop in the capability matrix, including `mcp-server`. Project materialization writes project-level files, and the Claude Desktop MCP config is user/OS-scope, so it is configured out of band. Exclude the harness with `target_harnesses:`, or use a coding harness for materialization.
 
 ---
 
@@ -267,14 +264,15 @@ podium sync
 | `skill` | `.cursor/skills/<name>/SKILL.md` (folder per skill, with `SKILL.md`). |
 | `agent` | `.cursor/agents/<name>.md` |
 | `command` | `.cursor/commands/<name>.md` |
-| `hook` | Merged into `.cursor/hooks.json` under the `hooks` key. `.cursor/hooks/` holds only the scripts a hook entry references. |
+| `hook` | Merged into `.cursor/hooks.json` under the `hooks` key. A hook's bundled scripts materialize to `.podium/resources/<artifact-id>/`, and the merged command references them there. |
 | `mcp-server` | Merged into `.cursor/mcp.json` under `mcpServers`. |
 | `context` | No native Cursor concept (`@Docs` is URL-indexed). A `context` artifact lands at `.podium/context/<artifact-id>/`. |
+| Bundled resources | Inside the skill folder for a `skill` (`scripts/`, `references/`, `assets/`). For an `agent`, `command`, or `hook`, under `.podium/resources/<artifact-id>/`. The adapter rewrites the reference only for a `hook`, whose `hook_action` points at that bucket; an `agent` and a `command` are written verbatim. |
 
 **Notes:**
 
-- Cursor has the most complete `rule_mode` support: all four values map natively to the `.mdc` frontmatter.
-- Native hook system available.
+- Every `rule_mode` value maps natively to the `.mdc` frontmatter.
+- Native hook system available for a subset of the canonical hook events. The adapter maps `user_prompt_submit`, `pre_shell_execution`, `pre_mcp_execution`, `pre_read_file`, `post_file_edit`, and `stop` onto Cursor's per-category hook events. Cursor has no native event for the remaining canonical events, including `session_start`, `session_end`, `pre_tool_use`, and `post_tool_use`, so a `hook` artifact declaring one of them writes no file on Cursor and its bundled scripts are dropped. Ingest warns for any `hook` artifact whose `target_harnesses:` names cursor. See [Hooks](../authoring/hooks).
 - Cursor also has a team marketplace. A `kind: marketplace` sync target writes `.cursor-plugin/marketplace.json` at the repository root and a per-plugin `.cursor-plugin/plugin.json` with `skills/`, `rules/*.mdc`, and `mcp.json` components. Import a GitHub, GitLab, or Bitbucket repository from the Cursor dashboard. See [Publishing](publishing).
 
 ---
@@ -285,10 +283,12 @@ podium sync
 
 ```json
 {
-  "mcpServers": {
+  "mcp": {
     "podium": {
-      "command": "podium-mcp",
-      "env": {
+      "type": "local",
+      "command": ["podium-mcp"],
+      "enabled": true,
+      "environment": {
         "PODIUM_REGISTRY": "https://podium.acme.com",
         "PODIUM_HARNESS": "opencode"
       }
@@ -314,14 +314,14 @@ OpenCode uses plural component directories (`.opencode/agents/`, `.opencode/comm
 | `skill` | `.opencode/skills/<name>/SKILL.md` (folder per skill). |
 | `agent` | `.opencode/agents/<name>.md` |
 | `command` | `.opencode/commands/<name>.md` (supports `$ARGUMENTS` and positional `$1`/`$2`). |
-| `rule` | Injected into `AGENTS.md` between Podium-managed XML markers (project-root, or common-ancestor for `rule_mode: glob`). Extra files referenced via the `instructions` array in `opencode.json`. |
+| `rule` | Injected into the project-root `AGENTS.md` between Podium-managed markers. |
 | `mcp-server` | Merged into `opencode.json` under the `mcp` key. |
 | `hook` | No declarative file. OpenCode hooks are JavaScript or TypeScript plugin modules (`.opencode/plugins/<name>.ts`), so `hook` artifacts are not materialized; exclude OpenCode with `target_harnesses:`. |
 | `context` | No native concept. A `context` artifact lands at `.podium/context/<artifact-id>/`. |
 
 **Notes:**
 
-- `rule_mode: auto` is not supported; ingest fails with a lint error unless `target_harnesses:` excludes opencode.
+- `rule_mode: glob`, `auto`, and `explicit` degrade to the always-loaded `AGENTS.md` block, because an injected block carries no per-file scoping. Ingest warns when an artifact's `target_harnesses:` names opencode.
 - Custom instruction files in `opencode.json` can reference Podium-materialized files; useful for explicit-mode rules.
 - AGENTS.md takes precedence over CLAUDE.md when both exist.
 
@@ -347,7 +347,7 @@ Codex consumes `AGENTS.md` for rules and now has native skill, subagent, and hoo
 |:--|:--|
 | `skill` | `.agents/skills/<name>/SKILL.md` (folder per skill; note the `.agents/` root, not `.codex/`). |
 | `agent` | `.codex/agents/<name>.toml` |
-| `rule` | Injected into root `AGENTS.md` (or common-ancestor for `rule_mode: glob`) between Podium-managed markers. |
+| `rule` | Injected into the root `AGENTS.md` between Podium-managed markers. |
 | `hook` | Merged into the `[hooks]` table in `.codex/config.toml`, keyed by the native event (for example `[[hooks.Stop]]`). |
 | `mcp-server` | Merged into `.codex/config.toml` under `[mcp_servers]`. |
 | `command` | No project-level target. Codex custom prompts are user-scope (`~/.codex/prompts/`) and deprecated in favor of skills; exclude Codex with `target_harnesses:` or author as `type: skill`. |
@@ -355,7 +355,7 @@ Codex consumes `AGENTS.md` for rules and now has native skill, subagent, and hoo
 
 **Notes:**
 
-- `rule_mode: auto` is not supported; ingest fails with a lint error.
+- `rule_mode: glob`, `auto`, and `explicit` degrade to the always-loaded `AGENTS.md` block, because an injected block carries no per-file scoping. Ingest warns when an artifact's `target_harnesses:` names codex.
 - Codex reads hooks from the `[hooks]` table in `.codex/config.toml`, so `hook` artifacts materialize rather than failing ingest. Codex runs these hooks in its interactive mode; `codex exec` does not fire lifecycle hooks in codex-cli 0.136.0.
 - Skills live at `.agents/skills/`, not `.codex/skills/`. Subagents are TOML at `.codex/agents/<name>.toml`.
 - Codex also has a git-repo marketplace. A `kind: marketplace` sync target writes `.agents/plugins/marketplace.json` at the repository root and a per-plugin `.codex-plugin/plugin.json` with `skills/`, `hooks/hooks.json`, and `.mcp.json` components. Install with `codex plugin marketplace add owner/repo`. See [Publishing](publishing).
@@ -421,7 +421,7 @@ Pi loads `AGENTS.md` from the project tree (and `~/.pi/agent/AGENTS.md` globally
 
 **Notes:**
 
-- `rule_mode: auto` is not supported.
+- `rule_mode: glob`, `auto`, and `explicit` degrade to the always-loaded `AGENTS.md` block, because an injected block carries no per-file scoping. Ingest warns when an artifact's `target_harnesses:` names pi.
 - Pi also reads `SYSTEM.md` and `APPEND_SYSTEM.md` for system-prompt customization; Podium does not write to these by default.
 - Pi distributes through a git package. A `kind: marketplace` sync target writes a root `package.json` carrying the `pi-package` keyword and a `pi.skills` array pointing at a skills subtree, with `skills/<name>/SKILL.md` per skill. Install with `pi install git:github.com/owner/repo`. See [Publishing](publishing).
 
@@ -455,13 +455,13 @@ Hermes natively reads project-level `.cursor/rules/*.mdc`, root `AGENTS.md`, and
 
 | Type | Location |
 |:--|:--|
-| `rule` | `.cursor/rules/<name>.mdc` (reused from the Cursor format) or root `AGENTS.md`. |
+| `rule` | `.cursor/rules/<name>.mdc`, reusing the Cursor format. |
 | `context` | `.podium/context/<artifact-id>/` (harness-neutral). |
 | `skill`, `command`, `hook`, `mcp-server` | User-scope only (`~/.hermes/skills/`, `~/.hermes/config.yaml`, and similar). Not materialized at project level; exclude Hermes with `target_harnesses:` or configure these out of band. |
 
 **Notes:**
 
-- Hermes has the broadest rule-format compatibility of any harness Podium supports; all `rule_mode` values map cleanly via the cursor-style `.mdc` format.
+- Hermes reads the Cursor `.mdc` format, so every `rule_mode` value maps natively.
 - Hermes distributes through a skills tap. A `kind: marketplace` sync target writes `skills/<name>/SKILL.md` per skill with its `references/`, `scripts/`, and `assets/`, under the tap's root `skills/` directory, and writes no root manifest. The tap defaults to a root `skills/` directory, so a Hermes target takes its own repository. Add it with `hermes skills tap add owner/repo`. See [Publishing](publishing).
 
 ---
@@ -495,7 +495,7 @@ This is also the right harness for build pipelines and evaluation harnesses that
 
 ## Standalone (no env override)
 
-When `podium serve` has auto-bootstrapped `~/.podium/sync.yaml` with `defaults.registry: http://127.0.0.1:8080`, or `podium init --global --standalone` has written it explicitly, the MCP server resolves the registry from there and the `PODIUM_REGISTRY` env var can be omitted. The harness still needs `PODIUM_HARNESS` set (or `--harness <name>` on the sync command).
+When `podium serve` has auto-bootstrapped `~/.podium/sync.yaml` with `defaults.registry: http://127.0.0.1:8080`, or `podium init --global --standalone` has written it explicitly, the MCP server resolves the registry from there and the `PODIUM_REGISTRY` env var can be omitted. The harness resolves separately. The MCP server reads `PODIUM_HARNESS` and falls back to the `none` adapter, and it does not read `defaults.harness` from `sync.yaml`, so a harness-native layout over the MCP path requires the variable. `podium sync` resolves `--harness`, then `PODIUM_HARNESS`, then the active profile's `harness`, then `defaults.harness`, then `none`, so a workspace initialized with `podium init --harness <name>` needs neither the flag nor the variable.
 
 ---
 

@@ -1,14 +1,12 @@
 ---
-layout: default
 title: Your first skill
-parent: Authoring
 nav_order: 1
-description: "From the quickstart's two-file skill to a richer artifact with a bundled script, runtime requirements, and a lint check before commit."
+description: "From the quickstart's greet skill to a richer artifact with fuller frontmatter, a referenced script, runtime requirements, and a lint check before commit."
 ---
 
 # Your first skill
 
-This page picks up from the [quickstart](../getting-started/quickstart) and rounds out the same `greet` skill with a bundled script, fuller frontmatter, watch-mode iteration, and a lint check. For non-skill walkthroughs, see [Your first command](your-first-command) and [Your first agent](your-first-agent).
+This page picks up from the [quickstart](../getting-started/quickstart) and rounds out the same `greet` skill with fuller frontmatter, a body reference to its bundled script, watch-mode iteration, and a lint check. For non-skill walkthroughs, see [Your first command](your-first-command) and [Your first agent](your-first-agent).
 
 ---
 
@@ -19,10 +17,12 @@ The quickstart leaves the artifact directory like this:
 ```
 ~/podium-artifacts/personal/hello/greet/
 ├── SKILL.md
-└── ARTIFACT.md
+├── ARTIFACT.md
+└── scripts/
+    └── today.py
 ```
 
-A skill named `greet`. `SKILL.md` is the [agentskills.io](https://agentskills.io/specification) standard manifest with the agent-facing prose; `ARTIFACT.md` is Podium's structured frontmatter.
+The artifact is a skill named `greet`. `SKILL.md` is the [agentskills.io](https://agentskills.io/specification) standard manifest with the agent-facing prose, `ARTIFACT.md` is Podium's structured frontmatter, and `scripts/today.py` is the bundled script the quickstart added.
 
 ---
 
@@ -38,7 +38,7 @@ $EDITOR ~/podium-artifacts/personal/hello/greet/SKILL.md
 
 The standard's frontmatter holds the discoverability fields:
 
-```yaml
+```markdown
 ---
 name: greet
 description: Greet the user by name and tell them today's date in a friendly format. Use when the user opens a session with a greeting or asks who you are.
@@ -54,7 +54,7 @@ $EDITOR ~/podium-artifacts/personal/hello/greet/ARTIFACT.md
 
 Podium's structured frontmatter holds the indexing and governance fields:
 
-```yaml
+```markdown
 ---
 type: skill
 version: 1.0.0
@@ -77,36 +77,25 @@ The full frontmatter reference is in [Frontmatter reference](frontmatter-referen
 
 ---
 
-## Add a bundled script
+## Reference the bundled script
 
-A skill can ship with files alongside `SKILL.md` and `ARTIFACT.md`. Anything in the artifact's directory other than the two manifest files is a bundled resource: Python scripts, Jinja templates, JSON schemas, eval datasets, all the way up to model weights. The agentskills.io spec recommends `scripts/`, `references/`, and `assets/` as conventional subfolders. The per-package soft cap is 10 MB; larger files use external resources, see [Bundled resources](bundled-resources).
-
-Add a script:
-
-```bash
-mkdir -p ~/podium-artifacts/personal/hello/greet/scripts
-cat > ~/podium-artifacts/personal/hello/greet/scripts/today.py <<'EOF'
-"""Print today's date in a friendly format."""
-import datetime
-print(datetime.date.today().strftime("%A, %B %-d, %Y"))
-EOF
-```
+The quickstart placed `scripts/today.py` beside the two manifests. Anything in the artifact's directory other than the two manifest files is a bundled resource: Python scripts, Jinja templates, JSON schemas, eval datasets, and files as large as model weights. The agentskills.io spec recommends `scripts/`, `references/`, and `assets/` as conventional subfolders. The per-package soft cap is 10 MB; larger files use external resources, see [Bundled resources](bundled-resources).
 
 Reference the script from the `SKILL.md` body:
 
 ```markdown
 Greet the user by their first name (ask if you don't know it).
-Tell them today's date by running `scripts/today.py`. Keep it to
-one or two sentences.
+Tell them today's date by running [scripts/today.py](scripts/today.py).
+Keep it to one or two sentences.
 ```
 
-The reference is plain markdown. At ingest time, lint resolves the path against the artifact's bundled files. Broken paths fail the lint check.
+Lint resolves markdown links in the body against the artifact's bundled files at ingest, so a link to a path the package does not contain fails the check. A path written as inline code is not checked.
 
 ---
 
 ## Declare runtime requirements
 
-The script needs Python. Tell the harness so it can refuse to materialize if Python isn't available. Add this to `ARTIFACT.md`:
+The script needs Python. Declare the requirement so a host that advertises its runtime capabilities to the Podium MCP server refuses a `load_artifact` it cannot satisfy with `materialize.runtime_unavailable` instead of failing at execution time. A host that advertises no capabilities receives the requirement and proceeds, and `podium sync` materializes the artifact without checking it. Add this to `ARTIFACT.md`:
 
 ```yaml
 runtime_requirements:
@@ -115,7 +104,7 @@ runtime_requirements:
 
 Now the artifact's `ARTIFACT.md` looks like this:
 
-```yaml
+```markdown
 ---
 type: skill
 version: 1.0.0
@@ -168,7 +157,7 @@ podium lint --registry ~/podium-artifacts/
 
 Lint checks the frontmatter against the type's schema in both files, validates that prose references in `SKILL.md` resolve to bundled files, runs the agentskills.io compliance checks on `SKILL.md` (name format, description constraints, parent-directory match), and runs type-specific rules. The thin-description check runs at registry ingest rather than in local `podium lint`. CI runs the same checks on PRs to a Git-source layer.
 
-If lint passes, commit the artifact. If lint warns or fails, the messages name the field and the file location.
+If lint passes, commit the artifact. Each diagnostic prints as `[<severity>] <artifact-id>: <message> (<rule-code>)`, for example `[error] personal/hello/greet: type is required (lint.required_field_missing)`. A clean run prints `lint: no issues.`. Warnings alone exit 0, and any error exits 1.
 
 ---
 

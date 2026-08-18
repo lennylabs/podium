@@ -1,82 +1,151 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 440" font-family="Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 440" class="dg">
   <!--
-    Single artifact package layout: one directory containing a
-    manifest and optional bundled resources. The bundled folders
-    are conventional names; any structure works under the manifest.
+    Single artifact package layout: one directory containing a manifest and
+    optional bundled resources. The bundled folders are conventional names; any
+    structure works under the manifest.
   -->
   <defs>
     <style>
-      .b-bg { fill: #ffffff; }
-      .b-folder-root { fill: #ffe9c7; stroke: #1f2933; stroke-width: 2.4; }
-      .b-file-req { fill: #ffe9c7; stroke: #1f2933; stroke-width: 2; }
-      .b-file-opt { fill: #fffaf0; stroke: #1f2933; stroke-width: 1.8; }
-      .b-folder { fill: #d6e9d2; stroke: #1f2933; stroke-width: 2; }
-      .b-title { font-size: 22px; fill: #1f2933; }
-      .b-mono { font-size: 15px; fill: #1f2933; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
-      .b-mono-root { font-size: 15px; fill: #1f2933; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
-      .b-callout { font-size: 14px; fill: #54616e; }
-      .b-tag-req { font-size: 12px; fill: #b56b1f; letter-spacing: 0.04em; }
-      .b-tag-opt { font-size: 12px; fill: #547a3a; letter-spacing: 0.04em; }
-      .b-sub { font-size: 15px; fill: #54616e; }
-      .b-foot { font-size: 13px; fill: #8a7755; }
-      .b-tree { fill: none; stroke: #8a7755; stroke-width: 1.3; }
+      /*
+        Colour comes from the site's design tokens. Inlined in the documentation
+        site the site's own variables win, so the theme toggle drives the
+        diagram. Standing alone (raw markdown on github.com, or the file opened
+        directly) the fallbacks apply and follow the operating system setting.
+        The block below is identical in every diagram; edit all of them together.
+      */
+      :root {
+        --dg-ground: var(--surface, #ffffff);
+        --dg-panel-fill: var(--surface-2, #fdfdf8);
+        --dg-fill: var(--surface-3, #f5f3e9);
+        --dg-fill-2: var(--chip, #eae7d9);
+        --dg-accent-fill: var(--accent-wash, #fff3e2);
+        --dg-accent-soft: var(--accent-strip, #ffeeda);
+        --dg-ink: var(--ink, #14130f);
+        --dg-meta: var(--meta, #63604f);
+        --dg-faint: var(--faint, #6f6c5e);
+        --dg-border: var(--border, #d9d5c6);
+        --dg-accent: var(--accent-deep, #f2861a);
+        --dg-accent-text: var(--link, #a8480a);
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --dg-ground: var(--surface, #171b28);
+          --dg-panel-fill: var(--surface-2, #1e2434);
+          --dg-fill: var(--surface-3, #1b2030);
+          --dg-fill-2: var(--chip, #212739);
+          --dg-accent-fill: var(--accent-wash, rgba(255, 164, 36, 0.12));
+          --dg-accent-soft: var(--accent-strip, rgba(255, 164, 36, 0.08));
+          --dg-ink: var(--ink, #eaeef7);
+          --dg-meta: var(--meta, #9aa3ba);
+          --dg-faint: var(--faint, #7a8399);
+          --dg-border: var(--border, #2b3145);
+          --dg-accent: var(--accent-deep, #f2861a);
+          --dg-accent-text: var(--link, #ffa424);
+        }
+      }
+
+      .dg {
+        font-family: var(--font-ui, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+      }
+
+      .dg-bg { fill: var(--dg-ground); }
+
+      .dg-panel { fill: var(--dg-panel-fill); stroke: var(--dg-border); stroke-width: 1.6; }
+      .dg-card { fill: var(--dg-fill); stroke: var(--dg-ink); stroke-width: 1.8; }
+      .dg-card-primary { fill: var(--dg-accent-fill); stroke: var(--dg-accent); stroke-width: 2.2; }
+      .dg-card-strong { fill: var(--dg-fill-2); stroke: var(--dg-accent); stroke-width: 2.2; }
+      .dg-card-quiet { fill: var(--dg-ground); stroke: var(--dg-meta); stroke-width: 1.4; }
+      .dg-card-event { fill: var(--dg-accent-soft); stroke: var(--dg-accent); stroke-width: 1.8; stroke-dasharray: 6 5; }
+      .dg-chip { fill: var(--dg-accent-soft); stroke: var(--dg-border); stroke-width: 1.2; }
+      .dg-outline { fill: none; stroke: var(--dg-accent); stroke-width: 1.6; stroke-dasharray: 6 5; }
+
+      .dg-title { font-size: 22px; fill: var(--dg-ink); }
+      .dg-name { font-size: 17px; fill: var(--dg-ink); }
+      .dg-lead { font-size: 15px; fill: var(--dg-meta); }
+      .dg-sub { font-size: 14px; fill: var(--dg-meta); }
+      .dg-label { font-size: 13px; fill: var(--dg-accent-text); letter-spacing: 0.06em; }
+      .dg-label-quiet { font-size: 13px; fill: var(--dg-meta); letter-spacing: 0.06em; }
+      .dg-note { font-size: 13px; fill: var(--dg-meta); font-style: italic; }
+      .dg-foot { font-size: 13px; fill: var(--dg-faint); }
+      .dg-mono { font-size: 13px; fill: var(--dg-ink); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+      .dg-mono-accent { font-size: 13px; fill: var(--dg-accent-text); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+      .dg-mono-quiet { font-size: 13px; fill: var(--dg-meta); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+
+      .dg-line { fill: none; stroke: var(--dg-ink); stroke-width: 2; stroke-linecap: round; }
+      .dg-line-accent { fill: none; stroke: var(--dg-accent); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 6 5; }
+      .dg-line-quiet { fill: none; stroke: var(--dg-meta); stroke-width: 1.6; stroke-linecap: round; }
+      .dg-guide { fill: none; stroke: var(--dg-border); stroke-width: 1.2; }
+      .dg-divider { fill: none; stroke: var(--dg-border); stroke-width: 1.2; stroke-dasharray: 4 4; }
+
+      .dg-arrow-head { fill: var(--dg-ink); }
+      .dg-arrow-head-accent { fill: var(--dg-accent); }
+
+      .dg-t-xs { font-size: 12px; }
+      .dg-t-s { font-size: 13px; }
+      .dg-t-m { font-size: 15px; }
+      .dg-t-l { font-size: 18px; }
+      .dg-t-xl { font-size: 21px; }
+      .dg-t-2xl { font-size: 24px; }
+      .dg-t-3xl { font-size: 28px; }
     </style>
   </defs>
 
-  <rect class="b-bg" width="1080" height="440"/>
+  <rect class="dg-bg" width="1080" height="440"/>
 
-  <text class="b-title" x="40" y="42">Artifact package layout</text>
-  <text class="b-sub" x="40" y="64">An artifact is a directory with a manifest plus optional bundled resources.</text>
+  <text class="dg-title" x="40" y="42">Artifact package layout</text>
+  <text class="dg-lead" x="40" y="64">An artifact is a directory with a manifest plus optional bundled resources.</text>
 
   <!-- Root folder card -->
-  <rect class="b-folder-root" x="60" y="92" width="500" height="44" rx="6"/>
-  <text class="b-mono-root" x="80" y="120">finance/close-reporting/run-variance-analysis/</text>
+  <rect class="dg-card-primary" x="60" y="92" width="500" height="44" rx="6"/>
+  <text class="dg-mono dg-t-m" x="80" y="120">finance/close-reporting/run-variance-analysis/</text>
 
   <!-- Tree connector lines from root to children -->
-  <path class="b-tree" d="M 100 136 L 100 372"/>
+  <path class="dg-guide" d="M 100 136 L 100 372"/>
 
   <!-- Child entries: each is (tree-tick, box, label, callout) -->
   <!-- ARTIFACT.md -->
-  <path class="b-tree" d="M 100 158 L 140 158"/>
-  <rect class="b-file-req" x="140" y="148" width="200" height="32" rx="6"/>
-  <text class="b-mono" x="156" y="170">ARTIFACT.md</text>
-  <text class="b-tag-req" x="356" y="170">REQUIRED</text>
-  <text class="b-callout" x="446" y="170">manifest frontmatter and prose body</text>
+  <path class="dg-guide" d="M 100 158 L 140 158"/>
+  <rect class="dg-card-primary" x="140" y="148" width="200" height="32" rx="6"/>
+  <text class="dg-mono dg-t-m" x="156" y="170">ARTIFACT.md</text>
+  <text class="dg-label dg-t-xs" x="356" y="170">REQUIRED</text>
+  <text class="dg-sub" x="446" y="170">manifest frontmatter and prose body</text>
 
   <!-- SKILL.md -->
-  <path class="b-tree" d="M 100 200 L 140 200"/>
-  <rect class="b-file-req" x="140" y="190" width="200" height="32" rx="6"/>
-  <text class="b-mono" x="156" y="212">SKILL.md</text>
-  <text class="b-tag-req" x="356" y="212">REQUIRED FOR SKILLS</text>
-  <text class="b-callout" x="556" y="212">agentskills.io-compatible body</text>
+  <path class="dg-guide" d="M 100 200 L 140 200"/>
+  <rect class="dg-card-primary" x="140" y="190" width="200" height="32" rx="6"/>
+  <text class="dg-mono dg-t-m" x="156" y="212">SKILL.md</text>
+  <text class="dg-label dg-t-xs" x="356" y="212">REQUIRED FOR SKILLS</text>
+  <text class="dg-sub" x="556" y="212">agentskills.io-compatible body</text>
 
   <!-- scripts/ -->
-  <path class="b-tree" d="M 100 242 L 140 242"/>
-  <rect class="b-folder" x="140" y="232" width="200" height="32" rx="6"/>
-  <text class="b-mono" x="156" y="254">scripts/</text>
-  <text class="b-tag-opt" x="356" y="254">OPTIONAL</text>
-  <text class="b-callout" x="446" y="254">code resources, any language</text>
+  <path class="dg-guide" d="M 100 242 L 140 242"/>
+  <rect class="dg-card" x="140" y="232" width="200" height="32" rx="6"/>
+  <text class="dg-mono dg-t-m" x="156" y="254">scripts/</text>
+  <text class="dg-label-quiet dg-t-xs" x="356" y="254">OPTIONAL</text>
+  <text class="dg-sub" x="446" y="254">code resources, any language</text>
 
   <!-- references/ -->
-  <path class="b-tree" d="M 100 284 L 140 284"/>
-  <rect class="b-folder" x="140" y="274" width="200" height="32" rx="6"/>
-  <text class="b-mono" x="156" y="296">references/</text>
-  <text class="b-tag-opt" x="356" y="296">OPTIONAL</text>
-  <text class="b-callout" x="446" y="296">supporting reference documents</text>
+  <path class="dg-guide" d="M 100 284 L 140 284"/>
+  <rect class="dg-card" x="140" y="274" width="200" height="32" rx="6"/>
+  <text class="dg-mono dg-t-m" x="156" y="296">references/</text>
+  <text class="dg-label-quiet dg-t-xs" x="356" y="296">OPTIONAL</text>
+  <text class="dg-sub" x="446" y="296">supporting reference documents</text>
 
   <!-- assets/ -->
-  <path class="b-tree" d="M 100 326 L 140 326"/>
-  <rect class="b-folder" x="140" y="316" width="200" height="32" rx="6"/>
-  <text class="b-mono" x="156" y="338">assets/</text>
-  <text class="b-tag-opt" x="356" y="338">OPTIONAL</text>
-  <text class="b-callout" x="446" y="338">templates, schemas, fixtures, configs</text>
+  <path class="dg-guide" d="M 100 326 L 140 326"/>
+  <rect class="dg-card" x="140" y="316" width="200" height="32" rx="6"/>
+  <text class="dg-mono dg-t-m" x="156" y="338">assets/</text>
+  <text class="dg-label-quiet dg-t-xs" x="356" y="338">OPTIONAL</text>
+  <text class="dg-sub" x="446" y="338">templates, schemas, fixtures, configs</text>
 
   <!-- Last tree corner -->
-  <path class="b-tree" d="M 100 372 L 140 372"/>
-  <rect class="b-file-opt" x="140" y="362" width="200" height="32" rx="6"/>
-  <text class="b-mono" x="156" y="384">… any other files</text>
-  <text class="b-tag-opt" x="356" y="384">OPTIONAL</text>
-  <text class="b-callout" x="446" y="384">folder names are conventional</text>
+  <path class="dg-guide" d="M 100 372 L 140 372"/>
+  <rect class="dg-card-quiet" x="140" y="362" width="200" height="32" rx="6"/>
+  <text class="dg-mono dg-t-m" x="156" y="384">… any other files</text>
+  <text class="dg-label-quiet dg-t-xs" x="356" y="384">OPTIONAL</text>
+  <text class="dg-sub" x="446" y="384">folder names are conventional</text>
 
-  <text class="b-foot" x="40" y="420">Only the manifest is required. Resources larger than the per-package cap use external_resources: pointing at pre-uploaded object-storage URLs with content hashes.</text>
+  <text class="dg-foot" x="40" y="412">Only the manifest is required. Resources larger than the per-package cap use external_resources:</text>
+  <text class="dg-foot" x="40" y="430">pointing at pre-uploaded object-storage URLs with content hashes.</text>
 </svg>

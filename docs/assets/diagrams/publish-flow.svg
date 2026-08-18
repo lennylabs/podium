@@ -1,107 +1,172 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 620" font-family="Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 620" class="dg">
   <!--
-    Publish flow.
-    Used by docs/getting-started/how-it-works.md.
-
-    A source change ingests into the registry, which emits one
-    layer.ingested event per cycle. One of two triggers runs the
-    multi-target podium sync: Pattern A is a scheduled CI job, Pattern
-    B is a receiver that posts to a relay which verifies the HMAC and
-    calls GitHub repository_dispatch. The kind: marketplace target
-    renders the marketplace tree and pushes it to a git remote the
-    harness imports.
+    Publish flow. A source change ingests into the registry, which emits one
+    layer.ingested event per cycle. One of two triggers runs the multi-target
+    podium sync: Pattern A is a scheduled CI job, Pattern B is a receiver that
+    posts to a relay which verifies the HMAC and calls GitHub
+    repository_dispatch. The marketplace target renders the marketplace tree and
+    pushes it to a git remote the harness imports.
   -->
   <defs>
-    <marker id="b-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
-      <path d="M 0 0 L 11 6 L 0 12 z" fill="#1f2933"/>
+    <marker id="dg-arrow-publish-flow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path class="dg-arrow-head" d="M 0 0 L 11 6 L 0 12 z"/>
     </marker>
-    <marker id="b-arrow-coral" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
-      <path d="M 0 0 L 11 6 L 0 12 z" fill="#c84a1d"/>
+    <marker id="dg-arrow-accent-publish-flow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path class="dg-arrow-head-accent" d="M 0 0 L 11 6 L 0 12 z"/>
     </marker>
     <style>
-      .b-bg { fill: #ffffff; }
-      .b-card { fill: #fffaf0; stroke: #1f2933; stroke-width: 2.2; }
-      .b-card-primary { fill: #ffe9c7; stroke: #1f2933; stroke-width: 2.4; }
-      .b-card-accent { fill: #d6e9d2; stroke: #1f2933; stroke-width: 2.2; }
-      .b-card-event { fill: #fde2d6; stroke: #c84a1d; stroke-width: 2.2; }
-      .b-title { font-size: 22px; fill: #1f2933; }
-      .b-label { font-size: 14px; fill: #b56b1f; letter-spacing: 0.04em; }
-      .b-name { font-size: 18px; fill: #1f2933; }
-      .b-sub { font-size: 14px; fill: #54616e; }
-      .b-mono { font-size: 13px; fill: #1f2933; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
-      .b-line { fill: none; stroke: #1f2933; stroke-width: 2.4; stroke-linecap: round; }
-      .b-line-coral { fill: none; stroke: #c84a1d; stroke-width: 2.2; stroke-linecap: round; stroke-dasharray: 6 5; }
-      .b-foot { font-size: 13px; fill: #8a7755; }
+      /*
+        Colour comes from the site's design tokens. Inlined in the documentation
+        site the site's own variables win, so the theme toggle drives the
+        diagram. Standing alone (raw markdown on github.com, or the file opened
+        directly) the fallbacks apply and follow the operating system setting.
+        The block below is identical in every diagram; edit all of them together.
+      */
+      :root {
+        --dg-ground: var(--surface, #ffffff);
+        --dg-panel-fill: var(--surface-2, #fdfdf8);
+        --dg-fill: var(--surface-3, #f5f3e9);
+        --dg-fill-2: var(--chip, #eae7d9);
+        --dg-accent-fill: var(--accent-wash, #fff3e2);
+        --dg-accent-soft: var(--accent-strip, #ffeeda);
+        --dg-ink: var(--ink, #14130f);
+        --dg-meta: var(--meta, #63604f);
+        --dg-faint: var(--faint, #6f6c5e);
+        --dg-border: var(--border, #d9d5c6);
+        --dg-accent: var(--accent-deep, #f2861a);
+        --dg-accent-text: var(--link, #a8480a);
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --dg-ground: var(--surface, #171b28);
+          --dg-panel-fill: var(--surface-2, #1e2434);
+          --dg-fill: var(--surface-3, #1b2030);
+          --dg-fill-2: var(--chip, #212739);
+          --dg-accent-fill: var(--accent-wash, rgba(255, 164, 36, 0.12));
+          --dg-accent-soft: var(--accent-strip, rgba(255, 164, 36, 0.08));
+          --dg-ink: var(--ink, #eaeef7);
+          --dg-meta: var(--meta, #9aa3ba);
+          --dg-faint: var(--faint, #7a8399);
+          --dg-border: var(--border, #2b3145);
+          --dg-accent: var(--accent-deep, #f2861a);
+          --dg-accent-text: var(--link, #ffa424);
+        }
+      }
+
+      .dg {
+        font-family: var(--font-ui, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+      }
+
+      .dg-bg { fill: var(--dg-ground); }
+
+      .dg-panel { fill: var(--dg-panel-fill); stroke: var(--dg-border); stroke-width: 1.6; }
+      .dg-card { fill: var(--dg-fill); stroke: var(--dg-ink); stroke-width: 1.8; }
+      .dg-card-primary { fill: var(--dg-accent-fill); stroke: var(--dg-accent); stroke-width: 2.2; }
+      .dg-card-strong { fill: var(--dg-fill-2); stroke: var(--dg-accent); stroke-width: 2.2; }
+      .dg-card-quiet { fill: var(--dg-ground); stroke: var(--dg-meta); stroke-width: 1.4; }
+      .dg-card-event { fill: var(--dg-accent-soft); stroke: var(--dg-accent); stroke-width: 1.8; stroke-dasharray: 6 5; }
+      .dg-chip { fill: var(--dg-accent-soft); stroke: var(--dg-border); stroke-width: 1.2; }
+      .dg-outline { fill: none; stroke: var(--dg-accent); stroke-width: 1.6; stroke-dasharray: 6 5; }
+
+      .dg-title { font-size: 22px; fill: var(--dg-ink); }
+      .dg-name { font-size: 17px; fill: var(--dg-ink); }
+      .dg-lead { font-size: 15px; fill: var(--dg-meta); }
+      .dg-sub { font-size: 14px; fill: var(--dg-meta); }
+      .dg-label { font-size: 13px; fill: var(--dg-accent-text); letter-spacing: 0.06em; }
+      .dg-label-quiet { font-size: 13px; fill: var(--dg-meta); letter-spacing: 0.06em; }
+      .dg-note { font-size: 13px; fill: var(--dg-meta); font-style: italic; }
+      .dg-foot { font-size: 13px; fill: var(--dg-faint); }
+      .dg-mono { font-size: 13px; fill: var(--dg-ink); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+      .dg-mono-accent { font-size: 13px; fill: var(--dg-accent-text); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+      .dg-mono-quiet { font-size: 13px; fill: var(--dg-meta); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+
+      .dg-line { fill: none; stroke: var(--dg-ink); stroke-width: 2; stroke-linecap: round; }
+      .dg-line-accent { fill: none; stroke: var(--dg-accent); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 6 5; }
+      .dg-line-quiet { fill: none; stroke: var(--dg-meta); stroke-width: 1.6; stroke-linecap: round; }
+      .dg-guide { fill: none; stroke: var(--dg-border); stroke-width: 1.2; }
+      .dg-divider { fill: none; stroke: var(--dg-border); stroke-width: 1.2; stroke-dasharray: 4 4; }
+
+      .dg-arrow-head { fill: var(--dg-ink); }
+      .dg-arrow-head-accent { fill: var(--dg-accent); }
+
+      .dg-t-xs { font-size: 12px; }
+      .dg-t-s { font-size: 13px; }
+      .dg-t-m { font-size: 15px; }
+      .dg-t-l { font-size: 18px; }
+      .dg-t-xl { font-size: 21px; }
+      .dg-t-2xl { font-size: 24px; }
+      .dg-t-3xl { font-size: 28px; }
     </style>
   </defs>
 
-  <rect class="b-bg" width="1080" height="620"/>
+  <rect class="dg-bg" width="1080" height="620"/>
 
-  <text class="b-title" x="30" y="40">Publish flow</text>
+  <text class="dg-title" x="30" y="40">Publish flow</text>
 
   <!-- Row 1: source change -> registry -> event -->
-  <rect class="b-card" x="30" y="64" width="220" height="80" rx="8"/>
-  <text class="b-label" x="48" y="90">SOURCE</text>
-  <text class="b-name" x="48" y="114">Source change</text>
-  <text class="b-sub" x="48" y="134">git push to a layer source</text>
+  <rect class="dg-card" x="30" y="64" width="220" height="80" rx="8"/>
+  <text class="dg-label" x="48" y="90">SOURCE</text>
+  <text class="dg-name dg-t-l" x="48" y="114">Source change</text>
+  <text class="dg-sub" x="48" y="134">git push to a layer source</text>
 
-  <path class="b-line" d="M 250 104 L 304 104" marker-end="url(#b-arrow)"/>
+  <path class="dg-line" d="M 250 104 L 304 104" marker-end="url(#dg-arrow-publish-flow)"/>
 
-  <rect class="b-card-primary" x="308" y="64" width="220" height="80" rx="8"/>
-  <text class="b-label" x="326" y="90">REGISTRY</text>
-  <text class="b-name" x="326" y="114">Ingest cycle</text>
-  <text class="b-sub" x="326" y="134">emits one event per cycle</text>
+  <rect class="dg-card-primary" x="308" y="64" width="220" height="80" rx="8"/>
+  <text class="dg-label" x="326" y="90">REGISTRY</text>
+  <text class="dg-name dg-t-l" x="326" y="114">Ingest cycle</text>
+  <text class="dg-sub" x="326" y="134">emits one event per cycle</text>
 
-  <path class="b-line-coral" d="M 528 104 L 596 104" marker-end="url(#b-arrow-coral)"/>
+  <path class="dg-line-accent" d="M 528 104 L 596 104" marker-end="url(#dg-arrow-accent-publish-flow)"/>
 
-  <rect class="b-card-event" x="600" y="64" width="220" height="80" rx="8"/>
-  <text class="b-mono" x="618" y="100">layer.ingested</text>
-  <text class="b-sub" x="618" y="124">one source commit</text>
-  <text class="b-sub" x="618" y="142">yields one publish</text>
+  <rect class="dg-card-event" x="600" y="64" width="220" height="80" rx="8"/>
+  <text class="dg-mono" x="618" y="96">layer.ingested</text>
+  <text class="dg-sub" x="618" y="118">one source commit</text>
+  <text class="dg-sub" x="618" y="136">yields one publish</text>
 
   <!-- T-junction from event down to the two triggers -->
-  <path class="b-line" d="M 710 144 L 710 178"/>
-  <path class="b-line" d="M 200 178 L 710 178"/>
-  <path class="b-line" d="M 200 178 L 200 218" marker-end="url(#b-arrow)"/>
-  <path class="b-line" d="M 700 178 L 700 218" marker-end="url(#b-arrow)"/>
+  <path class="dg-line" d="M 710 144 L 710 178"/>
+  <path class="dg-line" d="M 200 178 L 710 178"/>
+  <path class="dg-line" d="M 200 178 L 200 218" marker-end="url(#dg-arrow-publish-flow)"/>
+  <path class="dg-line" d="M 700 178 L 700 218" marker-end="url(#dg-arrow-publish-flow)"/>
 
   <!-- Pattern A: scheduled -->
-  <rect class="b-card" x="60" y="222" width="280" height="86" rx="8"/>
-  <text class="b-label" x="78" y="248">PATTERN A</text>
-  <text class="b-name" x="78" y="272">Scheduled CI job</text>
-  <text class="b-sub" x="78" y="294">GitHub Actions cron; no receiver</text>
+  <rect class="dg-card" x="60" y="222" width="280" height="86" rx="8"/>
+  <text class="dg-label" x="78" y="248">PATTERN A</text>
+  <text class="dg-name dg-t-l" x="78" y="272">Scheduled CI job</text>
+  <text class="dg-sub" x="78" y="294">GitHub Actions cron; no receiver</text>
 
   <!-- Pattern B: receiver -> relay -> dispatch -->
-  <rect class="b-card" x="560" y="222" width="280" height="86" rx="8"/>
-  <text class="b-label" x="578" y="248">PATTERN B</text>
-  <text class="b-name" x="578" y="272">Receiver</text>
-  <text class="b-sub" x="578" y="294">filtered to layer.ingested</text>
+  <rect class="dg-card" x="560" y="222" width="280" height="86" rx="8"/>
+  <text class="dg-label" x="578" y="248">PATTERN B</text>
+  <text class="dg-name dg-t-l" x="578" y="272">Receiver</text>
+  <text class="dg-sub" x="578" y="294">filtered to layer.ingested</text>
 
-  <path class="b-line-coral" d="M 700 308 L 700 338" marker-end="url(#b-arrow-coral)"/>
+  <path class="dg-line-accent" d="M 700 308 L 700 338" marker-end="url(#dg-arrow-accent-publish-flow)"/>
 
-  <rect class="b-card" x="560" y="342" width="280" height="86" rx="8"/>
-  <text class="b-name" x="578" y="372">Relay</text>
-  <text class="b-sub" x="578" y="394">verifies HMAC, then calls</text>
-  <text class="b-mono" x="578" y="414">POST /repos/&lt;owner&gt;/&lt;repo&gt;/dispatches</text>
+  <rect class="dg-card" x="560" y="342" width="345" height="86" rx="8"/>
+  <text class="dg-name dg-t-l" x="578" y="372">Relay</text>
+  <text class="dg-sub" x="578" y="394">verifies HMAC, then calls</text>
+  <text class="dg-mono" x="578" y="414">POST /repos/&lt;owner&gt;/&lt;repo&gt;/dispatches</text>
 
   <!-- Both triggers converge on the podium sync run -->
-  <path class="b-line" d="M 200 308 L 200 470 L 416 470" marker-end="url(#b-arrow)"/>
-  <path class="b-line" d="M 700 428 L 700 470 L 664 470" marker-end="url(#b-arrow)"/>
+  <path class="dg-line" d="M 200 308 L 200 470 L 416 470" marker-end="url(#dg-arrow-publish-flow)"/>
+  <path class="dg-line" d="M 700 428 L 700 470 L 664 470" marker-end="url(#dg-arrow-publish-flow)"/>
 
-  <rect class="b-card-primary" x="420" y="438" width="240" height="120" rx="10"/>
-  <text class="b-label" x="438" y="464">podium sync --config</text>
-  <text class="b-name" x="438" y="490">prepare (clone)</text>
-  <text class="b-name" x="438" y="514">render (Podium)</text>
-  <text class="b-name" x="438" y="538">publish (push)</text>
+  <rect class="dg-card-primary" x="420" y="438" width="240" height="120" rx="10"/>
+  <text class="dg-label" x="438" y="464">podium sync --config</text>
+  <text class="dg-name dg-t-l" x="438" y="490">prepare (clone)</text>
+  <text class="dg-name dg-t-l" x="438" y="514">render (Podium)</text>
+  <text class="dg-name dg-t-l" x="438" y="538">publish (push)</text>
 
-  <path class="b-line" d="M 660 498 L 724 498" marker-end="url(#b-arrow)"/>
+  <path class="dg-line" d="M 660 498 L 724 498" marker-end="url(#dg-arrow-publish-flow)"/>
 
-  <rect class="b-card-accent" x="728" y="438" width="240" height="120" rx="10"/>
-  <text class="b-label" x="746" y="464">GIT REMOTE</text>
-  <text class="b-name" x="746" y="492">Marketplace repo</text>
-  <text class="b-sub" x="746" y="516">the harness imports it</text>
-  <text class="b-sub" x="746" y="536">through its install path</text>
+  <rect class="dg-card-strong" x="728" y="438" width="240" height="120" rx="10"/>
+  <text class="dg-label" x="746" y="464">GIT REMOTE</text>
+  <text class="dg-name dg-t-l" x="746" y="492">Marketplace repo</text>
+  <text class="dg-sub" x="746" y="516">the harness imports it</text>
+  <text class="dg-sub" x="746" y="536">through its install path</text>
 
-  <text class="b-foot" x="30" y="592">The receiver cannot call GitHub's dispatch endpoint directly because the HMAC-signed receiver body differs, so a relay verifies the HMAC and issues the dispatch.</text>
-  <text class="b-foot" x="30" y="610">Pattern A polls on a cron, and Pattern B relays the event. Both run the same podium sync --config pipeline.</text>
+  <text class="dg-foot" x="30" y="592">The receiver cannot call GitHub's dispatch endpoint directly because the HMAC-signed receiver body differs, so a relay verifies the HMAC and issues the dispatch.</text>
+  <text class="dg-foot" x="30" y="610">Pattern A polls on a cron, and Pattern B relays the event. Both run the same podium sync --config pipeline.</text>
 </svg>

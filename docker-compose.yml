@@ -133,6 +133,11 @@ services:
       PODIUM_OAUTH_AUDIENCE: "http://localhost:8080"
       PODIUM_OAUTH_AUTHORIZATION_ENDPOINT: "http://localhost:5556/dex/device/code"
       PODIUM_BOOTSTRAP_ADMINS: "alice@acme.com"
+      # A Postgres-backed registry defaults its embedding provider to openai,
+      # which then requires OPENAI_API_KEY and stops this stack from starting.
+      # The evaluation stack has no key, so it opts out to BM25 keyword search.
+      # Remove this and supply a provider and its key to exercise hybrid search.
+      PODIUM_NO_EMBEDDINGS: "true"
     ports:
       - "8080:8080"
 

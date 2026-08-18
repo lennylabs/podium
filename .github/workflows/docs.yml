@@ -1,10 +1,11 @@
 name: docs
 
-# The Jekyll documentation site (docs/, just-the-docs) is regenerated only on a
-# new release tag, not on every push to main. The repository's Pages source is
-# set to "GitHub Actions" so the legacy per-commit branch build is disabled and
-# this workflow is the only deploy path. workflow_dispatch allows a manual
-# rebuild between releases, for example a docs-only correction.
+# The documentation site (docs/ markdown, rendered by the generator in site/) is
+# regenerated only on a new release tag, not on every push to main. The
+# repository's Pages source is set to "GitHub Actions" so the legacy per-commit
+# branch build is disabled and this workflow is the only deploy path.
+# workflow_dispatch allows a manual rebuild between releases, for example a
+# docs-only correction.
 on:
   push:
     tags:
@@ -27,12 +28,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
-      - uses: actions/jekyll-build-pages@v1
         with:
-          source: ./docs
-          destination: ./_site
+          # Each page shows when its source last changed, which is read from the
+          # commit history. A shallow clone carries none, so the dates would all
+          # come back empty.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - run: npm ci
+        working-directory: site
+      - run: npm run build
+        working-directory: site
+      - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
 
   deploy:
     needs: build

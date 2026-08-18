@@ -1,6 +1,6 @@
 package e2e
 
-// End-to-end tests for docs/deployment/solo-filesystem.md (D-solo-fs).
+// End-to-end tests for docs/deployment/local.md (D-local).
 // The page documents the filesystem-only Podium setup: podium sync/lint/init
 // against a directory tree, multi-layer .registry-config, watch mode, overlay,
 // override/save-as, and migration to a standalone server.

@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Rule modes
-parent: Authoring
 nav_order: 7
 description: The rule_mode values (always, glob, auto, explicit) and how each harness honors them.
 ---
@@ -84,7 +82,7 @@ Legend: ✓ supported natively, ⚠ supported via fallback (ingest lint warns wh
 | **codex, opencode, pi** | The rule body injects into root `AGENTS.md` between Podium-managed markers. `always` maps natively; `glob`, `auto`, and `explicit` fall back to always-loaded with a lint warning, because an injected block carries no per-file scoping. |
 | **gemini** | The rule body injects into root `GEMINI.md` between Podium-managed markers, with the same `always`-native, non-`always`-fallback behavior as the `AGENTS.md` harnesses. |
 | **claude-cowork** | No project-scope rule surface. A `type: rule` artifact on `claude-cowork` is a ✗ cell that fails materialization with `materialize.untranslatable` per §6.9, on both `podium sync` and `load_artifact`, including the default `always` mode. A cowork user obtains the rule through the published Claude marketplace ([Publishing](../consuming/publishing)). |
-| **claude-desktop** | No project-level surface, so a rule produces no Claude Desktop output. |
+| **claude-desktop** | No project-scope rule surface. Every `rule_mode` cell is ✗, so a `type: rule` artifact on `claude-desktop` fails materialization with `materialize.untranslatable` per §6.9, on both `podium sync` and `load_artifact`, including the default `always` mode. |
 
 ---
 
@@ -106,5 +104,6 @@ Lint enforces the field requirements per mode:
 - `rule_mode: glob` with `rule_description` set: lint warning ("rule-mode 'glob' uses globs only; rule-description is ignored").
 - `rule_mode: auto` with `rule_globs` set: lint warning ("rule-mode 'auto' uses description only; rule-globs is ignored").
 - A type other than `rule` with `rule_mode` set: lint warning ("rule-mode is only applicable to type: rule").
+- A `rule_mode` value outside `always`, `glob`, `auto`, and `explicit` on a `type: rule` artifact: ingest error (`lint.unknown_rule_mode`).
 
 When an artifact declares `target_harnesses:`, ingest lint surfaces a mismatch for any named harness whose cell for the chosen mode is ⚠ (warning) or ✗ (error). When `target_harnesses:` is absent, ingest stays permissive and an unsupported mode is caught at materialization onto that harness (§6.9). Authors who must use a non-portable mode can declare `target_harnesses:` in frontmatter to opt out of cross-harness materialization for that artifact.

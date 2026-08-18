@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Live vector backends
-parent: Testing
 nav_order: 1
 description: Set up Pinecone, Weaviate Cloud, and Qdrant Cloud for Podium's live integration tests, with storage-only and self-embedding collections.
 ---
@@ -126,7 +124,7 @@ Managed vector backends:
 
 Embedding providers: `OPENAI_API_KEY`, `COHERE_API_KEY`, and `VOYAGE_API_KEY`.
 
-Postgres, the S3 object store, and Ollama need no configuration. The workflow starts Postgres and MinIO as job-local services with throwaway localhost credentials and installs Ollama on the runner with a local model, so `PODIUM_POSTGRES_DSN`, the `PODIUM_S3_*` variables, and the Ollama variables are set in the workflow itself.
+Postgres, the S3 object store, and Ollama need no secrets. The workflow starts Postgres and MinIO as job-local services with throwaway localhost credentials and sets `PODIUM_POSTGRES_DSN` and the `PODIUM_S3_*` variables itself. It installs Ollama on the runner and pulls `nomic-embed-text`. The tests reach Ollama at `http://localhost:11434` with that model because both are the built-in defaults, so the workflow sets no Ollama variable.
 
 The workflow reads every value through the `secrets` context, so define each one as a secret. The repository is public, which makes an Actions log world-readable, and storing a value as a secret keeps it masked in the log. To keep a non-sensitive identifier such as an index or model name visible in the log, define it as a repository variable instead and change its reference in the workflow from `secrets.<NAME>` to `vars.<NAME>`.
 

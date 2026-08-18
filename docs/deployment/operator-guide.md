@@ -1,16 +1,14 @@
 ---
-layout: default
 title: Operator guide
-parent: Deployment
-nav_order: 5
-description: "Day-two operations for a standard Podium deployment: capacity, monitoring, alerts, backup, upgrades, security review, common pitfalls."
+nav_order: 8
+description: "Day-two operations for a clustered Podium deployment: capacity, monitoring, alerts, backup, upgrades, security review, common pitfalls."
 ---
 
 # Operator guide
 
-Day-two operations for a standard Podium deployment.
+Day-two operations for a [clustered](clustered) Podium deployment.
 
-For small-team, single-VM use, see [Small team](small-team) instead.
+For a single machine running one binary, see [Single node](single-node) instead.
 
 ---
 
@@ -34,14 +32,14 @@ Object-storage growth is dominated by bundled resources. Most teams' p99 artifac
 
 ## Monitoring
 
-Both the registry and the MCP server expose Prometheus metrics. The reference Grafana dashboard ships with the registry. Key signals:
+The registry serves Prometheus metrics at `/metrics` by default, and `PODIUM_METRICS=false` removes the endpoint. The MCP server is a stdio process with no listener of its own, so it serves its metrics only when `PODIUM_MCP_METRICS_ADDR`, the `--metrics-addr` flag, or the `metrics-addr` config-file key names a bind address. The reference Grafana dashboard is in the repository at `deploy/grafana-dashboard.json`. Key signals:
 
 **Registry:**
 
-- `podium_request_duration_seconds{endpoint}`: per-endpoint latency histogram. Watch `load_domain`, `search_domains`, `search_artifacts`, `load_artifact`, and `load_artifacts` against the SLOs (p99 < 200ms / 200ms / 200ms / 500ms manifest / 2s with resources).
+- `podium_request_duration_seconds{endpoint}`: per-endpoint latency histogram. Watch `load_domain`, `search_domains`, and `search_artifacts` at p99 < 200 ms each, and `load_artifact` at p99 < 500 ms for the manifest alone and p99 < 2 s when bundled resources are fetched on a cache miss. The bulk route `/v1/artifacts:batchLoad` reports under the label `batch_load` and carries no SLO budget.
 - `podium_request_total{endpoint}` and `podium_request_errors_total{endpoint}`: request volume and error count per endpoint. The error counter increments for any response status at or above 400, so the per-endpoint error rate is `rate(podium_request_errors_total) / rate(podium_request_total)`.
 - `podium_visibility_denied_total`: reads rejected by visibility filtering. This signal is informational; a sudden spike usually means a layer config error rather than an authorization issue.
-- `podium_cache_hits_total` and `podium_cache_misses_total`: server-side cache hits and misses. A low hit ratio often indicates a CDN or import-glob misconfiguration.
+- `podium_cache_hits_total` and `podium_cache_misses_total`: hits and misses on the registry's cache of `DOMAIN.md` import-glob expansions. The cache key combines the include and exclude patterns with a fingerprint of the caller's visible artifact-ID set, so the ratio falls when ingest changes that set frequently, when callers see different subsets of the catalogue, or when a domain's globs vary from request to request. The MCP server reports its own resolution-cache hits and misses under the same two names.
 - `podium_ingest_success_total` and `podium_ingest_failure_total`: ingest attempts that succeeded or failed. Flag a recent uptick in the failure counter.
 - `podium_vector_outbox_depth`: pending rows in the external-vector-backend outbox. A rising depth indicates the drain worker is falling behind. The gauge reads 0 on a collocated backend that uses no outbox.
 
@@ -84,7 +82,7 @@ A reasonable starting set, tuned for the baseline deployment:
   expr: sum(rate(podium_cache_hits_total[1h])) / (sum(rate(podium_cache_hits_total[1h])) + sum(rate(podium_cache_misses_total[1h]))) < 0.5
 ```
 
-The Helm chart ships these as a starter; tune thresholds to your SLOs.
+The chart at `deploy/helm/podium` does not carry alert rules, so add these to your own Prometheus rule set and tune the thresholds to your SLOs.
 
 ---
 
@@ -101,11 +99,18 @@ Test restores quarterly. The runbook procedure:
    S3 bucket.
 2. Restore Postgres from PITR to T-1h.
 3. Sync the production S3 bucket to the fresh one (rclone or aws s3 sync).
-4. Run `podium admin verify --check audit-chain --check signatures` against
-   the restored deployment. Fix any reported gaps.
-5. Spot-check `load_artifact` for a known-good artifact; should match the
+4. Watch the restored registry's log for the scheduled audit-integrity pass.
+   A hash-chain gap logs "audit integrity ALERT" and records an
+   audit.gap_detected event.
+5. Run `podium verify <artifact> --registry <restored-url> --provider
+   <name>` for a signed artifact and confirm it exits 0.
+6. Spot-check `load_artifact` for a known-good artifact; should match the
    pre-restore content_hash.
 ```
+
+Step 5 names the provider explicitly because `podium verify` reads `--provider` from `PODIUM_SIGNATURE_PROVIDER` and falls back to `noop`, and the noop provider accepts only the `noop:<content_hash>` placeholder it produces. For a Sigstore-signed artifact, pass `sigstore-keyless` and set `PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE`; verification fails with `no trust root configured` when the trust root is absent. `podium verify --provider registry-managed` loads no public key and returns `config.signature_provider_unavailable`, so check a registry-key deployment through a consumer configured with `PODIUM_SIGNATURE_VERIFY_KEY` instead.
+
+The audit-integrity pass runs inside the registry on the `PODIUM_AUDIT_VERIFY_INTERVAL_SECONDS` schedule, which defaults to 3600 seconds. Lower it on the restored deployment to get the first pass sooner.
 
 ---
 
@@ -116,7 +121,7 @@ Schema migrations are bundled in the registry binary and applied additively on s
 1. **Pre-upgrade.** Read the changelog and the migration notes for the target version. If a migration is non-trivial (reshuffling embeddings, changing the audit schema), schedule a maintenance window.
 2. **Canary.** Roll one registry replica to the new version. Watch metrics for 30 min and confirm latency, error rate, and cache hit rate are unchanged.
 3. **Roll.** Roll the rest of the replicas. Because migrations are additive, an older replica ignores the new tables and columns, so old and new replicas coexist during the roll.
-4. **Verify.** After the roll completes, run `podium admin verify --check schema --check audit-chain`.
+4. **Verify.** After the roll completes, confirm `/readyz` reports `ready` on every replica and that the audit-integrity pass logs no gap on its next run.
 
 Roll back by reverting the binary. The additive schema stays forward-compatible with the previous version's binary, so an older binary continues to run against the migrated database.
 
@@ -124,7 +129,7 @@ Roll back by reverting the binary. The additive schema stays forward-compatible 
 
 ## Read-only mode
 
-When the Postgres primary becomes unreachable but a read replica is up, the registry falls back to read-only mode: read endpoints continue to serve from the replica; write endpoints (ingest webhooks, layer admin operations, freeze toggles, admin grants, login-driven token issuance) are rejected with the structured error `registry.read_only`.
+When the Postgres primary becomes unreachable but a read replica is up, the registry falls back to read-only mode: read endpoints continue to serve from the replica; write endpoints (ingest webhooks, layer admin operations, freeze toggles, admin grants, and tenant management) are rejected with the structured error `registry.read_only`. `GET /v1/admin/tenants` is a read and stays available.
 
 A health-state machine governs the transition. The registry probes the primary every 5 s and flips to read-only after three consecutive failures (tunable via `PODIUM_READONLY_PROBE_INTERVAL` and `PODIUM_READONLY_PROBE_FAILURES`). It flips back automatically after three consecutive probe successes once the primary is reachable again.
 
@@ -145,7 +150,7 @@ The registry emits outbound webhooks for change events to receivers an admin reg
 
 **`PODIUM_WEBHOOK_ALLOWED_TARGETS`.** A deployment whose receiver is legitimately internal, such as an in-cluster relay, sets this comma-separated allowlist of hosts or CIDRs that the policy permits in addition to public addresses. An entry is either a bare host matched against the URL host or a CIDR matched against the resolved addresses. The variable is empty by default, which keeps the strict policy. A malformed entry aborts boot, so the registry fails closed rather than silently widening the policy. The startup log reports the wired allowlist.
 
-**Receiver registration on standalone and no-auth deployments.** The receiver CRUD endpoints require the per-tenant admin role and return `auth.forbidden` for a non-admin caller, the same authorization posture as the admin-grant endpoints. On a standalone or no-auth bind, anonymous receiver registration is no longer open: it requires an admin grant plus a token. Grant the role with `POST /v1/admin/grants` before a caller registers a receiver on such a deployment.
+**Receiver registration on a no-auth deployment.** The receiver CRUD endpoints require the per-tenant admin role and return `auth.forbidden` for a non-admin caller, the same authorization posture as the admin-grant endpoints. A caller the registry cannot authenticate resolves to the anonymous public identity, which fails the admin check, so receiver registration is closed on a bind with no identity provider. `POST /v1/admin/grants` is itself admin-gated and cannot create the first admin on such a deployment. Seed the first admin at boot with `PODIUM_BOOTSTRAP_ADMINS`, configure an identity provider the registry verifies (`injected-session-token`, `oidc-jwt`, or `trusted-headers`), and have that admin present its credential when registering a receiver.
 
 ---
 
@@ -158,8 +163,8 @@ Walk through these before launching to a tenant that handles sensitive content.
 | OAuth identity flow | Device-code flow tested for every IdP in production use. Token lifetimes set to ≤15 min. Revocation propagates within 60s. |
 | OIDC group claim mapping | Group claims actually produced by your IdP arrive in the registry's audit log. Test with a non-admin user. |
 | Per-layer visibility | Each layer's `visibility:` declaration is correct. Test by impersonating a non-member identity (via `injected-session-token` test harness). |
-| Sensitivity enforcement | `PODIUM_VERIFY_SIGNATURES` is `medium-and-above` (or stricter). Test that a tampered artifact fails materialization with `materialize.signature_invalid`. |
-| Audit hash chain | Run `podium admin verify --check audit-chain` weekly via cron. Detect gaps automatically. |
+| Sensitivity enforcement | Each consumer's MCP server resolves the policy from `PODIUM_VERIFY_SIGNATURES`, then `defaults.verify_signatures` in its `sync.yaml`, then a `medium-and-above` fallback. Confirm the resolved policy is `medium-and-above` or stricter on every consumer, including any machine where the standalone bootstrap wrote `verify_signatures: never` into `~/.podium/sync.yaml`. The registry does not read the variable, and `podium sync` runs no signature check. Test that a tampered artifact fails materialization with `materialize.signature_invalid`. |
+| Audit hash chain | `PODIUM_AUDIT_VERIFY_INTERVAL_SECONDS` is non-zero so the registry re-verifies the chain on a schedule. Alert on the `audit.gap_detected` event and on the "audit integrity ALERT" log line. |
 | Webhook signing | Git provider webhook HMAC secret is unique per layer. Test with an invalid signature; expect `ingest.webhook_invalid`. |
 | Outbound receiver URL policy | Receiver CRUD is admin-gated. `PODIUM_WEBHOOK_ALLOWED_TARGETS` lists only the internal receivers a deployment intends. Test by registering an `http` or private-address receiver; expect `registry.invalid_argument`. |
 | Sandbox profile honoring | The hosts in production honor `sandbox_profile` for non-`unrestricted` artifacts. Test with a `read-only-fs` artifact and confirm the host enforces. |
@@ -180,8 +185,8 @@ These come up a few times a year for most operators:
 - **MCP server cache pinning** (`PODIUM_CACHE_DIR` on slow disks). Developer machines with cache on a network filesystem will see materialization latency well above the SLO. Default to `~/.podium/cache/` on local disk.
 - **Webhook retries during read-only mode.** GitHub will retry webhooks for ~24 h with exponential backoff. If your read-only window exceeds that, ingests will be permanently lost. Trigger manual `podium layer reingest` after recovery.
 - **Force-push on a Git source layer.** Default policy is tolerant (`layer.history_rewritten` event emitted, prior commits preserved in the content store). If `force_push_policy: strict` is configured, expect ingest rejections after force-pushes. Coordinate with authors.
-- **OIDC token clock skew.** The registry tolerates ±60s of skew. NTP drift on a registry node beyond that window causes intermittent `auth.token_expired` errors. Monitor clock skew on registry hosts.
-- **SCIM lag.** OIDC group membership changes propagate via SCIM push from the IdP. If your IdP doesn't push, group membership only updates on the user's next login. Force a refresh with `podium admin scim-sync --user <id>`.
+- **OIDC token clock skew.** The registry validates a token's expiry against its own clock with no configured leeway, so any NTP drift on a registry node produces intermittent `auth.token_expired` errors for tokens near expiry. Keep registry hosts on NTP and monitor clock skew.
+- **SCIM lag.** OIDC group membership changes propagate via SCIM push from the IdP to `/scim/v2/`. The registry has no pull side and no sync command, so an IdP that does not push leaves group membership to update on the user's next login. Trigger a push from the IdP's provisioning console when a membership change has to land immediately.
 
 ---
 
@@ -208,7 +213,7 @@ A misconfigured public-mode deployment is the most common security-relevant oper
 
 ## When to escalate to support / open an issue
 
-- Audit chain gap detected (`podium admin verify --check audit-chain` reports a hash mismatch). Treat as a security incident; capture evidence before any cleanup.
+- Audit chain gap detected (the scheduled integrity pass records an `audit.gap_detected` event). Treat as a security incident; capture evidence before any cleanup.
 - Repeated `materialize.signature_invalid` for authored artifacts. Either the signing pipeline broke or someone is tampering. Investigate before continuing.
 - Sustained latency degradation that doesn't track CPU / memory / DB load. Often indicates a query-plan regression after a Postgres major upgrade.
 - Out-of-band ingest events (artifacts appear in the registry without a corresponding `artifact.published` outbound webhook). Indicates webhook config or processing failure.

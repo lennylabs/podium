@@ -1,7 +1,5 @@
 ---
-layout: default
 title: Error codes
-parent: Reference
 nav_order: 4
 description: The structured error envelope and the full namespace catalog.
 ---
@@ -77,6 +75,14 @@ Codes map to MCP error payloads per the MCP spec for harnesses that consume Podi
 | `config.trusted_headers_public_bind` | `trusted-headers` on a single-tenant registry bound to a non-loopback address without `PODIUM_TRUSTED_PROXY_SECRET` or `--allow-public-bind`. |
 | `config.trusted_headers_multitenant_no_secret` | `trusted-headers` on a multi-tenant registry without `PODIUM_TRUSTED_PROXY_SECRET`, which is required on every request regardless of bind. |
 | `config.identity_provider_unverified` | A registered identity provider was selected without a request-time verifier wired, which would resolve every caller as anonymous-public. |
+| `config.scope_preview_disabled` | `GET /v1/scope/preview` reached a tenant whose `expose_scope_preview` gate is `false`. Returned as `403`. |
+| `config.not_found` | The named `sync.yaml` was not found at the given path. |
+| `config.invalid_sign_mode` | `PODIUM_SIGN` (or `--sign`) carried a value other than `registry-key`. |
+| `config.layer_path_ambiguous` | A `--layer-path` root sets `multi_layer: true` in `.registry-config` while manifest files are also present at the top level, so the mode cannot be resolved. |
+| `config.server_version_too_old` | The merged defaults or the active profile pin a `min_server_version` above the running binary. Upgrade Podium to run that profile. |
+| `config.invalid_min_version` | A `min_server_version` pin (or the binary version) is not a comparable semver. |
+| `config.signature_provider_unavailable` | The selected signature provider is not configured: no registry-managed key for `registry-managed`, or no Sigstore configuration for `sigstore-keyless`. |
+| `config.filesystem_registry_unsupported` | `PODIUM_REGISTRY` names a filesystem path while the MCP server requires an `http://` or `https://` source. Use `podium sync` to consume a filesystem registry. |
 
 ### domain.*
 
@@ -96,6 +102,10 @@ Codes map to MCP error payloads per the MCP spec for harnesses that consume Podi
 | `ingest.source_unreachable` | The layer's source (Git repo, S3 prefix, etc.) couldn't be reached at ingest time. Existing served artifacts are unaffected. |
 | `ingest.public_mode_rejects_sensitive` | Public-mode deployments reject ingest of `sensitivity: medium` and `sensitivity: high` artifacts. |
 | `ingest.sandbox_profile_unenforceable` | With `PODIUM_ENFORCE_SANDBOX_PROFILE=true` the registry rejects an artifact whose `sandbox_profile` the local host cannot honor; the host advertises its enforceable set via `PODIUM_HOST_SANDBOXES`. |
+| `ingest.invalid_artifact` | The manifest could not be decoded into an artifact record, or its `extends:` pin failed to resolve. The artifact is rejected; the rest of the ingest continues. |
+| `ingest.collision` | Another layer already contributes this canonical artifact ID and the incoming manifest declares no `extends:`, so the overlay is not sanctioned. |
+| `ingest.sign_failed` | The configured signer rejected the artifact's content hash at ingest. |
+| `ingest.resource_store_failed` | A bundled resource could not be persisted to the object store, so the manifest was not committed. |
 
 ### materialize.*
 
@@ -104,6 +114,9 @@ Codes map to MCP error payloads per the MCP spec for harnesses that consume Podi
 | `materialize.signature_invalid` | Signature verification failed at materialization (tampered content, expired signature, unknown signer). |
 | `materialize.signature_missing` | The artifact requires a signature (sensitivity `medium` or higher under the default policy) but none was provided. |
 | `materialize.runtime_unavailable` | The host can't satisfy the artifact's `runtime_requirements:` (Python version, Node version, system package). |
+| `materialize.content_hash_mismatch` | The bytes the consumer received hash to a different value than the `content_hash` the registry served, so materialization stops before writing. |
+| `materialize.hook_failed` | A materialization hook returned an error, so the artifact is not written. |
+| `materialize.sandbox_violation` | A hook attempted an action its sandbox profile does not permit. |
 | `materialize.untranslatable` | The selected harness adapter cannot translate the artifact's type, mode, or one or more of its fields onto that harness (a §6.7.1 ✗ cell). For example, a plugin-layout type (`skill`, `agent`, `command`, `rule`, `hook`, `mcp-server`) on `claude-cowork` fails on both `podium sync` and `load_artifact`, because Cowork has no project-scope surface and the artifact ships through the published Claude marketplace instead. Use `harness: none` for raw output, or `target_harnesses:` to opt the artifact out of that harness. |
 
 ### mcp.*
@@ -117,7 +130,8 @@ Codes map to MCP error payloads per the MCP spec for harnesses that consume Podi
 
 | Code | When |
 |:--|:--|
-| `network.registry_unreachable` | The MCP server (or SDK) can't reach the registry. In `always-revalidate` cache mode, fresh calls return this on miss; `offline-first` returns cached results without raising. |
+| `network.registry_unreachable` | The MCP server or an SDK cannot reach the registry. The MCP server holds a content cache, so its `always-revalidate` mode returns this on a fresh-call miss while `offline-first` serves cached results without raising. The SDKs hold no cache, so both modes raise. |
+| `network.offline_cache_miss` | `offline-only` cache mode was asked for something the local cache does not hold, and the mode forbids contacting the registry. |
 
 ### quota.*
 
@@ -136,7 +150,12 @@ Codes map to MCP error payloads per the MCP spec for harnesses that consume Podi
 |:--|:--|
 | `registry.read_only` | Postgres primary unreachable; the registry has fallen back to read-only mode. Write endpoints (ingest, layer admin, freeze toggles, admin grants, tenant management) are rejected. Read endpoints continue to serve from the replica. |
 | `registry.tenant_management_unavailable` | A `/v1/admin/tenants` request (or a `podium admin tenant` command) reached a single-tenant or standalone registry, where multi-tenancy is out of scope. Start the registry in multi-tenant mode with `PODIUM_MULTI_TENANT` on a standard backend to manage tenants. |
-| `registry.invalid_argument` | A request argument failed validation (e.g., `top_k > 50`, or an outbound webhook receiver URL that is non-`https` or resolves to a loopback, link-local, or private target outside `PODIUM_WEBHOOK_ALLOWED_TARGETS`). Both the SDK (client-side) and the registry (server-side) enforce. |
+| `registry.invalid_argument` | A request argument failed validation (e.g., `top_k > 50`, or an outbound webhook receiver URL that is non-`https` or resolves to a loopback, link-local, or private target outside `PODIUM_WEBHOOK_ALLOWED_TARGETS`). Both the SDK (client-side) and the registry (server-side) enforce. Most endpoints also return it for an unsupported HTTP method. |
+| `registry.method_not_allowed` | `load_artifact` was called with a method other than `GET` or `HEAD`. |
+| `registry.not_found` | The named artifact, layer, webhook receiver, object, or tenant quota record does not exist. Returned as `404`. |
+| `registry.tenant_not_found` | A tenant lookup or write named an ID that is not provisioned. Returned as `404` by `PATCH` and `DELETE /v1/admin/tenants/{id}`. |
+| `registry.unavailable` | The registry could not complete the request against its metadata store, object store, or another dependency. Returned as `500`. |
+| `registry.unknown` | A batch-load item failed for a reason that maps to no more specific code. Carried in that item's error envelope; the batch itself stays `200`. |
 
 ### visibility.*
 

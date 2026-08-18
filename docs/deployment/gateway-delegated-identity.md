@@ -1,8 +1,6 @@
 ---
-layout: default
 title: Gateway-delegated identity
-parent: Deployment
-nav_order: 8
+nav_order: 11
 description: Run the registry behind a gateway that authenticates the caller, using the oidc-jwt and trusted-headers identity providers.
 ---
 
@@ -10,7 +8,7 @@ description: Run the registry behind a gateway that authenticates the caller, us
 
 A deployment may run the registry behind a gateway that has already authenticated the caller: an OIDC ingress, an OAuth2 proxy, an identity-verifying sidecar, or a non-OIDC corporate SSO. Two registry-process identity providers let the registry consume that gateway-supplied identity and filter layer visibility by it, rather than running its own device-code flow.
 
-Both are selected by the registry's `PODIUM_IDENTITY_PROVIDER`. They are registry-side values: a Podium client behind the gateway sends no credential of its own, because identity is supplied by the gateway. The MCP server's `PODIUM_IDENTITY_PROVIDER` continues to admit only `oauth-device-code` and `injected-session-token`, and rejects these two values. Both apply on a standalone or a standard backend, and both are mutually exclusive with public mode.
+Both are selected by the registry's `PODIUM_IDENTITY_PROVIDER`. They are registry-side values: a Podium client behind the gateway sends no credential of its own, because identity is supplied by the gateway. The MCP server's `PODIUM_IDENTITY_PROVIDER` continues to admit only `oauth-device-code` and `injected-session-token`, and rejects these two values. Both apply on a [single-node](single-node) or a [clustered](clustered) deployment, and both are mutually exclusive with public mode.
 
 | Value | Behavior | Use when |
 | --- | --- | --- |
@@ -23,17 +21,22 @@ Prefer `oidc-jwt` where the gateway can forward a verifiable token. It trusts th
 
 The gateway forwards the caller's IdP-signed JWT to the registry. The registry verifies the token on every request against the issuer's JWKS, which it resolves from the issuer's OIDC discovery document.
 
+`oidc-jwt` covers a directly-reachable registry as well, where a Podium client presents a token it acquired itself through the device-code flow. The verification path is identical, because the registry checks the token rather than the network path. The [OIDC cookbooks](oidc/) configure that arrangement per IdP.
+
 ```yaml
-# registry.yaml  (standalone or standard server, fronted by a gateway)
-identity_provider:
-  type: oidc-jwt
-  issuer: https://acme.okta.com/oauth2/default   # must be https
-  audience: https://podium.acme.com
-  token_header: Authorization   # default; value parsed as "Bearer <token>" for any header name
-  jwks_cache_ttl_seconds: 300   # default
-  # subject_claim: idsub                       # AD FS; default: sub
-  # groups_claim: http://schemas.microsoft.com/ws/2008/06/identity/claims/groups   # AD FS; default: groups
+# registry.yaml  (single-node or clustered server, fronted by a gateway)
+registry:
+  identity_provider:
+    type: oidc-jwt
+    issuer: https://acme.okta.com/oauth2/default   # must be https
+    audience: https://podium.acme.com
+    token_header: Authorization   # default; value parsed as "Bearer <token>" for any header name
+    jwks_cache_ttl_seconds: 300   # default
+    # subject_claim: idsub                       # AD FS; default: sub
+    # groups_claim: http://schemas.microsoft.com/ws/2008/06/identity/claims/groups   # AD FS; default: groups
 ```
+
+Every server-side key nests under the top-level `registry:` mapping. A document that starts at `identity_provider:` parses to an empty config and the registry ignores it without reporting an error.
 
 | Setting | Environment override | Default | Notes |
 | --- | --- | --- | --- |
@@ -46,7 +49,7 @@ identity_provider:
 
 The gateway's job: forward the caller's IdP-signed JWT in the configured header as `Bearer <token>`, whether the header is the default `Authorization` or a custom one such as `X-Forwarded-Access-Token`. Stripping client-supplied tokens is unnecessary, because a forged token fails verification.
 
-The registry reads group membership from the token's `groups` claim on every verified token, or from the claim named by `identity_provider.groups_claim` (`PODIUM_OAUTH_GROUPS_CLAIM`) when a deployment's IdP emits membership under another claim name. The `IdpGroupMapping` adapter rewrites the values that claim carries to registry-side group names, and it names no claim itself. A registry that also resolves membership through SCIM 2.0 push matches SCIM-resolved membership in addition to the claim-derived groups. SCIM is available on a standard backend, and a standalone server resolves groups through the token claim and `IdpGroupMapping` alone.
+The registry reads group membership from the token's `groups` claim on every verified token, or from the claim named by `identity_provider.groups_claim` (`PODIUM_OAUTH_GROUPS_CLAIM`) when a deployment's IdP emits membership under another claim name. The `IdpGroupMapping` adapter rewrites the values that claim carries to registry-side group names, and it names no claim itself. A registry that also resolves membership through SCIM 2.0 push matches SCIM-resolved membership in addition to the claim-derived groups. The registry mounts the SCIM receiver at `/scim/v2/` when `PODIUM_SCIM_TOKENS` names at least one bearer token, which is keyed on that variable alone and applies to a single-node and a clustered deployment alike, and `PODIUM_SCIM_STORE_PATH` persists the pushed directory across restarts.
 
 The token's `iss` is accepted when it matches the configured issuer or the `access_token_issuer` published by the discovery document that issuer resolves. AD FS serves discovery under `https://<host>/adfs` and stamps the federation-service identifier `http://<host>/adfs/services/trust` on the access token, so no single configured value covers both roles. The signing keys still come from the `jwks_uri` in that same `https` document, so the set of trusted keys is unchanged. When the document publishes an `access_token_issuer` that differs from the configured issuer, the registry logs both accepted values at startup.
 
@@ -59,10 +62,11 @@ A token that fails signature, `iss`, or `aud` validation is rejected with `auth.
 The gateway authenticates the caller by any means and injects the resolved identity as request headers. The registry reads them without verification.
 
 ```yaml
-# registry.yaml  (standalone or standard server, fronted by a gateway)
-identity_provider:
-  type: trusted-headers
-  # The proxy secret is read from PODIUM_TRUSTED_PROXY_SECRET, not stored here.
+# registry.yaml  (single-node or clustered server, fronted by a gateway)
+registry:
+  identity_provider:
+    type: trusted-headers
+    # The proxy secret is read from PODIUM_TRUSTED_PROXY_SECRET and has no config-file key.
 ```
 
 | Header | Carries |
@@ -73,7 +77,7 @@ identity_provider:
 | `X-Podium-User-Org` | The caller's organization (a multi-tenant registry routes by this value). |
 | `X-Podium-Proxy-Secret` | The shared secret matched against `PODIUM_TRUSTED_PROXY_SECRET`. |
 
-Groups come from `X-Podium-User-Groups` directly. SCIM and `IdpGroupMapping` are not consulted, because there is no token to read and the gateway is the source of truth. Provision groups at the gateway for a `trusted-headers` deployment.
+Groups come from `X-Podium-User-Groups` directly, and `IdpGroupMapping` is not consulted, because there is no token to read and the gateway is the source of truth. Provision groups at the gateway for a `trusted-headers` deployment. When the registry also mounts the SCIM receiver, a layer's `groups:` filter still expands against the pushed directory: the registry grants visibility when the named group holds a member whose SCIM `userName` equals the caller's `X-Podium-User-Sub` or `X-Podium-User-Email` value. Leave `PODIUM_SCIM_TOKENS` unset under `trusted-headers` when the gateway is meant to be the only source of group membership.
 
 The gateway's job: authenticate the caller, remove any client-supplied `X-Podium-User-*` headers, set the identity headers from the authenticated session, and, when a secret is configured, attach `X-Podium-Proxy-Secret`. A request without identity headers is anonymous and sees public visibility only; `trusted-headers` raises no authentication error.
 
@@ -88,15 +92,15 @@ The proxy secret is the registry's only request-level control over header trust,
 
 ## Single-tenant and multi-tenant
 
-On a single-tenant registry (a standalone backend, or a standard backend with one org), the registry resolves every authenticated caller to its sole tenant and does not consult the organization value.
+On a single-tenant registry, which covers a single-node deployment and a clustered one with a single org, the registry resolves every authenticated caller to its sole tenant and does not consult the organization value.
 
 A multi-tenant registry routes each request to the tenant its organization names: the verified `org_id` claim under `oidc-jwt`, or the `X-Podium-User-Org` header under `trusted-headers`. Enable multi-tenant mode with `PODIUM_MULTI_TENANT=true` (the `default` org is always provisioned). The organization value is an org ID or an org-name alias, which the registry resolves to a tenant. Under `oidc-jwt`, a value that resolves to no provisioned tenant is rejected with `auth.tenant_unknown`; under `trusted-headers`, the request is treated as anonymous and sees public visibility only.
 
-Tenants are provisioned at runtime by an instance operator. Seed the first operator with `PODIUM_OPERATOR_ADMINS` (comma-separated identities), which grants the instance-operator role at boot. The operator role is distinct from the per-tenant `admin` role and from `PODIUM_BOOTSTRAP_ADMINS`: it authorizes the `/v1/admin/tenants` API and the `podium admin tenant` CLI, and it confers no per-tenant `admin` rights. The operator provisions each org with `podium admin tenant create <name>` (or `POST /v1/admin/tenants`), lists tenants with `podium admin tenant list`, updates a tenant's quota or active state with `podium admin tenant update <id>`, and deactivates one with `podium admin tenant deactivate <id>`. Create is idempotent, so re-creating an existing name returns that tenant unchanged. Deactivation is soft: a deactivated tenant stops resolving while its data persists, and `podium admin tenant update <id> --active true` reactivates it. Tenant management is available only in multi-tenant mode; a single-tenant or standalone registry rejects every `/v1/admin/tenants` request with `registry.tenant_management_unavailable`. See the [CLI reference](../reference/cli#podium-admin-tenant) for the full flag set.
+Tenants are provisioned at runtime by an instance operator. Seed the first operator with `PODIUM_OPERATOR_ADMINS` (comma-separated identities), which grants the instance-operator role at boot. The operator role is distinct from the per-tenant `admin` role and from `PODIUM_BOOTSTRAP_ADMINS`: it authorizes the `/v1/admin/tenants` API and the `podium admin tenant` CLI, and it confers no per-tenant `admin` rights. The operator provisions each org with `podium admin tenant create <name>` (or `POST /v1/admin/tenants`), lists tenants with `podium admin tenant list`, updates a tenant's quota or active state with `podium admin tenant update <id>`, and deactivates one with `podium admin tenant deactivate <id>`. Create is idempotent, so re-creating an existing name returns that tenant unchanged. Deactivation is soft: a deactivated tenant stops resolving while its data persists, and `podium admin tenant update <id> --active true` reactivates it. Tenant management is available only in multi-tenant mode. A single-tenant registry rejects every `/v1/admin/tenants` request with `registry.tenant_management_unavailable`. See the [CLI reference](../reference/cli#podium-admin-tenant) for the full flag set.
 
 ## Layer visibility default
 
-Enabling either provider changes the resolved default layer visibility. On a standalone server without an identity provider, new layers default to `visibility: public`. Once a provider is enabled and `PODIUM_DEFAULT_LAYER_VISIBILITY` is unset, the resolved default is `private`, so admin layers are not public to every caller once the registry filters by identity. An explicit `PODIUM_DEFAULT_LAYER_VISIBILITY=public` is applied unchanged.
+Enabling either provider changes the resolved default layer visibility. On a registry with no identity provider, new admin-defined layers default to `visibility: public`. Once a provider is enabled and `PODIUM_DEFAULT_LAYER_VISIBILITY` is unset, the resolved default is `private`, so admin layers are not public to every caller once the registry filters by identity. An explicit `PODIUM_DEFAULT_LAYER_VISIBILITY=public` is applied unchanged. See [Access control](access-control#deployment-defaults).
 
 ## Web UI
 

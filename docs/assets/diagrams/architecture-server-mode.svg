@@ -1,146 +1,198 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 720" font-family="Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 720" class="dg">
   <!--
-    Server-mode architecture overview.
-    Used by README.md and docs/getting-started/how-it-works.md.
+    Registry-server architecture: sources ingest into the podium server, which
+    serves the language SDKs, the MCP server, and podium sync over an
+    OAuth-attested HTTP API.
 
-    Style: hand-drawn (Style B). Page background is white;
-    elements keep the warm Style B palette (cream cards, mustard
-    server card, sage consumer cards, coral identity dash).
-
-    Edit notes:
-    - Each shape is wrapped in a filter group (b-rough / b-rough-2)
-      that adds the wobble. Keep edits inside those groups so the
-      wobble stays consistent.
-    - Source/server/consumer/target swimlanes are 130px apart;
-      adjust the column x-offsets at 100, 380, 660 if a label needs
-      more room.
+    Swimlanes sit 130px apart. Adjust the column offsets at x=100, 380, and 660
+    when a label needs more room.
   -->
   <defs>
-    <filter id="b-rough" x="-10%" y="-10%" width="120%" height="120%">
-      <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" seed="3"/>
-      <feDisplacementMap in="SourceGraphic" scale="0"/>
-    </filter>
-    <filter id="b-rough-2" x="-10%" y="-10%" width="120%" height="120%">
-      <feTurbulence type="fractalNoise" baseFrequency="0.07" numOctaves="2" seed="7"/>
-      <feDisplacementMap in="SourceGraphic" scale="0"/>
-    </filter>
-    <marker id="b-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="9" markerHeight="9" orient="auto">
-      <path d="M 0 0 L 11 6 L 0 12 z" fill="#1f2933"/>
+    <marker id="dg-arrow-architecture-server-mode" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path class="dg-arrow-head" d="M 0 0 L 11 6 L 0 12 z"/>
     </marker>
     <style>
-      .b-bg { fill: #ffffff; }
-      .b-card { fill: #fffaf0; stroke: #1f2933; stroke-width: 2; }
-      .b-card-primary { fill: #ffe9c7; stroke: #1f2933; stroke-width: 2.5; }
-      .b-card-accent { fill: #d6e9d2; stroke: #1f2933; stroke-width: 2; }
-      .b-title { font-size: 22px; fill: #1f2933; }
-      .b-sub { font-size: 16px; fill: #54616e; }
-      .b-section { font-size: 16px; fill: #b56b1f; letter-spacing: 0.04em; }
-      .b-target-name { font-size: 16px; fill: #1f2933; }
-      .b-target-sub { font-size: 13px; fill: #54616e; }
-      .b-line { fill: none; stroke: #1f2933; stroke-width: 2.2; stroke-linecap: round; }
-      .b-line-accent { fill: none; stroke: #c84a1d; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 6 5; }
-      .b-pill { fill: #fff7e0; stroke: #1f2933; stroke-width: 1.6; }
-      .b-pill-label { font-size: 15px; fill: #1f2933; }
-      .b-foot { font-size: 13px; fill: #8a7755; }
+      /*
+        Colour comes from the site's design tokens. Inlined in the documentation
+        site the site's own variables win, so the theme toggle drives the
+        diagram. Standing alone (raw markdown on github.com, or the file opened
+        directly) the fallbacks apply and follow the operating system setting.
+        The block below is identical in every diagram; edit all of them together.
+      */
+      :root {
+        --dg-ground: var(--surface, #ffffff);
+        --dg-panel-fill: var(--surface-2, #fdfdf8);
+        --dg-fill: var(--surface-3, #f5f3e9);
+        --dg-fill-2: var(--chip, #eae7d9);
+        --dg-accent-fill: var(--accent-wash, #fff3e2);
+        --dg-accent-soft: var(--accent-strip, #ffeeda);
+        --dg-ink: var(--ink, #14130f);
+        --dg-meta: var(--meta, #63604f);
+        --dg-faint: var(--faint, #6f6c5e);
+        --dg-border: var(--border, #d9d5c6);
+        --dg-accent: var(--accent-deep, #f2861a);
+        --dg-accent-text: var(--link, #a8480a);
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --dg-ground: var(--surface, #171b28);
+          --dg-panel-fill: var(--surface-2, #1e2434);
+          --dg-fill: var(--surface-3, #1b2030);
+          --dg-fill-2: var(--chip, #212739);
+          --dg-accent-fill: var(--accent-wash, rgba(255, 164, 36, 0.12));
+          --dg-accent-soft: var(--accent-strip, rgba(255, 164, 36, 0.08));
+          --dg-ink: var(--ink, #eaeef7);
+          --dg-meta: var(--meta, #9aa3ba);
+          --dg-faint: var(--faint, #7a8399);
+          --dg-border: var(--border, #2b3145);
+          --dg-accent: var(--accent-deep, #f2861a);
+          --dg-accent-text: var(--link, #ffa424);
+        }
+      }
+
+      .dg {
+        font-family: var(--font-ui, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+      }
+
+      .dg-bg { fill: var(--dg-ground); }
+
+      .dg-panel { fill: var(--dg-panel-fill); stroke: var(--dg-border); stroke-width: 1.6; }
+      .dg-card { fill: var(--dg-fill); stroke: var(--dg-ink); stroke-width: 1.8; }
+      .dg-card-primary { fill: var(--dg-accent-fill); stroke: var(--dg-accent); stroke-width: 2.2; }
+      .dg-card-strong { fill: var(--dg-fill-2); stroke: var(--dg-accent); stroke-width: 2.2; }
+      .dg-card-quiet { fill: var(--dg-ground); stroke: var(--dg-meta); stroke-width: 1.4; }
+      .dg-card-event { fill: var(--dg-accent-soft); stroke: var(--dg-accent); stroke-width: 1.8; stroke-dasharray: 6 5; }
+      .dg-chip { fill: var(--dg-accent-soft); stroke: var(--dg-border); stroke-width: 1.2; }
+      .dg-outline { fill: none; stroke: var(--dg-accent); stroke-width: 1.6; stroke-dasharray: 6 5; }
+
+      .dg-title { font-size: 22px; fill: var(--dg-ink); }
+      .dg-name { font-size: 17px; fill: var(--dg-ink); }
+      .dg-lead { font-size: 15px; fill: var(--dg-meta); }
+      .dg-sub { font-size: 14px; fill: var(--dg-meta); }
+      .dg-label { font-size: 13px; fill: var(--dg-accent-text); letter-spacing: 0.06em; }
+      .dg-label-quiet { font-size: 13px; fill: var(--dg-meta); letter-spacing: 0.06em; }
+      .dg-note { font-size: 13px; fill: var(--dg-meta); font-style: italic; }
+      .dg-foot { font-size: 13px; fill: var(--dg-faint); }
+      .dg-mono { font-size: 13px; fill: var(--dg-ink); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+      .dg-mono-accent { font-size: 13px; fill: var(--dg-accent-text); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+      .dg-mono-quiet { font-size: 13px; fill: var(--dg-meta); font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+
+      .dg-line { fill: none; stroke: var(--dg-ink); stroke-width: 2; stroke-linecap: round; }
+      .dg-line-accent { fill: none; stroke: var(--dg-accent); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 6 5; }
+      .dg-line-quiet { fill: none; stroke: var(--dg-meta); stroke-width: 1.6; stroke-linecap: round; }
+      .dg-guide { fill: none; stroke: var(--dg-border); stroke-width: 1.2; }
+      .dg-divider { fill: none; stroke: var(--dg-border); stroke-width: 1.2; stroke-dasharray: 4 4; }
+
+      .dg-arrow-head { fill: var(--dg-ink); }
+      .dg-arrow-head-accent { fill: var(--dg-accent); }
+
+      .dg-t-xs { font-size: 12px; }
+      .dg-t-s { font-size: 13px; }
+      .dg-t-m { font-size: 15px; }
+      .dg-t-l { font-size: 18px; }
+      .dg-t-xl { font-size: 21px; }
+      .dg-t-2xl { font-size: 24px; }
+      .dg-t-3xl { font-size: 28px; }
     </style>
   </defs>
 
-  <rect class="b-bg" width="960" height="720"/>
+  <rect class="dg-bg" width="960" height="720"/>
 
   <!-- Sources -->
-  <text class="b-section" x="80" y="56">sources</text>
-  <g filter="url(#b-rough)">
-    <rect class="b-card" x="80" y="72" width="200" height="58" rx="6"/>
-    <rect class="b-card" x="300" y="72" width="200" height="58" rx="6"/>
-    <rect class="b-card" x="520" y="72" width="200" height="58" rx="6"/>
+  <text class="dg-label" x="80" y="56">sources</text>
+  <g>
+    <rect class="dg-card" x="80" y="72" width="200" height="58" rx="6"/>
+    <rect class="dg-card" x="300" y="72" width="200" height="58" rx="6"/>
+    <rect class="dg-card" x="520" y="72" width="200" height="58" rx="6"/>
   </g>
-  <text class="b-title" x="100" y="102">Git repo</text>
-  <text class="b-sub" x="100" y="122">team-shared @ main</text>
-  <text class="b-title" x="320" y="102">Git repo</text>
-  <text class="b-sub" x="320" y="122">company-glossary @ v3</text>
-  <text class="b-title" x="540" y="102">Local path</text>
-  <text class="b-sub" x="540" y="122">/opt/podium/personal</text>
+  <text class="dg-name dg-t-xl" x="100" y="102">Git repo</text>
+  <text class="dg-sub" x="100" y="122">team-shared @ main</text>
+  <text class="dg-name dg-t-xl" x="320" y="102">Git repo</text>
+  <text class="dg-sub" x="320" y="122">company-glossary @ v3</text>
+  <text class="dg-name dg-t-xl" x="540" y="102">Local path</text>
+  <text class="dg-sub" x="540" y="122">/opt/podium/personal</text>
 
-  <g filter="url(#b-rough-2)">
-    <path class="b-line" d="M 180 130 L 180 174 L 480 174 L 480 200" marker-end="url(#b-arrow)"/>
-    <path class="b-line" d="M 400 130 L 400 174"/>
-    <path class="b-line" d="M 620 130 L 620 174 L 480 174"/>
+  <g>
+    <path class="dg-line" d="M 180 130 L 180 174 L 480 174 L 480 200" marker-end="url(#dg-arrow-architecture-server-mode)"/>
+    <path class="dg-line" d="M 400 130 L 400 174"/>
+    <path class="dg-line" d="M 620 130 L 620 174 L 480 174"/>
   </g>
 
   <!-- Server card -->
-  <g filter="url(#b-rough)">
-    <rect class="b-card-primary" x="180" y="200" width="600" height="180" rx="8"/>
+  <g>
+    <rect class="dg-card-primary" x="180" y="200" width="600" height="180" rx="8"/>
   </g>
-  <text class="b-section" x="200" y="228">podium server</text>
-  <text class="b-title" x="200" y="256">HTTP / JSON API</text>
-  <text class="b-sub" x="200" y="278">stateless front-end + Postgres</text>
+  <text class="dg-label" x="200" y="228">podium server</text>
+  <text class="dg-name dg-t-xl" x="200" y="256">HTTP / JSON API</text>
+  <text class="dg-sub" x="200" y="278">stateless front-end + Postgres</text>
 
-  <g filter="url(#b-rough-2)">
-    <rect class="b-pill" x="200" y="294" width="170" height="32" rx="14"/>
-    <rect class="b-pill" x="382" y="294" width="170" height="32" rx="14"/>
-    <rect class="b-pill" x="564" y="294" width="186" height="32" rx="14"/>
-    <rect class="b-pill" x="200" y="334" width="170" height="32" rx="14"/>
-    <rect class="b-pill" x="382" y="334" width="170" height="32" rx="14"/>
-    <rect class="b-pill" x="564" y="334" width="186" height="32" rx="14"/>
+  <g>
+    <rect class="dg-chip" x="200" y="294" width="170" height="32" rx="14"/>
+    <rect class="dg-chip" x="382" y="294" width="170" height="32" rx="14"/>
+    <rect class="dg-chip" x="564" y="294" width="186" height="32" rx="14"/>
+    <rect class="dg-chip" x="200" y="334" width="170" height="32" rx="14"/>
+    <rect class="dg-chip" x="382" y="334" width="170" height="32" rx="14"/>
+    <rect class="dg-chip" x="564" y="334" width="186" height="32" rx="14"/>
   </g>
-  <text class="b-pill-label" x="216" y="315">Postgres + pgvector</text>
-  <text class="b-pill-label" x="398" y="315">Layer composition</text>
-  <text class="b-pill-label" x="580" y="315">Visibility filter</text>
-  <text class="b-pill-label" x="216" y="355">Dependency graph</text>
-  <text class="b-pill-label" x="398" y="355">Audit + hash chain</text>
-  <text class="b-pill-label" x="580" y="355">Hybrid retrieval</text>
+  <text class="dg-name dg-t-m" x="216" y="315">Postgres + pgvector</text>
+  <text class="dg-name dg-t-m" x="398" y="315">Layer composition</text>
+  <text class="dg-name dg-t-m" x="580" y="315">Visibility filter</text>
+  <text class="dg-name dg-t-m" x="216" y="355">Dependency graph</text>
+  <text class="dg-name dg-t-m" x="398" y="355">Audit + hash chain</text>
+  <text class="dg-name dg-t-m" x="580" y="355">Hybrid retrieval</text>
 
   <!-- Identity callout: compact pill anchored to the server's right side.
        Kept short ("OAuth") so the wobble doesn't push the label past
        the canvas edge. Caption below explains the cadence. -->
-  <g filter="url(#b-rough)">
-    <rect class="b-card" x="820" y="282" width="100" height="42" rx="21"/>
+  <g>
+    <rect class="dg-card" x="820" y="282" width="100" height="42" rx="21"/>
   </g>
-  <text class="b-title" x="844" y="309">OAuth</text>
-  <text class="b-sub" x="820" y="346">on every call</text>
-  <path class="b-line-accent" d="M 780 302 L 820 302"/>
+  <text class="dg-name dg-t-xl" x="844" y="309">OAuth</text>
+  <text class="dg-sub" x="820" y="346">on every call</text>
+  <path class="dg-line-accent" d="M 780 302 L 820 302"/>
 
   <!-- Server -> consumers: trunk down to the horizontal junction, then three
        branches. Only the branch ends carry arrowheads. -->
-  <g filter="url(#b-rough-2)">
-    <path class="b-line" d="M 480 380 L 480 422"/>
-    <path class="b-line" d="M 480 422 L 200 422 L 200 458" marker-end="url(#b-arrow)"/>
-    <path class="b-line" d="M 480 422 L 480 458" marker-end="url(#b-arrow)"/>
-    <path class="b-line" d="M 480 422 L 760 422 L 760 458" marker-end="url(#b-arrow)"/>
+  <g>
+    <path class="dg-line" d="M 480 380 L 480 422"/>
+    <path class="dg-line" d="M 480 422 L 200 422 L 200 458" marker-end="url(#dg-arrow-architecture-server-mode)"/>
+    <path class="dg-line" d="M 480 422 L 480 458" marker-end="url(#dg-arrow-architecture-server-mode)"/>
+    <path class="dg-line" d="M 480 422 L 760 422 L 760 458" marker-end="url(#dg-arrow-architecture-server-mode)"/>
   </g>
 
   <!-- Consumers -->
-  <text class="b-section" x="80" y="448">consumers</text>
-  <g filter="url(#b-rough)">
-    <rect class="b-card-accent" x="100" y="460" width="200" height="68" rx="6"/>
-    <rect class="b-card-accent" x="380" y="460" width="200" height="68" rx="6"/>
-    <rect class="b-card-accent" x="660" y="460" width="200" height="68" rx="6"/>
+  <text class="dg-label" x="80" y="448">consumers</text>
+  <g>
+    <rect class="dg-card-strong" x="100" y="460" width="200" height="68" rx="6"/>
+    <rect class="dg-card-strong" x="380" y="460" width="200" height="68" rx="6"/>
+    <rect class="dg-card-strong" x="660" y="460" width="200" height="68" rx="6"/>
   </g>
-  <text class="b-title" x="120" y="490">Language SDKs</text>
-  <text class="b-sub" x="120" y="510">python · typescript</text>
-  <text class="b-title" x="400" y="490">MCP server</text>
-  <text class="b-sub" x="400" y="510">in-process bridge</text>
-  <text class="b-title" x="680" y="490">podium sync</text>
-  <text class="b-sub" x="680" y="510">CLI · library</text>
+  <text class="dg-name dg-t-xl" x="120" y="490">Language SDKs</text>
+  <text class="dg-sub" x="120" y="510">python · typescript</text>
+  <text class="dg-name dg-t-xl" x="400" y="490">MCP server</text>
+  <text class="dg-sub" x="400" y="510">in-process bridge</text>
+  <text class="dg-name dg-t-xl" x="680" y="490">podium sync</text>
+  <text class="dg-sub" x="680" y="510">CLI · library</text>
 
-  <g filter="url(#b-rough-2)">
-    <path class="b-line" d="M 200 528 L 200 596" marker-end="url(#b-arrow)"/>
-    <path class="b-line" d="M 480 528 L 480 596" marker-end="url(#b-arrow)"/>
-    <path class="b-line" d="M 760 528 L 760 596" marker-end="url(#b-arrow)"/>
+  <g>
+    <path class="dg-line" d="M 200 528 L 200 596" marker-end="url(#dg-arrow-architecture-server-mode)"/>
+    <path class="dg-line" d="M 480 528 L 480 596" marker-end="url(#dg-arrow-architecture-server-mode)"/>
+    <path class="dg-line" d="M 760 528 L 760 596" marker-end="url(#dg-arrow-architecture-server-mode)"/>
   </g>
 
   <!-- Targets -->
-  <text class="b-section" x="80" y="588">targets</text>
-  <rect class="b-card" x="40" y="600" width="280" height="68" rx="6"/>
-  <rect class="b-card" x="340" y="600" width="280" height="68" rx="6"/>
-  <rect class="b-card" x="640" y="600" width="280" height="68" rx="6"/>
+  <text class="dg-label" x="80" y="588">targets</text>
+  <rect class="dg-card" x="40" y="600" width="280" height="68" rx="6"/>
+  <rect class="dg-card" x="340" y="600" width="280" height="68" rx="6"/>
+  <rect class="dg-card" x="640" y="600" width="280" height="68" rx="6"/>
 
-  <text class="b-target-name" x="52" y="628">LangChain · Claude Agent SDK · etc.</text>
-  <text class="b-target-sub" x="52" y="652">programmatic runtimes</text>
+  <text class="dg-name dg-t-m" x="52" y="628">LangChain · Claude Agent SDK · etc.</text>
+  <text class="dg-sub dg-t-s" x="52" y="652">programmatic runtimes</text>
 
-  <text class="b-target-name" x="352" y="628">Claude Code · OpenCode · etc.</text>
-  <text class="b-target-sub" x="352" y="652">coding harnesses</text>
+  <text class="dg-name dg-t-m" x="352" y="628">Claude Code · OpenCode · etc.</text>
+  <text class="dg-sub dg-t-s" x="352" y="652">coding harnesses</text>
 
-  <text class="b-target-name" x="652" y="628">Filesystem harnesses</text>
-  <text class="b-target-sub" x="652" y="652">writes to .claude/, .cursor/, etc.</text>
+  <text class="dg-name dg-t-m" x="652" y="628">Filesystem harnesses</text>
+  <text class="dg-sub dg-t-s" x="652" y="652">writes to .claude/, .cursor/, etc.</text>
 </svg>
