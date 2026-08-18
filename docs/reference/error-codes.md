@@ -54,7 +54,7 @@ Codes map to MCP error payloads per the MCP spec for harnesses that consume Podi
 | Code | When |
 |:--|:--|
 | `auth.untrusted_runtime` | An `injected-session-token` JWT was signed by a runtime whose signing key isn't registered with the registry. |
-| `auth.untrusted_token` | A gateway-forwarded `oidc-jwt` token failed signature, `iss`, or `aud` validation against the configured issuer JWKS. `details.token_iss` carries the rejected token's issuer. |
+| `auth.untrusted_token` | A gateway-forwarded `oidc-jwt` token failed signature, `iss`, or `aud` validation against the accepted issuers and the issuer JWKS. `details.token_iss` carries the rejected token's issuer. |
 | `auth.tenant_unknown` | A verified `oidc-jwt` token's `org_id` names no provisioned tenant on a multi-tenant registry. `details.token_org_id` carries the unresolved organization. |
 | `auth.token_expired` | The OAuth access token (or injected/forwarded JWT) has passed its `exp`. The MCP server triggers refresh on `oauth-device-code`; the runtime refreshes on `injected-session-token`; the gateway forwards a new token on `oidc-jwt`. |
 | `auth.forbidden` | An admin-only operation attempted by a non-admin caller, including a receiver CRUD call (`/v1/webhooks`) by a caller without the per-tenant admin role. |

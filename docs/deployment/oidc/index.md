@@ -17,7 +17,7 @@ These per-IdP guides cover the setup steps. Each guide assumes a Podium registry
 | Okta | [`okta.md`](okta.md) | Native group claim support; SCIM available. |
 | Microsoft Entra ID | [`entra-id.md`](entra-id.md) | Formerly Azure AD. Group claim emits group _IDs_ rather than names, so `IdpGroupMapping` resolves them to names. |
 | Google Workspace | [`google-workspace.md`](google-workspace.md) | No group claim natively in OIDC. Groups arrive via SCIM 2.0 push or as OIDC group claims mapped by `IdpGroupMapping`. |
-| Auth0 | [`auth0.md`](auth0.md) | Group claim via custom action or rule. `oidc-jwt` rejects every Auth0 token on the `iss` comparison, so callers reach the registry through a gateway under `trusted-headers`. |
+| Auth0 | [`auth0.md`](auth0.md) | Group claim via custom action or rule, emitted under a namespaced path that `groups_claim` names. Auth0 issues `iss` with a trailing slash, which the verifier trims on both sides. |
 | Keycloak | [`keycloak.md`](keycloak.md) | Self-hosted; group claim via mapper. The Compose stack uses the sibling Dex for evaluation deployments. |
 
 ## What every guide produces
@@ -36,7 +36,7 @@ Every server-side key nests under the top-level `registry:` mapping. A document 
 
 Group resolution is configured registry-side. Use SCIM 2.0 push from the IdP, or the `IdpGroupMapping` adapter that reads OIDC group claims from the token and maps them to group names.
 
-Each guide includes a `podium login` run from a developer machine. Where the flow completes, the command prints the identity it decodes from the ID token: the `sub`, the `email`, and the groups the token carries. Only the Okta, Entra ID, and Keycloak guides end with a credential the registry then accepts. The registry compares a token's `iss` against the configured issuer after stripping trailing slashes from the configured value alone, so every Auth0 token fails that comparison. The credential `podium login` caches for Google is an opaque access token that the verifier cannot parse. Both guides route callers through a gateway instead.
+Each guide includes a `podium login` run from a developer machine. Where the flow completes, the command prints the identity it decodes from the ID token: the `sub`, the `email`, and the groups the token carries. Every guide except Google Workspace ends with a credential the registry accepts. The credential `podium login` caches for Google is an opaque access token that the verifier cannot parse, so that guide routes callers through a gateway instead. The registry trims a trailing slash from both the configured issuer and the token's `iss` before comparing them, so an issuer URL written either way is accepted.
 
 ## Human callers and managed runtimes
 

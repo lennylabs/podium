@@ -75,7 +75,7 @@ exports.onExecutePostLogin = async (event, api) => {
 };
 ```
 
-Auth0 restricts non-namespaced custom claims, so confirm against your tenant that the access token carries a top-level `groups` array before relying on group-scoped layers. Where it does not, use `users:` visibility, or resolve membership through SCIM instead of the token claim.
+Auth0 restricts non-namespaced custom claims, so the Action emits membership under a namespaced path rather than a top-level `groups` array. Point `identity_provider.groups_claim` at that path so the verifier reads it. A deployment that would rather not name the claim can use `users:` visibility, or resolve membership through SCIM instead of the token claim.
 
 ## 4. Configure Podium
 
@@ -93,11 +93,7 @@ Every server-side key nests under the top-level `registry:` mapping. A document 
 
 `oidc-jwt` is the registry's side of the flow: it verifies each presented token against the issuer's JWKS and validates the `aud` claim against `audience:`. Setting `oauth-device-code` as the registry's own provider stops startup with `config.identity_provider_unverified`.
 
-The registry strips trailing slashes from the configured `issuer:` and compares the token's `iss` claim against the stripped value without stripping the claim. Auth0 issues every token with an `iss` that ends in a slash, so `https://<your-tenant>.auth0.com/` and `https://<your-tenant>.auth0.com` reduce to the same stripped value and every Auth0 token is rejected with `auth.untrusted_token` and the message `iss "https://<your-tenant>.auth0.com/" does not match the configured issuer "https://<your-tenant>.auth0.com"`. No `issuer:` value changes that comparison, so `oidc-jwt` cannot verify an Auth0 token.
-
-Authenticate Auth0 callers through a gateway that completes the Auth0 login and injects `X-Podium-User-Sub`, `X-Podium-User-Email`, `X-Podium-User-Groups`, and `X-Podium-User-Org`, with the registry's identity provider set to `trusted-headers`; see [gateway-delegated identity](../gateway-delegated-identity). Under `trusted-headers` the gateway supplies the caller's groups, so the Action in step 3 and the developer-side device-code commands below do not apply.
-
-Under `trusted-headers` the registry takes the caller's groups from `X-Podium-User-Groups` and consults neither the token's `groups` claim nor `PODIUM_IDP_GROUP_MAPPING`, so the gateway supplies the group names the layer's `groups:` filter declares. `PODIUM_IDP_GROUP_MAPPING` applies only where the registry verifies the token itself, which an Auth0 token cannot pass. Restart the registry.
+Restart the registry. The Action emits group membership under the namespaced claim path `https://podium.acme.com/groups`. A registry that verifies the forwarded token itself runs the `oidc-jwt` provider: it reads that path when `identity_provider.groups_claim` (`PODIUM_OAUTH_GROUPS_CLAIM`) names it, and the `IdpGroupMapping` adapter then maps the values the claim carries to group names registry-side. The `oauth-device-code` configuration above installs no request-time verifier, so neither the claim name nor the adapter applies to it. See [gateway-delegated identity](../gateway-delegated-identity).
 
 Developer side:
 
@@ -144,11 +140,10 @@ registry:
         groups: [engineering]
 ```
 
-A user with `engineering` in `app_metadata.groups` sees the layer; a user without it does not.
+Group-scoped visibility resolves on a registry running `oidc-jwt` with `identity_provider.groups_claim` (`PODIUM_OAUTH_GROUPS_CLAIM`) set to the namespaced path the Action emits, and with `IdpGroupMapping` configured when those claim values have to be rewritten to registry-side group names. On such a registry a user with `engineering` in `app_metadata.groups` sees the layer, and a user without it does not. See [gateway-delegated identity](../gateway-delegated-identity) for that configuration.
 
 ## Troubleshooting
 
 - **Groups claim is missing from the token.** The Action was not attached to the post-login trigger, or the user has no `groups` in `app_metadata`. Check the Action's logs: **Actions → Library → \[Action\] → Logs**.
 - **Token rejected.** The token's `aud` must match the registry's `audience:`. Confirm the API identifier and `audience:` match exactly.
-- **Token rejected with `auth.untrusted_token` naming an `iss` mismatch.** The registry strips trailing slashes from the configured `issuer:` and compares the token's `iss` claim against the stripped value without stripping the claim. Auth0 issues tokens whose `iss` ends in a slash, so the comparison never matches and no `issuer:` value repairs it. Authenticate through a gateway under the `trusted-headers` provider instead, as step 4 describes; see [gateway-delegated identity](../gateway-delegated-identity).
-- **Groups arrive in the token but every group-scoped layer is invisible.** The claim is namespaced. The registry reads the top-level `groups` claim only and has no setting for a different claim path, so a namespaced claim resolves to no groups. Inspect a real access token and confirm the claim key is exactly `groups`.
+- **Custom claim namespace error.** Auth0 rejects non-namespaced custom claims. The claim must look like `https://your-namespace/groups`. A bare `groups` is rejected. On a registry running `oidc-jwt`, set `identity_provider.groups_claim` (`PODIUM_OAUTH_GROUPS_CLAIM`) to the namespaced path the Action emits.

@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -23,11 +24,10 @@ func signRuntimeJWT(t *testing.T, priv *rsa.PrivateKey, claims jwt.MapClaims) st
 	return s
 }
 
-// Spec: §6.3.1 / §6.3.2 — the boot-wired verifier maps verified claims to a
-// layer.Identity, applies the IdpGroupMapping to the token group claims, and
-// carries the OAuth scopes.
-func TestInjectedTokenVerifier_MapsClaims(t *testing.T) {
-	t.Parallel()
+// registeredRuntimeKey returns a signing key and a §6.3.2 runtime-key
+// registry that trusts its public half under the issuer "rt".
+func registeredRuntimeKey(t *testing.T) (*rsa.PrivateKey, *identity.RuntimeKeyRegistry) {
+	t.Helper()
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("GenerateKey: %v", err)
@@ -36,6 +36,15 @@ func TestInjectedTokenVerifier_MapsClaims(t *testing.T) {
 	if err := reg.Register(identity.RuntimeKey{Issuer: "rt", Algorithm: "RS256", Key: &priv.PublicKey}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
+	return priv, reg
+}
+
+// Spec: §6.3.1 / §6.3.2 — the boot-wired verifier maps verified claims to a
+// layer.Identity, applies the IdpGroupMapping to the token group claims, and
+// carries the OAuth scopes.
+func TestInjectedTokenVerifier_MapsClaims(t *testing.T) {
+	t.Parallel()
+	priv, reg := registeredRuntimeKey(t)
 	mapping := identity.NewIdpGroupMapping(map[string]string{"00gFinanceOID": "finance"})
 	verify := injectedTokenVerifier(reg, "https://podium.acme.com", mapping)
 
@@ -68,6 +77,103 @@ func TestInjectedTokenVerifier_MapsClaims(t *testing.T) {
 	}
 	if len(id.Scopes) != 1 || id.Scopes[0] != "podium:read:finance/*" {
 		t.Errorf("Scopes = %v", id.Scopes)
+	}
+}
+
+// Spec: §6.3.1 / §6.3.2 — the group claim is read in the multi-value form and
+// in the single-string form an IdP emits for a caller in exactly one group.
+// The boot-wired injected-session-token verifier forwards the derived groups
+// through the IdpGroupMapping into the caller layer.Identity, so both
+// encodings reach the same mapped group names.
+func TestInjectedTokenVerifier_GroupClaimEncodings(t *testing.T) {
+	t.Parallel()
+	priv, reg := registeredRuntimeKey(t)
+	mapping := identity.NewIdpGroupMapping(map[string]string{"00gFinanceOID": "finance"})
+
+	cases := []struct {
+		name    string
+		groups  any
+		mapping *identity.IdpGroupMapping
+		want    []string
+	}{
+		{"array form maps and passes through", []string{"00gFinanceOID", "already-named"}, mapping, []string{"already-named", "finance"}},
+		{"single string is mapped", "00gFinanceOID", mapping, []string{"finance"}},
+		{"single string with no table entry passes through", "already-named", mapping, []string{"already-named"}},
+		{"single string with no mapping configured", "already-named", nil, []string{"already-named"}},
+		// The trusted-headers group header is comma-separated (§6.3.3); the
+		// JWT group claim is not, so the whole value is one group name.
+		{"single string is not split on a separator", "finance, engineering", mapping, []string{"finance, engineering"}},
+		{"empty single string yields no group", "", mapping, nil},
+		{"absent claim yields no group", nil, mapping, nil},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			claims := jwt.MapClaims{
+				"iss": "rt", "aud": "https://podium.acme.com", "sub": "alice", "act": "rt",
+				"exp": time.Now().Add(5 * time.Minute).Unix(),
+			}
+			if tc.groups != nil {
+				claims["groups"] = tc.groups
+			}
+			req, _ := http.NewRequest(http.MethodGet, "http://x/v1/search_artifacts", nil)
+			req.Header.Set("Authorization", "Bearer "+signRuntimeJWT(t, priv, claims))
+
+			id, err := injectedTokenVerifier(reg, "https://podium.acme.com", tc.mapping)(req)
+			if err != nil {
+				t.Fatalf("verify: %v", err)
+			}
+			slices.Sort(id.Groups)
+			if !slices.Equal(id.Groups, tc.want) {
+				t.Errorf("Groups = %v, want %v", id.Groups, tc.want)
+			}
+			if id.Sub != "alice" || !id.IsAuthenticated {
+				t.Errorf("identity = %+v, want authenticated alice", id)
+			}
+		})
+	}
+}
+
+// Spec: §4.6 / §6.3.2 — full-stack: a runtime-signed token whose group claim
+// arrives as a plain string resolves layer visibility through the meta-tool
+// server. The caller in exactly one group reaches the engineering layer, and a
+// comma-joined value stays one group name that matches no layer.
+func TestGatewayIntegration_InjectedTokenSingleStringGroupClaim(t *testing.T) {
+	t.Parallel()
+	priv, reg := registeredRuntimeKey(t)
+	mapping := identity.NewIdpGroupMapping(map[string]string{"00g1engOID": "engineering"})
+	ts := gatewayServer(t, injectedTokenVerifier(reg, gwAudience, mapping))
+
+	token := func(sub string, groups any) string {
+		return signRuntimeJWT(t, priv, jwt.MapClaims{
+			"iss": "rt", "aud": gwAudience, "sub": sub, "act": "rt",
+			"groups": groups,
+			"exp":    time.Now().Add(5 * time.Minute).Unix(),
+		})
+	}
+
+	// The single-string claim yields one group, which the IdpGroupMapping
+	// rewrites to the layer's group name.
+	alice := token("alice@acme.com", "00g1engOID")
+	if st, body := loadArtifact(t, ts.URL, "eng/secret", bearer(alice)); st != 200 {
+		t.Errorf("single-string group caller load eng/secret = %d, want 200\nbody: %s", st, body)
+	}
+	// An unmapped single-string value passes through and matches the layer
+	// group directly.
+	carol := token("carol@acme.com", "engineering")
+	if st, body := loadArtifact(t, ts.URL, "eng/secret", bearer(carol)); st != 200 {
+		t.Errorf("unmapped single-string group caller load eng/secret = %d, want 200\nbody: %s", st, body)
+	}
+	// The string form is not split, so a comma-joined value is a single group
+	// name that matches no layer.
+	bob := token("bob@acme.com", "engineering,ops")
+	if st, _ := loadArtifact(t, ts.URL, "eng/secret", bearer(bob)); st != 404 {
+		t.Errorf("comma-joined group caller load eng/secret = %d, want 404 (value is one group name)", st)
+	}
+	// The public layer stays visible to every verified caller.
+	if st, _ := loadArtifact(t, ts.URL, "pub/welcome", bearer(bob)); st != 200 {
+		t.Errorf("verified caller load pub/welcome = %d, want 200", st)
 	}
 }
 
@@ -110,14 +216,7 @@ func TestInjectedTokenVerifier_RejectsMissingToken(t *testing.T) {
 // nil verifier resolves to the anonymous-public caller (fail-closed).
 func TestLayerIdentityResolver(t *testing.T) {
 	t.Parallel()
-	priv, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatalf("GenerateKey: %v", err)
-	}
-	reg := identity.NewRuntimeKeyRegistry()
-	if err := reg.Register(identity.RuntimeKey{Issuer: "rt", Algorithm: "RS256", Key: &priv.PublicKey}); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
+	priv, reg := registeredRuntimeKey(t)
 	verify := injectedTokenVerifier(reg, "https://podium.acme.com", nil)
 	resolve := layerIdentityResolver(verify)
 

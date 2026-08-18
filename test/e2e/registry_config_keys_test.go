@@ -7,6 +7,8 @@ package e2e
 //     provider (observable as the embedder dimension in the startup log).
 //   - previously env-only keys (here embedding_provider.url) are valid
 //     config-file keys.
+//   - the oidc-jwt claim names resolve from their env vars and from their
+//     registry.yaml keys.
 //
 // These drive the real `podium` binary: `config show --server` for resolved
 // values and a standalone `serve` for the startup dimension log.
@@ -119,5 +121,93 @@ func TestRegistryConfig_EmbeddingModelFromConfigFile(t *testing.T) {
 	}
 	if !strings.Contains(log, "dim=3072") {
 		t.Errorf("expected dim=3072 from the config-file model text-embedding-3-large:\n%s", log)
+	}
+}
+
+// T-registry-config-5: PODIUM_OAUTH_SUBJECT_CLAIM and PODIUM_OAUTH_GROUPS_CLAIM
+// name the claims the oidc-jwt verifier reads as the caller's subject and group
+// membership (§6.3.3). `config show --server` reports each under its
+// config-file key with the env var as the source.
+func TestRegistryConfig_OAuthClaimNamesFromEnv(t *testing.T) {
+	t.Parallel()
+	const groupsClaim = "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups"
+	env := []string{
+		"PODIUM_OAUTH_SUBJECT_CLAIM=idsub",
+		"PODIUM_OAUTH_GROUPS_CLAIM=" + groupsClaim,
+		"PODIUM_REGISTRY=",
+	}
+	for _, tc := range []struct{ name, wantValue, wantSource string }{
+		{"identity_provider.subject_claim", "idsub", "PODIUM_OAUTH_SUBJECT_CLAIM"},
+		{"identity_provider.groups_claim", groupsClaim, "PODIUM_OAUTH_GROUPS_CLAIM"},
+	} {
+		value, source, found := rcShowSetting(t, env, tc.name)
+		if !found {
+			t.Errorf("config show --server has no %s row", tc.name)
+			continue
+		}
+		if value != tc.wantValue || source != tc.wantSource {
+			t.Errorf("%s = (%q, %q), want (%q, %q)", tc.name, value, source, tc.wantValue, tc.wantSource)
+		}
+	}
+}
+
+// T-registry-config-6: with both env vars unset, the rows report an empty
+// value, which is the §13.12 default that leaves the verifier on sub and
+// groups.
+func TestRegistryConfig_OAuthClaimNamesUnsetByDefault(t *testing.T) {
+	t.Parallel()
+	env := []string{
+		"PODIUM_OAUTH_SUBJECT_CLAIM=",
+		"PODIUM_OAUTH_GROUPS_CLAIM=",
+		"PODIUM_REGISTRY=",
+	}
+	for _, name := range []string{"identity_provider.subject_claim", "identity_provider.groups_claim"} {
+		value, _, found := rcShowSetting(t, env, name)
+		if !found {
+			t.Errorf("config show --server has no %s row", name)
+			continue
+		}
+		if value != "" {
+			t.Errorf("%s value = %q, want empty", name, value)
+		}
+	}
+}
+
+// T-registry-config-7: registry.identity_provider.subject_claim and
+// registry.identity_provider.groups_claim are config-file keys, so an operator
+// who configures the registry from registry.yaml never has to set the env vars.
+// With both env vars unset, each row reports the configured value with
+// registry.yaml as its source (§13.12).
+func TestRegistryConfig_OAuthClaimNamesFromConfigFile(t *testing.T) {
+	t.Parallel()
+	const (
+		subjectClaim = "upn"
+		groupsClaim  = "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups"
+	)
+	cfgFile := filepath.Join(t.TempDir(), "registry.yaml")
+	body := "registry:\n  identity_provider:\n    type: oidc-jwt\n" +
+		"    subject_claim: " + subjectClaim + "\n" +
+		"    groups_claim: " + groupsClaim + "\n"
+	if err := os.WriteFile(cfgFile, []byte(body), 0o644); err != nil {
+		t.Fatalf("write registry.yaml: %v", err)
+	}
+	env := []string{
+		"PODIUM_CONFIG_FILE=" + cfgFile,
+		"PODIUM_OAUTH_SUBJECT_CLAIM=",
+		"PODIUM_OAUTH_GROUPS_CLAIM=",
+		"PODIUM_REGISTRY=",
+	}
+	for _, tc := range []struct{ name, wantValue string }{
+		{"identity_provider.subject_claim", subjectClaim},
+		{"identity_provider.groups_claim", groupsClaim},
+	} {
+		value, source, found := rcShowSetting(t, env, tc.name)
+		if !found {
+			t.Errorf("config show --server has no %s row", tc.name)
+			continue
+		}
+		if value != tc.wantValue || source != "registry.yaml" {
+			t.Errorf("%s = (%q, %q), want (%q, %q)", tc.name, value, source, tc.wantValue, "registry.yaml")
+		}
 	}
 }
