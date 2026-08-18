@@ -182,6 +182,10 @@ async function loadDocument(url: URL): Promise<Document | null> {
     const response = await fetch(url.href, {
       credentials: "same-origin",
       headers: { accept: "text/html" },
+      // Pages are served with a short max-age, so the default mode can satisfy
+      // a navigation from cache and show a version the reader has already been
+      // told is out of date. Revalidating costs a 304 when nothing changed.
+      cache: "no-cache",
     });
     if (!response.ok) return null;
     const parsed = new DOMParser().parseFromString(await response.text(), "text/html");

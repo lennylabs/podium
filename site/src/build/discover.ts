@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, posix, relative, sep } from "node:path";
 
 import {
@@ -90,7 +90,7 @@ export function discover(config: SiteConfig): Discovery {
       source,
       file,
       route: routeForPage(source, frontmatter.permalink),
-      body: split.body,
+      body: appendInclude(split.body, frontmatter.include, config, file, diagnostics),
       bodyStartLine: split.bodyStartLine,
       frontmatter,
     });
@@ -151,4 +151,54 @@ export function lastModified(config: SiteConfig): Map<string, string> {
     if (!dates.has(line)) dates.set(line, current);
   }
   return dates;
+}
+
+/**
+ * Appends a repo-root file's markdown to a page body.
+ *
+ * A file such as CHANGELOG.md is maintained at the repository root, where the
+ * release process edits it and where a reader on github.com finds it. Reading
+ * it here publishes the same content as a page without a second copy to keep in
+ * step, and the appended markdown goes through the rest of the pipeline like
+ * any other body, so its headings, links, and fenced blocks are checked.
+ *
+ * Diagnostics are reported against the page that declared the include, since
+ * that is the file an author would edit.
+ */
+function appendInclude(
+  body: string,
+  include: string | null,
+  config: SiteConfig,
+  file: string,
+  diagnostics: BuildDiagnostic[],
+): string {
+  if (include === null) return body;
+
+  const source = join(config.repoRoot, include);
+  if (!existsSync(source)) {
+    diagnostics.push({
+      file,
+      line: null,
+      column: null,
+      message: `"include" names ${include}, which does not exist`,
+    });
+    return body;
+  }
+
+  return `${body.trimEnd()}\n\n${stripLeadingTitle(readFileSync(source, "utf8"))}`;
+}
+
+/**
+ * Drops an included file's opening h1.
+ *
+ * A standalone file such as CHANGELOG.md opens with its own title, which the
+ * including page already supplies from its frontmatter. Keeping both puts a
+ * second h1 partway down the page, which breaks the heading outline the build
+ * checks.
+ */
+function stripLeadingTitle(contents: string): string {
+  const trimmed = contents.trimStart();
+  if (!trimmed.startsWith("# ")) return trimmed;
+  const newline = trimmed.indexOf("\n");
+  return newline === -1 ? "" : trimmed.slice(newline + 1).trimStart();
 }

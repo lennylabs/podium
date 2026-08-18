@@ -8,7 +8,14 @@ import { validateRegistry } from "../components/islands/props";
 import { Doc } from "../pages/Doc";
 import { Landing } from "../pages/Landing";
 import { NotFound } from "../pages/NotFound";
-import { copyStatics, emitFonts, emitStylesheet, writeFile } from "./assets";
+import {
+  copyStatics,
+  emitFonts,
+  emitSearchIndex,
+  emitStylesheet,
+  iconVersion,
+  writeFile,
+} from "./assets";
 import { runChecks } from "./check";
 import { SITE_DIR, loadConfig } from "./config";
 import { buildCorpus } from "./content/pipeline";
@@ -112,6 +119,14 @@ async function runBuild(config: SiteConfig): Promise<void> {
 
   const fontCss = emitFonts(config);
   const stylesheet = emitStylesheet(config, fontCss);
+  // Both are hashed over their own bytes, so a page can be cached until one of
+  // them actually changes.
+  const searchIndex = emitSearchIndex(config, assembled.search.serialized);
+  const icons = iconVersion(config, [
+    "docs/assets/logo/podium-mark-light.svg",
+    "docs/assets/logo/podium-mark-dark.svg",
+    "docs/assets/logo/podium-tile.svg",
+  ]);
   const scriptSrc = await buildClientBundle(config);
 
   for (const page of assembled.pages) {
@@ -127,6 +142,8 @@ async function runBuild(config: SiteConfig): Promise<void> {
       bodyClass: "docs",
       scriptSrc,
       stylesheets: [stylesheet],
+      searchIndex,
+      iconVersion: icons,
       hydratable: page.islands.some((island) => island.mount === "hydrate"),
       children: createElement(Doc, {
         config,
@@ -152,6 +169,8 @@ async function runBuild(config: SiteConfig): Promise<void> {
       bodyClass: "landing",
       scriptSrc,
       stylesheets: [stylesheet],
+      searchIndex,
+      iconVersion: icons,
       hydratable: false,
       children: createElement(Landing, { config }),
     }),
@@ -167,12 +186,13 @@ async function runBuild(config: SiteConfig): Promise<void> {
       bodyClass: "docs",
       scriptSrc,
       stylesheets: [stylesheet],
+      searchIndex,
+      iconVersion: icons,
       hydratable: false,
       children: createElement(NotFound, { config, nav: assembled.nav }),
     }),
   );
 
-  writeFile(join(config.outDir, "search-index.json"), assembled.search.serialized);
   copyStatics(config, assembled.statics);
   writeFile(join(config.outDir, ".nojekyll"), "");
 

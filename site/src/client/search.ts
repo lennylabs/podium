@@ -20,9 +20,13 @@ async function load(basePath: string): Promise<void> {
   if (index !== null) return;
   // The engine is fetched alongside the index rather than in the page bundle,
   // so a reader who never searches never downloads it.
+  // The build writes the index under a hashed name and names it on the body,
+  // so the file is immutable and the fetch never returns a stale corpus.
+  const url =
+    document.body.dataset["searchIndex"] ?? `${basePath}/assets/search-index.json`;
   const [{ default: MiniSearch }, serialized] = await Promise.all([
     import("minisearch"),
-    fetch(`${basePath}/search-index.json`).then((response) => response.text()),
+    fetch(url).then((response) => response.text()),
   ]);
   index = MiniSearch.loadJSON<Stored>(serialized, {
     fields: ["page", "heading", "text"],

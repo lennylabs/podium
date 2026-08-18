@@ -3,7 +3,15 @@ import { join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { copyStatics, emitFonts, emitStylesheet, ensureDir, writeFile } from "../src/build/assets";
+import {
+  copyStatics,
+  emitFonts,
+  emitSearchIndex,
+  emitStylesheet,
+  ensureDir,
+  iconVersion,
+  writeFile,
+} from "../src/build/assets";
 import { SITE_DIR } from "../src/build/config";
 import { configFor } from "./support/corpus";
 
@@ -145,5 +153,51 @@ describe("copyStatics", () => {
     copyStatics(config, []);
 
     expect(existsSync(join(root, "out"))).toBe(false);
+  });
+});
+
+describe("emitSearchIndex", () => {
+  it("names the file after its contents so a stale index is never served", () => {
+    const root = scratch();
+    const config = configFor(root, join(root, "docs"));
+
+    const first = emitSearchIndex(config, '{"a":1}');
+    const again = emitSearchIndex(config, '{"a":1}');
+    const changed = emitSearchIndex(config, '{"a":2}');
+
+    expect(first).toBe(again);
+    expect(changed).not.toBe(first);
+    expect(first).toMatch(/^\/assets\/search-index-[0-9a-f]{8}\.json$/);
+  });
+
+  it("writes the serialized index at the URL it returns", () => {
+    const root = scratch();
+    const config = configFor(root, join(root, "docs"));
+
+    const url = emitSearchIndex(config, '{"documentCount":3}');
+
+    expect(readFileSync(join(config.outDir, url), "utf8")).toBe('{"documentCount":3}');
+  });
+});
+
+describe("iconVersion", () => {
+  it("changes only when an icon's bytes change", () => {
+    const root = scratch();
+    const config = configFor(root, join(root, "docs"));
+    const icon = "docs/assets/logo/mark.svg";
+    writeFile(join(root, icon), "<svg>one</svg>");
+
+    const before = iconVersion(config, [icon]);
+    expect(iconVersion(config, [icon])).toBe(before);
+
+    writeFile(join(root, icon), "<svg>two</svg>");
+    expect(iconVersion(config, [icon])).not.toBe(before);
+  });
+
+  it("ignores an icon that is not on disk rather than failing the build", () => {
+    const root = scratch();
+    const config = configFor(root, join(root, "docs"));
+
+    expect(iconVersion(config, ["docs/assets/logo/absent.svg"])).toMatch(/^[0-9a-f]{8}$/);
   });
 });

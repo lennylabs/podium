@@ -1,3 +1,6 @@
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { discover, lastModified, routeForPage } from "../src/build/discover";
@@ -95,5 +98,71 @@ describe("lastModified", () => {
     const config = configFor("/nonexistent-repository-root", "/nonexistent-repository-root/docs");
 
     expect(lastModified(config)).toEqual(new Map());
+  });
+});
+
+describe("the include frontmatter key", () => {
+  const page = [
+    "---",
+    "title: Changelog",
+    "description: Release history.",
+    "include: CHANGELOG.md",
+    "---",
+    "",
+    "# Changelog",
+    "",
+    "Lead paragraph.",
+    "",
+  ].join("\n");
+
+  it("appends the named repo-root file to the page body", () => {
+    const corpus = makeCorpus({ "about/changelog.md": page });
+    writeFileSync(
+      join(corpus.repoRoot, "CHANGELOG.md"),
+      "# Changelog\n\nPreamble.\n\n## [0.1.0] - 2026-05-11\n\nFirst release.\n",
+    );
+
+    const { pages, diagnostics } = discover(corpus.config);
+    const body = pages.find((entry) => entry.source === "about/changelog.md")?.body ?? "";
+
+    expect(diagnostics).toEqual([]);
+    expect(body).toContain("Lead paragraph.");
+    expect(body).toContain("## [0.1.0] - 2026-05-11");
+    expect(body).toContain("First release.");
+    corpus.dispose();
+  });
+
+  it("drops the included file's own title so the page keeps one h1", () => {
+    const corpus = makeCorpus({ "about/changelog.md": page });
+    writeFileSync(join(corpus.repoRoot, "CHANGELOG.md"), "# Changelog\n\nPreamble.\n");
+
+    const { pages } = discover(corpus.config);
+    const body = pages.find((entry) => entry.source === "about/changelog.md")?.body ?? "";
+
+    expect(body.match(/^# /gm)).toHaveLength(1);
+    expect(body).toContain("Preamble.");
+    corpus.dispose();
+  });
+
+  it("reports a missing include against the page that declared it", () => {
+    const corpus = makeCorpus({ "about/changelog.md": page });
+
+    const { diagnostics } = discover(corpus.config);
+
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]?.message).toContain("CHANGELOG.md");
+    expect(diagnostics[0]?.file).toContain("changelog.md");
+    corpus.dispose();
+  });
+
+  it("refuses a path that escapes the repository root", () => {
+    const corpus = makeCorpus({
+      "about/changelog.md": page.replace("include: CHANGELOG.md", "include: ../../etc/passwd"),
+    });
+
+    const { diagnostics } = discover(corpus.config);
+
+    expect(diagnostics.some((entry) => entry.message.includes('"include"'))).toBe(true);
+    corpus.dispose();
   });
 });

@@ -52,6 +52,24 @@
   overflow-y: auto;
 }
 
+/*
+ * Before a query is typed the list holds nothing, so the panel is the field and
+ * a strip of padding below it. The divider then separates the field from empty
+ * space, and the field's square bottom corners sit inside the panel's rounded
+ * ones. Both go until the list has a row in it, which makes the panel read as
+ * one rounded field. A query that matches nothing still renders a row, so the
+ * divider stays for that state.
+ */
+.search-panel:has(.search-results:empty) .search-field {
+  border-bottom-color: transparent;
+  border-bottom-left-radius: var(--r-card);
+  border-bottom-right-radius: var(--r-card);
+}
+
+.search-panel:has(.search-results:empty) .search-results {
+  padding: 0;
+}
+
 .search-result a {
   display: flex;
   flex-direction: column;

@@ -67,6 +67,14 @@ being ignored.
 | `permalink` | no | Explicit route when a page's route must differ from its source path |
 | `actions` | no | Call-to-action links, the first rendered as primary |
 | `hidden` | no | Excludes the page from navigation and search while still publishing it |
+| `include` | no | Repo-root-relative file whose markdown is appended to the page body |
+
+`include` publishes a file that is maintained outside `docs/`. The changelog
+page names `CHANGELOG.md`, which the release process edits at the repository
+root, so the page follows it with no second copy to keep in step. The appended
+markdown runs through the rest of the pipeline like any other body, so its
+headings, links, and fenced blocks are checked. An included file's opening h1 is
+dropped, because the including page already carries a title.
 
 Navigation comes from the directory tree. A directory is a section, its
 `index.md` is that section's page, and `nav_order` orders siblings. No page
@@ -239,6 +247,20 @@ The router dispatches `podium:navigate` on `document` when it takes a click and
 for the first one and closes; anything else that holds page-level state can use
 the same pair.
 
+## Caching
+
+Every file the browser fetches by a fixed name is a file the browser can serve
+after it changes. The stylesheet, the client bundle, and the search index are
+written under a name containing a hash of their contents, so each is immutable
+and a page can reference the new one the moment it is built. The browser icons
+keep fixed paths because a favicon is referenced by convention, so their links
+carry a version query taken from the icon bytes.
+
+Pages themselves are served with a short max-age. The router fetches them with
+`cache: "no-cache"`, which revalidates against the server and costs a 304 when
+nothing changed, so a client navigation never renders a page the reader has
+already been told is stale.
+
 ## Checks
 
 `npm run check` fails on an unknown frontmatter key, a missing required key, an
@@ -264,5 +286,8 @@ color. The accent is a surface color carrying dark text, or text on the dark
 ground; it never sets small text on a light background, which is why the light
 theme carries a separate link tone.
 
-The diagrams under `docs/assets/diagrams/` keep their own palette and render on
-a white card in both themes.
+The diagrams under `docs/assets/diagrams/` are written into the page rather than
+loaded through an img tag, so they read the same tokens the page does and the
+theme toggle drives them. Each one binds the tokens it uses to local `--dg-*`
+properties with a fallback beside every reference, which is what a reader on
+github.com sees. `.claude/rules/doc-diagram-style.md` holds the conventions.

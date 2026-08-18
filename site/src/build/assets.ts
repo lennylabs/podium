@@ -91,6 +91,36 @@ export function emitStylesheet(config: SiteConfig, fontCss: string): string {
   return `${config.basePath}/assets/${name}`;
 }
 
+/**
+ * Writes the prebuilt search index under a hashed name.
+ *
+ * The name changes with the contents, so the file can be cached indefinitely
+ * and a reader never searches a stale corpus. A fixed name is served from the
+ * browser's cache until it expires, which shows results for pages that have
+ * since been renamed or removed.
+ */
+export function emitSearchIndex(config: SiteConfig, serialized: string): string {
+  const name = `search-index-${hash(serialized)}.json`;
+  writeFile(join(config.outDir, "assets", name), serialized);
+  return `${config.basePath}/assets/${name}`;
+}
+
+/**
+ * A stamp over the browser icons, for the query the icon links carry.
+ *
+ * Icons are referenced by a fixed path and a browser caches a favicon
+ * aggressively, so replacing one leaves the old icon on screen until the cache
+ * expires. The query changes only when an icon's bytes change.
+ */
+export function iconVersion(config: SiteConfig, paths: string[]): string {
+  const digest = createHash("sha256");
+  for (const path of paths) {
+    const source = resolve(config.repoRoot, path);
+    if (existsSync(source)) digest.update(readFileSync(source));
+  }
+  return digest.digest("hex").slice(0, 8);
+}
+
 /** Publishes files that carry no frontmatter, at the path they already live at. */
 export function copyStatics(config: SiteConfig, statics: StaticFile[]): void {
   for (const file of statics) {

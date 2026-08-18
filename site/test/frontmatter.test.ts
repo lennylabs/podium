@@ -76,6 +76,7 @@ describe("parseFrontmatter", () => {
       navOrder: 2,
       navTitle: "Quick start",
       permalink: "/getting-started/quickstart.html",
+      include: null,
       hidden: false,
       actions: [{ label: "Concepts", href: "getting-started/concepts" }],
     });
@@ -90,6 +91,7 @@ describe("parseFrontmatter", () => {
       navOrder: null,
       navTitle: null,
       permalink: null,
+      include: null,
       hidden: false,
       actions: [],
     });
@@ -202,7 +204,7 @@ describe("parseFrontmatter", () => {
     const [message] = messages("title: A\ndescription: B\nlayout: default\n");
 
     expect(message).toContain(
-      "actions, description, hidden, nav_order, nav_title, permalink, title",
+      "actions, description, hidden, include, nav_order, nav_title, permalink, title",
     );
   });
 
@@ -214,5 +216,21 @@ describe("parseFrontmatter", () => {
     expect(diagnostics.map((diagnostic) => diagnostic.message)).toEqual([
       'actions[1].href is required and must be a non-empty string',
     ]);
+  });
+
+  it("reads an include naming a repo-root file", () => {
+    const { result, diagnostics } = parse("title: A\ndescription: B\ninclude: CHANGELOG.md\n");
+
+    expect(diagnostics).toEqual([]);
+    expect(result?.include).toBe("CHANGELOG.md");
+  });
+
+  it("rejects an include that is absolute or climbs out of the repository", () => {
+    for (const value of ["/etc/passwd", "../../etc/passwd"]) {
+      const { diagnostics } = parse(`title: A\ndescription: B\ninclude: ${value}\n`);
+
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0]?.message).toContain('"include" must be a repo-root-relative path');
+    }
   });
 });

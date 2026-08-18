@@ -323,6 +323,8 @@ describe("renderDocument", () => {
     scriptSrc: "/base/assets/site/entry-abc.js",
     stylesheets: ["/base/assets/site-abc.css"],
     hydratable: false,
+    searchIndex: "/base/assets/search-index-abc.json",
+    iconVersion: "abc12345",
     children: createElement("main", null, "Body"),
   };
 
@@ -331,7 +333,9 @@ describe("renderDocument", () => {
 
     expect(html.startsWith("<!doctype html>\n<html lang=\"en\">")).toBe(true);
     expect(html).toContain("<title>Install · Podium</title>");
-    expect(html).toContain('<body class="docs" data-base-path="/base">');
+    expect(html).toContain(
+      '<body class="docs" data-base-path="/base" data-search-index="/base/assets/search-index-abc.json">',
+    );
     expect(html).toContain("<main>Body</main>");
     expect(html.trimEnd().endsWith("</html>")).toBe(true);
   });

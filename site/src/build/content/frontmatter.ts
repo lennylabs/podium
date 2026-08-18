@@ -11,6 +11,7 @@ const ALLOWED_KEYS = new Set([
   "permalink",
   "actions",
   "hidden",
+  "include",
 ]);
 
 export type RawAction = { label: string; href: string };
@@ -23,6 +24,8 @@ export type Frontmatter = {
   permalink: string | null;
   actions: RawAction[];
   hidden: boolean;
+  /** Repo-root-relative file whose markdown is appended to the page body. */
+  include: string | null;
 };
 
 export type SplitSource = {
@@ -155,6 +158,21 @@ export function parseFrontmatter(
     }
   }
 
+  const includeRaw = parsed["include"];
+  let include: string | null = null;
+  if (includeRaw !== undefined) {
+    if (typeof includeRaw !== "string" || includeRaw.startsWith("/") || includeRaw.includes("..")) {
+      diagnostics.push({
+        file,
+        line: null,
+        column: null,
+        message: '"include" must be a repo-root-relative path, such as "CHANGELOG.md"',
+      });
+    } else {
+      include = includeRaw;
+    }
+  }
+
   const permalinkRaw = parsed["permalink"];
   let permalink: string | null = null;
   if (permalinkRaw !== undefined) {
@@ -195,6 +213,7 @@ export function parseFrontmatter(
     navOrder,
     navTitle,
     permalink,
+    include,
     actions,
     hidden,
   };

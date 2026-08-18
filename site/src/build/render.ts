@@ -206,12 +206,13 @@ export const ICONS = {
  * background, which makes it the one icon that reads correctly anywhere, and a
  * browser that ignores the conditions lands on it.
  */
-function iconLinks(basePath: string): string[] {
+function iconLinks(basePath: string, version: string): string[] {
+  const at = (icon: string): string => escapeHtml(`${basePath}${icon}?v=${version}`);
   return [
-    `<link rel="icon" type="image/svg+xml" media="(prefers-color-scheme: light)" href="${escapeHtml(basePath + ICONS.light)}">`,
-    `<link rel="icon" type="image/svg+xml" media="(prefers-color-scheme: dark)" href="${escapeHtml(basePath + ICONS.dark)}">`,
-    `<link rel="icon" type="image/svg+xml" href="${escapeHtml(basePath + ICONS.tile)}">`,
-    `<link rel="apple-touch-icon" href="${escapeHtml(basePath + ICONS.tile)}">`,
+    `<link rel="icon" type="image/svg+xml" media="(prefers-color-scheme: light)" href="${at(ICONS.light)}">`,
+    `<link rel="icon" type="image/svg+xml" media="(prefers-color-scheme: dark)" href="${at(ICONS.dark)}">`,
+    `<link rel="icon" type="image/svg+xml" href="${at(ICONS.tile)}">`,
+    `<link rel="apple-touch-icon" href="${at(ICONS.tile)}">`,
   ];
 }
 
@@ -226,6 +227,10 @@ export type DocumentOptions = {
   stylesheets: string[];
   /** True when the page carries islands and its markup must be hydratable. */
   hydratable: boolean;
+  /** Hashed URL of the search index, read by the client before it fetches. */
+  searchIndex: string;
+  /** Stamp on the icon links, so a replaced icon is not served from cache. */
+  iconVersion: string;
   children: ReactNode;
 };
 
@@ -254,7 +259,7 @@ export function renderDocument(options: DocumentOptions): string {
     `<meta property="og:url" content="${escapeHtml(canonical)}">`,
     '<meta property="og:type" content="website">',
     `<meta property="og:image" content="${escapeHtml(`${config.siteUrl}${config.basePath}${ICONS.tile}`)}">`,
-    ...iconLinks(config.basePath),
+    ...iconLinks(config.basePath, options.iconVersion),
     ...options.stylesheets.map(
       (href) => `<link rel="stylesheet" href="${escapeHtml(href)}">`,
     ),
@@ -273,7 +278,7 @@ export function renderDocument(options: DocumentOptions): string {
   <head>
     ${head}
   </head>
-  <body class="${escapeHtml(options.bodyClass)}" data-base-path="${escapeHtml(config.basePath)}">
+  <body class="${escapeHtml(options.bodyClass)}" data-base-path="${escapeHtml(config.basePath)}" data-search-index="${escapeHtml(options.searchIndex)}">
     ${markup}${script}
   </body>
 </html>
