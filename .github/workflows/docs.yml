@@ -27,7 +27,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Each page shows when its source last changed, which is read from the
           # commit history. A shallow clone carries none, so the dates would all
