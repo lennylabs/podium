@@ -1,8 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 480" class="dg">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 630" class="dg">
   <!--
-    podium sync watch mode (the long-running form invoked with the watch flag).
-    The client subscribes to registry change events and re-materializes affected
-    artifacts incrementally.
+    podium sync watch mode against a server-source registry (the long-running
+    form invoked with the watch flag). The watcher subscribes to the registry
+    change-event stream, debounces the triggers it receives, and reruns the
+    whole sync on each debounced trigger. Nothing is materialized per event.
+
+    Layout: 40px outer margin. Left column (x=40..460) carries the trigger
+    source, the debounce, and the loop back. Right panel (x=520..1040) carries
+    the five steps of one run. The target tree spans the bottom.
   -->
   <defs>
     <marker id="dg-arrow-sync-watch" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
@@ -97,69 +102,77 @@
     </style>
   </defs>
 
-  <rect class="dg-bg" width="1080" height="480"/>
+  <rect class="dg-bg" width="1080" height="630"/>
 
-  <text class="dg-title" x="40" y="42">podium sync watch mode (server-source registry)</text>
-  <text class="dg-sub" x="40" y="64">The watcher subscribes to registry events and re-materializes the changed artifacts incrementally.</text>
+  <text class="dg-title" x="40" y="44">podium sync watch mode (server-source registry)</text>
+  <text class="dg-sub" x="40" y="68">A trigger reruns the whole sync. The run rewrites every selected artifact and deletes the paths that left the view.</text>
 
-  <!-- Registry on left -->
-  <rect class="dg-card-primary" x="40" y="120" width="220" height="100" rx="8"/>
-  <text class="dg-label" x="60" y="146">podium server</text>
-  <text class="dg-name" x="60" y="170">change events</text>
-  <text class="dg-sub" x="60" y="192">SSE stream over HTTP,</text>
-  <text class="dg-sub" x="60" y="210">filtered to caller's view</text>
+  <!-- Trigger source: the registry change-event stream -->
+  <rect class="dg-panel" x="40" y="96" width="420" height="198" rx="10"/>
+  <text class="dg-label" x="62" y="124">podium server</text>
 
-  <!-- Arrow registry -> watcher step 1, with the event payload labelled below the arrow. -->
-  <path class="dg-line-accent" d="M 260 170 L 516 170" marker-end="url(#dg-arrow-accent-sync-watch)"/>
+  <rect class="dg-card-primary" x="60" y="136" width="380" height="72" rx="8"/>
+  <text class="dg-mono" x="78" y="166">GET /v1/events</text>
+  <text class="dg-sub" x="78" y="192">newline-delimited JSON, one line per event</text>
 
-  <!-- Event payload label (positioned beneath the arrow) -->
-  <rect class="dg-card-event" x="306" y="184" width="168" height="44" rx="6"/>
-  <text class="dg-mono" x="320" y="204">{artifact_id,</text>
-  <text class="dg-mono" x="320" y="220">version, change}</text>
+  <rect class="dg-card-quiet" x="60" y="218" width="380" height="60" rx="6"/>
+  <text class="dg-sub dg-t-s" x="78" y="242">the watcher reconnects 500 ms</text>
+  <text class="dg-sub dg-t-s" x="78" y="262">after a dropped stream</text>
 
-  <!-- Watcher loop on right -->
-  <rect class="dg-panel" x="500" y="100" width="540" height="240" rx="10"/>
-  <text class="dg-label" x="520" y="124">podium sync (watching)</text>
+  <!-- Trigger into the debounce -->
+  <path class="dg-line-accent" d="M 150 294 L 150 324" marker-end="url(#dg-arrow-accent-sync-watch)"/>
+  <text class="dg-note" x="170" y="314">only the event type is read</text>
 
-  <!-- Stage 1: receive -->
-  <rect class="dg-card" x="520" y="140" width="160" height="64" rx="6"/>
-  <text class="dg-name dg-t-m" x="536" y="164">1. Receive event</text>
-  <text class="dg-sub" x="536" y="186">debounce same id</text>
+  <!-- Debounce -->
+  <rect class="dg-card" x="40" y="328" width="420" height="96" rx="8"/>
+  <text class="dg-name" x="62" y="358">Debounce</text>
+  <text class="dg-sub" x="62" y="382">one timer for the whole stream</text>
+  <text class="dg-sub" x="62" y="404">a burst of events becomes one run</text>
 
-  <path class="dg-line" d="M 680 172 L 712 172" marker-end="url(#dg-arrow-sync-watch)"/>
+  <!-- Debounced trigger enters the run at step 1. -->
+  <path class="dg-line" d="M 460 376 L 490 376 L 490 164 L 512 164" marker-end="url(#dg-arrow-sync-watch)"/>
 
-  <!-- Stage 2: fetch -->
-  <rect class="dg-card" x="716" y="140" width="160" height="64" rx="6"/>
-  <text class="dg-name dg-t-m" x="732" y="164">2. Fetch manifest</text>
-  <text class="dg-sub" x="732" y="186">load_artifact</text>
+  <!-- One full sync run -->
+  <rect class="dg-panel" x="520" y="96" width="520" height="344" rx="10"/>
+  <text class="dg-label" x="542" y="124">one full sync run</text>
 
-  <path class="dg-line" d="M 876 172 L 908 172" marker-end="url(#dg-arrow-sync-watch)"/>
+  <rect class="dg-card" x="540" y="140" width="480" height="48" rx="6"/>
+  <text class="dg-label" x="558" y="170">1</text>
+  <text class="dg-name dg-t-m" x="578" y="170">Resolve</text>
+  <text class="dg-sub" x="676" y="170">the caller's effective view over HTTP</text>
 
-  <!-- Stage 3: adapt -->
-  <rect class="dg-card" x="912" y="140" width="116" height="64" rx="6"/>
-  <text class="dg-name dg-t-m" x="928" y="164">3. Adapt</text>
-  <text class="dg-sub" x="928" y="186">harness</text>
+  <rect class="dg-card" x="540" y="198" width="480" height="48" rx="6"/>
+  <text class="dg-label" x="558" y="228">2</text>
+  <text class="dg-name dg-t-m" x="578" y="228">Adapt</text>
+  <text class="dg-sub" x="676" y="228">each selected artifact, harness writer</text>
 
-  <!-- Down arrow to stage 4 -->
-  <path class="dg-line" d="M 970 204 L 970 240 L 802 240 L 802 252" marker-end="url(#dg-arrow-sync-watch)"/>
+  <rect class="dg-card" x="540" y="256" width="480" height="48" rx="6"/>
+  <text class="dg-label" x="558" y="286">3</text>
+  <text class="dg-name dg-t-m" x="578" y="286">Write</text>
+  <text class="dg-sub" x="676" y="286">every file staged .tmp, then renamed</text>
 
-  <!-- Stage 4: write -->
-  <rect class="dg-card" x="716" y="256" width="160" height="64" rx="6"/>
-  <text class="dg-name dg-t-m" x="732" y="280">4. Atomic write</text>
-  <text class="dg-sub" x="732" y="302">.tmp + rename</text>
+  <rect class="dg-card" x="540" y="314" width="480" height="48" rx="6"/>
+  <text class="dg-label" x="558" y="344">4</text>
+  <text class="dg-name dg-t-m" x="578" y="344">Delete</text>
+  <text class="dg-sub" x="676" y="344">every prior path this run did not write</text>
 
-  <!-- Loop arrow back to stage 1 -->
-  <path class="dg-line" d="M 716 288 L 600 288 L 600 204" marker-end="url(#dg-arrow-sync-watch)"/>
-  <text class="dg-note" x="540" y="280">await next event</text>
+  <rect class="dg-card" x="540" y="372" width="480" height="48" rx="6"/>
+  <text class="dg-label" x="558" y="402">5</text>
+  <text class="dg-name dg-t-m" x="578" y="402">Lock</text>
+  <text class="dg-sub" x="676" y="402">one .podium/sync.lock entry per path</text>
 
-  <!-- Output: target tree -->
-  <rect class="dg-card-strong" x="500" y="370" width="540" height="60" rx="8"/>
-  <text class="dg-label" x="520" y="394">target tree</text>
-  <text class="dg-mono" x="520" y="418">.claude/agents/, .cursor/rules/, …</text>
+  <path class="dg-line" d="M 780 440 L 780 466" marker-end="url(#dg-arrow-sync-watch)"/>
 
-  <!-- Arrow from write to target -->
-  <path class="dg-line" d="M 796 320 L 796 366" marker-end="url(#dg-arrow-sync-watch)"/>
+  <!-- Target tree -->
+  <rect class="dg-card-strong" x="40" y="470" width="1000" height="72" rx="8"/>
+  <text class="dg-label" x="62" y="500">target tree</text>
+  <text class="dg-mono" x="62" y="526">.claude/agents/, .cursor/rules/, etc.</text>
 
-  <text class="dg-foot" x="40" y="450">Event types: artifact_added, artifact_updated, artifact_removed, layer_changed. Removals delete from the target.</text>
-  <text class="dg-foot" x="40" y="468">A change to a parent (via extends:) re-emits events for every dependent child the caller can see.</text>
+  <!-- Loop back to the next trigger -->
+  <path class="dg-line" d="M 250 466 L 250 428" marker-end="url(#dg-arrow-sync-watch)"/>
+  <text class="dg-note" x="266" y="452">await the next trigger</text>
+
+  <text class="dg-foot" x="40" y="572">The subscription requests the artifact.published, artifact.deprecated, and layer.config_changed event types.</text>
+  <text class="dg-foot" x="40" y="590">Every run applies the active profile's scope and re-reads the lock file's toggles.</text>
+  <text class="dg-foot" x="40" y="608">A deprecated artifact keeps materializing. A file leaves the target when its artifact leaves the effective view.</text>
 </svg>

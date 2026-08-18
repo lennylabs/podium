@@ -33,89 +33,84 @@ The Podium MCP server is a stdio binary the harness spawns alongside its other M
 
 For `podium sync`, the same configuration lives in `<workspace>/.podium/sync.yaml` (or `~/.podium/sync.yaml` for per-developer defaults). See the per-harness sections for examples.
 
-`podium sync` runs in one-shot mode by default and in long-running watch mode when invoked with the watch flag. Watch mode subscribes to change events, coalesces a burst of them into one run through a debounce window, and re-runs the sync: it re-resolves the active profile, applies the lock file's toggles on top, and reconciles the target tree. The event source differs between server-source and filesystem-source registries; the downstream pipeline is identical.
+`podium sync` runs in one-shot mode by default and in long-running watch mode when invoked with the watch flag. Watch mode runs one sync at startup and then waits for change triggers. A burst of triggers coalesces into a single run through a debounce window, and that run reruns the whole sync: it re-reads the effective view, applies the active profile's scope and the toggles recorded in the lock file, writes every selected artifact, deletes the paths the prior run wrote that this run did not, and rewrites the lock file. No artifact is materialized per event. The trigger source differs between server-source and filesystem-source registries, and the run itself is identical.
 
-**Server-source registry.** The watcher subscribes to the registry change-event stream, a long-lived `GET /v1/events` that requests the `artifact.published`, `artifact.deprecated`, and `layer.config_changed` event types and returns newline-delimited JSON (`application/x-ndjson`), one event per line. The registry emits an event when an artifact in any visible layer is added, updated, or removed, or when a parent of a visible child changes.
+**Server-source registry.** The watcher subscribes to the registry change-event stream, a long-lived `GET /v1/events` that requests the `artifact.published`, `artifact.deprecated`, and `layer.config_changed` event types and returns newline-delimited JSON (`application/x-ndjson`), one event per line. The watcher reads each line's `event` field, skips the `_heartbeat` keepalive, and treats every other line as one trigger. The rest of the payload is not inspected, and a dropped stream is reopened after 500 ms. The stream itself applies no per-caller filtering; layer visibility applies when the triggered run re-reads the caller's effective view.
 
-![podium sync watch mode against a server-source registry: the watcher subscribes to the registry change-event stream and runs each event through receive, fetch, adapt, and atomic write before awaiting the next event.](../assets/diagrams/sync-watch.svg)
+![podium sync watch mode against a server-source registry: the watcher subscribes to the registry change-event stream, debounces the triggers it receives, and reruns the whole sync, which resolves the caller's effective view, adapts each artifact, writes atomically, deletes stale paths, and rewrites the lock file.](../assets/diagrams/sync-watch.svg)
 
 <!--
 ASCII fallback for the diagram above (podium sync watch mode, server-source registry):
 
-  podium-server                              podium sync (watching)
-    change events       {artifact_id,         +-------------------+
-    NDJSON stream over  version, change}      | 1. Receive event  |
-    HTTP, filtered to   ===(event)===>        |    debounce by id |
-    caller's view                             +---------+---------+
-                                                        |
-                                                        v
-                                              +-------------------+
-                                              | 2. Fetch manifest |
-                                              |    load_artifact  |
-                                              +---------+---------+
-                                                        |
-                                                        v
-                                              +-------------------+
-                                              | 3. Adapt          |
-                                              |    harness writer |
-                                              +---------+---------+
-                                                        |
-                                                        v
-                                              +-------------------+
-                                              | 4. Atomic write   |
-                                              |    .tmp + rename  |
-                                              +---------+---------+
-                                                        |
-                                                        v
-                                              target tree:
-                                                .claude/agents/, .cursor/rules/, ...
+  podium server
+    GET /v1/events                      the watcher reconnects 500 ms
+    newline-delimited JSON,             after a dropped stream
+    one line per event
+             |
+             |  only the event type is read
+             v
+  +----------------------------+
+  | Debounce                   |   one timer for the whole stream;
+  | a burst of events          |   a burst becomes one run
+  +-------------+--------------+
+                |
+                v
+  +---------------------------------------------------------+
+  | one full sync run                                        |
+  |   1 Resolve   the caller's effective view over HTTP      |
+  |   2 Adapt     each selected artifact, harness writer     |
+  |   3 Write     every file staged .tmp, then renamed       |
+  |   4 Delete    every prior path this run did not write    |
+  |   5 Lock      one .podium/sync.lock entry per path       |
+  +----------------------------+----------------------------+
+                               |
+                               v
+  target tree:
+    .claude/agents/, .cursor/rules/, etc.
 
-  After step 4 the watcher returns to step 1 (await next event).
-  Event types: artifact.published, artifact.deprecated, and
-  layer.config_changed. A deprecation deletes from the target. A
-  change to a parent re-emits events for every dependent child the
-  caller can see.
+  The run then awaits the next trigger, which re-arms the debounce.
+  Every run applies the active profile's scope and re-reads the lock
+  file's toggles. A deprecated artifact keeps materializing; a file
+  leaves the target when its artifact leaves the effective view.
 -->
 
-**Filesystem-source registry.** The catalog is a directory on disk. The watcher uses OS filesystem notifications (`fsnotify` on Linux and macOS, `ReadDirectoryChangesW` on Windows) and reads the changed manifests directly. Identity and visibility do not apply because the directory is canonical.
+**Filesystem-source registry.** The catalog is a directory on disk. The watcher registers an `fsnotify` watch on the registry path, the workspace overlay path, and every subdirectory beneath them, adding new subdirectories as they appear. Any event under either tree is one trigger, and the changed path is not inspected. When `fsnotify` cannot initialize, the watcher polls instead: it fingerprints both trees every 500 ms from each entry's path, modification time, and size, and reruns when the fingerprint moves. Identity and visibility are not evaluated because the directory is canonical.
 
-![podium sync watch mode against a filesystem-source registry: the watcher receives OS filesystem notifications, parses the changed manifest from disk, adapts it, and writes atomically to the target tree.](../assets/diagrams/sync-watch-filesystem.svg)
+![podium sync watch mode against a filesystem-source registry: fsnotify over the registry path and the workspace overlay path, with a fingerprint-poll fallback, feeds a debounce that triggers one full sync run, which resolves the local layers and the overlay, adapts each artifact, writes atomically, deletes stale paths, and rewrites the lock file.](../assets/diagrams/sync-watch-filesystem.svg)
 
 <!--
 ASCII fallback for the diagram above (podium sync watch mode, filesystem-source registry):
 
-  filesystem catalog                         podium sync (watching)
-    ~/podium-artifacts/   {path, op           +-------------------+
-    OS file notifications  (write, create,    | 1. Receive event  |
-    (fsnotify / fsevents   remove)}           |    debounce path  |
-     / ReadDirChanges)   ===(event)===>       +---------+---------+
-                                                        |
-                                                        v
-                                              +-------------------+
-                                              | 2. Parse manifest |
-                                              |    read from disk |
-                                              +---------+---------+
-                                                        |
-                                                        v
-                                              +-------------------+
-                                              | 3. Adapt          |
-                                              |    harness writer |
-                                              +---------+---------+
-                                                        |
-                                                        v
-                                              +-------------------+
-                                              | 4. Atomic write   |
-                                              |    .tmp + rename  |
-                                              +---------+---------+
-                                                        |
-                                                        v
-                                              target tree:
-                                                .claude/agents/, .cursor/rules/, ...
+  filesystem catalog
+    ~/podium-artifacts/ + .podium/overlay/    poll fallback when fsnotify
+    fsnotify over both trees, recursively     cannot start: it fingerprints
+                                              both trees every 500 ms
+             |
+             |  the changed path is not inspected
+             v
+  +----------------------------+
+  | Debounce                   |   one timer for both trees;
+  | a burst of edits           |   a burst becomes one run
+  +-------------+--------------+
+                |
+                v
+  +---------------------------------------------------------+
+  | one full sync run                                        |
+  |   1 Resolve   the local layers, then the overlay         |
+  |   2 Adapt     each selected artifact, harness writer     |
+  |   3 Write     every file staged .tmp, then renamed       |
+  |   4 Delete    every prior path this run did not write    |
+  |   5 Lock      one .podium/sync.lock entry per path       |
+  +----------------------------+----------------------------+
+                               |
+                               v
+  target tree:
+    .claude/agents/, .cursor/rules/, etc.
 
-  Removals translate directly to target deletions. Renames in the
-  catalog produce a remove and create event pair. Identity and
-  visibility are not evaluated: filesystem-source registries have
-  no caller identity.
+  The run then awaits the next trigger, which re-arms the debounce.
+  Every run applies the active profile's scope and re-reads the lock
+  file's toggles. The directory is canonical, so the run evaluates no
+  caller identity and no layer visibility.
 -->
 
 
