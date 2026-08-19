@@ -560,7 +560,9 @@ func TestVectorBackend_AdminReembedBarePOST(t *testing.T) {
 		"admin", "reembed",
 		"--registry", srv.BaseURL,
 	)
-	// reembed reaches the (un-gated) endpoint but requires a configured vector
+	// Spec: §4.7 — the standalone server configures no identity provider, so
+	// it authenticates no caller and the admin gate is skipped. reembed
+	// reaches the endpoint but requires a configured vector
 	// backend + embedder. The default standalone server has neither, so the
 	// request returns the structured "vector search not configured" error. When
 	// a backend is wired the command exits 0 with a JSON summary; accept either.

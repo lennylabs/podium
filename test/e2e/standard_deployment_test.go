@@ -1271,16 +1271,17 @@ func TestStandardDeploy_AdminReembedArtifactNoVersion(t *testing.T) {
 	}
 }
 
-// -- `podium admin runtime register` registers a trusted runtime signing key.
+// -- `podium admin runtime register --keys-file` writes the trusted runtime
+// signing key set the registry reads at startup (§6.3.2). The command writes
+// a local file and reaches no registry.
 func TestStandardDeploy_RuntimeRegister(t *testing.T) {
 	t.Parallel()
-	reg := orgLocalReg(t)
-	srv := startServer(t, reg)
 	pemPath := orgRSAPublicKeyPEM(t)
+	keysFile := filepath.Join(t.TempDir(), "runtimes.json")
 
 	res := runPodium(t, "", nil,
 		"admin", "runtime", "register",
-		"--registry", srv.BaseURL,
+		"--keys-file", keysFile,
 		"--issuer", "https://bedrock.amazonaws.com",
 		"--algorithm", "RS256",
 		"--public-key-file", pemPath,
@@ -1288,17 +1289,32 @@ func TestStandardDeploy_RuntimeRegister(t *testing.T) {
 	if res.Exit != 0 {
 		t.Fatalf("runtime register exit=%d stderr=%s stdout=%s", res.Exit, res.Stderr, res.Stdout)
 	}
-	var obj map[string]any
-	orgDecodeBody(t, []byte(res.Stdout), &obj)
-	if obj["issuer"] == nil {
-		t.Errorf("response missing issuer: %v", obj)
+	body, err := os.ReadFile(keysFile)
+	if err != nil {
+		t.Fatalf("read keys file: %v", err)
 	}
-	if obj["algorithm"] == nil {
-		t.Errorf("response missing algorithm: %v", obj)
+	var records []struct {
+		Issuer       string `json:"issuer"`
+		Algorithm    string `json:"algorithm"`
+		PublicKeyPEM string `json:"public_key_pem"`
+	}
+	orgDecodeBody(t, body, &records)
+	if len(records) != 1 {
+		t.Fatalf("records = %d, want 1:\n%s", len(records), body)
+	}
+	if records[0].Issuer != "https://bedrock.amazonaws.com" {
+		t.Errorf("issuer = %q", records[0].Issuer)
+	}
+	if records[0].Algorithm != "RS256" {
+		t.Errorf("algorithm = %q", records[0].Algorithm)
+	}
+	if !strings.Contains(records[0].PublicKeyPEM, "BEGIN PUBLIC KEY") {
+		t.Errorf("public_key_pem = %q", records[0].PublicKeyPEM)
 	}
 }
 
-// -- `podium admin runtime register` fails when required flags are missing.
+// -- `podium admin runtime register` fails when required flags are missing,
+// and the message names --keys-file rather than a registry URL (§13.12).
 func TestStandardDeploy_RuntimeRegisterMissingFlags(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY=http://127.0.0.1:19999"},
@@ -1306,36 +1322,11 @@ func TestStandardDeploy_RuntimeRegisterMissingFlags(t *testing.T) {
 	if res.Exit != 2 {
 		t.Errorf("exit=%d, want 2 (stderr=%s)", res.Exit, res.Stderr)
 	}
-	if !strings.Contains(res.Stderr, "--registry, --issuer, --algorithm, and --public-key-file are required") {
+	if !strings.Contains(res.Stderr, "--keys-file, --issuer, --algorithm, and --public-key-file are required") {
 		t.Errorf("stderr missing expected message:\n%s", res.Stderr)
 	}
-}
-
-// -- `podium admin runtime list` returns registered runtime keys.
-func TestStandardDeploy_RuntimeList(t *testing.T) {
-	t.Parallel()
-	reg := orgLocalReg(t)
-	srv := startServer(t, reg)
-	pemPath := orgRSAPublicKeyPEM(t)
-
-	// Register a key first.
-	r := runPodium(t, "", nil,
-		"admin", "runtime", "register",
-		"--registry", srv.BaseURL,
-		"--issuer", "https://bedrock.amazonaws.com",
-		"--algorithm", "RS256",
-		"--public-key-file", pemPath,
-	)
-	if r.Exit != 0 {
-		t.Fatalf("runtime register exit=%d stderr=%s", r.Exit, r.Stderr)
-	}
-
-	res := runPodium(t, "", nil, "admin", "runtime", "list", "--registry", srv.BaseURL)
-	if res.Exit != 0 {
-		t.Fatalf("runtime list exit=%d stderr=%s", res.Exit, res.Stderr)
-	}
-	if !strings.Contains(res.Stdout, "bedrock.amazonaws.com") {
-		t.Errorf("runtime list missing registered issuer:\n%s", res.Stdout)
+	if strings.Contains(res.Stderr, "--registry") {
+		t.Errorf("stderr still names --registry:\n%s", res.Stderr)
 	}
 }
 
@@ -1468,8 +1459,9 @@ func TestStandardDeploy_AdminReembedEndpoint(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
 	st, body := orgPostJSON(t, srv.BaseURL+"/v1/admin/reembed", map[string]any{})
-	// The reembed endpoint is reachable (not admin-gated) but requires a
-	// configured vector backend. A plain standalone server has none, so the
+	// Spec: §4.7 — a standalone boot configures no identity provider, so it
+	// authenticates no caller, the admin gate is skipped, and the endpoint is
+	// reachable. It still requires a configured vector backend. A plain standalone server has none, so the
 	// POST returns 500 registry.unavailable "vector search not configured".
 	// When a backend is wired the endpoint returns 200; accept either.
 	if st == 200 {

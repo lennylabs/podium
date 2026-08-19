@@ -122,6 +122,27 @@ func injectedTokenAudienceGuard(identityProvider, audience string) error {
 	return nil
 }
 
+// runtimeKeyBootstrapGuard refuses startup when the injected-session-token
+// provider is selected over an empty trusted key set.
+//
+// spec: §6.3.2 — the trusted key set comes from operator-supplied
+// configuration read at startup, and there is no request-time registration
+// API. A registry that verifies runtime-signed tokens against no key rejects
+// every call with auth.untrusted_runtime and can accept no first key, so it
+// serves nothing. Fail closed at boot instead. The unset-path case falls
+// through this arm, because an unset PODIUM_RUNTIME_KEYS_PATH leaves the
+// in-memory registry empty. Other providers never consult the store, so an
+// empty set is not a failure for them.
+func runtimeKeyBootstrapGuard(identityProvider, path string, keys identity.RuntimeKeyVerifierStore) error {
+	if identityProvider != "injected-session-token" {
+		return nil
+	}
+	if keys != nil && len(keys.All()) > 0 {
+		return nil
+	}
+	return fmt.Errorf("config.runtime_keys_unavailable: PODIUM_IDENTITY_PROVIDER=injected-session-token requires PODIUM_RUNTIME_KEYS_PATH to name a file carrying at least one trusted runtime signing key (§6.3.2), and the configured path %q carries none; write one with 'podium admin runtime register --keys-file', then restart the registry", path)
+}
+
 // selectIdentityProvider resolves the §9.1 IdentityProvider for
 // cfg.identityProvider from the process-global identity.Default registry
 // (§9.2). It returns the instantiated provider when the id is registered

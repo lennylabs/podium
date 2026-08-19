@@ -406,7 +406,7 @@ func TestDeployment_FilesystemNoVisibilityFilter(t *testing.T) {
 
 // injected-session-token identity provider.
 func TestDeployment_InjectedSessionToken(t *testing.T) {
-	t.Skip("requires a registered runtime signing key (podium admin runtime register) and a self-signed JWT; standard-deployment identity scenario not wired in the sandbox")
+	t.Skip("requires a seeded runtime keys file (podium admin runtime register --keys-file) and a self-signed JWT; standard-deployment identity scenario not wired in the sandbox")
 }
 
 // migrate-to-standard into a SQLite target.

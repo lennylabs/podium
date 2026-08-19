@@ -34,7 +34,7 @@ const scimvisToken = "scimvis-bearer"
 // visibility is restricted to the named group. Setting PODIUM_SCIM_TOKENS is
 // what wires WithGroupResolver(scimStore.MembersOf), so the group filter is
 // resolved through the SCIM directory.
-func scimvisStartServer(t *testing.T, home, groupName string) (*serverProc, string) {
+func scimvisStartServer(t *testing.T, home, groupName, pemPath string) (*serverProc, string) {
 	t.Helper()
 	layerRoot := writeRegistry(t, map[string]string{
 		"engineering/runbook/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: engineering runbook\n---\n\nbody\n",
@@ -58,6 +58,7 @@ func scimvisStartServer(t *testing.T, home, groupName string) (*serverProc, stri
 		"PODIUM_INGEST_OFFLINE=true",
 		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
 		"PODIUM_OAUTH_AUDIENCE=" + injAudience,
+		"PODIUM_RUNTIME_KEYS_PATH=" + injSeedRuntimeKeys(t, pemPath),
 		"PODIUM_SCIM_TOKENS=" + scimvisToken,
 	}, "serve", "--standalone")
 	return srv, cfgPath
@@ -96,8 +97,7 @@ func TestAuthSCIMVisibility_MembershipDrivesVisibility(t *testing.T) {
 	priv, pemPath := injKeyPair(t)
 
 	const groupName = "engineering"
-	srv, _ := scimvisStartServer(t, home, groupName)
-	injRegisterRuntime(t, srv, pemPath)
+	srv, _ := scimvisStartServer(t, home, groupName, pemPath)
 
 	// alice is provisioned over SCIM; bob is not. The token sub equals the
 	// SCIM userName so MembersOf -> userName matches the verified identity.
@@ -165,8 +165,7 @@ func TestAuthSCIMVisibility_UserDeletionRevokesVisibility(t *testing.T) {
 	priv, pemPath := injKeyPair(t)
 
 	const groupName = "engineering"
-	srv, _ := scimvisStartServer(t, home, groupName)
-	injRegisterRuntime(t, srv, pemPath)
+	srv, _ := scimvisStartServer(t, home, groupName, pemPath)
 
 	aliceID := scimvisPushUser(t, srv, "alice@acme.com")
 	st, body := oidcSCIMDo(t, http.MethodPost, srv.BaseURL+"/scim/v2/Groups",

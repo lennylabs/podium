@@ -20,7 +20,7 @@ func TestPodiumMCP_StructuredErrorEnvelopeReachesClient(t *testing.T) {
 		`"message":"Runtime 'managed-runtime-x' is not registered with the registry.",` +
 		`"details":{"runtime_iss":"managed-runtime-x"},` +
 		`"retryable":false,` +
-		`"suggested_action":"Register the runtime's signing key via 'podium admin runtime register'."}`
+		`"suggested_action":"Add the runtime's signing key with 'podium admin runtime register --keys-file', then restart the registry."}`
 	reg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)

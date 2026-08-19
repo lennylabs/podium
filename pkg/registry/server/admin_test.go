@@ -7,12 +7,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/webhook"
 )
 
 // adminIdentity returns an Identity that AdminAuthorize accepts
@@ -137,5 +139,108 @@ func TestAdminShowEffective_PerLayerVisibility(t *testing.T) {
 			t.Errorf("layer %s visible = %v, want %v (reason: %s)",
 				l.LayerID, got, want[l.LayerID], l.Reason)
 		}
+	}
+}
+
+// postReembed posts a bare tenant-wide re-embed and returns the status
+// and the §6.10 envelope code the registry answered with.
+func postReembed(t *testing.T, base string) (int, string) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, base+"/v1/admin/reembed", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	var env struct {
+		Code string `json:"code"`
+	}
+	buf, _ := io.ReadAll(resp.Body)
+	_ = json.Unmarshal(buf, &env)
+	return resp.StatusCode, env.Code
+}
+
+// Spec: §4.7.2 — POST /v1/admin/reembed is authorized by the per-tenant
+// admin role, so a caller without it is rejected with auth.forbidden.
+// The helper passes no WithUnauthenticatedReembed, so the gate is live
+// and the resolver supplies the anonymous-public identity requireAdmin
+// reads.
+func TestAdminReembed_AnonymousCallerForbidden(t *testing.T) {
+	t.Parallel()
+	ts := bootRegistryWithAdmin(t, "", nil)
+	status, code := postReembed(t, ts.URL)
+	if status != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", status)
+	}
+	if code != "auth.forbidden" {
+		t.Errorf("code = %q, want auth.forbidden", code)
+	}
+}
+
+// Spec: §4.7.2 — a caller holding the per-tenant admin role passes the
+// gate and reaches the handler. The test registry wires no vector search
+// backend, so the pass itself fails with registry.unavailable; what this
+// pins is that the request is not rejected as forbidden.
+func TestAdminReembed_AdminCallerReachesHandler(t *testing.T) {
+	t.Parallel()
+	ts := bootRegistryWithAdmin(t, "alice", nil)
+	status, code := postReembed(t, ts.URL)
+	if status == http.StatusForbidden {
+		t.Fatalf("status = 403 (code %q), want the handler to run for an admin caller", code)
+	}
+	if status != http.StatusOK && status != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 200 or 500", status)
+	}
+}
+
+// Spec: §4.7, §13.1.1 — a deployment that authenticates no caller has no
+// per-tenant admin role to check, so the boot path records that with
+// WithUnauthenticatedReembed and the re-embed gate is skipped. Without the
+// carve-out the endpoint would be unreachable on such a registry.
+func TestAdminReembed_UnauthenticatedDeploymentAdmitted(t *testing.T) {
+	t.Parallel()
+	ts := bootRegistryWithAdmin(t, "", nil, server.WithUnauthenticatedReembed())
+	status, code := postReembed(t, ts.URL)
+	if status == http.StatusForbidden {
+		t.Fatalf("status = 403 (code %q), want the handler to run on a registry that authenticates no caller", code)
+	}
+	if status != http.StatusOK && status != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 200 or 500", status)
+	}
+}
+
+// Spec: §4.7.2, §7.3.2 — the no-caller carve-out is read by handleReembed
+// alone. requireAdmin keeps refusing an anonymous caller on the other admin
+// routes, so a registry that authenticates nobody does not thereby open
+// /v1/admin/grants or the webhook receiver CRUD.
+func TestAdminReembed_CarveOutDoesNotReopenOtherAdminRoutes(t *testing.T) {
+	t.Parallel()
+	worker := &webhook.Worker{Store: webhook.NewMemoryStore(), HTTPClient: http.DefaultClient}
+	ts := bootRegistryWithAdmin(t, "", nil,
+		server.WithUnauthenticatedReembed(), server.WithWebhooks(worker))
+
+	cases := []struct {
+		name string
+		path string
+		body string
+	}{
+		{"grants", "/v1/admin/grants", `{"user_id":"bob"}`},
+		{"webhooks", "/v1/webhooks", `{"url":"https://example.test/hook"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := http.Post(ts.URL+tc.path, "application/json", strings.NewReader(tc.body))
+			if err != nil {
+				t.Fatalf("POST %s: %v", tc.path, err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403", resp.StatusCode)
+			}
+			buf, _ := io.ReadAll(resp.Body)
+			if !bytes.Contains(buf, []byte("auth.forbidden")) {
+				t.Errorf("response missing auth.forbidden: %s", buf)
+			}
+		})
 	}
 }

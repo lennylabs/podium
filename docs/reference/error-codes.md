@@ -14,7 +14,7 @@ Every Podium error is a structured envelope:
   "message": "Runtime 'managed-runtime-x' is not registered with the registry.",
   "details": { "runtime_iss": "managed-runtime-x" },
   "retryable": false,
-  "suggested_action": "Register the runtime's signing key via 'podium admin runtime register'."
+  "suggested_action": "Add the runtime's signing key with 'podium admin runtime register --keys-file', then restart the registry."
 }
 ```
 
@@ -53,7 +53,7 @@ Codes map to MCP error payloads per the MCP spec for harnesses that consume Podi
 
 | Code | When |
 |:--|:--|
-| `auth.untrusted_runtime` | An `injected-session-token` JWT was signed by a runtime whose signing key isn't registered with the registry. |
+| `auth.untrusted_runtime` | An `injected-session-token` JWT was signed by a runtime whose signing key is absent from the registry's trusted key set. The deployment adds the key to the file named by `PODIUM_RUNTIME_KEYS_PATH` and restarts the registry. |
 | `auth.untrusted_token` | A gateway-forwarded `oidc-jwt` token failed signature, `iss`, or `aud` validation against the accepted issuers and the issuer JWKS. `details.token_iss` carries the rejected token's issuer. |
 | `auth.tenant_unknown` | A verified `oidc-jwt` token's `org_id` names no provisioned tenant on a multi-tenant registry. `details.token_org_id` carries the unresolved organization. |
 | `auth.token_expired` | The OAuth access token (or injected/forwarded JWT) has passed its `exp`. The MCP server triggers refresh on `oauth-device-code`; the runtime refreshes on `injected-session-token`; the gateway forwards a new token on `oidc-jwt`. |
@@ -70,6 +70,7 @@ Codes map to MCP error payloads per the MCP spec for harnesses that consume Podi
 | `config.invalid_issuer_scheme` | `PODIUM_IDENTITY_PROVIDER=oidc-jwt` was given a non-`https` `PODIUM_OAUTH_ISSUER`. The registry fetches the discovery document and JWKS over this URL, so it must be `https`. |
 | `config.oidc_jwt_audience_unset` | `PODIUM_IDENTITY_PROVIDER=oidc-jwt` without `PODIUM_OAUTH_AUDIENCE`. The required `aud` claim cannot be verified. |
 | `config.injected_token_audience_unset` | `PODIUM_IDENTITY_PROVIDER=injected-session-token` without `PODIUM_OAUTH_AUDIENCE` set to this registry's endpoint. The required `aud` claim cannot be verified on every token. |
+| `config.runtime_keys_unavailable` | `PODIUM_IDENTITY_PROVIDER=injected-session-token` with no trusted runtime signing key: `PODIUM_RUNTIME_KEYS_PATH` is unset or names a file with no key. Also raised under any provider when the named file cannot be read or parsed. |
 | `config.unknown_harness` | `PODIUM_HARNESS` (or `--harness`) names a harness with no registered adapter. |
 | `config.invalid` | A `sync.yaml` `kind: marketplace` target is malformed: its harness set names a non-publish-target harness (`opencode` or `none` have no git-repo distribution), a plugin glob is malformed, or a workflow command declares neither `run:` nor `sh:` (or both). It also covers a marketplace field on a `kind: workspace` target, a workspace scope field on a `kind: marketplace` target, and a `kind: marketplace` target combined with `--watch`. `podium sync --config` rejects it at config validation. |
 | `config.trusted_headers_public_bind` | `trusted-headers` on a single-tenant registry bound to a non-loopback address without `PODIUM_TRUSTED_PROXY_SECRET` or `--allow-public-bind`. |

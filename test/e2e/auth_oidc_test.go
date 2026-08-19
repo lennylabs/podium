@@ -819,9 +819,9 @@ func TestAuth_IdpGroupMappingRemapsClaim(t *testing.T) {
 		"PODIUM_INGEST_OFFLINE=true",
 		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
 		"PODIUM_OAUTH_AUDIENCE=" + injAudience,
+		"PODIUM_RUNTIME_KEYS_PATH=" + injSeedRuntimeKeys(t, pem),
 		"PODIUM_IDP_GROUP_MAPPING=00g1financeOID=finance",
 	}, "serve", "--standalone")
-	injRegisterRuntime(t, srv, pem)
 
 	// A caller whose token carries the raw OID (not the friendly name) sees the
 	// finance-only artifact, because the mapping rewrites 00g1financeOID ->
@@ -1038,6 +1038,39 @@ func TestAuth_HealthzReachableWithOIDCMode(t *testing.T) {
 	}
 	if !strings.Contains(st.Stdout, "reachability") {
 		t.Errorf("status stdout missing 'reachability':\n%s", st.Stdout)
+	}
+}
+
+// ---- re-embed gate is live once a provider is configured -------
+
+// Spec: §4.7 — configuring an identity provider makes the re-embed admin
+// gate live, whether or not the registry verifies callers itself.
+// PODIUM_IDENTITY_PROVIDER=oidc is a free-form label that installs no
+// request-time verifier, so the caller resolves to the anonymous-public
+// identity and no caller holds the per-tenant admin role. The boot path
+// records the decision from its own configuration, so this pins the
+// predicate against a reading derived from the installed verifier, which
+// is nil on exactly this bind.
+func TestAuth_ReembedGatedWhenIdentityProviderNamed(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
+	srv := startServerArgs(t, []string{
+		"HOME=" + t.TempDir(),
+		"PODIUM_IDENTITY_PROVIDER=oidc",
+	}, "serve", "--standalone", "--layer-path", reg)
+
+	st, body := postJSON(t, srv.BaseURL+"/v1/admin/reembed", map[string]any{})
+	if st != http.StatusForbidden {
+		t.Fatalf("POST /v1/admin/reembed = %d, want 403 (body=%s)", st, body)
+	}
+	var env struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("decode envelope %q: %v", body, err)
+	}
+	if env.Code != "auth.forbidden" {
+		t.Errorf("code = %q, want auth.forbidden", env.Code)
 	}
 }
 

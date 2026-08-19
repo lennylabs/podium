@@ -65,7 +65,7 @@ Fine-grained narrowing via OAuth scope claims (e.g., `podium:read:finance/*`, `p
 
 ### 6.3.2 Runtime Trust Model (`injected-session-token`)
 
-The injected token is a JWT signed by a runtime-specific signing key registered with the registry one-time at runtime onboarding. The registry verifies the signature on every call. Required claims:
+The injected token is a JWT signed by a runtime-specific signing key that the deployment configures the registry to trust at runtime onboarding. The registry verifies the signature on every call. Required claims:
 
 - `iss`: runtime identifier (must match a registered runtime).
 - `aud`: registry endpoint.
@@ -74,6 +74,10 @@ The injected token is a JWT signed by a runtime-specific signing key registered 
 - `exp`: expiry.
 
 Without a registered signing key, the registry rejects with `auth.untrusted_runtime`.
+
+**Establishing the trusted key set.** A runtime signing key is a trust anchor for the whole registry. A token signed with it carries its own `sub` and `org_id`, so the key mints an identity for any subject in any organization, including one holding a per-tenant admin grant (§4.7.2) or the instance-operator grant (§4.7.1); an already-trusted runtime can therefore present itself as any administrator. The registry takes its trusted key set from operator-supplied configuration read at startup and exposes no request-time registration API. `PODIUM_RUNTIME_KEYS_PATH` (§13.12) names the file that carries the set. Each record in that file names the runtime's issuer, its JWS algorithm, and its public key as a PKIX PEM block, and `podium admin runtime register` writes a record into it. The registry names the trusted issuers in its startup log. Under `injected-session-token` a registry whose configuration supplies no usable key refuses to start with `config.runtime_keys_unavailable` (§13.12), because such a registry rejects every call with `auth.untrusted_runtime` and can accept no first key.
+
+Every replica of a deployment (§13.1) is configured with the same trusted key set, and a key added or rotated there takes effect at each replica's next start.
 
 #### 6.3.2.1 Token Rotation Contract
 
@@ -321,7 +325,7 @@ The MCP server is a stdio subprocess spawned by its host. The host is responsibl
 | Workspace overlay path missing                | Skip the workspace local overlay; warn once.                                                                                                                |
 | Auth token expired (`oauth-device-code`)      | Trigger refresh; if interactive refresh required, surface in tool response with reauth instructions via MCP elicitation.                                    |
 | Auth token expired (`injected-session-token`, `oidc-jwt`) | Reject with `auth.token_expired`. The host's runtime is responsible for refresh; for `oidc-jwt` the gateway forwards a new token. |
-| Untrusted runtime (`injected-session-token`)  | Reject with `auth.untrusted_runtime`. Runtime must register signing key with registry.                                                                      |
+| Untrusted runtime (`injected-session-token`)  | Reject with `auth.untrusted_runtime`. The deployment adds the runtime's signing key to the registry's trusted key set (§6.3.2) and restarts the registry. |
 | Untrusted forwarded token (`oidc-jwt`)        | Reject with `auth.untrusted_token`. The token failed signature, `iss`, or `aud` validation against the accepted issuers and the configured audience (§6.3.3).                       |
 | Verified token names no tenant (`oidc-jwt`)   | Reject with `auth.tenant_unknown`. The token verified, but its `org_id` names no provisioned tenant on a multi-tenant registry.                              |
 | Visibility denial on a call                   | Return a structured error naming the unreachable resource (without leaking the layer's existence); log to the registry audit stream as `visibility.denied`. |
@@ -344,7 +348,7 @@ All errors use a structured envelope:
   "message": "Runtime 'managed-runtime-x' is not registered with the registry.",
   "details": { "runtime_iss": "managed-runtime-x" },
   "retryable": false,
-  "suggested_action": "Register the runtime's signing key via 'podium admin runtime register'."
+  "suggested_action": "Add the runtime's signing key with 'podium admin runtime register --keys-file', then restart the registry."
 }
 ```
 

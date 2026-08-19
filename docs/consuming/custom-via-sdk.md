@@ -237,4 +237,4 @@ Custom providers register through the same interface as the MCP server's. For mo
 - **`oauth-device-code`**: `Client.login()` runs the device-code flow, prints the verification URL and the user code to stderr, and keeps the returned access token on the client instance for the life of the process. The SDK does not persist it; `podium login` stores a token in the OS keychain.
 - **`injected-session-token`**: a runtime-issued signed JWT. Pass it as `Client(registry=..., token=...)`, or export `PODIUM_SESSION_TOKEN` and construct the client with `Client.from_env()`. The right choice for managed agent runtimes (Bedrock Agents, OpenAI Assistants, custom orchestrators) where the runtime issues credentials per session.
 
-The runtime registers its signing key with the registry one-time at runtime onboarding. The registry verifies signatures on every call.
+The deployment configures the registry to trust the runtime's signing key at startup through `PODIUM_RUNTIME_KEYS_PATH`, which names a file written with `podium admin runtime register --keys-file`. The registry verifies signatures on every call.

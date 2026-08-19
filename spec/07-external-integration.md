@@ -724,7 +724,7 @@ Behavior: resolves the registry from the merged config (or `--registry` flag), p
 
 **Multi-endpoint behavior.** Tokens cache in the OS keychain keyed by registry URL. A developer logged into both `https://podium.acme.com` and `https://podium-finance.acme.com` keeps both tokens simultaneously; switching projects (or running `podium login` in any context) authenticates against whichever registry the merged config resolves to. No `podium logout` between project switches required.
 
-`podium login` is a no-op when the resolved registry is a filesystem path (no auth) or points at a `--standalone` server (no auth). In both cases it prints a notice and exits.
+`podium login` is a no-op when the resolved registry is a filesystem path, and when the resolved registry URL is `http://127.0.0.1:8080` or `http://localhost:8080`, which the client treats as a no-auth registry whatever that registry configures. In each case it prints a notice and exits.
 
 ## 7.8 Marketplace Publishing
 

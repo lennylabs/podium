@@ -399,6 +399,112 @@ func TestInjectedToken_AudienceUnsetFailsStartup(t *testing.T) {
 	}
 }
 
+// spec: §6.3.2, §13.12 — the trusted runtime key set comes from
+// configuration read at startup and there is no request-time registration
+// API, so an injected-session-token registry over an empty key set would
+// reject every call with auth.untrusted_runtime and could accept no first
+// key. Booting with no PODIUM_RUNTIME_KEYS_PATH refuses to start with
+// config.runtime_keys_unavailable.
+func TestInjectedToken_RuntimeKeysUnsetFailsStartup(t *testing.T) {
+	t.Parallel()
+	out := smallteamRawExecFail(t,
+		[]string{
+			"HOME=" + t.TempDir(),
+			"PODIUM_IDENTITY_PROVIDER=injected-session-token",
+			"PODIUM_OAUTH_AUDIENCE=http://127.0.0.1:8080",
+		},
+		"serve", "--standalone")
+	if !strings.Contains(out, "config.runtime_keys_unavailable") {
+		t.Errorf("expected config.runtime_keys_unavailable in output; got:\n%s", out)
+	}
+}
+
+// spec: §6.3.2, §13.12 — a keys file the registry cannot parse fails startup
+// under every identity provider, including the standalone default that never
+// consults the store. A corrupt file silently narrows the trusted set, so it
+// is a configuration failure rather than a degraded mode.
+func TestStandaloneServer_UnparseableRuntimeKeysFailStartup(t *testing.T) {
+	t.Parallel()
+	keys := filepath.Join(t.TempDir(), "keys.json")
+	if err := os.WriteFile(keys, []byte("not json"), 0o600); err != nil {
+		t.Fatalf("write keys: %v", err)
+	}
+	out := smallteamRawExecFail(t,
+		[]string{"HOME=" + t.TempDir(), "PODIUM_RUNTIME_KEYS_PATH=" + keys},
+		"serve", "--standalone")
+	if !strings.Contains(out, "config.runtime_keys_unavailable") {
+		t.Errorf("expected config.runtime_keys_unavailable in output; got:\n%s", out)
+	}
+}
+
+// spec: §6.3.2, §13.12 — a path that resolves to a readable file carrying no
+// key is a distinct arm from an unset path: the load succeeds and leaves an
+// empty trusted set. Under injected-session-token that set would reject every
+// call with auth.untrusted_runtime, so the guard aborts startup with
+// config.runtime_keys_unavailable.
+func TestInjectedToken_EmptyRuntimeKeysFailStartup(t *testing.T) {
+	t.Parallel()
+	keys := filepath.Join(t.TempDir(), "keys.json")
+	if err := os.WriteFile(keys, []byte("[]"), 0o600); err != nil {
+		t.Fatalf("write keys: %v", err)
+	}
+	out := smallteamRawExecFail(t,
+		[]string{
+			"HOME=" + t.TempDir(),
+			"PODIUM_IDENTITY_PROVIDER=injected-session-token",
+			"PODIUM_OAUTH_AUDIENCE=http://127.0.0.1:8080",
+			"PODIUM_RUNTIME_KEYS_PATH=" + keys,
+		},
+		"serve", "--standalone")
+	if !strings.Contains(out, "config.runtime_keys_unavailable") {
+		t.Errorf("expected config.runtime_keys_unavailable in output; got:\n%s", out)
+	}
+}
+
+// spec: §13.12 — the empty-set guard is scoped to injected-session-token,
+// which is the only provider that consults the trusted runtime key set. Under
+// the other providers a path naming a file that carries no key resolves to an
+// empty set and startup proceeds. Both a nonexistent file and a file holding
+// an empty array take that route, which keeps the load-site error separate
+// from the provider-scoped empty-set guard.
+func TestStandaloneServer_EmptyRuntimeKeysStartupProceeds(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	emptyArray := filepath.Join(dir, "empty.json")
+	if err := os.WriteFile(emptyArray, []byte("[]"), 0o600); err != nil {
+		t.Fatalf("write keys: %v", err)
+	}
+	cases := map[string]string{
+		"nonexistent": filepath.Join(dir, "absent.json"),
+		"empty-array": emptyArray,
+	}
+	for name, keys := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			reg := writeRegistry(t, map[string]string{"a/ARTIFACT.md": smallteamLowArtifact("a")})
+			srv := startServerArgs(t,
+				[]string{"HOME=" + t.TempDir(), "PODIUM_RUNTIME_KEYS_PATH=" + keys},
+				"serve", "--standalone", "--layer-path", reg)
+			status, body := getRaw(t, srv.BaseURL+"/healthz")
+			if status != 200 {
+				t.Errorf("GET /healthz = %d, want 200\nbody: %s", status, body)
+			}
+		})
+	}
+}
+
+// spec: §6.3.2 — the registry names the trusted issuers in its startup log, so
+// an operator can confirm which key set the boot loaded before any request
+// arrives.
+func TestInjectedToken_StartupLogNamesTrustedIssuer(t *testing.T) {
+	t.Parallel()
+	priv, pem := injKeyPair(t)
+	srv := injServer(t, apiReg(t), priv, pem)
+	if got := srv.log(); !strings.Contains(got, injIssuer) {
+		t.Errorf("startup log does not name the trusted issuer %q:\n%s", injIssuer, got)
+	}
+}
+
 // public mode reports mode:public in /healthz.
 func TestStandaloneServer_PublicModeHealthz(t *testing.T) {
 	t.Parallel()

@@ -91,7 +91,6 @@ An earlier pass verified the items below. They are known, they are recorded, and
 
 - \`deploy/helm/podium/values.yaml\` defaults to \`oauth-device-code\`, defaults the embedding provider to \`openai\`, and sets a \`config.bind\` no template renders. \`docs/deployment/clustered.md\` documents the three workarounds on purpose.
 - \`pkg/identity/oidc_jwt.go\` trims a trailing slash from the configured issuer but not from the token claim, so an issuer URL ending in \`/\` cannot verify.
-- \`/v1/admin/runtime\` is not admin-gated in the production wiring, and \`/v1/admin/reembed\` is authenticated but not admin-gated.
 - The spec's \`spec/13-deployment.md:467\` and \`:547\` describe device-code support the code does not provide.
 
 Do not report these. Report anything else you find of the same kind.
@@ -101,6 +100,8 @@ Do not report these. Report anything else you find of the same kind.
 - \`oauth-device-code\` is a client-side provider. Setting it as the registry's \`PODIUM_IDENTITY_PROVIDER\` aborts startup with \`config.identity_provider_unverified\`. The registry verifies \`injected-session-token\`, \`oidc-jwt\`, and \`trusted-headers\`.
 - There is no \`--marketplace\` flag and no \`podium publish\` command. Marketplace rendering goes through a \`kind: marketplace\` entry under \`targets:\`, reached with \`--config\`.
 - \`registry.yaml\` nests every key under a top-level \`registry:\`.
+- The trusted runtime signing keys are boot-time configuration. The registry reads them from the file named by \`PODIUM_RUNTIME_KEYS_PATH\` at startup, and there is no registration endpoint: \`GET\` and \`POST /v1/admin/runtime\` are gone. \`podium admin runtime register --keys-file\` writes that file, and \`podium admin runtime list\` does not exist.
+- \`POST /v1/admin/reembed\` is gated on the per-tenant \`admin\` role and rejected on a read-only registry. The gate is skipped only where the boot path recorded that the deployment authenticates no caller, which is public mode or no identity provider.
 - No embedding model ships in the binary. A single node defaults the provider to \`ollama\` and a Postgres-backed deployment to \`openai\`; neither is self-contained. \`PODIUM_NO_EMBEDDINGS=true\` opts out to keyword search, which is what the repository's \`docker-compose.yml\` now sets.
 - A local catalog composes ordered layers from disk through \`.registry-config\`.
 - Cursor skills go to \`.cursor/skills/<name>/SKILL.md\`; only rules become \`.mdc\`. Codex skills live under \`.agents/\`. Claude Code MCP servers go to \`.mcp.json\`.

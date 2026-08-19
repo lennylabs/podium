@@ -17,7 +17,6 @@
 # Usage (full evaluation stack):
 #   docker compose up -d
 #   podium init --global --registry http://localhost:8080
-#   podium login    # device-code flow against the bundled Dex IdP
 #
 #   docker compose down       # stop (keeps volumes)
 #   docker compose down -v    # stop + wipe data
@@ -103,9 +102,16 @@ services:
 
   # The registry binary, configured against the local services above. Built
   # from the repo Dockerfile so `docker compose up` needs no published
-  # image. It runs the server-side injected-session-token verification mode
-  # (the only mode this build verifies server-side); Dex provides the
-  # device-code IdP for the host-side `podium login` flow.
+  # image. The service selects no identity provider (§13.1.1), so the
+  # registry resolves every caller as anonymous-public, every layer is
+  # visible regardless of its declared `visibility:`, and the
+  # layer-management and erase endpoints admit any request. The port
+  # publishes on the host loopback interface for that reason.
+  # PODIUM_DEFAULT_LAYER_VISIBILITY holds the persisted layer declaration at
+  # private, which becomes load-bearing once an identity provider is
+  # configured. Dex is retained for device-code evaluation and this service
+  # does not consult it: `podium login` against http://localhost:8080
+  # reports that the registry needs no authentication and exits.
   registry:
     build:
       context: .
@@ -129,17 +135,21 @@ services:
       PODIUM_S3_ACCESS_KEY_ID: "minioadmin"
       PODIUM_S3_SECRET_ACCESS_KEY: "minioadmin"
       PODIUM_S3_FORCE_PATH_STYLE: "true"
-      PODIUM_IDENTITY_PROVIDER: "injected-session-token"
       PODIUM_OAUTH_AUDIENCE: "http://localhost:8080"
       PODIUM_OAUTH_AUTHORIZATION_ENDPOINT: "http://localhost:5556/dex/device/code"
       PODIUM_BOOTSTRAP_ADMINS: "alice@acme.com"
+      # §13.1.1: this pin changes nothing a caller observes here, because
+      # every caller resolves as anonymous-public and sees every layer. It
+      # fixes the visibility persisted into the layer's declaration so the
+      # declaration is correct if an identity provider is added later.
+      PODIUM_DEFAULT_LAYER_VISIBILITY: "private"
       # A Postgres-backed registry defaults its embedding provider to openai,
       # which then requires OPENAI_API_KEY and stops this stack from starting.
       # The evaluation stack has no key, so it opts out to BM25 keyword search.
       # Remove this and supply a provider and its key to exercise hybrid search.
       PODIUM_NO_EMBEDDINGS: "true"
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
 
 volumes:
   postgres_data:

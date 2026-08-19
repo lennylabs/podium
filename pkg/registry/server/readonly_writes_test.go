@@ -165,3 +165,28 @@ func TestWebhookReceiverReads_AllowedInReadOnly(t *testing.T) {
 	}
 	one.Body.Close()
 }
+
+// Spec: §13.2.1 — the re-embed pass is a write endpoint, so a read-only
+// registry rejects POST /v1/admin/reembed with the §6.10
+// registry.read_only envelope (503). WithMode is required: rejectIfReadOnly
+// no-ops on a nil ModeTracker, which is what bootRegistryWithAdmin
+// otherwise supplies.
+func TestAdminReembed_RejectedInReadOnly(t *testing.T) {
+	t.Parallel()
+	mode := server.NewModeTracker()
+	mode.Set(server.ModeReadOnly)
+	ts := bootRegistryWithAdmin(t, "alice", nil, server.WithMode(mode))
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/admin/reembed", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", resp.StatusCode)
+	}
+	if code := readOnlyErrorCode(t, resp); code != "registry.read_only" {
+		t.Errorf("code = %q, want registry.read_only", code)
+	}
+}

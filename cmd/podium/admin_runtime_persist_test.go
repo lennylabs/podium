@@ -1,112 +1,122 @@
 package main
 
 import (
-	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
-	"encoding/json"
 	"encoding/pem"
-	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
-	"github.com/lennylabs/podium/internal/serverboot"
+	"github.com/lennylabs/podium/pkg/identity"
 )
 
-// Spec: §6.3.2 — when PODIUM_RUNTIME_KEYS_PATH is set, the
-// registry persists runtime registrations to JSON. A second
-// server boot reads them back and the JWT verifier trusts the
-// issuer immediately.
-func TestServe_RuntimeKeysPersistAcrossRestart(t *testing.T) {
-	tmp := t.TempDir()
-	keysPath := filepath.Join(tmp, "runtimes.json")
-	pub, _, _ := ed25519.GenerateKey(rand.Reader)
-	der, _ := x509.MarshalPKIXPublicKey(pub)
-	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})
-	keyFile := filepath.Join(tmp, "runtime.pem")
-	if err := os.WriteFile(keyFile, pemBytes, 0o644); err != nil {
+// writeTestPublicKeyPEM writes a PKIX PEM public key and returns its path
+// alongside the algorithm that matches it.
+func writeTestPublicKeyPEM(t *testing.T, dir, name string) string {
+	t.Helper()
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	der, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		t.Fatalf("MarshalPKIXPublicKey: %v", err)
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
+	return path
+}
 
-	// §13.10: a named-but-missing --config is now a hard error, so
-	// the test names an existing (empty) config and configures the server via
-	// the PODIUM_* env vars below. The empty document overlays nothing.
-	configFile := filepath.Join(tmp, "registry.yaml")
-	if err := os.WriteFile(configFile, []byte(""), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
+// Spec: §6.3.2 — `podium admin runtime register --keys-file` writes the
+// trusted key set the registry reads at startup. The command loads the
+// existing file, adds the record, and writes the whole set back, so a
+// second registration preserves the first.
+func TestAdminRuntimeRegister_WritesKeysFileAndPreservesRecords(t *testing.T) {
+	tmp := t.TempDir()
+	keysPath := filepath.Join(tmp, "runtimes.json")
+	first := writeTestPublicKeyPEM(t, tmp, "first.pem")
+	second := writeTestPublicKeyPEM(t, tmp, "second.pem")
+
+	register := func(issuer, keyFile string) int {
+		return adminRuntimeRegister([]string{
+			"--keys-file", keysPath,
+			"--issuer", issuer,
+			"--algorithm", "EdDSA",
+			"--public-key-file", keyFile,
+		})
 	}
-	startServer := func(port int) {
-		t.Setenv("PODIUM_BIND", fmt.Sprintf("127.0.0.1:%d", port))
-		t.Setenv("PODIUM_REGISTRY_STORE", "memory")
-		t.Setenv("PODIUM_OBJECT_STORE", "none")
-		t.Setenv("PODIUM_CONFIG_FILE", configFile)
-		t.Setenv("PODIUM_FILESYSTEM_ROOT", tmp)
-		t.Setenv("PODIUM_VECTOR_BACKEND", "")
-		t.Setenv("PODIUM_RUNTIME_KEYS_PATH", keysPath)
-		go func() { _ = serverboot.Run() }()
-	}
-
-	port1 := freePort(t)
-	startServer(port1)
-	waitForHealthz(t, port1)
-
-	rc := adminRuntimeRegister([]string{
-		"--registry", fmt.Sprintf("http://127.0.0.1:%d", port1),
-		"--issuer", "claude-runtime",
-		"--algorithm", "EdDSA",
-		"--public-key-file", keyFile,
-	})
-	if rc != 0 {
-		t.Fatalf("first register: rc = %d", rc)
+	if rc := register("alice-runtime", first); rc != 0 {
+		t.Fatalf("first register: rc = %d, want 0", rc)
 	}
 	if _, err := os.Stat(keysPath); err != nil {
 		t.Fatalf("keys file not created: %v", err)
 	}
+	if rc := register("bob-runtime", second); rc != 0 {
+		t.Fatalf("second register: rc = %d, want 0", rc)
+	}
 
-	// Second boot reads the persisted file.
-	port2 := freePort(t)
-	startServer(port2)
-	waitForHealthz(t, port2)
-
-	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/v1/admin/runtime", port2))
+	reg, err := identity.LoadFilePersistedRuntimeKeyRegistry(keysPath)
 	if err != nil {
-		t.Fatalf("GET /v1/admin/runtime: %v", err)
+		t.Fatalf("LoadFilePersistedRuntimeKeyRegistry: %v", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d", resp.StatusCode)
-	}
-	var body struct {
-		Runtimes []struct {
-			Issuer    string `json:"issuer"`
-			Algorithm string `json:"algorithm"`
-		} `json:"runtimes"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(body.Runtimes) != 1 || body.Runtimes[0].Issuer != "claude-runtime" {
-		t.Errorf("Runtimes = %+v, want claude-runtime preserved", body.Runtimes)
+	for _, issuer := range []string{"alice-runtime", "bob-runtime"} {
+		key, ok := reg.Lookup(issuer)
+		if !ok {
+			t.Fatalf("keys file missing %s", issuer)
+		}
+		if key.Algorithm != "EdDSA" {
+			t.Errorf("%s algorithm = %q, want EdDSA", issuer, key.Algorithm)
+		}
 	}
 }
 
-func waitForHealthz(t *testing.T, port int) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/healthz", port), nil)
-		resp, err := http.DefaultClient.Do(req)
-		cancel()
-		if err == nil {
-			resp.Body.Close()
-			return
+// Spec: §6.3.2 — the command parses the PEM against the declared
+// algorithm, so a mismatch fails at authoring time rather than aborting
+// the registry's next start.
+func TestAdminRuntimeRegister_AlgorithmMismatch(t *testing.T) {
+	tmp := t.TempDir()
+	keysPath := filepath.Join(tmp, "runtimes.json")
+	keyFile := writeTestPublicKeyPEM(t, tmp, "key.pem")
+
+	withStderr(t, func() {
+		rc := adminRuntimeRegister([]string{
+			"--keys-file", keysPath,
+			"--issuer", "alice-runtime",
+			"--algorithm", "RS256",
+			"--public-key-file", keyFile,
+		})
+		if rc != 1 {
+			t.Errorf("rc = %d, want 1", rc)
 		}
-		time.Sleep(50 * time.Millisecond)
+	})
+	if _, err := os.Stat(keysPath); !os.IsNotExist(err) {
+		t.Errorf("keys file created despite a rejected key: %v", err)
 	}
-	t.Fatalf("server on port %d never came up", port)
+}
+
+// Spec: §6.3.2 — a keys file that is not valid JSON is a load failure
+// rather than a silently discarded key set.
+func TestAdminRuntimeRegister_CorruptKeysFile(t *testing.T) {
+	tmp := t.TempDir()
+	keysPath := filepath.Join(tmp, "runtimes.json")
+	if err := os.WriteFile(keysPath, []byte("{not json"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	keyFile := writeTestPublicKeyPEM(t, tmp, "key.pem")
+
+	withStderr(t, func() {
+		rc := adminRuntimeRegister([]string{
+			"--keys-file", keysPath,
+			"--issuer", "alice-runtime",
+			"--algorithm", "EdDSA",
+			"--public-key-file", keyFile,
+		})
+		if rc != 1 {
+			t.Errorf("rc = %d, want 1", rc)
+		}
+	})
 }

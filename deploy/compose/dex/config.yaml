@@ -1,12 +1,17 @@
-# Dex configuration for the evaluation docker-compose stack (§13.1.1).
-# Dex is the bundled OIDC IdP that backs the `podium login` device-code
-# flow (RFC 8628). This configuration is for evaluation only: it uses an
-# ephemeral SQLite store, a public device-code client, and a static
-# example user with a documented password. Do not use it in production.
+# Dex configuration for the evaluation docker-compose stack (§13.1.1). Dex
+# is retained for device-code evaluation. The registry service selects no
+# identity provider, so it does not consult Dex, and reaching a verifying
+# posture requires further work: an https issuer for oidc-jwt, or a seeded
+# key set for injected-session-token. This configuration is for evaluation
+# only: it uses an ephemeral SQLite store, a public device-code client, and
+# a static example user with a documented password. Do not use it in
+# production.
 #
-# The issuer is reached from the host (where `podium login` runs) at
-# http://localhost:5556/dex. The compose file maps container port 5556 to
-# the host so the device-code verification URL resolves from a browser.
+# The issuer is reached from the host at http://localhost:5556/dex, and the
+# compose file maps container port 5556 to the host. A device-code flow
+# against Dex requires publishing the registry at an address other than
+# http://localhost:8080 or http://127.0.0.1:8080, because `podium login`
+# treats those URLs as no-auth registries, prints a notice, and exits.
 
 issuer: http://localhost:5556/dex
 

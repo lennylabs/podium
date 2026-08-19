@@ -100,14 +100,13 @@ func TestDeployCompose_RegistryServiceWiring(t *testing.T) {
 	}
 	env := reg.Environment
 	checks := map[string]func(string) bool{
-		"PODIUM_REGISTRY_STORE":    func(v string) bool { return v == "postgres" },
-		"PODIUM_POSTGRES_DSN":      func(v string) bool { return strings.Contains(v, "postgres:5432") },
-		"PODIUM_OBJECT_STORE":      func(v string) bool { return v == "s3" },
-		"PODIUM_S3_ENDPOINT":       func(v string) bool { return strings.Contains(v, "minio:9000") },
-		"PODIUM_S3_BUCKET":         func(v string) bool { return v == "podium" },
-		"PODIUM_IDENTITY_PROVIDER": func(v string) bool { return v != "" },
-		"PODIUM_BOOTSTRAP_ADMINS":  func(v string) bool { return v != "" },
-		"PODIUM_BIND":              func(v string) bool { return strings.HasPrefix(v, "0.0.0.0:") },
+		"PODIUM_REGISTRY_STORE":   func(v string) bool { return v == "postgres" },
+		"PODIUM_POSTGRES_DSN":     func(v string) bool { return strings.Contains(v, "postgres:5432") },
+		"PODIUM_OBJECT_STORE":     func(v string) bool { return v == "s3" },
+		"PODIUM_S3_ENDPOINT":      func(v string) bool { return strings.Contains(v, "minio:9000") },
+		"PODIUM_S3_BUCKET":        func(v string) bool { return v == "podium" },
+		"PODIUM_BOOTSTRAP_ADMINS": func(v string) bool { return v != "" },
+		"PODIUM_BIND":             func(v string) bool { return strings.HasPrefix(v, "0.0.0.0:") },
 	}
 	for key, ok := range checks {
 		v, present := env[key]
@@ -118,6 +117,25 @@ func TestDeployCompose_RegistryServiceWiring(t *testing.T) {
 		if !ok(v) {
 			t.Errorf("registry env %s=%q failed its wiring check", key, v)
 		}
+	}
+	// Spec: §13.1.1 — the evaluation stack selects no identity provider, so
+	// it authenticates no caller. Selecting injected-session-token over the
+	// empty key set the stack ships would abort the boot with
+	// config.runtime_keys_unavailable (§6.3.2).
+	if v, present := env["PODIUM_IDENTITY_PROVIDER"]; present {
+		t.Errorf("registry env sets PODIUM_IDENTITY_PROVIDER=%q; the evaluation stack selects no provider", v)
+	}
+	// Spec: §13.1.1 — the pin fixes the visibility persisted into a layer's
+	// declaration so the declaration is correct once an identity provider is
+	// configured. It changes nothing a caller observes on this stack, where
+	// every caller resolves as anonymous-public.
+	if v := env["PODIUM_DEFAULT_LAYER_VISIBILITY"]; v != "private" {
+		t.Errorf("PODIUM_DEFAULT_LAYER_VISIBILITY=%q, want \"private\"", v)
+	}
+	// Spec: §13.1.1 — the listener is published on the host loopback
+	// interface, so an unauthenticated registry is not reachable off-host.
+	if len(reg.Ports) != 1 || !strings.HasPrefix(reg.Ports[0], "127.0.0.1:") {
+		t.Errorf("registry ports = %v, want a single 127.0.0.1-bound publish", reg.Ports)
 	}
 	// The device-code authorization endpoint must point at the bundled Dex.
 	if v := env["PODIUM_OAUTH_AUTHORIZATION_ENDPOINT"]; !strings.Contains(v, "5556") {
@@ -130,6 +148,82 @@ func TestDeployCompose_RegistryServiceWiring(t *testing.T) {
 	}
 	if dep, ok := reg.DependsOn["bootstrap"]; !ok || dep.Condition != "service_completed_successfully" {
 		t.Errorf("registry should depend_on bootstrap with service_completed_successfully, got %+v", reg.DependsOn["bootstrap"])
+	}
+}
+
+// TestDeployCompose_InjectedTokenServicesSeedRuntimeKeys asserts the paired
+// runtime-key invariant over every service in the compose file: a service
+// that selects injected-session-token also names a PODIUM_RUNTIME_KEYS_PATH
+// and mounts a volume that supplies it. A service that selects the provider
+// over a key set no volume supplies aborts its boot with
+// config.runtime_keys_unavailable, and the compose file has no compiled
+// call site that would catch it. The invariant holds vacuously while no
+// service names the provider.
+//
+// Spec: §6.3.2 — the trusted runtime signing-key set is operator-supplied
+// configuration read at startup.
+// Spec: §13.12 — PODIUM_RUNTIME_KEYS_PATH names the seed file.
+func TestDeployCompose_InjectedTokenServicesSeedRuntimeKeys(t *testing.T) {
+	t.Parallel()
+	cf := loadComposeFile(t)
+	for name, svc := range cf.Services {
+		if svc.Environment["PODIUM_IDENTITY_PROVIDER"] != "injected-session-token" {
+			continue
+		}
+		keysPath := svc.Environment["PODIUM_RUNTIME_KEYS_PATH"]
+		if keysPath == "" {
+			t.Errorf("service %q selects injected-session-token and sets no PODIUM_RUNTIME_KEYS_PATH; its boot aborts with config.runtime_keys_unavailable", name)
+			continue
+		}
+		if !composeSuppliesPath(svc.Volumes, keysPath) {
+			t.Errorf("service %q sets PODIUM_RUNTIME_KEYS_PATH=%q but mounts no volume supplying it; volumes=%v", name, keysPath, svc.Volumes)
+		}
+	}
+}
+
+// composeSuppliesPath reports whether one of the compose volume entries
+// mounts the container-side path, either exactly or as a directory holding
+// it. A compose volume entry is `source:target[:options]`, so the
+// container-side path is the second colon-separated field.
+func composeSuppliesPath(volumes []string, target string) bool {
+	for _, v := range volumes {
+		fields := strings.Split(v, ":")
+		if len(fields) < 2 {
+			continue
+		}
+		mount := fields[1]
+		if mount == target || strings.HasPrefix(target, strings.TrimSuffix(mount, "/")+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// TestDeployCompose_ComposeSuppliesPath exercises the matcher the invariant
+// above runs vacuously today, so the arms it depends on are pinned before a
+// service reinstates injected-session-token.
+func TestDeployCompose_ComposeSuppliesPath(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		volumes []string
+		target  string
+		want    bool
+	}{
+		{"exact file mount", []string{"./deploy/keys.json:/etc/podium/keys.json:ro"}, "/etc/podium/keys.json", true},
+		{"directory prefix", []string{"./deploy/keys:/etc/podium"}, "/etc/podium/keys.json", true},
+		{"directory prefix with slash", []string{"./deploy/keys:/etc/podium/"}, "/etc/podium/keys.json", true},
+		{"unrelated mount", []string{"./deploy/dex:/etc/dex:ro"}, "/etc/podium/keys.json", false},
+		{"named volume without target", []string{"podium_data"}, "/etc/podium/keys.json", false},
+		{"no volumes", nil, "/etc/podium/keys.json", false},
+		{"sibling path is not a prefix", []string{"./a:/etc/podium-keys"}, "/etc/podium-keys.json", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := composeSuppliesPath(tc.volumes, tc.target); got != tc.want {
+				t.Errorf("composeSuppliesPath(%v, %q) = %v, want %v", tc.volumes, tc.target, got, tc.want)
+			}
+		})
 	}
 }
 

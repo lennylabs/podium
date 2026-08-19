@@ -8,14 +8,15 @@ package e2e
 // inexpressible against it. The capability to do better already existed in
 // scattered form: test/integration/injected_session_token_test.go boots a
 // server behind the §6.3.2 verifier and mints JWTs, the parity helpers in
-// injected_token_helpers_test.go generate a runtime key pair and register it,
+// injected_token_helpers_test.go generate a runtime key pair and seed it into
+// the trusted key set the registry reads at startup,
 // and auth_admin_rbac_test.go / admin_visibility_override_test.go /
 // auth_scim_visibility_test.go each hand-roll a registry.yaml with per-layer
 // visibility. This file packages those into one reusable primitive.
 //
 // startAuthServer boots `serve --standalone` in injected-session-token mode
 // from a declarative layer set with explicit visibility (public, org,
-// groups:<g>, users:<u>, or private), registers the runtime signing key, and
+// groups:<g>, users:<u>, or private), seeds the runtime signing key, and
 // optionally seeds SCIM users and groups so the §4.6 groups: filter resolves
 // through the registry directory. The returned authServer mints a caller
 // token for a given identity, org, and group set, and carries request
@@ -127,8 +128,9 @@ type authIdentity struct {
 }
 
 // startAuthServer boots a standalone registry behind the injected-session-token
-// verifier from spec, registers the runtime signing key so minted tokens
-// verify immediately, and seeds any declared SCIM users and groups. It returns
+// verifier from spec, seeding the runtime signing key into the trusted key set
+// the registry reads at startup so minted tokens verify on the first request,
+// and seeds any declared SCIM users and groups. It returns
 // a handle whose token() mints caller tokens and whose request helpers drive
 // the server as a chosen identity.
 func startAuthServer(t *testing.T, spec authServerSpec) *authServer {
@@ -147,6 +149,7 @@ func startAuthServer(t *testing.T, spec authServerSpec) *authServer {
 		"PODIUM_INGEST_OFFLINE=true",
 		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
 		"PODIUM_OAUTH_AUDIENCE=" + injAudience,
+		"PODIUM_RUNTIME_KEYS_PATH=" + injSeedRuntimeKeys(t, pemPath),
 	}
 	if len(spec.BootstrapAdmins) > 0 {
 		env = append(env, "PODIUM_BOOTSTRAP_ADMINS="+strings.Join(spec.BootstrapAdmins, ","))
@@ -157,7 +160,6 @@ func startAuthServer(t *testing.T, spec authServerSpec) *authServer {
 	env = append(env, spec.ExtraEnv...)
 
 	proc := startServerArgs(t, env, "serve", "--standalone")
-	injRegisterRuntime(t, proc, pemPath)
 
 	as := &authServer{
 		t:       t,

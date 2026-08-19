@@ -205,9 +205,9 @@ type mlVisLayer struct {
 }
 
 // mlVisServer boots a standalone server in injected-session-token mode over a
-// registry.yaml whose `layers:` list carries per-layer visibility blocks, then
-// registers the runtime signing key so per-caller JWTs verify. Layers ingest at
-// boot in list order (lowest precedence first). This is the visibility-capable
+// registry.yaml whose `layers:` list carries per-layer visibility blocks, and
+// seeds the runtime signing key at pemPath so per-caller JWTs verify. Layers
+// ingest at boot in list order (lowest precedence first). This is the visibility-capable
 // harness the per-identity multi-layer journeys need: an anonymous caller is
 // rejected before visibility, and each caller presents a signed token whose sub
 // the §4.6 evaluator matches against users:/organization:/groups: filters.
@@ -230,8 +230,8 @@ func mlVisServer(t *testing.T, home string, layers []mlVisLayer, pemPath string)
 		"PODIUM_INGEST_OFFLINE=true",
 		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
 		"PODIUM_OAUTH_AUDIENCE=" + injAudience,
+		"PODIUM_RUNTIME_KEYS_PATH=" + injSeedRuntimeKeys(t, pemPath),
 	}, "serve", "--standalone")
-	injRegisterRuntime(t, srv, pemPath)
 	return srv
 }
 

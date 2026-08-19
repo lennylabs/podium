@@ -156,7 +156,7 @@ A build pipeline materializes a deterministic artifact set into a deploy artifac
 
 **Pipeline setup:**
 
-1. CI obtains a runtime-issued JWT (per `injected-session-token`, §6.3.2). The runtime's signing key is registered with the registry one-time.
+1. CI obtains a runtime-issued JWT (per `injected-session-token`, §6.3.2). The deployment configures the registry to trust the runtime's signing key at startup (§6.3.2, §13.12).
 2. Pipeline step:
    ```bash
    export PODIUM_REGISTRY=https://podium.acme.com

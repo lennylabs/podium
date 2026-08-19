@@ -46,9 +46,9 @@ func TestAdminVisibilityOverride_E2E(t *testing.T) {
 		"PODIUM_INGEST_OFFLINE=true",
 		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
 		"PODIUM_OAUTH_AUDIENCE=" + injAudience,
+		"PODIUM_RUNTIME_KEYS_PATH=" + injSeedRuntimeKeys(t, pemPath),
 		"PODIUM_BOOTSTRAP_ADMINS=alice@acme.com",
 	}, "serve", "--standalone")
-	injRegisterRuntime(t, srv, pemPath)
 
 	aliceToken := injSignJWT(t, priv, injClaims("alice@acme.com")) // bootstrap admin
 	carolToken := injSignJWT(t, priv, injClaims("carol@acme.com")) // authenticated non-admin

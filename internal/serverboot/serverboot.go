@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -742,12 +743,15 @@ func run(ctx context.Context, stop func()) error {
 	// a store fault is tolerated (the ID is still returned).
 	tenantID, _ := bootstrapDefaultTenant(context.Background(), st, cfg.exposeScopePreview)
 
-	// §13.1.1 evaluation-stack bootstrap: seed the configured admin users
-	// for the default tenant so the documented `docker compose up` →
-	// `podium init` → `podium login` workflow reaches a state where an
-	// admin exists. PODIUM_BOOTSTRAP_ADMINS carries the user IDs; the
-	// chicken-and-egg of "the first admin can only be granted by an existing
-	// admin" is broken here at boot rather than over the admin API.
+	// §13.1.1 evaluation-stack bootstrap: seed the configured admin users for
+	// the default tenant, establishing the first admin grant for whichever
+	// identity provider an operator later configures.
+	// PODIUM_BOOTSTRAP_ADMINS carries the user IDs; the chicken-and-egg of
+	// "the first admin can only be granted by an existing admin" is broken
+	// here at boot rather than over the admin API. On a deployment that
+	// selects no identity provider, and therefore authenticates no caller,
+	// the grant is a forward-compatibility seed: no caller can present that
+	// identity until a provider is configured.
 	if n, err := seedBootstrapAdmins(context.Background(), st, tenantID, cfg.bootstrapAdmins); err != nil {
 		log.Printf("warning: bootstrap admin seeding failed: %v", err)
 	} else if n > 0 {
@@ -1038,21 +1042,20 @@ func run(ctx context.Context, stop func()) error {
 		bootOpts = append(bootOpts, server.WithLatencyObserver(latencyObs))
 	}
 
-	// §6.3.2 runtime trust keys: when PODIUM_RUNTIME_KEYS_PATH is set,
-	// registrations persist as a JSON file at that path; the registry
-	// reloads them on startup. Without the env var, the registry stays in
-	// memory (registrations vanish on restart). The same store is consulted
-	// by the request-time JWT verifier and by the admin register/list
-	// endpoint, so a key registered over HTTP is immediately trusted.
+	// §6.3.2 runtime trust keys: the trusted key set comes from
+	// operator-supplied configuration read at startup, named by
+	// PODIUM_RUNTIME_KEYS_PATH. There is no request-time registration API, so
+	// an unreadable or unparseable file is a configuration failure rather
+	// than a degraded mode: it would silently narrow the trusted set and
+	// reject every runtime-signed call. Abort under every identity provider.
+	runtimeKeysPath := os.Getenv("PODIUM_RUNTIME_KEYS_PATH")
 	var runtimeKeys identity.RuntimeKeyVerifierStore = identity.NewRuntimeKeyRegistry()
-	if path := os.Getenv("PODIUM_RUNTIME_KEYS_PATH"); path != "" {
-		persisted, err := identity.LoadFilePersistedRuntimeKeyRegistry(path)
+	if runtimeKeysPath != "" {
+		persisted, err := identity.LoadFilePersistedRuntimeKeyRegistry(runtimeKeysPath)
 		if err != nil {
-			log.Printf("warning: runtime key persistence disabled: %v", err)
-		} else {
-			runtimeKeys = persisted
-			log.Printf("runtime trust keys persisted at %s", path)
+			return fmt.Errorf("config.runtime_keys_unavailable: PODIUM_RUNTIME_KEYS_PATH=%q could not be read as a trusted runtime key set (§6.3.2, §13.12): %w", runtimeKeysPath, err)
 		}
+		runtimeKeys = persisted
 	}
 
 	// §6.3.2 injected-session-token: install the per-request verifier so the
@@ -1092,6 +1095,17 @@ func run(ctx context.Context, stop func()) error {
 			if err := injectedTokenAudienceGuard(cfg.identityProvider, cfg.oauthAudience); err != nil {
 				return err
 			}
+			// §6.3.2: a verifying registry over an empty key set rejects every
+			// call and can accept no first key, so refuse to start.
+			if err := runtimeKeyBootstrapGuard(cfg.identityProvider, runtimeKeysPath, runtimeKeys); err != nil {
+				return err
+			}
+			issuers := make([]string, 0, len(runtimeKeys.All()))
+			for _, rk := range runtimeKeys.All() {
+				issuers = append(issuers, rk.Issuer)
+			}
+			sort.Strings(issuers)
+			log.Printf("identity provider: injected-session-token trusts runtime issuers %s (from %s)", strings.Join(issuers, ", "), runtimeKeysPath)
 			layerVerify = injectedTokenVerifier(runtimeKeys, cfg.oauthAudience, cfg.idpGroupMapping)
 			bootOpts = append(bootOpts, server.WithIdentityVerifier(layerVerify))
 			verifierInstalled = true
@@ -1198,8 +1212,6 @@ func run(ctx context.Context, stop func()) error {
 			return registry.AdminAuthorize(r.Context(), layerIdentity(r))
 		})
 
-	runtimeEndpoint := server.NewRuntimeKeyEndpoint(runtimeKeys, mode)
-
 	mux := http.NewServeMux()
 	mux.Handle("/v1/layers", layers.Handler())
 	mux.Handle("/v1/layers/", layers.Handler())
@@ -1210,7 +1222,6 @@ func run(ctx context.Context, stop func()) error {
 	// the registry audit stream. Backed by the same store + audit sink as the
 	// layer endpoint.
 	mux.Handle("/v1/admin/erase", layers.EraseHandler())
-	mux.Handle("/v1/admin/runtime", runtimeEndpoint.Handler())
 	if cfg.webUI {
 		mux.Handle("/ui/", http.StripPrefix("/ui/", http.FileServer(http.FS(web.Assets()))))
 		log.Printf("web UI mounted at /ui/")
@@ -2175,6 +2186,13 @@ func bootstrapOptions(c *Config, objStore objectstore.Provider) []server.Option 
 	out := []server.Option{}
 	if c.publicMode {
 		out = append(out, server.WithPublicMode())
+	}
+	// §4.7: a registry that configures no identity provider, or one in
+	// §13.10 public mode, authenticates no caller, so no caller can hold
+	// the per-tenant admin role and the re-embed endpoint would be
+	// unreachable. The predicate matches the LayerEndpoint admin callback.
+	if c.publicMode || c.identityProvider == "" {
+		out = append(out, server.WithUnauthenticatedReembed())
 	}
 	if objStore != nil {
 		out = append(out, server.WithObjectStore(objStore, c.publicURL, c.presignTTL))

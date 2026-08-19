@@ -9,10 +9,10 @@ import (
 
 // ErrReadOnly signals a write rejected because the registry is running
 // in §13.2.1 read-only mode. It maps to the registry.read_only §6.10
-// code. Every write endpoint the spec enumerates (ingest webhooks,
-// layer admin operations, freeze toggles, admin grants, runtime-key
-// issuance) rejects with this single code; the spec defines no separate
-// config-rejection code.
+// code. Every /v1 catalog and administrative handler that mutates
+// registry state rejects with this single code; the §6.3.1 SCIM
+// receiver is outside that set. The call sites below are the set, and
+// the spec defines no separate config-rejection code.
 var ErrReadOnly = errors.New("registry.read_only")
 
 // Mode is one of the §13.9 health states.

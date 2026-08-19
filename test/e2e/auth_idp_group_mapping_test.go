@@ -67,11 +67,11 @@ func TestAuthIdpGroupMapping_RawClaimMapsToLayerGroup(t *testing.T) {
 		"PODIUM_INGEST_OFFLINE=true",
 		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
 		"PODIUM_OAUTH_AUDIENCE=" + injAudience,
+		"PODIUM_RUNTIME_KEYS_PATH=" + injSeedRuntimeKeys(t, pemPath),
 		// Map the raw IdP group id to the friendly layer group name. SCIM is
 		// deliberately unset so visibility can only come from this mapping.
 		"PODIUM_IDP_GROUP_MAPPING=" + idpmapRawGroup + "=" + idpmapLayerName,
 	}, "serve", "--standalone")
-	injRegisterRuntime(t, srv, pemPath)
 
 	const artifactURL = "/v1/load_artifact?id=finance/forecast"
 

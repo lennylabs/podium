@@ -406,8 +406,10 @@ Built-in identity providers:
   `injected-session-token`, `oidc-jwt`, and `trusted-headers`.
 - **`injected-session-token`**: runtime-issued signed JWT for
   managed agent runtimes (Bedrock Agents, OpenAI Assistants, custom
-  orchestrators). The runtime registers its signing key once with
-  the registry; the registry verifies signatures on every call.
+  orchestrators). The deployment configures the registry to trust the
+  runtime's signing key at startup through `PODIUM_RUNTIME_KEYS_PATH`,
+  written with `podium admin runtime register --keys-file`; the registry
+  verifies signatures on every call.
 - **`oidc-jwt`** and **`trusted-headers`**: registry-process providers for a
   deployment that runs the registry behind a gateway that already authenticated
   the caller. `oidc-jwt` verifies the forwarded IdP-signed token on every

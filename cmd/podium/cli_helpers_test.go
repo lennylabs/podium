@@ -270,7 +270,6 @@ func TestSubcommands_HelpExitsZero(t *testing.T) {
 		"adminReembedCmd":       adminReembedCmd,
 		"adminEraseCmd":         adminEraseCmd,
 		"adminRetentionCmd":     adminRetentionCmd,
-		"adminRuntimeList":      adminRuntimeList,
 	} {
 		t.Run(name+"_help", func(t *testing.T) {
 			withStderr(t, func() {

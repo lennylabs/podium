@@ -56,7 +56,7 @@ func TestErrorResultFrom_PropagatesRegistryEnvelope(t *testing.T) {
 		Message:         "Runtime 'managed-runtime-x' is not registered with the registry.",
 		Details:         map[string]any{"runtime_iss": "managed-runtime-x"},
 		Retryable:       false,
-		SuggestedAction: "Register the runtime's signing key via 'podium admin runtime register'.",
+		SuggestedAction: "Add the runtime's signing key with 'podium admin runtime register --keys-file', then restart the registry.",
 	}
 	m := errorResultFrom(re)
 	if m["code"] != "auth.untrusted_runtime" {
@@ -145,7 +145,7 @@ func TestProxyGet_DecodesRegistryEnvelopeEndToEnd(t *testing.T) {
 		`"message":"Runtime 'managed-runtime-x' is not registered with the registry.",` +
 		`"details":{"runtime_iss":"managed-runtime-x"},` +
 		`"retryable":false,` +
-		`"suggested_action":"Register the runtime's signing key via 'podium admin runtime register'."}`
+		`"suggested_action":"Add the runtime's signing key with 'podium admin runtime register --keys-file', then restart the registry."}`
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)

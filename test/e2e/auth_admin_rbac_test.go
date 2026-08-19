@@ -69,9 +69,9 @@ func TestAuthAdminRBAC_GrantRevokeShowEffectiveGated(t *testing.T) {
 		"PODIUM_INGEST_OFFLINE=true",
 		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
 		"PODIUM_OAUTH_AUDIENCE=" + injAudience,
+		"PODIUM_RUNTIME_KEYS_PATH=" + injSeedRuntimeKeys(t, pemPath),
 		"PODIUM_BOOTSTRAP_ADMINS=alice@acme.com",
 	}, "serve", "--standalone")
-	injRegisterRuntime(t, srv, pemPath)
 
 	adminToken := injSignJWT(t, priv, injClaims("alice@acme.com")) // bootstrap admin
 	carolToken := injSignJWT(t, priv, injClaims("carol@acme.com")) // verified non-admin
@@ -206,9 +206,9 @@ func TestAuthAdminRBAC_LoadOverrideGated(t *testing.T) {
 		"PODIUM_INGEST_OFFLINE=true",
 		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
 		"PODIUM_OAUTH_AUDIENCE=" + injAudience,
+		"PODIUM_RUNTIME_KEYS_PATH=" + injSeedRuntimeKeys(t, pemPath),
 		"PODIUM_BOOTSTRAP_ADMINS=alice@acme.com",
 	}, "serve", "--standalone")
-	injRegisterRuntime(t, srv, pemPath)
 
 	adminToken := injSignJWT(t, priv, injClaims("alice@acme.com"))
 	carolToken := injSignJWT(t, priv, injClaims("carol@acme.com"))

@@ -166,8 +166,7 @@ Commands:
   admin grant         Grant tenant admin role to a user.
   admin revoke        Revoke tenant admin role from a user.
   admin show-effective  Print the per-layer visibility for a user identity.
-  admin runtime register  Register a trusted runtime signing key.
-  admin runtime list      List registered runtimes.
+  admin runtime register  Write a trusted runtime signing key into the registry's keys file.
   admin migrate-to-standard  Pump standalone state (SQLite + filesystem) into a standard deployment (Postgres + S3).
   login               Run the OAuth Device Code flow and persist the token to the keychain.
   logout              Remove the cached token for the configured registry.

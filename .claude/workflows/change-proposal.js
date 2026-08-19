@@ -646,7 +646,9 @@ if (mode === "new") {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 60);
-  path = repo + "/proposals/" + num + "_" + draft.kind + "_" + slug + ".md";
+  // Podium's convention is NNNN-<kebab-slug>.md. The draft still records a kind
+  // to frame the proposal, but the kind is not part of the filename.
+  path = repo + "/proposals/" + num + "-" + slug + ".md";
 
   await robustAgent(
     "Write a change proposal file.\n\n" +

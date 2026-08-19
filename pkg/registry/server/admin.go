@@ -26,7 +26,7 @@ func (s *Server) handleAdminGrants(w http.ResponseWriter, r *http.Request) {
 	}
 	// spec: §13.2.1 — admin grants are a write endpoint, so they are
 	// rejected in read-only mode with registry.read_only, consistent with
-	// the layer-admin and runtime-key handlers. Both routes below mutate
+	// the other /v1 administrative write handlers. Both routes below mutate
 	// the store, so the check runs before the method switch.
 	if rejectIfReadOnly(w, s.mode) {
 		return

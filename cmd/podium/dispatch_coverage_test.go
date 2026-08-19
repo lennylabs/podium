@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // adminCmd and layerCmd dispatch tables: call into each case so the
 // dispatch switch statements are fully exercised. Each branch
@@ -89,12 +92,36 @@ func TestSyncCmd_OverrideDispatch(t *testing.T) {
 }
 
 func TestAdminRuntimeCmd_DispatchTable(t *testing.T) {
-	t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:1")
-	for _, sub := range []string{"register", "list"} {
+	for _, sub := range []string{"register"} {
 		t.Run(sub, func(t *testing.T) {
 			withStderr(t, func() {
 				_ = adminRuntimeCmd([]string{sub, "--help"})
 			})
 		})
+	}
+}
+
+// Spec: §6.3.2 — the trusted runtime key set is boot-time configuration the
+// registry reads from a local file, so the registry exposes no listing API and
+// `podium admin runtime list` is not a subcommand. The dispatcher exits 2 on
+// it and the group help offers register alone.
+func TestAdminRuntimeCmd_ListIsNotASubcommand(t *testing.T) {
+	var code int
+	withStderr(t, func() {
+		code = adminRuntimeCmd([]string{"list"})
+	})
+	if code != 2 {
+		t.Errorf("adminRuntimeCmd(list) = %d, want 2", code)
+	}
+	help := captureStdout(t, func() {
+		if got := adminRuntimeCmd([]string{"--help"}); got != 0 {
+			t.Errorf("adminRuntimeCmd(--help) = %d, want 0", got)
+		}
+	})
+	if !strings.Contains(help, "register") {
+		t.Errorf("group help does not offer register:\n%s", help)
+	}
+	if strings.Contains(help, "list") {
+		t.Errorf("group help still offers list:\n%s", help)
 	}
 }

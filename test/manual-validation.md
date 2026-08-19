@@ -756,12 +756,16 @@ visibility, the mint helper in `tools/minttoken`.
    YAML
    ```
 
-3. Generate a runtime key, boot the server in injected-session-token mode, and
-   register the key. Seed SCIM so the `engineering` group resolves.
+3. Generate a runtime key, write it into the registry's keys file, and boot the
+   server in injected-session-token mode against that file. The registry reads
+   the keys file before it binds a listener, so the register step runs first.
+   Seed SCIM so the `engineering` group resolves.
 
    ```bash
    go run ./tools/minttoken --keys "$WORK/keys" >/dev/null 2>&1   # writes the keypair
+   podium admin runtime register --keys-file "$WORK/keys/runtimes.json" --issuer manual-runtime --algorithm RS256 --public-key-file "$WORK/keys/runtime-pub.pem"
    export PODIUM_IDENTITY_PROVIDER=injected-session-token
+   export PODIUM_RUNTIME_KEYS_PATH="$WORK/keys/runtimes.json"
    export PODIUM_OAUTH_AUDIENCE=https://podium.manual
    export PODIUM_SCIM_TOKENS=scim-secret
    export PODIUM_SCIM_STORE_PATH="$WORK/scim.json"
@@ -769,7 +773,6 @@ visibility, the mint helper in `tools/minttoken`.
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8108/healthz
    export PODIUM_REGISTRY=http://127.0.0.1:8108
-   podium admin runtime register --registry "$PODIUM_REGISTRY" --issuer manual-runtime --algorithm RS256 --public-key-file "$WORK/keys/runtime-pub.pem"
    ```
 
    Provision `alice@acme.com` into the `engineering` SCIM group and leave
@@ -811,9 +814,11 @@ show-effective`, bootstrap admins.
 **Steps.**
 
 1. Run the isolation block.
-2. Boot an injected-session-token server with `alice@acme.com` as a bootstrap
-   admin, over a small registry, and register the runtime key (as in S12, with
-   `PODIUM_BOOTSTRAP_ADMINS=alice@acme.com` added and `--bind 127.0.0.1:8109`).
+2. Write the runtime key into the keys file and boot an injected-session-token
+   server against it with `alice@acme.com` as a bootstrap admin, over a small
+   registry (as in S12, with `PODIUM_BOOTSTRAP_ADMINS=alice@acme.com` added and
+   `--bind 127.0.0.1:8109`). The register step and the
+   `PODIUM_RUNTIME_KEYS_PATH` export both precede `podium serve`.
 3. Exercise the admin surface as alice (admin) and bob (non-admin).
 
    ```bash
@@ -1830,20 +1835,22 @@ log, `admin erase`, `admin retention`.
 **Steps.**
 
 1. Run the isolation block.
-2. Boot an injected-session-token server over a small registry and register the
-   runtime key (as in S12, with `--bind 127.0.0.1:8122`). The audit log lands at
+2. Write the runtime key into the registry's keys file, then boot an
+   injected-session-token server over a small registry against that file (as in
+   S12, with `--bind 127.0.0.1:8122`). The audit log lands at
    `$PODIUM_AUDIT_LOG_PATH` from the isolation block.
 
    ```bash
    podium artifact scaffold --type skill --description "Quarterly report" "$WORK/reg/report"
    go run ./tools/minttoken --keys "$WORK/keys" >/dev/null 2>&1
+   podium admin runtime register --keys-file "$WORK/keys/runtimes.json" --issuer manual-runtime --algorithm RS256 --public-key-file "$WORK/keys/runtime-pub.pem"
    export PODIUM_IDENTITY_PROVIDER=injected-session-token
+   export PODIUM_RUNTIME_KEYS_PATH="$WORK/keys/runtimes.json"
    export PODIUM_OAUTH_AUDIENCE=https://podium.manual
    podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8122 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8122/healthz
    export PODIUM_REGISTRY=http://127.0.0.1:8122
-   podium admin runtime register --registry "$PODIUM_REGISTRY" --issuer manual-runtime --algorithm RS256 --public-key-file "$WORK/keys/runtime-pub.pem"
    ```
 
 3. Generate audited activity as alice, then inspect the audit log.
@@ -2339,10 +2346,12 @@ allowlist, and the per-receiver `debounce` field.
 **Steps.**
 
 1. Run the isolation block.
-2. Generate a runtime key (`go run ./tools/minttoken --keys "$WORK/keys"`), boot an
-   injected-session-token standalone server with `alice@acme.com` as a bootstrap
-   admin over a one-artifact registry, and register the runtime key (as in S12 and
+2. Generate a runtime key (`go run ./tools/minttoken --keys "$WORK/keys"`), write it
+   into the keys file with `podium admin runtime register --keys-file`, then boot an
+   injected-session-token standalone server against that file with `alice@acme.com`
+   as a bootstrap admin over a one-artifact registry (as in S12 and
    S13, with `PODIUM_BOOTSTRAP_ADMINS=alice@acme.com`, `PODIUM_OAUTH_AUDIENCE=https://podium.manual`,
+   `PODIUM_RUNTIME_KEYS_PATH="$WORK/keys/runtimes.json"`,
    and `--bind 127.0.0.1:8134`). Export `PODIUM_REGISTRY=http://127.0.0.1:8134`.
 3. Mint an admin and a non-admin token, and exercise the receiver CRUD over HTTP.
    The token is sent as `Authorization: Bearer`. The addresses use the

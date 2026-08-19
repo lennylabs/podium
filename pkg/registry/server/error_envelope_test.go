@@ -77,7 +77,7 @@ func TestEnrichEnvelope_SuggestedActionSpecExample(t *testing.T) {
 	t.Parallel()
 	e := &ErrorResponse{Code: "auth.untrusted_runtime", Message: "untrusted"}
 	enrichEnvelope(e)
-	const want = "Register the runtime's signing key via 'podium admin runtime register'."
+	const want = "Add the runtime's signing key with 'podium admin runtime register --keys-file', then restart the registry."
 	if e.SuggestedAction != want {
 		t.Errorf("suggested_action = %q, want %q", e.SuggestedAction, want)
 	}

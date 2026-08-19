@@ -568,20 +568,20 @@ With no `--artifact`, the command runs a tenant-wide pass; `--only-missing` and 
 
 ### `podium admin runtime`
 
-Manages the trusted runtime signing keys the `injected-session-token` verifier consults. `--registry` is required on both subcommands (defaults to `PODIUM_REGISTRY`).
+Writes a trusted runtime signing key into the keys file the `injected-session-token` verifier reads at startup. Like `podium admin erase --local`, this is a local form: it edits a file on the host rather than calling a registry, and the registry exposes no request-time registration endpoint.
 
 ```
-podium admin runtime register --issuer <name> --algorithm <alg> --public-key-file <path> --registry <url>
-podium admin runtime list --registry <url>
+podium admin runtime register --keys-file <path> --issuer <name> --algorithm <alg> --public-key-file <path>
 ```
 
 | Flag | Effect |
 |:--|:--|
+| `--keys-file <path>` | Path to the registry's runtime keys file, the same path the registry process reads from `PODIUM_RUNTIME_KEYS_PATH`. Required; it takes no environment default. |
 | `--issuer <name>` | Issuer name the runtime puts in the token's `iss` claim. Required. |
 | `--algorithm <alg>` | JWS algorithm the runtime signs with (`RS256`, `ES256`, `EdDSA`, and so on). Required. |
-| `--public-key-file <path>` | Path to the PEM-encoded public key. Required; the command reads the file and sends its contents. |
+| `--public-key-file <path>` | Path to the PEM-encoded public key. Required; the command reads the file and parses it against `--algorithm`, so a mismatched key fails here instead of at the registry's next start. |
 
-`list` prints the registered runtimes without echoing the key material.
+The command reads the existing records and rewrites the whole file, so the keys file has a single writer and the result of concurrent `register` invocations is undefined. The registry loads the new record at its next start. Read the file back with `cat` or `jq`; it holds public keys alone.
 
 ### `podium admin migrate-to-standard`
 
@@ -750,6 +750,7 @@ podium search "month-end close OR variance" --type skill --top-k 15 --json \
 | `PODIUM_PUBLIC_MODE` | Equivalent of `--public-mode`. |
 | `PODIUM_NO_AUTOSTANDALONE` | Disable zero-flag standalone fallback. |
 | `PODIUM_MULTI_TENANT` | Registry-process boot setting. When `true`, the registry runs in multi-tenant mode and routes each request to the tenant its organization names; the `podium admin tenant` commands and the `/v1/admin/tenants` endpoints are available. When unset, every request binds to the single `default` org and tenant management is rejected. |
+| `PODIUM_RUNTIME_KEYS_PATH` | Registry-process boot setting. Path to the JSON file holding the trusted runtime signing keys, written with `podium admin runtime register --keys-file`. The registry reads it before it binds a listener and never writes it. A key added to the file takes effect at the next process start. A file the registry cannot read or parse aborts startup with `config.runtime_keys_unavailable` under every identity provider; under `injected-session-token` an unset path, or a path naming a file that carries no key, aborts startup with the same code. |
 | `PODIUM_OPERATOR_ADMINS` | Registry-process boot setting. Comma-separated identities granted the instance-operator role at boot. The operator role authorizes the `podium admin tenant` commands and the `/v1/admin/tenants` endpoints; it confers no per-tenant `admin` rights. Distinct from `PODIUM_BOOTSTRAP_ADMINS`, which seeds per-tenant `admin` grants. |
 
 Server-side backend selection variables (`PODIUM_VECTOR_BACKEND`, `PODIUM_EMBEDDING_PROVIDER`, etc.) are documented alongside the corresponding backend in [Extending](../deployment/extending).
