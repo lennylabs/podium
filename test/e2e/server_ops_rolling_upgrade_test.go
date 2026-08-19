@@ -268,8 +268,10 @@ func ruSeededManifestRow(t *testing.T, dsn, id, version string) (hash string, ok
 // and the injected-session-token identity provider with a bootstrapped admin.
 // Seeding the admin writes admin_grants, an org table, so ensureOrg runs the
 // §13.4 additive migration on the prior-version schema at boot (the expand
-// step). The caller registers the runtime key and mints tokens.
-func ruStartUpgradedServer(t *testing.T, dsn string) *serverProc {
+// step). keysPath names the seeded trusted runtime key set the registry reads
+// at startup; the caller mints tokens against the matching private key, and the
+// two replicas of a roll share one path so one key verifies against both.
+func ruStartUpgradedServer(t *testing.T, dsn, keysPath string) *serverProc {
 	t.Helper()
 	return startServerArgs(t, []string{
 		"HOME=" + t.TempDir(),
@@ -284,6 +286,7 @@ func ruStartUpgradedServer(t *testing.T, dsn string) *serverProc {
 		"PODIUM_NO_EMBEDDINGS=true",
 		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
 		"PODIUM_OAUTH_AUDIENCE=" + injAudience,
+		"PODIUM_RUNTIME_KEYS_PATH=" + keysPath,
 		"PODIUM_BOOTSTRAP_ADMINS=alice@acme.com",
 		"PODIUM_DEFAULT_LAYER_VISIBILITY=public",
 	}, "serve")
@@ -356,8 +359,8 @@ func TestServerOps_RollingUpgradeCoexistence(t *testing.T) {
 	// Bootstrapping the admin writes admin_grants (an org table), so ensureOrg
 	// runs the §13.4 additive migration on the legacy schema at boot.
 	priv, pemPath := injKeyPair(t)
-	srvNew := ruStartUpgradedServer(t, dsn)
-	injRegisterRuntime(t, srvNew, pemPath)
+	keysPath := injSeedRuntimeKeys(t, pemPath)
+	srvNew := ruStartUpgradedServer(t, dsn, keysPath)
 	token := injSignJWT(t, priv, injClaims("alice@acme.com"))
 
 	// The boot added the recent additive columns to the pre-existing manifests
@@ -403,10 +406,9 @@ func TestServerOps_RollingUpgradeCoexistence(t *testing.T) {
 	// already-migrated org schema, standing in for the older replica that
 	// continues serving during the roll. The additive schema is forward- and
 	// backward-compatible, so the two processes coexist over one database. The
-	// same runtime key is registered with the second server so the admin's token
+	// same seeded runtime key set backs the second server so the admin's token
 	// verifies against both.
-	srvOther := ruStartUpgradedServer(t, dsn)
-	injRegisterRuntime(t, srvOther, pemPath)
+	srvOther := ruStartUpgradedServer(t, dsn, keysPath)
 
 	// During the overlap both binaries serve reads: each resolves the seeded
 	// legacy artifact and the artifact the first binary ingested.
@@ -477,8 +479,8 @@ func TestServerOps_RollbackBeforeFinalize(t *testing.T) {
 	// ---- Stage the earlier binary's database, then expand with the new binary -
 	id, version, contentHash := ruStageLegacyDatabase(t, dsn)
 	priv, pemPath := injKeyPair(t)
-	srvNew := ruStartUpgradedServer(t, dsn)
-	injRegisterRuntime(t, srvNew, pemPath)
+	keysPath := injSeedRuntimeKeys(t, pemPath)
+	srvNew := ruStartUpgradedServer(t, dsn, keysPath)
 	token := injSignJWT(t, priv, injClaims("alice@acme.com"))
 
 	// The new binary ingests an artifact, populating the recent additive
@@ -546,8 +548,7 @@ func TestServerOps_RollbackBeforeFinalize(t *testing.T) {
 	// the seeded row, the first upgrade's ingest, and the row the rolled-back
 	// binary wrote, so no step in the rollback lost data and the schema stayed
 	// forward-compatible throughout.
-	srvReupgrade := ruStartUpgradedServer(t, dsn)
-	injRegisterRuntime(t, srvReupgrade, pemPath)
+	srvReupgrade := ruStartUpgradedServer(t, dsn, keysPath)
 	for _, want := range []string{id, newID, rolledBackID} {
 		if st, _, body := ruLoad(t, srvReupgrade, token, want, ""); st != 200 {
 			t.Errorf("re-upgraded binary cannot load %q after the rollback: HTTP %d\nbody: %s", want, st, body)

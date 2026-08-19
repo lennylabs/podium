@@ -297,8 +297,9 @@ func withSink(t testing.TB, s *notificationSink) bootOption {
 // is reachable by a minted admin Bearer token, ingesting registry. The receiver
 // CRUD is admin-gated (s.requireAdmin -> core.AdminAuthorize), so the server
 // boots with the injected-session-token identity provider, a bootstrap admin
-// grant for alice@acme.com, and the runtime signing key registered, then mints
-// an admin token onto the returned serverProc.
+// grant for alice@acme.com, and the runtime signing key seeded into the trusted
+// key set it reads at startup, then mints an admin token onto the returned
+// serverProc.
 func startWebhookAdminServer(t *testing.T, registry string, opts ...bootOption) *serverProc {
 	t.Helper()
 	srv, _ := bootWebhookAdminServer(t, registry, opts...)
@@ -327,6 +328,7 @@ func bootWebhookAdminServer(t *testing.T, registry string, opts ...bootOption) (
 		"HOME=" + t.TempDir(),
 		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
 		"PODIUM_OAUTH_AUDIENCE=" + injAudience,
+		"PODIUM_RUNTIME_KEYS_PATH=" + injSeedRuntimeKeys(t, pemPath),
 		"PODIUM_BOOTSTRAP_ADMINS=alice@acme.com",
 		// An admin-defined layer (the republish helpers register one with the
 		// admin token) defaults to private; make it public so the admin's
@@ -353,7 +355,6 @@ func bootWebhookAdminServer(t *testing.T, registry string, opts ...bootOption) (
 		args = append(args, "--layer-path", registry)
 	}
 	srv := startServerArgs(t, env, args...)
-	injRegisterRuntime(t, srv, pemPath)
 	srv.adminToken = injSignJWT(t, priv, injClaims("alice@acme.com"))
 	return srv, priv
 }

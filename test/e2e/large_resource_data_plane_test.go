@@ -83,8 +83,7 @@ func TestLargeResourceDataPlane_S3PresignRefresh(t *testing.T) {
 	// same URL has expired so S3 returns 403. The refresh below re-requests
 	// load_artifact for a freshly minted URL whose own 2-second window is fresh.
 	priv, pemPath := injKeyPair(t)
-	srv := msStartStandardServerEnv(t, dsn, bucket, region, "PODIUM_PRESIGN_TTL_SECONDS=2")
-	injRegisterRuntime(t, srv, pemPath)
+	srv := msStartStandardServerEnv(t, dsn, bucket, region, pemPath, "PODIUM_PRESIGN_TTL_SECONDS=2")
 	token := injSignJWT(t, priv, injClaims("alice@acme.com"))
 
 	above := lrAbove()

@@ -663,8 +663,8 @@ func TestServerOps_PerLayerVisibilityInjectedToken(t *testing.T) {
 		"PODIUM_INGEST_OFFLINE=true",
 		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
 		"PODIUM_OAUTH_AUDIENCE=" + injAudience,
+		"PODIUM_RUNTIME_KEYS_PATH=" + injSeedRuntimeKeys(t, pem),
 	}, "serve", "--standalone")
-	injRegisterRuntime(t, srv, pem)
 
 	// A caller whose JWT carries the finance group sees the finance-only
 	// artifact.

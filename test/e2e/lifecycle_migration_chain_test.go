@@ -138,8 +138,7 @@ func TestLifecycle_MigrationChainFilesystemStandaloneStandard(t *testing.T) {
 	// injected-session-token identity path the parity helper wires; the migrated
 	// public layer is visible to a verified caller.
 	priv, pemPath := injKeyPair(t)
-	standard := msStartStandardServer(t, dsn, bucket, region)
-	injRegisterRuntime(t, standard, pemPath)
+	standard := msStartStandardServer(t, dsn, bucket, region, pemPath)
 	token := injSignJWT(t, priv, injClaims("alice@acme.com"))
 
 	// load_artifact through the standard stack returns the same content hash and

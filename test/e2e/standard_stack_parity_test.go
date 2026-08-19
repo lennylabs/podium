@@ -85,16 +85,17 @@ func msSkipIfNoStack(t *testing.T) (dsn, bucket, region string) {
 // plus the injected-session-token identity provider. There is no --standard
 // flag; the mode is implied by the explicit backend config, and the bare `serve`
 // subcommand (no --standalone) lets serverboot resolve the configured backends.
-// It registers the runtime signing key and returns the running server.
+// It seeds the runtime signing key at pemPath into the trusted key set the
+// registry reads at startup and returns the running server.
 //
 // The audience env (PODIUM_OAUTH_AUDIENCE) and the installed request-time
 // verifier are required: serverboot's injectedTokenAudienceGuard fails closed
 // without the audience, and identityVisibilityGuard fails closed if the selected
 // provider has no verifier, so a successful boot here is itself evidence the
 // managed identity path is wired (§6.3.2).
-func msStartStandardServer(t *testing.T, dsn, bucket, region string) *serverProc {
+func msStartStandardServer(t *testing.T, dsn, bucket, region, pemPath string) *serverProc {
 	t.Helper()
-	return msStartStandardServerEnv(t, dsn, bucket, region)
+	return msStartStandardServerEnv(t, dsn, bucket, region, pemPath)
 }
 
 // msStartStandardServerEnv is msStartStandardServer with extra environment
@@ -102,7 +103,7 @@ func msStartStandardServer(t *testing.T, dsn, bucket, region string) *serverProc
 // It is used to set PODIUM_PRESIGN_TTL_SECONDS so an S3 presigned URL expires
 // inside the test and the 403-driven refresh can be exercised against the live
 // data plane (§6.2 / §6.6).
-func msStartStandardServerEnv(t *testing.T, dsn, bucket, region string, extraEnv ...string) *serverProc {
+func msStartStandardServerEnv(t *testing.T, dsn, bucket, region, pemPath string, extraEnv ...string) *serverProc {
 	t.Helper()
 	emb := semanticMockEmbedder(t)
 	env := []string{
@@ -129,6 +130,7 @@ func msStartStandardServerEnv(t *testing.T, dsn, bucket, region string, extraEnv
 		"PODIUM_OPENAI_BASE_URL=" + emb.URL,
 		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
 		"PODIUM_OAUTH_AUDIENCE=" + injAudience,
+		"PODIUM_RUNTIME_KEYS_PATH=" + injSeedRuntimeKeys(t, pemPath),
 		// alice@acme.com is bootstrapped as the tenant admin so the author can
 		// register a layer through the managed stack; the consumer journey then
 		// runs as the same verified caller (§4.7.2).
@@ -257,8 +259,7 @@ func TestStandardStackParity_AuthorToConsumer(t *testing.T) {
 	dsn, bucket, region := msSkipIfNoStack(t)
 
 	priv, pemPath := injKeyPair(t)
-	srv := msStartStandardServer(t, dsn, bucket, region)
-	injRegisterRuntime(t, srv, pemPath)
+	srv := msStartStandardServer(t, dsn, bucket, region, pemPath)
 	token := injSignJWT(t, priv, injClaims("alice@acme.com"))
 
 	// ---- Author: ingest a bundled-resource layer through the managed stack ---

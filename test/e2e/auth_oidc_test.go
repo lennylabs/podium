@@ -819,9 +819,9 @@ func TestAuth_IdpGroupMappingRemapsClaim(t *testing.T) {
 		"PODIUM_INGEST_OFFLINE=true",
 		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
 		"PODIUM_OAUTH_AUDIENCE=" + injAudience,
+		"PODIUM_RUNTIME_KEYS_PATH=" + injSeedRuntimeKeys(t, pem),
 		"PODIUM_IDP_GROUP_MAPPING=00g1financeOID=finance",
 	}, "serve", "--standalone")
-	injRegisterRuntime(t, srv, pem)
 
 	// A caller whose token carries the raw OID (not the friendly name) sees the
 	// finance-only artifact, because the mapping rewrites 00g1financeOID ->
