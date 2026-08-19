@@ -84,6 +84,14 @@ var canonicalArtifacts = []fixture{
 		artifact: "---\ntype: hook\nversion: 1.0.0\nhook_event: pre_tool_use\nhook_action: ./scripts/guard.sh\n---\n\nGuard before each tool use.\n",
 	},
 	{
+		id: "team/fmt",
+		// A tool subtype rather than a generic event. Every harness that lacks a
+		// native subtype receives it on the generic tool event narrowed by a
+		// tool-name matcher, so this fixture is what pins the matcher in the
+		// materialized output (§4.3.5).
+		artifact: "---\ntype: hook\nversion: 1.0.0\nhook_event: pre_shell_execution\nhook_action: ./scripts/fmt.sh\n---\n\nFormat before a shell command runs.\n",
+	},
+	{
 		id:       "team/warehouse",
 		artifact: "---\ntype: mcp-server\nversion: 1.0.0\nserver_identifier: npx:@acme/warehouse-mcp\n---\n\nWarehouse MCP server.\n",
 	},

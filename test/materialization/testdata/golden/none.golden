@@ -16,6 +16,16 @@ description: Deploy the service.
 
 Run the deploy pipeline for the named environment.
 
+=== team/fmt/ARTIFACT.md ===
+---
+type: hook
+version: 1.0.0
+hook_event: pre_shell_execution
+hook_action: ./scripts/fmt.sh
+---
+
+Format before a shell command runs.
+
 === team/glossary/ARTIFACT.md ===
 ---
 type: context

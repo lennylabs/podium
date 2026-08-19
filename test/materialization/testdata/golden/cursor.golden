@@ -19,6 +19,12 @@ Run the deploy pipeline for the named environment.
 === .cursor/hooks.json ===
 {
   "hooks": {
+    "beforeShellExecution": [
+      {
+        "command": "./scripts/fmt.sh",
+        "x-podium-id": "team/fmt"
+      }
+    ],
     "stop": [
       {
         "command": "echo done\necho bye",
