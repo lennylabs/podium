@@ -18,7 +18,6 @@ For team evaluation, smoke-testing, and local integration testing (anything that
 ```bash
 docker compose up -d
 podium init --global --registry http://localhost:8080
-podium login    # device-code flow against the bundled Dex IdP
 ```
 
 The compose file includes:
@@ -26,10 +25,12 @@ The compose file includes:
 - **`registry`**: the registry binary, configured against the local services below.
 - **`postgres`**: `pgvector/pgvector:pg16` for metadata and embeddings.
 - **`minio`**: S3-compatible object storage (path-style URLs, `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` for auth).
-- **`dex`**: OIDC IdP for the OAuth device-code flow.
-- **`bootstrap`**: one-shot container that creates the MinIO bucket, then exits. The registry's OIDC client is registered declaratively in the Dex config, and the default tenant and admin grant (configurable via `PODIUM_BOOTSTRAP_ADMINS`) are seeded by the registry at boot, consistent with §13.10 standalone self-seeding.
+- **`dex`**: OIDC IdP, retained for device-code evaluation. The registry service selects no identity provider, so it does not consult Dex. `podium login` against this stack prints the §7.7 no-auth notice and exits, because §7.7 treats `http://localhost:8080` and `http://127.0.0.1:8080` as no-auth registries. A device-code flow against Dex requires publishing the registry at another address.
+- **`bootstrap`**: one-shot container that creates the MinIO bucket, then exits. The registry's OIDC client is registered declaratively in the Dex config, and the default tenant and the admin grant named by `PODIUM_BOOTSTRAP_ADMINS` are seeded by the registry at boot, consistent with §13.10 standalone self-seeding. The grant is a forward-compatibility seed. The evaluation stack selects no identity provider, so no caller presents that identity until an operator configures one.
 
 **Not production-grade.** Single-replica services, default credentials, local volumes. The compose stack is _standard-topology in shape_ so consumers exercise the same code paths as a real deployment, but it is intended only for evaluation pilots, CI integration tests, and adapter / SDK development. For genuine non-prod or solo use, prefer §13.10's standalone mode (one binary instead of four containers).
+
+**The evaluation stack authenticates no caller.** The `registry` service sets no `PODIUM_IDENTITY_PROVIDER`, so the registry resolves every caller as anonymous-public, every layer is visible regardless of its declared `visibility:`, and the layer-management and erase endpoints admit any request. The service publishes its port on the host loopback interface for that reason, and it sets `PODIUM_DEFAULT_LAYER_VISIBILITY=private` so a layer registered against the stack carries a private declaration if an identity provider is added later. Of the §13.2.2 detection signals, `/healthz` reports `ready` rather than `public` on this posture, `podium status` reports the same value, and no public-mode startup banner is emitted, while the audit signals do fire: read calls record `caller.identity: "system:public"` and `caller.public_mode: true`. The registry's startup log line reads `mode=standalone`, which is not one of the §13.2.2 signals. Configure a verified provider (§6.3.2, §6.3.3) before exposing the stack beyond the host.
 
 ## 13.2 Runbook
 
