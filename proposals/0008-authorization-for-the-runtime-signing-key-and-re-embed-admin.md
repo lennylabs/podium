@@ -1,7 +1,7 @@
 # Proposal 0008: Authorization for the runtime signing-key and re-embed admin endpoints
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-08-19). Converged after 17 adversarial review rounds (21 findings fixed).
+- Status: Implemented (2026-08-19). Converged after 17 adversarial review rounds (21 findings fixed).
 - Date: 2026-08-18
 
 ## Summary
@@ -49,25 +49,25 @@
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §6.3.2 establishes the trusted key set from configuration, and the §6.9 row, the §6.10 `suggested_action`, and the §14.11 pipeline-setup step in `spec/14-common-scenarios.md` follow it.
+- [x] **S1 · spec** — SPEC-1. §6.3.2 establishes the trusted key set from configuration, and the §6.9 row, the §6.10 `suggested_action`, and the §14.11 pipeline-setup step in `spec/14-common-scenarios.md` follow it.
       Levels: — Depends on: —
-- [ ] **S2 · spec** — SPEC-2. §13.12 documents `PODIUM_RUNTIME_KEYS_PATH` and mints `config.runtime_keys_unavailable`.
+- [x] **S2 · spec** — SPEC-2. §13.12 documents `PODIUM_RUNTIME_KEYS_PATH` and mints `config.runtime_keys_unavailable`.
       Levels: — Depends on: S1
-- [ ] **S3 · spec** — SPEC-3. §4.7 and §4.7.2 name the re-embed endpoint, its authority, and the no-caller rule, and §13.2.1's write-endpoint sentence becomes a rule with named examples.
+- [x] **S3 · spec** — SPEC-3. §4.7 and §4.7.2 name the re-embed endpoint, its authority, and the no-caller rule, and §13.2.1's write-endpoint sentence becomes a rule with named examples.
       Levels: — Depends on: —
-- [ ] **S10 · spec** — SPEC-4. §13.1.1 records that the evaluation stack authenticates no caller, that its port publishes on the host loopback interface, and that the seeded admin grant is a forward-compatibility seed rather than a working credential, and §7.7 in `spec/07-external-integration.md` restates the `podium login` no-op predicate over the resolved registry URL.
+- [x] **S10 · spec** — SPEC-4. §13.1.1 records that the evaluation stack authenticates no caller, that its port publishes on the host loopback interface, and that the seeded admin grant is a forward-compatibility seed rather than a working credential, and §7.7 in `spec/07-external-integration.md` restates the `podium login` no-op predicate over the resolved registry URL.
       Levels: — Depends on: —
-- [ ] **S4 · test** — TEST-1. Every injected-session-token end-to-end boot site, helper and inline alike, seeds `PODIUM_RUNTIME_KEYS_PATH` before the process starts, replacing the post-boot HTTP registration. Lands before the code steps so the migration commit is green while the endpoint still exists.
+- [x] **S4 · test** — TEST-1. Every injected-session-token end-to-end boot site, helper and inline alike, seeds `PODIUM_RUNTIME_KEYS_PATH` before the process starts, replacing the post-boot HTTP registration. Lands before the code steps so the migration commit is green while the endpoint still exists.
       Levels: e2e. Depends on: S2
-- [ ] **S5 · code** — CODE-3. `podium admin runtime register` writes the seed file through `--keys-file`, `list` is removed, and the `auth.untrusted_runtime` remediation string follows §6.10.
+- [x] **S5 · code** — CODE-3. `podium admin runtime register` writes the seed file through `--keys-file`, `list` is removed, and the `auth.untrusted_runtime` remediation string follows §6.10.
       Levels: unit, integration, e2e. Depends on: S1, S4
-- [ ] **S6 · code** — CODE-2. `serverboot` fails closed on the runtime key seed, drops the `/v1/admin/runtime` mount, and the §13.1.1 compose stack stops selecting `injected-session-token`, publishes 8080 on the host loopback interface, and pins `PODIUM_DEFAULT_LAYER_VISIBILITY: "private"`, in one edit.
+- [x] **S6 · code** — CODE-2. `serverboot` fails closed on the runtime key seed, drops the `/v1/admin/runtime` mount, and the §13.1.1 compose stack stops selecting `injected-session-token`, publishes 8080 on the host loopback interface, and pins `PODIUM_DEFAULT_LAYER_VISIBILITY: "private"`, in one edit.
       Levels: e2e. Depends on: S2, S5, S10
-- [ ] **S7 · code** — CODE-1. `RuntimeKeyEndpoint` and its tests are deleted, `RuntimeKeyVerifierStore` narrows to the surface the verifier uses, and the `ErrReadOnly` doc comment states the rule in place of its enumeration.
+- [x] **S7 · code** — CODE-1. `RuntimeKeyEndpoint` and its tests are deleted, `RuntimeKeyVerifierStore` narrows to the surface the verifier uses, and the `ErrReadOnly` doc comment states the rule in place of its enumeration.
       Levels: e2e. Depends on: S6
-- [ ] **S8 · code** — CODE-4. `handleReembed` gains the per-tenant admin gate and the read-only gate, `server.WithUnauthenticatedReembed()` carries the boot-time no-caller fact, and `bootstrapOptions` plus `server.NewFromFilesystem` set it.
+- [x] **S8 · code** — CODE-4. `handleReembed` gains the per-tenant admin gate and the read-only gate, `server.WithUnauthenticatedReembed()` carries the boot-time no-caller fact, and `bootstrapOptions` plus `server.NewFromFilesystem` set it.
       Levels: integration, e2e. Depends on: S3
-- [ ] **S9 · docs** — DOCS-1. The reference, getting-started, consuming, and deployment pages, the README, and the manual-validation scenarios follow the removed endpoint, the new flag, and the new error code. No documentation page restates the §13.2.1 write set under this proposal.
+- [x] **S9 · docs** — DOCS-1. The reference, getting-started, consuming, and deployment pages, the README, and the manual-validation scenarios follow the removed endpoint, the new flag, and the new error code. No documentation page restates the §13.2.1 write set under this proposal.
       Levels: e2e. Depends on: S3, S5, S6, S7, S8, S10
 
 ## Current state and the gap
