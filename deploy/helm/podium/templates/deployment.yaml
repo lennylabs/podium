@@ -29,6 +29,12 @@ spec:
             - secretRef:
                 name: {{ .Values.existingSecret }}
           env:
+            # The kubelet probes the pod over the cluster network, so the
+            # registry must listen on all interfaces rather than on its
+            # 127.0.0.1 default. values.yaml declared config.bind and no
+            # template consumed it, which left every pod failing its probes.
+            - name: PODIUM_BIND
+              value: {{ .Values.config.bind | quote }}
             - name: PODIUM_REGISTRY_STORE
               value: {{ .Values.config.store.type | quote }}
             - name: PODIUM_OBJECT_STORE

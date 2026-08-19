@@ -23,27 +23,35 @@ config:
     region: us-east-1
     endpoint: ""  # set for MinIO/R2/GCS
 
+  # Hybrid search is off by default so a bare `helm install` boots without an
+  # embedding-provider credential. Turn it on by setting both of the following
+  # and supplying the provider's key in the secret: vectorBackend.type to
+  # pgvector (or pinecone/weaviate/qdrant, whose per-backend env vars from
+  # §13.12 go in the same secret), and embeddingProvider.type to openai,
+  # voyage, cohere, or ollama. A registry that selects an embedding provider
+  # without its key exits at startup with
+  # `missing required configuration for the selected backend(s)`.
   vectorBackend:
-    type: pgvector
-    # When using an external backend (pinecone/weaviate/qdrant) supply
-    # the per-backend env vars from §13.12 via the secret below.
+    type: none
 
   embeddingProvider:
-    type: openai
+    type: none
     model: text-embedding-3-small
-    # OPENAI_API_KEY supplied via the secret below.
 
+  # The registry verifies oidc-jwt, trusted-headers, and injected-session-token
+  # at request time. oauth-device-code is the client-side acquisition provider
+  # and is refused here at startup with `config.identity_provider_unverified`
+  # (§6.3.3). Supply the issuer, audience, and any provider secret through the
+  # secret named in existingSecret, which reaches the pod via envFrom.
   identityProvider:
-    type: oauth-device-code
+    type: oidc-jwt
     audience: "https://podium.example.com"
     authorizationEndpoint: ""
 
-  discovery:
-    maxDepth: 3
-    foldBelowArtifacts: 3
-    foldPassthroughChains: true
-    notableCount: 10
-    targetResponseTokens: 4000
+  # The §13.12 / §4.5.5 discovery block is config-file-only: it has no
+  # environment variable, and this chart configures the registry through env.
+  # Setting it here did nothing, so it is not offered. Supply it in a
+  # registry.yaml mounted into the pod and pointed at by PODIUM_CONFIG_FILE.
 
 # Existing secret holding sensitive values (DSNs, API keys, OIDC
 # client secrets). The chart references the keys; supply your own
