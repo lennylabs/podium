@@ -7,12 +7,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/webhook"
 )
 
 // adminIdentity returns an Identity that AdminAuthorize accepts
@@ -188,5 +190,57 @@ func TestAdminReembed_AdminCallerReachesHandler(t *testing.T) {
 	}
 	if status != http.StatusOK && status != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 200 or 500", status)
+	}
+}
+
+// Spec: §4.7, §13.1.1 — a deployment that authenticates no caller has no
+// per-tenant admin role to check, so the boot path records that with
+// WithUnauthenticatedReembed and the re-embed gate is skipped. Without the
+// carve-out the endpoint would be unreachable on such a registry.
+func TestAdminReembed_UnauthenticatedDeploymentAdmitted(t *testing.T) {
+	t.Parallel()
+	ts := bootRegistryWithAdmin(t, "", nil, server.WithUnauthenticatedReembed())
+	status, code := postReembed(t, ts.URL)
+	if status == http.StatusForbidden {
+		t.Fatalf("status = 403 (code %q), want the handler to run on a registry that authenticates no caller", code)
+	}
+	if status != http.StatusOK && status != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 200 or 500", status)
+	}
+}
+
+// Spec: §4.7.2, §7.3.2 — the no-caller carve-out is read by handleReembed
+// alone. requireAdmin keeps refusing an anonymous caller on the other admin
+// routes, so a registry that authenticates nobody does not thereby open
+// /v1/admin/grants or the webhook receiver CRUD.
+func TestAdminReembed_CarveOutDoesNotReopenOtherAdminRoutes(t *testing.T) {
+	t.Parallel()
+	worker := &webhook.Worker{Store: webhook.NewMemoryStore(), HTTPClient: http.DefaultClient}
+	ts := bootRegistryWithAdmin(t, "", nil,
+		server.WithUnauthenticatedReembed(), server.WithWebhooks(worker))
+
+	cases := []struct {
+		name string
+		path string
+		body string
+	}{
+		{"grants", "/v1/admin/grants", `{"user_id":"bob"}`},
+		{"webhooks", "/v1/webhooks", `{"url":"https://example.test/hook"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := http.Post(ts.URL+tc.path, "application/json", strings.NewReader(tc.body))
+			if err != nil {
+				t.Fatalf("POST %s: %v", tc.path, err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403", resp.StatusCode)
+			}
+			buf, _ := io.ReadAll(resp.Body)
+			if !bytes.Contains(buf, []byte("auth.forbidden")) {
+				t.Errorf("response missing auth.forbidden: %s", buf)
+			}
+		})
 	}
 }
