@@ -100,14 +100,13 @@ func TestDeployCompose_RegistryServiceWiring(t *testing.T) {
 	}
 	env := reg.Environment
 	checks := map[string]func(string) bool{
-		"PODIUM_REGISTRY_STORE":    func(v string) bool { return v == "postgres" },
-		"PODIUM_POSTGRES_DSN":      func(v string) bool { return strings.Contains(v, "postgres:5432") },
-		"PODIUM_OBJECT_STORE":      func(v string) bool { return v == "s3" },
-		"PODIUM_S3_ENDPOINT":       func(v string) bool { return strings.Contains(v, "minio:9000") },
-		"PODIUM_S3_BUCKET":         func(v string) bool { return v == "podium" },
-		"PODIUM_IDENTITY_PROVIDER": func(v string) bool { return v != "" },
-		"PODIUM_BOOTSTRAP_ADMINS":  func(v string) bool { return v != "" },
-		"PODIUM_BIND":              func(v string) bool { return strings.HasPrefix(v, "0.0.0.0:") },
+		"PODIUM_REGISTRY_STORE":   func(v string) bool { return v == "postgres" },
+		"PODIUM_POSTGRES_DSN":     func(v string) bool { return strings.Contains(v, "postgres:5432") },
+		"PODIUM_OBJECT_STORE":     func(v string) bool { return v == "s3" },
+		"PODIUM_S3_ENDPOINT":      func(v string) bool { return strings.Contains(v, "minio:9000") },
+		"PODIUM_S3_BUCKET":        func(v string) bool { return v == "podium" },
+		"PODIUM_BOOTSTRAP_ADMINS": func(v string) bool { return v != "" },
+		"PODIUM_BIND":             func(v string) bool { return strings.HasPrefix(v, "0.0.0.0:") },
 	}
 	for key, ok := range checks {
 		v, present := env[key]
@@ -118,6 +117,24 @@ func TestDeployCompose_RegistryServiceWiring(t *testing.T) {
 		if !ok(v) {
 			t.Errorf("registry env %s=%q failed its wiring check", key, v)
 		}
+	}
+	// Spec: §13.1.1 — the evaluation stack selects no identity provider, so
+	// it authenticates no caller. Selecting injected-session-token over the
+	// empty key set the stack ships would abort the boot with
+	// config.runtime_keys_unavailable (§6.3.2).
+	if v, present := env["PODIUM_IDENTITY_PROVIDER"]; present {
+		t.Errorf("registry env sets PODIUM_IDENTITY_PROVIDER=%q; the evaluation stack selects no provider", v)
+	}
+	// Spec: §13.1.1 — a stack that authenticates no caller stores every layer
+	// private by default, so an unauthenticated caller composes an empty view
+	// rather than the whole catalog.
+	if v := env["PODIUM_DEFAULT_LAYER_VISIBILITY"]; v != "private" {
+		t.Errorf("PODIUM_DEFAULT_LAYER_VISIBILITY=%q, want \"private\"", v)
+	}
+	// Spec: §13.1.1 — the listener is published on the host loopback
+	// interface, so an unauthenticated registry is not reachable off-host.
+	if len(reg.Ports) != 1 || !strings.HasPrefix(reg.Ports[0], "127.0.0.1:") {
+		t.Errorf("registry ports = %v, want a single 127.0.0.1-bound publish", reg.Ports)
 	}
 	// The device-code authorization endpoint must point at the bundled Dex.
 	if v := env["PODIUM_OAUTH_AUTHORIZATION_ENDPOINT"]; !strings.Contains(v, "5556") {

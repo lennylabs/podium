@@ -277,6 +277,57 @@ func TestInjectedTokenAudienceGuard(t *testing.T) {
 	}
 }
 
+// Spec: §6.3.2 — the trusted runtime key set comes from configuration read
+// at startup and there is no request-time registration API, so an
+// injected-session-token registry over an empty key set rejects every call
+// with auth.untrusted_runtime and can accept no first key. The guard refuses
+// to start with config.runtime_keys_unavailable, covering the unset path and
+// the path that names a file carrying no key. Providers that never consult
+// the store are exempt.
+func TestRuntimeKeyBootstrapGuard(t *testing.T) {
+	t.Parallel()
+	_, seeded := registeredRuntimeKey(t)
+	empty := identity.NewRuntimeKeyRegistry()
+	cases := []struct {
+		name     string
+		provider string
+		path     string
+		keys     identity.RuntimeKeyVerifierStore
+		wantErr  bool
+	}{
+		{"injected with a seeded key starts", "injected-session-token", "/etc/podium/keys.json", seeded, false},
+		{"injected over an empty file refuses", "injected-session-token", "/etc/podium/keys.json", empty, true},
+		{"injected with an unset path refuses", "injected-session-token", "", empty, true},
+		{"injected with a nil store refuses", "injected-session-token", "", nil, true},
+		{"oidc-jwt over an empty set is exempt", "oidc-jwt", "", empty, false},
+		{"trusted-headers over an empty set is exempt", "trusted-headers", "", empty, false},
+		{"standalone is exempt", "", "", empty, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := runtimeKeyBootstrapGuard(tc.provider, tc.path, tc.keys)
+			if tc.wantErr && err == nil {
+				t.Fatalf("provider=%q path=%q: want refusal, got nil", tc.provider, tc.path)
+			}
+			if !tc.wantErr {
+				if err != nil {
+					t.Fatalf("provider=%q path=%q: want nil, got %v", tc.provider, tc.path, err)
+				}
+				return
+			}
+			if !strings.Contains(err.Error(), "config.runtime_keys_unavailable") {
+				t.Errorf("error should carry the namespaced code, got %v", err)
+			}
+			if !strings.Contains(err.Error(), "PODIUM_RUNTIME_KEYS_PATH") {
+				t.Errorf("error should name the variable, got %v", err)
+			}
+			if !strings.Contains(err.Error(), "--keys-file") {
+				t.Errorf("error should name the --keys-file remediation, got %v", err)
+			}
+		})
+	}
+}
+
 func TestBearerToken(t *testing.T) {
 	t.Parallel()
 	cases := []struct{ header, want string }{

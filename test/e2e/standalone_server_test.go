@@ -399,6 +399,44 @@ func TestInjectedToken_AudienceUnsetFailsStartup(t *testing.T) {
 	}
 }
 
+// spec: §6.3.2, §13.12 — the trusted runtime key set comes from
+// configuration read at startup and there is no request-time registration
+// API, so an injected-session-token registry over an empty key set would
+// reject every call with auth.untrusted_runtime and could accept no first
+// key. Booting with no PODIUM_RUNTIME_KEYS_PATH refuses to start with
+// config.runtime_keys_unavailable.
+func TestInjectedToken_RuntimeKeysUnsetFailsStartup(t *testing.T) {
+	t.Parallel()
+	out := smallteamRawExecFail(t,
+		[]string{
+			"HOME=" + t.TempDir(),
+			"PODIUM_IDENTITY_PROVIDER=injected-session-token",
+			"PODIUM_OAUTH_AUDIENCE=http://127.0.0.1:8080",
+		},
+		"serve", "--standalone")
+	if !strings.Contains(out, "config.runtime_keys_unavailable") {
+		t.Errorf("expected config.runtime_keys_unavailable in output; got:\n%s", out)
+	}
+}
+
+// spec: §6.3.2, §13.12 — a keys file the registry cannot parse fails startup
+// under every identity provider, including the standalone default that never
+// consults the store. A corrupt file silently narrows the trusted set, so it
+// is a configuration failure rather than a degraded mode.
+func TestStandaloneServer_UnparseableRuntimeKeysFailStartup(t *testing.T) {
+	t.Parallel()
+	keys := filepath.Join(t.TempDir(), "keys.json")
+	if err := os.WriteFile(keys, []byte("not json"), 0o600); err != nil {
+		t.Fatalf("write keys: %v", err)
+	}
+	out := smallteamRawExecFail(t,
+		[]string{"HOME=" + t.TempDir(), "PODIUM_RUNTIME_KEYS_PATH=" + keys},
+		"serve", "--standalone")
+	if !strings.Contains(out, "config.runtime_keys_unavailable") {
+		t.Errorf("expected config.runtime_keys_unavailable in output; got:\n%s", out)
+	}
+}
+
 // public mode reports mode:public in /healthz.
 func TestStandaloneServer_PublicModeHealthz(t *testing.T) {
 	t.Parallel()

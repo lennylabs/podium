@@ -17,7 +17,6 @@
 # Usage (full evaluation stack):
 #   docker compose up -d
 #   podium init --global --registry http://localhost:8080
-#   podium login    # device-code flow against the bundled Dex IdP
 #
 #   docker compose down       # stop (keeps volumes)
 #   docker compose down -v    # stop + wipe data
@@ -103,9 +102,11 @@ services:
 
   # The registry binary, configured against the local services above. Built
   # from the repo Dockerfile so `docker compose up` needs no published
-  # image. It runs the server-side injected-session-token verification mode
-  # (the only mode this build verifies server-side); Dex provides the
-  # device-code IdP for the host-side `podium login` flow.
+  # image. It selects no identity provider (§13.1.1), so it authenticates no
+  # caller and every layer it stores is private by default. The listener is
+  # published on the host loopback interface only. Dex runs beside it as the
+  # OIDC IdP an operator points a verifying provider at once one is
+  # configured.
   registry:
     build:
       context: .
@@ -129,17 +130,19 @@ services:
       PODIUM_S3_ACCESS_KEY_ID: "minioadmin"
       PODIUM_S3_SECRET_ACCESS_KEY: "minioadmin"
       PODIUM_S3_FORCE_PATH_STYLE: "true"
-      PODIUM_IDENTITY_PROVIDER: "injected-session-token"
       PODIUM_OAUTH_AUDIENCE: "http://localhost:8080"
       PODIUM_OAUTH_AUTHORIZATION_ENDPOINT: "http://localhost:5556/dex/device/code"
       PODIUM_BOOTSTRAP_ADMINS: "alice@acme.com"
+      # §13.1.1: the stack authenticates no caller, so a layer registered
+      # here is visible to every caller unless it defaults to private.
+      PODIUM_DEFAULT_LAYER_VISIBILITY: "private"
       # A Postgres-backed registry defaults its embedding provider to openai,
       # which then requires OPENAI_API_KEY and stops this stack from starting.
       # The evaluation stack has no key, so it opts out to BM25 keyword search.
       # Remove this and supply a provider and its key to exercise hybrid search.
       PODIUM_NO_EMBEDDINGS: "true"
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
 
 volumes:
   postgres_data:
