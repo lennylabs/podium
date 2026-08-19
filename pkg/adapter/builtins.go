@@ -158,7 +158,7 @@ func (Gemini) Adapt(ctx context.Context, src Source) ([]File, error) {
 	case "context":
 		return contextOut(src), nil
 	case "hook":
-		return hookConfigOut(".gemini/settings.json", hookFragmentJSON(geminiHookEvents, src), src), nil
+		return hookConfigOut(".gemini/settings.json", hookFragmentJSON(geminiHooks, src), src), nil
 	case "mcp-server":
 		return []File{{Path: ".gemini/settings.json", Op: OpMergeJSON, Content: mcpFragmentJSON(src)}}, nil
 	}

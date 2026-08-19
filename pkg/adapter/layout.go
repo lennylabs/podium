@@ -247,12 +247,18 @@ func codexHookOut(src Source) []File {
 // (an unknown key would fail --strict-config). Returns nil when Codex has no
 // native event for the canonical hook_event.
 func codexHookTOML(src Source) []byte {
-	native, ok := codexHookEvents[parsed(src).HookEvent]
+	event := parsed(src).HookEvent
+	native, ok := codexHooks.events[event]
 	if !ok || native == "" {
 		return nil
 	}
 	var b strings.Builder
 	b.WriteString("[[hooks." + native + "]]\n")
+	// Spec: §4.3.5 — the matcher keys the event table rather than the handler,
+	// so it narrows the whole entry to one tool category.
+	if matcher := codexHooks.matchers[event]; matcher != "" {
+		b.WriteString("matcher = " + tomlBasic(matcher) + "\n")
+	}
 	b.WriteString("[[hooks." + native + ".hooks]]\n")
 	b.WriteString("type = " + tomlBasic("command") + "\n")
 	b.WriteString("command = " + tomlBasic(hookActionFor(src)) + "\n")
@@ -304,18 +310,34 @@ func hookConfigOut(configPath string, frag []byte, src Source) []File {
 	return out
 }
 
+// hookDialect pairs a harness's canonical-to-native hook event mapping with
+// the tool-name matchers that narrow a generic native event to one tool
+// category. A canonical subtype absent from matchers installs no matcher, so
+// the hook keeps the full reach of the native event it maps onto.
+type hookDialect struct {
+	events   map[string]string
+	matchers map[string]string
+}
+
 // hookFragmentJSON builds the {"hooks": {"<nativeEvent>": [...]}} OpMergeJSON
 // fragment. The §4.3.5 canonical event is translated to the harness-native
-// event name by eventMap. Returns nil when the harness has no mapping for the
-// event (the adapter then emits no hook output for it).
-func hookFragmentJSON(eventMap map[string]string, src Source) []byte {
+// event name by the dialect. Returns nil when the harness has no mapping for
+// the event (the adapter then emits no hook output for it).
+func hookFragmentJSON(dialect hookDialect, src Source) []byte {
 	art := parsed(src)
-	native, ok := eventMap[art.HookEvent]
+	native, ok := dialect.events[art.HookEvent]
 	if !ok || native == "" {
 		return nil
 	}
 	handler := map[string]any{"type": "command", "command": hookActionFor(src)}
 	entry := map[string]any{"hooks": []any{handler}, PodiumOwnedKey: src.ArtifactID}
+	// Spec: §4.3.5 — a subtype mapped onto a generic native event carries a
+	// tool-name matcher so only matching tool calls fire it. Without it the
+	// action runs on every tool call at that phase and still succeeds, so
+	// nothing surfaces the over-trigger.
+	if matcher := dialect.matchers[art.HookEvent]; matcher != "" {
+		entry["matcher"] = matcher
+	}
 	frag := map[string]any{"hooks": map[string]any{native: []any{entry}}}
 	b, _ := json.Marshal(frag)
 	return b
@@ -347,6 +369,28 @@ var claudeHookEvents = map[string]string{
 	"post_compact":          "PreCompact",
 	"notification":          "Notification",
 }
+
+// claudeToolMatchers narrows a §4.3.5 tool subtype to the Claude Code tool
+// names that belong to it. Claude Code names the shell tool Bash, the read tool
+// Read, the edit tools Edit, Write, and NotebookEdit, the subagent tool Task,
+// and prefixes every MCP tool with mcp__. A canonical event absent here reaches
+// its native event unnarrowed: the generic tool events are the whole phase by
+// definition, permission_request and permission_denied are permission-category
+// events rather than tool categories, and post_tool_use_failure selects an
+// outcome rather than a tool.
+var claudeToolMatchers = map[string]string{
+	"pre_shell_execution":  "^Bash$",
+	"post_shell_execution": "^Bash$",
+	"pre_mcp_execution":    "^mcp__",
+	"post_mcp_execution":   "^mcp__",
+	"pre_read_file":        "^Read$",
+	"post_file_edit":       "^(Edit|Write|NotebookEdit)$",
+	"subagent_start":       "^Task$",
+}
+
+// claudeHooks is the Claude Code hook dialect. The emitter reuses it for the
+// harnesses that consume Claude Code's hooks.json layout.
+var claudeHooks = hookDialect{events: claudeHookEvents, matchers: claudeToolMatchers}
 
 // cursorHookEvents maps the canonical §4.3.5 events to Cursor's native hook
 // events. Cursor exposes per-category subtype events rather than the generic
@@ -404,6 +448,19 @@ var codexHookEvents = map[string]string{
 	"post_compact":         "PostCompact",
 }
 
+// codexToolMatchers narrows the Codex tool subtypes. Codex fires its tool hooks
+// for the shell tool it names Bash, and keeps mcp__ matcher aliases for MCP
+// calls so a matcher written against the prefixed name still selects them.
+var codexToolMatchers = map[string]string{
+	"pre_shell_execution":  "^Bash$",
+	"post_shell_execution": "^Bash$",
+	"pre_mcp_execution":    "^mcp__",
+	"post_mcp_execution":   "^mcp__",
+}
+
+// codexHooks is the Codex hook dialect.
+var codexHooks = hookDialect{events: codexHookEvents, matchers: codexToolMatchers}
+
 // geminiHookEvents maps the canonical events to Gemini CLI's native hook events.
 // Gemini has no event named "Stop"; the agent-finished lifecycle point is
 // AfterAgent, so canonical stop and subagent_stop both map there (confirmed by
@@ -424,3 +481,17 @@ var geminiHookEvents = map[string]string{
 	"pre_compact":          "PreCompress",
 	"notification":         "Notification",
 }
+
+// geminiToolMatchers narrows the Gemini CLI tool subtypes. Gemini matches
+// BeforeTool and AfterTool against the tool name, naming the shell tool
+// run_shell_command and prefixing MCP tools with mcp_. subagent_start is absent
+// because it maps to BeforeAgent, a lifecycle event rather than a tool event.
+var geminiToolMatchers = map[string]string{
+	"pre_shell_execution":  "^run_shell_command$",
+	"post_shell_execution": "^run_shell_command$",
+	"pre_mcp_execution":    "^mcp_",
+	"post_mcp_execution":   "^mcp_",
+}
+
+// geminiHooks is the Gemini CLI hook dialect.
+var geminiHooks = hookDialect{events: geminiHookEvents, matchers: geminiToolMatchers}

@@ -46,6 +46,16 @@ Enable strict type-checking in TypeScript files.
           }
         ],
         "x-podium-id": "team/guard"
+      },
+      {
+        "hooks": [
+          {
+            "command": "./scripts/fmt.sh",
+            "type": "command"
+          }
+        ],
+        "matcher": "^Bash$",
+        "x-podium-id": "team/fmt"
       }
     ],
     "Stop": [

@@ -95,7 +95,7 @@ func (c ClaudeCode) Adapt(ctx context.Context, src Source) ([]File, error) {
 		// §6.7 — a hook config-merges its registration into the shared
 		// settings.json; bundled scripts materialize to the harness-neutral
 		// .podium/resources/<id>/ bucket and the merged command references them.
-		return hookConfigOut(".claude/settings.json", hookFragmentJSON(claudeHookEvents, src), src), nil
+		return hookConfigOut(".claude/settings.json", hookFragmentJSON(claudeHooks, src), src), nil
 	case "mcp-server":
 		return []File{{Path: ".mcp.json", Op: OpMergeJSON, Content: mcpFragmentJSON(src)}}, nil
 	default:

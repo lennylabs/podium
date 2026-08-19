@@ -32,6 +32,14 @@ type = "command"
 command = "./scripts/guard.sh"
 # podium:end:team/guard
 
+# podium:begin:team/fmt
+[[hooks.PreToolUse]]
+matcher = "^Bash$"
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "./scripts/fmt.sh"
+# podium:end:team/fmt
+
 # podium:begin:team/warehouse
 [mcp_servers.warehouse]
 command = "npx"

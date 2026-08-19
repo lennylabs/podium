@@ -142,7 +142,7 @@ func (ClaudeMarketplace) Component(ctx context.Context, src Source) ([]File, err
 	case "command":
 		return []File{{Path: path.Join(root, "commands", lastSeg(src.ArtifactID)+".md"), Content: src.ArtifactBytes}}, nil
 	case "hook":
-		return hookConfigOut(path.Join(root, "hooks", "hooks.json"), hookFragmentJSON(claudeHookEvents, src), src), nil
+		return hookConfigOut(path.Join(root, "hooks", "hooks.json"), hookFragmentJSON(claudeHooks, src), src), nil
 	case "mcp-server":
 		return []File{{Path: path.Join(root, ".mcp.json"), Op: OpMergeJSON, Content: mcpFragmentJSON(src)}}, nil
 	}
@@ -227,7 +227,7 @@ func (CodexMarketplace) Component(ctx context.Context, src Source) ([]File, erro
 	case "skill":
 		return skillOut(path.Join(root, "skills", lastSeg(src.ArtifactID)), src), nil
 	case "hook":
-		return hookConfigOut(path.Join(root, "hooks", "hooks.json"), hookFragmentJSON(codexHookEvents, src), src), nil
+		return hookConfigOut(path.Join(root, "hooks", "hooks.json"), hookFragmentJSON(codexHooks, src), src), nil
 	case "mcp-server":
 		return []File{{Path: path.Join(root, ".mcp.json"), Op: OpMergeJSON, Content: mcpFragmentJSON(src)}}, nil
 	}

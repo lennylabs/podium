@@ -37,6 +37,16 @@ Run the deploy pipeline for the named environment.
           }
         ],
         "x-podium-id": "team/guard"
+      },
+      {
+        "hooks": [
+          {
+            "command": "./scripts/fmt.sh",
+            "type": "command"
+          }
+        ],
+        "matcher": "^run_shell_command$",
+        "x-podium-id": "team/fmt"
       }
     ]
   },
