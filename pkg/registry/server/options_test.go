@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/registry/core"
@@ -46,46 +45,6 @@ func TestPublishEvent_FiresEvent(t *testing.T) {
 	srv.PublishEvent(context.Background(), "artifact.published", map[string]any{
 		"id": "x", "version": "1.0.0",
 	})
-}
-
-// RuntimeKeyEndpoint.WithAdminAuth installs a custom authorization
-// hook; the test verifies the hook is called.
-func TestRuntimeKeyEndpoint_WithAdminAuth(t *testing.T) {
-	t.Parallel()
-	hits := 0
-	reg := identity.NewRuntimeKeyRegistry()
-	endpoint := server.NewRuntimeKeyEndpoint(reg, server.NewModeTracker()).WithAdminAuth(
-		func(*http.Request) error {
-			hits++
-			return nil
-		})
-	ts := httptest.NewServer(endpoint.Handler())
-	defer ts.Close()
-	resp, err := http.Get(ts.URL + "/v1/admin/runtime")
-	if err != nil {
-		t.Fatalf("GET: %v", err)
-	}
-	resp.Body.Close()
-	if hits == 0 {
-		t.Errorf("admin auth callback never fired")
-	}
-}
-
-// Default admin-auth hook is a no-op that returns nil; GET succeeds.
-func TestRuntimeKeyEndpoint_DefaultAdminAuthIsNoop(t *testing.T) {
-	t.Parallel()
-	reg := identity.NewRuntimeKeyRegistry()
-	endpoint := server.NewRuntimeKeyEndpoint(reg, server.NewModeTracker())
-	ts := httptest.NewServer(endpoint.Handler())
-	defer ts.Close()
-	resp, err := http.Get(ts.URL + "/v1/admin/runtime")
-	if err != nil {
-		t.Fatalf("GET: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("status = %d, want 200", resp.StatusCode)
-	}
 }
 
 // Quota handler returns the configured quotas.

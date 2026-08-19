@@ -62,11 +62,14 @@ func NewRuntimeKeyRegistry() *RuntimeKeyRegistry {
 }
 
 // RuntimeKeyVerifierStore is the runtime-key registry surface the server
-// boot consumes: the admin register/list endpoint plus the request-time
-// JWT verifier (§6.3.2). Both the in-memory RuntimeKeyRegistry and the
+// boot consumes once the trusted key set has been loaded from operator
+// configuration (§6.3.2): the request-time JWT verifier, plus the key set
+// the boot guard inspects to decide whether the deployment can verify any
+// runtime. Registration stays on the concrete registry types, because the
+// key set is populated by the CLI writer and the file loader rather than
+// at request time. Both the in-memory RuntimeKeyRegistry and the
 // file-persisted variant satisfy it.
 type RuntimeKeyVerifierStore interface {
-	Register(RuntimeKey) error
 	All() []RuntimeKey
 	JWTVerifier(audience string, clock func() jwt.NumericDate) func(string) (Identity, error)
 }
