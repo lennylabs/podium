@@ -753,7 +753,7 @@ In either case, an `EmbeddingProvider` can be **explicitly configured** to overr
 
 Custom embedding providers register through the SPI as Go-module plugins.
 
-**Model versioning and re-embedding.** The vector store records `(model_id, dimensions)` per artifact. When the configured embedding model changes (operator switches `EmbeddingProvider`, switches the self-embedding backend's hosted model, or upgrades to a new version of the same model), the registry triggers a background re-embed via `podium admin reembed` (`--all` or `--since <timestamp>`). During re-embedding, the vector store may transiently contain mixed dimensions; query-time the registry restricts results to vectors matching the currently-configured model and emits `embedding.reembed_in_progress` events for progress monitoring. Once re-embedding completes, stale-dimension rows are purged.
+**Model versioning and re-embedding.** The vector store records `(model_id, dimensions)` per artifact. When the configured embedding model changes (operator switches `EmbeddingProvider`, switches the self-embedding backend's hosted model, or upgrades to a new version of the same model), the registry triggers a background re-embed via `podium admin reembed` (`--all` or `--since <timestamp>`). During re-embedding, the vector store may transiently contain mixed dimensions; query-time the registry restricts results to vectors matching the currently-configured model and emits `embedding.reembed_in_progress` events for progress monitoring. Once re-embedding completes, stale-dimension rows are purged. The re-embed runs over the caller's tenant and is authorized by the per-tenant `admin` role (§4.7.2). `POST /v1/admin/reembed` rejects a caller without that role with `auth.forbidden` (§6.10), and it is a write endpoint under §13.2.1, so a read-only registry rejects it with `registry.read_only`. A registry started with no identity provider configured, or one started in public mode (§13.10), authenticates no caller, so no caller can hold the admin role and the re-embed endpoint admits the request there; the local operator owns the process and triggers the pass after a model change. Configuring an identity provider makes the gate live, whether or not the registry verifies callers itself. This exception is specific to re-embed and does not extend to the other admin-gated endpoints, whose posture is defined in §4.7.2 and §7.3.2.
 
 ### Dual-write semantics for external vector backends
 
@@ -796,6 +796,7 @@ Read access is governed by per-layer visibility (§4.6), enforced at the registr
 - Add, remove, and reorder admin-defined layers in the registry config.
 - Manage tenant-level settings (freeze windows, default user-layer cap, audit retention).
 - Trigger manual reingests across any layer in the tenant.
+- Trigger a catalog re-embed after an embedding-model change (§4.7).
 - View any layer's contents for diagnostic purposes (override visibility; the override is itself audited).
 
 Admin grants are stored as `(identity, org_id, "admin")` rows in Postgres and are managed via `podium admin grant` / `podium admin revoke`.
