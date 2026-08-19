@@ -20,7 +20,7 @@ Every call carries an OAuth-attested identity. The registry validates the JWT si
 
 The registry resolves the caller through the provider named by its `PODIUM_IDENTITY_PROVIDER`. The registry-process values are `injected-session-token`, `oidc-jwt`, and `trusted-headers`.
 
-- `injected-session-token`: runtime-issued signed JWT. The runtime registers its signing key with the registry one-time at runtime onboarding.
+- `injected-session-token`: runtime-issued signed JWT. The deployment configures the registry to trust the runtime's signing key at startup through `PODIUM_RUNTIME_KEYS_PATH`, which names a file written with `podium admin runtime register --keys-file`, and the registry verifies the signature on every call.
 - `oidc-jwt`: a gateway forwards the caller's token. The registry verifies the signature, `iss`, and `aud` against the issuer's JWKS.
 - `trusted-headers`: an authenticating reverse proxy asserts the identity in `X-Podium-User-Sub`, `X-Podium-User-Email`, `X-Podium-User-Groups`, and `X-Podium-User-Org`, optionally authenticated with `X-Podium-Proxy-Secret`.
 
@@ -454,14 +454,7 @@ POST /v1/admin/reembed?artifact={id}&version={v}&only_missing={bool}&since={rfc3
 
 Recomputes embeddings over the tenant. With no query parameters it reembeds every artifact. `artifact` (with a required `version`) scopes the run to one artifact; `only_missing=true` limits it to artifacts without a current embedding; `since` limits it to artifacts ingested at or after an RFC 3339 timestamp.
 
-### Runtime signing keys
-
-```
-POST /v1/admin/runtime    body: { "issuer": "...", "algorithm": "...", "public_key_pem": "..." }
-GET  /v1/admin/runtime
-```
-
-Registers and lists the trusted runtime signing keys the `injected-session-token` verifier consults. `POST` returns `201 Created`. `GET` returns the registered runtimes under the `runtimes` key without echoing the key material.
+A registry started with no identity provider configured, or one started in public mode, authenticates no caller, so no caller can hold the admin role and this endpoint admits the request there. The exception is specific to re-embed.
 
 ### Erase a user (GDPR)
 

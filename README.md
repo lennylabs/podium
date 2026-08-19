@@ -170,7 +170,9 @@ over manifest text. `oidc-jwt` verifies tokens an external IdP issued, so it
 needs that IdP's issuer URL and an audience the IdP mints tokens for.
 `trusted-headers` reads the identity headers a fronting gateway injects and
 contacts no IdP. `injected-session-token` verifies tokens signed by a runtime
-key registered with `podium admin runtime register`, against the audience
+key in the trusted key set the registry reads at startup from
+`PODIUM_RUNTIME_KEYS_PATH`, written with
+`podium admin runtime register --keys-file`, against the audience
 configured for the registry. SCIM provisions groups alongside a provider rather
 than replacing one. At cluster scale, Postgres and object storage become
 requirements, because registry replicas need shared state. See
