@@ -1,7 +1,7 @@
 # Proposal 0008: Authorization for the runtime signing-key and re-embed admin endpoints
 
 - Issue: (to be filed)
-- Status: Approved (2026-08-19). Converged after 17 adversarial review rounds (21 findings fixed).
+- Status: Applied to spec (2026-08-19). Converged after 17 adversarial review rounds (21 findings fixed).
 - Date: 2026-08-18
 
 ## Summary
