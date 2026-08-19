@@ -30,13 +30,13 @@ package e2e
 // PODIUM_WEBHOOK_MAX_FAILURES override so a low threshold makes auto-disable
 // reachable, the PODIUM_WEBHOOK_ALLOWED_TARGETS allowlist so the loopback
 // httptest sink passes the SSRF address rejection, and SSL_CERT_FILE pointing at
-// the TLS sink certificate so the worker's delivery verifies. sseClient opens a
+// the TLS sink certificate so the worker's delivery verifies. eventStreamClient opens a
 // bounded read of /v1/events, filters heartbeats, and yields decoded events.
 //
 // This lifts the receiverServer recorder from pkg/webhook/webhook_test.go and
 // the extWebhookHarness capture channel from plugin_spi_test.go into one
 // reusable primitive that works against the shipped binary over HTTP, plus the
-// bounded SSE read pattern from http_api_test.go. Driving the real binary
+// bounded event-stream read pattern from http_api_test.go. Driving the real binary
 // (rather than an in-process server) keeps the primitive reusable for the
 // CLI-driven outbound-delivery journeys and the SDK subscribe journeys, which
 // both run against a standalone subprocess.
@@ -583,14 +583,14 @@ func waitForWebhookFailureCount(t testing.TB, srv *serverProc, id string, want i
 	return rec, rec.FailureCount >= want || rec.Disabled
 }
 
-// ---- bounded SSE / NDJSON change-stream client -----------------------------
+// ---- bounded NDJSON change-stream client -----------------------------
 
-// sseClient is a bounded reader of the §7.6 /v1/events NDJSON change stream. It
+// eventStreamClient is a bounded reader of the §7.6 /v1/events NDJSON change stream. It
 // opens the connection, reads lines on a background goroutine into a channel,
 // and yields decoded events through next, dropping {"event":"_heartbeat"}
 // keepalives. close tears the connection down; the client never reads
 // unbounded.
-type sseClient struct {
+type eventStreamClient struct {
 	resp   *http.Response
 	cancel context.CancelFunc
 	events chan registryEventLine
@@ -608,12 +608,12 @@ type registryEventLine struct {
 	Data      map[string]any `json:"data"`
 }
 
-// openSSE opens GET /v1/events?type=... against srv and returns a bounded
+// openEventStream opens GET /v1/events?type=... against srv and returns a bounded
 // client. eventTypes filters the subscription server-side (empty = all). The
 // connection is established synchronously (so the subscription is registered
 // before the caller fires a triggering event) and read on a background
 // goroutine. The caller must call close, which t.Cleanup also enforces.
-func openSSE(t testing.TB, srv *serverProc, eventTypes ...string) *sseClient {
+func openEventStream(t testing.TB, srv *serverProc, eventTypes ...string) *eventStreamClient {
 	t.Helper()
 	url := srv.BaseURL + "/v1/events"
 	for i, et := range eventTypes {
@@ -629,7 +629,7 @@ func openSSE(t testing.TB, srv *serverProc, eventTypes ...string) *sseClient {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		cancel()
-		t.Fatalf("build SSE request: %v", err)
+		t.Fatalf("build event-stream request: %v", err)
 	}
 	resp, err := (&http.Client{}).Do(req)
 	if err != nil {
@@ -646,7 +646,7 @@ func openSSE(t testing.TB, srv *serverProc, eventTypes ...string) *sseClient {
 		cancel()
 		t.Fatalf("Content-Type=%q, want application/x-ndjson", ct)
 	}
-	c := &sseClient{resp: resp, cancel: cancel, events: make(chan registryEventLine, 16)}
+	c := &eventStreamClient{resp: resp, cancel: cancel, events: make(chan registryEventLine, 16)}
 	go c.readLoop()
 	t.Cleanup(c.close)
 	return c
@@ -655,7 +655,7 @@ func openSSE(t testing.TB, srv *serverProc, eventTypes ...string) *sseClient {
 // readLoop reads NDJSON lines until the connection closes, decoding each into
 // the events channel. Heartbeat lines are dropped so a caller never has to
 // account for them.
-func (c *sseClient) readLoop() {
+func (c *eventStreamClient) readLoop() {
 	defer close(c.events)
 	r := bufio.NewReader(c.resp.Body)
 	for {
@@ -678,16 +678,16 @@ func (c *sseClient) readLoop() {
 // next returns the next non-heartbeat event, or fails the test if none arrives
 // within the deadline. It is the bounded read: a wedged stream surfaces as a
 // test failure rather than a hang.
-func (c *sseClient) next(t testing.TB, within time.Duration) registryEventLine {
+func (c *eventStreamClient) next(t testing.TB, within time.Duration) registryEventLine {
 	t.Helper()
 	select {
 	case ev, ok := <-c.events:
 		if !ok {
-			t.Fatalf("SSE stream closed before an event arrived")
+			t.Fatalf("event stream closed before an event arrived")
 		}
 		return ev
 	case <-time.After(within):
-		t.Fatalf("no SSE event within %s", within)
+		t.Fatalf("no event within %s", within)
 		return registryEventLine{}
 	}
 }
@@ -695,7 +695,7 @@ func (c *sseClient) next(t testing.TB, within time.Duration) registryEventLine {
 // waitForEvent reads events until one with the given type arrives or the
 // deadline elapses, returning the matching event and whether it was seen.
 // Unlike next it tolerates intervening events of other types.
-func (c *sseClient) waitForEvent(t testing.TB, eventType string, within time.Duration) (registryEventLine, bool) {
+func (c *eventStreamClient) waitForEvent(t testing.TB, eventType string, within time.Duration) (registryEventLine, bool) {
 	t.Helper()
 	deadline := time.Now().Add(within)
 	for {
@@ -719,7 +719,7 @@ func (c *sseClient) waitForEvent(t testing.TB, eventType string, within time.Dur
 
 // close cancels the request context and drains the body so the background read
 // loop returns. Safe to call more than once (t.Cleanup plus an explicit call).
-func (c *sseClient) close() {
+func (c *eventStreamClient) close() {
 	if !c.closed.CompareAndSwap(false, true) {
 		return
 	}
@@ -732,4 +732,4 @@ func (c *sseClient) close() {
 // next is exercised by no test in this file but is provided for the downstream
 // subscription gaps that expect exactly one event on the stream; reference it so
 // the unused linter keeps the reusable primitive.
-var _ = (*sseClient).next
+var _ = (*eventStreamClient).next
