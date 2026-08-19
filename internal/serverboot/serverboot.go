@@ -743,12 +743,15 @@ func run(ctx context.Context, stop func()) error {
 	// a store fault is tolerated (the ID is still returned).
 	tenantID, _ := bootstrapDefaultTenant(context.Background(), st, cfg.exposeScopePreview)
 
-	// §13.1.1 evaluation-stack bootstrap: seed the configured admin users
-	// for the default tenant so the documented `docker compose up` →
-	// `podium init` workflow reaches a state where an admin exists.
-	// PODIUM_BOOTSTRAP_ADMINS carries the user IDs; the
-	// chicken-and-egg of "the first admin can only be granted by an existing
-	// admin" is broken here at boot rather than over the admin API.
+	// §13.1.1 evaluation-stack bootstrap: seed the configured admin users for
+	// the default tenant, establishing the first admin grant for whichever
+	// identity provider an operator later configures.
+	// PODIUM_BOOTSTRAP_ADMINS carries the user IDs; the chicken-and-egg of
+	// "the first admin can only be granted by an existing admin" is broken
+	// here at boot rather than over the admin API. On a deployment that
+	// selects no identity provider, and therefore authenticates no caller,
+	// the grant is a forward-compatibility seed: no caller can present that
+	// identity until a provider is configured.
 	if n, err := seedBootstrapAdmins(context.Background(), st, tenantID, cfg.bootstrapAdmins); err != nil {
 		log.Printf("warning: bootstrap admin seeding failed: %v", err)
 	} else if n > 0 {

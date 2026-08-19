@@ -102,11 +102,16 @@ services:
 
   # The registry binary, configured against the local services above. Built
   # from the repo Dockerfile so `docker compose up` needs no published
-  # image. It selects no identity provider (§13.1.1), so it authenticates no
-  # caller and every layer it stores is private by default. The listener is
-  # published on the host loopback interface only. Dex runs beside it as the
-  # OIDC IdP an operator points a verifying provider at once one is
-  # configured.
+  # image. The service selects no identity provider (§13.1.1), so the
+  # registry resolves every caller as anonymous-public, every layer is
+  # visible regardless of its declared `visibility:`, and the
+  # layer-management and erase endpoints admit any request. The port
+  # publishes on the host loopback interface for that reason.
+  # PODIUM_DEFAULT_LAYER_VISIBILITY holds the persisted layer declaration at
+  # private, which becomes load-bearing once an identity provider is
+  # configured. Dex is retained for device-code evaluation and this service
+  # does not consult it: `podium login` against http://localhost:8080
+  # reports that the registry needs no authentication and exits.
   registry:
     build:
       context: .
@@ -133,8 +138,10 @@ services:
       PODIUM_OAUTH_AUDIENCE: "http://localhost:8080"
       PODIUM_OAUTH_AUTHORIZATION_ENDPOINT: "http://localhost:5556/dex/device/code"
       PODIUM_BOOTSTRAP_ADMINS: "alice@acme.com"
-      # §13.1.1: the stack authenticates no caller, so a layer registered
-      # here is visible to every caller unless it defaults to private.
+      # §13.1.1: this pin changes nothing a caller observes here, because
+      # every caller resolves as anonymous-public and sees every layer. It
+      # fixes the visibility persisted into the layer's declaration so the
+      # declaration is correct if an identity provider is added later.
       PODIUM_DEFAULT_LAYER_VISIBILITY: "private"
       # A Postgres-backed registry defaults its embedding provider to openai,
       # which then requires OPENAI_API_KEY and stops this stack from starting.
